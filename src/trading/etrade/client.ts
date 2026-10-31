@@ -98,6 +98,19 @@ export class ETradeRestClient {
   // empty result without one means "genuinely nothing there".
   public lastError?: string;
 
+  /**
+   * Issue #2573: structured kind of the recorded `lastError`, set at
+   * the point of failure — never derived by string-matching the raw
+   * error text. `generateOAuthHeader` sets `token_missing` when no
+   * token could be resolved; `handleUpstreamAuthError` sets
+   * `token_expired` for a 401/403 upstream rejection. Any other
+   * recorded failure leaves it undefined, and the route layer then
+   * uses its per-section catalog code. This is what lets the broker
+   * routes answer with a coded business message while `lastError`
+   * itself (raw upstream body included) stays a log-only diagnostic.
+   */
+  public lastErrorKind?: "token_missing" | "token_expired";
+
   // Issue #2441: the latest upstream token rejection, if any (see
   // ETradeTokenRejection). Read via getTokenRejection().
   public tokenRejection?: ETradeTokenRejection;
@@ -119,6 +132,9 @@ export class ETradeRestClient {
   private async handleUpstreamAuthError(status: number, endpoint: string, errorBody: string): Promise<void> {
     if (status === 401 || status === 403) {
       const envConfig = this.getEnvConfig();
+      // Issue #2573: structured kind for the route layer; the raw
+      // body above stays a log-only diagnostic, never a UI message.
+      this.lastErrorKind = "token_expired";
       this.lastError = `E*TRADE Session Expired [HTTP ${status}]: Token rejected on ${endpoint} [${envConfig.name}]. Error: ${errorBody.slice(0, 200) || "Unauthorized"}`;
       console.warn(`[ETradeClient] Token rejected HTTP ${status} on ${endpoint}: ${errorBody}`);
       // Issue #2441: a rejection is a fact about token state, so it
@@ -149,6 +165,11 @@ export class ETradeRestClient {
 
   public getLastError(): string | undefined {
     return this.lastError;
+  }
+
+  /** Issue #2573: structured kind of the recorded `lastError`, if any. */
+  public getLastErrorKind(): "token_missing" | "token_expired" | undefined {
+    return this.lastErrorKind;
   }
 
   public getTokenRejection(): ETradeTokenRejection | null {
@@ -183,7 +204,16 @@ export class ETradeRestClient {
     }
 
     if (!token || !tokenSecret) {
+      // Issue #2573: structured kind for the route layer. The
+      // `getValidTokens` result does not distinguish "no stored
+      // session" from "stored session expired at midnight ET" (both
+      // return null), so the route layer deliberately uses
+      // FAILURE_AUTH_TOKEN_MISSING for both — never
+      // FAILURE_AUTH_NO_SESSION, whose distinction is not known here.
+      this.lastErrorKind = "token_missing";
       this.lastError = `E*TRADE OAuth Token Missing: No active session for user in [${envConfig.name}] mode. Please click 'Connect E*TRADE Account'.`;
+    } else {
+      this.lastErrorKind = undefined;
     }
 
     return generateOAuth1Header({

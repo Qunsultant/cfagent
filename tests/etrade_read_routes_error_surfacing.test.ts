@@ -62,6 +62,18 @@
  *
  * No assertion ever expects credential or token material in an error
  * surface; one test pins the opposite.
+ *
+ * Issue #2573: the failure body changed from `{ error: <raw
+ * lastError> }` (which pasted the raw upstream body, e.g.
+ * `oauth_problem=...`, into the UI) to the coded form
+ * `{ code, message, retryable }` from the single outcome catalog
+ * (see src/agents/routes/brokerCodedError.ts), with the catalog
+ * httpStatus (502 for the per-section codes). The tests below were
+ * updated to that contract in this slice: every former
+ * `body.error` assertion now asserts the section code and its
+ * catalog business message, and asserts the raw upstream text is
+ * ABSENT. Genuine-empty, genuine-not-found, and success assertions
+ * are unchanged, as are the failure-vs-empty distinctions themselves.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { makeFakeSessionStore } from "./fake-session-store";
@@ -271,7 +283,9 @@ describe("GET /etrade/accounts — failure vs genuine empty (#243)", () => {
     expect(res).not.toBeNull();
     expect(res!.status).toBe(502);
     const body = (await res!.json()) as any;
-    expect(body.error).toContain("consumer credentials are not configured");
+        expect(body.code).toBe("FAILURE_ETRADE_ACCOUNTS_UNAVAILABLE");
+    expect(body.message).toBe("Broker accounts are temporarily unavailable. Please try again, and reconnect your E*TRADE account if the problem persists.");
+    expect(body.error).toBeUndefined();
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
@@ -280,8 +294,10 @@ describe("GET /etrade/accounts — failure vs genuine empty (#243)", () => {
     const res = await handleEtradeBrokerRoutes(req(path), urlOf(path), path, USER, brokerCtx(await makeAuthedEnv(), makeOrm()));
     expect(res!.status).toBe(502);
     const body = (await res!.json()) as any;
-    expect(body.error).toContain("Accounts API Error [HTTP 400]");
-    expect(body.error).toContain("oauth_problem");
+        expect(body.code).toBe("FAILURE_ETRADE_ACCOUNTS_UNAVAILABLE");
+    expect(body.message).toBe("Broker accounts are temporarily unavailable. Please try again, and reconnect your E*TRADE account if the problem persists.");
+    expect(body.error).toBeUndefined();
+    expect(JSON.stringify(body)).not.toContain("oauth_problem");
   });
 
   it("genuine empty (wrapper present, no accounts) → the exact previous 200", async () => {
@@ -315,7 +331,9 @@ describe("GET /etrade/orders/remote — failure vs genuine empty (#243)", () => 
     const res = await handleEtradeBrokerRoutes(req(path), urlOf(path), path, USER, brokerCtx(makeBareEnv(), makeOrm()));
     expect(res!.status).toBe(502);
     const body = (await res!.json()) as any;
-    expect(body.error).toContain("consumer credentials are not configured");
+        expect(body.code).toBe("FAILURE_ETRADE_ORDERS_UNAVAILABLE");
+    expect(body.message).toBe("Broker orders are temporarily unavailable. Please try again, and reconnect your E*TRADE account if the problem persists.");
+    expect(body.error).toBeUndefined();
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
@@ -324,7 +342,9 @@ describe("GET /etrade/orders/remote — failure vs genuine empty (#243)", () => 
     const res = await handleEtradeBrokerRoutes(req(path), urlOf(path), path, USER, brokerCtx(await makeAuthedEnv(), makeOrm()));
     expect(res!.status).toBe(502);
     const body = (await res!.json()) as any;
-    expect(body.error).toContain("HTTP 400");
+        expect(body.code).toBe("FAILURE_ETRADE_ORDERS_UNAVAILABLE");
+    expect(body.message).toBe("Broker orders are temporarily unavailable. Please try again, and reconnect your E*TRADE account if the problem persists.");
+    expect(body.error).toBeUndefined();
   });
 
   it("genuine empty (account resolves, no orders) → the exact previous 200", async () => {
@@ -355,7 +375,9 @@ describe("GET /etrade/alerts — failure vs genuine empty (#243)", () => {
     const res = await handleEtradeBrokerActivityRoutes(req(path), urlOf(path), path, USER, brokerCtx(makeBareEnv(), makeOrm()));
     expect(res!.status).toBe(502);
     const body = (await res!.json()) as any;
-    expect(body.error).toContain("consumer credentials are not configured");
+        expect(body.code).toBe("FAILURE_ETRADE_ALERTS_UNAVAILABLE");
+    expect(body.message).toBe("Broker alerts are temporarily unavailable. Please try again, and reconnect your E*TRADE account if the problem persists.");
+    expect(body.error).toBeUndefined();
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
@@ -378,7 +400,9 @@ describe("GET /etrade/lookup — failure vs genuine no-match (#243)", () => {
     const res = await handleEtradeBrokerActivityRoutes(req(full), urlOf(full), path, USER, brokerCtx(makeBareEnv(), makeOrm()));
     expect(res!.status).toBe(502);
     const body = (await res!.json()) as any;
-    expect(body.error).toContain("consumer credentials are not configured");
+        expect(body.code).toBe("FAILURE_ETRADE_UPSTREAM");
+    expect(body.message).toBe("Broker data is temporarily unavailable. Please try again, and reconnect your E*TRADE account if the problem persists.");
+    expect(body.error).toBeUndefined();
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
@@ -387,7 +411,9 @@ describe("GET /etrade/lookup — failure vs genuine no-match (#243)", () => {
     const res = await handleEtradeBrokerActivityRoutes(req(full), urlOf(full), path, USER, brokerCtx(await makeAuthedEnv(), makeOrm()));
     expect(res!.status).toBe(502);
     const body = (await res!.json()) as any;
-    expect(body.error).toContain("Lookup API Error [HTTP 500]");
+        expect(body.code).toBe("FAILURE_ETRADE_UPSTREAM");
+    expect(body.message).toBe("Broker data is temporarily unavailable. Please try again, and reconnect your E*TRADE account if the problem persists.");
+    expect(body.error).toBeUndefined();
   });
 
   it("genuine no-match (wrapper present, no Data) → the exact previous 200", async () => {
@@ -406,7 +432,9 @@ describe("GET /etrade/watchlists — failure vs genuine empty (#243)", () => {
     expect(res).not.toBeNull();
     expect(res!.status).toBe(502);
     const body = (await res!.json()) as any;
-    expect(body.error).toContain("consumer credentials are not configured");
+        expect(body.code).toBe("FAILURE_ETRADE_WATCHLISTS_UNAVAILABLE");
+    expect(body.message).toBe("Broker watchlists are temporarily unavailable. Please try again, and reconnect your E*TRADE account if the problem persists.");
+    expect(body.error).toBeUndefined();
   });
 
   it("genuine empty (empty remote + empty local) → the exact previous 200", async () => {
@@ -436,8 +464,10 @@ describe("GET /etrade/watchlist/details — failure vs genuine not-found (#243)"
     const res = await handleWatchlistsRoutes(req(numericPath), urlOf(numericPath), "/api/etrade/watchlist/details", USER, watchlistsCtx(makeBareEnv(), makeOrm()));
     expect(res!.status).toBe(502);
     const body = (await res!.json()) as any;
-    expect(body.error).toContain("consumer credentials are not configured");
-    expect(body.error).not.toContain("not found");
+        expect(body.code).toBe("FAILURE_ETRADE_WATCHLISTS_UNAVAILABLE");
+    expect(body.message).toBe("Broker watchlists are temporarily unavailable. Please try again, and reconnect your E*TRADE account if the problem persists.");
+    expect(body.error).toBeUndefined();
+    expect(body.message).not.toContain("not found");
   });
 
   it("numeric id + HTTP 400 → 502 naming the failure (was 404 'not found')", async () => {
@@ -445,7 +475,9 @@ describe("GET /etrade/watchlist/details — failure vs genuine not-found (#243)"
     const res = await handleWatchlistsRoutes(req(numericPath), urlOf(numericPath), "/api/etrade/watchlist/details", USER, watchlistsCtx(await makeAuthedEnv(), makeOrm()));
     expect(res!.status).toBe(502);
     const body = (await res!.json()) as any;
-    expect(body.error).toContain("Watchlist Details API Error [HTTP 400]");
+        expect(body.code).toBe("FAILURE_ETRADE_WATCHLISTS_UNAVAILABLE");
+    expect(body.message).toBe("Broker watchlists are temporarily unavailable. Please try again, and reconnect your E*TRADE account if the problem persists.");
+    expect(body.error).toBeUndefined();
   });
 
   it("genuine not-found (name id, no local entry, no recorded error) → the exact previous 404", async () => {
@@ -475,7 +507,7 @@ describe("error-surface hygiene (#243)", () => {
     expect(res!.status).toBe(502);
     const body = (await res!.json()) as any;
     for (const secret of [FAKE_KEY, FAKE_SECRET, FAKE_TOKEN, FAKE_TOKEN_SECRET]) {
-      expect(body.error).not.toContain(secret);
+      expect(JSON.stringify(body)).not.toContain(secret);
     }
   });
 });
@@ -497,7 +529,9 @@ describe("GET /etrade/transactions — failure vs genuine empty (#517)", () => {
     expect(res).not.toBeNull();
     expect(res!.status).toBe(502);
     const body = (await res!.json()) as any;
-    expect(body.error).toContain("consumer credentials are not configured");
+        expect(body.code).toBe("FAILURE_ETRADE_TRANSACTIONS_UNAVAILABLE");
+    expect(body.message).toBe("Broker transactions are temporarily unavailable. Please try again, and reconnect your E*TRADE account if the problem persists.");
+    expect(body.error).toBeUndefined();
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
@@ -506,8 +540,10 @@ describe("GET /etrade/transactions — failure vs genuine empty (#517)", () => {
     const res = await handleEtradeBrokerActivityRoutes(req(path), urlOf(path), path, USER, brokerCtx(await makeAuthedEnvWithKey(), makeOrm()));
     expect(res!.status).toBe(502);
     const body = (await res!.json()) as any;
-    expect(body.error).toContain("Transactions API Error [HTTP 400]");
-    expect(body.error).toContain("oauth_problem");
+        expect(body.code).toBe("FAILURE_ETRADE_TRANSACTIONS_UNAVAILABLE");
+    expect(body.message).toBe("Broker transactions are temporarily unavailable. Please try again, and reconnect your E*TRADE account if the problem persists.");
+    expect(body.error).toBeUndefined();
+    expect(JSON.stringify(body)).not.toContain("oauth_problem");
   });
 
   it("genuine empty (account resolves, wrapper present, no transactions) → the exact previous 200", async () => {
@@ -559,8 +595,10 @@ describe("GET /etrade/transactions/:id — failure vs genuine not-found (#517)",
     const res = await handleEtradeBrokerActivityRoutes(req(path), urlOf(path), path, USER, brokerCtx(makeBareEnv(), makeOrm()));
     expect(res!.status).toBe(502);
     const body = (await res!.json()) as any;
-    expect(body.error).toContain("consumer credentials are not configured");
-    expect(body.error).not.toContain("not found");
+        expect(body.code).toBe("FAILURE_ETRADE_TRANSACTIONS_UNAVAILABLE");
+    expect(body.message).toBe("Broker transactions are temporarily unavailable. Please try again, and reconnect your E*TRADE account if the problem persists.");
+    expect(body.error).toBeUndefined();
+    expect(body.message).not.toContain("not found");
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
@@ -572,8 +610,10 @@ describe("GET /etrade/transactions/:id — failure vs genuine not-found (#517)",
     const res = await handleEtradeBrokerActivityRoutes(req(path), urlOf(path), path, USER, brokerCtx(await makeAuthedEnv(), makeOrm()));
     expect(res!.status).toBe(502);
     const body = (await res!.json()) as any;
-    expect(body.error).toContain("Transaction Details API Error [HTTP 400]");
-    expect(body.error).toContain("oauth_problem");
+        expect(body.code).toBe("FAILURE_ETRADE_TRANSACTIONS_UNAVAILABLE");
+    expect(body.message).toBe("Broker transactions are temporarily unavailable. Please try again, and reconnect your E*TRADE account if the problem persists.");
+    expect(body.error).toBeUndefined();
+    expect(JSON.stringify(body)).not.toContain("oauth_problem");
   });
 
   it("upstream 404 → 502 naming the recorded reason (the #168 contract records it as a failure; the route 404 is for a null with no recorded error)", async () => {
@@ -584,7 +624,9 @@ describe("GET /etrade/transactions/:id — failure vs genuine not-found (#517)",
     const res = await handleEtradeBrokerActivityRoutes(req(path), urlOf(path), path, USER, brokerCtx(await makeAuthedEnv(), makeOrm()));
     expect(res!.status).toBe(502);
     const body = (await res!.json()) as any;
-    expect(body.error).toContain("Transaction Details API Error [HTTP 404]");
+        expect(body.code).toBe("FAILURE_ETRADE_TRANSACTIONS_UNAVAILABLE");
+    expect(body.message).toBe("Broker transactions are temporarily unavailable. Please try again, and reconnect your E*TRADE account if the problem persists.");
+    expect(body.error).toBeUndefined();
   });
 
   it("success → 200 with the details, unchanged", async () => {
@@ -614,8 +656,10 @@ describe("GET /etrade/alerts/:id — failure vs genuine not-found (#517)", () =>
     const res = await handleEtradeBrokerActivityRoutes(req(path), urlOf(path), path, USER, brokerCtx(makeBareEnv(), makeOrm()));
     expect(res!.status).toBe(502);
     const body = (await res!.json()) as any;
-    expect(body.error).toContain("consumer credentials are not configured");
-    expect(body.error).not.toContain("not found");
+        expect(body.code).toBe("FAILURE_ETRADE_ALERTS_UNAVAILABLE");
+    expect(body.message).toBe("Broker alerts are temporarily unavailable. Please try again, and reconnect your E*TRADE account if the problem persists.");
+    expect(body.error).toBeUndefined();
+    expect(body.message).not.toContain("not found");
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
@@ -624,8 +668,10 @@ describe("GET /etrade/alerts/:id — failure vs genuine not-found (#517)", () =>
     const res = await handleEtradeBrokerActivityRoutes(req(path), urlOf(path), path, USER, brokerCtx(await makeAuthedEnv(), makeOrm()));
     expect(res!.status).toBe(502);
     const body = (await res!.json()) as any;
-    expect(body.error).toContain("Alert Details API Error [HTTP 400]");
-    expect(body.error).toContain("oauth_problem");
+        expect(body.code).toBe("FAILURE_ETRADE_ALERTS_UNAVAILABLE");
+    expect(body.message).toBe("Broker alerts are temporarily unavailable. Please try again, and reconnect your E*TRADE account if the problem persists.");
+    expect(body.error).toBeUndefined();
+    expect(JSON.stringify(body)).not.toContain("oauth_problem");
   });
 
   it("upstream 404 → 502 naming the recorded reason (same #168 contract as transaction details)", async () => {
@@ -633,7 +679,9 @@ describe("GET /etrade/alerts/:id — failure vs genuine not-found (#517)", () =>
     const res = await handleEtradeBrokerActivityRoutes(req(path), urlOf(path), path, USER, brokerCtx(await makeAuthedEnv(), makeOrm()));
     expect(res!.status).toBe(502);
     const body = (await res!.json()) as any;
-    expect(body.error).toContain("Alert Details API Error [HTTP 404]");
+        expect(body.code).toBe("FAILURE_ETRADE_ALERTS_UNAVAILABLE");
+    expect(body.message).toBe("Broker alerts are temporarily unavailable. Please try again, and reconnect your E*TRADE account if the problem persists.");
+    expect(body.error).toBeUndefined();
   });
 
   it("success → 200 with the details, unchanged", async () => {
@@ -658,7 +706,7 @@ describe("error-surface hygiene (#517)", () => {
       expect(res!.status).toBe(502);
       const body = (await res!.json()) as any;
       for (const secret of [FAKE_KEY, FAKE_SECRET, FAKE_TOKEN, FAKE_TOKEN_SECRET]) {
-        expect(body.error).not.toContain(secret);
+        expect(JSON.stringify(body)).not.toContain(secret);
       }
     }
   });
