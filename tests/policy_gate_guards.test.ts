@@ -1072,4 +1072,55 @@ describe("rewritten wrapper", () => {
     expect(res.stdout).toContain("Policy gate passed");
     expect(res.stdout).not.toContain("(f) stale base reversion");
   });
+
+  it("merge_group per-PR check does not false-fail check (f) when main advanced since PR was cut (#2571)", () => {
+    // When multiple PRs are processed in merge_group, downstream PR branches cut
+    // from older main lack commits added to main. The aggregate check validates
+    // the queue-rebased tree, so per-PR check must not false-fail (f).
+    runGit(tempRepoDir, ["checkout", "main"]);
+    fs.writeFileSync(path.join(tempRepoDir, "src", "main_new_file_2571.ts"), "export const newFile = true;\n");
+    runGit(tempRepoDir, ["add", "-A"]);
+    runGit(tempRepoDir, ["commit", "-m", "feat: new file on main (#2571)"]);
+    const currentMain = runGit(tempRepoDir, ["rev-parse", "HEAD"]);
+
+    // Create PR branch from commit before the new file
+    const oldBase = runGit(tempRepoDir, ["rev-parse", "HEAD~1"]);
+    runGit(tempRepoDir, ["checkout", "-b", "branch-old-base-2571", oldBase]);
+    fs.writeFileSync(path.join(tempRepoDir, "src", "pr_file_2571.ts"), "export const prFile = true;\n");
+    fs.mkdirSync(path.join(tempRepoDir, "changelog.d"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tempRepoDir, "changelog.d", "2571-test.md"),
+      "### Fixed\n\n- **CI/CD merge queue fix (#2571):** skip stale base on per-PR check\n"
+    );
+    runGit(tempRepoDir, ["add", "-A"]);
+    runGit(tempRepoDir, ["commit", "-m", "fix: pr commit (#2571) #COO-spr9"]);
+    const prHead = runGit(tempRepoDir, ["rev-parse", "HEAD"]);
+
+    // Merge PR into main to form the merge_group tree (has both files)
+    runGit(tempRepoDir, ["checkout", "main"]);
+    runGit(tempRepoDir, ["merge", "branch-old-base-2571", "--no-ff", "-m", "ci(merge_group): rebased queue tree"]);
+    const queueTreeHead = runGit(tempRepoDir, ["rev-parse", "HEAD"]);
+
+    const prJson = JSON.stringify([
+      {
+        number: 2571,
+        title: "fix: pr test (#2571) #COO-spr9",
+        body: "Fixes #2571\n\n## Agent\n#COO-spr9\n\n- [ ] Process documentation impact: none",
+        labels: ["lane:coo-spr9"],
+        head: prHead,
+      },
+    ]);
+
+    const res = runPolicyGate(
+      {
+        GITHUB_EVENT_NAME: "merge_group",
+        MERGE_GROUP_PRS_JSON: prJson,
+      },
+      ["--base", currentMain, "--head", queueTreeHead]
+    );
+
+    expect(res.status).toBe(0);
+    expect(res.stdout).toContain("Policy gate passed");
+    expect(res.stdout).not.toContain("(f) stale base reversion");
+  });
 });
