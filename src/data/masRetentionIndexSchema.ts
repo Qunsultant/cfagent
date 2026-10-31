@@ -46,4 +46,12 @@ export function ensureMasRetentionIndexes(sql: SqlStorage): void {
   sql.exec(
     "CREATE INDEX IF NOT EXISTS idx_mas_events_created ON mas_events(created_at, id)",
   );
+  // Issue #2543: the receipts read-back's session+type query
+  // (WHERE session_id = ? AND type = ? ORDER BY created_at DESC LIMIT ?)
+  // walks this covering index in order instead of scanning the audit log
+  // — the #1819 failure mode for a log that grows unboundedly. Same
+  // idempotent shape as the retention indexes above.
+  sql.exec(
+    "CREATE INDEX IF NOT EXISTS idx_mas_events_session_type ON mas_events(session_id, type, created_at DESC)",
+  );
 }

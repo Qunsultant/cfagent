@@ -26,8 +26,11 @@ import {
   AGENTIC_WALLET_DISCLOSURE_FALLBACK,
   fetchAgenticLedger,
   fetchAgenticWalletStatus,
+  fetchReceipts,
   isSimulatedLedgerEntry,
   ledgerStatusLabel,
+  receiptKindLabel,
+  receiptProvenanceLabel,
   walletSimulated,
 } from "../src/client/agenticWalletApi";
 import type { AgenticWalletStatus } from "../src/types";
@@ -104,6 +107,8 @@ interface StubState {
   transactions?: unknown;
   transactionsStatus?: number;
   walletViaJob?: boolean;
+  receipts?: unknown;
+  receiptsStatus?: number;
 }
 
 function installFetch(state: StubState) {
@@ -127,6 +132,11 @@ function installFetch(state: StubState) {
     }
     if (url.endsWith("/api/payments/transactions")) {
       return Response.json(state.transactions, { status: state.transactionsStatus ?? 200 });
+    }
+    if (url.endsWith("/api/payments/receipts")) {
+      return Response.json(state.receipts ?? receiptsPayload([]), {
+        status: state.receiptsStatus ?? 200,
+      });
     }
     throw new Error(`unstubbed fetch: ${url}`);
   });
@@ -327,5 +337,123 @@ describe("AgenticWalletPanel (issue #139)", () => {
     expect(text).toContain("$47.50");
     expect(text).toContain("ledger read failed");
     expect(text).not.toContain("No agentic payments recorded yet");
+  });
+});
+
+// Paid-call receipts (issue #2543) -----------------------------------------
+
+function receiptsPayload(receipts: unknown[]) {
+  return {
+    userLogin: "owner",
+    limit: 50,
+    receipts,
+    counts: { meter: 0, tier: 0, transaction: 0, real: 0, simulated: 0, audit: 0 },
+  };
+}
+
+const METER_RECEIPT = {
+  id: "use_rcpt_1",
+  kind: "meter",
+  createdAt: "2026-10-31T10:00:00.000Z",
+  provenance: "real",
+  provenanceNote: "Verified x402 payment served through the premium gate",
+  receiptId: "rcpt_1",
+  amountUSD: 0.05,
+  tier: "Free",
+  protocol: "x402",
+  gateway: null,
+  status: "served",
+};
+
+const TIER_RECEIPT = {
+  id: "e1",
+  kind: "tier",
+  createdAt: "2026-10-31T10:05:00.000Z",
+  provenance: "audit",
+  provenanceNote: "Tier-decision audit row (evidence of a decision, not a payment)",
+  receiptId: "rcpt_1",
+  amountUSD: 0.05,
+  tier: "Free",
+  protocol: "x402",
+  gateway: null,
+  status: null,
+};
+
+const SIMULATED_RECEIPT = {
+  id: "tx_sim_1",
+  kind: "transaction",
+  createdAt: "2026-10-31T09:00:00.000Z",
+  provenance: "simulated",
+  provenanceNote: "Simulated local record — no real payment was made or verified",
+  receiptId: "sim_1",
+  amountUSD: 0.05,
+  tier: null,
+  protocol: null,
+  gateway: "mpp",
+  status: "simulated",
+};
+
+describe("Paid-call receipts (issue #2543)", () => {
+  it("fetchReceipts returns the receipt rows in served order", async () => {
+    installFetch({ receipts: receiptsPayload([TIER_RECEIPT, METER_RECEIPT, SIMULATED_RECEIPT]) });
+    const data = await fetchReceipts();
+    expect(data.receipts.map((r) => r.id)).toEqual(["e1", "use_rcpt_1", "tx_sim_1"]);
+    expect(data.userLogin).toBe("owner");
+  });
+
+  it("receipt labels name the kind and the provenance, never Verified for simulated rows", () => {
+    expect(receiptKindLabel({ kind: "meter" })).toBe("Paid call");
+    expect(receiptKindLabel({ kind: "tier" })).toBe("Tier decision");
+    expect(receiptKindLabel({ kind: "transaction" })).toBe("Ledger entry");
+    expect(receiptProvenanceLabel({ provenance: "real" })).toBe("Real");
+    expect(receiptProvenanceLabel({ provenance: "simulated" })).toBe("Simulated");
+    expect(receiptProvenanceLabel({ provenance: "audit" })).toBe("Audit");
+  });
+
+  it("renders receipt rows with kind labels and provenance chips, simulated chip on the simulated row", async () => {
+    installFetch({
+      wallet: WALLET,
+      transactions: ledgerPayload([]),
+      receipts: receiptsPayload([TIER_RECEIPT, METER_RECEIPT, SIMULATED_RECEIPT]),
+    });
+    await renderPanel();
+    await waitForText("Paid-call receipts");
+
+    const text = container.textContent || "";
+    expect(text).toContain("Paid-call receipts (3)");
+    expect(text).toContain("Paid call");
+    expect(text).toContain("Tier decision");
+    expect(text).toContain("Ledger entry");
+    expect(text).toContain("Real");
+    expect(text).toContain("Audit");
+    expect(text).toContain("Receipt: rcpt_1");
+    // The simulated chip carries the simulated class; the row is never labeled Real.
+    const simChip = container.querySelector(".awp-status-chip.simulated");
+    expect(simChip?.textContent).toBe("Simulated");
+    // No money total: a sum over mixed provenance would read as revenue.
+    expect(text).not.toContain("Total receipts");
+  });
+
+  it("renders the honest empty state when no receipts exist", async () => {
+    installFetch({ wallet: WALLET, transactions: ledgerPayload([]), receipts: receiptsPayload([]) });
+    await renderPanel();
+    await waitForText("No receipts recorded yet");
+    expect(container.textContent).toContain("$47.50");
+  });
+
+  it("surfaces a receipts failure in the receipts section while the wallet still renders", async () => {
+    installFetch({
+      wallet: WALLET,
+      transactions: ledgerPayload([]),
+      receipts: { error: "receipts read failed" },
+      receiptsStatus: 500,
+    });
+    await renderPanel();
+    await waitForText("could not be loaded");
+
+    const text = container.textContent || "";
+    expect(text).toContain("$47.50");
+    expect(text).toContain("receipts read failed");
+    expect(text).not.toContain("No receipts recorded yet");
   });
 });

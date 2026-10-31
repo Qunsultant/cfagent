@@ -103,6 +103,7 @@ import {
   resolvePaymentsFlowModeScoped,
   type PaymentsFlowScopedModes,
 } from "../../config/paymentsFlowModes";
+import { readReceipts, type ReceiptKind } from "../../services/receiptSurface";
 
 /** The subset of OrchestratorAgent surface the payments handlers need. */
 export interface PaymentsRouteContext {
@@ -399,6 +400,66 @@ export async function handlePaymentsRoutes(
       } catch (err) {
         return Response.json({ error: err instanceof Error ? err.message : "Failed to fetch transactions" }, { status: 500 });
       }
+    }
+  }
+
+  // Receipts read-back (issue #2543): the caller's own meter rows,
+  // tier-decision audit rows, and joined gateway rows — NEVER the
+  // unscoped transactions list, NEVER another identity key's rows.
+  // Read-only: it confirms nothing, moves no funds, replays no charge.
+  // The caller is the session login (x-user-login, set by the worker
+  // from the verified session; deleted when no session exists).
+  if (path.endsWith("/payments/receipts") && request.method === "GET") {
+    const login = request.headers.get("x-user-login");
+    if (!login) {
+      return Response.json(
+        {
+          error: "ReceiptsLoginRequired",
+          statusCode: 401,
+          message: "Receipts require a signed-in session (x-user-login).",
+        },
+        { status: 401 },
+      );
+    }
+    const rawLimit = url.searchParams.get("limit");
+    let limit = 50;
+    if (rawLimit !== null) {
+      const parsed = Number(rawLimit);
+      if (!Number.isInteger(parsed) || parsed < 1) {
+        return Response.json(
+          {
+            error: "ReceiptsInvalidLimit",
+            statusCode: 400,
+            message: "limit must be a positive integer.",
+          },
+          { status: 400 },
+        );
+      }
+      limit = Math.min(parsed, 100);
+    }
+    const kindParam = url.searchParams.get("kind") ?? "all";
+    if (kindParam !== "all" && kindParam !== "meter" && kindParam !== "tier" && kindParam !== "transaction") {
+      return Response.json(
+        {
+          error: "ReceiptsInvalidKind",
+          statusCode: 400,
+          message: "kind must be one of meter, tier, transaction, all.",
+        },
+        { status: 400 },
+      );
+    }
+    try {
+      const orm = ctx.getOrm?.() ?? new DatabaseORM(sql);
+      const result = readReceipts({ sql, orm }, login, {
+        limit,
+        kind: kindParam as ReceiptKind | "all",
+      });
+      return Response.json(result);
+    } catch (err) {
+      return Response.json(
+        { error: err instanceof Error ? err.message : "Failed to fetch receipts" },
+        { status: 500 },
+      );
     }
   }
 
