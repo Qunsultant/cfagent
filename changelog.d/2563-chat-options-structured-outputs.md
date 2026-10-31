@@ -1,0 +1,4 @@
+### Added
+
+- **Options Copilot & structured outputs in Copilot/Chat (#2563):** enable URL-synced `?view=options` navigation in Copilot/Chat (`?tab=chat&view=options`) via `useUrlSyncedTabs` and `CapabilityNavBar`, featuring dedicated Options Copilot prompt chips and automated metadata routing (`E*TRADE · Auto Options Research`) to the backend options intelligence pipeline.
+- **Interactive Options Strategy Card in Chat (#2563):** introduce `OptionsStrategyCard` for options tool results (`screen_options`, `trade_options`, `options_strategy`, etc.) and markdown strategy code blocks, presenting underlying price, expiration/DTE, financial metrics (Max Profit, Max Loss, Breakevens, POP, Risk/Reward), net Greeks (Δ, Γ, Θ, V), legs table, interactive 2D expiration payoff curve SVG, and one-click execution preview buttons.

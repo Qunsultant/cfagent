@@ -1,0 +1,232 @@
+/* =========================================================================
+   OPTIONS STRATEGY STRUCTURED CARD & COPILOT STYLING (Token-only)
+   UX Architecture Specification: ISO 9241-110 & WCAG 2.2 AA Conformance
+   ========================================================================= */
+
+.options-strategy-structured-card {
+  margin: var(--space-2) 0;
+  border-radius: var(--radius-lg, 8px);
+  border: 1px solid var(--color-border-subtle);
+  background: var(--color-surface);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+
+.options-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2-5) var(--space-3);
+  background: var(--color-surface-sunken);
+  border-bottom: 1px solid var(--color-border-subtle);
+  gap: var(--space-2);
+  cursor: pointer;
+  user-select: none;
+}
+
+.options-card-title-group {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.options-card-icon {
+  font-size: var(--font-size-title, 1.25rem);
+  line-height: 1;
+}
+
+.options-strategy-name {
+  font-weight: 700;
+  font-size: var(--font-size-body, 0.875rem);
+  color: var(--color-text-primary);
+}
+
+.options-underlying-symbol {
+  font-family: var(--font-mono, monospace);
+  font-size: var(--font-size-body-sm, 0.8125rem);
+  padding: var(--space-0-5) var(--space-1-5);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm, 4px);
+  color: var(--color-text-primary);
+}
+
+.options-underlying-price {
+  font-size: var(--font-size-body-sm, 0.8125rem);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.options-card-badge-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1-5);
+}
+
+/* Financial Metrics Grid */
+.options-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: var(--space-2);
+  padding: var(--space-2-5) var(--space-3);
+  background: var(--color-surface-sunken);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.options-metric-tile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-0-5);
+  padding: var(--space-1-5) var(--space-2);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md, 6px);
+}
+
+.options-metric-label {
+  font-size: var(--font-size-micro, 0.65rem);
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--color-text-dim);
+  letter-spacing: 0.05em;
+}
+
+.options-metric-value {
+  font-size: var(--font-size-body-sm, 0.8125rem);
+  font-weight: 700;
+  font-family: var(--font-mono, monospace);
+  color: var(--color-text-primary);
+}
+
+.options-metric-value.profit {
+  color: var(--color-success);
+}
+
+.options-metric-value.loss {
+  color: var(--color-danger);
+}
+
+.options-metric-value.credit {
+  color: var(--color-accent);
+}
+
+/* Greeks Bar */
+.options-greeks-strip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-1-5) var(--space-3);
+  background: var(--color-surface-raised);
+  border-bottom: 1px solid var(--color-border-subtle);
+  font-size: var(--font-size-body-sm, 0.8125rem);
+  font-family: var(--font-mono, monospace);
+  color: var(--color-text-muted);
+  flex-wrap: wrap;
+}
+
+.options-greek-item strong {
+  color: var(--color-text-primary);
+}
+
+/* Legs Table */
+.options-legs-section {
+  padding: var(--space-2) var(--space-3);
+}
+
+.options-legs-title {
+  font-size: var(--font-size-micro, 0.65rem);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-dim);
+  margin-bottom: var(--space-1-5);
+}
+
+.options-legs-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-body-sm, 0.8125rem);
+}
+
+.options-legs-table th {
+  text-align: left;
+  padding: var(--space-1) var(--space-2);
+  color: var(--color-text-dim);
+  font-size: var(--font-size-micro, 0.65rem);
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.options-legs-table td {
+  padding: var(--space-1-5) var(--space-2);
+  border-bottom: 1px solid var(--color-border-subtle);
+  color: var(--color-text-primary);
+}
+
+.options-side-buy {
+  color: var(--color-success);
+  font-weight: 700;
+}
+
+.options-side-sell {
+  color: var(--color-danger);
+  font-weight: 700;
+}
+
+/* Mini Payoff SVG Visualization */
+.options-payoff-container {
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface-sunken);
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.options-payoff-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--font-size-micro, 0.65rem);
+  color: var(--color-text-dim);
+  margin-bottom: var(--space-1);
+}
+
+.options-payoff-svg {
+  width: 100%;
+  height: 90px;
+  overflow: visible;
+}
+
+/* Action CTAs */
+.options-card-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-border-subtle);
+  flex-wrap: wrap;
+}
+
+/* Copilot Subnav & Mode Banner */
+.chat-capability-subnav {
+  margin-bottom: 0 !important;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.options-copilot-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface-sunken);
+  border-bottom: 1px solid var(--color-border-subtle);
+  gap: var(--space-2);
+}
+
+.options-copilot-info {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-body-sm, 0.8125rem);
+  color: var(--color-text-muted);
+}

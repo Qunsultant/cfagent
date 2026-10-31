@@ -5,6 +5,8 @@ import { useAgentChat } from "@cloudflare/ai-chat/react";
 import { useAgent } from "agents/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { extractText } from "./types";
+import { useUrlSyncedTabs } from "../useUrlSyncedTabs";
+import { CapabilityNavBar, type CapabilityTabItem } from "../components/CapabilityNavBar";
 import type { AdItem, User } from "./types";
 import { MarkdownContent } from "./MarkdownContent";
 import { ReasoningView } from "./ReasoningView";
@@ -15,6 +17,12 @@ import { Notice } from "../components/ui/Notice";
 import { TextInput } from "../components/ui/TextInput";
 import { useToast } from "../components/ui/Toast";
 import { Modal } from "../components/ui/Modal";
+export type ChatSubView = "general" | "options";
+
+export function isValidChatSubView(view: unknown): view is ChatSubView {
+  return typeof view === "string" && (view === "general" || view === "options");
+}
+
 interface AgentChatTabContentProps {
   user: User;
   ads: AdItem[];
@@ -50,6 +58,37 @@ export function AgentChatTabContent({
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
   const toast = useToast();
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const { activeTab: activeView, handleTabChange: handleViewChange } = useUrlSyncedTabs<ChatSubView>({
+    param: "view",
+    isValid: isValidChatSubView,
+    defaultTab: "general",
+  });
+
+  const chatCapabilityTabs: CapabilityTabItem[] = useMemo(() => [
+    {
+      id: "general",
+      label: "General Copilot",
+      icon: "⚡",
+      tooltip: {
+        eyebrow: "AI Intelligence",
+        title: "Multi-Agent Orchestrator",
+        description: "Conversational multi-agent copilot for platform capabilities, market queries, and general workflows.",
+      },
+    },
+    {
+      id: "options",
+      label: "Options Copilot",
+      icon: "🎯",
+      badge: "AI",
+      badgeType: "cyan",
+      tooltip: {
+        eyebrow: "Options Intelligence",
+        title: "Options Strategy & Structured Outputs",
+        description: "Specialized copilot for options screening, multi-leg spreads, Greeks analysis, and interactive payoff visualizers.",
+      },
+    },
+  ], []);
 
   const agent = useAgent({ agent: "OrchestratorAgent", name: user.login });
   const { messages, sendMessage, status, error, connectionError } = useAgentChat({ agent });
@@ -109,13 +148,14 @@ export function AgentChatTabContent({
       }
     }
 
+    const sourceTab = activeView === "options" ? "E*TRADE · Auto Options Research" : "Chat & Agents";
     try {
       sendMessage({
         text: input.trim(),
         content: input.trim(),
         role: "user",
         parts: [{ type: "text", text: input.trim() }],
-        metadata: { sourceTab: "Chat & Agents", userLogin: user.login },
+        metadata: { sourceTab, userLogin: user.login },
       } as any);
       setInput("");
     } catch (err) {
@@ -123,7 +163,8 @@ export function AgentChatTabContent({
     }
   };
 
-  const handleChipClick = (prompt: string, sourceTab = "Chat & Agents") => {
+  const handleChipClick = (prompt: string, sourceTab?: string) => {
+    const effectiveSource = sourceTab || (activeView === "options" ? "E*TRADE · Auto Options Research" : "Chat & Agents");
     if (isBusy || isResetting) return;
     try {
       sendMessage({
@@ -144,6 +185,25 @@ export function AgentChatTabContent({
 
   return (
     <div className="chat-view">
+      <CapabilityNavBar
+        ariaLabel="Copilot modes"
+        tabs={chatCapabilityTabs}
+        activeTabId={activeView}
+        onTabChange={handleViewChange}
+        className="chat-capability-subnav"
+      />
+      {activeView === "options" && (
+        <div className="options-copilot-banner">
+          <div className="options-copilot-info">
+            <span style={{ fontSize: "var(--font-size-title-sm)" }}>🎯</span>
+            <div>
+              <strong style={{ color: "var(--color-text-primary)" }}>Options Copilot Active:</strong>{" "}
+              <span>Queries generate structured strategy cards with multi-leg execution plans, Greeks, and interactive payoff visualizers.</span>
+            </div>
+          </div>
+          <Badge size="xs" uppercase tone="accent">Structured Outputs</Badge>
+        </div>
+      )}
       <Modal
         open={clearConfirmOpen}
         onClose={() => setClearConfirmOpen(false)}
@@ -236,6 +296,71 @@ export function AgentChatTabContent({
       {/* Messages Stream */}
       <div className="messages-stream">
         {messages.length === 0 ? (
+          activeView === "options" ? (
+            <div className="hero-welcome">
+              <div className="hero-icon">🎯</div>
+              <h3>Options Strategy &amp; Intelligence Copilot</h3>
+              <p>
+                Screen, construct, and evaluate structured multi-leg options strategies with real-time Greeks, risk-reward ratios, and 1-click execution. Responses produce interactive structured strategy cards and payoff curves.
+              </p>
+              <div className="quick-chips">
+                <Button
+                  variant="primary"
+                  tone="subtle"
+                  size="sm"
+                  disabled={isBusy || isResetting}
+                  onClick={() => handleChipClick("Screen for Bull Put credit spreads with max loss <= $30 and max profit > 0", "Options Strategy Guide")}
+                >
+                  🎯 Bull Put Spread (&le; $30 Max Loss)
+                </Button>
+                <Button
+                  variant="primary"
+                  tone="subtle"
+                  size="sm"
+                  disabled={isBusy || isResetting}
+                  onClick={() => handleChipClick("Find delta-neutral Iron Condors on SPY with 30-45 DTE and probability of profit > 70%", "Options Strategy Guide")}
+                >
+                  🦅 SPY Iron Condor (High POP)
+                </Button>
+                <Button
+                  variant="secondary"
+                  tone="subtle"
+                  size="sm"
+                  disabled={isBusy || isResetting}
+                  onClick={() => handleChipClick("Find covered call setups on AAPL targeting 15-20 delta with 30 DTE", "Options Strategy Guide")}
+                >
+                  📈 AAPL Covered Call (Income)
+                </Button>
+                <Button
+                  variant="secondary"
+                  tone="subtle"
+                  size="sm"
+                  disabled={isBusy || isResetting}
+                  onClick={() => handleChipClick("Show recent aggressive institutional options sweeps and unusual volume alerts", "Options Flow Guide")}
+                >
+                  🌊 Unusual Options Flow Sweeps
+                </Button>
+                <Button
+                  variant="secondary"
+                  tone="subtle"
+                  size="sm"
+                  disabled={isBusy || isResetting}
+                  onClick={() => handleChipClick("Evaluate straddle pricing, implied move, and volatility skew for upcoming earnings on NVDA", "Options Strategy Guide")}
+                >
+                  ⚡ NVDA Straddle / Volatility
+                </Button>
+                <Button
+                  variant="secondary"
+                  tone="subtle"
+                  size="sm"
+                  disabled={isBusy || isResetting}
+                  onClick={() => handleChipClick("Calculate a delta-neutral portfolio hedge using index put options", "Trading Safety Guide")}
+                >
+                  🛡️ Portfolio Delta Hedge
+                </Button>
+              </div>
+            </div>
+          ) : (
           <div className="hero-welcome">
             <div className="hero-icon">⚡</div>
             <h3>Enterprise Multi-Agent Studio</h3>
@@ -326,6 +451,7 @@ export function AgentChatTabContent({
               </Button>
             </div>
           </div>
+          )
         ) : (
           messages.map((msg: any) => {
             const isUser = msg.role === "user";
@@ -394,7 +520,7 @@ export function AgentChatTabContent({
                     </div>
                   )}
 
-                  {text && <MarkdownContent text={text} />}
+                  {text && <MarkdownContent text={text} onAction={(actionPrompt) => handleChipClick(actionPrompt)} />}
                 </div>
               </div>
             );
@@ -592,6 +718,8 @@ export function AgentChatTabContent({
               ? "Resetting session…"
               : isBusy
               ? "Agent is processing response…"
+              : activeView === "options"
+              ? "Ask Options Copilot (e.g. 'Screen for Bull Put spreads on NVDA with max loss <= $30', 'Best SPY Iron Condor')..."
               : "Ask about platform capabilities, workflows, how to screen, draft orders, or query data…"
           }
           disabled={isBusy || isResetting}

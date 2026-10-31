@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
+import { OptionsStrategyCard } from "./OptionsStrategyCard";
 export function ToolResultView({
   toolType,
   data,
@@ -18,6 +19,25 @@ export function ToolResultView({
 }) {
   const [open, setOpen] = useState(false);
   const normalizedType = (toolType || "").toLowerCase();
+
+  // 0. Options Strategy & Intelligence Tool
+  if (
+    normalizedType.includes("option") ||
+    data?.bestTrade ||
+    data?.candidate ||
+    (Array.isArray(data?.rows) && typeof data?.targetTable === "string" && data.targetTable.includes("option")) ||
+    (data?.symbol && (Array.isArray(data?.legs) || Array.isArray(data?.tradePlan))) ||
+    data?.type === "options_alert" ||
+    data?.type === "options_candidate"
+  ) {
+    return (
+      <OptionsStrategyCard
+        data={data}
+        onAction={onAction}
+        isBusy={isBusy}
+      />
+    );
+  }
 
   // 1. Human-In-The-Loop Authorization Confirmation
   if (normalizedType.includes("confirm") || data?.auditNotice || (data?.draftId && (data?.status === "authorized" || data?.status === "scheduled" || data?.status === "rejected"))) {

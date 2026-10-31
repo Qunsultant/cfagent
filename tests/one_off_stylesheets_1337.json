@@ -15,6 +15,11 @@
     "reason": "grandfathered (#1337)"
   },
   {
+    "path": "src/client/chat/optionsCard.css",
+    "lines": 233,
+    "reason": "Options Strategy Card and Copilot subnav styling (#2563; tokens only)"
+  },
+  {
     "path": "src/client/dataProvidersPanel.css",
     "lines": 192,
     "reason": "grandfathered (#1337)"
