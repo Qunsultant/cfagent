@@ -7,15 +7,23 @@
  * every decision lives here, behind fakeable interfaces, so it is
  * unit-testable without a worker runtime.
  *
- * S2 scope: Leg 0 (start the payment child, poll it to a
+ * S3 scope: Leg 0 (start the payment child, poll it to a
  * terminal outcome) + Leg 1 (observe the paid screen to a terminal
  * status on the durable sleep + poll pattern) + Leg 2 (the journey
- * gate after a completed screen). No trading leg yet (S4): an
- * approved journey ends the saga at the gate (S4 continues to
- * Leg 3 from the journey_approved outcome); denied/expired end
- * the saga with no trades and no proposals. A failed screen
- * returns screen_failed with NO credit issued — the credit path
- * is S3, and S2 must not claim it. No entry route yet (S4).
+ * gate after a completed screen) + S3 compensation: a failed
+ * screen (deadline / errored-terminated / unrecognized output)
+ * compensates rail-aware under a NEW outcome code — stripe
+ * checkout → policy-gated refund REQUEST (never execution;
+ * operator approval still required), everything else → credit.
+ * No trading leg yet (S4): an approved journey ends the saga at
+ * the gate (S4 continues to Leg 3 from the journey_approved
+ * outcome); denied/expired end the saga with no trades, no
+ * proposals, and NO credit (Q3 working default: the screen was
+ * delivered). No entry route yet (S4).
+ *
+ * S1's FAILURE_SAGA_SCREEN_FAILED code stays valid in the catalog
+ * (stored S1-era rows still resolve) but the S3 flow no longer
+ * returns it: every failed screen compensates.
  *
  * Deterministic, NOT model-driven. No step prompts a model, no step
  * lets a model choose a leg, an amount, or a recipient. Leg order
@@ -83,6 +91,10 @@ import type {
 } from "./sagaJourneyGate";
 import { buildJourneyGatePrompt, parseJourneyDecision } from "./sagaJourneyGate";
 import type { SagaLeg, SagaLegInstanceStatus, SagaLegPort } from "./sagaLegPort";
+import {
+  compensateFailedScreen,
+  type SagaCompensationDeps,
+} from "./sagaCompensation";
 import type { WorkflowJobCommand } from "./workflowPorts";
 
 /** Minimal structural step surface the flow needs (fakeable in tests). */
@@ -126,13 +138,24 @@ export interface SagaAuditEvent {
   /** Why a journey answer was refused (S2 refused rows only; distinct from reason). */
   refusalReason?: string;
   withdraw?: JourneyWithdrawResult;
+  /** S3 compensation form for a compensated screen failure. */
+  compensationForm?: "refund-request" | "credit";
+  /** Refund request id (refund-request form only). */
+  refundId?: string;
+  /** Credit run id (credit form only; equals the runRequestId). */
+  creditRunId?: string;
+  /** Why a refund-request attempt fell back to credit (credit form only). */
+  fallbackReason?: string;
+  /** How originalPaidAtMs was derived (S3: "leg0_completion" — see sagaCompensation.ts). */
+  paidAtMsSource?: string;
 }
 
 /**
  * Saga params. Identity is verified, never defaulted (#1185).
  * family is "goal" in S1 (Q5 default: goal-only first family);
- * any other family throws. rail is carried, never acted on in
- * S1 (compensation is S3).
+ * any other family throws. rail is carried and, since S3, acted
+ * on for the compensation form (stripe + stripe_checkout →
+ * refund request; everything else → credit).
  */
 export interface SagaParams {
   sagaId: string;
@@ -177,6 +200,16 @@ export interface SagaDeps {
    * already recorded.
    */
   withdrawPrompts: (receipts: JourneyPromptReceipts) => Promise<JourneyWithdrawResult>;
+  /**
+   * S3 compensation deps (see sagaCompensation.ts): fail-loud
+   * credit issuance (payment-leg shape), lazy refund ports
+   * (null when unbound → credit fallback), and the monetization
+   * flag (mirroring the operator route's requireRefundFlag).
+   * Journey denied/expired paths never consult these (Q3 default).
+   */
+  issueCredit: SagaCompensationDeps["issueCredit"];
+  getRefundPorts: SagaCompensationDeps["getRefundPorts"];
+  monetizationEnabled: SagaCompensationDeps["monetizationEnabled"];
   nowMs: () => number;
 }
 
@@ -206,12 +239,27 @@ export type SagaWorkflowOutcome =
       rail?: "stripe" | "x402";
     }
   | {
-      status: "screen_failed";
-      code: "FAILURE_SAGA_SCREEN_FAILED";
+      status: "screen_failed_credit_issued";
+      code: "FAILURE_SAGA_SCREEN_FAILED_CREDIT_ISSUED";
       sagaId: string;
       runRequestId: string;
       screenerWorkflowId: string;
       reason: string;
+      compensationForm: "credit";
+      creditRunId: string;
+      fallbackReason?: string;
+      rail?: "stripe" | "x402";
+    }
+  | {
+      status: "screen_failed_refund_requested";
+      code: "FAILURE_SAGA_SCREEN_FAILED_REFUND_REQUESTED";
+      sagaId: string;
+      runRequestId: string;
+      screenerWorkflowId: string;
+      reason: string;
+      compensationForm: "refund-request";
+      refundId: string;
+      existing?: boolean;
       rail?: "stripe" | "x402";
     }
   | {
@@ -370,10 +418,27 @@ export async function runSagaWorkflowFlow(
         ...baseAudit,
         type: "saga.ended",
         outcomeCode: outcome.code,
-        ...(outcome.status === "screen_completed" || outcome.status === "screen_failed"
+        ...("screenerWorkflowId" in outcome
           ? { screenerWorkflowId: outcome.screenerWorkflowId }
           : {}),
         ...("reason" in outcome ? { reason: outcome.reason } : {}),
+        ...("compensationForm" in outcome
+          ? {
+              compensationForm: outcome.compensationForm,
+              // Only the refund-request form consumes a paidAtMs
+              // (the Leg-0 completion approximation); the credit
+              // form uses no timestamp, so it records none.
+              ...(outcome.compensationForm === "refund-request"
+                ? { paidAtMsSource: "leg0_completion" }
+                : {}),
+              ...("refundId" in outcome ? { refundId: outcome.refundId } : {}),
+              ...("existing" in outcome ? { existing: outcome.existing } : {}),
+              ...("creditRunId" in outcome ? { creditRunId: outcome.creditRunId } : {}),
+              ...("fallbackReason" in outcome && outcome.fallbackReason
+                ? { fallbackReason: outcome.fallbackReason }
+                : {}),
+            }
+          : {}),
       }),
     );
     return outcome;
@@ -459,6 +524,106 @@ export async function runSagaWorkflowFlow(
       }),
     );
 
+    // S3 compensation provenance, captured at Leg-0 completion:
+    // the payment leg's paidVia selects the form, its priceUSD
+    // values the compensation, and the completion time anchors
+    // the refund window (the payment flow knows no trustworthy
+    // paid timestamp — see sagaCompensation.ts). A missing price
+    // fails loud ONLY if a screen failure actually needs
+    // compensation; a completed screen never consults it.
+    const paidVia =
+      isRecord(paymentOutput) && typeof paymentOutput["paidVia"] === "string"
+        ? (paymentOutput["paidVia"] as string)
+        : undefined;
+    const priceUSD =
+      isRecord(paymentOutput) && typeof paymentOutput["priceUSD"] === "number"
+        ? (paymentOutput["priceUSD"] as number)
+        : undefined;
+    const paymentCompletedAtMs = deps.nowMs();
+
+    // S3: every failed screen compensates through this single
+    // call site (deadline / errored-terminated / unrecognized
+    // output are mutually exclusive by control flow), so a run
+    // compensates exactly once. A throwing compensate fails the
+    // step (durably retried), never a terminal uncompensated
+    // outcome. Journey denied/expired never reach this helper
+    // (Q3 default: the screen was delivered).
+    const compensateAndEnd = async (reason: string): Promise<SagaWorkflowOutcome> => {
+      const compensation = await step.do("compensate-failed-screen", () =>
+        compensateFailedScreen(
+          {
+            issueCredit: deps.issueCredit,
+            getRefundPorts: deps.getRefundPorts,
+            monetizationEnabled: deps.monetizationEnabled,
+            nowMs: deps.nowMs,
+          },
+          {
+            sagaId: params.sagaId,
+            runRequestId: params.runRequestId,
+            userLogin: params.userLogin,
+            tenantId: params.tenantId,
+            family: params.family,
+            rail: params.rail,
+            paidVia,
+            priceUSD,
+            paidAtMs: paymentCompletedAtMs,
+            reason,
+          },
+        ),
+      );
+      if (compensation.form === "refund-request") {
+        const refundId = compensation.refundId;
+        if (!refundId) throw new Error("Compensation returned refund-request without a refund id.");
+        const outcome: SagaWorkflowOutcome = {
+          status: "screen_failed_refund_requested",
+          code: "FAILURE_SAGA_SCREEN_FAILED_REFUND_REQUESTED",
+          sagaId: params.sagaId,
+          runRequestId: params.runRequestId,
+          screenerWorkflowId,
+          reason,
+          compensationForm: "refund-request",
+          refundId,
+          ...(compensation.existing !== undefined ? { existing: compensation.existing } : {}),
+          ...(params.rail ? { rail: params.rail } : {}),
+        };
+        return endSaga(outcome, {
+          type: "saga.screen_failed",
+          leg: "screener",
+          outcomeCode: "FAILURE_SAGA_SCREEN_FAILED_REFUND_REQUESTED",
+          screenerWorkflowId,
+          reason,
+          compensationForm: "refund-request",
+          refundId,
+          ...(compensation.existing !== undefined ? { existing: compensation.existing } : {}),
+          paidAtMsSource: "leg0_completion",
+        });
+      }
+      const creditRunId = compensation.creditRunId;
+      if (!creditRunId) throw new Error("Compensation returned credit without a credit run id.");
+      const outcome: SagaWorkflowOutcome = {
+        status: "screen_failed_credit_issued",
+        code: "FAILURE_SAGA_SCREEN_FAILED_CREDIT_ISSUED",
+        sagaId: params.sagaId,
+        runRequestId: params.runRequestId,
+        screenerWorkflowId,
+        reason,
+        compensationForm: "credit",
+        creditRunId,
+        ...(compensation.fallbackReason ? { fallbackReason: compensation.fallbackReason } : {}),
+        ...(params.rail ? { rail: params.rail } : {}),
+      };
+      return endSaga(outcome, {
+        type: "saga.screen_failed",
+        leg: "screener",
+        outcomeCode: "FAILURE_SAGA_SCREEN_FAILED_CREDIT_ISSUED",
+        screenerWorkflowId,
+        reason,
+        compensationForm: "credit",
+        creditRunId,
+        ...(compensation.fallbackReason ? { fallbackReason: compensation.fallbackReason } : {}),
+      });
+    };
+
     // Leg 1 — observe the paid screen (never start a second one).
     const screenTerminal = await pollLegToTerminal(
       deps,
@@ -469,33 +634,10 @@ export async function runSagaWorkflowFlow(
       pollIntervalMs,
     );
     if (screenTerminal.terminal === "deadline") {
-      return endSaga(
-        {
-          status: "screen_failed",
-          code: "FAILURE_SAGA_SCREEN_FAILED",
-          sagaId: params.sagaId,
-          runRequestId: params.runRequestId,
-          screenerWorkflowId,
-          reason: "screen_deadline_exceeded",
-          ...(params.rail ? { rail: params.rail } : {}),
-        },
-        { type: "saga.screen_failed", leg: "screener", outcomeCode: "FAILURE_SAGA_SCREEN_FAILED", screenerWorkflowId, reason: "screen_deadline_exceeded" },
-      );
+      return compensateAndEnd("screen_deadline_exceeded");
     }
     if (screenTerminal.terminal === "errored" || screenTerminal.terminal === "terminated") {
-      const reason = `screen_leg_${screenTerminal.terminal}`;
-      return endSaga(
-        {
-          status: "screen_failed",
-          code: "FAILURE_SAGA_SCREEN_FAILED",
-          sagaId: params.sagaId,
-          runRequestId: params.runRequestId,
-          screenerWorkflowId,
-          reason,
-          ...(params.rail ? { rail: params.rail } : {}),
-        },
-        { type: "saga.screen_failed", leg: "screener", outcomeCode: "FAILURE_SAGA_SCREEN_FAILED", screenerWorkflowId, reason },
-      );
+      return compensateAndEnd(`screen_leg_${screenTerminal.terminal}`);
     }
     const lifecycle = collationLifecycle(screenTerminal.output);
     if (lifecycle === "Completed" || lifecycle === "ReportGenerated") {
@@ -513,19 +655,11 @@ export async function runSagaWorkflowFlow(
       return runJourneyGate(params, deps, step, baseAudit, screenerWorkflowId, endSaga);
     }
     // Failed collation, or an output that is not a collation at all:
-    // a completed instance is not a delivered screen. S1 records
-    // the failure; the mid-run credit path is S3, never claimed here.
-    return endSaga(
-      {
-        status: "screen_failed",
-        code: "FAILURE_SAGA_SCREEN_FAILED",
-        sagaId: params.sagaId,
-        runRequestId: params.runRequestId,
-        screenerWorkflowId,
-        reason: lifecycle === "Failed" ? "screen_failed" : "screen_output_unrecognized",
-        ...(params.rail ? { rail: params.rail } : {}),
-      },
-      { type: "saga.screen_failed", leg: "screener", outcomeCode: "FAILURE_SAGA_SCREEN_FAILED", screenerWorkflowId, reason: lifecycle === "Failed" ? "screen_failed" : "screen_output_unrecognized" },
+    // a completed instance is not a delivered screen. S3 routes
+    // this through the same compensation helper as every other
+    // failed screen (one compensation per run, ever).
+    return compensateAndEnd(
+      lifecycle === "Failed" ? "screen_failed" : "screen_output_unrecognized",
     );
   }
 

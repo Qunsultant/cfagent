@@ -1,5 +1,5 @@
 /**
- * Issue #2041 S1+S2 — CrossDomainSagaWorkflow flow core, leg port,
+ * Issue #2041 S1+S2+S3 — CrossDomainSagaWorkflow flow core, leg port,
  * journey gate, and saga id derivation.
  *
  * The flow module is pure TypeScript (type-only imports), so these
@@ -11,8 +11,10 @@
  *
  * S1 scope: Leg 0 (payment child) + Leg 1 (observe the paid
  * screen to terminal). S2 adds Leg 2 (the journey gate after a
- * completed screen). No trading leg (S4), no mid-run failure
- * credit (S3), no entry route (S4).
+ * completed screen). S3 adds rail-aware mid-run failure
+ * compensation (stripe checkout → refund REQUEST, never execution;
+ * everything else → credit; one compensation per run, ever).
+ * No trading leg (S4), no entry route (S4).
  *
  * Invariants pinned here:
  * - fail-closed identity (#1185) + goal-only family (Q5 default);
@@ -37,6 +39,14 @@
  *   runs on BOTH decide and expire paths; denied/expired end
  *   the saga with no trades and no proposals; approved ends at
  *   the gate (trading leg is S4).
+ * - S3 compensation: every failed screen compensates through one
+ *   call site (deadline / errored-terminated / unrecognized);
+ *   stripe checkout → refund REQUEST (operator approval still
+ *   required, execution stays operator-only), all else → credit;
+ *   exactly one compensation per run (refund dedupe via the
+ *   existing-record pre-check); denied/expired NEVER compensate
+ *   (Q3 default: the screen was delivered); x402 never touches
+ *   the refund path (Q9); a throwing compensate fails loud.
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -57,6 +67,7 @@ import type {
   JourneyPromptReceipts,
   JourneyWithdrawResult,
 } from "../src/workflows/sagaJourneyGate";
+import type { SagaRefundPorts } from "../src/workflows/sagaCompensation";
 import {
   sagaLegInstanceId,
   sagaLegPort,
@@ -186,11 +197,50 @@ class FakeLegPort implements SagaLegPort {
   }
 }
 
+/** Minimal fake refund ports (working policy + store) for the S3 default path. */
+function fakeRefundPorts() {
+  const records: Array<Record<string, unknown>> = [];
+  const store = {
+    createRefund: async (input: Record<string, unknown>) => {
+      const rec = { id: `refund-${records.length + 1}`, ...input };
+      records.push(rec);
+      return rec;
+    },
+    getRefund: async (id: string) => records.find((r) => r.id === id) ?? null,
+    listRefunds: async (userId: string) => records.filter((r) => r.userId === userId),
+    updateRefund: async (id: string, patch: Record<string, unknown>) => {
+      const rec = records.find((r) => r.id === id);
+      if (!rec) throw new Error(`No refund ${id}.`);
+      Object.assign(rec, patch);
+      return rec;
+    },
+  };
+  const policy = {
+    getPolicy: async () => ({
+      windowDays: 30,
+      approver: "operator_hitl",
+      allowPartial: false,
+      subscriptionFullEffect: "revoke_immediately",
+      subscriptionPartialEffect: "keep_access",
+      payPerRunEffect: "none",
+      creditEffect: "none",
+      updatedAtMs: 1,
+    }),
+    setPolicy: async () => {
+      throw new Error("test: setPolicy unused");
+    },
+  };
+  return { store, policy, records };
+}
+
 function depsFor(
   legPort: SagaLegPort,
   opts: {
     auditThrowsOnCall?: number;
     clock?: { ms: number };
+    issueCredit?: SagaDeps["issueCredit"];
+    getRefundPorts?: SagaDeps["getRefundPorts"];
+    monetizationEnabled?: SagaDeps["monetizationEnabled"];
   } = {},
 ): {
   deps: SagaDeps;
@@ -198,11 +248,17 @@ function depsFor(
   clock: { ms: number };
   promptCalls: JourneyGatePrompt[];
   withdrawCalls: JourneyPromptReceipts[];
+  issueCreditCalls: Array<{ runRequestId: string; priceUSD: number }>;
+  depCalls: { refundPorts: number; monetization: number };
+  refundPorts: ReturnType<typeof fakeRefundPorts>;
 } {
   const auditEvents: SagaAuditEvent[] = [];
   const clock = opts.clock ?? { ms: 0 };
   const promptCalls: JourneyGatePrompt[] = [];
   const withdrawCalls: JourneyPromptReceipts[] = [];
+  const issueCreditCalls: Array<{ runRequestId: string; priceUSD: number }> = [];
+  const depCalls = { refundPorts: 0, monetization: 0 };
+  const refundPorts = fakeRefundPorts();
   let call = 0;
   const deps: SagaDeps = {
     legPort,
@@ -221,9 +277,35 @@ function depsFor(
       withdrawCalls.push(receipts);
       return { slack: "skipped", panel: "state-driven", chat: "state-driven" };
     },
+    issueCredit:
+      opts.issueCredit ??
+      (async (runRequestId: string, priceUSD: number) => {
+        issueCreditCalls.push({ runRequestId, priceUSD });
+      }),
+    getRefundPorts:
+      opts.getRefundPorts ??
+      (async () => {
+        depCalls.refundPorts += 1;
+        return refundPorts as unknown as SagaRefundPorts;
+      }),
+    monetizationEnabled:
+      opts.monetizationEnabled ??
+      (async () => {
+        depCalls.monetization += 1;
+        return true;
+      }),
     nowMs: () => clock.ms,
   };
-  return { deps, auditEvents, clock, promptCalls, withdrawCalls };
+  return {
+    deps,
+    auditEvents,
+    clock,
+    promptCalls,
+    withdrawCalls,
+    issueCreditCalls,
+    depCalls,
+    refundPorts,
+  };
 }
 
 function paymentStarted(screenerWorkflowId = "scr-wf-1"): SagaLegInstanceStatus {
@@ -234,6 +316,8 @@ function paymentStarted(screenerWorkflowId = "scr-wf-1"): SagaLegInstanceStatus 
       runRequestId: "run-1",
       paidVia: "stripe_checkout",
       screenerWorkflowId,
+      // S3: the payment "started" outcome carries the gate price.
+      priceUSD: 0.1,
     },
   };
 }
@@ -416,7 +500,7 @@ describe("saga flow Leg 0/1 (S1, #2041) and gate entry (S2)", () => {
     legPort.statuses["payment:pay-wf-1"] = [
       { status: "complete", output: { status: "screener_failed_credit_issued", runRequestId: "run-1", screenerError: "port unavailable" } },
     ];
-    const { deps, auditEvents, clock } = depsFor(legPort);
+    const { deps, auditEvents, clock, issueCreditCalls, depCalls } = depsFor(legPort);
     const outcome = await runSagaWorkflowFlow(baseParams(), deps, fakeStep(clock));
     expect(outcome.status).toBe("screen_start_failed_credit_issued");
     expect(outcome.code).toBe("FAILURE_SAGA_SCREEN_START_FAILED_CREDIT_ISSUED");
@@ -428,7 +512,11 @@ describe("saga flow Leg 0/1 (S1, #2041) and gate entry (S2)", () => {
       "saga.screen_start_failed_credit_issued",
       "saga.ended",
     ]);
-    // S1 has no credit dep at all (S3 builds it): the saga cannot re-issue.
+    // The payment leg already issued the credit; the saga records
+    // it and does NOT re-issue — S3's issueCredit dep stays unused
+    // on this path, and the refund path is never consulted.
+    expect(issueCreditCalls).toHaveLength(0);
+    expect(depCalls.refundPorts).toBe(0);
     expect("issueFailureCredit" in deps).toBe(false);
   });
 
@@ -474,23 +562,36 @@ describe("saga flow Leg 0/1 (S1, #2041) and gate entry (S2)", () => {
     expect(outcome2.status).toBe("payment_not_completed");
   });
 
-  it("Failed collation lifecycle ends screen_failed (instance complete is not screen success)", async () => {
+  it("Failed collation lifecycle ends screen_failed_refund_requested (instance complete is not screen success)", async () => {
     const legPort = new FakeLegPort();
     legPort.statuses["payment:pay-wf-1"] = [paymentStarted()];
     legPort.statuses["screener:scr-wf-1"] = [collation("Failed")];
-    const { deps, auditEvents, clock } = depsFor(legPort);
+    const { deps, auditEvents, clock, refundPorts } = depsFor(legPort);
     const outcome = await runSagaWorkflowFlow(baseParams(), deps, fakeStep(clock));
-    expect(outcome.status).toBe("screen_failed");
-    expect(outcome.code).toBe("FAILURE_SAGA_SCREEN_FAILED");
+    expect(outcome.status).toBe("screen_failed_refund_requested");
+    expect(outcome.code).toBe("FAILURE_SAGA_SCREEN_FAILED_REFUND_REQUESTED");
+    if (outcome.status === "screen_failed_refund_requested") {
+      expect(outcome.reason).toBe("screen_failed");
+      expect(outcome.compensationForm).toBe("refund-request");
+      expect(outcome.refundId).toMatch(/^refund-/);
+      expect(outcome.refundId).toBe((refundPorts.records[0] as { id: string }).id);
+    }
     expect(auditTypes(auditEvents)).toEqual([
       "saga.started",
       "saga.payment_started",
       "saga.screen_failed",
       "saga.ended",
     ]);
+    const failed = auditEvents.find((e) => e.type === "saga.screen_failed");
+    expect(failed?.compensationForm).toBe("refund-request");
+    expect(failed?.paidAtMsSource).toBe("leg0_completion");
+    const ended = auditEvents.find((e) => e.type === "saga.ended");
+    expect(ended?.outcomeCode).toBe("FAILURE_SAGA_SCREEN_FAILED_REFUND_REQUESTED");
+    // Exactly one compensation for the run (one refund record).
+    expect(refundPorts.records).toHaveLength(1);
   });
 
-  it("screen errored/terminated/deadline/unrecognized-output all end screen_failed without credit in S1", async () => {
+  it("screen errored/terminated/deadline/unrecognized-output all compensate under S3 (no uncompensated screen_failed)", async () => {
     const cases: Array<{ statuses: SagaLegInstanceStatus[]; reason: string }> = [
       { statuses: [{ status: "errored" }], reason: "screen_leg_errored" },
       { statuses: [{ status: "terminated" }], reason: "screen_leg_terminated" },
@@ -501,13 +602,129 @@ describe("saga flow Leg 0/1 (S1, #2041) and gate entry (S2)", () => {
       const legPort = new FakeLegPort();
       legPort.statuses["payment:pay-wf-1"] = [paymentStarted()];
       legPort.statuses["screener:scr-wf-1"] = c.statuses;
-      const { deps, clock } = depsFor(legPort);
+      const { deps, clock, refundPorts } = depsFor(legPort);
       const outcome = await runSagaWorkflowFlow(baseParams(), deps, fakeStep(clock));
-      expect(outcome.status).toBe("screen_failed");
-      if (outcome.status === "screen_failed") {
+      expect(outcome.status).toBe("screen_failed_refund_requested");
+      expect(outcome.code).toBe("FAILURE_SAGA_SCREEN_FAILED_REFUND_REQUESTED");
+      if (outcome.status === "screen_failed_refund_requested") {
         expect(outcome.reason).toBe(c.reason);
+        expect(outcome.compensationForm).toBe("refund-request");
       }
+      expect(refundPorts.records).toHaveLength(1);
     }
+  });
+
+  it("x402 screen failure issues credit without consulting the refund path (Q9)", async () => {
+    const legPort = new FakeLegPort();
+    legPort.statuses["payment:pay-wf-1"] = [
+      {
+        status: "complete",
+        output: {
+          status: "started",
+          runRequestId: "run-1",
+          paidVia: "x402",
+          screenerWorkflowId: "scr-wf-1",
+          priceUSD: 0.1,
+        },
+      },
+    ];
+    legPort.statuses["screener:scr-wf-1"] = [{ status: "errored" }];
+    const { deps, clock, issueCreditCalls, depCalls } = depsFor(legPort);
+    const outcome = await runSagaWorkflowFlow(
+      baseParams({ rail: "x402" }),
+      deps,
+      fakeStep(clock),
+    );
+    expect(outcome.status).toBe("screen_failed_credit_issued");
+    expect(outcome.code).toBe("FAILURE_SAGA_SCREEN_FAILED_CREDIT_ISSUED");
+    if (outcome.status === "screen_failed_credit_issued") {
+      expect(outcome.compensationForm).toBe("credit");
+      expect(outcome.creditRunId).toBe("run-1");
+      expect(outcome.fallbackReason).toBeUndefined();
+    }
+    expect(issueCreditCalls).toEqual([{ runRequestId: "run-1", priceUSD: 0.1 }]);
+    expect(depCalls.refundPorts).toBe(0);
+    expect(depCalls.monetization).toBe(0);
+  });
+
+  it("unbound refund ports fall back to credit with the reason recorded (S3)", async () => {
+    const legPort = new FakeLegPort();
+    legPort.statuses["payment:pay-wf-1"] = [paymentStarted()];
+    legPort.statuses["screener:scr-wf-1"] = [{ status: "errored" }];
+    const { deps, clock, issueCreditCalls } = depsFor(legPort, {
+      getRefundPorts: async () => null,
+    });
+    const outcome = await runSagaWorkflowFlow(baseParams(), deps, fakeStep(clock));
+    expect(outcome.status).toBe("screen_failed_credit_issued");
+    expect(outcome.code).toBe("FAILURE_SAGA_SCREEN_FAILED_CREDIT_ISSUED");
+    if (outcome.status === "screen_failed_credit_issued") {
+      expect(outcome.fallbackReason).toMatch(/ports/i);
+    }
+    expect(issueCreditCalls).toHaveLength(1);
+  });
+
+  it("journey denied and expired never compensate (Q3 default: the screen was delivered)", async () => {
+    // Denied path: owner denies at the gate after a completed screen.
+    const deniedPort = new FakeLegPort();
+    deniedPort.statuses["payment:pay-wf-1"] = [paymentStarted()];
+    deniedPort.statuses["screener:scr-wf-1"] = [collation("Completed")];
+    const denied = depsFor(deniedPort);
+    const deniedOutcome = await runSagaWorkflowFlow(
+      baseParams(),
+      denied.deps,
+      gateStep(denied.clock, [
+        {
+          payload: {
+            sagaId: "saga-1",
+            decision: "denied",
+            deciderLogin: "u1login",
+            surface: "panel",
+          },
+        },
+      ]),
+    );
+    expect(deniedOutcome.status).toBe("journey_denied");
+    expect(denied.issueCreditCalls).toHaveLength(0);
+    expect(denied.depCalls.refundPorts).toBe(0);
+    // Expired path: no decision arrives before the wait ends.
+    const expiredPort = new FakeLegPort();
+    expiredPort.statuses["payment:pay-wf-1"] = [paymentStarted()];
+    expiredPort.statuses["screener:scr-wf-1"] = [collation("Completed")];
+    const expired = depsFor(expiredPort);
+    const expiredOutcome = await runSagaWorkflowFlow(
+      baseParams(),
+      expired.deps,
+      fakeStep(expired.clock),
+    );
+    expect(expiredOutcome.status).toBe("journey_expired");
+    expect(expired.issueCreditCalls).toHaveLength(0);
+    expect(expired.depCalls.refundPorts).toBe(0);
+  });
+
+  it("a throwing compensate fails loud: no terminal outcome, no saga.ended", async () => {
+    const legPort = new FakeLegPort();
+    legPort.statuses["payment:pay-wf-1"] = [
+      {
+        status: "complete",
+        output: {
+          status: "started",
+          runRequestId: "run-1",
+          paidVia: "x402",
+          screenerWorkflowId: "scr-wf-1",
+          priceUSD: 0.1,
+        },
+      },
+    ];
+    legPort.statuses["screener:scr-wf-1"] = [{ status: "errored" }];
+    const { deps, auditEvents, clock } = depsFor(legPort, {
+      issueCredit: async () => {
+        throw new Error("ledger unavailable");
+      },
+    });
+    await expect(runSagaWorkflowFlow(baseParams({ rail: "x402" }), deps, fakeStep(clock))).rejects.toThrow(
+      /ledger unavailable/,
+    );
+    expect(auditTypes(auditEvents)).not.toContain("saga.ended");
   });
 
   it("an audit-write failure propagates: the saga never completes unrecorded", async () => {

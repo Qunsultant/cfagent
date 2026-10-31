@@ -17,10 +17,16 @@
  * S2 scope: Leg 0 (payment child) + Leg 1 (observe the paid
  * screen to terminal) + Leg 2 (the journey gate after a completed
  * screen). No trading leg yet (S4): an approved journey ends the
- * saga at the gate. No mid-run failure credit (S3), no entry
- * route (S4). No route calls this workflow yet by default: the
- * entry route is S4, and a route must NOT start a saga for free
- * when monetization is on.
+ * saga at the gate. No entry route (S4). No route calls this
+ * workflow yet by default: the entry route is S4, and a route
+ * must NOT start a saga for free when monetization is on.
+ *
+ * S3 adds the compensation deps (issueCredit, getRefundPorts,
+ * monetizationEnabled) — see sagaCompensation.ts. The credit dep
+ * mirrors the payment workflow's issueFailureCredit exactly
+ * (endpoint-mediated DO ledger row, fail-loud, + best-effort D1
+ * claim); like S1's audit forwarder it carries the same live-proof
+ * caveat (unit-pinned; live proof is owner-side).
  *
  * S2 defaults (not rulings): goal-only first family (Q5 default);
  * mainnet excluded — the saga never reads MONETIZATION_NETWORK
@@ -54,6 +60,16 @@ import type { WorkflowEvent, WorkflowStep } from "cloudflare:workers";
 import type { DefaultProgress } from "agents/workflows";
 import type { Env } from "../types";
 import { getServiceUserLogin, SHARED_ORCHESTRATOR_INSTANCE } from "../security/serviceIdentity";
+import { recordCfpayLedgerRow } from "../services/cfpayLedger";
+import {
+  createCommercialAdapter,
+  ensureCommercialSchema,
+} from "../data/createCommercialPorts";
+import {
+  createRefundPorts,
+  ensureRefundSchema,
+} from "../data/createRefundPorts";
+import { createFeatureFlagPort } from "../features/createFeatureFlagPort";
 import type { WorkflowBindingLike } from "./cfWorkflowAdapter";
 import { sagaLegPort, type SagaLegBinding } from "./sagaLegPort";
 import {
@@ -128,6 +144,11 @@ async function recordSagaAudit(env: Env, event: SagaAuditEvent): Promise<void> {
             ...(event.screenerWorkflowId ? { screenerWorkflowId: event.screenerWorkflowId } : {}),
             ...(event.reason ? { reason: event.reason } : {}),
             ...(event.existing !== undefined ? { existing: event.existing } : {}),
+            ...(event.compensationForm ? { compensationForm: event.compensationForm } : {}),
+            ...(event.refundId ? { refundId: event.refundId } : {}),
+            ...(event.creditRunId ? { creditRunId: event.creditRunId } : {}),
+            ...(event.fallbackReason ? { fallbackReason: event.fallbackReason } : {}),
+            ...(event.paidAtMsSource ? { paidAtMsSource: event.paidAtMsSource } : {}),
             ...(event.decidingSurface ? { decidingSurface: event.decidingSurface } : {}),
             ...(event.decision ? { decision: event.decision } : {}),
             ...(event.withdraw ? { withdraw: event.withdraw } : {}),
@@ -231,6 +252,58 @@ export class CrossDomainSagaWorkflow extends ThinkWorkflow<any, SagaParams, Defa
           receipts,
           "Journey-gate prompt closed — this saga's journey decision is recorded or expired.",
         ),
+      // S3 compensation deps (see sagaCompensation.ts). issueCredit
+      // mirrors the payment workflow's issueFailureCredit exactly:
+      // durable DO credit row first (fail-loud, endpoint-mediated
+      // like the audit forwarder above), then the D1 redeemable
+      // claim best-effort with loud logging. No cash moves.
+      issueCredit: async (runRequestId: string, priceUSD: number) => {
+        if (!Number.isFinite(priceUSD) || priceUSD <= 0) {
+          throw new Error(
+            `Refusing to issue a failure credit for run ${runRequestId} without a positive price.`,
+          );
+        }
+        await recordCfpayLedgerRow(this.env as Env, "credit", {
+          runRequestId,
+          userId: params.userId,
+          family: params.family,
+          priceUSD,
+        });
+        try {
+          const adapter = createCommercialAdapter(this.env as { AGENT_DB?: unknown });
+          if (!adapter) {
+            console.error(
+              `[saga-workflow] D1 credit-claim write skipped for run ${runRequestId} (AGENT_DB unbound); no redeemable claim recorded.`,
+            );
+            return;
+          }
+          await ensureCommercialSchema(adapter.db);
+          await adapter.recordCreditClaim({
+            creditRunId: runRequestId,
+            userId: params.userId,
+            family: params.family,
+            amountUSD: priceUSD,
+          });
+        } catch (err) {
+          console.error(
+            `[saga-workflow] D1 credit-claim write failed for run ${runRequestId} — claim missing, operator must re-issue from the payment record:`,
+            err instanceof Error ? err.message : String(err),
+          );
+        }
+      },
+      // Lazy refund ports: null when AGENT_DB is unbound, so the
+      // compensation step falls back to credit (fail-closed).
+      getRefundPorts: async () => {
+        const ports = createRefundPorts(this.env as { AGENT_DB?: unknown });
+        if (!ports) return null;
+        await ensureRefundSchema(ports.store.db);
+        return ports;
+      },
+      // Monetization flag, mirroring the operator refund route's
+      // requireRefundFlag: flag OFF refuses the refund request
+      // path (credit fallback), never the saga itself.
+      monetizationEnabled: () =>
+        createFeatureFlagPort(this.env as Env).isEnabled("monetization"),
       nowMs: () => Date.now(),
     };
     return runSagaWorkflowFlow(params, deps, adaptStep(step));

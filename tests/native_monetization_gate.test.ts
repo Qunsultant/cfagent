@@ -318,7 +318,7 @@ describe("flow + native gate + extractCheckoutId", () => {
       },
       step,
     );
-    expect(outcome).toEqual({ status: "started", runRequestId: "run-1", paidVia: "stripe_checkout", screenerWorkflowId: "wf-run-1" });
+    expect(outcome).toEqual({ status: "started", runRequestId: "run-1", paidVia: "stripe_checkout", screenerWorkflowId: "wf-run-1", priceUSD: 0.1 });
     expect(events).toContain("payment.confirmed");
   });
 
