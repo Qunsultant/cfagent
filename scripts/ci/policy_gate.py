@@ -114,7 +114,10 @@ def resolve_effective_head(head: str, base: str = "origin/main") -> str:
             if r0 == 0 and r1 != 0:
                 return parents[1]
             if r1 == 0 and r0 != 0:
-                return parents[0]
+                # Parent 1 is an ancestor of base (e.g. main was merged into the PR branch).
+                # The tree at head already integrates base. Returning parents[0] would strip
+                # away the merge of base and evaluate an outdated tree lacking files added to base.
+                return head
         except Exception:
             pass
         return parents[1]
@@ -128,6 +131,7 @@ def evaluate_policy(
     body: str = "",
     labels: Optional[List[str]] = None,
     diff_only: bool = False,
+    skip_stale_base: bool = False,
 ) -> List[str]:
     """Run all policy gate evaluations and return any failure reasons."""
     labels = labels or []
@@ -135,7 +139,7 @@ def evaluate_policy(
     # resolve_effective_head), except when evaluating the aggregate
     # merge_group tree where HEAD is already the queue-constructed target tree.
     original_head = head
-    if not diff_only or os.environ.get("GITHUB_EVENT_NAME") != "merge_group":
+    if os.environ.get("GITHUB_EVENT_NAME") != "merge_group":
         head = resolve_effective_head(head, base=base)
     # Attribution reads the PR body and labels ONLY (owner direction
     # 2026-10-27, issue #1894). Commit messages are NOT fallback context:
@@ -339,7 +343,9 @@ def evaluate_policy(
 
     # (f) Stale base reversion guard: ensure branch does not delete files added to base
     # Pure documentation PRs (#2555) cannot touch code files and bypass check (f).
-    if not is_pure_docs:
+    # Per-PR checks in merge_group bypass check (f) because the aggregate check evaluates
+    # the actual queue-rebased tree against base.
+    if not is_pure_docs and not skip_stale_base:
         try:
 
             # Files added to base (e.g. main) since the merge base
@@ -806,6 +812,7 @@ def main() -> int:
                 body=pr.get("body") or "",
                 labels=pr.get("labels") or [],
                 diff_only=False,
+                skip_stale_base=True,
             )
             for pf in pr_failures:
                 failures.append(f"[PR #{pr.get('number')}] {pf}")
