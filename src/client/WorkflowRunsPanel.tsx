@@ -479,7 +479,7 @@ function RunDetail({ run }: { run: WorkflowRun }) {
           <div className="workflow-runs-detail-subtitle">
             <span>{run.workflow}</span>
             <span className="workflow-runs-mono">{run.runId}</span>
-            <span className="workflow-runs-muted">{run.source === "job-chain" ? "Job tree" : "Outcome record only"}</span>
+            <span className="workflow-runs-muted">{run.source === "job-chain" ? "Job tree" : run.stageCount > 0 ? "Unified run record" : "Outcome record only"}</span>
           </div>
         </div>
         <div className="workflow-runs-detail-actions">
