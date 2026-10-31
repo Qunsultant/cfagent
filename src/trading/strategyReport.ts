@@ -22,6 +22,12 @@ import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import * as XLSX from "@e965/xlsx";
 import type { RankedStrategy } from "./options/recommendationAgent";
 import type { StrategyLeg } from "./options/strategyEngine";
+import { defaultRegistry } from "./options/strategies/catalog";
+import {
+  describeReportScope,
+  resolveOptionsReportScope,
+  type ResolvedOptionsReportScope,
+} from "./optionsReportScope";
 
 export type StrategyReportFormat = "pdf" | "xlsx" | "csv";
 
@@ -30,6 +36,29 @@ export interface StrategyReportAiRow {
   rank?: number;
   score?: number;
   rationale?: string;
+}
+
+/**
+ * What the report was asked to cover, and what it actually carries.
+ *
+ * This is the honest answer to "why only three strategies?". A wanted
+ * strategy can be missing for three different reasons, and they are not
+ * interchangeable: it was never selected (the scope's wanted set), it was
+ * evaluated but built/received no ranked candidate (candidate limit or
+ * acceptance gate), or the fetched chain could not reach its horizon.
+ */
+export interface StrategyReportCoverage {
+  /** The scope in one line (theses x strategies x chains → formats). */
+  scope: string;
+  preset: string;
+  theses: string[];
+  wantedStrategyIds: string[];
+  /** Strategy types that reached the ranked rows of this report. */
+  reportedStrategyIds: string[];
+  /** Strategy ids the engine's ledger reported, when the caller supplied it. */
+  evaluatedStrategyIds: string[];
+  notReported: Array<{ id: string; label: string; reason: string }>;
+  warnings: string[];
 }
 
 export interface StrategyReportInput {
@@ -47,6 +76,8 @@ export interface StrategyReportInput {
   bestTrade?: { best?: RankedStrategy; alternatives?: RankedStrategy[] } | null;
   ai?: { model?: string; rows?: StrategyReportAiRow[]; status?: string } | null;
   screenedOut?: Array<{ id: string; reason: string }>;
+  /** Issue #2577: scope + coverage, rendered as a named section. */
+  coverage?: StrategyReportCoverage | null;
 }
 
 export interface NormalizedStrategyRow {
@@ -199,10 +230,69 @@ export function strategyReportArtifactLinks(outcome: StrategyReportArtifactOutco
 }
 
 /**
+ * Derive the report's coverage from the resolved scope and the rows that
+ * actually reached the page. Report-side only: it never changes what was
+ * evaluated, it states what the document shows and why the rest is absent.
+ */
+export function buildStrategyReportCoverage(args: {
+  scope: ResolvedOptionsReportScope;
+  reported: string[];
+  evaluations?: Array<{ id?: unknown; status?: unknown; summary?: unknown }>;
+}): StrategyReportCoverage {
+  const reportedStrategyIds = [...new Set(args.reported.filter(Boolean))];
+  const evaluatedStrategyIds = [
+    ...new Set(
+      (args.evaluations ?? [])
+        .map((entry) => (typeof entry?.id === "string" ? entry.id : ""))
+        .filter(Boolean),
+    ),
+  ];
+  const reported = new Set(reportedStrategyIds);
+  const evaluated = new Set(evaluatedStrategyIds);
+  const evaluationById = new Map(
+    (args.evaluations ?? [])
+      .map((entry) => (typeof entry?.id === "string" ? ([entry.id, entry] as const) : null))
+      .filter((entry) => entry !== null),
+  );
+  const notReported = args.scope.strategyIds
+    .filter((id) => !reported.has(id))
+    .map((id) => {
+      const horizon = args.scope.horizonLimited.find((entry) => entry.id === id);
+      const evaluation = evaluationById.get(id);
+      const skipped = evaluation?.status === "skipped";
+      const skipSummary = typeof evaluation?.summary === "string" ? evaluation.summary : "";
+      const reason = horizon
+        ? `requires expiries beyond the fetched chain (catalog horizon ${horizon.horizonDte} DTE > ${args.scope.chains.dte.maxDte} DTE)`
+        : skipped
+          ? `skipped by the engine${skipSummary ? `: ${skipSummary}` : ""}`
+          : args.scope.thesisExcluded.includes(id)
+            ? "selected, but not thesis-aligned and the scope evaluates only the wanted thesis set"
+            : evaluated.has(id)
+              ? "evaluated, but no ranked candidate survived the acceptance gates or the report's candidate limit"
+              : "not evaluated: no candidate was built on the fetched chain";
+      return { id, label: defaultRegistry.get(id)?.label ?? id, reason };
+    });
+  return {
+    scope: describeReportScope(args.scope),
+    preset: args.scope.preset,
+    theses: args.scope.theses,
+    wantedStrategyIds: args.scope.strategyIds,
+    reportedStrategyIds,
+    evaluatedStrategyIds,
+    notReported,
+    warnings: args.scope.warnings.map((warning) => `${warning.axis}: ${warning.value} — ${warning.message}`),
+  };
+}
+
+/**
  * Normalize any strategy surface's execution data into the report
  * input: the panel routes pass `data.ranked` / `bestTrade`; the
  * unified actions pass `data.ranked`, `data.quant.ranked`, `bestTrade`,
  * and `data.llm` (AI rank/score/rationale).
+ *
+ * The request also resolves the report scope (issue #2577), so every
+ * strategy report states the scope it was produced under and which wanted
+ * strategies are absent — without the caller passing anything new.
  */
 export function buildStrategyReportInput(args: {
   action?: string;
@@ -211,6 +301,9 @@ export function buildStrategyReportInput(args: {
   symbol?: string;
   summary?: string;
   generatedAt?: string;
+  /** Pre-resolved scope (callers that already resolved it); otherwise derived from `request`. */
+  scope?: ResolvedOptionsReportScope;
+  coverage?: StrategyReportCoverage | null;
 }): StrategyReportInput {
   const data = args.data ?? {};
   const request = args.request ?? {};
@@ -243,9 +336,40 @@ export function buildStrategyReportInput(args: {
   const symbol =
     String(args.symbol || data.symbol || ranked[0]?.candidate?.symbol || data.contracts?.[0]?.symbol || request.symbol || "").toUpperCase() ||
     undefined;
+  const scope =
+    args.scope ??
+    resolveOptionsReportScope({
+      ...(typeof request.thesis === "string" ? { thesis: request.thesis } : {}),
+      ...(Array.isArray(request.allowedStrategies) && request.allowedStrategies.length > 0
+        ? { strategies: request.allowedStrategies.map(String) }
+        : {}),
+      ...(Number.isFinite(request.candidateLimit) ? { candidateLimit: Number(request.candidateLimit) } : {}),
+      ...(Number.isFinite(request.minDte) || Number.isFinite(request.maxDte)
+        ? {
+            dte: {
+              ...(Number.isFinite(request.minDte) ? { minDte: Number(request.minDte) } : {}),
+              ...(Number.isFinite(request.maxDte) ? { maxDte: Number(request.maxDte) } : {}),
+            },
+          }
+        : {}),
+    });
+  const coverage =
+    args.coverage === undefined
+      ? buildStrategyReportCoverage({
+          scope,
+          reported: ranked.map((entry) => String(entry?.candidate?.type ?? "")),
+          evaluations: Array.isArray(data.evaluations)
+            ? data.evaluations
+            : Array.isArray(data.strategies?.evaluations)
+              ? data.strategies.evaluations
+              : undefined,
+        })
+      : args.coverage;
+
   return {
     symbol,
     action: args.action,
+    coverage,
     thesis: typeof request.thesis === "string" ? request.thesis : undefined,
     riskProfile: typeof request.riskProfile === "string" ? request.riskProfile : undefined,
     generatedAt: args.generatedAt,
@@ -373,6 +497,36 @@ export function generateStrategyReportXlsx(input: StrategyReportInput): Uint8Arr
   ]);
   XLSX.utils.book_append_sheet(wb, summary, "Summary");
 
+  // Issue #2577: coverage is a first-class sheet, not a footnote. It is the
+  // difference between "3 strategies" and "3 of 74 reported, 71 with a
+  // named reason", which is the question every short report raises.
+  if (input.coverage) {
+    const coverageRows = input.coverage.wantedStrategyIds.map((id) => {
+      const missing = input.coverage!.notReported.find((entry) => entry.id === id);
+      return {
+        strategy: id,
+        label: missing?.label ?? defaultRegistry.get(id)?.label ?? id,
+        reported: missing ? "no" : "yes",
+        reason: missing?.reason ?? "",
+      };
+    });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(coverageRows), "Coverage");
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.aoa_to_sheet([
+        ["field", "value"],
+        ["scope", input.coverage.scope],
+        ["preset", input.coverage.preset],
+        ["theses", input.coverage.theses.join(", ")],
+        ["wanted_strategies", input.coverage.wantedStrategyIds.length],
+        ["reported_strategies", input.coverage.reportedStrategyIds.length],
+        ["not_reported", input.coverage.notReported.length],
+        ["warnings", input.coverage.warnings.join(" | ")],
+      ]),
+      "Coverage Summary",
+    );
+  }
+
   return XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as unknown as Uint8Array;
 }
 
@@ -435,6 +589,34 @@ export async function generateStrategyReportPdf(input: StrategyReportInput): Pro
   ].filter(Boolean).join("  ·  ");
   if (stamp) text(stamp, 9, false, rgb(0.42, 0.42, 0.42));
   if (input.summary) text(input.summary, 10);
+  if (input.coverage) {
+    const coverage = input.coverage;
+    text(
+      `Scope: ${coverage.scope}`,
+      9,
+      false,
+      rgb(0.42, 0.42, 0.42),
+    );
+    text(
+      `Coverage: ${coverage.reportedStrategyIds.length} of ${coverage.wantedStrategyIds.length} wanted strategies reported`
+        + ` (theses: ${coverage.theses.join(", ") || "—"})`,
+      9,
+      false,
+      rgb(0.42, 0.42, 0.42),
+    );
+    if (coverage.notReported.length > 0) {
+      text("Not reported in this document:", 9, true);
+      for (const entry of coverage.notReported.slice(0, 12)) {
+        text(`${entry.id} — ${entry.reason}`, 8, false, rgb(0.45, 0.45, 0.45), 8);
+      }
+      if (coverage.notReported.length > 12) {
+        text(`…and ${coverage.notReported.length - 12} more (full list in the XLSX Coverage sheet).`, 8, false, rgb(0.45, 0.45, 0.45), 8);
+      }
+    }
+    for (const warning of coverage.warnings.slice(0, 5)) {
+      text(`Scope warning — ${warning}`, 8, false, rgb(0.72, 0.45, 0), 8);
+    }
+  }
   if (input.ai?.status === "error") {
     text("AI ranking failed for this run; quant ranks stand alone.", 9, false, rgb(0.72, 0.2, 0.2));
   }

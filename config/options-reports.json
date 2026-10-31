@@ -1,0 +1,160 @@
+{
+  "version": 1,
+  "description": "Scope of an options screening report. Every axis a report can vary on \u2014 theses, strategies, chains, formats, channels and content caps \u2014 is declared here so a run can produce one, some, or all of any axis without a code change. Resolution precedence: request > env OPTIONS_REPORT_CONFIG > preset > defaults.",
+  "defaults": {
+    "preset": "full",
+    "theses": [
+      "bullish",
+      "bearish",
+      "range_bound",
+      "large_move"
+    ],
+    "strategies": "all",
+    "chains": {
+      "source": "run",
+      "universe": null,
+      "symbols": [],
+      "maxSymbols": 0,
+      "dte": {
+        "minDte": null,
+        "maxDte": null,
+        "widenToCatalogHorizon": false
+      },
+      "contractLimit": 10000,
+      "maxStrikesPerSide": 12,
+      "maxIronCondors": 100
+    },
+    "formats": [
+      "pdf",
+      "xlsx",
+      "csv"
+    ],
+    "channels": [
+      "ui"
+    ],
+    "gates": {
+      "maxPlannedLoss": 1000,
+      "minRewardRisk": 1.5,
+      "eventPolicy": "warn"
+    },
+    "content": {
+      "includeCoverage": true,
+      "includeNotEvaluated": true,
+      "includeThesisBreakdown": true,
+      "includeLegs": true,
+      "candidateLimit": 0,
+      "maxRowsPerSection": 500,
+      "pdfTruncateChars": 120
+    }
+  },
+  "presets": {
+    "full": {
+      "description": "Every thesis, every registry strategy, the whole chain set, all three formats. This is the report the owner asked for: all strategies x all theses x all chains.",
+      "theses": [
+        "bullish",
+        "bearish",
+        "range_bound",
+        "large_move"
+      ],
+      "strategies": "all",
+      "chains": {
+        "dte": {
+          "minDte": null,
+          "maxDte": null,
+          "widenToCatalogHorizon": false
+        }
+      },
+      "formats": [
+        "pdf",
+        "xlsx",
+        "csv"
+      ],
+      "content": {
+        "candidateLimit": 0,
+        "maxRowsPerSection": 1000
+      }
+    },
+    "thesis": {
+      "description": "One thesis, every strategy, every chain \u2014 the historical scheduled default, kept as an explicit preset.",
+      "theses": [
+        "bullish"
+      ],
+      "strategies": "all",
+      "formats": [
+        "pdf",
+        "xlsx",
+        "csv"
+      ]
+    },
+    "quick": {
+      "description": "Fast single-thesis smoke report: a short strategy list and PDF only.",
+      "theses": [
+        "bullish"
+      ],
+      "strategies": [
+        "long_call",
+        "put_credit_spread",
+        "iron_condor"
+      ],
+      "formats": [
+        "pdf"
+      ],
+      "content": {
+        "candidateLimit": 25
+      }
+    },
+    "all-chains": {
+      "description": "Every thesis, every strategy, and every expiry the catalog needs (widens the fetch band to the largest catalog horizon). Costs one extra chain fetch per expiry per symbol.",
+      "theses": [
+        "bullish",
+        "bearish",
+        "range_bound",
+        "large_move"
+      ],
+      "strategies": "all",
+      "chains": {
+        "dte": {
+          "minDte": null,
+          "maxDte": null,
+          "widenToCatalogHorizon": true
+        }
+      },
+      "formats": [
+        "pdf",
+        "xlsx",
+        "csv"
+      ],
+      "content": {
+        "candidateLimit": 0,
+        "maxRowsPerSection": 0
+      }
+    }
+  },
+  "allowed": {
+    "theses": [
+      "bullish",
+      "bearish",
+      "range_bound",
+      "large_move"
+    ],
+    "formats": [
+      "pdf",
+      "xlsx",
+      "csv"
+    ],
+    "channels": [
+      "ui",
+      "slack",
+      "email",
+      "webhook",
+      "mcp",
+      "a2a"
+    ],
+    "presets": [
+      "full",
+      "thesis",
+      "quick",
+      "all-chains"
+    ]
+  }
+}
