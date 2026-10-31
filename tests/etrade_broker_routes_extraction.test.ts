@@ -233,7 +233,13 @@ describe("handleEtradeBrokerActivityRoutes behavior", () => {
       ctx
     );
     expect(res).not.toBeNull();
-    expect(res!.status).toBe(500);
+    // #2573: catch blocks in converted routes return the generic coded
+    // failure (FAILURE_ETRADE_UPSTREAM, 502), never err.message.
+    expect(res!.status).toBe(502);
+    const body = (await res!.json()) as any;
+    expect(body.code).toBe("FAILURE_ETRADE_UPSTREAM");
+    expect(body.message).toBe("Broker data is temporarily unavailable. Please try again, and reconnect your E*TRADE account if the problem persists.");
+    expect(body.error).toBeUndefined();
   });
 
   it("handleEnvironmentSwitch is exported from the brokerEnvironment module for the #314 test pins", () => {

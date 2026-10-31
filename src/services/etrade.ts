@@ -1047,4 +1047,13 @@ export class ETradeService {
   getLastError(): string | undefined {
     return this.platform.getLastError?.() || this.client.getLastError();
   }
+
+  /**
+   * Issue #2573: structured kind of the recorded `lastError`
+   * (see `ETradeRestClient.getLastErrorKind`). The platform delegates
+   * to the same client instance, so the client's kind is the source.
+   */
+  getLastErrorKind(): "token_missing" | "token_expired" | undefined {
+    return this.client.getLastErrorKind();
+  }
 }

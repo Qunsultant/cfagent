@@ -314,7 +314,7 @@ describe("handleWatchlistsRoutes behavior", () => {
     expect(mocks.fns.saveScanAsWatchlist).toHaveBeenCalledWith("Screener Results", ["AAPL"], [{ s: "AAPL" }]);
   });
 
-  it("returns 500 with the original message when the service throws", async () => {
+  it("returns 502 with the generic coded message when the service throws (#2573)", async () => {
     mocks.fns.getWatchlists.mockRejectedValueOnce(new Error("etrade down"));
     const res = await handleWatchlistsRoutes(
       req("GET", "/api/etrade/watchlists", undefined, { "x-user-login": "alice" }),
@@ -324,10 +324,16 @@ describe("handleWatchlistsRoutes behavior", () => {
       baseCtx()
     );
     expect(res).not.toBeNull();
-    expect(res!.status).toBe(500);
-    // The inline contract: Error instances surface err.message.
-    expect(((await res!.json()) as any).error).toBe("etrade down");
-    // Non-Error throws fall back to the generic message.
+    // #2573: the old contract surfaced err.message (500); converted
+    // routes now return the generic coded failure (502) and the
+    // thrown message reaches logs only, never the response body.
+    expect(res!.status).toBe(502);
+    const body = (await res!.json()) as any;
+    expect(body.code).toBe("FAILURE_ETRADE_UPSTREAM");
+    expect(body.message).toBe("Broker data is temporarily unavailable. Please try again, and reconnect your E*TRADE account if the problem persists.");
+    expect(body.error).toBeUndefined();
+    expect(JSON.stringify(body)).not.toContain("etrade down");
+    // Non-Error throws return the same generic coded failure.
     mocks.fns.getWatchlists.mockRejectedValueOnce("string-failure");
     const res2 = await handleWatchlistsRoutes(
       req("GET", "/api/etrade/watchlists", undefined, { "x-user-login": "alice" }),
@@ -336,7 +342,9 @@ describe("handleWatchlistsRoutes behavior", () => {
       "s",
       baseCtx()
     );
-    expect(res2!.status).toBe(500);
-    expect(((await res2!.json()) as any).error).toBe("Failed to retrieve watchlists");
+    expect(res2!.status).toBe(502);
+    const body2 = (await res2!.json()) as any;
+    expect(body2.code).toBe("FAILURE_ETRADE_UPSTREAM");
+    expect(JSON.stringify(body2)).not.toContain("string-failure");
   });
 });
