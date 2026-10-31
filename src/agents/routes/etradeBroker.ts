@@ -68,6 +68,7 @@ import {
   etradeGateErrorResponse,
 } from "../../services/etradeExecutionGate";
 import { resolveEtradeRestSwitch } from "../../config/etradeModes";
+import { screenModeFieldsFromRequest, screenModeSelectionFromFields } from "../../workflows/screenerWorkflowRoutes";
 import type { AgentName, Env } from "../../types";
 import type { DatabaseORM } from "../../orm";
 import type { ScreenerAgent } from "../screener-agent";
@@ -287,8 +288,28 @@ export async function handleEtradeBrokerRoutes(
           ? (filters as { async?: unknown }).async === true
           : url.searchParams.get("async") === "1";
       if (request.method === "POST") delete (filters as { async?: unknown }).async;
+      // Issue #2530: dual-mode fields (distinct from the E01
+      // `mode` switch below): ND refuses 400 before any path.
+      const modeSelection = screenModeSelectionFromFields(
+        ctx.env,
+        screenModeFieldsFromRequest(request.method, filters, url.searchParams),
+        { asyncRequested },
+      );
+      if (request.method === "POST") {
+        delete (filters as { screenMode?: unknown }).screenMode;
+        delete (filters as { screenIntent?: unknown }).screenIntent;
+      }
+      if (!modeSelection.ok) {
+        return Response.json({ error: modeSelection.error }, { status: 400 });
+      }
       // #1726 E01: listings in etradeBrokerScreen.ts.
       const screenMode = resolveEtradeRestSwitch(ctx, "scan", request.method === "POST" ? (filters as { mode?: unknown }).mode : url.searchParams.get("mode"), "screened");
+      if (modeSelection.screenMode && screenMode === "listings") {
+        return Response.json(
+          { error: "screenMode \"non-deterministic\" runs only as an async workflow screen (scan path), not on listings." },
+          { status: 400 },
+        );
+      }
       if (screenMode === "listings") {
         const listingsEtrade = new ETradeService(ctx.getOrm(), ctx.env, userLogin, requestedEnv);
         return await executeEtradeScreenListings({ ctx, etrade: listingsEtrade, filters });
@@ -302,7 +323,7 @@ export async function handleEtradeBrokerRoutes(
       }
       const { universe, filters: validatedFilters, emailTo } = parsedScreen.value;
       const agent = ctx.getScreenerAgent(userLogin);
-      return await executeEtradeScreen({ ctx, sessionId, requestedEnv, userLogin, agent, universe, validatedFilters, asyncRequested, emailTo });
+      return await executeEtradeScreen({ ctx, sessionId, requestedEnv, userLogin, agent, universe, validatedFilters, asyncRequested, emailTo, ...(modeSelection.screenMode ? { screenMode: modeSelection.screenMode, screenIntent: modeSelection.screenIntent } : {}) });
     } catch (err) {
       return Response.json({ error: err instanceof Error ? err.message : "Failed to screen equities" }, { status: 500 });
     }

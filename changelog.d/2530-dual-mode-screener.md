@@ -1,0 +1,6 @@
+### Screener workflows gain a sanctioned non-deterministic mode (#2530)
+
+- Screener workflow runs now carry an explicit per-run mode: `deterministic` (today's behavior, the default for every existing caller) or `non-deterministic`, selected at the mesh screen door and the `/etrade/screen` + `/market-data/screen` APIs and recorded on the run (command, announce leg, collation).
+- Non-deterministic mode (design option (a)): one journaled prompt interpretation step at the head of the parent run proposes screen criteria as a data artifact; a deterministic validator gates it against the existing stock screener filter contract (unknown keys and incoherent bounds refuse); prompt + artifact + verdict are recorded in `mas_events` before any shard executes — a refused artifact completes the run as a Failed collation with zero shards started, and execution/replay stay deterministic in both modes.
+- The mode ships behind `SCREENER_ND_MODE` (default OFF, fail-closed on invalid values, enforced at the seams, at `tryStartScreenerWorkflow`, and at the workflow boundary); no production value is set, and flipping it on remains an owner action gated on CISO review.
+- Proof: a golden-task pair (`door-chat-screen-run-deterministic` / `door-chat-screen-run-non-deterministic`) runs the same screen request through the door into the real flows in both modes.

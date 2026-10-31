@@ -1393,15 +1393,19 @@ describe("golden set: G12 proof run (#2439)", () => {
   it("every golden task passes through its real door path, and the results are in the store", async () => {
     const executions = [screenExecution(), ...remainingExecutions()];
     // The executions cover the whole catalog except the HTTP task,
-    // which runs in mesh_golden_http_s18_2439.test.ts, and the four
-    // mesh-screen-door tasks (#2488), whose drivers live with the
-    // suite that owns their turn/queue/executor seams:
-    // tests/mesh_screen_door_2488.test.ts.
+    // which runs in mesh_golden_http_s18_2439.test.ts, and the
+    // mesh-screen-door tasks, whose drivers live with the suites
+    // that own their seams: the four #2488 tasks in
+    // tests/mesh_screen_door_2488.test.ts (turn/queue/executor),
+    // and the #2530 dual-mode pair in
+    // tests/screener_dual_mode_2530.test.ts (door → real flows).
     const DOOR_TASK_IDS = [
       "door-chat-screen-run",
       "door-chat-screen-identity-refusal",
       "door-chat-paid-screen",
       "door-chat-paid-budget-refusal",
+      "door-chat-screen-run-deterministic",
+      "door-chat-screen-run-non-deterministic",
     ];
     expect(executions.map((e) => e.task.id)).toEqual(
       MESH_GOLDEN_TASKS.filter(

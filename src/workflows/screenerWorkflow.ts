@@ -39,6 +39,11 @@ import type {
 } from "../agents/screener-agent";
 import type { OrchestratorAgent } from "../agents/orchestrator";
 import { SHARED_ORCHESTRATOR_INSTANCE } from "../security/serviceIdentity";
+import {
+  resolveScreenerNdGateFromEnv,
+  screenerNdConfigErrorEvent,
+} from "../config/screenerModes";
+import { createScreenIntentInterpreter } from "./screenIntentInterpreter";
 import { screenerOutcomeFromRunResult } from "../services/screenerFollowups";
 import {
   mapInstanceStatus,
@@ -225,6 +230,28 @@ function buildDeps(env: Env, command: WorkflowJobCommand): ScreenerWorkflowDeps 
       }
     },
     nowMs: () => Date.now(),
+    // Issue #2530: the ND mode's three deps — the gate
+    // resolved from this run's env (an invalid switch value
+    // fails closed to off and is logged as the config error),
+    // the gateway-backed interpreter (undefined without an
+    // AI binding → ND commands fail closed in the flow), and
+    // the mas_events audit sink on the shared orchestrator
+    // (the #2530 workflow door, next to the report doors
+    // above). All three are consulted only by ND commands;
+    // deterministic runs are untouched.
+    ndModeEnabled: (() => {
+      const gate = resolveScreenerNdGateFromEnv(env);
+      if (gate.invalid) {
+        console.warn(
+          `[screener-workflow] ${screenerNdConfigErrorEvent()}: SCREENER_ND_MODE value ${JSON.stringify(gate.raw)} is not "on"/"off" — failing closed to off.`,
+        );
+      }
+      return gate.enabled;
+    })(),
+    intentInterpreter: createScreenIntentInterpreter(env),
+    auditInterpretation: async (record) => {
+      await orchestrator.recordWorkflowScreenInterpretationAudit(record);
+    },
     // Issue #2428 (Agent Mesh S17): step hops for this run,
     // recorded from the command's traceparent into the
     // env-resolved hop store. A command without a traceparent

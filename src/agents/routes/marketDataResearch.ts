@@ -50,6 +50,8 @@ import {
 import { parseStockScreenRequest, shardableUniverses } from "../../trading";
 import {
   manualWorkflowJobId,
+  screenModeFieldsFromRequest,
+  screenModeSelectionFromFields,
   tryStartScreenerWorkflow,
   workflowAcceptedResponse,
   workflowTenantId,
@@ -304,6 +306,22 @@ export async function handleMarketDataCompareScreenRoutes(
           ? (filters as { async?: unknown }).async === true
           : url.searchParams.get("async") === "1";
       if (request.method === "POST") delete (filters as { async?: unknown }).async;
+      // Issue #2530: dual-mode fields, stripped like `async`
+      // and validated here: ND refuses 400 before any
+      // execution path — sync included (never a silent
+      // deterministic substitution).
+      const modeSelection = screenModeSelectionFromFields(
+        ctx.env,
+        screenModeFieldsFromRequest(request.method, filters, url.searchParams),
+        { asyncRequested },
+      );
+      if (request.method === "POST") {
+        delete (filters as { screenMode?: unknown }).screenMode;
+        delete (filters as { screenIntent?: unknown }).screenIntent;
+      }
+      if (!modeSelection.ok) {
+        return Response.json({ error: modeSelection.error }, { status: 400 });
+      }
       // Issue #959: the market-data screen takes the same StockScreenerFilter
       // shape as the E*TRADE screen — validate through the ONE shared
       // stock-screen schema (the universe/minScore envelope fields are
@@ -337,6 +355,9 @@ export async function handleMarketDataCompareScreenRoutes(
           provider: "yahoo",
           deliver: false,
           filters: parsedScreen.value.filters as unknown as Record<string, unknown>,
+          ...(modeSelection.screenMode
+            ? { screenMode: modeSelection.screenMode, screenIntent: modeSelection.screenIntent }
+            : {}),
         });
         if (handle) {
           ctx.audit("market_data.screener.enqueued", "research", {

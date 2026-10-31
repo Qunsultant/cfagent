@@ -51,6 +51,22 @@
  * timed-out shard records only analysis.failed: how far its
  * internal pipeline got is unobserved, so feed/gather are
  * left unrecorded rather than claimed.
+ *
+ * Issue #2530 — the non-deterministic mode (design option
+ * (a)): a parent command with screenMode "non-deterministic"
+ * runs THREE extra steps at its head, before fan-out, and
+ * nothing else changes. (1) interpret-screen-intent: the
+ * injected interpreter proposes screen criteria as a data
+ * artifact — journaled, so replay returns the journaled
+ * artifact and never re-calls the model. (2) Deterministic
+ * validation (pure flow code over the journaled artifact).
+ * (3) audit-screen-interpretation: prompt + artifact +
+ * verdict recorded in mas_events — journaled, exactly-once,
+ * and the run does not proceed without it. A refused
+ * artifact ends the run as a Failed collation with zero
+ * shards started; a validated artifact's filters refine the
+ * command's per field and fan-out proceeds verbatim.
+ * Deterministic commands run none of this.
  */
 
 import {
@@ -59,6 +75,7 @@ import {
   DEFAULT_SHARD_TIMEOUT_MS,
   WORKFLOW_STEP_MAX_RETRIES,
   workflowIdForJob,
+  type ScreenMode,
   type ShardOutcome,
   type StageTransition,
   type WorkflowCollation,
@@ -66,6 +83,11 @@ import {
   type WorkflowJobCommand,
   type WorkflowRunLifecycle,
 } from "./workflowPorts";
+import {
+  validateScreenCriteriaArtifact,
+  type ScreenIntentInterpreter,
+  type ScreenInterpretationAuditRecord,
+} from "./screenCriteriaArtifact";
 import {
   projectLegOutcomes,
   SHARD_JOB_RESULT_JSON_MAX,
@@ -220,6 +242,34 @@ export interface ScreenerWorkflowDeps {
     command: WorkflowJobCommand,
     event: { kind: "workflow-step" | "projection"; operation: string },
   ) => Promise<void>;
+  /**
+   * Issue #2530 — whether the SCREENER_ND_MODE gate is open
+   * in this run's environment (the workflow class resolves
+   * it from env via src/config/screenerModes.ts). Consulted
+   * ONLY for non-deterministic commands: absent/false refuses
+   * them in the parent flow, so a direct workflow start
+   * cannot bypass the flag. Deterministic runs never read it.
+   */
+  ndModeEnabled?: boolean;
+  /**
+   * Issue #2530 — the interpretation port for ND runs
+   * (production: the gateway-backed interpreter the workflow
+   * class builds from env; absent when no model seam is
+   * configured). An ND command reaching a flow without one
+   * FAILS CLOSED — the parent never invents criteria and
+   * never falls back to a deterministic execution the caller
+   * did not ask for.
+   */
+  intentInterpreter?: ScreenIntentInterpreter;
+  /**
+   * Issue #2530 — the mas_events audit sink for ND runs
+   * (production: the orchestrator's workflow-door audit
+   * method). Required for ND runs: the interpretation record
+   * is a journaled step, and a run whose audit cannot be
+   * recorded fails before any shard executes — no audit, no
+   * execution.
+   */
+  auditInterpretation?: (record: ScreenInterpretationAuditRecord) => Promise<void>;
 }
 
 /** Issue #2428: record one trace hop for a completed step, best-effort (never throws into the flow). */
@@ -735,6 +785,35 @@ export async function runParentFlow(
 ): Promise<WorkflowCollation> {
   const nowMs = deps.nowMs;
   const workflowId = workflowIdForJob(command.jobId);
+  // Issue #2530: the run's mode (absent = deterministic).
+  // ND admission is checked HERE, at the workflow boundary,
+  // before anything is announced or started: gate closed,
+  // no interpreter, or no audit sink each refuse the run —
+  // a direct workflow start cannot bypass the flag, invent
+  // criteria, or run unaudited.
+  const screenMode: ScreenMode = command.screenMode ?? "deterministic";
+  if (screenMode === "non-deterministic") {
+    if (deps.ndModeEnabled !== true) {
+      throw new Error(
+        "Non-deterministic screen run refused: the SCREENER_ND_MODE gate is closed in this environment (issue #2530: the mode ships flag-OFF; seams and direct starts alike are refused while it is off).",
+      );
+    }
+    if (!deps.intentInterpreter) {
+      throw new Error(
+        "Non-deterministic screen run refused: no screen-intent interpreter is configured for this workflow (issue #2530: without a model seam the run fails closed — it never falls back to a deterministic execution the caller did not ask for).",
+      );
+    }
+    if (!deps.auditInterpretation) {
+      throw new Error(
+        "Non-deterministic screen run refused: no interpretation audit sink is configured for this workflow (issue #2530: no audit, no execution).",
+      );
+    }
+    if (typeof command.screenIntent !== "string" || command.screenIntent.trim().length === 0) {
+      throw new Error(
+        "Non-deterministic screen run refused: the command carries no screenIntent (issue #2530: assertWorkflowJobCommand normally guarantees one).",
+      );
+    }
+  }
   const maxParallel = command.maxParallelShards ?? DEFAULT_MAX_PARALLEL_SHARDS;
   const shardTimeoutMs = command.shardTimeoutMs ?? DEFAULT_SHARD_TIMEOUT_MS;
   const pollIntervalMs = command.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
@@ -760,7 +839,7 @@ export async function runParentFlow(
           capabilityId: SCREENER_WORKFLOW_CAPABILITY,
           stage: "feed",
           status: "submitted",
-          detail: `Workflow started: ${command.shards.length} shard(s), trigger ${command.trigger}.`,
+          detail: `Workflow started: ${command.shards.length} shard(s), trigger ${command.trigger}, mode ${screenMode}.`,
           result: { jobId: command.jobId },
         },
       ], nowMs()),
@@ -768,30 +847,104 @@ export async function runParentFlow(
   });
   await traceStep(deps, command, "workflow-step", "announce");
 
+  // Issue #2530 — the ND head: interpret → validate → audit.
+  // All three are done before fan-out; a refused artifact
+  // short-circuits fan-out entirely (the outcomes below are
+  // synthesized as failed shards, so collation and projection
+  // proceed through the one existing tail). Deterministic
+  // runs skip this block untouched: runCommand IS command.
+  let runCommand = command;
+  let refusalReasons: string[] | null = null;
+  if (screenMode === "non-deterministic") {
+    const interpreter = deps.intentInterpreter!;
+    const intent = command.screenIntent!;
+    // Journaled: on replay the journaled artifact returns and
+    // the model is not called again — replay stays
+    // deterministic. A throw is infrastructure (step retries,
+    // then the run errors); a returned value is the
+    // validator's business.
+    const artifact = await step.do(
+      "interpret-screen-intent",
+      () =>
+        interpreter.interpret({
+          intent,
+          ...(command.filters ? { baseFilters: command.filters } : {}),
+          shardUniverses: command.shards.map((s) => s.universe ?? s.shardId),
+        }),
+      { retries: { limit: WORKFLOW_STEP_MAX_RETRIES } },
+    );
+    await traceStep(deps, command, "workflow-step", "interpret-screen-intent");
+    // Deterministic validation: a pure function of the
+    // journaled artifact, run in flow code — the same verdict
+    // on every replay.
+    const verdict = validateScreenCriteriaArtifact(artifact);
+    const effectiveFilters = verdict.ok
+      ? {
+          ...(command.filters ?? {}),
+          ...(verdict.filters as unknown as Record<string, unknown>),
+        }
+      : undefined;
+    // Journaled audit: exactly-once, and the run does not
+    // proceed without it (no audit, no execution). The record
+    // carries prompt + raw artifact + verdict either way.
+    await step.do("audit-screen-interpretation", async () => {
+      await deps.auditInterpretation!({
+        jobId: command.jobId,
+        userLogin: command.userLogin,
+        intent,
+        artifact,
+        validation: verdict.ok ? { ok: true } : { ok: false, reasons: verdict.reasons },
+        ...(effectiveFilters ? { effectiveFilters } : {}),
+      });
+    });
+    await traceStep(deps, command, "workflow-step", "audit-screen-interpretation");
+    if (verdict.ok) {
+      // The artifact refines the command's filters per field;
+      // shards, universe, provider, and deliver never change.
+      runCommand = { ...command, filters: effectiveFilters };
+    } else {
+      refusalReasons = verdict.reasons;
+    }
+  }
+
   // Fan out in batches of maxParallelShards.
   const pending: PendingShard[] = [];
   const outcomes = new Map<string, ShardOutcome>();
   const childResults = new Map<string, ShardScreenResult>();
-  for (let i = 0; i < command.shards.length; i += maxParallel) {
-    const batch = command.shards.slice(i, i + maxParallel);
-    const created = await step.do(`fan-out-batch-${i / maxParallel}`, async () => {
-      const out: Array<{ shard: WorkflowJobCommand["shards"][number]; workflowId: string }> = [];
-      for (const shard of batch) {
-        const child = await childOps.createChild(shardCommandFor(command, shard));
-        out.push({ shard, workflowId: child.workflowId });
-      }
-      return out;
-    });
-    for (const c of created) {
-      pending.push({
-        shard: c.shard,
-        workflowId: c.workflowId,
-        deadlineMs: nowMs() + shardTimeoutMs,
+  if (refusalReasons) {
+    // Issue #2530: a refused interpretation starts ZERO
+    // shards. Every shard is a failed outcome carrying the
+    // refusal reasons, so the run's record is a Failed
+    // collation — a business refusal, not an infra error.
+    for (const shard of command.shards) {
+      outcomes.set(shard.shardId, {
+        shardId: shard.shardId,
+        status: "failed",
+        error: `Non-deterministic screen refused before execution: ${refusalReasons.join("; ")}`,
       });
     }
-    // Poll this batch to terminal-or-timeout before the next
-    // batch starts: this is what bounds concurrency.
-    await pollBatch(pending, outcomes, childResults, command, step, deps, childOps, pollIntervalMs, nowMs);
+  } else {
+    for (let i = 0; i < command.shards.length; i += maxParallel) {
+      const batch = command.shards.slice(i, i + maxParallel);
+      const created = await step.do(`fan-out-batch-${i / maxParallel}`, async () => {
+        const out: Array<{ shard: WorkflowJobCommand["shards"][number]; workflowId: string }> = [];
+        for (const shard of batch) {
+          const child = await childOps.createChild(shardCommandFor(runCommand, shard));
+          out.push({ shard, workflowId: child.workflowId });
+        }
+        return out;
+      });
+      for (const c of created) {
+        pending.push({
+          shard: c.shard,
+          workflowId: c.workflowId,
+          deadlineMs: nowMs() + shardTimeoutMs,
+        });
+      }
+      // Poll this batch to terminal-or-timeout before the next
+      // batch starts: this is what bounds concurrency.
+      await pollBatch(pending, outcomes, childResults, runCommand, step, deps, childOps, pollIntervalMs, nowMs);
+    }
   }
 
   // Any shard still pending after its batch loop is timed out
@@ -834,6 +987,9 @@ export async function runParentFlow(
     atMs: nowMs(),
   });
   collation.lifecycleTransitions = [...lifecycleTransitions];
+  // Issue #2530: the mode the run executed in, on the run's
+  // collation record (always set by the parent flow).
+  collation.screenMode = screenMode;
 
   // Project the final parent row + one row per shard. The
   // collation already carries the final lifecycle (computed
