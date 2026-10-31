@@ -72,8 +72,8 @@ export interface WorkflowRunStage {
   stage: string;
   label: string;
   status: string;
-  /** Where this stage row came from — an async job, or a recorded stage transition. */
-  recordedBy: "job" | "stage-transition";
+  /** Where this stage row came from — an async job, a recorded stage transition, or a unified run record. */
+  recordedBy: "job" | "stage-transition" | "unified-record";
   startedAt: string | null;
   finishedAt: string | null;
   durationMs: number | null;
@@ -169,10 +169,41 @@ export interface WorkflowRunStageTransition {
   reason: string | null;
 }
 
+/**
+ * A unified run record overlaid onto a Workflow Runs outcome twin.
+ * Produced by the route layer from the canonical mas_reports body
+ * (body.stages, body.input, body.feed) for strategy runs — the same
+ * record Docs Run Details reads. It is NOT a job tree: stages carry
+ * no job id, and durations are null unless the recorder measured
+ * them. Matching is by runId, or by asyncJobId when the outcome
+ * twins an async job.
+ */
+export interface UnifiedWorkflowRunRecord {
+  runId: string;
+  asyncJobId?: string | null;
+  reportId?: string | null;
+  title?: string | null;
+  trigger?: string | null;
+  triggerDetail?: string | null;
+  stages: Array<{
+    stage: string;
+    status: string;
+    durationMs?: number | null;
+    detail?: string | null;
+    reason?: string | null;
+    error?: string | null;
+    input?: unknown;
+    output?: unknown;
+  }>;
+  inputs?: unknown;
+  outputs?: unknown;
+}
+
 export interface BuildWorkflowRunsInput {
   jobs: WorkflowRunJobRow[];
   outcomes: WorkflowRunOutcomeRow[];
   transitions: WorkflowRunStageTransition[];
+  unifiedRecords?: UnifiedWorkflowRunRecord[];
   /** Default 40, clamped 1..100. */
   limit?: number;
 }
@@ -187,6 +218,7 @@ const STAGE_LABELS: Record<string, string> = {
   feed: "Feed — market data intake",
   gather: "Gather — enrichment & technicals",
   generate: "Generate — screen / analysis",
+  recording: "Recording — canonical record",
   store: "Store — canonical record",
   serve: "Serve — artifact retrieval",
   deliver: "Deliver — channel dispatch",
@@ -816,6 +848,7 @@ export function runFromJobs(
 export function runFromOutcome(
   outcome: WorkflowRunOutcomeRow,
   transitions: WorkflowRunStageTransition[] = [],
+  unified?: UnifiedWorkflowRunRecord,
 ): WorkflowRun {
   const trigger = triggerFromOutcome(outcome);
   const family: WorkflowRunFamily =
@@ -828,28 +861,88 @@ export function runFromOutcome(
           : outcome.kind === "discovery"
             ? "discovery"
             : "other";
-  const stages: WorkflowRunStage[] = transitions.map((transition, index) => ({
-    key: transition.id,
-    order: index + 1,
-    stage: transition.stage ?? "stage",
-    label: stageLabel(transition.stage, ""),
-    status: normalizeTransitionStatus(transition.status),
-    recordedBy: "stage-transition" as const,
-    startedAt: isoOrNull(transition.createdAt),
-    finishedAt: isoOrNull(transition.createdAt),
-    durationMs: null,
-    detail: transition.summary || null,
-    reason: transition.reason,
-    error: transition.status === "failed" ? transition.reason : null,
-    capability: null,
-    jobKind: null,
-    channel: null,
-    input: null,
-    output: null,
-  }));
+  const unifiedStages: WorkflowRunStage[] = unified
+    ? unified.stages.map((s, index) => ({
+        key: `unified:${s.stage}`,
+        order: index + 1,
+        stage: s.stage,
+        label: stageLabel(s.stage, ""),
+        status: s.status,
+        recordedBy: "unified-record" as const,
+        startedAt: isoOrNull(outcome.createdAt),
+        finishedAt: isoOrNull(outcome.createdAt),
+        durationMs: typeof s.durationMs === "number" ? s.durationMs : null,
+        detail: s.detail ?? null,
+        reason: s.reason ?? null,
+        error: s.error ?? null,
+        capability: null,
+        jobKind: null,
+        channel: null,
+        input: s.input ?? null,
+        output: s.output ?? null,
+      }))
+    : [];
+  // The recording stage is derived from the written canonical row,
+  // exactly as Docs Run Details derives it — never stored as
+  // "completed" before the write lands.
+  if (unified && unified.reportId && !unifiedStages.some((s) => s.stage === "recording")) {
+    unifiedStages.push({
+      key: "unified:recording",
+      order: unifiedStages.length + 1,
+      stage: "recording",
+      label: stageLabel("recording", ""),
+      status: "completed",
+      recordedBy: "unified-record" as const,
+      startedAt: isoOrNull(outcome.createdAt),
+      finishedAt: isoOrNull(outcome.createdAt),
+      durationMs: null,
+      detail: `Canonical row ${unified.reportId}`,
+      reason: null,
+      error: null,
+      capability: null,
+      jobKind: null,
+      channel: null,
+      input: null,
+      output: [unified.reportId],
+    });
+  }
+  const stages: WorkflowRunStage[] = unified
+    ? unifiedStages
+    : transitions.map((transition, index) => ({
+        key: transition.id,
+        order: index + 1,
+        stage: transition.stage ?? "stage",
+        label: stageLabel(transition.stage, ""),
+        status: normalizeTransitionStatus(transition.status),
+        recordedBy: "stage-transition" as const,
+        startedAt: isoOrNull(transition.createdAt),
+        finishedAt: isoOrNull(transition.createdAt),
+        durationMs: null,
+        detail: transition.summary || null,
+        reason: transition.reason,
+        error: transition.status === "failed" ? transition.reason : null,
+        capability: null,
+        jobKind: null,
+        channel: null,
+        input: null,
+        output: null,
+      }));
   const recordedStageStatus = runStatusFromStages(stages);
-  const status: WorkflowRunStatus =
-    outcome.status === "failed"
+  // With a unified record, the run's status verb is the outcome's
+  // verb — a failed feed stage is stage evidence (failedStages,
+  // stage error), not a retroactive rewrite of the recorded
+  // outcome, so Docs and Workflow Runs agree on status while
+  // differing honestly on stage detail. Without a unified record,
+  // the previous promotion rule is unchanged.
+  const status: WorkflowRunStatus = unified
+    ? outcome.status === "failed"
+      ? "failed"
+      : outcome.status === "partial"
+        ? "partial"
+        : outcome.status === "completed"
+          ? "completed"
+          : "unknown"
+    : outcome.status === "failed"
       ? "failed"
       : outcome.status === "partial"
         ? "partial"
@@ -863,15 +956,16 @@ export function runFromOutcome(
                 ? "completed"
                 : "unknown";
   const kindLabel = outcome.kind ? `${outcome.kind.charAt(0).toUpperCase()}${outcome.kind.slice(1)}` : "Workflow";
+  const feedError = unifiedStages.find((s) => s.stage === "feed")?.error ?? null;
   return {
     id: outcome.id,
     runId: outcome.id,
     workflow: FAMILY_WORKFLOW[family],
     family,
-    title: `${kindLabel} run — ${outcome.id}`,
+    title: unified?.title ?? `${kindLabel} run — ${outcome.id}`,
     source: "job-outcome",
     trigger: trigger.trigger,
-    triggerDetail: trigger.detail,
+    triggerDetail: unified?.triggerDetail ?? trigger.detail,
     triggeredBy: trigger.triggeredBy,
     status,
     startedAt: outcome.createdAt,
@@ -880,12 +974,13 @@ export function runFromOutcome(
     stageCount: stages.length,
     completedStages: stages.filter((s) => s.status === "completed").length,
     failedStages: stages.filter((s) => s.status === "failed").length,
-    // An outcome records the run's terminal result; the only stage rows
-    // it can carry are transitions recorded under its own id. An empty
-    // list is the truthful answer, not a fabricated one.
+    // An outcome records the run's terminal result; without a
+    // unified record the only stage rows it can carry are
+    // transitions recorded under its own id. An empty list is the
+    // truthful answer, not a fabricated one.
     stages,
-    inputs: { kind: outcome.kind, origin: outcome.origin ?? null },
-    outputs: {
+    inputs: unified?.inputs ?? { kind: outcome.kind, origin: outcome.origin ?? null },
+    outputs: unified?.outputs ?? {
       status: outcome.status,
       scanned: outcome.scanned ?? null,
       matched: outcome.matched ?? null,
@@ -893,7 +988,7 @@ export function runFromOutcome(
     },
     artifacts: artifactsForOutcome(outcome),
     deliveryStates: outcome.deliveryStates ?? {},
-    error: outcome.codedError ?? null,
+    error: outcome.codedError ?? feedError,
   };
 }
 
@@ -942,7 +1037,10 @@ export function buildWorkflowRuns(input: BuildWorkflowRunsInput): WorkflowRun[] 
     const ownTransitions = input.transitions.filter(
       (transition) => transition.chainId === outcome.id || transition.jobId === outcome.id,
     );
-    runs.push(runFromOutcome(outcome, ownTransitions));
+    const unified = (input.unifiedRecords ?? []).find(
+      (u) => u.runId === outcome.id || (u.asyncJobId && u.asyncJobId === outcome.id),
+    );
+    runs.push(runFromOutcome(outcome, ownTransitions, unified));
   }
 
   runs.sort((a, b) => (a.startedAt === b.startedAt ? (a.id < b.id ? 1 : -1) : a.startedAt < b.startedAt ? 1 : -1));

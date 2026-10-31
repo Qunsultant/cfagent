@@ -23,10 +23,12 @@
 import { createAsyncJobPorts } from "../../data/createAsyncJobPorts";
 import { listJobOutcomes } from "../../services/jobOutcomes";
 import { listScreeningActivity } from "../../services/screeningActivity";
+import { listScheduledReports } from "../../services/scheduledReports";
 import type { SqlStorage } from "../../orm";
 import {
   buildWorkflowRuns,
   summarizeWorkflowRuns,
+  type UnifiedWorkflowRunRecord,
   type WorkflowRunJobRow,
   type WorkflowRunOutcomeRow,
   type WorkflowRunStageTransition,
@@ -110,6 +112,87 @@ export function readWorkflowRunTransitions(sql: WorkflowRunsSql, userLogin: stri
     });
 }
 
+/**
+ * Build unified-record overlays from canonical strategy rows — the
+ * SAME record Docs Run Details reads (mas_reports body.stages /
+ * body.input / body.feed), keyed by runId. Pure: no I/O, so tests
+ * can pin the overlay without a DO. Rows without a well-formed
+ * stored stage trace are skipped, never fabricated — a legacy
+ * strategy run keeps its outcome-only view.
+ */
+export function unifiedRecordsFromCanonicalReports(
+  hits: Array<{ id: string; runId: string; title: string; body: unknown }>,
+): UnifiedWorkflowRunRecord[] {
+  const records: UnifiedWorkflowRunRecord[] = [];
+  for (const hit of hits) {
+    let body: Record<string, any> = {};
+    try {
+      body = typeof hit.body === "string" ? JSON.parse(hit.body || "{}") : (hit.body as Record<string, any>);
+    } catch {
+      continue;
+    }
+    if (!body || typeof body !== "object" || body.jobType !== "options-strategy-panel") continue;
+    if (!Array.isArray(body.stages) || body.stages.length === 0) continue;
+    const stages = (body.stages as unknown[])
+      .map((s) => {
+        const o = s && typeof s === "object" ? (s as Record<string, unknown>) : null;
+        if (!o || typeof o.stage !== "string" || typeof o.status !== "string") return null;
+        const evidence = o.evidence && typeof o.evidence === "object" && !Array.isArray(o.evidence)
+          ? (o.evidence as Record<string, unknown>)
+          : {};
+        const detail =
+          o.stage === "feed"
+            ? `Feed — ${String(evidence.connector ?? "unknown connector")}: ${String(evidence.contractsEvaluated ?? "unknown")} contracts evaluated, ${String(evidence.fetchErrorCount ?? 0)} fetch errors`
+            : o.stage === "analysis"
+              ? `Analysis — ${String(evidence.rankedCount ?? "unknown")} ranked, ${String(evidence.screenedOutCount ?? "unknown")} screened out`
+              : o.stage === "generation"
+                ? `Generation — PDF ${String(evidence.pdfStatus ?? "unknown")}, XLSX ${String(evidence.xlsxStatus ?? "unknown")}, CSV ${String(evidence.csvStatus ?? "unknown")}`
+                : o.stage === "delivery"
+                  ? "Delivery — no delivery channel requested for this panel run"
+                  : null;
+        return {
+          stage: o.stage,
+          status: o.status,
+          durationMs: typeof o.durationMs === "number" ? o.durationMs : null,
+          detail,
+          reason: typeof o.reason === "string" ? o.reason : null,
+          error: typeof o.error === "string" ? o.error : null,
+          input: Array.isArray(o.inputIds) ? o.inputIds : undefined,
+          output: Array.isArray(o.outputIds) ? o.outputIds : evidence,
+        };
+      })
+      .filter((s): s is NonNullable<typeof s> => s !== null);
+    if (stages.length === 0) continue;
+    const input = body.input && typeof body.input === "object" ? body.input : {};
+    const feed = body.feed && typeof body.feed === "object" ? (body.feed as Record<string, unknown>) : {};
+    records.push({
+      runId: hit.runId,
+      asyncJobId: typeof body.asyncJobId === "string" ? body.asyncJobId : null,
+      reportId: hit.id,
+      title: hit.title,
+      trigger: typeof body.trigger === "string" ? body.trigger : null,
+      triggerDetail: typeof body.provenance?.submittedVia === "string" ? body.provenance.submittedVia : null,
+      stages,
+      inputs: {
+        kind: "options",
+        origin: "options-strategy-screener",
+        symbols: (input as Record<string, unknown>).symbols ?? null,
+        thesis: (input as Record<string, unknown>).thesis ?? null,
+        strategyMode: body.strategyMode ?? null,
+        mode: body.mode ?? null,
+      },
+      outputs: {
+        status: "completed",
+        scanned: typeof feed.scanned === "number" ? feed.scanned : (typeof feed.contractsEvaluated === "number" ? feed.contractsEvaluated : null),
+        matched: typeof body.withTrades === "number" ? body.withTrades : null,
+        ranked: typeof body.withTrades === "number" ? body.withTrades : null,
+        feed: feed,
+      },
+    });
+  }
+  return records;
+}
+
 function outcomeRow(row: ReturnType<typeof listJobOutcomes>[number]): WorkflowRunOutcomeRow {
   return {
     id: row.id,
@@ -151,6 +234,7 @@ export async function handleWorkflowRunsRoutes(
   let jobs: WorkflowRunJobRow[] = [];
   let outcomes: WorkflowRunOutcomeRow[] = [];
   let transitions: WorkflowRunStageTransition[] = [];
+  let unifiedRecords: UnifiedWorkflowRunRecord[] = [];
 
   try {
     const sql = ctx.ensureTables();
@@ -172,8 +256,21 @@ export async function handleWorkflowRunsRoutes(
   } else {
     storeErrors.stages = "skipped: no authenticated user identity available to scope the stage records";
   }
+  // Unified strategy records: the same canonical bodies Docs Run
+  // Details reads, overlaid onto their outcome twins by runId.
+  // Best-effort and windowed (newest 100 strategy rows) — a
+  // canonical row outside that window simply keeps its
+  // outcome-only view, and a read failure never hides the others.
+  if (ctx.userLogin) {
+    try {
+      const hits = listScheduledReports(ctx.ensureTables(), { userLogin: ctx.userLogin, sourceFilter: "options_strategy", limit: 100 });
+      unifiedRecords = unifiedRecordsFromCanonicalReports(hits.map((h) => ({ id: h.id, runId: h.runId, title: h.title, body: h.body })));
+    } catch (err) {
+      storeErrors.canonical = err instanceof Error ? err.message : String(err);
+    }
+  }
 
-  const runs = buildWorkflowRuns({ jobs, outcomes, transitions, limit });
+  const runs = buildWorkflowRuns({ jobs, outcomes, transitions, unifiedRecords, limit });
   return Response.json({
     count: runs.length,
     runs,
