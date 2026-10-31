@@ -50,6 +50,12 @@ import {
   type StrategyRequest,
 } from "../trading";
 import { DEFAULT_SUBREQUEST_BUDGET, getOpportunityScannerConfig } from "../config/etapiConfig";
+// Issue #2577: the report scope (theses, strategies, chains, formats,
+// channels) is data — config/options-reports.json, env
+// OPTIONS_REPORT_CONFIG / OPTIONS_REPORT_PRESET — not a hardcoded default
+// in this method. Imported directly rather than through the ../trading
+// barrel so the barrel's pinned extraction ledger stays untouched.
+import { describeReportScope, resolveOptionsReportScope } from "../trading/optionsReportScope";
 import { tagOpportunitiesWithDirection, ETradeSlackTradingService } from "../trading";
 // Issue #1291: the scheduled path's unified scan result is an
 // OpportunityScanResult, not the OptionScreenResult the workbook
@@ -1930,7 +1936,29 @@ export class ScheduledTasksService {
   }>> {
     const timestamp = new Date().toISOString();
     let symbols: string[] = [];
-    const targetThesis = options.thesis || "bullish";
+    // Issue #2577: resolve the report scope once per run. The thesis still
+    // orients scoring, but it no longer decides which strategies exist in
+    // the report: the wanted set does. `allowedStrategies` from the
+    // schedule is a request-level narrowing (a schedule naming three
+    // strategies gets three); omitting it resolves to the full registry.
+    const reportScope = resolveOptionsReportScope({
+      ...(options.thesis ? { thesis: options.thesis as string } : {}),
+      ...(options.allowedStrategies?.length
+        ? { strategies: options.allowedStrategies.map(String) }
+        : {}),
+      ...(options.symbols?.length ? { symbols: options.symbols } : {}),
+      env: this.env as { OPTIONS_REPORT_CONFIG?: string; OPTIONS_REPORT_PRESET?: string },
+    });
+    // One execution per thesis per run today; a multi-thesis scope names
+    // its remaining theses in the audit stamp so the gap is visible.
+    const targetThesis = (reportScope.theses[0] ?? "bullish") as OptionThesis;
+    const scopeStrategies = (
+      reportScope.strategyScope === "all" ? ["all"] : reportScope.strategyIds
+    ) as OptionStrategyType[];
+    const scopeDte = {
+      ...(reportScope.chains.dte.minDte !== null ? { minDte: reportScope.chains.dte.minDte } : {}),
+      ...(reportScope.chains.dte.maxDte !== null ? { maxDte: reportScope.chains.dte.maxDte } : {}),
+    };
     const reportRunId = `options_scanner:${timestamp}:${targetThesis}`;
     let auditRunId = reportRunId;
     const shouldNotifySlack = options.pushToSlack === true ||
@@ -2112,9 +2140,13 @@ export class ScheduledTasksService {
             thesis: targetThesis,
             targetDate: options.targetDate || new Date(Date.parse(timestamp) + 30 * 86400000).toISOString().slice(0, 10),
             riskProfile: options.riskProfile || "balanced",
-            allowedStrategies: options.allowedStrategies,
+            allowedStrategies: scopeStrategies,
+            ...scopeDte,
+            maxPlannedLoss: reportScope.gates.maxPlannedLoss,
+            minRewardRisk: reportScope.gates.minRewardRisk,
             // Issue #2091: scheduled runs judge the chain against every
-            // wanted strategy, not only the thesis-matching ones.
+            // wanted strategy, not only the thesis-matching ones. The
+            // wanted set is the scope's lever; the thesis orients scoring.
             evaluateAllStrategies: true,
           },
         };
@@ -2123,7 +2155,7 @@ export class ScheduledTasksService {
         const specs = planOptionsFeedShards(chain, timestamp);
         const submitted: string[] = [];
         for (const spec of specs) submitted.push((await this.shardSubmit(spec)).jobId);
-        this.audit("options.sharded_chain_submitted", { chainId, universe: chain.universe, symbols: symbols.length, jobs: submitted.length });
+        this.audit("options.sharded_chain_submitted", { chainId, universe: chain.universe, symbols: symbols.length, jobs: submitted.length, scope: describeReportScope(reportScope), theses: reportScope.theses, strategies: reportScope.strategyScope === "all" ? "all" : scopeStrategies, warnings: reportScope.warnings });
         return {
           success: true,
           taskType: "options_analysis" as any,
@@ -2149,7 +2181,10 @@ export class ScheduledTasksService {
         thesis: targetThesis,
         targetDate: options.targetDate,
         riskProfile: options.riskProfile || "balanced",
-        allowedStrategies: options.allowedStrategies,
+        allowedStrategies: scopeStrategies,
+        ...scopeDte,
+        maxPlannedLoss: reportScope.gates.maxPlannedLoss,
+        minRewardRisk: reportScope.gates.minRewardRisk,
         // Issue #2091: scheduled runs judge the chain against every
         // wanted strategy, not only the thesis-matching ones.
         evaluateAllStrategies: true,

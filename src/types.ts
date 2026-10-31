@@ -2331,6 +2331,16 @@ export interface ShardChainContext {
     allowedStrategies?: string[];
     /** Issue #2091: scheduled chains judge every wanted strategy. */
     evaluateAllStrategies?: boolean;
+    /**
+     * Issue #2577: the report scope's chain band and gates, carried from
+     * the schedule into every per-symbol shard. Before this the shard
+     * executor hardcoded 1000/1.5 and dropped the DTE band, so a sharded
+     * run could not honor the scope its schedule declared.
+     */
+    minDte?: number;
+    maxDte?: number;
+    maxPlannedLoss?: number;
+    minRewardRisk?: number;
     eventCalendarBySymbol?: Record<string, unknown>;
   };
 }

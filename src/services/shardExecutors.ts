@@ -351,8 +351,12 @@ async function executeOptionsSymbol(
         thesis: request.thesis as any,
         targetDate: request.targetDate,
         expectedIvDirection: "unchanged",
-        maxPlannedLoss: 1000,
-        minRewardRisk: 1.5,
+        maxPlannedLoss: request.maxPlannedLoss ?? 1000,
+        minRewardRisk: request.minRewardRisk ?? 1.5,
+        // Issue #2577: the scope's DTE band rides into the shard instead of
+        // being dropped here (the per-symbol runner previously ignored it).
+        ...(request.minDte !== undefined ? { minDte: request.minDte } : {}),
+        ...(request.maxDte !== undefined ? { maxDte: request.maxDte } : {}),
         allowedStrategies: request.allowedStrategies?.length ? request.allowedStrategies as any : ["all"],
         // Issue #2091: the chain's scheduled scope rides into the
         // per-symbol template; manual chains omit it (thesis default).
