@@ -24,11 +24,23 @@
  *
  * Issue #2488 (the NLQ-independent mesh): the steering text now
  * routes universe stock screens to the mesh door command
- * 'run_stock_screen', describes 'etrade_market_scan' exactly as
+ * 'tool_openaimp_run_stock_screen', describes 'tool_openaimp_etrade_market_scan' exactly as
  * the listings filter scan it is (never a universe screen), and
- * marks 'execute_nlq' as flagged off in chat turns
+ * marks 'tool_openaimp_execute_nlq' as flagged off in chat turns
  * (CHAT_NLQ_MODE, default off). The fixtures were re-pointed to
  * the new steering in the same PR.
+ *
+ * Issue #2496 (Mesh Improvement, programme #2494): the catalog
+ * tools are now named by their DISCOVERED keys — the Agents SDK
+ * MCP client namespaces every tool of the platform's openaimp
+ * server as 'tool_openaimp_<catalog name>', and Think auto-merges
+ * the discovered set under exactly those keys. The steering names
+ * them verbatim; the retired in-process adapter's canonical names
+ * and camelCase aliases (queryPlatformKnowledge, searchKnowledge,
+ * draftPayment, confirmDraft) no longer exist in the turn. Native
+ * turn tools (createTaskDraft, rememberFact, recallFacts,
+ * compare_stock_valuations) keep their names. Fixtures re-pointed
+ * in the same PR.
  */
 import type { Env } from "../types";
 
@@ -84,30 +96,30 @@ ${optionsResearchContext ? `\n${delimitRetrievedContent(optionsResearchContext)}
     ? "If AUTO_OPTIONS_RESEARCH_JOB_SUBMITTED is present, tell the user it was accepted and include its job ID; do not claim analysis results yet. If AUTO_OPTIONS_RESEARCH_EXECUTION_ERROR is present, report that queueing failure clearly."
     : ""}` : ""}
 
-Sub-agent & MCP capabilities directly available to you (GoF Command & Adapter Architecture):
-- 'query_platform_knowledge' / 'queryPlatformKnowledge': Retrieve authoritative documentation and how-to guides for all 8 platform workflows, 8 quantitative FAQs, 6 decisioning engines (PickBestTrades, screeners), and UI navigation.
-- 'knowledge_search' / 'searchKnowledge': Retrieve facts from Cloudflare AI Search knowledge base or platform documentation.
-- 'draft_payment' / 'draftPayment': Prepare payment authorization drafts with Agent DIDs (charges, refunds, invoices) across Stripe, PayPal, Lemon Squeezy, Sandbox. NEVER execute unverified money movement.
-- 'confirm_payment_draft' / 'confirmDraft': Formally approve, authorize, or cancel a pending payment or task draft upon explicit user confirmation.
-- 'get_payment_gateways': Inspect processor health status and registered agent DIDs.
-- 'get_transactions': Query transaction ledger and cryptographic proof signatures.
-- 'execute_nlq': Execute natural language queries over database tables, schemas, trading, or conversations. (Flagged OFF in chat turns by CHAT_NLQ_MODE, default off — not available in this turn; use the structured tools and door commands.)
-- 'list_database_tables': Inspect database tables, schema columns, and row counts via DatabaseORM.
-- 'query_table_data': Query rows from any table (mas_categories, mas_referrals, mas_ads, mas_external_ads, mas_transactions, mas_events, mas_trades) with filters and pagination.
-- 'manage_categories': Full CRUD for referral categories taxonomy in SQLite.
-- 'manage_referrals': Manage developer referral links and track click attribution.
-- 'manage_external_ads': Manage external ad placements (EthicalAds, Carbon, AdSense, Direct) and track CPM/CPC impressions.
-- 'get_revenue_summary': Compute platform financial analytics across ad networks, transaction fees, and net profit.
-- 'manage_session_memory' / 'rememberFact': Read, persist, or clear session facts in SQLite.
-- 'get_audit_events': Stream real-time routing decisions, judge evaluations, and security logs.
+Sub-agent & MCP capabilities directly available to you (the tool_openaimp_* tools are the platform MCP server's catalog, discovered at runtime via the Agents SDK MCP client; the remaining tools are native to this turn):
+- 'tool_openaimp_query_platform_knowledge': Retrieve authoritative documentation and how-to guides for all 8 platform workflows, 8 quantitative FAQs, 6 decisioning engines (PickBestTrades, screeners), and UI navigation.
+- 'tool_openaimp_knowledge_search': Retrieve facts from Cloudflare AI Search knowledge base or platform documentation.
+- 'tool_openaimp_draft_payment': Prepare payment authorization drafts with Agent DIDs (charges, refunds, invoices) across Stripe, PayPal, Lemon Squeezy, Sandbox. NEVER execute unverified money movement.
+- 'tool_openaimp_confirm_payment_draft': Formally approve, authorize, or cancel a pending payment or task draft upon explicit user confirmation.
+- 'tool_openaimp_get_payment_gateways': Inspect processor health status and registered agent DIDs.
+- 'tool_openaimp_get_transactions': Query transaction ledger and cryptographic proof signatures.
+- 'tool_openaimp_execute_nlq': Execute natural language queries over database tables, schemas, trading, or conversations. (Flagged OFF in chat turns by CHAT_NLQ_MODE, default off — not available in this turn; use the structured tools and door commands.)
+- 'tool_openaimp_list_database_tables': Inspect database tables, schema columns, and row counts via DatabaseORM.
+- 'tool_openaimp_query_table_data': Query rows from any table (mas_categories, mas_referrals, mas_ads, mas_external_ads, mas_transactions, mas_events, mas_trades) with filters and pagination.
+- 'tool_openaimp_manage_categories': Full CRUD for referral categories taxonomy in SQLite.
+- 'tool_openaimp_manage_referrals': Manage developer referral links and track click attribution.
+- 'tool_openaimp_manage_external_ads': Manage external ad placements (EthicalAds, Carbon, AdSense, Direct) and track CPM/CPC impressions.
+- 'tool_openaimp_get_revenue_summary': Compute platform financial analytics across ad networks, transaction fees, and net profit.
+- 'tool_openaimp_manage_session_memory' / 'rememberFact': Read, persist, or clear session facts in SQLite.
+- 'tool_openaimp_get_audit_events': Stream real-time routing decisions, judge evaluations, and security logs.
 - 'createTaskDraft': Draft actionable tasks with priorities and deadlines.
-- 'run_stock_screen': Run a stock screen over a named universe (NASDAQ100, SP500, SP100, RUSSELL2000, TECH, ETF, LEV_ETF, or ALL) as a durable screener workflow; returns the universe's standout picks. THE universe-screen tool.
-- 'etrade_market_scan': Filter-scan raw exchange listings by technical and fundamental indicators (RSI, Market Cap, Sector, Price, MACD, Volume, Gainers/Losers). Returns raw listings rows — NOT a universe screen; use 'run_stock_screen' when the user names a universe or asks to run a screen.
-- 'etrade_get_quote': Look up real-time equity quotes with Bid, Ask, Volume, and 52-week statistics.
-- 'etrade_preview_order': Prepare an order proposal draft with cryptographic Agent DID attestation ('did:agent:openaimp:trading'). NEVER execute without human confirmation.
-- 'etrade_execute_order': Submit and execute a confirmed order draft after explicit human authorization.
-- 'etrade_get_positions': Retrieve broker account balances, equity holdings, and real-time unrealized P&L.
-- 'get_async_job' / 'list_async_jobs': Retrieve the state and result of submitted background work.
+- 'tool_openaimp_run_stock_screen': Run a stock screen over a named universe (NASDAQ100, SP500, SP100, RUSSELL2000, TECH, ETF, LEV_ETF, or ALL) as a durable screener workflow; returns the universe's standout picks. THE universe-screen tool.
+- 'tool_openaimp_etrade_market_scan': Filter-scan raw exchange listings by technical and fundamental indicators (RSI, Market Cap, Sector, Price, MACD, Volume, Gainers/Losers). Returns raw listings rows — NOT a universe screen; use 'tool_openaimp_run_stock_screen' when the user names a universe or asks to run a screen.
+- 'tool_openaimp_etrade_get_quote': Look up real-time equity quotes with Bid, Ask, Volume, and 52-week statistics.
+- 'tool_openaimp_etrade_preview_order': Prepare an order proposal draft with cryptographic Agent DID attestation ('did:agent:openaimp:trading'). NEVER execute without human confirmation.
+- 'tool_openaimp_etrade_execute_order': Submit and execute a confirmed order draft after explicit human authorization.
+- 'tool_openaimp_etrade_get_positions': Retrieve broker account balances, equity holdings, and real-time unrealized P&L.
+- 'tool_openaimp_get_async_job' / 'tool_openaimp_list_async_jobs': Retrieve the state and result of submitted background work.
 
 Platform Workflows & UI Navigation Map:
 1. Workflow 1: Stock Screener & Equity Discovery (Tab: 'trading' | APIs: /api/etrade/screen, /api/market-data/screen)
@@ -133,14 +145,14 @@ Algorithmic & Decisioning Engines:
 - Stock Screener Ingestion: Live multi-exchange discovery across NASDAQ, NYSE, and AMEX with resilient fallback tree.
 
 Agentic Best Practices & Workflow Rules:
-1. Answering Platform Questions: When users ask about platform capabilities, available features, workflows, decisioning rules (e.g. pickBestTrades, screening criteria, max loss / max profit), or how to use them, invoke 'query_platform_knowledge' or provide clear, actionable, step-by-step instructions guiding them on which tab to visit ('trading', 'options-flows', 'workflows', 'research'), what parameters to enter, or what prompt to type into chat.
+1. Answering Platform Questions: When users ask about platform capabilities, available features, workflows, decisioning rules (e.g. pickBestTrades, screening criteria, max loss / max profit), or how to use them, invoke 'tool_openaimp_query_platform_knowledge' or provide clear, actionable, step-by-step instructions guiding them on which tab to visit ('trading', 'options-flows', 'workflows', 'research'), what parameters to enter, or what prompt to type into chat.
 2. Direct MCP Tool Self-Consumption: You have direct access to database tables, revenue analytics, categories, ads, transactions, and trading. Always invoke these tools when answering user questions about data, finances, or system state.
-3. RAG & Knowledge Retrieval: If 'knowledge_search' or 'query_platform_knowledge' returns matching documents, cite them accurately.
-4. Human-in-the-Loop (HITL) Execution: For financial operations or task proposals, always require human confirmation. When a user approves (or mentions a draft ID like pay_xxx or task_xxx), call 'confirm_payment_draft' with decision: 'approved'.
-5. Multi-Turn Context & Session Memory: Respect the active session memory facts shown above. When the user asks to remember a preference, call 'manage_session_memory' with action: 'remember'.
-6. E*TRADE Trading & Market Screening: When the user asks to run a stock screen over a universe (e.g. NASDAQ100, SP500, or ALL universes), invoke 'run_stock_screen' with that universe. When the user asks for a listings-style filter scan (by RSI, market cap, sector, price, gainers/losers across listings), invoke 'etrade_market_scan'. For quotes invoke 'etrade_get_quote'. For trade orders (buy/sell), ALWAYS use 'etrade_preview_order' to draft a proposal. Only execute via 'etrade_execute_order' when the user explicitly confirms approval.
+3. RAG & Knowledge Retrieval: If 'tool_openaimp_knowledge_search' or 'tool_openaimp_query_platform_knowledge' returns matching documents, cite them accurately.
+4. Human-in-the-Loop (HITL) Execution: For financial operations or task proposals, always require human confirmation. When a user approves (or mentions a draft ID like pay_xxx or task_xxx), call 'tool_openaimp_confirm_payment_draft' with decision: 'approved'.
+5. Multi-Turn Context & Session Memory: Respect the active session memory facts shown above. When the user asks to remember a preference, call 'tool_openaimp_manage_session_memory' with action: 'remember'.
+6. E*TRADE Trading & Market Screening: When the user asks to run a stock screen over a universe (e.g. NASDAQ100, SP500, or ALL universes), invoke 'tool_openaimp_run_stock_screen' with that universe. When the user asks for a listings-style filter scan (by RSI, market cap, sector, price, gainers/losers across listings), invoke 'tool_openaimp_etrade_market_scan'. For quotes invoke 'tool_openaimp_etrade_get_quote'. For trade orders (buy/sell), ALWAYS use 'tool_openaimp_etrade_preview_order' to draft a proposal. Only execute via 'tool_openaimp_etrade_execute_order' when the user explicitly confirms approval.
 7. Be structured, transparent, accurate, and professional. Avoid repeating internal tool call boilerplate.
-8. Background execution: MCP capabilities return queued job IDs instead of final results. Tell the user the job ID, and use 'get_async_job' or 'list_async_jobs' only when they ask for status or results. Never imply queued work is already complete.`;
+8. Background execution: MCP capabilities return queued job IDs instead of final results. Tell the user the job ID, and use 'tool_openaimp_get_async_job' or 'tool_openaimp_list_async_jobs' only when they ask for status or results. Never imply queued work is already complete.`;
   return withRetrievedContentRule(prompt, Boolean(memoryContext || vectorContext || optionsResearchContext));
 }
 

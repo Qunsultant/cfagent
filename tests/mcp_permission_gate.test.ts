@@ -181,9 +181,13 @@ describe("agent-turn adapter choke point (#1744)", () => {
   });
 
   it("denies a restricted agent-turn principal before the command runs", async () => {
-    const { createAgentMcpTools } = await import("../src/agents/mcpAdapter");
+    const { McpAgentToolAdapter } = await import("../src/agents/mcpAdapter");
     const { McpSystemFacade } = await import("../src/patterns/facade");
-    const tools = createAgentMcpTools({
+    // #2496: the chat turn consumes catalog commands by discovery
+    // (its choke point is the server-side gate — the JSON-RPC
+    // describe below); the adapter remains the in-process choke
+    // point and is driven directly here.
+    const tool = McpAgentToolAdapter.adapt(McpToolFactory.getTool("draft_payment")!, {
       env: mockEnv,
       orm,
       sessionId: "session_1",
@@ -194,7 +198,7 @@ describe("agent-turn adapter choke point (#1744)", () => {
         overrides: new Map<string, readonly McpScope[]>([["agent-turn:", ["mcp:read"]]]),
       }),
     });
-    await expect(tools["draft_payment"].execute({})).rejects.toMatchObject({
+    await expect(tool.execute({})).rejects.toMatchObject({
       code: MCP_PERMISSION_DENIED_CODE,
     });
     expect(auditLogs.some((l) => l.type === "mcp.permission_denied")).toBe(true);
@@ -222,9 +226,9 @@ describe("agent-turn adapter choke point (#1744)", () => {
   });
 
   it("allows a held scope through the adapter", async () => {
-    const { createAgentMcpTools } = await import("../src/agents/mcpAdapter");
+    const { McpAgentToolAdapter } = await import("../src/agents/mcpAdapter");
     const { McpSystemFacade } = await import("../src/patterns/facade");
-    const tools = createAgentMcpTools({
+    const tool = McpAgentToolAdapter.adapt(McpToolFactory.getTool("list_database_tables")!, {
       env: mockEnv,
       orm,
       sessionId: "session_1",
@@ -233,8 +237,8 @@ describe("agent-turn adapter choke point (#1744)", () => {
       principal: { kind: "agent-turn", login: null },
       permissionPort: createInMemoryMcpPermissionPort(),
     });
-    const out = await tools["list_database_tables"].execute({});
-    expect(out.tables.some((t: { name: string }) => t.name === "mas_categories")).toBe(true);
+    const out = (await tool.execute({})) as { tables: Array<{ name: string }> };
+    expect(out.tables.some((t) => t.name === "mas_categories")).toBe(true);
   });
 });
 

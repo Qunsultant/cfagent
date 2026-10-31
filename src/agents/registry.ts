@@ -828,7 +828,7 @@ export const MESH_TOOL_FAMILIES: MeshToolFamilyEntry[] = [
     ],
     commandSources: [{ file: "src/mcps/openaimp/meshDoorCommands.ts", kind: "readonly-name" }],
     notes:
-      "G1 outbound doors, batches A (#2341) + B (#2349) + C (#2351), plus S9/G4 batch D (#2375): the chat turn reaches ScheduledAgent, PaymentsAgent, TradingAgent, ReportAssetAgent, BrowserAgent, and SlackAgent through the typed doors in src/agents/orchestrator/meshDoors.ts. The commands require the turn's acting identity (the context actingLogin carrier) and fail closed without one, so they serve the chat door; external MCP callers use the A2A doors for these agents. The TradingAgent door exposes proposals (preview only) and reads, and — since #2375 — the approval door's workflow operations (start_trade_approval / decide_trade_approval / get_trade_approval_status): a chat trade runs as a TradingTradeWorkflow through the approval door, with the authorizer derived server-side; the synchronous settle (executeApprovedOrder) is never on the door. The Browser/Slack doors take no caller-supplied webhookUrl: delivery targets are env configuration only. AiSearchAgent is deliberately not in this family — the chat turn already reaches it through ai_search_agent_search (#2250, see its agent record). Batch E (#2488) adds run_stock_screen over the mesh screen door (src/agents/orchestrator/meshScreenDoor.ts): the chat turn's universe stock screen as a ScreenerScreenWorkflow run, executed by the door layer's own NLQ-free service — the screen path no longer depends on the NLQ stock-screen port, and the door has no direct-ScreenerAgent fallback.",
+      "G1 outbound doors, batches A (#2341) + B (#2349) + C (#2351), plus S9/G4 batch D (#2375): the chat turn reaches ScheduledAgent, PaymentsAgent, TradingAgent, ReportAssetAgent, BrowserAgent, and SlackAgent through the typed doors in src/agents/orchestrator/meshDoors.ts. The commands require the caller's acting identity (the context actingLogin carrier) and fail closed without one, so they serve the chat door; since #2496 they also serve identified external MCP callers — the /mcp route threads the edge-verified login into the same carrier — while anonymous MCP callers still fail closed, and the A2A doors remain the cross-instance surface for these agents. The TradingAgent door exposes proposals (preview only) and reads, and — since #2375 — the approval door's workflow operations (start_trade_approval / decide_trade_approval / get_trade_approval_status): a chat trade runs as a TradingTradeWorkflow through the approval door, with the authorizer derived server-side; the synchronous settle (executeApprovedOrder) is never on the door. The Browser/Slack doors take no caller-supplied webhookUrl: delivery targets are env configuration only. AiSearchAgent is deliberately not in this family — the chat turn already reaches it through ai_search_agent_search (#2250, see its agent record). Batch E (#2488) adds run_stock_screen over the mesh screen door (src/agents/orchestrator/meshScreenDoor.ts): the chat turn's universe stock screen as a ScreenerScreenWorkflow run, executed by the door layer's own NLQ-free service — the screen path no longer depends on the NLQ stock-screen port, and the door has no direct-ScreenerAgent fallback.",
   },
   {
     id: "mas-tools",
@@ -960,8 +960,8 @@ export const MESH_DOORS: MeshDoorEntry[] = [
     id: "chat-turn",
     name: "Chat turn",
     entryPoint:
-      "src/server.ts routeAgentRequest -> OrchestratorAgent turn; turn tools assembled by src/agents/mcpAdapter.ts (createAgentMcpTools over the MCP command registry)",
-    gate: "Session auth at connect; MCP permission scopes (#1744) enforced at the agent-turn adapter.",
+      "src/server.ts routeAgentRequest -> OrchestratorAgent turn; the turn's catalog tools are DISCOVERED at runtime from the platform's own openaimp MCP server through the Agents SDK MCP client (src/agents/orchestrator/meshMcpClient.ts) and auto-merged into the turn by Think under tool_openaimp_<name> keys, alongside the native turn tools (src/agents/mcpAdapter.ts createAgentMcpTools) — #2496",
+    gate: "Session auth at connect; MCP permission scopes (#1744) enforced at the /mcp route the discovered tools execute through (queue-time gate) and again by the async-job executor.",
   },
   {
     id: "http-routes",
@@ -973,7 +973,7 @@ export const MESH_DOORS: MeshDoorEntry[] = [
     id: "mcp",
     name: "MCP (external protocol surface)",
     entryPoint: "src/mcps/openaimp/index.ts MCP server over the McpToolFactory catalog (src/mcps/openaimp/commands.ts)",
-    gate: "MCP permission scopes (#1744) at the MCP factory/adapter — a separate enforcement point from the chat turn's in-process tool calls over the same registry.",
+    gate: "MCP permission scopes (#1744) at the /mcp route (queue-time) and the async-job executor. Since #2496 the route also threads the edge-verified acting login (x-user-login) into the execution context, and the handler stamps it server-side into queued mcp.tool payloads — the acting-login carrier this surface previously lacked (#2341) — so identified callers (session / API key, and the chat turn's own SDK loopback) are served the mesh-door commands as themselves; anonymous callers still fail closed at the gate.",
   },
   {
     id: "a2a",
@@ -1067,7 +1067,7 @@ export const MESH_DOOR_COST_BUDGETS: MeshDoorCostBudgetEntry[] = [
     enforcingSurface: null,
     gaps: [
       "Catalog commands carry no per-call cost metering: an external MCP call writes no usage row, so no cap can be charged on this door today.",
-      "The mesh-door commands are not served on this door at all (no actingLogin carrier for external callers, S5) — their cost belongs to the chat-turn record, which is where they execute.",
+      "Mesh-door commands invoked through this door by identified callers (#2496 acting-login carrier) execute exactly like chat-turn calls, but — like every catalog command on this door — write no per-call usage row, so their cost is unmetered here and remains attributed to the chat-turn record's accounting.",
     ],
   },
   {
@@ -1194,7 +1194,7 @@ export interface MeshCapabilityDoorEntry {
 const A2A_EDGE_GATE =
   "Per-agent credential (A2A_TOKEN_<SURFACE>) verified timing-safely at the A2A edge, fail-closed (503 when the surface has no credential configured, 401 on a missing/wrong one, before agent resolution) — src/a2a/index.ts + src/a2a/meshCredentials.ts. TRANSITIONAL: the shared A2A_API_TOKEN authenticates surfaces whose per-agent secret is unset, and the call's attribution says so (S16, #2426; removal when every surface carries its own secret).";
 const NO_ACTING_LOGIN_CARRIER =
-  "The mesh-door commands fail closed for external MCP callers: no actingLogin carrier exists on that surface (#2341), so identity-bearing doors cannot be served there — external callers use the A2A door.";
+  "The mesh-door commands that reach this class are OrchestratorAgent-hosted (their class reach is recorded on the chat-turn column). Since #2496 the /mcp route carries the caller's edge-verified acting login, so an identified external MCP caller can invoke those door commands as themselves through their own orchestrator instance — before #2496 they failed closed on this surface for lack of a carrier (#2341). The mcp column's derivation (catalog class-addressing) is unchanged in this slice; its re-derivation under the carrier is recorded as a follow-up for the MCP-server programme (#2494).";
 
 export const MESH_CAPABILITY_DOORS: MeshCapabilityDoorEntry[] = [
   // -- OrchestratorAgent -------------------------------------------------
@@ -1203,9 +1203,9 @@ export const MESH_CAPABILITY_DOORS: MeshCapabilityDoorEntry[] = [
     door: "chat-turn",
     status: "exposed",
     operations: [],
-    gate: "Session auth at connect; MCP permission scopes (#1744) enforced at the turn adapter.",
+    gate: "Session auth at connect; MCP permission scopes (#1744) enforced at the /mcp route (queue-time) and the async-job executor — the discovered tools execute through that route (#2496).",
     notes:
-      "The turn host class: every catalog command is assembled into its turn in-process (src/agents/mcpAdapter.ts); its outbound reach to the fleet is the G1 mesh doors (src/agents/orchestrator/meshDoors.ts). One catalog command is NOT assembled into the turn by default (#2488): execute_nlq stays registered and wired (catalog, /mcp surface, facade, async nlq.execute capability, A2A, routes, channels) but is flagged off in the turn by the CHAT_NLQ_MODE switch (src/config/chatNlqModes.ts, built-in default off) — the turn's mesh runs without NLQ, and chat screens go through the mesh screen door (run_stock_screen).",
+      "The turn host class: since #2496 every catalog command reaches its turn by runtime DISCOVERY — the class registers the platform's own openaimp MCP server on the Agents SDK MCP client (src/agents/orchestrator/meshMcpClient.ts) and Think auto-merges the discovered set under tool_openaimp_<name> keys alongside the native turn tools; its outbound reach to the fleet is the G1 mesh doors (src/agents/orchestrator/meshDoors.ts). One catalog command is NOT in the turn's usable set by default (#2488): execute_nlq stays registered and wired (catalog, /mcp surface, facade, async nlq.execute capability, A2A, routes, channels) but is flagged off in the turn by the CHAT_NLQ_MODE switch (src/config/chatNlqModes.ts, built-in default off) — under discovery the flag restricts the merged set through TurnConfig.activeTools (chatNlqTurnGate in meshMcpClient.ts) — the turn's mesh runs without NLQ, and chat screens go through the mesh screen door (run_stock_screen).",
   },
   {
     className: "OrchestratorAgent",
@@ -1222,7 +1222,7 @@ export const MESH_CAPABILITY_DOORS: MeshCapabilityDoorEntry[] = [
     status: "not-exposed",
     operations: [],
     reason:
-      "The external MCP server executes the shared command catalog against service ports under a system principal; no command addresses an OrchestratorAgent instance. The class's own invocation surfaces are the chat turn, its routes, and A2A.",
+      "The MCP server executes the shared command catalog on the caller's own OrchestratorAgent instance (server.ts forwards to the per-login instance; since #2496 the class's own chat turn consumes the same surface through the SDK MCP client, and identified callers' commands execute with their acting login threaded by the route) — but no catalog command addresses an OrchestratorAgent instance as its target. The class's own invocation surfaces are the chat turn, its routes, and A2A.",
   },
   {
     className: "OrchestratorAgent",
@@ -1333,7 +1333,7 @@ export const MESH_CAPABILITY_DOORS: MeshCapabilityDoorEntry[] = [
     status: "not-exposed",
     operations: [],
     reason:
-      "The etrade_* commands drive the E*TRADE services, not this class; and the mesh-door trade commands cannot be served externally — " +
+      "The etrade_* commands drive the E*TRADE services, not this class. " +
       NO_ACTING_LOGIN_CARRIER,
   },
   {
@@ -1382,7 +1382,7 @@ export const MESH_CAPABILITY_DOORS: MeshCapabilityDoorEntry[] = [
     status: "not-exposed",
     operations: [],
     reason:
-      "draft_payment / confirm_payment_draft act on the orchestrator's MAS ledger, not this class; and the mesh-door payment commands cannot be served externally — " +
+      "draft_payment / confirm_payment_draft act on the orchestrator's MAS ledger, not this class. " +
       NO_ACTING_LOGIN_CARRIER,
   },
   {
@@ -1431,7 +1431,7 @@ export const MESH_CAPABILITY_DOORS: MeshCapabilityDoorEntry[] = [
     status: "not-exposed",
     operations: [],
     reason:
-      "etrade_market_scan drives the pre-mesh listings engine (ETradeService.screenMarketsAsync — raw listings rows by filter): it never starts a workflow and never addresses this class. paid_options_screener drives the paid options screening service, not this class's instance surface. run_stock_screen addresses the class's workflow path but refuses on this door — external MCP contexts carry no actingLogin carrier, and the door is chat-turn only (#2488).",
+      "etrade_market_scan drives the pre-mesh listings engine (ETradeService.screenMarketsAsync — raw listings rows by filter): it never starts a workflow and never addresses this class. paid_options_screener drives the paid options screening service, not this class's instance surface. run_stock_screen addresses the class's workflow path and is OrchestratorAgent-hosted (recorded on the chat-turn column); on this door it previously refused for lack of an actingLogin carrier — since #2496 the /mcp route carries the caller's edge-verified acting login, so an identified external caller can start a screen as themselves through their own instance (#2488).",
   },
   {
     className: "ScreenerAgent",
@@ -1479,7 +1479,7 @@ export const MESH_CAPABILITY_DOORS: MeshCapabilityDoorEntry[] = [
     status: "not-exposed",
     operations: [],
     reason:
-      "The mesh-door schedule commands cannot be served externally — " + NO_ACTING_LOGIN_CARRIER,
+      NO_ACTING_LOGIN_CARRIER,
   },
   {
     className: "ScheduledAgent",
@@ -1528,7 +1528,7 @@ export const MESH_CAPABILITY_DOORS: MeshCapabilityDoorEntry[] = [
     status: "not-exposed",
     operations: [],
     reason:
-      "agentdb.reports.list reads the D1 read projection, not this class; and the mesh-door asset commands cannot be served externally — " +
+      "agentdb.reports.list reads the D1 read projection, not this class. " +
       NO_ACTING_LOGIN_CARRIER,
   },
   {
@@ -1576,7 +1576,7 @@ export const MESH_CAPABILITY_DOORS: MeshCapabilityDoorEntry[] = [
     status: "not-exposed",
     operations: [],
     reason:
-      "browser_inspect_page / browser_screenshot drive ETradeBrowserService directly, not this class; and the mesh-door browser commands cannot be served externally — " +
+      "browser_inspect_page / browser_screenshot drive ETradeBrowserService directly, not this class. " +
       NO_ACTING_LOGIN_CARRIER,
   },
   {
@@ -1624,7 +1624,7 @@ export const MESH_CAPABILITY_DOORS: MeshCapabilityDoorEntry[] = [
     status: "not-exposed",
     operations: [],
     reason:
-      "Slack ingress is a channel (MESH_CHANNELS), not an MCP surface; and the mesh-door slack commands cannot be served externally — " +
+      "Slack ingress is a channel (MESH_CHANNELS), not an MCP surface. " +
       NO_ACTING_LOGIN_CARRIER,
   },
   {
@@ -1667,8 +1667,8 @@ export const MESH_CAPABILITY_DOORS: MeshCapabilityDoorEntry[] = [
     door: "mcp",
     status: "exposed",
     operations: ["ai_search_agent_search"],
-    gate: "MCP permission scopes (#1744) at the factory/adapter; the command owner-checks report-type results against the caller login its context carries.",
-    notes: "The same catalog command serves the chat turn (in-process) and the external MCP surface — one registry, two enforcement points (registry MESH_DOORS).",
+    gate: "MCP permission scopes (#1744) at the /mcp route + executor; the command owner-checks report-type results against the caller login its context carries.",
+    notes: "The same catalog command serves the chat turn (discovered via the SDK MCP client, #2496) and the external MCP surface — one registry, and since #2496 one enforcement surface: both arrive at the instance's /mcp route (registry MESH_DOORS).",
   },
   {
     className: "AiSearchAgent",
@@ -1892,7 +1892,7 @@ export const MESH_TRACE_SPINE: MeshTraceSpineEntry[] = [
     hop: "turn",
     status: "carried",
     carrier:
-      "Minted lazily on the OrchestratorAgent turn stash (turnTraceparent()) and shared by every consumer of the turn; carried to tools via ChatTurnHelpersContext.turnTraceparent → McpToolContext.traceparent.",
+      "Minted lazily on the OrchestratorAgent turn stash (turnTraceparent()) and shared by every consumer of the turn; carried to native turn tools via ChatTurnHelpersContext.turnTraceparent → McpToolContext.traceparent, and to the discovered MCP tools as the traceparent header the SDK loopback carrier stamps per call (src/agents/orchestrator/meshMcpClient.ts).",
     evidence: "Hop recorded at mint (kind \"turn\", caller = the turn's userLogin) in agent_mesh_trace_hops.",
   },
   {
@@ -1906,7 +1906,7 @@ export const MESH_TRACE_SPINE: MeshTraceSpineEntry[] = [
     hop: "job-queue",
     status: "carried",
     carrier:
-      "Stamped into the mcp.tool async-job payload by McpAgentToolAdapter at queue time, server-side from the turn context (mirrors the S5 actingLogin stamp).",
+      "Stamped into the mcp.tool async-job payload at queue time, server-side: since #2496 by the openaimp handler (src/mcps/openaimp/handler.ts) from the route-threaded traceparent carrier — the SDK loopback carrier sets that header from the turn stash, and external callers may supply their own W3C traceparent; before #2496 the turn adapter (McpAgentToolAdapter) stamped it from the turn context (mirrors the S5 actingLogin stamp).",
     evidence: "Hop at queue time (kind \"job-queue\", jobId = the queued job's id).",
   },
   {
