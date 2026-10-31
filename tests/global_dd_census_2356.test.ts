@@ -110,6 +110,7 @@ const STORAGE_ALLOW_LIST: Array<[string, number, string]> = [
   ["src/services/learnings.ts", 7, "R-1 gated — NOT step 4c (two-host question open)"],
   ["src/security/sessionStore.ts", 2, "step 5 (SessionStore / kv_store)"],
   ["src/actors/cfAgentsAdapter.ts", 1, "permanent — Agents-SDK shim (ADR-out)"],
+  ["src/services/receiptSurface.ts", 2, "issue #2543 receipt read-back: meter + tier reads over the sql seam (usage port drops detail_json; no port path exists)"],
 ];
 
 /** The step-4c families: zero above-layer sites remain. */
@@ -259,7 +260,7 @@ const STEP4F_SERVICE_FILES = [
 
 /** The step-4f index statements live in the data layer, exactly. */
 const STEP4F_DATA_LAYER_FILES: Array<[string, number]> = [
-  ["src/data/masRetentionIndexSchema.ts", 2],
+  ["src/data/masRetentionIndexSchema.ts", 3],
   ["src/data/frameworkQueueIndexSchema.ts", 1],
 ];
 
@@ -284,8 +285,10 @@ describe("global D-D census: surface 1 — storage-shaped sites above the layer"
     // screener-agent's 1 → 24; step 4f (#2362) retires the
     // two index helpers' 3 → 21; step 4g (#2390) retires
     // reportDispatch's 3, screeningFlags' 4 and the
-    // orchestrator's G-7 CREATE → 13.
-    expect(total).toBe(13);
+    // orchestrator's G-7 CREATE → 13; issue #2543 adds the
+    // receipt surface's 2 (meter + tier reads over the sql
+    // seam — the usage port drops detail_json) → 15.
+    expect(total).toBe(15);
   });
 
   for (const file of STEP4C_SERVICE_FILES) {

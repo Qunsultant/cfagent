@@ -151,6 +151,81 @@ export async function fetchAgenticLedger(): Promise<AgenticLedgerEntry[]> {
     }));
 }
 
+/**
+ * Issue #2543: receipts read-back (GET /api/payments/receipts) — the
+ * caller's own meter rows, tier-decision audit rows, and joined gateway
+ * rows, newest first, each with a derived provenance. No money totals:
+ * a summed figure over mixed provenance would read as revenue.
+ */
+export type ReceiptKind = "meter" | "tier" | "transaction";
+export type ReceiptProvenance = "real" | "simulated" | "audit";
+
+export interface ReceiptEntry {
+  id: string;
+  kind: ReceiptKind;
+  createdAt: string;
+  provenance: ReceiptProvenance;
+  provenanceNote: string;
+  receiptId: string | null;
+  amountUSD: number | null;
+  tier: string | null;
+  protocol: string | null;
+  gateway: string | null;
+  status: string | null;
+}
+
+export interface ReceiptsResponse {
+  userLogin: string;
+  limit: number;
+  receipts: ReceiptEntry[];
+  counts: {
+    meter: number;
+    tier: number;
+    transaction: number;
+    real: number;
+    simulated: number;
+    audit: number;
+  };
+}
+
+export async function fetchReceipts(): Promise<ReceiptsResponse> {
+  const resp = await apiFetch("/api/payments/receipts");
+  const data = (await resp.json().catch(() => ({}))) as ReceiptsResponse & { error?: string };
+  if (!resp.ok) throw new Error(data.error || `Request failed (${resp.status})`);
+  if (!data || !Array.isArray(data.receipts)) {
+    throw new Error("Unexpected receipts response shape — the receipts payload was incomplete.");
+  }
+  return data;
+}
+
+/** Row-kind label: what the row evidences. */
+export function receiptKindLabel(entry: Pick<ReceiptEntry, "kind">): string {
+  switch (entry.kind) {
+    case "meter":
+      return "Paid call";
+    case "tier":
+      return "Tier decision";
+    case "transaction":
+      return "Ledger entry";
+    default:
+      return "Receipt";
+  }
+}
+
+/** Provenance label: Real / Simulated / Audit — simulated rows are never "Verified" or "Settled". */
+export function receiptProvenanceLabel(entry: Pick<ReceiptEntry, "provenance">): string {
+  switch (entry.provenance) {
+    case "real":
+      return "Real";
+    case "simulated":
+      return "Simulated";
+    case "audit":
+      return "Audit";
+    default:
+      return "Unknown";
+  }
+}
+
 /** Formats an ISO ledger timestamp for display; falls back to the raw string when unparseable. */
 export function fmtLedgerTime(iso: string): string {
   if (!iso) return "—";
