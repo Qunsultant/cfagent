@@ -2,7 +2,7 @@
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "ai-search-agent",
   "main": "src/server.ts",
-  "compatibility_date": "2026-09-29",
+  "compatibility_date": "2026-10-31",
   "compatibility_flags": ["nodejs_compat"],
   "routes": [{ "pattern": "agent.openaimp.com", "custom_domain": true }],
   // Issue #329: only `/` and `/index.html` need the Worker (they inject the

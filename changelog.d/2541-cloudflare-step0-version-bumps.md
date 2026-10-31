@@ -1,0 +1,2 @@
+### Changed
+- Cloudflare migration step 0 (version bumps only, #2541): `wrangler` 4.144.0 -> 4.156.0 (latest 4.x), `@cloudflare/workers-types` 5.20260930.1 -> 5.20261031.1 (latest 5.x), and `wrangler.jsonc` `compatibility_date` 2026-09-29 -> 2026-10-31. The nested lockfile wrangler duplication (`@cloudflare/vitest-plugin` nested 4.156.0 vs pinned 4.144.0) is resolved to a single 4.156.0. No behaviour change; `agents` 0.32.0 and `@cloudflare/think` 0.23.0 are unchanged (already current per npm view 2026-10-31).
