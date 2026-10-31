@@ -699,35 +699,45 @@ export function screenerOutcomeFromRunResult(
   result: Record<string, unknown>,
   appBaseUrl?: string,
 ): ScreenerRunOutcome {
-  const pdfKey = typeof result.pdfKey === "string" ? result.pdfKey : undefined;
-  const reportUrl = typeof result.reportUrl === "string"
-    ? absoluteReportUrl(appBaseUrl, result.reportUrl)
-    : pdfKey
-      ? kind === "stock"
-        ? screenerReportUrl(appBaseUrl, pdfKey)
-        : optionsReportUrl(appBaseUrl, pdfKey)
-      : undefined;
+  // Issue #2545: an explicit generatePdf:false on the run result is a
+  // DELIVERY-projection instruction (the manual route stamps it from
+  // the caller's delivery selection): the outcome carries no report
+  // artifacts, so deliveries send text without attachments. The run
+  // record itself — and its stored report — are untouched.
+  const includeReportArtifacts = result.generatePdf !== false;
+  const pdfKey = includeReportArtifacts && typeof result.pdfKey === "string" ? result.pdfKey : undefined;
+  const reportUrl = !includeReportArtifacts
+    ? undefined
+    : typeof result.reportUrl === "string"
+      ? absoluteReportUrl(appBaseUrl, result.reportUrl)
+      : pdfKey
+        ? kind === "stock"
+          ? screenerReportUrl(appBaseUrl, pdfKey)
+          : optionsReportUrl(appBaseUrl, pdfKey)
+        : undefined;
   return {
     kind,
     trigger: result.trigger === "scheduled" ? "scheduled" : "manual",
     success: result.success !== false,
     pdfKeys: pdfKey ? [pdfKey] : [],
-    pdfStatus: result.pdfStatus === "generated" || result.pdfStatus === "failed" || result.pdfStatus === "skipped"
-      ? result.pdfStatus
-      : pdfKey
-        ? "generated"
-        : undefined,
-    pdfError: typeof result.pdfError === "string" ? result.pdfError : undefined,
-    xlsxKey: typeof result.xlsxKey === "string" ? result.xlsxKey : undefined,
-    xlsxStatus: result.xlsxStatus === "generated" || result.xlsxStatus === "failed" || result.xlsxStatus === "skipped"
+    pdfStatus: !includeReportArtifacts
+      ? "skipped"
+      : result.pdfStatus === "generated" || result.pdfStatus === "failed" || result.pdfStatus === "skipped"
+        ? result.pdfStatus
+        : pdfKey
+          ? "generated"
+          : undefined,
+    pdfError: includeReportArtifacts && typeof result.pdfError === "string" ? result.pdfError : undefined,
+    xlsxKey: includeReportArtifacts && typeof result.xlsxKey === "string" ? result.xlsxKey : undefined,
+    xlsxStatus: includeReportArtifacts && (result.xlsxStatus === "generated" || result.xlsxStatus === "failed" || result.xlsxStatus === "skipped")
       ? result.xlsxStatus
       : undefined,
-    xlsxError: typeof result.xlsxError === "string" ? result.xlsxError : undefined,
-    csvKey: typeof result.csvKey === "string" ? result.csvKey : undefined,
-    csvStatus: result.csvStatus === "generated" || result.csvStatus === "failed" || result.csvStatus === "skipped"
+    xlsxError: includeReportArtifacts && typeof result.xlsxError === "string" ? result.xlsxError : undefined,
+    csvKey: includeReportArtifacts && typeof result.csvKey === "string" ? result.csvKey : undefined,
+    csvStatus: includeReportArtifacts && (result.csvStatus === "generated" || result.csvStatus === "failed" || result.csvStatus === "skipped")
       ? result.csvStatus
       : undefined,
-    csvError: typeof result.csvError === "string" ? result.csvError : undefined,
+    csvError: includeReportArtifacts && typeof result.csvError === "string" ? result.csvError : undefined,
     reportUrl,
     matchedCount: asNumber(result.matchedCount),
     totalScanned: asNumber(result.totalScanned) ?? asNumber(result.totalUnderlyingsScanned),
@@ -738,6 +748,19 @@ export function screenerOutcomeFromRunResult(
     providerFallback: asProviderFallback(result.providerFallback),
     ...(typeof result.scanRunId === "string" && result.scanRunId ? { scanRunId: result.scanRunId } : {}),
     ...(typeof result.emailTo === "string" && result.emailTo.trim() !== "" ? { emailTo: result.emailTo.trim() } : {}),
+    // Issue #2545: the manual route's delivery selection rides the
+    // enriched run result — the same per-task overrides the scheduled
+    // path's bus events carry into this outcome (S5b), plus the
+    // channel allowlist an explicit selection stamps (#1236 field).
+    ...(typeof result.slackChannel === "string" && result.slackChannel.trim() !== "" ? { slackChannel: result.slackChannel.trim() } : {}),
+    ...(typeof result.webhookUrl === "string" && result.webhookUrl.trim() !== "" ? { webhookUrl: result.webhookUrl.trim() } : {}),
+    ...(Array.isArray(result.deliveryChannels)
+      ? {
+          deliveryChannels: result.deliveryChannels.filter(
+            (c): c is AsyncJobChannel => c === "slack" || c === "email" || c === "webhook",
+          ),
+        }
+      : {}),
     error: typeof result.error === "string" ? result.error : undefined,
     partial: asPartialQualification(result.partial),
   };

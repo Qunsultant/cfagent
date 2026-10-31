@@ -139,6 +139,33 @@ export function screenModeSelectionFromFields(
   return { ok: true, screenMode: "non-deterministic", screenIntent: intent };
 }
 
+/**
+ * Issue #2530 — the routes' shared admission step: extract
+ * the dual-mode fields from the request, strip them from a
+ * POST body (like `async`, they must never leak into the
+ * screen filters), and resolve the selection the route
+ * refuses 400 on. Both screen routes use this instead of
+ * open-coding the select-then-strip sequence.
+ */
+export function admitScreenModeSelection(
+  env: unknown,
+  method: string,
+  body: { screenMode?: unknown; screenIntent?: unknown },
+  query: URLSearchParams,
+  opts?: { asyncRequested?: boolean },
+): ScreenModeSelection {
+  const selection = screenModeSelectionFromFields(
+    env,
+    screenModeFieldsFromRequest(method, body, query),
+    opts,
+  );
+  if (method === "POST") {
+    delete body.screenMode;
+    delete body.screenIntent;
+  }
+  return selection;
+}
+
 /** Start a workflow when the port is available; null → caller falls back to sync. */
 export async function tryStartScreenerWorkflow(
   env: Env,

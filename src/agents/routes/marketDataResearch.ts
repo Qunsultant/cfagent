@@ -49,9 +49,8 @@ import {
 } from "../../config/marketDataModes";
 import { parseStockScreenRequest, shardableUniverses } from "../../trading";
 import {
+  admitScreenModeSelection,
   manualWorkflowJobId,
-  screenModeFieldsFromRequest,
-  screenModeSelectionFromFields,
   tryStartScreenerWorkflow,
   workflowAcceptedResponse,
   workflowTenantId,
@@ -310,15 +309,7 @@ export async function handleMarketDataCompareScreenRoutes(
       // and validated here: ND refuses 400 before any
       // execution path — sync included (never a silent
       // deterministic substitution).
-      const modeSelection = screenModeSelectionFromFields(
-        ctx.env,
-        screenModeFieldsFromRequest(request.method, filters, url.searchParams),
-        { asyncRequested },
-      );
-      if (request.method === "POST") {
-        delete (filters as { screenMode?: unknown }).screenMode;
-        delete (filters as { screenIntent?: unknown }).screenIntent;
-      }
+      const modeSelection = admitScreenModeSelection(ctx.env, request.method, filters, url.searchParams, { asyncRequested });
       if (!modeSelection.ok) {
         return Response.json({ error: modeSelection.error }, { status: 400 });
       }

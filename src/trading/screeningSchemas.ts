@@ -177,6 +177,23 @@ export interface StockScreenRequest {
   /** Per-request email recipient for the manual route (#1941);
    *  never forwarded into the engine filter. */
   emailTo?: string;
+  /** Issue #2545: the scheduled market screen's delivery envelope,
+   *  carried on the manual request so a one-shot run delivers like
+   *  the scheduled run — the same field names the schedule payload's
+   *  deliveryFields carry (marketScreenScheduleCriteriaSchema).
+   *  Envelope only, split out here; never forwarded into the engine
+   *  filter. The route stamps them onto the run's follow-up outcome;
+   *  pushToSlack present = the caller made an explicit delivery
+   *  selection (the outcome then carries a channel allowlist). */
+  pushToSlack?: boolean;
+  slackChannel?: string;
+  webhookUrl?: string;
+  /** Issue #2545: include the run's generated report artifacts
+   *  (PDF/XLSX/CSV) in deliveries. Absent/true = today's behavior
+   *  (the run always generates its report; deliveries attach it);
+   *  false drops the artifacts from the DELIVERY projection only —
+   *  the run record and its stored report are untouched. */
+  generatePdf?: boolean;
 }
 
 const stockScreenRequestSchema = z.strictObject({
@@ -184,12 +201,16 @@ const stockScreenRequestSchema = z.strictObject({
   universe: universeNameSchema.optional(),
   minScore: fin().optional(),
   emailTo: z.string().optional(),
+  pushToSlack: z.boolean().optional(),
+  slackChannel: z.string().optional(),
+  webhookUrl: z.string().optional(),
+  generatePdf: z.boolean().optional(),
 });
 
 export function parseStockScreenRequest(input: unknown): ScreeningValidationResult<StockScreenRequest> {
   const parsed = parseWith("stock screen request", stockScreenRequestSchema, input);
   if (!parsed.ok) return parsed;
-  const { universe, minScore, emailTo, ...filters } = parsed.value as Record<string, unknown>;
+  const { universe, minScore, emailTo, pushToSlack, slackChannel, webhookUrl, generatePdf, ...filters } = parsed.value as Record<string, unknown>;
   return {
     ok: true,
     value: {
@@ -197,6 +218,10 @@ export function parseStockScreenRequest(input: unknown): ScreeningValidationResu
       universe: (universe as string | undefined) ?? "NASDAQ100",
       ...(minScore !== undefined ? { minScore: minScore as number } : {}),
       ...(emailTo !== undefined ? { emailTo: emailTo as string } : {}),
+      ...(pushToSlack !== undefined ? { pushToSlack: pushToSlack as boolean } : {}),
+      ...(slackChannel !== undefined ? { slackChannel: slackChannel as string } : {}),
+      ...(webhookUrl !== undefined ? { webhookUrl: webhookUrl as string } : {}),
+      ...(generatePdf !== undefined ? { generatePdf: generatePdf as boolean } : {}),
     },
   };
 }

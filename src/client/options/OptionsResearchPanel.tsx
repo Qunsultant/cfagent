@@ -24,6 +24,7 @@ import { LlmStrategyEvalModal, type StrategyToEvaluate } from "./LlmStrategyEval
 import { LlmOptionsIdeasPanel } from "./LlmOptionsIdeasPanel";
 import { EtapiConfigModal } from "./EtapiConfigModal";
 import { AutonomousOptionsRuns } from "./AutonomousOptionsRuns";
+import { ScheduledOptionsRunForm } from "./ScheduledOptionsRunForm";
 import { RawContractsScreener } from "./RawContractsScreener";
 import { RiskAnalysisModal } from "./RiskAnalysisModal";
 import { ThreeWayComparison, type ThreeWayComparisonData } from "./ThreeWayComparison";
@@ -1184,6 +1185,11 @@ export function OptionsResearchPanel({ activeEnv, userLogin, onPreviewTrade, onJ
               </Button>
             )}
           </div>
+          {/* Issue #2545: the scheduled job's full parameter set as a
+              one-shot run, hosted here in the schedules mode — the
+              Options Research one-shot surfaces could not reproduce
+              the scheduled "Options Market Screen" run before. */}
+          <ScheduledOptionsRunForm activeEnv={activeEnv} userLogin={userLogin} />
           {/* Issue #223: the persisted autonomous runs (hourly scheduled
               scans + manual runs) — the record of what the scheduler
               actually produced. */}
