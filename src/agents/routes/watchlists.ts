@@ -27,6 +27,10 @@
 
 import { unauthenticatedResponse } from "./routeIdentity";
 import { ETradeService } from "../../services/etrade";
+import {
+  brokerFailureResponse,
+  genericBrokerFailureResponse,
+} from "./brokerCodedError";
 import type { Env } from "../../types";
 import type { DatabaseORM } from "../../orm";
 
@@ -80,14 +84,13 @@ export async function handleWatchlistsRoutes(
           // exact previous 200 payload; a non-empty merged list (e.g.
           // local durable watchlists while the remote read failed) is
           // real data and is served exactly as before.
-          const upstreamError = etrade.getLastError();
-          if (upstreamError) {
-            return Response.json({ error: upstreamError }, { status: 502 });
-          }
+          // Issue #2573: coded form, not the raw lastError string.
+          const codedFailure = brokerFailureResponse(etrade, "watchlists");
+          if (codedFailure) return codedFailure;
         }
         return Response.json({ count: watchlists.length, watchlists });
       } catch (err) {
-        return Response.json({ error: err instanceof Error ? err.message : "Failed to retrieve watchlists" }, { status: 500 });
+        return genericBrokerFailureResponse();
       }
     }
 
@@ -104,15 +107,14 @@ export async function handleWatchlistsRoutes(
           // upstream failure (expired session, missing credentials),
           // not a missing watchlist — 502 naming the cause. Only a
           // genuine not-found (no recorded error) keeps the 404.
-          const upstreamError = etrade.getLastError();
-          if (upstreamError) {
-            return Response.json({ error: upstreamError }, { status: 502 });
-          }
+          // Issue #2573: coded form, not the raw lastError string.
+          const codedFailure = brokerFailureResponse(etrade, "watchlists");
+          if (codedFailure) return codedFailure;
           return Response.json({ error: `Watchlist '${id}' not found` }, { status: 404 });
         }
         return Response.json(details);
       } catch (err) {
-        return Response.json({ error: err instanceof Error ? err.message : "Failed to get watchlist details" }, { status: 500 });
+        return genericBrokerFailureResponse();
       }
     }
 

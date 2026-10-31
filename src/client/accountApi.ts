@@ -17,10 +17,48 @@ import { apiFetch } from "./apiFetch";
 
 export type { ETradeAlert, ETradeAlertDetails, ETradeCancelOrderResult, ETradeRemoteOrder, ETradeTransaction, ETradeTransactionDetails, ETradeWatchlist };
 
+/**
+ * Issue #2573: the client-side end of the coded broker-error contract.
+ *
+ * The broker routes now answer a failure with the coded form
+ * `{ code, message, retryable }` (see
+ * `src/agents/routes/brokerCodedError.ts`). These helpers render
+ * exactly that coded message — `"[CODE] business message"` — and
+ * NEVER the server's `error` field, which used to carry the raw
+ * broker `lastError` string (raw upstream body included, e.g.
+ * `oauth_problem=...`). A response without a coded payload falls
+ * back to the generic coded message below, not to the raw string
+ * and not to a bare HTTP status. That fallback's code and wording
+ * match the `FAILURE_ETRADE_UPSTREAM` catalog entry verbatim; this
+ * module does not resolve codes itself — the catalog remains the
+ * single resolver, server-side.
+ *
+ * Consequence for `AccountPanels.tsx`: every error it renders from
+ * these helpers is already a coded message, so assigning
+ * `err.message` into an error div is safe here — the translation
+ * happens in this module, before the panel ever sees the string.
+ */
+export const ACCOUNT_PANEL_FALLBACK_MESSAGE =
+  "[FAILURE_ETRADE_UPSTREAM] Broker data is temporarily unavailable. Please try again, and reconnect your E*TRADE account if the problem persists.";
+
+type CodedErrorBody = { code?: string; message?: string; error?: string };
+
+function codedErrorFromBody(data: CodedErrorBody): Error {
+  if (data.code && data.message) {
+    const err = new Error(`[${data.code}] ${data.message}`);
+    (err as Error & { code?: string }).code = data.code;
+    return err;
+  }
+  // No coded payload (legacy/uncoded error, validation error, or a
+  // body that failed to parse): generic coded message, never the
+  // raw `error` field.
+  return new Error(ACCOUNT_PANEL_FALLBACK_MESSAGE);
+}
+
 async function getJson<T>(path: string, env: string): Promise<T> {
   const resp = await apiFetch(path, { headers: { "x-environment": env } });
-  const data = (await resp.json().catch(() => ({}))) as T & { error?: string };
-  if (!resp.ok) throw new Error(data.error || `Request failed (${resp.status})`);
+  const data = (await resp.json().catch(() => ({}))) as T & CodedErrorBody;
+  if (!resp.ok) throw codedErrorFromBody(data);
   return data;
 }
 
@@ -30,8 +68,8 @@ async function sendJson<T>(path: string, env: string, method: string, body?: unk
     headers: { "Content-Type": "application/json", "x-environment": env },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  const data = (await resp.json().catch(() => ({}))) as T & { error?: string };
-  if (!resp.ok) throw new Error(data.error || `Request failed (${resp.status})`);
+  const data = (await resp.json().catch(() => ({}))) as T & CodedErrorBody;
+  if (!resp.ok) throw codedErrorFromBody(data);
   return data;
 }
 

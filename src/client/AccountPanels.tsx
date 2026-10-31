@@ -9,6 +9,13 @@
  * cancel) are two-step inline confirms — nothing destructive fires on a
  * single click; the unread-alert count is reported up so the app nav can
  * badge the Portfolio tab.
+ *
+ * Error messages (#2573): the loaders below render `err.message`
+ * because `accountApi.ts` already translates every broker failure
+ * into its coded form (`"[CODE] business message"`) or the generic
+ * coded fallback — the raw broker error string never reaches this
+ * panel. Do not reintroduce a path that renders a server `error`
+ * field directly.
  */
 
 import { useCallback, useEffect, useState } from "react";
