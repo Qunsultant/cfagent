@@ -139,11 +139,11 @@ jobs:
               VERIFIED="true"
               RUN_URL="https://github.com/$GITHUB_REPOSITORY/actions/runs/$MATCH_RUN"
               echo "Tree $TREE_SHA already verified within 24h by full CI run #$MATCH_RUN ($RUN_URL) — skipping redundant test execution."
-              cat <<EOF >> "$GITHUB_STEP_SUMMARY"
-### ⚡ Tree-Hash CI Deduplication (#2497, #2499)
-- **Git tree SHA (\`HEAD^{tree}\`):** \`$TREE_SHA\`
-- **Verified by full anchor run:** [#$MATCH_RUN]($RUN_URL) (\`Fast gates\` + 4/4 \`Tests\` shards executed & passed within 24h)
-EOF
+              {
+                echo "### ⚡ Tree-Hash CI Deduplication (#2497, #2499)"
+                echo "- **Git tree SHA (\`HEAD^{tree}\`):** \`$TREE_SHA\`"
+                echo "- **Verified by full anchor run:** [#$MATCH_RUN]($RUN_URL) (\`Fast gates\` + 4/4 \`Tests\` shards executed & passed within 24h)"
+              } >> "$GITHUB_STEP_SUMMARY"
             fi
           fi
 
