@@ -174,6 +174,19 @@ export async function handleMcpChatNlqRoutes(
         // (src/mcps/openaimp/handler); this shell keeps owning the
         // route context — identity, audit, job ports — exactly as
         // before. The GET discovery document above is unchanged.
+        // Issue #2496: the acting-login / traceparent carriers for
+        // this surface. The x-user-login header is Worker-verified
+        // at the edge — src/server.ts overwrites it from the
+        // session / API key before forwarding, and the in-instance
+        // SDK MCP loopback (src/agents/orchestrator/meshMcpClient.ts)
+        // stamps it from the turn stash under the same discipline;
+        // both arrive here indistinguishably, by construction. The
+        // handler spreads the resolvers into the sync-path tool
+        // context and stamps their values server-side into queued
+        // mcp.tool payloads. No header → no carrier → door commands
+        // still fail closed.
+        const headerLogin = request.headers.get("x-user-login")?.trim() || undefined;
+        const headerTraceparent = request.headers.get("traceparent") ?? undefined;
         return await handleOpenaimpMcpHttpRequest(request, {
           env: ctx.env,
           orm,
@@ -184,6 +197,8 @@ export async function handleMcpChatNlqRoutes(
           // `unknown` (fail closed) — the gate never defaults an
           // external call to system.
           principal: resolveMcpPrincipalFromHeaders(request.headers),
+          actingLogin: () => headerLogin,
+          traceparent: () => headerTraceparent,
           permissionDecisionSink: createObservabilitySink(ctx.env),
           scopedNlqModes: ctx.scopedNlqModes,
           scopedHttpDeliveryModes: ctx.scopedHttpDeliveryModes,

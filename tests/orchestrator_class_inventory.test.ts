@@ -232,11 +232,17 @@ const ORCH = "agents/orchestrator.ts";
  *  2760 and bytes rise to 129_250.
  *  Issue #2530 adds the screener-interpretation audit door
  *  (recordWorkflowScreenInterpretationAudit — one recordAudit
- *  delegation, no logic in the class) — measured 2,784 lines /
- *  130,352 B, so budget lines rise to 2795 and bytes rise to
- *  131_250. */
-const BUDGET_LINES = 2795;
-const BUDGET_BYTES = 131_250;
+ *  delegation, no logic in the class).
+ *  Issue #2496 wires the SDK-provided MCP client consumption
+ *  (one import + the waitForMcpConnections field + the
+ *  ensureMeshMcpDiscovery delegation + the onStart/portBeforeTurn
+ *  call sites + the CHAT_NLQ_MODE gate composition; the client
+ *  logic itself lives in orchestrator/meshMcpClient.ts, the
+ *  class gains no logic surface) — measured 2,868 lines /
+ *  137,257 B on the rebased tree, so budget lines rise to 2885
+ *  and bytes rise to 138_000. */
+const BUDGET_LINES = 2885;
+const BUDGET_BYTES = 138_000;
 
 const count = (haystack: string, needle: string) =>
   haystack.split(needle).length - 1;

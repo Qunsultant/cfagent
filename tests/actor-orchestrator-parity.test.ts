@@ -29,6 +29,9 @@ vi.mock("agents", () => ({
 import { ActorOrchestratorHarness, resolveMasMaxSteps, stubMcpContext } from "./actor-orchestrator-harness";
 import { legacyRowToSessionMessage } from "../src/actors/actorPorts";
 import { createAgentMcpTools } from "../src/agents/mcpAdapter";
+import { chatNlqTurnGate } from "../src/agents/orchestrator/meshMcpClient";
+import { handlerDispatch, makeDiscoveredPlatformTools } from "./mesh-mcp-testkit";
+import { MockSqlStorage } from "./mock-sql";
 import { createMAS } from "../src/agents/mas";
 import { McpToolFactory } from "../src/mcps/openaimp/commands";
 import { getWorkersAIModel, resolveAiModelName } from "../src/agents/model";
@@ -69,7 +72,7 @@ describe("#658 R1 — the preserved contract surface", () => {
   });
 });
 
-describe("#658 R2 — tool surface parity (createAgentMcpTools)", () => {
+describe("#658 R2 — tool surface parity (native set + runtime discovery)", () => {
   const env = { AI: {} };
   const liveNames = Object.keys(createAgentMcpTools(stubMcpContext(env as never))).sort();
 
@@ -78,33 +81,42 @@ describe("#658 R2 — tool surface parity (createAgentMcpTools)", () => {
     expect(harnessNames).toEqual(liveNames);
   });
 
-  it("every canonical McpToolFactory command is present by name", () => {
+  it("every canonical McpToolFactory command is present by name", async () => {
     const canonical = McpToolFactory.getAllTools().map((c) => c.name);
     expect(canonical.length).toBeGreaterThan(0);
-    // #2488 exception, by owner direction: execute_nlq stays
-    // registered in the catalog but is flagged off in the turn
-    // (CHAT_NLQ_MODE, built-in default off), so it is the ONE
-    // canonical command the default turn set does not carry.
+    // #2496: catalog commands reach the turn by runtime DISCOVERY
+    // from the openaimp server, under tool_openaimp_<name> keys;
+    // the native set (liveNames) adapts none of them.
+    const discovered = makeDiscoveredPlatformTools({
+      dispatch: handlerDispatch(),
+      resolveActingLogin: () => "parity",
+      sql: new MockSqlStorage(),
+    });
+    const ensured = await discovered.ensure();
+    expect(ensured.ready).toBe(true);
+    const discoveredNames = Object.keys(discovered.aiTools());
     for (const name of canonical) {
-      if (name === "execute_nlq") continue;
-      expect(liveNames).toContain(name);
+      expect(discoveredNames).toContain(`tool_openaimp_${name}`);
+      expect(liveNames).not.toContain(name);
     }
-    expect(liveNames).not.toContain("execute_nlq");
-    // With the switch on, the parity is exact again — the
-    // pre-#2488 turn set, verbatim.
-    const onNames = Object.keys(
-      createAgentMcpTools(stubMcpContext({ AI: {}, CHAT_NLQ_MODE: "on" } as never)),
-    );
-    for (const name of canonical) expect(onNames).toContain(name);
+    // #2488 exception, by owner direction: execute_nlq stays
+    // registered in the catalog and IS discovered, but the
+    // CHAT_NLQ_MODE gate (built-in default off) excludes it from
+    // the model's usable set — the ONE canonical command the
+    // default turn cannot call.
+    const gate = chatNlqTurnGate({
+      toolNames: [...liveNames, ...discoveredNames],
+      context: { env: {} as never },
+      audit: () => {},
+    });
+    expect(gate.activeTools).toBeDefined();
+    expect(gate.activeTools).not.toContain("tool_openaimp_execute_nlq");
+    expect(gate.activeTools).toContain("tool_openaimp_run_stock_screen");
   });
 
   it("the documented aliases and adapter-added tools are present", () => {
+    // The adapter-added native tools remain in the live set.
     for (const name of [
-      "searchKnowledge",
-      "queryPlatformKnowledge",
-      "getPlatformCapabilities",
-      "draftPayment",
-      "confirmDraft",
       "createTaskDraft",
       "rememberFact",
       "recallFacts",
@@ -114,9 +126,21 @@ describe("#658 R2 — tool surface parity (createAgentMcpTools)", () => {
     ]) {
       expect(liveNames).toContain(name);
     }
+    // The catalog camelCase aliases were retired in #2496 with
+    // the hand-wired turn layer; the discovered keys are the
+    // only catalog surface now.
+    for (const name of [
+      "searchKnowledge",
+      "queryPlatformKnowledge",
+      "getPlatformCapabilities",
+      "draftPayment",
+      "confirmDraft",
+    ]) {
+      expect(liveNames).not.toContain(name);
+    }
   });
 
-  it("the MAS six (spike correction, quantified): createMAS names are a subset of the live set", () => {
+  it("the MAS six (spike correction, quantified): createMAS's surface vs the live set after #2496", () => {
     const mas = createMAS({
       env: {} as never,
       sessionId: "parity",
@@ -125,6 +149,7 @@ describe("#658 R2 — tool surface parity (createAgentMcpTools)", () => {
       audit: () => {},
     });
     const masNames = Object.keys(mas).sort();
+    // createMAS's own surface is unchanged.
     expect(masNames).toEqual([
       "confirmDraft",
       "createTaskDraft",
@@ -133,7 +158,16 @@ describe("#658 R2 — tool surface parity (createAgentMcpTools)", () => {
       "rememberFact",
       "searchKnowledge",
     ]);
-    for (const name of masNames) expect(liveNames).toContain(name);
+    // Three of the six are the turn's native helpers and remain
+    // in the live set; the other three were the retired catalog
+    // aliases — createMAS keeps its own surface, but those names
+    // no longer reach the chat turn (#2496).
+    for (const name of ["createTaskDraft", "rememberFact", "recallFacts"]) {
+      expect(liveNames).toContain(name);
+    }
+    for (const name of ["confirmDraft", "draftPayment", "searchKnowledge"]) {
+      expect(liveNames).not.toContain(name);
+    }
   });
 });
 

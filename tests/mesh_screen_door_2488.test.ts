@@ -10,21 +10,33 @@
  * directly and missed it).
  *
  * Acceptance rule for THIS suite (the #2487 lesson): the screen
- * tests drive the path a model actually invokes — turn tool set
- * (createTurnTools) → McpAgentToolAdapter queue (capability
- * mcp.tool, acting login + traceparent stamped server-side) →
- * the real executor entry (executeMCPTool with the async-job
- * executor's context shape) → the run_stock_screen door command
- * → the mesh screen door service → ScreenerScreenWorkflow start.
- * Fakes sit only at binding seams (the WorkflowPort, the D1
- * job-history read, the instance SQL storage, the paid-path
- * seams) — the same seams the S8/S10/S18 harnesses fake, one
- * level further out. No test calls the door service as its
- * primary drive.
+ * tests drive the path a model actually invokes — since #2496
+ * that is the DISCOVERED turn tool (the Agents SDK MCP client's
+ * tool_openaimp_run_stock_screen, discovered over the production
+ * loopback carrier into the instance's real /mcp route) → the
+ * openaimp handler's queue (capability mcp.tool, acting login +
+ * traceparent stamped server-side) → the real executor entry
+ * (executeMCPTool with the async-job executor's context shape) →
+ * the run_stock_screen door command → the mesh screen door
+ * service → ScreenerScreenWorkflow start. Before #2496 the first
+ * leg was the McpAgentToolAdapter queue; the queue/executor/door
+ * legs are unchanged. Fakes sit only at binding seams (the
+ * WorkflowPort, the D1 job-history read, the instance SQL
+ * storage, the paid-path seams) — the same seams the S8/S10/S18
+ * harnesses fake, one level further out. No test calls the door
+ * service as its primary drive.
  */
 import { describe, expect, it, vi } from "vitest";
 import { createTurnTools, type ChatTurnHelpersContext } from "../src/agents/orchestrator/chatTurnHelpers";
-import { createAgentMcpTools } from "../src/agents/mcpAdapter";
+import {
+  handleMcpChatNlqRoutes,
+  type McpChatNlqRouteContext,
+} from "../src/agents/routes/mcpChatNlq";
+import {
+  chatNlqTurnGate,
+  OPENAIMP_MCP_TOOL_PREFIX,
+} from "../src/agents/orchestrator/meshMcpClient";
+import { makeDiscoveredPlatformTools } from "./mesh-mcp-testkit";
 import { executeMCPTool } from "../src/mcps/openaimp";
 import { McpToolFactory } from "../src/mcps/openaimp/commands";
 import { MCP_TOOL_SCOPES } from "../src/mcps/openaimp/mcpPermissionPorts";
@@ -59,7 +71,6 @@ import type {
   WorkflowJobCommand,
   WorkflowPort,
 } from "../src/workflows/workflowPorts";
-import type { McpToolContext } from "../src/patterns/interfaces";
 import type { AsyncJobSubmission, Env } from "../src/types";
 import { MockSqlStorage } from "./mock-sql";
 
@@ -181,19 +192,66 @@ function makeScreenHarness(opts: {
 /* ------------------------------------------------------------------ */
 
 interface TurnDrive {
-  tools: ReturnType<typeof createTurnTools>;
+  /** Think's merged composition: native getTools() set + the discovered set. */
+  tools: Record<string, unknown>;
   submitted: AsyncJobSubmission[];
   audits: Array<{ type: string; agent: unknown; payload: Record<string, unknown> }>;
 }
 
-function makeTurnDrive(opts: {
+/**
+ * Build the turn drive on the production composition (#2496): a
+ * real SDK MCPClientManager discovers the catalog over the
+ * production loopback carrier into the real /mcp route (whose
+ * submitAsyncJob captures the queued jobs), and the turn's tool
+ * set is Think's merge — the native createTurnTools set spread
+ * with the manager's discovered set.
+ */
+async function makeTurnDrive(opts: {
   login?: string;
   traceparent?: string;
   env?: Record<string, unknown>;
   sql: MockSqlStorage;
-}): TurnDrive {
+}): Promise<TurnDrive> {
   const submitted: AsyncJobSubmission[] = [];
   const audits: TurnDrive["audits"] = [];
+  const routeCtx: McpChatNlqRouteContext = {
+    getOrm: () => ({}) as never,
+    getStorageSql: () => opts.sql,
+    getStorage: () => ({ sql: opts.sql }) as never,
+    env: (opts.env ?? {}) as Env,
+    audit: (type, agent, payload) => {
+      audits.push({ type, agent, payload });
+    },
+    submitAsyncJob: async (job) => {
+      submitted.push(job);
+      return { jobId: "job-2488-1", status: "queued" as const, statusUrl: "/api/jobs/job-2488-1" };
+    },
+    getAsyncJob: () => undefined,
+    listAsyncJobs: () => [],
+    extractMessageText: () => "",
+    getMessages: async () => [],
+    recordMessage: () => {},
+    runAgenticChatTurn: async () => {
+      throw new Error("not used by the /mcp drive");
+    },
+    buildChatErrorFallback: async () => "",
+    nlqSchedulingPort: () => ({}) as never,
+  };
+  const discovered = makeDiscoveredPlatformTools({
+    dispatch: async (request) => {
+      const url = new URL(request.url);
+      const response = await handleMcpChatNlqRoutes(request, url, url.pathname, "session-2488", routeCtx);
+      if (!response) throw new Error(`route did not handle ${url.pathname}`);
+      return response;
+    },
+    resolveActingLogin: () => opts.login,
+    resolveTraceparent: () => opts.traceparent,
+    sql: opts.sql,
+  });
+  const ensured = await discovered.ensure();
+  if (!ensured.ready) {
+    throw new Error(`mesh discovery failed in the #2488 drive: ${ensured.error ?? "unknown"}`);
+  }
   const ctx: ChatTurnHelpersContext = {
     env: (opts.env ?? {}) as Env,
     ensureTables: () => opts.sql as never,
@@ -214,13 +272,18 @@ function makeTurnDrive(opts: {
     getMessages: async () => [],
     activeTurnMetadata: null,
   };
-  return { tools: createTurnTools(ctx, "req-2488"), submitted, audits };
+  const tools = {
+    ...(createTurnTools(ctx, "req-2488") as Record<string, unknown>),
+    ...discovered.aiTools(),
+  };
+  return { tools, submitted, audits };
 }
 
 /**
- * Queue one tool call through the turn's tool set, then execute
- * the queued job through the REAL executor entry with the
- * async-job executor's context shape (asyncJobs.ts mcp.tool
+ * Queue one tool call through the turn's tool set — since #2496
+ * the DISCOVERED tool under its tool_openaimp_<name> key — then
+ * execute the queued job through the REAL executor entry with
+ * the async-job executor's context shape (asyncJobs.ts mcp.tool
  * branch: system principal, acting identity + traceparent
  * re-supplied from the job payload, the instance's storage).
  */
@@ -230,9 +293,10 @@ async function driveTurnToolToExecution(
   args: Record<string, unknown>,
   exec: { sql: MockSqlStorage; seams?: MeshScreenDoorSeams; env?: Record<string, unknown> },
 ): Promise<unknown> {
-  const tool = (drive.tools as Record<string, { execute?: (input: never) => Promise<unknown> }>)[toolName];
-  expect(tool, `turn tool ${toolName}`).toBeDefined();
-  await tool.execute!(args as never);
+  const key = `${OPENAIMP_MCP_TOOL_PREFIX}${toolName}`;
+  const tool = (drive.tools as Record<string, { execute?: (input: never, opts: never) => Promise<unknown> }>)[key];
+  expect(tool, `turn tool ${key}`).toBeDefined();
+  await tool.execute!(args as never, { toolCallId: "call-2488", messages: [] } as never);
   expect(drive.submitted).toHaveLength(1);
   const job = drive.submitted[0];
   expect(job.capability).toBe("mcp.tool");
@@ -276,48 +340,51 @@ describe("issue #2488 — CHAT_NLQ_MODE switch resolution", () => {
     expect(CHAT_NLQ_MODE_SWITCH).toBe("CHAT_NLQ_MODE");
   });
 
-  it("excludes execute_nlq from the turn tool set by default — the tool stays in the catalog", () => {
-    const tools = createAgentMcpTools({
-      env: {} as Env,
-      orm: {} as never,
-      sessionId: "s",
-      audit: () => {},
-    } as McpToolContext);
-    expect(tools.execute_nlq).toBeUndefined();
-    expect(tools.run_stock_screen).toBeDefined();
-    // Registered and wired — just not offered to the turn's model.
+  // Since #2496 the flag's mechanism is the turn gate
+  // (chatNlqTurnGate over Think's activeTools): the discovered
+  // set always carries execute_nlq — the flag decides whether the
+  // MODEL may call it. The native tool set never carries it.
+  it("excludes execute_nlq from the turn's usable set by default (the #2496 gate) — the tool stays in the catalog", async () => {
+    const drive = await makeTurnDrive({ login: LOGIN, sql: new MockSqlStorage() });
+    // Discovered and wired — just not callable by the model.
+    expect(drive.tools["tool_openaimp_execute_nlq"]).toBeDefined();
     expect(McpToolFactory.getTool("execute_nlq")).toBeDefined();
+    const gate = chatNlqTurnGate({
+      toolNames: Object.keys(drive.tools),
+      context: { env: {} as Env },
+      audit: () => {},
+    });
+    expect(gate.activeTools).toBeDefined();
+    expect(gate.activeTools).not.toContain("tool_openaimp_execute_nlq");
+    expect(gate.activeTools).toContain("tool_openaimp_run_stock_screen");
   });
 
   it("offers execute_nlq to the turn when the switch is on (env or scoped carrier)", () => {
-    const viaEnv = createAgentMcpTools({
-      env: { CHAT_NLQ_MODE: "on" } as Env,
-      orm: {} as never,
-      sessionId: "s",
+    const toolNames = ["tool_openaimp_execute_nlq", "tool_openaimp_run_stock_screen"];
+    const viaEnv = chatNlqTurnGate({
+      toolNames,
+      context: { env: { CHAT_NLQ_MODE: "on" } as Env },
       audit: () => {},
-    } as McpToolContext);
-    expect(viaEnv.execute_nlq).toBeDefined();
-    const viaCarrier = createAgentMcpTools({
-      env: {} as Env,
-      orm: {} as never,
-      sessionId: "s",
+    });
+    expect(viaEnv.activeTools).toBeUndefined();
+    const viaCarrier = chatNlqTurnGate({
+      toolNames,
+      context: { env: {} as Env, scopedChatNlqModes: { user: "on" } },
       audit: () => {},
-      scopedChatNlqModes: { user: "on" },
-    } as McpToolContext);
-    expect(viaCarrier.execute_nlq).toBeDefined();
+    });
+    expect(viaCarrier.activeTools).toBeUndefined();
   });
 
   it("fails closed + audits chat_nlq.config_error on an invalid switch value", () => {
     const audits: Array<{ type: string }> = [];
-    const tools = createAgentMcpTools({
-      env: { CHAT_NLQ_MODE: "banana" } as Env,
-      orm: {} as never,
-      sessionId: "s",
+    const gate = chatNlqTurnGate({
+      toolNames: ["tool_openaimp_execute_nlq", "tool_openaimp_run_stock_screen"],
+      context: { env: { CHAT_NLQ_MODE: "banana" } as Env },
       audit: (type: string) => {
         audits.push({ type });
       },
-    } as unknown as McpToolContext);
-    expect(tools.execute_nlq).toBeUndefined();
+    });
+    expect(gate.activeTools).not.toContain("tool_openaimp_execute_nlq");
     expect(audits.map((a) => a.type)).toContain("chat_nlq.config_error");
   });
 });
@@ -341,7 +408,7 @@ describe("issue #2488 — run_stock_screen catalog registration", () => {
 describe("issue #2488 — chat screen through the turn tool path (free path)", () => {
   it("queues as mcp.tool with server-stamped identity, executes through the executor, starts the workflow, returns the read-back", async () => {
     const h = makeScreenHarness();
-    const drive = makeTurnDrive({ login: LOGIN, traceparent: h.traceparent, sql: h.sql });
+    const drive = await makeTurnDrive({ login: LOGIN, traceparent: h.traceparent, sql: h.sql });
     const result = (await driveTurnToolToExecution(
       drive,
       "run_stock_screen",
@@ -393,7 +460,7 @@ describe("issue #2488 — chat screen through the turn tool path (free path)", (
 
   it("defaults the universe to NASDAQ100 (the route default) when the model omits it", async () => {
     const h = makeScreenHarness();
-    const drive = makeTurnDrive({ login: LOGIN, sql: h.sql });
+    const drive = await makeTurnDrive({ login: LOGIN, sql: h.sql });
     const result = (await driveTurnToolToExecution(drive, "run_stock_screen", {}, { sql: h.sql, seams: h.seams })) as {
       success: boolean;
       universe: string;
@@ -403,18 +470,24 @@ describe("issue #2488 — chat screen through the turn tool path (free path)", (
     expect(h.startedCommands[0].jobId.startsWith("screener:chat:NASDAQ100:")).toBe(true);
   });
 
-  it("refuses with identity_required and zero starts when the turn carries no acting identity", async () => {
+  it("refuses with mesh_mcp_identity_required and zero starts when the turn carries no acting identity", async () => {
     const h = makeScreenHarness();
-    const drive = makeTurnDrive({ login: undefined, sql: h.sql });
+    const drive = await makeTurnDrive({ login: undefined, sql: h.sql });
+    // #2496: the refusal moved one leg earlier — the SDK loopback
+    // carrier refuses the call before anything queues (the
+    // execution-layer identity_required refusal still stands
+    // behind it, pinned in the #2496 suite and by the synthetic
+    // identity test below).
     await expect(
       driveTurnToolToExecution(drive, "run_stock_screen", { universe: "NASDAQ100" }, { sql: h.sql, seams: h.seams }),
-    ).rejects.toMatchObject({ code: "identity_required" });
+    ).rejects.toThrow(/mesh_mcp_identity_required/);
+    expect(drive.submitted).toHaveLength(0);
     expect(h.startedCommands).toHaveLength(0);
   });
 
   it("refuses the retired synthetic identity exactly like a missing one", async () => {
     const h = makeScreenHarness();
-    const drive = makeTurnDrive({ login: "default", sql: h.sql });
+    const drive = await makeTurnDrive({ login: "default", sql: h.sql });
     await expect(
       driveTurnToolToExecution(drive, "run_stock_screen", { universe: "NASDAQ100" }, { sql: h.sql, seams: h.seams }),
     ).rejects.toMatchObject({ code: "identity_required" });
@@ -423,7 +496,7 @@ describe("issue #2488 — chat screen through the turn tool path (free path)", (
 
   it("fails with door_unavailable when the workflow port is unavailable — no direct-agent fallback exists", async () => {
     const h = makeScreenHarness({ workflowPort: null });
-    const drive = makeTurnDrive({ login: LOGIN, sql: h.sql });
+    const drive = await makeTurnDrive({ login: LOGIN, sql: h.sql });
     await expect(
       driveTurnToolToExecution(drive, "run_stock_screen", { universe: "NASDAQ100" }, { sql: h.sql, seams: h.seams }),
     ).rejects.toMatchObject({ code: "door_unavailable" });
@@ -438,7 +511,7 @@ describe("issue #2488 — chat screen through the turn tool path (free path)", (
       status: async () => null,
     };
     const h = makeScreenHarness({ workflowPort: throwingPort });
-    const drive = makeTurnDrive({ login: LOGIN, sql: h.sql });
+    const drive = await makeTurnDrive({ login: LOGIN, sql: h.sql });
     await expect(
       driveTurnToolToExecution(drive, "run_stock_screen", { universe: "NASDAQ100" }, { sql: h.sql, seams: h.seams }),
     ).rejects.toMatchObject({ code: "door_unavailable" });
@@ -446,7 +519,7 @@ describe("issue #2488 — chat screen through the turn tool path (free path)", (
 
   it("fails with door_unavailable on the production context shape (no seams, unbound env)", async () => {
     const h = makeScreenHarness();
-    const drive = makeTurnDrive({ login: LOGIN, sql: h.sql });
+    const drive = await makeTurnDrive({ login: LOGIN, sql: h.sql });
     await expect(
       driveTurnToolToExecution(drive, "run_stock_screen", { universe: "NASDAQ100" }, { sql: h.sql }),
     ).rejects.toMatchObject({ code: "door_unavailable" });
@@ -637,7 +710,7 @@ function makePaidHarness(opts: { budgetVerdict?: { allowed: boolean; reason?: st
 describe("issue #2488 — chat paid screen through the turn tool path (monetization on)", () => {
   it("budget check first, one PaymentWorkflow start, screener started by the payment flow, read-back returned", async () => {
     const h = makePaidHarness();
-    const drive = makeTurnDrive({ login: LOGIN, sql: h.sql });
+    const drive = await makeTurnDrive({ login: LOGIN, sql: h.sql });
     const result = (await driveTurnToolToExecution(
       drive,
       "run_stock_screen",
@@ -658,7 +731,7 @@ describe("issue #2488 — chat paid screen through the turn tool path (monetizat
 
   it("a budget denial refuses before any start — zero payment starts, zero screener starts, no free fallback", async () => {
     const h = makePaidHarness({ budgetVerdict: { allowed: false, reason: "daily cap exceeded" } });
-    const drive = makeTurnDrive({ login: LOGIN, sql: h.sql });
+    const drive = await makeTurnDrive({ login: LOGIN, sql: h.sql });
     await expect(
       driveTurnToolToExecution(drive, "run_stock_screen", { universe: "NASDAQ100" }, { sql: h.sql, seams: h.seams }),
     ).rejects.toMatchObject({ code: "budget_denied" });
@@ -682,7 +755,10 @@ describe("issue #2488 — prompt steering", () => {
   });
 
   it("steers universe screens to run_stock_screen and describes etrade_market_scan as the listings filter scan", () => {
-    expect(prompt).toContain("'run_stock_screen'");
+    // #2496: steering names the DISCOVERED tool keys the model
+    // actually sees (tool_openaimp_<catalog name>).
+    expect(prompt).toContain("'tool_openaimp_run_stock_screen'");
+    expect(prompt).not.toContain("'run_stock_screen'");
     expect(prompt).toContain("listings");
     // The pre-#2488 steering sentence is gone: screens are no
     // longer routed to the listings scan.
@@ -697,6 +773,12 @@ describe("issue #2488 — prompt steering", () => {
 
 function refusalCodeOf(err: unknown): string {
   if (err instanceof MeshDoorError) return err.code;
+  // #2496: an unidentified turn's discovered call is refused at
+  // the SDK loopback carrier before it queues; the refusal token
+  // rides the MCP error's message.
+  if (err instanceof Error && err.message.includes("mesh_mcp_identity_required")) {
+    return "mesh_mcp_identity_required";
+  }
   return "unexpected_error";
 }
 
@@ -710,7 +792,7 @@ describe("issue #2488 — golden tasks for the door surface", () => {
       {
         task: goldenTask("door-chat-screen-run")!,
         drive: async () => {
-          const drive = makeTurnDrive({ login: LOGIN, traceparent: h.traceparent, sql: h.sql });
+          const drive = await makeTurnDrive({ login: LOGIN, traceparent: h.traceparent, sql: h.sql });
           const result = (await driveTurnToolToExecution(
             drive,
             "run_stock_screen",
@@ -744,7 +826,7 @@ describe("issue #2488 — golden tasks for the door surface", () => {
         task: goldenTask("door-chat-screen-identity-refusal")!,
         drive: async () => {
           const h = makeScreenHarness();
-          const drive = makeTurnDrive({ login: undefined, sql: h.sql });
+          const drive = await makeTurnDrive({ login: undefined, sql: h.sql });
           try {
             await driveTurnToolToExecution(drive, "run_stock_screen", { universe: "NASDAQ100" }, { sql: h.sql, seams: h.seams });
             return { outcome: "error" as const, facts: {}, detail: "door did not refuse" };
@@ -761,7 +843,7 @@ describe("issue #2488 — golden tasks for the door surface", () => {
         task: goldenTask("door-chat-paid-screen")!,
         drive: async () => {
           const h = makePaidHarness();
-          const drive = makeTurnDrive({ login: LOGIN, sql: h.sql });
+          const drive = await makeTurnDrive({ login: LOGIN, sql: h.sql });
           const result = (await driveTurnToolToExecution(
             drive,
             "run_stock_screen",
@@ -783,7 +865,7 @@ describe("issue #2488 — golden tasks for the door surface", () => {
         task: goldenTask("door-chat-paid-budget-refusal")!,
         drive: async () => {
           const h = makePaidHarness({ budgetVerdict: { allowed: false, reason: "daily cap exceeded" } });
-          const drive = makeTurnDrive({ login: LOGIN, sql: h.sql });
+          const drive = await makeTurnDrive({ login: LOGIN, sql: h.sql });
           try {
             await driveTurnToolToExecution(drive, "run_stock_screen", { universe: "NASDAQ100" }, { sql: h.sql, seams: h.seams });
             return { outcome: "error" as const, facts: {}, detail: "door did not refuse" };
