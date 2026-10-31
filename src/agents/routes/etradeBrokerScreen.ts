@@ -99,6 +99,14 @@ export async function executeEtradeScreen(args: {
   /** Issue #1737: opt-in async path — start a workflow, return 202, never await the scan. */
   asyncRequested?: boolean;
   emailTo?: string;
+  /**
+   * Issue #2530: an admitted ND selection (validated at the
+   * route by screenModeSelectionFromFields); rides the async
+   * workflow command. The route guarantees asyncRequested
+   * when this is present.
+   */
+  screenMode?: "non-deterministic";
+  screenIntent?: string;
 }): Promise<Response> {
   const { ctx, sessionId, requestedEnv, userLogin, agent, universe, validatedFilters, emailTo } = args;
   // Issue #17: the portfolio-context flag is read here (orchestrator
@@ -129,6 +137,9 @@ export async function executeEtradeScreen(args: {
       filters: validatedFilters as unknown as Record<string, unknown>,
       environment: requestedEnv,
       portfolioContext,
+      ...(args.screenMode
+        ? { screenMode: args.screenMode, screenIntent: args.screenIntent }
+        : {}),
     });
     if (handle) {
       ctx.audit("etrade.screen_enqueued", "trading", {

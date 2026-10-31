@@ -139,6 +139,22 @@ export const WORKFLOW_STEP_MAX_RETRIES = 3;
 /** Max explicit symbols on one command (claim-check: the request, not bulk data). */
 export const MAX_COMMAND_SYMBOLS = 200;
 
+/**
+ * Issue #2530 — the two modes a screener workflow run can
+ * execute in. "deterministic" is today's behavior and the
+ * default for every existing caller; "non-deterministic" is
+ * the sanctioned second mode under design option (a): ONE
+ * prompt interpretation step at the head of the parent run
+ * proposes screen criteria as a data artifact, a
+ * deterministic validator gates it, and the existing
+ * deterministic pipeline executes it — execution and replay
+ * stay deterministic in both modes (§8 doctrine).
+ */
+export type ScreenMode = "deterministic" | "non-deterministic";
+
+/** Max chars of free-form screening intent on one command (the planner-prompt cap precedent). */
+export const MAX_SCREEN_INTENT_CHARS = 2000;
+
 /** One shard of a parent job: a universe screen, or an explicit symbol set. */
 export interface WorkflowShard {
   /** Shard identity within the parent job (a universe id, or "symbols"). */
@@ -220,6 +236,24 @@ export interface WorkflowJobCommand {
    * service-layer call sites carry no request context today.
    */
   traceparent?: string;
+  /**
+   * Issue #2530 — the run's mode. Absent = "deterministic"
+   * (today's behavior; every existing caller). A run is one
+   * mode end to end: the mode rides the command to every
+   * shard (shardCommandFor spreads the parent), so it is
+   * recorded on the run's input record, and the parent
+   * collation carries it. Shards never interpret — the mode
+   * changes only how the parent obtains the run's filters.
+   */
+  screenMode?: ScreenMode;
+  /**
+   * Issue #2530 — the free-form screening intent the
+   * interpretation step proposes criteria from. Required
+   * (non-blank) when screenMode is "non-deterministic";
+   * invalid on a deterministic command (an intent that would
+   * be silently ignored is refused instead).
+   */
+  screenIntent?: string;
   /** Sector filter (recorded on the job; the screen applies it). */
   sector?: string;
   /** Data provider ("etrade" | "yahoo"; the screen defaults it when absent). */
@@ -469,6 +503,46 @@ export function assertWorkflowJobCommand(
       );
     }
   }
+  // Issue #2530 — the mode contract. An unrecognized mode is
+  // invalid; ND mode requires its intent; an intent without
+  // ND mode would be silently ignored, so it is invalid too;
+  // ND mode never composes with a goalScreen descriptor
+  // (goal runs interpret through their scenario).
+  if (
+    command.screenMode !== undefined &&
+    command.screenMode !== "deterministic" &&
+    command.screenMode !== "non-deterministic"
+  ) {
+    throw new WorkflowError(
+      "invalid_command",
+      `Workflow command screenMode must be "deterministic" or "non-deterministic" when present, got "${String(command.screenMode)}".`,
+    );
+  }
+  if (command.screenMode === "non-deterministic") {
+    if (typeof command.screenIntent !== "string" || command.screenIntent.trim().length === 0) {
+      throw new WorkflowError(
+        "invalid_command",
+        "A non-deterministic screen command requires a non-blank screenIntent (the free-form screening intent the interpretation step proposes criteria from).",
+      );
+    }
+    if (command.screenIntent.length > MAX_SCREEN_INTENT_CHARS) {
+      throw new WorkflowError(
+        "invalid_command",
+        `Workflow command screenIntent carries ${command.screenIntent.length} chars over the ${MAX_SCREEN_INTENT_CHARS} cap.`,
+      );
+    }
+    if (command.goalScreen !== undefined) {
+      throw new WorkflowError(
+        "invalid_command",
+        "A non-deterministic screen command cannot carry a goalScreen descriptor (goal runs interpret through their scenario, not the criteria interpreter).",
+      );
+    }
+  } else if (command.screenIntent !== undefined) {
+    throw new WorkflowError(
+      "invalid_command",
+      "screenIntent is only valid with screenMode \"non-deterministic\" — an intent on a deterministic command would be silently ignored.",
+    );
+  }
   return command;
 }
 
@@ -524,6 +598,13 @@ export interface StageTransition {
 export interface WorkflowCollation {
   jobId: string;
   workflowId: string;
+  /**
+   * Issue #2530 — the mode the run executed in, recorded by
+   * the parent flow ("deterministic" when the command named
+   * none). Optional in the type for collation literals built
+   * outside the parent flow; the parent flow always sets it.
+   */
+  screenMode?: ScreenMode;
   /**
    * Final lifecycle: Completed (qualified or not), Failed (no
    * usable shard), or ReportGenerated (every completed shard

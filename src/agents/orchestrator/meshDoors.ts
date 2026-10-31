@@ -131,7 +131,14 @@ export type MeshDoorErrorCode =
   // email source for a chat turn).
   | "budget_denied"
   | "price_unavailable"
-  | "checkout_email_required";
+  | "checkout_email_required"
+  // Issue #2530: the screen door's dual-mode refusal codes —
+  // nd_mode_unavailable (a non-deterministic run was requested
+  // while SCREENER_ND_MODE is off; never a silent downgrade to
+  // a deterministic screen), screen_intent_required (ND mode
+  // without its intent, or an intent supplied without ND mode).
+  | "nd_mode_unavailable"
+  | "screen_intent_required";
 
 export class MeshDoorError extends Error {
   readonly code: MeshDoorErrorCode;

@@ -141,6 +141,28 @@ export const MESH_GOLDEN_TASKS: readonly MeshGoldenTask[] = [
     },
   },
   {
+    id: "door-chat-screen-run-deterministic",
+    title: "Golden pair (#2530): the same chat screen request through the mesh screen door in deterministic mode — no interpretation runs, the started command records the deterministic mode, and the run completes through the real flows",
+    door: "chat-turn",
+    className: "ScreenerAgent",
+    operation: "run_stock_screen",
+    expectation: {
+      outcome: "completed",
+      facts: { workflowStarts: 1, screenMode: "deterministic", matchedCount: 2 },
+    },
+  },
+  {
+    id: "door-chat-screen-run-non-deterministic",
+    title: "Golden pair (#2530): the same chat screen request through the mesh screen door in non-deterministic mode — the interpretation step proposes criteria, the deterministic validator gates them, the same pipeline executes, and the started command records the non-deterministic mode",
+    door: "chat-turn",
+    className: "ScreenerAgent",
+    operation: "run_stock_screen",
+    expectation: {
+      outcome: "completed",
+      facts: { workflowStarts: 1, screenMode: "non-deterministic", matchedCount: 2 },
+    },
+  },
+  {
     id: "chat-trade-approval",
     title: "Chat trade runs the approval door into TradingTradeWorkflow and executes exactly once on approval (S9 path)",
     door: "chat-turn",

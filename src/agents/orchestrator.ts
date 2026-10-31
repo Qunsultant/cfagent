@@ -1629,6 +1629,38 @@ export class OrchestratorAgent extends PortThink {
     );
   }
 
+  /**
+   * Issue #2530: the non-deterministic mode's interpretation
+   * audit door. Called by ScreenerScreenWorkflow (via the
+   * shared orchestrator stub) from the parent's journaled
+   * audit step: the prompt (the run's screenIntent), the raw
+   * artifact the interpreter produced, and the deterministic
+   * validator's verdict land in mas_events. Deliberately
+   * built on recordAudit, NOT the swallowing audit() helper:
+   * the workflow's contract is no-audit-no-execution, so a
+   * failed insert must throw back into the audit step (which
+   * retries, then fails the run before any shard executes).
+   * The insert still funnels through the #270 single owner.
+   */
+  async recordWorkflowScreenInterpretationAudit(record: {
+    jobId: string;
+    userLogin: string;
+    intent: string;
+    artifact: unknown;
+    validation: { ok: boolean; reasons?: string[] };
+    effectiveFilters?: Record<string, unknown>;
+  }): Promise<void> {
+    this.recordAudit("screener.interpretation", "orchestrator", {
+      jobId: record.jobId,
+      userLogin: record.userLogin,
+      mode: "non-deterministic",
+      intent: record.intent,
+      artifact: record.artifact ?? null,
+      validation: record.validation,
+      ...(record.effectiveFilters ? { effectiveFilters: record.effectiveFilters } : {}),
+    });
+  }
+
   // Issue #992: extracted to ./orchestrator/reportDispatch.ts (sendReportEmail);
   private async sendReportEmail(
     recipient: string,

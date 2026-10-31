@@ -108,6 +108,10 @@ import {
 } from "../../services/scheduledReports";
 import { createFeatureFlagPort } from "../../features/createFeatureFlagPort";
 import {
+  resolveScreenerNdGateFromEnv,
+  screenerNdConfigErrorEvent,
+} from "../../config/screenerModes";
+import {
   checkPaymentBudgetViaDoor,
   requireActingLogin,
   MeshDoorError,
@@ -177,6 +181,23 @@ export interface MeshScreenDoorInput {
   universe?: string;
   /** Structured screener filters, passed through to the workflow command. */
   filters?: StockScreenerFilter;
+  /**
+   * Issue #2530 — the per-run mode selection. Absent or
+   * "deterministic" → today's deterministic run, unaffected
+   * by the flag. "non-deterministic" → the dual-mode run:
+   * admissible only while SCREENER_ND_MODE is on (else a
+   * coded nd_mode_unavailable refusal before any start —
+   * never a silent downgrade), and only with a screenIntent.
+   */
+  screenMode?: "deterministic" | "non-deterministic";
+  /**
+   * Issue #2530 — the free-form screening intent the ND
+   * run's interpretation step proposes criteria from.
+   * Required with screenMode "non-deterministic"; refused
+   * without it (an intent on a deterministic run would be
+   * silently ignored, so the door refuses instead).
+   */
+  screenIntent?: string;
 }
 
 /* ------------------------------------------------------------------ */
@@ -315,6 +336,53 @@ export async function runStockScreenViaDoor(
   // start, not after a run nobody can read.
   ctx.ensureTables();
 
+  // Issue #2530 — mode selection at the seam, before any
+  // start. An ND request is admissible only with the gate
+  // open and an intent present; every other ND shape refuses
+  // coded, and an intent without ND mode refuses rather than
+  // being silently ignored. Deterministic requests (the
+  // default) never read the gate.
+  const ndRequested = input.screenMode === "non-deterministic";
+  if (
+    input.screenMode !== undefined &&
+    !ndRequested &&
+    input.screenMode !== "deterministic"
+  ) {
+    throw new MeshDoorError(
+      "door_unavailable",
+      `run_stock_screen: unknown screenMode "${String(input.screenMode)}" — the door takes "deterministic" or "non-deterministic"; refusing rather than guessing.`,
+    );
+  }
+  if (input.screenIntent !== undefined && !ndRequested) {
+    throw new MeshDoorError(
+      "screen_intent_required",
+      "run_stock_screen refused: a screenIntent was supplied without screenMode \"non-deterministic\" — the intent would be silently ignored by a deterministic run, so the door refuses instead. No workflow was started.",
+    );
+  }
+  let screenIntent: string | undefined;
+  if (ndRequested) {
+    const gate = resolveScreenerNdGateFromEnv(ctx.env);
+    if (gate.invalid) {
+      console.warn(
+        `[mesh-screen-door] ${screenerNdConfigErrorEvent()}: SCREENER_ND_MODE value ${JSON.stringify(gate.raw)} is not "on"/"off" — failing closed to off.`,
+      );
+    }
+    if (!gate.enabled) {
+      throw new MeshDoorError(
+        "nd_mode_unavailable",
+        "run_stock_screen refused: the non-deterministic screener mode is disabled in this deployment (SCREENER_ND_MODE is off). " +
+          "No workflow was started and no screen ran — an ND request is never silently downgraded to a deterministic screen.",
+      );
+    }
+    screenIntent = typeof input.screenIntent === "string" ? input.screenIntent.trim() : "";
+    if (!screenIntent) {
+      throw new MeshDoorError(
+        "screen_intent_required",
+        "run_stock_screen refused: screenMode \"non-deterministic\" requires a non-blank screenIntent (the free-form intent the run's interpretation step proposes criteria from). No workflow was started.",
+      );
+    }
+  }
+
   const rawUniverse = typeof input.universe === "string" ? input.universe.trim() : "";
   let universeId: UniverseId = "NASDAQ100";
   if (rawUniverse) {
@@ -332,10 +400,13 @@ export async function runStockScreenViaDoor(
     universe: universeId,
   } as StockScreenerFilter;
 
+  const modeFields = ndRequested
+    ? { screenMode: "non-deterministic" as const, screenIntent }
+    : {};
   if (await screenMonetizationOn(ctx)) {
-    return runPaidScreen(ctx, { filters, userLogin: login, universeId });
+    return runPaidScreen(ctx, { filters, userLogin: login, universeId, ...modeFields });
   }
-  return runFreeScreen(ctx, { filters, userLogin: login, universeId });
+  return runFreeScreen(ctx, { filters, userLogin: login, universeId, ...modeFields });
 }
 
 /** The pieces of one door screen run, shared by the free and paid paths. */
@@ -357,7 +428,14 @@ interface ScreenCommandParts {
  */
 function buildScreenCommand(
   ctx: MeshScreenDoorContext,
-  req: { filters: StockScreenerFilter; userLogin: string; universeId: UniverseId },
+  req: {
+    filters: StockScreenerFilter;
+    userLogin: string;
+    universeId: UniverseId;
+    /** Issue #2530: present only on an admitted ND run (gate + intent checked at the seam). */
+    screenMode?: "non-deterministic";
+    screenIntent?: string;
+  },
 ): ScreenCommandParts {
   const shards: WorkflowJobCommand["shards"] =
     req.universeId === "ALL"
@@ -380,6 +458,9 @@ function buildScreenCommand(
     filters: req.filters as unknown as Record<string, unknown>,
     maxItems: 10,
     pollIntervalMs: SCREEN_DOOR_PARENT_POLL_INTERVAL_MS,
+    ...(req.screenMode
+      ? { screenMode: req.screenMode, screenIntent: req.screenIntent }
+      : {}),
     ...(traceparent ? { traceparent } : {}),
   };
   return { command, jobId, tenantId, shards, startedAtIso };
@@ -430,7 +511,13 @@ async function recordScreenStartHop(
  */
 async function runFreeScreen(
   ctx: MeshScreenDoorContext,
-  req: { filters: StockScreenerFilter; userLogin: string; universeId: UniverseId },
+  req: {
+    filters: StockScreenerFilter;
+    userLogin: string;
+    universeId: UniverseId;
+    screenMode?: "non-deterministic";
+    screenIntent?: string;
+  },
 ): Promise<MeshScreenRunResult> {
   const ports: WorkflowPort | null =
     ctx.workflowPort !== undefined ? ctx.workflowPort : createWorkflowPorts(ctx.env);
@@ -636,7 +723,13 @@ async function defaultPaymentWorkflowStatus(
  */
 async function runPaidScreen(
   ctx: MeshScreenDoorContext,
-  req: { filters: StockScreenerFilter; userLogin: string; universeId: UniverseId },
+  req: {
+    filters: StockScreenerFilter;
+    userLogin: string;
+    universeId: UniverseId;
+    screenMode?: "non-deterministic";
+    screenIntent?: string;
+  },
 ): Promise<MeshScreenRunResult> {
   const parts = buildScreenCommand(ctx, req);
   const { jobId, tenantId, shards, startedAtIso } = parts;

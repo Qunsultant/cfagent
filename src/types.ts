@@ -270,6 +270,20 @@ export interface Env {
   // enforcement exclusions (x-user-login gate, webhook social-port
   // withholding) live in src/config/nlqModes.ts.
   NLQ_MODE?: string;
+  // #2530 — ONE switch for the screener workflow's
+  // non-deterministic mode (non-secret, owner-set, same
+  // pattern as NLQ_MODE). Values "on" | "off" (case-insensitive,
+  // padded values accepted). Built-in default when unset or
+  // blank: "off" — no seam may start a non-deterministic
+  // screen run and a workflow command carrying the mode is
+  // refused at the workflow boundary. Any other value FAILS
+  // CLOSED to "off" and is logged + audited as
+  // screener_nd.config_error. Resolution lives in
+  // src/config/screenerModes.ts. This slice deliberately does
+  // NOT set a production value: flipping it on is an owner
+  // action gated on CISO review of the prompt-injection
+  // surface (#2530 acceptance item 4).
+  SCREENER_ND_MODE?: string;
   // #1723 (parent #1717, slice (c)) — TWO knowledge + memory switches
   // (non-secret, owner-set, same pattern as PAYMENTS_FLOW_MODE).
   // KNOWLEDGE_MODE: "search" | "platform" (case-insensitive, padded

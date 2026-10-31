@@ -229,9 +229,14 @@ const ORCH = "agents/orchestrator.ts";
  *  Issue #2489 adds the KV wipe delegation (import + onRequest
  *  early branch + routeRequest delegation, no logic in the class)
  *  — measured 2745 lines / 128577 B, so budget lines rise to
- *  2760 and bytes rise to 129_250. */
-const BUDGET_LINES = 2760;
-const BUDGET_BYTES = 129_250;
+ *  2760 and bytes rise to 129_250.
+ *  Issue #2530 adds the screener-interpretation audit door
+ *  (recordWorkflowScreenInterpretationAudit — one recordAudit
+ *  delegation, no logic in the class) — measured 2,784 lines /
+ *  130,352 B, so budget lines rise to 2795 and bytes rise to
+ *  131_250. */
+const BUDGET_LINES = 2795;
+const BUDGET_BYTES = 131_250;
 
 const count = (haystack: string, needle: string) =>
   haystack.split(needle).length - 1;
