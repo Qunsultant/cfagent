@@ -16,12 +16,18 @@ export interface Env {
   OBSERVABILITY?: AnalyticsEngineDataset;
   // Issue #1739: queue-backed messaging bindings. Optional so code is
   // safe before the bindings propagate; absence means the legacy
-  // in-process bus (the composition root returns null). The work
-  // queue stays producer-only in this slice (its consumer arrives
-  // with the first job handler); only the delivery subscriber queue
-  // has a consumer.
+  // in-process bus (the composition root returns null).
+  // Issue #2544 (Cloudflare migration step 1): the work queue now
+  // HAS a consumer (screener-events, via src/server.ts queue()),
+  // and both queues have dead-letter queues.
   SCREENER_EVENTS?: Queue<unknown>;
   SCREENER_EVENTS_DELIVERY?: Queue<unknown>;
+  // Issue #2544 — DLQ producer bindings, declared per the migration
+  // report §3.2 config shape. The platform delivers failed messages
+  // to the DLQ automatically; no code sends to these bindings (they
+  // exist so DLQ inspection tooling can bind the queues).
+  SCREENER_EVENTS_DLQ?: Queue<unknown>;
+  SCREENER_DELIVERY_DLQ?: Queue<unknown>;
   // Issue #329/#604: session + credential store — the SessionStore Durable
   // Object. Sessions, tokens and API keys live here, not in Workers KV
   // (legacy KV fallback removed in #604; the leftover KV bindings in

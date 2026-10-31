@@ -23,6 +23,14 @@
  * The panel is display-only: it never initiates a payment. (The
  * auto-approve limit is shown as the status reports it; changing it
  * stays with the existing NLQ / MCP surfaces.)
+ *
+ * Issue #2543 adds a "Paid-call receipts" section (GET
+ * /api/payments/receipts): the caller's own meter rows, tier-decision
+ * audit rows, and joined gateway rows, newest first, each with a
+ * provenance chip. Simulated rows read "Simulated", never real; no
+ * money total is shown (a sum over mixed provenance would read as
+ * revenue); a failed receipts fetch renders an error state, never
+ * dressed-up data.
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -30,14 +38,18 @@ import { Button } from "./components/ui";
 import {
   fetchAgenticLedger,
   fetchAgenticWalletStatus,
+  fetchReceipts,
   fmtLedgerTime,
   isSimulatedLedgerEntry,
   ledgerDirectionLabel,
   ledgerStatusLabel,
+  receiptKindLabel,
+  receiptProvenanceLabel,
   walletDisclosureNote,
   walletSimulated,
   type AgenticLedgerEntry,
   type AgenticWalletStatus,
+  type ReceiptEntry,
 } from "./agenticWalletApi";
 import { fmtUsd } from "./portfolioRiskApi";
 import "./agenticWalletPanel.css";
@@ -45,18 +57,22 @@ import "./agenticWalletPanel.css";
 export function AgenticWalletPanel() {
   const [status, setStatus] = useState<AgenticWalletStatus | null>(null);
   const [ledger, setLedger] = useState<AgenticLedgerEntry[] | null>(null);
+  const [receipts, setReceipts] = useState<ReceiptEntry[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [ledgerError, setLedgerError] = useState("");
+  const [receiptsError, setReceiptsError] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
     setLedgerError("");
+    setReceiptsError("");
     try {
-      const [statusResult, ledgerResult] = await Promise.allSettled([
+      const [statusResult, ledgerResult, receiptsResult] = await Promise.allSettled([
         fetchAgenticWalletStatus(),
         fetchAgenticLedger(),
+        fetchReceipts(),
       ]);
       if (statusResult.status === "fulfilled") {
         setStatus(statusResult.value);
@@ -71,6 +87,12 @@ export function AgenticWalletPanel() {
       } else {
         setLedger(null);
         setLedgerError(ledgerResult.reason?.message || "Failed to load the agentic payment ledger");
+      }
+      if (receiptsResult.status === "fulfilled") {
+        setReceipts(receiptsResult.value.receipts);
+      } else {
+        setReceipts(null);
+        setReceiptsError(receiptsResult.reason?.message || "Failed to load the paid-call receipts");
       }
     } finally {
       setLoading(false);
@@ -179,6 +201,47 @@ export function AgenticWalletPanel() {
                       {entry.customer && <>Counterparty: {entry.customer} · </>}
                       Gateway: {entry.gateway.toUpperCase()}
                       {entry.note && <> · {entry.note}</>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="awp-ledger">
+            <h5>Paid-call receipts{receipts ? ` (${receipts.length})` : ""}</h5>
+            <p className="awp-ledger-sub">
+              Your own paid calls, tier decisions, and joined gateway rows — newest first. Simulated rows are
+              labeled, never shown as real.
+            </p>
+            {receiptsError && (
+              <div className="awp-error" role="alert">
+                ⚠ The paid-call receipts could not be loaded — {receiptsError}
+              </div>
+            )}
+            {!receiptsError && receipts === null && <p className="awp-loading">Loading paid-call receipts…</p>}
+            {!receiptsError && receipts !== null && receipts.length === 0 && (
+              <p className="awp-empty">No receipts recorded yet.</p>
+            )}
+            {!receiptsError && receipts !== null && receipts.length > 0 && (
+              <div className="awp-ledger-list">
+                {receipts.map((entry) => (
+                  <div className="awp-entry" key={entry.id || `${entry.createdAt}-${entry.kind}`}>
+                    <div className="awp-entry-row">
+                      <span className="awp-entry-amount">
+                        {entry.amountUSD !== null ? `${fmtUsd(entry.amountUSD, 2)} USD` : "—"}
+                      </span>
+                      <span className="awp-entry-direction">{receiptKindLabel(entry)}</span>
+                      <span className={`awp-status-chip${entry.provenance === "simulated" ? " simulated" : ""}`}>
+                        {receiptProvenanceLabel(entry)}
+                      </span>
+                      <span className="awp-entry-time">{fmtLedgerTime(entry.createdAt)}</span>
+                    </div>
+                    <div className="awp-entry-meta">
+                      {entry.tier && <>Tier: {entry.tier} · </>}
+                      {entry.protocol && <>Protocol: {entry.protocol.toUpperCase()} · </>}
+                      {entry.gateway && <>Gateway: {entry.gateway.toUpperCase()} · </>}
+                      {entry.receiptId && <>Receipt: {entry.receiptId}</>}
                     </div>
                   </div>
                 ))}

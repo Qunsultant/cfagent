@@ -266,6 +266,25 @@ export interface MessageConsumer {
   ): Promise<ConsumeReport>;
 }
 
+/**
+ * Issue #2544 (migration step 1) — the DLQ-aware
+ * consumer contract for one queue: the platform-side settings
+ * the worker's consumer runs under. This is the port's config
+ * surface, not a deployment file: the wrangler.jsonc consumer
+ * entries are pinned against these values by test, so the two
+ * copies cannot drift (gitops §7, the pin rule).
+ * maxBatchTimeoutSeconds is absent for consumers the platform
+ * leaves at its default; deadLetterQueue is absent only for a
+ * consumer with no DLQ (none remain after step 1).
+ */
+export interface QueueConsumerConfig {
+  maxBatchSize: number;
+  maxBatchTimeoutSeconds?: number;
+  maxRetries: number;
+  maxConcurrency?: number;
+  deadLetterQueue?: string;
+}
+
 export interface MessagingPorts {
   /** Point-to-point work queue: one queue, competing consumers. */
   producer: MessageProducer;

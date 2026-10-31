@@ -52,6 +52,8 @@ import {
 import type { AsyncJobSubmission, Env } from "../../types";
 import type { DatabaseORM } from "../../orm";
 import { BusinessError } from "../../outcomes/outcomeAspects";
+import { recordTraceHopBestEffort } from "../../data/createMeshTracePorts";
+import { childContextOfTraceparent } from "../../observability/meshTrace";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
 import type { ObservabilitySink } from "../../observability/observabilityPorts";
 import {
@@ -87,6 +89,24 @@ export interface OpenaimpMcpHandlerContext {
   sessionId: string;
   /** #1744: calling principal + gate port for tools/call (see executeMCPTool). */
   principal?: McpPrincipal;
+  /**
+   * #2496: acting-identity resolver for this surface, supplied by
+   * the route from the verified identity headers (see
+   * McpToolContext.actingLogin). Spread into the tool context on
+   * the sync path by executeMCPTool; on the queued path its value
+   * is stamped server-side into the mcp.tool job payload, so the
+   * async-job executor re-supplies it at execution. Unset / no
+   * login means NO acting identity: identity-gated commands (the
+   * mesh doors) fail closed.
+   */
+  actingLogin?: () => string | undefined;
+  /**
+   * #2496: mesh-trace traceparent resolver, under exactly the
+   * actingLogin discipline (see McpToolContext.traceparent):
+   * spread on the sync path, stamped into the queued payload, and
+   * the source of the queue-time trace hop recorded below.
+   */
+  traceparent?: () => string | undefined;
   permissionPort?: ToolPermissionPort;
   permissionDecisionSink?: ObservabilitySink;
   /** #1722: NLQ_MODE session/user carriers, forwarded to tool execution. */
@@ -197,10 +217,45 @@ export function createOpenaimpMcpServer(context: OpenaimpMcpHandlerContext): Ser
           decisionSink:
             context.permissionDecisionSink ?? createObservabilitySink(context.env),
         });
-        data = await context.submitJob({
+        // #2496: stamp the acting identity + traceparent into the
+        // job payload HERE, server-side, from the route-threaded
+        // carriers (never from tool arguments) — the stamps the
+        // retired turn adapter (McpAgentToolAdapter) made at queue
+        // time, moved to the surface that now queues: the chat
+        // turn's discovered tools execute through this handler, so
+        // this is the one queue point for turn and external calls
+        // alike. Absent carriers stamp nothing: the executor then
+        // re-supplies no identity and identity-gated tools fail
+        // closed at execution, exactly as an unidentified direct
+        // call does.
+        const actingLogin = context.actingLogin?.()?.trim() || undefined;
+        const traceparent = context.traceparent?.() || undefined;
+        const submitted = await context.submitJob({
           capability: "mcp.tool",
-          payload: { toolName: name, arguments: toolArgs || {} },
+          payload: {
+            toolName: name,
+            arguments: toolArgs || {},
+            ...(actingLogin ? { actingLogin } : {}),
+            ...(traceparent ? { traceparent } : {}),
+          },
         });
+        // #2428 (Agent Mesh S17): the queue-time trace hop,
+        // recorded here for the same reason the stamps live here —
+        // this handler is where mcp.tool jobs are queued now.
+        const traceChild = childContextOfTraceparent(traceparent);
+        if (traceChild) {
+          void recordTraceHopBestEffort(context.env, {
+            traceId: traceChild.traceId,
+            spanId: traceChild.spanId,
+            parentSpanId: traceChild.parentSpanId,
+            kind: "job-queue",
+            operation: name,
+            timestampMs: Date.now(),
+            caller: actingLogin,
+            jobId: submitted.jobId,
+          });
+        }
+        data = submitted;
       } else {
         data = await executeMCPTool(name, toolArgs || {}, context);
       }

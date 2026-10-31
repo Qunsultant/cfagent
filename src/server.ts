@@ -85,7 +85,12 @@ import {
 } from "./data/createShardJobPorts";
 import { handleMeshRegistryRoute } from "./agents/meshRegistryRoute";
 import { handleRetentionPurgeRoute } from "./data/retentionRoute";
-import { dispatchSubscriberBatch } from "./messaging/cfQueueMessagingAdapter";
+import {
+  consumeCfBatch,
+  dispatchSubscriberBatch,
+} from "./messaging/cfQueueMessagingAdapter";
+import { createMessagingPorts } from "./messaging/createMessagingPorts";
+import { createScreenerEventsWorkHandler } from "./messaging/screenerEventsConsumer";
 import {
   isMessageEnvelope,
   type SubscriberHandlers,
@@ -4075,6 +4080,89 @@ export const PREMIUM_GATEWAY_INSTANCE = "premium-gateway";
 // scheduled deliveries already dedup on their own stable delivery id.
 const screenerDeliverySeen = new Set<string>();
 
+// Issue #2544 (Cloudflare migration step 1) — per-envelope dedup
+// for screener-events work batches, same isolate-scoped shape as
+// the delivery seen set above: the QueuePort consumer core marks
+// processed/drop envelope ids seen, so an at-least-once redelivery
+// never re-invokes the work handler.
+const screenerEventsSeen = new Set<string>();
+
+/**
+ * Issue #2544 — the single options_analysis queue dispatch, shared
+ * by the revived screener-events consumer and the legacy fallthrough
+ * below. Identity rules (#1185/#1066, #2331 slice 2): queue work
+ * runs under the message payload's stored owner when it carries
+ * one, else the explicit service identity. With neither, this
+ * THROWS (the caller retries) rather than dispatching under a
+ * fabricated identity. A service dispatch additionally requires a
+ * live platform-tier member binding, and the shared-orchestrator
+ * address is never an identity. Denied messages return "denied"
+ * (the caller acks/drops them, never retries: a re-dispatch
+ * would deny again, and options analysis is time-sensitive).
+ *
+ * @param awaitDispatch — true routes the trigger fetch through
+ * await (a fetch failure throws → the QueuePort core retries
+ * into the DLQ); false preserves the legacy fallthrough shape
+ * (waitUntil when available, else await).
+ */
+async function dispatchOptionsAnalysisQueueWork(opts: {
+  env: Env;
+  ctx?: any;
+  agent: { fetch: (request: Request) => Promise<unknown> };
+  payload: Record<string, unknown> | null | undefined;
+  serviceUserLogin: string | null;
+  getServiceProvisioned: () => Promise<boolean>;
+  awaitDispatch: boolean;
+  runId?: string;
+  unitId?: string;
+}): Promise<"dispatched" | "denied"> {
+  // Matches the pre-#2544 fallthrough exactly: a falsy payload
+  // dispatches as an empty object, never as a falsy body.
+  const payload = opts.payload || {};
+  const payloadOwner = isLoginShaped(
+    (payload as { userLogin?: unknown }).userLogin
+  )
+    ? (payload as { userLogin: string }).userLogin
+    : null;
+  const userLogin = payloadOwner ?? opts.serviceUserLogin;
+  if (!userLogin) {
+    throw new Error(
+      "options_analysis queue message has no payload owner and SERVICE_USER_LOGIN is not configured — refusing to dispatch under a fabricated identity (#1185)."
+    );
+  }
+  let denied: string | null = null;
+  if (userLogin === SHARED_ORCHESTRATOR_INSTANCE) {
+    denied = "the payload names the shared-orchestrator address as its owner";
+  } else if (userLogin === opts.serviceUserLogin) {
+    if (!(await opts.getServiceProvisioned())) {
+      denied = "the service user is not provisioned for the platform tier";
+    }
+  }
+  if (denied) {
+    const scope =
+      opts.runId !== undefined
+        ? ` (run ${opts.runId}, unit ${opts.unitId ?? opts.runId})`
+        : "";
+    console.warn(
+      `[Queue Handler] Dropping options_analysis queue message${scope}: ${denied} — dispatching it would run unattended work without a verified identity (#2331 slice 2).`
+    );
+    return "denied";
+  }
+  const queuePromise = opts.agent.fetch(
+    new Request("https://agent.internal/schedules/trigger-options-analysis", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-user-login": userLogin,
+      },
+      body: JSON.stringify(payload),
+    })
+  );
+  if (!opts.awaitDispatch && opts.ctx?.waitUntil) opts.ctx.waitUntil(queuePromise);
+  else await queuePromise;
+  return "dispatched";
+}
+
 export default {
   // Issue #329: an escaped throw used to surface as Cloudflare error 1101 —
   // every visitor saw an edge error page. The boundary turns any failure into a
@@ -4224,7 +4312,8 @@ export default {
   async queue(batch: any, env: Env, ctx?: any): Promise<void> {
     // Issue #1739 — durable screener-event delivery. The delivery
     // subscriber queue is dispatched through the broadcast core with
-    // per-subscriber dedup; every other batch falls through to the
+    // per-subscriber dedup; screener-events batches take the step-1
+    // branch below, and every other batch falls through to the
     // existing path untouched (options_analysis + ack-all behavior
     // preserved).
     if (batch?.queue === "screener-events-delivery") {
@@ -4264,6 +4353,101 @@ export default {
       }
       return;
     }
+    // Issue #2544 (Cloudflare migration step 1) — the screener-events
+    // work queue finally has a consumer. Envelopes route through
+    // the QueuePort consumer contract (consumeCfBatch over the
+    // messaging ports, deduped on the envelope id): at-least-once
+    // delivery, a handler throw becomes a retry (the platform
+    // re-delivers up to max_retries, then the DLQ —
+    // screener-events-dlq — with run/unit ids intact in the
+    // message body), and the options_analysis work item is REVIVED
+    // here (decided in #2544) via the QueuePort work handler.
+    // Legacy non-envelope taskType messages take the deprecated
+    // wrapper below; anything else can never decode and is acked
+    // + logged, never retried (a poison-loop guard).
+    if (batch?.queue === "screener-events") {
+      const serviceUserLogin = getServiceUserLogin(env);
+      const id = env.SEARCH_AGENT.idFromName(SHARED_ORCHESTRATOR_INSTANCE);
+      const agent = env.SEARCH_AGENT.get(id);
+      let serviceProvisioned: boolean | null = null;
+      const getServiceProvisioned = async (): Promise<boolean> => {
+        if (serviceProvisioned === null) {
+          serviceProvisioned = await isPlatformServiceProvisioned(
+            createKvMembershipStore(sessionStore(env)),
+            serviceUserLogin,
+            Date.now(),
+          );
+        }
+        return serviceProvisioned;
+      };
+      const dispatchWork = (
+        payload: Record<string, unknown> | null | undefined,
+        awaitDispatch: boolean,
+        runId?: string,
+        unitId?: string
+      ) =>
+        dispatchOptionsAnalysisQueueWork({
+          env,
+          ctx,
+          agent,
+          payload,
+          serviceUserLogin,
+          getServiceProvisioned,
+          awaitDispatch,
+          runId,
+          unitId,
+        });
+      const workHandler = createScreenerEventsWorkHandler({
+        dispatchOptionsAnalysis: (payload, runId, unitId) =>
+          dispatchWork(payload, true, runId, unitId),
+      });
+      const envelopeMessages: any[] = [];
+      if (batch?.messages && Array.isArray(batch.messages)) {
+        for (const msg of batch.messages) {
+          if (isMessageEnvelope(msg.body)) {
+            envelopeMessages.push(msg);
+          } else if (msg.body?.taskType === "options_analysis") {
+            // @deprecated Legacy taskType queue shape — superseded by CloudEvents envelope work items routed through the QueuePort screener-events consumer (src/messaging/screenerEventsConsumer.ts). Kept as a thin wrapper; do not add new producers.
+            try {
+              await dispatchWork(msg.body?.payload, false);
+              if (typeof msg.ack === "function") msg.ack();
+            } catch (queueErr) {
+              console.warn("[Queue Handler] Failed to process queue message:", queueErr);
+              if (typeof msg.retry === "function") msg.retry();
+            }
+          } else {
+            console.warn(
+              "[messaging] Dropping undecodable screener-events queue message (no valid envelope, no legacy taskType)."
+            );
+            if (typeof msg.ack === "function") msg.ack();
+          }
+        }
+      }
+      if (envelopeMessages.length > 0) {
+        const ports = createMessagingPorts(env, {
+          seenIds: screenerEventsSeen,
+        });
+        if (ports) {
+          await consumeCfBatch(
+            { queue: batch.queue, messages: envelopeMessages },
+            ports.consumer,
+            workHandler
+          );
+        } else {
+          // No messaging ports (no SCREENER_EVENTS binding): the
+          // worker cannot honestly claim QueuePort routing, so the
+          // envelopes are retried into the DLQ path visibly rather
+          // than acked into silence.
+          console.warn(
+            "[messaging] screener-events batch has no messaging ports — retrying envelopes into the DLQ path."
+          );
+          for (const msg of envelopeMessages) {
+            if (typeof msg.retry === "function") msg.retry();
+          }
+        }
+      }
+      return;
+    }
     // #1185 / #1066 — queue work runs under the message payload's stored
     // owner when it carries one, else the explicit service identity. With
     // neither, the message is retried (the existing catch path) rather
@@ -4283,45 +4467,25 @@ export default {
         try {
           const body = msg.body;
           if (body?.taskType === "options_analysis") {
-            const payloadOwner = isLoginShaped(body?.payload?.userLogin)
-              ? body.payload.userLogin
-              : null;
-            const userLogin = payloadOwner ?? serviceUserLogin;
-            if (!userLogin) {
-              throw new Error(
-                "options_analysis queue message has no payload owner and SERVICE_USER_LOGIN is not configured — refusing to dispatch under a fabricated identity (#1185)."
-              );
-            }
-            let denied: string | null = null;
-            if (userLogin === SHARED_ORCHESTRATOR_INSTANCE) {
-              denied = "the payload names the shared-orchestrator address as its owner";
-            } else if (userLogin === serviceUserLogin) {
-              if (serviceProvisioned === null) {
-                serviceProvisioned = await isPlatformServiceProvisioned(
-                  createKvMembershipStore(sessionStore(env)),
-                  serviceUserLogin,
-                  Date.now(),
-                );
-              }
-              if (!serviceProvisioned) {
-                denied = "the service user is not provisioned for the platform tier";
-              }
-            }
-            if (denied) {
-              console.warn(
-                `[Queue Handler] Dropping options_analysis queue message: ${denied} — dispatching it would run unattended work without a verified identity (#2331 slice 2).`
-              );
-            } else {
-              const queuePromise = agent.fetch(
-                new Request("https://agent.internal/schedules/trigger-options-analysis", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json", "x-user-login": userLogin },
-                  body: JSON.stringify(body.payload || {}),
-                })
-              );
-              if (ctx?.waitUntil) ctx.waitUntil(queuePromise);
-              else await queuePromise;
-            }
+            // @deprecated Legacy taskType queue shape — superseded by CloudEvents envelope work items routed through the QueuePort screener-events consumer (src/messaging/screenerEventsConsumer.ts). Kept as a thin wrapper; do not add new producers.
+            await dispatchOptionsAnalysisQueueWork({
+              env,
+              ctx,
+              agent,
+              payload: body?.payload,
+              serviceUserLogin,
+              getServiceProvisioned: async () => {
+                if (serviceProvisioned === null) {
+                  serviceProvisioned = await isPlatformServiceProvisioned(
+                    createKvMembershipStore(sessionStore(env)),
+                    serviceUserLogin,
+                    Date.now(),
+                  );
+                }
+                return serviceProvisioned;
+              },
+              awaitDispatch: false,
+            });
           }
           if (typeof msg.ack === "function") msg.ack();
         } catch (queueErr) {

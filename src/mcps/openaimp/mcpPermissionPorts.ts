@@ -49,11 +49,16 @@
  *   not-registered error (lookup precedes the gate).
  * - handleMCPRequest tools/call queued path — authorize BEFORE
  *   submitJob, so a refused call never receives a job receipt.
- * - McpAgentToolAdapter (agent/chat turns, incl. the queued
- *   branch) — principal kind agent-turn: the turn runs inside
- *   the owner's own agent instance, so the instance boundary IS
- *   the identity boundary; threading the turn's userLogin into
- *   the principal is a follow-up, not a launch requirement.
+ *   Since #2496 this is also the chat turn's enforcement point:
+ *   the turn's discovered tools execute through the instance's
+ *   own /mcp handler, with the principal resolved from the
+ *   loopback carrier's stamped identity headers.
+ * - McpAgentToolAdapter (direct in-process command adaptation —
+ *   the mesh-door suites drive commands through it) — principal
+ *   kind agent-turn: the turn runs inside the owner's own agent
+ *   instance, so the instance boundary IS the identity boundary;
+ *   threading the turn's userLogin into the principal is a
+ *   follow-up, not a launch requirement.
  */
 
 import { BusinessError } from "../../outcomes/outcomeAspects";

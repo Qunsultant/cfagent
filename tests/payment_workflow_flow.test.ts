@@ -127,6 +127,11 @@ describe("payment workflow flow (#2043, ported from the workspace cases)", () =>
     if (out.status === "started") {
       expect(out.paidVia).toBe("subscription_included");
       expect(out.screenerWorkflowId).toBe("wf-run-1");
+      // S3 (#2041): the started outcome carries the gate price so
+      // the saga can value compensation (credit or refund request).
+      // Pinned as positive, not as a catalogue value: the proposed
+      // defaults the test double seeds are unapproved.
+      expect(out.priceUSD).toBeGreaterThan(0);
     }
   });
 

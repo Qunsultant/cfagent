@@ -226,7 +226,7 @@ export interface PaymentWorkflowDeps {
 }
 
 export type PaymentWorkflowOutcome =
-  | { status: "started"; runRequestId: string; paidVia: string; screenerWorkflowId: string }
+  | { status: "started"; runRequestId: string; paidVia: string; screenerWorkflowId: string; priceUSD: number }
   | { status: "payment_required"; runRequestId: string; priceUSD: number; checkout?: unknown }
   | { status: "coverage_required"; runRequestId: string; priceUSD: number }
   | { status: "approval_rejected"; runRequestId: string }
@@ -425,6 +425,11 @@ async function startScreenerOrCredit(
       runRequestId: params.runRequestId,
       paidVia,
       screenerWorkflowId: started.workflowId,
+      // S3 (#2041): the saga's compensation needs the gate price
+      // (credit issuance and refund requests both refuse a missing
+      // price). Plumbing the existing gateDecision.priceUSD — not
+      // new pricing, never the unapproved catalogue defaults.
+      priceUSD,
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

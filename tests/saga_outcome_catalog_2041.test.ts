@@ -1,8 +1,9 @@
 /**
- * Issue #2041 S1+S2 — saga outcome catalog entries (gap G-CATALOG).
+ * Issue #2041 S1+S2+S3 — saga outcome catalog entries (gap G-CATALOG).
  *
  * S1 proposes the four Leg 0/1 outcomes; S2 adds the three
- * journey-gate outcomes below. Trading (S4) entries arrive with
+ * journey-gate outcomes below; S3 adds the two compensated
+ * screen-failure outcomes. Trading (S4) entries arrive with
  * their slice; nothing here claims them. Every entry follows
  * the #2381 catalog contract: SUCCESS_* / FAILURE_* names,
  * businessMessage to UI and channels, technicalDetail to logs
@@ -56,6 +57,22 @@ const SAGA_ENTRIES: Record<
     httpStatus: 502,
     businessMessage: "The paid screen failed after starting.",
   },
+  FAILURE_SAGA_SCREEN_FAILED_CREDIT_ISSUED: {
+    outcome: "failure",
+    category: "saga",
+    retryable: true,
+    httpStatus: 502,
+    businessMessage:
+      "The paid screen failed after starting; a one-time replacement-run credit was issued.",
+  },
+  FAILURE_SAGA_SCREEN_FAILED_REFUND_REQUESTED: {
+    outcome: "failure",
+    category: "saga",
+    retryable: true,
+    httpStatus: 502,
+    businessMessage:
+      "The paid screen failed after starting; a provider refund was requested (operator approval required before money moves).",
+  },
   SUCCESS_SAGA_JOURNEY_APPROVED: {
     outcome: "success",
     category: "saga",
@@ -79,7 +96,7 @@ const SAGA_ENTRIES: Record<
   },
 };
 
-describe("saga outcome catalog (S1+S2, #2041)", () => {
+describe("saga outcome catalog (S1+S2+S3, #2041)", () => {
   it.each(Object.keys(SAGA_ENTRIES))("carries %s with its full contract", (code) => {
     const expected = SAGA_ENTRIES[code];
     const entry = outcomes[code];
@@ -109,5 +126,13 @@ describe("saga outcome catalog (S1+S2, #2041)", () => {
     expect(resolved.resolved).toBe(false);
     expect(resolved.entry).toBeNull();
     expect(codedMessage("FAILURE_SAGA_NOPE")).toBe("[FAILURE_SAGA_NOPE]");
+  });
+
+  it("S1's screen_failed entry stays valid and notes the S3 compensation lineage", () => {
+    const entry = outcomes["FAILURE_SAGA_SCREEN_FAILED"];
+    expect(entry["businessMessage"]).toBe("The paid screen failed after starting.");
+    expect(entry["technicalDetail"]).toContain("S3 compensates");
+    expect(entry["technicalDetail"]).toContain("FAILURE_SAGA_SCREEN_FAILED_CREDIT_ISSUED");
+    expect(entry["technicalDetail"]).toContain("FAILURE_SAGA_SCREEN_FAILED_REFUND_REQUESTED");
   });
 });

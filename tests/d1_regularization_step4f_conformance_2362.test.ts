@@ -313,7 +313,7 @@ describe("family census surface (the global pin's own patterns)", () => {
     expect(count(PREPARE_PATTERN, "src/data/d1QuoteSourceAdapter.ts")).toBe(3);
     expect(count(PREPARE_PATTERN, "src/data/d1ResourceUsageAdapter.ts")).toBe(3);
     expect(count(PREPARE_PATTERN, "src/data/d1ResourceRollupAdapter.ts")).toBe(8);
-    expect(count(STORAGE_EXEC_PATTERN, "src/data/masRetentionIndexSchema.ts")).toBe(2);
+    expect(count(STORAGE_EXEC_PATTERN, "src/data/masRetentionIndexSchema.ts")).toBe(3);
     expect(count(STORAGE_EXEC_PATTERN, "src/data/frameworkQueueIndexSchema.ts")).toBe(1);
     for (const file of [
       "src/data/quoteSourcePorts.ts",
@@ -330,7 +330,7 @@ describe("family census surface (the global pin's own patterns)", () => {
   it("the layer schema modules produce the pinned indexes (module-level smoke)", () => {
     const raw = new DatabaseSync(":memory:");
     raw.exec(`CREATE TABLE mas_messages (id TEXT PRIMARY KEY, created_at TEXT NOT NULL)`);
-    raw.exec(`CREATE TABLE mas_events (id TEXT PRIMARY KEY, created_at TEXT NOT NULL)`);
+    raw.exec(`CREATE TABLE mas_events (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, type TEXT NOT NULL, created_at TEXT NOT NULL)`);
     raw.exec(`CREATE TABLE cf_agents_jobs (id TEXT PRIMARY KEY NOT NULL, time INTEGER NOT NULL,
       singleflight INTEGER NOT NULL DEFAULT 0, exclusive INTEGER NOT NULL DEFAULT 0,
       running INTEGER NOT NULL DEFAULT 0, execution_started_at INTEGER,
@@ -353,6 +353,7 @@ describe("family census surface (the global pin's own patterns)", () => {
       "idx_cf_agents_jobs_singleflight_running",
       "idx_cf_agents_jobs_time",
       "idx_mas_events_created",
+      "idx_mas_events_session_type",
       "idx_mas_messages_created",
     ]);
   });

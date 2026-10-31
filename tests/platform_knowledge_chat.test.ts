@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { searchPlatformKnowledge, PLATFORM_WORKFLOWS_KNOWLEDGE } from "../src/services/platformKnowledge";
 import { McpToolFactory, QueryPlatformKnowledgeCommand, KnowledgeSearchCommand } from "../src/mcps/openaimp/commands";
 import { createAgentMcpTools } from "../src/agents/mcpAdapter";
+import { handlerDispatch, makeDiscoveredPlatformTools } from "./mesh-mcp-testkit";
 import { McpSystemFacade } from "../src/patterns/facade";
 import { LLMJudge } from "../src/agents/judge";
 import { MockSqlStorage } from "./mock-sql";
@@ -180,7 +181,7 @@ describe("Platform Capabilities & Chat Knowledge Retrieval Suite", () => {
   });
 
   describe("5. McpAgentToolAdapter & createAgentMcpTools", () => {
-    it("exposes query_platform_knowledge and aliases in agent tools", () => {
+    it("exposes query_platform_knowledge and aliases in agent tools", async () => {
       const facade = new McpSystemFacade(mockEnv, orm, sessionId);
       const tools = createAgentMcpTools({
         env: mockEnv,
@@ -190,11 +191,26 @@ describe("Platform Capabilities & Chat Knowledge Retrieval Suite", () => {
         audit: auditMock,
       });
 
-      expect(tools["query_platform_knowledge"]).toBeDefined();
-      expect(tools["queryPlatformKnowledge"]).toBeDefined();
-      expect(tools["getPlatformCapabilities"]).toBeDefined();
-      expect(tools["knowledge_search"]).toBeDefined();
-      expect(tools["searchKnowledge"]).toBeDefined();
+      // #2496: catalog commands are no longer adapted into the
+      // native set — the turn DISCOVERS them from the openaimp
+      // server under tool_openaimp_<name> keys, and the camelCase
+      // aliases were retired with the hand-wired layer.
+      expect(tools["query_platform_knowledge"]).toBeUndefined();
+      expect(tools["queryPlatformKnowledge"]).toBeUndefined();
+      expect(tools["getPlatformCapabilities"]).toBeUndefined();
+      expect(tools["knowledge_search"]).toBeUndefined();
+      expect(tools["searchKnowledge"]).toBeUndefined();
+
+      const discovered = makeDiscoveredPlatformTools({
+        dispatch: handlerDispatch(),
+        resolveActingLogin: () => "knowledge-suite",
+        sql: new MockSqlStorage(),
+      });
+      const ensured = await discovered.ensure();
+      expect(ensured.ready).toBe(true);
+      const discoveredTools = discovered.aiTools();
+      expect(discoveredTools["tool_openaimp_query_platform_knowledge"]).toBeDefined();
+      expect(discoveredTools["tool_openaimp_knowledge_search"]).toBeDefined();
     });
   });
 });

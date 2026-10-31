@@ -393,6 +393,7 @@ const EXPECTED_INVENTORY = [
   "handlePaymentsRoutes :: endsWith(\"/payments/status\")",
   "handlePaymentsRoutes :: endsWith(\"/payments/dids\")",
   "handlePaymentsRoutes :: endsWith(\"/payments/transactions\")",
+  "handlePaymentsRoutes :: endsWith(\"/payments/receipts\")",
   "handlePaymentsRoutes :: endsWith(\"/payments/create\")",
   "handlePaymentsRoutes :: endsWith(\"/payments/confirm\")",
   "handlePaymentsRoutes :: endsWith(\"/payments/capture\")",

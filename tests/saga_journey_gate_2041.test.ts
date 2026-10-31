@@ -62,8 +62,15 @@ describe("journey gate copy (S2, #2041, G-DISCLOSURE)", () => {
   });
 
   it("repeats the rail compensation policy, and never promises a refund it cannot make", () => {
-    expect(journeyGateCopy("stripe").compensationLine).toContain("refund");
-    expect(journeyGateCopy("stripe").compensationLine).toContain("credit");
+    const stripe = journeyGateCopy("stripe").compensationLine;
+    expect(stripe).toContain("refund");
+    expect(stripe).toContain("credit");
+    // S3 corrected the stripe line to the request-first reality:
+    // a refund is REQUESTED, operator approval still required
+    // before money moves — never stated as already received.
+    expect(stripe).toContain("requested");
+    expect(stripe).toContain("operator approval");
+    expect(stripe).not.toContain("you would have received a provider refund first");
     const x402 = journeyGateCopy("x402").compensationLine;
     expect(x402).toContain("credit");
     expect(x402).toContain("cannot be reversed");
