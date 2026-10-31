@@ -139,11 +139,11 @@ jobs:
               VERIFIED="true"
               RUN_URL="https://github.com/$GITHUB_REPOSITORY/actions/runs/$MATCH_RUN"
               echo "Tree $TREE_SHA already verified within 24h by full CI run #$MATCH_RUN ($RUN_URL) — skipping redundant test execution."
-              {
-                echo "### ⚡ Tree-Hash CI Deduplication (#2497, #2499)"
-                echo "- **Git tree SHA (`HEAD^{tree}`)**: `$TREE_SHA`"
-                echo "- **Verified by full anchor run**: [#$MATCH_RUN]($RUN_URL) (`Fast gates` + 4/4 `Tests` shards executed & passed within 24h)"
-              } >> "$GITHUB_STEP_SUMMARY"
+              cat <<EOF >> "$GITHUB_STEP_SUMMARY"
+### ⚡ Tree-Hash CI Deduplication (#2497, #2499)
+- **Git tree SHA (\`HEAD^{tree}\`):** \`$TREE_SHA\`
+- **Verified by full anchor run:** [#$MATCH_RUN]($RUN_URL) (\`Fast gates\` + 4/4 \`Tests\` shards executed & passed within 24h)
+EOF
             fi
           fi
 
@@ -187,7 +187,6 @@ jobs:
     runs-on: ubuntu-24.04
     needs: [load-environment]
     if: github.event_name != 'merge_group' && needs.load-environment.outputs.tree_already_verified != 'true'
-    environment: ${{ needs.load-environment.outputs.target_env }}
     strategy:
       fail-fast: false
       matrix:
@@ -222,7 +221,6 @@ jobs:
     runs-on: ubuntu-24.04
     needs: [load-environment, fast-gates]
     if: github.event_name == 'merge_group' && needs.load-environment.outputs.tree_already_verified != 'true'
-    environment: ${{ needs.load-environment.outputs.target_env }}
     strategy:
       fail-fast: false
       matrix:

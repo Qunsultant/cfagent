@@ -35,6 +35,10 @@ const autoUpdateYml = readFileSync(
   new URL("../.github/workflows/auto-update-prs-app.yml", import.meta.url),
   "utf-8"
 );
+const autoMergeTrustedYml = readFileSync(
+  new URL("../.github/workflows/auto-merge-trusted.yml", import.meta.url),
+  "utf-8"
+);
 
 describe("CI/CD Merge Queue + Policy Gate + Tree-Hash Deduplication (#2497, #2499)", () => {
   it("triggers Policy Gate on merge_group with GH_TOKEN for per-PR evaluation", () => {
@@ -91,5 +95,24 @@ describe("CI/CD Merge Queue + Policy Gate + Tree-Hash Deduplication (#2497, #249
   it("keeps auto-update-prs-app.yml scoped to unqueued auto-merge PRs so Merge Queue is the sole updater for queued PRs (#2546)", () => {
     expect(autoUpdateYml).toContain("isInMergeQueue");
     expect(autoUpdateYml).toContain("hasAutoMerge");
+  });
+
+  it("does not configure environment deployments on PR/MQ test shards to avoid manual approval gates (#2580)", () => {
+    const testShardPrBlock = ciYml.match(/test-shard-pr:[\s\S]*?(?=\n\s\s#|\ntest-shard-mq:)/)?.[0] || "";
+    expect(testShardPrBlock).not.toContain("environment:");
+    const testShardMqBlock = ciYml.match(/test-shard-mq:[\s\S]*?(?=\n\s\s#|\ntest-and-verify:)/)?.[0] || "";
+    expect(testShardMqBlock).not.toContain("environment:");
+  });
+
+  it("protects in-flight CI runs and skips clean/conflicting PRs in auto-update-prs-app.yml (#2580)", () => {
+    expect(autoUpdateYml).toContain("statusCheckRollup");
+    expect(autoUpdateYml).toContain("checkState === 'PENDING'");
+    expect(autoUpdateYml).toContain("mergeStateStatus === 'CLEAN'");
+  });
+
+  it("enforces REBASE auto-merge and resets non-REBASE configurations (#2580)", () => {
+    expect(autoMergeTrustedYml).toContain('"$CURRENT_METHOD" != "REBASE"');
+    expect(autoMergeTrustedYml).toContain("disablePullRequestAutoMerge");
+    expect(autoMergeTrustedYml).toContain("mergeMethod: REBASE");
   });
 });

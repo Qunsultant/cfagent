@@ -69,28 +69,59 @@ jobs:
                 continue;
               }
 
-              // Check if PR is already in the merge queue
+              // Check if PR is already in the merge queue or has running CI checks (#2580)
               const queueQuery = `
                 query($owner: String!, $repo: String!, $number: Int!) {
                   repository(owner: $owner, name: $repo) {
                     pullRequest(number: $number) {
                       isInMergeQueue
+                      mergeable
+                      mergeStateStatus
+                      commits(last: 1) {
+                        nodes {
+                          commit {
+                            statusCheckRollup {
+                              state
+                            }
+                          }
+                        }
+                      }
                     }
                   }
                 }
               `;
+              let prDetails = null;
               try {
                 const qRes = await github.graphql(queueQuery, {
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   number: pr.number,
                 });
-                if (qRes?.repository?.pullRequest?.isInMergeQueue) {
+                prDetails = qRes?.repository?.pullRequest;
+                if (prDetails?.isInMergeQueue) {
                   console.log(`Skipping PR #${pr.number} (${pr.head.ref}); already in merge queue.`);
                   continue;
                 }
               } catch (e) {
                 console.log(`Could not query merge queue status for PR #${pr.number}: ${e.message}`);
+              }
+
+              if (prDetails) {
+                const checkState = prDetails.commits?.nodes?.[0]?.commit?.statusCheckRollup?.state;
+                if (checkState === 'PENDING') {
+                  console.log(`Skipping PR #${pr.number} (${pr.head.ref}); CI checks are currently running (state: PENDING). Protecting in-flight run from cancellation.`);
+                  continue;
+                }
+
+                if (prDetails.mergeStateStatus === 'CLEAN' && prDetails.mergeable === 'MERGEABLE') {
+                  console.log(`Skipping PR #${pr.number} (${pr.head.ref}); already CLEAN and MERGEABLE.`);
+                  continue;
+                }
+
+                if (prDetails.mergeStateStatus === 'DIRTY' || prDetails.mergeable === 'CONFLICTING') {
+                  console.log(`Skipping PR #${pr.number} (${pr.head.ref}); PR has merge conflicts (DIRTY/CONFLICTING). Manual resolution required.`);
+                  continue;
+                }
               }
 
               try {
