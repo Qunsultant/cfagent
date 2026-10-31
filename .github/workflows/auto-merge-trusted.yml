@@ -117,10 +117,23 @@ jobs:
             echo "Draft PR labeled. GitHub will allow merging after it is marked ready for review."
             exit 0
           fi
-          # NOTE (issue #2519): no --rebase/--squash/--merge flag here.
-          # When a merge queue is active, passing any merge-strategy flag causes
-          # gh to emit "The merge strategy for main is set by the merge queue"
-          # and exit 0 WITHOUT enqueuing the PR. The queue owns the merge method
-          # (REBASE, per ruleset 25543527). Omitting the flag lets the CLI submit
-          # the PR to the queue and lets the queue enforce the strategy.
-          gh pr merge --auto --repo "$GITHUB_REPOSITORY" "$PR_NUMBER"
+          # Enroll the PR with mergeMethod: REBASE via GraphQL so that GitHub
+          # immediately adds it to the merge queue (or enables auto-merge with REBASE)
+          # instead of defaulting to SQUASH (which is disallowed by ruleset and stalls PRs).
+          PR_NODE_ID=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '.node_id')
+          if [ -n "$PR_NODE_ID" ]; then
+            gh api graphql -F id="$PR_NODE_ID" -f query='
+              mutation($id: ID!) {
+                enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: REBASE }) {
+                  pullRequest {
+                    isInMergeQueue
+                    autoMergeRequest {
+                      mergeMethod
+                    }
+                  }
+                }
+              }
+            ' || gh pr merge --auto --repo "$GITHUB_REPOSITORY" "$PR_NUMBER" || true
+          else
+            gh pr merge --auto --repo "$GITHUB_REPOSITORY" "$PR_NUMBER" || true
+          fi
