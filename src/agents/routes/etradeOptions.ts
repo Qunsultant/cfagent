@@ -755,7 +755,7 @@ export async function handleEtradeOptionsRoutes(
         // / excluded ride the facade's legacy mapping. /compare and
         // /llm-ideas below are untouched.
         const dataAgent = new OptionsDataAgent(new DynamicOptionsScreener(etrade.client, undefined, await etrade.getUniverseDeps?.(ctx.agentCtx?.storage)));
-        const discoverStartedAt = Date.now();
+        const t0 = Date.now();
         const result = await new RecommendationService().discoverPanel({
           dataAgent: {
             loadSnapshot: async (params: unknown) => {
@@ -777,7 +777,7 @@ export async function handleEtradeOptionsRoutes(
           riskProfile: parsedDiscovery.value.riskProfile,
           alternatives: parsedDiscovery.value.alternatives,
         });
-        const discoverPanelDurationMs = Date.now() - discoverStartedAt;
+        const discoverPanelDurationMs = Date.now() - t0;
         const common = {
           screen: result.snapshot.screen,
           contracts: result.snapshot.contracts,
@@ -799,10 +799,10 @@ export async function handleEtradeOptionsRoutes(
           summary: `${result.ranked.length} ranked strateg${result.ranked.length === 1 ? "y" : "ies"} for ${parsedDiscovery.value.request.symbol}.`,
           generatedAt: new Date().toISOString(),
         });
-        const generationStartedAt = Date.now();
+        const t1 = Date.now();
         const strategyArtifacts = await ctx.getScreenerAgent(userLogin).generateAndStoreStrategyReport(strategyReportInput);
         const artifactLinks = strategyReportArtifactLinks(strategyArtifacts);
-        const strategyRequest = parsedDiscovery.value.request as Record<string, any>;
+        const req = parsedDiscovery.value.request as Record<string, any>;
         recordStrategyScreenRun(ctx.getOrm(), {
           ...strategyArtifacts,
           userLogin,
@@ -817,20 +817,18 @@ export async function handleEtradeOptionsRoutes(
           contracts: result.snapshot.contracts,
           dataSource: result.snapshot.dataSource,
           asyncJobId: ctx.asyncJobId,
-          // Unified run record: the request as submitted, so Docs
-          // Run Details no longer renders it as unknown. strategyMode
-          // labels the existing behaviour (evaluateAll true = all,
-          // otherwise thesis) — it does not change selection.
-          thesis: typeof strategyRequest.thesis === "string" ? strategyRequest.thesis : undefined,
-          strategyMode: strategyRequest.evaluateAllStrategies === true ? "all" : "thesis",
-          targetDate: typeof strategyRequest.targetDate === "string" ? strategyRequest.targetDate : undefined,
+          // Unified run record: request as submitted (strategyMode
+          // labels existing behaviour, it does not change selection).
+          thesis: typeof req.thesis === "string" ? req.thesis : undefined,
+          strategyMode: req.evaluateAllStrategies === true ? "all" : "thesis",
+          targetDate: typeof req.targetDate === "string" ? req.targetDate : undefined,
           riskProfile: parsedDiscovery.value.riskProfile,
-          allowedStrategies: strategyRequest.allowedStrategies,
-          targetPrice: typeof strategyRequest.targetPrice === "number" ? strategyRequest.targetPrice : undefined,
-          dteMin: typeof strategyRequest.minDte === "number" ? strategyRequest.minDte : undefined,
-          dteMax: typeof strategyRequest.maxDte === "number" ? strategyRequest.maxDte : undefined,
-          submittedVia: `ui — POST ${isBestTrade ? "/trading/options/best-trade" : "/trading/options/strategies"} (options-strategy-panel)`,
-          generationDurationMs: Date.now() - generationStartedAt,
+          allowedStrategies: req.allowedStrategies,
+          targetPrice: typeof req.targetPrice === "number" ? req.targetPrice : undefined,
+          dteMin: typeof req.minDte === "number" ? req.minDte : undefined,
+          dteMax: typeof req.maxDte === "number" ? req.maxDte : undefined,
+          submittedVia: `ui — POST ${path} (options-strategy-panel)`,
+          generationDurationMs: Date.now() - t1,
           discoverPanelDurationMs,
         });
         if (isBestTrade) {
