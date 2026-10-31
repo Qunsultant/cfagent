@@ -68,7 +68,7 @@ import {
   etradeGateErrorResponse,
 } from "../../services/etradeExecutionGate";
 import { resolveEtradeRestSwitch } from "../../config/etradeModes";
-import { screenModeFieldsFromRequest, screenModeSelectionFromFields } from "../../workflows/screenerWorkflowRoutes";
+import { admitScreenModeSelection } from "../../workflows/screenerWorkflowRoutes";
 import type { AgentName, Env } from "../../types";
 import type { DatabaseORM } from "../../orm";
 import type { ScreenerAgent } from "../screener-agent";
@@ -290,15 +290,7 @@ export async function handleEtradeBrokerRoutes(
       if (request.method === "POST") delete (filters as { async?: unknown }).async;
       // Issue #2530: dual-mode fields (distinct from the E01
       // `mode` switch below): ND refuses 400 before any path.
-      const modeSelection = screenModeSelectionFromFields(
-        ctx.env,
-        screenModeFieldsFromRequest(request.method, filters, url.searchParams),
-        { asyncRequested },
-      );
-      if (request.method === "POST") {
-        delete (filters as { screenMode?: unknown }).screenMode;
-        delete (filters as { screenIntent?: unknown }).screenIntent;
-      }
+      const modeSelection = admitScreenModeSelection(ctx.env, request.method, filters, url.searchParams, { asyncRequested });
       if (!modeSelection.ok) {
         return Response.json({ error: modeSelection.error }, { status: 400 });
       }
@@ -321,9 +313,9 @@ export async function handleEtradeBrokerRoutes(
       if (!parsedScreen.ok) {
         return Response.json({ error: parsedScreen.error }, { status: 400 });
       }
-      const { universe, filters: validatedFilters, emailTo } = parsedScreen.value;
+      const { universe, filters: validatedFilters, emailTo, pushToSlack, slackChannel, webhookUrl, generatePdf } = parsedScreen.value;
       const agent = ctx.getScreenerAgent(userLogin);
-      return await executeEtradeScreen({ ctx, sessionId, requestedEnv, userLogin, agent, universe, validatedFilters, asyncRequested, emailTo, ...(modeSelection.screenMode ? { screenMode: modeSelection.screenMode, screenIntent: modeSelection.screenIntent } : {}) });
+      return await executeEtradeScreen({ ctx, sessionId, requestedEnv, userLogin, agent, universe, validatedFilters, asyncRequested, delivery: { emailTo, pushToSlack, slackChannel, webhookUrl, generatePdf }, ...(modeSelection.screenMode ? { screenMode: modeSelection.screenMode, screenIntent: modeSelection.screenIntent } : {}) });
     } catch (err) {
       return Response.json({ error: err instanceof Error ? err.message : "Failed to screen equities" }, { status: 500 });
     }

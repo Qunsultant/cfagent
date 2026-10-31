@@ -27,6 +27,55 @@ import type { EtradeBrokerRouteContext } from "./etradeBroker";
 import type { ScreenerAgent } from "../screener-agent";
 
 /**
+ * Issue #2545: the manual screen's delivery selection — the scheduled
+ * market screen's delivery envelope (the schedule payload's
+ * deliveryFields) plus the report-artifact flag, as parsed from the
+ * request by parseStockScreenRequest. Every field optional: a caller
+ * that sends none gets today's behavior exactly.
+ */
+export interface ManualScreenDelivery {
+  emailTo?: string;
+  pushToSlack?: boolean;
+  slackChannel?: string;
+  webhookUrl?: string;
+  generatePdf?: boolean;
+}
+
+/**
+ * Issue #2545: the fields a delivery selection stamps onto a finished
+ * run's result before publication — the bridge's outcome projection
+ * (screenerOutcomeFromRunResult) reads exactly these names, the same
+ * per-task overrides the scheduled path's bus events carry.
+ * Conventions mirror the schedule payload builders: slackChannel
+ * rides only when Slack push is not off; blank recipients are
+ * omitted, never stamped empty. pushToSlack present (either value)
+ * means the caller made an explicit channel selection, so the
+ * outcome also carries the #1236 deliveryChannels allowlist built
+ * from the selection — without it, env-configured channels and
+ * overrides decide, as today.
+ */
+export function manualScreenDeliveryEnrichment(
+  delivery?: ManualScreenDelivery,
+): Record<string, unknown> {
+  if (!delivery) return {};
+  const enriched: Record<string, unknown> = {};
+  if (delivery.emailTo?.trim()) enriched.emailTo = delivery.emailTo.trim();
+  if (delivery.pushToSlack !== false && delivery.slackChannel?.trim()) {
+    enriched.slackChannel = delivery.slackChannel.trim();
+  }
+  if (delivery.webhookUrl?.trim()) enriched.webhookUrl = delivery.webhookUrl.trim();
+  if (delivery.generatePdf !== undefined) enriched.generatePdf = delivery.generatePdf;
+  if (delivery.pushToSlack !== undefined) {
+    const channels: string[] = [];
+    if (delivery.pushToSlack) channels.push("slack");
+    if (enriched.emailTo) channels.push("email");
+    if (enriched.webhookUrl) channels.push("webhook");
+    enriched.deliveryChannels = channels;
+  }
+  return enriched;
+}
+
+/**
  * Issue #1123: one publication decision for a finished manual screen —
  * job-run screens defer entirely (the tracked pipeline owns the run);
  * synchronous screens bridge into the pipeline when the host provides
@@ -37,11 +86,12 @@ async function publishOrBridge(
   ctx: EtradeBrokerRouteContext,
   userLogin: string,
   result: unknown,
-  emailTo?: string,
+  delivery?: ManualScreenDelivery,
 ): Promise<void> {
   if (ctx.asyncJobId) return;
-  const enriched = emailTo && result && typeof result === "object"
-    ? { ...(result as Record<string, unknown>), emailTo }
+  const enrichment = manualScreenDeliveryEnrichment(delivery);
+  const enriched = Object.keys(enrichment).length > 0 && result && typeof result === "object"
+    ? { ...(result as Record<string, unknown>), ...enrichment }
     : result;
   if (ctx.scheduleScreenerFollowups) {
     await ctx.scheduleScreenerFollowups(
@@ -98,7 +148,12 @@ export async function executeEtradeScreen(args: {
   validatedFilters: StockScreenValue["filters"];
   /** Issue #1737: opt-in async path — start a workflow, return 202, never await the scan. */
   asyncRequested?: boolean;
-  emailTo?: string;
+  /** Issue #2545: the caller's delivery selection (subsumes the
+   *  former bare emailTo). The synchronous paths publish it
+   *  through publishOrBridge; the async workflow path's command
+   *  carries no per-channel delivery fields (its deliver step
+   *  is boolean), so it is not forwarded there. */
+  delivery?: ManualScreenDelivery;
   /**
    * Issue #2530: an admitted ND selection (validated at the
    * route by screenModeSelectionFromFields); rides the async
@@ -108,7 +163,7 @@ export async function executeEtradeScreen(args: {
   screenMode?: "non-deterministic";
   screenIntent?: string;
 }): Promise<Response> {
-  const { ctx, sessionId, requestedEnv, userLogin, agent, universe, validatedFilters, emailTo } = args;
+  const { ctx, sessionId, requestedEnv, userLogin, agent, universe, validatedFilters, delivery } = args;
   // Issue #17: the portfolio-context flag is read here (orchestrator
   // storage owns mas_settings; the screener agent cannot read it) and
   // rides the run request — runSharded spreads it onto every shard.
@@ -154,7 +209,7 @@ export async function executeEtradeScreen(args: {
   if (universe === "ALL") {
     const shards = await agent.runSharded({ trigger: "manual", filters: validatedFilters, userLogin, environment: requestedEnv, portfolioContext });
     for (const shard of shards) {
-      await publishOrBridge(ctx, userLogin, shard, emailTo);
+      await publishOrBridge(ctx, userLogin, shard, delivery);
     }
     const failed = shards.filter((r) => !r.success);
     if (failed.length === shards.length) {
@@ -215,7 +270,7 @@ export async function executeEtradeScreen(args: {
       error,
       timestamp: new Date().toISOString(),
       universe: universe as any,
-    }, emailTo);
+    }, delivery);
     throw screenErr;
   }
   ctx.audit("etrade.screened", "trading", {
@@ -228,7 +283,7 @@ export async function executeEtradeScreen(args: {
   // Issue #911: pass userLogin so the report is stored under the
   // correct user scope (not "default").
   await ctx.persistScreenerReportCanonical({ ...result, userLogin });
-  await publishOrBridge(ctx, userLogin, result, emailTo);
+  await publishOrBridge(ctx, userLogin, result, delivery);
   if (!result.success) {
     return Response.json({ error: result.error || "E*TRADE unavailable" }, { status: 502 });
   }

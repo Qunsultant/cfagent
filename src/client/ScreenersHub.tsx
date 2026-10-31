@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePolling } from "./usePolling";
 import { useAutoRefresh } from "./autoRefresh";
 import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
-import { Skeleton, Button, Select, TextInput, Badge, Card, Notice } from "./components/ui";
+import { Skeleton, Button, Select, TextInput, Badge, Card, Notice, Checkbox, FieldShell } from "./components/ui";
 import { apiFetch as fetch } from "./apiFetch";
 import {
   getScreeningProviders,
@@ -46,6 +46,46 @@ import "./optionsResearch.css";
  *  INTO the hub as tabs (they were standalone nav entries), and the
  *  hub gains the proposal Review inbox and the recommendation Track
  *  Record — the #1096 surfaces users could not reach before. */
+/**
+ * Issue #2545: the Stocks one-shot form's delivery selection — the
+ * scheduled "Stock Market Screen" job's delivery fields, named
+ * exactly as the schedule payload names them (deliveryFields in
+ * src/trading/screeningSchemas.ts), plus the report flag.
+ */
+export interface StockRunDeliverySelection {
+  pushToSlack: boolean;
+  slackChannel: string;
+  emailTo: string;
+  webhookUrl: string;
+  generatePdf: boolean;
+}
+
+/**
+ * Issue #2545: the one-shot run request body — the screen filters
+ * plus the delivery envelope, built with the schedule payload
+ * builders' conventions: slackChannel rides only when Slack push is
+ * on, blank recipients are omitted (never sent as empty strings),
+ * recipients are trimmed. The server splits the envelope out of the
+ * engine filter (parseStockScreenRequest) and stamps it onto the
+ * run's delivery outcome, so a manual run with delivery options
+ * produces the same artifacts as the scheduled run.
+ */
+export function buildStockRunRequestBody(
+  filters: Record<string, unknown>,
+  delivery: StockRunDeliverySelection,
+): Record<string, unknown> {
+  return {
+    ...filters,
+    pushToSlack: delivery.pushToSlack,
+    ...(delivery.pushToSlack && delivery.slackChannel.trim()
+      ? { slackChannel: delivery.slackChannel.trim() }
+      : {}),
+    ...(delivery.emailTo.trim() ? { emailTo: delivery.emailTo.trim() } : {}),
+    ...(delivery.webhookUrl.trim() ? { webhookUrl: delivery.webhookUrl.trim() } : {}),
+    generatePdf: delivery.generatePdf,
+  };
+}
+
 export type ScreenersHubTab =
   | ScreeningAssetClass
   | "scanner"
@@ -225,6 +265,14 @@ export function ScreenersHub({
   // Issue #1496 (#940-B): stock criteria panel state. All toggles default
   // off, so existing run behavior is unchanged until the user opts in.
   const [stockCriteria, setStockCriteria] = useState<StockCriteriaState>(defaultStockCriteria);
+  // Issue #2545: delivery/report selection for the one-shot run — the
+  // scheduled stock screen's delivery defaults (Slack push on, PDF
+  // report attached), so the form opens at scheduled-run parity.
+  const [deliveryPushToSlack, setDeliveryPushToSlack] = useState(true);
+  const [deliverySlackChannel, setDeliverySlackChannel] = useState("");
+  const [deliveryEmailTo, setDeliveryEmailTo] = useState("");
+  const [deliveryWebhookUrl, setDeliveryWebhookUrl] = useState("");
+  const [deliveryGeneratePdf, setDeliveryGeneratePdf] = useState(true);
   // Run request object sent with the last stock run, for the panel's view.
   // (The request body, not just the filter: it also carries universe and
   // minScore, and exchange as a plain string — hence Record, not
@@ -340,6 +388,17 @@ export function ScreenersHub({
       };
       setLastSentStockFilters(filters);
 
+      // Issue #2545: the delivery envelope rides the same request —
+      // the server splits it out of the engine filter and delivers
+      // through the scheduled run's follow-up path.
+      const requestBody = buildStockRunRequestBody(filters, {
+        pushToSlack: deliveryPushToSlack,
+        slackChannel: deliverySlackChannel,
+        emailTo: deliveryEmailTo,
+        webhookUrl: deliveryWebhookUrl,
+        generatePdf: deliveryGeneratePdf,
+      });
+
       const response = await fetch(endpoint, {
         method: "POST",
         headers: {
@@ -347,7 +406,7 @@ export function ScreenersHub({
           "x-environment": activeEnv,
           ...(userLogin ? { "x-user-login": userLogin } : {}),
         },
-        body: JSON.stringify(filters),
+        body: JSON.stringify(requestBody),
       });
 
       const data = (await response.json()) as {
@@ -911,6 +970,45 @@ export function ScreenersHub({
                 onChange={setStockCriteria}
                 lastSentFilters={lastSentStockFilters}
               />
+            </div>
+            {/* Issue #2545: delivery/report fields at parity with the
+                scheduled "Stock Market Screen" job — same field names,
+                same delivery path (the run's follow-up bridge). Laid
+                out in the criteria deck like the preset/criteria block
+                above it: primitives + existing classes only (the UX
+                ratchets count new inline styles / raw labels). */}
+            <div className="screener-criteria-presets-deck">
+              <div>
+                <h3>Delivery &amp; report</h3>
+                <p>Deliver this run like the scheduled Stock Market Screen does.</p>
+                <FieldShell id="stock-delivery-slack-push" label="Slack push">
+                  <Checkbox id="stock-delivery-slack-push" checked={deliveryPushToSlack} onChange={(event) => setDeliveryPushToSlack(event.target.checked)} />
+                </FieldShell>
+                {deliveryPushToSlack && (
+                  <TextInput label="Slack channel"
+                    value={deliverySlackChannel}
+                    onChange={(event) => setDeliverySlackChannel(event.target.value)}
+                    placeholder="Optional; e.g. #trading-desk (blank = the configured channel)"
+                  />
+                )}
+              </div>
+              <div>
+                <TextInput label="Email recipients"
+                  type="email"
+                  value={deliveryEmailTo}
+                  onChange={(event) => setDeliveryEmailTo(event.target.value)}
+                  placeholder="Optional; e.g. trader@firm.com"
+                />
+                <TextInput label="Webhook URL"
+                  type="url"
+                  value={deliveryWebhookUrl}
+                  onChange={(event) => setDeliveryWebhookUrl(event.target.value)}
+                  placeholder="Optional; https://…"
+                />
+                <FieldShell id="stock-delivery-pdf" label="PDF report" hint="Attach the run's generated PDF report to deliveries">
+                  <Checkbox id="stock-delivery-pdf" checked={deliveryGeneratePdf} onChange={(event) => setDeliveryGeneratePdf(event.target.checked)} />
+                </FieldShell>
+              </div>
             </div>
             <div className="options-form-footer">
               <Button type="submit" variant="primary" disabled={loading || !endpoint}>{loading ? "Screening…" : "Run stock screen"}</Button>
