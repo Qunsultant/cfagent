@@ -820,6 +820,9 @@ describe("port purity (provider-neutral domain surface)", () => {
       "src/messaging/messagingPorts.ts",
       "src/messaging/screenerEventEnvelope.ts",
       "src/messaging/screenerQueueConsumer.ts",
+      // Issue #2544 — the step-1 work-queue consumer handler joins
+      // the purity list with the delivery consumer handler.
+      "src/messaging/screenerEventsConsumer.ts",
       "src/messaging/createMessagingPorts.ts",
       "src/messaging/inMemoryMessagingAdapter.ts",
     ]) {

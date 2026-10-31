@@ -44,10 +44,17 @@
   "queues": {
     "producers": [
       { "binding": "SCREENER_EVENTS", "queue": "screener-events" },
-      { "binding": "SCREENER_EVENTS_DELIVERY", "queue": "screener-events-delivery" }
+      { "binding": "SCREENER_EVENTS_DELIVERY", "queue": "screener-events-delivery" },
+      { "binding": "SCREENER_EVENTS_DLQ", "queue": "screener-events-dlq" },
+      { "binding": "SCREENER_DELIVERY_DLQ", "queue": "screener-events-delivery-dlq" }
     ],
     "consumers": [
-      { "queue": "screener-events-delivery", "max_batch_size": 10, "max_retries": 3 }
+      // Issue #2544 (Cloudflare migration step 1, report §3.2): the
+      // work queue finally has a consumer, and both consumers have
+      // dead-letter queues. The delivery consumer keeps its
+      // max_batch_size/max_retries and gains a DLQ + concurrency cap.
+      { "queue": "screener-events", "max_batch_size": 10, "max_batch_timeout": 30, "max_retries": 3, "dead_letter_queue": "screener-events-dlq", "max_concurrency": 4 },
+      { "queue": "screener-events-delivery", "max_batch_size": 10, "max_retries": 3, "dead_letter_queue": "screener-events-delivery-dlq", "max_concurrency": 2 }
     ]
   },
   "durable_objects": {
