@@ -57,6 +57,7 @@
  */
 
 import { SHARED_ORCHESTRATOR_INSTANCE } from "../security/serviceIdentity";
+import { sagaCompensationDisclosure } from "./sagaCompensation";
 
 /** Decision surfaces (ruling Q1). Email is notification only. */
 export type JourneySurface = "slack" | "panel" | "chat";
@@ -80,18 +81,16 @@ export interface JourneyGateCopy {
 /**
  * Gate copy (G-DISCLOSURE, gate copy). The body states the
  * journey authorization in words that cannot be mistaken for a
- * trade approval, and the compensation line is per-rail: stripe
- * refunds first (credit as fallback), x402 credits (an on-chain
- * payment cannot be reversed). Unknown rail falls back to the
+ * trade approval, and the compensation line is per-rail from the
+ * single source sagaCompensationDisclosure (S3 corrected the
+ * stripe line to the request-first reality: a refund is
+ * REQUESTED, operator approval still required before money
+ * moves, credit as fallback — the S2 line overstated it as a
+ * refund already received). Unknown rail falls back to the
  * credit framing — never to a refund promise.
  */
 export function journeyGateCopy(rail?: "stripe" | "x402"): JourneyGateCopy {
-  const compensationLine =
-    rail === "stripe"
-      ? "If this screen had failed, you would have received a provider refund first, with a replacement-run credit as fallback."
-      : rail === "x402"
-        ? "If this screen had failed, you would have received a one-time replacement-run credit: an on-chain payment cannot be reversed, so there is no refund on this rail."
-        : "If this screen had failed, you would have received a one-time replacement-run credit.";
+  const compensationLine = sagaCompensationDisclosure(rail);
   return {
     title: "Enter the trading leg?",
     body:
