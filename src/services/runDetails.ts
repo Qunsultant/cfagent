@@ -458,8 +458,8 @@ export function buildRunDetail(
     ["riskProfile", ["input.riskProfile", "riskProfile"]],
     ["allowedStrategies", ["input.allowedStrategies", "allowedStrategies"]],
     ["targetPrice", ["input.targetPrice", "targetPrice"]],
-    ["dteMin", ["input.dte.min", "dteMin"]],
-    ["dteMax", ["input.dte.max", "dteMax"]],
+    ["dteMin", ["input.dte.min", "input.dteMin", "dteMin"]],
+    ["dteMax", ["input.dte.max", "input.dteMax", "dteMax"]],
     ["sector", ["input.sector", "sector"]],
     ["contractType", ["input.contractType", "contractType"]],
   ];
@@ -487,8 +487,8 @@ export function buildRunDetail(
   if (summary.discoveryRunId) captureIds.unshift(summary.discoveryRunId);
 
   const captures: RunDetailField[] = [
-    field(mergedBody, "provider", store, "provider", "input.provider", "capture.provider"),
-    field(mergedBody, "connector", store, "connector", "input.connector", "capture.connector"),
+    field(mergedBody, "provider", store, "provider", "input.provider", "capture.provider", "feed.connector"),
+    field(mergedBody, "connector", store, "connector", "input.connector", "capture.connector", "feed.connector"),
     field(mergedBody, "connectorVersion", store, "connectorVersion", "capture.connectorVersion"),
     field(mergedBody, "snapshotId", store, "snapshotId", "capture.snapshotId", "snapshot.id"),
     field(mergedBody, "freshness", store, "freshness", "capture.freshness", "quoteAge"),
@@ -514,7 +514,54 @@ export function buildRunDetail(
         ? "failed"
         : "unknown";
 
-  const stages: RunDetailStage[] = [
+  // Unified strategy runs store their stage trace in the canonical
+  // body (body.stages, written by recordStrategyScreenRun). When
+  // present and well-formed, it IS the stage trace — the synthetic
+  // derivation below must not overwrite it, or Docs and Workflow
+  // Runs would diverge again. Legacy bodies without stored stages
+  // keep the synthetic derivation unchanged.
+  const storedStagesRaw = Array.isArray(body?.stages) ? (body.stages as unknown[]) : [];
+  const storedStages: RunDetailStage[] = storedStagesRaw
+    .map((s): RunDetailStage | null => {
+      const o = s && typeof s === "object" ? (s as Record<string, unknown>) : null;
+      if (!o) return null;
+      const stageName = typeof o.stage === "string" ? o.stage : "";
+      if (!["feed", "gather", "analysis", "generation", "recording", "delivery"].includes(stageName)) return null;
+      const status = typeof o.status === "string" ? o.status : "";
+      if (!["completed", "failed", "skipped", "never-attempted", "unknown"].includes(status)) return null;
+      const evidence = o.evidence && typeof o.evidence === "object" && !Array.isArray(o.evidence)
+        ? { ...(o.evidence as Record<string, string | number | null>), ...(typeof o.reason === "string" && o.reason ? { reason: o.reason } : {}) }
+        : (typeof o.reason === "string" && o.reason ? { reason: o.reason } : {});
+      return {
+        stage: stageName as RunDetailStage["stage"],
+        status: status as RunDetailStageStatus,
+        durationMs: numOrNull(o.durationMs),
+        inputIds: Array.isArray(o.inputIds) ? o.inputIds.filter((x): x is string => typeof x === "string") : [],
+        outputIds: Array.isArray(o.outputIds) ? o.outputIds.filter((x): x is string => typeof x === "string") : [],
+        errorCode: strOrNull(o.errorCode),
+        error: strOrNull(o.error),
+        evidence,
+      };
+    })
+    .filter((s): s is RunDetailStage => s !== null);
+  const hasStoredStages = storedStages.length > 0;
+  const stages: RunDetailStage[] = hasStoredStages
+    ? [
+        ...storedStages,
+        ...(storedStages.some((s) => s.stage === "recording")
+          ? []
+          : [{
+              stage: "recording" as const,
+              status: "completed" as const,
+              durationMs: null,
+              inputIds: [summary.pdfKey, summary.xlsxKey, summary.csvKey].filter((k): k is string => Boolean(k)),
+              outputIds: [summary.id],
+              errorCode: null,
+              error: null,
+              evidence: { store, reportId: summary.reportId ?? null },
+            }]),
+      ]
+    : [
     {
       stage: "feed",
       status: analysisStatus === "completed" || anyGenerated ? "completed" : analysisStatus === "failed" ? "failed" : "unknown",
@@ -617,6 +664,17 @@ export function buildRunDetail(
   }
   if (summary.resultCount === 0) {
     pushReason("RUN_EMPTY_RESULT", "result", "analysis", {}, { resultCount: 0, store });
+  }
+  // Unified strategy runs: a failed feed stage with provider fetch
+  // errors is a distinct why-no-data reason from a gate-empty
+  // result — the feed evidence names the provider error, and the
+  // stage trace names the stage. Never claimed when the feed
+  // completed with no fetch errors (an empty slice is a filter /
+  // window outcome, not a provider failure).
+  const feedStage = stages.find((s) => s.stage === "feed");
+  const feedFirstError = typeof feedStage?.evidence?.firstFetchError === "string" ? feedStage.evidence.firstFetchError : null;
+  if (feedStage?.status === "failed" && feedStage?.errorCode === "RUN_PROVIDER_FETCH_FAILED" && feedFirstError) {
+    pushReason("RUN_PROVIDER_FETCH_FAILED", null, "feed", { provider: `: ${feedFirstError}` }, { error: feedFirstError, store });
   }
   if (summary.partial) {
     pushReason("RUN_PARTIAL_COVERAGE", "result", "analysis", {}, { store, kind: summary.kind });
