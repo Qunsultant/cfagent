@@ -34,16 +34,37 @@ describe("worker error boundary (#329)", () => {
     expect(res.headers.get("Cache-Control")).toBe("no-store");
   });
 
-  it("turns any other throw into 500 internal_error", async () => {
+  it("turns any other throw into 500 FAILURE_UNEXPECTED_ERROR via the outcome catalog (#2572)", async () => {
     const wrapped = withErrorBoundary(async () => {
       throw new TypeError("boom");
     }, { log: () => undefined });
 
     const res = await wrapped(request, {});
-    const body = (await res.json()) as { code: string };
+    const body = (await res.json()) as { code: string; error: string };
 
     expect(res.status).toBe(500);
-    expect(body.code).toBe("internal_error");
+    expect(body.code).toBe("FAILURE_UNEXPECTED_ERROR");
+    expect(body.error).toBe(
+      "[FAILURE_UNEXPECTED_ERROR] An unexpected error occurred. Our team has been notified."
+    );
+    expect(res.headers.get("Retry-After")).toBe("5");
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
+  });
+
+  it("never leaks the original error text into the 500 body, but still logs it (#2572)", async () => {
+    const log = vi.fn();
+    const wrapped = withErrorBoundary(async () => {
+      throw new Error("secret-technical-detail-12345");
+    }, { log });
+
+    const res = await wrapped(request, {});
+    const body = (await res.json()) as { code: string; error: string };
+
+    expect(res.status).toBe(500);
+    expect(body.error).not.toContain("secret-technical-detail-12345");
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(String(log.mock.calls[0][0])).toContain("secret-technical-detail-12345");
+    expect(String(log.mock.calls[0][0])).toContain("FAILURE_UNEXPECTED_ERROR");
   });
 
   it("honours a thrown Response instead of wrapping it", async () => {
@@ -80,5 +101,9 @@ describe("worker error boundary (#329)", () => {
   it("classifies the quota wording, not the transport", () => {
     expect(classifyError(new Error("KV get() limit exceeded for the day.")).status).toBe(503);
     expect(classifyError(new Error("unrelated")).status).toBe(500);
+    expect(classifyError(new Error("unrelated")).body).toEqual({
+      error: "[FAILURE_UNEXPECTED_ERROR] An unexpected error occurred. Our team has been notified.",
+      code: "FAILURE_UNEXPECTED_ERROR",
+    });
   });
 });
