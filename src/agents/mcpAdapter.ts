@@ -8,18 +8,28 @@
  * - GRASP Indirection: Mediates interaction between the AI Orchestrator and the MCP command subsystem.
  * - Protected Variations: Protects AI agents from underlying database or MCP JSON-RPC protocol changes.
  *
- * This guarantees that internal AI agents DOGFOOD the exact same MCP commands and APIs
- * that external MCP clients (Claude Desktop, Cursor, Antigravity) consume.
+ * Issue #2496 (Mesh Improvement, programme #2494): the chat turn no
+ * longer adapts the MCP catalog in-process here. The turn's catalog
+ * tools are DISCOVERED at runtime from the platform's own MCP
+ * server through the Agents SDK MCP client and merged into the
+ * turn by Think itself (see src/agents/orchestrator/meshMcpClient.ts)
+ * — the dogfooding guarantee this header used to claim for the
+ * adapter is now carried by the protocol itself: the turn consumes
+ * the exact MCP surface external clients (Claude Desktop, Cursor,
+ * Antigravity) consume. What remains in this module:
+ * - createAgentMcpTools: the turn's NATIVE tools (task drafting,
+ *   the session-memory helpers, valuation comparison) that
+ *   Think's getTools() contributes alongside the discovered set;
+ * - McpAgentToolAdapter: retained as the direct command adapter —
+ *   the mesh-door suites drive commands through it, and it keeps
+ *   the #1744 gate + queue-stamp discipline for any in-process
+ *   caller that adapts a command directly.
  */
 
 import { tool } from "ai";
 import { z } from "zod";
 import type { IMcpToolCommand, McpToolContext } from "../patterns/interfaces";
 import { McpToolFactory } from "../mcps/openaimp/commands";
-import {
-  chatNlqConfigErrorEvent,
-  resolveChatNlqTurnMode,
-} from "../config/chatNlqModes";
 import { recordTraceHopBestEffort } from "../data/createMeshTracePorts";
 import { childContextOfTraceparent } from "../observability/meshTrace";
 import {
@@ -112,57 +122,25 @@ export class McpAgentToolAdapter {
 }
 
 /**
- * Creates the complete dictionary of AI tools for the Multi-Agent Orchestrator.
- * Combines all 14 MCP commands adapted for the LLM agent + agent-specific task drafting.
+ * Creates the turn's NATIVE AI tools for the Multi-Agent
+ * Orchestrator — the tools Think's getTools() contributes. The MCP
+ * catalog is NOT adapted here anymore (#2496): catalog tools reach
+ * the turn by runtime discovery through the Agents SDK MCP client
+ * (Think auto-merges them under `tool_openaimp_<name>` keys), and
+ * the CHAT_NLQ_MODE gate (#2488) now restricts that discovered set
+ * at the Think layer — chatNlqTurnGate in
+ * src/agents/orchestrator/meshMcpClient.ts, applied by
+ * portBeforeTurn through TurnConfig.activeTools. The catalog
+ * camelCase aliases that used to point at adapted commands
+ * (searchKnowledge, queryPlatformKnowledge,
+ * getPlatformCapabilities, draftPayment, confirmDraft) are retired
+ * with the adapter path: the prompt steers to the discovered names
+ * verbatim (src/agents/chatPrompt.ts).
  */
 export function createAgentMcpTools(context: McpToolContext) {
   const tools: Record<string, any> = {};
 
-  // #2488: the CHAT_NLQ_MODE gate (src/config/chatNlqModes.ts) —
-  // the owner's direction is that NLQ stays in the turn
-  // (registered in the catalog, wired on every non-turn
-  // surface) but is not USED by the turn: with the switch off
-  // (the built-in default), execute_nlq is not adapted into the
-  // turn's usable tool set. The gate lives here, in the
-  // turn/tool-assembly layer — no NLQ file is touched, and the
-  // /mcp surface plus the async nlq.execute capability, A2A,
-  // routes, and channels keep their behavior verbatim. An
-  // invalid switch value fails closed to off + audit, per the
-  // mode-switch discipline.
-  const chatNlq = resolveChatNlqTurnMode(context);
-  if (chatNlq.invalid) {
-    context.audit(chatNlqConfigErrorEvent(), "orchestrator", {
-      switch: "CHAT_NLQ_MODE",
-      level: chatNlq.level,
-      raw: chatNlq.raw ?? null,
-      resolvedMode: chatNlq.mode,
-    });
-  }
-  const nlqInTurn = chatNlq.mode === "on";
-
-  // 1. Dogfood every registered MCP command into the AI agent toolset.
-  for (const command of McpToolFactory.getAllTools()) {
-    if (command.name === "execute_nlq" && !nlqInTurn) continue;
-    // Register by canonical MCP name (e.g. 'execute_nlq', 'list_database_tables', 'get_revenue_summary')
-    tools[command.name] = McpAgentToolAdapter.adapt(command, context);
-  }
-
-  // 2. Add convenient camelCase aliases to preserve backward compatibility with legacy prompt heuristics
-  if (tools["knowledge_search"]) {
-    tools["searchKnowledge"] = tools["knowledge_search"];
-  }
-  if (tools["query_platform_knowledge"]) {
-    tools["queryPlatformKnowledge"] = tools["query_platform_knowledge"];
-    tools["getPlatformCapabilities"] = tools["query_platform_knowledge"];
-  }
-  if (tools["draft_payment"]) {
-    tools["draftPayment"] = tools["draft_payment"];
-  }
-  if (tools["confirm_payment_draft"]) {
-    tools["confirmDraft"] = tools["confirm_payment_draft"];
-  }
-
-  // 3. Task management tool for agent task proposals
+  // 1. Task management tool for agent task proposals
   tools["createTaskDraft"] = tool({
     description: "Draft a task or reminder for the user or organization. Returns a structured task proposal for user confirmation.",
     inputSchema: z.object({
@@ -186,7 +164,7 @@ export function createAgentMcpTools(context: McpToolContext) {
     },
   });
 
-  // 4. Memory helper aliases mapping to manage_session_memory
+  // 2. Memory helper aliases mapping to manage_session_memory
   tools["rememberFact"] = tool({
     description: "Persist a key fact, user preference, or project context into durable SQLite memory for this session.",
     inputSchema: z.object({
@@ -258,7 +236,7 @@ export function createAgentMcpTools(context: McpToolContext) {
     },
   });
 
-  // 5. Multi-Stock Valuation Comparison Tool
+  // 3. Multi-Stock Valuation Comparison Tool
   tools["compare_stock_valuations"] = tool({
     description: "Compare valuation metrics, P/E ratios, market caps, margins, and performance across peer stock tickers (e.g. NVDA, AMD, INTC).",
     inputSchema: z.object({

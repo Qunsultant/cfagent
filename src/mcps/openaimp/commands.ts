@@ -1711,9 +1711,9 @@ export class McpToolFactory {
 
     // AgentDB projection reads (#1546 slice 4, #1697): read-only
     // tools over the slices 1–3 projections. Registered here so
-    // they appear in tools/list and in createAgentMcpTools
-    // automatically; they ride the same /mcp auth path as every
-    // other tool in the factory.
+    // they appear in tools/list and — through SDK discovery
+    // (#2496) — in the chat turn automatically; they ride the
+    // same /mcp auth path as every other tool in the factory.
     this.registerTool(new AgentDbChainStatusCommand());
     this.registerTool(new AgentDbJobsHistoryCommand());
     this.registerTool(new AgentDbAuditHistoryCommand());

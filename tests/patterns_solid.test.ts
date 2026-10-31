@@ -68,20 +68,23 @@ describe("SOLID Principles, GoF Patterns & Agent Dogfooding Suite", () => {
   describe("1. Agent Self-Consumption (Dogfooding) of MCP Tools", () => {
     it("adapts all 14 MCP commands directly into the AI Agent toolset", () => {
       const facade = new McpSystemFacade(mockEnv, orm, sessionId);
-      // #2488: execute_nlq is flagged OFF in chat turns by default
-      // (CHAT_NLQ_MODE, default off). This test pins adapter COMPLETENESS —
-      // every canonical command CAN be adapted — so it enables the flag;
-      // the default-off exclusion is pinned in tests/mesh_screen_door_2488
-      // and tests/actor-orchestrator-parity.
-      const agentTools = createAgentMcpTools({
-        env: { ...mockEnv, CHAT_NLQ_MODE: "on" } as Env,
+      // #2496: the chat turn no longer adapts catalog commands
+      // in-process — it DISCOVERS them from the openaimp MCP
+      // server at runtime (pinned end-to-end in
+      // tests/mesh_mcp_client_2496.test.ts). What this test pins
+      // is the retained adapter's COMPLETENESS — every canonical
+      // command CAN be adapted through McpAgentToolAdapter — and
+      // that the native createAgentMcpTools set no longer carries
+      // any of them.
+      const context: McpToolContext = {
+        env: mockEnv,
         orm,
         sessionId,
         facade,
         audit: auditMock,
-      });
+      };
 
-      // Verify all 14 canonical MCP tools are present in the agent's toolset
+      // Verify all 14 canonical MCP tools adapt into agent tools
       const expectedMcpTools = [
         "knowledge_search",
         "draft_payment",
@@ -100,26 +103,38 @@ describe("SOLID Principles, GoF Patterns & Agent Dogfooding Suite", () => {
       ];
 
       for (const toolName of expectedMcpTools) {
-        expect(agentTools[toolName]).toBeDefined();
-        expect(typeof agentTools[toolName].execute).toBe("function");
+        const adapted = McpAgentToolAdapter.adapt(McpToolFactory.getTool(toolName)!, context);
+        expect(adapted, toolName).toBeDefined();
+        expect(typeof adapted.execute).toBe("function");
+        expect(createAgentMcpTools(context)[toolName]).toBeUndefined();
       }
 
-      // Verify legacy convenience aliases are also wired
-      expect(agentTools["searchKnowledge"]).toBeDefined();
-      expect(agentTools["draftPayment"]).toBeDefined();
-      expect(agentTools["confirmDraft"]).toBeDefined();
-      expect(agentTools["createTaskDraft"]).toBeDefined();
+      // The camelCase convenience aliases were retired with the
+      // hand-wired turn layer (#2496); the native task-draft tool
+      // remains.
+      const nativeTools = createAgentMcpTools(context);
+      expect(nativeTools["searchKnowledge"]).toBeUndefined();
+      expect(nativeTools["draftPayment"]).toBeUndefined();
+      expect(nativeTools["confirmDraft"]).toBeUndefined();
+      expect(nativeTools["createTaskDraft"]).toBeDefined();
     });
 
     it("executes database introspection and revenue calculation when called through agent tools", async () => {
       const facade = new McpSystemFacade(mockEnv, orm, sessionId);
-      const agentTools = createAgentMcpTools({
+      // #2496: "agent tools" here = the retained McpAgentToolAdapter
+      // over the factory's commands (the turn itself consumes the
+      // same commands by discovery — see the #2496 suite).
+      const context: McpToolContext = {
         env: mockEnv,
         orm,
         sessionId,
         facade,
         audit: auditMock,
-      });
+      };
+      const agentTools: Record<string, ReturnType<typeof McpAgentToolAdapter.adapt>> = {};
+      for (const toolName of ["list_database_tables", "get_revenue_summary", "manage_categories"]) {
+        agentTools[toolName] = McpAgentToolAdapter.adapt(McpToolFactory.getTool(toolName)!, context);
+      }
 
       // Agent dogfoods list_database_tables
       const tablesResult = await agentTools["list_database_tables"].execute({});
@@ -199,16 +214,19 @@ describe("SOLID Principles, GoF Patterns & Agent Dogfooding Suite", () => {
       // Verify factory has registered it
       expect(McpToolFactory.getTool("custom_audit_report")).toBe(customCmd);
 
-      // Verify agent adapter immediately incorporates the new tool
-      const agentTools = createAgentMcpTools({
+      // Verify the adapter immediately incorporates the new tool.
+      // #2496: at the turn level the same registration is picked
+      // up by DISCOVERY on the next connection — pinned in
+      // tests/mesh_mcp_self_registration_2496.test.ts.
+      const adapted = McpAgentToolAdapter.adapt(customCmd, {
         env: mockEnv,
         orm,
         sessionId,
         audit: auditMock,
       });
-      expect(agentTools["custom_audit_report"]).toBeDefined();
+      expect(adapted).toBeDefined();
 
-      const runResult = await agentTools["custom_audit_report"].execute({ format: "pdf" });
+      const runResult = await adapted.execute({ format: "pdf" });
       expect(runResult.status).toBe("success");
       expect(runResult.format).toBe("pdf");
     });

@@ -76,6 +76,7 @@ import type { ScreenerRunOutcome } from "../services/screenerFollowups";
 import { marketDateKey, readAutopilotStateRaw, getAutopilotState, writeAutopilotState, incrementAutopilotOrdersToday, fetchBrokerBalanceSnapshot, openNotionalForSymbol, evaluateAndRecordAutopilotVerdict, type AutopilotContext } from "./orchestrator/autopilot";
 import { readSettingRaw, writeSetting, getReportDispatchHitl, setReportDispatchHitl, createReportConfirmation, getReportConfirmation, decideReportConfirmation, storeResearchReportCanonicalAsync, confirmationDeliveryMeta, deliverStoredReportEmail, deliverStoredReportWebhook, persistScreenerReportCanonical, sendReportEmail, sendReportWebhook, type ReportDispatchContext } from "./orchestrator/reportDispatch";
 import { extractMessageText, createTurnTools, deriveTurn, assembleGrounding, type ChatTurnHelpersContext } from "./orchestrator/chatTurnHelpers";
+import { createOpenaimpMcpFetch, ensureOpenaimpMcpConnection, chatNlqTurnGate, type EnsureOpenaimpMcpResult } from "./orchestrator/meshMcpClient";
 import { logChatActivity, enqueueHttpRequest, type HttpEntryContext } from "./orchestrator/httpEntry";
 import { runResearchAndPublish, deliverResearchReport, sendResearchSummaryEmail, type ResearchPublishContext } from "./orchestrator/researchPublish";
 import { ETradeEmailTradingService } from "../trading";
@@ -279,6 +280,18 @@ export class OrchestratorAgent extends PortThink {
 
   /** Step bound for chat turns (sanitized clamp; see resolveShadowMaxSteps). */
   maxSteps: number;
+
+  /**
+   * #2496 (Mesh Improvement, programme #2494): Think waits for the
+   * SDK MCP client connections to settle before each turn's
+   * inference loop merges the discovered catalog (this.mcp holds
+   * the openaimp server registration — see
+   * ./orchestrator/meshMcpClient.ts). `includeMcpTools`
+   * deliberately keeps its SDK default (true): Think's auto-merge
+   * of the discovered set under `tool_openaimp_<name>` keys IS the
+   * provided consumption path this slice is built on.
+   */
+  waitForMcpConnections = { timeout: 10_000 };
 
   // ---------------------------------------------------------------------
   // Issue #1952 (think-fleet): the actor session + Think turn facet.
@@ -799,6 +812,41 @@ export class OrchestratorAgent extends PortThink {
     return orchestratorA2AOutcome(data);
   }
 
+  // Issue #2496 (Mesh Improvement S1): the in-flight openaimp MCP
+  // discovery ensure, shared by concurrent onStart/turn callers.
+  private meshMcpEnsureInFlight?: Promise<EnsureOpenaimpMcpResult>;
+
+  /**
+   * #2496: (re)establish the SDK MCP client connection to this
+   * instance's own openaimp MCP server, via the loopback identity
+   * carrier (./orchestrator/meshMcpClient.ts). The transport is
+   * memory-only (the SDK cannot persist a fetch function), so
+   * every wake re-registers it after the restore settles; a live
+   * connection is reused. Never throws — the ensure step audits
+   * its own failure (mesh_mcp.discovery_failed) and the turn
+   * degrades to its native tools until a later ensure succeeds.
+   */
+  private ensureMeshMcpDiscovery(): Promise<EnsureOpenaimpMcpResult> {
+    const mcp = this.mcp as typeof this.mcp | undefined;
+    if (!mcp) {
+      // Object.create test instances run without the Agent
+      // constructor, so no manager exists to discover through.
+      return Promise.resolve({ ready: false, toolCount: 0, reused: false, error: "no MCP client manager on this instance" });
+    }
+    this.meshMcpEnsureInFlight ??= ensureOpenaimpMcpConnection({
+      mcp,
+      fetch: createOpenaimpMcpFetch({
+        dispatch: (request) => this.routeRequest(request),
+        resolveActingLogin: () => this.pendingTurn?.userLogin,
+        resolveTraceparent: () => this.turnTraceparent(),
+      }),
+      audit: (type, payload) => this.audit(type, "orchestrator", payload),
+    }).finally(() => {
+      this.meshMcpEnsureInFlight = undefined;
+    });
+    return this.meshMcpEnsureInFlight;
+  }
+
   /** Cloudflare Agents lifecycle: initialize SQLite and recover durable work. */
   async onStart(props?: Record<string, unknown>): Promise<void> {
     this.ensureTables();
@@ -807,6 +855,17 @@ export class OrchestratorAgent extends PortThink {
       await this.recoverQueuedAsyncJobs();
     } catch (error) {
       console.error("[OrchestratorAgent][onStart] Could not reschedule queued async jobs:", error);
+    }
+
+    try {
+      // Issue #2496 (Mesh Improvement S1): establish the SDK MCP
+      // client connection to this instance's own openaimp MCP
+      // server so chat turns discover the catalog. Best-effort: a
+      // discovery failure never blocks startup (audited as
+      // mesh_mcp.discovery_failed; retried at the next turn).
+      await this.ensureMeshMcpDiscovery();
+    } catch (meshErr) {
+      console.warn("[OrchestratorAgent][onStart] Mesh MCP discovery setup failed:", meshErr);
     }
 
     try {
@@ -1829,6 +1888,14 @@ export class OrchestratorAgent extends PortThink {
       requestId: crypto.randomUUID(),
     };
     this.pendingTurn = turn;
+    // Issue #2496: repair a failed/dropped openaimp MCP discovery
+    // (a no-op when the connection is live). Think assembles the
+    // turn's merged tool set before this hook runs, so a repair
+    // here lands in the NEXT turn's discovered set — the wake-time
+    // ensure in onStart is the primary establishment, and this
+    // retry keeps a long-lived instance from staying degraded
+    // after one failed wake.
+    await this.ensureMeshMcpDiscovery();
     const { userText, userLogin, isAutoOptionsResearchRequest, sourceTab } = turn;
 
     // Session hygiene: delete empty assistant messages left behind
@@ -1905,6 +1972,19 @@ export class OrchestratorAgent extends PortThink {
     }
 
     const { memoryContext, vectorContext } = await this.assembleGrounding(userText);
+    // #2488/#2496: the CHAT_NLQ_MODE gate at the Think layer. The
+    // discovered catalog arrives through Think's auto-merge and
+    // TurnConfig.tools is additive-only, so while the switch
+    // resolves off the gate restricts the turn via activeTools
+    // (every merged tool except tool_openaimp_execute_nlq). The
+    // auto-research suppression below still wins outright.
+    const nlqGate = isAutoOptionsResearchRequest
+      ? {}
+      : chatNlqTurnGate({
+          toolNames: Object.keys(ctx.tools ?? {}),
+          context: { env: this.env },
+          audit: (type, payload) => this.audit(type, "orchestrator", payload),
+        });
     return {
       instructions: buildOrchestratorSystemPrompt({
         route,
@@ -1914,7 +1994,11 @@ export class OrchestratorAgent extends PortThink {
         isAutoOptionsResearchRequest,
       }),
       maxSteps: this.maxSteps,
-      ...(isAutoOptionsResearchRequest ? { activeTools: [] as string[] } : {}),
+      ...(isAutoOptionsResearchRequest
+        ? { activeTools: [] as string[] }
+        : nlqGate.activeTools
+          ? { activeTools: nlqGate.activeTools }
+          : {}),
     };
   }
 

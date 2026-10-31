@@ -130,13 +130,13 @@ export const MESH_GOLDEN_TASKS: readonly MeshGoldenTask[] = [
   },
   {
     id: "door-chat-screen-identity-refusal",
-    title: "Chat-turn screen through the mesh screen door refuses with no acting identity, before any workflow start (#2488)",
+    title: "Chat-turn screen refuses with no acting identity, before any queue or workflow start — since #2496 the SDK loopback carrier refuses the discovered call (mesh_mcp_identity_required); the door's own identity_required refusal still guards the execution layer (#2488)",
     door: "chat-turn",
     className: "ScreenerAgent",
     operation: "run_stock_screen",
     expectation: {
       outcome: "refused",
-      refusalCode: "identity_required",
+      refusalCode: "mesh_mcp_identity_required",
       facts: { workflowStarts: 0 },
     },
   },

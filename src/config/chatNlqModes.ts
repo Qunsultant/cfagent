@@ -15,27 +15,34 @@
  * ignored). Built-in default: "off" — the chat turn's tool set
  * does not offer `execute_nlq` to the model.
  *
- * What the switch governs (the turn's tool assembly ONLY):
- * - "off": `createAgentMcpTools` (src/agents/mcpAdapter.ts, the
- *   turn's tool-assembly layer) does not adapt `execute_nlq`
- *   into the turn's usable tool set. The command stays
- *   registered in McpToolFactory — the /mcp surface, the facade,
- *   and every non-turn caller keep the #1722 contract verbatim;
- *   NLQ execution itself (the async `nlq.execute` capability,
- *   A2A, the REST routes, the channels, the chat error fallback)
- *   is untouched and does not read this switch.
- * - "on": the pre-#2488 turn tool set, verbatim — `execute_nlq`
- *   is adapted like every other catalog command.
+ * What the switch governs (the turn's usable tool set ONLY):
+ * - "off": the turn cannot call `execute_nlq`. The mechanism
+ *   moved with the consumption path: #2488 enforced it in the
+ *   turn's tool-assembly layer (createAgentMcpTools did not
+ *   adapt the command); since #2496 the catalog reaches the turn
+ *   by SDK discovery through Think's auto-merge, so the gate
+ *   restricts the merged set at the Think layer —
+ *   chatNlqTurnGate (src/agents/orchestrator/meshMcpClient.ts),
+ *   applied by portBeforeTurn through TurnConfig.activeTools,
+ *   excludes the discovered `tool_openaimp_execute_nlq`. The
+ *   command stays registered in McpToolFactory — the /mcp
+ *   surface, the facade, and every non-turn caller keep the
+ *   #1722 contract verbatim; NLQ execution itself (the async
+ *   `nlq.execute` capability, A2A, the REST routes, the channels,
+ *   the chat error fallback) is untouched and does not read this
+ *   switch.
+ * - "on": `execute_nlq` is in the turn's usable set like every
+ *   other discovered catalog tool (no activeTools restriction).
  *
  * Resolution order (the #1722 discipline): run > session >
  * user > global env > built-in ("off"). Carriers: run = a
- * per-call value (no run-level carrier exists at tool-assembly
- * time; the level is part of the resolver contract for parity
+ * per-call value (no run-level carrier exists for the turn;
+ * the level is part of the resolver contract for parity
  * with the sibling switches); session / user = the optional
- * `scopedChatNlqModes` carrier on the execution context
- * (McpToolContext.scopedChatNlqModes, populated by the
- * execution-context owner); global env = the Worker env var
- * CHAT_NLQ_MODE. A blank/unset level falls through to the next
+ * `scopedChatNlqModes` carrier (McpToolContext.scopedChatNlqModes
+ * declares it for execution contexts; the turn gate's context
+ * owner may supply it the same way); global env = the Worker
+ * env var CHAT_NLQ_MODE. A blank/unset level falls through to the next
  * level. The FIRST non-blank level wins; if that value is
  * unrecognized, the resolution FAILS CLOSED to "off"
  * (invalid=true, level = the winning level) and does NOT fall
@@ -133,9 +140,11 @@ export function levelsForChatNlq(
 }
 
 /**
- * The turn-assembly resolution: the scoped carrier on the tool
- * context plus the env var out of the context's env. The one
- * call site is createAgentMcpTools (src/agents/mcpAdapter.ts).
+ * The turn resolution: the scoped carrier plus the env var out
+ * of the context's env. The one call site is chatNlqTurnGate
+ * (src/agents/orchestrator/meshMcpClient.ts), applied by
+ * OrchestratorAgent.portBeforeTurn; before #2496 it was
+ * createAgentMcpTools (src/agents/mcpAdapter.ts).
  */
 export function resolveChatNlqTurnMode(context: {
   env?: unknown;

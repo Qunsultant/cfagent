@@ -229,9 +229,17 @@ const ORCH = "agents/orchestrator.ts";
  *  Issue #2489 adds the KV wipe delegation (import + onRequest
  *  early branch + routeRequest delegation, no logic in the class)
  *  — measured 2745 lines / 128577 B, so budget lines rise to
- *  2760 and bytes rise to 129_250. */
-const BUDGET_LINES = 2760;
-const BUDGET_BYTES = 129_250;
+ *  2760 and bytes rise to 129_250.
+ *  Issue #2496 wires the SDK-provided MCP client consumption
+ *  (one import + the waitForMcpConnections field + the
+ *  ensureMeshMcpDiscovery delegation + the onStart/portBeforeTurn
+ *  call sites + the CHAT_NLQ_MODE gate composition; the client
+ *  logic itself lives in orchestrator/meshMcpClient.ts, the
+ *  class gains no logic surface) — measured 2,835 lines /
+ *  132,972 B on the branch tree, so budget lines rise to 2850
+ *  and bytes rise to 133_200. */
+const BUDGET_LINES = 2850;
+const BUDGET_BYTES = 133_200;
 
 const count = (haystack: string, needle: string) =>
   haystack.split(needle).length - 1;
