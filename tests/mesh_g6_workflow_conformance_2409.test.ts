@@ -998,7 +998,9 @@ describe("G6 payment workflow — eviction/resume across both waits + status (#2
     await flushIncarnation();
     expect(journal.parkedWaits).toEqual(["await-payment-approval", "await-payment-verified"]);
     expect(calls.check).toBe(1);
-    expect(eventTypes).toEqual(["payment.checkout_created"]);
+    // #2550: the approval now records payment.approved (naming
+    // the approver) before the verified-payment wait.
+    expect(eventTypes).toEqual(["payment.checkout_created", "payment.approved"]);
     expect(screenerStarts).toBe(0);
 
     // The verified-payment wake-up arrives; incarnation 3
@@ -1008,7 +1010,7 @@ describe("G6 payment workflow — eviction/resume across both waits + status (#2
     instances.set("run-g6-pay-1", { state: "complete", output: outcome });
     expect(outcome.status).toBe("started");
     expect(calls.confirmPaid).toBe(1);
-    expect(eventTypes).toEqual(["payment.checkout_created", "payment.confirmed"]);
+    expect(eventTypes).toEqual(["payment.checkout_created", "payment.approved", "payment.confirmed"]);
     expect(screenerStarts).toBe(1);
     const finalStatus = await (await binding.get("run-g6-pay-1")).status!();
     expect(finalStatus.status).toBe("complete");
@@ -1145,7 +1147,10 @@ describe("G6 payment workflow — no double charge under commit-window replay (#
     expect(calls.check).toBe(1);
     expect(calls.confirmPaid).toBe(1);
     expect(screenerStarts).toBe(1);
-    expect(otherEventTypes).toEqual(["payment.checkout_created"]);
+    // #2550: the approval record (payment.approved) is part of
+    // the non-charge event trail now; the charge itself is still
+    // exactly one row.
+    expect(otherEventTypes).toEqual(["payment.checkout_created", "payment.approved"]);
   });
 });
 

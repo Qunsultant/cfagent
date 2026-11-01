@@ -161,6 +161,17 @@ export interface PaymentWorkflowEvent {
   claimTxHash?: string;
   paymentIntentId?: string;
   /**
+   * Who approved the payment (#2550): the approverId carried by
+   * the approval event, or the submission's authorizing
+   * principal on the approved-at-submission path. Set on
+   * payment.approved and payment.approved_at_submission — the
+   * approval is the decision that lets capture proceed, and the
+   * audit trail must name who made it.
+   */
+  approverId?: string;
+  /** When the flow recorded the event (epoch ms), for events whose decision time is the audit fact (#2550). */
+  occurredAtMs?: number;
+  /**
    * How a covered run was covered (subscription_included | credits |
    * free_flag_off | already_paid). Set on payment.covered events for
    * the per-coverage-type revenue view (#2022).
@@ -300,8 +311,18 @@ export async function runPaymentWorkflowFlow(
     const alreadyApproved =
       params.scheduleKind === "one_off" && params.authorizedAtSubmission === true;
     if (alreadyApproved) {
+      // #2550: the at-submission record names its authorizing
+      // principal — the verified submitter whose authorization
+      // the params carry — symmetric with the waited path below.
       await step.do("record-approval", () =>
-        deps.recordEvent({ runRequestId: params.runRequestId, tenantId: params.tenantId, type: "payment.approved_at_submission" }),
+        deps.recordEvent({
+          runRequestId: params.runRequestId,
+          tenantId: params.tenantId,
+          type: "payment.approved_at_submission",
+          approverId: params.userId,
+          priceUSD: gateDecision.priceUSD,
+          occurredAtMs: Date.now(),
+        }),
       );
     } else {
       let approval: PaymentApprovalEvent;
@@ -323,6 +344,22 @@ export async function runPaymentWorkflowFlow(
         );
         return { status: "approval_rejected", runRequestId: params.runRequestId };
       }
+      // #2550: a successful approval is audited like its
+      // neighbors (rejection/expiry above) — exactly one
+      // payment.approved event naming the approver, the run, the
+      // amount, and the time, recorded before the verified-
+      // payment wait so the trail exists even if payment never
+      // completes.
+      await step.do("record-approval", () =>
+        deps.recordEvent({
+          runRequestId: params.runRequestId,
+          tenantId: params.tenantId,
+          type: "payment.approved",
+          approverId: approval.approverId,
+          priceUSD: gateDecision.priceUSD,
+          occurredAtMs: Date.now(),
+        }),
+      );
     }
     // Then wait for a verified-payment event, then confirm by re-reading status.
     let verified: PaymentVerifiedEvent;
