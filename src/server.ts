@@ -91,6 +91,17 @@ import {
 import { handleMeshRegistryRoute } from "./agents/meshRegistryRoute";
 import { handleRetentionPurgeRoute } from "./data/retentionRoute";
 import {
+  handlePrivacyErasureRoute,
+  handlePrivacyExportRoute,
+  handlePrivacyPreferencesRoute,
+  handlePrivacyStatusRoute,
+} from "./privacy/privacyRoutes";
+import {
+  buildExportPayload,
+  type ErasureLeg,
+  type PrivacyPreferences,
+} from "./privacy/privacyDsar";
+import {
   consumeCfBatch,
   dispatchSubscriberBatch,
 } from "./messaging/cfQueueMessagingAdapter";
@@ -527,6 +538,173 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
       const session = await requireAuth(request, env).catch(() => null);
       const features = await getAllFeatureFlags(env, { userLogin: session?.githubLogin });
       return Response.json({ features });
+    }
+
+    // Issue #1765 (parent #1717, F-41 / PRV-001–PRV-004): privacy
+    // routes — status (ADMT notice + GPC), preferences (ADMT
+    // opt-out), export, erasure cascade. Session-gated: the
+    // handlers 401/403, and every route serves ONLY the
+    // caller's own subject (derived from the session's
+    // internalUserId, never from request input).
+    // Production wiring, stated honestly: preferences live in
+    // the SessionStore under privacy:prefs:<subject>; the
+    // erasure session leg deletes that record and the
+    // response clears the caller's session cookie. The
+    // Orchestrator/Research/Screener DO legs and Vectorize
+    // are registered as DEFERRED — no per-subject delete RPC
+    // exists on those stores on current main (verified by
+    // grep: zero deleteUser/erase/purgeUser hits in
+    // src/agents), so the cascade reports them instead of
+    // claiming erasure it cannot perform. Adding one
+    // eraseSubjectData callable per DO is the named
+    // follow-up; until then the erasure report's
+    // complete=false is the honest production answer.
+    // Export coverage is likewise per-source: mas_messages /
+    // research_runs / screener_runs rows live in DO SQLite
+    // with no per-subject server read path, so they are
+    // listed as not_wired, never implied included.
+    if (
+      path === "/api/privacy/status" ||
+      path === "/api/privacy/preferences" ||
+      path === "/api/privacy/export" ||
+      path === "/api/privacy/erasure"
+    ) {
+      const session = await requireAuth(request, env).catch(() => null);
+      const subject = typeof session?.internalUserId === "string" ? session.internalUserId : "";
+      const kv = sessionStore(env);
+      const prefsKey = `privacy:prefs:${subject}`;
+      const loadPrefs = async (): Promise<PrivacyPreferences> => {
+        const raw = subject ? await kv.get(prefsKey).catch(() => null) : null;
+        if (!raw) return { saleSharingOptOut: false, admtOptOut: false };
+        try {
+          const parsed = JSON.parse(raw) as Partial<PrivacyPreferences>;
+          return {
+            saleSharingOptOut: parsed.saleSharingOptOut === true,
+            admtOptOut: parsed.admtOptOut === true,
+          };
+        } catch {
+          return { saleSharingOptOut: false, admtOptOut: false };
+        }
+      };
+      const savePrefs = async (prefs: PrivacyPreferences): Promise<void> => {
+        await kv.put(prefsKey, JSON.stringify(prefs));
+      };
+      const secGpcHeader = request.headers.get("Sec-GPC");
+      if (path === "/api/privacy/status") {
+        return handlePrivacyStatusRoute({
+          session,
+          method: request.method,
+          secGpcHeader,
+          preferences: await loadPrefs(),
+        });
+      }
+      if (path === "/api/privacy/preferences") {
+        let body: unknown = null;
+        if (request.method === "POST") {
+          try {
+            body = await request.json();
+          } catch {
+            body = null;
+          }
+        }
+        return handlePrivacyPreferencesRoute({
+          session,
+          method: request.method,
+          subject,
+          secGpcHeader,
+          body,
+          load: loadPrefs,
+          save: async (_s, prefs) => savePrefs(prefs),
+        });
+      }
+      if (path === "/api/privacy/export") {
+        return handlePrivacyExportRoute({
+          session,
+          method: request.method,
+          subject,
+          loadExport: async (s) =>
+            buildExportPayload({
+              subject: s,
+              session: { login: session?.githubLogin ?? null, hasInternalUserId: true },
+              messages: [],
+              researchRuns: [],
+              screenerRuns: [],
+              preferences: await loadPrefs(),
+              generatedAt: Date.now(),
+              coverage: [
+                { source: "session", status: "included", note: "caller session summary + stored preferences" },
+                {
+                  source: "mas_messages",
+                  status: "not_wired",
+                  note: "rows live in OrchestratorAgent DO SQLite; no per-subject server read path on current main (#1765 follow-up)",
+                },
+                {
+                  source: "research_runs",
+                  status: "not_wired",
+                  note: "rows live in ResearchAgent DO SQLite; no per-subject server read path on current main (#1765 follow-up)",
+                },
+                {
+                  source: "screener_runs",
+                  status: "not_wired",
+                  note: "rows live in ScreenerAgent DO SQLite; no per-subject server read path on current main (#1765 follow-up)",
+                },
+                {
+                  source: "vectorize",
+                  status: "not_wired",
+                  note: "vectors keyed by report/plan/outcome id, never by subject; no per-subject read path on current main",
+                },
+              ],
+            }),
+        });
+      }
+      // /api/privacy/erasure
+      const legs: ErasureLeg[] = [
+        {
+          name: "session",
+          erase: async (s) => {
+            const before = await kv.get(`privacy:prefs:${s}`).catch(() => null);
+            await kv.delete(`privacy:prefs:${s}`);
+            const after = await kv.get(`privacy:prefs:${s}`).catch(() => null);
+            return { deleted: before ? 1 : 0, residual: after ? 1 : 0 };
+          },
+          count: async (s) => ((await kv.get(`privacy:prefs:${s}`).catch(() => null)) ? 1 : 0),
+        },
+        {
+          name: "orchestrator",
+          deferred: "no per-subject delete RPC on OrchestratorAgent on current main (#1765 follow-up)",
+        },
+        {
+          name: "research",
+          deferred: "no per-subject delete RPC on ResearchAgent on current main (#1765 follow-up)",
+        },
+        {
+          name: "screener",
+          deferred: "no per-subject delete RPC on ScreenerAgent on current main (#1765 follow-up)",
+        },
+        {
+          name: "vectorize",
+          deferred: "no per-subject vector key on current main; vectors keyed by report/plan/outcome id",
+        },
+      ];
+      const erasureResponse = await handlePrivacyErasureRoute({
+        session,
+        method: request.method,
+        subject,
+        legs,
+      });
+      // Erasure terminates the caller's own session: clear its
+      // cookie on any handled (200) erasure response. Other
+      // sessions of the same subject cannot be enumerated
+      // (KvLike has no list) — recorded in the §15 report.
+      if (erasureResponse.status === 200) {
+        const headers = new Headers(erasureResponse.headers);
+        headers.set("Set-Cookie", clearSessionCookie());
+        return new Response(erasureResponse.body, {
+          status: erasureResponse.status,
+          headers,
+        });
+      }
+      return erasureResponse;
     }
 
     // Issue #2041 S2: saga journey-gate routes (panel + chat
