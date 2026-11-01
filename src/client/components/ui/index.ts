@@ -45,6 +45,8 @@
  *   Escape/outside-close, placement shared with Menu).
  * - Drawer — side panel on the Modal behavior contract (portal, Escape/
  *   backdrop close, focus trap + restore, scroll lock; sides left/right).
+ * - SkipLink — keyboard entry to main content (visually hidden until
+ *   focus; target region carries tabIndex={-1}).
  *
  * Styles live in ./primitives.css (imported once by main.tsx). New
  * primitives are added here with their styles + tests in the same PR.
@@ -71,3 +73,4 @@ export { ToastProvider, useToast, type ToastTone, type ToastInput, type ToastApi
 export { Menu, type MenuProps, type MenuItem } from "./Menu";
 export { Popover, type PopoverProps } from "./Popover";
 export { Drawer, type DrawerProps } from "./Drawer";
+export { SkipLink } from "./SkipLink";

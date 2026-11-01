@@ -32,7 +32,7 @@ import { MarketStatusPill } from "./components/MarketStatusPill";
 import { AskAgentWidget } from "./components/AskAgentWidget";
 import { getStoredTheme, applyTheme, ThemeMode, initThemeListener } from "./theme";
 import { adAccentPalette } from "./designTokens";
-import { Button, TextInput, Badge, Select, Table, Card, Notice, Modal, PageShell, PageSection, EmptyState } from "./components/ui";
+import { Button, TextInput, Badge, Select, Table, Card, Notice, Modal, PageShell, PageSection, EmptyState, SkipLink } from "./components/ui";
 import { MarkdownContent } from "./chat/MarkdownContent";
 import { renderInlineFormatted } from "./chat/renderInlineFormatted";
 import { ReasoningView } from "./chat/ReasoningView";
@@ -1543,6 +1543,7 @@ export function Chat({ user }: { user: User }) {
 
   return (
     <div className={`app-container ${navLayout === "left" ? "layout-sidebar" : "layout-top"} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+      <SkipLink />
       {/* #2471: first-run setup over the hub until this user completes it. */}
       <FirstRunGate userLogin={user.login} />
       <Modal
@@ -1599,7 +1600,7 @@ export function Chat({ user }: { user: User }) {
       )}
 
       {/* Main Content Layout Container */}
-      <div className={navLayout === "left" ? "app-main-layout" : "app-top-layout"}>
+      <div id="main-content" tabIndex={-1} className={navLayout === "left" ? "app-main-layout" : "app-top-layout"}>
         {/* Sub-Header for Left Sidebar mode OR Full Header for Top Nav mode */}
         {navLayout === "left" ? (
           <header className="app-sub-header">
