@@ -512,19 +512,11 @@ export const ROUTES = [
   {
     id: "schedules",
     retain: true,
-    navGroup: "schedules",
+    navGroup: "platform-admin",
     crumb: "Schedules",
     category: "Platform",
-    icon: "Schedules",
-    description: "The one scheduling surface for screening runs — create, pause, and inspect scheduled jobs",
-    navEntry: {
-      label: "Schedules",
-      shortLabel: "Schedules",
-      navOrder: 22,
-      defaultVisible: true,
-      badge: "Cron",
-      badgeType: "neutral",
-    },
+    icon: "Screeners",
+    description: SCREENERS_DESC,
   },
   {
     id: "screeners",
@@ -630,7 +622,7 @@ export const ROUTES = [
     navEntry: {
       label: "Workflows & FAQ",
       shortLabel: "Guides",
-      navOrder: 24,
+      navOrder: 22,
       defaultVisible: true,
       badge: "14 Guides",
       badgeType: "neutral",

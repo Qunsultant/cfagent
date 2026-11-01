@@ -4,3 +4,4 @@
 
 ### Fixed
 - Platform Admin horizontal tabs (`PLATFORM_ADMIN_TABS`) horizontal overflow: enabled `overflow-x: auto` and `flex-shrink: 0` on `.ui-tabs` in `primitives.css` so all 8 tabs including "Admin Access" fit cleanly and scroll smoothly on all viewports without clipping (#2709).
+
