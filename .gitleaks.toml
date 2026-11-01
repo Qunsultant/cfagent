@@ -1,31 +1,68 @@
 # Gitleaks configuration — cfagent
 # Extends default gitleaks rules with project allowlists for test fixtures,
 # documentation examples, and historical mock credentials.
+#
+# RULE-SCOPED by #1762 (was: a single global [allowlist]). The old global
+# allowlist suppressed EVERY rule for every file under tests/ and docs/ and
+# for nine listed commits, so a new rule's finding in a test fixture (for
+# example a Stripe key or a GitHub PAT) was silently ignored. There is now
+# NO global allowlist: the only rule with an allowlist is generic-api-key,
+# and each entry below names exactly one suppression dimension, so a
+# different rule's finding in the same file or commit is still reported.
+# Behavior was verified with gitleaks v8.24.2 (the version
+# .github/workflows/gitleaks.yml pins): a planted generic-api-key finding
+# in tests/ and docs/ is suppressed, while planted stripe-access-token and
+# github-pat findings in tests/ fire; a generic-api-key finding in a
+# non-allowlisted commit fires while the same finding in an allowlisted
+# commit does not. Pinned by tests/gitleaks_allowlist_1762.test.ts.
+#
+# The fingerprint-scoped .gitleaksignore (fingerprint + file + rule + line)
+# is a separate mechanism and is unchanged by this file.
 
 title = "cfagent gitleaks configuration"
 
 [extend]
 useDefault = true
 
-[allowlist]
-description = "Allowlist for test fixtures, documentation samples, and historical mock tokens"
-paths = [
-  '''tests/.*''',
-  '''docs/.*''',
-]
-commits = [
-  "c49ea9c659b03abda1fae3f61f9cb5aef5b2a0ae",
-  "1d9e719c0f5eeb0ad07d3dcd40e107783c1f218f",
-  "7676f0babe957b8fcd2b001e54e93b6c7bd81ff0",
-  "b398dd1b4d51f11f09cb92e9dd51b9fde773bae2",
-  "420f56ad333cb4b62962b7a5e467ed29033e73bb",
-  "13594c2bb398c2cb6c88d4b2d7c9193b97ee7eb3",
-  "fcb6f08983dd8c76b55a4f731035b809edaa0cc9",
-  "b3af1ffd3e27f0b233d8b089eebb261eed167c29",
-  "0c8312c0b9e3d98dfd6b9d98d6482eebddd0a152",
-]
-regexTarget = "line"
-regexes = [
-  '''sandbox\.paypal\.com''',
-  '''0x1A2B3C4D5E6F7A8B9C0D1E2F3A4B5C6D7E8F9A0B''',
-]
+[[rules]]
+id = "generic-api-key"
+
+  # (1) Paths: historical credential-shaped samples in test fixtures and
+  # documentation. Fixtures SHOULD use obvious placeholders (YOUR_*, test)
+  # so they never need an entry; these paths cover the legacy samples.
+  [[rules.allowlists]]
+  description = "generic-api-key only: test fixtures and documentation samples"
+  paths = [
+    '''tests/.*''',
+    '''docs/.*''',
+  ]
+
+  # (2) Commits: historical commits whose generic-api-key findings are
+  # already recorded fingerprint-by-fingerprint in .gitleaksignore. Only
+  # commits verified to resolve in this repo's history AND to carry only
+  # generic-api-key findings are listed. The pre-#1762 global list also
+  # carried five values that are not commits at all (they are
+  # .gitleaksignore fingerprints, and git cat-file fails for all five in
+  # the full history); those dead entries are dropped, not carried over,
+  # because a commits entry that matches nothing suppresses nothing.
+  [[rules.allowlists]]
+  description = "generic-api-key only: historical commits with recorded generic-api-key findings"
+  commits = [
+    "c49ea9c659b03abda1fae3f61f9cb5aef5b2a0ae",
+    "1d9e719c0f5eeb0ad07d3dcd40e107783c1f218f",
+    "7676f0babe957b8fcd2b001e54e93b6c7bd81ff0",
+    "b398dd1b4d51f11f09cb92e9dd51b9fde773bae2",
+  ]
+
+  # (3) Line regexes: two historical sample literals that trip
+  # generic-api-key in context (a sandbox PayPal URL carrying a token
+  # parameter, and the x402 wallet-address fixture constant). Line-scoped
+  # (regexTarget = "line"), so only a finding on a line containing one of
+  # these literals is suppressed — never a whole file or commit.
+  [[rules.allowlists]]
+  description = "generic-api-key only: historical sample literals, line-scoped"
+  regexTarget = "line"
+  regexes = [
+    '''sandbox\.paypal\.com''',
+    '''0x1A2B3C4D5E6F7A8B9C0D1E2F3A4B5C6D7E8F9A0B''',
+  ]

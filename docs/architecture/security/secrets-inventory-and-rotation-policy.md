@@ -63,7 +63,7 @@ sessions/tokens by design — schedule it, do not surprise it.
 | `INBOUND_NLQ_WEBHOOK_SECRET` | Inbound NLQ webhook authentication | Worker env | Regenerate → update Worker secret → verify a signed test request passes and an old signature fails | NLQ webhook path | Unknown |
 | `OUTBOUND_WEBHOOK_SECRET` | Outbound webhook signing | Worker env | As above, per receiving endpoint | Outbound webhook consumers | Unknown |
 | `SLACK_SIGNING_SECRET` | Slack request signature verification | Worker env (Slack app) | Regenerate in Slack app → update Worker secret → verify a Slack event verifies | Slack events path | Unknown |
-| `SLACK_BOT_TOKEN` | Slack bot token (posts, file uploads) | Worker env (Slack app) | Regenerate in Slack app → update Worker secret → verify a post succeeds. **Open owner action, unchanged by this PR:** the bot token still lacks the `files:write` scope (Slack `missing_scope`); file posts cannot arrive until the scope is added and the app reinstalled | Slack posting / file delivery | Unknown |
+| `SLACK_BOT_TOKEN` | Slack bot token (posts, file uploads) | Worker env (Slack app) | Regenerate in Slack app → update Worker secret → verify a post succeeds. **Open owner action, tracked in the §6 owner-action record (#1762, 2026-11-01: still pending):** the bot token still lacks the `files:write` scope (Slack `missing_scope`); file posts cannot arrive until the scope is added and the app reinstalled | Slack posting / file delivery | Unknown |
 | `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET` | Slack OAuth app client pair | Slack app → Worker env | Reissue in Slack app → update Worker secret → verify OAuth flow | Slack OAuth | Unknown |
 | `STRIPE_SECRET_KEY` | Stripe API secret | GitHub secret → deploy sync → Worker secret | Roll in Stripe dashboard → update GitHub secret → deploy sync → verify a Stripe call succeeds | Payments paths | Unknown |
 | `STRIPE_WEBHOOK_SECRET` | Stripe webhook signature verification | GitHub secret → deploy sync → Worker secret | Roll in Stripe dashboard → update GitHub secret → deploy sync → verify a test event verifies | Stripe webhooks | Unknown |
@@ -170,17 +170,40 @@ tracked `.agents/mcp_config.json` were real or placeholders.
 
 ## 5. Secret-scanning hygiene
 
-Current state on main (2026-10-25, verified by reading the configs, not by
-running a scan from this PR):
+Current state on main (2026-11-01, after #1762; verified by reading the
+configs AND by running gitleaks v8.24.2 — the version
+`.github/workflows/gitleaks.yml` pins — over the full history):
 
-- `.gitleaks.toml` carries a path-scoped allowlist (`tests/`, `docs/`) plus
-  historical commit entries. **Gap, stated:** that allowlist is path-scoped
-  but not rule-scoped — it is broader than the §5 rule below, and tightening
-  it is follow-up work, not silently assumed done.
-- `.gitleaksignore` retains three exact fingerprint entries for the historical
-  `.agents/mcp_config.json` findings. Those entries are fingerprint + file +
-  rule scoped: that is the tight form, and it is the only form a historical
-  entry may take.
+- `.gitleaks.toml` is now **rule-scoped** (#1762, closing the gap this
+  section previously stated). The old single global `[allowlist]` — which
+  suppressed *every* rule for every file under `tests/` and `docs/` and
+  for nine listed commits — is gone. The only rule with an allowlist is
+  `generic-api-key`, with three separate entries: paths (`tests/`,
+  `docs/`), four historical commits, and two line-scoped regexes (the
+  sandbox-PayPal URL literal and the x402 wallet-address fixture
+  constant). A different rule's finding in the same file or commit is
+  still reported — verified by planted-finding tests: a generic-api-key
+  finding in `tests/`/`docs/` is suppressed, while planted
+  stripe-access-token and github-pat findings in `tests/` fire, and a
+  generic-api-key finding in a non-allowlisted commit fires while the
+  same finding in an allowlisted commit does not. The config shape is
+  pinned by `tests/gitleaks_allowlist_1762.test.ts`.
+- The pre-#1762 global commits list also carried five values that are
+  **not commits at all**: they are `.gitleaksignore` fingerprints, and
+  `git cat-file` fails for all five in the repo's full history, so as
+  commits entries they suppressed nothing. #1762 drops those five dead
+  entries and keeps only the four entries that resolve as commits and
+  carry only generic-api-key findings. Dropping a dead entry changes no
+  scan outcome; it removes a false claim that nine commits were covered.
+- Full-history scan result with the rule-scoped config (2026-11-01,
+  gitleaks v8.24.2, `gitleaks git`, 4,553 commits): **no leaks found** —
+  the same result as the pre-#1762 global config, so the tightening
+  surfaces no previously hidden historical finding.
+- `.gitleaksignore` retains 30 fingerprint entries, all `generic-api-key`
+  (including three for the historical `.agents/mcp_config.json`
+  findings). Those entries are fingerprint + file + rule + line scoped:
+  that is the tight form, and it is the only form a historical entry
+  may take.
 
 **Rule for any new allowlist entry:** path + rule + fingerprint scoped, never
 blanket, never for a live value, never for a value whose rotation is
@@ -203,6 +226,41 @@ allowlist entry for a credential-shaped value.
   the first cadence cycle after this inventory runs from its merge date, and
   the first quarterly review must replace every `Unknown` with a date or a
   recorded exception.
+
+### Rotation-cadence baseline (#1762, recorded 2026-11-01)
+
+- **Baseline anchor:** this inventory came into force 2026-10-25. The
+  90-day cadence (§3) for provider API keys and for signing / session /
+  webhook secrets runs from that date.
+- **First quarterly review — due 2027-01-23, owner: the human owner
+  (Mubasher).** The CISO lane documents the review; it does not rotate
+  provider keys on its own authority (§1). At that review every
+  `Unknown` in §1–§2 becomes a rotation date or a recorded exception —
+  an `Unknown` carried past 2027-01-23 without an exception is a review
+  failure, not a baseline. The 180-day OAuth-client-secret and 12-month
+  GitHub-App-key / Cloudflare-token cadences are checked at the same
+  review and come due on their own clocks (2027-04-23 and 2026-10-25
+  come due on their own clocks (2027-04-23 and 2027-10-25 respectively,
+  counted from the baseline where no earlier date is recorded).
+- **Baseline status at 2026-11-01:** exactly one row carries a date —
+  the Alpaca pair, revoked and rotated by the human owner 2026-10-25
+  (§4). Every other row is `Unknown`, which is the honest baseline:
+  no lane has verified a live rotation date for any other row, and none
+  is invented here.
+
+### Owner-action record (#1762, status 2026-11-01 — honestly stated)
+
+These two items are **owner actions, not code**, and this slice claims
+neither of them done:
+
+| Item | Owner action | Owner | Status |
+|---|---|---|---|
+| Slack `files:write` scope + app reinstall | Add the `files:write` scope to the Slack app and reinstall it, then verify a file post arrives (the bot token's current scope gap is the §2 `SLACK_BOT_TOKEN` row) | Human owner (Mubasher, Slack app owner) | **PENDING** — not done, not claimed; file posts cannot arrive until it is done |
+| History purge for pre-#1486 Alpaca values | Decide whether to purge the pre-#1486 git history carrying the Alpaca-key-shaped values (§4). This is a **separate owner decision** from the rotation: the keys were revoked/rotated 2026-10-25 (owner-confirmed, §4), so purge is about history hygiene, not about killing a live credential. This lane performed no live-Alpaca verification and claims none. | Human owner (Mubasher) | **PENDING decision** — not done, not claimed; #768 stays closed and is NOT reopened by this slice |
+
+When either item moves, its status row is updated in this document in the
+same change that records the evidence — a status change without evidence
+is not a status change.
 
 ## Appendix: referenced but not secrets
 
