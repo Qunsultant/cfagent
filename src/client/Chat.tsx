@@ -15,6 +15,7 @@ import { SettingsMenu, type ETradeDynamicMenuProps } from "./ETradeDynamicMenu";
 import { MarketDataResearchHub } from "./MarketDataResearchHub";
 import { OptionsFlowsHub } from "./options/flows";
 import { OptionsScreenerPage } from "./OptionsScreenerPage";
+import { PlatformAdminPage } from "./PlatformAdminPage";
 import { WorkflowsHub } from "./WorkflowsHub";
 import { WorkflowRunsPanel } from "./WorkflowRunsPanel";
 import { AgentsPanel } from "./AgentsPanel";
@@ -1349,6 +1350,14 @@ export function Chat({ user }: { user: User }) {
           handleSelectTab(newTab);
           setTbdMenuOpen(false);
         }}
+      />
+    ),
+    "platform-admin": (
+      <PlatformAdminPage
+        user={{ login: user.login, name: user.name, avatar: user.avatar }}
+        adBannerConfig={adBannerConfig}
+        onUpdateAdBannerConfig={handleUpdateAdBannerConfig}
+        onOpenPartnerDeals={() => setShowPartnerDealsModal(true)}
       />
     ),
     "payment-assurance": (

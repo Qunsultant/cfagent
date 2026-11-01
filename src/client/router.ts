@@ -11,11 +11,13 @@
  * subscribes to both `popstate` (back/forward) and `routechange`.
  */
 import { resolveRouteId, type RouteId } from "./routes";
+import { platformAdminSectionFromNavId } from "./navConfig";
 
 /** Tab id carried by a query string; unknown or missing ids fall back to autopilot. */
 export function parseTabFromSearch(search: string): RouteId {
-  const tab = new URLSearchParams(search).get("tab");
-  return resolveRouteId(tab ?? "");
+  const tab = new URLSearchParams(search).get("tab") ?? "";
+  const section = platformAdminSectionFromNavId(tab);
+  return resolveRouteId(section ? "platform-admin" : tab);
 }
 
 /** Query string with `tab` set, every other param preserved. */
@@ -59,11 +61,30 @@ export function buildSearchWithView(currentSearch: string, view: string): string
  * there (no duplicate history entries for re-clicking the active item),
  * otherwise pushState and notify subscribers synchronously.
  */
-export function navigateToTab(tab: string): RouteId {
-  const next = resolveRouteId(tab);
+export function navigateToTab(tab: string, view?: string): RouteId {
+  const section = platformAdminSectionFromNavId(tab);
+  const targetTab = section ? "platform-admin" : tab;
+  const targetView = view ?? section;
+
+  const next = resolveRouteId(targetTab);
   if (typeof window === "undefined") return next;
-  if (parseTabFromSearch(window.location.search) === next) return next;
-  const url = `${window.location.pathname}${buildSearchWithTab(window.location.search, next)}${window.location.hash}`;
+
+  const currentTab = parseTabFromSearch(window.location.search);
+  const currentView = new URLSearchParams(window.location.search).get("view");
+  if (currentTab === next && ((!targetView && !currentView) || currentView === targetView)) {
+    return next;
+  }
+
+  let search = buildSearchWithTab(window.location.search, next);
+  if (targetView) {
+    search = buildSearchWithView(search, targetView);
+  } else if (targetTab !== "platform-admin") {
+    const params = new URLSearchParams(search);
+    params.delete("view");
+    const s = params.toString();
+    search = s ? `?${s}` : "";
+  }
+  const url = `${window.location.pathname}${search}${window.location.hash}`;
   window.history.pushState(null, "", url);
   window.dispatchEvent(new Event("routechange"));
   return next;
