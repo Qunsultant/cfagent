@@ -225,12 +225,19 @@ export function defaultPreferences(userId: string, tenantId: string): Notificati
 }
 
 export interface NotificationPreferencePort {
-  /** Stored row, or the defaults above when no row exists (no write). */
+  /**
+   * Stored row, or the defaults above when no row exists (no
+   * write). #1761: tenant-scoped — a blank tenant throws, and
+   * a stored row for another tenant reads as the defaults,
+   * never as the other tenant's row.
+   */
   getPreferences(userId: string, tenantId: string): Promise<NotificationPreferences>;
   /**
    * Upsert toggles. A digest opt-out takes effect on the next
    * send check, which is the same write — same-day effect, no
-   * propagation delay.
+   * propagation delay. #1761: fail-closed on tenant mismatch —
+   * a stored row for another tenant throws before any write
+   * instead of being overwritten (the row key is user_id alone).
    */
   setPreferences(input: {
     userId: string;

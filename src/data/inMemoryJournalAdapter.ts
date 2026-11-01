@@ -16,6 +16,7 @@ import {
   type JournalEntryInput,
   type JournalPort,
 } from "./journalPorts";
+import { bindTenantScope, TenantScopeError } from "./tenantScope";
 
 export class InMemoryJournalAdapter implements JournalPort {
   private entries = new Map<string, JournalEntry>();
@@ -24,7 +25,9 @@ export class InMemoryJournalAdapter implements JournalPort {
   async postEntries(entries: JournalEntryInput[]): Promise<JournalEntry[]> {
     assertBalancedPost(entries);
     const ref = entries[0].transactionRef;
-    const existing = await this.getEntriesByRef(ref);
+    // #1761: the idempotency probe is tenant-scoped — a replay in
+    // another tenant must write, never inherit the first tenant's rows.
+    const existing = await this.getEntriesByRef(ref, entries[0].tenantId);
     if (existing.length > 0) return existing;
     const now = Date.now();
     const written: JournalEntry[] = [];
@@ -41,6 +44,16 @@ export class InMemoryJournalAdapter implements JournalPort {
         family: e.family,
         createdAtMs: now,
       };
+      // #1761: mirror the D1 adapter — the entry id is
+      // tenant-blind, so overwriting another tenant's row here
+      // would be the in-memory form of the same cross-tenant
+      // clobber. Fail closed instead.
+      const clash = this.entries.get(record.id);
+      if (clash && clash.tenantId !== record.tenantId) {
+        throw new TenantScopeError(
+          `Journal post for transactionRef ${ref} collides with an entry posted under another tenant; refusing cross-tenant replay (issue #1761).`,
+        );
+      }
       this.entries.set(record.id, record);
       written.push(record);
     }
@@ -59,9 +72,15 @@ export class InMemoryJournalAdapter implements JournalPort {
       );
   }
 
-  async getEntriesByRef(transactionRef: string): Promise<JournalEntry[]> {
+  async getEntriesByRef(
+    transactionRef: string,
+    tenantId: string,
+  ): Promise<JournalEntry[]> {
+    // #1761: tenant-scoped, mirroring the D1 adapter — a blank
+    // tenant throws (fail closed) and a mismatched tenant reads empty.
+    bindTenantScope(tenantId);
     return [...this.entries.values()]
-      .filter((e) => e.transactionRef === transactionRef)
+      .filter((e) => e.transactionRef === transactionRef && e.tenantId === tenantId)
       .sort((a, b) => (a.id < b.id ? -1 : 1));
   }
 

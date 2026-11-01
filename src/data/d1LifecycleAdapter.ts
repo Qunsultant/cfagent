@@ -30,6 +30,11 @@ import {
   type MigrationDb,
 } from "./migrationRunner";
 import {
+  assertTenantScopeMatch,
+  bindTenantScope,
+  tenantEq,
+} from "./tenantScope";
+import {
   allocateRedemption,
   defaultPreferences,
   referralEarningId,
@@ -242,10 +247,21 @@ export class D1LifecycleAdapter implements LifecycleStore {
   }
 
   async getPreferences(userId: string, tenantId: string): Promise<NotificationPreferences> {
+    // #1761: the pre-fix read predicated on user_id alone and
+    // returned another tenant's row for the same user. The tenant
+    // filter is now built by the bound scope: a blank tenant
+    // throws, a mismatched tenant reads defaults (never the
+    // other tenant's row).
+    const scope = bindTenantScope(tenantId);
     const rows = await this.db
       .select()
       .from(agentNotificationPreferences)
-      .where(eq(agentNotificationPreferences.userId, userId))
+      .where(
+        and(
+          eq(agentNotificationPreferences.userId, userId),
+          tenantEq(agentNotificationPreferences, scope),
+        ),
+      )
       .limit(1);
     if (rows.length === 0) return defaultPreferences(userId, tenantId);
     return {
@@ -266,6 +282,17 @@ export class D1LifecycleAdapter implements LifecycleStore {
     if (!input.userId || !input.tenantId) {
       throw new Error("userId and tenantId are required.");
     }
+    // #1761: the table's primary key is user_id alone, so the
+    // upsert below would otherwise overwrite another tenant's
+    // row. Fail closed: a stored row for another tenant throws
+    // before any write, instead of being silently clobbered.
+    const scope = bindTenantScope(input.tenantId);
+    const raw = await this.db
+      .select()
+      .from(agentNotificationPreferences)
+      .where(eq(agentNotificationPreferences.userId, input.userId))
+      .limit(1);
+    if (raw.length > 0) assertTenantScopeMatch(raw[0].tenantId, scope);
     const existing = await this.getPreferences(input.userId, input.tenantId);
     const record: NotificationPreferences = {
       userId: input.userId,
