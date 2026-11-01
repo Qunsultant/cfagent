@@ -240,9 +240,20 @@ const ORCH = "agents/orchestrator.ts";
  *  logic itself lives in orchestrator/meshMcpClient.ts, the
  *  class gains no logic surface) — measured 2,868 lines /
  *  137,257 B on the rebased tree, so budget lines rise to 2885
- *  and bytes rise to 138_000. */
-const BUDGET_LINES = 2885;
-const BUDGET_BYTES = 138_000;
+ *  and bytes rise to 138_000.
+ *  Durable turn submissions (#2566) rewire the chat-turn driver
+ *  onto Think's submission queue (the submission logic itself
+ *  lives in orchestrator/durableTurnSubmission.ts in the #992
+ *  extraction pattern; the class gains the context builder, the
+ *  two thin delegating halves, the submittedTurnRoutes /
+ *  activeSubmittedTurn fields, the portBeforeTurn metadata
+ *  adoption, and the abortAllRequests cancellation) — measured
+ *  3,000 lines / 141,512 B recomposed onto current main (the
+ *  slice's +132 lines / +7,123 B delta over its original base
+ *  applied exactly onto the current main tip), so budget lines
+ *  rise to 3010 and bytes rise to 142_400. */
+const BUDGET_LINES = 3010;
+const BUDGET_BYTES = 142_400;
 
 const count = (haystack: string, needle: string) =>
   haystack.split(needle).length - 1;

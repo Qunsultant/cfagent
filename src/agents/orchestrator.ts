@@ -72,6 +72,7 @@ import { createKvMembershipStore } from "../security/iaaaMembershipStore";
 import { isLoginShaped } from "../security/serviceIdentity";
 import { sessionStore } from "../security/session";
 import { submitAsyncJob, recoverQueuedAsyncJobs, getAsyncJob, listAsyncJobs, executeAsyncJob, ensureAsyncJobTables, scheduleScreenerFollowups, retryAsyncJob, type AsyncJobsContext } from "./orchestrator/asyncJobs";
+import { submitChatTurn, awaitChatTurnSubmission, type DurableTurnContext, type SubmittedTurnHandle } from "./orchestrator/durableTurnSubmission";
 import type { ScreenerRunOutcome } from "../services/screenerFollowups";
 import { marketDateKey, readAutopilotStateRaw, getAutopilotState, writeAutopilotState, incrementAutopilotOrdersToday, fetchBrokerBalanceSnapshot, openNotionalForSymbol, evaluateAndRecordAutopilotVerdict, type AutopilotContext } from "./orchestrator/autopilot";
 import { readSettingRaw, writeSetting, getReportDispatchHitl, setReportDispatchHitl, createReportConfirmation, getReportConfirmation, decideReportConfirmation, storeResearchReportCanonicalAsync, confirmationDeliveryMeta, deliverStoredReportEmail, deliverStoredReportWebhook, persistScreenerReportCanonical, sendReportEmail, sendReportWebhook, type ReportDispatchContext } from "./orchestrator/reportDispatch";
@@ -387,7 +388,17 @@ export class OrchestratorAgent extends PortThink {
     return this.getActorSession().appendMessages(messages);
   }
 
-  /** Think chat turn, driven through the port's turn facet. */
+  /**
+   * Think chat turn, driven through the port's turn facet.
+   * Issue #2566: the chat-turn driver no longer drives the facet —
+   * it submits through Think's durable submission queue (the facet
+   * cannot persist a turn across an instance restart). The facet
+   * is retained deliberately: it is the actor port's turn surface
+   * (the conformance suite in tests/actor-ports-conformance runs
+   * against it), and it remains the only path that carries a
+   * configOverride turn, which the submission queue has no
+   * equivalent for.
+   */
   private runFacetTurn(input: Parameters<ActorTurnPort["runTurn"]>[0]): Promise<ChatResponseResult> {
     return this.createActorTurnRunner().runTurn(input);
   }
@@ -404,6 +415,21 @@ export class OrchestratorAgent extends PortThink {
   // at least that visibility (see the clearMessages note).
   protected abortAllRequests(_reason?: unknown): void {
     this.turnEpoch++;
+    // Issue #2566: cancel the driver's in-flight submission too, so
+    // a memory reset signals the SDK queue (best-effort: a reset
+    // must never fail because the queue could not be reached, and
+    // the epoch gate in the wait half still lands the aborted shape
+    // if the cancellation arrives too late to matter).
+    const active = this.activeSubmittedTurn;
+    if (active) {
+      this.activeSubmittedTurn = undefined;
+      try {
+        void this.cancelSubmission(active.submissionId).catch(() => {});
+      } catch {
+        // Engine without the submission surface (test stubs): the
+        // epoch bump above is the whole contract there.
+      }
+    }
   }
 
   /** Reset the in-flight turn stash. */
@@ -1208,8 +1234,11 @@ export class OrchestratorAgent extends PortThink {
   // emulation of the documented autonomous-admission API over
   // saveMessages — is removed. Think provides submitMessages
   // natively as the durable submissions queue (its own signature
-  // and acceptance result), which is what external admissions
-  // (webhooks, Slack, cron) now use.
+  // and acceptance result). Issue #2566: the chat-turn driver
+  // (runAgenticChatTurn) now submits through that native queue —
+  // see ./orchestrator/durableTurnSubmission.ts — and channel
+  // admissions reach the same driver through the route context, so
+  // this is now the one submission path for programmatic turns.
 
   // Issue #992: extracted to ./orchestrator/scheduledCallbacks.ts (expireStaleOrderDraft);
   async expireStaleOrderDraft(payload: { orderId: string; userLogin?: string }): Promise<void> {
@@ -1795,13 +1824,16 @@ export class OrchestratorAgent extends PortThink {
 
   /**
    * Issue #686 (Think migration step 4 — CUTOVER): the turn stash.
-   * runAgenticChatTurn (the HTTP driver) fills it before driving
-   * runTurn; portBeforeTurn creates it when a turn arrives without
-   * one. portOnChatResponse consumes it. One in-flight chat turn
-   * per DO instance is the live semantic — the AIChatAgent base
-   * serialized turns the same way. Issue #1738: the stash is
-   * in-memory only; there is no durable turn sealing on eviction
-   * (see ADR 0005).
+   * portBeforeTurn creates it for every turn — for facet turns from
+   * the port hooks' context, for direct and submitted turns by
+   * deriving it from the session (deriveTurn). portOnChatResponse
+   * consumes it. One in-flight chat turn per DO instance is the
+   * live semantic — the AIChatAgent base serialized turns the same
+   * way. Issue #1738: the stash is in-memory only; there is no
+   * durable turn sealing on eviction (see ADR 0005). Issue #2566:
+   * the SUBMISSION is now durable even though the stash is not —
+   * a persisted submission that outlives the instance re-executes
+   * on a fresh one and re-derives the stash then (ADR 0024).
    */
   private pendingTurn?: {
     userText: string;
@@ -1825,6 +1857,22 @@ export class OrchestratorAgent extends PortThink {
     /** Issue #2428: the turn hop for this trace has been recorded. */
     traceHopRecorded?: boolean;
   };
+
+  /**
+   * Issue #2566: route outcomes of driver-submitted turns, keyed by
+   * the turn request id the driver stamps into the user message's
+   * metadata (portBeforeTurn adopts the id and records the route
+   * here when the submitted turn executes; the wait half of the
+   * driver reads it back once the submission settles). Bounded by
+   * the capture site (FIFO at 64 — submissions are user-paced and
+   * each entry is one small route record).
+   */
+  private submittedTurnRoutes = new Map<string, RouteDecision>();
+
+  /** Issue #2566: the driver's in-flight submission, so a memory
+   *  reset (abortAllRequests) can cancel it in the SDK queue the
+   *  same way the epoch gates the facet drive. */
+  private activeSubmittedTurn?: { submissionId: string; epoch: number };
 
   /** Actor configuration: the constructed model arm (step-2 decision). */
   getModel() {
@@ -1915,6 +1963,13 @@ export class OrchestratorAgent extends PortThink {
    */
   async portBeforeTurn(ctx: TurnContext): Promise<TurnConfig | void> {
     this.ensureTables();
+    // Issue #2566: a driver-submitted turn arrives with no stash —
+    // the stash is derived from the session, and the correlation
+    // the driver stamped into the user message's metadata (its
+    // turnRequestId, and the re-send record suppression) is adopted
+    // so the driver can collect this turn's route outcome after
+    // the submission settles.
+    const derivedHere = !this.pendingTurn;
     const turn: NonNullable<typeof this.pendingTurn> = this.pendingTurn ?? {
       ...(await this.deriveTurn(ctx)),
       requestId: crypto.randomUUID(),
@@ -1928,6 +1983,34 @@ export class OrchestratorAgent extends PortThink {
     // retry keeps a long-lived instance from staying degraded
     // after one failed wake.
     await this.ensureMeshMcpDiscovery();
+    let submittedTurn = false;
+    if (derivedHere) {
+      try {
+        const session = await this.getPortMessages();
+        const lastUser = [...session].reverse().find((m: any) => m?.role === "user");
+        const meta = ((lastUser as any)?.metadata ?? {}) as {
+          turnRequestId?: unknown;
+          suppressUserRecord?: unknown;
+          recentTurns?: unknown;
+          autoOptionsResearch?: unknown;
+        };
+        if (typeof meta.turnRequestId === "string" && meta.turnRequestId) {
+          turn.requestId = meta.turnRequestId;
+          submittedTurn = true;
+          if (meta.suppressUserRecord === true) turn.suppressUserRecord = true;
+          // Caller-carried turn inputs the facet drive received
+          // directly (issue #2566): the Judge's recent-turns
+          // context and the caller's auto-research determination,
+          // adopted over the session derivation when present.
+          if (Array.isArray(meta.recentTurns)) {
+            turn.recentTurns = meta.recentTurns as Array<{ role?: string; content: string }>;
+          }
+          if (meta.autoOptionsResearch === true) turn.isAutoOptionsResearchRequest = true;
+        }
+      } catch {
+        // Best-effort correlation only; the turn proceeds unadopted.
+      }
+    }
     const { userText, userLogin, isAutoOptionsResearchRequest, sourceTab } = turn;
 
     // Session hygiene: delete empty assistant messages left behind
@@ -1965,6 +2048,18 @@ export class OrchestratorAgent extends PortThink {
       reason: route.reason,
       needsConfirmation: route.needsConfirmation,
     });
+    if (submittedTurn) {
+      // Issue #2566: record the route for the waiting driver (the
+      // submission settles independently of this hook). FIFO-bound
+      // at 64: a driver that never collects (instance replaced
+      // mid-wait) must not grow the map without limit.
+      this.submittedTurnRoutes.set(turn.requestId, route);
+      while (this.submittedTurnRoutes.size > 64) {
+        const oldest = this.submittedTurnRoutes.keys().next().value;
+        if (oldest === undefined) break;
+        this.submittedTurnRoutes.delete(oldest);
+      }
+    }
 
     if (userText && !turn.suppressUserRecord) {
       this.recordMessage("user", userText, "orchestrator");
@@ -2111,6 +2206,16 @@ export class OrchestratorAgent extends PortThink {
    * route}. The user message enters the session through the factory
    * input (delta-by-id), so an HTTP re-send of the history tail does
    * not duplicate it.
+   * Issue #2566: the driver now SUBMITS the turn through Think's
+   * durable submission queue instead of driving the facet in wait
+   * mode (see ./orchestrator/durableTurnSubmission.ts and ADR
+   * 0024); the {result, route} shape is unchanged. The executed
+   * turn derives its inputs from the session (deriveTurn — the
+   * direct-turn derivation), and the inputs the facet drive
+   * received directly from the caller — identity, source tab, the
+   * Judge's recent-turns context, the auto-research flag — ride
+   * the submitted message's metadata and are adopted by
+   * portBeforeTurn, so no caller input is lost in the move.
    */
   private async runAgenticChatTurn(opts: {
     userText: string;
@@ -2119,40 +2224,67 @@ export class OrchestratorAgent extends PortThink {
     isAutoOptionsResearchRequest: boolean;
     /** WS chat only: the originating UI tab, for options-research audit context. */
     sourceTab?: string;
+    /** Issue #2566: explicit idempotency key for the submission —
+     *  a re-submission with the same key collects the original
+     *  submission's outcome instead of executing a second turn. */
+    submissionKey?: string;
   }) {
-    const turn: NonNullable<typeof this.pendingTurn> = {
-      ...opts,
-      requestId: crypto.randomUUID(),
+    const handle = await this.submitChatTurn(opts);
+    return this.awaitChatTurnSubmission(handle);
+  }
+
+  // Issue #2566: extracted to ./orchestrator/durableTurnSubmission.ts
+  // (submitChatTurn) — the submit half of the driver above: the user
+  // message lands in the canonical port transcript and the turn in
+  // Think's durable submission queue, so a submitted turn survives
+  // an instance restart and completes afterwards (ADR 0024).
+  private async submitChatTurn(opts: {
+    userText: string;
+    recentTurns?: Array<{ role?: string; content: string }>;
+    userLogin: string;
+    isAutoOptionsResearchRequest?: boolean;
+    sourceTab?: string;
+    submissionKey?: string;
+  }): Promise<SubmittedTurnHandle> {
+    return submitChatTurn(this.durableTurnContext(), opts);
+  }
+
+  // Issue #2566: extracted to ./orchestrator/durableTurnSubmission.ts
+  // (awaitChatTurnSubmission) — the wait half: block on the durable
+  // submission until it settles, then shape the {result, route} the
+  // routes have always returned from this driver.
+  private async awaitChatTurnSubmission(handle: SubmittedTurnHandle) {
+    return awaitChatTurnSubmission(this.durableTurnContext(), handle);
+  }
+
+  /** Issue #2566: the this-bound context for the durable-turn
+   *  submission helpers (src/agents/orchestrator/
+   *  durableTurnSubmission.ts). Session/identity ownership stays
+   *  with the class; the builder only binds its own members — note
+   *  getMessages binds Think's own session (where a submitted turn
+   *  persists its reply), while the port transcript stays canonical
+   *  for reads through getPortMessages. */
+  private durableTurnContext(): DurableTurnContext {
+    return {
+      getPortMessages: () => this.getPortMessages(),
+      addPortMessages: (messages) => this.addPortMessages(messages),
+      extractMessageText: (message) => this.extractMessageText(message),
+      submitMessages: (messages, options) =>
+        this.submitMessages(messages as any, options as any),
+      waitForSubmission: (submissionId) => this.waitForSubmission(submissionId),
+      inspectSubmission: (submissionId) => this.inspectSubmission(submissionId),
+      getThinkMessages: async () => (await this.getMessages()) as unknown[],
+      turnEpoch: () => this.turnEpoch,
+      submittedTurnRoutes: this.submittedTurnRoutes,
+      markSubmittedTurnActive: (active) => {
+        this.activeSubmittedTurn = active;
+      },
+      markSubmittedTurnSettled: (submissionId) => {
+        if (this.activeSubmittedTurn?.submissionId === submissionId) {
+          this.activeSubmittedTurn = undefined;
+        }
+      },
     };
-    this.pendingTurn = turn;
-    try {
-      const existing = await this.getPortMessages();
-      const tailUser = [...existing].reverse().find((m: any) => m?.role === "user");
-      const isResend = !!tailUser && this.extractMessageText(tailUser) === opts.userText;
-      if (isResend) turn.suppressUserRecord = true;
-      const result = await this.runFacetTurn((current: any[]) =>
-        isResend
-          ? current
-          : [
-              ...current,
-              {
-                id: crypto.randomUUID(),
-                role: "user",
-                parts: [{ type: "text", text: opts.userText }],
-              } as any,
-            ]
-      );
-      const text = result?.message ? this.extractMessageText(result.message) : "";
-      const route = turn.route ?? {
-        agent: "search",
-        confidence: 0,
-        reason: "Turn completed without a recorded route decision.",
-        needsConfirmation: false,
-      };
-      return { result: { text }, route };
-    } finally {
-      if (this.pendingTurn === turn) this.pendingTurn = undefined;
-    }
   }
 
   /** Issue #669: the this-bound context for the shared fallback

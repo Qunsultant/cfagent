@@ -76,6 +76,139 @@ vi.mock("@cloudflare/think", () => {
       // for the tree session; a no-op here keeps that call real
       // (the port transcript clear is what the tests assert).
       async clearMessages() {}
+      // Issue #2566: the durable submission surface. The chat-turn
+      // driver now submits through Think's submission queue, so
+      // this stub implements it at the same engine boundary as
+      // runTurn below: submissions persist in the fake ctx storage,
+      // execute FIFO driving PortThink's hooks (beforeTurn ->
+      // onChatResponse, onChatError on failure, cancellation
+      // honored after beforeTurn), and waitForSubmission drains.
+      async getMessages() {
+        return (await this.ctx.storage.get("stubThink:session")) ?? [];
+      }
+      async submitMessages(messages: any[], options?: any) {
+        const rows = (await this.ctx.storage.get("stubThink:submissions")) ?? {};
+        if (options?.idempotencyKey) {
+          const existing = Object.values(rows).find((r: any) => r.idempotencyKey === options.idempotencyKey) as any;
+          if (existing) return { ...existing, status: existing.status, accepted: false };
+        }
+        const row: any = {
+          submissionId: options?.submissionId ?? crypto.randomUUID(),
+          idempotencyKey: options?.idempotencyKey,
+          status: "pending",
+          messages: Array.isArray(messages) ? messages : [messages],
+          metadata: options?.metadata,
+          createdAt: Date.now(),
+        };
+        rows[row.submissionId] = row;
+        await this.ctx.storage.put("stubThink:submissions", rows);
+        return { submissionId: row.submissionId, idempotencyKey: row.idempotencyKey, status: row.status, metadata: row.metadata, createdAt: row.createdAt, accepted: true };
+      }
+      async inspectSubmission(submissionId: string) {
+        const rows = (await this.ctx.storage.get("stubThink:submissions")) ?? {};
+        const row = rows[submissionId];
+        if (!row) return null;
+        return { submissionId: row.submissionId, idempotencyKey: row.idempotencyKey, status: row.status, error: row.error, messageId: row.messageId, metadata: row.metadata, createdAt: row.createdAt, startedAt: row.startedAt, completedAt: row.completedAt };
+      }
+      async cancelSubmission(submissionId: string) {
+        const rows = (await this.ctx.storage.get("stubThink:submissions")) ?? {};
+        const row = rows[submissionId];
+        if (!row) return { outcome: "not_found", submissionId };
+        if (["completed", "aborted", "skipped", "error"].includes(row.status)) {
+          return { outcome: "already_terminal", submissionId, submission: await this.inspectSubmission(submissionId) };
+        }
+        if (row.status === "pending") {
+          row.status = "aborted";
+          row.completedAt = Date.now();
+          await this.ctx.storage.put("stubThink:submissions", rows);
+          return { outcome: "cancelled", submissionId, previousStatus: "pending" };
+        }
+        row.cancelRequested = true;
+        await this.ctx.storage.put("stubThink:submissions", rows);
+        return { outcome: "cancelled", submissionId, previousStatus: "running" };
+      }
+      async waitForSubmission(submissionId: string) {
+        for (;;) {
+          const rows = (await this.ctx.storage.get("stubThink:submissions")) ?? {};
+          const pending = Object.values(rows)
+            .filter((r: any) => r.status === "pending")
+            .sort((a: any, b: any) => a.createdAt - b.createdAt) as any[];
+          if (pending.length === 0) break;
+          await this.driveSubmission(pending[0].submissionId);
+          const after = (await this.ctx.storage.get("stubThink:submissions")) ?? {};
+          const target = after[submissionId];
+          if (target && target.status !== "pending" && target.status !== "running") break;
+        }
+        return this.inspectSubmission(submissionId);
+      }
+      async driveSubmission(submissionId: string) {
+        const rows = (await this.ctx.storage.get("stubThink:submissions")) ?? {};
+        const row = rows[submissionId];
+        if (!row || row.status !== "pending") return;
+        row.status = "running";
+        row.startedAt = Date.now();
+        await this.ctx.storage.put("stubThink:submissions", rows);
+        const session = await this.getMessages();
+        for (const msg of row.messages) {
+          const at = session.findIndex((m: any) => m.id === msg.id);
+          if (at >= 0) session[at] = msg;
+          else session.push(msg);
+        }
+        await this.ctx.storage.put("stubThink:session", session);
+        thinkStubControl.entered = true;
+        if (thinkStubControl.deferred) await thinkStubControl.deferred.promise;
+        const ctx = {
+          system: "",
+          messages: session.map((m: any) => ({
+            role: m.role,
+            content: (m.parts ?? []).filter((p: any) => p?.type === "text").map((p: any) => p.text).join(""),
+          })),
+          tools: {},
+          model: undefined,
+          continuation: false,
+          body: {},
+        };
+        await (this as any).beforeTurn(ctx);
+        if (thinkStubControl.failNext) {
+          thinkStubControl.failNext = false;
+          const err = new Error("stub model failure");
+          (this as any).onChatError?.(err);
+          const fresh = (await this.ctx.storage.get("stubThink:submissions")) ?? {};
+          fresh[submissionId].status = "error";
+          fresh[submissionId].error = err.message;
+          fresh[submissionId].completedAt = Date.now();
+          await this.ctx.storage.put("stubThink:submissions", fresh);
+          return;
+        }
+        const fresh = (await this.ctx.storage.get("stubThink:submissions")) ?? {};
+        if (fresh[submissionId].cancelRequested) {
+          fresh[submissionId].status = "aborted";
+          fresh[submissionId].completedAt = Date.now();
+          await this.ctx.storage.put("stubThink:submissions", fresh);
+          return;
+        }
+        const message = {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          parts: [{ type: "text", text: "Stub assistant reply." }],
+        };
+        const sessionAfter = await this.getMessages();
+        sessionAfter.push(message);
+        await this.ctx.storage.put("stubThink:session", sessionAfter);
+        const marked = (await this.ctx.storage.get("stubThink:submissions")) ?? {};
+        marked[submissionId].messageId = message.id;
+        await this.ctx.storage.put("stubThink:submissions", marked);
+        await (this as any).onChatResponse({
+          message,
+          requestId: crypto.randomUUID(),
+          continuation: false,
+          status: "completed",
+        });
+        const done = (await this.ctx.storage.get("stubThink:submissions")) ?? {};
+        done[submissionId].status = "completed";
+        done[submissionId].completedAt = Date.now();
+        await this.ctx.storage.put("stubThink:submissions", done);
+      }
       async runTurn(_options: any) {
         thinkStubControl.entered = true;
         if (thinkStubControl.deferred) await thinkStubControl.deferred.promise;
