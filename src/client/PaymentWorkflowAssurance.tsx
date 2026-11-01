@@ -485,10 +485,9 @@ export function PaymentWorkflowAssurance({ userLogin }: { userLogin?: string }) 
             <option value="recurring">recurring</option>
           </Select>
         </div>
-        <label style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", marginTop: "var(--space-3)" }}>
-          <Checkbox checked={liveAuthorized} onChange={(e) => setLiveAuthorized(e.target.checked)} />
-          Authorized at submission (one-off only — skips the second approval wait)
-        </label>
+        <div style={{ marginTop: "var(--space-3)" }}>
+          <Checkbox label="Authorized at submission (one-off only — skips the second approval wait)" checked={liveAuthorized} onChange={(e) => setLiveAuthorized(e.target.checked)} />
+        </div>
         <div style={{ display: "flex", gap: "var(--space-3)", marginTop: "var(--space-4)", flexWrap: "wrap" }}>
           <Button variant="primary" onClick={startLive} disabled={liveBusy} loading={liveBusy}>{"Start live run"}</Button>
           <Button variant="secondary" onClick={refreshLive} disabled={liveBusy || !liveStart}>Refresh status</Button>
@@ -567,10 +566,9 @@ export function PaymentWorkflowAssurance({ userLogin }: { userLogin?: string }) 
           <TextInput label="Account tenant" value={cfg.accountTenantId} onChange={(e) => set("accountTenantId", e.target.value)} />
           <TextInput label="Run request id" value={cfg.runRequestId} onChange={(e) => set("runRequestId", e.target.value)} />
         </div>
-        <label style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", marginTop: "var(--space-3)" }}>
-          <Checkbox checked={cfg.authorizedAtSubmission} onChange={(e) => set("authorizedAtSubmission", e.target.checked)} />
-          Authorized at submission (one-off scheduled only — skips the second approval wait)
-        </label>
+        <div style={{ marginTop: "var(--space-3)" }}>
+          <Checkbox label="Authorized at submission (one-off scheduled only — skips the second approval wait)" checked={cfg.authorizedAtSubmission} onChange={(e) => set("authorizedAtSubmission", e.target.checked)} />
+        </div>
         <div style={{ display: "flex", gap: "var(--space-3)", marginTop: "var(--space-4)", flexWrap: "wrap" }}>
           <Button variant="primary" onClick={runOne} disabled={running} loading={running}>{"Run this scenario"}</Button>
           <Button variant="secondary" onClick={runSuite} disabled={running}>Run all 9 preset tests</Button>

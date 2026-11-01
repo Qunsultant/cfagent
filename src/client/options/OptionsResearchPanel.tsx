@@ -1426,19 +1426,13 @@ export function OptionsResearchPanel({ activeEnv, userLogin, onPreviewTrade, onJ
 
         <fieldset className="options-strategy-picker">
           <legend>Allowed strategy templates</legend>
-          <label>
-            <Checkbox checked={allowedStrategies.includes("all")} onChange={() => setAllowedStrategies(allowedStrategies.includes("all") ? [] : ["all"])} />
-            <span><strong>All strategies ({defaultRegistry.ids().length})</strong></span>
-          </label>
+          <Checkbox label={<span><strong>All strategies ({defaultRegistry.ids().length})</strong></span>} checked={allowedStrategies.includes("all")} onChange={() => setAllowedStrategies(allowedStrategies.includes("all") ? [] : ["all"])} />
           {!allowedStrategies.includes("all") && Object.entries(strategyGroups).map(([category, choices]) => (
             <details key={category}>
               <summary>{category.replace(/_/g, " ")} ({choices.length})</summary>
               <div className="options-strategy-options">
                 {choices.map((choice) => (
-                  <label key={choice.id}>
-                    <Checkbox checked={allowedStrategies.includes(choice.id)} onChange={() => toggleStrategy(choice.id)} />
-                    <span>{choice.label}</span>
-                  </label>
+                  <Checkbox key={choice.id} label={choice.label} checked={allowedStrategies.includes(choice.id)} onChange={() => toggleStrategy(choice.id)} />
                 ))}
               </div>
             </details>

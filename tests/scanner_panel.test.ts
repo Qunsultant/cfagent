@@ -1726,8 +1726,9 @@ describe("slice 5 — scan history (surface 5)", () => {
     await waitForText("Diff vs previous");
 
     // Pick the OLDER run first on purpose: ordering is by timestamp.
+    // (#2177: the Compare row is a Checkbox label now, not .scp-compare.)
     for (const row of [historyRows()[1], historyRows()[0]]) {
-      const box = row.querySelector<HTMLInputElement>(".scp-compare input")!;
+      const box = row.querySelector<HTMLInputElement>(".ui-checkbox-label input")!;
       await click(box);
     }
     await waitForText("Comparing 2 of 2 runs picked.");

@@ -1,0 +1,2 @@
+### Changed
+- Visual-system enforcement (#2177): the raw-label ceiling reaches zero. Checkbox gains a label prop — the primitive gap that forced 18 hand-rolled wrappers — and all 18 migrate to it; the 3 pill-row captions become spans; the varying-control row uses aria-labelledby. Bespoke checkbox-row rules retire (flow/compare treatments retarget to the primitive label); off-scale margins on the retired rows go with them.

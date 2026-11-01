@@ -804,7 +804,7 @@
   box-shadow: var(--shadow-focus-ring);
 }
 
-.strat-input-pill label {
+.strat-input-pill .strat-pill-caption {
   color: var(--color-text-muted);
   font-size: var(--font-size-caption);
   font-weight: 600;

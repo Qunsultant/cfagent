@@ -497,42 +497,34 @@ export function FlowFiltersSidebar({
           {/* Checkboxes Group */}
           {(currentTab === "live" || currentTab === "historical") && (
             <div className="flow-checkboxes-block">
-              <label className="flow-checkbox-row">
-                <Checkbox
-                  checked={filterConfig.isOtmOnly}
-                  onChange={(e) =>
-                    onFilterChange({ ...filterConfig, isOtmOnly: e.target.checked })
-                  }
-                />
-                <span>Out of the money</span>
-              </label>
-              <label className="flow-checkbox-row">
-                <Checkbox
-                  checked={filterConfig.volOverOiOnly}
-                  onChange={(e) =>
-                    onFilterChange({ ...filterConfig, volOverOiOnly: e.target.checked })
-                  }
-                />
-                <span>Volume &gt; OI</span>
-              </label>
-              <label className="flow-checkbox-row">
-                <Checkbox
-                  checked={filterConfig.upcomingEarningsOnly}
-                  onChange={(e) =>
-                    onFilterChange({ ...filterConfig, upcomingEarningsOnly: e.target.checked })
-                  }
-                />
-                <span>Upcoming earnings</span>
-              </label>
-              <label className="flow-checkbox-row">
-                <Checkbox
-                  checked={filterConfig.aboveAskBelowBidOnly}
-                  onChange={(e) =>
-                    onFilterChange({ ...filterConfig, aboveAskBelowBidOnly: e.target.checked })
-                  }
-                />
-                <span>Above ask or below bid</span>
-              </label>
+              <Checkbox
+                label="Out of the money"
+                checked={filterConfig.isOtmOnly}
+                onChange={(e) =>
+                  onFilterChange({ ...filterConfig, isOtmOnly: e.target.checked })
+                }
+              />
+              <Checkbox
+                label="Volume > OI"
+                checked={filterConfig.volOverOiOnly}
+                onChange={(e) =>
+                  onFilterChange({ ...filterConfig, volOverOiOnly: e.target.checked })
+                }
+              />
+              <Checkbox
+                label="Upcoming earnings"
+                checked={filterConfig.upcomingEarningsOnly}
+                onChange={(e) =>
+                  onFilterChange({ ...filterConfig, upcomingEarningsOnly: e.target.checked })
+                }
+              />
+              <Checkbox
+                label="Above ask or below bid"
+                checked={filterConfig.aboveAskBelowBidOnly}
+                onChange={(e) =>
+                  onFilterChange({ ...filterConfig, aboveAskBelowBidOnly: e.target.checked })
+                }
+              />
             </div>
           )}
 

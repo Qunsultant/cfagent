@@ -38,13 +38,13 @@ export function NotificationFields(props: NotificationFieldsProps) {
 
                   <div className="channels-checkbox-grid">
                     {/* Slack */}
-                    <label className="channel-check-card">
+                    <div className="channel-check-card">
                       <div className="channel-check-top">
                         <Checkbox
+                          label={<strong>Slack Block Kit</strong>}
                           checked={pushToSlack}
                           onChange={(e) => setPushToSlack(e.target.checked)}
                         />
-                        <strong>Slack Block Kit</strong>
                       </div>
                       <span className="channel-check-desc">
                         Interactive cards with PDF report attached and action shortcuts
@@ -70,16 +70,16 @@ export function NotificationFields(props: NotificationFieldsProps) {
                           )}
                         </>
                       )}
-                    </label>
+                    </div>
 
                     {/* Email */}
-                    <label className="channel-check-card">
+                    <div className="channel-check-card">
                       <div className="channel-check-top">
                         <Checkbox
+                          label={<strong>Email Channel (via cfpay A2A)</strong>}
                           checked={Boolean(emailTo)}
                           onChange={(e) => setEmailTo(e.target.checked ? "trader@firm.com" : "")}
                         />
-                        <strong>Email Channel (via cfpay A2A)</strong>
                       </div>
                       <span className="channel-check-desc">
                         Full report with attached PDF, complete screened symbols table, and technicals
@@ -93,16 +93,16 @@ export function NotificationFields(props: NotificationFieldsProps) {
                           placeholder="Recipient Email (e.g. trader@firm.com)"
                         />
                       )}
-                    </label>
+                    </div>
 
                     {/* Webhook */}
-                    <label className="channel-check-card">
+                    <div className="channel-check-card">
                       <div className="channel-check-top">
                         <Checkbox
+                          label={<strong>Outbound Signed Webhook</strong>}
                           checked={Boolean(webhookUrl)}
                           onChange={(e) => setWebhookUrl(e.target.checked ? "https://api.firm.com/webhooks/screener" : "")}
                         />
-                        <strong>Outbound Signed Webhook</strong>
                       </div>
                       <span className="channel-check-desc">
                         HMAC SHA-256 signed JSON payload. Dispatched only when OUTBOUND_WEBHOOK_SECRET is configured on the server — without a signing secret, the webhook is not sent.
@@ -116,7 +116,7 @@ export function NotificationFields(props: NotificationFieldsProps) {
                           placeholder="https://..."
                         />
                       )}
-                    </label>
+                    </div>
 
                     {/* Broadcast */}
                     <div className="channel-check-card" style={{ opacity: 0.9 }}>

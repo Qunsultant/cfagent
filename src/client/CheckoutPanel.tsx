@@ -485,10 +485,7 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
             </p>
           )}
           {pricing?.monetizationEnabled && (
-            <label>
-              <Checkbox checked={authorized} onChange={(e) => setAuthorized(e.target.checked)} /> I authorize this
-              charge at submission (one-off run only; recurring schedules are never card-charged).
-            </label>
+            <Checkbox label="I authorize this charge at submission (one-off run only; recurring schedules are never card-charged)." checked={authorized} onChange={(e) => setAuthorized(e.target.checked)} />
           )}
           {submitError && <Notice tone="danger">{submitError}</Notice>}
           <Button variant="primary" loading={submitting} onClick={handlePay}>
