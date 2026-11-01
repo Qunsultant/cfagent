@@ -103,12 +103,13 @@ describe("platform admin config (#2624)", () => {
 });
 
 describe("platform admin in the left navigation (#2624)", () => {
-  const adminSection = DEFAULT_LEFT_NAV_CONFIG.sections.find((section) => section.id === "section-platform-admin");
+  const adminSection = DEFAULT_LEFT_NAV_CONFIG.sections.find((section) => section.id === "section-platform");
 
   it("is a left-nav item with its own eight-item sub-menu", () => {
     expect(adminSection).toBeTruthy();
-    expect(adminSection!.title).toBe("PLATFORM ADMIN");
-    const item = adminSection!.items[0];
+    expect(adminSection!.title).toBe("PLATFORM");
+    const item = adminSection!.items.find((i) => i.id === "platform-admin")!;
+    expect(item).toBeTruthy();
     expect(item.id).toBe("platform-admin");
     expect(item.label).toBe("Platform Admin");
     expect(item.subItems).toHaveLength(8);

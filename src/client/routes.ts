@@ -32,7 +32,7 @@
  * alphabetically by id so concurrent additions land at different
  * positions instead of one prepend anchor (the CHANGELOG lesson).
  */
-export type RouteCategory = "Execution" | "Intelligence" | "Playbooks" | "Platform";
+export type RouteCategory = "Execution" | "Intelligence" | "Playbooks" | "Platform" | "Billing";
 
 export type RouteBadgeType = "pro" | "live" | "ai" | "mcp" | "new" | "neutral";
 
@@ -180,9 +180,9 @@ export const ROUTES = [
   },
   {
     id: "checkout",
-    navGroup: "payments",
+    navGroup: "checkout",
     crumb: "Checkout",
-    category: "Platform",
+    category: "Billing",
     icon: "Checkout",
     description:
       "Pay for a screener run or manage a subscription: per-run checkout with the failure policy disclosed before payment, and plan purchase, status, and cancel-at-period-end",
@@ -197,9 +197,9 @@ export const ROUTES = [
   },
   {
     id: "docs",
-    navGroup: "docs",
+    navGroup: "workflow-runs",
     crumb: "Docs & Reports",
-    category: "Intelligence",
+    category: "Playbooks",
     icon: "Docs",
     description:
       "Every document set a screener-workflow run produced — stock, options, goal and strategy — with its PDF, XLSX and CSV downloads and run id",
@@ -216,7 +216,7 @@ export const ROUTES = [
     id: "endpoints",
     navGroup: "endpoints",
     crumb: "MCP Explorer",
-    category: "Playbooks",
+    category: "Platform",
     icon: "Endpoints",
     description: "Interactive Model Context Protocol (MCP) tool and REST endpoint testing suite",
     navEntry: {
@@ -233,7 +233,7 @@ export const ROUTES = [
     retain: true,
     navGroup: "ledger",
     crumb: "Ledger",
-    category: "Execution",
+    category: "Billing",
     icon: "Ledger",
     description: "Full chronological ledger of open, executed, and cancelled orders with upstream IDs",
     navEntry: {
@@ -281,7 +281,7 @@ export const ROUTES = [
   {
     id: "options",
     retain: true,
-    navGroup: "screeners",
+    navGroup: "options-screener",
     crumb: "Options",
     category: "Intelligence",
     icon: "Screeners",
@@ -289,9 +289,9 @@ export const ROUTES = [
   },
   {
     id: "options-flows",
-    navGroup: "options-flows",
+    navGroup: "options-screener",
     crumb: "Options Flows",
-    category: "Execution",
+    category: "Intelligence",
     icon: "Options",
     description: "Options flows, dark pool prints, institutional sweeps, blocks, and insider disclosures",
     navEntry: {
@@ -371,7 +371,7 @@ export const ROUTES = [
     shellRetain: true,
     navGroup: "payments",
     crumb: "Payments",
-    category: "Platform",
+    category: "Billing",
     icon: "Payments",
     description: "x402 protocol, MPP micropayments, Stripe, PayPal, and DID billing",
     navEntry: {
@@ -436,15 +436,15 @@ export const ROUTES = [
   {
     id: "reports",
     retain: true,
-    navGroup: "screeners",
+    navGroup: "workflow-runs",
     crumb: "Reports",
-    category: "Intelligence",
+    category: "Playbooks",
     icon: "Screeners",
     description: SCREENERS_DESC,
   },
   {
     id: "research",
-    navGroup: "research",
+    navGroup: "screeners",
     crumb: "Research",
     category: "Intelligence",
     icon: "Research",
@@ -463,7 +463,7 @@ export const ROUTES = [
     shellRetain: true,
     navGroup: "revenue",
     crumb: "Revenue",
-    category: "Platform",
+    category: "Billing",
     icon: "Revenue",
     description: "Platform monetization engine, ad network yield, CPM/CPC metrics, and ledger",
     navEntry: {
@@ -478,7 +478,7 @@ export const ROUTES = [
   {
     id: "scanner",
     retain: true,
-    navGroup: "screeners",
+    navGroup: "options-screener",
     crumb: "Strategy/Symbol Scanner",
     category: "Intelligence",
     icon: "Screeners",
@@ -487,9 +487,9 @@ export const ROUTES = [
   {
     id: "schedules",
     retain: true,
-    navGroup: "screeners",
+    navGroup: "platform-admin",
     crumb: "Schedules",
-    category: "Intelligence",
+    category: "Platform",
     icon: "Screeners",
     description: SCREENERS_DESC,
   },
@@ -502,8 +502,8 @@ export const ROUTES = [
     icon: "Screeners",
     description: SCREENERS_DESC,
     navEntry: {
-      label: "Screeners",
-      shortLabel: "Screeners",
+      label: "Stock Screener",
+      shortLabel: "Stocks",
       navOrder: 6,
       defaultVisible: true,
       badge: "Multi",
@@ -579,8 +579,8 @@ export const ROUTES = [
     description:
       "Every recorded workflow run with its stages, inputs, outputs, failures, artifacts, and how it was triggered",
     navEntry: {
-      label: "Workflow Runs",
-      shortLabel: "Runs",
+      label: "Workflows",
+      shortLabel: "Workflows",
       navOrder: 12,
       defaultVisible: true,
       badge: "Trace",
@@ -591,12 +591,12 @@ export const ROUTES = [
     id: "workflows",
     navGroup: "workflows",
     crumb: "Workflows",
-    category: "Playbooks",
+    category: "Platform",
     icon: "Guides",
     description: "Platform architecture guides, strategy playbooks, order mechanics & FAQ",
     navEntry: {
       label: "Workflows & FAQ",
-      shortLabel: "Workflows",
+      shortLabel: "Guides",
       navOrder: 11,
       defaultVisible: true,
       badge: "14 Guides",
