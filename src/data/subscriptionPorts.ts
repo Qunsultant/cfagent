@@ -226,6 +226,16 @@ export interface SubscriptionStore {
   /** Cancel every unexpired row for the user (cancel-at-period-end: access continues to periodEnd). */
   cancelUnexpiredSubscriptions(userId: string, nowMs: number): Promise<SubscriptionRecord[]>;
   /**
+   * Issue #2656 (Phase 2.1) — cancel ONE row at period end:
+   * status canceled, periodEndMs KEPT (access continues to
+   * periodEnd), canceledAtMs set. Null when the row does not
+   * exist. The Billing-aware cancel route uses this for
+   * repurchase rows after provider-canceling Billing rows, so
+   * one cancel request never cancels rows it did not mean to
+   * (cancelUnexpiredSubscriptions cancels ALL unexpired rows).
+   */
+  cancelSubscription(subscriptionId: string, nowMs: number): Promise<SubscriptionRecord | null>;
+  /**
    * Issue #2204 (refunds) — revoke ONE subscription immediately:
    * status canceled AND periodEndMs moved to nowMs, so the
    * effective tier stops conferring Subscribed at the next read

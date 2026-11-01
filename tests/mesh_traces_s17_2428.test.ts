@@ -440,7 +440,7 @@ describe("issue #2428 — registry spine + migration pins", () => {
     }
   });
 
-  it("migration 0023 is registered and creates the hop table (0029 is last since #2548)", async () => {
+  it("migration 0023 is registered and creates the hop table (0030 is last since #2656 Phase 2.1, after #2548)", async () => {
     const {
       ALL_MIGRATIONS,
       MIGRATION_0023_AGENT_MESH_TRACE_HOPS,
@@ -448,6 +448,8 @@ describe("issue #2428 — registry spine + migration pins", () => {
       MIGRATION_0025_AGENT_MESH_PROPOSALS,
       MIGRATION_0026_TENANT_AUTO_REFRESH,
       MIGRATION_0028_TENANT_PROVIDERS,
+      MIGRATION_0029_PROOF_REDEMPTIONS,
+      MIGRATION_0030_BILLING_CUSTOMERS,
     } = await import(
       "../src/data/migrationRunner"
     );
@@ -464,7 +466,10 @@ describe("issue #2428 — registry spine + migration pins", () => {
     // (tenant data-provider / broker columns) after 0027.
     expect(ALL_MIGRATIONS).toContain(MIGRATION_0028_TENANT_PROVIDERS);
     // #2548 appended migration 0029 (proof redemptions) after 0028.
-    expect(ALL_MIGRATIONS[ALL_MIGRATIONS.length - 1].version).toBe(29);
+    expect(ALL_MIGRATIONS).toContain(MIGRATION_0029_PROOF_REDEMPTIONS);
+    // #2656 (Phase 2.1) appends migration 0030 (billing customers) after 0029.
+    expect(ALL_MIGRATIONS).toContain(MIGRATION_0030_BILLING_CUSTOMERS);
+    expect(ALL_MIGRATIONS[ALL_MIGRATIONS.length - 1]).toBe(MIGRATION_0030_BILLING_CUSTOMERS);
     expect(MIGRATION_0023_AGENT_MESH_TRACE_HOPS.version).toBe(23);
     expect(MIGRATION_0023_AGENT_MESH_TRACE_HOPS.sql).toContain("agent_mesh_trace_hops");
     const versions = ALL_MIGRATIONS.map((m) => m.version);
