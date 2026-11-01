@@ -50,39 +50,74 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Detect docs-only diff
-        id: docs
+      - name: Detect docs-only diff & 24h tree dedup (#2632)
+        id: dedup
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          DOCS_ONLY="false"
+          TREE_ALREADY_ANALYZED="false"
+
           if [ "${{ github.event_name }}" != "merge_group" ] && [ "${{ github.event_name }}" != "pull_request" ]; then
             echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            echo "tree_already_analyzed=false" >> "$GITHUB_OUTPUT"
             exit 0
-          fi
-          git fetch origin main
-          CHANGED_FILES=$(git diff --name-only origin/main...HEAD 2>/dev/null || true)
-          if [ -z "$CHANGED_FILES" ]; then
-            echo "docs_only=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          NON_DOCS=$(echo "$CHANGED_FILES" | grep -v -E '^(docs/|changelog\.d/|CHANGELOG\.md$|README\.md$|.*\.md$)' || true)
-          if [ -z "$NON_DOCS" ]; then
-            echo "docs_only=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "docs_only=false" >> "$GITHUB_OUTPUT"
           fi
 
+          # 1. Docs-only fast path
+          git fetch origin main --depth=50 2>/dev/null || true
+          CHANGED_FILES=$(git diff --name-only origin/main...HEAD 2>/dev/null || true)
+          if [ -n "$CHANGED_FILES" ]; then
+            NON_DOCS=$(echo "$CHANGED_FILES" | grep -v -E '^(docs/|changelog\.d/|CHANGELOG\.md$|README\.md$|.*\.md$)' || true)
+            if [ -z "$NON_DOCS" ]; then
+              DOCS_ONLY="true"
+              echo "docs_only=true" >> "$GITHUB_OUTPUT"
+              echo "tree_already_analyzed=false" >> "$GITHUB_OUTPUT"
+              echo "All changed files are documentation/changelog markdown — enabling docs-only fast path."
+              exit 0
+            fi
+          fi
+
+          # 2. 24h tree-hash deduplication anchor on merge_group (#2632)
+          if [ "${{ github.event_name }}" = "merge_group" ]; then
+            TREE_SHA=$(git rev-parse 'HEAD^{tree}')
+            echo "Current git tree SHA: $TREE_SHA"
+            CUTOFF_24H=$(date -u -d '24 hours ago' +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u -v-24H +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || true)
+            CANDIDATES=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/codeql.yml/runs?status=success&per_page=30"               --jq ".workflow_runs[] | select(.head_commit.tree_id == \"$TREE_SHA\" and .run_started_at >= \"$CUTOFF_24H\") | .id" 2>/dev/null || true)
+
+            for cand_id in $CANDIDATES; do
+              candidate_jobs=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$cand_id/jobs?per_page=10" 2>/dev/null || true)
+              if echo "$candidate_jobs" | jq -e '([.jobs[] | select(.name == "Analyze (javascript-typescript)" and .conclusion == "success")] | length == 1)' >/dev/null 2>&1; then
+                TREE_ALREADY_ANALYZED="true"
+                echo "tree_already_analyzed=true" >> "$GITHUB_OUTPUT"
+                echo "CodeQL already analyzed tree $TREE_SHA in run $cand_id within 24h — skipping re-analysis on merge_group."
+                {
+                  echo "### ⚡ CodeQL Tree Deduplication Anchor (#2632)"
+                  echo "- **Git tree SHA (\`HEAD^{tree}\`)**: \`$TREE_SHA\`"
+                  echo "- **Anchor CodeQL run**: [#$cand_id](https://github.com/$GITHUB_REPOSITORY/actions/runs/$cand_id)"
+                  echo "- **Action**: Re-analysis in Merge Queue skipped; check concluded success in ~5s."
+                } >> "$GITHUB_STEP_SUMMARY"
+                break
+              fi
+            done
+          fi
+
+          echo "docs_only=$DOCS_ONLY" >> "$GITHUB_OUTPUT"
+          echo "tree_already_analyzed=$TREE_ALREADY_ANALYZED" >> "$GITHUB_OUTPUT"
+
       - name: Initialize CodeQL
-        if: steps.docs.outputs.docs_only != 'true'
+        if: steps.dedup.outputs.docs_only != 'true' && steps.dedup.outputs.tree_already_analyzed != 'true'
         uses: github/codeql-action/init@v4
         with:
           languages: javascript-typescript
 
       - name: Autobuild
-        if: steps.docs.outputs.docs_only != 'true'
+        if: steps.dedup.outputs.docs_only != 'true' && steps.dedup.outputs.tree_already_analyzed != 'true'
         uses: github/codeql-action/autobuild@v4
 
       - name: Perform CodeQL Analysis
-        if: steps.docs.outputs.docs_only != 'true'
+        if: steps.dedup.outputs.docs_only != 'true' && steps.dedup.outputs.tree_already_analyzed != 'true'
         uses: github/codeql-action/analyze@v4
         with:
           category: "/language:javascript-typescript"
