@@ -13616,7 +13616,7 @@ body {
   z-index: 1200;
   display: flex;
   justify-content: flex-end;
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--color-overlay);
 }
 
 .platform-admin-panel {
