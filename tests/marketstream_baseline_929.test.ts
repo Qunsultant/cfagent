@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   getBaselineMarketTick,
   getBatchMarketQuotes,
@@ -58,6 +58,14 @@ function liveTick(symbol: string, price: number): MarketTickData {
 describe("[#913 S11] marketStream baseline ticks (#929)", () => {
   beforeEach(() => {
     liveMarketCache.clear();
+    // #2692: the HTTP handler now awaits its upstream refresh before
+    // serving, so "uncached" must also mean "upstream fails" — stub
+    // the fetch so these tests stay hermetic (no real Yahoo calls).
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, json: async () => ({}) })));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it("getBaselineMarketTick returns null when no live tick is cached (no static profile tick)", () => {
@@ -86,7 +94,7 @@ describe("[#913 S11] marketStream baseline ticks (#929)", () => {
   });
 
   it("handleMarketQuotesHttp reports uncached symbols as unavailable with no substitute numbers", async () => {
-    const res = handleMarketQuotesHttp(["NVDA", "SOL/USD"]);
+    const res = await handleMarketQuotesHttp(["NVDA", "SOL/USD"]);
     expect(res.status).toBe(200);
     const data = (await res.json()) as any;
     expect(data.quotes).toEqual([]);

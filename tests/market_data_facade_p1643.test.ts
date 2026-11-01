@@ -22,7 +22,7 @@
  * marketStream, 5-min in quoteCache) — the facade documents per-path
  * TTLs instead of inventing one.
  */
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   liveMarketCache,
   handleMarketQuotesHttp,
@@ -102,6 +102,10 @@ describe("MarketDataService facade (#1643 §7)", () => {
 
 describe("HTTP handler through the facade (#1643 §7)", () => {
   it("an expired cached tick is unavailable on HTTP, not served as current", async () => {
+    // #2692: the handler now awaits its upstream refresh before
+    // serving, so stub the fetch — otherwise a live Yahoo answer
+    // would overwrite the seeded expired tick mid-test.
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, json: async () => ({}) })));
     const now = Date.now();
     liveMarketCache.set("NVDA", {
       tick: tick("NVDA", 200, now - 3600000),
@@ -114,6 +118,9 @@ describe("HTTP handler through the facade (#1643 §7)", () => {
   });
 
   it("a fresh cached tick carries provenance + age + fetch time on HTTP", async () => {
+    // #2692: same fetch stub as above — a live answer would replace
+    // the seeded tick and break the provenance/age assertions.
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, json: async () => ({}) })));
     const now = Date.now();
     liveMarketCache.set("NVDA", {
       tick: tick("NVDA", 200, now - 5000),
