@@ -25,12 +25,13 @@ import {
   mintServiceToken,
   rotateServiceToken,
   revokeServiceToken,
+  SERVICE_TOKEN_ROLE_OPTIONS,
   type ServiceTokenInfo,
   type ServiceTokenTier,
 } from "./serviceTokensApi";
 import "./serviceTokensPanel.css";
 
-const ROLE_OPTIONS = ["platform-admin", "tenant-admin", "member", "approver", "auditor"] as const;
+const ROLE_OPTIONS = SERVICE_TOKEN_ROLE_OPTIONS;
 
 export function ServiceTokensPanel() {
   const [tokens, setTokens] = useState<ServiceTokenInfo[]>([]);

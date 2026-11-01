@@ -14,6 +14,22 @@ import { apiFetch } from "./apiFetch";
 
 export type ServiceTokenTier = "platform" | "tenant";
 
+/**
+ * Presentation of the single role catalog (ALL_ROLES in
+ * src/security/authorization.ts) for the token mint form. This is a
+ * display list, not a second role system: the server validates every
+ * requested role against ALL_ROLES and refuses anything ungrantable.
+ * workspace-admin is excluded here because tokens never carry it
+ * (no workspace binding exists for them); the server refuses it too.
+ */
+export const SERVICE_TOKEN_ROLE_OPTIONS = [
+  "platform-admin",
+  "tenant-admin",
+  "member",
+  "approver",
+  "auditor",
+] as const;
+
 export interface ServiceTokenInfo {
   id: string;
   label: string;

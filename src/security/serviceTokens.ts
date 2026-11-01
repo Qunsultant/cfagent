@@ -1,5 +1,6 @@
 import type { Env } from "../types";
 import {
+  ALL_ROLES,
   authorize,
   canGrantRole,
   createMemoryMembershipStore,
@@ -98,14 +99,9 @@ export interface MintServiceTokenInput {
 }
 
 const SECRET_PATTERN = /^svc_[A-Za-z0-9_-]{43}$/;
-const VALID_ROLES: readonly Role[] = [
-  "platform-admin",
-  "tenant-admin",
-  "workspace-admin",
-  "member",
-  "approver",
-  "auditor",
-];
+// Role validation uses the single catalog (ALL_ROLES) — never a
+// re-declared copy (#2688 consumption contract).
+const VALID_ROLES = ALL_ROLES;
 
 export function serviceTokenStore(env: Env): KvLike {
   return createStoreKv({
