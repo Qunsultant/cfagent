@@ -4,6 +4,12 @@ on:
   push:
     branches:
       - main
+  workflow_run:
+    workflows: ["Continuous Integration & Test Verification"]
+    types: [completed]
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -69,14 +75,18 @@ jobs:
                 continue;
               }
 
-              // Check if PR is already in the merge queue or has running CI checks (#2580)
+              // Check if PR is already in the merge queue or has running CI checks (#2580, #2629)
               const queueQuery = `
                 query($owner: String!, $repo: String!, $number: Int!) {
                   repository(owner: $owner, name: $repo) {
                     pullRequest(number: $number) {
+                      id
                       isInMergeQueue
                       mergeable
                       mergeStateStatus
+                      autoMergeRequest {
+                        mergeMethod
+                      }
                       commits(last: 1) {
                         nodes {
                           commit {
@@ -114,7 +124,55 @@ jobs:
                 }
 
                 if (prDetails.mergeStateStatus === 'CLEAN' && prDetails.mergeable === 'MERGEABLE') {
-                  console.log(`Skipping PR #${pr.number} (${pr.head.ref}); already CLEAN and MERGEABLE.`);
+                  if (!prDetails.isInMergeQueue) {
+                    console.log(`PR #${pr.number} (${pr.head.ref}) is CLEAN and MERGEABLE but not in merge queue. Enqueuing into Merge Queue (#2629)...`);
+                    const prId = prDetails.id || pr.node_id;
+                    const amMethod = prDetails.autoMergeRequest?.mergeMethod;
+                    if (amMethod && amMethod !== 'REBASE') {
+                      console.log(`Resetting PR #${pr.number} auto-merge method from ${amMethod} to REBASE...`);
+                      try {
+                        await github.graphql(`
+                          mutation($id: ID!) {
+                            disablePullRequestAutoMerge(input: { pullRequestId: $id }) {
+                              clientMutationId
+                            }
+                          }
+                        `, { id: prId });
+                      } catch (err) {
+                        console.log(`Note resetting auto-merge for PR #${pr.number}: ${err.message}`);
+                      }
+                    }
+
+                    try {
+                      await github.graphql(`
+                        mutation($id: ID!) {
+                          enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: REBASE }) {
+                            pullRequest {
+                              isInMergeQueue
+                            }
+                          }
+                        }
+                      `, { id: prId });
+                      console.log(`Enabled REBASE auto-merge for PR #${pr.number}`);
+                    } catch (err) {
+                      console.log(`Note enabling REBASE auto-merge for PR #${pr.number}: ${err.message}`);
+                    }
+
+                    try {
+                      await github.graphql(`
+                        mutation($id: ID!) {
+                          enqueuePullRequest(input: { pullRequestId: $id }) {
+                            clientMutationId
+                          }
+                        }
+                      `, { id: prId });
+                      console.log(`Enqueued PR #${pr.number} into Merge Queue.`);
+                    } catch (eqErr) {
+                      console.log(`Note enqueuing PR #${pr.number}: ${eqErr.message}`);
+                    }
+                  } else {
+                    console.log(`Skipping PR #${pr.number} (${pr.head.ref}); already in merge queue.`);
+                  }
                   continue;
                 }
 
