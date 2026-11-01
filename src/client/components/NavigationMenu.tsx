@@ -9,7 +9,7 @@ import { adjustFontScale, getStoredFontScale } from "../typography";
 import { BRAND } from "../branding";
 import { LeftNavBar } from "./LeftNavBar";
 import { PlatformAdminPanel } from "../PlatformAdminPanel";
-import { platformAdminSectionFromNavId } from "../navConfig";
+import { platformAdminSectionFromNavId, sandboxNavHrefFromNavId } from "../navConfig";
 export { LeftNavBar };
 import { isTabFeatureEnabled } from "../featureFlags";
 
@@ -488,6 +488,13 @@ export function NavigationMenu({
     if (section) {
       setPlatformAdminSection(section);
       setPlatformAdminOpen(true);
+      return;
+    }
+    // Issue #2645: sandbox ids link standalone server pages, not SPA tabs:
+    // open the page in a new tab so the app stays open behind it.
+    const sandboxHref = sandboxNavHrefFromNavId(id);
+    if (sandboxHref) {
+      window.open(sandboxHref, "_blank", "noopener");
       return;
     }
     onSelectTab(id as Parameters<typeof onSelectTab>[0]);
