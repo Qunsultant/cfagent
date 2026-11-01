@@ -415,6 +415,12 @@ export function collateShards(
   const reportKeys = outcomes
     .map((o) => o.pdfKey)
     .filter((k): k is string => typeof k === "string" && k.length > 0);
+  const xlsxKeys = outcomes
+    .map((o) => o.xlsxKey)
+    .filter((k): k is string => typeof k === "string" && k.length > 0);
+  const csvKeys = outcomes
+    .map((o) => o.csvKey)
+    .filter((k): k is string => typeof k === "string" && k.length > 0);
   return {
     jobId,
     workflowId,
@@ -429,6 +435,8 @@ export function collateShards(
     lifecycleTransitions,
     stageTransitions,
     reportKeys,
+    ...(xlsxKeys.length > 0 ? { xlsxKeys } : {}),
+    ...(csvKeys.length > 0 ? { csvKeys } : {}),
     storedShards,
     deliveredShards,
     ...(Object.keys(storeErrors).length > 0 ? { storeErrors } : {}),

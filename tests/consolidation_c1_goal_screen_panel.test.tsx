@@ -159,6 +159,42 @@ describe("C1 GoalScreenPanel", () => {
     expect(container.textContent).not.toContain("Candidate structures");
   });
 
+  it("renders PDF, XLSX, and CSV download links when artifact keys are present (#2625)", async () => {
+    goalResponse = {
+      status: 200,
+      body: {
+        success: true,
+        executed: true,
+        result: {
+          ...goalResult,
+          pdfKey: "goal_screen:pdf:test1234",
+          xlsxKey: "goal_screen:xlsx:test1234",
+          csvKey: "goal_screen:csv:test1234",
+        },
+      },
+    };
+    await act(async () => {
+      root.render(<GoalScreenPanel activeEnv="PROD" userLogin="alice" />);
+    });
+    await submitRun();
+
+    const pdfLink = container.querySelector("a.goal-screen-download-pdf") as HTMLAnchorElement;
+    const xlsxLink = container.querySelector("a.goal-screen-download-xlsx") as HTMLAnchorElement;
+    const csvLink = container.querySelector("a.goal-screen-download-csv") as HTMLAnchorElement;
+
+    expect(pdfLink).not.toBeNull();
+    expect(pdfLink.href).toContain("/api/screening/goal-screen/report.pdf?key=goal_screen%3Apdf%3Atest1234");
+    expect(pdfLink.textContent).toContain("Download PDF");
+
+    expect(xlsxLink).not.toBeNull();
+    expect(xlsxLink.href).toContain("/api/screening/goal-screen/report.xlsx?key=goal_screen%3Axlsx%3Atest1234");
+    expect(xlsxLink.textContent).toContain("Download XLSX");
+
+    expect(csvLink).not.toBeNull();
+    expect(csvLink.href).toContain("/api/screening/goal-screen/report.csv?key=goal_screen%3Acsv%3Atest1234");
+    expect(csvLink.textContent).toContain("Download CSV");
+  });
+
   it("the hub hosts the panel under its goal-screen tab", async () => {
     await act(async () => {
       root.render(<ScreenersHub activeEnv="PROD" userLogin="alice" initialTab="goal-screen" />);

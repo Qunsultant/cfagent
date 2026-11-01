@@ -621,6 +621,9 @@ export interface WorkflowCollation {
   stageTransitions: StageTransition[];
   /** Canonical report references stored for this job (pdfKeys). */
   reportKeys: string[];
+  /** Issue #2625: workbook and CSV artifact references stored for this job. */
+  xlsxKeys?: string[];
+  csvKeys?: string[];
   /** Shards whose child stored a canonical report (from child outputs, not a parent step). */
   storedShards: string[];
   /** Shards whose child delivered an outcome through the tracked pipeline. */
