@@ -941,12 +941,12 @@ export const MESH_TOOL_FAMILIES: MeshToolFamilyEntry[] = [
     id: "agent-skills",
     name: "Agent Skills (SDK SKILL.md packs)",
     source:
-      "no defining module on main — the adapter is Think.getSkills() in @cloudflare/think, inherited through PortThink (src/actors/thinkAdapter.ts)",
-    status: "absent",
+      "src/agents/orchestrator/skillPacks.ts (OrchestratorAgent getSkills() override — a thin delegation on the class) — the hook is Think.getSkills() in @cloudflare/think, inherited through PortThink (src/actors/thinkAdapter.ts)",
+    status: "live",
     commands: [],
     toolNames: ["activate_skill", "read_skill_resource", "run_skill_script"],
     notes:
-      "Named by the owner's Agents SDK Skills addition to #2225 (comment 6517280689); recorded by S14 (#2417). NOT ADOPTED: no agent class overrides getSkills() (zero occurrences in src/), so no skill catalog exists and the skills tools never appear in any turn. The adapter is present in the pinned SDK (@cloudflare/think 0.23.0): Think.getSkills() returns SkillSource[] — workspace, R2, or code-manifest sources, re-listed before every turn — and Think adds activate_skill / read_skill_resource when sources exist, plus run_skill_script behind an experimental script runner. The fleet runs Think behind the actor port: PortThink neither overrides nor blocks the hook, so adoption is a per-class override plus a source — but whether the port's adapter-driven turn surfaces Think's skills tools end-to-end is an open conformance question, recorded as the G7 matrix's skills aspect (GAP for every PortThink agent, programme backlog). A skill is instructions the model follows, so a source is a trust decision — source write-access is the control point — and any source binding (e.g. an R2 bucket for skills.r2()) is an owner-gated config change. The toolNames listed are the SDK's tool names: none is registered in the MCP catalog or any turn today (pinned).",
+      "Named by the owner's Agents SDK Skills addition to #2225 (comment 6517280689); recorded ABSENT by S14 (#2417); ADOPTED for OrchestratorAgent by #2705 (owner direction 2026-11-01, executing #2460's adopt-as-packaging recommendation). OrchestratorAgent overrides getSkills() to serve ONE in-repo code-manifest source (the Agents SDK skills.manifest factory) holding ONE pack — chat-screening-doors, the door playbook for the chat screening doors (#2488/#2581) — so on that class's turns Think's catalog block lists the pack and its turn assembly adds activate_skill / read_skill_resource to the tool set. Sources are re-listed before every turn. run_skill_script stays absent: no skill script runner is configured anywhere in the fleet. The other 11 PortThink agents do not override the hook and remain GAP in the G7 matrix — adoption is per-class, and theirs are follow-up slices. Conformance (the S14 open question — whether the port's adapter-driven turn surfaces Think's skills tools end-to-end): answered at the SDK seam by tests/agent_skills_enablement_s1_2705.test.ts, which drives the class's real getSkills() output through the SDK's own catalog loader and turn tool factory (loadSkillCatalog / createSkillTools — the exact modules and functions Think's turn assembly runs) and executes both tools against the pack; the residue is the live workerd model turn itself, which the Node harness cannot observe (it stubs Think's runTurn, #2003), so the model's production choice to activate is a follow-up observation, not a claim here. A skill is instructions the model follows, so a source is a trust decision — source write-access is the control point — and the in-repo code-manifest shape keeps packs under repository review; any external source binding (e.g. an R2 bucket for skills.r2()) remains an owner-gated config change. The toolNames listed are the SDK's turn-tool names: none is registered in the MCP catalog (pinned).",
   },
 ];
 
@@ -2107,13 +2107,23 @@ export const MESH_G12_PROOF = {
 // Skills-packaging assessment (S19, #2460) — the owner addition
 // on #2225 (comment 6517280689) asked whether Agents SDK Skills
 // are the RSI loop's knowledge-packaging format. This record is
-// the decision-grade answer. It is an ASSESSMENT ONLY: S14
+// the decision-grade answer. It was an ASSESSMENT ONLY: S14
 // recorded the agent-skills tool family ABSENT and the G7 matrix
 // records the skills aspect GAP for every PortThink agent, and
 // both records stand unchanged — adoption is a separate
 // owner-sequenced decision after this programme, and this slice
 // builds no adoption machinery (no getSkills override, no skill
 // source, no binding).
+//
+// Amendment (#2705, owner direction 2026-11-01): the owner took
+// the deferred decision — build the enablement. Slice 1 adopted
+// OrchestratorAgent (one getSkills override, one in-repo
+// code-manifest source, one pack), so the family record above is
+// now "live" and the matrix's OrchestratorAgent skills cell is
+// IMPLEMENTED; the other 11 PortThink agents' GAP cells stand.
+// The assessment's recommendation, fits, and control-point
+// analysis below stand unchanged — they are what the adoption
+// was built to.
 // ---------------------------------------------------------------------------
 
 export const MESH_SKILLS_ASSESSMENT = {
@@ -2122,7 +2132,7 @@ export const MESH_SKILLS_ASSESSMENT = {
     "Agents SDK Skills (SKILL.md packs, loaded on demand via Think.getSkills()) as the RSI improvement loop's knowledge-packaging format — the format in which the loop's accumulated know-how (calibration notes, door playbooks, evaluation findings) would be carried to future turns.",
   recommendation: "adopt-as-packaging",
   adoptionState:
-    "deferred — adoption itself is an owner-gated decision for the post-programme harness discussion; this record recommends the format for when that decision is taken, and adopts nothing now",
+    "first slice adopted — the owner took the deferred decision on 2026-11-01 (build the enablement, do not park it) and #2705 landed slice 1: OrchestratorAgent serves one in-repo code-manifest pack (chat-screening-doors) through a getSkills() override. Fleet-wide adoption remains deferred per class: the other 11 PortThink agents adopt only through their own owner-sequenced follow-up slices, one class per slice, each with its own pack and conformance pins.",
   fits: [
     "A SKILL.md pack is a plain file in the repository: versioned, diffable, and reviewable through the same gitops gate (issue → PR → CI → merge) that the loop already writes back through — packaging knowledge as packs keeps the loop's only write path the gated repository (doors-and-layers §7.4).",
     "The RSI loop's knowledge products are procedural know-how in prose — how a door behaves, what a falsified thesis taught, how a golden task is diagnosed — which is exactly the shape a skill pack carries (instructions plus bundled resources), unlike the registry (facts) or the eval store (outcomes).",
@@ -2131,10 +2141,10 @@ export const MESH_SKILLS_ASSESSMENT = {
   doesNotFit: [
     "A skill is instructions the model follows — it is not evidence and not enforcement. Gates, budgets, falsification criteria, and the evidence bar stay in deterministic code and the registry; anything safety-relevant must never live only in a pack, because a pack cannot refuse anything.",
     "A pack is consumed at turn time by a model, so its content is guidance, not a record: the loop's evidence (traces, eval outcomes, ledger rows) remains the system of record, and a pack that disagrees with the record is simply wrong prose until a gated change fixes it.",
-    "Fleet adoption is not a flip: the skills aspect is GAP for all 12 PortThink agents (matrix), adoption is a per-class getSkills() override plus a chosen source, and whether the port's adapter-driven turn surfaces Think's skills tools end-to-end is still unverified (the S14 conformance caveat).",
+    "Fleet adoption is not a flip: the skills aspect is GAP for all 12 PortThink agents (matrix), adoption is a per-class getSkills() override plus a chosen source, and whether the port's adapter-driven turn surfaces Think's skills tools end-to-end is still unverified (the S14 conformance caveat). — Updated by #2705: OrchestratorAgent is adopted (11 GAP cells remain), and the conformance question is answered at the SDK seam for the adopted class (driven catalog + tool-factory evidence in tests/agent_skills_enablement_s1_2705.test.ts; a live workerd turn remains unobserved).",
   ],
   controlPoint:
     "Source write-access is the control point: a skill is instructions the model follows, so a pack is only as trustworthy as the review that merged it. In-repo (code-manifest) packs inherit the repository's review; an out-of-repo source (an R2 bucket, a workspace directory) would move the control point to that store's write ACL and would need its own owner decision and gate story before use.",
   consistency:
-    "Consistent with S14 (#2417): the agent-skills tool family in this registry remains ABSENT and the matrix's skills GAP cells are unchanged by this assessment. The recommendation names a format for a future adoption decision; it is not adoption.",
+    "Consistent with S14 (#2417): the agent-skills tool family in this registry remains ABSENT and the matrix's skills GAP cells are unchanged by this assessment. The recommendation names a format for a future adoption decision; it is not adoption. — Superseded in part by #2705 (owner direction 2026-11-01): the family is now live on OrchestratorAgent and that class's matrix skills cell is IMPLEMENTED; the other 11 GAP cells are unchanged, and this assessment's format recommendation is the one the adoption executed.",
 } as const;
