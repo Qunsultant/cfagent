@@ -279,7 +279,9 @@ describe("golden harness: runner + store (#2439)", () => {
     // S19 (#2460) appended migration 0025 (agent_mesh_proposals) after 0024.
     // #2481 appended migration 0026 (tenant auto-refresh) after 0025.
     // #2547 appended migration 0027 (price catalogue approval) after 0026.
-    expect(Math.max(...ALL_MIGRATIONS.map((m) => m.version))).toBe(27);
+    // Slice 1 of the provider/broker programme appends migration 0028
+    // (tenant data-provider / broker columns) after 0027.
+    expect(Math.max(...ALL_MIGRATIONS.map((m) => m.version))).toBe(28);
     expect(getTableName(agentMeshEvalResults)).toBe("agent_mesh_eval_results");
   });
 });

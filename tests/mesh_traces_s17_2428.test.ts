@@ -440,13 +440,14 @@ describe("issue #2428 — registry spine + migration pins", () => {
     }
   });
 
-  it("migration 0023 is registered and creates the hop table (0027 is last since #2547)", async () => {
+  it("migration 0023 is registered and creates the hop table (0028 is last since provider/broker slice 1)", async () => {
     const {
       ALL_MIGRATIONS,
       MIGRATION_0023_AGENT_MESH_TRACE_HOPS,
       MIGRATION_0024_AGENT_MESH_EVAL_RESULTS,
       MIGRATION_0025_AGENT_MESH_PROPOSALS,
       MIGRATION_0026_TENANT_AUTO_REFRESH,
+      MIGRATION_0028_TENANT_PROVIDERS,
     } = await import(
       "../src/data/migrationRunner"
     );
@@ -454,10 +455,15 @@ describe("issue #2428 — registry spine + migration pins", () => {
     // S18 (#2439) appended migration 0024 (eval results) after 0023;
     // S19 (#2460) appended migration 0025 (mesh proposals) after 0024;
     // #2481 appended migration 0026 (tenant auto-refresh) after 0025.
+    // Slice 1 of the provider/broker programme appends migration 0027
+    // (tenant data-provider / broker columns) after 0026.
     expect(ALL_MIGRATIONS).toContain(MIGRATION_0024_AGENT_MESH_EVAL_RESULTS);
     expect(ALL_MIGRATIONS).toContain(MIGRATION_0025_AGENT_MESH_PROPOSALS);
     // #2547 appended migration 0027 (price catalogue approval) after 0026.
-    expect(ALL_MIGRATIONS[ALL_MIGRATIONS.length - 1].version).toBe(27);
+    // Slice 1 of the provider/broker programme appends migration 0028
+    // (tenant data-provider / broker columns) after 0027.
+    expect(ALL_MIGRATIONS).toContain(MIGRATION_0028_TENANT_PROVIDERS);
+    expect(ALL_MIGRATIONS[ALL_MIGRATIONS.length - 1]).toBe(MIGRATION_0028_TENANT_PROVIDERS);
     expect(MIGRATION_0023_AGENT_MESH_TRACE_HOPS.version).toBe(23);
     expect(MIGRATION_0023_AGENT_MESH_TRACE_HOPS.sql).toContain("agent_mesh_trace_hops");
     const versions = ALL_MIGRATIONS.map((m) => m.version);

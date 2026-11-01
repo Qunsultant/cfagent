@@ -251,9 +251,12 @@ const ORCH = "agents/orchestrator.ts";
  *  3,000 lines / 141,512 B recomposed onto current main (the
  *  slice's +132 lines / +7,123 B delta over its original base
  *  applied exactly onto the current main tip), so budget lines
- *  rise to 3010 and bytes rise to 142_400. */
-const BUDGET_LINES = 3010;
-const BUDGET_BYTES = 142_400;
+ *  rise to 3010 and bytes rise to 142_400.
+ *  Provider/broker slice 1 (#2594) adds the broker gate delegation
+ *  handleBrokerGateRoutes (+14 lines / +743 B), measured 3,014 lines /
+ *  142,255 B; budget lines rise to 3025. */
+const BUDGET_LINES = 3025;
+const BUDGET_BYTES = 143_000;
 
 const count = (haystack: string, needle: string) =>
   haystack.split(needle).length - 1;

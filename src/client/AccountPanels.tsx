@@ -19,7 +19,8 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { Button, TextInput } from "./components/ui";
+import { Button, TextInput, Notice } from "./components/ui";
+import { useTenantProviders, BROKER_OPTIONS, brokerUnavailableNotice } from "./tenantProviders";
 import {
   cancelRemoteOrder,
   createWatchlist,
@@ -52,6 +53,8 @@ interface AccountPanelsProps {
 }
 
 export function AccountPanels({ activeEnv, onUnreadAlertsChange }: AccountPanelsProps) {
+  const [tenantProviders] = useTenantProviders();
+  const selectedBrokerLabel = BROKER_OPTIONS.find((o) => o.id === tenantProviders.brokerId)?.label ?? tenantProviders.brokerId;
   const [open, setOpen] = useState({ alerts: true, transactions: true, watchlists: true, orders: true });
   const toggle = (key: keyof typeof open) => setOpen((o) => ({ ...o, [key]: !o[key] }));
   const [confirmKey, setConfirmKey] = useState<string | null>(null);
@@ -117,11 +120,12 @@ export function AccountPanels({ activeEnv, onUnreadAlertsChange }: AccountPanels
   }, [activeEnv]);
 
   useEffect(() => {
+    if (tenantProviders.brokerId !== "etrade") return;
     void loadAlerts();
     void loadTransactions();
     void loadWatchlists();
     void loadOrders();
-  }, [loadAlerts, loadTransactions, loadWatchlists, loadOrders]);
+  }, [loadAlerts, loadTransactions, loadWatchlists, loadOrders, tenantProviders.brokerId]);
 
   /** Two-step destructive action: first click arms, second click fires. */
   const destructive = (key: string, label: string, action: () => void) => (
@@ -153,6 +157,13 @@ export function AccountPanels({ activeEnv, onUnreadAlertsChange }: AccountPanels
   const openOrders = orders.filter((o) => o.status === "OPEN");
   const unreadCount = alerts.filter((a) => a.status === "UNREAD").length;
 
+  if (tenantProviders.brokerId !== "etrade") {
+    return (
+      <Notice tone="warning" title="[FAILURE_BROKER_UNAVAILABLE] Broker surface unavailable">
+        {brokerUnavailableNotice(tenantProviders.brokerId, selectedBrokerLabel)}
+      </Notice>
+    );
+  }
   return (
     <>
       {/* Broker alerts */}
