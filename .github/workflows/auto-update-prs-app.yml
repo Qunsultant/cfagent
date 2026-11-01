@@ -5,7 +5,9 @@ on:
     branches:
       - main
   workflow_run:
-    workflows: ["Continuous Integration & Test Verification"]
+    workflows:
+      - "Continuous Integration & Test Verification"
+      - "CodeQL"
     types: [completed]
   schedule:
     - cron: '*/5 * * * *'
