@@ -53,6 +53,8 @@ export * from "./screenerReportCsv";
 export * from "./optionsReportPdf";
 export * from "./strategyReport";
 export * from "./optionsReportXlsx";
+// Issue #2583: the options report scope resolver joins the trading surface.
+export * from "./optionsReportScope";
 export * from "./setupCatalog";
 export * from "./researchReportPdf";
 export * from "./researchReportData";
