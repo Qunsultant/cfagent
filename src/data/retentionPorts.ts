@@ -103,4 +103,12 @@ export interface RetentionPurgeReport {
   capped: boolean;
   /** True when the purge was disabled (window <= 0) — nothing touched. */
   skipped: boolean;
+  /**
+   * Issue #1766: whether the purge run was appended as a
+   * retention.purge IAAA audit event. Absent when the caller
+   * does not audit (pure runner reports); false means the
+   * audit write failed and the run must NOT be reported as
+   * audited. The server purge wiring always sets it.
+   */
+  auditOk?: boolean;
 }

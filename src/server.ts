@@ -90,6 +90,7 @@ import {
 } from "./data/createShardJobPorts";
 import { handleMeshRegistryRoute } from "./agents/meshRegistryRoute";
 import { handleRetentionPurgeRoute } from "./data/retentionRoute";
+import { buildPurgeAuditEventInput } from "./data/retention1766";
 import {
   handlePrivacyErasureRoute,
   handlePrivacyExportRoute,
@@ -2037,6 +2038,11 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
     // handler runs). The governed job definition
     // (RETENTION_PURGE_JOB) is activated by an operator as
     // a separate step; nothing here schedules it.
+    // Issue #1766 (F-58): every purge run appends a
+    // retention.purge IAAA audit event after the purge
+    // succeeds; auditOk:false on the report means the
+    // append failed and the run must not be reported as
+    // audited.
     if (path === "/api/retention/purge") {
       const session = await requireAuth(request, env);
       let isPlatformAdmin = false;
@@ -2078,6 +2084,34 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
           if (!report) {
             throw new Error(
               "Retention purge unavailable: AgentDB is not bound.",
+            );
+          }
+          // Issue #1766 (F-58): the purge run IS an audit event.
+          // The append is best-effort in one direction only: an
+          // audit failure is surfaced as auditOk:false on the
+          // report (never reported as audited when it was not)
+          // and never hides the purge result itself.
+          try {
+            const audit = await recordAuditEvent(createWiredAuditStore(env), buildPurgeAuditEventInput(
+              report,
+              {
+                actorPrincipalId:
+                  typeof session?.internalUserId === "string"
+                    ? session.internalUserId
+                    : "system",
+                tenantId,
+                nowMs: Date.now(),
+              },
+            ));
+            report.auditOk = audit.ok;
+            if (!audit.ok) {
+              console.error("[retention] purge audit append failed:", audit.error);
+            }
+          } catch (err) {
+            report.auditOk = false;
+            console.error(
+              "[retention] purge audit append threw:",
+              err instanceof Error ? err.message : String(err),
             );
           }
           return report;
