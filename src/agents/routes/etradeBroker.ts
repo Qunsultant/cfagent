@@ -33,6 +33,11 @@
 
 import { unauthenticatedResponse } from "./routeIdentity";
 import {
+  brokerFailureResponse,
+  codedBrokerMessage,
+  genericBrokerFailureResponse,
+} from "./brokerCodedError";
+import {
   resolveBrokerEnvironmentFromSettings,
   handleBrokerEnvironmentGet,
   handleEnvironmentSwitch,
@@ -247,17 +252,16 @@ export async function handleEtradeBrokerRoutes(
         // cause instead of an ambiguous empty 200 (the #155 pattern).
         // A genuine empty leaves lastError unset and keeps the exact
         // previous 200 payload.
-        const upstreamError = etrade.getLastError();
-        if (upstreamError) {
-          return Response.json({ error: upstreamError }, { status: 502 });
-        }
+        // Issue #2573: coded form, not the raw lastError string.
+        const codedFailure = brokerFailureResponse(etrade, "accounts");
+        if (codedFailure) return codedFailure;
       }
       if (discoveryMode === "mcp") {
         return Response.json({ count: accounts.length, accounts, asOf: new Date().toISOString() });
       }
       return Response.json({ count: accounts.length, accounts });
     } catch (err) {
-      return Response.json({ error: err instanceof Error ? err.message : "Failed to fetch accounts" }, { status: 500 });
+      return genericBrokerFailureResponse();
     }
   }
 
@@ -536,10 +540,17 @@ export async function handleEtradeBrokerRoutes(
         return Response.json(await etradePositionsMcpEnvelope(etrade));
       }
       const holdings = await etrade.fetchPortfolioRemote(undefined, true);
-      const lastError = etrade.getLastError();
+      // Issue #2573: the portfolio error field is user-facing
+      // (ETradeTradingHub renders it as the OAuth message), so it
+      // carries the coded message, never the raw lastError string.
+      // The 200 envelope shape is unchanged.
+      const codedError =
+        holdings.account.accountId === "unconnected"
+          ? codedBrokerMessage(etrade, "positions")
+          : null;
       return Response.json({
         ...holdings,
-        error: lastError && holdings.account.accountId === "unconnected" ? lastError : undefined,
+        error: codedError ?? undefined,
       });
     } catch (err) {
       return Response.json({ error: err instanceof Error ? err.message : "Failed to fetch positions" }, { status: 500 });
@@ -758,14 +769,13 @@ export async function handleEtradeBrokerRoutes(
         // Issue #243: empty + recorded client error = upstream failure,
         // not "no orders" — 502 naming the cause (#155 pattern). A
         // genuine empty keeps the exact previous 200 payload.
-        const upstreamError = etrade.getLastError();
-        if (upstreamError) {
-          return Response.json({ error: upstreamError }, { status: 502 });
-        }
+        // Issue #2573: coded form, not the raw lastError string.
+        const codedFailure = brokerFailureResponse(etrade, "orders");
+        if (codedFailure) return codedFailure;
       }
       return Response.json({ count: orders.length, orders });
     } catch (err) {
-      return Response.json({ error: err instanceof Error ? err.message : "Failed to fetch exchange orders" }, { status: 500 });
+      return genericBrokerFailureResponse();
     }
   }
 
@@ -827,14 +837,13 @@ export async function handleEtradeBrokerActivityRoutes(
         // not "no transactions" — 502 naming the cause (#155 pattern,
         // as #243 did for the sibling routes). A genuine empty keeps
         // the exact previous 200 payload.
-        const upstreamError = etrade.getLastError();
-        if (upstreamError) {
-          return Response.json({ error: upstreamError }, { status: 502 });
-        }
+        // Issue #2573: coded form, not the raw lastError string.
+        const codedFailure = brokerFailureResponse(etrade, "transactions");
+        if (codedFailure) return codedFailure;
       }
       return Response.json({ count: transactions.length, transactions });
     } catch (err) {
-      return Response.json({ error: err instanceof Error ? err.message : "Failed to fetch transactions" }, { status: 500 });
+      return genericBrokerFailureResponse();
     }
   }
 
@@ -855,15 +864,14 @@ export async function handleEtradeBrokerActivityRoutes(
         // not "not found" — 502 naming the cause (#155 pattern, as
         // #243 did for watchlist/details). A genuine not-found (null,
         // no recorded error) keeps the exact previous 404.
-        const upstreamError = etrade.getLastError();
-        if (upstreamError) {
-          return Response.json({ error: upstreamError }, { status: 502 });
-        }
+        // Issue #2573: coded form, not the raw lastError string.
+        const codedFailure = brokerFailureResponse(etrade, "transactions");
+        if (codedFailure) return codedFailure;
         return Response.json({ error: "Transaction not found" }, { status: 404 });
       }
       return Response.json(details);
     } catch (err) {
-      return Response.json({ error: err instanceof Error ? err.message : "Failed to fetch transaction details" }, { status: 500 });
+      return genericBrokerFailureResponse();
     }
   }
 
@@ -884,14 +892,13 @@ export async function handleEtradeBrokerActivityRoutes(
         // Issue #243: empty + recorded client error = upstream failure,
         // not "no alerts" — 502 naming the cause (#155 pattern). A
         // genuine empty keeps the exact previous 200 payload.
-        const upstreamError = etrade.getLastError();
-        if (upstreamError) {
-          return Response.json({ error: upstreamError }, { status: 502 });
-        }
+        // Issue #2573: coded form, not the raw lastError string.
+        const codedFailure = brokerFailureResponse(etrade, "alerts");
+        if (codedFailure) return codedFailure;
       }
       return Response.json({ count: alerts.length, alerts });
     } catch (err) {
-      return Response.json({ error: err instanceof Error ? err.message : "Failed to fetch alerts" }, { status: 500 });
+      return genericBrokerFailureResponse();
     }
   }
 
@@ -911,15 +918,14 @@ export async function handleEtradeBrokerActivityRoutes(
         // not "not found" — 502 naming the cause (#155 pattern, as
         // #243 did for watchlist/details). A genuine not-found (null,
         // no recorded error) keeps the exact previous 404.
-        const upstreamError = etrade.getLastError();
-        if (upstreamError) {
-          return Response.json({ error: upstreamError }, { status: 502 });
-        }
+        // Issue #2573: coded form, not the raw lastError string.
+        const codedFailure = brokerFailureResponse(etrade, "alerts");
+        if (codedFailure) return codedFailure;
         return Response.json({ error: "Alert not found" }, { status: 404 });
       }
       return Response.json(details);
     } catch (err) {
-      return Response.json({ error: err instanceof Error ? err.message : "Failed to fetch alert details" }, { status: 500 });
+      return genericBrokerFailureResponse();
     }
   }
 
@@ -948,14 +954,13 @@ export async function handleEtradeBrokerActivityRoutes(
         // Issue #243: empty + recorded client error = upstream failure,
         // not "no matches" — 502 naming the cause (#155 pattern). A
         // genuine no-match keeps the exact previous 200 payload.
-        const upstreamError = etrade.getLastError();
-        if (upstreamError) {
-          return Response.json({ error: upstreamError }, { status: 502 });
-        }
+        // Issue #2573: coded form, not the raw lastError string.
+        const codedFailure = brokerFailureResponse(etrade, "lookup");
+        if (codedFailure) return codedFailure;
       }
       return Response.json({ count: items.length, items });
     } catch (err) {
-      return Response.json({ error: err instanceof Error ? err.message : "Failed to lookup products" }, { status: 500 });
+      return genericBrokerFailureResponse();
     }
   }
 
