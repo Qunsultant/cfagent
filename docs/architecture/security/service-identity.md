@@ -111,15 +111,30 @@ tree):
 
 ## Addressing is not identity
 
-`SHARED_ORCHESTRATOR_INSTANCE` in `src/security/serviceIdentity.ts` keeps
-the legacy string as a Durable Object **address** only — it selects which
-Orchestrator instance unattended work talks to. It is never used as a
+`SHARED_ORCHESTRATOR_INSTANCE` in `src/security/serviceIdentity.ts` is
+the Durable Object **address** of the shared Orchestrator instance — it
+selects which instance unattended work talks to. It is never used as a
 login, token key, audit identity, or payer. Separately, the service
 identity inherits the bare instance names (`"default"`, `"trading"`), so
-the Durable Object state accumulated under the legacy identity remains
-reachable under the service identity: **no data migration is required**,
-and records created by unattended work are keyed under the service login
+records created by unattended work are keyed under the service login
 like any owner's records.
+
+**Address rename (#2681).** The live address is `shared_orchestrator`.
+The pre-#2681 address survives ONLY as `LEGACY_SHARED_ORCHESTRATOR_INSTANCE`
+in the same file, for two reasons: in-flight queued messages naming the
+legacy address are still denied as fabricated identity (the #1185/#2331
+guards deny the live address or the legacy address), and the
+orchestrator-migration driver takes its source address explicitly — the
+operator passes the legacy address once at run time. The migration
+(`POST /admin/orchestrator-migration/migrate`, platform-admin only)
+copies SDK schedules, paused_schedules, all KV keys, and user SQL
+tables from the source instance to the target, verifies counts, and
+writes a receipt; in-flight async-job rows drain on the source
+instance, and the source instance is never deleted (no delete API
+exists) — after the flip it simply receives no new work. Until the
+migration runs and the constant flips, the old address keeps serving;
+the flip itself is a deploy, so copy → verify → flip → soak is the
+order, never flip → copy.
 
 ## Changing or revoking it
 

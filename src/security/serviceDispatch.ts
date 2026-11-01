@@ -43,8 +43,8 @@ import {
   type MembershipStore,
 } from "./authorization";
 import {
-  SHARED_ORCHESTRATOR_INSTANCE,
   isLoginShaped,
+  isSharedOrchestratorAddress,
   serviceUserInternalUserId,
 } from "./serviceIdentity";
 
@@ -96,7 +96,7 @@ export function resolveDispatchCandidate(
     return { denied: true, reason: "NO_IDENTITY" };
   }
   const login = candidate as string;
-  if (login === SHARED_ORCHESTRATOR_INSTANCE) {
+  if (isSharedOrchestratorAddress(login)) {
     return { denied: true, reason: "SHARED_ADDRESS" };
   }
   if (serviceLogin !== null && login === serviceLogin) {

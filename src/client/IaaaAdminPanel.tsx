@@ -57,6 +57,7 @@ import {
 } from "./mcpEndpointsData";
 import { AdminQueueWipePanel } from "./AdminQueueWipePanel";
 import { ServiceUserSection } from "./ServiceUserSection";
+import { ServiceTokensPanel } from "./ServiceTokensPanel";
 import "./iaaaAdminPanel.css";
 
 type IaaaAdminTab = "overview" | "members" | "api" | "mcp" | "iaaa" | "correlations" | "queue";
@@ -361,6 +362,13 @@ export function IaaaAdminPanel() {
         state. */}
         <h4>Service user</h4>
         <ServiceUserSection />
+
+        {/* Issue #2681: service tokens live on Overview beside the
+        service-user section, not a new tab (tab indices unchanged)
+        and not duplicated elsewhere: like the service-user tiers,
+        they are platform state. */}
+        <h4>Service tokens</h4>
+        <ServiceTokensPanel />
 
         <p className="iaaa-admin-note">
           Audit events are read-only. Pending access requests below can be

@@ -296,6 +296,7 @@ const HANDLER_FILE: Record<string, string> = {
   "handleServiceUserRoutes": "serviceUser.ts",
   "handleAdminTenantQueueRoutes": "adminTenantQueues.ts",
   "handleKvWipeRoutes": "kvWipe.ts",
+  "handleOrchestratorMigrationRoutes": "orchestratorMigration.ts",
   "handleSchedulesRoutes": "schedules.ts"
 };
 
@@ -333,6 +334,7 @@ const EXPECTED_DELEGATIONS = [
   "handleServiceUserRoutes",
   "handleAdminTenantQueueRoutes",
   "handleKvWipeRoutes",
+  "handleOrchestratorMigrationRoutes",
   "handleSchedulesRoutes"
 ];
 
@@ -621,6 +623,11 @@ const EXPECTED_INVENTORY = [
   "handleScreenerResearchRoutes :: endsWith(\"/screening/backtest\")",
   "handleMaintenanceRoutes :: endsWith(\"/maintenance/events-export\")",
   "handleMaintenanceRoutes :: endsWith(\"/maintenance/clear-table\")",
+  "handleServiceUserRoutes :: endsWith(\"/admin/service-user/tokens\")",
+  "handleServiceUserRoutes :: includes(\"/admin/service-user/tokens/\")",
+  "handleServiceUserRoutes :: endsWith(\"/admin/service-user/tokens\")",
+  "handleServiceUserRoutes :: endsWith(\"/admin/service-user/tokens/rotate\")",
+  "handleServiceUserRoutes :: endsWith(\"/admin/service-user/tokens/revoke\")",
   "handleServiceUserRoutes :: endsWith(\"/admin/service-user/provision\")",
   "handleServiceUserRoutes :: endsWith(\"/admin/service-user/revoke\")",
   "handleServiceUserRoutes :: endsWith(\"/admin/service-user/status\")",
@@ -630,6 +637,9 @@ const EXPECTED_INVENTORY = [
   "handleAdminTenantQueueRoutes :: endsWith(\"/queues/cancel-all\")",
   "handleAdminTenantQueueRoutes :: endsWith(\"/queues/clear-table\")",
   "handleKvWipeRoutes :: endsWith(\"/maintenance/kv-wipe\")",
+  "handleOrchestratorMigrationRoutes :: endsWith(\"/admin/orchestrator-migration/export\")",
+  "handleOrchestratorMigrationRoutes :: endsWith(\"/admin/orchestrator-migration/import\")",
+  "handleOrchestratorMigrationRoutes :: endsWith(\"/admin/orchestrator-migration/migrate\")",
   "handleSchedulesRoutes :: endsWith(\"/schedules\")",
   "handleSchedulesRoutes :: endsWith(\"/api/schedules\")",
   "handleSchedulesRoutes :: === \"/schedules\"",

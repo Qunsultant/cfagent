@@ -145,6 +145,7 @@ import { handleScreenerResearchRoutes } from "./routes/screenerResearch";
 import { handleSchedulesRoutes, makeRunScheduleCallback } from "./routes/schedules";
 import { handleMaintenanceRoutes } from "./routes/maintenance";
 import { handleServiceUserRoutes } from "./routes/serviceUser";
+import { handleOrchestratorMigrationRoutes } from "./routes/orchestratorMigration";
 import { handleAdminTenantQueueRoutes } from "./routes/adminTenantQueues";
 import { handleKvWipeRoutes } from "./routes/kvWipe";
 import { TRADING_PAID_SERVICES } from "../services/agenticPayments";
@@ -2477,6 +2478,20 @@ export class OrchestratorAgent extends PortThink {
       return this.routeRequest(request);
     }
 
+    // Issue #2681: same trap for the service-token admin routes and
+    // the orchestrator-migration routes: "admin" is not an immediate
+    // prefix, so without this branch a token mint/rotate/revoke or a
+    // migration POST would queue as an async job and return 202
+    // instead of its per-request result (a 202 mint would strand the
+    // shown-once secret in a job payload). Method-agnostic, like the
+    // tenants branch above: reads on these paths are sync either way.
+    if (/(?:^|\/api)\/admin\/service-user\/tokens(?:\/|$)/.test(path)) {
+      return this.routeRequest(request);
+    }
+    if (/(?:^|\/api)\/admin\/orchestrator-migration(?:\/|$)/.test(path)) {
+      return this.routeRequest(request);
+    }
+
     // The Worker strips the /api prefix when forwarding and marks queue-eligible requests.
     const isMcpEndpoint = /\/mcp(?:\/|$)/i.test(path);
     const isScheduleEndpoint = /(?:^|\/)(?:api\/)?schedules(?:\/|$)/i.test(path);
@@ -3018,6 +3033,19 @@ export class OrchestratorAgent extends PortThink {
       audit: (type, agent, payload) => this.audit(type, agent, payload),
     });
     if (kvWipeResponse) return kvWipeResponse;
+
+    // Issue #2681: orchestrator-migration routes run after kvWipe,
+    // before schedules; the route logic itself lives in
+    // routes/orchestratorMigration.ts, the class gains no logic.
+    const migrationResponse = await handleOrchestratorMigrationRoutes(request, url, path, sessionId, {
+      env: this.env,
+      audit: (type, agent, payload) => this.audit(type, agent, payload),
+      storage: this.ctx.storage as never,
+      listSchedules: () => this.listSchedules() as unknown as Promise<import("./routes/orchestratorMigration").MigrationSchedule[]>,
+      schedule: (when, callback, payload, options) => this.schedule(when, callback as keyof this, payload, options),
+      scheduleEvery: (intervalSeconds, callback, payload) => this.scheduleEvery(intervalSeconds, callback as keyof this, payload),
+    });
+    if (migrationResponse) return migrationResponse;
 
     // Issue #359-16: schedules task-scheduling routes (list/create/cancel/
     // trigger-*) are handled by src/agents/routes/schedules.ts

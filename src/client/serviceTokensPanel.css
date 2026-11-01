@@ -1,0 +1,167 @@
+/* Service tokens section (issue #2681) — stp- prefixed, token-only. */
+
+.stp-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.stp-desc {
+  margin: 0;
+  font-size: var(--font-size-body-sm);
+  color: var(--color-text-muted);
+}
+
+.stp-desc code,
+.stp-item-prefix {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-caption);
+}
+
+/* The one-time secret reveal: a warning-toned box so the "only chance to
+   copy this" affordance cannot be missed. */
+.stp-secret {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-md);
+  background: var(--color-warning-subtle);
+}
+
+.stp-secret-label {
+  font-weight: 600;
+  color: var(--color-warning-text);
+}
+
+.stp-secret-value {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-body-sm);
+  word-break: break-all;
+  padding: 0.5rem;
+  border: 1px solid var(--color-border-medium);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.stp-secret-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.stp-secret-note {
+  font-size: var(--font-size-caption);
+  color: var(--color-warning-text);
+}
+
+.stp-mint-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.stp-mint-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.stp-label-field {
+  flex: 1 1 12rem;
+}
+
+.stp-tier-field,
+.stp-tenant-field,
+.stp-expiry-field {
+  flex: 1 1 8rem;
+}
+
+.stp-roles {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.stp-roles-label {
+  font-weight: 600;
+  font-size: var(--font-size-body-sm);
+}
+
+.stp-roles-list {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 0.25rem;
+}
+
+.stp-roles-note {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: var(--font-size-caption);
+  color: var(--color-text-muted);
+}
+
+.stp-loading {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-body-sm);
+}
+
+.stp-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.stp-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.stp-item-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.stp-item-label {
+  font-weight: 600;
+}
+
+.stp-item-prefix {
+  color: var(--color-accent);
+}
+
+.stp-item-scope,
+.stp-item-times {
+  font-size: var(--font-size-caption);
+  color: var(--color-text-muted);
+}
+
+.stp-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.stp-confirm-text {
+  font-size: var(--font-size-body-sm);
+  color: var(--color-danger);
+}
