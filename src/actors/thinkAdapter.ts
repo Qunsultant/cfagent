@@ -92,6 +92,15 @@ export type {
   SubmitMessagesResult,
   ThinkSubmissionInspection,
 } from "@cloudflare/think";
+// Issue #2693: the code-declared scheduled-task types, re-exported
+// here so the observe-only declaration module
+// (src/agents/orchestrator/scheduledTasksObserve.ts) and the
+// OrchestratorAgent getScheduledTasks override reach Think's
+// surface through the foundation adapter only.
+export type {
+  ThinkScheduledTaskContext,
+  ThinkScheduledTasks,
+} from "@cloudflare/think";
 import type { UIMessage } from "ai";
 import {
   createCfActorSchedule,
