@@ -44,6 +44,15 @@ import { findDuplicateSchedule } from "../../services/scheduleDedupe";
 import { runStorageRetention } from "../../security/storageRetention";
 import { pruneJobOutcomes } from "../../services/jobOutcomes";
 import {
+  buildSnapshotManifest,
+  ORPHAN_SWEEP_PREFIX,
+  planOrphanSweep,
+  resolveOrphanSweepDelete,
+  resolveSnapshotEnabled,
+  SNAPSHOT_ROW_LIMIT,
+  snapshotObjectKey,
+} from "../../data/retention1766";
+import {
   buildSchedulePayload,
   validateStrategyRequest,
 } from "../../trading";
@@ -734,6 +743,22 @@ export async function handleSchedulesRoutes(
     // Nightly retention pass (issue #255, part of #143; extended to
     // mas_events + mas_memory by issue #786). The Worker's scheduled()
     // handler fires this at the 0 4 * * * cron.
+    // Issue #1766 rides the same pass (same precedent as the #2294
+    // job-outcomes leg): a best-effort orphan sweep over the
+    // reports/ prefix and a best-effort R2 snapshot export of
+    // this instance's tables. Both legs are best-effort — a
+    // context without raw SQL or a bucket (tests, older
+    // callers) or a leg failure must never fail the pass
+    // itself — and both write their own mas_events audit rows
+    // so the pass's work is observable, not just logged.
+    // Fail-closed guards: the sweep deletes NOTHING unless
+    // RETENTION_ORPHAN_SWEEP_DELETE is exactly "true", and a
+    // referenced-keys read failure skips planning entirely
+    // (an unknown referenced set must never read as "every
+    // object is orphaned"). The sweep runs on the shared
+    // Orchestrator instance only; per-user instances are
+    // covered by PITR, not by this leg (recorded in the
+    // #1766 doc, not papered over).
     if (path.endsWith("/schedules/trigger-retention") && request.method === "POST") {
       try {
         const result = runStorageRetention(ctx.getOrm(), {
@@ -756,6 +781,164 @@ export async function handleSchedulesRoutes(
           jobOutcomes.error = err instanceof Error ? err.message : String(err);
           console.warn("[retention] job outcomes prune failed:", jobOutcomes.error);
         }
+        const auditEvent = (type: string, payload: Record<string, unknown>) => {
+          try {
+            const orm = ctx.getOrm() as unknown as {
+              events?: { create: (row: Record<string, unknown>) => void };
+            };
+            orm.events?.create({
+              id: `retention_${crypto.randomUUID().slice(0, 8)}`,
+              sessionId: "system",
+              type,
+              agent: "orchestrator",
+              payload,
+              createdAt: new Date().toISOString(),
+            });
+          } catch {
+            // Audit persistence is best-effort here; the response
+            // fields below are the operator-visible record.
+          }
+        };
+        // #1766 leg 1 — orphan sweep (reports/*.json vs mas_reports.body_r2_key).
+        const orphanSweep = {
+          scanned: 0,
+          orphans: 0,
+          danglingRows: 0,
+          deleted: 0,
+          deleteFailed: 0,
+          deleteEnabled: false,
+          truncated: false,
+          error: null as string | null,
+          skipped: null as string | null,
+        };
+        try {
+          const bucket = ctx.env?.REPORTS_BUCKET;
+          if (!bucket) {
+            orphanSweep.skipped = "REPORTS_BUCKET is not bound";
+          } else {
+            const sql = ctx.agentCtx.storage.sql as {
+              exec: (q: string, ...params: unknown[]) => Iterable<unknown>;
+            };
+            const bucketKeys: string[] = [];
+            let cursor: string | undefined;
+            let pageTruncated = false;
+            do {
+              const page = await bucket.list({ prefix: ORPHAN_SWEEP_PREFIX, cursor, limit: 1000 });
+              for (const obj of page.objects) bucketKeys.push(obj.key);
+              pageTruncated = page.truncated;
+              cursor = page.truncated ? page.cursor : undefined;
+              if (bucketKeys.length >= 5000) {
+                pageTruncated = true;
+                break;
+              }
+            } while (pageTruncated && cursor);
+            orphanSweep.truncated = pageTruncated;
+            let referencedKeys: string[] | null = null;
+            try {
+              const rows = Array.from(
+                sql.exec("SELECT body_r2_key FROM mas_reports WHERE body_r2_key IS NOT NULL"),
+              ) as Array<{ body_r2_key?: unknown }>;
+              referencedKeys = rows
+                .map((r) => r.body_r2_key)
+                .filter((k): k is string => typeof k === "string");
+            } catch (err) {
+              // Fail closed: without the referenced set, every object
+              // would read as orphaned — so plan nothing at all.
+              orphanSweep.error = `referenced-keys read failed: ${err instanceof Error ? err.message : String(err)}`;
+            }
+            if (referencedKeys !== null) {
+              const plan = planOrphanSweep({ bucketKeys, referencedKeys });
+              orphanSweep.scanned = plan.scanned;
+              orphanSweep.orphans = plan.orphans.length;
+              orphanSweep.danglingRows = plan.danglingRows.length;
+              orphanSweep.deleteEnabled = resolveOrphanSweepDelete(
+                ctx.env?.RETENTION_ORPHAN_SWEEP_DELETE,
+              );
+              if (orphanSweep.deleteEnabled) {
+                for (const key of plan.orphans) {
+                  try {
+                    await bucket.delete(key);
+                    orphanSweep.deleted += 1;
+                  } catch {
+                    orphanSweep.deleteFailed += 1;
+                  }
+                }
+              }
+              auditEvent("RETENTION_ORPHAN_SWEEP", {
+                scanned: orphanSweep.scanned,
+                orphans: orphanSweep.orphans,
+                danglingRows: orphanSweep.danglingRows,
+                deleted: orphanSweep.deleted,
+                deleteFailed: orphanSweep.deleteFailed,
+                deleteEnabled: orphanSweep.deleteEnabled,
+                truncated: orphanSweep.truncated,
+                note: "Nightly orphan sweep (#1766): reports/*.json objects with no mas_reports row; dangling rows are reported, never deleted.",
+              });
+            }
+          }
+        } catch (err) {
+          orphanSweep.error = err instanceof Error ? err.message : String(err);
+          console.warn("[retention] orphan sweep failed:", orphanSweep.error);
+        }
+        // #1766 leg 2 — R2 snapshot export of this instance's tables.
+        const snapshot = {
+          tables: 0,
+          rows: 0,
+          truncatedTables: [] as string[],
+          key: null as string | null,
+          error: null as string | null,
+          skipped: null as string | null,
+        };
+        try {
+          if (!resolveSnapshotEnabled(ctx.env?.RETENTION_SNAPSHOT_ENABLED)) {
+            snapshot.skipped = "disabled by RETENTION_SNAPSHOT_ENABLED=false";
+          } else {
+            const bucket = ctx.env?.REPORTS_BUCKET;
+            if (!bucket) {
+              snapshot.skipped = "REPORTS_BUCKET is not bound";
+            } else {
+              const sql = ctx.agentCtx.storage.sql as {
+                exec: (q: string, ...params: unknown[]) => Iterable<unknown>;
+              };
+              const tableRows = Array.from(
+                sql.exec("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"),
+              ) as Array<{ name?: unknown }>;
+              const tables: Array<{ table: string; rows: unknown[] }> = [];
+              for (const t of tableRows) {
+                if (typeof t.name !== "string" || !/^[A-Za-z0-9_]+$/.test(t.name)) continue;
+                const rows = Array.from(sql.exec(`SELECT * FROM "${t.name}" LIMIT 5001`));
+                tables.push({ table: t.name, rows });
+              }
+              const manifest = await buildSnapshotManifest({
+                instance: "orchestrator",
+                exportedAt: Date.now(),
+                tables,
+                rowLimit: SNAPSHOT_ROW_LIMIT,
+              });
+              const key = snapshotObjectKey("orchestrator", manifest.exportedAt);
+              await bucket.put(key, JSON.stringify(manifest), {
+                httpMetadata: { contentType: "application/json" },
+              });
+              snapshot.tables = manifest.tables.length;
+              snapshot.rows = manifest.tables.reduce((sum, t) => sum + t.rowCount, 0);
+              snapshot.truncatedTables = manifest.tables
+                .filter((t) => t.truncated)
+                .map((t) => t.table);
+              snapshot.key = key;
+              auditEvent("RETENTION_SNAPSHOT", {
+                tables: snapshot.tables,
+                rows: snapshot.rows,
+                truncatedTables: snapshot.truncatedTables,
+                key,
+                manifestSha256: manifest.manifestSha256,
+                note: "Nightly R2 snapshot export (#1766): portable per-table dump complementing Cloudflare PITR (30-day whole-DB restore); truncated tables are flagged, never silently partial.",
+              });
+            }
+          }
+        } catch (err) {
+          snapshot.error = err instanceof Error ? err.message : String(err);
+          console.warn("[retention] snapshot export failed:", snapshot.error);
+        }
         return Response.json({
           success: true,
           ...result,
@@ -763,6 +946,8 @@ export async function handleSchedulesRoutes(
           jobOutcomesByAge: jobOutcomes.deletedByAge,
           jobOutcomesByCap: jobOutcomes.deletedByCap,
           jobOutcomesError: jobOutcomes.error,
+          orphanSweep,
+          snapshot,
         });
       } catch (err: any) {
         return Response.json({ error: err.message || "Failed to run storage retention" }, { status: 500 });
