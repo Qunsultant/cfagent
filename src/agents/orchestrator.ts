@@ -6,7 +6,7 @@ import type {
   UiChatMessage,
 } from "../actors/actorPorts";
 import { createCfActorSession } from "../actors/cfAgentsAdapter";
-import { PortThink, createThinkActorTurn, type ThinkScheduledTasks } from "../actors/thinkAdapter";
+import { PortThink, createThinkActorTurn, type SkillSource, type ThinkScheduledTasks } from "../actors/thinkAdapter";
 import type { ActorSessionPort, ActorTurnHooks, ActorTurnPort } from "../actors/actorPorts";
 import type { ToolSet } from "ai";
 import { getWorkersAIModel } from "./model";
@@ -63,6 +63,7 @@ import { dispatchOrchestratorA2A, orchestratorA2AOutcome, type OrchestratorA2AOu
 import { buildChatErrorFallback, type ChatErrorFallbackContext } from "./chatErrorFallback";
 import { getScreenerExecutionContext, migrateLegacyScreenSchedules, removeUnownedBaselineSchedules, ensureStrategyScanSchedule, resolveScheduledLogin, type ScheduleMaintenanceContext } from "./orchestrator/scheduleMaintenance";
 import { declareStrategyScanObserveTasks, type ScheduledTasksObserveContext } from "./orchestrator/scheduledTasksObserve";
+import { buildOrchestratorSkillSources } from "./orchestrator/skillPacks";
 import { autoRenewETradeTokens, autonomousGoalScreen, autonomousMarketScreen, autonomousStrategyDiscovery, collectIvHistory, expireStaleOrderDraft, sendScheduledReminder, type ScheduledCallbacksContext } from "./orchestrator/scheduledCallbacks";
 import { nlqSchedulingPort, nlqSocialBriefPort, nlqStockScreenPort, type NlqPortsContext } from "./orchestrator/nlqPorts";
 import { formatTraceparent, newTraceContext } from "../observability/observabilityPorts";
@@ -1104,6 +1105,18 @@ export class OrchestratorAgent extends PortThink {
   // SDK row above keeps firing the real options scan.
   override getScheduledTasks(): Promise<ThinkScheduledTasks> {
     return declareStrategyScanObserveTasks(this.scheduledTasksObserveContext());
+  }
+
+  // Issue #2705 (Agents SDK Skills enablement, slice 1):
+  // extracted to ./orchestrator/skillPacks.ts
+  // (buildOrchestratorSkillSources). The class serves ONE
+  // in-repo code-manifest source — the chat-screening door
+  // playbook pack; Think re-lists sources before every turn
+  // and, with a non-empty catalog, adds activate_skill /
+  // read_skill_resource to the turn's tool set. No other fleet
+  // class overrides this hook in this slice.
+  override getSkills(): SkillSource[] {
+    return buildOrchestratorSkillSources();
   }
 
   // Issue #992: extracted to ./orchestrator/scheduledCallbacks.ts (autoRenewETradeTokens);

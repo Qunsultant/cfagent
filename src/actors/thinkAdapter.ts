@@ -101,6 +101,17 @@ export type {
   ThinkScheduledTaskContext,
   ThinkScheduledTasks,
 } from "@cloudflare/think";
+// Issue #2705: the Agent Skills source type, re-exported here so
+// the OrchestratorAgent skills-hook override and its extracted
+// module (src/agents/orchestrator/skillPacks.ts) reach Think's
+// surface through the foundation adapter only. (The runtime
+// skills factory itself is the agents package's skills module —
+// the module Think imports and re-exports as its skills
+// namespace — and is imported there, not here: this adapter
+// re-exports the TYPE so the class signature stays behind the
+// port, and PortThink itself neither overrides nor blocks the
+// hook.)
+export type { SkillSource } from "@cloudflare/think";
 import type { UIMessage } from "ai";
 import {
   createCfActorSchedule,
