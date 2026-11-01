@@ -195,9 +195,6 @@ jobs:
       contents: read
     env:
       APP_ENV: ${{ needs.load-environment.outputs.target_env }}
-      ET_API_KEY: ${{ secrets.ET_API_KEY }}
-      ET_API_SECRET: ${{ secrets.ET_API_SECRET }}
-      ET_BASE_URL: ${{ secrets.ET_BASE_URL }}
     steps:
       - name: 📥 Checkout Repository
         uses: actions/checkout@v4
@@ -229,9 +226,6 @@ jobs:
       contents: read
     env:
       APP_ENV: ${{ needs.load-environment.outputs.target_env }}
-      ET_API_KEY: ${{ secrets.ET_API_KEY }}
-      ET_API_SECRET: ${{ secrets.ET_API_SECRET }}
-      ET_BASE_URL: ${{ secrets.ET_BASE_URL }}
     steps:
       - name: 📥 Checkout Repository
         uses: actions/checkout@v4

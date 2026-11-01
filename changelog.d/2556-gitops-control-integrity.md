@@ -1,0 +1,6 @@
+- Harden GitOps control integrity and eliminate redundant CI/CD executions per Issue #2556:
+  - Protect `/.github/`, `/scripts/ci/`, `/AGENTS.md`, `/docs/agents/`, `/environment.config.json`, and `/wrangler.jsonc` in `.github/CODEOWNERS`.
+  - Execute Policy Gate evaluator strictly from trusted base branch `origin/main:scripts/ci/policy_gate.py` to prevent candidate PRs from altering their own gate rules.
+  - Remove live broker credentials (`ET_*`) from PR and MQ unit test shards in `ci.yml`, isolating unit test environments to mocked adapters.
+  - Bind Cloudflare Worker deployment in `deploy.yml` to successful `Continuous Integration & Test Verification` validation on `main`, pinning checkout to the verified commit SHA.
+  - Deprecate automated runner triggers in `self-heal-fixer-nocopilot.yml` to eliminate idle runner minutes.
