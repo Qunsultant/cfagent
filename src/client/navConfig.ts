@@ -278,6 +278,19 @@ export function buildDefaultLeftNavConfig(): LeftNavConfig {
         description: "Ads, tasks, keys, providers & IAAA",
         subItems: PLATFORM_ADMIN_NAV_ITEMS,
       });
+
+      const workflowsIndex = items.findIndex((i) => i.id === "workflows");
+      const insertAt = workflowsIndex !== -1 ? workflowsIndex : items.length;
+      items.splice(insertAt, 0, {
+        id: "schedules",
+        label: "Schedules",
+        shortLabel: "Schedules",
+        category: "Platform",
+        icon: "Schedules",
+        badge: "Cron",
+        badgeType: "neutral",
+        description: "The one scheduling surface for screening runs — create, pause, and inspect scheduled jobs",
+      });
     }
 
     return {
