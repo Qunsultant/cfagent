@@ -464,7 +464,12 @@ export async function handleDataProviderRoutes(
       return Response.json({ error: err.message }, { status: 409 });
     }
     return Response.json(
-      { error: err instanceof Error ? err.message : "Data provider route failed" },
+      {
+        error: err instanceof Error ? err.message : "Data provider route failed",
+        // Issue #2624 fix-up: a 500 must name what failed, so the panel can
+        // show a diagnosable message instead of a bare status.
+        code: "DATA_PROVIDER_ROUTE_FAILED",
+      },
       { status: 500 }
     );
   }

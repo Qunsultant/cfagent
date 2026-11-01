@@ -123,6 +123,8 @@ interface StubOptions {
   list?: { providers: DataProviderView[]; routes: CapabilityRouteView[] };
   listStatus?: number;
   listBody?: unknown;
+  /** Raw (non-JSON) body, e.g. an edge error page (issue #2624 fix-up). */
+  listRawBody?: string;
   actionStatus?: number;
   actionBody?: unknown;
 }
@@ -135,6 +137,12 @@ function installFetch(opts: StubOptions) {
     const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
     calls.push({ method, url, body });
     if (method === "GET" && url.endsWith("/api/data-providers")) {
+      if (opts.listRawBody !== undefined) {
+        return new Response(opts.listRawBody, {
+          status: opts.listStatus ?? 200,
+          headers: { "content-type": "text/html" },
+        });
+      }
       return Response.json(opts.listBody ?? opts.list ?? { providers: [], routes: [] }, {
         status: opts.listStatus ?? 200,
       });
@@ -305,6 +313,15 @@ describe("DataProvidersPanel rendering (issue #1180)", () => {
     await renderPanel();
     await waitForText("provider store unavailable");
     expect(container.querySelectorAll("[data-provider-id]")).toHaveLength(0);
+  });
+
+  it("names a non-JSON 500 instead of showing a bare status (#2624 fix-up)", async () => {
+    // An edge/error-boundary page carries no JSON body; before this fix the
+    // panel could only say "Request failed (500)", which is undiagnosable.
+    installFetch({ listStatus: 500, listRawBody: "<html>500 Internal Server Error</html>" });
+    await renderPanel();
+    await waitForText("Request failed (500)");
+    expect(container.textContent).toContain("HTML error page from the edge");
   });
 
   it("renders a sign-in-required state — not a generic failure — on 401", async () => {

@@ -525,6 +525,7 @@ export function NavigationMenu({
           open={platformAdminOpen}
           onClose={() => setPlatformAdminOpen(false)}
           initialSection={platformAdminSection}
+          user={{ login: user.login, name: user.name, avatar: user.avatar }}
         />
       </>
     );
