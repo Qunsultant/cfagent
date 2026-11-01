@@ -361,6 +361,11 @@ export function DocsAndReportsPanel() {
             {sortedRows.length} {sortedRows.length === 1 ? "run" : "runs"} · sorted by{" "}
             {SORT_LABELS[sort.key]}, {sort.dir === "asc" ? "ascending" : "descending"}
           </div>
+          {sortedRows.length >= 100 && (
+            <Notice tone="info" title="Run list capped at 100">
+              The request fetches at most 100 runs, so older runs are not shown here.
+            </Notice>
+          )}
           <RunDetailsModal
             open={detailsOpen}
             onClose={() => setDetailsOpen(false)}

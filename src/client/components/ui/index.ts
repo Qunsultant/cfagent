@@ -38,6 +38,12 @@
  * - Toast — the one global place for transient success/failure feedback
  *   (ToastProvider + useToast; auto-dismiss by tone, danger persists,
  *   hover/focus pause, Escape dismisses, role=status/alert announced).
+ * - Menu — WAI-ARIA menu button (trigger + portaled role="menu" items,
+ *   ArrowDown/Up/Home/End, Escape/outside-close, disabled + danger items).
+ * - Popover — non-modal anchored panel (trigger + portaled dialog,
+ *   Escape/outside-close, placement shared with Menu).
+ * - Drawer — side panel on the Modal behavior contract (portal, Escape/
+ *   backdrop close, focus trap + restore, scroll lock; sides left/right).
  *
  * Styles live in ./primitives.css (imported once by main.tsx). New
  * primitives are added here with their styles + tests in the same PR.
@@ -61,3 +67,6 @@ export { Table, type TableProps, type TableColumn } from "./Table";
 export { Skeleton, type SkeletonProps } from "./Skeleton";
 export { PageShell, PageSection, type PageShellProps, type PageSectionProps } from "./PageShell";
 export { ToastProvider, useToast, type ToastTone, type ToastInput, type ToastApi } from "./Toast";
+export { Menu, type MenuProps, type MenuItem } from "./Menu";
+export { Popover, type PopoverProps } from "./Popover";
+export { Drawer, type DrawerProps } from "./Drawer";

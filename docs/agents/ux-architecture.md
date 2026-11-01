@@ -306,6 +306,37 @@ and it keeps claiming loading after the fetch failed.
   truncated content ("NLQ: …"), a truncation suffix inside a computed
   label. A new swap cannot hide behind the allowlist.
 
+### Anchored surfaces: Menu, Popover, Drawer
+
+Floating panels are primitives, not per-panel inventions. Menu, Popover,
+and Drawer live in `src/client/components/ui/` with token-only styling
+in `primitives.css`, and new floating surfaces use them; existing
+hand-rolled menus migrate when touched (the AskAgentWidget drawer and
+the landing ⌘K palette migrated in stream 5).
+
+- Menu is a WAI-ARIA menu button: the trigger carries
+  `aria-haspopup="menu"` and `aria-expanded`, the portaled panel is
+  `role="menu"` with `role="menuitem"` buttons, ArrowDown/Up/Home/End
+  move between enabled items, Escape closes and restores focus to the
+  trigger, an outside pointer press closes, disabled items are
+  `aria-disabled` and never fire, danger items take the danger tone.
+- Popover is the non-modal sibling: a trigger-anchored dialog for
+  secondary content, Escape/outside-close, placement shared with Menu.
+  No focus trap by design — focus stays on the trigger.
+- Drawer is a side panel on the Modal behavior contract: portal to
+  body, Escape/backdrop close, focus trap with restore, body scroll
+  lock, `role="dialog"` + `aria-modal`. Token z-order puts the drawer
+  below Toast, so transient feedback always stays on top; the header
+  takes a title node plus optional actions before the built-in close.
+- The one-dialog-system rule extends to the vanilla landing page: its
+  ⌘K palette uses `.modal-backdrop` + `.modal-dialog` with only its
+  top-anchored placement page-local (no separate backdrop/box system).
+- Sortable table headers are real buttons, and the column carries
+  `aria-sort` (the Table primitive renders it on the `<th>`); a
+  clickable span is not a sort control. Silent caps are disclosed, not
+  hidden: DocsAndReports notes its 100-run request cap, NLQ notes its
+  first-20-rows display cap.
+
 ## 7. Goal capture and delegation
 
 The creation flow must collect:

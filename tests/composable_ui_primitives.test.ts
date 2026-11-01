@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import React from "react";
-import { SegmentedControl, PillGroup, Badge, Button, Spinner, EmptyState, Card, Notice, Tabs, TabPanel, TextInput, Select, FileInput, Modal, Table, Skeleton, Checkbox, PageShell, PageSection, ToastProvider, useToast } from "../src/client/components/ui";
+import { SegmentedControl, PillGroup, Badge, Button, Spinner, EmptyState, Card, Notice, Tabs, TabPanel, TextInput, Select, FileInput, Modal, Table, Skeleton, Checkbox, PageShell, PageSection, ToastProvider, useToast, Menu, Popover, Drawer } from "../src/client/components/ui";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -400,5 +400,49 @@ describe("PageShell + PageSection (#1804/#1808)", () => {
     expect(section.props.title).toBe("Overview");
     const shell = React.createElement(PageShell, { title: "Dashboard" }, section);
     expect(shell.props.title).toBe("Dashboard");
+  });
+});
+
+describe("Menu + Popover + Drawer (#2283 stream 5)", () => {
+  it("Menu carries the trigger/items/a11y contract", () => {
+    const element = React.createElement(Menu, {
+      ariaLabel: "Actions",
+      trigger: React.createElement("button", { type: "button" }, "Open"),
+      items: [
+        { id: "a", label: "Alpha", onSelect: () => {} },
+        { id: "b", label: "Beta", onSelect: () => {}, disabled: true, danger: true },
+      ],
+      align: "end",
+    });
+    expect(element.props.ariaLabel).toBe("Actions");
+    expect(element.props.items).toHaveLength(2);
+    expect(element.props.items[1].disabled).toBe(true);
+    expect(element.props.items[1].danger).toBe(true);
+    expect(element.props.align).toBe("end");
+  });
+
+  it("Popover carries the trigger/title/content contract", () => {
+    const element = React.createElement(
+      Popover,
+      {
+        trigger: React.createElement("button", { type: "button" }, "Info"),
+        title: "About this",
+      },
+      "Popover body",
+    );
+    expect(element.props.title).toBe("About this");
+    expect(element.props.children).toBe("Popover body");
+  });
+
+  it("Drawer carries the side-panel contract", () => {
+    const element = React.createElement(Drawer, {
+      open: true,
+      onClose: () => {},
+      title: "Copilot",
+      side: "left",
+    }, "Drawer body");
+    expect(element.props.open).toBe(true);
+    expect(element.props.title).toBe("Copilot");
+    expect(element.props.side).toBe("left");
   });
 });

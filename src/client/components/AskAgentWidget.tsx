@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import type { NavTabId } from "./NavigationMenu";
-import { Button, TextInput } from "./ui";
+import { Button, Drawer, TextInput } from "./ui";
 import { BRAND } from "../branding";
 
 export interface AskAgentWidgetProps {
@@ -233,16 +233,8 @@ export function AskAgentWidget({
     return () => window.removeEventListener("open-ask-agent", handleOpen);
   }, []);
 
-  // Global ESC handler to close drawer
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && isOpen) {
-        setIsOpen(false);
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen]);
+  // Drawer owns Escape/backdrop close via the Drawer primitive; no
+  // widget-level key handler (its close path is setIsOpen(false)).
 
   const handleSend = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -367,53 +359,44 @@ export function AskAgentWidget({
         )}
       </div>
 
-      {/* Floating Copilot Drawer Panel */}
-      {isOpen && (
-        <div className="ask-agent-drawer-card" role="dialog" aria-modal="true" aria-label="Ask Agent Copilot">
-          {/* Drawer Header */}
-          <div className="ask-agent-header">
-            <div className="agent-header-brand">
-              <div className="agent-header-avatar">
-                <span className="agent-avatar-glyph">🤖</span>
-                <span className={`agent-online-dot ${agentStatus.dotClass}`} />
-              </div>
-              <div className="agent-header-titles">
-                <div className="agent-main-title">
-                  <span>{BRAND.copilotName}</span>
-                  <span className="agent-ai-badge">AI 2.0</span>
-                </div>
-                <div className="agent-sub-title">
-                  Context: <strong style={{ color: "var(--color-accent)", textTransform: "capitalize" }}>{activeTab ? activeTab.replace("-", " ") : "Platform"}</strong>
-                </div>
-              </div>
+      {/* Copilot panel on the Drawer primitive (#2283 stream 5): side panel
+          with token z-order below Toast, replacing the z-99995 card. */}
+      <Drawer
+        open={isOpen}
+        onClose={() => setIsOpen(false)}
+        title={(
+          <div className="agent-header-brand">
+            <div className="agent-header-avatar">
+              <span className="agent-avatar-glyph">🤖</span>
+              <span className={`agent-online-dot ${agentStatus.dotClass}`} />
             </div>
-
-            <div className="agent-header-actions">
-              <Button
-                type="button"
-                className="agent-icon-btn"
-                onClick={() => handleTransferToFullChat()}
-                title="Expand to Full Chat Tab"
-                aria-label="Open in Chat Tab"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-                  <polyline points="15 3 21 3 21 9" />
-                  <line x1="10" y1="14" x2="21" y2="3" />
-                </svg>
-              </Button>
-              <Button
-                type="button"
-                className="agent-icon-btn"
-                onClick={() => setIsOpen(false)}
-                title="Minimize Agent"
-                aria-label="Close Ask Agent"
-              >
-                ✕
-              </Button>
+            <div className="agent-header-titles">
+              <div className="agent-main-title">
+                <span>{BRAND.copilotName}</span>
+                <span className="agent-ai-badge">AI 2.0</span>
+              </div>
+              <div className="agent-sub-title">
+                Context: <strong style={{ color: "var(--color-accent)", textTransform: "capitalize" }}>{activeTab ? activeTab.replace("-", " ") : "Platform"}</strong>
+              </div>
             </div>
           </div>
-
+        )}
+        actions={(
+          <Button
+            type="button"
+            className="agent-icon-btn"
+            onClick={() => handleTransferToFullChat()}
+            title="Expand to Full Chat Tab"
+            aria-label="Open in Chat Tab"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+              <polyline points="15 3 21 3 21 9" />
+              <line x1="10" y1="14" x2="21" y2="3" />
+            </svg>
+          </Button>
+        )}
+      >
           {/* Messages Scroll Area */}
           <div className="ask-agent-messages-container">
             {messages.map((m) => (
@@ -517,8 +500,7 @@ export function AskAgentWidget({
               Full Agent Workspace ↗
             </Button>
           </div>
-        </div>
-      )}
+      </Drawer>
     </>
   );
 }
