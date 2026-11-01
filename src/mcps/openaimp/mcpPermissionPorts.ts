@@ -389,6 +389,12 @@ export function resolveMcpPrincipalFromHeaders(headers: {
   const login = headers.get("x-user-login");
   if (!login) return { login: null, kind: "unknown" };
   const kindRaw = headers.get("x-principal-kind");
+  // Issue #2681: a service-token caller is never a session principal
+  // at the MCP gate. Token roles are enforced by the PDP seam, not by
+  // this kind mapping, so until #945 route wiring adopts it, a token
+  // caller maps to "unknown" (deny-all scopes) instead of inheriting
+  // session scope through the legacy default below.
+  if (kindRaw === "service-token") return { login, kind: "unknown" };
   const kind: McpPrincipalKind = kindRaw === "api-key" ? "api-key" : "session";
   return { login, kind };
 }
