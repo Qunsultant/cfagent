@@ -561,6 +561,13 @@ export async function runSagaWorkflowFlow(
       email: params.email,
       account: params.account,
       screenerCommand: params.screenerCommand,
+      // #2041 G-METERING: saga-only metering context. The payment
+      // workflow records one usage_event after confirm-paid
+      // succeeds, only when this context is present — so non-saga
+      // payment runs are never labeled saga, and the saga entry
+      // route (which never observes the payment outcome) stays
+      // out of metering entirely.
+      meterContext: { category: "saga", userLogin: params.userLogin },
     }),
   );
   const payTerminal = await pollLegToTerminal(

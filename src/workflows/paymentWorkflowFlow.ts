@@ -124,6 +124,16 @@ export interface PaymentWorkflowParams {
    * step hands it, unchanged, to the screener workflow port.
    */
   screenerCommand?: unknown;
+  /**
+   * #2041 G-METERING: saga-only metering context. When present,
+   * the paid path records one usage_event after confirm-paid
+   * succeeds (never earlier, never on covered runs). Absent =
+   * today's behavior exactly (no rows). The saga Leg 0 sets this;
+   * no other caller does, so non-saga runs are never labeled
+   * saga. The category is literal "saga" because the meter route
+   * rejects any other category.
+   */
+  meterContext?: { category: "saga"; userLogin: string };
 }
 
 /** Minimal structural step surface the flow needs (fakeable in tests). */
@@ -241,6 +251,22 @@ export interface PaymentWorkflowDeps {
    * (free_flag_off, already_paid) are no-ops.
    */
   consumeCoverage?: (use: { userId: string; paidVia: string; priceUSD: number }) => Promise<void>;
+  /**
+   * #2041 G-METERING: record one usage event for a saga paid run.
+   * Called only when params.meterContext is present and only
+   * after confirm-paid succeeds. MUST throw on failure
+   * (fail-closed): a throwing dep fails the step (durably
+   * retried) so a run never completes unmetered. Optional only
+   * so existing flow tests without metering keep passing; when
+   * meterContext is present and this dep is absent, the flow
+   * throws (a wiring bug, fail loud).
+   */
+  recordUsage?: (usage: {
+    receiptId: string;
+    protocol: "stripe" | "x402";
+    userLogin: string;
+    priceUSD: number;
+  }) => Promise<void>;
 }
 
 export type PaymentWorkflowOutcome =
@@ -414,6 +440,42 @@ export async function runPaymentWorkflowFlow(
         paymentIntentId: verified.paymentIntentId,
       }),
     );
+    // #2041 G-METERING: one usage row for a saga paid run, after
+    // confirm-paid succeeds and before the screen starts. Earlier
+    // would over-meter (unpaid runs); the covered path never
+    // reaches this (no confirm-paid, no payment). The receipt id
+    // is the provider id the native gate's confirm just used:
+    // the Stripe session id for card, the x402 payment proof for
+    // crypto — stable across step retries and workflow replays
+    // because `verified` comes from the completed waitForEvent
+    // step. Neither present is fail-closed: a confirmed payment
+    // without a provider id cannot be metered, and must not
+    // start unmetered. The price is the gate-check price, for the
+    // same resume reason as the record-payment comment above.
+    if (params.meterContext) {
+      if (!deps.recordUsage) {
+        throw new Error(
+          "Payment workflow metering miswired: meterContext present but recordUsage dep is absent.",
+        );
+      }
+      const receipt = verified.sessionId
+        ? { receiptId: verified.sessionId, protocol: "stripe" as const }
+        : verified.paymentProof
+          ? { receiptId: verified.paymentProof, protocol: "x402" as const }
+          : null;
+      if (!receipt) {
+        throw new Error(
+          `Payment workflow cannot meter run ${params.runRequestId}: confirmed payment carries no provider receipt id.`,
+        );
+      }
+      await step.do("record-usage", () =>
+        deps.recordUsage!({
+          ...receipt,
+          userLogin: params.meterContext!.userLogin,
+          priceUSD: gateDecision.priceUSD,
+        }),
+      );
+    }
     return startScreenerOrCredit(
       params,
       deps,

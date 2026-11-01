@@ -114,6 +114,7 @@ import {
   listCfpayLedgerRows,
   recordCfpayAuditEvent,
   recordCfpayLedgerRow,
+  recordMeterUsageEvent,
   reconcileCfpayRun,
 } from "../services/cfpayLedger";
 import {
@@ -437,6 +438,22 @@ export class PaymentWorkflow extends ThinkWorkflow<
           );
         }
       },
+      recordUsage: async (usage: {
+        receiptId: string;
+        protocol: "stripe" | "x402";
+        userLogin: string;
+        priceUSD: number;
+      }) => {
+        // #2041 G-METERING: endpoint-mediated meter write, same
+        // SEARCH_AGENT channel as the audit forwarder above
+        // (workflows run in the Worker with no DO sql accessor).
+        // THROWS on any failure (fail-closed) — unlike the
+        // best-effort audit write, a meter failure must fail the
+        // record-usage step so the run never completes unmetered.
+        // The route dedupes on the receipt-scoped id, so a
+        // retried step writes exactly one row.
+        await recordMeterUsageEvent(this.env, usage);
+      },
     };
 
     if (!p.screenerCommand || typeof p.screenerCommand.jobId !== "string") {
@@ -454,6 +471,11 @@ export class PaymentWorkflow extends ThinkWorkflow<
         userId: p.userId,
         email: p.email,
         screenerCommand: p.screenerCommand,
+        // #2041 G-METERING: saga-only. PaymentWorkflowEventParams
+        // inherits this optional field from PaymentWorkflowParams;
+        // absent for every non-saga caller, so non-saga runs meter
+        // nothing. The saga Leg 0 sets it (sagaWorkflowFlow.ts).
+        meterContext: p.meterContext,
       },
       deps,
       step as unknown as PaymentWorkflowStep,

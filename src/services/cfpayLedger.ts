@@ -344,6 +344,40 @@ export async function recordCfpayAuditEvent(
   }
 }
 
+/** One usage_events row for a saga paid run (see the meter route). */
+export interface MeterUsageInput {
+  receiptId: string;
+  protocol: "stripe" | "x402";
+  userLogin: string;
+  priceUSD: number;
+}
+
+/**
+ * #2041 G-METERING: record one usage_event for a saga paid run
+ * via the meter route (same SEARCH_AGENT stub channel as the
+ * audit forwarder above). THROWS on any failure (fail-closed):
+ * the flow's record-usage step fails and retries durably rather
+ * than completing unmetered — the deliberate opposite of the
+ * best-effort audit write. A 201 duplicate is informational
+ * success (a retried step re-inserting the same receipt-scoped
+ * id). Category is fixed to "saga" here (the route also
+ * enforces it): only saga-originated runs ever reach this call.
+ */
+export async function recordMeterUsageEvent(
+  env: Env,
+  usage: MeterUsageInput,
+): Promise<{ duplicate: boolean }> {
+  const res = await cfpayLedgerFetch(env, "/api/meter/event", {
+    method: "POST",
+    body: JSON.stringify({ ...usage, category: "saga" }),
+  });
+  if (!res.ok) {
+    throw new Error(`meter usage record failed: HTTP ${res.status} for receipt=${usage.receiptId}`);
+  }
+  const body = (await res.json()) as { duplicate?: boolean };
+  return { duplicate: body.duplicate ?? false };
+}
+
 export interface CfpayRevenueByFamily {
   charges: number;
   chargeTotalUSD: number;
