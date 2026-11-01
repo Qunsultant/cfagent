@@ -1,0 +1,2 @@
+### Changed
+- Chat system prompt (issue #2719, #2494 finding 1 / tracker #2708 A13): removed the embedded platform documentation (8-workflow UI navigation map and decisioning-engine descriptions) and compressed the tool list to steering lines — the content is served at turn time by `query_platform_knowledge`, the prompt now carries capabilities and behavior rules only (assembled prompt 10,193 → 5,880 chars, pinned).
