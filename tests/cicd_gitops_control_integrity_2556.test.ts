@@ -54,6 +54,17 @@ describe("GitOps Control Integrity & Redundancy Reduction (#2556)", () => {
     expect(content).toContain("Continuous Integration & Test Verification");
   });
 
+  it("enables post-deploy QA qa-smoke and tag-release under workflow_run trigger in deploy.yml (#2644)", () => {
+    expect(existsSync(deployPath)).toBe(true);
+    const content = readFileSync(deployPath, "utf-8");
+
+    const qaSmokeSection = content.split("qa-smoke:")[1] ?? "";
+    expect(qaSmokeSection).toContain("github.event_name == 'workflow_run'");
+
+    const tagReleaseSection = content.split("tag-release:")[1]?.split("qa-smoke:")[0] ?? "";
+    expect(tagReleaseSection).toContain("github.event_name == 'workflow_run'");
+  });
+
   it("disables automated runner burn on self-heal-fixer-nocopilot.yml", () => {
     expect(existsSync(fixerPath)).toBe(true);
     const content = readFileSync(fixerPath, "utf-8");

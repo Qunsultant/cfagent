@@ -349,7 +349,11 @@ jobs:
     needs: deploy
     permissions:
       contents: write
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Issue #2644: Align qa-smoke condition with deploy triggers (workflow_run from CI on main, workflow_dispatch, or push)
+    if: >-
+      (github.event_name == 'workflow_run' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.conclusion == 'success') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main')
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -442,7 +446,11 @@ jobs:
     concurrency:
       group: qa-smoke
       cancel-in-progress: false
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Issue #2644: Align qa-smoke condition with deploy triggers (workflow_run from CI on main, workflow_dispatch, or push)
+    if: >-
+      (github.event_name == 'workflow_run' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.conclusion == 'success') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main')
 
     steps:
       - name: Checkout
