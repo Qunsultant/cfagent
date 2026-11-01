@@ -1,4 +1,5 @@
 import { ROUTES, hasNavEntry, getNavGroup, type RouteCategory, type RouteBadgeType, type NavEntryMeta } from "./routes";
+import { PLATFORM_ADMIN_NAV_ITEMS } from "./platformAdminConfig";
 
 export interface NavSubMenuItemConfig {
   id: string;
@@ -99,6 +100,9 @@ const SECTION_METADATA: { category: RouteCategory; title: string; id: string }[]
  * Builds the default externalized LeftNavConfig derived from the single-source-of-truth
  * route table and enhanced with sub-menu definitions.
  */
+/** Id of the left-nav item that hosts the Platform Admin sub-menu. */
+export const PLATFORM_ADMIN_NAV_ID = "platform-admin";
+
 export function buildDefaultLeftNavConfig(): LeftNavConfig {
   const navRoutes = ROUTES.filter(hasNavEntry).sort(
     (a, b) => a.navEntry.navOrder - b.navEntry.navOrder
@@ -131,7 +135,35 @@ export function buildDefaultLeftNavConfig(): LeftNavConfig {
     };
   });
 
+  // Issue #2624: the administration surfaces are a left-nav destination with
+  // their own sub-menu — the same shape as Screeners — not a settings button.
+  // The item is not a route: selecting it (or a sub-item) opens the Platform
+  // Admin drawer at that section; navigation.tsx intercepts the ids.
+  sections.push({
+    id: "section-platform-admin",
+    title: "PLATFORM ADMIN",
+    category: "Platform",
+    items: [
+      {
+        id: PLATFORM_ADMIN_NAV_ID,
+        label: "Platform Admin",
+        shortLabel: "Admin",
+        category: "Platform",
+        icon: "Settings",
+        description: "Ads, tasks, keys, providers & IAAA",
+        subItems: PLATFORM_ADMIN_NAV_ITEMS,
+      },
+    ],
+  });
+
   return { sections };
+}
+
+/** Sub-item ids are `platform-admin:<section>`; the nav shell routes them to the drawer. */
+export function platformAdminSectionFromNavId(id: string): string | undefined {
+  if (id === PLATFORM_ADMIN_NAV_ID) return "ads";
+  const prefix = `${PLATFORM_ADMIN_NAV_ID}:`;
+  return id.startsWith(prefix) ? id.slice(prefix.length) : undefined;
 }
 
 export const DEFAULT_LEFT_NAV_CONFIG: LeftNavConfig = buildDefaultLeftNavConfig();

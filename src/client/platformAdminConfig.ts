@@ -59,6 +59,23 @@ export const DEFAULT_PLATFORM_ADMIN_CONFIG: PlatformAdminConfig = {
   ],
 };
 
+/**
+ * The same items as left-nav sub-entries (issue #2624 follow-up): the nav
+ * item id prefixes the section id, so the shell can open the drawer at the
+ * selected section without inventing a route per admin surface.
+ */
+export const PLATFORM_ADMIN_NAV_ITEMS: Array<{
+  id: string;
+  label: string;
+  shortLabel: string;
+  description: string;
+}> = DEFAULT_PLATFORM_ADMIN_CONFIG.sections[0].items.map((item) => ({
+  id: `platform-admin:${item.id}`,
+  label: item.label,
+  shortLabel: item.description,
+  description: item.description,
+}));
+
 /** Flatten a config's sections into one ordered item list (one section today). */
 export function platformAdminItems(
   config: PlatformAdminConfig = DEFAULT_PLATFORM_ADMIN_CONFIG,
