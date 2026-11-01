@@ -388,6 +388,58 @@ export async function handleReportsRoutes(
     }
   }
 
+  // Per-tenant data-provider / broker selection (slice 1 of the
+  // provider/broker agnosticism programme). Two independent
+  // selections, stored on the existing agent_tenant_settings row
+  // (migration 0027), tenant server-resolved via resolveIaaaTenant,
+  // never from a client value. Absent row = etrade / etrade.
+  // This route does not touch the auto-refresh handler above.
+  if (path.endsWith("/tenant/settings/providers")) {
+    try {
+      const adapter = ctx.env
+        ? createCommercialAdapter(ctx.env as { AGENT_DB?: unknown })
+        : null;
+      if (!adapter) {
+        return Response.json({ error: "Tenant store unavailable: AGENT_DB is not bound." }, { status: 503 });
+      }
+      await ensureCommercialSchema(adapter.db);
+      const tenantId = resolveIaaaTenant(ctx.env as { IAAA_TENANT_ID?: string } | null | undefined);
+      if (request.method === "GET") {
+        const current = await adapter.getTenantProviders(tenantId);
+        return Response.json({ tenantId, dataProviderId: current.dataProviderId, brokerId: current.brokerId });
+      }
+      if (request.method === "POST") {
+        const body = (await request.json().catch(() => null)) as {
+          dataProviderId?: unknown;
+          brokerId?: unknown;
+        } | null;
+        const { normalizeTenantProviders } = await import("../../services/tenantProviders");
+        const normalized = body ? normalizeTenantProviders(body) : null;
+        if (!normalized) {
+          return Response.json({ error: "dataProviderId and brokerId are required and must be known ids." }, { status: 400 });
+        }
+        const record = await adapter.setTenantProviders(tenantId, normalized);
+        ctx.audit("tenant_providers.changed", "orchestrator", {
+          tenantId,
+          dataProviderId: record.dataProviderId,
+          brokerId: record.brokerId,
+        });
+        return Response.json({
+          tenantId: record.tenantId,
+          dataProviderId: record.dataProviderId,
+          brokerId: record.brokerId,
+          updatedAtMs: record.updatedAtMs,
+        });
+      }
+      return Response.json({ error: "Method not allowed" }, { status: 405 });
+    } catch (err) {
+      return Response.json(
+        { error: err instanceof Error ? err.message : "Failed to load tenant provider selection" },
+        { status: 500 },
+      );
+    }
+  }
+
   // Issue #277: confirm (or reject) a pending report dispatch. Mirrors
   // POST /payments/confirm: the stored payload is executed only on
   // "approved"; nothing is sent on "rejected" or for unknown/expired ids.

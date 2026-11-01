@@ -135,6 +135,7 @@ import {
 import { handleEtradeOptionsRoutes } from "./routes/etradeOptions";
 import { resolveBrokerEnvironmentFromSettings } from "./routes/brokerEnvironment";
 import { handleWatchlistsRoutes } from "./routes/watchlists";
+import { handleBrokerGateRoutes } from "./routes/brokerGate";
 import { handleAlpacaMarketDataRoutes, handleAlpacaTradingRoutes } from "./routes/alpaca";
 import { handleMarketDataQuoteResearchRoutes, handleMarketDataCompareScreenRoutes } from "./routes/marketDataResearch";
 import { handleScreenerResearchRoutes } from "./routes/screenerResearch";
@@ -2763,6 +2764,19 @@ export class OrchestratorAgent extends PortThink {
     // block); a non-null return matched.
     const premiumResponse = await handlePremiumRoutes(request, url, path, sessionId, makePremiumRouteContext(this));
     if (premiumResponse) return premiumResponse;
+
+    // Provider/broker slice 1: the broker gate delegation
+    // (src/agents/routes/brokerGate.ts). Invoked at this exact
+    // position in the sequential matching sequence (after the
+    // premium delegation, before the E*TRADE broker delegation);
+    // a non-null return matched. It returns the coded
+    // FAILURE_BROKER_UNAVAILABLE response for /etrade/ broker and
+    // watchlist paths when the tenant broker is not etrade, and
+    // null otherwise (including /etrade/options/* data paths).
+    const brokerGateResponse = await handleBrokerGateRoutes(request, url, path, sessionId, {
+      env: this.env,
+    });
+    if (brokerGateResponse) return brokerGateResponse;
 
     // Issue #359-09: E*TRADE broker routes (Environment & E*TRADE Trading
     // APIs block) are handled by src/agents/routes/etradeBroker.ts

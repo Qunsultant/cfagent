@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { startPolling } from "./polling";
 import { getPollingConfig } from "./pollingConfig";
 import { useAutoRefresh } from "./autoRefresh";
+import { useTenantProviders, BROKER_OPTIONS, brokerUnavailableNotice } from "./tenantProviders";
 import { BRAND } from "./branding";
 import { apiFetch as fetch } from "./apiFetch";
 import { McpApiExplorer } from "./McpApiExplorer";
@@ -173,6 +174,8 @@ export function Chat({ user }: { user: User }) {
   // no longer keeps its own copy. The dynamic panel is controlled
   // from here via the props below.
   const [autoRefreshState, setAutoRefreshState] = useAutoRefresh();
+  const [tenantProviders] = useTenantProviders();
+  const selectedBrokerLabel = BROKER_OPTIONS.find((o) => o.id === tenantProviders.brokerId)?.label ?? tenantProviders.brokerId;
   const autoRefreshEnabled = autoRefreshState.enabled;
   const autoRefreshInterval = autoRefreshState.interval;
 
@@ -1818,6 +1821,11 @@ export function Chat({ user }: { user: User }) {
         {/* E*TRADE Agentic Trading Hub */}
         {/* Kept mounted (hidden) so in-flight and finished requests survive tab switches */}
         <div className="trading-view" hidden={!isTradingTab(tab)}>
+          {tenantProviders.brokerId !== "etrade" ? (
+            <Notice tone="warning" title="[FAILURE_BROKER_UNAVAILABLE] Broker surface unavailable">
+              {brokerUnavailableNotice(tenantProviders.brokerId, selectedBrokerLabel)}
+            </Notice>
+          ) : (
           <ErrorBoundary label="E*TRADE Hub">
           <ETradeTradingHub
             user={user}
@@ -1833,6 +1841,7 @@ export function Chat({ user }: { user: User }) {
             }}
           />
           </ErrorBoundary>
+          )}
         </div>
 
           </>

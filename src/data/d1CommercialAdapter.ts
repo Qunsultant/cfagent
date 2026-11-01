@@ -26,6 +26,7 @@ import {
   MIGRATION_0007_COMMERCIAL_STORE,
   MIGRATION_0010_PAID_SUBMISSIONS,
   MIGRATION_0026_TENANT_AUTO_REFRESH,
+  MIGRATION_0028_TENANT_PROVIDERS,
   type MigrationDb,
 } from "./migrationRunner";
 import {
@@ -33,6 +34,7 @@ import {
   assertNonNegativeCredits,
   assertStoreTier,
   DEFAULT_TENANT_AUTO_REFRESH,
+  DEFAULT_TENANT_PROVIDERS,
   round2,
   type CommercialAccountRecord,
   type CommercialStore,
@@ -40,6 +42,7 @@ import {
   type CreditRedemptionRecord,
   type PaidSubmissionRecord,
   type TenantAutoRefresh,
+  type TenantProviders,
   type TenantSettingsRecord,
 } from "./commercialPorts";
 
@@ -79,6 +82,7 @@ export async function ensureCommercialSchema(db: CommercialDb): Promise<number[]
     MIGRATION_0007_COMMERCIAL_STORE,
     MIGRATION_0010_PAID_SUBMISSIONS,
     MIGRATION_0026_TENANT_AUTO_REFRESH,
+    MIGRATION_0028_TENANT_PROVIDERS,
   ]);
 }
 
@@ -211,12 +215,15 @@ export class D1CommercialAdapter implements CommercialStore {
 
   async setTenantAdsEnabled(tenantId: string, adsEnabled: boolean): Promise<TenantSettingsRecord> {
     const existing = await this.getTenantAutoRefresh(tenantId);
+    const providers = await this.getTenantProviders(tenantId);
     const record: TenantSettingsRecord = {
       tenantId,
       adsEnabled,
       updatedAtMs: Date.now(),
       autoRefreshEnabled: existing.enabled,
       autoRefreshIntervalS: existing.intervalS,
+      dataProviderId: providers.dataProviderId,
+      brokerId: providers.brokerId,
     };
     await this.db
       .insert(agentTenantSettings)
@@ -226,6 +233,8 @@ export class D1CommercialAdapter implements CommercialStore {
         updatedAtMs: record.updatedAtMs,
         autoRefreshEnabled: record.autoRefreshEnabled ? 1 : 0,
         autoRefreshIntervalS: record.autoRefreshIntervalS,
+        dataProviderId: record.dataProviderId,
+        brokerId: record.brokerId,
       })
       .onConflictDoUpdate({
         target: agentTenantSettings.tenantId,
@@ -263,12 +272,15 @@ export class D1CommercialAdapter implements CommercialStore {
     autoRefresh: TenantAutoRefresh,
   ): Promise<TenantSettingsRecord> {
     const adsEnabled = await this.getTenantAdsEnabled(tenantId);
+    const providers = await this.getTenantProviders(tenantId);
     const record: TenantSettingsRecord = {
       tenantId,
       adsEnabled,
       updatedAtMs: Date.now(),
       autoRefreshEnabled: autoRefresh.enabled,
       autoRefreshIntervalS: autoRefresh.intervalS,
+      dataProviderId: providers.dataProviderId,
+      brokerId: providers.brokerId,
     };
     await this.db
       .insert(agentTenantSettings)
@@ -278,6 +290,8 @@ export class D1CommercialAdapter implements CommercialStore {
         updatedAtMs: record.updatedAtMs,
         autoRefreshEnabled: record.autoRefreshEnabled ? 1 : 0,
         autoRefreshIntervalS: record.autoRefreshIntervalS,
+        dataProviderId: record.dataProviderId,
+        brokerId: record.brokerId,
       })
       .onConflictDoUpdate({
         target: agentTenantSettings.tenantId,
@@ -286,6 +300,66 @@ export class D1CommercialAdapter implements CommercialStore {
         set: {
           autoRefreshEnabled: record.autoRefreshEnabled ? 1 : 0,
           autoRefreshIntervalS: record.autoRefreshIntervalS,
+          updatedAtMs: record.updatedAtMs,
+        },
+      });
+    return record;
+  }
+
+  async getTenantProviders(tenantId: string): Promise<TenantProviders> {
+    const rows = await this.db
+      .select()
+      .from(agentTenantSettings)
+      .where(eq(agentTenantSettings.tenantId, tenantId))
+      .limit(1);
+    if (rows.length === 0) return { ...DEFAULT_TENANT_PROVIDERS };
+    const row = rows[0] as typeof rows[0] & {
+      dataProviderId?: string | null;
+      brokerId?: string | null;
+    };
+    return {
+      dataProviderId:
+        typeof row.dataProviderId === "string" && row.dataProviderId !== ""
+          ? row.dataProviderId
+          : DEFAULT_TENANT_PROVIDERS.dataProviderId,
+      brokerId:
+        typeof row.brokerId === "string" && row.brokerId !== ""
+          ? row.brokerId
+          : DEFAULT_TENANT_PROVIDERS.brokerId,
+    };
+  }
+
+  async setTenantProviders(
+    tenantId: string,
+    providers: TenantProviders,
+  ): Promise<TenantSettingsRecord> {
+    const adsEnabled = await this.getTenantAdsEnabled(tenantId);
+    const autoRefresh = await this.getTenantAutoRefresh(tenantId);
+    const record: TenantSettingsRecord = {
+      tenantId,
+      adsEnabled,
+      updatedAtMs: Date.now(),
+      autoRefreshEnabled: autoRefresh.enabled,
+      autoRefreshIntervalS: autoRefresh.intervalS,
+      dataProviderId: providers.dataProviderId,
+      brokerId: providers.brokerId,
+    };
+    await this.db
+      .insert(agentTenantSettings)
+      .values({
+        tenantId,
+        adsEnabled: adsEnabled ? 1 : 0,
+        updatedAtMs: record.updatedAtMs,
+        autoRefreshEnabled: record.autoRefreshEnabled ? 1 : 0,
+        autoRefreshIntervalS: record.autoRefreshIntervalS,
+        dataProviderId: record.dataProviderId,
+        brokerId: record.brokerId,
+      })
+      .onConflictDoUpdate({
+        target: agentTenantSettings.tenantId,
+        set: {
+          dataProviderId: record.dataProviderId,
+          brokerId: record.brokerId,
           updatedAtMs: record.updatedAtMs,
         },
       });

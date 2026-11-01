@@ -270,6 +270,10 @@ export interface StrategyScreenRecordInput {
   universe?: string;
   /** Provenance: the panel route that handled this run. */
   submittedVia?: string;
+  /** Provider/broker slice 1: tenant selections at run time, stamped
+   *  into provenance. Absent = etrade / etrade (legacy default). */
+  dataProviderId?: string;
+  brokerId?: string;
   scheduleId?: string;
   goalId?: string;
   /** Measured generation duration (ms), when the caller timed it. */
@@ -510,6 +514,8 @@ export function recordStrategyScreenRun(
         asyncJobId: input.asyncJobId ?? null,
         jobType: "options-strategy-panel",
         strategyMode,
+        dataProviderId: input.dataProviderId ?? "etrade",
+        brokerId: input.brokerId ?? "etrade",
       },
       ...(input.scheduleId ? { scheduleId: input.scheduleId } : {}),
       ...(input.goalId ? { goalId: input.goalId } : {}),

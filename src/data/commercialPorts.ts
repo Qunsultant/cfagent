@@ -57,6 +57,10 @@ export interface TenantSettingsRecord {
   autoRefreshEnabled: boolean;
   /** Issue #2481: auto-refresh cadence in seconds. Absent row = 15. */
   autoRefreshIntervalS: number;
+  /** Per-tenant data-provider selection. Absent row = etrade. */
+  dataProviderId: string;
+  /** Per-tenant broker selection. Absent row = etrade. */
+  brokerId: string;
 }
 
 /** Issue #2481: the auto-refresh half of a tenant settings row. */
@@ -69,6 +73,19 @@ export interface TenantAutoRefresh {
 export const DEFAULT_TENANT_AUTO_REFRESH: TenantAutoRefresh = {
   enabled: false,
   intervalS: 15,
+};
+
+/** Per-tenant data-provider / broker selections. */
+export interface TenantProviders {
+  dataProviderId: string;
+  brokerId: string;
+}
+
+/** Defaults for a tenant with no settings row: etrade / etrade,
+ * preserving the pre-existing behaviour exactly. */
+export const DEFAULT_TENANT_PROVIDERS: TenantProviders = {
+  dataProviderId: "etrade",
+  brokerId: "etrade",
 };
 
 export interface CreditClaimRecord {
@@ -183,6 +200,11 @@ export interface CommercialStore {
   setTenantAutoRefresh(
     tenantId: string,
     autoRefresh: TenantAutoRefresh,
+  ): Promise<TenantSettingsRecord>;
+  getTenantProviders(tenantId: string): Promise<TenantProviders>;
+  setTenantProviders(
+    tenantId: string,
+    providers: TenantProviders,
   ): Promise<TenantSettingsRecord>;
   /** Idempotent: re-recording the same claim is a no-op (the DO ledger row is the audit). */
   recordCreditClaim(claim: {
