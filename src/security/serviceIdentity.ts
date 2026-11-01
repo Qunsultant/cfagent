@@ -52,14 +52,41 @@ export function getServiceUserLogin(env: Env): string | null {
  * session-less entry points forward to.
  *
  * Durable Object instance names are addresses, not principals. This
- * value is the legacy instance name: the live state behind it (armed
- * schedules, stored execution context) belongs to that address, and
- * renaming an address orphans the state, so the name is retained until
- * a state migration renames it. It must never be used as a login, a
- * token key, an audit actor, or a payer — identity for those purposes
- * comes from `getServiceUserLogin` or from an authenticated session.
+ * value is the live address: new unattended work talks to this
+ * instance. It must never be used as a login, a token key, an audit
+ * actor, or a payer — identity for those purposes comes from
+ * `getServiceUserLogin` or from an authenticated session.
  */
-export const SHARED_ORCHESTRATOR_INSTANCE = "default_trader";
+export const SHARED_ORCHESTRATOR_INSTANCE = "shared_orchestrator";
+
+/**
+ * Issue #2681 — the legacy shared-orchestrator address.
+ *
+ * The pre-#2681 address. It survives ONLY here, for two reasons, and
+ * nowhere else in src/ (enforced by the legacy-address pin test):
+ * (1) in-flight queued messages naming the legacy address must still be
+ * denied as fabricated identity (see isSharedOrchestratorAddress);
+ * (2) the orchestrator-migration driver takes its source address
+ * explicitly, and the operator passes this legacy address once at run
+ * time. The legacy instance is never deleted (no delete API exists);
+ * after the #2681 flip it simply receives no new work, and its alarms
+ * drain on their own storage. This constant is never a live address,
+ * login, token key, audit actor, or payer.
+ */
+export const LEGACY_SHARED_ORCHESTRATOR_INSTANCE = "default_trader";
+
+/**
+ * True when `login` names a shared-orchestrator address — the live one
+ * or the legacy one. Either must never be used as an identity: a
+ * payload or dispatch candidate naming an address is denied, not
+ * forwarded (issues #1185, #2331 slice 2, #2681).
+ */
+export function isSharedOrchestratorAddress(login: unknown): boolean {
+  return (
+    login === SHARED_ORCHESTRATOR_INSTANCE ||
+    login === LEGACY_SHARED_ORCHESTRATOR_INSTANCE
+  );
+}
 
 /**
  * #2331 slice 1 — the service user's stable internalUserId, derived

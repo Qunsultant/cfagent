@@ -61,6 +61,14 @@ import {
 } from "../../security/serviceIdentity";
 import { resolveIaaaTenant } from "../../security/iaaaGithubEndToEnd";
 import { sessionStore } from "../../security/session";
+import {
+  listServiceTokens,
+  mintServiceToken,
+  rotateServiceToken,
+  revokeServiceToken,
+  serviceTokenStore,
+  type ServiceTokenTier,
+} from "../../security/serviceTokens";
 import type { MembershipStore } from "../../security/authorization";
 import type { KvLike } from "../../security/kvResilience";
 import type { Env } from "../../types";
@@ -90,6 +98,8 @@ export interface ServiceUserRouteContext {
    * never reported as "absent" or "present".
    */
   brokerageTokenPresent?: (serviceLogin: string) => Promise<boolean | null>;
+  /** Issue #2681 — test seam: use this store instead of the SessionStore service_tokens bucket. */
+  tokenStore?: KvLike;
 }
 
 type Tier = "platform" | "tenant";
@@ -113,10 +123,19 @@ interface Caller {
   store: MembershipStore;
 }
 
-async function resolveCaller(
+/** Shared by the orchestrator-migration routes (#2681): same admin gate. */
+export async function resolveCaller(
   request: Request,
   ctx: ServiceUserRouteContext,
 ): Promise<Caller | Response> {
+  // Issue #2681: a service-token-authenticated caller is never an
+  // administrator of the service identity — tokens never administer
+  // tokens, and the service login has no wired alias, so the alias
+  // check below would 403 it anyway. The explicit guard states the
+  // rule instead of relying on that accident.
+  if (request.headers.get("x-principal-kind") === "service-token") {
+    return jsonError("Forbidden: service-token callers cannot administer the service identity.", 403);
+  }
   const login = request.headers.get("x-user-login") || "";
   if (!isLoginShaped(login)) {
     return jsonError("Unauthorized: a signed-in session is required.", 401);
@@ -430,6 +449,122 @@ async function statusServiceUser(
   });
 }
 
+/**
+ * Issue #2681 — service-token admin routes. Same gate as the
+ * service-user routes (platform-admin, wired session only, never a
+ * service-token caller) and the same audit funnel. Audit fires only
+ * on actual lifecycle changes (mint/rotate/revoke); list reads emit
+ * nothing, and failed mints emit nothing — the same rule as the
+ * service-user routes.
+ */
+function resolveTokenStore(ctx: ServiceUserRouteContext): KvLike {
+  return ctx.tokenStore ?? serviceTokenStore(ctx.env);
+}
+
+function resolveTokenServiceLogin(ctx: ServiceUserRouteContext): string | null {
+  return ctx.serviceLogin === undefined ? getServiceUserLogin(ctx.env) : ctx.serviceLogin;
+}
+
+async function mintTokenRoute(
+  caller: Caller,
+  ctx: ServiceUserRouteContext,
+  body: Record<string, unknown>,
+): Promise<Response> {
+  const serviceLogin = resolveTokenServiceLogin(ctx);
+  if (serviceLogin === null) {
+    return jsonError("Service user login is not configured (SERVICE_USER_LOGIN).", 500);
+  }
+  const serviceInternalUserId = serviceUserInternalUserId(serviceLogin);
+  if (serviceInternalUserId === caller.internalUserId) {
+    return jsonError("Forbidden: a caller cannot mint a token for itself as the service user.", 403);
+  }
+  try {
+    const { token, secret } = await mintServiceToken(
+      resolveTokenStore(ctx),
+      caller.store,
+      {
+        label: typeof body.label === "string" ? body.label : "",
+        tier: body.tier as ServiceTokenTier,
+        tenantId: typeof body.tenantId === "string" ? body.tenantId : undefined,
+        roles: Array.isArray(body.roles) ? (body.roles as never[]) : [],
+        expiresAtMs: typeof body.expiresAtMs === "number" ? body.expiresAtMs : 0,
+        serviceLogin,
+        serviceInternalUserId,
+        createdBy: caller.internalUserId,
+      },
+      Date.now(),
+    );
+    ctx.audit("service_token.minted", "orchestrator", {
+      tokenId: token.id,
+      prefix: token.prefix,
+      tier: token.tier,
+      tenantId: token.tenantId,
+      roles: token.roles,
+      createdBy: caller.internalUserId,
+    });
+    return Response.json({ ok: true, token, secret }, { status: 201 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Token mint failed.";
+    if (/Cannot grant role/.test(message) || /not provisioned/.test(message)) {
+      return jsonError(message, 403);
+    }
+    return jsonError(message, 400);
+  }
+}
+
+async function listTokensRoute(ctx: ServiceUserRouteContext): Promise<Response> {
+  const tokens = await listServiceTokens(resolveTokenStore(ctx));
+  return Response.json({ ok: true, tokens });
+}
+
+async function rotateTokenRoute(
+  caller: Caller,
+  ctx: ServiceUserRouteContext,
+  body: Record<string, unknown>,
+): Promise<Response> {
+  const tokenId = typeof body.tokenId === "string" ? body.tokenId : "";
+  const expiresAtMs = typeof body.expiresAtMs === "number" ? body.expiresAtMs : 0;
+  if (!tokenId) return jsonError("tokenId is required.", 400);
+  try {
+    const rotated = await rotateServiceToken(
+      resolveTokenStore(ctx),
+      tokenId,
+      expiresAtMs,
+      Date.now(),
+    );
+    if (rotated === null) {
+      return jsonError("Token not found or revoked.", 404);
+    }
+    ctx.audit("service_token.rotated", "orchestrator", {
+      tokenId: rotated.token.id,
+      prefix: rotated.token.prefix,
+      rotatedBy: caller.internalUserId,
+    });
+    return Response.json({ ok: true, token: rotated.token, secret: rotated.secret });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Token rotation failed.";
+    return jsonError(message, 400);
+  }
+}
+
+async function revokeTokenRoute(
+  caller: Caller,
+  ctx: ServiceUserRouteContext,
+  body: Record<string, unknown>,
+): Promise<Response> {
+  const tokenId = typeof body.tokenId === "string" ? body.tokenId : "";
+  if (!tokenId) return jsonError("tokenId is required.", 400);
+  const revoked = await revokeServiceToken(resolveTokenStore(ctx), tokenId, Date.now());
+  if (!revoked) {
+    return jsonError("Token not found or already revoked.", 404);
+  }
+  ctx.audit("service_token.revoked", "orchestrator", {
+    tokenId,
+    revokedBy: caller.internalUserId,
+  });
+  return Response.json({ ok: true, revoked: true, tokenId });
+}
+
 export async function handleServiceUserRoutes(
   request: Request,
   url: URL,
@@ -439,6 +574,43 @@ export async function handleServiceUserRoutes(
 ): Promise<Response | null> {
   void url;
   void sessionId;
+  // Issue #2681 token routes. Checked before the provision/revoke/
+  // status dispatch; an unknown tokens sub-path returns null so the
+  // DO chain keeps routing (no route hijack).
+  if (
+    path.endsWith("/admin/service-user/tokens") ||
+    path.includes("/admin/service-user/tokens/")
+  ) {
+    let tokenAction: "mint" | "list" | "rotate" | "revoke" | null = null;
+    if (path.endsWith("/admin/service-user/tokens")) {
+      tokenAction = request.method === "GET" ? "list" : "mint";
+    } else if (path.endsWith("/admin/service-user/tokens/rotate")) {
+      tokenAction = "rotate";
+    } else if (path.endsWith("/admin/service-user/tokens/revoke")) {
+      tokenAction = "revoke";
+    } else {
+      return null;
+    }
+    if (tokenAction === "list" && request.method !== "GET") {
+      return jsonError("Method not allowed", 405);
+    }
+    if (tokenAction !== "list" && request.method !== "POST") {
+      return jsonError("Method not allowed", 405);
+    }
+    try {
+      const caller = await resolveCaller(request, ctx);
+      if (caller instanceof Response) return caller;
+      if (tokenAction === "list") {
+        return listTokensRoute(ctx);
+      }
+      const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+      if (tokenAction === "mint") return mintTokenRoute(caller, ctx, body);
+      if (tokenAction === "rotate") return rotateTokenRoute(caller, ctx, body);
+      return revokeTokenRoute(caller, ctx, body);
+    } catch {
+      return jsonError("Service-token administration unavailable.", 500);
+    }
+  }
   let action: "provision" | "revoke" | "status" | null = null;
   if (path.endsWith("/admin/service-user/provision")) {
     action = "provision";

@@ -150,7 +150,7 @@ const MATRIX: MatrixRow[] = [
     className: "OrchestratorAgent",
     cells: {
       identity: IMPL(
-        "Per-login instances: server.ts resolves SEARCH_AGENT.idFromName(userLogin) (src/server.ts:364). Fixed names (default_trader, system_webhook_receiver) are addresses, never identities (src/security/serviceIdentity.ts:52-61); unattended work acts under getServiceUserLogin (serviceIdentity.ts:45), fail-closed when unconfigured. S3 (#2327) retired the research-stub default; behavioral pins in tests/mesh_identity_sweep_s3_2327.test.ts.",
+        "Per-login instances: server.ts resolves SEARCH_AGENT.idFromName(userLogin) (src/server.ts:364). Fixed names (shared_orchestrator, system_webhook_receiver) are addresses, never identities (src/security/serviceIdentity.ts); the legacy address default_trader survives only as the migration source + deny guard (#2681); unattended work acts under getServiceUserLogin (serviceIdentity.ts:45), fail-closed when unconfigured. S3 (#2327) retired the research-stub default; behavioral pins in tests/mesh_identity_sweep_s3_2327.test.ts.",
         "Chat-turn mas_* rows still partition by sessionKey() (the opaque DO id string) — an address doing partition duty. S16 (#2426) landed two-part attribution on the A2A door: the edge-authenticated caller rides into handleA2A and is recorded on the payments path, and mas payment rows carry proposer/agent + authorizer/principal DIDs, so sessionKey is no longer the sole attribution on any mesh door. Reworking chat-turn row attribution itself is a session-scoping change, not an identity gap.",
       ),
       state: IMPL(
