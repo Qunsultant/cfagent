@@ -71,6 +71,11 @@ export interface AsyncJobStoredRow {
   not_before: string | null;
   stage: string | null;
   chain_id: string | null;
+  /** Issue #2567: the stuck-running alert claim — the ISO instant
+   *  the (single) stuck alert was claimed for this row, or NULL
+   *  while unclaimed. Probed additive column, same migration
+   *  family as the graph columns above. */
+  stuck_alerted_at: string | null;
 }
 
 /** The list projection: the legacy list SELECT never read
@@ -170,6 +175,12 @@ export interface AsyncJobQueuePort {
    *  running -> failed with the unknown-outcome error, guarded
    *  on still-running. Returns rows written. */
   reapStaleRunning(jobId: string, error: string, nowIso: string): number;
+  /** Issue #2567: the stuck-alert claim — stamps stuck_alerted_at,
+   *  guarded on still-running AND not-yet-claimed, so exactly one
+   *  caller ever wins the alert for a row. NOT a lifecycle
+   *  transition (status and updated_at are untouched). Returns
+   *  rows written: 1 = this caller claimed the alert. */
+  markStuckAlerted(jobId: string, nowIso: string): number;
 }
 
 /**

@@ -153,6 +153,20 @@ for (const [name, make] of ADAPTERS) {
       expect(p.queue.reapStaleRunning("jreap", "again", T3)).toBe(0);
     });
 
+    it("markStuckAlerted (#2567) claims exactly once, guarded on running + unclaimed, and is not a lifecycle transition", () => {
+      const p = make();
+      p.queue.ensureSchema();
+      queued(p, "jstuck");
+      expect(p.queue.markStuckAlerted("jstuck", T1)).toBe(0);
+      p.queue.claim("jstuck", "s1", T1);
+      expect(p.queue.markStuckAlerted("jstuck", T2)).toBe(1);
+      expect(p.queue.markStuckAlerted("jstuck", T3)).toBe(0);
+      const row = p.read.getRow("jstuck", "s1");
+      expect(row?.status).toBe("running");
+      expect(row?.stuck_alerted_at).toBe(T2);
+      expect(row?.updated_at).toBe(T1);
+    });
+
     it("insertTerminal lands a row directly at its terminal status", () => {
       const p = make();
       p.queue.ensureSchema();

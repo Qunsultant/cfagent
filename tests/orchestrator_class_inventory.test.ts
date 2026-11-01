@@ -254,9 +254,16 @@ const ORCH = "agents/orchestrator.ts";
  *  rise to 3010 and bytes rise to 142_400.
  *  Provider/broker slice 1 (#2594) adds the broker gate delegation
  *  handleBrokerGateRoutes (+14 lines / +743 B), measured 3,014 lines /
- *  142,255 B; budget lines rise to 3025. */
-const BUDGET_LINES = 3025;
-const BUDGET_BYTES = 143_000;
+ *  142,255 B; budget lines rise to 3025.
+ *  Issue #2567 wires the stuck-running alert delivery into the
+ *  async-jobs context (notifyStuckRun — a postSlackText delivery
+ *  + outcome audit, no detection logic in the class) — measured
+ *  3,037 lines / 143,658 B recomposed onto current main (the
+ *  slice's +23 lines / +1,403 B delta over its original base
+ *  applied onto the #2594-landed tip), so budget lines rise to
+ *  3050 and bytes rise to 144_500. */
+const BUDGET_LINES = 3050;
+const BUDGET_BYTES = 144_500;
 
 const count = (haystack: string, needle: string) =>
   haystack.split(needle).length - 1;

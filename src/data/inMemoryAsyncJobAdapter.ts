@@ -85,6 +85,7 @@ export class InMemoryAsyncJobStore
       not_before: input.notBefore ?? null,
       stage: input.stage ?? null,
       chain_id: input.chainId ?? null,
+      stuck_alerted_at: null,
     });
   }
 
@@ -122,6 +123,7 @@ export class InMemoryAsyncJobStore
       not_before: null,
       stage: input.stage ?? null,
       chain_id: input.chainId ?? null,
+      stuck_alerted_at: null,
     });
   }
 
@@ -157,6 +159,13 @@ export class InMemoryAsyncJobStore
 
   reapStaleRunning(jobId: string, error: string, nowIso: string): number {
     return this.failRunning(jobId, error, nowIso);
+  }
+
+  markStuckAlerted(jobId: string, nowIso: string): number {
+    const row = this.rows.get(jobId);
+    if (!row || row.status !== "running" || row.stuck_alerted_at !== null) return 0;
+    row.stuck_alerted_at = nowIso;
+    return 1;
   }
 
   getRow(jobId: string, sessionId: string): AsyncJobStoredRow | undefined {
