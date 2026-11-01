@@ -3935,7 +3935,15 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
     }
 
     // --- Simulated Sandbox Terminal for Payment Gateways ---
+    // #2052: all five query params are attacker-controlled and land in
+    // HTML text positions — escape at interpolation (& first, then < >
+    // "). The route stays public by owner decision 2026-11-01
+    // (KEEP PUBLIC); escaping + CSP are the fix, not gating. The
+    // Authorize href keeps raw values under encodeURIComponent, the
+    // correct encoding for a URL query context.
     if (path === "/checkout/sandbox") {
+      const escapeHtml = (s: string) =>
+        s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
       const provider = (url.searchParams.get("provider") || "stripe").toUpperCase();
       const draftId = url.searchParams.get("id") || "pay_demo";
       const amount = url.searchParams.get("amt") || "25.00";
@@ -3948,7 +3956,7 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>${provider} Payment Terminal — Multi-Agent Studio</title>
+  <title>${escapeHtml(provider)} Payment Terminal — Multi-Agent Studio</title>
   <style>
     body {
       margin: 0; padding: 0; background: ${SERVER_PALETTE.surface}; color: ${SERVER_PALETTE.textPrimary};
@@ -3973,13 +3981,13 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
 </head>
 <body>
   <div class="card">
-    <span class="badge">${provider} Sandbox Terminal</span>
+    <span class="badge">${escapeHtml(provider)} Sandbox Terminal</span>
     <h2>Secure Payment Authorization</h2>
-    <p style="color: ${SERVER_PALETTE.textMuted}; font-size: 0.88rem; margin: 0;">Recipient: Multi-Agent Studio (${customer})</p>
-    <div class="amount">$${amount} <span style="font-size: 1rem; color: ${SERVER_PALETTE.textMuted};">${currency}</span></div>
+    <p style="color: ${SERVER_PALETTE.textMuted}; font-size: 0.88rem; margin: 0;">Recipient: Multi-Agent Studio (${escapeHtml(customer)})</p>
+    <div class="amount">$${escapeHtml(amount)} <span style="font-size: 1rem; color: ${SERVER_PALETTE.textMuted};">${escapeHtml(currency)}</span></div>
     <div class="did-box">
       <div><strong>Proposer:</strong> did:agent:openaimp:payments</div>
-      <div><strong>Intent Hash:</strong> ${sig}...</div>
+      <div><strong>Intent Hash:</strong> ${escapeHtml(sig)}...</div>
     </div>
     <a href="/?payment=success&draft=${encodeURIComponent(draftId)}&provider=${encodeURIComponent(provider)}" class="btn btn-pay">
       ✓ Authorize & Complete Payment
@@ -3988,7 +3996,16 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
   </div>
 </body>
 </html>`;
-      return new Response(html, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+      return new Response(html, {
+        headers: {
+          "Content-Type": "text/html; charset=utf-8",
+          // #2052: the page is self-contained (inline <style> only, no
+          // scripts, no external resources), so default-deny with an
+          // inline-style allowance is both tight and sufficient.
+          "Content-Security-Policy":
+            "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'",
+        },
+      });
     }
 
     // --- Serve App or Login Page ---
