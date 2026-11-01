@@ -286,8 +286,8 @@ export function AgentChatTabContent({
             onClick={handleClearWithConfirm}
             disabled={isResetting}
             title="Clear conversation and reset session"
-          >
-            {isResetting ? "⏳ Resetting…" : "🗑️ Clear chat"}
+           loading={isResetting}>
+            {"🗑️ Clear chat"}
           </Button>
         )}
       </div>
@@ -617,8 +617,8 @@ export function AgentChatTabContent({
               disabled={isResetting}
               onClick={() => handleClearWithConfirm()}
               title="Reset conversation state and clear history"
-            >
-              {isResetting ? "Resetting…" : "Reset & Clear History"}
+             loading={isResetting}>
+              {"Reset & Clear History"}
             </Button>
             <Button
               className="error-action-btn copy"
@@ -739,8 +739,8 @@ export function AgentChatTabContent({
           type="submit"
           variant="primary"
           disabled={!input.trim() || isBusy || isResetting}
-        >
-          {isBusy ? "Thinking…" : "Send ➔"}
+         loading={isBusy}>
+          {"Send ➔"}
         </Button>
       </form>
     </div>

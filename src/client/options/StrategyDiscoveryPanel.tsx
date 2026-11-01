@@ -2001,8 +2001,8 @@ export function StrategyDiscoveryPanel({
                     className="strat-action-chip highlight"
                     onClick={handleCreateDiscoverySchedule}
                     disabled={captureSubmitting}
-                  >
-                    {captureSubmitting ? "Scheduling…" : "✓ Create schedule"}
+                   loading={captureSubmitting}>
+                    {"✓ Create schedule"}
                   </Button>
                   <Button
                     type="button"
@@ -2520,8 +2520,8 @@ export function StrategyDiscoveryPanel({
               onClick={handleRefreshOptions}
               disabled={isQuoteRefreshing}
               title={`Refresh ${activeSymbol} quote & options legs`}
-            >
-              <span className={isQuoteRefreshing ? "strat-spin" : ""}>↻</span> {isQuoteRefreshing ? "Refreshing…" : "Refresh"}
+             loading={isQuoteRefreshing}>
+              <span className={isQuoteRefreshing ? "strat-spin" : ""}>↻</span> {"Refresh"}
             </Button>
           </div>
 

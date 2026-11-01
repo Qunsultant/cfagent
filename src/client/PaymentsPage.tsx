@@ -200,8 +200,8 @@ export function PaymentsPage({ active, user }: { active: boolean; user: User }) 
             size="sm"
             onClick={fetchPaymentsData}
             disabled={paymentsLoading}
-          >
-            {paymentsLoading ? "Refreshing…" : "🔄 Refresh"}
+           loading={paymentsLoading}>
+            {"🔄 Refresh"}
           </Button>
         </span>
       </div>
@@ -357,8 +357,8 @@ export function PaymentsPage({ active, user }: { active: boolean; user: User }) 
                   type="submit"
                   variant="primary"
                   disabled={creatingPayment || !newPayAmount || !newPayCustomer.trim()}
-                >
-                  {creatingPayment ? "Signing & Initializing… " : `🚀 Create ${newPayGateway.toUpperCase()} Checkout Link`}
+                 loading={creatingPayment}>
+                  {`🚀 Create ${newPayGateway.toUpperCase()} Checkout Link`}
                 </Button>
               </div>
             </div>

@@ -65,8 +65,8 @@ export function MemoryBrowser({ embedded = false }: MemoryBrowserProps = {}) {
           placeholder="operation filter (optional)"
           style={{ width: 200, padding: "var(--space-2) var(--space-3)" }}
         />
-        <Button onClick={() => void search()} disabled={loading || !query.trim()}>
-          {loading ? "Searching…" : "Search"}
+        <Button onClick={() => void search()} disabled={loading || !query.trim()} loading={loading}>
+          {"Search"}
         </Button>
       </div>
 

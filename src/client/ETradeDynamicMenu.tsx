@@ -579,8 +579,8 @@ export function SettingsMenu({
                 className="btn-menu-action sync"
                 disabled={isDiagnosticsRunning}
                 onClick={onRunDiagnostics}
-              >
-                {isDiagnosticsRunning ? "🔄 Testing…" : "🔄 Test & Sync API"}
+               loading={isDiagnosticsRunning}>
+                {"🔄 Test & Sync API"}
               </Button>
               {isConnected ? (
                 <>
@@ -609,8 +609,8 @@ export function SettingsMenu({
                   className="btn-menu-action connect"
                   disabled={oauthLoading}
                   onClick={onStartOAuth}
-                >
-                  {oauthLoading ? "Connecting…" : "⚡ Connect E*TRADE"}
+                 loading={oauthLoading}>
+                  {"⚡ Connect E*TRADE"}
                 </Button>
               )}
             </div>

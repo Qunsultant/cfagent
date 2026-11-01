@@ -355,8 +355,8 @@ export function ResearchRunsPanel({ userLogin, onSendPrompt }: ResearchRunsPanel
       </h3>
 
       <div style={{ display: "flex", gap: "var(--space-2)", marginBottom: 12, flexWrap: "wrap" }}>
-        <Button onClick={() => void runNow()} disabled={running}>
-          {running ? "Running…" : "Run research now"}
+        <Button onClick={() => void runNow()} disabled={running} loading={running}>
+          {"Run research now"}
         </Button>
         <Button
           variant="secondary"
@@ -399,7 +399,7 @@ export function ResearchRunsPanel({ userLogin, onSendPrompt }: ResearchRunsPanel
               <span style={{ fontSize: "var(--font-size-micro)", color: "var(--color-text-dim)" }}>{f.hint}</span>
             </div>
           ))}
-          <Button onClick={() => void save()} disabled={saving}>{saving ? "Saving…" : "Save filters"}</Button>
+          <Button onClick={() => void save()} disabled={saving} loading={saving}>{"Save filters"}</Button>
           {saveMsg && <span style={{ marginLeft: 8, fontSize: 13 }}>{saveMsg}</span>}
         </div>
       )}

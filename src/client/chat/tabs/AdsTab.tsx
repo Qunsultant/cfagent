@@ -56,8 +56,8 @@ export function AdsTab({adFormError, adFormSuccess, ads, adsLoading, fetchAds, h
           <Button
             onClick={fetchAds}
             disabled={adsLoading}
-          >
-            {adsLoading ? "Refreshing…" : "🔄 Refresh"}
+           loading={adsLoading}>
+            {"🔄 Refresh"}
           </Button>
         </div>
 
@@ -192,8 +192,8 @@ export function AdsTab({adFormError, adFormSuccess, ads, adsLoading, fetchAds, h
                     type="submit"
                     variant="primary"
                     disabled={savingAd || !newAdTitle.trim() || !newAdUrl.trim()}
-                  >
-                    {savingAd ? "Submitting Placement…" : "🚀 Launch Sponsored Placement"}
+                   loading={savingAd}>
+                    {"🚀 Launch Sponsored Placement"}
                   </Button>
                 </div>
               </form>

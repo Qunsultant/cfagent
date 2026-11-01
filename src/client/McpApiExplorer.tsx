@@ -427,8 +427,8 @@ export function McpApiExplorer() {
                 className="run-mcp-btn"
                 disabled={mcpLoading}
                 onClick={handleExecuteMcpTool}
-              >
-                {mcpLoading ? "Executing JSON-RPC Call…" : "▶️ Send MCP Tool Call (Live)"}
+               loading={mcpLoading}>
+                {"▶️ Send MCP Tool Call (Live)"}
               </Button>
             </div>
 
@@ -491,8 +491,8 @@ export function McpApiExplorer() {
                 className="run-mcp-btn"
                 disabled={resourceLoading}
                 onClick={() => handleReadResource(activeResource)}
-              >
-                {resourceLoading ? "Reading Resource…" : "📖 Read Resource"}
+               loading={resourceLoading}>
+                {"📖 Read Resource"}
               </Button>
             </div>
             <p className="runner-desc">{activeResource.description}</p>
@@ -553,8 +553,8 @@ export function McpApiExplorer() {
                 className="run-mcp-btn"
                 disabled={promptLoading}
                 onClick={() => handleGetPrompt(activePrompt)}
-              >
-                {promptLoading ? "Generating…" : "💬 Get Prompt Preview"}
+               loading={promptLoading}>
+                {"💬 Get Prompt Preview"}
               </Button>
             </div>
             <p className="runner-desc">{activePrompt.description}</p>
@@ -671,8 +671,8 @@ export function McpApiExplorer() {
                 className="run-mcp-btn"
                 disabled={restLoading}
                 onClick={handleSendRestRequest}
-              >
-                {restLoading ? "Sending API Request…" : `▶️ Send ${activeRest.method} Request (Live)`}
+               loading={restLoading}>
+                {`▶️ Send ${activeRest.method} Request (Live)`}
               </Button>
             </div>
 

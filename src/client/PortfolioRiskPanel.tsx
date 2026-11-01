@@ -240,15 +240,12 @@ export function PortfolioRiskPanel({ activeEnv, onPreviewHedge }: PortfolioRiskP
   return (
     <section className="prp-panel" id="section-portfolio-risk" style={{ scrollMarginTop: 80 }}>
       <div className="prp-header">
-        <Button className="prp-collapse" onClick={() => setPanelOpen((o) => !o)} aria-expanded={panelOpen}>
-        variant="ghost"
+        <Button className="prp-collapse" onClick={() => setPanelOpen((o) => !o)} aria-expanded={panelOpen} variant="ghost">
           {panelOpen ? "▾" : "▸"} Portfolio Risk
         </Button>
         {report && <span className="prp-asof">as of {new Date(report.asOf).toLocaleString()}</span>}
-        <Button className="prp-refresh" onClick={() => void load()} disabled={loading}>
-        variant="secondary"
-        size="sm"
-          {loading ? "Loading…" : "↻ Refresh"}
+        <Button className="prp-refresh" onClick={() => void load()} disabled={loading} loading={loading} variant="secondary" size="sm">
+          {"↻ Refresh"}
         </Button>
       </div>
       {panelOpen && (
@@ -328,9 +325,7 @@ export function PortfolioRiskPanel({ activeEnv, onPreviewHedge }: PortfolioRiskP
             )}
             <p>{proposal.rationale}</p>
           </div>
-          <Button className="prp-preview-btn" onClick={() => onPreviewHedge(hedgeProposalToTradeContext(proposal, report?.spyPrice ?? null))}>
-          variant="primary"
-          size="sm"
+          <Button className="prp-preview-btn" onClick={() => onPreviewHedge(hedgeProposalToTradeContext(proposal, report?.spyPrice ?? null))} variant="primary" size="sm">
             ⚡ Preview in Order Ticket →
           </Button>
         </div>
@@ -360,9 +355,7 @@ export function PortfolioRiskPanel({ activeEnv, onPreviewHedge }: PortfolioRiskP
             )}
             <p>{proposal.rationale}</p>
           </div>
-          <Button className="prp-preview-btn" onClick={() => onPreviewHedge(repairProposalToTradeContext(proposal))}>
-          variant="primary"
-          size="sm"
+          <Button className="prp-preview-btn" onClick={() => onPreviewHedge(repairProposalToTradeContext(proposal))} variant="primary" size="sm">
             ⚡ Preview in Order Ticket →
           </Button>
         </div>
@@ -372,7 +365,7 @@ export function PortfolioRiskPanel({ activeEnv, onPreviewHedge }: PortfolioRiskP
       <div className="prp-subhead">Correlation &amp; Concentration</div>
       <div className="prp-form-row">
         <TextInput value={corrSymbol} onChange={(e) => setCorrSymbol(e.target.value)} placeholder="Candidate symbol (optional)" />
-        <Button onClick={() => void runCorrelation()} disabled={corrLoading}>{corrLoading ? "Assessing…" : "Assess"}</Button>
+        <Button onClick={() => void runCorrelation()} disabled={corrLoading} loading={corrLoading}>{"Assess"}</Button>
         variant="secondary"
         size="sm"
       </div>
@@ -399,9 +392,7 @@ export function PortfolioRiskPanel({ activeEnv, onPreviewHedge }: PortfolioRiskP
               {concentration.candidateAssessment.flags.map((flag, i) => (
                 <div className="prp-flag" key={i}>⚠ {flag.message}</div>
               ))}
-              <Button className="prp-size-btn" onClick={() => setSizeSymbol(concentration.candidateAssessment!.symbol)}>
-              variant="secondary"
-              size="sm"
+              <Button className="prp-size-btn" onClick={() => setSizeSymbol(concentration.candidateAssessment!.symbol)} variant="secondary" size="sm">
                 Size this candidate ↓
               </Button>
             </div>
@@ -432,10 +423,8 @@ export function PortfolioRiskPanel({ activeEnv, onPreviewHedge }: PortfolioRiskP
         <TextInput label="Requested contracts" value={sizeRequested} onChange={(e) => setSizeRequested(e.target.value)} placeholder="optional" inputMode="numeric" />
         <TextInput label="Max measured correlation" value={sizeCorr} onChange={(e) => setSizeCorr(e.target.value)} placeholder="e.g. 0.85 (optional)" inputMode="decimal" />
       </div>
-      <Button className="prp-size-btn" onClick={() => void runSizing()} disabled={sizeLoading || !sizeSymbol.trim()}>
-      variant="secondary"
-      size="sm"
-        {sizeLoading ? "Sizing…" : "Size against portfolio"}
+      <Button className="prp-size-btn" onClick={() => void runSizing()} disabled={sizeLoading || !sizeSymbol.trim()} loading={sizeLoading} variant="secondary" size="sm">
+        {"Size against portfolio"}
       </Button>
       {sizeError && <div className="prp-error">{sizeError}</div>}
       {sizing && (
@@ -453,9 +442,7 @@ export function PortfolioRiskPanel({ activeEnv, onPreviewHedge }: PortfolioRiskP
           />
           <div className="ui-footnote">Post-trade: Δ {fmtSignedUsd(sizing.postTradeTotals.deltaDollars)} · β-weighted Δ {fmtSignedUsd(sizing.postTradeTotals.betaWeightedDeltaDollars)} · defined max loss {fmtUsd(sizing.postTradeTotals.definedMaxLoss)}</div>
           {lastSizingCandidate && (
-            <Button className="prp-size-btn" onClick={() => setEvalForm(sizingToEvalForm(lastSizingCandidate, sizing))}>
-            variant="secondary"
-            size="sm"
+            <Button className="prp-size-btn" onClick={() => setEvalForm(sizingToEvalForm(lastSizingCandidate, sizing))} variant="secondary" size="sm">
               Send sized candidate to Evaluator ↓
             </Button>
           )}
@@ -479,15 +466,11 @@ export function PortfolioRiskPanel({ activeEnv, onPreviewHedge }: PortfolioRiskP
       {bundleStagedNote && <div className="ui-footnote">{bundleStagedNote}</div>}
       {bundleTextState.status === "empty" && <div className="ui-footnote">{bundleTextState.message}</div>}
       {bundleTextState.status === "invalid" && <div className="prp-error">{bundleTextState.message}</div>}
-      <Button className="prp-size-btn" onClick={insertExampleBundleCandidate}>
-      variant="secondary"
-      size="sm"
+      <Button className="prp-size-btn" onClick={insertExampleBundleCandidate} variant="secondary" size="sm">
         Insert example candidate
       </Button>
-      <Button className="prp-size-btn" onClick={() => void runBundle()} disabled={bundleLoading || bundleTextState.status !== "valid"}>
-      variant="secondary"
-      size="sm"
-        {bundleLoading ? "Building…" : "Build bundle"}
+      <Button className="prp-size-btn" onClick={() => void runBundle()} disabled={bundleLoading || bundleTextState.status !== "valid"} loading={bundleLoading} variant="secondary" size="sm">
+        {"Build bundle"}
       </Button>
       {bundleError && <div className="prp-error">{bundleError}</div>}
       {bundle && (
@@ -522,7 +505,7 @@ export function PortfolioRiskPanel({ activeEnv, onPreviewHedge }: PortfolioRiskP
           <TextInput key={key} label={label} value={evalForm[key] ?? ""} onChange={(e) => setEvalForm({ ...evalForm, [key]: e.target.value })} inputMode="decimal" />
         ))}
       </div>
-      <Button className="prp-size-btn" onClick={() => void runEvaluate()} disabled={evalLoading}>{evalLoading ? "Evaluating…" : "Evaluate post-trade"}</Button>
+      <Button className="prp-size-btn" onClick={() => void runEvaluate()} disabled={evalLoading} loading={evalLoading}>{"Evaluate post-trade"}</Button>
       variant="secondary"
       size="sm"
       {evalError && <div className="prp-error">{evalError}</div>}
@@ -555,10 +538,8 @@ export function PortfolioRiskPanel({ activeEnv, onPreviewHedge }: PortfolioRiskP
         </Select>
         <TextInput label="Price (optional)" value={thinkPrice} onChange={(e) => setThinkPrice(e.target.value)} inputMode="decimal" />
       </div>
-      <Button className="prp-size-btn" onClick={() => void runThink()} disabled={thinkLoading || !thinkSymbol.trim() || !thinkQuantity.trim()}>
-      variant="secondary"
-      size="sm"
-        {thinkLoading ? "Checking…" : "Run guardrail check"}
+      <Button className="prp-size-btn" onClick={() => void runThink()} disabled={thinkLoading || !thinkSymbol.trim() || !thinkQuantity.trim()} loading={thinkLoading} variant="secondary" size="sm">
+        {"Run guardrail check"}
       </Button>
       {thinkError && <div className="prp-error">{thinkError}</div>}
       {verdict && (

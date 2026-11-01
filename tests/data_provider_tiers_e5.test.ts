@@ -79,6 +79,7 @@ import {
 import { UnifiedOptionsService } from "../src/trading/options/unifiedOptionsService";
 import { InMemoryScanRunStore } from "../src/trading/options/scanRunStore";
 import { DataProvidersPanel } from "../src/client/DataProvidersPanel";
+import { ToastProvider } from "../src/client/components/ui/Toast";
 import type {
   CapabilityRouteView,
   DataProviderView,
@@ -855,7 +856,7 @@ describe("panel route tier badge (issue #1202)", () => {
     document.body.appendChild(container);
     root = createRoot(container);
     await act(async () => {
-      root.render(React.createElement(DataProvidersPanel));
+      root.render(React.createElement(ToastProvider, null, React.createElement(DataProvidersPanel)));
     });
     await waitForText("Primary: etrade");
 

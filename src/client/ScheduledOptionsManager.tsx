@@ -829,8 +829,8 @@ export function ScheduledOptionsManager({
             onClick={() => handleTriggerNow()}
             disabled={triggeringKey !== null}
             title="Run the options intelligence scan immediately, on demand"
-          >
-            {triggeringKey === "hero" ? "Running…" : "Run Now"}
+           loading={triggeringKey === "hero"}>
+            {"Run Now"}
           </Button>
           <Button
             type="button"

@@ -662,6 +662,7 @@ export function AutopilotControlCenter({
       setEditLimitsDraft(confirmed);
       setIsServerBacked(true);
       setIsEditModalOpen(false);
+      toast.success("Policy limits saved.");
     } catch {
       setIsServerBacked(false);
       setLimitsError("Policy limits could not be saved — the previous limits still apply.");
@@ -1032,8 +1033,8 @@ export function AutopilotControlCenter({
               onClick={() => void fetchJobOutcomes()}
               disabled={isLoadingJobs}
               title="Refresh job outcomes from the backend"
-            >
-              {isLoadingJobs ? "🔄 Syncing…" : "↻ Refresh Jobs"}
+             loading={isLoadingJobs}>
+              {"↻ Refresh Jobs"}
             </Button>
           </div>
         </div>
@@ -1157,8 +1158,8 @@ export function AutopilotControlCenter({
               onClick={() => fetchLiveAutonomousActions(true)}
               disabled={isLoadingLive}
               title="Refresh autonomous actions and audit trail from backend"
-            >
-              {isLoadingLive ? "🔄 Syncing…" : "↻ Refresh Feed"}
+             loading={isLoadingLive}>
+              {"↻ Refresh Feed"}
             </Button>
 
             {/* Test Simulation Button */}
@@ -1169,8 +1170,8 @@ export function AutopilotControlCenter({
               onClick={handleSimulateAutonomousAction}
               disabled={isSimulating}
               title="Run a real policy evaluation server-side and record the signed verdict"
-            >
-              {isSimulating ? "Evaluating Policy…" : "⚡ Run Policy Check"}
+             loading={isSimulating}>
+              {"⚡ Run Policy Check"}
             </Button>
           </div>
         </div>
@@ -1522,8 +1523,7 @@ export function AutopilotControlCenter({
                   >
                     Cancel
                   </Button>
-                  <Button type="submit" className="btn-save-limits">
-                  variant="primary"
+                  <Button type="submit" className="btn-save-limits" variant="primary">
                     Save Policy Limits
                   </Button>
                 </div>

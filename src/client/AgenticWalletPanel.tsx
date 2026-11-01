@@ -110,8 +110,8 @@ export function AgenticWalletPanel() {
       <div className="awp-header">
         <h4>🤖 Agentic Wallet — x402 / MPP Micropayments</h4>
         {status && simulated && <span className="awp-sim-badge">Simulated</span>}
-        <Button type="button" className="awp-refresh" onClick={() => void load()} disabled={loading}>
-          {loading ? "Refreshing…" : "🔄 Refresh"}
+        <Button type="button" className="awp-refresh" onClick={() => void load()} disabled={loading} loading={loading}>
+          {"🔄 Refresh"}
         </Button>
       </div>
 

@@ -42,6 +42,7 @@ import { FieldShell } from "./components/ui/Field";
 import { TextInput } from "./components/ui/TextInput";
 import { Select } from "./components/ui/Select";
 import { Button } from "./components/ui/Button";
+import { EmptyState } from "./components/ui/EmptyState";
 
 export type OptionsContractType = "BOTH" | "CALL" | "PUT";
 export type OptionsMoneyness = "ALL" | "ITM" | "OTM" | "ATM";
@@ -382,7 +383,7 @@ export function OptionsCriteriaPanel({ criteria, onChange, lastSentFilters }: Op
       {numericRow("maxIvPct", "Max IV", "Percent; above this implied volatility are rejected.", { min: "0", step: "1" })}
       <h4>Last run&apos;s criteria</h4>
       {lastSentFilters === null ? (
-        <p>No run yet — the criteria above apply to the next run.</p>
+        <EmptyState title="No run yet — the criteria above apply to the next run." />
       ) : (
         <ul>
           {viewRows.map((row) => (

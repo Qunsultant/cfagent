@@ -171,8 +171,8 @@ export function buildScheduleRowColumns(
               disabled={handlers.busyKey !== null || !!item.paused}
               title={item.paused ? "Resume before triggering" : `Run ${model.title} now`}
               aria-label={`Trigger now: ${name}`}
-            >
-              {handlers.busyKey === item.id ? "Running…" : "Trigger Now"}
+             loading={handlers.busyKey === item.id}>
+              {"Trigger Now"}
             </Button>
             <Button
               type="button"

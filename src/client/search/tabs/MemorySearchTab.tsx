@@ -60,8 +60,8 @@ export function MemorySearchTab({ pendingQuery, onHealth, onSearch }: SearchTabP
         }}
       >
         <TextInput label="Query" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="e.g. last plan" />
-        <Button type="submit" variant="primary" disabled={loading || !query.trim()}>
-          {loading ? "Searching…" : "Search"}
+        <Button type="submit" variant="primary" disabled={loading || !query.trim()} loading={loading}>
+          {"Search"}
         </Button>
       </form>
       <Button type="button" onClick={() => downloadTextFile("memory-search-results.json", buildJson(lastResult), "application/json")} disabled={!lastResult} title="Download current results as JSON">

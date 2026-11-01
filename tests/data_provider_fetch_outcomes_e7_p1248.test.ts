@@ -71,6 +71,7 @@ import { PublicMcpClient, PublicMcpError } from "../src/mcps/public/publicMcp";
 import { PublicDataError } from "../src/services/publicData";
 import type { Env, ETradeQuote } from "../src/types";
 import { DataProvidersPanel } from "../src/client/DataProvidersPanel";
+import { ToastProvider } from "../src/client/components/ui/Toast";
 import { __resetDefaultBreakerRegistry } from "../src/breakers/createBreakerPorts";
 import type {
   DataProviderView,
@@ -1138,7 +1139,7 @@ describe("DataProvidersPanel fetch outcomes (issue #1248)", () => {
       })
     );
     await act(async () => {
-      root.render(React.createElement(DataProvidersPanel));
+      root.render(React.createElement(ToastProvider, null, React.createElement(DataProvidersPanel)));
     });
     await act(async () => {
       await new Promise((r) => setTimeout(r, 0));
