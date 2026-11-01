@@ -16,7 +16,12 @@
  * reconcileJournal reports (never silently corrects).
  */
 import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
+import {
+  bindTenantScope,
+  tenantEq,
+  TenantScopeError,
+} from "./tenantScope";
 import { agentJournalAccounts, agentJournalEntries } from "./drizzleSchema";
 import {
   applyMigrations,
@@ -89,7 +94,9 @@ export class D1JournalAdapter implements JournalPort {
   async postEntries(entries: JournalEntryInput[]): Promise<JournalEntry[]> {
     assertBalancedPost(entries);
     const ref = entries[0].transactionRef;
-    const existing = await this.getEntriesByRef(ref);
+    // #1761: the idempotency probe is tenant-scoped — a replay in
+    // another tenant must write, never inherit the first tenant's rows.
+    const existing = await this.getEntriesByRef(ref, entries[0].tenantId);
     if (existing.length > 0) return existing;
     const now = Date.now();
     const written: JournalEntry[] = [];
@@ -123,6 +130,20 @@ export class D1JournalAdapter implements JournalPort {
         .onConflictDoNothing();
       written.push(record);
     }
+    // #1761: the entry id is tenant-blind (`ref:account`), so a
+    // post under another tenant for an already-posted ref would
+    // silently no-op on the id conflict and return phantom rows
+    // that were never stored. Fail closed instead: if the scoped
+    // re-read finds nothing the post landed, the ref belongs to
+    // another tenant — throw rather than report a write that
+    // did not happen (posting is best-effort upstream, so the
+    // ledger write itself is unaffected).
+    const landed = await this.getEntriesByRef(ref, entries[0].tenantId);
+    if (landed.length === 0) {
+      throw new TenantScopeError(
+        `Journal post for transactionRef ${ref} did not land for tenant ${entries[0].tenantId}: the ref is already posted under another tenant; refusing cross-tenant replay (issue #1761).`,
+      );
+    }
     return written;
   }
 
@@ -135,11 +156,22 @@ export class D1JournalAdapter implements JournalPort {
     return rows.map(toEntry);
   }
 
-  async getEntriesByRef(transactionRef: string): Promise<JournalEntry[]> {
+  async getEntriesByRef(
+    transactionRef: string,
+    tenantId: string,
+  ): Promise<JournalEntry[]> {
+    // #1761: tenant-scoped via the bound scope — a blank tenant
+    // throws (fail closed) and a mismatched tenant reads empty.
+    const scope = bindTenantScope(tenantId);
     const rows = await this.db
       .select()
       .from(agentJournalEntries)
-      .where(eq(agentJournalEntries.transactionRef, transactionRef))
+      .where(
+        and(
+          eq(agentJournalEntries.transactionRef, transactionRef),
+          tenantEq(agentJournalEntries, scope),
+        ),
+      )
       .orderBy(asc(agentJournalEntries.id));
     return rows.map(toEntry);
   }
