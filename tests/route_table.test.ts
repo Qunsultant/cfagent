@@ -75,7 +75,7 @@ describe("route table", () => {
       expect(r.crumb.length).toBeGreaterThan(0);
       expect(r.description.length).toBeGreaterThan(0);
       expect(r.icon.length).toBeGreaterThan(0);
-      expect(["Execution", "Intelligence", "Playbooks", "Platform", "Billing"]).toContain(r.category);
+      expect(["Execution", "Intelligence", "Playbooks", "Platform", "Billing", "Marketing"]).toContain(r.category);
     }
   });
 
