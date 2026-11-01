@@ -572,6 +572,22 @@ export const agentReferralEarnings = sqliteTable("agent_referral_earnings", {
   redeemedAtMs: integer("redeemed_at_ms"),
 });
 
+/**
+ * Referrer→referred attribution rows (#2657, migration 0031). One row per
+ * referred user, ever — the PRIMARY KEY is the referred user, which is the
+ * set-once backstop (a racing second attribution for the same user hits a
+ * PK conflict and is reconciled from the row, never a duplicate).
+ * SEPARATE from agent_referral_earnings (the link, not the money) and from
+ * agent_credit_claims (failure credits) — never joined.
+ */
+export const agentReferralAttributions = sqliteTable("agent_referral_attributions", {
+  referredUserId: text("referred_user_id").primaryKey(),
+  referrerUserId: text("referrer_user_id").notNull(),
+  tenantId: text("tenant_id").notNull(),
+  source: text("source").notNull(),
+  createdAtMs: integer("created_at_ms").notNull(),
+});
+
 export const agentNotificationPreferences = sqliteTable("agent_notification_preferences", {
   userId: text("user_id").primaryKey(),
   tenantId: text("tenant_id").notNull(),
