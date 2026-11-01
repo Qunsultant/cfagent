@@ -1,6 +1,8 @@
 /**
  * Platform Admin side panel (issue #2624, follow-up).
  *
+ * @deprecated superseded by src/client/PlatformAdminPage.tsx
+ *
  * The settings dropdown had grown to fourteen sections: everyday controls
  * mixed with nine administration surfaces at the bottom, plus the signed-in
  * account card. The administration half now lives here — a right-hand drawer
@@ -62,7 +64,7 @@ export interface PlatformAdminPanelProps {
   user?: PlatformAdminUser;
 }
 
-function AdsSection({
+export function AdsSection({
   ads,
   onToggleMaster,
   onToggleOption,
@@ -173,7 +175,7 @@ function AdsSection({
   );
 }
 
-function ProvenanceSection() {
+export function ProvenanceSection() {
   return (
     <div className="etrade-panel-section etrade-provenance-section">
       <details className="etrade-provenance-drawer" open>
@@ -204,7 +206,7 @@ function ProvenanceSection() {
   );
 }
 
-function AdminAccessSection({
+export function AdminAccessSection({
   requesting,
   status,
   onRequest,
@@ -467,6 +469,7 @@ export function PlatformAdminPanel({
 }
 
 /** Section id the nav passes in (`platform-admin:api-keys` → `api-keys`). */
-export function isPlatformAdminSectionId(value: string): value is PlatformAdminSectionId {
+export function isPlatformAdminSectionId(value: unknown): value is PlatformAdminSectionId {
+  if (typeof value !== 'string') return false;
   return DEFAULT_PLATFORM_ADMIN_CONFIG.sections[0].items.some((item) => item.id === value);
 }

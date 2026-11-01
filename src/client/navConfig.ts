@@ -154,6 +154,13 @@ export const SUB_MENU_CONFIGS: Record<string, NavSubMenuItemConfig[]> = {
       description: "Scheduled options runs and their schedules",
     },
   ],
+  "platform-admin": PLATFORM_ADMIN_NAV_ITEMS.map((item) => ({
+    id: item.id,
+    label: item.label,
+    shortLabel: item.shortLabel,
+    icon: "Settings",
+    description: item.description,
+  })),
 };
 
 const SECTION_METADATA: { category: RouteCategory; title: string; id: string }[] = [
@@ -189,7 +196,7 @@ export function buildDefaultLeftNavConfig(): LeftNavConfig {
 
   const sections: NavSectionConfig[] = SECTION_METADATA.map((sec) => {
     const items: NavMenuItemConfig[] = navRoutes
-      .filter((r) => r.category === sec.category)
+      .filter((r) => r.category === sec.category && r.id !== PLATFORM_ADMIN_NAV_ID)
       .map((r) => {
         const meta: NavEntryMeta = r.navEntry;
         const subItems = SUB_MENU_CONFIGS[r.id];

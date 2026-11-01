@@ -3,6 +3,7 @@ import { Badge, Button } from "../components/ui";
 import {
   DEFAULT_LEFT_NAV_CONFIG,
   isNavItemOrSubItemActive,
+  platformAdminSectionFromNavId,
   type LeftNavConfig,
   type NavMenuItemConfig,
   type NavSubMenuItemConfig,
@@ -113,7 +114,16 @@ export function LeftNavBar({
   };
 
   const isSubActive = (subId: string): boolean => {
-    return activeTab === subId;
+    if (activeTab === subId) return true;
+    const section = platformAdminSectionFromNavId(subId);
+    if (section && activeTab === "platform-admin") {
+      const currentView =
+        typeof window !== "undefined"
+          ? (new URLSearchParams(window.location.search).get("view") ?? "ads")
+          : "ads";
+      return section === currentView;
+    }
+    return false;
   };
 
   return (

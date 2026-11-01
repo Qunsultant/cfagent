@@ -10,7 +10,8 @@
  *   (trading, orders, scanner, reports, schedules, options) that never
  *   render as nav items but still land on a page. Issue #2596 added
  *   the 33rd id, "options-screener", as a real nav entry (navOrder 26).
- * - `navEntry` is present only for the 27 entries that render in the nav.
+ *   Platform Admin was added as the 34th id (navOrder 27) as a real page.
+ * - `navEntry` is present only for the 28 entries that render in the nav.
  *   Its `navOrder` reproduces the historical sidebar/top-strip order, so
  *   deriving NAVIGATION_ITEMS from this table changes nothing visible.
  * - `navGroup` is the nav entry highlighted when this tab is active. It
@@ -379,6 +380,22 @@ export const ROUTES = [
       navOrder: 16,
       defaultVisible: true,
       badge: "x402",
+      badgeType: "neutral",
+    },
+  },
+  {
+    id: "platform-admin",
+    navGroup: "platform-admin",
+    crumb: "Platform Admin",
+    category: "Platform",
+    icon: "Settings",
+    description: "Administration surfaces for this workspace: ads, tasks, keys, providers, and IAAA",
+    navEntry: {
+      label: "Platform Admin",
+      shortLabel: "Admin",
+      navOrder: 27,
+      defaultVisible: true,
+      badge: "Admin",
       badgeType: "neutral",
     },
   },

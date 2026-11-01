@@ -12,6 +12,7 @@ import { PlatformAdminPanel } from "../PlatformAdminPanel";
 import { platformAdminSectionFromNavId, sandboxNavHrefFromNavId } from "../navConfig";
 export { LeftNavBar };
 import { isTabFeatureEnabled } from "../featureFlags";
+import { navigateToTab } from "../router";
 
 export type NavTabId = RouteId;
 
@@ -424,6 +425,7 @@ export const NAV_ICON_MAP: Record<string, NavItemDef["icon"]> = {
   Search: NavIcons.Search,
   Checkout: NavIcons.Checkout,
   Assurance: NavIcons.Assurance,
+  Settings: NavIcons.Settings,
 };
 
 /** Nav items, derived from the route table in display order (#1804 S1). */
@@ -481,13 +483,13 @@ export function NavigationMenu({
     return () => window.removeEventListener("typography-changed", handleTypo);
   }, []);
 
-  // `platform-admin` / `platform-admin:<section>` are nav ids, not routes:
-  // selecting them opens the drawer at that section instead of switching tab.
+  // `platform-admin` / `platform-admin:<section>` are nav ids:
+  // selecting them navigates to the Platform Admin page at that section.
   const handleSelectNavId = (id: string) => {
     const section = platformAdminSectionFromNavId(id);
     if (section) {
-      setPlatformAdminSection(section);
-      setPlatformAdminOpen(true);
+      onSelectTab("platform-admin" as NavTabId);
+      navigateToTab("platform-admin", section);
       return;
     }
     // Issue #2645: sandbox ids link standalone server pages, not SPA tabs:
