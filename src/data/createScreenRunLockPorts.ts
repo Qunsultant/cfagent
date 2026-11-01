@@ -16,18 +16,56 @@
  * TYPES from screenRunLockPorts.ts (type-only, erased at
  * compile time), never this root.
  */
-import { DoSqliteScreenRunLock } from "./doSqliteScreenRunLockAdapter";
+import {
+  resolveSchemaMigrationModeFromEnv,
+  schemaMigrationConfigErrorEvent,
+  type SchemaMigrationMode,
+} from "../config/schemaMigrationModes";
+import {
+  DoSqliteScreenRunLock,
+  type DoSqliteScreenRunLockOptions,
+} from "./doSqliteScreenRunLockAdapter";
 import { InMemoryScreenRunLock } from "./inMemoryScreenRunLockAdapter";
 import type {
   ScreenRunLockPort,
   ScreenRunLockSqlExecutor,
 } from "./screenRunLockPorts";
 
+/**
+ * #1767 (parent #1717): composition options for the lock port.
+ * Either pass a resolved mode directly, or pass the host's env
+ * carrier and let the SCHEMA_MIGRATION_MODE resolver decide
+ * (run/session/user carriers are not populated here — Worker
+ * env is the production-settable level; unset = legacy, the
+ * current behavior). An invalid env value fails closed to
+ * legacy and is console-logged with the schema.config_error
+ * event name: this sync composition root has no audit sink, so
+ * the log line — not silence — is the misconfiguration signal.
+ */
+export interface CreateScreenRunLockPortOptions {
+  env?: { SCHEMA_MIGRATION_MODE?: unknown };
+  schemaMigrationMode?: SchemaMigrationMode;
+}
+
 /** Compose the lock port over a host's DO storage. */
 export function createScreenRunLockPort(
-  sql: ScreenRunLockSqlExecutor
+  sql: ScreenRunLockSqlExecutor,
+  options: CreateScreenRunLockPortOptions = {},
 ): ScreenRunLockPort {
-  return new DoSqliteScreenRunLock(sql);
+  let mode: SchemaMigrationMode = options.schemaMigrationMode ?? "legacy";
+  if (options.schemaMigrationMode === undefined && options.env !== undefined) {
+    const resolved = resolveSchemaMigrationModeFromEnv(options.env);
+    if (resolved.invalid) {
+      console.warn(
+        `${schemaMigrationConfigErrorEvent()}: unrecognized SCHEMA_MIGRATION_MODE ${JSON.stringify(resolved.raw)} — failing closed to legacy`,
+      );
+    }
+    mode = resolved.mode;
+  }
+  const adapterOptions: DoSqliteScreenRunLockOptions = {
+    schemaMigrationMode: mode,
+  };
+  return new DoSqliteScreenRunLock(sql, adapterOptions);
 }
 
 /** Compose the in-memory lock port (test doubles). */

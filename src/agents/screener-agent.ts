@@ -583,7 +583,10 @@ export class ScreenerAgent extends PortThink {
    */
   private screenRunLock(): ScreenRunLockPort {
     if (!this.screenRunLockCache) {
-      this.screenRunLockCache = createScreenRunLockPort(this.ctx.storage.sql);
+      this.screenRunLockCache = createScreenRunLockPort(
+        this.ctx.storage.sql,
+        { env: this.env },
+      );
     }
     return this.screenRunLockCache;
   }
