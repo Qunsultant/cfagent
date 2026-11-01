@@ -261,9 +261,16 @@ const ORCH = "agents/orchestrator.ts";
  *  3,037 lines / 143,658 B recomposed onto current main (the
  *  slice's +23 lines / +1,403 B delta over its original base
  *  applied onto the #2594-landed tip), so budget lines rise to
- *  3050 and bytes rise to 144_500. */
-const BUDGET_LINES = 3050;
-const BUDGET_BYTES = 144_500;
+ *  3050 and bytes rise to 144_500.
+ *  Issue #2693 (#2494 Think adoption, screener slice 1) adds the
+ *  observe-only getScheduledTasks override + its context builder
+ *  (declaration and occurrence recording live in
+ *  orchestrator/scheduledTasksObserve.ts; the class gains no
+ *  dispatch logic) — measured 3,056 lines / 144,599 B on the
+ *  branch tree, so budget lines rise to 3070 and bytes rise
+ *  to 145_500. */
+const BUDGET_LINES = 3070;
+const BUDGET_BYTES = 145_500;
 
 const count = (haystack: string, needle: string) =>
   haystack.split(needle).length - 1;

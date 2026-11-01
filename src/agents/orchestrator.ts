@@ -6,7 +6,7 @@ import type {
   UiChatMessage,
 } from "../actors/actorPorts";
 import { createCfActorSession } from "../actors/cfAgentsAdapter";
-import { PortThink, createThinkActorTurn } from "../actors/thinkAdapter";
+import { PortThink, createThinkActorTurn, type ThinkScheduledTasks } from "../actors/thinkAdapter";
 import type { ActorSessionPort, ActorTurnHooks, ActorTurnPort } from "../actors/actorPorts";
 import type { ToolSet } from "ai";
 import { getWorkersAIModel } from "./model";
@@ -62,6 +62,7 @@ import { createMAS } from "./mas";
 import { dispatchOrchestratorA2A, orchestratorA2AOutcome, type OrchestratorA2AOutcome } from "./orchestrator/a2aDispatch";
 import { buildChatErrorFallback, type ChatErrorFallbackContext } from "./chatErrorFallback";
 import { getScreenerExecutionContext, migrateLegacyScreenSchedules, removeUnownedBaselineSchedules, ensureStrategyScanSchedule, resolveScheduledLogin, type ScheduleMaintenanceContext } from "./orchestrator/scheduleMaintenance";
+import { declareStrategyScanObserveTasks, type ScheduledTasksObserveContext } from "./orchestrator/scheduledTasksObserve";
 import { autoRenewETradeTokens, autonomousGoalScreen, autonomousMarketScreen, autonomousStrategyDiscovery, collectIvHistory, expireStaleOrderDraft, sendScheduledReminder, type ScheduledCallbacksContext } from "./orchestrator/scheduledCallbacks";
 import { nlqSchedulingPort, nlqSocialBriefPort, nlqStockScreenPort, type NlqPortsContext } from "./orchestrator/nlqPorts";
 import { formatTraceparent, newTraceContext } from "../observability/observabilityPorts";
@@ -503,6 +504,14 @@ export class OrchestratorAgent extends PortThink {
       screenerExecutionContextKey: SCREENER_EXECUTION_CONTEXT_KEY,
       legacyScheduleMigrationKey: LEGACY_SCHEDULE_MIGRATION_KEY,
       strategyScanCron: STRATEGY_SCAN_CRON,
+    };
+  }
+
+  private scheduledTasksObserveContext(): ScheduledTasksObserveContext {
+    return {
+      agentCtx: this.ctx,
+      getScreenerExecutionContext: () => this.getScreenerExecutionContext(),
+      audit: (type, agent, payload) => this.audit(type, agent, payload),
     };
   }
 
@@ -1084,6 +1093,16 @@ export class OrchestratorAgent extends PortThink {
   // Issue #992: extracted to ./orchestrator/scheduleMaintenance.ts (ensureStrategyScanSchedule);
   async ensureStrategyScanSchedule(context: ScreenerExecutionContext): Promise<void> {
     return ensureStrategyScanSchedule(this.scheduleMaintenanceContext(), context);
+  }
+
+  // Issue #2693 (#2494 Think adoption, screener slice 1): extracted
+  // to ./orchestrator/scheduledTasksObserve.ts
+  // (declareStrategyScanObserveTasks). OBSERVE ONLY: Think
+  // reconciles this declaration on startup; the task's handler
+  // records occurrences and never dispatches — the STRATEGY_SCAN_CRON
+  // SDK row above keeps firing the real options scan.
+  override getScheduledTasks(): Promise<ThinkScheduledTasks> {
+    return declareStrategyScanObserveTasks(this.scheduledTasksObserveContext());
   }
 
   // Issue #992: extracted to ./orchestrator/scheduledCallbacks.ts (autoRenewETradeTokens);
