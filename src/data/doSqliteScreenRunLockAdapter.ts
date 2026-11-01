@@ -6,6 +6,9 @@
  * now). The lock's #1993 design note (why instance-local,
  * why synchronous) lives on the port in screenRunLockPorts.ts.
  */
+import type { SchemaMigrationMode } from "../config/schemaMigrationModes";
+import { applyDoSchemaMigrations } from "./doSchemaMigrations";
+import type { DoSchemaMigration } from "../ports/schemaMigration";
 import {
   SCREEN_RUN_LOCK_STALE_MS,
   type ScreenRunLockAcquisition,
@@ -15,17 +18,54 @@ import {
 
 type Row = Record<string, unknown>;
 
-export class DoSqliteScreenRunLock implements ScreenRunLockPort {
-  constructor(private readonly sql: ScreenRunLockSqlExecutor) {}
-
-  ensureSchema(): void {
-    this.sql.exec(`CREATE TABLE IF NOT EXISTS screen_run_locks (
+/**
+ * The lock table's DDL, its ONE home: both the legacy
+ * ensureSchema branch and the managed migration below run this
+ * exact statement, so the two modes can never drift apart.
+ */
+const SCREEN_RUN_LOCK_TABLE_DDL = `CREATE TABLE IF NOT EXISTS screen_run_locks (
       user_login TEXT NOT NULL,
       universe TEXT NOT NULL,
       token TEXT NOT NULL,
       started_at INTEGER NOT NULL,
       PRIMARY KEY (user_login, universe)
-    )`);
+    )`;
+
+/**
+ * #1767 (parent #1717): the screen-run-lock store's first
+ * framework migration. v1 is the table exactly as the legacy
+ * path creates it — IF NOT EXISTS, so an instance whose table
+ * was created by the legacy path converges on first managed
+ * ensure (ledger row recorded, no DDL error, no data loss).
+ * A future lock-schema change rides as v2, never as an edit
+ * to this migration's `up` (applied instances never re-run v1).
+ */
+export const SCREEN_RUN_LOCK_SCHEMA_MIGRATION: DoSchemaMigration = {
+  version: 1,
+  name: "0001_screen_run_locks",
+  up: [SCREEN_RUN_LOCK_TABLE_DDL],
+  down: ["DROP TABLE IF EXISTS screen_run_locks"],
+};
+
+/** Options for the #1767 framework wiring; unset = legacy. */
+export interface DoSqliteScreenRunLockOptions {
+  schemaMigrationMode?: SchemaMigrationMode;
+}
+
+export class DoSqliteScreenRunLock implements ScreenRunLockPort {
+  constructor(
+    private readonly sql: ScreenRunLockSqlExecutor,
+    private readonly options: DoSqliteScreenRunLockOptions = {},
+  ) {}
+
+  ensureSchema(): void {
+    if (this.options.schemaMigrationMode === "managed") {
+      applyDoSchemaMigrations(this.sql, "screen_run_locks", [
+        SCREEN_RUN_LOCK_SCHEMA_MIGRATION,
+      ]);
+      return;
+    }
+    this.sql.exec(SCREEN_RUN_LOCK_TABLE_DDL);
   }
 
   acquire(
