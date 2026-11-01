@@ -55,6 +55,35 @@ skipped simply resume on the next tick once the value is present and the
 identity's stored token exists. No data migration is needed in either
 order (see "Addressing" below).
 
+## Provisioning completeness checklist (#1764, F-33)
+
+Provisioning is an owner step, not code, so no code change can
+complete it — but it must not be silent either. The status route
+(`GET /api/admin/service-user/status`, platform-admin caller)
+reports a `provisioning` object alongside the pre-existing status
+fields:
+
+- `service_login_configured` — `SERVICE_USER_LOGIN` is set and
+  login-shaped.
+- `platform_membership_live` — a live, unrevoked, unexpired
+  platform-scope member binding exists for the service identity
+  (an expired binding does not count).
+- `brokerage_token_present` — a stored token exists for the
+  service identity (presence only; the token value is never
+  exposed, and a failed store read reports `unknown`, never a
+  guessed pass or fail).
+
+`provisioning.complete` is true only when every item passes.
+Every non-pass item names its owner action in
+`provisioning.ownerActions`: provision the platform tier via
+`POST /api/admin/service-user/provision {"tier": "platform"}`,
+authorize the service login once via the Connect E*TRADE flow,
+or re-check token presence after a store-read failure. An item
+that is not a pass is therefore explicitly carried with an
+owner action, which is the #1764 acceptance for this checklist
+— the checklist is complete, or its remainder is owned, never
+unrecorded.
+
 ## Implications if it is not set
 
 Fail-closed, by surface (behaviour verified against the #1185 Phase A/C

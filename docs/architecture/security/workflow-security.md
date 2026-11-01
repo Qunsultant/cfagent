@@ -53,18 +53,46 @@ stated as a control rather than an option.
 
 Background dispatches go to Durable Objects with an `x-user-login`
 header set to the background identity — the same header user-driven
-forwards carry, with a synthetic value. Downstream code therefore
-cannot distinguish "background" from "user" by the header alone; it
-distinguishes them by the identity value. That is exactly why the
-service-identity migration matters: once background work carries a
-distinct, real authorization, attribution stops depending on a name
-everyone knows is fake.
+forwards carry. Since #1764 they additionally carry
+`x-actor-kind: background` (see
+`src/security/backgroundAttribution.ts`), so a reader of headers or
+audit records can tell background work from user work without
+knowing the configured service login value. Authority is never the
+header alone: `resolveActorAttribution()` returns "background"
+only when the login equals the configured service login (the
+serviceDispatch rule — with no configuration, nothing is a service
+dispatch), and a `background` header on any other login resolves
+to "user" with an anomaly flag, so a client-spoofed header cannot
+claim background work. The service identity itself is a real login
+authorized through the normal flow (see [service-identity.md](service-identity.md));
+the header only names the actor kind for audit and logs.
 
-Queue handling deserves one explicit note: a message is acked only
-after its job is dispatched, and retried on failure. A poison message
-that always fails is therefore retried, not dropped — retention and
-dead-letter behavior for the queue is an open gap, not a verified
-control.
+Queue handling, pinned by #1764 (F-32 closed for the screener
+queues; the legacy `default_trader` removal itself remains #1066,
+out of this slice's scope):
+
+- A retryable handler failure is bounded, not infinite: the
+  platform re-delivers up to `max_retries: 3` and then lands the
+  message in the dead-letter queue (`screener-events-dlq` /
+  `screener-events-delivery-dlq`, pinned against `wrangler.jsonc`
+  by #2544). A message that can never decode is acked + recorded,
+  never retried — redelivering undecodable bytes would
+  poison-loop the batch.
+- A terminal drop — a dispatch denied by the identity rules, an
+  undecodable message, or an envelope no handler exists for — is
+  acked (dropped, never retried: a re-dispatch would deny or loop
+  again) AND leaves a structured dead-letter record
+  (`src/messaging/deadLetter.ts`): one parseable
+  `[dead-letter] {json}` line per drop carrying queue, reason,
+  message/run/unit ids, and actor when known. The record is the
+  auditable half of the drop; ack/retry semantics are unchanged.
+- The DLQ queues intentionally have no consumer in this slice: a
+  DLQ consumer that acked would destroy the evidence it inspects.
+  A DLQ landing is platform-recorded (queue metrics + retention),
+  and a DLQ inspection/replay consumer is the named follow-up,
+  not silently built here — until it lands, the terminal-drop
+  records above are the auditable dead-letter trail, and DLQ
+  depth is monitored via the Cloudflare dashboard.
 
 ## 5. Rules for adding unattended work
 
