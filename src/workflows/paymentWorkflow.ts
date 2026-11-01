@@ -1,38 +1,54 @@
 /**
  * PaymentWorkflow — the durable payment wrapper for screener runs
- * (Goal 1 Phase 2, #2014, draft).
+ * (#2014; live — status corrected 2026-11-01, #2551).
  *
  * Follows the repo pattern exactly (ADR 0004 W13):
  *   - extends ThinkWorkflow, NOT WorkflowEntrypoint
  *   - NO new payment agent. PaymentsAgent already exists
  *     (src/agents/payments-agent.ts, #1957, PortThink). This workflow
  *     does not create, extend, or replace it.
- *   - Agent-type parameter: `any` in this draft, following the
+ *   - Agent-type parameter: `any`, following the
  *     ScreenerScreenWorkflow precedent, where tracking goes through
  *     D1 projection rows + instance status instead of the SDK's agent
- *     tracking. The open alternative is ThinkWorkflow<PaymentsAgent, ...>
- *     — justified ONLY if the workflow actually uses this.agent
- *     (SDK agent binding + tracking). This draft does not use
- *     this.agent; it delegates to the flow core, so `any` is the
- *     honest choice today. Changing it later is a type + binding
- *     change, not a redesign, and needs CTO review.
+ *     tracking. The workflow does not use this.agent; it delegates
+ *     to the flow core, so `any` is the honest choice. (Settled
+ *     as built; the draft-era open alternative is closed.)
  *   - OrchestratorAgent is a CALLER, not a base class. Like screener
  *     runs, the orchestrator triggers/creates this workflow instance
  *     and owns the store and deliver seams; this class is not an
  *     OrchestratorAgent subclass and does not extend it.
  *   - Money ops are step.do(), the human gate is waitForEvent
  *     approval before capture (backed by the #1262 approval engine
- *     in production wiring), never step.prompt().
+ *     in production wiring), never step.prompt(). A successful
+ *     approval is audited (#2550): exactly one payment.approved
+ *     event naming the approver, recorded in a journaled step
+ *     before the verified-payment wait; the approved-at-submission
+ *     path records payment.approved_at_submission naming its
+ *     authorizing principal.
  *   - Thin adapter: run() validates the payload, builds deps from env,
  *     and delegates to runPaymentWorkflowFlow in paymentWorkflowFlow.ts
  *
- * OPERATIONAL STATUS (2026-10-27, #2014 wiring):
- *   - Wrangler binding PAYMENT_WORKFLOW + Env type are added in this
- *     PR (wrangler.jsonc, src/types.ts). No route calls this workflow
- *     yet by default: the caller seam is paymentWorkflowSubmission.ts,
- *     and the route that adopts it is a reviewed wiring step — a
- *     route must NOT start a screener for free when monetization is
- *     on and the payment workflow cannot start.
+ * OPERATIONAL STATUS (2026-11-01, #2551 — supersedes the
+ * 2026-10-27 draft-era block, whose claims are stale):
+ *   - Wrangler binding PAYMENT_WORKFLOW + Env type are live
+ *     (wrangler.jsonc, src/types.ts), and routes and doors DO call
+ *     this workflow: the submission seams
+ *     (src/services/paidScreenSubmission.ts and
+ *     src/services/paymentWorkflowSubmission.ts) serve the HTTP
+ *     routes (src/agents/routes/agenticPayments.ts and
+ *     screenerResearch.ts), the mesh paid door used by chat, and
+ *     scheduled tasks. A route must NOT start a screener for free
+ *     when monetization is on and the payment workflow cannot
+ *     start.
+ *   - Gate: NativeMonetizationGate (Stripe card + x402 via
+ *     CheckoutPort), constructed by this adapter. x402 proof
+ *     redemption is durable (#2548): confirm checks the
+ *     proof-redemption store before paying and records the
+ *     redemption on success, so a replayed proof is refused
+ *     across instances and restarts. The cfpay gate is
+ *     deprecated in place, superseded by the native gate (see
+ *     src/services/cfpayMonetization.ts); no production route
+ *     constructs it.
  *   - Flag: Flagship feature flag "monetization" (#2043), default OFF,
  *     fail-closed. When the FLAGS binding is present, Flagship is
  *     the source of truth: the flag must exist in the Flagship
@@ -44,15 +60,31 @@
  *     Flag OFF in PROD would mean free runs at scale — a revenue
  *     risk, not a charge risk — so PROD enablement needs COO/CTO
  *     sign-off and explicit staging-only enablement first.
- *   - Account: caller-supplied pay-per-use identity until the
- *     subscription/credits store exists (#2015/#1623). Recurring
- *     runs stay coverage_required until that store exists.
- *   - Ledger: gate ledger is in-memory in this draft; durable cfpay
- *     ledger rows in mas_transactions are Phase 4 (#2019) — see
- *     recordEvent above for why recordLedgerPayment is NOT reused
- *     (it builds x402 PaymentsAgent-origin rows only).
- *   - Failure credit: still throws (Phase 4). A screener failure
- *     after payment is loud, never a silent credit claim.
+ *     Activation also depends on catalogue prices being
+ *     approved: approval state is representable and enforced
+ *     (#2547) — both gates resolve prices only through
+ *     getApprovedPrice and refuse unapproved prices
+ *     fail-closed; the approval itself is the operator act
+ *     behind the CPO price-approval gate (#951/#1173).
+ *   - Account: the subscription/credits store exists (#2015);
+ *     the caller resolves the account from it by verified userId
+ *     (paidScreenSubmission), and covered runs consume coverage
+ *     from the store. Recurring scheduled runs are coverage-only.
+ *   - Ledger: durable. Confirmed payments and failure credits
+ *     write deduped rows through the cfpay ledger service
+ *     (mas_transactions) AND the native D1 ledger, with a
+ *     double-entry journal projection (#2155). Nothing about
+ *     the ledger is in-memory. (recordLedgerPayment is NOT
+ *     reused because it builds x402 PaymentsAgent-origin rows
+ *     only.)
+ *   - Failure credit: IMPLEMENTED (#2019/#2015). A screener
+ *     failure after payment issues exactly one replacement-run
+ *     credit, deduped in the ledger and recorded as a D1 credit
+ *     claim — automatic compensation is the credit, never cash
+ *     (#2549). Cash refunds stand as a separate
+ *     operator-initiated, approval-gated path, and a run that
+ *     already received the failure credit is refused one
+ *     (fail-closed XOR, #2549).
  *   - Params carry ids only — never credentials, never secrets, never
  *     a card, never a Stripe key or x402 recipient. Checkout
  *     configuration is read from env in the composition root
@@ -116,11 +148,11 @@ export const PAYMENT_WORKFLOW_BINDING = "PAYMENT_WORKFLOW" as const;
 
 /**
  * Payload for the workflow: ids + caller-supplied account + the
- * caller-built screener command. The account is the caller's verified
- * identity for pay-per-use (tier PayPerUse, 0 credits, 0 included
- * runs) until the subscription/credits store exists (#2015/#1623);
- * a Subscribed account must come from that store, not from a caller
- * snapshot, and recurring runs stay coverage_required until it does.
+ * caller-built screener command. The account comes from the
+ * subscription/credits store (#2015), resolved by the caller from
+ * the verified userId — a Subscribed account must come from that
+ * store, not from a caller snapshot. Recurring scheduled runs are
+ * coverage-only (coverage_required when no coverage remains).
  * The screener command is built by the caller (route / schedule
  * service, e.g. buildGoalScreenCommand) — never invented here.
  */
