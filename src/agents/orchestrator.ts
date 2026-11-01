@@ -114,6 +114,7 @@ import { handleMcpChatNlqRoutes } from "./routes/mcpChatNlq";
 import { handleSchemaRoutes } from "./routes/schema";
 import { handleAdsRevenueReferralsRoutes, handleReferralsAdsRoutes } from "./routes/adsRevenueReferrals";
 import { handleAuditRoutes } from "./routes/audit";
+import { handleMeterRoutes } from "./routes/meter";
 import { handleDataProviderRoutes } from "./routes/dataProviders";
 import { buildDataProviderPorts } from "../data/buildDataProviderPorts";
 import type { D1ProviderConfigAdapter } from "../data/d1ProviderConfigAdapter";
@@ -2654,6 +2655,9 @@ export class OrchestratorAgent extends PortThink {
       env: this.env, // #1733: global-env fallback for AUDIT_WRITE_MODE.
     });
     if (auditResponse) return auditResponse;
+
+    const meter = await handleMeterRoutes(request, url, path, sessionId, { sql: this.ctx.storage.sql, env: this.env });
+    if (meter) return meter;
 
     // Issue #1170 (E3): data-provider lifecycle routes are handled
     // by src/agents/routes/dataProviders.ts. Invoked here (after the

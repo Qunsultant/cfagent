@@ -154,4 +154,13 @@ describe("E*TRADE & Broker Immediate Sync Routing (#1149)", () => {
     expect(isImmediateEndpoint.test("/custom/long-computation")).toBe(false);
     expect(isImmediateEndpoint.test("/reports/analytics")).toBe(false);
   });
+
+  it("POST /api/tenant/settings/auto-refresh is forwarded with immediate sync (no x-async-eligible) (#2692)", async () => {
+    const { env, forwarded } = makeEnv();
+    const res = await worker.fetch(req("/api/tenant/settings/auto-refresh", "POST"), env);
+    expect(res.status).toBe(200);
+    expect(forwarded).toHaveLength(1);
+    expect(forwarded[0].pathname).toBe("/tenant/settings/auto-refresh");
+    expect(forwarded[0].asyncEligible).toBeNull();
+  });
 });

@@ -554,6 +554,25 @@ describe("saga flow Leg 0/1 (S1, #2041) and gate entry (S2)", () => {
     expect(withdrawCalls).toHaveLength(1);
   });
 
+  it("Leg 0 threads the saga metering context into the payment child params", async () => {
+    const legPort = new FakeLegPort();
+    legPort.statuses["payment:pay-wf-1"] = [paymentStarted()];
+    legPort.statuses["screener:scr-wf-1"] = [collation("ReportGenerated")];
+    const { deps, clock } = depsFor(legPort);
+    const step = gateStep(clock, [
+      { payload: { sagaId: "saga-1", decision: "denied", deciderLogin: "u1login", surface: "panel" } },
+    ]);
+    const outcome = await runSagaWorkflowFlow(baseParams(), deps, step);
+    expect(outcome.status).toBe("journey_denied");
+    expect(legPort.starts[0].leg).toBe("payment");
+    const paymentParams = legPort.starts[0].params as Record<string, unknown>;
+    // #2041 G-METERING: the payment workflow meters one usage row
+    // after confirm-paid succeeds, only when this context is
+    // present — non-saga payment runs carry no such context and
+    // meter nothing.
+    expect(paymentParams["meterContext"]).toEqual({ category: "saga", userLogin: "u1login" });
+  });
+
   it.each(["payment_required", "coverage_required", "approval_rejected", "expired"])(
     "payment outcome %s ends payment_not_completed without touching the screen",
     async (paymentStatus) => {

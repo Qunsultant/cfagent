@@ -271,7 +271,7 @@ describe("M2 expiry: facade + batch + HTTP + WS", () => {
     const now = Date.now();
     liveMarketCache.set("FRESH", { tick: makeTick("FRESH", 100, now - 1000), expiresAt: now + 30000 });
     liveMarketCache.set("STALE", { tick: makeTick("STALE", 200, now - 60000), expiresAt: now - 1000 });
-    const res = handleMarketQuotesHttp(["FRESH", "STALE"]);
+    const res = await handleMarketQuotesHttp(["FRESH", "STALE"]);
     expect(res.status).toBe(200);
     const body = (await res.json()) as any;
     expect(body.quotes.map((q: any) => q.symbol)).toEqual(["FRESH"]);
@@ -287,7 +287,7 @@ describe("M2 expiry: facade + batch + HTTP + WS", () => {
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, json: async () => ({}) })));
     const now = Date.now();
     liveMarketCache.set("STALE", { tick: makeTick("STALE", 200, now - 60000), expiresAt: now - 1000 });
-    const res = handleMarketQuotesHttp(["STALE"], undefined, { expiryMode: "continuity" });
+    const res = await handleMarketQuotesHttp(["STALE"], undefined, { expiryMode: "continuity" });
     const body = (await res.json()) as any;
     expect(body.quotes.map((q: any) => q.symbol)).toEqual(["STALE"]);
     expect(body.unavailable).toEqual([]);
@@ -298,7 +298,7 @@ describe("M2 expiry: facade + batch + HTTP + WS", () => {
 
   it("HTTP handler with no symbols at all stays 200 with unavailable[] empty", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, json: async () => ({}) })));
-    const body = (await handleMarketQuotesHttp(["ZZQNONE"]).json()) as any;
+    const body = (await (await handleMarketQuotesHttp(["ZZQNONE"])).json()) as any;
     expect(body.quotes).toEqual([]);
     expect(body.unavailable).toEqual(["ZZQNONE"]);
     expect(body.dataUnavailable).toBe(true);
@@ -359,9 +359,13 @@ describe("M2b runtime confirmation: HTTP env-drop", () => {
         return { ok: false, json: async () => ({}) } as any;
       })
     );
-    const res = handleMarketQuotesHttp(["M2BNOENV"]);
+    const res = await handleMarketQuotesHttp(["M2BNOENV"]);
     const body = (await res.json()) as any;
-    expect(body.unavailable).toEqual(["M2BNOENV"]); // cache was empty at answer time
+    // #2692: refresh-then-serve — the Yahoo answer now populates the
+    // cache BEFORE the response, so the symbol is quoted on the first
+    // call instead of unavailable (the old fire-and-forget behavior).
+    expect(body.quotes.map((q: any) => q.symbol)).toEqual(["M2BNOENV"]);
+    expect(body.unavailable).toEqual([]);
     await flush();
     await flush();
     expect(urls.length).toBeGreaterThan(0);
@@ -385,7 +389,7 @@ describe("M2b runtime confirmation: HTTP env-drop", () => {
       })
     );
     const env = { ALPACA_API_KEY_ID: "k", ALPACA_API_SECRET_KEY: "s" } as unknown as Env;
-    handleMarketQuotesHttp(["M2BWITHENV"], env);
+    await handleMarketQuotesHttp(["M2BWITHENV"], env);
     await flush();
     await flush();
     expect(urls.some((u) => u.includes("alpaca"))).toBe(true);

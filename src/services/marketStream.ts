@@ -426,8 +426,9 @@ export function annotateStreamTicks(
  * Issue #1643: quotes resolve through the MarketDataService facade,
  * so each quote carries its provenance (cached + fetch time + age)
  * and expired entries resolve as unavailable instead of being
- * served stale. The background refresh still fires, so the next
- * call recovers; the top-level `timestamp` remains the RESPONSE
+ * served stale. #2692: the refresh runs BEFORE serving
+ * (refresh-then-serve), so a cold cache still returns live quotes
+ * on the first call; the top-level `timestamp` remains the RESPONSE
  * time — per-quote freshness is `fetchedAtMs`/`ageMs`, never the
  * response time. The WebSocket stream is untouched (its continuity
  * design publishes the last cached quote; see marketDataService).
@@ -439,7 +440,7 @@ export function annotateStreamTicks(
  * resolution reads `opts.envForModes ?? env`, so the expiry env
  * level survives even when the fetch env is withheld.
  */
-export function handleMarketQuotesHttp(
+export async function handleMarketQuotesHttp(
   symbols: string[],
   env?: Env,
   opts?: {
@@ -447,9 +448,15 @@ export function handleMarketQuotesHttp(
     scoped?: QuoteScopedModes;
     envForModes?: Env;
   },
-): Response {
-  // Fire background refresh of live quotes for symbols
-  void refreshQuotesInBackground(symbols, env);
+): Promise<Response> {
+  // #2692: refresh-then-serve (mirroring pushTicks). The handler used
+  // to fire the refresh un-awaited and serve the isolate-local cache
+  // immediately, so on a cold cache it always answered quotes: [] even
+  // when upstream answers normally — no subscriber warms the Worker
+  // isolate's HTTP cache. Awaiting first means the first call after a
+  // cold start returns live quotes; a failed upstream still resolves
+  // to unavailable, never a fabricated number.
+  await refreshQuotesInBackground(symbols, env);
 
   const modeEnv = opts?.envForModes ?? env;
   const expiryMode = resolveQuoteExpiryMode(
