@@ -64,6 +64,16 @@ export interface McpToolContext {
    */
   meshScreenDoorSeams?: import("../agents/orchestrator/meshScreenDoor").MeshScreenDoorSeams;
   /**
+   * #2581: binding-seam overrides for the mesh options-strategy
+   * door (run_options_strategy_screen), populated ONLY by test
+   * harnesses through the executor-shaped context. Production
+   * contexts (turn, async-job executor, /mcp) never set it: the
+   * door then composes every seam from env/orm (see
+   * src/agents/orchestrator/meshOptionsStrategyDoor.ts,
+   * MeshOptionsStrategyDoorSeams).
+   */
+  meshOptionsStrategyDoorSeams?: import("../agents/orchestrator/meshOptionsStrategyDoor").MeshOptionsStrategyDoorSeams;
+  /**
    * #1723: optional session/user carriers for the KNOWLEDGE_MODE switch
    * (run comes from the per-call `mode` input, global env from
    * `env`). Populated by the execution-context owner; unset carriers

@@ -129,6 +129,7 @@ other doors. Scope column is #1843's declaration, consumed here.
 | `browser_capture_page` | mcp:write | L via door 2 only — acting identity required (#2351); refused on doors 1/3 (no acting-identity carrier there) |
 | `slack_dispatch_transaction_snap` | mcp:write | L via door 2 only — acting identity required (#2351); refused on doors 1/3 (no acting-identity carrier there) |
 | `run_stock_screen` | mcp:write | L via door 2 only — acting identity required (#2488); refused on doors 1/3 (no acting-identity carrier there) |
+| `run_options_strategy_screen` | mcp:write | L via door 2 only — acting identity required (#2581); refused on doors 1/3 (no acting-identity carrier there) |
 
 ### mcp:execute (7)
 

@@ -130,10 +130,14 @@ const PINNED_NAMED_REEXPORTS = ["MAX_SCAN_SYMBOLS from ./options/opportunityScan
  * Q4 (2026-10-23) — the MCP quote command likewise: 47 -> 46.
  * Growths: C5 (#1361) — the comparison route constructs its own
  * service like every sibling options route: etradeOptions 5 -> 6.
+ * #2581 — the mesh options-strategy door composes the service
+ * for the acting login exactly as the NLQ execution layer does:
+ * +1 in a new file.
  */
 const CONSTRUCTION_LEDGER: Record<string, number> = {
   "agents/nlq/execution.ts": 2,
   "agents/orchestrator/asyncJobs.ts": 2,
+  "agents/orchestrator/meshOptionsStrategyDoor.ts": 1,
   "agents/routes/etradeBroker.ts": 21,
   "agents/routes/etradeOptions.ts": 6,
   "agents/routes/watchlists.ts": 5,
@@ -182,6 +186,9 @@ describe("trading extraction ledger (issue #291 T0)", () => {
     // executor dispatch it mirrors.
     // 51 → 52 in #1726: the /etrade/screen listings branch constructs
     // its ETradeService like every sibling broker route.
-    expect(total).toBe(52);
+    // 52 → 53 in #2581: the mesh options-strategy door constructs
+    // its ETradeService for the acting login, like the NLQ
+    // execution layer whose engine seam it calls.
+    expect(total).toBe(53);
   });
 });

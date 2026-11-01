@@ -1397,8 +1397,11 @@ describe("golden set: G12 proof run (#2439)", () => {
     // mesh-screen-door tasks, whose drivers live with the suites
     // that own their seams: the four #2488 tasks in
     // tests/mesh_screen_door_2488.test.ts (turn/queue/executor),
-    // and the #2530 dual-mode pair in
-    // tests/screener_dual_mode_2530.test.ts (door → real flows).
+    // the #2530 dual-mode pair in
+    // tests/screener_dual_mode_2530.test.ts (door → real flows),
+    // and the #2581 options-strategy task in
+    // tests/mesh_options_strategy_door_2581.test.ts (door → the
+    // engine seam the NLQ options action dispatches to).
     const DOOR_TASK_IDS = [
       "door-chat-screen-run",
       "door-chat-screen-identity-refusal",
@@ -1406,6 +1409,7 @@ describe("golden set: G12 proof run (#2439)", () => {
       "door-chat-paid-budget-refusal",
       "door-chat-screen-run-deterministic",
       "door-chat-screen-run-non-deterministic",
+      "door-chat-options-strategy-screen",
     ];
     expect(executions.map((e) => e.task.id)).toEqual(
       MESH_GOLDEN_TASKS.filter(

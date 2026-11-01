@@ -163,6 +163,17 @@ export const MESH_GOLDEN_TASKS: readonly MeshGoldenTask[] = [
     },
   },
   {
+    id: "door-chat-options-strategy-screen",
+    title: "Chat-turn options strategy screen through the mesh options-strategy door (#2581): the reported request — NASDAQ100, bull put credit spreads, max loss <= $30, max profit > $0 — assembled as structured filters and evaluated by the existing options engine seam (runOptionsStrategyAction, options_opportunities), the catalog alias resolved to put_credit_spread and the constraints plumbed in the engine's own field names",
+    door: "chat-turn",
+    className: "ScreenerAgent",
+    operation: "run_options_strategy_screen",
+    expectation: {
+      outcome: "completed",
+      facts: { engineCalls: 1, maxPlannedLoss: 30, minMaxProfit: 0.01, strategyTypes: "put_credit_spread" },
+    },
+  },
+  {
     id: "chat-trade-approval",
     title: "Chat trade runs the approval door into TradingTradeWorkflow and executes exactly once on approval (S9 path)",
     door: "chat-turn",

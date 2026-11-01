@@ -110,6 +110,7 @@ import {
   SlackSendPreTradeApprovalCommand,
   SlackDispatchTransactionSnapCommand,
   RunStockScreenCommand,
+  RunOptionsStrategyScreenCommand,
 } from "./meshDoorCommands";
 
 import { searchPlatformKnowledge } from "../../services/platformKnowledge";
@@ -1780,6 +1781,17 @@ export class McpToolFactory {
     // discipline as batches A–D; the door has no
     // direct-ScreenerAgent fallback.
     this.registerTool(new RunStockScreenCommand());
+
+    // Agent Mesh #2581: the chat turn's options strategy
+    // screen as a mesh door command over the door layer's
+    // options-strategy service
+    // (src/agents/orchestrator/meshOptionsStrategyDoor.ts) —
+    // the path the prompt steers options strategy screens to:
+    // structured constraints in, the existing evaluation
+    // engine's ranked candidates out (direct return; the
+    // engine's carriage has no workflow behind it). Same
+    // identity discipline as batches A–E.
+    this.registerTool(new RunOptionsStrategyScreenCommand());
   }
 
   /**

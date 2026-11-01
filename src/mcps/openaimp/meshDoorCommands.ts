@@ -96,6 +96,24 @@
  *     CHAT_NLQ_MODE (#2488), not removed. Unlike the NLQ port,
  *     the door has NO direct-ScreenerAgent fallback: an
  *     unavailable workflow port is a coded refusal.
+ *
+ * Batch F (#2581) adds one command over the mesh
+ * options-strategy door (src/agents/orchestrator/
+ * meshOptionsStrategyDoor.ts), declaring mcp:write:
+ *   - `run_options_strategy_screen` (mcp:write) — screen
+ *     options strategies over a universe by structured
+ *     constraints (catalog strategy type, max loss, min
+ *     profit, reward/risk, DTE window) through the door: the
+ *     door assembles the engine's structured filters and calls
+ *     the existing evaluation seam the NLQ
+ *     options_opportunities action dispatches to
+ *     (runOptionsStrategyAction), returning its ranked result
+ *     directly — the engine's carriage is a direct awaited
+ *     call, so this door has no workflow/job carriage. This is
+ *     the chat options-strategy path the prompt steers to; it
+ *     replaces no NLQ surface (the NLQ options actions keep
+ *     serving their own callers) and routes nothing through
+ *     NLQ.
  */
 
 import { z } from "zod";
@@ -148,6 +166,12 @@ import {
   type MeshScreenDoorInput,
   type MeshScreenRunResult,
 } from "../../agents/orchestrator/meshScreenDoor";
+import {
+  meshOptionsStrategyDoorContextFromMcp,
+  runOptionsStrategyScreenViaDoor,
+  type MeshOptionsStrategyDoorInput,
+  type MeshOptionsStrategyScreenResult,
+} from "../../agents/orchestrator/meshOptionsStrategyDoor";
 import { UNIVERSES, type UniverseId } from "../../trading";
 
 /**
@@ -1161,6 +1185,105 @@ export class RunStockScreenCommand implements IMcpToolCommand<MeshScreenDoorInpu
       success: result.success,
       matchedCount: result.matchedCount,
       totalScanned: result.totalScanned,
+    });
+    return result;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* run_options_strategy_screen (#2581)                                 */
+/* ------------------------------------------------------------------ */
+
+export class RunOptionsStrategyScreenCommand implements IMcpToolCommand<MeshOptionsStrategyDoorInput> {
+  readonly name = "run_options_strategy_screen";
+  readonly description =
+    "Screen options strategies over a named universe (NASDAQ100, SP500, SP100, RUSSELL2000, TECH, ETF, LEV_ETF) by structured constraints through the mesh options-strategy door: the strategy type is validated against the engine's strategy catalog (an id, label, or alias — e.g. \"put_credit_spread\" or \"Bull Put Credit Spread\"), the universe resolves to its symbol batch, and the existing options evaluation engine ranks candidate spreads under the stated caps (maxLoss, minProfit, minRewardRisk, DTE window). Returns the engine's ranked candidates with the constraint echo; an empty result is an honest no-qualifying-spreads payload, not an error. Research only — places no orders. Requires the chat turn's acting identity.";
+  readonly jsonSchema = {
+    type: "object" as const,
+    properties: {
+      universe: {
+        type: "string",
+        enum: SCREEN_UNIVERSE_IDS.filter((u) => u !== "ALL"),
+        description: "The universe to screen (default NASDAQ100).",
+      },
+      strategyType: {
+        type: "string",
+        description: "Strategy to screen for: a strategy-catalog id, label, or alias (e.g. \"put_credit_spread\", \"Bull Put Credit Spread\", \"iron_condor\"). Omit to screen every strategy.",
+      },
+      maxLoss: {
+        type: "number",
+        description: "Max loss cap per spread in dollars (the engine's maxPlannedLoss; default 500).",
+      },
+      minProfit: {
+        type: "number",
+        description: "Minimum max-profit floor per spread in dollars (the engine's minMaxProfit screen filter). Pass a positive value to require max profit above zero.",
+      },
+      minRewardRisk: {
+        type: "number",
+        description: "Reward/risk scoring floor (the engine's minRewardRisk; default 1.5).",
+      },
+      thesis: {
+        type: "string",
+        enum: ["bullish", "bearish", "range_bound", "large_move"],
+        description: "Scan thesis (default: the strategy's catalog thesis).",
+      },
+      riskProfile: {
+        type: "string",
+        enum: ["conservative", "balanced", "aggressive"],
+        description: "Ranking posture (default balanced).",
+      },
+      minDte: { type: "number", description: "Minimum days to expiration (default 14)." },
+      maxDte: { type: "number", description: "Maximum days to expiration (default 60)." },
+      minProbabilityOfProfit: {
+        type: "number",
+        description: "Probability-of-profit floor, 0–1 (the engine's minProbabilityOfProfit screen filter).",
+      },
+      requireFresh: {
+        type: "boolean",
+        description: "Require fresh quotes only (the engine's requireFresh screen filter).",
+      },
+    },
+  };
+  readonly zodSchema = z.object({
+    universe: z
+      .enum(SCREEN_UNIVERSE_IDS.filter((u) => u !== "ALL") as [UniverseId, ...UniverseId[]])
+      .optional()
+      .describe("The universe to screen (default NASDAQ100)"),
+    strategyType: z.string().min(1).optional().describe("Strategy catalog id, label, or alias"),
+    maxLoss: z.number().positive().optional().describe("Max loss cap per spread in dollars"),
+    minProfit: z.number().nonnegative().optional().describe("Minimum max-profit floor per spread in dollars"),
+    minRewardRisk: z.number().nonnegative().optional().describe("Reward/risk scoring floor"),
+    thesis: z
+      .enum(["bullish", "bearish", "range_bound", "large_move"])
+      .optional()
+      .describe("Scan thesis (default: the strategy's catalog thesis)"),
+    riskProfile: z
+      .enum(["conservative", "balanced", "aggressive"])
+      .optional()
+      .describe("Ranking posture (default balanced)"),
+    minDte: z.number().int().positive().optional().describe("Minimum days to expiration"),
+    maxDte: z.number().int().positive().optional().describe("Maximum days to expiration"),
+    minProbabilityOfProfit: z.number().min(0).max(1).optional().describe("Probability-of-profit floor, 0–1"),
+    requireFresh: z.boolean().optional().describe("Require fresh quotes only"),
+  });
+
+  async execute(
+    input: MeshOptionsStrategyDoorInput,
+    context: McpToolContext,
+  ): Promise<MeshOptionsStrategyScreenResult> {
+    const actingLogin = context.actingLogin?.();
+    await recordDoorHop(context, this.name, "ScreenerAgent");
+    const result = await runOptionsStrategyScreenViaDoor(
+      meshOptionsStrategyDoorContextFromMcp(context),
+      actingLogin,
+      input,
+    );
+    context.audit("run_options_strategy_screen", "mcp", {
+      actingLogin: actingLogin ?? null,
+      universe: result.universe,
+      status: result.status,
+      count: result.count,
+      strategyTypes: result.constraints.strategyTypes,
     });
     return result;
   }
