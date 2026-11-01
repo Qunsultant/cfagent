@@ -251,13 +251,13 @@
  * combined branch, so one inventory entry) — in
  * handleAgenticPaymentsRoutes, after the subscription purchase
  * route and before the cancel route — bringing the pinned array
- * to 305 entries; the delegation sequence is unchanged (same
+ * to 323 entries; the delegation sequence is unchanged (same
  * handler, same position).
  *
  * Issue #2657 (Phase 2.2) added one — POST
  * /payments/agentic/commercial/referral/attribute — in
  * handleAgenticPaymentsRoutes, after the referral record-earn
- * route — bringing the pinned array to 323 entries (measured);
+ * route — bringing the pinned array to 324 entries (measured);
  * the delegation sequence is unchanged (same handler, same position).
  *
  * LANDMARK RULE (#405): all position assertions anchor to DELEGATION
@@ -276,6 +276,7 @@ const HANDLER_FILE: Record<string, string> = {
   "handleAdsRevenueReferralsRoutes": "adsRevenueReferrals.ts",
   "handleReferralsAdsRoutes": "adsRevenueReferrals.ts",
   "handleAuditRoutes": "audit.ts",
+  "handleMeterRoutes": "meter.ts",
   "handleDataProviderRoutes": "dataProviders.ts",
   "handleEnrichmentRoutes": "enrichment.ts",
   "handleWorkflowRunsRoutes": "workflowRuns.ts",
@@ -313,6 +314,7 @@ const EXPECTED_DELEGATIONS = [
   "handleSchemaRoutes",
   "handleAdsRevenueReferralsRoutes",
   "handleAuditRoutes",
+  "handleMeterRoutes",
   "handleDataProviderRoutes",
   "handleEnrichmentRoutes",
   "handleWorkflowRunsRoutes",
@@ -381,6 +383,7 @@ const EXPECTED_INVENTORY = [
   "handleAuditRoutes :: endsWith(\"/audit\")",
   "handleAuditRoutes :: endsWith(\"/audit\")",
   "handleAuditRoutes :: endsWith(\"/audit/event\")",
+  "handleMeterRoutes :: endsWith(\"/meter/event\")",
   "handleDataProviderRoutes :: === \"/data-providers\"",
   "handleDataProviderRoutes :: === \"/data-providers/\"",
   "handleEnrichmentRoutes :: === \"/enrichment/status\"",
