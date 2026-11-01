@@ -268,9 +268,13 @@ const ORCH = "agents/orchestrator.ts";
  *  orchestrator/scheduledTasksObserve.ts; the class gains no
  *  dispatch logic) — measured 3,056 lines / 144,599 B on the
  *  branch tree, so budget lines rise to 3070 and bytes rise
- *  to 145_500. */
-const BUDGET_LINES = 3070;
-const BUDGET_BYTES = 145_500;
+ *  to 145_500.
+ *  Issue #2681 adds the migration delegation + context
+ *  pass-through in routeRequest (the class gains no logic);
+ *  budgets re-measured on the merged tree: 3,084 lines /
+ *  146,284 B, so lines rise to 3090 and bytes rise to 146_500. */
+const BUDGET_LINES = 3090;
+const BUDGET_BYTES = 146_500;
 
 const count = (haystack: string, needle: string) =>
   haystack.split(needle).length - 1;
@@ -364,8 +368,11 @@ describe("orchestrator class inventory (#992 standing gate)", () => {
 
   it("caps inline schedule registrations at the post-refactor counts", () => {
     const text = src(ORCH);
-    expect(count(text, "this.schedule(")).toBeLessThanOrEqual(6);
-    expect(count(text, "this.scheduleEvery(")).toBeLessThanOrEqual(3);
+    // Bumped 6 -> 7 / 3 -> 4 for issue #2681: the migration context
+    // binds schedule/scheduleEvery as pass-throughs; the re-arm itself
+    // lives in routes/orchestratorMigration.ts, not inline.
+    expect(count(text, "this.schedule(")).toBeLessThanOrEqual(7);
+    expect(count(text, "this.scheduleEvery(")).toBeLessThanOrEqual(4);
   });
 
   it("keeps every delegated method declared on the class", () => {

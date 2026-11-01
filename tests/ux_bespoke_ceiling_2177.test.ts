@@ -85,8 +85,14 @@ describe("bespoke-styling ceiling (issue #2177)", () => {
     // Sanctioned growth named in the PR body, per this test's own rule.
     // Ratcheted to 3838 / 2619 by the #2177 close (retired bespoke
     // checkbox-row rules; see the raw-label ratchet below).
-    expect(braces).toBeLessThanOrEqual(3842);
-    expect(classes.size).toBeLessThanOrEqual(2619); // ratcheted from 2622 by the #2177 close
+    // Bumped 3842 -> 3867 for issue #2681: the ServiceTokensPanel
+    // stylesheet (25 braces, tokens only, registered in
+    // one_off_stylesheets_1337.json). Sanctioned growth named in
+    // the PR body, per this test's own rule.
+    expect(braces).toBeLessThanOrEqual(3867);
+    // Classes bumped 2619 -> 2646 for the same #2681 sheet (27 stp-
+    // classes, tokens only).
+    expect(classes.size).toBeLessThanOrEqual(2646); // ratcheted from 2622 by the #2177 close
   });
 
   it("inline styles and raw labels outside the primitives do not grow", () => {

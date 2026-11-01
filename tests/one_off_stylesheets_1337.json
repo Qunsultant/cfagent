@@ -85,6 +85,11 @@
     "reason": "grandfathered (#1337)"
   },
   {
+    "path": "src/client/serviceTokensPanel.css",
+    "lines": 168,
+    "reason": "Service tokens panel (issue #2681; tokens only)"
+  },
+  {
     "path": "src/client/styles.css",
     "lines": 14425,
     "reason": "grandfathered (#1337)"
