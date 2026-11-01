@@ -1,23 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { apiFetch } from "../apiFetch";
 import { useBrokerEnvironment } from "../brokerEnvironment";
 import { useMarketQuotes } from "../quotes/useMarketQuotes";
 import { TAPE_SYMBOLS, type QuoteSymbolMeta } from "../quotes/symbolSets";
 import {
   loadTapeSelection,
   resolveTapeSymbols,
-  saveTapeSelection,
+  subscribeTapeSelection,
   synthesizeTapeMeta,
   type TapeSetSelection,
 } from "../quotes/symbolSetResolver";
 import {
   fetchPositionSymbols,
   fetchWatchlistDetails,
-  fetchWatchlists,
-  type ETradeWatchlist,
 } from "../accountApi";
 import type { NavTabId } from "./NavigationMenu";
-import { Button, Select, TextInput } from "./ui";
+import { Button } from "./ui";
 
 export interface TickerTapeQuote {
   symbol: string;
@@ -46,26 +43,8 @@ export function MarketTickerTape({ onSelectSymbol, onSelectTab, className = "" }
   // never from the retired cfagent_env key.
   const env = useBrokerEnvironment();
   const [selection, setSelection] = useState<TapeSetSelection>(() => loadTapeSelection() ?? { kind: "default" });
-  const [customDraft, setCustomDraft] = useState<string>(() =>
-    loadTapeSelection()?.kind === "custom" ? (loadTapeSelection() as { text: string }).text : "",
-  );
-  const [watchlists, setWatchlists] = useState<ETradeWatchlist[]>([]);
   const [fetchedSymbols, setFetchedSymbols] = useState<string[]>([]);
   const fetchToken = useRef(0);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetchWatchlists(env)
-      .then((data) => {
-        if (!cancelled) setWatchlists(data.watchlists);
-      })
-      .catch(() => {
-        // No watchlist options; a stored watchlist selection falls back.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [env]);
 
   const fetchForSelection = (sel: TapeSetSelection) => {
     const token = ++fetchToken.current;
@@ -96,11 +75,16 @@ export function MarketTickerTape({ onSelectSymbol, onSelectTab, className = "" }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const changeSelection = (next: TapeSetSelection) => {
-    setSelection(next);
-    saveTapeSelection(next);
-    fetchForSelection(next);
-  };
+  // Issue #2689: the Tape set control lives in SettingsMenu now; a
+  // panel change reaches the tape through the selection event, and
+  // the tape re-resolves (watchlist/holdings re-fetch) without reload.
+  useEffect(() => {
+    return subscribeTapeSelection((next) => {
+      setSelection(next);
+      fetchForSelection(next);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const resolvedMetas: QuoteSymbolMeta[] = useMemo(() => {
     const symbols = resolveTapeSymbols(selection, fetchedSymbols);
@@ -113,35 +97,6 @@ export function MarketTickerTape({ onSelectSymbol, onSelectTab, className = "" }
       return { symbol: synth.symbol, type: synth.type, price: "—", change: "—", isPositive: true };
     });
   }, [selection, fetchedSymbols]);
-
-  const selectionValue =
-    selection.kind === "default"
-      ? "default"
-      : selection.kind === "preset"
-        ? `preset:${selection.preset}`
-        : selection.kind === "custom"
-          ? "custom"
-          : selection.kind === "watchlist"
-            ? `watchlist:${selection.id}`
-            : "holdings";
-
-  const handleSetChange = (value: string) => {
-    if (value === "default") return changeSelection({ kind: "default" });
-    if (value === "custom") return changeSelection({ kind: "custom", text: customDraft });
-    if (value === "holdings") return changeSelection({ kind: "holdings" });
-    if (value.startsWith("preset:")) {
-      const preset = value.slice("preset:".length);
-      if (preset === "indices" || preset === "mega-cap" || preset === "crypto") {
-        return changeSelection({ kind: "preset", preset });
-      }
-      return;
-    }
-    if (value.startsWith("watchlist:")) {
-      const id = value.slice("watchlist:".length);
-      const found = watchlists.find((w) => String(w.watchlistId) === id);
-      return changeSelection({ kind: "watchlist", id, name: found?.name });
-    }
-  };
 
   // Issue #2100: the feed lifecycle (socket, fallback, flash) lives in
   // the quotes service; the tape only renders what the hook returns.
@@ -173,52 +128,6 @@ export function MarketTickerTape({ onSelectSymbol, onSelectTab, className = "" }
           type: base.type,
         };
   }
-
-  // Issue #2108: deployment-wide quote source pick. The server decides
-  // the source; this control only reads and writes the setting, and the
-  // stream reflects the pick on next refresh.
-  const [quoteSource, setQuoteSource] = useState<"auto" | "alpaca" | "yahoo">("auto");
-  useEffect(() => {
-    let cancelled = false;
-    apiFetch("/api/market/quotes/source")
-      .then((res) =>
-        res.ok ? (res.json() as Promise<{ source?: unknown }>) : Promise.reject(new Error("source read failed")),
-      )
-      .then((data) => {
-        if (!cancelled && (data?.source === "alpaca" || data?.source === "yahoo")) {
-          setQuoteSource(data.source);
-        }
-      })
-      .catch(() => {
-        // Unavailable setting surface: keep "auto" (legacy behavior).
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const handleQuoteSourceChange = (next: "auto" | "alpaca" | "yahoo") => {
-    const previous = quoteSource;
-    setQuoteSource(next);
-    apiFetch("/api/market/quotes/source", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ source: next }),
-    })
-      .then((res) => {
-        if (!res.ok) throw new Error("source write failed");
-        return res.json() as Promise<{ source?: unknown }>;
-      })
-      .then((data) => {
-        if (data?.source === "auto" || data?.source === "alpaca" || data?.source === "yahoo") {
-          setQuoteSource(data.source);
-        }
-      })
-      .catch(() => {
-        // Server-confirmed state only: revert on failure.
-        setQuoteSource(previous);
-      });
-  };
 
   const handleClickItem = (sym: string) => {
     if (onSelectSymbol) {
@@ -273,52 +182,11 @@ export function MarketTickerTape({ onSelectSymbol, onSelectTab, className = "" }
       role="region"
       aria-label="Real-Time Market Ticker"
     >
-      {/* Feed Status Indicator */}
+      {/* Feed Status Indicator (#2689: configuration controls live in
+          SettingsMenu now; the bar keeps only the status badge). */}
       <div className={`ticker-tape-feed-badge ${feedStatus}`} title={`Feed: ${sourceLabel}`}>
         <span className={`ticker-live-dot ${feedStatus}`} />
         <span className="ticker-live-text">{liveSourceAvailable ? "LIVE" : transport === "offline" ? "OFFLINE" : "SYNCING"} · {sourceLabel}</span>
-        <Select
-          aria-label="Quote source"
-          size="sm"
-          value={quoteSource}
-          onChange={(e) => handleQuoteSourceChange(e.target.value as "auto" | "alpaca" | "yahoo")}
-        >
-          <option value="auto">Auto</option>
-          <option value="alpaca">Alpaca</option>
-          <option value="yahoo">Yahoo</option>
-        </Select>
-        <Select
-          aria-label="Tape set"
-          size="sm"
-          value={selectionValue}
-          onChange={(e) => handleSetChange(e.target.value)}
-        >
-          <option value="default">Default</option>
-          <option value="preset:indices">Indices</option>
-          <option value="preset:mega-cap">Mega-cap</option>
-          <option value="preset:crypto">Crypto</option>
-          <option value="custom">Custom</option>
-          <option value="holdings">Holdings</option>
-          {watchlists.map((w) => (
-            <option key={w.watchlistId} value={`watchlist:${w.watchlistId}`}>
-              Watchlist: {w.name}
-            </option>
-          ))}
-        </Select>
-        {selection.kind === "custom" && (
-          <>
-            <TextInput
-              aria-label="Custom symbols"
-              size="sm"
-              value={customDraft}
-              onChange={(e) => setCustomDraft(e.target.value)}
-              placeholder="NVDA, AAPL"
-            />
-            <Button size="sm" onClick={() => changeSelection({ kind: "custom", text: customDraft })}>
-              Apply
-            </Button>
-          </>
-        )}
       </div>
 
       {/* Scrolling / Chips Strip */}

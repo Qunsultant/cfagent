@@ -14,6 +14,46 @@ export const TAPE_SET_CAP = 20;
 
 export const TAPE_SET_STORAGE_KEY = "cfagent_tape_symbol_set";
 
+/** Same-tab broadcast for tape-set changes (#2689, mirrors autoRefresh). */
+export const TAPE_SELECTION_CHANGED_EVENT = "cfagent:tape-selection-changed";
+
+function dispatchTapeSelectionChanged(selection: TapeSetSelection): void {
+  try {
+    if (typeof window === "undefined") return;
+    window.dispatchEvent(
+      new CustomEvent(TAPE_SELECTION_CHANGED_EVENT, { detail: { ...selection } }),
+    );
+  } catch {
+    // Dispatch failure must never break the save itself.
+  }
+}
+
+/**
+ * Subscribe to tape-set changes (panel save, or another tab via the
+ * storage event). The tape and the panel both use this so a panel
+ * change reaches the tape without a reload.
+ */
+export function subscribeTapeSelection(
+  listener: (selection: TapeSetSelection) => void,
+): () => void {
+  if (typeof window === "undefined") return () => {};
+  const onCustom = (event: Event) => {
+    const detail = (event as CustomEvent).detail as TapeSetSelection | undefined;
+    if (detail && typeof detail.kind === "string") listener(detail);
+    else listener(loadTapeSelection() ?? { kind: "default" });
+  };
+  const onStorage = (event: StorageEvent) => {
+    if (event.key !== null && event.key !== TAPE_SET_STORAGE_KEY) return;
+    listener(loadTapeSelection() ?? { kind: "default" });
+  };
+  window.addEventListener(TAPE_SELECTION_CHANGED_EVENT, onCustom);
+  window.addEventListener("storage", onStorage);
+  return () => {
+    window.removeEventListener(TAPE_SELECTION_CHANGED_EVENT, onCustom);
+    window.removeEventListener("storage", onStorage);
+  };
+}
+
 export type TapePresetId = "default" | "indices" | "mega-cap" | "crypto";
 
 export type TapeSetSelection =
@@ -112,6 +152,7 @@ export function saveTapeSelection(selection: TapeSetSelection, storage?: TapeSet
   if (!store) return;
   try {
     store.setItem(TAPE_SET_STORAGE_KEY, JSON.stringify(selection));
+    dispatchTapeSelectionChanged(selection);
   } catch {
     // Persistence is best-effort; the tape still renders the selection.
   }
