@@ -48,14 +48,13 @@ import {
   type OptionThesis,
   type OptionStrategyType,
   type StrategyRequest,
+  // Issue #2583: the report scope (theses, strategies, chains, formats,
+  // channels) is data — config/options-reports.json, env
+  // OPTIONS_REPORT_CONFIG / OPTIONS_REPORT_PRESET — not a hardcoded default.
+  describeReportScope,
+  resolveOptionsReportScope,
 } from "../trading";
 import { DEFAULT_SUBREQUEST_BUDGET, getOpportunityScannerConfig } from "../config/etapiConfig";
-// Issue #2577: the report scope (theses, strategies, chains, formats,
-// channels) is data — config/options-reports.json, env
-// OPTIONS_REPORT_CONFIG / OPTIONS_REPORT_PRESET — not a hardcoded default
-// in this method. Imported directly rather than through the ../trading
-// barrel so the barrel's pinned extraction ledger stays untouched.
-import { describeReportScope, resolveOptionsReportScope } from "../trading/optionsReportScope";
 import { tagOpportunitiesWithDirection, ETradeSlackTradingService } from "../trading";
 // Issue #1291: the scheduled path's unified scan result is an
 // OpportunityScanResult, not the OptionScreenResult the workbook

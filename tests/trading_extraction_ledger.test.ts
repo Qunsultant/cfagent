@@ -66,6 +66,8 @@ const PINNED_STAR_REEXPORTS = [
   // Issue #2162: the strategy report generator joins the trading surface.
   "./strategyReport",
   "./optionsReportXlsx",
+  // Issue #2583: the options report scope resolver joins the trading surface.
+  "./optionsReportScope",
   "./setupCatalog",
   "./researchReportPdf",
   // Issue #2167: the research workbook/CSV renderers join the trading surface.
