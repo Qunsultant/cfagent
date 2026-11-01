@@ -84,6 +84,9 @@ interface GoalScreenResult {
   };
   partial?: { failedClasses: string[]; reasons: Record<string, string> };
   completedAt: string;
+  pdfKey?: string;
+  xlsxKey?: string;
+  csvKey?: string;
 }
 
 interface BacktestResult {
@@ -406,10 +409,23 @@ export function GoalScreenPanel({ activeEnv, userLogin }: GoalScreenPanelProps) 
             },
           });
           if (!res.ok) throw new Error(`Report fetch failed [HTTP ${res.status}].`);
-          const data = (await res.json()) as { body?: { result?: GoalScreenResult } };
+          const data = (await res.json()) as {
+            body?: {
+              result?: GoalScreenResult;
+              pdfKey?: string;
+              xlsxKey?: string;
+              csvKey?: string;
+            };
+          };
           if (!data.body?.result) throw new Error("Stored run has no result.");
           if (trackGen.current !== gen) return;
-          setResult(data.body.result);
+          const mergedResult: GoalScreenResult = {
+            ...data.body.result,
+            pdfKey: data.body.result.pdfKey ?? data.body.pdfKey,
+            xlsxKey: data.body.result.xlsxKey ?? data.body.xlsxKey,
+            csvKey: data.body.result.csvKey ?? data.body.csvKey,
+          };
+          setResult(mergedResult);
           setPreviousResult(false);
           setBacktest(null);
           setBacktestError("");
@@ -461,9 +477,22 @@ export function GoalScreenPanel({ activeEnv, userLogin }: GoalScreenPanelProps) 
         },
       });
       if (!reportRes.ok) return;
-      const reportData = (await reportRes.json()) as { body?: { result?: GoalScreenResult } };
+      const reportData = (await reportRes.json()) as {
+        body?: {
+          result?: GoalScreenResult;
+          pdfKey?: string;
+          xlsxKey?: string;
+          csvKey?: string;
+        };
+      };
       if (!reportData.body?.result) return;
-      setResult(reportData.body.result);
+      const mergedResult: GoalScreenResult = {
+        ...reportData.body.result,
+        pdfKey: reportData.body.result.pdfKey ?? reportData.body.pdfKey,
+        xlsxKey: reportData.body.result.xlsxKey ?? reportData.body.xlsxKey,
+        csvKey: reportData.body.result.csvKey ?? reportData.body.csvKey,
+      };
+      setResult(mergedResult);
       setPreviousResult(true);
     } catch {
       // Silent: no previous result to show.
@@ -715,6 +744,61 @@ export function GoalScreenPanel({ activeEnv, userLogin }: GoalScreenPanelProps) 
             {result.counts.optionsUnderlyingsScanned} option underlyings ({result.counts.optionsContractsMatched}{" "}
             contracts matched); {result.counts.hits} hit(s).
           </p>
+          {(() => {
+            const pdfUrl = result.pdfKey
+              ? `/api/screening/goal-screen/report.pdf?key=${encodeURIComponent(result.pdfKey)}`
+              : undefined;
+            const xlsxUrl = result.xlsxKey
+              ? `/api/screening/goal-screen/report.xlsx?key=${encodeURIComponent(result.xlsxKey)}`
+              : undefined;
+            const csvUrl = result.csvKey
+              ? `/api/screening/goal-screen/report.csv?key=${encodeURIComponent(result.csvKey)}`
+              : undefined;
+            if (!pdfUrl && !xlsxUrl && !csvUrl) return null;
+            return (
+              <div
+                className="goal-screen-report-actions"
+                style={{
+                  display: "flex",
+                  gap: "var(--space-2)",
+                  margin: "var(--space-2) 0",
+                  flexWrap: "wrap",
+                  alignItems: "center",
+                }}
+              >
+                {pdfUrl && (
+                  <a
+                    className="ui-btn variant-secondary tone-subtle size-sm goal-screen-download-pdf"
+                    href={pdfUrl}
+                    download
+                    style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "var(--space-1)" }}
+                  >
+                    📄 Download PDF
+                  </a>
+                )}
+                {xlsxUrl && (
+                  <a
+                    className="ui-btn variant-secondary tone-subtle size-sm goal-screen-download-xlsx"
+                    href={xlsxUrl}
+                    download
+                    style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "var(--space-1)" }}
+                  >
+                    📊 Download XLSX
+                  </a>
+                )}
+                {csvUrl && (
+                  <a
+                    className="ui-btn variant-secondary tone-subtle size-sm goal-screen-download-csv"
+                    href={csvUrl}
+                    download
+                    style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "var(--space-1)" }}
+                  >
+                    📋 Download CSV
+                  </a>
+                )}
+              </div>
+            );
+          })()}
           {result.hits.length > 0 && (
             <Table
               columns={[
