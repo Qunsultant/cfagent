@@ -35,6 +35,7 @@ import {
 } from "../src/client/navConfig";
 import { getRoute } from "../src/client/routes";
 import {
+  getClientFeatureFlags,
   isOptionsProductEnabled,
   isTabFeatureEnabled,
   TAB_TO_FEATURE_MAP,
@@ -99,6 +100,15 @@ describe("options product flags (issue #2596)", () => {
     // silently enabled by inheritance from an unrelated flag.
     const screenerOnly = new EnvFeatureFlagAdapter({ FEATURE_SCREENER: "1" });
     expect(await screenerOnly.isEnabled("options_best_trade")).toBe(false);
+
+    // Configured environment with FEATURE_OPTIONS_SCREENER ON:
+    // options_screener and absent sub-products resolve ON.
+    const optionsOn = new EnvFeatureFlagAdapter({
+      FEATURE_SCREENER: "1",
+      FEATURE_OPTIONS_SCREENER: "1",
+    });
+    expect(await optionsOn.isEnabled("options_screener")).toBe(true);
+    expect(await optionsOn.isEnabled("options_best_trade")).toBe(true);
   });
 
   it("InMemory: absent product inherits an explicitly set parent", async () => {
@@ -152,6 +162,10 @@ describe("options product flags (issue #2596)", () => {
     // Stock screener routes are untouched.
     expect(matchFeatureForRoute("/api/screener/runs")).toBe("screener");
     expect(matchFeatureForRoute("/api/etrade/screen")).toBe("screener");
+  });
+
+  it("client fallback returns screener and options_screener enabled when unconfigured", () => {
+    expect(getClientFeatureFlags().options_screener).toBe(true);
   });
 
   it("client tab map gates the new page by the parent and flows by its product flag", () => {
