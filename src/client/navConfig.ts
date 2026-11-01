@@ -168,7 +168,7 @@ export const SUB_MENU_CONFIGS: Record<string, NavSubMenuItemConfig[]> = {
     id: item.id,
     label: item.label,
     shortLabel: item.shortLabel,
-    icon: "Settings",
+    icon: item.icon ?? "Settings",
     description: item.description,
   })),
   sandbox: [

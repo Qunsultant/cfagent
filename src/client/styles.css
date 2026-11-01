@@ -13732,3 +13732,29 @@ body {
     display: none;
   }
 }
+
+.submenu-item-bullet svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+
+.platform-admin-menu-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.platform-admin-menu-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  color: var(--color-text-secondary);
+}
+
+.platform-admin-menu-item.active .platform-admin-menu-icon {
+  color: var(--color-primary-default);
+}

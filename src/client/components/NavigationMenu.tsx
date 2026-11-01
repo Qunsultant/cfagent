@@ -442,6 +442,83 @@ export const NavIcons = {
       <line x1="21" y1="12" x2="9" y2="12" />
     </svg>
   ),
+  Banners: ({ active }: { active?: boolean; className?: string }) => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="18" height="12" rx="2" fill={active ? "currentColor" : "none"} fillOpacity={0.15} />
+      <line x1="8" y1="21" x2="8" y2="15" />
+      <line x1="16" y1="21" x2="16" y2="15" />
+      <line x1="4" y1="21" x2="20" y2="21" />
+    </svg>
+  ),
+  Tasks: ({ active }: { active?: boolean; className?: string }) => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="4" width="18" height="18" rx="2" fill={active ? "currentColor" : "none"} fillOpacity={0.15} />
+      <path d="M7 10h2" />
+      <path d="M7 14h2" />
+      <path d="M7 18h2" />
+      <path d="M12 10h5" />
+      <path d="M12 14h5" />
+      <path d="M12 18h5" />
+      <polyline points="7 6 9 8 13 4" strokeWidth="2" />
+    </svg>
+  ),
+  ScheduledGoals: ({ active }: { active?: boolean; className?: string }) => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="9" fill={active ? "currentColor" : "none"} fillOpacity={0.15} />
+      <circle cx="12" cy="12" r="5" />
+      <circle cx="12" cy="12" r="1.5" />
+      <line x1="12" y1="2" x2="12" y2="5" />
+      <line x1="12" y1="19" x2="12" y2="22" />
+      <line x1="2" y1="12" x2="5" y2="12" />
+      <line x1="19" y1="12" x2="22" y2="12" />
+    </svg>
+  ),
+  Provenance: ({ active }: { active?: boolean; className?: string }) => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 2v4" />
+      <path d="m4.93 4.93 2.83 2.83" />
+      <path d="M2 12h4" />
+      <path d="m4.93 19.07 2.83-2.83" />
+      <path d="M12 18v4" />
+      <path d="m19.07 19.07-2.83-2.83" />
+      <path d="M18 12h4" />
+      <path d="m19.07 4.93-2.83 2.83" />
+      <circle cx="12" cy="12" r="4" fill={active ? "currentColor" : "none"} fillOpacity={0.2} />
+    </svg>
+  ),
+  ApiKeys: ({ active }: { active?: boolean; className?: string }) => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="7.5" cy="15.5" r="5.5" fill={active ? "currentColor" : "none"} fillOpacity={0.15} />
+      <path d="m21 2-9.6 9.6" />
+      <path d="m15.5 7.5 3 3L22 7l-1.5-1.5 1.5-1.5-1-1" />
+    </svg>
+  ),
+  DataProviders: ({ active }: { active?: boolean; className?: string }) => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="3" width="20" height="7" rx="2" fill={active ? "currentColor" : "none"} fillOpacity={0.15} />
+      <rect x="2" y="14" width="20" height="7" rx="2" fill={active ? "currentColor" : "none"} fillOpacity={0.15} />
+      <line x1="6" y1="6.5" x2="6.01" y2="6.5" strokeWidth="2.5" />
+      <line x1="6" y1="17.5" x2="6.01" y2="17.5" strokeWidth="2.5" />
+      <line x1="10" y1="6.5" x2="18" y2="6.5" />
+      <line x1="10" y1="17.5" x2="18" y2="17.5" />
+    </svg>
+  ),
+  IaaaAdmin: ({ active }: { active?: boolean; className?: string }) => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" fill={active ? "currentColor" : "none"} fillOpacity={0.15} />
+      <circle cx="12" cy="11" r="2.5" />
+      <path d="M12 13.5V17" strokeWidth="2" />
+    </svg>
+  ),
+  AdminAccess: ({ active }: { active?: boolean; className?: string }) => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" fill={active ? "currentColor" : "none"} fillOpacity={0.15} />
+      <path d="M19 11v6" strokeWidth="2.5" />
+      <path d="M16 14h6" strokeWidth="2.5" />
+    </svg>
+  ),
+
   Settings: () => (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="12" cy="12" r="3" />
@@ -489,6 +566,14 @@ export const NAV_ICON_MAP: Record<string, NavItemDef["icon"]> = {
   Reports: NavIcons.Reports,
   Review: NavIcons.Review,
   TrackRecord: NavIcons.TrackRecord,
+  Banners: NavIcons.Banners,
+  Tasks: NavIcons.Tasks,
+  ScheduledGoals: NavIcons.ScheduledGoals,
+  Provenance: NavIcons.Provenance,
+  ApiKeys: NavIcons.ApiKeys,
+  DataProviders: NavIcons.DataProviders,
+  IaaaAdmin: NavIcons.IaaaAdmin,
+  AdminAccess: NavIcons.AdminAccess,
 };
 
 /** Nav items, derived from the route table in display order (#1804 S1). */
