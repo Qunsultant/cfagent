@@ -120,9 +120,11 @@ jobs:
           # Enroll the PR with mergeMethod: REBASE via GraphQL so that GitHub
           # immediately adds it to the merge queue (or enables auto-merge with REBASE)
           # instead of defaulting to SQUASH (which is disallowed by ruleset and stalls PRs).
-          PR_INFO=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '{node_id: .node_id, method: .auto_merge_request.merge_method}' 2>/dev/null || true)
+          # Note: REST API returns .auto_merge.merge_method (lowercase e.g. "squash")
+          # while GraphQL returns autoMergeRequest.mergeMethod (uppercase e.g. "SQUASH").
+          PR_INFO=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '{node_id: .node_id, method: (.auto_merge.merge_method // .auto_merge_request.merge_method // empty)}' 2>/dev/null || true)
           PR_NODE_ID=$(echo "$PR_INFO" | jq -r '.node_id // empty' 2>/dev/null || true)
-          CURRENT_METHOD=$(echo "$PR_INFO" | jq -r '.method // empty' 2>/dev/null || true)
+          CURRENT_METHOD=$(echo "$PR_INFO" | jq -r '.method // empty' 2>/dev/null | tr '[:lower:]' '[:upper:]' || true)
           if [ -n "$PR_NODE_ID" ]; then
             if [ -n "$CURRENT_METHOD" ] && [ "$CURRENT_METHOD" != "REBASE" ]; then
               echo "Auto-merge currently configured with $CURRENT_METHOD; resetting to REBASE..."
@@ -145,7 +147,7 @@ jobs:
                   }
                 }
               }
-            ' || gh pr merge --auto --rebase --repo "$GITHUB_REPOSITORY" "$PR_NUMBER" || true
+            ' || gh pr merge "$PR_NUMBER" --auto --repo "$GITHUB_REPOSITORY" || true
           else
-            gh pr merge --auto --rebase --repo "$GITHUB_REPOSITORY" "$PR_NUMBER" || true
+            gh pr merge "$PR_NUMBER" --auto --repo "$GITHUB_REPOSITORY" || true
           fi
