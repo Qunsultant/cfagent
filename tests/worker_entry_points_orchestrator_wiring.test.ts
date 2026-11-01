@@ -114,8 +114,10 @@ import type { Env, AgentScheduleItem } from "../src/types";
 import type { NLQSchedulingPort } from "../src/agents/nlq";
 
 /** The worker's established owner instance for session-less entry points
- *  (the same instance name the scheduled() handler forwards to). */
-const OWNER_INSTANCE = "default_trader";
+ *  (the same instance name the scheduled() handler forwards to).
+ *  Renamed default_trader -> shared_orchestrator by issue #2681; the
+ *  test's premise (email forwards to the owner instance) is unchanged. */
+const OWNER_INSTANCE = "shared_orchestrator";
 const VOICE_LOGIN = "voice-user-815";
 
 // ---------------------------------------------------------------------------
