@@ -457,6 +457,34 @@
   cursor: pointer;
 }
 
+/* Skip link (#2673 slice 6): visually hidden until keyboard focus,
+   then a fixed token-styled link above all other chrome (Toast sits
+   at 10000). The target region carries tabIndex={-1} so focus moves. */
+.ui-skip-link {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+.ui-skip-link:focus-visible {
+  position: fixed;
+  top: var(--space-2);
+  left: var(--space-2);
+  width: auto;
+  height: auto;
+  overflow: visible;
+  clip: auto;
+  white-space: normal;
+  z-index: 10001;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-popover);
+}
+
 
 /* ---------- Modal ---------- */
 /* Chrome (backdrop, dialog surface, header, close button) comes from the

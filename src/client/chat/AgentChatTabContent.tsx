@@ -721,6 +721,7 @@ export function AgentChatTabContent({
       <form className="chat-input-bar" onSubmit={handleSendChat}>
         <TextInput
           type="text"
+          aria-label="Ask the agent"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder={
