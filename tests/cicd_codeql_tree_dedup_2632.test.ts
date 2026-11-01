@@ -26,7 +26,7 @@ describe("CodeQL Tree Deduplication & Dual Workflow_Run Auto-Enqueue (#2632)", (
     expect(codeqlYml).toContain("tree_already_analyzed");
     expect(codeqlYml).toContain("24 hours ago");
     expect(codeqlYml).toContain("GITHUB_STEP_SUMMARY");
-    expect(codeqlYml).toContain("steps.dedup.outputs.tree_already_analyzed != 'true'");
+    expect(codeqlYml).toContain("steps.docs.outputs.tree_already_analyzed != 'true'");
   });
 
   it("skips CodeQL initialization, autobuild, and analysis when tree is already analyzed (#2632)", () => {
