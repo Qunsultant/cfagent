@@ -164,6 +164,22 @@ export function allocateRedemption(
   return allocations;
 }
 
+export interface ReferralAttribution {
+  /** The referred user; the attribution row key (one attribution per referred user, ever). */
+  referredUserId: string;
+  referrerUserId: string;
+  tenantId: string;
+  /**
+   * How the attribution was recorded. `operator` = the operator attribution
+   * route (#2657). `code` is reserved for future referral-code surfaces
+   * (e.g. #2468 Phase 4 marketing) that write through this store; no route
+   * stamps `code` today, and the operator route always stamps `operator`
+   * regardless of client input.
+   */
+  source: "operator" | "code";
+  createdAtMs: number;
+}
+
 export interface ReferralCreditPort {
   /** The stored operator rule row (seeded by migration 0015). */
   getRules(): Promise<ReferralRules>;
@@ -173,6 +189,23 @@ export interface ReferralCreditPort {
     vestingDelayMs: unknown;
     redemptionScope: unknown;
   }): Promise<ReferralRules>;
+  /**
+   * Record a referrer→referred attribution (#2657). Set-once: replaying the
+   * SAME referrer for the same referred user returns the existing row;
+   * a DIFFERENT referrer for an already-attributed user throws (never a
+   * silent overwrite); self-referral throws; blank ids/tenant throw.
+   * Attribution alone earns nothing — it only lets the automatic earn
+   * trigger (submit path) know whom to credit on the referred user's
+   * first paid run. It is deliberately separate from the earning rows:
+   * attribution is the link, the earning is the money.
+   */
+  recordAttribution(input: {
+    referrerUserId: string;
+    referredUserId: string;
+    tenantId: string;
+  }): Promise<ReferralAttribution>;
+  /** The attribution row for one referred user, or null when unattributed. */
+  getAttribution(referredUserId: string): Promise<ReferralAttribution | null>;
   /**
    * Record the first-paid-run earning for a referred user.
    * Idempotent: re-recording the same referred user returns the
