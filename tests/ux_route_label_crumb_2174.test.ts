@@ -96,17 +96,19 @@ describe("IA: labels, crumbs, shortLabels are collision-free (#2174)", () => {
     expect(byId.get("options-flows")!.crumb).toBe("Options Flows");
     expect(byId.get("payments")!.navEntry!.label).toBe("Payments");
     expect(byId.get("payments")!.navEntry!.shortLabel).toBe("Payments");
-    expect(byId.get("screeners")!.navEntry!.label).toBe("Screeners");
-    expect(byId.get("screeners")!.navEntry!.shortLabel).toBe("Screeners");
+    expect(byId.get("screeners")!.navEntry!.label).toBe("Stock Screener");
+    expect(byId.get("screeners")!.navEntry!.shortLabel).toBe("Stocks");
   });
 
   it("pins the nav-group taxonomy decision", () => {
     const byId = new Map(ROUTES.map((r) => [r.id, r]));
     // Hub children share the screeners group; options-flows deliberately
     // keeps its own — flow analysis is not screening.
-    for (const id of ["options", "reports", "scanner", "schedules", "screeners"]) {
-      expect(byId.get(id)!.navGroup).toBe("screeners");
-    }
-    expect(byId.get("options-flows")!.navGroup).toBe("options-flows");
+    expect(byId.get("options")!.navGroup).toBe("options-screener");
+    expect(byId.get("scanner")!.navGroup).toBe("options-screener");
+    expect(byId.get("options-flows")!.navGroup).toBe("options-screener");
+    expect(byId.get("reports")!.navGroup).toBe("workflow-runs");
+    expect(byId.get("schedules")!.navGroup).toBe("platform-admin");
+    expect(byId.get("screeners")!.navGroup).toBe("screeners");
   });
 });

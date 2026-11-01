@@ -60,7 +60,7 @@ describe("nav derivation", () => {
       expect(item.label.length).toBeGreaterThan(0);
       expect(item.shortLabel.length).toBeGreaterThan(0);
       expect(item.description.length).toBeGreaterThan(0);
-      expect(["Execution", "Intelligence", "Playbooks", "Platform"]).toContain(item.category);
+      expect(["Execution", "Intelligence", "Playbooks", "Platform", "Billing"]).toContain(item.category);
       expect(typeof item.icon).toBe("function");
     }
   });
@@ -69,7 +69,7 @@ describe("nav derivation", () => {
     const byId = new Map(NAVIGATION_ITEMS.map((i) => [i.id, i]));
     expect(byId.get("autopilot")!.label).toBe("Autopilot Control");
     expect(byId.get("order")!.label).toBe("Fast Order Ticket");
-    expect(byId.get("screeners")!.label).toBe("Screeners");
+    expect(byId.get("screeners")!.label).toBe("Stock Screener");
     expect(byId.get("social")!.label).toBe("Social Posting");
     expect(byId.get("approvals")!.label).toBe("Approvals");
     expect(byId.get("docs")!.label).toBe("Docs & Reports");
@@ -79,12 +79,12 @@ describe("nav derivation", () => {
     expect(isTabActive("autopilot", "autopilot")).toBe(true);
     expect(isTabActive("autopilot", "trading")).toBe(true);
     expect(isTabActive("order", "orders")).toBe(true);
-    expect(isTabActive("screeners", "scanner")).toBe(true);
-    expect(isTabActive("screeners", "options")).toBe(true);
+    expect(isTabActive("options-screener", "scanner")).toBe(true);
+    expect(isTabActive("options-screener", "options")).toBe(true);
     expect(isTabActive("options-screener", "options-screener")).toBe(true);
     expect(isTabActive("platform-admin", "platform-admin")).toBe(true);
-    expect(isTabActive("screeners", "reports")).toBe(true);
-    expect(isTabActive("screeners", "schedules")).toBe(true);
+    expect(isTabActive("workflow-runs", "reports")).toBe(true);
+    expect(isTabActive("platform-admin", "schedules")).toBe(true);
     expect(isTabActive("portfolio", "portfolio")).toBe(true);
     expect(isTabActive("portfolio", "ledger")).toBe(false);
     expect(isTabActive("screeners", "social")).toBe(false);

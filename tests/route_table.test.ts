@@ -75,7 +75,7 @@ describe("route table", () => {
       expect(r.crumb.length).toBeGreaterThan(0);
       expect(r.description.length).toBeGreaterThan(0);
       expect(r.icon.length).toBeGreaterThan(0);
-      expect(["Execution", "Intelligence", "Playbooks", "Platform"]).toContain(r.category);
+      expect(["Execution", "Intelligence", "Playbooks", "Platform", "Billing"]).toContain(r.category);
     }
   });
 
@@ -139,11 +139,11 @@ describe("route table", () => {
     expect(getNavGroup("order")).toBe("order");
     expect(getNavGroup("orders")).toBe("order");
     expect(getNavGroup("screeners")).toBe("screeners");
-    expect(getNavGroup("scanner")).toBe("screeners");
-    expect(getNavGroup("reports")).toBe("screeners");
-    expect(getNavGroup("docs")).toBe("docs");
-    expect(getNavGroup("schedules")).toBe("screeners");
-    expect(getNavGroup("options")).toBe("screeners");
+    expect(getNavGroup("scanner")).toBe("options-screener");
+    expect(getNavGroup("reports")).toBe("workflow-runs");
+    expect(getNavGroup("docs")).toBe("workflow-runs");
+    expect(getNavGroup("schedules")).toBe("platform-admin");
+    expect(getNavGroup("options")).toBe("options-screener");
     expect(getNavGroup("bogus")).toBe("autopilot");
   });
 });

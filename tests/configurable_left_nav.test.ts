@@ -22,7 +22,7 @@ describe("navConfig - externalized navigation and sub-menu configuration", () =>
     // The fifth group is the Platform Admin drawer destination; the sixth is
     // the Sandbox demo-links destination. Both carry the "Platform" category
     // because they belong to that navigation family.
-    expect(categories).toEqual(["Execution", "Intelligence", "Playbooks", "Platform", "Platform", "Platform"]);
+    expect(categories).toEqual(["Execution", "Intelligence", "Playbooks", "Billing", "Platform", "Platform"]);
   });
 
   it("every section has a non-empty title and at least one menu item", () => {
@@ -32,23 +32,23 @@ describe("navConfig - externalized navigation and sub-menu configuration", () =>
     }
   });
 
-  it("configures Screeners with sub-menu options for stocks and options", () => {
+  it("configures Screeners with sub-menu options for stocks and research", () => {
     const screenersItem = findNavItemConfig(DEFAULT_LEFT_NAV_CONFIG, "screeners");
     expect(screenersItem).toBeDefined();
-    expect(screenersItem?.label).toBe("Screeners");
+    expect(screenersItem?.label).toBe("Stock Screener");
     expect(screenersItem?.subItems).toBeDefined();
     expect(screenersItem!.subItems!.length).toBeGreaterThanOrEqual(2);
 
     const subIds = screenersItem!.subItems!.map((sub) => sub.id);
     // Must include choices for stocks and options
-    expect(subIds).toContain("screeners"); // Stock screener
-    expect(subIds).toContain("options");   // Options screener
-
+    expect(subIds).toContain("screeners");
+    expect(subIds).toContain("research"); // Stock screener
+    
     const stockChoice = screenersItem!.subItems!.find((sub) => sub.id === "screeners");
     expect(stockChoice?.label).toMatch(/stock/i);
 
-    const optionsChoice = screenersItem!.subItems!.find((sub) => sub.id === "options");
-    expect(optionsChoice?.label).toMatch(/option/i);
+    const researchChoice = screenersItem!.subItems!.find((sub) => sub.id === "research");
+    expect(researchChoice?.label).toMatch(/research/i);
   });
 
   it("isNavItemOrSubItemActive correctly detects parent and child active states", () => {
@@ -56,7 +56,7 @@ describe("navConfig - externalized navigation and sub-menu configuration", () =>
     // Direct match
     expect(isNavItemOrSubItemActive(screenersItem, "screeners")).toBe(true);
     // Sub-item match (options)
-    expect(isNavItemOrSubItemActive(screenersItem, "options")).toBe(true);
+    expect(isNavItemOrSubItemActive(screenersItem, "research")).toBe(true);
     // Unrelated tab
     expect(isNavItemOrSubItemActive(screenersItem, "portfolio")).toBe(false);
   });
