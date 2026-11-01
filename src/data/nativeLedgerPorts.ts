@@ -197,7 +197,8 @@ export function buildNativeChargeTransaction(
  * One credit row per run (enforced by the port's dedupe);
  * a second issue for the same run returns the existing row
  * as a duplicate, never a second row. A credit is value
- * granted, never a cash refund.
+ * granted, not a cash refund (cash refunds are
+ * operator-initiated only, #2204 / #2549).
  */
 export function buildNativeCreditTransaction(
   input: NativeLedgerRowInput,
@@ -222,7 +223,7 @@ export function buildNativeCreditTransaction(
     proofSignature: "none (replacement-run credit, no payment)",
     note:
       `One-time replacement-run credit for failed paid run ${input.runRequestId} ` +
-      `(${input.family}); redeemable for one future run of the same family; never a cash refund.`,
+      `(${input.family}); redeemable for one future run of the same family; this credit is not a cash refund.`,
     tenantId: input.tenantId,
     family: input.family,
     runRequestId: input.runRequestId,

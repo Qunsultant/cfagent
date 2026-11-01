@@ -25,7 +25,7 @@ import { CheckoutPanel } from "../src/client/CheckoutPanel";
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
 const FAILURE_POLICY =
-  "One charge per run-request. Shards, stages, retries and re-serves are free. Automated refunds are not available in v1; a paid run that fails gets a one-time replacement-run credit.";
+  "One charge per run-request. Shards, stages, retries and re-serves are free. If a paid run fails, its automatic compensation is a one-time replacement-run credit — a cash refund is never issued automatically. Cash refunds exist only as an operator-initiated action, granted only with operator approval.";
 
 const apiState = vi.hoisted(() => ({
   monetizationEnabled: true,

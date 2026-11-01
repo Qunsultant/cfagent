@@ -698,8 +698,9 @@ function paymentOutcomeStatus(output: unknown): string | null {
  * The honest terminal note for a payment run that ended
  * without starting the screen. Wording states what happened
  * and what did NOT happen (no screen, no confirmed charge);
- * the failure-compensation rule (a one-time replacement-run
- * credit, never a cash refund) is named where it applies.
+ * the failure-compensation rule (automatic compensation is a
+ * one-time replacement-run credit, never an automatic cash
+ * refund, #2549) is named where it applies.
  */
 function paymentTerminalNote(outcome: string | null, instanceStatus: string, runRequestId: string): string {
   switch (outcome) {
@@ -712,7 +713,7 @@ function paymentTerminalNote(outcome: string | null, instanceStatus: string, run
     case "expired":
       return `payment run ${runRequestId} expired before payment completed — no screen was started and no charge was confirmed`;
     case "screener_failed_credit_issued":
-      return `payment run ${runRequestId} was covered/paid but the screener failed to start — a one-time replacement-run credit was issued for it (never a cash refund)`;
+      return `payment run ${runRequestId} was covered/paid but the screener failed to start — a one-time replacement-run credit was issued for it (automatic compensation is a credit, not a cash refund)`;
     default:
       return `payment run ${runRequestId} ended (workflow status "${instanceStatus}"${outcome ? `, outcome "${outcome}"` : ""}) without starting the screen`;
   }

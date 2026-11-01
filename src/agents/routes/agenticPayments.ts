@@ -1989,6 +1989,25 @@ export async function handleAgenticPaymentsRoutes(
           sourceResolver: createSubscriptionPaymentResolver(subs),
           subscriptionStore: subs,
           commercialStore: store,
+          // Issue #2549: the XOR guard's failure-credit lookup
+          // reads BOTH ledgers — a credit row in either one
+          // (native D1 rows, or the cfpay mas_transactions rows
+          // the payment workflow writes fail-loud) blocks a cash
+          // refund for the same run.
+          failureCreditLookup: {
+            hasFailureCredit: async (runRequestId: string) => {
+              const native = createNativeLedgerAdapter(ctx.env as { AGENT_DB?: unknown });
+              if (native) {
+                await ensureNativeLedgerSchema(native.db);
+                if (await native.findRow(runRequestId, "credit")) return true;
+              }
+              const sessionId = cfpayLedgerSessionId(runRequestId);
+              return ctx
+                .getOrm()
+                .transactions.findMany()
+                .some((t) => t.sessionId === sessionId && t.action === "credit" && isCfpayLedgerRow(t));
+            },
+          },
           gateway,
           postJournal: (entries) =>
             postJournalBestEffort(async () => {
@@ -2037,7 +2056,7 @@ export async function handleAgenticPaymentsRoutes(
           ? 409
           : /Gateway refund failed/.test(message)
             ? 502
-            : /not resolvable|non-refundable|window expired|not allowed|exceeds|not configured|flag is OFF/.test(message)
+            : /not resolvable|non-refundable|window expired|not allowed|exceeds|not configured|flag is OFF|already received its automatic replacement-run credit|failure-credit lookup/.test(message)
               ? 422
               : 500;
       return Response.json({ error: message }, { status });

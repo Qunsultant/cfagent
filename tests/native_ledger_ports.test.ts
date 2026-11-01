@@ -153,12 +153,12 @@ describe("native ledger builders (#2192)", () => {
     ).toBe("run-1");
   });
 
-  it("credit row is a replacement grant, never a cash refund, never micropayment", () => {
+  it("credit row is a replacement grant, not a cash refund, never micropayment (#2549 wording)", () => {
     const row = buildNativeCreditTransaction(chargeInput({ kind: "credit" }));
     expect(row.action).toBe("credit");
     expect(row.gatewayRef).toBe("credit:run-1");
     expect(row.proofSignature).toContain("no payment");
-    expect(row.note).toContain("never a cash refund");
+    expect(row.note).toContain("this credit is not a cash refund");
   });
 
   it("no builder ever produces a micropayment row", () => {

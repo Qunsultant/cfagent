@@ -1139,7 +1139,7 @@ export const MESH_WORKFLOWS: MeshWorkflowEntry[] = [
     starters: [
       "src/services/paymentWorkflowSubmission.ts seam (paid screen submissions from routes; scheduled runs via src/services/scheduledTasks.ts)",
     ],
-    role: "Per-run-request payment gate for paid screens: testnet, feature-flagged, default OFF; one charge per run-request, failure compensates with a replacement-run credit, never a cash refund.",
+    role: "Per-run-request payment gate for paid screens: testnet, feature-flagged, default OFF; one charge per run-request; automatic failure compensation is a replacement-run credit; cash refunds are operator-initiated only (#2549).",
   },
   {
     className: "CrossDomainSagaWorkflow",

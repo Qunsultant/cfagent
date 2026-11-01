@@ -561,7 +561,7 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
             <>
               <Notice tone="info">
                 Subscriptions do not auto-renew: renewal is repurchase before expiry. Canceling keeps your access
-                through the end of the current period; no cash refund is issued.
+                through the end of the current period; canceling does not itself issue a cash refund.
               </Notice>
               {subStatus && (
                 <p>
