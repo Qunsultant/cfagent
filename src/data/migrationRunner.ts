@@ -1278,6 +1278,30 @@ ALTER TABLE agent_price_catalogue ADD COLUMN approved_at_ms INTEGER;
 `,
 };
 
+/**
+ * Migration 0029 — durable payment-proof redemptions (#2548,
+ * from the #2013 review). One row per redemption key; the
+ * PRIMARY KEY is the cross-instance replay backstop for the
+ * native gate's proof redemption (the in-memory byClaim maps
+ * remain a per-instance fast path). Numbering: 0027 is #2547's
+ * price-catalogue approval migration and 0028 was taken by
+ * #2594's tenant-providers migration, both landed ahead of
+ * this slice.
+ */
+export const MIGRATION_0029_PROOF_REDEMPTIONS: DataMigration = {
+  version: 29,
+  name: "0029_proof_redemptions",
+  sql: `
+CREATE TABLE IF NOT EXISTS agent_payment_proof_redemptions (
+  redemption_key TEXT PRIMARY KEY,
+  run_request_id TEXT NOT NULL,
+  rail TEXT NOT NULL,
+  payer TEXT,
+  redeemed_at_ms INTEGER NOT NULL
+);
+`,
+};
+
 export const ALL_MIGRATIONS: DataMigration[] = [
   MIGRATION_0001_AGENT_GOVERNANCE,
   MIGRATION_0002_AGENT_CHAINS_SCHEDULES,
@@ -1307,6 +1331,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [
   MIGRATION_0026_TENANT_AUTO_REFRESH,
   MIGRATION_0027_PRICE_CATALOGUE_APPROVAL,
   MIGRATION_0028_TENANT_PROVIDERS,
+  MIGRATION_0029_PROOF_REDEMPTIONS,
 ];
 
 function splitStatements(sqlText: string): string[] {
