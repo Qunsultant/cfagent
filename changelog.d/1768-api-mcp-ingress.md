@@ -1,0 +1,14 @@
+### Added
+
+- **Unified API/MCP ingress middleware v1 (#1768):** a single home for the ingress guards previously spread across `handleFetch` — `src/api/ingress.ts` (uniform throttle, identity-header guard, webhook header lookup, WS burst cap, JSON-RPC codes), `src/api/wsRoutes.ts` (table-driven WebSocket upgrade dispatch), `src/api/ingressSchemas.ts` (zod shape validation for the NLQ webhook body), `src/api/openApiDrift.ts` (runtime OpenAPI structural + route-coverage validation), and the `API_INGRESS_MODE` switch (`legacy` | `unified`, default `legacy`, run > session > user > global env > built-in, invalid fails closed to `legacy`) in `src/config/apiIngressModes.ts`. Production value is an owner action; this slice never sets it.
+
+### Fixed
+
+- **Throttle-bucket evasion via caller identity headers (#1768):** the `handleFetch` throttle keyed on caller-supplied `x-user-login` first, so any unauthenticated caller could mint a fresh bucket per fake login and evade the NLQ webhook and memory-search throttles. Buckets are now keyed on the connecting IP, scoped per user only by a server-verified session login (memory search keeps per-user buckets; the NLQ webhook, which has no session, is IP-keyed). Same limits, same 429 shape.
+- **Unauthenticated quotes WS upgrades had no burst cap (#1768, F-40):** in `unified` mode, WS upgrades are capped at 60/60s per key (IP for quotes, IP + verified login for voice) via the uniform throttle; `legacy` mode keeps the current uncapped behavior. The quotes upgrade now also forwards with caller identity headers stripped (TickerAgent reads only the `x-quote-*` carriers, never `x-user-login`).
+- **Webhook signature header inconsistency (#1768, F-48):** the NLQ webhook now accepts `X-Signature-256`, `x-hub-signature-256`, and `x-signature-256` under the same secret and HMAC verification; a valid signature under any spelling verifies instead of 401ing on spelling alone.
+- **MCP params-shape errors (#1768, F-48):** a `tools/call` with a present-but-non-string `name` (and `resources/read` with a non-string `uri`) now answers `-32602` with a business message instead of falling through to the SDK's `-32603` schema dump. Tool execution errors themselves stay spec-shaped (`isError` in-result) — the guard covers params shape only.
+
+### Notes
+
+- **Verified already unified on current main, not rebuilt (#1768):** HMAC webhook gates (#140/#147), session-route spoofing fixes (#154), #1725 quote unification, the MCP SDK parity guard, and the PROD E*TRADE session preflight (`src/services/etradeAuthPreflight.ts` + scheduled-run guard) all exist on current main; the slice wires the remaining gaps and pins the verifications in `tests/api_ingress_1768.test.ts` instead of duplicating them. The full `handleFetch` router-table extraction, client-to-edge mTLS (F-42, P2/minor), and the `DOCS_PUBLIC_SURFACES` decision (open #1024) remain named follow-ups/exclusions per the issue body.

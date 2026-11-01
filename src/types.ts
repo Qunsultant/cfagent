@@ -371,6 +371,11 @@ export interface Env {
   // src/config/quoteModes.ts. This slice deliberately does NOT set
   // production values: production values are an owner action.
   // Rollback is unsetting the var and redeploying.
+  // #1768 (parent #1717): API_INGRESS_MODE: "legacy" | "unified"
+  // (built-in default "legacy"; unrecognized fails closed to
+  // "legacy"). Resolution lives in src/config/apiIngressModes.ts.
+  // Production value is an owner action; this slice never sets it.
+  API_INGRESS_MODE?: string;
   QUOTE_EXPIRY_MODE?: string;
   QUOTE_STREAM_PROVENANCE?: string;
   QUOTE_HTTP_PROVIDER_MODE?: string;
