@@ -90,8 +90,8 @@ export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copi
             size="sm"
             onClick={fetchReferrals}
             disabled={referralsLoading}
-          >
-            {referralsLoading ? "Refreshing…" : "🔄 Refresh"}
+           loading={referralsLoading}>
+            {"🔄 Refresh"}
           </Button>
         </div>
 
@@ -360,8 +360,8 @@ export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copi
                       type="submit"
                       variant="primary"
                       disabled={savingRef || !newRefTitle.trim() || !newRefUrl.trim()}
-                    >
-                      {savingRef ? "Publishing…" : "🚀 Publish Referral Link"}
+                     loading={savingRef}>
+                      {"🚀 Publish Referral Link"}
                     </Button>
                   </div>
                 </form>

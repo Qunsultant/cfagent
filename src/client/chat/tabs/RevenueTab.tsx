@@ -118,8 +118,8 @@ export function RevenueTab({adBannerConfig, ads, browseTable, catErrorMsg, catSu
               fetchTables();
             }}
             disabled={revenueLoading}
-          >
-            {revenueLoading ? "Refreshing…" : "🔄 Refresh Financials"}
+           loading={revenueLoading}>
+            {"🔄 Refresh Financials"}
           </Button>
         </div>
 
@@ -337,8 +337,8 @@ export function RevenueTab({adBannerConfig, ads, browseTable, catErrorMsg, catSu
                         type="submit"
                         variant="primary"
                         disabled={savingExtAd || !newExtTitle.trim() || !newExtUrl.trim()}
-                      >
-                        {savingExtAd ? "Activating Placement…" : "🚀 Activate Ad Network Unit"}
+                       loading={savingExtAd}>
+                        {"🚀 Activate Ad Network Unit"}
                       </Button>
                     </div>
                   </form>
@@ -422,8 +422,8 @@ export function RevenueTab({adBannerConfig, ads, browseTable, catErrorMsg, catSu
                         type="submit"
                         variant="primary"
                         disabled={savingCat || !newCatName.trim()}
-                      >
-                        {savingCat ? "Saving Category…" : "🏷️ Save Category"}
+                       loading={savingCat}>
+                        {"🏷️ Save Category"}
                       </Button>
                     </div>
                   </form>

@@ -225,8 +225,8 @@ export function CorpusTab({ onHealth }: SearchTabProps) {
       </p>
 
       <h3>Integrity</h3>
-      <Button type="button" onClick={() => void loadReport()} disabled={reportLoading}>
-        {reportLoading ? "Checking…" : "Refresh"}
+      <Button type="button" onClick={() => void loadReport()} disabled={reportLoading} loading={reportLoading}>
+        {"Refresh"}
       </Button>{" "}
       <Button
         type="button"
@@ -262,8 +262,8 @@ export function CorpusTab({ onHealth }: SearchTabProps) {
 
       <h3>Sync</h3>
       <p>The sync also runs weekly on the existing every-30-minutes tick; this button only triggers a run now.</p>
-      <Button type="button" onClick={() => void runSync()} disabled={syncLoading}>
-        {syncLoading ? "Syncing…" : "Run sync now"}
+      <Button type="button" onClick={() => void runSync()} disabled={syncLoading} loading={syncLoading}>
+        {"Run sync now"}
       </Button>
       {syncError && <p role="alert">{syncError}</p>}
       {syncResult && (
@@ -299,8 +299,8 @@ export function CorpusTab({ onHealth }: SearchTabProps) {
         <TextInput label="File name (optional)" value={fileName} onChange={(e) => setFileName(e.target.value)} placeholder="Defaults to category + hash prefix" />
         <FileInput id="corpus-file" label="File (required)" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
         {file && <p>Selected: {file.name}</p>}
-        <Button type="submit" variant="primary" disabled={uploadLoading || !title.trim() || !sourceUrl.trim() || !file}>
-          {uploadLoading ? "Uploading…" : "Upload"}
+        <Button type="submit" variant="primary" disabled={uploadLoading || !title.trim() || !sourceUrl.trim() || !file} loading={uploadLoading}>
+          {"Upload"}
         </Button>
       </form>
       {uploadError && <p role="alert">{uploadError}</p>}

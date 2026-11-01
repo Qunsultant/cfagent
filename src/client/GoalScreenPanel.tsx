@@ -662,8 +662,8 @@ export function GoalScreenPanel({ activeEnv, userLogin }: GoalScreenPanelProps) 
           <Checkbox checked={includeOptions} onChange={(e) => setIncludeOptions(e.target.checked)} />
           Options
         </label>
-        <Button type="submit" variant="primary" disabled={loading}>
-          {loading ? "Screening…" : "Run goal screen"}
+        <Button type="submit" variant="primary" disabled={loading} loading={loading}>
+          {"Run goal screen"}
         </Button>
       </form>
 
@@ -827,8 +827,8 @@ export function GoalScreenPanel({ activeEnv, userLogin }: GoalScreenPanelProps) 
           )}
           {stockHits.length > 0 && (
             <div style={{ marginTop: "1rem" }}>
-              <Button type="button" onClick={runBacktest} disabled={backtestLoading}>
-                {backtestLoading ? "Backtesting…" : `Backtest the ${stockHits.length} stock hit(s)`}
+              <Button type="button" onClick={runBacktest} disabled={backtestLoading} loading={backtestLoading}>
+                {`Backtest the ${stockHits.length} stock hit(s)`}
               </Button>
               {backtestError && <div className="options-error" role="alert">{backtestError}</div>}
               {backtest && (

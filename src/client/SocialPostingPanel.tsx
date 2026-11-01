@@ -199,8 +199,8 @@ export function SocialPostingPanel({ active = true }: { active?: boolean }) {
                   )}
                 </div>
                 <div>
-                  <Button variant="primary" disabled={!canSave} onClick={() => void handleSave()}>
-                    {busy === "save" ? "Saving…" : "Save brief"}
+                  <Button variant="primary" disabled={!canSave} onClick={() => void handleSave()} loading={busy === "save"}>
+                    {"Save brief"}
                   </Button>
                   {savedNote && <span className="ui-meta ui-success ui-ml-3">{savedNote}</span>}
                 </div>

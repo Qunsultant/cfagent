@@ -268,9 +268,7 @@ function NoViewOutcomeBody({ outcome }: { outcome: DiscoverySymbolOutcome }) {
               })}
             </div>
           ) : (
-            <p className="discovery-ranked-empty">
-              No structures ranked for this symbol under the stated constraints.
-            </p>
+            <EmptyState title="No structures ranked for this symbol under the stated constraints." />
           )}
 
           <p className="discovery-counts-line">
@@ -416,9 +414,7 @@ function OutcomeView({ outcome }: { outcome: DiscoverySymbolOutcome }) {
               })}
             </div>
           ) : (
-            <p className="discovery-ranked-empty">
-              No candidates ranked for this view — the pipeline found nothing that satisfied it.
-            </p>
+            <EmptyState title="No candidates ranked for this view — the pipeline found nothing that satisfied it." />
           )}
 
           <p className="discovery-counts-line">

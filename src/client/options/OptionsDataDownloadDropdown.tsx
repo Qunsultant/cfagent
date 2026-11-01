@@ -90,8 +90,8 @@ export function OptionsDataDownloadDropdown({
         onClick={() => setIsOpen(!isOpen)}
         disabled={downloading !== null}
         title={`Download raw and normalized options datasets for ${symbol.toUpperCase()}`}
-      >
-        {downloading ? "⏳ Downloading…" : `${label} ▾`}
+       loading={downloading !== null}>
+        {`${label} ▾`}
       </Button>
 
       {isOpen && (

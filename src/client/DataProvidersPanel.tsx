@@ -36,7 +36,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { Button, EmptyState, Notice, Spinner, TextInput } from "./components/ui";
+import { Button, EmptyState, Notice, Spinner, TextInput, useToast } from "./components/ui";
 import {
   fetchDataProviders,
   fmtCaptureBytes,
@@ -59,6 +59,15 @@ const ACTION_LABELS: Record<DataProviderActionName, string> = {
   deprovision: "Deprovision",
 };
 
+/** Past-tense labels for the success toast after an action lands. */
+const ACTION_PAST: Record<DataProviderActionName, string> = {
+  configure: "configured",
+  verify: "verified",
+  enable: "enabled",
+  disable: "disabled",
+  deprovision: "deprovisioned",
+};
+
 /** Plain-language labels for the E6 capture-derived health status. */
 const HEALTH_STATUS_LABELS: Record<DataProviderHealthStatus, string> = {
   healthy: "Healthy",
@@ -68,6 +77,7 @@ const HEALTH_STATUS_LABELS: Record<DataProviderHealthStatus, string> = {
 };
 
 export function DataProvidersPanel() {
+  const toast = useToast();
   const [providers, setProviders] = useState<DataProviderView[]>([]);
   const [routes, setRoutes] = useState<CapabilityRouteView[]>([]);
   const [loading, setLoading] = useState(true);
@@ -122,6 +132,7 @@ export function DataProvidersPanel() {
       setConfirmingDeprovisionId(null);
       setConfiguringId(null);
       await load();
+      toast.success(`Provider "${view.id}" ${ACTION_PAST[action]}.`);
     } catch (err: any) {
       // Keep the list as-is; the server's message is the explanation.
       setError(err?.message || `Failed to ${action} provider "${view.id}".`);

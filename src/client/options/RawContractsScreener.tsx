@@ -531,8 +531,8 @@ export function RawContractsScreener({
           />
         </div>
         <div className="options-form-footer" style={{ gridColumn: "1 / -1", display: "flex", justifyContent: "flex-end", gap: "var(--space-2)" }}>
-          <Button type="submit" disabled={loading} style={{ minWidth: "180px", fontWeight: 600 }}>
-            {loading ? "Scanning Chains…" : `⚡ Screen ${symbol || "Options"} Contracts`}
+          <Button type="submit" disabled={loading} style={{ minWidth: "180px", fontWeight: 600 }} loading={loading}>
+            {`⚡ Screen ${symbol || "Options"} Contracts`}
           </Button>
         </div>
       </form>
