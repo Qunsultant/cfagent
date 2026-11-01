@@ -272,9 +272,13 @@ const ORCH = "agents/orchestrator.ts";
  *  Issue #2681 adds the migration delegation + context
  *  pass-through in routeRequest (the class gains no logic);
  *  budgets re-measured on the merged tree: 3,084 lines /
- *  146,284 B, so lines rise to 3090 and bytes rise to 146_500. */
-const BUDGET_LINES = 3090;
-const BUDGET_BYTES = 146_500;
+ *  146,284 B, so lines rise to 3090 and bytes rise to 146_500.
+ *  Provider/broker slice 2 (#2598) adds the options feed gate
+ *  delegation handleOptionsProviderGateRoutes, re-measured on
+ *  the merged tree: 3,103 lines / 147,379 B, so budget lines
+ *  rise to 3110 and bytes rise to 147_500. */
+const BUDGET_LINES = 3110;
+const BUDGET_BYTES = 147_500;
 
 const count = (haystack: string, needle: string) =>
   haystack.split(needle).length - 1;

@@ -26,6 +26,12 @@ import {
 } from "./components/ui";
 import type { NavTabId } from "./components/NavigationMenu";
 import { isOptionsProductEnabled } from "./featureFlags";
+import {
+  useTenantProviders,
+  DATA_PROVIDER_OPTIONS,
+  BROKER_OPTIONS,
+  brokerUnavailableNotice,
+} from "./tenantProviders";
 
 export interface OptionsScreenerProduct {
   id: string;
@@ -126,11 +132,47 @@ export interface OptionsScreenerPageProps {
 }
 
 export function OptionsScreenerPage({ onSelectTab }: OptionsScreenerPageProps) {
+  // Provider/broker slice 2 (#2598): panel provenance — the page shows
+  // the tenant's server-resolved selections (slice 1's module; no second
+  // selector here) so a run's feed and broker surface are never a
+  // surprise. Capability enforcement stays server-side: the feed gate
+  // returns the coded FAILURE_DATA_PROVIDER_UNAVAILABLE response for a
+  // non-chain provider, and the broker notice below mirrors slice 1's
+  // AccountPanels / trading-hub notice for a non-etrade broker.
+  const [tenantProviders] = useTenantProviders();
+  const dataProviderLabel =
+    DATA_PROVIDER_OPTIONS.find((o) => o.id === tenantProviders.dataProviderId)?.label ??
+    tenantProviders.dataProviderId;
+  const brokerLabel =
+    BROKER_OPTIONS.find((o) => o.id === tenantProviders.brokerId)?.label ?? tenantProviders.brokerId;
   return (
     <PageShell
       title="Options Screener"
       scopeNote="Every options sub-product in one place. Each card links to the existing surface that hosts it — nothing here is a second copy."
     >
+      <PageSection
+        title="Provider selection"
+        description="The data provider feeding these surfaces and the broker whose surfaces render, from Settings. Changing a selection writes the server row; this page only displays it."
+      >
+        <Card padding="md">
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "var(--space-2, 0.5rem)",
+            }}
+          >
+            <p style={{ margin: 0 }}>
+              Data provider: {dataProviderLabel} · Broker: {brokerLabel}
+            </p>
+            {tenantProviders.brokerId !== "etrade" && (
+              <Notice tone="warning" title="[FAILURE_BROKER_UNAVAILABLE] Broker surface unavailable">
+                {brokerUnavailableNotice(tenantProviders.brokerId, brokerLabel)}
+              </Notice>
+            )}
+          </div>
+        </Card>
+      </PageSection>
       <PageSection
         title="Sub-products"
         description="A disabled sub-product shows OFF and its button is disabled; its server route also returns 404 FEATURE_DISABLED. An absent flag inherits the parent options flag, so nothing here is silently disabled by this page."

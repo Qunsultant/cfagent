@@ -137,6 +137,7 @@ import {
   handleEtradeBrokerActivityRoutes,
 } from "./routes/etradeBroker";
 import { handleEtradeOptionsRoutes } from "./routes/etradeOptions";
+import { handleOptionsProviderGateRoutes } from "./routes/optionsProviderGate";
 import { resolveBrokerEnvironmentFromSettings } from "./routes/brokerEnvironment";
 import { handleWatchlistsRoutes } from "./routes/watchlists";
 import { handleBrokerGateRoutes } from "./routes/brokerGate";
@@ -2913,6 +2914,20 @@ export class OrchestratorAgent extends PortThink {
       cancelSchedule: (id) => this.cancelSchedule(id),
     });
     if (etradeBrokerActivityResponse) return etradeBrokerActivityResponse;
+
+    // Provider/broker slice 2 (issue #2598): the options feed gate
+    // delegation (src/agents/routes/optionsProviderGate.ts). Invoked at
+    // this exact position in the sequential matching sequence
+    // (immediately before the E*TRADE options delegation); a non-null
+    // return matched. It returns the coded
+    // FAILURE_DATA_PROVIDER_UNAVAILABLE response for live-chain options
+    // paths when the tenant's selected data provider does not declare
+    // optionsChains, and null otherwise — including every stored-run
+    // read, the catalog, and config, which read no live chain.
+    const optionsProviderGateResponse = await handleOptionsProviderGateRoutes(request, url, path, sessionId, {
+      env: this.env,
+    });
+    if (optionsProviderGateResponse) return optionsProviderGateResponse;
 
     // Issue #359-11: E*TRADE options routes (chains / expire-dates / scans /
     // iv-history / profiles / strategy) and the trading/options routes
