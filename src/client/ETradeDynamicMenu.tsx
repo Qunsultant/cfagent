@@ -436,6 +436,11 @@ export function SettingsMenu({
   const isConnected = !!oauthStatus?.authenticated;
   const accountValue = account?.netAccountValue;
 
+  const selectedBrokerId = tenantProviders.brokerId ?? "etrade";
+  const selectedBroker = BROKER_OPTIONS.find((b) => b.id === selectedBrokerId);
+  const selectedBrokerLabel = selectedBroker ? selectedBroker.label : (selectedBrokerId === "alpaca" ? "Alpaca" : "E*TRADE");
+  const brokerIcon = selectedBrokerId === "alpaca" ? "🦙" : "⚡";
+
   const handleMouseEnter = () => {
     if (hoverTimerRef.current) {
       clearTimeout(hoverTimerRef.current);
@@ -614,17 +619,23 @@ export function SettingsMenu({
           {/* Header */}
           <div className="etrade-panel-header">
             <div className="etrade-panel-brand">
-              <span className="brand-icon">⚡</span>
+              <span className="brand-icon">{brokerIcon}</span>
               <div className="etrade-brand-text-row">
-                <h5>E*TRADE Brokerage API</h5>
+                <h5>{`${selectedBrokerLabel} Brokerage API`}</h5>
                 <span className={`brand-status-text ${isConnected ? "connected" : "disconnected"}`}>
                   {isConnected ? "● OAuth Session Active" : "○ Offline / Not Connected"}
                 </span>
               </div>
             </div>
             <div className="etrade-panel-header-actions">
-              <span className={`etrade-env-badge ${isLive ? "prod" : "test"}`}>
-                {isLive ? "PROD (LIVE)" : "TEST (SANDBOX)"}
+              <span
+                className={`etrade-env-badge ${
+                  !isConnected ? "offline" : isLive ? "prod" : "test"
+                }`}
+              >
+                {!isConnected
+                  ? `${selectedBrokerLabel} · OFFLINE`
+                  : `${selectedBrokerLabel} · ${isLive ? "PROD" : "TEST"}`}
               </span>
             </div>
           </div>
@@ -665,61 +676,85 @@ export function SettingsMenu({
             </Button>
           </div>
 
-          {/* Environment Switcher ("PROD...") */}
-          <div className="etrade-panel-section">
+          {/* Broker Selection (First Choice) */}
+          <div className="etrade-panel-section broker-select-section">
             <div className="section-label-row">
-              <span>Environment</span>
-              <small>{isLive ? "Live execution" : "Paper sandbox testing"}</small>
+              <span>Broker</span>
+              <small>{selectedBrokerLabel} selected</small>
             </div>
-            <div className="etrade-env-switch-bar">
-              <Button
-                type="button"
-                className={!isLive ? "active" : ""}
-                onClick={() => onSwitchEnv("TEST")}
-              >
-                🧪 TEST (Sandbox)
-              </Button>
-              <Button
-                type="button"
-                className={isLive ? "active" : ""}
-                onClick={() => onSwitchEnv("PROD")}
-              >
-                🔴 PROD (Live)
-              </Button>
-            </div>
+            <PillGroup
+              className="settings-pref-btn-group broker-pill-group"
+              ariaLabel="Broker"
+              size="sm"
+              variant="default"
+              options={BROKER_OPTIONS.map((o) => ({
+                id: o.id,
+                label: o.label,
+                icon: o.id === "alpaca" ? "🦙" : "⚡",
+                tooltip: `Select ${o.label} as active broker`,
+              }))}
+              value={selectedBrokerId}
+              onChange={(v) => handleSetTenantProviders({ ...tenantProviders, brokerId: v })}
+            />
           </div>
 
-          {/* Connection Actions & Diagnostics */}
+          {/* Environment & Connection (Harmonized Single Line) */}
           <div className="etrade-panel-section">
             <div className="section-label-row">
-              <span>Connection &amp; Diagnostics</span>
+              <span>Environment &amp; Connection</span>
+              <small>{isLive ? "Live execution" : "Paper sandbox"}</small>
             </div>
-            <div className="etrade-actions-grid">
+            <div className="etrade-controls-single-line">
               <Button
                 type="button"
-                className="btn-menu-action sync"
+                size="sm"
+                className={`btn-env-mini ${!isLive ? "active" : ""}`}
+                onClick={() => onSwitchEnv("TEST")}
+                title="Switch to paper sandbox environment"
+              >
+                🧪 TEST
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                className={`btn-env-mini ${isLive ? "active" : ""}`}
+                onClick={() => onSwitchEnv("PROD")}
+                title="Switch to live production environment"
+              >
+                🔴 PROD
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                className="btn-action-mini sync"
                 disabled={isDiagnosticsRunning}
                 onClick={onRunDiagnostics}
-               loading={isDiagnosticsRunning}>
-                {"🔄 Test & Sync API"}
+                loading={isDiagnosticsRunning}
+                title="Test latency and sync API diagnostics"
+              >
+                🔄 Sync
               </Button>
               {isConnected ? (
                 <>
                   {oauthStatus?.renewable && (
                     <Button
                       type="button"
-                      className="btn-menu-action renew"
+                      size="sm"
+                      className="btn-action-mini renew"
                       disabled={oauthLoading}
                       onClick={onRenewOAuth}
+                      title="Renew token"
                     >
-                      🔑 Renew Token
+                      🔑 Renew
                     </Button>
                   )}
                   <Button
                     type="button"
-                    className="btn-menu-action disconnect"
+                    size="sm"
+                    className="btn-action-mini disconnect"
                     disabled={oauthLoading}
                     onClick={onRevokeOAuth}
+                    title="Disconnect active brokerage session"
                   >
                     🔌 Disconnect
                   </Button>
@@ -727,11 +762,14 @@ export function SettingsMenu({
               ) : (
                 <Button
                   type="button"
-                  className="btn-menu-action connect"
+                  size="sm"
+                  className="btn-action-mini connect"
                   disabled={oauthLoading}
                   onClick={onStartOAuth}
-                 loading={oauthLoading}>
-                  {"⚡ Connect E*TRADE"}
+                  loading={oauthLoading}
+                  title={`Connect to ${selectedBrokerLabel}`}
+                >
+                  {`${brokerIcon} Connect ${selectedBrokerLabel}`}
                 </Button>
               )}
             </div>
@@ -761,9 +799,9 @@ export function SettingsMenu({
                 type="button"
                 className="btn-menu-tuning"
                 onClick={handleOpenTuning}
-                title="Configure ETAPI trade engine and safety controls"
+                title="Configure trade engine and safety controls"
               >
-                ⚙️ ETAPI Engine Tuning
+                ⚙️ Engine Tuning
               </Button>
 
               <div className="menu-download-row">
@@ -924,18 +962,7 @@ export function SettingsMenu({
                     onChange={(v) => handleSetTenantProviders({ ...tenantProviders, dataProviderId: v })}
                   />
               </div>
-              <div className="settings-pref-row">
-                <span className="pref-row-lbl">Broker:</span>
-                <PillGroup
-                    className="settings-pref-btn-group"
-                    ariaLabel="Broker"
-                    size="sm"
-                    variant="default"
-                    options={BROKER_OPTIONS.map((o) => ({ id: o.id, label: o.label, tooltip: `Use ${o.label} as the broker` }))}
-                    value={tenantProviders.brokerId}
-                    onChange={(v) => handleSetTenantProviders({ ...tenantProviders, brokerId: v })}
-                  />
-              </div>
+
               {providerSaveError && (
                 <div className="settings-pref-row">
                   <span className="pref-row-lbl">{providerSaveError}</span>
@@ -990,18 +1017,19 @@ export function SettingsMenu({
             </div>
           </div>
 
-          {/* Ticker configuration (#2689: moved off the tape bar). */}
+          {/* Ticker configuration (#2689: moved off the tape bar, #2720: single-line compact controls) */}
           <div className="etrade-panel-section">
             <div className="section-label-row">
               <span>Ticker</span>
               <small>Quote source &amp; tape set</small>
             </div>
-            <div className="settings-prefs-stack">
-              <div className="settings-pref-row">
-                <span className="pref-row-lbl">Quote source:</span>
+            <div className="ticker-controls-single-line">
+              <div className="ticker-ctrl-item">
+                <span className="ticker-ctrl-lbl">Quote:</span>
                 <Select
                   aria-label="Quote source"
                   size="sm"
+                  className="ticker-select-compact"
                   value={quoteSource}
                   onChange={(e) => handleQuoteSourceChange(e.target.value as "auto" | "alpaca" | "yahoo")}
                 >
@@ -1010,11 +1038,12 @@ export function SettingsMenu({
                   <option value="yahoo">Yahoo</option>
                 </Select>
               </div>
-              <div className="settings-pref-row">
-                <span className="pref-row-lbl">Tape set:</span>
+              <div className="ticker-ctrl-item">
+                <span className="ticker-ctrl-lbl">Tape:</span>
                 <Select
                   aria-label="Tape set"
                   size="sm"
+                  className="ticker-select-compact"
                   value={tapeSelectionValue}
                   onChange={(e) => handleTapeSetChange(e.target.value)}
                 >
@@ -1032,22 +1061,25 @@ export function SettingsMenu({
                 </Select>
               </div>
               {tapeSelection.kind === "custom" && (
-                <div className="settings-pref-row">
-                  <span className="pref-row-lbl">Custom symbols:</span>
+                <div className="settings-pref-row ticker-ctrl-item custom-symbols-item">
                   <TextInput
                     aria-label="Custom symbols"
                     size="sm"
+                    className="ticker-custom-input"
                     value={tapeCustomDraft}
                     onChange={(e) => setTapeCustomDraft(e.target.value)}
                     placeholder="NVDA, AAPL"
+                    title="Custom symbols (comma separated)"
                   />
                   <Button
                     size="sm"
+                    className="btn-ticker-apply"
                     onClick={() => {
                       const next: TapeSetSelection = { kind: "custom", text: tapeCustomDraft };
                       setTapeSelection(next);
                       saveTapeSelection(next);
                     }}
+                    title="Apply custom symbol list"
                   >
                     Apply
                   </Button>
