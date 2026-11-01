@@ -227,8 +227,8 @@ export function ScheduledGoalsPanel({ embedded = false }: ScheduledGoalsPanelPro
         <TextInput style={inputStyle} placeholder="budget in cents (e.g. 500)" value={form.budgetCents} onChange={(e) => setForm({ ...form, budgetCents: e.target.value })} />
         <TextInput placeholder="timeZone (IANA, e.g. UTC)" value={form.timeZone} onChange={(e) => setForm({ ...form, timeZone: e.target.value })} />
         <div>
-          <Button disabled={busy === "add"} onClick={() => void submitGoal()}>
-            {busy === "add" ? "Adding…" : "Add goal"}
+          <Button disabled={busy === "add"} onClick={() => void submitGoal()} loading={busy === "add"}>
+            {"Add goal"}
           </Button>
         </div>
       </div>
@@ -257,8 +257,8 @@ export function ScheduledGoalsPanel({ embedded = false }: ScheduledGoalsPanelPro
         </div>
       )}
       <div>
-        <Button disabled={!!busy} onClick={() => void submitPreset()}>
-          {busy === "preset" ? "Adding…" : "Add SessionStore resource goals"}
+        <Button disabled={!!busy} onClick={() => void submitPreset()} loading={busy === "preset"}>
+          {"Add SessionStore resource goals"}
         </Button>
       </div>
 

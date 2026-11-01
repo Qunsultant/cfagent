@@ -199,8 +199,8 @@ export function ScheduledOptionsRunForm({ activeEnv, userLogin }: ScheduledOptio
         />
 
         <div>
-          <Button type="submit" variant="primary" disabled={running}>
-            {running ? "Running…" : "Run options screen now"}
+          <Button type="submit" variant="primary" disabled={running} loading={running}>
+            {"Run options screen now"}
           </Button>
         </div>
       </form>

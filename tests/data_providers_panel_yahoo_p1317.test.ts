@@ -13,6 +13,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { DataProvidersPanel } from "../src/client/DataProvidersPanel";
+import { ToastProvider } from "../src/client/components/ui/Toast";
 import type {
   CapabilityRouteView,
   DataProviderView,
@@ -110,7 +111,7 @@ describe("panel: yahoo enabled + health renders with no panel change (#1317)", (
     document.body.appendChild(container);
     root = createRoot(container);
     await act(async () => {
-      root.render(React.createElement(DataProvidersPanel));
+      root.render(React.createElement(ToastProvider, null, React.createElement(DataProvidersPanel)));
     });
     await waitForText("Yahoo Finance");
     const item = container.querySelector('[data-provider-id="yahoo"]');

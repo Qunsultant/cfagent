@@ -51,6 +51,7 @@ import {
 } from "../src/agents/routes/dataProviders";
 import type { Env } from "../src/types";
 import { DataProvidersPanel } from "../src/client/DataProvidersPanel";
+import { ToastProvider } from "../src/client/components/ui/Toast";
 import {
   fmtCaptureBytes,
   fmtDataProviderTime,
@@ -549,7 +550,7 @@ async function renderPanel() {
   document.body.appendChild(container);
   root = createRoot(container);
   await act(async () => {
-    root.render(React.createElement(DataProvidersPanel));
+    root.render(React.createElement(ToastProvider, null, React.createElement(DataProvidersPanel)));
   });
   await flush(60);
 }

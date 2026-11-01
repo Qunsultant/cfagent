@@ -1011,7 +1011,7 @@ export function ScreenersHub({
               </div>
             </div>
             <div className="options-form-footer">
-              <Button type="submit" variant="primary" disabled={loading || !endpoint}>{loading ? "Screening…" : "Run stock screen"}</Button>
+              <Button type="submit" variant="primary" disabled={loading || !endpoint} loading={loading}>{"Run stock screen"}</Button>
             </div>
           </form>
 

@@ -350,10 +350,8 @@ export function ScheduleFormModal(props: ScheduleFormModalProps) {
                   type="submit"
                   variant="primary"
                   disabled={submitting}
-                >
-                  {submitting
-                    ? "Saving Schedule…"
-                    : editingScheduleId
+                 loading={submitting}>
+                  {editingScheduleId
                     ? "✓ Save Updated Schedule"
                     : "✓ Register Durable Schedule"}
                 </Button>

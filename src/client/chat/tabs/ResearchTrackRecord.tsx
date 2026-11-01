@@ -90,7 +90,7 @@ export function TrackRecordView(props: { data: TrackRecordData }) {
         ]}
         rows={d.byStrategy}
         rowKey={(s) => s.key}
-        empty={<Notice tone="info">No strategies recorded yet.</Notice>}
+        empty={<EmptyState title="No strategies recorded yet." />}
       />
 
       <h4>By period</h4>
@@ -104,7 +104,7 @@ export function TrackRecordView(props: { data: TrackRecordData }) {
         ]}
         rows={d.byPeriod}
         rowKey={(s) => s.key}
-        empty={<Notice tone="info">No periods recorded yet.</Notice>}
+        empty={<EmptyState title="No periods recorded yet." />}
       />
 
       <h4>Published ideas vs outcomes</h4>

@@ -86,8 +86,8 @@ export function SemanticSearchTab({ pendingQuery, onHealth, onSearch }: SearchTa
         }}
       >
         <TextInput label="Query" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="e.g. weekly options" />
-        <Button type="submit" variant="primary" disabled={loading || !query.trim()}>
-          {loading ? "Searching…" : "Search"}
+        <Button type="submit" variant="primary" disabled={loading || !query.trim()} loading={loading}>
+          {"Search"}
         </Button>
       </form>
       <Button type="button" onClick={() => downloadTextFile("semantic-search-results.json", buildJson(lastResult), "application/json")} disabled={!lastResult} title="Download current results as JSON">

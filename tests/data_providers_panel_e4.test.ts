@@ -29,6 +29,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { DataProvidersPanel } from "../src/client/DataProvidersPanel";
+import { ToastProvider } from "../src/client/components/ui/Toast";
 import {
   providerActions,
   providerDisplayName,
@@ -183,7 +184,7 @@ async function renderPanel() {
   document.body.appendChild(container);
   root = createRoot(container);
   await act(async () => {
-    root.render(React.createElement(DataProvidersPanel));
+    root.render(React.createElement(ToastProvider, null, React.createElement(DataProvidersPanel)));
   });
   await flush(60);
 }

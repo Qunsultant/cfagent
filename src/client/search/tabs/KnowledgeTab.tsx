@@ -111,8 +111,8 @@ export function KnowledgeTab({ pendingQuery, onHealth, onSearch }: SearchTabProp
             </option>
           ))}
         </Select>
-        <Button type="submit" variant="primary" disabled={loading || !query.trim()}>
-          {loading ? "Searching…" : "Search"}
+        <Button type="submit" variant="primary" disabled={loading || !query.trim()} loading={loading}>
+          {"Search"}
         </Button>
       </form>
       <Button type="button" onClick={() => downloadTextFile("knowledge-results.json", buildJson(lastResult), "application/json")} disabled={!lastResult} title="Download current results as JSON">

@@ -37,6 +37,7 @@ import { FieldShell } from "./components/ui/Field";
 import { TextInput } from "./components/ui/TextInput";
 import { Select } from "./components/ui/Select";
 import { Button } from "./components/ui/Button";
+import { EmptyState } from "./components/ui/EmptyState";
 
 export type RsiBand = "any" | "oversold" | "overbought" | "neutral";
 export type MomentumKind =
@@ -291,7 +292,7 @@ export function StockCriteriaPanel({ criteria, onChange, lastSentFilters }: Stoc
       ])}
       <h4>Last run&apos;s criteria</h4>
       {lastSentFilters === null ? (
-        <p>No run yet — the criteria above apply to the next run.</p>
+        <EmptyState title="No run yet — the criteria above apply to the next run." />
       ) : (
         <ul>
           {viewRows.map((row) => (

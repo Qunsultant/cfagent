@@ -129,25 +129,25 @@ export function ResearchReportActions({ title, query, sheets, userLogin }: Resea
     <section className="research-report-actions" aria-label={`${title} export and delivery`}>
       <h3>Export and share this research</h3>
       <div className="research-report-controls">
-        <Button type="button" disabled={Boolean(busy) || !rowsAvailable} onClick={() => void download()}>
-          {busy === "download" ? "Preparing…" : "Download .xlsx"}
+        <Button type="button" disabled={Boolean(busy) || !rowsAvailable} onClick={() => void download()} loading={busy === "download"}>
+          {"Download .xlsx"}
         </Button>
         <TextInput label="Email recipient (workbook or NLQ response)" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" />
-        <Button type="button" disabled={Boolean(busy) || !rowsAvailable || !email.trim()} onClick={() => void sendEmail()}>
-          {busy === "email" ? "Sending…" : "Send email"}
+        <Button type="button" disabled={Boolean(busy) || !rowsAvailable || !email.trim()} onClick={() => void sendEmail()} loading={busy === "email"}>
+          {"Send email"}
         </Button>
       </div>
       <TextInput label="Submit the same research question to Slack or voice" multiline value={nlq} onChange={(event) => setNlq(event.target.value)} rows={2} />
       <div className="research-report-controls">
         <TextInput label="Slack channel ID" value={slackChannel} onChange={(event) => setSlackChannel(event.target.value)} placeholder="C0123456789" />
-        <Button type="button" disabled={Boolean(busy) || !nlq.trim() || !slackChannel.trim()} onClick={() => void sendSlack()}>
-          {busy === "slack" ? "Sending…" : "Submit to Slack"}
+        <Button type="button" disabled={Boolean(busy) || !nlq.trim() || !slackChannel.trim()} onClick={() => void sendSlack()} loading={busy === "slack"}>
+          {"Submit to Slack"}
         </Button>
-        <Button type="button" disabled={Boolean(busy) || !nlq.trim()} onClick={() => void askVoice()}>
-          {busy === "voice" ? "Sending…" : "Ask voice agent"}
+        <Button type="button" disabled={Boolean(busy) || !nlq.trim()} onClick={() => void askVoice()} loading={busy === "voice"}>
+          {"Ask voice agent"}
         </Button>
-        <Button type="button" disabled={Boolean(busy) || !rowsAvailable} onClick={() => void publishWebhook()}>
-          {busy === "webhook" ? "Sending…" : "Publish recommendations"}
+        <Button type="button" disabled={Boolean(busy) || !rowsAvailable} onClick={() => void publishWebhook()} loading={busy === "webhook"}>
+          {"Publish recommendations"}
         </Button>
       </div>
       {status && <p className="research-report-status" role="status">{status}</p>}

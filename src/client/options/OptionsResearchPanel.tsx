@@ -658,8 +658,8 @@ function StrategyCard({
             </Button>
           )}
           {chain && (
-            <Button type="button" disabled={chain.refreshing} onClick={() => void chain.refresh()}>
-              {chain.refreshing ? "Refreshing…" : "↻ Refresh option prices"}
+            <Button type="button" disabled={chain.refreshing} onClick={() => void chain.refresh()} loading={chain.refreshing}>
+              {"↻ Refresh option prices"}
             </Button>
           )}
         </div>
@@ -1279,8 +1279,8 @@ export function OptionsResearchPanel({ activeEnv, userLogin, onPreviewTrade, onJ
           onChange={(event) => setNlqQuoteAgeSeconds(event.target.value)}
           placeholder="No limit"
         />
-        <Button type="submit" disabled={!nlqQuery.trim() || nlqLoading}>
-          {nlqLoading ? "Running…" : "Run options screen"}
+        <Button type="submit" disabled={!nlqQuery.trim() || nlqLoading} loading={nlqLoading}>
+          {"Run options screen"}
         </Button>
       </form>
       {nlqError && <p className="options-error" role="alert">{nlqError}</p>}
@@ -1458,17 +1458,17 @@ export function OptionsResearchPanel({ activeEnv, userLogin, onPreviewTrade, onJ
               Buttons unlock once you enter: {[!symbol.trim() && "Underlying", !targetPrice && "Target price", allowedStrategies.length === 0 && "at least one strategy"].filter(Boolean).join(", ")}.
             </p>
           )}
-          <Button type="submit" disabled={loading || !canRun}>
-            {loading ? "Evaluating candidates…" : "Rank research candidates"}
+          <Button type="submit" disabled={loading || !canRun} loading={loading}>
+            {"Rank research candidates"}
           </Button>
-          <Button type="button" disabled={loading || !canRun} onClick={() => void run("best")}>
-            {loading ? "Evaluating…" : "Pick best trade"}
+          <Button type="button" disabled={loading || !canRun} onClick={() => void run("best")} loading={loading}>
+            {"Pick best trade"}
           </Button>
-          <Button type="button" disabled={loading || !canRun} onClick={() => void run("compare")}>
-            {loading ? "Comparing…" : "Compare Quant vs AI"}
+          <Button type="button" disabled={loading || !canRun} onClick={() => void run("compare")} loading={loading}>
+            {"Compare Quant vs AI"}
           </Button>
-          <Button type="button" disabled={loading || !canRun} onClick={() => void runThreeWay()}>
-            {loading ? "Comparing…" : "Compare generators (LLM / Quant / Hybrid)"}
+          <Button type="button" disabled={loading || !canRun} onClick={() => void runThreeWay()} loading={loading}>
+            {"Compare generators (LLM / Quant / Hybrid)"}
           </Button>
         </div>
       </form>
