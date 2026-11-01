@@ -13,3 +13,4 @@
 Closes #2703
 
 Process documentation impact: None (client UI and navigation iconography refinement).
+
