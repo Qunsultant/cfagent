@@ -434,9 +434,11 @@ export function PaymentWorkflowAssurance({ userLogin }: { userLogin?: string }) 
           Price for the selected family (proposed, not approved):{" "}
           <strong>${PROPOSED_SEED_PRICES[cfg.family].toFixed(2)}</strong> per
           run-request — never per stage, shard, leg, retry, or re-serve.
-          A paid run that fails gets a one-time replacement-run credit,
-          never a cash refund (cfpay cannot refund; refund capability is
-          deferred, see issue 2024).
+          A paid run that fails gets a one-time replacement-run credit
+          as its automatic compensation — never an automatic cash
+          refund. Cash refunds are operator-initiated and
+          operator-approved only (the refund path of issue 2204,
+          reconciled in issue 2549).
         </p>
       </PageSection>
 

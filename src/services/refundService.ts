@@ -32,6 +32,17 @@
  *   best-effort journal post, and the executed mark. A journal or
  *   entitlement failure never un-moves money that already moved:
  *   both are loud-logged and recorded, and execution still marks.
+ * - compensation XOR (#2549, owner decision 2026-10-31 — both
+ *   mechanisms stand, one per failure): the automatic failure
+ *   compensation for a paid run is a one-time replacement-run
+ *   credit; this service is the operator-initiated cash path and
+ *   never fires automatically. A pay-per-run execution therefore
+ *   consults the injected failure-credit lookup BEFORE the
+ *   gateway call: a run that already received its failure credit
+ *   is refused (credit XOR refund for the same failure), and a
+ *   pay-per-run execution with no lookup wired is refused rather
+ *   than unchecked. A lookup failure also refuses — no money
+ *   moves on an unverifiable compensation state.
  */
 import type { CommercialStore } from "../data/commercialPorts";
 import type { JournalEntryInput } from "../data/journalPorts";
@@ -48,6 +59,16 @@ import {
   type RefundStore,
 } from "../data/refundPorts";
 import type { SubscriptionStore } from "../data/subscriptionPorts";
+
+/**
+ * Issue #2549: reads whether the automatic replacement-run
+ * credit was already issued for a run (the payment ledgers'
+ * credit rows are the record). Injected so the service stays
+ * port-first; the route wires both ledgers, tests stub it.
+ */
+export interface FailureCreditLookup {
+  hasFailureCredit(runRequestId: string): Promise<boolean>;
+}
 
 /** The gateway surface the service needs: Stripe refund by payment-intent id. */
 export interface RefundGatewayExecutor {
@@ -248,6 +269,15 @@ export async function applyRefundEntitlements(
     subscriptionStore?: SubscriptionStore;
     commercialStore?: CommercialStore;
     sourceResolver?: RefundPaymentSourceResolver;
+    /**
+     * Issue #2549: for a pay-per-run refund, whether the run's
+     * automatic failure credit was issued — executeRefund always
+     * resolves this through the XOR guard before calling here
+     * (an issued credit refuses execution, so an executed refund
+     * records "no"); a direct caller that did not check records
+     * "unchecked" rather than claiming a fact it never read.
+     */
+    failureCreditIssued?: boolean;
   },
   record: RefundRecord,
   policy: RefundPolicy,
@@ -255,7 +285,13 @@ export async function applyRefundEntitlements(
 ): Promise<string> {
   let base: string;
   if (record.kind === "pay_per_run") {
-    base = "none:run_already_delivered";
+    const creditFact =
+      deps.failureCreditIssued === undefined
+        ? "unchecked"
+        : deps.failureCreditIssued
+          ? "yes"
+          : "no";
+    base = `none:run_already_delivered;failure_credit_issued:${creditFact}`;
   } else {
     let subId = record.subscriptionId;
     if (!subId && deps.sourceResolver) {
@@ -341,6 +377,8 @@ export async function executeRefund(
     commercialStore?: CommercialStore;
     gateway: RefundGatewayExecutor;
     postJournal?: (entries: JournalEntryInput[]) => Promise<void>;
+    /** Issue #2549: required for pay-per-run execution (XOR guard). */
+    failureCreditLookup?: FailureCreditLookup;
     monetizationEnabled: boolean;
     nowMs?: number;
   },
@@ -380,6 +418,29 @@ export async function executeRefund(
   if (!paymentIntentId) {
     throw new Error(refundNotResolvableMessage(record.originalPaymentRef));
   }
+  // Issue #2549 — compensation XOR at the money gate: a
+  // pay-per-run run that already received its automatic
+  // replacement-run credit must not also be cash-refunded for
+  // the same failure. Checked after payment-intent resolution
+  // and before the gateway call, so a refusal never moves money;
+  // an unwired or failing lookup also refuses (fail closed).
+  let failureCreditIssued = false;
+  if (record.kind === "pay_per_run") {
+    if (!deps.failureCreditLookup) {
+      throw new Error(
+        "Pay-per-run refund execution requires a failure-credit lookup (issue #2549): " +
+          "execution is refused rather than risk double compensation.",
+      );
+    }
+    failureCreditIssued = await deps.failureCreditLookup.hasFailureCredit(record.originalPaymentRef);
+    if (failureCreditIssued) {
+      throw new Error(
+        `Run ${record.originalPaymentRef} already received its automatic replacement-run credit ` +
+          `for this failure; a cash refund on top would double-compensate the same failure ` +
+          `(credit XOR refund per failure, issue #2549). Refund refused.`,
+      );
+    }
+  }
   const result = await deps.gateway.executeRefund({
     transactionId: record.id,
     amount: record.amountUSD,
@@ -399,6 +460,7 @@ export async function executeRefund(
         subscriptionStore: deps.subscriptionStore,
         commercialStore: deps.commercialStore,
         sourceResolver: deps.sourceResolver,
+        failureCreditIssued,
       },
       record,
       policy,

@@ -183,6 +183,7 @@ export const PROPOSED_SEED_POLICY: Omit<RefundPolicy, "updatedAtMs"> = {
  */
 export const REFUND_POLICY_COPY =
   "Refunds are available within 30 days of payment and require operator approval. " +
+  "Refunds are never automatic: the automatic compensation for a failed paid run is a replacement-run credit, and a run that already received that credit is not also cash-refunded. " +
   "Card payments may be refunded in full (partial refunds only if the operator policy allows them). " +
   "Crypto (x402) payments are non-refundable; if a crypto-paid run fails to start, a replacement-run credit applies instead. " +
   "A refunded subscription period ends immediately and its included runs are removed, unless the operator policy keeps access to the end of the period. " +

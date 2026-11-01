@@ -631,7 +631,8 @@ export interface TransactionRecord {
   id: string;
   sessionId: string;
   /** "credit" is a one-time replacement-run credit (#2019): value granted
-      for a failed paid run, never a cash refund. */
+      for a failed paid run; a credit is not a cash refund (cash refunds
+      are operator-initiated only, #2204 / #2549). */
   action: "charge" | "refund" | "invoice" | "payout" | "micropayment" | "agentic_payment" | "credit";
   amount: number;
   currency: string;

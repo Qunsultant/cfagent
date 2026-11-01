@@ -308,7 +308,9 @@ export class PaymentWorkflow extends ThinkWorkflow<
         // family join). A D1 failure must not turn a failed paid
         // run into a workflow error with no credit at all: the DO
         // row above is the operator's re-issue signal. No cash
-        // moves: cfpay cannot refund.
+        // moves here: this path issues the credit only (#2549 —
+        // cash refunds are the operator-approved refund service's
+        // path, never automatic, and never on top of this credit).
         if (!Number.isFinite(priceUSD) || priceUSD <= 0) {
           throw new Error(
             `Refusing to issue a failure credit for run ${runRequestId} without a positive price.`,

@@ -14,8 +14,11 @@
  * - gateway `stripe` — the cfpay checkout settles via Stripe fulfil
  *   (checkout.fulfil, called only after a verified Stripe webhook).
  * - action `charge` for a confirmed payment, `credit` for a one-time
- *   replacement-run credit. A credit is value granted, never a cash
- *   refund: cfpay cannot refund, and no code path here moves cash back.
+ *   replacement-run credit. A credit is value granted, not a cash
+ *   refund, and no code path in this ledger moves cash back (cash
+ *   refunds live in the operator-approved refund service, #2204,
+ *   are never issued automatically, and per #2549 never stack on
+ *   top of a credit for the same failure).
  * - proposerDid is the orchestrator: no workflow DID exists, and the
  *   orchestrator is both the ledger owner and the workflow's caller.
  *   The payer is `customer` (the verified user id).
@@ -139,7 +142,7 @@ export function buildCfpayCreditTransaction(
     proofSignature: "none (replacement-run credit, no payment)",
     note:
       `One-time replacement-run credit for failed paid run ${input.runRequestId} ` +
-      `(${input.family}); redeemable for one future run of the same family; never a cash refund.`,
+      `(${input.family}); redeemable for one future run of the same family; this credit is not a cash refund.`,
     createdAt: ts,
     updatedAt: ts,
   };

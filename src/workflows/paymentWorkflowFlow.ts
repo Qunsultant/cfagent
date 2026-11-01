@@ -48,7 +48,10 @@
  *      OrchestratorAgent creates ScreenerScreenWorkflow). If the
  *      screener starter throws after payment, issue one failure
  *      credit via the injected dep and return screener_failed_credit_issued.
- *      There is no cash refund in v1 (cfpay cannot refund, #2024 deferred).
+ *      This flow never issues a cash refund: the credit is the
+ *      automatic compensation (#2549). Cash refunds exist only as
+ *      an operator-initiated, operator-approved action in the
+ *      refund service (#2204), never from this flow.
  *
  * Params carry ids only — never credentials, never secrets, never a
  * payment card, never a cfpay key. Identity is the verified userLogin +

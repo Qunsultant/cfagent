@@ -52,7 +52,7 @@ describe("cfpay ledger builders (#2019)", () => {
     expect(tx.gatewayRef).toBe("run-1");
   });
 
-  it("credit row is a replacement grant, never a cash refund", () => {
+  it("credit row is a replacement grant, not a cash refund (#2549 wording)", () => {
     const tx = buildCfpayCreditTransaction({
       runRequestId: "run-1",
       userId: "u1",
@@ -66,7 +66,7 @@ describe("cfpay ledger builders (#2019)", () => {
     expect(tx.status).toBe("completed");
     expect(tx.gatewayRef).toBe("credit:run-1");
     expect(tx.note).toContain("replacement-run credit");
-    expect(tx.note).toContain("never a cash refund");
+    expect(tx.note).toContain("this credit is not a cash refund");
   });
 
   it("session predicate and per-kind lookup scope rows to one run", () => {

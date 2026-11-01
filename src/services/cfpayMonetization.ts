@@ -29,8 +29,12 @@
  * - Confirm paid only via cfpay checkout.status == fulfilled.
  *   Stripe return page is never proof. Replay of a tx hash / payment
  *   intent id is rejected. Identity, price, and network are fail-closed.
- * - cfpay cannot refund: a failed paid run gets a one-time replacement
- *   credit, disclosed before payment.
+ * - Failure compensation (#2549, both mechanisms stand): a failed
+ *   paid run gets a one-time replacement-run credit automatically,
+ *   disclosed before payment; this gate never issues a cash refund
+ *   automatically — cash refunds are operator-initiated only, via
+ *   the refund service (#2204), and never for a run that already
+ *   received its failure credit.
  * - Prices are operator data, not code (#2185, sub-issue of
  *   #2012): the gate reads them through the PriceCatalogue port
  *   (src/data/priceCataloguePorts.ts), seeded with PROPOSED
@@ -67,7 +71,7 @@ export const ALLOWED_NETWORKS = ["base-sepolia", "ethereum-sepolia", "base", "ei
  * remains testnet (base-sepolia).
  */
 export const PAYMENT_DISCLOSURE =
-  "One charge per run-request. Shards, stages, retries and re-serves are free. Automated refunds are not available in v1; a paid run that fails gets a one-time replacement-run credit. Mainnet payments are accepted on Base (MONETIZATION_NETWORK=base); testnets remain available. Settlement chain follows the cfpay deployment configuration.";
+  "One charge per run-request. Shards, stages, retries and re-serves are free. If a paid run fails, its automatic compensation is a one-time replacement-run credit — a cash refund is never issued automatically. Cash refunds exist only as an operator-initiated action, granted only with operator approval. Mainnet payments are accepted on Base (MONETIZATION_NETWORK=base); testnets remain available. Settlement chain follows the cfpay deployment configuration.";
 
 /**
  * @deprecated superseded by src/services/nativeMonetization.ts (NativeMonetizationGate + CheckoutPort).

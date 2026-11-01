@@ -93,11 +93,13 @@ export interface NativeMonetizationConfig {
 /**
  * The failure policy, disclosed BEFORE any payment (the native
  * successor to the cfpay gate's PAYMENT_DISCLOSURE: same one-charge
- * and replacement-credit terms, with the settlement-chain sentence
- * replaced — native settlement is Stripe/x402, not cfpay).
+ * terms and the same both-mechanisms failure policy, #2549 —
+ * automatic compensation is a replacement-run credit, cash
+ * refunds are operator-initiated only — with the settlement-chain
+ * sentence replaced: native settlement is Stripe/x402, not cfpay).
  */
 export const NATIVE_PAYMENT_DISCLOSURE =
-  "One charge per run-request. Shards, stages, retries and re-serves are free. Automated refunds are not available in v1; a paid run that fails gets a one-time replacement-run credit. A payment success page is never proof of payment; payment is confirmed only by re-reading provider state.";
+  "One charge per run-request. Shards, stages, retries and re-serves are free. If a paid run fails, its automatic compensation is a one-time replacement-run credit — a cash refund is never issued automatically. Cash refunds exist only as an operator-initiated action, granted only with operator approval. A payment success page is never proof of payment; payment is confirmed only by re-reading provider state.";
 
 export type NativeGateDecision =
   | { allowed: true; status: string; runRequestId: string; priceUSD: number; paidVia?: string }
