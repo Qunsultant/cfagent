@@ -13606,3 +13606,123 @@ body {
 .dual-feed-stat-val {
   color: var(--color-text-primary);
 }
+
+/* ── Platform Admin side panel (issue #2624) ──────────────────────────
+   The nine administration surfaces left the settings dropdown and now
+   live in this drawer. Tokens only; no inline layout styles. */
+.platform-admin-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.platform-admin-panel {
+  display: flex;
+  flex-direction: column;
+  width: min(52rem, 100vw);
+  height: 100%;
+  background: var(--color-surface-raised);
+  color: var(--color-text-primary);
+  border-left: 1px solid var(--color-border-medium);
+  box-shadow: var(--shadow-drawer);
+}
+
+.platform-admin-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.platform-admin-title-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.platform-admin-title {
+  margin: 0;
+  font-size: var(--font-size-title);
+  color: var(--color-text-primary);
+}
+
+.platform-admin-subtitle {
+  margin: 0;
+  font-size: var(--font-size-body);
+  color: var(--color-text-muted);
+}
+
+.platform-admin-close {
+  align-self: flex-start;
+}
+
+.platform-admin-body {
+  display: grid;
+  grid-template-columns: minmax(14rem, 18rem) 1fr;
+  flex: 1;
+  min-height: 0;
+}
+
+.platform-admin-menu {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border-right: 1px solid var(--color-border-subtle);
+  overflow-y: auto;
+}
+
+.platform-admin-menu-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  text-align: left;
+  border-radius: var(--radius-md);
+}
+
+.platform-admin-menu-item.active {
+  background: var(--color-surface-active);
+}
+
+.platform-admin-menu-label {
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.platform-admin-menu-desc {
+  font-size: var(--font-size-caption);
+  color: var(--color-text-dim);
+}
+
+.platform-admin-content {
+  min-width: 0;
+  padding: var(--space-4) var(--space-5);
+  overflow-y: auto;
+}
+
+.btn-open-platform-admin {
+  width: 100%;
+}
+
+@media (max-width: 720px) {
+  .platform-admin-body {
+    grid-template-columns: 1fr;
+  }
+
+  .platform-admin-menu {
+    flex-direction: row;
+    border-right: 0;
+    border-bottom: 1px solid var(--color-border-subtle);
+    overflow-x: auto;
+  }
+
+  .platform-admin-menu-desc {
+    display: none;
+  }
+}
