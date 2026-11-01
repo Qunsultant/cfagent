@@ -1,7 +1,8 @@
 /**
  * Shell derivation contract (#1804 S1, issue #1808): NAVIGATION_ITEMS,
  * isTabActive, and the visibility defaults all derive from the route
- * table, reproducing the historical nav exactly — same 26 items, same
+ * table, reproducing the historical nav exactly — same 27 items (26
+ * historical + options-screener from #2596), same
  * display order, same active-state groups.
  * (#2120 slice 1 added the Search nav entry, navOrder 23, last in
  * display order; pin updated in the same PR per the §7 pin rule.)
@@ -45,10 +46,11 @@ const EXPECTED_ORDER = [
   "search",
   "checkout",
   "agents",
+  "options-screener",
 ];
 
 describe("nav derivation", () => {
-  it("derives the 26 nav items in display order", () => {
+  it("derives the 27 nav items in display order", () => {
     expect(NAVIGATION_ITEMS.map((i) => i.id)).toEqual(EXPECTED_ORDER);
   });
 
@@ -78,6 +80,7 @@ describe("nav derivation", () => {
     expect(isTabActive("order", "orders")).toBe(true);
     expect(isTabActive("screeners", "scanner")).toBe(true);
     expect(isTabActive("screeners", "options")).toBe(true);
+    expect(isTabActive("options-screener", "options-screener")).toBe(true);
     expect(isTabActive("screeners", "reports")).toBe(true);
     expect(isTabActive("screeners", "schedules")).toBe(true);
     expect(isTabActive("portfolio", "portfolio")).toBe(true);

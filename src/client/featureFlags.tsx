@@ -22,8 +22,15 @@ export const TAB_TO_FEATURE_MAP: Partial<Record<NavTabId, FeatureFlag>> = {
   reports: "screener",
   docs: "screener",
   schedules: "schedules",
-  options: "screener",
-  "options-flows": "options_research",
+  // Issue #2596: the options tab and the new top-level Options
+  // Screener page are gated by the options parent flag, which
+  // inherits options_research when absent (server-side, in the
+  // adapters). The per-product flags gate their server routes and
+  // the Options Screener page cards, not these tabs — hub tabs host
+  // several products, so a tab map entry cannot express one product.
+  options: "options_screener",
+  "options-screener": "options_screener",
+  "options-flows": "options_flows",
   research: "screener",
   autopilot: "autopilot",
   trading: "autopilot",
@@ -60,6 +67,22 @@ export function isTabFeatureEnabled(
   const feature = TAB_TO_FEATURE_MAP[tabId];
   if (!feature) return true; // core tab (not gated)
   return flags[feature] === true;
+}
+
+/**
+ * Issue #2596: per-product flag check for the Options Screener page
+ * and for hub-internal surfaces (e.g. the LLM evaluate modal) that
+ * have no tab of their own. Strict, like isTabFeatureEnabled: the
+ * injected flag map must read true. The server is authoritative —
+ * its adapters resolve inheritance and fail closed — so this is a
+ * discovery/UX gate, and the product's server route is the
+ * enforcement point (404 FEATURE_DISABLED when disabled).
+ */
+export function isOptionsProductEnabled(
+  flag: string,
+  flags: Record<string, boolean> = getClientFeatureFlags()
+): boolean {
+  return flags[flag] === true;
 }
 
 /**

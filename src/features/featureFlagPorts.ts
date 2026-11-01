@@ -31,7 +31,26 @@ export type FeatureFlag =
   // "payment_assurance": default ON since issue #2054 (OFF only on
   // explicit disable); ON = assurance page visible (test-only, fake
   // seams).
-  | "payment_assurance";
+  | "payment_assurance"
+  // Issue #2596 (Options Screener product programme, slice 1):
+  // parent flag for the whole options product line. Its own parent
+  // is options_research (see OPTIONS_PRODUCT_FLAG_PARENTS), so an
+  // absent options_screener inherits options_research.
+  | "options_screener"
+  // Issue #2596: one kill-switch flag per options sub-product.
+  // An explicitly OFF flag always wins; an absent flag inherits
+  // options_screener (see OPTIONS_PRODUCT_FLAG_PARENTS). These are
+  // rollout/kill-switch flags, not behaviour changes.
+  | "options_contract_screen"
+  | "options_strategy_panel"
+  | "options_best_trade"
+  | "options_compare"
+  | "options_llm_ideas"
+  | "options_llm_evaluate"
+  | "options_discovery"
+  | "options_scheduled"
+  | "options_flows"
+  | "options_iv_history";
 
 export const ALL_FEATURE_FLAGS: readonly FeatureFlag[] = [
   "screener",
@@ -57,7 +76,54 @@ export const ALL_FEATURE_FLAGS: readonly FeatureFlag[] = [
   // Default is ON since issue #2054 (adapters); an explicit
   // disable still wins everywhere.
   "payment_assurance",
+  // Issue #2596: options product line (parent + per-product flags).
+  // Defaults are resolved by inheritance in the adapters, never here:
+  // an absent flag inherits its parent, an explicit OFF always wins.
+  "options_screener",
+  "options_contract_screen",
+  "options_strategy_panel",
+  "options_best_trade",
+  "options_compare",
+  "options_llm_ideas",
+  "options_llm_evaluate",
+  "options_discovery",
+  "options_scheduled",
+  "options_flows",
+  "options_iv_history",
 ] as const;
+
+/**
+ * Issue #2596: parent flag for each options product flag.
+ *
+ * Inheritance chain (resolved by every adapter, not by callers):
+ *   per-product flag (absent) -> options_screener (absent)
+ *   -> options_research -> the adapter's normal default for that flag.
+ * An explicitly set per-product flag (ON or OFF) never consults its
+ * parent, so an explicit OFF always wins even when the parent is ON.
+ * Stock screener products need no new flag: the stock screener and
+ * the strategy scanner are already gated by "screener".
+ */
+export const OPTIONS_PRODUCT_FLAG_PARENTS: Readonly<
+  Record<string, FeatureFlag>
+> = {
+  options_screener: "options_research",
+  options_contract_screen: "options_screener",
+  options_strategy_panel: "options_screener",
+  options_best_trade: "options_screener",
+  options_compare: "options_screener",
+  options_llm_ideas: "options_screener",
+  options_llm_evaluate: "options_screener",
+  options_discovery: "options_screener",
+  options_scheduled: "options_screener",
+  options_flows: "options_screener",
+  options_iv_history: "options_screener",
+} as const;
+
+export function getOptionsProductParentFlag(
+  flag: string
+): FeatureFlag | null {
+  return OPTIONS_PRODUCT_FLAG_PARENTS[flag] ?? null;
+}
 
 const KNOWN_FLAGS = new Set<string>(ALL_FEATURE_FLAGS);
 

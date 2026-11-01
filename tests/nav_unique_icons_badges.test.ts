@@ -2,8 +2,9 @@
  * Left-nav identity contract: every item is individually recognizable.
  *
  * Pins (owner request, 2026-10-29):
- *  - all 26 nav entries carry an icon and a badge (26 since #2469
- *    added the agents tab with its own icon key and badge);
+ *  - all 27 nav entries carry an icon and a badge (27 since #2596
+ *    added the options-screener tab with its own icon key and badge;
+ *    26 since #2469 added the agents tab);
  *  - no two nav entries share an icon (route key AND resolved component);
  *  - no two nav entries share a badge label (case-insensitive);
  *  - every badge carries a badge type, so the tone is deliberate rather
@@ -18,10 +19,10 @@ import { ROUTES, hasNavEntry } from "../src/client/routes";
 import { NAVIGATION_ITEMS } from "../src/client/components/NavigationMenu";
 
 const navRoutes = ROUTES.filter(hasNavEntry);
-const NAV_COUNT = 26;
+const NAV_COUNT = 27;
 
 describe("left-nav unique icons and badges", () => {
-  it("has the full 26-item nav", () => {
+  it("has the full 27-item nav", () => {
     expect(navRoutes).toHaveLength(NAV_COUNT);
     expect(NAVIGATION_ITEMS).toHaveLength(NAV_COUNT);
   });
@@ -60,5 +61,7 @@ describe("left-nav unique icons and badges", () => {
     expect(byId.get("checkout")!.navEntry.badge).toBe("Testnet");
     expect(byId.get("docs")!.icon).toBe("Docs");
     expect(byId.get("search")!.icon).toBe("Search");
+    expect(byId.get("options-screener")!.icon).toBe("Scanner");
+    expect(byId.get("options-screener")!.navEntry.badge).toBe("Options");
   });
 });

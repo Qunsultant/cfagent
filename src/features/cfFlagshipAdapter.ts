@@ -13,6 +13,7 @@ import {
   type FeatureEvaluationContext,
   type FeatureFlag,
   type FeatureFlagPort,
+  getOptionsProductParentFlag,
   isKnownFeatureFlag,
 } from "./featureFlagPorts";
 
@@ -43,9 +44,21 @@ export class CfFlagshipAdapter implements FeatureFlagPort {
       // an evaluation failure still fails closed below).
     const defaultValue = flag === "payment_assurance" || flag === "goal_workflow";
     try {
+      // Issue #2596: Flagship cannot distinguish an absent dashboard
+      // flag from an explicit one, so parent inheritance is expressed
+      // through the default value: the parent chain is evaluated
+      // first (recursively, so options_screener itself inherits
+      // options_research) and its result becomes this flag's
+      // default. A dashboard value still wins (getBooleanValue
+      // returns it, not the default), and an evaluation failure
+      // still fails closed below.
+      const productParent = getOptionsProductParentFlag(flag);
+      const inheritedDefault = productParent
+        ? await this.isEnabled(productParent, context)
+        : defaultValue;
       const result = await this.flags.getBooleanValue(
         flag,
-        defaultValue,
+        inheritedDefault,
         context as Record<string, unknown> | undefined
       );
       if (typeof result === "boolean") {

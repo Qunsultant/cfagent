@@ -13,6 +13,7 @@ import { FirstRunGate } from "./FirstRunGate";
 import { SettingsMenu, type ETradeDynamicMenuProps } from "./ETradeDynamicMenu";
 import { MarketDataResearchHub } from "./MarketDataResearchHub";
 import { OptionsFlowsHub } from "./options/flows";
+import { OptionsScreenerPage } from "./OptionsScreenerPage";
 import { WorkflowsHub } from "./WorkflowsHub";
 import { WorkflowRunsPanel } from "./WorkflowRunsPanel";
 import { AgentsPanel } from "./AgentsPanel";
@@ -1334,6 +1335,18 @@ export function Chat({ user }: { user: User }) {
               }}
             />
           </div>
+    ),
+    // Issue #2596, slice 1: the Options Screener's own page. It is
+    // not a retained trading-hub tab, so it lives in TAB_CONTENT
+    // like the other standalone pages; its cards link to the
+    // existing surfaces, they do not re-render them.
+    "options-screener": (
+      <OptionsScreenerPage
+        onSelectTab={(newTab) => {
+          handleSelectTab(newTab);
+          setTbdMenuOpen(false);
+        }}
+      />
     ),
     "payment-assurance": (
           <PaymentWorkflowAssurance userLogin={user.login} />

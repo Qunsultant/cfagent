@@ -87,6 +87,73 @@ export const SUB_MENU_CONFIGS: Record<string, NavSubMenuItemConfig[]> = {
       description: "Historical and implied volatility percentile ranks",
     },
   ],
+  /**
+   * Issue #2596, slice 1: the Options Screener's own sub-menu. Every
+   * entry is an existing tab id — nothing here is a new surface.
+   * The sub-products with no tab of their own (strategy panel,
+   * best-trade, compare, LLM ideas/evaluate, discovery, IV history
+   * as a hub section, scheduled runs, settings) are aggregated on
+   * the Options Screener page itself (OptionsScreenerPage), which
+   * links to the tab that hosts each one. The Screeners sub-menu
+   * above keeps its "options" entry: promotion adds a top-level
+   * home, it does not remove the historical path.
+   */
+  "options-screener": [
+    {
+      id: "options",
+      label: "Contract Screen",
+      shortLabel: "Contracts",
+      icon: "Options",
+      badge: "Contracts",
+      badgeType: "ai",
+      description: "Raw options contracts screener, hosted in the options hub",
+    },
+    {
+      id: "scanner",
+      label: "Strategy Scanner",
+      shortLabel: "Scanner",
+      icon: "Scanner",
+      badge: "Scan",
+      badgeType: "mcp",
+      description: "Pattern matching, technical breakout, and momentum scans",
+    },
+    {
+      id: "options-flows",
+      label: "Options Flows",
+      shortLabel: "Flows",
+      icon: "Options",
+      badge: "Flows",
+      badgeType: "live",
+      description: "Institutional block trades, sweeps, and dark pool prints",
+    },
+    {
+      id: "docs",
+      label: "Reports & Docs",
+      shortLabel: "Docs",
+      icon: "Screeners",
+      badge: "Docs",
+      badgeType: "pro",
+      description: "Generated options reports and run details for every run",
+    },
+    {
+      id: "workflow-runs",
+      label: "Workflow Runs",
+      shortLabel: "Runs",
+      icon: "Screeners",
+      badge: "Runs",
+      badgeType: "neutral",
+      description: "Every recorded workflow run with its stages and artifacts",
+    },
+    {
+      id: "schedules",
+      label: "Schedules",
+      shortLabel: "Schedules",
+      icon: "Screeners",
+      badge: "Schedules",
+      badgeType: "pro",
+      description: "Scheduled options runs and their schedules",
+    },
+  ],
 };
 
 const SECTION_METADATA: { category: RouteCategory; title: string; id: string }[] = [

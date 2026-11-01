@@ -17,6 +17,7 @@ import {
   type FeatureEvaluationContext,
   type FeatureFlag,
   type FeatureFlagPort,
+  getOptionsProductParentFlag,
   isKnownFeatureFlag,
 } from "./featureFlagPorts";
 
@@ -83,6 +84,19 @@ export class EnvFeatureFlagAdapter implements FeatureFlagPort {
       } else if (typeof legacyMonetization === "boolean") {
         return legacyMonetization;
       }
+    }
+
+    // Issue #2596: options product flags inherit their parent when
+    // neither the bulk map nor a direct variable set them explicitly
+    // (both explicit paths returned above). An explicit OFF/ON above
+    // therefore always wins; reaching here means "absent", so the
+    // parent evaluation — itself subject to its own parent chain —
+    // is the value. This runs before the generic configured/bare
+    // default below, so a configured environment with the parent ON
+    // does not silently disable an absent per-product flag.
+    const productParent = getOptionsProductParentFlag(flag);
+    if (productParent) {
+      return this.isEnabled(productParent, _context);
     }
 
     // Issue #2043: monetization is ALWAYS default-closed (OFF),
