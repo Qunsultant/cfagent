@@ -1828,7 +1828,7 @@ export function StrategyDiscoveryPanel({
 
               <div className="strat-input-pill strat-implied-move-info" title="Market Implied Move calculated from options market IV and days to expiration">
                 <span className="strat-pill-icon">📐</span>
-                <label>Implied Move:</label>
+                <span className="strat-pill-caption">Implied Move:</span>
                 <span className="strat-implied-val">
                   {quote ? (
                     <>
@@ -1845,7 +1845,7 @@ export function StrategyDiscoveryPanel({
 
               <div className="strat-input-pill" title="Max capital budget to allocate">
                 <span className="strat-pill-icon">💰</span>
-                <label>Budget:</label>
+                <span className="strat-pill-caption">Budget:</span>
                 <span className="strat-currency-prefix">$</span>
                 <TextInput
                   type="text"
@@ -1861,7 +1861,7 @@ export function StrategyDiscoveryPanel({
 
               <div className="strat-input-pill strat-rr-pill" title="Filter strategies by minimum Reward/Risk (Max Profit to Max Loss ratio)">
                 <span className="strat-pill-icon">⚖️</span>
-                <label>Min R:R:</label>
+                <span className="strat-pill-caption">Min R:R:</span>
                 <Select
                   value={minRewardRiskRatio ?? ""}
                   onChange={(e) => setMinRewardRiskRatio(e.target.value === "" ? null : Number(e.target.value))}

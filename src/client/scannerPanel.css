@@ -258,17 +258,6 @@
 .scp-form-grid .scp-field {
   min-width: 170px;
 }
-.scp-check {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  margin-top: 0.9rem;
-  font-size: var(--font-size-body);
-  cursor: pointer;
-}
-.scp-check-inline {
-  margin-top: 1.35rem;
-}
 .scp-form-actions {
   display: flex;
   gap: 0.6rem;
@@ -430,13 +419,9 @@
   align-items: center;
   gap: 0.3rem;
 }
-.scp-compare {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
+.scp-row > .ui-checkbox-label {
   font-size: var(--font-size-body-sm);
   color: var(--color-text-muted);
-  cursor: pointer;
   white-space: nowrap;
 }
 .scp-compare-bar {

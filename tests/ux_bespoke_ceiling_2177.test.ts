@@ -83,8 +83,10 @@ describe("bespoke-styling ceiling (issue #2177)", () => {
     // Bumped 3828 -> 3845 and 2610 -> 2622 for the Platform Admin drawer
     // (issue #2624): 12 scoped classes + the media-query block it needs.
     // Sanctioned growth named in the PR body, per this test's own rule.
-    expect(braces).toBeLessThanOrEqual(3845);
-    expect(classes.size).toBeLessThanOrEqual(2622); // bumped from 2610 for the Platform Admin drawer (#2624)
+    // Ratcheted to 3838 / 2619 by the #2177 close (retired bespoke
+    // checkbox-row rules; see the raw-label ratchet below).
+    expect(braces).toBeLessThanOrEqual(3838);
+    expect(classes.size).toBeLessThanOrEqual(2619); // ratcheted from 2622 by the #2177 close
   });
 
   it("inline styles and raw labels outside the primitives do not grow", () => {
@@ -116,11 +118,22 @@ describe("bespoke-styling ceiling (issue #2177)", () => {
     // NotificationFields 1, RawContractsScreener 3,
     // ResearchReportActions 3, ThesisRiskFields 2,
     // LlmOptionsIdeasPanel 2, LlmStrategyEvalModal 1, IvHistoryPanel 1);
-    // the remaining 22 are all sanctioned exceptions: 18 checkbox-wrapper
+    // the remaining 22 were all sanctioned exceptions: 18 checkbox-wrapper
     // labels (Checkbox is a bare control) and 3 pill-row labels, plus the
     // ResearchRunsPanel config-list row label whose control varies
     // between Checkbox and TextInput.
-    expect(inlineStyles).toBeLessThanOrEqual(843);
-    expect(rawLabels).toBeLessThanOrEqual(22);
+    // Resolved to 0 by the #2177 close (this change): Checkbox gains a
+    // label prop — the primitive gap that forced the 18 hand-rolled
+    // wrappers — and all 18 migrate to it; the 3 pill-row captions
+    // become spans (they never labeled a control; two controls already
+    // carried aria-labels); the varying-control row uses
+    // aria-labelledby on a captioned span (layout preserved, controls
+    // now actually named — the old unassociated <label> named nothing).
+    // Off-scale margins on the retired rows (0.9rem, 1.35rem) go with
+    // them; flow/compare treatments retarget to .ui-checkbox-label
+    // scoped to their panel. Measured on this tree: braces 3838,
+    // classes 2619, inline 807, rawLabels 0.
+    expect(inlineStyles).toBeLessThanOrEqual(807);
+    expect(rawLabels).toBeLessThanOrEqual(0);
   });
 });

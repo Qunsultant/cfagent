@@ -831,18 +831,9 @@
   gap: 0.5rem;
 }
 
-.flow-checkbox-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
+.flow-checkboxes-block .ui-checkbox-label {
   font-size: var(--font-size-body-sm);
   color: var(--color-text-secondary);
-  cursor: pointer;
-}
-
-.flow-checkbox-row input {
-  accent-color: var(--color-accent);
-  cursor: pointer;
 }
 
 /* Numeric Comparisons */

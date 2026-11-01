@@ -383,14 +383,16 @@ export function ResearchRunsPanel({ userLogin, onSendPrompt }: ResearchRunsPanel
           <h4>Filters & thresholds — every run embeds the effective snapshot</h4>
           {CONFIG_FIELDS.map((f) => (
             <div key={f.key} style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", marginBottom: 6 }}>
-              <label style={{ width: 260, fontSize: 13 }}>{f.label}</label>
+              <span id={`rrf-${f.key}`} style={{ width: 260, fontSize: 13 }}>{f.label}</span>
               {f.type === "boolean" ? (
                 <Checkbox
+                  aria-labelledby={`rrf-${f.key}`}
                   checked={(draft[f.key] ?? "") === "1" || (draft[f.key] ?? "").toLowerCase() === "true"}
                   onChange={(e) => setDraft({ ...draft, [f.key]: e.target.checked ? "1" : "0" })}
                 />
               ) : (
                 <TextInput
+                  aria-labelledby={`rrf-${f.key}`}
                   style={{ width: 200 }}
                   value={draft[f.key] ?? ""}
                   onChange={(e) => setDraft({ ...draft, [f.key]: e.target.value })}

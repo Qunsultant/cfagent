@@ -440,6 +440,19 @@
 
 .ui-checkbox:disabled { opacity: 0.55; cursor: not-allowed; }
 
+/* Checkbox label row (#2177): the one way to label a Checkbox.
+   Implicit association via the wrapping <label>; panel rules that
+   used to target hand-rolled wrappers now target this class scoped
+   to their panel, or the row keeps the primitive treatment. */
+.ui-checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-body);
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
 
 /* ---------- Modal ---------- */
 /* Chrome (backdrop, dialog surface, header, close button) comes from the

@@ -1532,10 +1532,7 @@ export function ScannerPanel({ activeEnv, userLogin, onPreviewTrade }: ScannerPa
             </div>
           </div>
 
-          <label className="scp-check">
-            <Checkbox checked={form.gateEnabled} onChange={setField("gateEnabled")} />
-            Set fit-gate thresholds (issue #24)
-          </label>
+          <Checkbox label="Set fit-gate thresholds (issue #24)" checked={form.gateEnabled} onChange={setField("gateEnabled")} />
           {form.gateEnabled && (
             <div className="scp-form-grid">
               <div className="scp-field">
@@ -1553,10 +1550,7 @@ export function ScannerPanel({ activeEnv, userLogin, onPreviewTrade }: ScannerPa
                 </Select>
               </div>
               <div className="scp-field">
-                <label className="scp-check scp-check-inline">
-                  <Checkbox checked={form.gateRequireFresh} onChange={setField("gateRequireFresh")} />
-                  Require fresh quotes
-                </label>
+                <Checkbox label="Require fresh quotes" checked={form.gateRequireFresh} onChange={setField("gateRequireFresh")} />
               </div>
             </div>
           )}
@@ -1637,13 +1631,11 @@ export function ScannerPanel({ activeEnv, userLogin, onPreviewTrade }: ScannerPa
                 Diff vs previous
               </Button>
             )}
-            <label className="scp-compare">
-              <Checkbox
-                checked={compareIds.includes(run.id)}
-                onChange={() => toggleCompare(run.id)}
-              />
-              Compare
-            </label>
+            <Checkbox
+              label="Compare"
+              checked={compareIds.includes(run.id)}
+              onChange={() => toggleCompare(run.id)}
+            />
           </div>
         ))}
       </div>

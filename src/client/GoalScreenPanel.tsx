@@ -183,14 +183,6 @@ export function clearGoalTracking(jobId?: string): void {
   }
 }
 
-const fieldStyle: React.CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: "var(--space-1)",
-  fontSize: "var(--font-size-body)",
-  color: "var(--color-text-muted)",
-};
-
 export function GoalScreenPanel({ activeEnv, userLogin }: GoalScreenPanelProps) {
   const [goalKind, setGoalKind] = useState("income");
   const [direction, setDirection] = useState("");
@@ -654,14 +646,8 @@ export function GoalScreenPanel({ activeEnv, userLogin }: GoalScreenPanelProps) 
           onChange={(e) => setSymbolsText(e.target.value)}
           placeholder="AAPL, NVDA, MSFT"
         />
-        <label style={{ ...fieldStyle, flexDirection: "row", alignItems: "center", gap: "var(--space-1-5)" }}>
-          <Checkbox checked={includeStocks} onChange={(e) => setIncludeStocks(e.target.checked)} />
-          Stocks
-        </label>
-        <label style={{ ...fieldStyle, flexDirection: "row", alignItems: "center", gap: "var(--space-1-5)" }}>
-          <Checkbox checked={includeOptions} onChange={(e) => setIncludeOptions(e.target.checked)} />
-          Options
-        </label>
+        <Checkbox label="Stocks" checked={includeStocks} onChange={(e) => setIncludeStocks(e.target.checked)} />
+        <Checkbox label="Options" checked={includeOptions} onChange={(e) => setIncludeOptions(e.target.checked)} />
         <Button type="submit" variant="primary" disabled={loading} loading={loading}>
           {"Run goal screen"}
         </Button>

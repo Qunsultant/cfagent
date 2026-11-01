@@ -218,13 +218,13 @@ export function ReportsPanel() {
             className="search-input"
           />
           <Button type="submit" className="search-btn">🔍 Search</Button>
-          <label className="semantic-toggle" title="Use AI semantic search instead of keyword matching">
+          <span title="Use AI semantic search instead of keyword matching">
             <Checkbox
+              label="🧠 Semantic"
               checked={semanticMode}
               onChange={(e) => setSemanticMode(e.target.checked)}
             />
-            🧠 Semantic
-          </label>
+          </span>
         </form>
         <div className="source-filters">
           {filteredSources.map((s) => (
