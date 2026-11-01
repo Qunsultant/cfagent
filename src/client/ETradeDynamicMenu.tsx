@@ -6,7 +6,6 @@ import {
   NAV_TAB_PRESETS,
 } from "./components/NavigationMenu";
 import { isTabFeatureEnabled } from "./featureFlags";
-import { PlatformAdminPanel } from "./PlatformAdminPanel";
 import { PillGroup, Button, TextInput } from "./components/ui";
 import {
   switchBrokerEnvironment,
@@ -149,9 +148,6 @@ export function SettingsMenu({
 }: SettingsMenuProps) {
   const [isHovered, setIsHovered] = useState(false);
   const [isPinned, setIsPinned] = useState(false);
-  // Issue #2624: the Platform Admin drawer lives outside the dropdown's
-  // open state so a click inside it cannot dismiss the panel.
-  const [platformAdminOpen, setPlatformAdminOpen] = useState(false);
   const [downloadSymbol, setDownloadSymbol] = useState(defaultSymbol);
   const menuRef = useRef<HTMLDivElement>(null);
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -184,8 +180,6 @@ export function SettingsMenu({
   // issuer; a failed or provider-less response simply shows no line
   // (legacy sessions keep the previous display, unchanged).
   const [loginProviderName, setLoginProviderName] = useState<string | null>(null);
-  const [accessRequestStatus, setAccessRequestStatus] = useState<string>("");
-  const [requestingAccess, setRequestingAccess] = useState(false);
   useEffect(() => {
     let cancelled = false;
     globalThis
@@ -203,30 +197,6 @@ export function SettingsMenu({
       cancelled = true;
     };
   }, []);
-  const requestAdminAccess = useCallback(async () => {
-    setRequestingAccess(true);
-    setAccessRequestStatus("");
-    try {
-      const res = await globalThis.fetch("/api/iaaa/access-request", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ requestedRole: "tenant-admin" }),
-      });
-      const data = (await res.json().catch(() => ({}))) as { error?: string };
-      if (res.status === 201) {
-        setAccessRequestStatus("Access requested — pending admin approval.");
-      } else if (res.status === 409) {
-        setAccessRequestStatus("You already have a pending access request.");
-      } else {
-        setAccessRequestStatus(data.error || "Access request was not submitted.");
-      }
-    } catch {
-      setAccessRequestStatus("Access request was not submitted.");
-    } finally {
-      setRequestingAccess(false);
-    }
-  }, []);
-
   useEffect(() => {
     if (adBannerConfig) {
       setLocalAdConfig(adBannerConfig);
@@ -922,25 +892,6 @@ export function SettingsMenu({
             </div>
           </div>
 
-          {/* Issue #2624: the nine administration surfaces moved out of this
-              dropdown into the Platform Admin drawer (PlatformAdminPanel).
-              The account card below stays: who is signed in belongs here. */}
-          <div className="etrade-panel-section settings-platform-admin-section">
-            <div className="section-label-row">
-              <span>Platform Admin</span>
-              <small>Ads, tasks, keys, providers &amp; IAAA</small>
-            </div>
-            <Button
-              type="button"
-              className="btn-open-platform-admin"
-              onClick={() => setPlatformAdminOpen(true)}
-              aria-haspopup="dialog"
-              title="Open Platform Admin — ads, background tasks, scheduled goals, diagnostics, API keys, data providers, IAAA"
-            >
-              Open Platform Admin →
-            </Button>
-          </div>
-
           {/* User Account & Session */}
           <div className="etrade-panel-section user-session-section">
             <div className="settings-user-card compact">
@@ -994,25 +945,6 @@ export function SettingsMenu({
         </div>
       )}
 
-      <PlatformAdminPanel
-        open={platformAdminOpen}
-        onClose={() => setPlatformAdminOpen(false)}
-        ads={effectiveAdConfig}
-        onToggleAdsMaster={handleToggleAdMaster}
-        onToggleAdsOption={handleToggleAdOption}
-        {...(onOpenPartnerDeals ? { onOpenPartnerDeals } : {})}
-        access={{
-          requesting: requestingAccess,
-          status: accessRequestStatus,
-          onRequest: () => void requestAdminAccess(),
-        }}
-        user={{
-          login: userLogin,
-          ...(userName ? { name: userName } : {}),
-          ...(userAvatar ? { avatar: userAvatar } : {}),
-          ...(loginProviderName ? { providerName: loginProviderName } : {}),
-        }}
-      />
     </div>
   );
 }

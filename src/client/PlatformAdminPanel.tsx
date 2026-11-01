@@ -1,31 +1,35 @@
 /**
- * Platform Admin side panel (issue #2624).
+ * Platform Admin side panel (issue #2624, follow-up).
  *
  * The settings dropdown had grown to fourteen sections: everyday controls
- * (environment, connection, tuning, preferences, navbar tabs) mixed with
- * nine administration surfaces at the bottom, plus the signed-in account
- * card. Finding "API Keys" meant scrolling past everything else, and the
- * panel had two identities.
+ * mixed with nine administration surfaces at the bottom, plus the signed-in
+ * account card. The administration half now lives here — a right-hand drawer
+ * whose menu is externalized config (the #2529 LeftNavBar idiom):
+ * `platformAdminConfig.ts` → sections → items.
  *
- * This module owns the administration half. It renders a right-hand drawer
- * named Platform Admin whose menu is the nine extracted items, and hosts
- * the exact same panels the dropdown used to host — same components, same
- * behaviour, different container. The dropdown keeps the account card
- * (avatar, name, @login, provider) and the everyday sections.
+ * Entry point: the left-nav item "Platform Admin" and its sub-menu
+ * (`platform-admin:<section>` ids). The nav shell opens this drawer at the
+ * selected section; nothing here depends on the settings menu being mounted.
  *
- * Styling follows the UX architecture (docs/agents/ux-architecture.md §20):
- * primitives only, classes are scoped to this panel, no inline layout
- * styles, and no hand-rolled form labels.
+ * The panel is self-contained: ad-banner preferences come from
+ * `adBannerConfig` (localStorage, optional parent override) and the
+ * request-admin-access action posts the same endpoint the settings menu used
+ * to post. Styling follows docs/agents/ux-architecture.md §20 — primitives,
+ * tokens, scoped classes, no inline layout styles.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, PillGroup } from "./components/ui";
+import {
+  getStoredAdBannerConfig,
+  saveStoredAdBannerConfig,
+  type AdBannerConfig,
+} from "./adBannerConfig";
 import { AsyncJobsPanel } from "./AsyncJobsPanel";
 import { ScheduledGoalsPanel } from "./ScheduledGoalsPanel";
 import { ApiKeysPanel } from "./ApiKeysPanel";
 import { DataProvidersPanel } from "./DataProvidersPanel";
 import { IaaaAdminPanel } from "./IaaaAdminPanel";
-
 import {
   DEFAULT_PLATFORM_ADMIN_CONFIG,
   platformAdminItems,
@@ -36,18 +40,6 @@ import {
 } from "./platformAdminConfig";
 
 export type { PlatformAdminSectionId };
-export interface PlatformAdminAdsConfig {
-  enabled: boolean;
-  showSponsorSpotlight: boolean;
-  showAdNetworkStrip: boolean;
-  showGoogleAdUnits: boolean;
-}
-
-export interface PlatformAdminAccessState {
-  requesting: boolean;
-  status: string;
-  onRequest: () => void;
-}
 
 export interface PlatformAdminUser {
   login: string;
@@ -62,13 +54,12 @@ export interface PlatformAdminPanelProps {
   /** Externalized menu config (#2529 idiom); defaults to the shipped config. */
   config?: PlatformAdminConfig;
   /** Section shown when the drawer opens; defaults to the first item. */
-  initialSection?: PlatformAdminSectionId;
-  ads: PlatformAdminAdsConfig;
-  onToggleAdsMaster: (enabled: boolean) => void;
-  onToggleAdsOption: (key: keyof Omit<PlatformAdminAdsConfig, "enabled">, value: boolean) => void;
+  initialSection?: string;
+  /** Controlled ad-banner config (optional); defaults to the stored one. */
+  adBannerConfig?: AdBannerConfig;
+  onUpdateAdBannerConfig?: (config: AdBannerConfig) => void;
   onOpenPartnerDeals?: () => void;
-  access: PlatformAdminAccessState;
-  user: PlatformAdminUser;
+  user?: PlatformAdminUser;
 }
 
 function AdsSection({
@@ -77,9 +68,9 @@ function AdsSection({
   onToggleOption,
   onOpenPartnerDeals,
 }: {
-  ads: PlatformAdminAdsConfig;
+  ads: AdBannerConfig;
   onToggleMaster: (enabled: boolean) => void;
-  onToggleOption: (key: keyof Omit<PlatformAdminAdsConfig, "enabled">, value: boolean) => void;
+  onToggleOption: (key: keyof Omit<AdBannerConfig, "enabled">, value: boolean) => void;
   onOpenPartnerDeals?: () => void;
 }) {
   return (
@@ -214,10 +205,14 @@ function ProvenanceSection() {
 }
 
 function AdminAccessSection({
-  access,
+  requesting,
+  status,
+  onRequest,
   user,
 }: {
-  access: PlatformAdminAccessState;
+  requesting: boolean;
+  status: string;
+  onRequest: () => void;
   user: PlatformAdminUser;
 }) {
   const initials = (user.name || user.login || "?").slice(0, 2).toUpperCase();
@@ -238,12 +233,12 @@ function AdminAccessSection({
             <span className="settings-user-name">{user.name || user.login}</span>
             <span className="settings-user-login">@{user.login}</span>
             {user.providerName && <span className="settings-user-login">Logged in via {user.providerName}</span>}
-            <Button type="button" disabled={access.requesting} onClick={access.onRequest}>
+            <Button type="button" disabled={requesting} onClick={onRequest}>
               Request admin access
             </Button>
-            {access.status && (
+            {status && (
               <span className="settings-user-login" role="status">
-                {access.status}
+                {status}
               </span>
             )}
           </div>
@@ -258,25 +253,70 @@ export function PlatformAdminPanel({
   onClose,
   config = DEFAULT_PLATFORM_ADMIN_CONFIG,
   initialSection,
-  ads,
-  onToggleAdsMaster,
-  onToggleAdsOption,
+  adBannerConfig,
+  onUpdateAdBannerConfig,
   onOpenPartnerDeals,
-  access,
-  user,
+  user = { login: "unknown" },
 }: PlatformAdminPanelProps) {
   const items = platformAdminItems(config);
   const firstItem = items[0];
-  const [active, setActive] = useState<PlatformAdminSectionId>(initialSection ?? firstItem.id);
+  const [active, setActive] = useState<string>(initialSection ?? firstItem.id);
+  const [ads, setAds] = useState<AdBannerConfig>(() => adBannerConfig ?? getStoredAdBannerConfig());
+  const [requesting, setRequesting] = useState(false);
+  const [accessStatus, setAccessStatus] = useState("");
   const panelRef = useRef<HTMLElement | null>(null);
 
+  // Ad preferences: parent-controlled when given, stored otherwise.
+  useEffect(() => {
+    if (adBannerConfig) setAds(adBannerConfig);
+  }, [adBannerConfig]);
+
+  const applyAds = useCallback(
+    (next: AdBannerConfig) => {
+      setAds(next);
+      saveStoredAdBannerConfig(next);
+      onUpdateAdBannerConfig?.(next);
+    },
+    [onUpdateAdBannerConfig],
+  );
+
+  const toggleMaster = useCallback((enabled: boolean) => applyAds({ ...ads, enabled }), [ads, applyAds]);
+  const toggleOption = useCallback(
+    (key: keyof Omit<AdBannerConfig, "enabled">, value: boolean) => applyAds({ ...ads, [key]: value }),
+    [ads, applyAds],
+  );
+
+  const requestAdminAccess = useCallback(async () => {
+    setRequesting(true);
+    setAccessStatus("");
+    try {
+      const res = await globalThis.fetch("/api/iaaa/access-request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requestedRole: "tenant-admin" }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      if (res.status === 201) {
+        setAccessStatus("Access requested — pending admin approval.");
+      } else if (res.status === 409) {
+        setAccessStatus("You already have a pending access request.");
+      } else {
+        setAccessStatus(data.error || "Access request was not submitted.");
+      }
+    } catch {
+      setAccessStatus("Access request was not submitted.");
+    } finally {
+      setRequesting(false);
+    }
+  }, []);
+
   // Opening the drawer always lands on the requested section (or the first
-  // one), never on whatever was left selected in a previous session.
+  // one), never on whatever was left selected in a previous turn.
   useEffect(() => {
     if (open) setActive(initialSection ?? firstItem.id);
   }, [open, initialSection, firstItem.id]);
 
-  // Escape closes the drawer without touching the settings panel state.
+  // Escape closes the drawer without touching anything else on the page.
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -339,17 +379,13 @@ export function PlatformAdminPanel({
             ))}
           </nav>
 
-          <div
-            className="platform-admin-content"
-            role="region"
-            aria-label={activeSection.label}
-          >
+          <div className="platform-admin-content" role="region" aria-label={activeSection.label}>
             {active === "ads" && (
               <AdsSection
                 ads={ads}
-                onToggleMaster={onToggleAdsMaster}
-                onToggleOption={onToggleAdsOption}
-                onOpenPartnerDeals={onOpenPartnerDeals}
+                onToggleMaster={toggleMaster}
+                onToggleOption={toggleOption}
+                {...(onOpenPartnerDeals ? { onOpenPartnerDeals } : {})}
               />
             )}
             {active === "background-tasks" && (
@@ -398,10 +434,22 @@ export function PlatformAdminPanel({
                 <IaaaAdminPanel />
               </div>
             )}
-            {active === "admin-access" && <AdminAccessSection access={access} user={user} />}
+            {active === "admin-access" && (
+              <AdminAccessSection
+                requesting={requesting}
+                status={accessStatus}
+                onRequest={() => void requestAdminAccess()}
+                user={user}
+              />
+            )}
           </div>
         </div>
       </aside>
     </div>
   );
+}
+
+/** Section id the nav passes in (`platform-admin:api-keys` → `api-keys`). */
+export function isPlatformAdminSectionId(value: string): value is PlatformAdminSectionId {
+  return DEFAULT_PLATFORM_ADMIN_CONFIG.sections[0].items.some((item) => item.id === value);
 }

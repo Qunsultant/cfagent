@@ -8,6 +8,8 @@ import { MarketStatusPill } from "./MarketStatusPill";
 import { adjustFontScale, getStoredFontScale } from "../typography";
 import { BRAND } from "../branding";
 import { LeftNavBar } from "./LeftNavBar";
+import { PlatformAdminPanel } from "../PlatformAdminPanel";
+import { platformAdminSectionFromNavId } from "../navConfig";
 export { LeftNavBar };
 import { isTabFeatureEnabled } from "../featureFlags";
 
@@ -464,6 +466,10 @@ export function NavigationMenu({
   lastRefreshedAt,
 }: NavigationMenuProps) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  // Issue #2624: the Platform Admin drawer is owned by the nav shell so the
+  // left-nav item works on every page, not only where settings is mounted.
+  const [platformAdminOpen, setPlatformAdminOpen] = useState(false);
+  const [platformAdminSection, setPlatformAdminSection] = useState<string | undefined>(undefined);
   const [navFontScale, setNavFontScale] = useState<number>(getStoredFontScale);
 
   useEffect(() => {
@@ -474,6 +480,18 @@ export function NavigationMenu({
     window.addEventListener("typography-changed", handleTypo);
     return () => window.removeEventListener("typography-changed", handleTypo);
   }, []);
+
+  // `platform-admin` / `platform-admin:<section>` are nav ids, not routes:
+  // selecting them opens the drawer at that section instead of switching tab.
+  const handleSelectNavId = (id: string) => {
+    const section = platformAdminSectionFromNavId(id);
+    if (section) {
+      setPlatformAdminSection(section);
+      setPlatformAdminOpen(true);
+      return;
+    }
+    onSelectTab(id as Parameters<typeof onSelectTab>[0]);
+  };
 
   const isTabVisible = (id: string) => {
     if (!isTabFeatureEnabled(id as NavTabId)) return false;
@@ -494,14 +512,21 @@ export function NavigationMenu({
   // 1. LEFT SIDEBAR LAYOUT
   if (layout === "left") {
     return (
-      <LeftNavBar
-        activeTab={activeTab}
-        onSelectTab={onSelectTab}
-        collapsed={collapsed}
-        onToggleCollapse={onToggleCollapse}
-        visibleTabs={visibleTabs}
-        alertBadgeCount={alertBadgeCount}
-      />
+      <>
+        <LeftNavBar
+          activeTab={activeTab}
+          onSelectTab={handleSelectNavId}
+          collapsed={collapsed}
+          onToggleCollapse={onToggleCollapse}
+          visibleTabs={visibleTabs}
+          alertBadgeCount={alertBadgeCount}
+        />
+        <PlatformAdminPanel
+          open={platformAdminOpen}
+          onClose={() => setPlatformAdminOpen(false)}
+          initialSection={platformAdminSection}
+        />
+      </>
     );
   }
 

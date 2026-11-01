@@ -11,11 +11,15 @@ import { LeftNavBar } from "../src/client/components/LeftNavBar";
 import { NavigationMenu } from "../src/client/components/NavigationMenu";
 
 describe("navConfig - externalized navigation and sub-menu configuration", () => {
-  it("exports a valid default LeftNavConfig with four primary sections", () => {
+  it("exports a valid default LeftNavConfig with four primary sections plus the Platform Admin group", () => {
     expect(DEFAULT_LEFT_NAV_CONFIG).toBeDefined();
-    expect(DEFAULT_LEFT_NAV_CONFIG.sections).toHaveLength(4);
+    // Issue #2624: the Platform Admin destination is a fifth group, appended
+    // after the route-derived sections (it opens a drawer, not a route).
+    expect(DEFAULT_LEFT_NAV_CONFIG.sections).toHaveLength(5);
     const categories = DEFAULT_LEFT_NAV_CONFIG.sections.map((s) => s.category);
-    expect(categories).toEqual(["Execution", "Intelligence", "Playbooks", "Platform"]);
+    // The fifth group is the Platform Admin drawer destination; it carries the
+    // "Platform" category because it belongs to that navigation family.
+    expect(categories).toEqual(["Execution", "Intelligence", "Playbooks", "Platform", "Platform"]);
   });
 
   it("every section has a non-empty title and at least one menu item", () => {
