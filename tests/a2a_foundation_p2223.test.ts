@@ -89,7 +89,7 @@ describe("A2A resolution map (#2223 slice 1)", () => {
     // SURVEY §6.4: five names on five instances would fragment
     // mas_memory / mas_transactions / mas_reports. One instance —
     // the shared orchestrator address — serves every orchestrator op.
-    expect(SHARED_ORCHESTRATOR_INSTANCE).toBe("default_trader");
+    expect(SHARED_ORCHESTRATOR_INSTANCE).toBe("shared_orchestrator");
     for (const name of ORCHESTRATOR_FAMILY) {
       const resolution = resolveA2AAgent(name);
       expect(resolution, name).toBeDefined();
@@ -187,7 +187,7 @@ describe("A2A dispatcher resolves through the map (#2223 slice 1)", () => {
     const { env, idFromNameCalls, stubCalls } = makeA2aEnv();
     const res = await handleA2A(postA2a("/a2a/orchestrator", "test-token"), env);
     expect(res.status).toBe(200);
-    expect(idFromNameCalls).toEqual([{ binding: "SEARCH_AGENT", name: "default_trader" }]);
+    expect(idFromNameCalls).toEqual([{ binding: "SEARCH_AGENT", name: "shared_orchestrator" }]);
     expect(stubCalls).toHaveLength(1);
   });
 
@@ -196,8 +196,8 @@ describe("A2A dispatcher resolves through the map (#2223 slice 1)", () => {
     expect((await handleA2A(postA2a("/a2a/search", "test-token"), env)).status).toBe(200);
     expect((await handleA2A(postA2a("/a2a/memory", "test-token"), env)).status).toBe(200);
     expect(idFromNameCalls).toEqual([
-      { binding: "SEARCH_AGENT", name: "default_trader" },
-      { binding: "SEARCH_AGENT", name: "default_trader" },
+      { binding: "SEARCH_AGENT", name: "shared_orchestrator" },
+      { binding: "SEARCH_AGENT", name: "shared_orchestrator" },
     ]);
   });
 

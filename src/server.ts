@@ -5,7 +5,7 @@ import {
   renewSession,
   setSessionCookie,
 } from "./session";
-import { getServiceUserLogin, isLoginShaped, SHARED_ORCHESTRATOR_INSTANCE } from "./security/serviceIdentity";
+import { getServiceUserLogin, isLoginShaped, isSharedOrchestratorAddress, SHARED_ORCHESTRATOR_INSTANCE } from "./security/serviceIdentity";
 import { backgroundDispatchHeaders } from "./security/backgroundAttribution";
 import {
   createDeadLetterRecord,
@@ -148,6 +148,11 @@ import {
   revokeApiKey,
   verifyApiKey,
 } from "./security/apiKeys";
+import {
+  bearerTokenFromRequest,
+  serviceTokenStore,
+  verifyServiceToken,
+} from "./security/serviceTokens";
 import { serveStaticAsset } from "./security/staticAssets";
 import { withErrorBoundary } from "./security/workerErrorBoundary";
 import { handleLogout, renderLoginPage } from "./oauth";
@@ -3914,14 +3919,66 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
     // --- Forwarded Durable Object APIs (NLQ, Audit, Memory, Clear, Referrals, Ads, Payments) ---
     if (path.startsWith("/api/")) {
       const session = await requireAuth(request, env);
-      if (!session) return new Response("Unauthorized", { status: 401 });
+      // Issue #2681: session first, then a tenant-bound service token.
+      // A verified token forwards as the service login with
+      // x-principal-kind "service-token", so DO routes can tell a
+      // token caller from a session caller (token callers never
+      // administer the service identity). Tenant-tier tokens are
+      // usable only when the server-resolved tenant equals the
+      // token's tenant (verifyServiceToken enforces that; the tenant
+      // never comes from a request header). A denied token is
+      // indistinguishable from a missing one to the caller, and is
+      // attributed best-effort to the IAAA chain — the decision is
+      // already deny, so an audit-store failure never converts it
+      // into an allow. The presented secret and its hash are never
+      // logged or audited.
+      let userLogin = session?.githubLogin ?? null;
+      let principalKind: "session" | "service-token" = "session";
+      if (!userLogin) {
+        const presented = bearerTokenFromRequest(request);
+        const verified = await verifyServiceToken(
+          serviceTokenStore(env),
+          createKvMembershipStore(sessionStore(env)),
+          presented,
+          resolveIaaaTenant(env),
+          Date.now(),
+        ).catch(() => null);
+        if (verified) {
+          userLogin = verified.serviceLogin;
+          principalKind = "service-token";
+        } else if (presented) {
+          console.warn("[service-token] denied: invalid, expired, revoked, unprovisioned, or cross-tenant token");
+          try {
+            await recordAuditEvent(createWiredAuditStore(env), {
+              timestamp: Date.now(),
+              type: "service_token.denied",
+              actorPrincipalId: "unknown-service-token",
+              actorType: "service",
+              initiatingPrincipalId: "unknown-service-token",
+              tenantId: resolveIaaaTenant(env),
+              correlationId: crypto.randomUUID(),
+              action: "service_token.use",
+              decision: "deny",
+              policyVersion: IAAA_AUDIT_POLICY_VERSION,
+              outcome: "failed",
+              errorCode: "SERVICE_TOKEN_DENIED",
+            });
+          } catch {
+            /* denial attribution is best-effort; the deny stands */
+          }
+        }
+      }
+      if (!userLogin) return new Response("Unauthorized", { status: 401 });
 
-      const id = env.SEARCH_AGENT.idFromName(session.githubLogin);
+      const id = env.SEARCH_AGENT.idFromName(userLogin);
       const subPath = path.replace(/^\/api/, "");
       const targetUrl = new URL(subPath + url.search, "https://agent.internal");
 
       const forwardReq = new Request(targetUrl, request);
-      forwardReq.headers.set("x-user-login", session.githubLogin);
+      forwardReq.headers.delete("x-user-login");
+      forwardReq.headers.delete("x-principal-kind");
+      forwardReq.headers.set("x-user-login", userLogin);
+      forwardReq.headers.set("x-principal-kind", principalKind);
       const isImmediateSync = /^\/(?:clear|reset|memory|audit|chat|etrade|broker|trading|screener|options|workflow-runs)(?:\/|\?|$)/i.test(subPath);
       // #1724: the caller's `x-delivery-mode` header (copied through
       // by the Request construction above) adjusts eligibility ONLY:
@@ -4181,7 +4238,7 @@ async function dispatchOptionsAnalysisQueueWork(opts: {
     );
   }
   let denied: string | null = null;
-  if (userLogin === SHARED_ORCHESTRATOR_INSTANCE) {
+  if (isSharedOrchestratorAddress(userLogin)) {
     denied = "the payload names the shared-orchestrator address as its owner";
   } else if (userLogin === opts.serviceUserLogin) {
     if (!(await opts.getServiceProvisioned())) {
