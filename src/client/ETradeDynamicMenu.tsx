@@ -17,6 +17,7 @@ import {
   saveStoredAdBannerConfig,
 } from "./adBannerConfig";
 import { useAutoRefresh } from "./autoRefresh";
+import { useTenantProviders, DATA_PROVIDER_OPTIONS, BROKER_OPTIONS } from "./tenantProviders";
 import { getPollingConfig } from "./pollingConfig";
 import {
   FONT_SCALE_PRESETS,
@@ -162,6 +163,14 @@ export function SettingsMenu({
   // props win and the toggle delegates to Chat, which writes
   // through the same module.
   const [autoRefreshState, setAutoRefreshState] = useAutoRefresh();
+  const [tenantProviders, setTenantProviders] = useTenantProviders();
+  const [providerSaveError, setProviderSaveError] = useState("");
+  const handleSetTenantProviders = (next: { dataProviderId: string; brokerId: string }) => {
+    setProviderSaveError("");
+    void setTenantProviders(next).catch(() => {
+      setProviderSaveError("Could not save provider selection. The previous selection is still in effect.");
+    });
+  };
   const effectiveAutoRefreshEnabled = autoRefreshEnabled !== undefined ? autoRefreshEnabled : autoRefreshState.enabled;
   const effectiveAutoRefreshInterval = autoRefreshInterval !== undefined ? autoRefreshInterval : autoRefreshState.interval;
 
@@ -784,6 +793,40 @@ export function SettingsMenu({
                     onChange={(v) => handleSetAutoRefresh(true, Number(v))}
                   />
                   </div>
+                </div>
+              )}
+
+              {/* Per-tenant provider / broker selection (slice 1):
+                  two independent selectors. Changing a selection
+                  writes the server row; surfaces gated on the
+                  selection re-render from the same module. */}
+              <div className="settings-pref-row">
+                <span className="pref-row-lbl">Data provider:</span>
+                <PillGroup
+                    className="settings-pref-btn-group"
+                    ariaLabel="Data provider"
+                    size="sm"
+                    variant="default"
+                    options={DATA_PROVIDER_OPTIONS.map((o) => ({ id: o.id, label: o.label, tooltip: `Use ${o.label} as the data provider` }))}
+                    value={tenantProviders.dataProviderId}
+                    onChange={(v) => handleSetTenantProviders({ ...tenantProviders, dataProviderId: v })}
+                  />
+              </div>
+              <div className="settings-pref-row">
+                <span className="pref-row-lbl">Broker:</span>
+                <PillGroup
+                    className="settings-pref-btn-group"
+                    ariaLabel="Broker"
+                    size="sm"
+                    variant="default"
+                    options={BROKER_OPTIONS.map((o) => ({ id: o.id, label: o.label, tooltip: `Use ${o.label} as the broker` }))}
+                    value={tenantProviders.brokerId}
+                    onChange={(v) => handleSetTenantProviders({ ...tenantProviders, brokerId: v })}
+                  />
+              </div>
+              {providerSaveError && (
+                <div className="settings-pref-row">
+                  <span className="pref-row-lbl">{providerSaveError}</span>
                 </div>
               )}
 

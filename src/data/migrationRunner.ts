@@ -1234,6 +1234,23 @@ CREATE INDEX IF NOT EXISTS agent_mesh_proposals_state_idx ON agent_mesh_proposal
  * Marker-gated like the other ALTER migrations (0010, 0013),
  * so a re-apply is skipped, never re-ALTERed.
  */
+/**
+ * Migration 0027 — per-tenant data-provider / broker selection.
+ * Two independent selections on the existing agent_tenant_settings
+ * row: data_provider_id and broker_id, both defaulting to 'etrade'
+ * so an absent row, a pre-migration row, and a store read failure
+ * all preserve the pre-existing E*TRADE behaviour. Marker-gated
+ * like the other ALTER migrations, so a re-apply is skipped.
+ */
+export const MIGRATION_0028_TENANT_PROVIDERS: DataMigration = {
+  version: 28,
+  name: "0028_tenant_providers",
+  sql: `
+ALTER TABLE agent_tenant_settings ADD COLUMN data_provider_id TEXT NOT NULL DEFAULT 'etrade';
+ALTER TABLE agent_tenant_settings ADD COLUMN broker_id TEXT NOT NULL DEFAULT 'etrade';
+`,
+};
+
 export const MIGRATION_0026_TENANT_AUTO_REFRESH: DataMigration = {
   version: 26,
   name: "0026_tenant_auto_refresh",
@@ -1289,6 +1306,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [
   MIGRATION_0025_AGENT_MESH_PROPOSALS,
   MIGRATION_0026_TENANT_AUTO_REFRESH,
   MIGRATION_0027_PRICE_CATALOGUE_APPROVAL,
+  MIGRATION_0028_TENANT_PROVIDERS,
 ];
 
 function splitStatements(sqlText: string): string[] {

@@ -12,6 +12,7 @@ import {
   assertNonNegativeCredits,
   assertStoreTier,
   DEFAULT_TENANT_AUTO_REFRESH,
+  DEFAULT_TENANT_PROVIDERS,
   round2,
   type CommercialAccountRecord,
   type CommercialStore,
@@ -20,6 +21,7 @@ import {
   type PaidSubmissionRecord,
   type TenantAutoRefresh,
   type TenantSettingsRecord,
+  type TenantProviders,
 } from "./commercialPorts";
 
 export class InMemoryCommercialAdapter implements CommercialStore {
@@ -106,6 +108,8 @@ export class InMemoryCommercialAdapter implements CommercialStore {
       updatedAtMs: Date.now(),
       autoRefreshEnabled: existing?.autoRefreshEnabled ?? DEFAULT_TENANT_AUTO_REFRESH.enabled,
       autoRefreshIntervalS: existing?.autoRefreshIntervalS ?? DEFAULT_TENANT_AUTO_REFRESH.intervalS,
+      dataProviderId: existing?.dataProviderId ?? DEFAULT_TENANT_PROVIDERS.dataProviderId,
+      brokerId: existing?.brokerId ?? DEFAULT_TENANT_PROVIDERS.brokerId,
     };
     this.tenantSettings.set(tenantId, record);
     return record;
@@ -132,6 +136,34 @@ export class InMemoryCommercialAdapter implements CommercialStore {
       updatedAtMs: Date.now(),
       autoRefreshEnabled: autoRefresh.enabled,
       autoRefreshIntervalS: autoRefresh.intervalS,
+      dataProviderId: existing?.dataProviderId ?? DEFAULT_TENANT_PROVIDERS.dataProviderId,
+      brokerId: existing?.brokerId ?? DEFAULT_TENANT_PROVIDERS.brokerId,
+    };
+    this.tenantSettings.set(tenantId, record);
+    return record;
+  }
+
+  async getTenantProviders(tenantId: string): Promise<TenantProviders> {
+    const existing = this.tenantSettings.get(tenantId);
+    return {
+      dataProviderId: existing?.dataProviderId ?? DEFAULT_TENANT_PROVIDERS.dataProviderId,
+      brokerId: existing?.brokerId ?? DEFAULT_TENANT_PROVIDERS.brokerId,
+    };
+  }
+
+  async setTenantProviders(
+    tenantId: string,
+    providers: TenantProviders,
+  ): Promise<TenantSettingsRecord> {
+    const existing = this.tenantSettings.get(tenantId);
+    const record: TenantSettingsRecord = {
+      tenantId,
+      adsEnabled: existing?.adsEnabled ?? true,
+      updatedAtMs: Date.now(),
+      autoRefreshEnabled: existing?.autoRefreshEnabled ?? DEFAULT_TENANT_AUTO_REFRESH.enabled,
+      autoRefreshIntervalS: existing?.autoRefreshIntervalS ?? DEFAULT_TENANT_AUTO_REFRESH.intervalS,
+      dataProviderId: providers.dataProviderId,
+      brokerId: providers.brokerId,
     };
     this.tenantSettings.set(tenantId, record);
     return record;

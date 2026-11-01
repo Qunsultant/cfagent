@@ -116,6 +116,7 @@ import {
   executeUnifiedOptions,
 } from "./etradeOptionsScreen";
 import { recordStrategyScreenRun } from "../../services/optionsServeRecord";
+import { resolveTenantProviders } from "../../services/tenantProviders";
 
 /** The subset of OrchestratorAgent surface the E*TRADE options handlers need. */
 export interface EtradeOptionsRouteContext {
@@ -803,8 +804,10 @@ export async function handleEtradeOptionsRoutes(
         const strategyArtifacts = await ctx.getScreenerAgent(userLogin).generateAndStoreStrategyReport(strategyReportInput);
         const artifactLinks = strategyReportArtifactLinks(strategyArtifacts);
         const req = parsedDiscovery.value.request as Record<string, any>;
+        // Slice 1: stamp tenant provider/broker into provenance (fail-open etrade/etrade).
         recordStrategyScreenRun(ctx.getOrm(), {
           ...strategyArtifacts,
+          ...(await resolveTenantProviders(ctx.env)),
           userLogin,
           symbol: parsedDiscovery.value.request.symbol,
           trigger: "manual",

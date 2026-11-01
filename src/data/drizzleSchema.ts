@@ -321,6 +321,10 @@ export const agentTenantSettings = sqliteTable("agent_tenant_settings", {
   autoRefreshEnabled: integer("auto_refresh_enabled").notNull().default(0),
   /** Issue #2481: auto-refresh cadence in seconds. Absent row = 15. */
   autoRefreshIntervalS: integer("auto_refresh_interval_s").notNull().default(15),
+  /** Per-tenant data-provider selection. Absent row = etrade. */
+  dataProviderId: text("data_provider_id").notNull().default("etrade"),
+  /** Per-tenant broker selection. Absent row = etrade. */
+  brokerId: text("broker_id").notNull().default("etrade"),
 });
 
 /**
