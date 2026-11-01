@@ -36,7 +36,11 @@ export type ApiEndpointAuth =
   | "platform-admin"
   | "webhook-signature"
   | "slack-signature"
-  | "payment-gated";
+  | "payment-gated"
+  // #2041 G-METERING: internal service-identity channel (the
+  // SEARCH_AGENT stub), not a user session — the meter route is
+  // reachable only that way, never publicly.
+  | "service";
 
 export type ApiEndpointKind = "http" | "websocket" | "catchall" | "static";
 
@@ -774,6 +778,16 @@ export const API_ENDPOINT_CATALOG: ApiEndpointEntry[] = [
     auth: "session",
     authNote: "401 unauthenticated; 404 when no saga audit rows exist for the session user (owner-scoped, no cross-user leak); 503 when SEARCH_AGENT is unbound or the audit read fails. Returns the panel's {jobs} shape (stage rows from saga audit rows + live instance status/output, issue #2041 S4). Deliberately NOT flag-gated: a read path for one's own sagas survives a flag flip.",
     source: "src/server.ts branch: path matches /api/saga/:sagaId/status",
+  },
+  {
+    id: "saga-meter",
+    method: "POST",
+    path: "/api/meter/event",
+    aliases: [],
+    kind: "http",
+    auth: "service",
+    authNote: "Internal SEARCH_AGENT stub channel only (service identity); not publicly routed — server.ts has no branch for this path. 400 for a missing/invalid receiptId, protocol other than stripe/x402, missing userLogin, non-positive priceUSD, or category other than saga; 500 on store failure (fail-closed, never served unmetered). Writes one usage_events row (category saga) via the DO usage port; a retried step re-inserts the same receipt-scoped id and reports duplicate, never a second row (issue #2041 G-METERING).",
+    source: "src/agents/routes/meter.ts via OrchestratorAgent dispatch (SEARCH_AGENT channel)",
   },
   {
     id: "reports-list",
