@@ -1,0 +1,3 @@
+### Fixed
+- Ticker auto-refresh toggle now applies synchronously (#2692): `/tenant/settings/*` joins the Worker forwarder's immediate-sync list, so the settings POST no longer queues as a 202 job that the client treats as success without applying — the snap-back to OFF is gone.
+- Market quotes HTTP endpoint now refreshes before serving (#2692): `handleMarketQuotesHttp` awaits the upstream refresh (refresh-then-serve, mirroring pushTicks) instead of serving the isolate-local cache immediately, so a cold cache with a healthy upstream returns quotes on the first call instead of an empty list. A failed upstream still reports unavailable, never a fabricated number.

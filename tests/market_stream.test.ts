@@ -210,7 +210,11 @@ describe("Real-Time Market Data WebSocket Streaming (Issue #21)", () => {
         tick: { ...mk("SOL/USD", 200), type: "crypto" },
         expiresAt: Date.now() + 60000,
       });
-      const res = handleMarketQuotesHttp(["NVDA", "SOL/USD"]);
+      // #2692: the handler now awaits its upstream refresh before
+      // serving — stub the fetch so this stays hermetic (a live
+      // answer would replace the seeded ticks mid-test).
+      vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, json: async () => ({}) })));
+      const res = await handleMarketQuotesHttp(["NVDA", "SOL/USD"]);
       expect(res.status).toBe(200);
       expect(res.headers.get("Content-Type")).toBe("application/json");
       expect(res.headers.get("Access-Control-Allow-Origin")).toBe("*");
@@ -222,6 +226,7 @@ describe("Real-Time Market Data WebSocket Streaming (Issue #21)", () => {
       expect(data.quotes[1].symbol).toBe("SOL/USD");
       expect(data.unavailable).toEqual([]);
       expect(data.dataUnavailable).toBe(false);
+      vi.unstubAllGlobals();
       liveMarketCache.clear();
     });
   });
