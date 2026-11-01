@@ -2,8 +2,12 @@
  * CI/CD Merge Queue Auto-Enqueue & Auto-Merge Velocity Guard (#2629).
  *
  * Verifies:
- * 1. auto-update-prs-app.yml runs on recurring schedule (cron: '* / 5 * * * *'),
- *    push to main, and workflow_dispatch so clean PRs are enqueued even without push storms.
+ * 1. auto-update-prs-app.yml runs proactively on:
+ *    - workflow_run (upon completion of Continuous Integration & Test Verification)
+ *    - push to main
+ *    - recurring schedule (cron: '* / 5 * * * *')
+ *    - workflow_dispatch
+ *    so green PRs are enqueued immediately without manual intervention or push storms.
  * 2. auto-update-prs-app.yml inspects autoMergeRequest.mergeMethod and resets non-REBASE
  *    methods (e.g. SQUASH) to REBASE before calling enqueuePullRequest.
  * 3. auto-update-prs-app.yml actively enqueues CLEAN and MERGEABLE unqueued PRs into the Merge Queue.
@@ -23,9 +27,11 @@ const autoMergeTrustedYml = readFileSync(
 );
 
 describe("CI/CD Merge Queue Auto-Enqueue & Auto-Merge Velocity (#2629)", () => {
-  it("triggers auto-update-prs-app.yml periodically and on workflow_dispatch (#2629)", () => {
+  it("triggers auto-update-prs-app.yml proactively on CI completion, push, schedule, and workflow_dispatch (#2629)", () => {
     expect(autoUpdateYml).toMatch(/schedule:\s*[\r\n]+\s*-\s*cron:\s*['"]\*\s*\/\s*5/);
     expect(autoUpdateYml).toContain("workflow_dispatch:");
+    expect(autoUpdateYml).toContain("workflow_run:");
+    expect(autoUpdateYml).toContain("Continuous Integration & Test Verification");
   });
 
   it("queries id and autoMergeRequest { mergeMethod } in auto-update-prs-app queueQuery (#2629)", () => {
