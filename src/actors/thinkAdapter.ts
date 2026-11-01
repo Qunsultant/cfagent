@@ -83,6 +83,15 @@ import type {
   TurnContext as ThinkTurnContext,
   TurnInputMessages as ThinkTurnInputMessages,
 } from "@cloudflare/think";
+// Issue #2566: the durable-submission types, re-exported here so
+// consumers (src/agents/orchestrator/durableTurnSubmission.ts)
+// reach Think's surface through the foundation adapter only — the
+// agent-conformance pin forbids direct "@cloudflare/think" imports
+// outside the adapter files.
+export type {
+  SubmitMessagesResult,
+  ThinkSubmissionInspection,
+} from "@cloudflare/think";
 import type { UIMessage } from "ai";
 import {
   createCfActorSchedule,
