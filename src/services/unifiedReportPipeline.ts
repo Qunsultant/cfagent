@@ -303,3 +303,395 @@ export async function serveReportStage(input: {
   }
   return { verified: true };
 }
+
+/**
+ * Options artifact contract (issue #2621, P0 — the first production
+ * deliverable of runtime unification).
+ *
+ * ONE assembler for the options report's three formats, used by BOTH
+ * the sync route (manual contract screen, unified opportunities,
+ * scheduled monolithic path) and the sharded path (serve assembly
+ * from generate/store rows). It does NOT merge the sync and sharded
+ * runtimes: each path still generates through its own seams (the
+ * sync route through runReportPipeline + ScreenerAgent stores, the
+ * shards through their generate/store jobs), but both report the
+ * same outcome shape, so a 2-symbol sync run and a 20-symbol
+ * sharded run over the same schedule describe the same coverage,
+ * gates, and per-format outcomes.
+ *
+ * The contract:
+ * - Per-format non-fatal generate: a renderer failure records that
+ *   format as "failed" with its error, and the run still ships the
+ *   formats that generated. No renderer can kill a run.
+ * - Links only for what exists: a key/url appears only for a format
+ *   whose status is "generated". A failed format contributes its
+ *   status + error, never a fabricated link.
+ * - No second recorder/catalog/scope model: this module only shapes
+ *   the artifact outcome. Recording still goes through
+ *   recordUnifiedOptionsRun / recordOptionsServeReport, messages
+ *   still resolve through outcomes/outcomeCatalog.json, and scope
+ *   (theses/strategies/gates/formats) still resolves through
+ *   #2583's resolveOptionsReportScope — callers may pass its
+ *   description/gates through, the assembler never re-resolves it
+ *   and never changes selection, thesis filtering, mode defaults,
+ *   caps, report content, delivery channels, or scheduling.
+ */
+
+export type OptionsArtifactFormat = "pdf" | "xlsx" | "csv";
+
+export const OPTIONS_ARTIFACT_FORMATS: readonly OptionsArtifactFormat[] = ["pdf", "xlsx", "csv"];
+
+/** Per-format outcome: "skipped" means the format was not requested, never a failure. */
+export type OptionsFormatStatus = "generated" | "failed" | "skipped";
+
+export interface OptionsFormatOutcome {
+  format: OptionsArtifactFormat;
+  status: OptionsFormatStatus;
+  /** Present only when status is "generated" — never a link to missing bytes. */
+  key?: string;
+  fileName?: string;
+  /** Present only when status is "failed". */
+  error?: string;
+}
+
+export type OptionsArtifactOutcomes = Record<OptionsArtifactFormat, OptionsFormatOutcome>;
+
+/** Normalise one format outcome: "generated" without a key is not a link, it is a failure. */
+export function optionsFormatOutcome(
+  format: OptionsArtifactFormat,
+  partial: Partial<Omit<OptionsFormatOutcome, "format">> & { status: OptionsFormatStatus },
+): OptionsFormatOutcome {
+  if (partial.status === "generated" && !partial.key) {
+    return {
+      format,
+      status: "failed",
+      ...(partial.fileName ? { fileName: partial.fileName } : {}),
+      error: partial.error || `Artifact reported generated without a storage key for ${format}.`,
+    };
+  }
+  if (partial.status !== "generated") {
+    const out: OptionsFormatOutcome = { format, status: partial.status };
+    if (partial.status === "failed" && partial.error) out.error = partial.error;
+    return out;
+  }
+  return {
+    format,
+    status: "generated",
+    key: partial.key,
+    ...(partial.fileName ? { fileName: partial.fileName } : {}),
+  };
+}
+
+export interface OptionsArtifactGenerator {
+  /** Storage key + file name of the stored artifact. Throws on failure — the runner records it, never propagates it. */
+  (): Promise<{ key: string; fileName: string }>;
+}
+
+/**
+ * Run every supplied per-format generator, each in its own failure
+ * domain. A throwing generator becomes that format's "failed"
+ * outcome; a missing generator becomes "skipped" (the format was
+ * not requested, e.g. a pdf-only scope preset). This function never
+ * throws: it is the seam that guarantees no renderer kills a run.
+ */
+export async function runOptionsArtifactFormats(
+  generators: Partial<Record<OptionsArtifactFormat, OptionsArtifactGenerator>>,
+): Promise<OptionsArtifactOutcomes> {
+  const outcomes = {} as OptionsArtifactOutcomes;
+  for (const format of OPTIONS_ARTIFACT_FORMATS) {
+    const generate = generators[format];
+    if (!generate) {
+      outcomes[format] = { format, status: "skipped" };
+      continue;
+    }
+    try {
+      const stored = await generate();
+      outcomes[format] = optionsFormatOutcome(format, {
+        status: "generated",
+        key: stored.key,
+        fileName: stored.fileName,
+      });
+    } catch (err) {
+      outcomes[format] = {
+        format,
+        status: "failed",
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
+  return outcomes;
+}
+
+/** Coverage as the run record renders it: nulls where the dataset carries no number, never a guessed count. */
+export interface OptionsResultCoverage {
+  considered: number | null;
+  evaluated: number | null;
+  matched: number | null;
+  scanned: number | null;
+}
+
+function coverageNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+/**
+ * Read coverage off an assembled dataset without inventing it.
+ * OpportunityScanResult carries coverage.{considered,evaluated};
+ * OptionScreenResult carries totalUnderlyingsScanned /
+ * totalContractsEvaluated / matchedCount. A dataset with neither
+ * yields nulls, and the run record says so instead of showing 0.
+ */
+export function optionsResultCoverage(dataset: unknown): OptionsResultCoverage {
+  const d = (dataset && typeof dataset === "object" ? (dataset as Record<string, unknown>) : {}) as Record<string, unknown>;
+  const coverage = (d.coverage && typeof d.coverage === "object"
+    ? (d.coverage as Record<string, unknown>)
+    : {}) as Record<string, unknown>;
+  const hasCoverage = d.coverage !== undefined && d.coverage !== null;
+  return {
+    considered: hasCoverage
+      ? (coverageNumber(coverage.considered) ?? coverageNumber(coverage.scanned))
+      : coverageNumber(d.totalUnderlyingsScanned),
+    evaluated: hasCoverage
+      ? coverageNumber(coverage.evaluated)
+      : coverageNumber(d.totalContractsEvaluated),
+    matched: coverageNumber(d.withTrades) ?? coverageNumber(coverage.withTrades) ?? coverageNumber(d.matchedCount),
+    scanned: hasCoverage
+      ? (coverageNumber(coverage.scanned) ?? coverageNumber(d.scanned))
+      : (coverageNumber(d.totalUnderlyingsScanned) ?? coverageNumber(d.scanned)),
+  };
+}
+
+export interface AssembleOptionsResultInput {
+  /** The assembled scan dataset (OptionScreenResult or OpportunityScanResult). Content is passed through, never reshaped. */
+  dataset: unknown;
+  /** Per-format outcomes, from runOptionsArtifactFormats (sync) or optionsArtifactsFromShardRows (sharded). */
+  artifacts: Partial<Record<OptionsArtifactFormat, OptionsFormatOutcome>>;
+  /** Formats the run requested; anything else is "skipped", never "failed". Defaults to all three. */
+  requestedFormats?: readonly OptionsArtifactFormat[];
+  /** Link builder; when absent, no urls are produced (keys still are). A url is built only for a generated format. */
+  urlFor?: (format: OptionsArtifactFormat, key: string) => string;
+  /** #2583 scope passthrough: description + gates from resolveOptionsReportScope, when the caller resolved one. */
+  scope?: {
+    description?: string;
+    gates?: { maxPlannedLoss?: number; minRewardRisk?: number } | null;
+  };
+}
+
+/** Canonical-body-ready links: keys/urls only for generated formats, statuses + errors for every requested format. */
+export interface AssembledOptionsLinks {
+  pdfKey?: string;
+  pdfStatus: OptionsFormatStatus;
+  pdfError?: string;
+  reportUrl?: string;
+  xlsxKey?: string;
+  xlsxStatus: OptionsFormatStatus;
+  xlsxError?: string;
+  xlsxUrl?: string;
+  csvKey?: string;
+  csvStatus: OptionsFormatStatus;
+  csvError?: string;
+  csvUrl?: string;
+}
+
+export interface AssembledOptionsResult {
+  dataset: unknown;
+  coverage: OptionsResultCoverage;
+  artifacts: OptionsArtifactOutcomes;
+  generatedFormats: OptionsArtifactFormat[];
+  failedFormats: OptionsArtifactFormat[];
+  skippedFormats: OptionsArtifactFormat[];
+  /** True when at least one requested format generated. */
+  anyGenerated: boolean;
+  /** True when nothing generated and at least one requested format failed (all-skipped is not a failure). */
+  allFailed: boolean;
+  links: AssembledOptionsLinks;
+  scopeSummary: string | null;
+  gates: { maxPlannedLoss?: number; minRewardRisk?: number } | null;
+}
+
+/**
+ * The ONE options-result assembler. Pure: same dataset + same
+ * per-format outcomes always yield the same coverage, gates, and
+ * links, whether the caller is the sync route or the shard serve
+ * planner — that is the P0 acceptance (2-symbol sync vs 20-symbol
+ * sharded over the same schedule must agree).
+ */
+export function assembleOptionsResult(input: AssembleOptionsResultInput): AssembledOptionsResult {
+  const requested = input.requestedFormats ?? OPTIONS_ARTIFACT_FORMATS;
+  const requestedSet = new Set(requested);
+  const artifacts = {} as OptionsArtifactOutcomes;
+  for (const format of OPTIONS_ARTIFACT_FORMATS) {
+    if (!requestedSet.has(format)) {
+      artifacts[format] = { format, status: "skipped" };
+      continue;
+    }
+    const outcome = input.artifacts[format];
+    artifacts[format] = outcome
+      ? optionsFormatOutcome(format, outcome)
+      : { format, status: "failed", error: `No ${format} artifact was produced for this run.` };
+  }
+  const generatedFormats = OPTIONS_ARTIFACT_FORMATS.filter((f) => artifacts[f].status === "generated");
+  const failedFormats = OPTIONS_ARTIFACT_FORMATS.filter((f) => artifacts[f].status === "failed");
+  const skippedFormats = OPTIONS_ARTIFACT_FORMATS.filter((f) => artifacts[f].status === "skipped");
+  const urlFor = (format: OptionsArtifactFormat): string | undefined => {
+    const outcome = artifacts[format];
+    return outcome.status === "generated" && outcome.key && input.urlFor
+      ? input.urlFor(format, outcome.key)
+      : undefined;
+  };
+  const links: AssembledOptionsLinks = {
+    ...(artifacts.pdf.key ? { pdfKey: artifacts.pdf.key } : {}),
+    pdfStatus: artifacts.pdf.status,
+    ...(artifacts.pdf.error ? { pdfError: artifacts.pdf.error } : {}),
+    ...(urlFor("pdf") ? { reportUrl: urlFor("pdf") } : {}),
+    ...(artifacts.xlsx.key ? { xlsxKey: artifacts.xlsx.key } : {}),
+    xlsxStatus: artifacts.xlsx.status,
+    ...(artifacts.xlsx.error ? { xlsxError: artifacts.xlsx.error } : {}),
+    ...(urlFor("xlsx") ? { xlsxUrl: urlFor("xlsx") } : {}),
+    ...(artifacts.csv.key ? { csvKey: artifacts.csv.key } : {}),
+    csvStatus: artifacts.csv.status,
+    ...(artifacts.csv.error ? { csvError: artifacts.csv.error } : {}),
+    ...(urlFor("csv") ? { csvUrl: urlFor("csv") } : {}),
+  };
+  return {
+    dataset: input.dataset,
+    coverage: optionsResultCoverage(input.dataset),
+    artifacts,
+    generatedFormats,
+    failedFormats,
+    skippedFormats,
+    anyGenerated: generatedFormats.length > 0,
+    allFailed: generatedFormats.length === 0 && failedFormats.length > 0,
+    links,
+    scopeSummary: input.scope?.description ?? null,
+    gates: input.scope?.gates ?? null,
+  };
+}
+
+/**
+ * Shard-row projection the assembler reads (the planner's ShardRow
+ * shape, without importing it — this module must stay importable
+ * from the planner without a cycle).
+ */
+export interface ShardArtifactRow {
+  stage?: string;
+  shardKey?: string;
+  status: string;
+  result?: unknown;
+  error?: string;
+}
+
+/**
+ * Build per-format outcomes from a chain's generate + store rows —
+ * the sharded path's input to assembleOptionsResult.
+ *
+ * - A completed generate row with a key is "generated", unless its
+ *   store row says otherwise (see below).
+ * - A completed generate row carrying status "failed" is that
+ *   format's renderer failure (the #2621 non-fatal outcome: the
+ *   shard job completed with a definitive failed result instead of
+ *   throwing, so the chain advances past it).
+ * - A failed generate job row with no completed retry is "failed"
+ *   with the row's error (the chain's existing stop semantics keep
+ *   such a chain from advancing; this mapping only describes rows
+ *   the planner already let through).
+ * - A store row decides servability: a completed store row with
+ *   status "failed", or a failed store job row, downgrades its
+ *   format to "failed" with the store error — the serve outcome
+ *   must never link bytes the store could not verify. A completed
+ *   store row without a status is legacy "generated".
+ * - No row at all for a format is "failed" with a named reason,
+ *   matching the serve planner's previous missing → failed mapping.
+ */
+export function optionsArtifactsFromShardRows(rows: readonly ShardArtifactRow[]): OptionsArtifactOutcomes {
+  const outcomes = {} as OptionsArtifactOutcomes;
+  for (const format of OPTIONS_ARTIFACT_FORMATS) {
+    const generateRows = rows.filter((r) => r.stage === "generate" && r.shardKey === format);
+    const latestCompleted = generateRows.filter((r) => r.status === "completed").at(-1);
+    const latestFailedJob = generateRows.filter((r) => r.status === "failed").at(-1);
+    const storeRows = rows.filter((r) => r.stage === "store" && r.shardKey === format);
+    const latestStoreCompleted = storeRows.filter((r) => r.status === "completed").at(-1);
+    const latestStoreFailedJob = storeRows.filter((r) => r.status === "failed").at(-1);
+    const generateResult = (latestCompleted?.result && typeof latestCompleted.result === "object"
+      ? (latestCompleted.result as Record<string, unknown>)
+      : {}) as Record<string, unknown>;
+    let outcome: OptionsFormatOutcome;
+    if (latestCompleted && generateResult.status === "failed") {
+      outcome = {
+        format,
+        status: "failed",
+        error: typeof generateResult.error === "string" && generateResult.error
+          ? generateResult.error
+          : (latestCompleted.error ?? `Options ${format} generation failed.`),
+      };
+    } else if (latestCompleted && typeof generateResult.key === "string" && generateResult.key) {
+      outcome = {
+        format,
+        status: "generated",
+        key: generateResult.key,
+        ...(typeof generateResult.fileName === "string" ? { fileName: generateResult.fileName } : {}),
+      };
+    } else if (latestFailedJob) {
+      outcome = {
+        format,
+        status: "failed",
+        error: latestFailedJob.error ?? `Options ${format} generation failed.`,
+      };
+    } else if (latestCompleted) {
+      outcome = {
+        format,
+        status: "failed",
+        error: `Options ${format} generate shard completed without an artifact key.`,
+      };
+    } else {
+      outcome = {
+        format,
+        status: "failed",
+        error: `No ${format} generate shard completed for this run.`,
+      };
+    }
+    if (outcome.status === "generated") {
+      const storeResult = (latestStoreCompleted?.result && typeof latestStoreCompleted.result === "object"
+        ? (latestStoreCompleted.result as Record<string, unknown>)
+        : {}) as Record<string, unknown>;
+      if (latestStoreCompleted && storeResult.status === "failed") {
+        outcome = {
+          format,
+          status: "failed",
+          error: typeof storeResult.error === "string" && storeResult.error
+            ? storeResult.error
+            : (latestStoreCompleted.error ?? `Options ${format} store verification failed.`),
+        };
+      } else if (latestStoreFailedJob && !latestStoreCompleted) {
+        outcome = {
+          format,
+          status: "failed",
+          error: latestStoreFailedJob.error ?? `Options ${format} store failed.`,
+        };
+      }
+    }
+    outcomes[format] = outcome;
+  }
+  return outcomes;
+}
+
+/**
+ * Serve-planner entry point to the ONE assembler: the sharded path
+ * projects a chain's generate + store rows into per-format outcomes
+ * and assembles them exactly as the sync route assembles its own
+ * outcomes, so the two paths agree on coverage, gates, and links
+ * for the same dataset. The chain argument is accepted for
+ * call-site symmetry only; the outcome is built from rows +
+ * dataset, never from chain metadata.
+ */
+export function assembleOptionsResultForServe(
+  rows: readonly ShardArtifactRow[],
+  dataset: unknown,
+  _chain?: unknown
+): AssembledOptionsResult {
+  void _chain;
+  return assembleOptionsResult({
+    dataset,
+    artifacts: optionsArtifactsFromShardRows(rows),
+  });
+}

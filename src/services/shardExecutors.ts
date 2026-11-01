@@ -432,7 +432,7 @@ async function generateAssembleOptions(
 async function generatePdf(
   deps: ShardExecutorDeps,
   chain: ShardChainContext
-): Promise<{ format: string; key: string; fileName: string }> {
+): Promise<{ format: string; key: string; fileName: string } | { format: string; status: "failed"; error: string }> {
   const dataset = siblingResult(deps, chain.chainId, "generate", "assemble");
   if (!dataset) throw new Error("Generate shard pdf blocked: assemble shard has no completed result.");
   const { runReportPipeline } = await import("./unifiedReportPipeline");
@@ -458,7 +458,16 @@ async function generatePdf(
     }
   );
   if (out.pdfStatus !== "generated" || !out.pdfKey) {
-    throw new Error(out.pdfError || "PDF generation failed in the report pipeline.");
+    // Issue #2621 P0 (options only): a renderer failure is a
+    // per-format failed outcome, not a chain failure — the shard
+    // job completes with this result, so the planner advances past
+    // it and the run still ships the formats that generated. Stock
+    // chains keep the existing throw (their stop semantics are
+    // unchanged by this slice). A missing assemble dataset above
+    // still throws for both: that is a blocker, not a renderer.
+    const error = out.pdfError || "PDF generation failed in the report pipeline.";
+    if (chain.screenType === "options") return { format: "pdf", status: "failed", error };
+    throw new Error(error);
   }
   return {
     format: "pdf",
@@ -471,7 +480,7 @@ async function generateTabular(
   deps: ShardExecutorDeps,
   chain: ShardChainContext,
   format: "xlsx" | "csv"
-): Promise<{ format: string; key: string; fileName: string }> {
+): Promise<{ format: string; key: string; fileName: string } | { format: string; status: "failed"; error: string }> {
   const dataset = siblingResult(deps, chain.chainId, "generate", "assemble");
   if (!dataset) {
     throw new Error(`Generate shard ${format} blocked: assemble shard has no completed result.`);
@@ -482,46 +491,68 @@ async function generateTabular(
     : (format === "xlsx" ? "screener:xlsx:" : "screener:csv:");
   const key = `${prefix}${crypto.randomUUID().slice(0, 8)}`;
   const { putReportPdf } = await import("./reportBlobStore");
-  const { fileName, bytes } = await withRetry(
-    async () => {
-      if (format === "xlsx") {
-        if (chain.screenType === "options") {
-          const { generateOptionsXlsx, optionsXlsxFileName, adaptOpportunityScanToOptionScreenResult } = await import("../trading");
-          const adapted = adaptOpportunityScanToOptionScreenResult(dataset as any);
-          return { fileName: optionsXlsxFileName(adapted), bytes: generateOptionsXlsx(adapted) };
+  // Issue #2621 P0 (options only): generate + store failures are a
+  // per-format failed outcome, not a chain failure — same rule as
+  // generatePdf above. Stock chains keep the existing throw.
+  let fileName: string;
+  let bytes: Uint8Array;
+  try {
+    ({ fileName, bytes } = await withRetry(
+      async () => {
+        if (format === "xlsx") {
+          if (chain.screenType === "options") {
+            const { generateOptionsXlsx, optionsXlsxFileName, adaptOpportunityScanToOptionScreenResult } = await import("../trading");
+            const adapted = adaptOpportunityScanToOptionScreenResult(dataset as any);
+            return { fileName: optionsXlsxFileName(adapted), bytes: generateOptionsXlsx(adapted) };
+          }
+          const { generateScreenerXlsx, screenerXlsxFileName } = await import("../trading");
+          return { fileName: screenerXlsxFileName(dataset), bytes: generateScreenerXlsx(dataset) };
         }
-        const { generateScreenerXlsx, screenerXlsxFileName } = await import("../trading");
-        return { fileName: screenerXlsxFileName(dataset), bytes: generateScreenerXlsx(dataset) };
-      }
-      if (chain.screenType === "options") {
-        const { generateOptionsCsv, optionsCsvFileName, adaptOpportunityScanToOptionScreenResult } = await import("../trading");
-        const adapted = adaptOpportunityScanToOptionScreenResult(dataset as any);
-        return { fileName: optionsCsvFileName(adapted), bytes: new TextEncoder().encode(generateOptionsCsv(adapted)) };
-      }
-      const { generateScreenerCsv, screenerCsvFileName } = await import("../trading");
-      return {
-        fileName: screenerCsvFileName(dataset),
-        bytes: new TextEncoder().encode(generateScreenerCsv(dataset)),
-      };
-    },
-    policy,
-    { label: `shard.generate.${format}` }
-  );
+        if (chain.screenType === "options") {
+          const { generateOptionsCsv, optionsCsvFileName, adaptOpportunityScanToOptionScreenResult } = await import("../trading");
+          const adapted = adaptOpportunityScanToOptionScreenResult(dataset as any);
+          return { fileName: optionsCsvFileName(adapted), bytes: new TextEncoder().encode(generateOptionsCsv(adapted)) };
+        }
+        const { generateScreenerCsv, screenerCsvFileName } = await import("../trading");
+        return {
+          fileName: screenerCsvFileName(dataset),
+          bytes: new TextEncoder().encode(generateScreenerCsv(dataset)),
+        };
+      },
+      policy,
+      { label: `shard.generate.${format}` }
+    ));
+  } catch (err) {
+    if (chain.screenType === "options") {
+      return { format, status: "failed", error: err instanceof Error ? err.message : String(err) };
+    }
+    throw err;
+  }
   // The blob store is the generate leg's store: putReportPdf writes
   // the bytes (R2 when bound, DO storage otherwise) under the
   // per-run key. The mas_reports row is the store shard's job.
   // Content type follows the goal-screen pattern (explicit per
   // format), not persistRun's PDF default.
-  await putReportPdf(
-    deps.env as any,
-    deps.storage as any,
-    key,
-    fileName,
-    bytes,
-    format === "csv"
-      ? "text/csv"
-      : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-  );
+  try {
+    await putReportPdf(
+      deps.env as any,
+      deps.storage as any,
+      key,
+      fileName,
+      bytes,
+      format === "csv"
+        ? "text/csv"
+        : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+  } catch (err) {
+    // Issue #2621 P0 (options only): a blob-store failure on this
+    // leg is the format's failure, not the chain's — same rule as
+    // the renderer failure above. Stock chains keep the throw.
+    if (chain.screenType === "options") {
+      return { format, status: "failed", error: err instanceof Error ? err.message : String(err) };
+    }
+    throw err;
+  }
   return { format, key, fileName };
 }
 
@@ -529,7 +560,7 @@ async function storeFormat(
   deps: ShardExecutorDeps,
   chain: ShardChainContext,
   inputs: Record<string, unknown>
-): Promise<{ format: string; key: string; reportId: string }> {
+): Promise<{ format: string; key: string; reportId: string } | { format: string; key: string; status: "failed"; error: string }> {
   const format = String(inputs.format ?? "");
   const key = String(inputs.key ?? "");
   const fileName = String(inputs.fileName ?? "");
@@ -539,7 +570,19 @@ async function storeFormat(
   // that are not there.
   const { getReportPdf } = await import("./reportBlobStore");
   const stored = await getReportPdf(deps.env as any, deps.storage as any, key);
-  if (!stored) throw new Error(`Store shard ${format} blocked: blob ${key} is not readable.`);
+  if (!stored) {
+    // Issue #2621 P0 (options only): an unverifiable blob
+    // downgrades its format instead of stopping the chain — the
+    // serve planner reads this failed outcome and drops the format
+    // from the run's links (see optionsArtifactsFromShardRows).
+    // The row is still never written for this format, so no
+    // mas_reports row points at missing bytes. Stock chains keep
+    // the existing throw.
+    if (chain.screenType === "options") {
+      return { format, key, status: "failed", error: `Store shard ${format} blocked: blob ${key} is not readable.` };
+    }
+    throw new Error(`Store shard ${format} blocked: blob ${key} is not readable.`);
+  }
   const provenance = shardProvenanceIds(chainRows(deps, chain.chainId));
   const row = deps.orm.storeCanonicalReport({
     runId: `${chain.screenType === "options" ? "options" : "screener"}:${chain.chainId}`,
@@ -565,6 +608,12 @@ async function storeFormat(
  * Execute one shard.execute row's payload. Throws on failure —
  * the executor records the failure and the chain stops (a failed
  * feed shard additionally audits the assembly blocker by name).
+ * Exception (issue #2621 P0, options chains only): a generate or
+ * store format failure returns a completed { status: "failed" }
+ * outcome instead of throwing, so one renderer or unverifiable
+ * blob cannot kill the run — the planner advances past it and the
+ * serve assembly drops that format from the run's links. Feed and
+ * assemble failures still throw for every chain type.
  */
 export async function executeShardJob(
   deps: ShardExecutorDeps,
