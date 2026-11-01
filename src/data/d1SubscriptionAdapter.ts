@@ -309,4 +309,18 @@ export class D1SubscriptionAdapter implements SubscriptionStore {
       );
     return rows.map((r) => ({ ...toSubscription(r), status: "canceled" as const, canceledAtMs: nowMs, updatedAtMs: nowMs }));
   }
+
+  async cancelSubscription(subscriptionId: string, nowMs: number): Promise<SubscriptionRecord | null> {
+    const rows = await this.db
+      .select()
+      .from(agentSubscriptions)
+      .where(eq(agentSubscriptions.id, subscriptionId))
+      .limit(1);
+    if (rows.length === 0) return null;
+    await this.db
+      .update(agentSubscriptions)
+      .set({ status: "canceled", canceledAtMs: nowMs, updatedAtMs: nowMs })
+      .where(eq(agentSubscriptions.id, subscriptionId));
+    return { ...toSubscription(rows[0]), status: "canceled" as const, canceledAtMs: nowMs, updatedAtMs: nowMs };
+  }
 }

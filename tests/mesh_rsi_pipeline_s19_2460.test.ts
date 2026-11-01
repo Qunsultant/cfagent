@@ -50,6 +50,8 @@ import {
   MIGRATION_0025_AGENT_MESH_PROPOSALS,
   MIGRATION_0026_TENANT_AUTO_REFRESH,
   MIGRATION_0028_TENANT_PROVIDERS,
+  MIGRATION_0029_PROOF_REDEMPTIONS,
+  MIGRATION_0030_BILLING_CUSTOMERS,
 } from "../src/data/migrationRunner";
 import { agentMeshProposals } from "../src/data/drizzleSchema";
 import { InMemoryMeshProposalStore } from "../src/data/inMemoryMeshProposalAdapter";
@@ -197,7 +199,7 @@ describe("door budget guard", () => {
 /* ------------------------------------------------------------------ */
 
 describe("mesh proposal store", () => {
-  it("migration 0025 is registered and 0029 is last (#2548), and the drizzle schema carries the table", () => {
+  it("migration 0025 is registered and 0030 is last (#2656, after #2548), and the drizzle schema carries the table", () => {
     expect(MIGRATION_0025_AGENT_MESH_PROPOSALS.version).toBe(25);
     expect(MIGRATION_0025_AGENT_MESH_PROPOSALS.sql).toContain("agent_mesh_proposals");
     expect(ALL_MIGRATIONS).toContain(MIGRATION_0025_AGENT_MESH_PROPOSALS);
@@ -208,7 +210,12 @@ describe("mesh proposal store", () => {
     // (tenant data-provider / broker columns) after 0027.
     expect(ALL_MIGRATIONS).toContain(MIGRATION_0028_TENANT_PROVIDERS);
     // #2548 appended migration 0029 (proof redemptions) after 0028.
-    expect(ALL_MIGRATIONS[ALL_MIGRATIONS.length - 1].version).toBe(29);
+    expect(ALL_MIGRATIONS).toContain(MIGRATION_0029_PROOF_REDEMPTIONS);
+    // #2656 (Phase 2.1) appends migration 0030 (billing customers) after 0029.
+    expect(ALL_MIGRATIONS).toContain(MIGRATION_0030_BILLING_CUSTOMERS);
+    expect(ALL_MIGRATIONS[ALL_MIGRATIONS.length - 1]).toBe(
+      MIGRATION_0030_BILLING_CUSTOMERS,
+    );
     expect(getTableName(agentMeshProposals)).toBe("agent_mesh_proposals");
   });
 

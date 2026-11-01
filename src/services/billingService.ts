@@ -157,6 +157,66 @@ export async function createBillingSubscription(input: CreateBillingSubscription
   return { subscription, provider };
 }
 
+/**
+ * Issue #2656 (Phase 2.1) — record a Billing-managed row from an
+ * ALREADY-VERIFIED provider subscription object (the fulfillment
+ * route verified the Checkout session + retrieved this object
+ * before calling here). This is the Checkout-fulfillment twin
+ * of createBillingSubscription: createBillingSubscription
+ * creates the provider subscription itself (operator flow);
+ * this one never calls the provider — it only records what
+ * the provider already returned.
+ *
+ * Idempotent on provider id: a replay returns the existing
+ * row (the route maps that to 409, like the one-time replay
+ * guard). An existing row claimed by a DIFFERENT user or
+ * tenant THROWS (possible account confusion — never a silent
+ * reassign). A missing provider id or an unusable period
+ * THROWS (never invent a period). The row is a NEW provider
+ * row: it never converts a repurchase row (grandfather rule).
+ */
+export async function recordBillingSubscription(input: {
+  subs: SubscriptionStore;
+  provider: ProviderSubscription;
+  userId: string;
+  tenantId: string;
+  planId: string;
+  nowMs?: number;
+}): Promise<SubscriptionRecord> {
+  const { subs, provider, userId, tenantId, planId } = input;
+  const nowMs = input.nowMs ?? Date.now();
+  const providerId = provider.providerSubscriptionId;
+  if (!providerId?.trim()) {
+    throw new Error("Provider returned no subscription id: refusing to record a Billing subscription.");
+  }
+  const existing = await subs.findByProviderSubscriptionId(providerId);
+  if (existing) {
+    if (existing.userId !== userId || existing.tenantId !== tenantId) {
+      throw new Error(
+        `Billing subscription ${providerId} already belongs to another user/tenant: refusing to reassign (operator resolves).`,
+      );
+    }
+    return existing;
+  }
+  const periodStartMs = provider.currentPeriodStartMs ?? nowMs;
+  const periodEndMs = provider.currentPeriodEndMs ?? periodStartMs;
+  if (!(periodEndMs > periodStartMs)) {
+    throw new Error("Provider returned no usable current period: refusing to record a Billing subscription.");
+  }
+  return subs.createSubscription({
+    id: `sub-${crypto.randomUUID().slice(0, 8)}`,
+    userId,
+    tenantId,
+    planId,
+    provider: "stripe",
+    providerPaymentRef: providerId,
+    providerSubscriptionId: providerId,
+    providerStatus: provider.status,
+    periodStartMs,
+    periodEndMs,
+  });
+}
+
 /** Cancel a Billing-managed row at period end, on the provider and locally (local status canceled, period end kept). */
 export async function cancelBillingAtPeriodEnd(input: {
   billing: BillingPort;

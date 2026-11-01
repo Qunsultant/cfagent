@@ -243,6 +243,17 @@
  * array to 301 entries; the delegation sequence is unchanged
  * (same handler, same position).
  *
+ * Issue #2656 (Phase 2.1) added four — POST
+ * /payments/agentic/commercial/subscription/billing-checkout,
+ * POST /payments/agentic/commercial/subscription/billing-purchase,
+ * POST /payments/agentic/commercial/billing/webhook, and
+ * GET/POST /payments/agentic/commercial/billing-policy (a single
+ * combined branch, so one inventory entry) — in
+ * handleAgenticPaymentsRoutes, after the subscription purchase
+ * route and before the cancel route — bringing the pinned array
+ * to 305 entries; the delegation sequence is unchanged (same
+ * handler, same position).
+ *
  * LANDMARK RULE (#405): all position assertions anchor to DELEGATION
  * CALLS - the only landmarks a thin router has.
  */
@@ -425,6 +436,10 @@ const EXPECTED_INVENTORY = [
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/plans/deactivate\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/subscription/checkout\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/subscription/purchase\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/subscription/billing-checkout\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/subscription/billing-purchase\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/billing/webhook\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/billing-policy\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/subscription/cancel\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/subscription\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/pricing\")",
