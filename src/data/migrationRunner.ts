@@ -1243,6 +1243,24 @@ ALTER TABLE agent_tenant_settings ADD COLUMN auto_refresh_interval_s INTEGER NOT
 `,
 };
 
+/**
+ * Migration 0027 — price catalogue approval state (#2547, from
+ * the #2013 review). Existing rows take the column default
+ * 'proposed': every price stored before this migration is a
+ * proposal until an operator approves it, which is exactly the
+ * fail-closed direction. The approval columns are written only
+ * by the catalogue adapters' approvePrice path.
+ */
+export const MIGRATION_0027_PRICE_CATALOGUE_APPROVAL: DataMigration = {
+  version: 27,
+  name: "0027_price_catalogue_approval",
+  sql: `
+ALTER TABLE agent_price_catalogue ADD COLUMN approval_status TEXT NOT NULL DEFAULT 'proposed';
+ALTER TABLE agent_price_catalogue ADD COLUMN approved_by TEXT;
+ALTER TABLE agent_price_catalogue ADD COLUMN approved_at_ms INTEGER;
+`,
+};
+
 export const ALL_MIGRATIONS: DataMigration[] = [
   MIGRATION_0001_AGENT_GOVERNANCE,
   MIGRATION_0002_AGENT_CHAINS_SCHEDULES,
@@ -1270,6 +1288,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [
   MIGRATION_0024_AGENT_MESH_EVAL_RESULTS,
   MIGRATION_0025_AGENT_MESH_PROPOSALS,
   MIGRATION_0026_TENANT_AUTO_REFRESH,
+  MIGRATION_0027_PRICE_CATALOGUE_APPROVAL,
 ];
 
 function splitStatements(sqlText: string): string[] {

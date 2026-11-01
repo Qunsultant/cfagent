@@ -60,7 +60,7 @@ function depsFor(
   const gate = new CfPayMonetizationGate(stubCfpay(), {
     monetizationEnabled: true,
     network: "base-sepolia",
-    priceCatalogue: new InMemoryPriceCatalogueAdapter(),
+    priceCatalogue: new InMemoryPriceCatalogueAdapter(undefined, { approvedBy: "test-operator" }),
   });
   return {
     gate,

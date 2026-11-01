@@ -114,7 +114,7 @@ function gateFor(status = "fulfilled"): CfPayMonetizationGate {
     network: "base-sepolia",
     // #2185: the gate prices from the catalogue port, never from
     // code — the test double seeds the proposed defaults.
-    priceCatalogue: new InMemoryPriceCatalogueAdapter(),
+    priceCatalogue: new InMemoryPriceCatalogueAdapter(undefined, { approvedBy: "test-operator" }),
   });
 }
 
@@ -147,7 +147,7 @@ describe("payment workflow flow (#2043, ported from the workspace cases)", () =>
     const gate = new CfPayMonetizationGate(stubCfpay(), {
       monetizationEnabled: false,
       network: "base-sepolia",
-      priceCatalogue: new InMemoryPriceCatalogueAdapter(),
+      priceCatalogue: new InMemoryPriceCatalogueAdapter(undefined, { approvedBy: "test-operator" }),
     });
     const { deps } = depsFor(gate, { ...baseAccount });
     const out = await runPaymentWorkflowFlow(baseParams, deps, fakeStep());

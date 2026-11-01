@@ -196,15 +196,14 @@ describe("door budget guard", () => {
 /* ------------------------------------------------------------------ */
 
 describe("mesh proposal store", () => {
-  it("migration 0025 is registered and 0026 is last, and the drizzle schema carries the table", () => {
+  it("migration 0025 is registered and 0027 is last (#2547), and the drizzle schema carries the table", () => {
     expect(MIGRATION_0025_AGENT_MESH_PROPOSALS.version).toBe(25);
     expect(MIGRATION_0025_AGENT_MESH_PROPOSALS.sql).toContain("agent_mesh_proposals");
     expect(ALL_MIGRATIONS).toContain(MIGRATION_0025_AGENT_MESH_PROPOSALS);
     // #2481 appended migration 0026 (tenant auto-refresh) after 0025.
     expect(ALL_MIGRATIONS).toContain(MIGRATION_0026_TENANT_AUTO_REFRESH);
-    expect(ALL_MIGRATIONS[ALL_MIGRATIONS.length - 1]).toBe(
-      MIGRATION_0026_TENANT_AUTO_REFRESH,
-    );
+    // #2547 appended migration 0027 (price catalogue approval) after 0026.
+    expect(ALL_MIGRATIONS[ALL_MIGRATIONS.length - 1].version).toBe(27);
     expect(getTableName(agentMeshProposals)).toBe("agent_mesh_proposals");
   });
 

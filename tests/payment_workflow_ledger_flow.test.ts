@@ -94,7 +94,7 @@ function gateFor(status = "fulfilled"): CfPayMonetizationGate {
     monetizationEnabled: true,
     network: "base-sepolia",
     // #2185: the gate prices from the catalogue port, never from code.
-    priceCatalogue: new InMemoryPriceCatalogueAdapter(),
+    priceCatalogue: new InMemoryPriceCatalogueAdapter(undefined, { approvedBy: "test-operator" }),
   });
 }
 

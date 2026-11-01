@@ -615,6 +615,13 @@ function makePaidHarness(opts: { budgetVerdict?: { allowed: boolean; reason?: st
       monetizationEnabled: true,
       priceCatalogue: {
         getPrice: async (family: string) => (family === "stock" ? STOCK_PRICE_USD : null),
+        // #2547: gates resolve through the approval-aware read;
+        // this stub's stock price is an approved fixture.
+        getApprovedPrice: async (family: string) => (family === "stock" ? STOCK_PRICE_USD : null),
+        getEntry: async (family: string) =>
+          family === "stock"
+            ? { family: "stock" as const, priceUSD: STOCK_PRICE_USD, updatedAtMs: 0, approvalStatus: "approved" as const, approvedBy: "test-operator", approvedAtMs: 0 }
+            : null,
       },
       checkout: gateCheckoutPorts,
     });
