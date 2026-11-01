@@ -68,6 +68,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 describe("S3 autoRenewETradeTokens identity pass-through", () => {
@@ -226,9 +227,11 @@ describe("S3 Worker 03:00 renewal pass identity pass-through", () => {
   }
 
   it("internal-id entry + alias record → renewed, upstream called once", async () => {
+    const t0 = new Date("2026-10-31T15:00:00.000Z").getTime();
+    vi.setSystemTime(t0);
     const { fake, env } = renewEnv();
     seedAlias(fake, LOGIN, INTERNAL_ID, ALIAS_LOGIN);
-    const seededAt = new Date(Date.now() - 3600 * 1000).toISOString();
+    const seededAt = new Date(t0 - 3600 * 1000).toISOString();
     fake.seed("etrade", `etrade:token:TEST:${INTERNAL_ID}`, freshToken(LOGIN, seededAt));
     const fetchSpy = stubRenewUpstream();
     const counts = await renewAllStoredETradeTokens(env);
