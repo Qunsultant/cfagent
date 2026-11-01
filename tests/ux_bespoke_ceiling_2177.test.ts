@@ -80,8 +80,11 @@ describe("bespoke-styling ceiling (issue #2177)", () => {
         classes.add(match);
       }
     }
-    expect(braces).toBeLessThanOrEqual(3828);
-    expect(classes.size).toBeLessThanOrEqual(2610); // bumped from 2582 for optionsCard.css (#2563)
+    // Bumped 3828 -> 3845 and 2610 -> 2622 for the Platform Admin drawer
+    // (issue #2624): 12 scoped classes + the media-query block it needs.
+    // Sanctioned growth named in the PR body, per this test's own rule.
+    expect(braces).toBeLessThanOrEqual(3845);
+    expect(classes.size).toBeLessThanOrEqual(2622); // bumped from 2610 for the Platform Admin drawer (#2624)
   });
 
   it("inline styles and raw labels outside the primitives do not grow", () => {
