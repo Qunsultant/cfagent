@@ -1015,30 +1015,18 @@ ${hcTokens}
       color: var(--color-text-dim);
     }
 
-    /* ⌘K Search Modal */
-    .search-modal-backdrop {
+    /* ⌘K Search Modal on the Universal Modal System (#2283 stream 5):
+       backdrop + dialog chrome come from .modal-backdrop/.modal-dialog;
+       only the palette's top-anchored placement stays page-local. */
+    #searchBackdrop,
+    #searchModal {
       display: none;
-      position: fixed;
-      inset: 0;
-      z-index: 100;
-      background: var(--color-night);
-      opacity: 0.8;
-      backdrop-filter: var(--backdrop-blur-md);
-      -webkit-backdrop-filter: var(--backdrop-blur-md);
     }
-    .search-modal-box {
-      display: none;
-      position: fixed;
-      top: 15%;
-      left: 50%;
-      transform: translateX(-50%);
-      z-index: 101;
+    .modal-dialog.search-palette {
+      align-self: flex-start;
+      margin-top: 15vh;
       width: 90%;
       max-width: 580px;
-      background: var(--color-card);
-      border: 1px solid var(--color-border-focus);
-      border-radius: var(--radius-xl);
-      box-shadow: var(--shadow-e3);
       overflow: hidden;
     }
     .search-modal-input-wrap {
@@ -1617,8 +1605,8 @@ ${hcTokens}
   </footer>
 
   <!-- ⌘K Search Modal -->
-  <div class="search-modal-backdrop" id="searchBackdrop"></div>
-  <div class="search-modal-box" id="searchModal" role="dialog" aria-modal="true" aria-label="Search">
+  <div class="modal-backdrop" id="searchBackdrop"></div>
+  <div class="modal-dialog search-palette" id="searchModal" role="dialog" aria-modal="true" aria-label="Search">
     <div class="search-modal-input-wrap">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <circle cx="11" cy="11" r="8"></circle>
@@ -1669,7 +1657,7 @@ ${hcTokens}
 
       function openModal() {
         if (!modal || !backdrop) return;
-        backdrop.style.display = 'block';
+        backdrop.style.display = 'flex';
         modal.style.display = 'block';
         if (field) { field.value = ''; field.focus(); }
       }

@@ -88,6 +88,9 @@ export function NlqSearchTab({ pendingQuery, onHealth, onSearch }: SearchTabProp
             {latencyMs !== null ? ` · ${latencyMs} ms` : ""}
           </p>
           {result.summary && <p>{result.summary}</p>}
+          {(result.rows || []).length > 20 && (
+            <p>Showing first 20 of {(result.rows || []).length} rows.</p>
+          )}
           {(result.rows || []).slice(0, 20).map((row, i) => (
             <p key={i}>{Object.values(row).map((v) => String(v)).join(" · ")}</p>
           ))}

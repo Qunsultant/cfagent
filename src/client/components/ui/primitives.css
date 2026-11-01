@@ -865,3 +865,153 @@ div.ui-modal-title { font-size: inherit; font-weight: inherit; }
 .ui-toast.tone-info { background: var(--color-info-subtle); color: var(--color-info-text); border-color: var(--color-accent-border); }
 .ui-toast.tone-warning { background: var(--color-warning-subtle); color: var(--color-warning-text); border-color: var(--color-warning-border); }
 .ui-toast.tone-danger { background: var(--color-danger-subtle); color: var(--color-danger-text); border-color: var(--color-danger-border); }
+
+/* ---------- Menu / Popover / Drawer (#2283 stream 5) ---------- */
+/* Anchored floating surfaces. Stacking: menus and popovers sit above page
+   content (9000) and below dialogs; the drawer backdrop (9990) and panel
+   (9995) sit below the modal backdrop (9999) and Toast (10000), so
+   transient feedback always stays on top. All colors, radii, shadows,
+   and spacing come from tokens.css. */
+.ui-menu-trigger,
+.ui-popover-trigger {
+  display: inline-block;
+}
+
+.ui-menu {
+  position: fixed;
+  z-index: 9000;
+  min-width: 12rem;
+  max-width: min(20rem, calc(100vw - 2rem));
+  background: var(--color-surface-raised);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-popover);
+  padding: var(--space-1) 0;
+}
+
+.ui-menu-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ui-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+}
+
+.ui-menu-item:hover,
+.ui-menu-item:focus-visible {
+  background: var(--color-surface-hover);
+  outline: none;
+}
+
+.ui-menu-item:focus-visible {
+  box-shadow: var(--shadow-focus-ring);
+}
+
+.ui-menu-item.is-disabled {
+  color: var(--color-text-dim);
+  cursor: not-allowed;
+}
+
+.ui-menu-item.is-danger {
+  color: var(--color-danger);
+}
+
+.ui-popover {
+  position: fixed;
+  z-index: 9000;
+  max-width: min(24rem, calc(100vw - 2rem));
+  background: var(--color-surface-raised);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-popover);
+  padding: var(--space-3) var(--space-4);
+}
+
+.ui-popover-title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-size-title-sm);
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.ui-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9990;
+  background: var(--modal-backdrop-bg);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.ui-drawer-panel {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  z-index: 9995;
+  width: min(28rem, calc(100vw - 2rem));
+  background: var(--color-surface-raised);
+  color: var(--color-text-primary);
+  box-shadow: var(--shadow-drawer);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.ui-drawer-panel:focus {
+  outline: none;
+}
+
+.ui-drawer-panel.side-right {
+  right: 0;
+  border-left: 1px solid var(--color-border-subtle);
+}
+
+.ui-drawer-panel.side-left {
+  left: 0;
+  border-right: 1px solid var(--color-border-subtle);
+}
+
+.ui-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.ui-drawer-title {
+  margin: 0;
+  font-size: var(--font-size-title-sm);
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.ui-drawer-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+div.ui-drawer-title {
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.ui-drawer-body {
+  padding: var(--space-4);
+  flex: 1;
+}

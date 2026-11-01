@@ -43,10 +43,14 @@ const INVENTORY: Record<string, string[]> = {
   "PageShell.tsx": ["PageShell", "PageSection"],
   // #2283 global toast: the single home for transient feedback.
   "Toast.tsx": ["ToastProvider", "useToast"],
+  // #2283 stream 5: anchored surfaces join as primitives.
+  "Menu.tsx": ["Menu"],
+  "Popover.tsx": ["Popover"],
+  "Drawer.tsx": ["Drawer"],
 };
 
 /** Non-primitive files allowed in components/ui (helpers + styles). */
-const HELPERS = new Set(["Field.tsx", "segmentedNavigation.ts", "index.ts", "primitives.css"]);
+const HELPERS = new Set(["Field.tsx", "segmentedNavigation.ts", "index.ts", "primitives.css", "anchorPosition.ts"]);
 
 const ALL_PRIMITIVES = Object.values(INVENTORY).flat();
 

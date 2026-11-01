@@ -10679,36 +10679,7 @@ body {
   transform: scale(1.1);
 }
 
-/* Copilot Drawer Dialog */
-.ask-agent-drawer-card {
-  position: fixed;
-  bottom: 4.8rem;
-  right: 1.5rem;
-  width: 380px;
-  max-width: calc(100vw - 2rem);
-  height: 520px;
-  max-height: calc(100vh - 6.5rem);
-  background: var(--color-surface-raised);
-  border: 1px solid var(--color-border-medium);
-  border-radius: 16px;
-  box-shadow: var(--shadow-drawer);
-  z-index: 99995;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  animation: drawerSlideUp 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-}
 
-@keyframes drawerSlideUp {
-  from {
-    transform: translateY(14px) scale(0.97);
-    opacity: 0;
-  }
-  to {
-    transform: translateY(0) scale(1);
-    opacity: 1;
-  }
-}
 
 .ask-agent-header {
   padding: 0.75rem 1rem;

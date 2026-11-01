@@ -11,9 +11,9 @@
  * when unavailable rather than faked.
  */
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactElement } from "react";
 import { downloadScreenExport } from "./runExport";
-import { Button, Table } from "./components/ui";
+import { Button, Table, type TableColumn } from "./components/ui";
 import { RegeneratePdfButton } from "./RegeneratePdfButton";
 
 export interface StockTechnicalsData {
@@ -122,6 +122,9 @@ export interface ScreenerResultData {
   error?: string;
 }
 
+type OpportunityRow = ScreenerResultData["opportunities"][number];
+type AllStockRow = NonNullable<ScreenerResultData["allStocks"]>[number];
+
 type SortKey =
   | "symbol"
   | "lastPrice"
@@ -216,6 +219,23 @@ function useSortable<T extends Record<string, any>>(rows: T[], defaultKey: SortK
   return { sorted, sortKey, sortDir, toggle };
 }
 
+/**
+ * Derive aria-sort for sortable columns from their SortLabel headers
+ * (#2283 stream 5): the Table primitive renders ariaSort on the <th>,
+ * and the header already carries the sort key — so no per-column edit
+ * is needed when columns are added. Non-sort headers pass through.
+ */
+function withSortAria<T>(columns: TableColumn<T>[], sortKey: SortKey, sortDir: 1 | -1): TableColumn<T>[] {
+  return columns.map((col) => {
+    const k = (col.header as ReactElement<{ k?: SortKey }> | undefined)?.props?.k;
+    if (!k) return col;
+    return {
+      ...col,
+      ariaSort: sortKey === k ? (sortDir === 1 ? "ascending" : "descending") : undefined,
+    };
+  });
+}
+
 function SortLabel({
   label,
   k,
@@ -232,14 +252,16 @@ function SortLabel({
   title?: string;
 }) {
   return (
-    <span
+    <Button
+      variant="ghost"
+      size="sm"
       onClick={() => toggle(k)}
       title={title ?? `Sort by ${label}`}
-      style={{ cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" }}
+      aria-label={`Sort by ${label}`}
     >
       {label}
       {sortKey === k && <span style={{ marginLeft: "0.25rem" }}>{sortDir === 1 ? "▲" : "▼"}</span>}
-    </span>
+    </Button>
   );
 }
 
@@ -576,7 +598,7 @@ export function ScreenerResultsView({ result }: { result: ScreenerResultData }) 
           {result.opportunities.length > 0 ? (
               <Table
                 containerClassName="options-table-scroll"
-                columns={[
+                columns={withSortAria<OpportunityRow>([
                   { key: "symbol", header: <SortLabel label="Symbol" k="symbol" {...opps} />, render: (o) => (<><strong>{o.symbol}</strong>{o.indicators?.directional && (<span title="Strong directional move (|change| ≥ 2%)" style={{ marginLeft: "0.3rem" }}>⚡</span>)}</>) },
                   { key: "company", header: "Company", render: (o) => o.companyName },
                   { key: "sentiment", header: <SortLabel label="Sentiment" k="sentiment" {...opps} title="Day-action sentiment: very bearish → very bullish" />, render: (o) => (<span style={{ color: sentimentColor(o.indicators?.sentiment), fontWeight: 600 }}>{sentimentLabel(o.indicators?.sentiment)}</span>) },
@@ -589,7 +611,7 @@ export function ScreenerResultsView({ result }: { result: ScreenerResultData }) 
                   { key: "gap", header: <SortLabel label="Gap" k="gapPercent" {...opps} title="Overnight gap % (open vs prev close, Yahoo)" />, render: (o) => (<GapValue t={o.technicals} />) },
                   { key: "range", header: <SortLabel label="Range" k="rangeZone" {...opps} title="Range-based overbought/oversold (52-week position, not RSI)" />, render: (o) => (o.indicators?.rangeZone ?? "—") },
                   { key: "valueZone", header: <SortLabel label="Value" k="valueZone" {...opps} title="Heuristic value zone (P/E + 52-week position)" />, render: (o) => (o.indicators?.valueZone ?? "—") },
-                ]}
+                ], opps.sortKey, opps.sortDir)}
                 rows={opps.sorted}
                 rowKey={(o) => o.symbol}
               />
@@ -612,7 +634,7 @@ export function ScreenerResultsView({ result }: { result: ScreenerResultData }) 
               </summary>
               <div className="options-table-scroll" style={{ marginTop: "0.5rem" }}>
                 <Table
-                  columns={[
+                  columns={withSortAria<AllStockRow>([
                     { key: "symbol", header: <SortLabel label="Symbol" k="symbol" {...all} />, render: (s) => (<><strong>{s.symbol}</strong>{s.indicators?.directional && (<span title="Strong directional move" style={{ marginLeft: "0.3rem" }}>⚡</span>)}</>) },
                     { key: "company", header: "Company", render: (s) => s.companyName },
                     { key: "price", header: <SortLabel label="Price" k="lastPrice" {...all} />, render: (s) => ("$" + s.lastPrice.toFixed(2)) },
@@ -629,7 +651,7 @@ export function ScreenerResultsView({ result }: { result: ScreenerResultData }) 
                     { key: "rsi", header: <SortLabel label="RSI(14)" k="rsi14" {...all} title="Real RSI(14) from Yahoo daily history" />, render: (s) => (<span title={s.technicals?.historySource ? `RSI(14) from ${s.technicals.historySource} (${s.technicals.historyBars} bars)` : "No history — RSI unavailable"}>{s.rsi14 == null ? "—" : s.rsi14.toFixed(1)}</span>) },
                     { key: "macd", header: (<span title="MACD(12,26,9) from Yahoo daily history">MACD</span>), render: (s) => (<span style={{ fontSize: "0.75rem" }} title={s.technicals?.macdSignal ?? "No history — MACD unavailable"}>{s.technicals?.macdHistogram == null ? "—" : `${s.technicals.macdHistogram >= 0 ? "+" : ""}${s.technicals.macdHistogram.toFixed(2)}`}</span>) },
                     { key: "source", header: "Source", render: (s) => (<span style={{ fontSize: "0.75rem", color: "var(--color-text-muted)" }}>{s.source}</span>) },
-                  ]}
+                  ], all.sortKey, all.sortDir)}
                   rows={all.sorted}
                   rowKey={(s) => s.symbol}
                 />
