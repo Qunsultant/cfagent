@@ -21,6 +21,7 @@ import {
   type LifecycleStore,
   type NotificationPreferences,
   type ReferralAllocation,
+  type ReferralAttribution,
   type ReferralEarning,
   type ReferralRules,
 } from "./lifecyclePorts";
@@ -35,6 +36,7 @@ export class InMemoryLifecycleAdapter implements LifecycleStore {
     updatedAtMs: 0,
   };
   private earnings = new Map<string, ReferralEarning>();
+  private attributions = new Map<string, ReferralAttribution>();
   private preferences = new Map<string, NotificationPreferences>();
   private digestSends = new Set<string>();
 
@@ -81,6 +83,43 @@ export class InMemoryLifecycleAdapter implements LifecycleStore {
     };
     this.earnings.set(id, record);
     return { ...record };
+  }
+
+  async recordAttribution(input: {
+    referrerUserId: string;
+    referredUserId: string;
+    tenantId: string;
+  }): Promise<ReferralAttribution> {
+    if (!input.referrerUserId || !input.referredUserId || !input.tenantId) {
+      throw new Error("referrerUserId, referredUserId, and tenantId are required.");
+    }
+    if (input.referrerUserId === input.referredUserId) {
+      throw new Error("A user cannot refer themselves.");
+    }
+    const existing = this.attributions.get(input.referredUserId);
+    if (existing) {
+      if (existing.referrerUserId !== input.referrerUserId) {
+        throw new Error(
+          `User ${input.referredUserId} is already attributed to a different referrer; attribution is set-once and is never silently overwritten.`,
+        );
+      }
+      return { ...existing };
+    }
+    const record: ReferralAttribution = {
+      referredUserId: input.referredUserId,
+      referrerUserId: input.referrerUserId,
+      tenantId: input.tenantId,
+      source: "operator",
+      createdAtMs: Date.now(),
+    };
+    this.attributions.set(input.referredUserId, record);
+    return { ...record };
+  }
+
+  async getAttribution(referredUserId: string): Promise<ReferralAttribution | null> {
+    if (!referredUserId) return null;
+    const row = this.attributions.get(referredUserId);
+    return row ? { ...row } : null;
   }
 
   async listEarnings(userId: string): Promise<ReferralEarning[]> {

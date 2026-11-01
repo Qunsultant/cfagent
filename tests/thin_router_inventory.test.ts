@@ -254,6 +254,12 @@
  * to 323 entries; the delegation sequence is unchanged (same
  * handler, same position).
  *
+ * Issue #2657 (Phase 2.2) added one — POST
+ * /payments/agentic/commercial/referral/attribute — in
+ * handleAgenticPaymentsRoutes, after the referral record-earn
+ * route — bringing the pinned array to 324 entries (measured);
+ * the delegation sequence is unchanged (same handler, same position).
+ *
  * LANDMARK RULE (#405): all position assertions anchor to DELEGATION
  * CALLS - the only landmarks a thin router has.
  */
@@ -463,6 +469,7 @@ const EXPECTED_INVENTORY = [
   "handleAgenticPaymentsRoutes :: includes(\"/payments/agentic/auto-approve-limit\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/referral/balance\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/referral/record-earn\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/referral/attribute\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/lifecycle/preferences\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/lifecycle/preferences\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/lifecycle/welcome\")",
