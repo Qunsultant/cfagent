@@ -170,6 +170,18 @@ const SECTION_METADATA: { category: RouteCategory; title: string; id: string }[]
 /** Id of the left-nav item that hosts the Platform Admin sub-menu. */
 export const PLATFORM_ADMIN_NAV_ID = "platform-admin";
 
+/** Id of the left-nav item that links the demo checkout sandbox page. */
+export const SANDBOX_NAV_ID = "sandbox-checkout";
+
+/**
+ * Issue #2645: `sandbox-checkout` is a nav id, not a route — it links the
+ * standalone server-rendered /checkout/sandbox page, which is not an SPA tab.
+ * Returns the page path for sandbox nav ids, undefined for everything else.
+ */
+export function sandboxNavHrefFromNavId(id: string): string | undefined {
+  return id === SANDBOX_NAV_ID ? "/checkout/sandbox" : undefined;
+}
+
 export function buildDefaultLeftNavConfig(): LeftNavConfig {
   const navRoutes = ROUTES.filter(hasNavEntry).sort(
     (a, b) => a.navEntry.navOrder - b.navEntry.navOrder
@@ -219,6 +231,27 @@ export function buildDefaultLeftNavConfig(): LeftNavConfig {
         icon: "Settings",
         description: "Ads, tasks, keys, providers & IAAA",
         subItems: PLATFORM_ADMIN_NAV_ITEMS,
+      },
+    ],
+  });
+
+  // Issue #2645: the demo pages are a left-nav destination with the same
+  // shape as Platform Admin — a section whose items are nav ids, not
+  // routes. The nav shell intercepts the sandbox id and opens the
+  // standalone server page (see sandboxNavHrefFromNavId); the route
+  // itself stays public and ungated per the owner's 2026-11-01 decision.
+  sections.push({
+    id: "section-sandbox",
+    title: "SANDBOX",
+    category: "Platform",
+    items: [
+      {
+        id: SANDBOX_NAV_ID,
+        label: "Checkout sandbox",
+        shortLabel: "Sandbox",
+        category: "Platform",
+        icon: "Checkout",
+        description: "Demo checkout terminal (public sandbox page)",
       },
     ],
   });
