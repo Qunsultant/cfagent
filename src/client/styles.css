@@ -13756,5 +13756,5 @@ body {
 }
 
 .platform-admin-menu-item.active .platform-admin-menu-icon {
-  color: var(--color-primary-default);
+  color: var(--color-primary);
 }
