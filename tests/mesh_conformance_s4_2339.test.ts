@@ -117,21 +117,24 @@ const FIBERS_GAP = GAP(
 );
 
 /**
- * The Skills cell for every PortThink agent (S14, #2417; owner
- * addition #2225 comment 6517280689). The per-agent note states the
- * class's turn posture; the shared core states the fleet fact. The
- * GAP-vs-NOT-APPLICABLE call, per cell: every PortThink class is a
- * Think subclass and inherits the hook, so the capability is
- * available to the class and unadopted — GAP on the fibers
- * precedent, even where no turn runs on the class today. The two
- * non-Agent roster entries are NOT-APPLICABLE (no harness exists
- * for the aspect to apply to).
+ * The Skills cell for the unadopted PortThink agents (S14, #2417;
+ * owner addition #2225 comment 6517280689). The per-agent note
+ * states the class's turn posture; the shared core states the
+ * fleet fact. The GAP-vs-NOT-APPLICABLE call, per cell: every
+ * PortThink class is a Think subclass and inherits the hook, so
+ * the capability is available to the class and unadopted — GAP on
+ * the fibers precedent, even where no turn runs on the class
+ * today. The two non-Agent roster entries are NOT-APPLICABLE (no
+ * harness exists for the aspect to apply to). OrchestratorAgent
+ * left this group in #2705 (owner direction 2026-11-01): its cell
+ * is IMPLEMENTED, with the conformance evidence and its residue
+ * recorded in the cell.
  */
 const SKILLS_GAP_CORE =
-  "No agent class overrides getSkills() — zero occurrences in src/ (fleet pin below) — so no skill catalog exists and Think's skills tools (activate_skill / read_skill_resource) never appear in any turn. The adapter is present in the pinned SDK: @cloudflare/think 0.23.0's shipped types expose Think.getSkills() returning SkillSource[] (workspace / R2 / code-manifest sources; the default returns none), and PortThink neither overrides nor blocks the hook, so adoption is a per-class override plus a source. Whether the port's adapter-driven turn surfaces Think's skills tools end-to-end is unverified — the repo's Node harness stubs @cloudflare/think (#2003), so the hook is pinned against the package's shipped types (tests/mesh_tool_registry_s14_2417.test.ts), never exercised.";
+  "Exactly one agent class overrides getSkills() — OrchestratorAgent, adopted by #2705 (fleet pin below) — so a skill catalog exists on that class only; this class does not override the hook, so no catalog exists here and Think's skills tools (activate_skill / read_skill_resource) never appear in its turns. The adapter is present in the pinned SDK: @cloudflare/think 0.23.0's shipped types expose Think.getSkills() returning SkillSource[] (workspace / R2 / code-manifest sources; the default returns none), and PortThink neither overrides nor blocks the hook, so adoption is a per-class override plus a source. For the adopted class, the port-conformance question is answered at the SDK seam (tests/agent_skills_enablement_s1_2705.test.ts drives the class's real getSkills() output through the SDK's own catalog loader and turn tool factory and executes both tools; a live workerd model turn remains unobserved — the repo's Node harness stubs @cloudflare/think, #2003). For this class the hook is unexercised because unadopted.";
 const SKILLS_GAP = (turnNote: string): MatrixCell =>
   GAP(
-    "programme backlog (owner addition #2225 comment 6517280689 — adoption is a separate owner-sequenced decision; no slice yet)",
+    "programme backlog (owner addition #2225 comment 6517280689 — first slice #2705 adopted OrchestratorAgent under the owner's 2026-11-01 direction; the remaining classes are per-class follow-up slices, owner-sequenced)",
     `${turnNote} ${SKILLS_GAP_CORE}`,
   );
 const SKILLS_NO_TURN_NOTE =
@@ -180,7 +183,10 @@ const MATRIX: MatrixRow[] = [
         "this.schedule / this.scheduleEvery through the port schedule facets (orchestrator.ts:448-495).",
       ),
       fibers: FIBERS_GAP,
-      skills: SKILLS_GAP("Turn-capable — this class’s chat turn is exactly the surface skills tools would appear on."),
+      skills: IMPL(
+        "Adopted by #2705 (owner direction 2026-11-01, executing #2460's adopt-as-packaging recommendation): OrchestratorAgent overrides getSkills() — a thin delegation to src/agents/orchestrator/skillPacks.ts — serving ONE in-repo code-manifest source (the SDK's skills.manifest factory) with ONE pack, chat-screening-doors (the chat screening doors' playbook, #2488/#2581); Think re-lists the source before every turn and its catalog block lists the pack. Conformance evidence: tests/agent_skills_enablement_s1_2705.test.ts drives the class's real getSkills() output through the SDK's own loadSkillCatalog and createSkillTools (the exact modules and functions Think's turn assembly runs) — with the source the tool set is exactly activate_skill + read_skill_resource and both tools are executed against the pack; with no sources the catalog and the tool set are empty.",
+        "A live workerd model turn is unobserved: the repo's Node harness stubs @cloudflare/think and its runTurn refuses (#2003), so the evidence boundary is the model invocation itself — the model's production choice to activate the pack is the follow-up observation, not a claim here. run_skill_script stays absent: no skill script runner is configured anywhere in the fleet.",
+      ),
     },
   },
   {
@@ -911,11 +917,10 @@ describe("fleet fact pins (#2339)", () => {
     );
   });
 
-  it("no agent source overrides getSkills — the skills GAP fact (S14, #2417)", () => {
+  it("exactly one agent source overrides getSkills — OrchestratorAgent, the skills adoption boundary (#2705)", () => {
     for (const row of MATRIX) {
-      expect(agentSource(row.className), row.className).not.toContain(
-        "getSkills",
-      );
+      const has = agentSource(row.className).includes("getSkills");
+      expect(has, row.className).toBe(row.className === "OrchestratorAgent");
     }
   });
 });

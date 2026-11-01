@@ -25,10 +25,13 @@
  *     refusal itself is the recorded outcome. Filing is the
  *     pipeline's maximum reach: nothing here actuates.
  *
- *  3. SKILLS, ANSWERED NOT ADOPTED. The packaging assessment is
- *     recorded with a recommendation, consistent with S14's
- *     agent-skills family record — which stays ABSENT: this
- *     slice adopts nothing.
+ *  3. SKILLS, ANSWERED NOT ADOPTED — BY THIS SLICE. The packaging
+ *     assessment is recorded with a recommendation, consistent
+ *     with S14's agent-skills family record as it stood at S19:
+ *     ABSENT, because this slice adopted nothing. The adoption
+ *     the assessment recommended landed later, in #2705 (owner
+ *     direction 2026-11-01): the pins below now record the
+ *     assessment AND its first-slice adoption state.
  */
 import { describe, expect, it } from "vitest";
 import { getTableName } from "drizzle-orm";
@@ -505,15 +508,20 @@ describe("proposal pipeline", () => {
 describe("Skills-packaging assessment", () => {
   it("the assessment is recorded with a recommendation and its reasoning", () => {
     expect(MESH_SKILLS_ASSESSMENT.recommendation).toBe("adopt-as-packaging");
-    expect(MESH_SKILLS_ASSESSMENT.adoptionState).toMatch(/deferred/);
-    expect(MESH_SKILLS_ASSESSMENT.adoptionState).toMatch(/owner/);
     expect(MESH_SKILLS_ASSESSMENT.fits.length).toBeGreaterThan(0);
     expect(MESH_SKILLS_ASSESSMENT.doesNotFit.length).toBeGreaterThan(0);
     expect(MESH_SKILLS_ASSESSMENT.controlPoint).toMatch(/write-access/);
   });
 
-  it("it is consistent with S14's record: the family stays ABSENT, nothing adopted", () => {
+  it("its adoption state records the first slice (#2705): one class adopted, the rest deferred per class", () => {
+    expect(MESH_SKILLS_ASSESSMENT.adoptionState).toMatch(/first slice adopted/);
+    expect(MESH_SKILLS_ASSESSMENT.adoptionState).toContain("2705");
+    expect(MESH_SKILLS_ASSESSMENT.adoptionState).toMatch(/deferred/);
+    expect(MESH_SKILLS_ASSESSMENT.adoptionState).toMatch(/owner/);
+  });
+
+  it("it is consistent with S14's record as updated by the adoption: the family is live on the one adopted class", () => {
     const family = MESH_TOOL_FAMILIES.find((f) => f.id === "agent-skills");
-    expect(family?.status).toBe("absent");
+    expect(family?.status).toBe("live");
   });
 });

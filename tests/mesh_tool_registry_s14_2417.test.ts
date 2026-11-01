@@ -22,17 +22,25 @@
  *     an in-memory Map (the same fact the S4 fibers cells rest on).
  *   - web-search / web-fetch are "absent" BECAUSE no tool by either
  *     name exists in src/ or in the MCP catalog.
- *   - agent-skills is "absent" BECAUSE no agent class overrides
- *     Think's getSkills() hook and none of the SDK's skills tools is
- *     registered anywhere — while the adapter itself is present in
- *     the pinned SDK and PortThink neither overrides nor blocks it.
- *     Adopt skills, or bump the SDK past the hook, and a pin here
- *     fails. Harness note: Node vitest aliases @cloudflare/think to
- *     a stub (#2003 — the real package's runtime graph reaches
+ *   - agent-skills is "live" (since #2705) BECAUSE exactly one
+ *     agent class — OrchestratorAgent — overrides Think's
+ *     getSkills() hook to serve an in-repo code-manifest source,
+ *     while none of the SDK's skills tools is registered in the
+ *     MCP catalog (they are turn tools, built by Think's turn
+ *     assembly from the catalog). The adapter itself is present
+ *     in the pinned SDK and PortThink neither overrides nor
+ *     blocks it. Adopt skills on another class, remove the one
+ *     override, or bump the SDK past the hook, and a pin here
+ *     fails. Harness note: Node vitest aliases @cloudflare/think
+ *     to a stub (#2003 — the real package's runtime graph reaches
  *     workerd-only imports), so the SDK-surface fact is pinned
  *     against the installed package's shipped type declarations —
  *     the same locked artifact the production build bundles — not
- *     against a runtime prototype this harness cannot load.
+ *     against a runtime prototype this harness cannot load. The
+ *     driven conformance evidence (catalog + tool factory +
+ *     executed tools) lives in
+ *     tests/agent_skills_enablement_s1_2705.test.ts, which loads
+ *     the real agents/skills modules Think itself runs.
  *
  * Live statuses for the command families rest on S1's live catalog
  * accounting; this suite adds the evidence for the non-command live
@@ -122,7 +130,7 @@ const EXPECTED_STATUS: Record<string, MeshToolFamilyStatus> = {
   "web-search": "absent",
   "web-fetch": "absent",
   "ai-search-platform": "degraded",
-  "agent-skills": "absent",
+  "agent-skills": "live",
 };
 
 describe("tool family status table (#2417)", () => {
@@ -210,10 +218,10 @@ describe("absent status evidence (#2417)", () => {
     }
   });
 
-  it("agent-skills: the family records the SDK's three tool names, none of them registered anywhere", () => {
+  it("agent-skills: the family records the SDK's three tool names, none of them registered in the MCP catalog (they are turn tools)", () => {
     const family = getToolFamily("agent-skills");
     expect(family).toBeDefined();
-    expect(family!.status).toBe("absent");
+    expect(family!.status).toBe("live");
     expect([...(family!.toolNames ?? [])].sort()).toEqual(
       ["activate_skill", "read_skill_resource", "run_skill_script"].sort(),
     );
@@ -223,16 +231,23 @@ describe("absent status evidence (#2417)", () => {
     }
   });
 
-  it("agent-skills: no agent class overrides getSkills() — no skill catalog exists in the fleet", () => {
+  it("agent-skills: exactly one agent class overrides getSkills() — OrchestratorAgent (#2705); the hook lives in exactly two src files", () => {
     for (const agent of MESH_AGENTS) {
-      expect(read(agent.sourceFile), agent.className).not.toContain("getSkills");
+      const has = read(agent.sourceFile).includes("getSkills");
+      expect(has, agent.className).toBe(agent.className === "OrchestratorAgent");
     }
-    for (const file of SRC_FILES) {
-      expect(readFileSync(file, "utf8").includes("getSkills"), file).toBe(false);
-    }
+    const withHook = SRC_FILES.filter((file) =>
+      readFileSync(file, "utf8").includes("getSkills"),
+    )
+      .map((file) => file.slice(root.length + 1).replace(/\\/g, "/"))
+      .sort();
+    expect(withHook).toEqual([
+      "src/agents/orchestrator.ts",
+      "src/agents/orchestrator/skillPacks.ts",
+    ]);
   });
 
-  it("agent-skills: the adapter the absent record cites is present in the pinned SDK, and PortThink neither overrides nor blocks it", () => {
+  it("agent-skills: the adapter the family record cites is present in the pinned SDK, and PortThink neither overrides nor blocks it", () => {
     // package.json pins @cloudflare/think, and the installed
     // package's shipped type declarations expose the getSkills()
     // hook returning SkillSource[] — the adapter exists in the SDK
