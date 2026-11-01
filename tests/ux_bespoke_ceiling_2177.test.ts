@@ -90,11 +90,14 @@ describe("bespoke-styling ceiling (issue #2177)", () => {
     // one_off_stylesheets_1337.json). Sanctioned growth named in
     // the PR body, per this test's own rule.
     // Bumped 3867 -> 3871 for issue #2703: Platform Admin sub-menu icon styling.
-    expect(braces).toBeLessThanOrEqual(3871);
+        // Bumped 3871 -> 3891 and 2648 -> 2659 for issue #2720: Multi-broker harmonization,
+    // compact single-line controls, and ticker controls in ETradeDynamicMenu.
+    expect(braces).toBeLessThanOrEqual(3891);
     // Classes bumped 2619 -> 2646 for the same #2681 sheet (27 stp-
     // classes, tokens only).
     // Classes bumped 2646 -> 2648 for issue #2703 (platform-admin-menu-row, platform-admin-menu-icon).
-    expect(classes.size).toBeLessThanOrEqual(2648); // ratcheted from 2622 by the #2177 close
+    // Classes bumped 2648 -> 2659 for issue #2720 (etrade-controls-single-line, btn-env-mini, etc.).
+    expect(classes.size).toBeLessThanOrEqual(2659); // ratcheted from 2622 by the #2177 close
   });
 
   it("inline styles and raw labels outside the primitives do not grow", () => {
