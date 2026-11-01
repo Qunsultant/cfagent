@@ -373,11 +373,31 @@ export async function handleOpenaimpMcpHttpRequest(
         error: { code: -32602, message: "Invalid params: 'name' is required" },
       });
     }
+    // #1768 (F-48): a present-but-non-string name/uri previously fell
+    // through to the SDK's -32603 schema dump; the established
+    // contract answers -32602 with a business message, as for a
+    // missing field above. Tool execution errors themselves stay
+    // spec-shaped (isError in-result) — this guard covers only the
+    // params-shape cases, never a tool's own failure.
+    if (msg.method === "tools/call" && msg.params?.name !== undefined && typeof msg.params.name !== "string") {
+      return Response.json({
+        jsonrpc: "2.0",
+        id: msg.id ?? null,
+        error: { code: -32602, message: "Invalid params: 'name' must be a string" },
+      });
+    }
     if (msg.method === "resources/read" && !msg.params?.uri) {
       return Response.json({
         jsonrpc: "2.0",
         id: msg.id ?? null,
         error: { code: -32602, message: "Invalid params: 'uri' is required" },
+      });
+    }
+    if (msg.method === "resources/read" && msg.params?.uri !== undefined && typeof msg.params.uri !== "string") {
+      return Response.json({
+        jsonrpc: "2.0",
+        id: msg.id ?? null,
+        error: { code: -32602, message: "Invalid params: 'uri' must be a string" },
       });
     }
   }
