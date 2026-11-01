@@ -32,7 +32,7 @@
  * alphabetically by id so concurrent additions land at different
  * positions instead of one prepend anchor (the CHANGELOG lesson).
  */
-export type RouteCategory = "Execution" | "Intelligence" | "Playbooks" | "Platform" | "Billing";
+export type RouteCategory = "Execution" | "Intelligence" | "Playbooks" | "Platform" | "Billing" | "Marketing";
 
 export type RouteBadgeType = "pro" | "live" | "ai" | "mcp" | "new" | "neutral";
 
@@ -83,13 +83,13 @@ export const ROUTES = [
     shellRetain: true,
     navGroup: "ads",
     crumb: "Marketplace",
-    category: "Platform",
+    category: "Marketing",
     icon: "Ads",
     description: "Curated partner marketplace, developer sponsorships, and deal feed",
     navEntry: {
       label: "Sponsored Marketplace",
       shortLabel: "Deals",
-      navOrder: 18,
+      navOrder: 13,
       defaultVisible: true,
       badge: "Partners",
       badgeType: "neutral",
@@ -106,7 +106,7 @@ export const ROUTES = [
     navEntry: {
       label: "Agents",
       shortLabel: "Agents",
-      navOrder: 25,
+      navOrder: 20,
       defaultVisible: true,
       badge: "Registry",
       badgeType: "neutral",
@@ -123,7 +123,7 @@ export const ROUTES = [
     navEntry: {
       label: "Approvals",
       shortLabel: "Approvals",
-      navOrder: 4,
+      navOrder: 3,
       defaultVisible: true,
       badge: "Queue",
       badgeType: "neutral",
@@ -139,7 +139,7 @@ export const ROUTES = [
     navEntry: {
       label: "Audit Vault",
       shortLabel: "Audit Log",
-      navOrder: 15,
+      navOrder: 21,
       defaultVisible: true,
       badge: "DID",
       badgeType: "pro",
@@ -189,7 +189,7 @@ export const ROUTES = [
     navEntry: {
       label: "Checkout",
       shortLabel: "Checkout",
-      navOrder: 24,
+      navOrder: 18,
       defaultVisible: true,
       badge: "Testnet",
       badgeType: "pro",
@@ -206,7 +206,7 @@ export const ROUTES = [
     navEntry: {
       label: "Docs & Reports",
       shortLabel: "Docs",
-      navOrder: 22,
+      navOrder: 26,
       defaultVisible: true,
       badge: "PDF",
       badgeType: "neutral",
@@ -214,7 +214,7 @@ export const ROUTES = [
   },
   {
     id: "endpoints",
-    navGroup: "endpoints",
+    navGroup: "agents",
     crumb: "MCP Explorer",
     category: "Platform",
     icon: "Endpoints",
@@ -222,7 +222,7 @@ export const ROUTES = [
     navEntry: {
       label: "Developer & MCP",
       shortLabel: "Endpoints",
-      navOrder: 13,
+      navOrder: 25,
       defaultVisible: true,
       badge: "MCP",
       badgeType: "mcp",
@@ -239,7 +239,7 @@ export const ROUTES = [
     navEntry: {
       label: "Order History Ledger",
       shortLabel: "Ledger",
-      navOrder: 3,
+      navOrder: 17,
       defaultVisible: true,
       badge: "AUDIT",
       badgeType: "pro",
@@ -255,7 +255,7 @@ export const ROUTES = [
     navEntry: {
       label: "Records NLQ",
       shortLabel: "Records",
-      navOrder: 14,
+      navOrder: 11,
       defaultVisible: true,
       badge: "NLQ",
       badgeType: "neutral",
@@ -266,13 +266,13 @@ export const ROUTES = [
     retain: true,
     navGroup: "omnichannel",
     crumb: "Email & Slack",
-    category: "Intelligence",
+    category: "Execution",
     icon: "Omnichannel",
     description: "Autonomous alerts, trade approvals, and scheduled market briefings dispatched to Slack and Email",
     navEntry: {
       label: "Email & Slack Agents",
       shortLabel: "Omnichannel",
-      navOrder: 10,
+      navOrder: 5,
       defaultVisible: true,
       badge: "Relay",
       badgeType: "new",
@@ -292,12 +292,12 @@ export const ROUTES = [
     navGroup: "options-screener",
     crumb: "Options Flows",
     category: "Intelligence",
-    icon: "Options",
+    icon: "Flows",
     description: "Options flows, dark pool prints, institutional sweeps, blocks, and insider disclosures",
     navEntry: {
       label: "Options Flows",
       shortLabel: "Flows",
-      navOrder: 5,
+      navOrder: 23,
       defaultVisible: true,
       badge: "Sweeps",
       badgeType: "pro",
@@ -312,13 +312,13 @@ export const ROUTES = [
     // "Options" is already the Options Flows entry's icon, and "Screeners"
     // is the Screeners entry's, so this entry reuses the otherwise
     // nav-unused "Scanner" key from the existing icon map — no new icon.
-    icon: "Scanner",
+    icon: "Options",
     description:
       "The one options home: contract screen, strategy panel, best-trade, compare, LLM ideas and evaluate, discovery, scheduled runs, IV history, flows, reports, workflow runs, and schedules — linked to their existing surfaces, not duplicated (issue 2596, slice 1)",
     navEntry: {
       label: "Options Screener",
       shortLabel: "Options",
-      navOrder: 26,
+      navOrder: 7,
       defaultVisible: true,
       badge: "Options",
       badgeType: "ai",
@@ -360,7 +360,7 @@ export const ROUTES = [
     navEntry: {
       label: "Payment Assurance",
       shortLabel: "Assurance",
-      navOrder: 21,
+      navOrder: 27,
       defaultVisible: true,
       badge: "Test",
       badgeType: "neutral",
@@ -377,7 +377,7 @@ export const ROUTES = [
     navEntry: {
       label: "Payments",
       shortLabel: "Payments",
-      navOrder: 16,
+      navOrder: 15,
       defaultVisible: true,
       badge: "x402",
       badgeType: "neutral",
@@ -393,7 +393,7 @@ export const ROUTES = [
     navEntry: {
       label: "Platform Admin",
       shortLabel: "Admin",
-      navOrder: 27,
+      navOrder: 19,
       defaultVisible: true,
       badge: "Admin",
       badgeType: "neutral",
@@ -421,13 +421,13 @@ export const ROUTES = [
     shellRetain: true,
     navGroup: "referrals",
     crumb: "Referrals",
-    category: "Platform",
+    category: "Marketing",
     icon: "Referrals",
     description: "Community referral engine, reward tracking, and social share links",
     navEntry: {
       label: "Referrals & Earn",
       shortLabel: "Referrals",
-      navOrder: 17,
+      navOrder: 12,
       defaultVisible: true,
       badge: "Earn",
       badgeType: "new",
@@ -452,7 +452,7 @@ export const ROUTES = [
     navEntry: {
       label: "Research & Dual Feed",
       shortLabel: "Research",
-      navOrder: 7,
+      navOrder: 24,
       defaultVisible: true,
       badge: "Feed",
       badgeType: "new",
@@ -469,7 +469,7 @@ export const ROUTES = [
     navEntry: {
       label: "Revenue Analytics",
       shortLabel: "Revenue",
-      navOrder: 19,
+      navOrder: 16,
       defaultVisible: true,
       badge: "Yield",
       badgeType: "new",
@@ -521,7 +521,7 @@ export const ROUTES = [
     navEntry: {
       label: "Search",
       shortLabel: "Search",
-      navOrder: 23,
+      navOrder: 9,
       defaultVisible: true,
       badge: "Hub",
       badgeType: "mcp",
@@ -532,13 +532,13 @@ export const ROUTES = [
     shellRetain: true,
     navGroup: "social",
     crumb: "Social",
-    category: "Platform",
+    category: "Marketing",
     icon: "Social",
     description: "Today's social brief editor, manual daily-post trigger, pending approvals, and per-channel token health",
     navEntry: {
       label: "Social Posting",
       shortLabel: "Social",
-      navOrder: 20,
+      navOrder: 14,
       defaultVisible: true,
       badge: "Daily",
       badgeType: "new",
@@ -558,13 +558,13 @@ export const ROUTES = [
     retain: true,
     navGroup: "voice",
     crumb: "Voice Desk",
-    category: "Intelligence",
+    category: "Execution",
     icon: "Voice",
     description: "Hands-free voice recognition desk for querying quotes, screening setups, and trade confirmation",
     navEntry: {
       label: "Voice Trading Desk",
       shortLabel: "Voice Desk",
-      navOrder: 9,
+      navOrder: 4,
       defaultVisible: true,
       badge: "Audio",
       badgeType: "ai",
@@ -581,7 +581,7 @@ export const ROUTES = [
     navEntry: {
       label: "Workflows",
       shortLabel: "Workflows",
-      navOrder: 12,
+      navOrder: 10,
       defaultVisible: true,
       badge: "Trace",
       badgeType: "neutral",
@@ -597,7 +597,7 @@ export const ROUTES = [
     navEntry: {
       label: "Workflows & FAQ",
       shortLabel: "Guides",
-      navOrder: 11,
+      navOrder: 22,
       defaultVisible: true,
       badge: "14 Guides",
       badgeType: "neutral",

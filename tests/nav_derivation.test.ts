@@ -23,31 +23,31 @@ const EXPECTED_ORDER = [
   "autopilot",
   "order",
   "portfolio",
-  "ledger",
   "approvals",
-  "options-flows",
-  "screeners",
-  "research",
-  "chat",
   "voice",
   "omnichannel",
-  "workflows",
+  "screeners",
+  "options-screener",
+  "chat",
+  "search",
   "workflow-runs",
-  "endpoints",
   "nlq",
-  "audit",
-  "payments",
   "referrals",
   "ads",
-  "revenue",
   "social",
-  "payment-assurance",
-  "docs",
-  "search",
+  "payments",
+  "revenue",
+  "ledger",
   "checkout",
-  "agents",
-  "options-screener",
   "platform-admin",
+  "agents",
+  "audit",
+  "workflows",
+  "options-flows",
+  "research",
+  "endpoints",
+  "docs",
+  "payment-assurance",
 ];
 
 describe("nav derivation", () => {
@@ -60,7 +60,7 @@ describe("nav derivation", () => {
       expect(item.label.length).toBeGreaterThan(0);
       expect(item.shortLabel.length).toBeGreaterThan(0);
       expect(item.description.length).toBeGreaterThan(0);
-      expect(["Execution", "Intelligence", "Playbooks", "Platform", "Billing"]).toContain(item.category);
+      expect(["Execution", "Intelligence", "Playbooks", "Platform", "Billing", "Marketing"]).toContain(item.category);
       expect(typeof item.icon).toBe("function");
     }
   });

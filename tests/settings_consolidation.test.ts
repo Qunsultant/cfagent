@@ -27,7 +27,7 @@ describe("Settings Consolidation & Unified Preferences", () => {
       expect(item.id).toBeTruthy();
       expect(item.label).toBeTruthy();
       expect(item.category).toBeTruthy();
-      expect(["Execution", "Intelligence", "Playbooks", "Platform", "Billing"]).toContain(item.category);
+      expect(["Execution", "Intelligence", "Playbooks", "Platform", "Billing", "Marketing"]).toContain(item.category);
       expect(DEFAULT_VISIBLE_NAV_TABS[item.id]).toBe(true);
     }
   });

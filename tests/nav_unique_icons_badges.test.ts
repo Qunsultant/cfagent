@@ -61,7 +61,8 @@ describe("left-nav unique icons and badges", () => {
     expect(byId.get("checkout")!.navEntry.badge).toBe("Testnet");
     expect(byId.get("docs")!.icon).toBe("Docs");
     expect(byId.get("search")!.icon).toBe("Search");
-    expect(byId.get("options-screener")!.icon).toBe("Scanner");
+    expect(byId.get("options-screener")!.icon).toBe("Options");
+    expect(byId.get("options-flows")!.icon).toBe("Flows");
     expect(byId.get("options-screener")!.navEntry.badge).toBe("Options");
     expect(byId.get("platform-admin")!.icon).toBe("Settings");
     expect(byId.get("platform-admin")!.navEntry.badge).toBe("Admin");

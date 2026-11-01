@@ -203,6 +203,7 @@ export function LeftNavBar({
         {onToggleCollapse && (
           <Button
             variant="ghost"
+            size="sm"
             className="sidebar-collapse-btn"
             onClick={onToggleCollapse}
             title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
@@ -253,6 +254,7 @@ export function LeftNavBar({
                       <div className={`sidebar-nav-item-row ${active ? "active" : ""}`}>
                         <Button
                           variant="ghost"
+            size="sm"
                           className={`sidebar-nav-item ${active ? "active" : ""}`}
                           onClick={() => handleItemClick(item, hasSubMenu)}
                           onFocus={(e) => {
@@ -288,6 +290,7 @@ export function LeftNavBar({
                         {!collapsed && hasSubMenu && (
                           <Button
                             variant="ghost"
+            size="sm"
                             className={`submenu-toggle-btn ${isExpanded ? "open" : ""}`}
                             onClick={(e) => toggleSubMenu(item.id, e)}
                             title={isExpanded ? `Collapse ${item.label} sub-menu` : `Expand ${item.label} sub-menu`}
@@ -309,6 +312,7 @@ export function LeftNavBar({
                         {collapsed && hasSubMenu && visibleSubItems.length > 0 && (
                           <Button
                             variant="ghost"
+            size="sm"
                             className={`submenu-toggle-btn ${flyoutOpen ? "open" : ""}`}
                             onClick={(e) => {
                               e.stopPropagation();
@@ -345,6 +349,7 @@ export function LeftNavBar({
                             return (
                               <Button
                                 variant="ghost"
+            size="sm"
                                 key={sub.id}
                                 className={`sidebar-submenu-item ${subActive ? "active" : ""}`}
                                 onClick={() => handleSubItemClick(sub)}
@@ -403,6 +408,7 @@ export function LeftNavBar({
                             return (
                               <Button
                                 variant="ghost"
+            size="sm"
                                 key={sub.id}
                                 className={`sidebar-submenu-item ${subActive ? "active" : ""}`}
                                 onClick={() => {

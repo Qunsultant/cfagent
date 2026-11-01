@@ -55,15 +55,64 @@ async function renderNavBar(props: Partial<React.ComponentProps<typeof LeftNavBa
 }
 
 describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
-  it("renders the 6 configured sections: Execution, Intelligence, Workflows, Billing, Platform, Sandbox", () => {
-    expect(DEFAULT_LEFT_NAV_CONFIG.sections).toHaveLength(6);
+  it("renders the 7 configured sections: Execution, Intelligence, Workflows, Marketing, Billing, Platform, Sandbox", () => {
+    expect(DEFAULT_LEFT_NAV_CONFIG.sections).toHaveLength(7);
     const titles = DEFAULT_LEFT_NAV_CONFIG.sections.map((s) => s.title);
     expect(titles).toContain("TRADING & EXECUTION");
     expect(titles).toContain("INTELLIGENCE & COPILOT");
     expect(titles).toContain("WORKFLOWS");
+    expect(titles).toContain("MARKETING");
     expect(titles).toContain("BILLING");
     expect(titles).toContain("PLATFORM");
     expect(titles).toContain("SANDBOX");
+  });
+
+  it("configures Marketing menu with referrals, ads, and social", () => {
+    const marketing = DEFAULT_LEFT_NAV_CONFIG.sections.find((s) => s.id === "section-marketing");
+    expect(marketing).toBeDefined();
+    const itemIds = marketing!.items.map((i) => i.id);
+    expect(itemIds).toContain("referrals");
+    expect(itemIds).toContain("ads");
+    expect(itemIds).toContain("social");
+  });
+
+  it("configures Agents with endpoints as a sub-menu under Platform", () => {
+    const agentsItem = findNavItemConfig(DEFAULT_LEFT_NAV_CONFIG, "agents");
+    expect(agentsItem).toBeDefined();
+    expect(agentsItem?.subItems).toBeDefined();
+    const subIds = agentsItem!.subItems!.map((s) => s.id);
+    expect(subIds).toContain("agents");
+    expect(subIds).toContain("endpoints");
+  });
+
+  it("places Voice and Omnichannel in Execution", () => {
+    const exec = DEFAULT_LEFT_NAV_CONFIG.sections.find((s) => s.id === "section-execution");
+    expect(exec).toBeDefined();
+    const itemIds = exec!.items.map((i) => i.id);
+    expect(itemIds).toContain("voice");
+    expect(itemIds).toContain("omnichannel");
+  });
+
+  it("positions Options Screener directly after Stock Screener and Chat under Goal Screen", () => {
+    const intel = DEFAULT_LEFT_NAV_CONFIG.sections.find((s) => s.id === "section-intelligence");
+    expect(intel).toBeDefined();
+    const itemIds = intel!.items.map((i) => i.id);
+    const stockIdx = itemIds.indexOf("screeners");
+    const optIdx = itemIds.indexOf("options-screener");
+    const goalIdx = itemIds.indexOf("goal-screen");
+    const chatIdx = itemIds.indexOf("chat");
+
+    expect(stockIdx).toBeGreaterThanOrEqual(0);
+    expect(optIdx).toBe(stockIdx + 1);
+    expect(goalIdx).toBe(optIdx + 1);
+    expect(chatIdx).toBe(goalIdx + 1);
+  });
+
+  it("positions Workflows & FAQ as the last menu item of Platform", () => {
+    const plat = DEFAULT_LEFT_NAV_CONFIG.sections.find((s) => s.id === "section-platform");
+    expect(plat).toBeDefined();
+    const lastItem = plat!.items[plat!.items.length - 1];
+    expect(lastItem.id).toBe("workflows");
   });
 
   it("configures Stock Screener with only screeners and research sub-menus", () => {
