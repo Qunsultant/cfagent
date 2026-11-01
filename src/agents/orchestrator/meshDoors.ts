@@ -138,7 +138,12 @@ export type MeshDoorErrorCode =
   // a deterministic screen), screen_intent_required (ND mode
   // without its intent, or an intent supplied without ND mode).
   | "nd_mode_unavailable"
-  | "screen_intent_required";
+  | "screen_intent_required"
+  // Issue #2581: the options-strategy door's catalog refusal —
+  // invalid_strategy_type (the requested strategy type does not
+  // resolve against the engine's strategy catalog; refused
+  // before any engine call).
+  | "invalid_strategy_type";
 
 export class MeshDoorError extends Error {
   readonly code: MeshDoorErrorCode;

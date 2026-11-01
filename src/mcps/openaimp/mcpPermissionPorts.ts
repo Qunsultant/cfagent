@@ -214,6 +214,11 @@ export const MCP_TOOL_SCOPES: Record<string, McpScope> = {
   // changes state (and is budget-gated inside the door when
   // monetization is on); the command itself moves no money.
   run_stock_screen: "mcp:write",
+  // #2581: the mesh options-strategy door — runs the options
+  // evaluation engine over a universe batch (a read-shaped
+  // scan that persists nothing itself and moves no money; the
+  // write scope matches its sibling screen door).
+  run_options_strategy_screen: "mcp:write",
   // execute (7)
   execute_nlq: "mcp:execute",
   "chain.run": "mcp:execute",
