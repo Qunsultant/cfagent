@@ -9,6 +9,10 @@
  * pay-per-run redemption only.
  */
 import {
+  assertTenantScopeMatch,
+  bindTenantScope,
+} from "./tenantScope";
+import {
   allocateRedemption,
   defaultPreferences,
   referralEarningId,
@@ -132,8 +136,13 @@ export class InMemoryLifecycleAdapter implements LifecycleStore {
   }
 
   async getPreferences(userId: string, tenantId: string): Promise<NotificationPreferences> {
+    // #1761: mirror the D1 adapter — a blank tenant throws, a
+    // stored row for another tenant reads as defaults, never
+    // as the other tenant's row.
+    const scope = bindTenantScope(tenantId);
     const existing = this.preferences.get(userId);
     if (!existing) return defaultPreferences(userId, tenantId);
+    if (existing.tenantId !== scope.tenantId) return defaultPreferences(userId, tenantId);
     return { ...existing };
   }
 
@@ -146,6 +155,11 @@ export class InMemoryLifecycleAdapter implements LifecycleStore {
     if (!input.userId || !input.tenantId) {
       throw new Error("userId and tenantId are required.");
     }
+    // #1761: mirror the D1 adapter — a stored row for another
+    // tenant throws before any write, instead of being
+    // silently overwritten (the map key is user_id alone).
+    const stored = this.preferences.get(input.userId);
+    if (stored) assertTenantScopeMatch(stored.tenantId, bindTenantScope(input.tenantId));
     const existing = await this.getPreferences(input.userId, input.tenantId);
     const record: NotificationPreferences = {
       userId: input.userId,

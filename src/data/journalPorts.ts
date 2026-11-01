@@ -114,13 +114,23 @@ export interface JournalPort {
    * Throws on an unbalanced set, a multi-tenant set, an unknown
    * account, or an invalid amount — before writing anything.
    * Replaying an already-posted transactionRef returns the
-   * existing entries without writing.
+   * existing entries without writing. #1761: replay is
+   * tenant-scoped — a replay under a DIFFERENT tenant throws
+   * (fail closed) instead of returning the first tenant's
+   * entries or silently dropping the write on the tenant-blind
+   * entry id.
    */
   postEntries(entries: JournalEntryInput[]): Promise<JournalEntry[]>;
   /** All entries for one tenant, oldest first. No unscoped read. */
   listEntries(tenantId: string): Promise<JournalEntry[]>;
-  /** Entries for one transactionRef (any tenant; refs are unique per run). */
-  getEntriesByRef(transactionRef: string): Promise<JournalEntry[]>;
+  /**
+   * Entries for one transactionRef IN one tenant (#1761: the
+   * pre-fix read took no tenant and returned any tenant's rows
+   * for the ref, so a replay post in another tenant was
+   * short-circuited by the first tenant's entries. A blank
+   * tenant throws; a mismatched tenant reads tenant-empty).
+   */
+  getEntriesByRef(transactionRef: string, tenantId: string): Promise<JournalEntry[]>;
   /** The seeded chart, ordered by code. */
   listAccounts(): Promise<JournalAccount[]>;
 }
