@@ -294,6 +294,10 @@
     // default in cfFlagshipAdapter.ts is what turns it on there.
     // Rollback is setting this var to "0" and redeploying (explicit
     // disable wins over the default in every adapter).
-    "FEATURE_PAYMENT_ASSURANCE": "1"
+    "FEATURE_PAYMENT_ASSURANCE": "1",
+    // Issue #2596: Options Screener product programme slice 1.
+    // Enables the top-level Options Screener nav item and sub-menus.
+    // Rollback is removing this var (or setting to "0") and redeploying.
+    "FEATURE_OPTIONS_SCREENER": "1"
   }
 }
