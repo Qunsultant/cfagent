@@ -178,8 +178,8 @@ export function LlmOptionsIdeasPanel({ activeEnv, userLogin }: LlmOptionsIdeasPa
         />
         </FieldShell>
         <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "flex-end", flexWrap: "wrap" }}>
-          <Button type="submit" disabled={loading || !symbol.trim() || !question.trim()}>
-            {loading ? "Analyzing chains with Neural Engine…" : "Ask LLM"}
+          <Button type="submit" disabled={loading || !symbol.trim() || !question.trim()} loading={loading}>
+            {"Ask LLM"}
           </Button>
           <Button
             type="button"

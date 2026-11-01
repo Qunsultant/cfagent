@@ -124,7 +124,7 @@ export function ThreeWayComparison({ data, activeEnv, userLogin }: {
         {data.generationNotes.skippedReason ? ` Skipped: ${data.generationNotes.skippedReason}.` : ""}
       </p>
       <Button variant="secondary" size="sm" loading={outcomesLoading} onClick={() => void loadOutcomes()}>
-        {outcomesLoading ? "Loading outcomes…" : "Load ledger outcomes"}
+        {"Load ledger outcomes"}
       </Button>
       {outcomesError && <div className="options-error" role="alert">{outcomesError}</div>}
       {outcomes !== null && (

@@ -934,8 +934,8 @@ export function Chat({ user }: { user: User }) {
               scopeNote="Live observability stream into router decisions, sub-agent executions, AI decision evaluations, and firm memory state."
             >
             <div>
-              <Button variant="secondary" size="sm" onClick={fetchAuditData} disabled={auditLoading}>
-                {auditLoading ? "Refreshing…" : "🔄 Refresh Data"}
+              <Button variant="secondary" size="sm" onClick={fetchAuditData} disabled={auditLoading} loading={auditLoading}>
+                {"🔄 Refresh Data"}
               </Button>
             </div>
 
@@ -1141,7 +1141,7 @@ export function Chat({ user }: { user: User }) {
                 onClick={() => browseTable(selectedBrowseTable, browseSearch)}
                 loading={browsingLoading}
               >
-                {browsingLoading ? "Loading Records…" : "🔍 Browse Records"}
+                {"🔍 Browse Records"}
               </Button>
             </div>
 

@@ -71,8 +71,8 @@ export function NlqSearchTab({ pendingQuery, onHealth, onSearch }: SearchTabProp
         }}
       >
         <TextInput label="Query" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="e.g. show my recent screens" />
-        <Button type="submit" variant="primary" disabled={loading || !query.trim()}>
-          {loading ? "Searching…" : "Search"}
+        <Button type="submit" variant="primary" disabled={loading || !query.trim()} loading={loading}>
+          {"Search"}
         </Button>
       </form>
       {/* Issue #1169 S4-4: this tab already retains the full native

@@ -490,7 +490,7 @@ export function PaymentWorkflowAssurance({ userLogin }: { userLogin?: string }) 
           Authorized at submission (one-off only — skips the second approval wait)
         </label>
         <div style={{ display: "flex", gap: "var(--space-3)", marginTop: "var(--space-4)", flexWrap: "wrap" }}>
-          <Button variant="primary" onClick={startLive} disabled={liveBusy}>{liveBusy ? "Working…" : "Start live run"}</Button>
+          <Button variant="primary" onClick={startLive} disabled={liveBusy} loading={liveBusy}>{"Start live run"}</Button>
           <Button variant="secondary" onClick={refreshLive} disabled={liveBusy || !liveStart}>Refresh status</Button>
           <Button variant="secondary" onClick={() => sendLiveEvent("approval", { approved: true })} disabled={liveBusy || !liveStart}>Approve</Button>
           <Button variant="secondary" onClick={() => sendLiveEvent("approval", { approved: false })} disabled={liveBusy || !liveStart}>Reject</Button>
@@ -572,7 +572,7 @@ export function PaymentWorkflowAssurance({ userLogin }: { userLogin?: string }) 
           Authorized at submission (one-off scheduled only — skips the second approval wait)
         </label>
         <div style={{ display: "flex", gap: "var(--space-3)", marginTop: "var(--space-4)", flexWrap: "wrap" }}>
-          <Button variant="primary" onClick={runOne} disabled={running}>{running ? "Running…" : "Run this scenario"}</Button>
+          <Button variant="primary" onClick={runOne} disabled={running} loading={running}>{"Run this scenario"}</Button>
           <Button variant="secondary" onClick={runSuite} disabled={running}>Run all 9 preset tests</Button>
         </div>
       </PageSection>

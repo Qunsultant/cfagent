@@ -272,6 +272,40 @@ familiar bottom-right place, in the same shape, whatever panel acted.
   page-level error/empty states) still belongs to the inline Notice —
   Toast is for transient feedback, Notice is for state that stays.
 
+### Loading and empty states: never present loading as empty
+
+While data is in flight the panel shows a Spinner (or a Skeleton);
+EmptyState is reserved for settled-but-empty. An EmptyState titled
+"Loading…" lies twice: it claims emptiness before the data has answered,
+and it keeps claiming loading after the fetch failed.
+
+- Async buttons use the Button `loading` prop, never a label swap.
+  A swap ("Save" → "Saving…") renames the action mid-flight, shifts
+  layout as the text width changes, and drops the spinner affordance;
+  `loading` keeps the label, shows the spinner, disables the button,
+  and sets `aria-busy`. Keep any existing `disabled` expression; the
+  prop adds its own disable.
+- Table has no `loading` prop: its `empty` slot renders a Spinner while
+  loading and the static EmptyState once settled
+  (`empty={loading ? <Spinner /> : <EmptyState title="…" />}`).
+- PageShell `loading` hides children — never wire refresh-loading to
+  it. It is for the initial page load only; a refresh keeps the old
+  content visible with the refresh control itself in its loading state.
+- Skeleton is for content-shaped waits (a panel whose layout is known
+  before its data arrives); Spinner is for region waits. Either is a
+  loading affordance, never an empty state.
+- Silent success is a missing confirmation: a completed user action
+  that changes nothing visible gets a transient Toast (see Toasts
+  above), not silence and not a persistent Notice.
+- Pins (`tests/ux_no_loading_empty_2283.test.ts`,
+  `tests/ux_button_loading_2283.test.ts`): no EmptyState title contains
+  "Loading" (the scan tracks `{}` depth, so JSX-valued props do not
+  hide a title); no Button child ternary swaps to an ellipsis label.
+  Static ellipses are content, not swaps, and live in the pin's
+  allowlist with the reason: a picker label ("Select strategies…"),
+  truncated content ("NLQ: …"), a truncation suffix inside a computed
+  label. A new swap cannot hide behind the allowlist.
+
 ## 7. Goal capture and delegation
 
 The creation flow must collect:

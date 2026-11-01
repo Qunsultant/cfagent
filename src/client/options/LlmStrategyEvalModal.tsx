@@ -266,8 +266,8 @@ export function LlmStrategyEvalModal({
                 type="submit"
                 className="llm-eval-submit-btn"
                 disabled={loading || !question.trim()}
-              >
-                {loading ? "Analyzing strategy with Neural Engine…" : "🚀 Run LLM Evaluation"}
+               loading={loading}>
+                {"🚀 Run LLM Evaluation"}
               </Button>
               <Button
                 type="button"

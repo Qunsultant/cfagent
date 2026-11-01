@@ -152,8 +152,8 @@ export function NotificationPreferencesPanel({
         <Notice tone="danger">Preferences could not be saved. Try again.</Notice>
       )}
       {saved && !onSaved && <Notice tone="success">Saved.</Notice>}
-      <Button type="button" variant="primary" disabled={saving} onClick={() => void save()}>
-        {saving ? "Saving…" : "Save"}
+      <Button type="button" variant="primary" disabled={saving} onClick={() => void save()} loading={saving}>
+        {"Save"}
       </Button>{" "}
       {onContinue && (
         <Button type="button" variant="secondary" onClick={onContinue}>

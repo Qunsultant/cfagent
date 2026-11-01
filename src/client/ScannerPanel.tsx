@@ -1311,6 +1311,17 @@ export function ScannerPanel({ activeEnv, userLogin, onPreviewTrade }: ScannerPa
     setForm((current) => ({ ...current, [field]: value }));
   };
 
+  // Strategy picker button label (#2283 stream 4): computed once, rendered
+  // static — the trailing "…" is a truncation suffix for the "N selected"
+  // list, not a progress label, so it must not live in a Button ternary.
+  const strategyPickerLabel =
+    selectedStrategies.length === 0
+      ? "Select strategies…"
+      : `${selectedStrategies.length} selected: ${selectedStrategies
+          .map((id) => strategyCatalog.find((s) => s.id === id)?.label || id)
+          .slice(0, 3)
+          .join(", ")}${selectedStrategies.length > 3 ? "…" : ""}`;
+
   return (
     <section className="scp-panel" id="section-opportunity-scanner" style={{ scrollMarginTop: 80 }}>
       <div className="scp-header">
@@ -1350,15 +1361,8 @@ export function ScannerPanel({ activeEnv, userLogin, onPreviewTrade }: ScannerPa
               className="scp-strategy-picker-btn"
               onClick={() => setStrategyModalOpen(true)}
               disabled={strategyCatalog.length === 0}
-            >
-              {strategyCatalog.length === 0
-                ? "Loading strategies…"
-                : selectedStrategies.length === 0
-                  ? "Select strategies…"
-                  : `${selectedStrategies.length} selected: ${selectedStrategies
-                      .map((id) => strategyCatalog.find((s) => s.id === id)?.label || id)
-                      .slice(0, 3)
-                      .join(", ")}${selectedStrategies.length > 3 ? "…" : ""}`}
+             loading={strategyCatalog.length === 0}>
+              {strategyPickerLabel}
             </Button>
           </FieldShell>
           {selectedStrategies.length > 0 && (
@@ -1401,9 +1405,8 @@ export function ScannerPanel({ activeEnv, userLogin, onPreviewTrade }: ScannerPa
           </div>
         )}
         <div className="scp-field scp-field-btn">
-          <Button type="submit" className="scp-run" disabled={scanning}>
-          variant="primary"
-            {scanning ? "Running scan…" : "Run scan"}
+          <Button type="submit" className="scp-run" disabled={scanning} loading={scanning} variant="primary">
+            {"Run scan"}
           </Button>
         </div>
       </form>
@@ -1559,13 +1562,10 @@ export function ScannerPanel({ activeEnv, userLogin, onPreviewTrade }: ScannerPa
           )}
 
           <div className="scp-form-actions">
-            <Button type="submit" className="scp-run" disabled={saving}>
-            variant="primary"
-              {saving ? "Saving…" : editingId ? "Save changes" : "Create profile"}
+            <Button type="submit" className="scp-run" disabled={saving} loading={saving} variant="primary">
+              {editingId ? "Save changes" : "Create profile"}
             </Button>
-            <Button className="scp-mini-btn" onClick={() => { setFormOpen(false); setEditingId(null); }}>
-            variant="secondary"
-            size="sm"
+            <Button className="scp-mini-btn" onClick={() => { setFormOpen(false); setEditingId(null); }} variant="secondary" size="sm">
               Cancel
             </Button>
           </div>
@@ -1592,14 +1592,10 @@ export function ScannerPanel({ activeEnv, userLogin, onPreviewTrade }: ScannerPa
         {compareIds.length > 0 && (
           <div className="scp-note scp-compare-bar">
             Comparing {compareIds.length} of 2 runs picked.
-            <Button className="scp-mini-btn" disabled={compareIds.length !== 2} onClick={compareSelected}>
-            variant="secondary"
-            size="sm"
+            <Button className="scp-mini-btn" disabled={compareIds.length !== 2} onClick={compareSelected} variant="secondary" size="sm">
               Show diff
             </Button>
-            <Button className="scp-mini-btn" onClick={() => setCompareIds([])}>
-            variant="secondary"
-            size="sm"
+            <Button className="scp-mini-btn" onClick={() => setCompareIds([])} variant="secondary" size="sm">
               Clear
             </Button>
           </div>
@@ -1637,9 +1633,7 @@ export function ScannerPanel({ activeEnv, userLogin, onPreviewTrade }: ScannerPa
               Re-run
             </Button>
             {idx < history.length - 1 && (
-              <Button className="scp-mini-btn" onClick={() => diffVsPrevious(run, idx)}>
-              variant="secondary"
-              size="sm"
+              <Button className="scp-mini-btn" onClick={() => diffVsPrevious(run, idx)} variant="secondary" size="sm">
                 Diff vs previous
               </Button>
             )}

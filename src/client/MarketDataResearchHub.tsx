@@ -605,9 +605,9 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
                   type="button"
                   onClick={() => fetchScreener()}
                   disabled={screenerLoading}
-                >
+                 loading={screenerLoading}>
                   <span className={screenerLoading ? "strat-spin" : ""}>🔄</span>
-                  {screenerLoading ? "Scanning…" : "Refresh Screener"}
+                  {"Refresh Screener"}
                 </Button>
               </div>
             </div>
@@ -640,8 +640,8 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
                   type="button"
                   onClick={() => loadAllSymbolData(activeSymbol)}
                   disabled={quoteLoading || snapshotLoading}
-                >
-                  {quoteLoading || snapshotLoading ? "Refreshing…" : "🔄 Refresh Dual Feeds"}
+                 loading={quoteLoading || snapshotLoading}>
+                  {"🔄 Refresh Dual Feeds"}
                 </Button>
               </div>
             </div>
@@ -919,8 +919,8 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
               className="btn-run-scan"
               onClick={() => fetchScreener()}
               disabled={screenerLoading}
-            >
-              {screenerLoading ? "Scanning…" : "🔍 Run Scan"}
+             loading={screenerLoading}>
+              {"🔍 Run Scan"}
             </Button>
           </div>
 
@@ -1366,8 +1366,10 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
                     <span>Updated: {new Date(yfinanceQuote.timestamp).toLocaleTimeString()}</span>
                   </div>
                 </div>
+              ) : quoteLoading ? (
+                <Spinner size="lg" label="Loading Yahoo Finance quote" />
               ) : (
-                <EmptyState icon={<Spinner size="lg" label="Loading Yahoo Finance quote" />} title="Loading Yahoo Finance Quote…" />
+                <EmptyState title="No Yahoo Finance quote available" />
               )}
             </div>
 
@@ -1433,8 +1435,10 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
                     <span>Updated: {new Date(alpacaQuote.timestamp).toLocaleTimeString()}</span>
                   </div>
                 </div>
+              ) : quoteLoading ? (
+                <Spinner size="lg" label="Loading Alpaca quote" />
               ) : (
-                <EmptyState icon={<Spinner size="lg" label="Loading Alpaca quote" />} title="Loading Alpaca Quote…" />
+                <EmptyState title="No Alpaca quote available" />
               )}
             </div>
           </div>
@@ -1609,8 +1613,8 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
                 disabled={barsLoading}
                 onClick={() => loadHistoricalBars(activeSymbol, barTimeframe, barLimit, barProvider)}
                 title="Refresh live market bars" style={{ marginLeft: "0.25rem" }}
-              >
-                {barsLoading ? "Refreshing…" : "↻ Refresh"}
+               loading={barsLoading}>
+                {"↻ Refresh"}
               </Button>
             </div>
           </div>
@@ -1658,7 +1662,7 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
             ]}
             rows={bars}
             rowKey={(bar, i) => bar.timestamp || String(i)}
-            empty={<EmptyState title={barsLoading ? "Loading historical bars…" : "No bars returned."} />}
+            empty={barsLoading ? <Spinner label="Loading historical bars" /> : <EmptyState title="No bars returned." />}
           />
         </div>
       )}
@@ -1731,8 +1735,8 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
                 type="button"
                 onClick={loadAlpacaTraces}
                 disabled={tracesLoading}
-              >
-                {tracesLoading ? "Refreshing Traces…" : "🔄 Refresh Audit Traces"}
+               loading={tracesLoading}>
+                {"🔄 Refresh Audit Traces"}
               </Button>
             </div>
 
@@ -1828,8 +1832,8 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
               className="btn-run-compare"
               disabled={compareLoading}
               onClick={() => runComparison(compareSymbolsInput)}
-            >
-              {compareLoading ? "Comparing…" : "⚡ Run Valuation Comparison"}
+             loading={compareLoading}>
+              {"⚡ Run Valuation Comparison"}
             </Button>
           </div>
             <Table
@@ -1885,7 +1889,7 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
             ]}
             rows={comparisonResults}
             rowKey={({ symbol }) => symbol}
-            empty={<EmptyState title={compareLoading ? "Gathering multi-stock metrics from Yahoo Finance & Alpaca…" : "No stocks to compare."} />}
+            empty={compareLoading ? <Spinner label="Gathering multi-stock metrics" /> : <EmptyState title="No stocks to compare." />}
           />
         </div>
       )}

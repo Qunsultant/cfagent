@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { apiFetch as fetch } from "./apiFetch";
 import { getDisplayUserDid } from "../agents/did";
-import { Card, Badge, TextInput, Button, EmptyState, Select, Table, Modal, PageShell, FieldShell, useToast } from "./components/ui";
+import { Card, Badge, TextInput, Button, EmptyState, Select, Spinner, Table, Modal, PageShell, FieldShell, useToast } from "./components/ui";
 import { getRoute } from "./routes";
 import {
   ETradeQuote,
@@ -1437,8 +1437,8 @@ export function ETradeTradingHub({
                     className="btn-submit-pin"
                     variant="primary"
                     disabled={oauthSubmitting || !oauthPin.trim()}
-                  >
-                    {oauthSubmitting ? "Verifying…" : "✓ Complete Authorization & Store Token"}
+                   loading={oauthSubmitting}>
+                    {"✓ Complete Authorization & Store Token"}
                   </Button>
                   <Button
                     className="btn-cancel-modal"
@@ -1544,8 +1544,8 @@ export function ETradeTradingHub({
                   style={{ background: "var(--color-accent)", borderColor: "var(--color-border-focus)" }}
                   disabled={executingDraft}
                   onClick={handleRefreshAndExecuteDraft}
-                >
-                  {executingDraft ? "Refreshing & Executing…" : "⚡ Re-preview & Resubmit Now"}
+                 loading={executingDraft}>
+                  {"⚡ Re-preview & Resubmit Now"}
                 </Button>
               ) : (
                 <Button
@@ -1553,8 +1553,8 @@ export function ETradeTradingHub({
                   variant="primary"
                   disabled={executingDraft}
                   onClick={() => handleExecuteDraft(activeDraft.orderId, "approved")}
-                >
-                  {executingDraft ? "Executing on E*TRADE…" : "✅ Approve & Submit Trade to E*TRADE"}
+                 loading={executingDraft}>
+                  {"✅ Approve & Submit Trade to E*TRADE"}
                 </Button>
               )}
               <Button variant="primary"
@@ -1611,8 +1611,8 @@ export function ETradeTradingHub({
                   type="button"
                   disabled={executingDraft}
                   onClick={handleRefreshAndExecuteDraft}
-                >
-                  {executingDraft ? "Refreshing & Executing…" : "⚡ Re-preview & Submit Fresh Order to E*TRADE"}
+                 loading={executingDraft}>
+                  {"⚡ Re-preview & Submit Fresh Order to E*TRADE"}
                 </Button>
               </div>
             )}
@@ -1686,9 +1686,9 @@ export function ETradeTradingHub({
                     onClick={() => fetchSymbolQuote(orderSymbol)}
                     disabled={quoteLoading}
                     title={`Refresh live quote for ${orderSymbol}`}
-                  >
+                   loading={quoteLoading}>
                     <span className={quoteLoading ? "strat-spin" : ""}>↻</span>
-                    <span>{quoteLoading ? "Refreshing…" : "Refresh Quote"}</span>
+                    <span>{"Refresh Quote"}</span>
                   </Button>
                 )}
               </div>
@@ -1772,8 +1772,8 @@ export function ETradeTradingHub({
                         disabled={quoteLoading}
                         onClick={() => fetchSymbolQuote(orderSymbol)}
                         title="Fetch live quote from E*TRADE"
-                      >
-                        {quoteLoading ? "Fetching…" : "🔍 Get Live Quote"}
+                       loading={quoteLoading}>
+                        {"🔍 Get Live Quote"}
                       </Button>
                     </div>
                   </FieldShell>
@@ -2194,9 +2194,9 @@ export function ETradeTradingHub({
                 onClick={() => fetchPositions()}
                 disabled={positionsLoading}
                 title="Refresh live portfolio positions from broker"
-              >
+               loading={positionsLoading}>
                 <span className={positionsLoading ? "strat-spin" : ""}>↻</span>
-                <span>{positionsLoading ? "Refreshing…" : "Refresh Positions"}</span>
+                <span>{"Refresh Positions"}</span>
               </Button>
               <Button variant="trade"
                 type="button"
@@ -2268,18 +2268,18 @@ export function ETradeTradingHub({
                       ]}
                       rows={positions}
                       rowKey={(pos: any) => pos.symbol}
-                      empty={<EmptyState
-                        icon="💼"
-                        title={positionsLoading ? "Loading portfolio positions from broker…" : "No Active Holdings Found"}
-                        description={
-                          positionsLoading
-                            ? "Connecting to brokerage upstream and calculating portfolio equity balances…"
-                            : isLive
-                            ? "No active positions found in your connected live brokerage account. Use the Fast Order Ticket to build and preview an order."
-                            : "Your paper trading sandbox has no open positions. Place a paper trade or load curated demo holdings (NVDA, AAPL, MSFT, SPY) to explore portfolio analytics, charts, and Greeks."
-                        }
-                        action={
-                          !positionsLoading ? (
+                      empty={positionsLoading ? (
+                        <Spinner label="Loading portfolio positions" />
+                      ) : (
+                        <EmptyState
+                          icon="💼"
+                          title="No Active Holdings Found"
+                          description={
+                            isLive
+                              ? "No active positions found in your connected live brokerage account. Use the Fast Order Ticket to build and preview an order."
+                              : "Your paper trading sandbox has no open positions. Place a paper trade or load curated demo holdings (NVDA, AAPL, MSFT, SPY) to explore portfolio analytics, charts, and Greeks."
+                          }
+                          action={
                             <div style={{ display: "flex", gap: "var(--space-3)", justifyContent: "center", flexWrap: "wrap" }}>
                               <Button variant="trade" onClick={() => handleNavigateSubTab("order")}>
                                 ⚡ Build Order Ticket
@@ -2290,9 +2290,9 @@ export function ETradeTradingHub({
                                 </Button>
                               )}
                             </div>
-                          ) : undefined
-                        }
-                      />}
+                          }
+                        />
+                      )}
                     />
           </div>
 
@@ -2340,8 +2340,8 @@ export function ETradeTradingHub({
               variant="secondary"
               disabled={ordersLoading}
               onClick={fetchOrders}
-            >
-              {ordersLoading ? "Refreshing…" : "🔄 Refresh Ledger"}
+             loading={ordersLoading}>
+              {"🔄 Refresh Ledger"}
             </Button>
           </div>
 
@@ -2362,7 +2362,7 @@ export function ETradeTradingHub({
                       ]}
                       rows={orders}
                       rowKey={(ord: any) => ord.id}
-                      empty={<EmptyState title={ordersLoading ? "Loading orders ledger…" : "No trade orders recorded yet."} />}
+                      empty={ordersLoading ? <Spinner label="Loading orders ledger" /> : <EmptyState title="No trade orders recorded yet." />}
                     />
           </div>
         </Card>
@@ -2674,8 +2674,8 @@ export function ETradeTradingHub({
                     disabled={emailLoading}
                     onClick={handleSimulateEmail}
                     variant="primary"
-                  >
-                    {emailLoading ? "Processing Inbound Email…" : "⚡ Send Test Email to Agent"}
+                   loading={emailLoading}>
+                    {"⚡ Send Test Email to Agent"}
                   </Button>
                 </div>
               </div>
@@ -2783,8 +2783,8 @@ export function ETradeTradingHub({
                     disabled={slackLoading}
                     onClick={() => handleSimulateSlack()}
                     variant="primary"
-                  >
-                    {slackLoading ? "Simulating Slack Agent…" : "⚡ Simulate Slack Message"}
+                   loading={slackLoading}>
+                    {"⚡ Simulate Slack Message"}
                   </Button>
                 </div>
               </div>
@@ -3005,8 +3005,8 @@ export function ETradeTradingHub({
                   disabled={voiceLoading || !voiceInputText.trim()}
                   className="btn-voice-send"
                   variant="primary"
-                >
-                  {voiceLoading ? "Processing…" : "Send Voice Turn"}
+                 loading={voiceLoading}>
+                  {"Send Voice Turn"}
                 </Button>
               </form>
             </div>
