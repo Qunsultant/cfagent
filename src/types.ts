@@ -586,6 +586,15 @@ export interface Env {
   // Nightly mas_memory retention window in days, by updated_at (issue
   // #786). Default 365. A value <= 0 disables only the mas_memory prune.
   MAS_MEMORY_RETENTION_DAYS?: string;
+  // Issue #1766: orphan-sweep delete gate. Only the exact string
+  // "true" enables deletion of orphaned reports/*.json objects;
+  // anything else (including unset) runs the sweep report-only.
+  // Fail-closed: the sweep never deletes by default.
+  RETENTION_ORPHAN_SWEEP_DELETE?: string;
+  // Issue #1766: nightly R2 snapshot export gate. Runs unless
+  // explicitly set to "false" (a missing backup is the unsafe
+  // state, so the fail-closed direction is ON).
+  RETENTION_SNAPSHOT_ENABLED?: string;
   // Cloudflare Vectorize & AI Search
   VECTORIZE?: any;
   // Optional / backward-compatible bindings
