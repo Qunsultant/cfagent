@@ -485,6 +485,25 @@ export interface Env {
   // sourcing, or any AgentDB read source — all pinned, see
   // src/config/goalChainModes.ts.
   GOAL_COMPILE_MODE?: string;
+  // #1767 (parent #1717, slice F-37/F-38) — ONE schema-migration
+  // switch (non-secret, owner-set, same pattern as
+  // PAYMENTS_FLOW_MODE).
+  // SCHEMA_MIGRATION_MODE: "managed" | "legacy".
+  // Built-in default is "legacy" (the current inline CREATE
+  // TABLE IF NOT EXISTS path) — unset changes nothing.
+  // "managed" routes a store's ensureSchema through the
+  // versioned framework in src/data/doSchemaMigrations.ts with
+  // a mas_schema_migrations ledger row per migration.
+  // Any other value FAILS CLOSED to "legacy", console-logged +
+  // audited as schema.config_error. Resolution order (run >
+  // session > user > global env > built-in) lives in
+  // src/config/schemaMigrationModes.ts. This slice deliberately
+  // does NOT set a production value: production values are an
+  // owner action. Rollback is unsetting the var and redeploying.
+  // The switch does NOT govern any IAAA gate, the D1
+  // `_migrations` runner, or the DO generation marker — all
+  // pinned, see src/config/schemaMigrationModes.ts.
+  SCHEMA_MIGRATION_MODE?: string;
   // Payment Gateway Secrets (Stripe, PayPal, Lemon Squeezy)
   STRIPE_SECRET_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
