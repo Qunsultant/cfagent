@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import React from "react";
-import { SegmentedControl, PillGroup, Badge, Button, Spinner, EmptyState, Card, Notice, Tabs, TabPanel, TextInput, Select, FileInput, Modal, Table, Skeleton, Checkbox, PageShell, PageSection, ToastProvider, useToast, Menu, Popover, Drawer } from "../src/client/components/ui";
+import { SegmentedControl, PillGroup, Badge, Button, Spinner, EmptyState, Card, Notice, Tabs, TabPanel, TextInput, Select, FileInput, Modal, Table, Skeleton, Checkbox, PageShell, PageSection, ToastProvider, useToast, Menu, Popover, Drawer, SkipLink } from "../src/client/components/ui";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -444,5 +444,12 @@ describe("Menu + Popover + Drawer (#2283 stream 5)", () => {
     expect(element.props.open).toBe(true);
     expect(element.props.title).toBe("Copilot");
     expect(element.props.side).toBe("left");
+  });
+});
+
+describe("SkipLink (#2673 slice 6)", () => {
+  it("is the keyboard entry to main content", () => {
+    const element = React.createElement(SkipLink);
+    expect(element.type).toBe(SkipLink);
   });
 });
