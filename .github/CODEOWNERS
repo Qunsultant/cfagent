@@ -1,4 +1,4 @@
-# CODEOWNERS — cfagent issue #1487.
+# CODEOWNERS — cfagent issue #1487, #2556.
 #
 # Owner review is required for the paths that define or enforce
 # policy. This file alone does not block merges: the protectmain
@@ -9,5 +9,10 @@
 # Owner: the OpenAIMP account is the repository owner; lane agents
 # work through it, so the owner entry is the account, not a lane.
 
+/.github/ @OpenAIMP
+/scripts/ci/ @OpenAIMP
+/docs/agents/ @OpenAIMP
 /docs/agents/gitops.md @OpenAIMP
 /AGENTS.md @OpenAIMP
+/environment.config.json @OpenAIMP
+/wrangler.jsonc @OpenAIMP

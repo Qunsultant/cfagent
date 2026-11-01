@@ -1,4 +1,4 @@
-# Policy Gate — cfagent issue #1487.
+# Policy Gate — cfagent issue #1487, #2556.
 #
 # WHAT: turns gitops policy that is otherwise only prose into a required
 # check. A PR merges only if it carries (a) a linked issue, (b) a §21
@@ -22,6 +22,10 @@
 # diffs the PR head against the merge base and requires an added
 # line inside the ## [Unreleased] section. No secrets, no network
 # beyond the checkout.
+#
+# CONTROL INTEGRITY (#2556): the policy evaluator is always executed
+# from the trusted origin/main base branch rather than the candidate PR
+# tree, preventing candidate modifications from altering their own gate.
 #
 # OWNER STEP: add the job name "Policy Gate" to the protectmain
 # ruleset's required checks; until then this workflow runs but does
@@ -61,14 +65,15 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Fetch base branch for CHANGELOG comparison
+      - name: Fetch base branch for CHANGELOG comparison & trusted evaluator (#2556)
         run: git fetch origin main
 
-      - name: Run policy gate
+      - name: Run policy gate from trusted base (#2556)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_BODY: ${{ github.event.pull_request.body }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ' ') }}
-        run: python3 scripts/ci/policy_gate.py --base origin/main --head HEAD
-
+        run: |
+          git show origin/main:scripts/ci/policy_gate.py > /tmp/trusted_policy_gate.py
+          python3 /tmp/trusted_policy_gate.py --base origin/main --head HEAD

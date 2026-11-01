@@ -5,9 +5,11 @@ name: Deploy NextGenTP
 # runner migration is a deliberate, tested change.
 
 on:
-  push:
-    branches:
-      - main
+  # Issue #2556: Deploy only after CI validation completes successfully on main
+  workflow_run:
+    workflows: ["Continuous Integration & Test Verification"]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
     inputs:
       target_env:
@@ -25,12 +27,15 @@ jobs:
   load-environment:
     name: Load Active Environment
     runs-on: ubuntu-24.04
+    # Issue #2556: Ensure deployment runs only on green CI or explicit manual dispatch
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     outputs:
       target_env: ${{ steps.read-env.outputs.target_env }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           sparse-checkout: |
             environment.config.json
 
@@ -67,6 +72,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4

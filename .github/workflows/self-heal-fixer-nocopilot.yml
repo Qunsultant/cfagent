@@ -15,12 +15,15 @@
 
 name: Self-heal Fixer (No-op)
 
+# DEPRECATED in place (Issue #2556, gitops §22). Automated triggers disabled to prevent
+# redundant runner consumption. Superseded by the external Muse fixer poller.
 on:
-  issues:
-    types: [opened]
   workflow_dispatch:
-  schedule:
-    - cron: "23 */6 * * *"
+  # Automated triggers disabled to eliminate runner burn (#2556):
+  # issues:
+  #   types: [opened]
+  # schedule:
+  #   - cron: "23 */6 * * *"
 
 permissions:
   contents: read
