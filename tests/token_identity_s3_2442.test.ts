@@ -24,6 +24,7 @@ import { handleEtradeDiagnostics } from "../src/agents/routes/etradeBrokerDiagno
 import {
   renewAllStoredETradeTokens,
   getStoredTokens,
+  getMidnightEtUtcMs,
 } from "../src/security/etradeOAuth";
 import { ETradeRestClient } from "../src/trading";
 import type { Env } from "../src/types";
@@ -68,7 +69,6 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
-  vi.useRealTimers();
 });
 
 describe("S3 autoRenewETradeTokens identity pass-through", () => {
@@ -227,11 +227,21 @@ describe("S3 Worker 03:00 renewal pass identity pass-through", () => {
   }
 
   it("internal-id entry + alias record → renewed, upstream called once", async () => {
-    const t0 = new Date("2026-10-31T15:00:00.000Z").getTime();
-    vi.setSystemTime(t0);
     const { fake, env } = renewEnv();
     seedAlias(fake, LOGIN, INTERNAL_ID, ALIAS_LOGIN);
-    const seededAt = new Date(t0 - 3600 * 1000).toISOString();
+    // #2587: anchor the seed inside the current ET day. isTokenExpiredEt
+    // expires a token at the ET midnight after it was stored, so a plain
+    // now−1h seed falls on the previous ET day between 00:00–01:00 ET and
+    // the renewal pass correctly skips it as expired. Use one hour ago
+    // when that is the same ET day; otherwise just after today's ET
+    // midnight (capped at now so the refreshed-token ordering assertion
+    // below still holds in the first minute of the ET day).
+    const nowMs = Date.now();
+    const seededAtMs = Math.max(
+      nowMs - 3600 * 1000,
+      Math.min(getMidnightEtUtcMs(nowMs) + 60 * 1000, nowMs),
+    );
+    const seededAt = new Date(seededAtMs).toISOString();
     fake.seed("etrade", `etrade:token:TEST:${INTERNAL_ID}`, freshToken(LOGIN, seededAt));
     const fetchSpy = stubRenewUpstream();
     const counts = await renewAllStoredETradeTokens(env);
