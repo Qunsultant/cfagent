@@ -253,6 +253,15 @@
  * route and before the cancel route — bringing the pinned array
  * to 323 entries; the delegation sequence is unchanged (same
  * handler, same position).
+ * Issue #2598 added eleven — the live-chain options paths, gated a
+ * second time in handleOptionsProviderGateRoutes (immediately before
+ * the options delegation, so the gate's entries precede the options
+ * entries): chains, expire-dates, strategy, recommend, llm-ideas,
+ * compare, comparison, strategies, best-trade, screen, unified —
+ * bringing the pinned array to 334 entries and the delegation
+ * sequence to 37 calls (gate + migration delegations included).
+ * The gate adds no new route surface: every gated path was already
+ * an options route; the gate only refuses it for non-chain providers.
  *
  * LANDMARK RULE (#405): all position assertions anchor to DELEGATION
  * CALLS - the only landmarks a thin router has.
@@ -286,6 +295,7 @@ const HANDLER_FILE: Record<string, string> = {
   "handleBrokerGateRoutes": "brokerGate.ts",
   "handleEtradeBrokerActivityRoutes": "etradeBroker.ts",
   "handleTradingIntegrationsRoutes": "tradingIntegrations.ts",
+  "handleOptionsProviderGateRoutes": "optionsProviderGate.ts",
   "handleEtradeOptionsRoutes": "etradeOptions.ts",
   "handleWatchlistsRoutes": "watchlists.ts",
   "handleAlpacaTradingRoutes": "alpaca.ts",
@@ -325,6 +335,7 @@ const EXPECTED_DELEGATIONS = [
   "handleEtradeBrokerRoutes",
   "handleTradingIntegrationsRoutes",
   "handleEtradeBrokerActivityRoutes",
+  "handleOptionsProviderGateRoutes",
   "handleEtradeOptionsRoutes",
   "handleWatchlistsRoutes",
   "handleAlpacaTradingRoutes",
@@ -515,6 +526,17 @@ const EXPECTED_INVENTORY = [
   "handleEtradeBrokerActivityRoutes :: endsWith(\"/learnings\")",
   "handleEtradeBrokerActivityRoutes :: endsWith(\"/learnings\")",
   "handleEtradeBrokerActivityRoutes :: endsWith(\"/reflection/run\")",
+  "handleOptionsProviderGateRoutes :: endsWith(\"/etrade/options/chains\")",
+  "handleOptionsProviderGateRoutes :: endsWith(\"/etrade/options/expire-dates\")",
+  "handleOptionsProviderGateRoutes :: endsWith(\"/etrade/options/strategy\")",
+  "handleOptionsProviderGateRoutes :: endsWith(\"/trading/options/recommend\")",
+  "handleOptionsProviderGateRoutes :: endsWith(\"/trading/options/llm-ideas\")",
+  "handleOptionsProviderGateRoutes :: endsWith(\"/trading/options/compare\")",
+  "handleOptionsProviderGateRoutes :: endsWith(\"/trading/options/comparison\")",
+  "handleOptionsProviderGateRoutes :: endsWith(\"/trading/options/strategies\")",
+  "handleOptionsProviderGateRoutes :: endsWith(\"/trading/options/best-trade\")",
+  "handleOptionsProviderGateRoutes :: endsWith(\"/trading/options/screen\")",
+  "handleOptionsProviderGateRoutes :: endsWith(\"/trading/options/unified\")",
   "handleEtradeOptionsRoutes :: endsWith(\"/options/latest\")",
   "handleEtradeOptionsRoutes :: endsWith(\"/etrade/options/chains\")",
   "handleEtradeOptionsRoutes :: endsWith(\"/etrade/options/strategy\")",

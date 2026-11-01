@@ -31,6 +31,8 @@ import { deliverScreenerToSlackA2A } from "../../services/screenerSlackDelivery"
 import { screenerOutcomeFromRunResult } from "../../services/screenerFollowups";
 import { recordJobOutcome } from "../../services/jobOutcomes";
 import { recordOptionsRunOutcome, storeOptionsCanonicalReport } from "../../services/optionsServeRecord";
+import { resolveTenantProviders } from "../../services/tenantProviders";
+import { resolveTenantProviderContext, withProviderProvenance } from "../../services/optionsProviderContext";
 import {
   cfpaySendEmail,
   cfpaySendEmailWithAttachments,
@@ -285,13 +287,22 @@ export async function executeOptionsScreen(args: {
 
   const generatedAt = new Date().toISOString();
   const generationId = `options_scanner:manual:${generatedAt}`;
+  // Provider/broker slice 2 (#2598): stamp the tenant's selections into
+  // body.provenance — the same two fields the unified record carries,
+  // resolved fail-open (etrade/etrade) like every other slice-2 read.
+  // This runs only after the feed gate passed, so the stamped provider
+  // is a chain provider (or the fail-open default).
+  const screenProviderProvenance = withProviderProvenance(
+    {},
+    resolveTenantProviderContext(await resolveTenantProviders(ctx.env)),
+  );
   storeOptionsCanonicalReport(ctx.getOrm(), {
     runId: generationId,
     generationId,
     title: `Options contract screen — ${(screenFilter.underlyingSymbols || []).join(", ") || screenUniverseLabel || "selected underlyings"}`,
     source: "options_scanner",
     summary: `${result.totalUnderlyingsScanned} underlyings scanned, ${result.totalContractsEvaluated} contracts evaluated, ${result.matchedCount} matched.`,
-    body: { generatedAt, filter: screenFilter, result, pdfKey: optionsPdfKey, pdfStatus: optionsPdfKey ? "generated" : "failed", reportUrl: optionsReportUrl, xlsxKey: optionsXlsxKey, xlsxStatus: optionsXlsxStatus, xlsxError: optionsXlsxError, xlsxUrl: optionsXlsxUrl, csvKey: optionsCsvKey, csvStatus: optionsCsvStatus, csvError: optionsCsvError, csvUrl: optionsCsvUrl },
+    body: { generatedAt, provenance: screenProviderProvenance, filter: screenFilter, result, pdfKey: optionsPdfKey, pdfStatus: optionsPdfKey ? "generated" : "failed", reportUrl: optionsReportUrl, xlsxKey: optionsXlsxKey, xlsxStatus: optionsXlsxStatus, xlsxError: optionsXlsxError, xlsxUrl: optionsXlsxUrl, csvKey: optionsCsvKey, csvStatus: optionsCsvStatus, csvError: optionsCsvError, csvUrl: optionsCsvUrl },
     createdAt: generatedAt,
     // Options run-record fix: owner-scope the row — an ownerless write is invisible
     // to the owner-scoped Reports read.
@@ -342,6 +353,14 @@ export async function executeUnifiedOptions(args: {
   const { request, sessionId, ctx, reqData } = args;
   const userLogin = request.headers.get("x-user-login");
   if (!userLogin) return unauthenticatedResponse();
+  // Provider/broker slice 2 (#2598): stamp the tenant's selections into
+  // body.provenance on both canonical writes below — the same two
+  // fields the unified record carries, resolved fail-open
+  // (etrade/etrade). This runs only after the feed gate passed.
+  const unifiedProviderProvenance = withProviderProvenance(
+    {},
+    resolveTenantProviderContext(await resolveTenantProviders(ctx.env)),
+  );
   // #2303: the platform ports for the service's platform block
   // (built from env; nulls when AGENT_DB is unbound).
   const dpPorts = await buildDataProviderPorts(ctx.env);
@@ -526,7 +545,7 @@ export async function executeUnifiedOptions(args: {
       title: `Options scanner — ${reqData.thesis || "mixed"} (${generatedAt.slice(0, 10)})`,
       source: "options_scanner",
       summary: result.summary,
-      body: { generatedAt, request: reqData, report: result.toWebhook(), pdfKey, pdfStatus: pdfKey ? "generated" : "failed", reportUrl, xlsxKey: scannerXlsxKey, xlsxUrl: scannerXlsxUrl, csvKey: scannerCsvKey, csvUrl: scannerCsvUrl },
+      body: { generatedAt, provenance: unifiedProviderProvenance, request: reqData, report: result.toWebhook(), pdfKey, pdfStatus: pdfKey ? "generated" : "failed", reportUrl, xlsxKey: scannerXlsxKey, xlsxUrl: scannerXlsxUrl, csvKey: scannerCsvKey, csvUrl: scannerCsvUrl },
       createdAt: generatedAt,
       // Options run-record fix: owner-scope the row (ownerless rows are invisible to
       // the owner-scoped Reports read).
@@ -600,6 +619,7 @@ export async function executeUnifiedOptions(args: {
       summary: result.summary,
       body: {
         generatedAt,
+        provenance: unifiedProviderProvenance,
         action,
         symbol,
         request: reqData,
