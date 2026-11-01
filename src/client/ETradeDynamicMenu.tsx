@@ -6,11 +6,7 @@ import {
   NAV_TAB_PRESETS,
 } from "./components/NavigationMenu";
 import { isTabFeatureEnabled } from "./featureFlags";
-import { AsyncJobsPanel } from "./AsyncJobsPanel";
-import { ScheduledGoalsPanel } from "./ScheduledGoalsPanel";
-import { ApiKeysPanel } from "./ApiKeysPanel";
-import { DataProvidersPanel } from "./DataProvidersPanel";
-import { IaaaAdminPanel } from "./IaaaAdminPanel";
+import { PlatformAdminPanel } from "./PlatformAdminPanel";
 import { PillGroup, Button, TextInput } from "./components/ui";
 import {
   switchBrokerEnvironment,
@@ -153,6 +149,9 @@ export function SettingsMenu({
 }: SettingsMenuProps) {
   const [isHovered, setIsHovered] = useState(false);
   const [isPinned, setIsPinned] = useState(false);
+  // Issue #2624: the Platform Admin drawer lives outside the dropdown's
+  // open state so a click inside it cannot dismiss the panel.
+  const [platformAdminOpen, setPlatformAdminOpen] = useState(false);
   const [downloadSymbol, setDownloadSymbol] = useState(defaultSymbol);
   const menuRef = useRef<HTMLDivElement>(null);
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -923,184 +922,23 @@ export function SettingsMenu({
             </div>
           </div>
 
-          {/* Ads & Partner Banners Configuration (Externalized & Configurable) */}
-          <div className="etrade-panel-section settings-ads-section">
+          {/* Issue #2624: the nine administration surfaces moved out of this
+              dropdown into the Platform Admin drawer (PlatformAdminPanel).
+              The account card below stays: who is signed in belongs here. */}
+          <div className="etrade-panel-section settings-platform-admin-section">
             <div className="section-label-row">
-              <span>Ads &amp; Partner Banners</span>
-              <small>{effectiveAdConfig.enabled ? "Active (Customized)" : "Disabled (Clean Workspace)"}</small>
+              <span>Platform Admin</span>
+              <small>Ads, tasks, keys, providers &amp; IAAA</small>
             </div>
-
-            <p className="settings-section-desc">
-              Promotional banners and sponsor spotlights are externalized by default to keep workspace tabs clean. Toggle them on if desired, or browse deals on-demand.
-            </p>
-
-            <div className="settings-pref-row">
-              <span className="pref-row-lbl">Workspace Banners:</span>
-              <PillGroup
-                    className="settings-pref-btn-group"
-                    ariaLabel="Workspace banners"
-                    size="sm"
-                    variant="default"
-                    options={[
-                      { id: "off", label: "OFF (Clean)", icon: "⏹", tooltip: "Disable all promotional banners and ads across workspace tabs (Clean UI)" },
-                      { id: "on", label: "ON", icon: "▶", tooltip: "Enable promotional banners and customize placements" },
-                    ]}
-                    value={effectiveAdConfig.enabled ? "on" : "off"}
-                    onChange={(v) => handleToggleAdMaster(v === "on")}
-                  />
-            </div>
-
-            {effectiveAdConfig.enabled && (
-              <div className="settings-ads-suboptions">
-                <div className="settings-pref-row">
-                  <span className="pref-row-lbl">Sponsor Spotlight:</span>
-                  <PillGroup
-                      className="settings-pref-btn-group"
-                      ariaLabel="Sponsor Spotlight"
-                      size="sm"
-                      variant="default"
-                      options={[
-                        { id: "off", label: "OFF" },
-                        { id: "on", label: "ON" },
-                      ]}
-                      value={effectiveAdConfig.showSponsorSpotlight ? "on" : "off"}
-                      onChange={(v) => handleToggleAdOption("showSponsorSpotlight", v === "on")}
-                    />
-                </div>
-
-                <div className="settings-pref-row">
-                  <span className="pref-row-lbl">Ad Network Strip:</span>
-                  <PillGroup
-                      className="settings-pref-btn-group"
-                      ariaLabel="Ad Network Strip"
-                      size="sm"
-                      variant="default"
-                      options={[
-                        { id: "off", label: "OFF" },
-                        { id: "on", label: "ON" },
-                      ]}
-                      value={effectiveAdConfig.showAdNetworkStrip ? "on" : "off"}
-                      onChange={(v) => handleToggleAdOption("showAdNetworkStrip", v === "on")}
-                    />
-                </div>
-
-                <div className="settings-pref-row">
-                  <span className="pref-row-lbl">Google Ad Units:</span>
-                  <PillGroup
-                      className="settings-pref-btn-group"
-                      ariaLabel="Google Ad Units"
-                      size="sm"
-                      variant="default"
-                      options={[
-                        { id: "off", label: "OFF" },
-                        { id: "on", label: "ON" },
-                      ]}
-                      value={effectiveAdConfig.showGoogleAdUnits ? "on" : "off"}
-                      onChange={(v) => handleToggleAdOption("showGoogleAdUnits", v === "on")}
-                    />
-                </div>
-              </div>
-            )}
-
-            {/* Externalized Deals Showcase Action Button */}
-            <div className="settings-ads-external-actions">
-              <Button
-                type="button"
-                className="btn-open-deals-showcase"
-                onClick={() => {
-                  if (onOpenPartnerDeals) {
-                    onOpenPartnerDeals();
-                  } else if (typeof window !== "undefined") {
-                    window.dispatchEvent(new CustomEvent("open-partner-deals-modal"));
-                  }
-                }}
-                title="Open external Partner Deals & Offers showcase"
-              >
-                ⭐ Browse Partner Deals &amp; Cloud Credits (External) ↗
-              </Button>
-            </div>
-          </div>
-
-          {/* Background Tasks & Async Work */}
-          <div className="etrade-panel-section settings-async-tasks-section">
-            <div className="section-label-row">
-              <span>Background Tasks</span>
-              <small>Async jobs &amp; execution queue</small>
-            </div>
-            <AsyncJobsPanel embedded />
-          </div>
-
-          {/* Scheduled Goals (issue #1922): the ScheduledAgent dashboard
-              panel (issue #159) was built but never mounted anywhere;
-              this mounts it in Settings, next to the other background
-              scheduling surface. SchedulesPanel (Orchestrator schedules)
-              is a different system and is untouched. */}
-          <div className="etrade-panel-section settings-scheduled-goals-section">
-            <div className="section-label-row">
-              <span>Scheduled goals</span>
-              <small>ScheduledAgent goals, ticks &amp; add-goal form</small>
-            </div>
-            <ScheduledGoalsPanel embedded />
-          </div>
-
-          {/* Technical Diagnostics & Provenance (Relocated towards end of floating panel) */}
-          <div className="etrade-panel-section etrade-provenance-section">
-            <details className="etrade-provenance-drawer">
-              <summary className="etrade-provenance-summary">
-                <span>⚙️ Technical Diagnostics &amp; Provenance</span>
-                <span className="provenance-chevron" aria-hidden="true">▾</span>
-              </summary>
-              <div className="etrade-provenance-content">
-                <div className="etrade-provenance-row">
-                  <strong>DID:</strong>
-                  <code className="etrade-provenance-code">did:agent:openaimp:trading</code>
-                </div>
-                <div className="etrade-provenance-row">
-                  <strong>Architecture:</strong>
-                  <span>MCP &amp; OAuth 1.0a REST Client</span>
-                </div>
-                <div className="etrade-provenance-row">
-                  <strong>Attestation:</strong>
-                  <span>Internal W3C DID Cryptographic Stamping</span>
-                </div>
-                <div className="etrade-provenance-row">
-                  <strong>Ledger Architecture:</strong>
-                  <span>Institutional Execution Ledger &amp; Audit Trail</span>
-                </div>
-              </div>
-            </details>
-          </div>
-
-          {/* API Keys (issue #180): per-user keys for external MCP clients */}
-          <div className="etrade-panel-section settings-api-keys-section">
-            <div className="section-label-row">
-              <span>API Keys</span>
-              <small>MCP transport access for external clients</small>
-            </div>
-            <ApiKeysPanel />
-          </div>
-
-          {/* Data Providers (issue #1180, epic #1116 E4): provisioning
-              lifecycle admin over the E3 lifecycle API (#1170) */}
-          <div className="etrade-panel-section settings-data-providers-section">
-            <div className="section-label-row">
-              <span>Data Providers</span>
-              <small>Provisioning lifecycle for market-data providers</small>
-            </div>
-            <DataProvidersPanel />
-          </div>
-
-          {/* IAAA Admin (issue #945, IAAA-UI v1: READ-ONLY): the
-              caller's own memberships, genesis status, and recent
-              tenant audit events. The server gates this to live
-              platform admins; anyone else sees a plain "not an
-              admin" state. No mutation UI exists in v1. */}
-          <div className="etrade-panel-section settings-iaaa-admin-section">
-            <div className="section-label-row">
-              <span>IAAA Admin</span>
-              <small>Read-only memberships, genesis &amp; audit</small>
-            </div>
-            <IaaaAdminPanel />
+            <Button
+              type="button"
+              className="btn-open-platform-admin"
+              onClick={() => setPlatformAdminOpen(true)}
+              aria-haspopup="dialog"
+              title="Open Platform Admin — ads, background tasks, scheduled goals, diagnostics, API keys, data providers, IAAA"
+            >
+              Open Platform Admin →
+            </Button>
           </div>
 
           {/* User Account & Session */}
@@ -1119,14 +957,6 @@ export function SettingsMenu({
                   <span className="settings-user-login">@{userLogin}</span>
                   {loginProviderName && (
                     <span className="settings-user-login">Logged in via {loginProviderName}</span>
-                  )}
-                  <Button type="button" disabled={requestingAccess} onClick={() => void requestAdminAccess()}>
-                    Request admin access
-                  </Button>
-                  {accessRequestStatus && (
-                    <span className="settings-user-login" role="status">
-                      {accessRequestStatus}
-                    </span>
                   )}
                 </div>
               </div>
@@ -1163,6 +993,26 @@ export function SettingsMenu({
           )}
         </div>
       )}
+
+      <PlatformAdminPanel
+        open={platformAdminOpen}
+        onClose={() => setPlatformAdminOpen(false)}
+        ads={effectiveAdConfig}
+        onToggleAdsMaster={handleToggleAdMaster}
+        onToggleAdsOption={handleToggleAdOption}
+        {...(onOpenPartnerDeals ? { onOpenPartnerDeals } : {})}
+        access={{
+          requesting: requestingAccess,
+          status: accessRequestStatus,
+          onRequest: () => void requestAdminAccess(),
+        }}
+        user={{
+          login: userLogin,
+          ...(userName ? { name: userName } : {}),
+          ...(userAvatar ? { avatar: userAvatar } : {}),
+          ...(loginProviderName ? { providerName: loginProviderName } : {}),
+        }}
+      />
     </div>
   );
 }
