@@ -104,6 +104,8 @@ import {
   type StripeDisplayMode,
 } from "../../services/checkoutDisplay";
 import { createCheckoutPorts, type CheckoutEnv } from "../../services/createCheckoutPorts";
+import { createBillingCheckoutPorts, type BillingCheckoutEnv } from "../../services/createBillingCheckoutPorts";
+import { createBillingPorts, type BillingEnv } from "../../services/createBillingPorts";
 import { StripePaymentStrategy } from "../../patterns/paymentStrategies";
 
 import { PROPOSED_SEED_PRICES } from "../../data/priceCataloguePorts";
@@ -137,6 +139,24 @@ import {
   createSubscriptionAdapter,
   ensureSubscriptionSchema,
 } from "../../data/createSubscriptionPorts";
+import {
+  createBillingPolicyAdapter,
+  ensureBillingPolicySchema,
+} from "../../data/createBillingPolicyPorts";
+import type { D1BillingPolicyAdapter } from "../../data/d1BillingPolicyAdapter";
+import {
+  createBillingCustomerAdapter,
+  ensureBillingCustomerSchema,
+} from "../../data/createBillingCustomerPorts";
+import type { D1BillingCustomerAdapter } from "../../data/d1BillingCustomerAdapter";
+import { assertBillingPolicyPartial } from "../../data/billingPolicyPorts";
+import {
+  applyBillingWebhookEvent,
+  cancelBillingAtPeriodEnd,
+  isBillingManaged,
+  recordBillingSubscription,
+  type BillingWebhookEvent,
+} from "../../services/billingService";
 import {
   createRefundPorts,
   ensureRefundSchema,
@@ -640,6 +660,35 @@ export async function handleAgenticPaymentsRoutes(
       return Response.json({ error: "Subscription store unavailable: AGENT_DB is not bound." }, { status: 503 });
     }
     return adapter;
+  };
+  // Issue #2656 (Phase 2.1): Billing stores, same fail-closed shape
+  // as the commercial/subscription stores: unbound AGENT_DB is a
+  // 503, never a silent fallback.
+  const requireBillingPolicy = (): D1BillingPolicyAdapter | Response => {
+    const adapter = createBillingPolicyAdapter(ctx.env as { AGENT_DB?: unknown });
+    if (!adapter) {
+      return Response.json({ error: "Billing policy store unavailable: AGENT_DB is not bound." }, { status: 503 });
+    }
+    return adapter;
+  };
+  const requireBillingCustomers = (): D1BillingCustomerAdapter | Response => {
+    const adapter = createBillingCustomerAdapter(ctx.env as { AGENT_DB?: unknown });
+    if (!adapter) {
+      return Response.json({ error: "Billing customer store unavailable: AGENT_DB is not bound." }, { status: 503 });
+    }
+    return adapter;
+  };
+  const ensureBillingStores = async (
+    policy: D1BillingPolicyAdapter,
+    customers: D1BillingCustomerAdapter,
+  ): Promise<Response | null> => {
+    try {
+      await ensureBillingPolicySchema(policy.db);
+      await ensureBillingCustomerSchema(customers.db);
+    } catch (err: any) {
+      return Response.json({ error: `Billing store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+    }
+    return null;
   };
   // Issue #2522: email content selection resolves the effective
   // tier the same way the premium gate does (src/agents/routes/
@@ -1648,9 +1697,428 @@ export async function handleAgenticPaymentsRoutes(
     }
   }
 
+  // POST /payments/agentic/commercial/subscription/billing-checkout — mint a subscription-mode Stripe
+  // Checkout Session (Phase 2.1, #2656). MINT ONLY: no subscription row is created here; the
+  // billing-purchase route fulfills from a retrieved session. The price is the OPERATOR-MAPPED
+  // provider price id from the billing policy (stripePriceByPlan) — never a catalogue price, never
+  // a code constant. A missing mapping refuses with 503 (operator configuration gap, not a client
+  // error). The session carries fulfillment keys (userId/planId/tenantId) in session + provider
+  // subscription metadata; the tenant comes from the resolved identity, never the request body
+  // (same rule as the one-time checkout, #2219). An existing customer mapping is passed through
+  // so a second checkout reuses the provider customer instead of fragmenting customers.
+  if (path.endsWith("/payments/agentic/commercial/subscription/billing-checkout") && request.method === "POST") {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      const flag = await requireMonetization();
+      if (flag) return flag;
+      const body = (await request.json().catch(() => ({}))) as { planId?: unknown };
+      const planId = typeof body.planId === "string" ? body.planId : "";
+      if (!planId) return Response.json({ error: "planId is required." }, { status: 400 });
+      const store = requireStore();
+      if (store instanceof Response) return store;
+      const subs = requireSubs();
+      if (subs instanceof Response) return subs;
+      const policy = requireBillingPolicy();
+      if (policy instanceof Response) return policy;
+      const customers = requireBillingCustomers();
+      if (customers instanceof Response) return customers;
+      const ensured = await ensureStores(store, subs);
+      if (ensured) return ensured;
+      const ensuredBilling = await ensureBillingStores(policy, customers);
+      if (ensuredBilling) return ensuredBilling;
+      const plan = await subs.getPlan(planId);
+      if (!plan) return Response.json({ error: `No plan ${planId}.` }, { status: 404 });
+      if (!plan.active) return Response.json({ error: `Plan ${planId} is not active.` }, { status: 409 });
+      const policyValue = await policy.getPolicy();
+      const priceId = policyValue.stripePriceByPlan[plan.id];
+      if (!priceId) {
+        return Response.json(
+          { error: `No operator-mapped Stripe Price id for plan ${plan.id}: Billing checkout is not configured.` },
+          { status: 503 },
+        );
+      }
+      let identity;
+      try {
+        identity = await resolvePlatformIdentity(
+          { commercial: store, subscriptions: subs },
+          { userId: login, nowMs: Date.now() },
+        );
+      } catch (err: any) {
+        return Response.json({ error: err.message || "Failed to resolve platform identity" }, { status: 503 });
+      }
+      const tenantId = identity.tenantId ?? login;
+      const ports = createBillingCheckoutPorts(ctx.env as unknown as BillingCheckoutEnv);
+      if (!ports) {
+        return Response.json({ error: "Billing checkout is not configured (Stripe)." }, { status: 503 });
+      }
+      const existingCustomer = await customers.getCustomer(login);
+      const draftId = `bill-${crypto.randomUUID()}`;
+      let created;
+      try {
+        created = await ports.createSubscriptionCheckout({
+          draftId,
+          priceId,
+          customerId: existingCustomer?.stripeCustomerId ?? null,
+          metadata: { userId: login, planId: plan.id, tenantId },
+        });
+      } catch (err: any) {
+        return Response.json({ error: err.message || "Stripe subscription checkout could not be created." }, { status: 503 });
+      }
+      if (!created.url || !created.id) {
+        return Response.json({ error: "Stripe subscription checkout could not be created." }, { status: 503 });
+      }
+      ctx.audit("commercial.subscription.billing_checkout_created", "payments", {
+        userId: login,
+        tenantId,
+        planId: plan.id,
+        checkoutRequestId: draftId,
+        checkoutSessionId: created.id,
+        stripeCustomerId: existingCustomer?.stripeCustomerId ?? null,
+      });
+      return Response.json({
+        checkoutRequestId: draftId,
+        checkoutUrl: created.url,
+        checkoutSessionId: created.id,
+        plan: { id: plan.id, name: plan.name, priceUSD: plan.priceUSD, periodDays: plan.periodDays, includedRuns: plan.includedRuns },
+      });
+    } catch (err: any) {
+      return Response.json({ error: err.message || "Failed to create Billing checkout" }, { status: 500 });
+    }
+  }
+
+  // POST /payments/agentic/commercial/subscription/billing-purchase — fulfill a Billing checkout on
+  // VERIFIED evidence only (Phase 2.1, #2656). The caller passes BOTH the route-minted draft id
+  // (checkoutRequestId, "bill-" prefix) and the Stripe session id (checkoutSessionId). Activation
+  // requires ALL of: session status complete, payment_status paid, client_reference_id ==
+  // checkoutRequestId, metadata userId == login and planId == plan, a provider subscription id and
+  // customer id present, the retrieved provider subscription's price id == the operator-mapped
+  // price id, and provider status active/trialing. The tenant is NOT checked against metadata:
+  // account creation between mint and fulfill legitimately changes the resolved tenant, and
+  // activation uses the resolved tenant (same rule as one-time). Any failure refuses (402) and
+  // activates nothing. A replay (existing provider row) refuses with 409; a customer-mapping
+  // mismatch refuses with 409 (possible account confusion, operator resolves). Included-run
+  // bypass stays OFF: this confers tier only, never included runs.
+  if (path.endsWith("/payments/agentic/commercial/subscription/billing-purchase") && request.method === "POST") {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      const flag = await requireMonetization();
+      if (flag) return flag;
+      const body = (await request.json().catch(() => ({}))) as { planId?: unknown; checkoutRequestId?: unknown; checkoutSessionId?: unknown };
+      const planId = typeof body.planId === "string" ? body.planId : "";
+      const checkoutRequestId = typeof body.checkoutRequestId === "string" ? body.checkoutRequestId : "";
+      const checkoutSessionId = typeof body.checkoutSessionId === "string" ? body.checkoutSessionId : "";
+      if (!planId) return Response.json({ error: "planId is required." }, { status: 400 });
+      if (!checkoutRequestId) return Response.json({ error: "checkoutRequestId is required." }, { status: 400 });
+      if (!checkoutRequestId.startsWith("bill-")) {
+        return Response.json({ error: "checkoutRequestId must come from the Billing checkout route." }, { status: 400 });
+      }
+      if (!checkoutSessionId) return Response.json({ error: "checkoutSessionId is required." }, { status: 400 });
+      const store = requireStore();
+      if (store instanceof Response) return store;
+      const subs = requireSubs();
+      if (subs instanceof Response) return subs;
+      const policy = requireBillingPolicy();
+      if (policy instanceof Response) return policy;
+      const customers = requireBillingCustomers();
+      if (customers instanceof Response) return customers;
+      const ensured = await ensureStores(store, subs);
+      if (ensured) return ensured;
+      const ensuredBilling = await ensureBillingStores(policy, customers);
+      if (ensuredBilling) return ensuredBilling;
+      const plan = await subs.getPlan(planId);
+      if (!plan) return Response.json({ error: `No plan ${planId}.` }, { status: 404 });
+      if (!plan.active) return Response.json({ error: `Plan ${planId} is not active.` }, { status: 409 });
+      const policyValue = await policy.getPolicy();
+      const priceId = policyValue.stripePriceByPlan[plan.id];
+      if (!priceId) {
+        return Response.json(
+          { error: `No operator-mapped Stripe Price id for plan ${plan.id}: Billing purchase is not configured.` },
+          { status: 503 },
+        );
+      }
+      let identity;
+      try {
+        identity = await resolvePlatformIdentity(
+          { commercial: store, subscriptions: subs },
+          { userId: login, nowMs: Date.now() },
+        );
+      } catch (err: any) {
+        return Response.json({ error: err.message || "Failed to resolve platform identity" }, { status: 503 });
+      }
+      const tenantId = identity.tenantId ?? login;
+      const ports = createBillingCheckoutPorts(ctx.env as unknown as BillingCheckoutEnv);
+      if (!ports) {
+        return Response.json({ error: "Billing checkout is not configured (Stripe)." }, { status: 503 });
+      }
+      const billing = createBillingPorts(ctx.env as unknown as BillingEnv, true);
+      if (!billing) {
+        return Response.json({ error: "Billing is not configured (Stripe)." }, { status: 503 });
+      }
+      let evidence;
+      try {
+        evidence = await ports.retrieveSubscriptionSession(checkoutSessionId);
+      } catch {
+        return Response.json({ error: "Payment verification unavailable." }, { status: 503 });
+      }
+      if (
+        evidence.status !== "complete" ||
+        evidence.paymentStatus !== "paid" ||
+        evidence.clientReferenceId !== checkoutRequestId ||
+        !evidence.subscriptionId ||
+        !evidence.customerId ||
+        evidence.metadata?.userId !== login ||
+        evidence.metadata?.planId !== plan.id
+      ) {
+        return Response.json({ error: "Billing checkout is not paid for this plan and user; no subscription activated." }, { status: 402 });
+      }
+      let provider;
+      try {
+        provider = await billing.retrieveProviderSubscription(evidence.subscriptionId);
+      } catch {
+        return Response.json({ error: "Billing subscription verification unavailable." }, { status: 503 });
+      }
+      if (provider.priceId !== priceId) {
+        return Response.json({ error: "Billing subscription price does not match the operator-mapped price for this plan; no subscription activated." }, { status: 402 });
+      }
+      if (provider.status !== "active" && provider.status !== "trialing") {
+        return Response.json({ error: "Billing subscription is not active; no subscription activated." }, { status: 402 });
+      }
+      const existingMapping = await customers.getCustomer(login);
+      if (existingMapping && existingMapping.stripeCustomerId !== evidence.customerId) {
+        return Response.json(
+          { error: `Billing customer mismatch: mapped to ${existingMapping.stripeCustomerId}, session names ${evidence.customerId} (operator resolves; no subscription activated).` },
+          { status: 409 },
+        );
+      }
+      const existingRow = await subs.findByProviderSubscriptionId(evidence.subscriptionId);
+      if (existingRow) {
+        return Response.json({ error: `Billing subscription ${evidence.subscriptionId} already activated subscription ${existingRow.id}.` }, { status: 409 });
+      }
+      const beforeAccount = await store.getAccount(login);
+      const previousSubscriptions = await subs.listSubscriptions(login);
+      await customers.recordCustomer({ userId: login, tenantId, stripeCustomerId: evidence.customerId });
+      const subscription = await recordBillingSubscription({
+        subs,
+        provider,
+        userId: login,
+        tenantId,
+        planId: plan.id,
+      });
+      const afterAccount = await store.getAccount(login);
+      const activatedSubscriptions = await subs.listSubscriptions(login);
+      const activationTransition = resolveTierTransition(
+        beforeAccount,
+        previousSubscriptions,
+        afterAccount,
+        activatedSubscriptions,
+        Date.now(),
+      );
+      ctx.audit("commercial.subscription.billing_activated", "payments", {
+        userId: login,
+        tenantId,
+        planId: plan.id,
+        subscriptionId: subscription.id,
+        providerSubscriptionId: evidence.subscriptionId,
+        stripeCustomerId: evidence.customerId,
+        checkoutRequestId,
+        checkoutSessionId,
+        periodEndMs: subscription.periodEndMs,
+        previousEffectiveTier: activationTransition.previousEffectiveTier,
+        newEffectiveTier: activationTransition.newEffectiveTier,
+      });
+      // Same deferred-revenue journal projection as the one-time
+      // purchase (Dr 1000 / Cr 2100), best-effort, never thrown.
+      // The RECOGNITION schedule (deferred → earned over the
+      // period) is a follow-up slice and is not posted here.
+      await postJournalBestEffort(async () => {
+        const adapter = createJournalAdapter(ctx.env as { AGENT_DB?: unknown });
+        if (!adapter) return null;
+        await ensureJournalSchema(adapter.db);
+        return adapter;
+      }, mapSubscriptionPurchaseToJournalEntries({
+        transactionRef: checkoutRequestId,
+        tenantId,
+        subscriptionId: subscription.id,
+        amountUSD: plan.priceUSD,
+      }));
+      const effectiveTier = resolveEffectiveTier(afterAccount, [subscription], Date.now());
+      return Response.json({ subscription, account: afterAccount, effectiveTier });
+    } catch (err: any) {
+      const message = err.message || "Failed to activate Billing subscription";
+      const status = /Tenant mismatch/.test(message)
+        ? 403
+        : /already activated|already belongs|mismatch/.test(message)
+          ? 409
+          : /required|must be|not active/.test(message)
+            ? 400
+            : 500;
+      return Response.json({ error: message }, { status });
+    }
+  }
+
+  // POST /payments/agentic/commercial/billing/webhook — apply a verified Stripe Billing webhook
+  // event (Phase 2.1, #2656). No login: Stripe calls this, so the ONLY authentication is the
+  // Stripe signature (HMAC over the RAW body — the body is read as text, never re-serialized).
+  // Unverified → 401, nothing applied. Flag OFF → 200 flag_off, nothing applied (webhooks must
+  // not activate while purchases are disabled). Unknown provider ids and unknown event types →
+  // 200 not-applied (Stripe must not retry a well-formed but unmatchable event forever). A
+  // provider retrieve 404 → provider null (the service then reports unknown/missing, still 200);
+  // any other retrieve failure → 503 so Stripe retries. D1 is shared, so there is no
+  // canonical-instance hop: the handler builds the store adapters straight from ctx.env.AGENT_DB.
+  // Dunning-notice SENDING is out of scope here: a failed renewal marks past_due, and the notice
+  // schedule (policy) is applied by a later slice.
+  if (path.endsWith("/payments/agentic/commercial/billing/webhook") && request.method === "POST") {
+    try {
+      const rawBody = await request.text();
+      let verification;
+      try {
+        verification = await new PaymentGatewayService(ctx.env).verifyWebhookSignature("stripe", rawBody, request.headers);
+      } catch {
+        return Response.json({ error: "Webhook verification unavailable." }, { status: 503 });
+      }
+      if (!verification.isValid) {
+        return Response.json({ error: "Invalid webhook signature: nothing applied." }, { status: 401 });
+      }
+      let eventPayload: any;
+      try {
+        eventPayload = JSON.parse(rawBody);
+      } catch {
+        return Response.json({ error: "Malformed webhook payload." }, { status: 400 });
+      }
+      const eventType = typeof eventPayload?.type === "string" ? eventPayload.type : "";
+      const eventObject = eventPayload?.data?.object ?? {};
+      const isInvoiceEvent = eventType.startsWith("invoice.");
+      const providerSubscriptionId = isInvoiceEvent
+        ? (typeof eventObject.subscription === "string" ? eventObject.subscription : "")
+        : (typeof eventObject.id === "string" ? eventObject.id : "");
+      const flagOn = await createFeatureFlagPort(ctx.env).isEnabled("monetization");
+      if (!flagOn) {
+        ctx.audit("commercial.billing.webhook", "payments", {
+          type: eventType,
+          providerSubscriptionId,
+          applied: false,
+          reason: "billing_flag_off",
+        });
+        return Response.json({ applied: false, reason: "billing_flag_off" });
+      }
+      const billing = createBillingPorts(ctx.env as unknown as BillingEnv, true);
+      if (!billing) {
+        return Response.json({ error: "Billing is not configured (Stripe)." }, { status: 503 });
+      }
+      const subs = requireSubs();
+      if (subs instanceof Response) return subs;
+      const policy = requireBillingPolicy();
+      if (policy instanceof Response) return policy;
+      try {
+        await ensureSubscriptionSchema(subs.db);
+        await ensureBillingPolicySchema(policy.db);
+      } catch (err: any) {
+        return Response.json({ error: `Billing store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+      }
+      let policyValue;
+      try {
+        policyValue = await policy.getPolicy();
+      } catch (err: any) {
+        return Response.json({ error: `Billing policy unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+      }
+      const KNOWN_TYPES = new Set([
+        "customer.subscription.created",
+        "customer.subscription.updated",
+        "customer.subscription.deleted",
+        "invoice.paid",
+        "invoice.payment_failed",
+      ]);
+      let provider = null;
+      if (KNOWN_TYPES.has(eventType) && providerSubscriptionId) {
+        try {
+          provider = await billing.retrieveProviderSubscription(providerSubscriptionId);
+        } catch (err: any) {
+          if (/HTTP 404/.test(err.message || "")) {
+            provider = null;
+          } else {
+            return Response.json({ error: "Billing subscription verification unavailable." }, { status: 503 });
+          }
+        }
+      }
+      const webhookEvent: BillingWebhookEvent = { type: eventType, providerSubscriptionId, provider };
+      const result = await applyBillingWebhookEvent({
+        verified: true,
+        event: webhookEvent,
+        subs,
+        policy: policyValue,
+        nowMs: Date.now(),
+      });
+      ctx.audit("commercial.billing.webhook", "payments", {
+        type: eventType,
+        providerSubscriptionId,
+        applied: result.applied,
+        reason: result.reason,
+        subscriptionId: result.subscription?.id ?? null,
+      });
+      return Response.json({
+        applied: result.applied,
+        reason: result.reason,
+        subscriptionId: result.subscription?.id ?? null,
+      });
+    } catch (err: any) {
+      return Response.json({ error: err.message || "Failed to apply Billing webhook" }, { status: 500 });
+    }
+  }
+
+  // GET/POST /payments/agentic/commercial/billing-policy — operator-only billing-policy read/write
+  // (Phase 2.1, #2656). NOT flag-gated: operators configure policy before activation (same rule
+  // as the refund policy routes). POST validates a partial update (invalid → 400) and audits.
+  // Values not yet edited by an operator are the PROPOSED seed values pending owner approval —
+  // the GET response says so rather than claiming approval.
+  if (path.endsWith("/payments/agentic/commercial/billing-policy") && (request.method === "GET" || request.method === "POST")) {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!isStoreOperator(login)) {
+        return Response.json({ error: "Forbidden: only a store operator may read or set billing policy." }, { status: 403 });
+      }
+      const policy = requireBillingPolicy();
+      if (policy instanceof Response) return policy;
+      try {
+        await ensureBillingPolicySchema(policy.db);
+      } catch (err: any) {
+        return Response.json({ error: `Billing policy store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+      }
+      if (request.method === "GET") {
+        const policyValue = await policy.getPolicy();
+        return Response.json({
+          policy: policyValue,
+          seedNote: "Values not yet edited by an operator are PROPOSED seed values pending owner approval.",
+        });
+      }
+      const body = (await request.json().catch(() => ({}))) as unknown;
+      let partial;
+      try {
+        partial = assertBillingPolicyPartial(body);
+      } catch (err: any) {
+        return Response.json({ error: err.message || "Invalid billing policy update." }, { status: 400 });
+      }
+      const updated = await policy.updatePolicy(partial);
+      ctx.audit("commercial.billing.policy_set", "payments", { userId: login, policy: updated });
+      return Response.json({ policy: updated });
+    } catch (err: any) {
+      return Response.json({ error: err.message || "Failed to handle billing policy" }, { status: 500 });
+    }
+  }
+
   // POST /payments/agentic/commercial/subscription/cancel — cancel-at-period-end.
   // Sets every unexpired row canceled; access continues to periodEnd, then stops. No cash refund
   // (deferred #2024). Self-service, or an operator on a user's behalf (body.userId).
+  // Issue #2656 (Phase 2.1): Billing-aware. A locally-only cancel of a Billing-managed row would
+  // leave Stripe charging while access shows canceled — so Billing rows are provider-canceled
+  // FIRST (cancelBillingAtPeriodEnd, provider + local), and repurchase rows are canceled per-row
+  // after. Any provider failure refuses with 503 and cancels NOTHING (atomicity: a half-canceled
+  // user is worse than an un-canceled one). With no Billing rows, the existing
+  // cancelUnexpiredSubscriptions path runs untouched. Cancel uses the Billing port regardless of
+  // flag state: cancel STOPS money, never starts it, so the monetization flag (which gates
+  // money-starting actions) must never block a user from stopping charges.
   if (path.endsWith("/payments/agentic/commercial/subscription/cancel") && request.method === "POST") {
     try {
       const login = commercialLogin();
@@ -1666,7 +2134,38 @@ export async function handleAgenticPaymentsRoutes(
       if (store instanceof Response) return store;
       const ensured = await ensureStores(store, subs);
       if (ensured) return ensured;
-      const canceled = await subs.cancelUnexpiredSubscriptions(targetUser, Date.now());
+      const nowMs = Date.now();
+      const unexpired = (await subs.listSubscriptions(targetUser)).filter(
+        (s) => s.status === "active" && s.periodEndMs > nowMs,
+      );
+      const billingRows = unexpired.filter((s) => isBillingManaged(s));
+      let canceled;
+      let billingCanceledIds: string[] = [];
+      if (billingRows.length === 0) {
+        canceled = await subs.cancelUnexpiredSubscriptions(targetUser, nowMs);
+      } else {
+        const billing = createBillingPorts(ctx.env as unknown as BillingEnv, true);
+        if (!billing) {
+          return Response.json({ error: "Billing cancel is not configured (Stripe): no subscriptions canceled." }, { status: 503 });
+        }
+        const billingCanceled = [];
+        try {
+          for (const row of billingRows) {
+            billingCanceled.push(await cancelBillingAtPeriodEnd({ billing, subs, subscriptionId: row.id }));
+          }
+        } catch (err: any) {
+          return Response.json({ error: `Billing cancel failed, no subscriptions canceled: ${err.message || "unknown error"}` }, { status: 503 });
+        }
+        billingCanceledIds = billingCanceled.map((s) => s.id);
+        const repurchaseCanceled = [];
+        for (const row of unexpired.filter((s) => !isBillingManaged(s))) {
+          const one = await subs.cancelSubscription(row.id, nowMs);
+          if (one) repurchaseCanceled.push(one);
+        }
+        canceled = [...billingCanceled, ...repurchaseCanceled].sort(
+          (a, b) => a.createdAtMs - b.createdAtMs || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+        );
+      }
       const accessThroughMs = canceled.length > 0 ? Math.max(...canceled.map((s) => s.periodEndMs)) : null;
       // Issue #2522: cancel-at-period-end changes no periodEndMs,
       // so the effective tier is unchanged — the audit states the
@@ -1677,6 +2176,7 @@ export async function handleAgenticPaymentsRoutes(
       ctx.audit("commercial.subscription.canceled", "payments", {
         userId: targetUser,
         subscriptionIds: canceled.map((s) => s.id),
+        billingCanceledIds,
         accessThroughMs,
         effectiveTier: resolveEffectiveTier(cancelAccount, cancelSubscriptions, Date.now()),
       });

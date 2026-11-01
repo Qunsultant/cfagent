@@ -169,9 +169,29 @@ export class PaymentGatewayService {
     client_reference_id: string;
     payment_intent?: string;
     url?: string;
+    subscriptionId?: string;
+    customerId?: string;
+    metadata?: Record<string, string>;
   }> {
     const stripeStrategy = PaymentStrategyFactory.getStrategy("stripe") as StripePaymentStrategy;
     return stripeStrategy.retrieveCheckoutSession(this.env, sessionId);
+  }
+
+  /**
+   * Issue #2656 (Phase 2.1) — subscription-mode Checkout Session
+   * creation, via the Stripe strategy (the only Stripe API
+   * surface). Thin wrapper: the Billing checkout adapter calls
+   * this, never the strategy directly. Throws on missing
+   * configuration or transport failure (fail closed).
+   */
+  async createSubscriptionCheckoutSession(params: {
+    draftId: string;
+    priceId: string;
+    customerId?: string | null;
+    metadata: Record<string, string>;
+  }): Promise<{ id: string; url: string | null }> {
+    const stripeStrategy = PaymentStrategyFactory.getStrategy("stripe") as StripePaymentStrategy;
+    return stripeStrategy.createSubscriptionCheckoutSession(this.env, params);
   }
 
   /**

@@ -452,6 +452,22 @@ export const agentBillingPolicy = sqliteTable("agent_billing_policy", {
 });
 
 /**
+ * Billing customer mapping (#2656, Phase 2.1 of #2405) on D1.
+ * One row per user: the provider customer id for that user's
+ * Billing checkouts (first-wins — see billingCustomerPorts.ts).
+ * This schema MAPS the table; it does not create it — DDL
+ * authority lives in migration 0030
+ * (src/data/migrationRunner.ts).
+ */
+export const agentBillingCustomers = sqliteTable("agent_billing_customers", {
+  userId: text("user_id").primaryKey(),
+  tenantId: text("tenant_id").notNull(),
+  stripeCustomerId: text("stripe_customer_id").notNull(),
+  createdAtMs: integer("created_at_ms").notNull(),
+  updatedAtMs: integer("updated_at_ms").notNull(),
+});
+
+/**
  * Minimal double-entry journal (#2155, sub-issue of #2012). This
  * schema MAPS tables; it does not create them — DDL authority
  * lives in migration 0009 (src/data/migrationRunner.ts), and a

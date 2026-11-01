@@ -1251,6 +1251,33 @@ ALTER TABLE agent_tenant_settings ADD COLUMN broker_id TEXT NOT NULL DEFAULT 'et
 `,
 };
 
+/**
+ * Migration 0030 — Billing customer mapping (#2656, Phase 2.1
+ * of #2405). Renumbered from 0029 during the rebase onto main
+ * 80285a15: main's #2548 claimed 0029 (proof redemptions) while
+ * this slice was in flight, so 0030 is the next free number.
+ * Standalone table, no prerequisite migration: one
+ * row per user (user_id PK), the provider customer id for that
+ * user's Billing checkouts. First-wins is enforced by the port
+ * (recordCustomer refuses a different id), not by DDL — a
+ * UNIQUE index on stripe_customer_id would wrongly forbid two
+ * users ever sharing a provider customer (e.g. an operator
+ * correction), so none is declared.
+ */
+export const MIGRATION_0030_BILLING_CUSTOMERS: DataMigration = {
+  version: 30,
+  name: "0030_billing_customers",
+  sql: `
+CREATE TABLE IF NOT EXISTS agent_billing_customers (
+  user_id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL,
+  stripe_customer_id TEXT NOT NULL,
+  created_at_ms INTEGER NOT NULL,
+  updated_at_ms INTEGER NOT NULL
+);
+`,
+};
+
 export const MIGRATION_0026_TENANT_AUTO_REFRESH: DataMigration = {
   version: 26,
   name: "0026_tenant_auto_refresh",
@@ -1332,6 +1359,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [
   MIGRATION_0027_PRICE_CATALOGUE_APPROVAL,
   MIGRATION_0028_TENANT_PROVIDERS,
   MIGRATION_0029_PROOF_REDEMPTIONS,
+  MIGRATION_0030_BILLING_CUSTOMERS,
 ];
 
 function splitStatements(sqlText: string): string[] {
