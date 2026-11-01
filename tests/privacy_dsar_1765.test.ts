@@ -194,11 +194,21 @@ describe("ADMT notice + opt-out (PRV-003)", () => {
 });
 
 describe("universal retention registry (PRV-006, shared with #1766)", () => {
-  it("covers mas_messages, screener_runs and research_runs with a 30-day bound", () => {
+  it("covers mas_messages, screener_runs and research_runs with their declared bounds", () => {
+    // #1766 correction: mas_messages is 90d, not 30d — the nightly
+    // pass defaults to STORAGE_RETENTION_DEFAULT_DAYS (90d) and the
+    // UI advertises 90d; #1765's 30d claim was wrong. screener_runs
+    // and research_runs keep their declared 30d targets (carried,
+    // not enforced — see the registry header).
+    const expected: Record<string, number> = {
+      mas_messages: 90,
+      screener_runs: 30,
+      research_runs: 30,
+    };
     for (const table of ["mas_messages", "screener_runs", "research_runs"]) {
       const rule = retentionRuleFor(table);
       expect(rule).toBeDefined();
-      expect(rule?.maxAgeDays).toBe(30);
+      expect(rule?.maxAgeDays).toBe(expected[table]);
       expect(PRIVACY_RETENTION_TABLES).toContain(table);
     }
   });

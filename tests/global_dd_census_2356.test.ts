@@ -112,6 +112,7 @@ const STORAGE_ALLOW_LIST: Array<[string, number, string]> = [
   ["src/actors/cfAgentsAdapter.ts", 1, "permanent — Agents-SDK shim (ADR-out)"],
   ["src/services/receiptSurface.ts", 2, "issue #2543 receipt read-back: meter + tier reads over the sql seam (usage port drops detail_json; no port path exists)"],
   ["src/agents/routes/orchestratorMigration.ts", 3, "issue #2681 orchestrator migration: DO-internal table export/import — sqlite_master discovery, SELECT *, INSERT OR REPLACE; the migration driver must read the source instance's own storage, no port path exists for cross-instance table copy"],
+  ["src/agents/routes/schedules.ts", 3, "issue #1766 nightly retention legs: DO-internal orphan-sweep read (body_r2_key), sqlite_master discovery, and per-table SELECT * for the R2 snapshot; the pass runs inside the DO and reads its own storage, no port path exists for own-instance table dump"],
 ];
 
 /** The step-4c families: zero above-layer sites remain. */
@@ -293,8 +294,11 @@ describe("global D-D census: surface 1 — storage-shaped sites above the layer"
     // seam — the usage port drops detail_json) → 15;
     // issue #2681 adds the orchestrator-migration module's 3
     // (DO-internal export/import, same class as orchestrator.ts's
-    // permanent remainder) → 18.
-    expect(total).toBe(18);
+    // permanent remainder) → 18; issue #1766 adds the nightly
+    // retention legs' 3 (orphan-sweep read, sqlite_master
+    // discovery, per-table SELECT * for the R2 snapshot —
+    // same DO-internal class) → 21.
+    expect(total).toBe(21);
   });
 
   for (const file of STEP4C_SERVICE_FILES) {
