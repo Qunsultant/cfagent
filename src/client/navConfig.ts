@@ -37,7 +37,6 @@ export interface LeftNavConfig {
 
 /**
  * Sub-menu configuration map for navigation items that contain sub-menus.
- * For example, Screeners provides choices for stocks and options.
  */
 export const SUB_MENU_CONFIGS: Record<string, NavSubMenuItemConfig[]> = {
   screeners: [
@@ -51,53 +50,15 @@ export const SUB_MENU_CONFIGS: Record<string, NavSubMenuItemConfig[]> = {
       description: "Multi-factor equity screener and fundamental valuation filters",
     },
     {
-      id: "options",
-      label: "Options Screener",
-      shortLabel: "Options",
-      icon: "Options",
-      badge: "Options",
-      badgeType: "ai",
-      description: "Options chain, unusual activity, and Greeks scanner",
-    },
-    {
-      id: "scanner",
-      label: "Strategy Scanner",
-      shortLabel: "Scanner",
-      icon: "Scanner",
-      badge: "Scan",
-      badgeType: "mcp",
-      description: "Pattern matching, technical breakout, and momentum scans",
-    },
-    {
-      id: "options-flows",
-      label: "Options Flows",
-      shortLabel: "Flows",
-      icon: "Options",
-      badge: "Flows",
-      badgeType: "live",
-      description: "Institutional block trades, sweeps, and dark pool prints",
-    },
-    {
-      id: "iv-history",
-      label: "IV History & Volatility",
-      shortLabel: "IV",
-      icon: "Options",
-      badge: "IV",
-      badgeType: "neutral",
-      description: "Historical and implied volatility percentile ranks",
+      id: "research",
+      label: "Market Research",
+      shortLabel: "Research",
+      icon: "Research",
+      badge: "Feed",
+      badgeType: "new",
+      description: "Zero-credential Yahoo Finance and Alpaca dual feed, fundamental peer comparison",
     },
   ],
-  /**
-   * Issue #2596, slice 1: the Options Screener's own sub-menu. Every
-   * entry is an existing tab id — nothing here is a new surface.
-   * The sub-products with no tab of their own (strategy panel,
-   * best-trade, compare, LLM ideas/evaluate, discovery, IV history
-   * as a hub section, scheduled runs, settings) are aggregated on
-   * the Options Screener page itself (OptionsScreenerPage), which
-   * links to the tab that hosts each one. The Screeners sub-menu
-   * above keeps its "options" entry: promotion adds a top-level
-   * home, it does not remove the historical path.
-   */
   "options-screener": [
     {
       id: "options",
@@ -127,31 +88,60 @@ export const SUB_MENU_CONFIGS: Record<string, NavSubMenuItemConfig[]> = {
       description: "Institutional block trades, sweeps, and dark pool prints",
     },
     {
+      id: "iv-history",
+      label: "IV History & Volatility",
+      shortLabel: "IV",
+      icon: "Options",
+      badge: "IV",
+      badgeType: "neutral",
+      description: "Historical and implied volatility percentile ranks",
+    },
+  ],
+  "workflow-runs": [
+    {
       id: "docs",
       label: "Reports & Docs",
       shortLabel: "Docs",
-      icon: "Screeners",
+      icon: "Docs",
       badge: "Docs",
       badgeType: "pro",
-      description: "Generated options reports and run details for every run",
+      description: "Generated options and stock reports with PDF/XLSX/CSV downloads",
     },
     {
       id: "workflow-runs",
       label: "Workflow Runs",
       shortLabel: "Runs",
-      icon: "Screeners",
+      icon: "Runs",
       badge: "Runs",
       badgeType: "neutral",
       description: "Every recorded workflow run with its stages and artifacts",
     },
     {
-      id: "schedules",
-      label: "Schedules",
-      shortLabel: "Schedules",
+      id: "reports",
+      label: "Screener Reports",
+      shortLabel: "Reports",
       icon: "Screeners",
-      badge: "Schedules",
+      badge: "Reports",
       badgeType: "pro",
-      description: "Scheduled options runs and their schedules",
+      description: "Comprehensive market screener reports and run details",
+    },
+    {
+      id: "review",
+      label: "Proposal Review",
+      shortLabel: "Review",
+      icon: "Screeners",
+      badge: "Review",
+      badgeType: "ai",
+      description: "Autonomous proposal evaluation and human-in-the-loop approvals",
+    },
+    {
+      id: "track-record",
+      label: "Track Record",
+      shortLabel: "Record",
+      icon: "Screeners",
+      badge: "Track",
+      badgeType: "pro",
+      description: "Recommendation track record, hit rates, and historical outcomes",
     },
   ],
   "platform-admin": PLATFORM_ADMIN_NAV_ITEMS.map((item) => ({
@@ -161,19 +151,36 @@ export const SUB_MENU_CONFIGS: Record<string, NavSubMenuItemConfig[]> = {
     icon: "Settings",
     description: item.description,
   })),
+  sandbox: [
+    {
+      id: "payment-assurance",
+      label: "Payment Assurance",
+      shortLabel: "Assurance",
+      icon: "Shield",
+      badge: "Test",
+      badgeType: "neutral",
+      description: "Live & simulation payment assurance test suite",
+    },
+    {
+      id: "sandbox-checkout",
+      label: "Checkout sandbox",
+      shortLabel: "Sandbox",
+      icon: "Checkout",
+      badge: "Demo",
+      badgeType: "pro",
+      description: "Demo checkout terminal (public sandbox page)",
+    },
+  ],
 };
 
 const SECTION_METADATA: { category: RouteCategory; title: string; id: string }[] = [
   { category: "Execution", title: "TRADING & EXECUTION", id: "section-execution" },
   { category: "Intelligence", title: "INTELLIGENCE & COPILOT", id: "section-intelligence" },
-  { category: "Playbooks", title: "PLAYBOOKS & TOOLS", id: "section-playbooks" },
-  { category: "Platform", title: "PLATFORM & BILLING", id: "section-platform" },
+  { category: "Playbooks", title: "WORKFLOWS", id: "section-workflows" },
+  { category: "Billing", title: "BILLING", id: "section-billing" },
+  { category: "Platform", title: "PLATFORM", id: "section-platform" },
 ];
 
-/**
- * Builds the default externalized LeftNavConfig derived from the single-source-of-truth
- * route table and enhanced with sub-menu definitions.
- */
 /** Id of the left-nav item that hosts the Platform Admin sub-menu. */
 export const PLATFORM_ADMIN_NAV_ID = "platform-admin";
 
@@ -181,13 +188,20 @@ export const PLATFORM_ADMIN_NAV_ID = "platform-admin";
 export const SANDBOX_NAV_ID = "sandbox-checkout";
 
 /**
- * Issue #2645: `sandbox-checkout` is a nav id, not a route — it links the
- * standalone server-rendered /checkout/sandbox page, which is not an SPA tab.
  * Returns the page path for sandbox nav ids, undefined for everything else.
  */
 export function sandboxNavHrefFromNavId(id: string): string | undefined {
   return id === SANDBOX_NAV_ID ? "/checkout/sandbox" : undefined;
 }
+
+/** Items whose primary navigation home is inside a sub-menu, so they do not repeat as top-level main items */
+const SUB_MENU_HOSTED_IDS = new Set([
+  "options-flows",
+  "research",
+  "docs",
+  "payment-assurance",
+  PLATFORM_ADMIN_NAV_ID,
+]);
 
 export function buildDefaultLeftNavConfig(): LeftNavConfig {
   const navRoutes = ROUTES.filter(hasNavEntry).sort(
@@ -196,7 +210,7 @@ export function buildDefaultLeftNavConfig(): LeftNavConfig {
 
   const sections: NavSectionConfig[] = SECTION_METADATA.map((sec) => {
     const items: NavMenuItemConfig[] = navRoutes
-      .filter((r) => r.category === sec.category && r.id !== PLATFORM_ADMIN_NAV_ID)
+      .filter((r) => r.category === sec.category && !SUB_MENU_HOSTED_IDS.has(r.id))
       .map((r) => {
         const meta: NavEntryMeta = r.navEntry;
         const subItems = SUB_MENU_CONFIGS[r.id];
@@ -213,6 +227,35 @@ export function buildDefaultLeftNavConfig(): LeftNavConfig {
         };
       });
 
+    // Add Goal Screen to Intelligence section as its own top-level item
+    if (sec.id === "section-intelligence") {
+      items.splice(2, 0, {
+        id: "goal-screen",
+        label: "Goal Screen",
+        shortLabel: "Goal",
+        category: "Intelligence",
+        icon: "Screeners",
+        badge: "Goal",
+        badgeType: "ai",
+        description: "Goal-driven screening flow with AI-orchestrated criteria",
+      });
+    }
+
+    // Add Platform Admin to Platform section
+    if (sec.id === "section-platform") {
+      items.unshift({
+        id: PLATFORM_ADMIN_NAV_ID,
+        label: "Platform Admin",
+        shortLabel: "Admin",
+        category: "Platform",
+        icon: "Settings",
+        badge: "Admin",
+        badgeType: "pro",
+        description: "Ads, tasks, keys, providers & IAAA",
+        subItems: PLATFORM_ADMIN_NAV_ITEMS,
+      });
+    }
+
     return {
       id: sec.id,
       title: sec.title,
@@ -221,44 +264,20 @@ export function buildDefaultLeftNavConfig(): LeftNavConfig {
     };
   });
 
-  // Issue #2624: the administration surfaces are a left-nav destination with
-  // their own sub-menu — the same shape as Screeners — not a settings button.
-  // The item is not a route: selecting it (or a sub-item) opens the Platform
-  // Admin drawer at that section; navigation.tsx intercepts the ids.
-  sections.push({
-    id: "section-platform-admin",
-    title: "PLATFORM ADMIN",
-    category: "Platform",
-    items: [
-      {
-        id: PLATFORM_ADMIN_NAV_ID,
-        label: "Platform Admin",
-        shortLabel: "Admin",
-        category: "Platform",
-        icon: "Settings",
-        description: "Ads, tasks, keys, providers & IAAA",
-        subItems: PLATFORM_ADMIN_NAV_ITEMS,
-      },
-    ],
-  });
-
-  // Issue #2645: the demo pages are a left-nav destination with the same
-  // shape as Platform Admin — a section whose items are nav ids, not
-  // routes. The nav shell intercepts the sandbox id and opens the
-  // standalone server page (see sandboxNavHrefFromNavId); the route
-  // itself stays public and ungated per the owner's 2026-11-01 decision.
+  // Dedicated Sandbox section
   sections.push({
     id: "section-sandbox",
     title: "SANDBOX",
     category: "Platform",
     items: [
       {
-        id: SANDBOX_NAV_ID,
-        label: "Checkout sandbox",
+        id: "sandbox",
+        label: "Sandbox",
         shortLabel: "Sandbox",
         category: "Platform",
         icon: "Checkout",
-        description: "Demo checkout terminal (public sandbox page)",
+        description: "Payment assurance and demo checkout sandbox",
+        subItems: SUB_MENU_CONFIGS.sandbox,
       },
     ],
   });
@@ -266,7 +285,7 @@ export function buildDefaultLeftNavConfig(): LeftNavConfig {
   return { sections };
 }
 
-/** Sub-item ids are `platform-admin:<section>`; the nav shell routes them to the drawer. */
+/** Sub-item ids are `platform-admin:<section>`; the nav shell routes them to the drawer or tab view. */
 export function platformAdminSectionFromNavId(id: string): string | undefined {
   if (id === PLATFORM_ADMIN_NAV_ID) return "ads";
   const prefix = `${PLATFORM_ADMIN_NAV_ID}:`;
@@ -285,6 +304,22 @@ export function findNavItemConfig(
   for (const section of config.sections) {
     for (const item of section.items) {
       if (item.id === id) return item;
+      if (item.subItems) {
+        for (const sub of item.subItems) {
+          if (sub.id === id) {
+            return {
+              id: sub.id,
+              label: sub.label,
+              shortLabel: sub.shortLabel,
+              category: section.category,
+              icon: sub.icon || item.icon,
+              badge: sub.badge,
+              badgeType: sub.badgeType,
+              description: sub.description || "",
+            };
+          }
+        }
+      }
     }
   }
   return undefined;
@@ -298,12 +333,30 @@ export function isNavItemOrSubItemActive(
   currentTab: string
 ): boolean {
   if (item.id === currentTab) return true;
+  if (item.id === "goal-screen") {
+    if (typeof window !== "undefined") {
+      const view = new URLSearchParams(window.location.search).get("view");
+      return currentTab === "screeners" && view === "goal-screen";
+    }
+    return false;
+  }
+  if (item.id === "screeners") {
+    if (typeof window !== "undefined") {
+      const view = new URLSearchParams(window.location.search).get("view");
+      if (view === "goal-screen") return false;
+    }
+  }
   if (getNavGroup(currentTab) === item.id) return true;
   if (item.subItems) {
-    return item.subItems.some(
-      (sub) => sub.id === currentTab || getNavGroup(currentTab) === sub.id
-    );
+    return item.subItems.some((sub) => {
+      if (sub.id === currentTab) return true;
+      if (getNavGroup(currentTab) === sub.id) return true;
+      if (typeof window !== "undefined") {
+        const view = new URLSearchParams(window.location.search).get("view");
+        if (currentTab === "screeners" && view === sub.id) return true;
+      }
+      return false;
+    });
   }
   return false;
 }
-

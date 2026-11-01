@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import type { ThemeMode } from "../theme";
 import { StockSearchBar } from "./StockSearchBar";
 import { Badge, Button, type BadgeTone } from "./ui";
-import { ROUTES, DEFAULT_VISIBLE_NAV_TABS, getNavGroup, hasNavEntry, type RouteId, type NavEntryMeta } from "../routes";
+import { ROUTES, DEFAULT_VISIBLE_NAV_TABS, getNavGroup, hasNavEntry, type RouteId, type NavEntryMeta, type RouteCategory } from "../routes";
 export { DEFAULT_VISIBLE_NAV_TABS };
 import { MarketStatusPill } from "./MarketStatusPill";
 import { adjustFontScale, getStoredFontScale } from "../typography";
@@ -29,7 +29,7 @@ export interface NavItemDef {
   id: NavTabId;
   label: string;
   shortLabel: string;
-  category: "Execution" | "Intelligence" | "Playbooks" | "Platform";
+  category: RouteCategory;
   badge?: string;
   badgeType?: "pro" | "live" | "ai" | "mcp" | "new" | "neutral";
 

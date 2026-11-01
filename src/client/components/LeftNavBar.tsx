@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Badge, Button } from "../components/ui";
 import {
   DEFAULT_LEFT_NAV_CONFIG,
+  SANDBOX_NAV_ID,
   isNavItemOrSubItemActive,
   platformAdminSectionFromNavId,
   type LeftNavConfig,
@@ -17,6 +18,7 @@ import {
 import { BRAND } from "../branding";
 import { isTabFeatureEnabled } from "../featureFlags";
 import { getNavGroup } from "../routes";
+import { navigateToTab } from "../router";
 
 export interface LeftNavBarProps {
   config?: LeftNavConfig;
@@ -92,12 +94,49 @@ export function LeftNavBar({
 
   const closeFlyout = () => setFlyout(null);
 
-  const toggleSubMenu = (itemId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const toggleSubMenu = (itemId: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
     setExpandedMenus((prev) => ({
       ...prev,
       [itemId]: !prev[itemId],
     }));
+  };
+
+  const handleItemClick = (item: NavMenuItemConfig, hasSubMenu: boolean) => {
+    if (hasSubMenu && !collapsed) {
+      toggleSubMenu(item.id);
+    }
+    if (item.id === "goal-screen") {
+      navigateToTab("screeners", "goal-screen");
+      return;
+    }
+    if (item.id === "sandbox" || item.id === SANDBOX_NAV_ID) {
+      if (!hasSubMenu) {
+        window.location.href = "/checkout/sandbox";
+      }
+      return;
+    }
+    onSelectTab(item.id as NavTabId);
+  };
+
+  const handleSubItemClick = (sub: NavSubMenuItemConfig) => {
+    if (
+      sub.id === "goal-screen" ||
+      sub.id === "scanner" ||
+      sub.id === "iv-history" ||
+      sub.id === "review" ||
+      sub.id === "track-record"
+    ) {
+      navigateToTab("screeners", sub.id);
+    } else if (sub.id === "reports") {
+      navigateToTab("reports");
+    } else if (sub.id === "schedules") {
+      navigateToTab("schedules");
+    } else if (sub.id === SANDBOX_NAV_ID) {
+      window.location.href = "/checkout/sandbox";
+    } else {
+      onSelectTab(sub.id as NavTabId);
+    }
   };
 
   const isSubVisible = (sub: NavSubMenuItemConfig) => {
@@ -115,13 +154,16 @@ export function LeftNavBar({
 
   const isSubActive = (subId: string): boolean => {
     if (activeTab === subId) return true;
+    const currentView =
+      typeof window !== "undefined"
+        ? new URLSearchParams(window.location.search).get("view")
+        : null;
+    if (activeTab === "screeners" && currentView === subId) {
+      return true;
+    }
     const section = platformAdminSectionFromNavId(subId);
     if (section && activeTab === "platform-admin") {
-      const currentView =
-        typeof window !== "undefined"
-          ? (new URLSearchParams(window.location.search).get("view") ?? "ads")
-          : "ads";
-      return section === currentView;
+      return (currentView ?? "ads") === section;
     }
     return false;
   };
@@ -212,7 +254,7 @@ export function LeftNavBar({
                         <Button
                           variant="ghost"
                           className={`sidebar-nav-item ${active ? "active" : ""}`}
-                          onClick={() => onSelectTab(item.id as NavTabId)}
+                          onClick={() => handleItemClick(item, hasSubMenu)}
                           onFocus={(e) => {
                             if (collapsed && visibleSubItems.length > 0) {
                               openFlyoutFor(item.id, e.currentTarget.closest(".sidebar-nav-item-wrapper") as HTMLElement | null);
@@ -253,8 +295,8 @@ export function LeftNavBar({
                             aria-expanded={isExpanded}
                             aria-controls={`submenu-${item.id}`}
                           >
-                            <span className="submenu-toggle-chevron">
-                              {isExpanded ? "▼" : "›"}
+                            <span className={`submenu-toggle-chevron ${isExpanded ? "open" : ""}`}>
+                              <NavIcons.ChevronRight />
                             </span>
                           </Button>
                         )}
@@ -281,8 +323,8 @@ export function LeftNavBar({
                             aria-expanded={flyoutOpen}
                             aria-controls={`flyout-submenu-${item.id}`}
                           >
-                            <span className="submenu-toggle-chevron">
-                              {flyoutOpen ? "▼" : "›"}
+                            <span className={`submenu-toggle-chevron ${flyoutOpen ? "open" : ""}`}>
+                              <NavIcons.ChevronRight />
                             </span>
                           </Button>
                         )}
@@ -305,7 +347,7 @@ export function LeftNavBar({
                                 variant="ghost"
                                 key={sub.id}
                                 className={`sidebar-submenu-item ${subActive ? "active" : ""}`}
-                                onClick={() => onSelectTab(sub.id as NavTabId)}
+                                onClick={() => handleSubItemClick(sub)}
                                 title={`${sub.label}${sub.description ? ` — ${sub.description}` : ""}`}
                               >
                                 <span className="submenu-item-bullet">
