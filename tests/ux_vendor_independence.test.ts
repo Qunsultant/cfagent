@@ -71,7 +71,12 @@ describe("UX Vendor Independence & Capability Representation (Issues #1322 & #13
     const menu = read("src/client/ETradeDynamicMenu.tsx");
     expect(menu).not.toContain("Durable Objects + SQLite");
     expect(menu).not.toContain("Persistent Distributed SQLite");
-    expect(menu).toContain("Institutional Execution Ledger &amp; Audit Trail");
+    // Issue #2624: the provenance prose moved with the admin sections into
+    // the Platform Admin drawer. Same assertions, new host.
+    const platformAdmin = read("src/client/PlatformAdminPanel.tsx");
+    expect(platformAdmin).toContain("Institutional Execution Ledger &amp; Audit Trail");
+    expect(platformAdmin).not.toContain("Durable Objects + SQLite");
+    expect(platformAdmin).not.toContain("Persistent Distributed SQLite");
 
     const marketDataResearch = read("src/client/MarketDataResearchHub.tsx");
     expect(marketDataResearch).not.toContain("SQLite Durable Objects");
