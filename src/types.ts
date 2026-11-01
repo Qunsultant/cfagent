@@ -290,6 +290,16 @@ export interface Env {
   // action gated on CISO review of the prompt-injection
   // surface (#2530 acceptance item 4).
   SCREENER_ND_MODE?: string;
+  // Issue #2567 — the stuck-running alert threshold, in minutes
+  // (non-secret, owner-set, same pattern as the other mode vars).
+  // A mas_async_jobs row still `running` past the threshold
+  // raises exactly one operator Slack alert from the read path,
+  // ahead of the 2h stale-running reap. Built-in default when
+  // unset or unparseable: 30. "0" or negative disables the alert
+  // (the reap is unaffected). Resolution lives in
+  // src/config/stuckRunAlert.ts. This slice sets NO production
+  // value.
+  STUCK_RUN_ALERT_THRESHOLD_MINUTES?: string;
   // #1723 (parent #1717, slice (c)) — TWO knowledge + memory switches
   // (non-secret, owner-set, same pattern as PAYMENTS_FLOW_MODE).
   // KNOWLEDGE_MODE: "search" | "platform" (case-insensitive, padded

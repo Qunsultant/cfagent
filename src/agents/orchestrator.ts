@@ -67,6 +67,8 @@ import { nlqSchedulingPort, nlqSocialBriefPort, nlqStockScreenPort, type NlqPort
 import { formatTraceparent, newTraceContext } from "../observability/observabilityPorts";
 import { recordTraceHopBestEffort } from "../data/createMeshTracePorts";
 import { createSocialBriefStoreFromNamespace } from "./social/briefStore";
+import { fetchSlackPost } from "./social/delivery";
+import { postSlackText } from "./resourceGoals";
 import type { DoNamespaceLike } from "../security/durableKv";
 import { createKvMembershipStore } from "../security/iaaaMembershipStore";
 import { isLoginShaped } from "../security/serviceIdentity";
@@ -606,6 +608,27 @@ export class OrchestratorAgent extends PortThink {
         getScreenerAgent: (userLogin) => this.getScreenerAgent(userLogin),
       }),
       serviceMembershipStore: createKvMembershipStore(sessionStore(this.env)),
+      notifyStuckRun: async (info) => {
+        // Issue #2567: deliver the stuck-running alert through the
+        // existing Slack operator surface — postSlackText, the
+        // #1819 resource cap-alert seam (webhook first, bot token
+        // second; no new channel) — and audit the delivery
+        // outcome. Detection + the exactly-once claim live in
+        // asyncJobs.maybeAlertStuckRunning.
+        const text = [
+          `⚠️ Stuck run detected: job ${info.jobId} (${info.label}) has been running for ~${Math.round(info.ageMs / 60000)} min (alert threshold ${Math.round(info.thresholdMs / 60000)} min; the 2h reap is the backstop).`,
+          `Capability: ${info.capability} · Owner: ${info.ownerLogin} · Started: ${info.startedAt}`,
+          "Diagnosis + safe intervention: docs/operations/runbook/stuck-runs.md",
+        ].join("\n");
+        const result = await postSlackText({ post: fetchSlackPost, env: this.env, text });
+        this.audit(result.ok ? "async_job.stuck_alert" : "async_job.stuck_alert_failed", "orchestrator", {
+          jobId: info.jobId,
+          capability: info.capability,
+          ownerLogin: info.ownerLogin,
+          ageMs: info.ageMs,
+          ...(result.ok ? { method: result.method } : { error: result.error }),
+        });
+      },
     };
   }
 

@@ -100,6 +100,10 @@ export class DoSqliteAsyncJobStore
     if (!names.has("chain_id")) {
       this.sql.exec("ALTER TABLE mas_async_jobs ADD COLUMN chain_id TEXT");
     }
+    if (!names.has("stuck_alerted_at")) {
+      // Issue #2567: the stuck-running alert claim stamp.
+      this.sql.exec("ALTER TABLE mas_async_jobs ADD COLUMN stuck_alerted_at TEXT");
+    }
     this.sql.exec("CREATE INDEX IF NOT EXISTS idx_mas_async_jobs_parent ON mas_async_jobs(parent_job_id)");
     this.sql.exec("CREATE INDEX IF NOT EXISTS idx_mas_async_jobs_chain ON mas_async_jobs(chain_id)");
   }
@@ -244,6 +248,17 @@ export class DoSqliteAsyncJobStore
     return rowsWritten(cursor);
   }
 
+  markStuckAlerted(jobId: string, nowIso: string): number {
+    const cursor = this.sql.exec(
+      `UPDATE mas_async_jobs SET stuck_alerted_at = ?
+       WHERE job_id = ? AND status = 'running' AND stuck_alerted_at IS NULL`,
+      nowIso,
+      jobId,
+    );
+    Array.from(cursor as Iterable<unknown>);
+    return rowsWritten(cursor);
+  }
+
   // ------------------------------------------------------------------
   // Read
   // ------------------------------------------------------------------
@@ -251,7 +266,7 @@ export class DoSqliteAsyncJobStore
   getRow(jobId: string, sessionId: string): AsyncJobStoredRow | undefined {
     const rows = Array.from(this.sql.exec(
       `SELECT job_id, session_id, capability, display_name, status, result_json, response_status,
-            error, created_at, updated_at, started_at, completed_at, parent_job_id, job_kind, channel, not_before, stage, chain_id
+            error, created_at, updated_at, started_at, completed_at, parent_job_id, job_kind, channel, not_before, stage, chain_id, stuck_alerted_at
      FROM mas_async_jobs WHERE job_id = ? AND session_id = ?`,
       jobId,
       sessionId,
@@ -261,7 +276,7 @@ export class DoSqliteAsyncJobStore
 
   listRows(sessionId: string, limit: number): AsyncJobListRow[] {
     return Array.from(this.sql.exec(
-      `SELECT job_id, session_id, capability, display_name, status, result_json, error, created_at, updated_at, started_at, completed_at, parent_job_id, job_kind, channel, not_before, stage, chain_id
+      `SELECT job_id, session_id, capability, display_name, status, result_json, error, created_at, updated_at, started_at, completed_at, parent_job_id, job_kind, channel, not_before, stage, chain_id, stuck_alerted_at
      FROM mas_async_jobs WHERE session_id = ?
      ORDER BY created_at DESC LIMIT ?`,
       sessionId,
@@ -332,7 +347,7 @@ export class DoSqliteAsyncJobStore
 
   workflowRunRows(sessionId: string, limit: number): AsyncJobWorkflowRow[] {
     return Array.from(this.sql.exec(
-      "SELECT job_id, capability, display_name, status, payload_json, result_json, error, created_at, updated_at, started_at, completed_at, parent_job_id, job_kind, channel, not_before, stage, chain_id FROM mas_async_jobs WHERE session_id = ? ORDER BY created_at DESC LIMIT ?",
+      "SELECT job_id, capability, display_name, status, payload_json, result_json, error, created_at, updated_at, started_at, completed_at, parent_job_id, job_kind, channel, not_before, stage, chain_id, stuck_alerted_at FROM mas_async_jobs WHERE session_id = ? ORDER BY created_at DESC LIMIT ?",
       sessionId,
       limit,
     )) as unknown as AsyncJobWorkflowRow[];

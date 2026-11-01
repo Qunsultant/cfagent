@@ -11,6 +11,7 @@ not in bulk, so each move stays a reviewable pure rename.
 | Runbook | Location today | Status |
 | --- | --- | --- |
 | Screening System Runbook (operator runbook for the goal/scenario screening system, Epic #1096 Phase 6) | `docs/operations/runbook/screening-system-runbook.md` | Current |
+| Stuck Runs Runbook (detection, diagnosis, and safe intervention for long-running async job runs, issue #2567) | `docs/operations/runbook/stuck-runs.md` | Current |
 | Service Identity Operator Runbook (operator runbook for the service-identity configuration) | `docs/architecture/security/service-identity.md` | Current — candidate to move here |
 
 ## Missing

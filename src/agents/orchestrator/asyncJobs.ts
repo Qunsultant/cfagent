@@ -53,6 +53,7 @@ import {
   resolveNlqMode,
 } from "../../config/nlqModes";
 import { getUserDid } from "../did";
+import { resolveStuckRunAlertThresholdMs } from "../../config/stuckRunAlert";
 import { createAsyncJobPorts, type AsyncJobPorts } from "../../data/createAsyncJobPorts";
 import { createOptionsDiscoveryPorts } from "../../data/createOptionsDiscoveryPorts";
 import { createDiscoveryService } from "../../services/discoveryService";
@@ -100,6 +101,13 @@ export interface AsyncJobsContext {
    *  KV store; a context without one denies every service dispatch
    *  (fail closed — an unverifiable service identity never runs). */
   serviceMembershipStore?: MembershipStore;
+  /** Issue #2567: the stuck-running alert delivery hook. The
+   *  orchestrator builder wires the Slack operator surface
+   *  (postSlackText); a context without one still claims + audits
+   *  the detection (async_job.stuck_detected) so a stuck run is
+   *  never invisible. Invoked fire-and-forget off the read path;
+   *  the implementation audits its own delivery outcome. */
+  notifyStuckRun?: (info: StuckRunAlertInfo) => Promise<void>;
   /** Issue #1123: artifact lookups for followup.report jobs — the
    *  ScreenerAgent's stored PDFs, by kind and run key. */
   followupReportPort: () => {
@@ -332,6 +340,78 @@ export async function recoverQueuedAsyncJobs(ctx: AsyncJobsContext): Promise<voi
   }
 }
 
+/** Issue #2567: what the stuck-running alert carries — the run's
+ *  id, its kind (capability + display name), its age against the
+ *  configured threshold, and its owner (the job's session scope:
+ *  the per-login orchestrator instance name). */
+export interface StuckRunAlertInfo {
+  jobId: string;
+  capability: string;
+  label: string;
+  ownerLogin: string;
+  startedAt: string;
+  ageMs: number;
+  thresholdMs: number;
+}
+
+/**
+ * Issue #2567: stuck-running detection on the read path (the
+ * reap's own seam). A `running` row older than the configured
+ * threshold (src/config/stuckRunAlert.ts; default 30 min, well
+ * before the 2h reap backstop) is claimed exactly once through
+ * the port's guarded markStuckAlerted — the claim stamp is what
+ * makes repeated and concurrent reads safe — and the delivery
+ * hook is invoked fire-and-forget so a slow or failing channel
+ * can never break or delay the read. Detection is audited even
+ * when no delivery hook is wired, so a stuck run is never
+ * invisible. Returns true iff this call claimed + dispatched.
+ *
+ * Claim-first trade-off (deliberate, vs the resourceGoals
+ * mark-on-success precedent): if delivery then fails, no second
+ * alert fires; the delivery failure is audited by the hook
+ * implementation and the runbook covers the case.
+ */
+export function maybeAlertStuckRunning(
+  ctx: AsyncJobsContext,
+  row: Record<string, unknown>,
+  nowMs: number = Date.now(),
+): boolean {
+  if (row.status !== "running" || typeof row.started_at !== "string") return false;
+  if (typeof row.stuck_alerted_at === "string" && row.stuck_alerted_at !== "") return false;
+  const thresholdMs = resolveStuckRunAlertThresholdMs(ctx.env);
+  if (thresholdMs <= 0) return false;
+  const ageMs = nowMs - Date.parse(row.started_at);
+  if (!(ageMs > thresholdMs)) return false;
+  const jobId = String(row.job_id);
+  const claimed = ports(ctx).queue.markStuckAlerted(jobId, new Date(nowMs).toISOString());
+  if (claimed !== 1) return false;
+  const info: StuckRunAlertInfo = {
+    jobId,
+    capability: String(row.capability),
+    label: String(row.display_name),
+    ownerLogin: String(row.session_id),
+    startedAt: row.started_at,
+    ageMs,
+    thresholdMs,
+  };
+  ctx.audit("async_job.stuck_detected", "orchestrator", {
+    jobId: info.jobId,
+    capability: info.capability,
+    ownerLogin: info.ownerLogin,
+    ageMs: info.ageMs,
+    thresholdMs: info.thresholdMs,
+  });
+  if (typeof ctx.notifyStuckRun === "function") {
+    void Promise.resolve()
+      .then(() => ctx.notifyStuckRun!(info))
+      .catch(() => {
+        // Delivery failures are audited by the hook itself; a
+        // throwing hook must never surface on the read path.
+      });
+  }
+  return true;
+}
+
 export function getAsyncJob(ctx: AsyncJobsContext, jobId: string): AsyncJobRecord | undefined {
   ctx.ensureTables();
   const row = ports(ctx).read.getRow(jobId, ctx.sessionKey()) as Record<string, unknown> | undefined;
@@ -346,6 +426,10 @@ export function getAsyncJob(ctx: AsyncJobsContext, jobId: string): AsyncJobRecor
     );
     return getAsyncJob(ctx, jobId);
   }
+  // Issue #2567: stuck-running alert — after the reap check, so
+  // an already-reaped row is never alerted; before the reap's 2h
+  // by configuration (default threshold 30 min).
+  maybeAlertStuckRunning(ctx, row);
   let result: unknown;
   if (typeof row.result_json === "string") {
     try {
