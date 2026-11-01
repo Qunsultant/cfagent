@@ -34,6 +34,25 @@ import { RemoteMcpClient } from "../mcps/client/mcpClient";
 import { computeHmacSha256Hex } from "../services/cryptoUtils";
 import { resolveEnvironmentConfig } from "../config/environment";
 
+/** Stripe id-or-expanded-object field → bare id, or undefined when absent/malformed. Never invented. */
+function idOf(value: unknown): string | undefined {
+  if (typeof value === "string" && value) return value;
+  if (value && typeof value === "object" && typeof (value as { id?: unknown }).id === "string") {
+    return (value as { id: string }).id;
+  }
+  return undefined;
+}
+
+/** Stripe metadata object → string record, or undefined when absent/malformed. Non-string values are dropped, never coerced. */
+function toStringRecord(value: unknown): Record<string, string> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const out: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof entry === "string") out[key] = entry;
+  }
+  return out;
+}
+
 /**
  * Concrete Strategy: Stripe Payments Engine (Real REST API / Remote MCP)
  */
@@ -240,6 +259,9 @@ export class StripePaymentStrategy implements IPaymentGatewayStrategy {
     client_reference_id: string;
     payment_intent?: string;
     url?: string;
+    subscriptionId?: string;
+    customerId?: string;
+    metadata?: Record<string, string>;
   }> {
     const { apiKey } = this.resolveApiKey(env);
     if (!apiKey) {
@@ -276,6 +298,81 @@ export class StripePaymentStrategy implements IPaymentGatewayStrategy {
           : (paymentIntent as { id?: unknown } | null)?.id && typeof (paymentIntent as { id?: unknown }).id === "string"
             ? ((paymentIntent as { id: string }).id as string)
             : undefined,
+      // Issue #2656 (Phase 2.1) — subscription-mode sessions carry
+      // the provider subscription + customer. Both arrive as a
+      // bare id or an expanded object; anything else reads as
+      // absent (never invented). One-time callers ignore these
+      // fields; the Billing fulfillment route requires them.
+      subscriptionId: idOf(data.subscription),
+      customerId: idOf(data.customer),
+      metadata: toStringRecord(data.metadata),
+    };
+  }
+
+  /**
+   * Issue #2656 (Phase 2.1) — create a subscription-mode Checkout
+   * Session over direct Stripe REST (the composition root's
+   * direct-REST-key rule: no MCP path here, matching
+   * createCheckoutPorts). mode=subscription + a provider price id:
+   * the price is operator-mapped (billing policy), never derived
+   * from a catalogue or code constant. Session metadata AND
+   * subscription_data metadata both carry the fulfillment keys
+   * (userId/planId/tenantId) so the provider subscription object
+   * itself carries traceability, not just the session. An
+   * existing customer id is passed through when the caller has
+   * one (first-wins mapping); otherwise Stripe creates one and
+   * fulfillment records it. Transport/config failures THROW.
+   */
+  async createSubscriptionCheckoutSession(
+    env: Env,
+    params: {
+      draftId: string;
+      priceId: string;
+      customerId?: string | null;
+      metadata: Record<string, string>;
+    },
+  ): Promise<{ id: string; url: string | null }> {
+    const { apiKey } = this.resolveApiKey(env);
+    if (!apiKey) {
+      throw new Error("Stripe is not configured: a secret key is required to create a subscription checkout session.");
+    }
+    if (!params.draftId || typeof params.draftId !== "string") {
+      throw new Error("A draft id is required to create a subscription checkout session.");
+    }
+    if (!params.priceId || typeof params.priceId !== "string") {
+      throw new Error("A provider price id is required to create a subscription checkout session.");
+    }
+    const baseUrl = env.APP_BASE_URL || "https://agent.openaimp.com";
+    const body = new URLSearchParams({
+      mode: "subscription",
+      "line_items[0][price]": params.priceId,
+      "line_items[0][quantity]": "1",
+      client_reference_id: params.draftId,
+      success_url: `${baseUrl}/?payment=success&draft=${params.draftId}`,
+      cancel_url: `${baseUrl}/?payment=cancelled`,
+    });
+    for (const [key, value] of Object.entries(params.metadata)) {
+      body.set(`metadata[${key}]`, value);
+      body.set(`subscription_data[metadata][${key}]`, value);
+    }
+    if (params.customerId) body.set("customer", params.customerId);
+    const res = await fetch("https://api.stripe.com/v1/checkout/sessions", {
+      method: "POST",
+      headers: {
+        Authorization: ["Bearer", apiKey].join(" "),
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body,
+    });
+    const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    if (!res.ok || typeof data.id !== "string") {
+      throw new Error(
+        `Stripe subscription checkout creation failed: HTTP ${res.status} (${(data.error as { message?: string } | undefined)?.message ?? res.statusText}).`,
+      );
+    }
+    return {
+      id: data.id,
+      url: typeof data.url === "string" ? data.url : null,
     };
   }
 

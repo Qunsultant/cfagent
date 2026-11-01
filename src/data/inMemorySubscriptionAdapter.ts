@@ -145,4 +145,12 @@ export class InMemorySubscriptionAdapter implements SubscriptionStore {
     canceled.sort((a, b) => a.createdAtMs - b.createdAtMs || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
     return canceled;
   }
+
+  async cancelSubscription(subscriptionId: string, nowMs: number): Promise<SubscriptionRecord | null> {
+    const s = this.subscriptions.get(subscriptionId);
+    if (!s) return null;
+    const updated = { ...s, status: "canceled" as const, canceledAtMs: nowMs, updatedAtMs: nowMs };
+    this.subscriptions.set(subscriptionId, updated);
+    return { ...updated };
+  }
 }
