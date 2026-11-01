@@ -1,0 +1,5 @@
+### Fixed
+
+- Resolved auto-merge stalling in `.github/workflows/auto-merge-trusted.yml` by inspecting REST `.auto_merge.merge_method` (and GraphQL `autoMergeRequest.mergeMethod`), normalizing to uppercase, and resetting non-REBASE auto-merge requests before reenabling with `mergeMethod: REBASE`. Removed strategy flags (`--rebase`) from CLI fallback `gh pr merge --auto` to comply with Merge Queue rules.
+- Added active merge queue enqueuing in `.github/workflows/auto-update-prs-app.yml`: unqueued pull requests with `CLEAN` and `MERGEABLE` status now automatically reset legacy SQUASH auto-merge requests and invoke `enqueuePullRequest` to enter the Merge Queue immediately.
+- Added a 5-minute recurring schedule (`cron: '*/5 * * * *'`) and `workflow_dispatch` to `.github/workflows/auto-update-prs-app.yml` so green PRs are promptly enqueued even when `main` receives no pushes.
