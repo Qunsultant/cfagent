@@ -364,4 +364,12 @@ describe("principal resolution from headers (#1744)", () => {
       kind: "unknown",
     });
   });
+
+  it("service-token kind resolves to unknown (issue #2681: never session scope)", () => {
+    expect(
+      resolveMcpPrincipalFromHeaders(
+        headers({ "x-user-login": "svc-background", "x-principal-kind": "service-token" }),
+      ),
+    ).toEqual({ login: "svc-background", kind: "unknown" });
+  });
 });
