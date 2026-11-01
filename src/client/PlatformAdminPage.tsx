@@ -175,13 +175,15 @@ export function PlatformAdminPage({
       title={platformAdminTitle(config)}
       scopeNote="Workspace administration, background jobs, external connectivity, and security governance"
     >
-      <Tabs<PlatformAdminSectionId>
-        idBase="platform-admin"
-        ariaLabel="Platform Admin Sections"
-        tabs={PLATFORM_ADMIN_TABS}
-        value={active}
-        onChange={handleSelectTab}
-      />
+      <div className="platform-admin-tabs-wrapper">
+        <Tabs<PlatformAdminSectionId>
+          idBase="platform-admin"
+          ariaLabel="Platform Admin Sections"
+          tabs={PLATFORM_ADMIN_TABS}
+          value={active}
+          onChange={handleSelectTab}
+        />
+      </div>
 
       <TabPanel idBase="platform-admin" tabId="ads" active={active === "ads"}>
         <Card padding="md">
