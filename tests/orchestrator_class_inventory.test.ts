@@ -273,12 +273,17 @@ const ORCH = "agents/orchestrator.ts";
  *  pass-through in routeRequest (the class gains no logic);
  *  budgets re-measured on the merged tree: 3,084 lines /
  *  146,284 B, so lines rise to 3090 and bytes rise to 146_500.
+ *  Issue #2705 adds the getSkills framework override (one
+ *  import + the thin delegation; the source and the pack live
+ *  in orchestrator/skillPacks.ts, the class gains no logic) —
+ *  measured 3,101 lines / 147,123 B on the branch tree, so
+ *  budget lines rise to 3110 and bytes rise to 147_500.
  *  Provider/broker slice 2 (#2598) adds the options feed gate
  *  delegation handleOptionsProviderGateRoutes, re-measured on
- *  the merged tree: 3,103 lines / 147,379 B, so budget lines
- *  rise to 3110 and bytes rise to 147_500. */
-const BUDGET_LINES = 3110;
-const BUDGET_BYTES = 147_500;
+ *  the merged tree: 3,116 lines / 148,016 B, so budget lines
+ *  rise to 3120 and bytes rise to 148_500. */
+const BUDGET_LINES = 3120;
+const BUDGET_BYTES = 148_500;
 
 const count = (haystack: string, needle: string) =>
   haystack.split(needle).length - 1;
