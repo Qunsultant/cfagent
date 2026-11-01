@@ -51,7 +51,7 @@ jobs:
           fetch-depth: 0
 
       - name: Detect docs-only diff & 24h tree dedup (#2632)
-        id: dedup
+        id: docs
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -107,17 +107,17 @@ jobs:
           echo "tree_already_analyzed=$TREE_ALREADY_ANALYZED" >> "$GITHUB_OUTPUT"
 
       - name: Initialize CodeQL
-        if: steps.dedup.outputs.docs_only != 'true' && steps.dedup.outputs.tree_already_analyzed != 'true'
+        if: steps.docs.outputs.docs_only != 'true' && steps.docs.outputs.tree_already_analyzed != 'true'
         uses: github/codeql-action/init@v4
         with:
           languages: javascript-typescript
 
       - name: Autobuild
-        if: steps.dedup.outputs.docs_only != 'true' && steps.dedup.outputs.tree_already_analyzed != 'true'
+        if: steps.docs.outputs.docs_only != 'true' && steps.docs.outputs.tree_already_analyzed != 'true'
         uses: github/codeql-action/autobuild@v4
 
       - name: Perform CodeQL Analysis
-        if: steps.dedup.outputs.docs_only != 'true' && steps.dedup.outputs.tree_already_analyzed != 'true'
+        if: steps.docs.outputs.docs_only != 'true' && steps.docs.outputs.tree_already_analyzed != 'true'
         uses: github/codeql-action/analyze@v4
         with:
           category: "/language:javascript-typescript"
