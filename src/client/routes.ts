@@ -5,13 +5,14 @@
  * from this table (see NavigationMenu.tsx and Chat.tsx).
  *
  * Shape of an entry:
- * - `id` is the tab id carried in the URL (`?tab=<id>`). All 33 ids Chat
+ * - `id` is the tab id carried in the URL (`?tab=<id>`). All 34 ids Chat
  *   has ever used are entries, including the six legacy/alias ids
  *   (trading, orders, scanner, reports, schedules, options) that never
  *   render as nav items but still land on a page. Issue #2596 added
  *   the 33rd id, "options-screener", as a real nav entry (navOrder 26).
  *   Platform Admin was added as the 34th id (navOrder 27) as a real page.
- * - `navEntry` is present only for the 28 entries that render in the nav.
+ *   Products was added as the 35th id (navOrder 28) as a real page.
+ * - `navEntry` is present only for the 29 entries that render in the nav.
  *   Its `navOrder` reproduces the historical sidebar/top-strip order, so
  *   deriving NAVIGATION_ITEMS from this table changes nothing visible.
  * - `navGroup` is the nav entry highlighted when this tab is active. It
@@ -414,6 +415,30 @@ export const ROUTES = [
       defaultVisible: true,
       badge: "Broker",
       badgeType: "live",
+    },
+  },
+  {
+    id: "products",
+    navGroup: "products",
+    crumb: "Products",
+    // Marketing section (navConfig.ts groups by category): the catalog
+    // is Phase 4's marketing surface, alongside referrals/ads/social —
+    // and Platform's last item stays Workflows & FAQ per the #2685 pin.
+    category: "Marketing",
+    // Icon key must be unique across nav entries (tests/nav_unique_icons_badges.test.ts):
+    // "Screeners" is the Screeners entry's, so this entry reuses the
+    // otherwise nav-unused "Workflows" key from the existing icon map
+    // — no new icon (same precedent as options-screener's "Scanner").
+    icon: "Workflows",
+    description:
+      "The product catalog as the Phase 2 registry records it, with Phase 3 access parity: listed products, approved prices, and purchase paths",
+    navEntry: {
+      label: "Products",
+      shortLabel: "Products",
+      navOrder: 28,
+      defaultVisible: true,
+      badge: "Catalog",
+      badgeType: "neutral",
     },
   },
   {

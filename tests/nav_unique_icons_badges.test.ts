@@ -13,16 +13,18 @@
  * Non-nav alias ids (trading, orders, scanner, reports, schedules,
  * options) keep their inline icons; they never render as nav items, so
  * they are outside this contract.
+ * (#2695 added the Products nav entry, navOrder 28, last in display
+ * order; pin updated in the same PR per the §7 pin rule.)
  */
 import { describe, it, expect } from "vitest";
 import { ROUTES, hasNavEntry } from "../src/client/routes";
 import { NAVIGATION_ITEMS } from "../src/client/components/NavigationMenu";
 
 const navRoutes = ROUTES.filter(hasNavEntry);
-const NAV_COUNT = 28;
+const NAV_COUNT = 29;
 
 describe("left-nav unique icons and badges", () => {
-  it("has the full 28-item nav", () => {
+  it("has the full 29-item nav", () => {
     expect(navRoutes).toHaveLength(NAV_COUNT);
     expect(NAVIGATION_ITEMS).toHaveLength(NAV_COUNT);
   });

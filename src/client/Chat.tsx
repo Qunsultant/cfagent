@@ -19,6 +19,7 @@ import { PlatformAdminPage } from "./PlatformAdminPage";
 import { WorkflowsHub } from "./WorkflowsHub";
 import { WorkflowRunsPanel } from "./WorkflowRunsPanel";
 import { AgentsPanel } from "./AgentsPanel";
+import { ProductCatalogPanel } from "./ProductCatalogPanel";
 import { AdBannerConfig, applyServerAdsConfig, getStoredAdBannerConfig, saveStoredAdBannerConfig, type ServerAdsConfig } from "./adBannerConfig";
 import { PartnerDealsModal } from "./components/PartnerDealsModal";
 import { NavigationMenu, NavTabId, NavLayoutMode, NavIcons, DEFAULT_VISIBLE_NAV_TABS } from "./components/NavigationMenu";
@@ -1359,6 +1360,11 @@ export function Chat({ user }: { user: User }) {
         onUpdateAdBannerConfig={handleUpdateAdBannerConfig}
         onOpenPartnerDeals={() => setShowPartnerDealsModal(true)}
       />
+    ),
+    products: (
+      <ErrorBoundary label="Products">
+        <ProductCatalogPanel />
+      </ErrorBoundary>
     ),
     "payment-assurance": (
           <PaymentWorkflowAssurance userLogin={user.login} />
