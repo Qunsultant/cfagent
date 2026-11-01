@@ -46,14 +46,14 @@ export const DEFAULT_PLATFORM_ADMIN_CONFIG: PlatformAdminConfig = {
       id: "section-platform-admin",
       title: "Platform Admin",
       items: [
-        { id: "ads", label: "Ads & Partner Banners", description: "Workspace banners and sponsor placements" },
-        { id: "background-tasks", label: "Background Tasks", description: "Async jobs & execution queue" },
-        { id: "scheduled-goals", label: "Scheduled goals", description: "ScheduledAgent goals, ticks & add-goal form" },
-        { id: "provenance", label: "Technical Diagnostics & Provenance", description: "DID, MCP client, attestation & ledger" },
-        { id: "api-keys", label: "API Keys", description: "MCP transport access for external clients" },
-        { id: "data-providers", label: "Data Providers", description: "Provisioning lifecycle for market-data providers" },
-        { id: "iaaa-admin", label: "IAAA Admin", description: "Read-only memberships, genesis & audit" },
-        { id: "admin-access", label: "Request admin access", description: "Ask the platform owner for admin rights" },
+        { id: "ads", label: "Ads & Partner Banners", description: "Workspace banners and sponsor placements", icon: "Banners" },
+        { id: "background-tasks", label: "Background Tasks", description: "Async jobs & execution queue", icon: "Tasks" },
+        { id: "scheduled-goals", label: "Scheduled goals", description: "ScheduledAgent goals, ticks & add-goal form", icon: "ScheduledGoals" },
+        { id: "provenance", label: "Technical Diagnostics & Provenance", description: "DID, MCP client, attestation & ledger", icon: "Provenance" },
+        { id: "api-keys", label: "API Keys", description: "MCP transport access for external clients", icon: "ApiKeys" },
+        { id: "data-providers", label: "Data Providers", description: "Provisioning lifecycle for market-data providers", icon: "DataProviders" },
+        { id: "iaaa-admin", label: "IAAA Admin", description: "Read-only memberships, genesis & audit", icon: "IaaaAdmin" },
+        { id: "admin-access", label: "Request admin access", description: "Ask the platform owner for admin rights", icon: "AdminAccess" },
       ],
     },
   ],
@@ -69,11 +69,13 @@ export const PLATFORM_ADMIN_NAV_ITEMS: Array<{
   label: string;
   shortLabel: string;
   description: string;
+  icon?: string;
 }> = DEFAULT_PLATFORM_ADMIN_CONFIG.sections[0].items.map((item) => ({
   id: `platform-admin:${item.id}`,
   label: item.label,
   shortLabel: item.description,
   description: item.description,
+  icon: item.icon,
 }));
 
 /** Flatten a config's sections into one ordered item list (one section today). */

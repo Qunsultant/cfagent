@@ -1,3 +1,4 @@
+import { NavIcons } from "./components/NavigationMenu";
 /**
  * Platform Admin Page (Issue: dedicated platform admin page with tabbed sub-menus).
  *
@@ -65,14 +66,14 @@ export interface PlatformAdminPageProps {
 }
 
 export const PLATFORM_ADMIN_TABS: TabOption<PlatformAdminSectionId>[] = [
-  { id: "ads", label: "Ads & Banners" },
-  { id: "background-tasks", label: "Background Tasks" },
-  { id: "scheduled-goals", label: "Scheduled Goals" },
-  { id: "provenance", label: "Diagnostics & Provenance" },
-  { id: "api-keys", label: "API Keys" },
-  { id: "data-providers", label: "Data Providers" },
-  { id: "iaaa-admin", label: "IAAA Admin" },
-  { id: "admin-access", label: "Admin Access" },
+  { id: "ads", label: "Ads & Banners", icon: <NavIcons.Banners /> },
+  { id: "background-tasks", label: "Background Tasks", icon: <NavIcons.Tasks /> },
+  { id: "scheduled-goals", label: "Scheduled Goals", icon: <NavIcons.ScheduledGoals /> },
+  { id: "provenance", label: "Diagnostics & Provenance", icon: <NavIcons.Provenance /> },
+  { id: "api-keys", label: "API Keys", icon: <NavIcons.ApiKeys /> },
+  { id: "data-providers", label: "Data Providers", icon: <NavIcons.DataProviders /> },
+  { id: "iaaa-admin", label: "IAAA Admin", icon: <NavIcons.IaaaAdmin /> },
+  { id: "admin-access", label: "Admin Access", icon: <NavIcons.AdminAccess /> },
 ];
 
 export function PlatformAdminPage({

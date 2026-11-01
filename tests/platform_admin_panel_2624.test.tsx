@@ -100,6 +100,14 @@ describe("platform admin config (#2624)", () => {
     };
     expect(platformAdminTitle(custom)).toBe("Operations Admin");
   });
+  it("every platform admin item defines a distinct icon", () => {
+    const items = platformAdminItems();
+    for (const item of items) {
+      expect(item.icon).toBeDefined();
+    }
+    const icons = items.map((i) => i.icon);
+    expect(new Set(icons).size).toBe(8);
+  });
 });
 
 describe("platform admin in the left navigation (#2624)", () => {

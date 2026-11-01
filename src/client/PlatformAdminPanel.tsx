@@ -1,3 +1,4 @@
+import { NAV_ICON_MAP } from "./components/NavigationMenu";
 /**
  * Platform Admin side panel (issue #2624, follow-up).
  *
@@ -382,20 +383,30 @@ export function PlatformAdminPanel({
 
         <div className="platform-admin-body">
           <nav className="platform-admin-menu" aria-label="Platform Admin sections">
-            {items.map((section: PlatformAdminMenuItemConfig) => (
-              <Button
-                key={section.id}
-                type="button"
-                variant="ghost"
-                className={`platform-admin-menu-item ${active === section.id ? "active" : ""}`}
-                aria-current={active === section.id ? "page" : undefined}
-                onClick={() => setActive(section.id)}
-                title={section.description}
-              >
-                <span className="platform-admin-menu-label">{section.label}</span>
-                <span className="platform-admin-menu-desc">{section.description}</span>
-              </Button>
-            ))}
+            {items.map((section: PlatformAdminMenuItemConfig) => {
+              const ItemIcon = section.icon ? NAV_ICON_MAP[section.icon] : null;
+              return (
+                <Button
+                  key={section.id}
+                  type="button"
+                  variant="ghost"
+                  className={`platform-admin-menu-item ${active === section.id ? "active" : ""}`}
+                  aria-current={active === section.id ? "page" : undefined}
+                  onClick={() => setActive(section.id)}
+                  title={section.description}
+                >
+                  <div className="platform-admin-menu-row">
+                    {ItemIcon && (
+                      <span className="platform-admin-menu-icon" aria-hidden="true">
+                        <ItemIcon active={active === section.id} />
+                      </span>
+                    )}
+                    <span className="platform-admin-menu-label">{section.label}</span>
+                  </div>
+                  <span className="platform-admin-menu-desc">{section.description}</span>
+                </Button>
+              );
+            })}
           </nav>
 
           <div className="platform-admin-content" role="region" aria-label={activeSection.label}>
