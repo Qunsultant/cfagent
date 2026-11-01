@@ -137,10 +137,17 @@ describe("automatic failure path issues a credit and has no cash channel (#2549)
   };
 
   it("a paid run whose screener fails gets exactly one failure credit via the credit dep", async () => {
+    // #2547 composition: a chargeable run presupposes an APPROVED
+    // price — the seeded "goal" price lands as PROPOSED and the gate
+    // refuses it fail-closed. Approve it through the catalogue's
+    // operator API first, exactly as production requires; this
+    // scenario's subject is the failure-credit path, not approval.
+    const catalogue = new InMemoryPriceCatalogueAdapter();
+    await catalogue.approvePrice({ family: "goal", approverId: "test-operator" });
     const gate = new CfPayMonetizationGate(stubCfpay(), {
       monetizationEnabled: true,
       network: "base-sepolia",
-      priceCatalogue: new InMemoryPriceCatalogueAdapter(),
+      priceCatalogue: catalogue,
     });
     const creditCalls: Array<{ runRequestId: string; priceUSD: number }> = [];
     const events: Array<{ type: string }> = [];

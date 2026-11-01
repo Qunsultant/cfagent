@@ -1804,7 +1804,11 @@ export async function handleAgenticPaymentsRoutes(
       if (!isStoreOperator(login)) {
         return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
       }
-      const body = (await request.json().catch(() => ({}))) as { family?: unknown; priceUSD?: unknown };
+      const body = (await request.json().catch(() => ({}))) as {
+        family?: unknown;
+        priceUSD?: unknown;
+        approvalStatus?: unknown;
+      };
       const catalogue = createPriceCatalogueAdapter(ctx.env as { AGENT_DB?: unknown });
       if (!catalogue) {
         return Response.json({ error: "Price catalogue unavailable: AGENT_DB is not bound." }, { status: 503 });
@@ -1814,8 +1818,37 @@ export async function handleAgenticPaymentsRoutes(
       } catch (err: any) {
         return Response.json({ error: `Price catalogue unavailable: ${err.message || "unknown error"}` }, { status: 503 });
       }
-      const entry = await catalogue.setPrice({ family: body.family, priceUSD: body.priceUSD });
-      ctx.audit("commercial.price.set", "payments", { family: entry.family, priceUSD: entry.priceUSD });
+      // #2547: a price write lands as PROPOSED (setPrice clears
+      // any prior approval). Approval is a separate, explicit
+      // operator action on this same route: approvalStatus
+      // "approved" records THIS verified operator login as the
+      // approver — the body cannot name a different approver.
+      if (body.approvalStatus !== undefined && body.approvalStatus !== "approved") {
+        return Response.json(
+          { error: 'approvalStatus must be "approved" when present: use a price write to return an entry to proposed.' },
+          { status: 400 },
+        );
+      }
+      let entry = null;
+      if (body.priceUSD !== undefined) {
+        entry = await catalogue.setPrice({ family: body.family, priceUSD: body.priceUSD });
+        ctx.audit("commercial.price.set", "payments", { family: entry.family, priceUSD: entry.priceUSD });
+      }
+      if (body.approvalStatus === "approved") {
+        entry = await catalogue.approvePrice({ family: body.family, approverId: login });
+        ctx.audit("commercial.price.approved", "payments", {
+          family: entry.family,
+          priceUSD: entry.priceUSD,
+          approvedBy: entry.approvedBy,
+          approvedAtMs: entry.approvedAtMs,
+        });
+      }
+      if (!entry) {
+        return Response.json(
+          { error: "Nothing to do: provide priceUSD to set a price or approvalStatus approved to approve one." },
+          { status: 400 },
+        );
+      }
       return Response.json({ entry });
     } catch (err: any) {
       const message = err.message || "Failed to set price";

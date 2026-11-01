@@ -440,7 +440,7 @@ describe("issue #2428 — registry spine + migration pins", () => {
     }
   });
 
-  it("migration 0023 is registered and creates the hop table (0026 is last since #2481)", async () => {
+  it("migration 0023 is registered and creates the hop table (0027 is last since #2547)", async () => {
     const {
       ALL_MIGRATIONS,
       MIGRATION_0023_AGENT_MESH_TRACE_HOPS,
@@ -456,7 +456,8 @@ describe("issue #2428 — registry spine + migration pins", () => {
     // #2481 appended migration 0026 (tenant auto-refresh) after 0025.
     expect(ALL_MIGRATIONS).toContain(MIGRATION_0024_AGENT_MESH_EVAL_RESULTS);
     expect(ALL_MIGRATIONS).toContain(MIGRATION_0025_AGENT_MESH_PROPOSALS);
-    expect(ALL_MIGRATIONS[ALL_MIGRATIONS.length - 1]).toBe(MIGRATION_0026_TENANT_AUTO_REFRESH);
+    // #2547 appended migration 0027 (price catalogue approval) after 0026.
+    expect(ALL_MIGRATIONS[ALL_MIGRATIONS.length - 1].version).toBe(27);
     expect(MIGRATION_0023_AGENT_MESH_TRACE_HOPS.version).toBe(23);
     expect(MIGRATION_0023_AGENT_MESH_TRACE_HOPS.sql).toContain("agent_mesh_trace_hops");
     const versions = ALL_MIGRATIONS.map((m) => m.version);

@@ -565,6 +565,11 @@ export const agentPriceCatalogue = sqliteTable("agent_price_catalogue", {
   family: text("family").primaryKey(),
   priceUSD: real("price_usd").notNull(),
   updatedAtMs: integer("updated_at_ms").notNull(),
+  // Approval state (#2547): migration 0027 adds these columns to
+  // the 0011 table; existing rows default to 'proposed'.
+  approvalStatus: text("approval_status").notNull().default("proposed"),
+  approvedBy: text("approved_by"),
+  approvedAtMs: integer("approved_at_ms"),
 });
 
 /**

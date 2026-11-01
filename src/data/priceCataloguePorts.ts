@@ -62,19 +62,70 @@ export const PROPOSED_SEED_PRICES: Record<PriceFamily, number> = {
   strategy: 0.1,
 };
 
+/**
+ * Approval state of a catalogue entry (#2547, from the #2013
+ * review). A price is PROPOSED from the moment it is written —
+ * by seeding or by an operator price change — until an operator
+ * approves it through the operator route. Only an APPROVED price
+ * may be charged: the monetization gates resolve prices through
+ * `getApprovedPrice`, never through the raw stored value, so a
+ * proposed price fails closed exactly like a missing one. The
+ * approver and the approval time are recorded on the entry: an
+ * approval with no name and no time is not an audit record.
+ */
+export type PriceApprovalStatus = "proposed" | "approved";
+
+export function assertPriceApprovalStatus(status: unknown): PriceApprovalStatus {
+  if (status !== "proposed" && status !== "approved") {
+    throw new Error(`Invalid price approval status: ${String(status)} (must be proposed or approved).`);
+  }
+  return status;
+}
+
+/** The approver is an audit identity: a blank approver approves nothing. */
+export function assertApproverId(approverId: unknown): string {
+  if (typeof approverId !== "string" || approverId.trim().length === 0) {
+    throw new Error("approverId must be a non-empty string: an approval must name its approver.");
+  }
+  return approverId.trim();
+}
+
 export interface PriceEntry {
   family: PriceFamily;
   priceUSD: number;
   updatedAtMs: number;
+  /** #2547: proposed until an operator approves the entry. */
+  approvalStatus: PriceApprovalStatus;
+  /** Login of the approving operator; null while proposed. */
+  approvedBy: string | null;
+  /** Epoch ms of the approval; null while proposed. */
+  approvedAtMs: number | null;
 }
 
 /**
- * The price catalogue store surface. `getPrice` returns null for
- * a family with no stored row — that null is the fail-closed
- * signal, not an invitation to guess a price.
+ * The price catalogue store surface. `getPrice` returns the raw
+ * stored price (null for a family with no stored row) for
+ * operator/display reads; it does NOT consider approval state.
+ * Charging reads go through `getApprovedPrice`, which returns
+ * null unless the entry exists, is valid, and is APPROVED — that
+ * null is the gates' fail-closed signal, not an invitation to
+ * guess a price (#2547).
  */
 export interface PriceCatalogue {
   getPrice(family: string): Promise<number | null>;
+  getEntry(family: string): Promise<PriceEntry | null>;
+  getApprovedPrice(family: string): Promise<number | null>;
   getAllPrices(): Promise<PriceEntry[]>;
+  /**
+   * Write a price. Writing ALWAYS lands as PROPOSED with the
+   * approval record cleared: a changed price is a new proposal,
+   * never a silently-still-approved one (#2547).
+   */
   setPrice(input: { family: unknown; priceUSD: unknown }): Promise<PriceEntry>;
+  /**
+   * Approve the stored price for a family, recording the
+   * approver and the approval time. Approving a family with no
+   * stored price throws — there is nothing to approve.
+   */
+  approvePrice(input: { family: unknown; approverId: unknown }): Promise<PriceEntry>;
 }

@@ -43,6 +43,7 @@ import { InMemoryPriceCatalogueAdapter } from "../src/data/inMemoryPriceCatalogu
 import { createPriceCatalogueAdapter } from "../src/data/createPriceCataloguePorts";
 import {
   MIGRATION_0011_PRICE_CATALOGUE,
+  MIGRATION_0027_PRICE_CATALOGUE_APPROVAL,
   applyMigrations,
   type MigrationDb,
 } from "../src/data/migrationRunner";
@@ -109,8 +110,13 @@ async function seededAdapters(): Promise<Array<{ name: string; catalogue: PriceC
 async function emptyAdapters(): Promise<Array<{ name: string; catalogue: PriceCatalogue }>> {
   const mock = new MockD1Database();
   const db = createD1PriceCatalogueDb(mock as unknown as D1Database);
-  // Migration only, no ensure seeding: the table exists but holds no rows.
-  await applyMigrations(db as unknown as MigrationDb, [MIGRATION_0011_PRICE_CATALOGUE]);
+  // Migrations only, no ensure seeding: the table exists (at the
+  // current schema, 0011 + the #2547 approval columns of 0027)
+  // but holds no rows.
+  await applyMigrations(db as unknown as MigrationDb, [
+    MIGRATION_0011_PRICE_CATALOGUE,
+    MIGRATION_0027_PRICE_CATALOGUE_APPROVAL,
+  ]);
   return [
     { name: "in-memory", catalogue: new InMemoryPriceCatalogueAdapter({}) },
     { name: "drizzle", catalogue: new D1PriceCatalogueAdapter(db) },
@@ -212,6 +218,9 @@ describe("gate prices from the catalogue port (#2185)", () => {
 
   it("charges the catalogue price, not a code price", async () => {
     for (const { catalogue } of await seededAdapters()) {
+      // #2547: seeded prices are proposals; an operator approval
+      // is what makes the goal price chargeable.
+      await catalogue.approvePrice({ family: "goal", approverId: "test-operator" });
       const { client } = stubCfpay();
       const gate = new CfPayMonetizationGate(client, {
         monetizationEnabled: true,
@@ -234,6 +243,8 @@ describe("gate prices from the catalogue port (#2185)", () => {
   it("honors an operator price change with no code deploy", async () => {
     for (const { catalogue } of await seededAdapters()) {
       await catalogue.setPrice({ family: "goal", priceUSD: 0.25 });
+      // #2547: the changed price is a new proposal until approved.
+      await catalogue.approvePrice({ family: "goal", approverId: "test-operator" });
       const { client } = stubCfpay();
       const gate = new CfPayMonetizationGate(client, {
         monetizationEnabled: true,
@@ -440,6 +451,10 @@ describe("price catalogue structural pins (#2185, ADR 0002 R1)", () => {
       "CREATE TABLE IF NOT EXISTS agent_price_catalogue (",
     )[1].split(");")[0];
     const ddlColumns = [...block.matchAll(/^\s{2}(\w+) /gm)].map((m) => m[1]);
-    expect(ddlColumns.sort()).toEqual(schemaColumns.sort());
+    // #2547: migration 0027 adds the approval columns by ALTER.
+    const alterColumns = [...MIGRATION_0027_PRICE_CATALOGUE_APPROVAL.sql.matchAll(/ADD COLUMN (\w+)/g)].map(
+      (m) => m[1],
+    );
+    expect([...ddlColumns, ...alterColumns].sort()).toEqual(schemaColumns.sort());
   });
 });

@@ -54,7 +54,7 @@ describe("cfpay gate network allowlist (#2016)", () => {
     const gate = new CfPayMonetizationGate(stubCfpay, {
       monetizationEnabled: true,
       network: "base-sepolia",
-      priceCatalogue: new InMemoryPriceCatalogueAdapter(),
+      priceCatalogue: new InMemoryPriceCatalogueAdapter(undefined, { approvedBy: "test-operator" }),
     });
     const decision = await gate.check({ id: "run-1", family: "stock", trigger: "manual", account: freeAccount });
     expect(decision.allowed).toBe(false);

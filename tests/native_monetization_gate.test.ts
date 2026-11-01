@@ -65,7 +65,7 @@ function cardGate(evidenceFor: (sessionId: string) => SessionEvidence, monetizat
   const ports: CheckoutPorts = { card: new StripeCheckoutAdapter(client), x402: null };
   const gate = new NativeMonetizationGate({
     monetizationEnabled,
-    priceCatalogue: new InMemoryPriceCatalogueAdapter(),
+    priceCatalogue: new InMemoryPriceCatalogueAdapter(undefined, { approvedBy: "test-operator" }),
     checkout: ports,
   });
   return { gate, creates, ports };
@@ -88,7 +88,7 @@ async function x402CheckedGate(opts: { isValid: boolean }) {
   };
   const gate = new NativeMonetizationGate({
     monetizationEnabled: true,
-    priceCatalogue: new InMemoryPriceCatalogueAdapter(),
+    priceCatalogue: new InMemoryPriceCatalogueAdapter(undefined, { approvedBy: "test-operator" }),
     checkout: ports,
   });
   const decision = await gate.check({ id: "run-1", family: "goal", trigger: "manual", account: account() });
@@ -156,7 +156,7 @@ describe("native gate: card confirm semantics", () => {
     const { ports } = cardGate(() => goalEvidence());
     const fresh = new NativeMonetizationGate({
       monetizationEnabled: true,
-      priceCatalogue: new InMemoryPriceCatalogueAdapter(),
+      priceCatalogue: new InMemoryPriceCatalogueAdapter(undefined, { approvedBy: "test-operator" }),
       checkout: ports,
     });
     const confirmed = await fresh.confirmPaid(
@@ -218,7 +218,7 @@ describe("native gate: fail-closed and preserved rules", () => {
   it("throws when no checkout ports exist, and when the requested rail is unconfigured", async () => {
     const noPorts = new NativeMonetizationGate({
       monetizationEnabled: true,
-      priceCatalogue: new InMemoryPriceCatalogueAdapter(),
+      priceCatalogue: new InMemoryPriceCatalogueAdapter(undefined, { approvedBy: "test-operator" }),
       checkout: null,
     });
     await expect(noPorts.check({ id: "run-1", family: "goal", trigger: "manual", account: account() })).rejects.toThrow(/not configured/);
@@ -229,7 +229,7 @@ describe("native gate: fail-closed and preserved rules", () => {
     };
     const gate = new NativeMonetizationGate({
       monetizationEnabled: true,
-      priceCatalogue: new InMemoryPriceCatalogueAdapter(),
+      priceCatalogue: new InMemoryPriceCatalogueAdapter(undefined, { approvedBy: "test-operator" }),
       checkout: x402Only,
     });
     await expect(gate.check({ id: "run-1", family: "goal", trigger: "manual", account: account(), rail: "stripe" })).rejects.toThrow(/rail stripe/);
@@ -284,7 +284,7 @@ describe("flow + native gate + extractCheckoutId", () => {
     });
     const gate = new NativeMonetizationGate({
       monetizationEnabled: true,
-      priceCatalogue: new InMemoryPriceCatalogueAdapter(),
+      priceCatalogue: new InMemoryPriceCatalogueAdapter(undefined, { approvedBy: "test-operator" }),
       checkout: { card: mem, x402: null },
     });
     const events: string[] = [];

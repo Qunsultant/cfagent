@@ -134,13 +134,34 @@ export async function runAssuranceScenario(cfg: FakeConfig): Promise<ScenarioRes
     async getPrice(family: string) {
       return (PROPOSED_SEED_PRICES as Record<string, number>)[family] ?? null;
     },
+    async getEntry(family: string): Promise<PriceEntry | null> {
+      const all = await this.getAllPrices();
+      return all.find((e) => e.family === family) ?? null;
+    },
+    async getApprovedPrice(family: string) {
+      // Demo fixture: the seed values are treated as APPROVED so
+      // the scenarios can exercise the gate (#2547). The real
+      // catalogue seeds the same values as PROPOSED, and the real
+      // gates refuse them until an operator approves.
+      return (PROPOSED_SEED_PRICES as Record<string, number>)[family] ?? null;
+    },
     async getAllPrices(): Promise<PriceEntry[]> {
       return (Object.entries(PROPOSED_SEED_PRICES) as Array<[ScreenerFamily, number]>).map(
-        ([family, priceUSD]) => ({ family, priceUSD, updatedAtMs: Date.now() }),
+        ([family, priceUSD]) => ({
+          family,
+          priceUSD,
+          updatedAtMs: Date.now(),
+          approvalStatus: "approved" as const,
+          approvedBy: "payment-assurance-demo",
+          approvedAtMs: Date.now(),
+        }),
       );
     },
     async setPrice(input: { family: unknown; priceUSD: unknown }): Promise<PriceEntry> {
       throw new Error(`Demo catalogue is read-only (family ${String(input.family)} not set).`);
+    },
+    async approvePrice(input: { family: unknown; approverId: unknown }): Promise<PriceEntry> {
+      throw new Error(`Demo catalogue is read-only (family ${String(input.family)} not approved).`);
     },
   };
   const gate = new CfPayMonetizationGate(fakeCfpay, {

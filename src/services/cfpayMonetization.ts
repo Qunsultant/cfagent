@@ -141,10 +141,13 @@ export class CfPayMonetizationGate {
   /**
    * Resolve the per-run price for a family through the catalogue
    * port (#2185). Fail-closed, exactly: no catalogue configured,
-   * no stored row, or an invalid stored value all throw before
-   * any checkout is minted or any coverage is consumed. There is
-   * no hardcoded fallback price — a throw here means "no charge",
-   * never "charge a guessed price".
+   * no stored row, an invalid stored value, or a stored price
+   * that is not APPROVED (#2547) all throw before any checkout
+   * is minted or any coverage is consumed. There is no hardcoded
+   * fallback price — a throw here means "no charge", never
+   * "charge a guessed price". (This draining gate enforces the
+   * same approval rule as its native successor: a draining
+   * path is not a bypass.)
    */
   async priceFor(family: ScreenerFamily): Promise<number> {
     const catalogue = this.config.priceCatalogue;
@@ -153,8 +156,17 @@ export class CfPayMonetizationGate {
         "Price catalogue is not configured: refusing to price a run without operator price data (fail-closed).",
       );
     }
-    const price = await catalogue.getPrice(family);
+    // #2547: only an APPROVED price is chargeable. A proposed
+    // price fails closed exactly like a missing one — the seed
+    // values are proposals, not an activation.
+    const price = await catalogue.getApprovedPrice(family);
     if (price === null || !Number.isFinite(price) || price <= 0) {
+      const entry = typeof catalogue.getEntry === "function" ? await catalogue.getEntry(family).catch(() => null) : null;
+      if (entry && entry.approvalStatus !== "approved") {
+        throw new Error(
+          `Stored price for family ${family} is not approved (status: ${entry.approvalStatus}): refusing to charge (fail-closed).`,
+        );
+      }
       throw new Error(`No valid stored price for family ${family}: refusing to charge (fail-closed).`);
     }
     return price;
@@ -167,6 +179,14 @@ export class CfPayMonetizationGate {
     const existing = this.byRun.get(run.id);
     if (existing?.status === "paid") {
       return { allowed: true, status: "already_paid", runRequestId: run.id, priceUSD: existing.priceUSD, paidVia: existing.paidVia };
+    }
+    // Flag OFF means this gate charges nothing — no checkout, no
+    // coverage spend — so the run is free without resolving a
+    // price at all (#2547: approval state gates CHARGING, and a
+    // free run must not depend on the CPO approval state of the
+    // catalogue, or on the catalogue existing).
+    if (!this.config.monetizationEnabled) {
+      return { allowed: true, status: "free_flag_off", runRequestId: run.id, priceUSD: 0 };
     }
     const priceUSD = await this.priceFor(run.family);
 
@@ -190,9 +210,6 @@ export class CfPayMonetizationGate {
     if (run.trigger === "scheduled" && !isOneOffScheduled) {
       this.events.push({ runRequestId: run.id, type: "scheduled.skipped_uncovered" });
       return { allowed: false, status: "coverage_required", httpStatus: 402, runRequestId: run.id, priceUSD, family: run.family, reason: "Scheduled runs need subscription included usage or prepaid credits. No unattended card charge is taken." };
-    }
-    if (!this.config.monetizationEnabled) {
-      return { allowed: true, status: "free_flag_off", runRequestId: run.id, priceUSD: 0 };
     }
     if (existing?.status === "payment_required") {
       return { allowed: false, status: "payment_required", httpStatus: 402, runRequestId: run.id, priceUSD, family: run.family };
