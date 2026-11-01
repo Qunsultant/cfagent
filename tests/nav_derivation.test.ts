@@ -1,7 +1,7 @@
 /**
  * Shell derivation contract (#1804 S1, issue #1808): NAVIGATION_ITEMS,
  * isTabActive, and the visibility defaults all derive from the route
- * table, reproducing the historical nav exactly — same 28 items (26
+ * table, reproducing the historical nav exactly — same 29 items (26
  * historical + options-screener from #2596), same
  * display order, same active-state groups.
  * (#2120 slice 1 added the Search nav entry, navOrder 23, last in
@@ -11,6 +11,11 @@
  * (#2469, Agent Mesh S20/G9, added the Agents nav entry, navOrder 25,
  * last in display order; pin updated in the same PR per the §7 pin
  * rule.)
+ * (#2695, Platform Phase 4, added the Products nav entry, navOrder 28,
+ * last in display order; pin updated in the same PR per the §7 pin
+ * rule.)
+ * (#2698 regrouped the display order on main; this pin follows the
+ * regrouped order with products appended at navOrder 28.)
  */
 import { describe, it, expect } from "vitest";
 import {
@@ -48,10 +53,11 @@ const EXPECTED_ORDER = [
   "endpoints",
   "docs",
   "payment-assurance",
+  "products",
 ];
 
 describe("nav derivation", () => {
-  it("derives the 28 nav items in display order", () => {
+  it("derives the 29 nav items in display order", () => {
     expect(NAVIGATION_ITEMS.map((i) => i.id)).toEqual(EXPECTED_ORDER);
   });
 

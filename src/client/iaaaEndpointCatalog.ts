@@ -689,6 +689,16 @@ export const API_ENDPOINT_CATALOG: ApiEndpointEntry[] = [
     source: "src/server.ts branch: path === /api/agents/registry",
   },
   {
+    id: "products-catalog",
+    method: "GET",
+    path: "/api/products/catalog",
+    aliases: [],
+    kind: "http",
+    auth: "session",
+    authNote: "401 unauthenticated; 405 non-GET; 503 when the price catalogue is unbound or unreadable. Read-only rendering of the Phase 2 product catalog with Phase 3 access parity (src/data/productCatalogue.ts + src/data/productAccess.ts): listed products, approved prices only, unlisted reasons, purchase paths. No charged price is changed by this route.",
+    source: "src/server.ts branch: path === /api/products/catalog",
+  },
+  {
     id: "telemetry-summary",
     method: "GET",
     path: "/api/telemetry/summary",
