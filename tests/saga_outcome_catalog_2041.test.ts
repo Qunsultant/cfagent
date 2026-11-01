@@ -3,8 +3,8 @@
  *
  * S1 proposes the four Leg 0/1 outcomes; S2 adds the three
  * journey-gate outcomes below; S3 adds the two compensated
- * screen-failure outcomes. Trading (S4) entries arrive with
- * their slice; nothing here claims them. Every entry follows
+ * screen-failure outcomes; S4 adds the five trading-leg
+ * outcomes. Every entry follows
  * the #2381 catalog contract: SUCCESS_* / FAILURE_* names,
  * businessMessage to UI and channels, technicalDetail to logs
  * only, stored rows never rewritten, and the resolver never
@@ -94,9 +94,44 @@ const SAGA_ENTRIES: Record<
     httpStatus: 200,
     businessMessage: "The journey gate expired unanswered; the saga ends with no trades and no proposals.",
   },
+  SUCCESS_SAGA_TRADE_SETTLED: {
+    outcome: "success",
+    category: "saga",
+    retryable: false,
+    httpStatus: 200,
+    businessMessage: "The trade leg settled; the saga ends with the trade outcome.",
+  },
+  FAILURE_SAGA_TRADE_REJECTED: {
+    outcome: "failure",
+    category: "saga",
+    retryable: false,
+    httpStatus: 200,
+    businessMessage: "The trade was rejected at per-order approval; the saga ends with no order placed.",
+  },
+  FAILURE_SAGA_TRADE_EXPIRED: {
+    outcome: "failure",
+    category: "saga",
+    retryable: false,
+    httpStatus: 200,
+    businessMessage: "The per-order approval wait expired; the saga ends with no order placed.",
+  },
+  FAILURE_SAGA_TRADE_LEG_FAILED: {
+    outcome: "failure",
+    category: "saga",
+    retryable: false,
+    httpStatus: 500,
+    businessMessage: "The trading leg failed; the saga ends with the failure surfaced and no compensation.",
+  },
+  FAILURE_SAGA_PROPOSAL_FAILED: {
+    outcome: "failure",
+    category: "saga",
+    retryable: false,
+    httpStatus: 500,
+    businessMessage: "The trade proposal failed; no approval workflow started and no order was placed.",
+  },
 };
 
-describe("saga outcome catalog (S1+S2+S3, #2041)", () => {
+describe("saga outcome catalog (S1+S2+S3+S4, #2041)", () => {
   it.each(Object.keys(SAGA_ENTRIES))("carries %s with its full contract", (code) => {
     const expected = SAGA_ENTRIES[code];
     const entry = outcomes[code];
@@ -126,6 +161,12 @@ describe("saga outcome catalog (S1+S2+S3, #2041)", () => {
     expect(resolved.resolved).toBe(false);
     expect(resolved.entry).toBeNull();
     expect(codedMessage("FAILURE_SAGA_NOPE")).toBe("[FAILURE_SAGA_NOPE]");
+  });
+
+  it("S2's journey_approved entry no longer says the trading leg is stubbed (S4 builds it)", () => {
+    const entry = outcomes["SUCCESS_SAGA_JOURNEY_APPROVED"];
+    expect(entry["technicalDetail"]).not.toContain("stubbed in S2");
+    expect(entry["technicalDetail"]).toContain("trading leg");
   });
 
   it("S1's screen_failed entry stays valid and notes the S3 compensation lineage", () => {

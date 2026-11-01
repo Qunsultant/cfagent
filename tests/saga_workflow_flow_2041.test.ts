@@ -192,7 +192,11 @@ class FakeLegPort implements SagaLegPort {
   async getLegStatus(leg: SagaLeg, workflowId: string): Promise<SagaLegInstanceStatus | null> {
     this.statusCalls.push({ leg, workflowId });
     const queue = this.statuses[`${leg}:${workflowId}`];
-    if (!queue || queue.length === 0) return { status: "running" };
+    // No queue = no instance (null). The flow's poll loop maps
+    // null to unknown and keeps polling, so deadline tests are
+    // unaffected; the S4 trade pre-check needs null to mean "no
+    // child" (propose path) rather than a phantom running child.
+    if (!queue || queue.length === 0) return null;
     return queue.shift()!;
   }
 }
@@ -241,6 +245,8 @@ function depsFor(
     issueCredit?: SagaDeps["issueCredit"];
     getRefundPorts?: SagaDeps["getRefundPorts"];
     monetizationEnabled?: SagaDeps["monetizationEnabled"];
+    proposeTrade?: SagaDeps["proposeTrade"];
+    deliverNotice?: SagaDeps["deliverNotice"];
   } = {},
 ): {
   deps: SagaDeps;
@@ -251,6 +257,8 @@ function depsFor(
   issueCreditCalls: Array<{ runRequestId: string; priceUSD: number }>;
   depCalls: { refundPorts: number; monetization: number };
   refundPorts: ReturnType<typeof fakeRefundPorts>;
+  proposeCalls: Array<unknown>;
+  noticeCalls: Array<unknown>;
 } {
   const auditEvents: SagaAuditEvent[] = [];
   const clock = opts.clock ?? { ms: 0 };
@@ -258,6 +266,8 @@ function depsFor(
   const withdrawCalls: JourneyPromptReceipts[] = [];
   const issueCreditCalls: Array<{ runRequestId: string; priceUSD: number }> = [];
   const depCalls = { refundPorts: 0, monetization: 0 };
+  const proposeCalls: Array<unknown> = [];
+  const noticeCalls: Array<unknown> = [];
   const refundPorts = fakeRefundPorts();
   let call = 0;
   const deps: SagaDeps = {
@@ -294,6 +304,21 @@ function depsFor(
         depCalls.monetization += 1;
         return true;
       }),
+    // S4: calls are counted before delegating, so custom deps
+    // still record. The default proposal refuses (a test that
+    // reaches the leg without setting proposeTrade ends
+    // proposal_failed LOUDLY instead of hanging); the default
+    // notice records without posting.
+    proposeTrade: async (intent: unknown) => {
+      proposeCalls.push(intent);
+      if (opts.proposeTrade) return opts.proposeTrade(intent);
+      return { ok: false, reason: "proposal_failed" };
+    },
+    deliverNotice: async (notice: unknown) => {
+      noticeCalls.push(notice);
+      if (opts.deliverNotice) return opts.deliverNotice(notice);
+      return { slack: "skipped" };
+    },
     nowMs: () => clock.ms,
   };
   return {
@@ -305,6 +330,8 @@ function depsFor(
     issueCreditCalls,
     depCalls,
     refundPorts,
+    proposeCalls,
+    noticeCalls,
   };
 }
 
@@ -329,6 +356,24 @@ function paymentOutcome(status: string): SagaLegInstanceStatus {
 function collation(lifecycle: string): SagaLegInstanceStatus {
   return { status: "complete", output: { lifecycle } };
 }
+/** S4 trade setup for approved-path tests: propose ok + a settled child. */
+const TRADE_INTENT = {
+  kind: "stock",
+  symbol: "AAPL",
+  action: "buy",
+  quantity: 10,
+  orderType: "market",
+} as const;
+function queueTradeSettled(legPort: FakeLegPort) {
+  // The fake port returns startResult's id for every leg, so
+  // the trade poll reads "trade:pay-wf-1".
+  legPort.statuses["trade:pay-wf-1"] = [
+    { status: "complete", output: { status: "settled", decision: "approved", orderId: "order-1" } },
+  ];
+}
+const TRADE_PROPOSE = {
+  proposeTrade: async () => ({ ok: true, orderId: "order-1" }),
+} as const;
 
 function auditTypes(events: SagaAuditEvent[]): string[] {
   return events.map((e) => e.type);
@@ -401,36 +446,59 @@ describe("saga flow fail-closed (S1, #2041)", () => {
 });
 
 describe("saga flow Leg 0/1 (S1, #2041) and gate entry (S2)", () => {
-  it("started payment + completed screen reaches the gate; an owner approval ends journey_approved, and never starts a second screener", async () => {
+  it("started payment + completed screen reaches the gate; an owner approval continues to Leg 3 (S4: journey_approved is a milestone, not a terminal), and never starts a second screener", async () => {
     const legPort = new FakeLegPort();
     legPort.statuses["payment:pay-wf-1"] = [{ status: "running" }, paymentStarted()];
     legPort.statuses["screener:scr-wf-1"] = [{ status: "running" }, collation("Completed")];
-    const { deps, auditEvents, clock, promptCalls, withdrawCalls } = depsFor(legPort);
+    // S4 trade leg: the fake port returns startResult's id for
+    // every leg, so the trade poll reads "trade:pay-wf-1".
+    legPort.statuses["trade:pay-wf-1"] = [
+      { status: "complete", output: { status: "settled", decision: "approved", orderId: "order-1" } },
+    ];
+    const { deps, auditEvents, clock, promptCalls, withdrawCalls, proposeCalls, noticeCalls } = depsFor(legPort, {
+      proposeTrade: async () => ({ ok: true, orderId: "order-1" }),
+    });
     const step = gateStep(clock, [
       { payload: { sagaId: "saga-1", decision: "approved", deciderLogin: "u1login", surface: "slack" } },
     ]);
     const outcome: SagaWorkflowOutcome = await runSagaWorkflowFlow(
-      baseParams(),
+      baseParams({
+        tradeIntent: {
+          kind: "stock",
+          symbol: "AAPL",
+          action: "buy",
+          quantity: 10,
+          orderType: "market",
+        },
+      }),
       deps,
       step,
     );
-    expect(outcome.status).toBe("journey_approved");
-    expect(outcome.code).toBe("SUCCESS_SAGA_JOURNEY_APPROVED");
+    expect(outcome.status).toBe("trade_settled");
+    expect(outcome.code).toBe("SUCCESS_SAGA_TRADE_SETTLED");
     expect(outcome.screenerWorkflowId).toBe("scr-wf-1");
     expect(outcome.rail).toBe("stripe");
-    // screen_completed is a milestone row now, NOT the terminal outcome.
+    // screen_completed AND journey_decided are milestone rows
+    // now, NOT terminal outcomes: the saga ends at the trade
+    // outcome, with its notice before the ended row.
     expect(auditTypes(auditEvents)).toEqual([
       "saga.started",
       "saga.payment_started",
       "saga.screen_completed",
       "saga.journey_prompted",
       "saga.journey_decided",
-      "saga.ended",
       "saga.journey_prompts_withdrawn",
+      "saga.trade_proposed",
+      "saga.trade_settled",
+      "saga.outcome_notice",
+      "saga.ended",
     ]);
     const decided = auditEvents.find((e) => e.type === "saga.journey_decided");
     expect(decided?.decidingSurface).toBe("slack");
     expect(decided?.decision).toBe("approved");
+    const ended = auditEvents.find((e) => e.type === "saga.ended");
+    expect(ended?.outcomeCode).toBe("SUCCESS_SAGA_TRADE_SETTLED");
+    expect(ended?.decidingSurface).toBe("slack");
     // The gate ran exactly once, with the ruled 24h provider timeout.
     expect(step.waitCalls).toHaveLength(1);
     expect(step.waitCalls[0].name).toBe("await-journey-decision");
@@ -440,14 +508,22 @@ describe("saga flow Leg 0/1 (S1, #2041) and gate entry (S2)", () => {
     expect(promptCalls).toHaveLength(1);
     expect(promptCalls[0].sagaId).toBe("saga-1");
     expect(withdrawCalls).toHaveLength(1);
-    // Exactly one leg start (payment); the screener is observed, never started.
-    expect(legPort.starts).toHaveLength(1);
+    // The trade leg proposed once (preview-only) and the outcome
+    // notice fired once for the terminal trade outcome.
+    expect(proposeCalls).toHaveLength(1);
+    expect(noticeCalls).toHaveLength(1);
+    // Two leg starts (payment + trade); the screener is observed, never started.
+    expect(legPort.starts).toHaveLength(2);
     expect(legPort.starts[0].leg).toBe("payment");
     const paymentParams = legPort.starts[0].params as Record<string, unknown>;
     expect(paymentParams["runRequestId"]).toBe("run-1");
     expect(paymentParams["family"]).toBe("goal");
     expect(paymentParams["account"]).toBe(baseAccount);
     expect(paymentParams["screenerCommand"]).toBe(baseCommand);
+    expect(legPort.starts[1].leg).toBe("trade");
+    const tradeParams = legPort.starts[1].params as Record<string, unknown>;
+    expect(tradeParams["orderId"]).toBe("order-1");
+    expect(legPort.starts.some((s) => s.leg === "screener")).toBe(false);
     // The screen was observed through the payment outcome's id, not a new start.
     expect(legPort.statusCalls.some((c) => c.leg === "screener" && c.workflowId === "scr-wf-1")).toBe(true);
   });
@@ -469,6 +545,7 @@ describe("saga flow Leg 0/1 (S1, #2041) and gate entry (S2)", () => {
       "saga.screen_completed",
       "saga.journey_prompted",
       "saga.journey_decided",
+      "saga.outcome_notice",
       "saga.ended",
       "saga.journey_prompts_withdrawn",
     ]);
@@ -489,7 +566,8 @@ describe("saga flow Leg 0/1 (S1, #2041) and gate entry (S2)", () => {
       expect(auditTypes(auditEvents)).toEqual([
         "saga.started",
         "saga.payment_not_completed",
-        "saga.ended",
+        "saga.outcome_notice",
+      "saga.ended",
       ]);
       expect(legPort.statusCalls.some((c) => c.leg === "screener")).toBe(false);
     },
@@ -510,6 +588,7 @@ describe("saga flow Leg 0/1 (S1, #2041) and gate entry (S2)", () => {
     expect(auditTypes(auditEvents)).toEqual([
       "saga.started",
       "saga.screen_start_failed_credit_issued",
+      "saga.outcome_notice",
       "saga.ended",
     ]);
     // The payment leg already issued the credit; the saga records
@@ -580,6 +659,7 @@ describe("saga flow Leg 0/1 (S1, #2041) and gate entry (S2)", () => {
       "saga.started",
       "saga.payment_started",
       "saga.screen_failed",
+      "saga.outcome_notice",
       "saga.ended",
     ]);
     const failed = auditEvents.find((e) => e.type === "saga.screen_failed");
@@ -744,13 +824,22 @@ describe("saga flow Leg 0/1 (S1, #2041) and gate entry (S2)", () => {
     legPort.startResult = { workflowId: "pay-wf-1", existing: true };
     legPort.statuses["payment:pay-wf-1"] = [paymentStarted()];
     legPort.statuses["screener:scr-wf-1"] = [collation("Completed")];
-    const { deps, auditEvents, clock } = depsFor(legPort);
+    queueTradeSettled(legPort);
+    const { deps, auditEvents, clock } = depsFor(legPort, TRADE_PROPOSE);
     const step = gateStep(clock, [
       { payload: { sagaId: "saga-1", decision: "approved", deciderLogin: "u1login", surface: "chat" } },
     ]);
-    const outcome = await runSagaWorkflowFlow(baseParams(), deps, step);
-    expect(outcome.status).toBe("journey_approved");
-    expect(legPort.starts).toHaveLength(1);
+    const outcome = await runSagaWorkflowFlow(
+      baseParams({ tradeIntent: { ...TRADE_INTENT } }),
+      deps,
+      step,
+    );
+    // S4: approval is a milestone — the saga ends at the trade
+    // outcome, while the payment adopt pin stays intact.
+    expect(outcome.status).toBe("trade_settled");
+    expect(legPort.starts).toHaveLength(2);
+    expect(legPort.starts[0].leg).toBe("payment");
+    expect(legPort.starts[1].leg).toBe("trade");
     const startedEvent = auditEvents.find((e) => e.type === "saga.payment_started");
     expect(startedEvent?.existing).toBe(true);
   });
@@ -789,11 +878,17 @@ describe("saga flow Leg 0/1 (S1, #2041) and gate entry (S2)", () => {
     const legPort = new FakeLegPort();
     legPort.statuses["payment:pay-wf-1"] = [paymentStarted()];
     legPort.statuses["screener:scr-wf-1"] = [collation("Completed")];
-    const { deps, auditEvents, clock } = depsFor(legPort);
+    queueTradeSettled(legPort);
+    const { deps, auditEvents, clock } = depsFor(legPort, TRADE_PROPOSE);
     const step = gateStep(clock, [
       { payload: { sagaId: "saga-1", decision: "approved", deciderLogin: "u1login", surface: "panel" } },
     ]);
-    const outcome = await runSagaWorkflowFlow(baseParams({ rail: "x402" }), deps, step);
+    const outcome = await runSagaWorkflowFlow(
+      baseParams({ rail: "x402", tradeIntent: { ...TRADE_INTENT } }),
+      deps,
+      step,
+    );
+    expect(outcome.status).toBe("trade_settled");
     expect(outcome.rail).toBe("x402");
     expect(auditEvents.every((e) => e.rail === "x402")).toBe(true);
   });
@@ -810,13 +905,17 @@ describe("saga flow Leg 0/1 (S1, #2041) and gate entry (S2)", () => {
 
 describe("saga flow Leg 2 journey gate (S2, #2041)", () => {
   /** A completed paid screen, ready to enter the gate. */
-  function completedScreen(over: Partial<SagaParams> = {}) {
+  function completedScreen(
+    over: Partial<SagaParams> = {},
+    depOpts: Parameters<typeof depsFor>[1] = {},
+  ) {
     const legPort = new FakeLegPort();
     legPort.statuses["payment:pay-wf-1"] = [paymentStarted()];
     legPort.statuses["screener:scr-wf-1"] = [collation("Completed")];
-    const bundle = depsFor(legPort);
+    const bundle = depsFor(legPort, depOpts);
     return { legPort, params: baseParams(over), ...bundle };
   }
+
 
   it("a wait throw ends journey_expired, and prompts are still withdrawn", async () => {
     const { legPort, params, deps, auditEvents, clock, withdrawCalls } = completedScreen();
@@ -829,6 +928,7 @@ describe("saga flow Leg 2 journey gate (S2, #2041)", () => {
       "saga.screen_completed",
       "saga.journey_prompted",
       "saga.journey_expired",
+      "saga.outcome_notice",
       "saga.ended",
       "saga.journey_prompts_withdrawn",
     ]);
@@ -851,13 +951,14 @@ describe("saga flow Leg 2 journey gate (S2, #2041)", () => {
   });
 
   it("a non-owner answer is refused and never decides; the owner answer then decides", async () => {
-    const { deps, auditEvents, clock } = completedScreen();
+    const { legPort, deps, auditEvents, clock } = completedScreen({}, TRADE_PROPOSE);
+    queueTradeSettled(legPort);
     const step = gateStep(clock, [
       { payload: { sagaId: "saga-1", decision: "denied", deciderLogin: "someone-else", surface: "slack" } },
       { payload: { sagaId: "saga-1", decision: "approved", deciderLogin: "u1login", surface: "panel" } },
     ]);
-    const outcome = await runSagaWorkflowFlow(baseParams(), deps, step);
-    expect(outcome.status).toBe("journey_approved");
+    const outcome = await runSagaWorkflowFlow(baseParams({ tradeIntent: { ...TRADE_INTENT } }), deps, step);
+    expect(outcome.status).toBe("trade_settled");
     const refused = auditEvents.filter((e) => e.type === "saga.journey_decision_refused");
     expect(refused).toHaveLength(1);
     expect(refused[0].refusalReason).toBe("non_owner_decider");
@@ -868,39 +969,42 @@ describe("saga flow Leg 2 journey gate (S2, #2041)", () => {
   });
 
   it("a malformed answer is refused and never decides; the owner answer then decides", async () => {
-    const { deps, auditEvents, clock } = completedScreen();
+    const { legPort, deps, auditEvents, clock } = completedScreen({}, TRADE_PROPOSE);
+    queueTradeSettled(legPort);
     const step = gateStep(clock, [
       { payload: { sagaId: "saga-1", decision: "maybe", deciderLogin: "u1login", surface: "chat" } },
       { payload: { sagaId: "saga-1", decision: "approved", deciderLogin: "u1login", surface: "chat" } },
     ]);
-    const outcome = await runSagaWorkflowFlow(baseParams(), deps, step);
-    expect(outcome.status).toBe("journey_approved");
+    const outcome = await runSagaWorkflowFlow(baseParams({ tradeIntent: { ...TRADE_INTENT } }), deps, step);
+    expect(outcome.status).toBe("trade_settled");
     const refused = auditEvents.filter((e) => e.type === "saga.journey_decision_refused");
     expect(refused).toHaveLength(1);
     expect(refused[0].refusalReason).toBe("malformed_decision_value");
   });
 
   it("an answer for another saga is refused and never decides", async () => {
-    const { deps, auditEvents, clock } = completedScreen();
+    const { legPort, deps, auditEvents, clock } = completedScreen({}, TRADE_PROPOSE);
+    queueTradeSettled(legPort);
     const step = gateStep(clock, [
       { payload: { sagaId: "saga-other", decision: "denied", deciderLogin: "u1login", surface: "slack" } },
       { payload: { sagaId: "saga-1", decision: "approved", deciderLogin: "u1login", surface: "slack" } },
     ]);
-    const outcome = await runSagaWorkflowFlow(baseParams(), deps, step);
-    expect(outcome.status).toBe("journey_approved");
+    const outcome = await runSagaWorkflowFlow(baseParams({ tradeIntent: { ...TRADE_INTENT } }), deps, step);
+    expect(outcome.status).toBe("trade_settled");
     const refused = auditEvents.filter((e) => e.type === "saga.journey_decision_refused");
     expect(refused).toHaveLength(1);
     expect(refused[0].refusalReason).toBe("saga_id_mismatch");
   });
 
   it("first answer wins: a second queued decision is never consumed", async () => {
-    const { deps, auditEvents, clock } = completedScreen();
+    const { legPort, deps, auditEvents, clock } = completedScreen({}, TRADE_PROPOSE);
+    queueTradeSettled(legPort);
     const step = gateStep(clock, [
       { payload: { sagaId: "saga-1", decision: "approved", deciderLogin: "u1login", surface: "slack" } },
       { payload: { sagaId: "saga-1", decision: "denied", deciderLogin: "u1login", surface: "panel" } },
     ]);
-    const outcome = await runSagaWorkflowFlow(baseParams(), deps, step);
-    expect(outcome.status).toBe("journey_approved");
+    const outcome = await runSagaWorkflowFlow(baseParams({ tradeIntent: { ...TRADE_INTENT } }), deps, step);
+    expect(outcome.status).toBe("trade_settled");
     expect(step.waitCalls).toHaveLength(1);
     expect(auditEvents.filter((e) => e.type === "saga.journey_decided")).toHaveLength(1);
   });
