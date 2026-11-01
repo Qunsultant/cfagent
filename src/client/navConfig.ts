@@ -64,7 +64,7 @@ export const SUB_MENU_CONFIGS: Record<string, NavSubMenuItemConfig[]> = {
       id: "options",
       label: "Contract Screen",
       shortLabel: "Contracts",
-      icon: "Options",
+      icon: "Contracts",
       badge: "Contracts",
       badgeType: "ai",
       description: "Raw options contracts screener, hosted in the options hub",
@@ -73,7 +73,7 @@ export const SUB_MENU_CONFIGS: Record<string, NavSubMenuItemConfig[]> = {
       id: "scanner",
       label: "Strategy Scanner",
       shortLabel: "Scanner",
-      icon: "Scanner",
+      icon: "StrategyScan",
       badge: "Scan",
       badgeType: "mcp",
       description: "Pattern matching, technical breakout, and momentum scans",
@@ -82,7 +82,7 @@ export const SUB_MENU_CONFIGS: Record<string, NavSubMenuItemConfig[]> = {
       id: "options-flows",
       label: "Options Flows",
       shortLabel: "Flows",
-      icon: "Options",
+      icon: "Flows",
       badge: "Flows",
       badgeType: "live",
       description: "Institutional block trades, sweeps, and dark pool prints",
@@ -91,7 +91,7 @@ export const SUB_MENU_CONFIGS: Record<string, NavSubMenuItemConfig[]> = {
       id: "iv-history",
       label: "IV History & Volatility",
       shortLabel: "IV",
-      icon: "Options",
+      icon: "Volatility",
       badge: "IV",
       badgeType: "neutral",
       description: "Historical and implied volatility percentile ranks",
@@ -120,7 +120,7 @@ export const SUB_MENU_CONFIGS: Record<string, NavSubMenuItemConfig[]> = {
       id: "reports",
       label: "Screener Reports",
       shortLabel: "Reports",
-      icon: "Screeners",
+      icon: "Reports",
       badge: "Reports",
       badgeType: "pro",
       description: "Comprehensive market screener reports and run details",
@@ -129,7 +129,7 @@ export const SUB_MENU_CONFIGS: Record<string, NavSubMenuItemConfig[]> = {
       id: "review",
       label: "Proposal Review",
       shortLabel: "Review",
-      icon: "Screeners",
+      icon: "Review",
       badge: "Review",
       badgeType: "ai",
       description: "Autonomous proposal evaluation and human-in-the-loop approvals",
@@ -138,10 +138,30 @@ export const SUB_MENU_CONFIGS: Record<string, NavSubMenuItemConfig[]> = {
       id: "track-record",
       label: "Track Record",
       shortLabel: "Record",
-      icon: "Screeners",
+      icon: "TrackRecord",
       badge: "Track",
       badgeType: "pro",
       description: "Recommendation track record, hit rates, and historical outcomes",
+    },
+  ],
+  agents: [
+    {
+      id: "agents",
+      label: "Agent Mesh Registry",
+      shortLabel: "Agents",
+      icon: "Agents",
+      badge: "Mesh",
+      badgeType: "ai",
+      description: "Autonomous agents, capabilities, heartbeats, and peer delegations",
+    },
+    {
+      id: "endpoints",
+      label: "API Endpoints",
+      shortLabel: "Endpoints",
+      icon: "Endpoints",
+      badge: "MCP",
+      badgeType: "mcp",
+      description: "Model Context Protocol tools, OpenAPI schemas, and server endpoints",
     },
   ],
   "platform-admin": PLATFORM_ADMIN_NAV_ITEMS.map((item) => ({
@@ -156,7 +176,7 @@ export const SUB_MENU_CONFIGS: Record<string, NavSubMenuItemConfig[]> = {
       id: "payment-assurance",
       label: "Payment Assurance",
       shortLabel: "Assurance",
-      icon: "Shield",
+      icon: "Assurance",
       badge: "Test",
       badgeType: "neutral",
       description: "Live & simulation payment assurance test suite",
@@ -177,6 +197,7 @@ const SECTION_METADATA: { category: RouteCategory; title: string; id: string }[]
   { category: "Execution", title: "TRADING & EXECUTION", id: "section-execution" },
   { category: "Intelligence", title: "INTELLIGENCE & COPILOT", id: "section-intelligence" },
   { category: "Playbooks", title: "WORKFLOWS", id: "section-workflows" },
+  { category: "Marketing", title: "MARKETING", id: "section-marketing" },
   { category: "Billing", title: "BILLING", id: "section-billing" },
   { category: "Platform", title: "PLATFORM", id: "section-platform" },
 ];
@@ -200,6 +221,7 @@ const SUB_MENU_HOSTED_IDS = new Set([
   "research",
   "docs",
   "payment-assurance",
+  "endpoints",
   PLATFORM_ADMIN_NAV_ID,
 ]);
 
@@ -227,14 +249,16 @@ export function buildDefaultLeftNavConfig(): LeftNavConfig {
         };
       });
 
-    // Add Goal Screen to Intelligence section as its own top-level item
+    // Add Goal Screen to Intelligence section directly under Options Screener and above Chat
     if (sec.id === "section-intelligence") {
-      items.splice(2, 0, {
+      const chatIndex = items.findIndex((i) => i.id === "chat");
+      const insertAt = chatIndex !== -1 ? chatIndex : 2;
+      items.splice(insertAt, 0, {
         id: "goal-screen",
         label: "Goal Screen",
         shortLabel: "Goal",
         category: "Intelligence",
-        icon: "Screeners",
+        icon: "Goal",
         badge: "Goal",
         badgeType: "ai",
         description: "Goal-driven screening flow with AI-orchestrated criteria",
