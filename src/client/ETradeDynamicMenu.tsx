@@ -6,7 +6,15 @@ import {
   NAV_TAB_PRESETS,
 } from "./components/NavigationMenu";
 import { isTabFeatureEnabled } from "./featureFlags";
-import { PillGroup, Button, TextInput } from "./components/ui";
+import { PillGroup, Button, TextInput, Select } from "./components/ui";
+import { apiFetch } from "./apiFetch";
+import { fetchWatchlists, type ETradeWatchlist } from "./accountApi";
+import {
+  loadTapeSelection,
+  saveTapeSelection,
+  subscribeTapeSelection,
+  type TapeSetSelection,
+} from "./quotes/symbolSetResolver";
 import {
   switchBrokerEnvironment,
   useBrokerEnvironment,
@@ -182,6 +190,94 @@ export function SettingsMenu({
     }
   };
 
+  // Issue #2689 — ticker configuration moved off the tape bar: the
+  // Quote source + Tape set controls live here. Tape set writes go
+  // through saveTapeSelection (which notifies the tape); quote source
+  // writes go to /api/market/quotes/source (server-confirmed, revert
+  // on failure, same as the tape's old control).
+  const [quoteSource, setQuoteSource] = useState<"auto" | "alpaca" | "yahoo">("auto");
+  const [tapeSelection, setTapeSelection] = useState<TapeSetSelection>(() => loadTapeSelection() ?? { kind: "default" });
+  const [tapeCustomDraft, setTapeCustomDraft] = useState<string>(() =>
+    loadTapeSelection()?.kind === "custom" ? (loadTapeSelection() as { text: string }).text : "",
+  );
+  const [tapeWatchlists, setTapeWatchlists] = useState<ETradeWatchlist[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch("/api/market/quotes/source")
+      .then((res) =>
+        res.ok ? (res.json() as Promise<{ source?: unknown }>) : Promise.reject(new Error("source read failed")),
+      )
+      .then((data) => {
+        if (!cancelled && (data?.source === "alpaca" || data?.source === "yahoo")) {
+          setQuoteSource(data.source);
+        }
+      })
+      .catch(() => {
+        // Unavailable setting surface: keep "auto" (legacy behavior).
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  useEffect(() => {
+    return subscribeTapeSelection((next) => {
+      setTapeSelection(next);
+      if (next.kind === "custom") setTapeCustomDraft(next.text);
+    });
+  }, []);
+  const handleQuoteSourceChange = (next: "auto" | "alpaca" | "yahoo") => {
+    const previous = quoteSource;
+    setQuoteSource(next);
+    apiFetch("/api/market/quotes/source", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source: next }),
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error("source write failed");
+        return res.json() as Promise<{ source?: unknown }>;
+      })
+      .then((data) => {
+        if (data?.source === "auto" || data?.source === "alpaca" || data?.source === "yahoo") {
+          setQuoteSource(data.source);
+        }
+      })
+      .catch(() => {
+        // Server-confirmed state only: revert on failure.
+        setQuoteSource(previous);
+      });
+  };
+  const tapeSelectionValue =
+    tapeSelection.kind === "default"
+      ? "default"
+      : tapeSelection.kind === "preset"
+        ? `preset:${tapeSelection.preset}`
+        : tapeSelection.kind === "custom"
+          ? "custom"
+          : tapeSelection.kind === "watchlist"
+            ? `watchlist:${tapeSelection.id}`
+            : "holdings";
+  const handleTapeSetChange = (value: string) => {
+    let next: TapeSetSelection | null = null;
+    if (value === "default") next = { kind: "default" };
+    else if (value === "custom") next = { kind: "custom", text: tapeCustomDraft };
+    else if (value === "holdings") next = { kind: "holdings" };
+    else if (value.startsWith("preset:")) {
+      const preset = value.slice("preset:".length);
+      if (preset === "indices" || preset === "mega-cap" || preset === "crypto") {
+        next = { kind: "preset", preset };
+      }
+    } else if (value.startsWith("watchlist:")) {
+      const id = value.slice("watchlist:".length);
+      const found = tapeWatchlists.find((w) => String(w.watchlistId) === id);
+      next = { kind: "watchlist", id, name: found?.name };
+    }
+    if (next) {
+      setTapeSelection(next);
+      saveTapeSelection(next);
+    }
+  };
+
   // Local state for Ad / Sponsor banner configuration
   const [localAdConfig, setLocalAdConfig] = useState<AdBannerConfig>(() => getStoredAdBannerConfig());
   // #1274: login-provider display + request access. /api/me reports
@@ -296,6 +392,22 @@ export function SettingsMenu({
   // (backed by the etrade_active_env key, which could disagree with
   // the hub's cfagent_env key) is gone.
   const effectiveEnv = useBrokerEnvironment();
+  // Issue #2689 — watchlist options for the panel Tape set dropdown.
+  // (Placed here, after effectiveEnv, so the effect deps never read
+  // a not-yet-declared binding.)
+  useEffect(() => {
+    let cancelled = false;
+    fetchWatchlists(effectiveEnv)
+      .then((data) => {
+        if (!cancelled) setTapeWatchlists(data.watchlists);
+      })
+      .catch(() => {
+        // No watchlist options; a stored watchlist selection falls back.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveEnv]);
   const effectiveMask = maskAccount !== undefined ? maskAccount : localMask;
   const toggleMask = () => {
     if (setMaskAccount) {
@@ -873,6 +985,72 @@ export function SettingsMenu({
                       <Button size="sm" variant="secondary" onClick={() => onRefreshReportConfirmations()} title="Refresh the pending confirmations list">⟳ Refresh</Button>
                     )}
                   </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Ticker configuration (#2689: moved off the tape bar). */}
+          <div className="etrade-panel-section">
+            <div className="section-label-row">
+              <span>Ticker</span>
+              <small>Quote source &amp; tape set</small>
+            </div>
+            <div className="settings-prefs-stack">
+              <div className="settings-pref-row">
+                <span className="pref-row-lbl">Quote source:</span>
+                <Select
+                  aria-label="Quote source"
+                  size="sm"
+                  value={quoteSource}
+                  onChange={(e) => handleQuoteSourceChange(e.target.value as "auto" | "alpaca" | "yahoo")}
+                >
+                  <option value="auto">Auto</option>
+                  <option value="alpaca">Alpaca</option>
+                  <option value="yahoo">Yahoo</option>
+                </Select>
+              </div>
+              <div className="settings-pref-row">
+                <span className="pref-row-lbl">Tape set:</span>
+                <Select
+                  aria-label="Tape set"
+                  size="sm"
+                  value={tapeSelectionValue}
+                  onChange={(e) => handleTapeSetChange(e.target.value)}
+                >
+                  <option value="default">Default</option>
+                  <option value="preset:indices">Indices</option>
+                  <option value="preset:mega-cap">Mega-cap</option>
+                  <option value="preset:crypto">Crypto</option>
+                  <option value="custom">Custom</option>
+                  <option value="holdings">Holdings</option>
+                  {tapeWatchlists.map((w) => (
+                    <option key={w.watchlistId} value={`watchlist:${w.watchlistId}`}>
+                      Watchlist: {w.name}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              {tapeSelection.kind === "custom" && (
+                <div className="settings-pref-row">
+                  <span className="pref-row-lbl">Custom symbols:</span>
+                  <TextInput
+                    aria-label="Custom symbols"
+                    size="sm"
+                    value={tapeCustomDraft}
+                    onChange={(e) => setTapeCustomDraft(e.target.value)}
+                    placeholder="NVDA, AAPL"
+                  />
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      const next: TapeSetSelection = { kind: "custom", text: tapeCustomDraft };
+                      setTapeSelection(next);
+                      saveTapeSelection(next);
+                    }}
+                  >
+                    Apply
+                  </Button>
                 </div>
               )}
             </div>

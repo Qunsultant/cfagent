@@ -1,13 +1,15 @@
 /**
  * @vitest-environment jsdom
  *
- * Issue #2108 — the tape's source control reads the stored setting on
+ * Issue #2108 — the quote source control reads the stored setting on
  * mount and posts a change, with server-confirmed state only.
+ * Issue #2689 — the control lives in SettingsMenu now, not on the
+ * tape bar; this test renders the panel.
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { MarketTickerTape } from "../src/client/components/MarketTickerTape";
+import { SettingsMenu } from "../src/client/ETradeDynamicMenu";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -70,7 +72,13 @@ describe("tape source control (#2108)", () => {
   it("shows the stored source and posts a change", async () => {
     root = createRoot(container);
     await act(async () => {
-      root!.render(React.createElement(MarketTickerTape));
+      root!.render(React.createElement(SettingsMenu));
+    });
+    // The panel body renders only once opened (hover or pin).
+    const trigger = container.querySelector(".etrade-dynamic-menu-trigger") as HTMLButtonElement;
+    expect(trigger).not.toBeNull();
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     const select = container.querySelector('select[aria-label="Quote source"]') as HTMLSelectElement;
     expect(select).not.toBeNull();

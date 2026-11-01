@@ -3,11 +3,15 @@
  *
  * Issue #2116 — the tape renders the resolved set, not the hardcoded
  * default, and the set picker drives it.
+ * Issue #2689 — the picker lives in SettingsMenu now, not on the
+ * tape bar; these tests render the panel alongside the tape, and a
+ * panel change must reach the tape through the selection event.
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MarketTickerTape } from "../src/client/components/MarketTickerTape";
+import { SettingsMenu } from "../src/client/ETradeDynamicMenu";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -81,7 +85,20 @@ describe("tape set picker (#2116)", () => {
   async function mount() {
     root = createRoot(container);
     await act(async () => {
-      root!.render(React.createElement(MarketTickerTape));
+      root!.render(
+        React.createElement(
+          React.Fragment,
+          null,
+          React.createElement(SettingsMenu),
+          React.createElement(MarketTickerTape),
+        ),
+      );
+    });
+    // The panel body renders only once opened (hover or pin).
+    const trigger = container.querySelector(".etrade-dynamic-menu-trigger") as HTMLButtonElement;
+    expect(trigger).not.toBeNull();
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
   }
 
@@ -130,10 +147,11 @@ describe("tape set picker (#2116)", () => {
       setter.call(input, "nvda, aapl");
       input.dispatchEvent(new Event("input", { bubbles: true }));
     });
-    const apply = Array.from(container.querySelectorAll("button")).find(
-      (b) => b.textContent === "Apply",
-    ) as HTMLButtonElement;
-    expect(apply).not.toBeUndefined();
+    const apply = input
+      .closest(".settings-pref-row")
+      ?.querySelector("button") as HTMLButtonElement;
+    expect(apply).not.toBeNull();
+    expect(apply.textContent).toBe("Apply");
     await act(async () => {
       apply.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
