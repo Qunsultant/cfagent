@@ -1,5 +1,6 @@
 /**
- * PaymentWorkflowFlow — the deterministic payment flow for Goal 1 Phase 2 (#2014).
+ * PaymentWorkflowFlow — the deterministic payment flow behind
+ * PaymentWorkflow (#2014; live — header corrected 2026-11-01, #2551).
  *
  * This is the flow module behind PaymentWorkflow, mirroring the repo pattern:
  * ScreenerScreenWorkflow delegates to screenerWorkflowFlow.ts and
@@ -9,7 +10,10 @@
  *
  * Deterministic, NOT model-driven. No step prompts a model, no step lets a
  * model choose an amount, a recipient, or whether to pay. Amounts come from
- * the price catalogue in cfpayMonetization.ts (proposed, NOT approved).
+ * the price catalogue port (src/data/priceCataloguePorts.ts, #2185) as
+ * resolved by the gate: only APPROVED catalogue prices resolve (#2547,
+ * getApprovedPrice) — seeds are PROPOSED operator defaults, never code
+ * constants, and an unapproved price refuses the charge fail-closed.
  * Payment is confirmed only by re-reading provider state via the
  * gate (native: Stripe session retrieve / x402 facilitator verify;
  * cfpay-era: checkout.status); a workflow event is a wake-up

@@ -1,10 +1,15 @@
 /**
- * Goal 1 Phase 2 (draft, #2014): cfpay monetization gate, TypeScript port.
+ * cfpay monetization gate (#2014; header corrected 2026-11-01, #2551).
  *
- * This is a standalone service: no route wiring, no flag enablement, no
- * PROD deployment in this file. Wiring it into the unified run-request
- * path is a separate, reviewed step under #2014, behind FeatureFlagPort,
- * default OFF.
+ * Status: DEPRECATED IN PLACE. For new runs this gate is
+ * superseded by src/services/nativeMonetization.ts
+ * (NativeMonetizationGate — see the deprecation markers below):
+ * the payment workflow adapter constructs the native gate, and
+ * no production route constructs this one. The class remains
+ * compiled and tested, is exercised by the client assurance
+ * panel (src/client/PaymentWorkflowAssurance.tsx) with a demo
+ * catalogue, and the rules below describe this gate's own
+ * behavior wherever it is constructed.
  *
  * Mainnet (Phase 6, #2016) enabled by owner direction 2026-10-28:
  * the network allowlist below admits Base mainnet alongside the
