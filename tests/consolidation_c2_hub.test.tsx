@@ -277,13 +277,15 @@ describe("C2 nav collapse", () => {
     const present = NAVIGATION_ITEMS.filter((i) => screeningIds.includes(i.id)).map((i) => i.id);
     expect(present).toEqual(["screeners"]);
     const entry = NAVIGATION_ITEMS.find((i) => i.id === "screeners")!;
-    expect(entry.label).toBe("Screeners");
+    expect(entry.label).toBe("Stock Screener");
   });
 
-  it("legacy screening tab ids still read as active on the one entry (deep links)", () => {
-    for (const legacy of ["scanner", "options", "reports", "schedules", "screeners"] as const) {
-      expect(isTabActive("screeners", legacy)).toBe(true);
-    }
+  it("screening tab ids still read as active on their host entry (deep links)", () => {
+    expect(isTabActive("screeners", "screeners")).toBe(true);
+    expect(isTabActive("options-screener", "options")).toBe(true);
+    expect(isTabActive("options-screener", "scanner")).toBe(true);
+    expect(isTabActive("workflow-runs", "reports")).toBe(true);
+    expect(isTabActive("platform-admin", "schedules")).toBe(true);
     expect(isTabActive("screeners", "portfolio")).toBe(false);
   });
 });

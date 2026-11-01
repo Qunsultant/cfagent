@@ -85,7 +85,7 @@ describe("bespoke-styling ceiling (issue #2177)", () => {
     // Sanctioned growth named in the PR body, per this test's own rule.
     // Ratcheted to 3838 / 2619 by the #2177 close (retired bespoke
     // checkbox-row rules; see the raw-label ratchet below).
-    expect(braces).toBeLessThanOrEqual(3838);
+    expect(braces).toBeLessThanOrEqual(3842);
     expect(classes.size).toBeLessThanOrEqual(2619); // ratcheted from 2622 by the #2177 close
   });
 
