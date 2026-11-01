@@ -299,7 +299,7 @@ export function buildDefaultLeftNavConfig(): LeftNavConfig {
         label: "Sandbox",
         shortLabel: "Sandbox",
         category: "Platform",
-        icon: "Checkout",
+        icon: "Sandbox",
         description: "Payment assurance and demo checkout sandbox",
         subItems: SUB_MENU_CONFIGS.sandbox,
       },
@@ -364,10 +364,17 @@ export function isNavItemOrSubItemActive(
     }
     return false;
   }
+  if (item.id === "schedules") {
+    if (currentTab === "schedules") return true;
+    if (typeof window !== "undefined") {
+      const view = new URLSearchParams(window.location.search).get("view");
+      return currentTab === "screeners" && (view === "schedules" || view === "schemas");
+    }
+  }
   if (item.id === "screeners") {
     if (typeof window !== "undefined") {
       const view = new URLSearchParams(window.location.search).get("view");
-      if (view === "goal-screen") return false;
+      if (view === "goal-screen" || view === "schedules" || view === "schemas") return false;
     }
   }
   if (getNavGroup(currentTab) === item.id) return true;

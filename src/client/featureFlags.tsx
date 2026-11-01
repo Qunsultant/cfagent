@@ -55,6 +55,7 @@ export function getClientFeatureFlags(): Record<string, boolean> {
   return {
     screener: true,
     options_screener: true,
+    schedules: true,
   };
 }
 

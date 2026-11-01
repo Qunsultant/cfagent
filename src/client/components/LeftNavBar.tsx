@@ -110,6 +110,10 @@ export function LeftNavBar({
       navigateToTab("screeners", "goal-screen");
       return;
     }
+    if (item.id === "schedules") {
+      navigateToTab("schedules");
+      return;
+    }
     if (item.id === "sandbox" || item.id === SANDBOX_NAV_ID) {
       if (!hasSubMenu) {
         window.location.href = "/checkout/sandbox";

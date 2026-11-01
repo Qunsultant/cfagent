@@ -339,6 +339,9 @@
   align-items: center;
   gap: 1.25rem;
   border-bottom: 1px solid var(--color-border-subtle);
+  overflow-x: auto;
+  max-width: 100%;
+  scrollbar-width: thin;
 }
 
 .ui-tab {
@@ -351,6 +354,7 @@
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
+  flex-shrink: 0;
   transition: color 0.15s ease, box-shadow 0.15s ease;
 }
 
