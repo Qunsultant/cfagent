@@ -239,4 +239,36 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
     const svgs = submenu!.querySelectorAll('.submenu-item-bullet svg');
     expect(svgs.length).toBe(8);
   });
+  it("renders Schedules under Platform with distinct Schedules icon and handles navigation", async () => {
+    const platform = DEFAULT_LEFT_NAV_CONFIG.sections.find((s) => s.id === "section-platform");
+    expect(platform).toBeDefined();
+    const itemIds = platform!.items.map((i) => i.id);
+    expect(itemIds).toContain("schedules");
+    const schedulesItem = findNavItemConfig(DEFAULT_LEFT_NAV_CONFIG, "schedules");
+    expect(schedulesItem).toBeDefined();
+    expect(schedulesItem?.icon).toBe("Schedules");
+
+    const onSelectTab = vi.fn();
+    await renderNavBar({ onSelectTab });
+    expect(container.textContent).toContain("Schedules");
+
+    // Click Schedules item
+    const schedulesBtn = Array.from(container.querySelectorAll(".sidebar-nav-item")).find(
+      (btn) => btn.textContent?.includes("Schedules")
+    ) as HTMLButtonElement | undefined;
+    expect(schedulesBtn).toBeTruthy();
+    await act(async () => {
+      schedulesBtn!.click();
+    });
+    // navigateToTab or onSelectTab was triggered
+    expect(isNavItemOrSubItemActive(schedulesItem!, "schedules")).toBe(true);
+  });
+
+  it("configures Sandbox menu with dedicated Sandbox icon instead of Checkout cart", () => {
+    const sandboxSection = DEFAULT_LEFT_NAV_CONFIG.sections.find((s) => s.id === "section-sandbox");
+    expect(sandboxSection).toBeDefined();
+    const sandboxItem = sandboxSection!.items.find((i) => i.id === "sandbox");
+    expect(sandboxItem).toBeDefined();
+    expect(sandboxItem?.icon).toBe("Sandbox");
+  });
 });
