@@ -98,6 +98,15 @@ const ROLES: readonly Role[] = [
   "auditor",
 ];
 
+/**
+ * The single role catalog. Every surface that assigns roles consumes
+ * this list — service tokens (#2681), human role grants (#2688), and
+ * the #2171 grants model — never a re-declared copy. Server-side
+ * validation (canGrantRole, mint) checks against it; client checkbox
+ * lists are presentations of it, not second systems.
+ */
+export const ALL_ROLES: readonly Role[] = ROLES;
+
 export type AuthorizationScope = "platform" | "tenant" | "workspace" | "resource";
 
 /** Role grants. Scope, tenant, and resource checks are applied on top. */

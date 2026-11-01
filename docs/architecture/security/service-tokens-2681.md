@@ -98,6 +98,43 @@ unknown, expired, revoked, unprovisioned, and cross-tenant all read
 as 401). The presented secret and its hash are never logged or
 audited; audit records carry the token id/prefix only.
 
+## Shared role model (consumed by #2688)
+
+There is ONE role model, and this issue does not create a second one:
+
+- **Catalog:** `Role` + `ALL_ROLES` in `src/security/authorization.ts`
+  (platform-admin, tenant-admin, workspace-admin, member, approver,
+  auditor). Service-token mint validates every requested role against
+  `ALL_ROLES`; the mint form's checkbox list
+  (`SERVICE_TOKEN_ROLE_OPTIONS` in `src/client/serviceTokensApi.ts`) is
+  a presentation of that catalog minus workspace-admin, never an
+  enforcement point.
+- **Gates:** `canGrantRole()` (same PDP, same membership store) for
+  every grant decision, and `authorize()` for every permission check.
+  Human role grants (#2688) consume the same catalog and the same
+  gates: a platform admin grants platform-admin or tenant-admin; a
+  tenant admin grants tenant-admin within their own tenant only; a
+  tenant admin can never grant platform admin or touch another tenant.
+- **No default admin:** admin comes only from a live, unrevoked
+  membership binding (`isPlatformAdmin` reads bindings, never IdP
+  claims). A fresh login via any provider (#2686) holds no admin role
+  until explicitly granted — the token mint gate inherits this: an
+  unprovisioned caller cannot mint, and a caller cannot mint a token
+  for itself as the service user.
+- **Route-level self-check (pattern #2688 reuses):** `canGrantRole`
+  itself does not compare granter to target — it denies grants the
+  granter has no right to make, which already blocks self-escalation
+  into scopes the granter does not hold. The explicit
+  "granter ≠ target" refusal lives at the route, as the token mint
+  route does (403 when the caller is the service user itself). #2688's
+  grant endpoint must keep its own route-level self-grant refusal;
+  that rule is not a second role system, it is the same gate plus one
+  comparison.
+- **Shared invariants on both surfaces:** default-deny, no
+  self-grant, tenant-scoped, audited, immediate revocation (a revoked
+  binding denies on the next check, 0 ms, because verification reads
+  the store fresh).
+
 ## Provisioning UX
 
 IAAA Admin → Overview → Service tokens (beside Service user, same

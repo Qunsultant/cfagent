@@ -11,6 +11,7 @@
  */
 import { describe, it, expect } from "vitest";
 import {
+  ALL_ROLES,
   createMemoryMembershipStore,
   type Membership,
   type MembershipStore,
@@ -195,6 +196,22 @@ describe("issue #2681: service token mint", () => {
     await expect(
       mintPlatformToken(kv, store, { roles: ["platform-admin"] }),
     ).rejects.toThrow(/grant/i);
+  });
+
+  it("validates roles against the single catalog (ALL_ROLES, shared with #2688)", async () => {
+    expect([...ALL_ROLES]).toEqual([
+      "platform-admin",
+      "tenant-admin",
+      "workspace-admin",
+      "member",
+      "approver",
+      "auditor",
+    ]);
+    const kv = mapKv();
+    const store = await provisionedStore({ platform: true, admin: true });
+    await expect(
+      mintPlatformToken(kv, store, { roles: ["superuser" as never] }),
+    ).rejects.toThrow("Unknown role");
   });
 
   it("refuses the workspace-admin role (no workspace binding exists on tokens)", async () => {

@@ -17,6 +17,7 @@ vi.mock("../src/client/serviceTokensApi", () => ({
   rotateServiceToken: vi.fn(),
   revokeServiceToken: vi.fn(),
   fmtServiceTokenTime: (ms: number | null) => (ms === null ? "Never" : `t${ms}`),
+  SERVICE_TOKEN_ROLE_OPTIONS: ["platform-admin", "tenant-admin", "member", "approver", "auditor"],
 }));
 
 const mockedFetch = vi.mocked(fetchServiceTokens);
