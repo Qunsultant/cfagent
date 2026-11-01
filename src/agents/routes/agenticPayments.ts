@@ -1298,6 +1298,63 @@ export async function handleAgenticPaymentsRoutes(
             ctx.audit("commercial.submission.record_failed", "payments", { runRequestId, workflowId: started.workflowId, userId: login });
           }
         }
+        // Issue #2657: automatic referral earn, AFTER the payment
+        // workflow started. The earn event is the referred user's first
+        // PAID run: the monetization flag must be ON (a flag-OFF free
+        // run is not a paid run — the workflow start alone does not
+        // prove payment), and the failure-credit early return above
+        // already excludes replacement runs (compensation, not
+        // payment). BEST-EFFORT by design: the run already started,
+        // so an earn failure must never fail it — a loud log + an
+        // earn_failed audit row is the operator's reconcile signal,
+        // the same pattern as recordPaidSubmission above. The port's
+        // recordEarning is idempotent per referred user, so repeat
+        // submits no-op; the earned audit fires only when the row
+        // is new (earnedAtMs at or after this trigger's start),
+        // never as a replay claim.
+        if (monetizationOn) {
+          try {
+            const earnLifecycle = requireLifecycle();
+            if (!(earnLifecycle instanceof Response)) {
+              const earnEnsured = await ensureLifecycle(earnLifecycle);
+              if (!earnEnsured) {
+                const attribution = await earnLifecycle.getAttribution(login);
+                if (attribution) {
+                  if (attribution.tenantId !== tenantId) {
+                    ctx.audit("commercial.referral.earn_failed", "payments", {
+                      runRequestId,
+                      referredUserId: login,
+                      reason: "attribution tenant mismatch: referral credits never cross tenants",
+                    });
+                  } else {
+                    const triggerStartMs = Date.now();
+                    const earning = await recordFirstPaidRunEarning(earnLifecycle, {
+                      referrerUserId: attribution.referrerUserId,
+                      referredUserId: login,
+                      tenantId,
+                    });
+                    if (earning.earnedAtMs >= triggerStartMs) {
+                      ctx.audit("commercial.referral.earned", "payments", {
+                        referrerUserId: earning.referrerUserId,
+                        referredUserId: earning.referredUserId,
+                        amountUSD: earning.amountUSD,
+                        trigger: "auto",
+                        runRequestId,
+                      });
+                    }
+                  }
+                }
+              }
+            }
+          } catch (err: any) {
+            console.error(`[payments] referral auto-earn failed for ${login}: ${err?.message ?? "unknown error"}`);
+            ctx.audit("commercial.referral.earn_failed", "payments", {
+              runRequestId,
+              referredUserId: login,
+              reason: err?.message ?? "unknown error",
+            });
+          }
+        }
         return Response.json({ runRequestId, workflowId: started.workflowId, status: "payment_started" });
       } catch (err: any) {
         return Response.json({ error: err.message || "Payment workflow could not start; no screener started." }, { status: 503 });
@@ -3048,15 +3105,20 @@ export async function handleAgenticPaymentsRoutes(
       if (lifecycle instanceof Response) return lifecycle;
       const ensured = await ensureLifecycle(lifecycle);
       if (ensured) return ensured;
-      const [rules, redeemableUSD, earnings] = await Promise.all([
+      const [rules, redeemableUSD, earnings, attribution] = await Promise.all([
         lifecycle.getRules(),
         lifecycle.redeemableBalance(userId),
         lifecycle.listEarnings(userId),
+        lifecycle.getAttribution(userId),
       ]);
       return Response.json({
         userId,
         redeemableUSD,
         totalEarnedUSD: earnings.reduce((s, e) => s + e.amountUSD, 0),
+        // #2657: the referrer this user is attributed to, if any. The
+        // attribution row is keyed by referred user, so a referrer's own
+        // balance reads null here — their earnings are the list above.
+        attribution,
         rules: {
           earnAmountUSD: rules.earnAmountUSD,
           vestingDelayMs: rules.vestingDelayMs,
@@ -3099,6 +3161,46 @@ export async function handleAgenticPaymentsRoutes(
       return Response.json({ earning });
     } catch (err: any) {
       return Response.json({ error: err.message || "Failed to record referral earning" }, { status: 500 });
+    }
+  }
+
+  // POST /payments/agentic/commercial/referral/attribute (operator only).
+  // Issue #2657: the durable referrer→referred link #2208 named as
+  // follow-up. Set-once per referred user (same referrer replays as a
+  // no-op; a different referrer throws — never a silent overwrite).
+  // The route always stamps source "operator": referral-code surfaces
+  // (e.g. #2468 Phase 4 marketing) will write `code` rows through their
+  // own route later; no client input can claim a code source here.
+  // Attribution alone earns nothing — it only lets the submit path's
+  // automatic earn trigger know whom to credit on first paid run.
+  if (path.endsWith("/payments/agentic/commercial/referral/attribute") && request.method === "POST") {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!isStoreOperator(login)) return Response.json({ error: "Forbidden: operator only." }, { status: 403 });
+      const body = (await request.json().catch(() => ({}))) as {
+        referrerUserId?: unknown; referredUserId?: unknown; tenantId?: unknown;
+      };
+      if (typeof body.referrerUserId !== "string" || typeof body.referredUserId !== "string" || typeof body.tenantId !== "string") {
+        return Response.json({ error: "referrerUserId, referredUserId, and tenantId are required." }, { status: 400 });
+      }
+      const lifecycle = requireLifecycle();
+      if (lifecycle instanceof Response) return lifecycle;
+      const ensured = await ensureLifecycle(lifecycle);
+      if (ensured) return ensured;
+      const attribution = await lifecycle.recordAttribution({
+        referrerUserId: body.referrerUserId,
+        referredUserId: body.referredUserId,
+        tenantId: body.tenantId,
+      });
+      ctx.audit("commercial.referral.attributed", "payments", {
+        referrerUserId: attribution.referrerUserId,
+        referredUserId: attribution.referredUserId,
+        tenantId: attribution.tenantId,
+      });
+      return Response.json({ attribution });
+    } catch (err: any) {
+      return Response.json({ error: err.message || "Failed to record referral attribution" }, { status: 500 });
     }
   }
 
