@@ -213,26 +213,43 @@ function AdminAccessSection({
   requesting: boolean;
   status: string;
   onRequest: () => void;
-  user: PlatformAdminUser;
+  user?: PlatformAdminUser;
 }) {
-  const initials = (user.name || user.login || "?").slice(0, 2).toUpperCase();
+  const login = user?.login?.trim();
+  // Never invent an identity: if the shell has no session user, say so
+  // instead of printing "unknown" / "UN" / "@unknown" (issue #2624 fix-up).
+  if (!login) {
+    return (
+      <div className="etrade-panel-section user-session-section">
+        <div className="section-label-row">
+          <span>Request admin access</span>
+          <small>No signed-in identity</small>
+        </div>
+        <p className="settings-section-desc">
+          The session user is not available on this page, so an access request cannot be attributed.
+          Reload the page after signing in and try again.
+        </p>
+      </div>
+    );
+  }
+  const initials = (user?.name || login).slice(0, 2).toUpperCase();
   return (
     <div className="etrade-panel-section user-session-section">
       <div className="section-label-row">
         <span>Request admin access</span>
-        <small>Signed in as {user.login}</small>
+        <small>Signed in as {login}</small>
       </div>
       <div className="settings-user-card compact">
         <div className="settings-user-meta">
-          {user.avatar ? (
-            <img src={user.avatar} alt={user.login} className="settings-user-avatar" />
+          {user?.avatar ? (
+            <img src={user.avatar} alt={login} className="settings-user-avatar" />
           ) : (
             <div className="settings-user-avatar-placeholder">{initials}</div>
           )}
           <div className="settings-user-details">
-            <span className="settings-user-name">{user.name || user.login}</span>
-            <span className="settings-user-login">@{user.login}</span>
-            {user.providerName && <span className="settings-user-login">Logged in via {user.providerName}</span>}
+            <span className="settings-user-name">{user?.name || login}</span>
+            <span className="settings-user-login">@{login}</span>
+            {user?.providerName && <span className="settings-user-login">Logged in via {user.providerName}</span>}
             <Button type="button" disabled={requesting} onClick={onRequest}>
               Request admin access
             </Button>
@@ -256,7 +273,7 @@ export function PlatformAdminPanel({
   adBannerConfig,
   onUpdateAdBannerConfig,
   onOpenPartnerDeals,
-  user = { login: "unknown" },
+  user,
 }: PlatformAdminPanelProps) {
   const items = platformAdminItems(config);
   const firstItem = items[0];

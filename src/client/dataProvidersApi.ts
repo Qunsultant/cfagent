@@ -166,14 +166,35 @@ export function providerDisplayName(view: DataProviderView): string {
   return typeof name === "string" && name !== "" ? name : view.id;
 }
 
+/**
+ * One request seam. A failed response carries the server's own explanation
+ * when it sent one: the JSON `error`, or — for a body that is not JSON
+ * (an edge/error-boundary page, a truncated response) — the first lines of
+ * the raw text, clamped. A bare `Request failed (500)` told the operator
+ * nothing, which is why the Data Providers surface could not be diagnosed
+ * from the UI (issue #2624 fix-up).
+ */
 async function send<T>(path: string, init?: RequestInit): Promise<T> {
   const resp = await apiFetch(path, init);
-  const data = (await resp.json().catch(() => ({}))) as T & { error?: string };
+  const raw = await resp.text().catch(() => "");
+  let data = {} as T & { error?: string; code?: string };
+  if (raw) {
+    try {
+      data = JSON.parse(raw) as T & { error?: string; code?: string };
+    } catch {
+      data = {} as T & { error?: string; code?: string };
+    }
+  }
   if (!resp.ok) {
-    const err = new Error(data.error || `Request failed (${resp.status})`) as Error & {
-      status?: number;
-    };
+    const bodyHint = !raw
+      ? ""
+      : raw.startsWith("<")
+        ? " (HTML error page from the edge — see Worker logs)"
+        : `: ${raw.replace(/\s+/g, " ").trim().slice(0, 200)}`;
+    const message = data.error || `Request failed (${resp.status})${bodyHint}`;
+    const err = new Error(message) as Error & { status?: number; code?: string };
     err.status = resp.status;
+    if (data.code) err.code = data.code;
     throw err;
   }
   return data;
