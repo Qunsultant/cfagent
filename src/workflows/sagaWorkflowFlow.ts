@@ -15,11 +15,15 @@
  * compensates rail-aware under a NEW outcome code — stripe
  * checkout → policy-gated refund REQUEST (never execution;
  * operator approval still required), everything else → credit.
- * No trading leg yet (S4): an approved journey ends the saga at
- * the gate (S4 continues to Leg 3 from the journey_approved
- * outcome); denied/expired end the saga with no trades, no
- * proposals, and NO credit (Q3 working default: the screen was
- * delivered). No entry route yet (S4).
+ * Leg 3 (S4, sagaTradeLeg.ts): an approved journey continues
+ * to the trading leg — propose via the preview surfaces
+ * (preview-only drafts; the saga never places an order) + a
+ * TradingTradeWorkflow child through the leg port; trade outcomes
+ * pass through as saga outcomes. Denied/expired end the saga
+ * with no trades, no proposals, and NO credit (Q3 working
+ * default: the screen was delivered). Entry route, job surface,
+ * and outcome notices arrive with S4 (sagaEntry.ts,
+ * sagaStatus.ts, sagaOutcomeNotice.ts).
  *
  * S1's FAILURE_SAGA_SCREEN_FAILED code stays valid in the catalog
  * (stored S1-era rows still resolve) but the S3 flow no longer
@@ -93,9 +97,22 @@ import { buildJourneyGatePrompt, parseJourneyDecision } from "./sagaJourneyGate"
 import type { SagaLeg, SagaLegInstanceStatus, SagaLegPort } from "./sagaLegPort";
 import {
   compensateFailedScreen,
+  sagaCompensationDisclosure,
   type SagaCompensationDeps,
 } from "./sagaCompensation";
 import type { WorkflowJobCommand } from "./workflowPorts";
+import {
+  runTradeLeg,
+  type ProposeTradeResult,
+  type SagaTradeFinish,
+  type SagaTradeIntent,
+  type SagaTradeOutcome,
+} from "./sagaTradeLeg";
+import {
+  buildSagaOutcomeNotice,
+  type SagaOutcomeNotice,
+  type SagaOutcomeNoticeReceipts,
+} from "./sagaOutcomeNotice";
 
 /** Minimal structural step surface the flow needs (fakeable in tests). */
 export interface SagaWorkflowStep {
@@ -124,6 +141,12 @@ export interface SagaAuditEvent {
     | "saga.journey_decision_refused"
     | "saga.journey_expired"
     | "saga.journey_prompts_withdrawn"
+    | "saga.trade_proposed"
+    | "saga.trade_settled"
+    | "saga.trade_decided"
+    | "saga.trade_leg_failed"
+    | "saga.proposal_failed"
+    | "saga.outcome_notice"
     | "saga.ended";
   userLogin: string;
   family: string;
@@ -148,6 +171,14 @@ export interface SagaAuditEvent {
   fallbackReason?: string;
   /** How originalPaidAtMs was derived (S3: "leg0_completion" — see sagaCompensation.ts). */
   paidAtMsSource?: string;
+  /** Draft order id (S4 trade leg rows only). */
+  orderId?: string;
+  /** Trade child workflow id (S4 trade leg rows only). */
+  tradeWorkflowId?: string;
+  /** Pre-payment disclosure text (S4: saga.started row only, from sagaCompensationDisclosure). */
+  disclosure?: string;
+  /** Outcome-notice delivery receipts (S4: saga.outcome_notice rows only). */
+  notice?: SagaOutcomeNoticeReceipts;
 }
 
 /**
@@ -176,6 +207,15 @@ export interface SagaParams {
   screenPollDeadlineMs?: number;
   /** Journey wait window override (Q2 open; default 24h). */
   journeyWaitMs?: number;
+  /**
+   * Trade intent (S4, caller-supplied like screenerCommand).
+   * The saga never invents what to trade; a missing intent at
+   * the trading leg ends proposal_failed (defensive pin only —
+   * the entry route requires it).
+   */
+  tradeIntent?: SagaTradeIntent;
+  /** Trade-leg poll deadline override (Q2 open; default 25h). */
+  tradePollDeadlineMs?: number;
 }
 
 export interface SagaDeps {
@@ -210,6 +250,19 @@ export interface SagaDeps {
   issueCredit: SagaCompensationDeps["issueCredit"];
   getRefundPorts: SagaCompensationDeps["getRefundPorts"];
   monetizationEnabled: SagaCompensationDeps["monetizationEnabled"];
+  /**
+   * S4 trading-leg deps. proposeTrade proposes via the preview
+   * surfaces (ok/err for service refusals; throws only for
+   * config failure — see sagaTradeLeg.ts). deliverNotice posts
+   * the terminal-outcome notice through existing channels; the
+   * flow treats a throwing dep as a failed receipt (best-effort
+   * at the flow level too), so a notice failure never fails a
+   * saga whose outcome is already recorded.
+   */
+  proposeTrade: (intent: SagaTradeIntent) => Promise<ProposeTradeResult>;
+  deliverNotice: (
+    notice: SagaOutcomeNotice,
+  ) => Promise<SagaOutcomeNoticeReceipts>;
   nowMs: () => number;
 }
 
@@ -287,7 +340,8 @@ export type SagaWorkflowOutcome =
       runRequestId: string;
       screenerWorkflowId: string;
       rail?: "stripe" | "x402";
-    };
+    }
+  | SagaTradeOutcome;
 
 /** Poll cadence for leg observation (S1 working default, Q2 open). */
 export const SAGA_POLL_INTERVAL_MS_DEFAULT = 30_000;
@@ -300,7 +354,7 @@ export const SAGA_JOURNEY_WAIT_TIMEOUT = "24 hours";
 /** Journey-gate wait window (Q2 open; per-order wait is also 24h). */
 export const SAGA_JOURNEY_WAIT_MS_DEFAULT = 24 * 60 * 60 * 1000;
 
-type LegTerminal =
+export type LegTerminal =
   | { terminal: "complete"; output?: unknown }
   | { terminal: "errored" }
   | { terminal: "terminated" }
@@ -313,9 +367,12 @@ type LegTerminal =
  * Unknown/missing statuses keep polling — only a terminal status
  * or the deadline ends the loop. A missing binding throws
  * immediately (the port fails loud, never burns a deadline).
+ * The deps are structural (legPort + nowMs only) so the trading
+ * leg (S4, sagaTradeLeg.ts) reuses this same poll instead of a
+ * second copy of the loop.
  */
-async function pollLegToTerminal(
-  deps: SagaDeps,
+export async function pollLegToTerminal(
+  deps: { legPort: SagaLegPort; nowMs: () => number },
   step: SagaWorkflowStep,
   leg: SagaLeg,
   workflowId: string,
@@ -399,8 +456,15 @@ export async function runSagaWorkflowFlow(
 
   // Every audit write is a durable step whose failure propagates:
   // the saga never completes with an unrecorded transition.
+  // The started row carries the pre-payment disclosure (S4: the
+  // same single source the entry route returns — one function,
+  // two surfaces, no copy drift).
   await step.do("record-audit-saga-started", () =>
-    deps.recordAudit({ ...baseAudit, type: "saga.started" }),
+    deps.recordAudit({
+      ...baseAudit,
+      type: "saga.started",
+      disclosure: sagaCompensationDisclosure(params.rail),
+    }),
   );
 
   const endSaga = async (
@@ -413,6 +477,37 @@ export async function runSagaWorkflowFlow(
     await step.do(`record-audit-${outcome.status}`, () =>
       deps.recordAudit({ ...baseAudit, ...terminalEvent }),
     );
+    // S4 outcome notice: every terminal outcome is noticed
+    // through existing channels AFTER its terminal audit row and
+    // BEFORE saga.ended. A throwing dep degrades to a failed
+    // receipt here (flow-level best-effort): the notice row is
+    // the visible record, and a notice failure never fails a
+    // saga whose outcome is already recorded.
+    const notice = buildSagaOutcomeNotice({
+      sagaId: params.sagaId,
+      runRequestId: params.runRequestId,
+      outcomeCode: outcome.code,
+      statusUrl: `/api/saga/${params.sagaId}/status`,
+    });
+    let noticeReceipts: SagaOutcomeNoticeReceipts;
+    try {
+      noticeReceipts = await step.do("deliver-outcome-notice", () =>
+        deps.deliverNotice(notice),
+      );
+    } catch (err) {
+      noticeReceipts = {
+        slack: "failed",
+        slackDetail: `Outcome notice delivery threw: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+    await step.do("record-audit-outcome-notice", () =>
+      deps.recordAudit({
+        ...baseAudit,
+        type: "saga.outcome_notice",
+        outcomeCode: outcome.code,
+        notice: noticeReceipts,
+      }),
+    );
     await step.do("record-audit-saga-ended", () =>
       deps.recordAudit({
         ...baseAudit,
@@ -420,6 +515,15 @@ export async function runSagaWorkflowFlow(
         outcomeCode: outcome.code,
         ...("screenerWorkflowId" in outcome
           ? { screenerWorkflowId: outcome.screenerWorkflowId }
+          : {}),
+        ...("decidingSurface" in outcome
+          ? { decidingSurface: outcome.decidingSurface }
+          : {}),
+        ...("orderId" in outcome && outcome.orderId
+          ? { orderId: outcome.orderId }
+          : {}),
+        ...("tradeWorkflowId" in outcome && outcome.tradeWorkflowId
+          ? { tradeWorkflowId: outcome.tradeWorkflowId }
           : {}),
         ...("reason" in outcome ? { reason: outcome.reason } : {}),
         ...("compensationForm" in outcome
@@ -712,10 +816,11 @@ export async function runSagaWorkflowFlow(
  * default, G-APPROVER open): a non-owner or malformed answer is
  * audited as refused and the gate keeps waiting. No valid owner
  * decision within the window (wait throw, or the flow clock
- * passing the deadline) → expired. Approved → journey_approved
- * (S2 ends at the gate; S4 continues to Leg 3 from this
- * outcome — no proposal is started here). Denied → journey_denied
- * (no trades, no proposals). Withdrawal runs on BOTH decide and
+ * passing the deadline) → expired. Approved → Leg 3 (S4: the
+ * decided row is recorded, prompts withdrawn, and the trading
+ * leg runs — journey_approved is a milestone, not a terminal).
+ * Denied → journey_denied (no trades, no proposals).
+ * Withdrawal runs on BOTH decide and
  * expire paths, AFTER the decision/expiry is recorded: a prompt
  * that outlives its decision is superseded-safe, while a
  * decision without its record would not be.
@@ -854,22 +959,52 @@ async function runJourneyGate(
     return result;
   }
 
-  const outcome: SagaWorkflowOutcome = {
-    status: "journey_approved",
-    code: "SUCCESS_SAGA_JOURNEY_APPROVED",
-    sagaId: params.sagaId,
-    runRequestId: params.runRequestId,
-    screenerWorkflowId,
-    decidingSurface: decision.surface,
-    ...(params.rail ? { rail: params.rail } : {}),
-  };
-  const result = await endSaga(outcome, {
-    type: "saga.journey_decided",
-    decidingSurface: decision.surface,
-    decision: "approved",
-    screenerWorkflowId,
-    outcomeCode: "SUCCESS_SAGA_JOURNEY_APPROVED",
-  });
+  // S4: approval is a MILESTONE, not a terminal. The decided row
+  // is recorded (not via endSaga — the saga does not end here),
+  // prompts are withdrawn, and the flow continues to Leg 3. The
+  // saga ends at the TRADE outcome; its saga.ended row carries
+  // the trade code plus decidingSurface (see endSaga).
+  // SUCCESS_SAGA_JOURNEY_APPROVED stays valid in the catalog
+  // (stored S2-era rows still resolve) but the S4 flow no longer
+  // returns it as a terminal outcome.
+  await step.do("record-audit-journey-decided-approved", () =>
+    deps.recordAudit({
+      ...baseAudit,
+      type: "saga.journey_decided",
+      decidingSurface: decision.surface,
+      decision: "approved",
+      screenerWorkflowId,
+      outcomeCode: "SUCCESS_SAGA_JOURNEY_APPROVED",
+    }),
+  );
   await withdrawAndAudit();
-  return result;
+  // endSaga returns its input verbatim, so the wrapper cast is
+  // sound: the leg's finish contract is the trade outcome it was
+  // handed, and endSaga hands exactly that back.
+  const finishTrade: SagaTradeFinish = async (outcome, terminalEvent) =>
+    (await endSaga(outcome, terminalEvent)) as SagaTradeOutcome;
+  return runTradeLeg(
+    {
+      sagaId: params.sagaId,
+      runRequestId: params.runRequestId,
+      userLogin: params.userLogin,
+      tenantId: params.tenantId,
+      family: params.family,
+      ...(params.rail ? { rail: params.rail } : {}),
+      tradeIntent: params.tradeIntent,
+      screenerWorkflowId,
+      decidingSurface: decision.surface,
+      tradePollDeadlineMs: params.tradePollDeadlineMs,
+      pollIntervalMs: params.pollIntervalMs ?? SAGA_POLL_INTERVAL_MS_DEFAULT,
+    },
+    {
+      legPort: deps.legPort,
+      recordAudit: deps.recordAudit,
+      proposeTrade: deps.proposeTrade,
+      nowMs: deps.nowMs,
+    },
+    step,
+    baseAudit,
+    finishTrade,
+  );
 }

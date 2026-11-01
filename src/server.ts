@@ -540,6 +540,34 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
       if (sagaJourneyResponse) return sagaJourneyResponse;
     }
 
+    // Issue #2041 S4: saga entry + status routes. Same placement
+    // as the journey branch (before the feature gate): the entry
+    // route enforces its own monetization flag (403 when OFF),
+    // and the status route is deliberately NOT flag-gated (a read
+    // path for one's own sagas must survive a flag flip).
+    if (path === "/api/saga/start" || /^\/api\/saga\/[^/]+\/status$/.test(path)) {
+      const { handleSagaEntryRoutes } = await import("./agents/routes/sagaEntry");
+      const { handleSagaStatusRoutes } = await import("./agents/routes/sagaStatus");
+      const session = await requireAuth(request, env).catch(() => null);
+      const login = session?.githubLogin ?? null;
+      const sagaEntryResponse = await handleSagaEntryRoutes(
+        request,
+        url,
+        path,
+        env,
+        login,
+      );
+      if (sagaEntryResponse) return sagaEntryResponse;
+      const sagaStatusResponse = await handleSagaStatusRoutes(
+        request,
+        url,
+        path,
+        env,
+        login,
+      );
+      if (sagaStatusResponse) return sagaStatusResponse;
+    }
+
     // Issue #1806: Server-side feature flag enforcement (default-closed, fail-closed).
     // An endpoint for a disabled feature is completely unreachable (HTTP 404 FEATURE_DISABLED).
     const gatedFeature = matchFeatureForRoute(path);

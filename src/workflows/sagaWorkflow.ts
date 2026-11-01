@@ -16,17 +16,25 @@
  *
  * S2 scope: Leg 0 (payment child) + Leg 1 (observe the paid
  * screen to terminal) + Leg 2 (the journey gate after a completed
- * screen). No trading leg yet (S4): an approved journey ends the
- * saga at the gate. No entry route (S4). No route calls this
- * workflow yet by default: the entry route is S4, and a route
- * must NOT start a saga for free when monetization is on.
+ * screen). S4 adds Leg 3 (the trading leg: proposeTrade via the
+ * TRADING_AGENT stub's typed-RPC door + the trade child through
+ * the leg port) + the outcome-notice dep (deliverNotice via
+ * postSlackSagaOutcome, best-effort). The entry route is S4
+ * (sagaEntry.ts); a route must NOT start a saga for free when
+ * monetization is on.
  *
  * S3 adds the compensation deps (issueCredit, getRefundPorts,
  * monetizationEnabled) — see sagaCompensation.ts. The credit dep
  * mirrors the payment workflow's issueFailureCredit exactly
  * (endpoint-mediated DO ledger row, fail-loud, + best-effort D1
  * claim); like S1's audit forwarder it carries the same live-proof
- * caveat (unit-pinned; live proof is owner-side).
+ * caveat (unit-pinned; live proof is owner-side). The S4 deps
+ * carry the same caveat: the proposeTrade RPC shape mirrors the
+ * trade workflow's settleThroughApprovalDoor addressing, and
+ * the notice post mirrors postSlackJourneyPrompt — both are
+ * endpoint/RPC-mediated, throwing behavior unit-pinned only,
+ * live proof pending an owner run; the workflow is uncalled in
+ * prod until the entry route is reviewed, so no prod impact.
  *
  * S2 defaults (not rulings): goal-only first family (Q5 default);
  * mainnet excluded — the saga never reads MONETIZATION_NETWORK
@@ -78,6 +86,12 @@ import {
   type JourneyGatePrompt,
   type JourneyPromptReceipts,
 } from "./sagaJourneyGate";
+import {
+  postSlackSagaOutcome,
+  type SagaOutcomeNotice,
+} from "./sagaOutcomeNotice";
+import { tradingAgentName } from "../agents/trading-agent";
+import type { SagaTradeIntent } from "./sagaTradeLeg";
 import {
   runSagaWorkflowFlow,
   type SagaAuditEvent,
@@ -152,6 +166,10 @@ async function recordSagaAudit(env: Env, event: SagaAuditEvent): Promise<void> {
             ...(event.decidingSurface ? { decidingSurface: event.decidingSurface } : {}),
             ...(event.decision ? { decision: event.decision } : {}),
             ...(event.withdraw ? { withdraw: event.withdraw } : {}),
+            ...(event.orderId ? { orderId: event.orderId } : {}),
+            ...(event.tradeWorkflowId ? { tradeWorkflowId: event.tradeWorkflowId } : {}),
+            ...(event.disclosure ? { disclosure: event.disclosure } : {}),
+            ...(event.notice ? { notice: event.notice } : {}),
           },
         }),
       }),
@@ -304,6 +322,99 @@ export class CrossDomainSagaWorkflow extends ThinkWorkflow<any, SagaParams, Defa
       // path (credit fallback), never the saga itself.
       monetizationEnabled: () =>
         createFeatureFlagPort(this.env as Env).isEnabled("monetization"),
+      // S4 trading-leg proposal (see sagaTradeLeg.ts): the
+      // typed-RPC door, same instance addressing as the trade
+      // workflow's settleThroughApprovalDoor, so the draft lands
+      // in the instance store the settle door threads. A missing
+      // TRADING_AGENT binding THROWS (config failure, retried);
+      // a service refusal returns ok:false with the error's
+      // stable token (fallback "proposal_failed"). The service
+      // result is preview-only by construction: trade_stock /
+      // trade_options return {status: "pending_approval",
+      // proposal: draft} and NEVER place an order.
+      proposeTrade: async (intent: SagaTradeIntent) => {
+        const ns = (this.env as Env).TRADING_AGENT;
+        if (!ns) {
+          throw new Error(
+            "Saga trade proposal unavailable: TRADING_AGENT binding is not bound.",
+          );
+        }
+        const stub = ns.get(
+          ns.idFromName(
+            tradingAgentName(params.userLogin, getServiceUserLogin(this.env as Env)),
+          ),
+        ) as unknown as {
+          executeService: (call: {
+            serviceId: string;
+            userLogin: string;
+            input: Record<string, unknown>;
+          }) => Promise<unknown>;
+        };
+        const orderTypeMap: Record<string, string> = {
+          market: "MARKET",
+          limit: "LIMIT",
+          stop: "STOP",
+          stop_limit: "STOP_LIMIT",
+        };
+        try {
+          const result = (await stub.executeService({
+            serviceId:
+              intent.kind === "options" ? "options_trading" : "stock_trading",
+            userLogin: params.userLogin,
+            input: {
+              ...(intent.provider ? { provider: intent.provider } : {}),
+              userLogin: params.userLogin,
+              symbol: intent.symbol,
+              action: intent.action === "sell" ? "SELL" : "BUY",
+              quantity: intent.quantity,
+              ...(intent.orderType && orderTypeMap[intent.orderType]
+                ? { orderType: orderTypeMap[intent.orderType] }
+                : {}),
+              ...(intent.limitPrice !== undefined
+                ? { limitPrice: intent.limitPrice }
+                : {}),
+              ...(intent.stopPrice !== undefined
+                ? { stopPrice: intent.stopPrice }
+                : {}),
+              ...(intent.strategyNetDebit !== undefined
+                ? { strategyNetDebit: intent.strategyNetDebit }
+                : {}),
+              ...(intent.optionLegs ? { optionLegs: intent.optionLegs } : {}),
+            },
+          })) as {
+            status?: unknown;
+            proposal?: { orderId?: unknown };
+          } | null;
+          if (
+            result?.status === "pending_approval" &&
+            typeof result.proposal?.orderId === "string"
+          ) {
+            return { ok: true as const, orderId: result.proposal.orderId };
+          }
+          return { ok: false as const, reason: "proposal_failed" };
+        } catch (err) {
+          const code = (err as { code?: unknown })?.code;
+          return {
+            ok: false as const,
+            reason: typeof code === "string" && code ? code : "proposal_failed",
+          };
+        }
+      },
+      // S4 outcome notice (see sagaOutcomeNotice.ts): Slack post
+      // mirroring postSlackJourneyPrompt, best-effort at the
+      // adapter level too (a throw degrades to a failed receipt;
+      // the flow also guards, so a notice failure never fails
+      // the saga).
+      deliverNotice: async (notice: SagaOutcomeNotice) => {
+        try {
+          return await postSlackSagaOutcome(notice, this.env as Env);
+        } catch (err) {
+          return {
+            slack: "failed" as const,
+            slackDetail: `Outcome notice delivery threw: ${err instanceof Error ? err.message : String(err)}`,
+          };
+        }
+      },
       nowMs: () => Date.now(),
     };
     return runSagaWorkflowFlow(params, deps, adaptStep(step));
