@@ -492,6 +492,22 @@ export const agentJournalEntries = sqliteTable("agent_journal_entries", {
  * (DO mas_transactions), native rows live in D1, never in
  * mas_transactions, so BudgetGuard cannot see them.
  */
+/**
+ * Durable payment-proof redemptions (#2548, from the #2013
+ * review). One row per redemption key (claim id, x402
+ * nonce+payer, or proof-payload hash); the PRIMARY KEY is the
+ * replay backstop — the first run to record a key owns the
+ * proof. This schema MAPS the table; DDL authority lives in
+ * migration 0029 (src/data/migrationRunner.ts).
+ */
+export const agentPaymentProofRedemptions = sqliteTable("agent_payment_proof_redemptions", {
+  redemptionKey: text("redemption_key").primaryKey(),
+  runRequestId: text("run_request_id").notNull(),
+  rail: text("rail").notNull(),
+  payer: text("payer"),
+  redeemedAtMs: integer("redeemed_at_ms").notNull(),
+});
+
 export const agentNativeLedgerRows = sqliteTable("agent_native_ledger_rows", {
   id: text("id").primaryKey(),
   sessionId: text("session_id").notNull(),

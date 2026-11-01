@@ -93,6 +93,10 @@ import {
   ensurePriceCatalogueSchema,
 } from "../data/createPriceCataloguePorts";
 import {
+  createProofRedemptionAdapter,
+  ensureProofRedemptionSchema,
+} from "../data/createProofRedemptionPorts";
+import {
   createJournalAdapter,
   ensureJournalSchema,
 } from "../data/createJournalPorts";
@@ -188,6 +192,16 @@ export class PaymentWorkflow extends ThinkWorkflow<
     if (priceCatalogue) {
       await ensurePriceCatalogueSchema(priceCatalogue.db);
     }
+    // #2548: the durable proof-redemption store, wired from the
+    // same AGENT_DB binding. This gate instance is fresh for this
+    // run (and confirm re-builds it after a durable resume), so
+    // the store — not instance memory — is what makes a proof
+    // redeem exactly once. Unbound AGENT_DB = no store, and the
+    // gate keeps its in-memory guard only.
+    const proofRedemptions = createProofRedemptionAdapter(this.env as { AGENT_DB?: unknown });
+    if (proofRedemptions) {
+      await ensureProofRedemptionSchema(proofRedemptions.db);
+    }
     const gate = new NativeMonetizationGate(
       {
         // Flagship feature flag "monetization" (#2043): OFF = free
@@ -199,6 +213,7 @@ export class PaymentWorkflow extends ThinkWorkflow<
           { userId: p.userId, userLogin: p.userId },
         ),
         priceCatalogue,
+        proofRedemptions,
         checkout: checkoutPorts,
       },
     );

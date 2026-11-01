@@ -39,9 +39,14 @@
  *   (src/services/x402Verifier.ts) is the follow-up hardening.
  * - Idempotent on run-request id: the in-memory byRun/byClaim
  *   maps (already-paid short-circuit, claim/session/proof replay
- *   rejection across runs) mirror the cfpay gate; durable dedupe
- *   still lives in the ledger endpoint and the subscription replay
- *   guard, unchanged by this slice.
+ *   rejection across runs) mirror the cfpay gate. Since #2548 the
+ *   replay rejection is ALSO durable: when a proof-redemption
+ *   store is wired (the workflow wires one from AGENT_DB),
+ *   confirm checks and records redemption keyed by claim id,
+ *   x402 nonce+payer, and proof-payload hash, so a proof redeems
+ *   exactly once across gate instances and restarts; the ledger
+ *   endpoint dedupe and the subscription replay guard are
+ *   unchanged.
  * - Fail closed: no checkout ports, no port for the requested rail,
  *   no catalogue, no stored price, or an invalid stored value all
  *   throw/refuse — never a free run, never a guessed price. The
@@ -57,6 +62,13 @@
  *   table at all.
  */
 import type { PriceCatalogue, PriceFamily } from "../data/priceCataloguePorts";
+import {
+  claimRedemptionKey,
+  x402NonceRedemptionKey,
+  x402ProofRedemptionKey,
+  type ProofRedemptionRecord,
+  type ProofRedemptionStore,
+} from "../data/proofRedemptionPorts";
 import type { CheckoutPorts, CheckoutRail } from "./checkoutPorts";
 
 export type NativeScreenerFamily = PriceFamily;
@@ -81,6 +93,16 @@ export interface NativeMonetizationConfig {
    * fallback price anywhere in this module.
    */
   priceCatalogue?: PriceCatalogue | null;
+  /**
+   * The durable proof-redemption store (#2548). When wired,
+   * confirmPaid checks and records proof redemption against it
+   * — a proof then redeems exactly once across gate instances
+   * and restarts, not just within this instance's in-memory
+   * maps. The payment workflow wires it from AGENT_DB. When
+   * absent, only the in-memory guard applies (the pre-#2548
+   * behavior, kept as the floor, not the ceiling).
+   */
+  proofRedemptions?: ProofRedemptionStore | null;
   /**
    * The checkout ports bundle, or null when nothing is configured.
    * Null means: no checkout can be minted and no payment can be
@@ -274,6 +296,18 @@ export class NativeMonetizationGate {
       const prior = this.byClaim.get(key.toLowerCase());
       if (prior && prior !== run.id) throw new Error(`This payment was already redeemed for run ${prior}`);
     }
+    // Durable replay guard (#2548): the same claim keys checked
+    // against the redemption store, so the guard survives this
+    // instance — a fresh gate after a durable resume, or another
+    // run's gate entirely, sees the redemption the first gate
+    // recorded. Store errors propagate: a money path does not
+    // confirm against an unreadable redemption record.
+    await this.assertNotDurablyRedeemed(
+      [proof.claimTxHash, proof.paymentIntentId, proof.sessionId]
+        .filter((k): k is string => typeof k === "string" && k.length > 0)
+        .map((k) => claimRedemptionKey(k)),
+      run.id,
+    );
     const rail: CheckoutRail | undefined =
       existing?.rail ?? (proof.sessionId ? "stripe" : proof.paymentProof ? "x402" : undefined);
     if (!rail) {
@@ -330,6 +364,14 @@ export class NativeMonetizationGate {
       for (const key of [sessionId, proof.paymentIntentId, evidence.paymentIntentId, proof.claimTxHash]) {
         if (key) this.byClaim.set(key.toLowerCase(), run.id);
       }
+      await this.recordDurableRedemption(
+        [sessionId, proof.paymentIntentId, evidence.paymentIntentId, proof.claimTxHash]
+          .filter((k): k is string => typeof k === "string" && k.length > 0)
+          .map((k) => claimRedemptionKey(k)),
+        run.id,
+        "stripe",
+        run.userId,
+      );
       return { allowed: true, status: "paid", runRequestId: run.id, priceUSD: expectedPrice, paidVia: "stripe_checkout" };
     }
 
@@ -351,6 +393,17 @@ export class NativeMonetizationGate {
     if (existing?.challengeNonce && verdict.nonce && existing.challengeNonce !== verdict.nonce) {
       return { allowed: false, status: "payment_required", httpStatus: 402, runRequestId: run.id, priceUSD: existing.priceUSD, family: existing.family };
     }
+    // Stateless nonce binding (#2548): on the durable-resume path
+    // there is no `existing` row and no minted-challenge nonce in
+    // memory, so the in-memory check above cannot fire. The
+    // binding is restored durably instead: the verdict's
+    // nonce+payer and the proof payload itself are redemption
+    // keys — if either was already redeemed by another run, this
+    // proof is a replay, whatever gate instance recorded it.
+    const x402Keys: string[] = [];
+    if (verdict.nonce && verdict.payer) x402Keys.push(x402NonceRedemptionKey(verdict.nonce, verdict.payer));
+    x402Keys.push(await x402ProofRedemptionKey(proof.paymentProof));
+    await this.assertNotDurablyRedeemed(x402Keys, run.id);
     this.byRun.set(run.id, {
       ...(existing as NativeLedgerRow),
       runRequestId: run.id,
@@ -363,6 +416,55 @@ export class NativeMonetizationGate {
     for (const key of [proof.claimTxHash, verdict.nonce ? `x402:${verdict.nonce}:${verdict.payer}` : undefined]) {
       if (key) this.byClaim.set(key.toLowerCase(), run.id);
     }
+    await this.recordDurableRedemption(
+      [
+        ...x402Keys,
+        ...(proof.claimTxHash ? [claimRedemptionKey(proof.claimTxHash)] : []),
+      ],
+      run.id,
+      "x402",
+      verdict.payer,
+    );
     return { allowed: true, status: "paid", runRequestId: run.id, priceUSD: expectedPrice, paidVia: "x402" };
+  }
+
+  /**
+   * #2548: throw if any key was durably redeemed by a DIFFERENT
+   * run. A key redeemed by this same run is idempotency, not
+   * replay (a resumed workflow re-confirming its own payment).
+   * No store wired = no durable state to consult (in-memory
+   * guard only).
+   */
+  private async assertNotDurablyRedeemed(keys: string[], runId: string): Promise<void> {
+    const store = this.config.proofRedemptions;
+    if (!store || keys.length === 0) return;
+    for (const key of keys) {
+      const record: ProofRedemptionRecord | null = await store.findRedemption(key);
+      if (record && record.runRequestId !== runId) {
+        throw new Error(`This payment was already redeemed for run ${record.runRequestId}`);
+      }
+    }
+  }
+
+  /**
+   * #2548: record this run's redemption of every key. If a
+   * racing confirm from another run recorded a key first, the
+   * store returns that run's record and this confirm throws —
+   * the proof is spent, and this run must not proceed as paid.
+   */
+  private async recordDurableRedemption(
+    keys: string[],
+    runId: string,
+    rail: "stripe" | "x402",
+    payer: string | null,
+  ): Promise<void> {
+    const store = this.config.proofRedemptions;
+    if (!store) return;
+    for (const key of keys) {
+      const { record } = await store.recordRedemption({ redemptionKey: key, runRequestId: runId, rail, payer });
+      if (record.runRequestId !== runId) {
+        throw new Error(`This payment was already redeemed for run ${record.runRequestId}`);
+      }
+    }
   }
 }
