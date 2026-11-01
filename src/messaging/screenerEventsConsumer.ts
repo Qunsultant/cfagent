@@ -41,6 +41,12 @@ import {
   type MessageHandler,
   type QueueConsumerConfig,
 } from "./messagingPorts";
+import {
+  consoleDeadLetterSink,
+  createDeadLetterRecord,
+  type DeadLetterSink,
+} from "./deadLetter";
+import { isLoginShaped } from "../security/serviceIdentity";
 
 /**
  * Report §3.2 — the screener-events consumer config, pinned
@@ -123,23 +129,40 @@ export interface ScreenerEventsWorkHandlerDeps {
     runId: string,
     unitId: string
   ) => Promise<"dispatched" | "denied">;
+  /**
+   * Issue #1764 — dead-letter sink for terminal drops. Defaults
+   * to the console sink (one parseable `[dead-letter]` line per
+   * drop); tests inject a capturing sink. A drop still acks —
+   * the sink only adds the auditable record, it never changes
+   * the disposition.
+   */
+  onDeadLetter?: DeadLetterSink;
 }
 
 /**
  * The QueuePort work handler for screener-events envelopes.
- * Unknown envelope types are dropped with a warning (never
- * retried: no handler could ever process them). A denied
- * dispatch is likewise a drop (a re-dispatch would deny again,
- * and options analysis is time-sensitive — the #2331 rule).
+ * Unknown envelope types are dropped with a dead-letter record
+ * (never retried: no handler could ever process them). A denied
+ * dispatch is likewise a drop with a dead-letter record (a
+ * re-dispatch would deny again, and options analysis is
+ * time-sensitive — the #2331 rule).
  */
 export function createScreenerEventsWorkHandler(
   deps: ScreenerEventsWorkHandlerDeps
 ): MessageHandler {
+  const sink = deps.onDeadLetter ?? consoleDeadLetterSink;
   return async (envelope): Promise<ConsumeOutcome> => {
     const work = extractScreenerEventsWork(envelope);
     if (!work) {
-      console.warn(
-        `[messaging] screener-events: no handler for envelope type "${envelope.type}" (run ${envelope.jobid ?? envelope.subject ?? envelope.id}) — dropping; redelivery would loop.`
+      sink.record(
+        createDeadLetterRecord({
+          queue: "screener-events",
+          reason: "no_handler",
+          messageId: envelope.id,
+          runId: envelope.jobid ?? envelope.subject ?? envelope.id,
+          unitId: envelope.shardid ?? envelope.stage ?? envelope.id,
+          detail: `No handler for envelope type "${envelope.type}" — dropping; redelivery would loop (#1764).`,
+        })
       );
       return "drop";
     }
@@ -148,6 +171,24 @@ export function createScreenerEventsWorkHandler(
       work.runId,
       work.unitId
     );
-    return outcome === "denied" ? "drop" : "processed";
+    if (outcome === "denied") {
+      const actorLogin = isLoginShaped(work.payload.userLogin)
+        ? (work.payload.userLogin as string)
+        : undefined;
+      sink.record(
+        createDeadLetterRecord({
+          queue: "screener-events",
+          reason: "denied",
+          messageId: envelope.id,
+          runId: work.runId,
+          unitId: work.unitId,
+          actorLogin,
+          detail:
+            "options_analysis dispatch denied by the identity rules — dropping; a re-dispatch would deny again (#2331 slice 2, #1764).",
+        })
+      );
+      return "drop";
+    }
+    return "processed";
   };
 }

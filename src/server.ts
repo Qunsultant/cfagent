@@ -6,6 +6,11 @@ import {
   setSessionCookie,
 } from "./session";
 import { getServiceUserLogin, isLoginShaped, SHARED_ORCHESTRATOR_INSTANCE } from "./security/serviceIdentity";
+import { backgroundDispatchHeaders } from "./security/backgroundAttribution";
+import {
+  createDeadLetterRecord,
+  logDeadLetter,
+} from "./messaging/deadLetter";
 import { getSessionCached, getSessionCachedFetchedAt, invalidateSessionCache } from "./security/sessionCache";
 import { resolveIdleTimeoutMs } from "./security/sessionPolicy";
 import { deleteSession, getSession, listSessionFamilyEntries, sessionStore, updateSession, wiredAccessRequestStore, wiredMembershipStore } from "./security/session";
@@ -4198,7 +4203,11 @@ async function dispatchOptionsAnalysisQueueWork(opts: {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-user-login": userLogin,
+        // Issue #1764 — background attribution: the unattended
+        // dispatch carries x-actor-kind: background alongside
+        // x-user-login, so downstream audit no longer has to know
+        // the service login value to tell background from user work.
+        ...backgroundDispatchHeaders(userLogin),
       },
       body: JSON.stringify(payload),
     })
@@ -4277,7 +4286,7 @@ export default {
       const researchPromise = agent.fetch(
         new Request("https://agent.internal/research/scheduled-tick", {
           method: "POST",
-          headers: { "x-user-login": userLogin },
+          headers: { ...backgroundDispatchHeaders(userLogin) },
         })
       );
       if (ctx?.waitUntil) ctx.waitUntil(researchPromise);
@@ -4289,7 +4298,7 @@ export default {
       const reflectionPromise = agent.fetch(
         new Request("https://agent.internal/reflection/run", {
           method: "POST",
-          headers: { "x-user-login": userLogin },
+          headers: { ...backgroundDispatchHeaders(userLogin) },
         })
       );
       if (ctx?.waitUntil) ctx.waitUntil(reflectionPromise);
@@ -4302,7 +4311,7 @@ export default {
       const weightsPromise = agent.fetch(
         new Request("https://agent.internal/adaptation/weights/run", {
           method: "POST",
-          headers: { "x-user-login": userLogin },
+          headers: { ...backgroundDispatchHeaders(userLogin) },
         })
       );
       if (ctx?.waitUntil) ctx.waitUntil(weightsPromise);
@@ -4316,7 +4325,7 @@ export default {
       const corpusSyncPromise = agent.fetch(
         new Request("https://agent.internal/knowledge/corpus-sync", {
           method: "POST",
-          headers: { "x-user-login": userLogin },
+          headers: { ...backgroundDispatchHeaders(userLogin) },
         })
       );
       if (ctx?.waitUntil) ctx.waitUntil(corpusSyncPromise);
@@ -4347,7 +4356,7 @@ export default {
       const retentionPromise = agent.fetch(
         new Request("https://agent.internal/schedules/trigger-retention", {
           method: "POST",
-          headers: { "x-user-login": userLogin },
+          headers: { ...backgroundDispatchHeaders(userLogin) },
         })
       );
       if (ctx?.waitUntil) ctx.waitUntil(retentionPromise);
@@ -4442,6 +4451,10 @@ export default {
           runId,
           unitId,
         });
+      // Issue #1764 — the work handler's terminal drops (no
+      // handler, denied dispatch) go through its default console
+      // dead-letter sink: one parseable `[dead-letter]` record
+      // per drop, ack/retry semantics unchanged.
       const workHandler = createScreenerEventsWorkHandler({
         dispatchOptionsAnalysis: (payload, runId, unitId) =>
           dispatchWork(payload, true, runId, unitId),
@@ -4454,15 +4467,35 @@ export default {
           } else if (msg.body?.taskType === "options_analysis") {
             // @deprecated Legacy taskType queue shape — superseded by CloudEvents envelope work items routed through the QueuePort screener-events consumer (src/messaging/screenerEventsConsumer.ts). Kept as a thin wrapper; do not add new producers.
             try {
-              await dispatchWork(msg.body?.payload, false);
+              const legacyOutcome = await dispatchWork(msg.body?.payload, false);
+              if (legacyOutcome === "denied") {
+                // Issue #1764 — a denied legacy message is dropped
+                // (acked below), now with a structured dead-letter
+                // record instead of only the dispatch warning.
+                logDeadLetter(
+                  createDeadLetterRecord({
+                    queue: batch.queue,
+                    reason: "denied",
+                    detail:
+                      "Legacy options_analysis dispatch denied by the identity rules — dropping; a re-dispatch would deny again (#1764).",
+                  })
+                );
+              }
               if (typeof msg.ack === "function") msg.ack();
             } catch (queueErr) {
               console.warn("[Queue Handler] Failed to process queue message:", queueErr);
               if (typeof msg.retry === "function") msg.retry();
             }
           } else {
-            console.warn(
-              "[messaging] Dropping undecodable screener-events queue message (no valid envelope, no legacy taskType)."
+            // Issue #1764 — acked as before (undecodable bytes can
+            // never decode), now with a structured dead-letter record.
+            logDeadLetter(
+              createDeadLetterRecord({
+                queue: batch.queue,
+                reason: "undecodable",
+                detail:
+                  "Dropping undecodable screener-events queue message (no valid envelope, no legacy taskType) (#1764).",
+              })
             );
             if (typeof msg.ack === "function") msg.ack();
           }
@@ -4513,7 +4546,7 @@ export default {
           const body = msg.body;
           if (body?.taskType === "options_analysis") {
             // @deprecated Legacy taskType queue shape — superseded by CloudEvents envelope work items routed through the QueuePort screener-events consumer (src/messaging/screenerEventsConsumer.ts). Kept as a thin wrapper; do not add new producers.
-            await dispatchOptionsAnalysisQueueWork({
+            const fallthroughOutcome = await dispatchOptionsAnalysisQueueWork({
               env,
               ctx,
               agent,
@@ -4531,6 +4564,19 @@ export default {
               },
               awaitDispatch: false,
             });
+            if (fallthroughOutcome === "denied") {
+              // Issue #1764 — dropped (acked below) with a
+              // structured dead-letter record, as in the
+              // screener-events legacy branch above.
+              logDeadLetter(
+                createDeadLetterRecord({
+                  queue: batch.queue,
+                  reason: "denied",
+                  detail:
+                    "Legacy options_analysis dispatch denied by the identity rules — dropping; a re-dispatch would deny again (#1764).",
+                })
+              );
+            }
           }
           if (typeof msg.ack === "function") msg.ack();
         } catch (queueErr) {

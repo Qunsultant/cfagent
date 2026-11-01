@@ -51,6 +51,7 @@
  */
 
 import { createKvMembershipStore, grantMembership } from "../../security/iaaaMembershipStore";
+import { getStoredTokens } from "../../security/etradeOAuth";
 import { isPlatformAdmin } from "../../security/iaaaAdminOverview";
 import { lookupInternalUserIdByLogin } from "../../security/iaaaMigration";
 import {
@@ -81,6 +82,14 @@ export interface ServiceUserRouteContext {
   serviceLogin?: string | null;
   /** Test seam: use this tenant instead of resolveIaaaTenant(env). */
   defaultTenantId?: string;
+  /**
+   * Issue #1764 — test seam for the brokerage-token presence
+   * check in the provisioning checklist. When absent, the route
+   * reads presence (never a value) via getStoredTokens and
+   * reports "unknown" if that read fails, so a store outage is
+   * never reported as "absent" or "present".
+   */
+  brokerageTokenPresent?: (serviceLogin: string) => Promise<boolean | null>;
 }
 
 type Tier = "platform" | "tenant";
@@ -269,6 +278,115 @@ async function revokeServiceUser(
   });
 }
 
+/**
+ * Issue #1764 — the service-identity provisioning completeness
+ * checklist (F-33). Provisioning is an owner step, not code, so
+ * the route cannot complete it — but it can stop it being
+ * silent: every item is reported pass/fail/unknown, and every
+ * non-pass item names the owner action that closes it. The
+ * pre-existing status fields above are unchanged; this object
+ * is purely additive. A binding counts as live only when the
+ * membership is unrevoked AND its platform member binding is
+ * unexpired (an expired binding previously read as provisioned
+ * in the platform field's presence check). The token item is
+ * presence only: the token value is never read into the
+ * response, and a failed store read reports "unknown", never a
+ * guessed pass or fail.
+ */
+export type ProvisioningCheckStatus = "pass" | "fail" | "unknown";
+
+export interface ProvisioningChecklistItem {
+  id: string;
+  label: string;
+  status: ProvisioningCheckStatus;
+  detail?: string;
+}
+
+export interface ProvisioningChecklist {
+  complete: boolean;
+  checklist: ProvisioningChecklistItem[];
+  ownerActions: string[];
+}
+
+async function buildProvisioningChecklist(
+  ctx: ServiceUserRouteContext,
+  serviceLogin: string,
+  serviceInternalUserId: string,
+  actives: Awaited<ReturnType<Caller["store"]["getMembershipsByUser"]>>,
+): Promise<ProvisioningChecklist> {
+  const nowMs = Date.now();
+  const platformLive = actives.some((m) =>
+    m.roleBindings.some(
+      (b) =>
+        b.scope === "platform" &&
+        b.role === "member" &&
+        (b.expiresAtMs === undefined || b.expiresAtMs > nowMs),
+    ),
+  );
+  let tokenPresent: boolean | null;
+  if (ctx.brokerageTokenPresent) {
+    tokenPresent = await ctx.brokerageTokenPresent(serviceLogin);
+  } else {
+    try {
+      const tokens = await getStoredTokens(ctx.env, serviceLogin, undefined, {
+        internalUserId: serviceInternalUserId,
+      });
+      tokenPresent = tokens !== null;
+    } catch {
+      tokenPresent = null;
+    }
+  }
+  const checklist: ProvisioningChecklistItem[] = [
+    {
+      id: "service_login_configured",
+      label: "SERVICE_USER_LOGIN is configured",
+      status: "pass",
+      detail: `Configured login: ${serviceLogin}.`,
+    },
+    {
+      id: "platform_membership_live",
+      label: "Platform-tier member binding is live",
+      status: platformLive ? "pass" : "fail",
+      detail: platformLive
+        ? "A live, unrevoked, unexpired platform-scope member binding exists."
+        : "No live platform-scope member binding (missing, revoked, or expired).",
+    },
+    {
+      id: "brokerage_token_present",
+      label: "Brokerage token is stored for the service identity",
+      status:
+        tokenPresent === null ? "unknown" : tokenPresent ? "pass" : "fail",
+      detail:
+        tokenPresent === null
+          ? "Token presence could not be read from the token store; not assumed present or absent."
+          : tokenPresent
+            ? "A stored token exists for the service identity (presence only; value never exposed)."
+            : "No stored token for the service identity.",
+    },
+  ];
+  const ownerActions: string[] = [];
+  if (!platformLive) {
+    ownerActions.push(
+      "Provision the platform tier via POST /api/admin/service-user/provision with {\"tier\": \"platform\"} (platform-admin caller required).",
+    );
+  }
+  if (tokenPresent === false) {
+    ownerActions.push(
+      `Authorize ${serviceLogin} once via the Connect E*TRADE flow so a stored token exists under its login.`,
+    );
+  }
+  if (tokenPresent === null) {
+    ownerActions.push(
+      "Re-check brokerage token presence: the token-store read failed, so presence is unknown (not failed).",
+    );
+  }
+  return {
+    complete: checklist.every((item) => item.status === "pass"),
+    checklist,
+    ownerActions,
+  };
+}
+
 async function statusServiceUser(
   caller: Caller,
   ctx: ServiceUserRouteContext,
@@ -291,6 +409,12 @@ async function statusServiceUser(
         .map((m) => m.tenantId),
     ),
   ];
+  const provisioning = await buildProvisioningChecklist(
+    ctx,
+    serviceLogin,
+    serviceInternalUserId,
+    actives,
+  );
   return Response.json({
     ok: true,
     serviceUser: serviceLogin,
@@ -302,6 +426,7 @@ async function statusServiceUser(
         }
       : null,
     tenants,
+    provisioning,
   });
 }
 

@@ -47,6 +47,10 @@ import {
   type PublishReport,
   type SubscriberHandlers,
 } from "./messagingPorts";
+import {
+  createDeadLetterRecord,
+  logDeadLetter,
+} from "./deadLetter";
 
 /** Minimal structural shape of a provider queue producer binding. */
 export interface QueueSendBinding {
@@ -190,8 +194,16 @@ export async function consumeCfBatch(
     const msg = batch.messages[i];
     if (!msg) return;
     if (result.disposition === "invalid") {
-      console.warn(
-        "[messaging] Dropping undecodable queue message (no valid envelope)."
+      // Issue #1764 — the drop keeps its ack (redelivering bytes
+      // that can never decode would poison-loop), but it now
+      // leaves a structured dead-letter record, not a bare warning.
+      logDeadLetter(
+        createDeadLetterRecord({
+          queue: batch.queue,
+          reason: "undecodable",
+          detail:
+            "Dropping undecodable queue message (no valid envelope) (#1764).",
+        })
       );
     }
     if (result.disposition === "retried") {
@@ -219,8 +231,16 @@ export async function dispatchSubscriberBatch(
 ): Promise<void> {
   for (const msg of batch.messages) {
     if (!isMessageEnvelope(msg.body)) {
-      console.warn(
-        "[messaging] Dropping undecodable subscriber message (no valid envelope)."
+      // Issue #1764 — acked as before (undecodable bytes can never
+      // decode), now with a structured dead-letter record.
+      logDeadLetter(
+        createDeadLetterRecord({
+          queue: batch.queue,
+          reason: "undecodable",
+          subscriber,
+          detail:
+            "Dropping undecodable subscriber message (no valid envelope) (#1764).",
+        })
       );
       msg.ack();
       continue;
