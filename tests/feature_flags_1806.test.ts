@@ -187,13 +187,15 @@ describe("Cloudflare Feature Flags (Issue #1806)", () => {
       expect(matchFeatureForRoute("/api/screener/runs")).toBe("screener");
       expect(matchFeatureForRoute("/api/screener/export/pdf")).toBe("screener");
       expect(matchFeatureForRoute("/api/etrade/screen")).toBe("screener");
-      expect(matchFeatureForRoute("/api/options/screen")).toBe("screener");
+      // Issue #2596: the options contract screen is its own product flag now.
+      expect(matchFeatureForRoute("/api/options/screen")).toBe("options_contract_screen");
       expect(matchFeatureForRoute("/api/market-data/screen")).toBe("screener");
       expect(matchFeatureForRoute("/screener/presets")).toBe("screener");
     });
 
     it("maps other feature routes to their respective flags", () => {
-      expect(matchFeatureForRoute("/api/options/flows/latest")).toBe("options_research");
+      // Issue #2596: options flows is its own product flag now.
+      expect(matchFeatureForRoute("/api/options/flows/latest")).toBe("options_flows");
       expect(matchFeatureForRoute("/api/trading/options/chains")).toBe("options_research");
       expect(matchFeatureForRoute("/api/trading/orders/preview")).toBe("trading_orders");
       expect(matchFeatureForRoute("/api/trading/voice/synthesize")).toBe("voice_trading");
@@ -274,7 +276,9 @@ describe("Cloudflare Feature Flags (Issue #1806)", () => {
       expect(flowsRes.status).toBe(404);
       const flowsJson = await flowsRes.json() as any;
       expect(flowsJson.code).toBe("FEATURE_DISABLED");
-      expect(flowsJson.feature).toBe("options_research");
+      // Issue #2596: flows is its own product flag now; it is still
+      // blocked here because only screener is enabled.
+      expect(flowsJson.feature).toBe("options_flows");
     });
   });
 

@@ -5,11 +5,12 @@
  * from this table (see NavigationMenu.tsx and Chat.tsx).
  *
  * Shape of an entry:
- * - `id` is the tab id carried in the URL (`?tab=<id>`). All 32 ids Chat
+ * - `id` is the tab id carried in the URL (`?tab=<id>`). All 33 ids Chat
  *   has ever used are entries, including the six legacy/alias ids
  *   (trading, orders, scanner, reports, schedules, options) that never
- *   render as nav items but still land on a page.
- * - `navEntry` is present only for the 26 entries that render in the nav.
+ *   render as nav items but still land on a page. Issue #2596 added
+ *   the 33rd id, "options-screener", as a real nav entry (navOrder 26).
+ * - `navEntry` is present only for the 27 entries that render in the nav.
  *   Its `navOrder` reproduces the historical sidebar/top-strip order, so
  *   deriving NAVIGATION_ITEMS from this table changes nothing visible.
  * - `navGroup` is the nav entry highlighted when this tab is active. It
@@ -299,6 +300,27 @@ export const ROUTES = [
       defaultVisible: true,
       badge: "Sweeps",
       badgeType: "pro",
+    },
+  },
+  {
+    id: "options-screener",
+    navGroup: "options-screener",
+    crumb: "Options Screener",
+    category: "Intelligence",
+    // Icon key must be unique across nav entries (tests/nav_unique_icons_badges.test.ts):
+    // "Options" is already the Options Flows entry's icon, and "Screeners"
+    // is the Screeners entry's, so this entry reuses the otherwise
+    // nav-unused "Scanner" key from the existing icon map — no new icon.
+    icon: "Scanner",
+    description:
+      "The one options home: contract screen, strategy panel, best-trade, compare, LLM ideas and evaluate, discovery, scheduled runs, IV history, flows, reports, workflow runs, and schedules — linked to their existing surfaces, not duplicated (issue 2596, slice 1)",
+    navEntry: {
+      label: "Options Screener",
+      shortLabel: "Options",
+      navOrder: 26,
+      defaultVisible: true,
+      badge: "Options",
+      badgeType: "ai",
     },
   },
   {

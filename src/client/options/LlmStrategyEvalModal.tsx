@@ -12,6 +12,7 @@ import type { TradeOrderContext, TradeOrderLeg } from "../trading/tradeOrderCont
 import "./strategyDiscovery.css";
 
 import { Button, Modal, TextInput, FieldShell } from "../components/ui";
+import { FeatureDisabledNotice, isOptionsProductEnabled } from "../featureFlags";
 export interface StrategyToEvaluate {
   symbol: string;
   strategyName: string;
@@ -97,6 +98,20 @@ export function LlmStrategyEvalModal({
   }, [strategy]);
 
   if (!isOpen || !strategy) return null;
+
+  // Issue #2596: LLM evaluate has no distinct server route (its modal
+  // calls /api/trading/options/llm-ideas, gated by options_llm_ideas),
+  // so this modal is its client gate: when options_llm_evaluate is
+  // disabled, the modal shows the disabled notice and never fires
+  // the LLM call. The server route gate remains the enforcement
+  // point for the underlying call.
+  if (!isOptionsProductEnabled("options_llm_evaluate")) {
+    return (
+      <Modal open={isOpen} onClose={onClose} size="none" panelClassName="llm-eval-modal-content" ariaLabel="Neural strategy evaluation">
+        <FeatureDisabledNotice featureName="options_llm_evaluate" tabLabel="LLM Evaluate" />
+      </Modal>
+    );
+  }
 
   const runLlmEvaluation = async (queryText: string, forceRefresh = false) => {
     if (loading) return;
