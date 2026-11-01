@@ -37,11 +37,12 @@
  * prod until the entry route is reviewed, so no prod impact.
  *
  * S2 defaults (not rulings): goal-only first family (Q5 default);
- * mainnet excluded — the saga never reads MONETIZATION_NETWORK
- * and never overrides the payment leg's network (Q4 open);
  * workflow-only identity, no DO agent (Q8 open); journey wait
  * 24h (Q2 open); instance-owner-only gate answers (G-APPROVER
  * open, working default).
+ * Q4 ruled 2026-11-01: no exclusion, mainnet is in scope — the
+ * saga imposes no network restriction and never overrides the
+ * payment leg's network; the payment leg's network policy governs.
  *
  * Audit: the recordAudit dep posts saga rows to POST /api/audit/event
  * through the SEARCH_AGENT stub (the same endpoint the payment
