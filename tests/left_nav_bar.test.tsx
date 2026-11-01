@@ -1,0 +1,170 @@
+/** @vitest-environment jsdom */
+/**
+ * Left-nav UX and interaction test suite (issue #2685):
+ *  1. Collapsible sidebar and collapsed layout state
+ *  2. Dual-target toggle: clicking the menu item row or chevron toggles sub-menus
+ *  3. Stock Screener: renamed from Screeners, contains screeners & research only
+ *  4. Options Screener: contains options, scanner, options-flows, iv-history; no docs/runs/schedules
+ *  5. Workflows menu: hosts docs, workflow-runs, reports, review, track-record
+ *  6. Platform menu: hosts platform-admin, schedules, agents, audit, workflows, endpoints
+ *  7. Billing menu: separated from Platform, hosts payments, revenue, ledger, checkout
+ *  8. Intelligence menu: hosts Goal Screen as its own top-level menu item
+ *  9. Sandbox menu: hosts payment-assurance and checkout sandbox
+ */
+
+(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+
+import React, { act } from "react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { createRoot, type Root } from "react-dom/client";
+import { LeftNavBar } from "../src/client/components/LeftNavBar";
+import {
+  DEFAULT_LEFT_NAV_CONFIG,
+  SUB_MENU_CONFIGS,
+  findNavItemConfig,
+  isNavItemOrSubItemActive,
+} from "../src/client/navConfig";
+
+let container: HTMLDivElement;
+let root: Root;
+
+beforeEach(() => {
+  window.history.pushState(null, "", "/?tab=autopilot");
+  container = document.createElement("div");
+  document.body.appendChild(container);
+  root = createRoot(container);
+});
+
+afterEach(async () => {
+  await act(async () => root.unmount());
+  container.remove();
+});
+
+async function renderNavBar(props: Partial<React.ComponentProps<typeof LeftNavBar>> = {}) {
+  await act(async () => {
+    root.render(
+      <LeftNavBar
+        config={DEFAULT_LEFT_NAV_CONFIG}
+        activeTab="autopilot"
+        onSelectTab={vi.fn()}
+        collapsed={false}
+        {...props}
+      />
+    );
+  });
+}
+
+describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
+  it("renders the 6 configured sections: Execution, Intelligence, Workflows, Billing, Platform, Sandbox", () => {
+    expect(DEFAULT_LEFT_NAV_CONFIG.sections).toHaveLength(6);
+    const titles = DEFAULT_LEFT_NAV_CONFIG.sections.map((s) => s.title);
+    expect(titles).toContain("TRADING & EXECUTION");
+    expect(titles).toContain("INTELLIGENCE & COPILOT");
+    expect(titles).toContain("WORKFLOWS");
+    expect(titles).toContain("BILLING");
+    expect(titles).toContain("PLATFORM");
+    expect(titles).toContain("SANDBOX");
+  });
+
+  it("configures Stock Screener with only screeners and research sub-menus", () => {
+    const stockSubItems = SUB_MENU_CONFIGS.screeners;
+    expect(stockSubItems).toBeDefined();
+    const subIds = stockSubItems.map((s) => s.id);
+    expect(subIds).toEqual(["screeners", "research"]);
+    expect(subIds).not.toContain("options");
+    expect(subIds).not.toContain("scanner");
+    expect(subIds).not.toContain("options-flows");
+    expect(subIds).not.toContain("iv-history");
+  });
+
+  it("configures Options Screener with contracts, scanner, flows, and iv-history, without docs/runs/schedules", () => {
+    const optionsSubItems = SUB_MENU_CONFIGS["options-screener"];
+    expect(optionsSubItems).toBeDefined();
+    const subIds = optionsSubItems.map((s) => s.id);
+    expect(subIds).toEqual(["options", "scanner", "options-flows", "iv-history"]);
+    expect(subIds).not.toContain("docs");
+    expect(subIds).not.toContain("workflow-runs");
+    expect(subIds).not.toContain("schedules");
+  });
+
+  it("configures Workflows menu with docs, workflow-runs, reports, review, track-record", () => {
+    const workflowSubItems = SUB_MENU_CONFIGS["workflow-runs"];
+    expect(workflowSubItems).toBeDefined();
+    const subIds = workflowSubItems.map((s) => s.id);
+    expect(subIds).toEqual(["docs", "workflow-runs", "reports", "review", "track-record"]);
+  });
+
+  it("configures Sandbox menu with payment-assurance and sandbox-checkout", () => {
+    const sandboxSubItems = SUB_MENU_CONFIGS.sandbox;
+    expect(sandboxSubItems).toBeDefined();
+    const subIds = sandboxSubItems.map((s) => s.id);
+    expect(subIds).toEqual(["payment-assurance", "sandbox-checkout"]);
+  });
+
+  it("toggles sub-menu open and closed on menu row click", async () => {
+    const onSelectTab = vi.fn();
+    await renderNavBar({ onSelectTab });
+
+    // Find Stock Screener menu item button
+    const buttons = Array.from(container.querySelectorAll(".sidebar-nav-item"));
+    const stockBtn = buttons.find((b) => b.textContent?.includes("Stock Screener")) as HTMLButtonElement;
+    expect(stockBtn).toBeDefined();
+
+    // Click menu row -> expands sub-menu
+    await act(async () => {
+      stockBtn.click();
+    });
+    expect(onSelectTab).toHaveBeenCalledWith("screeners");
+
+    // Sub-items should now be visible
+    expect(container.textContent).toContain("Market Research");
+
+    // Click menu row again -> collapses sub-menu
+    await act(async () => {
+      stockBtn.click();
+    });
+    expect(container.textContent).not.toContain("Market Research");
+  });
+
+  it("toggles sub-menu open and closed on chevron button click", async () => {
+    await renderNavBar();
+
+    const chevronBtn = container.querySelector(".submenu-toggle-btn") as HTMLButtonElement;
+    expect(chevronBtn).toBeDefined();
+
+    // Click chevron -> expands
+    await act(async () => {
+      chevronBtn.click();
+    });
+    expect(container.textContent).toContain("Market Research");
+
+    // Click chevron again -> collapses
+    await act(async () => {
+      chevronBtn.click();
+    });
+    expect(container.textContent).not.toContain("Market Research");
+  });
+
+  it("supports collapsing the sidebar via onToggleCollapse", async () => {
+    const onToggleCollapse = vi.fn();
+    await renderNavBar({ onToggleCollapse, collapsed: false });
+
+    const collapseBtn = container.querySelector(".sidebar-collapse-btn") as HTMLButtonElement;
+    expect(collapseBtn).toBeDefined();
+
+    await act(async () => {
+      collapseBtn.click();
+    });
+    expect(onToggleCollapse).toHaveBeenCalledTimes(1);
+
+    // Rerender collapsed
+    await renderNavBar({ onToggleCollapse, collapsed: true });
+    const sidebar = container.querySelector(".app-sidebar");
+    expect(sidebar?.classList.contains("collapsed")).toBe(true);
+  });
+
+  it("renders Goal Screen as its own top-level item in Intelligence section", async () => {
+    await renderNavBar();
+    expect(container.textContent).toContain("Goal Screen");
+  });
+});

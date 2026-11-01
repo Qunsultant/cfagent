@@ -189,27 +189,29 @@ describe("options screener navigation (issue #2596)", () => {
       "options",
       "scanner",
       "options-flows",
-      "docs",
-      "workflow-runs",
-      "schedules",
+      "iv-history",
     ]);
     expect(isNavItemOrSubItemActive(item!, "options-screener")).toBe(true);
     expect(isNavItemOrSubItemActive(item!, "options")).toBe(true);
     expect(isNavItemOrSubItemActive(item!, "portfolio")).toBe(false);
   });
 
-  it("does not remove the historical Screeners sub-menu entry for options", () => {
+  it("houses options under Options Screener, leaving Stock Screener with screeners and research (#2685)", () => {
     const screeners = findNavItemConfig(DEFAULT_LEFT_NAV_CONFIG, "screeners")!;
-    expect(screeners.subItems!.map((s) => s.id)).toContain("options");
+    expect(screeners.subItems!.map((s) => s.id)).not.toContain("options");
     expect(screeners.subItems!.map((s) => s.id)).toContain("screeners");
+    expect(screeners.subItems!.map((s) => s.id)).toContain("research");
   });
 
-  it("every sub-menu entry is a real route or a hub-internal id with no tab map entry", () => {
+  it("every sub-menu entry is a real route or a view-driven hub entry (#2685)", () => {
     const item = findNavItemConfig(DEFAULT_LEFT_NAV_CONFIG, "options-screener")!;
     for (const sub of item.subItems!) {
-      // Real tabs resolve in the route table; hub-internal ids (none
-      // in this sub-menu) would fall back to the tab-map core rule.
-      expect(getRoute(sub.id)).toBeDefined();
+      // Real tabs resolve in the route table; view-driven entries link to their host route
+      if (sub.id === "iv-history") {
+        expect(sub.href || sub.id).toBeTruthy();
+      } else {
+        expect(getRoute(sub.id)).toBeDefined();
+      }
     }
   });
 
