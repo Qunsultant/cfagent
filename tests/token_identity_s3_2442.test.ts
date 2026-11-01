@@ -228,7 +228,11 @@ describe("S3 Worker 03:00 renewal pass identity pass-through", () => {
   it("internal-id entry + alias record → renewed, upstream called once", async () => {
     const { fake, env } = renewEnv();
     seedAlias(fake, LOGIN, INTERNAL_ID, ALIAS_LOGIN);
-    const seededAt = new Date(Date.now() - 3600 * 1000).toISOString();
+    // Seeded one minute ago, not one hour: E*TRADE tokens expire at
+    // midnight ET (isTokenExpiredEt), so a 1-hour-old seed crosses the
+    // midnight boundary and is skipped as expired whenever CI runs
+    // between 00:00 and 01:00 ET — the failure this pins.
+    const seededAt = new Date(Date.now() - 60 * 1000).toISOString();
     fake.seed("etrade", `etrade:token:TEST:${INTERNAL_ID}`, freshToken(LOGIN, seededAt));
     const fetchSpy = stubRenewUpstream();
     const counts = await renewAllStoredETradeTokens(env);
