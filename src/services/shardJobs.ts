@@ -42,6 +42,7 @@
  */
 
 import { createAsyncJobPorts } from "../data/createAsyncJobPorts";
+import { assembleOptionsResultForServe } from "./unifiedReportPipeline";
 import type {
   AsyncJobChannel,
   AsyncJobSubmission,
@@ -220,7 +221,11 @@ function generateResultsFromRows(rows: ShardRow[]): GenerateResult[] {
   const out: GenerateResult[] = [];
   for (const row of rows) {
     if (row.stage !== "generate" || row.status !== "completed") continue;
-    const result = (row.result ?? {}) as Partial<GenerateResult>;
+    const result = (row.result ?? {}) as Partial<GenerateResult> & { status?: unknown };
+    // Issue #2621 P0: a completed generate row carrying a failed
+    // outcome (options renderer failure) is not a generated
+    // artifact — it must not earn a store shard or a serve link.
+    if (result.status === "failed") continue;
     if (
       result.format &&
       (REPORT_FORMATS as readonly string[]).includes(result.format) &&
@@ -275,6 +280,20 @@ export function planServeJob(
     (r) => r.stage === "generate" && r.shardKey === "assemble" && r.status === "completed"
   );
   const dataset = (assemble?.result ?? {}) as Record<string, any>;
+  // Issue #2621 P0 (options only): the serve outcome is built by
+  // the ONE assembler from the chain's generate + store rows, so
+  // it agrees with the sync route's outcome for the same dataset:
+  // a failed format keeps its status + error and contributes no
+  // key/link, a store-downgraded format drops out the same way.
+  // Stock chains keep the legacy mapping below, byte for byte.
+  const optionsAssembled = chain.screenType === "options"
+    ? (() => {
+        // Dynamic import avoided: the assembler is pure and this
+        // module already imports it statically (see top of file).
+        const assembled = assembleOptionsResultForServe(rows, dataset, chain);
+        return assembled;
+      })()
+    : null;
   const delaySeconds = chain.stageChain?.serveDelaySeconds;
   const runAt =
     delaySeconds !== undefined
@@ -287,12 +306,17 @@ export function planServeJob(
         kind: chain.screenType === "options" ? "options" : "stock",
         trigger: chain.trigger ?? "scheduled",
         success: true,
-        pdfKeys: byFormat.get("pdf") ? [byFormat.get("pdf")!.key] : [],
-        pdfStatus: byFormat.get("pdf") ? "generated" : "failed",
-        xlsxKey: byFormat.get("xlsx")?.key,
-        xlsxStatus: byFormat.get("xlsx") ? "generated" : "failed",
-        csvKey: byFormat.get("csv")?.key,
-        csvStatus: byFormat.get("csv") ? "generated" : "failed",
+        pdfKeys: optionsAssembled
+          ? (optionsAssembled.links.pdfKey ? [optionsAssembled.links.pdfKey] : [])
+          : (byFormat.get("pdf") ? [byFormat.get("pdf")!.key] : []),
+        pdfStatus: optionsAssembled ? optionsAssembled.links.pdfStatus : (byFormat.get("pdf") ? "generated" : "failed"),
+        ...(optionsAssembled?.links.pdfError ? { pdfError: optionsAssembled.links.pdfError } : {}),
+        xlsxKey: optionsAssembled ? optionsAssembled.links.xlsxKey : byFormat.get("xlsx")?.key,
+        xlsxStatus: optionsAssembled ? optionsAssembled.links.xlsxStatus : (byFormat.get("xlsx") ? "generated" : "failed"),
+        ...(optionsAssembled?.links.xlsxError ? { xlsxError: optionsAssembled.links.xlsxError } : {}),
+        csvKey: optionsAssembled ? optionsAssembled.links.csvKey : byFormat.get("csv")?.key,
+        csvStatus: optionsAssembled ? optionsAssembled.links.csvStatus : (byFormat.get("csv") ? "generated" : "failed"),
+        ...(optionsAssembled?.links.csvError ? { csvError: optionsAssembled.links.csvError } : {}),
         universe: chain.universe,
         thesis: chain.options?.thesis,
         // Issue #2091: the serve stage records the run from these —
