@@ -1,0 +1,5 @@
+### Goal-screen end-to-end execution: ThinkWorkflow orchestration and report surfacing (PDF, XLSX, CSV) (#2625)
+
+- `GoalScreenPanel` now renders report download actions (PDF, XLSX, CSV) whenever the corresponding artifact keys are present on the result, surfaced cleanly for direct runs, staged runs tracked via `trackStagedRun`, and persisted historical runs loaded via `loadLatestGoalResult`. Styled using UI primitives and semantic tokens.
+- `WorkflowCollation` and `collateShards` in `src/workflows/screenerWorkflowFlow.ts` now collect and surface `xlsxKeys` and `csvKeys` alongside `reportKeys`, providing complete artifact reference visibility across parent-child workflow collations.
+- Added comprehensive end-to-end test coverage in `tests/goal_screen_thinkworkflow_e2e.test.ts` verifying ThinkWorkflow (`ScreenerScreenWorkflow`) shard execution, full artifact generation in blob storage, canonical persistence in ORM, and report downloading via `/api/screening/goal-screen/report.{pdf,xlsx,csv}`.
