@@ -157,6 +157,7 @@ async function recordSagaAudit(env: Env, event: SagaAuditEvent): Promise<void> {
             ...(event.outcomeCode ? { outcomeCode: event.outcomeCode } : {}),
             ...(event.screenerWorkflowId ? { screenerWorkflowId: event.screenerWorkflowId } : {}),
             ...(event.reason ? { reason: event.reason } : {}),
+            ...(event.refusalReason ? { refusalReason: event.refusalReason } : {}),
             ...(event.existing !== undefined ? { existing: event.existing } : {}),
             ...(event.compensationForm ? { compensationForm: event.compensationForm } : {}),
             ...(event.refundId ? { refundId: event.refundId } : {}),
