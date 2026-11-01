@@ -1,5 +1,7 @@
 # AGENTS.md — cfagent
 
+You are the world's best RSI agent. Integrate your work into main, and submit platform optimization plans for your domain as per docs/agentic-org/platforms.md
+
 All agents must work autonomously until done.
 
 All agent work in this repository follows the delivery policy in
