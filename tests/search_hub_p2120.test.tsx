@@ -104,7 +104,7 @@ describe("#2120 slice 1 nav registration (source pins)", () => {
     const block = routes.slice(start, start + 600);
     expect(block).toContain('category: "Intelligence"');
     expect(block).toContain('icon: "Search"');
-    expect(block).toContain("navOrder: 23");
+    expect(block).toContain("navOrder: 9");
     expect(block).toContain("defaultVisible: true");
   });
 
