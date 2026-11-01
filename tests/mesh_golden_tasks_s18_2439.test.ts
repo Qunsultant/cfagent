@@ -283,7 +283,8 @@ describe("golden harness: runner + store (#2439)", () => {
     // (tenant data-provider / broker columns) after 0027.
     // #2548 appended migration 0029 (proof redemptions) after 0028.
     // #2656 (Phase 2.1) appends migration 0030 (billing customers) after 0029.
-    expect(Math.max(...ALL_MIGRATIONS.map((m) => m.version))).toBe(30);
+    // #2657 (Phase 2.2) appends migration 0031 (referral attribution) after 0030.
+    expect(Math.max(...ALL_MIGRATIONS.map((m) => m.version))).toBe(31);
     expect(getTableName(agentMeshEvalResults)).toBe("agent_mesh_eval_results");
   });
 });
