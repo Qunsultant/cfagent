@@ -1,10 +1,10 @@
 /**
  * Route table contract (#1804 S1, issue #1808): the table is the single
- * source of truth for navigation, so its shape is pinned — 34 entries
- * (28 nav entries + 6 alias ids; the agents tab was added by #2469,
+ * source of truth for navigation, so its shape is pinned — 35 entries
+ * (29 nav entries + 6 alias ids; the agents tab was added by #2469,
  * Agent Mesh S20/G9, appended at navOrder 25 so no existing item
  * moves; the options-screener tab was added by #2596, appended at
- * navOrder 26 so no existing item moves; the platform-admin tab was added at navOrder 27 so no existing item moves), sorted ids, complete metadata, alias
+ * navOrder 26 so no existing item moves; the platform-admin tab was added at navOrder 27 so no existing item moves; the products tab was added by #2695, appended at navOrder 28 so no existing item moves), sorted ids, complete metadata, alias
  * groups resolving to real nav entries, and derived defaults.
  * (#2137 rebuild: checkout added at navOrder 24; search restored at
  * navOrder 23 — the old branch's search-for-checkout swap at order 23
@@ -43,6 +43,7 @@ const EXPECTED_IDS = [
   "payments",
   "platform-admin",
   "portfolio",
+  "products",
   "referrals",
   "reports",
   "research",
@@ -61,7 +62,7 @@ const EXPECTED_IDS = [
 const ALIAS_IDS = ["options", "orders", "reports", "scanner", "schedules", "trading"];
 
 describe("route table", () => {
-  it("has exactly the 34 tab ids, sorted and unique", () => {
+  it("has exactly the 35 tab ids, sorted and unique", () => {
     const ids = ROUTES.map((r) => r.id);
     expect(ids).toEqual(EXPECTED_IDS);
     expect(new Set(ids).size).toBe(ids.length);
@@ -87,11 +88,11 @@ describe("route table", () => {
     }
   });
 
-  it("has exactly 28 nav entries with unique 0..27 display order", () => {
+  it("has exactly 29 nav entries with unique 0..28 display order", () => {
     const nav = ROUTES.filter(hasNavEntry);
-    expect(nav).toHaveLength(28);
+    expect(nav).toHaveLength(29);
     const orders = nav.map((r) => r.navEntry.navOrder).sort((a, b) => a - b);
-    expect(orders).toEqual(Array.from({ length: 28 }, (_, i) => i));
+    expect(orders).toEqual(Array.from({ length: 29 }, (_, i) => i));
     for (const r of nav) {
       expect(r.navEntry.label.length).toBeGreaterThan(0);
       expect(r.navEntry.shortLabel.length).toBeGreaterThan(0);
@@ -106,7 +107,7 @@ describe("route table", () => {
     }
   });
 
-  it("derives visibility defaults: the 28 nav entries, all visible", () => {
+  it("derives visibility defaults: the 29 nav entries, all visible", () => {
     const navIds = ROUTES.filter(hasNavEntry).map((r) => r.id).sort();
     expect(Object.keys(DEFAULT_VISIBLE_NAV_TABS).sort()).toEqual(navIds);
     expect(Object.values(DEFAULT_VISIBLE_NAV_TABS).every((v) => v === true)).toBe(true);

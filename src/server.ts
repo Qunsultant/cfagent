@@ -89,6 +89,8 @@ import {
   readJobHistory,
 } from "./data/createShardJobPorts";
 import { handleMeshRegistryRoute } from "./agents/meshRegistryRoute";
+import { handleProductCatalogRoute } from "./agents/productCatalogRoute";
+import { createPriceCatalogueAdapter } from "./data/createPriceCataloguePorts";
 import { handleRetentionPurgeRoute } from "./data/retentionRoute";
 import { buildPurgeAuditEventInput } from "./data/retention1766";
 import {
@@ -1971,6 +1973,29 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
     if (path === "/api/agents/registry") {
       const session = await requireAuth(request, env);
       return handleMeshRegistryRoute({ session, method: request.method });
+    }
+
+    // --- Product catalog view (issue #2695, Platform Phase 4) ---
+    // GET /api/products/catalog: the Products view's data route —
+    // a read-only rendering of the Phase 2 product catalog with
+    // Phase 3 access parity, derived at request time. Gated by
+    // requireAuth (any signed-in user), like the registry read.
+    // The price list comes from the price-catalogue adapter bound
+    // to AGENT_DB; unbound → the handler answers 503 (a read route
+    // never auto-migrates a schema). Exactly one bounded
+    // price-catalogue query per request; no SessionStore reads
+    // beyond requireAuth's own session check. The handler answers
+    // GET only and writes nothing.
+    if (path === "/api/products/catalog") {
+      const session = await requireAuth(request, env);
+      const adapter = createPriceCatalogueAdapter(
+        env as { AGENT_DB?: unknown },
+      );
+      return handleProductCatalogRoute({
+        session,
+        method: request.method,
+        listPrices: adapter ? () => adapter.getAllPrices() : null,
+      });
     }
 
     // --- Shard job reconciliation (issue #1676, slice 2) ---
