@@ -21,18 +21,26 @@
  * redacted, long values clipped) and the raw rows are never returned.
  */
 import { createAsyncJobPorts } from "../../data/createAsyncJobPorts";
+import { createShardJobAdapter } from "../../data/createShardJobPorts";
+import type { ShardJobReader, ShardJobRow } from "../../data/shardJobPorts";
 import { listJobOutcomes } from "../../services/jobOutcomes";
 import { listScreeningActivity } from "../../services/screeningActivity";
 import { listScheduledReports } from "../../services/scheduledReports";
+import { resolveIaaaTenant } from "../../security/iaaaGithubEndToEnd";
+import { sagaAuditOwnerStub, type AuditOwnerStub } from "../../workflows/sagaJourneyGate";
 import type { SqlStorage } from "../../orm";
 import {
   buildWorkflowRuns,
+  compareWorkflowRunsNewestFirst,
+  runFromSagaChain,
   summarizeWorkflowRuns,
   type UnifiedWorkflowRunRecord,
+  type WorkflowRun,
   type WorkflowRunJobRow,
   type WorkflowRunOutcomeRow,
   type WorkflowRunStageTransition,
 } from "../../services/workflowRuns";
+import { mapSagaAuditToJobs, readSagaAuditRows } from "./sagaStatus";
 
 export interface WorkflowRunsSql {
   exec: (query: string, ...args: unknown[]) => Iterable<unknown>;
@@ -43,6 +51,10 @@ export interface WorkflowRunsRouteContext {
   /** The verified login (src/server.ts sets x-user-login from the session). */
   userLogin: string;
   env?: unknown;
+  /** Saga read seams (issue #2780). Production builds them from env. */
+  sagaAuditStub?: AuditOwnerStub;
+  sagaProjectionReader?: Pick<ShardJobReader, "listJobsForChain">;
+  sagaTenantId?: string;
 }
 
 const DEFAULT_LIMIT = 40;
@@ -212,6 +224,85 @@ function outcomeRow(row: ReturnType<typeof listJobOutcomes>[number]): WorkflowRu
   };
 }
 
+export interface SagaChainRunsInput {
+  auditRows: Array<Record<string, unknown>>;
+  /** Per-chain saga projection rows (null when the D1 read did not answer). */
+  projections: Map<string, ShardJobRow | null>;
+  userLogin: string;
+}
+
+function sagaIdOfAuditRow(row: Record<string, unknown>, userLogin: string): string | null {
+  const payload = row["payload"];
+  if (!payload || typeof payload !== "object") return null;
+  const p = payload as Record<string, unknown>;
+  return p["userLogin"] === userLogin && typeof p["sagaId"] === "string" && p["sagaId"] !== ""
+    ? (p["sagaId"] as string)
+    : null;
+}
+
+function stringField(payload: Record<string, unknown> | undefined, field: string): string | null {
+  if (!payload) return null;
+  const value = payload[field];
+  return typeof value === "string" ? value : null;
+}
+
+/**
+ * Build saga chain runs from the session user's own audit rows (issue
+ * #2780). Chain discovery is owner-scoped by construction: only chains
+ * whose audit rows carry the session login appear. A chain with no
+ * mappable audit stages shows its projection row's submitted stage;
+ * a chain with neither is skipped, never fabricated. Non-saga
+ * projection rows are ignored. Pure: the handler does the I/O.
+ */
+export function buildSagaChainRuns(input: SagaChainRunsInput): WorkflowRun[] {
+  const byChain = new Map<string, Array<Record<string, unknown>>>();
+  for (const row of input.auditRows) {
+    const sagaId = sagaIdOfAuditRow(row, input.userLogin);
+    if (!sagaId) continue;
+    const list = byChain.get(sagaId) ?? [];
+    list.push(row);
+    byChain.set(sagaId, list);
+  }
+  const runs: WorkflowRun[] = [];
+  for (const [sagaId, rows] of byChain) {
+    const jobs = mapSagaAuditToJobs(rows, sagaId);
+    const projRow = input.projections.get(sagaId) ?? null;
+    const projection =
+      projRow && projRow.jobKey === "saga"
+        ? {
+            stage: projRow.stage,
+            status: projRow.status,
+            detail: projRow.detail,
+            createdAtMs: projRow.createdAtMs,
+            updatedAtMs: projRow.updatedAtMs,
+          }
+        : null;
+    const startedPayload = rows.find((r) => r["type"] === "saga.started")?.["payload"] as
+      | Record<string, unknown>
+      | undefined;
+    const endedPayload = rows.find((r) => r["type"] === "saga.ended")?.["payload"] as
+      | Record<string, unknown>
+      | undefined;
+    const run = runFromSagaChain({
+      sagaId,
+      jobs,
+      projection,
+      triggeredBy: input.userLogin,
+      endedCode: stringField(endedPayload, "outcomeCode"),
+      endedAtMs: jobs.find((j) => j.stage === "done")?.updatedAtMs ?? null,
+      started: startedPayload
+        ? {
+            family: stringField(startedPayload, "family"),
+            rail: stringField(startedPayload, "rail"),
+            runRequestId: stringField(startedPayload, "runRequestId"),
+          }
+        : null,
+    });
+    if (run) runs.push(run);
+  }
+  return runs;
+}
+
 export async function handleWorkflowRunsRoutes(
   request: Request,
   url: URL,
@@ -270,11 +361,55 @@ export async function handleWorkflowRunsRoutes(
     }
   }
 
+  // Saga chains (#2780): projection chains with jobKey "saga" join the
+  // list. Discovery is owner-scoped by construction — chains are found
+  // in the session user's own audit rows. The D1 projection row carries
+  // no userLogin, so a pre-audit chain cannot be attributed to a user
+  // and is not listed here; the per-sagaId status fallback covers that
+  // window for the owner who knows the id. A failed saga read never
+  // hides the other runs: it is named in storeErrors.
+  let sagaRuns: WorkflowRun[] = [];
+  if (ctx.env !== undefined && ctx.userLogin) {
+    try {
+      const stub = ctx.sagaAuditStub ?? sagaAuditOwnerStub(ctx.env);
+      const auditRows = await readSagaAuditRows(stub);
+      const tenantId = ctx.sagaTenantId ?? resolveIaaaTenant(ctx.env as never);
+      const reader = ctx.sagaProjectionReader ?? createShardJobAdapter(ctx.env as never);
+      const ownSagaIds = [
+        ...new Set(
+          auditRows
+            .map((row) => sagaIdOfAuditRow(row, ctx.userLogin))
+            .filter((id): id is string => id !== null),
+        ),
+      ];
+      const projections = new Map<string, ShardJobRow | null>();
+      for (const sagaId of ownSagaIds) {
+        if (!reader) {
+          projections.set(sagaId, null);
+          continue;
+        }
+        try {
+          const rows = await reader.listJobsForChain(tenantId, sagaId);
+          projections.set(sagaId, rows.find((r) => r.jobKey === "saga") ?? null);
+        } catch (err) {
+          storeErrors.sagaProjection = err instanceof Error ? err.message : String(err);
+          projections.set(sagaId, null);
+        }
+      }
+      sagaRuns = buildSagaChainRuns({ auditRows, projections, userLogin: ctx.userLogin });
+    } catch (err) {
+      storeErrors.saga = err instanceof Error ? err.message : String(err);
+    }
+  }
+
   const runs = buildWorkflowRuns({ jobs, outcomes, transitions, unifiedRecords, limit });
+  runs.push(...sagaRuns);
+  runs.sort(compareWorkflowRunsNewestFirst);
+  const limited = runs.slice(0, limit);
   return Response.json({
-    count: runs.length,
-    runs,
-    summary: summarizeWorkflowRuns(runs),
+    count: limited.length,
+    runs: limited,
+    summary: summarizeWorkflowRuns(limited),
     ...(Object.keys(storeErrors).length > 0 ? { storeErrors } : {}),
     generatedAt: new Date().toISOString(),
   });
