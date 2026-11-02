@@ -254,6 +254,63 @@ export interface PartialQuoteQualification {
 }
 
 /**
+ * Issue #1770: named reason recorded for a symbol whose quote fetches
+ * were never issued (or could not complete) because the run's
+ * subrequest budget ran out. A deferral is not an upstream failure:
+ * the symbol was not fetched, so it must never be reported as a
+ * broker/quote failure — it lands in the qualified partial under
+ * failureReasons["request-budget"], the same category the pipeline
+ * already uses when the platform itself reports a subrequest cap.
+ * Stock-side twin of the options ledger (#1204); deliberately a
+ * separate definition, not an import of optionsScreener, because
+ * optionsScreener imports this module's universe types — importing
+ * it back would be a cycle.
+ */
+export const STOCK_SUBREQUEST_BUDGET_DEFERRED_REASON =
+  "Subrequest budget exhausted: quote fetch deferred (Worker per-invocation subrequest limit).";
+
+/**
+ * Issue #1770: a per-run ledger bounding how many upstream quote
+ * fetches stock acquisition may issue inside one Worker invocation.
+ * The ledger is created once per acquireUniverse call and shared
+ * across every batch and per-symbol call of that run, so the bound
+ * applies to the run, not to each symbol. Callers charge it
+ * synchronously before each actual upstream invocation — including
+ * retries, which re-invoke the charged wrapper — so concurrent
+ * calls cannot overspend. Universe-listing resolution is outside
+ * this ledger (a separate single fetch per run); the ledger bounds
+ * the quote fan-out, which is the unbounded part.
+ */
+export interface StockSubrequestBudget {
+  readonly limit: number;
+  used: number;
+  exhausted: boolean;
+  tryConsume(): boolean;
+}
+
+export function createStockSubrequestBudget(limit: number): StockSubrequestBudget {
+  const budget: StockSubrequestBudget = {
+    limit: Math.max(0, Math.floor(limit)),
+    used: 0,
+    exhausted: false,
+    tryConsume() {
+      if (budget.used >= budget.limit) {
+        budget.exhausted = true;
+        return false;
+      }
+      budget.used += 1;
+      return true;
+    },
+  };
+  return budget;
+}
+
+/** Error thrown when a charged fetch finds the run budget exhausted. */
+function stockBudgetError(): Error {
+  return new Error(STOCK_SUBREQUEST_BUDGET_DEFERRED_REASON);
+}
+
+/**
  * Issue #1317: Yahoo acquisition, moved here from the deleted
  * src/trading/yahooDataSource.ts (the pipeline's yahoo-mode helpers
  * are pipeline logic — retry policy, curated universe, pipeline
@@ -983,10 +1040,25 @@ const YAHOO_BATCH_CHUNK = 50;
 
 export async function fetchYahooQuotes(
   symbols: string[],
-  deps: YahooScreenerDeps
+  deps: YahooScreenerDeps,
+  opts?: {
+    /**
+     * Issue #1770: per-run subrequest budget. When supplied, every
+     * actual upstream invocation charges one unit (the first attempt
+     * is charged synchronously before launch; retries charge on each
+     * re-invocation), and symbols never attempted because the budget
+     * ran out are reported via onBudgetDeferred — never fetched past
+     * the budget, never silently dropped. Absent = unbounded legacy
+     * behaviour (existing callers/tests unaffected).
+     */
+    budget?: StockSubrequestBudget;
+    onBudgetDeferred?: (symbols: string[]) => void;
+  }
 ): Promise<ETradeQuote[]> {
   const policy = deps.retryPolicy ?? DEFAULT_PIPELINE_POLICY.retry.acquisition;
   const bySymbol = new Map<string, ETradeQuote>();
+  const budget = opts?.budget;
+  const deferredSymbols: string[] = [];
 
   // Issue #1184 (#1173 R2): batch first — one request per chunk of
   // 50 replaces 2–3 requests per symbol (the burst Yahoo throttled
@@ -995,10 +1067,27 @@ export async function fetchYahooQuotes(
   // for its symbols; symbols a batch response omits do the same.
   if (deps.fetchYahooBatchQuotes) {
     for (let i = 0; i < symbols.length; i += YAHOO_BATCH_CHUNK) {
+      if (budget?.exhausted) {
+        deferredSymbols.push(...symbols.slice(i));
+        break;
+      }
       const chunk = symbols.slice(i, i + YAHOO_BATCH_CHUNK);
+      // First attempt charged synchronously before launch; retries
+      // charge on each re-invocation through the wrapper.
+      if (budget && !budget.tryConsume()) {
+        deferredSymbols.push(...symbols.slice(i));
+        break;
+      }
+      let attempts = 0;
       try {
         const batch = await withRetry(
-          () => deps.fetchYahooBatchQuotes!(chunk),
+          () => {
+            attempts++;
+            if (attempts > 1 && budget && !budget.tryConsume()) {
+              throw stockBudgetError();
+            }
+            return deps.fetchYahooBatchQuotes!(chunk);
+          },
           policy,
           { label: `yahoo-batch:${chunk.length}`, sleep: deps.retrySleep }
         );
@@ -1018,20 +1107,41 @@ export async function fetchYahooQuotes(
     }
   }
 
-  const missing = symbols.filter((s) => !bySymbol.has(s.toUpperCase()));
+  const missing = symbols.filter(
+    (s) =>
+      !bySymbol.has(s.toUpperCase()) &&
+      !deferredSymbols.some((d) => d.toUpperCase() === s.toUpperCase())
+  );
   const quotes: ETradeQuote[] = [];
   const CONCURRENCY = 10;
   for (let i = 0; i < missing.length; i += CONCURRENCY) {
+    if (budget?.exhausted) {
+      deferredSymbols.push(...missing.slice(i));
+      break;
+    }
     const batch = missing.slice(i, i + CONCURRENCY);
     const results = await Promise.allSettled(
       batch.map(async (symbol) => {
+        // Issue #1770: the budget gate runs synchronously before the
+        // first await, so concurrent callbacks in one chunk consume
+        // in order and cannot overspend; the symbol is deferred, not
+        // attempted, once the budget is gone.
+        if (budget && !budget.tryConsume()) {
+          deferredSymbols.push(symbol);
+          return null;
+        }
         // Issue #1181 (#1173 R1): every symbol fetch retries under
         // the shared acquisition policy (exponential backoff) — the
         // parity the E*TRADE path always had. A symbol is dropped
         // only after its attempts are exhausted; the partial-quote
         // qualification in acquireUniverse reports it as before.
+        let attempts = 0;
         return withRetry(
           async () => {
+            attempts++;
+            if (attempts > 1 && budget && !budget.tryConsume()) {
+              throw stockBudgetError();
+            }
             const live = await deps.fetchYahooQuote(symbol);
             const adapted = yahooQuoteToPipelineQuote(
               live,
@@ -1050,9 +1160,10 @@ export async function fetchYahooQuotes(
       })
     );
     for (const r of results) {
-      if (r.status === "fulfilled") quotes.push(r.value);
+      if (r.status === "fulfilled" && r.value) quotes.push(r.value);
     }
   }
+  if (deferredSymbols.length > 0) opts?.onBudgetDeferred?.(deferredSymbols);
   for (const q of quotes) bySymbol.set(q.symbol.toUpperCase(), q);
   // Input order, batch and per-symbol results merged.
   return symbols
@@ -1109,18 +1220,41 @@ export async function acquireUniverse(
     if (limited.length === 0) {
       throw new Error("The selected Yahoo universe contains no listings; no static symbols were substituted.");
     }
+    // Issue #1770: the run's subrequest budget bounds Yahoo
+    // acquisition exactly like the E*TRADE legs below; deferred
+    // symbols are a named reason, not yahoo-unavailable.
+    const budget = createStockSubrequestBudget(
+      cfg.acquisition.maxSubrequestsPerRun
+    );
+    const budgetDeferred: string[] = [];
     const quotes = await fetchYahooQuotes(
       limited.map((l) => l.symbol),
-      opts.yahooDeps
+      opts.yahooDeps,
+      {
+        budget,
+        onBudgetDeferred: (symbols) => budgetDeferred.push(...symbols),
+      }
     );
     const quotedSymbols = new Set(quotes.map((q) => q.symbol.toUpperCase()));
     const failed = limited
       .map((l) => l.symbol)
       .filter((s) => !quotedSymbols.has(s.toUpperCase()));
+    const deferredSet = new Set(budgetDeferred.map((s) => s.toUpperCase()));
+    const failureReasons: Record<string, number> = {};
+    if (failed.length - budgetDeferred.length > 0) {
+      failureReasons["yahoo-unavailable"] =
+        failed.length - budgetDeferred.length;
+    }
+    if (budgetDeferred.length > 0) {
+      failureReasons["request-budget"] = budgetDeferred.length;
+    }
     if (quotes.length === 0) {
       throw new Error(
         `Yahoo Finance unavailable: no live quotes returned (0 of ${limited.length} symbols quoted` +
           (failed.length > 0 ? ` (failed: ${failed.slice(0, 5).join(", ")}${failed.length > 5 ? "…" : ""})` : "") +
+          (budgetDeferred.length > 0
+            ? ` (failure reasons: request-budget=${budgetDeferred.length})`
+            : "") +
           `). No fallback data substituted.`
       );
     }
@@ -1130,10 +1264,14 @@ export async function acquireUniverse(
             quotedCount: quotes.length,
             requestedCount: limited.length,
             failedSymbols: failed,
-            failureReasons: { "yahoo-unavailable": failed.length },
+            failureReasons,
             failureSamples: failed
               .slice(0, 3)
-              .map((s) => `${s}: yahoo-unavailable (Yahoo Finance returned no live quote)`),
+              .map((s) =>
+                deferredSet.has(s.toUpperCase())
+                  ? `${s}: request-budget (${STOCK_SUBREQUEST_BUDGET_DEFERRED_REASON})`
+                  : `${s}: yahoo-unavailable (Yahoo Finance returned no live quote)`
+              ),
           }
         : undefined;
     return {
@@ -1163,6 +1301,13 @@ export async function acquireUniverse(
       throw new Error("live-quotes mode requires quoteDeps.fetchQuote");
     }
     const cfg = opts.config ?? DEFAULT_SCREENER_CONFIG;
+    // Issue #1770: same run budget as the etrade-only leg below —
+    // batch + per-symbol passes share one ledger per run, and
+    // budget-deferred symbols are never re-attempted.
+    const budget = createStockSubrequestBudget(
+      cfg.acquisition.maxSubrequestsPerRun
+    );
+    const budgetDeferred = new Set<string>();
     const symbols =
       opts.symbols ?? filterTechnologySymbols(await resolveUniverseListings(opts, "live-quotes"));
     const maxSymbols = opts.maxSymbols ?? cfg.acquisition.defaultMaxSymbols;
@@ -1218,10 +1363,26 @@ export async function acquireUniverse(
     if (opts.quoteDeps.fetchQuotes) {
       const requestedSymbols = limited.map((listing) => listing.symbol);
       for (let i = 0; i < requestedSymbols.length; i += batchSize) {
+        // Issue #1770: an exhausted budget defers every remaining
+        // chunk without issuing (or retry-delaying) another fetch.
+        if (!budget.tryConsume()) {
+          for (const symbol of requestedSymbols.slice(i)) {
+            budgetDeferred.add(symbol.toUpperCase());
+            quoteErrors.set(symbol, stockBudgetError());
+          }
+          break;
+        }
         const chunk = requestedSymbols.slice(i, i + batchSize);
+        let batchAttempts = 0;
         try {
           const batchQuotes = await withRetries(
-            () => opts.quoteDeps!.fetchQuotes!(chunk),
+            () => {
+              batchAttempts++;
+              if (batchAttempts > 1 && !budget.tryConsume()) {
+                throw stockBudgetError();
+              }
+              return opts.quoteDeps!.fetchQuotes!(chunk);
+            },
             "Live quotes batch"
           );
           const bySymbol = new Map(
@@ -1259,17 +1420,43 @@ export async function acquireUniverse(
     // symbols a successful batch omitted. Bounded by
     // maxIndividualQuoteRetries so a provider-wide outage cannot
     // turn one screen into hundreds of requests.
+    // Issue #1770: budget-deferred symbols are excluded here and
+    // every fetch charges the run budget (first attempt synchronously
+    // before launch, retries on each re-invocation).
     const missingSymbols = limited
       .map((listing) => listing.symbol)
-      .filter((symbol) => !quotedSymbols.has(symbol.toUpperCase()));
+      .filter(
+        (symbol) =>
+          !quotedSymbols.has(symbol.toUpperCase()) &&
+          !budgetDeferred.has(symbol.toUpperCase())
+      );
     const retryBudget = Math.max(0, cfg.acquisition.maxIndividualQuoteRetries);
     const retrySymbols = missingSymbols.slice(0, retryBudget);
     for (let i = 0; i < retrySymbols.length; i += CONCURRENCY) {
+      if (budget.exhausted) {
+        for (const symbol of retrySymbols.slice(i)) {
+          budgetDeferred.add(symbol.toUpperCase());
+          quoteErrors.set(symbol, stockBudgetError());
+        }
+        break;
+      }
       const batch = retrySymbols.slice(i, i + CONCURRENCY);
       const results = await Promise.allSettled(
         batch.map(async (symbol) => {
+          if (!budget.tryConsume()) {
+            budgetDeferred.add(symbol.toUpperCase());
+            quoteErrors.set(symbol, stockBudgetError());
+            return { symbol, live: null, deferred: true as const };
+          }
+          let attempts = 0;
           const live = await withRetries(
-            () => opts.quoteDeps!.fetchQuote(symbol),
+            () => {
+              attempts++;
+              if (attempts > 1 && !budget.tryConsume()) {
+                throw stockBudgetError();
+              }
+              return opts.quoteDeps!.fetchQuote(symbol);
+            },
             "Live quote",
             symbol
           );
@@ -1279,17 +1466,19 @@ export async function acquireUniverse(
             const detail = !live ? "null-response" : `zero-price(lastPrice=${live.lastPrice})`;
             throw new Error(`No live quote returned for ${symbol} [${detail}]`);
           }
-          return { symbol, live };
+          return { symbol, live, deferred: false as const };
         })
       );
       for (let j = 0; j < results.length; j++) {
         const r = results[j];
-        if (r.status === "fulfilled") {
+        if (r.status === "fulfilled" && !r.value.deferred) {
           const listing = listingsBySymbol.get(batch[j].toUpperCase());
           if (listing) acceptQuote(listing, r.value.live);
-        } else {
+        } else if (r.status === "rejected") {
           quoteErrors.set(batch[j], r.reason);
         }
+        // Fulfilled + deferred: the budget error is already recorded
+        // in quoteErrors above; nothing further to do for the symbol.
       }
       // Pace batches to stay under provider rate limits.
       if (i + CONCURRENCY < retrySymbols.length) {
@@ -1452,6 +1641,15 @@ export async function acquireUniverse(
       throw new Error("etrade-only mode requires quoteDeps.fetchQuote");
     }
     const cfg = opts.config ?? DEFAULT_SCREENER_CONFIG;
+    // Issue #1770: the run's subrequest budget, shared by the batch
+    // and per-symbol passes below. Symbols deferred by the budget are
+    // tracked separately so the per-symbol pass never re-attempts
+    // them and the final loop reports request-budget, not a broker
+    // failure, for them.
+    const budget = createStockSubrequestBudget(
+      cfg.acquisition.maxSubrequestsPerRun
+    );
+    const budgetDeferred = new Set<string>();
     const symbols =
       opts.symbols ?? filterTechnologySymbols(await resolveUniverseListings(opts, "etrade-only"));
     const maxSymbols = opts.maxSymbols ?? cfg.acquisition.defaultMaxSymbols;
@@ -1506,10 +1704,26 @@ export async function acquireUniverse(
     if (opts.quoteDeps.fetchQuotes) {
       const requestedSymbols = limited.map((listing) => listing.symbol);
       for (let i = 0; i < requestedSymbols.length; i += batchSize) {
+        // Issue #1770: an exhausted budget defers every remaining
+        // chunk without issuing (or retry-delaying) another fetch.
+        if (!budget.tryConsume()) {
+          for (const symbol of requestedSymbols.slice(i)) {
+            budgetDeferred.add(symbol.toUpperCase());
+            quoteErrors.set(symbol, stockBudgetError());
+          }
+          break;
+        }
         const chunk = requestedSymbols.slice(i, i + batchSize);
+        let batchAttempts = 0;
         try {
           const batchQuotes = await withRetries(
-            () => opts.quoteDeps!.fetchQuotes!(chunk),
+            () => {
+              batchAttempts++;
+              if (batchAttempts > 1 && !budget.tryConsume()) {
+                throw stockBudgetError();
+              }
+              return opts.quoteDeps!.fetchQuotes!(chunk);
+            },
             "E*TRADE batch quote"
           );
           const bySymbol = new Map(
@@ -1549,17 +1763,45 @@ export async function acquireUniverse(
     // Per-symbol pass: covers brokers without a batch fetcher and symbols a
     // successful batch omitted. Bounded by maxIndividualQuoteRetries so a
     // broker-wide outage cannot turn one screen into hundreds of requests.
+    // Issue #1770: budget-deferred symbols are excluded here (the
+    // batch leg already recorded them) and every fetch charges the
+    // run budget — first attempt synchronously before launch, retries
+    // on each re-invocation — so the pass stops at the budget instead
+    // of issuing fetches past it.
     const missingSymbols = limited
       .map((listing) => listing.symbol)
-      .filter((symbol) => !quotedSymbols.has(symbol.toUpperCase()));
+      .filter(
+        (symbol) =>
+          !quotedSymbols.has(symbol.toUpperCase()) &&
+          !budgetDeferred.has(symbol.toUpperCase())
+      );
     const retryBudget = Math.max(0, cfg.acquisition.maxIndividualQuoteRetries);
     const retrySymbols = missingSymbols.slice(0, retryBudget);
     for (let i = 0; i < retrySymbols.length; i += CONCURRENCY) {
+      if (budget.exhausted) {
+        for (const symbol of retrySymbols.slice(i)) {
+          budgetDeferred.add(symbol.toUpperCase());
+          quoteErrors.set(symbol, stockBudgetError());
+        }
+        break;
+      }
       const batch = retrySymbols.slice(i, i + CONCURRENCY);
       const results = await Promise.allSettled(
         batch.map(async (symbol) => {
+          if (!budget.tryConsume()) {
+            budgetDeferred.add(symbol.toUpperCase());
+            quoteErrors.set(symbol, stockBudgetError());
+            return { symbol, live: null, deferred: true as const };
+          }
+          let attempts = 0;
           const live = await withRetries(
-            () => opts.quoteDeps!.fetchQuote(symbol),
+            () => {
+              attempts++;
+              if (attempts > 1 && !budget.tryConsume()) {
+                throw stockBudgetError();
+              }
+              return opts.quoteDeps!.fetchQuote(symbol);
+            },
             "E*TRADE",
             symbol
           );
@@ -1569,17 +1811,19 @@ export async function acquireUniverse(
             const detail = !live ? "null-response" : `zero-price(lastPrice=${live.lastPrice})`;
             throw new Error(`E*TRADE returned no quote for ${symbol} [${detail}]`);
           }
-          return { symbol, live };
+          return { symbol, live, deferred: false as const };
         })
       );
       for (let j = 0; j < results.length; j++) {
         const r = results[j];
-        if (r.status === "fulfilled") {
+        if (r.status === "fulfilled" && !r.value.deferred) {
           const listing = listingsBySymbol.get(batch[j].toUpperCase());
           if (listing) acceptQuote(listing, r.value.live);
-        } else {
+        } else if (r.status === "rejected") {
           quoteErrors.set(batch[j], r.reason);
         }
+        // Fulfilled + deferred: the budget error is already recorded
+        // in quoteErrors above; nothing further to do for the symbol.
       }
       // Pace batches to stay under E*TRADE rate limits.
       if (i + CONCURRENCY < retrySymbols.length) {
