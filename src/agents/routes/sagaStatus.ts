@@ -15,7 +15,10 @@
  *
  * Owner-scoped: a saga with no audit rows for the session user
  * is 404 (no cross-user leak — the filter is applied here even
- * though the audit read is agent-scoped). The status route is
+ * though the audit read is agent-scoped), unless its
+ * tenant-scoped projection row exists (issue #2777 fallback for
+ * the pre-audit window — same tenant scoping as the jobs/history
+ * projection read, never a cross-tenant answer). The status route is
  * NOT flag-gated: a read path for one's own sagas must survive
  * a flag flip. Live instance status is best-effort: an unbound
  * binding or a missing instance degrades to audit-derived
@@ -23,6 +26,9 @@
  */
 import type { Env } from "../../types";
 import type { ShardJobRow } from "../../data/shardJobPorts";
+import type { ShardJobReader } from "../../data/shardJobPorts";
+import { createShardJobAdapter } from "../../data/createShardJobPorts";
+import { resolveIaaaTenant } from "../../security/iaaaGithubEndToEnd";
 import {
   sagaAuditOwnerStub,
   type AuditOwnerStub,
@@ -207,6 +213,50 @@ export async function recordSagaProjectionRow(
 export interface SagaStatusOverrides {
   auditStub?: AuditOwnerStub;
   sagaBinding?: SagaStatusBinding;
+  /** Test seam: session tenant for the projection fallback. Absent → resolveIaaaTenant(env). */
+  tenantId?: string;
+  /** Test seam: projection reader. Absent → createShardJobAdapter(env) (null when unbound). */
+  projectionReader?: Pick<ShardJobReader, "listJobsForChain">;
+}
+
+/**
+ * Issue #2777 — projection fallback. When no audit rows match,
+ * the saga may simply be too young for its first audit row: the
+ * entry route wrote a projection row synchronously at start.
+ * Answer from that row (its submitted stage) instead of 404ing
+ * the panel's first polls — tenant-scoped exactly as
+ * /api/jobs/history reads it (listJobsForChain filters tenantId
+ * AND chainId at the SQL layer), and only for the saga's own
+ * projection row (jobKey "saga"). Returns null when there is no
+ * such row, no reader, or the read fails: the caller then
+ * answers the old 404. A fallback row never overrides audit
+ * stages — this runs only when zero audit rows matched.
+ */
+async function readSagaProjectionFallback(
+  env: Env,
+  sagaId: string,
+  overrides?: SagaStatusOverrides,
+): Promise<SagaJobRow | null> {
+  const reader =
+    overrides?.projectionReader ?? createShardJobAdapter(env);
+  if (!reader) return null;
+  const tenantId = overrides?.tenantId ?? resolveIaaaTenant(env);
+  let rows: ShardJobRow[];
+  try {
+    rows = await reader.listJobsForChain(tenantId, sagaId);
+  } catch {
+    // Best-effort visibility: a failed fallback degrades to the
+    // old 404, never a 503 — the audit read already answered.
+    return null;
+  }
+  const row = rows.find((r) => r.jobKey === "saga");
+  if (!row) return null;
+  return {
+    stage: row.stage,
+    status: row.status,
+    detail: row.detail,
+    ...(row.updatedAtMs ? { updatedAtMs: row.updatedAtMs } : {}),
+  };
 }
 
 /** Read all saga audit rows through the SEARCH_AGENT stub (agent-scoped, one read). */
@@ -237,9 +287,10 @@ async function readSagaAuditRows(
 /**
  * GET /api/saga/:sagaId/status. Returns null for non-matching
  * paths. 401 without a session; 503 when the audit stub is
- * unbound or the read fails; 404 when no rows exist for the
- * session user; otherwise 200 with {jobs} + best-effort live
- * instance state.
+ * unbound or the read fails; 404 when no audit rows exist for
+ * the session user AND no projection row exists for the session
+ * tenant (issue #2777 fallback); otherwise 200 with {jobs} +
+ * best-effort live instance state.
  */
 export async function handleSagaStatusRoutes(
   request: Request,
@@ -281,10 +332,20 @@ export async function handleSagaStatusRoutes(
       payload["sagaId"] === sagaId && payload["userLogin"] === sessionLogin
     );
   });
-  if (own.length === 0) {
-    return Response.json({ error: "saga not found" }, { status: 404 });
+  let jobs: SagaJobRow[];
+  if (own.length > 0) {
+    jobs = mapSagaAuditToJobs(own, sagaId);
+  } else {
+    // Issue #2777: a just-created saga has no audit rows yet —
+    // answer from its synchronously-written projection row
+    // instead of 404ing the panel's first polls. Audit rows win
+    // the moment they exist (this branch never runs then).
+    const projected = await readSagaProjectionFallback(env, sagaId, overrides);
+    if (!projected) {
+      return Response.json({ error: "saga not found" }, { status: 404 });
+    }
+    jobs = [projected];
   }
-  const jobs = mapSagaAuditToJobs(own, sagaId);
   const ended = own.find((row) => row["type"] === "saga.ended");
   const endedCode =
     ended && typeof (ended["payload"] as Record<string, unknown>)["outcomeCode"] === "string"

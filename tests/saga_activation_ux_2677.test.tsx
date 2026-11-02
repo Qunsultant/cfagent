@@ -437,7 +437,7 @@ describe("SagaStartSection", () => {
     expect(startCalls).toBe(0);
   });
 
-  it("starts on 202, shows the disclosure and status link, and polls stage rows", async () => {
+  it("starts on 202, shows the disclosure and no URL, and polls stage rows", async () => {
     await act(async () => {
       root.render(<SagaStartSection userLogin="alice" />);
     });
@@ -449,7 +449,12 @@ describe("SagaStartSection", () => {
     await flush();
     expect(startCalls).toBe(1);
     expect(container.textContent).toContain("replacement-run credit would apply");
-    expect(container.textContent).toContain("/api/saga/saga-test-1/status");
+    // Split variant (#2777): the receipt renders no URL at all —
+    // neither the raw status URL nor the Workflow Runs link (held
+    // for the extension follow-up).
+    expect(container.querySelectorAll("a")).toHaveLength(0);
+    expect(container.textContent).not.toContain("/api/saga/");
+    expect(container.textContent).not.toContain("Workflow Runs");
     expect(container.textContent).toContain("payment");
     expect(container.textContent).toContain("screen");
   });
