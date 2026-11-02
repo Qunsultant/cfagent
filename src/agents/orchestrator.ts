@@ -2705,7 +2705,7 @@ export class OrchestratorAgent extends PortThink {
     // Workflow Runs ledger (routes/workflowRuns.ts), after enrichment.
     const workflowRunsResponse = await handleWorkflowRunsRoutes(request, url, path, sessionId, {
       ensureTables: () => this.ensureTables(),
-      userLogin: request.headers.get("x-user-login") || "",
+      userLogin: request.headers.get("x-user-login") || "", env: this.env,
     });
     if (workflowRunsResponse) return workflowRunsResponse;
 

@@ -992,6 +992,175 @@ export function runFromOutcome(
   };
 }
 
+/** Newest-first ordering for run lists. Ties break by id so the order is stable. */
+export function compareWorkflowRunsNewestFirst(a: WorkflowRun, b: WorkflowRun): number {
+  return a.startedAt === b.startedAt ? (a.id < b.id ? 1 : -1) : a.startedAt < b.startedAt ? 1 : -1;
+}
+
+/** One audit-mapped stage row for a saga chain (the mapSagaAuditToJobs output shape). */
+export interface SagaChainStageRow {
+  stage: string;
+  status: string;
+  detail: string;
+  updatedAtMs?: number;
+  resultJson?: Record<string, unknown>;
+}
+
+/** Inputs for building a saga run in the Workflow Runs surface (issue #2780). */
+export interface SagaChainRunInput {
+  sagaId: string;
+  /** Audit-mapped stage rows in audit order; empty when nothing mapped. */
+  jobs: SagaChainStageRow[];
+  /** The saga's own projection row, when the D1 read answered. */
+  projection: {
+    stage: string;
+    status: string;
+    detail: string;
+    createdAtMs: number;
+    updatedAtMs: number;
+  } | null;
+  triggeredBy: string | null;
+  /** The saga.ended outcomeCode, when an ended row exists. */
+  endedCode?: string | null;
+  /** The saga.ended row's timestamp, when one exists. */
+  endedAtMs?: number | null;
+  /** The saga.started payload fields for run inputs. */
+  started?: {
+    family?: string | null;
+    rail?: string | null;
+    runRequestId?: string | null;
+  } | null;
+}
+
+function msToIso(ms: number | null | undefined): string | null {
+  if (typeof ms !== "number" || !Number.isFinite(ms)) return null;
+  try {
+    return new Date(ms).toISOString();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Build a saga chain run for the Workflow Runs surface (issue #2780).
+ * Stages come from the saga's audit rows; when the audit mapping yields
+ * nothing but a projection row exists, the run shows that row's
+ * submitted stage instead. When neither exists, returns null so the
+ * caller skips the chain rather than fabricating a run. The trigger is
+ * never guessed: audit payloads and projection rows carry no trigger
+ * field, so it stays "unknown" ("Not recorded by the source").
+ */
+export function runFromSagaChain(input: SagaChainRunInput): WorkflowRun | null {
+  const { sagaId } = input;
+  let stages: WorkflowRunStage[];
+  if (input.jobs.length > 0) {
+    stages = input.jobs.map((job, i) => {
+      const at = msToIso(job.updatedAtMs);
+      const failed = job.status === "failed";
+      const payload = job.resultJson ?? {};
+      const error = failed
+        ? typeof payload.error === "string"
+          ? payload.error
+          : typeof payload.reason === "string"
+            ? payload.reason
+            : null
+        : null;
+      return {
+        key: `${sagaId}:${job.stage}:${i}`,
+        order: i,
+        stage: job.stage,
+        label: stageLabel(job.stage, "saga"),
+        status: job.status,
+        recordedBy: "stage-transition" as const,
+        startedAt: at,
+        finishedAt: job.status === "completed" || failed ? at : null,
+        durationMs: null,
+        detail: job.detail,
+        reason: null,
+        error,
+        capability: "saga",
+        jobKind: null,
+        channel: null,
+        input: null,
+        output: compactJsonValue(payload),
+      };
+    });
+  } else if (input.projection) {
+    const p = input.projection;
+    stages = [
+      {
+        key: `${sagaId}:projection`,
+        order: 0,
+        stage: p.stage,
+        label: stageLabel(p.stage, "saga"),
+        status: p.status,
+        recordedBy: "stage-transition" as const,
+        startedAt: msToIso(p.updatedAtMs),
+        finishedAt: null,
+        durationMs: null,
+        detail: p.detail,
+        reason: null,
+        error: null,
+        capability: "saga",
+        jobKind: null,
+        channel: null,
+        input: null,
+        output: null,
+      },
+    ];
+  } else {
+    return null;
+  }
+  const ended = input.endedCode ?? null;
+  const status: WorkflowRunStatus = ended
+    ? ended.startsWith("SUCCESS_")
+      ? "completed"
+      : "failed"
+    : stages.some((s) => s.status === "failed")
+      ? "failed"
+      : "running";
+  const startedAt =
+    (input.projection ? msToIso(input.projection.createdAtMs) : null) ??
+    stages
+      .map((s) => s.startedAt)
+      .filter((v): v is string => v !== null)
+      .sort()[0] ??
+    new Date(0).toISOString();
+  const finishedAt = msToIso(input.endedAtMs);
+  const firstError = stages.map((s) => s.error).find((e) => e !== null && e !== undefined) ?? null;
+  const started = input.started;
+  return {
+    id: sagaId,
+    runId: sagaId,
+    workflow: FAMILY_WORKFLOW.goal,
+    family: "goal",
+    title: `Saga run — ${sagaId}`,
+    source: "job-chain",
+    trigger: "unknown",
+    triggerDetail: "Not recorded by the source",
+    triggeredBy: input.triggeredBy,
+    status,
+    startedAt,
+    finishedAt,
+    durationMs: durationBetween(startedAt, finishedAt),
+    stageCount: stages.length,
+    completedStages: stages.filter((s) => s.status === "completed").length,
+    failedStages: stages.filter((s) => s.status === "failed").length,
+    stages,
+    inputs: started
+      ? compactJsonValue({
+          family: started.family ?? "goal",
+          ...(started.rail ? { rail: started.rail } : {}),
+          ...(started.runRequestId ? { runRequestId: started.runRequestId } : {}),
+        })
+      : {},
+    outputs: ended ? { outcomeCode: ended } : {},
+    artifacts: [],
+    deliveryStates: {},
+    error: firstError ?? (ended && !ended.startsWith("SUCCESS_") ? ended : null),
+  };
+}
+
 /** Group, attach outcomes, and merge — newest first, capped at limit. */
 export function buildWorkflowRuns(input: BuildWorkflowRunsInput): WorkflowRun[] {
   const limit = Math.max(1, Math.min(Math.floor(input.limit ?? 40) || 40, 100));
@@ -1043,7 +1212,7 @@ export function buildWorkflowRuns(input: BuildWorkflowRunsInput): WorkflowRun[] 
     runs.push(runFromOutcome(outcome, ownTransitions, unified));
   }
 
-  runs.sort((a, b) => (a.startedAt === b.startedAt ? (a.id < b.id ? 1 : -1) : a.startedAt < b.startedAt ? 1 : -1));
+  runs.sort(compareWorkflowRunsNewestFirst);
   return runs.slice(0, limit);
 }
 
