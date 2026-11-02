@@ -17,6 +17,7 @@ import { ResearchReportActions } from "../ResearchReportActions";
 import { stageBundleCandidate } from "../portfolioRiskApi";
 import { defaultRegistry } from "../../trading/options/strategies/catalog";
 import { StrategyDiscoveryPanel } from "./StrategyDiscoveryPanel";
+import { ConfidenceMethodBreakdown } from "./ConfidenceMethodBreakdown";
 import { DiscoveryRunsPanel } from "./DiscoveryRunsPanel";
 import { ScreeningActivityPanel } from "./ScreeningActivityPanel";
 import { UniversalChart } from "../components/UniversalChart";
@@ -264,6 +265,10 @@ function BestTradeCard({
           )}
         </div>
       </header>
+      {/* Issue #1773 (HAX #9): the confidence rating travels with its
+          method breakdown — margin, liquidity, POP, freshness, and
+          blockers — never as a single unexplained number. */}
+      <ConfidenceMethodBreakdown pick={pick} />
       <ul className="options-explanations">{pick.rationale.map((line) => <li key={line}>{line}</li>)}</ul>
       {pick.blockers.length > 0 && <ul className="options-warnings">{pick.blockers.map((b) => <li key={b}>{b}</li>)}</ul>}
       {pick.tradePlan && pick.tradePlan.length > 0 && (
