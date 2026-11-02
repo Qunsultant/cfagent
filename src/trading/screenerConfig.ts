@@ -24,6 +24,20 @@ export interface ScreenerAcquisitionConfig {
    * broker-wide outage cannot turn one screen into hundreds of requests.
    */
   maxIndividualQuoteRetries: number;
+  /**
+   * Issue #1770: per-run subrequest budget for stock quote acquisition
+   * (batch calls + per-symbol fetches, retries included — every actual
+   * upstream invocation charges one unit). The options side already
+   * enforces its own ledger (#1204/#1545); this is the stock-side
+   * twin. Default 35 leaves headroom under the Workers Free 50
+   * external-subrequest cap for the rest of the invocation, exactly
+   * like the options default; the default E*TRADE path costs at most
+   * 33 attempts (1 batch chunk x 3 retries + 10 per-symbol x 3), so
+   * ordinary runs are untouched and only fan-out past the budget
+   * defers. Run-scoped override: pass `config` to acquireUniverse;
+   * built-in default here.
+   */
+  maxSubrequestsPerRun: number;
   /** ms pause between quote batches (rate-limit pacing). */
   batchPauseMs: number;
   /** Default max standout opportunities per run. */
@@ -108,6 +122,7 @@ export const DEFAULT_SCREENER_CONFIG: ScreenerConfig = {
     quoteConcurrency: 10,
     quoteBatchSize: 50,
     maxIndividualQuoteRetries: 10,
+    maxSubrequestsPerRun: 35,
     batchPauseMs: 0,
     defaultMaxItems: 5,
     historyLimit: 20,
