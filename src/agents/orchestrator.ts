@@ -116,6 +116,7 @@ import { handleSchemaRoutes } from "./routes/schema";
 import { handleAdsRevenueReferralsRoutes, handleReferralsAdsRoutes } from "./routes/adsRevenueReferrals";
 import { handleAuditRoutes } from "./routes/audit";
 import { handleMeterRoutes } from "./routes/meter";
+import { handleDlqRoutes } from "./routes/dlq";
 import { handleDataProviderRoutes } from "./routes/dataProviders";
 import { buildDataProviderPorts } from "../data/buildDataProviderPorts";
 import type { D1ProviderConfigAdapter } from "../data/d1ProviderConfigAdapter";
@@ -2672,6 +2673,9 @@ export class OrchestratorAgent extends PortThink {
 
     const meter = await handleMeterRoutes(request, url, path, sessionId, { sql: this.ctx.storage.sql, env: this.env });
     if (meter) return meter;
+
+    const dlq = await handleDlqRoutes(request, url, path, sessionId, { env: this.env });
+    if (dlq) return dlq;
 
     // Issue #1170 (E3): data-provider lifecycle routes are handled
     // by src/agents/routes/dataProviders.ts. Invoked here (after the

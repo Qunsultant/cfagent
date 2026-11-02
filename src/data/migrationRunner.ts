@@ -1315,6 +1315,36 @@ CREATE TABLE IF NOT EXISTS agent_store_operators (
 `,
 };
 
+export const MIGRATION_0033_DEAD_LETTER_STORE: DataMigration = {
+  version: 33,
+  name: "0033_dead_letter_store",
+  sql: `
+CREATE TABLE IF NOT EXISTS agent_dead_letter_records (
+  id TEXT PRIMARY KEY,
+  queue TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  message_id TEXT,
+  run_id TEXT,
+  unit_id TEXT,
+  actor_login TEXT,
+  actor_kind TEXT,
+  subscriber TEXT,
+  detail TEXT,
+  envelope_json TEXT,
+  created_at_ms INTEGER NOT NULL,
+  replayed_at_ms INTEGER,
+  replay_outcome TEXT,
+  replay_token TEXT
+);
+CREATE TABLE IF NOT EXISTS dlq_depth_state (
+  id TEXT PRIMARY KEY,
+  alerted_at_ms INTEGER,
+  depth_at_alert INTEGER,
+  claim_token TEXT
+);
+`,
+};
+
 export const MIGRATION_0026_TENANT_AUTO_REFRESH: DataMigration = {
   version: 26,
   name: "0026_tenant_auto_refresh",
@@ -1399,6 +1429,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [
   MIGRATION_0030_BILLING_CUSTOMERS,
   MIGRATION_0031_REFERRAL_ATTRIBUTION,
   MIGRATION_0032_STORE_OPERATORS,
+  MIGRATION_0033_DEAD_LETTER_STORE,
 ];
 
 function splitStatements(sqlText: string): string[] {

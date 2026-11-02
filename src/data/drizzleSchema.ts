@@ -1079,3 +1079,35 @@ export const agentMeshProposals = sqliteTable("agent_mesh_proposals", {
   createdAtMs: integer("created_at_ms").notNull(),
   updatedAtMs: integer("updated_at_ms").notNull(),
 });
+
+/**
+ * Phase 5 Slice 1 (issue #2000) — one row per persisted
+ * terminal drop, plus the single depth-incident row. The
+ * envelope is JSON text (parse before reading fields); the
+ * replay mark is the guarded claim (replayed_at_ms NULL
+ * guard + replay_token check). DDL lives in MIGRATION_0033.
+ */
+export const agentDeadLetterRecords = sqliteTable("agent_dead_letter_records", {
+  id: text("id").primaryKey(),
+  queue: text("queue").notNull(),
+  reason: text("reason").notNull(),
+  messageId: text("message_id"),
+  runId: text("run_id"),
+  unitId: text("unit_id"),
+  actorLogin: text("actor_login"),
+  actorKind: text("actor_kind"),
+  subscriber: text("subscriber"),
+  detail: text("detail"),
+  envelopeJson: text("envelope_json"),
+  createdAtMs: integer("created_at_ms").notNull(),
+  replayedAtMs: integer("replayed_at_ms"),
+  replayOutcome: text("replay_outcome"),
+  replayToken: text("replay_token"),
+});
+
+export const dlqDepthState = sqliteTable("dlq_depth_state", {
+  id: text("id").primaryKey(),
+  alertedAtMs: integer("alerted_at_ms"),
+  depthAtAlert: integer("depth_at_alert"),
+  claimToken: text("claim_token"),
+});

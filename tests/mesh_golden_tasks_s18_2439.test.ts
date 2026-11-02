@@ -285,7 +285,8 @@ describe("golden harness: runner + store (#2439)", () => {
     // #2656 (Phase 2.1) appends migration 0030 (billing customers) after 0029.
     // #2657 (Phase 2.2) appends migration 0031 (referral attribution) after 0030.
     // #2680 appends migration 0032 (store operators) after 0031.
-    expect(Math.max(...ALL_MIGRATIONS.map((m) => m.version))).toBe(32);
+    // Phase 5 Slice 1 (#2000) appends migration 0033 (dead-letter store) after 0032.
+    expect(Math.max(...ALL_MIGRATIONS.map((m) => m.version))).toBe(33);
     expect(getTableName(agentMeshEvalResults)).toBe("agent_mesh_eval_results");
   });
 });
