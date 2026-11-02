@@ -100,6 +100,16 @@ describe("E*TRADE OAuth 1.0a Full Token Lifecycle & Account Discovery", () => {
       const twoDaysAgoIso = new Date(now - 48 * 3600 * 1000).toISOString();
       expect(isTokenExpiredEt(twoDaysAgoIso, now)).toBe(true);
     });
+
+    it("handles DST transition days (25-hour fall-back and 23-hour spring-forward) without false expiration (#2742)", () => {
+      // 2026-11-01 is US DST fall-back (25-hour day). Token stored at 23:00 ET should not expire before midnight ET.
+      const storedIso = "2026-11-01T23:00:00-05:00";
+      const beforeMidnightMs = new Date("2026-11-01T23:55:00-05:00").getTime();
+      expect(isTokenExpiredEt(storedIso, beforeMidnightMs)).toBe(false);
+
+      const afterMidnightMs = new Date("2026-11-02T00:05:00-05:00").getTime();
+      expect(isTokenExpiredEt(storedIso, afterMidnightMs)).toBe(true);
+    });
   });
 
   describe("Step 1: Request Token Handshake", () => {

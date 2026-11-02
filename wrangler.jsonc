@@ -298,6 +298,10 @@
     // Issue #2596: Options Screener product programme slice 1.
     // Enables the top-level Options Screener nav item and sub-menus.
     // Rollback is removing this var (or setting to "0") and redeploying.
-    "FEATURE_OPTIONS_SCREENER": "1"
+    "FEATURE_OPTIONS_SCREENER": "1",
+    // Issue #2742: Flagship monetization flag enabled (owner direction).
+    // Native payment workflow and charging active by default.
+    // Rollback is setting this var to "0" (or toggling off in Flagship dashboard).
+    "FEATURE_MONETIZATION": "1"
   }
 }
