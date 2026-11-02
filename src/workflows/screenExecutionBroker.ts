@@ -48,6 +48,7 @@ import {
 } from "./screenerWorkflowRoutes";
 import type { WorkflowHandle, WorkflowJobCommand, WorkflowShard } from "./workflowPorts";
 import type { StockScreenRunSpec } from "./stockScreenRunSpec";
+import { workflowTriggerForSpec } from "./stockScreenRunSpec";
 
 export type ScreenWorkflowStarter = (
   env: Env,
@@ -97,7 +98,13 @@ export async function startStockScreenWorkflowOrNull(args: {
   // routing decision for source "goal", not a failure.
   if (spec.source === "goal") return null;
   if (!spec.asyncRequested) return null;
-  const jobId = manualWorkflowJobId(spec.universe);
+  // Issue #2908 (G1): the job id and identity come from the
+  // spec when it carries them — no field re-derived by hand
+  // downstream. The workflow trigger maps from the spec
+  // trigger (scheduled only for scheduled specs); the spec's
+  // own trigger rides as specTrigger so NLQ/mesh/research
+  // provenance survives the workflow hop.
+  const jobId = spec.jobId ?? manualWorkflowJobId(spec.universe);
   const shards: WorkflowShard[] = shardsForUniverse(spec.universe);
   const starter = args.starter ?? tryStartScreenerWorkflow;
   // ND throw propagates by design — see module header.
@@ -105,11 +112,16 @@ export async function startStockScreenWorkflowOrNull(args: {
     jobId,
     type: "run-screen",
     source: "manual",
-    trigger: "manual",
-    userLogin,
+    trigger: workflowTriggerForSpec(spec),
+    ...(spec.trigger !== undefined ? { specTrigger: spec.trigger } : {}),
+    userLogin: spec.userLogin ?? userLogin,
     role: "parent",
     tenantId: workflowTenantId(env),
     shards,
+    ...(spec.scheduleId !== undefined ? { scheduleId: spec.scheduleId } : {}),
+    ...(spec.goalId !== undefined ? { goalId: spec.goalId } : {}),
+    ...(spec.patternRef !== undefined ? { patternRef: spec.patternRef } : {}),
+    ...(spec.presetRef !== undefined ? { presetRef: spec.presetRef } : {}),
     deliver: spec.deliver,
     ...(spec.provider ? { provider: spec.provider } : {}),
     filters: spec.filters as unknown as Record<string, unknown>,

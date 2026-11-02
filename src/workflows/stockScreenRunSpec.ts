@@ -62,7 +62,49 @@ export interface StockScreenDelivery {
   generatePdf?: boolean;
 }
 
-export type StockScreenSource = "etrade" | "market-data" | "goal";
+export type StockScreenSource = "etrade" | "market-data" | "goal" | "nlq" | "mesh" | "research";
+
+/**
+ * Issue #2908 (G1 under #2764) — the run's trigger vocabulary.
+ * The workflow command's trigger stays "manual" | "scheduled"
+ * (workflowPorts validation); this richer trigger is the spec's
+ * provenance record and maps to the workflow trigger via
+ * workflowTriggerForSpec. "research" is the research-tab
+ * screener (the market-data screen route); "nlq" / "mesh"
+ * are the chat / mesh-door screens, whose commands carry
+ * specTrigger (workflowPorts) so the provenance survives
+ * the workflow hop instead of collapsing to "manual".
+ */
+export type StockScreenTrigger =
+  | "manual"
+  | "scheduled"
+  | "nlq"
+  | "mesh"
+  | "goal"
+  | "research";
+
+/** Issue #2908 (G1) — a pattern pinned at run creation: id + version, never re-resolved downstream. */
+export interface StockScreenPatternRef {
+  patternId: string;
+  version: string;
+}
+
+/** Issue #2908 (G1) — a preset resolved at run time: id + resolution timestamp. */
+export interface StockScreenPresetRef {
+  presetId: string;
+  resolvedAt: string;
+}
+
+/** Issue #2908 (G1) — the provenance fields every path populates; all but trigger are optional because a path records only what it knows (genuinely unavailable fields stay absent, never fabricated). */
+export interface StockScreenRunProvenance {
+  trigger?: StockScreenTrigger;
+  userLogin?: string;
+  scheduleId?: string;
+  jobId?: string;
+  goalId?: string;
+  patternRef?: StockScreenPatternRef;
+  presetRef?: StockScreenPresetRef;
+}
 
 /**
  * The normalized run spec both REST routes execute from. `minScore`
@@ -70,7 +112,7 @@ export type StockScreenSource = "etrade" | "market-data" | "goal";
  * never forwarded into the engine filter — `filters` already
  * excludes it, as parseStockScreenRequest splits it out.
  */
-export interface StockScreenRunSpec {
+export interface StockScreenRunSpec extends StockScreenRunProvenance {
   source: StockScreenSource;
   /** Undefined for E*TRADE (agent default) and goal (goal-owned); "yahoo" for market-data. */
   provider?: "yahoo";
@@ -88,6 +130,59 @@ export interface StockScreenRunSpec {
     goalKind: string;
     outlook: string;
     structures: string[];
+  };
+  /**
+   * Issue #2908 (G1): the run trigger. The builder always sets
+   * it (goal source -> "goal", otherwise "manual" unless the
+   * caller passes one); hand-built specs must set it too —
+   * downstream code never re-derives it, and the UI renders
+   * a missing trigger as "unknown", never as "scheduled".
+   */
+  trigger: StockScreenTrigger;
+}
+
+/**
+ * Issue #2908 (G1): overlay provenance onto a spec without
+ * re-deriving anything. Only defined values win; a path that
+ * does not know a field leaves it absent rather than
+ * fabricating it. Pure — used by REST (builder), scheduled,
+ * NLQ, mesh, goal, and research paths alike.
+ */
+export function withRunProvenance(
+  spec: StockScreenRunSpec,
+  provenance: StockScreenRunProvenance,
+): StockScreenRunSpec {
+  const out: StockScreenRunSpec = { ...spec };
+  if (provenance.trigger !== undefined) out.trigger = provenance.trigger;
+  if (provenance.userLogin !== undefined) out.userLogin = provenance.userLogin;
+  if (provenance.scheduleId !== undefined) out.scheduleId = provenance.scheduleId;
+  if (provenance.jobId !== undefined) out.jobId = provenance.jobId;
+  if (provenance.goalId !== undefined) out.goalId = provenance.goalId;
+  if (provenance.patternRef !== undefined) out.patternRef = provenance.patternRef;
+  if (provenance.presetRef !== undefined) out.presetRef = provenance.presetRef;
+  return out;
+}
+
+/** Issue #2908 (G1): the workflow command trigger for a spec — "scheduled" only for scheduled specs, "manual" otherwise (workflowPorts admits nothing else). The spec's own trigger rides the command as specTrigger. */
+export function workflowTriggerForSpec(spec: StockScreenRunSpec): "manual" | "scheduled" {
+  return spec.trigger === "scheduled" ? "scheduled" : "manual";
+}
+
+/**
+ * Issue #2908 (G1): the spec fields a canonical mas_reports
+ * body carries, as a spreadable object (defined fields only).
+ * Canonical writers spread this instead of re-deriving
+ * trigger/userLogin/refs by hand from the run result.
+ */
+export function specCanonicalFields(spec: StockScreenRunSpec): Record<string, unknown> {
+  return {
+    trigger: spec.trigger,
+    ...(spec.userLogin !== undefined ? { userLogin: spec.userLogin } : {}),
+    ...(spec.scheduleId !== undefined ? { scheduleId: spec.scheduleId } : {}),
+    ...(spec.jobId !== undefined ? { jobId: spec.jobId } : {}),
+    ...(spec.goalId !== undefined ? { goalId: spec.goalId } : {}),
+    ...(spec.patternRef !== undefined ? { patternRef: spec.patternRef } : {}),
+    ...(spec.presetRef !== undefined ? { presetRef: spec.presetRef } : {}),
   };
 }
 
@@ -107,6 +202,14 @@ export function buildStockScreenRunSpec(args: {
   source: StockScreenSource;
   /** Pre-admitted mode (E*TRADE route: admitted before listings). */
   modeSelection?: ScreenModeSelection;
+  /** Issue #2908 (G1): provenance the route knows; trigger defaults by source (goal -> "goal", else "manual"). */
+  trigger?: StockScreenTrigger;
+  userLogin?: string;
+  scheduleId?: string;
+  jobId?: string;
+  goalId?: string;
+  patternRef?: StockScreenPatternRef;
+  presetRef?: StockScreenPresetRef;
 }): BuildStockScreenRunSpecResult {
   const modeSelection =
     args.modeSelection ??
@@ -140,6 +243,15 @@ export function buildStockScreenRunSpec(args: {
       ...(modeSelection.screenMode
         ? { screenMode: modeSelection.screenMode, screenIntent: modeSelection.screenIntent }
         : {}),
+      // Issue #2908 (G1): provenance, set once here — never
+      // re-derived downstream. Undefined fields stay absent.
+      trigger: args.trigger ?? (args.source === "goal" ? "goal" : "manual"),
+      ...(args.userLogin !== undefined ? { userLogin: args.userLogin } : {}),
+      ...(args.scheduleId !== undefined ? { scheduleId: args.scheduleId } : {}),
+      ...(args.jobId !== undefined ? { jobId: args.jobId } : {}),
+      ...(args.goalId !== undefined ? { goalId: args.goalId } : {}),
+      ...(args.patternRef !== undefined ? { patternRef: args.patternRef } : {}),
+      ...(args.presetRef !== undefined ? { presetRef: args.presetRef } : {}),
     },
   };
 }

@@ -43,10 +43,20 @@ import {
   type StockScreenPlan,
 } from "./stockScreenPlanner";
 
-/** Translate a goal plan's stock leg to its canonical run spec. Pure: the filter is copied verbatim. */
-export function goalStockSpecFromPlan(plan: GoalScreenPlan): StockScreenRunSpec {
+/**
+ * Translate a goal plan's stock leg to its canonical run spec.
+ * Pure: the filter is copied verbatim. Issue #2908 (G1): the
+ * spec now carries trigger "goal" and the goal id when the
+ * caller knows it — the goal leg is distinguishable in the
+ * canonical body and in replay, not re-derived downstream.
+ */
+export function goalStockSpecFromPlan(
+  plan: GoalScreenPlan,
+  opts?: { goalId?: string; userLogin?: string },
+): StockScreenRunSpec {
   return {
     source: "goal",
+    trigger: "goal",
     deliver: false,
     filters: { ...plan.stockFilter },
     universe: "ALL",
@@ -57,6 +67,8 @@ export function goalStockSpecFromPlan(plan: GoalScreenPlan): StockScreenRunSpec 
       outlook: plan.outlook,
       structures: [...plan.structures],
     },
+    ...(opts?.goalId !== undefined ? { goalId: opts.goalId } : {}),
+    ...(opts?.userLogin !== undefined ? { userLogin: opts.userLogin } : {}),
   };
 }
 
