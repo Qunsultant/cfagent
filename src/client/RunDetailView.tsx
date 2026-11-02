@@ -167,7 +167,7 @@ export function RunDetailView({ run, confirmations, confirmationsLoading, chrome
           {run.patternQualifications && run.patternQualifications.length > 0 && (
             <Notice tone="warning" density="compact">
               Qualified run — these pattern guardrails were NOT enforced by this screen and are recorded here, never silently dropped:
-              <ul style={{ margin: "0.25rem 0 0", paddingLeft: "1.25rem" }}>
+              <ul style={{ marginTop: "var(--space-1)", paddingLeft: "var(--space-4)" }}>
                 {run.patternQualifications.map((line) => (
                   <li key={line}>{line}</li>
                 ))}
@@ -237,7 +237,7 @@ export function RunDetailView({ run, confirmations, confirmationsLoading, chrome
                 {replay.replay.patternQualifications && replay.replay.patternQualifications.length > 0 && (
                   <div style={{ marginTop: "0.25rem" }}>
                     Qualified — guardrails not enforced on this run:
-                    <ul style={{ margin: "0.25rem 0 0", paddingLeft: "1.25rem" }}>
+                    <ul style={{ marginTop: "var(--space-1)", paddingLeft: "var(--space-4)" }}>
                       {replay.replay.patternQualifications.map((line) => (
                         <li key={line}>{line}</li>
                       ))}
