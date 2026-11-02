@@ -71,9 +71,13 @@ import {
 import { parseSessionRegistryEntries } from "./security/iaaaSessionRegistry";
 import {
   isMailSuppressed,
+  resolveOffboardSessions,
   runOffboard,
   setMailSuppression,
 } from "./security/iaaaLifecycleWiring";
+import { createSubscriptionAdapter } from "./data/createSubscriptionPorts";
+import { hasUnexpiredSubscription } from "./data/subscriptionPorts";
+import { createLifecycleAdapter } from "./data/createLifecyclePorts";
 import { handleSeedGovernanceRoute } from "./data/seedGovernanceRoute";
 import {
   handleChainStatusRoute,
@@ -3274,15 +3278,104 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
           if (body?.confirm !== "deactivate") {
             return Response.json({ error: "Deactivation requires { confirm: \"deactivate\" }." }, { status: 400 });
           }
-          const report = await runOffboard(offboardDeps(), {
+          // Issue #2660 (monetization Phase 2.5): the subscription gate.
+          // Deactivation revokes the identity a subscription bills against,
+          // so an unexpired subscription must block deactivation explicitly:
+          // never silently canceled (cancel mechanics belong to 2.7) and
+          // never silently kept charging (the user would have no session
+          // left with which to cancel). Logins come from the principal's
+          // own sessions — the same discovery runOffboard uses, never a
+          // caller-supplied identity. The gate reads AGENT_DB only (#1819:
+          // zero new SessionStore reads). Nothing is revoked before the
+          // gate, and a KNOWN active subscription always blocks (409).
+          // Deliberate non-fail-closed case: when the subscription store
+          // is unavailable (or a login's read throws), deactivation still
+          // proceeds — deactivation is security revocation first, and
+          // blocking it on a billing-store outage would leave compromised
+          // sessions/keys unrevocable. The unverified state is recorded
+          // in the response's subscriptionGate field, never silent, so
+          // the interaction is stated even when it cannot be checked.
+          const deps = offboardDeps();
+          const listed = await deps.sessions.list();
+          const resolved = resolveOffboardSessions(listed, session.internalUserId.trim(), []);
+          const logins = [...new Set(resolved.map((e) => e.githubLogin))];
+          const subscriptionGate: {
+            checked: boolean;
+            loginsWithActive: string[];
+            unverified: Array<{ login?: string; reason: string }>;
+          } = { checked: true, loginsWithActive: [], unverified: [] };
+          const subs = createSubscriptionAdapter(env);
+          if (!subs) {
+            subscriptionGate.checked = false;
+            subscriptionGate.unverified.push({ reason: "subscription-store-unavailable" });
+          } else {
+            for (const login of logins) {
+              try {
+                const rows = await subs.listSubscriptions(login);
+                if (hasUnexpiredSubscription(rows, nowMs)) subscriptionGate.loginsWithActive.push(login);
+              } catch (err: any) {
+                subscriptionGate.checked = false;
+                subscriptionGate.unverified.push({ login, reason: err?.message ?? "unknown error" });
+              }
+            }
+          }
+          if (subscriptionGate.loginsWithActive.length > 0) {
+            return Response.json(
+              {
+                error:
+                  "Deactivation blocked: an active subscription is still billing this identity. Cancel it first, then deactivate.",
+                code: "DeactivationBlockedByActiveSubscription",
+                cancelRoute: "/api/payments/agentic/commercial/subscription/cancel",
+                loginsWithActive: subscriptionGate.loginsWithActive,
+              },
+              { status: 409 },
+            );
+          }
+          const report = await runOffboard(deps, {
             internalUserId: session.internalUserId,
             tenantId,
             nowMs,
             actorInternalUserId: session.internalUserId,
             auditAction: "iaaa.deactivate",
           });
+          // Issue #2660: commercial-plane mail suppression. The iaaa Kv
+          // flag runOffboard sets is not consulted by any commercial mail
+          // path, so the scheduled digest pass would keep mailing a
+          // deactivated principal. Flip the lifecycle preference row for
+          // each discovered login instead: the pass enumerates
+          // digestEnabled=1 rows only, and the send-time checks enforce
+          // both flags. Per-login containment: one login's failure never
+          // blocks the others, and every outcome is reported in the
+          // response, never silent. A suppression failure after a
+          // completed offboard is surfaced here; operator recovery is
+          // POST lifecycle/preferences (an operator may write prefs).
+          // No extra audit marker is emitted: offboardAudit hardcodes
+          // outcome "succeeded", which would misdescribe a partial
+          // suppression failure — the response body is the record, and
+          // the offboard itself is audited by runOffboard's audit step.
+          const commercialSuppression: {
+            suppressed: string[];
+            noRow: string[];
+            failed: Array<{ login: string; error: string }>;
+          } = { suppressed: [], noRow: [], failed: [] };
+          const lifecycle = createLifecycleAdapter(env);
+          if (!lifecycle) {
+            for (const login of logins) {
+              commercialSuppression.failed.push({ login, error: "lifecycle-store-unavailable" });
+            }
+          } else {
+            for (const login of logins) {
+              try {
+                const flipped = await lifecycle.suppressMailForUser(login);
+                if (flipped) commercialSuppression.suppressed.push(login);
+                else commercialSuppression.noRow.push(login);
+              } catch (err: any) {
+                commercialSuppression.failed.push({ login, error: err?.message ?? "unknown error" });
+              }
+            }
+          }
           return Response.json(
-            { ok: true, ...report },
+            { ok: true, ...report, subscriptionGate, commercialSuppression },
             { headers: { "Set-Cookie": clearSessionCookie() } },
           );
         }
