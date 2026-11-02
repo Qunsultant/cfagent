@@ -258,6 +258,17 @@
     // change; granted memberships are NOT deleted by rollback.
     "IAAA_BOOTSTRAP_ADMINS": "platform:https://github.com:82253453,https://github.com:82253453",
     "IAAA_PDP_ENABLED": "1",
+    // Issue #2800 (owner-directed, interim bootstrap): make the
+    // commercial URLs work for the owner login OpenAIMP for now.
+    // Env operator list for the commercial routes (UNION the store
+    // operator list; empty = deny all). Plain login list, not a
+    // credential — vars is the right home by repo convention
+    // (precedent: IAAA_BOOTSTRAP_ADMINS above). Interim: once an
+    // operator exists, the durable list is managed through the UI
+    // (/operators/add); this entry can be removed by a follow-up
+    // PR + redeploy. Rollback is removing this var and
+    // redeploying — no code change.
+    "COMMERCIAL_STORE_OPERATORS": "OpenAIMP",
     // Issue #1077, real-post test (owner-authorized go-live): social
     // posting ON + live publishing ON. Daily goal stays DISABLED, so
     // nothing auto-fires — a live post happens only via manual
