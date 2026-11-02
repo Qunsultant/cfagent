@@ -299,9 +299,9 @@ const MATRIX: MatrixRow[] = [
       scheduling: NA(
         "None of its own; fired by the orchestrator, server routes, ScheduledAgent goal chains, and workflow shards.",
       ),
-      recovery: GAP(
-        "Programme backlog (workflow layer proven by #2409; agent-level resume of an interrupted screen unowned)",
-        "Runs are recorded in its task ledger and a concurrent-run lock reports the first run's age — an honest in-progress state, not a resume. S12 (#2409) proved the WORKFLOW layer above the agent (tests/mesh_g6_workflow_conformance_2409.test.ts: shard + parent eviction/resume, canonical-store convergence under replay, honest qualified partials) and the ledger suite pins the agent's records (tests/screener-task-ledger.test.ts: dedupe, lifecycle, stale sweep) — but the agent itself restarts an interrupted screen rather than resuming it, and no eviction/resume pin covers the agent class, so the cell stays GAP for the agent-level claim.",
+      recovery: IMPL(
+        "onStart (screener-agent.ts:494) runs start-up recovery over the class's own task ledger: a fresh incarnation has executed nothing, so every active record (queued / claimed / running) it finds belongs to a dead incarnation and is terminally marked interrupted — failed → escalated with the interruption recorded in the record's history — by recoverInterruptedScreenerTasks (:604) over ScreenerTaskLedger.markInterrupted / recoverInterrupted (screenerTaskLedger.ts:427 / :444). The disposition is the #615 doctrine (never auto-rerun; a human reviews the escalation); the #618 orchestrator stale sweep remains the backstop for records that go stale inside a live incarnation. The concurrent-run lock is deliberately untouched (its rows expire by the #1993 stale rule; the recovered record is terminal, so a takeover can neither resurrect nor double-execute it). Behavioral pins: tests/screener_recovery_a9_2733.test.ts drives the REAL class over one durable store with instance replacement — a prior incarnation's running task (fresh heartbeat: incarnation-keyed, not heartbeat-keyed) is escalated on start, queued records recover, terminal records are byte-identical, a second pass is a no-op, the idempotency slot is freed for a genuinely new run, a fresh lock row still refuses a new run while the post-window takeover leaves the recovered record terminal, and onStart never throws when the recovery write fails. The workflow layer above the agent was already proven by S12 (#2409).",
+        "Simulation scope: instance replacement at the module seam over the surviving store, not live workerd eviction (the fleet-wide S12 residual). Recovery is terminal marking, not resume: the ledger carries lifecycle state only (no request payload, no checkpoint), so an interrupted screen is never resumed at the agent level — retry as a NEW run belongs to the workflow layer (#2409).",
       ),
       "sdk-state": SDK_STATE_DIVERGENT,
       sessions: NA("portHooks unset; no turn path, no transcript."),
@@ -886,9 +886,10 @@ describe("fleet fact pins (#2339)", () => {
     expect(sourcesWith("onConnect")).toEqual(["TickerAgent"]);
   });
 
-  it("onStart is defined by exactly OrchestratorAgent and TickerAgent", () => {
+  it("onStart is defined by exactly OrchestratorAgent, ScreenerAgent and TickerAgent", () => {
     expect(sourcesWith("onStart(").sort()).toEqual([
       "OrchestratorAgent",
+      "ScreenerAgent",
       "TickerAgent",
     ]);
   });
