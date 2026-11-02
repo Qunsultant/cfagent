@@ -1,0 +1,3 @@
+### Added
+
+- **Scheduled digest pass (#2659, monetization Phase 2.4):** a SERVICE-identity-only `POST /payments/agentic/commercial/lifecycle/digest/run-due` trigger runs the opt-in daily digest pass on the existing 30-minute tick (no new cron trigger): once-per-UTC-day durable marker, per-user per-day guard, skip-on-empty, and send-time opt-out re-check, delegating each send to the existing digest sender so slice-3 tier caps are inherited. Successful welcome/digest sends record the address for the pass (migration 0035); subscribers with no address on file are reported, never sent to. The welcome trigger stays the route surface until slice 2.6 admin provisioning carries a grantee email; self-service deactivation remains slice 2.5.
