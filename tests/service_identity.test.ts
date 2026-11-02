@@ -128,6 +128,8 @@ describe("worker scheduled() (#1185)", () => {
       "/adaptation/weights/run",
       // Issue #1169 (S4-4): the weekly corpus sync rides this tick.
       "/knowledge/corpus-sync",
+      // Issue #2659 (Phase 2.4): the scheduled digest pass rides this tick.
+      "/payments/agentic/commercial/lifecycle/digest/run-due",
     ]);
     for (const req of search.requests) {
       expect(req.headers.get("x-user-login")).toBe(SERVICE_LOGIN);

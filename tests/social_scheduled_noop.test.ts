@@ -81,6 +81,8 @@ describe("worker scheduled() social dispatch (Phase 5b slice 1)", () => {
     expect(agentFetchCalls.sort()).toEqual([
       "/adaptation/weights/run",
       "/knowledge/corpus-sync",
+      // Issue #2659 (Phase 2.4): the scheduled digest pass rides this tick.
+      "/payments/agentic/commercial/lifecycle/digest/run-due",
       "/reflection/run",
       "/research/scheduled-tick",
     ]);

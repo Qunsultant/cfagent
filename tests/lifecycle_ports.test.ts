@@ -359,6 +359,7 @@ describe("lifecycle structural pins (#2208)", () => {
     for (const file of [
       "data/lifecyclePorts.ts",
       "services/lifecycleEmail.ts",
+      "services/lifecycleDigestPass.ts",
       "services/referralCredits.ts",
     ]) {
       const imports = importLines(file).join("\n");

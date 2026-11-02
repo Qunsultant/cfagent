@@ -19,7 +19,9 @@
 import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
 import { and, asc, eq } from "drizzle-orm";
 import {
+  agentDigestPassDays,
   agentDigestSends,
+  agentDigestSubscriberEmails,
   agentNotificationPreferences,
   agentReferralAttributions,
   agentReferralEarnings,
@@ -29,6 +31,7 @@ import {
   applyMigrations,
   MIGRATION_0015_LIFECYCLE_REFERRAL,
   MIGRATION_0031_REFERRAL_ATTRIBUTION,
+  MIGRATION_0035_DIGEST_PASS,
   type MigrationDb,
 } from "./migrationRunner";
 import {
@@ -42,6 +45,7 @@ import {
   referralEarningId,
   round2,
   validateReferralRules,
+  type DigestSubscriber,
   type LifecycleStore,
   type NotificationPreferences,
   type ReferralAllocation,
@@ -83,6 +87,7 @@ export async function ensureLifecycleSchema(db: LifecycleDb): Promise<number[]> 
   return applyMigrations(db as unknown as MigrationDb, [
     MIGRATION_0015_LIFECYCLE_REFERRAL,
     MIGRATION_0031_REFERRAL_ATTRIBUTION,
+    MIGRATION_0035_DIGEST_PASS,
   ]);
 }
 
@@ -416,6 +421,70 @@ export class D1LifecycleAdapter implements LifecycleStore {
     await this.db
       .insert(agentDigestSends)
       .values({ userId, day, sentAtMs: Date.now() })
+      .onConflictDoNothing();
+  }
+
+  async listDigestSubscribers(): Promise<DigestSubscriber[]> {
+    // Digest-enabled rows only, ordered by user_id for a
+    // deterministic pass order. The email JOIN is tenant-aware:
+    // an address recorded under another tenant never leaks.
+    const rows = await this.db
+      .select({
+        userId: agentNotificationPreferences.userId,
+        tenantId: agentNotificationPreferences.tenantId,
+        email: agentDigestSubscriberEmails.email,
+      })
+      .from(agentNotificationPreferences)
+      .leftJoin(
+        agentDigestSubscriberEmails,
+        and(
+          eq(agentDigestSubscriberEmails.userId, agentNotificationPreferences.userId),
+          eq(agentDigestSubscriberEmails.tenantId, agentNotificationPreferences.tenantId),
+        ),
+      )
+      .where(eq(agentNotificationPreferences.digestEnabled, 1))
+      .orderBy(asc(agentNotificationPreferences.userId));
+    return rows.map((r) => ({ userId: r.userId, tenantId: r.tenantId, email: r.email ?? null }));
+  }
+
+  async setSubscriberEmail(userId: string, tenantId: string, email: string): Promise<void> {
+    if (!userId || !tenantId || !email) {
+      throw new Error("userId, tenantId, and email are required.");
+    }
+    // #1761: the address table's primary key is user_id alone,
+    // so an upsert would otherwise overwrite another tenant's
+    // row. Fail closed: a stored row for another tenant throws
+    // before any write. Callers (send routes) catch: persistence
+    // never changes a send result.
+    const scope = bindTenantScope(tenantId);
+    const raw = await this.db
+      .select()
+      .from(agentDigestSubscriberEmails)
+      .where(eq(agentDigestSubscriberEmails.userId, userId))
+      .limit(1);
+    if (raw.length > 0) assertTenantScopeMatch(raw[0].tenantId, scope);
+    await this.db
+      .insert(agentDigestSubscriberEmails)
+      .values({ userId, tenantId, email, updatedAtMs: Date.now() })
+      .onConflictDoUpdate({
+        target: agentDigestSubscriberEmails.userId,
+        set: { tenantId, email, updatedAtMs: Date.now() },
+      });
+  }
+
+  async hasDigestPassRun(day: string): Promise<boolean> {
+    const rows = await this.db
+      .select()
+      .from(agentDigestPassDays)
+      .where(eq(agentDigestPassDays.day, day))
+      .limit(1);
+    return rows.length > 0;
+  }
+
+  async markDigestPassRun(day: string): Promise<void> {
+    await this.db
+      .insert(agentDigestPassDays)
+      .values({ day, ranAtMs: Date.now() })
       .onConflictDoNothing();
   }
 }

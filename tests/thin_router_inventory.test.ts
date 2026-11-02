@@ -507,6 +507,7 @@ const EXPECTED_INVENTORY = [
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/lifecycle/preferences\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/lifecycle/welcome\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/lifecycle/digest/send\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/lifecycle/digest/run-due\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/lifecycle/unsubscribe\")",
   "handlePremiumRoutes :: includes(\"/premium/options-scan\")",
   "handlePremiumRoutes :: includes(\"/premium/market-research\")",
