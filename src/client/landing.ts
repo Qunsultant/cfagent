@@ -465,7 +465,7 @@ ${hcTokens}
       font-weight: 700;
     }
 
-    /* Showcase Console (NextGenTP Hero Interactive Mockup) */
+    /* Showcase Console (Hero Interactive Mockup) */
     .showcase-container {
       position: relative;
       z-index: 10;
@@ -1187,7 +1187,7 @@ ${hcTokens}
       </div>
     </section>
 
-    <!-- Showcase Console (NextGenTP Hero Component) -->
+    <!-- Showcase Console (Hero Component) -->
     <section class="showcase-container" id="autopilot">
       <div class="console-chrome-card">
         <!-- Chrome Top Bar -->
