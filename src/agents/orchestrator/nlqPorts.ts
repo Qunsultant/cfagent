@@ -351,6 +351,9 @@ function buildChatScreenCommand(
     type: "run-screen",
     source: "nlq-chat",
     trigger: "manual",
+    // Issue #2908 (G1): the NLQ trigger rides the command
+    // instead of collapsing to "manual" in provenance.
+    specTrigger: "nlq",
     userLogin: req.userLogin,
     role: "parent",
     tenantId,
