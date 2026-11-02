@@ -659,6 +659,16 @@ export const API_ENDPOINT_CATALOG: ApiEndpointEntry[] = [
     source: "src/server.ts branch: path === /api/jobs/history",
   },
   {
+    id: "traces",
+    method: "GET",
+    path: "/api/traces",
+    aliases: [],
+    kind: "http",
+    auth: "session",
+    authNote: "401 unauthenticated; 405 non-GET; 400 without a traceId query parameter. Tenant-scoped read of one trace's assembled hops from AgentDB (surfacing route for the mesh trace spine, issue #2000); unbound AgentDB answers 503, unknown or cross-tenant trace answers 404.",
+    source: "src/server.ts branch: path === /api/traces",
+  },
+  {
     id: "jobs-reconcile",
     method: "POST",
     path: "/api/jobs/reconcile",
