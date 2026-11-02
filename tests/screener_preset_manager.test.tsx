@@ -311,6 +311,12 @@ describe("Issue #1497 — ScreenerPresetManager", () => {
   it("StockHub wires the manager into the stock run form (source pin, #2896)", () => {
     const src = readFileSync("src/client/StockHub.tsx", "utf8");
     expect(src).toContain("ScreenerPresetManager");
-    expect(src).toContain("onApplyPreset={setStockCriteria}");
+    // Issue #2909 (G2): preset application goes through
+    // handleCriteriaChange, which sets the criteria exactly as
+    // setStockCriteria did and additionally clears any applied
+    // pattern, so a preset-applied run is never misreported as
+    // a pattern run. The pin follows the wiring, not the name.
+    expect(src).toContain("onApplyPreset={handleCriteriaChange}");
+    expect(src).toContain("onChange={handleCriteriaChange}");
   });
 });

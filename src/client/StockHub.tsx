@@ -837,7 +837,7 @@ export function StockHub({
                   <>
                     {" "}Qualified run: this pattern's guardrails below are NOT enforced by this screen and will be recorded
                     as a run qualification, never silently dropped:
-                    <ul style={{ margin: "0.25rem 0 0", paddingLeft: "1.25rem" }}>
+                    <ul style={{ marginTop: "var(--space-1)", paddingLeft: "var(--space-4)" }}>
                       {patternQualificationLines(appliedPattern.unmappedGuardrails).map((line) => (
                         <li key={line}>{line}</li>
                       ))}
