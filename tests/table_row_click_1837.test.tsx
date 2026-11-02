@@ -71,4 +71,11 @@ describe("Table row props (#1837)", () => {
   it("renders aria-sort on the th", () => {
     expect(getParts({}).th["aria-sort"]).toBe("ascending");
   });
+
+  it("spreads rowProps onto the tr (#2723)", () => {
+    const parts = getParts({
+      rowProps: (row: Row) => ({ "data-testid": `row-${row.label}` } as React.HTMLAttributes<HTMLTableRowElement>),
+    });
+    expect((parts.bodyRows[0].props as Record<string, unknown>)["data-testid"]).toBe("row-first");
+  });
 });

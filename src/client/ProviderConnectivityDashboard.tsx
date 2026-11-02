@@ -1,4 +1,5 @@
 /**
+ * @deprecated Superseded by src/client/DataProvidersPanel.tsx (Issue #2723: consolidated into Platform Admin).
  * Issue #2438 (ScreenersHub redesign): the provider connectivity
  * dashboard — the ONE source of truth for provider health (owner
  * decision, #2438 comment 6522933506). Hosted in ScreenersHub;
