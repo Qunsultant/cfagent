@@ -499,6 +499,39 @@ export const API_ENDPOINT_CATALOG: ApiEndpointEntry[] = [
     source: "src/server.ts branch: path === /api/me",
   },
   {
+    id: "user-email-destination-get",
+    method: "GET",
+    path: "/api/user/email-destination",
+    aliases: [],
+    kind: "http",
+    auth: "session",
+    authNote:
+      "Issue Qunsultant/cfagent#488: 401 unauthenticated (or session without githubLogin); reads only the caller's own stored destination (login from the session, never request input). Returns the stored value plus fallbackConfigured; the global env value itself is never returned.",
+    source: "src/server.ts branch: path === /api/user/email-destination",
+  },
+  {
+    id: "user-email-destination-set",
+    method: "POST",
+    path: "/api/user/email-destination",
+    aliases: [],
+    kind: "http",
+    auth: "session",
+    authNote:
+      "Issue Qunsultant/cfagent#488: 401 unauthenticated (or session without githubLogin); writes only the caller's own stored destination (login from the session, never request input). The body email is strictly validated; an invalid address is rejected with 400 and leaves the prior value intact.",
+    source: "src/server.ts branch: path === /api/user/email-destination",
+  },
+  {
+    id: "user-email-destination-clear",
+    method: "DELETE",
+    path: "/api/user/email-destination",
+    aliases: [],
+    kind: "http",
+    auth: "session",
+    authNote:
+      "Issue Qunsultant/cfagent#488: 401 unauthenticated (or session without githubLogin); clears only the caller's own stored destination (login from the session, never request input). Delivery then falls back to the global env vars.",
+    source: "src/server.ts branch: path === /api/user/email-destination",
+  },
+  {
     id: "iaaa-access-request-create",
     method: "POST",
     path: "/api/iaaa/access-request",
