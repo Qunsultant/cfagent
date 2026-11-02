@@ -908,7 +908,7 @@ export const MESH_TOOL_FAMILIES: MeshToolFamilyEntry[] = [
     status: "degraded",
     commands: [],
     notes:
-      "Home-grown fiber helper: in-memory registry, checkpoints written but never read — NOT durable across eviction (survey §3). Moved from src/agents/durableFibers.ts since the survey base. The execute_durable_twap command lives in the cloudflare-agent-mcp-commands family.",
+      "Home-grown fiber helper: live records sit in an in-memory registry, and since #2763 (tracker #2708 item B4) the checkpoints are read back when a run carries an identity — execute_durable_twap's optional runId resumes a TWAP preview run from its latest mas_events checkpoint, skipping the slices that checkpoint proves complete; a corrupt or plan-mismatched checkpoint fails loud (FiberCheckpointError), never a silent fresh start. Still degraded: without a runId a run is write-only exactly as before (survey §3), live status is memory-only, and this is a service-level checkpoint resume, not the SDK fiber primitive. Moved from src/agents/durableFibers.ts since the survey base. The execute_durable_twap command lives in the cloudflare-agent-mcp-commands family.",
   },
   {
     id: "web-search",

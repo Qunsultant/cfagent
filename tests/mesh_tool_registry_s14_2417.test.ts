@@ -19,7 +19,9 @@
  *     (the namespace value is dashboard-issued; src/types.ts records
  *     the owner enablement steps).
  *   - durable-fibers is "degraded" BECAUSE its live records sit in
- *     an in-memory Map (the same fact the S4 fibers cells rest on).
+ *     an in-memory Map (the same fact the S4 fibers cells rest on)
+ *     and checkpoint read-back (#2763) covers only runs that carry
+ *     a runId.
  *   - web-fetch is "absent" BECAUSE no tool by that name exists in
  *     src/ or in the MCP catalog.
  *   - web-search is "degraded" (since #2731) BECAUSE the
@@ -206,10 +208,14 @@ describe("degraded status evidence (#2417)", () => {
     expect(service).toContain("no container sandbox backend is bound");
   });
 
-  it("durable-fibers: live records sit in an in-memory Map — not durable across eviction", () => {
-    expect(read("src/services/durableFibers.ts")).toContain(
-      "activeFibers = new Map",
-    );
+  it("durable-fibers: live records sit in an in-memory Map; checkpoints read back only for runId runs (#2763)", () => {
+    const src = read("src/services/durableFibers.ts");
+    expect(src).toContain("activeFibers = new Map");
+    // The family stays "degraded": the read half exists for runs that
+    // carry an identity (runId), and fails loud on untrusted state —
+    // a run without a runId is still write-only.
+    expect(src).toContain("loadRunCheckpoint");
+    expect(src).toContain("FiberCheckpointError");
   });
 
   it("web-search: the command is registered, and the seam's not-configured failure is the recorded backend fact (#2731)", () => {

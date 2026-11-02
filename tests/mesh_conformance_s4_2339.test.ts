@@ -118,7 +118,7 @@ const SDK_STATE_DIVERGENT = IMPL(
 /** The Fibers cell for every PortThink agent (survey contradiction 1). */
 const FIBERS_GAP = GAP(
   "programme backlog (no slice yet)",
-  "No agent uses the SDK/Think fiber primitive (fleet pin below: no runFiber/startFiber in agent sources). The only fiber surface, src/services/durableFibers.ts, is home-grown and NOT durable: live records sit in an in-memory Map (activeFibers, :32), checkpoints are written but never read back, and the onFiberRecovered hook its header advertises (:9) exists nowhere else in src/. Judged against the real SDK primitive per the reference set, this row is a GAP, never an implemented cell.",
+  "No agent uses the SDK/Think fiber primitive (fleet pin below: no runFiber/startFiber in agent sources). The only fiber surface, src/services/durableFibers.ts, is home-grown: live records sit in an in-memory Map (activeFibers, :113), and since #2763 a run started with a runId reads its checkpoints back on (re)start and resumes (execute_durable_twap) — but a run without a runId is still write-only, recovery is a service-level checkpoint resume rather than the platform primitive, and no agent class gains fibers from it. Judged against the real SDK primitive per the reference set, this row is a GAP, never an implemented cell.",
 );
 
 /**
@@ -918,10 +918,14 @@ describe("fleet fact pins (#2339)", () => {
     }
   });
 
-  it("durableFibers keeps its live records in an in-memory Map — the fibers GAP fact", () => {
-    expect(read("src/services/durableFibers.ts")).toContain(
-      "activeFibers = new Map",
-    );
+  it("durableFibers keeps its live records in an in-memory Map, with checkpoint read-back only on runId (re)start — the fibers GAP facts", () => {
+    const src = read("src/services/durableFibers.ts");
+    expect(src).toContain("activeFibers = new Map");
+    // #2763: the read half exists — a runId (re)start loads the latest
+    // checkpoint and records the resume — but it is a service-level
+    // resume, not the SDK fiber primitive this row judges against.
+    expect(src).toContain("loadRunCheckpoint");
+    expect(src).toContain("FIBER_RESUMED");
   });
 
   it("exactly one agent source overrides getSkills — OrchestratorAgent, the skills adoption boundary (#2705)", () => {
