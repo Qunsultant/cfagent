@@ -49,6 +49,7 @@ import {
 } from "../../config/marketDataModes";
 import { workflowAcceptedResponse } from "../../workflows/screenerWorkflowRoutes";
 import { startStockScreenWorkflowOrNull } from "../../workflows/screenExecutionBroker";
+import { persistThenDeliverAll } from "../../workflows/screenRunFinalize";
 import { buildStockScreenRunSpec } from "../../workflows/stockScreenRunSpec";
 import type { ScreenerAgent } from "../screener-agent";
 import type { AgentName, Env } from "../../types";
@@ -351,7 +352,13 @@ export async function handleMarketDataCompareScreenRoutes(
           filters: spec.filters,
           userLogin,
         });
-        for (const r of shards) await ctx.persistScreenerReportCanonical({ ...r, userLogin });
+        // Issue #2861: persist-then-deliver finalizer, persist-only
+        // here (market-data has no deliver step) — same order as
+        // before, now shared with the E*TRADE route.
+        await persistThenDeliverAll({
+          results: shards,
+          persist: (r) => ctx.persistScreenerReportCanonical({ ...r, userLogin }),
+        });
         const failedShards = shards.filter((r) => !r.success);
         ctx.audit("market_data.screener.executed", "research", {
           filterSummary: `ALL (sharded: ${shards.length} universes)`,
@@ -405,7 +412,10 @@ export async function handleMarketDataCompareScreenRoutes(
       // Issue #307/#308 + #1007: store the canonical report copy (one
       // row per generation) so market-data runs are visible in GET /api/reports
       // and Reports history, with provider provenance in the body.
-      await ctx.persistScreenerReportCanonical({ ...result, userLogin });
+      await persistThenDeliverAll({
+        results: [result],
+        persist: (r) => ctx.persistScreenerReportCanonical({ ...r, userLogin }),
+      });
       ctx.audit("market_data.screener.executed", "research", {
         filterSummary: result.filterSummary,
         count: result.allStocks.length,
