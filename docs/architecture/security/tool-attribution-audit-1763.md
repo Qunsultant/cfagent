@@ -99,6 +99,7 @@ other doors. Scope column is #1843's declaration, consumed here.
 | `alpaca_orders` | mcp:read | L (I / R on other doors) |
 | `foss_alpaca_orders` (deprecated #1906 alias of `alpaca_orders`, same scope) | mcp:read | L (I / R on other doors) |
 | `browser_inspect_page` | mcp:read | L (I / R on other doors) |
+| `web_fetch` | mcp:read | L (I / R on other doors) — the standalone unrendered page fetch (#2760, tracker #2708 A3): acting login carried in the tool audit from context only (no identity argument); failures propagate as named `web_fetch_*` errors, never fabricated content |
 | `ai_search_financial_docs` | mcp:read | L (I / R on other doors) |
 | `ai_search_agent_search` | mcp:read | L (I / R on other doors) |
 | `agentdb.chain.status` | mcp:read | L (I / R on other doors) |

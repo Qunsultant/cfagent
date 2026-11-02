@@ -82,6 +82,7 @@ import {
   GoalCompileCommand,
   GoalScheduleCommand,
 } from "./goalChainCommands";
+import { WebFetchCommand } from "./webFetchCommands";
 import {
   AgentDbAuditHistoryCommand,
   AgentDbChainStatusCommand,
@@ -1802,6 +1803,14 @@ export class McpToolFactory {
     // engine's carriage has no workflow behind it). Same
     // identity discipline as batches A–E.
     this.registerTool(new RunOptionsStrategyScreenCommand());
+
+    // Tracker #2708 A3 (#2760): the standalone web fetch — the
+    // web-fetch family's first tool (recorded absent at S14,
+    // #2417). A deterministic service command
+    // (src/services/webFetch.ts): plain Worker fetch + the
+    // shared stripHtmlToText extractor, named limits and named
+    // errors; BrowserAgent keeps the rendered-page surfaces.
+    this.registerTool(new WebFetchCommand());
   }
 
   /**
