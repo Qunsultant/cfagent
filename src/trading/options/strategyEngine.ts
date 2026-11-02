@@ -2,6 +2,7 @@ import type { ScreenedOptionContractItem } from "../../types";
 import { defaultRegistry, buildNameLedger } from "./strategies/catalog";
 import { contractKey, MULTIPLIER } from "./strategies/legs";
 import { EvaluationLedger, runAcceptanceRules, runNoViewAcceptanceRules } from "./strategies/ledger";
+import { filterDefinitionsByMode, resolveStrategyMode } from "./strategyChoice";
 import type { RiskProfile } from "./recommendationAgent";
 import type { ChainView, NameLedgerEntry, StrategyContext, StrategyDefinition, StrategyEvaluation } from "./strategies/types";
 
@@ -72,8 +73,35 @@ export interface StrategyRequest {
    * ledger-skipped ("no contracts inside the DTE window"), never silently
    * dropped. Fetch bands are unaffected: this flag judges the chain that
    * was fetched, it does not widen what is fetched.
+   *
+   * Issue #2600: deprecated alias, superseded by strategyMode
+   * (src/trading/options/strategyChoice.ts). true === "all",
+   * false/absent === "thesis"; a conflicting pair is rejected at the
+   * schema boundary, never resolved silently here.
    */
   evaluateAllStrategies?: boolean;
+  /**
+   * Issue #2600: canonical per-run strategy scope — "thesis" (default:
+   * only thesis-matching wanted strategies), "all" (every wanted
+   * strategy, thesis kept as a score bias), "no-view" (never on this
+   * viewed request type; no-view uses NoViewStrategyRequest).
+   */
+  strategyMode?: "thesis" | "all" | "no-view";
+  /**
+   * Issue #2600: far-dated fetch toggle for this run. true widens the
+   * fetch bands to the selected templates' horizons (see
+   * deriveFetchBands); false keeps the near band only and reports
+   * far-horizon selections as horizon-limited. Absent on engine-only
+   * callers = the engine judges the chain it was given.
+   */
+  farDated?: boolean;
+  /**
+   * Issue #2600: fetch bands derived from the mode-resolved selected
+   * templates (deriveFetchBands), carried so the snapshot loader and
+   * the run record use the same band list. Absent = the loader's own
+   * default window.
+   */
+  expirationDteBands?: Array<{ minDte: number; maxDte: number; maxExpirations?: number }>;
   eventPolicy?: "warn" | "exclude";
   eventCalendar?: EventCalendarInfo;
   riskFreeRate?: number;
@@ -984,7 +1012,12 @@ export function recommendOptionStrategies(
   const registry = defaultRegistry;
   const ledger = new EvaluationLedger(registry.list());
   const wanted = new Set(registry.resolveMany(request.allowedStrategies).ids);
-  const selectedDefs = registry.list().filter((def) => wanted.has(def.id) && (request.evaluateAllStrategies === true || def.theses.includes(request.thesis)));
+  // Issue #2600: one mode resolution for selection — the alias is
+  // resolved once here, not per call site. A conflicting pair throws
+  // (schema boundaries reject it first, so engine callers see it only
+  // when they built the request by hand).
+  const strategyMode = resolveStrategyMode(request);
+  const selectedDefs = filterDefinitionsByMode(registry.list(), wanted, strategyMode, request.thesis);
   const finish = (partial: Omit<StrategyRecommendationResult, "evaluations" | "nameLedger">): StrategyRecommendationResult => {
     const evaluations = ledger.report();
     return { ...partial, evaluations, nameLedger: buildNameLedger(evaluations) };
@@ -1040,7 +1073,7 @@ export function recommendOptionStrategies(
       ledger.onSkipped(def, "Skipped: not selected in this request.");
       continue;
     }
-    if (request.evaluateAllStrategies !== true && !def.theses.includes(request.thesis)) {
+    if (strategyMode !== "all" && !def.theses.includes(request.thesis)) {
       const reason = `${def.label} conflicts with the selected ${request.thesis.replaceAll("_", " ")} thesis`;
       ledger.onSkipped(def, `Skipped: ${reason}.`);
       addRejected(rejected, reason);

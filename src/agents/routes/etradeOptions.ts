@@ -74,6 +74,10 @@ import {
   parseOptionsDiscoveryRequest,
   parseOptionsScreenRequest,
   parseUnifiedOptionsRequest,
+  resolvePanelFetchBands,
+  normalizeViewedRecommendationBody,
+  noViewComparisonError,
+  strategyRecordControlFields,
 } from "../../trading";
 import { getEtapiConfig, setRuntimeEtapiConfigOverrides } from "../../config/etapiConfig";
 import { isDemoCalibratedChainsEnabled } from "../../config/demoMode";
@@ -112,6 +116,8 @@ import {
   executeOptionsScreen,
   executeUnifiedOptions,
 } from "./etradeOptionsScreen";
+import { runNoViewStrategies } from "./etradeOptionsNoView";
+import { serveDiscoveryReport } from "./etradeOptionsDiscoveryReport";
 import { recordStrategyScreenRun } from "../../services/optionsServeRecord";
 import { panelAuthResponse } from "../../services/optionsAuthFreshness";
 import { resolveTenantProviders } from "../../services/tenantProviders";
@@ -163,13 +169,20 @@ export async function handleOptionsStrategyRecommend(
   deps: { orm: any; env: Env; sessionKey: string; requestedEnv: "TEST" | "PROD" | undefined; storage?: any }
 ): Promise<Response> {
   const body = await request.json().catch(() => null) as Partial<StrategyRequest> | null;
-  const validationError = validateStrategyRequest(body);
+  // Issue #2600: normalize BEFORE the legacy validator.
+  const normalized = normalizeViewedRecommendationBody(body);
+  if (normalized.noViewError) {
+    return Response.json({ error: normalized.noViewError }, { status: 400 });
+  }
+  const validationBody = normalized.validationBody as Partial<StrategyRequest>;
+  const validationError = validateStrategyRequest(validationBody);
   if (validationError) {
     return Response.json({ error: validationError }, { status: 400 });
   }
 
   try {
-    const strategyRequest = body as StrategyRequest;
+    const strategyRequest = validationBody as StrategyRequest;
+    const banded = resolvePanelFetchBands(strategyRequest, normalized.farDated);
     // Issue #16: the event calendar is a server-side fact — a
     // client-supplied one is never trusted. Fetch it for this name and
     // overwrite whatever the body carried. The service never throws;
@@ -194,6 +207,7 @@ export async function handleOptionsStrategyRecommend(
         contractType: "BOTH",
         minDte: strategyRequest.minDte,
         maxDte: strategyRequest.maxDte,
+        ...(banded.request.expirationDteBands ? { expirationDteBands: banded.request.expirationDteBands } : {}),
         minVolume: strategyRequest.minVolume,
         minOpenInterest: strategyRequest.minOpenInterest,
         maxSpreadPct: strategyRequest.maxSpreadPct,
@@ -205,7 +219,7 @@ export async function handleOptionsStrategyRecommend(
       throw new Error("Options screening provider returned a non-options result.");
     }
     const screened = provided.result;
-    const recommendations = recommendOptionStrategies(screened.contracts, strategyRequest, strategyRequest.candidateLimit);
+    const recommendations = recommendOptionStrategies(screened.contracts, banded.request, normalized.candidateLimitAll ? undefined : strategyRequest.candidateLimit);
     return Response.json({
       ...recommendations,
       contracts: screened.contracts,
@@ -240,45 +254,6 @@ export async function handleOptionsStrategyRecommend(
  * owner resolves to nothing), and 404 — never a guess — when the key is
  * absent or unknown.
  */
-async function serveDiscoveryReport(
-  request: Request,
-  ctx: EtradeOptionsRouteContext,
-  format: "pdf" | "xlsx" | "csv",
-): Promise<Response> {
-  const userLogin = request.headers.get("x-user-login");
-  if (!userLogin) return unauthenticatedResponse();
-  const url = new URL(request.url);
-  const key = url.searchParams.get("key");
-  const label = format.toUpperCase();
-  if (!key) {
-    return Response.json({ error: `No discovery report ${label} key supplied` }, { status: 400 });
-  }
-  try {
-    const file = await ctx.getScreenerAgent(userLogin).getDiscoveryReportByKey(key);
-    if (!file) {
-      return Response.json({ error: `No discovery report ${label} available yet` }, { status: 404 });
-    }
-    const contentType =
-      format === "pdf"
-        ? "application/pdf"
-        : format === "xlsx"
-          ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-          : "text/csv";
-    return new Response(file.bytes as unknown as BodyInit, {
-      headers: {
-        "Content-Type": contentType,
-        "Content-Disposition": `attachment; filename="${file.fileName}"`,
-        "Content-Length": String(file.bytes.length),
-      },
-    });
-  } catch (err) {
-    return Response.json(
-      { error: err instanceof Error ? err.message : `Failed to load discovery report ${label}` },
-      { status: 500 },
-    );
-  }
-}
-
 export async function handleEtradeOptionsRoutes(
   request: Request,
   url: URL,
@@ -610,12 +585,18 @@ export async function handleEtradeOptionsRoutes(
       if (!parsedDiscovery.ok) {
         return Response.json({ error: parsedDiscovery.error }, { status: 400 });
       }
+      // Issue #2600: comparison is viewed-only (no-view refused).
+      const noViewComparison = noViewComparisonError(parsedDiscovery.value.strategyMode);
+      if (noViewComparison) {
+        return Response.json({ error: noViewComparison }, { status: 400 });
+      }
       try {
         const userLogin = request.headers.get("x-user-login");
         if (!userLogin) return unauthenticatedResponse();
         const etrade = new ETradeService(ctx.getOrm(), ctx.env, userLogin, ctx.requestedEnv);
         const dataAgent = new OptionsDataAgent(new DynamicOptionsScreener(etrade.client, undefined, await etrade.getUniverseDeps?.(ctx.agentCtx?.storage)));
-        const s = await dataAgent.loadSnapshot(parsedDiscovery.value.request);
+        const banded = resolvePanelFetchBands(parsedDiscovery.value.request, parsedDiscovery.value.farDated);
+        const s = await dataAgent.loadSnapshot(banded.request);
         // Same KernelSnapshot mapping the panel route builds (see
         // RecommendationService.discoverPanel) — replicated here
         // rather than calling discoverPanel, which would waste a full
@@ -727,11 +708,15 @@ export async function handleEtradeOptionsRoutes(
     // `label` on the live shape. Removed; the live handler above now
     // emits both name and label.
     if ((path.endsWith("/trading/options/strategies") || path.endsWith("/trading/options/best-trade")) && request.method === "POST") {
+      const isBestTrade = path.endsWith("/best-trade");
       const body = await request.json().catch(() => null) as (Partial<StrategyRequest> & {
         strategyFilter?: StrategyScreenFilter;
         riskProfile?: RiskProfile;
         alternatives?: number;
       }) | null;
+      // Issue #2600: no-view bodies run in the sibling module (null = viewed).
+      const noViewResponse = await runNoViewStrategies(ctx, request, body as Record<string, unknown> | null, path, isBestTrade);
+      if (noViewResponse) return noViewResponse;
       // Issue #959: the discovery request validates through the ONE
       // shared schema (src/trading/screeningSchemas.ts) — the request
       // fields and the route envelope (strategyFilter / riskProfile /
@@ -756,6 +741,7 @@ export async function handleEtradeOptionsRoutes(
         // / excluded ride the facade's legacy mapping. /compare and
         // /llm-ideas below are untouched.
         const dataAgent = new OptionsDataAgent(new DynamicOptionsScreener(etrade.client, undefined, await etrade.getUniverseDeps?.(ctx.agentCtx?.storage)));
+        const banded = resolvePanelFetchBands(parsedDiscovery.value.request, parsedDiscovery.value.farDated);
         const t0 = Date.now();
         const result = await new RecommendationService().discoverPanel({
           dataAgent: {
@@ -773,7 +759,7 @@ export async function handleEtradeOptionsRoutes(
           },
           riskAgent: new StrategyRiskAgent(),
           recommender: new RecommendationAgent(),
-          request: parsedDiscovery.value.request,
+          request: banded.request,
           strategyFilter: parsedDiscovery.value.strategyFilter,
           riskProfile: parsedDiscovery.value.riskProfile,
           alternatives: parsedDiscovery.value.alternatives,
@@ -786,10 +772,9 @@ export async function handleEtradeOptionsRoutes(
           dataSource: result.snapshot.dataSource,
           snapshotError: result.snapshot.validationError,
         };
-        const isBestTrade = path.endsWith("/best-trade");
         const strategyReportInput = buildStrategyReportInput({
           action: isBestTrade ? "best-trade" : "strategies",
-          request: parsedDiscovery.value.request as unknown as Record<string, any>,
+          request: banded.request as unknown as Record<string, any>,
           data: {
             ranked: result.ranked,
             bestTrade: result.bestTrade,
@@ -803,7 +788,6 @@ export async function handleEtradeOptionsRoutes(
         const t1 = Date.now();
         const strategyArtifacts = await ctx.getScreenerAgent(userLogin).generateAndStoreStrategyReport(strategyReportInput);
         const artifactLinks = strategyReportArtifactLinks(strategyArtifacts);
-        const req = parsedDiscovery.value.request as Record<string, any>;
         // Slice 1: stamp tenant provider/broker into provenance (fail-open etrade/etrade).
         recordStrategyScreenRun(ctx.getOrm(), {
           ...strategyArtifacts,
@@ -820,16 +804,17 @@ export async function handleEtradeOptionsRoutes(
           contracts: result.snapshot.contracts,
           dataSource: result.snapshot.dataSource,
           asyncJobId: ctx.asyncJobId,
-          // Unified run record: request as submitted (strategyMode
-          // labels existing behaviour, it does not change selection).
-          thesis: typeof req.thesis === "string" ? req.thesis : undefined,
-          strategyMode: req.evaluateAllStrategies === true ? "all" : "thesis",
-          targetDate: typeof req.targetDate === "string" ? req.targetDate : undefined,
-          riskProfile: parsedDiscovery.value.riskProfile,
-          allowedStrategies: req.allowedStrategies,
-          targetPrice: typeof req.targetPrice === "number" ? req.targetPrice : undefined,
-          dteMin: typeof req.minDte === "number" ? req.minDte : undefined,
-          dteMax: typeof req.maxDte === "number" ? req.maxDte : undefined,
+          // Issue #2600: run record carries all four controls.
+          ...strategyRecordControlFields({
+            strategyMode: parsedDiscovery.value.strategyMode,
+            riskProfile: parsedDiscovery.value.riskProfile,
+            candidateLimit: parsedDiscovery.value.candidateLimit,
+            farDated: parsedDiscovery.value.farDated,
+            alternatives: parsedDiscovery.value.alternatives,
+            request: parsedDiscovery.value.request as Record<string, any>,
+            bands: banded.bands,
+            horizonLimited: banded.horizonLimited,
+          }),
           submittedVia: `ui — POST ${path} (options-strategy-panel)`,
           generationDurationMs: Date.now() - t1,
           discoverPanelDurationMs,

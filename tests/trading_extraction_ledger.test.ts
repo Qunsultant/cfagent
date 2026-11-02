@@ -143,6 +143,7 @@ const CONSTRUCTION_LEDGER: Record<string, number> = {
   "agents/orchestrator/meshOptionsStrategyDoor.ts": 1,
   "agents/routes/etradeBroker.ts": 21,
   "agents/routes/etradeOptions.ts": 6,
+  "agents/routes/etradeOptionsNoView.ts": 1,
   "agents/routes/watchlists.ts": 5,
   "agents/screener-agent.ts": 2,
   "mcps/openaimp/cloudflareAgentCommands.ts": 1,
@@ -192,6 +193,11 @@ describe("trading extraction ledger (issue #291 T0)", () => {
     // 52 → 53 in #2581: the mesh options-strategy door constructs
     // its ETradeService for the acting login, like the NLQ
     // execution layer whose engine seam it calls.
-    expect(total).toBe(53);
+    // 53 → 54 in #2600: the no-view strategies route constructs
+    // its own ETradeService like every sibling options route
+    // (C5 precedent); the construction lives in the sibling
+    // module etradeOptionsNoView.ts, not in etradeOptions.ts,
+    // which keeps its count at 6 and stays under the #359 ratchet.
+    expect(total).toBe(54);
   });
 });

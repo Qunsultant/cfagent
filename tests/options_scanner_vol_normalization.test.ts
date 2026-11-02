@@ -344,8 +344,8 @@ describe("OpportunityScanner EM wiring (issue #25)", () => {
       statedTarget: { price: 260, symbol: "NVDA" },
     }), { now: scanNow });
 
-    expect(result.modelVersion).toBe("1.2.0");
-    expect(SCAN_MODEL_VERSION).toBe("1.2.0");
+    expect(result.modelVersion).toBe("1.2.1");
+    expect(SCAN_MODEL_VERSION).toBe("1.2.1");
     expect(result.configSnapshot.targetEmMultiples).toEqual({
       bullish: 0.6, bearish: -0.6, large_move: 1.2, range_bound: 0,
     });
