@@ -222,9 +222,9 @@ describe("shell wiring (issue #2161)", () => {
     expect([...SHELL_RETAINED_PAGES].sort()).toEqual(["ads", "payments", "referrals", "revenue", "social"]);
   });
 
-  it("trading set is unchanged by the shell move", () => {
+  it("trading set is unchanged by the shell move (#2896 adds stock-hub)", () => {
     expect([...TRADING_TABS].sort()).toEqual(
-      ["autopilot", "ledger", "omnichannel", "options", "order", "orders", "portfolio", "reports", "scanner", "schedules", "screeners", "trading", "voice"].sort(),
+      ["autopilot", "ledger", "omnichannel", "options", "order", "orders", "portfolio", "reports", "scanner", "schedules", "screeners", "stock-hub", "trading", "voice"].sort(),
     );
   });
 

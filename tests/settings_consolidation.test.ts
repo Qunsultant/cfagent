@@ -34,11 +34,11 @@ describe("Settings Consolidation & Unified Preferences", () => {
 
   it("supports granular tab toggling without losing other tab states", () => {
     const userTabs = { ...DEFAULT_VISIBLE_NAV_TABS };
-    expect(userTabs.screeners).toBe(true);
+    expect(userTabs["stock-hub"]).toBe(true);
 
-    // Toggle screeners off
-    userTabs.screeners = false;
-    expect(userTabs.screeners).toBe(false);
+    // Toggle stock-hub off (#2896: the screeners menu entry became Stock Hub)
+    userTabs["stock-hub"] = false;
+    expect(userTabs["stock-hub"]).toBe(false);
     expect(userTabs.autopilot).toBe(true);
     expect(userTabs.order).toBe(true);
 

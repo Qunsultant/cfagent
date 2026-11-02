@@ -372,8 +372,8 @@ describe("ScheduledOptionsRunForm (#2545)", () => {
 /* ------------------------------------------------------------------ */
 
 describe("panel wiring pins (#2545)", () => {
-  it("the Stocks panel form carries the delivery fields and builds through the shared helper", () => {
-    const hub = read("src/client/ScreenersHub.tsx");
+  it("the Stocks panel form carries the delivery fields and builds through the shared helper (#2896)", () => {
+    const hub = read("src/client/StockHub.tsx");
     expect(hub).toContain("buildStockRunRequestBody");
     expect(hub).toContain("Email recipients");
     expect(hub).toContain("Webhook URL");

@@ -208,8 +208,8 @@ describe("options screener navigation (issue #2596)", () => {
     expect(isNavItemOrSubItemActive(item!, "portfolio")).toBe(false);
   });
 
-  it("houses options under Options Screener, leaving Stock Screener with screeners and research (#2685)", () => {
-    const screeners = findNavItemConfig(DEFAULT_LEFT_NAV_CONFIG, "screeners")!;
+  it("houses options under Options Screener, leaving Stock Hub with screeners and research (#2685, #2896)", () => {
+    const screeners = findNavItemConfig(DEFAULT_LEFT_NAV_CONFIG, "stock-hub")!;
     expect(screeners.subItems!.map((s) => s.id)).not.toContain("options");
     expect(screeners.subItems!.map((s) => s.id)).toContain("screeners");
     expect(screeners.subItems!.map((s) => s.id)).toContain("research");

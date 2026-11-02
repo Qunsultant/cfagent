@@ -16,7 +16,7 @@ import {
   SUB_MENU_CONFIGS,
   findNavItemConfig,
 } from "../src/client/navConfig";
-import { ScreenersHub } from "../src/client/ScreenersHub";
+import { StockHub } from "../src/client/StockHub";
 
 let container: HTMLDivElement;
 let root: Root;
@@ -73,8 +73,8 @@ afterEach(async () => {
 });
 
 describe("Run a new screen dedicated page and left-nav sub-menu (#2746)", () => {
-  it("configures 'Run a new screen' as a sub-menu under Stock Screener in navConfig", () => {
-    const stockSubItems = SUB_MENU_CONFIGS.screeners;
+  it("configures 'Run a new screen' as a sub-menu under Stock Hub in navConfig", () => {
+    const stockSubItems = SUB_MENU_CONFIGS["stock-hub"];
     expect(stockSubItems).toBeDefined();
     const ids = stockSubItems.map((s) => s.id);
     expect(ids).toContain("new-screen");
@@ -83,13 +83,13 @@ describe("Run a new screen dedicated page and left-nav sub-menu (#2746)", () => 
     expect(newScreenItem?.shortLabel).toBe("Run");
   });
 
-  it("renders 'Run a new screen' in the LeftNavBar sub-menu when Stock Screener is expanded", async () => {
+  it("renders 'Run a new screen' in the LeftNavBar sub-menu when Stock Hub is expanded", async () => {
     const onSelectTab = vi.fn();
     await act(async () => {
       root.render(
         <LeftNavBar
           config={DEFAULT_LEFT_NAV_CONFIG}
-          activeTab="screeners"
+          activeTab="stock-hub"
           onSelectTab={onSelectTab}
           collapsed={false}
         />
@@ -105,7 +105,7 @@ describe("Run a new screen dedicated page and left-nav sub-menu (#2746)", () => 
 
   it("renders dedicated new-screen panel with form when initialTab is new-screen", async () => {
     await act(async () => {
-      root.render(<ScreenersHub activeEnv="PROD" userLogin="tester" initialTab="new-screen" />);
+      root.render(<StockHub activeEnv="PROD" userLogin="tester" initialTab="new-screen" />);
     });
     await flush();
     await flush();
@@ -119,7 +119,7 @@ describe("Run a new screen dedicated page and left-nav sub-menu (#2746)", () => 
 
   it("renders stocks panel with launch card pointing to new-screen when initialTab is stocks", async () => {
     await act(async () => {
-      root.render(<ScreenersHub activeEnv="PROD" userLogin="tester" initialTab="stocks" />);
+      root.render(<StockHub activeEnv="PROD" userLogin="tester" initialTab="stocks" />);
     });
     await flush();
     await flush();

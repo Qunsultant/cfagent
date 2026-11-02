@@ -9,11 +9,13 @@
  * render branch no caller can ever select (no sub-tab setter, no route
  * mapping, its result state never set) — removed, not linked, because
  * the NLQ capability itself lives in Records NLQ and chat.
+ * (Issue #2896: the screeners menu became the Stock Hub menu, so
+ * Goal Screen's home is its top-level Intelligence item, not a sub.)
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { SUB_MENU_CONFIGS } from "../src/client/navConfig";
+import { SUB_MENU_CONFIGS, DEFAULT_LEFT_NAV_CONFIG } from "../src/client/navConfig";
 import { NAV_ICON_MAP } from "../src/client/components/NavigationMenu";
 import {
   deepLinkForNavNode,
@@ -24,18 +26,20 @@ import { researchSurfaceForParam } from "../src/client/options/researchSurface";
 const hubSrc = readFileSync(join(__dirname, "../src/client/ETradeTradingHub.tsx"), "utf8");
 
 describe("nav completeness (#2801)", () => {
-  it("adds Goal Screen as a sub-menu under screeners", () => {
-    const found = SUB_MENU_CONFIGS["screeners"].find((s) => s.id === "goal-screen");
+  it("keeps Goal Screen as a top-level Intelligence item (#2896 moved the menu)", () => {
+    const intel = DEFAULT_LEFT_NAV_CONFIG.sections.find((s) => s.id === "section-intelligence");
+    expect(intel).toBeDefined();
+    const found = intel!.items.find((i) => i.id === "goal-screen");
     expect(found).toBeDefined();
     expect(found!.label).toBe("Goal Screen");
     expect(found!.description.length).toBeGreaterThan(0);
     expect(found!.icon).toBe("Goal");
     expect(NAV_ICON_MAP[found!.icon!]).toBeDefined();
-    expect(deepLinkForNavNode("screeners", "goal-screen")).toEqual({
+    expect(deepLinkForNavNode(null, "goal-screen")).toEqual({
       tab: "screeners",
       view: "goal-screen",
     });
-    expect(deepLinkHrefForNavNode("screeners", "goal-screen")).toBe(
+    expect(deepLinkHrefForNavNode(null, "goal-screen")).toBe(
       "?tab=screeners&view=goal-screen",
     );
   });

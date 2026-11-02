@@ -79,6 +79,9 @@ export interface RouteDef {
 const SCREENERS_DESC =
   "The one screening hub: stock + options screening, the strategy scanner, IV history, goal screens, reports, schedules, proposal review, and the recommendation track record";
 
+const STOCK_HUB_DESC =
+  "Stock Hub: autonomous stock screens, manual stock screens, and market research";
+
 export const ROUTES = [
   {
     id: "ads",
@@ -495,7 +498,7 @@ export const ROUTES = [
   },
   {
     id: "research",
-    navGroup: "screeners",
+    navGroup: "stock-hub",
     crumb: "Research",
     category: "Intelligence",
     icon: "Research",
@@ -551,15 +554,8 @@ export const ROUTES = [
     crumb: "Screeners",
     category: "Intelligence",
     icon: "Screeners",
-    description: SCREENERS_DESC,
-    navEntry: {
-      label: "Stock Screener",
-      shortLabel: "Stocks",
-      navOrder: 6,
-      defaultVisible: true,
-      badge: "Multi",
-      badgeType: "pro",
-    },
+    description:
+      "Multi-asset screening hub: options research, the strategy scanner, IV history, goal screens, reports, schedules, proposal review, and the recommendation track record",
   },
   {
     id: "search",
@@ -593,6 +589,23 @@ export const ROUTES = [
       defaultVisible: true,
       badge: "Daily",
       badgeType: "new",
+    },
+  },
+  {
+    id: "stock-hub",
+    retain: true,
+    navGroup: "stock-hub",
+    crumb: "Stock Hub",
+    category: "Intelligence",
+    icon: "Scanner",
+    description: STOCK_HUB_DESC,
+    navEntry: {
+      label: "Stock Hub",
+      shortLabel: "Stocks",
+      navOrder: 6,
+      defaultVisible: true,
+      badge: "Stocks",
+      badgeType: "pro",
     },
   },
   {

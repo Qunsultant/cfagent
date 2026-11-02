@@ -187,8 +187,8 @@ describe("Issue #1496 — StockCriteriaPanel", () => {
     expect(el.textContent).toMatch(/no run yet/i);
   });
 
-  it("ScreenersHub wires the panel into the stock run form (source pin)", () => {
-    const src = readFileSync("src/client/ScreenersHub.tsx", "utf8");
+  it("StockHub wires the panel into the stock run form (source pin, #2896)", () => {
+    const src = readFileSync("src/client/StockHub.tsx", "utf8");
     expect(src).toContain("StockCriteriaPanel");
     expect(src).toContain("stockCriteriaToFilter(stockCriteria)");
     expect(src).toContain("lastSentStockFilters");

@@ -11,8 +11,8 @@
  *   via resolveRouteId, exactly like today's unknown-tab behavior.
  *
  * The catalog is keyed by nav-node key, not bare id: the top-level
- * `screeners` item and the `screeners` sub-item under it are different
- * nodes with different links (?tab=screeners vs ?tab=screeners&view=stocks).
+ * `stock-hub` item and the `screeners` sub-item under it are different
+ * nodes with different links (?tab=stock-hub vs ?tab=stock-hub&view=stocks).
  */
 import {
   DEFAULT_LEFT_NAV_CONFIG,
@@ -24,6 +24,7 @@ import {
 import { navigateToTab } from "./router";
 import { resolveRouteId, type RouteId } from "./routes";
 import { SCREENER_HUB_TABS } from "./ScreenersHub";
+import { STOCK_HUB_TABS } from "./StockHub";
 import { OPTIONS_RESEARCH_SURFACE_VALUES } from "./options/researchSurface";
 
 export type DeepLink =
@@ -44,10 +45,11 @@ export const DEEP_LINK_OVERRIDES: Record<string, DeepLink> = {
   // link; the resolver falls back to the bare id when no parent:key entry
   // exists, so both paths resolve identically.
   "sandbox-checkout": { href: "/checkout/sandbox", newTab: true },
-  // Screener-hub views: sub-items that live under ?tab=screeners.
-  "screeners:new-screen": { tab: "screeners", view: "new-screen" },
-  "screeners:screeners": { tab: "screeners", view: "stocks" },
-  "screeners:goal-screen": { tab: "screeners", view: "goal-screen" },
+  // Stock Hub views: sub-items that live under ?tab=stock-hub.
+  "stock-hub:new-screen": { tab: "stock-hub", view: "new-screen" },
+  "stock-hub:screeners": { tab: "stock-hub", view: "stocks" },
+  "stock-hub:research": { tab: "stock-hub", view: "research" },
+  // Old-hub views: sub-items that live under ?tab=screeners.
   "options-screener:scanner": { tab: "screeners", view: "scanner" },
   "options-screener:iv-history": { tab: "screeners", view: "iv-history" },
   // Options research surfaces (issue #2784): the research param names
@@ -199,6 +201,7 @@ export interface SurfaceTabDef {
  */
 export const SURFACE_TAB_DEFS: SurfaceTabDef[] = [
   { surface: "screeners-hub", page: "screeners", param: "view", values: SCREENER_HUB_TABS },
+  { surface: "stock-hub", page: "stock-hub", param: "view", values: STOCK_HUB_TABS },
   {
     surface: "options-research",
     page: "options",

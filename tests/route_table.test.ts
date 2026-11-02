@@ -1,6 +1,6 @@
 /**
  * Route table contract (#1804 S1, issue #1808): the table is the single
- * source of truth for navigation, so its shape is pinned — 36 entries
+ * source of truth for navigation, so its shape is pinned — 37 entries
  * (30 nav entries + 6 alias ids; the agents tab was added by #2469,
  * Agent Mesh S20/G9, appended at navOrder 25 so no existing item
  * moves; the options-screener tab was added by #2596, appended at
@@ -54,6 +54,7 @@ const EXPECTED_IDS = [
   "screeners",
   "search",
   "social",
+  "stock-hub",
   "trading",
   "voice",
   "workflow-runs",
@@ -63,7 +64,7 @@ const EXPECTED_IDS = [
 const ALIAS_IDS = ["options", "orders", "reports", "scanner", "schedules", "trading"];
 
 describe("route table", () => {
-  it("has exactly the 36 tab ids, sorted and unique", () => {
+  it("has exactly the 37 tab ids, sorted and unique", () => {
     const ids = ROUTES.map((r) => r.id);
     expect(ids).toEqual(EXPECTED_IDS);
     expect(new Set(ids).size).toBe(ids.length);
@@ -81,11 +82,19 @@ describe("route table", () => {
     }
   });
 
-  it("every navGroup resolves to a real nav entry", () => {
+  it("every navGroup resolves to a real nav entry, except host routes grouping under themselves", () => {
     for (const r of ROUTES) {
       const group = getRoute(r.navGroup);
       expect(group).toBeDefined();
-      expect(hasNavEntry(group!)).toBe(true);
+      // Issue #2896: a host route with no nav entry may group under
+      // itself (screeners); its tabs are reached through their
+      // capability menus. Every other navGroup must resolve to a
+      // real nav entry.
+      if (!hasNavEntry(r) && r.navGroup === r.id) {
+        expect(group).toBeDefined();
+      } else {
+        expect(hasNavEntry(group!)).toBe(true);
+      }
     }
   });
 
@@ -126,6 +135,7 @@ describe("route table", () => {
     expect(getCrumb("order")).toBe("Order Ticket");
     expect(getCrumb("orders")).toBe("Order Ticket");
     expect(getCrumb("screeners")).toBe("Screeners");
+    expect(getCrumb("stock-hub")).toBe("Stock Hub");
     expect(getCrumb("scanner")).toBe("Strategy/Symbol Scanner");
     expect(getCrumb("reports")).toBe("Reports");
     expect(getCrumb("docs")).toBe("Docs & Reports");
@@ -141,6 +151,7 @@ describe("route table", () => {
     expect(getNavGroup("order")).toBe("order");
     expect(getNavGroup("orders")).toBe("order");
     expect(getNavGroup("screeners")).toBe("screeners");
+    expect(getNavGroup("stock-hub")).toBe("stock-hub");
     expect(getNavGroup("scanner")).toBe("options-screener");
     expect(getNavGroup("reports")).toBe("workflow-runs");
     expect(getNavGroup("docs")).toBe("workflow-runs");

@@ -20,6 +20,7 @@ import { TradingApprovalsQueue } from "./TradingApprovalsQueue";
 import { AccountPanels } from "./AccountPanels";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { ScreenersHub, type ScreenersHubTab } from "./ScreenersHub";
+import { StockHub, type StockHubTab } from "./StockHub";
 import { ETradeDynamicMenu, type ETradeDynamicMenuProps } from "./ETradeDynamicMenu";
 import {
   fetchBrokerEnvironment,
@@ -55,6 +56,7 @@ export type TradingSubTab =
   | "autopilot"
   | "scanner"
   | "screeners"
+  | "stock-hub"
   | "reports"
   | "schedules"
   | "iv-history"
@@ -111,6 +113,19 @@ export function ETradeTradingHub({
     <ScreenersHub
       activeEnv={activeEnv}
       userLogin={user?.login}
+      onStocksLoaded={setScreenerStocks}
+      initialTab={tab}
+      onPreviewTrade={handleTradeOrder}
+      onSendPrompt={onSendPrompt}
+      onJobStateChange={setOptionsJob}
+    />
+  );
+
+  const renderStockHub = (tab: StockHubTab) => (
+    <StockHub
+      activeEnv={activeEnv}
+      userLogin={user?.login}
+      user={user}
       onStocksLoaded={setScreenerStocks}
       initialTab={tab}
       onPreviewTrade={handleTradeOrder}
@@ -1320,6 +1335,7 @@ export function ETradeTradingHub({
       autopilot: "Autopilot Control Center",
       scanner: "Strategy/Symbol Scanner",
       screeners: "Multi-Asset Screeners",
+      "stock-hub": "Stock Hub",
       reports: "Reports",
       schedules: "Schedules",
       "iv-history": "IV History",
@@ -1653,7 +1669,8 @@ export function ETradeTradingHub({
           the equivalent tab — no redirect notices. */}
       {effectiveSubTab === "iv-history" && renderScreenersHub("iv-history")}
 
-      {effectiveSubTab === "screeners" && renderScreenersHub("stocks")}
+      {effectiveSubTab === "screeners" && renderScreenersHub("options")}
+      {effectiveSubTab === "stock-hub" && renderStockHub("stocks")}
 
       {effectiveSubTab === "reports" && renderScreenersHub("reports")}
 

@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { ScreenersHub, SCREENER_HUB_TABS } from "../src/client/ScreenersHub";
+import { StockHub, STOCK_HUB_TABS } from "../src/client/StockHub";
 import { CapabilityNavBar } from "../src/client/components/CapabilityNavBar";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
@@ -32,9 +33,11 @@ describe("ScreenersHub Tabbed Browsing Reference Implementation", () => {
     vi.restoreAllMocks();
   });
 
-  it("exports SCREENER_HUB_TABS with all 13 supported tabs", () => {
+  it("exports SCREENER_HUB_TABS without the moved stocks tabs, and STOCK_HUB_TABS carries them (#2896)", () => {
     expect(SCREENER_HUB_TABS).toBeDefined();
-    expect(SCREENER_HUB_TABS).toContain("stocks");
+    expect(SCREENER_HUB_TABS).not.toContain("stocks");
+    expect(SCREENER_HUB_TABS).not.toContain("new-screen");
+    expect(SCREENER_HUB_TABS).not.toContain("run-screen");
     expect(SCREENER_HUB_TABS).toContain("options");
     expect(SCREENER_HUB_TABS).toContain("scanner");
     expect(SCREENER_HUB_TABS).toContain("iv-history");
@@ -43,6 +46,9 @@ describe("ScreenersHub Tabbed Browsing Reference Implementation", () => {
     expect(SCREENER_HUB_TABS).toContain("schedules");
     expect(SCREENER_HUB_TABS).toContain("review");
     expect(SCREENER_HUB_TABS).toContain("track-record");
+    expect(STOCK_HUB_TABS).toContain("stocks");
+    expect(STOCK_HUB_TABS).toContain("new-screen");
+    expect(STOCK_HUB_TABS).toContain("research");
   });
 
   it("deep-links directly into the tab specified by the canonical ?view param", async () => {
@@ -90,55 +96,55 @@ describe("ScreenersHub Tabbed Browsing Reference Implementation", () => {
     expect(scannerPanel?.hasAttribute("hidden")).toBe(false);
   });
 
-  it("updates URL and history state when switching tabs", async () => {
+  it("updates URL and history state when switching tabs (StockHub, #2896)", async () => {
     const pushStateSpy = vi.spyOn(window.history, "pushState");
 
     await act(async () => {
-      root?.render(<ScreenersHub activeEnv="TEST" initialTab="stocks" />);
+      root?.render(<StockHub activeEnv="TEST" initialTab="stocks" />);
     });
 
-    // Find Reports tab and click it
+    // Find the new-screen tab and click it
     const buttons = Array.from(container?.querySelectorAll(".capability-tab-btn") || []);
-    const reportsBtn = buttons.find((b) => b.textContent?.includes("Reports")) as HTMLButtonElement;
-    expect(reportsBtn).toBeDefined();
+    const newScreenBtn = buttons.find((b) => b.textContent?.includes("Run a New Screen")) as HTMLButtonElement;
+    expect(newScreenBtn).toBeDefined();
 
     await act(async () => {
-      reportsBtn.click();
+      newScreenBtn.click();
     });
 
     expect(pushStateSpy).toHaveBeenCalled();
     const lastCallUrl = String(pushStateSpy.mock.calls[pushStateSpy.mock.calls.length - 1][2]);
-    expect(lastCallUrl).toContain("view=reports");
+    expect(lastCallUrl).toContain("view=new-screen");
 
-    const reportsPanel = container?.querySelector('#screener-tabpanel-reports');
-    expect(reportsPanel).not.toBeNull();
-    expect(reportsPanel?.hasAttribute("hidden")).toBe(false);
+    const newScreenPanel = container?.querySelector('#screener-tabpanel-new-screen');
+    expect(newScreenPanel).not.toBeNull();
+    expect(newScreenPanel?.hasAttribute("hidden")).toBe(false);
   });
 
-  it("responds to browser back/forward (popstate) events", async () => {
+  it("responds to browser back/forward (popstate) events (StockHub, #2896)", async () => {
     await act(async () => {
-      root?.render(<ScreenersHub activeEnv="TEST" initialTab="stocks" />);
+      root?.render(<StockHub activeEnv="TEST" initialTab="stocks" />);
     });
 
     expect(container?.querySelector('.capability-tab-btn[aria-selected="true"]')?.textContent).toContain("Stocks");
 
-    // Simulate browser back/forward navigation to ?screenerTab=schedules
-    window.history.replaceState(null, "", "/screeners?screenerTab=schedules");
+    // Simulate browser back/forward navigation to ?screenerTab=new-screen
+    window.history.replaceState(null, "", "/screeners?screenerTab=new-screen");
     await act(async () => {
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
 
     const activeTab = container?.querySelector('.capability-tab-btn[aria-selected="true"]');
-    expect(activeTab?.textContent).toContain("Schedules");
+    expect(activeTab?.textContent).toContain("Run a New Screen");
 
-    const schedulesPanel = container?.querySelector('#screener-tabpanel-schedules');
-    expect(schedulesPanel).not.toBeNull();
-    expect(schedulesPanel?.hasAttribute("hidden")).toBe(false);
+    const newScreenPanel = container?.querySelector('#screener-tabpanel-new-screen');
+    expect(newScreenPanel).not.toBeNull();
+    expect(newScreenPanel?.hasAttribute("hidden")).toBe(false);
   });
 
-  it("preserves mounted tab state across tab switches (retained DOM panels)", async () => {
+  it("preserves mounted tab state across tab switches (retained DOM panels, StockHub, #2896)", async () => {
     await act(async () => {
-      root?.render(<ScreenersHub activeEnv="TEST" initialTab="stocks" />);
+      root?.render(<StockHub activeEnv="TEST" initialTab="stocks" />);
     });
 
     // Verify stocks panel is visible
@@ -146,18 +152,18 @@ describe("ScreenersHub Tabbed Browsing Reference Implementation", () => {
     expect(stocksPanel).not.toBeNull();
     expect(stocksPanel?.hasAttribute("hidden")).toBe(false);
 
-    // Switch to Scanner tab
+    // Switch to the new-screen tab
     const buttons = Array.from(container?.querySelectorAll(".capability-tab-btn") || []);
-    const scannerBtn = buttons.find((b) => b.textContent?.includes("Scanner")) as HTMLButtonElement;
+    const newScreenBtn = buttons.find((b) => b.textContent?.includes("Run a New Screen")) as HTMLButtonElement;
     await act(async () => {
-      scannerBtn.click();
+      newScreenBtn.click();
     });
 
     // Stocks panel is hidden, not unmounted
     expect(stocksPanel?.hasAttribute("hidden")).toBe(true);
-    const scannerPanel = container?.querySelector('#screener-tabpanel-scanner');
-    expect(scannerPanel).not.toBeNull();
-    expect(scannerPanel?.hasAttribute("hidden")).toBe(false);
+    const newScreenPanel = container?.querySelector('#screener-tabpanel-new-screen');
+    expect(newScreenPanel).not.toBeNull();
+    expect(newScreenPanel?.hasAttribute("hidden")).toBe(false);
 
     // Switch back to Stocks tab
     const stocksBtn = buttons.find((b) => b.textContent?.includes("Stocks")) as HTMLButtonElement;
@@ -166,7 +172,7 @@ describe("ScreenersHub Tabbed Browsing Reference Implementation", () => {
     });
 
     expect(stocksPanel?.hasAttribute("hidden")).toBe(false);
-    expect(scannerPanel?.hasAttribute("hidden")).toBe(true);
+    expect(newScreenPanel?.hasAttribute("hidden")).toBe(true);
   });
 
   it("CapabilityNavBar supports WCAG 2.2 / WAI-ARIA roving tabindex keyboard navigation", async () => {

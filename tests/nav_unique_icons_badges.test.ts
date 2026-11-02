@@ -17,6 +17,8 @@
  * order; pin updated in the same PR per the §7 pin rule.)
  * (#2740 added the Billing nav entry, navOrder 29, last in display
  * order; pin updated in the same PR per the §7 pin rule.)
+ * (#2896 replaced the screeners nav entry with the Stock Hub entry
+ * (navOrder 6, icon Scanner, badge Stocks); nav count stays 30.)
  */
 import { describe, it, expect } from "vitest";
 import { ROUTES, hasNavEntry } from "../src/client/routes";
