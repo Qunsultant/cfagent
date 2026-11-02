@@ -656,7 +656,12 @@ function isStandaloneRequestTrace(job: WorkflowRunJobRow): boolean {
   const payload = parseObject(job.payload_json);
   if (payload && "stageChain" in payload) return false;
   const method = typeof payload?.method === "string" ? payload.method.toUpperCase() : "";
-  return method === "GET" || method === "HEAD";
+  if (method === "GET" || method === "HEAD") return true;
+  const path = str(payload?.pathAndQuery) ?? "";
+  if (path.includes("/external-ads/impression") || path.includes("/external-ads/click")) {
+    return true;
+  }
+  return false;
 }
 
 function mainJobOf(jobs: WorkflowRunJobRow[]): WorkflowRunJobRow {

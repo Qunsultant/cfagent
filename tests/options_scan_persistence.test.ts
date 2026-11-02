@@ -373,12 +373,14 @@ describe("scan provenance (issue #27)", () => {
     });
 
     expect(result.generatedAt).toBe("2026-10-16T14:30:00.000Z");
-    expect(result.modelVersion).toBe("1.2.0");
+    expect(result.modelVersion).toBe("1.2.1");
     expect(result.modelVersion).toBe(SCAN_MODEL_VERSION);
 
     // The snapshot echoes exactly what was asked (not what the gate or
     // the scorer later decided): scoped stated target and the per-name
     // override travel verbatim, the shared filters by reference.
+    // Issue #2600 exception: strategyMode is stamped as resolved by
+    // scan() (default "thesis"), never re-derived from the alias.
     expect(result.requestSnapshot.mode).toBe("strategy_fit");
     expect(result.requestSnapshot.riskProfile).toBe("aggressive");
     expect(result.requestSnapshot.strategyFilter).toBeUndefined();
@@ -390,6 +392,7 @@ describe("scan provenance (issue #27)", () => {
       maxPlannedLoss: 5_000,
       minRewardRisk: 0.1,
       allowedStrategies: ["long_call", "call_debit_spread", "put_credit_spread"],
+      strategyMode: "thesis",
       statedTarget: { price: 260, symbol: "NVDA" },
       perSymbol: { AMD: { statedTarget: { percent: 8 } } },
     });

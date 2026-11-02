@@ -5,6 +5,7 @@
  */
 
 export * from "./optionsDataAgent";
+export * from "./strategyChoice";
 export * from "./strategyRiskAgent";
 export * from "./recommendationAgent";
 export * from "./panelPipeline";

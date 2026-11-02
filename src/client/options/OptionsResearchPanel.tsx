@@ -769,6 +769,15 @@ export function OptionsResearchPanel({ activeEnv, userLogin, onPreviewTrade, onJ
   const [maxQuoteAgeSeconds, setMaxQuoteAgeSeconds] = useState("60");
   const [contractLimit, setContractLimit] = useState("5000");
   const [candidateLimit, setCandidateLimit] = useState("100");
+  const [candidateLimitAll, setCandidateLimitAll] = useState(false);
+  // Issue #2600: strategy-choice controls. Mode thesis|all only: this
+  // form always carries a thesis/target, so it cannot express the
+  // constraint-only no-view mode (that body goes to the strategies
+  // route directly, without view fields). Far-dated off (default)
+  // keeps the near window; on attaches the selected templates'
+  // horizon bands so PMCC/LEAPS can actually build.
+  const [strategyMode, setStrategyMode] = useState<"thesis" | "all">("thesis");
+  const [farDated, setFarDated] = useState(false);
   const [maxStrikesPerSide, setMaxStrikesPerSide] = useState("12");
   const [maxIronCondors, setMaxIronCondors] = useState("100");
   const [eventPolicy, setEventPolicy] = useState<"warn" | "exclude">("warn");
@@ -911,7 +920,9 @@ export function OptionsResearchPanel({ activeEnv, userLogin, onPreviewTrade, onJ
     maxSpreadPct: maxSpreadPct.trim() ? Number(maxSpreadPct) : undefined,
     maxQuoteAgeSeconds: Number(maxQuoteAgeSeconds),
     contractLimit: Number(contractLimit),
-    candidateLimit: Number(candidateLimit),
+    candidateLimit: candidateLimitAll ? "all" : Number(candidateLimit),
+    strategyMode,
+    farDated,
     maxStrikesPerSide: Number(maxStrikesPerSide),
     maxIronCondors: Number(maxIronCondors),
     allowedStrategies,
@@ -1416,7 +1427,13 @@ export function OptionsResearchPanel({ activeEnv, userLogin, onPreviewTrade, onJ
         <TextInput label="Maximum bid/ask spread (%)" type="number" min="0" step="0.1" value={maxSpreadPct} onChange={(event) => setMaxSpreadPct(event.target.value)} />
         <TextInput label="Quote-age reference (seconds)" required type="number" min="0" step="1" value={maxQuoteAgeSeconds} onChange={(event) => setMaxQuoteAgeSeconds(event.target.value)} />
         <TextInput label="Contracts to evaluate" type="number" min="1" step="1" value={contractLimit} onChange={(event) => setContractLimit(event.target.value)} />
-        <TextInput label="Ranked candidates to show" type="number" min="1" step="1" value={candidateLimit} onChange={(event) => setCandidateLimit(event.target.value)} />
+        <TextInput label="Ranked candidates to show" type="number" min="1" step="1" value={candidateLimit} onChange={(event) => setCandidateLimit(event.target.value)} disabled={candidateLimitAll} />
+        <Checkbox label="All ranked candidates (no cap; distinct from the best-trade alternatives count, which stays 3)" checked={candidateLimitAll} onChange={() => setCandidateLimitAll(!candidateLimitAll)} />
+        <Select label="Strategy scope" value={strategyMode} onChange={(event) => setStrategyMode(event.target.value as "thesis" | "all")}>
+          <option value="thesis">Thesis only (default)</option>
+          <option value="all">All wanted strategies (thesis orients scoring only)</option>
+        </Select>
+        <Checkbox label="Fetch far-dated horizons (lets selected long-horizon strategies such as PMCC and LEAPS reach their expiries)" checked={farDated} onChange={() => setFarDated(!farDated)} />
         <TextInput label="Strike candidates per side" type="number" min="1" step="1" value={maxStrikesPerSide} onChange={(event) => setMaxStrikesPerSide(event.target.value)} />
         <TextInput label="Iron condor combinations" type="number" min="0" step="1" value={maxIronCondors} onChange={(event) => setMaxIronCondors(event.target.value)} />
         <Select label="Earnings/dividend policy" value={eventPolicy} onChange={(event) => setEventPolicy(event.target.value as "warn" | "exclude")}>

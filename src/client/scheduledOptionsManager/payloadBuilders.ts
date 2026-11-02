@@ -177,6 +177,11 @@ export function buildScheduleSubmission(
         maxItems: form.maxItems,
         thesis: form.thesis,
         riskProfile: form.riskProfile,
+        // Issue #2600: schedule strategy-choice controls, when set
+        // (absent fields keep the golden-pinned legacy bodies intact).
+        ...(form.optionsStrategyMode ? { strategyMode: form.optionsStrategyMode } : {}),
+        ...(form.optionsFarDated !== undefined ? { farDated: form.optionsFarDated } : {}),
+        ...(form.optionsCandidateLimit !== undefined ? { candidateLimit: form.optionsCandidateLimit } : {}),
         pushToSlack: form.pushToSlack,
         slackChannel: form.pushToSlack ? form.slackChannel : undefined,
         emailTo: form.emailTo.trim() || undefined,
@@ -304,6 +309,11 @@ export function buildOptionsRunNowPayload(form: ScheduleFormState): Record<strin
     maxItems: form.maxItems,
     thesis: form.thesis,
     riskProfile: form.riskProfile,
+    // Issue #2600: Run Now is the schedule's own trigger path, so it
+    // carries the same strategy-choice controls when set.
+    ...(form.optionsStrategyMode ? { strategyMode: form.optionsStrategyMode } : {}),
+    ...(form.optionsFarDated !== undefined ? { farDated: form.optionsFarDated } : {}),
+    ...(form.optionsCandidateLimit !== undefined ? { candidateLimit: form.optionsCandidateLimit } : {}),
     pushToSlack: form.pushToSlack,
     slackChannel: form.pushToSlack ? form.slackChannel : undefined,
     emailTo: form.emailTo.trim() || undefined,

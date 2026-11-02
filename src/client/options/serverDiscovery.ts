@@ -27,6 +27,13 @@ export interface ServerDiscoveryInputs {
   /** Issue #65: "calibrated-demo" explicitly requests generated chains for
    *  the Demo tab; honored server-side only when the dev/demo gate is on. */
   dataMode?: "live" | "calibrated-demo";
+  /** Issue #2600: strategy-choice controls, when the caller sets
+   *  them. Absent = server defaults (thesis mode, near window,
+   *  ranked cap 24 below) — the Discovery view's historical body is
+   *  unchanged unless the caller opts in. */
+  strategyMode?: "thesis" | "all";
+  farDated?: boolean;
+  candidateLimit?: number | "all";
 }
 
 type OptionThesis = "bullish" | "bearish" | "range_bound" | "large_move";
@@ -63,7 +70,9 @@ export function buildStrategyRequest(inputs: ServerDiscoveryInputs) {
     minRewardRisk: inputs.minRewardRisk,
     allowedStrategies: ["all"],
     maxDte: inputs.expiration.dte,
-    candidateLimit: 24,
+    candidateLimit: inputs.candidateLimit ?? 24,
+    ...(inputs.strategyMode !== undefined ? { strategyMode: inputs.strategyMode } : {}),
+    ...(inputs.farDated !== undefined ? { farDated: inputs.farDated } : {}),
     ...(inputs.bias !== undefined ? { optimizationBias: inputs.bias } : {}),
     ...(inputs.dataMode !== undefined ? { dataMode: inputs.dataMode } : {}),
   };
