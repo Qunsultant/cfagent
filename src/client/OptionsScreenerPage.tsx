@@ -155,22 +155,14 @@ export function OptionsScreenerPage({ onSelectTab }: OptionsScreenerPageProps) {
         description="The data provider feeding these surfaces and the broker whose surfaces render, from Settings. Changing a selection writes the server row; this page only displays it."
       >
         <Card padding="md">
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: "var(--space-2, 0.5rem)",
-            }}
-          >
-            <p style={{ margin: 0 }}>
-              Data provider: {dataProviderLabel} · Broker: {brokerLabel}
-            </p>
-            {tenantProviders.brokerId !== "etrade" && (
-              <Notice tone="warning" title="[FAILURE_BROKER_UNAVAILABLE] Broker surface unavailable">
-                {brokerUnavailableNotice(tenantProviders.brokerId, brokerLabel)}
-              </Notice>
-            )}
-          </div>
+          <p>
+            Data provider: {dataProviderLabel} · Broker: {brokerLabel}
+          </p>
+          {tenantProviders.brokerId !== "etrade" && (
+            <Notice tone="warning" title="[FAILURE_BROKER_UNAVAILABLE] Broker surface unavailable">
+              {brokerUnavailableNotice(tenantProviders.brokerId, brokerLabel)}
+            </Notice>
+          )}
         </Card>
       </PageSection>
       <PageSection
