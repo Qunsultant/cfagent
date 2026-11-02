@@ -1,0 +1,3 @@
+### Changed
+
+- **Cleanup last (#2892, under #2764):** test-pinned retention register, zero deletions. Audit finding: no qualifying deprecation exists in the stock surface today because the slices replaced old paths in place (Slice 1 spec builder, Slice 7 shard policy, Slices 5–6 scheduled planner, Slice 3 finalizer) rather than leaving parallel copies. Retained deliberately: the fused runScreen path (#2869 per-stage migration follow-through, not cleanup fodder) and the legacy `?screenerTab=`/`?tab=` aliases (bookmarks; canonical is `?view=`). No file deleted, no deprecation issued without a qualifying surface; any future removal needs a named successor plus a lossless check in its own PR.
