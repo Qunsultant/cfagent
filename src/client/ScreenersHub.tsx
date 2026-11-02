@@ -22,7 +22,6 @@ import { CapabilityNavBar, CopilotTriggerButton, type CapabilityTabItem } from "
 import { ScreenerResultsView, type ScreenerResultData } from "./ScreenerResultsView";
 import { RunDetailView, type RunDetailConfirmation } from "./RunDetailView";
 import { MorningDigest } from "./MorningDigest";
-import { ProviderConnectivityDashboard } from "./ProviderConnectivityDashboard";
 import { ScannerPanel } from "./ScannerPanel";
 import { GoalScreenPanel } from "./GoalScreenPanel";
 import { ErrorBoundary } from "./ErrorBoundary";
@@ -1031,13 +1030,24 @@ export function ScreenersHub({
             </div>
           ))}
           {!manualResult && summary && <div className="screener-results-header"><span>{summary}</span><span>{activeProvider?.label} · {activeEnv}</span></div>}
-          {/* Issue #2438: the provider dashboard — the screen's
-              provider-health section and the one source of truth for
-              provider health (owner decision). Stored state only: it
-              reads GET /api/data-providers (+ oauth/status presence)
-              and never runs, verifies, or tests a provider. */}
-          <div id="provider-dashboard" style={{ marginTop: "1.5rem" }}>
-            <ProviderConnectivityDashboard />
+          {/* Issue #2723: Provider connectivity consolidated into Platform Admin -> Data Providers. */}
+          <div id="provider-dashboard" className="provider-dashboard-callout">
+            <Card padding="md">
+              <div className="provider-callout-inner">
+                <div>
+                  <h4 className="provider-callout-title">Provider connectivity &amp; health</h4>
+                  <p className="provider-callout-desc">
+                    Live provisioning lifecycle, capture health, and route metrics are consolidated in Platform Admin.
+                  </p>
+                </div>
+                <a
+                  href="/?tab=platform-admin&view=data-providers"
+                  className="ui-btn ui-btn-secondary ui-btn-sm provider-callout-link"
+                >
+                  View Data Providers &rarr;
+                </a>
+              </div>
+            </Card>
           </div>
         </div>
       )}
