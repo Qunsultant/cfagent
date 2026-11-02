@@ -1965,9 +1965,11 @@ export const MESH_TRACE_SPINE: MeshTraceSpineEntry[] = [
   },
   {
     hop: "payment-workflow-steps",
-    status: "break",
-    consequence:
-      "PaymentWorkflow's internal steps (gate, ledger record inside the workflow, screener start) record no step hops: the S10 path's trace covers the port's payment.start hop and the screener run it starts (whose command carries the traceparent), but the payment run's own step spans are not yet recorded, so assembly shows the payment leg as its start hop plus the screener leg.",
+    status: "carried",
+    carrier:
+      "PaymentWorkflowParams.traceparent (#1743's field, grown by #2762): buildPaymentWorkflowParams stamps it from the caller-built screener command's traceparent — the command the S10 submission already carries — server-side only, never a tool argument; PaymentWorkflow threads it into the flow, whose step hops record under it. Submissions whose command carries no traceparent (route-originated) record no step hops; never minted mid-flight.",
+    evidence:
+      "Hops per completed step (kind \"workflow-step\", operations = the flow's step names: gate-check, record-checkout / record-coverage-required, await-payment-approval, record-approval / record-rejection, await-payment-verified, record-expiry, confirm-paid, record-payment, record-usage, consume-coverage, start-screener, issue-failure-credit; jobId = the run's runRequestId) recorded by the flow's traceHop dep, wired in paymentWorkflow.ts via recordWorkflowTraceHop over meshTraceStoreForEnv, deriving deterministic spans from (runRequestId, step name) so durable replay converges.",
   },
   {
     hop: "http-route-workflow-starts",
