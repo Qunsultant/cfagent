@@ -13,6 +13,10 @@
  */
 
 import { parseStockScreenRequest, shardableUniverses } from "../../trading";
+import type {
+  StockScreenDelivery,
+  StockScreenRunSpec,
+} from "../../workflows/stockScreenRunSpec";
 import { screenerOutcomeFromRunResult } from "../../services/screenerFollowups";
 import { isPortfolioContextEnabled } from "../../services/screeningFlags";
 import type { ETradeService } from "../../services/etrade";
@@ -33,13 +37,13 @@ import type { ScreenerAgent } from "../screener-agent";
  * request by parseStockScreenRequest. Every field optional: a caller
  * that sends none gets today's behavior exactly.
  */
-export interface ManualScreenDelivery {
-  emailTo?: string;
-  pushToSlack?: boolean;
-  slackChannel?: string;
-  webhookUrl?: string;
-  generatePdf?: boolean;
-}
+/**
+ * Issue #2809: the delivery envelope is defined once in
+ * stockScreenRunSpec.ts (StockScreenDelivery); this name is kept
+ * as an alias so existing importers keep working. Do not add
+ * fields here — add them to StockScreenDelivery.
+ */
+export type ManualScreenDelivery = StockScreenDelivery;
 
 /**
  * Issue #2545: the fields a delivery selection stamps onto a finished
@@ -144,8 +148,18 @@ export async function executeEtradeScreen(args: {
   requestedEnv: "TEST" | "PROD" | undefined;
   userLogin: string;
   agent: ScreenerAgent;
-  universe: StockScreenValue["universe"];
-  validatedFilters: StockScreenValue["filters"];
+  /**
+   * Issue #2809: the normalized run spec, built once by
+   * buildStockScreenRunSpec. When present it is the single
+   * source for universe/filters/async/delivery/mode; the
+   * legacy fields below are kept only as the backward-
+   * compatible construction path (existing pins call with
+   * them) and are normalized to the same spec at the top
+   * of this function.
+   */
+  spec?: StockScreenRunSpec;
+  universe?: StockScreenValue["universe"];
+  validatedFilters?: StockScreenValue["filters"];
   /** Issue #1737: opt-in async path — start a workflow, return 202, never await the scan. */
   asyncRequested?: boolean;
   /** Issue #2545: the caller's delivery selection (subsumes the
@@ -163,7 +177,27 @@ export async function executeEtradeScreen(args: {
   screenMode?: "non-deterministic";
   screenIntent?: string;
 }): Promise<Response> {
-  const { ctx, sessionId, requestedEnv, userLogin, agent, universe, validatedFilters, delivery } = args;
+  const { ctx, sessionId, requestedEnv, userLogin, agent } = args;
+  // Issue #2809: normalize both call shapes to one spec. The
+  // legacy path pins deliver=true / source "etrade", exactly
+  // what the E*TRADE route's spec carries.
+  const spec: StockScreenRunSpec = args.spec ?? {
+    source: "etrade",
+    deliver: true,
+    filters: args.validatedFilters as StockScreenValue["filters"],
+    universe: args.universe as StockScreenValue["universe"],
+    asyncRequested: args.asyncRequested ?? false,
+    delivery: args.delivery ?? {},
+    ...(args.screenMode
+      ? { screenMode: args.screenMode, screenIntent: args.screenIntent }
+      : {}),
+  };
+  const universe = spec.universe;
+  const validatedFilters = spec.filters;
+  const delivery = spec.delivery;
+  const asyncRequested = spec.asyncRequested;
+  const screenMode = spec.screenMode;
+  const screenIntent = spec.screenIntent;
   // Issue #17: the portfolio-context flag is read here (orchestrator
   // storage owns mas_settings; the screener agent cannot read it) and
   // rides the run request — runSharded spreads it onto every shard.
@@ -173,7 +207,7 @@ export async function executeEtradeScreen(args: {
   // store + deliver per shard, so nothing is persisted,
   // published, or audited-as-complete here. Unbound → null
   // → fall through to the synchronous path below.
-  if (args.asyncRequested) {
+  if (asyncRequested) {
     const jobId = manualWorkflowJobId(universe);
     const shards =
       universe === "ALL"
@@ -188,12 +222,14 @@ export async function executeEtradeScreen(args: {
       role: "parent",
       tenantId: workflowTenantId(ctx.env),
       shards,
-      deliver: true,
+      // Issue #2809: deliver comes from the spec (true for E*TRADE),
+      // not a second literal divergence point.
+      deliver: spec.deliver,
       filters: validatedFilters as unknown as Record<string, unknown>,
       environment: requestedEnv,
       portfolioContext,
-      ...(args.screenMode
-        ? { screenMode: args.screenMode, screenIntent: args.screenIntent }
+      ...(screenMode
+        ? { screenMode, screenIntent }
         : {}),
     });
     if (handle) {
