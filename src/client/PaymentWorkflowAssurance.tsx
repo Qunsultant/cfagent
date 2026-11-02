@@ -78,6 +78,7 @@ import {
   Table,
   TextInput,
 } from "./components/ui";
+import { StoreOperatorsPanel } from "./StoreOperatorsPanel";
 
 export interface FakeConfig {
   monetizationOn: boolean;
@@ -1023,6 +1024,8 @@ export function PaymentWorkflowAssurance({ userLogin }: { userLogin?: string }) 
       </PageSection>
 
       <PriceApprovalSection userLogin={userLogin} />
+
+      <StoreOperatorsPanel />
 
       <PageSection title="Tunable fakes">
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "var(--space-3)" }}>

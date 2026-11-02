@@ -273,6 +273,11 @@
  * handleAgenticPaymentsRoutes, after the referral record-earn
  * route — bringing the pinned array to 324 entries (measured);
  * the delegation sequence is unchanged (same handler, same position).
+ * Issue #2680 added three — GET /payments/agentic/commercial/operators
+ * and POST .../operators/add and .../operators/remove (in
+ * handleAgenticPaymentsRoutes, after the prices route) — bringing the
+ * pinned array to 339 entries (measured); the delegation sequence is
+ * unchanged (same handler, same position).
  *
  * LANDMARK RULE (#405): all position assertions anchor to DELEGATION
  * CALLS - the only landmarks a thin router has.
@@ -472,6 +477,9 @@ const EXPECTED_INVENTORY = [
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/pricing\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/prices\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/prices\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/operators\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/operators/add\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/operators/remove\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/refunds\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/refunds/approve\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/refunds/execute\")",
