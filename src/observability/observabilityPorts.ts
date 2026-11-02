@@ -40,6 +40,7 @@
  */
 
 import type { MessageEnvelope } from "../messaging/messagingPorts";
+import { guardResourceEvent } from "./resourceEventGuard";
 
 /** W3C trace context for one trace span. */
 export interface TraceContext {
@@ -454,6 +455,22 @@ export function foldEnvelopeToEvent(
             ? { deliveryId: envelope.subject }
             : {}),
         };
+        return event;
+      }
+      case "resource.sql_op": {
+        // Phase 5 slice 5 (#1819): counts-only fold. The guard bounds
+        // every dimension and drops identities; the whitelist here
+        // admits nothing else, even when a producer envelope carries
+        // session ids, user logins, bound values, or error text.
+        // Trace rides the envelope traceparent (traceOf), the same
+        // design Slice 3 uses for steps — no Slice 3 code is needed.
+        const guarded = guardResourceEvent(data);
+        if (!guarded) return null;
+        const event = baseEvent(envelope, "resource.sql_op", "info", guarded.tenantId);
+        event.runId = guarded.runId;
+        event.sessionRef = guarded.sessionRef;
+        if (guarded.durationMs !== undefined) event.durationMs = guarded.durationMs;
+        event.fields = guarded.fields;
         return event;
       }
       case "screener.stage.feed_completed":
