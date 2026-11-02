@@ -957,6 +957,29 @@ export function getCanonicalReport(
   }
 }
 
+/**
+ * Issue #2664: whether one canonical report row belongs to the given
+ * login, resolved through the canonical-report read port
+ * (getRowByIdForOwner) — never a raw storage query, so this service
+ * layer keeps zero storage-exec sites. Used by the report-confirmation
+ * ownership gate (legacy fallback for rows created before confirmation
+ * creator tracking) and by the stored-report delivery seam. False when
+ * the report does not exist, the owner differs, or the read fails.
+ * Never throws.
+ */
+export function isCanonicalReportOwnedBy(
+  sql: SqlStorage,
+  reportId: string,
+  owner: string
+): boolean {
+  try {
+    if (!reportId || typeof reportId !== "string" || !owner) return false;
+    return storePorts(sql).read.getRowByIdForOwner(reportId, owner) !== null;
+  } catch {
+    return false;
+  }
+}
+
 /** SHA-256 hex of text — content-hash generation ids for client reports. */
 export async function sha256Hex(text: string): Promise<string> {
   const digest = await crypto.subtle.digest(

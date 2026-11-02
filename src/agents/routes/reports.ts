@@ -76,7 +76,9 @@ export interface ReportsRouteContext {
   createReportConfirmation(
     kind: "email" | "webhook" | "screener",
     payloadJson: string,
-    reportId?: string | null
+    reportId?: string | null,
+    /** Issue #2664: the login creating the hold. */
+    createdBy?: string | null
   ): string;
   /** Issue #1123 S5c: resubmit a held screener follow-up delivery on
    *  approval (the resubmitted job carries the approval marker). */
@@ -460,6 +462,37 @@ export async function handleReportsRoutes(
     if (!row) {
       return Response.json({ error: "Report confirmation not found." }, { status: 404 });
     }
+    // Issue #2664: a held dispatch is its creator's HITL — no other
+    // user may approve, reject, or trigger it, and no operator bypass
+    // exists. The creator is the stored created_by; legacy rows fall
+    // back to the linked canonical report's owner through the read
+    // port (getRowByIdForOwner). Pre-#308 rows with neither a creator
+    // nor a linked report keep the pinned embedded-payload fallback
+    // (canonical-report.test.ts: legacy rows still approve): they
+    // predate ownership tracking, are age-bounded by the TTL check
+    // below, and live in the creator's per-user instance store. The
+    // gate runs before any status/expiry read so a non-owner learns
+    // nothing about the row.
+    const callerLogin = request.headers.get("x-user-login") || sessionId;
+    const { isCanonicalReportOwnedBy } = await import("../../services/scheduledReports");
+    if (typeof (row as any).created_by === "string" && (row as any).created_by) {
+      if ((row as any).created_by !== callerLogin) {
+        ctx.audit("research_report.confirmation_denied", "trading", { confirmationId });
+        return Response.json(
+          { error: "Forbidden: this confirmation belongs to another user." },
+          { status: 403 }
+        );
+      }
+    } else if (row.report_id) {
+      if (!isCanonicalReportOwnedBy(ctx.ensureTables(), String(row.report_id), callerLogin)) {
+        ctx.audit("research_report.confirmation_denied", "trading", { confirmationId });
+        return Response.json(
+          { error: "Forbidden: this confirmation's report belongs to another user or is no longer available; re-submit the delivery." },
+          { status: 403 }
+        );
+      }
+    }
+    // else: pre-#308 orphan row — pinned legacy fallback below.
     if (row.status !== "pending") {
       return Response.json(
         { error: `Report confirmation already ${row.status}.`, confirmationId },
@@ -472,7 +505,7 @@ export async function handleReportsRoutes(
       ctx.audit("research_report.confirmation_expired", "trading", { confirmationId });
       return Response.json({ error: "Report confirmation expired.", confirmationId }, { status: 410 });
     }
-    const userLogin = request.headers.get("x-user-login") || sessionId;
+    const userLogin = callerLogin;
     if (decision === "approved") {
       // Issue #1123 S5c: a held screener follow-up delivery. Approval
       // resubmits the delivery job with the approval marker so the
@@ -634,7 +667,8 @@ export async function handleReportsRoutes(
       const confirmationId = ctx.createReportConfirmation(
         "email",
         JSON.stringify({ recipient, title, fileName }),
-        stored.reportId
+        stored.reportId,
+        userLogin
       );
       ctx.audit("research_report.pending_confirmation", "trading", { confirmationId, recipient, fileName, reportId: stored.reportId });
       return Response.json({ success: true, status: "pending_confirmation", confirmationId });
@@ -682,7 +716,8 @@ export async function handleReportsRoutes(
       const confirmationId = ctx.createReportConfirmation(
         "webhook",
         JSON.stringify({ title: wtitle, query: typeof body.query === "string" ? body.query : "", sheetCount: body.sheets.length }),
-        stored.reportId
+        stored.reportId,
+        wuserLogin
       );
       ctx.audit("research_report.pending_confirmation", "trading", {
         confirmationId,

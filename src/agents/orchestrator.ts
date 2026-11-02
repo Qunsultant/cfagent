@@ -722,8 +722,8 @@ export class OrchestratorAgent extends PortThink {
       getResearchAgent: (userLogin?: string) => this.getResearchAgent(userLogin),
       runAgentTool: (cls, options) => this.runAgentTool(cls as any, options),
       getReportDispatchHitl: () => this.getReportDispatchHitl(),
-      createReportConfirmation: (kind, payloadJson, reportId) =>
-        this.createReportConfirmation(kind, payloadJson, reportId),
+      createReportConfirmation: (kind, payloadJson, reportId, createdBy) =>
+        this.createReportConfirmation(kind, payloadJson, reportId, createdBy),
       RESEARCH_TASK_HEARTBEAT_MS,
     };
   }
@@ -1630,9 +1630,10 @@ export class OrchestratorAgent extends PortThink {
   private createReportConfirmation(
     kind: "email" | "webhook" | "screener",
     payloadJson: string,
-    reportId?: string | null
+    reportId?: string | null,
+    createdBy?: string | null
   ): string {
-    return createReportConfirmation(this.reportDispatchContext(), kind, payloadJson, reportId);
+    return createReportConfirmation(this.reportDispatchContext(), kind, payloadJson, reportId, createdBy);
   }
 
   // Issue #992: extracted to ./orchestrator/reportDispatch.ts (getReportConfirmation);
@@ -2596,8 +2597,8 @@ export class OrchestratorAgent extends PortThink {
       getReportConfirmation: (id) => this.getReportConfirmation(id),
       decideReportConfirmation: (id, status, decidedBy) =>
         this.decideReportConfirmation(id, status, decidedBy),
-      createReportConfirmation: (kind, payloadJson, reportId) =>
-        this.createReportConfirmation(kind, payloadJson, reportId),
+      createReportConfirmation: (kind, payloadJson, reportId, createdBy) =>
+        this.createReportConfirmation(kind, payloadJson, reportId, createdBy),
       submitFollowupDelivery: makeSubmitFollowupDelivery((job) => this.submitAsyncJob(job)),
       confirmationDeliveryMeta: (row) => this.confirmationDeliveryMeta(row),
       deliverStoredReportEmail: (reportId, recipient, userLogin) =>
