@@ -177,7 +177,7 @@ import {
   serviceTokenStore,
   verifyServiceToken,
 } from "./security/serviceTokens";
-import { serveStaticAsset } from "./security/staticAssets";
+import { serveStaticAsset, fetchStaticAsset } from "./security/staticAssets";
 import { withErrorBoundary } from "./security/workerErrorBoundary";
 import { handleLogout, renderLoginPage } from "./oauth";
 import {
@@ -4443,7 +4443,10 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
         });
       }
 
-      const asset = await env.ASSETS.fetch(request);
+      // Qunsultant/cfagent#1775 (Adapter S1): ASSETS fetch via the
+      // static-asset port (fetchStaticAsset), not the binding
+      // directly. Response handling below is verbatim.
+      const asset = await fetchStaticAsset(request, env);
       if (asset.ok) {
         const html = await asset.text();
         // Issue #1759: the client renders the user DID from the
@@ -4508,7 +4511,9 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
       }
     }
 
-    return env.ASSETS.fetch(request);
+    // Qunsultant/cfagent#1775 (Adapter S1): fallthrough serve via
+    // the static-asset port, not the binding directly.
+    return fetchStaticAsset(request, env);
 }
 
 /**
