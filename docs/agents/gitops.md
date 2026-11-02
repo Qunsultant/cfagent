@@ -251,7 +251,7 @@ Titles carry the work type as a prefix, and the matching label is applied at cre
 Rules:
 - The title prefix and the type label must match; a mismatch is a review finding, fixed before merge.
 - Every issue also carries its `lane:<lane>` label (see Required issue metadata) — the type label does not replace the lane label.
-- Related issues are recorded in the `## Related issues` body section with roles, not as a bare list: Parent epic, Blocks / Blocked by, Related, Supersedes. A related issue with no recorded role is invisible to sequencing (see Required issue metadata).
+- Related issues are recorded in the `## Related issues` body section with roles, not as a bare list: Parent epic, Blocks / Blocked by, Related, Supersedes. A related issue with no recorded role is invisible to sequencing (see Required issue metadata). Body recording is in addition to, never instead of, the required GitHub sub-issue relationship (see "Related work MUST be GitHub sub-issues" below): a body link alone does not satisfy the relationship requirement.
 - PRs carry the same Type section in the PR template; the PR title itself has no type prefix requirement.
 - Labels `fix`, `hotfix`, and `ent-arch` were created via the repo web UI on 2026-10-27 (labels cannot be created through the API tools available to agents); all five convention rows are live from that date.
 
@@ -263,7 +263,7 @@ The issue body template is not enough — every issue must also have its sidebar
 - **Labels** — at least one applicable label, including the lane label (`lane:<lane>`). Labels are how lanes, types, and CI failures are found.
 - **Projects** — link the applicable project. If no project applies, record that in Traceability.
 - **Milestone** — set the target milestone. If none applies, record that in Traceability.
-- **Relationships** — link the parent epic, sub-issues, and blocked-by/blocking issues where they exist. A related issue with no recorded relationship is invisible to sequencing.
+- **Relationships** — link the parent epic and sub-issues via the GitHub sub-issue relationship, which is mandatory for all related work (see "Related work MUST be GitHub sub-issues" below), and blocked-by/blocking issues where they exist. A related issue with no recorded relationship is invisible to sequencing; a body link alone is not a relationship.
 - **Development** — link the branch and pull request once they exist (a PR body `Closes #N` links automatically). An issue with no linked development has no delivery path.
 - **Notifications** — the author stays subscribed to the issue thread while it is open. Unsubscribing from an issue you own breaks the feedback loop.
 
@@ -318,6 +318,26 @@ Large work ships as phases, not as one PR. The structure is:
   except the small-slice combination rule below. Bundling sub-issues into
   one PR outside that rule breaks clean revert, coherent review,
   and §15 traceability, and stays forbidden.
+
+### Related work MUST be GitHub sub-issues
+
+- ALL related work MUST be created as a GitHub sub-issue of its parent
+  epic/blueprint issue, using GitHub's sub-issue relationship — not
+  merely listed in a `## Related issues` body section, and not left as
+  a standalone issue.
+- At creation, attach the sub-issue to its parent. If no parent epic
+  exists, create the parent epic first, then create the work as its
+  sub-issue.
+- A related issue that only has a body link and no GitHub sub-issue
+  relationship is non-compliant and is a review finding, fixed before
+  merge.
+- Existing standalone related issues MUST be retroactively attached to
+  their parent. Example: the Options Screener Product Programme slices,
+  created as standalone issues and attached under blueprint #2528 on
+  2026-11-02.
+- The epic still closes only when every sub-issue is closed, with a
+  §15 covering the whole outcome, as stated above in "Phased work:
+  epics and sub-issues".
 
 ### Combining small slices into one PR (owner direction 2026-10-26)
 
