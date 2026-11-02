@@ -914,7 +914,18 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
       const outcome = payload.outcome as import("../../services/screenerFollowups").ScreenerRunOutcome;
       const userLogin = typeof payload.userLogin === "string" ? payload.userLogin : ctx.sessionKey();
       if (!outcome || typeof outcome !== "object") throw new Error("followup.report job requires an outcome payload.");
-      if (outcome.pdfStatus === "failed") {
+      // Issue #2599 (F4): serve is per format, not per PDF. A
+      // failed PDF leg skips serve ONLY when no tabular format
+      // survived with it; when XLSX and/or CSV generated, serve
+      // adopts those (status ready, perFormat pdf: failed, coded
+      // pdfNote) and the options serve record is still written,
+      // so a PDF failure no longer suppresses successful XLSX/CSV
+      // delivery. The PDF failure itself stays coded and visible
+      // (pdfNote + the serve record's pdfError), never silent.
+      const tabularAdoptable =
+        (outcome.xlsxKey && outcome.xlsxStatus !== "failed") ||
+        (outcome.csvKey && outcome.csvStatus !== "failed");
+      if (outcome.pdfStatus === "failed" && !tabularAdoptable) {
         result = { status: "skipped", reason: codedMessage("FAILURE_REPORT_PDF_GENERATION", outcome.pdfError || undefined) };
       } else if (outcome.canonicalReportId) {
         // Consolidation C4 (#1329): serve's schedulable content for
@@ -931,21 +942,18 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
           throw new Error(codedMessage("FAILURE_REPORT_ARTIFACT_MISSING", checked.reason));
         }
         result = { status: "ready", artifacts: [], canonicalReportId: outcome.canonicalReportId };
-      } else if (!outcome.pdfKeys || outcome.pdfKeys.length === 0) {
+      } else if ((!outcome.pdfKeys || outcome.pdfKeys.length === 0) && !tabularAdoptable) {
         result = { status: "skipped", reason: codedMessage("FAILURE_REPORT_ARTIFACT_MISSING", "The run produced no report artifact key.") };
       } else {
         const port = ctx.followupReportPort();
         const artifacts: Array<{ key: string; fileName: string; kind?: "pdf" | "xlsx" | "csv" }> = [];
         const missing: string[] = [];
-        for (const key of outcome.pdfKeys) {
+        for (const key of outcome.pdfKeys ?? []) {
           const pdf = outcome.kind === "stock"
             ? await port.getStockPdf(userLogin, key)
             : await port.getOptionsPdf(userLogin, key);
           if (pdf) artifacts.push({ key, fileName: pdf.fileName, kind: "pdf" });
           else missing.push(key);
-        }
-        if (artifacts.length === 0) {
-          throw new Error(codedMessage("FAILURE_REPORT_ARTIFACT_MISSING", `Report artifact(s) referenced by the run are missing from storage: ${missing.join(", ")}`));
         }
         // Issue #1191 (#1173 R3): adopt the run's XLSX alongside the
         // PDF so deliveries carry text + PDF + XLSX. persistRun only
@@ -968,10 +976,29 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
         if (outcome.csvKey && outcome.csvStatus !== "failed") {
           artifacts.push({ key: outcome.csvKey, fileName: "screener-report.csv", kind: "csv" });
         } else if (outcome.csvStatus === "failed") {
-          csvNote = codedMessage("FAILURE_REPORT_PDF_GENERATION", outcome.csvError || undefined);
+          // Issue #2599 (F4): a CSV failure carries the CSV code
+          // (single outcome catalog), not the PDF code this line
+          // previously reused — per-format failures must name
+          // their own format.
+          csvNote = codedMessage("FAILURE_REPORT_CSV_GENERATION", outcome.csvError || undefined);
         }
+        // Issue #2599 (F4): the no-artifact throw moves here,
+        // after tabular adoption — a run whose PDF failed but
+        // whose XLSX/CSV adopted has artifacts and must not
+        // throw for its missing PDF. A run with nothing adopted
+        // still fails explicitly, as before.
+        if (artifacts.length === 0) {
+          throw new Error(codedMessage("FAILURE_REPORT_ARTIFACT_MISSING", `Report artifact(s) referenced by the run are missing from storage: ${missing.join(", ")}`));
+        }
+        const pdfNote = outcome.pdfStatus === "failed"
+          ? codedMessage("FAILURE_REPORT_PDF_GENERATION", outcome.pdfError || undefined)
+          : undefined;
         const perFormat: Record<string, string> = {
-          pdf: artifacts.some((a) => a.kind === "pdf") ? "adopted" : "missing",
+          pdf: artifacts.some((a) => a.kind === "pdf")
+            ? "adopted"
+            : outcome.pdfStatus === "failed"
+              ? "failed"
+              : "missing",
           xlsx: outcome.xlsxKey && outcome.xlsxStatus !== "failed"
             ? "adopted"
             : outcome.xlsxStatus === "failed"
@@ -983,7 +1010,7 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
               ? "failed"
               : "missing",
         };
-        result = { status: "ready", artifacts, missingKeys: missing, perFormat, ...(xlsxNote ? { xlsxNote } : {}), ...(csvNote ? { csvNote } : {}) };
+        result = { status: "ready", artifacts, missingKeys: missing, perFormat, ...(pdfNote ? { pdfNote } : {}), ...(xlsxNote ? { xlsxNote } : {}), ...(csvNote ? { csvNote } : {}) };
         // Issue #2091: sharded options runs produced blobs but no
         // record — the serve stage now writes the canonical row +
         // history row so Docs and Reports can list the run. Record

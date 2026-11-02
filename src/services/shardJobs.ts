@@ -39,6 +39,13 @@
  * independent of each other and start staggered. A failed shard
  * stops its chain (existing C3 stop-point semantics): nothing
  * downstream is submitted, and the failure names the blocker.
+ * Exception (issue #2599 F2/F4, options chains only): a failed
+ * per-format generate/store leg does NOT stop the chain once
+ * every leg of the stage is terminal — the completed formats
+ * advance to store/serve and the failed leg's error rides the
+ * serve outcome (see planServeJob), so one renderer failure
+ * cannot silently strand the formats that generated. Stock
+ * chains keep the C3 stop semantics unchanged.
  */
 
 import { createAsyncJobPorts } from "../data/createAsyncJobPorts";
@@ -286,6 +293,10 @@ export function planServeJob(
   // a failed format keeps its status + error and contributes no
   // key/link, a store-downgraded format drops out the same way.
   // Stock chains keep the legacy mapping below, byte for byte.
+  // (Rebase note: this supersedes #2599 F2's pre-P0 overlay, which
+  // the slice itself named as superseded once P0 lands — the
+  // overlay and its unhealedFormatFailures helper are removed,
+  // the assembler reads the same per-format failed outcomes.)
   const optionsAssembled = chain.screenType === "options"
     ? (() => {
         // Dynamic import avoided: the assembler is pure and this
@@ -328,8 +339,8 @@ export function planServeJob(
         summary: chain.screenType === "options"
           ? `Options screen — ${chain.options?.thesis ?? "bullish"}: ${String(dataset.withTrades ?? 0)} actionable setups; evaluated ${String((dataset.coverage as any)?.evaluated ?? 0)} of ${String((dataset.coverage as any)?.considered ?? 0)} underlyings.`
           : undefined,
-        reportUrl: byFormat.get("pdf")
-          ? `${chain.reportBaseUrl ?? "https://agent.openaimp.com"}/api/options/report.pdf?key=${encodeURIComponent(byFormat.get("pdf")!.key)}`
+        reportUrl: (optionsAssembled ? optionsAssembled.links.pdfKey : byFormat.get("pdf")?.key)
+          ? `${chain.reportBaseUrl ?? "https://agent.openaimp.com"}/api/options/report.pdf?key=${encodeURIComponent((optionsAssembled ? optionsAssembled.links.pdfKey : byFormat.get("pdf")!.key)!)}`
           : undefined,
         opportunities: Array.isArray(dataset.opportunities) ? dataset.opportunities.slice(0, 10).map((row: any) => ({
           symbol: row.symbol,
@@ -428,6 +439,19 @@ function stageHasFailure(rows: ShardRow[], stage: PipelineStage, keys: readonly 
   );
 }
 
+/** Issue #2599 (F2): true when every key of the stage is terminal
+ *  — completed, or failed with no completed row (unhealed). A
+ *  still-running key is not terminal: advancing early would
+ *  strand its late completion behind the next stage's
+ *  already-submitted guard, so the planner waits for it. */
+function stageTerminal(rows: ShardRow[], stage: PipelineStage, keys: readonly string[]): boolean {
+  return keys.every(
+    (k) =>
+      keyHasCompleted(rows, stage, k) ||
+      rows.some((r) => r.stage === stage && r.shardKey === k && r.status === "failed"),
+  );
+}
+
 function nextStageSubmitted(rows: ShardRow[], stage: PipelineStage): boolean {
   return stageRows(rows, stage).length > 0;
 }
@@ -488,12 +512,48 @@ export function planShardAdvance(input: {
     return planGenerateShards(chain, input.assembleJobId ?? rootJobId, nowIso);
   }
   if (completedStage === "generate") {
+    if (chain.screenType === "options") {
+      // Issue #2599 (F2/F4): an options generate leg is a
+      // per-format outcome, not a chain failure. The assemble
+      // shard is still a blocker (a missing dataset blocks every
+      // format, not one leg). Once assemble completed and every
+      // format is terminal, the completed formats advance to
+      // store; when NO format completed, serve is still planned
+      // so the run ends as a coded skipped serve (the serve
+      // outcome carries every leg's error) instead of a chain
+      // stalled forever with no record. A still-running format
+      // waits — see stageTerminal.
+      if (!keyHasCompleted(rows, "generate", "assemble")) return [];
+      if (!stageTerminal(rows, "generate", REPORT_FORMATS)) return [];
+      if (nextStageSubmitted(rows, "store")) return [];
+      const generated = generateResultsFromRows(rows);
+      if (generated.length === 0) {
+        if (nextStageSubmitted(rows, "serve")) return [];
+        return [planServeJob(chain, input.assembleJobId ?? rootJobId, rows, nowIso)];
+      }
+      return planStoreShards(chain, input.assembleJobId ?? rootJobId, rows, nowIso);
+    }
     if (stageHasFailure(rows, "generate", ["assemble", ...REPORT_FORMATS])) return [];
     if (!stageComplete(rows, "generate", ["assemble", ...REPORT_FORMATS])) return [];
     if (nextStageSubmitted(rows, "store")) return [];
     return planStoreShards(chain, input.assembleJobId ?? rootJobId, rows, nowIso);
   }
   if (completedStage === "store") {
+    if (chain.screenType === "options") {
+      // Issue #2599 (F2/F4): same per-format rule for store —
+      // only formats that were actually stored are terminal
+      // candidates (a format that never generated has no store
+      // row and is not waited on). Serve reads the generate
+      // rows overlaid with store failures (see planServeJob),
+      // so a store-failed format drops from the serve links
+      // with its error, while stored formats still serve.
+      const storedFormats = REPORT_FORMATS.filter((k) =>
+        rows.some((r) => r.stage === "store" && r.shardKey === k),
+      );
+      if (!stageTerminal(rows, "store", storedFormats)) return [];
+      if (nextStageSubmitted(rows, "serve")) return [];
+      return [planServeJob(chain, input.assembleJobId ?? rootJobId, rows, nowIso)];
+    }
     if (stageHasFailure(rows, "store", REPORT_FORMATS)) return [];
     if (!stageComplete(rows, "store", REPORT_FORMATS)) return [];
     if (nextStageSubmitted(rows, "serve")) return [];

@@ -42,11 +42,8 @@
  * block (slice #359-09 did the same for handleEnvironmentSwitch): it is
  * called only by the two strategy routes owned by this module.
  *
- * Handlers that used OrchestratorAgent state receive it via the explicit
- * EtradeOptionsRouteContext parameter; there are no new globals and no
- * back-references into the class. The requestedEnv binding stays inline in
- * routeRequest and is passed through the context (it is shared with the
- * the watchlists module below (#359-12); passed through the context).
+ * Handlers receive OrchestratorAgent state via EtradeOptionsRouteContext
+ * (no new globals; requestedEnv passes through the context).
  */
 
 import { unauthenticatedResponse } from "./routeIdentity";
@@ -116,6 +113,7 @@ import {
   executeUnifiedOptions,
 } from "./etradeOptionsScreen";
 import { recordStrategyScreenRun } from "../../services/optionsServeRecord";
+import { panelAuthResponse } from "../../services/optionsAuthFreshness";
 import { resolveTenantProviders } from "../../services/tenantProviders";
 
 /** The subset of OrchestratorAgent surface the E*TRADE options handlers need. */
@@ -746,6 +744,8 @@ export async function handleEtradeOptionsRoutes(
       try {
         const userLogin = request.headers.get("x-user-login");
         if (!userLogin) return unauthenticatedResponse();
+        const blocked = await panelAuthResponse(ctx.env, userLogin, ctx.requestedEnv);
+        if (blocked) return blocked;
         const etrade = new ETradeService(ctx.getOrm(), ctx.env, userLogin, ctx.requestedEnv);
         // Consolidation C4 (#1329): the panel route runs through the
         // Recommendation Kernel facade (panel configuration: D1 fit

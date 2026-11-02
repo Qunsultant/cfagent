@@ -82,6 +82,7 @@ export * from "./options/discoveryAlertStore";
 export * from "./options/discoveryDelta";
 export * from "./options/ivCollector";
 export * from "./options/optionsDataAgent";
+export * from "./options/panelFetchDteBands";
 export * from "./options/opportunityScanner";
 export * from "./options/unifiedOptionsService";
 export * from "./options/calibratedOptionChains";
