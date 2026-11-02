@@ -550,6 +550,27 @@ describe("E*TRADE Agentic Trading Hub & Screening Engine", () => {
       }).not.toThrow();
     });
 
+    it("assertSandboxUrlSafety cannot be bypassed with userinfo or percent-encoded hosts (#1034/#1035)", async () => {
+      const { assertSandboxUrlSafety } = await import("../src/aspects/loggingAspect");
+
+      // Userinfo trick: the real host IS api.etrade.com (production). The old
+      // substring check saw "apisb.etrade.com" inside the userinfo and let it through.
+      expect(() => {
+        assertSandboxUrlSafety("https://apisb.etrade.com@api.etrade.com/v1/market/quote/NVDA.json", false);
+      }).toThrowError(/SECURITY VIOLATION/);
+
+      // Percent-encoded host: invisible to the substring check, decoded by the URL parser.
+      expect(() => {
+        assertSandboxUrlSafety("https://%61pi.etrade.com/v1/market/quote/NVDA.json", false);
+      }).toThrowError(/SECURITY VIOLATION/);
+
+      // A non-E*TRADE host that merely contains the production hostname is not
+      // live production (parity with the #843-#847 exact-hostname semantics).
+      expect(() => {
+        assertSandboxUrlSafety("https://api.etrade.com.evil.com/v1/market/quote/NVDA.json", false);
+      }).not.toThrow();
+    });
+
     it("fetchQuoteRemote rejects E*TRADE Sandbox Google mock stubs and returns authentic equity quotes", async () => {
       // NVDA quote must have NVIDIA Corporation and authentic pricing, NOT GOOGLE INC CL A or 577.51
       const nvda = await etrade.fetchQuoteRemote("NVDA");

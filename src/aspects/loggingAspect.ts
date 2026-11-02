@@ -8,6 +8,7 @@
  */
 
 import { ETradeError, ETradeErrorCode, AgentError, AgentErrorCode, resolveErrorAspect } from "./errorCodes";
+import { isETradeHost } from "../config/environment";
 
 export interface AspectContext {
   operationName: string;
@@ -42,17 +43,21 @@ function sanitizeForLog(obj: unknown): unknown {
 /**
  * Sandbox Security Guard Aspect
  * Guarantees that in non-live (TEST) mode, NO network call can ever target live production.
+ *
+ * Exact-hostname matching (CodeQL js/incomplete-url-substring-sanitization,
+ * #1034/#1035 — same pattern as #843-#847): substring checks like
+ * `url.includes("api.etrade.com")` are bypassable — e.g. the userinfo trick
+ * `https://apisb.etrade.com@api.etrade.com/` (real host: api.etrade.com)
+ * slipped through because the string also contains "apisb.etrade.com", and
+ * percent-encoded hosts were invisible to substring matching entirely.
+ * Parse the URL and compare the hostname exactly instead.
  */
 export function assertSandboxUrlSafety(url: string, isLive: boolean): void {
-  if (!isLive) {
-    // If running in TEST / Sandbox mode, live production hostnames are strictly forbidden
-    const lower = url.toLowerCase();
-    if (lower.includes("api.etrade.com") && !lower.includes("apisb.etrade.com")) {
-      throw new ETradeError(
-        ETradeErrorCode.SANDBOX_GUARD_VIOLATION,
-        `SECURITY VIOLATION: Blocked outgoing call to live production URL [${url}] while running in Sandbox/TEST mode.`
-      );
-    }
+  if (!isLive && isETradeHost(url, "api.etrade.com")) {
+    throw new ETradeError(
+      ETradeErrorCode.SANDBOX_GUARD_VIOLATION,
+      `SECURITY VIOLATION: Blocked outgoing call to live production URL [${url}] while running in Sandbox/TEST mode.`
+    );
   }
 }
 
