@@ -249,6 +249,8 @@ export async function autonomousMarketScreen(ctx: ScheduledCallbacksContext, pay
    *  criteria replace filters). Carried through the {...payload} spread
    *  below — including Trigger-Now dispatches of the same schedule. */
   presetId?: string;
+  /** Issue #2908 (G1): the arming schedule's id, when the caller knows it — rides the canonical body (see run below). */
+  scheduleId?: string;
   /** Issue #1007: data provider for the scheduled run (default "etrade"). */
   provider?: import("../../trading").StockScreenProvider;
   /** Consolidation C3 (#1277): stage-chain config from the schedule
