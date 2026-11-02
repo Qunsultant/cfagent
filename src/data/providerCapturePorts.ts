@@ -56,6 +56,7 @@ import {
   type FetchOutcomeMeta,
   type FetchOutcomeRecorder,
 } from "../trading";
+import { createBlobStore } from "../services/blobStoreR2Adapter";
 
 export const DATA_CAPTURE_TABLE = "mas_data_captures";
 
@@ -275,10 +276,13 @@ export async function putCaptureBlob(
   key: string,
   bytes: Uint8Array
 ): Promise<void> {
-  const bucket = env.REPORTS_BUCKET;
-  if (bucket) {
-    await bucket.put(key, bytes, {
-      httpMetadata: { contentType: "application/json" },
+  // Issue #1777 (Adapter S3): the R2 access goes through the one
+  // BlobStore port; the CaptureBlobStorage metadata shape and both
+  // function signatures stay exactly as callers know them.
+  const store = createBlobStore(env);
+  if (store) {
+    await store.put(key, bytes, {
+      contentType: "application/json",
       customMetadata: { captureKey: key },
     });
     const meta: CaptureBlobMeta = {
@@ -302,12 +306,12 @@ export async function getCaptureBlob(
 ): Promise<Uint8Array | null> {
   const meta = await storage.get<CaptureBlobMeta>(key).catch(() => undefined);
   if (!meta) return null;
-  const bucket = env.REPORTS_BUCKET;
-  if (bucket && meta.r2Key) {
+  const store = createBlobStore(env);
+  if (store && meta.r2Key) {
     try {
-      const obj = await bucket.get(meta.r2Key);
+      const obj = await store.get(meta.r2Key);
       if (!obj) return null;
-      return new Uint8Array(await obj.arrayBuffer());
+      return obj.bytes;
     } catch (err) {
       console.warn("[dataProviders] capture blob R2 read failed:", err);
       return null;
