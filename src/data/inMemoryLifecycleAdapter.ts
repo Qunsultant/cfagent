@@ -18,6 +18,7 @@ import {
   referralEarningId,
   round2,
   validateReferralRules,
+  type DigestSubscriber,
   type LifecycleStore,
   type NotificationPreferences,
   type ReferralAllocation,
@@ -39,6 +40,8 @@ export class InMemoryLifecycleAdapter implements LifecycleStore {
   private attributions = new Map<string, ReferralAttribution>();
   private preferences = new Map<string, NotificationPreferences>();
   private digestSends = new Set<string>();
+  private subscriberEmails = new Map<string, { tenantId: string; email: string }>();
+  private digestPassDays = new Set<string>();
 
   async getRules(): Promise<ReferralRules> {
     return { ...this.rules };
@@ -219,5 +222,42 @@ export class InMemoryLifecycleAdapter implements LifecycleStore {
 
   async markDigestSent(userId: string, day: string): Promise<void> {
     this.digestSends.add(`${userId}:${day}`);
+  }
+
+  async listDigestSubscribers(): Promise<DigestSubscriber[]> {
+    const subs: DigestSubscriber[] = [];
+    for (const prefs of this.preferences.values()) {
+      if (!prefs.digestEnabled) continue;
+      // Tenant-aware lookup: an address stored under another
+      // tenant never leaks into this subscriber's row.
+      const row = this.subscriberEmails.get(prefs.userId);
+      subs.push({
+        userId: prefs.userId,
+        tenantId: prefs.tenantId,
+        email: row && row.tenantId === prefs.tenantId ? row.email : null,
+      });
+    }
+    subs.sort((a, b) => (a.userId < b.userId ? -1 : a.userId > b.userId ? 1 : 0));
+    return subs;
+  }
+
+  async setSubscriberEmail(userId: string, tenantId: string, email: string): Promise<void> {
+    if (!userId || !tenantId || !email) {
+      throw new Error("userId, tenantId, and email are required.");
+    }
+    // #1761: a stored address for another tenant throws before
+    // any write (mirrors the D1 adapter's fail-closed check).
+    const scope = bindTenantScope(tenantId);
+    const existing = this.subscriberEmails.get(userId);
+    if (existing) assertTenantScopeMatch(existing.tenantId, scope);
+    this.subscriberEmails.set(userId, { tenantId, email });
+  }
+
+  async hasDigestPassRun(day: string): Promise<boolean> {
+    return this.digestPassDays.has(day);
+  }
+
+  async markDigestPassRun(day: string): Promise<void> {
+    this.digestPassDays.add(day);
   }
 }

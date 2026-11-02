@@ -621,6 +621,20 @@ export const agentDigestSends = sqliteTable(
   (t) => [primaryKey({ columns: [t.userId, t.day] })],
 );
 
+/** Issue #2659: addresses recorded from successful sends (see migration 0032). */
+export const agentDigestSubscriberEmails = sqliteTable("agent_digest_subscriber_emails", {
+  userId: text("user_id").primaryKey(),
+  tenantId: text("tenant_id").notNull(),
+  email: text("email").notNull(),
+  updatedAtMs: integer("updated_at_ms").notNull(),
+});
+
+/** Issue #2659: once-per-UTC-day marker for the scheduled digest pass. */
+export const agentDigestPassDays = sqliteTable("agent_digest_pass_days", {
+  day: text("day").primaryKey(),
+  ranAtMs: integer("ran_at_ms").notNull(),
+});
+
 /**
  * Per-run price catalogue (#2185, sub-issue of #2012) on D1.
  * One row per family; operator data, never code. This schema MAPS

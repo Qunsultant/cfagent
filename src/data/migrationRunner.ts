@@ -1345,6 +1345,44 @@ CREATE TABLE IF NOT EXISTS dlq_depth_state (
 `,
 };
 
+/**
+ * Migration 0035 — scheduled digest pass (#2659, monetization
+ * Phase 2.4; renumbered from 0032 during the d768ed02 rebase
+ * because #2680 claimed 0032 for store operators, again from
+ * 0033 during the 8476478b rebase because #2000 Phase 5 slice 1
+ * claimed 0033 for the dead-letter store, and again from 0034
+ * during the d7f6057b rebase because #2000 Phase 5 slice 2
+ * claimed 0034 for breaker state). Two new
+ * tables, no changes to existing tables:
+ * - agent_digest_subscriber_emails: the address mail was last
+ *   successfully sent to for a subscriber, recorded by the send
+ *   routes. Never guessed, never derived from a login; a
+ *   subscriber with no row is reported `no-email-on-file` by the
+ *   pass and never sent to. Tenant-scoped on write (see
+ *   setSubscriberEmail's #1761 fail-closed rule); the pass JOIN
+ *   is tenant-aware so an address never leaks across tenants.
+ * - agent_digest_pass_days: the once-per-UTC-day marker for the
+ *   scheduled pass (written only after a completed pass, so a
+ *   thrown pass retries on the next tick; per-user day guards
+ *   make the retry idempotent).
+ */
+export const MIGRATION_0035_DIGEST_PASS: DataMigration = {
+  version: 35,
+  name: "0035_digest_pass",
+  sql: `
+CREATE TABLE IF NOT EXISTS agent_digest_subscriber_emails (
+  user_id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL,
+  email TEXT NOT NULL,
+  updated_at_ms INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS agent_digest_pass_days (
+  day TEXT PRIMARY KEY,
+  ran_at_ms INTEGER NOT NULL
+);
+`,
+};
+
 export const MIGRATION_0026_TENANT_AUTO_REFRESH: DataMigration = {
   version: 26,
   name: "0026_tenant_auto_refresh",
@@ -1458,6 +1496,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [
   MIGRATION_0032_STORE_OPERATORS,
   MIGRATION_0033_DEAD_LETTER_STORE,
   MIGRATION_0034_BREAKER_STATE,
+  MIGRATION_0035_DIGEST_PASS,
 ];
 
 function splitStatements(sqlText: string): string[] {
