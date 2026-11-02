@@ -22,6 +22,10 @@ import {
 import { ETradeBrowserService } from "../../services/browserAgent";
 import { ETradeWebhookService } from "../../services/tradingWebhooks";
 import { ETradeSandboxService } from "../../services/sandboxAgent";
+import type {
+  SandboxExecutionRequest,
+  SandboxExecutionResult,
+} from "../../types";
 import { ETradeThinkHarness } from "../../services/thinkHarness";
 import { ETradeAISearchService } from "../../services/aiSearch";
 import { ETradeDurableFiberService } from "../../services/durableFibers";
@@ -119,11 +123,52 @@ export class DispatchTradingWebhookCommand implements IMcpToolCommand<{
 }
 
 /**
- * 4. Sandbox Run Command
+ * 4. Sandbox Run Command (issue #2732 — the #2253 follow-up,
+ * tracker #2708 item A4)
+ *
+ * The chat/MCP door onto SandboxAgent (#2253): until this slice,
+ * this command constructed ETradeSandboxService directly, bypassing
+ * the fleet class every other door (A2A, HTTP onRequest) already
+ * reaches the capability through — the census recorded SandboxAgent
+ * as not-exposed on the chat-turn and mcp doors for exactly that
+ * reason. The command now resolves the agent through the
+ * SANDBOX_AGENT Durable Object binding on the fixed service
+ * instance below and calls its runCommand door (the deterministic
+ * RPC door — command execution is exact work, not a judgment turn),
+ * following the AISearchAgentSearchCommand seam (#2250). The
+ * instance is a SERVICE instance: the agent is stateless
+ * sandboxing, the same instance the A2A door addresses (its
+ * resolution carries no instance override, so its URL name is the
+ * instance name). The caller's login is never the instance name:
+ * this door consumes no identity on any surface (input parity with
+ * the A2A dispatch and the onRequest /run handler: exactly
+ * { command, timeoutMs }).
+ *
+ * The agent delegates to the ONE sandbox service, constructed with
+ * no container backend, so the result today is the service's honest
+ * not-executed shape (#121) — served via the class, unchanged. The
+ * owner step that lifts the degradation is the containers
+ * configuration for the class (tracker #2708 item D7), which now
+ * lifts every door at once.
+ *
+ * The binding is declared in wrangler.jsonc and on the Env type
+ * (optional, src/types.ts). Its absence answers honestly in the
+ * same result shape — executed:false with a reason naming the
+ * unconfigured binding — the tool never throws for configuration
+ * and never fabricates output.
  */
+const SANDBOX_AGENT_SERVICE_INSTANCE = "sandbox";
+
+/** Structural minimum of the SandboxAgent stub this command calls. */
+interface SandboxAgentStubLike {
+  runCommand(
+    request: SandboxExecutionRequest,
+  ): Promise<SandboxExecutionResult>;
+}
+
 export class SandboxRunCommand implements IMcpToolCommand<{ command: string; timeoutMs?: number }> {
   readonly name = "run_sandbox_command";
-  readonly description = "Run a shell command in a Cloudflare Linux container sandbox. The command executes ONLY when a container backend is bound; the MCP facade binds none, so calls currently return executed:false with exitCode:null and an error stating the command was NOT run. Execution is never emulated and output is never fabricated — do not present a result with executed:false as command output.";
+  readonly description = "Run a shell command in a Cloudflare Linux container sandbox, through the SandboxAgent — the fleet's sandbox agent class: the command resolves the agent on the SANDBOX_AGENT binding and delegates to the one sandbox service the agent wraps. The command executes ONLY when a container backend is bound to the agent; none is bound, so calls currently return executed:false with exitCode:null and an error stating the command was NOT run. Execution is never emulated and output is never fabricated — do not present a result with executed:false as command output.";
   readonly jsonSchema = {
     type: "object" as const,
     properties: {
@@ -138,8 +183,29 @@ export class SandboxRunCommand implements IMcpToolCommand<{ command: string; tim
   });
 
   async execute(input: { command: string; timeoutMs?: number }, context: McpToolContext) {
-    const sandbox = new ETradeSandboxService(undefined, context.env);
-    const result = await sandbox.runCommand({ command: input.command, timeoutMs: input.timeoutMs });
+    const namespace = context.env?.SANDBOX_AGENT;
+    if (
+      !namespace ||
+      typeof namespace.get !== "function" ||
+      typeof namespace.idFromName !== "function"
+    ) {
+      const startTime = Date.now();
+      const result: SandboxExecutionResult = {
+        executed: false,
+        exitCode: null,
+        stdout: "",
+        stderr: "",
+        durationMs: Date.now() - startTime,
+        error:
+          "Command NOT executed: the SandboxAgent binding (SANDBOX_AGENT) is not configured in this environment, so the sandbox agent cannot be reached and there is nothing to run the command in. Shell execution is not emulated and no output was produced.",
+      };
+      context.audit("sandbox.execute", "sandbox", { command: input.command, executed: result.executed, exitCode: result.exitCode });
+      return result;
+    }
+    const stub = namespace.get(
+      namespace.idFromName(SANDBOX_AGENT_SERVICE_INSTANCE),
+    ) as unknown as SandboxAgentStubLike;
+    const result = await stub.runCommand({ command: input.command, timeoutMs: input.timeoutMs });
     context.audit("sandbox.execute", "sandbox", { command: input.command, executed: result.executed, exitCode: result.exitCode });
     return result;
   }

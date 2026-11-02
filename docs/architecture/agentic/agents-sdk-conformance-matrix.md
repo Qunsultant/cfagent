@@ -370,7 +370,7 @@ is recorded) — dispositions in their cells.
 |---|---|---|
 | `identity` | NOT-APPLICABLE | No acting identity: the class delegates to ETradeSandboxService constructed from env only, and adds no identity of its own. |
 | `state` | NOT-APPLICABLE | No ctx.storage use in the class (pinned); the service is constructed with no container backend and holds no per-instance durable state. |
-| `connections` | NOT-APPLICABLE | Its doors are the domain methods, the onRequest surface (:130), and — since #2421 — the A2A door (handleA2A → src/agents/sandboxA2aDispatch.ts); production call-site wiring through the agent is a recorded follow-up — the MCP run_sandbox_command still constructs the service directly (class header). |
+| `connections` | NOT-APPLICABLE | Its doors are the domain methods, the onRequest surface (:138), and — since #2421 — the A2A door (handleA2A → src/agents/sandboxA2aDispatch.ts); the MCP run_sandbox_command resolves this class on the SANDBOX_AGENT binding and calls runCommand (#2732, the #2253 call-site wiring follow-up, landed). |
 | `scheduling` | NOT-APPLICABLE | No scheduling role: it registers no schedules and owns no scheduled work; anything time-based reaches it from callers recorded elsewhere in this row. |
 | `recovery` | NOT-APPLICABLE | Stateless; run results are honest non-executions (executed:false, #121) until an owner binds a container backend — there is no in-flight work to resume. |
 | `sdk-state` | NOT-APPLICABLE | No agent state to manage through any API. |
