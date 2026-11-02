@@ -297,7 +297,12 @@ describe("Issue #120: Browser Agent honesty", () => {
     it("keeps the placeholder labelling and honest failure wording", () => {
       expect(source).toContain("PLACEHOLDER — NOT A SCREENSHOT");
       expect(source).toContain("Not delivered:");
-      expect(source).toContain('screenshotKind: data.screenshotBase64 ? "capture" : undefined');
+      // Issue #1778 (Adapter S4): the capture-kind gate moved with the
+      // render call into the BrowserRenderer port — the variable is
+      // now `rendered`, not the pre-S4 inline `data`; the gate itself
+      // (capture only when a real render produced a screenshot) is
+      // unchanged, and the port's mapping is pinned in adapter-s4-1778.
+      expect(source).toContain('screenshotKind: rendered.screenshotBase64 ? "capture" : undefined');
     });
   });
 });
