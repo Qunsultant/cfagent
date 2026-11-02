@@ -124,6 +124,10 @@ import { recordJobOutcome } from "./jobOutcomes";
 import { storeReportStage } from "./unifiedReportPipeline";
 import { storeOptionsCanonicalReport } from "./optionsServeRecord";
 import { registerScreenerPublishers } from "../events/screenerPublishers";
+import {
+  getStoredEmailDestination,
+  resolveEmailDestination,
+} from "./userEmailDestination";
 import { deliverScreenerToSlackA2A } from "./screenerSlackDelivery";
 import { getEventCalendarCoverage, getSymbolEventCalendar } from "./eventCalendar";
 
@@ -2234,6 +2238,13 @@ export class ScheduledTasksService {
           throw new Error("Sharded options runs require the async-job submission port; configure the host or run the scan directly.");
         }
         const { planOptionsFeedShards } = await import("./shardJobs");
+        // Issue Qunsultant/cfagent#488: the chain's email channel follows the
+        // same resolution as direct delivery — run > stored user > env.
+        const resolvedEmailTo = resolveEmailDestination({
+          eventEmailTo: options.emailTo,
+          storedEmailTo: await getStoredEmailDestination(this.env, options.userLogin || this.userLogin),
+          env: this.env as unknown as Record<string, unknown>,
+        });
         const chainId = crypto.randomUUID();
         const chain: import("../types").ShardChainContext = {
           chainId,
@@ -2245,11 +2256,11 @@ export class ScheduledTasksService {
           maxItems: symbols.length,
           timestamp,
           channels: [
-            ...(options.emailTo ? ["email" as const] : []),
+            ...(resolvedEmailTo ? ["email" as const] : []),
             ...(shouldNotifySlack ? ["slack" as const] : []),
             ...((options.webhookUrl || this.env.OUTBOUND_WEBHOOK_URL) ? ["webhook" as const] : []),
           ],
-          emailTo: options.emailTo || (this.env as any).OPTIONS_EMAIL_TO || (this.env as any).SCREENER_EMAIL_TO,
+          emailTo: resolvedEmailTo,
           slackChannel: options.slackChannel || (this.env as any).SCREENER_SLACK_CHANNEL || (this.env as any).SLACK_CHANNEL,
           webhookUrl: options.webhookUrl || this.env.OUTBOUND_WEBHOOK_URL,
           reportBaseUrl: this.env.APP_BASE_URL || "https://agent.openaimp.com",
@@ -2607,7 +2618,12 @@ export class ScheduledTasksService {
 
       // 2. Push Email if recipient is specified or environment configured
       // Issue #303: Try cfpay via A2A first, fall back to local.
-      const targetEmail = options.emailTo || (this.env as any).OPTIONS_EMAIL_TO || (this.env as any).SCREENER_EMAIL_TO;
+      // Issue Qunsultant/cfagent#488: per-user stored destination outranks env.
+      const targetEmail = resolveEmailDestination({
+        eventEmailTo: options.emailTo,
+        storedEmailTo: await getStoredEmailDestination(this.env, options.userLogin || this.userLogin),
+        env: this.env as unknown as Record<string, unknown>,
+      });
       if (targetEmail && !chainMode) {
         const cfpay = getCfpayConfig(this.env);
         let emailOk = false;

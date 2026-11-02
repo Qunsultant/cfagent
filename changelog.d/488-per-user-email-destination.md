@@ -1,0 +1,3 @@
+### Added
+
+- **Per-user screener email destination (#488):** a user's screener email destination is now data, not the deployment-global `SCREENER_EMAIL_TO` env var. Stored in the SessionStore DO keyed by login (`user-email-destination:<login>`, `src/services/userEmailDestination.ts`), managed via session-gated `GET/POST/DELETE /api/user/email-destination` (caller's own record only), and resolved run > stored user > `OPTIONS_EMAIL_TO` > `SCREENER_EMAIL_TO` in the screener publishers and the scheduled-options direct + sharded paths. A store failure degrades to the env fallback, never to a failed delivery. The global env vars are unchanged as fallbacks; no endpoint is removed.

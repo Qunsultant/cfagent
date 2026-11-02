@@ -271,6 +271,10 @@ import { ETradeBrowserService } from "./services/browserAgent";
 import { handleMarketQuotesHttp } from "./services/marketStream";
 import { sendProvisioningWelcome } from "./services/provisioningWelcome";
 import {
+  createUserEmailDestinationStore,
+  normalizeEmailDestination,
+} from "./services/userEmailDestination";
+import {
   getQuoteSource,
   setQuoteSource,
   normalizeQuoteSource,
@@ -1836,6 +1840,62 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
             }
           : {}),
       });
+    }
+
+    // Issue Qunsultant/cfagent#488 — per-user email destination as data.
+    // GET/POST/DELETE /api/user/email-destination: the caller's OWN
+    // screener email destination, stored in the SessionStore DO keyed by
+    // the session's githubLogin (never from request input, so a caller
+    // can only read or change their own record). Session-gated
+    // (unauthenticated -> 401); the stored value outranks the
+    // deployment-global SCREENER_EMAIL_TO / OPTIONS_EMAIL_TO at
+    // delivery time (see src/services/userEmailDestination.ts). GET
+    // reports only the stored value plus whether an env fallback exists
+    // (names only — the global value itself is never returned).
+    if (path === "/api/user/email-destination") {
+      const session = await requireAuth(request, env);
+      if (!session || !session.githubLogin) {
+        return Response.json({ error: "Unauthorized: Please log in." }, { status: 401 });
+      }
+      const store = createUserEmailDestinationStore(sessionStore(env));
+      const fallbackConfigured = Boolean(
+        (env as unknown as Record<string, unknown>).OPTIONS_EMAIL_TO ||
+          (env as unknown as Record<string, unknown>).SCREENER_EMAIL_TO
+      );
+      if (request.method === "GET") {
+        try {
+          const stored = await store.get(session.githubLogin);
+          return Response.json({ email: stored, fallbackConfigured });
+        } catch {
+          return Response.json({ error: "Failed to read email destination." }, { status: 500 });
+        }
+      }
+      if (request.method === "POST") {
+        let body: unknown;
+        try {
+          body = await request.json();
+        } catch {
+          return Response.json({ error: "Request body must be valid JSON." }, { status: 400 });
+        }
+        const email = (body as { email?: unknown } | null)?.email;
+        const normalized = normalizeEmailDestination(email);
+        if (!normalized.ok) return Response.json({ error: normalized.error }, { status: 400 });
+        try {
+          const record = await store.set(session.githubLogin, normalized.email, session.githubLogin);
+          return Response.json({ email: record.email, fallbackConfigured });
+        } catch {
+          return Response.json({ error: "Failed to save email destination." }, { status: 500 });
+        }
+      }
+      if (request.method === "DELETE") {
+        try {
+          await store.clear(session.githubLogin);
+          return Response.json({ email: null, fallbackConfigured });
+        } catch {
+          return Response.json({ error: "Failed to clear email destination." }, { status: 500 });
+        }
+      }
+      return Response.json({ error: "Method not allowed" }, { status: 405 });
     }
 
     // --- IAAA Admin overview (issue #945, IAAA-UI v1: READ-ONLY) ---
