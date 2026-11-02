@@ -11,6 +11,7 @@ import type { ActorSessionPort, ActorTurnHooks, ActorTurnPort } from "../actors/
 import type { ToolSet } from "ai";
 import { getWorkersAIModel } from "./model";
 import { resolveScreenerAgentName } from "./screenerAgentName";
+import { actorGateway } from "../services/cloudflareActorGateway";
 import { buildOrchestratorSystemPrompt, resolveShadowMaxSteps } from "./chatPrompt";
 import { LLMJudge } from "./judge";
 import { VectorMemory } from "../memory/vector-memory";
@@ -732,8 +733,11 @@ export class OrchestratorAgent extends PortThink {
   private getScreenerAgent(userLogin?: string): ScreenerAgent {
     // Issue #1185: per-owner instances; naming/owner resolution lives
     // in ./screenerAgentName (fail closed without an identity).
-    const id = this.env.SCREENER_AGENT.idFromName(resolveScreenerAgentName(this.env, userLogin));
-    return this.env.SCREENER_AGENT.get(id) as unknown as ScreenerAgent;
+    // Addressing rides the ActorGateway (#1779); the stub type is unchanged.
+    return actorGateway.stub<ScreenerAgent>(
+      this.env.SCREENER_AGENT,
+      resolveScreenerAgentName(this.env, userLogin),
+    );
   }
 
   // Issue #992: extracted to ./orchestrator/scheduleMaintenance.ts (getScreenerExecutionContext);
@@ -766,8 +770,8 @@ export class OrchestratorAgent extends PortThink {
     const trimmed = typeof userLogin === "string" ? userLogin.trim() : "";
     if (!trimmed || trimmed === "default") return null;
     const login = userLogin as string;
-    const id = ns.idFromName(`research:${login}`);
-    return ns.get(id) as unknown as ResearchAgent;
+    // Addressing rides the ActorGateway (#1779); the null guards above are unchanged.
+    return actorGateway.stub<ResearchAgent>(ns, `research:${login}`);
   }
 
   // Issue #992: extracted to ./orchestrator/researchPublish.ts (runResearchAndPublish);

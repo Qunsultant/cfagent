@@ -110,6 +110,7 @@ import { readReceipts, type ReceiptKind } from "../../services/receiptSurface";
 // The DDL's one home stays the usage port's ensureSchema (#2359);
 // this call never throws (it logs and continues on ensure failure).
 import { ensureUsageEventsTable } from "../../services/scheduledReports";
+import { actorGateway } from "../../services/cloudflareActorGateway";
 
 /** The subset of OrchestratorAgent surface the payments handlers need. */
 export interface PaymentsRouteContext {
@@ -1115,13 +1116,13 @@ export async function handlePaymentsRoutes(
         // instance. The owner's response (settled, or loud-unmatched)
         // is propagated to the gateway unchanged.
         try {
-          const ns = ctx.env.SEARCH_AGENT;
-          const stub = ns.get(ns.idFromString(owner));
           const headers = new Headers(request.headers);
           headers.set(SETTLEMENT_OWNER_HEADER, owner);
           headers.delete("content-length");
           const targetUrl = new URL("/payments/webhook" + url.search, "https://agent.internal");
-          return await stub.fetch(
+          return await actorGateway.dispatchFromId(
+            ctx.env.SEARCH_AGENT,
+            owner,
             new Request(targetUrl, { method: "POST", headers, body: rawBody })
           );
         } catch (err) {

@@ -36,6 +36,7 @@ import {
 import PostalMime from "postal-mime";
 import { SERVER_PALETTE } from "../../theme/serverPalette";
 import { createEmailSender } from "../../services/cloudflareEmailSender";
+import { actorGateway } from "../../services/cloudflareActorGateway";
 
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (character) => ({
@@ -1062,12 +1063,10 @@ export async function handleCloudflareEmailMessage(
   // /api route uses. If the orchestrator path is unavailable this
   // throws (the #781 fail-loud contract) instead of processing the
   // email against an ORM-less local service.
-  const namespace = env.SEARCH_AGENT;
-  if (!namespace || typeof namespace.idFromName !== "function") {
-    throw new Error(
-      "Inbound email trading requires the SEARCH_AGENT (orchestrator) binding to reach the user's Durable Object ORM; refusing to process the email without it (issue #815)."
-    );
-  }
+  // Issue #815 (via ActorGateway, #1779): an unbound SEARCH_AGENT
+  // binding now throws the gateway's named error at the dispatch
+  // below (the #781 fail-loud contract, unchanged) instead of
+  // processing the email against an ORM-less local service.
   // Issue #1185: the instance constant is the ADDRESS, not an identity.
   // The forward asserts no identity header (Issue #1262 Phase 1: the DO
   // resolves the principal from the payload); the service identity must
@@ -1079,8 +1078,9 @@ export async function handleCloudflareEmailMessage(
       "Inbound email trading requires a configured service identity (SERVICE_USER_LOGIN) to forward under; refusing to process the email without it (issue #1185)."
     );
   }
-  const agentId = namespace.idFromName(INBOUND_EMAIL_ORCHESTRATOR_INSTANCE);
-  const response = await namespace.get(agentId).fetch(
+  const response = await actorGateway.dispatch(
+    env.SEARCH_AGENT,
+    INBOUND_EMAIL_ORCHESTRATOR_INSTANCE,
     new Request("https://agent.internal/trading/email/inbound", {
       method: "POST",
       headers: {

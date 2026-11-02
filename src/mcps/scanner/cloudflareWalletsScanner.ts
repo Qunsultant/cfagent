@@ -27,6 +27,7 @@ import { optionScreenerFilterFields } from "../../trading";
 import type { Env } from "../../types";
 import { getServiceUserLogin } from "../../security/serviceIdentity";
 import { AGENT_DIDS } from "../../agents/did";
+import { actorGateway } from "../../services/cloudflareActorGateway";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -219,7 +220,6 @@ export class OptionsScannerMCP extends McpAgent<Env> {
     method: "GET" | "POST",
     body?: Record<string, unknown>,
   ): Promise<unknown> {
-    const id = this.env.SEARCH_AGENT.idFromName(this.ctx.id.toString());
     const headers = new Headers();
     // Issue #1185 / #700: the scanner asserts no identity of its own.
     // It forwards under the configured service identity when one
@@ -227,7 +227,9 @@ export class OptionsScannerMCP extends McpAgent<Env> {
     const serviceLogin = getServiceUserLogin(this.env);
     if (serviceLogin) headers.set("x-user-login", serviceLogin);
     if (body) headers.set("Content-Type", "application/json");
-    const response = await this.env.SEARCH_AGENT.get(id).fetch(
+    const response = await actorGateway.dispatch(
+      this.env.SEARCH_AGENT,
+      this.ctx.id.toString(),
       new Request(new URL(path, "https://agent.internal"), {
         method,
         headers,
