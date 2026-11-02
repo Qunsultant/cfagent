@@ -2,6 +2,7 @@ import type { NoViewStrategyCandidate, NoViewStrategyRequest, StrategyCandidate,
 import type { RankedStrategy } from "../recommendationAgent";
 import type { ScanMatrixCellBest } from "../opportunityScanner";
 import type { AcceptanceRule, EvaluationObserver, EvaluationStatus, StrategyDefinition, StrategyEvaluation } from "./types";
+import { PMCC_ACCEPTANCE_RULES } from "./pmccGates";
 
 /** Chain of responsibility: the first rule that returns a reason rejects the candidate. */
 export const DEFAULT_ACCEPTANCE_RULES: AcceptanceRule[] = [
@@ -17,6 +18,13 @@ export const DEFAULT_ACCEPTANCE_RULES: AcceptanceRule[] = [
     id: "min-reward-risk",
     evaluate: (candidate, request) => candidate.targetRewardRisk < request.minRewardRisk ? `${candidate.label} is below the minimum target reward/risk` : null,
   },
+  // Issue #1769: PMCC gates (screener-rules.md §1.3) — friction <= 3.0,
+  // breach distance (>= 8% above spot or >= LEAPS breakeven), and
+  // 30-day premium yield >= 4.0%. PMCC-only: every rule passes other
+  // strategy types through with null, so non-PMCC acceptance is
+  // unchanged. Enforced here because the engine already runs
+  // DEFAULT_ACCEPTANCE_RULES on every generated candidate.
+  ...PMCC_ACCEPTANCE_RULES,
 ];
 
 export function runAcceptanceRules(candidate: StrategyCandidate, request: StrategyRequest, rules: AcceptanceRule[] = DEFAULT_ACCEPTANCE_RULES): string | null {
