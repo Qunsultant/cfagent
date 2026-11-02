@@ -48,7 +48,7 @@
  * env, plus a test wallet payment on testnet. Live endpoints are
  * additionally restricted to PAYMENT_ASSURANCE_LIVE_LOGINS.
  */
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   CfPayMonetizationGate,
   type CommercialAccount,
@@ -75,6 +75,7 @@ import {
   PageSection,
   PageShell,
   Select,
+  Table,
   TextInput,
 } from "./components/ui";
 
@@ -302,6 +303,272 @@ function resultLabel(r: ScenarioResult): string {
   return `${r.outcome.status}${paid}${credit}`;
 }
 
+/**
+ * Shared styles for the price approval section below — one definition
+ * per visual pattern, reused across the section, instead of a fresh
+ * inline style literal per element (the bespoke-styling ceiling counts
+ * literals).
+ */
+const priceMutedStyle: React.CSSProperties = { color: "var(--color-text-muted)" };
+const priceFlagRowStyle: React.CSSProperties = { display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap", marginBottom: "var(--space-3)" };
+const priceErrorWrapStyle: React.CSSProperties = { marginTop: "var(--space-1)" };
+const priceFootnoteStyle: React.CSSProperties = { margin: "var(--space-3) 0 0", color: "var(--color-text-muted)", fontSize: "var(--font-size-body)" };
+
+/**
+ * Store price approval (issue 2677, slice A). A LIVE operator action,
+ * unlike the simulation on this page: approving a family here records
+ * a real price approval through POST /payments/agentic/commercial/prices.
+ * The monetization gate treats a merely-proposed price as missing, so
+ * the table shows proposed vs approved distinctly — with one honest
+ * limitation: no route returns price entries, so a family's approval
+ * state reads Unknown until an approval is recorded in this section.
+ * The server remains authoritative: a price change returns an entry to
+ * proposed, and approving after such a change re-records approver and
+ * time. Rendered text never uses the "#NNNN" issue-number form (the
+ * ratchet counts it as a hex literal).
+ */
+export type StorePriceFamily = "stock" | "goal" | "options" | "strategy";
+export const STORE_PRICE_FAMILIES: Array<{ id: StorePriceFamily; label: string }> = [
+  { id: "stock", label: "Stock" },
+  { id: "goal", label: "Goal" },
+  { id: "options", label: "Options" },
+  { id: "strategy", label: "Strategy" },
+];
+
+export interface PriceApprovalInfo {
+  approvedBy: string;
+  approvedAtMs: number;
+}
+
+export type OperatorProbe = "operator" | "not-operator" | "unknown";
+
+/**
+ * Maps the operator probe's HTTP status. The probe is POST
+ * /payments/agentic/commercial/prices with an empty body: the route
+ * answers 403 for a non-operator before reading the body, and 400
+ * ("Nothing to do") for an operator with nothing to set — so neither
+ * outcome writes anything, and no audit row is produced. Any other
+ * status (or a network failure) is unknown, and approval stays
+ * disabled (fail-closed). The probe exists because no route exposes
+ * the session's store-operator status; the server gate on
+ * COMMERCIAL_STORE_OPERATORS remains authoritative, and a 403 on a
+ * real approval flips the section to not-operator even mid-session.
+ */
+export function mapOperatorProbeStatus(status: number): OperatorProbe {
+  if (status === 403) return "not-operator";
+  if (status === 400) return "operator";
+  return "unknown";
+}
+
+export function PriceApprovalSection({ userLogin }: { userLogin?: string }) {
+  const [loading, setLoading] = useState(true);
+  const [operator, setOperator] = useState<OperatorProbe | "loading">("loading");
+  const [prices, setPrices] = useState<Partial<Record<StorePriceFamily, number>>>({});
+  const [monetizationOn, setMonetizationOn] = useState<boolean | null>(null);
+  const [approvals, setApprovals] = useState<Partial<Record<StorePriceFamily, PriceApprovalInfo>>>({});
+  const [busyFamily, setBusyFamily] = useState<StorePriceFamily | null>(null);
+  const [rowError, setRowError] = useState<Partial<Record<StorePriceFamily, string>>>({});
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const load = async () => {
+    if (!userLogin) {
+      setOperator("unknown");
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setLoadError(null);
+    const headers: Record<string, string> = { "x-user-login": userLogin };
+    try {
+      const res = await globalThis.fetch("/payments/agentic/commercial/pricing", { headers });
+      const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      if (!res.ok) {
+        setLoadError(typeof data["error"] === "string" ? data["error"] : `Price list failed (HTTP ${res.status}).`);
+      } else {
+        const raw = data["prices"] as Record<string, unknown> | undefined;
+        const next: Partial<Record<StorePriceFamily, number>> = {};
+        if (raw) {
+          for (const { id } of STORE_PRICE_FAMILIES) {
+            if (typeof raw[id] === "number") next[id] = raw[id] as number;
+          }
+        }
+        setPrices(next);
+        setMonetizationOn(typeof data["monetizationEnabled"] === "boolean" ? (data["monetizationEnabled"] as boolean) : null);
+      }
+    } catch {
+      setLoadError("Price list could not be reached.");
+    }
+    try {
+      const res = await globalThis.fetch("/payments/agentic/commercial/prices", {
+        method: "POST",
+        headers: { ...headers, "content-type": "application/json" },
+        body: "{}",
+      });
+      // The probe may run schema-ensure on a FRESH store only (seeding
+      // proposed defaults); it never sets a price or an approval.
+      await res.json().catch(() => ({}));
+      setOperator(mapOperatorProbeStatus(res.status));
+    } catch {
+      setOperator("unknown");
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userLogin]);
+
+  const approve = async (family: StorePriceFamily) => {
+    if (!userLogin || busyFamily) return;
+    setBusyFamily(family);
+    setRowError((prev) => ({ ...prev, [family]: undefined }));
+    try {
+      const res = await globalThis.fetch("/payments/agentic/commercial/prices", {
+        method: "POST",
+        headers: { "x-user-login": userLogin, "content-type": "application/json" },
+        body: JSON.stringify({ family, approvalStatus: "approved" }),
+      });
+      const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      if (res.status === 403) {
+        setOperator("not-operator");
+        setRowError((prev) => ({ ...prev, [family]: "You are not a store operator." }));
+      } else if (!res.ok) {
+        setRowError((prev) => ({
+          ...prev,
+          [family]: typeof data["error"] === "string" ? (data["error"] as string) : `Approval failed (HTTP ${res.status}).`,
+        }));
+      } else {
+        const entry = data["entry"] as Record<string, unknown> | undefined;
+        if (!entry || typeof entry["approvedBy"] !== "string" || typeof entry["approvedAtMs"] !== "number") {
+          setRowError((prev) => ({ ...prev, [family]: "Approval response was incomplete." }));
+        } else {
+          setApprovals((prev) => ({
+            ...prev,
+            [family]: { approvedBy: entry["approvedBy"] as string, approvedAtMs: entry["approvedAtMs"] as number },
+          }));
+        }
+      }
+    } catch {
+      setRowError((prev) => ({ ...prev, [family]: "Approval could not be reached." }));
+    }
+    setBusyFamily(null);
+  };
+
+  const canApprove = operator === "operator";
+  const rows = STORE_PRICE_FAMILIES.map(({ id, label }) => ({
+    id,
+    label,
+    priceUSD: prices[id] ?? null,
+    approval: approvals[id] ?? null,
+    error: rowError[id] ?? null,
+  }));
+
+  return (
+    <PageSection title="Store price approval">
+      <Notice tone="info" title="Live operator action — not a simulation">
+        Approving a family here records a real price approval, unlike
+        the simulation below. Until a price is approved, the gate
+        treats it as missing and paid runs fail closed.
+      </Notice>
+      {!userLogin ? (
+        <Notice tone="warning" title="Sign in to view store price approval">
+          Price approval needs a session login, and only a login listed
+          in the store operators list may approve. Tenant-admin and
+          platform-admin roles do not grant it.
+        </Notice>
+      ) : loading ? (
+        <p style={priceMutedStyle}>Loading prices…</p>
+      ) : (
+        <>
+          <div style={priceFlagRowStyle}>
+            <span style={priceMutedStyle}>
+              Monetization flag: {monetizationOn === null ? "unknown" : monetizationOn ? "ON" : "OFF"}
+            </span>
+            <Button variant="secondary" size="sm" onClick={() => void load()}>
+              Refresh prices
+            </Button>
+          </div>
+          {loadError && <Notice tone="danger" title="Price list failed">{loadError}</Notice>}
+          {operator === "not-operator" && (
+            <Notice tone="warning" title="You are not a store operator">
+              Price approval requires a session login listed in the
+              store operators list. The server enforces this; approval
+              buttons are hidden rather than offered and refused.
+            </Notice>
+          )}
+          {operator === "unknown" && (
+            <Notice tone="warning" title="Could not verify store-operator status">
+              Approval is disabled until the status can be verified.
+              The server gate remains authoritative.
+            </Notice>
+          )}
+          <Table
+            columns={[
+              { key: "family", header: "Family", render: (row) => row.label },
+              {
+                key: "price",
+                header: "Price per run",
+                render: (row) => (row.priceUSD === null ? "—" : `$${row.priceUSD.toFixed(2)}`),
+              },
+              {
+                key: "approval",
+                header: "Approval",
+                render: (row) =>
+                  row.approval ? (
+                    <>
+                      <Badge tone="success">Approved</Badge>{" "}
+                      <span style={priceMutedStyle}>
+                        by {row.approval.approvedBy} · {new Date(row.approval.approvedAtMs).toLocaleString()}
+                      </span>
+                    </>
+                  ) : (
+                    <Badge tone="neutral">Unknown</Badge>
+                  ),
+              },
+              {
+                key: "action",
+                header: "Action",
+                render: (row) => (
+                  <>
+                    {canApprove ? (
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        aria-label={`Approve ${row.label} price`}
+                        loading={busyFamily === row.id}
+                        onClick={() => void approve(row.id)}
+                      >
+                        Approve
+                      </Button>
+                    ) : (
+                      "—"
+                    )}
+                    {row.error && (
+                      <div style={priceErrorWrapStyle}>
+                        <Notice tone="danger">{row.error}</Notice>
+                      </div>
+                    )}
+                  </>
+                ),
+              },
+            ]}
+            rows={rows}
+            rowKey={(row) => row.id}
+          />
+          <p style={priceFootnoteStyle}>
+            Approval state shows only approvals recorded here: the price
+            list does not report approval state, so a family reads
+            Unknown until its approval is recorded. Approving re-records
+            the approver and time; a price change returns a family to
+            proposed, after which it must be approved again.
+          </p>
+        </>
+      )}
+    </PageSection>
+  );
+}
+
 export function PaymentWorkflowAssurance({ userLogin }: { userLogin?: string }) {
   const [cfg, setCfg] = useState<FakeConfig>({ ...DEFAULT_FAKE_CONFIG });
   const [running, setRunning] = useState(false);
@@ -521,6 +788,8 @@ export function PaymentWorkflowAssurance({ userLogin }: { userLogin?: string }) 
           </Card>
         )}
       </PageSection>
+
+      <PriceApprovalSection userLogin={userLogin} />
 
       <PageSection title="Tunable fakes">
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "var(--space-3)" }}>
