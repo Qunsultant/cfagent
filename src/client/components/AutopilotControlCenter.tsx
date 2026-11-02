@@ -763,7 +763,7 @@ export function AutopilotControlCenter({
         </p>
       </div>
 
-      {/* NextGenTP Executive Performance Ribbon */}
+      {/* Executive Performance Ribbon */}
       <div className="autopilot-executive-ribbon">
         <div className="executive-kpi-card">
           <span className="executive-kpi-label">Portfolio NAV</span>
@@ -798,7 +798,7 @@ export function AutopilotControlCenter({
         </div>
       </div>
 
-      {/* NextGenTP Interactive Strategy Performance Curve */}
+      {/* Interactive Strategy Performance Curve */}
       <div className="autopilot-card autopilot-chart-card">
         <div className="chart-card-header">
           <div className="chart-title-wrap">

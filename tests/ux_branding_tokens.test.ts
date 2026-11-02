@@ -83,4 +83,28 @@ describe("Thematic Branding Token Architecture (Issue #1297)", () => {
     expect(chatSrc).toContain('from "./branding"');
     expect(chatSrc).toContain("BRAND.name");
   });
+
+  it("slice 7 (#2727): no hardcoded brand literal remains outside the seam", () => {
+    // The seam (branding.ts) is the only canonical definition; the four
+    // files below previously carried 9 hardcoded "NextGenTP" literals.
+    // ReferralsTab renders its share copy via BRAND.name; the other five
+    // occurrences were comments, reworded to drop the brand token since
+    // a comment cannot consume the seam and would go stale on a rename.
+    const files = [
+      join(ROOT, "src", "client", "chat", "tabs", "ReferralsTab.tsx"),
+      join(ROOT, "src", "client", "components", "AutopilotControlCenter.tsx"),
+      join(ROOT, "src", "client", "landing.ts"),
+      join(ROOT, "src", "client", "Chat.tsx"),
+    ];
+    for (const file of files) {
+      const src = readFileSync(file, "utf8");
+      expect(src).not.toContain("NextGenTP");
+    }
+    const referralsSrc = readFileSync(
+      join(ROOT, "src", "client", "chat", "tabs", "ReferralsTab.tsx"),
+      "utf8"
+    );
+    expect(referralsSrc).toContain('from "../../branding"');
+    expect(referralsSrc).toContain("BRAND.name");
+  });
 });

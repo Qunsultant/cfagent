@@ -89,7 +89,7 @@ export function Chat({ user }: { user: User }) {
   const [tbdMenuOpen, setTbdMenuOpen] = useState(false);
   const isTbdTab = tab === "chat" || tab === "nlq" || tab === "audit" || tab === "payments" || tab === "referrals" || tab === "ads" || tab === "revenue";
 
-  // NextGenTP Navigation Layout state (flexible top or left sidebar)
+  // Navigation Layout state (flexible top or left sidebar)
   const [navLayout, setNavLayout] = useState<NavLayoutMode>(() => {
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem("cf_nav_layout");
