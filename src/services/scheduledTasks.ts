@@ -15,6 +15,8 @@ import { renewETradeAccessToken, getStoredTokens, etradeIdentityFromLogin } from
 import { getServiceUserLogin } from "../security/serviceIdentity";
 import { createMessagingPorts } from "../messaging/createMessagingPorts";
 import { toScreenerEnvelope } from "../messaging/screenerEventEnvelope";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+import { writeEnvelopeToSink } from "../observability/observabilityPorts";
 import {
   checkScreenerDeliveryConfig,
   type ScreenerDeliveryConfigStatus,
@@ -324,6 +326,37 @@ export function buildDiscoveryDeliveryOutcome(
 }
 
 
+/**
+ * Issue #1770 (slice C): write one screener-loop outcome to the
+ * EXISTING Analytics Engine sink. foldEnvelopeToEvent already maps
+ * screener.completed/failed envelopes to screener.delivery telemetry
+ * events, but no screener-loop caller invoked it before — the loop
+ * emitted nothing. Returns true when a point was written, false
+ * when the envelope folds to nothing (e.g. options.* events) or
+ * the sink could not be written. Best-effort by construction: the
+ * sink is Safe-wrapped (unbound env degrades to the console sink),
+ * and any residual error is warned, never thrown — telemetry must
+ * never fail the run or its deliveries.
+ */
+export async function writeScreenerEventTelemetry(
+  env: unknown,
+  userLogin: string,
+  event: import("../events/screenerEvents").ScreenerEvent
+): Promise<boolean> {
+  try {
+    return await writeEnvelopeToSink(
+      createObservabilitySink(env as { OBSERVABILITY?: unknown }),
+      toScreenerEnvelope(event, userLogin)
+    );
+  } catch (err) {
+    console.warn(
+      "[ScheduledTasksService] screener telemetry emit failed (run outcome unaffected):",
+      err instanceof Error ? err.message : String(err)
+    );
+    return false;
+  }
+}
+
 export class ScheduledTasksService {
   constructor(
     private env: Env,
@@ -615,7 +648,12 @@ export class ScheduledTasksService {
             const report = await ports.publisher.publish(
               toScreenerEnvelope(event, this.userLogin)
             );
-            if (report.deliveredTo.length > 0) return deliveryConfig;
+            if (report.deliveredTo.length > 0) {
+              // Issue #1770 (slice C): the run outcome reaches the
+              // observability sink on the queue leg too, exactly once.
+              await writeScreenerEventTelemetry(this.env, this.userLogin, event);
+              return deliveryConfig;
+            }
             console.warn(
               "[ScheduledTasksService] queue publish reached no subscriber stream — falling back to the in-process bus."
             );
@@ -636,6 +674,14 @@ export class ScheduledTasksService {
         });
       }
       await this.screenerBus.publish(event);
+      // Issue #1770 (slice C): bus leg emits the same single
+      // telemetry point; options.* events fold to nothing, so this
+      // call is a no-op for them. The chained path above returns
+      // before this point and never emits here — chained delivery
+      // owns its own outcome reporting.
+      if (event.type.startsWith("screener.")) {
+        await writeScreenerEventTelemetry(this.env, this.userLogin, event);
+      }
       return deliveryConfig;
     } catch (err) {
       console.warn(
