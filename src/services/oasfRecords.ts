@@ -260,6 +260,8 @@ export const MCP_FAMILY_OASF_SKILLS: Record<string, OasfSkillRef[]> = {
     SK.teamMessaging,
     SK.regulatedFinanceOperations,
   ],
+  // #2731: the web_search command's family (tracker #2708 A2).
+  "web-search": [SK.webSearch],
 };
 
 /** A2A card name → OASF domain class (v1.1.0 domains catalog). */

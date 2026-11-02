@@ -74,6 +74,7 @@ other doors. Scope column is #1843's declaration, consumed here.
 |---|---|---|
 | `knowledge_search` | mcp:read | L (I / R on other doors) |
 | `query_platform_knowledge` | mcp:read | L (I / R on other doors) |
+| `web_search` | mcp:read | L (I / R on other doors); provider-gated at the seam (#2731) — no provider key configured in production, so calls fail loud with `web_search_provider_not_configured` until the owner sets the secret |
 | `get_async_job` | mcp:read | L (I / R on other doors) |
 | `list_async_jobs` | mcp:read | L (I / R on other doors) |
 | `etrade_get_quote` | mcp:read | L (I / R on other doors) |

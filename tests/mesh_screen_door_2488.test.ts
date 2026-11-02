@@ -397,7 +397,8 @@ describe("issue #2488 — run_stock_screen catalog registration", () => {
   it("is registered in the factory with the mcp:write scope", () => {
     expect(McpToolFactory.getTool("run_stock_screen")).toBeDefined();
     expect(MCP_TOOL_SCOPES.run_stock_screen).toBe("mcp:write");
-    expect(McpToolFactory.getAllTools()).toHaveLength(83);
+    // 83 through #2581; 84 since #2731 (web_search).
+    expect(McpToolFactory.getAllTools()).toHaveLength(84);
   });
 });
 

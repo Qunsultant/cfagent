@@ -103,8 +103,8 @@ export interface MeshToolFamilyEntry {
   source: string;
   status: MeshToolFamilyStatus;
   /**
-   * McpToolFactory command names this family accounts for. Only the
-   * seven factory-module families carry commands; every factory tool
+   * McpToolFactory command names this family accounts for. The
+   * factory-module families carry commands; every factory tool
    * is accounted for by exactly one family (pinned).
    */
   commands: string[];
@@ -913,11 +913,12 @@ export const MESH_TOOL_FAMILIES: MeshToolFamilyEntry[] = [
   {
     id: "web-search",
     name: "Web search (reference-set family)",
-    source: "no defining module on main",
-    status: "absent",
-    commands: [],
+    source: "src/mcps/openaimp/webSearchCommands.ts + src/services/webSearch.ts",
+    status: "degraded",
+    commands: ["web_search"],
+    commandSources: [{ file: "src/mcps/openaimp/webSearchCommands.ts", kind: "readonly-name" }],
     notes:
-      "Named by the #2225 reference-set update as a G11 inventory family. No web_search tool exists in src/ on current main (verified by source scan for #2322); recorded as an honest gap for a later slice.",
+      "Named by the #2225 reference-set update as a G11 inventory family; recorded absent by S14 (#2417) after the #2322 source scan found no web_search tool. Built by #2731 (tracker #2708 item A2): the web_search command is registered in the MCP catalog over a named-provider seam (src/services/webSearch.ts; ADR 0025), first provider Brave Search API. Status is degraded on the sandbox-tools precedent — the command surface is live, the execution backend is not configured: production has no BRAVE_SEARCH_API_KEY secret, so every call fails loud with the named error web_search_provider_not_configured (never fabricated results, never a silent empty success), pinned by tests/web_search_2731.test.ts. Owner enablement is config only: wrangler secret put BRAVE_SEARCH_API_KEY (+ optionally WEB_SEARCH_PROVIDER); no code change. The keyless DuckDuckGo Instant Answer API was probed and rejected on #2731: it returned its canned test stub / empty payloads for ordinary queries — an instant-answer service, not a web-results index. web_fetch stays absent (tracker A3, a separate slice).",
   },
   {
     id: "web-fetch",
