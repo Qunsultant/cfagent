@@ -58,6 +58,11 @@ import { maybeAlertServeFailure } from "../../observability/alertingList";
 import { postSlackText } from "../resourceGoals";
 import { fetchSlackPost, type SlackDeliveryEnv } from "../social/delivery";
 import { createAsyncJobPorts, type AsyncJobPorts } from "../../data/createAsyncJobPorts";
+import {
+  createDeliverySuppressor,
+  deliveryDestinationFor,
+  type DeliverySuppressor,
+} from "../../workflows/screenDeliverySuppression";
 import { createOptionsDiscoveryPorts } from "../../data/createOptionsDiscoveryPorts";
 import { createDiscoveryService } from "../../services/discoveryService";
 import { buildDataProviderPorts } from "../../data/buildDataProviderPorts";
@@ -104,6 +109,16 @@ export interface AsyncJobsContext {
    *  KV store; a context without one denies every service dispatch
    *  (fail closed — an unverifiable service identity never runs). */
   serviceMembershipStore?: MembershipStore;
+  /**
+   * Issue #2867: the (runId, destination) delivery suppressor
+   * for followup.deliver jobs. The orchestrator builder may
+   * supply one; otherwise the executor creates an in-memory
+   * suppressor on this context (the per-instance pattern of
+   * the context's scheduled slot sets). A context without one
+   * still suppresses within the instance — a duplicate send
+   * is never silent.
+   */
+  deliverySuppressor?: DeliverySuppressor;
   /** Issue #2567: the stuck-running alert delivery hook. The
    *  orchestrator builder wires the Slack operator surface
    *  (postSlackText); a context without one still claims + audits
@@ -1071,33 +1086,69 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
       // The research-report dispatch gate is untouched: it lives
       // in reportDispatch / the reports routes, not this executor.
       } else {
-        if (channel === "email") {
-          const config = resolveScreenerFollowupConfig(ctx.env as unknown as Record<string, unknown>);
-          // Per-task override wins over the env recipient (S5b); the
-          // allowlist applies to the effective recipient either way.
-          const to = outcome.emailTo ?? config.channels.email.to;
-          if (!to) throw new Error("Email delivery is not configured (SCREENER_EMAIL_TO is unset).");
-          if (!isEmailAllowed(config, to, outcome)) {
-            throw new Error(codedMessage("FAILURE_DELIVERY_RECIPIENT_NOT_ALLOWED", `recipient ${to}`));
+        // Issue #2867: (runId, destination) delivery suppression,
+        // checked after the policy gates above and before any
+        // send — a deliver job that sent and then failed to
+        // complete must not send the same run to the same
+        // destination again on retry. The claim completes the
+        // job as skipped with the reason on the job, never a
+        // silent drop and never a second send.
+        const suppressor =
+          ctx.deliverySuppressor ?? (ctx.deliverySuppressor = createDeliverySuppressor());
+        const deliveryRunId = outcome.deliveryId ?? jobId;
+        const deliveryDestination = deliveryDestinationFor(channel, outcome.emailTo);
+        if (!suppressor.tryClaim(deliveryRunId, deliveryDestination)) {
+          ctx.audit("followup.delivery_suppressed", "orchestrator", {
+            jobId,
+            runId: deliveryRunId,
+            destination: deliveryDestination,
+            channel,
+          });
+          result = {
+            status: "skipped",
+            reason: `Duplicate delivery suppressed for run ${deliveryRunId} to ${deliveryDestination}.`,
+            channel,
+          };
+        } else {
+          if (channel === "email") {
+            const config = resolveScreenerFollowupConfig(ctx.env as unknown as Record<string, unknown>);
+            // Per-task override wins over the env recipient (S5b); the
+            // allowlist applies to the effective recipient either way.
+            const to = outcome.emailTo ?? config.channels.email.to;
+            if (!to) throw new Error("Email delivery is not configured (SCREENER_EMAIL_TO is unset).");
+            if (!isEmailAllowed(config, to, outcome)) {
+              throw new Error(codedMessage("FAILURE_DELIVERY_RECIPIENT_NOT_ALLOWED", `recipient ${to}`));
+            }
           }
+          // Issue #2867: a failed send releases the claim, so
+          // a retry may send (the recipient holds nothing). A
+          // post-send failure below does NOT release — the
+          // recipient already holds the artifact, so the retry
+          // is the duplicate this suppressor exists to stop.
+          let delivery: { ok: boolean; error?: string; detail?: string };
+          try {
+            delivery = await ctx.followupDeliveryPort().deliver({ channel, userLogin, outcome, artifacts });
+            if (!delivery.ok) throw new Error(codedMessage("FAILURE_DELIVERY_CHANNEL_FAILED", delivery.error || `Delivery via ${channel} failed.`));
+          } catch (sendErr) {
+            suppressor.release(deliveryRunId, deliveryDestination);
+            throw sendErr;
+          }
+          // Issue #2178 (Q7 S2): the delivery claim is consequential —
+          // audit it through the blocking helper before the job can
+          // complete as sent. A throwing store propagates to the
+          // executor's catch, which marks the job failed: the recipient
+          // may already hold the artifact, but the system never reports
+          // an unrecorded delivery as success.
+          recordBlockingAudit(ctx.getOrm().events, {
+            id: crypto.randomUUID(),
+            sessionId: userLogin,
+            type: "followup.delivered",
+            agent: "orchestrator",
+            payload: { jobId, channel, userLogin, detail: delivery.detail },
+            createdAt: new Date().toISOString(),
+          });
+          result = { status: "sent", channel, detail: delivery.detail };
         }
-        const delivery = await ctx.followupDeliveryPort().deliver({ channel, userLogin, outcome, artifacts });
-        if (!delivery.ok) throw new Error(codedMessage("FAILURE_DELIVERY_CHANNEL_FAILED", delivery.error || `Delivery via ${channel} failed.`));
-        // Issue #2178 (Q7 S2): the delivery claim is consequential —
-        // audit it through the blocking helper before the job can
-        // complete as sent. A throwing store propagates to the
-        // executor's catch, which marks the job failed: the recipient
-        // may already hold the artifact, but the system never reports
-        // an unrecorded delivery as success.
-        recordBlockingAudit(ctx.getOrm().events, {
-          id: crypto.randomUUID(),
-          sessionId: userLogin,
-          type: "followup.delivered",
-          agent: "orchestrator",
-          payload: { jobId, channel, userLogin, detail: delivery.detail },
-          createdAt: new Date().toISOString(),
-        });
-        result = { status: "sent", channel, detail: delivery.detail };
       }
     } else if (job.capability === "followup.notify") {
       // Issue #1123 S4: one lifecycle notification on one channel.

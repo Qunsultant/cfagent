@@ -61,6 +61,20 @@ export interface ScreenExecutionBrokerResult {
 }
 
 /**
+ * Issue #2867 (Phase 2 Slice 7 under #2764) — the broker's one
+ * shard policy, shared by the REST broker, the NLQ chat-screen
+ * command builder, and the mesh door's command builder (which
+ * previously each wrote this ternary out by hand): universe
+ * "ALL" fans out to every shardable universe, any other
+ * universe is its own single shard.
+ */
+export function shardsForUniverse(universe: string): WorkflowShard[] {
+  return universe === "ALL"
+    ? shardableUniverses().map((u) => ({ shardId: u, universe: u }))
+    : [{ shardId: universe, universe }];
+}
+
+/**
  * Start a REST stock screen via workflow when the spec asks
  * for async, otherwise return null for the sync path.
  */
@@ -78,10 +92,7 @@ export async function startStockScreenWorkflowOrNull(args: {
   const { env, spec, userLogin, environment, portfolioContext } = args;
   if (!spec.asyncRequested) return null;
   const jobId = manualWorkflowJobId(spec.universe);
-  const shards: WorkflowShard[] =
-    spec.universe === "ALL"
-      ? shardableUniverses().map((u) => ({ shardId: u, universe: u }))
-      : [{ shardId: spec.universe, universe: spec.universe }];
+  const shards: WorkflowShard[] = shardsForUniverse(spec.universe);
   const starter = args.starter ?? tryStartScreenerWorkflow;
   // ND throw propagates by design — see module header.
   const handle = await starter(env, {
