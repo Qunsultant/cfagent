@@ -1,0 +1,3 @@
+### Added
+
+- **Social digest→brief wiring mechanism (#1771 slice D, parent #1717):** pure `src/orchestrations/socialDigestFeed.ts` — `SOCIAL_FEED_SOURCE` scoped resolver (run > session > user > global env > built-in brief-only; invalid winning value fails closed to brief-only), provenance-marked digest-brief builder (refuses empty outcomes), and human-brief-wins staging into the brief store the pipeline feed stage already reads, so staged digests flow through the unchanged #1224 pipeline with live publish still approval-gated. Registry entry `social-feed-digest` flipped to enabled in this mechanism form; automatic tick invocation is NOT wired (no screener-outcome feed into the social tick exists) and is recorded as the follow-up, not claimed.

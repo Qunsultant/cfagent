@@ -154,12 +154,17 @@ export const ORCHESTRATION_STATUS: OrchestrationStatus[] = [
   {
     id: "social-feed-digest",
     label: "Social feed wiring (screener digest → brief)",
-    status: "decided",
+    status: "enabled",
     blocker: null,
-    evidence: ["src/agents/social/pipeline.ts", "src/agents/social/briefStore.ts"],
+    evidence: [
+      "src/orchestrations/socialDigestFeed.ts",
+      "tests/social_digest_feed_1771.test.ts",
+      "src/agents/social/pipeline.ts",
+      "src/agents/social/briefStore.ts",
+    ],
     tradeApprovalBypass: false,
-    note: "Decision terms (slice D builds the mechanism): the digest is an OPT-IN feed source behind one scoped switch (default: human/NLQ brief only, today's behavior); a human brief for the same date always wins and is never overwritten; a digest-derived brief is provenance-marked as auto-generated; live publish still requires the existing approval standing. The pipeline's #1224 gates stay byte-identical.",
-    nextSlice: "D",
+    note: "Enabled as the opt-in wiring mechanism (slice D): SOCIAL_FEED_SOURCE resolver (default brief-only), provenance-marked digest-brief builder, and human-brief-wins staging into the same brief store the pipeline feed stage already reads — so a staged digest brief flows through the unchanged #1224 pipeline, live publish still approval-gated. SCOPE LIMIT, stated not hidden: no automatic tick invocation is wired (no screener-outcome feed into the social tick exists on main); an operator or scheduled goal must call stageDigestBrief with a real screener outcome before the pipeline firing. That caller wiring is the recorded follow-up, not a claimed automation.",
+    nextSlice: null,
   },
   {
     id: "goal-chaining",
