@@ -291,6 +291,8 @@ export async function persistScreenerReportCanonical(ctx: ReportDispatchContext,
   criteria?: unknown;
   patternRef?: unknown;
   presetRef?: unknown;
+  /** Issue #2773: post-screening Pareto evaluation, recorded in the body when the run computed one. Additive. */
+  pareto?: unknown;
 }): Promise<void> {
   if (!result.userLogin) {
     console.error(`[reportDispatch] Screen report store refused: no owning userLogin (run: ${result.timestamp}).`);
@@ -342,6 +344,8 @@ export async function persistScreenerReportCanonical(ctx: ReportDispatchContext,
         ...(result.criteria !== undefined ? { criteria: result.criteria } : {}),
         ...(result.patternRef !== undefined ? { patternRef: result.patternRef } : {}),
         ...(result.presetRef !== undefined ? { presetRef: result.presetRef } : {}),
+        // Issue #2773: Pareto evaluation rides the body when present.
+        ...(result.pareto !== undefined ? { pareto: result.pareto } : {}),
         reportUrl: result.pdfKey
           ? `${ctx.env.APP_BASE_URL || "https://agent.openaimp.com"}/api/screener/report.pdf?key=${encodeURIComponent(result.pdfKey)}`
           : undefined,
