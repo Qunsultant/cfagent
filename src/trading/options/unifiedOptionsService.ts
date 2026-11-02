@@ -34,7 +34,7 @@ import {
   type OptionsChainRequest,
   type Tier,
 } from "../dataProviders";
-import { DynamicOptionsScreener } from "../optionsScreener";
+import { DEFAULT_MAX_DTE, DynamicOptionsScreener } from "../optionsScreener";
 import {
   runPanelPipeline,
   type PipelineOptions,
@@ -57,6 +57,7 @@ import { getEtapiConfig, type EtapiConfig } from "../../config/etapiConfig";
 import { AGENT_DIDS } from "../../agents/did";
 import { rankCandidatesWithLlm } from "./llmComparison";
 import { defaultRegistry, REQUESTED_STRATEGY_NAMES } from "./strategies/catalog";
+import { deriveFetchBands, filterDefinitionsByMode, resolveStrategyMode } from "./strategyChoice";
 import { isDemoCalibratedChainsEnabled } from "../../config/demoMode";
 import { SERVER_PALETTE } from "../../theme/serverPalette";
 
@@ -105,6 +106,34 @@ export interface UnifiedOptionsRequest {
    * all-scope request.
    */
   evaluateAllStrategies?: boolean;
+  /**
+   * Issue #2600: canonical per-run strategy scope — "thesis"
+   * (default), "all", or "no-view". Deprecated alias:
+   * evaluateAllStrategies (true === "all"). A conflicting pair is
+   * rejected at the unified route schema; the service resolves the
+   * pair once via resolveStrategyMode before forwarding, so engine
+   * and scanner never see two scopes. `limit` stays the unified
+   * pagination/limit field and is NOT renamed to candidateLimit:
+   * on the opportunities action it paginates fits / caps rows, and
+   * omitting it means the scanner's own default — the ranked-cap
+   * "all" on this surface is expressed through the scan's
+   * candidateLimit option (see the opportunities forwarding below).
+   */
+  strategyMode?: "thesis" | "all" | "no-view";
+  /** Issue #2600: far-dated fetch toggle, forwarded into the scan
+   *  template (false suppresses horizon bands; absent = legacy bands). */
+  farDated?: boolean;
+  /**
+   * Issue #2600: ranked-candidate cap, kept separate from `limit`
+   * (pagination/row cap) and from best-trade `alternatives`. A number
+   * caps ranked candidates; "all" means uncapped ("all ranked") and
+   * is recorded as "all", never as a large number. On the
+   * strategies/best_trade/compare/llm actions it caps the ranked
+   * list (best-trade alternatives stay their own count, default 3);
+   * on opportunities it caps the headline per_name_best list via
+   * the scanner's candidateLimit option.
+   */
+  candidateLimit?: number | "all";
   /** Optimization bias (0 = max return, 100 = max chance); converted to
    *  score weights server-side (issue #29). */
   optimizationBias?: number;
@@ -243,6 +272,62 @@ function bodyPresentFields(req: UnifiedOptionsRequest, includePosture: boolean):
     if (req.mode !== undefined) present.push("mode");
   }
   return present;
+}
+
+/**
+ * Issue #2600: the ONE viewed-request assembly for the unified
+ * strategies / best_trade / compare / llm actions (previously three
+ * copies that each dropped a different control). Resolves the mode
+ * once (alias folded in); no-view is refused here — these actions
+ * are viewed by construction and must never fabricate a thesis for
+ * a constraint-only request. candidateLimit "all" is uncapped
+ * (omitted on the request; the kernel slices rankedAll.length when
+ * absent); a number caps it. farDated true attaches the same
+ * mode-resolved fetch bands the panel route uses; absent/false
+ * leaves the loader's default window (far templates are then
+ * ledger-skipped, never silently ranked on partial chains).
+ */
+function buildUnifiedViewedRequest(
+  req: UnifiedOptionsRequest,
+  symbol: string,
+  targetPrice: number,
+  targetDate: string,
+): StrategyRequest {
+  const mode = resolveStrategyMode(req);
+  if (mode === "no-view") {
+    throw new Error("strategyMode \"no-view\" cannot run a viewed unified action; use the no-view path (constraint-only, no thesis/target/date/IV)");
+  }
+  const allowedStrategies = req.allowedStrategies && req.allowedStrategies.length > 0 ? req.allowedStrategies : ["all"];
+  const request: StrategyRequest = {
+    symbol,
+    thesis: req.thesis || "bullish",
+    targetPrice,
+    targetDate,
+    expectedIvDirection: req.expectedIvDirection || "unchanged",
+    maxPlannedLoss: req.maxPlannedLoss || 1000,
+    minRewardRisk: req.minRewardRisk || 1.5,
+    allowedStrategies,
+    optimizationBias: req.optimizationBias,
+    strategyMode: mode,
+    ...(mode === "all" ? { evaluateAllStrategies: true } : {}),
+    ...(req.minDte !== undefined ? { minDte: req.minDte } : {}),
+    ...(req.maxDte !== undefined ? { maxDte: req.maxDte } : {}),
+    ...(typeof req.candidateLimit === "number" ? { candidateLimit: req.candidateLimit } : {}),
+    ...(req.farDated !== undefined ? { farDated: req.farDated } : {}),
+    eventCalendar: req.eventCalendarBySymbol?.[symbol],
+  };
+  if (req.farDated === true) {
+    const wanted = new Set(defaultRegistry.resolveMany(allowedStrategies).ids);
+    const selected = filterDefinitionsByMode(defaultRegistry.list(), wanted, mode, request.thesis);
+    const { bands } = deriveFetchBands({
+      selected,
+      nearMinDte: request.minDte ?? 0,
+      nearMaxDte: request.maxDte ?? DEFAULT_MAX_DTE,
+      farDated: true,
+    });
+    request.expirationDteBands = bands;
+  }
+  return request;
 }
 
 /**
@@ -483,7 +568,7 @@ export class UnifiedOptionsService {
       req.action === "discovery"
         ? `${[...(req.symbols ?? (req.symbol ? [req.symbol] : []))].map((s) => s.toUpperCase().trim()).sort().join("+")}:${this.discoverySql ? "disc-wired" : "disc-unwired"}`
         : "";
-    return `${req.action}:${sym}:${req.thesis || ""}:${req.riskProfile || ""}:${req.targetPrice || ""}:${req.mode || ""}:${perSymbol}:${profileSegment}:${req.limit ?? ""}:${statedTargetSegment}:${req.minDte ?? ""}:${req.maxDte ?? ""}:${req.offset ?? ""}:${this.userLogin}:${envSegment}:${filterSegment}:${req.maxSymbols ?? ""}:${effectiveTargetDate}:${req.expectedIvDirection || ""}:${allowedSegment}:${req.maxPlannedLoss ?? ""}:${req.minRewardRisk ?? ""}:${req.optimizationBias ?? ""}:${calendarSegment}:${req.question ?? ""}:${this.scanRunStore ? "store" : "nostore"}:${discoverySegment}:${req.evaluateAllStrategies === true ? "allstrat" : ""}`;
+    return `${req.action}:${sym}:${req.thesis || ""}:${req.riskProfile || ""}:${req.targetPrice || ""}:${req.mode || ""}:${perSymbol}:${profileSegment}:${req.limit ?? ""}:${statedTargetSegment}:${req.minDte ?? ""}:${req.maxDte ?? ""}:${req.offset ?? ""}:${this.userLogin}:${envSegment}:${filterSegment}:${req.maxSymbols ?? ""}:${effectiveTargetDate}:${req.expectedIvDirection || ""}:${allowedSegment}:${req.maxPlannedLoss ?? ""}:${req.minRewardRisk ?? ""}:${req.optimizationBias ?? ""}:${calendarSegment}:${req.question ?? ""}:${this.scanRunStore ? "store" : "nostore"}:${discoverySegment}:${req.evaluateAllStrategies === true ? "allstrat" : ""}:${req.strategyMode ?? ""}:${req.farDated === true ? "fardated" : req.farDated === false ? "neardated" : ""}:${req.candidateLimit ?? ""}`;
   }
 
   async execute(req: UnifiedOptionsRequest): Promise<FormattedOmnichannelResponse> {
@@ -691,20 +776,13 @@ export class UnifiedOptionsService {
           const symbol = (req.symbol || "SPY").toUpperCase().trim();
           const targetPrice = req.targetPrice || (req.thesis === "bearish" ? 100 : 150);
           const targetDate = req.targetDate || new Date(Date.now() + 30 * 86400000).toISOString().split("T")[0];
-          const strategyRequest: StrategyRequest = {
-            symbol,
-            thesis: req.thesis || "bullish",
-            targetPrice,
-            targetDate,
-            expectedIvDirection: req.expectedIvDirection || "unchanged",
-            maxPlannedLoss: req.maxPlannedLoss || 1000,
-            minRewardRisk: req.minRewardRisk || 1.5,
-            allowedStrategies: req.allowedStrategies && req.allowedStrategies.length > 0 ? req.allowedStrategies : ["all"],
-            optimizationBias: req.optimizationBias,
-            // Issue #16: this name's event calendar, server-fetched by
-            // the caller — the engine annotates / excludes on it.
-            eventCalendar: req.eventCalendarBySymbol?.[symbol],
-          };
+          // Issue #2600: one builder for all viewed actions (mode,
+          // far-dated bands, DTE window, candidateLimit) — previously
+          // this copy dropped evaluateAllStrategies, minDte/maxDte,
+          // and any candidate cap entirely.
+          // Issue #16: this name's event calendar, server-fetched by
+          // the caller — the engine annotates / excludes on it.
+          const strategyRequest = buildUnifiedViewedRequest(req, symbol, targetPrice, targetDate);
           // Issue #28: a selected profile layers under the body's own
           // fields — fields present in the body stay explicit.
           const effectiveRequest = strategyProfile
@@ -763,7 +841,14 @@ export class UnifiedOptionsService {
             ...(req.statedTarget ? { statedTarget: req.statedTarget } : {}),
             ...(req.minDte !== undefined ? { minDte: req.minDte } : {}),
             ...(req.maxDte !== undefined ? { maxDte: req.maxDte } : {}),
-            ...(req.evaluateAllStrategies === true ? { evaluateAllStrategies: true } : {}),
+            // Issue #2600: canonical mode resolved once (alias folded
+            // in; the route schema already rejected a conflicting
+            // pair). The scanner resolves the same way, so template
+            // and snapshot agree. farDated rides the template so
+            // the scanner's band derivation sees it.
+            strategyMode: resolveStrategyMode(req),
+            ...(resolveStrategyMode(req) === "all" ? { evaluateAllStrategies: true } : {}),
+            ...(req.farDated !== undefined ? { farDated: req.farDated } : {}),
           }, {
             riskProfile: req.riskProfile || "balanced",
             ...(req.mode ? { mode: req.mode } : {}),
@@ -773,6 +858,11 @@ export class UnifiedOptionsService {
             // caps rows in per-name mode. It was previously dropped,
             // which made a caller's limit a no-op.
             ...(req.limit !== undefined ? { limit: req.limit } : {}),
+            // Issue #2600: ranked-candidate cap, distinct from limit
+            // (see the UnifiedOptionsRequest field comment): it caps
+            // the headline per_name_best list; "all" returns every
+            // opportunity. strategy_fit pagination stays limit-driven.
+            ...(req.candidateLimit !== undefined ? { candidateLimit: req.candidateLimit } : {}),
             // Issue #738: forward maxSymbols so the scanner respects the
             // caller's universe size instead of the hardcoded 20-symbol cap.
             ...(req.maxSymbols !== undefined ? { maxSymbols: req.maxSymbols } : {}),
@@ -820,6 +910,12 @@ export class UnifiedOptionsService {
             ...(req.statedTarget !== undefined ? { statedTarget: req.statedTarget } : {}),
             ...(req.minDte !== undefined ? { minDte: req.minDte } : {}),
             ...(req.maxDte !== undefined ? { maxDte: req.maxDte } : {}),
+            // Issue #2600: the four controls as submitted (mode as
+            // resolved, so a stored run replays the scope it ran).
+            ...(req.strategyMode !== undefined || req.evaluateAllStrategies !== undefined
+              ? { strategyMode: resolveStrategyMode(req) } : {}),
+            ...(req.farDated !== undefined ? { farDated: req.farDated } : {}),
+            ...(req.candidateLimit !== undefined ? { candidateLimit: req.candidateLimit } : {}),
           };
           scanResult.requestSnapshot.request = requestRecord;
           executionData = scanResult;
@@ -899,20 +995,11 @@ export class UnifiedOptionsService {
           const symbol = (req.symbol || "SPY").toUpperCase().trim();
           const targetPrice = req.targetPrice || 100;
           const targetDate = req.targetDate || new Date(Date.now() + 30 * 86400000).toISOString().split("T")[0];
-          const strategyRequest: StrategyRequest = {
-            symbol,
-            thesis: req.thesis || "bullish",
-            targetPrice,
-            targetDate,
-            expectedIvDirection: req.expectedIvDirection || "unchanged",
-            maxPlannedLoss: req.maxPlannedLoss || 1000,
-            minRewardRisk: req.minRewardRisk || 1.5,
-            allowedStrategies: req.allowedStrategies && req.allowedStrategies.length > 0 ? req.allowedStrategies : ["all"],
-            optimizationBias: req.optimizationBias,
-            // Issue #16: this name's event calendar, server-fetched by
-            // the caller — the engine annotates / excludes on it.
-            eventCalendar: req.eventCalendarBySymbol?.[symbol],
-          };
+          // Issue #2600: same viewed-request builder as strategies /
+          // best_trade (see that case). Issue #16: this name's event
+          // calendar is server-fetched by the caller — the engine
+          // annotates / excludes on it.
+          const strategyRequest = buildUnifiedViewedRequest(req, symbol, targetPrice, targetDate);
           // Issue #28: a selected profile layers under the body's own
           // fields — fields present in the body stay explicit.
           const effectiveRequest = strategyProfile
@@ -969,20 +1056,16 @@ export class UnifiedOptionsService {
           // compare-pattern output and is deliberately not done here.
           const symbol = (req.symbol || "NVDA").toUpperCase().trim();
           const question = req.question || "Find the strongest options strategy ideas across available chains.";
-          const strategyRequest: StrategyRequest = {
+          // Issue #2600: same viewed-request builder as strategies /
+          // best_trade (see that case). Issue #16: this name's event
+          // calendar is server-fetched by the caller — the engine
+          // annotates / excludes on it.
+          const strategyRequest = buildUnifiedViewedRequest(
+            req,
             symbol,
-            thesis: req.thesis || "bullish",
-            targetPrice: req.targetPrice || 100,
-            targetDate: req.targetDate || new Date(Date.now() + 30 * 86400000).toISOString().split("T")[0],
-            expectedIvDirection: req.expectedIvDirection || "unchanged",
-            maxPlannedLoss: req.maxPlannedLoss || 1000,
-            minRewardRisk: req.minRewardRisk || 1.5,
-            allowedStrategies: req.allowedStrategies && req.allowedStrategies.length > 0 ? req.allowedStrategies : ["all"],
-            optimizationBias: req.optimizationBias,
-            // Issue #16: this name's event calendar, server-fetched by
-            // the caller — the engine annotates / excludes on it.
-            eventCalendar: req.eventCalendarBySymbol?.[symbol],
-          };
+            req.targetPrice || 100,
+            req.targetDate || new Date(Date.now() + 30 * 86400000).toISOString().split("T")[0],
+          );
           // Issue #28: a selected profile layers under the body's own
           // fields — fields present in the body stay explicit.
           const effectiveRequest = strategyProfile

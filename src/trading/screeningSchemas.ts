@@ -474,28 +474,97 @@ export interface OptionsDiscoveryRequest {
   strategyFilter?: StrategyScreenFilter;
   riskProfile?: "conservative" | "balanced" | "aggressive";
   alternatives?: number;
+  /** Issue #2600: canonical mode as resolved (alias folded in). */
+  strategyMode?: "thesis" | "all" | "no-view";
+  /** Issue #2600: far-dated toggle as submitted. */
+  farDated?: boolean;
+  /**
+   * Issue #2600: ranked-candidate cap as submitted — a number, or
+   * "all" for explicit uncapped ("all ranked"). Absent = not set
+   * (distinct from "all": the engine then uses its own default).
+   * The forwarded request carries the numeric cap only; "all" is
+   * carried as an uncapped request (candidateLimit omitted).
+   */
+  candidateLimit?: number | "all";
+}
+
+/** Issue #2600: strategyMode + deprecated-alias conflict is a
+ *  validation failure naming the field, never a silent resolution. */
+function strategyModeConflictCheck(
+  value: { strategyMode?: string; evaluateAllStrategies?: boolean },
+  ctx: z.RefinementCtx,
+): void {
+  if (
+    value.strategyMode !== undefined &&
+    value.evaluateAllStrategies !== undefined &&
+    (value.evaluateAllStrategies ? "all" : "thesis") !== value.strategyMode
+  ) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["strategyMode"],
+      message: `conflicts with evaluateAllStrategies ${value.evaluateAllStrategies} (which means "${value.evaluateAllStrategies ? "all" : "thesis"}"); send strategyMode only`,
+    });
+  }
 }
 
 const optionsDiscoveryRequestSchema = z
   .strictObject({
     ...strategyRequestFields,
+    // Issue #2600: the panel route schema gains the four controls'
+    // route-level keys. strategyRequestFields itself is NOT widened
+    // (that would also widen parseStrategyRequest and the no-view
+    // field-check variants). candidateLimit is overridden here so
+    // the explicit "all ranked" value is accepted on this route.
+    strategyMode: z.enum(["thesis", "all", "no-view"]).optional(),
+    // Deprecated alias, superseded by strategyMode
+    // (src/trading/options/strategyChoice.ts); kept so existing
+    // callers that send it stop failing strictObject validation.
+    evaluateAllStrategies: z.boolean().optional(),
+    farDated: z.boolean().optional(),
+    candidateLimit: z.union([intAtLeast(1), z.literal("all")]).optional(),
     strategyFilter: strategyScreenFilterSchema.optional(),
     riskProfile: riskProfileSchema.optional(),
     alternatives: intAtLeast(0).optional(),
   })
-  .superRefine(dteOrderCheck);
+  .superRefine((value, ctx) => {
+    dteOrderCheck(value, ctx);
+    strategyModeConflictCheck(value, ctx);
+  });
 
 export function parseOptionsDiscoveryRequest(input: unknown): ScreeningValidationResult<OptionsDiscoveryRequest> {
   const parsed = parseWith("options discovery request", optionsDiscoveryRequestSchema, input);
   if (!parsed.ok) return parsed;
-  const { strategyFilter, riskProfile, alternatives, ...request } = parsed.value as Record<string, unknown>;
+  const {
+    strategyFilter, riskProfile, alternatives,
+    strategyMode, farDated, evaluateAllStrategies,
+    candidateLimit: candidateLimitRaw,
+    ...request
+  } = parsed.value as Record<string, unknown>;
+  // Resolve once, here: the alias folds into the canonical mode and
+  // the forwarded request carries it, so engine/scanner/record all
+  // read the same mode (the schema's conflict check above already
+  // rejected a conflicting pair, so this cannot throw here).
+  const resolvedMode = (
+    strategyMode !== undefined ? strategyMode as "thesis" | "all" | "no-view"
+    : evaluateAllStrategies === true ? "all" as const
+    : "thesis" as const
+  );
   return {
     ok: true,
     value: {
-      request: request as unknown as StrategyRequest,
+      request: {
+        ...request,
+        ...(typeof candidateLimitRaw === "number" ? { candidateLimit: candidateLimitRaw } : {}),
+        strategyMode: resolvedMode,
+        ...(farDated !== undefined ? { farDated } : {}),
+        ...(evaluateAllStrategies !== undefined ? { evaluateAllStrategies } : {}),
+      } as unknown as StrategyRequest,
       ...(strategyFilter !== undefined ? { strategyFilter: strategyFilter as StrategyScreenFilter } : {}),
       ...(riskProfile !== undefined ? { riskProfile: riskProfile as OptionsDiscoveryRequest["riskProfile"] } : {}),
       ...(alternatives !== undefined ? { alternatives: alternatives as number } : {}),
+      strategyMode: resolvedMode,
+      ...(farDated !== undefined ? { farDated: farDated as boolean } : {}),
+      ...(candidateLimitRaw !== undefined ? { candidateLimit: candidateLimitRaw as number | "all" } : {}),
     },
   };
 }
@@ -567,6 +636,13 @@ export const unifiedOptionsRequestFields = {
   // Issue #2091: scheduled all-strategy scope (client/manual callers
   // omit it; the schema must still declare the key).
   evaluateAllStrategies: z.boolean().optional(),
+  // Issue #2600: canonical per-run strategy scope (default thesis;
+  // see strategyChoice.ts) + far-dated fetch toggle. A conflicting
+  // strategyMode/evaluateAllStrategies pair is rejected by the
+  // route schema's refinement below, never resolved silently.
+  strategyMode: z.enum(["thesis", "all", "no-view"]).optional(),
+  farDated: z.boolean().optional(),
+  candidateLimit: z.union([intAtLeast(1), z.literal("all")]).optional(),
 } satisfies Record<keyof UnifiedOptionsRequest, z.ZodType>;
 
 export const unifiedOptionsRequestSchema = z.strictObject(unifiedOptionsRequestFields);
@@ -579,11 +655,13 @@ export interface UnifiedOptionsRouteRequest {
   slackChannel?: string;
 }
 
-const unifiedOptionsRouteRequestSchema = z.strictObject({
-  ...unifiedOptionsRequestFields,
-  pushToSlack: z.boolean().optional(),
-  slackChannel: z.string().optional(),
-});
+const unifiedOptionsRouteRequestSchema = z
+  .strictObject({
+    ...unifiedOptionsRequestFields,
+    pushToSlack: z.boolean().optional(),
+    slackChannel: z.string().optional(),
+  })
+  .superRefine((value, ctx) => strategyModeConflictCheck(value, ctx));
 
 export function parseUnifiedOptionsRequest(input: unknown): ScreeningValidationResult<UnifiedOptionsRouteRequest> {
   const parsed = parseWith("unified options request", unifiedOptionsRouteRequestSchema, input);
@@ -615,6 +693,11 @@ export const scanRequestTemplateFields = {
   maxPlannedLoss: fin(),
   minRewardRisk: fin(),
   ...strategyThresholdFields,
+  // Issue #2600: the NLQ scan template carries the same two controls
+  // the scanner reads (mode + far-dated toggle); the alias is not a
+  // template field — NLQ callers send strategyMode only.
+  strategyMode: z.enum(["thesis", "all"]).optional(),
+  farDated: z.boolean().optional(),
   allowedStrategies: allowedStrategiesSchema,
   statedTarget: z
     .strictObject({ price: fin(), symbol: z.string().optional() })
@@ -736,6 +819,15 @@ export const optionsAnalysisScheduleCriteriaSchema = z.strictObject({
   thesis: optionThesisSchema.optional(),
   targetDate: z.string().optional(),
   allowedStrategies: z.array(z.string()).optional(),
+  // Issue #2600: the schedule's strategy-choice controls. strategyMode
+  // is thesis|all here — no-view is NOT a valid options-analysis
+  // schedule (it is a viewed scan; no-view schedules use the
+  // strategy-discovery no-view model), so a no-view value fails
+  // creation with the field named instead of failing at fire time.
+  // Absent strategyMode = the stored #2583 scope maps at fire time.
+  strategyMode: z.enum(["thesis", "all"]).optional(),
+  farDated: z.boolean().optional(),
+  candidateLimit: z.union([intAtLeast(1), z.literal("all")]).optional(),
   riskProfile: riskProfileSchema.optional(),
   // Issue #1574: opt into durable per-symbol option-chain shards.
   // Absent/false preserves the established monolithic path.

@@ -67,6 +67,15 @@ export interface ScheduleFormState {
   scheduledDate: string;
   thesis: "bullish" | "bearish" | "neutral" | "directional";
   riskProfile: "conservative" | "balanced" | "aggressive";
+  /**
+   * Issue #2600: options-analysis strategy-choice controls, when the
+   * form sets them. Absent = server defaults (strategyMode from the
+   * stored #2583 scope at fire time; farDated absent = legacy bands;
+   * candidateLimit absent = the scanner's headline default).
+   */
+  optionsStrategyMode?: "thesis" | "all";
+  optionsFarDated?: boolean;
+  optionsCandidateLimit?: number | "all";
   pushToSlack: boolean;
   slackChannel: string;
   emailTo: string;

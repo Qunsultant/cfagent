@@ -12,6 +12,7 @@ import { DEFAULT_MAX_DTE, MAX_EXPIRATIONS_PER_SYMBOL, MAX_SCAN_SYMBOLS as DEFAUL
 import { getOpportunityScannerConfig, type EtapiFitGateConfig } from "../../config/etapiConfig";
 import { defaultRegistry } from "./strategies/catalog";
 import { buildStrategyCoverage } from "../optionsReportMatrix";
+import { deriveFetchBands, resolveStrategyMode } from "./strategyChoice";
 import { applyProfileFields, profileDisclosure, toProfileRef, type ProfileRef, type StrategyProfile } from "./strategyProfile";
 import type { ScreenedOptionContractItem } from "../../types";
 import { RiskProfileComposite, type KernelCandidate } from "../../services/recommendationKernel";
@@ -29,7 +30,11 @@ const CONCURRENCY = baseOppConfig.concurrency;
  * with different model versions are never silently compared as if they
  * were produced by the same model.
  */
-export const SCAN_MODEL_VERSION = "1.2.0";
+/** 1.2.1 (issue #2600): scanner fetch selection honours strategyMode —
+ *  mode "all" now fetches contra-thesis templates' horizons too, so
+ *  all-mode verdicts for those templates change from "not evaluated"
+ *  to evaluated. Thesis-mode scans are byte-identical to 1.2.0. */
+export const SCAN_MODEL_VERSION = "1.2.1";
 
 /**
  * The two strategy questions a scan can answer (issue #23):
@@ -362,6 +367,10 @@ export interface ScanRequestRecord {
   statedTarget?: { price: number; symbol?: string };
   minDte?: number;
   maxDte?: number;
+  /** Issue #2600: the four controls as submitted/resolved. */
+  strategyMode?: StrategyRequest["strategyMode"];
+  farDated?: boolean;
+  candidateLimit?: number | "all";
 }
 
 export interface ScanRequestSnapshot {
@@ -378,6 +387,10 @@ export interface ScanRequestSnapshot {
     allowedStrategies: StrategyRequest["allowedStrategies"];
     /** Issue #2091: the scan's strategy scope, stamped by scan(). */
     evaluateAllStrategies?: boolean;
+    /** Issue #2600: canonical mode as resolved by scan(). */
+    strategyMode?: StrategyRequest["strategyMode"];
+    /** Issue #2600: far-dated toggle as run (absent = legacy bands). */
+    farDated?: boolean;
     statedTarget?: { price: number; symbol?: string };
     perSymbol?: Record<string, ScanSymbolOverride>;
   };
@@ -563,7 +576,14 @@ export function collateOpportunityScanShards(
   symbols: string[],
   results: OpportunityScanResult[],
   failed: Array<{ symbol: string; reason: string }> = [],
-  now = new Date()
+  now = new Date(),
+  /**
+   * Issue #2600: headline cap for the collated list, mirroring the
+   * scan's candidateLimit option. Absent = the historical top-10;
+   * "all" = every opportunity (explicit "all ranked", never a large
+   * number). The shard executor passes the chain's stored cap here.
+   */
+  candidateLimit?: number | "all",
 ): OpportunityScanResult {
   const unique = [...new Set(symbols.map((s) => s.trim().toUpperCase()).filter(Boolean))];
   const first = results[0];
@@ -618,7 +638,9 @@ export function collateOpportunityScanShards(
   const result: OpportunityScanResult = {
     scanned: coverage.scanned,
     withTrades: allOpportunities.length,
-    opportunities: allOpportunities.slice(0, 10),
+    opportunities: candidateLimit === "all"
+      ? allOpportunities
+      : allOpportunities.slice(0, candidateLimit ?? 10),
     skipped,
     truncatedSymbols: coverage.truncated,
     assumptions,
@@ -1026,6 +1048,15 @@ export class OpportunityScanner {
       riskProfile?: RiskProfile;
       strategyFilter?: StrategyScreenFilter;
       limit?: number;
+      /**
+       * Issue #2600: ranked-candidate cap for the headline
+       * per_name_best list, kept separate from `limit` (fit
+       * pagination / row cap in strategy_fit mode). A number caps
+       * the headline list; "all" returns every opportunity (the
+       * explicit "all ranked" choice, never a large number).
+       * Absent = the historical top-10 headline cap.
+       */
+      candidateLimit?: number | "all";
       /** Which strategy question to answer (issue #23); default
        *  "per_name_best". In strategy_fit mode `limit` paginates `fits`
        *  instead of `opportunities`. */
@@ -1133,23 +1164,30 @@ export class OpportunityScanner {
       requestTemplate.thesis,
       ...Object.values(effectiveTemplate.perSymbol ?? {}).flatMap((override) => override.thesis ? [override.thesis] : []),
     ]);
+    // Issue #2600 (slice-2 fix (c), carried over): fetch selection
+    // applies the SAME mode resolution as the engine. Previously it
+    // was always thesis-filtered, so in mode "all" a long-horizon
+    // contra-thesis strategy was judged by the engine but never
+    // fetched — it could never build. Thesis mode is unchanged: the
+    // per-symbol override theses still widen the thesis set, exactly
+    // as before. farDated === false suppresses horizon bands (the
+    // far templates are then horizon-limited, named in the scan's
+    // strategyCoverage via dataMaxDte); absent/true keeps the legacy
+    // horizon bands, so existing scheduled scans are unaffected.
+    const scanMode = resolveStrategyMode(requestTemplate);
+    if (scanMode === "no-view") {
+      throw new Error("strategyMode \"no-view\" cannot run a viewed opportunity scan; use the no-view path (recommendNoViewStrategies)");
+    }
     const selectedDefinitions = defaultRegistry.list()
-      .filter((def) => resolvedStrategies.has(def.id) && def.theses.some((thesis) => scanTheses.has(thesis)));
+      .filter((def) => resolvedStrategies.has(def.id) && (scanMode === "all" || def.theses.some((thesis) => scanTheses.has(thesis))));
     const nearMaxDte = requestTemplate.maxDte ?? DEFAULT_MAX_DTE;
-    const dataMaxDte = Math.max(nearMaxDte, ...selectedDefinitions.map((def) => def.dataHorizonDte ?? 0));
-    const expirationDteBands = [
-      { minDte: requestTemplate.minDte ?? 0, maxDte: nearMaxDte, maxExpirations: MAX_EXPIRATIONS_PER_SYMBOL },
-      ...selectedDefinitions.flatMap((def) => {
-        const horizon = def.dataHorizonDte ?? 0;
-        if (horizon <= nearMaxDte) return [];
-        const minDte = def.multiExpiry
-          ? Math.max(nearMaxDte + 7, def.requiredMaxDte ?? 0)
-          : Math.max(nearMaxDte + 1, def.requiredMaxDte ?? 0);
-        return minDte <= horizon ? [{ minDte, maxDte: horizon, maxExpirations: 4 }] : [];
-      }),
-    ].filter((band, index, bands) => bands.findIndex((candidate) =>
-      candidate.minDte === band.minDte && candidate.maxDte === band.maxDte
-    ) === index);
+    const { bands: expirationDteBands, dataMaxDte } = deriveFetchBands({
+      selected: selectedDefinitions,
+      nearMinDte: requestTemplate.minDte ?? 0,
+      nearMaxDte,
+      farDated: requestTemplate.farDated,
+      nearMaxExpirations: MAX_EXPIRATIONS_PER_SYMBOL,
+    });
 
     // Issue #1204: ONE subrequest budget for the whole scan. Snapshots
     // are fetched per symbol over a shared screener, so without a
@@ -1328,7 +1366,9 @@ export class OpportunityScanner {
     return {
       scanned: batch.length,
       withTrades: opportunities.length,
-      opportunities: opportunities.slice(0, mode === "per_name_best" ? options.limit ?? 10 : 10),
+      opportunities: opportunities.slice(0, mode === "per_name_best"
+        ? (options.candidateLimit === "all" ? opportunities.length : (options.candidateLimit ?? options.limit ?? 10))
+        : 10),
       skipped,
       truncatedSymbols: Math.max(0, unique.length - batch.length),
       assumptions,
@@ -1353,6 +1393,10 @@ export class OpportunityScanner {
           minRewardRisk: effectiveTemplate.minRewardRisk,
           allowedStrategies: effectiveTemplate.allowedStrategies,
           evaluateAllStrategies: effectiveTemplate.evaluateAllStrategies,
+          // Issue #2600: canonical mode + far-dated toggle as run, so
+          // a later reader need not re-derive them from the alias.
+          strategyMode: scanMode,
+          farDated: effectiveTemplate.farDated,
           statedTarget: effectiveTemplate.statedTarget,
           perSymbol: effectiveTemplate.perSymbol,
         },
@@ -1376,7 +1420,7 @@ export class OpportunityScanner {
         matrix,
         requestTemplate.allowedStrategies,
         dataMaxDte,
-        requestTemplate.evaluateAllStrategies === true ? "all" : "thesis",
+        scanMode,
       ),
     };
   }

@@ -53,6 +53,13 @@ import {
   // OPTIONS_REPORT_CONFIG / OPTIONS_REPORT_PRESET — not a hardcoded default.
   describeReportScope,
   resolveOptionsReportScope,
+  strategyModeFromReportScope,
+  DEFAULT_MAX_DTE,
+  deriveFetchBands,
+  filterDefinitionsByMode,
+  resolveAllowedStrategyIds,
+  resolveStrategyMode,
+  defaultRegistry,
 } from "../trading";
 import { DEFAULT_SUBREQUEST_BUDGET, getOpportunityScannerConfig } from "../config/etapiConfig";
 import { tagOpportunitiesWithDirection, ETradeSlackTradingService } from "../trading";
@@ -122,6 +129,19 @@ export interface AutonomousOptionsAnalysisOptions {
   thesis?: OptionThesis;
   targetDate?: string;
   allowedStrategies?: OptionStrategyType[];
+  /**
+   * Issue #2600: the four strategy-choice controls as stored on the
+   * schedule. strategyMode, when set, wins; when absent the stored
+   * #2583 scope is honoured (resolver "all" -> mode "all",
+   * "explicit" -> mode "thesis") and never silently re-defaulted.
+   * farDated rides into the scan template (absent = legacy bands).
+   * candidateLimit caps the headline per_name_best list ("all" =
+   * uncapped); it is distinct from best-trade alternatives, which
+   * scheduled scans do not produce.
+   */
+  strategyMode?: "thesis" | "all" | "no-view";
+  farDated?: boolean;
+  candidateLimit?: number | "all";
   riskProfile?: "conservative" | "balanced" | "aggressive";
   pushToSlack?: boolean;
   slackChannel?: string;
@@ -1959,6 +1979,18 @@ export class ScheduledTasksService {
       ...(reportScope.chains.dte.maxDte !== null ? { maxDte: reportScope.chains.dte.maxDte } : {}),
     };
     const reportRunId = `options_scanner:${timestamp}:${targetThesis}`;
+    // Issue #2600: the schedule's strategy mode — an explicitly
+    // stored strategyMode wins; otherwise the #2583 scope maps
+    // (resolver "all" -> mode "all", "explicit" -> mode "thesis").
+    // This replaces the old forced evaluateAllStrategies: true on
+    // both fire paths: a schedule that wants the old always-all
+    // behaviour stores strategyMode "all" explicitly. No-view is
+    // refused here — this is a viewed scan; no-view schedules use
+    // the autonomousStrategyDiscovery no-view model.
+    if (options.strategyMode === "no-view") {
+      throw new Error("strategyMode \"no-view\" cannot run a viewed options analysis; use a strategy-discovery schedule with the no-view input model.");
+    }
+    const scheduledMode = options.strategyMode ?? strategyModeFromReportScope(reportScope.strategyScope);
     let auditRunId = reportRunId;
     const shouldNotifySlack = options.pushToSlack === true ||
       (options.pushToSlack === undefined && Boolean(this.env.SLACK_BOT_TOKEN || getCfpayConfig(this.env)));
@@ -2153,10 +2185,15 @@ export class ScheduledTasksService {
             ...scopeDte,
             maxPlannedLoss: reportScope.gates.maxPlannedLoss,
             minRewardRisk: reportScope.gates.minRewardRisk,
-            // Issue #2091: scheduled runs judge the chain against every
-            // wanted strategy, not only the thesis-matching ones. The
-            // wanted set is the scope's lever; the thesis orients scoring.
-            evaluateAllStrategies: true,
+            // Issue #2600: the schedule's mode rides the chain (the
+            // shard executor forwards it into each per-symbol
+            // template); the alias is kept alongside for snapshot
+            // readers that still stamp it. Issue #2091's always-all
+            // is superseded by the stored/scope-derived mode above.
+            strategyMode: scheduledMode,
+            ...(scheduledMode === "all" ? { evaluateAllStrategies: true } : {}),
+            ...(options.farDated !== undefined ? { farDated: options.farDated } : {}),
+            ...(options.candidateLimit !== undefined ? { candidateLimit: options.candidateLimit } : {}),
           },
         };
         // The per-symbol job owns its event-calendar request too; do not
@@ -2194,9 +2231,15 @@ export class ScheduledTasksService {
         ...scopeDte,
         maxPlannedLoss: reportScope.gates.maxPlannedLoss,
         minRewardRisk: reportScope.gates.minRewardRisk,
-        // Issue #2091: scheduled runs judge the chain against every
-        // wanted strategy, not only the thesis-matching ones.
-        evaluateAllStrategies: true,
+        // Issue #2600: the schedule's four controls ride the unified
+        // call (mode, far-dated toggle, ranked cap). The alias is
+        // kept for the unified snapshot's legacy stamp; the mode is
+        // canonical. Issue #2091's always-all is superseded by the
+        // stored/scope-derived mode above.
+        strategyMode: scheduledMode,
+        ...(scheduledMode === "all" ? { evaluateAllStrategies: true } : {}),
+        ...(options.farDated !== undefined ? { farDated: options.farDated } : {}),
+        ...(options.candidateLimit !== undefined ? { candidateLimit: options.candidateLimit } : {}),
         channel: "ui",
         userLogin,
         overrideEnv: options.environment,
@@ -3248,7 +3291,30 @@ export class ScheduledTasksService {
           });
         }
       }
-      const result = await runPanelWithAgents(agents, request, snapshotOverride ? { snapshotOverride } : {});
+      // Issue #2600: fire-time fetch bands for saved requests. A
+      // captured request that carries farDated true but no bands
+      // (captured before bands were computed) gets its bands derived
+      // here from its own mode-resolved selection — the same rule as
+      // the panel route — so a far-horizon saved schedule actually
+      // fetches its horizons. A no-view mode on a saved (viewed)
+      // request fails this symbol honestly instead of throwing
+      // inside the engine's viewed filter.
+      let fireRequest = request;
+      if (resolveStrategyMode(request) === "no-view") {
+        return { symbol, status: "failed", request, error: "strategyMode \"no-view\" cannot run a saved viewed request; use the no-view schedule model." };
+      }
+      if (request.farDated === true && !request.expirationDteBands) {
+        const wanted = new Set(resolveAllowedStrategyIds(request.allowedStrategies).ids);
+        const selected = filterDefinitionsByMode(defaultRegistry.list(), wanted, resolveStrategyMode(request), request.thesis);
+        const { bands } = deriveFetchBands({
+          selected,
+          nearMinDte: request.minDte ?? 0,
+          nearMaxDte: request.maxDte ?? DEFAULT_MAX_DTE,
+          farDated: true,
+        });
+        fireRequest = { ...request, expirationDteBands: bands };
+      }
+      const result = await runPanelWithAgents(agents, fireRequest, snapshotOverride ? { snapshotOverride } : {});
       const snapshot = result.snapshot;
       // A snapshot that never loaded its chain is a failure, not
       // an empty success: the screen records why (validation
@@ -3272,7 +3338,7 @@ export class ScheduledTasksService {
       return {
         symbol,
         status: "completed",
-        request,
+        request: fireRequest,
         ranked: result.ranked,
         riskReports: result.riskReports,
         screenedOut: result.screenedOut.slice(0, 50),
