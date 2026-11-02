@@ -424,7 +424,9 @@ export function SagaStartSection({ userLogin }: { userLogin?: string }) {
   // Gate-cards' 30s setInterval pattern (not the 2s staged-run loop:
   // a saga run is long-lived — payment plus screen take minutes).
   // Stops at the gate, at a terminal outcome, on error, or on
-  // "Stop following" (effect cleanup clears the interval).
+  // "Stop following" (effect cleanup clears the interval). A 404
+  // does NOT stop it (issue #2777): while polling, 404 means
+  // "not yet visible" in the pre-audit window, not "not found".
   useEffect(() => {
     if (!started?.statusUrl || phase !== "polling") return;
     let cancelled = false;
@@ -436,8 +438,12 @@ export function SagaStartSection({ userLogin }: { userLogin?: string }) {
         const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
         if (cancelled) return;
         if (!res.ok) {
-          if (res.status === 404) setProgressError("Saga not found (runs are owner-scoped).");
-          else if (res.status === 503) setProgressError("Saga status is unavailable (audit read failed).");
+          // Issue #2777: a 404 while polling means "not yet
+          // visible" (the pre-audit window), not "not found" —
+          // keep polling with the waiting state. The error phase
+          // is reserved for genuine failures (503, other non-ok).
+          if (res.status === 404) return;
+          if (res.status === 503) setProgressError("Saga status is unavailable (audit read failed).");
           else setProgressError(typeof data["error"] === "string" ? (data["error"] as string) : `Saga status failed (HTTP ${res.status}).`);
           setPhase("error");
           return;
@@ -615,9 +621,6 @@ export function SagaStartSection({ userLogin }: { userLogin?: string }) {
           {started.runRequestId && (
             <p style={sagaMutedTightStyle}>Run request: {started.runRequestId}</p>
           )}
-          <p style={sagaMutedTightStyle}>
-            <a href={started.statusUrl}>{started.statusUrl}</a>
-          </p>
           {started.disclosure && (
             <p style={sagaListStyle}>{started.disclosure}</p>
           )}
@@ -666,7 +669,7 @@ export function SagaStartSection({ userLogin }: { userLogin?: string }) {
           )}
           {phase === "stopped" && (
             <p style={sagaListStyle}>
-              Not following — reopen via the status link above.
+              Not following — outcome notices go to Slack.
             </p>
           )}
           {phase === "error" && progressError && (

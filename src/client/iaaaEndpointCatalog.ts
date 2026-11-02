@@ -786,7 +786,7 @@ export const API_ENDPOINT_CATALOG: ApiEndpointEntry[] = [
     aliases: [],
     kind: "http",
     auth: "session",
-    authNote: "401 unauthenticated; 404 when no saga audit rows exist for the session user (owner-scoped, no cross-user leak); 503 when SEARCH_AGENT is unbound or the audit read fails. Returns the panel's {jobs} shape (stage rows from saga audit rows + live instance status/output, issue #2041 S4). Deliberately NOT flag-gated: a read path for one's own sagas survives a flag flip.",
+    authNote: "401 unauthenticated; 404 when no saga audit rows exist for the session user AND no projection row exists for the session tenant (owner-scoped audit read; tenant-scoped projection fallback, issue #2777); 503 when SEARCH_AGENT is unbound or the audit read fails. Returns the panel's {jobs} shape (stage rows from saga audit rows, or the submitted stage from the projection row before audit rows exist, + live instance status/output, issue #2041 S4). Deliberately NOT flag-gated: a read path for one's own sagas survives a flag flip.",
     source: "src/server.ts branch: path matches /api/saga/:sagaId/status",
   },
   {
