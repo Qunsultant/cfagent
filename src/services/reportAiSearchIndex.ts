@@ -53,6 +53,8 @@ import {
   type AiSearchIndexOutcome,
 } from "../agents/aiSearchPaths";
 import { AgentErrorCode } from "../aspects/errorCodes";
+import { createBlobStore } from "./blobStoreR2Adapter";
+import { blobText } from "./blobStorePorts";
 
 /** Stable log event code for a failed/degraded instance indexing leg. */
 export const AI_SEARCH_REPORT_INDEX_FAILED = "ai_search_report_index_failed";
@@ -104,10 +106,11 @@ export async function indexCanonicalReportInAiSearch(
       return { ok: false, code: "disabled", correlationId };
     }
     let body = report.body;
-    if (!body && report.bodyR2Key && env.REPORTS_BUCKET) {
+    const store = createBlobStore(env);
+    if (!body && report.bodyR2Key && store) {
       try {
-        const obj = await env.REPORTS_BUCKET.get(report.bodyR2Key);
-        const text = await obj?.text();
+        const obj = await store.get(report.bodyR2Key);
+        const text = obj ? blobText(obj) : undefined;
         if (typeof text === "string" && text.length > 0) body = text;
       } catch {
         // R2 resolution is best-effort; fall back to summary + title.
