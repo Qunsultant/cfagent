@@ -43,5 +43,23 @@ export async function serveStaticAsset(
   env: Env
 ): Promise<Response | null> {
   if (!isStaticAssetRequest(request, path)) return null;
+  return fetchStaticAsset(request, env);
+}
+
+/**
+ * Qunsultant/cfagent#1775 (Adapter S1): the asset port — the single
+ * home for ASSETS.fetch in this module. Unlike serveStaticAsset,
+ * this does NOT gate on asset paths: it is for call sites that
+ * already authenticated/authorized the request (the landing-page
+ * injection for `/` / `/index.html` and the fallthrough serve in
+ * server.ts). Widening isStaticAssetRequest to cover `/` would
+ * have been wrong — those paths must keep their session handling
+ * in handleFetch; only the binding fetch itself moves behind the
+ * port, with the response passed through verbatim.
+ */
+export async function fetchStaticAsset(
+  request: Request,
+  env: Env
+): Promise<Response> {
   return env.ASSETS.fetch(request);
 }
