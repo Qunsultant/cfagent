@@ -472,6 +472,64 @@ export function classifyPriceRegime(
 }
 
 /**
+ * Death-cross detection (issue #1769, parent #1717; screener-rules.md
+ * §1.1: a Death Cross within 20 sessions is a hard rejection).
+ * Pure function over closes supplied by the caller — nothing here
+ * fetches. SMA50/SMA200 are computed at every index that has both
+ * windows (index >= 199); a cross event at index i requires
+ * SMA50[i-1] >= SMA200[i-1] and SMA50[i] < SMA200[i] (a strict
+ * crossing, so equality on either side is not a cross). The first
+ * computable index (199) can never be a cross event — there is no
+ * previous pair to cross from — so a series already below at 199
+ * reports no observed cross, not a cross "within 20 sessions".
+ *
+ * `crossedWithinSessions` is true only when the most recent observed
+ * cross falls within the last `sessions` sessions (default 20):
+ * sessionsSinceCross <= sessions - 1. An older cross reports
+ * crossedWithinSessions false with its age, so callers can tell
+ * "old cross" from "no cross" (sessionsSinceCross null).
+ *
+ * Returns null when the value cannot be built honestly: fewer than
+ * 200 closes, a non-finite close, or an invalid sessions value
+ * (non-integer or < 1). Never estimates from a short window.
+ */
+export interface DeathCrossDetection {
+  latestSma50: number;
+  latestSma200: number;
+  /** Sessions since the most recent observed cross, or null if none. */
+  sessionsSinceCross: number | null;
+  crossedWithinSessions: boolean;
+}
+
+export function detectDeathCrossWithinSessions(
+  bars: readonly YahooDailyBar[],
+  sessions = 20
+): DeathCrossDetection | null {
+  if (!bars || bars.length < 200) return null;
+  if (!Number.isInteger(sessions) || sessions < 1) return null;
+  const closes = bars.map((b) => b.close);
+  if (closes.some((c) => !Number.isFinite(c))) return null;
+  const prefix: number[] = [0];
+  for (const c of closes) prefix.push(prefix[prefix.length - 1] + c);
+  const sma = (endIndex: number, period: number): number =>
+    (prefix[endIndex + 1] - prefix[endIndex + 1 - period]) / period;
+  let lastCrossIndex: number | null = null;
+  for (let i = 200; i < closes.length; i++) {
+    if (sma(i - 1, 50) >= sma(i - 1, 200) && sma(i, 50) < sma(i, 200)) {
+      lastCrossIndex = i;
+    }
+  }
+  const last = closes.length - 1;
+  const sessionsSinceCross = lastCrossIndex === null ? null : last - lastCrossIndex;
+  return {
+    latestSma50: sma(last, 50),
+    latestSma200: sma(last, 200),
+    sessionsSinceCross,
+    crossedWithinSessions: sessionsSinceCross !== null && sessionsSinceCross < sessions,
+  };
+}
+
+/**
  * 15-min Opening Range Breakout (ORB) — issue #1654 slice 7/8;
  * docs/architecture/business/screener-rules.md §1.4, fit-gap Gap 6.
  * Pure functions over intraday bars supplied by the caller — nothing
@@ -695,6 +753,65 @@ export function computeVwapHold(
   const barsAbove = completed.filter((b) => b.close > sessionVwap).length;
   const holdPct = barsAbove / completed.length;
   return { sessionVwap, barsAbove, barsTotal: completed.length, holdPct, confirmed: holdPct >= 0.7 };
+}
+
+/**
+ * ORB breakout composition (issue #1769, parent #1717; screener-rules.md
+ * §1.4). Slice 7 shipped the three primitives (opening range, trigger,
+ * VWAP hold) with no consumer; this function IS the consumer: it
+ * composes them over intraday bars a caller supplies into one
+ * breakout verdict. `breakoutConfirmed` requires BOTH the trigger
+ * (price strictly above OR_H × 1.001 with time-prorated RVOL ≥ 1.5)
+ * AND VWAP confirmation (≥ 70% of completed 15-min bars closing above
+ * session VWAP). Any primitive returning null (no opening-range bars,
+ * invalid trigger inputs, no completed bars) makes the composition
+ * null — "gate cannot be evaluated", never a partial pass. Minute-bar
+ * sourcing remains the caller's responsibility (slice 7's documented
+ * gap: no live minute-bar provider is wired here, and this function
+ * never mislabels daily bars as intraday bars).
+ */
+export interface OrbBreakout {
+  orHigh: number;
+  orLow: number;
+  triggerPrice: number;
+  rvol: number;
+  triggered: boolean;
+  vwapHoldPct: number;
+  vwapConfirmed: boolean;
+  breakoutConfirmed: boolean;
+}
+
+export function evaluateOrbBreakout(args: {
+  bars: readonly IntradayBar[];
+  sessionDate: string;
+  price: number;
+  sessionVolume: number;
+  avgDailyVolume: number;
+  elapsedMinutes: number;
+  asOf: string;
+}): OrbBreakout | null {
+  const or = computeOpeningRange(args.bars, args.sessionDate);
+  if (or === null) return null;
+  const trigger = evaluateOrbTrigger({
+    orHigh: or.orHigh,
+    price: args.price,
+    sessionVolume: args.sessionVolume,
+    avgDailyVolume: args.avgDailyVolume,
+    elapsedMinutes: args.elapsedMinutes,
+  });
+  if (trigger === null) return null;
+  const hold = computeVwapHold(args.bars, args.sessionDate, args.asOf);
+  if (hold === null) return null;
+  return {
+    orHigh: or.orHigh,
+    orLow: or.orLow,
+    triggerPrice: trigger.triggerPrice,
+    rvol: trigger.rvol,
+    triggered: trigger.triggered,
+    vwapHoldPct: hold.holdPct,
+    vwapConfirmed: hold.confirmed,
+    breakoutConfirmed: trigger.triggered && hold.confirmed,
+  };
 }
 
 /**
