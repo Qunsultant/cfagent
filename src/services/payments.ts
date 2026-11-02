@@ -222,6 +222,15 @@ export class PaymentGatewayService {
     return stripeStrategy.cancelProviderImmediately(this.env, providerSubscriptionId);
   }
 
+  async updateProviderSubscriptionPrice(
+    providerSubscriptionId: string,
+    priceId: string,
+    prorationBehavior: import("../data/billingPolicyPorts").ProrationBehavior,
+  ): Promise<ProviderSubscription> {
+    const stripeStrategy = PaymentStrategyFactory.getStrategy("stripe") as StripePaymentStrategy;
+    return stripeStrategy.updateProviderSubscriptionPrice(this.env, providerSubscriptionId, priceId, prorationBehavior);
+  }
+
   /**
    * Captures an authorized payment order across Stripe or PayPal
    */

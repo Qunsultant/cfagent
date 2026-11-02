@@ -52,6 +52,7 @@ import {
 } from "../src/data/inMemoryRefundAdapter";
 import {
   MIGRATION_0018_REFUNDS,
+  MIGRATION_0036_REFUND_POLICY_APPROVAL,
   applyMigrations,
   type MigrationDb,
 } from "../src/data/migrationRunner";
@@ -146,7 +147,7 @@ async function emptyPolicyAdapters(): Promise<
 > {
   const mock = new MockD1Database();
   const db = createD1RefundDb(mock as unknown as D1Database);
-  await applyMigrations(db as unknown as MigrationDb, [MIGRATION_0018_REFUNDS]);
+  await applyMigrations(db as unknown as MigrationDb, [MIGRATION_0018_REFUNDS, MIGRATION_0036_REFUND_POLICY_APPROVAL]);
   return [
     { name: "in-memory", policy: new InMemoryRefundPolicyAdapter(null) },
     { name: "drizzle", policy: new D1RefundPolicyAdapter(db) },
@@ -256,7 +257,10 @@ describe("refund port contract (#2204)", () => {
     };
     const ddlColumns = (table: string): string[] => {
       const block = MIGRATION_0018_REFUNDS.sql.split(`CREATE TABLE IF NOT EXISTS ${table} (`)[1].split(");")[0];
-      return [...block.matchAll(/^\s{2}(\w+) /gm)].map((m) => m[1]).sort();
+      const base = [...block.matchAll(/^\s{2}(\w+) /gm)].map((m) => m[1]);
+      // Issue #2662: migration 0036 adds approval columns by ALTER.
+      const alters = [...MIGRATION_0036_REFUND_POLICY_APPROVAL.sql.matchAll(/ADD COLUMN (\w+) /g)].map((m) => m[1]);
+      return [...base, ...(table === "agent_refund_policy" ? alters : [])].sort();
     };
     expect(ddlColumns("agent_refund_policy")).toEqual(columnsOf(agentRefundPolicy));
     expect(ddlColumns("agent_refunds")).toEqual(columnsOf(agentRefunds));
@@ -283,6 +287,12 @@ describe("refund service lifecycle (#2204)", () => {
 
   async function serviceSetup() {
     const policy = new InMemoryRefundPolicyAdapter();
+    // Issue #2662: the #2204 lifecycle tests predate per-kind approval;
+    // approve both kinds here so the lifecycle assertions keep testing
+    // lifecycle behavior, while the approval gate itself is covered by
+    // tests/cancel_refund_policy_2662.test.ts.
+    await policy.setKindApproval("subscription", true, "op1");
+    await policy.setKindApproval("pay_per_run", true, "op1");
     const store = new InMemoryRefundAdapter();
     const subs = new InMemorySubscriptionAdapter();
     const commercial = new InMemoryCommercialAdapter();
@@ -560,6 +570,9 @@ describe("refund service lifecycle (#2204)", () => {
     });
     await decideRefund({ refundStore: base.refundStore }, { refundId: record.id, decision: "approve", approverLogin: "op1" });
     await policy.setPolicy({ windowDays: 1 });
+    // Issue #2662: the edit reset approval; re-approve so the test
+    // isolates window re-validation (not the approval gate).
+    await policy.setKindApproval("subscription", true, "op1");
     await expect(
       executeRefund({ ...base, nowMs: Date.now() + 2 * 86_400_000 }, { refundId: record.id }),
     ).rejects.toThrow(/window expired/);
@@ -626,6 +639,11 @@ describe("refund routes (#2204)", () => {
     await ensureSubscriptionSchema(subsDb);
     const refundDb = createD1RefundDb(mock as unknown as D1Database);
     await ensureRefundSchema(refundDb);
+    // Issue #2662: approve both kinds so the #2204 route tests keep
+    // testing route behavior; the gate itself is covered by the 2.7 tests.
+    const refundPolicy = new D1RefundPolicyAdapter(refundDb);
+    await refundPolicy.setKindApproval("subscription", true, "op1");
+    await refundPolicy.setKindApproval("pay_per_run", true, "op1");
     const subs = new D1SubscriptionAdapter(subsDb);
     const plan = await subs.createPlan({ id: "plan-pro", name: "Pro", priceUSD: 20, periodDays: 30, includedRuns: 10 });
     const now = Date.now();
@@ -777,7 +795,8 @@ describe("refund routes (#2204)", () => {
     const policy = await bodyOf(await call(ctx, "GET", "/payments/agentic/commercial/refund-policy", "u1"));
     expect(policy.policy.windowDays).toBe(30);
     expect(policy.disclosure).toContain("non-refundable");
-    expect(policy.proposed).toBe(true);
+    // Issue #2662: GET reports real approval state, never a hardcoded flag.
+    expect([...policy.policy.approvedKinds].sort()).toEqual(["pay_per_run", "subscription"]);
     expect(
       (await call(ctx, "POST", "/payments/agentic/commercial/refund-policy", "u1", { windowDays: 14 }))?.status,
     ).toBe(403);

@@ -392,6 +392,9 @@ export const agentRefundPolicy = sqliteTable("agent_refund_policy", {
   subscriptionPartialEffect: text("subscription_partial_effect").notNull(),
   payPerRunEffect: text("pay_per_run_effect").notNull(),
   creditEffect: text("credit_effect").notNull(),
+  approvedKinds: text("approved_kinds").notNull(),
+  approvedBy: text("approved_by"),
+  approvedAtMs: integer("approved_at_ms"),
   updatedAtMs: integer("updated_at_ms").notNull(),
 });
 

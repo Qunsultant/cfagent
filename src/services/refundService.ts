@@ -48,6 +48,7 @@ import type { CommercialStore } from "../data/commercialPorts";
 import type { JournalEntryInput } from "../data/journalPorts";
 import {
   assertRefundKind,
+  assertKindApproved,
   CRYPTO_NON_REFUNDABLE_MESSAGE,
   round2,
   validateRefundRequest,
@@ -151,6 +152,9 @@ export async function requestRefund(
   const policy = await deps.policyStore.getPolicy();
   if (!policy) throw new Error("Refund policy is not configured: run the refund schema ensure first.");
   const kind = assertRefundKind(input.kind);
+  // Issue #2662: a seeded PROPOSED value is never an approval — refuse
+  // before any record is created, before any store read beyond policy.
+  assertKindApproved(policy, kind);
   const originalPaymentRef =
     typeof input.originalPaymentRef === "string" && input.originalPaymentRef.trim()
       ? input.originalPaymentRef.trim()
@@ -398,6 +402,10 @@ export async function executeRefund(
   if (policy.approver !== "operator_hitl") {
     throw new Error('Refund approver policy must be "operator_hitl" in this slice.');
   }
+  // Issue #2662: re-validate approval against the CURRENT policy — an
+  // approval withdrawn (or a value edit resetting approval) between
+  // approve and execute refuses execution before any gateway call.
+  assertKindApproved(policy, record.kind);
   // Re-validate against the CURRENT policy: a policy change between
   // approval and execution cannot widen an approved refund.
   validateRefundRequest(

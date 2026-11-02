@@ -41,6 +41,39 @@ export type RefundKind = "subscription" | "pay_per_run";
 export type RefundRail = "card" | "crypto";
 
 /**
+ * Issue #2662 (monetization Phase 2.7) — owner approval of the refund
+ * policy, per kind. A seeded PROPOSED value is never an approval: a
+ * refund request/execution for a kind is refused fail-closed until an
+ * operator explicitly approves THAT kind through the approve route.
+ * Approval attaches to exact values — any setPolicy edit resets it
+ * (the #2547 price-catalogue rule: never a silently-still-approved
+ * policy). Approval is never a setPolicy field: the patch validator
+ * rejects it as an unknown field, so approval cannot be smuggled in
+ * through a value edit.
+ */
+export function assertApprovedKinds(value: unknown): RefundKind[] {
+  if (!Array.isArray(value)) throw new Error("approvedKinds must be an array of refund kinds.");
+  const seen = new Set<string>();
+  for (const kind of value) {
+    if (kind !== "subscription" && kind !== "pay_per_run") {
+      throw new Error(`Invalid approved refund kind: ${String(kind)}.`);
+    }
+    seen.add(kind);
+  }
+  return [...seen] as RefundKind[];
+}
+
+/** Refund policy approval state, carried on the policy row. */
+export interface RefundPolicyApproval {
+  /** Kinds whose current policy values an operator has explicitly approved. */
+  approvedKinds: RefundKind[];
+  /** Operator login that last set approval, null when nothing is approved. */
+  approvedBy: string | null;
+  /** Epoch-ms of the last approval set, null when nothing is approved. */
+  approvedAtMs: number | null;
+}
+
+/**
  * Refund lifecycle. "requested" -> "approved" | "denied"; an approved
  * refund -> "executed", or -> "execution_failed" on a gateway
  * failure (a retry from "execution_failed" is allowed). No other
@@ -145,6 +178,12 @@ export interface RefundPolicy {
   payPerRunEffect: PayPerRunRefundEffect;
   /** What a refund does to credit claims. Only "none" in this slice. */
   creditEffect: CreditRefundEffect;
+  /** Issue #2662: per-kind owner approval (see assertApprovedKinds). */
+  approvedKinds: RefundKind[];
+  /** Operator login that last set approval, null when nothing is approved. */
+  approvedBy: string | null;
+  /** Epoch-ms of the last approval set, null when nothing is approved. */
+  approvedAtMs: number | null;
   updatedAtMs: number;
 }
 
@@ -174,6 +213,9 @@ export const PROPOSED_SEED_POLICY: Omit<RefundPolicy, "updatedAtMs"> = {
   subscriptionPartialEffect: "keep_access",
   payPerRunEffect: "none",
   creditEffect: "none",
+  approvedKinds: [],
+  approvedBy: null,
+  approvedAtMs: null,
 };
 
 /**
@@ -201,7 +243,10 @@ const POLICY_FIELDS = [
 
 type PolicyField = (typeof POLICY_FIELDS)[number];
 
-/** Validate a full policy row (shared by both adapters). */
+/** Validate a full policy row (shared by both adapters). Approval fields
+ * default to unapproved when absent (pre-#2662 rows read as unapproved);
+ * they are validated when present. setPolicy callers never pass them:
+ * assertRefundPolicyPatch rejects them as unknown fields. */
 export function assertRefundPolicy(input: {
   windowDays?: unknown;
   approver?: unknown;
@@ -210,6 +255,9 @@ export function assertRefundPolicy(input: {
   subscriptionPartialEffect?: unknown;
   payPerRunEffect?: unknown;
   creditEffect?: unknown;
+  approvedKinds?: unknown;
+  approvedBy?: unknown;
+  approvedAtMs?: unknown;
 }): Omit<RefundPolicy, "updatedAtMs"> {
   const windowDays = Number(input.windowDays);
   if (!Number.isFinite(windowDays) || Math.floor(windowDays) !== windowDays || windowDays < 1 || windowDays > 365) {
@@ -241,6 +289,23 @@ export function assertRefundPolicy(input: {
     subscriptionPartialEffect: input.subscriptionPartialEffect,
     payPerRunEffect: "none",
     creditEffect: "none",
+    approvedKinds: input.approvedKinds === undefined ? [] : assertApprovedKinds(input.approvedKinds),
+    approvedBy:
+      input.approvedBy === undefined || input.approvedBy === null
+        ? null
+        : typeof input.approvedBy === "string" && input.approvedBy.trim()
+          ? input.approvedBy.trim()
+          : (() => {
+              throw new Error("approvedBy must be a non-empty login or null.");
+            })(),
+    approvedAtMs:
+      input.approvedAtMs === undefined || input.approvedAtMs === null
+        ? null
+        : Number.isFinite(Number(input.approvedAtMs)) && Number(input.approvedAtMs) > 0
+          ? Math.floor(Number(input.approvedAtMs))
+          : (() => {
+              throw new Error("approvedAtMs must be a positive epoch-ms timestamp or null.");
+            })(),
   };
 }
 
@@ -261,11 +326,30 @@ export function assertRefundPolicyPatch(
   return assertRefundPolicy(merged as Parameters<typeof assertRefundPolicy>[0]);
 }
 
-/** The refund policy store surface. Null policy = unconfigured store (fail closed). */
+/** The refund policy store surface. Null policy = unconfigured store (fail closed).
+ * setPolicy edits VALUES and always resets approval (approval attaches to exact
+ * values); setKindApproval toggles approval for one kind without changing values.
+ * Approval fields are deliberately absent from POLICY_FIELDS above, so a patch
+ * naming them throws as an unknown field. */
 export interface RefundPolicyStore {
   getPolicy(): Promise<RefundPolicy | null>;
-  /** Partial update, validated; returns the new policy row. Throws when no policy row exists yet. */
+  /** Partial update, validated; returns the new policy row. Throws when no policy row exists yet. Resets approval. */
   setPolicy(patch: Record<string, unknown>): Promise<RefundPolicy>;
+  /** Approve (or withdraw approval for) one kind's current values, audited by the caller. */
+  setKindApproval(kind: RefundKind, approved: boolean, byLogin: string): Promise<RefundPolicy>;
+}
+
+/** Issue #2662: a seeded PROPOSED value is never an approval. Throws the
+ * typed fail-closed refusal the routes map to 422. */
+export function assertKindApproved(policy: RefundPolicy, kind: RefundKind): void {
+  // Pre-#2662 policy objects carry no approval fields; they read as
+  // unapproved (fail closed), never as approved by omission.
+  const approved = policy.approvedKinds ?? [];
+  if (!approved.includes(kind)) {
+    throw new Error(
+      `Refund policy for kind '${kind}' is not owner-approved: an operator must approve this kind's current policy values before refunds of this kind can be requested or executed.`,
+    );
+  }
 }
 
 /** One refund request, from request through decision to execution. */

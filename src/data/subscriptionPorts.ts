@@ -197,6 +197,8 @@ export function nextPeriodStartMs(existingPeriodEndsMs: number[], nowMs: number)
 export interface ProviderBillingPatch {
   providerSubscriptionId?: string | null;
   providerStatus?: string | null;
+  /** Issue #2662: operator plan change on a Billing row. */
+  planId?: string;
   periodStartMs?: number;
   periodEndMs?: number;
   status?: SubscriptionStatus;

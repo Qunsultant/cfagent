@@ -248,6 +248,7 @@ export class D1SubscriptionAdapter implements SubscriptionStore {
     const set: Record<string, unknown> = { updatedAtMs: now };
     if (patch.providerSubscriptionId !== undefined) set.providerSubscriptionId = patch.providerSubscriptionId;
     if (patch.providerStatus !== undefined) set.providerStatus = patch.providerStatus;
+    if (patch.planId !== undefined) set.planId = patch.planId;
     if (patch.periodStartMs !== undefined) set.periodStartMs = patch.periodStartMs;
     if (patch.periodEndMs !== undefined) set.periodEndMs = patch.periodEndMs;
     if (patch.status !== undefined) set.status = patch.status;

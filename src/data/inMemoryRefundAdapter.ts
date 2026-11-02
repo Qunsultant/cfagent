@@ -37,7 +37,36 @@ export class InMemoryRefundPolicyAdapter implements RefundPolicyStore {
   async setPolicy(patch: Record<string, unknown>): Promise<RefundPolicy> {
     if (!this.policy) throw new Error("Refund policy is not configured: run the refund schema ensure first.");
     const validated = assertRefundPolicyPatch(patch, this.policy);
-    this.policy = { ...validated, updatedAtMs: Date.now() };
+    // Issue #2662 (#2547 rule): a value edit resets approval.
+    this.policy = {
+      ...validated,
+      approvedKinds: [],
+      approvedBy: null,
+      approvedAtMs: null,
+      updatedAtMs: Date.now(),
+    };
+    return { ...this.policy };
+  }
+
+  async setKindApproval(kind: RefundPolicy["approvedKinds"][number], approved: boolean, byLogin: string): Promise<RefundPolicy> {
+    if (!this.policy) throw new Error("Refund policy is not configured: run the refund schema ensure first.");
+    if (kind !== "subscription" && kind !== "pay_per_run") {
+      throw new Error(`Invalid refund kind: ${String(kind)} (must be subscription or pay_per_run).`);
+    }
+    if (typeof byLogin !== "string" || !byLogin.trim()) {
+      throw new Error("byLogin is required.");
+    }
+    const kinds = new Set(this.policy.approvedKinds);
+    if (approved) kinds.add(kind);
+    else kinds.delete(kind);
+    const approvedKinds = [...kinds];
+    this.policy = {
+      ...this.policy,
+      approvedKinds,
+      approvedBy: approvedKinds.length > 0 ? byLogin.trim() : null,
+      approvedAtMs: approvedKinds.length > 0 ? Date.now() : null,
+      updatedAtMs: Date.now(),
+    };
     return { ...this.policy };
   }
 }

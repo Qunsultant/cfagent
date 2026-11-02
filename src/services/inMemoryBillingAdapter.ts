@@ -71,6 +71,21 @@ export class InMemoryBillingAdapter implements BillingPort {
     return { ...updated };
   }
 
+  async updateProviderSubscriptionPrice(
+    providerSubscriptionId: string,
+    priceId: string,
+    _prorationBehavior: import("../data/billingPolicyPorts").ProrationBehavior,
+  ): Promise<ProviderSubscription> {
+    const found = await this.retrieveProviderSubscription(providerSubscriptionId);
+    if (found.status === "canceled") {
+      throw new Error(`Provider subscription ${providerSubscriptionId} is canceled and cannot change price.`);
+    }
+    if (!priceId?.trim()) throw new Error("priceId is required.");
+    const updated: ProviderSubscription = { ...found, priceId };
+    this.subs.set(providerSubscriptionId, updated);
+    return { ...updated };
+  }
+
   /** Test-only: force a provider state (e.g. past_due) to drive webhook/transition tests. */
   setProviderState(providerSubscriptionId: string, patch: Partial<ProviderSubscription>): ProviderSubscription {
     const found = this.subs.get(providerSubscriptionId);

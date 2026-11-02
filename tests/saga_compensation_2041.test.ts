@@ -57,6 +57,11 @@ const POLICY: RefundPolicy = {
   payPerRunEffect: "none",
   creditEffect: "none",
   updatedAtMs: 1,
+  // Issue #2662: this fixture is an approved policy, so the saga
+  // routing tests test routing, not the approval gate.
+  approvedKinds: ["pay_per_run"],
+  approvedBy: "op1",
+  approvedAtMs: 1,
 };
 
 function fakeRefundStore() {
@@ -251,6 +256,31 @@ describe("compensateFailedScreen (S3, #2041)", () => {
     const out = await compensateFailedScreen(deps, baseInput({ paidAtMs: NOW + 86_400_000 }));
     expect(out.form).toBe("credit");
     expect(out.fallbackReason).toMatch(/future/i);
+    expect(issueCredit).toHaveBeenCalledTimes(1);
+    expect(store.createRefund).not.toHaveBeenCalled();
+  });
+
+  it("unapproved refund kind falls back to credit (issue #2662)", async () => {
+    const store = fakeRefundStore();
+    const policyStore = fakePolicyStore({
+      ...POLICY,
+      approvedKinds: [],
+      approvedBy: null,
+      approvedAtMs: null,
+    });
+    const issueCredit = vi.fn(async () => undefined);
+    const deps: SagaCompensationDeps = {
+      issueCredit,
+      getRefundPorts: async () => ({
+        store: store as unknown as RefundStore,
+        policy: policyStore as unknown as RefundPolicyStore,
+      }),
+      monetizationEnabled: async () => true,
+      nowMs: () => NOW,
+    };
+    const out = await compensateFailedScreen(deps, baseInput());
+    expect(out.form).toBe("credit");
+    expect(out.fallbackReason).toMatch(/not owner-approved/i);
     expect(issueCredit).toHaveBeenCalledTimes(1);
     expect(store.createRefund).not.toHaveBeenCalled();
   });

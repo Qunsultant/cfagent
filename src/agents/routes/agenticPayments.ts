@@ -161,6 +161,8 @@ import { assertBillingPolicyPartial } from "../../data/billingPolicyPorts";
 import {
   applyBillingWebhookEvent,
   cancelBillingAtPeriodEnd,
+  cancelBillingImmediately,
+  changeBillingPlanPrice,
   isBillingManaged,
   recordBillingSubscription,
   type BillingWebhookEvent,
@@ -2233,17 +2235,32 @@ export async function handleAgenticPaymentsRoutes(
     }
   }
 
-  // POST /payments/agentic/commercial/subscription/cancel — cancel-at-period-end.
-  // Sets every unexpired row canceled; access continues to periodEnd, then stops. No cash refund
-  // (deferred #2024). Self-service, or an operator on a user's behalf (body.userId).
-  // Issue #2656 (Phase 2.1): Billing-aware. A locally-only cancel of a Billing-managed row would
-  // leave Stripe charging while access shows canceled — so Billing rows are provider-canceled
-  // FIRST (cancelBillingAtPeriodEnd, provider + local), and repurchase rows are canceled per-row
-  // after. Any provider failure refuses with 503 and cancels NOTHING (atomicity: a half-canceled
-  // user is worse than an un-canceled one). With no Billing rows, the existing
-  // cancelUnexpiredSubscriptions path runs untouched. Cancel uses the Billing port regardless of
-  // flag state: cancel STOPS money, never starts it, so the monetization flag (which gates
-  // money-starting actions) must never block a user from stopping charges.
+  // POST /payments/agentic/commercial/subscription/cancel — cancel.
+  // Issue #2662 (Phase 2.7): the timing follows the OPERATOR billing
+  // policy's downgradeTiming. period_end (the default) = existing
+  // cancel-at-period-end: access continues to periodEnd, then stops.
+  // immediate = provider DELETE + local truncation: Billing rows via
+  // cancelBillingImmediately, repurchase rows via revokeSubscription
+  // (status canceled AND periodEnd moves to now — plain
+  // cancelSubscription keeps periodEnd, and resolveEffectiveTier
+  // confers Subscribed on periodEndMs alone, so it would NOT stop
+  // access). The policy read is read-only and fail-safe: an
+  // unavailable policy store (or a read throw) falls back to
+  // period_end — access is never truncated without an explicit
+  // operator choice. No cash refund (deferred #2024; refunds go
+  // through the #2204 request → approve → execute routes).
+  // Self-service, or an operator on a user's behalf (body.userId).
+  // Issue #2656 (Phase 2.1): Billing-aware. A locally-only cancel of
+  // a Billing-managed row would leave Stripe charging while access
+  // shows canceled — so Billing rows are provider-canceled FIRST
+  // (provider + local), and repurchase rows are canceled per-row
+  // after. Any provider failure refuses with 503 before the
+  // repurchase rows run (row-by-row provider semantics, same as the
+  // at-period-end path — no stronger atomicity is claimed).
+  // Cancel uses the Billing port regardless of flag state: cancel
+  // STOPS money, never starts it, so the monetization flag (which
+  // gates money-starting actions) must never block a user from
+  // stopping charges.
   if (path.endsWith("/payments/agentic/commercial/subscription/cancel") && request.method === "POST") {
     try {
       const login = commercialLogin();
@@ -2263,11 +2280,32 @@ export async function handleAgenticPaymentsRoutes(
       const unexpired = (await subs.listSubscriptions(targetUser)).filter(
         (s) => s.status === "active" && s.periodEndMs > nowMs,
       );
+      // Issue #2662: read-only policy read; any failure falls back to
+      // period_end (fail-safe toward preserving access).
+      let downgradeTiming: "period_end" | "immediate" = "period_end";
+      try {
+        const policyAdapter = createBillingPolicyAdapter(ctx.env as { AGENT_DB?: unknown });
+        if (policyAdapter) {
+          const billingPolicy = await policyAdapter.getPolicy();
+          if (billingPolicy.downgradeTiming === "immediate") downgradeTiming = "immediate";
+        }
+      } catch {
+        downgradeTiming = "period_end";
+      }
       const billingRows = unexpired.filter((s) => isBillingManaged(s));
       let canceled;
       let billingCanceledIds: string[] = [];
       if (billingRows.length === 0) {
-        canceled = await subs.cancelUnexpiredSubscriptions(targetUser, nowMs);
+        if (downgradeTiming === "immediate") {
+          canceled = [];
+          for (const row of unexpired) {
+            const one = await subs.revokeSubscription(row.id, nowMs);
+            if (one) canceled.push(one);
+          }
+          canceled.sort((a, b) => a.createdAtMs - b.createdAtMs || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+        } else {
+          canceled = await subs.cancelUnexpiredSubscriptions(targetUser, nowMs);
+        }
       } else {
         const billing = createBillingPorts(ctx.env as unknown as BillingEnv, true);
         if (!billing) {
@@ -2276,15 +2314,22 @@ export async function handleAgenticPaymentsRoutes(
         const billingCanceled = [];
         try {
           for (const row of billingRows) {
-            billingCanceled.push(await cancelBillingAtPeriodEnd({ billing, subs, subscriptionId: row.id }));
+            billingCanceled.push(
+              downgradeTiming === "immediate"
+                ? await cancelBillingImmediately({ billing, subs, subscriptionId: row.id })
+                : await cancelBillingAtPeriodEnd({ billing, subs, subscriptionId: row.id }),
+            );
           }
         } catch (err: any) {
-          return Response.json({ error: `Billing cancel failed, no subscriptions canceled: ${err.message || "unknown error"}` }, { status: 503 });
+          return Response.json({ error: `Billing cancel failed, no repurchase subscriptions canceled: ${err.message || "unknown error"}` }, { status: 503 });
         }
         billingCanceledIds = billingCanceled.map((s) => s.id);
         const repurchaseCanceled = [];
         for (const row of unexpired.filter((s) => !isBillingManaged(s))) {
-          const one = await subs.cancelSubscription(row.id, nowMs);
+          const one =
+            downgradeTiming === "immediate"
+              ? await subs.revokeSubscription(row.id, nowMs)
+              : await subs.cancelSubscription(row.id, nowMs);
           if (one) repurchaseCanceled.push(one);
         }
         canceled = [...billingCanceled, ...repurchaseCanceled].sort(
@@ -2295,7 +2340,8 @@ export async function handleAgenticPaymentsRoutes(
       // Issue #2522: cancel-at-period-end changes no periodEndMs,
       // so the effective tier is unchanged — the audit states the
       // tier at cancel time (access continues to periodEnd),
-      // never a claimed change.
+      // never a claimed change. Immediate cancel truncates access,
+      // so the after rows state the truncated tier.
       const cancelAccount = await store.getAccount(targetUser);
       const cancelSubscriptions = await subs.listSubscriptions(targetUser);
       ctx.audit("commercial.subscription.canceled", "payments", {
@@ -2303,11 +2349,105 @@ export async function handleAgenticPaymentsRoutes(
         subscriptionIds: canceled.map((s) => s.id),
         billingCanceledIds,
         accessThroughMs,
+        downgradeTiming,
         effectiveTier: resolveEffectiveTier(cancelAccount, cancelSubscriptions, Date.now()),
       });
-      return Response.json({ userId: targetUser, canceled, accessThroughMs });
+      return Response.json({ userId: targetUser, canceled, accessThroughMs, downgradeTiming });
     } catch (err: any) {
       return Response.json({ error: err.message || "Failed to cancel subscription" }, { status: 500 });
+    }
+  }
+
+  // POST /payments/agentic/commercial/subscription/billing-change-plan —
+  // Issue #2662: operator-only plan change on a Billing-managed row.
+  // This is the FIRST provider subscription update path in the codebase,
+  // and the reason prorationBehavior is no longer decorative policy:
+  // the update sends the OPERATOR billing policy's proration_behavior
+  // (none / create_prorations / always_invoice) to Stripe. FLAG-GATED
+  // (a plan change alters what the provider charges — a money
+  // path, unlike cancel, which stops money and is never flag-blocked).
+  // Operator-only: the operator's explicit invocation IS the HITL;
+  // self-service plan changes go through billing-purchase checkout.
+  // Fail-closed chain (service): row exists, Billing-managed, active,
+  // unexpired; plan exists and is active; price operator-mapped;
+  // provider price differs. Provider failure changes nothing locally
+  // (provider update runs before the local write).
+  if (path.endsWith("/payments/agentic/commercial/subscription/billing-change-plan") && request.method === "POST") {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!isStoreOperator(login)) {
+        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+      }
+      const flagOn = await createFeatureFlagPort(ctx.env).isEnabled("monetization");
+      if (!flagOn) {
+        return Response.json({ error: "monetization flag is OFF; plan changes are disabled." }, { status: 403 });
+      }
+      const body = (await request.json().catch(() => ({}))) as { subscriptionId?: unknown; planId?: unknown };
+      const subscriptionId = typeof body.subscriptionId === "string" ? body.subscriptionId : "";
+      const planId = typeof body.planId === "string" ? body.planId : "";
+      if (!subscriptionId) return Response.json({ error: "subscriptionId is required." }, { status: 400 });
+      if (!planId) return Response.json({ error: "planId is required." }, { status: 400 });
+      const subs = requireSubs();
+      if (subs instanceof Response) return subs;
+      const store = requireStore();
+      if (store instanceof Response) return store;
+      const ensured = await ensureStores(store, subs);
+      if (ensured) return ensured;
+      const billingPolicyAdapter = requireBillingPolicy();
+      if (billingPolicyAdapter instanceof Response) return billingPolicyAdapter;
+      try {
+        await ensureBillingPolicySchema(billingPolicyAdapter.db);
+      } catch (err: any) {
+        return Response.json({ error: `Billing policy store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+      }
+      const billingPolicy = await billingPolicyAdapter.getPolicy();
+      const billing = createBillingPorts(ctx.env as unknown as BillingEnv, true);
+      if (!billing) {
+        return Response.json({ error: "Billing plan change is not configured (Stripe)." }, { status: 503 });
+      }
+      const existingRow = await subs.getSubscription(subscriptionId);
+      if (!existingRow) return Response.json({ error: `No subscription ${subscriptionId}.` }, { status: 404 });
+      const beforeAccount = await store.getAccount(existingRow.userId);
+      const beforeSubscriptions = await subs.listSubscriptions(existingRow.userId);
+      let changed;
+      try {
+        changed = await changeBillingPlanPrice({ billing, subs, policy: billingPolicy, subscriptionId, planId });
+      } catch (err: any) {
+        const message = err.message || "Failed to change plan";
+        const status = /No subscription|No plan/.test(message)
+          ? 404
+          : /already on price/.test(message)
+            ? 409
+            : /not active|repurchase|not active and unexpired/.test(message)
+              ? 400
+              : /no operator-mapped|not configured|Billing policy/.test(message)
+                ? 503
+                : /Stripe Billing request failed/.test(message)
+                  ? 502
+                  : 500;
+        return Response.json({ error: message }, { status });
+      }
+      const afterAccount = await store.getAccount(changed.record.userId);
+      const afterSubscriptions = await subs.listSubscriptions(changed.record.userId);
+      const transition = resolveTierTransition(beforeAccount, beforeSubscriptions, afterAccount, afterSubscriptions, Date.now());
+      ctx.audit("commercial.subscription.plan_changed", "payments", {
+        subscriptionId: changed.record.id,
+        userId: changed.record.userId,
+        fromPlanId: changed.fromPlanId,
+        toPlanId: changed.record.planId,
+        prorationBehavior: changed.prorationBehavior,
+        providerSubscriptionId: changed.record.providerSubscriptionId,
+        previousEffectiveTier: transition.previousEffectiveTier,
+        newEffectiveTier: transition.newEffectiveTier,
+      });
+      return Response.json({
+        subscription: changed.record,
+        fromPlanId: changed.fromPlanId,
+        prorationBehavior: changed.prorationBehavior,
+      });
+    } catch (err: any) {
+      return Response.json({ error: err.message || "Failed to change plan" }, { status: 500 });
     }
   }
 
@@ -2703,9 +2843,14 @@ export async function handleAgenticPaymentsRoutes(
       return Response.json({ refund: record });
     } catch (err: any) {
       const message = err.message || "Failed to request refund";
-      const status = /required|must be|not allowed|exceeds|expired|non-refundable|No subscription|Only the|no stored|determinable|rail is required|resolver/.test(message)
-        ? 400
-        : 500;
+      // Issue #2662: unapproved-kind refusal is a policy-state refusal
+      // (422), distinct from a malformed request (400) or a server
+      // failure (500).
+      const status = /not owner-approved/.test(message)
+        ? 422
+        : /required|must be|not allowed|exceeds|expired|non-refundable|No subscription|Only the|no stored|determinable|rail is required|resolver/.test(message)
+          ? 400
+          : 500;
       return Response.json({ error: message }, { status });
     }
   }
@@ -2873,7 +3018,7 @@ export async function handleAgenticPaymentsRoutes(
           ? 409
           : /Gateway refund failed/.test(message)
             ? 502
-            : /not resolvable|non-refundable|window expired|not allowed|exceeds|not configured|flag is OFF|already received its automatic replacement-run credit|failure-credit lookup/.test(message)
+            : /not resolvable|non-refundable|window expired|not allowed|exceeds|not configured|flag is OFF|already received its automatic replacement-run credit|failure-credit lookup|not owner-approved/.test(message)
               ? 422
               : 500;
       return Response.json({ error: message }, { status });
@@ -2912,8 +3057,12 @@ export async function handleAgenticPaymentsRoutes(
     }
   }
 
-  // Refund policy read: current operator policy plus the PROPOSED
-  // disclosure copy (the UI slice surfaces this copy later).
+  // Refund policy read: current operator policy plus the disclosure copy.
+  // Issue #2662: the response reports the REAL approval state
+  // (approvedKinds/approvedBy/approvedAtMs on the policy row) — never
+  // a hardcoded proposed flag. An unapproved kind's values are
+  // PROPOSED seeds or operator edits awaiting approval, not an
+  // activation.
   if (path.endsWith("/payments/agentic/commercial/refund-policy") && request.method === "GET") {
     try {
       const login = commercialLogin();
@@ -2927,7 +3076,7 @@ export async function handleAgenticPaymentsRoutes(
       }
       const policy = await ports.policy.getPolicy();
       if (!policy) return Response.json({ error: "Refund policy is not configured." }, { status: 503 });
-      return Response.json({ policy, disclosure: REFUND_POLICY_COPY, proposed: true });
+      return Response.json({ policy, disclosure: REFUND_POLICY_COPY });
     } catch {
       return Response.json({ error: "Failed to read refund policy." }, { status: 500 });
     }
@@ -2959,6 +3108,53 @@ export async function handleAgenticPaymentsRoutes(
       }
     } catch {
       return Response.json({ error: "Failed to set refund policy." }, { status: 500 });
+    }
+  }
+
+  // Issue #2662 — operator refund policy APPROVAL, per kind. Approving
+  // a kind's CURRENT values is a separate, audited operator action
+  // from editing values: setPolicy always resets approval, and the
+  // patch validator rejects approval fields, so approval can never
+  // be smuggled in through a value edit and never survives one
+  // silently (#2547 rule). Approving a policy is NOT approving any
+  // individual refund — each refund still needs operator HITL
+  // approve + execute. Not flag-gated (configuration precedes
+  // activation, same rule as the policy routes).
+  if (path.endsWith("/payments/agentic/commercial/refund-policy/approve") && request.method === "POST") {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!isStoreOperator(login)) {
+        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+      }
+      const ports = requireRefunds();
+      if (ports instanceof Response) return ports;
+      try {
+        await ensureRefundSchema(ports.store.db);
+      } catch (err: any) {
+        return Response.json({ error: `Refund store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+      }
+      const body = (await request.json().catch(() => ({}))) as { kind?: unknown; approved?: unknown };
+      if (body.kind !== "subscription" && body.kind !== "pay_per_run") {
+        return Response.json({ error: "kind must be subscription or pay_per_run." }, { status: 400 });
+      }
+      if (typeof body.approved !== "boolean") {
+        return Response.json({ error: "approved must be a boolean." }, { status: 400 });
+      }
+      try {
+        const policy = await ports.policy.setKindApproval(body.kind, body.approved, login);
+        ctx.audit("commercial.refund.policy.approved", "payments", {
+          kind: body.kind,
+          approved: body.approved,
+          approverLogin: login,
+          approvedKinds: policy.approvedKinds,
+        });
+        return Response.json({ policy });
+      } catch (err: any) {
+        return Response.json({ error: err.message || "Failed to set refund policy approval" }, { status: 400 });
+      }
+    } catch {
+      return Response.json({ error: "Failed to set refund policy approval." }, { status: 500 });
     }
   }
 

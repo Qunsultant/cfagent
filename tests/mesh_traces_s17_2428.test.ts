@@ -443,7 +443,7 @@ describe("issue #2428 — registry spine + migration pins", () => {
     }
   });
 
-  it("migration 0023 is registered and creates the hop table (0035 is last since #2659 Phase 2.4, after Phase 5 Slice 2 #2000)", async () => {
+  it("migration 0023 is registered and creates the hop table (0036 is last since #2662 Phase 2.7, after #2659 Phase 2.4)", async () => {
     const {
       ALL_MIGRATIONS,
       MIGRATION_0023_AGENT_MESH_TRACE_HOPS,
@@ -458,6 +458,7 @@ describe("issue #2428 — registry spine + migration pins", () => {
       MIGRATION_0033_DEAD_LETTER_STORE,
       MIGRATION_0034_BREAKER_STATE,
       MIGRATION_0035_DIGEST_PASS,
+      MIGRATION_0036_REFUND_POLICY_APPROVAL,
     } = await import(
       "../src/data/migrationRunner"
     );
@@ -487,7 +488,9 @@ describe("issue #2428 — registry spine + migration pins", () => {
     expect(ALL_MIGRATIONS).toContain(MIGRATION_0034_BREAKER_STATE);
     // #2659 (Phase 2.4) appends migration 0035 (digest pass) after 0034.
     expect(ALL_MIGRATIONS).toContain(MIGRATION_0035_DIGEST_PASS);
-    expect(ALL_MIGRATIONS[ALL_MIGRATIONS.length - 1]).toBe(MIGRATION_0035_DIGEST_PASS);
+    // #2662 (Phase 2.7) appends migration 0036 (refund policy approval) after 0035.
+    expect(ALL_MIGRATIONS).toContain(MIGRATION_0036_REFUND_POLICY_APPROVAL);
+    expect(ALL_MIGRATIONS[ALL_MIGRATIONS.length - 1]).toBe(MIGRATION_0036_REFUND_POLICY_APPROVAL);
     expect(MIGRATION_0023_AGENT_MESH_TRACE_HOPS.version).toBe(23);
     expect(MIGRATION_0023_AGENT_MESH_TRACE_HOPS.sql).toContain("agent_mesh_trace_hops");
     const versions = ALL_MIGRATIONS.map((m) => m.version);

@@ -498,6 +498,51 @@ export class StripePaymentStrategy implements IPaymentGatewayStrategy {
   }
 
   /**
+   * Issue #2662 — provider subscription price update (plan change).
+   * Stripe requires the subscription ITEM id for a price change, which
+   * the parsed ProviderSubscription does not carry, so this method
+   * GETs the subscription first, takes items.data[0].id (fail closed
+   * when absent — an item id is never guessed), then POSTs the update
+   * with items[0][id], items[0][price], and the caller-supplied
+   * proration_behavior (read from operator billing policy by the
+   * caller; this method never defaults it).
+   */
+  async updateProviderSubscriptionPrice(
+    env: Env,
+    providerSubscriptionId: string,
+    priceId: string,
+    prorationBehavior: import("../data/billingPolicyPorts").ProrationBehavior,
+  ): Promise<ProviderSubscription> {
+    if (!providerSubscriptionId?.trim()) throw new Error("A provider subscription id is required.");
+    if (!priceId?.trim()) throw new Error("A provider price id is required.");
+    if (prorationBehavior !== "none" && prorationBehavior !== "create_prorations" && prorationBehavior !== "always_invoice") {
+      throw new Error(`Invalid proration_behavior: ${String(prorationBehavior)}.`);
+    }
+    const current = await this.stripeBillingRequest(
+      env,
+      "GET",
+      `/v1/subscriptions/${encodeURIComponent(providerSubscriptionId)}`,
+    );
+    const items = (current.items as { data?: Array<{ id?: unknown }> } | undefined)?.data;
+    const itemId = Array.isArray(items) && items.length > 0 ? items[0]?.id : undefined;
+    if (typeof itemId !== "string" || !itemId) {
+      throw new Error(`Provider subscription ${providerSubscriptionId} has no subscription item: refusing to guess an item id.`);
+    }
+    const body = new URLSearchParams({
+      "items[0][id]": itemId,
+      "items[0][price]": priceId,
+      proration_behavior: prorationBehavior,
+    });
+    const data = await this.stripeBillingRequest(
+      env,
+      "POST",
+      `/v1/subscriptions/${encodeURIComponent(providerSubscriptionId)}`,
+      body,
+    );
+    return this.parseProviderSubscription(data, providerSubscriptionId);
+  }
+
+  /**
    * Creates a native Stripe PaymentIntent for headless or mobile checkouts
    */
   async createPaymentIntent(
