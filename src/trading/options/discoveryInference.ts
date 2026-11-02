@@ -201,3 +201,41 @@ export function inferThesis(
       : `no setup for ${c.symbol} — no signals fired`,
   );
 }
+
+/**
+ * Volatility framework (issue #1769, parent #1717; screener-rules.md
+ * §1.5). Pure functions — no fetching, no inference state.
+ *
+ * 25-delta skew: Skew25 = IV_put,25Δ − IV_call,25Δ. Positive skew
+ * means puts trade richer than calls at 25 delta (the usual equity
+ * skew); negative means calls richer. Null on non-finite IVs.
+ *
+ * Decision matrix — strict boundaries, stated not silent:
+ *   IVR > 50 AND IV > HV → SELL_PREMIUM (options overpriced; seller edge)
+ *   IVR < 25             → STAND_DOWN   (options cheap; veto short premium)
+ *   otherwise            → NO_READ      (default to technical/strike gates)
+ * IVR = 50, IVR = 25, and IV = HV are all NO_READ: the doc's strict
+ * inequalities are the contract, and a boundary value is not evidence
+ * for either side. Null when any input is non-finite or negative —
+ * a decision matrix over an impossible IV/HV/IVR is not a decision.
+ * IV and HV are decimals (0.25 = 25%); IVR is a 0–100 rank.
+ */
+export type VolDecision = "SELL_PREMIUM" | "STAND_DOWN" | "NO_READ";
+
+export function computeSkew25(putIv25: number, callIv25: number): number | null {
+  if (!Number.isFinite(putIv25) || !Number.isFinite(callIv25)) return null;
+  return putIv25 - callIv25;
+}
+
+export function evaluateVolDecisionMatrix(args: {
+  iv: number;
+  ivr: number;
+  hv: number;
+}): VolDecision | null {
+  const { iv, ivr, hv } = args;
+  if (!Number.isFinite(iv) || !Number.isFinite(ivr) || !Number.isFinite(hv)) return null;
+  if (iv < 0 || hv < 0) return null;
+  if (ivr > 50 && iv > hv) return "SELL_PREMIUM";
+  if (ivr < 25) return "STAND_DOWN";
+  return "NO_READ";
+}
