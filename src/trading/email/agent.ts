@@ -1063,10 +1063,21 @@ export async function handleCloudflareEmailMessage(
   // /api route uses. If the orchestrator path is unavailable this
   // throws (the #781 fail-loud contract) instead of processing the
   // email against an ORM-less local service.
-  // Issue #815 (via ActorGateway, #1779): an unbound SEARCH_AGENT
-  // binding now throws the gateway's named error at the dispatch
-  // below (the #781 fail-loud contract, unchanged) instead of
-  // processing the email against an ORM-less local service.
+  // Issue #815 (fail-loud guard, pinned by
+  // tests/worker_entry_points_orchestrator_wiring.test.ts): the
+  // binding must exist with addressing methods BEFORE the
+  // service-identity check below, so a missing orchestrator path
+  // throws the SEARCH_AGENT error (the #781 fail-loud contract)
+  // instead of processing the email against an ORM-less local
+  // service. This is a capability check only — the addressing and
+  // fetch below ride the ActorGateway (#1779), which is the only
+  // module that invokes idFromName/get for dispatch.
+  const namespace = env.SEARCH_AGENT;
+  if (!namespace || typeof namespace.idFromName !== "function" || typeof namespace.get !== "function") {
+    throw new Error(
+      "Inbound email trading requires the SEARCH_AGENT (orchestrator) binding to reach the user's Durable Object ORM; refusing to process the email without it (issue #815)."
+    );
+  }
   // Issue #1185: the instance constant is the ADDRESS, not an identity.
   // The forward asserts no identity header (Issue #1262 Phase 1: the DO
   // resolves the principal from the payload); the service identity must
