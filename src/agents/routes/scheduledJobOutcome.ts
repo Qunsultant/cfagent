@@ -20,6 +20,8 @@
  * accepted or stored.
  */
 import { resolveActorAttribution } from "../../security/backgroundAttribution";
+import { getServiceUserLogin } from "../../security/serviceIdentity";
+import type { Env } from "../../types";
 import { resolveScheduledJobAlertThreshold } from "../../config/scheduledJobAlert";
 import { postSlackText, resourceSlackPost } from "../resourceGoals";
 import type { SlackDeliveryEnv } from "../social/delivery";
@@ -34,8 +36,6 @@ import {
 } from "../../observability/scheduledJobOutcomes";
 
 export interface ScheduledJobOutcomeRouteContext {
-  /** Configured service login (null = unconfigured, route refuses all). */
-  serviceLogin: string | null;
   /** Audit writer (owner: OrchestratorAgent — funnels to mas_events). */
   audit: (
     type: string,
@@ -93,7 +93,10 @@ export async function handleScheduledJobOutcomeRoute(
   request: Request,
   ctx: ScheduledJobOutcomeRouteContext,
 ): Promise<Response> {
-  const attribution = resolveActorAttribution(request.headers, ctx.serviceLogin);
+  const attribution = resolveActorAttribution(
+    request.headers,
+    getServiceUserLogin(ctx.env as unknown as Env),
+  );
   if (attribution.actorKind !== "background") {
     return Response.json(
       { success: false, error: "Background service dispatch required." },

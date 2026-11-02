@@ -442,7 +442,6 @@ describe("POST /scheduled-job-outcome route (#2037)", () => {
       store,
       alerts,
       ctx: {
-        serviceLogin: "svc-background",
         audit: vi.fn(),
         getOrm: () => ({
           events: {
@@ -457,7 +456,7 @@ describe("POST /scheduled-job-outcome route (#2037)", () => {
             findMany: () => [],
           },
         }),
-        env: {},
+        env: { SERVICE_USER_LOGIN: "svc-background" },
         sendAlert: async (text: string) => {
           alerts.push(text);
         },

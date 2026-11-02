@@ -68,17 +68,15 @@ import { declareStrategyScanObserveTasks, type ScheduledTasksObserveContext } fr
 import { buildOrchestratorSkillSources } from "./orchestrator/skillPacks";
 import { autoRenewETradeTokens, autonomousGoalScreen, autonomousMarketScreen, autonomousStrategyDiscovery, collectIvHistory, expireStaleOrderDraft, sendScheduledReminder, type ScheduledCallbacksContext } from "./orchestrator/scheduledCallbacks";
 import { nlqSchedulingPort, nlqSocialBriefPort, nlqStockScreenPort, type NlqPortsContext } from "./orchestrator/nlqPorts";
-import { formatTraceparent, newTraceContext, parseTraceparent, traceContextFromHeaders } from "../observability/observabilityPorts";
-import { withObservability } from "../observability/aspects";
-import { createObservabilitySink } from "../observability/createObservabilityPorts";
-import { isScheduledJobDispatchPath } from "../observability/scheduledJobOutcomes";
+import { formatTraceparent, newTraceContext, parseTraceparent } from "../observability/observabilityPorts";
+import { observeDoRouteDispatch } from "../observability/scheduledJobOutcomes";
 import { recordTraceHopBestEffort } from "../data/createMeshTracePorts";
 import { createSocialBriefStoreFromNamespace } from "./social/briefStore";
 import { fetchSlackPost } from "./social/delivery";
 import { postSlackText } from "./resourceGoals";
 import type { DoNamespaceLike } from "../security/durableKv";
 import { createKvMembershipStore } from "../security/iaaaMembershipStore";
-import { getServiceUserLogin, isLoginShaped } from "../security/serviceIdentity";
+import { isLoginShaped } from "../security/serviceIdentity";
 import { sessionStore } from "../security/session";
 import { submitAsyncJob, recoverQueuedAsyncJobs, getAsyncJob, listAsyncJobs, executeAsyncJob, ensureAsyncJobTables, scheduleScreenerFollowups, retryAsyncJob, type AsyncJobsContext } from "./orchestrator/asyncJobs";
 import { submitChatTurn, awaitChatTurnSubmission, type DurableTurnContext, type SubmittedTurnHandle } from "./orchestrator/durableTurnSubmission";
@@ -2477,28 +2475,8 @@ export class OrchestratorAgent extends PortThink {
       return this.logChatActivity(request);
     }
 
-    // Issue Qunsultant/cfagent#2037 — the Worker-side dispatch
-    // observer reports dispatch-layer failures back through this
-    // internal route (same mas_events sink, same streak/alert
-    // logic as the in-DO handler audits). Early branch, before
-    // routeRequest: the record must land even when the failure
-    // sits inside the route chain. Gated inside the handler on
-    // background attribution (service login), never on the path.
-    if (path.endsWith("/scheduled-job-outcome") && request.method === "POST") {
-      return handleScheduledJobOutcomeRoute(request, {
-        serviceLogin: getServiceUserLogin(
-          this.env as unknown as Parameters<typeof getServiceUserLogin>[0],
-        ),
-        audit: (type, agent, payload) =>
-          this.audit(
-            type,
-            agent as "orchestrator",
-            payload,
-          ),
-        getOrm: () => this.getOrm(),
-        env: this.env as unknown as Record<string, unknown>,
-      });
-    }
+    if (path.endsWith("/scheduled-job-outcome") && request.method === "POST") // #2037: dispatch-failure records land here (background-gated in handler).
+      return handleScheduledJobOutcomeRoute(request, { audit: (type, agent, payload) => this.audit(type, agent as "orchestrator", payload), getOrm: () => this.getOrm(), env: this.env as unknown as Record<string, unknown> });
 
     // Issue #2457: cross-tenant admin queue actions run synchronously
     // through routeRequest, before the queue decision below. The
@@ -2585,29 +2563,8 @@ export class OrchestratorAgent extends PortThink {
       return this.enqueueHttpRequest(request, url);
     }
 
-    // Issue Qunsultant/cfagent#2037 — the scheduled-job dispatches
-    // ride routeRequest, and the Worker fetch wrapper (#1743) never
-    // sees a DO stub fetch. Wrap ONLY these three paths with the
-    // #1743 interceptor, honoring the incoming tick traceparent:
-    // a throw inside the dispatch chain emits one AE error event
-    // (code, never message) correlated to its tick, then rethrows
-    // unchanged — responses pass through untouched, including the
-    // handler-caught 500s whose outcomes land in mas_events.
-    // Every other route keeps today's unwrapped path (no AE volume
-    // change for general API traffic).
-    if (isScheduledJobDispatchPath(path, request.method)) {
-      return withObservability(
-        {
-          sink: createObservabilitySink(this.env),
-          operation: "do.internal_dispatch",
-          trace: traceContextFromHeaders(request.headers),
-          fields: { path, method: request.method },
-        },
-        () => this.routeRequest(request),
-      );
-    }
-
-    return this.routeRequest(request);
+    // #2037: the three job paths get the DO dispatch wrap; the rest keep today's path.
+    return observeDoRouteDispatch(path, request.method, request.headers, this.env, () => this.routeRequest(request));
   }
 
   // Issue #992: extracted to ./orchestrator/httpEntry.ts (logChatActivity);

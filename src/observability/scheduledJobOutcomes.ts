@@ -37,6 +37,8 @@ import type {
   ObservabilitySink,
   TraceContext,
 } from "./observabilityPorts";
+import { traceContextFromHeaders } from "./observabilityPorts";
+import { createObservabilitySink } from "./createObservabilityPorts";
 
 /** The single outcome sink type in mas_events. */
 export const SCHEDULED_JOB_OUTCOME_TYPE = "scheduled_job.outcome";
@@ -345,6 +347,37 @@ export async function recordScheduledJobOutcome(
     );
     return { recorded: true, streak, alerted: false };
   }
+}
+
+/**
+ * DO-side dispatch observation (issue #2037). The Worker fetch
+ * wrapper (#1743) never sees a DO stub fetch, so the DO wraps its
+ * own dispatch: ONLY the three scheduled-job paths get the
+ * interceptor, honoring the incoming tick traceparent. A throw
+ * inside the chain emits one AE error event (code, never message)
+ * and rethrows unchanged; responses pass through untouched,
+ * including handler-caught 500s whose outcomes land in mas_events.
+ * Every other route keeps today's unwrapped path (no AE volume
+ * change for general API traffic). The sink is built here from
+ * env so callers pass one fewer binding around.
+ */
+export async function observeDoRouteDispatch(
+  path: string,
+  method: string,
+  headers: { get(name: string): string | null },
+  env: { OBSERVABILITY?: unknown },
+  route: () => Promise<Response>,
+): Promise<Response> {
+  if (!isScheduledJobDispatchPath(path, method)) return route();
+  return withObservability(
+    {
+      sink: createObservabilitySink(env),
+      operation: "do.internal_dispatch",
+      trace: traceContextFromHeaders(headers),
+      fields: { path, method },
+    },
+    route,
+  );
 }
 
 export interface DispatchObservationDeps {
