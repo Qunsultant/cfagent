@@ -37,6 +37,10 @@ import {
 import { DynamicMarketScreener } from "../trading";
 import { planStockScreenRun } from "../workflows/stockScreenPlanner";
 import {
+  classifyScreenFailure,
+  logScreenRunEvent,
+} from "../workflows/screenRunAspects";
+import {
   acquireUniverse,
   screenUniverse,
   selectStandouts,
@@ -701,13 +705,62 @@ export class ScreenerAgent extends PortThink {
     const lock = this.screenRunLock().acquire(lockLogin, lockUniverse);
     if (!lock.acquired) {
       const age = lock.startedAt ? Math.round((Date.now() - lock.startedAt) / 1000) : 0;
-      throw new Error(`Screen already running for ${lockUniverse} (started ${age}s ago). Please wait for it to complete.`);
+      const err = new Error(`Screen already running for ${lockUniverse} (started ${age}s ago). Please wait for it to complete.`);
+      // Issue #2868: the lock refusal is a classified, logged
+      // failure (retryable) — the throw itself is unchanged.
+      logScreenRunEvent({
+        event: "screen.failed",
+        trigger: req.trigger,
+        universe: lockUniverse,
+        userLogin: lockLogin,
+        traceId: crypto.randomUUID(),
+        classification: classifyScreenFailure(err),
+        error: err.message,
+      });
+      throw err;
     }
     if (lock.tookOverStale) {
       console.warn(`[ScreenerAgent] Stale lock detected, taking over.`);
     }
+    // Issue #2868: logging + failure-classification aspects,
+    // wired once at this funnel (every sync and workflow-child
+    // path runs through runScreen). Logs only: results and
+    // throws are identical, and the lock still releases in
+    // the finally below, failure or not.
+    const startedMs = Date.now();
+    const traceId = crypto.randomUUID();
+    logScreenRunEvent({
+      event: "screen.started",
+      trigger: req.trigger,
+      universe: lockUniverse,
+      userLogin: lockLogin,
+      traceId,
+    });
     try {
-      return await this.runScreenInner(req, timestamp, cfg);
+      const result = await this.runScreenInner(req, timestamp, cfg);
+      logScreenRunEvent({
+        event: "screen.completed",
+        trigger: req.trigger,
+        universe: lockUniverse,
+        userLogin: lockLogin,
+        traceId,
+        success: result.success,
+        matchedCount: result.matchedCount,
+        durationMs: Date.now() - startedMs,
+      });
+      return result;
+    } catch (err) {
+      logScreenRunEvent({
+        event: "screen.failed",
+        trigger: req.trigger,
+        universe: lockUniverse,
+        userLogin: lockLogin,
+        traceId,
+        classification: classifyScreenFailure(err),
+        error: err instanceof Error ? err.message : String(err),
+        durationMs: Date.now() - startedMs,
+      });
+      throw err;
     } finally {
       // Always release the lock, even on failure.
       this.screenRunLock().release(lockLogin, lockUniverse, lock.token);
