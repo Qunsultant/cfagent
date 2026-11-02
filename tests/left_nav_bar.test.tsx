@@ -62,7 +62,7 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
     expect(titles).toContain("INTELLIGENCE & COPILOT");
     expect(titles).toContain("WORKFLOWS");
     expect(titles).toContain("MARKETING");
-    expect(titles).toContain("BILLING");
+    expect(titles).toContain("BILLINGS/PAYMENTS");
     expect(titles).toContain("PLATFORM");
     expect(titles).toContain("PLANNED");
     expect(titles).toContain("SANDBOX");
@@ -109,11 +109,12 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
     expect(chatIdx).toBe(goalIdx + 1);
   });
 
-  it("positions Workflows & FAQ as the last menu item of Platform", () => {
+  it("positions workflows in the Workflows sub-menu and not top-level in Platform", () => {
     const plat = DEFAULT_LEFT_NAV_CONFIG.sections.find((s) => s.id === "section-platform");
     expect(plat).toBeDefined();
-    const lastItem = plat!.items[plat!.items.length - 1];
-    expect(lastItem.id).toBe("workflows");
+    const itemIds = plat!.items.map((i) => i.id);
+    expect(itemIds).not.toContain("workflows");
+    expect(itemIds).toContain("schedules");
   });
 
   it("configures Stock Screener with only screeners and research sub-menus", () => {
@@ -137,18 +138,24 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
     expect(subIds).not.toContain("schedules");
   });
 
-  it("configures Workflows menu with docs, workflow-runs, reports, review, track-record", () => {
+  it("configures Workflows menu with docs, workflow-runs, workflows, reports, review, track-record", () => {
     const workflowSubItems = SUB_MENU_CONFIGS["workflow-runs"];
     expect(workflowSubItems).toBeDefined();
     const subIds = workflowSubItems.map((s) => s.id);
-    expect(subIds).toEqual(["docs", "workflow-runs", "reports", "review", "track-record"]);
+    expect(subIds).toEqual(["docs", "workflow-runs", "workflows", "reports", "review", "track-record"]);
   });
 
-  it("configures Sandbox menu with payment-assurance and sandbox-checkout", () => {
+  it("configures Sandbox menu with sandbox-checkout, and BILLINGS/PAYMENTS with payment-assurance", () => {
     const sandboxSubItems = SUB_MENU_CONFIGS.sandbox;
     expect(sandboxSubItems).toBeDefined();
     const subIds = sandboxSubItems.map((s) => s.id);
-    expect(subIds).toEqual(["payment-assurance", "sandbox-checkout"]);
+    expect(subIds).toEqual(["sandbox-checkout"]);
+
+    const billingSec = DEFAULT_LEFT_NAV_CONFIG.sections.find((s) => s.id === "section-billing");
+    expect(billingSec).toBeDefined();
+    expect(billingSec!.title).toBe("BILLINGS/PAYMENTS");
+    const itemIds = billingSec!.items.map((i) => i.id);
+    expect(itemIds).toContain("payment-assurance");
   });
 
   it("toggles sub-menu open and closed on menu row click", async () => {
