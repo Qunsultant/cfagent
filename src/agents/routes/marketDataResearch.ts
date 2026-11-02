@@ -47,13 +47,8 @@ import {
   marketDataResearchAuditEvent,
   marketDataBarsAuditEvent,
 } from "../../config/marketDataModes";
-import { shardableUniverses } from "../../trading";
-import {
-  manualWorkflowJobId,
-  tryStartScreenerWorkflow,
-  workflowAcceptedResponse,
-  workflowTenantId,
-} from "../../workflows/screenerWorkflowRoutes";
+import { workflowAcceptedResponse } from "../../workflows/screenerWorkflowRoutes";
+import { startStockScreenWorkflowOrNull } from "../../workflows/screenExecutionBroker";
 import { buildStockScreenRunSpec } from "../../workflows/stockScreenRunSpec";
 import type { ScreenerAgent } from "../screener-agent";
 import type { AgentName, Env } from "../../types";
@@ -327,41 +322,26 @@ export async function handleMarketDataCompareScreenRoutes(
       const userLogin = request.headers.get("x-user-login");
       if (!userLogin) return unauthenticatedResponse();
       const agent = ctx.getScreenerAgent(userLogin);
-      // Issue #1737: async path (store only, no deliver — the
-      // market-data route has no deliver step). Unbound → fall
-      // through to the synchronous path below.
+      // Issue #2827: async path via ScreenExecutionBroker
+      // (store only, no deliver — the market-data route has
+      // no deliver step). Broker null -> fall through to sync.
+      // ND throw propagates (fail-closed).
       if (asyncRequested) {
-        const jobId = manualWorkflowJobId(universe);
-        const shards =
-          universe === "ALL"
-            ? shardableUniverses().map((u) => ({ shardId: u, universe: u }))
-            : [{ shardId: universe, universe }];
-        const handle = await tryStartScreenerWorkflow(ctx.env, {
-          jobId,
-          type: "run-screen",
-          source: "manual",
-          trigger: "manual",
+        const started = await startStockScreenWorkflowOrNull({
+          env: ctx.env,
+          spec,
+          // Market-data previously passed no environment /
+          // portfolioContext keys; broker omits them here.
           userLogin,
-          role: "parent",
-          tenantId: workflowTenantId(ctx.env),
-          shards,
-          // Issue #2809: provider/deliver come from the spec
-          // (yahoo / false for market-data), not second literals.
-          provider: spec.provider,
-          deliver: spec.deliver,
-          filters: spec.filters as unknown as Record<string, unknown>,
-          ...(spec.screenMode
-            ? { screenMode: spec.screenMode, screenIntent: spec.screenIntent }
-            : {}),
         });
-        if (handle) {
+        if (started) {
           ctx.audit("market_data.screener.enqueued", "research", {
-            jobId,
-            workflowId: handle.workflowId,
+            jobId: started.jobId,
+            workflowId: started.handle.workflowId,
             universe,
             provider: "yahoo",
           });
-          return workflowAcceptedResponse(handle);
+          return workflowAcceptedResponse(started.handle);
         }
       }
       if (universe === "ALL") {
