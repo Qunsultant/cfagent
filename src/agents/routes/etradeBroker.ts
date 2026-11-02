@@ -331,6 +331,9 @@ export async function handleEtradeBrokerRoutes(
         asyncRequested,
         source: "etrade",
         modeSelection,
+        // Issue #2908 (G1): the REST spec carries its identity —
+        // trigger + userLogin — instead of the broker arg alone.
+        userLogin,
       });
       if (!specResult.ok) {
         return Response.json({ error: specResult.error }, { status: 400 });
