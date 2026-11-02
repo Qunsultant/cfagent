@@ -12,7 +12,9 @@
  * 4c59daff): no D1 migration, no `GET/POST /api/tenant/settings/providers`
  * route, no client selectors, no broker-gate route, no catalog entry.
  * Provider ids come from the canonical registry vocabulary
- * (`src/trading/dataProviders/contract.ts`) and broker ids from slice 1's
+ * (`src/trading/dataProviders/contract.ts`, imported here only via
+ * the trading index, the sole public surface per the #290 boundary)
+ * and broker ids from slice 1's
  * server module (`src/services/tenantProviders.ts`); the defaults are
  * slice 1's `DEFAULT_TENANT_PROVIDERS` values, pinned equal by test.
  * The outcome codes are resolved through the single outcome catalog
@@ -47,7 +49,7 @@
  * is deliberately out of this slice.
  */
 
-import { DATA_PROVIDER_IDS, type DataProviderCapability } from "../trading/dataProviders/contract";
+import { DATA_PROVIDER_IDS, type DataProviderCapability } from "../trading";
 import { BROKER_IDS, type BrokerId } from "./tenantProviders";
 
 export const DEFAULT_DATA_PROVIDER_ID = "etrade";
