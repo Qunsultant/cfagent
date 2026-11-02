@@ -13,6 +13,7 @@ import { ErrorBoundary } from "./ErrorBoundary";
 import { IvHistoryPanel } from "./IvHistoryPanel";
 import { ReportsPanel } from "./ReportsPanel";
 import { PatternsPanel } from "./PatternsPanel";
+import { PresetsPanel } from "./PresetsPanel";
 import { SchedulesPanel } from "./SchedulesPanel";
 import { ScreeningReviewPanel } from "./ScreeningReviewPanel";
 import { ScreeningOutcomesPanel } from "./ScreeningOutcomesPanel";
@@ -87,7 +88,8 @@ export type ScreenersHubTab =
   | "schedules"
   | "review"
   | "track-record"
-  | "patterns";
+  | "patterns"
+  | "presets";
 
 export const SCREENER_HUB_TABS: readonly ScreenersHubTab[] = [
   "options",
@@ -103,6 +105,7 @@ export const SCREENER_HUB_TABS: readonly ScreenersHubTab[] = [
   "review",
   "track-record",
   "patterns",
+  "presets",
 ] as const;
 
 export function isValidScreenerTab(tab: unknown): tab is ScreenersHubTab {
@@ -245,7 +248,8 @@ export function ScreenersHub({
     hubTab === "schedules" ||
     hubTab === "review" ||
     hubTab === "track-record" ||
-    hubTab === "patterns"
+    hubTab === "patterns" ||
+    hubTab === "presets"
       ? "stocks"
       : hubTab;
   const screenerTabs: CapabilityTabItem[] = useMemo(() => {
@@ -407,6 +411,20 @@ export function ScreenersHub({
           description: "Stock market setup signatures from the setup catalog — read-only, apply one to a new screen.",
         },
       },
+      {
+        // Issue #2886: the presets catalog — My Presets plus
+        // proposed starters (copy-to-mine). Presets stay
+        // separate from patterns; this tab never touches
+        // pattern definitions.
+        id: "presets",
+        label: "Presets",
+        icon: "💾",
+        tooltip: {
+          eyebrow: "PRESET CATALOG",
+          title: "Presets",
+          description: "Your saved screening configurations, plus proposed starter presets to copy to My Presets.",
+        },
+      },
     );
     // Issue #2783: the #2438 exclusion is removed — the Planned tabs
     // return to the primary bar with their PLANNED badges (nothing
@@ -517,6 +535,26 @@ export function ScreenersHub({
                 // there; preset storage is never touched.
                 navigateToTab("stock-hub", "new-screen");
               }}
+            />
+          </ErrorBoundary>
+        </div>
+      )}
+
+      {/* Issue #2886: Presets catalog tab (?tab=screeners&view=presets). */}
+      {visitedTabs.has("presets") && (
+        <div
+          role="tabpanel"
+          id="screener-tabpanel-presets"
+          aria-labelledby="cap-tab-presets"
+          hidden={hubTab !== "presets"}
+          style={hubTab !== "presets" ? { display: "none" } : undefined}
+        >
+          <ErrorBoundary label="Presets panel">
+            <PresetsPanel
+              userLogin={userLogin}
+              currentFilter={{}}
+              onApplyPreset={() => navigateToTab("stock-hub", "new-screen")}
+              onNavigateNewScreen={() => navigateToTab("stock-hub", "new-screen")}
             />
           </ErrorBoundary>
         </div>
