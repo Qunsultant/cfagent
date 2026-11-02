@@ -113,6 +113,43 @@ export const DEFAULT_SCHEDULES: ScheduledGoal[] = [
     enabled: true,
     timeZone: "UTC",
   },
+  {
+    // #1980 index-list refresh goals. Canonical definitions:
+    // fresh deployments seed from here; the running deployment
+    // needs operator dashboard-API adds (the #1819 pattern) —
+    // adding an entry here does not inject it into an already-
+    // running deployment. Both run on the existing */30 tick;
+    // no new scheduler, no new wrangler cron triggers.
+    // Wikipedia weekly (Sunday 04:00 UTC): the four Wikipedia
+    // indices, within the #1852 10-day freshness cap. The
+    // production path is live: D1 store via AGENT_DB + global
+    // fetch over the adapter's own Wikipedia URLs.
+    // Holdings daily (03:00 UTC) ships DISABLED, the
+    // daily-social-post precedent: no ETF holdings-file fetcher
+    // binding exists in code (no holdings URL is established
+    // anywhere in the repo, and none is invented here), so
+    // enabling it would tick-error daily. The operator enables
+    // it via Settings → Scheduled goals once the holdings
+    // fetcher is bound (see docs/architecture/security/
+    // index-list-snapshots-1980.md); forced triggerGoal still
+    // exercises it before then.
+    id: "index-refresh-wikipedia",
+    name: "Index-list refresh (Wikipedia)",
+    cron: "0 4 * * 0",
+    operation: "index.refresh_wikipedia",
+    budgetCents: 1,
+    enabled: true,
+    timeZone: "UTC",
+  },
+  {
+    id: "index-refresh-holdings",
+    name: "Index-list refresh (ETF holdings)",
+    cron: "0 3 * * *",
+    operation: "index.refresh_holdings",
+    budgetCents: 1,
+    enabled: false,
+    timeZone: "UTC",
+  },
 ];
 
 /** Weekday convention: 0 = Sunday … 6 = Saturday (JS Date convention). */

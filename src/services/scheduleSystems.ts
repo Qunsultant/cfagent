@@ -82,6 +82,8 @@ export const SCHEDULED_GOAL_IDS_INVENTORY = [
   "resource-daily-rollup",
   "resource-cap-alert",
   "resource-dashboard-comparison",
+  "index-refresh-wikipedia",
+  "index-refresh-holdings",
 ] as const;
 
 /** Mirrors the crons array in wrangler.jsonc (test-pinned). */

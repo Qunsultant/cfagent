@@ -75,6 +75,10 @@ import {
 import { ensureChainScheduleSchema } from "../data/d1ChainScheduleAdapter";
 import { projectRunLegs } from "../data/createShardJobPorts";
 import { recordAuditEventBestEffort } from "../data/createAuditReportPorts";
+import type {
+  IndexListJobResult,
+  IndexRefreshOperation,
+} from "../services/indexListJob";
 
 /**
  * Resolve a halt read for the firing path, failing closed: any
@@ -201,6 +205,17 @@ export interface ScheduledAgentCronOpts {
    * so a failed run stamps nothing and leaves the goal due.
    */
   chainExecutor?: (step: CompiledChainStep) => Promise<unknown>;
+  /**
+   * #1980: injected index-list refresh executor (tests, or a
+   * caller that already owns a store + fetchers). Absent, the
+   * branch below runs the Wikipedia goal's production path
+   * (D1 store via AGENT_DB + global fetch) and fails the
+   * holdings goal visibly until its fetcher is bound — never
+   * a silent no-op, never an invented holdings URL.
+   */
+  indexRefreshExecutor?: (
+    operation: IndexRefreshOperation,
+  ) => Promise<IndexListJobResult>;
 }
 
 /**
@@ -590,6 +605,90 @@ export class ScheduledAgent extends PortThink {
             // real breakage), goal stays due and retries tomorrow.
             tick.jobsSkipped++;
             continue;
+          }
+          goal.lastRun = now.toISOString();
+          tick.jobsCreated++;
+          continue;
+        }
+
+        if (
+          goal.operation === "index.refresh_wikipedia" ||
+          goal.operation === "index.refresh_holdings"
+        ) {
+          // #1980 index-list refresh goals execute directly
+          // through the refresh job (the social.publish /
+          // resource.* precedent), never through createJob —
+          // createJob mints a pending descriptor and executes
+          // nothing. The catalog entry exists so addGoal accepts
+          // these operations.
+          //
+          // An injected executor wins (tests; a caller that
+          // already owns a store + fetchers). Otherwise the
+          // Wikipedia goal runs its production path: D1 store
+          // via AGENT_DB (the resource-goal binding read) +
+          // global fetch over the #1852 adapter's own Wikipedia
+          // URLs — the fetcher is fetch(url).text(), the URLs
+          // are the adapter's, nothing invented. The holdings
+          // goal has no production fetcher binding in code (no
+          // ETF holdings-file URL is established anywhere in
+          // the repo): it fails visibly and stays due instead
+          // of fetching from an invented URL, and it ships
+          // DISABLED in DEFAULT_SCHEDULES until the binding
+          // lands (see src/schedule.ts). An all-failed job
+          // throws into the loop's catch below: tick error,
+          // goal stays due — the feed job's rule. A partial
+          // job stamps lastRun with its failures named as tick
+          // errors: the run happened, the fed indices are
+          // stored, and the next cadence re-fetches the failed
+          // ones (no retry storm inside one tick).
+          let refreshResult: IndexListJobResult;
+          if (opts?.indexRefreshExecutor) {
+            refreshResult = await opts.indexRefreshExecutor(
+              goal.operation as IndexRefreshOperation,
+            );
+          } else if (goal.operation === "index.refresh_holdings") {
+            tick.errors.push(
+              `${goal.id}: holdings fetcher not bound — no ETF holdings-file fetcher is bound in this deployment, goal left due`,
+            );
+            tick.jobsSkipped++;
+            continue;
+          } else {
+            const db = (env as unknown as { AGENT_DB?: unknown }).AGENT_DB;
+            if (!db) {
+              tick.errors.push(`${goal.id}: AGENT_DB binding unavailable, goal left due`);
+              tick.jobsSkipped++;
+              continue;
+            }
+            const { D1IndexListStore } = await import("../data/d1IndexListAdapter");
+            const {
+              createIndexMembershipService,
+              createWikipediaIndexMembershipAdapter,
+            } = await import("../trading/indexMembership");
+            const { createIndexListRefreshExecutor } = await import("../services/indexListJob");
+            const fetchHtml = async (url: string): Promise<string> => {
+              const res = await fetch(url);
+              if (!res.ok) {
+                throw new Error(`Wikipedia fetch failed for ${url}: HTTP ${res.status}`);
+              }
+              return res.text();
+            };
+            const service = createIndexMembershipService({
+              wikipedia: createWikipediaIndexMembershipAdapter(fetchHtml),
+              holdings: {
+                getMembers: async () => {
+                  throw new Error(
+                    "holdings fetcher not bound — the Wikipedia refresh path never calls it",
+                  );
+                },
+              },
+            });
+            refreshResult = await createIndexListRefreshExecutor({
+              store: new D1IndexListStore(db as never),
+              service,
+            })(goal.operation as IndexRefreshOperation);
+          }
+          for (const f of refreshResult.failures) {
+            tick.errors.push(`${goal.id}: ${f.index}: ${f.error}`);
           }
           goal.lastRun = now.toISOString();
           tick.jobsCreated++;
