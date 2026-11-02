@@ -22,8 +22,6 @@
  *     an in-memory Map (the same fact the S4 fibers cells rest on)
  *     and checkpoint read-back (#2763) covers only runs that carry
  *     a runId.
- *   - web-fetch is "absent" BECAUSE no tool by that name exists in
- *     src/ or in the MCP catalog.
  *   - web-search is "degraded" (since #2731) BECAUSE the
  *     web_search command IS registered in the catalog but its
  *     provider backend is not configured: no BRAVE_SEARCH_API_KEY
@@ -33,6 +31,12 @@
  *     command-carrying family that is not "live" — the
  *     commands-are-live pin below carries the explicit exception,
  *     and the degraded-evidence test pins the facts.
+ *   - web-fetch is "live" (since #2760, tracker #2708 A3) BECAUSE
+ *     the web_fetch tool exists in the MCP catalog, defined by
+ *     src/mcps/openaimp/webFetchCommands.ts over the deterministic
+ *     service in src/services/webFetch.ts. Unlike web-search it
+ *     has no provider or configuration gate — a plain fetch — so
+ *     live is its honest status, pinned below.
  *   - agent-skills is "live" (since #2705) BECAUSE exactly one
  *     agent class — OrchestratorAgent — overrides Think's
  *     getSkills() hook to serve an in-repo code-manifest source,
@@ -139,7 +143,7 @@ const EXPECTED_STATUS: Record<string, MeshToolFamilyStatus> = {
   "screening-research-services": "live",
   "durable-fibers": "degraded",
   "web-search": "degraded",
-  "web-fetch": "absent",
+  "web-fetch": "live",
   "ai-search-platform": "degraded",
   "agent-skills": "live",
 };
@@ -247,17 +251,21 @@ describe("degraded status evidence (#2417)", () => {
 // ---------------------------------------------------------------------------
 
 describe("absent status evidence (#2417)", () => {
-  it("web-fetch: no tool by that name exists in src/ or in the MCP catalog", () => {
-    // #2731 narrowed this pin from web-search + web-fetch to
-    // web-fetch only: web_search now exists (its degraded
-    // evidence is pinned above); web_fetch remains absent
-    // (tracker #2708 item A3, a separate slice).
+  // No absence test remains for the two reference-set families:
+  // web-search left "absent" with #2731 (registered, provider-gated
+  // — its evidence is the degraded pin above) and web-fetch left
+  // "absent" with #2760 (registered and live — its evidence is the
+  // next test). An assertion that either tool does NOT exist would
+  // now be false, so the pin's job is done by the status table.
+
+  it("web-fetch: live since #2760 — the web_fetch tool is in the catalog and its defining modules name it", () => {
     const catalog = new Set(McpToolFactory.getAllTools().map((t) => t.name));
-    expect(catalog.has("web_fetch")).toBe(false);
-    for (const file of SRC_FILES) {
-      const src = readFileSync(file, "utf8");
-      expect(src.includes('"web_fetch"'), file).toBe(false);
-    }
+    expect(catalog.has("web_fetch")).toBe(true);
+    // The family's defining modules exist and carry the tool: the
+    // command names it, the service implements the fetch behind it.
+    expect(read("src/mcps/openaimp/webFetchCommands.ts")).toContain('"web_fetch"');
+    expect(existsSync(resolve(root, "src/services/webFetch.ts"))).toBe(true);
+    expect(read("src/services/webFetch.ts")).toContain("stripHtmlToText");
   });
 
   it("agent-skills: the family records the SDK's three tool names, none of them registered in the MCP catalog (they are turn tools)", () => {

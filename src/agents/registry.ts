@@ -923,11 +923,12 @@ export const MESH_TOOL_FAMILIES: MeshToolFamilyEntry[] = [
   {
     id: "web-fetch",
     name: "Web fetch (reference-set family)",
-    source: "no defining module on main",
-    status: "absent",
-    commands: [],
+    source: "src/services/webFetch.ts + src/mcps/openaimp/webFetchCommands.ts",
+    status: "live",
+    commands: ["web_fetch"],
+    commandSources: [{ file: "src/mcps/openaimp/webFetchCommands.ts", kind: "readonly-name" }],
     notes:
-      "No standalone web_fetch tool exists on current main; BrowserAgent (browser-tools family) is the current fetch surface. Recorded as an inventory gap.",
+      "Named by the #2225 reference-set update as a G11 inventory family; recorded ABSENT by S14 (#2417) — no standalone web_fetch tool existed, and BrowserAgent (browser-tools family) was the only fetch surface. ADOPTED by #2760 (tracker #2708 item A3): `web_fetch` (mcp:read) is a deterministic service command — a plain Worker fetch of one URL whose HTML is extracted by the SAME stripHtmlToText extractor (src/services/browserAgent.ts) that BrowserAgent's own fetch fallback produces its text with, so output is consistent with the browser-tools surface, not a second implementation. Hard limits in code: 30s max timeout, 2 MiB body cap, 20,000-char text cap, truncation always flagged in the result. Failures are named web_fetch_* errors (http status, unsupported content type, invalid/non-http(s) URL, timeout, network) and propagate — content is never fabricated and an unavailable page never becomes a silent empty success. The rendered/JS-heavy surfaces (screenshots, DOM tables, snapshots) remain BrowserAgent's; this family is the lightweight unrendered fetch only. The schema carries no identity field — the acting login rides the tool context into the audit, and anonymous calls fail closed at the /mcp handler like every catalog command.",
   },
   {
     id: "ai-search-platform",

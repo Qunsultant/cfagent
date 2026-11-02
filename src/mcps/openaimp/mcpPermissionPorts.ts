@@ -140,8 +140,12 @@ export interface ToolPermissionPort {
  * fails loudly instead of executing unscoped.
  */
 export const MCP_TOOL_SCOPES: Record<string, McpScope> = {
-  // read (40)
+  // read (42)
   knowledge_search: "mcp:read",
+  // #2760 (tracker #2708 A3): the standalone web fetch — a pure
+  // read of a public page through the webFetch service (no state
+  // changes, no delivery); the web-fetch family's first tool.
+  web_fetch: "mcp:read",
   query_platform_knowledge: "mcp:read",
   // #2731: web_search — read-only; provider-gated at the seam
   // (src/services/webSearch.ts), not by scope.
