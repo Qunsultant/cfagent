@@ -744,7 +744,8 @@ describe("identity pins — round 1 (#2339)", () => {
   });
 
   it("OrchestratorAgent is resolved per login and the service identity helper exists", () => {
-    expect(read("src/server.ts")).toContain("env.SEARCH_AGENT.idFromName(userLogin)");
+    // #1779: per-login resolution now rides the ActorGateway.
+    expect(read("src/server.ts")).toContain("actorGateway.dispatch(env.SEARCH_AGENT, userLogin");
     expect(read("src/security/serviceIdentity.ts")).toContain(
       "export function getServiceUserLogin",
     );
@@ -783,7 +784,8 @@ describe("identity pins — round 1 (#2339)", () => {
 
   it("TickerAgent's shared instance name is the one server.ts addresses", () => {
     expect(agentSource("TickerAgent")).toContain("TICKER_INSTANCE_NAME");
-    expect(read("src/server.ts")).toContain("idFromName(TICKER_INSTANCE_NAME)");
+    // #1779: the shared ticker instance is now addressed via the ActorGateway.
+    expect(read("src/server.ts")).toContain("actorGateway.dispatch(env.TICKER_AGENT, TICKER_INSTANCE_NAME");
   });
 
   it("AiSearchAgent's runner still enforces the report login discipline its identity cell cites", () => {
