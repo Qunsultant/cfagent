@@ -318,11 +318,21 @@ export function isTokenExpiredEt(storedAtIso: string, nowMs: number = Date.now()
   try {
     const storedDate = new Date(storedAtIso);
     if (isNaN(storedDate.getTime())) return true;
+    if (nowMs < storedDate.getTime()) return false;
+    // Issue #2742 DST resilience: If >= 26 hours have elapsed, it has crossed midnight regardless of DST
+    if (nowMs - storedDate.getTime() >= 26 * 3600 * 1000) return true;
 
-    const storedMidnightMs = getMidnightEtUtcMs(storedDate.getTime());
-    const nextMidnightMs = storedMidnightMs + 24 * 3600 * 1000;
+    const fmt = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/New_York",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
 
-    return nowMs >= nextMidnightMs;
+    const storedDay = fmt.format(storedDate);
+    const nowDay = fmt.format(new Date(nowMs));
+
+    return nowDay > storedDay;
   } catch {
     return true;
   }
