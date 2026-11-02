@@ -10,7 +10,10 @@
  * Configuration (env vars):
  * - CFPAY_A2A_TOKEN: use cfpay's agents via A2A (tried first)
  * - SLACK_BOT_TOKEN or SLACK_WEBHOOK_URL: local Slack fallback
- * - SCREENER_EMAIL_TO: enables email publishing (local fallback)
+ * - SCREENER_EMAIL_TO: enables email publishing (local fallback).
+ *   Issue #488: the per-user stored destination (see
+ *   src/services/userEmailDestination.ts) outranks both env vars;
+ *   the run's explicit emailTo outranks the stored destination.
  * - OUTBOUND_WEBHOOK_URL: enables webhook publishing (local only;
  *   cfpay has no outbound webhook dispatch via A2A)
  *
@@ -44,6 +47,10 @@ import {
 } from "../services/cfpayA2A";
 import { deliverScreenerToSlack, deliverScreenerToSlackA2A } from "../services/screenerSlackDelivery";
 import { checkScreenerDeliveryConfig } from "../services/screenerDeliveryConfig";
+import {
+  getStoredEmailDestination,
+  resolveEmailDestination,
+} from "../services/userEmailDestination";
 
 export interface ScreenerPublisherDeps {
   env: Env;
@@ -52,6 +59,26 @@ export interface ScreenerPublisherDeps {
 }
 
 const registeredBuses = new WeakSet<ScreenerEventBus>();
+
+/**
+ * Issue Qunsultant/cfagent#488 — per-user email destination as data.
+ * Resolution for every publisher email send: the run's explicit emailTo,
+ * then the user's stored destination, then the deployment-global env
+ * vars (OPTIONS_EMAIL_TO, SCREENER_EMAIL_TO). A store failure degrades
+ * to the env fallback inside getStoredEmailDestination, never to a
+ * failed delivery.
+ */
+async function resolvePublisherEmailTo(
+  deps: ScreenerPublisherDeps,
+  event: { emailTo?: string }
+): Promise<string | undefined> {
+  const stored = await getStoredEmailDestination(deps.env, deps.userLogin);
+  return resolveEmailDestination({
+    eventEmailTo: event.emailTo,
+    storedEmailTo: stored,
+    env: deps.env as unknown as Record<string, unknown>,
+  });
+}
 
 interface ScreenerPdf {
   bytes: Uint8Array;
@@ -191,7 +218,7 @@ async function deliverPdfToEmail(
   html: string,
   plainText: string
 ): Promise<void> {
-  const emailTo = (deps.env as any).SCREENER_EMAIL_TO;
+  const emailTo = await resolvePublisherEmailTo(deps, event);
   if (!emailTo) return;
   try {
     let base64 = "";
@@ -379,7 +406,7 @@ async function publishCompleted(
   // Issue #1770 (slice B, F-63): when no email transport is
   // configured, skip with the named reason instead of attempting
   // sends that cannot succeed and dropping the failure silently.
-  const emailTo = event.emailTo || (deps.env as any).SCREENER_EMAIL_TO;
+  const emailTo = await resolvePublisherEmailTo(deps, event);
   if (emailTo) {
     const deliveryConfig = checkScreenerDeliveryConfig(deps.env);
     if (!deliveryConfig.emailConfigured) {
@@ -482,7 +509,7 @@ async function publishFailed(
     }
   }
 
-  const emailTo = event.emailTo || (deps.env as any).SCREENER_EMAIL_TO;
+  const emailTo = await resolvePublisherEmailTo(deps, event);
   if (emailTo) {
     attempted = true;
     // Issue #1770 (slice B, F-63): same named skip as the completed
