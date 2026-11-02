@@ -86,7 +86,9 @@ describe("step-4a family census (#2358)", () => {
     // retired to the dedicated settings port's adapter — the
     // class file's count drops 4 -> 3 (the ADR-out legacy
     // ai-chat lift remains).
-    expect(countIn("src/agents/orchestrator.ts")).toBe(3);
+    // #1776 (#1717 Adapter S2) pin update: the legacy ai-chat
+    // lift's SQL moved to SqlLegacyChatStore — 3 -> 0.
+    expect(countIn("src/agents/orchestrator.ts")).toBe(0);
   });
 
   it("the family's statements live in the data layer at exact counts", () => {

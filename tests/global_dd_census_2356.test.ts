@@ -106,7 +106,9 @@ function aboveLayerCounts(pattern: RegExp): Map<string, number> {
 
 /** [file, sites, owner] — every entry retires only in its owner's slice. */
 const STORAGE_ALLOW_LIST: Array<[string, number, string]> = [
-  ["src/agents/orchestrator.ts", 3, "permanent remainder: ADR-out ai-chat lift (3)"],
+  // #1776 (#1717 Adapter S2) retired orchestrator.ts's entry:
+  // the ai-chat lift's 3 sites moved to SqlLegacyChatStore, so
+  // the file no longer appears in the above-layer population.
   ["src/services/learnings.ts", 7, "R-1 gated — NOT step 4c (two-host question open)"],
   ["src/security/sessionStore.ts", 2, "step 5 (SessionStore / kv_store)"],
   ["src/actors/cfAgentsAdapter.ts", 1, "permanent — Agents-SDK shim (ADR-out)"],
@@ -297,8 +299,10 @@ describe("global D-D census: surface 1 — storage-shaped sites above the layer"
     // permanent remainder) → 18; issue #1766 adds the nightly
     // retention legs' 3 (orphan-sweep read, sqlite_master
     // discovery, per-table SELECT * for the R2 snapshot —
-    // same DO-internal class) → 21.
-    expect(total).toBe(21);
+    // same DO-internal class) → 21; issue #1776 (#1717
+    // Adapter S2) retires orchestrator.ts's 3 (ai-chat lift →
+    // SqlLegacyChatStore) → 18.
+    expect(total).toBe(18);
   });
 
   for (const file of STEP4C_SERVICE_FILES) {
