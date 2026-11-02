@@ -6,6 +6,8 @@
  * orchestrator's supervise mode after each wave.
  */
 
+import type { Env } from "../types";
+
 export interface VerificationResult {
   /** Whether the output passes verification */
   pass: boolean;
@@ -64,6 +66,22 @@ export function verifyOutput(output: string, evidence: Evidence[]): Verification
 /**
  * LLM-based verification for high-stakes outputs.
  * Uses the judge model chain via runWithRouting.
+ *
+ * Qunsultant/cfagent#1775 (Adapter S1): the model call routes
+ * through the Workers AI adapter (getWorkersAIModel) and the
+ * gateway port's shared call (executeModelCall) instead of
+ * calling the AI binding directly. The chain, the prompts, and
+ * the fail contract are unchanged: a model failure still throws
+ * past the router (fail-loud, after cheap -> primary -> fallback
+ * on retryable errors); only an unparseable reply fails soft
+ * below. When AI_GATEWAY_ID is unset the adapter path is
+ * byte-identical to the direct path; when set, calls now route
+ * through the gateway per #1741 instead of bypassing it.
+ * This also resolves the #1741 coverage pin's recorded
+ * exemption ("verifier.ts uses env.AI.run ... and is #1717 S1
+ * territory"): the verifier no longer calls the binding, and
+ * no new generateText call site is added — the AI SDK call
+ * lives only in the gateway module, as the pin requires.
  */
 export async function verifyWithLLM(
   env: { AI: any },
@@ -71,24 +89,30 @@ export async function verifyWithLLM(
   criteria: string
 ): Promise<VerificationResult> {
   const { runWithRouting } = await import("./router");
+  const { getWorkersAIModel } = await import("../agents/model");
+  const { executeModelCall } = await import("../gateway/gatewayModelCall");
   const { result } = await runWithRouting("judge", async (model) => {
-    const res = await env.AI.run(model, {
-      messages: [
-        {
-          role: "system",
-          content: "You verify agent outputs. Reply with ONLY JSON: {\"pass\": true|false, \"confidence\": 0-1, \"issues\": [...]}",
-        },
-        {
-          role: "user",
-          content: `Criteria: ${criteria}\n\nOutput to verify:\n${output.slice(0, 4000)}`,
-        },
-      ],
-    });
-    return res;
+    const { text } = await executeModelCall(
+      getWorkersAIModel(env as unknown as Env, model),
+      {
+        model,
+        messages: [
+          {
+            role: "system",
+            content: "You verify agent outputs. Reply with ONLY JSON: {\"pass\": true|false, \"confidence\": 0-1, \"issues\": [...]}",
+          },
+          {
+            role: "user",
+            content: `Criteria: ${criteria}\n\nOutput to verify:\n${output.slice(0, 4000)}`,
+          },
+        ],
+      }
+    );
+    return text;
   });
 
   try {
-    const text = (result as any).response ?? JSON.stringify(result);
+    const text = typeof result === "string" ? result : JSON.stringify(result);
     const parsed = JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] ?? "{}");
     return {
       pass: !!parsed.pass,

@@ -227,6 +227,30 @@ export class ETradeAISearchService {
   constructor(private env?: Env) {}
 
   /**
+   * Qunsultant/cfagent#1775 (Adapter S1): the MAS searchKnowledge
+   * tool's raw `/search` call, owned here so this module is the
+   * single home for AI Search HTTP calls. It returns the upstream
+   * Response untouched — status handling, chunk extraction, the
+   * abort timeout, the TTL cache, and the audit calls all stay
+   * with the MAS caller, verbatim. This is deliberately NOT
+   * searchFinancialDocs: that path posts to the bare endpoint
+   * with ai_search_options, maps chunks, and falls back to the
+   * local corpus — a different contract the MAS tool must not
+   * inherit (it surfaces upstream failure, never stub docs).
+   */
+  async searchRaw(
+    query: string,
+    opts?: { signal?: AbortSignal }
+  ): Promise<Response> {
+    return fetch(`${this.env?.AI_SEARCH_ENDPOINT}/search`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages: [{ role: "user", content: query }] }),
+      ...(opts?.signal ? { signal: opts.signal } : {}),
+    });
+  }
+
+  /**
    * Search financial documentation and SEC filings using AI Search
    */
   async searchFinancialDocs(query: string, limit: number = 5): Promise<AISearchQueryResponse> {

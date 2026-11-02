@@ -7,6 +7,11 @@ import { registerDraftOwner } from "../payments/draftOwners";
 // Issue #278: single-owner TTL cache for AI Search queries + durable
 // scheduled-run reports searchable through this same path.
 import { getAiSearchCache, aiSearchCacheKey } from "../services/aiSearchCache";
+// Qunsultant/cfagent#1775 (Adapter S1): the AI Search HTTP call
+// lives in the aiSearch client — this tool no longer fetches the
+// endpoint directly. Only the fetch moved; URL, body, timeout,
+// status/chunk handling, cache, and audits below are verbatim.
+import { ETradeAISearchService } from "../services/aiSearch";
 import { searchScheduledReports } from "../services/scheduledReports";
 // Issue #1169 (S2, flag-gated): corpus provenance on index chunks.
 import {
@@ -58,10 +63,7 @@ export function createMAS({ env, sessionId, requestId, sql, audit }: MASOptions)
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 10_000);
       try {
-        const response = await fetch(`${env.AI_SEARCH_ENDPOINT}/search`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ messages: [{ role: "user", content: query }] }),
+        const response = await new ETradeAISearchService(env).searchRaw(query, {
           signal: controller.signal,
         });
 
