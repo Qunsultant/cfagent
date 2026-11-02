@@ -36,6 +36,16 @@
   // can never serve the real capture path and captures fall back to
   // the labelled placeholder (mesh survey G11 finding).
   "browser": { "binding": "BROWSER" },
+  // Issue #2889 (follow-up to Adapter S4 #1778, program #1717) —
+  // Email Sending binding for outbound mail: src/services/
+  // cloudflareEmailSender.ts calls env.EMAIL.send; without this
+  // declaration the deployed config can never serve the real send
+  // path and sends fall back to fail-soft false. Wrangler 4 schema:
+  // send_email items carry `name` (the env binding name).
+  // Account-side Email Sending provisioning is the owner step that
+  // unblocked this declaration; no destination restriction is set,
+  // so sends keep the adapter's existing From/recipient behaviour.
+  "send_email": [{ "name": "EMAIL" }],
   // Issue #1739 — queue-backed messaging. The work queue is
   // producer-only in this slice (its consumer arrives with the first
   // job handler); only the delivery subscriber queue has a consumer.
