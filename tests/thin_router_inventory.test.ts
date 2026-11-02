@@ -253,6 +253,11 @@
  * route and before the cancel route — bringing the pinned array
  * to 323 entries; the delegation sequence is unchanged (same
  * handler, same position).
+ * Issue #2739 added one — GET /payments/agentic/commercial/prices
+ * (in handleAgenticPaymentsRoutes, immediately before the POST
+ * prices route, so the two prices entries sit adjacent) — bringing
+ * the pinned array to 336 entries (measured); the delegation sequence is
+ * unchanged (same handler, same position).
  * Issue #2598 added eleven — the live-chain options paths, gated a
  * second time in handleOptionsProviderGateRoutes (immediately before
  * the options delegation, so the gate's entries precede the options
@@ -465,6 +470,7 @@ const EXPECTED_INVENTORY = [
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/subscription/cancel\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/subscription\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/pricing\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/prices\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/prices\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/refunds\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/refunds/approve\")",
