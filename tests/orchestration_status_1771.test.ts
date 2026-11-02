@@ -18,11 +18,12 @@
  *   rationale naming the change-control path self-mutation
  *   would bypass (branch + PR + gate). No code/prompt
  *   mutation path is built in #1771.
- * - Slice-A state: swarm consensus, rebalance proposals, and
- *   the social digest builder are NOT yet enabled here —
- *   slices B/C/D flip exactly those entries, and this test
- *   pins the slice-A values so a premature "enabled" claim
- *   fails here first.
+ * - Slice-B update (pin rule): slice B flipped swarm-consensus
+ *   to enabled, so the slice-A pin below was updated in the
+ *   same PR; rebalance proposals and the social digest builder
+ *   are still NOT yet enabled — slices C/D flip exactly those
+ *   entries, and this test pins the current values so a
+ *   premature "enabled" claim fails here first.
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -67,9 +68,10 @@ describe("orchestration status registry (#1771 slice A)", () => {
     }
   });
 
-  it("slice-A state: swarm, rebalance and social digest are not yet enabled", () => {
+  it("slice-B state: swarm is enabled; rebalance still unenabled, social digest still decided", () => {
     const byId = new Map(ORCHESTRATION_STATUS.map((e) => [e.id, e]));
-    expect(byId.get("swarm-consensus")!.status).toBe("deliberately-unenabled");
+    expect(byId.get("swarm-consensus")!.status).toBe("enabled");
+    expect(byId.get("swarm-consensus")!.blocker).toBeNull();
     expect(byId.get("portfolio-rebalancing")!.status).toBe(
       "deliberately-unenabled",
     );

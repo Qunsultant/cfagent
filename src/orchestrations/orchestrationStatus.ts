@@ -16,7 +16,8 @@
  * - "deliberately-unenabled": NOT built, with a named blocker.
  *   A blocker is a fact (a missing source, a missing owner
  *   decision), never a vague "later". Slices B/C/D of #1771
- *   flip exactly the entries they build, in their own PRs.
+ *   flip exactly the entries they build, in their own PRs
+ *   (slice B flipped swarm-consensus to enabled).
  * - "decided": the issue's deliverable for this row IS a
  *   decision (not an automation), recorded here with its
  *   terms; the builder slice (D for social digest) ships the
@@ -127,12 +128,15 @@ export const ORCHESTRATION_STATUS: OrchestrationStatus[] = [
   {
     id: "swarm-consensus",
     label: "Multi-agent swarm cross-screener consensus",
-    status: "deliberately-unenabled",
-    blocker:
-      "No swarm routing/consensus harness exists on main (the orchestrator's Judge routing serves single chat turns, not cross-screener consensus); slice B builds the pure consensus harness, producing a DRAFT consensus set with dissent, never trades.",
-    evidence: ["src/agents/orchestrator.ts"],
+    status: "enabled",
+    blocker: null,
+    evidence: [
+      "src/orchestrations/swarmConsensus.ts",
+      "tests/swarm_consensus_1771.test.ts",
+    ],
     tradeApprovalBypass: false,
-    nextSlice: "B",
+    note: "Enabled as the consensus harness only: computeSwarmConsensus produces a DRAFT set + named dissent from N named screener outputs. It places no orders and feeds no trade path — a consensus symbol is not a trade proposal.",
+    nextSlice: null,
   },
   {
     id: "volatility-darkpool-monitor",
