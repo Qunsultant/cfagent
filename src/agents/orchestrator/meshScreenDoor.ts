@@ -450,6 +450,9 @@ function buildScreenCommand(
     type: "run-screen",
     source: "mesh-door",
     trigger: "manual",
+    // Issue #2908 (G1): the mesh trigger rides the command
+    // instead of collapsing to "manual" in provenance.
+    specTrigger: "mesh",
     userLogin: req.userLogin,
     role: "parent",
     tenantId,
