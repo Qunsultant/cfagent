@@ -48,6 +48,14 @@ export const DEEP_LINK_OVERRIDES: Record<string, DeepLink> = {
   "options-screener:iv-history": { tab: "screeners", view: "iv-history" },
   "workflow-runs:review": { tab: "screeners", view: "review" },
   "workflow-runs:track-record": { tab: "screeners", view: "track-record" },
+  // Planned menu (issue #2783): subs link to their hub views. The
+  // parent links to its first sub; the parent itself renders as a
+  // toggle-only button in the sidebar, never as a link.
+  planned: { tab: "screeners", view: "forex" },
+  "planned:forex": { tab: "screeners", view: "forex" },
+  "planned:futures": { tab: "screeners", view: "futures" },
+  "planned:commodities": { tab: "screeners", view: "commodities" },
+  "planned:bonds": { tab: "screeners", view: "bonds" },
 };
 
 /** Catalog key for a nav node: bare id for top-level items, parent:id for subs. */

@@ -41,10 +41,12 @@ describe("FeatureFlagPort Conformance Suite (Issue #1815)", () => {
   });
 
   describe("InMemoryFeatureFlagAdapter", () => {
-    it("defaults to closed (false) for all registered flags except payment_assurance (issue #2054)", async () => {
+    it("defaults to closed (false) for all registered flags except payment_assurance (issue #2054) and planned_asset_tabs (issue #2783)", async () => {
       const port: FeatureFlagPort = new InMemoryFeatureFlagAdapter();
       for (const flag of ALL_FEATURE_FLAGS) {
-        expect(await port.isEnabled(flag)).toBe(flag === "payment_assurance");
+        expect(await port.isEnabled(flag)).toBe(
+          flag === "payment_assurance" || flag === "planned_asset_tabs",
+        );
       }
       expect(await port.isEnabled("unknown_feature")).toBe(false);
     });
@@ -131,6 +133,25 @@ describe("FeatureFlagPort Conformance Suite (Issue #1815)", () => {
       expect(await directDisabled.isEnabled("payment_assurance")).toBe(false);
     });
 
+    it("planned_asset_tabs is ON by default, OFF only on explicit disable (issue #2783)", async () => {
+      // Mirrors the #2054 payment_assurance default: no explicit setting
+      // means the Planned menu is visible. Explicit disable still wins.
+      const bare = new EnvFeatureFlagAdapter({});
+      expect(await bare.isEnabled("planned_asset_tabs")).toBe(true);
+      const enabled = new EnvFeatureFlagAdapter({
+        FEATURE_FLAGS: JSON.stringify({ planned_asset_tabs: true }),
+      });
+      expect(await enabled.isEnabled("planned_asset_tabs")).toBe(true);
+      const direct = new EnvFeatureFlagAdapter({ FEATURE_PLANNED_ASSET_TABS: "1" });
+      expect(await direct.isEnabled("planned_asset_tabs")).toBe(true);
+      const bulkDisabled = new EnvFeatureFlagAdapter({
+        FEATURE_FLAGS: JSON.stringify({ planned_asset_tabs: false }),
+      });
+      expect(await bulkDisabled.isEnabled("planned_asset_tabs")).toBe(false);
+      const directDisabled = new EnvFeatureFlagAdapter({ FEATURE_PLANNED_ASSET_TABS: "0" });
+      expect(await directDisabled.isEnabled("planned_asset_tabs")).toBe(false);
+    });
+
     it("defaults goal_workflow OPEN in a bare env, explicit OFF wins (issue #2051)", async () => {
       // #2051 reverses #1997: goal_workflow gates a shipped path, so an
       // unconfigured flag resolves ON; explicit OFF still wins.
@@ -213,6 +234,17 @@ describe("FeatureFlagPort Conformance Suite (Issue #1815)", () => {
       expect(await port.isEnabled("payment_assurance")).toBe(true);
       expect(await port.isEnabled("screener")).toBe(false);
       expect(getBooleanValue).toHaveBeenCalledWith("payment_assurance", true, undefined);
+    });
+
+    it("uses the provider default for planned_asset_tabs (issue #2783)", async () => {
+      // Mirrors the #2054 payment_assurance default: a missing dashboard
+      // flag evaluates ON for the Planned menu.
+      const getBooleanValue = vi.fn().mockImplementation((flag: string, defaultVal: boolean) => Promise.resolve(defaultVal));
+      const binding: FlagshipBindingLike = { getBooleanValue };
+      const port: FeatureFlagPort = new CfFlagshipAdapter(binding);
+      expect(await port.isEnabled("planned_asset_tabs")).toBe(true);
+      expect(await port.isEnabled("screener")).toBe(false);
+      expect(getBooleanValue).toHaveBeenCalledWith("planned_asset_tabs", true, undefined);
     });
 
     it("passes goal_workflow default true to Flagship, other flags false (issue #2051)", async () => {

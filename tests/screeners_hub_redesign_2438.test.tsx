@@ -161,11 +161,11 @@ afterEach(async () => {
 });
 
 describe("ScreenersHub redesign (#2438)", () => {
-  it("leaves the Planned tabs out of the primary bar", async () => {
+  it("shows the Planned tabs in the primary bar (#2783 supersedes the #2438 exclusion)", async () => {
     await renderHub();
     const barButtons = Array.from(container.querySelectorAll("button")).map((b) => b.textContent || "");
     for (const planned of ["Forex", "Futures", "Commodities", "Bonds"]) {
-      expect(barButtons.some((t) => t.includes(planned))).toBe(false);
+      expect(barButtons.some((t) => t.includes(planned))).toBe(true);
     }
     expect(barButtons.some((t) => t.includes("Stocks"))).toBe(true);
   });

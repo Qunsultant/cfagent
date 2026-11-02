@@ -55,8 +55,8 @@ async function renderNavBar(props: Partial<React.ComponentProps<typeof LeftNavBa
 }
 
 describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
-  it("renders the 7 configured sections: Execution, Intelligence, Workflows, Marketing, Billing, Platform, Sandbox", () => {
-    expect(DEFAULT_LEFT_NAV_CONFIG.sections).toHaveLength(7);
+  it("renders the 8 configured sections: Execution, Intelligence, Workflows, Marketing, Billing, Platform, Sandbox, Planned", () => {
+    expect(DEFAULT_LEFT_NAV_CONFIG.sections).toHaveLength(8);
     const titles = DEFAULT_LEFT_NAV_CONFIG.sections.map((s) => s.title);
     expect(titles).toContain("TRADING & EXECUTION");
     expect(titles).toContain("INTELLIGENCE & COPILOT");
@@ -64,6 +64,7 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
     expect(titles).toContain("MARKETING");
     expect(titles).toContain("BILLING");
     expect(titles).toContain("PLATFORM");
+    expect(titles).toContain("PLANNED");
     expect(titles).toContain("SANDBOX");
   });
 
