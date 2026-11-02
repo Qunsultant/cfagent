@@ -1697,6 +1697,8 @@ export class OrchestratorAgent extends PortThink {
     criteria?: unknown;
     patternRef?: unknown;
     presetRef?: unknown;
+    /** Issue #2773: Pareto evaluation (additive). */
+    pareto?: unknown;
   }): Promise<void> {
     return persistScreenerReportCanonical(this.reportDispatchContext(), result);
   }

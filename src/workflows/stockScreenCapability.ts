@@ -177,6 +177,18 @@ export const STOCK_SCREEN_CAPABILITIES: readonly StockScreenCapability[] = [
     status: "canonical",
   },
   {
+    id: "pareto-evaluation",
+    name: "Pareto frontier evaluation",
+    entry: "Post-screening stage (ScreenerAgent.runScreenInner, before persistence)",
+    engine: "paretoFrontierForScreen over allStocks (default: momentumScore + changePercent, both maximize)",
+    provider: "none (pure evaluation over the run's own rows)",
+    persistence: "Run result pareto field (agent run store) + canonical body pareto field (REST runs)",
+    delivery: "none (view only — never a trade, never a promotion, never a re-rank)",
+    canonical: ["paretoFrontier.evaluateParetoFrontier", "paretoFrontier.paretoFrontierForScreen"],
+    status: "canonical",
+    extensionPoint: "stage",
+  },
+  {
     id: "report-generation",
     name: "Report generation (generate/store/serve)",
     entry: "unifiedReportPipeline via ReportAssetAgent (analysis-done consumer)",

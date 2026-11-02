@@ -87,6 +87,8 @@ export interface MarketDataResearchRouteContext {
     criteria?: unknown;
     patternRef?: unknown;
     presetRef?: unknown;
+    /** Issue #2773: Pareto evaluation (additive). */
+    pareto?: unknown;
   }): Promise<void>;
 }
 
