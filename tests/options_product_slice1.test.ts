@@ -16,6 +16,8 @@
  * Deliberately NOT pinned here: hub-internal deep-links (IV history
  * section, strategy panel section) — slice 1 links to the hosting
  * tab and says so on the card; deep-linking is a later slice.
+ * That later slice is issue #2784: the research surfaces below now
+ * carry their own links, and the sub-menu validity rule covers them.
  */
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -34,6 +36,8 @@ import {
   isNavItemOrSubItemActive,
 } from "../src/client/navConfig";
 import { getRoute } from "../src/client/routes";
+import { deepLinkForNavNode } from "../src/client/deepLinks";
+import { OPTIONS_RESEARCH_SURFACE_VALUES } from "../src/client/options/researchSurface";
 import {
   getClientFeatureFlags,
   isOptionsProductEnabled,
@@ -190,6 +194,14 @@ describe("options screener navigation (issue #2596)", () => {
       "scanner",
       "options-flows",
       "iv-history",
+      "discovery",
+      "strategy-panel",
+      "best-trade",
+      "compare",
+      "llm-ideas",
+      "llm-evaluate",
+      "run-records",
+      "nlq",
     ]);
     expect(isNavItemOrSubItemActive(item!, "options-screener")).toBe(true);
     expect(isNavItemOrSubItemActive(item!, "options")).toBe(true);
@@ -203,11 +215,17 @@ describe("options screener navigation (issue #2596)", () => {
     expect(screeners.subItems!.map((s) => s.id)).toContain("research");
   });
 
-  it("every sub-menu entry is a real route or a view-driven hub entry (#2685)", () => {
+  it("every sub-menu entry is a real route, a view-driven hub entry, or a research surface (#2685, #2784, #2801)", () => {
     const item = findNavItemConfig(DEFAULT_LEFT_NAV_CONFIG, "options-screener")!;
     for (const sub of item.subItems!) {
-      // Real tabs resolve in the route table; view-driven entries link to their host route
-      if (sub.id === "iv-history") {
+      // Real tabs resolve in the route table; view-driven entries link to their host route;
+      // research surfaces link to the options host with their research param.
+      // (#2801: run-records names the schedules surface, so the param — not the
+      // sub id — is what must be a valid research value.)
+      const link = deepLinkForNavNode("options-screener", sub.id);
+      if ("params" in link && link.params?.research) {
+        expect(OPTIONS_RESEARCH_SURFACE_VALUES as readonly string[]).toContain(link.params.research);
+      } else if (sub.id === "iv-history") {
         expect(sub.href || sub.id).toBeTruthy();
       } else {
         expect(getRoute(sub.id)).toBeDefined();

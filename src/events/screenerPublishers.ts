@@ -32,7 +32,8 @@ import {
 } from "../services/screenerReportUrl";
 import { requireGatewayPorts } from "../gateway/createGatewayPorts";
 import { chainModels } from "../models/router";
-import type { ScreenerAgent } from "../agents/screener-agent";
+import { actorGateway } from "../services/cloudflareActorGateway";
+import type { ScreenerPdfStub } from "../services/actorGatewayPorts";
 import type { Env } from "../types";
 import type { DatabaseORM } from "../orm";
 import {
@@ -86,7 +87,9 @@ export async function fetchScreenerPdf(
     // configured service identity — the only login that maps to it.
     const serviceUserLogin = getServiceUserLogin(deps.env);
     const agentName = serviceUserLogin && deps.userLogin === serviceUserLogin ? "default" : `screener:${deps.userLogin}`;
-    const agent = ns.get(ns.idFromName(agentName)) as unknown as ScreenerAgent;
+    // #1779: PDF RPC rides the ActorGateway; the missing-binding
+    // null return above is unchanged.
+    const agent = actorGateway.stub<ScreenerPdfStub>(ns, agentName);
     return await agent.getPdfByKey(pdfKey);
   } catch (err) {
     console.warn("[ScreenerPublishers] fetchScreenerPdf failed:", err instanceof Error ? err.message : String(err));

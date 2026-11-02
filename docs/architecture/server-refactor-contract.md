@@ -1,0 +1,421 @@
+# server.ts refactor by domain — Slice 1 contract (inventory only, no code move)
+
+Issue: Qunsultant/cfagent#2902. Agent: #clo-arsi.
+Separate cross-lane issue. NOT a sub-issue of Qunsultant/cfagent#2764.
+Do not attach it to #2764, and do not change other lanes' domain logic
+unilaterally; coordinate shared-file moves with the affected lanes
+(options Qunsultant/cfagent#2621, trading, IAAA, payments) before moving
+their routes, and do not merge a domain slice over a conflicting lane PR.
+
+## 1. Baseline (verified, not assumed)
+
+- File: `src/server.ts` on `origin/main`.
+- Baseline commit at inventory time: `136e2293be24013f15cab091cee4325200d98f51`, rebased onto `cbf683585984d19eb2961d91fb8525c45ac2f32e` before submission.
+- Size: **5,343 lines, 254,107 bytes** at `136e2293`; **5,308 lines, 252,882 bytes** at `cbf68358` (main advanced during Slice 1 with an ActorGateway dispatch refactor only — see note below).
+- Shape, by line range on that baseline:
+  - Imports and agent/DO exports: lines 1–360. Twenty re-exports
+    (OrchestratorAgent, TickerAgent, OptionsScannerMCP, BrowserAgent,
+    SlackAgent, AiSearchAgent, SandboxAgent, PaymentsAgent,
+    ScheduledAgent, ScreenerAgent, ResearchAgent, TradingAgent,
+    TradingTradeWorkflow, ScreenerScreenWorkflow, PaymentWorkflow,
+    CrossDomainSagaWorkflow, ReportAssetAgent, SessionStore, plus
+    `PREMIUM_GATEWAY_INSTANCE`).
+  - Shared helpers: `isAllowedOrigin` (363), `handleNlqWebhookRequest`
+    (407, Messaging — moves with Slice 7, not Core),
+    `ensureBreakerDurability` (548), `handleFetch` (571–4761),
+    `dispatchOptionsAnalysisQueueWork` (4762), default export
+    (fetch / email / scheduled / queue, ~4827–5343),
+    `requireAuth` (5259) and `authenticateRequest` (5269).
+  - `handleFetch` prelude, in order: `ensureBreakerDurability`,
+    static-asset serve, ingress throttle, public-REST burst cap for
+    `/api/*`, then the domain branches in §3, then the `/api/*`
+    fallthrough to the Orchestrator (SEARCH_AGENT) at 4462, then
+    `/checkout/sandbox`, then `/` / `/index.html`, then static-asset
+    fallback. **Branch order is part of the contract**: a later
+    branch must never shadow an earlier one after a move, and the
+    `/api/*` fallthrough must stay after every explicit `/api/*`
+    branch, exactly as today.
+- Two routers must not be confused:
+  - `src/server.ts` (`handleFetch`, Worker entry) — this refactor.
+  - `OrchestratorAgent.routeRequest` in `src/agents/orchestrator/*`
+    — already a thin dispatcher, already pinned by
+    `tests/thin_router_inventory.test.ts` (24 delegations, 200+
+    route conditions, in `src/agents/routes/*.ts`). The `/api/*`
+    fallthrough in `server.ts` forwards to that router; this
+    refactor does **not** move, rename, or re-pin agent routes.
+    Agent routes are therefore excluded from the §3 count below,
+    except where a server.ts branch duplicates an agent route
+    spelling (noted as alias where seen).
+
+## 2. Thin-dispatcher contract (what "done" means)
+
+After all slices, `src/server.ts` contains ONLY:
+
+1. The default export: `fetch` (observability + error boundary
+   around the dispatcher), `email`, `scheduled`, `queue` — each a
+   one-line delegation to its domain consumer, plus
+   `ensureBreakerDurability` where it is today (entry prelude).
+2. The ordered router table: a sequence of
+   `if (response) return response;` delegations to domain handlers,
+   in the §3 order, with the `/api/*` Orchestrator fallthrough
+   after all explicit `/api/*` domain branches, and the
+   `/` / `/index.html` + static-asset fallback last.
+3. No domain business logic, no inline route body, no
+   per-domain import sprawl: domain modules import what they need;
+   `server.ts` imports only the domain handlers and the shared
+   auth/origin helpers it still needs for the prelude.
+4. Agent/DO exports moved to a dedicated exports module
+   (Cleanup slice), re-exported from `server.ts` only if wrangler
+   binding requires the entrypoint export — if a binding does
+   require it, that re-export is documented per class, not
+   blanket-copied.
+5. Shared helpers live once, not per domain:
+   - `requireAuth` / `authenticateRequest` → shared auth helper
+     module (Slice 2 Core), imported by every domain module that
+     needs session auth. Never duplicated per domain.
+   - `isAllowedOrigin` → same shared module (Core).
+   - `ensureBreakerDurability` → Core prelude.
+   - `handleNlqWebhookRequest` → Messaging slice (its only caller
+     is the NLQ webhook branches).
+
+### Proposed size pin (for review, not final until Slice 2 proves it)
+
+- `src/server.ts`: **< 800 lines** (proposal, see evidence below).
+  This number is taken from Qunsultant/cfagent#2902 as a starting
+  proposal, not asserted as proven. Evidence for plausibility:
+  a dispatcher needs roughly the default export (~30 lines),
+  the fetch prelude (static + throttle + burst cap, ~60 lines),
+  the router table (one delegation per §3 domain block, ~80
+  lines), and the shared-helper imports — well under 800, with
+  headroom for comments. It is ~15% of the current 5,343 lines.
+- **Final number is approved in Slice 2**, when Core is actually
+  extracted: if the real Core exceeds 800, Slice 2 must either
+  split the router table into a named router module (and say so
+  explicitly, with its own pin) or justify a revised number —
+  it must not game the pin by moving dispatcher logic into an
+  unpinned file. The pin is on `server.ts` itself; domain files
+  are not size-pinned (the IAAA block alone is ~900 lines today),
+  because pinning them would force artificial splits.
+- Pin implementation (Slice 9 Cleanup, not Slice 1): a test that
+  reads `src/server.ts` line count and fails above the approved
+  number, plus the existing `thin_router_inventory` pin staying
+  green (that pin covers the Orchestrator router, not this file,
+  and must not be weakened to pass this refactor).
+
+## 3. Route inventory (inline branches in handleFetch, baseline above)
+
+Reading rule: a row is one top-level `path` branch in `handleFetch`.
+Combined blocks (one `if` covering several paths, e.g. the IAAA
+membership block, the telemetry block) are one row with all paths
+listed — splitting them in a later slice must not change which
+paths they cover, in which order, or their shared auth. Methods
+are shown where the branch gates on them; otherwise the branch
+handles the methods it handles today (see the code at the line
+range, do not infer a method list from this table alone).
+Auth column: `session` = `requireAuth` (401/403 as today);
+`session-or-apikey` = session, else Bearer API key;
+`public` = no session required in this branch;
+`webhook` = signature / origin / service-identity check as today;
+`inherited` = auth is applied by a shared outer block or by the
+delegated handler, and the slice that moves it must pin it
+exactly — this table does not guess it.
+
+### Slice 2 — Core dispatcher (stays in / moves to core, not a domain)
+
+| Lines | Path(s) | Method | Auth |
+|---|---|---|---|
+| 606 | `/api/*` (public-REST burst cap, prelude only) | any | prelude |
+| 617 | `/.well-known/oauth-client-id-metadata-document` | GET | public |
+| 630 | `/a2a/*`, `/.well-known/*` → `handleA2A` | any | delegated |
+| 636 | `/api/features` | GET | session-or-null (session optional) |
+| 1290 | `/health`, `/api/health` | any | bearer/service (see code) |
+| 4445 | `/openapi.json`, `/api/docs` | GET | session (401 otherwise) |
+| 4462 | `/api/*` fallthrough → SEARCH_AGENT / Orchestrator | any | session, then delegated |
+| 4548 | `/checkout/sandbox` | GET | public (KEEP PUBLIC, #2052) |
+| 4620 | `/`, `/index.html` → landing / static fallback | GET | public |
+| — | static-asset serve (prelude + fallback) | any | public |
+| — | `fetch` / `email` / `scheduled` / `queue` entry wrappers | — | service-identity (scheduled/queue, #1185/#2331) |
+
+### Slice 3 — Auth & IAAA
+
+| Lines | Path(s) | Method | Auth |
+|---|---|---|---|
+| 900 | `/login` | GET | public (redirects to provider) |
+| 953 | `/auth/logout` | any | session cookie cleared |
+| 972 | `/auth/etrade/start`, `/api/etrade/oauth/start` | any | session |
+| 1010 | `/auth/etrade/callback` | any | session |
+| 1025 | `/api/etrade/oauth/status` | any | session |
+| 1035 | `/api/etrade/diagnostics` | any | session |
+| 1088 | `/api/etrade/oauth/verifier` | POST | session |
+| 1122 | `/api/etrade/oauth/renew` | POST | session |
+| 1160 | `/api/etrade/oauth/revoke` | POST | session |
+| 1176 | `/auth/public/start` | any | session |
+| 1213 | `/auth/public/callback` | any | session |
+| 1239 | `/api/public/status` | any | session |
+| 1245 | `/api/public/connect` | POST | session |
+| 1282 | `/api/public/disconnect` | POST | session |
+| 1798 | `/api/me` | any | session |
+| 1856 | `/api/iaaa/overview` | GET | session |
+| 1905 | `/api/governance/seed-halt` | any | session (wired-session pattern) |
+| 2654–2780 | `/api/iaaa/access-request`, `/api/iaaa/access-requests`, `/api/iaaa/access-request/decision` (one combined block, sub-branches by path/method) | GET/POST as today | session + wired-session / role checks |
+| 2781–3529 | `/api/iaaa/memberships`, `/api/iaaa/membership/grant`, `/api/iaaa/membership/revoke`, `/api/iaaa/membership/edit`, `/api/iaaa/permission/deny`, `/api/iaaa/permission/clear`, `/api/iaaa/deactivate`, `/api/iaaa/offboard` (one combined lifecycle block, sub-branches by path/method) | GET/POST as today | session + wired-session / role checks |
+| 3530 | `/api/api-keys` | GET/POST | session |
+| 3563 | `/api/api-keys/*` | DELETE (and as today) | session + bearer |
+
+### Slice 4 — Privacy & compliance
+
+| Lines | Path(s) | Method | Auth |
+|---|---|---|---|
+| 666–811 | `/api/privacy/status`, `/api/privacy/preferences`, `/api/privacy/export`, `/api/privacy/erasure` (one combined block, sub-branches by path) | as today | session, caller-own subject only |
+| 1948 | `/api/chains/status` | any | session |
+| 1987 | `/api/chains/reconcile` | any | session |
+| 2032 | `/api/jobs/history` | any | session |
+| 2075 | `/api/traces` | any | session |
+| 2095 | `/api/agents/registry` | any | session |
+| 2111 | `/api/products/catalog` | any | session |
+| 2132 | `/api/jobs/reconcile` | any | session |
+| 2193 | `/api/retention/purge` | any | session |
+| 2461 | `/api/audit/history` | any | session |
+| 2500 | `/api/reports/list` | any | session |
+| 2541 | `/api/reports/seed-canonical` | any | session |
+
+### Slice 5 — Trading & market
+
+| Lines | Path(s) | Method | Auth |
+|---|---|---|---|
+| 1466–1510 | `/api/schedule/*` (goals, operations, ticks) | GET/POST as today | session |
+| — | `/api/payments/webhook`, `/payments/webhook` — moves with Platform & commerce (Slice 7), not Trading; listed there only | any | webhook |
+| 3780 | `/api/trading/email/inbound` | POST | session (see code; email service) |
+| 3802 | `/api/trading/email/approve` | GET | inherited (approval link) |
+| 3840 | `/api/trading/slack/test` | POST | session |
+| 3857 | `/api/trading/slack/link` | POST | session |
+| 3891 | `/api/trading/voice/greeting`, `/api/trading/voice/turn` (voice/turn block) | GET/POST as today | session |
+| 3922 | `/api/schedules` (forward to SEARCH_AGENT schedules) | any | session |
+| 4030 | `/api/market/quotes/source`, `/api/market/quotes`, `/api/market-data/quotes`, `/api/foss/quotes` (quote-source block) | GET/POST | session |
+| 4291 | `/trade/approve` | any | session |
+| 4319 | `/clear`, `/reset`, `/api/clear`, `/api/reset` | any | session |
+| 4341 | `/api/options/flows/*` (forward) | any | session |
+
+### Slice 6 — Messaging & social
+
+| Lines | Path(s) | Method | Auth |
+|---|---|---|---|
+| 812 | `/api/saga/journey-gates`, `/api/saga/journey-decision` | any | session |
+| 830 | `/api/saga/start`, `/api/saga/<id>/status` | any | session + origin check |
+| 866 | `/nlq/webhook`, `/api/trading/nlq/webhook`, `/api/nlq/webhook` → `handleNlqWebhookRequest` (one handler, three spellings, byte-identical) | POST | webhook (HMAC, throttle, replay nonce) |
+| 1321 | `/api/qa/investigate` | POST | session + bearer |
+| 1361 | `/api/memory/search` | POST | session |
+| 1545 | `/api/social/brief` | GET/POST | session |
+| 1611 | `/api/social/approval`, `/api/social/approvals` | GET/POST as today | session |
+| 1734 | `/api/social/posts` | GET | session |
+| 1779 | `/api/social/token-health` | GET | session |
+| 4098 | `/slack/commands`, `/slack/slash` | POST | webhook (Slack signature, in delegated handler) |
+| 4118 | `/slack`, `/slack/events` | POST | webhook |
+| 4149 | `/slack/interactions` | POST | webhook |
+| 4249 | `/slack/install` | any | inherited |
+| 4259 | `/slack/oauth_callback` | any | inherited |
+
+### Slice 7 — Platform & commerce
+
+| Lines | Path(s) | Method | Auth |
+|---|---|---|---|
+| 3586 | `/mcp`, `/api/mcp` | GET/POST/OPTIONS | session-or-apikey |
+| 3627 | `/mcp/scanner`, `/mcp/scanner/*` | GET/POST/OPTIONS | inherited (scanner DO, see code) |
+| 3678–3739 | `/api/premium/*`, `/api/payments/agentic/*`, `/payments/agentic/commercial/*` (OPTIONS preflight, then premium/agentic dispatch) | any | session |
+| 3764 | `/api/payments/webhook`, `/payments/webhook` | any | webhook |
+| 2286–2460 | `/api/telemetry/summary`, `/api/telemetry/decisions`, `/api/telemetry/decisions/<id>/(decide\|apply\|supersede\|expire)`, `/api/telemetry/reconcile` (one combined block) | as today | session |
+| 2596 | `/api/retrieval/populate-market-graph` | any | session |
+| 4046–4085 | `/api/browser/snapshot`, `/browser/snapshot`, `/api/browser/snap/transaction`, `/api/browser/transaction-snap`, `/trading/browser/transaction-snap` (browser snapshot block) | as today | session |
+
+Note on Slice 7 vs Slice 5: the browser snapshot block is placed
+in Platform here because it is a browser-agent platform surface,
+not a trading order surface; if the Slice 5/7 owner disagrees,
+the block moves as a whole with its line range and this table is
+updated in the same PR — it must not be split across slices.
+
+### Slice 8 — Queue / scheduled extraction
+
+Not HTTP routes. Handlers in the default export and helpers:
+
+- `email` → `handleCloudflareEmailMessage` (already delegated;
+  stays as a one-line delegation, no move of the email service).
+- `scheduled` (4838–4990): `*/30 * * * *` tick →
+  ScheduledAgent `onCron`, plus unconditional dispatches that
+  fire/no-fire inside the target route: research scheduled tick,
+  reflection run, adaptation weights run, knowledge corpus sync,
+  digest pass (#2659), retention, token renewal (03:00 UTC
+  pass, identity-free enumeration). Service identity:
+  `SERVICE_USER_LOGIN` + platform-tier provisioning gate
+  (#1185, #2331) — fail closed, never a fabricated identity.
+- `queue` (4991–5343): `screener-events-delivery`
+  (screener.completed / screener.failed, per-subscriber dedup),
+  `screener-events` (CloudEvents envelopes + legacy
+  `options_analysis` taskType wrapper, deprecated, no new
+  producers), and the options_analysis fallthrough, via
+  `dispatchOptionsAnalysisQueueWork` (4762).
+- Slice 8 moves each queue/scheduled consumer to its domain
+  consumer module (screener-events → Messaging/Trading as
+  appropriate, options_analysis → Trading), keeping the
+  default-export wrappers one line each. Queue/scheduled
+  behaviour (ack, DLQ, dedup, denied-message logging) must not
+  change as a side effect.
+
+### Baseline drift note (added at rebase)
+
+Between the inventory scan (`136e2293`) and submission
+(`cbf68358`), `server.ts` changed only by the ActorGateway
+dispatch refactor (direct `SEARCH_AGENT.get(id).fetch` calls
+replaced by `actorGateway.dispatch`/`actorGateway.stub`).
+No `path` branch was added, removed, or renamed in that
+diff, and no route method/auth changed. §3 line ranges below
+are from the `136e2293` scan; they shift by up to ~35 lines
+later in the file at `cbf68358`. Slice 2 must re-baseline
+the exact ranges at move time and correct this table in the
+same PR if any range is off — the path/method/auth list,
+not the line numbers, is the contract.
+
+### Count and reconciliation rule
+
+- Inline top-level `path` branches counted in §3: **~84
+  branch starts** (including combined blocks counted once),
+  covering **138 unique path literals** found by a literal scan
+  of `server.ts` (168 occurrences, including redirects and
+  internal forward targets such as `https://agent.internal/*`,
+  which are not routes and are excluded from the route count).
+- The exact reconciliation is **not** this approximate count:
+  Slice 2 must land a route pin (see §5) whose list is generated
+  from the moved modules in order and must match the §3 list
+  1:1, path by path, method by method. Any path that appears in
+  the pin but not in §3, or vice versa, blocks that slice's PR
+  until the table is corrected in the same PR with an issue
+  reference for the route's origin.
+- Delegated routes (the `/api/*` fallthrough to the Orchestrator,
+  plus agent DO routes) are pinned separately by
+  `thin_router_inventory` and are **not** double-counted here.
+
+## 4. Target module layout (decision + why)
+
+**Chosen: `src/server/routes/<domain>.ts`** — one file per domain
+slice, e.g.:
+
+- `src/server/routes/core.ts` (prelude helpers + router table
+  helpers, if Core is split from `server.ts` itself)
+- `src/server/routes/auth.ts`
+- `src/server/routes/privacy.ts`
+- `src/server/routes/trading.ts`
+- `src/server/routes/messaging.ts`
+- `src/server/routes/platform.ts`
+- `src/server/routes/queue.ts` (queue/scheduled consumers)
+- `src/server/auth.ts` (shared `requireAuth`,
+  `authenticateRequest`, `isAllowedOrigin`)
+- `src/server/exports.ts` (agent/DO exports, Cleanup)
+
+**Why this layout, and why not the alternatives:**
+
+- It matches the existing delegation precedent:
+  `src/agents/routes/<handler>.ts` modules each export a
+  `handleXRoutes(...)` that returns `Response | null`, and
+  `OrchestratorAgent.routeRequest` calls them in order with
+  `if (response) return response;`. Server domain modules use
+  the same signature and the same ordered-delegation contract,
+  so reviewers already know the pattern and the thin-router
+  rule transfers directly.
+- It matches the `src/data/*Route.ts` precedent (one route
+  family per file, handler imported by the dispatcher) without
+  colliding with it: `src/data/*Route.ts` files are
+  single-route handlers for data ports; `src/server/routes/*`
+  files are entry-level domain routers.
+- **Not** `src/server/domains/<domain>.ts`: there is no
+  `domains/` precedent in the repo, and it would read as a new
+  domain-layer concept rather than what these files are —
+  thin entry routers that delegate to existing handlers/ports.
+- **Not** reusing `src/agents/routes/` for entry routes: agent
+  routes are Durable Object routes (Orchestrator), with a
+  different `env`/`ctx` shape and a different pin
+  (`thin_router_inventory`). Mixing Worker-entry routes into
+  that directory would break that pin's attribution and confuse
+  which router owns which route.
+- Each domain module imports only its own handlers/ports plus
+  the shared `src/server/auth.ts`. No domain module imports
+  another domain module. Circular imports are a hard failure
+  for that slice's PR.
+
+## 5. 1:1 route pin plan (implemented in Slice 2, specified here)
+
+New test: `tests/server_route_inventory_2902.test.ts`
+(implementation in Slice 2, not Slice 1 — Slice 1 is docs only).
+
+The pin must assert, in order:
+
+1. **Static inventory:** the ordered list of path conditions in
+   `src/server.ts` + `src/server/routes/*.ts`, reconstructed by
+   the same scan used for §3 (top-level `path` branches, in
+   source order), equals the §3 list exactly. A route added
+   without updating this pin fails; a route removed without
+   updating §3 and the pin fails.
+2. **Dispatch smoke:** for each §3 branch, a `worker.fetch`
+   dispatch (the pattern already used by e.g.
+   `tests/checkout_sandbox_xss_2052.test.ts`, importing the
+   Worker default export) reaches the same handler outcome
+   class as before the move — at minimum, unauthenticated
+   public branches return their public response, and
+   session-gated branches return 401 without a session.
+   Full per-route behaviour is covered by the existing
+   per-domain tests; this pin's job is "no route dropped,
+   merged, or silently re-authed", not re-testing domain logic.
+3. **Order pin:** the router table order in `server.ts` equals
+   the §3 order. Reordering the table without a route-change
+   issue fails.
+4. **Thin-router pin stays green:** `thin_router_inventory`
+   (Orchestrator) is run unchanged per slice; it must not be
+   weakened, and any route it pins must not be double-moved.
+
+## 6. Slice order and cross-lane coordination
+
+1. Slice 1 — this contract (docs only, no code move).
+2. Slice 2 — Core dispatcher + shared auth module + §5 pin.
+   Core is the only slice allowed to change `server.ts`'s
+   structure; later slices only remove a domain block and add
+   a delegation line, in §3 order.
+3. Slice 3 — Auth & IAAA.
+4. Slice 4 — Privacy & compliance.
+5. Slice 5 — Trading & market.
+6. Slice 6 — Messaging & social.
+7. Slice 7 — Platform & commerce.
+8. Slice 8 — Queue / scheduled extraction.
+9. Slice 9 — Cleanup: exports module, size pin (§2), §3
+   reconciliation 1:1, thin-router pin green.
+
+Per slice: own branch/PR, rebase onto fresh main,
+`scripts/verify-before-merge.sh` green locally, PR body with
+full Qunsultant/cfagent# references + `Process documentation
+impact:` line, labels `auto-merge` + `lane:clo-arsi`,
+`mergeable_state` clean, GitHub CI green, merge via merge
+queue only, post-merge CI checked. Never merge over red,
+never submit a PR while any check fails. If a domain slice
+conflicts with an in-flight lane PR touching the same block,
+pause that slice (do not force-merge over it) and record the
+conflict on Qunsultant/cfagent#2902.
+
+## 7. What Slice 1 deliberately does NOT decide
+
+- The final size-pin number (proposal in §2, approved in Slice 2).
+- Whether the browser snapshot block belongs to Platform or
+  Trading (see §3 Slice 7 note — moves as a whole either way).
+- Any behaviour, route, method, auth, or response-shape change:
+  moves only. Any intentional change needs its own approved
+  issue and must not ride along with a move.
+- Any change to agent routes, trading/IAAA/payments domain
+  logic, or stock programme scope (Qunsultant/cfagent#2764).
+
+## 8. Open questions for review (do not guess in code)
+
+1. Confirm the < 800-line pin in Slice 2 (see §2).
+2. Confirm browser snapshot placement (Platform vs Trading).
+3. Confirm that wrangler requires agent/DO exports from the
+   entrypoint itself (if so, Cleanup keeps re-exports in
+   `server.ts` with per-class justification; if not, they move
+   fully to `src/server/exports.ts`).
+4. Confirm the scheduled/queue consumer ownership split in
+   Slice 8 (screener-events vs options_analysis) with the
+   messaging/trading lanes before moving them.

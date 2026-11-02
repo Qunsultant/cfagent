@@ -360,3 +360,88 @@ describe("mas_events session index (#2543)", () => {
     expect(text).not.toContain("SCAN");
   });
 });
+
+describe("receipts empty-store fix (#2779)", () => {
+  // NOTE: MockSqlStorage forgives missing tables (SELECT on an unknown
+  // table returns []), which is exactly why slice 4's tests never caught
+  // this production 500. These regression tests therefore run against
+  // REAL SQLite (node:sqlite), where a missing table throws like production.
+  function makeRealSql(db: DatabaseSync) {
+    return {
+      exec: (query: string, ...args: unknown[]) => {
+        const stmt = db.prepare(query);
+        if (/^\s*(SELECT|EXPLAIN|PRAGMA|WITH)\b/i.test(query)) {
+          return stmt.all(...(args as any[])) as unknown[];
+        }
+        stmt.run(...(args as any[]));
+        return [];
+      },
+    };
+  }
+
+  function makeRealProductionLikeStore() {
+    // Production ensureTables() ensures mas_* shared tables but NOT
+    // usage_events — the exact store shape that 500s in production.
+    const db = new DatabaseSync(":memory:");
+    const sql = makeRealSql(db) as any;
+    const orm = new DatabaseORM(sql);
+    ensureSharedTable(sql, "mas_messages");
+    ensureSharedTable(sql, "mas_events");
+    ensureSharedTable(sql, "mas_transactions");
+    ensureMasRetentionIndexes(sql);
+    return { sql, orm };
+  }
+
+  it("returns 200 with an empty list on a real store with no usage_events table", async () => {
+    const store = makeRealProductionLikeStore();
+    const res = await callReceipts(store, { "x-user-login": OWNER });
+    expect(res!.status).toBe(200);
+    const body = await res!.json();
+    expect(body.receipts).toEqual([]);
+    expect(body.counts).toEqual({ meter: 0, tier: 0, transaction: 0, real: 0, simulated: 0, audit: 0 });
+  });
+
+  it("returns 200 with an empty meter list for kind=meter on a real store with no usage_events table", async () => {
+    const store = makeRealProductionLikeStore();
+    const res = await callReceipts(store, { "x-user-login": OWNER }, "?kind=meter");
+    expect(res!.status).toBe(200);
+    expect((await res!.json()).receipts).toEqual([]);
+  });
+
+  it("sees rows seeded after the first read: ensure is idempotent, reads unchanged", async () => {
+    const store = makeRealProductionLikeStore();
+    const first = await callReceipts(store, { "x-user-login": OWNER });
+    expect(first!.status).toBe(200);
+    seedMeter(store.sql, {
+      id: "use_fix_1", userLogin: OWNER, runId: "rcpt_fix_1", category: "options_screener",
+      createdAt: "2026-11-02T10:00:00.000Z",
+      detail: { receiptId: "rcpt_fix_1", priceUSD: 0.05, tier: "PayPerUse", protocol: "x402" },
+    });
+    const second = await callReceipts(store, { "x-user-login": OWNER }, "?kind=meter");
+    expect(second!.status).toBe(200);
+    const body = await second!.json();
+    expect(body.receipts).toHaveLength(1);
+    expect(body.receipts[0].receiptId).toBe("rcpt_fix_1");
+  });
+
+  it("returns a typed 500 with no raw store text when the read itself fails", async () => {
+    const store = makeRealProductionLikeStore();
+    const throwingSql = {
+      exec: () => {
+        throw new Error("boom: no such table: usage_events: SQLITE_ERROR");
+      },
+    };
+    const url = new URL("https://worker.test/api/payments/receipts");
+    const req = new Request(url, { headers: { "x-user-login": OWNER } });
+    const res = await handlePaymentsRoutes(req, url, url.pathname, "session-1", {
+      env: {},
+      ensureTables: () => throwingSql,
+      getOrm: () => store.orm,
+      audit: () => {},
+    } as any);
+    expect(res!.status).toBe(500);
+    const body = await res!.json();
+    expect(body.error).toBe("ReceiptsUnavailable");
+    expect(JSON.stringify(body)).not.toContain("no such table");
+  });
+});

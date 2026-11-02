@@ -35,6 +35,8 @@ import {
 } from "../channels/signedLinks";
 import PostalMime from "postal-mime";
 import { SERVER_PALETTE } from "../../theme/serverPalette";
+import { createEmailSender } from "../../services/cloudflareEmailSender";
+import { actorGateway } from "../../services/cloudflareActorGateway";
 
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (character) => ({
@@ -936,67 +938,15 @@ export class ETradeEmailTradingService {
       : Array.isArray(attachment)
         ? attachment
         : [attachment];
-    if (this.env.EMAIL && typeof this.env.EMAIL.send === "function") {
-      try {
-        const fromAddress = this.env.EMAIL_AGENT_ADDRESS || "trade@agent.openaimp.com";
-        const alternativeBoundary = `----=_Alternative_${crypto.randomUUID()}`;
-        const mixedBoundary = `----=_Mixed_${crypto.randomUUID()}`;
-        const rawParts = [
-          `From: "E*TRADE Agentic Trading Hub" <${fromAddress}>`,
-          `To: <${to}>`,
-          `Subject: ${subject}`,
-          `MIME-Version: 1.0`,
-          `Content-Type: ${attachments.length > 0 ? `multipart/mixed; boundary="${mixedBoundary}"` : `multipart/alternative; boundary="${alternativeBoundary}"`}`,
-          `X-Agent-DID: ${AGENT_DIDS.TRADING}`,
-          ``,
-        ];
-        if (attachments.length > 0) {
-          rawParts.push(
-            `--${mixedBoundary}`,
-            `Content-Type: multipart/alternative; boundary="${alternativeBoundary}"`,
-            ``,
-          );
-        }
-        rawParts.push(
-          `--${alternativeBoundary}`,
-          `Content-Type: text/plain; charset=UTF-8`,
-          `Content-Transfer-Encoding: 7bit`,
-          ``,
-          text,
-          ``,
-          `--${alternativeBoundary}`,
-          `Content-Type: text/html; charset=UTF-8`,
-          `Content-Transfer-Encoding: 7bit`,
-          ``,
-          html,
-          ``,
-          `--${alternativeBoundary}--`,
-        );
-        if (attachments.length > 0) {
-          for (const att of attachments) {
-            const safeFileName = att.fileName.replace(/[^a-zA-Z0-9._-]/g, "_") || "research.xlsx";
-            rawParts.push(
-              ``,
-              `--${mixedBoundary}`,
-              `Content-Type: ${att.contentType}; name="${safeFileName}"`,
-              `Content-Disposition: attachment; filename="${safeFileName}"`,
-              `Content-Transfer-Encoding: base64`,
-              ``,
-              att.contentBase64.match(/.{1,76}/g)?.join("\r\n") || "",
-            );
-          }
-          rawParts.push(``, `--${mixedBoundary}--`);
-        }
-        const rawMime = rawParts.join("\r\n");
-
-        await this.env.EMAIL.send(new Response(rawMime).body);
-        return true;
-      } catch (err) {
-        console.warn("[ETradeEmailService] Failed to send email via env.EMAIL binding:", err);
-        return false;
-      }
-    }
-    return false;
+    // Issue #1778 (Adapter S4, program #1717): outbound sends go
+    // through the one EmailSender port; the Cloudflare EMAIL
+    // implementation lives in services/cloudflareEmailSender.ts.
+    // Fail-soft contract preserved: unbound binding -> false (the
+    // factory returns null), send failure -> warn + false inside
+    // the adapter. Recipient/subject validation above still throws.
+    const sender = createEmailSender(this.env);
+    if (!sender) return false;
+    return sender.send({ to, subject, html, text, attachments });
   }
 
   /**
@@ -1113,8 +1063,17 @@ export async function handleCloudflareEmailMessage(
   // /api route uses. If the orchestrator path is unavailable this
   // throws (the #781 fail-loud contract) instead of processing the
   // email against an ORM-less local service.
+  // Issue #815 (fail-loud guard, pinned by
+  // tests/worker_entry_points_orchestrator_wiring.test.ts): the
+  // binding must exist with addressing methods BEFORE the
+  // service-identity check below, so a missing orchestrator path
+  // throws the SEARCH_AGENT error (the #781 fail-loud contract)
+  // instead of processing the email against an ORM-less local
+  // service. This is a capability check only — the addressing and
+  // fetch below ride the ActorGateway (#1779), which is the only
+  // module that invokes idFromName/get for dispatch.
   const namespace = env.SEARCH_AGENT;
-  if (!namespace || typeof namespace.idFromName !== "function") {
+  if (!namespace || typeof namespace.idFromName !== "function" || typeof namespace.get !== "function") {
     throw new Error(
       "Inbound email trading requires the SEARCH_AGENT (orchestrator) binding to reach the user's Durable Object ORM; refusing to process the email without it (issue #815)."
     );
@@ -1130,8 +1089,9 @@ export async function handleCloudflareEmailMessage(
       "Inbound email trading requires a configured service identity (SERVICE_USER_LOGIN) to forward under; refusing to process the email without it (issue #1185)."
     );
   }
-  const agentId = namespace.idFromName(INBOUND_EMAIL_ORCHESTRATOR_INSTANCE);
-  const response = await namespace.get(agentId).fetch(
+  const response = await actorGateway.dispatch(
+    env.SEARCH_AGENT,
+    INBOUND_EMAIL_ORCHESTRATOR_INSTANCE,
     new Request("https://agent.internal/trading/email/inbound", {
       method: "POST",
       headers: {

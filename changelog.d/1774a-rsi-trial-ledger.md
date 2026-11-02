@@ -1,0 +1,3 @@
+### Added
+
+- RSI trial ledger port (#1774, F-43): append-only, SHA-256 hash-chained trial event log in `src/rsi/trialLedger.ts` (propose → run → telemetry → evaluate → owner decision → adopt; adoption impossible without an approved decision; no update/delete operation), with an in-memory store and a DO-SQLite executor shape, pinned by `tests/rsi_trial_ledger_1774.test.ts`. RSI governance definition completed in `docs/architecture/security/rsi-governance-1774.md` (CAP-GOV-03); no new Durable Object class is created — the ledger rides existing DO SQLite stores, per the store notice posted on #1774 before building.

@@ -151,6 +151,20 @@ export function resolveEffectiveTier(
 }
 
 /**
+ * Issue #2660 (monetization Phase 2.5): the deactivation subscription
+ * gate, pure. An unexpired ACTIVE row blocks deactivation; expired or
+ * canceled rows do not. Same unexpired rule resolveEffectiveTier uses —
+ * no new semantics, so the gate and the tier read can never disagree
+ * about whether a subscription is live.
+ */
+export function hasUnexpiredSubscription(
+  subscriptions: Array<{ status: SubscriptionStatus; periodEndMs: number }>,
+  nowMs: number,
+): boolean {
+  return subscriptions.some((s) => s.status === "active" && s.periodEndMs > nowMs);
+}
+
+/**
  * Issue #2522 (slice 3, #2405 Phase 1.3): the tier transition for
  * audit payloads. Pure: both sides are the same
  * resolveEffectiveTier rule applied to the before/after rows, so

@@ -25,8 +25,10 @@
  * OUT OF THIS FAMILY (named, not silently absorbed):
  * mas_settings — its DDL stays in ensureTables and the
  * reportDispatch settings pair stays raw (owner gate G-7);
- * the legacy cf_ai_chat_agent_messages lift stays in the
- * class (SDK-owned table, ADR-out per the audit).
+ * the legacy cf_ai_chat_agent_messages lift's logic stays in
+ * the class (SDK-owned table, ADR-out per the audit); its SQL
+ * moved to SqlLegacyChatStore (doSqliteLegacyChatAdapter.ts)
+ * under #1776 (#1717 Adapter S2), so it is not a port here.
  *
  * TRANSACTION SEAM (ADR D-C): deliberately none. Every
  * operation is a single statement; the one multi-statement

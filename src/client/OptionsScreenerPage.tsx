@@ -32,6 +32,11 @@ import {
   BROKER_OPTIONS,
   brokerUnavailableNotice,
 } from "./tenantProviders";
+import {
+  deepLinkForNavNode,
+  deepLinkHrefForNavNode,
+  navigateToDeepLink,
+} from "./deepLinks";
 
 export interface OptionsScreenerProduct {
   id: string;
@@ -48,7 +53,7 @@ export const OPTIONS_SCREENER_PRODUCTS: OptionsScreenerProduct[] = [
     label: "Contract Screen",
     flag: "options_contract_screen",
     hostTab: "options",
-    hostNote: "Opens the options hub (contract screen section).",
+    hostNote: "Opens the options hub, Contract Screen section, via its own link.",
     description: "Raw options contracts screener over live chains.",
   },
   {
@@ -56,7 +61,7 @@ export const OPTIONS_SCREENER_PRODUCTS: OptionsScreenerProduct[] = [
     label: "Strategy Panel",
     flag: "options_strategy_panel",
     hostTab: "options",
-    hostNote: "Opens the options hub (strategy research section).",
+    hostNote: "Opens the options hub, Strategy Panel section, via its own link.",
     description: "Strategy discovery and ranking for a symbol or universe.",
   },
   {
@@ -64,7 +69,7 @@ export const OPTIONS_SCREENER_PRODUCTS: OptionsScreenerProduct[] = [
     label: "Best Trade",
     flag: "options_best_trade",
     hostTab: "options",
-    hostNote: "Opens the options hub (best-trade section).",
+    hostNote: "Opens the options hub, Best Trade section, via its own link.",
     description: "The single best trade for a name, plus alternatives.",
   },
   {
@@ -72,7 +77,7 @@ export const OPTIONS_SCREENER_PRODUCTS: OptionsScreenerProduct[] = [
     label: "Compare",
     flag: "options_compare",
     hostTab: "options",
-    hostNote: "Opens the options hub (comparison section).",
+    hostNote: "Opens the options hub, Compare section, via its own link.",
     description: "Side-by-side comparison of candidate strategies.",
   },
   {
@@ -80,7 +85,7 @@ export const OPTIONS_SCREENER_PRODUCTS: OptionsScreenerProduct[] = [
     label: "LLM Ideas",
     flag: "options_llm_ideas",
     hostTab: "options",
-    hostNote: "Opens the options hub (LLM ideas section).",
+    hostNote: "Opens the options hub, LLM Ideas section, via its own link.",
     description: "LLM evaluation of quantitative candidates.",
   },
   {
@@ -89,7 +94,7 @@ export const OPTIONS_SCREENER_PRODUCTS: OptionsScreenerProduct[] = [
     flag: "options_llm_evaluate",
     hostTab: "options",
     hostNote:
-      "Opens the options hub; the evaluate modal itself is also gated by this flag.",
+      "Opens the options hub, Strategy Panel section, where Evaluate lives on discovered strategies, via its own link.",
     description: "LLM evaluation of one chosen strategy, from the research panel.",
   },
   {
@@ -97,7 +102,7 @@ export const OPTIONS_SCREENER_PRODUCTS: OptionsScreenerProduct[] = [
     label: "Discovery",
     flag: "options_discovery",
     hostTab: "options",
-    hostNote: "Opens the options hub (discovery runs section).",
+    hostNote: "Opens the options hub, Discovery Runs section, via its own link.",
     description: "Scheduled and manual discovery runs and their reports.",
   },
   {
@@ -121,11 +126,28 @@ export const OPTIONS_SCREENER_PRODUCTS: OptionsScreenerProduct[] = [
     label: "IV History",
     flag: "options_iv_history",
     hostTab: "screeners",
-    hostNote:
-      "Opens the Screeners hub; IV History is a hub section — deep-linking into it is a later slice.",
+    hostNote: "Opens the Screeners hub, IV History section, via its own link.",
     description: "Historical and implied volatility percentile ranks.",
   },
 ];
+
+/**
+ * Catalog card id → left-nav node id under options-screener (issue
+ * #2784). Cards with a node link through the deep-link catalog, so
+ * the button opens the surface itself, not just its host tab.
+ * Scheduled Runs has no options-screener node and keeps its host tab.
+ */
+export const OPTIONS_PRODUCT_NAV_NODE: Record<string, string> = {
+  "contract-screen": "options",
+  "strategy-panel": "strategy-panel",
+  "best-trade": "best-trade",
+  compare: "compare",
+  "llm-ideas": "llm-ideas",
+  "llm-evaluate": "llm-evaluate",
+  discovery: "discovery",
+  flows: "options-flows",
+  "iv-history": "iv-history",
+};
 
 export interface OptionsScreenerPageProps {
   onSelectTab: (tab: NavTabId) => void;
@@ -171,6 +193,8 @@ export function OptionsScreenerPage({ onSelectTab }: OptionsScreenerPageProps) {
       >
         {OPTIONS_SCREENER_PRODUCTS.map((product) => {
           const enabled = isOptionsProductEnabled(product.flag);
+          const navNodeId = OPTIONS_PRODUCT_NAV_NODE[product.id];
+          const link = enabled && navNodeId ? deepLinkForNavNode("options-screener", navNodeId) : null;
           return (
             <Card key={product.id} padding="md">
               <div
@@ -198,19 +222,34 @@ export function OptionsScreenerPage({ onSelectTab }: OptionsScreenerPageProps) {
                 <p style={{ margin: 0 }}>{product.description}</p>
                 <p style={{ margin: 0 }}>{product.hostNote}</p>
                 <div>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    disabled={!enabled}
-                    onClick={() => onSelectTab(product.hostTab)}
-                    title={
-                      enabled
-                        ? `Open ${product.label}`
-                        : `${product.label} is disabled by feature flag ${product.flag}`
-                    }
-                  >
-                    {enabled ? "Open" : "Disabled"}
-                  </Button>
+                  {link ? (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      href={deepLinkHrefForNavNode("options-screener", navNodeId!)}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        navigateToDeepLink(link);
+                      }}
+                      title={`Open ${product.label}`}
+                    >
+                      Open
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={!enabled}
+                      onClick={() => onSelectTab(product.hostTab)}
+                      title={
+                        enabled
+                          ? `Open ${product.label}`
+                          : `${product.label} is disabled by feature flag ${product.flag}`
+                      }
+                    >
+                      {enabled ? "Open" : "Disabled"}
+                    </Button>
+                  )}
                 </div>
               </div>
             </Card>

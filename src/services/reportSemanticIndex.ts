@@ -15,15 +15,24 @@
 
 import type { SqlStorage } from "../orm";
 import { createCanonicalReportStorePorts } from "../data/createCanonicalReportStorePorts";
+import { VectorMemory } from "../memory/vector-memory";
+import { createBlobStore } from "./blobStoreR2Adapter";
+import { blobText } from "./blobStorePorts";
 
-const EMBEDDING_MODEL = "@cf/baai/bge-base-en-v1.5";
-
-async function embed(ai: any, text: string): Promise<number[] | null> {
+/**
+ * Qunsultant/cfagent#1775 (Adapter S1): the duplicate local embed()
+ * is deleted — the single embedding implementation is VectorMemory's
+ * (same model "@cf/baai/bge-base-en-v1.5", same index). EQUIVALENCE,
+ * preserved here so the fail-soft contract is byte-identical:
+ * text is truncated to 8000 chars before embedding (as the deleted
+ * embed did); an embedding throw or a missing vector maps to null,
+ * and callers map null to index=false / search=[] exactly as before.
+ * The upsert/query argument shapes are unchanged.
+ */
+async function embedViaMemory(vm: VectorMemory, text: string): Promise<number[] | null> {
   try {
-    const res = await ai.run(EMBEDDING_MODEL, { text: text.slice(0, 8000) });
-    const data = (res as { data?: number[][] }).data;
-    if (!data?.[0]) return null;
-    return data[0];
+    const values = await vm.embedText(text.slice(0, 8000));
+    return Array.isArray(values) ? values : null;
   } catch (err) {
     console.warn("[reportSemanticIndex] embed failed:", err);
     return null;
@@ -48,9 +57,10 @@ export async function indexReport(
 ): Promise<boolean> {
   try {
     if (!env.AI || !env.VECTOR_MEMORY || !input.reportId) return false;
-    const values = await embed(env.AI, `${input.title}\n${input.text}`);
+    const vm = new VectorMemory(env.AI, env.VECTOR_MEMORY, undefined);
+    const values = await embedViaMemory(vm, `${input.title}\n${input.text}`);
     if (!values) return false;
-    await env.VECTOR_MEMORY.upsert([
+    await vm.upsertVectors([
       {
         id: `report:${input.reportId}`,
         values,
@@ -211,10 +221,11 @@ export async function indexCanonicalReport(
     if (!env || !env.AI || !env.VECTOR_MEMORY || !report.reportId) return false;
     if ((INDEX_EXCLUDED_SOURCES as readonly string[]).includes(report.source)) return false;
     let body = report.body;
-    if (!body && report.bodyR2Key && env.REPORTS_BUCKET) {
+    const store = createBlobStore(env);
+    if (!body && report.bodyR2Key && store) {
       try {
-        const obj = await env.REPORTS_BUCKET.get(report.bodyR2Key);
-        const text = await obj?.text();
+        const obj = await store.get(report.bodyR2Key);
+        const text = obj ? blobText(obj) : undefined;
         if (typeof text === "string" && text.length > 0) body = text;
       } catch {
         // R2 resolution is best-effort; fall back to summary + title.
@@ -340,9 +351,10 @@ export async function semanticSearchReports(
 ): Promise<SemanticHit[]> {
   try {
     if (!env.AI || !env.VECTOR_MEMORY || !query.trim()) return [];
-    const values = await embed(env.AI, query);
+    const vm = new VectorMemory(env.AI, env.VECTOR_MEMORY, undefined);
+    const values = await embedViaMemory(vm, query);
     if (!values) return [];
-    const res = await env.VECTOR_MEMORY.query(values, {
+    const res = await vm.queryVectors(values, {
       topK,
       filter: { kind: "report" },
       returnMetadata: true,
