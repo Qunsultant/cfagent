@@ -7264,6 +7264,11 @@ body {
   background: var(--color-sentiment-very-bearish-subtle);
   color: var(--color-danger-text);
 }
+.etrade-env-badge.offline {
+  background: var(--color-surface-sunken);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border-medium);
+}
 
 /* Account Details Card — Single Line Thematic Layout */
 .etrade-panel-account-card {
@@ -7395,6 +7400,100 @@ body {
   border: 1px solid var(--color-accent-border);
 }
 
+/* Broker Selection Section (#2720) */
+.broker-select-section {
+  padding-bottom: 0.35rem;
+}
+
+.broker-pill-group {
+  width: 100%;
+}
+
+/* Harmonized Single-Line Environment & Connection Controls (#2720) */
+.etrade-controls-single-line {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.35rem;
+  width: 100%;
+}
+
+.btn-env-mini {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0.35rem 0.25rem;
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+  border-radius: var(--radius-sm, 6px);
+  border: 1px solid var(--color-border-medium);
+  background: var(--color-surface-sunken);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: all var(--transition-fast, 0.15s ease);
+}
+
+.btn-env-mini.active {
+  background: var(--color-accent-subtle);
+  color: var(--color-accent);
+  border-color: var(--color-accent-border);
+}
+
+.btn-action-mini {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0.35rem 0.35rem;
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+  border-radius: var(--radius-sm, 6px);
+  cursor: pointer;
+  transition: all var(--transition-fast, 0.15s ease);
+  border: 1px solid var(--color-border-medium);
+  background: var(--color-surface-raised);
+  color: var(--color-text-primary);
+}
+
+.btn-action-mini:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-action-mini.sync:hover:not(:disabled) {
+  background: var(--color-surface-hover);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.btn-action-mini.connect {
+  flex: 1.4 1 0;
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: var(--color-primary-foreground);
+}
+
+.btn-action-mini.connect:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+.btn-action-mini.renew {
+  background: var(--color-warning-subtle);
+  border-color: var(--color-warning);
+  color: var(--color-warning);
+}
+
+.btn-action-mini.disconnect {
+  background: var(--color-danger-subtle);
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+}
+
 .etrade-actions-grid {
   display: flex;
   gap: 0.4rem;
@@ -7496,8 +7595,11 @@ body {
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 0.45rem;
+  gap: 0.35rem;
   width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
 .btn-menu-tuning {
@@ -7531,9 +7633,9 @@ body {
 }
 
 .menu-symbol-input {
-  width: 68px;
+  width: 52px;
   flex-shrink: 0;
-  padding: 0.38rem 0.45rem;
+  padding: 0.38rem 0.35rem;
   background: var(--color-input);
   border: 1px solid var(--color-input-border);
   border-radius: var(--radius-sm, 6px);
@@ -7642,6 +7744,61 @@ body {
   font-size: var(--font-size-caption);
   color: var(--color-text-muted);
   font-weight: 500;
+}
+
+/* Single-Line Ticker Configuration Controls (#2720) */
+.ticker-controls-single-line {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.35rem;
+  width: 100%;
+}
+
+.ticker-ctrl-item {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+  flex: 1 1 0;
+}
+
+.ticker-ctrl-lbl {
+  font-size: var(--font-size-caption);
+  color: var(--color-text-muted);
+  font-weight: 500;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.ticker-select-compact {
+  min-width: 0;
+  width: 100%;
+  font-size: var(--font-size-caption);
+  padding: 0.25rem 0.35rem;
+}
+
+.ticker-controls-single-line .settings-pref-row.ticker-ctrl-item {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+  flex: 1.2 1 0;
+  justify-content: flex-start;
+}
+
+.ticker-custom-input {
+  min-width: 0;
+  width: 100%;
+  font-size: var(--font-size-caption);
+  padding: 0.25rem 0.35rem;
+}
+
+.btn-ticker-apply {
+  padding: 0.25rem 0.45rem;
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+  flex-shrink: 0;
 }
 
 .settings-pref-btn-group {

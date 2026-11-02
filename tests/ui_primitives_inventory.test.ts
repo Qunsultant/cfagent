@@ -47,6 +47,8 @@ const INVENTORY: Record<string, string[]> = {
   "Menu.tsx": ["Menu"],
   "Popover.tsx": ["Popover"],
   "Drawer.tsx": ["Drawer"],
+  // #2673 slice 6: keyboard entry to main content.
+  "SkipLink.tsx": ["SkipLink"],
 };
 
 /** Non-primitive files allowed in components/ui (helpers + styles). */

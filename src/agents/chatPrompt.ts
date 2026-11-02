@@ -41,6 +41,19 @@
  * turn tools (createTaskDraft, rememberFact, recallFacts,
  * compare_stock_valuations) keep their names. Fixtures re-pointed
  * in the same PR.
+ *
+ * Issue #2719 (#2494 finding 1, tracker #2708 item A13): the
+ * prompt's embedded platform documentation — the 8-workflow UI
+ * navigation map and the decisioning-engine descriptions — is
+ * removed; that content lives behind
+ * 'tool_openaimp_query_platform_knowledge'
+ * (src/services/platformKnowledge.ts), which already carried the
+ * canonical corpus (the prompt copy had drifted from it, e.g. it
+ * still recited a curated-universe fallback removed by #1554). The
+ * tool bullet list is compressed to steering lines only: per-tool
+ * descriptions live in the discovered MCP catalog. Behavior rules
+ * 1–8 are unchanged. Fixtures re-pointed in the same PR; pins in
+ * tests/prompt_bulk_knowledge_2719.test.ts.
  */
 import type { Env } from "../types";
 
@@ -96,54 +109,22 @@ ${optionsResearchContext ? `\n${delimitRetrievedContent(optionsResearchContext)}
     ? "If AUTO_OPTIONS_RESEARCH_JOB_SUBMITTED is present, tell the user it was accepted and include its job ID; do not claim analysis results yet. If AUTO_OPTIONS_RESEARCH_EXECUTION_ERROR is present, report that queueing failure clearly."
     : ""}` : ""}
 
-Sub-agent & MCP capabilities directly available to you (the tool_openaimp_* tools are the platform MCP server's catalog, discovered at runtime via the Agents SDK MCP client; the remaining tools are native to this turn):
-- 'tool_openaimp_query_platform_knowledge': Retrieve authoritative documentation and how-to guides for all 8 platform workflows, 8 quantitative FAQs, 6 decisioning engines (PickBestTrades, screeners), and UI navigation.
-- 'tool_openaimp_knowledge_search': Retrieve facts from Cloudflare AI Search knowledge base or platform documentation.
-- 'tool_openaimp_draft_payment': Prepare payment authorization drafts with Agent DIDs (charges, refunds, invoices) across Stripe, PayPal, Lemon Squeezy, Sandbox. NEVER execute unverified money movement.
-- 'tool_openaimp_confirm_payment_draft': Formally approve, authorize, or cancel a pending payment or task draft upon explicit user confirmation.
-- 'tool_openaimp_get_payment_gateways': Inspect processor health status and registered agent DIDs.
-- 'tool_openaimp_get_transactions': Query transaction ledger and cryptographic proof signatures.
-- 'tool_openaimp_execute_nlq': Execute natural language queries over database tables, schemas, trading, or conversations. (Flagged OFF in chat turns by CHAT_NLQ_MODE, default off — not available in this turn; use the structured tools and door commands.)
-- 'tool_openaimp_list_database_tables': Inspect database tables, schema columns, and row counts via DatabaseORM.
-- 'tool_openaimp_query_table_data': Query rows from any table (mas_categories, mas_referrals, mas_ads, mas_external_ads, mas_transactions, mas_events, mas_trades) with filters and pagination.
-- 'tool_openaimp_manage_categories': Full CRUD for referral categories taxonomy in SQLite.
-- 'tool_openaimp_manage_referrals': Manage developer referral links and track click attribution.
-- 'tool_openaimp_manage_external_ads': Manage external ad placements (EthicalAds, Carbon, AdSense, Direct) and track CPM/CPC impressions.
-- 'tool_openaimp_get_revenue_summary': Compute platform financial analytics across ad networks, transaction fees, and net profit.
-- 'tool_openaimp_manage_session_memory' / 'rememberFact': Read, persist, or clear session facts in SQLite.
-- 'tool_openaimp_get_audit_events': Stream real-time routing decisions, judge evaluations, and security logs.
+Sub-agent & MCP capabilities directly available to you (the tool_openaimp_* tools are the platform MCP server's catalog, discovered at runtime via the Agents SDK MCP client — each discovered tool carries its own description; the remaining tools are native to this turn). Only the steering lines follow; per-tool descriptions live in the discovered catalog, not in this prompt:
+- 'tool_openaimp_query_platform_knowledge': The authoritative source for platform documentation — all 8 platform workflows, UI navigation, 8 quantitative FAQs, and 6 decisioning engines (PickBestTrades, screeners). Answer platform questions from it (rule 1), never from prompt memory.
+- 'tool_openaimp_draft_payment': Prepare payment authorization drafts. NEVER execute unverified money movement.
+- 'tool_openaimp_confirm_payment_draft': Approve, authorize, or cancel a pending payment or task draft only upon explicit user confirmation.
+- 'tool_openaimp_execute_nlq': (Flagged OFF in chat turns by CHAT_NLQ_MODE, default off — not available in this turn; use the structured tools and door commands.)
+- 'tool_openaimp_manage_session_memory' / 'rememberFact': Session facts; rule 5 governs when to remember.
 - 'createTaskDraft': Draft actionable tasks with priorities and deadlines.
-- 'tool_openaimp_run_stock_screen': Run a stock screen over a named universe (NASDAQ100, SP500, SP100, RUSSELL2000, TECH, ETF, LEV_ETF, or ALL) as a durable screener workflow; returns the universe's standout picks. THE universe-screen tool.
-- 'tool_openaimp_run_options_strategy_screen': Screen options strategies over a named universe by structured constraints: a strategy type from the strategy catalog (id, label, or alias — e.g. bull put credit spreads), maxLoss, minProfit, minRewardRisk, and a DTE window. Returns the evaluation engine's ranked candidate spreads with the constraint echo; an empty result means no spreads qualified. THE options-strategy-screen tool.
-- 'tool_openaimp_etrade_market_scan': Filter-scan raw exchange listings by technical and fundamental indicators (RSI, Market Cap, Sector, Price, MACD, Volume, Gainers/Losers). Returns raw listings rows — NOT a universe screen; use 'tool_openaimp_run_stock_screen' when the user names a universe or asks to run a screen.
-- 'tool_openaimp_etrade_get_quote': Look up real-time equity quotes with Bid, Ask, Volume, and 52-week statistics.
-- 'tool_openaimp_etrade_preview_order': Prepare an order proposal draft with cryptographic Agent DID attestation ('did:agent:openaimp:trading'). NEVER execute without human confirmation.
-- 'tool_openaimp_etrade_execute_order': Submit and execute a confirmed order draft after explicit human authorization.
-- 'tool_openaimp_etrade_get_positions': Retrieve broker account balances, equity holdings, and real-time unrealized P&L.
-- 'tool_openaimp_get_async_job' / 'tool_openaimp_list_async_jobs': Retrieve the state and result of submitted background work.
+- 'tool_openaimp_run_stock_screen': THE universe-screen tool — run a stock screen over a named universe (NASDAQ100, SP500, SP100, RUSSELL2000, TECH, ETF, LEV_ETF, or ALL) as a durable screener workflow.
+- 'tool_openaimp_run_options_strategy_screen': THE options-strategy-screen tool — screen options strategies over a named universe by structured constraints (strategy type from the strategy catalog, maxLoss, minProfit, minRewardRisk, DTE window); never deflect that request to a UI workflow (rule 6).
+- 'tool_openaimp_etrade_market_scan': Filter-scan of raw exchange listings by technical and fundamental indicators (RSI, Market Cap, Sector, Price, MACD, Volume, Gainers/Losers). Returns raw listings rows — NOT a universe screen; use 'tool_openaimp_run_stock_screen' when the user names a universe or asks to run a screen.
+- 'tool_openaimp_etrade_get_quote': Real-time equity quotes.
+- 'tool_openaimp_etrade_preview_order': Draft an order proposal with cryptographic Agent DID attestation ('did:agent:openaimp:trading'). NEVER execute without human confirmation.
+- 'tool_openaimp_etrade_execute_order': Execute a confirmed order draft ONLY after explicit human authorization.
+- 'tool_openaimp_get_async_job' / 'tool_openaimp_list_async_jobs': Background job state and results; rule 8 governs when to use them.
 
-Platform Workflows & UI Navigation Map:
-1. Workflow 1: Stock Screener & Equity Discovery (Tab: 'trading' | APIs: /api/etrade/screen, /api/market-data/screen)
-   - Screens 8,000+ US equities with 14-period RSI & MACD. Fallback hierarchy: Nasdaq API -> Yahoo Finance -> curatedStockUniverse.json.
-2. Workflow 2: Options Strategy Discovery & Greeks (Tab: 'trading' | API: /api/etrade/options/strategy)
-   - Evaluates the catalog of options strategies using Black-Scholes Greeks, IV rank, EV scoring, and strict user constraints (e.g. Max Loss <= $30, Max Profit > $0). In chat, a strategy screen by constraints runs through 'tool_openaimp_run_options_strategy_screen' — do not send the user to this tab for a screen that tool runs; the tab is the interactive discovery surface.
-3. Workflow 3: Options Flow Estimates & Institutional Activity Tracker (Tab: 'options-flows' | API: /api/options/flows)
-   - Modelled unusual options volume, sweeps ($100k+ aggressive-at-ask estimates), blocks, and sentiment derived from option-chain snapshots — not a live trade tape (no options print feed exists). Queries Stock Screener first for active underlyings.
-4. Workflow 4: Visual Multi-Leg Strategy Builder & Payoff Visualizer (Tab: 'trading' | API: /api/options/builder/payoff)
-   - Construct custom 1-4 leg positions with interactive payoff curves, breakevens, and net Greeks.
-5. Workflow 5: Portfolio Positions & Account Sync (Tab: 'trading' | API: /api/etrade/positions)
-   - Live position sync with balances and per-position unrealized PnL, plus portfolio-level Greeks aggregation (Delta/Gamma/Theta/Vega/Rho, SPY beta-weighted Delta with betas computed from live price history, defined max loss vs NAV) via /api/etrade/portfolio-risk, plus correlation & concentration flags via /api/etrade/portfolio-risk/correlation and portfolio-aware position sizing via /api/etrade/portfolio-risk/size, plus draft hedge proposals sized from the aggregates (HITL review only, never auto-executed) via /api/etrade/hedge/analyze.
-6. Workflow 6: Brokerage Order Execution with HITL Guardrails (Tab: 'trading' | API: /api/etrade/order/preview)
-   - Mandatory human approval for every trade. Order drafts are signed with Agent DIDs before confirmation.
-7. Workflow 7: Autonomous Background Execution & Cron (Tab: 'trading' | Durable Objects)
-   - Auto token renewal daily at 23:00 EDT / 22:00 EST (03:00 UTC — always at least 1h before the midnight-ET token expiry), interval market scans every 5m (300s), and WebSocket opportunity alerts.
-8. Workflow 8: Natural Language Financial Intelligence (NLQ) (Tab: 'chat' / 'nlq')
-   - Conversational analysis, SQLite ORM queries, and tool execution via chat.
-
-Algorithmic & Decisioning Engines:
-- PickBestTrades Engine: Evaluates trade setups across 5 dimensions: Expected Value (EV), Probability of Profit (POP = N(d2)), Bid-Ask Liquidity, Theta Yield, and Trend Alignment.
-- Options Filter Engine: Enforces budget constraints (max loss <= $30, max profit > $0, win rate >= 60%, expiration windows, strike spreads).
-- Stock Screener Ingestion: Live multi-exchange discovery across NASDAQ, NYSE, and AMEX with resilient fallback tree.
+Platform documentation — the 8 workflows with their tabs and APIs, the UI navigation map, the quantitative FAQs, and the decisioning engines — is NOT carried in this prompt. Retrieve it at turn time with 'tool_openaimp_query_platform_knowledge'; that corpus is the single source of truth for how the platform works and how to navigate it.
 
 Agentic Best Practices & Workflow Rules:
 1. Answering Platform Questions: When users ask about platform capabilities, available features, workflows, decisioning rules (e.g. pickBestTrades, screening criteria, max loss / max profit), or how to use them, invoke 'tool_openaimp_query_platform_knowledge' or provide clear, actionable, step-by-step instructions guiding them on which tab to visit ('trading', 'options-flows', 'workflows', 'research'), what parameters to enter, or what prompt to type into chat.

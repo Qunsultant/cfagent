@@ -229,7 +229,13 @@ import {
 } from "./trading";
 import { gateSlackRequest, timingSafeEqual } from "./security/webhookSecurity";
 import { sanitizeInboundText } from "./security/promptInjectionSanitize";
-import { checkRateLimit } from "./security/rateLimiter";
+import { createIngressThrottle, pickWebhookSignature } from "./api/ingress";
+import { nlqWebhookBodySchema } from "./api/ingressSchemas";
+import { dispatchWsUpgrade } from "./api/wsRoutes";
+import {
+  levelsForApiIngressMode,
+  resolveApiIngressMode,
+} from "./config/apiIngressModes";
 import {
   deriveNlqNonce,
   sharedMemoryReplayStore,
@@ -390,9 +396,13 @@ async function handleNlqWebhookRequest(
   const rawBody = await request.text();
   if (rawBody.length > 128_000) return Response.json({ error: "Webhook payload exceeds 128 KB." }, { status: 413 });
   const verifier = new ETradeWebhookService(undefined, env, NLQ_WEBHOOK_SERVICE_LOGIN);
+  // #1768: unified webhook signature header lookup — the same secret
+  // and HMAC verification, accepting any known carrier spelling
+  // (X-Signature-256 first, then the x-hub/x-signature aliases).
+  const pickedSignature = pickWebhookSignature(request.headers);
   const isValid = await verifier.verifySignature(
     rawBody,
-    request.headers.get("X-Signature-256"),
+    pickedSignature?.value ?? null,
     env.INBOUND_NLQ_WEBHOOK_SECRET,
   );
   if (!isValid) return Response.json({ error: "Invalid NLQ webhook signature." }, { status: 401 });
@@ -403,6 +413,23 @@ async function handleNlqWebhookRequest(
   } catch {
     return Response.json({ error: "Request body must be valid JSON." }, { status: 400 });
   }
+  // #1768 (F-39): zod shape validation replaces manual property
+  // parsing for the ingress body. Messages/statuses below are
+  // unchanged — the schema only rejects wrong-typed fields and
+  // non-object bodies (which previously threw on body.query and
+  // surfaced as a 500) with the handler's existing messages.
+  const shaped = nlqWebhookBodySchema.safeParse(body);
+  if (!shaped.success) {
+    const field = shaped.error.issues[0]?.path[0];
+    if (field === "timestamp") {
+      return Response.json({ error: "Webhook timestamp is missing, invalid, or expired." }, { status: 401 });
+    }
+    if (field === "emailTo") {
+      return Response.json({ error: "emailTo must be a valid email address." }, { status: 400 });
+    }
+    return Response.json({ error: "A non-empty query string is required." }, { status: 400 });
+  }
+  body = shaped.data;
   if (typeof body.query !== "string" || !body.query.trim()) {
     return Response.json({ error: "A non-empty query string is required." }, { status: 400 });
   }
@@ -495,27 +522,17 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
 
     // Issue #241: abuse throttling on expensive ingress routes.
     // `null` = allowed, otherwise a 429 Response to return immediately.
-    const throttle = (
-      route: string,
-      maxRequests: number,
-      windowMs: number
-    ): Response | null => {
-      const client =
-        request.headers.get("x-user-login") ||
-        request.headers.get("cf-connecting-ip") ||
-        "anonymous";
-      const res = checkRateLimit(`${route}:${client}`, maxRequests, windowMs);
-      if (!res.allowed) {
-        return Response.json(
-          { error: "Rate limit exceeded. Slow down and retry." },
-          {
-            status: 429,
-            headers: { "Retry-After": String(Math.max(1, Math.ceil(res.retryAfterMs / 1000))) },
-          }
-        );
-      }
-      return null;
-    };
+    // #1768: uniform throttle from src/api/ingress.ts — the bucket key
+    // is the connecting IP, never the caller-supplied x-user-login
+    // (which let any unauthenticated caller mint a fresh bucket per
+    // fake login and evade the throttle). Session-gated call sites
+    // pass the server-verified login separately (memory_search below).
+    const throttle = createIngressThrottle(request);
+    // #1768: WS burst-cap mode, admin/platform-controlled via env
+    // only — never from request input (see apiIngressModes.ts guard).
+    const apiIngressMode = resolveApiIngressMode(
+      levelsForApiIngressMode(undefined, undefined, undefined, env.API_INGRESS_MODE),
+    ).mode;
 
     // Issue #1247: Public.com Client ID Metadata Document — the
     // OAuth client_id for the Public resource provider IS this URL
@@ -1277,7 +1294,14 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
       const session = await requireAuth(request, env);
       if (!session) return Response.json({ error: "Unauthorized: Please log in." }, { status: 401 });
       // Issue #241: vector search is billed per query — throttle per caller.
-      const limited = throttle("memory_search", 60, 60_000);
+      // #1768: the bucket key uses the server-verified session login
+      // (never the caller header), so distinct users behind one IP
+      // keep separate buckets and a fake login mints nothing.
+      const limited = createIngressThrottle(request, { verifiedLogin: session.githubLogin })(
+        "memory_search",
+        60,
+        60_000,
+      );
       if (limited) return limited;
       const body = (await request.json().catch(() => null)) as {
         query?: unknown;
@@ -3632,46 +3656,48 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
       return env.SEARCH_AGENT.get(id).fetch(forwardReq);
     }
 
-    // --- Omnichannel Trading Agent: Voice WebSocket Session ---
-    if ((path === "/voice/trade" || path === "/api/trading/voice/ws") && request.headers.get("Upgrade") === "websocket") {
-      // Issue #154: the voice-trading session requires an app session,
-      // checked BEFORE the WebSocket is accepted. Previously a null
-      // session proceeded under a shared synthetic voice identity, so an
-      // unauthenticated caller could open a voice trading session.
-      const session = await requireAuth(request, env);
-      if (!session) return new Response("Unauthorized", { status: 401 });
-
-      const pair = new WebSocketPair();
-      const [clientWs, serverWs] = Object.values(pair);
-      serverWs.accept();
-
-      const userLogin = session.githubLogin;
-
-      // Issue #815: the worker isolate has no ORM (an ORM wraps a
-      // specific Durable Object's storage.sql), so voice turns are
-      // forwarded per-turn to the session user's orchestrator DO, whose
-      // POST /trading/voice/turn route runs the voice service against
-      // the DO's real ORM. The forwarder keys the DO instance by, and
-      // sets the identity header from, the verified session login above
-      // — never from caller input.
-      const forwardVoiceTurn = createOrchestratorVoiceTurnForwarder(env, userLogin);
-      handleVoiceWebSocketConnection(serverWs, env, undefined, userLogin, forwardVoiceTurn).catch(console.warn);
-
-      return new Response(null, { status: 101, webSocket: clientWs });
-    }
-
-    // --- Real-Time Market Data Quotes WebSocket Session (Issue #2230) ---
-    // Served by TickerAgent (a PortThink agent), addressed directly so
-    // the no-auth, no-audit surface (M10) is preserved: routing through
+    // #1768: WebSocket upgrade dispatch, table-driven (src/api/wsRoutes.ts).
+    // Same position in the chain as the two branches it replaces
+    // (after schedules, before batch quotes), same paths, same auth:
+    // voice still 401s without a session BEFORE accept (#154), and
+    // the quotes path stays public (M10, #2230 — routing through
     // routeAgentRequest onBeforeConnect would 401 unauthenticated
-    // callers and break the public landing page tape. The SDK's stub
-    // fetch performs the upgrade and drives the agent's onConnect,
-    // which reads the #1725 header carriers (x-quote-expiry-mode /
-    // x-quote-stream-provenance) from the upgrade request.
-    if ((path === "/api/market-data/quotes/ws" || path === "/api/market/quotes/ws" || path === "/api/foss/quotes/ws") && request.headers.get("Upgrade") === "websocket") {
-      const tickerId = env.TICKER_AGENT.idFromName(TICKER_INSTANCE_NAME);
-      return env.TICKER_AGENT.get(tickerId).fetch(request);
-    }
+    // callers and break the public landing page tape). The quotes
+    // upgrade now forwards with caller identity headers stripped
+    // (TickerAgent reads only the #1725 x-quote-* carriers, never
+    // x-user-login), and in API_INGRESS_MODE=unified the IP burst
+    // cap applies (F-40). Non-upgrade requests fall through (null),
+    // exactly as the old branches' failed conditions did.
+    const wsResponse = await dispatchWsUpgrade(request, env, {
+      requireAuth: (req, e) => requireAuth(req, e as Env),
+      acceptVoice: async (_req, _e, userLogin) => {
+        // Issue #154: the voice-trading session requires an app session,
+        // checked BEFORE the WebSocket is accepted. Previously a null
+        // session proceeded under a shared synthetic voice identity, so an
+        // unauthenticated caller could open a voice trading session.
+        const pair = new WebSocketPair();
+        const [clientWs, serverWs] = Object.values(pair);
+        serverWs.accept();
+
+        // Issue #815: the worker isolate has no ORM (an ORM wraps a
+        // specific Durable Object's storage.sql), so voice turns are
+        // forwarded per-turn to the session user's orchestrator DO, whose
+        // POST /trading/voice/turn route runs the voice service against
+        // the DO's real ORM. The forwarder keys the DO instance by, and
+        // sets the identity header from, the verified session login above
+        // — never from caller input.
+        const forwardVoiceTurn = createOrchestratorVoiceTurnForwarder(env, userLogin);
+        handleVoiceWebSocketConnection(serverWs, env, undefined, userLogin, forwardVoiceTurn).catch(console.warn);
+
+        return new Response(null, { status: 101, webSocket: clientWs });
+      },
+      fetchTicker: async (strippedRequest) => {
+        const tickerId = env.TICKER_AGENT.idFromName(TICKER_INSTANCE_NAME);
+        return env.TICKER_AGENT.get(tickerId).fetch(strippedRequest);
+      },
+      ingressMode: apiIngressMode,
+    });
+    if (wsResponse) return wsResponse;
 
     // --- Batch Market Quotes HTTP Endpoint (Fallback for non-WebSocket clients) ---
     if ((path === "/api/market-data/quotes" || path === "/api/market/quotes" || path === "/api/foss/quotes") && request.method === "GET") {
