@@ -84,6 +84,42 @@ export function planStockScreenRun(
   return buildPlan(input, timestamp);
 }
 
+/**
+ * Issue #2865 (Phase 2 Slice 5 under #2764) — plan a scheduled
+ * monolithic run from the schedule payload's resolved inputs.
+ * The effective provider rule is copied verbatim from
+ * ScheduledTasksService.autonomousMarketScreen: a fallback run
+ * (E*TRADE auth dead) runs Yahoo with its marker; otherwise the
+ * requested provider, else the planner default. The trigger
+ * defaults to "scheduled"; callers that re-run a schedule with
+ * trigger "manual" (Trigger-Now) pass it explicitly.
+ */
+export function planScheduledScreen(
+  input: {
+    sector?: string;
+    filters?: { sector?: string };
+    universe?: UniverseId;
+    provider?: StockScreenProvider;
+    providerFallback?: StockScreenPlan["providerFallback"];
+    trigger?: "manual" | "scheduled";
+  },
+  timestamp: string,
+): StockScreenPlan {
+  return buildPlan(
+    {
+      trigger: input.trigger ?? "scheduled",
+      sector: input.sector,
+      filters: input.filters,
+      universe: input.universe,
+      provider: input.providerFallback ? "yahoo" : input.provider,
+      ...(input.providerFallback
+        ? { providerFallback: input.providerFallback }
+        : {}),
+    },
+    timestamp,
+  );
+}
+
 /** Plan a run from a Slice 1 StockScreenRunSpec. */
 export function planFromSpec(
   spec: StockScreenRunSpec,

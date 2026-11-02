@@ -29,6 +29,7 @@ import {
 import type { ScreenerTrace } from "./screenerTrace";
 import { withRetry } from "./resilience";
 import { resolvePipelinePolicy } from "./pipelinePolicy";
+import { planScheduledScreen } from "../workflows/stockScreenPlanner";
 import { DynamicMarketScreener } from "../trading";
 import {
   type ScannedStock,
@@ -1133,28 +1134,38 @@ export class ScheduledTasksService {
         // enclosing try/catch in an async function.
         return await this.autonomousMarketScreenSharded({ ...options, filters: screenFilters }, userLogin, timestamp);
       }
-      // Issue #261/#270: delegate screening to ScreenerAgent (E*TRADE-only).
-      // Issue #421: pass the sector through unset when none was chosen —
-      // ScreenerAgent labels unselected runs "ALL" instead of inventing one.
+      // Issue #2865: the monolithic scheduled run is the broker's
+      // sync branch (asyncRequested false → broker null → sync) and
+      // is planned through the one planner — sector, universe,
+      // provider, and fallback marker resolve here, not by hand.
+      // Values are identical to the hand-derived ones above:
+      // planner defaults equal runScreenInner defaults, and the
+      // fallback→yahoo rule is the planner's verbatim copy.
+      const scheduledPlan = planScheduledScreen(
+        {
+          sector: options.sector,
+          filters: screenFilters,
+          universe: (options.universe as any) || undefined,
+          provider: options.provider,
+          ...(providerFallback ? { providerFallback } : {}),
+          trigger: options.trigger || "scheduled",
+        },
+        timestamp,
+      );
+      // Issue #261/#270: delegate screening to ScreenerAgent.
       const result = await this.getScreenerAgent(userLogin).runScreen({
         trigger: options.trigger || "scheduled",
-        sector: options.sector,
-        universe: (options.universe as any) || "TECH",
+        sector: scheduledPlan.sector,
+        universe: scheduledPlan.universe,
         maxSymbols: options.maxItems,
         filters: screenFilters,
         userLogin,
         environment: options.environment,
         portfolioContext,
-        // Issue #1007: provider rides through to the pipeline run;
-        // absent keeps the E*TRADE default, byte-identical in shape.
-        // Issue #1527: a fallback run rides provider "yahoo" plus the
-        // marker; a deliberate Yahoo run rides provider "yahoo" with
-        // no marker; an E*TRADE-live run is unchanged.
-        ...(providerFallback
-          ? { provider: "yahoo" as const, providerFallback }
-          : options.provider
-            ? { provider: options.provider }
-            : {}),
+        provider: scheduledPlan.provider,
+        ...(scheduledPlan.providerFallback
+          ? { providerFallback: scheduledPlan.providerFallback }
+          : {}),
       });
 
       if (result.skippedDuplicate) {
