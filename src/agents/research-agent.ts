@@ -288,6 +288,35 @@ export class ResearchAgent extends PortThink {
   }
 
   /**
+   * Cloudflare Agents lifecycle: reconcile durable work left by a
+   * prior incarnation (issue #2761, tracker #2708 A10). A fresh
+   * incarnation has executed nothing, so every active task-ledger
+   * record found at start belongs to a dead incarnation — that
+   * incarnation's runs were interrupted mid-flight and their
+   * records are recovered (marked interrupted) here, at first
+   * touch, instead of waiting for the orchestrator's #618 stale
+   * sweep to reach this instance. Recovery failure must never
+   * break agent start — a throw out of onStart is terminal for
+   * the instance — so it is logged, not propagated; the #618 sweep
+   * remains the backstop for anything this pass misses.
+   */
+  override async onStart(): Promise<void> {
+    try {
+      const recovered = await this.recoverInterruptedResearchTasks();
+      if (recovered.length > 0) {
+        console.warn(
+          `[ResearchAgent] Start-up recovery marked ${recovered.length} interrupted research task(s) as failed → escalated.`
+        );
+      }
+    } catch (error) {
+      console.error(
+        "[ResearchAgent][onStart] Interrupted-run recovery failed:",
+        error
+      );
+    }
+  }
+
+  /**
    * Issue #577 — durable task record for a delegated research run.
    * The orchestrator creates + begins a task before dispatch and
    * completes/fails it afterwards; the record lives with the work.
@@ -354,6 +383,29 @@ export class ResearchAgent extends PortThink {
     staleAfterMs: number = DEFAULT_STALE_AFTER_MS
   ): Promise<ResearchTask[]> {
     return this.taskLedger().sweepStale(staleAfterMs);
+  }
+
+  /**
+   * Issue #2761 (tracker #2708 A10): close every active research
+   * task as interrupted (failed → escalated, the interruption
+   * recorded in the task's history). Invoked by onStart, where an
+   * active record is orphaned by construction (see onStart); also
+   * callable directly. Never auto-reruns a run — the run may have
+   * partially happened, and persistRun may already have published
+   * its report before the orchestrator could complete the task,
+   * so re-dispatch would publish a second, divergent report for
+   * one delegated run (#615 doctrine); retry as a NEW run belongs
+   * to the caller/workflow layer. The ledger's idempotency slot
+   * is deliberately respected in both directions: an active
+   * record still dedupes a duplicate create, and once the record
+   * is terminal a later create under the same key starts fresh —
+   * recovery itself writes only through the ledger's guarded
+   * transitions.
+   */
+  async recoverInterruptedResearchTasks(): Promise<ResearchTask[]> {
+    return this.taskLedger().recoverInterrupted(
+      "interrupted: agent restarted before the run completed (start-up recovery)"
+    );
   }
 
   /** Issue #635: delete terminal task records past the retention tiers. */
