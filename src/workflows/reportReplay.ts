@@ -74,6 +74,11 @@ export interface ReplayArtifacts {
   reportUrl?: string;
 }
 
+/** Issue #2909 (G2): a pinned pattern reference — the object form G1 writes, or the legacy string form older bodies carry. */
+export type ReplayPatternRef = string | { patternId: string; version: string };
+/** Issue #2909 (G2): a resolved preset reference — object form, or legacy string form. */
+export type ReplayPresetRef = string | { presetId: string; resolvedAt?: string };
+
 export interface StockReplayEnvelope {
   kind: "replay";
   reportKind: "stock-screen";
@@ -90,8 +95,10 @@ export interface StockReplayEnvelope {
   success: boolean;
   /** The run's criteria, when recorded; null when not recorded (partial gap). */
   criteria: Record<string, unknown> | null;
-  patternRef?: string;
-  presetRef?: string;
+  patternRef?: ReplayPatternRef;
+  presetRef?: ReplayPresetRef;
+  /** Issue #2909 (G2): run qualifications for unmapped pattern guardrails, when recorded. */
+  patternQualifications?: string[];
   totalScanned: number;
   matchedCount: number;
   /** The full persisted scanned set — quotes, enrichment, indicators/scores as stored. */
@@ -131,6 +138,37 @@ export type ReplayEnvelope = StockReplayEnvelope | ResearchReplayEnvelope;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Issue #2909 (G2): normalize a persisted ref to the envelope
+ * form. A legacy string passes through unchanged; an object
+ * with a string patternId passes through with its version
+ * (or "unknown" when the version was never recorded — an
+ * explicit unknown, never an invented version). Anything else
+ * present-but-unparsable returns null so the caller can mark
+ * it partial instead of inventing a ref.
+ */
+function parsePatternRef(value: unknown): ReplayPatternRef | null {
+  if (typeof value === "string") return value;
+  if (isRecord(value) && typeof value.patternId === "string") {
+    return {
+      patternId: value.patternId,
+      version: typeof value.version === "string" ? value.version : "unknown",
+    };
+  }
+  return null;
+}
+
+function parsePresetRef(value: unknown): ReplayPresetRef | null {
+  if (typeof value === "string") return value;
+  if (isRecord(value) && typeof value.presetId === "string") {
+    return {
+      presetId: value.presetId,
+      ...(typeof value.resolvedAt === "string" ? { resolvedAt: value.resolvedAt } : {}),
+    };
+  }
+  return null;
 }
 
 /** Build a replay envelope from one persisted canonical record. Throws loudly on missing/unreplayable data. */
@@ -178,6 +216,17 @@ export function buildReplayFromRecord(
   if (!Array.isArray(body.opportunities)) {
     partialReasons.push("standouts (opportunities) not recorded for this run.");
   }
+  const patternRef = parsePatternRef(body.patternRef);
+  if (body.patternRef !== undefined && patternRef === null) {
+    partialReasons.push("pattern reference recorded in an unrecognized shape — replayed rows are unaffected, the pattern is not shown.");
+  }
+  const presetRef = parsePresetRef(body.presetRef);
+  if (body.presetRef !== undefined && presetRef === null) {
+    partialReasons.push("preset reference recorded in an unrecognized shape — replayed rows are unaffected, the preset is not shown.");
+  }
+  const patternQualifications = Array.isArray(body.patternQualifications)
+    ? body.patternQualifications.filter((q): q is string => typeof q === "string")
+    : undefined;
   const artifacts: ReplayArtifacts = {
     ...(typeof body.pdfKey === "string" ? { pdfKey: body.pdfKey } : {}),
     ...(typeof body.xlsxKey === "string" ? { xlsxKey: body.xlsxKey } : {}),
@@ -202,8 +251,9 @@ export function buildReplayFromRecord(
     ...(typeof body.trigger === "string" ? { trigger: body.trigger } : {}),
     success: body.success !== false,
     criteria,
-    ...(typeof body.patternRef === "string" ? { patternRef: body.patternRef } : {}),
-    ...(typeof body.presetRef === "string" ? { presetRef: body.presetRef } : {}),
+    ...(patternRef !== null ? { patternRef } : {}),
+    ...(presetRef !== null ? { presetRef } : {}),
+    ...(patternQualifications !== undefined ? { patternQualifications } : {}),
     totalScanned: typeof body.totalScanned === "number" ? body.totalScanned : body.allStocks.length,
     matchedCount: typeof body.matchedCount === "number" ? body.matchedCount : standouts.length,
     rows: body.allStocks,

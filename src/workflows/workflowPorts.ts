@@ -232,6 +232,8 @@ export interface WorkflowJobCommand {
   goalId?: string;
   patternRef?: { patternId: string; version: string };
   presetRef?: { presetId: string; resolvedAt: string };
+  /** Issue #2909 (G2): run qualifications for unmapped pattern guardrails, carried on the command like patternRef. */
+  patternQualifications?: string[];
   /** Owner login. Required — fail closed without an identity (#1185). */
   userLogin: string;
   /** Shards to run in parallel (computed by the starter from the request). */

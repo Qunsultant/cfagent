@@ -35,6 +35,10 @@ export interface RunDetailRun {
   trigger?: string;
   universe?: string;
   sector: string;
+  /** Issue #2909 (G2): the pinned pattern for a pattern run, when the run record carries it. */
+  patternRef?: string | { patternId: string; version: string };
+  /** Issue #2909 (G2): run qualifications for unmapped pattern guardrails, when recorded. */
+  patternQualifications?: string[];
   success: boolean;
   totalScanned: number;
   matchedCount: number;
@@ -150,6 +154,29 @@ export function RunDetailView({ run, confirmations, confirmationsLoading, chrome
         </Notice>
       )}
 
+      {(run.patternRef || (run.patternQualifications && run.patternQualifications.length > 0)) && (
+        <section aria-label="Pattern" style={{ margin: "1rem 0" }}>
+          <h4 style={{ margin: "0 0 0.5rem" }}>Pattern</h4>
+          {run.patternRef && (
+            <div>
+              {typeof run.patternRef === "string"
+                ? `Pattern: ${run.patternRef}`
+                : `Pattern: ${run.patternRef.patternId} (v${run.patternRef.version}) — pinned at run creation.`}
+            </div>
+          )}
+          {run.patternQualifications && run.patternQualifications.length > 0 && (
+            <Notice tone="warning" density="compact">
+              Qualified run — these pattern guardrails were NOT enforced by this screen and are recorded here, never silently dropped:
+              <ul style={{ margin: "0.25rem 0 0", paddingLeft: "1.25rem" }}>
+                {run.patternQualifications.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            </Notice>
+          )}
+        </section>
+      )}
+
       <section aria-label="Artifacts" style={{ margin: "1rem 0" }}>
         <h4 style={{ margin: "0 0 0.5rem" }}>Artifacts</h4>
         <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
@@ -205,6 +232,16 @@ export function RunDetailView({ run, confirmations, confirmationsLoading, chrome
                 {replay.replay.partial && replay.replay.partialReasons && replay.replay.partialReasons.length > 0 && (
                   <div style={{ marginTop: "0.25rem" }}>
                     Partial: {replay.replay.partialReasons.join(" ")}
+                  </div>
+                )}
+                {replay.replay.patternQualifications && replay.replay.patternQualifications.length > 0 && (
+                  <div style={{ marginTop: "0.25rem" }}>
+                    Qualified — guardrails not enforced on this run:
+                    <ul style={{ margin: "0.25rem 0 0", paddingLeft: "1.25rem" }}>
+                      {replay.replay.patternQualifications.map((line) => (
+                        <li key={line}>{line}</li>
+                      ))}
+                    </ul>
                   </div>
                 )}
               </Notice>

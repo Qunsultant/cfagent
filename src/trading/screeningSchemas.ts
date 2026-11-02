@@ -198,6 +198,22 @@ export interface StockScreenRequest {
    *  false drops the artifacts from the DELIVERY projection only —
    *  the run record and its stored report are untouched. */
   generatePdf?: boolean;
+  /**
+   * Issue #2909 (G2): the pattern pinned at run creation, sent
+   * by the New Screen form only while its criteria are exactly
+   * the applied pattern's. Envelope only, split out here;
+   * never forwarded into the engine filter, and never a
+   * preset: pattern application writes no preset storage.
+   */
+  patternRef?: { patternId: string; version: string };
+  /**
+   * Issue #2909 (G2): run qualifications for pattern guardrails
+   * with no filter field — human lines naming each guardrail
+   * and stating it is not enforced. Envelope only; recorded
+   * on the canonical body and shown on replay, never silently
+   * converted into filter fields.
+   */
+  patternQualifications?: string[];
 }
 
 const stockScreenRequestSchema = z.strictObject({
@@ -209,12 +225,16 @@ const stockScreenRequestSchema = z.strictObject({
   slackChannel: z.string().optional(),
   webhookUrl: z.string().optional(),
   generatePdf: z.boolean().optional(),
+  patternRef: z
+    .strictObject({ patternId: nonEmptyString, version: nonEmptyString })
+    .optional(),
+  patternQualifications: z.array(nonEmptyString).optional(),
 });
 
 export function parseStockScreenRequest(input: unknown): ScreeningValidationResult<StockScreenRequest> {
   const parsed = parseWith("stock screen request", stockScreenRequestSchema, input);
   if (!parsed.ok) return parsed;
-  const { universe, minScore, emailTo, pushToSlack, slackChannel, webhookUrl, generatePdf, ...filters } = parsed.value as Record<string, unknown>;
+  const { universe, minScore, emailTo, pushToSlack, slackChannel, webhookUrl, generatePdf, patternRef, patternQualifications, ...filters } = parsed.value as Record<string, unknown>;
   return {
     ok: true,
     value: {
@@ -226,6 +246,8 @@ export function parseStockScreenRequest(input: unknown): ScreeningValidationResu
       ...(slackChannel !== undefined ? { slackChannel: slackChannel as string } : {}),
       ...(webhookUrl !== undefined ? { webhookUrl: webhookUrl as string } : {}),
       ...(generatePdf !== undefined ? { generatePdf: generatePdf as boolean } : {}),
+      ...(patternRef !== undefined ? { patternRef: patternRef as StockScreenRequest["patternRef"] } : {}),
+      ...(patternQualifications !== undefined ? { patternQualifications: patternQualifications as string[] } : {}),
     },
   };
 }
