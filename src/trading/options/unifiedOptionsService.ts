@@ -108,7 +108,7 @@ export interface UnifiedOptionsRequest {
   evaluateAllStrategies?: boolean;
   /**
    * Issue #2600: canonical per-run strategy scope — "thesis"
-   * (default), "all", or "no-view". Deprecated alias:
+   * (default), "all", or "no-view". Deprecated alias (superseded by strategyMode):
    * evaluateAllStrategies (true === "all"). A conflicting pair is
    * rejected at the unified route schema; the service resolves the
    * pair once via resolveStrategyMode before forwarding, so engine
