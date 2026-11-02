@@ -43,6 +43,11 @@ import type {
 } from "../actors/actorPorts";
 import { tool, type ToolSet } from "ai";
 import { getServiceUserLogin } from "../security/serviceIdentity";
+import { createApprovalWorkflow } from "../services/cloudflareApprovalWorkflow";
+import type {
+  ApprovalWorkflow,
+  ApprovalWorkflowHost,
+} from "../services/approvalWorkflowPorts";
 import { recordBlockingAudit } from "../security/auditChain";
 import { z } from "zod";
 import { resolveAiModelName } from "./model";
@@ -1064,6 +1069,24 @@ export class TradingAgent extends PortThink {
     return tradingAgentUserLogin(this.name ?? "trading", getServiceUserLogin(this.env));
   }
 
+  /**
+   * Issue #1780 (Adapter S6, program #1717): the ApprovalWorkflow
+   * port for this instance, built fresh per call so the adapter
+   * resolves the host doors at call time (a door stubbed on the
+   * instance after construction still flows through the port —
+   * the existing approval tests' idiom). The host is this agent
+   * itself, so a run keeps its existing agent origin (this
+   * instance's name, addressed via tradingAgentName by the S5
+   * gateway / mesh door), and the binding stays
+   * TRADE_WORKFLOW_BINDING — no new naming, no new binding.
+   */
+  private approvalWorkflow(): ApprovalWorkflow {
+    return createApprovalWorkflow(
+      this as unknown as ApprovalWorkflowHost,
+      TRADE_WORKFLOW_BINDING,
+    );
+  }
+
   private readPlatform(provider?: string): ITradingPlatform {
     const userLogin = this.instanceUserLogin();
     if (!userLogin) {
@@ -1272,7 +1295,7 @@ export class TradingAgent extends PortThink {
       userLogin: ownerLogin,
       ...(input.traceparent ? { traceparent: input.traceparent } : {}),
     };
-    const workflowId = await this.runWorkflow(TRADE_WORKFLOW_BINDING, params);
+    const workflowId = await this.approvalWorkflow().start(params);
     return { workflowId, orderId: input.orderId, status: "awaiting_approval" };
   }
 
@@ -1322,14 +1345,11 @@ export class TradingAgent extends PortThink {
       },
       createdAt: new Date().toISOString(),
     });
-    await this.sendWorkflowEvent(TRADE_WORKFLOW_BINDING, input.workflowId, {
-      type: "approval",
-      payload: {
-        decision: input.decision,
-        authorizerDid: input.authorizerDid,
-        reason: input.reason,
-        expectedTerms: input.expectedTerms,
-      },
+    await this.approvalWorkflow().decide(input.workflowId, {
+      decision: input.decision,
+      authorizerDid: input.authorizerDid,
+      reason: input.reason,
+      expectedTerms: input.expectedTerms,
     });
     return { workflowId: input.workflowId, delivered: true };
   }
