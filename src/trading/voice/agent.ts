@@ -36,6 +36,7 @@ import {
 } from "../channels/approval";
 import { getVoiceConfig, getTradingConstraints } from "../../config/etapiConfig";
 import { getPlatformCapabilitiesDeskSummary } from "../../services/platformKnowledge";
+import { actorGateway } from "../../services/cloudflareActorGateway";
 
 /**
  * Normalizes speech-to-text transcript for financial and trading intents.
@@ -1059,13 +1060,13 @@ export type VoiceTurnForwarder = (
  */
 export function createOrchestratorVoiceTurnForwarder(env: Env, userLogin: string): VoiceTurnForwarder {
   return async (request: VoiceTradingTurnRequest): Promise<VoiceTradingTurnResponse> => {
-    const namespace = env.SEARCH_AGENT;
-    if (!namespace || typeof namespace.idFromName !== "function") {
-      throw new Error(
-        "Voice turns require the SEARCH_AGENT (orchestrator) binding to reach the user's Durable Object ORM; refusing to process the turn without it (issue #815)."
-      );
-    }
-    const response = await namespace.get(namespace.idFromName(userLogin)).fetch(
+    // Issue #815 (via ActorGateway, #1779): an unbound SEARCH_AGENT
+    // binding now throws the gateway's named error at the dispatch
+    // below (the #781 fail-loud contract, unchanged) instead of
+    // falling back to an ORM-less local turn.
+    const response = await actorGateway.dispatch(
+      env.SEARCH_AGENT,
+      userLogin,
       new Request("https://agent.internal/trading/voice/turn", {
         method: "POST",
         headers: {

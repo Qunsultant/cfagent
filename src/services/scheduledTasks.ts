@@ -12,7 +12,8 @@ import type { Env, ScheduledTaskResult, StageChainConfig, TradeRecord, ScreenedS
 import { DatabaseORM } from "../orm";
 import { codedMessage } from "../outcomes/outcomeAspects";
 import { renewETradeAccessToken, getStoredTokens, etradeIdentityFromLogin } from "../security/etradeOAuth";
-import { getServiceUserLogin } from "../security/serviceIdentity";
+import { resolveScreenerAgentName } from "../agents/screenerAgentName";
+import { actorGateway } from "./cloudflareActorGateway";
 import { createMessagingPorts } from "../messaging/createMessagingPorts";
 import { toScreenerEnvelope } from "../messaging/screenerEventEnvelope";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
@@ -486,13 +487,21 @@ export class ScheduledTasksService {
    * ScreenerAgent stub (issue #261) — one agent owns all screening.
    */
   private getScreenerAgent(userLogin = this.userLogin): import("../agents/screener-agent").ScreenerAgent {
-    // Issue #1185: the bare "default" instance name belongs to the
-    // configured service identity — the only login that maps to it.
-    const serviceUserLogin = getServiceUserLogin(this.env);
-    const id = (this.env as any).SCREENER_AGENT.idFromName(
-      serviceUserLogin && userLogin === serviceUserLogin ? "default" : `screener:${userLogin}`
+    // Issue #1779 dedup: this method's inline naming duplicate is
+    // collapsed onto the ONE shared rule in
+    // src/agents/screenerAgentName.ts (also used by
+    // OrchestratorAgent.getScreenerAgent), addressed through the
+    // ActorGateway. Names agree on every legitimate input (service
+    // login -> "default", any other login -> "screener:<login>").
+    // The only deltas are fail-closed: an undefined login with a
+    // configured service identity now resolves to that identity's
+    // "default" instance (per #1185) instead of a `screener:undefined`
+    // instance that could hold no real state, and no login with no
+    // service identity now throws instead of addressing one.
+    return actorGateway.stub<import("../agents/screener-agent").ScreenerAgent>(
+      (this.env as any).SCREENER_AGENT,
+      resolveScreenerAgentName(this.env, userLogin),
     );
-    return (this.env as any).SCREENER_AGENT.get(id);
   }
 
   /**

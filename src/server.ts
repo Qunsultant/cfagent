@@ -15,7 +15,8 @@ import {
 import { getSessionCached, getSessionCachedFetchedAt, invalidateSessionCache } from "./security/sessionCache";
 import { resolveIdleTimeoutMs } from "./security/sessionPolicy";
 import { deleteSession, getSession, listSessionFamilyEntries, sessionStore, updateSession, wiredAccessRequestStore, wiredMembershipStore } from "./security/session";
-import { listStoreEntries, type DoNamespaceLike } from "./security/durableKv";
+import { listStoreEntries, type DoNamespaceLike, type DoStubLike } from "./security/durableKv";
+import type { ActorNamespaceLike } from "./services/actorGatewayPorts";
 import { zonedDateParts } from "./schedule";
 import { OPERATION_CATALOG } from "./orchestrate";
 import {
@@ -132,6 +133,7 @@ import {
   type MessageEnvelope,
   type SubscriberHandlers,
 } from "./messaging/messagingPorts";
+import { actorGateway } from "./services/cloudflareActorGateway";
 import { withRequestObservability } from "./observability/aspects";
 import { createObservabilitySink } from "./observability/createObservabilityPorts";
 import { writeEnvelopeToSink } from "./observability/observabilityPorts";
@@ -493,7 +495,6 @@ async function handleNlqWebhookRequest(
   const userLogin = typeof body.userId === "string" && /^[A-Za-z0-9_-]{1,80}$/.test(body.userId)
     ? `nlq_webhook_${body.userId}`
     : NLQ_WEBHOOK_SERVICE_LOGIN;
-  const agentId = env.SEARCH_AGENT.idFromName(userLogin);
   const target = new URL("/nlq", "https://agent.internal");
   const forwarded = new Request(target, {
     method: "POST",
@@ -504,7 +505,7 @@ async function handleNlqWebhookRequest(
     },
     body: JSON.stringify({ query: sanitizedQuery }),
   });
-  const response = await env.SEARCH_AGENT.get(agentId).fetch(forwarded);
+  const response = await actorGateway.dispatch(env.SEARCH_AGENT, userLogin, forwarded);
   if (!response.ok) return response;
   const result = await response.json() as Record<string, unknown>;
 
@@ -1466,15 +1467,14 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
     if (path.startsWith("/api/schedule/")) {
       const session = await requireAuth(request, env);
       if (!session) return Response.json({ error: "Unauthorized: Please log in." }, { status: 401 });
-      const schedId = (env as any).SCHEDULED_AGENT.idFromName("default");
-      const sched = (env as any).SCHEDULED_AGENT.get(schedId) as unknown as {
+      const sched = actorGateway.stub<{
         listGoals(): Promise<unknown[]>;
         getTickHistory(limit?: number): Promise<unknown[]>;
         addGoal(goal: Record<string, unknown>): Promise<unknown>;
         removeGoal(id: string): Promise<boolean>;
         setGoalEnabled(id: string, enabled: boolean): Promise<boolean>;
         triggerGoal(id: string): Promise<unknown>;
-      };
+      }>((env as any).SCHEDULED_AGENT, "default");
 
       if (path === "/api/schedule/goals" && request.method === "GET") {
         return Response.json({ ok: true, goals: await sched.listGoals() });
@@ -1922,14 +1922,12 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
           return Response.json({ error: "Governance seed unavailable." }, { status: 500 });
         }
       }
-      const stub = env.SEARCH_AGENT.get(
-        env.SEARCH_AGENT.idFromName(SHARED_ORCHESTRATOR_INSTANCE),
-      ) as unknown as {
+      const stub = actorGateway.stub<{
         seedGovernanceHalt(
           setBy: string,
           tenantId: string,
         ): Promise<{ seeded: boolean; state: GovernedHaltState }>;
-      };
+      }>(env.SEARCH_AGENT, SHARED_ORCHESTRATOR_INSTANCE);
       return handleSeedGovernanceRoute({
         session,
         method: request.method,
@@ -2004,13 +2002,12 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
           return Response.json({ error: "Chain reconciliation unavailable." }, { status: 500 });
         }
       }
-      const schedId = (env as any).SCHEDULED_AGENT.idFromName("default");
-      const sched = (env as any).SCHEDULED_AGENT.get(schedId) as unknown as {
+      const sched = actorGateway.stub<{
         reconcileChainScheduleProjection(
           tenantId: string,
           actor?: string,
         ): Promise<ReconcileReport>;
-      };
+      }>((env as any).SCHEDULED_AGENT, "default");
       return handleReconcileChainsRoute({
         session,
         method: request.method,
@@ -2155,13 +2152,11 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
           { status: 503 },
         );
       }
-      const stub = env.SEARCH_AGENT.get(
-        env.SEARCH_AGENT.idFromName(SHARED_ORCHESTRATOR_INSTANCE),
-      ) as unknown as {
+      const stub = actorGateway.stub<{
         reconcileShardJobProjection(
           tenantId: string,
         ): Promise<ReconcileShardJobsReport>;
-      };
+      }>(env.SEARCH_AGENT, SHARED_ORCHESTRATOR_INSTANCE);
       return handleReconcileJobsRoute({
         session,
         method: request.method,
@@ -2322,13 +2317,12 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
                 doLogin = session.githubLogin;
               }
             }
-            const id = env.SEARCH_AGENT.idFromName(doLogin);
             const targetUrl = new URL("/enrichment/status", "https://agent.internal");
             const freq = new Request(targetUrl, {
               headers: { "x-user-login": doLogin },
               signal: AbortSignal.timeout(3000),
             });
-            const fres = await env.SEARCH_AGENT.get(id).fetch(freq);
+            const fres = await actorGateway.dispatch(env.SEARCH_AGENT, doLogin, freq);
             if (fres.ok) {
               const data = (await fres.json().catch(() => null)) as {
                 quality?: import("./enrichment/enrichmentPorts").EnrichmentQualitySummary;
@@ -2390,12 +2384,7 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
       if (path === "/api/telemetry/reconcile") {
         const userLogin =
           url.searchParams.get("userLogin") ?? session?.githubLogin ?? "default";
-        const researchNs = (env as any).RESEARCH_AGENT as
-          | {
-              idFromName(name: string): unknown;
-              get(id: unknown): unknown;
-            }
-          | undefined;
+        const researchNs = (env as any).RESEARCH_AGENT as ActorNamespaceLike | undefined;
         return handleTelemetryReconcileRoute({
           session,
           method: request.method,
@@ -2407,10 +2396,9 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
             if (!researchNs) {
               throw new Error("ResearchAgent binding not configured.");
             }
-            const id = researchNs.idFromName(`research:${userLogin}`);
-            const agent = researchNs.get(id) as unknown as {
+            const agent = actorGateway.stub<{
               getTrackRecord(): Promise<{ ideas: unknown[] }>;
-            };
+            }>(researchNs, `research:${userLogin}`);
             const record = await agent.getTrackRecord();
             return { ideas: record.ideas as unknown as TrackRecordIdeaInput[] };
           },
@@ -2564,14 +2552,12 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
           { status: 503 },
         );
       }
-      const stub = env.SEARCH_AGENT.get(
-        env.SEARCH_AGENT.idFromName(SHARED_ORCHESTRATOR_INSTANCE),
-      ) as unknown as {
+      const stub = actorGateway.stub<{
         seedCanonicalReports(
           setBy: string,
           tenantId: string,
         ): Promise<SeedCanonicalReportsResult>;
-      };
+      }>(env.SEARCH_AGENT, SHARED_ORCHESTRATOR_INSTANCE);
       return handleSeedReportsRoute({
         session,
         method: request.method,
@@ -3605,7 +3591,6 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
           { status: 401, headers: corsHeaders }
         );
       }
-      const id = env.SEARCH_AGENT.idFromName(userLogin);
       const targetUrl = new URL("/mcp" + url.search, "https://agent.internal");
       const forwardReq = new Request(targetUrl, request);
       forwardReq.headers.set("x-user-login", userLogin);
@@ -3613,7 +3598,7 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
       // cannot tell session from API-key auth from the login alone.
       forwardReq.headers.set("x-principal-kind", session ? "session" : "api-key");
 
-      const resp = await env.SEARCH_AGENT.get(id).fetch(forwardReq);
+      const resp = await actorGateway.dispatch(env.SEARCH_AGENT, userLogin, forwardReq);
       const headers = new Headers(resp.headers);
       headers.set("Access-Control-Allow-Origin", "*");
       headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -3654,13 +3639,14 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
         request.headers.get("x-scanner-session") ||
         request.headers.get("x-user-id") ||
         "public_scanner";
-      const scannerId = (env as any).OPTIONS_SCANNER_MCP.idFromName(scannerAffinityId);
       const scannerUrl = new URL(
         path.replace("/mcp/scanner", "") || "/" + url.search,
         "https://scanner.internal",
       );
 
-      const resp = await (env as any).OPTIONS_SCANNER_MCP.get(scannerId).fetch(
+      const resp = await actorGateway.dispatch(
+        (env as any).OPTIONS_SCANNER_MCP,
+        scannerAffinityId,
         new Request(scannerUrl, request),
       );
       const headers = new Headers(resp.headers);
@@ -3709,13 +3695,12 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
       const session = await requireAuth(request, env);
       if (!session) return new Response("Unauthorized", { status: 401 });
       const userLogin = session.githubLogin;
-      const id = env.SEARCH_AGENT.idFromName(userLogin);
       const subPath = path.replace(/^\/api/, "");
       const targetUrl = new URL(subPath + url.search, "https://agent.internal");
       const forwardReq = new Request(targetUrl, request);
       forwardReq.headers.set("x-user-login", userLogin);
 
-      const resp = await env.SEARCH_AGENT.get(id).fetch(forwardReq);
+      const resp = await actorGateway.dispatch(env.SEARCH_AGENT, userLogin, forwardReq);
       const headers = new Headers(resp.headers);
       headers.set("Access-Control-Allow-Origin", "*");
       headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -3741,17 +3726,17 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
       const subPath = path.replace(/^\/api/, "");
       const targetUrl = new URL(subPath + url.search, "https://agent.internal");
       const forwardReq = new Request(targetUrl, request);
-      let id;
+      let instanceName;
       if (session) {
         forwardReq.headers.set("x-user-login", session.githubLogin);
-        id = env.SEARCH_AGENT.idFromName(session.githubLogin);
+        instanceName = session.githubLogin;
       } else {
         forwardReq.headers.delete("x-user-login");
         forwardReq.headers.delete("x-user-id");
-        id = env.SEARCH_AGENT.idFromName(PREMIUM_GATEWAY_INSTANCE);
+        instanceName = PREMIUM_GATEWAY_INSTANCE;
       }
 
-      const resp = await env.SEARCH_AGENT.get(id).fetch(forwardReq);
+      const resp = await actorGateway.dispatch(env.SEARCH_AGENT, instanceName, forwardReq);
       const headers = new Headers(resp.headers);
       headers.set("Access-Control-Allow-Origin", "*");
       headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -3762,9 +3747,8 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
 
     // --- External Payment Webhook Listeners (Stripe, PayPal, Lemon Squeezy) ---
     if (path.startsWith("/api/payments/webhook") || path === "/payments/webhook") {
-      const id = env.SEARCH_AGENT.idFromName("system_webhook_receiver");
       const targetUrl = new URL("/payments/webhook" + url.search, "https://agent.internal");
-      return env.SEARCH_AGENT.get(id).fetch(new Request(targetUrl, request));
+      return actorGateway.dispatch(env.SEARCH_AGENT, "system_webhook_receiver", new Request(targetUrl, request));
     }
 
     // --- Omnichannel Trading Agent: Inbound Email Webhook & Simulator ---
@@ -3781,11 +3765,10 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
       const session = await requireAuth(request, env);
       if (!session) return new Response("Unauthorized", { status: 401 });
       const userLogin = session.githubLogin;
-      const id = env.SEARCH_AGENT.idFromName(userLogin);
       const targetUrl = new URL("/trading/email/inbound", "https://agent.internal");
       const forwardReq = new Request(targetUrl, request);
       forwardReq.headers.set("x-user-login", userLogin);
-      return env.SEARCH_AGENT.get(id).fetch(forwardReq);
+      return actorGateway.dispatch(env.SEARCH_AGENT, userLogin, forwardReq);
     }
 
     // --- Omnichannel Trading Agent: Signed Email Approval Link Click ---
@@ -3814,9 +3797,8 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
       if (!fastCheck.ok) {
         return renderPage("Approval link invalid", fastCheck.error);
       }
-      const id = env.SEARCH_AGENT.idFromName(INBOUND_EMAIL_ORCHESTRATOR_INSTANCE);
       const targetUrl = new URL("/trading/email/approve-link", "https://agent.internal");
-      const forwardRes = await env.SEARCH_AGENT.get(id).fetch(
+      const forwardRes = await actorGateway.dispatch(env.SEARCH_AGENT, INBOUND_EMAIL_ORCHESTRATOR_INSTANCE,
         new Request(targetUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -3841,11 +3823,10 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
       const session = await requireAuth(request, env);
       if (!session) return new Response("Unauthorized", { status: 401 });
       const userLogin = session.githubLogin;
-      const id = env.SEARCH_AGENT.idFromName(userLogin);
       const targetUrl = new URL("/trading/slack/event", "https://agent.internal");
       const forwardReq = new Request(targetUrl, request);
       forwardReq.headers.set("x-user-login", userLogin);
-      return env.SEARCH_AGENT.get(id).fetch(forwardReq);
+      return actorGateway.dispatch(env.SEARCH_AGENT, userLogin, forwardReq);
     }
 
     // --- Omnichannel Trading Agent: Slack Principal Link Confirm ---
@@ -3880,11 +3861,10 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
       const session = await requireAuth(request, env);
       if (!session) return new Response("Unauthorized", { status: 401 });
       const userLogin = session.githubLogin;
-      const id = env.SEARCH_AGENT.idFromName(userLogin);
       const targetUrl = new URL("/trading/voice/turn", "https://agent.internal");
       const forwardReq = new Request(targetUrl, request);
       forwardReq.headers.set("x-user-login", userLogin);
-      return env.SEARCH_AGENT.get(id).fetch(forwardReq);
+      return actorGateway.dispatch(env.SEARCH_AGENT, userLogin, forwardReq);
     }
 
     // --- Omnichannel Trading Agent: Voice Welcome Greeting ---
@@ -3892,11 +3872,10 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
       const session = await requireAuth(request, env);
       if (!session) return new Response("Unauthorized", { status: 401 });
       const userLogin = session.githubLogin;
-      const id = env.SEARCH_AGENT.idFromName(userLogin);
       const targetUrl = new URL("/trading/voice/greeting", "https://agent.internal");
       const forwardReq = new Request(targetUrl, request);
       forwardReq.headers.set("x-user-login", userLogin);
-      return env.SEARCH_AGENT.get(id).fetch(forwardReq);
+      return actorGateway.dispatch(env.SEARCH_AGENT, userLogin, forwardReq);
     }
 
     // --- Omnichannel Options Intelligence: Forwarder for Options Endpoints (Catalog, Strategies, Screen, Unified, Config) ---
@@ -3910,12 +3889,11 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
       const session = await requireAuth(request, env);
       if (!session) return new Response("Unauthorized", { status: 401 });
       const userLogin = session.githubLogin;
-      const id = env.SEARCH_AGENT.idFromName(userLogin);
       const subPath = path.replace(/^\/api/, "");
       const targetUrl = new URL(subPath + url.search, "https://agent.internal");
       const forwardReq = new Request(targetUrl, request);
       forwardReq.headers.set("x-user-login", userLogin);
-      return env.SEARCH_AGENT.get(id).fetch(forwardReq);
+      return actorGateway.dispatch(env.SEARCH_AGENT, userLogin, forwardReq);
     }
 
     // --- Cloudflare Agents Task Scheduling Management APIs ---
@@ -3927,12 +3905,11 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
       const session = await requireAuth(request, env);
       if (!session) return new Response("Unauthorized", { status: 401 });
       const userLogin = session.githubLogin;
-      const id = env.SEARCH_AGENT.idFromName(userLogin);
       const subPath = path.replace(/^\/api/, "");
       const targetUrl = new URL(subPath + url.search, "https://agent.internal");
       const forwardReq = new Request(targetUrl, request);
       forwardReq.headers.set("x-user-login", userLogin);
-      return env.SEARCH_AGENT.get(id).fetch(forwardReq);
+      return actorGateway.dispatch(env.SEARCH_AGENT, userLogin, forwardReq);
     }
 
     // #1768: WebSocket upgrade dispatch, table-driven (src/api/wsRoutes.ts).
@@ -3971,8 +3948,7 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
         return new Response(null, { status: 101, webSocket: clientWs });
       },
       fetchTicker: async (strippedRequest) => {
-        const tickerId = env.TICKER_AGENT.idFromName(TICKER_INSTANCE_NAME);
-        return env.TICKER_AGENT.get(tickerId).fetch(strippedRequest);
+        return actorGateway.dispatch(env.TICKER_AGENT, TICKER_INSTANCE_NAME, strippedRequest);
       },
       ingressMode: apiIngressMode,
     });
@@ -4081,14 +4057,13 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
         // and the "browser_trader" literal is a defensive default
         // only. The DO route has no fallback (one shared block).
         const userLogin = resolveSnapIdentity(request.headers.get("x-user-login"), tx.symbol);
-        const id = env.SEARCH_AGENT.idFromName(userLogin);
         const targetUrl = new URL("/trading/browser/transaction-snap", "https://agent.internal");
         const forwardReq = new Request(targetUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json", "x-user-login": userLogin },
           body: JSON.stringify(body),
         });
-        return env.SEARCH_AGENT.get(id).fetch(forwardReq);
+        return actorGateway.dispatch(env.SEARCH_AGENT, userLogin, forwardReq);
       } catch (err: any) {
         return Response.json({ success: false, error: err.message }, { status: 500 });
       }
@@ -4104,14 +4079,13 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
 
       const params = new URLSearchParams(rawBody);
       const teamId = params.get("team_id") || "default_workspace";
-      const id = env.SEARCH_AGENT.idFromName(`slack_${teamId}`);
       const targetUrl = new URL("/trading/slack/command", "https://agent.internal");
       const forwardReq = new Request(targetUrl, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: rawBody,
       });
-      return env.SEARCH_AGENT.get(id).fetch(forwardReq);
+      return actorGateway.dispatch(env.SEARCH_AGENT, `slack_${teamId}`, forwardReq);
     }
 
     // --- Omnichannel Trading Agent: Slack Events Webhook ---
@@ -4135,14 +4109,13 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
 
       // Multi-tenant: Route to workspace DO or fallback receiver
       const teamId = parsed.team_id || "default_workspace";
-      const id = env.SEARCH_AGENT.idFromName(`slack_${teamId}`);
       const targetUrl = new URL("/trading/slack/event", "https://agent.internal");
       const forwardReq = new Request(targetUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: rawBody,
       });
-      return env.SEARCH_AGENT.get(id).fetch(forwardReq);
+      return actorGateway.dispatch(env.SEARCH_AGENT, `slack_${teamId}`, forwardReq);
     }
 
     // --- Omnichannel Trading Agent: Slack Interactive Component Actions ---
@@ -4235,14 +4208,13 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
       }
 
       const teamId = payload.team?.id || "default_workspace";
-      const id = env.SEARCH_AGENT.idFromName(`slack_${teamId}`);
       const targetUrl = new URL("/trading/slack/interaction", "https://agent.internal");
       const forwardReq = new Request(targetUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      return env.SEARCH_AGENT.get(id).fetch(forwardReq);
+      return actorGateway.dispatch(env.SEARCH_AGENT, `slack_${teamId}`, forwardReq);
     }
 
     // --- Omnichannel Trading Agent: Slack OAuth Install & Callback ---
@@ -4298,14 +4270,13 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
         return new Response("Unauthorized: sign in to approve a trade.", { status: 401 });
       }
       const userLogin = session.githubLogin;
-      const id = env.SEARCH_AGENT.idFromName(userLogin);
       const targetUrl = new URL("/etrade/order/execute", "https://agent.internal");
       const forwardReq = new Request(targetUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-user-login": userLogin },
         body: JSON.stringify({ orderId, decision: "approved" }),
       });
-      const res = await env.SEARCH_AGENT.get(id).fetch(forwardReq);
+      const res = await actorGateway.dispatch(env.SEARCH_AGENT, userLogin, forwardReq);
       const json = (await res.json().catch(() => ({}))) as any;
 
       if (json.success) {
@@ -4320,12 +4291,11 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
       const session = await requireAuth(request, env);
       if (!session) return new Response("Unauthorized", { status: 401 });
 
-      const id = env.SEARCH_AGENT.idFromName(session.githubLogin);
       const targetUrl = new URL(`/clear${url.search}`, "https://agent.internal");
 
       const forwardReq = new Request(targetUrl, request);
       forwardReq.headers.set("x-user-login", session.githubLogin);
-      return env.SEARCH_AGENT.get(id).fetch(forwardReq);
+      return actorGateway.dispatch(env.SEARCH_AGENT, session.githubLogin, forwardReq);
     }
 
     // --- Options Flows Endpoints (Live, Historical, News, Insider, Congress, Summary, Presets) ---
@@ -4512,7 +4482,6 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
       }
       if (!userLogin) return new Response("Unauthorized", { status: 401 });
 
-      const id = env.SEARCH_AGENT.idFromName(userLogin);
       const subPath = path.replace(/^\/api/, "");
       const targetUrl = new URL(subPath + url.search, "https://agent.internal");
 
@@ -4535,7 +4504,7 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
       if (deliveryOverride !== "sync" && (deliveryOverride === "queued" || !isImmediateSync)) {
         forwardReq.headers.set("x-async-eligible", "1");
       }
-      return env.SEARCH_AGENT.get(id).fetch(forwardReq);
+      return actorGateway.dispatch(env.SEARCH_AGENT, userLogin, forwardReq);
     }
 
     // --- Simulated Sandbox Terminal for Payment Gateways ---
@@ -4863,8 +4832,7 @@ export default {
           Date.now(),
         )
       : false;
-    const id = env.SEARCH_AGENT.idFromName(SHARED_ORCHESTRATOR_INSTANCE);
-    const agent = env.SEARCH_AGENT.get(id);
+    const agent = actorGateway.stub<DoStubLike>(env.SEARCH_AGENT, SHARED_ORCHESTRATOR_INSTANCE);
 
     // PR #4 — ScheduledAgent tick: evaluate due goals, budget-check,
     // create Orchestrator jobs (issue #166).
@@ -4875,10 +4843,9 @@ export default {
         );
         return;
       }
-      const schedId = env.SCHEDULED_AGENT.idFromName("default");
-      const schedAgent = env.SCHEDULED_AGENT.get(schedId) as unknown as {
+      const schedAgent = actorGateway.stub<{
         onCron(): Promise<unknown>;
-      };
+      }>(env.SCHEDULED_AGENT, "default");
       const tickPromise = schedAgent.onCron();
       if (ctx?.waitUntil) ctx.waitUntil(tickPromise);
       else await tickPromise;
@@ -5083,8 +5050,7 @@ export default {
     // + logged, never retried (a poison-loop guard).
     if (batch?.queue === "screener-events") {
       const serviceUserLogin = getServiceUserLogin(env);
-      const id = env.SEARCH_AGENT.idFromName(SHARED_ORCHESTRATOR_INSTANCE);
-      const agent = env.SEARCH_AGENT.get(id);
+      const agent = actorGateway.stub<DoStubLike>(env.SEARCH_AGENT, SHARED_ORCHESTRATOR_INSTANCE);
       let serviceProvisioned: boolean | null = null;
       const getServiceProvisioned = async (): Promise<boolean> => {
         if (serviceProvisioned === null) {
@@ -5203,8 +5169,7 @@ export default {
     // (dropped, not retried: a re-dispatch would deny again, and
     // options analysis is time-sensitive).
     const serviceUserLogin = getServiceUserLogin(env);
-    const id = env.SEARCH_AGENT.idFromName(SHARED_ORCHESTRATOR_INSTANCE);
-    const agent = env.SEARCH_AGENT.get(id);
+    const agent = actorGateway.stub<DoStubLike>(env.SEARCH_AGENT, SHARED_ORCHESTRATOR_INSTANCE);
     let serviceProvisioned: boolean | null = null;
 
     if (batch?.messages && Array.isArray(batch.messages)) {

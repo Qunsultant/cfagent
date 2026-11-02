@@ -1,5 +1,6 @@
 import { PortThink } from "../actors/thinkAdapter";
 import { AGENTIC_SPEND_AGENT_ID } from "../payments/ledger";
+import { actorGateway } from "../services/cloudflareActorGateway";
 import {
   dispatchScheduledA2A,
   scheduledA2AOutcome,
@@ -325,14 +326,9 @@ export class ScheduledAgent extends PortThink {
       if (!isForced && !isDue(goal.cron, goal.lastRun, now, goal.timeZone)) continue;
 
       try {
-        const paymentsId = env.PAYMENTS_AGENT.idFromName("default");
-        const payments = env.PAYMENTS_AGENT.get(paymentsId) as unknown as {
-          budgetCheck(req: {
-            operation: string;
-            amountCents: number;
-            agentId: string;
-          }): Promise<{ allowed: boolean; reason?: string }>;
-        };
+        // #1779: the shared PaymentsAgentStub (budgetCheck) via the
+        // ActorGateway — replaces this site's inline stub type.
+        const payments = actorGateway.paymentsStub(env.PAYMENTS_AGENT);
         const budgetOk = await payments.budgetCheck({
           operation: goal.operation,
           amountCents: goal.budgetCents,
@@ -1140,14 +1136,9 @@ export class ScheduledAgent extends PortThink {
       }
       return { fired: false, reason: decision.reason, record };
     }
-    const paymentsId = this.env.PAYMENTS_AGENT.idFromName("default");
-    const payments = this.env.PAYMENTS_AGENT.get(paymentsId) as unknown as {
-      budgetCheck(req: {
-        operation: string;
-        amountCents: number;
-        agentId: string;
-      }): Promise<{ allowed: boolean; reason?: string }>;
-    };
+    // #1779: the shared PaymentsAgentStub (budgetCheck) via the
+    // ActorGateway — the second site of the duplicated inline type.
+    const payments = actorGateway.paymentsStub(this.env.PAYMENTS_AGENT);
     const budgetOk = await payments.budgetCheck({
       operation: CHAIN_EXECUTE_OPERATION,
       amountCents: record.budgetCents,
