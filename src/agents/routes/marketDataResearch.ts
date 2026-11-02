@@ -50,7 +50,7 @@ import {
 import { workflowAcceptedResponse } from "../../workflows/screenerWorkflowRoutes";
 import { startStockScreenWorkflowOrNull } from "../../workflows/screenExecutionBroker";
 import { persistThenDeliverAll } from "../../workflows/screenRunFinalize";
-import { buildStockScreenRunSpec } from "../../workflows/stockScreenRunSpec";
+import { buildStockScreenRunSpec, specCanonicalFields, withRunProvenance } from "../../workflows/stockScreenRunSpec";
 import type { ScreenerAgent } from "../screener-agent";
 import type { AgentName, Env } from "../../types";
 
@@ -324,10 +324,12 @@ export async function handleMarketDataCompareScreenRoutes(
       if (!specResult.ok) {
         return Response.json({ error: specResult.error }, { status: 400 });
       }
-      const spec = specResult.spec;
-      const universe = spec.universe;
+      const universe = specResult.spec.universe;
       const userLogin = request.headers.get("x-user-login");
       if (!userLogin) return unauthenticatedResponse();
+      // Issue #2908 (G1): the builder runs before auth here, so
+      // the login is overlaid after it (same spec, no rebuild).
+      const spec = withRunProvenance(specResult.spec, { userLogin });
       const agent = ctx.getScreenerAgent(userLogin);
       // Issue #2827: async path via ScreenExecutionBroker
       // (store only, no deliver — the market-data route has
@@ -364,7 +366,7 @@ export async function handleMarketDataCompareScreenRoutes(
         await persistThenDeliverAll({
           results: shards,
           // Issue #2863: record the run's criteria with each shard's canonical copy.
-          persist: (r) => ctx.persistScreenerReportCanonical({ ...r, userLogin, criteria: spec.filters }),
+          persist: (r) => ctx.persistScreenerReportCanonical({ ...r, userLogin, criteria: spec.filters, ...specCanonicalFields(spec) }),
         });
         const failedShards = shards.filter((r) => !r.success);
         ctx.audit("market_data.screener.executed", "research", {
@@ -422,7 +424,7 @@ export async function handleMarketDataCompareScreenRoutes(
       await persistThenDeliverAll({
         results: [result],
         // Issue #2863: record the run's criteria with the canonical copy.
-        persist: (r) => ctx.persistScreenerReportCanonical({ ...r, userLogin, criteria: spec.filters }),
+        persist: (r) => ctx.persistScreenerReportCanonical({ ...r, userLogin, criteria: spec.filters, ...specCanonicalFields(spec) }),
       });
       ctx.audit("market_data.screener.executed", "research", {
         filterSummary: result.filterSummary,
