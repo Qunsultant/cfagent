@@ -12,16 +12,17 @@
  * original inline block returned.
  */
 
-import { parseStockScreenRequest, shardableUniverses } from "../../trading";
+import { parseStockScreenRequest } from "../../trading";
+import type {
+  StockScreenDelivery,
+  StockScreenRunSpec,
+} from "../../workflows/stockScreenRunSpec";
 import { screenerOutcomeFromRunResult } from "../../services/screenerFollowups";
 import { isPortfolioContextEnabled } from "../../services/screeningFlags";
 import type { ETradeService } from "../../services/etrade";
-import {
-  manualWorkflowJobId,
-  tryStartScreenerWorkflow,
-  workflowAcceptedResponse,
-  workflowTenantId,
-} from "../../workflows/screenerWorkflowRoutes";
+import { workflowAcceptedResponse } from "../../workflows/screenerWorkflowRoutes";
+import { startStockScreenWorkflowOrNull } from "../../workflows/screenExecutionBroker";
+import { persistThenDeliverAll } from "../../workflows/screenRunFinalize";
 import { publishManualScreenerRun } from "./etradeBroker";
 import type { EtradeBrokerRouteContext } from "./etradeBroker";
 import type { ScreenerAgent } from "../screener-agent";
@@ -33,13 +34,13 @@ import type { ScreenerAgent } from "../screener-agent";
  * request by parseStockScreenRequest. Every field optional: a caller
  * that sends none gets today's behavior exactly.
  */
-export interface ManualScreenDelivery {
-  emailTo?: string;
-  pushToSlack?: boolean;
-  slackChannel?: string;
-  webhookUrl?: string;
-  generatePdf?: boolean;
-}
+/**
+ * Issue #2809: the delivery envelope is defined once in
+ * stockScreenRunSpec.ts (StockScreenDelivery); this name is kept
+ * as an alias so existing importers keep working. Do not add
+ * fields here — add them to StockScreenDelivery.
+ */
+export type ManualScreenDelivery = StockScreenDelivery;
 
 /**
  * Issue #2545: the fields a delivery selection stamps onto a finished
@@ -144,8 +145,18 @@ export async function executeEtradeScreen(args: {
   requestedEnv: "TEST" | "PROD" | undefined;
   userLogin: string;
   agent: ScreenerAgent;
-  universe: StockScreenValue["universe"];
-  validatedFilters: StockScreenValue["filters"];
+  /**
+   * Issue #2809: the normalized run spec, built once by
+   * buildStockScreenRunSpec. When present it is the single
+   * source for universe/filters/async/delivery/mode; the
+   * legacy fields below are kept only as the backward-
+   * compatible construction path (existing pins call with
+   * them) and are normalized to the same spec at the top
+   * of this function.
+   */
+  spec?: StockScreenRunSpec;
+  universe?: StockScreenValue["universe"];
+  validatedFilters?: StockScreenValue["filters"];
   /** Issue #1737: opt-in async path — start a workflow, return 202, never await the scan. */
   asyncRequested?: boolean;
   /** Issue #2545: the caller's delivery selection (subsumes the
@@ -163,54 +174,65 @@ export async function executeEtradeScreen(args: {
   screenMode?: "non-deterministic";
   screenIntent?: string;
 }): Promise<Response> {
-  const { ctx, sessionId, requestedEnv, userLogin, agent, universe, validatedFilters, delivery } = args;
+  const { ctx, sessionId, requestedEnv, userLogin, agent } = args;
+  // Issue #2809: normalize both call shapes to one spec. The
+  // legacy path pins deliver=true / source "etrade", exactly
+  // what the E*TRADE route's spec carries.
+  const spec: StockScreenRunSpec = args.spec ?? {
+    source: "etrade",
+    deliver: true,
+    filters: args.validatedFilters as StockScreenValue["filters"],
+    universe: args.universe as StockScreenValue["universe"],
+    asyncRequested: args.asyncRequested ?? false,
+    delivery: args.delivery ?? {},
+    ...(args.screenMode
+      ? { screenMode: args.screenMode, screenIntent: args.screenIntent }
+      : {}),
+  };
+  const universe = spec.universe;
+  const validatedFilters = spec.filters;
+  const delivery = spec.delivery;
+  const asyncRequested = spec.asyncRequested;
   // Issue #17: the portfolio-context flag is read here (orchestrator
   // storage owns mas_settings; the screener agent cannot read it) and
   // rides the run request — runSharded spreads it onto every shard.
   const portfolioContext = isPortfolioContextEnabled(ctx.readSettingRaw);
-  // Issue #1737: async path. Shards mirror runSharded (ALL →
-  // shardableUniverses, else one shard); the workflow owns
-  // store + deliver per shard, so nothing is persisted,
-  // published, or audited-as-complete here. Unbound → null
-  // → fall through to the synchronous path below.
-  if (args.asyncRequested) {
-    const jobId = manualWorkflowJobId(universe);
-    const shards =
-      universe === "ALL"
-        ? shardableUniverses().map((u) => ({ shardId: u, universe: u }))
-        : [{ shardId: universe, universe }];
-    const handle = await tryStartScreenerWorkflow(ctx.env, {
-      jobId,
-      type: "run-screen",
-      source: "manual",
-      trigger: "manual",
+  // Issue #2827: async path via ScreenExecutionBroker. The
+  // workflow owns store + deliver per shard, so nothing is
+  // persisted, published, or audited-as-complete here.
+  // Broker null (unbound / start failure) -> fall through
+  // to the synchronous path below. ND throw propagates
+  // (fail-closed, never a sync fallback).
+  if (asyncRequested) {
+    const started = await startStockScreenWorkflowOrNull({
+      env: ctx.env,
+      spec,
       userLogin,
-      role: "parent",
-      tenantId: workflowTenantId(ctx.env),
-      shards,
-      deliver: true,
-      filters: validatedFilters as unknown as Record<string, unknown>,
       environment: requestedEnv,
       portfolioContext,
-      ...(args.screenMode
-        ? { screenMode: args.screenMode, screenIntent: args.screenIntent }
-        : {}),
     });
-    if (handle) {
+    if (started) {
       ctx.audit("etrade.screen_enqueued", "trading", {
-        jobId,
-        workflowId: handle.workflowId,
+        jobId: started.jobId,
+        workflowId: started.handle.workflowId,
         universe,
-        shards: shards.length,
+        shards: started.shards.length,
       });
-      return workflowAcceptedResponse(handle);
+      return workflowAcceptedResponse(started.handle);
     }
   }
   if (universe === "ALL") {
     const shards = await agent.runSharded({ trigger: "manual", filters: validatedFilters, userLogin, environment: requestedEnv, portfolioContext });
-    for (const shard of shards) {
-      await publishOrBridge(ctx, userLogin, shard, delivery);
-    }
+    // Issue #2861: persist-then-deliver, unified with the single-run
+    // path below — previously this block delivered every shard
+    // before persisting any of them.
+    await persistThenDeliverAll({
+      results: shards,
+      // Issue #2863: record the run's criteria with each shard's
+      // canonical copy, so future replays can show them.
+      persist: (r) => ctx.persistScreenerReportCanonical({ ...r, userLogin, criteria: spec.filters }),
+      deliver: (shard) => publishOrBridge(ctx, userLogin, shard, delivery),
+    });
     const failed = shards.filter((r) => !r.success);
     if (failed.length === shards.length) {
       return Response.json({ error: failed[0]?.error || "E*TRADE unavailable" }, { status: 502 });
@@ -220,10 +242,6 @@ export async function executeEtradeScreen(args: {
       count: shards.reduce((n, r) => n + r.allStocks.length, 0),
       success: true,
     });
-    // Issue #307/#308: store each shard's canonical report copy
-    // (one row per generation) so manual screens are searchable.
-    // Issue #911: pass userLogin for correct user scoping.
-    for (const r of shards) await ctx.persistScreenerReportCanonical({ ...r, userLogin });
     return Response.json({
       sharded: true,
       universes: shards.map((r) => ({
@@ -282,8 +300,14 @@ export async function executeEtradeScreen(args: {
   // generation) so manual screens are searchable like scheduled ones.
   // Issue #911: pass userLogin so the report is stored under the
   // correct user scope (not "default").
-  await ctx.persistScreenerReportCanonical({ ...result, userLogin });
-  await publishOrBridge(ctx, userLogin, result, delivery);
+  // Issue #2861: same persist-then-deliver finalizer as the
+  // sharded path above; order unchanged here, now pinned.
+  await persistThenDeliverAll({
+    results: [result],
+    // Issue #2863: record the run's criteria with the canonical copy.
+    persist: (r) => ctx.persistScreenerReportCanonical({ ...r, userLogin, criteria: spec.filters }),
+    deliver: (r) => publishOrBridge(ctx, userLogin, r, delivery),
+  });
   if (!result.success) {
     return Response.json({ error: result.error || "E*TRADE unavailable" }, { status: 502 });
   }

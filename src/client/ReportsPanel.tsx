@@ -20,6 +20,7 @@ import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
 import { PendingReviewQueue } from "./PendingReviewQueue";
 import { RegeneratePdfButton } from "./RegeneratePdfButton";
 import { ResearchRunDetail } from "./chat/tabs/ResearchRunDetail";
+import { replayReport, replaySummary, type ReplayResponse } from "./replayReport";
 import { ResearchIdeasBrowser } from "./chat/tabs/ResearchIdeasBrowser";
 import { ResearchTrackRecord } from "./chat/tabs/ResearchTrackRecord";
 import "./reports.css";
@@ -130,6 +131,21 @@ export function ReportsPanel() {
       defaultTab: "reports",
     });
   const [semanticMode, setSemanticMode] = useState(false);
+  // Issue #2863: per-row replay state (keyed by the row id).
+  // A row replays when it names a canonical row (reportId) or a
+  // screener generation (runId `screener:<timestamp>`); rows
+  // naming neither get no Replay button — a replay needs a
+  // persisted row to read, and this panel never invents one.
+  const [replayState, setReplayState] = useState<Record<string, { loading: boolean; result?: ReplayResponse }>>({});
+  const onReplayRow = async (row: ReportItem) => {
+    const key = row.id;
+    if (replayState[key]?.loading) return;
+    setReplayState((s) => ({ ...s, [key]: { loading: true } }));
+    const result = row.reportId
+      ? await replayReport({ reportId: row.reportId })
+      : await replayReport({ runId: row.runId });
+    setReplayState((s) => ({ ...s, [key]: { loading: false, result } }));
+  };
 
   const fetchReports = useCallback(async (query?: string, semantic?: boolean) => {
     setLoading(true);
@@ -296,6 +312,16 @@ export function ReportsPanel() {
                   View run
                 </Button>
               )}
+              {(r.reportId || r.runId.startsWith("screener:")) && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => onReplayRow(r)}
+                  disabled={replayState[r.id]?.loading}
+                >
+                  {replayState[r.id]?.loading ? "Replaying…" : "Replay"}
+                </Button>
+              )}
               <span className="run-id" title={r.runId}>
                 Run: {r.runId.slice(0, 12)}…
               </span>
@@ -323,6 +349,21 @@ export function ReportsPanel() {
                 <RegeneratePdfButton onRegenerated={() => fetchReports()} />
               )}
             </div>
+            {replayState[r.id]?.result && !replayState[r.id]!.result!.ok && (
+              <Notice tone="danger" density="compact">
+                Replay failed — {replayState[r.id]!.result!.error}
+              </Notice>
+            )}
+            {replayState[r.id]?.result?.ok && replayState[r.id]!.result!.replay && (
+              <Notice tone={replayState[r.id]!.result!.replay!.partial ? "warning" : "success"} density="compact">
+                {replaySummary(replayState[r.id]!.result!.replay!)}
+                {replayState[r.id]!.result!.replay!.partial &&
+                  replayState[r.id]!.result!.replay!.partialReasons &&
+                  replayState[r.id]!.result!.replay!.partialReasons!.length > 0 && (
+                    <div>Partial: {replayState[r.id]!.result!.replay!.partialReasons!.join(" ")}</div>
+                  )}
+              </Notice>
+            )}
           </div>
         ))}
       </div>

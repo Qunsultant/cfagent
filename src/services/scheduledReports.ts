@@ -1187,6 +1187,43 @@ export function listScheduledReports(
  * caller login is known, legacy unfiltered when it is not. Returns null
  * when the report does not exist (or is not the caller's). Never throws.
  */
+/**
+ * Issue #2863: fetch one stored report by its stored run_id
+ * (screener: `screener:<timestamp>` generation) — the key
+ * RunDetailView knows (run timestamp), where the mas_reports
+ * row id is unknown. Owner scoping matches getRowByIdForOwner
+ * (#584 EP-003): strict when the caller login is known.
+ * Newest first, so a duplicated run_id resolves to the
+ * latest canonical copy. Returns null when absent (or not
+ * the caller's). Never throws.
+ */
+export function getScheduledReportByRunId(
+  sql: SqlStorage,
+  runId: string,
+  opts?: { userLogin?: string }
+): ScheduledReportHit | null {
+  try {
+    if (!runId || typeof runId !== "string") return null;
+    ensureScheduledReportsTable(sql);
+    const owner =
+      opts?.userLogin && typeof opts.userLogin === "string"
+        ? opts.userLogin
+        : undefined;
+    let q = `SELECT id, run_id, title, source, summary, body, created_at, body_r2_key, fanout_outcome FROM mas_reports WHERE run_id = ?`;
+    const params: unknown[] = [runId];
+    if (owner) {
+      q += ` AND user_login = ?`;
+      params.push(owner);
+    }
+    q += ` ORDER BY created_at DESC LIMIT 1`;
+    const rows = Array.from(sql.exec(q, ...params)) as unknown as Array<Record<string, unknown>>;
+    if (!rows[0]) return null;
+    return scheduledReportHitFromRow(rows[0]);
+  } catch {
+    return null;
+  }
+}
+
 export function getScheduledReportById(
   sql: SqlStorage,
   reportId: string,

@@ -875,6 +875,11 @@ export function ScreenersHub({
                           confirmations={runConfirmations}
                           confirmationsLoading={runConfirmationsLoading}
                           chrome="bare"
+                          // Issue #2863: the auto-runs feed row's
+                          // timestamp IS its canonical generation
+                          // (`screener:<timestamp>`), so the detail
+                          // view can replay the persisted report.
+                          replayRunId={`screener:${selectedAutoRun.timestamp}`}
                         />
                       </div>
                       <div style={{ marginTop: "0.75rem" }}>

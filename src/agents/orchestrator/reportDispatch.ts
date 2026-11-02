@@ -287,6 +287,10 @@ export async function persistScreenerReportCanonical(ctx: ReportDispatchContext,
   error?: string;
   trigger?: unknown;
   userLogin?: string;
+  /** Issue #2863: replay criteria/refs — recorded in the body so future replays can show them. Additive: older readers ignore. */
+  criteria?: unknown;
+  patternRef?: unknown;
+  presetRef?: unknown;
 }): Promise<void> {
   if (!result.userLogin) {
     console.error(`[reportDispatch] Screen report store refused: no owning userLogin (run: ${result.timestamp}).`);
@@ -334,6 +338,10 @@ export async function persistScreenerReportCanonical(ctx: ReportDispatchContext,
         csvStatus: result.csvStatus,
         csvError: result.csvError,
         runSource: result.runSource ?? "stock",
+        // Issue #2863: replay criteria/refs ride the body.
+        ...(result.criteria !== undefined ? { criteria: result.criteria } : {}),
+        ...(result.patternRef !== undefined ? { patternRef: result.patternRef } : {}),
+        ...(result.presetRef !== undefined ? { presetRef: result.presetRef } : {}),
         reportUrl: result.pdfKey
           ? `${ctx.env.APP_BASE_URL || "https://agent.openaimp.com"}/api/screener/report.pdf?key=${encodeURIComponent(result.pdfKey)}`
           : undefined,
