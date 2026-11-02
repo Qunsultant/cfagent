@@ -104,6 +104,12 @@ import {
   type PaymentsFlowScopedModes,
 } from "../../config/paymentsFlowModes";
 import { readReceipts, type ReceiptKind } from "../../services/receiptSurface";
+// #2779: the receipts read path must ensure usage_events before the
+// SELECT — the write path is its only creator, so a store with zero
+// metered calls 500s on the read with "no such table: usage_events".
+// The DDL's one home stays the usage port's ensureSchema (#2359);
+// this call never throws (it logs and continues on ensure failure).
+import { ensureUsageEventsTable } from "../../services/scheduledReports";
 
 /** The subset of OrchestratorAgent surface the payments handlers need. */
 export interface PaymentsRouteContext {
@@ -449,6 +455,10 @@ export async function handlePaymentsRoutes(
       );
     }
     try {
+      // #2779: ensure usage_events before the read — production
+      // ensureTables() covers mas_events + mas_transactions but not
+      // usage_events, so without this a zero-receipt account 500s.
+      ensureUsageEventsTable(sql);
       const orm = ctx.getOrm?.() ?? new DatabaseORM(sql);
       const result = readReceipts({ sql, orm }, login, {
         limit,
@@ -456,8 +466,18 @@ export async function handlePaymentsRoutes(
       });
       return Response.json(result);
     } catch (err) {
+      // #2779: typed error, never raw store text (the production 500
+      // leaked "no such table: usage_events: SQLITE_ERROR" verbatim).
+      console.error(
+        `[payments] receipts read failed: ${err instanceof Error ? err.message : String(err)}`,
+        err,
+      );
       return Response.json(
-        { error: err instanceof Error ? err.message : "Failed to fetch receipts" },
+        {
+          error: "ReceiptsUnavailable",
+          statusCode: 500,
+          message: "Receipts could not be read.",
+        },
         { status: 500 },
       );
     }
