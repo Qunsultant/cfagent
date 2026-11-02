@@ -214,10 +214,14 @@ retrievability is #1968, open). **Trace correction (CAIO):** trace propagation a
 queue/workflow boundaries is **mechanism-designed, production-proof + surfacing missing**
 — not "none": #1739 gives one correlationId from enqueue → run → events → projected D1
 rows, #1743 events carry W3C traceparent, job rows join the same chain. Genuinely
-missing: production proof on a real staged run, traceparent threading through the
-Cloudflare Workflows runtime itself (Workflows do not natively propagate W3C context, so
-the envelope must carry it — designed but unproven on the Q7 path), and any surface that
-uses the traces (dashboard UI + SQL aggregation are open #1743 follow-ups).
+missing: production proof on a real staged run (pending the owner run — Phase 5
+slice 3's evidence template is in docs/OBSERVABILITY.md §5). Landed in Phase 5
+slice 3: traceparent threading through the Cloudflare Workflows runtime itself
+(command params carry it into instances and child commands, pinned; every parent
+step including fan-out emits under it) and a surface that uses the traces (GET
+/api/traces?traceId= plus the AE SQL aggregation treatment, docs/OBSERVABILITY.md
+§5). Still open: a dashboard UI page (not built — the slice settled on route + SQL
+docs per the plan's open question 4).
 
 ### 2.6 Async vs sync, batch vs realtime
 
@@ -269,7 +273,7 @@ failure state. **v2 notes (CAIO):** the AOP doc's observability 62/100 score pre
 #1743's Foundation layer and is stale; what remains is Phase 2–4 items (the
 MCP-permissions part landed via #1744; the rest sits with IAAA/#1717) plus
 dashboard/aggregation. Gap 7's "trace propagation: none" is reworded per §2.5 (mechanism
-designed, proof + surfacing missing).
+designed, surfacing landed in Phase 5 slice 3, proof pending).
 
 ## 3. The goal-screen divergence: why thesis selection was impossible
 
@@ -470,9 +474,10 @@ result to `mas_reports` + its data to `mas_data_captures`, keyed by the same run
    (queue + `dead_letter_queue` + replay procedure + depth alert) still open.
 6. A durable cross-isolate breaker store (today: per-isolate, fail-open on cold start) —
    or explicit owner acceptance of fail-open, plus a trip subscriber + trip alerting.
-7. Trace propagation across queue/workflow boundaries — **reworded (CAIO, v2): mechanism
-   designed, production proof + surfacing missing** (see §2.5). Dashboard UI + SQL
-   aggregation are open #1743 follow-ups.
+7. Trace propagation across queue/workflow boundaries — **reworded (CAIO, v2); updated
+   Phase 5 slice 3: mechanism designed + surfacing landed (read route + SQL aggregation
+   treatment, docs/OBSERVABILITY.md §5); production proof pending the owner run**
+   (see §2.5). Dashboard UI still open.
 8. A consumer for `screener-events` (Q1) — or a deliberate decision to remove the
    producer-only queue. **RESOLVED (Phase 5 slice 8, #2000): KEEP.** The consumer exists since #2544 (Worker `queue()` `screener-events` branch, `server.ts:4834` → `createScreenerEventsWorkHandler`; config pinned vs `wrangler.jsonc:56`; DLQ wired; terminal drops persisted + operator-replayable since slice 1). The goal-flow constraint is discharged, not lifted by code: `publish` (broadcast) never routes to Q1 — `screener.*` events fan out to subscriber queues (Q2 delivery) — and the goal flow sends no work items to Q1 (it rides the Workflow + Q4 job rows + Q2). Putting goal work ON Q1 would need new work-item semantics + dispatch + producer — a follow-up build slice, not a flag flip; until such a slice lands, goal work stays off Q1. Revisit condition: if Q1 is still producer-less when the goal-work question is next reviewed, re-raise removal (unbind + deprecate consumer + retire pins) rather than carrying it indefinitely.
 9. Serve-stage retry — **narrowed (COO, v2): chained runs already retry per stage via

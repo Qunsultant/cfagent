@@ -40,6 +40,41 @@ export class VectorMemory {
     private aiSearch: any
   ) {}
 
+  /**
+   * Qunsultant/cfagent#1775 (Adapter S1): the Vectorize port for
+   * callers that own their own vector id/metadata shape (the
+   * report semantic index). Same embedding model and same index
+   * as remember/recallForPlan — these are passthroughs over the
+   * one embed() above, not a second embedding implementation.
+   * Callers keep their own truncation and fail-soft mapping; a
+   * throw here means the caller's contract decides (the report
+   * index maps it to null/false/[]).
+   */
+  async embedText(text: string): Promise<number[]> {
+    return embed(this.ai, text);
+  }
+
+  async upsertVectors(
+    vectors: Array<{
+      id: string;
+      values: number[];
+      metadata: Record<string, unknown>;
+    }>
+  ): Promise<void> {
+    await this.vectorize.upsert(vectors);
+  }
+
+  async queryVectors(
+    values: number[],
+    opts: {
+      topK: number;
+      filter?: Record<string, unknown>;
+      returnMetadata?: boolean;
+    }
+  ): Promise<any> {
+    return this.vectorize.query(values, opts);
+  }
+
   /** Store a job outcome. Called after every orchestrator job. */
   async remember(outcome: MemoryOutcome): Promise<void> {
     const text = `Operation: ${outcome.operation}\nSuccess: ${outcome.success}\nSummary: ${outcome.summary}`;

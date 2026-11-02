@@ -381,7 +381,7 @@ export const ROUTES = [
     id: "payment-assurance",
     navGroup: "payment-assurance",
     crumb: "Payment Assurance",
-    category: "Platform",
+    category: "Billing",
     icon: "Assurance",
     description: "Test-only assurance harness for PaymentWorkflow: the real flow and gate behind fake cfpay/screener seams, no charge, no real run",
     navEntry: {
@@ -640,9 +640,9 @@ export const ROUTES = [
   },
   {
     id: "workflows",
-    navGroup: "workflows",
+    navGroup: "workflow-runs",
     crumb: "Workflows",
-    category: "Platform",
+    category: "Playbooks",
     icon: "Guides",
     description: "Platform architecture guides, strategy playbooks, order mechanics & FAQ",
     navEntry: {

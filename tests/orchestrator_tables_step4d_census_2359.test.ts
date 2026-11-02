@@ -186,7 +186,9 @@ describe("4d family census: surface-1 execution sites", () => {
     // lift (2 SELECTs + DROP) and the G-7 mas_settings CREATE.
     // #2390 (step 4g) pin update: the mas_settings CREATE
     // retired to the dedicated settings port's adapter — 4 -> 3.
-    expect(count(read("src/agents/orchestrator.ts"), STORAGE_EXEC_PATTERN)).toBe(3);
+    // #1776 (#1717 Adapter S2) pin update: the legacy ai-chat
+    // lift's SQL moved to SqlLegacyChatStore — 3 -> 0.
+    expect(count(read("src/agents/orchestrator.ts"), STORAGE_EXEC_PATTERN)).toBe(0);
     // reportDispatch.ts remainder at 4d: the G-7 mas_settings
     // pair (one read + delete/insert), untouched by 4d.
     // #2390 (step 4g) pin update: the pair delegates to the

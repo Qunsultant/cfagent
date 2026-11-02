@@ -48,6 +48,7 @@
  */
 
 import { r2KeyForStorageKey } from "./reportBlobStore";
+import { createBlobStore } from "./blobStoreR2Adapter";
 
 export type KnowledgeCategory =
   | "sec_filing"
@@ -160,8 +161,8 @@ export async function putKnowledgeDoc(
   if (existing && existing.contentHash === contentHash) {
     return { meta: existing, idempotent: true };
   }
-  const bucket = env.REPORTS_BUCKET;
-  if (!bucket) {
+  const store = createBlobStore(env);
+  if (!store) {
     throw new KnowledgeCorpusError(
       "REPORTS_BUCKET is not bound; corpus ingestion requires the screener bucket."
     );
@@ -169,8 +170,8 @@ export async function putKnowledgeDoc(
   const contentType = input.contentType || "application/octet-stream";
   const fileName = input.fileName || `${input.category}-${contentHash.slice(0, 12)}`;
   const r2Key = r2KeyForStorageKey(key);
-  await bucket.put(r2Key, input.bytes, {
-    httpMetadata: { contentType },
+  await store.put(r2Key, input.bytes, {
+    contentType,
     customMetadata: {
       fileName,
       title: input.title,
@@ -392,21 +393,21 @@ export async function getKnowledgeDoc(
   }
   const meta = await storage.get<KnowledgeDocMeta>(key).catch(() => undefined);
   if (!meta) return null;
-  const bucket = env.REPORTS_BUCKET;
-  if (!bucket) {
+  const store = createBlobStore(env);
+  if (!store) {
     throw new KnowledgeCorpusError(
       "REPORTS_BUCKET is not bound; corpus bytes are unreachable without the screener bucket."
     );
   }
-  let obj: R2ObjectBody | null;
+  let obj: { bytes: Uint8Array } | null;
   try {
-    obj = await bucket.get(meta.r2Key);
+    obj = await store.get(meta.r2Key);
   } catch (err) {
     console.warn("[knowledgeCorpus] R2 read failed:", err);
     return null;
   }
   if (!obj) return null;
-  const bytes = new Uint8Array(await obj.arrayBuffer());
+  const bytes = obj.bytes;
   if ((await sha256Hex(bytes)) !== meta.contentHash) {
     console.warn(
       `[knowledgeCorpus] Hash mismatch for ${meta.r2Key}: stored bytes do not match recorded contentHash; refusing to serve.`

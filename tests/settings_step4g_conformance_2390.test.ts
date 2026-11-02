@@ -226,7 +226,9 @@ describe("step-4g family census (surface-1 pattern, exact counts)", () => {
     ["src/data/governedHalt.ts", 0],
     // The ensurer retirement in orchestrator.ts (4 -> 3: the
     // ADR-out legacy ai-chat lift remains):
-    ["src/agents/orchestrator.ts", 3],
+    // #1776 (#1717 Adapter S2) pin update: the legacy ai-chat
+    // lift's SQL moved to SqlLegacyChatStore — 3 -> 0.
+    ["src/agents/orchestrator.ts", 0],
     // In-layer homes after the move:
     ["src/data/doSqliteOrmAdapters.ts", 17],
     ["src/data/doSqliteStrategyWeightsAdapter.ts", 11],

@@ -84,6 +84,35 @@ function stubBucket(
   };
 }
 
+/**
+ * Issue #1777 (Adapter S3): the BlobStore-shaped double for DIRECT
+ * integrity/sync tests — the dep now takes a BlobStore. Route tests
+ * below keep stubBucket as REPORTS_BUCKET, because production envs
+ * carry a real R2Bucket and the route wraps it via createBlobStore.
+ * Test titles and expectations are unchanged.
+ */
+function stubBlobStore(
+  pages: Array<Array<{ key: string; bytes: Uint8Array }>>
+) {
+  const flat = pages.flat();
+  return {
+    async list(options?: { prefix?: string; cursor?: string }) {
+      const idx = options?.cursor ? Number(options.cursor) : 0;
+      const page = pages[idx] ?? [];
+      return {
+        keys: page.map((o) => o.key),
+        truncated: idx + 1 < pages.length,
+        cursor: idx + 1 < pages.length ? String(idx + 1) : undefined,
+      };
+    },
+    async get(key: string) {
+      const found = flat.find((o) => o.key === key);
+      if (!found) return null;
+      return { bytes: found.bytes };
+    },
+  };
+}
+
 describe("corpus integrity (S4-4)", () => {
   it("reports missing, mismatched, and extra keys exactly, and skips unseeded entries", async () => {
     const bytesOk = enc.encode("corpus bytes ok");
@@ -104,7 +133,7 @@ describe("corpus integrity (S4-4)", () => {
       [`knowledge:broker_rules:${hTamperedKey}`]: { contentHash: hTamperedKey },
       [`knowledge:market_education:${hOrphan}`]: { contentHash: hOrphan },
     };
-    const bucket = stubBucket([
+    const bucket = stubBlobStore([
       [
         { key: `knowledge/options_disclosure/${hOk}`, bytes: bytesOk },
         { key: `knowledge/broker_rules/${hTamperedKey}`, bytes: bytesTampered },
@@ -138,7 +167,7 @@ describe("corpus integrity (S4-4)", () => {
     const report = await runCorpusIntegrityCheck({
       manifest: [{ title: "doc", category: "options_disclosure", sha256: h, fetchStatus: "verified" }],
       recordStore: stubStore({ [`knowledge:options_disclosure:${h}`]: { contentHash: h } }),
-      bucket: stubBucket([[{ key: `knowledge/options_disclosure/${h}`, bytes }]]),
+      bucket: stubBlobStore([[{ key: `knowledge/options_disclosure/${h}`, bytes }]]),
     });
     // #1169 knowledge UI (disclosed §7 pin update): the report
     // gains the additive `entries` array; all old fields unchanged.
@@ -248,7 +277,7 @@ describe("shared index backfill (S4-4 extraction)", () => {
     const withBackfill = await runCorpusSync({
       manifest: [],
       recordStore: stubStore({}),
-      bucket: stubBucket([[]]),
+      bucket: stubBlobStore([[]]),
       backfill: async () => ({ upserted: 3, skippedRetention: 1, rows: 4, pages: 1, complete: true }),
     });
     expect(withBackfill.backfill).toEqual({ upserted: 3, skippedRetention: 1, rows: 4, pages: 1, complete: true });
@@ -256,7 +285,7 @@ describe("shared index backfill (S4-4 extraction)", () => {
     const withoutBackfill = await runCorpusSync({
       manifest: [],
       recordStore: stubStore({}),
-      bucket: stubBucket([[]]),
+      bucket: stubBlobStore([[]]),
     });
     expect(withoutBackfill.backfill.skipped).toBe(true);
     expect(typeof withoutBackfill.backfill.reason).toBe("string");

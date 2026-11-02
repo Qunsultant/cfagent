@@ -1,0 +1,3 @@
+### Added
+
+- SOC 2 formalization (#1774, F-55): control mapping in `docs/architecture/security/soc2-controls-1774.md` (access logs via `mas_events` + hash-chained `iaaaAudit.ts`, zero-trust policies via `zero-trust.md`/`authz.md`/`authn.md`, change management via gitops, vendor management via the new register) and first formal vendor-risk register in `docs/architecture/security/vendor-risk-1774.md` (Cloudflare, GitHub, Google, Slack, Stripe, x402, Alpaca, E*TRADE, Public.com — only where repo evidence shows a live integration). Formalization only: no attestation or auditor opinion is claimed. Honest gaps carried: audit retention unsettled, tamper response unwired, Slack-app-side configuration owner-owned.

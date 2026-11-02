@@ -127,7 +127,9 @@ describe("Agent Mesh S13 (#2412) — channel registry completeness", () => {
 
   it("the production Slack host is unchanged: server.ts still forwards to the per-team orchestrator instance", () => {
     const server = read("src/server.ts");
-    expect(server).toContain("env.SEARCH_AGENT.idFromName(`slack_${teamId}`)");
+    // #1779: the per-team forward now rides the ActorGateway; the
+    // pin tracks the gateway spelling, the instance still per-team.
+    expect(server).toContain("actorGateway.dispatch(env.SEARCH_AGENT, `slack_${teamId}`");
     expect(server).toContain('"/trading/slack/command"');
     expect(server).toContain('"/trading/slack/event"');
     expect(server).toContain('"/trading/slack/interaction"');

@@ -63,6 +63,7 @@ import {
   type KnowledgeDocMeta,
 } from "./knowledgeCorpus";
 import { r2KeyForStorageKey } from "./reportBlobStore";
+import type { BlobStore } from "./blobStorePorts";
 import {
   runCanonicalIndexBackfillPage,
   type IndexEnv,
@@ -137,23 +138,15 @@ export interface CorpusRecordStore {
   get<T>(key: string): Promise<T | undefined>;
 }
 
-/** Minimal R2-bucket shape for the integrity leg (list + get only). */
-export interface CorpusBucket {
-  list(options?: {
-    prefix?: string;
-    cursor?: string;
-  }): Promise<{
-    objects: Array<{ key: string }>;
-    truncated: boolean;
-    cursor?: string;
-  }>;
-  get(key: string): Promise<{ arrayBuffer(): Promise<ArrayBuffer> } | null>;
-}
-
+/** Issue #1777 (Adapter S3): the integrity leg reads through the one
+ * BlobStore port — the bespoke CorpusBucket shape is retired in
+ * favour of BlobStore (superseded by src/services/blobStorePorts.ts).
+ * The dep field keeps its `bucket` name so route call sites are
+ * unchanged apart from passing createBlobStore(env). */
 export interface CorpusIntegrityDeps {
   manifest: readonly SeedManifestEntry[];
   recordStore: CorpusRecordStore;
-  bucket?: CorpusBucket | null;
+  bucket?: BlobStore | null;
 }
 
 function shaPrefix(bucketKey: string): string {
@@ -200,12 +193,12 @@ export async function runCorpusIntegrityCheck(
       if (r.status === "missing") missing.add(bucketKey);
       else if (r.status === "mismatch") mismatched.add(bucketKey);
     }
-    // Paginated R2 listing over the whole knowledge/ prefix.
+    // Paginated blob listing over the whole knowledge/ prefix.
     const listed = new Set<string>();
     let cursor: string | undefined;
     do {
       const page = await bucket.list({ prefix: "knowledge/", cursor });
-      for (const obj of page.objects) listed.add(obj.key);
+      for (const key of page.keys) listed.add(key);
       cursor = page.truncated ? page.cursor : undefined;
     } while (cursor !== undefined);
     // Manifest records whose object is absent from the listing.
@@ -234,7 +227,7 @@ export async function runCorpusIntegrityCheck(
         missing.add(key);
         continue;
       }
-      const bytes = new Uint8Array(await obj.arrayBuffer());
+      const bytes = obj.bytes;
       if ((await sha256Hex(bytes)) !== record.contentHash) {
         mismatched.add(key);
       }

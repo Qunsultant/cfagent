@@ -15,7 +15,8 @@ import {
 import { getSessionCached, getSessionCachedFetchedAt, invalidateSessionCache } from "./security/sessionCache";
 import { resolveIdleTimeoutMs } from "./security/sessionPolicy";
 import { deleteSession, getSession, listSessionFamilyEntries, sessionStore, updateSession, wiredAccessRequestStore, wiredMembershipStore } from "./security/session";
-import { listStoreEntries, type DoNamespaceLike } from "./security/durableKv";
+import { listStoreEntries, type DoNamespaceLike, type DoStubLike } from "./security/durableKv";
+import type { ActorNamespaceLike } from "./services/actorGatewayPorts";
 import { zonedDateParts } from "./schedule";
 import { OPERATION_CATALOG } from "./orchestrate";
 import {
@@ -71,9 +72,13 @@ import {
 import { parseSessionRegistryEntries } from "./security/iaaaSessionRegistry";
 import {
   isMailSuppressed,
+  resolveOffboardSessions,
   runOffboard,
   setMailSuppression,
 } from "./security/iaaaLifecycleWiring";
+import { createSubscriptionAdapter } from "./data/createSubscriptionPorts";
+import { hasUnexpiredSubscription } from "./data/subscriptionPorts";
+import { createLifecycleAdapter } from "./data/createLifecyclePorts";
 import { handleSeedGovernanceRoute } from "./data/seedGovernanceRoute";
 import {
   handleChainStatusRoute,
@@ -85,6 +90,10 @@ import {
   handleJobHistoryRoute,
   handleReconcileJobsRoute,
 } from "./data/shardJobRoute";
+import {
+  createTraceReader,
+  handleMeshTraceRoute,
+} from "./data/meshTraceRoute";
 import {
   createShardJobAdapter,
   readJobHistory,
@@ -124,6 +133,7 @@ import {
   type MessageEnvelope,
   type SubscriberHandlers,
 } from "./messaging/messagingPorts";
+import { actorGateway } from "./services/cloudflareActorGateway";
 import { withRequestObservability } from "./observability/aspects";
 import { createObservabilitySink } from "./observability/createObservabilityPorts";
 import { writeEnvelopeToSink } from "./observability/observabilityPorts";
@@ -177,7 +187,7 @@ import {
   serviceTokenStore,
   verifyServiceToken,
 } from "./security/serviceTokens";
-import { serveStaticAsset } from "./security/staticAssets";
+import { serveStaticAsset, fetchStaticAsset } from "./security/staticAssets";
 import { withErrorBoundary } from "./security/workerErrorBoundary";
 import { handleLogout, renderLoginPage } from "./oauth";
 import {
@@ -239,7 +249,11 @@ import {
 } from "./trading";
 import { gateSlackRequest, timingSafeEqual } from "./security/webhookSecurity";
 import { sanitizeInboundText } from "./security/promptInjectionSanitize";
-import { createIngressThrottle, pickWebhookSignature } from "./api/ingress";
+import {
+  checkPublicRestThrottle,
+  createIngressThrottle,
+  pickWebhookSignature,
+} from "./api/ingress";
 import { nlqWebhookBodySchema } from "./api/ingressSchemas";
 import { dispatchWsUpgrade } from "./api/wsRoutes";
 import {
@@ -255,6 +269,7 @@ import { handleVoiceWebSocketConnection, ETradeVoiceTradingService, createOrches
 import { ETradeWebhookService } from "./services/tradingWebhooks";
 import { ETradeBrowserService } from "./services/browserAgent";
 import { handleMarketQuotesHttp } from "./services/marketStream";
+import { sendProvisioningWelcome } from "./services/provisioningWelcome";
 import {
   getQuoteSource,
   setQuoteSource,
@@ -480,7 +495,6 @@ async function handleNlqWebhookRequest(
   const userLogin = typeof body.userId === "string" && /^[A-Za-z0-9_-]{1,80}$/.test(body.userId)
     ? `nlq_webhook_${body.userId}`
     : NLQ_WEBHOOK_SERVICE_LOGIN;
-  const agentId = env.SEARCH_AGENT.idFromName(userLogin);
   const target = new URL("/nlq", "https://agent.internal");
   const forwarded = new Request(target, {
     method: "POST",
@@ -491,7 +505,7 @@ async function handleNlqWebhookRequest(
     },
     body: JSON.stringify({ query: sanitizedQuery }),
   });
-  const response = await env.SEARCH_AGENT.get(agentId).fetch(forwarded);
+  const response = await actorGateway.dispatch(env.SEARCH_AGENT, userLogin, forwarded);
   if (!response.ok) return response;
   const result = await response.json() as Record<string, unknown>;
 
@@ -586,6 +600,14 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
     const apiIngressMode = resolveApiIngressMode(
       levelsForApiIngressMode(undefined, undefined, undefined, env.API_INGRESS_MODE),
     ).mode;
+    // #1774 (parent #1717, F-55): public-REST burst cap — unified
+    // mode only, per-IP, /api/* paths only (see src/api/ingress.ts).
+    // Legacy mode keeps the current uncapped behavior; production
+    // activation is an owner action (API_INGRESS_MODE env value).
+    if (path.startsWith("/api/")) {
+      const restLimited = checkPublicRestThrottle(request, { mode: apiIngressMode });
+      if (restLimited) return restLimited;
+    }
 
     // Issue #1247: Public.com Client ID Metadata Document — the
     // OAuth client_id for the Public resource provider IS this URL
@@ -1445,15 +1467,14 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
     if (path.startsWith("/api/schedule/")) {
       const session = await requireAuth(request, env);
       if (!session) return Response.json({ error: "Unauthorized: Please log in." }, { status: 401 });
-      const schedId = (env as any).SCHEDULED_AGENT.idFromName("default");
-      const sched = (env as any).SCHEDULED_AGENT.get(schedId) as unknown as {
+      const sched = actorGateway.stub<{
         listGoals(): Promise<unknown[]>;
         getTickHistory(limit?: number): Promise<unknown[]>;
         addGoal(goal: Record<string, unknown>): Promise<unknown>;
         removeGoal(id: string): Promise<boolean>;
         setGoalEnabled(id: string, enabled: boolean): Promise<boolean>;
         triggerGoal(id: string): Promise<unknown>;
-      };
+      }>((env as any).SCHEDULED_AGENT, "default");
 
       if (path === "/api/schedule/goals" && request.method === "GET") {
         return Response.json({ ok: true, goals: await sched.listGoals() });
@@ -1901,14 +1922,12 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
           return Response.json({ error: "Governance seed unavailable." }, { status: 500 });
         }
       }
-      const stub = env.SEARCH_AGENT.get(
-        env.SEARCH_AGENT.idFromName(SHARED_ORCHESTRATOR_INSTANCE),
-      ) as unknown as {
+      const stub = actorGateway.stub<{
         seedGovernanceHalt(
           setBy: string,
           tenantId: string,
         ): Promise<{ seeded: boolean; state: GovernedHaltState }>;
-      };
+      }>(env.SEARCH_AGENT, SHARED_ORCHESTRATOR_INSTANCE);
       return handleSeedGovernanceRoute({
         session,
         method: request.method,
@@ -1983,13 +2002,12 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
           return Response.json({ error: "Chain reconciliation unavailable." }, { status: 500 });
         }
       }
-      const schedId = (env as any).SCHEDULED_AGENT.idFromName("default");
-      const sched = (env as any).SCHEDULED_AGENT.get(schedId) as unknown as {
+      const sched = actorGateway.stub<{
         reconcileChainScheduleProjection(
           tenantId: string,
           actor?: string,
         ): Promise<ReconcileReport>;
-      };
+      }>((env as any).SCHEDULED_AGENT, "default");
       return handleReconcileChainsRoute({
         session,
         method: request.method,
@@ -2036,6 +2054,30 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
         tenantId,
         chainId,
         readHistory: async () => history,
+      });
+    }
+
+    // --- Mesh trace read (issue #2000, Phase 5 slice 3) ---
+    // GET /api/traces?traceId=: tenant-scoped read of one
+    // trace's assembled hops — the surfacing route for the
+    // mesh trace spine (before this slice no route exposed
+    // hopsFor; the assembly lived only behind the MCP read
+    // command). Gated by requireAuth (any signed-in user);
+    // the tenant comes from the IAAA tenant resolution, like
+    // the job-history read above. Unbound AgentDB → 503 (the
+    // durable hop record requires AGENT_DB; isolate-local
+    // in-memory hops are never served as a trace). Unknown
+    // trace, or another tenant's trace → 404. The handler
+    // answers GET only and writes nothing.
+    if (path === "/api/traces") {
+      const session = await requireAuth(request, env);
+      const tenantId = resolveIaaaTenant(env);
+      const traceId = url.searchParams.get("traceId") ?? "";
+      return handleMeshTraceRoute({
+        session,
+        method: request.method,
+        traceId,
+        readTrace: createTraceReader(env, tenantId),
       });
     }
 
@@ -2110,13 +2152,11 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
           { status: 503 },
         );
       }
-      const stub = env.SEARCH_AGENT.get(
-        env.SEARCH_AGENT.idFromName(SHARED_ORCHESTRATOR_INSTANCE),
-      ) as unknown as {
+      const stub = actorGateway.stub<{
         reconcileShardJobProjection(
           tenantId: string,
         ): Promise<ReconcileShardJobsReport>;
-      };
+      }>(env.SEARCH_AGENT, SHARED_ORCHESTRATOR_INSTANCE);
       return handleReconcileJobsRoute({
         session,
         method: request.method,
@@ -2277,13 +2317,12 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
                 doLogin = session.githubLogin;
               }
             }
-            const id = env.SEARCH_AGENT.idFromName(doLogin);
             const targetUrl = new URL("/enrichment/status", "https://agent.internal");
             const freq = new Request(targetUrl, {
               headers: { "x-user-login": doLogin },
               signal: AbortSignal.timeout(3000),
             });
-            const fres = await env.SEARCH_AGENT.get(id).fetch(freq);
+            const fres = await actorGateway.dispatch(env.SEARCH_AGENT, doLogin, freq);
             if (fres.ok) {
               const data = (await fres.json().catch(() => null)) as {
                 quality?: import("./enrichment/enrichmentPorts").EnrichmentQualitySummary;
@@ -2345,12 +2384,7 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
       if (path === "/api/telemetry/reconcile") {
         const userLogin =
           url.searchParams.get("userLogin") ?? session?.githubLogin ?? "default";
-        const researchNs = (env as any).RESEARCH_AGENT as
-          | {
-              idFromName(name: string): unknown;
-              get(id: unknown): unknown;
-            }
-          | undefined;
+        const researchNs = (env as any).RESEARCH_AGENT as ActorNamespaceLike | undefined;
         return handleTelemetryReconcileRoute({
           session,
           method: request.method,
@@ -2362,10 +2396,9 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
             if (!researchNs) {
               throw new Error("ResearchAgent binding not configured.");
             }
-            const id = researchNs.idFromName(`research:${userLogin}`);
-            const agent = researchNs.get(id) as unknown as {
+            const agent = actorGateway.stub<{
               getTrackRecord(): Promise<{ ideas: unknown[] }>;
-            };
+            }>(researchNs, `research:${userLogin}`);
             const record = await agent.getTrackRecord();
             return { ideas: record.ideas as unknown as TrackRecordIdeaInput[] };
           },
@@ -2519,14 +2552,12 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
           { status: 503 },
         );
       }
-      const stub = env.SEARCH_AGENT.get(
-        env.SEARCH_AGENT.idFromName(SHARED_ORCHESTRATOR_INSTANCE),
-      ) as unknown as {
+      const stub = actorGateway.stub<{
         seedCanonicalReports(
           setBy: string,
           tenantId: string,
         ): Promise<SeedCanonicalReportsResult>;
-      };
+      }>(env.SEARCH_AGENT, SHARED_ORCHESTRATOR_INSTANCE);
       return handleSeedReportsRoute({
         session,
         method: request.method,
@@ -2960,10 +2991,71 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
           if (targetId === "" || bindings.length === 0) {
             return Response.json({ error: "internalUserId and a non-empty roleBindings array are required." }, { status: 400 });
           }
+          // #2661 — optional grantee email. A blank email is the
+          // same as absent (the panel only sends a filled field);
+          // a present-but-malformed email fails closed, never
+          // stored and never mailed to.
+          const emailRaw = typeof body?.email === "string" ? body.email.trim() : "";
+          const granteeEmail = emailRaw === "" ? undefined : emailRaw;
+          if (granteeEmail !== undefined && (granteeEmail.length > 512 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(granteeEmail))) {
+            return Response.json({ error: "email must be a valid email address." }, { status: 400 });
+          }
           if (targetId === session.internalUserId) {
             return Response.json({ error: "Self-grant is forbidden: another admin must grant your roles.", code: "SELF_GRANT" }, { status: 403 });
           }
           const grantTenantId = typeof body?.tenantId === "string" && body.tenantId.trim() !== "" ? body.tenantId.trim() : tenantId;
+          // #2661 — idempotent no-op: when the target already
+          // holds every requested binding live (same tenant,
+          // unrevoked, unexpired), the grant changes nothing, so
+          // it writes nothing — no new record, no new audit rows,
+          // no welcome. Authorization is still enforced first via
+          // a read-only canGrantRole check per binding, so a
+          // non-granter learns nothing beyond a denied grant
+          // (the memberships list route already shows holdings to
+          // granters). Step-up is skipped only because nothing is
+          // granted; the normal flow below keeps its obligations.
+          const requestedBindings: Array<{ role: string; scope: "platform" | "tenant"; workspaceId?: string }> = bindings.map((raw) => {
+            const binding = raw as { role?: unknown; scope?: unknown; workspaceId?: unknown };
+            return {
+              role: binding.role as string,
+              scope: binding.scope === "platform" ? "platform" : "tenant",
+              workspaceId: typeof binding.workspaceId === "string" ? binding.workspaceId : undefined,
+            };
+          });
+          const existingLive = await membershipStore.getMembershipsByUser(targetId);
+          const covering = existingLive.find(
+            (m) =>
+              m.tenantId === grantTenantId &&
+              m.revokedAtMs === undefined &&
+              requestedBindings.every((rb) =>
+                m.roleBindings.some(
+                  (b) =>
+                    b.role === rb.role &&
+                    b.scope === rb.scope &&
+                    (rb.workspaceId ? b.workspaceId === rb.workspaceId : true) &&
+                    (b.expiresAtMs === undefined || b.expiresAtMs > nowMs),
+                ),
+              ),
+          );
+          if (covering) {
+            for (const rb of requestedBindings) {
+              const check = await canGrantRole(membershipStore, {
+                granterInternalUserId: session.internalUserId as string,
+                targetTenantId: grantTenantId,
+                targetScope: rb.scope,
+                targetRole: rb.role as Role,
+                targetWorkspaceId: rb.workspaceId,
+                nowMs,
+              });
+              if (check.decision === "deny") {
+                return Response.json(
+                  { error: "Forbidden: grant denied.", code: check.reason, reason: check.reason },
+                  { status: 403 },
+                );
+              }
+            }
+            return Response.json({ ok: true, membership: covering, alreadyProvisioned: true });
+          }
           for (const raw of bindings) {
             const binding = raw as { role?: unknown; scope?: unknown; workspaceId?: unknown };
             const scope = binding.scope === "platform" ? "platform" : "tenant";
@@ -3001,6 +3093,7 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
               };
             }),
             nowMs,
+            ...(granteeEmail !== undefined ? { email: granteeEmail } : {}),
           });
           if (!granted.ok) {
             return Response.json(
@@ -3008,7 +3101,24 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
               { status: granted.code === "GRANT_DENIED" ? 403 : 400 },
             );
           }
-          return Response.json({ ok: true, membership: granted.membership }, { status: 201 });
+          // #2661 — welcome trigger on provisioning: a successful
+          // grant that captured a grantee email best-effort sends
+          // the tier-selected welcome. The send never blocks or
+          // fails the grant — its outcome rides along in the
+          // response. No email → no welcome attempt. No-ops never
+          // reach here, so re-grants never re-welcome.
+          let welcome;
+          if (granteeEmail !== undefined) {
+            welcome = await sendProvisioningWelcome(env, {
+              userId: targetId,
+              email: granteeEmail,
+              tenantId: grantTenantId,
+            });
+          }
+          return Response.json(
+            { ok: true, membership: granted.membership, ...(welcome ? { welcome } : {}) },
+            { status: 201 },
+          );
         }
         if (path === "/api/iaaa/membership/revoke") {
           if (request.method !== "POST") {
@@ -3262,15 +3372,104 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
           if (body?.confirm !== "deactivate") {
             return Response.json({ error: "Deactivation requires { confirm: \"deactivate\" }." }, { status: 400 });
           }
-          const report = await runOffboard(offboardDeps(), {
+          // Issue #2660 (monetization Phase 2.5): the subscription gate.
+          // Deactivation revokes the identity a subscription bills against,
+          // so an unexpired subscription must block deactivation explicitly:
+          // never silently canceled (cancel mechanics belong to 2.7) and
+          // never silently kept charging (the user would have no session
+          // left with which to cancel). Logins come from the principal's
+          // own sessions — the same discovery runOffboard uses, never a
+          // caller-supplied identity. The gate reads AGENT_DB only (#1819:
+          // zero new SessionStore reads). Nothing is revoked before the
+          // gate, and a KNOWN active subscription always blocks (409).
+          // Deliberate non-fail-closed case: when the subscription store
+          // is unavailable (or a login's read throws), deactivation still
+          // proceeds — deactivation is security revocation first, and
+          // blocking it on a billing-store outage would leave compromised
+          // sessions/keys unrevocable. The unverified state is recorded
+          // in the response's subscriptionGate field, never silent, so
+          // the interaction is stated even when it cannot be checked.
+          const deps = offboardDeps();
+          const listed = await deps.sessions.list();
+          const resolved = resolveOffboardSessions(listed, session.internalUserId.trim(), []);
+          const logins = [...new Set(resolved.map((e) => e.githubLogin))];
+          const subscriptionGate: {
+            checked: boolean;
+            loginsWithActive: string[];
+            unverified: Array<{ login?: string; reason: string }>;
+          } = { checked: true, loginsWithActive: [], unverified: [] };
+          const subs = createSubscriptionAdapter(env);
+          if (!subs) {
+            subscriptionGate.checked = false;
+            subscriptionGate.unverified.push({ reason: "subscription-store-unavailable" });
+          } else {
+            for (const login of logins) {
+              try {
+                const rows = await subs.listSubscriptions(login);
+                if (hasUnexpiredSubscription(rows, nowMs)) subscriptionGate.loginsWithActive.push(login);
+              } catch (err: any) {
+                subscriptionGate.checked = false;
+                subscriptionGate.unverified.push({ login, reason: err?.message ?? "unknown error" });
+              }
+            }
+          }
+          if (subscriptionGate.loginsWithActive.length > 0) {
+            return Response.json(
+              {
+                error:
+                  "Deactivation blocked: an active subscription is still billing this identity. Cancel it first, then deactivate.",
+                code: "DeactivationBlockedByActiveSubscription",
+                cancelRoute: "/api/payments/agentic/commercial/subscription/cancel",
+                loginsWithActive: subscriptionGate.loginsWithActive,
+              },
+              { status: 409 },
+            );
+          }
+          const report = await runOffboard(deps, {
             internalUserId: session.internalUserId,
             tenantId,
             nowMs,
             actorInternalUserId: session.internalUserId,
             auditAction: "iaaa.deactivate",
           });
+          // Issue #2660: commercial-plane mail suppression. The iaaa Kv
+          // flag runOffboard sets is not consulted by any commercial mail
+          // path, so the scheduled digest pass would keep mailing a
+          // deactivated principal. Flip the lifecycle preference row for
+          // each discovered login instead: the pass enumerates
+          // digestEnabled=1 rows only, and the send-time checks enforce
+          // both flags. Per-login containment: one login's failure never
+          // blocks the others, and every outcome is reported in the
+          // response, never silent. A suppression failure after a
+          // completed offboard is surfaced here; operator recovery is
+          // POST lifecycle/preferences (an operator may write prefs).
+          // No extra audit marker is emitted: offboardAudit hardcodes
+          // outcome "succeeded", which would misdescribe a partial
+          // suppression failure — the response body is the record, and
+          // the offboard itself is audited by runOffboard's audit step.
+          const commercialSuppression: {
+            suppressed: string[];
+            noRow: string[];
+            failed: Array<{ login: string; error: string }>;
+          } = { suppressed: [], noRow: [], failed: [] };
+          const lifecycle = createLifecycleAdapter(env);
+          if (!lifecycle) {
+            for (const login of logins) {
+              commercialSuppression.failed.push({ login, error: "lifecycle-store-unavailable" });
+            }
+          } else {
+            for (const login of logins) {
+              try {
+                const flipped = await lifecycle.suppressMailForUser(login);
+                if (flipped) commercialSuppression.suppressed.push(login);
+                else commercialSuppression.noRow.push(login);
+              } catch (err: any) {
+                commercialSuppression.failed.push({ login, error: err?.message ?? "unknown error" });
+              }
+            }
+          }
           return Response.json(
-            { ok: true, ...report },
+            { ok: true, ...report, subscriptionGate, commercialSuppression },
             { headers: { "Set-Cookie": clearSessionCookie() } },
           );
         }
@@ -3392,7 +3591,6 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
           { status: 401, headers: corsHeaders }
         );
       }
-      const id = env.SEARCH_AGENT.idFromName(userLogin);
       const targetUrl = new URL("/mcp" + url.search, "https://agent.internal");
       const forwardReq = new Request(targetUrl, request);
       forwardReq.headers.set("x-user-login", userLogin);
@@ -3400,7 +3598,7 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
       // cannot tell session from API-key auth from the login alone.
       forwardReq.headers.set("x-principal-kind", session ? "session" : "api-key");
 
-      const resp = await env.SEARCH_AGENT.get(id).fetch(forwardReq);
+      const resp = await actorGateway.dispatch(env.SEARCH_AGENT, userLogin, forwardReq);
       const headers = new Headers(resp.headers);
       headers.set("Access-Control-Allow-Origin", "*");
       headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -3441,13 +3639,14 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
         request.headers.get("x-scanner-session") ||
         request.headers.get("x-user-id") ||
         "public_scanner";
-      const scannerId = (env as any).OPTIONS_SCANNER_MCP.idFromName(scannerAffinityId);
       const scannerUrl = new URL(
         path.replace("/mcp/scanner", "") || "/" + url.search,
         "https://scanner.internal",
       );
 
-      const resp = await (env as any).OPTIONS_SCANNER_MCP.get(scannerId).fetch(
+      const resp = await actorGateway.dispatch(
+        (env as any).OPTIONS_SCANNER_MCP,
+        scannerAffinityId,
         new Request(scannerUrl, request),
       );
       const headers = new Headers(resp.headers);
@@ -3459,7 +3658,10 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
     }
 
     // --- Cloudflare Agentic Payments: CORS preflight (premium + wallet families) ---
-    if ((path.startsWith("/api/premium/") || path.startsWith("/api/payments/agentic/")) && request.method === "OPTIONS") {
+    // Issue #2787: the commercial family answers its bare spelling too
+    // (/payments/agentic/commercial/*), so its preflight is aliased here
+    // exactly like its dispatch below.
+    if ((path.startsWith("/api/premium/") || path.startsWith("/api/payments/agentic/") || path.startsWith("/payments/agentic/commercial/")) && request.method === "OPTIONS") {
       return new Response(null, {
         headers: {
           "Access-Control-Allow-Origin": "*",
@@ -3471,6 +3673,16 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
     }
 
     // --- Agentic Wallet API (/api/payments/agentic/*) ---
+    // Issue #2787: the commercial family also answers its bare spelling
+    // (/payments/agentic/commercial/*) — same handler, same session gate,
+    // same instance routing, same forwarding. The /api spelling stays
+    // canonical (every in-app client uses it); the bare spelling is an
+    // alias, not a second route: subPath below strips /api when present
+    // and passes bare paths through unchanged, so both spellings forward
+    // identically to the handlers (which match endsWith). Precedent: the
+    // webhook below accepts both /api/payments/webhook and
+    // /payments/webhook. Only the commercial family is aliased — other
+    // /payments/agentic/* paths keep the /api-only gate.
     // Issue #183: a session is REQUIRED for the wallet family (the #154
     // pattern) — the wallet and its HITL auto-approve limit are the
     // signed-in user's own state. Previously a null session fell back
@@ -3479,17 +3691,16 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
     // read and mutate a shared wallet (and select any user's instance
     // by asserting their login). The fallback identities are removed;
     // the only in-app caller (AgenticWalletPanel) is signed in.
-    if (path.startsWith("/api/payments/agentic/")) {
+    if (path.startsWith("/api/payments/agentic/") || path.startsWith("/payments/agentic/commercial/")) {
       const session = await requireAuth(request, env);
       if (!session) return new Response("Unauthorized", { status: 401 });
       const userLogin = session.githubLogin;
-      const id = env.SEARCH_AGENT.idFromName(userLogin);
       const subPath = path.replace(/^\/api/, "");
       const targetUrl = new URL(subPath + url.search, "https://agent.internal");
       const forwardReq = new Request(targetUrl, request);
       forwardReq.headers.set("x-user-login", userLogin);
 
-      const resp = await env.SEARCH_AGENT.get(id).fetch(forwardReq);
+      const resp = await actorGateway.dispatch(env.SEARCH_AGENT, userLogin, forwardReq);
       const headers = new Headers(resp.headers);
       headers.set("Access-Control-Allow-Origin", "*");
       headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -3515,17 +3726,17 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
       const subPath = path.replace(/^\/api/, "");
       const targetUrl = new URL(subPath + url.search, "https://agent.internal");
       const forwardReq = new Request(targetUrl, request);
-      let id;
+      let instanceName;
       if (session) {
         forwardReq.headers.set("x-user-login", session.githubLogin);
-        id = env.SEARCH_AGENT.idFromName(session.githubLogin);
+        instanceName = session.githubLogin;
       } else {
         forwardReq.headers.delete("x-user-login");
         forwardReq.headers.delete("x-user-id");
-        id = env.SEARCH_AGENT.idFromName(PREMIUM_GATEWAY_INSTANCE);
+        instanceName = PREMIUM_GATEWAY_INSTANCE;
       }
 
-      const resp = await env.SEARCH_AGENT.get(id).fetch(forwardReq);
+      const resp = await actorGateway.dispatch(env.SEARCH_AGENT, instanceName, forwardReq);
       const headers = new Headers(resp.headers);
       headers.set("Access-Control-Allow-Origin", "*");
       headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -3536,9 +3747,8 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
 
     // --- External Payment Webhook Listeners (Stripe, PayPal, Lemon Squeezy) ---
     if (path.startsWith("/api/payments/webhook") || path === "/payments/webhook") {
-      const id = env.SEARCH_AGENT.idFromName("system_webhook_receiver");
       const targetUrl = new URL("/payments/webhook" + url.search, "https://agent.internal");
-      return env.SEARCH_AGENT.get(id).fetch(new Request(targetUrl, request));
+      return actorGateway.dispatch(env.SEARCH_AGENT, "system_webhook_receiver", new Request(targetUrl, request));
     }
 
     // --- Omnichannel Trading Agent: Inbound Email Webhook & Simulator ---
@@ -3555,11 +3765,10 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
       const session = await requireAuth(request, env);
       if (!session) return new Response("Unauthorized", { status: 401 });
       const userLogin = session.githubLogin;
-      const id = env.SEARCH_AGENT.idFromName(userLogin);
       const targetUrl = new URL("/trading/email/inbound", "https://agent.internal");
       const forwardReq = new Request(targetUrl, request);
       forwardReq.headers.set("x-user-login", userLogin);
-      return env.SEARCH_AGENT.get(id).fetch(forwardReq);
+      return actorGateway.dispatch(env.SEARCH_AGENT, userLogin, forwardReq);
     }
 
     // --- Omnichannel Trading Agent: Signed Email Approval Link Click ---
@@ -3588,9 +3797,8 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
       if (!fastCheck.ok) {
         return renderPage("Approval link invalid", fastCheck.error);
       }
-      const id = env.SEARCH_AGENT.idFromName(INBOUND_EMAIL_ORCHESTRATOR_INSTANCE);
       const targetUrl = new URL("/trading/email/approve-link", "https://agent.internal");
-      const forwardRes = await env.SEARCH_AGENT.get(id).fetch(
+      const forwardRes = await actorGateway.dispatch(env.SEARCH_AGENT, INBOUND_EMAIL_ORCHESTRATOR_INSTANCE,
         new Request(targetUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -3615,11 +3823,10 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
       const session = await requireAuth(request, env);
       if (!session) return new Response("Unauthorized", { status: 401 });
       const userLogin = session.githubLogin;
-      const id = env.SEARCH_AGENT.idFromName(userLogin);
       const targetUrl = new URL("/trading/slack/event", "https://agent.internal");
       const forwardReq = new Request(targetUrl, request);
       forwardReq.headers.set("x-user-login", userLogin);
-      return env.SEARCH_AGENT.get(id).fetch(forwardReq);
+      return actorGateway.dispatch(env.SEARCH_AGENT, userLogin, forwardReq);
     }
 
     // --- Omnichannel Trading Agent: Slack Principal Link Confirm ---
@@ -3654,11 +3861,10 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
       const session = await requireAuth(request, env);
       if (!session) return new Response("Unauthorized", { status: 401 });
       const userLogin = session.githubLogin;
-      const id = env.SEARCH_AGENT.idFromName(userLogin);
       const targetUrl = new URL("/trading/voice/turn", "https://agent.internal");
       const forwardReq = new Request(targetUrl, request);
       forwardReq.headers.set("x-user-login", userLogin);
-      return env.SEARCH_AGENT.get(id).fetch(forwardReq);
+      return actorGateway.dispatch(env.SEARCH_AGENT, userLogin, forwardReq);
     }
 
     // --- Omnichannel Trading Agent: Voice Welcome Greeting ---
@@ -3666,11 +3872,10 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
       const session = await requireAuth(request, env);
       if (!session) return new Response("Unauthorized", { status: 401 });
       const userLogin = session.githubLogin;
-      const id = env.SEARCH_AGENT.idFromName(userLogin);
       const targetUrl = new URL("/trading/voice/greeting", "https://agent.internal");
       const forwardReq = new Request(targetUrl, request);
       forwardReq.headers.set("x-user-login", userLogin);
-      return env.SEARCH_AGENT.get(id).fetch(forwardReq);
+      return actorGateway.dispatch(env.SEARCH_AGENT, userLogin, forwardReq);
     }
 
     // --- Omnichannel Options Intelligence: Forwarder for Options Endpoints (Catalog, Strategies, Screen, Unified, Config) ---
@@ -3684,12 +3889,11 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
       const session = await requireAuth(request, env);
       if (!session) return new Response("Unauthorized", { status: 401 });
       const userLogin = session.githubLogin;
-      const id = env.SEARCH_AGENT.idFromName(userLogin);
       const subPath = path.replace(/^\/api/, "");
       const targetUrl = new URL(subPath + url.search, "https://agent.internal");
       const forwardReq = new Request(targetUrl, request);
       forwardReq.headers.set("x-user-login", userLogin);
-      return env.SEARCH_AGENT.get(id).fetch(forwardReq);
+      return actorGateway.dispatch(env.SEARCH_AGENT, userLogin, forwardReq);
     }
 
     // --- Cloudflare Agents Task Scheduling Management APIs ---
@@ -3701,12 +3905,11 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
       const session = await requireAuth(request, env);
       if (!session) return new Response("Unauthorized", { status: 401 });
       const userLogin = session.githubLogin;
-      const id = env.SEARCH_AGENT.idFromName(userLogin);
       const subPath = path.replace(/^\/api/, "");
       const targetUrl = new URL(subPath + url.search, "https://agent.internal");
       const forwardReq = new Request(targetUrl, request);
       forwardReq.headers.set("x-user-login", userLogin);
-      return env.SEARCH_AGENT.get(id).fetch(forwardReq);
+      return actorGateway.dispatch(env.SEARCH_AGENT, userLogin, forwardReq);
     }
 
     // #1768: WebSocket upgrade dispatch, table-driven (src/api/wsRoutes.ts).
@@ -3745,8 +3948,7 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
         return new Response(null, { status: 101, webSocket: clientWs });
       },
       fetchTicker: async (strippedRequest) => {
-        const tickerId = env.TICKER_AGENT.idFromName(TICKER_INSTANCE_NAME);
-        return env.TICKER_AGENT.get(tickerId).fetch(strippedRequest);
+        return actorGateway.dispatch(env.TICKER_AGENT, TICKER_INSTANCE_NAME, strippedRequest);
       },
       ingressMode: apiIngressMode,
     });
@@ -3855,14 +4057,13 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
         // and the "browser_trader" literal is a defensive default
         // only. The DO route has no fallback (one shared block).
         const userLogin = resolveSnapIdentity(request.headers.get("x-user-login"), tx.symbol);
-        const id = env.SEARCH_AGENT.idFromName(userLogin);
         const targetUrl = new URL("/trading/browser/transaction-snap", "https://agent.internal");
         const forwardReq = new Request(targetUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json", "x-user-login": userLogin },
           body: JSON.stringify(body),
         });
-        return env.SEARCH_AGENT.get(id).fetch(forwardReq);
+        return actorGateway.dispatch(env.SEARCH_AGENT, userLogin, forwardReq);
       } catch (err: any) {
         return Response.json({ success: false, error: err.message }, { status: 500 });
       }
@@ -3878,14 +4079,13 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
 
       const params = new URLSearchParams(rawBody);
       const teamId = params.get("team_id") || "default_workspace";
-      const id = env.SEARCH_AGENT.idFromName(`slack_${teamId}`);
       const targetUrl = new URL("/trading/slack/command", "https://agent.internal");
       const forwardReq = new Request(targetUrl, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: rawBody,
       });
-      return env.SEARCH_AGENT.get(id).fetch(forwardReq);
+      return actorGateway.dispatch(env.SEARCH_AGENT, `slack_${teamId}`, forwardReq);
     }
 
     // --- Omnichannel Trading Agent: Slack Events Webhook ---
@@ -3909,14 +4109,13 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
 
       // Multi-tenant: Route to workspace DO or fallback receiver
       const teamId = parsed.team_id || "default_workspace";
-      const id = env.SEARCH_AGENT.idFromName(`slack_${teamId}`);
       const targetUrl = new URL("/trading/slack/event", "https://agent.internal");
       const forwardReq = new Request(targetUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: rawBody,
       });
-      return env.SEARCH_AGENT.get(id).fetch(forwardReq);
+      return actorGateway.dispatch(env.SEARCH_AGENT, `slack_${teamId}`, forwardReq);
     }
 
     // --- Omnichannel Trading Agent: Slack Interactive Component Actions ---
@@ -4009,14 +4208,13 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
       }
 
       const teamId = payload.team?.id || "default_workspace";
-      const id = env.SEARCH_AGENT.idFromName(`slack_${teamId}`);
       const targetUrl = new URL("/trading/slack/interaction", "https://agent.internal");
       const forwardReq = new Request(targetUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      return env.SEARCH_AGENT.get(id).fetch(forwardReq);
+      return actorGateway.dispatch(env.SEARCH_AGENT, `slack_${teamId}`, forwardReq);
     }
 
     // --- Omnichannel Trading Agent: Slack OAuth Install & Callback ---
@@ -4072,14 +4270,13 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
         return new Response("Unauthorized: sign in to approve a trade.", { status: 401 });
       }
       const userLogin = session.githubLogin;
-      const id = env.SEARCH_AGENT.idFromName(userLogin);
       const targetUrl = new URL("/etrade/order/execute", "https://agent.internal");
       const forwardReq = new Request(targetUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-user-login": userLogin },
         body: JSON.stringify({ orderId, decision: "approved" }),
       });
-      const res = await env.SEARCH_AGENT.get(id).fetch(forwardReq);
+      const res = await actorGateway.dispatch(env.SEARCH_AGENT, userLogin, forwardReq);
       const json = (await res.json().catch(() => ({}))) as any;
 
       if (json.success) {
@@ -4094,12 +4291,11 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
       const session = await requireAuth(request, env);
       if (!session) return new Response("Unauthorized", { status: 401 });
 
-      const id = env.SEARCH_AGENT.idFromName(session.githubLogin);
       const targetUrl = new URL(`/clear${url.search}`, "https://agent.internal");
 
       const forwardReq = new Request(targetUrl, request);
       forwardReq.headers.set("x-user-login", session.githubLogin);
-      return env.SEARCH_AGENT.get(id).fetch(forwardReq);
+      return actorGateway.dispatch(env.SEARCH_AGENT, session.githubLogin, forwardReq);
     }
 
     // --- Options Flows Endpoints (Live, Historical, News, Insider, Congress, Summary, Presets) ---
@@ -4286,7 +4482,6 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
       }
       if (!userLogin) return new Response("Unauthorized", { status: 401 });
 
-      const id = env.SEARCH_AGENT.idFromName(userLogin);
       const subPath = path.replace(/^\/api/, "");
       const targetUrl = new URL(subPath + url.search, "https://agent.internal");
 
@@ -4309,7 +4504,7 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
       if (deliveryOverride !== "sync" && (deliveryOverride === "queued" || !isImmediateSync)) {
         forwardReq.headers.set("x-async-eligible", "1");
       }
-      return env.SEARCH_AGENT.get(id).fetch(forwardReq);
+      return actorGateway.dispatch(env.SEARCH_AGENT, userLogin, forwardReq);
     }
 
     // --- Simulated Sandbox Terminal for Payment Gateways ---
@@ -4418,7 +4613,10 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
         });
       }
 
-      const asset = await env.ASSETS.fetch(request);
+      // Qunsultant/cfagent#1775 (Adapter S1): ASSETS fetch via the
+      // static-asset port (fetchStaticAsset), not the binding
+      // directly. Response handling below is verbatim.
+      const asset = await fetchStaticAsset(request, env);
       if (asset.ok) {
         const html = await asset.text();
         // Issue #1759: the client renders the user DID from the
@@ -4483,7 +4681,9 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
       }
     }
 
-    return env.ASSETS.fetch(request);
+    // Qunsultant/cfagent#1775 (Adapter S1): fallthrough serve via
+    // the static-asset port, not the binding directly.
+    return fetchStaticAsset(request, env);
 }
 
 /**
@@ -4632,8 +4832,7 @@ export default {
           Date.now(),
         )
       : false;
-    const id = env.SEARCH_AGENT.idFromName(SHARED_ORCHESTRATOR_INSTANCE);
-    const agent = env.SEARCH_AGENT.get(id);
+    const agent = actorGateway.stub<DoStubLike>(env.SEARCH_AGENT, SHARED_ORCHESTRATOR_INSTANCE);
 
     // PR #4 — ScheduledAgent tick: evaluate due goals, budget-check,
     // create Orchestrator jobs (issue #166).
@@ -4644,10 +4843,9 @@ export default {
         );
         return;
       }
-      const schedId = env.SCHEDULED_AGENT.idFromName("default");
-      const schedAgent = env.SCHEDULED_AGENT.get(schedId) as unknown as {
+      const schedAgent = actorGateway.stub<{
         onCron(): Promise<unknown>;
-      };
+      }>(env.SCHEDULED_AGENT, "default");
       const tickPromise = schedAgent.onCron();
       if (ctx?.waitUntil) ctx.waitUntil(tickPromise);
       else await tickPromise;
@@ -4852,8 +5050,7 @@ export default {
     // + logged, never retried (a poison-loop guard).
     if (batch?.queue === "screener-events") {
       const serviceUserLogin = getServiceUserLogin(env);
-      const id = env.SEARCH_AGENT.idFromName(SHARED_ORCHESTRATOR_INSTANCE);
-      const agent = env.SEARCH_AGENT.get(id);
+      const agent = actorGateway.stub<DoStubLike>(env.SEARCH_AGENT, SHARED_ORCHESTRATOR_INSTANCE);
       let serviceProvisioned: boolean | null = null;
       const getServiceProvisioned = async (): Promise<boolean> => {
         if (serviceProvisioned === null) {
@@ -4972,8 +5169,7 @@ export default {
     // (dropped, not retried: a re-dispatch would deny again, and
     // options analysis is time-sensitive).
     const serviceUserLogin = getServiceUserLogin(env);
-    const id = env.SEARCH_AGENT.idFromName(SHARED_ORCHESTRATOR_INSTANCE);
-    const agent = env.SEARCH_AGENT.get(id);
+    const agent = actorGateway.stub<DoStubLike>(env.SEARCH_AGENT, SHARED_ORCHESTRATOR_INSTANCE);
     let serviceProvisioned: boolean | null = null;
 
     if (batch?.messages && Array.isArray(batch.messages)) {

@@ -408,6 +408,32 @@ export class D1LifecycleAdapter implements LifecycleStore {
     return record;
   }
 
+  async suppressMailForUser(userId: string): Promise<NotificationPreferences | null> {
+    // Issue #2660: one UPDATE keyed by user_id alone (the table's
+    // primary key), so no tenant scope is consulted and no
+    // tenant-mismatch failure is possible. No row → null: defaults
+    // are already digest-OFF, so there is nothing to suppress.
+    if (!userId) throw new Error("userId is required.");
+    const rows = await this.db
+      .select()
+      .from(agentNotificationPreferences)
+      .where(eq(agentNotificationPreferences.userId, userId))
+      .limit(1);
+    if (rows.length === 0) return null;
+    const updatedAtMs = Date.now();
+    await this.db
+      .update(agentNotificationPreferences)
+      .set({ digestEnabled: 0, welcomeEnabled: 0, updatedAtMs })
+      .where(eq(agentNotificationPreferences.userId, userId));
+    return {
+      userId: rows[0].userId,
+      tenantId: rows[0].tenantId,
+      digestEnabled: false,
+      welcomeEnabled: false,
+      updatedAtMs,
+    };
+  }
+
   async hasSentDigest(userId: string, day: string): Promise<boolean> {
     const rows = await this.db
       .select()

@@ -278,6 +278,18 @@ export interface NotificationPreferencePort {
     digestEnabled?: unknown;
     welcomeEnabled?: unknown;
   }): Promise<NotificationPreferences>;
+  /**
+   * Issue #2660 (monetization Phase 2.5): commercial-plane mail
+   * suppression on deactivation. Flips digestEnabled AND welcomeEnabled
+   * off on the user's preference row (the table's primary key is
+   * user_id alone, so one row covers the user — no tenant-mismatch
+   * trap). The scheduled digest pass enumerates digestEnabled=1 rows
+   * only, and the send-time checks enforce both flags, so this is
+   * what makes "deactivation stops digest mail" true. Returns the
+   * flipped row, or null when no row exists (defaults are already
+   * digest-OFF; a missing row needs no suppression write).
+   */
+  suppressMailForUser(userId: string): Promise<NotificationPreferences | null>;
 }
 
 /** UTC calendar day, YYYY-MM-DD — the digest guard's grain. */

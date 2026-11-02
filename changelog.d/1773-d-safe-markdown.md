@@ -1,0 +1,2 @@
+### Added
+- Safe-markdown rendering pin (Qunsultant/cfagent#1773, OWASP ASI-03 untrusted content): a test proving hostile model output rendered through MarkdownContent creates no script, img, svg, iframe, or anchor element, no executable href, and no event-handler attribute — the payloads render as inert text — plus a source pin that the markdown path uses no innerHTML, and a negative control proving the same assertions detect an unsafe renderer. No behavior change: the renderer was already safe by construction (React text nodes, no link parsing); this closes ASI-03 by test.

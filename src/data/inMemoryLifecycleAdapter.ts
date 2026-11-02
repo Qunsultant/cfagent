@@ -216,6 +216,22 @@ export class InMemoryLifecycleAdapter implements LifecycleStore {
     return { ...record };
   }
 
+  async suppressMailForUser(userId: string): Promise<NotificationPreferences | null> {
+    // Issue #2660: mirror the D1 adapter — flip both flags on the
+    // user's row (the map key is user_id alone); no row → null.
+    if (!userId) throw new Error("userId is required.");
+    const existing = this.preferences.get(userId);
+    if (!existing) return null;
+    const record: NotificationPreferences = {
+      ...existing,
+      digestEnabled: false,
+      welcomeEnabled: false,
+      updatedAtMs: Date.now(),
+    };
+    this.preferences.set(userId, record);
+    return { ...record };
+  }
+
   async hasSentDigest(userId: string, day: string): Promise<boolean> {
     return this.digestSends.has(`${userId}:${day}`);
   }

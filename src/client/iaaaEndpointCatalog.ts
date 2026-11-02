@@ -535,7 +535,7 @@ export const API_ENDPOINT_CATALOG: ApiEndpointEntry[] = [
     aliases: [],
     kind: "http",
     auth: "session",
-    authNote: "401 unauthenticated; 403 legacy sessions, self-grants, non-granters, and failed step-up/audit obligations; 400 for empty bindings or unknown roles. Grants through grantMembership (canGrantRole re-enforced); platform-admin grants platform roles only (#1758).",
+    authNote: "401 unauthenticated; 403 legacy sessions, self-grants, non-granters, and failed step-up/audit obligations; 400 for empty bindings, unknown roles, or a malformed grantee email. Grants through grantMembership (canGrantRole re-enforced); platform-admin grants platform roles only (#1758). #2661: optional email is captured on the record and best-effort sends the tier-selected welcome; re-granting held bindings is a no-op (200, alreadyProvisioned).",
     source: "src/server.ts branch: path === /api/iaaa/membership/grant",
   },
   {
@@ -657,6 +657,16 @@ export const API_ENDPOINT_CATALOG: ApiEndpointEntry[] = [
     auth: "session",
     authNote: "401 unauthenticated; 405 non-GET; 400 without a chainId query parameter. Tenant-scoped read of the AgentDB shard job projection ONLY (never the durable object); unbound AgentDB answers 503.",
     source: "src/server.ts branch: path === /api/jobs/history",
+  },
+  {
+    id: "traces",
+    method: "GET",
+    path: "/api/traces",
+    aliases: [],
+    kind: "http",
+    auth: "session",
+    authNote: "401 unauthenticated; 405 non-GET; 400 without a traceId query parameter. Tenant-scoped read of one trace's assembled hops from AgentDB (surfacing route for the mesh trace spine, issue #2000); unbound AgentDB answers 503, unknown or cross-tenant trace answers 404.",
+    source: "src/server.ts branch: path === /api/traces",
   },
   {
     id: "jobs-reconcile",
@@ -909,8 +919,8 @@ export const API_ENDPOINT_CATALOG: ApiEndpointEntry[] = [
     kind: "http",
     auth: "session",
     authNote: "requireAuth (401); the OPTIONS preflight is handled by the earlier CORS branch.",
-    source: "src/server.ts branch: path.startsWith /api/payments/agentic/",
-    prefixes: ["/api/payments/agentic/"],
+    source: "src/server.ts branch: path.startsWith /api/payments/agentic/ (+ #2787 bare commercial alias: path.startsWith /payments/agentic/commercial/)",
+    prefixes: ["/api/payments/agentic/", "/payments/agentic/commercial/"],
   },
   {
     id: "premium",

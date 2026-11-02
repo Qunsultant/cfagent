@@ -62,6 +62,10 @@ export class McpAgentToolAdapter {
           sessionId: context.sessionId,
           audit: context.audit,
           decisionSink: context.permissionDecisionSink,
+          // #2171: agent-grant enforcement for this turn, when the
+          // turn's context carries it. Absent → the gate is
+          // unchanged (scope check only).
+          agentAccess: context.agentAccess,
         };
         if (context.submitJob && command.name !== "get_async_job" && command.name !== "list_async_jobs") {
           await authorizeMcpToolCall(port, principal, command.name, gateOpts);
