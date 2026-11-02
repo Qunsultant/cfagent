@@ -297,6 +297,40 @@ export function computeAtr(
 }
 
 /**
+ * Historical Volatility (issue #1769, parent #1717; screener-rules.md
+ * §1.5: HV = sqrt(252) × sigma(ln(P_t / P_{t-1}))). Pure function over
+ * closes supplied by the caller — nothing here fetches. Returns the
+ * ANNUALIZED decimal (0.25 = 25%): log returns over the trailing
+ * `window` returns (so `window + 1` closes), population sigma
+ * (divide by N, matching the discovery-signals realizedVolatility
+ * helper this function exports for reuse — that helper was private
+ * and unexported, which is why HV read as "partially implemented").
+ * Only the trailing window + 1 closes are read; earlier history is
+ * ignored, never averaged in.
+ *
+ * Returns null when the value cannot be built honestly: fewer than
+ * `window + 1` closes, fewer than 10 returns in the window (a sigma
+ * over a handful of returns is noise dressed as a number), a
+ * non-positive or non-finite close in the window, or an invalid
+ * window (non-integer or < 1). Never fabricates closes.
+ */
+export function computeHistoricalVolatility(
+  closes: readonly number[],
+  window = 20
+): number | null {
+  if (!Number.isInteger(window) || window < 1) return null;
+  if (!closes || closes.length < window + 1) return null;
+  const slice = closes.slice(closes.length - (window + 1));
+  if (slice.some((c) => !Number.isFinite(c) || c <= 0)) return null;
+  const returns: number[] = [];
+  for (let i = 1; i < slice.length; i++) returns.push(Math.log(slice[i] / slice[i - 1]));
+  if (returns.length < 10) return null;
+  const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
+  const variance = returns.reduce((sum, r) => sum + (r - mean) * (r - mean), 0) / returns.length;
+  return Math.sqrt(variance) * Math.sqrt(252);
+}
+
+/**
  * Fractal pivots (issue #1654 slice 4/8; docs/architecture/business/
  * screener-rules.md: "Identified High/Low pivots require P_t to be
  * extreme compared to n preceding and trailing bars"). Pure function
