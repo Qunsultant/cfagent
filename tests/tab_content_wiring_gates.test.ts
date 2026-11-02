@@ -83,6 +83,9 @@ const KNOWN_ORPHANS = [
   // OptionsResearchPanel shim only by tests/options_llm_ideas.test.ts.
   "src/client/LlmOptionsIdeasPanel.tsx",
   "src/client/OptionsResearchPanel.tsx",
+  // Deprecated in place in #2723 (superseded by DataProvidersPanel);
+  // preserved under the zero-deletions policy gate (§22).
+  "src/client/ProviderConnectivityDashboard.tsx",
 ];
 
 describe("tab content wiring gates (#2083)", () => {

@@ -47,10 +47,10 @@ describe("Data Providers consolidation & tabular presentation (#2723)", () => {
 
   it("source defines tabular structure and ScreenersHub callout link", () => {
     expect(dppSrc).toContain("dpp-table");
-    expect(dppSrc).toContain("<table");
-    expect(dppSrc).toContain("<th scope=\"col\">Provider</th>");
-    expect(dppSrc).toContain("<th scope=\"col\">Connectivity &amp; Session</th>");
-    expect(dppSrc).toContain("<th scope=\"col\">Actions</th>");
+    expect(dppSrc).toContain("<Table");
+    expect(dppSrc).toContain('header: "Provider"');
+    expect(dppSrc).toContain('header: "Connectivity & Session"');
+    expect(dppSrc).toContain('header: "Actions"');
 
     // ScreenersHub no longer mounts ProviderConnectivityDashboard, but keeps callout link
     expect(screenersSrc).not.toContain("<ProviderConnectivityDashboard />");
