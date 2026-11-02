@@ -70,6 +70,7 @@ import type {
   StrategyRequest,
   StrategyScreenFilter,
 } from "../trading";
+import { buildPanelFetchDteBands } from "../trading";
 
 /* ------------------------------------------------------------------ */
 /* Candidate contract                                                  */
@@ -1287,7 +1288,25 @@ export interface PanelDiscoveryResult extends KernelDiscoveryResult {
  */
 export class RecommendationService {
   async discoverPanel(input: PanelDiscoveryInput): Promise<PanelDiscoveryResult> {
-    const data = await input.dataAgent.loadSnapshot(input.request);
+    // Issue #2599 (F7): the panel snapshot fetches the scanner's
+    // near + extended DTE bands for this request's thesis and
+    // wanted strategies, so LEAPS (365-550 DTE) and PMCC (180+
+    // DTE far leg) contracts are in the fetched chain instead of
+    // unreachable past the 0-90 default window. The request
+    // itself is unchanged (same thesis, strategies, caps); only
+    // the snapshot's fetch bands widen, via the panel band builder
+    // (same rule as the scheduled scanner). The route's snapshot
+    // adapter forwards the extra field to OptionsDataAgent, whose
+    // SnapshotParams already carries expirationDteBands.
+    const data = await input.dataAgent.loadSnapshot({
+      ...input.request,
+      expirationDteBands: buildPanelFetchDteBands({
+        thesis: input.request.thesis,
+        allowedStrategies: input.request.allowedStrategies,
+        minDte: input.request.minDte,
+        maxDte: input.request.maxDte,
+      }),
+    });
     const snapshot: KernelSnapshot = {
       symbol: data.symbol,
       dataSource: data.dataSource,

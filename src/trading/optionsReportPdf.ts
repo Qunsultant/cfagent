@@ -67,16 +67,43 @@ function text(
   const str = cleanForPdf(rawStr);
   const size = opts.size ?? 10;
   const font = opts.bold ? ctx.bold : ctx.font;
-  ensureSpace(ctx, size + 4);
   const c = opts.color ?? PRINT_INK;
-  ctx.page.drawText(str.slice(0, 120), {
-    x: opts.x ?? MARGIN,
-    y: ctx.y,
-    size,
-    font,
-    color: rgb(c[0], c[1], c[2]),
-  });
-  ctx.y -= size + 4;
+  const x = opts.x ?? MARGIN;
+  // Issue #2599 (F8): word-wrap, never truncate. The previous
+  // `str.slice(0, 120)` silently cut contract/prose lines at 120
+  // characters; this is the screenerReportPdf wrap idiom (measure
+  // with widthOfTextAtSize, break on words, one drawn line per
+  // wrapped line with its own page-break check). Caps and content
+  // are unchanged — the callers' slice(0, 50) / slice(0, 25) /
+  // "... and N more" lines still state the summary caps; only the
+  // rendering of each kept line changes, from cut to wrapped.
+  const maxWidth = PAGE_W - MARGIN - x;
+  const words = str.split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let line = "";
+  for (const word of words) {
+    const candidate = line ? `${line} ${word}` : word;
+    if (line && font.widthOfTextAtSize(candidate, size) > maxWidth) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = candidate;
+    }
+  }
+  if (line) lines.push(line);
+  // Empty input still consumes one line, as the old single-draw did.
+  if (lines.length === 0) lines.push("");
+  for (const renderedLine of lines) {
+    ensureSpace(ctx, size + 4);
+    ctx.page.drawText(renderedLine, {
+      x,
+      y: ctx.y,
+      size,
+      font,
+      color: rgb(c[0], c[1], c[2]),
+    });
+    ctx.y -= size + 4;
+  }
 }
 
 function rule(ctx: Ctx): void {

@@ -2103,8 +2103,18 @@ export class ScheduledTasksService {
         1,
         Math.floor(DEFAULT_SUBREQUEST_BUDGET / 12),
       );
+      // Issue #2599 (F3): the budget is a property of the
+      // invocation, not of the trigger label — an on-demand
+      // ("manual") invocation of this same scan over the same
+      // universe previously ran monolithically and silently
+      // deferred most symbols past the budget, while the
+      // scheduled invocation auto-sharded. Auto-shard whenever
+      // the symbol count exceeds the monolithic limit, whatever
+      // the trigger; the sharded branch's queued contract
+      // (success + sharded + chainId, results collated after
+      // completion) is the same contract explicit sharded: true
+      // already offers manual callers.
       const autoShard =
-        options.trigger === "scheduled" &&
         symbols.length > SCHEDULED_OPTIONS_MONOLITHIC_SYMBOL_LIMIT;
       if (options.sharded || autoShard) {
         if (!this.shardSubmit) {
@@ -2207,6 +2217,29 @@ export class ScheduledTasksService {
       // code only threw on coverageErrors > 0.
       const hasCoverage = scanData?.coverage != null;
       const evaluatedCount = Number(scanData?.coverage?.evaluated ?? 0);
+      // Issue #2599 (F5): the publish-nothing gate's missing-
+      // coverage hole. The scanner always stamps coverage, so a
+      // missing coverage object means the result cannot prove
+      // anything was evaluated; when every other signal is also
+      // empty (nothing scanned, no trades, no opportunities) the
+      // run is a total failure exactly like evaluatedCount === 0
+      // and takes the same coded gate instead of publishing an
+      // empty report. A result with any non-empty signal still
+      // proceeds — absence of coverage alone never discards a
+      // run that produced evidence.
+      if (!hasCoverage) {
+        const withTradesCount = Number(scanData?.withTrades ?? 0);
+        const opportunityRows = Array.isArray(scanData?.opportunities) ? scanData.opportunities : [];
+        if (scannedCount === 0 && withTradesCount === 0 && opportunityRows.length === 0) {
+          throw new Error(
+            codedMessage(
+              "FAILURE_SCREEN_NO_CONTRACTS_EVALUATED",
+              `Incomplete options universe: ${scannedCount} of ${symbols.length} underlyings scanned, ` +
+              `${coverageErrors} quote/chain failures, ${truncatedCount} truncated. No coverage was recorded and no opportunity was produced. No partial report published.`,
+            )
+          );
+        }
+      }
       if (hasCoverage && evaluatedCount === 0) {
         // Issue #915 (Mubasher): name the dominant skip reason alongside
         // the counts — counts alone left failing runs undiagnosable.

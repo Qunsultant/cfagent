@@ -97,6 +97,7 @@ const PINNED_STAR_REEXPORTS = [
   "./options/discoveryDelta",
   "./options/ivCollector",
   "./options/optionsDataAgent",
+  "./options/panelFetchDteBands",
   "./options/opportunityScanner",
   "./options/unifiedOptionsService",
   "./options/calibratedOptionChains",

@@ -24,6 +24,10 @@
 
 import { recordOptionsRun } from "../agents/optionsRuns";
 import { recordJobOutcome } from "./jobOutcomes";
+import {
+  classifyChainFreshness,
+  type ChainFreshness,
+} from "./optionsAuthFreshness";
 import type { SqlStorage } from "../orm";
 import type { ScreenerRunOutcome } from "./screenerFollowups";
 
@@ -254,6 +258,14 @@ export interface StrategyScreenRecordInput {
   screen?: unknown;
   contracts?: unknown[];
   dataSource?: string;
+  /** Issue #2599 (F1): chain-freshness label for this run's
+   *  snapshot — carried into body.feed and the feed stage evidence
+   *  so stale/unknown chains are named, never presented as live.
+   *  When absent, recordStrategyScreenRun derives it from
+   *  screen.scannedAt (the snapshot's scan timestamp); a missing
+   *  or non-string scannedAt leaves it null (no probe), never a
+   *  guessed label. */
+  chainFreshness?: ChainFreshness;
   asyncJobId?: string;
   createdAt?: string;
   /** Request fields, as submitted — the input.* fields runDetails.ts reads. */
@@ -370,6 +382,10 @@ export function buildUnifiedStrategyStages(
       reason: feedStatus === "failed" ? (screen.validationError ? screen.validationError : firstFetchError) : null,
       evidence: {
         dataSource: input.dataSource ?? null,
+        // Issue #2599 (F1): degraded-mode label on the feed stage.
+        chainFreshnessState: input.chainFreshness?.state ?? null,
+        chainFreshnessAgeMinutes: input.chainFreshness?.ageMinutes ?? null,
+        chainFreshnessLabel: input.chainFreshness?.label ?? null,
         connector: input.dataSource === "calibrated-demo" ? "calibrated-demo" : "E*TRADE",
         underlyingsScanned: screen.underlyingsScanned,
         contractsEvaluated,
@@ -436,13 +452,31 @@ export function recordStrategyScreenRun(
   input: StrategyScreenRecordInput,
 ): { reportId: string; created: boolean } | null {
   const createdAt = input.createdAt ?? new Date().toISOString();
+  // Issue #2599 (F1): derive the chain-freshness label here, in
+  // the record layer, from the snapshot's scan timestamp — never
+  // in the panel route (etradeOptions.ts sits 90 B under the #359
+  // 50 KB ratchet after the terse guard call, so the route carries
+  // no probe code). An explicit input.chainFreshness still wins;
+  // a missing/non-string scannedAt leaves the field null (no
+  // probe), never a guessed label. createdAt is the probe's now:
+  // the record is written immediately after generation, so the
+  // snapshot's age at record time is its age at run time.
+  const screenScannedAt =
+    input.screen && typeof input.screen === "object"
+      ? (input.screen as Record<string, unknown>).scannedAt
+      : undefined;
+  const chainFreshness =
+    input.chainFreshness ??
+    (typeof screenScannedAt === "string"
+      ? classifyChainFreshness(screenScannedAt, Date.parse(createdAt))
+      : undefined);
   const generationId = `options_strategy:${input.mode}:${input.symbol}:${createdAt}`;
   const matched = input.mode === "best-trade" ? (input.bestTrade ? 1 : 0) : input.ranked.length;
   const summary =
     input.mode === "best-trade"
       ? `Best-trade pick for ${input.symbol}: ${input.bestTrade ? "one selected strategy" : "no qualifying strategy"}.`
       : `Strategy screen for ${input.symbol}: ${matched} ranked strateg${matched === 1 ? "y" : "ies"}.`;
-  const stages = buildUnifiedStrategyStages(input, matched);
+  const stages = buildUnifiedStrategyStages({ ...input, chainFreshness }, matched);
   const feed = stages[0];
   const strategyMode = input.strategyMode ?? "thesis";
   const submittedVia = input.submittedVia ?? `ui — POST /trading/options/${input.mode === "best-trade" ? "best-trade" : "strategies"} (options-strategy-panel)`;
@@ -471,6 +505,8 @@ export function recordStrategyScreenRun(
       screen: input.screen,
       feed: {
         dataSource: input.dataSource ?? null,
+        // Issue #2599 (F1): degraded-mode label for this run's chains.
+        chainFreshness: chainFreshness ?? null,
         connector: feed.evidence.connector,
         underlyingsScanned: feed.evidence.underlyingsScanned,
         contractsEvaluated: feed.evidence.contractsEvaluated,
