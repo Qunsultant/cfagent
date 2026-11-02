@@ -1,0 +1,3 @@
+### Added
+
+- Screener gates completed for #1769 (parent #1717): MA death-cross hard rejection within 20 sessions (`detectDeathCrossWithinSessions`, gather SMA50/SMA200 attachment, `requireNoRecentDeathCross` gate), 15-minute ORB breakout gate (`evaluateOrbBreakout` composing the #1654 slice-7 primitives, `requireOrbBreakout` gate requiring trigger + VWAP hold ≥ 70%), and the pre-market gap gate (`|Gap%| >= 2.0%` default, `requirePreMarketMomentumGap` / `minAbsGapPct`), completing the pre-market momentum trio with the existing RVOL and ATR% gates. All requested gates fail closed on missing attached data.

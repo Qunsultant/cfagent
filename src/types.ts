@@ -981,6 +981,21 @@ export interface StockScreenerFilter {
   /** Issue #1654 slice 6: reject candidates whose attached composite
    *  bias score (see compositeBiasScore) is below this minimum. */
   minCompositeBiasScore?: number;
+  /** Issue #1769: hard-reject candidates whose attached SMA50/SMA200
+   *  death cross falls within the last 20 sessions (see
+   *  deathCrossWithin20). */
+  requireNoRecentDeathCross?: boolean;
+  /** Issue #1769: reject candidates whose attached intraday ORB
+   *  breakout is not confirmed (trigger + VWAP hold; see
+   *  orbTriggered / orbVwapConfirmed). */
+  requireOrbBreakout?: boolean;
+  /** Issue #1769: pre-market gap gate. Active when set, or when
+   *  requirePreMarketMomentumGap is set; the threshold defaults to
+   *  the doc bound 2.0% (screener-rules.md §1.4, |Gap%| >= 2.0%). */
+  minAbsGapPct?: number;
+  /** Issue #1769: activate the pre-market gap gate at its 2.0%
+   *  default threshold (see minAbsGapPct). */
+  requirePreMarketMomentumGap?: boolean;
   gainersOnly?: boolean;
   losersOnly?: boolean;
   rsiFilter?: "oversold" | "overbought" | "neutral" | "any";
@@ -1081,6 +1096,27 @@ export interface ScreenedStockItem extends ETradeQuote {
   /** Issue #1654 slice 6: 6-vote composite bias label for the attached
    *  score (see compositeBiasScore). */
   compositeBias?: CompositeBias;
+  /** Issue #1769: SMA50 from real bar history, attached upstream
+   *  where bars exist (see detectDeathCrossWithinSessions). */
+  sma50?: number;
+  /** Issue #1769: SMA200 from real bar history, attached upstream
+   *  where bars exist. */
+  sma200?: number;
+  /** Issue #1769: true when an SMA50-below-SMA200 cross was observed
+   *  within the last 20 sessions. Absent = death-cross data
+   *  unavailable — the gate that needs it fail-closes. */
+  deathCrossWithin20?: boolean;
+  /** Issue #1769: overnight/pre-market gap % attached upstream
+   *  where bars exist (see computeTechnicals gapPercent). Absent =
+   *  gap data unavailable — the gate that needs it fail-closes. */
+  gapPercent?: number;
+  /** Issue #1769: intraday ORB trigger state attached by a caller
+   *  that supplied minute bars (see evaluateOrbBreakout). Absent =
+   *  ORB data unavailable — the gate that needs it fail-closes. */
+  orbTriggered?: boolean;
+  /** Issue #1769: session-VWAP hold >= 70% state attached alongside
+   *  orbTriggered (see evaluateOrbBreakout). */
+  orbVwapConfirmed?: boolean;
   macdSignal: string;
   signal: "BULLISH_MOMENTUM" | "OVERSOLD_BOUNCE" | "RANGE_BOUND" | "OVERBOUGHT";
   technicalSignal: string;

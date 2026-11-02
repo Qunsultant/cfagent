@@ -198,6 +198,15 @@ export class DynamicMarketScreener implements IMarketScreener {
     if (filter.minCompositeBiasScore !== undefined) {
       summaryParts.push(`Composite bias >= ${filter.minCompositeBiasScore}`);
     }
+    if (filter.requireNoRecentDeathCross) {
+      summaryParts.push("No death cross within 20 sessions");
+    }
+    if (filter.requireOrbBreakout) {
+      summaryParts.push("ORB breakout confirmed (trigger + VWAP hold)");
+    }
+    if (filter.requirePreMarketMomentumGap || filter.minAbsGapPct !== undefined) {
+      summaryParts.push(`|Gap%| >= ${filter.minAbsGapPct ?? 2.0}`);
+    }
     if (filter.gainersOnly) {
       summaryParts.push("Gainers Only");
     }
@@ -680,6 +689,91 @@ export class DynamicMarketScreener implements IMarketScreener {
           rejections.push({
             symbol: stock.symbol,
             reason: `Composite bias score ${biasScore} below minimum ${filter.minCompositeBiasScore}`,
+            price: stock.price,
+            changePercent: stock.changePercent,
+          });
+          continue;
+        }
+      }
+
+      // 16. Death-cross hard rejection (issue #1769; screener-rules.md
+      // §1.1). A cross within the last 20 sessions rejects; an older
+      // cross or no cross passes. A requested gate with no attached
+      // death-cross data fail-closes, never estimates.
+      if (filter.requireNoRecentDeathCross) {
+        const deathCross = stock.deathCrossWithin20;
+        if (deathCross === undefined) {
+          rejections.push({
+            symbol: stock.symbol,
+            reason: "Death-cross data unavailable — death-cross gate requested but no SMA data attached",
+            price: stock.price,
+            changePercent: stock.changePercent,
+          });
+          continue;
+        }
+        if (deathCross) {
+          rejections.push({
+            symbol: stock.symbol,
+            reason: "Death cross within 20 sessions — SMA50 below SMA200 (hard rejection)",
+            price: stock.price,
+            changePercent: stock.changePercent,
+          });
+          continue;
+        }
+      }
+
+      // 17. ORB breakout gate (issue #1769; screener-rules.md §1.4).
+      // Passes only when BOTH the breakout trigger and the VWAP hold
+      // are confirmed on attached intraday data. A requested gate
+      // with no attached ORB data fail-closes, never estimates.
+      if (filter.requireOrbBreakout) {
+        const triggered = stock.orbTriggered;
+        const vwapConfirmed = stock.orbVwapConfirmed;
+        if (triggered === undefined || vwapConfirmed === undefined) {
+          rejections.push({
+            symbol: stock.symbol,
+            reason: "ORB data unavailable — ORB gate requested but no intraday breakout data attached",
+            price: stock.price,
+            changePercent: stock.changePercent,
+          });
+          continue;
+        }
+        if (!triggered || !vwapConfirmed) {
+          rejections.push({
+            symbol: stock.symbol,
+            reason: !triggered
+              ? "ORB breakout trigger not met — price did not clear OR_H x 1.001 with RVOL >= 1.5x"
+              : "ORB VWAP hold not confirmed — fewer than 70% of completed 15-min bars closed above session VWAP",
+            price: stock.price,
+            changePercent: stock.changePercent,
+          });
+          continue;
+        }
+      }
+
+      // 18. Pre-market gap gate (issue #1769; screener-rules.md §1.4).
+      // Completes the pre-market momentum trio (gap + RVOL via the
+      // high_relative_volume momentum filter + ATR% gate §13): |Gap%|
+      // must reach the threshold, defaulting to the doc bound 2.0%
+      // when only requirePreMarketMomentumGap is set. Bounds are
+      // inclusive. A requested gate with no gap data fail-closes.
+      const gapGatingActive = filter.requirePreMarketMomentumGap || filter.minAbsGapPct !== undefined;
+      if (gapGatingActive) {
+        const gap = stock.gapPercent;
+        if (gap === undefined || !Number.isFinite(gap)) {
+          rejections.push({
+            symbol: stock.symbol,
+            reason: "Gap data unavailable — gap gate requested but no gap data attached",
+            price: stock.price,
+            changePercent: stock.changePercent,
+          });
+          continue;
+        }
+        const minAbsGapPct = filter.minAbsGapPct ?? 2.0;
+        if (Math.abs(gap) < minAbsGapPct) {
+          rejections.push({
+            symbol: stock.symbol,
+            reason: `|Gap%| (${Math.abs(gap).toFixed(2)}) below minimum ${minAbsGapPct.toFixed(2)}`,
             price: stock.price,
             changePercent: stock.changePercent,
           });
