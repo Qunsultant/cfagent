@@ -588,6 +588,21 @@ export const agentReferralAttributions = sqliteTable("agent_referral_attribution
   createdAtMs: integer("created_at_ms").notNull(),
 });
 
+/**
+ * Store-managed commercial operator list (#2680). One row per
+ * store operator login; operator data, never code. This schema
+ * MAPS the table; it does not create it — DDL authority lives
+ * in migration 0032 (src/data/migrationRunner.ts). The env list
+ * (COMMERCIAL_STORE_OPERATORS) is NOT in this table: env
+ * operators are bootstrap fallback, merged at read time by the
+ * route handler, and never written here.
+ */
+export const agentStoreOperators = sqliteTable("agent_store_operators", {
+  login: text("login").primaryKey(),
+  addedBy: text("added_by").notNull(),
+  addedAtMs: integer("added_at_ms").notNull(),
+});
+
 export const agentNotificationPreferences = sqliteTable("agent_notification_preferences", {
   userId: text("user_id").primaryKey(),
   tenantId: text("tenant_id").notNull(),
@@ -1063,4 +1078,60 @@ export const agentMeshProposals = sqliteTable("agent_mesh_proposals", {
   filedIssueUrl: text("filed_issue_url"),
   createdAtMs: integer("created_at_ms").notNull(),
   updatedAtMs: integer("updated_at_ms").notNull(),
+});
+
+/**
+ * Phase 5 Slice 1 (issue #2000) — one row per persisted
+ * terminal drop, plus the single depth-incident row. The
+ * envelope is JSON text (parse before reading fields); the
+ * replay mark is the guarded claim (replayed_at_ms NULL
+ * guard + replay_token check). DDL lives in MIGRATION_0033.
+ */
+export const agentDeadLetterRecords = sqliteTable("agent_dead_letter_records", {
+  id: text("id").primaryKey(),
+  queue: text("queue").notNull(),
+  reason: text("reason").notNull(),
+  messageId: text("message_id"),
+  runId: text("run_id"),
+  unitId: text("unit_id"),
+  actorLogin: text("actor_login"),
+  actorKind: text("actor_kind"),
+  subscriber: text("subscriber"),
+  detail: text("detail"),
+  envelopeJson: text("envelope_json"),
+  createdAtMs: integer("created_at_ms").notNull(),
+  replayedAtMs: integer("replayed_at_ms"),
+  replayOutcome: text("replay_outcome"),
+  replayToken: text("replay_token"),
+});
+
+export const dlqDepthState = sqliteTable("dlq_depth_state", {
+  id: text("id").primaryKey(),
+  alertedAtMs: integer("alerted_at_ms"),
+  depthAtAlert: integer("depth_at_alert"),
+  claimToken: text("claim_token"),
+});
+
+/** Phase 5 Slice 2 (#2000) — durable breaker state, one row per provider. */
+export const agentBreakerState = sqliteTable("agent_breaker_state", {
+  providerId: text("provider_id").primaryKey(),
+  state: text("state").notNull(),
+  consecutiveFailures: integer("consecutive_failures").notNull(),
+  openedAtMs: integer("opened_at_ms"),
+  lastFailureAtMs: integer("last_failure_at_ms"),
+  totalCalls: integer("total_calls").notNull(),
+  totalSuccesses: integer("total_successes").notNull(),
+  totalFailures: integer("total_failures").notNull(),
+  totalTrips: integer("total_trips").notNull(),
+  totalFallbacks: integer("total_fallbacks").notNull(),
+  totalRejected: integer("total_rejected").notNull(),
+  transitionSeq: integer("transition_seq").notNull(),
+  updatedAtMs: integer("updated_at_ms").notNull(),
+});
+
+/** Phase 5 Slice 2 (#2000) — trip-alert claims, one row per transition id. */
+export const breakerTripAlerts = sqliteTable("breaker_trip_alerts", {
+  transitionId: text("transition_id").primaryKey(),
+  alertedAtMs: integer("alerted_at_ms"),
+  claimToken: text("claim_token"),
 });

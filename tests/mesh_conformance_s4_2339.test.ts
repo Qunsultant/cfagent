@@ -29,10 +29,15 @@
  * is proven where S12's pins land
  * (tests/mesh_g6_workflow_conformance_2409.test.ts): the
  * recovery cells for OrchestratorAgent and TradingAgent are
- * IMPLEMENTED on that evidence, while ResearchAgent and
- * ScreenerAgent remain GAPs — re-dispositioned to the programme
- * backlog by #2409 with the evidence boundary named in their
- * cells.
+ * IMPLEMENTED on that evidence. The two GAPs S12 left —
+ * ScreenerAgent and ResearchAgent, re-dispositioned to the
+ * programme backlog by #2409 — were closed by the A9/A10 slices
+ * (#2733 / #2761, tracker #2708): start-up recovery over each
+ * class's own task ledger, terminally marking a dead
+ * incarnation's active records interrupted, with behavioral
+ * pins in tests/screener_recovery_a9_2733.test.ts and
+ * tests/research_recovery_a10_2761.test.ts. No recovery GAPs
+ * remain.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync, existsSync } from "node:fs";
@@ -204,9 +209,9 @@ const MATRIX: MatrixRow[] = [
       scheduling: NA(
         "No scheduling role of its own: its daily run is fired by the worker cron through the orchestrator's scheduled-tick route (identity-gated post-S3), and the file contains no schedule calls.",
       ),
-      recovery: GAP(
-        "Programme backlog (re-dispositioned by #2409 — no resumable record exists to pin; closing needs a design decision)",
-        "No onStart; reads are read-through from storage (getLatest returns null honestly), so eviction loses nothing durable — but an interrupted run leaves no resumable record. S12 (#2409) disposition: the cell STAYS a GAP — no workflow runs this agent's work and there is no resumable record to pin against; closing it needs a design decision (a resumable run record), not a conformance pin.",
+      recovery: IMPL(
+        "onStart (research-agent.ts:303) runs start-up recovery over the class's own task ledger: a fresh incarnation has executed nothing, so every active record (queued / claimed / running) it finds belongs to a dead incarnation and is terminally marked interrupted — failed → escalated with the interruption recorded in the record's history — by recoverInterruptedResearchTasks (:405) over ResearchTaskLedger.markInterrupted / recoverInterrupted (researchTaskLedger.ts:369 / :386). The disposition is the #615 doctrine (never auto-rerun; a human reviews the escalation); the #618 orchestrator stale sweep remains the backstop for records that go stale inside a live incarnation. The ledger's idempotency slot is respected in both directions — an active record still dedupes a duplicate create, and once the record is terminal the same key admits a genuinely new run (this agent has no concurrent-run lock; the idempotency slot is its dedupe surface). Behavioral pins: tests/research_recovery_a10_2761.test.ts drives the REAL class over one durable store with instance replacement — a prior incarnation's running task (fresh heartbeat: incarnation-keyed, not heartbeat-keyed) is escalated on start, queued records recover, terminal records are byte-identical, a second pass is a no-op, the idempotency slot is freed for a genuinely new run, and onStart never throws when the recovery write fails. No workflow layer runs this agent's work (the S12 #2409 disposition); this is the agent-level mechanism, landed by #2761 (tracker #2708 A10) on the A9 pattern (#2733).",
+        "Simulation scope: instance replacement at the module seam over the surviving store, not live workerd eviction (the fleet-wide S12 residual). Recovery is terminal marking, not resume: the ledger carries lifecycle state only (no request payload beyond trigger + login, no checkpoint, no partial results), and persistRun publishes the report before the orchestrator completes the task, so an interrupted run is never resumed or re-dispatched at the agent level — retry as a NEW run belongs to the caller/workflow layer.",
       ),
       "sdk-state": SDK_STATE_DIVERGENT,
       sessions: IMPL(
@@ -299,9 +304,9 @@ const MATRIX: MatrixRow[] = [
       scheduling: NA(
         "None of its own; fired by the orchestrator, server routes, ScheduledAgent goal chains, and workflow shards.",
       ),
-      recovery: GAP(
-        "Programme backlog (workflow layer proven by #2409; agent-level resume of an interrupted screen unowned)",
-        "Runs are recorded in its task ledger and a concurrent-run lock reports the first run's age — an honest in-progress state, not a resume. S12 (#2409) proved the WORKFLOW layer above the agent (tests/mesh_g6_workflow_conformance_2409.test.ts: shard + parent eviction/resume, canonical-store convergence under replay, honest qualified partials) and the ledger suite pins the agent's records (tests/screener-task-ledger.test.ts: dedupe, lifecycle, stale sweep) — but the agent itself restarts an interrupted screen rather than resuming it, and no eviction/resume pin covers the agent class, so the cell stays GAP for the agent-level claim.",
+      recovery: IMPL(
+        "onStart (screener-agent.ts:494) runs start-up recovery over the class's own task ledger: a fresh incarnation has executed nothing, so every active record (queued / claimed / running) it finds belongs to a dead incarnation and is terminally marked interrupted — failed → escalated with the interruption recorded in the record's history — by recoverInterruptedScreenerTasks (:604) over ScreenerTaskLedger.markInterrupted / recoverInterrupted (screenerTaskLedger.ts:427 / :444). The disposition is the #615 doctrine (never auto-rerun; a human reviews the escalation); the #618 orchestrator stale sweep remains the backstop for records that go stale inside a live incarnation. The concurrent-run lock is deliberately untouched (its rows expire by the #1993 stale rule; the recovered record is terminal, so a takeover can neither resurrect nor double-execute it). Behavioral pins: tests/screener_recovery_a9_2733.test.ts drives the REAL class over one durable store with instance replacement — a prior incarnation's running task (fresh heartbeat: incarnation-keyed, not heartbeat-keyed) is escalated on start, queued records recover, terminal records are byte-identical, a second pass is a no-op, the idempotency slot is freed for a genuinely new run, a fresh lock row still refuses a new run while the post-window takeover leaves the recovered record terminal, and onStart never throws when the recovery write fails. The workflow layer above the agent was already proven by S12 (#2409).",
+        "Simulation scope: instance replacement at the module seam over the surviving store, not live workerd eviction (the fleet-wide S12 residual). Recovery is terminal marking, not resume: the ledger carries lifecycle state only (no request payload, no checkpoint), so an interrupted screen is never resumed at the agent level — retry as a NEW run belongs to the workflow layer (#2409).",
       ),
       "sdk-state": SDK_STATE_DIVERGENT,
       sessions: NA("portHooks unset; no turn path, no transcript."),
@@ -503,7 +508,7 @@ const MATRIX: MatrixRow[] = [
         "No ctx.storage use in the class (pinned below); the service is constructed with no container backend and holds no per-instance durable state.",
       ),
       connections: NA(
-        "Its doors are the domain methods plus the onRequest surface (:123); production call-site wiring through the agent is a recorded follow-up — the MCP run_sandbox_command still constructs the service directly (class header).",
+        "Its doors are the domain methods plus the onRequest surface (:138); the MCP run_sandbox_command resolves this class on the SANDBOX_AGENT binding and calls runCommand (#2732, the #2253 call-site wiring follow-up, landed).",
       ),
       scheduling: NA("No scheduling role: it registers no schedules and owns no scheduled work; anything time-based reaches it from callers recorded elsewhere in this row."),
       recovery: NA(
@@ -886,9 +891,11 @@ describe("fleet fact pins (#2339)", () => {
     expect(sourcesWith("onConnect")).toEqual(["TickerAgent"]);
   });
 
-  it("onStart is defined by exactly OrchestratorAgent and TickerAgent", () => {
+  it("onStart is defined by exactly OrchestratorAgent, ResearchAgent, ScreenerAgent and TickerAgent", () => {
     expect(sourcesWith("onStart(").sort()).toEqual([
       "OrchestratorAgent",
+      "ResearchAgent",
+      "ScreenerAgent",
       "TickerAgent",
     ]);
   });

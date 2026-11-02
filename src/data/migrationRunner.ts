@@ -1303,6 +1303,48 @@ CREATE INDEX IF NOT EXISTS agent_referral_attributions_referrer_idx ON agent_ref
 `,
 };
 
+export const MIGRATION_0032_STORE_OPERATORS: DataMigration = {
+  version: 32,
+  name: "0032_store_operators",
+  sql: `
+CREATE TABLE IF NOT EXISTS agent_store_operators (
+  login TEXT PRIMARY KEY,
+  added_by TEXT NOT NULL,
+  added_at_ms INTEGER NOT NULL
+);
+`,
+};
+
+export const MIGRATION_0033_DEAD_LETTER_STORE: DataMigration = {
+  version: 33,
+  name: "0033_dead_letter_store",
+  sql: `
+CREATE TABLE IF NOT EXISTS agent_dead_letter_records (
+  id TEXT PRIMARY KEY,
+  queue TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  message_id TEXT,
+  run_id TEXT,
+  unit_id TEXT,
+  actor_login TEXT,
+  actor_kind TEXT,
+  subscriber TEXT,
+  detail TEXT,
+  envelope_json TEXT,
+  created_at_ms INTEGER NOT NULL,
+  replayed_at_ms INTEGER,
+  replay_outcome TEXT,
+  replay_token TEXT
+);
+CREATE TABLE IF NOT EXISTS dlq_depth_state (
+  id TEXT PRIMARY KEY,
+  alerted_at_ms INTEGER,
+  depth_at_alert INTEGER,
+  claim_token TEXT
+);
+`,
+};
+
 export const MIGRATION_0026_TENANT_AUTO_REFRESH: DataMigration = {
   version: 26,
   name: "0026_tenant_auto_refresh",
@@ -1354,6 +1396,33 @@ CREATE TABLE IF NOT EXISTS agent_payment_proof_redemptions (
 `,
 };
 
+export const MIGRATION_0034_BREAKER_STATE: DataMigration = {
+  version: 34,
+  name: "0034_breaker_state",
+  sql: `
+CREATE TABLE IF NOT EXISTS agent_breaker_state (
+  provider_id TEXT PRIMARY KEY,
+  state TEXT NOT NULL,
+  consecutive_failures INTEGER NOT NULL,
+  opened_at_ms INTEGER,
+  last_failure_at_ms INTEGER,
+  total_calls INTEGER NOT NULL,
+  total_successes INTEGER NOT NULL,
+  total_failures INTEGER NOT NULL,
+  total_trips INTEGER NOT NULL,
+  total_fallbacks INTEGER NOT NULL,
+  total_rejected INTEGER NOT NULL,
+  transition_seq INTEGER NOT NULL,
+  updated_at_ms INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS breaker_trip_alerts (
+  transition_id TEXT PRIMARY KEY,
+  alerted_at_ms INTEGER,
+  claim_token TEXT
+);
+`,
+};
+
 export const ALL_MIGRATIONS: DataMigration[] = [
   MIGRATION_0001_AGENT_GOVERNANCE,
   MIGRATION_0002_AGENT_CHAINS_SCHEDULES,
@@ -1386,6 +1455,9 @@ export const ALL_MIGRATIONS: DataMigration[] = [
   MIGRATION_0029_PROOF_REDEMPTIONS,
   MIGRATION_0030_BILLING_CUSTOMERS,
   MIGRATION_0031_REFERRAL_ATTRIBUTION,
+  MIGRATION_0032_STORE_OPERATORS,
+  MIGRATION_0033_DEAD_LETTER_STORE,
+  MIGRATION_0034_BREAKER_STATE,
 ];
 
 function splitStatements(sqlText: string): string[] {

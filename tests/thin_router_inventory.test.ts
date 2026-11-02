@@ -273,6 +273,15 @@
  * handleAgenticPaymentsRoutes, after the referral record-earn
  * route — bringing the pinned array to 324 entries (measured);
  * the delegation sequence is unchanged (same handler, same position).
+ * Issue #2680 added three — GET /payments/agentic/commercial/operators
+ * and POST .../operators/add and .../operators/remove (in
+ * handleAgenticPaymentsRoutes, after the prices route) — bringing the
+ * pinned array to 339 entries (measured); the delegation sequence is
+ * unchanged (same handler, same position).
+ * Phase 5 Slice 1 (#2000) added two — GET /api/ops/dlq/records and
+ * POST /api/ops/dlq/replay (in handleDlqRoutes, after the meter
+ * delegation) — bringing the pinned array to 341 entries; the
+ * delegation sequence gains handleDlqRoutes after handleMeterRoutes.
  *
  * LANDMARK RULE (#405): all position assertions anchor to DELEGATION
  * CALLS - the only landmarks a thin router has.
@@ -291,6 +300,7 @@ const HANDLER_FILE: Record<string, string> = {
   "handleReferralsAdsRoutes": "adsRevenueReferrals.ts",
   "handleAuditRoutes": "audit.ts",
   "handleMeterRoutes": "meter.ts",
+  "handleDlqRoutes": "dlq.ts",
   "handleDataProviderRoutes": "dataProviders.ts",
   "handleEnrichmentRoutes": "enrichment.ts",
   "handleWorkflowRunsRoutes": "workflowRuns.ts",
@@ -330,6 +340,7 @@ const EXPECTED_DELEGATIONS = [
   "handleAdsRevenueReferralsRoutes",
   "handleAuditRoutes",
   "handleMeterRoutes",
+  "handleDlqRoutes",
   "handleDataProviderRoutes",
   "handleEnrichmentRoutes",
   "handleWorkflowRunsRoutes",
@@ -400,6 +411,8 @@ const EXPECTED_INVENTORY = [
   "handleAuditRoutes :: endsWith(\"/audit\")",
   "handleAuditRoutes :: endsWith(\"/audit/event\")",
   "handleMeterRoutes :: endsWith(\"/meter/event\")",
+  "handleDlqRoutes :: endsWith(\"/api/ops/dlq/records\")",
+  "handleDlqRoutes :: endsWith(\"/api/ops/dlq/replay\")",
   "handleDataProviderRoutes :: === \"/data-providers\"",
   "handleDataProviderRoutes :: === \"/data-providers/\"",
   "handleEnrichmentRoutes :: === \"/enrichment/status\"",
@@ -472,6 +485,9 @@ const EXPECTED_INVENTORY = [
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/pricing\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/prices\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/prices\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/operators\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/operators/add\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/operators/remove\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/refunds\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/refunds/approve\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/refunds/execute\")",

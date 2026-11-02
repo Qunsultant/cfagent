@@ -20,8 +20,17 @@
  *     the owner enablement steps).
  *   - durable-fibers is "degraded" BECAUSE its live records sit in
  *     an in-memory Map (the same fact the S4 fibers cells rest on).
- *   - web-search / web-fetch are "absent" BECAUSE no tool by either
- *     name exists in src/ or in the MCP catalog.
+ *   - web-fetch is "absent" BECAUSE no tool by that name exists in
+ *     src/ or in the MCP catalog.
+ *   - web-search is "degraded" (since #2731) BECAUSE the
+ *     web_search command IS registered in the catalog but its
+ *     provider backend is not configured: no BRAVE_SEARCH_API_KEY
+ *     secret exists in this deployment, so the provider seam
+ *     (src/services/webSearch.ts) fails every call loud with
+ *     web_search_provider_not_configured. It is the one
+ *     command-carrying family that is not "live" — the
+ *     commands-are-live pin below carries the explicit exception,
+ *     and the degraded-evidence test pins the facts.
  *   - agent-skills is "live" (since #2705) BECAUSE exactly one
  *     agent class — OrchestratorAgent — overrides Think's
  *     getSkills() hook to serve an in-repo code-manifest source,
@@ -127,7 +136,7 @@ const EXPECTED_STATUS: Record<string, MeshToolFamilyStatus> = {
   "payments-tools": "live",
   "screening-research-services": "live",
   "durable-fibers": "degraded",
-  "web-search": "absent",
+  "web-search": "degraded",
   "web-fetch": "absent",
   "ai-search-platform": "degraded",
   "agent-skills": "live",
@@ -148,9 +157,18 @@ describe("tool family status table (#2417)", () => {
 
   it("every family carrying McpToolFactory commands is live (the catalog is the evidence)", () => {
     const catalog = new Set(McpToolFactory.getAllTools().map((t) => t.name));
+    // #2731: the one recorded exception — web-search carries a
+    // catalog command whose provider backend is config-gated off
+    // in this deployment, so the family is "degraded" with its
+    // evidence pinned in the degraded-evidence suite below (the
+    // sandbox-tools posture: surface live, backend absent). Any
+    // OTHER command-carrying family reading non-live fails here.
+    const COMMAND_FAMILY_DEGRADED = new Set(["web-search"]);
     for (const family of MESH_TOOL_FAMILIES) {
       if (family.commands.length === 0) continue;
-      expect(family.status, family.id).toBe("live");
+      expect(family.status, family.id).toBe(
+        COMMAND_FAMILY_DEGRADED.has(family.id) ? "degraded" : "live",
+      );
       for (const command of family.commands) {
         expect(catalog.has(command), `${family.id}:${command}`).toBe(true);
       }
@@ -194,6 +212,22 @@ describe("degraded status evidence (#2417)", () => {
     );
   });
 
+  it("web-search: the command is registered, and the seam's not-configured failure is the recorded backend fact (#2731)", () => {
+    // The surface is live: web_search is in the factory catalog.
+    const catalog = new Set(McpToolFactory.getAllTools().map((t) => t.name));
+    expect(catalog.has("web_search")).toBe(true);
+    // The backend fact the degraded status rests on: the provider
+    // seam fails loud with the named error while no provider key
+    // is configured, and the family record names the enablement.
+    const service = read("src/services/webSearch.ts");
+    expect(service).toContain("web_search_provider_not_configured");
+    expect(service).toContain("BRAVE_SEARCH_API_KEY");
+    const family = getToolFamily("web-search");
+    expect(family).toBeDefined();
+    expect(family!.commands).toEqual(["web_search"]);
+    expect(family!.notes ?? "").toContain("wrangler secret put BRAVE_SEARCH_API_KEY");
+  });
+
   it("ai-search-platform: the ai_search_namespaces binding is not declared in wrangler.jsonc, and the env type records it as owner-added config", () => {
     expect(wrangler["ai_search_namespaces"]).toBeUndefined();
     expect(read("src/types.ts")).toContain("AI_SEARCH?: AiSearchNamespace");
@@ -207,13 +241,15 @@ describe("degraded status evidence (#2417)", () => {
 // ---------------------------------------------------------------------------
 
 describe("absent status evidence (#2417)", () => {
-  it("web-search / web-fetch: no tool by either name exists in src/ or in the MCP catalog", () => {
+  it("web-fetch: no tool by that name exists in src/ or in the MCP catalog", () => {
+    // #2731 narrowed this pin from web-search + web-fetch to
+    // web-fetch only: web_search now exists (its degraded
+    // evidence is pinned above); web_fetch remains absent
+    // (tracker #2708 item A3, a separate slice).
     const catalog = new Set(McpToolFactory.getAllTools().map((t) => t.name));
-    expect(catalog.has("web_search")).toBe(false);
     expect(catalog.has("web_fetch")).toBe(false);
     for (const file of SRC_FILES) {
       const src = readFileSync(file, "utf8");
-      expect(src.includes('"web_search"'), file).toBe(false);
       expect(src.includes('"web_fetch"'), file).toBe(false);
     }
   });

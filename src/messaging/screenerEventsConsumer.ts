@@ -44,6 +44,7 @@ import {
 import {
   consoleDeadLetterSink,
   createDeadLetterRecord,
+  type DeadLetterRecord,
   type DeadLetterSink,
 } from "./deadLetter";
 import { isLoginShaped } from "../security/serviceIdentity";
@@ -137,6 +138,18 @@ export interface ScreenerEventsWorkHandlerDeps {
    * the disposition.
    */
   onDeadLetter?: DeadLetterSink;
+  /**
+   * Phase 5 Slice 1 (issue #2000) — optional persistence for
+   * terminal drops: the store row that makes replay possible.
+   * Additive only (the console record above is always emitted
+   * first); the production closure never throws, so awaiting
+   * it here cannot change the drop disposition. Absent, drops
+   * stay console-only — today's behavior.
+   */
+  persistDeadLetter?: (
+    record: DeadLetterRecord,
+    envelope: MessageEnvelope | null,
+  ) => Promise<void>;
 }
 
 /**
@@ -151,19 +164,22 @@ export function createScreenerEventsWorkHandler(
   deps: ScreenerEventsWorkHandlerDeps
 ): MessageHandler {
   const sink = deps.onDeadLetter ?? consoleDeadLetterSink;
+  const persist = deps.persistDeadLetter;
   return async (envelope): Promise<ConsumeOutcome> => {
     const work = extractScreenerEventsWork(envelope);
     if (!work) {
-      sink.record(
-        createDeadLetterRecord({
-          queue: "screener-events",
-          reason: "no_handler",
-          messageId: envelope.id,
-          runId: envelope.jobid ?? envelope.subject ?? envelope.id,
-          unitId: envelope.shardid ?? envelope.stage ?? envelope.id,
-          detail: `No handler for envelope type "${envelope.type}" — dropping; redelivery would loop (#1764).`,
-        })
-      );
+      const record = createDeadLetterRecord({
+        queue: "screener-events",
+        reason: "no_handler",
+        messageId: envelope.id,
+        runId: envelope.jobid ?? envelope.subject ?? envelope.id,
+        unitId: envelope.shardid ?? envelope.stage ?? envelope.id,
+        detail: `No handler for envelope type "${envelope.type}" — dropping; redelivery would loop (#1764).`,
+      });
+      sink.record(record);
+      // Slice 1 (#2000): persist the full envelope so the
+      // operator can replay this drop from the store.
+      await persist?.(record, envelope);
       return "drop";
     }
     const outcome = await deps.dispatchOptionsAnalysis(
@@ -175,18 +191,20 @@ export function createScreenerEventsWorkHandler(
       const actorLogin = isLoginShaped(work.payload.userLogin)
         ? (work.payload.userLogin as string)
         : undefined;
-      sink.record(
-        createDeadLetterRecord({
-          queue: "screener-events",
-          reason: "denied",
-          messageId: envelope.id,
-          runId: work.runId,
-          unitId: work.unitId,
-          actorLogin,
-          detail:
-            "options_analysis dispatch denied by the identity rules — dropping; a re-dispatch would deny again (#2331 slice 2, #1764).",
-        })
-      );
+      const record = createDeadLetterRecord({
+        queue: "screener-events",
+        reason: "denied",
+        messageId: envelope.id,
+        runId: work.runId,
+        unitId: work.unitId,
+        actorLogin,
+        detail:
+          "options_analysis dispatch denied by the identity rules — dropping; a re-dispatch would deny again (#2331 slice 2, #1764).",
+      });
+      sink.record(record);
+      // Slice 1 (#2000): persisted for the record, but a denied
+      // dispatch is never replayable — replay refuses it.
+      await persist?.(record, envelope);
       return "drop";
     }
     return "processed";

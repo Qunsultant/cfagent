@@ -9,6 +9,34 @@
  * The bus is intentionally simple: synchronous in-process pub/sub within
  * the Durable Object. Subscribers are independent — a failure in one
  * never blocks the others.
+ *
+ * Issue #1770 (slice C) — LOSS WINDOW, READ BEFORE RELYING ON THIS BUS:
+ * The in-process bus is NOT the durable delivery path. Since #1739 the
+ * durable primary for screener.completed / screener.failed is the
+ * Cloudflare Queue (screener-events-delivery, CloudEvents envelopes,
+ * dedup), which survives Worker isolate and instance restarts; the
+ * in-process bus runs only as fallback (queue unreachable, or no
+ * subscriber stream received the event) and as local fan-out.
+ *   - Fallback-leg window: an event published to this bus is lost if
+ *     the isolate / Durable Object instance restarts (or a new
+ *     instance serves) before every subscriber's handler completes.
+ *     There is no persistence, no replay, and no redelivery — the
+ *     window opens at bus publish and closes when the last handler
+ *     returns; anything in flight across a restart is gone, leaving
+ *     only the publisher's console warning (queue-fallback notice)
+ *     as evidence.
+ *   - options.* events have NO durable leg at all: they keep the
+ *     legacy bus path (no bus subscribers today; delivery stays on
+ *     the #223 direct path), so their loss window is the same
+ *     in-process window with no queue behind it.
+ *   - What survives a lost delivery: the screener-loop outcome record.
+ *     Since #1770 slice C the publish path also writes one
+ *     screener.delivery telemetry point to the existing Analytics
+ *     Engine sink (best-effort; console-degraded when the binding
+ *     is absent), so a lost delivery still leaves an outcome record
+ *     — but telemetry is not redelivery, and it never re-sends a
+ *     Slack/email/webhook notice.
+ * Full statement: docs/architecture/security/screener-event-bus-loss-window-1770.md.
  */
 
 export interface ScreenerOpportunity {

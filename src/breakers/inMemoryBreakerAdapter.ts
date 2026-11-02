@@ -19,6 +19,7 @@ import type {
   BreakerStateChangeEvent,
   CircuitBreaker,
 } from "./breakerPorts";
+import type { BreakerPersistedState } from "./breakerStateStorePorts";
 import {
   BreakerBudgetExhaustedError,
   BreakerOpenError,
@@ -84,6 +85,30 @@ export class InMemoryCircuitBreaker implements CircuitBreaker {
     this.openedAtMs = null;
     // Lifetime totals are history, not state — reset keeps them so
     // an operator reset never erases the trip/fallback record.
+  }
+
+  /**
+   * Restore persisted state (Phase 5 Slice 2 durable hydration).
+   * NOT a transition: emits nothing, and resets the in-flight
+   * probe count (a probe cannot survive an isolate recycle).
+   * The caller (durable adapter) guarantees this runs before
+   * any execute on the hydrated instance, and never after a
+   * reset — applying a stale row over a fresh reset would
+   * resurrect a trip the operator just cleared.
+   */
+  hydrate(state: BreakerPersistedState): void {
+    this.state = state.state;
+    this.consecutiveFailures = state.consecutiveFailures;
+    this.probeCount = 0;
+    this.openedAtMs = state.openedAtMs;
+    this.lastFailureAtMs = state.lastFailureAtMs;
+    this.totalCalls = state.totalCalls;
+    this.totalSuccesses = state.totalSuccesses;
+    this.totalFailures = state.totalFailures;
+    this.totalTrips = state.totalTrips;
+    this.totalFallbacks = state.totalFallbacks;
+    this.totalRejected = state.totalRejected;
+    this.transitionSeq = state.transitionSeq;
   }
 
   async execute<T>(

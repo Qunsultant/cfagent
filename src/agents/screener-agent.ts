@@ -478,6 +478,36 @@ export class ScreenerAgent extends PortThink {
   }
 
   /**
+   * Cloudflare Agents lifecycle: reconcile durable work left by a
+   * prior incarnation (issue #2733, tracker #2708 A9). A fresh
+   * incarnation has executed nothing, so every active task-ledger
+   * record found at start belongs to a dead incarnation — that
+   * incarnation's runs were interrupted mid-flight and their
+   * records are recovered (marked interrupted) here, at first
+   * touch, instead of waiting for the orchestrator's six-hourly
+   * stale sweep (#618) to reach this instance. Recovery failure
+   * must never break agent start — a throw out of onStart is
+   * terminal for the instance — so it is logged, not propagated;
+   * the #618 sweep remains the backstop for anything this pass
+   * misses.
+   */
+  override async onStart(): Promise<void> {
+    try {
+      const recovered = await this.recoverInterruptedScreenerTasks();
+      if (recovered.length > 0) {
+        console.warn(
+          `[ScreenerAgent] Start-up recovery marked ${recovered.length} interrupted screener task(s) as failed → escalated.`
+        );
+      }
+    } catch (error) {
+      console.error(
+        "[ScreenerAgent][onStart] Interrupted-run recovery failed:",
+        error
+      );
+    }
+  }
+
+  /**
    * Issue #607 — durable task record for a screener run. runScreen
    * creates + begins a task before screening and resolves it on every
    * exit path; the record lives with the work in this DO.
@@ -556,6 +586,25 @@ export class ScreenerAgent extends PortThink {
     staleAfterMs: number = DEFAULT_STALE_AFTER_MS
   ): Promise<ScreenerTask[]> {
     return this.taskLedger().sweepStale(staleAfterMs);
+  }
+
+  /**
+   * Issue #2733 (tracker #2708 A9): close every active screener
+   * task as interrupted (failed → escalated, the interruption
+   * recorded in the task's history). Invoked by onStart, where an
+   * active record is orphaned by construction (see onStart); also
+   * callable directly. Never auto-reruns a screen — the run may
+   * have partially happened (#615), and retry-as-new-run belongs
+   * to the workflow layer above (#2409). The concurrent-run lock
+   * is deliberately NOT touched: its rows expire by their own
+   * stale rule (#1993), and because the recovered record is
+   * terminal, a later lock takeover can neither resurrect it nor
+   * double-execute it.
+   */
+  async recoverInterruptedScreenerTasks(): Promise<ScreenerTask[]> {
+    return this.taskLedger().recoverInterrupted(
+      "interrupted: agent restarted before the run completed (start-up recovery)"
+    );
   }
 
   /** Issue #635: delete terminal task records past the retention tiers. */

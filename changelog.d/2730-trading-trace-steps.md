@@ -1,0 +1,2 @@
+### Fixed
+- Mesh trace spine (issue #2730, tracker #2708 A5 / S17 #2428): closed the `trading-workflow-steps` break — `TradeApprovalParams` now carry the W3C traceparent (#1743's field), stamped by the `start_trade_approval` door from the turn's server-side resolver through `TradingAgent.startTradeApproval`, and `TradingTradeWorkflow` records its step hops (`await-approval`, `settle-trade`) under that trace via the S17 deterministic-span mechanism. The registry cell reads `carried`; untraced starts still record nothing, and trade execution behavior is unchanged.

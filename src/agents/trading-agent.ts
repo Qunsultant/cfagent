@@ -768,6 +768,15 @@ export interface TradeApprovalParams {
   orderId: string;
   provider?: string;
   userLogin: string;
+  /**
+   * Issue #2730 — W3C traceparent for the run (#1743's field,
+   * the WorkflowJobCommand contract): the start_trade_approval
+   * door stamps it from the turn's traceparent resolver,
+   * server-side only — never a tool argument. The workflow's
+   * step hops record under it (the S17 mechanism); absent →
+   * the run's steps record nothing, never minted mid-flight.
+   */
+  traceparent?: string;
 }
 
 /** The decision event payload delivered to a waiting trade workflow. */
@@ -1235,6 +1244,8 @@ export class TradingAgent extends PortThink {
     provider?: string;
     userLogin?: string;
     orderId: string;
+    /** Issue #2730: the caller's W3C traceparent (server-side carrier only), carried into the run's params. */
+    traceparent?: string;
   }): Promise<{ workflowId: string; orderId: string; status: "awaiting_approval" }> {
     if (!input?.orderId || typeof input.orderId !== "string") {
       throw new TradingServiceError("invalid_input", "startTradeApproval requires an orderId.");
@@ -1259,6 +1270,7 @@ export class TradingAgent extends PortThink {
       orderId: input.orderId,
       provider: input.provider,
       userLogin: ownerLogin,
+      ...(input.traceparent ? { traceparent: input.traceparent } : {}),
     };
     const workflowId = await this.runWorkflow(TRADE_WORKFLOW_BINDING, params);
     return { workflowId, orderId: input.orderId, status: "awaiting_approval" };

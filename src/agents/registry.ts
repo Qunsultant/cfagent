@@ -103,8 +103,8 @@ export interface MeshToolFamilyEntry {
   source: string;
   status: MeshToolFamilyStatus;
   /**
-   * McpToolFactory command names this family accounts for. Only the
-   * seven factory-module families carry commands; every factory tool
+   * McpToolFactory command names this family accounts for. The
+   * factory-module families carry commands; every factory tool
    * is accounted for by exactly one family (pinned).
    */
   commands: string[];
@@ -293,7 +293,7 @@ export const MESH_AGENTS: MeshAgentEntry[] = [
     statusReason:
       "Degraded: no container backend is configured (no containers declared in wrangler.jsonc), so run_command honestly returns executed:false; the class and its A2A surface are live, the execution backend is absent (see notes).",
     notes:
-      "Landed after the mesh survey base (migration v13). No container backend is configured, so runs honestly return executed:false. The A2A surface recorded as a follow-up landed in S15 (#2421): card + resolution + src/agents/sandboxA2aDispatch.ts (sandbox.status, sandbox.run_command) on the A2A edge gate; S16 (#2426) gave the surface its own mesh credential (A2A_TOKEN_SANDBOX — see the identity records), with the shared token as its transitional fallback. Chat/MCP still reach the sandbox capability by constructing the service directly, not through this class (the #2253 wiring follow-up; see the census).",
+      "Landed after the mesh survey base (migration v13). No container backend is configured, so runs honestly return executed:false. The A2A surface recorded as a follow-up landed in S15 (#2421): card + resolution + src/agents/sandboxA2aDispatch.ts (sandbox.status, sandbox.run_command) on the A2A edge gate; S16 (#2426) gave the surface its own mesh credential (A2A_TOKEN_SANDBOX — see the identity records), with the shared token as its transitional fallback. The #2253 wiring follow-up landed in #2732 (tracker #2708 A4): run_sandbox_command now resolves this class on the SANDBOX_AGENT binding and calls runCommand, so chat/MCP reach the capability through the class like the A2A and HTTP doors (see the census). The remaining owner step is the containers configuration alone.",
   },
   {
     className: "SessionStore",
@@ -864,7 +864,7 @@ export const MESH_TOOL_FAMILIES: MeshToolFamilyEntry[] = [
     status: "degraded",
     commands: [],
     notes:
-      "No container backend is configured: runs return executed:false (honest degradation). The run_sandbox_command MCP command lives in the cloudflare-agent-mcp-commands family. Making this family live is a named OWNER DECISION, not a code gap: add a Cloudflare Containers configuration for SandboxAgent to wrangler.jsonc and construct the service with the bound container (this.ctx.container) — the enablement steps are recorded in src/agents/sandbox-agent.ts and in the SANDBOX_AGENT binding comment in wrangler.jsonc. Owner-gated in this programme; the registry slices record it and do not make it (S14, #2417).",
+      "No container backend is configured: runs return executed:false (honest degradation). The run_sandbox_command MCP command lives in the cloudflare-agent-mcp-commands family and — since #2732 (tracker #2708 A4) — routes through SandboxAgent, the class this family is sourced from, so the enablement below lifts the MCP door with the others. Making this family live is a named OWNER DECISION, not a code gap: add a Cloudflare Containers configuration for SandboxAgent to wrangler.jsonc and construct the service with the bound container (this.ctx.container) — the enablement steps are recorded in src/agents/sandbox-agent.ts and in the SANDBOX_AGENT binding comment in wrangler.jsonc. Owner-gated in this programme; the registry slices record it and do not make it (S14, #2417).",
   },
   {
     id: "browser-tools",
@@ -913,11 +913,12 @@ export const MESH_TOOL_FAMILIES: MeshToolFamilyEntry[] = [
   {
     id: "web-search",
     name: "Web search (reference-set family)",
-    source: "no defining module on main",
-    status: "absent",
-    commands: [],
+    source: "src/mcps/openaimp/webSearchCommands.ts + src/services/webSearch.ts",
+    status: "degraded",
+    commands: ["web_search"],
+    commandSources: [{ file: "src/mcps/openaimp/webSearchCommands.ts", kind: "readonly-name" }],
     notes:
-      "Named by the #2225 reference-set update as a G11 inventory family. No web_search tool exists in src/ on current main (verified by source scan for #2322); recorded as an honest gap for a later slice.",
+      "Named by the #2225 reference-set update as a G11 inventory family; recorded absent by S14 (#2417) after the #2322 source scan found no web_search tool. Built by #2731 (tracker #2708 item A2): the web_search command is registered in the MCP catalog over a named-provider seam (src/services/webSearch.ts; ADR 0025), first provider Brave Search API. Status is degraded on the sandbox-tools precedent — the command surface is live, the execution backend is not configured: production has no BRAVE_SEARCH_API_KEY secret, so every call fails loud with the named error web_search_provider_not_configured (never fabricated results, never a silent empty success), pinned by tests/web_search_2731.test.ts. Owner enablement is config only: wrangler secret put BRAVE_SEARCH_API_KEY (+ optionally WEB_SEARCH_PROVIDER); no code change. The keyless DuckDuckGo Instant Answer API was probed and rejected on #2731: it returned its canned test stub / empty payloads for ordinary queries — an instant-answer service, not a web-results index. web_fetch stays absent (tracker A3, a separate slice).",
   },
   {
     id: "web-fetch",
@@ -1733,10 +1734,11 @@ export const MESH_CAPABILITY_DOORS: MeshCapabilityDoorEntry[] = [
   {
     className: "SandboxAgent",
     door: "chat-turn",
-    status: "not-exposed",
-    operations: [],
-    reason:
-      "run_sandbox_command reaches the sandbox capability by constructing ETradeSandboxService directly — this class is not wired to that command (the recorded #2253 follow-up). The capability's result is identical either way today, because the agent delegates to the same service construction; the gap is class wiring, not capability.",
+    status: "exposed",
+    operations: ["run_sandbox_command"],
+    gate: "No caller identity is consumed on this door: the command takes { command, timeoutMs } only, on every door (input parity with the A2A dispatch and the onRequest /run handler).",
+    notes:
+      "A catalog command, not a mesh-door command — the same catalog command serves the external MCP surface (see the mcp entry). Wired through this class by #2732 (tracker #2708 A4), the #2253 follow-up the earlier census recorded as this cell's gap: the command resolves the class on SANDBOX_AGENT (service instance 'sandbox') and calls runCommand, so the turn's sandbox reach lands on the class. Results keep the service's posture verbatim: with no container backend bound, executed:false — never emulated, never fabricated.",
   },
   {
     className: "SandboxAgent",
@@ -1745,15 +1747,16 @@ export const MESH_CAPABILITY_DOORS: MeshCapabilityDoorEntry[] = [
     operations: [],
     gate: "SDK agent routing to the class's onRequest surface.",
     notes:
-      "onRequest serves /health (the status surface) and POST /run, mirroring BrowserAgent; production capability traffic still arrives via the MCP facade's direct service construction (see the chat-turn entry).",
+      "onRequest serves /health (the status surface) and POST /run, mirroring BrowserAgent; since #2732 the MCP/chat capability traffic also arrives through this class (the catalog command resolves it on SANDBOX_AGENT — see the chat-turn and mcp entries).",
   },
   {
     className: "SandboxAgent",
     door: "mcp",
-    status: "not-exposed",
-    operations: [],
-    reason:
-      "Same class-wiring gap as the chat turn: run_sandbox_command is in the catalog (cloudflare-agent-mcp-commands family) but constructs ETradeSandboxService directly; wiring it through this class is the recorded #2253 follow-up.",
+    status: "exposed",
+    operations: ["run_sandbox_command"],
+    gate: "MCP permission scope mcp:execute (#1744) at the /mcp route + executor; the command itself consumes no caller identity (input parity: { command, timeoutMs } only).",
+    notes:
+      "The same catalog command serves the chat turn (discovered via the SDK MCP client, #2496) and the external MCP surface — one registry, and since #2496 one enforcement surface: both arrive at the instance's /mcp route (registry MESH_DOORS). Wired by #2732 (tracker #2708 A4), the #2253 follow-up: SandboxRunCommand resolves this class on the SANDBOX_AGENT binding (service instance 'sandbox') and returns its runCommand result unchanged; a missing binding answers in the same honest shape from the command itself. The class delegates to the one ETradeSandboxService, so results carry the service's degraded posture verbatim (executed:false while no container backend is bound).",
   },
   {
     className: "SandboxAgent",
@@ -1954,9 +1957,11 @@ export const MESH_TRACE_SPINE: MeshTraceSpineEntry[] = [
   },
   {
     hop: "trading-workflow-steps",
-    status: "break",
-    consequence:
-      "TradingTradeWorkflow's params carry no traceparent field (the S9 approval door starts it from TradingAgent, not from a traced command), so a chat trade's trace ends at the door/start hops: the trade run's internal steps cannot join the turn's trace until the workflow's params grow the field (a TradingAgent-slice change, not an instrumentation shim here). Assembly reports the trade trace as far as the door.",
+    status: "carried",
+    carrier:
+      "TradeApprovalParams.traceparent (#1743's field, grown by #2730): the start_trade_approval door stamps it from the turn's McpToolContext.traceparent resolver — server-side only, never a tool argument — through startTradeApprovalViaDoor and TradingAgent.startTradeApproval into TradingTradeWorkflow's params. Starts without a traceparent (route-originated approvals) record no step hops; never minted mid-flight.",
+    evidence:
+      "Hops per completed step (kind \"workflow-step\", operations await-approval / settle-trade, jobId = the run's orderId) recorded by the trade flow from the params' traceparent via recordWorkflowTraceHop, deriving deterministic spans from (orderId, step name) so durable replay converges.",
   },
   {
     hop: "payment-workflow-steps",

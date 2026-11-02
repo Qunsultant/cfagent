@@ -15,6 +15,12 @@ import { renewETradeAccessToken, getStoredTokens, etradeIdentityFromLogin } from
 import { getServiceUserLogin } from "../security/serviceIdentity";
 import { createMessagingPorts } from "../messaging/createMessagingPorts";
 import { toScreenerEnvelope } from "../messaging/screenerEventEnvelope";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+import { writeEnvelopeToSink } from "../observability/observabilityPorts";
+import {
+  checkScreenerDeliveryConfig,
+  type ScreenerDeliveryConfigStatus,
+} from "./screenerDeliveryConfig";
 import {
   guardScheduledETradeAuth,
   type AuthEpisodeStore,
@@ -340,6 +346,37 @@ export function buildDiscoveryDeliveryOutcome(
 }
 
 
+/**
+ * Issue #1770 (slice C): write one screener-loop outcome to the
+ * EXISTING Analytics Engine sink. foldEnvelopeToEvent already maps
+ * screener.completed/failed envelopes to screener.delivery telemetry
+ * events, but no screener-loop caller invoked it before — the loop
+ * emitted nothing. Returns true when a point was written, false
+ * when the envelope folds to nothing (e.g. options.* events) or
+ * the sink could not be written. Best-effort by construction: the
+ * sink is Safe-wrapped (unbound env degrades to the console sink),
+ * and any residual error is warned, never thrown — telemetry must
+ * never fail the run or its deliveries.
+ */
+export async function writeScreenerEventTelemetry(
+  env: unknown,
+  userLogin: string,
+  event: import("../events/screenerEvents").ScreenerEvent
+): Promise<boolean> {
+  try {
+    return await writeEnvelopeToSink(
+      createObservabilitySink(env as { OBSERVABILITY?: unknown }),
+      toScreenerEnvelope(event, userLogin)
+    );
+  } catch (err) {
+    console.warn(
+      "[ScheduledTasksService] screener telemetry emit failed (run outcome unaffected):",
+      err instanceof Error ? err.message : String(err)
+    );
+    return false;
+  }
+}
+
 export class ScheduledTasksService {
   constructor(
     private env: Env,
@@ -585,7 +622,7 @@ export class ScheduledTasksService {
   private screenerBus?: ScreenerEventBus;
   private async publishScreenerEvent(
     event: import("../events/screenerEvents").ScreenerEvent
-  ): Promise<void> {
+  ): Promise<ScreenerDeliveryConfigStatus | undefined> {
     try {
       // Issue #1123 S5b: the tracked pipeline is the preferred sink —
       // the run is recorded as a main job and chained (report →
@@ -602,8 +639,21 @@ export class ScheduledTasksService {
           this.userLogin,
           Boolean((event as { stageChain?: unknown }).stageChain) || event.type.startsWith("screener."),
         );
-        return;
+        // Chained delivery owns its own errors — no bus-path config
+        // status applies here.
+        return undefined;
       }
+      // Issue #1770 (slice B): the bus-path email config status for
+      // the run's task result — only when this run requested email
+      // (event recipient or the deployment default). The status
+      // describes the deployment's transports, which the queue
+      // consumer shares, so it holds for the queue path too.
+      const emailTo =
+        (event as { emailTo?: string }).emailTo ??
+        (this.env as unknown as Record<string, unknown>).SCREENER_EMAIL_TO;
+      const deliveryConfig = emailTo
+        ? checkScreenerDeliveryConfig(this.env)
+        : undefined;
       // Issue #1739: the durable queue is primary for the two
       // bus-subscribed event types (screener.completed / screener.failed
       // — screener.md §8.1). options.* events keep the legacy bus path:
@@ -618,7 +668,12 @@ export class ScheduledTasksService {
             const report = await ports.publisher.publish(
               toScreenerEnvelope(event, this.userLogin)
             );
-            if (report.deliveredTo.length > 0) return;
+            if (report.deliveredTo.length > 0) {
+              // Issue #1770 (slice C): the run outcome reaches the
+              // observability sink on the queue leg too, exactly once.
+              await writeScreenerEventTelemetry(this.env, this.userLogin, event);
+              return deliveryConfig;
+            }
             console.warn(
               "[ScheduledTasksService] queue publish reached no subscriber stream — falling back to the in-process bus."
             );
@@ -639,6 +694,15 @@ export class ScheduledTasksService {
         });
       }
       await this.screenerBus.publish(event);
+      // Issue #1770 (slice C): bus leg emits the same single
+      // telemetry point; options.* events fold to nothing, so this
+      // call is a no-op for them. The chained path above returns
+      // before this point and never emits here — chained delivery
+      // owns its own outcome reporting.
+      if (event.type.startsWith("screener.")) {
+        await writeScreenerEventTelemetry(this.env, this.userLogin, event);
+      }
+      return deliveryConfig;
     } catch (err) {
       console.warn(
         "[ScheduledTasksService] screener event publish failed:",
@@ -1116,7 +1180,10 @@ export class ScheduledTasksService {
 
       // Issue #210: publish to the event bus so Slack/email/webhook
       // subscribers can harvest the results.
-      await this.publishScreenerEvent({
+      // Issue #1770 (slice B): the bus-path delivery-config status
+      // rides the run result so a missing email transport is visible
+      // on the run, not a silent skip.
+      const deliveryConfig = await this.publishScreenerEvent({
         type: "screener.completed",
         timestamp,
         universe: result.universe,
@@ -1182,6 +1249,7 @@ export class ScheduledTasksService {
             email: Boolean(options.emailTo),
             webhook: Boolean(options.webhookUrl),
           },
+          ...(deliveryConfig ? { deliveryConfig } : {}),
         },
         timestamp,
       };
@@ -1217,7 +1285,10 @@ export class ScheduledTasksService {
       }
 
       // Issue #210: publish the failure so subscribers can notify.
-      await this.publishScreenerEvent({
+      // Issue #1770 (slice B): same delivery-config status as the
+      // success path, so a failed run that also lost its email
+      // notice names the missing transport.
+      const deliveryConfig = await this.publishScreenerEvent({
         type: "screener.failed",
         timestamp,
         universe: options.universe || "TECH",
@@ -1235,6 +1306,7 @@ export class ScheduledTasksService {
         success: false,
         taskType: "market_screen",
         error: err.message || "Market screener execution error",
+        ...(deliveryConfig ? { deliveryConfig } : {}),
         timestamp,
       };
     }

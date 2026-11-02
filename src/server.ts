@@ -10,6 +10,7 @@ import { backgroundDispatchHeaders } from "./security/backgroundAttribution";
 import {
   createDeadLetterRecord,
   logDeadLetter,
+  type DeadLetterRecord,
 } from "./messaging/deadLetter";
 import { getSessionCached, getSessionCachedFetchedAt, invalidateSessionCache } from "./security/sessionCache";
 import { resolveIdleTimeoutMs } from "./security/sessionPolicy";
@@ -110,8 +111,17 @@ import {
 } from "./messaging/cfQueueMessagingAdapter";
 import { createMessagingPorts } from "./messaging/createMessagingPorts";
 import { createScreenerEventsWorkHandler } from "./messaging/screenerEventsConsumer";
+import { createDeadLetterStoreAdapter, ensureDeadLetterStoreSchema } from "./data/createDeadLetterStorePorts";
+import { createBreakerStateStoreAdapter, ensureBreakerStateSchema } from "./data/createBreakerStateStorePorts";
+import { configureDefaultBreakerDurability } from "./breakers/createBreakerPorts";
+import { createBreakerTripSubscriber } from "./breakers/breakerTripAlert";
+import { resolveDlqDepthAlertThreshold } from "./config/dlqDepthAlert";
+import { persistDeadLetterLanding } from "./messaging/deadLetterPersist";
+import { postSlackText, resourceSlackPost } from "./agents/resourceGoals";
+import type { SlackDeliveryEnv } from "./agents/social/delivery";
 import {
   isMessageEnvelope,
+  type MessageEnvelope,
   type SubscriberHandlers,
 } from "./messaging/messagingPorts";
 import { withRequestObservability } from "./observability/aspects";
@@ -510,7 +520,50 @@ async function handleNlqWebhookRequest(
   return Response.json(result);
 }
 
+/**
+ * Phase 5 Slice 2 (issue #2000) — one-time per-isolate breaker
+ * durability configuration. Idempotent: the first call wins;
+ * later calls are no-ops (bindings do not change within an
+ * isolate's lifetime, so a null store at first call stays
+ * null). The schema ensure runs fire-and-forget once: a load
+ * that races it degrades to in-memory (logged) and the next
+ * load succeeds — the durable adapter never fails a provider
+ * call over store state. Called at the top of fetch, scheduled,
+ * and queue entry points, before any breaker use.
+ */
+let breakerDurabilityConfigured = false;
+function ensureBreakerDurability(env: Env): void {
+  if (breakerDurabilityConfigured) return;
+  breakerDurabilityConfigured = true;
+  const adapter = createBreakerStateStoreAdapter(env);
+  if (!adapter) return;
+  const subscriber = createBreakerTripSubscriber({
+    postText: (text) =>
+      postSlackText({ post: resourceSlackPost, env: env as unknown as SlackDeliveryEnv, text }),
+    claimTripAlert: (transitionId, atMs, token) => adapter.claimTripAlert(transitionId, atMs, token),
+  });
+  configureDefaultBreakerDurability({
+    store: adapter,
+    tripAlert: (envelope) => {
+      void subscriber.handleEnvelope(envelope);
+    },
+  });
+  void ensureBreakerStateSchema(adapter.db).catch((err: unknown) => {
+    console.warn(
+      `[breaker] schema ensure failed, loads degrade to in-memory until it succeeds: ${err instanceof Error ? err.message : String(err)}`
+    );
+  });
+}
+
 async function handleFetch(request: Request, env: Env): Promise<Response> {
+    // Phase 5 Slice 2 (#2000) — durable breaker production path.
+    // Configures the shared registry's store + trip subscriber once
+    // per isolate, before any breaker use in this request (the
+    // registry is created lazily on first use; configuration must
+    // precede it, which entry-point ordering guarantees). Unbound
+    // AGENT_DB leaves the in-memory registry in place — exactly
+    // today's behavior, no lockout.
+    ensureBreakerDurability(env);
     const url = new URL(request.url);
     const path = url.pathname;
 
@@ -4552,6 +4605,8 @@ export default {
     await handleCloudflareEmailMessage(message, env, ctx);
   },
   async scheduled(event: any, env: Env, ctx?: any): Promise<void> {
+    // Phase 5 Slice 2 (#2000) — durable breaker production path (see ensureBreakerDurability).
+    ensureBreakerDurability(env);
     // #1185 / #1066 — unattended work runs under the explicit service
     // identity (SERVICE_USER_LOGIN), never a hardcoded synthetic login.
     // The shared Orchestrator instance is addressed by its established
@@ -4684,12 +4739,48 @@ export default {
     }
   },
   async queue(batch: any, env: Env, ctx?: any): Promise<void> {
+    // Phase 5 Slice 2 (#2000) — durable breaker production path (see ensureBreakerDurability).
+    ensureBreakerDurability(env);
     // Issue #1739 — durable screener-event delivery. The delivery
     // subscriber queue is dispatched through the broadcast core with
     // per-subscriber dedup; screener-events batches take the step-1
     // branch below, and every other batch falls through to the
     // existing path untouched (options_analysis + ack-all behavior
     // preserved).
+    // Phase 5 Slice 1 (issue #2000) — dead-letter persistence
+    // closure, shared by all three queue branches below. The
+    // console dead-letter record is always emitted first by the
+    // caller; this closure only adds the store row + depth
+    // check. It never throws by construction (schema-ensure
+    // failures return early, the persist helper catches the
+    // rest), so awaiting it can never change an ack/retry
+    // disposition. Unbound AGENT_DB yields undefined: drops
+    // stay console-only, exactly today's behavior.
+    const dlqStore = createDeadLetterStoreAdapter(env);
+    const persistDeadLetter = dlqStore
+      ? async (record: DeadLetterRecord, envelope: MessageEnvelope | null): Promise<void> => {
+          try {
+            await ensureDeadLetterStoreSchema(dlqStore.db);
+          } catch (err) {
+            console.warn("[dead-letter] schema ensure failed (console record stands):", err);
+            return;
+          }
+          await persistDeadLetterLanding(
+            {
+              store: dlqStore,
+              threshold: resolveDlqDepthAlertThreshold(env as unknown as Record<string, unknown>),
+              sendAlert: async (text) => {
+                // Env carries the Slack delivery vars postSlackText
+                // reads; the cast bridges the index-signature gap
+                // between the Env interface and SlackDeliveryEnv.
+                await postSlackText({ post: resourceSlackPost, env: env as unknown as SlackDeliveryEnv, text });
+              },
+            },
+            record,
+            envelope,
+          );
+        }
+      : undefined;
     if (batch?.queue === "screener-events-delivery") {
       const deliveryHandler = createScreenerQueueHandler({ env });
       const handlers: SubscriberHandlers = new Map([
@@ -4705,7 +4796,8 @@ export default {
         batch,
         "delivery",
         handlers,
-        screenerDeliverySeen
+        screenerDeliverySeen,
+        persistDeadLetter
       );
       // Issue #1743 — passive observability tap: fold the same
       // delivery envelopes into the Analytics Engine stream.
@@ -4778,6 +4870,7 @@ export default {
       const workHandler = createScreenerEventsWorkHandler({
         dispatchOptionsAnalysis: (payload, runId, unitId) =>
           dispatchWork(payload, true, runId, unitId),
+        persistDeadLetter,
       });
       const envelopeMessages: any[] = [];
       if (batch?.messages && Array.isArray(batch.messages)) {
@@ -4792,14 +4885,16 @@ export default {
                 // Issue #1764 — a denied legacy message is dropped
                 // (acked below), now with a structured dead-letter
                 // record instead of only the dispatch warning.
-                logDeadLetter(
-                  createDeadLetterRecord({
-                    queue: batch.queue,
-                    reason: "denied",
-                    detail:
-                      "Legacy options_analysis dispatch denied by the identity rules — dropping; a re-dispatch would deny again (#1764).",
-                  })
-                );
+                const legacyDeniedRecord = createDeadLetterRecord({
+                  queue: batch.queue,
+                  reason: "denied",
+                  detail:
+                    "Legacy options_analysis dispatch denied by the identity rules — dropping; a re-dispatch would deny again (#1764).",
+                });
+                logDeadLetter(legacyDeniedRecord);
+                // Slice 1 (#2000): persist the drop (no envelope;
+                // a denied dispatch is never replayable).
+                await persistDeadLetter?.(legacyDeniedRecord, null);
               }
               if (typeof msg.ack === "function") msg.ack();
             } catch (queueErr) {
@@ -4809,14 +4904,15 @@ export default {
           } else {
             // Issue #1764 — acked as before (undecodable bytes can
             // never decode), now with a structured dead-letter record.
-            logDeadLetter(
-              createDeadLetterRecord({
-                queue: batch.queue,
-                reason: "undecodable",
-                detail:
-                  "Dropping undecodable screener-events queue message (no valid envelope, no legacy taskType) (#1764).",
-              })
-            );
+            const undecodableRecord = createDeadLetterRecord({
+              queue: batch.queue,
+              reason: "undecodable",
+              detail:
+                "Dropping undecodable screener-events queue message (no valid envelope, no legacy taskType) (#1764).",
+            });
+            logDeadLetter(undecodableRecord);
+            // Slice 1 (#2000): persist the drop (no envelope).
+            await persistDeadLetter?.(undecodableRecord, null);
             if (typeof msg.ack === "function") msg.ack();
           }
         }
@@ -4829,7 +4925,8 @@ export default {
           await consumeCfBatch(
             { queue: batch.queue, messages: envelopeMessages },
             ports.consumer,
-            workHandler
+            workHandler,
+            persistDeadLetter
           );
         } else {
           // No messaging ports (no SCREENER_EVENTS binding): the
@@ -4888,14 +4985,15 @@ export default {
               // Issue #1764 — dropped (acked below) with a
               // structured dead-letter record, as in the
               // screener-events legacy branch above.
-              logDeadLetter(
-                createDeadLetterRecord({
-                  queue: batch.queue,
-                  reason: "denied",
-                  detail:
-                    "Legacy options_analysis dispatch denied by the identity rules — dropping; a re-dispatch would deny again (#1764).",
-                })
-              );
+              const fallthroughDeniedRecord = createDeadLetterRecord({
+                queue: batch.queue,
+                reason: "denied",
+                detail:
+                  "Legacy options_analysis dispatch denied by the identity rules — dropping; a re-dispatch would deny again (#1764).",
+              });
+              logDeadLetter(fallthroughDeniedRecord);
+              // Slice 1 (#2000): persist the drop (no envelope).
+              await persistDeadLetter?.(fallthroughDeniedRecord, null);
             }
           }
           if (typeof msg.ack === "function") msg.ack();

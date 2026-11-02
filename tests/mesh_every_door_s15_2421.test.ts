@@ -675,12 +675,17 @@ describe("deliberate non-exposures carry their real reasons (#2421)", () => {
     expect(capabilityDoor("SessionStore", "a2a")!.reason).toContain("credential");
   });
 
-  it("SandboxAgent's chat/MCP entries record the class-wiring gap honestly (capability reachable, class not wired)", () => {
+  it("SandboxAgent's chat/MCP entries record the landed class wiring (#2732: the #2253 follow-up)", () => {
+    // Until #2732 this pin asserted the gap (not-exposed, the reason
+    // naming run_sandbox_command + #2253); the wiring landed, so the
+    // pin flips with it (gitops §7 pin rule): both doors now reach
+    // the class through the one catalog command.
     for (const door of ["chat-turn", "mcp"] as const) {
       const entry = capabilityDoor("SandboxAgent", door)!;
-      expect(entry.status).toBe("not-exposed");
-      expect(entry.reason).toContain("run_sandbox_command");
-      expect(entry.reason).toContain("#2253");
+      expect(entry.status).toBe("exposed");
+      expect(entry.operations).toEqual(["run_sandbox_command"]);
+      expect(entry.notes).toContain("#2732");
+      expect(entry.notes).toContain("#2253");
     }
   });
 
