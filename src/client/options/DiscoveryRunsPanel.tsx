@@ -43,6 +43,7 @@ import {
   type StoredDiscoveryRun,
 } from "../discoveryApi";
 import { discoveryTriggerLabel, downloadDiscoveryExport } from "../runExport";
+import { ConfidenceMethodBreakdown } from "./ConfidenceMethodBreakdown";
 import {
   NO_VIEW_DEFAULT_MIN_PROBABILITY_OF_PROFIT,
   type DiscoveryInputModel,
@@ -233,6 +234,9 @@ function NoViewOutcomeBody({ outcome }: { outcome: DiscoverySymbolOutcome }) {
                   Blockers: {best.blockers.join("; ")}
                 </span>
               )}
+              {/* Issue #1773 (HAX #9): no-view ratings cap at MEDIUM
+                  by construction — the breakdown says so explicitly. */}
+              <ConfidenceMethodBreakdown pick={{ ...best, capHigh: true }} />
             </div>
           )}
 
@@ -385,6 +389,9 @@ function OutcomeView({ outcome }: { outcome: DiscoverySymbolOutcome }) {
                   Blockers: {best.blockers.join("; ")}
                 </span>
               )}
+              {/* Issue #1773 (HAX #9): the confidence rating travels
+                  with its method breakdown. */}
+              <ConfidenceMethodBreakdown pick={best} />
             </div>
           )}
 
