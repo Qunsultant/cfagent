@@ -31,6 +31,8 @@ import {
   type TradeApprovalParams,
 } from "./trading-agent";
 import { getServiceUserLogin } from "../security/serviceIdentity";
+import { recordWorkflowTraceHop } from "../observability/meshTrace";
+import { meshTraceStoreForEnv } from "../data/createMeshTracePorts";
 
 /** How long a proposal waits for its decision before lapsing. */
 export const TRADE_APPROVAL_TIMEOUT = "24 hours";
@@ -91,6 +93,42 @@ async function settleThroughApprovalDoor(
 }
 
 /**
+ * Issue #2730 (tracker #2708 A5): record one step hop for this
+ * trade run, from the params' traceparent into the env-resolved
+ * hop store — the S17 mechanism the screener workflow wires in
+ * its buildDeps (recordWorkflowTraceHop over
+ * meshTraceStoreForEnv). Called AFTER a step's journaled result
+ * returns, never inside a step callback, so durable replay
+ * re-records the identical deterministic span and the store
+ * converges. Params without a traceparent record nothing (the
+ * helper's contract — never minted mid-flight); a store failure
+ * is swallowed here: tracing degrades, the trade does not (the
+ * #1743 rule). Trace carriage is data — it never branches the
+ * flow, gates the settle, or alters a step input.
+ */
+async function traceTradeStep(
+  env: Env,
+  params: TradeApprovalParams,
+  operation: string,
+  note?: string,
+): Promise<void> {
+  try {
+    await recordWorkflowTraceHop(
+      meshTraceStoreForEnv(env),
+      {
+        traceparent: params.traceparent,
+        jobId: params.orderId,
+        userLogin: params.userLogin,
+        agent: "TradingTradeWorkflow",
+      },
+      { kind: "workflow-step", operation, ...(note ? { note } : {}) },
+    );
+  } catch {
+    // Best-effort by design (the #1743 degradation rule).
+  }
+}
+
+/**
  * The flow: wait for the decision event, then settle exactly once
  * inside a durable step. Any failure to obtain a decision (timeout,
  * termination) ends the flow as expired and settles NOTHING — a trade
@@ -109,11 +147,16 @@ export async function runTradeApprovalFlow(
     });
     decision = event.payload;
   } catch {
+    // The wait completed with no decision: the hop records the
+    // elapsed wait under the carried trace, noted as expired.
+    await traceTradeStep(env, params, "await-approval", "expired");
     return { status: "expired", orderId: params.orderId };
   }
+  await traceTradeStep(env, params, "await-approval");
   const result = await step.do("settle-trade", () =>
     settleThroughApprovalDoor(env, params, decision),
   );
+  await traceTradeStep(env, params, "settle-trade");
   return { status: "settled", orderId: params.orderId, decision: decision.decision, result };
 }
 
@@ -143,6 +186,11 @@ export class TradingTradeWorkflow extends ThinkWorkflow<
       orderId: event.payload.orderId,
       provider: event.payload.provider,
       userLogin: event.payload.userLogin,
+      // Issue #2730: the run's traceparent rides the payload
+      // into the flow, whose step hops record under it.
+      ...(event.payload.traceparent
+        ? { traceparent: event.payload.traceparent }
+        : {}),
     };
     return runTradeApprovalFlow(this.env, params, step as unknown as TradeApprovalStep);
   }

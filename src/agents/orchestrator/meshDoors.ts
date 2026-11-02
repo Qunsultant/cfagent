@@ -399,6 +399,8 @@ export interface TradingAgentDoorStub {
     orderId: string;
     provider?: string;
     userLogin: string;
+    /** Issue #2730: the door call's W3C traceparent (server-side carrier only), carried into the run's params. */
+    traceparent?: string;
   }): Promise<TradeApprovalStartDoorResult>;
   decideTradeApproval(input: {
     workflowId: string;
@@ -584,6 +586,7 @@ export async function startTradeApprovalViaDoor(
   env: Env,
   actingLogin: string | undefined | null,
   input: { orderId: string; provider?: string },
+  traceparent?: string,
 ): Promise<TradeApprovalStartDoorResult> {
   const login = requireActingLogin(actingLogin);
   const door = getTradingAgentDoor(env, login);
@@ -591,6 +594,11 @@ export async function startTradeApprovalViaDoor(
     orderId: input.orderId,
     ...(input.provider !== undefined ? { provider: input.provider } : {}),
     userLogin: login,
+    // Issue #2730: the turn's traceparent rides into the run's
+    // params under the S5 carrier discipline — resolved by the
+    // door command from its server-side resolver, never a tool
+    // argument. Absent → the run's steps record no hops.
+    ...(traceparent ? { traceparent } : {}),
   });
 }
 

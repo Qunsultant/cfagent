@@ -632,7 +632,16 @@ export class StartTradeApprovalCommand implements IMcpToolCommand<{
   ): Promise<TradeApprovalStartDoorResult> {
     const actingLogin = context.actingLogin?.();
     await recordDoorHop(context, this.name, "TradingAgent");
-    const result = await startTradeApprovalViaDoor(context.env, actingLogin, input);
+    // Issue #2730: the same server-side traceparent resolver the
+    // door hop reads also stamps the run's params, so the trade
+    // workflow's steps join this trace (S17). Never a tool
+    // argument — the S5 carrier discipline.
+    const result = await startTradeApprovalViaDoor(
+      context.env,
+      actingLogin,
+      input,
+      context.traceparent?.(),
+    );
     context.audit("start_trade_approval", "mcp", {
       actingLogin: actingLogin ?? null,
       orderId: input.orderId,
