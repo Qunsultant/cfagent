@@ -456,6 +456,42 @@ export function foldEnvelopeToEvent(
         };
         return event;
       }
+      case "screener.stage.feed_completed":
+      case "screener.stage.feed_failed":
+      case "screener.stage.gather_completed":
+      case "screener.stage.gather_failed":
+      case "screener.stage.analysis_completed":
+      case "screener.stage.analysis_failed":
+      case "screener.stage.deliver_completed":
+      case "screener.stage.deliver_failed": {
+        // Issue #2000 Phase 5 slice 4 — stage events as NEW TYPE
+        // VALUES ONLY (no schema change): the stage vocabulary
+        // comes from the screener flow's stage outcomes (feed,
+        // gather, analysis, deliver); `serve` is not a stage in
+        // that vocabulary and still folds to null. Counts+ids
+        // only: tenantId + runId required (tenant is the stream's
+        // index dimension, so a tenant-less stage envelope folds
+        // to null rather than being mis-indexed), optional
+        // numeric count. Failed forms carry the type itself as
+        // errorCode, never an error message.
+        const tenantId = str(data, "tenantId");
+        const runId = str(data, "runId");
+        if (!tenantId || !runId) return null;
+        const failed = envelope.type.endsWith("_failed");
+        const count = num(data, "count");
+        const event = baseEvent(
+          envelope,
+          "screener.stage",
+          failed ? "error" : "info",
+          tenantId,
+        );
+        event.runId = runId;
+        if (failed) event.errorCode = envelope.type;
+        event.fields = {
+          ...(count !== null ? { count } : {}),
+        };
+        return event;
+      }
       default:
         return null;
     }
