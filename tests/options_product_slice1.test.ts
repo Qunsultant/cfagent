@@ -200,6 +200,8 @@ describe("options screener navigation (issue #2596)", () => {
       "compare",
       "llm-ideas",
       "llm-evaluate",
+      "run-records",
+      "nlq",
     ]);
     expect(isNavItemOrSubItemActive(item!, "options-screener")).toBe(true);
     expect(isNavItemOrSubItemActive(item!, "options")).toBe(true);
@@ -213,16 +215,18 @@ describe("options screener navigation (issue #2596)", () => {
     expect(screeners.subItems!.map((s) => s.id)).toContain("research");
   });
 
-  it("every sub-menu entry is a real route, a view-driven hub entry, or a research surface (#2685, #2784)", () => {
+  it("every sub-menu entry is a real route, a view-driven hub entry, or a research surface (#2685, #2784, #2801)", () => {
     const item = findNavItemConfig(DEFAULT_LEFT_NAV_CONFIG, "options-screener")!;
     for (const sub of item.subItems!) {
       // Real tabs resolve in the route table; view-driven entries link to their host route;
       // research surfaces link to the options host with their research param.
-      if (sub.id === "iv-history") {
+      // (#2801: run-records names the schedules surface, so the param — not the
+      // sub id — is what must be a valid research value.)
+      const link = deepLinkForNavNode("options-screener", sub.id);
+      if ("params" in link && link.params?.research) {
+        expect(OPTIONS_RESEARCH_SURFACE_VALUES as readonly string[]).toContain(link.params.research);
+      } else if (sub.id === "iv-history") {
         expect(sub.href || sub.id).toBeTruthy();
-      } else if ((OPTIONS_RESEARCH_SURFACE_VALUES as readonly string[]).includes(sub.id)) {
-        const link = deepLinkForNavNode("options-screener", sub.id);
-        expect("params" in link && link.params?.research).toBe(sub.id);
       } else {
         expect(getRoute(sub.id)).toBeDefined();
       }

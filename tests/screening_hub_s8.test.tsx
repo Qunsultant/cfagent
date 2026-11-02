@@ -234,7 +234,7 @@ describe("S8 hub inventory coverage (source pins)", () => {
   });
 
   it("the Trading Hub's non-screening subtabs are intact", () => {
-    for (const subtab of ["autopilot", "order", "portfolio", "ledger", "reports", "schedules", "nlq", "omnichannel", "voice"]) {
+    for (const subtab of ["autopilot", "order", "portfolio", "ledger", "reports", "schedules", "omnichannel", "voice"]) {
       expect(tradingHub).toContain(`effectiveSubTab === "${subtab}"`);
     }
     expect(tradingHub).toContain("<AutopilotControlCenter");

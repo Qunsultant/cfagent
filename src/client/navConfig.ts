@@ -67,6 +67,15 @@ export const SUB_MENU_CONFIGS: Record<string, NavSubMenuItemConfig[]> = {
       badgeType: "new",
       description: "Zero-credential Yahoo Finance and Alpaca dual feed, fundamental peer comparison",
     },
+    {
+      id: "goal-screen",
+      label: "Goal Screen",
+      shortLabel: "Goal",
+      icon: "Goal",
+      badge: "AI",
+      badgeType: "ai",
+      description: "Pick a goal; the unified screening stack screens stocks and options for it, with backtest-on-screen",
+    },
   ],
   "options-screener": [
     {
@@ -158,6 +167,24 @@ export const SUB_MENU_CONFIGS: Record<string, NavSubMenuItemConfig[]> = {
       badge: "Eval",
       badgeType: "mcp",
       description: "LLM evaluation of one chosen strategy, from the discovery list",
+    },
+    {
+      id: "run-records",
+      label: "Run Records",
+      shortLabel: "Records",
+      icon: "Runs",
+      badge: "Runs",
+      badgeType: "neutral",
+      description: "The options run record: scheduled and manual discovery runs, the screening activity log, and the schedules pointer",
+    },
+    {
+      id: "nlq",
+      label: "NLQ",
+      shortLabel: "NLQ",
+      icon: "Search",
+      badge: "NLQ",
+      badgeType: "neutral",
+      description: "Natural-language options screen: describe the trade and scan underlyings for it",
     },
   ],
   "workflow-runs": [

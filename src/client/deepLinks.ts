@@ -47,6 +47,7 @@ export const DEEP_LINK_OVERRIDES: Record<string, DeepLink> = {
   // Screener-hub views: sub-items that live under ?tab=screeners.
   "screeners:new-screen": { tab: "screeners", view: "new-screen" },
   "screeners:screeners": { tab: "screeners", view: "stocks" },
+  "screeners:goal-screen": { tab: "screeners", view: "goal-screen" },
   "options-screener:scanner": { tab: "screeners", view: "scanner" },
   "options-screener:iv-history": { tab: "screeners", view: "iv-history" },
   // Options research surfaces (issue #2784): the research param names
@@ -60,6 +61,10 @@ export const DEEP_LINK_OVERRIDES: Record<string, DeepLink> = {
   "options-screener:compare": { tab: "options", params: { research: "compare" } },
   "options-screener:llm-ideas": { tab: "options", params: { research: "llm-ideas" } },
   "options-screener:llm-evaluate": { tab: "options", params: { research: "llm-evaluate" } },
+  // Run-records and NLQ surfaces (issue #2801): the panel already
+  // adopts these modes (#2784's mapping); the subs only need to name them.
+  "options-screener:run-records": { tab: "options", params: { research: "schedules" } },
+  "options-screener:nlq": { tab: "options", params: { research: "nlq" } },
   "workflow-runs:review": { tab: "screeners", view: "review" },
   "workflow-runs:track-record": { tab: "screeners", view: "track-record" },
   // Planned menu (issue #2783): subs link to their hub views. The
