@@ -42,6 +42,7 @@ import {
   cfpaySendEmailWithAttachments,
 } from "../services/cfpayA2A";
 import { deliverScreenerToSlack, deliverScreenerToSlackA2A } from "../services/screenerSlackDelivery";
+import { checkScreenerDeliveryConfig } from "../services/screenerDeliveryConfig";
 
 export interface ScreenerPublisherDeps {
   env: Env;
@@ -372,45 +373,61 @@ async function publishCompleted(
   }
 
   // 2. Email — try cfpay via A2A first, fall back to local.
+  // Issue #1770 (slice B, F-63): when no email transport is
+  // configured, skip with the named reason instead of attempting
+  // sends that cannot succeed and dropping the failure silently.
   const emailTo = event.emailTo || (deps.env as any).SCREENER_EMAIL_TO;
   if (emailTo) {
-    let emailOk = false;
-    if (cfpay) {
-      let r;
-      if (pdf) {
-        let binary = "";
-        for (let i = 0; i < pdf.bytes.length; i += 8192) binary += String.fromCharCode(...pdf.bytes.subarray(i, i + 8192));
-        r = await cfpaySendEmailWithAttachments(cfpay, {
-          to: emailTo,
-          subject: `📊 Market Screen [${event.universe || event.sector}] — ${event.opportunities.length} opportunities`,
-          body: plainText,
-          attachments: [{ filename: pdf.fileName, contentB64: btoa(binary), contentType: "application/pdf" }],
-        });
-      } else {
-        r = await cfpaySendEmail(cfpay, emailTo,
-          `📊 Market Screen [${event.universe || event.sector}] — ${event.opportunities.length} opportunities`, plainText);
+    const deliveryConfig = checkScreenerDeliveryConfig(deps.env);
+    if (!deliveryConfig.emailConfigured) {
+      console.warn(
+        `[ScreenerPublishers] Email delivery skipped for ${event.universe || event.sector}: ${deliveryConfig.emailMissingReason}`
+      );
+    } else {
+      let emailOk = false;
+      if (cfpay) {
+        let r;
+        if (pdf) {
+          let binary = "";
+          for (let i = 0; i < pdf.bytes.length; i += 8192) binary += String.fromCharCode(...pdf.bytes.subarray(i, i + 8192));
+          r = await cfpaySendEmailWithAttachments(cfpay, {
+            to: emailTo,
+            subject: `📊 Market Screen [${event.universe || event.sector}] — ${event.opportunities.length} opportunities`,
+            body: plainText,
+            attachments: [{ filename: pdf.fileName, contentB64: btoa(binary), contentType: "application/pdf" }],
+          });
+        } else {
+          r = await cfpaySendEmail(cfpay, emailTo,
+            `📊 Market Screen [${event.universe || event.sector}] — ${event.opportunities.length} opportunities`, plainText);
+        }
+        emailOk = r.ok;
+        if (!r.ok) {
+          console.warn("[ScreenerPublishers] cfpay Email failed, falling back to local:", r.error);
+        }
       }
-      emailOk = r.ok;
-      if (!r.ok) {
-        console.warn("[ScreenerPublishers] cfpay Email failed, falling back to local:", r.error);
-      }
-    }
-    if (!emailOk) {
-      try {
-        const email = new ETradeEmailTradingService(deps.env, deps.orm, deps.userLogin);
-        await email.sendOutboundEmail(
-          emailTo,
-          `📊 Market Screen [${event.universe || event.sector}] — ${event.opportunities.length} opportunities`,
-          `${html}${pdf ? `<p>Full report attached: ${pdf.fileName}</p>` : ""}`,
-          `${plainText}${reportUrl ? `\n\nPDF report: ${reportUrl}` : ""}`,
-          pdf ? (() => {
-            let binary = "";
-            for (let i = 0; i < pdf.bytes.length; i += 8192) binary += String.fromCharCode(...pdf.bytes.subarray(i, i + 8192));
-            return { fileName: pdf.fileName, contentType: "application/pdf", contentBase64: btoa(binary) };
-          })() : undefined
-        );
-      } catch (err) {
-        console.warn("[ScreenerPublishers] Email publish failed:", err instanceof Error ? err.message : String(err));
+      if (!emailOk) {
+        try {
+          const email = new ETradeEmailTradingService(deps.env, deps.orm, deps.userLogin);
+          const sent = await email.sendOutboundEmail(
+            emailTo,
+            `📊 Market Screen [${event.universe || event.sector}] — ${event.opportunities.length} opportunities`,
+            `${html}${pdf ? `<p>Full report attached: ${pdf.fileName}</p>` : ""}`,
+            `${plainText}${reportUrl ? `\n\nPDF report: ${reportUrl}` : ""}`,
+            pdf ? (() => {
+              let binary = "";
+              for (let i = 0; i < pdf.bytes.length; i += 8192) binary += String.fromCharCode(...pdf.bytes.subarray(i, i + 8192));
+              return { fileName: pdf.fileName, contentType: "application/pdf", contentBase64: btoa(binary) };
+            })() : undefined
+          );
+          // Issue #1770 (slice B): the local send's false return used
+          // to be dropped silently — a missing EMAIL binding looked
+          // exactly like a delivered email. Name it.
+          if (!sent) {
+            console.warn("[ScreenerPublishers] Local email send failed (env.EMAIL binding is not configured or send failed) — email not delivered.");
+          }
+        } catch (err) {
+          console.warn("[ScreenerPublishers] Email publish failed:", err instanceof Error ? err.message : String(err));
+        }
       }
     }
   }
@@ -465,13 +482,24 @@ async function publishFailed(
   const emailTo = event.emailTo || (deps.env as any).SCREENER_EMAIL_TO;
   if (emailTo) {
     attempted = true;
-    if (cfpay) {
+    // Issue #1770 (slice B, F-63): same named skip as the completed
+    // path — a missing transport must warn with its reason, not
+    // silently drop the failure notice.
+    const deliveryConfig = checkScreenerDeliveryConfig(deps.env);
+    if (!deliveryConfig.emailConfigured) {
+      console.warn(
+        `[ScreenerPublishers] Email failure-notify skipped for ${event.universe || "TECH"}: ${deliveryConfig.emailMissingReason}`
+      );
+    } else if (cfpay) {
       const r = await cfpaySendEmail(cfpay, emailTo, `⚠️ Market Screen FAILED — ${event.universe || "TECH"}`, text);
       if (!r.ok) console.warn("[ScreenerPublishers] cfpay Email failure-notify failed:", r.error);
     } else {
       try {
         const email = new ETradeEmailTradingService(deps.env, deps.orm, deps.userLogin);
-        await email.sendOutboundEmail(emailTo, `⚠️ Market Screen FAILED — ${event.universe || "TECH"}`, `<p>${text}</p>`, text);
+        const sent = await email.sendOutboundEmail(emailTo, `⚠️ Market Screen FAILED — ${event.universe || "TECH"}`, `<p>${text}</p>`, text);
+        if (!sent) {
+          console.warn("[ScreenerPublishers] Local email failure-notify failed (env.EMAIL binding is not configured or send failed) — notice not delivered.");
+        }
       } catch (err) {
         console.warn("[ScreenerPublishers] Email failure-notify failed:", err instanceof Error ? err.message : String(err));
       }
