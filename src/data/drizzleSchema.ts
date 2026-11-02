@@ -621,7 +621,7 @@ export const agentDigestSends = sqliteTable(
   (t) => [primaryKey({ columns: [t.userId, t.day] })],
 );
 
-/** Issue #2659: addresses recorded from successful sends (see migration 0032). */
+/** Issue #2659: addresses recorded from successful sends (see migration 0035). */
 export const agentDigestSubscriberEmails = sqliteTable("agent_digest_subscriber_emails", {
   userId: text("user_id").primaryKey(),
   tenantId: text("tenant_id").notNull(),
