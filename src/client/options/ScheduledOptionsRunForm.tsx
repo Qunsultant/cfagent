@@ -19,7 +19,7 @@
  * maxItems 100, bullish thesis, balanced risk profile.
  */
 import { useState } from "react";
-import { Button, Notice, Select, TextInput } from "../components/ui";
+import { Button, Checkbox, Notice, Select, TextInput } from "../components/ui";
 import { apiFetch as fetch } from "../apiFetch";
 import {
   buildOptionsRunNowPayload,
@@ -45,6 +45,17 @@ export function ScheduledOptionsRunForm({ activeEnv, userLogin }: ScheduledOptio
   const [maxItems, setMaxItems] = useState(100);
   const [thesis, setThesis] = useState<"bullish" | "bearish" | "neutral" | "directional">("bullish");
   const [riskProfile, setRiskProfile] = useState<"conservative" | "balanced" | "aggressive">("balanced");
+  // Issue #2600: strategy-choice controls for this run. Scope
+  // "default" omits the field so the server maps the stored #2583
+  // scope at fire time (the default preset is "all", which is also
+  // what this run did before #2600 forced all); "thesis"/"all"
+  // override it explicitly. Far-dated unchecked omits the field
+  // (legacy horizon bands); checked sends true. The headline cap
+  // defaults to 10 (the scanner's default); "all ranked" sends "all".
+  const [strategyScope, setStrategyScope] = useState<"default" | "thesis" | "all">("default");
+  const [farDated, setFarDated] = useState(false);
+  const [candidateLimit, setCandidateLimit] = useState("10");
+  const [candidateLimitAll, setCandidateLimitAll] = useState(false);
   const [pushToSlack, setPushToSlack] = useState(true);
   const [slackChannel, setSlackChannel] = useState("");
   const [emailTo, setEmailTo] = useState("");
@@ -80,6 +91,9 @@ export function ScheduledOptionsRunForm({ activeEnv, userLogin }: ScheduledOptio
       scheduledDate: "",
       thesis,
       riskProfile,
+      ...(strategyScope !== "default" ? { optionsStrategyMode: strategyScope } : {}),
+      ...(farDated ? { optionsFarDated: true } : {}),
+      optionsCandidateLimit: candidateLimitAll ? "all" : Number(candidateLimit),
       pushToSlack,
       slackChannel,
       emailTo,
@@ -185,6 +199,35 @@ export function ScheduledOptionsRunForm({ activeEnv, userLogin }: ScheduledOptio
           riskProfile={riskProfile}
           setRiskProfile={setRiskProfile}
         />
+
+        <div className="sched-form-group">
+          <Select label="Strategy scope" hint="Thesis only judges thesis-matching strategies; All judges every wanted strategy (thesis orients scoring only). Default follows the stored report scope."
+            id="scheduled-options-run-strategy-scope"
+            value={strategyScope}
+            onChange={(e) => setStrategyScope(e.target.value as "default" | "thesis" | "all")}
+          >
+            <option value="default">Default (from report scope)</option>
+            <option value="thesis">Thesis only</option>
+            <option value="all">All strategies</option>
+          </Select>
+        </div>
+
+        <div className="sched-form-group">
+          <Checkbox label="Fetch far-dated horizons (lets long-horizon strategies such as PMCC and LEAPS reach their expiries)" checked={farDated} onChange={() => setFarDated(!farDated)} />
+        </div>
+
+        <div className="sched-form-group">
+          <TextInput label="Headline setups to show" hint="Caps the ranked headline list; distinct from best-trade alternatives."
+            id="scheduled-options-run-candidate-limit"
+            type="number"
+            min={1}
+            step={1}
+            value={candidateLimit}
+            onChange={(e) => setCandidateLimit(e.target.value)}
+            disabled={candidateLimitAll}
+          />
+          <Checkbox label="All ranked (no headline cap)" checked={candidateLimitAll} onChange={() => setCandidateLimitAll(!candidateLimitAll)} />
+        </div>
 
         <NotificationFields
           jobType="optionsAnalysis"

@@ -361,6 +361,11 @@ async function executeOptionsSymbol(
         // Issue #2091: the chain's scheduled scope rides into the
         // per-symbol template; manual chains omit it (thesis default).
         ...(request.evaluateAllStrategies === true ? { evaluateAllStrategies: true } : {}),
+        // Issue #2600: the chain's canonical mode + far-dated toggle
+        // ride the same template (the scanner resolves the mode once;
+        // a conflicting alias pair throws there, never silently).
+        ...(request.strategyMode !== undefined ? { strategyMode: request.strategyMode } : {}),
+        ...(request.farDated !== undefined ? { farDated: request.farDated } : {}),
       },
       {
         riskProfile: request.riskProfile,
@@ -410,7 +415,7 @@ async function generateAssembleOptions(
     );
   }
   const { collateOpportunityScanShards } = await import("../trading");
-  const assembled = collateOpportunityScanShards(symbols, results, failed, new Date(chain.timestamp));
+  const assembled = collateOpportunityScanShards(symbols, results, failed, new Date(chain.timestamp), chain.options?.candidateLimit);
   if (assembled.coverage.evaluated === 0) {
     const top = assembled.partial?.topSkipReason;
     throw new Error(`Options chain shards produced no evaluable symbols.${top ? ` Top skip reason: ${top}` : ""}`);
