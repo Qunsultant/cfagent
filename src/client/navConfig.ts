@@ -50,6 +50,15 @@ export const SUB_MENU_CONFIGS: Record<string, NavSubMenuItemConfig[]> = {
       description: "Multi-factor equity screener and fundamental valuation filters",
     },
     {
+      id: "new-screen",
+      label: "Run a new screen",
+      shortLabel: "Run",
+      icon: "Screeners",
+      badge: "New",
+      badgeType: "ai",
+      description: "Execute a manual multi-factor stock screener with customizable criteria and filters",
+    },
+    {
       id: "research",
       label: "Market Research",
       shortLabel: "Research",
