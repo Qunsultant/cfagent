@@ -503,7 +503,7 @@ const MATRIX: MatrixRow[] = [
         "No ctx.storage use in the class (pinned below); the service is constructed with no container backend and holds no per-instance durable state.",
       ),
       connections: NA(
-        "Its doors are the domain methods plus the onRequest surface (:123); production call-site wiring through the agent is a recorded follow-up — the MCP run_sandbox_command still constructs the service directly (class header).",
+        "Its doors are the domain methods plus the onRequest surface (:138); the MCP run_sandbox_command resolves this class on the SANDBOX_AGENT binding and calls runCommand (#2732, the #2253 call-site wiring follow-up, landed).",
       ),
       scheduling: NA("No scheduling role: it registers no schedules and owns no scheduled work; anything time-based reaches it from callers recorded elsewhere in this row."),
       recovery: NA(

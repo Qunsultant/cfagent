@@ -293,7 +293,7 @@ export const MESH_AGENTS: MeshAgentEntry[] = [
     statusReason:
       "Degraded: no container backend is configured (no containers declared in wrangler.jsonc), so run_command honestly returns executed:false; the class and its A2A surface are live, the execution backend is absent (see notes).",
     notes:
-      "Landed after the mesh survey base (migration v13). No container backend is configured, so runs honestly return executed:false. The A2A surface recorded as a follow-up landed in S15 (#2421): card + resolution + src/agents/sandboxA2aDispatch.ts (sandbox.status, sandbox.run_command) on the A2A edge gate; S16 (#2426) gave the surface its own mesh credential (A2A_TOKEN_SANDBOX — see the identity records), with the shared token as its transitional fallback. Chat/MCP still reach the sandbox capability by constructing the service directly, not through this class (the #2253 wiring follow-up; see the census).",
+      "Landed after the mesh survey base (migration v13). No container backend is configured, so runs honestly return executed:false. The A2A surface recorded as a follow-up landed in S15 (#2421): card + resolution + src/agents/sandboxA2aDispatch.ts (sandbox.status, sandbox.run_command) on the A2A edge gate; S16 (#2426) gave the surface its own mesh credential (A2A_TOKEN_SANDBOX — see the identity records), with the shared token as its transitional fallback. The #2253 wiring follow-up landed in #2732 (tracker #2708 A4): run_sandbox_command now resolves this class on the SANDBOX_AGENT binding and calls runCommand, so chat/MCP reach the capability through the class like the A2A and HTTP doors (see the census). The remaining owner step is the containers configuration alone.",
   },
   {
     className: "SessionStore",
@@ -864,7 +864,7 @@ export const MESH_TOOL_FAMILIES: MeshToolFamilyEntry[] = [
     status: "degraded",
     commands: [],
     notes:
-      "No container backend is configured: runs return executed:false (honest degradation). The run_sandbox_command MCP command lives in the cloudflare-agent-mcp-commands family. Making this family live is a named OWNER DECISION, not a code gap: add a Cloudflare Containers configuration for SandboxAgent to wrangler.jsonc and construct the service with the bound container (this.ctx.container) — the enablement steps are recorded in src/agents/sandbox-agent.ts and in the SANDBOX_AGENT binding comment in wrangler.jsonc. Owner-gated in this programme; the registry slices record it and do not make it (S14, #2417).",
+      "No container backend is configured: runs return executed:false (honest degradation). The run_sandbox_command MCP command lives in the cloudflare-agent-mcp-commands family and — since #2732 (tracker #2708 A4) — routes through SandboxAgent, the class this family is sourced from, so the enablement below lifts the MCP door with the others. Making this family live is a named OWNER DECISION, not a code gap: add a Cloudflare Containers configuration for SandboxAgent to wrangler.jsonc and construct the service with the bound container (this.ctx.container) — the enablement steps are recorded in src/agents/sandbox-agent.ts and in the SANDBOX_AGENT binding comment in wrangler.jsonc. Owner-gated in this programme; the registry slices record it and do not make it (S14, #2417).",
   },
   {
     id: "browser-tools",
@@ -1734,10 +1734,11 @@ export const MESH_CAPABILITY_DOORS: MeshCapabilityDoorEntry[] = [
   {
     className: "SandboxAgent",
     door: "chat-turn",
-    status: "not-exposed",
-    operations: [],
-    reason:
-      "run_sandbox_command reaches the sandbox capability by constructing ETradeSandboxService directly — this class is not wired to that command (the recorded #2253 follow-up). The capability's result is identical either way today, because the agent delegates to the same service construction; the gap is class wiring, not capability.",
+    status: "exposed",
+    operations: ["run_sandbox_command"],
+    gate: "No caller identity is consumed on this door: the command takes { command, timeoutMs } only, on every door (input parity with the A2A dispatch and the onRequest /run handler).",
+    notes:
+      "A catalog command, not a mesh-door command — the same catalog command serves the external MCP surface (see the mcp entry). Wired through this class by #2732 (tracker #2708 A4), the #2253 follow-up the earlier census recorded as this cell's gap: the command resolves the class on SANDBOX_AGENT (service instance 'sandbox') and calls runCommand, so the turn's sandbox reach lands on the class. Results keep the service's posture verbatim: with no container backend bound, executed:false — never emulated, never fabricated.",
   },
   {
     className: "SandboxAgent",
@@ -1746,15 +1747,16 @@ export const MESH_CAPABILITY_DOORS: MeshCapabilityDoorEntry[] = [
     operations: [],
     gate: "SDK agent routing to the class's onRequest surface.",
     notes:
-      "onRequest serves /health (the status surface) and POST /run, mirroring BrowserAgent; production capability traffic still arrives via the MCP facade's direct service construction (see the chat-turn entry).",
+      "onRequest serves /health (the status surface) and POST /run, mirroring BrowserAgent; since #2732 the MCP/chat capability traffic also arrives through this class (the catalog command resolves it on SANDBOX_AGENT — see the chat-turn and mcp entries).",
   },
   {
     className: "SandboxAgent",
     door: "mcp",
-    status: "not-exposed",
-    operations: [],
-    reason:
-      "Same class-wiring gap as the chat turn: run_sandbox_command is in the catalog (cloudflare-agent-mcp-commands family) but constructs ETradeSandboxService directly; wiring it through this class is the recorded #2253 follow-up.",
+    status: "exposed",
+    operations: ["run_sandbox_command"],
+    gate: "MCP permission scope mcp:execute (#1744) at the /mcp route + executor; the command itself consumes no caller identity (input parity: { command, timeoutMs } only).",
+    notes:
+      "The same catalog command serves the chat turn (discovered via the SDK MCP client, #2496) and the external MCP surface — one registry, and since #2496 one enforcement surface: both arrive at the instance's /mcp route (registry MESH_DOORS). Wired by #2732 (tracker #2708 A4), the #2253 follow-up: SandboxRunCommand resolves this class on the SANDBOX_AGENT binding (service instance 'sandbox') and returns its runCommand result unchanged; a missing binding answers in the same honest shape from the command itself. The class delegates to the one ETradeSandboxService, so results carry the service's degraded posture verbatim (executed:false while no container backend is bound).",
   },
   {
     className: "SandboxAgent",

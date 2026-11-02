@@ -9,9 +9,10 @@
  * The agent adds no sandbox logic of its own; there is exactly one
  * implementation, and when a backend is ever bound, only the
  * service's construction changes (the #2215 bindings-first posture:
- * registration lands, call-site wiring is a follow-up slice — the
- * MCP command run_sandbox_command keeps constructing the service
- * directly, unchanged).
+ * registration landed first; the call-site wiring follow-up landed
+ * in #2732 — the MCP command run_sandbox_command now resolves this
+ * class on the SANDBOX_AGENT binding and calls runCommand, like the
+ * A2A and HTTP doors).
  *
  * Degraded posture — read this before mistaking existence for
  * capability: NO container backend is bound. The service is
@@ -39,11 +40,15 @@
  * registration. Its doors are the domain methods below plus the
  * HTTP onRequest surface, mirroring BrowserAgent.
  *
- * OUT of scope (follow-ups): rewiring run_sandbox_command through
- * the agent, and the containers configuration itself (owner step,
- * above). The A2A door/card recorded here as a follow-up landed in
- * #2421 (Agent Mesh S15): handleA2A below, dispatch in
- * ./sandboxA2aDispatch.ts, on the shared A2A edge gate.
+ * OUT of scope (follow-up): the containers configuration itself
+ * (owner step, above). The two call-site follow-ups recorded here
+ * have landed: the A2A door/card in #2421 (Agent Mesh S15 —
+ * handleA2A below, dispatch in ./sandboxA2aDispatch.ts, on the
+ * shared A2A edge gate), and the run_sandbox_command rewiring in
+ * #2732 (tracker #2708 A4) — the MCP command resolves this class on
+ * the SANDBOX_AGENT binding (service instance "sandbox") and calls
+ * runCommand; an environment without the binding answers in the
+ * same honest shape from the command itself.
  */
 
 import { PortThink } from "../actors/thinkAdapter";
@@ -83,11 +88,14 @@ export class SandboxAgent extends PortThink {
 
   private getService(): ETradeSandboxService {
     if (!this.sandboxService) {
-      // Constructed exactly as the MCP facade constructs the
-      // service today (RunSandboxCommand in
-      // src/mcps/openaimp/cloudflareAgentCommands.ts): no container backend.
-      // Passing a real container here is the ONLY change a future
-      // enablement slice makes — see the header.
+      // Constructed with no container backend. Every door reaches
+      // this construction through the class: the A2A dispatch and
+      // onRequest call these methods directly, and the MCP command
+      // (RunSandboxCommand in
+      // src/mcps/openaimp/cloudflareAgentCommands.ts) resolves this
+      // class on the SANDBOX_AGENT binding since #2732. Passing a
+      // real container here is the ONLY change a future enablement
+      // slice makes — see the header.
       this.sandboxService = new ETradeSandboxService(undefined, this.env);
     }
     return this.sandboxService;
