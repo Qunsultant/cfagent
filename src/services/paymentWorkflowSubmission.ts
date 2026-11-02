@@ -100,6 +100,15 @@ export function buildPaymentWorkflowParams(
     email: input.email,
     account: input.account,
     screenerCommand: input.screenerCommand,
+    // Issue #2762: the payment run joins the trace its screener
+    // command already carries (#1743's field, stamped by the
+    // command's producer) — carried into the workflow params so
+    // PaymentWorkflow's steps record under the same trace.
+    // Absent on the command → absent here; never minted at this
+    // seam, never a caller input.
+    ...(input.screenerCommand.traceparent
+      ? { traceparent: input.screenerCommand.traceparent }
+      : {}),
   };
 }
 
