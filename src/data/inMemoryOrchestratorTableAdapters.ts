@@ -94,6 +94,7 @@ export class InMemoryReportConfirmationStore implements ReportConfirmationPort {
       decided_at: null,
       decided_by: null,
       report_id: input.reportId,
+      created_by: input.createdBy ?? null,
     });
   }
   getById(id: string): ReportConfirmationRow | null {

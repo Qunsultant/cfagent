@@ -128,6 +128,8 @@ export interface ReportConfirmationRow {
   decided_at: string | null;
   decided_by: string | null;
   report_id: string | null;
+  /** Issue #2664: creator login; null for rows created before this slice. */
+  created_by: string | null;
 }
 
 /** The pending-list projection (id, kind, payload_json, created_at). */
@@ -149,6 +151,8 @@ export interface InsertConfirmationInput {
   status: string;
   createdAt: string;
   reportId: string | null;
+  /** Issue #2664: the login that created the hold. Null for legacy rows. */
+  createdBy?: string | null;
 }
 
 export interface ReportConfirmationPort {

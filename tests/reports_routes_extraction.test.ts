@@ -163,6 +163,7 @@ describe("handleReportsRoutes behavior", () => {
         status: "pending",
         created_at: new Date().toISOString(),
         report_id: "r1",
+        created_by: "sess",
         payload_json: JSON.stringify({ recipient: "a@b.com" }),
       })),
       confirmationDeliveryMeta: vi.fn(() => ({ recipient: "a@b.com" })),
@@ -194,6 +195,7 @@ describe("handleReportsRoutes behavior", () => {
         status: "pending",
         created_at: new Date().toISOString(),
         report_id: "r1",
+        created_by: "sess",
         payload_json: "{}",
       })),
       decideReportConfirmation: decide,
@@ -224,6 +226,7 @@ describe("handleReportsRoutes behavior", () => {
         status: "pending",
         created_at: "2020-01-01T00:00:00Z",
         report_id: "r1",
+        created_by: "sess",
         payload_json: "{}",
       })),
     });
