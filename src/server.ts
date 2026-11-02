@@ -90,6 +90,10 @@ import {
   handleReconcileJobsRoute,
 } from "./data/shardJobRoute";
 import {
+  createTraceReader,
+  handleMeshTraceRoute,
+} from "./data/meshTraceRoute";
+import {
   createShardJobAdapter,
   readJobHistory,
 } from "./data/createShardJobPorts";
@@ -2053,6 +2057,30 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
         tenantId,
         chainId,
         readHistory: async () => history,
+      });
+    }
+
+    // --- Mesh trace read (issue #2000, Phase 5 slice 3) ---
+    // GET /api/traces?traceId=: tenant-scoped read of one
+    // trace's assembled hops — the surfacing route for the
+    // mesh trace spine (before this slice no route exposed
+    // hopsFor; the assembly lived only behind the MCP read
+    // command). Gated by requireAuth (any signed-in user);
+    // the tenant comes from the IAAA tenant resolution, like
+    // the job-history read above. Unbound AgentDB → 503 (the
+    // durable hop record requires AGENT_DB; isolate-local
+    // in-memory hops are never served as a trace). Unknown
+    // trace, or another tenant's trace → 404. The handler
+    // answers GET only and writes nothing.
+    if (path === "/api/traces") {
+      const session = await requireAuth(request, env);
+      const tenantId = resolveIaaaTenant(env);
+      const traceId = url.searchParams.get("traceId") ?? "";
+      return handleMeshTraceRoute({
+        session,
+        method: request.method,
+        traceId,
+        readTrace: createTraceReader(env, tenantId),
       });
     }
 

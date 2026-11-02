@@ -158,6 +158,94 @@ lines themselves become the evidence, and in-isolate aggregation behind
 the same sink seam is the documented next step — the record shape above is
 the contract either way.
 
+## 5. Mesh traces — the trace spine's read surface (issue #2000, Phase 5 slice 3)
+
+One trace spine across doors, workflows, and agents: the W3C trace id
+(#1743) minted or continued at ingress, carried on the messaging
+envelope and on the workflow command (`WorkflowJobCommand.traceparent`),
+and recorded hop by hop into the D1 hop store
+(`agent_mesh_trace_hops`, via `meshTraceStoreForEnv` — AGENT_DB bound,
+else a per-isolate in-memory store). Every recorded hop is ALSO
+forwarded to the #1743 stream as a `mesh.trace.hop` event (the
+sink-forwarding store decorator), so the trace is visible both as
+rows and as stream events. Workflow step spans are deterministic
+(`(jobId, operation)`), so a durable replay re-records the identical
+span and the store's conflict rule converges it instead of duplicating.
+
+**Read route — `GET /api/traces?traceId=`** (any signed-in user).
+Before this slice no route exposed the hop store; the assembly lived
+only behind the MCP `agentdb.trace.get` command. The route returns the
+assembly: ordered hops (recorded hops + projection rows folded in),
+named breaks, and the mapped jobIds. Decision order: 401 (no session)
+→ 405 (non-GET) → 400 (missing/malformed traceId — refused, never
+normalized into a lookup) → 503 (AGENT_DB unbound: the durable hop
+record requires it, and isolate-local in-memory hops are never served
+as a trace) → 404 (no hops survive the tenant filter) → 200.
+Tenancy mirrors the MCP read surface: hops recorded under a DIFFERENT
+tenant are excluded before assembly; a hop whose tenant is null — an
+ingress boundary with no scope — stays visible, since it carries no
+tenant material. A trace from another tenant reads as 404 (no
+existence leak). The route writes nothing and never fails a run.
+
+**Analytics Engine aggregation.** The `observability` dataset carries
+one datapoint per hop event. Blob positions follow
+`src/observability/cfAnalyticsEngineAdapter.ts`: blob1 = event type,
+blob3 = operation, blob4 = runId, blob6 = traceId, blob8 = fields JSON
+(redacted). Dashboard queries over the dataset:
+
+```sql
+-- Hops per trace: which runs left the most spans
+SELECT blob6 AS traceId, count() AS hops
+FROM observability
+WHERE blob1 = 'mesh.trace.hop'
+GROUP BY blob6 ORDER BY hops DESC LIMIT 50
+```
+
+```sql
+-- Hops per operation: where the trace volume concentrates
+SELECT blob3 AS operation, count() AS hops
+FROM observability
+WHERE blob1 = 'mesh.trace.hop'
+GROUP BY blob3 ORDER BY hops DESC
+```
+
+Break detection (a missing step, a missing projection leg) is NOT an
+AE query: breaks are computed by the assembly in the route, which sees
+the hop kinds and the projection rows together. AE gives volume and
+shape; the route gives completeness.
+
+**What the spine does NOT yet cover (honest gaps, not silent ones).**
+Service-layer emissions inside a step do not carry the run's trace id:
+service call sites carry no request context, so an observability event
+emitted from inside a step folds under its own correlation/id, not
+under the run's trace. Threading trace context through the service
+layer needs orchestrator-door signature changes (an orchestrator.ts
+budget decision) and is a follow-up, not this slice. The payment
+workflow likewise has no traceparent field and emits no hops yet;
+wiring it is a follow-up slice (the saga workflow is out of this
+slice's scope by program boundary). The trace spine today covers the
+screener workflow (door workflow-start + every step including
+fan-out) and the trade workflow.
+
+**Production proof — PENDING the owner run.** The mechanism is
+verified by tests; a real staged run has not yet proven it end to
+end. The owner run files this record (same shape as the #2129 live
+proof):
+
+```text
+Staged run jobId:  ________________________
+Trace id (D1 console: SELECT DISTINCT trace_id FROM agent_mesh_trace_hops
+  WHERE job_id = '<run jobId>'):  ________________________________
+GET /api/traces?traceId=<id> → status: ___  hops observed: ___
+  operations seen (expect, for a goal run: announce, fan-out-batch-*,
+  execute-goal-screen, store-shard, deliver-shard, project-shard,
+  project-final, plus the door's workflow-start):  ________________
+  breaks reported (expect none for a complete run):  ______________
+```
+
+Until that record lands, the slice's acceptance reads: mechanism
+verified, production proof PENDING.
+
 ## Retention honesty (issue #257)
 
 UI copy must advertise only enforced retention. What is actually enforced:

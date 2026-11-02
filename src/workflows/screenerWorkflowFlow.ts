@@ -942,6 +942,12 @@ export async function runParentFlow(
         }
         return out;
       });
+      // Issue #2000 Phase 5 Slice 3: the fan-out step joins
+      // the run's trace like every other parent step — until
+      // this slice it was the one parent step that never
+      // emitted, so the trace jumped from announce straight
+      // to the shards' steps with the fan-out invisible.
+      await traceStep(deps, runCommand, "workflow-step", `fan-out-batch-${i / maxParallel}`);
       for (const c of created) {
         pending.push({
           shard: c.shard,
