@@ -56,8 +56,13 @@ probe run on the audit base: a temporary `src/client/__1772_pin_probe.tsx`
 rendering one raw `<button>` failed the freeze test with
 "NEW raw controls: src/client/__1772_pin_probe.tsx renders 1 raw
 control(s) but is not in the allowlist"; the probe was removed and the
-freeze test returned to green. #1772's Phase 4 follow-up PR adds a
-permanent negative test for that pin mechanism.
+freeze test returned to green. The Phase 4 follow-up PR adds the
+permanent negative test for that pin mechanism
+(`tests/ux_primitives_pin_negative_1772.test.ts`): it asserts the
+freeze test and empty allowlist are present, and proves via a temp
+client tree that a new raw-control file (including nested files and
+regressions in previously clean files) is flagged while primitive-only
+files and comment/string mentions are not.
 
 ## Remainders
 
