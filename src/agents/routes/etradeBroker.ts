@@ -127,13 +127,6 @@ export interface EtradeBrokerRouteContext {
     agent: AgentName | "judge" | "nlq" | "orchestrator",
     payload: Record<string, unknown>
   ): void;
-  /**
-   * Issue Qunsultant/cfagent#2037 — tick trace id carried from the
-   * dispatch's traceparent (set by the OrchestratorAgent delegation
-   * from the request headers; null when the dispatch carried none).
-   * Handlers record it on outcome rows so a tick and its outcomes
-   * correlate without any new header or field.
-   */
   traceId?: string | null;
   /** Screener agent (owner: OrchestratorAgent - was `this.getScreenerAgent()`). */
   getScreenerAgent(userLogin?: string): ScreenerAgent;
