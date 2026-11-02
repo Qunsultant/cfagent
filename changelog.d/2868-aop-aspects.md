@@ -1,0 +1,3 @@
+### Added
+
+- **Stock screener AOP aspects once (#2868, under #2764):** one aspect map (logging, auth/scoping, paid-run, retry, failure classification, partial-result marking, delivery, provenance) naming the single existing join point per concern, plus the two once-only implementations that did not exist: failure classification (`classifyScreenFailure`) and structured run logging (JSON lines with trace_id/actor_id/agent_id), wired at the `ScreenerAgent.runScreen` funnel shared by REST, NLQ, mesh, scheduled-monolithic, and workflow-child paths. Logs only — results and throws are unchanged; no generic AOP framework, no second recorder/catalog/port layer.
