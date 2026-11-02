@@ -21,8 +21,8 @@
   },
   {
     "path": "src/client/dataProvidersPanel.css",
-    "lines": 192,
-    "reason": "grandfathered (#1337)"
+    "lines": 253,
+    "reason": "Tabular presentation and consolidated provider connectivity (#2723; tokens only)"
   },
   {
     "path": "src/client/docsAndReports.css",

@@ -1,38 +1,17 @@
 /**
- * Data Providers settings section (issue #1180, E4 of epic #1116).
+ * Data Providers settings section (issue #1180, consolidated #2723).
  *
- * The admin surface for the data-provider platform: it renders the
+ * Tabular admin surface for the data-provider platform: renders the
  * E3 lifecycle API's own view (GET /api/data-providers — configs,
  * verification evidence, declared capabilities, and the registry's
- * servability per capability route) and drives the lifecycle through
- * the E3 POST actions (register / configure / verify / enable /
- * disable / deprovision). E3's route layer is the authority: it
- * session-gates mutations, enforces the legal-transition map, and
- * audits every attempt — this panel only offers the moves the map
- * allows from the state the API reports (see providerActions in
- * dataProvidersApi.ts) and surfaces server rejections verbatim.
+ * servability per capability route) along with consolidated provider
+ * connectivity and health metrics from former ProviderConnectivityDashboard.
  *
- * Configure takes a credential REFERENCE name ("env:NAME",
- * "sessionstore:ns:key") — secret values are never entered, sent,
- * or stored here; the server rejects anything that is not a
- * reference name.
- *
- * Honest states: a spinner while loading, the server's error
- * message verbatim on failure, a distinct sign-in-required state on
- * 401, and an explicit empty state — never placeholder rows.
- *
- * E6 (issue #1235): each provider card also renders the health
- * block the API derives from the provider's capture records —
- * status label, capture/failure counts, last success/failure, and
- * captured bytes. The panel formats only; every number and the
- * status itself are computed server-side, and "no-data" (zero
- * captures) renders as its own honest state, never as healthy.
- *
- * E7 (issue #1248): when the API sends the fetch-outcome fields,
- * the card additionally shows the fetch failure rate and the
- * latest fetch failure WITH its classified kind — again formatted
- * only, never derived client-side; an older (v1-shaped) response
- * without those fields renders exactly as before.
+ * Drives the lifecycle through standard actions:
+ *   - Configure
+ *   - Verify
+ *   - Disable / Enable
+ *   - Deprovision
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -42,7 +21,6 @@ import {
   fmtCaptureBytes,
   fmtDataProviderTime,
   postDataProviderAction,
-  providerActions,
   providerDisplayName,
   type CapabilityRouteView,
   type DataProviderActionName,
@@ -51,15 +29,6 @@ import {
 } from "./dataProvidersApi";
 import "./dataProvidersPanel.css";
 
-const ACTION_LABELS: Record<DataProviderActionName, string> = {
-  configure: "Configure",
-  verify: "Verify",
-  enable: "Enable",
-  disable: "Disable",
-  deprovision: "Deprovision",
-};
-
-/** Past-tense labels for the success toast after an action lands. */
 const ACTION_PAST: Record<DataProviderActionName, string> = {
   configure: "configured",
   verify: "verified",
@@ -67,6 +36,31 @@ const ACTION_PAST: Record<DataProviderActionName, string> = {
   disable: "disabled",
   deprovision: "deprovisioned",
 };
+
+interface ETradeScopePresence {
+  loginScoped: boolean;
+  unscoped: boolean;
+  internalId: boolean;
+  aliasLogin: boolean;
+}
+
+interface ETradeStatus {
+  authenticated?: boolean;
+  tokenScopes?: ETradeScopePresence;
+}
+
+function scopeLines(scopes: ETradeScopePresence): Array<{ scope: string; present: boolean }> {
+  return [
+    { scope: "login-scoped", present: scopes.loginScoped },
+    { scope: "unscoped", present: scopes.unscoped },
+    { scope: "internal-id", present: scopes.internalId },
+    { scope: "alias-login", present: scopes.aliasLogin },
+  ];
+}
+
+function isETradeProvider(view: DataProviderView): boolean {
+  return view.adapterKind === "etrade" || view.id === "etrade";
+}
 
 /** Plain-language labels for the E6 capture-derived health status. */
 const HEALTH_STATUS_LABELS: Record<DataProviderHealthStatus, string> = {
@@ -80,6 +74,7 @@ export function DataProvidersPanel() {
   const toast = useToast();
   const [providers, setProviders] = useState<DataProviderView[]>([]);
   const [routes, setRoutes] = useState<CapabilityRouteView[]>([]);
+  const [etradeStatus, setEtradeStatus] = useState<ETradeStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [needsAuth, setNeedsAuth] = useState(false);
   const [error, setError] = useState("");
@@ -102,7 +97,7 @@ export function DataProvidersPanel() {
       setRoutes(data.routes);
       setNeedsAuth(false);
     } catch (err: any) {
-      if (err?.status === 401) {
+      if (err?.status === 401 || err?.code === "auth_required") {
         setNeedsAuth(true);
         setProviders([]);
         setRoutes([]);
@@ -113,6 +108,14 @@ export function DataProvidersPanel() {
       }
     } finally {
       setLoading(false);
+    }
+
+    try {
+      const res = await fetch("/api/etrade/oauth/status");
+      const data = (await res.json().catch(() => null)) as ETradeStatus | null;
+      setEtradeStatus(res.ok && data ? data : null);
+    } catch {
+      setEtradeStatus(null);
     }
   }, []);
 
@@ -129,12 +132,12 @@ export function DataProvidersPanel() {
     setError("");
     try {
       await postDataProviderAction(view.id, action, body);
+      const past = ACTION_PAST[action] ?? `${action}d`;
+      toast.success(`Provider "${view.id}" ${past}.`);
       setConfirmingDeprovisionId(null);
       setConfiguringId(null);
       await load();
-      toast.success(`Provider "${view.id}" ${ACTION_PAST[action]}.`);
     } catch (err: any) {
-      // Keep the list as-is; the server's message is the explanation.
       setError(err?.message || `Failed to ${action} provider "${view.id}".`);
     } finally {
       setActingId(null);
@@ -142,11 +145,10 @@ export function DataProvidersPanel() {
   };
 
   const handleConfigureSave = async (view: DataProviderView) => {
-    const body: Record<string, unknown> = {};
-    const ref = configureRef.trim();
-    if (ref) body.credentialRef = ref;
-    const name = configureName.trim();
-    if (name) body.displayName = name;
+    const body: Record<string, unknown> = {
+      credentialRef: configureRef.trim(),
+    };
+    if (configureName.trim()) body.displayName = configureName.trim();
     await runAction(view, "configure", body);
   };
 
@@ -184,10 +186,9 @@ export function DataProvidersPanel() {
   return (
     <div className="dpp-panel">
       <p className="dpp-desc">
-        Market-data providers are provisioned through a lifecycle: register, configure a
-        credential <em>reference</em> (never the secret itself), verify the adapter really
-        works, then enable. Disabling keeps the configuration; deprovisioning withdraws the
-        provider&apos;s capability routes and clears its credential reference.
+        Market-data providers are provisioned through a unified lifecycle: register, configure a
+        credential <em>reference</em> (never the secret itself), verify connectivity, then enable.
+        Disabling preserves configuration; deprovisioning withdraws capability routes and clears credentials.
       </p>
 
       {error && (
@@ -216,198 +217,291 @@ export function DataProvidersPanel() {
           description="Register a provider below to start its provisioning lifecycle. Providers appear here with their lifecycle state, verification evidence, and capability routes."
         />
       ) : (
-        <ul className="dpp-list">
-          {providers.map((view) => {
-            const busy = actingId === view.id;
-            const actions = providerActions(view);
-            const myRoutes = routes.filter(
-              (r) => r.primaryProviderId === view.id || r.gapFillProviderId === view.id
-            );
-            return (
-              <li key={view.id} className="dpp-item" data-provider-id={view.id}>
-                <div className="dpp-item-main">
-                  <div className="dpp-item-head">
-                    <span className="dpp-item-name">{providerDisplayName(view)}</span>
-                    <code className="dpp-item-id">{view.id}</code>
-                    <span className="dpp-item-state">{view.lifecycleState}</span>
-                    <span className="dpp-item-enabled">{view.enabled ? "Enabled" : "Disabled"}</span>
-                  </div>
-                  <div className="dpp-item-meta">
-                    <span>{`Adapter: ${view.adapterKind}`}</span>
-                    <span>{`Precedence: ${view.precedence}`}</span>
-                    <span>
-                      {"Credential reference: "}
-                      {view.credentialRef ? <code>{view.credentialRef}</code> : "None"}
-                    </span>
-                    <span>{`Serving: ${view.serving ? "Yes" : "No"}`}</span>
-                    <span>
-                      {`Capabilities: ${
-                        view.declaredCapabilities.length > 0
-                          ? view.declaredCapabilities.join(", ")
-                          : "None declared"
-                      }`}
-                    </span>
-                    {view.verification ? (
-                      <span>
-                        {`Verified ${fmtDataProviderTime(view.verification.verifiedAt)} by ${view.verification.verifiedBy} — ${view.verification.summary}`}
-                      </span>
-                    ) : (
-                      <span>Not verified</span>
-                    )}
-                  </div>
-                  {view.health ? (
-                    <div className="dpp-health">
-                      <div className="dpp-health-head">
-                        <span className={`dpp-health-status dpp-health-status-${view.health.status}`}>
-                          {HEALTH_STATUS_LABELS[view.health.status] ?? view.health.status}
-                        </span>
-                        <span>{`Captures: ${view.health.totalCaptures}`}</span>
-                        <span>{`Failure rate: ${Math.round(view.health.failureRate * 100)}%`}</span>
-                        <span>{`Last 24h: ${view.health.capturesLast24h} captures, ${view.health.failuresLast24h} failed`}</span>
+        <div className="dpp-table-container">
+          <table className="ui-table dpp-table">
+            <thead>
+              <tr>
+                <th scope="col">Provider</th>
+                <th scope="col">Lifecycle &amp; State</th>
+                <th scope="col">Health &amp; Telemetry</th>
+                <th scope="col">Capabilities &amp; Routes</th>
+                <th scope="col">Connectivity &amp; Session</th>
+                <th scope="col">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {providers.map((view) => {
+                const busy = actingId === view.id;
+                const myRoutes = routes.filter(
+                  (r) => r.primaryProviderId === view.id || r.gapFillProviderId === view.id
+                );
+                return (
+                  <tr key={view.id} className="dpp-item" data-provider-id={view.id}>
+                    {/* 1. Provider Identity */}
+                    <td>
+                      <div className="dpp-col-provider">
+                        <span className="dpp-item-name">{providerDisplayName(view)}</span>
+                        <code className="dpp-item-id">{view.id}</code>
+                        <div className="dpp-item-meta">
+                          <span>{`Adapter: ${view.adapterKind}`}</span>
+                          <span>{`Precedence: ${view.precedence}`}</span>
+                        </div>
                       </div>
-                      <div className="dpp-health-meta">
-                        <span>{`Last success: ${fmtDataProviderTime(view.health.lastSuccessAt)}`}</span>
-                        <span>{`Last failure: ${fmtDataProviderTime(view.health.lastFailureAt)}`}</span>
-                        <span>{`Captured data: ${fmtCaptureBytes(view.health.totalRawBytes)}`}</span>
+                    </td>
+
+                    {/* 2. Lifecycle & Access */}
+                    <td>
+                      <div className="dpp-col-state">
+                        <span className="dpp-item-state">{view.lifecycleState}</span>
+                        <span className="dpp-item-enabled">{view.enabled ? "Enabled" : "Disabled"}</span>
+                        <div className="dpp-item-meta">
+                          <span>{`Serving: ${view.serving ? "Yes" : "No"}`}</span>
+                          <span>
+                            {"Credential reference: "}
+                            {view.credentialRef ? <code>{view.credentialRef}</code> : "None"}
+                          </span>
+                          {view.verification ? (
+                            <span>
+                              {`Verified ${fmtDataProviderTime(view.verification.verifiedAt)} by ${view.verification.verifiedBy} — ${view.verification.summary}`}
+                            </span>
+                          ) : (
+                            <span>Not verified</span>
+                          )}
+                        </div>
                       </div>
-                      {typeof view.health.fetchFailureRate === "number" &&
-                        typeof view.health.fetchAttempts === "number" && (
-                          <div className="dpp-health-meta">
-                            <span>{`Fetch failure rate: ${Math.round(view.health.fetchFailureRate * 100)}%`}</span>
-                            <span>{`${view.health.fetchFailures ?? 0} of ${view.health.fetchAttempts} attempts failed`}</span>
-                            {view.health.lastFetchFailureAt && (
-                              <span>{`Latest fetch failure: ${fmtDataProviderTime(view.health.lastFetchFailureAt)}${
-                                view.health.latestFetchFailureKind
-                                  ? ` (${view.health.latestFetchFailureKind})`
-                                  : ""
-                              }`}</span>
+                    </td>
+
+                    {/* 3. Health & Telemetry */}
+                    <td>
+                      <div className="dpp-col-health">
+                        {view.health ? (
+                          <div className="dpp-health">
+                            <div className="dpp-health-head">
+                              <span className={`dpp-health-status dpp-health-status-${view.health.status}`}>
+                                {HEALTH_STATUS_LABELS[view.health.status] ?? view.health.status}
+                              </span>
+                              <span>{`Captures: ${view.health.totalCaptures}`}</span>
+                              <span>{`Failure rate: ${Math.round(view.health.failureRate * 100)}%`}</span>
+                              <span>{`Last 24h: ${view.health.capturesLast24h} captures, ${view.health.failuresLast24h} failed`}</span>
+                            </div>
+                            <div className="dpp-health-meta">
+                              <span>{`Last success: ${fmtDataProviderTime(view.health.lastSuccessAt)}`}</span>
+                              <span>{`Last failure: ${fmtDataProviderTime(view.health.lastFailureAt)}`}</span>
+                              <span>{`Captured data: ${fmtCaptureBytes(view.health.totalRawBytes)}`}</span>
+                            </div>
+                            {typeof view.health.fetchFailureRate === "number" &&
+                              typeof view.health.fetchAttempts === "number" && (
+                                <div className="dpp-health-meta">
+                                  <span>{`Fetch failure rate: ${Math.round(view.health.fetchFailureRate * 100)}%`}</span>
+                                  <span>{`${view.health.fetchFailures ?? 0} of ${view.health.fetchAttempts} attempts failed`}</span>
+                                  {view.health.lastFetchFailureAt && (
+                                    <span>{`Latest fetch failure: ${fmtDataProviderTime(view.health.lastFetchFailureAt)}${
+                                      view.health.latestFetchFailureKind
+                                        ? ` (${view.health.latestFetchFailureKind})`
+                                        : ""
+                                    }`}</span>
+                                  )}
+                                </div>
+                              )}
+                            {Object.keys(view.health.byCapability ?? {}).length > 0 && (
+                              <ul className="dpp-health-caps">
+                                {Object.entries(view.health.byCapability).map(([capability, agg]) => (
+                                  <li key={capability} className="dpp-health-cap">
+                                    {`${capability}: ${agg.totalCaptures} captures (${agg.failedCount} failed)`}
+                                  </li>
+                                ))}
+                              </ul>
                             )}
                           </div>
+                        ) : (
+                          <div className="dpp-health">
+                            <span className="dpp-health-status">Health unavailable</span>
+                          </div>
                         )}
-                      {Object.keys(view.health.byCapability ?? {}).length > 0 && (
-                        <ul className="dpp-health-caps">
-                          {Object.entries(view.health.byCapability).map(([capability, agg]) => (
-                            <li key={capability} className="dpp-health-cap">
-                              {`${capability}: ${agg.totalCaptures} captures (${agg.failedCount} failed)`}
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="dpp-health">
-                      <span className="dpp-health-status">Health unavailable</span>
-                    </div>
-                  )}
-                  {myRoutes.length > 0 && (
-                    <ul className="dpp-routes">
-                      {myRoutes.map((route) => (
-                        <li key={route.capability} className="dpp-route">
-                          <span className="dpp-route-capability">{route.capability}</span>
-                          <span className="dpp-route-tier">{`Tier: ${route.minTier === "premium" ? "Premium" : "Freemium"}`}</span>
-                          <span>{`Primary: ${route.primaryProviderId}`}</span>
-                          <span>{`Gap-fill: ${route.gapFillProviderId ?? "—"}`}</span>
-                          <span>{`Resolves: ${route.resolves ? "Yes" : "No"}`}</span>
-                          {route.error && <span className="dpp-route-error">{route.error}</span>}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
+                      </div>
+                    </td>
 
-                {confirmingDeprovisionId === view.id ? (
-                  <div className="dpp-item-actions">
-                    <span className="dpp-confirm-text">
-                      Deprovision this provider? Its capability routes are withdrawn and its
-                      credential reference is cleared.
-                    </span>
-                    <Button
-                      size="sm"
-                      variant="danger"
-                      onClick={() => void runAction(view, "deprovision")}
-                      loading={busy}
-                      disabled={busy}
-                    >
-                      Confirm deprovision
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => setConfirmingDeprovisionId(null)}
-                      disabled={busy}
-                    >
-                      Cancel
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="dpp-item-actions">
-                    {actions.map((action) => (
-                      <Button
-                        key={action}
-                        size="sm"
-                        variant={action === "deprovision" ? "danger" : "ghost"}
-                        {...(action === "deprovision" ? { tone: "subtle" as const } : {})}
-                        disabled={busy}
-                        onClick={() => {
-                          if (action === "deprovision") {
-                            setConfirmingDeprovisionId(view.id);
-                            setConfiguringId(null);
-                          } else if (action === "configure") {
-                            openConfigure(view);
-                          } else {
-                            void runAction(view, action);
-                          }
-                        }}
-                      >
-                        {ACTION_LABELS[action]}
-                      </Button>
-                    ))}
-                  </div>
-                )}
+                    {/* 4. Capabilities & Routes */}
+                    <td>
+                      <div className="dpp-col-routes">
+                        <div className="dpp-item-meta">
+                          <span>
+                            {`Capabilities: ${
+                              view.declaredCapabilities.length > 0
+                                ? view.declaredCapabilities.join(", ")
+                                : "None declared"
+                            }`}
+                          </span>
+                        </div>
+                        {myRoutes.length > 0 && (
+                          <ul className="dpp-routes">
+                            {myRoutes.map((route) => (
+                              <li key={route.capability} className="dpp-route">
+                                <span className="dpp-route-capability">{route.capability}</span>
+                                <span className="dpp-route-tier">{`Tier: ${route.minTier === "premium" ? "Premium" : "Freemium"}`}</span>
+                                <span>{`Primary: ${route.primaryProviderId}`}</span>
+                                <span>{`Gap-fill: ${route.gapFillProviderId ?? "—"}`}</span>
+                                <span>{`Resolves: ${route.resolves ? "Yes" : "No"}`}</span>
+                                {route.error && <span className="dpp-route-error">{route.error}</span>}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    </td>
 
-                {configuringId === view.id && (
-                  <div className="dpp-configure-form">
-                    <TextInput
-                      id="dpp-configure-credential-ref"
-                      label="Credential reference"
-                      placeholder="env:PROVIDER_API_KEY"
-                      value={configureRef}
-                      onChange={(event) => setConfigureRef(event.target.value)}
-                      wrapperClassName="dpp-configure-field"
-                    />
-                    <TextInput
-                      id="dpp-configure-display-name"
-                      label="Display name (optional)"
-                      placeholder="e.g. Yahoo Finance"
-                      value={configureName}
-                      onChange={(event) => setConfigureName(event.target.value)}
-                      wrapperClassName="dpp-configure-field"
-                    />
-                    <div className="dpp-configure-actions">
-                      <Button
-                        size="sm"
-                        variant="primary"
-                        onClick={() => void handleConfigureSave(view)}
-                        loading={busy}
-                        disabled={busy}
-                      >
-                        Save configuration
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => setConfiguringId(null)}
-                        disabled={busy}
-                      >
-                        Cancel
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </li>
-            );
-          })}
-        </ul>
+                    {/* 5. Connectivity & Session (Consolidated) */}
+                    <td>
+                      <div className="dpp-col-session">
+                        {isETradeProvider(view) ? (
+                          <div className="dpp-session-info">
+                            {etradeStatus === null ? (
+                              <span>E*TRADE session presence unavailable for this session.</span>
+                            ) : (
+                              <>
+                                <span>
+                                  <strong>Panel (signed-in session):</strong>{" "}
+                                  {etradeStatus.authenticated ? "connected" : "not connected"}
+                                </span>
+                                <span>
+                                  <strong>Token presence by scope:</strong>{" "}
+                                  {etradeStatus.tokenScopes
+                                    ? scopeLines(etradeStatus.tokenScopes)
+                                        .map((line) => `${line.scope}: ${line.present ? "present" : "absent"}`)
+                                        .join(" · ")
+                                    : "scope presence unavailable"}
+                                </span>
+                              </>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="dpp-session-info">
+                            <span>
+                              {view.verification ? "Connectivity verified" : "Awaiting verification"}
+                            </span>
+                            <span>
+                              {view.credentialRef ? "Credential reference set" : "No credential configured"}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </td>
+
+                    {/* 6. Standardized Consistent Actions */}
+                    <td>
+                      <div className="dpp-col-actions">
+                        {confirmingDeprovisionId === view.id ? (
+                          <div className="dpp-item-actions">
+                            <span className="dpp-confirm-text">
+                              Deprovision this provider? Its capability routes are withdrawn and its
+                              credential reference is cleared.
+                            </span>
+                            <Button
+                              size="sm"
+                              variant="danger"
+                              onClick={() => void runAction(view, "deprovision")}
+                              loading={busy}
+                              disabled={busy}
+                            >
+                              Confirm deprovision
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => setConfirmingDeprovisionId(null)}
+                              disabled={busy}
+                            >
+                              Cancel
+                            </Button>
+                          </div>
+                        ) : (
+                          <div className="dpp-item-actions">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              disabled={busy}
+                              onClick={() => openConfigure(view)}
+                            >
+                              Configure
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              disabled={busy}
+                              onClick={() => void runAction(view, "verify")}
+                            >
+                              Verify
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              disabled={busy}
+                              onClick={() => void runAction(view, view.enabled ? "disable" : "enable")}
+                            >
+                              {view.enabled ? "Disable" : "Enable"}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="danger"
+                              tone="subtle"
+                              disabled={busy}
+                              onClick={() => {
+                                setConfirmingDeprovisionId(view.id);
+                                setConfiguringId(null);
+                              }}
+                            >
+                              Deprovision
+                            </Button>
+                          </div>
+                        )}
+
+                        {configuringId === view.id && (
+                          <div className="dpp-configure-form">
+                            <TextInput
+                              id="dpp-configure-credential-ref"
+                              label="Credential reference"
+                              placeholder="env:PROVIDER_API_KEY"
+                              value={configureRef}
+                              onChange={(event) => setConfigureRef(event.target.value)}
+                              wrapperClassName="dpp-configure-field"
+                            />
+                            <TextInput
+                              id="dpp-configure-display-name"
+                              label="Display name (optional)"
+                              placeholder="e.g. Yahoo Finance"
+                              value={configureName}
+                              onChange={(event) => setConfigureName(event.target.value)}
+                              wrapperClassName="dpp-configure-field"
+                            />
+                            <div className="dpp-configure-actions">
+                              <Button
+                                size="sm"
+                                variant="primary"
+                                onClick={() => void handleConfigureSave(view)}
+                                loading={busy}
+                                disabled={busy}
+                              >
+                                Save configuration
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => setConfiguringId(null)}
+                                disabled={busy}
+                              >
+                                Cancel
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
 
       {!needsAuth && (
