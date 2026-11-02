@@ -388,6 +388,7 @@ export function SagaStartSection({ userLogin }: { userLogin?: string }) {
   } | null>(null);
   const [jobs, setJobs] = useState<SagaStatusJob[]>([]);
   const [instanceStatus, setInstanceStatus] = useState<string | null>(null);
+  const [instanceError, setInstanceError] = useState<string | null>(null);
   const [outcomeCode, setOutcomeCode] = useState<string | null>(null);
   const [phase, setPhase] = useState<SagaProgressPhase>("polling");
   const [progressError, setProgressError] = useState("");
@@ -461,7 +462,21 @@ export function SagaStartSection({ userLogin }: { userLogin?: string }) {
         const nextJobs = Array.isArray(data["jobs"]) ? (data["jobs"] as SagaStatusJob[]) : [];
         setJobs(nextJobs);
         setInstanceStatus(typeof data["instanceStatus"] === "string" ? (data["instanceStatus"] as string) : null);
+        setInstanceError(typeof data["instanceError"] === "string" ? (data["instanceError"] as string) : null);
         setOutcomeCode(typeof data["outcomeCode"] === "string" ? (data["outcomeCode"] as string) : null);
+        // Issue #2810: an errored instance is terminal — show
+        // the reason and stop polling, never poll a dead run
+        // forever. This wins over the jobs-derived phase: the
+        // live instance state is authoritative about liveness.
+        if (data["instanceStatus"] === "errored") {
+          setProgressError(
+            typeof data["instanceError"] === "string" && data["instanceError"]
+              ? (data["instanceError"] as string)
+              : "Saga failed: instance errored.",
+          );
+          setPhase("error");
+          return;
+        }
         const terminal = sagaProgressPhase(nextJobs);
         if (terminal) setPhase(terminal);
       } catch {
@@ -525,6 +540,7 @@ export function SagaStartSection({ userLogin }: { userLogin?: string }) {
       persistSagaTracking({ sagaId, statusUrl });
       setPhase("polling");
       setJobs([]);
+      setInstanceError(null);
       setProgressError("");
     } catch {
       setFormError("Saga start could not be reached.");

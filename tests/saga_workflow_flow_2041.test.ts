@@ -24,10 +24,12 @@
  * - Leg 1 maps the screener collation lifecycle, not just the
  *   instance status (Failed collation is a failed screen even
  *   though the instance completed);
- * - an audit-write failure propagates: the saga never completes
- *   with an unrecorded transition (Q7 S2 blocking shape, as far
- *   as it is reachable from a workflow step — see the audit
- *   reachability note in sagaWorkflowFlow.ts);
+ * - an audit-write failure ends the saga as a recorded
+ *   FAILURE_SAGA_FAILED (Q7 S2 blocking shape, as far as it is
+ *   reachable from a workflow step — see the audit
+ *   reachability note in sagaWorkflowFlow.ts; #2810: the
+ *   failure is recorded, never swallowed, and the saga never
+ *   proceeds past the failed write);
  * - saga re-runs are idempotent: the same sagaId adopts the same
  *   leg instances instead of starting duplicates (G-REPLAY);
  * - leg instance ids are derived, never raw concatenations, and
@@ -46,7 +48,8 @@
  *   exactly one compensation per run (refund dedupe via the
  *   existing-record pre-check); denied/expired NEVER compensate
  *   (Q3 default: the screen was delivered); x402 never touches
- *   the refund path (Q9); a throwing compensate fails loud.
+ *   the refund path (Q9); a throwing compensate ends as a
+ *   recorded FAILURE_SAGA_FAILED claiming no compensation (#2810).
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -800,7 +803,7 @@ describe("saga flow Leg 0/1 (S1, #2041) and gate entry (S2)", () => {
     expect(expired.depCalls.refundPorts).toBe(0);
   });
 
-  it("a throwing compensate fails loud: no terminal outcome, no saga.ended", async () => {
+  it("a throwing compensate ends as a recorded FAILURE_SAGA_FAILED, claiming no compensation (#2810)", async () => {
     const legPort = new FakeLegPort();
     legPort.statuses["payment:pay-wf-1"] = [
       {
@@ -820,22 +823,47 @@ describe("saga flow Leg 0/1 (S1, #2041) and gate entry (S2)", () => {
         throw new Error("ledger unavailable");
       },
     });
-    await expect(runSagaWorkflowFlow(baseParams({ rail: "x402" }), deps, fakeStep(clock))).rejects.toThrow(
-      /ledger unavailable/,
-    );
-    expect(auditTypes(auditEvents)).not.toContain("saga.ended");
+    // #2810: the compensate throw no longer errors the instance
+    // silently. It ends as a RECORDED failure (saga.failed +
+    // notice + saga.ended with FAILURE_SAGA_FAILED) that claims
+    // NO compensation: no saga.screen_failed row, no credit, no
+    // refund — the failed row's reason IS the compensate error.
+    const outcome = await runSagaWorkflowFlow(baseParams({ rail: "x402" }), deps, fakeStep(clock));
+    expect(outcome.status).toBe("failed");
+    expect(outcome.code).toBe("FAILURE_SAGA_FAILED");
+    expect(auditTypes(auditEvents)).toEqual([
+      "saga.started",
+      "saga.payment_started",
+      "saga.failed",
+      "saga.outcome_notice",
+      "saga.ended",
+    ]);
+    expect(auditEvents.find((e) => e.type === "saga.failed")?.reason).toBe("ledger unavailable");
+    expect(auditEvents.find((e) => e.type === "saga.ended")?.outcomeCode).toBe("FAILURE_SAGA_FAILED");
   });
 
-  it("an audit-write failure propagates: the saga never completes unrecorded", async () => {
+  it("an audit-write failure ends the saga as a recorded failure, never proceeding past the failed write (#2810)", async () => {
     const legPort = new FakeLegPort();
     legPort.statuses["payment:pay-wf-1"] = [paymentStarted()];
     legPort.statuses["screener:scr-wf-1"] = [collation("Completed")];
     const { deps, auditEvents, clock } = depsFor(legPort, { auditThrowsOnCall: 2 });
-    await expect(runSagaWorkflowFlow(baseParams(), deps, fakeStep(clock))).rejects.toThrow(
-      /audit endpoint unavailable/,
-    );
-    // Only the saga.started row landed; no terminal outcome was produced.
-    expect(auditTypes(auditEvents)).toEqual(["saga.started"]);
+    // #2810: the failed write still ends the saga — but as a
+    // RECORDED failure, not a silent error: the catch-all's
+    // terminal rows land (calls 3-5 succeed) with the audit
+    // error as the reason. The saga never proceeds past the
+    // failed write: payment_started is absent, and the gap is
+    // explicit in the record. If the terminal write ALSO fails,
+    // the throw still propagates (see the #2810 audit-down pin).
+    const outcome = await runSagaWorkflowFlow(baseParams(), deps, fakeStep(clock));
+    expect(outcome.status).toBe("failed");
+    expect(outcome.code).toBe("FAILURE_SAGA_FAILED");
+    expect(auditTypes(auditEvents)).toEqual([
+      "saga.started",
+      "saga.failed",
+      "saga.outcome_notice",
+      "saga.ended",
+    ]);
+    expect(auditEvents.find((e) => e.type === "saga.failed")?.reason).toBe("audit endpoint unavailable");
   });
 
   it("a re-run with the same sagaId adopts the existing payment instance (G-REPLAY)", async () => {
@@ -1038,7 +1066,7 @@ describe("saga flow Leg 2 journey gate (S2, #2041)", () => {
     expect(withdrawCalls).toHaveLength(0);
   });
 
-  it("an audit-write failure at the prompted row propagates before any prompt is delivered", async () => {
+  it("an audit-write failure at the prompted row ends as a recorded failure before any prompt is delivered (#2810)", async () => {
     const legPort = new FakeLegPort();
     legPort.statuses["payment:pay-wf-1"] = [paymentStarted()];
     legPort.statuses["screener:scr-wf-1"] = [collation("Completed")];
@@ -1047,13 +1075,17 @@ describe("saga flow Leg 2 journey gate (S2, #2041)", () => {
     const step = gateStep(clock, [
       { payload: { sagaId: "saga-1", decision: "approved", deciderLogin: "u1login", surface: "slack" } },
     ]);
-    await expect(runSagaWorkflowFlow(baseParams(), deps, step)).rejects.toThrow(
-      /audit endpoint unavailable/,
-    );
+    // #2810: as the previous test — the saga ends as a recorded
+    // failure (calls 5-7 land); no journey prompt is delivered.
+    const outcome = await runSagaWorkflowFlow(baseParams(), deps, step);
+    expect(outcome.code).toBe("FAILURE_SAGA_FAILED");
     expect(auditTypes(auditEvents)).toEqual([
       "saga.started",
       "saga.payment_started",
       "saga.screen_completed",
+      "saga.failed",
+      "saga.outcome_notice",
+      "saga.ended",
     ]);
     expect(promptCalls).toHaveLength(0);
   });
