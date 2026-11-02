@@ -406,7 +406,7 @@ export function SagaStartSection({ userLogin }: { userLogin?: string }) {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch("/payments/agentic/commercial/pricing", {
+        const res = await fetch("/api/payments/agentic/commercial/pricing", {
           headers: { "x-user-login": userLogin },
         });
         if (cancelled) return;
