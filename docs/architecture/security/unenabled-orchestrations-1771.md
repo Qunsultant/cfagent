@@ -20,7 +20,7 @@ in tests (`tests/orchestration_status_1771.test.ts`).
 
 | Orchestration | Status | Blocker / terms |
 |---|---|---|
-| Autonomous portfolio rebalancing | Deliberately unenabled (slice C builds it) | No engine on main — only a UI action-type label. Slice C: DRAFT-only drift proposals, never autonomous execution. |
+| Autonomous portfolio rebalancing | Enabled, DRAFT-only (slice C) | `src/orchestrations/rebalanceProposals.ts` sizes buy/sell drift proposals against target weights; unlisted holdings are named with no proposal; bad target sums and bad prices throw. Places, previews, and submits nothing — execution still requires the trade-approval workflow. Autonomous execution with no human gate is NOT enabled. |
 | Cross-agent P2P x402 micro-payments | Enabled, gated | Testnet (base-sepolia, no real money) + simulated paths only; simulated proofs rejected by verifyPayment. Mainnet real-money P2P is NOT activated — owner decision. |
 | Multi-leg spread repair engine | Deliberately unenabled | No multi-leg fill-state source; existing `repairProposals.ts` is single-stock underwater repair (DRAFT, #355), not a spread engine. |
 | Cross-venue E*TRADE-vs-Alpaca arbitrage | Deliberately unenabled | E*TRADE Connect is an owner action (#1066); no live dual-venue pricing/fees/balance source. Catalog arbitrage entries are single-venue templates. |
