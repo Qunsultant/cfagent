@@ -5,14 +5,15 @@
  * from this table (see NavigationMenu.tsx and Chat.tsx).
  *
  * Shape of an entry:
- * - `id` is the tab id carried in the URL (`?tab=<id>`). All 34 ids Chat
+ * - `id` is the tab id carried in the URL (`?tab=<id>`). All 36 ids Chat
  *   has ever used are entries, including the six legacy/alias ids
  *   (trading, orders, scanner, reports, schedules, options) that never
  *   render as nav items but still land on a page. Issue #2596 added
  *   the 33rd id, "options-screener", as a real nav entry (navOrder 26).
  *   Platform Admin was added as the 34th id (navOrder 27) as a real page.
  *   Products was added as the 35th id (navOrder 28) as a real page.
- * - `navEntry` is present only for the 29 entries that render in the nav.
+ *   Billing was added as the 36th id (navOrder 29) as a real page.
+ * - `navEntry` is present only for the 30 entries that render in the nav.
  *   Its `navOrder` reproduces the historical sidebar/top-strip order, so
  *   deriving NAVIGATION_ITEMS from this table changes nothing visible.
  * - `navGroup` is the nav entry highlighted when this tab is active. It
@@ -161,6 +162,31 @@ export const ROUTES = [
       defaultVisible: true,
       badge: "LIVE",
       badgeType: "live",
+    },
+  },
+  {
+    id: "billing",
+    navGroup: "billing",
+    crumb: "Billing",
+    // Billing section (navConfig.ts groups by category): Phase 6's
+    // read-only servicing view over landed rails — subscription,
+    // receipts, plans, referral balance — with no purchase, cancel,
+    // deactivation, or refund action (those belong to Selling,
+    // rescoped 2.14, 2.5, and 2.7 respectively).
+    category: "Billing",
+    // Icon key must be unique across nav entries (see the nav pin
+    // test): "Billing" is a new NavIcons key, not a reuse, so the
+    // resolved component is distinct by construction.
+    icon: "Billing",
+    description:
+      "Your subscription, receipts, plans, and referral-credit balance — read-only servicing over existing routes",
+    navEntry: {
+      label: "Billing",
+      shortLabel: "Billing",
+      navOrder: 29,
+      defaultVisible: true,
+      badge: "Billing",
+      badgeType: "neutral",
     },
   },
   {

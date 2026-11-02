@@ -15,16 +15,18 @@
  * they are outside this contract.
  * (#2695 added the Products nav entry, navOrder 28, last in display
  * order; pin updated in the same PR per the §7 pin rule.)
+ * (#2740 added the Billing nav entry, navOrder 29, last in display
+ * order; pin updated in the same PR per the §7 pin rule.)
  */
 import { describe, it, expect } from "vitest";
 import { ROUTES, hasNavEntry } from "../src/client/routes";
 import { NAVIGATION_ITEMS } from "../src/client/components/NavigationMenu";
 
 const navRoutes = ROUTES.filter(hasNavEntry);
-const NAV_COUNT = 29;
+const NAV_COUNT = 30;
 
 describe("left-nav unique icons and badges", () => {
-  it("has the full 29-item nav", () => {
+  it("has the full 30-item nav", () => {
     expect(navRoutes).toHaveLength(NAV_COUNT);
     expect(NAVIGATION_ITEMS).toHaveLength(NAV_COUNT);
   });
@@ -68,5 +70,8 @@ describe("left-nav unique icons and badges", () => {
     expect(byId.get("options-screener")!.navEntry.badge).toBe("Options");
     expect(byId.get("platform-admin")!.icon).toBe("Settings");
     expect(byId.get("platform-admin")!.navEntry.badge).toBe("Admin");
+    expect(byId.get("billing")!.icon).toBe("Billing");
+    expect(byId.get("billing")!.navEntry.badge).toBe("Billing");
+    expect(byId.get("billing")!.navEntry.navOrder).toBe(29);
   });
 });
