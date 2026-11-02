@@ -1303,6 +1303,18 @@ CREATE INDEX IF NOT EXISTS agent_referral_attributions_referrer_idx ON agent_ref
 `,
 };
 
+export const MIGRATION_0032_STORE_OPERATORS: DataMigration = {
+  version: 32,
+  name: "0032_store_operators",
+  sql: `
+CREATE TABLE IF NOT EXISTS agent_store_operators (
+  login TEXT PRIMARY KEY,
+  added_by TEXT NOT NULL,
+  added_at_ms INTEGER NOT NULL
+);
+`,
+};
+
 export const MIGRATION_0026_TENANT_AUTO_REFRESH: DataMigration = {
   version: 26,
   name: "0026_tenant_auto_refresh",
@@ -1386,6 +1398,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [
   MIGRATION_0029_PROOF_REDEMPTIONS,
   MIGRATION_0030_BILLING_CUSTOMERS,
   MIGRATION_0031_REFERRAL_ATTRIBUTION,
+  MIGRATION_0032_STORE_OPERATORS,
 ];
 
 function splitStatements(sqlText: string): string[] {
