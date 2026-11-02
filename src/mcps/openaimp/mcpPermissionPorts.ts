@@ -68,6 +68,13 @@ import {
   type ObservabilityEvent,
   type ObservabilitySink,
 } from "../../observability/observabilityPorts";
+import {
+  authorizeAgentInvocation,
+  type AgentAccessDeps,
+  type AgentAccessMode,
+  type AgentInvocationRequest,
+} from "../../security/agentAccess";
+import type { ObligationAuditWriter } from "../../security/obligations";
 import { createExecutionStore, type ExecutionRecord, type ExecutionSeal } from "./executionStore";
 
 /** Stable business-error code for a refused tool call (see outcomeCatalog.json). */
@@ -75,6 +82,11 @@ export const MCP_PERMISSION_DENIED_CODE = "FAILURE_MCP_PERMISSION_DENIED";
 
 /** Audit event type for a refused tool call (durable trail, via context.audit). */
 export const MCP_PERMISSION_DENIED_AUDIT = "mcp.permission_denied";
+
+/** #2171 — audit event types for agent-grant decisions at this gate. */
+export const AGENT_ACTION_AUDIT = "agent.action";
+export const AGENT_ACCESS_DENIED_AUDIT = "agent.access_denied";
+export const AGENT_ACCESS_SHADOW_DENIED_AUDIT = "agent.access_shadow_denied";
 
 /** Stream event type for a refused tool call (counts/outcomes only, via #1743's port). */
 export const MCP_PERMISSION_DENIED_STREAM = "mcp.permission_denied";
@@ -406,6 +418,35 @@ export function resolveMcpPrincipalFromHeaders(headers: {
   return { login, kind };
 }
 
+/**
+ * #2171 — agent-grant enforcement at this gate, opt-in per call
+ * site. The mode comes from the platform-only
+ * IAAA_AGENT_ACCESS_MODE switch, resolved by the CALLER from its
+ * platform env (never from run/session/user carriers) and passed
+ * here already resolved. Absent → the pre-#2171 gate exactly
+ * (scope check only). mode=off → evaluated never, nothing
+ * audited. mode=audit → evaluated and audited as a shadow
+ * denial, but never denies (the scope decision stands).
+ * mode=enforce → a grant denial audits as agent.access_denied
+ * and throws the same BusinessError as a scope denial, before
+ * execution begins; a grant allow audits as agent.action (the
+ * uniform allowed-call row G-AUD-1 asked for). The scope check
+ * always runs first: a scope denial keeps its own audit and
+ * never reaches the agent check.
+ */
+export interface McpAgentAccessOptions {
+  mode: AgentAccessMode;
+  deps: Omit<AgentAccessDeps, "auditSink">;
+  agentId: string;
+  tenantId: string;
+  purpose?: string;
+  resourceId?: string;
+  nowMs: number;
+  enforceObligations?: boolean;
+  authTimeMs?: number;
+  obligationAudit?: ObligationAuditWriter;
+}
+
 export interface PermissionGateOptions {
   port: ToolPermissionPort;
   principal: McpPrincipal;
@@ -414,6 +455,8 @@ export interface PermissionGateOptions {
   audit: (type: string, agent: unknown, payload: Record<string, unknown>) => void;
   /** Optional #1743 stream sink; denials only. Never fails the call. */
   decisionSink?: ObservabilitySink;
+  /** Optional #2171 agent-grant enforcement (see McpAgentAccessOptions). */
+  agentAccess?: McpAgentAccessOptions;
 }
 
 function denialStreamEvent(
@@ -454,7 +497,65 @@ export async function authorizeMcpToolCall(
   opts: Omit<PermissionGateOptions, "port" | "principal" | "toolName">
 ): Promise<PermissionDecision> {
   const decision = await port.authorize(principal, toolName);
-  if (decision.allowed) return decision;
+  if (decision.allowed) {
+    // #2171: agent-grant enforcement runs AFTER the scope allow,
+    // so a scope denial is never relabeled and never reaches the
+    // agent check. In audit (shadow) mode a grant denial is
+    // audited but the scope decision stands; in enforce mode it
+    // throws the same business error before execution begins.
+    // The gate's audit fn is the sink of record: an allow whose
+    // audit write throws is denied inside authorizeAgentInvocation
+    // (AUDIT_FAILED) and never executes — fail-closed, mirroring
+    // the scope path, where audit failure likewise precedes run.
+    const agentAccess = opts.agentAccess;
+    if (agentAccess && agentAccess.mode !== "off") {
+      const request: AgentInvocationRequest = {
+        agentId: agentAccess.agentId,
+        tenantId: agentAccess.tenantId,
+        targetKind: "tool",
+        target: toolName,
+        purpose: agentAccess.purpose,
+        resourceId: agentAccess.resourceId,
+        nowMs: agentAccess.nowMs,
+        enforceObligations: agentAccess.enforceObligations,
+        authTimeMs: agentAccess.authTimeMs,
+        obligationAudit: agentAccess.obligationAudit,
+      };
+      const agentDecision = await authorizeAgentInvocation(
+        {
+          ...agentAccess.deps,
+          auditSink: (event) => {
+            const type =
+              event.decision === "allow"
+                ? AGENT_ACTION_AUDIT
+                : agentAccess.mode === "audit"
+                  ? AGENT_ACCESS_SHADOW_DENIED_AUDIT
+                  : AGENT_ACCESS_DENIED_AUDIT;
+            opts.audit(type, "mcp", {
+              tool: toolName,
+              agentId: event.agentId,
+              agentKind: event.agentKind,
+              grantId: event.grantId,
+              delegatingPrincipal: event.delegatingPrincipal,
+              tenantId: event.tenantId,
+              decision: event.decision,
+              reason: event.reason,
+            });
+          },
+        },
+        request,
+      );
+      if (agentDecision.decision === "deny" && agentAccess.mode === "enforce") {
+        throw new BusinessError(MCP_PERMISSION_DENIED_CODE, {
+          tool: toolName,
+          scope: decision.scope ?? "none",
+        });
+      }
+      // mode=audit: any agent outcome stands aside — the scope
+      // decision is returned and execution proceeds.
+    }
+    return decision;
+  }
   opts.audit(MCP_PERMISSION_DENIED_AUDIT, "mcp", {
     tool: toolName,
     requiredScope: decision.scope,
