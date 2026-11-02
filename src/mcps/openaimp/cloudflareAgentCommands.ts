@@ -351,9 +351,10 @@ export class DurableTWAPOrderCommand implements IMcpToolCommand<{
   slices: number;
   intervalSeconds?: number;
   mode?: string;
+  runId?: string;
 }> {
   readonly name = "execute_durable_twap";
-  readonly description = "Preview a durable TWAP order PLAN: splits the order into slices and runs each slice through the broker order preview with Cloudflare durable checkpointing. This tool does NOT place orders and nothing fills — it returns preview drafts only (status: \"previewed\", executed: false). Real execution requires the human-in-the-loop order flow: etrade_preview_order followed by etrade_execute_order with an explicit human decision. Preview engine: #1734 adopts #1726 ETRADE_PREVIEW_MODE (local | broker) — mode input, session/user carrier, env, then local (legacy); broker previews slices through previewOrderRemote. Preview-only in BOTH modes.";
+  readonly description = "Preview a durable TWAP order PLAN: splits the order into slices and runs each slice through the broker order preview with Cloudflare durable checkpointing. This tool does NOT place orders and nothing fills — it returns preview drafts only (status: \"previewed\", executed: false). Real execution requires the human-in-the-loop order flow: etrade_preview_order followed by etrade_execute_order with an explicit human decision. Preview engine: #1734 adopts #1726 ETRADE_PREVIEW_MODE (local | broker) — mode input, session/user carrier, env, then local (legacy); broker previews slices through previewOrderRemote. Preview-only in BOTH modes. Durable resume (#2763): pass the same optional runId on a re-invocation to resume an interrupted run from its last checkpoint — checkpointed slices are not re-previewed and the result reports resumed/resumedFromStep; a corrupt or plan-mismatched checkpoint fails loud instead of silently restarting the plan.";
   readonly jsonSchema = {
     type: "object" as const,
     properties: {
@@ -363,6 +364,7 @@ export class DurableTWAPOrderCommand implements IMcpToolCommand<{
       slices: { type: "number", description: "Number of preview slices" },
       intervalSeconds: { type: "number", description: "Interval in seconds between slice previews" },
       mode: { type: "string", description: "#1726 run-level ETRADE_PREVIEW_MODE override (local | broker); unset = local legacy" },
+      runId: { type: "string", description: "Optional durable run identity (#2763): re-invoke with the same runId to resume an interrupted TWAP preview run from its last checkpoint instead of re-previewing completed slices. Omit for a one-off run." },
     },
     required: ["symbol", "action", "totalQuantity", "slices"],
   };
@@ -373,9 +375,10 @@ export class DurableTWAPOrderCommand implements IMcpToolCommand<{
     slices: z.number(),
     intervalSeconds: z.number().optional(),
     mode: z.string().optional(),
+    runId: z.string().optional(),
   });
 
-  async execute(input: { symbol: string; action: "BUY" | "SELL"; totalQuantity: number; slices: number; intervalSeconds?: number; mode?: string }, context: McpToolContext) {
+  async execute(input: { symbol: string; action: "BUY" | "SELL"; totalQuantity: number; slices: number; intervalSeconds?: number; mode?: string; runId?: string }, context: McpToolContext) {
     // #1734 (slice (n)): TWAP previously hardcoded the LOCAL draft,
     // bypassing #1726's preview pair — the appendix (n) requirement
     // that a TWAP slice adopt the E03/E04 gate posture, not inherit
@@ -430,7 +433,8 @@ export class DurableTWAPOrderCommand implements IMcpToolCommand<{
           orderType: "MARKET",
           sessionId: context.sessionId,
         });
-      }
+      },
+      { runId: input.runId }
     );
 
     context.audit("twap.previewed", "trading", {
@@ -440,6 +444,9 @@ export class DurableTWAPOrderCommand implements IMcpToolCommand<{
       totalPreviewed: plan.totalPreviewed,
       executed: false,
       previewMode,
+      resumed: plan.resumed,
+      resumedFromStep: plan.resumedFromStep,
+      ...(input.runId ? { runId: input.runId } : {}),
     });
 
     return {
@@ -462,6 +469,8 @@ export class DurableTWAPOrderCommand implements IMcpToolCommand<{
         pricingQuoteStatus: entry.preview?.pricingQuoteStatus,
       })),
       fiberId: plan.fiberId,
+      resumed: plan.resumed,
+      resumedFromStep: plan.resumedFromStep,
     };
   }
 }
