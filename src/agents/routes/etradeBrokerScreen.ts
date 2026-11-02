@@ -22,6 +22,7 @@ import { isPortfolioContextEnabled } from "../../services/screeningFlags";
 import type { ETradeService } from "../../services/etrade";
 import { workflowAcceptedResponse } from "../../workflows/screenerWorkflowRoutes";
 import { startStockScreenWorkflowOrNull } from "../../workflows/screenExecutionBroker";
+import { persistThenDeliverAll } from "../../workflows/screenRunFinalize";
 import { publishManualScreenerRun } from "./etradeBroker";
 import type { EtradeBrokerRouteContext } from "./etradeBroker";
 import type { ScreenerAgent } from "../screener-agent";
@@ -222,9 +223,14 @@ export async function executeEtradeScreen(args: {
   }
   if (universe === "ALL") {
     const shards = await agent.runSharded({ trigger: "manual", filters: validatedFilters, userLogin, environment: requestedEnv, portfolioContext });
-    for (const shard of shards) {
-      await publishOrBridge(ctx, userLogin, shard, delivery);
-    }
+    // Issue #2861: persist-then-deliver, unified with the single-run
+    // path below — previously this block delivered every shard
+    // before persisting any of them.
+    await persistThenDeliverAll({
+      results: shards,
+      persist: (r) => ctx.persistScreenerReportCanonical({ ...r, userLogin }),
+      deliver: (shard) => publishOrBridge(ctx, userLogin, shard, delivery),
+    });
     const failed = shards.filter((r) => !r.success);
     if (failed.length === shards.length) {
       return Response.json({ error: failed[0]?.error || "E*TRADE unavailable" }, { status: 502 });
@@ -234,10 +240,6 @@ export async function executeEtradeScreen(args: {
       count: shards.reduce((n, r) => n + r.allStocks.length, 0),
       success: true,
     });
-    // Issue #307/#308: store each shard's canonical report copy
-    // (one row per generation) so manual screens are searchable.
-    // Issue #911: pass userLogin for correct user scoping.
-    for (const r of shards) await ctx.persistScreenerReportCanonical({ ...r, userLogin });
     return Response.json({
       sharded: true,
       universes: shards.map((r) => ({
@@ -296,8 +298,13 @@ export async function executeEtradeScreen(args: {
   // generation) so manual screens are searchable like scheduled ones.
   // Issue #911: pass userLogin so the report is stored under the
   // correct user scope (not "default").
-  await ctx.persistScreenerReportCanonical({ ...result, userLogin });
-  await publishOrBridge(ctx, userLogin, result, delivery);
+  // Issue #2861: same persist-then-deliver finalizer as the
+  // sharded path above; order unchanged here, now pinned.
+  await persistThenDeliverAll({
+    results: [result],
+    persist: (r) => ctx.persistScreenerReportCanonical({ ...r, userLogin }),
+    deliver: (r) => publishOrBridge(ctx, userLogin, r, delivery),
+  });
   if (!result.success) {
     return Response.json({ error: result.error || "E*TRADE unavailable" }, { status: 502 });
   }
