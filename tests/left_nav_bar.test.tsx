@@ -128,11 +128,22 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
     expect(subIds).not.toContain("iv-history");
   });
 
-  it("configures Options Screener with contracts, scanner, flows, and iv-history, without docs/runs/schedules", () => {
+  it("configures Options Screener with contracts, scanner, flows, iv-history, and the research surfaces, without docs/runs/schedules", () => {
     const optionsSubItems = SUB_MENU_CONFIGS["options-screener"];
     expect(optionsSubItems).toBeDefined();
     const subIds = optionsSubItems.map((s) => s.id);
-    expect(subIds).toEqual(["options", "scanner", "options-flows", "iv-history"]);
+    expect(subIds).toEqual([
+      "options",
+      "scanner",
+      "options-flows",
+      "iv-history",
+      "discovery",
+      "strategy-panel",
+      "best-trade",
+      "compare",
+      "llm-ideas",
+      "llm-evaluate",
+    ]);
     expect(subIds).not.toContain("docs");
     expect(subIds).not.toContain("workflow-runs");
     expect(subIds).not.toContain("schedules");

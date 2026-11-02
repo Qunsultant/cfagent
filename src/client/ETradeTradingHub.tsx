@@ -59,7 +59,6 @@ export type TradingSubTab =
   | "schedules"
   | "iv-history"
   | "options"
-  | "llm-ideas"
   | "order"
   | "portfolio"
   | "ledger"
@@ -97,9 +96,9 @@ export function ETradeTradingHub({
   const effectiveSubTab: TradingSubTab = activeSubTab || subTab || "autopilot";
   // S4-D (#1991): the hub is the route outlet for every trading page, so
   // the shell title/scope follow the active subtab via the route table.
-  // iv-history and llm-ideas are inner hub tabs with no route entries.
+  // iv-history is an inner hub tab with no route entry.
   const shellRoute = getRoute(effectiveSubTab);
-  const shellTitle = shellRoute?.crumb ?? (effectiveSubTab === "iv-history" ? "IV History" : "LLM Ideas");
+  const shellTitle = shellRoute?.crumb ?? (effectiveSubTab === "iv-history" ? "IV History" : "");
   const shellScopeNote = shellRoute?.description;
 
   const handleNavigateSubTab = (newSubTab: TradingSubTab) => {
@@ -1328,7 +1327,6 @@ export function ETradeTradingHub({
       schedules: "Schedules",
       "iv-history": "IV History",
       options: "Auto Options Research",
-      "llm-ideas": "LLM Idea Experiment",
       order: "Order Ticket",
       portfolio: "Portfolio",
       ledger: "Order History",

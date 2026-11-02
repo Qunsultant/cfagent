@@ -1,5 +1,7 @@
 import { useContext, useEffect, useMemo, useState, createContext, useRef } from "react";
 import { Button, Checkbox, FieldShell, Select, Table, TextInput } from "../components/ui";
+import { subscribeToRouteChanges } from "../router";
+import { researchSurfaceForParam, researchParamForMode } from "./researchSurface";
 import { apiFetch as fetch } from "../apiFetch";
 import type {
   ExpectedIvDirection,
@@ -757,6 +759,45 @@ export type ResearchMode = "discovery" | "contracts" | "custom" | "nlq" | "llm-i
 
 export function OptionsResearchPanel({ activeEnv, userLogin, onPreviewTrade, onJobStateChange, onSendPrompt, onOpenSchedules }: OptionsResearchPanelProps) {
   const [researchMode, setResearchMode] = useState<ResearchMode>("discovery");
+  // Issue #2784: the ?research= surface param. Adopt it on mount and
+  // on every route change (nav sub clicks pushState while this
+  // shell-retained panel stays mounted); write the mode back with
+  // replaceState so the URL stays shareable after in-panel tab
+  // switches. The focus scroll is deferred a tick: the routechange
+  // fires before React commits the newly visible tab.
+  const appliedResearchRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const adoptFromUrl = () => {
+      const parsed = researchSurfaceForParam(
+        new URLSearchParams(window.location.search).get("research"),
+      );
+      if (!parsed || appliedResearchRef.current === parsed.surface) return;
+      appliedResearchRef.current = parsed.surface;
+      setResearchMode(parsed.mode);
+      if (parsed.sectionId) {
+        const sectionId = parsed.sectionId;
+        window.setTimeout(() => {
+          document.getElementById(sectionId)?.scrollIntoView({ block: "start" });
+        }, 0);
+      }
+    };
+    adoptFromUrl();
+    return subscribeToRouteChanges(adoptFromUrl);
+  }, []);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const next = researchParamForMode(researchMode, appliedResearchRef.current);
+    if (params.get("research") === next) return;
+    params.set("research", next);
+    appliedResearchRef.current = next;
+    window.history.replaceState(
+      null,
+      "",
+      `${window.location.pathname}?${params.toString()}${window.location.hash}`,
+    );
+  }, [researchMode]);
   const [evaluatingStrategy, setEvaluatingStrategy] = useState<StrategyToEvaluate | null>(null);
   const handleEvaluateLlm = (strategy: StrategyToEvaluate) => setEvaluatingStrategy(strategy);
   const [symbol, setSymbol] = useState("");
@@ -1220,17 +1261,21 @@ export function OptionsResearchPanel({ activeEnv, userLogin, onPreviewTrade, onJ
 
       {researchMode === "discovery" && (
         <>
-          <StrategyDiscoveryPanel
-            initialSymbol={symbol.trim() || "TSLA"}
-            activeEnv={activeEnv}
-            userLogin={userLogin}
-            onPreviewTrade={onPreviewTrade}
-            onSendPrompt={onSendPrompt}
-          />
+          <div id="options-research-strategy">
+            <StrategyDiscoveryPanel
+              initialSymbol={symbol.trim() || "TSLA"}
+              activeEnv={activeEnv}
+              userLogin={userLogin}
+              onPreviewTrade={onPreviewTrade}
+              onSendPrompt={onSendPrompt}
+            />
+          </div>
           {/* Issue #126 (PR-F): the persisted scheduled/manual discovery
               runs — a separate, read-only record stream below the
               interactive panel; the two are never merged. */}
-          <DiscoveryRunsPanel activeEnv={activeEnv} userLogin={userLogin} />
+          <div id="options-research-runs">
+            <DiscoveryRunsPanel activeEnv={activeEnv} userLogin={userLogin} />
+          </div>
         </>
       )}
 
@@ -1467,7 +1512,7 @@ export function OptionsResearchPanel({ activeEnv, userLogin, onPreviewTrade, onJ
           <option value="aggressive">Aggressive (favor reward/risk)</option>
         </Select>
 
-        <div className="options-form-footer">
+        <div className="options-form-footer" id="options-research-custom-actions">
           <p>All thresholds and search/result limits are set above. Stale/unknown quote ages are labeled and scored, not excluded on age alone. Zero-bid, crossed, and adjusted contracts are excluded as invalid/non-standard instruments.</p>
           {!canRun && (
             <p className="options-error" role="status">
