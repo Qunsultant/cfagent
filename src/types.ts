@@ -2419,6 +2419,15 @@ export interface ShardChainContext {
     allowedStrategies?: string[];
     /** Issue #2091: scheduled chains judge every wanted strategy. */
     evaluateAllStrategies?: boolean;
+    /** Issue #2600: canonical mode for the chain's per-symbol
+     *  templates (deprecated alias kept alongside for snapshot
+     *  readers, superseded by strategyMode). Absent = thesis default. */
+    strategyMode?: "thesis" | "all" | "no-view";
+    /** Issue #2600: far-dated fetch toggle for the chain. */
+    farDated?: boolean;
+    /** Issue #2600: ranked-candidate cap for the chain ("all" =
+     *  uncapped headline list). */
+    candidateLimit?: number | "all";
     /**
      * Issue #2577: the report scope's chain band and gates, carried from
      * the schedule into every per-symbol shard. Before this the shard

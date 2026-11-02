@@ -108,6 +108,11 @@ export interface UnifiedOptionsRunRecord {
   summary: string;
   trigger: "manual" | "scheduled" | "triggered" | "goal" | "agentic";
   strategyMode?: "thesis" | "all" | "no-view";
+  /** Issue #2600: the remaining strategy-choice controls, when known. */
+  candidateLimit?: number | "all";
+  alternatives?: number;
+  farDated?: boolean;
+  allowedStrategiesResolved?: string[];
   symbol?: string;
   thesis?: string;
   scheduleId?: string;
@@ -143,6 +148,10 @@ export function recordUnifiedOptionsRun(
       body: {
         trigger: input.trigger,
         strategyMode: input.strategyMode,
+        ...(input.candidateLimit !== undefined ? { candidateLimit: input.candidateLimit } : {}),
+        ...(input.alternatives !== undefined ? { alternatives: input.alternatives } : {}),
+        ...(input.farDated !== undefined ? { farDated: input.farDated } : {}),
+        ...(input.allowedStrategiesResolved !== undefined ? { allowedStrategiesResolved: input.allowedStrategiesResolved } : {}),
         symbol: input.symbol,
         thesis: input.thesis,
         scheduleId: input.scheduleId,
@@ -274,9 +283,30 @@ export interface StrategyScreenRecordInput {
   targetDate?: string;
   riskProfile?: string;
   allowedStrategies?: unknown;
+  /** Issue #2600: allowedStrategies resolved to registry ids (from
+   *  resolveMany), alongside the as-submitted list above, so a later
+   *  reader can tell "user asked for all" from "user asked for these
+   *  ids" without re-resolving against a changed catalogue. */
+  allowedStrategiesResolved?: string[];
   targetPrice?: number;
   dteMin?: number;
   dteMax?: number;
+  /** Issue #2600: ranked-candidate cap as submitted — a number, or
+   *  "all" for explicit uncapped ("all ranked"). Absent = not set.
+   *  Kept separate from best-trade alternatives (recorded under
+   *  their own name below, never merged into this cap). */
+  candidateLimit?: number | "all";
+  /** Issue #2600: best-trade alternatives count as submitted
+   *  (kernel default 3 when absent: 1 best + <=3 alternatives). */
+  alternatives?: number;
+  /** Issue #2600: far-dated toggle as submitted. */
+  farDated?: boolean;
+  /** Issue #2600: the fetch bands actually used (deriveFetchBands). */
+  fetchBands?: Array<{ minDte: number; maxDte: number; maxExpirations?: number }>;
+  /** Issue #2600: selected templates no band could reach, in the
+   *  #2583 resolver's horizonLimited shape (reported, never silently
+   *  dropped). */
+  horizonLimited?: Array<{ id: string; label: string; horizonDte: number }>;
   sector?: string;
   contractType?: string;
   universe?: string;
@@ -528,9 +558,15 @@ export function recordStrategyScreenRun(
         ...(input.targetDate ? { targetDate: input.targetDate } : {}),
         ...(input.riskProfile ? { riskProfile: input.riskProfile } : {}),
         ...(input.allowedStrategies !== undefined ? { allowedStrategies: input.allowedStrategies } : {}),
+        ...(input.allowedStrategiesResolved !== undefined ? { allowedStrategiesResolved: input.allowedStrategiesResolved } : {}),
         ...(input.targetPrice !== undefined ? { targetPrice: input.targetPrice } : {}),
         ...(input.dteMin !== undefined ? { dteMin: input.dteMin } : {}),
         ...(input.dteMax !== undefined ? { dteMax: input.dteMax } : {}),
+        ...(input.candidateLimit !== undefined ? { candidateLimit: input.candidateLimit } : {}),
+        ...(input.alternatives !== undefined ? { alternatives: input.alternatives } : {}),
+        ...(input.farDated !== undefined ? { farDated: input.farDated } : {}),
+        ...(input.fetchBands !== undefined ? { fetchBands: input.fetchBands } : {}),
+        ...(input.horizonLimited !== undefined ? { horizonLimited: input.horizonLimited } : {}),
         ...(input.sector ? { sector: input.sector } : {}),
         ...(input.contractType ? { contractType: input.contractType } : {}),
       },
