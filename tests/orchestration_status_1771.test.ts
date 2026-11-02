@@ -68,13 +68,13 @@ describe("orchestration status registry (#1771 slice A)", () => {
     }
   });
 
-  it("slice-C state: swarm and rebalance enabled; social digest still decided", () => {
+  it("slice-D state: swarm, rebalance and social digest all enabled", () => {
     const byId = new Map(ORCHESTRATION_STATUS.map((e) => [e.id, e]));
     expect(byId.get("swarm-consensus")!.status).toBe("enabled");
     expect(byId.get("swarm-consensus")!.blocker).toBeNull();
     expect(byId.get("portfolio-rebalancing")!.status).toBe("enabled");
     expect(byId.get("portfolio-rebalancing")!.blocker).toBeNull();
-    expect(byId.get("social-feed-digest")!.status).toBe("decided");
+    expect(byId.get("social-feed-digest")!.status).toBe("enabled");
     expect(byId.get("social-feed-digest")!.blocker).toBeNull();
   });
 
