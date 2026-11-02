@@ -141,8 +141,9 @@ function parseSubscriptions(body: unknown): { effectiveTier: string; rows: Subsc
  * This section writes no checkout logic of its own: mint opens the
  * Stripe URL the API returns, and activation is shown only after a
  * verified row comes back from the subscription read. No cancel
- * action (2.14 + Phase 6 own it), no credits UI (2.2 unlanded),
- * no ads code, no lifecycle sends, no price invented anywhere.
+ * action (rescoped 2.14 owns it; Phase 6 does not), no credits
+ * redemption UI (ledger landed in 2.2; panel redemption flow never
+ * built), no ads code, no lifecycle sends, no price invented anywhere.
  */
 function SellingSection({
   products,

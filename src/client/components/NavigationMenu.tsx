@@ -249,6 +249,14 @@ export const NavIcons = {
       <line x1="5" y1="15" x2="9" y2="15" strokeWidth="2.5" />
     </svg>
   ),
+  Billing: ({ active }: { active?: boolean; className?: string }) => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6 2h12v20l-2-1.5L14 22l-2-1.5L10 22l-2-1.5L6 22V2z" fill={active ? "currentColor" : "none"} fillOpacity={0.12} />
+      <line x1="9" y1="7" x2="15" y2="7" />
+      <line x1="9" y1="11" x2="15" y2="11" />
+      <line x1="9" y1="15" x2="13" y2="15" strokeWidth="2.5" />
+    </svg>
+  ),
   Referrals: ({ active }: { active?: boolean; className?: string }) => (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <polyline points="20 12 20 22 4 22 4 12" />
@@ -563,6 +571,7 @@ export const NAV_ICON_MAP: Record<string, NavItemDef["icon"]> = {
   Database: NavIcons.Database,
   Audit: NavIcons.Audit,
   Payments: NavIcons.Payments,
+  Billing: NavIcons.Billing,
   Referrals: NavIcons.Referrals,
   Ads: NavIcons.Ads,
   Revenue: NavIcons.Revenue,
