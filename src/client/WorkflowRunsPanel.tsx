@@ -189,7 +189,16 @@ export function WorkflowRunsPanel() {
   const [error, setError] = useState<string | null>(null);
   const [triggerFilter, setTriggerFilter] = useState<TriggerFilter>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [query, setQuery] = useState("");
+  // Issue #2777 — deep link by run id: `?tab=workflow-runs&run=<id>`
+  // pre-fills the search so a link from another view lands on that run.
+  const [query, setQuery] = useState(() => {
+    try {
+      if (typeof window === "undefined") return "";
+      return new URLSearchParams(window.location.search).get("run") ?? "";
+    } catch {
+      return "";
+    }
+  });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loadedAt, setLoadedAt] = useState<string | null>(null);
 

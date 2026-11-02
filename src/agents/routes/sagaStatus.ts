@@ -260,7 +260,7 @@ async function readSagaProjectionFallback(
 }
 
 /** Read all saga audit rows through the SEARCH_AGENT stub (agent-scoped, one read). */
-async function readSagaAuditRows(
+export async function readSagaAuditRows(
   stub: AuditOwnerStub,
 ): Promise<Array<Record<string, unknown>>> {
   const url = new URL("/api/audit", "https://agent.internal");
