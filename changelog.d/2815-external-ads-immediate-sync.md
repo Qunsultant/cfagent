@@ -1,0 +1,3 @@
+### Fixed
+
+- Prevent external ads impression beacons from becoming background workflow jobs (#2815). Gates client-side ad impression beacons in `Chat.tsx` so impressions are never sent when ads are disabled, strip is hidden, or tab visibility is disabled. Configures `/external-ads/*`, `/categories`, `/referrals`, `/revenue`, and `/ads` as immediate synchronous routes in edge Worker and Orchestrator so lightweight tracking requests execute in-memory rather than being queued as async background jobs. Excludes standalone `/external-ads/impression` and `/external-ads/click` HTTP request traces from Workflow Runs view.

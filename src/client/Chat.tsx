@@ -505,12 +505,18 @@ export function Chat({ user }: { user: User }) {
     fetchRevenueSummary();
   }, []);
 
-  // Record impression whenever active external ad changes
+  // Record impression whenever active external ad changes (gated on ad enablement)
   useEffect(() => {
-    if (externalAds.length > 0 && externalAds[activeExtAdIndex]) {
+    if (
+      effectiveAdBannerConfig.enabled &&
+      effectiveAdBannerConfig.showAdNetworkStrip &&
+      Boolean(effectiveAdBannerConfig.tabVisibility[tab]) &&
+      externalAds.length > 0 &&
+      externalAds[activeExtAdIndex]
+    ) {
       recordExternalAdImpression(externalAds[activeExtAdIndex]);
     }
-  }, [activeExtAdIndex, externalAds.length]);
+  }, [activeExtAdIndex, externalAds.length, effectiveAdBannerConfig, tab]);
 
   // Load tab-specific data when tab changes
   useEffect(() => {
