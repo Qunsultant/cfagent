@@ -5,12 +5,14 @@ import {
   type ScreeningAssetClass,
 } from "./screeningAdapters";
 import type { ScreenedStockItem } from "../types";
+import { navigateToTab } from "./router";
 import { CapabilityNavBar, CopilotTriggerButton, type CapabilityTabItem } from "./components/CapabilityNavBar";
 import { ScannerPanel } from "./ScannerPanel";
 import { GoalScreenPanel } from "./GoalScreenPanel";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { IvHistoryPanel } from "./IvHistoryPanel";
 import { ReportsPanel } from "./ReportsPanel";
+import { PatternsPanel } from "./PatternsPanel";
 import { SchedulesPanel } from "./SchedulesPanel";
 import { ScreeningReviewPanel } from "./ScreeningReviewPanel";
 import { ScreeningOutcomesPanel } from "./ScreeningOutcomesPanel";
@@ -84,7 +86,8 @@ export type ScreenersHubTab =
   | "reports"
   | "schedules"
   | "review"
-  | "track-record";
+  | "track-record"
+  | "patterns";
 
 export const SCREENER_HUB_TABS: readonly ScreenersHubTab[] = [
   "options",
@@ -99,6 +102,7 @@ export const SCREENER_HUB_TABS: readonly ScreenersHubTab[] = [
   "schedules",
   "review",
   "track-record",
+  "patterns",
 ] as const;
 
 export function isValidScreenerTab(tab: unknown): tab is ScreenersHubTab {
@@ -240,7 +244,8 @@ export function ScreenersHub({
     hubTab === "reports" ||
     hubTab === "schedules" ||
     hubTab === "review" ||
-    hubTab === "track-record"
+    hubTab === "track-record" ||
+    hubTab === "patterns"
       ? "stocks"
       : hubTab;
   const screenerTabs: CapabilityTabItem[] = useMemo(() => {
@@ -389,6 +394,19 @@ export function ScreenersHub({
           description: "What happened to issued recommendations, from the outcome ledger — Unverified stays Unverified.",
         },
       },
+      {
+        // Issue #2884: the stock pattern catalog — read-only in
+        // v1, select/apply to New Screen. Patterns stay separate
+        // from presets; this tab never touches preset storage.
+        id: "patterns",
+        label: "Patterns",
+        icon: "🧩",
+        tooltip: {
+          eyebrow: "STOCK PATTERN CATALOG",
+          title: "Patterns",
+          description: "Stock market setup signatures from the setup catalog — read-only, apply one to a new screen.",
+        },
+      },
     );
     // Issue #2783: the #2438 exclusion is removed — the Planned tabs
     // return to the primary bar with their PLANNED badges (nothing
@@ -482,6 +500,28 @@ export function ScreenersHub({
       )}
 
       {/* 6. Reports Panel */}
+      {/* Issue #2884: Patterns catalog tab (?tab=screeners&view=patterns). */}
+      {visitedTabs.has("patterns") && (
+        <div
+          role="tabpanel"
+          id="screener-tabpanel-patterns"
+          aria-labelledby="cap-tab-patterns"
+          hidden={hubTab !== "patterns"}
+          style={hubTab !== "patterns" ? { display: "none" } : undefined}
+        >
+          <ErrorBoundary label="Patterns panel">
+            <PatternsPanel
+              onApplyPattern={(filter) => {
+                // Apply fully determines the New Screen panel
+                // (stockFilterToCriteria semantics) and navigates
+                // there; preset storage is never touched.
+                navigateToTab("stock-hub", "new-screen");
+              }}
+            />
+          </ErrorBoundary>
+        </div>
+      )}
+
       {visitedTabs.has("reports") && (
         <div
           role="tabpanel"

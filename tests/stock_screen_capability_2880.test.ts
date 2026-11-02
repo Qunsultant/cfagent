@@ -72,11 +72,11 @@ describe("stock screen capability inventory #2880", () => {
     expect(unbuiltStockScreenCapabilities().map((c) => c.id)).toContain("goal-stock-leg");
   });
 
-  it("pattern application is honestly none — no registry is pretended", () => {
+  it("pattern application is canonical once the patterns slice lands (#2884 updates this pin in the same PR)", () => {
     const pattern = stockScreenCapabilityById("pattern-application");
-    expect(pattern?.status).toBe("none");
+    expect(pattern?.status).toBe("canonical");
     expect(pattern?.extensionPoint).toBe("pattern");
-    expect(unbuiltStockScreenCapabilities().map((c) => c.id)).toContain("pattern-application");
+    expect(unbuiltStockScreenCapabilities().map((c) => c.id)).not.toContain("pattern-application");
   });
 
   it("unknown ids resolve to undefined, never an invented mapping", () => {
