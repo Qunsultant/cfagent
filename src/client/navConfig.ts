@@ -126,6 +126,15 @@ export const SUB_MENU_CONFIGS: Record<string, NavSubMenuItemConfig[]> = {
       description: "Every recorded workflow run with its stages and artifacts",
     },
     {
+      id: "workflows",
+      label: "Workflows & FAQ",
+      shortLabel: "Guides",
+      icon: "Guides",
+      badge: "14 Guides",
+      badgeType: "neutral",
+      description: "Platform architecture guides, strategy playbooks, order mechanics & FAQ",
+    },
+    {
       id: "reports",
       label: "Screener Reports",
       shortLabel: "Reports",
@@ -181,15 +190,6 @@ export const SUB_MENU_CONFIGS: Record<string, NavSubMenuItemConfig[]> = {
     description: item.description,
   })),
   sandbox: [
-    {
-      id: "payment-assurance",
-      label: "Payment Assurance",
-      shortLabel: "Assurance",
-      icon: "Assurance",
-      badge: "Test",
-      badgeType: "neutral",
-      description: "Live & simulation payment assurance test suite",
-    },
     {
       id: "sandbox-checkout",
       label: "Checkout sandbox",
@@ -249,7 +249,7 @@ const SECTION_METADATA: { category: RouteCategory; title: string; id: string }[]
   { category: "Intelligence", title: "INTELLIGENCE & COPILOT", id: "section-intelligence" },
   { category: "Playbooks", title: "WORKFLOWS", id: "section-workflows" },
   { category: "Marketing", title: "MARKETING", id: "section-marketing" },
-  { category: "Billing", title: "BILLING", id: "section-billing" },
+  { category: "Billing", title: "BILLINGS/PAYMENTS", id: "section-billing" },
   { category: "Platform", title: "PLATFORM", id: "section-platform" },
 ];
 
@@ -271,7 +271,7 @@ const SUB_MENU_HOSTED_IDS = new Set([
   "options-flows",
   "research",
   "docs",
-  "payment-assurance",
+  "workflows",
   "endpoints",
   PLATFORM_ADMIN_NAV_ID,
 ]);

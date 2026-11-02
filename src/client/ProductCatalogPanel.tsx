@@ -1,5 +1,7 @@
 /**
  * Issue #2695 (Platform Phase 4, program #2468) — marketing.
+ * Modernized UI under issue #2843 with design token styling, structured cards,
+ * tabular sales rails & receipts, and robust error/status notices.
  *
  * The first surface that renders the Phase 2 product catalog:
  * a read-only panel over GET /api/products/catalog. Prices are
@@ -19,6 +21,7 @@ import { Badge } from "./components/ui/Badge";
 import { FieldShell } from "./components/ui/Field";
 import { Button } from "./components/ui/Button";
 import { Card } from "./components/ui/Card";
+import { Notice } from "./components/ui/Notice";
 import { PageSection, PageShell } from "./components/ui/PageShell";
 import { Select } from "./components/ui/Select";
 import { Table, type TableColumn } from "./components/ui/Table";
@@ -34,6 +37,8 @@ import {
   type CatalogDisplayEntryLike,
   type SellingPlanInput,
   type SubscriptionRowInput,
+  type SellingReceipt,
+  type ProductSellingEntry,
 } from "../data/productSelling";
 import {
   errorMessageForStatus,
@@ -42,6 +47,106 @@ import {
 } from "./firstRunApi";
 
 const SELLING_BASE = "/api/payments/agentic/commercial";
+
+const pageWrapperStyle: React.CSSProperties = {
+  padding: "var(--space-4)",
+  boxSizing: "border-box",
+  width: "100%",
+  display: "flex",
+  flexDirection: "column",
+  gap: "var(--space-4)",
+};
+
+const cardHeaderRowStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "flex-start",
+  gap: "var(--space-3)",
+  marginBottom: "var(--space-3)",
+  flexWrap: "wrap",
+};
+
+const cardTitleStyle: React.CSSProperties = {
+  margin: 0,
+  fontSize: "var(--font-size-title-sm)",
+  fontWeight: "var(--font-weight-bold)",
+  color: "var(--color-text-primary)",
+};
+
+const cardSubtitleStyle: React.CSSProperties = {
+  margin: "var(--space-1) 0 0",
+  fontSize: "var(--font-size-body-sm)",
+  color: "var(--color-text-muted)",
+};
+
+const badgeRowStyle: React.CSSProperties = {
+  display: "flex",
+  gap: "var(--space-2)",
+  alignItems: "center",
+  flexWrap: "wrap",
+};
+
+const detailTextStyle: React.CSSProperties = {
+  margin: "var(--space-2) 0",
+  fontSize: "var(--font-size-body)",
+  color: "var(--color-text-primary)",
+};
+
+const detailMutedTextStyle: React.CSSProperties = {
+  margin: "var(--space-2) 0 0",
+  fontSize: "var(--font-size-body-sm)",
+  color: "var(--color-text-muted)",
+};
+
+const checkoutRowStyle: React.CSSProperties = {
+  display: "flex",
+  gap: "var(--space-3)",
+  alignItems: "flex-end",
+  flexWrap: "wrap",
+  marginTop: "var(--space-3)",
+  marginBottom: "var(--space-3)",
+};
+
+const mintedActionStyle: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: "var(--space-3)",
+  marginTop: "var(--space-3)",
+  marginBottom: "var(--space-3)",
+};
+
+const sectionHeaderStyle: React.CSSProperties = {
+  marginBottom: "var(--space-3)",
+};
+
+const channelSelectWrapperStyle: React.CSSProperties = {
+  maxWidth: "320px",
+  marginBottom: "var(--space-3)",
+};
+
+const draftBoxStyle: React.CSSProperties = {
+  background: "var(--color-surface-sunken)",
+  border: "1px solid var(--color-border-subtle)",
+  borderRadius: "var(--radius-md)",
+  padding: "var(--space-3)",
+  margin: "var(--space-3) 0",
+  overflowX: "auto",
+};
+
+const draftTextStyle: React.CSSProperties = {
+  margin: 0,
+  fontFamily: "var(--font-mono, monospace)",
+  fontSize: "var(--font-size-body-sm)",
+  whiteSpace: "pre-wrap",
+  wordBreak: "break-word",
+  color: "var(--color-text-primary)",
+};
+
+const linkStyle: React.CSSProperties = {
+  color: "var(--color-accent)",
+  textDecoration: "underline",
+  fontWeight: "var(--font-weight-medium)",
+};
 
 /** Fixed caller-facing selling messages per HTTP status. Server bodies
  *  are never rendered — they can carry internal detail. */
@@ -138,12 +243,6 @@ function parseSubscriptions(body: unknown): { effectiveTier: string; rows: Subsc
  * calls go to EXISTING routes: identity (session-derived, self-only),
  * subscription read, plans list, and the 2.1 Billing API
  * (billing-checkout mint, billing-purchase confirm-by-retrieve).
- * This section writes no checkout logic of its own: mint opens the
- * Stripe URL the API returns, and activation is shown only after a
- * verified row comes back from the subscription read. No cancel
- * action (rescoped 2.14 owns it; Phase 6 does not), no credits
- * redemption UI (ledger landed in 2.2; panel redemption flow never
- * built), no ads code, no lifecycle sends, no price invented anywhere.
  */
 function SellingSection({
   products,
@@ -201,10 +300,6 @@ function SellingSection({
     }
   }
 
-  // A catalog row's Subscribe button opens this section from outside
-  // (the purchase path for subscription products). The ref guard makes
-  // repeat signals idempotent even under the effect's first-render
-  // closure.
   useEffect(() => {
     if (openSignal > 0) void open();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -289,72 +384,145 @@ function SellingSection({
           Show selling options
         </Button>
       )}
-      {opened && loading && <p>Loading selling options</p>}
-      {opened && error && <p>{error}</p>}
+      {opened && loading && <Notice tone="neutral">Loading selling options</Notice>}
+      {opened && error && <Notice tone="danger" title="Selling options unavailable">{error}</Notice>}
       {opened && !loading && !error && selling && (
         <>
           <Card>
-            <p>Current tier: {selling.subscription.effectiveTier}</p>
-            <p>Activation: {selling.subscription.activation}</p>
+            <div style={cardHeaderRowStyle}>
+              <div>
+                <h3 style={cardTitleStyle}>Current tier: {selling.subscription.effectiveTier}</h3>
+                <p style={cardSubtitleStyle}>Live entitlement status and active period window</p>
+              </div>
+              <div style={badgeRowStyle}>
+                <Badge tone="accent">{selling.subscription.effectiveTier}</Badge>
+                <Badge tone={selling.subscription.activation !== "none" ? "success" : "neutral"}>
+                  Activation: {selling.subscription.activation}
+                </Badge>
+              </div>
+            </div>
             {selling.subscription.current && (
-              <p>
+              <p style={detailTextStyle}>
                 Current period ends: {new Date(selling.subscription.current.periodEndMs).toISOString()}
               </p>
             )}
-            <p>{selling.subscription.creditsRedemption.reason}</p>
+            <p style={detailMutedTextStyle}>{selling.subscription.creditsRedemption.reason}</p>
           </Card>
-          <FieldShell id="selling-plan" label="Plan">
-            <Select
-              id="selling-plan"
-              aria-label="Subscription plan"
-              value={selectedPlanId}
-              onChange={(event) => setSelectedPlanId(event.target.value)}
-            >
-              {selling.plans.map((plan) => (
-                <option key={plan.id} value={plan.id}>
-                  {plan.name} — ${plan.priceUSD.toFixed(2)} / {plan.periodDays} days
-                </option>
-              ))}
-            </Select>
-          </FieldShell>
-          {actionError && <p>{actionError}</p>}
-          {confirmed && <p>Subscription activated.</p>}
-          {!minted && selling.plans.length > 0 && (
-            <Button variant="secondary" onClick={subscribe}>
-              Start checkout
-            </Button>
-          )}
+
+          <div style={checkoutRowStyle}>
+            <FieldShell id="selling-plan" label="Plan">
+              <Select
+                id="selling-plan"
+                aria-label="Subscription plan"
+                value={selectedPlanId}
+                onChange={(event) => setSelectedPlanId(event.target.value)}
+              >
+                {selling.plans.map((plan) => (
+                  <option key={plan.id} value={plan.id}>
+                    {plan.name} — ${plan.priceUSD.toFixed(2)} / {plan.periodDays} days
+                  </option>
+                ))}
+              </Select>
+            </FieldShell>
+            {!minted && selling.plans.length > 0 && (
+              <Button variant="secondary" onClick={subscribe}>
+                Start checkout
+              </Button>
+            )}
+          </div>
+
+          {actionError && <Notice tone="danger" title="Checkout Error">{actionError}</Notice>}
+          {confirmed && <Notice tone="success" title="Subscription Activated">Subscription activated.</Notice>}
           {!minted && selling.plans.length === 0 && (
-            <p>No active subscription plan — operator data missing.</p>
+            <Notice tone="neutral">No active subscription plan — operator data missing.</Notice>
           )}
           {minted && (
-            <>
-              <p>Checkout opened in a new tab. After paying, confirm below.</p>
+            <div style={mintedActionStyle}>
+              <Notice tone="info" title="Checkout In Progress">
+                Checkout opened in a new tab. After paying, confirm below.
+              </Notice>
               <Button variant="secondary" onClick={confirmPaid}>
                 I have paid
               </Button>
-            </>
+            </div>
           )}
+
           <Card>
-            <p>Purchase receipts</p>
-            {selling.subscription.receipts.length === 0 && <p>No purchases yet.</p>}
-            {selling.subscription.receipts.map((receipt) => (
-              <p key={receipt.subscriptionId}>
-                {receipt.planName ?? receipt.planId} —{" "}
-                {receipt.priceUSD === null ? "price unknown" : `$${receipt.priceUSD.toFixed(2)}`} —{" "}
-                {receipt.providerStatus ?? receipt.status} — ends{" "}
-                {new Date(receipt.periodEndMs).toISOString()}
-              </p>
-            ))}
+            <div style={sectionHeaderStyle}>
+              <h3 style={cardTitleStyle}>Purchase receipts</h3>
+              <p style={cardSubtitleStyle}>Recorded transaction history and billing verification</p>
+            </div>
+            {selling.subscription.receipts.length === 0 ? (
+              <p style={detailMutedTextStyle}>No purchases yet.</p>
+            ) : (
+              <Table<SellingReceipt>
+                columns={[
+                  {
+                    key: "plan",
+                    header: "Plan",
+                    render: (receipt) => <strong>{receipt.planName ?? receipt.planId}</strong>,
+                  },
+                  {
+                    key: "price",
+                    header: "Price",
+                    render: (receipt) =>
+                      receipt.priceUSD === null ? "price unknown" : `$${receipt.priceUSD.toFixed(2)}`,
+                  },
+                  {
+                    key: "status",
+                    header: "Status",
+                    render: (receipt) => (
+                      <Badge tone={receipt.status === "active" ? "success" : "neutral"}>
+                        {receipt.providerStatus ?? receipt.status}
+                      </Badge>
+                    ),
+                  },
+                  {
+                    key: "period",
+                    header: "Coverage",
+                    render: (receipt) => `ends ${new Date(receipt.periodEndMs).toISOString()}`,
+                  },
+                ]}
+                rows={selling.subscription.receipts}
+                rowKey={(receipt) => receipt.subscriptionId}
+                caption="Purchase receipts"
+              />
+            )}
           </Card>
+
           <Card>
-            <p>How each product is sold</p>
-            {selling.products.map((product) => (
-              <p key={product.productId}>
-                {product.canonicalName} — {product.rail} —{" "}
-                {product.purchasable ? "purchasable" : (product.notPurchasableReason ?? "not purchasable")}
-              </p>
-            ))}
+            <div style={sectionHeaderStyle}>
+              <h3 style={cardTitleStyle}>How each product is sold</h3>
+              <p style={cardSubtitleStyle}>Entitlement rails and subscription gating breakdown</p>
+            </div>
+            <Table<ProductSellingEntry>
+              columns={[
+                {
+                  key: "product",
+                  header: "Product",
+                  render: (product) => <strong>{product.canonicalName}</strong>,
+                },
+                {
+                  key: "rail",
+                  header: "Billing Rail",
+                  render: (product) => <Badge tone="neutral">{product.rail}</Badge>,
+                },
+                {
+                  key: "purchasable",
+                  header: "Status",
+                  render: (product) => (
+                    <Badge tone={product.purchasable ? "success" : "neutral"}>
+                      {product.purchasable
+                        ? "purchasable"
+                        : (product.notPurchasableReason ?? "not purchasable")}
+                    </Badge>
+                  ),
+                },
+              ]}
+              rows={selling.products}
+              rowKey={(product) => product.productId}
+              caption="Product sales rails"
+            />
           </Card>
         </>
       )}
@@ -380,9 +548,6 @@ export function ProductCatalogPanel() {
   const [channel, setChannel] = useState<MarketingChannel>("facebook");
   const [preview, setPreview] = useState<MarketingDraft | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
-  // A catalog row's Subscribe button requests the Selling section to
-  // open (the purchase path for subscription products, replacing the
-  // Phase 4 "View plans" dead-end that linked at an API route).
   const [sellingOpenRequest, setSellingOpenRequest] = useState(0);
 
   useEffect(() => {
@@ -402,8 +567,8 @@ export function ProductCatalogPanel() {
   }, []);
 
   const columns: TableColumn<CatalogDisplayEntry>[] = [
-    { key: "product", header: "Product", render: (row) => row.canonicalName },
-    { key: "tier", header: "Tier", render: (row) => row.tier },
+    { key: "product", header: "Product", render: (row) => <strong>{row.canonicalName}</strong> },
+    { key: "tier", header: "Tier", render: (row) => <Badge tone="neutral">{row.tier}</Badge> },
     {
       key: "price",
       header: "Price",
@@ -429,20 +594,14 @@ export function ProductCatalogPanel() {
       key: "purchase",
       header: "Purchase path",
       render: (row) =>
-        // Subscription products buy through the Selling section's 2.1
-        // Billing flow — NOT the Phase 4 "View plans" anchor, which
-        // linked at an API route and was a dead end. The derivation
-        // still records the plans pointer; the renderer upgrades it
-        // to the purchase action, so Phase 4's display contract is
-        // untouched. Unlisted rows never get a Subscribe button.
         row.listed && (row.tier === "Subscribed" || row.availability === "entitlement-pending") ? (
           <Button variant="secondary" onClick={() => setSellingOpenRequest((n) => n + 1)}>
             Subscribe
           </Button>
         ) : row.purchasePath ? (
-          <a href={row.purchasePath.route}>{row.purchasePath.label}</a>
+          <a href={row.purchasePath.route} style={linkStyle}>{row.purchasePath.label}</a>
         ) : (
-          (row.purchasePathReason ?? row.unlistedReasons.join("; "))
+          <span style={detailMutedTextStyle}>{row.purchasePathReason ?? row.unlistedReasons.join("; ")}</span>
         ),
     },
     {
@@ -478,78 +637,94 @@ export function ProductCatalogPanel() {
             Preview draft
           </Button>
         ) : (
-          row.unlistedReasons.join("; ")
+          <span style={detailMutedTextStyle}>{row.unlistedReasons.join("; ")}</span>
         ),
     },
   ];
 
   return (
-    <PageShell
-      title="Products"
-      scopeNote="The product catalog as the Phase 2 registry records it, with Phase 3 access parity. Prices shown are approved prices only."
-      loading={products === null && error === null}
-      loadingLabel="Loading catalog"
-      error={error}
-      empty={products !== null && products.length === 0}
-      emptyTitle="No products registered"
-      emptyDescription="The catalog has no entries yet."
-    >
-      <PageSection title="Catalog">
-        <Table
-          columns={columns}
-          rows={products ?? []}
-          rowKey={(row) => row.id}
-          caption="Product catalog"
-        />
-      </PageSection>
-      <PageSection
-        title="Teaser rules"
-        description="How limited teasers are built (teaser rule B1, issue 1076)."
+    <div style={pageWrapperStyle}>
+      <PageShell
+        title="Products"
+        scopeNote="The product catalog as the Phase 2 registry records it, with Phase 3 access parity. Prices shown are approved prices only."
+        loading={products === null && error === null}
+        loadingLabel="Loading catalog"
+        error={error}
+        empty={products !== null && products.length === 0}
+        emptyTitle="No products registered"
+        emptyDescription="The catalog has no entries yet."
       >
-        <Card>
-          <p>
-            Teasers show at most {TEASER_CANDIDATE_CAP} candidates from the
-            same screening pipeline and gates. Only gate-passing candidates
-            with stated falsification criteria are shown; every entry is
-            labeled as a teaser, never as a recommendation. Links appear
-            only when the caller supplies them — a teaser never promises
-            a report, subscription, or referral-credit path that does not
-            exist.
-          </p>
-        </Card>
-      </PageSection>
-      <PageSection title="Marketing draft preview">
-        <FieldShell id="marketing-channel" label="Channel">
-          <Select
-            id="marketing-channel"
-            aria-label="Marketing channel"
-            value={channel}
-            onChange={(event) =>
-              setChannel(event.target.value as MarketingChannel)
-            }
-          >
-            <option value="facebook">Facebook</option>
-            <option value="instagram">Instagram</option>
-            <option value="threads">Threads</option>
-            <option value="slack">Slack</option>
-          </Select>
-        </FieldShell>
-        {previewError && <p>{previewError}</p>}
-        {preview && (
+        <PageSection title="Catalog">
+          <Table
+            columns={columns}
+            rows={products ?? []}
+            rowKey={(row) => row.id}
+            caption="Product catalog"
+          />
+        </PageSection>
+        <PageSection
+          title="Teaser rules"
+          description="How limited teasers are built (teaser rule B1, issue 1076)."
+        >
           <Card>
-            <p>{preview.text}</p>
-            <p>
-              Draft only — not published. Publishing requires owner
-              approval.
-            </p>
-            {preview.citationOmittedReason && (
-              <p>Citation omitted: {preview.citationOmittedReason}</p>
-            )}
-            {preview.truncated && <p>Draft truncated to the channel limit.</p>}
+            <Notice tone="info" title="Teaser Rule B1 (Issue 1076)">
+              Teasers show at most {TEASER_CANDIDATE_CAP} candidates from the
+              same screening pipeline and gates. Only gate-passing candidates
+              with stated falsification criteria are shown; every entry is
+              labeled as a teaser, never as a recommendation. Links appear
+              only when the caller supplies them — a teaser never promises
+              a report, subscription, or referral-credit path that does not
+              exist.
+            </Notice>
           </Card>
-        )}
-      </PageSection>
-      <SellingSection products={products} openSignal={sellingOpenRequest} />
-    </PageShell>
+        </PageSection>
+        <PageSection
+          title="Marketing draft preview"
+          description="Compose channel-formatted promotional snippets directly from catalog records."
+        >
+          <div style={channelSelectWrapperStyle}>
+            <FieldShell id="marketing-channel" label="Channel">
+              <Select
+                id="marketing-channel"
+                aria-label="Marketing channel"
+                value={channel}
+                onChange={(event) =>
+                  setChannel(event.target.value as MarketingChannel)
+                }
+              >
+                <option value="facebook">Facebook</option>
+                <option value="instagram">Instagram</option>
+                <option value="threads">Threads</option>
+                <option value="slack">Slack</option>
+              </Select>
+            </FieldShell>
+          </div>
+          {previewError && (
+            <Notice tone="danger" title="Draft Composition Error">
+              {previewError}
+            </Notice>
+          )}
+          {preview && (
+            <Card>
+              <div style={cardHeaderRowStyle}>
+                <h4 style={cardTitleStyle}>Draft Preview</h4>
+                <Badge tone="accent">{channel.toUpperCase()}</Badge>
+              </div>
+              <div style={draftBoxStyle}>
+                <pre style={draftTextStyle}>{preview.text}</pre>
+              </div>
+              <Notice tone="warning" title="Publication Guardrail">
+                Draft only — not published. Publishing requires owner approval.
+              </Notice>
+              {preview.citationOmittedReason && (
+                <p style={detailMutedTextStyle}>Citation omitted: {preview.citationOmittedReason}</p>
+              )}
+              {preview.truncated && <Notice tone="neutral">Draft truncated to the channel limit.</Notice>}
+            </Card>
+          )}
+        </PageSection>
+        <SellingSection products={products} openSignal={sellingOpenRequest} />
+      </PageShell>
+    </div>
   );
 }

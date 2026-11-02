@@ -1,0 +1,2 @@
+### Fixed
+- **UX Navigation & Product Catalog Modernization (#2843)**: Moved Guides & FAQ (`tab=workflows`) into the Workflows (`workflow-runs`) sub-menu, renamed Billing navigation section to `BILLINGS/PAYMENTS`, moved `tab=payment-assurance` under `BILLINGS/PAYMENTS`, and modernized `ProductCatalogPanel.tsx` with container padding, structured status cards, tables for purchase receipts and product sales rails, and design-token Notice callouts.
