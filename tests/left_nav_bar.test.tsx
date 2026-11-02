@@ -119,7 +119,7 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
     const stockSubItems = SUB_MENU_CONFIGS.screeners;
     expect(stockSubItems).toBeDefined();
     const subIds = stockSubItems.map((s) => s.id);
-    expect(subIds).toEqual(["screeners", "research"]);
+    expect(subIds).toEqual(["screeners", "new-screen", "research"]);
     expect(subIds).not.toContain("options");
     expect(subIds).not.toContain("scanner");
     expect(subIds).not.toContain("options-flows");

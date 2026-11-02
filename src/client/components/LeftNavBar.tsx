@@ -129,9 +129,13 @@ export function LeftNavBar({
       sub.id === "scanner" ||
       sub.id === "iv-history" ||
       sub.id === "review" ||
-      sub.id === "track-record"
+      sub.id === "track-record" ||
+      sub.id === "new-screen" ||
+      sub.id === "run-screen"
     ) {
       navigateToTab("screeners", sub.id);
+    } else if (sub.id === "screeners" || sub.id === "stocks") {
+      navigateToTab("screeners", "stocks");
     } else if (sub.id === "reports") {
       navigateToTab("reports");
     } else if (sub.id === "schedules") {
@@ -157,14 +161,20 @@ export function LeftNavBar({
   };
 
   const isSubActive = (subId: string): boolean => {
-    if (activeTab === subId) return true;
     const currentView =
       typeof window !== "undefined"
         ? new URLSearchParams(window.location.search).get("view")
         : null;
-    if (activeTab === "screeners" && currentView === subId) {
-      return true;
+    if (activeTab === "screeners") {
+      if (subId === "screeners" || subId === "stocks") {
+        return !currentView || currentView === "stocks";
+      }
+      if (subId === "new-screen" || subId === "run-screen") {
+        return currentView === "new-screen" || currentView === "run-screen";
+      }
+      return currentView === subId;
     }
+    if (activeTab === subId) return true;
     const section = platformAdminSectionFromNavId(subId);
     if (section && activeTab === "platform-admin") {
       return (currentView ?? "ads") === section;
