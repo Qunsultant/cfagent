@@ -36,6 +36,7 @@ import {
 } from "../services/portfolioContextRanking";
 import { DynamicMarketScreener } from "../trading";
 import { planStockScreenRun } from "../workflows/stockScreenPlanner";
+import { paretoFrontierForScreen } from "../workflows/paretoFrontier";
 import {
   classifyScreenFailure,
   logScreenRunEvent,
@@ -193,6 +194,8 @@ export interface ScreenerRunResult {
   opportunities: OpportunityStock[];
   /** Full scanned set with provenance (for the results table). */
   allStocks: ScannedStock[];
+  /** Issue #2773: post-screening Pareto frontier over allStocks (default objectives momentumScore + changePercent, both maximize). Additive view only — opportunities, ranking, delivery, and charging are unchanged; absent on failed runs. */
+  pareto?: import("../workflows/paretoFrontier").ParetoEvaluation;
   discoveryMessage: string;
   /** Summary of criteria applied during screening. */
   filterSummary?: string;
@@ -1173,6 +1176,12 @@ export class ScreenerAgent extends PortThink {
         failuresByCategory: traceSummary.failuresByCategory as Record<string, number>,
         batches: [], // Detailed batch info available in logs via traceId
       };
+
+      // Issue #2773: post-screening Pareto stage — pure view
+      // over the scanned set, computed before persistence so
+      // the agent's run store carries it. Opportunities,
+      // ranking, delivery, and charging are untouched.
+      result.pareto = paretoFrontierForScreen(result.allStocks);
 
       await beat();
       await this.persistRun(result);
