@@ -1379,7 +1379,9 @@ export function Chat({ user }: { user: User }) {
       </ErrorBoundary>
     ),
     "payment-assurance": (
-          <PaymentWorkflowAssurance userLogin={user.login} />
+      <ErrorBoundary label="Payment Assurance">
+        <PaymentWorkflowAssurance userLogin={user.login} />
+      </ErrorBoundary>
     ),
     "checkout": (
           <CheckoutPanel userLogin={user.login} />
