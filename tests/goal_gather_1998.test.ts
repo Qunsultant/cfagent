@@ -191,13 +191,21 @@ describe("goal gather (#1998)", () => {
     expect(aapl.averageVolume).toBe(50_000_000);
     expect(aapl.rsi).toBe(computeTechnicals("AAPL", bars(30, 100)).rsi14);
 
-    // #1743 stage event.
-    expect(sink.write).toHaveBeenCalledTimes(1);
+    // #1743 stage event + Phase 5 slice 7 (#2000) miss event:
+    // this run has missing symbols (MSFT Yahoo-only, NVDA
+    // unserved), so the gather writes the stored event AND the
+    // counts-only goal.gather.missed event. Partial miss: no
+    // operator page (no alertText was passed).
+    expect(sink.write).toHaveBeenCalledTimes(2);
     const event = sink.write.mock.calls[0][0];
     expect(event.type).toBe("goal.gather.stored");
     expect(event.runId).toBe("goal-run-1");
     expect(event.fields.stored).toBe(2);
     expect(event.fields.yahooComplemented).toBe(1);
+    const missEvent = sink.write.mock.calls[1][0];
+    expect(missEvent.type).toBe("goal.gather.missed");
+    expect(missEvent.runId).toBe("goal-run-1");
+    expect(missEvent.fields).toEqual({ requested: 4, stored: 2, missing: 2 });
   });
 
   it("route version hash is the run-time snapshot hash and changes with the routes", async () => {

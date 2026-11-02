@@ -75,7 +75,8 @@ export function createBreakerTripSubscriber(deps: TripSubscriberDeps): TripSubsc
       const fallbacks = typeof data.fallbacks === "number" ? data.fallbacks : 0;
       const text =
         `🚨 Circuit breaker OPEN: ${providerId} (${from} → open, trip #${trips}, ${fallbacks} fallbacks) — ` +
-        `provider calls are rejected instantly until the reset timeout elapses.`;
+        `provider calls are rejected instantly until the reset timeout elapses.\n` +
+        `Diagnosis + safe intervention: docs/operations/runbook/alerting.md#breaker-trips`;
       let result: { ok: boolean; error?: string };
       try {
         result = await deps.postText(text);
