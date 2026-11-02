@@ -1,0 +1,3 @@
+### Added
+
+- **Research subtabs migration (#2890, under #2764):** test-pinned disposition module for all 7 MarketDataResearchHub subtabs (screener, report, quoting, fundamentals, bars, snapshot, compare). Screener is the one canonical screen (GET /api/market-data/screen via spec/broker/planner/finalizer, Slice 1). Report is replayable research (live generation stays live; stored reports replay verbatim via POST /api/reports/replay, #2863). Quoting, fundamentals, bars, snapshot, compare are explicitly live research views — no run, no persistence, no delivery, not screens — staying on their market-data endpoints with provenance shown. Invariant pinned: no subtab runs an uncanonical screen path. No tab created (all 7 already exist as UI), no screening semantics change.
