@@ -264,24 +264,22 @@ export function ScheduledGoalsPanel({ embedded = false }: ScheduledGoalsPanelPro
       {/* Issue #1773 (HAX #1): the same Delegation Contract preview
           for the preset's three fixed goals, from their documented
           payloads — the preset authorizes only these three runs. */}
-      <details style={{ marginBottom: 8 }}>
-        <summary style={{ fontSize: 13, cursor: "pointer" }}>Delegation contract for these three goals</summary>
-        <div style={{ display: "grid", gap: "var(--space-2)", marginTop: "var(--space-2)" }}>
-          {RESOURCE_GOALS_PRESET.map((preset) => (
-            <DelegationContractPreview
-              key={preset.id}
-              title={`Delegation contract — ${preset.name}`}
-              contract={buildDelegationContract({
-                goalId: preset.id,
-                goalName: preset.name,
-                cron: preset.cron,
-                operation: preset.operation,
-                budgetCents: preset.budgetCents,
-                timeZone: preset.timeZone,
-              })}
-            />
-          ))}
-        </div>
+      <details>
+        <summary>Delegation contract for these three goals</summary>
+        {RESOURCE_GOALS_PRESET.map((preset) => (
+          <DelegationContractPreview
+            key={preset.id}
+            title={`Delegation contract — ${preset.name}`}
+            contract={buildDelegationContract({
+              goalId: preset.id,
+              goalName: preset.name,
+              cron: preset.cron,
+              operation: preset.operation,
+              budgetCents: preset.budgetCents,
+              timeZone: preset.timeZone,
+            })}
+          />
+        ))}
       </details>
       {presetResults && (
         <div style={{ marginBottom: 8 }}>

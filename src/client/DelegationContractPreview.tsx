@@ -1,8 +1,11 @@
 /**
  * Delegation Contract preview (Qunsultant/cfagent#1773, item 4;
  * HAX #1 scope disclosure). Renders a DelegationContract built by
- * src/client/delegationContract.ts. Token-only styling, no raw
- * controls (the #1580 freeze/density gates scan this file).
+ * src/client/delegationContract.ts. No inline styles and no raw
+ * controls: the #2177 bespoke-styling ceiling counts every
+ * inline-style prop, so this component leans on the Card
+ * primitive's own padding and browser defaults instead of adding
+ * any (the #1580 freeze/density gates scan this file too).
  */
 import React from "react";
 import { Card } from "./components/ui";
@@ -27,19 +30,17 @@ export function DelegationContractPreview({
   return (
     <section aria-label="Delegation contract preview">
       <Card>
-        <div style={{ display: "grid", gap: "var(--space-2)" }}>
-          <h4 style={{ margin: "0", fontSize: "var(--font-size-body)" }}>{title}</h4>
-          {SECTIONS.map(([label, key]) => (
-            <div key={key}>
-              <strong style={{ fontSize: "var(--font-size-body-sm)" }}>{label}</strong>
-              <ul style={{ margin: "0", paddingLeft: "var(--space-4)", fontSize: "var(--font-size-body-sm)" }}>
-                {contract[key].map((line) => (
-                  <li key={line}>{line}</li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </div>
+        <h4>{title}</h4>
+        {SECTIONS.map(([label, key]) => (
+          <div key={key}>
+            <strong>{label}</strong>
+            <ul>
+              {contract[key].map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          </div>
+        ))}
       </Card>
     </section>
   );
