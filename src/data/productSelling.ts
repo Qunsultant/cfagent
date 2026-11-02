@@ -25,8 +25,10 @@
  *   purchase→activation leg as derivation. Sink + dashboard stay
  *   deferred and are stated as such.
  * - credits redemption is ALWAYS unavailable with reason: the credits
- *   ledger is slice 2.2 (#2657), unlanded — no credits exist to redeem.
- *   This module never invents a credit balance.
+ *   ledger EXISTS (attribution + automatic earn, slice 2.2 #2657,
+ *   landed as #2726) but this panel has no redemption flow —
+ *   redemption runs through the gate conversion path, not the
+ *   purchase flow. This module never invents a credit balance.
  * - effectiveTier is carried verbatim from the caller (the GET
  *   /subscription response). The server is the authority on tier;
  *   this module never re-derives it from rows.
@@ -129,7 +131,7 @@ export interface ProductSelling {
 }
 
 export const CREDITS_UNAVAILABLE_REASON =
-  "Referral credits redemption is not available: the credits ledger is slice 2.2 (#2657), unlanded — no credits exist to redeem.";
+  "Referral credits cannot be applied to a purchase here: the referral-credit ledger exists (attribution + automatic earn, #2657/#2726), but this panel has no redemption flow — redemption runs through the gate conversion path, not the purchase flow.";
 
 function deriveActivation(
   rows: SubscriptionRowInput[],

@@ -21,8 +21,9 @@
  *   (repurchase rows carry no provider subscription id and emit no
  *   events; no row ⇒ no events). Persistent funnel sink + dashboard
  *   stay deferred (Phase 4's model has no sink);
- * - credits redemption always unavailable with reason (slice 2.2,
- *   #2657, unlanded — no credits exist to redeem).
+ * - credits redemption always unavailable with reason (ledger
+ *   landed in slice 2.2, #2657/#2726; panel redemption flow never
+ *   built — redemption runs through the gate conversion path).
  * See PHASE5-INVENTORY.md for the scope lines vs 2.14 (checkout UI
  * surfaces), 2.2 (credits), 2.3 (ads), 2.4 (lifecycle), 2.7 (refunds),
  * Phase 6 (billing views + servicing).
