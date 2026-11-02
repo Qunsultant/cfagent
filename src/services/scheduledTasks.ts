@@ -858,8 +858,24 @@ export class ScheduledTasksService {
     userLogin: string,
     timestamp: string
   ): Promise<ReturnType<ScheduledTasksService["autonomousMarketScreen"]>> {
-    const universe = (options.universe as any) || "TECH";
-    const sector = options.sector || options.filters?.sector || "ALL";
+    // Issue #2866: the sharded scheduled run is planned through
+    // the one planner, like the monolithic path (Slice 5) — same
+    // values (universe default TECH, sector precedence request >
+    // filters > ALL), derived once instead of by hand. The chain
+    // submission below is the broker's async branch for scheduled
+    // runs: planFeedStart + the shardSubmit async-job port
+    // (#2621 mas_async_jobs, reused as-is).
+    const shardedPlan = planScheduledScreen(
+      {
+        sector: options.sector,
+        filters: options.filters,
+        universe: (options.universe as any) || undefined,
+        trigger: options.trigger || "scheduled",
+      },
+      timestamp,
+    );
+    const universe = shardedPlan.universe;
+    const sector = shardedPlan.sector;
     if (!this.shardSubmit) {
       // Issue #1412 (mirror of #1369): a missing-port run is a
       // failure, not a quiet return — throw so the caller's catch
