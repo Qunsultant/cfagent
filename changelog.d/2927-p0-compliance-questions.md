@@ -1,0 +1,3 @@
+### Changed
+
+- #764 P0 remainder verification (#2927): docs/COMPLIANCE.md §7 refreshed to current status — Q2 (Alpaca-key-shaped values) resolved by the owner's 2026-10-25 revoke/rotate, with the separate git-history purge decision still pending; Q1 (secret renames), Q3 (investment-advice posture), Q4 (mas_events retention/archival policy), and Q5 (#291 sequencing) carried explicitly as owner decisions, none answered by this lane. Verification record added at docs/architecture/security/rsi-infosec-764-p0-verification.md (#700 persistAudit reroute, scanner affinity alias, MPP payer binding, #143/#237 P0 items, #290 boundary). No behaviour change; no issue closed.

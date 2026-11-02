@@ -123,19 +123,43 @@ re-exports the options binding external code used. Enforced by
 
 ## 7. Open compliance questions (owner)
 
+Status refreshed 2026-11-02 against current main (Qunsultant/cfagent#2927,
+#764 P0 remainder slice). §§1–6 are unchanged by that slice; only this
+section's status lines changed. Nothing below is answered by the lane —
+each item is carried as an owner decision with its reason.
+
 1. **Rename items (§3)**: approve renaming the `ETRADE_*`/`ALPACA_*` names to
    the `ET_*` namespace (or an `ALPACA_*`-exclusive equivalent) with matching
    CICD secret updates, or accept the current names permanently.
+   Status: STILL OPEN (owner decision; a code rename without the matching
+   CICD secret updates breaks production).
 2. **`.agents/mcp_config.json`**: Alpaca-key-shaped values are committed in
    this file — owner to confirm real vs placeholder (rotate + move to env if
    real; scoped gitleaks allowlist if placeholder).
+   Status: RESOLVED 2026-10-25 — the placeholder classification failed
+   verification (high-entropy credential-shaped strings fed as env to a
+   real Alpaca MCP server process, a live-credential usage path), so the
+   values were treated as exposed and the owner revoked and rotated them
+   (recorded in `docs/architecture/security/secrets-inventory-and-rotation-policy.md`
+   §4). What remains open is the SEPARATE history-purge decision for the
+   pre-#1486 git history carrying those values — purge is about history
+   hygiene, not about killing a live credential, and #768 stays closed
+   (it is not reopened by this slice).
 3. **Investment-advice posture**: recommendation reports are generated and
    dispatched autonomously by default (owner decision, #277); confirm this
    matches the product's legal posture (same open question as the cfpay
    Autopilot legal review).
+   Status: STILL OPEN (owner decision; the lane does not set the product's
+   legal posture).
 4. **Retention**: `mas_events` (the audit ledger backing the new
    `/api/audit` endpoints, #270) is append-only until R2 archival exists —
    confirm the intended retention/archival policy.
+   Status: STILL OPEN (owner decision). Note the current enforcement
+   state, which narrows but does not answer the question: `mas_events`
+   is pruned nightly at 365d by the shared retention pass
+   (`src/security/storageRetention.ts`, issue #786), while R2
+   archival-before-delete remains a follow-on (no bucket exists yet).
 5. **Future direction**: platform end-state is one agent per competency/
    capability (issue #291 tracker) — sequencing is the owner's call; this
    boundary is the seam future extractions will cut along.
+   Status: STILL OPEN (owner sequencing call).
