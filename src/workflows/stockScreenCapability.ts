@@ -149,9 +149,9 @@ export const STOCK_SCREEN_CAPABILITIES: readonly StockScreenCapability[] = [
     provider: "provider registry (goal stock leg)",
     persistence: "Goal screen reports (goalScreenReports)",
     delivery: "Goal dispatch delivery (goal-owned)",
-    canonical: ["stockScreenRunSpec (source: goal, deliver: false)", "stockScreenPlanner", "screenExecutionBroker"],
+    canonical: ["goalStockScreenSpec (source: goal, deliver: false)", "stockScreenPlanner.planGoalStockLeg", "screenExecutionBroker goal guard (returns null)"],
     status: "target",
-    current: "goalDrivenScreen.buildGoalScreenPlan + goalScreenDispatch (no spec/broker/planner yet)",
+    current: "goalDrivenScreen.buildGoalScreenPlan + goalScreenDispatch own execution; translation (spec + broker guard + planner mapping, #2882) built, execution migration still open",
     extensionPoint: "stage",
   },
   {
