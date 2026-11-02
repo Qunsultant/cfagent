@@ -86,9 +86,10 @@
 
 import type { AgentContext } from "agents";
 import type { Env, StockScreenerFilter } from "../../types";
-import { shardableUniverses, UNIVERSES, type UniverseId } from "../../trading";
+import { UNIVERSES, type UniverseId } from "../../trading";
 import { createWorkflowPorts, workflowPortsUnavailableReason } from "../../workflows/createWorkflowPorts";
 import { workflowTenantId } from "../../workflows/screenerWorkflowRoutes";
+import { shardsForUniverse } from "../../workflows/screenExecutionBroker";
 import {
   assertWorkflowJobCommand,
   workflowStatusUrl,
@@ -437,10 +438,8 @@ function buildScreenCommand(
     screenIntent?: string;
   },
 ): ScreenCommandParts {
-  const shards: WorkflowJobCommand["shards"] =
-    req.universeId === "ALL"
-      ? shardableUniverses().map((u) => ({ shardId: u, universe: u }))
-      : [{ shardId: req.universeId, universe: req.universeId }];
+  // Issue #2867: shard derivation is the broker's one policy.
+  const shards: WorkflowJobCommand["shards"] = shardsForUniverse(req.universeId);
   const nowMs = ctx.nowMs ?? (() => Date.now());
   const startedAtIso = new Date(nowMs()).toISOString();
   const jobId = `screener:chat:${req.universeId}:${startedAtIso}:${crypto.randomUUID().slice(0, 8)}`;
