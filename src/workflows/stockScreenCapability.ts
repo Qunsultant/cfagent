@@ -202,7 +202,7 @@ export const STOCK_SCREEN_CAPABILITIES: readonly StockScreenCapability[] = [
   {
     id: "preset-resolution",
     name: "Preset resolution",
-    entry: "ScreenerPresetManager / schedules carrying a preset id",
+    entry: "ScreenerPresetManager / presets tab (?tab=screeners&view=presets) / schedules carrying a preset id",
     engine: "screenerPresetResolution.resolvePresetFilter (run-time, caller-owned)",
     provider: "none",
     persistence: "mas_screener_presets (pre-existing store)",
