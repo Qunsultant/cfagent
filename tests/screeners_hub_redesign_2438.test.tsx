@@ -134,12 +134,12 @@ async function flush() {
   });
 }
 
-async function renderHub() {
+async function renderHub(props: Partial<React.ComponentProps<typeof ScreenersHub>> = {}) {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
   await act(async () => {
-    root.render(<ScreenersHub activeEnv="PROD" userLogin="tester" />);
+    root.render(<ScreenersHub activeEnv="PROD" userLogin="tester" {...props} />);
   });
   await flush();
   await flush();
@@ -199,7 +199,7 @@ describe("ScreenersHub redesign (#2438)", () => {
   });
 
   it("keeps every manual form field rendered for both providers (no reshaping)", async () => {
-    await renderHub();
+    await renderHub({ initialTab: "new-screen" });
     const form = container.querySelector("form");
     expect(form).not.toBeNull();
     const labels = Array.from(form!.querySelectorAll("label")).map((l) => l.textContent || "");
@@ -210,7 +210,7 @@ describe("ScreenersHub redesign (#2438)", () => {
   });
 
   it("renders manual errors via Notice, never an .options-error div", async () => {
-    await renderHub();
+    await renderHub({ initialTab: "new-screen" });
     const form = container.querySelector("form")!;
     const submit = Array.from(form.querySelectorAll("button")).find((b) => b.type === "submit")!;
     await act(async () => {
