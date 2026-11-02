@@ -1,0 +1,3 @@
+### Operations
+
+- **Stuck-job sweeper decision recorded (Qunsultant/cfagent#2000, Phase 5 slice 6):** no background sweeper — the standing answer is the #2567 read-path alert (30-minute default, claim-once) + read-path reap (2-hour backstop, guarded `failed` transition, never a delete) + operator runbook, documented in `docs/operations/runbook/stuck-sweeper-decision.md` with the evidence, the gaps left open (unread stuck rows persist; claim-first alert loss on delivery failure; `queued`-never-started rows outside both mechanisms), and what would reopen the decision. Doc §6 gap 15, §7 Phase 5, and §8 Q7 corrected from their stale "none found / decision pending" wording in the same slice.
