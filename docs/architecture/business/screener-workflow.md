@@ -59,7 +59,7 @@ Phase 3 would repeat the everything-or-nothing failure mode at program scale.
 **Vision → state, honestly:** engines exist (unification missing); thinkagent is partial
 (actor port + ScreenerAgent-as-actor exist, #1738; retrieval #1740 exists but its graph
 was never populated in production — do not plan on it; PortThink #1955 in flight);
-queues/workflows/schedules/state/flags exist (gaps: Q1 consumer, DLQ, breaker durability);
+queues/workflows/schedules/state/flags exist (former gaps Q1 consumer, DLQ, breaker durability — closed by #2544 and Phase 5 slices 1–2);
 batch is real, real-time is live-fetch + poll with **no streaming or push** (true push
 realtime, if the vision needs it, is a named gap, not a current capability); sync + async
 both exist; resilience/observability/testability exist with the gaps §2.5/§6 name; AOP is
@@ -140,8 +140,8 @@ the *screen engine* layer.
 
 | # | Queue | Producer → Consumer | Loss behavior |
 |---|---|---|---|
-| Q1 | CF Queue `screener-events` (`wrangler.jsonc:38`) | `publishScreenerEvent` for `screener.*` events → **no consumer wired** ("producer-only in this slice", `wrangler.jsonc:31-35`). | Never consumed; bus fallback runs when no subscriber received it. Silent non-delivery if a future consumer is misconfigured. |
-| Q2 | CF Queue `screener-events-delivery` (`wrangler.jsonc:39,42`, `max_batch_size:10`, `max_retries:3`) | `CfQueueMessagingAdapter.publish` → Worker `queue()` (`server.ts:3287-3325`) → `createScreenerQueueHandler`, handling only `screener.completed`/`screener.failed` for subscriber `delivery`. | After 3 retries: **dropped — no DLQ wired**. Undecodable messages are acked + logged (deliberate loss, avoids poison-loop). Dedup seen-set is per-isolate only — cross-isolate duplicates can double-deliver. |
+| Q1 | CF Queue `screener-events` (`wrangler.jsonc:46,56`) | Point-to-point work queue: `producer.send` → Worker `queue()` (`server.ts:4834`) → `createScreenerEventsWorkHandler` (`src/messaging/screenerEventsConsumer.ts`), the consumer revived in #2544. Sole defined work semantics: `options_analysis` (envelope type, or data-level `taskType`); any other envelope type drops as `no_handler`. | Handler throw → platform retry (max 3) → `screener-events-dlq` with run/unit ids intact; undecodable → ack + dead-letter record (never poison-loop); terminal drops persisted + operator-replayable since Phase 5 slice 1 (denied/undecodable refused). No production producer sends to Q1 today (verified 2026-11-02); the goal flow never touches Q1 (Workflow + Q4 job rows + Q2). |
+| Q2 | CF Queue `screener-events-delivery` (`wrangler.jsonc:47,57`, `max_batch_size:10`, `max_retries:3`) | `CfQueueMessagingAdapter.publish` → Worker `queue()` (`server.ts:4784`) → `createScreenerQueueHandler`, handling only `screener.completed`/`screener.failed` for subscriber `delivery`. | After 3 retries: **`screener-events-delivery-dlq`** (wired #2544; `wrangler.jsonc:57`). Undecodable messages are acked + logged (deliberate loss, avoids poison-loop). Dedup seen-set is per-isolate only — cross-isolate duplicates can double-deliver. |
 | Q3 | In-process `ScreenerEventBus` (`src/events/screenerEvents.ts`) | Service / queue consumer → publishers (`registerScreenerPublishers`). | **In-memory fan-out, no durability.** If the isolate dies mid-publish, undelivered events are gone. When no queue binding exists, the bus is the *only* path. Publish failures are `console.warn`-only. |
 | Q4 | `mas_async_jobs` table | `submitAsyncJob`, follow-up planner, shard planner → Agents SDK `executeAsyncJob` alarms. | Durable; history pruned by design (30 days, latest 500/session) — history loss, not job loss. Oversize payload/result fails the job, does not queue it. |
 | Q5 | Agents SDK schedule store (Orchestrator DO) | Schedules API → platform callback dispatch. | Durable; duplicates suppressed by slot claims. Unowned schedules are deleted by `removeUnownedBaselineSchedules` (deliberate, not loss). |
@@ -149,7 +149,7 @@ the *screen engine* layer.
 | Q7 | Cloudflare Workflow instances (`SCREENER_WORKFLOW`) | 3 manual routes → Workflow runtime (parent polls children). | Step retries 3; shard past 10-min deadline → `timed_out`, collation proceeds without it (`BudgetConstrained`). If all children time out, the run is `Failed` with summaries only. |
 
 **Total: 7 mechanisms; 2 CF Queues; 5 durable-or-platform-backed in production (Q2, Q4,
-Q5, Q6, Q7); Q1 producer-only; Q3 in-memory.** "Nothing is lost" is a design goal, not the
+Q5, Q6, Q7); Q1 consumer-wired but with no production producer today; Q3 in-memory.** "Nothing is lost" is a design goal, not the
 current state.
 
 ### 2.4 Persistence + error handling per stage
@@ -416,9 +416,9 @@ staged workflow).
   R2 blobs.
 - **Exists but is unwired (or wired only narrowly):** `gather.ts` slice-8 module (zero
   production callers — confirmed by grep: only `src/trading/gather.ts` itself and
-  `tests/gather_stage_1654s8.test.ts`); CF Queue `screener-events` (producer-only,
-  consumer deferred — a documented slice boundary, not an accident, but nothing consumes
-  it today); Cloudflare Workflow engine (wired for 3 manual routes, unwired for all
+  `tests/gather_stage_1654s8.test.ts`); CF Queue `screener-events` (consumer wired
+  since #2544, but with no production producer today — the consumer waits for work;
+  see §6 gap 8); Cloudflare Workflow engine (wired for 3 manual routes, unwired for all
   scheduled and all goal runs); in-memory messaging/workflow adapters (deliberately
   test-only, correctly unwired); breaker state durability (in-memory by design,
   cross-isolate sync missing).
@@ -474,8 +474,7 @@ result to `mas_reports` + its data to `mas_data_captures`, keyed by the same run
    designed, production proof + surfacing missing** (see §2.5). Dashboard UI + SQL
    aggregation are open #1743 follow-ups.
 8. A consumer for `screener-events` (Q1) — or a deliberate decision to remove the
-   producer-only queue. **Sequenced to Phase 5, not a slice-1 gate (COO)** — the goal
-   flow must not publish `screener.*` expecting Q1 consumption until then.
+   producer-only queue. **RESOLVED (Phase 5 slice 8, #2000): KEEP.** The consumer exists since #2544 (Worker `queue()` `screener-events` branch, `server.ts:4834` → `createScreenerEventsWorkHandler`; config pinned vs `wrangler.jsonc:56`; DLQ wired; terminal drops persisted + operator-replayable since slice 1). The goal-flow constraint is discharged, not lifted by code: `publish` (broadcast) never routes to Q1 — `screener.*` events fan out to subscriber queues (Q2 delivery) — and the goal flow sends no work items to Q1 (it rides the Workflow + Q4 job rows + Q2). Putting goal work ON Q1 would need new work-item semantics + dispatch + producer — a follow-up build slice, not a flag flip; until such a slice lands, goal work stays off Q1. Revisit condition: if Q1 is still producer-less when the goal-work question is next reviewed, re-raise removal (unbind + deprecate consumer + retire pins) rather than carrying it indefinitely.
 9. Serve-stage retry — **narrowed (COO, v2): chained runs already retry per stage via
    `retryAsyncJob`; the gap is monolithic serve only** — plus a first-class failure
    state for pipeline gather in the monolithic path.
@@ -718,8 +717,7 @@ explicit owner acceptance of fail-open) + trip subscriber + trip alerting (alert
 DLQ depth, breaker trips, stuck rows, serve-stage failures, gather misses — a gather-miss
 event must exist first); trace propagation across the Q2/Q4/Q7 boundaries (envelope
 carries the traceparent through the Workflows runtime; production proof + dashboard/SQL
-aggregation surfacing); a Q1 consumer (or removal of the producer-only queue — Phase 5,
-not a slice-1 gate); catalog-only rendering of per-channel texts (#1969 Phase 1) so the
+aggregation surfacing); a Q1 consumer — **RESOLVED (slice 8): KEEP** (consumer wired since #2544; goal-flow constraint discharged — see §6 gap 8; goal work onto Q1 is a follow-up build slice, not a flag flip); catalog-only rendering of per-channel texts (#1969 Phase 1) so the
 guard's Slack alert and every other channel render from the catalog, not hand-written
 variants. **Stage events (CAIO): YES — emit as event types in the #1743 schema** (one
 envelope, `type` as blob dimension, tenant-as-index; a new stage event = a new `type`
