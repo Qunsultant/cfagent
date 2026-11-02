@@ -38,6 +38,7 @@ PR.
 | [0019](0019-enrichment-yahoo-alpaca.md) | Daily enrichment + minute bars (#1888): Yahoo live via existing flag port, Alpaca flag-gated with Yahoo fallback, manual killswitch, telemetry-fed quality | Accepted |
 | [0020](0020-do-d1-r2-topology.md) | DO vs D1 vs R2 — actor runtime, queryable projection, blob storage | Accepted |
 | [0024](0024-durable-turn-submissions.md) | Durable chat-turn submission via Think's submission queue (ADR 0005 follow-up D2) | Accepted |
+| [0025](0025-web-search-provider-seam.md) | Web search behind a named-provider seam (Brave first), fail-loud with web_search_provider_not_configured until the owner sets the provider secret (#2731) | Accepted |
 
 ## Template
 

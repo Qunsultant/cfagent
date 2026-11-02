@@ -143,6 +143,9 @@ export const MCP_TOOL_SCOPES: Record<string, McpScope> = {
   // read (40)
   knowledge_search: "mcp:read",
   query_platform_knowledge: "mcp:read",
+  // #2731: web_search — read-only; provider-gated at the seam
+  // (src/services/webSearch.ts), not by scope.
+  web_search: "mcp:read",
   get_async_job: "mcp:read",
   list_async_jobs: "mcp:read",
   etrade_get_quote: "mcp:read",

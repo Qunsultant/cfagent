@@ -1,0 +1,2 @@
+### Added
+- `web_search` MCP tool (issue #2731, tracker #2708 item A2): registered in the openaimp catalog over a named-provider seam (`src/services/webSearch.ts`), first provider Brave Search API. Until the owner sets the `BRAVE_SEARCH_API_KEY` secret, calls fail loud with the named `web_search_provider_not_configured` error — never fabricated results. Registry web-search family moves `absent` → `degraded` with the enablement step recorded; provider decision in ADR 0025.

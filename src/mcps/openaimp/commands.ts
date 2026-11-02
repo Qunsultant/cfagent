@@ -89,6 +89,7 @@ import {
   AgentDbReportsListCommand,
   AgentDbTraceGetCommand,
 } from "./agentDbReadCommands";
+import { WebSearchCommand } from "./webSearchCommands";
 import {
   ListScheduledGoalsCommand,
   TriggerScheduledGoalCommand,
@@ -1723,6 +1724,15 @@ export class McpToolFactory {
     // surface, in this same AgentDB-read family (see
     // agentDbReadCommands.ts header).
     this.registerTool(new AgentDbTraceGetCommand());
+
+    // Web search (#2731, tracker #2708 item A2): the web-search
+    // family's command, over the named-provider seam in
+    // src/services/webSearch.ts. Registered unconditionally like
+    // every catalog tool; provider enablement is env config at
+    // the seam, and until it exists the command fails loud with
+    // web_search_provider_not_configured (never fabricated
+    // results). Scope declared in MCP_TOOL_SCOPES (#1744).
+    this.registerTool(new WebSearchCommand());
 
     // Agent Mesh G1 doors (#2341, S5 batch A): the chat turn reaches
     // ScheduledAgent and PaymentsAgent through typed doors

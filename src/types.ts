@@ -91,6 +91,14 @@ export interface Env {
   // instance's Public Endpoint in the Cloudflare dashboard, so
   // absence = the MCP path is unconfigured, never an error.
   AI_SEARCH_MCP_ENDPOINT?: string;
+  // Issue #2731 (web_search): named web-search provider selection
+  // for the seam in src/services/webSearch.ts. Both optional —
+  // absence is the recorded production state, and the web_search
+  // tool then fails loud with web_search_provider_not_configured.
+  // Enablement is owner config only: wrangler secret put
+  // BRAVE_SEARCH_API_KEY (+ optionally WEB_SEARCH_PROVIDER).
+  WEB_SEARCH_PROVIDER?: string;
+  BRAVE_SEARCH_API_KEY?: string;
   AI_SEARCH_ENDPOINT: string;
   APP_NAME: string;
   GITHUB_CLIENT_ID: string;
