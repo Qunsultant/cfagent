@@ -168,3 +168,83 @@ UI copy must advertise only enforced retention. What is actually enforced:
 - `mas_events`: append-only audit ledger. No pruning is enforced; it retains
   full history until R2 archival lands (follow-on — no bucket exists yet).
   Do not advertise a retention window for the ledger.
+
+## Resource event aggregation (#1819)
+
+Phase 5 slice 5 (#2000): the resource event as a #1743 type. The
+measurement already existed (`src/telemetry/resourceUsagePorts.ts`
+events, `bucketTotals` aggregation, the D1 `resource_sql_ops`
+projection and daily rollups); what was missing was the *event* in
+the stream: the fold case, the cardinality guard, and the
+aggregation treatment. The direct adapter path
+(`resourceUsageObservabilityAdapter`, which converts typed
+`ResourceUsageEvent`s straight to `ObservabilityEvent`s) is
+unchanged — this slice covers the envelope ingestion boundary
+(`writeEnvelopeToSink`, e.g. the Q1 consumer path in `server.ts`),
+where a producer envelope may carry anything.
+
+### Fold contract (`resource.sql_op`, `src/observability/observabilityPorts.ts`)
+
+Whitelist only. Admitted fields: `ns`, `op`, `rowsRead`,
+`rowsWritten`, `caller`, `trigger`, `statement`. Scope:
+`tenantId`, `runId`, `sessionRef` (guarded, see below), and the
+trace id from the envelope traceparent (`traceOf` — the same design
+Slice 3 uses for steps; no Slice 3 code is imported). Level `info`.
+Deliberately dropped even when present: session ids, user logins,
+bound values, error messages, prompt/thesis text, and any other
+user material — the fold admits nothing beyond the whitelist, so a
+leaky producer envelope cannot leak through it.
+
+### Cardinality guard (`src/observability/resourceEventGuard.ts`)
+
+- Counts are strict: `rowsRead`/`rowsWritten` must be finite
+  integers >= 0, else the whole event is rejected (null, never
+  thrown). A malformed count is a producer bug, not a guess.
+- `ns` is required (missing/empty rejects); over 64 chars or off
+  the `[a-z0-9_-]` charset collapses to `"other"`. `op` must be
+  one of `get | put | delete | consume | list`, else reject.
+- `caller` (max 128 chars, `[A-Za-z0-9_./:-]`) and `trigger`
+  (must be `user | scheduled | tick | manual`) collapse to
+  `"other"` when present but unbounded; an absent trigger is
+  omitted (the aggregation treats it as `"unknown"`, per
+  `bucketTotals`).
+- `statement` is the parameterized SQL template only (never bound
+  values); it is whitespace-fingerprinted and dropped when over
+  256 chars. Counts survive a statement drop.
+- `sessionRef` is accepted ONLY as the #1743 correlator (exactly
+  12 lowercase hex chars, what `sessionRefFor` produces). A raw
+  session id is dropped, never laundered into a scope field.
+- `tenantId` (max 128) and `runId` (max 256) drop when over cap,
+  never truncated into a new id.
+- All caps above are working defaults (pinned by test), not
+  rulings; changing one is a one-line constant edit plus its test.
+
+### Aggregation treatment
+
+- The single aggregation definition stays `bucketTotals`
+  (time-bucketed totals by ns/op/caller/trigger) — this slice
+  reuses it, it does not redefine it.
+- `capBucketGroups` bounds the index: it keeps the top groups by
+  rowsRead (default cap 500, a working default) and folds the
+  overflow into per-(bucket, ns, op) `"other"` rows. Grand totals
+  (ops, rowsRead, rowsWritten) are preserved exactly — the cap
+  bounds the index, never the numbers.
+- Analytics Engine totals query (blob positions per
+  `cfAnalyticsEngineAdapter.ts`: blob1 type, blob2 level, blob3
+  operation, blob4 runId, blob5 sessionRef, blob6 traceId, blob7
+  errorCode, blob8 fields JSON):
+  filter `blob1 = 'resource.sql_op'` for event counts and
+  totals. Per-dimension rowsRead breakdowns are NOT groupable in
+  AE SQL from this mapping — the dimensions live in the blob8
+  fields JSON, not in blob positions. The per-dimension query
+  surface is the D1 rollup projection (`resource_sql_ops` →
+  daily rollups, `buildComparisonReport`), and AE totals must
+  agree with D1 totals in magnitude under the same agreement
+  criteria as the comparison report. Promoting ns/op to blob
+  positions would be a schema change beyond adding type values
+  (blob positions are shared across all types) and is out of
+  scope for this slice.
+- Live proof is PENDING an owner run (same posture as Slice 3):
+  a `resource.sql_op` envelope folded through the Q1 consumer
+  path and visible in the stream, with AE totals agreeing with
+  the D1 rollup. Not fabricated here.
