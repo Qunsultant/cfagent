@@ -142,6 +142,10 @@ export interface EtradeBrokerRouteContext {
     error?: string;
     trigger?: unknown;
     userLogin?: string;
+    /** Issue #2863: replay criteria/refs (additive; older readers ignore). */
+    criteria?: unknown;
+    patternRef?: unknown;
+    presetRef?: unknown;
   }): Promise<void>;
   /** Autopilot policy evaluation (owner: OrchestratorAgent - was `this.evaluateAndRecordAutopilotVerdict`). */
   evaluateAndRecordAutopilotVerdict(params: {

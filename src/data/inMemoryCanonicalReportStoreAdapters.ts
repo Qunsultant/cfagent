@@ -132,6 +132,19 @@ export class InMemoryCanonicalReportStore
     return r ? toHit(r) : null;
   }
 
+  getRowByRunIdForOwner(
+    runId: string,
+    owner: string | undefined
+  ): CanonicalReportStoredRow | null {
+    const matched = [...this.rows.values()].filter((r) => {
+      if (r.run_id !== runId) return false;
+      if (owner !== undefined && r.user_login !== owner) return false;
+      return true;
+    });
+    matched.sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : b.seq - a.seq));
+    return matched[0] ? toHit(matched[0]) : null;
+  }
+
   getRowByIdForOwner(
     reportId: string,
     owner: string | undefined

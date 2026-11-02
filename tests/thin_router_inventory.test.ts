@@ -392,6 +392,9 @@ const EXPECTED_INVENTORY = [
   "handleReportsRoutes :: endsWith(\"/reports\")",
   "handleReportsRoutes :: === \"/reports\"",
   "handleReportsRoutes :: === \"/api/reports\"",
+  // Issue #2863: POST /reports/replay (in handleReportsRoutes,
+  // before /reports/semantic-search, as in reports.ts).
+  "handleReportsRoutes :: endsWith(\"/reports/replay\")",
   "handleReportsRoutes :: endsWith(\"/reports/semantic-search\")",
   "handleScreenerPresetRoutes :: endsWith(\"/screener/presets\")",
   "handleScreenerPresetRoutes :: endsWith(\"/screener/presets\")",

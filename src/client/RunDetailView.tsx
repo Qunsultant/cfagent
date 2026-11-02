@@ -19,7 +19,9 @@
  * record renders as absent, never invented.
  */
 
-import { Badge, Card, EmptyState, Notice, Spinner } from "./components/ui";
+import { useState } from "react";
+import { Badge, Button, Card, EmptyState, Notice, Spinner } from "./components/ui";
+import { replayReport, replaySummary, type ReplayResponse } from "./replayReport";
 
 export interface RunDetailPartial {
   quotedCount: number;
@@ -68,6 +70,14 @@ export interface RunDetailViewProps {
    * the standalone rendering every existing consumer relies on.
    */
   chrome?: "card" | "bare";
+  /**
+   * Issue #2863: the stored generation id for this run
+   * (`screener:<timestamp>`), when known. When present, the
+   * "Replay this report" button replays the persisted report
+   * for that generation — zero live re-fetch, no re-charge.
+   * Absent when the caller cannot name the canonical row.
+   */
+  replayRunId?: string;
 }
 
 function outcomeOf(run: RunDetailRun): { label: string; tone: "success" | "warning" | "danger" } {
@@ -84,10 +94,21 @@ function confirmationLabel(status: string): string {
   return status;
 }
 
-export function RunDetailView({ run, confirmations, confirmationsLoading, chrome = "card" }: RunDetailViewProps) {
+export function RunDetailView({ run, confirmations, confirmationsLoading, chrome = "card", replayRunId }: RunDetailViewProps) {
   const outcome = outcomeOf(run);
   const pdfUrl = run.reportUrl || (run.pdfKey ? `/api/screener/report.pdf?key=${encodeURIComponent(run.pdfKey)}` : null);
   const xlsxUrl = run.xlsxKey ? `/api/screener/report.xlsx?key=${encodeURIComponent(run.xlsxKey)}` : null;
+  const [replayLoading, setReplayLoading] = useState(false);
+  const [replay, setReplay] = useState<ReplayResponse | null>(null);
+  const onReplay = async () => {
+    if (!replayRunId || replayLoading) return;
+    setReplayLoading(true);
+    try {
+      setReplay(await replayReport({ runId: replayRunId }));
+    } finally {
+      setReplayLoading(false);
+    }
+  };
 
   const body = (
     <>
@@ -164,6 +185,33 @@ export function RunDetailView({ run, confirmations, confirmationsLoading, chrome
           </div>
         </div>
       </section>
+
+      {replayRunId && (
+        <section aria-label="Replay" style={{ margin: "1rem 0" }}>
+          <Button variant="secondary" size="sm" onClick={onReplay} loading={replayLoading}>
+            Replay this report
+          </Button>
+          {replay && !replay.ok && (
+            <div style={{ marginTop: "0.5rem" }}>
+              <Notice tone="danger" density="compact">
+                Replay failed — {replay.error}
+              </Notice>
+            </div>
+          )}
+          {replay?.ok && replay.replay && (
+            <div style={{ marginTop: "0.5rem" }}>
+              <Notice tone={replay.replay.partial ? "warning" : "success"} density="compact">
+                {replaySummary(replay.replay)}
+                {replay.replay.partial && replay.replay.partialReasons && replay.replay.partialReasons.length > 0 && (
+                  <div style={{ marginTop: "0.25rem" }}>
+                    Partial: {replay.replay.partialReasons.join(" ")}
+                  </div>
+                )}
+              </Notice>
+            </div>
+          )}
+        </section>
+      )}
 
       <section aria-label="Delivery status">
         <h4 style={{ margin: "0 0 0.5rem" }}>Delivery status</h4>

@@ -228,7 +228,9 @@ export async function executeEtradeScreen(args: {
     // before persisting any of them.
     await persistThenDeliverAll({
       results: shards,
-      persist: (r) => ctx.persistScreenerReportCanonical({ ...r, userLogin }),
+      // Issue #2863: record the run's criteria with each shard's
+      // canonical copy, so future replays can show them.
+      persist: (r) => ctx.persistScreenerReportCanonical({ ...r, userLogin, criteria: spec.filters }),
       deliver: (shard) => publishOrBridge(ctx, userLogin, shard, delivery),
     });
     const failed = shards.filter((r) => !r.success);
@@ -302,7 +304,8 @@ export async function executeEtradeScreen(args: {
   // sharded path above; order unchanged here, now pinned.
   await persistThenDeliverAll({
     results: [result],
-    persist: (r) => ctx.persistScreenerReportCanonical({ ...r, userLogin }),
+    // Issue #2863: record the run's criteria with the canonical copy.
+    persist: (r) => ctx.persistScreenerReportCanonical({ ...r, userLogin, criteria: spec.filters }),
     deliver: (r) => publishOrBridge(ctx, userLogin, r, delivery),
   });
   if (!result.success) {
