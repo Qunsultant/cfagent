@@ -105,11 +105,14 @@ import { createCheckoutPorts } from "../services/createCheckoutPorts";
 import {
   PAYMENT_VERIFICATION_TIMEOUT,
   runPaymentWorkflowFlow,
+  type PaymentWorkflowDeps,
   type PaymentWorkflowEvent,
   type PaymentWorkflowOutcome,
   type PaymentWorkflowParams,
   type PaymentWorkflowStep,
 } from "./paymentWorkflowFlow";
+import { recordWorkflowTraceHop } from "../observability/meshTrace";
+import { meshTraceStoreForEnv } from "../data/createMeshTracePorts";
 import {
   listCfpayLedgerRows,
   recordCfpayAuditEvent,
@@ -160,6 +163,55 @@ export const PAYMENT_WORKFLOW_BINDING = "PAYMENT_WORKFLOW" as const;
 export interface PaymentWorkflowEventParams extends PaymentWorkflowParams {
   account: NativeCommercialAccount;
   screenerCommand: WorkflowJobCommand;
+}
+
+/**
+ * Issue #2762 (tracker #2708 A6, S17 #2428): the flow's traceHop
+ * dep for one run, built from the run's payload — records each
+ * completed step's hop from the params' traceparent into the
+ * env-resolved hop store via the landed S17 mechanism
+ * (recordWorkflowTraceHop over meshTraceStoreForEnv), agent
+ * PaymentWorkflow, jobId = the run's runRequestId. Called by the
+ * flow AFTER a step's journaled result returns, never inside a
+ * step callback, so durable replay re-records the identical
+ * deterministic span and the store converges. Params without a
+ * traceparent record nothing (the helper's contract — never
+ * minted mid-flight); a store failure is swallowed here:
+ * tracing degrades, the payment does not (the #1743 rule).
+ * Trace carriage is data only — it never branches the flow,
+ * gates a charge, or alters a step input, and the #2550
+ * approval audit and the #2547 price gate are untouched.
+ */
+export function paymentTraceHop(
+  env: Env,
+  p: {
+    traceparent?: string;
+    runRequestId: string;
+    tenantId: string;
+    userId: string;
+  },
+): NonNullable<PaymentWorkflowDeps["traceHop"]> {
+  return async (event) => {
+    try {
+      await recordWorkflowTraceHop(
+        meshTraceStoreForEnv(env),
+        {
+          traceparent: p.traceparent,
+          jobId: p.runRequestId,
+          tenantId: p.tenantId,
+          userLogin: p.userId,
+          agent: "PaymentWorkflow",
+        },
+        {
+          kind: "workflow-step",
+          operation: event.operation,
+          ...(event.note ? { note: event.note } : {}),
+        },
+      );
+    } catch {
+      // Best-effort by design (the #1743 degradation rule).
+    }
+  };
 }
 
 export class PaymentWorkflow extends ThinkWorkflow<
@@ -454,6 +506,10 @@ export class PaymentWorkflow extends ThinkWorkflow<
         // retried step writes exactly one row.
         await recordMeterUsageEvent(this.env, usage);
       },
+      // Issue #2762: step hops for this run under the params'
+      // traceparent (see paymentTraceHop above). Observational
+      // only; the flow calls it after each journaled step.
+      traceHop: paymentTraceHop(this.env, p),
     };
 
     if (!p.screenerCommand || typeof p.screenerCommand.jobId !== "string") {
@@ -476,6 +532,10 @@ export class PaymentWorkflow extends ThinkWorkflow<
         // absent for every non-saga caller, so non-saga runs meter
         // nothing. The saga Leg 0 sets it (sagaWorkflowFlow.ts).
         meterContext: p.meterContext,
+        // Issue #2762: the run's traceparent, stamped at the
+        // submission seam from the screener command (see
+        // buildPaymentWorkflowParams); absent → no step hops.
+        traceparent: p.traceparent,
       },
       deps,
       step as unknown as PaymentWorkflowStep,

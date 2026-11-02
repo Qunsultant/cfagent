@@ -134,6 +134,16 @@ export interface PaymentWorkflowParams {
    * rejects any other category.
    */
   meterContext?: { category: "saga"; userLogin: string };
+  /**
+   * Issue #2762 — W3C traceparent for the run (#1743's field, the
+   * WorkflowJobCommand contract): buildPaymentWorkflowParams stamps
+   * it from the caller-built screener command's traceparent —
+   * server-side only, never a tool argument or a caller input. The
+   * flow's step hops record under it (the S17 mechanism, #2428);
+   * absent → the run's steps record nothing, never minted
+   * mid-flight.
+   */
+  traceparent?: string;
 }
 
 /** Minimal structural step surface the flow needs (fakeable in tests). */
@@ -267,6 +277,38 @@ export interface PaymentWorkflowDeps {
     userLogin: string;
     priceUSD: number;
   }) => Promise<void>;
+  /**
+   * Issue #2762 (tracker #2708 A6, S17 #2428): trace hop recorder
+   * for this run's steps — the screener flow's traceHop pattern.
+   * Optional and purely observational: called AFTER a step's
+   * journaled result returns (never inside a step callback, so
+   * durable replay cannot re-run it as a side effect — and the
+   * recorder's deterministic spans make a re-record converge in
+   * the store regardless). Absent → the flow records no step
+   * hops (flow test doubles and the saga's direct wiring keep
+   * today's behavior). The production adapter wires it in
+   * paymentWorkflow.ts from the params' traceparent; a throwing
+   * recorder must never fail a step — call sites go through
+   * traceStep(), which swallows.
+   */
+  traceHop?: (event: { operation: string; note?: string }) => Promise<void>;
+}
+
+/**
+ * Issue #2762: record one trace hop for a completed step,
+ * best-effort (never throws into the flow — tracing degrades,
+ * the run does not, per the #1743 rule).
+ */
+async function traceStep(
+  deps: PaymentWorkflowDeps,
+  operation: string,
+  note?: string,
+): Promise<void> {
+  try {
+    await deps.traceHop?.({ operation, ...(note ? { note } : {}) });
+  } catch {
+    // Best-effort by design (the #1743 degradation rule).
+  }
 }
 
 export type PaymentWorkflowOutcome =
@@ -305,6 +347,7 @@ export async function runPaymentWorkflowFlow(
       account: deps.account,
     }),
   );
+  await traceStep(deps, "gate-check");
 
   if (!gateDecision.allowed) {
     if (gateDecision.status === "coverage_required") {
@@ -318,6 +361,7 @@ export async function runPaymentWorkflowFlow(
           priceUSD: gateDecision.priceUSD,
         }),
       );
+      await traceStep(deps, "record-coverage-required");
       return { status: "coverage_required", runRequestId: params.runRequestId, priceUSD: gateDecision.priceUSD };
     }
     // payment_required: a checkout was created (or already exists).
@@ -334,6 +378,7 @@ export async function runPaymentWorkflowFlow(
           checkoutId: extractCheckoutId(gateDecision.checkout),
         }),
       );
+      await traceStep(deps, "record-checkout");
     }
     // Human gate BEFORE capture: wait for an approval event, never a
     // model prompt. A one-off scheduled run already authorized at
@@ -354,6 +399,7 @@ export async function runPaymentWorkflowFlow(
           occurredAtMs: Date.now(),
         }),
       );
+      await traceStep(deps, "record-approval");
     } else {
       let approval: PaymentApprovalEvent;
       try {
@@ -363,15 +409,21 @@ export async function runPaymentWorkflowFlow(
         });
         approval = (event.payload ?? {}) as PaymentApprovalEvent;
       } catch {
+        // The wait completed with no decision: the hop records the
+        // elapsed wait under the carried trace, noted as expired.
+        await traceStep(deps, "await-payment-approval", "expired");
         await step.do("record-expiry", () =>
           deps.recordEvent({ runRequestId: params.runRequestId, tenantId: params.tenantId, type: "payment.approval_expired" }),
         );
+        await traceStep(deps, "record-expiry");
         return { status: "expired", runRequestId: params.runRequestId };
       }
+      await traceStep(deps, "await-payment-approval");
       if (approval.approved !== true) {
         await step.do("record-rejection", () =>
           deps.recordEvent({ runRequestId: params.runRequestId, tenantId: params.tenantId, type: "payment.approval_rejected" }),
         );
+        await traceStep(deps, "record-rejection");
         return { status: "approval_rejected", runRequestId: params.runRequestId };
       }
       // #2550: a successful approval is audited like its
@@ -390,6 +442,7 @@ export async function runPaymentWorkflowFlow(
           occurredAtMs: Date.now(),
         }),
       );
+      await traceStep(deps, "record-approval");
     }
     // Then wait for a verified-payment event, then confirm by re-reading status.
     let verified: PaymentVerifiedEvent;
@@ -400,11 +453,14 @@ export async function runPaymentWorkflowFlow(
       });
       verified = (event.payload ?? {}) as PaymentVerifiedEvent;
     } catch {
+      await traceStep(deps, "await-payment-verified", "expired");
       await step.do("record-expiry", () =>
         deps.recordEvent({ runRequestId: params.runRequestId, tenantId: params.tenantId, type: "payment.expired" }),
       );
+      await traceStep(deps, "record-expiry");
       return { status: "expired", runRequestId: params.runRequestId };
     }
+    await traceStep(deps, "await-payment-verified");
     const confirmed = await step.do("confirm-paid", () =>
       deps.gate.confirmPaid(
         { id: params.runRequestId, userId: params.userId, email: params.email, family: params.family },
@@ -417,6 +473,7 @@ export async function runPaymentWorkflowFlow(
         },
       ),
     );
+    await traceStep(deps, "confirm-paid");
     if (!confirmed.allowed) {
       return {
         status: "payment_required",
@@ -440,6 +497,7 @@ export async function runPaymentWorkflowFlow(
         paymentIntentId: verified.paymentIntentId,
       }),
     );
+    await traceStep(deps, "record-payment");
     // #2041 G-METERING: one usage row for a saga paid run, after
     // confirm-paid succeeds and before the screen starts. Earlier
     // would over-meter (unpaid runs); the covered path never
@@ -475,6 +533,7 @@ export async function runPaymentWorkflowFlow(
           priceUSD: gateDecision.priceUSD,
         }),
       );
+      await traceStep(deps, "record-usage");
     }
     return startScreenerOrCredit(
       params,
@@ -495,6 +554,7 @@ export async function runPaymentWorkflowFlow(
       paidVia: gateDecision.paidVia ?? gateDecision.status,
     }),
   );
+  await traceStep(deps, "record-payment");
   // Issue #2015: consume the coverage in the store, so an included
   // run or a credit balance cannot be spent twice. Best-effort in
   // the adapter (see the dep doc): a failed consumption never
@@ -507,6 +567,7 @@ export async function runPaymentWorkflowFlow(
         priceUSD: gateDecision.priceUSD,
       }),
     );
+    await traceStep(deps, "consume-coverage");
   }
   return startScreenerOrCredit(
     params,
@@ -526,6 +587,7 @@ async function startScreenerOrCredit(
 ): Promise<PaymentWorkflowOutcome> {
   try {
     const started = await step.do("start-screener", () => deps.startScreener(params));
+    await traceStep(deps, "start-screener");
     return {
       status: "started",
       runRequestId: params.runRequestId,
@@ -548,6 +610,7 @@ async function startScreenerOrCredit(
         priceUSD,
       });
     });
+    await traceStep(deps, "issue-failure-credit");
     return { status: "screener_failed_credit_issued", runRequestId: params.runRequestId, screenerError: message };
   }
 }
