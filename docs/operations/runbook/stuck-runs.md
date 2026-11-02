@@ -4,6 +4,12 @@ Operator runbook for async job runs (screens, reports, deliveries,
 and other `mas_async_jobs` work) that stay in `running` far longer
 than any healthy run. Filed under issue #2567 (programme #2494).
 
+**Standing decision (Phase 5 slice 6, #2000): no background
+sweeper.** The alert + reap + this runbook are the standing answer;
+see `stuck-sweeper-decision.md` (same folder) for the inventory,
+the evidence, the gaps left open, and what would reopen the
+decision.
+
 ## How a stuck run surfaces
 
 - **Alert (the early signal).** When a job has been `running` for

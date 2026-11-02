@@ -503,10 +503,18 @@ result to `mas_reports` + its data to `mas_data_captures`, keyed by the same run
     proposal, not settled policy, and makes no retention claim. Correct claims:
     "tamper-evident hash chain (proposed)" + "retention undecided" — never
     "tamper-proof" or settled retention.
-15. **Stuck-job handling (COO, v2): none found** — no sweeper, reaper, or heartbeat in
-    asyncJobs/scheduledTasks/scheduledCallbacks. Needs a stuck-`running` alert (age
-    threshold + query over `mas_async_jobs`) + runbook procedure + a sweeper decision
-    (Phase 5).
+15. **Stuck-job handling (COO, v2): decided (Phase 5 slice 6,
+    #2000)** — the #2567 machinery exists: stuck-`running` alert
+    (30-minute default threshold + guarded claim-once +
+    `async_job.stuck_detected` audit + Slack delivery) + read-path
+    reap (2-hour backstop, guarded `failed` transition, never a
+    delete) + runbook procedure
+    (`docs/operations/runbook/stuck-runs.md`). The remaining
+    question — a background sweeper — is DECIDED: no sweeper; the
+    read-path alert + reap stand (see
+    `docs/operations/runbook/stuck-sweeper-decision.md` for the
+    evidence, the gaps left open, and what would reopen the
+    decision). No sweeper, reaper-gap, or heartbeat-gap remains.
 16. **Poll-202 design is a rows-read decision under the #1819 lens (COO, v2), not just
     UX** — interval × isolate churn × per-request auth reads. D1 reads are a separate
     meter from DO rows.
@@ -719,7 +727,9 @@ value with counts+ids payload, NOT a schema change; whitelist + redaction alread
 **#1819 resource events: CONFIRMED with conditions** (a #1743 `type` carrying count
 fields fits; counts/aggregates only, no raw payloads/per-row data; cardinality guard +
 aggregation treatment proven through the #1743 dashboard/SQL-aggregation follow-up;
-per-row form rejected). **Stuck-job alert + runbook** (gap 15) and a sweeper decision.
+per-row form rejected). **Stuck-job alert + runbook** (gap 15)
+    and the sweeper decision — DECIDED (Phase 5 slice 6): no
+    background sweeper; the read-path alert + reap stand.
 These are shared-path improvements: they pay off for every family, not just goal.
 
 ### Non-goals (from #1972, carried forward)
@@ -787,7 +797,9 @@ stream as designed surface; #1942 open (gap 17); no gateway change; deployment s
 5. **DLQ + breaker-store binding choices:** DLQ queue + replay procedure; durable
    breaker store binding (D1/KV/DO) or explicit owner acceptance of fail-open.
 6. **Q1:** consumer vs remove (Phase 5).
-7. **Sweeper:** stuck-`running` alert now, sweeper decision (Phase 5).
+7. **Sweeper:** DECIDED (Phase 5 slice 6, #2000) — no background
+   sweeper; the read-path alert + reap stand (see
+   `docs/operations/runbook/stuck-sweeper-decision.md`).
 8. **#1968 sequencing:** before or with Phase 4 (CISO: precondition).
 9. **#1942 fix:** before any XLSX-provenance claim on staged runs.
 10. **#1743 follow-ups:** dashboard/aggregation + production stream confirmation on a
