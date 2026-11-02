@@ -20,6 +20,7 @@ import { TradingApprovalsQueue } from "./TradingApprovalsQueue";
 import { AccountPanels } from "./AccountPanels";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { ScreenersHub, type ScreenersHubTab } from "./ScreenersHub";
+import { StockHub, type StockHubTab } from "./StockHub";
 import { ETradeDynamicMenu, type ETradeDynamicMenuProps } from "./ETradeDynamicMenu";
 import {
   fetchBrokerEnvironment,
@@ -55,15 +56,14 @@ export type TradingSubTab =
   | "autopilot"
   | "scanner"
   | "screeners"
+  | "stock-hub"
   | "reports"
   | "schedules"
   | "iv-history"
   | "options"
-  | "llm-ideas"
   | "order"
   | "portfolio"
   | "ledger"
-  | "nlq"
   | "omnichannel"
   | "voice";
 
@@ -97,9 +97,9 @@ export function ETradeTradingHub({
   const effectiveSubTab: TradingSubTab = activeSubTab || subTab || "autopilot";
   // S4-D (#1991): the hub is the route outlet for every trading page, so
   // the shell title/scope follow the active subtab via the route table.
-  // iv-history and llm-ideas are inner hub tabs with no route entries.
+  // iv-history is an inner hub tab with no route entry.
   const shellRoute = getRoute(effectiveSubTab);
-  const shellTitle = shellRoute?.crumb ?? (effectiveSubTab === "iv-history" ? "IV History" : "LLM Ideas");
+  const shellTitle = shellRoute?.crumb ?? (effectiveSubTab === "iv-history" ? "IV History" : "");
   const shellScopeNote = shellRoute?.description;
 
   const handleNavigateSubTab = (newSubTab: TradingSubTab) => {
@@ -113,6 +113,19 @@ export function ETradeTradingHub({
     <ScreenersHub
       activeEnv={activeEnv}
       userLogin={user?.login}
+      onStocksLoaded={setScreenerStocks}
+      initialTab={tab}
+      onPreviewTrade={handleTradeOrder}
+      onSendPrompt={onSendPrompt}
+      onJobStateChange={setOptionsJob}
+    />
+  );
+
+  const renderStockHub = (tab: StockHubTab) => (
+    <StockHub
+      activeEnv={activeEnv}
+      userLogin={user?.login}
+      user={user}
       onStocksLoaded={setScreenerStocks}
       initialTab={tab}
       onPreviewTrade={handleTradeOrder}
@@ -274,8 +287,6 @@ export function ETradeTradingHub({
 
   // In-tab NLQ state
   const [nlqQuery, setNlqQuery] = useState("");
-  const [nlqLoading, setNlqLoading] = useState(false);
-  const [nlqResult, setNlqResult] = useState<any>(null);
 
   // DID Copy feedback
   const [copiedDid, setCopiedDid] = useState(false);
@@ -1324,15 +1335,14 @@ export function ETradeTradingHub({
       autopilot: "Autopilot Control Center",
       scanner: "Strategy/Symbol Scanner",
       screeners: "Multi-Asset Screeners",
+      "stock-hub": "Stock Hub",
       reports: "Reports",
       schedules: "Schedules",
       "iv-history": "IV History",
       options: "Auto Options Research",
-      "llm-ideas": "LLM Idea Experiment",
       order: "Order Ticket",
       portfolio: "Portfolio",
       ledger: "Order History",
-      nlq: "Trading",
       omnichannel: "Email & Slack Agents",
       voice: "Voice Trading Desk",
     };
@@ -1659,7 +1669,8 @@ export function ETradeTradingHub({
           the equivalent tab — no redirect notices. */}
       {effectiveSubTab === "iv-history" && renderScreenersHub("iv-history")}
 
-      {effectiveSubTab === "screeners" && renderScreenersHub("stocks")}
+      {effectiveSubTab === "screeners" && renderScreenersHub("options")}
+      {effectiveSubTab === "stock-hub" && renderStockHub("stocks")}
 
       {effectiveSubTab === "reports" && renderScreenersHub("reports")}
 
@@ -2379,192 +2390,6 @@ export function ETradeTradingHub({
                     />
           </div>
         </Card>
-      )}
-
-      {/* SUBTAB 5: NLQ RESULTS */}
-      {effectiveSubTab === "nlq" && (
-        <div className="trading-section nlq-section">
-          <div className="nlq-results-wrapper">
-            <div className="nlq-query-recap">
-              <span className="nlq-icon-big">🤖</span>
-              <div className="nlq-query-meta">
-                <h4>Natural Language Trading Query</h4>
-                <p>"{nlqQuery || "Show top momentum gainers"}"</p>
-              </div>
-            </div>
-
-            {nlqLoading && (
-              <div className="nlq-loading-state">
-                <span className="spinner-large" />
-                <p>Analyzing trading intent, scanning E*TRADE markets, and synthesizing response…</p>
-              </div>
-            )}
-
-            {!nlqLoading && nlqResult && (
-              <div className="nlq-response-card">
-                {/* Plan Overview */}
-                {nlqResult.plan && (
-                  <div className="nlq-plan-pill-group">
-                    <Badge size="md" tone="accent">Domain: {nlqResult.plan.domain}</Badge>
-                    <Badge size="md" tone="success">Intent: {nlqResult.plan.tradingData?.intent || "market_query"}</Badge>
-                    {nlqResult.plan.sql && (
-                      <Badge size="md" tone="warning">Deterministic SQL</Badge>
-                    )}
-                  </div>
-                )}
-
-                {/* Provenance Strip */}
-                {(nlqResult.provenance || nlqResult.result?.provenance) && (
-                  <div className="provenance-strip">
-                    <span className="provenance-pill">
-                      <strong>Data Source:</strong> {(nlqResult.provenance || nlqResult.result?.provenance)?.dataSource || "E*TRADE Sandbox REST API"}
-                    </span>
-                    <span className="provenance-pill">
-                      <strong>Observed:</strong> {(nlqResult.provenance || nlqResult.result?.provenance)?.pricesObservedAt ? new Date((nlqResult.provenance || nlqResult.result?.provenance).pricesObservedAt).toLocaleTimeString() : "Just now"}
-                    </span>
-                    <span className="provenance-pill">
-                      <strong>Reconciliation:</strong> {(nlqResult.provenance || nlqResult.result?.provenance)?.reconciliationStatus || "VERIFIED"}
-                    </span>
-                  </div>
-                )}
-
-                {/* Fail-Closed Reconcile Alert */}
-                {(nlqResult.reconciled === false || nlqResult.status === "RECONCILIATION_FAILED" || nlqResult.result?.reconciled === false) && (
-                  <div className="nlq-unverified-warning-banner" role="alert">
-                    <div className="warning-title">
-                      ⚠️ UNVERIFIED / POSSIBLE DEMO DATA — NO ACCOUNT CONCLUSION SHOWN
-                    </div>
-                    <p className="warning-desc">
-                      {nlqResult.summary || nlqResult.result?.summary}
-                    </p>
-                    {(nlqResult.discrepancy || nlqResult.result?.discrepancy) && (
-                      <div className="discrepancy-breakdown-box">
-                        <h5>Discrepancy Breakdown:</h5>
-                        <div className="discrepancy-grid">
-                          <div><strong>Stated Total:</strong> {(nlqResult.discrepancy || nlqResult.result?.discrepancy).statedAccountTotal || (nlqResult.discrepancy || nlqResult.result?.discrepancy).statedTotal}</div>
-                          <div><strong>Holdings Sum:</strong> {(nlqResult.discrepancy || nlqResult.result?.discrepancy).positionsMarketValue || (nlqResult.discrepancy || nlqResult.result?.discrepancy).positionsSum}</div>
-                          <div><strong>Stated Cash:</strong> {(nlqResult.discrepancy || nlqResult.result?.discrepancy).statedCash}</div>
-                          <div className="variance-highlight"><strong>Unexplained Variance:</strong> {(nlqResult.discrepancy || nlqResult.result?.discrepancy).unexplainedVariance}</div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Fail-Closed Scan Mismatch Alert */}
-                {(nlqResult.status === "SCAN_INVALID_DATA_MISMATCH" || nlqResult.result?.status === "SCAN_INVALID_DATA_MISMATCH") && (
-                  <div className="nlq-unverified-warning-banner" role="alert" style={{ background: "var(--color-danger-subtle)", borderColor: "var(--color-danger)" }}>
-                    <div className="warning-title" style={{ color: "var(--color-danger)" }}>
-                      🚨 SCAN INVALID — DATA MISMATCH: FILTER CONTRADICTION DETECTED
-                    </div>
-                    <p className="warning-desc" style={{ color: "var(--color-text-secondary)" }}>
-                      {nlqResult.summary || nlqResult.result?.summary}
-                    </p>
-                    <div style={{ fontSize: "var(--font-size-body)", color: "var(--color-danger)", marginTop: "0.4rem" }}>
-                      Trading order shortcuts disabled because one or more candidates failed validation.
-                    </div>
-                  </div>
-                )}
-
-                {/* Scan Audit Ledger Box */}
-                {(nlqResult.scanLedger || nlqResult.result?.scanLedger) && (
-                  <div className="scan-audit-ledger-box" style={{ background: "var(--color-surface-sunken)", border: "1px solid var(--color-border-subtle)", borderRadius: "var(--radius-md)", padding: "var(--space-4)", margin: "1rem 0" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem", flexWrap: "wrap", gap: "var(--space-2)" }}>
-                      <h5 style={{ margin: 0, fontSize: "var(--font-size-body)", color: "var(--color-accent)", display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
-                        <span>🛡️</span> Market Universe Scan Audit Ledger
-                      </h5>
-                      <div style={{ fontSize: "var(--font-size-body-sm)", color: "var(--color-text-muted)" }}>
-                        Evaluated: <strong style={{ color: "var(--color-text-primary)" }}>{(nlqResult.scanLedger || nlqResult.result?.scanLedger).totalEvaluated}</strong> | 
-                        Passed: <strong style={{ color: "var(--color-success)" }}>{(nlqResult.scanLedger || nlqResult.result?.scanLedger).passedCount}</strong> | 
-                        Rejected: <strong style={{ color: "var(--color-danger)" }}>{(nlqResult.scanLedger || nlqResult.result?.scanLedger).rejectedCount}</strong>
-                      </div>
-                    </div>
-
-                    {/* Rejection Details */}
-                    {((nlqResult.scanLedger || nlqResult.result?.scanLedger).rejections || []).length > 0 && (
-                      <details style={{ fontSize: "var(--font-size-body-sm)", color: "var(--color-text-secondary)", marginTop: "0.5rem" }}>
-                        <summary style={{ cursor: "pointer", color: "var(--color-danger)" }}>
-                          View {((nlqResult.scanLedger || nlqResult.result?.scanLedger).rejections || []).length} Rejection Details (showing first 200)
-                        </summary>
-                        <div style={{ marginTop: "0.5rem" }}>
-                      <Table
-                        columns={[
-                          { key: "symbol", header: "SYMBOL", render: (rej: any) => <strong style={{ color: "var(--color-danger)" }}>{rej.symbol}</strong> },
-                          { key: "reason", header: "REASON", render: (rej: any) => <>{rej.reason}</> },
-                        ]}
-                        rows={((nlqResult.scanLedger || nlqResult.result?.scanLedger).rejections || []).slice(0, 200).map((rej: any, rIdx: number) => ({ ...rej, __rowKey: String(rIdx) }))}
-                        rowKey={(row: any) => row.__rowKey}
-                      />
-                    </div>
-                      </details>
-                    )}
-                  </div>
-                )}
-
-                {/* Text Summary */}
-                {(nlqResult.summary || nlqResult.result?.summary) && (nlqResult.reconciled !== false && nlqResult.result?.reconciled !== false && nlqResult.status !== "RECONCILIATION_FAILED") && (
-                  <div className="nlq-summary-text" role="status" aria-live="polite">
-                    {nlqResult.summary || nlqResult.result?.summary}
-                  </div>
-                )}
-
-                {/* Portfolio / Query Rows Table */}
-                {Array.isArray(nlqResult.rows || nlqResult.result?.rows) && (nlqResult.rows || nlqResult.result?.rows).length > 0 && (
-                  <div className="nlq-rows-table-wrap" style={{ margin: "1rem 0", overflowX: "auto" }}>
-                    <Table
-                      columns={Object.keys((nlqResult.rows || nlqResult.result?.rows)[0]).map((col) => ({
-                        key: col,
-                        header: formatNlqColumn(col),
-                        render: (row: any) => {
-                          const val = row[col];
-                          if (col === "actionAvailable") {
-                            const isDisabled = String(val).includes("DISABLED");
-                            return isDisabled ? (<span style={{ color: "var(--color-danger)", fontSize: "0.75rem", fontWeight: "bold" }}>⛔ {String(val)}</span>) : (<Button variant="secondary" size="sm" type="button" onClick={() => { if (row.symbol) handleOpenInspectQuote(row.symbol); }}>⚡ {String(val)}</Button>);
-                          }
-                          if (col === "candidateStrategies" && Array.isArray(val)) {
-                            return (<ul className="ledger-candidates">{val.map((candidate: any) => (<li key={candidate.id} className={`ledger-candidate ledger-${candidate.status}`}><a href={`/strategies/${candidate.id}.html`} target="_blank" rel="noopener noreferrer" title={candidate.description || candidate.name}>{candidate.name}</a>{" "}<span className="ledger-verdict">{candidate.status === "accepted" ? "PASSED" : candidate.status === "rejected" ? "FAILED" : "SKIPPED"}</span>{" "}<span className="ledger-why">{candidate.why}</span></li>))}</ul>);
-                          }
-                          return val !== null && typeof val === "object" ? JSON.stringify(val) : String(val);
-                        },
-                      }))}
-                      rows={(nlqResult.rows || nlqResult.result?.rows).slice(0, NLQ_ROW_RENDER_LIMIT).map((row: any, idx: number) => ({ ...row, __rowKey: String(idx) }))}
-                      rowKey={(row: any) => row.__rowKey}
-                    />
-                    {(nlqResult.rows || nlqResult.result?.rows).length > NLQ_ROW_RENDER_LIMIT && (
-                      <p className="nlq-rows-truncated" role="status">
-                        Showing first {NLQ_ROW_RENDER_LIMIT} of {(nlqResult.rows || nlqResult.result?.rows).length.toLocaleString()} rows. Narrow the query or use the scanner filters to see the rest.
-                      </p>
-                    )}
-                  </div>
-                )}
-
-                {/* Stock Screener Results */}
-                {nlqResult.result?.screener?.stocks && (
-                  <div className="nlq-rows-table-wrap" style={{ margin: "1rem 0", overflowX: "auto" }}>
-                    <Table
-                      columns={[
-                        { key: "symbol", header: "SYMBOL & COMPANY", render: (stock: any) => <div className="ticker-company"><span className="ticker-badge">{stock.symbol}</span><span className="company-title">{stock.companyName}</span></div> },
-                        { key: "price", header: "PRICE", render: (stock: any) => <>${stock.price.toFixed(2)}</> },
-                        { key: "rsi", header: "RSI", render: (stock: any) => <span className={`rsi-badge ${getRsiBadgeClass(stock.rsi14)}`}>{stock.rsi14 === undefined ? "N/A" : stock.rsi14.toFixed(1)}</span> },
-                        { key: "signal", header: "SIGNAL", render: (stock: any) => <span className="signal-badge">{stock.technicalSignal}</span> },
-                        { key: "reason", header: "REASON", render: (stock: any) => <>{stock.highlightReason}</> },
-                        { key: "actions", header: "ACTIONS", render: (stock: any) => <><Button variant="secondary" size="sm" type="button" onClick={() => handleOpenInspectQuote(stock.symbol, stock)}>Quote</Button>{" "}<Button variant="trade" size="sm" type="button" onClick={() => handleQuickTrade(stock, "BUY")}>⚡ Trade</Button></> },
-                      ]}
-                      rows={nlqResult.result.screener.stocks.slice(0, NLQ_ROW_RENDER_LIMIT)}
-                      rowKey={(stock: any) => stock.symbol}
-                    />
-                  </div>
-                )}
-
-                {/* Raw Result Inspector */}
-                <details className="nlq-raw-details">
-                  <summary>View Complete NLQ JSON Execution Trace</summary>
-                  <pre>{JSON.stringify(nlqResult, null, 2)}</pre>
-                </details>
-              </div>
-            )}
-          </div>
-        </div>
       )}
 
       {/* Omnichannel Trading Desks (Autonomous Email & Slack Desks) */}

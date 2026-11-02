@@ -12,7 +12,8 @@ import type { Env, ScheduledTaskResult, StageChainConfig, TradeRecord, ScreenedS
 import { DatabaseORM } from "../orm";
 import { codedMessage } from "../outcomes/outcomeAspects";
 import { renewETradeAccessToken, getStoredTokens, etradeIdentityFromLogin } from "../security/etradeOAuth";
-import { getServiceUserLogin } from "../security/serviceIdentity";
+import { resolveScreenerAgentName } from "../agents/screenerAgentName";
+import { actorGateway } from "./cloudflareActorGateway";
 import { createMessagingPorts } from "../messaging/createMessagingPorts";
 import { toScreenerEnvelope } from "../messaging/screenerEventEnvelope";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
@@ -124,6 +125,10 @@ import { recordJobOutcome } from "./jobOutcomes";
 import { storeReportStage } from "./unifiedReportPipeline";
 import { storeOptionsCanonicalReport } from "./optionsServeRecord";
 import { registerScreenerPublishers } from "../events/screenerPublishers";
+import {
+  getStoredEmailDestination,
+  resolveEmailDestination,
+} from "./userEmailDestination";
 import { deliverScreenerToSlackA2A } from "./screenerSlackDelivery";
 import { getEventCalendarCoverage, getSymbolEventCalendar } from "./eventCalendar";
 
@@ -487,13 +492,21 @@ export class ScheduledTasksService {
    * ScreenerAgent stub (issue #261) — one agent owns all screening.
    */
   private getScreenerAgent(userLogin = this.userLogin): import("../agents/screener-agent").ScreenerAgent {
-    // Issue #1185: the bare "default" instance name belongs to the
-    // configured service identity — the only login that maps to it.
-    const serviceUserLogin = getServiceUserLogin(this.env);
-    const id = (this.env as any).SCREENER_AGENT.idFromName(
-      serviceUserLogin && userLogin === serviceUserLogin ? "default" : `screener:${userLogin}`
+    // Issue #1779 dedup: this method's inline naming duplicate is
+    // collapsed onto the ONE shared rule in
+    // src/agents/screenerAgentName.ts (also used by
+    // OrchestratorAgent.getScreenerAgent), addressed through the
+    // ActorGateway. Names agree on every legitimate input (service
+    // login -> "default", any other login -> "screener:<login>").
+    // The only deltas are fail-closed: an undefined login with a
+    // configured service identity now resolves to that identity's
+    // "default" instance (per #1185) instead of a `screener:undefined`
+    // instance that could hold no real state, and no login with no
+    // service identity now throws instead of addressing one.
+    return actorGateway.stub<import("../agents/screener-agent").ScreenerAgent>(
+      (this.env as any).SCREENER_AGENT,
+      resolveScreenerAgentName(this.env, userLogin),
     );
-    return (this.env as any).SCREENER_AGENT.get(id);
   }
 
   /**
@@ -2236,6 +2249,13 @@ export class ScheduledTasksService {
           throw new Error("Sharded options runs require the async-job submission port; configure the host or run the scan directly.");
         }
         const { planOptionsFeedShards } = await import("./shardJobs");
+        // Issue Qunsultant/cfagent#488: the chain's email channel follows the
+        // same resolution as direct delivery — run > stored user > env.
+        const resolvedEmailTo = resolveEmailDestination({
+          eventEmailTo: options.emailTo,
+          storedEmailTo: await getStoredEmailDestination(this.env, options.userLogin || this.userLogin),
+          env: this.env as unknown as Record<string, unknown>,
+        });
         const chainId = crypto.randomUUID();
         const chain: import("../types").ShardChainContext = {
           chainId,
@@ -2247,11 +2267,11 @@ export class ScheduledTasksService {
           maxItems: symbols.length,
           timestamp,
           channels: [
-            ...(options.emailTo ? ["email" as const] : []),
+            ...(resolvedEmailTo ? ["email" as const] : []),
             ...(shouldNotifySlack ? ["slack" as const] : []),
             ...((options.webhookUrl || this.env.OUTBOUND_WEBHOOK_URL) ? ["webhook" as const] : []),
           ],
-          emailTo: options.emailTo || (this.env as any).OPTIONS_EMAIL_TO || (this.env as any).SCREENER_EMAIL_TO,
+          emailTo: resolvedEmailTo,
           slackChannel: options.slackChannel || (this.env as any).SCREENER_SLACK_CHANNEL || (this.env as any).SLACK_CHANNEL,
           webhookUrl: options.webhookUrl || this.env.OUTBOUND_WEBHOOK_URL,
           reportBaseUrl: this.env.APP_BASE_URL || "https://agent.openaimp.com",
@@ -2609,7 +2629,12 @@ export class ScheduledTasksService {
 
       // 2. Push Email if recipient is specified or environment configured
       // Issue #303: Try cfpay via A2A first, fall back to local.
-      const targetEmail = options.emailTo || (this.env as any).OPTIONS_EMAIL_TO || (this.env as any).SCREENER_EMAIL_TO;
+      // Issue Qunsultant/cfagent#488: per-user stored destination outranks env.
+      const targetEmail = resolveEmailDestination({
+        eventEmailTo: options.emailTo,
+        storedEmailTo: await getStoredEmailDestination(this.env, options.userLogin || this.userLogin),
+        env: this.env as unknown as Record<string, unknown>,
+      });
       if (targetEmail && !chainMode) {
         const cfpay = getCfpayConfig(this.env);
         let emailOk = false;

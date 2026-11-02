@@ -90,11 +90,11 @@ describe("shell-retain routing (#2149)", () => {
     }
   });
 
-  it("the trading set is still exactly the historical 13 ids (#388)", () => {
+  it("the trading set is still exactly the historical 13 ids plus stock-hub (#388, #2896)", () => {
     expect([...TRADING_TABS].sort()).toEqual(
       [
         "autopilot", "ledger", "omnichannel", "options", "order", "orders",
-        "portfolio", "reports", "scanner", "schedules", "screeners", "trading", "voice",
+        "portfolio", "reports", "scanner", "schedules", "screeners", "stock-hub", "trading", "voice",
       ].sort(),
     );
   });

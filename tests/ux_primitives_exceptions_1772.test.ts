@@ -97,7 +97,9 @@ const PARTIAL_16 = [
   "src/client/MarketDataResearchHub.tsx",
   "src/client/IaaaAdminPanel.tsx",
   "src/client/ReportsPanel.tsx",
-  "src/client/ScreenersHub.tsx",
+  // #2896: the stocks surface (and its controls) moved to StockHub;
+  // the trimmed old hub renders no controls and imports no primitive.
+  "src/client/StockHub.tsx",
   "src/client/chat/tabs/AdsTab.tsx",
   "src/client/chat/tabs/ResearchRunDetail.tsx",
   "src/client/chat/tabs/ResearchTrackRecord.tsx",

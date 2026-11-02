@@ -163,8 +163,8 @@ describe("Issue #1326 — RunDetailView", () => {
     expect(container.textContent || "").toContain("No delivery record linked to this run.");
   });
 
-  it("ScreenersHub wires the view into the selected-run area (source pin)", () => {
-    const hub = readFileSync("src/client/ScreenersHub.tsx", "utf8");
+  it("StockHub wires the view into the selected-run area (source pin, #2896)", () => {
+    const hub = readFileSync("src/client/StockHub.tsx", "utf8");
     expect(hub).toContain("RunDetailView");
   });
 });

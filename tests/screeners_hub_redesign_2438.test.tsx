@@ -18,9 +18,14 @@ import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { readFileSync } from "node:fs";
+import { StockHub } from "../src/client/StockHub";
 import { ScreenersHub } from "../src/client/ScreenersHub";
+import { ToastProvider } from "../src/client/components/ui/Toast";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+
+// jsdom does not implement scrollIntoView; the tab bar centers the active chip.
+Element.prototype.scrollIntoView = vi.fn() as any;
 
 const opp = (symbol: string, momentumScore: number) => ({
   symbol,
@@ -134,12 +139,25 @@ async function flush() {
   });
 }
 
-async function renderHub(props: Partial<React.ComponentProps<typeof ScreenersHub>> = {}) {
+async function renderHub(props: Partial<React.ComponentProps<typeof StockHub>> = {}) {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
   await act(async () => {
-    root.render(<ScreenersHub activeEnv="PROD" userLogin="tester" {...props} />);
+    root.render(<StockHub activeEnv="PROD" userLogin="tester" {...props} />);
+  });
+  await flush();
+  await flush();
+}
+
+// The old hub still hosts the planned-asset bar; its default options tab
+// needs toast context (#2896: stocks left the old hub for StockHub).
+async function renderOldHub() {
+  container = document.createElement("div");
+  document.body.appendChild(container);
+  root = createRoot(container);
+  await act(async () => {
+    root.render(<ToastProvider><ScreenersHub activeEnv="PROD" userLogin="tester" /></ToastProvider>);
   });
   await flush();
   await flush();
@@ -160,14 +178,22 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-describe("ScreenersHub redesign (#2438)", () => {
+describe("StockHub redesign (#2438, moved by #2896)", () => {
   it("shows the Planned tabs in the primary bar (#2783 supersedes the #2438 exclusion)", async () => {
-    await renderHub();
+    // Planned asset tabs still live on the old hub's asset bar.
+    await renderOldHub();
     const barButtons = Array.from(container.querySelectorAll("button")).map((b) => b.textContent || "");
     for (const planned of ["Forex", "Futures", "Commodities", "Bonds"]) {
       expect(barButtons.some((t) => t.includes(planned))).toBe(true);
     }
-    expect(barButtons.some((t) => t.includes("Stocks"))).toBe(true);
+    // Stocks left the old hub for StockHub (#2896): its tab bar carries it.
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+    await renderHub();
+    const hubButtons = Array.from(container.querySelectorAll("button")).map((b) => b.textContent || "");
+    expect(hubButtons.some((t) => t.includes("Stocks"))).toBe(true);
   });
 
   it("drops the grouped universe cards and keeps the compact run list", async () => {

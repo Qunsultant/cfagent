@@ -3,7 +3,7 @@
  * Left-nav UX and interaction test suite (issue #2685):
  *  1. Collapsible sidebar and collapsed layout state
  *  2. Dual-target toggle: clicking the menu item row or chevron toggles sub-menus
- *  3. Stock Screener: renamed from Screeners, contains screeners & research only
+ *  3. Stock Hub: the stock-specific hub (issue #2896), contains stocks, new-screen & research
  *  4. Options Screener: contains options, scanner, options-flows, iv-history; no docs/runs/schedules
  *  5. Workflows menu: hosts docs, workflow-runs, reports, review, track-record
  *  6. Platform menu: hosts platform-admin, schedules, agents, audit, workflows, endpoints
@@ -62,7 +62,7 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
     expect(titles).toContain("INTELLIGENCE & COPILOT");
     expect(titles).toContain("WORKFLOWS");
     expect(titles).toContain("MARKETING");
-    expect(titles).toContain("BILLING");
+    expect(titles).toContain("BILLINGS/PAYMENTS");
     expect(titles).toContain("PLATFORM");
     expect(titles).toContain("PLANNED");
     expect(titles).toContain("SANDBOX");
@@ -94,11 +94,11 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
     expect(itemIds).toContain("omnichannel");
   });
 
-  it("positions Options Screener directly after Stock Screener and Chat under Goal Screen", () => {
+  it("positions Options Screener directly after Stock Hub and Chat under Goal Screen", () => {
     const intel = DEFAULT_LEFT_NAV_CONFIG.sections.find((s) => s.id === "section-intelligence");
     expect(intel).toBeDefined();
     const itemIds = intel!.items.map((i) => i.id);
-    const stockIdx = itemIds.indexOf("screeners");
+    const stockIdx = itemIds.indexOf("stock-hub");
     const optIdx = itemIds.indexOf("options-screener");
     const goalIdx = itemIds.indexOf("goal-screen");
     const chatIdx = itemIds.indexOf("chat");
@@ -109,15 +109,16 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
     expect(chatIdx).toBe(goalIdx + 1);
   });
 
-  it("positions Workflows & FAQ as the last menu item of Platform", () => {
+  it("positions workflows in the Workflows sub-menu and not top-level in Platform", () => {
     const plat = DEFAULT_LEFT_NAV_CONFIG.sections.find((s) => s.id === "section-platform");
     expect(plat).toBeDefined();
-    const lastItem = plat!.items[plat!.items.length - 1];
-    expect(lastItem.id).toBe("workflows");
+    const itemIds = plat!.items.map((i) => i.id);
+    expect(itemIds).not.toContain("workflows");
+    expect(itemIds).toContain("schedules");
   });
 
-  it("configures Stock Screener with only screeners and research sub-menus", () => {
-    const stockSubItems = SUB_MENU_CONFIGS.screeners;
+  it("configures Stock Hub with stocks, new-screen and research sub-menus", () => {
+    const stockSubItems = SUB_MENU_CONFIGS["stock-hub"];
     expect(stockSubItems).toBeDefined();
     const subIds = stockSubItems.map((s) => s.id);
     expect(subIds).toEqual(["screeners", "new-screen", "research"]);
@@ -127,37 +128,56 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
     expect(subIds).not.toContain("iv-history");
   });
 
-  it("configures Options Screener with contracts, scanner, flows, and iv-history, without docs/runs/schedules", () => {
+  it("configures Options Screener with contracts, scanner, flows, iv-history, and the research surfaces, without docs/runs/schedules", () => {
     const optionsSubItems = SUB_MENU_CONFIGS["options-screener"];
     expect(optionsSubItems).toBeDefined();
     const subIds = optionsSubItems.map((s) => s.id);
-    expect(subIds).toEqual(["options", "scanner", "options-flows", "iv-history"]);
+    expect(subIds).toEqual([
+      "options",
+      "scanner",
+      "options-flows",
+      "iv-history",
+      "discovery",
+      "strategy-panel",
+      "best-trade",
+      "compare",
+      "llm-ideas",
+      "llm-evaluate",
+      "run-records",
+      "nlq",
+    ]);
     expect(subIds).not.toContain("docs");
     expect(subIds).not.toContain("workflow-runs");
     expect(subIds).not.toContain("schedules");
   });
 
-  it("configures Workflows menu with docs, workflow-runs, reports, review, track-record", () => {
+  it("configures Workflows menu with docs, workflow-runs, workflows, reports, review, track-record", () => {
     const workflowSubItems = SUB_MENU_CONFIGS["workflow-runs"];
     expect(workflowSubItems).toBeDefined();
     const subIds = workflowSubItems.map((s) => s.id);
-    expect(subIds).toEqual(["docs", "workflow-runs", "reports", "review", "track-record"]);
+    expect(subIds).toEqual(["docs", "workflow-runs", "workflows", "reports", "review", "track-record"]);
   });
 
-  it("configures Sandbox menu with payment-assurance and sandbox-checkout", () => {
+  it("configures Sandbox menu with sandbox-checkout, and BILLINGS/PAYMENTS with payment-assurance", () => {
     const sandboxSubItems = SUB_MENU_CONFIGS.sandbox;
     expect(sandboxSubItems).toBeDefined();
     const subIds = sandboxSubItems.map((s) => s.id);
-    expect(subIds).toEqual(["payment-assurance", "sandbox-checkout"]);
+    expect(subIds).toEqual(["sandbox-checkout"]);
+
+    const billingSec = DEFAULT_LEFT_NAV_CONFIG.sections.find((s) => s.id === "section-billing");
+    expect(billingSec).toBeDefined();
+    expect(billingSec!.title).toBe("BILLINGS/PAYMENTS");
+    const itemIds = billingSec!.items.map((i) => i.id);
+    expect(itemIds).toContain("payment-assurance");
   });
 
   it("toggles sub-menu open and closed on menu row click", async () => {
     const onSelectTab = vi.fn();
     await renderNavBar({ onSelectTab });
 
-    // Find Stock Screener menu item button
+    // Find Stock Hub menu item button
     const buttons = Array.from(container.querySelectorAll(".sidebar-nav-item"));
-    const stockBtn = buttons.find((b) => b.textContent?.includes("Stock Screener")) as HTMLButtonElement;
+    const stockBtn = buttons.find((b) => b.textContent?.includes("Stock Hub")) as HTMLButtonElement;
     expect(stockBtn).toBeDefined();
 
     // Click menu row -> expands sub-menu
@@ -166,7 +186,7 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
     });
     // Issue #2776: nav rows navigate via the URL (Chat derives its tab
     // from the routechange subscription), not via the onSelectTab prop.
-    expect(window.location.search).toContain("tab=screeners");
+    expect(window.location.search).toContain("tab=stock-hub");
 
     // Sub-items should now be visible
     expect(container.textContent).toContain("Market Research");

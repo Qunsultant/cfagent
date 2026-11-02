@@ -272,12 +272,12 @@ async function click(container: HTMLElement, text: string) {
 /* ------------------------------------------------------------------ */
 
 describe("C2 nav collapse", () => {
-  it("NAVIGATION_ITEMS carries exactly one screening entry — the Screening hub", () => {
-    const screeningIds = ["screeners", "scanner", "options", "reports", "schedules"];
+  it("NAVIGATION_ITEMS carries exactly one screening entry — the Stock Hub (#2896)", () => {
+    const screeningIds = ["stock-hub", "scanner", "options", "reports", "schedules"];
     const present = NAVIGATION_ITEMS.filter((i) => screeningIds.includes(i.id)).map((i) => i.id);
-    expect(present).toEqual(["screeners"]);
-    const entry = NAVIGATION_ITEMS.find((i) => i.id === "screeners")!;
-    expect(entry.label).toBe("Stock Screener");
+    expect(present).toEqual(["stock-hub"]);
+    const entry = NAVIGATION_ITEMS.find((i) => i.id === "stock-hub")!;
+    expect(entry.label).toBe("Stock Hub");
   });
 
   it("screening tab ids still read as active on their host entry (deep links)", () => {
@@ -406,8 +406,9 @@ describe("C2 hub + panels (render)", () => {
   });
 
   it("the hub's tab bar carries Reports, Schedules, Review, and Track Record", async () => {
+    // Default tab is options since #2896, and its panel needs toast context.
     await act(async () => {
-      root.render(<ScreenersHub activeEnv="PROD" userLogin="alice" />);
+      root.render(<ToastProvider><ScreenersHub activeEnv="PROD" userLogin="alice" /></ToastProvider>);
     });
     await flush();
     for (const label of ["Reports", "Schedules", "Review", "Track Record"]) {

@@ -39,7 +39,7 @@ export interface LeftNavConfig {
  * Sub-menu configuration map for navigation items that contain sub-menus.
  */
 export const SUB_MENU_CONFIGS: Record<string, NavSubMenuItemConfig[]> = {
-  screeners: [
+  "stock-hub": [
     {
       id: "screeners",
       label: "Stock Screener",
@@ -105,6 +105,78 @@ export const SUB_MENU_CONFIGS: Record<string, NavSubMenuItemConfig[]> = {
       badgeType: "neutral",
       description: "Historical and implied volatility percentile ranks",
     },
+    {
+      id: "discovery",
+      label: "Discovery",
+      shortLabel: "Discovery",
+      icon: "Research",
+      badge: "Runs",
+      badgeType: "neutral",
+      description: "Scheduled and manual discovery runs and their reports",
+    },
+    {
+      id: "strategy-panel",
+      label: "Strategy Panel",
+      shortLabel: "Strategy",
+      icon: "StrategyScan",
+      badge: "Strategy",
+      badgeType: "ai",
+      description: "Strategy discovery and ranking for a symbol or universe",
+    },
+    {
+      id: "best-trade",
+      label: "Best Trade",
+      shortLabel: "Best",
+      icon: "Goal",
+      badge: "Best",
+      badgeType: "pro",
+      description: "The single best trade for a name, plus alternatives",
+    },
+    {
+      id: "compare",
+      label: "Compare",
+      shortLabel: "Compare",
+      icon: "Review",
+      badge: "Compare",
+      badgeType: "ai",
+      description: "Side-by-side comparison of candidate strategies, quant vs AI and across generators",
+    },
+    {
+      id: "llm-ideas",
+      label: "LLM Ideas",
+      shortLabel: "LLM",
+      icon: "Copilot",
+      badge: "LLM",
+      badgeType: "ai",
+      description: "LLM evaluation of quantitative candidates",
+    },
+    {
+      id: "llm-evaluate",
+      label: "LLM Evaluate",
+      shortLabel: "Eval",
+      icon: "Audit",
+      badge: "Eval",
+      badgeType: "mcp",
+      description: "LLM evaluation of one chosen strategy, from the discovery list",
+    },
+    {
+      id: "run-records",
+      label: "Run Records",
+      shortLabel: "Records",
+      icon: "Runs",
+      badge: "Runs",
+      badgeType: "neutral",
+      description: "The options run record: scheduled and manual discovery runs, the screening activity log, and the schedules pointer",
+    },
+    {
+      id: "nlq",
+      label: "NLQ",
+      shortLabel: "NLQ",
+      icon: "Search",
+      badge: "NLQ",
+      badgeType: "neutral",
+      description: "Natural-language options screen: describe the trade and scan underlyings for it",
+    },
   ],
   "workflow-runs": [
     {
@@ -124,6 +196,15 @@ export const SUB_MENU_CONFIGS: Record<string, NavSubMenuItemConfig[]> = {
       badge: "Runs",
       badgeType: "neutral",
       description: "Every recorded workflow run with its stages and artifacts",
+    },
+    {
+      id: "workflows",
+      label: "Workflows & FAQ",
+      shortLabel: "Guides",
+      icon: "Guides",
+      badge: "14 Guides",
+      badgeType: "neutral",
+      description: "Platform architecture guides, strategy playbooks, order mechanics & FAQ",
     },
     {
       id: "reports",
@@ -181,15 +262,6 @@ export const SUB_MENU_CONFIGS: Record<string, NavSubMenuItemConfig[]> = {
     description: item.description,
   })),
   sandbox: [
-    {
-      id: "payment-assurance",
-      label: "Payment Assurance",
-      shortLabel: "Assurance",
-      icon: "Assurance",
-      badge: "Test",
-      badgeType: "neutral",
-      description: "Live & simulation payment assurance test suite",
-    },
     {
       id: "sandbox-checkout",
       label: "Checkout sandbox",
@@ -249,7 +321,7 @@ const SECTION_METADATA: { category: RouteCategory; title: string; id: string }[]
   { category: "Intelligence", title: "INTELLIGENCE & COPILOT", id: "section-intelligence" },
   { category: "Playbooks", title: "WORKFLOWS", id: "section-workflows" },
   { category: "Marketing", title: "MARKETING", id: "section-marketing" },
-  { category: "Billing", title: "BILLING", id: "section-billing" },
+  { category: "Billing", title: "BILLINGS/PAYMENTS", id: "section-billing" },
   { category: "Platform", title: "PLATFORM", id: "section-platform" },
 ];
 
@@ -271,7 +343,7 @@ const SUB_MENU_HOSTED_IDS = new Set([
   "options-flows",
   "research",
   "docs",
-  "payment-assurance",
+  "workflows",
   "endpoints",
   PLATFORM_ADMIN_NAV_ID,
 ]);
@@ -456,12 +528,6 @@ export function isNavItemOrSubItemActive(
       return currentTab === "screeners" && (view === "schedules" || view === "schemas");
     }
   }
-  if (item.id === "screeners") {
-    if (typeof window !== "undefined") {
-      const view = new URLSearchParams(window.location.search).get("view");
-      if (view === "goal-screen" || view === "schedules" || view === "schemas") return false;
-    }
-  }
   if (getNavGroup(currentTab) === item.id) return true;
   if (item.subItems) {
     return item.subItems.some((sub) => {
@@ -469,7 +535,7 @@ export function isNavItemOrSubItemActive(
       if (getNavGroup(currentTab) === sub.id) return true;
       if (typeof window !== "undefined") {
         const view = new URLSearchParams(window.location.search).get("view");
-        if (currentTab === "screeners" && view === sub.id) return true;
+        if ((currentTab === "screeners" || currentTab === "stock-hub") && view === sub.id) return true;
       }
       return false;
     });

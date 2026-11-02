@@ -11,6 +11,7 @@ import type { ActorSessionPort, ActorTurnHooks, ActorTurnPort } from "../actors/
 import type { ToolSet } from "ai";
 import { getWorkersAIModel } from "./model";
 import { resolveScreenerAgentName } from "./screenerAgentName";
+import { actorGateway } from "../services/cloudflareActorGateway";
 import { buildOrchestratorSystemPrompt, resolveShadowMaxSteps } from "./chatPrompt";
 import { LLMJudge } from "./judge";
 import { VectorMemory } from "../memory/vector-memory";
@@ -57,6 +58,7 @@ import { diffScanRuns } from "../trading";
 import { createOptionsDiscoveryPorts } from "../data/createOptionsDiscoveryPorts";
 import { createOrchestratorTablePorts } from "../data/createOrchestratorTablePorts";
 import { createOrmPorts } from "../data/createOrmPorts";
+import { SqlLegacyChatStore } from "../data/doSqliteLegacyChatAdapter";
 import { createDidAttestation, resolveAgentDidDocument } from "./did";
 import { createMAS } from "./mas";
 import { dispatchOrchestratorA2A, orchestratorA2AOutcome, type OrchestratorA2AOutcome } from "./orchestrator/a2aDispatch";
@@ -731,8 +733,11 @@ export class OrchestratorAgent extends PortThink {
   private getScreenerAgent(userLogin?: string): ScreenerAgent {
     // Issue #1185: per-owner instances; naming/owner resolution lives
     // in ./screenerAgentName (fail closed without an identity).
-    const id = this.env.SCREENER_AGENT.idFromName(resolveScreenerAgentName(this.env, userLogin));
-    return this.env.SCREENER_AGENT.get(id) as unknown as ScreenerAgent;
+    // Addressing rides the ActorGateway (#1779); the stub type is unchanged.
+    return actorGateway.stub<ScreenerAgent>(
+      this.env.SCREENER_AGENT,
+      resolveScreenerAgentName(this.env, userLogin),
+    );
   }
 
   // Issue #992: extracted to ./orchestrator/scheduleMaintenance.ts (getScreenerExecutionContext);
@@ -765,8 +770,8 @@ export class OrchestratorAgent extends PortThink {
     const trimmed = typeof userLogin === "string" ? userLogin.trim() : "";
     if (!trimmed || trimmed === "default") return null;
     const login = userLogin as string;
-    const id = ns.idFromName(`research:${login}`);
-    return ns.get(id) as unknown as ResearchAgent;
+    // Addressing rides the ActorGateway (#1779); the null guards above are unchanged.
+    return actorGateway.stub<ResearchAgent>(ns, `research:${login}`);
   }
 
   // Issue #992: extracted to ./orchestrator/researchPublish.ts (runResearchAndPublish);
@@ -993,19 +998,13 @@ export class OrchestratorAgent extends PortThink {
    * in place and log, so the rows remain recoverable.
    */
   private async liftLegacyChatMessages(): Promise<void> {
-    const sql = this.ctx.storage.sql;
-    const exists =
-      Array.from(
-        sql.exec(
-          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'cf_ai_chat_agent_messages'"
-        )
-      ).length > 0;
-    if (!exists) return;
-    const rows = Array.from(
-      sql.exec(
-        "SELECT id, message, created_at FROM cf_ai_chat_agent_messages ORDER BY created_at ASC, rowid ASC"
-      )
-    ) as Array<{ id: string; message: string; created_at: unknown }>;
+    // Issue #1776 (#1717 Adapter S2): the lift's SQL lives in
+    // SqlLegacyChatStore (src/data/doSqliteLegacyChatAdapter.ts)
+    // behind the existing SqlStorage injection; this method keeps
+    // only the validation / import / drop-on-clean-lift logic.
+    const store = new SqlLegacyChatStore(this.ctx.storage.sql);
+    if (!store.tableExists()) return;
+    const rows = store.listLegacyRows();
     const valid: any[] = [];
     let skipped = 0;
     for (const row of rows) {
@@ -1027,7 +1026,7 @@ export class OrchestratorAgent extends PortThink {
     }
     if (valid.length > 0) await this.addPortMessages(valid as any);
     if (skipped === 0) {
-      sql.exec("DROP TABLE cf_ai_chat_agent_messages");
+      store.dropTable();
       return;
     }
     console.error(

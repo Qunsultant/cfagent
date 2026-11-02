@@ -11,8 +11,8 @@
  *   via resolveRouteId, exactly like today's unknown-tab behavior.
  *
  * The catalog is keyed by nav-node key, not bare id: the top-level
- * `screeners` item and the `screeners` sub-item under it are different
- * nodes with different links (?tab=screeners vs ?tab=screeners&view=stocks).
+ * `stock-hub` item and the `screeners` sub-item under it are different
+ * nodes with different links (?tab=stock-hub vs ?tab=stock-hub&view=stocks).
  */
 import {
   DEFAULT_LEFT_NAV_CONFIG,
@@ -24,8 +24,12 @@ import {
 import { navigateToTab } from "./router";
 import { resolveRouteId, type RouteId } from "./routes";
 import { SCREENER_HUB_TABS } from "./ScreenersHub";
+import { STOCK_HUB_TABS } from "./StockHub";
+import { OPTIONS_RESEARCH_SURFACE_VALUES } from "./options/researchSurface";
 
-export type DeepLink = { tab: RouteId; view?: string } | { href: string; newTab?: boolean };
+export type DeepLink =
+  | { tab: RouteId; view?: string; params?: Record<string, string> }
+  | { href: string; newTab?: boolean };
 
 /**
  * The editable surface: nodes whose link differs from the default rule.
@@ -41,11 +45,28 @@ export const DEEP_LINK_OVERRIDES: Record<string, DeepLink> = {
   // link; the resolver falls back to the bare id when no parent:key entry
   // exists, so both paths resolve identically.
   "sandbox-checkout": { href: "/checkout/sandbox", newTab: true },
-  // Screener-hub views: sub-items that live under ?tab=screeners.
-  "screeners:new-screen": { tab: "screeners", view: "new-screen" },
-  "screeners:screeners": { tab: "screeners", view: "stocks" },
+  // Stock Hub views: sub-items that live under ?tab=stock-hub.
+  "stock-hub:new-screen": { tab: "stock-hub", view: "new-screen" },
+  "stock-hub:screeners": { tab: "stock-hub", view: "stocks" },
+  "stock-hub:research": { tab: "stock-hub", view: "research" },
+  // Old-hub views: sub-items that live under ?tab=screeners.
   "options-screener:scanner": { tab: "screeners", view: "scanner" },
   "options-screener:iv-history": { tab: "screeners", view: "iv-history" },
+  // Options research surfaces (issue #2784): the research param names
+  // the surface on the options host; the panel adopts mode + section.
+  // The Contract Screen sub used to resolve to bare ?tab=options, which
+  // lands on the default discovery mode — it now carries contracts.
+  "options-screener:options": { tab: "options", params: { research: "contracts" } },
+  "options-screener:discovery": { tab: "options", params: { research: "discovery" } },
+  "options-screener:strategy-panel": { tab: "options", params: { research: "strategy-panel" } },
+  "options-screener:best-trade": { tab: "options", params: { research: "best-trade" } },
+  "options-screener:compare": { tab: "options", params: { research: "compare" } },
+  "options-screener:llm-ideas": { tab: "options", params: { research: "llm-ideas" } },
+  "options-screener:llm-evaluate": { tab: "options", params: { research: "llm-evaluate" } },
+  // Run-records and NLQ surfaces (issue #2801): the panel already
+  // adopts these modes (#2784's mapping); the subs only need to name them.
+  "options-screener:run-records": { tab: "options", params: { research: "schedules" } },
+  "options-screener:nlq": { tab: "options", params: { research: "nlq" } },
   "workflow-runs:review": { tab: "screeners", view: "review" },
   "workflow-runs:track-record": { tab: "screeners", view: "track-record" },
   // Planned menu (issue #2783): subs link to their hub views. The
@@ -83,6 +104,9 @@ export function deepLinkHref(link: DeepLink): string {
   const params = new URLSearchParams();
   params.set("tab", link.tab);
   if (link.view) params.set("view", link.view);
+  if (link.params) {
+    for (const [key, value] of Object.entries(link.params)) params.set(key, value);
+  }
   return `?${params.toString()}`;
 }
 
@@ -99,7 +123,7 @@ export function navigateToDeepLink(link: DeepLink): void {
     else window.location.href = link.href;
     return;
   }
-  navigateToTab(link.tab, link.view);
+  navigateToTab(link.tab, link.view, link.params);
 }
 
 export interface DeepLinkCatalogEntry {
@@ -177,6 +201,13 @@ export interface SurfaceTabDef {
  */
 export const SURFACE_TAB_DEFS: SurfaceTabDef[] = [
   { surface: "screeners-hub", page: "screeners", param: "view", values: SCREENER_HUB_TABS },
+  { surface: "stock-hub", page: "stock-hub", param: "view", values: STOCK_HUB_TABS },
+  {
+    surface: "options-research",
+    page: "options",
+    param: "research",
+    values: OPTIONS_RESEARCH_SURFACE_VALUES,
+  },
   {
     surface: "platform-admin",
     page: "platform-admin",

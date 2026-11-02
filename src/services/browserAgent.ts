@@ -23,6 +23,7 @@ import type {
 import { AGENT_DIDS } from "../agents/did";
 import { SERVER_PALETTE } from "../theme/serverPalette";
 import { checkSlackWebhookRateLimit } from "./slackWebhookRateLimit";
+import { createBrowserRenderer } from "./cloudflareBrowserRenderer";
 import { getCfpayConfig, cfpayPostToSlack } from "./cfpayA2A";
 
 // ---------------------------------------------------------------------------
@@ -83,37 +84,33 @@ export class ETradeBrowserService {
     const timestamp = new Date().toISOString();
     const url = options.url;
 
-    // 1. If Cloudflare Browser Rendering binding is configured, use it
-    if (this.env?.BROWSER && typeof this.env.BROWSER.fetch === "function") {
-      try {
-        const renderReq = new Request("https://browser.cloudflare.local/scrape", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            url,
-            selector: options.selector || "body",
-            waitForTimeout: options.waitForTimeoutMs || 3000,
-            screenshot: options.screenshot ?? false,
-          }),
-        });
-
-        const resp = await this.env.BROWSER.fetch(renderReq);
-        if (resp.ok) {
-          const data = (await resp.json()) as any;
-          return {
-            success: true,
-            url,
-            title: data.title || "E*TRADE Financial Portal",
-            text: data.text || data.content || "",
-            tables: data.tables || [],
-            screenshotBase64: data.screenshotBase64,
-            // Only the real Browser Rendering path produces an actual capture.
-            screenshotKind: data.screenshotBase64 ? "capture" : undefined,
-            timestamp,
-          };
-        }
-      } catch {
-        // Fall through to HTTP fetch + DOM parsing
+    // 1. If Cloudflare Browser Rendering binding is configured, use it.
+    // Issue #1778 (Adapter S4, program #1717): renders go through the
+    // one BrowserRenderer port; the Cloudflare BROWSER implementation
+    // lives in cloudflareBrowserRenderer.ts. Fail-soft contract
+    // preserved: a null render (unbound binding, non-OK response,
+    // throw) falls through to the HTTP-fetch + DOM-parsing fallback
+    // below, exactly as the pre-S4 direct call did.
+    const renderer = createBrowserRenderer(this.env);
+    if (renderer) {
+      const rendered = await renderer.render({
+        url,
+        selector: options.selector,
+        waitForTimeoutMs: options.waitForTimeoutMs,
+        screenshot: options.screenshot,
+      });
+      if (rendered) {
+        return {
+          success: true,
+          url,
+          title: rendered.title || "E*TRADE Financial Portal",
+          text: rendered.text || "",
+          tables: rendered.tables || [],
+          screenshotBase64: rendered.screenshotBase64,
+          // Only the real Browser Rendering path produces an actual capture.
+          screenshotKind: rendered.screenshotBase64 ? "capture" : undefined,
+          timestamp,
+        };
       }
     }
 

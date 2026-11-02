@@ -95,12 +95,14 @@ describe("Deep-link catalog (issue #2776)", () => {
       href: "/checkout/sandbox",
       newTab: true,
     });
-    expect(deepLinkForNavNode("screeners", "new-screen")).toEqual({
-      tab: "screeners",
+    // #2896: the screeners menu became the Stock Hub menu, so the
+    // stocks specials resolve under the stock-hub parent now.
+    expect(deepLinkForNavNode("stock-hub", "new-screen")).toEqual({
+      tab: "stock-hub",
       view: "new-screen",
     });
-    expect(deepLinkForNavNode("screeners", "screeners")).toEqual({
-      tab: "screeners",
+    expect(deepLinkForNavNode("stock-hub", "screeners")).toEqual({
+      tab: "stock-hub",
       view: "stocks",
     });
     expect(deepLinkForNavNode("options-screener", "scanner")).toEqual({

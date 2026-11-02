@@ -45,6 +45,8 @@ export function mapTabToTradingSubTab(targetTab: string): TradingSubTab {
       return "ledger";
     case "screeners":
       return "screeners";
+    case "stock-hub":
+      return "stock-hub";
     case "scanner":
       return "scanner";
     case "reports":

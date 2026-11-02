@@ -96,8 +96,11 @@ describe("IA: labels, crumbs, shortLabels are collision-free (#2174)", () => {
     expect(byId.get("options-flows")!.crumb).toBe("Options Flows");
     expect(byId.get("payments")!.navEntry!.label).toBe("Payments");
     expect(byId.get("payments")!.navEntry!.shortLabel).toBe("Payments");
-    expect(byId.get("screeners")!.navEntry!.label).toBe("Stock Screener");
-    expect(byId.get("screeners")!.navEntry!.shortLabel).toBe("Stocks");
+    // #2896: the screeners route lost its navEntry (host route now);
+    // the Stock Hub route carries the screening entry instead.
+    expect(byId.get("screeners")!.navEntry).toBeUndefined();
+    expect(byId.get("stock-hub")!.navEntry!.label).toBe("Stock Hub");
+    expect(byId.get("stock-hub")!.navEntry!.shortLabel).toBe("Stocks");
   });
 
   it("pins the nav-group taxonomy decision", () => {
