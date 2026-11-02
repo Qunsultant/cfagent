@@ -12,7 +12,8 @@ import type { AgentScheduleItem, Env, StockScreenerFilter } from "../../types";
 import type { NLQSchedulingPort, NLQSocialBriefPort, NLQStockScreenPort, NLQStockScreenRunResult } from "../nlq";
 import type { ScreenerAgent, ScreenerRunRequest } from "../screener-agent";
 import type { SocialBriefStore } from "../social/briefStore";
-import { shardableUniverses } from "../../trading";
+import { shardsForUniverse } from "../../workflows/screenExecutionBroker";
+import { planStockScreenRun } from "../../workflows/stockScreenPlanner";
 import { createWorkflowPorts } from "../../workflows/createWorkflowPorts";
 import { workflowTenantId } from "../../workflows/screenerWorkflowRoutes";
 import {
@@ -276,10 +277,17 @@ export function nlqStockScreenPort(ctx: NlqPortsContext): NLQStockScreenPort {
       }
       const viaWorkflow = await runChatScreenViaWorkflow(ctx, { filters, userLogin: login, universe });
       if (viaWorkflow) return viaWorkflow;
+      // Issue #2867: the direct fallback is planned through the
+      // one planner — same values (universe from the filters,
+      // else the planner default; trigger manual), derived once.
+      const fallbackPlan = planStockScreenRun(
+        { trigger: "manual", filters, universe },
+        new Date().toISOString(),
+      );
       return ctx.getScreenerAgent(userLogin).runScreen({
         trigger: "manual",
         filters,
-        universe,
+        universe: fallbackPlan.universe,
         userLogin,
         maxItems: 10,
       });
@@ -321,10 +329,8 @@ function buildChatScreenCommand(
   req: { filters: StockScreenerFilter; userLogin: string; universe?: string },
 ): ChatScreenCommandParts {
   const universeId = req.universe ?? "TECH";
-  const shards: WorkflowJobCommand["shards"] =
-    universeId === "ALL"
-      ? shardableUniverses().map((u) => ({ shardId: u, universe: u }))
-      : [{ shardId: universeId, universe: universeId }];
+  // Issue #2867: shard derivation is the broker's one policy.
+  const shards: WorkflowJobCommand["shards"] = shardsForUniverse(universeId);
   const nowMs = ctx.nowMs ?? (() => Date.now());
   const startedAtIso = new Date(nowMs()).toISOString();
   // Job id derived from the run (survey §3.4): the manual
