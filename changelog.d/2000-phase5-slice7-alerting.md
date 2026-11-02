@@ -1,0 +1,3 @@
+### Observability
+
+- **Wire the five-item alerting list into one inventory with consistent delivery and claim-once semantics (issue #2000, Phase 5 slice 7):** DLQ depth, breaker trips, and stuck rows ride the machinery slices 1, 2, and 6 established (postSlackText channel, existing claim stores); serve-stage failures and gather misses are built in-slice — a monolithic report-job failure now persists a first-class `serve/failed` failure state and pages once, and a goal gather miss emits the counts-only `goal.gather.missed` event (new type value only, no schema change) with a page on total miss only.
