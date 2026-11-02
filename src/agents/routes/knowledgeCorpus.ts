@@ -45,6 +45,7 @@
 
 import { unauthenticatedResponse } from "./routeIdentity";
 import { base64ToBytes } from "../../services/reportBlobStore";
+import { createBlobStore } from "../../services/blobStoreR2Adapter";
 import {
   runCorpusIntegrityCheck,
   runCorpusSync,
@@ -222,7 +223,7 @@ export async function handleKnowledgeCorpusRoutes(
       const report = await runCorpusIntegrityCheck({
         manifest: SEED_MANIFEST_ENTRIES,
         recordStore: ctx.storage,
-        bucket: ctx.env.REPORTS_BUCKET ?? null,
+        bucket: createBlobStore(ctx.env),
       });
       console.info(
         `[knowledgeCorpus] integrity GET ok=${report.ok} missing=${report.missing.length} mismatched=${report.mismatched.length} extra=${report.extra.length}`
@@ -331,7 +332,7 @@ export async function handleKnowledgeCorpusRoutes(
     const result = await runCorpusSync({
       manifest: SEED_MANIFEST_ENTRIES,
       recordStore: ctx.storage,
-      bucket: ctx.env.REPORTS_BUCKET ?? null,
+      bucket: createBlobStore(ctx.env),
       backfill: () => runCanonicalIndexBackfillAll(ctx.env, sql),
     });
     if (result.completed) {

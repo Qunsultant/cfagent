@@ -15,7 +15,14 @@
  *
  * The PDF is always a delivery artifact rendered from the canonical stored
  * copy in mas_reports (#308 model) — never a second copy of the report.
+ *
+ * Issue #1777 (Adapter S3): the R2 access here goes through the one
+ * BlobStore port (`blobStorePorts.ts` / `blobStoreR2Adapter.ts`) —
+ * this module keeps its public surface and its legacy DO-storage
+ * fallback exactly, only the access path moves behind the port.
  */
+
+import { createBlobStore } from "./blobStoreR2Adapter";
 
 interface BlobStorage {
   get<T>(key: string): Promise<T | undefined>;
@@ -87,11 +94,11 @@ export async function putReportPdf(
   bytes: Uint8Array,
   contentType = "application/pdf"
 ): Promise<void> {
-  const bucket = env.REPORTS_BUCKET;
-  if (bucket) {
+  const store = createBlobStore(env);
+  if (store) {
     const r2Key = r2KeyForStorageKey(key);
-    await bucket.put(r2Key, bytes, {
-      httpMetadata: { contentType },
+    await store.put(r2Key, bytes, {
+      contentType,
       customMetadata: { fileName },
     });
     const meta: ReportPdfMeta = {
@@ -118,14 +125,13 @@ export async function getReportPdf(
 ): Promise<{ bytes: Uint8Array; fileName: string } | null> {
   const meta = await storage.get<ReportPdfMeta>(key).catch(() => undefined);
   if (!meta) {
-    const bucket = env.REPORTS_BUCKET;
-    if (bucket) {
+    const store = createBlobStore(env);
+    if (store) {
       try {
-        const obj = await bucket.get(r2KeyForStorageKey(key));
+        const obj = await store.get(r2KeyForStorageKey(key));
         if (obj) {
-          const bytes = new Uint8Array(await obj.arrayBuffer());
           const fileName = obj.customMetadata?.fileName || `${key.split(":").pop() || "report"}.pdf`;
-          return { bytes, fileName };
+          return { bytes: obj.bytes, fileName };
         }
       } catch (err) {
         console.warn("[reportBlobStore] Direct R2 read failed:", err);
@@ -133,20 +139,19 @@ export async function getReportPdf(
     }
     return null;
   }
-  const bucket = env.REPORTS_BUCKET;
-  if (bucket && meta.r2Key) {
+  const store = createBlobStore(env);
+  if (store && meta.r2Key) {
     try {
-      const obj = await bucket.get(meta.r2Key);
+      const obj = await store.get(meta.r2Key);
       if (!obj) return null;
-      const bytes = new Uint8Array(await obj.arrayBuffer());
-      return { bytes, fileName: meta.fileName };
+      return { bytes: obj.bytes, fileName: meta.fileName };
     } catch (err) {
       console.warn("[reportBlobStore] R2 read failed, trying legacy:", err);
     }
   }
   if (meta.base64) {
     const bytes = base64ToBytes(meta.base64);
-    if (bucket) {
+    if (store) {
       // Issue #605 lazy migration: a legacy DO blob read while the
       // bucket is bound is copied to R2 and its DO record rewritten
       // as a pointer, so existing PDFs migrate on first serve and DO
@@ -154,8 +159,8 @@ export async function getReportPdf(
       // itself never fails because a migration write did.
       try {
         const r2Key = r2KeyForStorageKey(key);
-        await bucket.put(r2Key, bytes, {
-          httpMetadata: { contentType: "application/pdf" },
+        await store.put(r2Key, bytes, {
+          contentType: "application/pdf",
           customMetadata: { fileName: meta.fileName },
         });
         const pointer: ReportPdfMeta = {

@@ -91,6 +91,8 @@ import {
   type IndexEnv,
 } from "./reportSemanticIndex";
 import { indexCanonicalReportInAiSearch } from "./reportAiSearchIndex";
+import { createBlobStore } from "./blobStoreR2Adapter";
+import { blobText } from "./blobStorePorts";
 
 export const SCHEDULED_REPORTS_TABLE = "mas_reports";
 /** Body payload cap — keeps every row far under the SQLite row limit. */
@@ -759,12 +761,12 @@ export async function storeReportAtGenerationWithR2(
     const rec = toScheduledReportRecord(input);
     let bodyR2Key: string | null = null;
     let bodyStatus: FanoutBodyStatus = "inline";
-    const bucket = env?.REPORTS_BUCKET;
-    if (bucket) {
+    const store = createBlobStore(env);
+    if (store) {
       const key = reportBodyR2Key(rec.id);
       try {
-        await bucket.put(key, rec.body, {
-          httpMetadata: { contentType: "application/json" },
+        await store.put(key, rec.body, {
+          contentType: "application/json",
         });
         bodyR2Key = key;
         bodyStatus = "r2";
@@ -848,10 +850,10 @@ export async function deleteCanonicalReport(
     const hit = getCanonicalReport(sql, reportId);
     if (!hit) return false;
     if (hit.bodyR2Key) {
-      const bucket = env?.REPORTS_BUCKET;
-      if (bucket) {
+      const store = createBlobStore(env);
+      if (store) {
         try {
-          await bucket.delete(hit.bodyR2Key);
+          await store.delete(hit.bodyR2Key);
         } catch (err) {
           console.error(
             `[scheduledReports] deleteCanonicalReport: R2 delete failed for report ${reportId} (key ${hit.bodyR2Key}); deleting the row anyway — the orphan sweep owns the stranded object: ${err instanceof Error ? err.message : String(err)}`,
@@ -892,12 +894,12 @@ export async function resolveCanonicalReportBodyWithBackfill(
   hit: ScheduledReportHit
 ): Promise<string | null> {
   if (hit.bodyR2Key) return resolveCanonicalReportBody(env, hit);
-  const bucket = env?.REPORTS_BUCKET;
-  if (!bucket || !hit.body) return hit.body;
+  const store = createBlobStore(env);
+  if (!store || !hit.body) return hit.body;
   const key = reportBodyR2Key(hit.id);
   try {
-    await bucket.put(key, hit.body, {
-      httpMetadata: { contentType: "application/json" },
+    await store.put(key, hit.body, {
+      contentType: "application/json",
     });
     ensureScheduledReportsTable(sql);
     storePorts(sql).write.backfillBodyPointer(hit.id, key);
@@ -922,12 +924,12 @@ export async function resolveCanonicalReportBody(
   hit: ScheduledReportHit
 ): Promise<string | null> {
   if (!hit.bodyR2Key) return hit.body;
-  const bucket = env?.REPORTS_BUCKET;
-  if (!bucket) return null;
+  const store = createBlobStore(env);
+  if (!store) return null;
   try {
-    const obj = await bucket.get(hit.bodyR2Key);
+    const obj = await store.get(hit.bodyR2Key);
     if (!obj) return null;
-    return await obj.text();
+    return blobText(obj);
   } catch (err) {
     // Issue #876 doctrine: never silent — a failed body read is a
     // storage symptom the worker log must show.
