@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import { apiFetch as fetch } from "./apiFetch";
 import { Button, Checkbox, Select, Table, TextInput } from "./components/ui";
 import { getPollingConfig } from "./pollingConfig";
@@ -181,6 +182,502 @@ export function clearGoalTracking(jobId?: string): void {
   } catch {
     // Best-effort.
   }
+}
+
+/**
+ * Shared styles for the saga start section below — one definition per
+ * visual pattern, reused across the section, instead of a fresh inline
+ * style literal per element (the bespoke-styling ceiling counts
+ * literals, and the section repeats the same muted paragraph often).
+ */
+const sagaSectionStyle: CSSProperties = { marginTop: "1rem" };
+const sagaHeadingStyle: CSSProperties = { margin: "0 0 0.25rem", fontWeight: 600 };
+const sagaMutedStyle: CSSProperties = { margin: "0 0 0.5rem", color: "var(--color-text-muted)", fontSize: "var(--font-size-body)" };
+const sagaMutedPlainStyle: CSSProperties = { color: "var(--color-text-muted)", fontSize: "var(--font-size-body)" };
+const sagaMutedTightStyle: CSSProperties = { margin: "0 0 0.25rem", color: "var(--color-text-muted)" };
+const sagaFieldsetStyle: CSSProperties = { border: 0, margin: 0, padding: 0 };
+const sagaReceiptStyle: CSSProperties = { marginTop: "1rem", fontSize: "var(--font-size-body)" };
+const sagaListStyle: CSSProperties = { margin: "0 0 0.5rem", color: "var(--color-text-muted)" };
+
+/**
+ * Saga start + progress (issue 2677, slice B). The first client caller
+ * of GET /api/saga/:sagaId/status: it starts a paid saga journey
+ * through POST /api/saga/start (goal family only, per the saga
+ * program's working default) and polls the status route until the
+ * journey gate — then hands over to the existing gate cards
+ * (panel/chat/Slack) and the Trading Approvals Queue, which are NOT
+ * rebuilt here. Starting is a USER action (own session), never an
+ * operator action: the form is not operator-gated. Rendered text
+ * never uses the "#NNNN" issue-number form (the ratchet counts it
+ * as a hex literal).
+ */
+export const SAGA_TRACKING_KEY = "saga:tracking";
+
+export interface SagaTrackingHandle {
+  sagaId: string;
+  statusUrl: string;
+}
+
+export function loadSagaTracking(): SagaTrackingHandle | null {
+  try {
+    const raw = sessionStorage.getItem(SAGA_TRACKING_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<SagaTrackingHandle>;
+    if (typeof parsed.sagaId !== "string" || typeof parsed.statusUrl !== "string") return null;
+    return { sagaId: parsed.sagaId, statusUrl: parsed.statusUrl };
+  } catch {
+    return null;
+  }
+}
+
+export function persistSagaTracking(handle: SagaTrackingHandle): void {
+  try {
+    sessionStorage.setItem(SAGA_TRACKING_KEY, JSON.stringify(handle));
+  } catch {
+    // Best-effort; in-memory tracking still works.
+  }
+}
+
+export function clearSagaTracking(): void {
+  try {
+    sessionStorage.removeItem(SAGA_TRACKING_KEY);
+  } catch {
+    // Best-effort.
+  }
+}
+
+export function generateSagaIds(): { sagaId: string; runRequestId: string; jobId: string } {
+  // Mirrors the entry route's server-side default pattern
+  // (saga-<ts36>-<rand>); the run request id defaults to the saga id.
+  const suffix = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const sagaId = `saga-${suffix}`;
+  return { sagaId, runRequestId: sagaId, jobId: `saga-job-${suffix}` };
+}
+
+export function parseOptionLegs(text: string): { legs?: Array<Record<string, unknown>>; error?: string } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return { error: "Legs must be a JSON array." };
+  }
+  if (!Array.isArray(parsed) || parsed.length < 1) {
+    return { error: "Legs must be a JSON array with at least one leg." };
+  }
+  if (!parsed.every((leg) => !!leg && typeof leg === "object" && !Array.isArray(leg))) {
+    return { error: "Each leg must be a JSON object." };
+  }
+  return { legs: parsed as Array<Record<string, unknown>> };
+}
+
+export interface SagaStartFields {
+  userLogin: string;
+  kind: "stock" | "options";
+  symbol: string;
+  action: "buy" | "sell";
+  quantity: string;
+  rail: "" | "stripe" | "x402";
+  email: string;
+  legsText: string;
+}
+
+export function buildSagaStartBody(
+  fields: SagaStartFields,
+  ids: { sagaId: string; runRequestId: string; jobId: string },
+): { body?: Record<string, unknown>; error?: string } {
+  const symbol = fields.symbol.trim().toUpperCase();
+  if (!symbol) return { error: "Symbol is required." };
+  const quantity = Number(fields.quantity);
+  if (!Number.isFinite(quantity) || quantity <= 0) return { error: "Quantity must be a positive number." };
+  const email = fields.email.trim();
+  // Slightly stricter than the route's non-empty rule, so the form
+  // never creates a run with a garbage delivery address.
+  if (!email || !email.includes("@")) return { error: "Email is required." };
+  let optionLegs: Array<Record<string, unknown>> | undefined;
+  if (fields.kind === "options") {
+    const parsed = parseOptionLegs(fields.legsText.trim());
+    if (parsed.error) return { error: parsed.error };
+    optionLegs = parsed.legs;
+  }
+  const tradeIntent: Record<string, unknown> = {
+    kind: fields.kind,
+    symbol,
+    action: fields.action,
+    quantity,
+    ...(optionLegs ? { optionLegs } : {}),
+  };
+  return {
+    body: {
+      sagaId: ids.sagaId,
+      runRequestId: ids.runRequestId,
+      // Canonical parent screener command (the same shape the goal
+      // workflow submission builds); the route validates jobId and
+      // that userLogin equals the session login, nothing more.
+      screenerCommand: {
+        jobId: ids.jobId,
+        type: "run-screen",
+        source: "manual",
+        trigger: "manual",
+        userLogin: fields.userLogin,
+        role: "parent",
+        shards: [{ shardId: "goal" }],
+      },
+      tradeIntent,
+      email,
+      family: "goal",
+      trigger: "manual",
+      ...(fields.rail ? { rail: fields.rail } : {}),
+    },
+  };
+}
+
+export interface SagaStatusJob {
+  stage: string;
+  status: string;
+  detail?: string;
+  updatedAtMs?: number;
+}
+
+export function sagaProgressPhase(jobs: SagaStatusJob[]): "gate" | "done" | null {
+  if (jobs.some((job) => job.stage === "done")) return "done";
+  if (jobs.some((job) => job.stage === "journey")) return "gate";
+  return null;
+}
+
+export function mapSagaStartError(status: number, serverError: string | null): string {
+  if (status === 401) return "Sign in to start a saga.";
+  if (status === 403) {
+    return serverError && serverError.includes("monetization flag")
+      ? "Saga start is disabled — the monetization flag is OFF. An owner enables it in the Flagship dashboard."
+      : "Saga start was refused. The monetization flag may be OFF.";
+  }
+  if (status === 400) return serverError ?? "Saga start was rejected — check the form.";
+  if (status === 503) return serverError ?? "Saga start is unavailable right now.";
+  return serverError ?? `Saga start failed (HTTP ${status}).`;
+}
+
+export type SagaProgressPhase = "polling" | "gate" | "done" | "stopped" | "error";
+
+export function SagaStartSection({ userLogin }: { userLogin?: string }) {
+  const [flagState, setFlagState] = useState<"loading" | "on" | "off" | "unknown">("loading");
+  const [kind, setKind] = useState<"stock" | "options">("stock");
+  const [symbol, setSymbol] = useState("");
+  const [action, setAction] = useState<"buy" | "sell">("buy");
+  const [quantity, setQuantity] = useState("");
+  const [rail, setRail] = useState<"" | "stripe" | "x402">("");
+  const [email, setEmail] = useState("");
+  const [legsText, setLegsText] = useState("");
+  const [formError, setFormError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [started, setStarted] = useState<{
+    sagaId: string;
+    runRequestId: string;
+    statusUrl: string;
+    disclosure: string | null;
+    existing: boolean;
+  } | null>(null);
+  const [jobs, setJobs] = useState<SagaStatusJob[]>([]);
+  const [instanceStatus, setInstanceStatus] = useState<string | null>(null);
+  const [outcomeCode, setOutcomeCode] = useState<string | null>(null);
+  const [phase, setPhase] = useState<SagaProgressPhase>("polling");
+  const [progressError, setProgressError] = useState("");
+
+  // Flag pre-check via the pricing route's monetizationEnabled: the
+  // flag value itself lives only in Flagship and cannot be read
+  // here, but the pricing route evaluates it for the session. A
+  // failed pre-check leaves the flag unknown and the form enabled —
+  // a 403 from the start POST itself still surfaces the reason.
+  useEffect(() => {
+    if (!userLogin) {
+      setFlagState("unknown");
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/payments/agentic/commercial/pricing", {
+          headers: { "x-user-login": userLogin },
+        });
+        if (cancelled) return;
+        const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+        setFlagState(res.ok && data["monetizationEnabled"] === true ? "on" : res.ok ? "off" : "unknown");
+      } catch {
+        if (!cancelled) setFlagState("unknown");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userLogin]);
+
+  // Resume a followed run after reload (same sessionStorage pattern
+  // as goal-screen tracking); the status route is not flag-gated,
+  // so resuming works even with the flag off.
+  useEffect(() => {
+    const handle = loadSagaTracking();
+    if (handle) {
+      setStarted({ sagaId: handle.sagaId, runRequestId: "", statusUrl: handle.statusUrl, disclosure: null, existing: true });
+      setPhase("polling");
+    }
+  }, []);
+
+  // Gate-cards' 30s setInterval pattern (not the 2s staged-run loop:
+  // a saga run is long-lived — payment plus screen take minutes).
+  // Stops at the gate, at a terminal outcome, on error, or on
+  // "Stop following" (effect cleanup clears the interval).
+  useEffect(() => {
+    if (!started?.statusUrl || phase !== "polling") return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const res = await fetch(started.statusUrl, {
+          headers: { ...(userLogin ? { "x-user-login": userLogin } : {}) },
+        });
+        const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+        if (cancelled) return;
+        if (!res.ok) {
+          if (res.status === 404) setProgressError("Saga not found (runs are owner-scoped).");
+          else if (res.status === 503) setProgressError("Saga status is unavailable (audit read failed).");
+          else setProgressError(typeof data["error"] === "string" ? (data["error"] as string) : `Saga status failed (HTTP ${res.status}).`);
+          setPhase("error");
+          return;
+        }
+        const nextJobs = Array.isArray(data["jobs"]) ? (data["jobs"] as SagaStatusJob[]) : [];
+        setJobs(nextJobs);
+        setInstanceStatus(typeof data["instanceStatus"] === "string" ? (data["instanceStatus"] as string) : null);
+        setOutcomeCode(typeof data["outcomeCode"] === "string" ? (data["outcomeCode"] as string) : null);
+        const terminal = sagaProgressPhase(nextJobs);
+        if (terminal) setPhase(terminal);
+      } catch {
+        if (!cancelled) {
+          setProgressError("Saga status could not be reached.");
+          setPhase("error");
+        }
+      }
+    };
+    void poll();
+    const timer = setInterval(poll, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [started?.statusUrl, phase, userLogin]);
+
+  const disabled = !userLogin || flagState === "off";
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (submitting || disabled || !userLogin) return;
+    const { body, error } = buildSagaStartBody(
+      { userLogin, kind, symbol, action, quantity, rail, email, legsText },
+      generateSagaIds(),
+    );
+    if (error || !body) {
+      setFormError(error ?? "Saga start was rejected — check the form.");
+      return;
+    }
+    setFormError("");
+    setSubmitting(true);
+    try {
+      const res = await fetch("/api/saga/start", {
+        method: "POST",
+        headers: { "x-user-login": userLogin, "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      if (!res.ok) {
+        setFormError(mapSagaStartError(res.status, typeof data["error"] === "string" ? (data["error"] as string) : null));
+        // A flag flip between pre-check and submit surfaces here:
+        // re-disable the form with the flag reason.
+        if (res.status === 403) setFlagState("off");
+        return;
+      }
+      // apiFetch intercepts a 202 only when the body has BOTH a
+      // string jobId and a string statusUrl; the saga 202 has a
+      // statusUrl but no jobId, so it passes through unchanged.
+      // The statusUrl fallback covers a future apiFetch change.
+      const sagaId = typeof data["sagaId"] === "string" ? (data["sagaId"] as string) : (body["sagaId"] as string);
+      const statusUrl =
+        typeof data["statusUrl"] === "string" ? (data["statusUrl"] as string) : `/api/saga/${sagaId}/status`;
+      setStarted({
+        sagaId,
+        runRequestId: typeof data["runRequestId"] === "string" ? (data["runRequestId"] as string) : (body["runRequestId"] as string),
+        statusUrl,
+        disclosure: typeof data["disclosure"] === "string" ? (data["disclosure"] as string) : null,
+        existing: data["existing"] === true,
+      });
+      persistSagaTracking({ sagaId, statusUrl });
+      setPhase("polling");
+      setJobs([]);
+      setProgressError("");
+    } catch {
+      setFormError("Saga start could not be reached.");
+    }
+    setSubmitting(false);
+  };
+
+  return (
+    <div style={sagaSectionStyle}>
+      <p style={sagaHeadingStyle}>Start a paid saga journey</p>
+      <p style={sagaMutedStyle}>
+        Pay for a goal screen, then decide at the journey gate whether
+        to enter the trading leg. Per-order approval still gates every
+        trade — this start never places an order. The run costs the
+        approved goal price; starting is open to any signed-in user
+        for their own runs.
+      </p>
+      {!userLogin && (
+        <p style={sagaMutedPlainStyle}>
+          Sign in to start a saga.
+        </p>
+      )}
+      {flagState === "off" && (
+        <div className="options-error" role="alert">
+          Saga start is disabled — the monetization flag is OFF. An
+          owner enables it in the Flagship dashboard.
+        </div>
+      )}
+      {flagState === "unknown" && userLogin && (
+        <p style={sagaMutedPlainStyle}>
+          Could not confirm the monetization flag — if it is OFF,
+          starting will be refused with the reason.
+        </p>
+      )}
+      <form onSubmit={(e) => void submit(e)}>
+        <fieldset disabled={disabled} style={sagaFieldsetStyle}>
+          <Select label="Trade intent kind" value={kind} onChange={(e) => setKind(e.target.value as "stock" | "options")}>
+            <option value="stock">Stock</option>
+            <option value="options">Options</option>
+          </Select>
+          <TextInput
+            label="Symbol"
+            type="text"
+            value={symbol}
+            onChange={(e) => setSymbol(e.target.value)}
+            placeholder="AAPL"
+          />
+          <Select label="Action" value={action} onChange={(e) => setAction(e.target.value as "buy" | "sell")}>
+            <option value="buy">Buy</option>
+            <option value="sell">Sell</option>
+          </Select>
+          <TextInput
+            label="Quantity"
+            type="number"
+            min="0"
+            step="any"
+            value={quantity}
+            onChange={(e) => setQuantity(e.target.value)}
+            placeholder="10"
+          />
+          <Select label="Payment rail (optional)" value={rail} onChange={(e) => setRail(e.target.value as "" | "stripe" | "x402")}>
+            <option value="">Default</option>
+            <option value="stripe">Stripe (card)</option>
+            <option value="x402">x402 (crypto)</option>
+          </Select>
+          <TextInput
+            label="Email"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@example.com"
+            hint="Outcome notices go to Slack; the email is part of the saga entry."
+          />
+          {kind === "options" && (
+            <TextInput
+              label="Option legs (JSON)"
+              multiline
+              rows={3}
+              value={legsText}
+              onChange={(e) => setLegsText(e.target.value)}
+              hint="A JSON array with at least one leg object. The entry route validates only that the array is non-empty."
+            />
+          )}
+          <Button type="submit" variant="primary" disabled={disabled} loading={submitting}>
+            Start paid saga
+          </Button>
+        </fieldset>
+      </form>
+      {formError && (
+        <div className="options-error" role="alert">
+          {formError}
+        </div>
+      )}
+      {started && (
+        <div style={sagaReceiptStyle} role="status">
+          <p style={sagaHeadingStyle}>
+            Saga started{started.existing && started.runRequestId === "" ? " (resumed)" : ""} — {started.sagaId}
+          </p>
+          {started.existing && started.runRequestId !== "" && (
+            <p style={sagaMutedTightStyle}>
+              Resumed an existing run for this saga id.
+            </p>
+          )}
+          {started.runRequestId && (
+            <p style={sagaMutedTightStyle}>Run request: {started.runRequestId}</p>
+          )}
+          <p style={sagaMutedTightStyle}>
+            <a href={started.statusUrl}>{started.statusUrl}</a>
+          </p>
+          {started.disclosure && (
+            <p style={sagaListStyle}>{started.disclosure}</p>
+          )}
+          {jobs.length > 0 ? (
+            <ul style={sagaListStyle}>
+              {jobs.map((job, i) => (
+                <li key={`${job.stage}-${i}`}>
+                  {job.stage}: {job.status}
+                  {job.detail ? ` — ${job.detail}` : ""}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            phase === "polling" && (
+              <p style={sagaListStyle}>Waiting for the first stage row…</p>
+            )
+          )}
+          {instanceStatus && (
+            <p style={sagaMutedTightStyle}>Instance: {instanceStatus}</p>
+          )}
+          {phase === "polling" && (
+            <p style={sagaListStyle}>
+              Following this run (refreshes every 30 seconds)…{" "}
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => {
+                  clearSagaTracking();
+                  setPhase("stopped");
+                }}
+              >
+                Stop following
+              </Button>
+            </p>
+          )}
+          {phase === "gate" && (
+            <p style={sagaListStyle}>
+              Gate reached — decide with the pending journey card above
+              (panel, chat, or Slack). First answer wins.
+            </p>
+          )}
+          {phase === "done" && (
+            <p style={sagaListStyle}>
+              Saga ended{outcomeCode ? `: ${outcomeCode}` : "."}
+            </p>
+          )}
+          {phase === "stopped" && (
+            <p style={sagaListStyle}>
+              Not following — reopen via the status link above.
+            </p>
+          )}
+          {phase === "error" && progressError && (
+            <div className="options-error" role="alert">
+              {progressError}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function GoalScreenPanel({ activeEnv, userLogin }: GoalScreenPanelProps) {
@@ -652,6 +1149,8 @@ export function GoalScreenPanel({ activeEnv, userLogin }: GoalScreenPanelProps) 
           {"Run goal screen"}
         </Button>
       </form>
+
+      <SagaStartSection userLogin={userLogin} />
 
       {error && <div className="options-error" role="alert">{error}</div>}
 
