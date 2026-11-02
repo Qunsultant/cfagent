@@ -16,6 +16,7 @@ import { TextInput } from "../../components/ui/TextInput";
 import { FieldShell } from "../../components/ui/Field";
 import { Tabs, TabPanel } from "../../components/ui/Tabs";
 import { useUrlSyncedTabs } from "../../useUrlSyncedTabs";
+import { BRAND } from "../../branding";
 
 export interface ReferralsTabProps {
   activeShareRefId: string | null;
@@ -132,7 +133,7 @@ export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copi
               <div className="ui-stat-grid">
                 <a
                   href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(
-                    `Build autonomous AI trading and intelligence agents on NextGenTP: ${personalReferralUrl}`
+                    `Build autonomous AI trading and intelligence agents on ${BRAND.name}: ${personalReferralUrl}`
                   )}`}
                   target="_blank"
                   rel="noopener noreferrer"
@@ -155,7 +156,7 @@ export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copi
                 <a
                   href={`https://reddit.com/submit?url=${encodeURIComponent(
                     personalReferralUrl
-                  )}&title=${encodeURIComponent("NextGenTP: Autonomous Multi-Agent Trading & Strategy Execution")}`}
+                  )}&title=${encodeURIComponent(`${BRAND.name}: Autonomous Multi-Agent Trading & Strategy Execution`)}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="social-btn reddit"
@@ -207,7 +208,7 @@ export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copi
                 </a>
                 <a
                   href={`https://bsky.app/intent/compose?text=${encodeURIComponent(
-                    `Check out NextGenTP for multi-agent trading: ${personalReferralUrl}`
+                    `Check out ${BRAND.name} for multi-agent trading: ${personalReferralUrl}`
                   )}`}
                   target="_blank"
                   rel="noopener noreferrer"
@@ -219,7 +220,7 @@ export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copi
                 <a
                   href={`https://news.ycombinator.com/submitlink?u=${encodeURIComponent(
                     personalReferralUrl
-                  )}&t=${encodeURIComponent("NextGenTP: Institutional Multi-Agent Trading System")}`}
+                  )}&t=${encodeURIComponent(`${BRAND.name}: Institutional Multi-Agent Trading System`)}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="social-btn hackernews"
