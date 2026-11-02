@@ -21,6 +21,17 @@
  *     provider "yahoo", delivery = {} — the parsed envelope is
  *     deliberately NOT forwarded, exactly as today: the
  *     market-data route has no deliver step.
+ *   - Goal stock leg (issue #2882): source "goal", deliver
+ *     false, provider unset, universe "ALL", asyncRequested
+ *     false, delivery = {}. Goal delivery and the goal
+ *     provider stay owned by goal dispatch; the broker never
+ *     starts a screener workflow for a goal spec (it returns
+ *     null). "ALL" records that goal legs are not
+ *     universe-scoped (the registry provider screens its
+ *     listings feed) — it is not a coverage claim, and the
+ *     spec is a canonical record of the leg, not an
+ *     execution reroute: goal execution stays in
+ *     goalDrivenScreen + goal dispatch.
  *
  * Ordering contract (preserves both routes' behaviour exactly):
  * the E*TRADE route admits the mode BEFORE its listings switch
@@ -51,7 +62,7 @@ export interface StockScreenDelivery {
   generatePdf?: boolean;
 }
 
-export type StockScreenSource = "etrade" | "market-data";
+export type StockScreenSource = "etrade" | "market-data" | "goal";
 
 /**
  * The normalized run spec both REST routes execute from. `minScore`
@@ -61,9 +72,9 @@ export type StockScreenSource = "etrade" | "market-data";
  */
 export interface StockScreenRunSpec {
   source: StockScreenSource;
-  /** Undefined for E*TRADE (agent default); "yahoo" for market-data. */
+  /** Undefined for E*TRADE (agent default) and goal (goal-owned); "yahoo" for market-data. */
   provider?: "yahoo";
-  /** The pinned delivery divergence: E*TRADE true, market-data false. */
+  /** The pinned delivery divergence: E*TRADE true, market-data and goal false. */
   deliver: boolean;
   filters: StockScreenerFilter;
   universe: string;
@@ -72,6 +83,12 @@ export interface StockScreenRunSpec {
   delivery: StockScreenDelivery;
   screenMode?: "non-deterministic";
   screenIntent?: string;
+  /** Issue #2882: goal provenance, present only on source "goal" specs. Kept as a reference, never flattened into the filter. */
+  goal?: {
+    goalKind: string;
+    outlook: string;
+    structures: string[];
+  };
 }
 
 export type BuildStockScreenRunSpecResult =

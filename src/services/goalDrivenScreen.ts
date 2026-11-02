@@ -47,6 +47,8 @@ import {
   type ScreenerTask,
   type ScreenerTaskLedger,
 } from "./screenerTaskLedger";
+import { goalStockSpecFromPlan } from "../workflows/goalStockScreenSpec";
+import type { StockScreenRunSpec } from "../workflows/stockScreenRunSpec";
 
 /* ------------------------------------------------------------------ */
 /* Screen plan                                                         */
@@ -151,6 +153,8 @@ export interface GoalDrivenScreenResult {
   goalKind: GoalKind;
   outlook: Outlook;
   plan: GoalScreenPlan;
+  /** Issue #2882: canonical stock-leg spec, present when stocks were requested. Additive record only — execution stays goal-owned. */
+  stockSpec?: StockScreenRunSpec;
   status: "complete" | "partial" | "failed";
   hits: GoalScreenHit[];
   counts: {
@@ -323,6 +327,10 @@ export async function runGoalDrivenScreen(input: {
     goalKind: plan.goalKind,
     outlook: plan.outlook,
     plan,
+    // Issue #2882: the goal stock leg's canonical spec rides
+    // the result when stocks were requested. Record only:
+    // nothing downstream executes from it (broker guard).
+    ...(requested.includes("stocks") ? { stockSpec: goalStockSpecFromPlan(plan) } : {}),
     status,
     hits,
     counts,
