@@ -696,6 +696,7 @@ export function StockHub({
                           confirmations={runConfirmations}
                           confirmationsLoading={runConfirmationsLoading}
                           chrome="bare"
+                          replayRunId={`screener:${selectedAutoRun.timestamp}`}
                         />
                       </div>
                       <div style={{ marginTop: "0.75rem" }}>

@@ -253,6 +253,21 @@ export class DoSqliteCanonicalReportStore
     return rows[0] ?? null;
   }
 
+  getRowByRunIdForOwner(
+    runId: string,
+    owner: string | undefined
+  ): CanonicalReportStoredRow | null {
+    let q = `SELECT ${HIT_COLUMNS} FROM ${TABLE} WHERE run_id = ?`;
+    const params: unknown[] = [runId];
+    if (owner) {
+      q += ` AND user_login = ?`;
+      params.push(owner);
+    }
+    q += ` ORDER BY created_at DESC LIMIT 1`;
+    const rows = Array.from(this.sql.exec(q, ...params)) as unknown as CanonicalReportStoredRow[];
+    return rows[0] ?? null;
+  }
+
   getRowByIdForOwner(
     reportId: string,
     owner: string | undefined

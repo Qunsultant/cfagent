@@ -1189,6 +1189,39 @@ export function listScheduledReports(
  * caller login is known, legacy unfiltered when it is not. Returns null
  * when the report does not exist (or is not the caller's). Never throws.
  */
+/**
+ * Issue #2863: fetch one stored report by its stored run_id
+ * (screener: `screener:<timestamp>` generation) — the key
+ * RunDetailView knows (run timestamp), where the mas_reports
+ * row id is unknown. Owner scoping matches getRowByIdForOwner
+ * (#584 EP-003): strict when the caller login is known.
+ * Newest first, so a duplicated run_id resolves to the
+ * latest canonical copy. Returns null when absent (or not
+ * the caller's). Never throws.
+ */
+export function getScheduledReportByRunId(
+  sql: SqlStorage,
+  runId: string,
+  opts?: { userLogin?: string }
+): ScheduledReportHit | null {
+  try {
+    if (!runId || typeof runId !== "string") return null;
+    ensureScheduledReportsTable(sql);
+    const owner =
+      opts?.userLogin && typeof opts.userLogin === "string"
+        ? opts.userLogin
+        : undefined;
+    // Issue #2863 fix: serve through the canonical report store port
+    // (getRowByRunIdForOwner, newest first, owner-scoped) — this file
+    // must hold zero storage-exec sites (#2359 step 4d census).
+    const row = storePorts(sql).read.getRowByRunIdForOwner(runId, owner);
+    if (!row) return null;
+    return scheduledReportHitFromRow(row as unknown as Record<string, unknown>);
+  } catch {
+    return null;
+  }
+}
+
 export function getScheduledReportById(
   sql: SqlStorage,
   reportId: string,

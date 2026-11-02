@@ -3,6 +3,7 @@ import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
 import { apiFetch as fetch } from "./apiFetch";
 import { EmptyState, Spinner, Button, Select, Table, TextInput, PageShell, PageSection, FieldShell } from "./components/ui";
 import { ResearchReportActions } from "./ResearchReportActions";
+import { replayReport, replaySummary, type ReplayResponse } from "./replayReport";
 import { TabHoverItem } from "./TabHoverItem";
 import { CapabilityNavBar, CopilotTriggerButton } from "./components/CapabilityNavBar";
 import type {
@@ -118,6 +119,22 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
   // Research Report State
   const [report, setReport] = useState<MarketDataResearchReport | null>(null);
   const [reportLoading, setReportLoading] = useState(false);
+  // Issue #2863: replay of the newest STORED research report for
+  // the active symbol — persisted data only, never a live call.
+  // No stored report for the symbol -> a loud 404 notice, never
+  // a fabricated report. (The live panel above stays live; this
+  // button is the subtab's replay surface, not a re-run.)
+  const [reportReplayLoading, setReportReplayLoading] = useState(false);
+  const [reportReplay, setReportReplay] = useState<ReplayResponse | null>(null);
+  const onReplayStoredReport = async () => {
+    if (!activeSymbol || reportReplayLoading) return;
+    setReportReplayLoading(true);
+    try {
+      setReportReplay(await replayReport({ symbol: activeSymbol }));
+    } finally {
+      setReportReplayLoading(false);
+    }
+  };
 
   // Quoting State
   const [quoteProvider, setQuoteProvider] = useState<"yfinance" | "alpaca" | "hybrid">("hybrid");
@@ -1115,6 +1132,24 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
       {/* SUBTAB 1: AUTONOMOUS RESEARCH REPORT */}
       {subTab === "report" && (
         <div className="research-section report-section">
+          <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap", marginBottom: "0.75rem" }}>
+            <Button variant="secondary" size="sm" onClick={onReplayStoredReport} loading={reportReplayLoading} disabled={!activeSymbol}>
+              Replay stored report
+            </Button>
+            <span style={{ fontSize: "var(--font-size-body-sm)", color: "var(--color-text-muted)" }}>
+              Replays the newest stored research report for {activeSymbol} — persisted data only, no live re-fetch, no re-charge.
+            </span>
+          </div>
+          {reportReplay && !reportReplay.ok && (
+            <div role="alert" style={{ marginBottom: "0.75rem", padding: "var(--space-2)", border: "1px solid var(--color-danger)", borderRadius: "8px", fontSize: "var(--font-size-body-sm)" }}>
+              Replay failed — {reportReplay.error}
+            </div>
+          )}
+          {reportReplay?.ok && reportReplay.replay && (
+            <div role="status" style={{ marginBottom: "0.75rem", padding: "var(--space-2)", border: "1px solid var(--color-border-subtle)", borderRadius: "8px", fontSize: "var(--font-size-body-sm)" }}>
+              {replaySummary(reportReplay.replay)} (run {reportReplay.replay.originalRunId})
+            </div>
+          )}
           {reportLoading ? (
             <div className="research-loading-state">
               <span className="spinner-large" />

@@ -26,6 +26,7 @@ import type { RunSummary } from "../../services/runSummaries";
 import {
   canonicalResearchEmailBody,
   canonicalResearchWebhookBody,
+  type ScheduledReportHit,
 } from "../../services/scheduledReports";
 import { createCanonicalReportStorePorts } from "../../data/createCanonicalReportStorePorts";
 import { createOrchestratorTablePorts } from "../../data/createOrchestratorTablePorts";
@@ -1042,6 +1043,131 @@ export async function handleReportsRoutes(
       });
     } catch (err: any) {
       return Response.json({ error: err.message || "Failed to list reports", reports: [] }, { status: 500 });
+    }
+  }
+
+  // Issue #2863: report replay from persisted data only.
+  // POST /api/reports/replay { reportId?, runId?, symbol? }.
+  // A replay is NOT a run: it reads one canonical row (plus
+  // its R2 body) and returns the persisted report with replay
+  // provenance — zero live re-fetch, no re-charge (the handler
+  // never touches any payment/monetization path, starts no
+  // workflow, and writes no new canonical report). Loud
+  // failures only: unknown/missing row -> 404, unavailable
+  // body -> 500, unreplayable body -> 422. Never a fabricated
+  // report. Lookup keys, in order: reportId (exact canonical
+  // row id, owner-scoped), runId (stored run_id, owner-scoped
+  // — the key RunDetailView knows: screener:<timestamp>),
+  // symbol (newest stored research report for that symbol,
+  // the key the Research Report subtab knows).
+  if (path.endsWith("/reports/replay") && request.method === "POST") {
+    const login = request.headers.get("x-user-login") || "";
+    if (!login) return unauthenticatedResponse();
+    const userLogin = login.trim();
+    const body = (await request.json().catch(() => ({}))) as {
+      reportId?: unknown;
+      runId?: unknown;
+      generationId?: unknown;
+      symbol?: unknown;
+    };
+    const reportId = typeof body.reportId === "string" ? body.reportId.trim() : "";
+    const runId =
+      typeof body.runId === "string"
+        ? body.runId.trim()
+        : typeof body.generationId === "string"
+          ? body.generationId.trim()
+          : "";
+    const symbol = typeof body.symbol === "string" ? body.symbol.trim() : "";
+    if (!reportId && !runId && !symbol) {
+      return Response.json(
+        { error: "Replay requires reportId, runId, or symbol." },
+        { status: 400 },
+      );
+    }
+    try {
+      const {
+        getScheduledReportById,
+        getScheduledReportByRunId,
+        listScheduledReports,
+        resolveCanonicalReportBody,
+      } = await import("../../services/scheduledReports");
+      const { buildReplayFromRecord } = await import("../../workflows/reportReplay");
+      const sql = ctx.ensureTables();
+      let hit: ScheduledReportHit | null = null;
+      if (reportId) {
+        hit = getScheduledReportById(sql, reportId, { userLogin });
+      } else if (runId) {
+        hit = getScheduledReportByRunId(sql, runId, { userLogin });
+      } else {
+        // Newest stored research report for the symbol: resolve
+        // bodies newest-first until one names the symbol.
+        const rows = listScheduledReports(sql, {
+          userLogin,
+          sourceFilter: "research_report",
+          limit: 100,
+        });
+        for (const row of rows) {
+          const rowBody = await resolveCanonicalReportBody(ctx.env ?? {}, row);
+          if (!rowBody) continue;
+          try {
+            const parsed = JSON.parse(rowBody) as { symbol?: unknown };
+            if (typeof parsed.symbol === "string" && parsed.symbol.toLowerCase() === symbol.toLowerCase()) {
+              hit = row;
+              break;
+            }
+          } catch {
+            continue;
+          }
+        }
+      }
+      if (!hit) {
+        return Response.json(
+          { error: "Report not found or not owned by the caller." },
+          { status: 404 },
+        );
+      }
+      const bodyJson = await resolveCanonicalReportBody(ctx.env ?? {}, hit);
+      if (!bodyJson) {
+        return Response.json(
+          { error: "Persisted report body is unavailable." },
+          { status: 500 },
+        );
+      }
+      let parsedBody: unknown;
+      try {
+        parsedBody = JSON.parse(bodyJson);
+      } catch {
+        return Response.json(
+          { error: "Persisted report body is not valid JSON." },
+          { status: 500 },
+        );
+      }
+      let replay: unknown;
+      try {
+        replay = buildReplayFromRecord({
+          id: hit.id,
+          runId: hit.runId,
+          source: hit.source,
+          body: parsedBody,
+          userLogin,
+        });
+      } catch (replayErr) {
+        const message = replayErr instanceof Error ? replayErr.message : String(replayErr);
+        const status = message.startsWith("not replayable") ? 422 : 500;
+        return Response.json({ error: message }, { status });
+      }
+      ctx.audit("report.replayed", "orchestrator", {
+        reportId: hit.id,
+        runId: hit.runId,
+        userLogin,
+        partial: (replay as { partial?: boolean }).partial ?? false,
+      });
+      return Response.json({ replay });
+    } catch (err) {
+      return Response.json(
+        { error: err instanceof Error ? err.message : "Failed to replay report." },
+        { status: 500 },
+      );
     }
   }
 

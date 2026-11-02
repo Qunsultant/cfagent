@@ -130,6 +130,13 @@ export interface CanonicalReportWritePort {
 export interface CanonicalReportReadPort {
   /** One row by id (the delivery read-back), or null. */
   getRowById(reportId: string): CanonicalReportStoredRow | null;
+  /** One row by run id, newest first, owner-scoped when an owner is given.
+   *  Issue #2863: Replay needs the latest canonical copy for a run id,
+   *  not the first stored id — duplicates resolve to the newest row. */
+  getRowByRunIdForOwner(
+    runId: string,
+    owner: string | undefined
+  ): CanonicalReportStoredRow | null;
   /** One row by id, owner-scoped when an owner is given. */
   getRowByIdForOwner(
     reportId: string,

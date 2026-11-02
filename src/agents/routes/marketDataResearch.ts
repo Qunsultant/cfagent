@@ -83,6 +83,10 @@ export interface MarketDataResearchRouteContext {
     error?: string;
     trigger?: unknown;
     userLogin?: string;
+    /** Issue #2863: replay criteria/refs (additive; older readers ignore). */
+    criteria?: unknown;
+    patternRef?: unknown;
+    presetRef?: unknown;
   }): Promise<void>;
 }
 
@@ -357,7 +361,8 @@ export async function handleMarketDataCompareScreenRoutes(
         // before, now shared with the E*TRADE route.
         await persistThenDeliverAll({
           results: shards,
-          persist: (r) => ctx.persistScreenerReportCanonical({ ...r, userLogin }),
+          // Issue #2863: record the run's criteria with each shard's canonical copy.
+          persist: (r) => ctx.persistScreenerReportCanonical({ ...r, userLogin, criteria: spec.filters }),
         });
         const failedShards = shards.filter((r) => !r.success);
         ctx.audit("market_data.screener.executed", "research", {
@@ -414,7 +419,8 @@ export async function handleMarketDataCompareScreenRoutes(
       // and Reports history, with provider provenance in the body.
       await persistThenDeliverAll({
         results: [result],
-        persist: (r) => ctx.persistScreenerReportCanonical({ ...r, userLogin }),
+        // Issue #2863: record the run's criteria with the canonical copy.
+        persist: (r) => ctx.persistScreenerReportCanonical({ ...r, userLogin, criteria: spec.filters }),
       });
       ctx.audit("market_data.screener.executed", "research", {
         filterSummary: result.filterSummary,
