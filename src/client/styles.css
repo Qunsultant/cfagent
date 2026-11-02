@@ -7661,8 +7661,11 @@ body {
 
 .menu-download-row .options-download-main-btn {
   width: 100%;
+  min-width: 0;
   justify-content: center;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-size: var(--font-size-caption);
   padding: 0.42rem 0.55rem;
 }
