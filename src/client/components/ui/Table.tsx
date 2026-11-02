@@ -29,6 +29,8 @@ export interface TableProps<T> {
   onRowClick?: (row: T) => void;
   /** title for every row's <tr> (string or per-row function). */
   rowTitle?: string | ((row: T) => string);
+  /** Extra HTML attributes (e.g. data-* attrs) for every row's <tr> (#2723). */
+  rowProps?: (row: T, index: number) => React.HTMLAttributes<HTMLTableRowElement>;
   /** Keep the header cells stuck to the top of the scroll container. */
   stickyHeader?: boolean;
 }
@@ -50,6 +52,7 @@ export function Table<T>({
   containerClassName = "",
   onRowClick,
   rowTitle,
+  rowProps,
   stickyHeader = false,
 }: TableProps<T>) {
   if (rows.length === 0 && empty) return <>{empty}</>;
@@ -80,6 +83,7 @@ export function Table<T>({
               }
               onClick={onRowClick ? () => onRowClick(row) : undefined}
               title={typeof rowTitle === "function" ? rowTitle(row) : rowTitle}
+              {...(rowProps ? rowProps(row, rowIdx) : undefined)}
             >
               {columns.map((col) => (
                 <td

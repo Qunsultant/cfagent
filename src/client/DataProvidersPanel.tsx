@@ -15,7 +15,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { Button, EmptyState, Notice, Spinner, TextInput, useToast } from "./components/ui";
+import { Button, EmptyState, Notice, Spinner, Table, type TableColumn, TextInput, useToast } from "./components/ui";
 import {
   fetchDataProviders,
   fmtCaptureBytes,
@@ -217,291 +217,302 @@ export function DataProvidersPanel() {
           description="Register a provider below to start its provisioning lifecycle. Providers appear here with their lifecycle state, verification evidence, and capability routes."
         />
       ) : (
-        <div className="dpp-table-container">
-          <table className="ui-table dpp-table">
-            <thead>
-              <tr>
-                <th scope="col">Provider</th>
-                <th scope="col">Lifecycle &amp; State</th>
-                <th scope="col">Health &amp; Telemetry</th>
-                <th scope="col">Capabilities &amp; Routes</th>
-                <th scope="col">Connectivity &amp; Session</th>
-                <th scope="col">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {providers.map((view) => {
-                const busy = actingId === view.id;
+        <Table<DataProviderView>
+          columns={[
+            {
+              key: "provider",
+              header: "Provider",
+              cellClassName: "dpp-col-provider-cell",
+              render: (view) => (
+                <div className="dpp-col-provider">
+                  <span className="dpp-item-name">{providerDisplayName(view)}</span>
+                  <code className="dpp-item-id">{view.id}</code>
+                  <div className="dpp-item-meta">
+                    <span>{`Adapter: ${view.adapterKind}`}</span>
+                    <span>{`Precedence: ${view.precedence}`}</span>
+                  </div>
+                </div>
+              ),
+            },
+            {
+              key: "state",
+              header: "Lifecycle & State",
+              cellClassName: "dpp-col-state-cell",
+              render: (view) => (
+                <div className="dpp-col-state">
+                  <span className="dpp-item-state">{view.lifecycleState}</span>
+                  <span className="dpp-item-enabled">{view.enabled ? "Enabled" : "Disabled"}</span>
+                  <div className="dpp-item-meta">
+                    <span>{`Serving: ${view.serving ? "Yes" : "No"}`}</span>
+                    <span>
+                      {"Credential reference: "}
+                      {view.credentialRef ? <code>{view.credentialRef}</code> : "None"}
+                    </span>
+                    {view.verification ? (
+                      <span>
+                        {`Verified ${fmtDataProviderTime(view.verification.verifiedAt)} by ${view.verification.verifiedBy} — ${view.verification.summary}`}
+                      </span>
+                    ) : (
+                      <span>Not verified</span>
+                    )}
+                  </div>
+                </div>
+              ),
+            },
+            {
+              key: "health",
+              header: "Health & Telemetry",
+              cellClassName: "dpp-col-health-cell",
+              render: (view) => (
+                <div className="dpp-col-health">
+                  {view.health ? (
+                    <div className="dpp-health">
+                      <div className="dpp-health-head">
+                        <span className={`dpp-health-status dpp-health-status-${view.health.status}`}>
+                          {HEALTH_STATUS_LABELS[view.health.status] ?? view.health.status}
+                        </span>
+                        <span>{`Captures: ${view.health.totalCaptures}`}</span>
+                        <span>{`Failure rate: ${Math.round(view.health.failureRate * 100)}%`}</span>
+                        <span>{`Last 24h: ${view.health.capturesLast24h} captures, ${view.health.failuresLast24h} failed`}</span>
+                      </div>
+                      <div className="dpp-health-meta">
+                        <span>{`Last success: ${fmtDataProviderTime(view.health.lastSuccessAt)}`}</span>
+                        <span>{`Last failure: ${fmtDataProviderTime(view.health.lastFailureAt)}`}</span>
+                        <span>{`Captured data: ${fmtCaptureBytes(view.health.totalRawBytes)}`}</span>
+                      </div>
+                      {typeof view.health.fetchFailureRate === "number" &&
+                        typeof view.health.fetchAttempts === "number" && (
+                          <div className="dpp-health-meta">
+                            <span>{`Fetch failure rate: ${Math.round(view.health.fetchFailureRate * 100)}%`}</span>
+                            <span>{`${view.health.fetchFailures ?? 0} of ${view.health.fetchAttempts} attempts failed`}</span>
+                            {view.health.lastFetchFailureAt && (
+                              <span>{`Latest fetch failure: ${fmtDataProviderTime(view.health.lastFetchFailureAt)}${
+                                view.health.latestFetchFailureKind
+                                  ? ` (${view.health.latestFetchFailureKind})`
+                                  : ""
+                              }`}</span>
+                            )}
+                          </div>
+                        )}
+                      {Object.keys(view.health.byCapability ?? {}).length > 0 && (
+                        <ul className="dpp-health-caps">
+                          {Object.entries(view.health.byCapability).map(([capability, agg]) => (
+                            <li key={capability} className="dpp-health-cap">
+                              {`${capability}: ${agg.totalCaptures} captures (${agg.failedCount} failed)`}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  ) : (
+                    <span className="dpp-health-nodata">Health unavailable</span>
+                  )}
+                </div>
+              ),
+            },
+            {
+              key: "capabilities",
+              header: "Capabilities & Routes",
+              cellClassName: "dpp-col-capabilities-cell",
+              render: (view) => {
                 const myRoutes = routes.filter(
                   (r) => r.primaryProviderId === view.id || r.gapFillProviderId === view.id
                 );
                 return (
-                  <tr key={view.id} className="dpp-item" data-provider-id={view.id}>
-                    {/* 1. Provider Identity */}
-                    <td>
-                      <div className="dpp-col-provider">
-                        <span className="dpp-item-name">{providerDisplayName(view)}</span>
-                        <code className="dpp-item-id">{view.id}</code>
-                        <div className="dpp-item-meta">
-                          <span>{`Adapter: ${view.adapterKind}`}</span>
-                          <span>{`Precedence: ${view.precedence}`}</span>
-                        </div>
-                      </div>
-                    </td>
-
-                    {/* 2. Lifecycle & Access */}
-                    <td>
-                      <div className="dpp-col-state">
-                        <span className="dpp-item-state">{view.lifecycleState}</span>
-                        <span className="dpp-item-enabled">{view.enabled ? "Enabled" : "Disabled"}</span>
-                        <div className="dpp-item-meta">
-                          <span>{`Serving: ${view.serving ? "Yes" : "No"}`}</span>
-                          <span>
-                            {"Credential reference: "}
-                            {view.credentialRef ? <code>{view.credentialRef}</code> : "None"}
-                          </span>
-                          {view.verification ? (
-                            <span>
-                              {`Verified ${fmtDataProviderTime(view.verification.verifiedAt)} by ${view.verification.verifiedBy} — ${view.verification.summary}`}
-                            </span>
-                          ) : (
-                            <span>Not verified</span>
-                          )}
-                        </div>
-                      </div>
-                    </td>
-
-                    {/* 3. Health & Telemetry */}
-                    <td>
-                      <div className="dpp-col-health">
-                        {view.health ? (
-                          <div className="dpp-health">
-                            <div className="dpp-health-head">
-                              <span className={`dpp-health-status dpp-health-status-${view.health.status}`}>
-                                {HEALTH_STATUS_LABELS[view.health.status] ?? view.health.status}
-                              </span>
-                              <span>{`Captures: ${view.health.totalCaptures}`}</span>
-                              <span>{`Failure rate: ${Math.round(view.health.failureRate * 100)}%`}</span>
-                              <span>{`Last 24h: ${view.health.capturesLast24h} captures, ${view.health.failuresLast24h} failed`}</span>
-                            </div>
-                            <div className="dpp-health-meta">
-                              <span>{`Last success: ${fmtDataProviderTime(view.health.lastSuccessAt)}`}</span>
-                              <span>{`Last failure: ${fmtDataProviderTime(view.health.lastFailureAt)}`}</span>
-                              <span>{`Captured data: ${fmtCaptureBytes(view.health.totalRawBytes)}`}</span>
-                            </div>
-                            {typeof view.health.fetchFailureRate === "number" &&
-                              typeof view.health.fetchAttempts === "number" && (
-                                <div className="dpp-health-meta">
-                                  <span>{`Fetch failure rate: ${Math.round(view.health.fetchFailureRate * 100)}%`}</span>
-                                  <span>{`${view.health.fetchFailures ?? 0} of ${view.health.fetchAttempts} attempts failed`}</span>
-                                  {view.health.lastFetchFailureAt && (
-                                    <span>{`Latest fetch failure: ${fmtDataProviderTime(view.health.lastFetchFailureAt)}${
-                                      view.health.latestFetchFailureKind
-                                        ? ` (${view.health.latestFetchFailureKind})`
-                                        : ""
-                                    }`}</span>
-                                  )}
-                                </div>
-                              )}
-                            {Object.keys(view.health.byCapability ?? {}).length > 0 && (
-                              <ul className="dpp-health-caps">
-                                {Object.entries(view.health.byCapability).map(([capability, agg]) => (
-                                  <li key={capability} className="dpp-health-cap">
-                                    {`${capability}: ${agg.totalCaptures} captures (${agg.failedCount} failed)`}
-                                  </li>
-                                ))}
-                              </ul>
-                            )}
-                          </div>
-                        ) : (
-                          <div className="dpp-health">
-                            <span className="dpp-health-status">Health unavailable</span>
-                          </div>
-                        )}
-                      </div>
-                    </td>
-
-                    {/* 4. Capabilities & Routes */}
-                    <td>
-                      <div className="dpp-col-routes">
-                        <div className="dpp-item-meta">
-                          <span>
-                            {`Capabilities: ${
-                              view.declaredCapabilities.length > 0
-                                ? view.declaredCapabilities.join(", ")
-                                : "None declared"
-                            }`}
-                          </span>
-                        </div>
-                        {myRoutes.length > 0 && (
-                          <ul className="dpp-routes">
-                            {myRoutes.map((route) => (
-                              <li key={route.capability} className="dpp-route">
-                                <span className="dpp-route-capability">{route.capability}</span>
-                                <span className="dpp-route-tier">{`Tier: ${route.minTier === "premium" ? "Premium" : "Freemium"}`}</span>
-                                <span>{`Primary: ${route.primaryProviderId}`}</span>
-                                <span>{`Gap-fill: ${route.gapFillProviderId ?? "—"}`}</span>
-                                <span>{`Resolves: ${route.resolves ? "Yes" : "No"}`}</span>
-                                {route.error && <span className="dpp-route-error">{route.error}</span>}
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                      </div>
-                    </td>
-
-                    {/* 5. Connectivity & Session (Consolidated) */}
-                    <td>
-                      <div className="dpp-col-session">
-                        {isETradeProvider(view) ? (
-                          <div className="dpp-session-info">
-                            {etradeStatus === null ? (
-                              <span>E*TRADE session presence unavailable for this session.</span>
-                            ) : (
-                              <>
-                                <span>
-                                  <strong>Panel (signed-in session):</strong>{" "}
-                                  {etradeStatus.authenticated ? "connected" : "not connected"}
-                                </span>
-                                <span>
-                                  <strong>Token presence by scope:</strong>{" "}
-                                  {etradeStatus.tokenScopes
-                                    ? scopeLines(etradeStatus.tokenScopes)
-                                        .map((line) => `${line.scope}: ${line.present ? "present" : "absent"}`)
-                                        .join(" · ")
-                                    : "scope presence unavailable"}
-                                </span>
-                              </>
-                            )}
-                          </div>
-                        ) : (
-                          <div className="dpp-session-info">
-                            <span>
-                              {view.verification ? "Connectivity verified" : "Awaiting verification"}
-                            </span>
-                            <span>
-                              {view.credentialRef ? "Credential reference set" : "No credential configured"}
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    </td>
-
-                    {/* 6. Standardized Consistent Actions */}
-                    <td>
-                      <div className="dpp-col-actions">
-                        {confirmingDeprovisionId === view.id ? (
-                          <div className="dpp-item-actions">
-                            <span className="dpp-confirm-text">
-                              Deprovision this provider? Its capability routes are withdrawn and its
-                              credential reference is cleared.
-                            </span>
-                            <Button
-                              size="sm"
-                              variant="danger"
-                              onClick={() => void runAction(view, "deprovision")}
-                              loading={busy}
-                              disabled={busy}
-                            >
-                              Confirm deprovision
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => setConfirmingDeprovisionId(null)}
-                              disabled={busy}
-                            >
-                              Cancel
-                            </Button>
-                          </div>
-                        ) : (
-                          <div className="dpp-item-actions">
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              disabled={busy}
-                              onClick={() => openConfigure(view)}
-                            >
-                              Configure
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              disabled={busy}
-                              onClick={() => void runAction(view, "verify")}
-                            >
-                              Verify
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              disabled={busy}
-                              onClick={() => void runAction(view, view.enabled ? "disable" : "enable")}
-                            >
-                              {view.enabled ? "Disable" : "Enable"}
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="danger"
-                              tone="subtle"
-                              disabled={busy}
-                              onClick={() => {
-                                setConfirmingDeprovisionId(view.id);
-                                setConfiguringId(null);
-                              }}
-                            >
-                              Deprovision
-                            </Button>
-                          </div>
-                        )}
-
-                        {configuringId === view.id && (
-                          <div className="dpp-configure-form">
-                            <TextInput
-                              id="dpp-configure-credential-ref"
-                              label="Credential reference"
-                              placeholder="env:PROVIDER_API_KEY"
-                              value={configureRef}
-                              onChange={(event) => setConfigureRef(event.target.value)}
-                              wrapperClassName="dpp-configure-field"
-                            />
-                            <TextInput
-                              id="dpp-configure-display-name"
-                              label="Display name (optional)"
-                              placeholder="e.g. Yahoo Finance"
-                              value={configureName}
-                              onChange={(event) => setConfigureName(event.target.value)}
-                              wrapperClassName="dpp-configure-field"
-                            />
-                            <div className="dpp-configure-actions">
-                              <Button
-                                size="sm"
-                                variant="primary"
-                                onClick={() => void handleConfigureSave(view)}
-                                loading={busy}
-                                disabled={busy}
-                              >
-                                Save configuration
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => setConfiguringId(null)}
-                                disabled={busy}
-                              >
-                                Cancel
-                              </Button>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
+                  <div className="dpp-col-capabilities">
+                    <div className="dpp-item-meta">
+                      <span>
+                        {`Capabilities: ${
+                          view.declaredCapabilities.length > 0
+                            ? view.declaredCapabilities.join(", ")
+                            : "None declared"
+                        }`}
+                      </span>
+                    </div>
+                    {myRoutes.length > 0 && (
+                      <ul className="dpp-routes">
+                        {myRoutes.map((route) => (
+                          <li key={route.capability} className="dpp-route">
+                            <span className="dpp-route-capability">{route.capability}</span>
+                            <span className="dpp-route-tier">{`Tier: ${route.minTier === "premium" ? "Premium" : "Freemium"}`}</span>
+                            <span>{`Primary: ${route.primaryProviderId}`}</span>
+                            <span>{`Gap-fill: ${route.gapFillProviderId ?? "—"}`}</span>
+                            <span>{`Resolves: ${route.resolves ? "Yes" : "No"}`}</span>
+                            {route.error && <span className="dpp-route-error">{route.error}</span>}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
                 );
-              })}
-            </tbody>
-          </table>
-        </div>
+              },
+            },
+            {
+              key: "connectivity",
+              header: "Connectivity & Session",
+              cellClassName: "dpp-col-session-cell",
+              render: (view) => (
+                <div className="dpp-col-session">
+                  {isETradeProvider(view) ? (
+                    <div className="dpp-session-info">
+                      {etradeStatus === null ? (
+                        <span>E*TRADE session presence unavailable for this session.</span>
+                      ) : (
+                        <>
+                          <span>
+                            <strong>Panel (signed-in session):</strong>{" "}
+                            {etradeStatus.authenticated ? "connected" : "not connected"}
+                          </span>
+                          <span>
+                            <strong>Token presence by scope:</strong>{" "}
+                            {etradeStatus.tokenScopes
+                              ? scopeLines(etradeStatus.tokenScopes)
+                                  .map((line) => `${line.scope}: ${line.present ? "present" : "absent"}`)
+                                  .join(" · ")
+                              : "scope presence unavailable"}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="dpp-session-info">
+                      <span>
+                        {view.verification ? "Connectivity verified" : "Awaiting verification"}
+                      </span>
+                      <span>
+                        {view.credentialRef ? "Credential reference set" : "No credential configured"}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              ),
+            },
+            {
+              key: "actions",
+              header: "Actions",
+              cellClassName: "dpp-col-actions-cell",
+              render: (view) => {
+                const busy = actingId === view.id;
+                return (
+                  <div className="dpp-col-actions">
+                    {confirmingDeprovisionId === view.id ? (
+                      <div className="dpp-item-actions">
+                        <span className="dpp-confirm-text">
+                          Deprovision this provider? Its capability routes are withdrawn and its
+                          credential reference is cleared.
+                        </span>
+                        <Button
+                          size="sm"
+                          variant="danger"
+                          onClick={() => void runAction(view, "deprovision")}
+                          loading={busy}
+                          disabled={busy}
+                        >
+                          Confirm deprovision
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setConfirmingDeprovisionId(null)}
+                          disabled={busy}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="dpp-item-actions">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={busy}
+                          onClick={() => openConfigure(view)}
+                        >
+                          Configure
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={busy}
+                          onClick={() => void runAction(view, "verify")}
+                        >
+                          Verify
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={busy}
+                          onClick={() => void runAction(view, view.enabled ? "disable" : "enable")}
+                        >
+                          {view.enabled ? "Disable" : "Enable"}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="danger"
+                          tone="subtle"
+                          disabled={busy}
+                          onClick={() => {
+                            setConfirmingDeprovisionId(view.id);
+                            setConfiguringId(null);
+                          }}
+                        >
+                          Deprovision
+                        </Button>
+                      </div>
+                    )}
+
+                    {configuringId === view.id && (
+                      <div className="dpp-configure-form">
+                        <TextInput
+                          id="dpp-configure-credential-ref"
+                          label="Credential reference"
+                          placeholder="env:PROVIDER_API_KEY"
+                          value={configureRef}
+                          onChange={(event) => setConfigureRef(event.target.value)}
+                          wrapperClassName="dpp-configure-field"
+                        />
+                        <TextInput
+                          id="dpp-configure-display-name"
+                          label="Display name (optional)"
+                          placeholder="e.g. Yahoo Finance"
+                          value={configureName}
+                          onChange={(event) => setConfigureName(event.target.value)}
+                          wrapperClassName="dpp-configure-field"
+                        />
+                        <div className="dpp-configure-actions">
+                          <Button
+                            size="sm"
+                            variant="primary"
+                            onClick={() => void handleConfigureSave(view)}
+                            loading={busy}
+                            disabled={busy}
+                          >
+                            Save configuration
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => setConfiguringId(null)}
+                            disabled={busy}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              },
+            },
+          ]}
+          rows={providers}
+          rowKey={(view) => view.id}
+          rowProps={(view) => ({
+            "data-provider-id": view.id,
+          } as React.HTMLAttributes<HTMLTableRowElement>)}
+          rowClassName="dpp-item"
+          className="dpp-table"
+          containerClassName="dpp-table-container"
+        />
       )}
 
       {!needsAuth && (
