@@ -28,6 +28,10 @@ async function flush(ms = 30) {
 }
 
 async function render(node: React.ReactNode) {
+  // Issue #2776: panel tabs are URL-synced, so a tab click in one test
+  // writes ?checkoutTab= into the shared jsdom URL and would leak into
+  // the next test's initial tab. Every render starts from a clean URL.
+  window.history.replaceState(null, "", "/");
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);

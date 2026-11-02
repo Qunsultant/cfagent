@@ -163,7 +163,9 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
     await act(async () => {
       stockBtn.click();
     });
-    expect(onSelectTab).toHaveBeenCalledWith("screeners");
+    // Issue #2776: nav rows navigate via the URL (Chat derives its tab
+    // from the routechange subscription), not via the onSelectTab prop.
+    expect(window.location.search).toContain("tab=screeners");
 
     // Sub-items should now be visible
     expect(container.textContent).toContain("Market Research");

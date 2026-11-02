@@ -9,6 +9,14 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
   size?: "sm" | "md" | "lg";
   /** Shows a spinner and sets aria-busy; the button is disabled while loading. */
   loading?: boolean;
+  /**
+   * Renders an anchor instead of a button, with identical styling (#2776):
+   * deep links need real hrefs (copyable, open-in-new-tab) while keeping
+   * the primitive's look. Pair with an onClick that preventDefaults and
+   * navigates SPA-style; the href is what makes the link addressable.
+   */
+  href?: string;
+  target?: React.HTMLAttributeAnchorTarget;
 }
 
 /**
@@ -26,12 +34,35 @@ export function Button({
   type = "button",
   className = "",
   children,
+  href,
+  target,
   ...rest
 }: ButtonProps) {
+  const classes = `ui-btn variant-${variant} tone-${tone} size-${size} ${className}`;
+  if (href !== undefined) {
+    // Anchor branch: the button-typed ...rest is cast, not re-typed —
+    // callers pass element-generic handlers (React.MouseEvent), and no
+    // href caller relies on button-element-only handler signatures.
+    const anchorProps = rest as React.AnchorHTMLAttributes<HTMLAnchorElement>;
+    return (
+      <a
+        className={classes}
+        href={href}
+        target={target}
+        rel={target === "_blank" ? "noopener" : undefined}
+        aria-busy={loading || undefined}
+        aria-disabled={disabled || undefined}
+        {...anchorProps}
+      >
+        {loading && <span className="ui-btn-spinner" aria-hidden="true" />}
+        {children}
+      </a>
+    );
+  }
   return (
     <button
       type={type}
-      className={`ui-btn variant-${variant} tone-${tone} size-${size} ${className}`}
+      className={classes}
       disabled={disabled || loading}
       aria-busy={loading || undefined}
       {...rest}
