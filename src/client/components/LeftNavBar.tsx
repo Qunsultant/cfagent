@@ -2,7 +2,6 @@ import React, { useState, useEffect } from "react";
 import { Badge, Button } from "../components/ui";
 import {
   DEFAULT_LEFT_NAV_CONFIG,
-  SANDBOX_NAV_ID,
   isNavItemOrSubItemActive,
   platformAdminSectionFromNavId,
   type LeftNavConfig,
@@ -18,7 +17,12 @@ import {
 import { BRAND } from "../branding";
 import { isTabFeatureEnabled } from "../featureFlags";
 import { getNavGroup } from "../routes";
-import { navigateToTab } from "../router";
+import {
+  deepLinkForNavNode,
+  deepLinkHref,
+  navigateToDeepLink,
+  type DeepLink,
+} from "../deepLinks";
 
 export interface LeftNavBarProps {
   config?: LeftNavConfig;
@@ -102,49 +106,51 @@ export function LeftNavBar({
     }));
   };
 
-  const handleItemClick = (item: NavMenuItemConfig, hasSubMenu: boolean) => {
+  // Deep links (#2776): every nav row is a real link (copyable, openable
+  // in a new tab). A plain left-click still navigates SPA-style; modifier
+  // clicks fall through to the browser so the href opens natively. The
+  // sandbox group header keeps its old toggle-only behavior on plain
+  // clicks — its href exists for copy/modifier-click, not plain-click nav.
+  const handleNavLinkClick = (
+    event: React.MouseEvent,
+    link: DeepLink,
+  ): boolean => {
+    if (
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey ||
+      event.button !== 0
+    ) {
+      return false;
+    }
+    event.preventDefault();
+    navigateToDeepLink(link);
+    return true;
+  };
+
+  const handleItemClick = (
+    event: React.MouseEvent,
+    item: NavMenuItemConfig,
+    hasSubMenu: boolean,
+  ) => {
     if (hasSubMenu && !collapsed) {
       toggleSubMenu(item.id);
     }
-    if (item.id === "goal-screen") {
-      navigateToTab("screeners", "goal-screen");
+    if (item.id === "sandbox") {
       return;
     }
-    if (item.id === "schedules") {
-      navigateToTab("schedules");
-      return;
-    }
-    if (item.id === "sandbox" || item.id === SANDBOX_NAV_ID) {
-      if (!hasSubMenu) {
-        window.location.href = "/checkout/sandbox";
-      }
-      return;
-    }
-    onSelectTab(item.id as NavTabId);
+    const link = deepLinkForNavNode(null, item.id);
+    handleNavLinkClick(event, link);
   };
 
-  const handleSubItemClick = (sub: NavSubMenuItemConfig) => {
-    if (
-      sub.id === "goal-screen" ||
-      sub.id === "scanner" ||
-      sub.id === "iv-history" ||
-      sub.id === "review" ||
-      sub.id === "track-record" ||
-      sub.id === "new-screen" ||
-      sub.id === "run-screen"
-    ) {
-      navigateToTab("screeners", sub.id);
-    } else if (sub.id === "screeners" || sub.id === "stocks") {
-      navigateToTab("screeners", "stocks");
-    } else if (sub.id === "reports") {
-      navigateToTab("reports");
-    } else if (sub.id === "schedules") {
-      navigateToTab("schedules");
-    } else if (sub.id === SANDBOX_NAV_ID) {
-      window.location.href = "/checkout/sandbox";
-    } else {
-      onSelectTab(sub.id as NavTabId);
-    }
+  const handleSubItemClick = (
+    event: React.MouseEvent,
+    sub: NavSubMenuItemConfig,
+    parentId: string,
+  ) => {
+    const link = deepLinkForNavNode(parentId, sub.id);
+    handleNavLinkClick(event, link);
   };
 
   const isSubVisible = (sub: NavSubMenuItemConfig) => {
@@ -250,6 +256,7 @@ export function LeftNavBar({
                     activeTab === item.id ||
                     isNavItemOrSubItemActive(item, activeTab);
                   const Icon = NAV_ICON_MAP[item.icon] || NavIcons.Screeners;
+                  const itemLink = deepLinkForNavNode(null, item.id);
 
                   return (
                     <div
@@ -270,7 +277,9 @@ export function LeftNavBar({
                           variant="ghost"
             size="sm"
                           className={`sidebar-nav-item ${active ? "active" : ""}`}
-                          onClick={() => handleItemClick(item, hasSubMenu)}
+                          href={deepLinkHref(itemLink)}
+                          target={"href" in itemLink && itemLink.newTab ? "_blank" : undefined}
+                          onClick={(e) => handleItemClick(e, item, hasSubMenu)}
                           onFocus={(e) => {
                             if (collapsed && visibleSubItems.length > 0) {
                               openFlyoutFor(item.id, e.currentTarget.closest(".sidebar-nav-item-wrapper") as HTMLElement | null);
@@ -359,6 +368,7 @@ export function LeftNavBar({
                           {visibleSubItems.map((sub: NavSubMenuItemConfig) => {
                             const subActive = isSubActive(sub.id);
                             const SubIcon = sub.icon ? NAV_ICON_MAP[sub.icon] : null;
+                            const subLink = deepLinkForNavNode(item.id, sub.id);
 
                             return (
                               <Button
@@ -366,7 +376,9 @@ export function LeftNavBar({
             size="sm"
                                 key={sub.id}
                                 className={`sidebar-submenu-item ${subActive ? "active" : ""}`}
-                                onClick={() => handleSubItemClick(sub)}
+                                href={deepLinkHref(subLink)}
+                                target={"href" in subLink && subLink.newTab ? "_blank" : undefined}
+                                onClick={(e) => handleSubItemClick(e, sub, item.id)}
                                 title={`${sub.label}${sub.description ? ` — ${sub.description}` : ""}`}
                               >
                                 <span className="submenu-item-bullet">
@@ -419,15 +431,18 @@ export function LeftNavBar({
                           {visibleSubItems.map((sub: NavSubMenuItemConfig) => {
                             const subActive = isSubActive(sub.id);
                             const SubIcon = sub.icon ? NAV_ICON_MAP[sub.icon] : null;
+                            const subLink = deepLinkForNavNode(item.id, sub.id);
                             return (
                               <Button
                                 variant="ghost"
             size="sm"
                                 key={sub.id}
                                 className={`sidebar-submenu-item ${subActive ? "active" : ""}`}
-                                onClick={() => {
-                                  onSelectTab(sub.id as NavTabId);
+                                href={deepLinkHref(subLink)}
+                                target={"href" in subLink && subLink.newTab ? "_blank" : undefined}
+                                onClick={(e) => {
                                   closeFlyout();
+                                  handleSubItemClick(e, sub, item.id);
                                 }}
                                 title={`${sub.label}${sub.description ? ` — ${sub.description}` : ""}`}
                               >
