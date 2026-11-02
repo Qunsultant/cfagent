@@ -1,0 +1,3 @@
+### Added
+
+- **Unenabled-orchestrations status registry (#1771 slice A, parent #1717):** pure `src/orchestrations/orchestrationStatus.ts` records per-orchestration status (enabled / enabled-gated / deliberately-unenabled with blocker / decided) for all seven orchestrations plus the gated screener-to-trade loop and goal-chaining, with the reflection decision (developer-mediated, no code/prompt mutation) and a hard guard enforced in tests: no entry bypasses the trade-approval gate. Companion doc: `docs/architecture/security/unenabled-orchestrations-1771.md`. No production behavior changes in this slice.
