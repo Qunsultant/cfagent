@@ -509,6 +509,30 @@ export function foldEnvelopeToEvent(
         };
         return event;
       }
+      case "goal.gather.missed": {
+        // Issue #2000 Phase 5 slice 7 — gather-miss event as a
+        // NEW TYPE VALUE ONLY (no schema change, same pattern
+        // as slice 4's stage events): counts+ids only, tenantId
+        // + runId required (tenant is the stream's index
+        // dimension, so a tenant-less envelope folds to null
+        // rather than being mis-indexed). Symbol lists, error
+        // messages, and any other user material never survive,
+        // even when a producer envelope carries them.
+        const tenantId = str(data, "tenantId");
+        const runId = str(data, "runId");
+        if (!tenantId || !runId) return null;
+        const requested = num(data, "requested");
+        const stored = num(data, "stored");
+        const missing = num(data, "missing");
+        const event = baseEvent(envelope, "goal.gather", "warn", tenantId);
+        event.runId = runId;
+        event.fields = {
+          ...(requested !== null ? { requested } : {}),
+          ...(stored !== null ? { stored } : {}),
+          ...(missing !== null ? { missing } : {}),
+        };
+        return event;
+      }
       default:
         return null;
     }

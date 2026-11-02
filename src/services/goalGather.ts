@@ -52,6 +52,7 @@ import {
   type YahooHistoryDeps,
 } from "../trading";
 import type { ObservabilitySink } from "../observability/observabilityPorts";
+import { gatherMissText } from "../observability/alertingList";
 import type { ProviderConfigStore } from "../data/providerConfigPorts";
 import type { ProviderCaptureStore } from "../data/providerCapturePorts";
 
@@ -96,6 +97,14 @@ export interface GoalGatherInput {
   routes?: CapabilityRouteRecord[];
   /** #1743 sink; absent = no emission, never a failure. */
   sink?: ObservabilitySink;
+  /**
+   * Phase 5 slice 7 (#2000): total-miss alert channel; absent =
+   * event-only, never a failure. The caller supplies the
+   * operator surface (postSlackText); the gather itself never
+   * imports a delivery channel, so a missing channel degrades
+   * to the miss event alone.
+   */
+  alertText?: (text: string) => Promise<void>;
   /**
    * #2303 (#1976 step 1): the data-layer ports. When the host
    * supplies them, the gather's capture writes + read-back run
@@ -350,6 +359,57 @@ export function createGoalGatherEnrichment(input: GoalGatherInput): ScreenLiveEn
           });
         } catch {
           // Best-effort only.
+        }
+      }
+
+      // 7. Phase 5 slice 7 (#2000): gather-miss event + total-miss
+      // alert, best-effort (never fails the run). Miss = any
+      // requested symbol without a stored row (per #2056: live
+      // alone supplies rows, Yahoo-only never stores, so a
+      // Yahoo-only symbol IS a miss — its live side failed).
+      // Counts only: symbol lists never ride the event or the
+      // alert. A partial miss is event-visible, not paged; only
+      // a total miss (requested > 0, stored === 0 — the run has
+      // no dataset) pages the operator. An empty universe
+      // (requested 0) is neither event nor alert.
+      if (missingSymbols.length > 0 && input.sink) {
+        try {
+          await input.sink.write({
+            type: "goal.gather.missed",
+            level: "warn",
+            operation: "goal.gather",
+            tenantId: input.tenantId,
+            runId: input.runId,
+            sessionRef: null,
+            traceId: crypto.randomUUID(),
+            timestampMs: Date.now(),
+            count: missingSymbols.length,
+            fields: {
+              requested: symbols.length,
+              stored: enrichedQuotes.length,
+              missing: missingSymbols.length,
+            },
+          });
+        } catch {
+          // Best-effort only.
+        }
+      }
+      if (
+        symbols.length > 0 &&
+        enrichedQuotes.length === 0 &&
+        input.alertText
+      ) {
+        try {
+          await input.alertText(
+            gatherMissText({
+              runId: input.runId,
+              requested: symbols.length,
+              stored: 0,
+              missing: missingSymbols.length,
+            }),
+          );
+        } catch {
+          // Best-effort only: a failed page never fails the run.
         }
       }
 
