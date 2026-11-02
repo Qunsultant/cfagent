@@ -1954,9 +1954,11 @@ export const MESH_TRACE_SPINE: MeshTraceSpineEntry[] = [
   },
   {
     hop: "trading-workflow-steps",
-    status: "break",
-    consequence:
-      "TradingTradeWorkflow's params carry no traceparent field (the S9 approval door starts it from TradingAgent, not from a traced command), so a chat trade's trace ends at the door/start hops: the trade run's internal steps cannot join the turn's trace until the workflow's params grow the field (a TradingAgent-slice change, not an instrumentation shim here). Assembly reports the trade trace as far as the door.",
+    status: "carried",
+    carrier:
+      "TradeApprovalParams.traceparent (#1743's field, grown by #2730): the start_trade_approval door stamps it from the turn's McpToolContext.traceparent resolver — server-side only, never a tool argument — through startTradeApprovalViaDoor and TradingAgent.startTradeApproval into TradingTradeWorkflow's params. Starts without a traceparent (route-originated approvals) record no step hops; never minted mid-flight.",
+    evidence:
+      "Hops per completed step (kind \"workflow-step\", operations await-approval / settle-trade, jobId = the run's orderId) recorded by the trade flow from the params' traceparent via recordWorkflowTraceHop, deriving deterministic spans from (orderId, step name) so durable replay converges.",
   },
   {
     hop: "payment-workflow-steps",

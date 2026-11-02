@@ -110,11 +110,27 @@ export class SinkForwardingTraceStore implements MeshTraceStore {
  * NOTHING — that absence is the recorded break the registry
  * names (a run that began outside a traced ingress has no
  * trace to join), and this helper never mints one mid-flight.
+ *
+ * The emitting workflow defaults to ScreenerScreenWorkflow
+ * (the original S17 caller); another workflow reusing this
+ * mechanism names itself via `command.agent` (#2730:
+ * TradingTradeWorkflow, whose params carry the same #1743
+ * field). A step outcome worth naming rides `event.note`.
  */
 export async function recordWorkflowTraceHop(
   store: MeshTraceStore,
-  command: { traceparent?: string; jobId: string; tenantId?: string; userLogin: string },
-  event: { kind: Extract<MeshTraceHopKind, "workflow-step" | "projection">; operation: string },
+  command: {
+    traceparent?: string;
+    jobId: string;
+    tenantId?: string;
+    userLogin: string;
+    agent?: string;
+  },
+  event: {
+    kind: Extract<MeshTraceHopKind, "workflow-step" | "projection">;
+    operation: string;
+    note?: string;
+  },
 ): Promise<void> {
   const parsed = parseTraceparent(command.traceparent);
   if (!parsed) return;
@@ -127,8 +143,9 @@ export async function recordWorkflowTraceHop(
     timestampMs: Date.now(),
     tenantId: command.tenantId ?? null,
     caller: command.userLogin,
-    agent: "ScreenerScreenWorkflow",
+    agent: command.agent ?? "ScreenerScreenWorkflow",
     jobId: command.jobId,
+    ...(event.note ? { note: event.note } : {}),
   });
 }
 
