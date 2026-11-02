@@ -198,6 +198,9 @@ import {
   signUnsubscribeToken,
   type EmailSender,
 } from "../../services/lifecycleEmail";
+import { sendDueDigests } from "../../services/lifecycleDigestPass";
+import { digestDayKey } from "../../data/lifecyclePorts";
+import { getServiceUserLogin } from "../../security/serviceIdentity";
 import {
   convertReferralCreditsForRun,
   recordFirstPaidRunEarning,
@@ -3526,6 +3529,12 @@ export async function handleAgenticPaymentsRoutes(
         preferences,
         tier,
       });
+      // Issue #2659: record the address a successful welcome
+      // used, so the scheduled digest pass can reach this
+      // subscriber. Persistence never changes the send result.
+      if (result.sent && lifecycle && typeof body.tenantId === "string" && body.tenantId) {
+        await lifecycle.setSubscriberEmail(body.userId, body.tenantId, body.email).catch(() => {});
+      }
       return Response.json(result);
     } catch (err: any) {
       return Response.json({ sent: false, reason: "send-failed" });
@@ -3577,9 +3586,86 @@ export async function handleAgenticPaymentsRoutes(
         unsubscribeUrl,
         tier,
       });
+      // Issue #2659: record the address a successful digest
+      // used, so the scheduled digest pass can reach this
+      // subscriber. Persistence never changes the send result.
+      if (result.sent) {
+        await lifecycle.setSubscriberEmail(body.userId, body.tenantId, body.email).catch(() => {});
+      }
       return Response.json(result);
     } catch (err: any) {
       return Response.json({ error: err.message || "Failed to send digest" }, { status: 500 });
+    }
+  }
+
+  // POST /payments/agentic/commercial/lifecycle/digest/run-due — SERVICE identity only.
+  // Issue #2659 (monetization Phase 2.4): the scheduled digest
+  // pass trigger. The 30-minute tick (src/server.ts) calls this route
+  // as the service user; it is NOT own-or-operator — a
+  // subscriber must never be able to trigger a pass for all
+  // subscribers. Auth: the configured SERVICE_USER_LOGIN only;
+  // an unconfigured service login fails closed with 401.
+  // Semantics: already-ran-today is a 200 with fired:false (the
+  // tick calling again is normal); an unbound store or missing
+  // transport is a 503 with NO day marker (retry next tick);
+  // a thrown pass is a 500 with NO marker (retry next tick;
+  // per-user day guards make the retry idempotent). The day
+  // marker is written only after a completed pass. The tick
+  // supplies no items, so scheduled passes skip-on-empty until
+  // a digest content provider lands; an operator/system caller
+  // may supply itemsByUser. No unsubscribe link is attached:
+  // the scheduled path has no trustworthy public origin (the
+  // tick is a cron event, not a user-facing request) — opt-out
+  // remains via the preferences panel and the unsubscribe route.
+  if (path.endsWith("/payments/agentic/commercial/lifecycle/digest/run-due") && request.method === "POST") {
+    try {
+      const login = commercialLogin();
+      const serviceLogin = getServiceUserLogin(ctx.env);
+      if (!login || !serviceLogin || login !== serviceLogin) {
+        return Response.json({ error: "Unauthorized: service identity required." }, { status: 401 });
+      }
+      const lifecycle = requireLifecycle();
+      if (lifecycle instanceof Response) return lifecycle;
+      const ensured = await ensureLifecycle(lifecycle);
+      if (ensured) return ensured;
+      const day = digestDayKey(Date.now());
+      if (await lifecycle.hasDigestPassRun(day)) {
+        return Response.json({ fired: false, reason: "already-ran-today", dateKey: day });
+      }
+      const sender = lifecycleSender();
+      if (!sender) {
+        return Response.json({ error: "Digest pass unavailable: no email transport configured." }, { status: 503 });
+      }
+      const body = (await request.json().catch(() => ({}))) as { itemsByUser?: unknown };
+      const itemsByUser: Record<string, string[]> = {};
+      if (body.itemsByUser && typeof body.itemsByUser === "object") {
+        for (const [userId, items] of Object.entries(body.itemsByUser)) {
+          itemsByUser[userId] = Array.isArray(items)
+            ? items.filter((i): i is string => typeof i === "string")
+            : [];
+        }
+      }
+      const summary = await sendDueDigests({
+        store: lifecycle,
+        sender,
+        tierResolver: (userId) => resolveEmailTier(userId),
+        itemsProvider: async (userId) => itemsByUser[userId] ?? [],
+      });
+      await lifecycle.markDigestPassRun(day);
+      try {
+        await ctx.audit("lifecycle.digest.pass", "payments", {
+          day,
+          attempted: summary.attempted,
+          sent: summary.sent,
+          skipped: summary.skipped,
+          failed: summary.failed,
+        });
+      } catch {
+        // Audit failure never changes the pass result.
+      }
+      return Response.json({ fired: true, dateKey: day, summary });
+    } catch (err: any) {
+      return Response.json({ error: err.message || "Digest pass failed" }, { status: 500 });
     }
   }
 

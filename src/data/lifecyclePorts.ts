@@ -292,5 +292,37 @@ export interface DigestGuardPort {
   markDigestSent(userId: string, day: string): Promise<void>;
 }
 
-/** The full lifecycle store: referral + preferences + digest guard. */
-export type LifecycleStore = ReferralCreditPort & NotificationPreferencePort & DigestGuardPort;
+/**
+ * Issue #2659 (monetization Phase 2.4): a digest subscriber for the
+ * scheduled pass. The email is the address mail was last
+ * successfully sent to for this subscriber (recorded by the send
+ * routes) — never guessed, never derived from a login. Null when
+ * no address is on file; the pass reports such subscribers as
+ * `no-email-on-file` and never attempts a send.
+ */
+export interface DigestSubscriber {
+  userId: string;
+  tenantId: string;
+  email: string | null;
+}
+
+/**
+ * Issue #2659: the scheduled digest pass port. Enumeration is
+ * digestEnabled=1 rows only; the email JOIN is tenant-aware (a
+ * row for another tenant never leaks an address across tenants).
+ * setSubscriberEmail mirrors setPreferences' #1761 fail-closed
+ * idiom: a stored row for another tenant throws before any write.
+ */
+export interface DigestPassPort {
+  /** Digest-enabled subscribers, ordered by user_id, with addresses. */
+  listDigestSubscribers(): Promise<DigestSubscriber[]>;
+  /** Record the address a successful send used. Throws on blank inputs or tenant mismatch. */
+  setSubscriberEmail(userId: string, tenantId: string, email: string): Promise<void>;
+  /** True when the scheduled pass already ran on this UTC day. */
+  hasDigestPassRun(day: string): Promise<boolean>;
+  /** Idempotent: re-marking the same day is a no-op. */
+  markDigestPassRun(day: string): Promise<void>;
+}
+
+/** The full lifecycle store: referral + preferences + digest guard + digest pass. */
+export type LifecycleStore = ReferralCreditPort & NotificationPreferencePort & DigestGuardPort & DigestPassPort;

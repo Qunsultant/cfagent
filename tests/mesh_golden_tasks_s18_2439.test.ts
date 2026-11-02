@@ -287,7 +287,8 @@ describe("golden harness: runner + store (#2439)", () => {
     // #2680 appends migration 0032 (store operators) after 0031.
     // Phase 5 Slice 1 (#2000) appends migration 0033 (dead-letter store) after 0032.
     // Phase 5 Slice 2 (#2000) appends migration 0034 (breaker state) after 0033.
-    expect(Math.max(...ALL_MIGRATIONS.map((m) => m.version))).toBe(34);
+    // #2659 (Phase 2.4) appends migration 0035 (digest pass) after 0034.
+    expect(Math.max(...ALL_MIGRATIONS.map((m) => m.version))).toBe(35);
     expect(getTableName(agentMeshEvalResults)).toBe("agent_mesh_eval_results");
   });
 });
