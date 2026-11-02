@@ -1278,6 +1278,31 @@ CREATE TABLE IF NOT EXISTS agent_billing_customers (
 `,
 };
 
+/**
+ * Migration 0031 — referral attribution store (#2657, sub-issue of #2405).
+ * The ledger itself is #2208 (migration 0015); this migration adds ONLY the
+ * missing link #2208 named as follow-up: which referrer a user came from.
+ * One row per referred user (referred_user_id PRIMARY KEY = the set-once
+ * backstop). Column names match the Drizzle mapping in drizzleSchema.ts
+ * (pinned by test). No seed rows: without an operator-recorded attribution
+ * the store records nothing and grants nothing (fail closed). The table is
+ * referral-only: it never joins agent_credit_claims (failure credits).
+ */
+export const MIGRATION_0031_REFERRAL_ATTRIBUTION: DataMigration = {
+  version: 31,
+  name: "0031_referral_attribution",
+  sql: `
+CREATE TABLE IF NOT EXISTS agent_referral_attributions (
+  referred_user_id TEXT PRIMARY KEY,
+  referrer_user_id TEXT NOT NULL,
+  tenant_id TEXT NOT NULL,
+  source TEXT NOT NULL,
+  created_at_ms INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS agent_referral_attributions_referrer_idx ON agent_referral_attributions (referrer_user_id, created_at_ms);
+`,
+};
+
 export const MIGRATION_0026_TENANT_AUTO_REFRESH: DataMigration = {
   version: 26,
   name: "0026_tenant_auto_refresh",
@@ -1360,6 +1385,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [
   MIGRATION_0028_TENANT_PROVIDERS,
   MIGRATION_0029_PROOF_REDEMPTIONS,
   MIGRATION_0030_BILLING_CUSTOMERS,
+  MIGRATION_0031_REFERRAL_ATTRIBUTION,
 ];
 
 function splitStatements(sqlText: string): string[] {

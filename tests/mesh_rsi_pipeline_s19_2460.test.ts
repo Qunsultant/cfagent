@@ -55,6 +55,7 @@ import {
   MIGRATION_0028_TENANT_PROVIDERS,
   MIGRATION_0029_PROOF_REDEMPTIONS,
   MIGRATION_0030_BILLING_CUSTOMERS,
+  MIGRATION_0031_REFERRAL_ATTRIBUTION,
 } from "../src/data/migrationRunner";
 import { agentMeshProposals } from "../src/data/drizzleSchema";
 import { InMemoryMeshProposalStore } from "../src/data/inMemoryMeshProposalAdapter";
@@ -202,7 +203,7 @@ describe("door budget guard", () => {
 /* ------------------------------------------------------------------ */
 
 describe("mesh proposal store", () => {
-  it("migration 0025 is registered and 0030 is last (#2656, after #2548), and the drizzle schema carries the table", () => {
+  it("migration 0025 is registered and 0031 is last (#2657, after #2656), and the drizzle schema carries the table", () => {
     expect(MIGRATION_0025_AGENT_MESH_PROPOSALS.version).toBe(25);
     expect(MIGRATION_0025_AGENT_MESH_PROPOSALS.sql).toContain("agent_mesh_proposals");
     expect(ALL_MIGRATIONS).toContain(MIGRATION_0025_AGENT_MESH_PROPOSALS);
@@ -216,8 +217,10 @@ describe("mesh proposal store", () => {
     expect(ALL_MIGRATIONS).toContain(MIGRATION_0029_PROOF_REDEMPTIONS);
     // #2656 (Phase 2.1) appends migration 0030 (billing customers) after 0029.
     expect(ALL_MIGRATIONS).toContain(MIGRATION_0030_BILLING_CUSTOMERS);
+    // #2657 (Phase 2.2) appends migration 0031 (referral attribution) after 0030.
+    expect(ALL_MIGRATIONS).toContain(MIGRATION_0031_REFERRAL_ATTRIBUTION);
     expect(ALL_MIGRATIONS[ALL_MIGRATIONS.length - 1]).toBe(
-      MIGRATION_0030_BILLING_CUSTOMERS,
+      MIGRATION_0031_REFERRAL_ATTRIBUTION,
     );
     expect(getTableName(agentMeshProposals)).toBe("agent_mesh_proposals");
   });

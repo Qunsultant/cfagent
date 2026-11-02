@@ -21,12 +21,14 @@ import { and, asc, eq } from "drizzle-orm";
 import {
   agentDigestSends,
   agentNotificationPreferences,
+  agentReferralAttributions,
   agentReferralEarnings,
   agentReferralRules,
 } from "./drizzleSchema";
 import {
   applyMigrations,
   MIGRATION_0015_LIFECYCLE_REFERRAL,
+  MIGRATION_0031_REFERRAL_ATTRIBUTION,
   type MigrationDb,
 } from "./migrationRunner";
 import {
@@ -43,6 +45,7 @@ import {
   type LifecycleStore,
   type NotificationPreferences,
   type ReferralAllocation,
+  type ReferralAttribution,
   type ReferralEarning,
   type ReferralRules,
 } from "./lifecyclePorts";
@@ -51,6 +54,7 @@ import {
 export type LifecycleDb = DrizzleD1Database<{
   agentReferralRules: typeof agentReferralRules;
   agentReferralEarnings: typeof agentReferralEarnings;
+  agentReferralAttributions: typeof agentReferralAttributions;
   agentNotificationPreferences: typeof agentNotificationPreferences;
   agentDigestSends: typeof agentDigestSends;
 }>;
@@ -61,6 +65,7 @@ export function createD1LifecycleDb(d1: D1Database): LifecycleDb {
     schema: {
       agentReferralRules,
       agentReferralEarnings,
+      agentReferralAttributions,
       agentNotificationPreferences,
       agentDigestSends,
     },
@@ -68,13 +73,27 @@ export function createD1LifecycleDb(d1: D1Database): LifecycleDb {
 }
 
 /**
- * Idempotent schema-ensure: applies migration 0015 if
- * unapplied. The rule seed lives IN the migration SQL (data,
- * not a code constant); nothing here re-seeds or overwrites
- * an operator-changed rule row.
+ * Idempotent schema-ensure: applies migration 0015 (ledger + rules) and
+ * migration 0031 (attribution store, #2657) if unapplied. The rule seed
+ * lives IN the migration SQL (data, not a code constant); nothing here
+ * re-seeds or overwrites an operator-changed rule row. The attribution
+ * migration seeds nothing: no attribution, no grant.
  */
 export async function ensureLifecycleSchema(db: LifecycleDb): Promise<number[]> {
-  return applyMigrations(db as unknown as MigrationDb, [MIGRATION_0015_LIFECYCLE_REFERRAL]);
+  return applyMigrations(db as unknown as MigrationDb, [
+    MIGRATION_0015_LIFECYCLE_REFERRAL,
+    MIGRATION_0031_REFERRAL_ATTRIBUTION,
+  ]);
+}
+
+function toAttribution(raw: typeof agentReferralAttributions.$inferSelect): ReferralAttribution {
+  return {
+    referredUserId: raw.referredUserId,
+    referrerUserId: raw.referrerUserId,
+    tenantId: raw.tenantId,
+    source: raw.source as ReferralAttribution["source"],
+    createdAtMs: raw.createdAtMs,
+  };
 }
 
 function toEarning(raw: typeof agentReferralEarnings.$inferSelect): ReferralEarning {
@@ -190,6 +209,66 @@ export class D1LifecycleAdapter implements LifecycleStore {
       .where(eq(agentReferralEarnings.id, record.id))
       .limit(1);
     return toEarning(rows[0]);
+  }
+
+  async recordAttribution(input: {
+    referrerUserId: string;
+    referredUserId: string;
+    tenantId: string;
+  }): Promise<ReferralAttribution> {
+    if (!input.referrerUserId || !input.referredUserId || !input.tenantId) {
+      throw new Error("referrerUserId, referredUserId, and tenantId are required.");
+    }
+    if (input.referrerUserId === input.referredUserId) {
+      throw new Error("A user cannot refer themselves.");
+    }
+    const existing = await this.getAttribution(input.referredUserId);
+    if (existing) {
+      if (existing.referrerUserId !== input.referrerUserId) {
+        throw new Error(
+          `User ${input.referredUserId} is already attributed to a different referrer; attribution is set-once and is never silently overwritten.`,
+        );
+      }
+      return existing;
+    }
+    const record: ReferralAttribution = {
+      referredUserId: input.referredUserId,
+      referrerUserId: input.referrerUserId,
+      tenantId: input.tenantId,
+      source: "operator",
+      createdAtMs: Date.now(),
+    };
+    try {
+      await this.db.insert(agentReferralAttributions).values({
+        referredUserId: record.referredUserId,
+        referrerUserId: record.referrerUserId,
+        tenantId: record.tenantId,
+        source: record.source,
+        createdAtMs: record.createdAtMs,
+      });
+    } catch {
+      // Racing second attribution for the same user hit the PRIMARY KEY:
+      // reconcile from the row, never a duplicate.
+      const raced = await this.getAttribution(input.referredUserId);
+      if (!raced) throw new Error("Referral attribution insert failed.");
+      if (raced.referrerUserId !== input.referrerUserId) {
+        throw new Error(
+          `User ${input.referredUserId} is already attributed to a different referrer; attribution is set-once and is never silently overwritten.`,
+        );
+      }
+      return raced;
+    }
+    return record;
+  }
+
+  async getAttribution(referredUserId: string): Promise<ReferralAttribution | null> {
+    if (!referredUserId) return null;
+    const rows = await this.db
+      .select()
+      .from(agentReferralAttributions)
+      .where(eq(agentReferralAttributions.referredUserId, referredUserId))
+      .limit(1);
+    return rows.length === 0 ? null : toAttribution(rows[0]);
   }
 
   async listEarnings(userId: string): Promise<ReferralEarning[]> {
