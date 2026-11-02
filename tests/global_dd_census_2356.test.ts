@@ -224,7 +224,10 @@ const STEP4D_DATA_LAYER_FILES: Array<[string, number]> = [
   // 21 at step 4d; 22 since #2528 slice 1: the canonical
   // backfill's updateBody UPDATE (artifact-key merge on
   // redelivery) lives in the data layer, behind the port.
-  ["src/data/doSqliteCanonicalReportStoreAdapter.ts", 22],
+  // 23 since #2863: getRowByRunIdForOwner SELECT (newest
+  // run-id row, owner-scoped) lives in the data layer, behind
+  // the port — the Replay read moved out of scheduledReports.
+  ["src/data/doSqliteCanonicalReportStoreAdapter.ts", 23],
   ["src/data/doSqliteUsageEventAdapter.ts", 4],
   ["src/data/orchestratorTablePorts.ts", 0],
   ["src/data/canonicalReportStorePorts.ts", 0],

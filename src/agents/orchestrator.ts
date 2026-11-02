@@ -1693,6 +1693,10 @@ export class OrchestratorAgent extends PortThink {
     error?: string;
     trigger?: unknown;
     userLogin?: string;
+    /** Issue #2863: replay criteria/refs (additive). */
+    criteria?: unknown;
+    patternRef?: unknown;
+    presetRef?: unknown;
   }): Promise<void> {
     return persistScreenerReportCanonical(this.reportDispatchContext(), result);
   }
