@@ -3564,7 +3564,10 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
     }
 
     // --- Cloudflare Agentic Payments: CORS preflight (premium + wallet families) ---
-    if ((path.startsWith("/api/premium/") || path.startsWith("/api/payments/agentic/")) && request.method === "OPTIONS") {
+    // Issue #2787: the commercial family answers its bare spelling too
+    // (/payments/agentic/commercial/*), so its preflight is aliased here
+    // exactly like its dispatch below.
+    if ((path.startsWith("/api/premium/") || path.startsWith("/api/payments/agentic/") || path.startsWith("/payments/agentic/commercial/")) && request.method === "OPTIONS") {
       return new Response(null, {
         headers: {
           "Access-Control-Allow-Origin": "*",
@@ -3576,6 +3579,16 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
     }
 
     // --- Agentic Wallet API (/api/payments/agentic/*) ---
+    // Issue #2787: the commercial family also answers its bare spelling
+    // (/payments/agentic/commercial/*) — same handler, same session gate,
+    // same instance routing, same forwarding. The /api spelling stays
+    // canonical (every in-app client uses it); the bare spelling is an
+    // alias, not a second route: subPath below strips /api when present
+    // and passes bare paths through unchanged, so both spellings forward
+    // identically to the handlers (which match endsWith). Precedent: the
+    // webhook below accepts both /api/payments/webhook and
+    // /payments/webhook. Only the commercial family is aliased — other
+    // /payments/agentic/* paths keep the /api-only gate.
     // Issue #183: a session is REQUIRED for the wallet family (the #154
     // pattern) — the wallet and its HITL auto-approve limit are the
     // signed-in user's own state. Previously a null session fell back
@@ -3584,7 +3597,7 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
     // read and mutate a shared wallet (and select any user's instance
     // by asserting their login). The fallback identities are removed;
     // the only in-app caller (AgenticWalletPanel) is signed in.
-    if (path.startsWith("/api/payments/agentic/")) {
+    if (path.startsWith("/api/payments/agentic/") || path.startsWith("/payments/agentic/commercial/")) {
       const session = await requireAuth(request, env);
       if (!session) return new Response("Unauthorized", { status: 401 });
       const userLogin = session.githubLogin;
