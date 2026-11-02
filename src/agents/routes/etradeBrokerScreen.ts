@@ -12,7 +12,7 @@
  * original inline block returned.
  */
 
-import { parseStockScreenRequest, shardableUniverses } from "../../trading";
+import { parseStockScreenRequest } from "../../trading";
 import type {
   StockScreenDelivery,
   StockScreenRunSpec,
@@ -20,12 +20,8 @@ import type {
 import { screenerOutcomeFromRunResult } from "../../services/screenerFollowups";
 import { isPortfolioContextEnabled } from "../../services/screeningFlags";
 import type { ETradeService } from "../../services/etrade";
-import {
-  manualWorkflowJobId,
-  tryStartScreenerWorkflow,
-  workflowAcceptedResponse,
-  workflowTenantId,
-} from "../../workflows/screenerWorkflowRoutes";
+import { workflowAcceptedResponse } from "../../workflows/screenerWorkflowRoutes";
+import { startStockScreenWorkflowOrNull } from "../../workflows/screenExecutionBroker";
 import { publishManualScreenerRun } from "./etradeBroker";
 import type { EtradeBrokerRouteContext } from "./etradeBroker";
 import type { ScreenerAgent } from "../screener-agent";
@@ -196,50 +192,32 @@ export async function executeEtradeScreen(args: {
   const validatedFilters = spec.filters;
   const delivery = spec.delivery;
   const asyncRequested = spec.asyncRequested;
-  const screenMode = spec.screenMode;
-  const screenIntent = spec.screenIntent;
   // Issue #17: the portfolio-context flag is read here (orchestrator
   // storage owns mas_settings; the screener agent cannot read it) and
   // rides the run request — runSharded spreads it onto every shard.
   const portfolioContext = isPortfolioContextEnabled(ctx.readSettingRaw);
-  // Issue #1737: async path. Shards mirror runSharded (ALL →
-  // shardableUniverses, else one shard); the workflow owns
-  // store + deliver per shard, so nothing is persisted,
-  // published, or audited-as-complete here. Unbound → null
-  // → fall through to the synchronous path below.
+  // Issue #2827: async path via ScreenExecutionBroker. The
+  // workflow owns store + deliver per shard, so nothing is
+  // persisted, published, or audited-as-complete here.
+  // Broker null (unbound / start failure) -> fall through
+  // to the synchronous path below. ND throw propagates
+  // (fail-closed, never a sync fallback).
   if (asyncRequested) {
-    const jobId = manualWorkflowJobId(universe);
-    const shards =
-      universe === "ALL"
-        ? shardableUniverses().map((u) => ({ shardId: u, universe: u }))
-        : [{ shardId: universe, universe }];
-    const handle = await tryStartScreenerWorkflow(ctx.env, {
-      jobId,
-      type: "run-screen",
-      source: "manual",
-      trigger: "manual",
+    const started = await startStockScreenWorkflowOrNull({
+      env: ctx.env,
+      spec,
       userLogin,
-      role: "parent",
-      tenantId: workflowTenantId(ctx.env),
-      shards,
-      // Issue #2809: deliver comes from the spec (true for E*TRADE),
-      // not a second literal divergence point.
-      deliver: spec.deliver,
-      filters: validatedFilters as unknown as Record<string, unknown>,
       environment: requestedEnv,
       portfolioContext,
-      ...(screenMode
-        ? { screenMode, screenIntent }
-        : {}),
     });
-    if (handle) {
+    if (started) {
       ctx.audit("etrade.screen_enqueued", "trading", {
-        jobId,
-        workflowId: handle.workflowId,
+        jobId: started.jobId,
+        workflowId: started.handle.workflowId,
         universe,
-        shards: shards.length,
+        shards: started.shards.length,
       });
-      return workflowAcceptedResponse(handle);
+      return workflowAcceptedResponse(started.handle);
     }
   }
   if (universe === "ALL") {
