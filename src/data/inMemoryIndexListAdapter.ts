@@ -3,7 +3,7 @@
  * index-list port, with semantics identical to the SQL adapters:
  * newest-first per index, keep-per-index prune on store.
  */
-import type { IndexId, IndexMember } from "../trading/indexMembership";
+import type { IndexId, IndexMember } from "../trading";
 import type {
   IndexListArtifact,
   IndexListStore,

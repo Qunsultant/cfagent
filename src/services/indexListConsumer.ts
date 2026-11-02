@@ -17,21 +17,21 @@
  * holdings 3 days) unless the caller passes maxAgeDays.
  */
 import type { IndexListStore } from "../data/indexListPorts";
+// Boundary (#290): trading is imported ONLY through its barrel
+// (src/trading/index.ts) — never a trading-internal path.
 import {
   DEFAULT_MAX_AGE_DAYS,
+  DynamicMarketScreener,
+  acquireUniverse,
   isStaleSnapshot,
   membersToListings,
+  screenUniverse,
   StaleIndexMembershipError,
   type IndexId,
   type IndexMembership,
-} from "../trading/indexMembership";
-import type { StockScreenerFilter } from "../types";
-import {
-  acquireUniverse,
-  screenUniverse,
   type QuoteScreenerDeps,
-} from "../trading/screenerPipeline";
-import { DynamicMarketScreener } from "../trading/screener";
+} from "../trading";
+import type { StockScreenerFilter } from "../types";
 
 export type StoredIndexListResolution =
   | { status: "hit"; membership: IndexMembership; stale: boolean }

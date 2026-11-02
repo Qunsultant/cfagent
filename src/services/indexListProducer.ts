@@ -20,7 +20,7 @@ import type {
 import type {
   IndexId,
   IndexMembershipPort,
-} from "../trading/indexMembership";
+} from "../trading";
 
 export interface IndexListDescriptor {
   artifactId: string;

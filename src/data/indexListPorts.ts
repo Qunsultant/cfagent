@@ -33,7 +33,7 @@
  * exclude it. Callers are jobs and resolvers, never the
  * discovery hot path, so async costs nothing here.
  */
-import type { IndexId, IndexMember } from "../trading/indexMembership";
+import type { IndexId, IndexMember } from "../trading";
 
 /** One stored index list: the unit the refresh job writes and the consumer reads. */
 export interface IndexListArtifact {
