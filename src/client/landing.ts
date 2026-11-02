@@ -63,11 +63,13 @@ export function renderLandingPage(appName?: string, polling?: Partial<PollingCon
   <meta name="description" content="Deploy self-driving trading strategies across US equities, index options, and futures. Guaranteed pre-trade risk policy enforcement and W3C Agent DID audit ledgers.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
     :root {
       --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+      --font-mono: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      --font-code: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      --font-numeric: 'Inter', -apple-system, BlinkMacSystemFont, monospace;
       --radius-sm: 0.375rem;
       --radius-md: 0.5rem;
       --radius-lg: 0.75rem;
@@ -334,7 +336,7 @@ ${hcTokens}
       align-items: center;
       gap: 0.5rem;
       font-size: 0.775rem;
-      font-family: var(--font-mono);
+      font-family: var(--font-numeric);
     }
     .ticker-sym { font-weight: 600; color: var(--color-text-primary); }
     .ticker-val { color: var(--color-text-secondary); }
@@ -512,7 +514,7 @@ ${hcTokens}
       padding: 0.2rem 1rem;
       font-size: 0.75rem;
       color: var(--color-text-secondary);
-      font-family: var(--font-mono);
+      font-family: var(--font-code);
       display: flex;
       align-items: center;
       gap: 0.4rem;
@@ -565,7 +567,7 @@ ${hcTokens}
       font-size: 1.45rem;
       font-weight: 700;
       color: var(--color-text-primary);
-      font-family: var(--font-mono);
+      font-family: var(--font-numeric);
       letter-spacing: -0.02em;
     }
     .kpi-sub-text {
@@ -696,9 +698,9 @@ ${hcTokens}
     .pos-sym {
       font-weight: 600;
       color: var(--color-text-primary);
-      font-family: var(--font-mono);
+      font-family: var(--font-numeric);
     }
-    .pos-pnl.gain { color: var(--color-gain); font-weight: 600; font-family: var(--font-mono); }
+    .pos-pnl.gain { color: var(--color-gain); font-weight: 600; font-family: var(--font-numeric); }
     .pos-policy-pill {
       font-size: 0.675rem;
       padding: 0.1rem 0.35rem;
@@ -757,7 +759,7 @@ ${hcTokens}
     .risk-did-meta {
       font-size: 0.7rem;
       color: var(--color-text-muted);
-      font-family: var(--font-mono);
+      font-family: var(--font-code);
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -785,7 +787,7 @@ ${hcTokens}
       letter-spacing: -0.03em;
       line-height: 1;
       margin-bottom: 0.4rem;
-      font-family: var(--font-mono);
+      font-family: var(--font-numeric);
     }
     .stat-counter-box p {
       font-size: 0.9rem;
