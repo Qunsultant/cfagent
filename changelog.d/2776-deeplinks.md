@@ -1,0 +1,2 @@
+### Added
+- Deep links for every tab/sub-tab, externalized in the nav config (#2776): the left-nav tree, the screeners hub, Platform Admin sections, Payments, Social, Ads, Referrals, Revenue, Workflows, Checkout, IAAA Admin, Reports panel mode, and the Risk Analysis modal tabs each have their own copyable URL; nav rows render as real links, the collapsed flyout resolves through the same catalog as the expanded submenu, and the sandbox page opens in a new tab from both nav surfaces.

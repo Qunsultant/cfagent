@@ -54,6 +54,7 @@ import {
   Tabs,
   TextInput,
 } from "./components/ui";
+import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
 import {
   buildGoalCommand,
   buildNonGoalCommand,
@@ -106,7 +107,16 @@ function newJobId(): string {
 }
 
 export function CheckoutPanel({ userLogin }: { userLogin: string }) {
-  const [tab, setTab] = React.useState<"pay" | "subscriptions">("pay");
+  // Deep links (#2776): the checkout tabs live in `?checkoutTab=` via
+  // the shared hook (aliased to the old tab/setTab names, so the panel
+  // below is untouched).
+  const { activeTab: tab, handleTabChange: setTab } = useUrlSyncedTabs<
+    "pay" | "subscriptions"
+  >({
+    param: "checkoutTab",
+    isValid: (v): v is "pay" | "subscriptions" => v === "pay" || v === "subscriptions",
+    defaultTab: "pay",
+  });
   const [loading, setLoading] = React.useState(true);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [pricing, setPricing] = React.useState<Pricing | null>(null);
@@ -396,7 +406,7 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
           { id: "subscriptions", label: "Subscriptions" },
         ]}
         value={tab}
-        onChange={(v) => setTab(v as "pay" | "subscriptions")}
+        onChange={setTab}
         idBase="checkout-tabs"
         ariaLabel="Checkout sections"
       />

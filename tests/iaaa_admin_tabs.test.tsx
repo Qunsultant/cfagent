@@ -65,6 +65,10 @@ async function renderPanel() {
 }
 
 beforeEach(() => {
+  // Issue #2776: panel tabs are URL-synced, so a tab click in one test
+  // writes ?iaaaTab= into the shared jsdom URL and would leak into the
+  // next test's initial tab. Every test starts from a clean URL.
+  window.history.replaceState(null, "", "/");
   vi.stubGlobal(
     "fetch",
     vi.fn(async () => new Response(JSON.stringify(OVERVIEW), { status: 200 })),
