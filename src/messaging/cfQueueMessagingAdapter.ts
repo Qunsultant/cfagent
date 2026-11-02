@@ -50,6 +50,7 @@ import {
 import {
   createDeadLetterRecord,
   logDeadLetter,
+  type DeadLetterRecord,
 } from "./deadLetter";
 
 /** Minimal structural shape of a provider queue producer binding. */
@@ -186,32 +187,44 @@ export class CfQueueMessagingAdapter
 export async function consumeCfBatch(
   batch: ProviderQueueBatch,
   consumer: MessageConsumer,
-  handler: MessageHandler
+  handler: MessageHandler,
+  /**
+   * Phase 5 Slice 1 (issue #2000) — optional persistence for
+   * undecodable drops (no envelope exists to persist). The
+   * production closure never throws; absent, drops stay
+   * console-only.
+   */
+  persist?: (record: DeadLetterRecord, envelope: null) => Promise<void>,
 ): Promise<void> {
   const bodies = batch.messages.map((m) => m.body);
   const report = await consumer.consume(bodies, handler);
-  report.results.forEach((result, i) => {
+  for (let i = 0; i < report.results.length; i++) {
+    const result = report.results[i];
     const msg = batch.messages[i];
-    if (!msg) return;
+    if (!msg) continue;
     if (result.disposition === "invalid") {
       // Issue #1764 — the drop keeps its ack (redelivering bytes
       // that can never decode would poison-loop), but it now
       // leaves a structured dead-letter record, not a bare warning.
-      logDeadLetter(
-        createDeadLetterRecord({
-          queue: batch.queue,
-          reason: "undecodable",
-          detail:
-            "Dropping undecodable queue message (no valid envelope) (#1764).",
-        })
-      );
+      const record = createDeadLetterRecord({
+        queue: batch.queue,
+        reason: "undecodable",
+        detail:
+          "Dropping undecodable queue message (no valid envelope) (#1764).",
+      });
+      logDeadLetter(record);
+      // Slice 1 (#2000): persist the drop (no envelope) before
+      // the ack below, so the record exists before the message
+      // is gone. The closure never throws, so the ack below
+      // still always runs.
+      await persist?.(record, null);
     }
     if (result.disposition === "retried") {
       msg.retry();
     } else {
       msg.ack();
     }
-  });
+  }
 }
 
 /**
@@ -227,21 +240,29 @@ export async function dispatchSubscriberBatch(
   batch: ProviderQueueBatch,
   subscriber: string,
   handlers: SubscriberHandlers,
-  seen: Set<string>
+  seen: Set<string>,
+  /**
+   * Phase 5 Slice 1 (issue #2000) — optional persistence for
+   * undecodable drops (no envelope exists to persist). Same
+   * never-throws contract as consumeCfBatch's persist.
+   */
+  persist?: (record: DeadLetterRecord, envelope: null) => Promise<void>,
 ): Promise<void> {
   for (const msg of batch.messages) {
     if (!isMessageEnvelope(msg.body)) {
       // Issue #1764 — acked as before (undecodable bytes can never
       // decode), now with a structured dead-letter record.
-      logDeadLetter(
-        createDeadLetterRecord({
-          queue: batch.queue,
-          reason: "undecodable",
-          subscriber,
-          detail:
-            "Dropping undecodable subscriber message (no valid envelope) (#1764).",
-        })
-      );
+      const record = createDeadLetterRecord({
+        queue: batch.queue,
+        reason: "undecodable",
+        subscriber,
+        detail:
+          "Dropping undecodable subscriber message (no valid envelope) (#1764).",
+      });
+      logDeadLetter(record);
+      // Slice 1 (#2000): persist the drop (no envelope) before
+      // the ack below, for the same reason as consumeCfBatch.
+      await persist?.(record, null);
       msg.ack();
       continue;
     }
