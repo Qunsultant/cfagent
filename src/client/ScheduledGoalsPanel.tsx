@@ -11,12 +11,15 @@ import {
   removeGoal,
   listOperations,
   addResourceGoals,
+  RESOURCE_GOALS_PRESET,
   type ScheduledGoal,
   type ScheduleTick,
   type CatalogOperation,
   type PresetGoalResult,
 } from "./scheduleApi";
 import { TextInput, Select, Button, Modal } from "./components/ui";
+import { DelegationContractPreview } from "./DelegationContractPreview";
+import { buildDelegationContract } from "./delegationContract";
 
 export interface ScheduledGoalsPanelProps {
   embedded?: boolean;
@@ -226,6 +229,22 @@ export function ScheduledGoalsPanel({ embedded = false }: ScheduledGoalsPanelPro
         </Select>
         <TextInput style={inputStyle} placeholder="budget in cents (e.g. 500)" value={form.budgetCents} onChange={(e) => setForm({ ...form, budgetCents: e.target.value })} />
         <TextInput placeholder="timeZone (IANA, e.g. UTC)" value={form.timeZone} onChange={(e) => setForm({ ...form, timeZone: e.target.value })} />
+        {/* Issue #1773 (HAX #1 scope disclosure): the Delegation
+            Contract preview for exactly what adding this goal
+            authorizes, built from the form + the loaded catalog
+            entry — nothing invented when a field is still blank. */}
+        <DelegationContractPreview
+          contract={buildDelegationContract({
+            goalId: form.id,
+            goalName: form.name,
+            cron: form.cron,
+            operation: form.operation,
+            operationAgent: operations.find((op) => op.operation === form.operation)?.agent,
+            operationBlurb: operations.find((op) => op.operation === form.operation)?.blurb,
+            budgetCents: form.budgetCents.trim() === "" || !Number.isFinite(Number(form.budgetCents)) ? null : Number(form.budgetCents),
+            timeZone: form.timeZone,
+          })}
+        />
         <div>
           <Button disabled={busy === "add"} onClick={() => void submitGoal()} loading={busy === "add"}>
             {"Add goal"}
@@ -242,6 +261,26 @@ export function ScheduledGoalsPanel({ embedded = false }: ScheduledGoalsPanelPro
         Adds the three SessionStore resource goals (daily rollup, 70% cap alert, dashboard
         comparison) with timeZone UTC. Goals that already exist are skipped, not duplicated.
       </div>
+      {/* Issue #1773 (HAX #1): the same Delegation Contract preview
+          for the preset's three fixed goals, from their documented
+          payloads — the preset authorizes only these three runs. */}
+      <details>
+        <summary>Delegation contract for these three goals</summary>
+        {RESOURCE_GOALS_PRESET.map((preset) => (
+          <DelegationContractPreview
+            key={preset.id}
+            title={`Delegation contract — ${preset.name}`}
+            contract={buildDelegationContract({
+              goalId: preset.id,
+              goalName: preset.name,
+              cron: preset.cron,
+              operation: preset.operation,
+              budgetCents: preset.budgetCents,
+              timeZone: preset.timeZone,
+            })}
+          />
+        ))}
+      </details>
       {presetResults && (
         <div style={{ marginBottom: 8 }}>
           {presetResults.map((r) => (
