@@ -35,10 +35,17 @@ import {
 } from "../../workflows/sagaJourneyGate";
 import { sagaWorkflowInstanceId } from "../../workflows/sagaJourneyGate";
 
-/** Minimal structural surface of the SAGA_WORKFLOW binding. */
+/** Minimal structural surface of the SAGA_WORKFLOW binding.
+ * The runtime snapshot also carries an optional error (the
+ * cfWorkflowAdapter WorkflowBindingLike shape): issue #2810
+ * surfaces it as the errored instance's reason. */
 export interface SagaStatusBinding {
   get: (id: string) => Promise<{
-    status: () => Promise<{ status: string; output?: unknown }>;
+    status: () => Promise<{
+      status: string;
+      output?: unknown;
+      error?: { message: string } | string;
+    }>;
   }>;
 }
 
@@ -78,6 +85,7 @@ const STAGE_FOR_TYPE: Record<string, string> = {
   "saga.trade_decided": "trade",
   "saga.trade_leg_failed": "trade",
   "saga.proposal_failed": "trade",
+  "saga.failed": "failed",
   "saga.outcome_notice": "notice",
   "saga.ended": "done",
 };
@@ -93,6 +101,14 @@ function detailFor(row: AuditRowLike): string {
       return `Journey ${String(p["decision"] ?? "?")} via ${String(p["decidingSurface"] ?? "?")}`;
     case "saga.trade_proposed":
       return `Trade proposed (order ${String(p["orderId"] ?? "?")})`;
+    case "saga.failed": {
+      // Issue #2810: the terminal failure row names its step +
+      // reason, so the panel and Workflow Runs stages show both.
+      const reason = typeof p["reason"] === "string" ? (p["reason"] as string) : "";
+      const leg = typeof p["leg"] === "string" ? (p["leg"] as string) : "";
+      if (reason && leg) return `${leg} leg failed: ${reason}`;
+      return reason || "saga failed";
+    }
     case "saga.outcome_notice": {
       const notice = p["notice"];
       const slack =
@@ -290,7 +306,8 @@ export async function readSagaAuditRows(
  * unbound or the read fails; 404 when no audit rows exist for
  * the session user AND no projection row exists for the session
  * tenant (issue #2777 fallback); otherwise 200 with {jobs} +
- * best-effort live instance state.
+ * best-effort live instance state. An errored instance also
+ * carries instanceError (#2810).
  */
 export async function handleSagaStatusRoutes(
   request: Request,
@@ -361,7 +378,13 @@ export async function handleSagaStatusRoutes(
       : undefined;
 
   // Live instance state: best-effort, never a 503 on its own.
+  // Issue #2810: an errored instance also surfaces its reason
+  // (instanceError) — the binding's error text when present,
+  // else the terminal audit row's reason, else the last known
+  // step + "instance errored". Never a 503: every source here
+  // is already in hand or best-effort.
   let instanceStatus: string | undefined;
+  let snapshotError: string | undefined;
   let outcomeCode: string | undefined = endedCode;
   let tradeWorkflowId: string | undefined = proposedTradeId;
   const binding =
@@ -372,6 +395,13 @@ export async function handleSagaStatusRoutes(
       const instance = await binding.get(sagaWorkflowInstanceId(sagaId));
       const snapshot = await instance.status();
       instanceStatus = snapshot.status;
+      const rawError = snapshot.error;
+      snapshotError =
+        typeof rawError === "string"
+          ? rawError
+          : rawError && typeof rawError === "object" && typeof rawError.message === "string"
+            ? rawError.message
+            : undefined;
       if (snapshot.output && typeof snapshot.output === "object") {
         const output = snapshot.output as Record<string, unknown>;
         if (typeof output["code"] === "string") {
@@ -385,10 +415,28 @@ export async function handleSagaStatusRoutes(
       // Missing instance or unbound binding: audit rows answer.
     }
   }
+  let instanceError: string | undefined;
+  if (instanceStatus === "errored") {
+    const reasonOf = (type: string): string | undefined => {
+      const row = own.find((r) => r["type"] === type);
+      const payload = row?.["payload"] as Record<string, unknown> | undefined;
+      const reason = payload?.["reason"];
+      return typeof reason === "string" && reason ? reason : undefined;
+    };
+    const lastJob = jobs[jobs.length - 1];
+    instanceError =
+      snapshotError ??
+      reasonOf("saga.failed") ??
+      reasonOf("saga.ended") ??
+      (lastJob
+        ? `Saga failed at ${lastJob.stage}: instance errored`
+        : "Saga failed: instance errored");
+  }
   return Response.json({
     sagaId,
     jobs,
     ...(instanceStatus ? { instanceStatus } : {}),
+    ...(instanceError ? { instanceError } : {}),
     ...(outcomeCode ? { outcomeCode } : {}),
     ...(tradeWorkflowId ? { tradeWorkflowId } : {}),
   });

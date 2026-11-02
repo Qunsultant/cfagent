@@ -129,6 +129,14 @@ const SAGA_ENTRIES: Record<
     httpStatus: 500,
     businessMessage: "The trade proposal failed; no approval workflow started and no order was placed.",
   },
+  FAILURE_SAGA_FAILED: {
+    outcome: "failure",
+    category: "saga",
+    retryable: false,
+    httpStatus: 500,
+    businessMessage:
+      "The saga failed unexpectedly; the failure is recorded with its step and reason — start a fresh saga.",
+  },
 };
 
 describe("saga outcome catalog (S1+S2+S3+S4, #2041)", () => {
