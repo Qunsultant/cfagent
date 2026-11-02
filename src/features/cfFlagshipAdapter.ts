@@ -43,10 +43,12 @@ export class CfFlagshipAdapter implements FeatureFlagPort {
       // authoritative control; an explicit Flagship value wins, and
       // an evaluation failure still fails closed below).
     // Issue #2742: monetization defaults ON (owner direction).
+    // Issue #2783: planned_asset_tabs defaults ON (owner direction).
     const defaultValue =
       flag === "payment_assurance" ||
       flag === "goal_workflow" ||
-      flag === "monetization";
+      flag === "monetization" ||
+      flag === "planned_asset_tabs";
     try {
       // Issue #2596: Flagship cannot distinguish an absent dashboard
       // flag from an explicit one, so parent inheritance is expressed

@@ -17,12 +17,16 @@ describe("navConfig - externalized navigation and sub-menu configuration", () =>
     // after the route-derived sections (it opens a drawer, not a route).
     // Issue #2645: the Sandbox destination is a sixth group, appended after
     // Platform Admin (it links standalone demo pages, not routes).
-    expect(DEFAULT_LEFT_NAV_CONFIG.sections).toHaveLength(7);
+    // Issue #2783: the Planned destination is an eighth group, appended
+    // after Sandbox (it links hub views, not routes).
+    expect(DEFAULT_LEFT_NAV_CONFIG.sections).toHaveLength(8);
     const categories = DEFAULT_LEFT_NAV_CONFIG.sections.map((s) => s.category);
     // The sixth group is the Platform Admin drawer destination; the seventh is
     // the Sandbox demo-links destination. Both carry the "Platform" category
-    // because they belong to that navigation family.
-    expect(categories).toEqual(["Execution", "Intelligence", "Playbooks", "Marketing", "Billing", "Platform", "Platform"]);
+    // because they belong to that navigation family. The eighth is the
+    // Planned menu destination, carrying "Intelligence" because it belongs
+    // to the screening family.
+    expect(categories).toEqual(["Execution", "Intelligence", "Playbooks", "Marketing", "Billing", "Platform", "Platform", "Intelligence"]);
   });
 
   it("every section has a non-empty title and at least one menu item", () => {

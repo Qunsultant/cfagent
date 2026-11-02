@@ -679,12 +679,10 @@ export function ScreenersHub({
         },
       },
     );
-    // Issue #2438: the Planned tabs leave the primary bar until
-    // implemented. They stay valid tab ids (isValidScreenerTab) and
-    // their panels still render for deep links — only the bar items
-    // go away, so first-time users meet no dead ends.
-    const PLANNED_BAR_EXCLUDED = ["forex", "futures", "commodities", "bonds"];
-    return assetTabs.filter((tab) => !PLANNED_BAR_EXCLUDED.includes(tab.id));
+    // Issue #2783: the #2438 exclusion is removed — the Planned tabs
+    // return to the primary bar with their PLANNED badges (nothing
+    // hidden); the left-nav Planned menu links to the same views.
+    return assetTabs;
   }, []);
 
   return (
