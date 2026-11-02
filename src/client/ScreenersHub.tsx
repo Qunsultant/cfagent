@@ -93,10 +93,14 @@ export type ScreenersHubTab =
   | "reports"
   | "schedules"
   | "review"
-  | "track-record";
+  | "track-record"
+  | "new-screen"
+  | "run-screen";
 
 export const SCREENER_HUB_TABS: readonly ScreenersHubTab[] = [
   "stocks",
+  "new-screen",
+  "run-screen",
   "options",
   "forex",
   "futures",
@@ -250,7 +254,9 @@ export function ScreenersHub({
     hubTab === "reports" ||
     hubTab === "schedules" ||
     hubTab === "review" ||
-    hubTab === "track-record"
+    hubTab === "track-record" ||
+    hubTab === "new-screen" ||
+    hubTab === "run-screen"
       ? "stocks"
       : hubTab;
   const providers = useMemo(() => getScreeningProviders(assetClass), [assetClass]);
@@ -572,6 +578,20 @@ export function ScreenersHub({
     // S8: the folded surfaces ride the same tab bar, right after
     // Options — the Strategy/Symbol Scanner and IV History, formerly
     // Trading Hub subtabs.
+    const stocksIndex = assetTabs.findIndex((tab) => tab.id === "stocks");
+    assetTabs.splice(stocksIndex + 1, 0, {
+      id: "new-screen",
+      label: "Run a New Screen",
+      icon: "⚡",
+      badge: "NEW",
+      badgeType: "live",
+      tooltip: {
+        eyebrow: "ONE-SHOT SCREEN",
+        title: "Run a New Screen",
+        description: "Screen common stocks with custom criteria, filters, and delivery options.",
+      },
+    });
+
     const optionsIndex = assetTabs.findIndex((tab) => tab.id === "options");
     assetTabs.splice(optionsIndex + 1, 0,
       {
@@ -878,158 +898,26 @@ export function ScreenersHub({
               </>
             )}
           </div>
-          {/* Issue #2438: the manual form is a clearly-headed secondary
-              placement below the run detail — it no longer competes with
-              the digest and history above it. Provider health lives on
-              the dashboard below; the per-screen feed callouts it
-              replaces are gone (one source of truth). */}
-          <h2 style={{ fontSize: "1.125rem", margin: "1.5rem 0 0.25rem" }}>Run a new screen</h2>
-          <p style={{ fontSize: "var(--font-size-body)", color: "var(--color-text-muted)", margin: "0 0 0.75rem" }}>
-            Provider health: see the <a href="#provider-dashboard">provider dashboard</a> below.
-          </p>
-          <form className="options-request-form screeners-filter-form" onSubmit={(event) => void runScreen(event)}>
-            <Select label="Data provider / API" value={providerId} onChange={(event) => setProviderId(event.target.value)}>
-              {providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.label}</option>)}
-            </Select>
-
-            {/* Issue #2438: fields never reshape by provider — every
-                field renders; one the active provider does not support
-                is disabled with the reason, never mounted/unmounted.
-                runScreen still only SENDS supported filters, so the
-                request shape is unchanged. */}
-            <TextInput label="Ticker or company search"
-              value={symbolSearch}
-              onChange={(event) => setSymbolSearch(event.target.value)}
-              placeholder="Optional; e.g. NVDA, AAPL"
-              disabled={!providerSupportsFilter(activeProvider, assetClass, "search")}
-              hint={providerSupportsFilter(activeProvider, assetClass, "search") ? undefined : `Not supported by ${activeProvider?.label ?? "this provider"}`}
-            />
-            <Select label="Exchange" value={exchange} onChange={(event) => setExchange(event.target.value)}
-              disabled={!providerSupportsFilter(activeProvider, assetClass, "exchange")}
-              hint={providerSupportsFilter(activeProvider, assetClass, "exchange") ? undefined : `Not supported by ${activeProvider?.label ?? "this provider"}`}>
-              <option value="ALL">All U.S. listings</option>
-              <option value="NASDAQ">Nasdaq</option>
-              <option value="NYSE">NYSE</option>
-              <option value="AMEX">AMEX</option>
-            </Select>
-            <TextInput label="Min price" type="number" min="0" step="0.01" value={minPrice} onChange={(event) => setMinPrice(event.target.value)}
-              disabled={!providerSupportsFilter(activeProvider, assetClass, "price-range")}
-              hint={providerSupportsFilter(activeProvider, assetClass, "price-range") ? undefined : `Not supported by ${activeProvider?.label ?? "this provider"}`} />
-            <TextInput label="Max price" type="number" min="0" step="0.01" value={maxPrice} onChange={(event) => setMaxPrice(event.target.value)}
-              disabled={!providerSupportsFilter(activeProvider, assetClass, "price-range")}
-              hint={providerSupportsFilter(activeProvider, assetClass, "price-range") ? undefined : `Not supported by ${activeProvider?.label ?? "this provider"}`} />
-            <Select label="Universe" value={universe} onChange={(event) => setUniverse(event.target.value)} title="Index/ETF universe to screen">
-              <option value="TECH">Technology (discovery)</option>
-              <option value="NASDAQ100">Nasdaq-100</option>
-              <option value="SP100">S&P 100</option>
-              <option value="SP500">S&P 500</option>
-              <option value="RUSSELL2000">Russell 2000</option>
-              <option value="ETF">ETFs</option>
-              <option value="LEV_ETF">Leveraged ETFs</option>
-              <option value="ALL">All (auto-sharded, parallel)</option>
-            </Select>
-            <Select label="Sector" value={sector} onChange={(event) => setSector(event.target.value)} title="Industry sector filter">
-              <option value="ALL">All Sectors</option>
-              <option value="Technology">Technology</option>
-              <option value="Semiconductors">Semiconductors</option>
-              <option value="Financial">Financial / Banking</option>
-              <option value="Healthcare">Healthcare / Biotech</option>
-              <option value="Consumer Discretionary">Consumer Discretionary</option>
-              <option value="Communication Services">Communication Services</option>
-              <option value="Energy">Energy</option>
-              <option value="Industrials">Industrials</option>
-            </Select>
-            <TextInput label="Min Score (0–100)"
-              type="number"
-              min="0"
-              max="100"
-              value={minScore}
-              onChange={(event) => setMinScore(event.target.value)}
-              placeholder="Optional; e.g. 50"
-            />
-            <Select label="Daily trend" value={trend} onChange={(event) => setTrend(event.target.value)}
-              disabled={!providerSupportsFilter(activeProvider, assetClass, "trend")}
-              hint={providerSupportsFilter(activeProvider, assetClass, "trend") ? undefined : `Not supported by ${activeProvider?.label ?? "this provider"}`}>
-              <option value="all">All</option>
-              <option value="gainers">Gainers</option>
-              <option value="losers">Losers</option>
-            </Select>
-            <TextInput label="Max results" type="number" min="1" value={stockLimit} onChange={(event) => setStockLimit(event.target.value)}
-              disabled={!providerSupportsFilter(activeProvider, assetClass, "limit")}
-              hint={providerSupportsFilter(activeProvider, assetClass, "limit") ? undefined : `Not supported by ${activeProvider?.label ?? "this provider"}`} />
-            <div className="screener-criteria-presets-deck">
-              <ScreenerPresetManager
-                assetClass="stocks"
-                userLogin={userLogin}
-                currentFilter={stockCriteriaToFilter(stockCriteria)}
-                onApplyPreset={setStockCriteria}
-              />
-              <StockCriteriaPanel
-                criteria={stockCriteria}
-                onChange={setStockCriteria}
-                lastSentFilters={lastSentStockFilters}
-              />
-            </div>
-            {/* Issue #2545: delivery/report fields at parity with the
-                scheduled "Stock Market Screen" job — same field names,
-                same delivery path (the run's follow-up bridge). Laid
-                out in the criteria deck like the preset/criteria block
-                above it: primitives + existing classes only (the UX
-                ratchets count new inline styles / raw labels). */}
-            <div className="screener-criteria-presets-deck">
-              <div>
-                <h3>Delivery &amp; report</h3>
-                <p>Deliver this run like the scheduled Stock Market Screen does.</p>
-                <FieldShell id="stock-delivery-slack-push" label="Slack push">
-                  <Checkbox id="stock-delivery-slack-push" checked={deliveryPushToSlack} onChange={(event) => setDeliveryPushToSlack(event.target.checked)} />
-                </FieldShell>
-                {deliveryPushToSlack && (
-                  <TextInput label="Slack channel"
-                    value={deliverySlackChannel}
-                    onChange={(event) => setDeliverySlackChannel(event.target.value)}
-                    placeholder="Optional; e.g. #trading-desk (blank = the configured channel)"
-                  />
-                )}
+          {/* Issue #2746: One-shot manual screen moved to its own page / view (?tab=screeners&view=new-screen). */}
+          <div className="provider-dashboard-callout">
+            <Card padding="md">
+              <div className="provider-callout-inner">
+                <div>
+                  <h3 className="provider-callout-title">Run a new screen</h3>
+                  <p className="provider-callout-desc">
+                    Execute a manual stock screen with custom filters, presets, and delivery targets.
+                  </p>
+                </div>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => handleTabChange("new-screen")}
+                >
+                  Run a new screen &rarr;
+                </Button>
               </div>
-              <div>
-                <TextInput label="Email recipients"
-                  type="email"
-                  value={deliveryEmailTo}
-                  onChange={(event) => setDeliveryEmailTo(event.target.value)}
-                  placeholder="Optional; e.g. trader@firm.com"
-                />
-                <TextInput label="Webhook URL"
-                  type="url"
-                  value={deliveryWebhookUrl}
-                  onChange={(event) => setDeliveryWebhookUrl(event.target.value)}
-                  placeholder="Optional; https://…"
-                />
-                <FieldShell id="stock-delivery-pdf" label="PDF report" hint="Attach the run's generated PDF report to deliveries">
-                  <Checkbox id="stock-delivery-pdf" checked={deliveryGeneratePdf} onChange={(event) => setDeliveryGeneratePdf(event.target.checked)} />
-                </FieldShell>
-              </div>
-            </div>
-            <div className="options-form-footer">
-              <Button type="submit" variant="primary" disabled={loading || !endpoint} loading={loading}>{"Run stock screen"}</Button>
-            </div>
-          </form>
-
-          {/* Issue #2438: errors render via the Notice primitive, never
-              a raw .options-error div. */}
-          {error && (
-            <Notice tone="danger" density="compact" onDismiss={() => setError("")}>
-              {error}
-            </Notice>
-          )}
-          {/* Issue #261: manual results use the same ScreenerResultsView as autonomous. */}
-          {manualResult && <ScreenerResultsView result={manualResult} />}
-          {shardedResults.length > 0 && shardedResults.map((r) => (
-            <div key={r.universe} style={{ marginTop: "1.5rem" }}>
-              <h3 style={{ fontSize: "1rem", marginBottom: "0.5rem" }}>🌐 {r.universe}</h3>
-              <ScreenerResultsView result={r} />
-            </div>
-          ))}
-          {!manualResult && summary && <div className="screener-results-header"><span>{summary}</span><span>{activeProvider?.label} · {activeEnv}</span></div>}
+            </Card>
+          </div>
           {/* Issue #2723: Provider connectivity consolidated into Platform Admin -> Data Providers. */}
           <div id="provider-dashboard" className="provider-dashboard-callout">
             <Card padding="md">
@@ -1048,6 +936,172 @@ export function ScreenersHub({
                 </a>
               </div>
             </Card>
+          </div>
+        </div>
+      )}
+
+      {/* 1b. Run a New Screen Panel (Issue #2746) */}
+      {(visitedTabs.has("new-screen") || visitedTabs.has("run-screen")) && (
+        <div
+          role="tabpanel"
+          id="screener-tabpanel-new-screen"
+          aria-labelledby="cap-tab-new-screen"
+          hidden={hubTab !== "new-screen" && hubTab !== "run-screen"}
+          style={hubTab !== "new-screen" && hubTab !== "run-screen" ? { display: "none" } : undefined}
+        >
+          <div style={{ padding: "0 var(--space-4)" }}>
+            <h2 style={{ fontSize: "1.125rem", margin: "1.5rem 0 0.25rem" }}>Run a new screen</h2>
+            <p style={{ fontSize: "var(--font-size-body)", color: "var(--color-text-muted)", margin: "0 0 0.75rem" }}>
+              Provider health: see the <a href="/?tab=platform-admin&view=data-providers">provider dashboard</a> in Platform Admin.
+            </p>
+            <form className="options-request-form screeners-filter-form" onSubmit={(event) => void runScreen(event)}>
+              <Select label="Data provider / API" value={providerId} onChange={(event) => setProviderId(event.target.value)}>
+                {providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.label}</option>)}
+              </Select>
+
+              <TextInput label="Ticker or company search"
+                value={symbolSearch}
+                onChange={(event) => setSymbolSearch(event.target.value)}
+                placeholder="Optional; e.g. NVDA, AAPL"
+                disabled={!providerSupportsFilter(activeProvider, assetClass, "search")}
+                hint={providerSupportsFilter(activeProvider, assetClass, "search") ? undefined : `Not supported by ${activeProvider?.label ?? "this provider"}`}
+              />
+              <Select label="Exchange" value={exchange} onChange={(event) => setExchange(event.target.value)}
+                disabled={!providerSupportsFilter(activeProvider, assetClass, "exchange")}
+                hint={providerSupportsFilter(activeProvider, assetClass, "exchange") ? undefined : `Not supported by ${activeProvider?.label ?? "this provider"}`}>
+                <option value="ALL">All U.S. listings</option>
+                <option value="NASDAQ">Nasdaq</option>
+                <option value="NYSE">NYSE</option>
+                <option value="AMEX">AMEX</option>
+              </Select>
+              <TextInput label="Min price" type="number" min="0" step="0.01" value={minPrice} onChange={(event) => setMinPrice(event.target.value)}
+                disabled={!providerSupportsFilter(activeProvider, assetClass, "price-range")}
+                hint={providerSupportsFilter(activeProvider, assetClass, "price-range") ? undefined : `Not supported by ${activeProvider?.label ?? "this provider"}`} />
+              <TextInput label="Max price" type="number" min="0" step="0.01" value={maxPrice} onChange={(event) => setMaxPrice(event.target.value)}
+                disabled={!providerSupportsFilter(activeProvider, assetClass, "price-range")}
+                hint={providerSupportsFilter(activeProvider, assetClass, "price-range") ? undefined : `Not supported by ${activeProvider?.label ?? "this provider"}`} />
+              <Select label="Universe" value={universe} onChange={(event) => setUniverse(event.target.value)} title="Index/ETF universe to screen">
+                <option value="TECH">Technology (discovery)</option>
+                <option value="NASDAQ100">Nasdaq-100</option>
+                <option value="SP100">S&P 100</option>
+                <option value="SP500">S&P 500</option>
+                <option value="RUSSELL2000">Russell 2000</option>
+                <option value="ETF">ETFs</option>
+                <option value="LEV_ETF">Leveraged ETFs</option>
+                <option value="ALL">All (auto-sharded, parallel)</option>
+              </Select>
+              <Select label="Sector" value={sector} onChange={(event) => setSector(event.target.value)} title="Industry sector filter">
+                <option value="ALL">All Sectors</option>
+                <option value="Technology">Technology</option>
+                <option value="Semiconductors">Semiconductors</option>
+                <option value="Financial">Financial / Banking</option>
+                <option value="Healthcare">Healthcare / Biotech</option>
+                <option value="Consumer Discretionary">Consumer Discretionary</option>
+                <option value="Communication Services">Communication Services</option>
+                <option value="Energy">Energy</option>
+                <option value="Industrials">Industrials</option>
+              </Select>
+              <TextInput label="Min Score (0–100)"
+                type="number"
+                min="0"
+                max="100"
+                value={minScore}
+                onChange={(event) => setMinScore(event.target.value)}
+                placeholder="Optional; e.g. 50"
+              />
+              <Select label="Daily trend" value={trend} onChange={(event) => setTrend(event.target.value)}
+                disabled={!providerSupportsFilter(activeProvider, assetClass, "trend")}
+                hint={providerSupportsFilter(activeProvider, assetClass, "trend") ? undefined : `Not supported by ${activeProvider?.label ?? "this provider"}`}>
+                <option value="all">All</option>
+                <option value="gainers">Gainers</option>
+                <option value="losers">Losers</option>
+              </Select>
+              <TextInput label="Max results" type="number" min="1" value={stockLimit} onChange={(event) => setStockLimit(event.target.value)}
+                disabled={!providerSupportsFilter(activeProvider, assetClass, "limit")}
+                hint={providerSupportsFilter(activeProvider, assetClass, "limit") ? undefined : `Not supported by ${activeProvider?.label ?? "this provider"}`} />
+              <div className="screener-criteria-presets-deck">
+                <ScreenerPresetManager
+                  assetClass="stocks"
+                  userLogin={userLogin}
+                  currentFilter={stockCriteriaToFilter(stockCriteria)}
+                  onApplyPreset={setStockCriteria}
+                />
+                <StockCriteriaPanel
+                  criteria={stockCriteria}
+                  onChange={setStockCriteria}
+                  lastSentFilters={lastSentStockFilters}
+                />
+              </div>
+              <div className="screener-criteria-presets-deck">
+                <div>
+                  <h3>Delivery &amp; report</h3>
+                  <p>Deliver this run like the scheduled Stock Market Screen does.</p>
+                  <FieldShell id="stock-delivery-slack-push" label="Slack push">
+                    <Checkbox id="stock-delivery-slack-push" checked={deliveryPushToSlack} onChange={(event) => setDeliveryPushToSlack(event.target.checked)} />
+                  </FieldShell>
+                  {deliveryPushToSlack && (
+                    <TextInput label="Slack channel"
+                      value={deliverySlackChannel}
+                      onChange={(event) => setDeliverySlackChannel(event.target.value)}
+                      placeholder="Optional; e.g. #trading-desk (blank = the configured channel)"
+                    />
+                  )}
+                </div>
+                <div>
+                  <TextInput label="Email recipients"
+                    type="email"
+                    value={deliveryEmailTo}
+                    onChange={(event) => setDeliveryEmailTo(event.target.value)}
+                    placeholder="Optional; e.g. trader@firm.com"
+                  />
+                  <TextInput label="Webhook URL"
+                    type="url"
+                    value={deliveryWebhookUrl}
+                    onChange={(event) => setDeliveryWebhookUrl(event.target.value)}
+                    placeholder="Optional; https://…"
+                  />
+                  <FieldShell id="stock-delivery-pdf" label="PDF report" hint="Attach the run's generated PDF report to deliveries">
+                    <Checkbox id="stock-delivery-pdf" checked={deliveryGeneratePdf} onChange={(event) => setDeliveryGeneratePdf(event.target.checked)} />
+                  </FieldShell>
+                </div>
+              </div>
+              <div className="options-form-footer">
+                <Button type="submit" variant="primary" disabled={loading || !endpoint} loading={loading}>{"Run stock screen"}</Button>
+              </div>
+            </form>
+
+            {error && (
+              <Notice tone="danger" density="compact" onDismiss={() => setError("")}>
+                {error}
+              </Notice>
+            )}
+            {manualResult && <ScreenerResultsView result={manualResult} />}
+            {shardedResults.length > 0 && shardedResults.map((r) => (
+              <div key={r.universe} style={{ marginTop: "1.5rem" }}>
+                <h3 style={{ fontSize: "1rem", marginBottom: "0.5rem" }}>🌐 {r.universe}</h3>
+                <ScreenerResultsView result={r} />
+              </div>
+            ))}
+            {!manualResult && summary && <div className="screener-results-header"><span>{summary}</span><span>{activeProvider?.label} · {activeEnv}</span></div>}
+
+            <div className="provider-dashboard-callout">
+              <Card padding="md">
+                <div className="provider-callout-inner">
+                  <div>
+                    <h4 className="provider-callout-title">Provider connectivity &amp; health</h4>
+                    <p className="provider-callout-desc">
+                      Live provisioning lifecycle, capture health, and route metrics are consolidated in Platform Admin.
+                    </p>
+                  </div>
+                  <a
+                    href="/?tab=platform-admin&view=data-providers"
+                    className="ui-btn ui-btn-secondary ui-btn-sm provider-callout-link"
+                  >
+                    View Data Providers &rarr;
+                  </a>
+                </div>
+              </Card>
+            </div>
           </div>
         </div>
       )}
