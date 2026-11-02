@@ -307,6 +307,8 @@ export async function persistScreenerReportCanonical(ctx: ReportDispatchContext,
   scheduleId?: unknown;
   jobId?: unknown;
   goalId?: unknown;
+  /** Issue #2909 (G2): run qualifications for unmapped pattern guardrails — recorded in the body when the caller carries them. Additive: older readers ignore. */
+  patternQualifications?: unknown;
   /** Issue #2773: post-screening Pareto evaluation, recorded in the body when the run computed one. Additive. */
   pareto?: unknown;
 }): Promise<void> {
@@ -364,6 +366,8 @@ export async function persistScreenerReportCanonical(ctx: ReportDispatchContext,
         ...(result.scheduleId !== undefined ? { scheduleId: result.scheduleId } : {}),
         ...(result.jobId !== undefined ? { jobId: result.jobId } : {}),
         ...(result.goalId !== undefined ? { goalId: result.goalId } : {}),
+        // Issue #2909 (G2): pattern qualifications ride the body.
+        ...(result.patternQualifications !== undefined ? { patternQualifications: result.patternQualifications } : {}),
         // Issue #2773: Pareto evaluation rides the body when present.
         ...(result.pareto !== undefined ? { pareto: result.pareto } : {}),
         reportUrl: result.pdfKey

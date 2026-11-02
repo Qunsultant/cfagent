@@ -20,6 +20,10 @@ export interface ReplayResponse {
     partialReasons?: string[];
     artifacts?: { pdfKey?: string; xlsxKey?: string; csvKey?: string; reportUrl?: string };
     body?: unknown;
+    /** Issue #2909 (G2): the pinned pattern, object form or legacy string form. */
+    patternRef?: string | { patternId: string; version: string };
+    presetRef?: string | { presetId: string; resolvedAt?: string };
+    patternQualifications?: string[];
   };
   error?: string;
 }
@@ -50,5 +54,11 @@ export function replaySummary(replay: NonNullable<ReplayResponse["replay"]>): st
     typeof replay.matchedCount === "number" && typeof replay.totalScanned === "number"
       ? `${replay.matchedCount} matched of ${replay.totalScanned} scanned`
       : "rows reproduced from persisted data";
-  return `Replayed report from run ${replay.originalRunId ?? "unknown"} — ${counts}. No live re-fetch, no re-charge.`;
+  const pattern =
+    typeof replay.patternRef === "string"
+      ? ` Pattern ${replay.patternRef}.`
+      : replay.patternRef
+        ? ` Pattern ${replay.patternRef.patternId} (v${replay.patternRef.version}) pinned.`
+        : "";
+  return `Replayed report from run ${replay.originalRunId ?? "unknown"} — ${counts}.${pattern} No live re-fetch, no re-charge.`;
 }
