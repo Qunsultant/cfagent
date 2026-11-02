@@ -319,10 +319,10 @@ const priceEditRowStyle: React.CSSProperties = { display: "flex", gap: "var(--sp
 /**
  * Store price approval (issue 2677, slice A). A LIVE operator action,
  * unlike the simulation on this page: approving a family here records
- * a real price approval through POST /payments/agentic/commercial/prices.
+ * a real price approval through POST /api/payments/agentic/commercial/prices.
  * The monetization gate treats a merely-proposed price as missing, so
  * the table shows proposed vs approved distinctly. The entries read
- * (GET /payments/agentic/commercial/prices) supplies real approval
+ * (GET /api/payments/agentic/commercial/prices) supplies real approval
  * state; a family reads Unknown only when that read fails or is
  * unavailable. The server remains authoritative: a price change
  * returns an entry to proposed, and approving after such a change
@@ -354,7 +354,7 @@ export type OperatorProbe = "operator" | "not-operator" | "unknown";
 
 /**
  * Maps the operator probe's HTTP status. The probe is POST
- * /payments/agentic/commercial/prices with an empty body: the route
+ * /api/payments/agentic/commercial/prices with an empty body: the route
  * answers 403 for a non-operator before reading the body, and 400
  * ("Nothing to do") for an operator with nothing to set — so neither
  * outcome writes anything, and no audit row is produced. Any other
@@ -395,7 +395,7 @@ export function PriceApprovalSection({ userLogin }: { userLogin?: string }) {
     const headers: Record<string, string> = { "x-user-login": userLogin };
     let pricingPrices: Partial<Record<StorePriceFamily, number>> = {};
     try {
-      const res = await globalThis.fetch("/payments/agentic/commercial/pricing", { headers });
+      const res = await globalThis.fetch("/api/payments/agentic/commercial/pricing", { headers });
       const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
       if (!res.ok) {
         setLoadError(typeof data["error"] === "string" ? data["error"] : `Price list failed (HTTP ${res.status}).`);
@@ -420,7 +420,7 @@ export function PriceApprovalSection({ userLogin }: { userLogin?: string }) {
     // blocks the section, and for a non-operator the 403 here is
     // expected (the probe below is the gating signal).
     try {
-      const res = await globalThis.fetch("/payments/agentic/commercial/prices", { headers });
+      const res = await globalThis.fetch("/api/payments/agentic/commercial/prices", { headers });
       const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
       const list = data["entries"];
       if (!res.ok || !Array.isArray(list)) {
@@ -457,7 +457,7 @@ export function PriceApprovalSection({ userLogin }: { userLogin?: string }) {
       setEntriesAvailable(false);
     }
     try {
-      const res = await globalThis.fetch("/payments/agentic/commercial/prices", {
+      const res = await globalThis.fetch("/api/payments/agentic/commercial/prices", {
         method: "POST",
         headers: { ...headers, "content-type": "application/json" },
         body: "{}",
@@ -482,7 +482,7 @@ export function PriceApprovalSection({ userLogin }: { userLogin?: string }) {
     setBusyFamily(family);
     setRowError((prev) => ({ ...prev, [family]: undefined }));
     try {
-      const res = await globalThis.fetch("/payments/agentic/commercial/prices", {
+      const res = await globalThis.fetch("/api/payments/agentic/commercial/prices", {
         method: "POST",
         headers: { "x-user-login": userLogin, "content-type": "application/json" },
         body: JSON.stringify({ family, approvalStatus: "approved" }),
@@ -602,7 +602,7 @@ export function PriceApprovalSection({ userLogin }: { userLogin?: string }) {
     setBusyFamily(family);
     setRowError((prev) => ({ ...prev, [family]: undefined }));
     try {
-      const res = await globalThis.fetch("/payments/agentic/commercial/prices", {
+      const res = await globalThis.fetch("/api/payments/agentic/commercial/prices", {
         method: "POST",
         headers: { "x-user-login": userLogin, "content-type": "application/json" },
         body: JSON.stringify(body),

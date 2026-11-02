@@ -75,15 +75,18 @@ describe("PriceApprovalSection price management (issue 2739)", () => {
   let probeStatus: number;
   let entriesStatus: number;
   let postCalls: Array<Record<string, unknown>>;
+  let requestedUrls: string[];
 
   beforeEach(() => {
     probeStatus = 400;
     entriesStatus = 200;
     postCalls = [];
+    requestedUrls = [];
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: unknown, init?: RequestInit) => {
         const url = String(input);
+        requestedUrls.push(url);
         const method = init?.method ?? "GET";
         if (url.endsWith("/payments/agentic/commercial/pricing") && method === "GET") {
           return { ok: true, status: 200, json: async () => PRICING_BODY };
@@ -183,6 +186,15 @@ describe("PriceApprovalSection price management (issue 2739)", () => {
     expect(container.textContent).toContain("Proposed");
     expect(container.textContent).toContain("Approved");
     expect(container.textContent).toContain("op1");
+  });
+
+  it("routes every commercial price call through /api (issue 2812)", async () => {
+    await renderSection();
+    const commercial = requestedUrls.filter((u) => u.includes("/payments/agentic/commercial/"));
+    expect(commercial.length).toBeGreaterThan(0);
+    for (const u of commercial) {
+      expect(u.startsWith("/api/payments/agentic/commercial/")).toBe(true);
+    }
   });
 
   it("Save flips an approved row to Proposed with a needs-re-approval note and the new price", async () => {
