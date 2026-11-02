@@ -434,7 +434,10 @@ describe("issue #2428 — registry spine + migration pins", () => {
       expect(carried, kind).toContain(kind);
     }
     const breaks = MESH_TRACE_SPINE.filter((e) => e.status === "break");
-    expect(breaks.length).toBeGreaterThanOrEqual(3);
+    // Floor was 3 at S17; #2730 (trading) and #2762 (payment)
+    // closed the two workflow-step breaks, leaving the route and
+    // channel legs — the floor follows the recorded breaks.
+    expect(breaks.length).toBeGreaterThanOrEqual(2);
     for (const b of breaks) {
       expect(b.consequence && b.consequence.length).toBeGreaterThan(20);
     }
