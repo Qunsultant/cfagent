@@ -245,6 +245,8 @@ export interface GrantMembershipInput {
   workspaceId?: string;
   roleBindings: RoleBinding[];
   nowMs: number;
+  /** #2661 — optional grantee email, stored on the record when supplied. */
+  email?: string;
 }
 
 export type GrantMembershipResult =
@@ -259,6 +261,7 @@ export type GrantMembershipResult =
         | "INVALID_ROLE"
         | "INVALID_SCOPE"
         | "INVALID_GRANTED_BY"
+        | "INVALID_EMAIL"
         | "EMPTY_ROLE_BINDINGS";
       error: string;
     };
@@ -304,5 +307,6 @@ export async function grantMembership(
     })),
     createdBy: input.granterInternalUserId,
     nowMs: input.nowMs,
+    ...(input.email !== undefined ? { email: input.email } : {}),
   });
 }

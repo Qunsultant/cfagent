@@ -212,13 +212,19 @@ export async function fetchMemberships(): Promise<AdminMembershipView[]> {
 export async function grantMembershipApi(
   internalUserId: string,
   roleBindings: MembershipMutationBinding[],
-): Promise<AdminMembershipView> {
-  const data = await postJson<{ membership?: unknown }>("/api/iaaa/membership/grant", {
+  email?: string,
+): Promise<{ membership: AdminMembershipView; welcome?: { sent: boolean; reason?: string } }> {
+  const data = await postJson<{ membership?: unknown; welcome?: unknown }>("/api/iaaa/membership/grant", {
     internalUserId,
     roleBindings,
+    ...(email ? { email } : {}),
   });
   if (!isMembership(data.membership)) throw new Error("Unexpected grant response.");
-  return data.membership;
+  const welcome =
+    data.welcome && typeof data.welcome === "object" && typeof (data.welcome as { sent?: unknown }).sent === "boolean"
+      ? (data.welcome as { sent: boolean; reason?: string })
+      : undefined;
+  return { membership: data.membership, ...(welcome ? { welcome } : {}) };
 }
 
 export async function revokeMembershipApi(membershipId: string): Promise<void> {
