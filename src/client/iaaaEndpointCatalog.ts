@@ -535,7 +535,7 @@ export const API_ENDPOINT_CATALOG: ApiEndpointEntry[] = [
     aliases: [],
     kind: "http",
     auth: "session",
-    authNote: "401 unauthenticated; 403 legacy sessions, self-grants, non-granters, and failed step-up/audit obligations; 400 for empty bindings or unknown roles. Grants through grantMembership (canGrantRole re-enforced); platform-admin grants platform roles only (#1758).",
+    authNote: "401 unauthenticated; 403 legacy sessions, self-grants, non-granters, and failed step-up/audit obligations; 400 for empty bindings, unknown roles, or a malformed grantee email. Grants through grantMembership (canGrantRole re-enforced); platform-admin grants platform roles only (#1758). #2661: optional email is captured on the record and best-effort sends the tier-selected welcome; re-granting held bindings is a no-op (200, alreadyProvisioned).",
     source: "src/server.ts branch: path === /api/iaaa/membership/grant",
   },
   {

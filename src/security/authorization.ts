@@ -156,6 +156,14 @@ export interface Membership {
   createdBy: string;
   createdAtMs: number;
   revokedAtMs?: number;
+  /**
+   * #2661 — grantee email captured at provisioning time, where the
+   * operator supplied one. Powers the welcome trigger on
+   * provisioning (the 2.4-blocked item): the grant route passes
+   * this address to the welcome send. Optional: older records
+   * have no email and grant without one still works.
+   */
+  email?: string;
 }
 
 export interface MembershipStore {
@@ -223,6 +231,7 @@ export type MembershipErrorCode =
   | "INVALID_ROLE"
   | "INVALID_SCOPE"
   | "INVALID_GRANTED_BY"
+  | "INVALID_EMAIL"
   | "EMPTY_ROLE_BINDINGS";
 
 export type MembershipResult =
@@ -236,6 +245,8 @@ export interface CreateMembershipInput {
   roleBindings: RoleBinding[];
   createdBy: string;
   nowMs: number;
+  /** #2661 — optional grantee email, stored on the record when supplied. */
+  email?: string;
 }
 
 const MAX_FIELD_LENGTH = 512;
@@ -265,6 +276,14 @@ export async function createMembership(
   if (!isValidField(input.createdBy)) {
     return { ok: false, code: "INVALID_CREATED_BY", error: "createdBy must be a non-empty string" };
   }
+  // #2661 — a supplied grantee email must be a plausible address;
+  // an absent email is fine (grant without one still works).
+  if (
+    input.email !== undefined &&
+    (!isValidField(input.email) || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email.trim()))
+  ) {
+    return { ok: false, code: "INVALID_EMAIL", error: "email must be a valid email address" };
+  }
   if (!Array.isArray(input.roleBindings) || input.roleBindings.length === 0) {
     return { ok: false, code: "EMPTY_ROLE_BINDINGS", error: "at least one role binding is required" };
   }
@@ -292,6 +311,7 @@ export async function createMembership(
     })),
     createdBy: normalize(input.createdBy),
     createdAtMs: input.nowMs,
+    ...(input.email !== undefined ? { email: normalize(input.email) } : {}),
   };
   await store.put(membership);
   return { ok: true, membership };

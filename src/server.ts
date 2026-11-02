@@ -267,6 +267,7 @@ import { handleVoiceWebSocketConnection, ETradeVoiceTradingService, createOrches
 import { ETradeWebhookService } from "./services/tradingWebhooks";
 import { ETradeBrowserService } from "./services/browserAgent";
 import { handleMarketQuotesHttp } from "./services/marketStream";
+import { sendProvisioningWelcome } from "./services/provisioningWelcome";
 import {
   getQuoteSource,
   setQuoteSource,
@@ -3004,10 +3005,71 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
           if (targetId === "" || bindings.length === 0) {
             return Response.json({ error: "internalUserId and a non-empty roleBindings array are required." }, { status: 400 });
           }
+          // #2661 — optional grantee email. A blank email is the
+          // same as absent (the panel only sends a filled field);
+          // a present-but-malformed email fails closed, never
+          // stored and never mailed to.
+          const emailRaw = typeof body?.email === "string" ? body.email.trim() : "";
+          const granteeEmail = emailRaw === "" ? undefined : emailRaw;
+          if (granteeEmail !== undefined && (granteeEmail.length > 512 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(granteeEmail))) {
+            return Response.json({ error: "email must be a valid email address." }, { status: 400 });
+          }
           if (targetId === session.internalUserId) {
             return Response.json({ error: "Self-grant is forbidden: another admin must grant your roles.", code: "SELF_GRANT" }, { status: 403 });
           }
           const grantTenantId = typeof body?.tenantId === "string" && body.tenantId.trim() !== "" ? body.tenantId.trim() : tenantId;
+          // #2661 — idempotent no-op: when the target already
+          // holds every requested binding live (same tenant,
+          // unrevoked, unexpired), the grant changes nothing, so
+          // it writes nothing — no new record, no new audit rows,
+          // no welcome. Authorization is still enforced first via
+          // a read-only canGrantRole check per binding, so a
+          // non-granter learns nothing beyond a denied grant
+          // (the memberships list route already shows holdings to
+          // granters). Step-up is skipped only because nothing is
+          // granted; the normal flow below keeps its obligations.
+          const requestedBindings: Array<{ role: string; scope: "platform" | "tenant"; workspaceId?: string }> = bindings.map((raw) => {
+            const binding = raw as { role?: unknown; scope?: unknown; workspaceId?: unknown };
+            return {
+              role: binding.role as string,
+              scope: binding.scope === "platform" ? "platform" : "tenant",
+              workspaceId: typeof binding.workspaceId === "string" ? binding.workspaceId : undefined,
+            };
+          });
+          const existingLive = await membershipStore.getMembershipsByUser(targetId);
+          const covering = existingLive.find(
+            (m) =>
+              m.tenantId === grantTenantId &&
+              m.revokedAtMs === undefined &&
+              requestedBindings.every((rb) =>
+                m.roleBindings.some(
+                  (b) =>
+                    b.role === rb.role &&
+                    b.scope === rb.scope &&
+                    (rb.workspaceId ? b.workspaceId === rb.workspaceId : true) &&
+                    (b.expiresAtMs === undefined || b.expiresAtMs > nowMs),
+                ),
+              ),
+          );
+          if (covering) {
+            for (const rb of requestedBindings) {
+              const check = await canGrantRole(membershipStore, {
+                granterInternalUserId: session.internalUserId as string,
+                targetTenantId: grantTenantId,
+                targetScope: rb.scope,
+                targetRole: rb.role as Role,
+                targetWorkspaceId: rb.workspaceId,
+                nowMs,
+              });
+              if (check.decision === "deny") {
+                return Response.json(
+                  { error: "Forbidden: grant denied.", code: check.reason, reason: check.reason },
+                  { status: 403 },
+                );
+              }
+            }
+            return Response.json({ ok: true, membership: covering, alreadyProvisioned: true });
+          }
           for (const raw of bindings) {
             const binding = raw as { role?: unknown; scope?: unknown; workspaceId?: unknown };
             const scope = binding.scope === "platform" ? "platform" : "tenant";
@@ -3045,6 +3107,7 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
               };
             }),
             nowMs,
+            ...(granteeEmail !== undefined ? { email: granteeEmail } : {}),
           });
           if (!granted.ok) {
             return Response.json(
@@ -3052,7 +3115,24 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
               { status: granted.code === "GRANT_DENIED" ? 403 : 400 },
             );
           }
-          return Response.json({ ok: true, membership: granted.membership }, { status: 201 });
+          // #2661 — welcome trigger on provisioning: a successful
+          // grant that captured a grantee email best-effort sends
+          // the tier-selected welcome. The send never blocks or
+          // fails the grant — its outcome rides along in the
+          // response. No email → no welcome attempt. No-ops never
+          // reach here, so re-grants never re-welcome.
+          let welcome;
+          if (granteeEmail !== undefined) {
+            welcome = await sendProvisioningWelcome(env, {
+              userId: targetId,
+              email: granteeEmail,
+              tenantId: grantTenantId,
+            });
+          }
+          return Response.json(
+            { ok: true, membership: granted.membership, ...(welcome ? { welcome } : {}) },
+            { status: 201 },
+          );
         }
         if (path === "/api/iaaa/membership/revoke") {
           if (request.method !== "POST") {

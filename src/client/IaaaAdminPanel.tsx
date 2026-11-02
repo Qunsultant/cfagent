@@ -109,6 +109,8 @@ export function IaaaAdminPanel() {
   const [grantTarget, setGrantTarget] = useState("");
   const [grantRole, setGrantRole] = useState<string>("member");
   const [grantScope, setGrantScope] = useState<string>("tenant");
+  const [grantEmail, setGrantEmail] = useState("");
+  const [grantWelcome, setGrantWelcome] = useState<{ sent: boolean; reason?: string } | null>(null);
   const [editRole, setEditRole] = useState<Record<string, string>>({});
   const [editScope, setEditScope] = useState<Record<string, string>>({});
   const [deactivateArmed, setDeactivateArmed] = useState(false);
@@ -171,16 +173,25 @@ export function IaaaAdminPanel() {
     }
     setActingId("grant");
     setMembersError("");
+    setGrantWelcome(null);
     try {
-      await grantMembershipApi(grantTarget.trim(), [{ role: grantRole, scope: grantScope }]);
+      // #2661 — an optional grantee email is captured on the
+      // record and best-effort triggers the welcome send.
+      const result = await grantMembershipApi(
+        grantTarget.trim(),
+        [{ role: grantRole, scope: grantScope }],
+        grantEmail.trim() === "" ? undefined : grantEmail.trim(),
+      );
       setGrantTarget("");
+      setGrantEmail("");
+      setGrantWelcome(result.welcome ?? null);
       await loadMemberships();
     } catch (err: any) {
       setMembersError(err?.message || "Failed to grant membership.");
     } finally {
       setActingId(null);
     }
-  }, [grantTarget, grantRole, grantScope, loadMemberships]);
+  }, [grantTarget, grantRole, grantScope, grantEmail, loadMemberships]);
 
   const [revokeTarget, setRevokeTarget] = useState<{ id: string; label: string } | null>(null);
 
@@ -500,9 +511,21 @@ export function IaaaAdminPanel() {
             </option>
           ))}
         </Select>
+        <TextInput
+          label="Grantee email (optional)"
+          value={grantEmail}
+          onChange={(e) => setGrantEmail(e.target.value)}
+        />
         <Button type="button" disabled={actingId === "grant"} onClick={() => void grant()}>
           Grant
         </Button>
+        {grantWelcome && (
+          <p>
+            {grantWelcome.sent
+              ? "Welcome mail sent."
+              : `Welcome mail not sent${grantWelcome.reason ? ` (${grantWelcome.reason})` : ""}.`}
+          </p>
+        )}
         <h4>Memberships</h4>
         {memberships.length === 0 ? (
           <EmptyState title="No memberships" description="No memberships returned for this tenant yet." />
