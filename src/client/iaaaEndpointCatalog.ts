@@ -909,8 +909,8 @@ export const API_ENDPOINT_CATALOG: ApiEndpointEntry[] = [
     kind: "http",
     auth: "session",
     authNote: "requireAuth (401); the OPTIONS preflight is handled by the earlier CORS branch.",
-    source: "src/server.ts branch: path.startsWith /api/payments/agentic/",
-    prefixes: ["/api/payments/agentic/"],
+    source: "src/server.ts branch: path.startsWith /api/payments/agentic/ (+ #2787 bare commercial alias: path.startsWith /payments/agentic/commercial/)",
+    prefixes: ["/api/payments/agentic/", "/payments/agentic/commercial/"],
   },
   {
     id: "premium",
