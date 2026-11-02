@@ -6,7 +6,9 @@
  * warning) when RESEND_API_KEY/SMTP config [is] missing". On current
  * main there is NO Resend sender at all (RESEND_API_KEY has zero hits
  * in src) and no SMTP sender either — email actually travels via
- * cfpay A2A (DASHBOARD_API_KEY_IS_A2A_TOKEN / CFPAY_A2A_TOKEN) or the
+ * cfpay A2A (CFPAY_OUTBOUND_TOKEN, with DASHBOARD_API_KEY_IS_A2A_TOKEN
+ * as a deprecated transitional fallback superseded by
+ * CFPAY_OUTBOUND_TOKEN, and CFPAY_A2A_TOKEN as a third fallback) or the
  * Cloudflare Email Sending binding (env.EMAIL). A run that requests
  * email with neither transport configured used to skip silently: the
  * bus publisher dropped the local send's `false` return without even
@@ -84,7 +86,8 @@ export function checkScreenerDeliveryConfig(
     emailConfigured,
     emailMissingReason:
       "No email transport is configured: the cfpay A2A token " +
-      "(DASHBOARD_API_KEY_IS_A2A_TOKEN or CFPAY_A2A_TOKEN) is unset and " +
+      "(CFPAY_OUTBOUND_TOKEN, deprecated fallback " +
+      "DASHBOARD_API_KEY_IS_A2A_TOKEN, or CFPAY_A2A_TOKEN) is unset and " +
       "the env.EMAIL binding is not bound. Email requested by this run " +
       "will be skipped." +
       unusedNote,
