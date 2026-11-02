@@ -1461,8 +1461,29 @@ CREATE TABLE IF NOT EXISTS breaker_trip_alerts (
 `,
 };
 
-export const ALL_MIGRATIONS: DataMigration[] = [
-  MIGRATION_0001_AGENT_GOVERNANCE,
+/**
+ * Migration 0036 — refund policy owner approval per kind (#2662,
+ * monetization Phase 2.7). Mirrors the #2547 price-catalogue approval
+ * pattern (migration 0027): approval is operator data, never a code
+ * constant. approved_kinds is a JSON array of kinds whose CURRENT
+ * values an operator has explicitly approved; approved_by/at record
+ * who approved and when. A fresh column defaults to '[]' (nothing
+ * approved): pre-#2662 stores read as unapproved, so refunds refuse
+ * fail-closed until an operator approves — a seeded PROPOSED value is
+ * never an approval. Portable subset: ALTER TABLE ADD COLUMN only,
+ * no params, no dialect date functions.
+ */
+export const MIGRATION_0036_REFUND_POLICY_APPROVAL: DataMigration = {
+  version: 36,
+  name: "0036_refund_policy_approval",
+  sql: `
+ALTER TABLE agent_refund_policy ADD COLUMN approved_kinds TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE agent_refund_policy ADD COLUMN approved_by TEXT;
+ALTER TABLE agent_refund_policy ADD COLUMN approved_at_ms INTEGER;
+`,
+};
+
+export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANCE,
   MIGRATION_0002_AGENT_CHAINS_SCHEDULES,
   MIGRATION_0003_AGENT_SHARD_JOBS,
   MIGRATION_0004_AGENT_AUDIT_REPORTS,
@@ -1497,6 +1518,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [
   MIGRATION_0033_DEAD_LETTER_STORE,
   MIGRATION_0034_BREAKER_STATE,
   MIGRATION_0035_DIGEST_PASS,
+  MIGRATION_0036_REFUND_POLICY_APPROVAL,
 ];
 
 function splitStatements(sqlText: string): string[] {

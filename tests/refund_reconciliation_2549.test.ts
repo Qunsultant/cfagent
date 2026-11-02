@@ -70,6 +70,7 @@ import {
 import {
   createD1RefundDb,
   D1RefundAdapter,
+  D1RefundPolicyAdapter,
   ensureRefundSchema,
 } from "../src/data/d1RefundAdapter";
 import { createNativeLedgerAdapter, ensureNativeLedgerSchema } from "../src/data/createNativeLedgerPorts";
@@ -199,6 +200,9 @@ describe("credit XOR refund at the execute gate (#2549)", () => {
 
   async function approvedPayPerRun() {
     const policy = new InMemoryRefundPolicyAdapter();
+    // Issue #2662: approve the kind first; the XOR tests test the XOR
+    // gate, while the approval gate is covered by the 2.7 tests.
+    await policy.setKindApproval("pay_per_run", true, "op1");
     const store = new InMemoryRefundAdapter();
     const record = await requestRefund(
       { policyStore: policy, refundStore: store },
@@ -290,6 +294,8 @@ describe("credit XOR refund at the execute gate (#2549)", () => {
 
   it("subscription refunds do not consult the failure-credit lookup", async () => {
     const policy = new InMemoryRefundPolicyAdapter();
+    // Issue #2662: approve the kind; this test tests the lookup bypass.
+    await policy.setKindApproval("subscription", true, "op1");
     const store = new InMemoryRefundAdapter();
     const subs = new InMemorySubscriptionAdapter();
     const plan = await subs.createPlan({ id: "plan-pro", name: "Pro", priceUSD: 20, periodDays: 30, includedRuns: 10 });
@@ -428,6 +434,9 @@ describe("refund routes: operator gate + XOR wiring (#2549)", () => {
     const refundDb = createD1RefundDb(mock as unknown as D1Database);
     await ensureRefundSchema(refundDb);
     const refundStore = new D1RefundAdapter(refundDb);
+    // Issue #2662: approve pay_per_run so the XOR tests test the XOR
+    // gate; records are seeded directly in "approved" status.
+    await new D1RefundPolicyAdapter(refundDb).setKindApproval("pay_per_run", true, "op1");
     const now = Date.now();
     const seedApprovedPayPerRun = async (runRequestId: string) => {
       return refundStore.createRefund({

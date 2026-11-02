@@ -8,6 +8,8 @@
  * InMemoryBillingAdapter); the billing service
  * (src/services/billingService.ts) depends only on this port.
  *
+ * Type-only note: ProrationBehavior is imported as a TYPE from the
+ * billing policy port (no runtime import, no store client, no env).
  * Stripe API surface used (verified against the Stripe API
  * reference at build time, not from memory):
  * - POST /v1/subscriptions — create; required: customer,
@@ -33,6 +35,8 @@
  * service maps them to access; an unknown future status is
  * recorded verbatim and confers no access (fail closed).
  */
+
+import type { ProrationBehavior } from "../data/billingPolicyPorts";
 
 /** A provider-managed recurring subscription, as the port reports it. Periods are epoch-ms (converted from Stripe epoch-seconds by the adapter). */
 export interface ProviderSubscription {
@@ -67,6 +71,18 @@ export interface BillingPort {
   cancelProviderAtPeriodEnd(providerSubscriptionId: string): Promise<ProviderSubscription>;
   /** Provider immediate cancel: DELETE. The service truncates local access per policy (immediate) or keeps period end (period_end). */
   cancelProviderImmediately(providerSubscriptionId: string): Promise<ProviderSubscription>;
+  /**
+   * Issue #2662 — provider subscription price update (plan change). POST
+   * update with the subscription item's price replaced and the OPERATOR
+   * billing policy's proration_behavior applied (none /
+   * create_prorations / always_invoice). The caller reads the behavior
+   * from policy; this port never defaults it.
+   */
+  updateProviderSubscriptionPrice(
+    providerSubscriptionId: string,
+    priceId: string,
+    prorationBehavior: ProrationBehavior,
+  ): Promise<ProviderSubscription>;
 }
 
 /** The client shape the Stripe adapter delegates to (PaymentGatewayService satisfies this; tests inject a fake). */
@@ -75,4 +91,9 @@ export interface StripeBillingClient {
   retrieveProviderSubscription(providerSubscriptionId: string): Promise<ProviderSubscription>;
   cancelProviderAtPeriodEnd(providerSubscriptionId: string): Promise<ProviderSubscription>;
   cancelProviderImmediately(providerSubscriptionId: string): Promise<ProviderSubscription>;
+  updateProviderSubscriptionPrice(
+    providerSubscriptionId: string,
+    priceId: string,
+    prorationBehavior: ProrationBehavior,
+  ): Promise<ProviderSubscription>;
 }

@@ -158,6 +158,14 @@ describe("refund execute audit (#2522)", () => {
       periodEndMs: now + 29 * 24 * 60 * 60 * 1000,
     });
 
+    // Issue #2662: approve the subscription kind's policy first; the
+    // audit test tests execution auditing, not the approval gate.
+    const policyApproved = await call(ctx, "POST", "/payments/agentic/commercial/refund-policy/approve", "op1", {
+      kind: "subscription",
+      approved: true,
+    });
+    expect(policyApproved?.status).toBe(200);
+
     const requested = await bodyOf(await call(ctx, "POST", "/payments/agentic/commercial/refunds", "op1", {
       kind: "subscription", originalPaymentRef: "sub-pay-1", amountUSD: 5, reason: "test full refund",
     }));

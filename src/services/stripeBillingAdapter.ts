@@ -44,4 +44,16 @@ export class StripeBillingAdapter implements BillingPort {
   async cancelProviderImmediately(providerSubscriptionId: string): Promise<ProviderSubscription> {
     return this.client.cancelProviderImmediately(requireId(providerSubscriptionId, "providerSubscriptionId"));
   }
+
+  async updateProviderSubscriptionPrice(
+    providerSubscriptionId: string,
+    priceId: string,
+    prorationBehavior: import("../data/billingPolicyPorts").ProrationBehavior,
+  ): Promise<ProviderSubscription> {
+    return this.client.updateProviderSubscriptionPrice(
+      requireId(providerSubscriptionId, "providerSubscriptionId"),
+      requireId(priceId, "priceId"),
+      prorationBehavior,
+    );
+  }
 }

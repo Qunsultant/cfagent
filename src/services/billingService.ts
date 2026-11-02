@@ -236,7 +236,12 @@ export async function cancelBillingAtPeriodEnd(input: {
   });
 }
 
-/** Cancel a Billing-managed row immediately, on the provider and locally (access truncated per policy at apply time). */
+/** Cancel a Billing-managed row immediately, on the provider and locally.
+ * Local access ends at the cancel instant: periodEndMs is ALWAYS nowMs,
+ * never the provider's reported current_period_end (Stripe keeps the
+ * billing-period boundary on a DELETE response, and resolveEffectiveTier
+ * confers Subscribed on periodEndMs alone — trusting the provider
+ * period would leave access live after an "immediate" cancel). */
 export async function cancelBillingImmediately(input: {
   billing: BillingPort;
   subs: SubscriptionStore;
@@ -254,8 +259,62 @@ export async function cancelBillingImmediately(input: {
     providerStatus: provider.status,
     status: "canceled",
     canceledAtMs: provider.canceledAtMs ?? nowMs,
-    periodEndMs: provider.currentPeriodEndMs ?? nowMs,
+    periodEndMs: nowMs,
   });
+}
+
+/**
+ * Issue #2662 — operator plan change on a Billing-managed row.
+ * Provider price update with the OPERATOR billing policy's
+ * proration_behavior (the caller passes the policy; this function
+ * never defaults it). Fail-closed chain, in order: row must exist,
+ * be Billing-managed, active, and unexpired; the target plan must
+ * exist and be active; the target price must be operator-mapped
+ * (stripePriceByPlan — never invented); the provider price must
+ * differ (a same-price "change" is refused, not a no-op success).
+ * The provider update runs BEFORE any local write, so a provider
+ * failure changes nothing locally. The local row takes the new
+ * planId + provider status + provider periods (proration does not
+ * move the period, but the provider response is authoritative).
+ */
+export async function changeBillingPlanPrice(input: {
+  billing: BillingPort;
+  subs: SubscriptionStore;
+  policy: BillingPolicy;
+  subscriptionId: string;
+  planId: string;
+}): Promise<{ record: SubscriptionRecord; fromPlanId: string; prorationBehavior: BillingPolicy["prorationBehavior"] }> {
+  const record = await input.subs.getSubscription(input.subscriptionId);
+  if (!record) throw new Error(`No subscription ${input.subscriptionId}.`);
+  if (!record.providerSubscriptionId) {
+    throw new Error("Refusing to change the plan of a repurchase subscription: repurchase rows have no provider subscription to update.");
+  }
+  if (record.status !== "active" || record.periodEndMs <= Date.now()) {
+    throw new Error(`Subscription ${input.subscriptionId} is not active and unexpired; only live Billing rows change plan.`);
+  }
+  const plan = await input.subs.getPlan(input.planId);
+  if (!plan) throw new Error(`No plan ${input.planId}.`);
+  if (!plan.active) throw new Error(`Plan ${input.planId} is not active.`);
+  const priceId = input.policy.stripePriceByPlan[input.planId];
+  if (!priceId) {
+    throw new Error(`Plan ${input.planId} has no operator-mapped Stripe price id: refusing to invent one.`);
+  }
+  const provider = await input.billing.retrieveProviderSubscription(record.providerSubscriptionId);
+  if (provider.priceId === priceId) {
+    throw new Error(`Subscription ${input.subscriptionId} is already on price ${priceId}; refusing a same-price change.`);
+  }
+  const updated = await input.billing.updateProviderSubscriptionPrice(
+    record.providerSubscriptionId,
+    priceId,
+    input.policy.prorationBehavior,
+  );
+  const next = await input.subs.updateProviderBilling(record.id, {
+    planId: input.planId,
+    providerStatus: updated.status,
+    periodStartMs: updated.currentPeriodStartMs ?? undefined,
+    periodEndMs: updated.currentPeriodEndMs ?? undefined,
+  });
+  return { record: next, fromPlanId: record.planId, prorationBehavior: input.policy.prorationBehavior };
 }
 
 /** Normalized Billing webhook event (the caller has already verified the signature and parsed the provider payload). */

@@ -18,6 +18,7 @@ import { agentRefundPolicy, agentRefunds } from "./drizzleSchema";
 import {
   applyMigrations,
   MIGRATION_0018_REFUNDS,
+  MIGRATION_0036_REFUND_POLICY_APPROVAL,
   type MigrationDb,
 } from "./migrationRunner";
 import {
@@ -48,20 +49,35 @@ export function createD1RefundDb(d1: D1Database): RefundDb {
 }
 
 /**
- * Idempotent schema-ensure: applies migration 0018 if unapplied,
+ * Idempotent schema-ensure: applies migrations 0018 + 0036 if unapplied,
  * then seeds the proposed policy (INSERT OR IGNORE — re-seeding is
  * a no-op, so an operator-edited policy is never overwritten by a
  * later ensure). The seeds are PROPOSED defaults pending owner
- * approval, not an activation.
+ * approval, not an activation. Issue #2662: the seed row is
+ * unapproved (approved_kinds '[]'); refunds refuse fail-closed
+ * until an operator approves the kind.
  */
 export async function ensureRefundSchema(db: RefundDb): Promise<number[]> {
-  const applied = await applyMigrations(db as unknown as MigrationDb, [MIGRATION_0018_REFUNDS]);
+  const applied = await applyMigrations(db as unknown as MigrationDb, [
+    MIGRATION_0018_REFUNDS,
+    MIGRATION_0036_REFUND_POLICY_APPROVAL,
+  ]);
   const now = Date.now();
   await db
     .insert(agentRefundPolicy)
     .values(policyRow({ ...PROPOSED_SEED_POLICY, updatedAtMs: now }))
     .onConflictDoNothing();
   return applied;
+}
+
+function parseApprovedKinds(raw: unknown): string[] {
+  if (typeof raw !== "string") return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((k) => k === "subscription" || k === "pay_per_run") : [];
+  } catch {
+    return [];
+  }
 }
 
 function toPolicy(raw: typeof agentRefundPolicy.$inferSelect): RefundPolicy {
@@ -74,6 +90,9 @@ function toPolicy(raw: typeof agentRefundPolicy.$inferSelect): RefundPolicy {
       subscriptionPartialEffect: raw.subscriptionPartialEffect,
       payPerRunEffect: raw.payPerRunEffect,
       creditEffect: raw.creditEffect,
+      approvedKinds: parseApprovedKinds(raw.approvedKinds),
+      approvedBy: raw.approvedBy,
+      approvedAtMs: raw.approvedAtMs,
     }),
     updatedAtMs: raw.updatedAtMs,
   };
@@ -89,6 +108,9 @@ function policyRow(policy: RefundPolicy): typeof agentRefundPolicy.$inferInsert 
     subscriptionPartialEffect: policy.subscriptionPartialEffect,
     payPerRunEffect: policy.payPerRunEffect,
     creditEffect: policy.creditEffect,
+    approvedKinds: JSON.stringify(policy.approvedKinds),
+    approvedBy: policy.approvedBy,
+    approvedAtMs: policy.approvedAtMs,
     updatedAtMs: policy.updatedAtMs,
   };
 }
@@ -112,7 +134,42 @@ export class D1RefundPolicyAdapter implements RefundPolicyStore {
     const current = await this.getPolicy();
     if (!current) throw new Error("Refund policy is not configured: run the refund schema ensure first.");
     const validated = assertRefundPolicyPatch(patch, current);
-    const updated: RefundPolicy = { ...validated, updatedAtMs: Date.now() };
+    // Issue #2662 (#2547 rule): a value edit resets approval — approval
+    // attaches to exact values, never survives an edit silently.
+    const updated: RefundPolicy = {
+      ...validated,
+      approvedKinds: [],
+      approvedBy: null,
+      approvedAtMs: null,
+      updatedAtMs: Date.now(),
+    };
+    await this.db
+      .update(agentRefundPolicy)
+      .set(policyRow(updated))
+      .where(eq(agentRefundPolicy.id, "default"));
+    return updated;
+  }
+
+  async setKindApproval(kind: RefundPolicy["approvedKinds"][number], approved: boolean, byLogin: string): Promise<RefundPolicy> {
+    const current = await this.getPolicy();
+    if (!current) throw new Error("Refund policy is not configured: run the refund schema ensure first.");
+    if (kind !== "subscription" && kind !== "pay_per_run") {
+      throw new Error(`Invalid refund kind: ${String(kind)} (must be subscription or pay_per_run).`);
+    }
+    if (typeof byLogin !== "string" || !byLogin.trim()) {
+      throw new Error("byLogin is required.");
+    }
+    const kinds = new Set(current.approvedKinds);
+    if (approved) kinds.add(kind);
+    else kinds.delete(kind);
+    const approvedKinds = [...kinds];
+    const updated: RefundPolicy = {
+      ...current,
+      approvedKinds,
+      approvedBy: approvedKinds.length > 0 ? byLogin.trim() : null,
+      approvedAtMs: approvedKinds.length > 0 ? Date.now() : null,
+      updatedAtMs: Date.now(),
+    };
     await this.db
       .update(agentRefundPolicy)
       .set(policyRow(updated))

@@ -232,6 +232,11 @@ function fakeRefundPorts() {
       payPerRunEffect: "none",
       creditEffect: "none",
       updatedAtMs: 1,
+      // Issue #2662: this fixture is an approved policy, so the saga
+      // routing tests test routing, not the approval gate.
+      approvedKinds: ["pay_per_run"],
+      approvedBy: "op1",
+      approvedAtMs: 1,
     }),
     setPolicy: async () => {
       throw new Error("test: setPolicy unused");

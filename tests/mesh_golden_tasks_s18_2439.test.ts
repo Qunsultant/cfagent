@@ -288,7 +288,8 @@ describe("golden harness: runner + store (#2439)", () => {
     // Phase 5 Slice 1 (#2000) appends migration 0033 (dead-letter store) after 0032.
     // Phase 5 Slice 2 (#2000) appends migration 0034 (breaker state) after 0033.
     // #2659 (Phase 2.4) appends migration 0035 (digest pass) after 0034.
-    expect(Math.max(...ALL_MIGRATIONS.map((m) => m.version))).toBe(35);
+    // #2662 (Phase 2.7) appends migration 0036 (refund policy approval) after 0035.
+    expect(Math.max(...ALL_MIGRATIONS.map((m) => m.version))).toBe(36);
     expect(getTableName(agentMeshEvalResults)).toBe("agent_mesh_eval_results");
   });
 });
