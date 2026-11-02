@@ -86,3 +86,41 @@ These are public and must not be treated as protected by obscurity:
 
 If any of these ever carries sensitive content, the fix is to move it
 behind a gate — not to assume nobody noticed it is public.
+
+## 6. A2A token names: inbound vs outbound (Qunsultant/cfagent#2053)
+
+This section is the ONE canonical place for the two A2A directions and
+their token names. The naming muddle recorded as out-of-scope in the
+#1754 gate-coverage inventory (`gate-coverage-inventory-1754.md` §9.4)
+is resolved here; no other doc restates these names as authority, so
+this section cannot drift against a second copy.
+
+There are exactly two directions, and their names are never aliased to
+each other in code. Reasoning from one name about the other direction
+is always wrong.
+
+| Direction | Worker secret name | Read by | Enablement |
+| --- | --- | --- | --- |
+| Inbound: cfagent as A2A server (`POST /a2a/*`) | `A2A_API_TOKEN` | `src/a2a/index.ts` via `src/a2a/meshCredentials.ts` (per-surface `A2A_TOKEN_<SURFACE>` first, shared token transitionally) | Deliberately disabled by absence: unset means dispatch fails closed (503, "A2A dispatch is not configured"); a missing/wrong token is 401. Enabling inbound dispatch is a separate owner decision to set `A2A_API_TOKEN` — deploy never writes it, and no outbound name enables it. |
+| Outbound: cfagent as A2A client to cfpay | `CFPAY_OUTBOUND_TOKEN` (current) | `src/services/cfpayA2A.ts` `getCfpayConfig` | Live via its own name. Written by `.github/workflows/deploy.yml` from the GitHub-secret source (see the layer note below). |
+| Outbound, transitional fallback | `DASHBOARD_API_KEY_IS_A2A_TOKEN` (deprecated, superseded by `CFPAY_OUTBOUND_TOKEN`) | `getCfpayConfig`, read only after `CFPAY_OUTBOUND_TOKEN` | Still written by deploy.yml alongside the new name during transition, so renaming cannot break live outbound dispatch across the deploy boundary. Retired only by a later owner-directed removal once the new secret is proven live — never silently, and never by deleting the fallback from code while deploy still writes it. |
+| Outbound, pre-existing fallback | `CFPAY_A2A_TOKEN` | `getCfpayConfig`, read only after both names above | Unchanged by #2053. |
+
+Rules:
+
+- **Never alias.** Do not map `A2A_API_TOKEN` to an outbound name or
+  an outbound name to `A2A_API_TOKEN` in code: aliasing would silently
+  enable inbound dispatch, which is a separate owner decision.
+- **Layer note (GitHub secret vs Worker secret).** Deploy writes
+  Worker secrets; the code reads Worker secret names. In #2053 the
+  GitHub secret feeding deploy (`S_DASHBOARD_API_KEY`) keeps its
+  existing name — renaming that GitHub secret is an owner action, not
+  part of this slice — while the Worker secret it writes is renamed to
+  `CFPAY_OUTBOUND_TOKEN`. Do not confuse the two layers when reading
+  deploy.yml.
+- **Live inbound state is owner-visible only.** Code and config show
+  no deploy path that sets `A2A_API_TOKEN`, but whether it is set
+  out-of-band on the Worker cannot be proven from the repo and is
+  never claimed here; that check belongs to the owner.
+- **No secret value is ever recorded here.** Names, directions, and
+  enablement states only.

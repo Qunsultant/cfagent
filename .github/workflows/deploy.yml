@@ -203,6 +203,19 @@ jobs:
           require_secret GITHUB_CLIENT_SECRET "$GH_SEC"
           require_secret APP_BASE_URL "$S_APP_BASE_URL"
           require_secret SESSION_SECRET "$S_SESSION_SECRET"
+          # Outbound cfpay A2A token (#2053): the direction-explicit
+          # Worker secret CFPAY_OUTBOUND_TOKEN is written from the same
+          # GitHub-secret source as before. The old Worker secret name
+          # is still written alongside it during transition (the code
+          # reads the new name first and falls back to the old one),
+          # so this deploy cannot break live outbound dispatch; the
+          # old name is retired only by a later owner-directed removal
+          # once the new secret is proven live. The GitHub secret
+          # source name itself is unchanged in this slice (an owner
+          # action to rename it, if wanted); Worker secret names are
+          # what the code reads. This writes NO inbound token:
+          # A2A_API_TOKEN is never set by deploy, by design.
+          require_secret CFPAY_OUTBOUND_TOKEN "$S_DASHBOARD_API_KEY"
           require_secret DASHBOARD_API_KEY_IS_A2A_TOKEN "$S_DASHBOARD_API_KEY"
 
           # Notification targets are genuinely optional; absence is reported.

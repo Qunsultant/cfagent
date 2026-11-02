@@ -643,6 +643,21 @@ export interface Env {
   TRADING_AGENT?: DurableObjectNamespace;
   /** Bearer token required on A2A dispatch POSTs (#291 A5). Unset = dispatch disabled (fail closed). Since S16 (#2426) this is the TRANSITIONAL shared fallback: it authenticates only surfaces whose per-agent credential (below) is unset, and is removed once every surface carries its own. */
   A2A_API_TOKEN?: string;
+  /** Outbound cfpay A2A bearer token (#2053): cfagent as A2A client to
+   * cfpay, read by `getCfpayConfig` in src/services/cfpayA2A.ts.
+   * Direction-explicit: this name cannot be read as the inbound
+   * dispatch token, and it never enables inbound dispatch. */
+  CFPAY_OUTBOUND_TOKEN?: string;
+  /** Deprecated transitional fallback for the outbound cfpay A2A token,
+   * superseded by CFPAY_OUTBOUND_TOKEN (#2053). Kept only until the
+   * new Worker secret is proven live; retired by a later
+   * owner-directed removal, never by silent deletion. Never an
+   * inbound token. */
+  DASHBOARD_API_KEY_IS_A2A_TOKEN?: string;
+  /** Pre-existing third fallback for the outbound cfpay A2A token
+   * (#2053), read only after CFPAY_OUTBOUND_TOKEN and the deprecated
+   * fallback above. */
+  CFPAY_A2A_TOKEN?: string;
   // Per-agent A2A mesh credentials (S16, #2426): one optional Worker
   // secret per A2A surface, verified at the edge by
   // src/a2a/meshCredentials.ts. A surface whose secret is set accepts

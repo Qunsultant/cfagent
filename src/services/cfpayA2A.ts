@@ -11,7 +11,12 @@
  *   for inbound); use the local ETradeWebhookService instead.
  *
  * Requires `CFPAY_URL` (default https://pay.openaimp.com) and
- * `CFPAY_A2A_TOKEN` (bearer token) in env. The token is never logged.
+ * `CFPAY_OUTBOUND_TOKEN` (outbound bearer token to cfpay, #2053) in
+ * env. The token is never logged. `DASHBOARD_API_KEY_IS_A2A_TOKEN` is
+ * kept only as a deprecated transitional fallback, superseded by
+ * `CFPAY_OUTBOUND_TOKEN`; `CFPAY_A2A_TOKEN` is the pre-existing third
+ * fallback. `A2A_API_TOKEN` is NEVER an outbound token: it is the
+ * inbound dispatch token and must not enable outbound calls.
  */
 
 export interface CfpayA2AConfig {
@@ -22,8 +27,20 @@ export interface CfpayA2AConfig {
 export function getCfpayConfig(env: unknown): CfpayA2AConfig | null {
   const e = env as Record<string, unknown>;
   const baseUrl = (e.CFPAY_URL as string) || "https://pay.openaimp.com";
-  // DASHBOARD_API_KEY_IS_A2A_TOKEN is the A2A bearer token (falls back to CFPAY_A2A_TOKEN).
-  const token = (e.DASHBOARD_API_KEY_IS_A2A_TOKEN as string) || (e.CFPAY_A2A_TOKEN as string);
+  // CFPAY_OUTBOUND_TOKEN is the outbound A2A bearer token (#2053,
+  // direction-explicit: this name cannot be read as the inbound token).
+  // DASHBOARD_API_KEY_IS_A2A_TOKEN is a deprecated transitional
+  // fallback, superseded by CFPAY_OUTBOUND_TOKEN — kept only until the
+  // new Worker secret is proven live, then retired by a later
+  // owner-directed removal. CFPAY_A2A_TOKEN is the pre-existing third
+  // fallback. A2A_API_TOKEN is never read here: aliasing it in would
+  // silently enable inbound dispatch, which is a separate owner
+  // decision, so inbound handling stays untouched (fail-closed 503
+  // when unset, 401 on a wrong token, at the A2A edge).
+  const token =
+    (e.CFPAY_OUTBOUND_TOKEN as string) ||
+    (e.DASHBOARD_API_KEY_IS_A2A_TOKEN as string) ||
+    (e.CFPAY_A2A_TOKEN as string);
   if (!token) return null;
   return { baseUrl: baseUrl.replace(/\/$/, ""), token };
 }
