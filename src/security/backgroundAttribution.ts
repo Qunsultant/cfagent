@@ -87,6 +87,23 @@ export function backgroundDispatchHeaders(
 }
 
 /**
+ * Issue Qunsultant/cfagent#2037 — the same background dispatch
+ * headers plus the tick's W3C traceparent, so the DO-side dispatch
+ * observation correlates to the scheduled() tick that sent it. The
+ * traceparent is carried, never minted here: scheduled() owns the
+ * tick trace (one trace per tick, one child span per dispatch).
+ */
+export function backgroundDispatchHeadersWithTrace(
+  login: string,
+  traceparent: string
+): Record<string, string> {
+  return {
+    ...backgroundDispatchHeaders(login),
+    traceparent,
+  };
+}
+
+/**
  * Resolve the actor kind for a dispatch from its headers and the
  * configured service login. Pure and total: unknown/missing values
  * resolve to user, never to background.

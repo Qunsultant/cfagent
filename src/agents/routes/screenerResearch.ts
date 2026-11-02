@@ -42,6 +42,15 @@ import {
   shouldFireResearchTick,
   RESEARCH_SCHEDULED_LAST_RUN_KEY,
 } from "../../services/researchScheduleGuard";
+import { resolveScheduledJobAlertThreshold } from "../../config/scheduledJobAlert";
+import {
+  recordScheduledJobOutcome,
+  scheduledJobOutcomeStoreFromOrmEvents,
+  type ScheduledJobId,
+  type ScheduledJobOutcomeInput,
+} from "../../observability/scheduledJobOutcomes";
+import { postSlackText, resourceSlackPost } from "../resourceGoals";
+import type { SlackDeliveryEnv } from "../social/delivery";
 import type { ScreenerAgent } from "../screener-agent";
 import type { ResearchAgent } from "../research-agent";
 import type { DatabaseORM } from "../../orm";
@@ -84,6 +93,52 @@ export interface ScreenerResearchRouteContext {
   readSettingRaw(key: string): string | null;
   /** mas_settings write (owner: OrchestratorAgent.writeSetting - was `this.writeSetting`). */
   writeSetting(key: string, value: string): void;
+  /**
+   * Issue Qunsultant/cfagent#2037 — tick trace id carried from the
+   * dispatch's traceparent (set by the OrchestratorAgent delegation
+   * from the request headers; null when the dispatch carried none).
+   */
+  traceId?: string | null;
+}
+
+/**
+ * Issue Qunsultant/cfagent#2037 — record one tick-job outcome in the
+ * single mas_events sink (with streak/alert via the existing Slack
+ * route). Never throws and never changes the handler's response:
+ * the outcome row is observation, not the job. The ORM events port
+ * is read lazily so a mock context without it degrades to a
+ * recorded:false no-op instead of failing the tick.
+ */
+async function recordTickJobOutcome(
+  ctx: ScreenerResearchRouteContext,
+  sessionId: string,
+  input: Omit<ScheduledJobOutcomeInput, "job"> & { job: ScheduledJobId },
+): Promise<void> {
+  try {
+    await recordScheduledJobOutcome(
+      {
+        store: scheduledJobOutcomeStoreFromOrmEvents(() => {
+          const orm = ctx.getOrm() as unknown as {
+            events?: { create?: unknown; findMany?: unknown };
+          };
+          return orm?.events ?? null;
+        }, sessionId),
+        alert: async (text: string) => {
+          await postSlackText({
+            post: resourceSlackPost,
+            env: ctx.env as unknown as SlackDeliveryEnv,
+            text,
+          });
+        },
+        threshold: resolveScheduledJobAlertThreshold(
+          ctx.env as unknown as Record<string, unknown>,
+        ),
+      },
+      input,
+    );
+  } catch {
+    // Observation never fails the response.
+  }
 }
 
 /**
@@ -511,6 +566,15 @@ export async function handleScreenerResearchRoutes(
           ctx.readSettingRaw(RESEARCH_SCHEDULED_LAST_RUN_KEY)
         );
         if (!decision.fire) {
+          // Issue Qunsultant/cfagent#2037 — a skip is an outcome, not
+          // an absence: it leaves a mas_events row so a quiet tick is
+          // distinguishable from a lost one. Response shape unchanged.
+          await recordTickJobOutcome(ctx, sessionId, {
+            job: "research",
+            outcome: "skipped",
+            traceId: ctx.traceId ?? null,
+            reason: decision.reason,
+          });
           return Response.json({
             success: true,
             skipped: true,
@@ -728,8 +792,26 @@ export async function handleScreenerResearchRoutes(
           // Phase 6 steps are best-effort; the research run already succeeded.
         }
         ctx.writeSetting(RESEARCH_SCHEDULED_LAST_RUN_KEY, decision.dateKey);
+        // Issue Qunsultant/cfagent#2037 — the ran outcome, same sink
+        // as the skip above. Recorded after the durable last-run
+        // marker so a lost outcome row can never imply a run that
+        // the guard would repeat.
+        await recordTickJobOutcome(ctx, sessionId, {
+          job: "research",
+          outcome: "ran",
+          traceId: ctx.traceId ?? null,
+        });
         return Response.json(out);
       } catch (err: any) {
+        // Issue Qunsultant/cfagent#2037 — a handler failure is a
+        // failed outcome (code only), recorded before the 500 the
+        // caller already receives. Response shape unchanged.
+        await recordTickJobOutcome(ctx, sessionId, {
+          job: "research",
+          outcome: "failed",
+          traceId: ctx.traceId ?? null,
+          errorCode: (err as { code?: unknown } | null)?.code as string | undefined,
+        });
         return Response.json(
           { success: false, error: err?.message || "Scheduled research run failed." },
           { status: 500 }
@@ -850,6 +932,15 @@ export async function handleScreenerResearchRoutes(
       );
       const now = new Date();
       if (body?.force !== true && ctx.readSettingRaw(WEIGHTS_LAST_RUN_WEEK_KEY) === isoWeekKey(now)) {
+        // Issue Qunsultant/cfagent#2037 — the already-ran skip leaves
+        // a mas_events row like every other job outcome. Response
+        // shape unchanged.
+        await recordTickJobOutcome(ctx, sessionId, {
+          job: "adaptation",
+          outcome: "skipped",
+          traceId: ctx.traceId ?? null,
+          reason: "already ran this week",
+        });
         return Response.json({
           success: true,
           considered: slices.length,
@@ -864,6 +955,16 @@ export async function handleScreenerResearchRoutes(
       if (!result.halted && body?.force !== true) {
         ctx.writeSetting(WEIGHTS_LAST_RUN_WEEK_KEY, isoWeekKey(now));
       }
+      // Issue Qunsultant/cfagent#2037 — the ran outcome, recorded
+      // after the durable week marker like the research ran above.
+      // A throw inside the adjustment still propagates (no catch
+      // added): the DO dispatch wrap emits the AE error event and
+      // scheduled()'s observer records the failure — same sink.
+      await recordTickJobOutcome(ctx, sessionId, {
+        job: "adaptation",
+        outcome: "ran",
+        traceId: ctx.traceId ?? null,
+      });
       return Response.json({ success: true, ...result, weightsSource: "v2", timestamp: now.toISOString() });
     }
 

@@ -285,8 +285,8 @@ const ORCH = "agents/orchestrator.ts";
  *  Replay #2863 adds criteria/patternRef/presetRef fields to the
  *  persistScreenerReport wrapper — measured 3,123 lines / 148,501 B,
  *  so budget lines rise to 3135 and bytes rise to 149_500. */
-const BUDGET_LINES = 3135;
-const BUDGET_BYTES = 149_500;
+const BUDGET_LINES = 3140;
+const BUDGET_BYTES = 150_000;
 
 const count = (haystack: string, needle: string) =>
   haystack.split(needle).length - 1;

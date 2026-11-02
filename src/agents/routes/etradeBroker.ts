@@ -127,6 +127,7 @@ export interface EtradeBrokerRouteContext {
     agent: AgentName | "judge" | "nlq" | "orchestrator",
     payload: Record<string, unknown>
   ): void;
+  traceId?: string | null;
   /** Screener agent (owner: OrchestratorAgent - was `this.getScreenerAgent()`). */
   getScreenerAgent(userLogin?: string): ScreenerAgent;
   /** Canonical-copy screener persistence (owner: OrchestratorAgent - was `this.persistScreenerReportCanonical`). */

@@ -68,7 +68,8 @@ import { declareStrategyScanObserveTasks, type ScheduledTasksObserveContext } fr
 import { buildOrchestratorSkillSources } from "./orchestrator/skillPacks";
 import { autoRenewETradeTokens, autonomousGoalScreen, autonomousMarketScreen, autonomousStrategyDiscovery, collectIvHistory, expireStaleOrderDraft, sendScheduledReminder, type ScheduledCallbacksContext } from "./orchestrator/scheduledCallbacks";
 import { nlqSchedulingPort, nlqSocialBriefPort, nlqStockScreenPort, type NlqPortsContext } from "./orchestrator/nlqPorts";
-import { formatTraceparent, newTraceContext } from "../observability/observabilityPorts";
+import { formatTraceparent, newTraceContext, parseTraceparent } from "../observability/observabilityPorts";
+import { observeDoRouteDispatch } from "../observability/scheduledJobOutcomes";
 import { recordTraceHopBestEffort } from "../data/createMeshTracePorts";
 import { createSocialBriefStoreFromNamespace } from "./social/briefStore";
 import { fetchSlackPost } from "./social/delivery";
@@ -148,6 +149,7 @@ import { handleBrokerGateRoutes } from "./routes/brokerGate";
 import { handleAlpacaMarketDataRoutes, handleAlpacaTradingRoutes } from "./routes/alpaca";
 import { handleMarketDataQuoteResearchRoutes, handleMarketDataCompareScreenRoutes } from "./routes/marketDataResearch";
 import { handleScreenerResearchRoutes } from "./routes/screenerResearch";
+import { handleScheduledJobOutcomeRoute } from "./routes/scheduledJobOutcome";
 import { handleSchedulesRoutes, makeRunScheduleCallback } from "./routes/schedules";
 import { handleMaintenanceRoutes } from "./routes/maintenance";
 import { handleServiceUserRoutes } from "./routes/serviceUser";
@@ -2473,6 +2475,9 @@ export class OrchestratorAgent extends PortThink {
       return this.logChatActivity(request);
     }
 
+    if (path.endsWith("/scheduled-job-outcome") && request.method === "POST") // #2037: dispatch-failure records land here (background-gated in handler).
+      return handleScheduledJobOutcomeRoute(request, { audit: (type, agent, payload) => this.audit(type, agent as "orchestrator", payload), getOrm: () => this.getOrm(), env: this.env as unknown as Record<string, unknown> });
+
     // Issue #2457: cross-tenant admin queue actions run synchronously
     // through routeRequest, before the queue decision below. The
     // generic /api/ forwarder marks these queue-eligible and "admin"
@@ -2558,7 +2563,8 @@ export class OrchestratorAgent extends PortThink {
       return this.enqueueHttpRequest(request, url);
     }
 
-    return this.routeRequest(request);
+    // #2037: the three job paths get the DO dispatch wrap; the rest keep today's path.
+    return observeDoRouteDispatch(path, request.method, request.headers, this.env, () => this.routeRequest(request));
   }
 
   // Issue #992: extracted to ./orchestrator/httpEntry.ts (logChatActivity);
@@ -2869,6 +2875,7 @@ export class OrchestratorAgent extends PortThink {
     // a non-null return matched.
     const etradeBrokerResponse = await handleEtradeBrokerRoutes(request, url, path, sessionId, {
       env: this.env,
+      traceId: parseTraceparent(request.headers.get("traceparent"))?.traceId ?? null,
       asyncJobId: request.headers.get("x-async-job-id") || undefined,
       scheduleScreenerFollowups: (outcome: ScreenerRunOutcome, userLogin: string) =>
         scheduleScreenerFollowups(this.asyncJobsContext(), outcome, userLogin),
@@ -2923,6 +2930,7 @@ export class OrchestratorAgent extends PortThink {
     // a non-null return matched.
     const etradeBrokerActivityResponse = await handleEtradeBrokerActivityRoutes(request, url, path, sessionId, {
       env: this.env,
+      traceId: parseTraceparent(request.headers.get("traceparent"))?.traceId ?? null,
       getOrm: () => this.getOrm(),
       readSettingRaw: (key) => this.readSettingRaw(key),
       writeSetting: (key, value) => this.writeSetting(key, value),
@@ -3035,6 +3043,7 @@ export class OrchestratorAgent extends PortThink {
       getResearchAgent: (userLogin?: string) => this.getResearchAgent(userLogin),
       runResearchAndPublish: (trigger, userLogin) => this.runResearchAndPublish(trigger, userLogin),
       getOrm: () => this.getOrm(),
+      traceId: parseTraceparent(request.headers.get("traceparent"))?.traceId ?? null,
       // Issue #1661: DO blob handle for full capture on the backtest leg.
       getStorage: () => this.ctx.storage,
       readSettingRaw: (key) => this.readSettingRaw(key),
