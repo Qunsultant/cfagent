@@ -358,6 +358,16 @@ export function mapSagaStartError(status: number, serverError: string | null): s
 
 export type SagaProgressPhase = "polling" | "gate" | "done" | "stopped" | "error";
 
+/**
+ * Issue #2777 — Workflow Runs deep link for a saga. The panel
+ * never renders a raw API URL: progress opens the Workflow Runs
+ * view filtered to this saga id (the view reads its `run` query
+ * param into its search on mount).
+ */
+export function sagaWorkflowRunsLink(sagaId: string): string {
+  return `?tab=workflow-runs&run=${encodeURIComponent(sagaId)}`;
+}
+
 export function SagaStartSection({ userLogin }: { userLogin?: string }) {
   const [flagState, setFlagState] = useState<"loading" | "on" | "off" | "unknown">("loading");
   const [kind, setKind] = useState<"stock" | "options">("stock");
@@ -621,6 +631,9 @@ export function SagaStartSection({ userLogin }: { userLogin?: string }) {
           {started.runRequestId && (
             <p style={sagaMutedTightStyle}>Run request: {started.runRequestId}</p>
           )}
+          <p style={sagaMutedTightStyle}>
+            <a href={sagaWorkflowRunsLink(started.sagaId)}>View this run in Workflow Runs</a>
+          </p>
           {started.disclosure && (
             <p style={sagaListStyle}>{started.disclosure}</p>
           )}
@@ -669,7 +682,7 @@ export function SagaStartSection({ userLogin }: { userLogin?: string }) {
           )}
           {phase === "stopped" && (
             <p style={sagaListStyle}>
-              Not following — outcome notices go to Slack.
+              Not following — reopen via the Workflow Runs link above.
             </p>
           )}
           {phase === "error" && progressError && (

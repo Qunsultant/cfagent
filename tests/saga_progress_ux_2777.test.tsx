@@ -1,9 +1,9 @@
 /** @vitest-environment jsdom */
 /**
- * Issue #2777 (split variant) — saga progress UX: no raw API URLs
- * on the panel, and polling treats 404 as "not yet". The receipt
- * renders no URL at all; the Workflow Runs link ships later with
- * the Workflow Runs extension follow-up.
+ * Issue #2777 + #2780 — saga progress UX: no raw API URLs on the
+ * panel, polling treats 404 as "not yet", and the receipt links to
+ * the Workflow Runs view filtered to the saga id (the link ships
+ * with the #2780 extension, now that the run resolves there).
  *
  * Component tests use the repo idiom (createRoot + act + stubbed
  * global fetch, no testing library). Fake timers drive the
@@ -12,7 +12,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { SagaStartSection } from "../src/client/GoalScreenPanel";
+import { SagaStartSection, sagaWorkflowRunsLink } from "../src/client/GoalScreenPanel";
+import { WorkflowRunsPanel } from "../src/client/WorkflowRunsPanel";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -30,6 +31,16 @@ function setInput(el: HTMLInputElement, value: string) {
   setter.call(el, value);
   el.dispatchEvent(new Event("input", { bubbles: true }));
 }
+
+
+describe("sagaWorkflowRunsLink (#2777)", () => {
+  it("builds a Workflow Runs deep link by saga id, never an API URL", () => {
+    const href = sagaWorkflowRunsLink("saga-test-1");
+    expect(href).toContain("tab=workflow-runs");
+    expect(href).toContain("run=saga-test-1");
+    expect(href).not.toContain("/api/");
+  });
+});
 
 describe("SagaStartSection receipt + polling (#2777)", () => {
   let container: HTMLDivElement;
@@ -137,12 +148,15 @@ describe("SagaStartSection receipt + polling (#2777)", () => {
     expect(container.textContent).toContain("Saga started");
     expect(container.textContent).toContain("Run request: saga-test-1");
     expect(container.textContent).toContain("replacement-run credit would apply");
-    // Split variant: no link of any kind in the receipt — neither
-    // the raw status URL nor the Workflow Runs link (held for the
-    // extension follow-up). The stage list is the progress view.
-    expect(container.querySelectorAll("a")).toHaveLength(0);
+    // Extension (#2780): the receipt links to the Workflow Runs
+    // view filtered to this saga id — never a raw API URL.
+    const link = [...container.querySelectorAll("a")].find((a) =>
+      (a.getAttribute("href") ?? "").includes("tab=workflow-runs"),
+    );
+    expect(link).toBeTruthy();
+    expect(link!.getAttribute("href")).toContain("run=saga-test-1");
+    expect(link!.textContent).toMatch(/Workflow Runs/);
     expect(container.textContent).not.toContain("/api/saga/");
-    expect(container.textContent).not.toContain("Workflow Runs");
   });
 
   it("a 404 while polling keeps polling with the waiting state, then shows stages when they land", async () => {
@@ -195,8 +209,123 @@ describe("SagaStartSection receipt + polling (#2777)", () => {
     });
     await flush();
     expect(container.textContent).toContain("Saga started (resumed)");
-    expect(container.querySelectorAll("a")).toHaveLength(0);
+    const link = [...container.querySelectorAll("a")].find((a) =>
+      (a.getAttribute("href") ?? "").includes("tab=workflow-runs"),
+    );
+    expect(link).toBeTruthy();
+    expect(link!.getAttribute("href")).toContain("run=saga-resumed-1");
     expect(container.textContent).not.toContain("/api/saga/");
-    expect(container.textContent).not.toContain("Workflow Runs");
+  });
+});
+
+describe("WorkflowRunsPanel deep link (#2777)", () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    window.history.pushState({}, "", "/?tab=workflow-runs&run=saga-test-1");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: unknown) => {
+        const url = String(input);
+        if (url.startsWith("/api/workflow-runs")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              count: 2,
+              runs: [
+                {
+                  id: "saga-test-1",
+                  runId: "saga-test-1",
+                  workflow: "saga",
+                  family: "saga",
+                  title: "Saga saga-test-1",
+                  source: "job-chain",
+                  trigger: "manual",
+                  triggerDetail: "Manual",
+                  triggeredBy: "alice",
+                  status: "running",
+                  startedAt: "2026-11-02T00:00:00.000Z",
+                  finishedAt: null,
+                  durationMs: null,
+                  stageCount: 1,
+                  completedStages: 0,
+                  failedStages: 0,
+                  stages: [],
+                  inputs: null,
+                  outputs: null,
+                  artifacts: [],
+                  deliveryStates: {},
+                  error: null,
+                },
+                {
+                  id: "other-1",
+                  runId: "other-1",
+                  workflow: "screener",
+                  family: "screener",
+                  title: "Screen other-1",
+                  source: "job-chain",
+                  trigger: "manual",
+                  triggerDetail: "Manual",
+                  triggeredBy: "alice",
+                  status: "completed",
+                  startedAt: "2026-11-01T00:00:00.000Z",
+                  finishedAt: "2026-11-01T00:01:00.000Z",
+                  durationMs: 60000,
+                  stageCount: 1,
+                  completedStages: 1,
+                  failedStages: 0,
+                  stages: [],
+                  inputs: null,
+                  outputs: null,
+                  artifacts: [],
+                  deliveryStates: {},
+                  error: null,
+                },
+              ],
+              summary: {
+                total: 2,
+                completed: 1,
+                partial: 0,
+                failed: 0,
+                active: 1,
+                byTrigger: { manual: 2, scheduled: 0, autonomous: 0, webhook: 0, agent: 0, unknown: 0 },
+              },
+              generatedAt: "2026-11-02T00:00:00.000Z",
+            }),
+          };
+        }
+        return { ok: false, status: 500, json: async () => ({}) };
+      }),
+    );
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(async () => {
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+    window.history.pushState({}, "", "/");
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it("prefills the search from the run query param and filters to that run", async () => {
+    await act(async () => {
+      root.render(<WorkflowRunsPanel />);
+    });
+    await flush();
+    const search = container.querySelector(
+      'input[aria-label="Search workflow runs"]',
+    ) as HTMLInputElement | null;
+    expect(search).toBeTruthy();
+    expect(search!.value).toBe("saga-test-1");
+    expect(container.textContent).toContain("saga-test-1");
+    expect(container.textContent).not.toContain("other-1");
   });
 });
