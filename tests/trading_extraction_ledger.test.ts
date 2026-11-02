@@ -56,6 +56,9 @@ const PINNED_STAR_REEXPORTS = [
   "./universes",
   "./screenerConfig",
   "./screenerPipeline",
+  // Issue #1980: the #1852 index-membership port joins the trading
+  // surface so stored-list code imports it through the barrel (#290).
+  "./indexMembership",
   "./screeningSchemas",
   "./screenerReportPdf",
   // Issue #2088: the PDF template module joins the trading surface.
