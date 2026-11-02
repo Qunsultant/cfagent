@@ -34,6 +34,36 @@ const LIST_PATH = "/api/payments/agentic/commercial/operators";
 const ADD_PATH = "/api/payments/agentic/commercial/operators/add";
 const REMOVE_PATH = "/api/payments/agentic/commercial/operators/remove";
 
+const opCardContentStyle: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: "var(--space-3)",
+};
+const addOperatorRowStyle: React.CSSProperties = {
+  display: "flex",
+  gap: "var(--space-3)",
+  alignItems: "flex-end",
+  flexWrap: "wrap",
+  marginTop: "var(--space-3)",
+  paddingTop: "var(--space-3)",
+  borderTop: "1px solid var(--color-border-subtle)",
+};
+const addInputWrapperStyle: React.CSSProperties = {
+  flex: 1,
+  minWidth: "220px",
+};
+const opSubtitleStyle: React.CSSProperties = {
+  margin: "0 0 var(--space-2)",
+  color: "var(--color-text-muted)",
+  fontSize: "var(--font-size-body)",
+};
+const opTitleStyle: React.CSSProperties = {
+  margin: 0,
+  fontSize: "var(--font-size-title-sm)",
+  fontWeight: 600,
+  color: "var(--color-text-primary)",
+};
+
 export interface EffectiveOperatorRow {
   login: string;
   source: "env" | "store";
@@ -155,79 +185,95 @@ export function StoreOperatorsPanel() {
   if (notOperator) {
     return (
       <Card>
-        <Notice tone="warning" title="Not a store operator">
-          You are not a store operator, so operator management is not available to this session. Operators are
-          assigned by an existing operator, or listed in the deployment&apos;s operator list by the owner.
-        </Notice>
+        <div style={opCardContentStyle}>
+          <div>
+            <h2 style={opTitleStyle}>Store operators</h2>
+            <p style={opSubtitleStyle}>
+              Effective operators are the deployment list plus the store list. Env-managed operators are removed via the
+              deployment dashboard, not here; store operators are managed below. Removing the last effective operator is
+              refused.
+            </p>
+          </div>
+          <Notice tone="warning" title="Not a store operator">
+            You are not a store operator, so operator management is not available to this session. Operators are
+            assigned by an existing operator, or listed in the deployment&apos;s operator list by the owner.
+          </Notice>
+        </div>
       </Card>
     );
   }
 
   return (
     <Card>
-      <h2>Store operators</h2>
-      <p>
-        Effective operators are the deployment list plus the store list. Env-managed operators are removed via the
-        deployment dashboard, not here; store operators are managed below. Removing the last effective operator is
-        refused.
-      </p>
-      {error && (
-        <Notice tone="danger" title="Operator action failed">
-          {error}
-        </Notice>
-      )}
-      {message && (
-        <Notice tone="success" title="Done">
-          {message}
-        </Notice>
-      )}
-      {operators.length === 0 ? (
-        <EmptyState title="No operators" description="No effective operators are listed for this deployment." />
-      ) : (
-        <Table
-          columns={[
-            { key: "login", header: "Login", render: (op) => op.login },
-            {
-              key: "source",
-              header: "Source",
-              render: (op) => (
-                <Badge tone={op.source === "env" ? "neutral" : "accent"} title={op.source === "env" ? "Env-managed: remove via dashboard" : "Store-managed"}>
-                  {op.source}
-                </Badge>
-              ),
-            },
-            { key: "addedBy", header: "Added by", render: (op) => op.addedBy ?? "—" },
-            { key: "addedAt", header: "Added at", render: (op) => formatTimestamp(op.addedAtMs) },
-            {
-              key: "actions",
-              header: "Actions",
-              render: (op) =>
-                op.source === "store" ? (
-                  <Button variant="secondary" size="sm" disabled={busy} onClick={() => void removeOperator(op.login)}>
-                    Remove
-                  </Button>
-                ) : (
-                  "—"
+      <div style={opCardContentStyle}>
+        <div>
+          <h2 style={opTitleStyle}>Store operators</h2>
+          <p style={opSubtitleStyle}>
+            Effective operators are the deployment list plus the store list. Env-managed operators are removed via the
+            deployment dashboard, not here; store operators are managed below. Removing the last effective operator is
+            refused.
+          </p>
+        </div>
+        {error && (
+          <Notice tone="danger" title="Operator action failed">
+            {error}
+          </Notice>
+        )}
+        {message && (
+          <Notice tone="success" title="Done">
+            {message}
+          </Notice>
+        )}
+        {operators.length === 0 ? (
+          <EmptyState title="No operators" description="No effective operators are listed for this deployment." />
+        ) : (
+          <Table
+            columns={[
+              { key: "login", header: "Login", render: (op) => op.login },
+              {
+                key: "source",
+                header: "Source",
+                render: (op) => (
+                  <Badge tone={op.source === "env" ? "neutral" : "accent"} title={op.source === "env" ? "Env-managed: remove via dashboard" : "Store-managed"}>
+                    {op.source}
+                  </Badge>
                 ),
-            },
-          ]}
-          rows={operators}
-          rowKey={(op) => op.login}
-        />
-      )}
-      <div>
-        <TextInput
-          id="store-operator-login"
-          name="operator-login"
-          type="text"
-          label="Add operator by login"
-          ref={loginRef}
-          placeholder="operator login"
-          autoComplete="off"
-        />
-        <Button variant="primary" disabled={busy} onClick={() => void addOperator()}>
-          Add operator
-        </Button>
+              },
+              { key: "addedBy", header: "Added by", render: (op) => op.addedBy ?? "—" },
+              { key: "addedAt", header: "Added at", render: (op) => formatTimestamp(op.addedAtMs) },
+              {
+                key: "actions",
+                header: "Actions",
+                render: (op) =>
+                  op.source === "store" ? (
+                    <Button variant="secondary" size="sm" disabled={busy} onClick={() => void removeOperator(op.login)}>
+                      Remove
+                    </Button>
+                  ) : (
+                    "—"
+                  ),
+              },
+            ]}
+            rows={operators}
+            rowKey={(op) => op.login}
+          />
+        )}
+        <div style={addOperatorRowStyle}>
+          <div style={addInputWrapperStyle}>
+            <TextInput
+              id="store-operator-login"
+              name="operator-login"
+              type="text"
+              label="Add operator by login"
+              ref={loginRef}
+              placeholder="operator login"
+              autoComplete="off"
+            />
+          </div>
+          <Button variant="primary" disabled={busy} onClick={() => void addOperator()}>
+            Add operator
+          </Button>
+        </div>
       </div>
     </Card>
   );

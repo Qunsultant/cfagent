@@ -76,9 +76,13 @@ import {
   PageShell,
   Select,
   Table,
+  Tabs,
+  TabPanel,
   TextInput,
+  type TabOption,
 } from "./components/ui";
 import { StoreOperatorsPanel } from "./StoreOperatorsPanel";
+import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
 
 export interface FakeConfig {
   monetizationOn: boolean;
@@ -315,6 +319,86 @@ const priceFlagRowStyle: React.CSSProperties = { display: "flex", gap: "var(--sp
 const priceErrorWrapStyle: React.CSSProperties = { marginTop: "var(--space-1)" };
 const priceFootnoteStyle: React.CSSProperties = { margin: "var(--space-3) 0 0", color: "var(--color-text-muted)", fontSize: "var(--font-size-body)" };
 const priceEditRowStyle: React.CSSProperties = { display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" };
+const pageWrapperStyle: React.CSSProperties = {
+  padding: "var(--space-4)",
+  boxSizing: "border-box",
+  width: "100%",
+  display: "flex",
+  flexDirection: "column",
+  gap: "var(--space-4)",
+};
+const tabsWrapperStyle: React.CSSProperties = {
+  marginBottom: "var(--space-2)",
+};
+const formSubgridStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+  gap: "var(--space-3)",
+};
+const actionBarStyle: React.CSSProperties = {
+  display: "flex",
+  gap: "var(--space-3)",
+  marginTop: "var(--space-4)",
+  flexWrap: "wrap",
+  alignItems: "center",
+};
+const resultListStyle: React.CSSProperties = {
+  margin: 0,
+  paddingLeft: "var(--space-5)",
+  fontFamily: "var(--font-code)",
+  fontSize: "var(--font-size-body-sm)",
+};
+const codeBlockStyle: React.CSSProperties = {
+  margin: 0,
+  fontFamily: "var(--font-code)",
+  fontSize: "var(--font-size-body-sm)",
+  whiteSpace: "pre-wrap",
+};
+const monoSnippetStyle: React.CSSProperties = {
+  margin: 0,
+  fontFamily: "var(--font-code)",
+  fontSize: "var(--font-size-body-sm)",
+};
+const monoSnippetWithTopMarginStyle: React.CSSProperties = {
+  margin: "var(--space-2) 0 0",
+  fontFamily: "var(--font-code)",
+  fontSize: "var(--font-size-body-sm)",
+};
+const suiteStackStyle: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: "var(--space-2)",
+};
+const suiteExpectedStyle: React.CSSProperties = {
+  margin: "var(--space-2) 0 0",
+  color: "var(--color-text-muted)",
+  fontSize: "var(--font-size-body)",
+};
+const badgeRowStyle: React.CSSProperties = {
+  display: "flex",
+  gap: "var(--space-2)",
+  alignItems: "center",
+  flexWrap: "wrap",
+};
+const marginTopSmStyle: React.CSSProperties = {
+  marginTop: "var(--space-3)",
+};
+const sectionSubtitleStyle: React.CSSProperties = {
+  margin: "0 0 var(--space-3)",
+  color: "var(--color-text-muted)",
+};
+const stepTraceHeaderStyle: React.CSSProperties = {
+  margin: "var(--space-4) 0 var(--space-2)",
+};
+
+export type AssuranceTab = "simulation" | "live" | "prices" | "operators";
+
+export const ASSURANCE_TABS: TabOption<AssuranceTab>[] = [
+  { id: "simulation", label: "Simulator & Presets" },
+  { id: "live", label: "Live Workflow" },
+  { id: "prices", label: "Store Prices" },
+  { id: "operators", label: "Store Operators" },
+];
 
 /**
  * Store price approval (issue 2677, slice A). A LIVE operator action,
@@ -809,6 +893,13 @@ export function PaymentWorkflowAssurance({ userLogin }: { userLogin?: string }) 
   const [last, setLast] = useState<ScenarioResult | null>(null);
   const [suite, setSuite] = useState<Array<{ preset: Preset; result: ScenarioResult; pass: boolean }> | null>(null);
 
+  const { activeTab, visitedTabs, handleTabChange } = useUrlSyncedTabs<AssuranceTab>({
+    param: "view",
+    defaultTab: "simulation",
+    isValid: (v): v is AssuranceTab =>
+      v === "simulation" || v === "live" || v === "prices" || v === "operators",
+  });
+
   // Live mode (issue 2059): real workflow instance on Cloudflare.
   const [liveMode, setLiveMode] = useState<"coverage" | "checkout">("coverage");
   const [liveScheduleKind, setLiveScheduleKind] = useState<ScheduleKind>("one_off");
@@ -939,182 +1030,206 @@ export function PaymentWorkflowAssurance({ userLogin }: { userLogin?: string }) 
   const passCount = suite ? suite.filter((r) => r.pass).length : null;
 
   return (
-    <PageShell
-      title="Payment Workflow Assurance"
-      scopeNote="Permanent assurance capability for PaymentWorkflow. Live mode runs the real workflow on Cloudflare with test inputs; the simulation below runs the real flow and gate behind fake seams. TEST ONLY — no real-user runs, no mainnet."
-    >
-      <PageSection title="What this page is (and is not)">
-        <Notice tone="warning" title="Test only — not a payment surface">
-          Live mode starts real workflow instances, but only with test
-          inputs (live-test run ids, TEST screener command, test
-          account) — never a real-user run. The simulation below it
-          charges nobody and runs no real screener: its cfpay checkout
-          is a stub, its screener starter returns a fake workflow id
-          (or throws, on purpose), and the gate is testnet-only.
-        </Notice>
-        <p style={{ margin: "var(--space-3) 0 0", color: "var(--color-text-muted)" }}>
-          Price for the selected family (proposed, not approved):{" "}
-          <strong>${PROPOSED_SEED_PRICES[cfg.family].toFixed(2)}</strong> per
-          run-request — never per stage, shard, leg, retry, or re-serve.
-          A paid run that fails gets a one-time replacement-run credit
-          as its automatic compensation — never an automatic cash
-          refund. Cash refunds are operator-initiated and
-          operator-approved only (the refund path of issue 2204,
-          reconciled in issue 2549).
-        </p>
-      </PageSection>
+    <div style={pageWrapperStyle}>
+      <PageShell
+        title="Payment Workflow Assurance"
+        scopeNote="Permanent assurance capability for PaymentWorkflow. Live mode runs the real workflow on Cloudflare with test inputs; the simulation runs the real flow and gate behind fake seams. TEST ONLY — no real-user runs, no mainnet."
+      >
+        <div style={tabsWrapperStyle}>
+          <Tabs<AssuranceTab>
+            idBase="payment-assurance"
+            ariaLabel="Payment assurance sections"
+            tabs={ASSURANCE_TABS}
+            value={activeTab}
+            onChange={handleTabChange}
+          />
+        </div>
 
-      <PageSection title="Live mode — real workflow on Cloudflare (issue 2059)">
-        <p style={{ margin: "0 0 var(--space-3)", color: "var(--color-text-muted)" }}>
-          Starts a real PaymentWorkflow instance through the live
-          deployed binding, with test inputs only. Coverage mode needs
-          no cfpay key: the test account covers the run and the
-          workflow starts the real screener. Checkout mode needs
-          MONETIZATION_ENABLED and a cfpay key in the deployed env,
-          plus a test wallet payment on testnet — until those are in
-          place it refuses with the missing piece named, instead of
-          silently running free. Live endpoints also require your login
-          to be listed in PAYMENT_ASSURANCE_LIVE_LOGINS.
-        </p>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "var(--space-3)" }}>
-          <Select label="Live mode" value={liveMode} onChange={(e) => setLiveMode(e.target.value as "coverage" | "checkout")}>
-            <option value="coverage">coverage — test account covers the run</option>
-            <option value="checkout">checkout — real cfpay checkout (testnet)</option>
-          </Select>
-          <Select label="Schedule kind" value={liveScheduleKind} onChange={(e) => setLiveScheduleKind(e.target.value as ScheduleKind)}>
-            <option value="one_off">one_off</option>
-            <option value="recurring">recurring</option>
-          </Select>
-        </div>
-        <div style={{ marginTop: "var(--space-3)" }}>
-          <Checkbox label="Authorized at submission (one-off only — skips the second approval wait)" checked={liveAuthorized} onChange={(e) => setLiveAuthorized(e.target.checked)} />
-        </div>
-        <div style={{ display: "flex", gap: "var(--space-3)", marginTop: "var(--space-4)", flexWrap: "wrap" }}>
-          <Button variant="primary" onClick={startLive} disabled={liveBusy} loading={liveBusy}>{"Start live run"}</Button>
-          <Button variant="secondary" onClick={refreshLive} disabled={liveBusy || !liveStart}>Refresh status</Button>
-          <Button variant="secondary" onClick={() => sendLiveEvent("approval", { approved: true })} disabled={liveBusy || !liveStart}>Approve</Button>
-          <Button variant="secondary" onClick={() => sendLiveEvent("approval", { approved: false })} disabled={liveBusy || !liveStart}>Reject</Button>
-          <Button variant="secondary" onClick={checkLivePayment} disabled={liveBusy || !liveStart}>Check payment and deliver verified</Button>
-        </div>
-        {liveError && (
-          <Notice tone="danger" title="Live run error">
-            {liveError}
-          </Notice>
-        )}
-        {liveMessage && (
-          <p style={{ margin: "var(--space-3) 0 0", color: "var(--color-text-muted)" }}>{liveMessage}</p>
-        )}
-        {liveStart && (
-          <Card>
-            <p style={{ margin: 0, fontFamily: "var(--font-code)", fontSize: "var(--font-size-body-sm)" }}>
-              workflow: {String(liveStart.workflowId)}
+        <TabPanel idBase="payment-assurance" tabId="simulation" active={activeTab === "simulation"} retain>
+          <PageSection title="What this page is (and is not)">
+            <Notice tone="warning" title="Test only — not a payment surface">
+              Live mode starts real workflow instances, but only with test
+              inputs (live-test run ids, TEST screener command, test
+              account) — never a real-user run. The simulation below it
+              charges nobody and runs no real screener: its cfpay checkout
+              is a stub, its screener starter returns a fake workflow id
+              (or throws, on purpose), and the gate is testnet-only.
+            </Notice>
+            <p style={sectionSubtitleStyle}>
+              Price for the selected family (proposed, not approved):{" "}
+              <strong>${PROPOSED_SEED_PRICES[cfg.family].toFixed(2)}</strong> per
+              run-request — never per stage, shard, leg, retry, or re-serve.
+              A paid run that fails gets a one-time replacement-run credit
+              as its automatic compensation — never an automatic cash
+              refund. Cash refunds are operator-initiated and
+              operator-approved only (the refund path of issue 2204,
+              reconciled in issue 2549).
             </p>
-            <p style={{ margin: "var(--space-2) 0 0", fontFamily: "var(--font-code)", fontSize: "var(--font-size-body-sm)" }}>
-              run: {String(liveStart.runRequestId)} · screener job: {String(liveStart.screenerJobId)} · mode: {String(liveStart.mode)}
-            </p>
-          </Card>
-        )}
-        {liveStatus !== null && (
-          <Card>
-            <pre style={{ margin: 0, fontFamily: "var(--font-code)", fontSize: "var(--font-size-body-sm)", whiteSpace: "pre-wrap" }}>
-              {JSON.stringify(liveStatus, null, 2)}
-            </pre>
-          </Card>
-        )}
-      </PageSection>
+          </PageSection>
 
-      <PriceApprovalSection userLogin={userLogin} />
+          <PageSection title="Tunable fakes">
+            <Card padding="md">
+              <div style={formSubgridStyle}>
+                <Select label="Simulated monetization flag (gate config)" value={cfg.monetizationOn ? "on" : "off"} onChange={(e) => set("monetizationOn", e.target.value === "on")}>
+                  <option value="on">ON — gate applies</option>
+                  <option value="off">OFF — free path</option>
+                </Select>
+                <Select label="Family" value={cfg.family} onChange={(e) => set("family", e.target.value as ScreenerFamily)}>
+                  <option value="stock">stock — $0.02</option>
+                  <option value="goal">goal — $0.10</option>
+                  <option value="options">options — $0.05</option>
+                  <option value="strategy">strategy — $0.10</option>
+                </Select>
+                <Select label="Trigger" value={cfg.trigger} onChange={(e) => set("trigger", e.target.value as RunTrigger)}>
+                  <option value="manual">manual (one-off scheduled behind the scenes)</option>
+                  <option value="scheduled">scheduled</option>
+                </Select>
+                <Select label="Schedule kind" value={cfg.scheduleKind} onChange={(e) => set("scheduleKind", e.target.value as ScheduleKind)}>
+                  <option value="one_off">one_off</option>
+                  <option value="recurring">recurring</option>
+                </Select>
+                <Select label="Account tier" value={cfg.tier} onChange={(e) => set("tier", e.target.value as CommercialAccount["tier"])}>
+                  <option value="Free">Free</option>
+                  <option value="PayPerUse">PayPerUse</option>
+                  <option value="Subscribed">Subscribed</option>
+                </Select>
+                <TextInput label="Credits (USD)" type="number" step="0.01" value={cfg.creditsUSD} onChange={(e) => set("creditsUSD", Number(e.target.value))} />
+                <TextInput label="Included runs remaining" type="number" value={cfg.includedRunsRemaining} onChange={(e) => set("includedRunsRemaining", Number(e.target.value))} />
+                <Select label="Approval fake" value={cfg.approval} onChange={(e) => set("approval", e.target.value as FakeConfig["approval"])}>
+                  <option value="approve">approve</option>
+                  <option value="reject">reject</option>
+                  <option value="timeout">timeout (wait throws)</option>
+                </Select>
+                <Select label="Fake checkout.status re-read" value={cfg.checkoutStatus} onChange={(e) => set("checkoutStatus", e.target.value as FakeConfig["checkoutStatus"])}>
+                  <option value="fulfilled">fulfilled</option>
+                  <option value="pending">pending</option>
+                </Select>
+                <Select label="Fake screener" value={cfg.screener} onChange={(e) => set("screener", e.target.value as FakeConfig["screener"])}>
+                  <option value="success">success</option>
+                  <option value="throw">throw (failure credit path)</option>
+                </Select>
+                <TextInput label="Run tenant" value={cfg.runTenantId} onChange={(e) => set("runTenantId", e.target.value)} />
+                <TextInput label="Account tenant" value={cfg.accountTenantId} onChange={(e) => set("accountTenantId", e.target.value)} />
+                <TextInput label="Run request id" value={cfg.runRequestId} onChange={(e) => set("runRequestId", e.target.value)} />
+              </div>
+              <div style={marginTopSmStyle}>
+                <Checkbox label="Authorized at submission (one-off scheduled only — skips the second approval wait)" checked={cfg.authorizedAtSubmission} onChange={(e) => set("authorizedAtSubmission", e.target.checked)} />
+              </div>
+              <div style={actionBarStyle}>
+                <Button variant="primary" onClick={runOne} disabled={running} loading={running}>{"Run this scenario"}</Button>
+                <Button variant="secondary" onClick={runSuite} disabled={running}>Run all 9 preset tests</Button>
+              </div>
+            </Card>
+          </PageSection>
 
-      <StoreOperatorsPanel />
-
-      <PageSection title="Tunable fakes">
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "var(--space-3)" }}>
-          <Select label="Simulated monetization flag (gate config)" value={cfg.monetizationOn ? "on" : "off"} onChange={(e) => set("monetizationOn", e.target.value === "on")}>
-            <option value="on">ON — gate applies</option>
-            <option value="off">OFF — free path</option>
-          </Select>
-          <Select label="Family" value={cfg.family} onChange={(e) => set("family", e.target.value as ScreenerFamily)}>
-            <option value="stock">stock — $0.02</option>
-            <option value="goal">goal — $0.10</option>
-            <option value="options">options — $0.05</option>
-            <option value="strategy">strategy — $0.10</option>
-          </Select>
-          <Select label="Trigger" value={cfg.trigger} onChange={(e) => set("trigger", e.target.value as RunTrigger)}>
-            <option value="manual">manual (one-off scheduled behind the scenes)</option>
-            <option value="scheduled">scheduled</option>
-          </Select>
-          <Select label="Schedule kind" value={cfg.scheduleKind} onChange={(e) => set("scheduleKind", e.target.value as ScheduleKind)}>
-            <option value="one_off">one_off</option>
-            <option value="recurring">recurring</option>
-          </Select>
-          <Select label="Account tier" value={cfg.tier} onChange={(e) => set("tier", e.target.value as CommercialAccount["tier"])}>
-            <option value="Free">Free</option>
-            <option value="PayPerUse">PayPerUse</option>
-            <option value="Subscribed">Subscribed</option>
-          </Select>
-          <TextInput label="Credits (USD)" type="number" step="0.01" value={cfg.creditsUSD} onChange={(e) => set("creditsUSD", Number(e.target.value))} />
-          <TextInput label="Included runs remaining" type="number" value={cfg.includedRunsRemaining} onChange={(e) => set("includedRunsRemaining", Number(e.target.value))} />
-          <Select label="Approval fake" value={cfg.approval} onChange={(e) => set("approval", e.target.value as FakeConfig["approval"])}>
-            <option value="approve">approve</option>
-            <option value="reject">reject</option>
-            <option value="timeout">timeout (wait throws)</option>
-          </Select>
-          <Select label="Fake checkout.status re-read" value={cfg.checkoutStatus} onChange={(e) => set("checkoutStatus", e.target.value as FakeConfig["checkoutStatus"])}>
-            <option value="fulfilled">fulfilled</option>
-            <option value="pending">pending</option>
-          </Select>
-          <Select label="Fake screener" value={cfg.screener} onChange={(e) => set("screener", e.target.value as FakeConfig["screener"])}>
-            <option value="success">success</option>
-            <option value="throw">throw (failure credit path)</option>
-          </Select>
-          <TextInput label="Run tenant" value={cfg.runTenantId} onChange={(e) => set("runTenantId", e.target.value)} />
-          <TextInput label="Account tenant" value={cfg.accountTenantId} onChange={(e) => set("accountTenantId", e.target.value)} />
-          <TextInput label="Run request id" value={cfg.runRequestId} onChange={(e) => set("runRequestId", e.target.value)} />
-        </div>
-        <div style={{ marginTop: "var(--space-3)" }}>
-          <Checkbox label="Authorized at submission (one-off scheduled only — skips the second approval wait)" checked={cfg.authorizedAtSubmission} onChange={(e) => set("authorizedAtSubmission", e.target.checked)} />
-        </div>
-        <div style={{ display: "flex", gap: "var(--space-3)", marginTop: "var(--space-4)", flexWrap: "wrap" }}>
-          <Button variant="primary" onClick={runOne} disabled={running} loading={running}>{"Run this scenario"}</Button>
-          <Button variant="secondary" onClick={runSuite} disabled={running}>Run all 9 preset tests</Button>
-        </div>
-      </PageSection>
-
-      {last && (
-        <PageSection title="Last run">
-          <Card>
-            <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
-              <Badge tone={last.outcome?.status === "started" ? "success" : last.error ? "danger" : "neutral"}>{resultLabel(last)}</Badge>
-              {last.credited && <Badge tone="info">failure credit issued</Badge>}
-            </div>
-            <h3 style={{ margin: "var(--space-4) 0 var(--space-2)" }}>Step trace</h3>
-            <ol style={{ margin: 0, paddingLeft: "var(--space-5)", fontFamily: "var(--font-code)", fontSize: "var(--font-size-body-sm)" }}>
-              {last.trace.map((t, i) => (
-                <li key={i}>{t}</li>
-              ))}
-            </ol>
-            {last.trace.length === 0 && <p style={{ color: "var(--color-text-muted)" }}>No steps ran — the flow failed closed before the gate.</p>}
-          </Card>
-        </PageSection>
-      )}
-
-      {suite && (
-        <PageSection title={`Preset suite — ${passCount}/${suite.length} passing`}>
-          <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
-            {suite.map((row, i) => (
-              <Card key={i}>
-                <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
-                  <Badge tone={row.pass ? "success" : "danger"}>{row.pass ? "PASS" : "FAIL"}</Badge>
-                  <span>{row.preset.name}</span>
+          {last && (
+            <PageSection title="Last run">
+              <Card>
+                <div style={badgeRowStyle}>
+                  <Badge tone={last.outcome?.status === "started" ? "success" : last.error ? "danger" : "neutral"}>{resultLabel(last)}</Badge>
+                  {last.credited && <Badge tone="info">failure credit issued</Badge>}
                 </div>
-                <p style={{ margin: "var(--space-2) 0 0", color: "var(--color-text-muted)", fontSize: "var(--font-size-body)" }}>
-                  Expected: {row.preset.expected} · Got: {resultLabel(row.result)}
+                <h3 style={stepTraceHeaderStyle}>Step trace</h3>
+                <ol style={resultListStyle}>
+                  {last.trace.map((t, i) => (
+                    <li key={i}>{t}</li>
+                  ))}
+                </ol>
+                {last.trace.length === 0 && <p style={priceMutedStyle}>No steps ran — the flow failed closed before the gate.</p>}
+              </Card>
+            </PageSection>
+          )}
+
+          {suite && (
+            <PageSection title={`Preset suite — ${passCount}/${suite.length} passing`}>
+              <div style={suiteStackStyle}>
+                {suite.map((row, i) => (
+                  <Card key={i}>
+                    <div style={badgeRowStyle}>
+                      <Badge tone={row.pass ? "success" : "danger"}>{row.pass ? "PASS" : "FAIL"}</Badge>
+                      <span>{row.preset.name}</span>
+                    </div>
+                    <p style={suiteExpectedStyle}>
+                      Expected: {row.preset.expected} · Got: {resultLabel(row.result)}
+                    </p>
+                  </Card>
+                ))}
+              </div>
+            </PageSection>
+          )}
+        </TabPanel>
+
+        <TabPanel idBase="payment-assurance" tabId="live" active={activeTab === "live"} retain>
+          <PageSection title="Live mode — real workflow on Cloudflare (issue 2059)">
+            <p style={sectionSubtitleStyle}>
+              Starts a real PaymentWorkflow instance through the live
+              deployed binding, with test inputs only. Coverage mode needs
+              no cfpay key: the test account covers the run and the
+              workflow starts the real screener. Checkout mode needs
+              MONETIZATION_ENABLED and a cfpay key in the deployed env,
+              plus a test wallet payment on testnet — until those are in
+              place it refuses with the missing piece named, instead of
+              silently running free. Live endpoints also require your login
+              to be listed in PAYMENT_ASSURANCE_LIVE_LOGINS.
+            </p>
+            <Card padding="md">
+              <div style={formSubgridStyle}>
+                <Select label="Live mode" value={liveMode} onChange={(e) => setLiveMode(e.target.value as "coverage" | "checkout")}>
+                  <option value="coverage">coverage — test account covers the run</option>
+                  <option value="checkout">checkout — real cfpay checkout (testnet)</option>
+                </Select>
+                <Select label="Schedule kind" value={liveScheduleKind} onChange={(e) => setLiveScheduleKind(e.target.value as ScheduleKind)}>
+                  <option value="one_off">one_off</option>
+                  <option value="recurring">recurring</option>
+                </Select>
+              </div>
+              <div style={marginTopSmStyle}>
+                <Checkbox label="Authorized at submission (one-off only — skips the second approval wait)" checked={liveAuthorized} onChange={(e) => setLiveAuthorized(e.target.checked)} />
+              </div>
+              <div style={actionBarStyle}>
+                <Button variant="primary" onClick={startLive} disabled={liveBusy} loading={liveBusy}>{"Start live run"}</Button>
+                <Button variant="secondary" onClick={refreshLive} disabled={liveBusy || !liveStart}>Refresh status</Button>
+                <Button variant="secondary" onClick={() => sendLiveEvent("approval", { approved: true })} disabled={liveBusy || !liveStart}>Approve</Button>
+                <Button variant="secondary" onClick={() => sendLiveEvent("approval", { approved: false })} disabled={liveBusy || !liveStart}>Reject</Button>
+                <Button variant="secondary" onClick={checkLivePayment} disabled={liveBusy || !liveStart}>Check payment and deliver verified</Button>
+              </div>
+            </Card>
+            {liveError && (
+              <Notice tone="danger" title="Live run error">
+                {liveError}
+              </Notice>
+            )}
+            {liveMessage && (
+              <p style={sectionSubtitleStyle}>{liveMessage}</p>
+            )}
+            {liveStart && (
+              <Card>
+                <p style={monoSnippetStyle}>
+                  workflow: {String(liveStart.workflowId)}
+                </p>
+                <p style={monoSnippetWithTopMarginStyle}>
+                  run: {String(liveStart.runRequestId)} · screener job: {String(liveStart.screenerJobId)} · mode: {String(liveStart.mode)}
                 </p>
               </Card>
-            ))}
-          </div>
-        </PageSection>
-      )}
-    </PageShell>
+            )}
+            {liveStatus !== null && (
+              <Card>
+                <pre style={codeBlockStyle}>
+                  {JSON.stringify(liveStatus, null, 2)}
+                </pre>
+              </Card>
+            )}
+          </PageSection>
+        </TabPanel>
+
+        <TabPanel idBase="payment-assurance" tabId="prices" active={activeTab === "prices"} retain>
+          <PriceApprovalSection userLogin={userLogin} />
+        </TabPanel>
+
+        <TabPanel idBase="payment-assurance" tabId="operators" active={activeTab === "operators"} retain>
+          <StoreOperatorsPanel />
+        </TabPanel>
+      </PageShell>
+    </div>
   );
 }
