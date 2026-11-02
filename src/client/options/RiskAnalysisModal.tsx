@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useEffect } from "react";
+import { useUrlSyncedTabs } from "../useUrlSyncedTabs";
 import {
   computeRiskProfile,
   type RiskSubject,
@@ -20,7 +21,22 @@ export function RiskAnalysisModal({
   subject,
   onSendPrompt,
 }: RiskAnalysisModalProps) {
-  const [activeTab, setActiveTab] = useState<"anatomy" | "playbook" | "scenarios" | "ai">("anatomy");
+  // Deep links (#2776): the modal tabs live in `?riskTab=` via the shared
+  // hook (aliased to the old activeTab/setActiveTab names, so the panels
+  // below are untouched). The modal is host-dependent — the tab param is
+  // read whenever the modal opens and written on every tab change — so a
+  // link shared while the modal is open restores that tab on return.
+  // Cold-load modal opening still needs host subject state (the subject
+  // is an in-memory RiskSubject, not URL-addressable by id); the link
+  // opens the host page, and the modal opens from there.
+  const { activeTab, handleTabChange: setActiveTab } = useUrlSyncedTabs<
+    "anatomy" | "playbook" | "scenarios" | "ai"
+  >({
+    param: "riskTab",
+    isValid: (v): v is "anatomy" | "playbook" | "scenarios" | "ai" =>
+      v === "anatomy" || v === "playbook" || v === "scenarios" || v === "ai",
+    defaultTab: "anatomy",
+  });
   const [accountNav, setAccountNav] = useState<number>(25000);
   const [copiedPrompt, setCopiedPrompt] = useState(false);
 

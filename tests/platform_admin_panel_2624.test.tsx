@@ -220,7 +220,9 @@ describe("nav shell owns the drawer; settings keeps the user card (#2624)", () =
 
   it("mounts the panel in the navigation shell and routes nav ids to it", () => {
     expect(nav).toContain("<PlatformAdminPanel");
-    expect(nav).toContain("platformAdminSectionFromNavId");
+    // Issue #2776: admin ids route through the deep-link catalog, not a
+    // direct platformAdminSectionFromNavId call in NavigationMenu.
+    expect(nav).toContain("navigateToDeepLink(deepLinkForNavNode(null, id))");
     expect(nav).toContain("onSelectTab={handleSelectNavId}");
   });
 
