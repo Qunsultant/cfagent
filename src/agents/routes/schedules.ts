@@ -42,6 +42,7 @@ import { getStoredTokens, isTokenExpiredEt, etradeIdentityFromLogin } from "../.
 import { isLoginShaped } from "../../security/serviceIdentity";
 import { findDuplicateSchedule } from "../../services/scheduleDedupe";
 import { runStorageRetention } from "../../security/storageRetention";
+import { createBlobStore } from "../../services/blobStoreR2Adapter";
 import { pruneJobOutcomes } from "../../services/jobOutcomes";
 import {
   buildSnapshotManifest,
@@ -812,8 +813,10 @@ export async function handleSchedulesRoutes(
           skipped: null as string | null,
         };
         try {
-          const bucket = ctx.env?.REPORTS_BUCKET;
-          if (!bucket) {
+          // Issue #1777 (Adapter S3): the sweep lists/deletes through
+          // the one BlobStore port; the skipped message is unchanged.
+          const store = createBlobStore(ctx.env);
+          if (!store) {
             orphanSweep.skipped = "REPORTS_BUCKET is not bound";
           } else {
             const sql = ctx.agentCtx.storage.sql as {
@@ -823,8 +826,8 @@ export async function handleSchedulesRoutes(
             let cursor: string | undefined;
             let pageTruncated = false;
             do {
-              const page = await bucket.list({ prefix: ORPHAN_SWEEP_PREFIX, cursor, limit: 1000 });
-              for (const obj of page.objects) bucketKeys.push(obj.key);
+              const page = await store.list({ prefix: ORPHAN_SWEEP_PREFIX, cursor, limit: 1000 });
+              for (const key of page.keys) bucketKeys.push(key);
               pageTruncated = page.truncated;
               cursor = page.truncated ? page.cursor : undefined;
               if (bucketKeys.length >= 5000) {
@@ -857,7 +860,7 @@ export async function handleSchedulesRoutes(
               if (orphanSweep.deleteEnabled) {
                 for (const key of plan.orphans) {
                   try {
-                    await bucket.delete(key);
+                    await store.delete(key);
                     orphanSweep.deleted += 1;
                   } catch {
                     orphanSweep.deleteFailed += 1;
@@ -893,8 +896,8 @@ export async function handleSchedulesRoutes(
           if (!resolveSnapshotEnabled(ctx.env?.RETENTION_SNAPSHOT_ENABLED)) {
             snapshot.skipped = "disabled by RETENTION_SNAPSHOT_ENABLED=false";
           } else {
-            const bucket = ctx.env?.REPORTS_BUCKET;
-            if (!bucket) {
+            const store = createBlobStore(ctx.env);
+            if (!store) {
               snapshot.skipped = "REPORTS_BUCKET is not bound";
             } else {
               const sql = ctx.agentCtx.storage.sql as {
@@ -916,8 +919,8 @@ export async function handleSchedulesRoutes(
                 rowLimit: SNAPSHOT_ROW_LIMIT,
               });
               const key = snapshotObjectKey("orchestrator", manifest.exportedAt);
-              await bucket.put(key, JSON.stringify(manifest), {
-                httpMetadata: { contentType: "application/json" },
+              await store.put(key, JSON.stringify(manifest), {
+                contentType: "application/json",
               });
               snapshot.tables = manifest.tables.length;
               snapshot.rows = manifest.tables.reduce((sum, t) => sum + t.rowCount, 0);

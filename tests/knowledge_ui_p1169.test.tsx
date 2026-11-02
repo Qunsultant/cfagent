@@ -86,6 +86,33 @@ function stubBucket(
   };
 }
 
+/**
+ * Issue #1777 (Adapter S3): BlobStore-shaped double for the DIRECT
+ * integrity test below; route tests keep stubBucket as
+ * REPORTS_BUCKET (production envs carry a real R2Bucket).
+ */
+function stubBlobStore(
+  pages: Array<Array<{ key: string; bytes: Uint8Array }>>
+) {
+  const flat = pages.flat();
+  return {
+    async list(options?: { prefix?: string; cursor?: string }) {
+      const idx = options?.cursor ? Number(options.cursor) : 0;
+      const page = pages[idx] ?? [];
+      return {
+        keys: page.map((o) => o.key),
+        truncated: idx + 1 < pages.length,
+        cursor: idx + 1 < pages.length ? String(idx + 1) : undefined,
+      };
+    },
+    async get(key: string) {
+      const found = flat.find((o) => o.key === key);
+      if (!found) return null;
+      return { bytes: found.bytes };
+    },
+  };
+}
+
 function stubSyncSql(initialMarker: string | null) {
   let marker: string | null = initialMarker;
   return {
@@ -174,7 +201,7 @@ describe("integrity report additive entries (knowledge UI)", () => {
         [`knowledge:options_disclosure:${hOk}`]: { contentHash: hOk },
         [`knowledge:market_education:${hTamperedKey}`]: { contentHash: hTamperedKey },
       }),
-      bucket: stubBucket([
+      bucket: stubBlobStore([
         [
           { key: `knowledge/options_disclosure/${hOk}`, bytes: bytesOk },
           { key: `knowledge/market_education/${hTamperedKey}`, bytes: bytesTampered },

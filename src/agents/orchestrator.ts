@@ -57,6 +57,7 @@ import { diffScanRuns } from "../trading";
 import { createOptionsDiscoveryPorts } from "../data/createOptionsDiscoveryPorts";
 import { createOrchestratorTablePorts } from "../data/createOrchestratorTablePorts";
 import { createOrmPorts } from "../data/createOrmPorts";
+import { SqlLegacyChatStore } from "../data/doSqliteLegacyChatAdapter";
 import { createDidAttestation, resolveAgentDidDocument } from "./did";
 import { createMAS } from "./mas";
 import { dispatchOrchestratorA2A, orchestratorA2AOutcome, type OrchestratorA2AOutcome } from "./orchestrator/a2aDispatch";
@@ -993,19 +994,13 @@ export class OrchestratorAgent extends PortThink {
    * in place and log, so the rows remain recoverable.
    */
   private async liftLegacyChatMessages(): Promise<void> {
-    const sql = this.ctx.storage.sql;
-    const exists =
-      Array.from(
-        sql.exec(
-          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'cf_ai_chat_agent_messages'"
-        )
-      ).length > 0;
-    if (!exists) return;
-    const rows = Array.from(
-      sql.exec(
-        "SELECT id, message, created_at FROM cf_ai_chat_agent_messages ORDER BY created_at ASC, rowid ASC"
-      )
-    ) as Array<{ id: string; message: string; created_at: unknown }>;
+    // Issue #1776 (#1717 Adapter S2): the lift's SQL lives in
+    // SqlLegacyChatStore (src/data/doSqliteLegacyChatAdapter.ts)
+    // behind the existing SqlStorage injection; this method keeps
+    // only the validation / import / drop-on-clean-lift logic.
+    const store = new SqlLegacyChatStore(this.ctx.storage.sql);
+    if (!store.tableExists()) return;
+    const rows = store.listLegacyRows();
     const valid: any[] = [];
     let skipped = 0;
     for (const row of rows) {
@@ -1027,7 +1022,7 @@ export class OrchestratorAgent extends PortThink {
     }
     if (valid.length > 0) await this.addPortMessages(valid as any);
     if (skipped === 0) {
-      sql.exec("DROP TABLE cf_ai_chat_agent_messages");
+      store.dropTable();
       return;
     }
     console.error(
