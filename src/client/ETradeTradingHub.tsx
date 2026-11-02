@@ -28,6 +28,7 @@ import {
 } from "./brokerEnvironment";
 import { EtapiConfigModal } from "./options/EtapiConfigModal";
 import { RiskAnalysisModal } from "./options/RiskAnalysisModal";
+import { TradeExecutionPreview } from "./TradeExecutionPreview";
 import type { RiskSubject } from "./options/riskManagementEngine";
 
 /**
@@ -1249,7 +1250,13 @@ export function ETradeTradingHub({
     }
   };
 
-  const handleRefreshAndExecuteDraft = async () => {
+  // Issue #1773 (OWASP ASI-02): re-preview is preview ONLY. The old
+  // handler re-previewed and then executed the fresh draft in the
+  // same click, so the user approved a payload they never saw. The
+  // fresh draft now becomes the active draft and its execution
+  // preview renders above the approve button; execution happens
+  // only on an explicit approve of that fresh preview.
+  const handleRefreshPreview = async () => {
     if (!activeDraft) return;
     setExecutingDraft(true);
     setOrderError("");
@@ -1272,12 +1279,13 @@ export function ETradeTradingHub({
       const freshDraft = await previewResp.json() as any;
       if (previewResp.ok && freshDraft.orderId) {
         setActiveDraft(freshDraft);
-        await handleExecuteDraft(freshDraft.orderId, "approved", freshDraft);
+        setLastExecutionResult(null);
+        setOrderError("Fresh preview ready — review the updated execution preview above, then approve to submit. Nothing has been executed.");
       } else {
         setOrderError(freshDraft.error || "Failed to generate fresh preview on E*TRADE");
       }
     } catch (err: any) {
-      setOrderError(err.message || "Failed to refresh and submit order");
+      setOrderError(err.message || "Failed to refresh preview");
     } finally {
       setExecutingDraft(false);
     }
@@ -1536,6 +1544,11 @@ export function ETradeTradingHub({
               🛡️ <strong>Safety Guarantee:</strong> No trade will be executed without your explicit authorization. Funds remain untouched until you approve.
             </div>
 
+            {/* Issue #1773 (OWASP ASI-02): the exact execution
+                payload, fees, and slippage limits, shown BEFORE the
+                approve button — approval is over this preview. */}
+            <TradeExecutionPreview draft={activeDraft} />
+
             <div className="hitl-action-buttons">
               {(orderError.includes("timed out") || orderError.includes("resubmit") || lastExecutionResult?.message?.includes("timed out") || lastExecutionResult?.message?.includes("resubmit")) ? (
                 <Button
@@ -1543,9 +1556,9 @@ export function ETradeTradingHub({
                   variant="primary"
                   style={{ background: "var(--color-accent)", borderColor: "var(--color-border-focus)" }}
                   disabled={executingDraft}
-                  onClick={handleRefreshAndExecuteDraft}
+                  onClick={handleRefreshPreview}
                  loading={executingDraft}>
-                  {"⚡ Re-preview & Resubmit Now"}
+                  {"↻ Re-preview order (no execution)"}
                 </Button>
               ) : (
                 <Button
@@ -1610,9 +1623,9 @@ export function ETradeTradingHub({
                 <Button variant="trade"
                   type="button"
                   disabled={executingDraft}
-                  onClick={handleRefreshAndExecuteDraft}
+                  onClick={handleRefreshPreview}
                  loading={executingDraft}>
-                  {"⚡ Re-preview & Submit Fresh Order to E*TRADE"}
+                  {"↻ Re-preview order (no execution)"}
                 </Button>
               </div>
             )}
@@ -3042,6 +3055,10 @@ export function ETradeTradingHub({
                             <div><strong>Action:</strong> {msg.orderDraft.action} {msg.orderDraft.quantity} {msg.orderDraft.quantity === 1 ? "share" : "shares"} of {msg.orderDraft.symbol} {msg.orderDraft.orderType === "LIMIT" ? `(LIMIT @ $${(msg.orderDraft.limitPrice || msg.orderDraft.estimatedPrice)?.toFixed(2)})` : "(MARKET)"}</div>
                             <div><strong>Estimated Total:</strong> ${msg.orderDraft.estimatedTotal?.toFixed(2)} USD</div>
                           </div>
+                          {/* Issue #1773 (OWASP ASI-02): the voice
+                              approve path shows the same exact
+                              payload, fees, and slippage limits. */}
+                          <TradeExecutionPreview draft={msg.orderDraft} />
                           <div className="voice-order-preview-actions">
                             <Button
                               onClick={() => handleVoiceOrderAction("approve", msg.orderDraft.orderId)}
