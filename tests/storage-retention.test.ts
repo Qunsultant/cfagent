@@ -86,6 +86,20 @@ describe("runStorageRetention", () => {
     expect(orm.messages.findById(freshId2)).not.toBeNull();
   });
 
+  it("never deletes an unexpired row: a row exactly at the cutoff survives (#2928)", () => {
+    const atCutoffId = seedMessage(90);
+    const olderId = seedMessage(91);
+    const freshId = seedMessage(10);
+
+    const res = runStorageRetention(orm, { now: () => FIXED_NOW });
+
+    expect(res.pruned).toBe(1);
+    expect(res.cutoffIso).toBe(isoDaysAgo(90));
+    expect(orm.messages.findById(olderId)).toBeNull();
+    expect(orm.messages.findById(atCutoffId)).not.toBeNull();
+    expect(orm.messages.findById(freshId)).not.toBeNull();
+  });
+
   it("honors a custom window", () => {
     const oldId = seedMessage(40);
     const freshId = seedMessage(20);
