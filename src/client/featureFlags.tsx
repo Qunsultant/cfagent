@@ -42,6 +42,15 @@ export const TAB_TO_FEATURE_MAP: Partial<Record<NavTabId, FeatureFlag>> = {
   payments: "payments",
   // Issue #2049: assurance page, own flag, default OFF fail-closed.
   "payment-assurance": "payment_assurance",
+  // Issue #2783: Planned menu + asset subs. These ids are not routes
+  // (a menu id + hub-view ids), so they are keyed by cast: lookups
+  // already cast sub ids to NavTabId (see LeftNavBar.isSubVisible),
+  // and the #2783 pins assert all five entries.
+  ["planned" as NavTabId]: "planned_asset_tabs",
+  ["forex" as NavTabId]: "planned_asset_tabs",
+  ["futures" as NavTabId]: "planned_asset_tabs",
+  ["commodities" as NavTabId]: "planned_asset_tabs",
+  ["bonds" as NavTabId]: "planned_asset_tabs",
 };
 
 /**

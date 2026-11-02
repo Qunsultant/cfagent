@@ -21,14 +21,18 @@ export class InMemoryFeatureFlagAdapter implements FeatureFlagPort {
 
   constructor(initialFlags?: Partial<Record<FeatureFlag, boolean>>) {
     // Default-closed for all known flags, except payment_assurance
-    // (issue #2054: default ON, overridable via initialFlags).
+    // (issue #2054: default ON, overridable via initialFlags) and
+    // planned_asset_tabs (issue #2783: same default-ON rule).
     // Issue #2596: options product flags are NOT pre-filled here —
     // an absent product flag must inherit its parent (see isEnabled),
     // and pre-filling false would mask that inheritance. Non-product
     // flags keep the historical defaults.
     for (const flag of ALL_FEATURE_FLAGS) {
       if (!getOptionsProductParentFlag(flag)) {
-        this.flags.set(flag, flag === "payment_assurance");
+        this.flags.set(
+          flag,
+          flag === "payment_assurance" || flag === "planned_asset_tabs",
+        );
       }
     }
 

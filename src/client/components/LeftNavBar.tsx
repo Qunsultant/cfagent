@@ -16,7 +16,7 @@ import {
 } from "./NavigationMenu";
 import { BRAND } from "../branding";
 import { isTabFeatureEnabled } from "../featureFlags";
-import { getNavGroup } from "../routes";
+import { getNavGroup, getRoute, hasNavEntry } from "../routes";
 import {
   deepLinkForNavNode,
   deepLinkHref,
@@ -129,6 +129,14 @@ export function LeftNavBar({
     return true;
   };
 
+  // A submenu parent with no route entry is a menu, not a link:
+  // sandbox and planned today. Its row renders as a button (no href)
+  // and its click only toggles.
+  const isMenuOnlyParent = (id: string): boolean => {
+    const route = getRoute(id);
+    return !(route && hasNavEntry(route));
+  };
+
   const handleItemClick = (
     event: React.MouseEvent,
     item: NavMenuItemConfig,
@@ -137,7 +145,13 @@ export function LeftNavBar({
     if (hasSubMenu && !collapsed) {
       toggleSubMenu(item.id);
     }
-    if (item.id === "sandbox") {
+    // Menu-only parents (a submenu whose id has no route entry, e.g.
+    // sandbox and planned) toggle without navigating: there is no
+    // page to land on, and the catalog fallback (autopilot) would be
+    // a wrong link. This generalizes the old sandbox-only early
+    // return; the outcome for sandbox is unchanged, and leaf items
+    // still navigate below.
+    if (hasSubMenu && isMenuOnlyParent(item.id)) {
       return;
     }
     const link = deepLinkForNavNode(null, item.id);
@@ -257,6 +271,7 @@ export function LeftNavBar({
                     isNavItemOrSubItemActive(item, activeTab);
                   const Icon = NAV_ICON_MAP[item.icon] || NavIcons.Screeners;
                   const itemLink = deepLinkForNavNode(null, item.id);
+                  const isMenuOnly = hasSubMenu && isMenuOnlyParent(item.id);
 
                   return (
                     <div
@@ -277,7 +292,7 @@ export function LeftNavBar({
                           variant="ghost"
             size="sm"
                           className={`sidebar-nav-item ${active ? "active" : ""}`}
-                          href={deepLinkHref(itemLink)}
+                          href={isMenuOnly ? undefined : deepLinkHref(itemLink)}
                           target={"href" in itemLink && itemLink.newTab ? "_blank" : undefined}
                           onClick={(e) => handleItemClick(e, item, hasSubMenu)}
                           onFocus={(e) => {

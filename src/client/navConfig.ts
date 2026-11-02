@@ -200,6 +200,48 @@ export const SUB_MENU_CONFIGS: Record<string, NavSubMenuItemConfig[]> = {
       description: "Demo checkout terminal (public sandbox page)",
     },
   ],
+  // Issue #2783: Planned asset classes — valid hub views with no
+  // provider adapter yet. Their links are catalog overrides
+  // (planned:<id> → screeners view); their visibility is the
+  // planned_asset_tabs flag, ON by default.
+  planned: [
+    {
+      id: "forex",
+      label: "Forex",
+      shortLabel: "Forex",
+      icon: "Screeners",
+      badge: "Planned",
+      badgeType: "neutral",
+      description: "Screen foreign-exchange pairs — planned, no provider adapter yet",
+    },
+    {
+      id: "futures",
+      label: "Futures",
+      shortLabel: "Futures",
+      icon: "Screeners",
+      badge: "Planned",
+      badgeType: "neutral",
+      description: "Screen futures contracts — planned, no provider adapter yet",
+    },
+    {
+      id: "commodities",
+      label: "Commodities",
+      shortLabel: "Commodities",
+      icon: "Screeners",
+      badge: "Planned",
+      badgeType: "neutral",
+      description: "Screen commodities — planned, no provider adapter yet",
+    },
+    {
+      id: "bonds",
+      label: "Bonds",
+      shortLabel: "Bonds",
+      icon: "Screeners",
+      badge: "Planned",
+      badgeType: "neutral",
+      description: "Screen bonds — planned, no provider adapter yet",
+    },
+  ],
 };
 
 const SECTION_METADATA: { category: RouteCategory; title: string; id: string }[] = [
@@ -324,6 +366,27 @@ export function buildDefaultLeftNavConfig(): LeftNavConfig {
         icon: "Sandbox",
         description: "Payment assurance and demo checkout sandbox",
         subItems: SUB_MENU_CONFIGS.sandbox,
+      },
+    ],
+  });
+
+  // Dedicated Planned section (issue #2783): mirrors the Sandbox
+  // section — a menu-only parent (no route) whose subs link to hub
+  // views. Screening family, so the Intelligence category.
+  sections.push({
+    id: "section-planned",
+    title: "PLANNED",
+    category: "Intelligence",
+    items: [
+      {
+        id: "planned",
+        label: "Planned",
+        shortLabel: "Planned",
+        category: "Intelligence",
+        icon: "Screeners",
+        description:
+          "Planned asset classes — forex, futures, commodities, and bonds (no provider adapters yet)",
+        subItems: SUB_MENU_CONFIGS.planned,
       },
     ],
   });
