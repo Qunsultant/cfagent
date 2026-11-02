@@ -30,6 +30,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Button, EmptyState, Modal, Notice, Select, Spinner, Table, Tabs, TabPanel, TextInput } from "./components/ui";
+import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
 import {
   deactivateSelf,
   decideAccessRequest,
@@ -81,7 +82,16 @@ export function IaaaAdminPanel() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notAdmin, setNotAdmin] = useState(false);
-  const [tab, setTab] = useState<IaaaAdminTab>("overview");
+  // Deep links (#2776): the IAAA tabs live in `?iaaaTab=` via the shared
+  // hook (aliased to the old tab/setTab names, so the panel below and
+  // the members lazy-load effect are untouched). `view` is taken by the
+  // admin section, hence a distinct inner param.
+  const { activeTab: tab, handleTabChange: setTab } = useUrlSyncedTabs<IaaaAdminTab>({
+    param: "iaaaTab",
+    isValid: (v): v is IaaaAdminTab =>
+      IAAA_ADMIN_TABS.some((t) => t.id === v),
+    defaultTab: "overview",
+  });
   // #1274: pending access requests for this tenant. A tenant-admin
   // without platform-admin never reaches this panel (the overview
   // gate is platform-admin), so the decide buttons serve admins who

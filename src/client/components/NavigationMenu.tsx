@@ -9,10 +9,13 @@ import { adjustFontScale, getStoredFontScale } from "../typography";
 import { BRAND } from "../branding";
 import { LeftNavBar } from "./LeftNavBar";
 import { PlatformAdminPanel } from "../PlatformAdminPanel";
-import { platformAdminSectionFromNavId, sandboxNavHrefFromNavId } from "../navConfig";
+import {
+  deepLinkForNavNode,
+  deepLinkHref,
+  navigateToDeepLink,
+} from "../deepLinks";
 export { LeftNavBar };
 import { isTabFeatureEnabled } from "../featureFlags";
-import { navigateToTab } from "../router";
 
 export type NavTabId = RouteId;
 
@@ -659,23 +662,11 @@ export function NavigationMenu({
     return () => window.removeEventListener("typography-changed", handleTypo);
   }, []);
 
-  // `platform-admin` / `platform-admin:<section>` are nav ids:
-  // selecting them navigates to the Platform Admin page at that section.
+  // Nav ids resolve through the deep-link catalog (#2776): it subsumes
+  // the old admin-prefix and sandbox specials (platform-admin:<section>
+  // → platform-admin + view; sandbox ids → /checkout/sandbox, new tab).
   const handleSelectNavId = (id: string) => {
-    const section = platformAdminSectionFromNavId(id);
-    if (section) {
-      onSelectTab("platform-admin" as NavTabId);
-      navigateToTab("platform-admin", section);
-      return;
-    }
-    // Issue #2645: sandbox ids link standalone server pages, not SPA tabs:
-    // open the page in a new tab so the app stays open behind it.
-    const sandboxHref = sandboxNavHrefFromNavId(id);
-    if (sandboxHref) {
-      window.open(sandboxHref, "_blank", "noopener");
-      return;
-    }
-    onSelectTab(id as Parameters<typeof onSelectTab>[0]);
+    navigateToDeepLink(deepLinkForNavNode(null, id));
   };
 
   const isTabVisible = (id: string) => {
@@ -821,12 +812,27 @@ export function NavigationMenu({
           {effectiveNavItems.map((item) => {
             const active = isTabActive(item.id, activeTab);
             const Icon = item.icon;
+            const itemLink = deepLinkForNavNode(null, item.id);
             return (
               <Button
                 variant="ghost"
                 key={item.id}
                 className={`top-menu-item-btn ${active ? "active" : ""}`}
-                onClick={() => onSelectTab(item.id)}
+                href={deepLinkHref(itemLink)}
+                target={"href" in itemLink && itemLink.newTab ? "_blank" : undefined}
+                onClick={(e) => {
+                  if (
+                    e.metaKey ||
+                    e.ctrlKey ||
+                    e.shiftKey ||
+                    e.altKey ||
+                    e.button !== 0
+                  ) {
+                    return;
+                  }
+                  e.preventDefault();
+                  handleSelectNavId(item.id);
+                }}
                 title={item.description}
               >
                 <Icon active={active} />

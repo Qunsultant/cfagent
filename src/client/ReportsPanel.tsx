@@ -16,6 +16,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { apiFetch as fetch } from "./apiFetch";
 import { Button, Checkbox, Notice, SegmentedControl, TextInput } from "./components/ui";
+import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
 import { PendingReviewQueue } from "./PendingReviewQueue";
 import { RegeneratePdfButton } from "./RegeneratePdfButton";
 import { ResearchRunDetail } from "./chat/tabs/ResearchRunDetail";
@@ -117,7 +118,17 @@ export function ReportsPanel() {
   const [searchQuery, setSearchQuery] = useState("");
   const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
-  const [panelMode, setPanelMode] = useState<"reports" | "ideas" | "track">("reports");
+  // Deep links (#2776): the reports/ideas/track switch lives in
+  // `?reportsTab=` via the shared hook (aliased to the old
+  // panelMode/setPanelMode names, so the panel below is untouched).
+  // `view` is taken by the hub tab, hence a distinct inner param.
+  const { activeTab: panelMode, handleTabChange: setPanelMode } =
+    useUrlSyncedTabs<"reports" | "ideas" | "track">({
+      param: "reportsTab",
+      isValid: (v): v is "reports" | "ideas" | "track" =>
+        v === "reports" || v === "ideas" || v === "track",
+      defaultTab: "reports",
+    });
   const [semanticMode, setSemanticMode] = useState(false);
 
   const fetchReports = useCallback(async (query?: string, semantic?: boolean) => {
