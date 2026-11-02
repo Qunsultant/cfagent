@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { apiFetch as fetch } from "./apiFetch";
 import { getDisplayUserDid } from "../agents/did";
-import { Card, Badge, TextInput, Button, EmptyState, Select, Spinner, Table, Modal, PageShell, FieldShell, useToast } from "./components/ui";
+import { Card, Badge, TextInput, Button, EmptyState, Select, Spinner, Table, Modal, Notice, PageShell, FieldShell, useToast } from "./components/ui";
 import { getRoute } from "./routes";
 import {
   ETradeQuote,
@@ -316,6 +316,8 @@ export function ETradeTradingHub({
   const [requestTokenInfo, setRequestTokenInfo] = useState<{ requestToken: string; authorizeUrl: string } | null>(null);
   const [oauthSubmitting, setOauthSubmitting] = useState(false);
   const [oauthMsg, setOauthMsg] = useState("");
+  // #1159: fallback authorize URL when the popup itself is blocked.
+  const [blockedAuthUrl, setBlockedAuthUrl] = useState<string | null>(null);
 
   // Omnichannel Email & Slack Simulator states
   const [emailFrom, setEmailFrom] = useState("trader@example.com");
@@ -686,6 +688,13 @@ export function ETradeTradingHub({
     const envToUse = typeof override === "string" && (override === "TEST" || override === "PROD") ? override : activeEnv;
     setOauthLoading(true);
     setOauthMsg("");
+    setBlockedAuthUrl(null);
+    // Open the tab synchronously, while this is still the user's gesture:
+    // a window.open issued after the await below is blocked by browsers
+    // as a popup (#1159). If the open itself is blocked (null), the
+    // authorize URL surfaces as a fallback link in the hub banner.
+    const authTab =
+      typeof window !== "undefined" ? window.open("", "_blank", "noopener,noreferrer") : null;
     try {
       const resp = await fetch("/api/etrade/oauth/start", {
         headers: { "x-environment": envToUse },
@@ -694,12 +703,17 @@ export function ETradeTradingHub({
       if (resp.ok && data.authorizeUrl) {
         setRequestTokenInfo(data);
         setShowPinModal(true);
-        // Open E*TRADE login & authorization in a new tab
-        window.open(data.authorizeUrl, "_blank", "noopener,noreferrer");
+        if (authTab) {
+          authTab.location.href = data.authorizeUrl;
+        } else {
+          setBlockedAuthUrl(data.authorizeUrl);
+        }
       } else {
+        authTab?.close();
         setOauthMsg(data.error || "Failed to start E*TRADE OAuth session");
       }
     } catch (err: any) {
+      authTab?.close();
       setOauthMsg(err.message || "Failed to initiate OAuth request");
     } finally {
       setOauthLoading(false);
@@ -1391,6 +1405,56 @@ export function ETradeTradingHub({
 
   return (
     <div className="etrade-trading-hub">
+      {/* #1159: OAuth feedback used to live only inside the PIN modal,
+          which opens only on success — a failed start showed nothing on
+          the hub. This persistent banner surfaces it here (hidden while
+          the modal is open, where the message already renders). Tone:
+          known confirmations read success/info; anything else —
+          including arbitrary upstream errors — defaults to danger. */}
+      {oauthMsg && !showPinModal && (
+        <Notice
+          tone={
+            oauthMsg.startsWith("Switched to") || oauthMsg.includes("disconnected.")
+              ? "info"
+              : oauthMsg.includes("established") || oauthMsg.includes("Connected!") || oauthMsg.includes("renewed successfully")
+                ? "success"
+                : "danger"
+          }
+          variant="strip"
+          title="E*TRADE connection"
+          onDismiss={() => {
+            setOauthMsg("");
+            setBlockedAuthUrl(null);
+          }}
+        >
+          {oauthMsg}
+          {(oauthMsg.includes("SANDBOX") || oauthMsg.includes("switch environment to TEST")) && (
+            <div>
+              <Button type="button" variant="primary" size="sm" onClick={() => void handleSwitchAndConnect("TEST")}>
+                Switch to TEST &amp; Connect
+              </Button>
+            </div>
+          )}
+        </Notice>
+      )}
+      {/* Blocked-popup fallback after the PIN modal is dismissed: the
+          modal itself already links the authorize URL while open; this
+          keeps that link reachable once the user closes the modal. */}
+      {!showPinModal && !oauthMsg && blockedAuthUrl && (
+        <Notice
+          tone="warning"
+          variant="strip"
+          title="E*TRADE connection"
+          onDismiss={() => setBlockedAuthUrl(null)}
+        >
+          Your browser blocked the E*TRADE authorization tab. Open it here:
+          <div>
+            <Button href={blockedAuthUrl} target="_blank" variant="primary" size="sm">
+              Open E*TRADE authorization →
+            </Button>
+          </div>
+        </Notice>
+      )}
       <Modal
         open={disconnectConfirmOpen}
         onClose={() => setDisconnectConfirmOpen(false)}
