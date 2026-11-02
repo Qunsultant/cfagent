@@ -90,6 +90,12 @@ export async function startStockScreenWorkflowOrNull(args: {
   starter?: ScreenWorkflowStarter;
 }): Promise<ScreenExecutionBrokerResult | null> {
   const { env, spec, userLogin, environment, portfolioContext } = args;
+  // Issue #2882: goal stock legs never start a screener
+  // workflow. Goal execution and delivery stay owned by goal
+  // dispatch; the goal spec is a canonical record, not an
+  // execution request. Returning null here is the broker's
+  // routing decision for source "goal", not a failure.
+  if (spec.source === "goal") return null;
   if (!spec.asyncRequested) return null;
   const jobId = manualWorkflowJobId(spec.universe);
   const shards: WorkflowShard[] = shardsForUniverse(spec.universe);
