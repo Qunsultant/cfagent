@@ -588,6 +588,21 @@ export const agentReferralAttributions = sqliteTable("agent_referral_attribution
   createdAtMs: integer("created_at_ms").notNull(),
 });
 
+/**
+ * Store-managed commercial operator list (#2680). One row per
+ * store operator login; operator data, never code. This schema
+ * MAPS the table; it does not create it — DDL authority lives
+ * in migration 0032 (src/data/migrationRunner.ts). The env list
+ * (COMMERCIAL_STORE_OPERATORS) is NOT in this table: env
+ * operators are bootstrap fallback, merged at read time by the
+ * route handler, and never written here.
+ */
+export const agentStoreOperators = sqliteTable("agent_store_operators", {
+  login: text("login").primaryKey(),
+  addedBy: text("added_by").notNull(),
+  addedAtMs: integer("added_at_ms").notNull(),
+});
+
 export const agentNotificationPreferences = sqliteTable("agent_notification_preferences", {
   userId: text("user_id").primaryKey(),
   tenantId: text("tenant_id").notNull(),
