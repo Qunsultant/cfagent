@@ -15,15 +15,22 @@
 
 import type { SqlStorage } from "../orm";
 import { createCanonicalReportStorePorts } from "../data/createCanonicalReportStorePorts";
+import { VectorMemory } from "../memory/vector-memory";
 
-const EMBEDDING_MODEL = "@cf/baai/bge-base-en-v1.5";
-
-async function embed(ai: any, text: string): Promise<number[] | null> {
+/**
+ * Qunsultant/cfagent#1775 (Adapter S1): the duplicate local embed()
+ * is deleted — the single embedding implementation is VectorMemory's
+ * (same model "@cf/baai/bge-base-en-v1.5", same index). EQUIVALENCE,
+ * preserved here so the fail-soft contract is byte-identical:
+ * text is truncated to 8000 chars before embedding (as the deleted
+ * embed did); an embedding throw or a missing vector maps to null,
+ * and callers map null to index=false / search=[] exactly as before.
+ * The upsert/query argument shapes are unchanged.
+ */
+async function embedViaMemory(vm: VectorMemory, text: string): Promise<number[] | null> {
   try {
-    const res = await ai.run(EMBEDDING_MODEL, { text: text.slice(0, 8000) });
-    const data = (res as { data?: number[][] }).data;
-    if (!data?.[0]) return null;
-    return data[0];
+    const values = await vm.embedText(text.slice(0, 8000));
+    return Array.isArray(values) ? values : null;
   } catch (err) {
     console.warn("[reportSemanticIndex] embed failed:", err);
     return null;
@@ -48,9 +55,10 @@ export async function indexReport(
 ): Promise<boolean> {
   try {
     if (!env.AI || !env.VECTOR_MEMORY || !input.reportId) return false;
-    const values = await embed(env.AI, `${input.title}\n${input.text}`);
+    const vm = new VectorMemory(env.AI, env.VECTOR_MEMORY, undefined);
+    const values = await embedViaMemory(vm, `${input.title}\n${input.text}`);
     if (!values) return false;
-    await env.VECTOR_MEMORY.upsert([
+    await vm.upsertVectors([
       {
         id: `report:${input.reportId}`,
         values,
@@ -340,9 +348,10 @@ export async function semanticSearchReports(
 ): Promise<SemanticHit[]> {
   try {
     if (!env.AI || !env.VECTOR_MEMORY || !query.trim()) return [];
-    const values = await embed(env.AI, query);
+    const vm = new VectorMemory(env.AI, env.VECTOR_MEMORY, undefined);
+    const values = await embedViaMemory(vm, query);
     if (!values) return [];
-    const res = await env.VECTOR_MEMORY.query(values, {
+    const res = await vm.queryVectors(values, {
       topK,
       filter: { kind: "report" },
       returnMetadata: true,
