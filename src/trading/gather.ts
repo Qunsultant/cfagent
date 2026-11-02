@@ -61,6 +61,7 @@ import {
   computeBollingerBands,
   computeBollingerSqueezeGate,
   computeFibonacciRetracements,
+  detectDeathCrossWithinSessions,
   type YahooDailyBar,
 } from "./technicals";
 import { compute6VoteCompositeBiasFromBars } from "./screeningIndicators";
@@ -77,6 +78,10 @@ export interface GatheredAttachments {
   regime?: PriceRegime;
   compositeBiasScore?: number;
   compositeBias?: CompositeBias;
+  /** Issue #1769: SMA50/SMA200 + death-cross flag from real bar history. */
+  sma50?: number;
+  sma200?: number;
+  deathCrossWithin20?: boolean;
 }
 
 /** A feed quote carrying its gathered attachments. */
@@ -199,6 +204,13 @@ export function gatherEnrichedQuote(input: GatherInput): GatheredSymbol {
   if (bias !== null) {
     attachments.compositeBiasScore = bias.score;
     attachments.compositeBias = bias.bias;
+  }
+
+  const deathCross = detectDeathCrossWithinSessions(bars);
+  if (deathCross !== null) {
+    attachments.sma50 = deathCross.latestSma50;
+    attachments.sma200 = deathCross.latestSma200;
+    attachments.deathCrossWithin20 = deathCross.crossedWithinSessions;
   }
 
   const fib = computeFibonacciRetracements(bars);
