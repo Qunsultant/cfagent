@@ -2421,7 +2421,7 @@ export interface ShardChainContext {
     evaluateAllStrategies?: boolean;
     /** Issue #2600: canonical mode for the chain's per-symbol
      *  templates (deprecated alias kept alongside for snapshot
-     *  readers). Absent = thesis default. */
+     *  readers, superseded by strategyMode). Absent = thesis default. */
     strategyMode?: "thesis" | "all" | "no-view";
     /** Issue #2600: far-dated fetch toggle for the chain. */
     farDated?: boolean;
