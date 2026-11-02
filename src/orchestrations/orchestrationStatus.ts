@@ -83,12 +83,15 @@ export const ORCHESTRATION_STATUS: OrchestrationStatus[] = [
   {
     id: "portfolio-rebalancing",
     label: "Autonomous portfolio rebalancing",
-    status: "deliberately-unenabled",
-    blocker:
-      "No rebalancing engine exists on main (only a UI action-type label in AutopilotControlCenter); slice C builds it as DRAFT-only drift proposals, never as autonomous execution — execution still requires the trade-approval workflow.",
-    evidence: ["src/client/components/AutopilotControlCenter.tsx"],
+    status: "enabled",
+    blocker: null,
+    evidence: [
+      "src/orchestrations/rebalanceProposals.ts",
+      "tests/rebalance_proposals_1771.test.ts",
+    ],
     tradeApprovalBypass: false,
-    nextSlice: "C",
+    note: "Enabled ONLY as DRAFT-only drift proposals (slice C): computeRebalanceProposals sizes buy/sell quantities against target weights but places, previews, and submits nothing — execution still requires the trade-approval workflow. Autonomous execution (no human gate) is NOT enabled and is not claimed.",
+    nextSlice: null,
   },
   {
     id: "x402-p2p",
