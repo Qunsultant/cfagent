@@ -224,6 +224,15 @@ describe("FeatureFlagPort Conformance Suite (Issue #1815)", () => {
       expect(getBooleanValue).toHaveBeenCalledWith("goal_workflow", true, undefined);
     });
 
+    it("passes monetization default true to Flagship, other flags false (#2742, owner direction)", async () => {
+      const getBooleanValue = vi.fn().mockImplementation((flag: string, defaultVal: boolean) => Promise.resolve(defaultVal));
+      const binding: FlagshipBindingLike = { getBooleanValue };
+      const port: FeatureFlagPort = new CfFlagshipAdapter(binding);
+      expect(await port.isEnabled("monetization")).toBe(true);
+      expect(await port.isEnabled("screener")).toBe(false);
+      expect(getBooleanValue).toHaveBeenCalledWith("monetization", true, undefined);
+    });
+
     it("fails closed when Flagship throws an error", async () => {
       const binding: FlagshipBindingLike = {
         getBooleanValue: vi.fn().mockRejectedValue(new Error("Flagship service unavailable")),
