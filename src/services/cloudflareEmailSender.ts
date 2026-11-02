@@ -108,11 +108,11 @@ class CloudflareEmailSender implements EmailSender {
  * contract on null (fail-soft `false`) — the port never invents a
  * sender when the binding is absent.
  *
- * DEPLOYMENT NOTE (not a code change in this slice): `EMAIL` is
- * types-only today (declared in `src/types.ts` `Env`, absent from
- * `wrangler.jsonc`). Declaring/binding it is an owner/dashboard
- * action tracked by the S4 follow-up issue — until then production
- * sends resolve to the fail-soft `false` path, exactly as before.
+ * DEPLOYMENT NOTE: `EMAIL` is declared in `wrangler.jsonc`
+ * (`send_email`, issue #2889, after account-side Email Sending
+ * provisioning). The null path above remains for unbound envs
+ * (local/dev without the binding) — it is the fail-soft contract,
+ * not a second send path.
  */
 export function createEmailSender(env: EmailSenderEnv | undefined | null): EmailSender | null {
   const binding = env?.EMAIL;
