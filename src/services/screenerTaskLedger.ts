@@ -40,7 +40,11 @@
  * heartbeat aged past 30 minutes to failed → escalated (never
  * auto-rerun) and prunes terminal records past the #635 retention
  * tiers (90 days completed/cancelled, 365 days failed/escalated;
- * active records are never pruned). Lifecycle writes from runScreen
+ * active records are never pruned). Since #2733 the owning agent
+ * also recovers at start-up: a fresh incarnation marks every
+ * active record interrupted (same failed → escalated disposition,
+ * a distinct history note), so an eviction's records are truthful
+ * at first touch rather than at the next sweep. Lifecycle writes from runScreen
  * are best-effort-warn by design: a ledger failure must never fail
  * the screen itself.
  */
@@ -407,6 +411,43 @@ export class ScreenerTaskLedger {
     task.error = reason;
     await this.save(task);
     return this.escalate(id, "stale task sweep");
+  }
+
+  /**
+   * Issue #2733 (tracker #2708 A9): fail + escalate a task whose
+   * execution was interrupted — the agent incarnation that owned
+   * it is gone (evicted / restarted mid-run), so no live execution
+   * will ever resolve the record. The disposition is the stale
+   * sweep's (#615: never auto-rerun — the run may have partially
+   * happened, so a human reviews the escalation), but the history
+   * note is distinct: this is start-up recovery, not heartbeat
+   * staleness, and the record's history is the audit trail that
+   * keeps the two apart.
+   */
+  async markInterrupted(id: string, reason: string): Promise<ScreenerTask> {
+    const task = await this.transition(id, ["queued", "claimed", "running"], "failed", reason);
+    task.error = reason;
+    await this.save(task);
+    return this.escalate(id, "interrupted run recovery; awaiting human review");
+  }
+
+  /**
+   * Issue #2733: recover every active task in the ledger as
+   * interrupted. Called by the owning agent's onStart: a fresh
+   * incarnation has executed nothing, so each active record
+   * belongs to a dead incarnation and is orphaned by construction
+   * — deliberately NO heartbeat-age gate (that gate is the stale
+   * sweep's, for records inside a LIVE incarnation's lifetime).
+   * Terminal records are never touched, so a second pass over a
+   * recovered ledger returns []. Returns the recovered tasks.
+   */
+  async recoverInterrupted(reason: string): Promise<ScreenerTask[]> {
+    const recovered: ScreenerTask[] = [];
+    for (const task of await this.list(Number.MAX_SAFE_INTEGER)) {
+      if (!ACTIVE.has(task.status)) continue;
+      recovered.push(await this.markInterrupted(task.id, reason));
+    }
+    return recovered;
   }
 
   private async load(id: string): Promise<ScreenerTask> {
