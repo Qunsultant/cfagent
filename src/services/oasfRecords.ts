@@ -262,6 +262,11 @@ export const MCP_FAMILY_OASF_SKILLS: Record<string, OasfSkillRef[]> = {
   ],
   // #2731: the web_search command's family (tracker #2708 A2).
   "web-search": [SK.webSearch],
+  // #2760 (tracker #2708 A3): the web-fetch family's web_fetch
+  // tool acquires web content as readable text — the taxonomy's
+  // web-scraping class (the same class the browser family's
+  // dom-scraping capability maps to).
+  "web-fetch": [SK.webScraping],
 };
 
 /** A2A card name → OASF domain class (v1.1.0 domains catalog). */
