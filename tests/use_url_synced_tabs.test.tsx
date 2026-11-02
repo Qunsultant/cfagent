@@ -128,4 +128,15 @@ describe("useUrlSyncedTabs", () => {
     expect(seen?.active).toBe("summary");
     expect(seen?.visited).toEqual(["stocks", "options", "summary"]);
   });
+
+  it("syncs on left-nav navigation (pushState + routechange, issue 2896)", () => {
+    render({});
+    expect(seen?.active).toBe("stocks");
+    act(() => {
+      window.history.pushState(null, "", "/screeners?view=options");
+      window.dispatchEvent(new Event("routechange"));
+    });
+    expect(seen?.active).toBe("options");
+    expect(seen?.visited).toEqual(["stocks", "options"]);
+  });
 });
