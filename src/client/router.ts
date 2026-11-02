@@ -60,8 +60,12 @@ export function buildSearchWithView(currentSearch: string, view: string): string
  * Navigate to a tab: resolve (unknown ids fall back), skip when already
  * there (no duplicate history entries for re-clicking the active item),
  * otherwise pushState and notify subscribers synchronously.
+ * `extraParams` (issue #2784: the research surface param) are set on
+ * the URL alongside tab/view and take part in the already-there check,
+ * so re-clicking a different research sub while on the options host
+ * actually navigates instead of no-opping.
  */
-export function navigateToTab(tab: string, view?: string): RouteId {
+export function navigateToTab(tab: string, view?: string, extraParams?: Record<string, string>): RouteId {
   const section = platformAdminSectionFromNavId(tab);
   const targetTab = section ? "platform-admin" : tab;
   const targetView = view ?? section;
@@ -70,8 +74,16 @@ export function navigateToTab(tab: string, view?: string): RouteId {
   if (typeof window === "undefined") return next;
 
   const currentTab = parseTabFromSearch(window.location.search);
-  const currentView = new URLSearchParams(window.location.search).get("view");
-  if (currentTab === next && ((!targetView && !currentView) || currentView === targetView)) {
+  const currentParams = new URLSearchParams(window.location.search);
+  const currentView = currentParams.get("view");
+  const extrasMatch =
+    !extraParams ||
+    Object.entries(extraParams).every(([key, value]) => currentParams.get(key) === value);
+  if (
+    currentTab === next &&
+    ((!targetView && !currentView) || currentView === targetView) &&
+    extrasMatch
+  ) {
     return next;
   }
 
@@ -81,6 +93,12 @@ export function navigateToTab(tab: string, view?: string): RouteId {
   } else if (targetTab !== "platform-admin") {
     const params = new URLSearchParams(search);
     params.delete("view");
+    const s = params.toString();
+    search = s ? `?${s}` : "";
+  }
+  if (extraParams) {
+    const params = new URLSearchParams(search);
+    for (const [key, value] of Object.entries(extraParams)) params.set(key, value);
     const s = params.toString();
     search = s ? `?${s}` : "";
   }
