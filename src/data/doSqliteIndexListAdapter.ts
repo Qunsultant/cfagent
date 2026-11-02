@@ -6,7 +6,7 @@
  * mock), newest-first per index, keep-per-index prune via
  * per-row DELETEs.
  */
-import type { IndexId, IndexMember } from "../trading/indexMembership";
+import type { IndexId, IndexMember } from "../trading";
 import type {
   IndexListArtifact,
   IndexListSqlExecutor,

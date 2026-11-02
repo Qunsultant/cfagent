@@ -25,6 +25,14 @@ One artifact per (index, snapshotDate) in `mas_index_lists`:
 
 - Port: `src/data/indexListPorts.ts` (`IndexListStore`: async
   `store` + `latest`, keep-per-index prune, default 10).
+- Boundary (#290): the #1852 module was previously imported
+  only by its test file and was NOT on the trading barrel, so
+  this slice adds `export * from "./indexMembership"` to
+  `src/trading/index.ts` and imports trading ONLY through the
+  barrel everywhere outside `src/trading/` (producer, job,
+  consumer, data adapters, ScheduledAgent branch). No name
+  collisions were introduced (verified by grep + the boundary
+  test itself).
 - Adapters, one conformance suite
   (`tests/index_list_snapshots_1980.test.ts`) across all three:
   `src/data/inMemoryIndexListAdapter.ts` (test double),

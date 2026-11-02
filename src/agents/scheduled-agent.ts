@@ -663,7 +663,7 @@ export class ScheduledAgent extends PortThink {
             const {
               createIndexMembershipService,
               createWikipediaIndexMembershipAdapter,
-            } = await import("../trading/indexMembership");
+            } = await import("../trading");
             const { createIndexListRefreshExecutor } = await import("../services/indexListJob");
             const fetchHtml = async (url: string): Promise<string> => {
               const res = await fetch(url);

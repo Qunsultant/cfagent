@@ -10,7 +10,7 @@
  * table resolve to undefined (no stored list) rather than
  * inventing one.
  */
-import type { IndexId, IndexMember } from "../trading/indexMembership";
+import type { IndexId, IndexMember } from "../trading";
 import type {
   IndexListArtifact,
   IndexListStore,

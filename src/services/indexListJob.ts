@@ -15,7 +15,7 @@
  * src/agents/scheduled-agent.ts).
  */
 import type { IndexListStore } from "../data/indexListPorts";
-import type { IndexId } from "../trading/indexMembership";
+import type { IndexId } from "../trading";
 import {
   produceIndexListSnapshot,
   type IndexListDescriptor,
