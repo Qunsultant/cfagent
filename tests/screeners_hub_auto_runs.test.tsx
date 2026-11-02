@@ -26,11 +26,11 @@ import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import {
-  ScreenersHub,
+  StockHub,
   screenRunStatus,
   resolveSelectedRun,
   SCREEN_RUN_STATUS_LABELS,
-} from "../src/client/ScreenersHub";
+} from "../src/client/StockHub";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -142,7 +142,7 @@ async function renderHub() {
   document.body.appendChild(container);
   root = createRoot(container);
   await act(async () => {
-    root.render(<ScreenersHub activeEnv="PROD" userLogin="tester" />);
+    root.render(<StockHub activeEnv="PROD" userLogin="tester" />);
   });
   await flush();
   await flush();
@@ -215,7 +215,7 @@ describe("resolveSelectedRun (#125)", () => {
 
 // Component ------------------------------------------------------------------
 
-describe("ScreenersHub autonomous run history (#125)", () => {
+describe("StockHub autonomous run history (#125, moved by #2896)", () => {
   it("renders every retained run in the list with time, scope, counts and status badge", async () => {
     await renderHub();
     const items = runItems();
@@ -342,7 +342,7 @@ function universeCard(universe: string): HTMLElement {
   return btn as HTMLElement;
 }
 
-describe("ScreenersHub autonomous panel truth (#2075)", () => {
+describe("StockHub autonomous panel truth (#2075, moved by #2896)", () => {
   it("labels a manual latest run's card Manual, never as a scheduled run", async () => {
     stubRuns([RUN_MANUAL_TECH]);
     await renderHub();

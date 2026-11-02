@@ -204,8 +204,8 @@ describe("Issue #1328 — MorningDigest", () => {
     expect(container.textContent || "").toContain("No runs overnight");
   });
 
-  it("ScreenersHub wires the digest above the runs panel (source pin)", () => {
-    const hub = readFileSync("src/client/ScreenersHub.tsx", "utf8");
+  it("StockHub wires the digest above the runs panel (source pin, #2896)", () => {
+    const hub = readFileSync("src/client/StockHub.tsx", "utf8");
     expect(hub).toContain("MorningDigest");
   });
 });

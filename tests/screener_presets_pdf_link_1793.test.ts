@@ -27,8 +27,8 @@ describe("Issue #1793 — Screener Presets Layout and Report Persistence", () =>
     expect(storagePutLatest).toBeLessThan(storagePutHistory);
   });
 
-  it("ScreenersHub wraps preset manager and criteria panel in full-width responsive deck", () => {
-    const src = readFileSync(path.join(repoRoot, "src/client/ScreenersHub.tsx"), "utf-8");
+  it("StockHub wraps preset manager and criteria panel in full-width responsive deck (#2896)", () => {
+    const src = readFileSync(path.join(repoRoot, "src/client/StockHub.tsx"), "utf-8");
     expect(src).toContain('className="screener-criteria-presets-deck"');
     const deckIndex = src.indexOf('className="screener-criteria-presets-deck"');
     const presetIndex = src.indexOf("<ScreenerPresetManager", deckIndex);
@@ -47,8 +47,8 @@ describe("Issue #1793 — Screener Presets Layout and Report Persistence", () =>
     expect(criteriaIndex).toBeGreaterThan(presetIndex);
   });
 
-  it("ScreenersHub manualResult retains full report and quote trace metadata", () => {
-    const src = readFileSync(path.join(repoRoot, "src/client/ScreenersHub.tsx"), "utf-8");
+  it("StockHub manualResult retains full report and quote trace metadata (#2896)", () => {
+    const src = readFileSync(path.join(repoRoot, "src/client/StockHub.tsx"), "utf-8");
     expect(src).toContain("pdfStatus: (data as any).pdfStatus");
     expect(src).toContain("pdfError: (data as any).pdfError");
     expect(src).toContain("xlsxKey: (data as any).xlsxKey");

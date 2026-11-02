@@ -39,7 +39,7 @@ export interface LeftNavConfig {
  * Sub-menu configuration map for navigation items that contain sub-menus.
  */
 export const SUB_MENU_CONFIGS: Record<string, NavSubMenuItemConfig[]> = {
-  screeners: [
+  "stock-hub": [
     {
       id: "screeners",
       label: "Stock Screener",
@@ -66,15 +66,6 @@ export const SUB_MENU_CONFIGS: Record<string, NavSubMenuItemConfig[]> = {
       badge: "Feed",
       badgeType: "new",
       description: "Zero-credential Yahoo Finance and Alpaca dual feed, fundamental peer comparison",
-    },
-    {
-      id: "goal-screen",
-      label: "Goal Screen",
-      shortLabel: "Goal",
-      icon: "Goal",
-      badge: "AI",
-      badgeType: "ai",
-      description: "Pick a goal; the unified screening stack screens stocks and options for it, with backtest-on-screen",
     },
   ],
   "options-screener": [
@@ -537,12 +528,6 @@ export function isNavItemOrSubItemActive(
       return currentTab === "screeners" && (view === "schedules" || view === "schemas");
     }
   }
-  if (item.id === "screeners") {
-    if (typeof window !== "undefined") {
-      const view = new URLSearchParams(window.location.search).get("view");
-      if (view === "goal-screen" || view === "schedules" || view === "schemas") return false;
-    }
-  }
   if (getNavGroup(currentTab) === item.id) return true;
   if (item.subItems) {
     return item.subItems.some((sub) => {
@@ -550,7 +535,7 @@ export function isNavItemOrSubItemActive(
       if (getNavGroup(currentTab) === sub.id) return true;
       if (typeof window !== "undefined") {
         const view = new URLSearchParams(window.location.search).get("view");
-        if (currentTab === "screeners" && view === sub.id) return true;
+        if ((currentTab === "screeners" || currentTab === "stock-hub") && view === sub.id) return true;
       }
       return false;
     });

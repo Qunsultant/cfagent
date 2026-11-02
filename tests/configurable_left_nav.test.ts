@@ -36,10 +36,10 @@ describe("navConfig - externalized navigation and sub-menu configuration", () =>
     }
   });
 
-  it("configures Screeners with sub-menu options for stocks and research", () => {
-    const screenersItem = findNavItemConfig(DEFAULT_LEFT_NAV_CONFIG, "screeners");
+  it("configures Stock Hub with sub-menu options for stocks and research (#2896)", () => {
+    const screenersItem = findNavItemConfig(DEFAULT_LEFT_NAV_CONFIG, "stock-hub");
     expect(screenersItem).toBeDefined();
-    expect(screenersItem?.label).toBe("Stock Screener");
+    expect(screenersItem?.label).toBe("Stock Hub");
     expect(screenersItem?.subItems).toBeDefined();
     expect(screenersItem!.subItems!.length).toBeGreaterThanOrEqual(2);
 
@@ -56,7 +56,7 @@ describe("navConfig - externalized navigation and sub-menu configuration", () =>
   });
 
   it("isNavItemOrSubItemActive correctly detects parent and child active states", () => {
-    const screenersItem = findNavItemConfig(DEFAULT_LEFT_NAV_CONFIG, "screeners")!;
+    const screenersItem = findNavItemConfig(DEFAULT_LEFT_NAV_CONFIG, "stock-hub")!;
     // Direct match
     expect(isNavItemOrSubItemActive(screenersItem, "screeners")).toBe(true);
     // Sub-item match (options)

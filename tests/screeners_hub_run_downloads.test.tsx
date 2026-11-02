@@ -23,7 +23,7 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { ScreenersHub } from "../src/client/ScreenersHub";
+import { StockHub } from "../src/client/StockHub";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -164,7 +164,7 @@ async function renderHub() {
   document.body.appendChild(container);
   root = createRoot(container);
   await act(async () => {
-    root.render(<ScreenersHub activeEnv="PROD" userLogin="tester" />);
+    root.render(<StockHub activeEnv="PROD" userLogin="tester" />);
   });
   await flush();
   await flush();
@@ -214,7 +214,7 @@ afterEach(async () => {
 
 // Component ----------------------------------------------------------------
 
-describe("ScreenersHub run result-set downloads (#125 PR-B / #126)", () => {
+describe("StockHub run result-set downloads (#125 PR-B / #126, moved by #2896)", () => {
   it("a successful run shows CSV standouts, CSV all-screened and JSON controls", async () => {
     await renderHub();
     const { csv, csvAll, json } = exportButtons();

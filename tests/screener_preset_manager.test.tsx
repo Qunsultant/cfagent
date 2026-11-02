@@ -308,8 +308,8 @@ describe("Issue #1497 — ScreenerPresetManager", () => {
     expect(fetchCalls.some((c) => c.method === "DELETE" && c.url.endsWith("/p1"))).toBe(true);
   });
 
-  it("ScreenersHub wires the manager into the stock run form (source pin)", () => {
-    const src = readFileSync("src/client/ScreenersHub.tsx", "utf8");
+  it("StockHub wires the manager into the stock run form (source pin, #2896)", () => {
+    const src = readFileSync("src/client/StockHub.tsx", "utf8");
     expect(src).toContain("ScreenerPresetManager");
     expect(src).toContain("onApplyPreset={setStockCriteria}");
   });

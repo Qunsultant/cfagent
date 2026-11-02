@@ -21,7 +21,7 @@ const dppSrc = readFileSync(
   "utf8",
 );
 const screenersSrc = readFileSync(
-  join(here, "..", "src", "client", "ScreenersHub.tsx"),
+  join(here, "..", "src", "client", "StockHub.tsx"),
   "utf8",
 );
 
@@ -45,14 +45,14 @@ describe("Data Providers consolidation & tabular presentation (#2723)", () => {
     vi.unstubAllGlobals();
   });
 
-  it("source defines tabular structure and ScreenersHub callout link", () => {
+  it("source defines tabular structure and StockHub callout link (#2896)", () => {
     expect(dppSrc).toContain("dpp-table");
     expect(dppSrc).toContain("<Table");
     expect(dppSrc).toContain('header: "Provider"');
     expect(dppSrc).toContain('header: "Connectivity & Session"');
     expect(dppSrc).toContain('header: "Actions"');
 
-    // ScreenersHub no longer mounts ProviderConnectivityDashboard, but keeps callout link
+    // StockHub (ex-ScreenersHub stocks tabs, #2896) no longer mounts ProviderConnectivityDashboard, but keeps callout link
     expect(screenersSrc).not.toContain("<ProviderConnectivityDashboard />");
     expect(screenersSrc).toContain('id="provider-dashboard"');
     expect(screenersSrc).toContain('href="/?tab=platform-admin&view=data-providers"');

@@ -41,6 +41,7 @@ function shellContentKeys(src: string): string[] {
   return [...slice.matchAll(/^    ([a-z0-9-]+): /gm)].map((m) => m[1]);
 }
 
+// #2896: the Stock Hub route is shell-retained, so the set gains stock-hub.
 const HISTORICAL_TRADING_IDS = [
   "autopilot",
   "ledger",
@@ -53,6 +54,7 @@ const HISTORICAL_TRADING_IDS = [
   "scanner",
   "schedules",
   "screeners",
+  "stock-hub",
   "trading",
   "voice",
 ];
@@ -93,7 +95,7 @@ describe("route-table-derived content switch (#2077)", () => {
     expect(chatSrc.slice(start, end)).not.toContain('{tab === "');
   });
 
-  it("the retained set is exactly the historical trading set (#388)", () => {
+  it("the retained set is exactly the historical trading set (#388, #2896)", () => {
     expect([...TRADING_TABS].sort()).toEqual([...HISTORICAL_TRADING_IDS].sort());
   });
 
