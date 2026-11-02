@@ -93,7 +93,7 @@ All development on this issue must follow:
 - Change management (actual: change type, impacted surfaces, migration and data impact, rollout plan, rollback plan, communication, changelog entry):
 - Conformance (actual: UX primitives/tokens used, architecture boundaries followed, reused surfaces, rework justification, regression pins):
 - Agentic design (actual: allocation as built, delegation path, evaluator, task records, policies/budgets, never-list compliance):
-- Value and impact (value created, capabilities enhanced, competencies improved, value proposition, delivery channels, user journey):
+- Value and impact (value created, capabilities enabled, competencies improved, value proposition, delivery channels, user journey):
 - Risk and limitations (security, tenant isolation, compatibility, performance/cost; known test-coverage gaps stated explicitly):
 - Delivery and release (migration, feature flag, deployment impact, rollback; release state, version, environment):
 - Workflows operationalized:
