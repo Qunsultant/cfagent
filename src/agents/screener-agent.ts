@@ -35,6 +35,7 @@ import {
   type PortfolioContextMarker,
 } from "../services/portfolioContextRanking";
 import { DynamicMarketScreener } from "../trading";
+import { planStockScreenRun } from "../workflows/stockScreenPlanner";
 import {
   acquireUniverse,
   screenUniverse,
@@ -724,22 +725,18 @@ export class ScreenerAgent extends PortThink {
         console.log(`[ScreenerAgent] Applied ${learnings.length} learnings:`, appliedLearnings);
       }
     } catch {}
-    // Issue #421: a run's sector label states what was actually screened.
-    // When no sector was selected, the screen covered every sector in the
-    // universe → "ALL" (header renderers suppress it) — never the config
-    // default, which made NASDAQ100 reports claim "Technology sector".
-    const sector = req.sector || req.filters?.sector || "ALL";
+    // Issue #2864: the run's execution plan comes from the one
+    // planner (src/workflows/stockScreenPlanner.ts) — sector
+    // (#421), universe default, provider default (#1007), and
+    // fallback marker (#1527) are resolved there, verbatim.
+    // Downstream code keeps using these same names unchanged.
+    const plan = planStockScreenRun(req, timestamp);
+    const sector = plan.sector;
     const screener = new DynamicMarketScreener();
     const userLogin = req.userLogin || (await this.userLogin());
-    const universe: UniverseId = req.universe ?? "TECH";
-    // Issue #1007: the run's data provider (default E*TRADE). Recorded
-    // on every result — success, duplicate and failure alike — so the
-    // canonical report provenance always names its provider.
-    const provider: StockScreenProvider = req.provider ?? "etrade";
-    // Issue #1527: carry the fallback marker onto every result the
-    // run produces, so provenance names the fallback, not the
-    // configured provider's live run.
-    const providerFallback = req.providerFallback;
+    const universe: UniverseId = plan.universe;
+    const provider: StockScreenProvider = plan.provider;
+    const providerFallback = plan.providerFallback;
     let expectedCount = 0;
 
     // Issue #607: durable task record for this run (mandate §6; design
@@ -759,10 +756,7 @@ export class ScreenerAgent extends PortThink {
         universe,
         sector,
         userLogin,
-        idempotencyKey:
-          req.trigger === "scheduled"
-            ? `screener:scheduled:${universe}:${sector}:${timestamp.slice(0, 16)}`
-            : `screener:manual:${universe}:${sector}:${timestamp}`,
+        idempotencyKey: plan.idempotencyKey,
       });
       taskId = created.task.id;
       if (created.task.status === "queued") {
@@ -792,7 +786,7 @@ export class ScreenerAgent extends PortThink {
     };
 
     try {
-      if (req.trigger === "scheduled" && !(await this.claimScheduledExecution(`stock:${universe}`, req.environment))) {
+      if (req.trigger === "scheduled" && !(await this.claimScheduledExecution(plan.scheduledClaimKey, req.environment))) {
         const dupResult: ScreenerRunResult = {
           timestamp,
           trigger: req.trigger,
