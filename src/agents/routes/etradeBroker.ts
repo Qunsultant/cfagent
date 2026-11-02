@@ -51,7 +51,7 @@ import {
   type CandidateGreekContribution,
 } from "../../services/portfolioRisk";
 import { ETradeThinkHarness } from "../../services/thinkHarness";
-import { parseStockScreenRequest, TradingPlatformRegistry, fetchQuoteLiveStrict } from "../../trading";
+import { TradingPlatformRegistry, fetchQuoteLiveStrict } from "../../trading";
 import { resolveEnvironmentConfig } from "../../config/environment";
 import { assessPortfolioConcentration } from "../../services/portfolioConcentration";
 import {
@@ -74,6 +74,7 @@ import {
 } from "../../services/etradeExecutionGate";
 import { resolveEtradeRestSwitch } from "../../config/etradeModes";
 import { admitScreenModeSelection } from "../../workflows/screenerWorkflowRoutes";
+import { buildStockScreenRunSpec } from "../../workflows/stockScreenRunSpec";
 import type { AgentName, Env } from "../../types";
 import type { DatabaseORM } from "../../orm";
 import type { ScreenerAgent } from "../screener-agent";
@@ -310,16 +311,26 @@ export async function handleEtradeBrokerRoutes(
         const listingsEtrade = new ETradeService(ctx.getOrm(), ctx.env, userLogin, requestedEnv);
         return await executeEtradeScreenListings({ ctx, etrade: listingsEtrade, filters });
       }
-      // Issue #959: the body (POST) or assembled params (GET) validate
-      // through the ONE shared stock-screen schema — a mis-shaped
-      // filter is a 400 naming the field, never a silent engine run.
-      const parsedScreen = parseStockScreenRequest(filters);
-      if (!parsedScreen.ok) {
-        return Response.json({ error: parsedScreen.error }, { status: 400 });
+      // Issue #2809: the body (POST) or assembled params (GET)
+      // validate through the ONE shared stock-screen schema via
+      // the single spec builder — a mis-shaped filter is a 400
+      // naming the field, never a silent engine run. The mode
+      // was already admitted above (before the listings branch),
+      // so it is passed in rather than re-admitted here.
+      const specResult = buildStockScreenRunSpec({
+        env: ctx.env,
+        method: request.method,
+        rawFilters: filters,
+        query: url.searchParams,
+        asyncRequested,
+        source: "etrade",
+        modeSelection,
+      });
+      if (!specResult.ok) {
+        return Response.json({ error: specResult.error }, { status: 400 });
       }
-      const { universe, filters: validatedFilters, emailTo, pushToSlack, slackChannel, webhookUrl, generatePdf } = parsedScreen.value;
       const agent = ctx.getScreenerAgent(userLogin);
-      return await executeEtradeScreen({ ctx, sessionId, requestedEnv, userLogin, agent, universe, validatedFilters, asyncRequested, delivery: { emailTo, pushToSlack, slackChannel, webhookUrl, generatePdf }, ...(modeSelection.screenMode ? { screenMode: modeSelection.screenMode, screenIntent: modeSelection.screenIntent } : {}) });
+      return await executeEtradeScreen({ ctx, sessionId, requestedEnv, userLogin, agent, spec: specResult.spec });
     } catch (err) {
       return Response.json({ error: err instanceof Error ? err.message : "Failed to screen equities" }, { status: 500 });
     }

@@ -920,8 +920,11 @@ describe("#959 single definition site", () => {
   it("every entry point module CALLS the shared schema module (call-level pins — comments do not satisfy them)", () => {
     const entryPointCalls: Array<[string, RegExp]> = [
       ["../src/agents/routes/schedules.ts", /buildSchedulePayload\(/],
-      ["../src/agents/routes/etradeBroker.ts", /parseStockScreenRequest\(/],
-      ["../src/agents/routes/marketDataResearch.ts", /parseStockScreenRequest\(/],
+      // Issue #2809: the two REST stock-screen routes call the
+      // single spec builder, which itself calls the shared schema.
+      ["../src/agents/routes/etradeBroker.ts", /buildStockScreenRunSpec\(/],
+      ["../src/agents/routes/marketDataResearch.ts", /buildStockScreenRunSpec\(/],
+      ["../src/workflows/stockScreenRunSpec.ts", /parseStockScreenRequest\(/],
       ["../src/agents/routes/etradeOptions.ts", /parseOptionsScreenRequest\(/],
       ["../src/agents/routes/etradeOptions.ts", /parseUnifiedOptionsRequest\(/],
       ["../src/agents/routes/etradeOptions.ts", /parseOptionsDiscoveryRequest\(/],

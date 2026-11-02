@@ -47,14 +47,14 @@ import {
   marketDataResearchAuditEvent,
   marketDataBarsAuditEvent,
 } from "../../config/marketDataModes";
-import { parseStockScreenRequest, shardableUniverses } from "../../trading";
+import { shardableUniverses } from "../../trading";
 import {
-  admitScreenModeSelection,
   manualWorkflowJobId,
   tryStartScreenerWorkflow,
   workflowAcceptedResponse,
   workflowTenantId,
 } from "../../workflows/screenerWorkflowRoutes";
+import { buildStockScreenRunSpec } from "../../workflows/stockScreenRunSpec";
 import type { ScreenerAgent } from "../screener-agent";
 import type { AgentName, Env } from "../../types";
 
@@ -305,23 +305,25 @@ export async function handleMarketDataCompareScreenRoutes(
           ? (filters as { async?: unknown }).async === true
           : url.searchParams.get("async") === "1";
       if (request.method === "POST") delete (filters as { async?: unknown }).async;
-      // Issue #2530: dual-mode fields, stripped like `async`
-      // and validated here: ND refuses 400 before any
-      // execution path — sync included (never a silent
-      // deterministic substitution).
-      const modeSelection = admitScreenModeSelection(ctx.env, request.method, filters, url.searchParams, { asyncRequested });
-      if (!modeSelection.ok) {
-        return Response.json({ error: modeSelection.error }, { status: 400 });
+      // Issue #2809: dual-mode admission (#2530) and the ONE shared
+      // stock-screen schema (#959) are built once here by the
+      // single spec builder — ND refuses 400 before any execution
+      // path, sync included (never a silent deterministic
+      // substitution); the universe/minScore envelope fields are
+      // accepted and split out by the builder's parse step.
+      const specResult = buildStockScreenRunSpec({
+        env: ctx.env,
+        method: request.method,
+        rawFilters: filters,
+        query: url.searchParams,
+        asyncRequested,
+        source: "market-data",
+      });
+      if (!specResult.ok) {
+        return Response.json({ error: specResult.error }, { status: 400 });
       }
-      // Issue #959: the market-data screen takes the same StockScreenerFilter
-      // shape as the E*TRADE screen — validate through the ONE shared
-      // stock-screen schema (the universe/minScore envelope fields are
-      // accepted and split out).
-      const parsedScreen = parseStockScreenRequest(filters);
-      if (!parsedScreen.ok) {
-        return Response.json({ error: parsedScreen.error }, { status: 400 });
-      }
-      const universe = parsedScreen.value.universe;
+      const spec = specResult.spec;
+      const universe = spec.universe;
       const userLogin = request.headers.get("x-user-login");
       if (!userLogin) return unauthenticatedResponse();
       const agent = ctx.getScreenerAgent(userLogin);
@@ -343,11 +345,13 @@ export async function handleMarketDataCompareScreenRoutes(
           role: "parent",
           tenantId: workflowTenantId(ctx.env),
           shards,
-          provider: "yahoo",
-          deliver: false,
-          filters: parsedScreen.value.filters as unknown as Record<string, unknown>,
-          ...(modeSelection.screenMode
-            ? { screenMode: modeSelection.screenMode, screenIntent: modeSelection.screenIntent }
+          // Issue #2809: provider/deliver come from the spec
+          // (yahoo / false for market-data), not second literals.
+          provider: spec.provider,
+          deliver: spec.deliver,
+          filters: spec.filters as unknown as Record<string, unknown>,
+          ...(spec.screenMode
+            ? { screenMode: spec.screenMode, screenIntent: spec.screenIntent }
             : {}),
         });
         if (handle) {
@@ -363,8 +367,8 @@ export async function handleMarketDataCompareScreenRoutes(
       if (universe === "ALL") {
         const shards = await agent.runSharded({
           trigger: "manual",
-          provider: "yahoo",
-          filters: parsedScreen.value.filters,
+          provider: spec.provider,
+          filters: spec.filters,
           userLogin,
         });
         for (const r of shards) await ctx.persistScreenerReportCanonical({ ...r, userLogin });
@@ -401,8 +405,8 @@ export async function handleMarketDataCompareScreenRoutes(
       try {
         result = await agent.runScreen({
           trigger: "manual",
-          provider: "yahoo",
-          filters: parsedScreen.value.filters,
+          provider: spec.provider,
+          filters: spec.filters,
           universe: universe as any,
           userLogin,
         });
@@ -439,7 +443,7 @@ export async function handleMarketDataCompareScreenRoutes(
         opportunities: result.opportunities,
         stocks: result.allStocks,
         results: result.allStocks,
-        filterApplied: parsedScreen.value.filters,
+        filterApplied: spec.filters,
         filterSummary: result.filterSummary,
         discoveryMessage: result.discoveryMessage,
         scannedAt: result.timestamp,
