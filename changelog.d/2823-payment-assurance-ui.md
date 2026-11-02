@@ -1,0 +1,3 @@
+### Changed
+
+- Organize Payment Workflow Assurance into URL-synced tabbed interface and polish layout (#2823). Refactors `PaymentWorkflowAssurance` from a monolithic vertical page into four URL-synced tabs (`?tab=payment-assurance&view=<view>`): `Simulator & Presets` (default: tunable fakes, scenario runner, and 9-preset suite), `Live Workflow` (Cloudflare live workflow instance execution and status), `Store Prices` (store price approval table), and `Store Operators` (effective operators list and addition form). Wraps tab in `ErrorBoundary` in `Chat.tsx`, adds proper container padding and spacing using design tokens, and aligns operator form controls without bespoke stylesheet additions.
