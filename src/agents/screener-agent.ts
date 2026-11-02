@@ -1408,6 +1408,15 @@ export class ScreenerAgent extends PortThink {
             ...(gatherYahooQuoteDeps ? { yahooQuoteDeps: gatherYahooQuoteDeps } : {}),
             ...(gatherHistoryDeps ? { historyDeps: gatherHistoryDeps } : {}),
             sink: createObservabilitySink(this.env),
+            // Phase 5 slice 7 (#2000): total-miss page through
+            // the existing postSlackText channel (best-effort
+            // inside the gather — a failed page never fails the
+            // run; a partial miss emits the event only).
+            alertText: async (text) => {
+              const { postSlackText } = await import("./resourceGoals");
+              const { fetchSlackPost } = await import("./social/delivery");
+              await postSlackText({ post: fetchSlackPost, env: this.env, text });
+            },
           });
         }
       } catch (err) {

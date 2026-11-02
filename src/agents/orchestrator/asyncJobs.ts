@@ -54,6 +54,9 @@ import {
 } from "../../config/nlqModes";
 import { getUserDid } from "../did";
 import { resolveStuckRunAlertThresholdMs } from "../../config/stuckRunAlert";
+import { maybeAlertServeFailure } from "../../observability/alertingList";
+import { postSlackText } from "../resourceGoals";
+import { fetchSlackPost, type SlackDeliveryEnv } from "../social/delivery";
 import { createAsyncJobPorts, type AsyncJobPorts } from "../../data/createAsyncJobPorts";
 import { createOptionsDiscoveryPorts } from "../../data/createOptionsDiscoveryPorts";
 import { createDiscoveryService } from "../../services/discoveryService";
@@ -1473,6 +1476,54 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
         jobId,
         status: "failed",
         reason: message,
+      });
+    } else if (job.capability === "followup.report") {
+      // Phase 5 slice 7 (#2000): a monolithic serve failure —
+      // the report job with no chain identity — gets the same
+      // first-class failure state the chained path records
+      // (serve/failed transition + audit) plus, for a first
+      // failure only, the operator page. Chained serve failures
+      // never reach this branch (jobStage is set); retries
+      // record state but never re-page. Delivery is
+      // fire-and-forget through the existing postSlackText
+      // channel and can never fail the already-terminal job.
+      let retryOf: string | null = null;
+      try {
+        const parsed = JSON.parse(job.payload_json) as { retryOf?: unknown };
+        if (typeof parsed?.retryOf === "string" && parsed.retryOf) retryOf = parsed.retryOf;
+      } catch {
+        retryOf = null;
+      }
+      await maybeAlertServeFailure(
+        {
+          jobId,
+          capability: job.capability,
+          stage: null,
+          chainId: null,
+          retryOf,
+          userLogin: jobUserLogin ?? ctx.sessionKey(),
+          error: message,
+        },
+        {
+          recordTransition: (t) =>
+            recordStageTransition(ctx, {
+              userLogin: t.userLogin,
+              stage: t.stage,
+              jobId: t.jobId,
+              status: t.status,
+              reason: t.reason,
+            }),
+          audit: (type, _agent, payload) => ctx.audit(type, "orchestrator", payload),
+          postText: async (text) =>
+            // Env carries non-string bindings, so it is not
+            // assignable to SlackDeliveryEnv's string index
+            // (same cast as server.ts); delivery reads only the
+            // string Slack fields at runtime.
+            postSlackText({ post: fetchSlackPost, env: ctx.env as unknown as SlackDeliveryEnv, text }),
+        },
+      ).catch(() => {
+        // maybeAlertServeFailure never throws by contract; this
+        // guard is defense in depth for the terminal path.
       });
     }
     // Issue #1355: a failed feed shard blocks assembly by NAME —
