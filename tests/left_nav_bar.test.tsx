@@ -117,11 +117,11 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
     expect(itemIds).toContain("schedules");
   });
 
-  it("configures Stock Screener with only screeners and research sub-menus", () => {
+  it("configures Stock Screener with screeners, research, and goal-screen sub-menus", () => {
     const stockSubItems = SUB_MENU_CONFIGS.screeners;
     expect(stockSubItems).toBeDefined();
     const subIds = stockSubItems.map((s) => s.id);
-    expect(subIds).toEqual(["screeners", "new-screen", "research"]);
+    expect(subIds).toEqual(["screeners", "new-screen", "research", "goal-screen"]);
     expect(subIds).not.toContain("options");
     expect(subIds).not.toContain("scanner");
     expect(subIds).not.toContain("options-flows");
@@ -143,6 +143,8 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
       "compare",
       "llm-ideas",
       "llm-evaluate",
+      "run-records",
+      "nlq",
     ]);
     expect(subIds).not.toContain("docs");
     expect(subIds).not.toContain("workflow-runs");
