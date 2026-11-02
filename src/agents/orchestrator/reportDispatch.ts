@@ -291,6 +291,10 @@ export async function persistScreenerReportCanonical(ctx: ReportDispatchContext,
   criteria?: unknown;
   patternRef?: unknown;
   presetRef?: unknown;
+  /** Issue #2908 (G1): spec provenance — recorded in the body when the caller carries it. Additive: older readers ignore. */
+  scheduleId?: unknown;
+  jobId?: unknown;
+  goalId?: unknown;
   /** Issue #2773: post-screening Pareto evaluation, recorded in the body when the run computed one. Additive. */
   pareto?: unknown;
 }): Promise<void> {
@@ -344,6 +348,10 @@ export async function persistScreenerReportCanonical(ctx: ReportDispatchContext,
         ...(result.criteria !== undefined ? { criteria: result.criteria } : {}),
         ...(result.patternRef !== undefined ? { patternRef: result.patternRef } : {}),
         ...(result.presetRef !== undefined ? { presetRef: result.presetRef } : {}),
+        // Issue #2908 (G1): spec provenance rides the body.
+        ...(result.scheduleId !== undefined ? { scheduleId: result.scheduleId } : {}),
+        ...(result.jobId !== undefined ? { jobId: result.jobId } : {}),
+        ...(result.goalId !== undefined ? { goalId: result.goalId } : {}),
         // Issue #2773: Pareto evaluation rides the body when present.
         ...(result.pareto !== undefined ? { pareto: result.pareto } : {}),
         reportUrl: result.pdfKey
