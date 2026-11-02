@@ -239,7 +239,11 @@ import {
 } from "./trading";
 import { gateSlackRequest, timingSafeEqual } from "./security/webhookSecurity";
 import { sanitizeInboundText } from "./security/promptInjectionSanitize";
-import { createIngressThrottle, pickWebhookSignature } from "./api/ingress";
+import {
+  checkPublicRestThrottle,
+  createIngressThrottle,
+  pickWebhookSignature,
+} from "./api/ingress";
 import { nlqWebhookBodySchema } from "./api/ingressSchemas";
 import { dispatchWsUpgrade } from "./api/wsRoutes";
 import {
@@ -586,6 +590,14 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
     const apiIngressMode = resolveApiIngressMode(
       levelsForApiIngressMode(undefined, undefined, undefined, env.API_INGRESS_MODE),
     ).mode;
+    // #1774 (parent #1717, F-55): public-REST burst cap — unified
+    // mode only, per-IP, /api/* paths only (see src/api/ingress.ts).
+    // Legacy mode keeps the current uncapped behavior; production
+    // activation is an owner action (API_INGRESS_MODE env value).
+    if (path.startsWith("/api/")) {
+      const restLimited = checkPublicRestThrottle(request, { mode: apiIngressMode });
+      if (restLimited) return restLimited;
+    }
 
     // Issue #1247: Public.com Client ID Metadata Document — the
     // OAuth client_id for the Public resource provider IS this URL

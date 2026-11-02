@@ -158,6 +158,61 @@ export function checkWsUpgradeBurst(request: Request, opts: WsBurstOptions = {})
   return throttle("ws_upgrade", WS_UPGRADE_BURST.maxRequests, WS_UPGRADE_BURST.windowMs);
 }
 
+/**
+ * Public REST burst cap (#1774, parent #1717, F-55).
+ *
+ * The scan's "public REST API rate-limiting missing" is true only
+ * for the generic case: NLQ webhook, memory search, WS upgrades,
+ * the AI gateway, and Slack outbound webhooks already have caps,
+ * but an unauthenticated caller could flood any other /api/*
+ * route with no throttle at all. This guard closes that gap the
+ * same way #1768 closed the WS gap: legacy mode keeps the current
+ * uncapped behavior; unified mode (admin/platform-controlled via
+ * API_INGRESS_MODE env only, never request input) caps /api/*
+ * traffic at 300 requests / 60s per connecting IP.
+ *
+ * The cap is deliberately generous and per-IP, not per-user:
+ * session resolution happens per-route later in handleFetch, so
+ * an early choke cannot know the verified login without spending
+ * a session-store read on every request. Authenticated callers
+ * share the per-IP bucket in unified mode by design — the same
+ * IP-keying anti-evasion rule as the WS cap (a caller-supplied
+ * login must never mint fresh buckets). Non-/api/* paths are
+ * untouched: A2A dispatch keeps its own auth/payment gates and
+ * Slack events keep their signature gate.
+ *
+ * Named non-coverage: this is a per-isolate token bucket like
+ * every other guard in this module — a burst spread across
+ * isolates is bounded per isolate, not globally accounted.
+ */
+export const PUBLIC_REST_BURST = { maxRequests: 300, windowMs: 60_000 } as const;
+
+export interface PublicRestThrottleOptions {
+  mode?: ApiIngressMode;
+  verifiedLogin?: string;
+  check?: IngressThrottleOptions["check"];
+}
+
+/** Returns a 429 Response when the public-REST burst cap trips, else null. */
+export function checkPublicRestThrottle(
+  request: Request,
+  opts: PublicRestThrottleOptions = {},
+): Response | null {
+  if (opts.mode !== "unified") return null;
+  let path: string;
+  try {
+    path = new URL(request.url).pathname;
+  } catch {
+    return null;
+  }
+  if (!path.startsWith("/api/")) return null;
+  const throttle = createIngressThrottle(request, {
+    verifiedLogin: opts.verifiedLogin,
+    check: opts.check,
+  });
+  return throttle("public_rest", PUBLIC_REST_BURST.maxRequests, PUBLIC_REST_BURST.windowMs);
+}
+
 /** JSON-RPC 2.0 error codes (F-48: no HTTP-200-error-in-result). */
 export const JSON_RPC_ERROR_CODES = {
   PARSE_ERROR: -32700,
