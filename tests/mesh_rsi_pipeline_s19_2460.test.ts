@@ -58,6 +58,7 @@ import {
   MIGRATION_0031_REFERRAL_ATTRIBUTION,
   MIGRATION_0032_STORE_OPERATORS,
   MIGRATION_0033_DEAD_LETTER_STORE,
+  MIGRATION_0034_BREAKER_STATE,
 } from "../src/data/migrationRunner";
 import { agentMeshProposals } from "../src/data/drizzleSchema";
 import { InMemoryMeshProposalStore } from "../src/data/inMemoryMeshProposalAdapter";
@@ -205,7 +206,7 @@ describe("door budget guard", () => {
 /* ------------------------------------------------------------------ */
 
 describe("mesh proposal store", () => {
-  it("migration 0025 is registered and 0033 is last (Phase 5 Slice 1 #2000, after #2680), and the drizzle schema carries the table", () => {
+  it("migration 0025 is registered and 0034 is last (Phase 5 Slice 2 #2000, after Slice 1), and the drizzle schema carries the table", () => {
     expect(MIGRATION_0025_AGENT_MESH_PROPOSALS.version).toBe(25);
     expect(MIGRATION_0025_AGENT_MESH_PROPOSALS.sql).toContain("agent_mesh_proposals");
     expect(ALL_MIGRATIONS).toContain(MIGRATION_0025_AGENT_MESH_PROPOSALS);
@@ -225,8 +226,10 @@ describe("mesh proposal store", () => {
     expect(ALL_MIGRATIONS).toContain(MIGRATION_0032_STORE_OPERATORS);
     // Phase 5 Slice 1 (#2000) appends migration 0033 (dead-letter store) after 0032.
     expect(ALL_MIGRATIONS).toContain(MIGRATION_0033_DEAD_LETTER_STORE);
+    // Phase 5 Slice 2 (#2000) appends migration 0034 (breaker state) after 0033.
+    expect(ALL_MIGRATIONS).toContain(MIGRATION_0034_BREAKER_STATE);
     expect(ALL_MIGRATIONS[ALL_MIGRATIONS.length - 1]).toBe(
-      MIGRATION_0033_DEAD_LETTER_STORE,
+      MIGRATION_0034_BREAKER_STATE,
     );
     expect(getTableName(agentMeshProposals)).toBe("agent_mesh_proposals");
   });

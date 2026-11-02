@@ -1111,3 +1111,27 @@ export const dlqDepthState = sqliteTable("dlq_depth_state", {
   depthAtAlert: integer("depth_at_alert"),
   claimToken: text("claim_token"),
 });
+
+/** Phase 5 Slice 2 (#2000) — durable breaker state, one row per provider. */
+export const agentBreakerState = sqliteTable("agent_breaker_state", {
+  providerId: text("provider_id").primaryKey(),
+  state: text("state").notNull(),
+  consecutiveFailures: integer("consecutive_failures").notNull(),
+  openedAtMs: integer("opened_at_ms"),
+  lastFailureAtMs: integer("last_failure_at_ms"),
+  totalCalls: integer("total_calls").notNull(),
+  totalSuccesses: integer("total_successes").notNull(),
+  totalFailures: integer("total_failures").notNull(),
+  totalTrips: integer("total_trips").notNull(),
+  totalFallbacks: integer("total_fallbacks").notNull(),
+  totalRejected: integer("total_rejected").notNull(),
+  transitionSeq: integer("transition_seq").notNull(),
+  updatedAtMs: integer("updated_at_ms").notNull(),
+});
+
+/** Phase 5 Slice 2 (#2000) — trip-alert claims, one row per transition id. */
+export const breakerTripAlerts = sqliteTable("breaker_trip_alerts", {
+  transitionId: text("transition_id").primaryKey(),
+  alertedAtMs: integer("alerted_at_ms"),
+  claimToken: text("claim_token"),
+});

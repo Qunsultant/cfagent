@@ -112,6 +112,9 @@ import {
 import { createMessagingPorts } from "./messaging/createMessagingPorts";
 import { createScreenerEventsWorkHandler } from "./messaging/screenerEventsConsumer";
 import { createDeadLetterStoreAdapter, ensureDeadLetterStoreSchema } from "./data/createDeadLetterStorePorts";
+import { createBreakerStateStoreAdapter, ensureBreakerStateSchema } from "./data/createBreakerStateStorePorts";
+import { configureDefaultBreakerDurability } from "./breakers/createBreakerPorts";
+import { createBreakerTripSubscriber } from "./breakers/breakerTripAlert";
 import { resolveDlqDepthAlertThreshold } from "./config/dlqDepthAlert";
 import { persistDeadLetterLanding } from "./messaging/deadLetterPersist";
 import { postSlackText, resourceSlackPost } from "./agents/resourceGoals";
@@ -517,7 +520,50 @@ async function handleNlqWebhookRequest(
   return Response.json(result);
 }
 
+/**
+ * Phase 5 Slice 2 (issue #2000) — one-time per-isolate breaker
+ * durability configuration. Idempotent: the first call wins;
+ * later calls are no-ops (bindings do not change within an
+ * isolate's lifetime, so a null store at first call stays
+ * null). The schema ensure runs fire-and-forget once: a load
+ * that races it degrades to in-memory (logged) and the next
+ * load succeeds — the durable adapter never fails a provider
+ * call over store state. Called at the top of fetch, scheduled,
+ * and queue entry points, before any breaker use.
+ */
+let breakerDurabilityConfigured = false;
+function ensureBreakerDurability(env: Env): void {
+  if (breakerDurabilityConfigured) return;
+  breakerDurabilityConfigured = true;
+  const adapter = createBreakerStateStoreAdapter(env);
+  if (!adapter) return;
+  const subscriber = createBreakerTripSubscriber({
+    postText: (text) =>
+      postSlackText({ post: resourceSlackPost, env: env as unknown as SlackDeliveryEnv, text }),
+    claimTripAlert: (transitionId, atMs, token) => adapter.claimTripAlert(transitionId, atMs, token),
+  });
+  configureDefaultBreakerDurability({
+    store: adapter,
+    tripAlert: (envelope) => {
+      void subscriber.handleEnvelope(envelope);
+    },
+  });
+  void ensureBreakerStateSchema(adapter.db).catch((err: unknown) => {
+    console.warn(
+      `[breaker] schema ensure failed, loads degrade to in-memory until it succeeds: ${err instanceof Error ? err.message : String(err)}`
+    );
+  });
+}
+
 async function handleFetch(request: Request, env: Env): Promise<Response> {
+    // Phase 5 Slice 2 (#2000) — durable breaker production path.
+    // Configures the shared registry's store + trip subscriber once
+    // per isolate, before any breaker use in this request (the
+    // registry is created lazily on first use; configuration must
+    // precede it, which entry-point ordering guarantees). Unbound
+    // AGENT_DB leaves the in-memory registry in place — exactly
+    // today's behavior, no lockout.
+    ensureBreakerDurability(env);
     const url = new URL(request.url);
     const path = url.pathname;
 
@@ -4559,6 +4605,8 @@ export default {
     await handleCloudflareEmailMessage(message, env, ctx);
   },
   async scheduled(event: any, env: Env, ctx?: any): Promise<void> {
+    // Phase 5 Slice 2 (#2000) — durable breaker production path (see ensureBreakerDurability).
+    ensureBreakerDurability(env);
     // #1185 / #1066 — unattended work runs under the explicit service
     // identity (SERVICE_USER_LOGIN), never a hardcoded synthetic login.
     // The shared Orchestrator instance is addressed by its established
@@ -4691,6 +4739,8 @@ export default {
     }
   },
   async queue(batch: any, env: Env, ctx?: any): Promise<void> {
+    // Phase 5 Slice 2 (#2000) — durable breaker production path (see ensureBreakerDurability).
+    ensureBreakerDurability(env);
     // Issue #1739 — durable screener-event delivery. The delivery
     // subscriber queue is dispatched through the broadcast core with
     // per-subscriber dedup; screener-events batches take the step-1

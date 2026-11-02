@@ -1396,6 +1396,33 @@ CREATE TABLE IF NOT EXISTS agent_payment_proof_redemptions (
 `,
 };
 
+export const MIGRATION_0034_BREAKER_STATE: DataMigration = {
+  version: 34,
+  name: "0034_breaker_state",
+  sql: `
+CREATE TABLE IF NOT EXISTS agent_breaker_state (
+  provider_id TEXT PRIMARY KEY,
+  state TEXT NOT NULL,
+  consecutive_failures INTEGER NOT NULL,
+  opened_at_ms INTEGER,
+  last_failure_at_ms INTEGER,
+  total_calls INTEGER NOT NULL,
+  total_successes INTEGER NOT NULL,
+  total_failures INTEGER NOT NULL,
+  total_trips INTEGER NOT NULL,
+  total_fallbacks INTEGER NOT NULL,
+  total_rejected INTEGER NOT NULL,
+  transition_seq INTEGER NOT NULL,
+  updated_at_ms INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS breaker_trip_alerts (
+  transition_id TEXT PRIMARY KEY,
+  alerted_at_ms INTEGER,
+  claim_token TEXT
+);
+`,
+};
+
 export const ALL_MIGRATIONS: DataMigration[] = [
   MIGRATION_0001_AGENT_GOVERNANCE,
   MIGRATION_0002_AGENT_CHAINS_SCHEDULES,
@@ -1430,6 +1457,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [
   MIGRATION_0031_REFERRAL_ATTRIBUTION,
   MIGRATION_0032_STORE_OPERATORS,
   MIGRATION_0033_DEAD_LETTER_STORE,
+  MIGRATION_0034_BREAKER_STATE,
 ];
 
 function splitStatements(sqlText: string): string[] {
