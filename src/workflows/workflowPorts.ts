@@ -216,6 +216,22 @@ export interface WorkflowJobCommand {
   /** Trigger source for audit (never branched on): e.g. "scheduled-tasks" or "manual". */
   source: string;
   trigger: "manual" | "scheduled";
+  /**
+   * Issue #2908 (G1): the spec's own trigger, carried
+   * alongside the workflow trigger (which admits only
+   * manual|scheduled). Lets NLQ ("nlq"), mesh ("mesh"),
+   * goal, and research runs keep their provenance through
+   * the workflow hop instead of collapsing to "manual".
+   * Shape mirrors StockScreenRunSpec's trigger vocabulary;
+   * kept inline here to avoid a workflowPorts <->
+   * stockScreenRunSpec import cycle.
+   */
+  specTrigger?: "manual" | "scheduled" | "nlq" | "mesh" | "goal" | "research";
+  /** Issue #2908 (G1): spec provenance carried on the command (defined fields only; genuinely unknown fields stay absent). */
+  scheduleId?: string;
+  goalId?: string;
+  patternRef?: { patternId: string; version: string };
+  presetRef?: { presetId: string; resolvedAt: string };
   /** Owner login. Required — fail closed without an identity (#1185). */
   userLogin: string;
   /** Shards to run in parallel (computed by the starter from the request). */

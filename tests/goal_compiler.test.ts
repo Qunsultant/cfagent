@@ -310,6 +310,9 @@ describe("goal compiler (#1441) — waves and planner prompt on the existing pat
     // rollup/alert/comparison goals — same precedent as social and
     // chain (goals-list-valid operations handled by their own agent
     // branch, not orchestrator jobs).
+    // #1980 index-list slice amends this pin: the catalog gains
+    // exactly one entry, the ScheduledAgent-owned `index` marker
+    // for the index-list refresh goals — same precedent.
     expect(OPERATION_CATALOG.map((e) => e.agent)).toEqual([
       "search",
       "payments",
@@ -321,6 +324,7 @@ describe("goal compiler (#1441) — waves and planner prompt on the existing pat
       "scheduled",
       "social",
       "resource",
+      "index",
     ]);
   });
 });

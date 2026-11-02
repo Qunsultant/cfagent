@@ -17,6 +17,7 @@ import type {
   StockScreenDelivery,
   StockScreenRunSpec,
 } from "../../workflows/stockScreenRunSpec";
+import { specCanonicalFields } from "../../workflows/stockScreenRunSpec";
 import { screenerOutcomeFromRunResult } from "../../services/screenerFollowups";
 import { isPortfolioContextEnabled } from "../../services/screeningFlags";
 import type { ETradeService } from "../../services/etrade";
@@ -180,6 +181,10 @@ export async function executeEtradeScreen(args: {
   // what the E*TRADE route's spec carries.
   const spec: StockScreenRunSpec = args.spec ?? {
     source: "etrade",
+    // Issue #2908 (G1): the legacy construction path carries
+    // the same provenance the builder sets (trigger + login).
+    trigger: "manual",
+    userLogin,
     deliver: true,
     filters: args.validatedFilters as StockScreenValue["filters"],
     universe: args.universe as StockScreenValue["universe"],
@@ -230,7 +235,7 @@ export async function executeEtradeScreen(args: {
       results: shards,
       // Issue #2863: record the run's criteria with each shard's
       // canonical copy, so future replays can show them.
-      persist: (r) => ctx.persistScreenerReportCanonical({ ...r, userLogin, criteria: spec.filters }),
+      persist: (r) => ctx.persistScreenerReportCanonical({ ...r, userLogin, criteria: spec.filters, ...specCanonicalFields(spec) }),
       deliver: (shard) => publishOrBridge(ctx, userLogin, shard, delivery),
     });
     const failed = shards.filter((r) => !r.success);
@@ -305,7 +310,7 @@ export async function executeEtradeScreen(args: {
   await persistThenDeliverAll({
     results: [result],
     // Issue #2863: record the run's criteria with the canonical copy.
-    persist: (r) => ctx.persistScreenerReportCanonical({ ...r, userLogin, criteria: spec.filters }),
+    persist: (r) => ctx.persistScreenerReportCanonical({ ...r, userLogin, criteria: spec.filters, ...specCanonicalFields(spec) }),
     deliver: (r) => publishOrBridge(ctx, userLogin, r, delivery),
   });
   if (!result.success) {

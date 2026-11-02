@@ -124,6 +124,18 @@ export const OPERATION_CATALOG: CatalogEntry[] = [
     blurb:
       "SessionStore resource rollup, cap alert, and dashboard comparison (issue #1819): daily UTC rollup, hourly 70%-of-cap alert, and the instrumented-vs-dashboard comparison report, all as ScheduledAgent goals.",
   },
+  {
+    // #1980 index-list refresh operations are NOT orchestrator
+    // jobs. ScheduledAgent executes them directly through the
+    // refresh job (the social.publish / resource.* precedent);
+    // the catalog entry exists so addGoal accepts the operations
+    // and the dashboard can list them.
+    agent: "index",
+    binding: "SCHEDULED_AGENT",
+    operations: ["index.refresh_wikipedia", "index.refresh_holdings"],
+    blurb:
+      "Stored index-list refresh (issue #1980, follow-up to #1852): weekly Wikipedia refresh of Dow / S&P 500 / S&P 100 / Nasdaq-100 and daily ETF-holdings refresh of Russell 2000 / Russell 1000, both as ScheduledAgent goals on the existing tick.",
+  },
 ];
 
 export function catalogAgent(agent: string): CatalogEntry | undefined {

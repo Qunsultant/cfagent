@@ -124,7 +124,7 @@ export function RunDetailView({ run, confirmations, confirmationsLoading, chrome
               </span>
             </div>
             <div style={{ fontSize: "var(--font-size-body)", color: "var(--color-text-muted)", marginTop: "0.25rem" }}>
-              {(run.universe || "nasdaq100").toUpperCase()} · {run.sector} · {run.trigger || "scheduled"} ·{" "}
+              {(run.universe || "nasdaq100").toUpperCase()} · {run.sector} · {run.trigger || "unknown"} ·{" "}
               {new Date(run.timestamp).toLocaleString()}
             </div>
           </section>

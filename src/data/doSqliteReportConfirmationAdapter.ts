@@ -19,6 +19,21 @@ import type {
   ReportConfirmationRow,
 } from "./orchestratorTablePorts";
 
+/** Add a column to the table when it is missing (additive migration). */
+function ensureColumn(
+  sql: OrchestratorTableSqlExecutor,
+  column: string,
+  type: string
+): void {
+  const cols = Array.from(
+    sql.exec("PRAGMA table_info(mas_report_confirmations)")
+  ) as Array<{ name?: unknown }>;
+  const names = cols.map((c) => String(c?.name ?? ""));
+  if (!names.includes(column)) {
+    sql.exec(`ALTER TABLE mas_report_confirmations ADD COLUMN ${column} ${type}`);
+  }
+}
+
 export class DoSqliteReportConfirmationStore implements ReportConfirmationPort {
   constructor(private readonly sql: OrchestratorTableSqlExecutor) {}
 
@@ -32,20 +47,18 @@ export class DoSqliteReportConfirmationStore implements ReportConfirmationPort {
         created_at TEXT NOT NULL,
         decided_at TEXT,
         decided_by TEXT,
-        report_id TEXT
+        report_id TEXT,
+        created_by TEXT
       )
     `);
-    // Additive migration for tables created before issue #308.
+    // Additive migrations for tables created before issue #308
+    // (report_id) and before issue #2664 (created_by). One helper
+    // keeps the file's storage-exec census count unchanged.
     try {
-      const cols = Array.from(
-        this.sql.exec("PRAGMA table_info(mas_report_confirmations)")
-      ) as Array<{ name?: unknown }>;
-      const names = cols.map((c) => String(c?.name ?? ""));
-      if (!names.includes("report_id")) {
-        this.sql.exec("ALTER TABLE mas_report_confirmations ADD COLUMN report_id TEXT");
-      }
+      ensureColumn(this.sql, "report_id", "TEXT");
+      ensureColumn(this.sql, "created_by", "TEXT");
     } catch {
-      // Non-critical: best-effort migration; fresh installs get the column.
+      // Non-critical: best-effort migration; fresh installs get the columns.
     }
   }
 
@@ -58,13 +71,14 @@ export class DoSqliteReportConfirmationStore implements ReportConfirmationPort {
 
   insertConfirmation(input: InsertConfirmationInput): void {
     this.sql.exec(
-      "INSERT INTO mas_report_confirmations (id, kind, payload_json, status, created_at, report_id) VALUES (?, ?, ?, ?, ?, ?)",
+      "INSERT INTO mas_report_confirmations (id, kind, payload_json, status, created_at, report_id, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)",
       input.id,
       input.kind,
       input.payloadJson,
       input.status,
       input.createdAt,
-      input.reportId
+      input.reportId,
+      input.createdBy ?? null
     );
   }
 

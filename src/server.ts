@@ -6,7 +6,7 @@ import {
   setSessionCookie,
 } from "./session";
 import { getServiceUserLogin, isLoginShaped, isSharedOrchestratorAddress, SHARED_ORCHESTRATOR_INSTANCE } from "./security/serviceIdentity";
-import { backgroundDispatchHeaders } from "./security/backgroundAttribution";
+import { backgroundDispatchHeaders, backgroundDispatchHeadersWithTrace } from "./security/backgroundAttribution";
 import {
   createDeadLetterRecord,
   logDeadLetter,
@@ -136,7 +136,8 @@ import {
 import { actorGateway } from "./services/cloudflareActorGateway";
 import { withRequestObservability } from "./observability/aspects";
 import { createObservabilitySink } from "./observability/createObservabilityPorts";
-import { writeEnvelopeToSink } from "./observability/observabilityPorts";
+import { writeEnvelopeToSink, childSpan, formatTraceparent, newTraceContext } from "./observability/observabilityPorts";
+import { observeInternalDispatch } from "./observability/scheduledJobOutcomes";
 import { createScreenerQueueHandler } from "./messaging/screenerQueueConsumer";
 import {
   createRetentionPurgeStore,
@@ -4909,6 +4910,55 @@ export default {
       const tickPromise = schedAgent.onCron();
       if (ctx?.waitUntil) ctx.waitUntil(tickPromise);
       else await tickPromise;
+      // Issue Qunsultant/cfagent#2037 — one trace per tick. Every
+      // dispatch below carries a child span of this trace, so a
+      // DO-side AE event, a mas_events outcome row, and a Slack
+      // alert all correlate to the tick that sent them. The
+      // traceparent rides every tick dispatch (corpus/digest
+      // included — their routes ignore it today, at no cost);
+      // only the three named jobs get the failure observer, per
+      // the issue's scope. The observer never rejects, so
+      // waitUntil/await below keep today's fire-and-forget shape.
+      const tickTrace = newTraceContext();
+      const observeTickDispatch = (
+        job: "research" | "reflection" | "adaptation",
+        promise: Promise<unknown>,
+      ): Promise<void> =>
+        observeInternalDispatch(promise, {
+          job,
+          sink: createObservabilitySink(env),
+          trace: tickTrace,
+          recordFailure: async (input) => {
+            const recorded = (await agent.fetch(
+              new Request("https://agent.internal/scheduled-job-outcome", {
+                method: "POST",
+                headers: backgroundDispatchHeadersWithTrace(
+                  userLogin,
+                  formatTraceparent(childSpan(tickTrace)),
+                ),
+                body: JSON.stringify(input),
+              }),
+            )) as unknown as { status?: unknown };
+            if (
+              !recorded ||
+              typeof recorded.status !== "number" ||
+              recorded.status >= 400
+            ) {
+              throw new Error("scheduled-job-outcome record failed");
+            }
+          },
+          alertUnreachable: async (failedJob, trace) => {
+            await postSlackText({
+              post: resourceSlackPost,
+              env: env as unknown as SlackDeliveryEnv,
+              text:
+                `Scheduled job ${failedJob} dispatch failed AND its outcome ` +
+                `record is unreachable (trace ${trace.traceId}). The DO did ` +
+                `not record this failure — investigate the dispatch layer; ` +
+                `see Cloudflare logs for the tick.`,
+            });
+          },
+        });
       // Issue #354 — the daily options-research run (after market close)
       // rides this tick: the dedicated 0 21 * * 1-5 trigger cannot exist
       // (Workers Free ceiling of 5 cron triggers/account, error 10072; it
@@ -4916,11 +4966,17 @@ export default {
       // Fire/no-fire is decided inside the tick route (weekday, >= 21:00
       // UTC, not already fired today — durable guard in mas_settings), so
       // this dispatch is unconditional; skips are cheap and explicit.
-      const researchPromise = agent.fetch(
-        new Request("https://agent.internal/research/scheduled-tick", {
-          method: "POST",
-          headers: { ...backgroundDispatchHeaders(userLogin) },
-        })
+      const researchPromise = observeTickDispatch(
+        "research",
+        agent.fetch(
+          new Request("https://agent.internal/research/scheduled-tick", {
+            method: "POST",
+            headers: backgroundDispatchHeadersWithTrace(
+              userLogin,
+              formatTraceparent(childSpan(tickTrace)),
+            ),
+          }),
+        ),
       );
       if (ctx?.waitUntil) ctx.waitUntil(researchPromise);
       else await researchPromise;
@@ -4928,11 +4984,17 @@ export default {
       // Workers Free ceiling constraint as #354). Fire/no-fire is decided
       // inside the route (Sunday, not already fired this week — durable
       // guard in mas_settings), so this dispatch is unconditional.
-      const reflectionPromise = agent.fetch(
-        new Request("https://agent.internal/reflection/run", {
-          method: "POST",
-          headers: { ...backgroundDispatchHeaders(userLogin) },
-        })
+      const reflectionPromise = observeTickDispatch(
+        "reflection",
+        agent.fetch(
+          new Request("https://agent.internal/reflection/run", {
+            method: "POST",
+            headers: backgroundDispatchHeadersWithTrace(
+              userLogin,
+              formatTraceparent(childSpan(tickTrace)),
+            ),
+          }),
+        ),
       );
       if (ctx?.waitUntil) ctx.waitUntil(reflectionPromise);
       else await reflectionPromise;
@@ -4941,11 +5003,17 @@ export default {
       // Fire/no-fire is decided inside the job (ISO-week guard +
       // adaptation kill switch in mas_settings), so this dispatch is
       // unconditional; skips are cheap and explicit in the job result.
-      const weightsPromise = agent.fetch(
-        new Request("https://agent.internal/adaptation/weights/run", {
-          method: "POST",
-          headers: { ...backgroundDispatchHeaders(userLogin) },
-        })
+      const weightsPromise = observeTickDispatch(
+        "adaptation",
+        agent.fetch(
+          new Request("https://agent.internal/adaptation/weights/run", {
+            method: "POST",
+            headers: backgroundDispatchHeadersWithTrace(
+              userLogin,
+              formatTraceparent(childSpan(tickTrace)),
+            ),
+          }),
+        ),
       );
       if (ctx?.waitUntil) ctx.waitUntil(weightsPromise);
       else await weightsPromise;
@@ -4958,7 +5026,10 @@ export default {
       const corpusSyncPromise = agent.fetch(
         new Request("https://agent.internal/knowledge/corpus-sync", {
           method: "POST",
-          headers: { ...backgroundDispatchHeaders(userLogin) },
+          headers: backgroundDispatchHeadersWithTrace(
+            userLogin,
+            formatTraceparent(childSpan(tickTrace)),
+          ),
         })
       );
       if (ctx?.waitUntil) ctx.waitUntil(corpusSyncPromise);
@@ -4977,7 +5048,10 @@ export default {
       const digestPassPromise = agent.fetch(
         new Request("https://agent.internal/payments/agentic/commercial/lifecycle/digest/run-due", {
           method: "POST",
-          headers: { ...backgroundDispatchHeaders(userLogin) },
+          headers: backgroundDispatchHeadersWithTrace(
+            userLogin,
+            formatTraceparent(childSpan(tickTrace)),
+          ),
         })
       );
       if (ctx?.waitUntil) ctx.waitUntil(digestPassPromise);

@@ -45,6 +45,7 @@ export * from "./platformHistory";
 export * from "./universes";
 export * from "./screenerConfig";
 export * from "./screenerPipeline";
+export * from "./indexMembership";
 export * from "./screeningSchemas";
 export * from "./screenerReportPdf";
 export * from "./screenerReportTemplate";

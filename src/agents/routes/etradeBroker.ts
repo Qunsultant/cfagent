@@ -127,6 +127,7 @@ export interface EtradeBrokerRouteContext {
     agent: AgentName | "judge" | "nlq" | "orchestrator",
     payload: Record<string, unknown>
   ): void;
+  traceId?: string | null;
   /** Screener agent (owner: OrchestratorAgent - was `this.getScreenerAgent()`). */
   getScreenerAgent(userLogin?: string): ScreenerAgent;
   /** Canonical-copy screener persistence (owner: OrchestratorAgent - was `this.persistScreenerReportCanonical`). */
@@ -142,10 +143,11 @@ export interface EtradeBrokerRouteContext {
     error?: string;
     trigger?: unknown;
     userLogin?: string;
-    /** Issue #2863: replay criteria/refs (additive; older readers ignore). */
+    /** Issue #2863 / #2773: replay refs & pareto (additive). */
     criteria?: unknown;
     patternRef?: unknown;
     presetRef?: unknown;
+    pareto?: unknown;
   }): Promise<void>;
   /** Autopilot policy evaluation (owner: OrchestratorAgent - was `this.evaluateAndRecordAutopilotVerdict`). */
   evaluateAndRecordAutopilotVerdict(params: {
@@ -329,6 +331,7 @@ export async function handleEtradeBrokerRoutes(
         asyncRequested,
         source: "etrade",
         modeSelection,
+        userLogin,
       });
       if (!specResult.ok) {
         return Response.json({ error: specResult.error }, { status: 400 });

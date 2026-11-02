@@ -41,7 +41,7 @@ export interface ResearchPublishContext {
     options: { input: { trigger: "manual" | "scheduled"; userLogin: string } }
   ) => Promise<{ status: string; error?: string }>;
   getReportDispatchHitl: () => boolean;
-  createReportConfirmation: (kind: "email" | "webhook", payloadJson: string, reportId?: string | null) => string;
+  createReportConfirmation: (kind: "email" | "webhook", payloadJson: string, reportId?: string | null, createdBy?: string | null) => string;
   RESEARCH_TASK_HEARTBEAT_MS: number;
 }
 
@@ -403,7 +403,8 @@ export async function deliverResearchReport(ctx: ResearchPublishContext,
           trigger: opts.trigger,
           userLogin: opts.userLogin,
         }),
-        opts.reportId
+        opts.reportId,
+        opts.userLogin
       );
       result.held = true;
     } catch (err) {

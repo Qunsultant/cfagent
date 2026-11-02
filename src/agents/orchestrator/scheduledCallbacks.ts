@@ -249,6 +249,8 @@ export async function autonomousMarketScreen(ctx: ScheduledCallbacksContext, pay
    *  criteria replace filters). Carried through the {...payload} spread
    *  below — including Trigger-Now dispatches of the same schedule. */
   presetId?: string;
+  /** Issue #2908 (G1): the arming schedule's id, when the caller knows it — rides the canonical body (see run below). */
+  scheduleId?: string;
   /** Issue #1007: data provider for the scheduled run (default "etrade"). */
   provider?: import("../../trading").StockScreenProvider;
   /** Consolidation C3 (#1277): stage-chain config from the schedule
@@ -324,6 +326,10 @@ export async function autonomousMarketScreen(ctx: ScheduledCallbacksContext, pay
         // Issue #2062: the scheduled callback records its own trigger so
         // the run's type is data, not a guess from its provenance.
         trigger: "scheduled",
+        // Issue #2908 (G1): the schedule id rides the canonical
+        // body when the schedule payload carries one — never
+        // fabricated when it does not.
+        ...(typeof payload?.scheduleId === "string" ? { scheduleId: payload.scheduleId } : {}),
         sector: res.data?.sector || payload?.sector || "ALL",
         universe: res.data?.universe || payload?.universe || "NASDAQ100",
         // Issue #1007: provider provenance rides into the stored run

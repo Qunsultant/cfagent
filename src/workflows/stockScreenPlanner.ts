@@ -120,19 +120,26 @@ export function planScheduledScreen(
   );
 }
 
-/** Plan a run from a Slice 1 StockScreenRunSpec. */
+/**
+ * Plan a run from a Slice 1 StockScreenRunSpec. Issue #2908
+ * (G1): the trigger defaults to the spec's own trigger
+ * (scheduled only for scheduled specs; every other spec
+ * trigger plans as manual) — callers no longer re-derive
+ * it by hand; an explicit trigger still wins.
+ */
 export function planFromSpec(
   spec: StockScreenRunSpec,
-  trigger: "manual" | "scheduled",
-  timestamp: string,
+  trigger?: "manual" | "scheduled",
+  timestamp?: string,
 ): StockScreenPlan {
+  const resolvedTrigger = trigger ?? (spec.trigger === "scheduled" ? "scheduled" : "manual");
   return buildPlan(
     {
-      trigger,
+      trigger: resolvedTrigger,
       filters: spec.filters as { sector?: string },
       universe: spec.universe as UniverseId,
       ...(spec.provider ? { provider: spec.provider as StockScreenProvider } : {}),
     },
-    timestamp,
+    timestamp ?? new Date().toISOString(),
   );
 }

@@ -17,6 +17,7 @@ import { ETradeEmailTradingService } from "../../trading";
 import { ETradeWebhookService } from "../../services/tradingWebhooks";
 import {
   getCanonicalReport,
+  isCanonicalReportOwnedBy,
   parseResearchReportBody,
   resolveCanonicalReportBodyWithBackfill,
   sha256Hex,
@@ -98,7 +99,9 @@ function ports(ctx: ReportDispatchContext): OrchestratorTablePorts {
 export function createReportConfirmation(ctx: ReportDispatchContext,
   kind: "email" | "webhook" | "screener",
   payloadJson: string,
-  reportId?: string | null
+  reportId?: string | null,
+  /** Issue #2664: the login creating the hold; null for legacy callers. */
+  createdBy?: string | null
 ): string {
   const confirmations = ports(ctx).confirmations;
   const now = new Date().toISOString();
@@ -114,6 +117,7 @@ export function createReportConfirmation(ctx: ReportDispatchContext,
     status: "pending",
     createdAt: now,
     reportId: reportId ?? null,
+    createdBy: createdBy ?? null,
   });
   return id;
 }
@@ -202,6 +206,12 @@ export async function deliverStoredReportEmail(ctx: ReportDispatchContext,
 ): Promise<"sent" | "missing" | "failed"> {
   const stored = getCanonicalReport(ctx.ensureTables(), reportId);
   if (!stored) return "missing";
+  // Issue #2664: the stored row's owner must equal the calling login;
+  // a mismatch returns "missing" (never the row, never a leak signal —
+  // the route layer refuses cross-user delivery attempts with a typed
+  // 403 before this seam). Resolved through the read port, never a
+  // raw storage query.
+  if (!isCanonicalReportOwnedBy(ctx.ensureTables(), reportId, userLogin)) return "missing";
   // Issue #338 S2+S4: resolve the body through the pointer (inline rows
   // resolve to themselves and backfill to R2 on this read; a lost R2
   // object resolves to null = missing).
@@ -229,6 +239,8 @@ export async function deliverStoredReportWebhook(ctx: ReportDispatchContext,
 ): Promise<{ outcome: "sent" | "missing" | "failed"; result?: { success: boolean; status?: number; error?: string; notConfigured?: boolean } }> {
   const stored = getCanonicalReport(ctx.ensureTables(), reportId);
   if (!stored) return { outcome: "missing" };
+  // Issue #2664: same owner rule as the email leg (see above).
+  if (!isCanonicalReportOwnedBy(ctx.ensureTables(), reportId, userLogin)) return { outcome: "missing" };
   // Issue #338 S2+S4: resolve the body through the pointer (see email leg).
   const body = await resolveCanonicalReportBodyWithBackfill(ctx.ensureTables(), ctx.env, stored);
   if (body === null) return { outcome: "missing" };
@@ -291,6 +303,12 @@ export async function persistScreenerReportCanonical(ctx: ReportDispatchContext,
   criteria?: unknown;
   patternRef?: unknown;
   presetRef?: unknown;
+  /** Issue #2908 (G1): spec provenance — recorded in the body when the caller carries it. Additive: older readers ignore. */
+  scheduleId?: unknown;
+  jobId?: unknown;
+  goalId?: unknown;
+  /** Issue #2773: post-screening Pareto evaluation, recorded in the body when the run computed one. Additive. */
+  pareto?: unknown;
 }): Promise<void> {
   if (!result.userLogin) {
     console.error(`[reportDispatch] Screen report store refused: no owning userLogin (run: ${result.timestamp}).`);
@@ -342,6 +360,12 @@ export async function persistScreenerReportCanonical(ctx: ReportDispatchContext,
         ...(result.criteria !== undefined ? { criteria: result.criteria } : {}),
         ...(result.patternRef !== undefined ? { patternRef: result.patternRef } : {}),
         ...(result.presetRef !== undefined ? { presetRef: result.presetRef } : {}),
+        // Issue #2908 (G1): spec provenance rides the body.
+        ...(result.scheduleId !== undefined ? { scheduleId: result.scheduleId } : {}),
+        ...(result.jobId !== undefined ? { jobId: result.jobId } : {}),
+        ...(result.goalId !== undefined ? { goalId: result.goalId } : {}),
+        // Issue #2773: Pareto evaluation rides the body when present.
+        ...(result.pareto !== undefined ? { pareto: result.pareto } : {}),
         reportUrl: result.pdfKey
           ? `${ctx.env.APP_BASE_URL || "https://agent.openaimp.com"}/api/screener/report.pdf?key=${encodeURIComponent(result.pdfKey)}`
           : undefined,
