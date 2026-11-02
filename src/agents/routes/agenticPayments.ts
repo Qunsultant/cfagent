@@ -113,6 +113,14 @@ import {
   createPriceCatalogueAdapter,
   ensurePriceCatalogueSchema,
 } from "../../data/createPriceCataloguePorts";
+import {
+  createStoreOperatorsAdapter,
+  ensureStoreOperatorsSchema,
+} from "../../data/createStoreOperatorsPorts";
+import {
+  assertOperatorLogin,
+  type EffectiveOperatorEntry,
+} from "../../data/storeOperatorsPorts";
 import { buildScenario, GOAL_TAXONOMY } from "../../services/goalScenarioEngine";
 import { buildGoalScreenCommand } from "../../services/goalScreenWorkflowSubmission";
 import {
@@ -629,8 +637,9 @@ export async function handleAgenticPaymentsRoutes(
   //   from env.AGENT_DB. An unbound AGENT_DB fails closed on money
   //   paths (503) — the store cannot be verified, so no run starts
   //   and no balance is read as Free.
-  // - Operator writes require COMMERCIAL_STORE_OPERATORS (empty =
-  //   deny all). The consume/redeem/unredeemed-credit HTTP endpoints
+  // - Operator writes require effective operator status: env
+  //   COMMERCIAL_STORE_OPERATORS UNION the store list (#2680;
+  //   empty = deny all). The consume/redeem/unredeemed-credit HTTP endpoints
   //   from the earlier DO-store draft are gone: with D1, the
   //   payment adapter and the submit route call the port directly,
   //   so no hop-only endpoint needs to exist.
@@ -639,11 +648,67 @@ export async function handleAgenticPaymentsRoutes(
     const login = request.headers.get("x-user-login");
     return login && login.trim() ? login.trim() : null;
   };
+  // Issue #2680: effective operators = env list UNION store
+  // list. The env list is parsed once per request; the store
+  // list is preloaded once per request (one indexed SELECT) so
+  // every isStoreOperator call site below stays synchronous.
+  // When AGENT_DB is unbound, or the store read fails (e.g. the
+  // 0032 table is not yet migrated), the store set is empty and
+  // the check degrades to env-only — exactly today's behavior,
+  // never a 500, never a lockout. Env operators are the
+  // bootstrap fallback; store operators are the managed list.
+  const envOperatorLogins = (): Set<string> => {
+    const raw = (ctx.env as unknown as Record<string, unknown>)["COMMERCIAL_STORE_OPERATORS"];
+    if (typeof raw !== "string" || !raw.trim()) return new Set();
+    return new Set(
+      raw
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0),
+    );
+  };
+  const envOperators = envOperatorLogins();
+  let storeOperatorLogins = new Set<string>();
+  try {
+    const operatorsAdapter = createStoreOperatorsAdapter(ctx.env as { AGENT_DB?: unknown });
+    if (operatorsAdapter) {
+      const entries = await operatorsAdapter.listOperators();
+      storeOperatorLogins = new Set(entries.map((entry) => entry.login));
+    }
+  } catch {
+    storeOperatorLogins = new Set();
+  }
   const isStoreOperator = (login: string | null): boolean => {
     if (!login) return false;
-    const raw = (ctx.env as unknown as Record<string, unknown>)["COMMERCIAL_STORE_OPERATORS"];
-    if (typeof raw !== "string" || !raw.trim()) return false;
-    return raw.split(",").map((s) => s.trim()).includes(login);
+    return envOperators.has(login) || storeOperatorLogins.has(login);
+  };
+  // Merged effective-operator list for the management routes:
+  // env rows first-class (source "env", no added-by record),
+  // store rows from the adapter. A login in both lists shows
+  // once as env-managed; its store row is still removable, and
+  // the login stays effective via env either way. Unbound store
+  // yields the env rows alone — the env list is meaningful
+  // without a store. Callers handle ensure failures (503).
+  const listEffectiveOperators = async (): Promise<EffectiveOperatorEntry[]> => {
+    const storeAdapter = createStoreOperatorsAdapter(ctx.env as { AGENT_DB?: unknown });
+    const byLogin = new Map<string, EffectiveOperatorEntry>();
+    for (const login of [...envOperators].sort()) {
+      byLogin.set(login, { login, source: "env", addedBy: null, addedAtMs: null });
+    }
+    if (storeAdapter) {
+      await ensureStoreOperatorsSchema(storeAdapter.db);
+      for (const entry of await storeAdapter.listOperators()) {
+        if (!byLogin.has(entry.login)) {
+          byLogin.set(entry.login, {
+            login: entry.login,
+            source: "store",
+            addedBy: entry.addedBy,
+            addedAtMs: entry.addedAtMs,
+          });
+        }
+      }
+    }
+    return [...byLogin.values()].sort((a, b) => (a.login < b.login ? -1 : a.login > b.login ? 1 : 0));
   };
   const canAccessAccount = (login: string | null, userId: string): boolean =>
     login !== null && (login === userId || isStoreOperator(login));
@@ -2440,6 +2505,135 @@ export async function handleAgenticPaymentsRoutes(
     } catch (err: any) {
       const message = err.message || "Failed to set price";
       return Response.json({ error: message }, { status: /Invalid|must be/.test(message) ? 400 : 500 });
+    }
+  }
+
+  // Store operator management (#2680) — list/add/remove.
+  // All three routes 403 for non-operators. Add/remove are POST
+  // actions following the prices-route pattern (not DELETE with
+  // a body: the commercial handler's money writes are POST
+  // actions, and DELETE bodies are dropped by some proxies).
+  // Add is idempotent for an existing store row; a login that
+  // is already env-managed is 409 (env rows are managed via
+  // dashboard, never via the UI). Remove refuses (409) when it
+  // would leave zero effective operators, and 404s when there
+  // is no store row to remove. Unbound store is 503 for
+  // add/remove (there is nowhere to write) but list still
+  // returns the env rows.
+  if (path.endsWith("/payments/agentic/commercial/operators") && request.method === "GET") {
+    try {
+      const login = commercialLogin();
+      if (!isStoreOperator(login)) {
+        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+      }
+      let operators: EffectiveOperatorEntry[];
+      try {
+        operators = await listEffectiveOperators();
+      } catch (err: any) {
+        return Response.json({ error: `Operator store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+      }
+      return Response.json({ operators });
+    } catch (err: any) {
+      return Response.json({ error: err.message || "Failed to list operators" }, { status: 500 });
+    }
+  }
+
+  if (path.endsWith("/payments/agentic/commercial/operators/add") && request.method === "POST") {
+    try {
+      const login = commercialLogin();
+      if (!isStoreOperator(login)) {
+        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+      }
+      const body = (await request.json().catch(() => ({}))) as { login?: unknown };
+      let target: string;
+      try {
+        target = assertOperatorLogin(body.login);
+      } catch (err: any) {
+        return Response.json({ error: err.message }, { status: 400 });
+      }
+      if (envOperators.has(target)) {
+        return Response.json(
+          { error: `Login ${target} is already an env-managed operator: env operators are managed via dashboard, not via the UI.` },
+          { status: 409 },
+        );
+      }
+      const adapter = createStoreOperatorsAdapter(ctx.env as { AGENT_DB?: unknown });
+      if (!adapter) {
+        return Response.json({ error: "Operator store unavailable: AGENT_DB is not bound." }, { status: 503 });
+      }
+      try {
+        await ensureStoreOperatorsSchema(adapter.db);
+      } catch (err: any) {
+        return Response.json({ error: `Operator store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+      }
+      const existing = await adapter.listOperators();
+      const already = existing.find((entry) => entry.login === target);
+      if (already) {
+        return Response.json({ operator: already });
+      }
+      const operator = await adapter.addOperator({ login: target, addedBy: login });
+      ctx.audit("commercial.operator.added", "payments", { operatorLogin: operator.login, addedBy: login });
+      return Response.json({ operator });
+    } catch (err: any) {
+      const message = err.message || "Failed to add operator";
+      return Response.json({ error: message }, { status: /must be/.test(message) ? 400 : 500 });
+    }
+  }
+
+  if (path.endsWith("/payments/agentic/commercial/operators/remove") && request.method === "POST") {
+    try {
+      const login = commercialLogin();
+      if (!isStoreOperator(login)) {
+        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+      }
+      const body = (await request.json().catch(() => ({}))) as { login?: unknown };
+      let target: string;
+      try {
+        target = assertOperatorLogin(body.login);
+      } catch (err: any) {
+        return Response.json({ error: err.message }, { status: 400 });
+      }
+      const adapter = createStoreOperatorsAdapter(ctx.env as { AGENT_DB?: unknown });
+      if (!adapter) {
+        return Response.json({ error: "Operator store unavailable: AGENT_DB is not bound." }, { status: 503 });
+      }
+      try {
+        await ensureStoreOperatorsSchema(adapter.db);
+      } catch (err: any) {
+        return Response.json({ error: `Operator store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+      }
+      const storeEntries = await adapter.listOperators();
+      const hasStoreRow = storeEntries.some((entry) => entry.login === target);
+      if (!hasStoreRow) {
+        return Response.json(
+          { error: `No store operator row for login ${target}: env-managed operators are removed via dashboard, not via the UI.` },
+          { status: 404 },
+        );
+      }
+      // Last-operator guard on FRESH data (not the preloaded
+      // set): removal must never leave zero effective operators
+      // through the UI. A login that is also env-managed stays
+      // effective via env, so removing its store row is safe;
+      // the guard only fires when the effective set would empty.
+      const effectiveAfter = new Set(envOperators);
+      for (const entry of storeEntries) {
+        if (entry.login !== target) effectiveAfter.add(entry.login);
+      }
+      if (effectiveAfter.size === 0) {
+        return Response.json(
+          { error: "Refusing to remove the last effective operator: the system must never reach zero operators through the UI." },
+          { status: 409 },
+        );
+      }
+      const removed = await adapter.removeOperator({ login: target });
+      if (!removed) {
+        return Response.json({ error: `No store operator row for login ${target}.` }, { status: 404 });
+      }
+      ctx.audit("commercial.operator.removed", "payments", { operatorLogin: target, addedBy: login });
+      return Response.json({ removed: target });
+    } catch (err: any) {
+      const message = err.message || "Failed to remove operator";
+      return Response.json({ error: message }, { status: /must be/.test(message) ? 400 : 500 });
     }
   }
 
