@@ -149,6 +149,14 @@ export interface McpToolContext {
    */
   principal?: import("../mcps/openaimp/mcpPermissionPorts").McpPrincipal;
   permissionPort?: import("../mcps/openaimp/mcpPermissionPorts").ToolPermissionPort;
+  /**
+   * #2171: agent-grant enforcement for the MCP gate, populated
+   * ONLY by a server-side context owner that resolved the mode
+   * from the platform env and the agent identity from its own
+   * store. Unset → the gate is unchanged (scope check only).
+   * Never populated from tool arguments or caller headers.
+   */
+  agentAccess?: import("../mcps/openaimp/mcpPermissionPorts").McpAgentAccessOptions;
   permissionDecisionSink?: import("../observability/observabilityPorts").ObservabilitySink;
   /** #1744: execution id of the gated execution running this command (correlation only). */
   executionId?: string;
