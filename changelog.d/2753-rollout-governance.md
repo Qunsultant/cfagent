@@ -1,0 +1,3 @@
+### Added
+
+- Platform Phase 7 rollout governance derivation (#2753): product-agnostic rollout stages (internal → pilot → broad, fail-safe to internal), mainnet-gate checklist evaluator (RED unless all 8 written requirements carry evidence), readiness-gate evaluator, inert pilot gate (runnable only with named cohort + approval + owner go-ahead + testnet-only + revenue/usage/audit hooks), resource budget evaluation (empty budget or actual is unevaluated, never within by default), and risk register partitions. Pure derivation: no new table, flag, cron, queue, or route; no mainnet activation path; no pilot run or trigger.
