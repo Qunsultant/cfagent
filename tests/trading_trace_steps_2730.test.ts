@@ -355,10 +355,11 @@ describe("issue #2730 — registry spine truth-sync", () => {
     expect(entry!.carrier).toContain("TradeApprovalParams.traceparent");
     expect(entry!.evidence).toContain("workflow-step");
     const breaks = MESH_TRACE_SPINE.filter((e) => e.status === "break");
+    // #2762 closed the payment-workflow-steps break as well; the
+    // two remaining breaks are the route/channel legs.
     expect(breaks.map((b) => b.hop).sort()).toEqual([
       "channel-ingress-turns",
       "http-route-workflow-starts",
-      "payment-workflow-steps",
     ]);
   });
 });
