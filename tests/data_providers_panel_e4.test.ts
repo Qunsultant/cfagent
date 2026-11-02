@@ -136,6 +136,9 @@ function installFetch(opts: StubOptions) {
     const url = String(input);
     const method = (init?.method ?? "GET").toUpperCase();
     const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
+    if (url.includes("/api/etrade/oauth/status")) {
+      return Response.json({ authenticated: false, tokenScopes: null }, { status: 200 });
+    }
     calls.push({ method, url, body });
     if (method === "GET" && url.endsWith("/api/data-providers")) {
       if (opts.listRawBody !== undefined) {
@@ -353,13 +356,14 @@ describe("DataProvidersPanel affordances (issue #1180)", () => {
 
     const labels = (id: string) =>
       [...providerItem(id).querySelectorAll("button")].map((b) => b.textContent?.trim());
-    expect(labels("nasdaq")).toEqual(["Configure", "Deprovision"]);
-    expect(labels("cfgd")).toEqual(["Configure", "Verify", "Deprovision"]);
-    expect(labels("verf")).toEqual(["Enable", "Deprovision"]);
-    expect(labels("enbd")).toEqual(["Disable", "Deprovision"]);
-    expect(labels("dsbv")).toEqual(["Enable", "Deprovision"]);
-    expect(labels("dsbn")).toEqual(["Deprovision"]);
-    expect(labels("depr")).toEqual([]);
+    // Issue #2723: standard consistent action buttons across all providers
+    expect(labels("nasdaq")).toEqual(["Configure", "Verify", "Enable", "Deprovision"]);
+    expect(labels("cfgd")).toEqual(["Configure", "Verify", "Enable", "Deprovision"]);
+    expect(labels("verf")).toEqual(["Configure", "Verify", "Enable", "Deprovision"]);
+    expect(labels("enbd")).toEqual(["Configure", "Verify", "Disable", "Deprovision"]);
+    expect(labels("dsbv")).toEqual(["Configure", "Verify", "Enable", "Deprovision"]);
+    expect(labels("dsbn")).toEqual(["Configure", "Verify", "Enable", "Deprovision"]);
+    expect(labels("depr")).toEqual(["Configure", "Verify", "Enable", "Deprovision"]);
   });
 });
 
