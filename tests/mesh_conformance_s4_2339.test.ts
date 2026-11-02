@@ -29,10 +29,15 @@
  * is proven where S12's pins land
  * (tests/mesh_g6_workflow_conformance_2409.test.ts): the
  * recovery cells for OrchestratorAgent and TradingAgent are
- * IMPLEMENTED on that evidence, while ResearchAgent and
- * ScreenerAgent remain GAPs — re-dispositioned to the programme
- * backlog by #2409 with the evidence boundary named in their
- * cells.
+ * IMPLEMENTED on that evidence. The two GAPs S12 left —
+ * ScreenerAgent and ResearchAgent, re-dispositioned to the
+ * programme backlog by #2409 — were closed by the A9/A10 slices
+ * (#2733 / #2761, tracker #2708): start-up recovery over each
+ * class's own task ledger, terminally marking a dead
+ * incarnation's active records interrupted, with behavioral
+ * pins in tests/screener_recovery_a9_2733.test.ts and
+ * tests/research_recovery_a10_2761.test.ts. No recovery GAPs
+ * remain.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync, existsSync } from "node:fs";
@@ -204,9 +209,9 @@ const MATRIX: MatrixRow[] = [
       scheduling: NA(
         "No scheduling role of its own: its daily run is fired by the worker cron through the orchestrator's scheduled-tick route (identity-gated post-S3), and the file contains no schedule calls.",
       ),
-      recovery: GAP(
-        "Programme backlog (re-dispositioned by #2409 — no resumable record exists to pin; closing needs a design decision)",
-        "No onStart; reads are read-through from storage (getLatest returns null honestly), so eviction loses nothing durable — but an interrupted run leaves no resumable record. S12 (#2409) disposition: the cell STAYS a GAP — no workflow runs this agent's work and there is no resumable record to pin against; closing it needs a design decision (a resumable run record), not a conformance pin.",
+      recovery: IMPL(
+        "onStart (research-agent.ts:303) runs start-up recovery over the class's own task ledger: a fresh incarnation has executed nothing, so every active record (queued / claimed / running) it finds belongs to a dead incarnation and is terminally marked interrupted — failed → escalated with the interruption recorded in the record's history — by recoverInterruptedResearchTasks (:405) over ResearchTaskLedger.markInterrupted / recoverInterrupted (researchTaskLedger.ts:369 / :386). The disposition is the #615 doctrine (never auto-rerun; a human reviews the escalation); the #618 orchestrator stale sweep remains the backstop for records that go stale inside a live incarnation. The ledger's idempotency slot is respected in both directions — an active record still dedupes a duplicate create, and once the record is terminal the same key admits a genuinely new run (this agent has no concurrent-run lock; the idempotency slot is its dedupe surface). Behavioral pins: tests/research_recovery_a10_2761.test.ts drives the REAL class over one durable store with instance replacement — a prior incarnation's running task (fresh heartbeat: incarnation-keyed, not heartbeat-keyed) is escalated on start, queued records recover, terminal records are byte-identical, a second pass is a no-op, the idempotency slot is freed for a genuinely new run, and onStart never throws when the recovery write fails. No workflow layer runs this agent's work (the S12 #2409 disposition); this is the agent-level mechanism, landed by #2761 (tracker #2708 A10) on the A9 pattern (#2733).",
+        "Simulation scope: instance replacement at the module seam over the surviving store, not live workerd eviction (the fleet-wide S12 residual). Recovery is terminal marking, not resume: the ledger carries lifecycle state only (no request payload beyond trigger + login, no checkpoint, no partial results), and persistRun publishes the report before the orchestrator completes the task, so an interrupted run is never resumed or re-dispatched at the agent level — retry as a NEW run belongs to the caller/workflow layer.",
       ),
       "sdk-state": SDK_STATE_DIVERGENT,
       sessions: IMPL(
@@ -886,9 +891,10 @@ describe("fleet fact pins (#2339)", () => {
     expect(sourcesWith("onConnect")).toEqual(["TickerAgent"]);
   });
 
-  it("onStart is defined by exactly OrchestratorAgent, ScreenerAgent and TickerAgent", () => {
+  it("onStart is defined by exactly OrchestratorAgent, ResearchAgent, ScreenerAgent and TickerAgent", () => {
     expect(sourcesWith("onStart(").sort()).toEqual([
       "OrchestratorAgent",
+      "ResearchAgent",
       "ScreenerAgent",
       "TickerAgent",
     ]);

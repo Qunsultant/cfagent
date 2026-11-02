@@ -113,7 +113,7 @@ recovery column reads as it does.
 | `state` | 10 | 4 | 0 |
 | `connections` | 3 | 11 | 0 |
 | `scheduling` | 3 | 11 | 0 |
-| `recovery` | 4 | 9 | 1 |
+| `recovery` | 5 | 9 | 0 |
 | `sdk-state` | 7 | 7 | 0 |
 | `sessions` | 3 | 10 | 1 |
 | `routing` | 14 | 0 | 0 |
@@ -121,7 +121,7 @@ recovery column reads as it does.
 | `sdk-scheduling` | 2 | 12 | 0 |
 | `fibers` | 0 | 2 | 12 |
 | `skills` | 1 | 2 | 11 |
-| Total | 61 | 82 | 25 |
+| Total | 62 | 82 | 24 |
 
 168 cells (14 roster entries × 12 aspects), zero unclassified. The
 two honest headlines: **recovery has its first IMPLEMENTED cells** —
@@ -131,11 +131,12 @@ TradingAgent's workflow-mediated recovery with behavioral pins
 live workerd eviction), and S13 (#2412) closed SlackAgent's
 recovery cell the same way (instance replacement over the same
 durable store; the replacement incarnation honors the executed
-draft), while one recovery GAP remains (ResearchAgent,
-re-dispositioned to the programme backlog by #2409 with the
-evidence boundary named in its cell; ScreenerAgent's cell closed
-as IMPLEMENTED by #2733 — start-up recovery over its own task
-ledger, instance replacement over the same durable store) — and **fibers
+draft), and no recovery GAP remains: ScreenerAgent's cell
+closed as IMPLEMENTED by #2733 and ResearchAgent's by #2761
+(tracker #2708 items A9/A10) — both start-up recovery over the
+class's own task ledger, terminally marking a dead incarnation's
+active records interrupted, instance replacement over the same
+durable store) — and **fibers
 is a GAP for every PortThink agent**, judged against the real SDK
 primitive. **Skills, added by S14 (#2417), was a GAP for every
 PortThink agent at classification** — classified before any
@@ -158,7 +159,6 @@ see §4 and the cells.
 
 | Agent | Aspect | Owning slice |
 |---|---|---|
-| ResearchAgent | `recovery` | Programme backlog (re-dispositioned by #2409 — no resumable record exists to pin; closing needs a design decision) |
 | TradingAgent | `sessions` | Programme backlog (re-dispositioned by #2375 — S9 landed the door caller, not a turn) |
 | All 12 PortThink agents | `fibers` | Programme backlog (no slice yet) |
 | 11 PortThink agents (all but OrchestratorAgent) | `skills` | Programme backlog (owner addition, #2225 comment 6517280689 — first slice #2705 adopted OrchestratorAgent under the owner's 2026-11-01 direction; the remaining classes are per-class follow-up slices, owner-sequenced) |
@@ -202,7 +202,7 @@ is recorded) — dispositions in their cells.
 | `state` | IMPLEMENTED | Instance-local: ctx.storage KV (research:latest, research:history) plus SQLite via ctx.storage.sql; report PDFs via the report blob store. |
 | `connections` | NOT-APPLICABLE | No connection surface terminates on this class: no client connects and it defines no onConnect. Work arrives by DO stub RPC and agent-as-a-tool dispatch, recorded under routing. |
 | `scheduling` | NOT-APPLICABLE | No scheduling role of its own: its daily run is fired by the worker cron through the orchestrator's scheduled-tick route (identity-gated post-S3), and the file contains no schedule calls. |
-| `recovery` | GAP | No onStart; reads are read-through from storage (getLatest returns null honestly), so eviction loses nothing durable — but an interrupted run leaves no resumable record. S12 (#2409) disposition: the cell STAYS a GAP — no workflow runs this agent's work and there is no resumable record to pin against; closing it needs a design decision (a resumable run record), not a conformance pin. Owner: programme backlog (re-dispositioned by #2409). |
+| `recovery` | IMPLEMENTED | onStart (research-agent.ts:303) runs start-up recovery over the class's own task ledger: a fresh incarnation has executed nothing, so every active record (queued / claimed / running) it finds belongs to a dead incarnation and is terminally marked interrupted — failed → escalated with the interruption recorded in the record's history — by recoverInterruptedResearchTasks (:405) over ResearchTaskLedger.markInterrupted / recoverInterrupted (researchTaskLedger.ts:369 / :386). The disposition is the #615 doctrine (never auto-rerun; a human reviews the escalation); the #618 orchestrator stale sweep remains the backstop for records that go stale inside a live incarnation. The ledger's idempotency slot is respected in both directions — an active record still dedupes a duplicate create, and once the record is terminal the same key admits a genuinely new run (this agent has no concurrent-run lock; the idempotency slot is its dedupe surface). Behavioral pins: tests/research_recovery_a10_2761.test.ts drives the REAL class over one durable store with instance replacement — a prior incarnation's running task (fresh heartbeat: incarnation-keyed, not heartbeat-keyed) is escalated on start, queued records recover, terminal records are byte-identical, a second pass is a no-op, the idempotency slot is freed for a genuinely new run, and onStart never throws when the recovery write fails. No workflow layer runs this agent's work (the S12 #2409 disposition); this is the agent-level mechanism, landed by #2761 (tracker #2708 A10) on the A9 pattern (#2733). Residual: Simulation scope: instance replacement at the module seam over the surviving store, not live workerd eviction (the fleet-wide S12 residual). Recovery is terminal marking, not resume: the ledger carries lifecycle state only (no request payload beyond trigger + login, no checkpoint, no partial results), and persistRun publishes the report before the orchestrator completes the task, so an interrupted run is never resumed or re-dispatched at the agent level — retry as a NEW run belongs to the caller/workflow layer. |
 | `sdk-state` | IMPLEMENTED | Deliberate divergence, classified explicitly per the reference set (#2225 comment 6491152513): durable state is held through the actor-port state facet (createCfActorState over ctx.storage, src/actors/cfAgentsAdapter.ts:29-40) and Think's own storage use; the SDK setState API is unused (fleet pin: zero this.setState in agent sources). |
 | `sessions` | IMPLEMENTED | Turn-capable: portHooks are set in the constructor (:194) as identity pass-throughs of its own getModel/getSystemPrompt/getTools. Turns are driven remotely by the orchestrator (runAgentTool dispatch); the transcript lives in its own instance's port session store. Non-chat: no user-facing session continuity. |
 | `routing` | IMPLEMENTED | Binding RESEARCH_AGENT; stub callers are the orchestrator and server.ts; A2A surface research (registry). |

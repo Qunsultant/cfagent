@@ -8,7 +8,11 @@
  * heartbeat, the execution path actually taken (Think vs deterministic
  * fallback), an immutable report reference (runId), and a deterministic
  * outcome evaluation. A failed run ends in `escalated` — visible to a
- * human — instead of vanishing into an error return.
+ * human — instead of vanishing into an error return. Since #2761 the
+ * owning agent also recovers at start-up: a fresh incarnation marks
+ * every active record interrupted (same failed → escalated
+ * disposition, a distinct history note), so an eviction's records are
+ * truthful at first touch rather than at the next sweep.
  *
  * SDK-free, following the ResearchConfigService idiom: storage is an
  * injected key/value store, so the agent (DO SQLite) and tests
@@ -348,6 +352,44 @@ export class ResearchTaskLedger {
     task.error = reason;
     this.save(task);
     return this.escalate(id, "stale task sweep");
+  }
+
+  /**
+   * Issue #2761 (tracker #2708 A10): fail + escalate a task whose
+   * execution was interrupted — the agent incarnation that owned
+   * it is gone (evicted / restarted mid-run), so no live execution
+   * will ever resolve the record. The disposition is the stale
+   * sweep's (#615: never auto-rerun — the run may have partially
+   * happened, and persistRun may already have published its
+   * report, so a human reviews the escalation), but the history
+   * note is distinct: this is start-up recovery, not heartbeat
+   * staleness, and the record's history is the audit trail that
+   * keeps the two apart.
+   */
+  markInterrupted(id: string, reason: string): ResearchTask {
+    const task = this.transition(id, ["queued", "claimed", "running"], "failed", reason);
+    task.error = reason;
+    this.save(task);
+    return this.escalate(id, "interrupted run recovery; awaiting human review");
+  }
+
+  /**
+   * Issue #2761: recover every active task in the ledger as
+   * interrupted. Called by the owning agent's onStart: a fresh
+   * incarnation has executed nothing, so each active record
+   * belongs to a dead incarnation and is orphaned by construction
+   * — deliberately NO heartbeat-age gate (that gate is the stale
+   * sweep's, for records inside a LIVE incarnation's lifetime).
+   * Terminal records are never touched, so a second pass over a
+   * recovered ledger returns []. Returns the recovered tasks.
+   */
+  recoverInterrupted(reason: string): ResearchTask[] {
+    const recovered: ResearchTask[] = [];
+    for (const task of this.list(Number.MAX_SAFE_INTEGER)) {
+      if (!ACTIVE.has(task.status)) continue;
+      recovered.push(this.markInterrupted(task.id, reason));
+    }
+    return recovered;
   }
 
   private load(id: string): ResearchTask {
