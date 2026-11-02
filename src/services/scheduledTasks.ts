@@ -16,6 +16,10 @@ import { getServiceUserLogin } from "../security/serviceIdentity";
 import { createMessagingPorts } from "../messaging/createMessagingPorts";
 import { toScreenerEnvelope } from "../messaging/screenerEventEnvelope";
 import {
+  checkScreenerDeliveryConfig,
+  type ScreenerDeliveryConfigStatus,
+} from "./screenerDeliveryConfig";
+import {
   guardScheduledETradeAuth,
   type AuthEpisodeStore,
 } from "./etradeAuthPreflight";
@@ -565,7 +569,7 @@ export class ScheduledTasksService {
   private screenerBus?: ScreenerEventBus;
   private async publishScreenerEvent(
     event: import("../events/screenerEvents").ScreenerEvent
-  ): Promise<void> {
+  ): Promise<ScreenerDeliveryConfigStatus | undefined> {
     try {
       // Issue #1123 S5b: the tracked pipeline is the preferred sink —
       // the run is recorded as a main job and chained (report →
@@ -582,8 +586,21 @@ export class ScheduledTasksService {
           this.userLogin,
           Boolean((event as { stageChain?: unknown }).stageChain) || event.type.startsWith("screener."),
         );
-        return;
+        // Chained delivery owns its own errors — no bus-path config
+        // status applies here.
+        return undefined;
       }
+      // Issue #1770 (slice B): the bus-path email config status for
+      // the run's task result — only when this run requested email
+      // (event recipient or the deployment default). The status
+      // describes the deployment's transports, which the queue
+      // consumer shares, so it holds for the queue path too.
+      const emailTo =
+        (event as { emailTo?: string }).emailTo ??
+        (this.env as unknown as Record<string, unknown>).SCREENER_EMAIL_TO;
+      const deliveryConfig = emailTo
+        ? checkScreenerDeliveryConfig(this.env)
+        : undefined;
       // Issue #1739: the durable queue is primary for the two
       // bus-subscribed event types (screener.completed / screener.failed
       // — screener.md §8.1). options.* events keep the legacy bus path:
@@ -598,7 +615,7 @@ export class ScheduledTasksService {
             const report = await ports.publisher.publish(
               toScreenerEnvelope(event, this.userLogin)
             );
-            if (report.deliveredTo.length > 0) return;
+            if (report.deliveredTo.length > 0) return deliveryConfig;
             console.warn(
               "[ScheduledTasksService] queue publish reached no subscriber stream — falling back to the in-process bus."
             );
@@ -619,6 +636,7 @@ export class ScheduledTasksService {
         });
       }
       await this.screenerBus.publish(event);
+      return deliveryConfig;
     } catch (err) {
       console.warn(
         "[ScheduledTasksService] screener event publish failed:",
@@ -1096,7 +1114,10 @@ export class ScheduledTasksService {
 
       // Issue #210: publish to the event bus so Slack/email/webhook
       // subscribers can harvest the results.
-      await this.publishScreenerEvent({
+      // Issue #1770 (slice B): the bus-path delivery-config status
+      // rides the run result so a missing email transport is visible
+      // on the run, not a silent skip.
+      const deliveryConfig = await this.publishScreenerEvent({
         type: "screener.completed",
         timestamp,
         universe: result.universe,
@@ -1162,6 +1183,7 @@ export class ScheduledTasksService {
             email: Boolean(options.emailTo),
             webhook: Boolean(options.webhookUrl),
           },
+          ...(deliveryConfig ? { deliveryConfig } : {}),
         },
         timestamp,
       };
@@ -1197,7 +1219,10 @@ export class ScheduledTasksService {
       }
 
       // Issue #210: publish the failure so subscribers can notify.
-      await this.publishScreenerEvent({
+      // Issue #1770 (slice B): same delivery-config status as the
+      // success path, so a failed run that also lost its email
+      // notice names the missing transport.
+      const deliveryConfig = await this.publishScreenerEvent({
         type: "screener.failed",
         timestamp,
         universe: options.universe || "TECH",
@@ -1215,6 +1240,7 @@ export class ScheduledTasksService {
         success: false,
         taskType: "market_screen",
         error: err.message || "Market screener execution error",
+        ...(deliveryConfig ? { deliveryConfig } : {}),
         timestamp,
       };
     }
