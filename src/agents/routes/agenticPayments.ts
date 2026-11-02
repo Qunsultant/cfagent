@@ -2346,6 +2346,36 @@ export async function handleAgenticPaymentsRoutes(
     }
   }
 
+  // GET /payments/agentic/commercial/prices (operator only, issue 2739)
+  // — the operator price-entries read: the full catalogue entries
+  // (family, price, updated time, approval status, approver, approval
+  // time) for the price management UI. The pricing GET returns price
+  // values only, so this read is what lets the UI show real approval
+  // state instead of Unknown. Operator gating mirrors the POST route
+  // (COMMERCIAL_STORE_OPERATORS, empty = deny all); a missing login
+  // is 401 like the pricing GET. This GET never ensures the schema
+  // (no writes on a read path, mirroring the pricing GET); an
+  // unbound store is 503, never a silent no-op.
+  if (path.endsWith("/payments/agentic/commercial/prices") && request.method === "GET") {
+    try {
+      const login = commercialLogin();
+      if (!login) {
+        return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      }
+      if (!isStoreOperator(login)) {
+        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+      }
+      const catalogue = createPriceCatalogueAdapter(ctx.env as { AGENT_DB?: unknown });
+      if (!catalogue) {
+        return Response.json({ error: "Price catalogue unavailable: AGENT_DB is not bound." }, { status: 503 });
+      }
+      const entries = await catalogue.getAllPrices();
+      return Response.json({ entries });
+    } catch (err: any) {
+      return Response.json({ error: err.message || "Failed to read prices." }, { status: 500 });
+    }
+  }
+
   // POST /payments/agentic/commercial/prices (operator only, #2185)
   // — the operator price upsert: changing a per-run price needs no
   // code deploy, because the gate reads the catalogue, not code.

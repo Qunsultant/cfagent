@@ -313,19 +313,20 @@ const priceMutedStyle: React.CSSProperties = { color: "var(--color-text-muted)" 
 const priceFlagRowStyle: React.CSSProperties = { display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap", marginBottom: "var(--space-3)" };
 const priceErrorWrapStyle: React.CSSProperties = { marginTop: "var(--space-1)" };
 const priceFootnoteStyle: React.CSSProperties = { margin: "var(--space-3) 0 0", color: "var(--color-text-muted)", fontSize: "var(--font-size-body)" };
+const priceEditRowStyle: React.CSSProperties = { display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" };
 
 /**
  * Store price approval (issue 2677, slice A). A LIVE operator action,
  * unlike the simulation on this page: approving a family here records
  * a real price approval through POST /payments/agentic/commercial/prices.
  * The monetization gate treats a merely-proposed price as missing, so
- * the table shows proposed vs approved distinctly — with one honest
- * limitation: no route returns price entries, so a family's approval
- * state reads Unknown until an approval is recorded in this section.
- * The server remains authoritative: a price change returns an entry to
- * proposed, and approving after such a change re-records approver and
- * time. Rendered text never uses the "#NNNN" issue-number form (the
- * ratchet counts it as a hex literal).
+ * the table shows proposed vs approved distinctly. The entries read
+ * (GET /payments/agentic/commercial/prices) supplies real approval
+ * state; a family reads Unknown only when that read fails or is
+ * unavailable. The server remains authoritative: a price change
+ * returns an entry to proposed, and approving after such a change
+ * re-records approver and time. Rendered text never uses the "#NNNN"
+ * issue-number form (the ratchet counts it as a hex literal).
  */
 export type StorePriceFamily = "stock" | "goal" | "options" | "strategy";
 export const STORE_PRICE_FAMILIES: Array<{ id: StorePriceFamily; label: string }> = [
@@ -338,6 +339,14 @@ export const STORE_PRICE_FAMILIES: Array<{ id: StorePriceFamily; label: string }
 export interface PriceApprovalInfo {
   approvedBy: string;
   approvedAtMs: number;
+}
+
+export interface PriceEntryState {
+  priceUSD: number;
+  approvalStatus: "proposed" | "approved";
+  approvedBy: string | null;
+  approvedAtMs: number | null;
+  updatedAtMs: number;
 }
 
 export type OperatorProbe = "operator" | "not-operator" | "unknown";
@@ -366,6 +375,10 @@ export function PriceApprovalSection({ userLogin }: { userLogin?: string }) {
   const [prices, setPrices] = useState<Partial<Record<StorePriceFamily, number>>>({});
   const [monetizationOn, setMonetizationOn] = useState<boolean | null>(null);
   const [approvals, setApprovals] = useState<Partial<Record<StorePriceFamily, PriceApprovalInfo>>>({});
+  const [entries, setEntries] = useState<Partial<Record<StorePriceFamily, PriceEntryState>>>({});
+  const [entriesAvailable, setEntriesAvailable] = useState(false);
+  const [drafts, setDrafts] = useState<Partial<Record<StorePriceFamily, string>>>({});
+  const [needsReapproval, setNeedsReapproval] = useState<Partial<Record<StorePriceFamily, boolean>>>({});
   const [busyFamily, setBusyFamily] = useState<StorePriceFamily | null>(null);
   const [rowError, setRowError] = useState<Partial<Record<StorePriceFamily, string>>>({});
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -379,6 +392,7 @@ export function PriceApprovalSection({ userLogin }: { userLogin?: string }) {
     setLoading(true);
     setLoadError(null);
     const headers: Record<string, string> = { "x-user-login": userLogin };
+    let pricingPrices: Partial<Record<StorePriceFamily, number>> = {};
     try {
       const res = await globalThis.fetch("/payments/agentic/commercial/pricing", { headers });
       const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
@@ -392,11 +406,54 @@ export function PriceApprovalSection({ userLogin }: { userLogin?: string }) {
             if (typeof raw[id] === "number") next[id] = raw[id] as number;
           }
         }
+        pricingPrices = next;
         setPrices(next);
         setMonetizationOn(typeof data["monetizationEnabled"] === "boolean" ? (data["monetizationEnabled"] as boolean) : null);
       }
     } catch {
       setLoadError("Price list could not be reached.");
+    }
+    // Entries read (issue 2739): full approval state. A failed read
+    // leaves entries unavailable and the table falls back to
+    // session-recorded approvals with Unknown otherwise; it never
+    // blocks the section, and for a non-operator the 403 here is
+    // expected (the probe below is the gating signal).
+    try {
+      const res = await globalThis.fetch("/payments/agentic/commercial/prices", { headers });
+      const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      const list = data["entries"];
+      if (!res.ok || !Array.isArray(list)) {
+        setEntriesAvailable(false);
+      } else {
+        const nextEntries: Partial<Record<StorePriceFamily, PriceEntryState>> = {};
+        const nextPrices: Partial<Record<StorePriceFamily, number>> = {};
+        for (const raw of list) {
+          const row = raw as Record<string, unknown>;
+          if (typeof row["family"] !== "string" || typeof row["priceUSD"] !== "number") continue;
+          const id = row["family"] as StorePriceFamily;
+          if (!STORE_PRICE_FAMILIES.some((f) => f.id === id)) continue;
+          nextEntries[id] = {
+            priceUSD: row["priceUSD"] as number,
+            approvalStatus: row["approvalStatus"] === "approved" ? "approved" : "proposed",
+            approvedBy: typeof row["approvedBy"] === "string" ? (row["approvedBy"] as string) : null,
+            approvedAtMs: typeof row["approvedAtMs"] === "number" ? (row["approvedAtMs"] as number) : null,
+            updatedAtMs: typeof row["updatedAtMs"] === "number" ? (row["updatedAtMs"] as number) : 0,
+          };
+          nextPrices[id] = row["priceUSD"] as number;
+        }
+        const merged = { ...pricingPrices, ...nextPrices };
+        setEntries(nextEntries);
+        setEntriesAvailable(true);
+        setPrices(merged);
+        const nextDrafts: Partial<Record<StorePriceFamily, string>> = {};
+        for (const { id } of STORE_PRICE_FAMILIES) {
+          if (merged[id] !== undefined) nextDrafts[id] = String(merged[id]);
+        }
+        setDrafts(nextDrafts);
+        setNeedsReapproval({});
+      }
+    } catch {
+      setEntriesAvailable(false);
     }
     try {
       const res = await globalThis.fetch("/payments/agentic/commercial/prices", {
@@ -447,6 +504,23 @@ export function PriceApprovalSection({ userLogin }: { userLogin?: string }) {
             ...prev,
             [family]: { approvedBy: entry["approvedBy"] as string, approvedAtMs: entry["approvedAtMs"] as number },
           }));
+          setEntries((prev) => ({
+            ...prev,
+            [family]: {
+              priceUSD:
+                typeof entry["priceUSD"] === "number"
+                  ? (entry["priceUSD"] as number)
+                  : (prev[family]?.priceUSD ?? prices[family] ?? 0),
+              approvalStatus: "approved",
+              approvedBy: entry["approvedBy"] as string,
+              approvedAtMs: entry["approvedAtMs"] as number,
+              updatedAtMs:
+                typeof entry["updatedAtMs"] === "number"
+                  ? (entry["updatedAtMs"] as number)
+                  : (prev[family]?.updatedAtMs ?? 0),
+            },
+          }));
+          setNeedsReapproval((prev) => ({ ...prev, [family]: false }));
         }
       }
     } catch {
@@ -455,12 +529,128 @@ export function PriceApprovalSection({ userLogin }: { userLogin?: string }) {
     setBusyFamily(null);
   };
 
+  /**
+   * Client-side price validation mirroring the server's assertPriceUSD
+   * (finite, positive; the server rounds to cents). An invalid draft
+   * shows an inline error and sends no request.
+   */
+  const validateDraft = (family: StorePriceFamily): number | null => {
+    const raw = (drafts[family] ?? "").trim();
+    const value = Number(raw);
+    if (raw === "" || !Number.isFinite(value) || value <= 0) {
+      setRowError((prev) => ({ ...prev, [family]: "Enter a positive price." }));
+      return null;
+    }
+    return value;
+  };
+
+  const applyEntryResponse = (
+    family: StorePriceFamily,
+    res: Response,
+    data: Record<string, unknown>,
+  ): void => {
+    if (res.status === 403) {
+      setOperator("not-operator");
+      setRowError((prev) => ({ ...prev, [family]: "You are not a store operator." }));
+      return;
+    }
+    if (!res.ok) {
+      setRowError((prev) => ({
+        ...prev,
+        [family]:
+          typeof data["error"] === "string" ? (data["error"] as string) : `Price update failed (HTTP ${res.status}).`,
+      }));
+      return;
+    }
+    const entry = data["entry"] as Record<string, unknown> | undefined;
+    if (!entry || typeof entry["priceUSD"] !== "number" || typeof entry["approvalStatus"] !== "string") {
+      setRowError((prev) => ({ ...prev, [family]: "Price update response was incomplete." }));
+      return;
+    }
+    const approved = entry["approvalStatus"] === "approved";
+    setPrices((prev) => ({ ...prev, [family]: entry["priceUSD"] as number }));
+    setDrafts((prev) => ({ ...prev, [family]: String(entry["priceUSD"] as number) }));
+    setEntries((prev) => ({
+      ...prev,
+      [family]: {
+        priceUSD: entry["priceUSD"] as number,
+        approvalStatus: approved ? "approved" : "proposed",
+        approvedBy: typeof entry["approvedBy"] === "string" ? (entry["approvedBy"] as string) : null,
+        approvedAtMs: typeof entry["approvedAtMs"] === "number" ? (entry["approvedAtMs"] as number) : null,
+        updatedAtMs:
+          typeof entry["updatedAtMs"] === "number" ? (entry["updatedAtMs"] as number) : (prev[family]?.updatedAtMs ?? 0),
+      },
+    }));
+    if (approved) {
+      if (typeof entry["approvedBy"] === "string" && typeof entry["approvedAtMs"] === "number") {
+        setApprovals((prev) => ({
+          ...prev,
+          [family]: { approvedBy: entry["approvedBy"] as string, approvedAtMs: entry["approvedAtMs"] as number },
+        }));
+      }
+      setNeedsReapproval((prev) => ({ ...prev, [family]: false }));
+    } else {
+      // A price write lands as proposed and clears any prior approval
+      // (#2547): the row must show that consequence, not hide it.
+      setNeedsReapproval((prev) => ({ ...prev, [family]: true }));
+    }
+  };
+
+  const postPrice = async (family: StorePriceFamily, body: Record<string, unknown>) => {
+    if (!userLogin || busyFamily) return;
+    setBusyFamily(family);
+    setRowError((prev) => ({ ...prev, [family]: undefined }));
+    try {
+      const res = await globalThis.fetch("/payments/agentic/commercial/prices", {
+        method: "POST",
+        headers: { "x-user-login": userLogin, "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      applyEntryResponse(family, res, data);
+    } catch {
+      setRowError((prev) => ({ ...prev, [family]: "Price update could not be reached." }));
+    }
+    setBusyFamily(null);
+  };
+
+  const save = async (family: StorePriceFamily) => {
+    const value = validateDraft(family);
+    if (value === null) return;
+    await postPrice(family, { family, priceUSD: value });
+  };
+
+  const saveAndApprove = async (family: StorePriceFamily) => {
+    const value = validateDraft(family);
+    if (value === null) return;
+    await postPrice(family, { family, priceUSD: value, approvalStatus: "approved" });
+  };
+
   const canApprove = operator === "operator";
+  type ApprovalDisplay =
+    | { kind: "hidden" }
+    | { kind: "unknown" }
+    | { kind: "approved"; approvedBy: string; approvedAtMs: number }
+    | { kind: "proposed"; updatedAtMs: number; needsReapproval: boolean };
+  const approvalFor = (id: StorePriceFamily): ApprovalDisplay => {
+    if (operator === "not-operator") return { kind: "hidden" };
+    if (entriesAvailable) {
+      const entry = entries[id];
+      if (!entry) return { kind: "unknown" };
+      if (entry.approvalStatus === "approved" && entry.approvedBy && entry.approvedAtMs !== null) {
+        return { kind: "approved", approvedBy: entry.approvedBy, approvedAtMs: entry.approvedAtMs };
+      }
+      return { kind: "proposed", updatedAtMs: entry.updatedAtMs, needsReapproval: !!needsReapproval[id] };
+    }
+    const approval = approvals[id];
+    return approval ? { kind: "approved", ...approval } : { kind: "unknown" };
+  };
   const rows = STORE_PRICE_FAMILIES.map(({ id, label }) => ({
     id,
     label,
     priceUSD: prices[id] ?? null,
-    approval: approvals[id] ?? null,
+    approval: approvalFor(id),
+    draft: drafts[id] ?? "",
     error: rowError[id] ?? null,
   }));
 
@@ -515,12 +705,24 @@ export function PriceApprovalSection({ userLogin }: { userLogin?: string }) {
                 key: "approval",
                 header: "Approval",
                 render: (row) =>
-                  row.approval ? (
+                  row.approval.kind === "hidden" ? (
+                    "—"
+                  ) : row.approval.kind === "approved" ? (
                     <>
                       <Badge tone="success">Approved</Badge>{" "}
                       <span style={priceMutedStyle}>
                         by {row.approval.approvedBy} · {new Date(row.approval.approvedAtMs).toLocaleString()}
                       </span>
+                    </>
+                  ) : row.approval.kind === "proposed" ? (
+                    <>
+                      <Badge tone="neutral">Proposed</Badge>{" "}
+                      <span style={priceMutedStyle}>
+                        updated {new Date(row.approval.updatedAtMs).toLocaleString()}
+                      </span>
+                      {row.approval.needsReapproval && (
+                        <span style={priceMutedStyle}> · Needs re-approval</span>
+                      )}
                     </>
                   ) : (
                     <Badge tone="neutral">Unknown</Badge>
@@ -532,15 +734,46 @@ export function PriceApprovalSection({ userLogin }: { userLogin?: string }) {
                 render: (row) => (
                   <>
                     {canApprove ? (
-                      <Button
-                        variant="primary"
-                        size="sm"
-                        aria-label={`Approve ${row.label} price`}
-                        loading={busyFamily === row.id}
-                        onClick={() => void approve(row.id)}
-                      >
-                        Approve
-                      </Button>
+                      <div style={priceEditRowStyle}>
+                        <TextInput
+                          size="sm"
+                          type="number"
+                          inputMode="decimal"
+                          min="0"
+                          step="0.01"
+                          aria-label={`Edit ${row.label} price`}
+                          value={row.draft}
+                          disabled={busyFamily === row.id}
+                          onChange={(e) => setDrafts((prev) => ({ ...prev, [row.id]: e.target.value }))}
+                        />
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          aria-label={`Save ${row.label} price`}
+                          loading={busyFamily === row.id}
+                          onClick={() => void save(row.id)}
+                        >
+                          Save
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          aria-label={`Save and approve ${row.label} price`}
+                          loading={busyFamily === row.id}
+                          onClick={() => void saveAndApprove(row.id)}
+                        >
+                          Save & approve
+                        </Button>
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          aria-label={`Approve ${row.label} price`}
+                          loading={busyFamily === row.id}
+                          onClick={() => void approve(row.id)}
+                        >
+                          Approve
+                        </Button>
+                      </div>
                     ) : (
                       "—"
                     )}
@@ -557,11 +790,11 @@ export function PriceApprovalSection({ userLogin }: { userLogin?: string }) {
             rowKey={(row) => row.id}
           />
           <p style={priceFootnoteStyle}>
-            Approval state shows only approvals recorded here: the price
-            list does not report approval state, so a family reads
-            Unknown until its approval is recorded. Approving re-records
-            the approver and time; a price change returns a family to
-            proposed, after which it must be approved again.
+            Approval state comes from the price entries read: a family
+            reads Unknown only when that read fails. Saving a price
+            returns the family to proposed and clears its approval, so
+            it must be approved again; Save & approve does both in
+            one request.
           </p>
         </>
       )}
