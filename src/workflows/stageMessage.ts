@@ -47,11 +47,16 @@
  * permanent bypass): today the monolithic path
  * (ScreenerAgent.runScreen) runs stages in-process and
  * persists via persistRun + the canonical report, emitting
- * no stage messages. That path is the degenerate case this
+ * no stage messages — EXCEPT the report leg since G8
+ * #2869: generateRunPdf persists the analysis to a
+ * per-run key and consumes a real analysis-done message
+ * through stageReportProduction (in-process consume, not
+ * queue transport). That path is the degenerate case this
  * contract migrates: a follow-up slice under #2869 emits
  * one stage message per stage boundary inside runScreenInner
  * (persist-then-publish, same contract), after which the
- * fused path is gone. This slice lands the contract, the
+ * fused path is gone, and a second follow-up wires queue
+ * transport for the analysis-done message. This slice lands the contract, the
  * report consumer, and the batching primitives; it does NOT
  * rewrite any stage's execution, and it does not claim the
  * migration is done.

@@ -6,9 +6,12 @@
  * the consumer receives ONLY a stage message plus injected
  * functions. It reads the persisted analysis through
  * readPersisted (canonical store, by artifact key) and hands
- * that persisted result to generate (production wiring:
- * unifiedReportPipeline.runReportPipeline, whose input
- * `result` is the persisted result — never a live run).
+ * that persisted result to generate (production wiring
+ * since G8 #2869: stageReportProduction
+ * .generateRunPdfViaStageConsumer, whose generate fn is
+ * the one generation module's PDF leg — itself
+ * unifiedReportPipeline.runReportPipeline — with input
+ * `result` the persisted result, never a live run).
  * There is NO fetch, provider, or quote input anywhere in
  * this module: report generation from persisted data only
  * is a property of the signature, so a live re-fetch cannot
@@ -20,10 +23,17 @@
  * Exactly-once effect: the consumer claims the message's
  * idempotencyKey before generating; a redelivery for an
  * already-claimed key returns duplicate-suppressed without
- * regenerating. Poison: a message that fails validation
- * (wrong stage, missing runId/artifact keys) is
- * dead-lettered immediately — attempt count is irrelevant,
- * a poison message never becomes valid by retrying.
+ * regenerating. Release-on-failure (G8 #2869): when
+ * generation itself throws, the claim is released (when
+ * the store supports delete) — a failed generation has
+ * no effect to deduplicate, so a retry, including #1278
+ * regeneration of a run whose PDF failed, must be
+ * allowed to generate. A successful generation never
+ * releases: its output is never regenerated. Poison: a
+ * message that fails validation (wrong stage, missing
+ * runId/artifact keys) is dead-lettered immediately —
+ * attempt count is irrelevant, a poison message never
+ * becomes valid by retrying.
  * Budget: past maxAttempts, a well-formed but failing
  * message is dead-lettered (pipelinePolicy budgets govern
  * the queue/workflow retry layer; the caller passes the
@@ -57,6 +67,12 @@ export interface StageConsumeResult {
 export interface StageClaimStore {
   has(key: string): boolean;
   add(key: string): void;
+  /**
+   * Optional: release a claim. Used ONLY when generation
+   * itself throws (release-on-failure). Absent = release
+   * is a no-op and a failed attempt keeps its claim.
+   */
+  delete?(key: string): void;
 }
 
 export interface PersistedAnalysis {
@@ -121,11 +137,21 @@ export async function consumeAnalysisDone(args: {
       `report consumer refused: persisted analysis for run ${message.runId} is missing or has no full set (allStocks) — refusing to regenerate analysis inside report generation.`,
     );
   }
-  const output = await args.generate({
-    result: persisted,
-    runId: message.runId,
-    userLogin: message.userLogin,
-    partial: persisted.partial !== undefined && persisted.partial !== null,
-  });
+  let output: unknown;
+  try {
+    output = await args.generate({
+      result: persisted,
+      runId: message.runId,
+      userLogin: message.userLogin,
+      partial: persisted.partial !== undefined && persisted.partial !== null,
+    });
+  } catch (err) {
+    // Release-on-failure (G8 #2869): a failed generation
+    // produced no effect, so the claim must not block a
+    // retry. The throw still propagates — the caller
+    // records the failure; it is never swallowed here.
+    claims?.delete?.(message.idempotencyKey);
+    throw err;
+  }
   return { status: "generated", output };
 }
