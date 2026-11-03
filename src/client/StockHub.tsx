@@ -1072,7 +1072,18 @@ export function StockHub({
           <PresetsPanel
             userLogin={userLogin}
             currentFilter={{}}
-            onApplyPreset={() => handleTabChange("new-screen")}
+            // Issue #2860 (audit F3): the presets tab Apply
+            // was navigate-only — the criteria the panel
+            // passes up were dropped and New Screen opened
+            // with whatever draft was there. Apply through
+            // handleCriteriaChange first (sets the criteria
+            // and clears any applied pattern), then navigate
+            // — the same order PresetsPanel already uses
+            // internally (apply, then navigate).
+            onApplyPreset={(criteria) => {
+              handleCriteriaChange(criteria);
+              handleTabChange("new-screen");
+            }}
             onNavigateNewScreen={() => handleTabChange("new-screen")}
           />
         </div>
