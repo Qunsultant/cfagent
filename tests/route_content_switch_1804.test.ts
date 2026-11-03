@@ -43,9 +43,12 @@ function shellContentKeys(src: string): string[] {
 
 // #2896: the Stock Hub route is shell-retained, so the set gains stock-hub.
 // #2954: the Assets Hub route is retained, so the set gains assets-hub.
+// #2970: the own-pages routes are retained, so the set gains
+// goal-screen, review, and track-record.
 const HISTORICAL_TRADING_IDS = [
   "assets-hub",
   "autopilot",
+  "goal-screen",
   "ledger",
   "omnichannel",
   "options",
@@ -53,10 +56,12 @@ const HISTORICAL_TRADING_IDS = [
   "orders",
   "portfolio",
   "reports",
+  "review",
   "scanner",
   "schedules",
   "screeners",
   "stock-hub",
+  "track-record",
   "trading",
   "voice",
 ];
@@ -97,7 +102,7 @@ describe("route-table-derived content switch (#2077)", () => {
     expect(chatSrc.slice(start, end)).not.toContain('{tab === "');
   });
 
-  it("the retained set is exactly the historical trading set (#388, #2896, #2954)", () => {
+  it("the retained set is exactly the historical trading set (#388, #2896, #2954, #2970)", () => {
     expect([...TRADING_TABS].sort()).toEqual([...HISTORICAL_TRADING_IDS].sort());
   });
 

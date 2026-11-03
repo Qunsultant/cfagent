@@ -79,8 +79,7 @@ describe("Deep-link catalog (issue #2776)", () => {
       view: "ads",
     });
     expect(deepLinkForNavNode(null, "goal-screen")).toEqual({
-      tab: "assets-hub",
-      view: "goal-screen",
+      tab: "goal-screen",
     });
     expect(deepLinkForNavNode(null, "sandbox")).toEqual({
       href: "/checkout/sandbox",
@@ -111,10 +110,10 @@ describe("Deep-link catalog (issue #2776)", () => {
       tab: "options",
       view: "strategy-scanner",
     });
-    // Issue #2954: review lives on the Assets Hub now.
+    // Issue #2970: review has its own page now (the hub tab stays
+    // until #2971 via the keyed assets-hub:review override).
     expect(deepLinkForNavNode("workflow-runs", "review")).toEqual({
-      tab: "assets-hub",
-      view: "review",
+      tab: "review",
     });
     expect(deepLinkForNavNode("platform-admin", "platform-admin:ads")).toEqual({
       tab: "platform-admin",

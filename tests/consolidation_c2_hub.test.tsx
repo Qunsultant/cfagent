@@ -304,17 +304,13 @@ describe("C2 source pins", () => {
     expect(tradingHub).not.toContain("ScreeningMovedNotice");
     expect(tradingHub).not.toContain("Screening Moved to the Screeners Hub");
     // Issue #2954: the options/scanner/iv-history subtabs render the
-    // Options copy hub now; reports/schedules still render the
-    // ScreenersHub (Assets Hub).
+    // Options copy hub now. Issue #2970: reports/schedules render
+    // their panels directly (the hub still hosts them until #2971).
     expect(tradingHub).toContain('renderOptionsHub()');
     expect(tradingHub).toContain('renderOptionsHub("strategy-scanner")');
     expect(tradingHub).toContain('renderOptionsHub("iv-history")');
-    for (const tab of ["reports", "schedules"]) {
-      expect(tradingHub).toContain(`renderScreenersHub("${tab}")`);
-    }
-    // Reports/Schedules are hosted by the hub now, not mounted here.
-    expect(tradingHub).not.toContain("<ReportsPanel");
-    expect(tradingHub).not.toContain("<SchedulesPanel");
+    expect(tradingHub).toContain("<ReportsPanel");
+    expect(tradingHub).toContain("<SchedulesPanel");
   });
 
   it("the hub hosts reports, schedules, the review inbox, and the track record", () => {
