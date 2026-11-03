@@ -779,15 +779,6 @@
         "badge": "Flows",
         "badgeType": "live",
         "description": "Institutional block trades, sweeps, and dark pool prints"
-      },
-      {
-        "id": "best-trade",
-        "label": "Best Trade",
-        "shortLabel": "Best",
-        "icon": "Goal",
-        "badge": "Best",
-        "badgeType": "pro",
-        "description": "The single best trade for a name, plus alternatives"
       }
     ],
     "assets-hub": [
