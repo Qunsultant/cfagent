@@ -27,6 +27,7 @@ import { persistThenDeliverAll } from "../../workflows/screenRunFinalize";
 import { publishManualScreenerRun } from "./etradeBroker";
 import type { EtradeBrokerRouteContext } from "./etradeBroker";
 import type { ScreenerAgent } from "../screener-agent";
+import { screenAlreadyRunningDetails } from "../../services/screenInFlight";
 
 /**
  * Issue #2545: the manual screen's delivery selection — the scheduled
@@ -305,9 +306,12 @@ export async function executeEtradeScreen(args: {
   } catch (screenErr) {
     const error = screenErr instanceof Error ? screenErr.message : String(screenErr);
     // Issue #832: "already running" is not a failure — return 429, don't spam Slack.
+    // #2840: the 429 also names the in-flight run (id + status)
+    // so the second submitter knows what it is waiting on.
     if (error.includes("already running")) {
+      const details = screenAlreadyRunningDetails(screenErr);
       return Response.json(
-        { error: "Screen already running", message: error, retryable: true },
+        { error: "Screen already running", message: error, retryable: true, runId: details?.runId ?? null, status: details?.status ?? "running" },
         { status: 429 }
       );
     }
