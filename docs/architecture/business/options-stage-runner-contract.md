@@ -74,10 +74,11 @@ on, and a plan naming it is still refused downstream while the gate is closed.
 
 | # | Seam | Moves onto | Reuse step | Dependency |
 |---|---|---|---|---|
-| 1 | contract + planner + projection (this slice) | — | step 2 shape (port-only additions; no behaviour change) | — |
-| 2 | A — `shardJobs` chain planner | `planNext` / resume / fan-out decisions | step 5 sequencing (`StageRunnerPort` on workflows) | slice 1 green |
-| 3 | C — workflow poll loop | `planNext` + step retries + `waitForEvent` | step 4 | seam A on the same decisions |
-| 4 | B — DO-alarm scheduler narrowed | `planNext` claim/re-arm; sub-minute single-shot only | step 7 | seam C |
+| 1 | contract + planner + projection | — | step 2 shape (port-only additions; no behaviour change) | — | **done** (PR #3012) |
+| 2 | A — `shardJobs` chain planner | stage order + retry buckets derived from the contract | step 5 sequencing | contract merged | **done** (behaviour-preserving; per-format/gate domain rules stay) |
+| 3 | C — workflow fan-out | `planStageFanout` partitions the shard rounds at the stage cap | step 5 shape | seam A | **done** (behaviour-preserving; same batches, same order) |
+| 3b | C — workflow poll loop | step retries + `waitForEvent` | step 4 | seam C fan-out | **declined for #2601**: a behaviour change (polling → child-signalled events) that needs its own approval and child-side emission; it must not ride a consolidation slice |
+| 4 | B — DO-alarm scheduler narrowed | `planNext` claim/re-arm; sub-minute single-shot only | step 7 | seams A+C | **declined for #2601**: the alarm path decides from a queue row, not a stage plan; moving it before queue delivery (step 3) and workflow retries (step 4) would invert the reuse-report order and change claim semantics. It stays named here as the next runner step |
 
 Step 6 (Agent schedules replacing the tick loop) and step 8 (unbounded fan-out
 removal) stay sequenced under #2621; this document does not claim them.
