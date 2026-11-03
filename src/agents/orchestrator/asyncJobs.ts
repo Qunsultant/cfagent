@@ -116,7 +116,9 @@ export interface AsyncJobsContext {
    * suppressor on this context (the per-instance pattern of
    * the context's scheduled slot sets). A context without one
    * still suppresses within the instance — a duplicate send
-   * is never silent.
+   * is never silent. Issue #2913 (G6): the orchestrator
+   * builder supplies the SQL-backed suppressor, so
+   * production claims survive an instance eviction.
    */
   deliverySuppressor?: DeliverySuppressor;
   /** Issue #2567: the stuck-running alert delivery hook. The

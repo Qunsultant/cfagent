@@ -22,15 +22,20 @@
  * Store scope, stated plainly: the suppressor's store is
  * injected; the executor default is an in-memory set held on
  * the executor context (the same per-instance pattern as the
- * context's scheduled slot sets). It therefore suppresses
- * retries and duplicate submissions within one agent instance.
- * A resubmitted deliver job that carries no deliveryId cannot
- * be matched to the original run across instances — it is
- * keyed by its own job id — so durable cross-instance
- * suppression for deliveryId-less resubmissions is a named
- * follow-up, not a claim of this slice. The mas_async_jobs
- * completion marking remains the durable guard against
- * re-executing a completed deliver job.
+ * context's scheduled slot sets), which suppresses retries
+ * and duplicate submissions within one agent instance.
+ * Issue #2913 (G6) adds the durable store
+ * (mas_delivery_claims in the DO SQLite store, wired by the
+ * orchestrator's asyncJobsContext, so claims survive an
+ * instance eviction) — its SQL lives in
+ * src/data/deliveryClaimsStore.ts, the data-layer home for
+ * this table — and stamps the REST bridge's outcomes with
+ * the stable deliveryId the legacy fallback already uses,
+ * so a resubmitted deliver job carrying that deliveryId is
+ * matched across instances. A resubmitted deliver job that
+ * carries no deliveryId at all is still keyed by its own job
+ * id — the mas_async_jobs completion marking remains the
+ * durable guard against re-executing a completed deliver job.
  */
 
 export interface DeliverySuppressionStore {
