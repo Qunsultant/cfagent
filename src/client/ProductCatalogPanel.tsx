@@ -24,6 +24,7 @@ import { Card } from "./components/ui/Card";
 import { Notice } from "./components/ui/Notice";
 import { PageSection, PageShell } from "./components/ui/PageShell";
 import { Select } from "./components/ui/Select";
+import { TextInput } from "./components/ui/TextInput";
 import { Table, type TableColumn } from "./components/ui/Table";
 import {
   composeMarketingDraft,
@@ -170,6 +171,39 @@ function sellingConfirmError(status: number): string {
   return errorMessageForStatus(status);
 }
 
+/** Fixed caller-facing cfpay channel messages per HTTP status (#2945). */
+function channelMintError(status: number): string {
+  if (status === 503) {
+    return "The cfpay channel is not configured yet (no approved price or operator channel price).";
+  }
+  if (status === 409) {
+    return "This product's price does not match the channel's configured fixed price.";
+  }
+  if (status === 403) {
+    return "Channel purchases are disabled (the monetization flag is off).";
+  }
+  return errorMessageForStatus(status);
+}
+
+function channelConfirmError(status: number): string {
+  if (status === 402) {
+    return "Payment not verified — no credit granted.";
+  }
+  if (status === 409) {
+    return "This channel purchase was already fulfilled.";
+  }
+  if (status === 502) {
+    return "Payment is verified, but fulfilment could not be recorded — no credit granted. An operator must reconcile.";
+  }
+  if (status === 404) {
+    return "Unknown channel purchase.";
+  }
+  if (status === 403) {
+    return "Only the purchase owner may confirm it.";
+  }
+  return errorMessageForStatus(status);
+}
+
 async function getJson(path: string): Promise<{ status: number; body: unknown }> {
   let res: Response;
   try {
@@ -267,6 +301,17 @@ function SellingSection({
   } | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState(false);
+  // Issue #2945 — cfpay channel card state (same Selling section, never
+  // a second purchase path: the catalog entry stays the single entry).
+  const [channelFamily, setChannelFamily] = useState("");
+  const [channelEmail, setChannelEmail] = useState("");
+  const [channelDraft, setChannelDraft] = useState<{
+    id: string;
+    family: string;
+    expectedPriceUSD: number;
+  } | null>(null);
+  const [channelConfirmed, setChannelConfirmed] = useState(false);
+  const [channelError, setChannelError] = useState<string | null>(null);
 
   async function load(userLogin: string) {
     const sub = await getJson(
@@ -348,6 +393,52 @@ function SellingSection({
       setMinted(null);
     } catch {
       setActionError("Payment confirmation could not be completed. Try again later.");
+    }
+  }
+
+  async function channelMint() {
+    if (!channelFamily || !channelEmail.trim()) return;
+    setChannelError(null);
+    setChannelConfirmed(false);
+    try {
+      const res = await postJson(`${SELLING_BASE}/channel/checkout`, {
+        family: channelFamily,
+        email: channelEmail.trim(),
+      });
+      if (res.status !== 201) {
+        setChannelError(channelMintError(res.status));
+        return;
+      }
+      const draft = res.body.draft as Record<string, unknown> | undefined;
+      const id = typeof draft?.id === "string" ? draft.id : "";
+      const price = typeof draft?.expectedPriceUSD === "number" ? draft.expectedPriceUSD : NaN;
+      if (!id || !Number.isFinite(price)) {
+        setChannelError("Channel checkout could not be created. Try again later.");
+        return;
+      }
+      setChannelDraft({ id, family: channelFamily, expectedPriceUSD: price });
+    } catch {
+      setChannelError("Channel checkout could not be created. Try again later.");
+    }
+  }
+
+  async function channelConfirmPaid() {
+    if (!channelDraft) return;
+    setChannelError(null);
+    try {
+      const res = await postJson(`${SELLING_BASE}/channel/purchase`, {
+        channelRequestId: channelDraft.id,
+      });
+      if (res.status !== 200) {
+        setChannelError(channelConfirmError(res.status));
+        return;
+      }
+      const identity = await fetchPlatformIdentity();
+      await load(identity.userLogin);
+      setChannelConfirmed(true);
+      setChannelDraft(null);
+    } catch {
+      setChannelError("Payment confirmation could not be completed. Try again later.");
     }
   }
 
@@ -446,6 +537,73 @@ function SellingSection({
               </Button>
             </div>
           )}
+
+          <Card>
+            <div style={sectionHeaderStyle}>
+              <h3 style={cardTitleStyle}>Pay per run via cfpay channel</h3>
+              <p style={cardSubtitleStyle}>
+                One pay-per-use run of a listed product, paid through the cfpay channel. No
+                subscription is created. Credit is added only after the payment is verified —
+                never on checkout creation. The server refuses any product whose approved price
+                does not match the operator-set channel price.
+              </p>
+            </div>
+            <div style={checkoutRowStyle}>
+              <FieldShell id="channel-product" label="Product">
+                <Select
+                  id="channel-product"
+                  aria-label="Channel product"
+                  value={channelFamily}
+                  onChange={(event) => setChannelFamily(event.target.value)}
+                >
+                  <option value="">Select a product</option>
+                  {(products ?? [])
+                    .filter((p) => p.listed && p.priceUSD !== null)
+                    .map((p) => (
+                      <option key={p.family} value={p.family}>
+                        {p.canonicalName} — ${p.priceUSD!.toFixed(2)}
+                      </option>
+                    ))}
+                </Select>
+              </FieldShell>
+              <FieldShell id="channel-email" label="Email">
+                <TextInput
+                  id="channel-email"
+                  aria-label="Channel checkout email"
+                  type="email"
+                  placeholder="you@example.com"
+                  value={channelEmail}
+                  onChange={(event) => setChannelEmail(event.target.value)}
+                />
+              </FieldShell>
+              {!channelDraft && (
+                <Button
+                  variant="secondary"
+                  onClick={channelMint}
+                  disabled={!channelFamily || !channelEmail.trim()}
+                >
+                  Start channel checkout
+                </Button>
+              )}
+            </div>
+            {channelError && <Notice tone="danger" title="Channel Error">{channelError}</Notice>}
+            {channelConfirmed && (
+              <Notice tone="success" title="Channel Purchase Fulfilled">
+                Run credit added.
+              </Notice>
+            )}
+            {channelDraft && (
+              <div style={mintedActionStyle}>
+                <Notice tone="info" title="Channel Checkout Created">
+                  Pay this channel purchase (${channelDraft.expectedPriceUSD.toFixed(2)} for{" "}
+                  {channelDraft.family}), then confirm below. Request id: {channelDraft.id}
+                </Notice>
+                <Button variant="secondary" onClick={channelConfirmPaid}>
+                  I have paid
+                </Button>
+              </div>
+            )}
+          </Card>
 
           <Card>
             <div style={sectionHeaderStyle}>

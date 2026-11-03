@@ -72,6 +72,15 @@ export interface BillingPolicy {
   repurchaseMigration: RepurchaseMigration;
   /** Operator mapping: local plan id -> Stripe Price id (price_*). Empty = fail closed. */
   stripePriceByPlan: Record<string, string>;
+  /**
+   * Issue #2945: operator-attested fixed charge for cfpay channel
+   * checkouts, in USD. The card takes no amount input, so the channel
+   * is offered ONLY for catalogue products whose approved price exactly
+   * equals this value. Null = the channel is not configured (mint
+   * refuses 503). Never a code constant: an operator sets it through
+   * the billing-policy route, and only an operator changes it.
+   */
+  cfpayChannelFixedPriceUSD: number | null;
 }
 
 /**
@@ -90,6 +99,7 @@ export const PROPOSED_SEED_BILLING_POLICY: BillingPolicy = {
   prorationBehavior: "create_prorations",
   repurchaseMigration: "grandfather",
   stripePriceByPlan: {},
+  cfpayChannelFixedPriceUSD: null,
 };
 
 /** Storage keys for the policy table (one row per key). */
@@ -102,6 +112,7 @@ export const BILLING_POLICY_KEYS = {
   prorationBehavior: "proration_behavior",
   repurchaseMigration: "repurchase_migration",
   stripePriceByPlan: "stripe_price_by_plan",
+  cfpayChannelFixedPriceUSD: "cfpay_channel_fixed_price_usd",
 } as const;
 
 export function assertBillingPeriod(value: unknown, field: string): BillingPeriod {
@@ -159,6 +170,16 @@ export function assertRepurchaseMigration(value: unknown): RepurchaseMigration {
   return value;
 }
 
+/** Issue #2945: null (channel unconfigured) or a finite positive USD amount. */
+export function assertCfpayChannelFixedPriceUSD(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) {
+    throw new Error("cfpayChannelFixedPriceUSD must be null or a finite positive number.");
+  }
+  return n;
+}
+
 export function assertStripePriceByPlan(value: unknown): Record<string, string> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error("stripePriceByPlan must be an object mapping plan id to Stripe Price id.");
@@ -186,6 +207,7 @@ export function assertBillingPolicy(value: unknown): BillingPolicy {
     prorationBehavior: assertProrationBehavior(v.prorationBehavior),
     repurchaseMigration: assertRepurchaseMigration(v.repurchaseMigration),
     stripePriceByPlan: assertStripePriceByPlan(v.stripePriceByPlan),
+    cfpayChannelFixedPriceUSD: assertCfpayChannelFixedPriceUSD(v.cfpayChannelFixedPriceUSD),
   };
 }
 
@@ -202,6 +224,7 @@ export function assertBillingPolicyPartial(value: unknown): Partial<BillingPolic
     "prorationBehavior",
     "repurchaseMigration",
     "stripePriceByPlan",
+    "cfpayChannelFixedPriceUSD",
   ]);
   for (const k of Object.keys(v)) {
     if (!allowed.has(k)) throw new Error(`Unknown billing policy field: ${k}.`);
@@ -215,6 +238,7 @@ export function assertBillingPolicyPartial(value: unknown): Partial<BillingPolic
   if (v.prorationBehavior !== undefined) out.prorationBehavior = assertProrationBehavior(v.prorationBehavior);
   if (v.repurchaseMigration !== undefined) out.repurchaseMigration = assertRepurchaseMigration(v.repurchaseMigration);
   if (v.stripePriceByPlan !== undefined) out.stripePriceByPlan = assertStripePriceByPlan(v.stripePriceByPlan);
+  if (v.cfpayChannelFixedPriceUSD !== undefined) out.cfpayChannelFixedPriceUSD = assertCfpayChannelFixedPriceUSD(v.cfpayChannelFixedPriceUSD);
   return out;
 }
 

@@ -455,6 +455,27 @@ export const agentBillingPolicy = sqliteTable("agent_billing_policy", {
 });
 
 /**
+ * cfpay channel purchase drafts (#2945, Phase 2.17 of #2405) on D1.
+ * One row per channel purchase: the draft id IS the cfpay checkout
+ * request id (also the replay guard). This schema MAPS the table; it
+ * does not create it — DDL authority lives in migration 0037
+ * (src/data/migrationRunner.ts).
+ */
+export const agentCfpayChannelPurchases = sqliteTable("agent_cfpay_channel_purchases", {
+  id: text("id").primaryKey(),
+  userLogin: text("user_login").notNull(),
+  tenantId: text("tenant_id").notNull(),
+  email: text("email").notNull(),
+  family: text("family").notNull(),
+  expectedPriceUSD: real("expected_price_usd").notNull(),
+  status: text("status").notNull(),
+  createdAtMs: integer("created_at_ms").notNull(),
+  fulfilledAtMs: integer("fulfilled_at_ms"),
+  paymentIntentId: text("payment_intent_id"),
+  fulfilSkippedReason: text("fulfil_skipped_reason"),
+});
+
+/**
  * Billing customer mapping (#2656, Phase 2.1 of #2405) on D1.
  * One row per user: the provider customer id for that user's
  * Billing checkouts (first-wins — see billingCustomerPorts.ts).

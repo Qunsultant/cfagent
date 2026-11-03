@@ -38,7 +38,7 @@
 export type RefundKind = "subscription" | "pay_per_run";
 
 /** Payment rail of the original payment. */
-export type RefundRail = "card" | "crypto";
+export type RefundRail = "card" | "crypto" | "cfpay-channel";
 
 /**
  * Issue #2662 (monetization Phase 2.7) — owner approval of the refund
@@ -94,8 +94,8 @@ export function assertRefundKind(kind: unknown): RefundKind {
 }
 
 export function assertRefundRail(rail: unknown): RefundRail {
-  if (rail !== "card" && rail !== "crypto") {
-    throw new Error(`Invalid refund rail: ${String(rail)} (must be card or crypto).`);
+  if (rail !== "card" && rail !== "crypto" && rail !== "cfpay-channel") {
+    throw new Error(`Invalid refund rail: ${String(rail)} (must be card, crypto, or cfpay-channel).`);
   }
   return rail;
 }
