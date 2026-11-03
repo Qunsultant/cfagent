@@ -1897,16 +1897,24 @@ export class ScreenerAgent extends PortThink {
    * ReportAssetAgent fallback — storage, not generation.
    */
   private async generateRunPdf(result: ScreenerRunResult): Promise<void> {
-    const { generateStockReportArtifacts } = await import("../services/stockReportArtifacts");
+    // Issue #2869 (G8): PDF generation runs through the
+    // stage consumer — the helper persists the analysis,
+    // builds a real analysis-done message, and consumes
+    // it. The module's PDF leg is unchanged; only the
+    // path to it moved (in-process consume, not direct
+    // call). Queue transport for the message stays open
+    // on #2869.
+    const { generateRunPdfViaStageConsumer } = await import("../workflows/stageReportProduction");
     const { putReportPdf, getReportPdf } = await import("../services/reportBlobStore");
-    const { pdf } = await generateStockReportArtifacts({
+    const outcome = await generateRunPdfViaStageConsumer({
       env: this.env,
       storage: this.ctx.storage as any,
-      result,
+      sql: (this.ctx.storage as any).sql,
+      result: result as any,
       userLogin: await this.userLogin(),
-      formats: ["pdf"],
     });
-    if (pdf.status === "generated" && pdf.key) {
+    const pdf = { status: result.pdfStatus, key: result.pdfKey };
+    if ((outcome.status === "generated" || outcome.status === "duplicate-suppressed") && pdf.status === "generated" && pdf.key) {
       // Keep the "latest" pointer for backward compatibility.
       let stored = await getReportPdf(this.env, this.ctx.storage as any, pdf.key);
       if (!stored) {
@@ -1917,14 +1925,21 @@ export class ScreenerAgent extends PortThink {
         await putReportPdf(this.env, this.ctx.storage as any, pdf.key, stored.fileName, stored.bytes);
         await putReportPdf(this.env, this.ctx.storage as any, PDF_LATEST_KEY, stored.fileName, stored.bytes);
       }
-      // result.pdfKey/pdfStatus already set by the module; a regenerated
-      // run must not keep its previous failure on record (the module
-      // deletes pdfError on success).
+      // result.pdfKey/pdfStatus already set by the helper
+      // (copy-back from the module's leg); a regenerated
+      // run must not keep its previous failure on record
+      // (the module deletes pdfError on success, and the
+      // helper copy-backs that deletion).
     } else {
       // Issue #1023 (S4): NO direct-generator fallback — the unified
       // pipeline is the only PDF path (#914/#680). Issue #822: do NOT
-      // swallow. The module records the failure explicitly on the run
+      // swallow. The helper records the failure explicitly on the run
+      // (failed leg, dead-letter, or suppressed-without-fields)
       // so the publisher knows not to fall back to a stale PDF.
+      // A duplicate-suppressed outcome with no pdf fields can
+      // only mean the previous generation left none — the
+      // helper copy-backs whatever the persisted analysis
+      // holds, so nothing is silently dropped here.
     }
   }
 

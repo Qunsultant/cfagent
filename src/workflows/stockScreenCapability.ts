@@ -192,11 +192,16 @@ export const STOCK_SCREEN_CAPABILITIES: readonly StockScreenCapability[] = [
     id: "report-generation",
     name: "Report generation (generate/store/serve)",
     entry: "unifiedReportPipeline via ReportAssetAgent (analysis-done consumer)",
-    engine: "unifiedReportPipeline.runReportPipeline (persisted result input)",
+    engine:
+      "consumeAnalysisDone (production PDF leg) via stageReportProduction.generateRunPdfViaStageConsumer; tabular XLSX/CSV legs stay in the one generation module (stockReportArtifacts)",
     provider: "none (report generation never fetches)",
     persistence: "mas_reports via storeReportStage (idempotent on generationId)",
     delivery: "Delivery bridge via serveReportStage consumers",
-    canonical: ["stageReportConsumer.consumeAnalysisDone", "stageMessage (analysis-done)"],
+    canonical: [
+      "stageReportConsumer.consumeAnalysisDone (production PDF leg)",
+      "stageReportProduction.generateRunPdfViaStageConsumer",
+      "stageMessage (analysis-done)",
+    ],
     status: "canonical",
     extensionPoint: "stage",
   },
