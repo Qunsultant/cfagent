@@ -17,7 +17,7 @@
  * delivery path to ride, and the brief allows email only on
  * existing delivery without new infrastructure.
  */
-import { codedMessage, resolveOutcome } from "../outcomes/outcomeAspects";
+import { codedMessage, renderChannelText, resolveOutcome } from "../outcomes/outcomeAspects";
 
 export interface SagaOutcomeNotice {
   code: string;
@@ -49,7 +49,11 @@ export function buildSagaOutcomeNotice(input: {
     sagaId: input.sagaId,
     runRequestId: input.runRequestId,
     statusUrl: input.statusUrl,
-    text: `${message} Saga: ${input.sagaId}. Status: ${input.statusUrl}`,
+    text: renderChannelText("saga_outcome_notice", "slack", {
+      message,
+      sagaId: input.sagaId,
+      statusUrl: input.statusUrl,
+    }, "legacy_saga_outcome_notice"),
   };
 }
 
