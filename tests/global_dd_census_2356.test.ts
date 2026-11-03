@@ -826,7 +826,10 @@ const STEP5B_PORT_SITES: Array<[string, string, number]> = [
   // rows, binding listing for issuer:subject enrichment), using
   // the same listSessionFamilyEntries factory as the existing
   // membership-listing site — no new funnel, no bypass.
-  ["src/server.ts", "listSessionFamilyEntries", 5],
+  // Bumped 5 -> 6 for issue #2838: the policy-proposals list
+  // route adds one list site in server.ts (proposal records by
+  // prefix), same factory — no new funnel, no bypass.
+  ["src/server.ts", "listSessionFamilyEntries", 6],
   ["src/server.ts", "wiredAccessRequestStore", 1],
   ["src/server.ts", "wiredMembershipStore", 10],
 ];
