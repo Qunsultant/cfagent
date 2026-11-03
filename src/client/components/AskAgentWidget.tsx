@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import type { NavTabId } from "./NavigationMenu";
 import { Button, Drawer, TextInput } from "./ui";
+import { usePolling } from "../usePolling";
 import { BRAND } from "../branding";
 
 export interface AskAgentWidgetProps {
@@ -123,26 +124,24 @@ export function AskAgentWidget({
   // #2376 WS work); the card is the chat surface for S2.
   const [journeyGates, setJourneyGates] = useState<PendingJourneyGate[]>([]);
   const [journeyGateNotice, setJourneyGateNotice] = useState("");
-  useEffect(() => {
-    if (!isOpen) return;
-    let cancelled = false;
-    const loadGates = async () => {
+  // Issue #2376 slice 1: the gate list rides the shared polling
+  // contract (usePolling) — same 30s cadence, same immediate first
+  // fetch, same best-effort error handling, same drawer-open gating
+  // (enabled flips with isOpen, so closing the drawer stops the
+  // poller and reopening refetches immediately).
+  usePolling(
+    async () => {
       try {
         const res = await globalThis.fetch("/api/saga/journey-gates");
-        if (!res.ok || cancelled) return;
+        if (!res.ok) return;
         const data = (await res.json()) as { gates?: PendingJourneyGate[] };
         if (Array.isArray(data.gates)) setJourneyGates(data.gates);
       } catch {
         // Best-effort: a failed poll leaves the previous list.
       }
-    };
-    void loadGates();
-    const timer = setInterval(loadGates, 30000);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [isOpen]);
+    },
+    { fastMs: 30_000, idleMs: 30_000, immediate: true, enabled: isOpen },
+  );
 
   const answerJourneyGate = async (sagaId: string, decision: "approved" | "denied") => {
     try {

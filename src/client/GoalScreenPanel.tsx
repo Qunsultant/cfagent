@@ -3,6 +3,8 @@ import type { CSSProperties } from "react";
 import { apiFetch as fetch } from "./apiFetch";
 import { Button, Checkbox, Select, Table, TextInput } from "./components/ui";
 import { getPollingConfig } from "./pollingConfig";
+import { startPolling } from "./polling";
+import { usePolling } from "./usePolling";
 import { isAutoRefreshEnabled } from "./autoRefresh";
 
 /**
@@ -432,12 +434,16 @@ export function SagaStartSection({ userLogin }: { userLogin?: string }) {
     }
   }, []);
 
-  // Gate-cards' 30s setInterval pattern (not the 2s staged-run loop:
-  // a saga run is long-lived — payment plus screen take minutes).
-  // Stops at the gate, at a terminal outcome, on error, or on
-  // "Stop following" (effect cleanup clears the interval). A 404
+  // Saga status on the shared polling contract (issue #2376 slice 1;
+  // not the 2s staged-run loop: a saga run is long-lived — payment
+  // plus screen take minutes). Same 30s cadence, same immediate
+  // first fetch. Stops at the gate, at a terminal outcome, on error,
+  // or on "Stop following" (effect cleanup stops the poller). A 404
   // does NOT stop it (issue #2777): while polling, 404 means
   // "not yet visible" in the pre-audit window, not "not found".
+  // Mechanism change, by design: a hidden tab pauses instead of
+  // polling on the throttled interval, and refetches immediately
+  // on return — the shared contract's defined behavior.
   useEffect(() => {
     if (!started?.statusUrl || phase !== "polling") return;
     let cancelled = false;
@@ -486,11 +492,10 @@ export function SagaStartSection({ userLogin }: { userLogin?: string }) {
         }
       }
     };
-    void poll();
-    const timer = setInterval(poll, 30000);
+    const stop = startPolling(poll, { fastMs: 30_000, idleMs: 30_000, immediate: true });
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      stop();
     };
   }, [started?.statusUrl, phase, userLogin]);
 
@@ -741,27 +746,24 @@ export function GoalScreenPanel({ activeEnv, userLogin }: GoalScreenPanelProps) 
   // surface even with auto-refresh off, and the card disappears
   // on next poll once decided (state-driven dismissal — the
   // route no longer lists decided gates).
+  // Issue #2376 slice 1: the gate list rides the shared polling
+  // contract (usePolling) — same 30s cadence, same immediate first
+  // fetch, same best-effort error handling.
   const [journeyGates, setJourneyGates] = useState<PendingJourneyGate[]>([]);
   const [journeyGateNotice, setJourneyGateNotice] = useState("");
-  useEffect(() => {
-    let cancelled = false;
-    const loadGates = async () => {
+  usePolling(
+    async () => {
       try {
         const res = await fetch("/api/saga/journey-gates");
-        if (!res.ok || cancelled) return;
+        if (!res.ok) return;
         const data = (await res.json()) as { gates?: PendingJourneyGate[] };
         if (Array.isArray(data.gates)) setJourneyGates(data.gates);
       } catch {
         // Best-effort: a failed poll leaves the previous list.
       }
-    };
-    void loadGates();
-    const timer = setInterval(loadGates, 30000);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, []);
+    },
+    { fastMs: 30_000, idleMs: 30_000, immediate: true },
+  );
 
   const answerJourneyGate = async (sagaId: string, decision: "approved" | "denied") => {
     try {
@@ -803,7 +805,7 @@ export function GoalScreenPanel({ activeEnv, userLogin }: GoalScreenPanelProps) 
     [result]
   );
 
-  const trackStagedRun = async (jobId: string, statusUrl: string, startedAtMs: number = Date.now()) => {
+  const trackStagedRun = (jobId: string, statusUrl: string, startedAtMs: number = Date.now()) => {
     const gen = trackGen.current;
     // Issue #2419: cadence + deadline resolve through the externalized
     // polling config (defaults 2s / 10min when nothing is injected).
@@ -814,26 +816,44 @@ export function GoalScreenPanel({ activeEnv, userLogin }: GoalScreenPanelProps) 
     // submit (a resumed loop does not get a fresh 10 minutes).
     persistGoalTracking({ jobId, statusUrl, startedAtMs });
     const deadline = startedAtMs + trackDeadlineMs;
-    while (Date.now() < deadline) {
-      if (trackGen.current !== gen) return;
-      await new Promise((resolve) => setTimeout(resolve, trackPollMs));
-      if (trackGen.current !== gen) return;
-      // Issue #2419: never spend a status fetch while the tab is
-      // hidden — the loop re-sleeps and the absolute deadline still
-      // applies, so a hidden tab costs zero requests. (This loop is
-      // bounded until-terminal, so it takes the shared treatment's
-      // hidden-pause + externalized cadence rather than usePolling's
-      // indefinite shape, which has no stop handle.)
-      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
-        continue;
+    // Issue #2376 slice 1: the sleep loop rides the shared polling
+    // contract (startPolling) — same 2s cadence, same absolute
+    // deadline, same hidden-pause (now the scheduler's, not a
+    // hand-rolled visibility check), same terminal/failure exits.
+    // The first tick lands after one cadence, exactly like the
+    // old loop's opening sleep. A resumed handle already past its
+    // deadline times out at once (the old loop's while-condition
+    // exit) instead of arming a poller.
+    if (Date.now() >= deadline) {
+      setTracking((t) => (t ? { ...t, timedOut: true } : t));
+      setError(
+        "The staged run is still processing. Your previous result is kept — track it via the job link below, or find the run in Screening → Reports once it lands.",
+      );
+      clearGoalTracking(jobId);
+      return;
+    }
+    let stop: () => void = () => {};
+    const tick = async () => {
+      if (trackGen.current !== gen) {
+        stop();
+        return;
+      }
+      if (Date.now() >= deadline) {
+        setTracking((t) => (t ? { ...t, timedOut: true } : t));
+        setError(
+          "The staged run is still processing. Your previous result is kept — track it via the job link below, or find the run in Screening → Reports once it lands.",
+        );
+        clearGoalTracking(jobId);
+        stop();
+        return;
       }
       // Issue #2481 — the global auto-refresh switch gates this
-      // periodic status fetch too: while OFF the loop sleeps
+      // periodic status fetch too: while OFF the tick skips the fetch
       // without fetching (deadline unchanged, so tracking resumes
       // if the switch flips back ON, and the stored run stays
       // reachable via Screening → Reports).
       if (!isAutoRefreshEnabled()) {
-        continue;
+        return;
       }
       let history: { jobs?: Array<{ stage?: string; status?: string; detail?: string; updatedAtMs?: number; resultJson?: string }> };
       try {
@@ -849,6 +869,7 @@ export function GoalScreenPanel({ activeEnv, userLogin }: GoalScreenPanelProps) 
           );
           setTracking(null);
           clearGoalTracking(jobId);
+          stop();
           return;
         }
         history = (await res.json()) as typeof history;
@@ -858,6 +879,7 @@ export function GoalScreenPanel({ activeEnv, userLogin }: GoalScreenPanelProps) 
         );
         setTracking(null);
         clearGoalTracking(jobId);
+        stop();
         return;
       }
       const stages: StageRow[] = (history.jobs ?? [])
@@ -868,7 +890,7 @@ export function GoalScreenPanel({ activeEnv, userLogin }: GoalScreenPanelProps) 
           updatedAtMs: row.updatedAtMs ?? 0,
         }))
         .sort((a, b) => a.updatedAtMs - b.updatedAtMs);
-      if (trackGen.current !== gen) return;
+      if (trackGen.current !== gen) { stop(); return; }
       setTracking({ jobId, statusUrl, stages, timedOut: false });
       // Issue #1997 (rebased onto #1996): a goal run is ONE
       // "goal" shard, so there is no separate store row — the
@@ -894,6 +916,7 @@ export function GoalScreenPanel({ activeEnv, userLogin }: GoalScreenPanelProps) 
           );
           setTracking(null);
           clearGoalTracking(jobId);
+          stop();
           return;
         }
         let inner: { stored?: boolean; reportId?: string; storeError?: string } = {};
@@ -911,6 +934,7 @@ export function GoalScreenPanel({ activeEnv, userLogin }: GoalScreenPanelProps) 
           );
           setTracking(null);
           clearGoalTracking(jobId);
+          stop();
           return;
         }
         const reportId = inner.reportId;
@@ -920,6 +944,7 @@ export function GoalScreenPanel({ activeEnv, userLogin }: GoalScreenPanelProps) 
           );
           setTracking(null);
           clearGoalTracking(jobId);
+          stop();
           return;
         }
         try {
@@ -939,7 +964,7 @@ export function GoalScreenPanel({ activeEnv, userLogin }: GoalScreenPanelProps) 
             };
           };
           if (!data.body?.result) throw new Error("Stored run has no result.");
-          if (trackGen.current !== gen) return;
+          if (trackGen.current !== gen) { stop(); return; }
           const mergedResult: GoalScreenResult = {
             ...data.body.result,
             pdfKey: data.body.result.pdfKey ?? data.body.pdfKey,
@@ -957,22 +982,18 @@ export function GoalScreenPanel({ activeEnv, userLogin }: GoalScreenPanelProps) 
             setError(`Run complete and stored, but delivery failed: ${deliverRow.detail ?? "deliver failed"}`);
           }
         } catch (err) {
-          if (trackGen.current !== gen) return;
+          if (trackGen.current !== gen) { stop(); return; }
           setError(
             err instanceof Error ? err.message : "Stored run could not be loaded.",
           );
           setTracking(null);
           clearGoalTracking(jobId);
         }
+        stop();
         return;
       }
-    }
-    if (trackGen.current !== gen) return;
-    setTracking((t) => (t ? { ...t, timedOut: true } : t));
-    setError(
-      "The staged run is still processing. Your previous result is kept — track it via the job link below, or find the run in Screening → Reports once it lands.",
-    );
-    clearGoalTracking(jobId);
+    };
+    stop = startPolling(tick, { fastMs: trackPollMs, idleMs: trackPollMs });
   };
 
   // Issue #2129: best-effort read-back of the newest stored goal
