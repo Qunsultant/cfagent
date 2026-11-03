@@ -134,7 +134,7 @@ export const OPERATION_CATALOG: CatalogEntry[] = [
     binding: "SCHEDULED_AGENT",
     operations: ["index.refresh_wikipedia", "index.refresh_holdings"],
     blurb:
-      "Stored index-list refresh (issue #1980, follow-up to #1852): weekly Wikipedia refresh of Dow / S&P 500 / S&P 100 / Nasdaq-100 and daily ETF-holdings refresh of Russell 2000 / Russell 1000, both as ScheduledAgent goals on the existing tick.",
+      "Stored index-list refresh (issue #1980, follow-up to #1852; extended by #2962): weekly Wikipedia refresh of Dow / S&P 500 / S&P 100 / Nasdaq-100 / S&P 400 / the 11 GICS sectors and daily ETF-holdings refresh of Russell 2000 / Russell 1000 / Russell 3000, both as ScheduledAgent goals on the existing tick.",
   },
 ];
 
