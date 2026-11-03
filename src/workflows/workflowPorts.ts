@@ -136,6 +136,14 @@ export const DEFAULT_POLL_INTERVAL_MS = 15 * 1000;
 /** Max retries per workflow step (blueprint ADR-0003 NFR). */
 export const WORKFLOW_STEP_MAX_RETRIES = 3;
 
+/**
+ * Issue #3025: the event a shard sends its parent when its run reaches
+ * a terminal state. The payload carries the shard id only — the parent
+ * reads the child's status/output through the workflow binding, so no
+ * bulk data rides an event (claim-check).
+ */
+export const SHARD_DONE_EVENT = "screener-shard-done";
+
 /** Max explicit symbols on one command (claim-check: the request, not bulk data). */
 export const MAX_COMMAND_SYMBOLS = 200;
 
@@ -242,6 +250,14 @@ export interface WorkflowJobCommand {
   role: "parent" | "shard";
   /** Parent job id (shard commands only). */
   parentJobId?: string;
+  /**
+   * Issue #3025: the parent's workflow instance id (shard commands
+   * only). The shard signals its completion to this instance so the
+   * parent can wait on an event instead of polling. Absent on a shard
+   * started by an older parent — such a child simply never signals, and
+   * the parent's deadline sweep covers it.
+   */
+  parentWorkflowId?: string;
   /** This shard's descriptor (shard commands only). */
   shard?: WorkflowShard;
   /** Tenant id resolved by the starter (absent → projection best-effort skipped). */
