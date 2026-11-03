@@ -77,6 +77,11 @@
  * Deterministic commands run none of this.
  */
 
+import { planStageFanout } from "./stageRunnerPlan";
+import {
+  STAGE_RETRY_BUCKET,
+  type StageRunnerStage,
+} from "./stageRunnerPorts";
 import {
   DEFAULT_MAX_PARALLEL_SHARDS,
   DEFAULT_POLL_INTERVAL_MS,
@@ -815,6 +820,24 @@ export async function runShardFlow(
   };
 }
 
+/**
+ * Issue #2601 seam C - the shard fan-out as the runner contract sees
+ * it: one parallel stage over the shard units, capped by the command
+ * (default DEFAULT_MAX_PARALLEL_SHARDS), retrying under the analysis
+ * bucket. The cap is the contract's decision; the batched loop below
+ * consumes its started/deferred partition, so the tail is always
+ * queued as the next round - never truncated.
+ */
+function shardFanoutStage(maxParallel: number, timeoutMs: number): StageRunnerStage {
+  return {
+    stage: "analysis",
+    execution: "parallel",
+    maxParallel,
+    timeoutMs,
+    retryBucket: STAGE_RETRY_BUCKET.analysis,
+  };
+}
+
 interface PendingShard {
   shard: WorkflowJobCommand["shards"][number];
   workflowId: string;
@@ -973,9 +996,14 @@ export async function runParentFlow(
       });
     }
   } else {
-    for (let i = 0; i < command.shards.length; i += maxParallel) {
-      const batch = command.shards.slice(i, i + maxParallel);
-      const created = await step.do(`fan-out-batch-${i / maxParallel}`, async () => {
+    const fanoutStage = shardFanoutStage(maxParallel, shardTimeoutMs);
+    const shardById = new Map(command.shards.map((shard) => [shard.shardId, shard]));
+    let queue = command.shards.map((shard) => ({ unitId: shard.shardId }));
+    let batchIndex = 0;
+    while (queue.length > 0) {
+      const fanout = planStageFanout(fanoutStage, queue);
+      const batch = fanout.started.map((unit) => shardById.get(unit.unitId)!);
+      const created = await step.do(`fan-out-batch-${batchIndex}`, async () => {
         const out: Array<{ shard: WorkflowJobCommand["shards"][number]; workflowId: string }> = [];
         for (const shard of batch) {
           const child = await childOps.createChild(shardCommandFor(runCommand, shard));
@@ -988,7 +1016,7 @@ export async function runParentFlow(
       // this slice it was the one parent step that never
       // emitted, so the trace jumped from announce straight
       // to the shards' steps with the fan-out invisible.
-      await traceStep(deps, runCommand, "workflow-step", `fan-out-batch-${i / maxParallel}`);
+      await traceStep(deps, runCommand, "workflow-step", `fan-out-batch-${batchIndex}`);
       for (const c of created) {
         pending.push({
           shard: c.shard,
@@ -999,6 +1027,11 @@ export async function runParentFlow(
       // Poll this batch to terminal-or-timeout before the next
       // batch starts: this is what bounds concurrency.
       await pollBatch(pending, outcomes, childResults, runCommand, step, deps, childOps, pollIntervalMs, nowMs);
+      // The contract partition consumes the tail as the next round:
+      // a shard is deferred, never dropped, and the loop ends only
+      // when every unit has started.
+      queue = fanout.deferred;
+      batchIndex += 1;
     }
   }
 
