@@ -111,7 +111,9 @@ describe("IA: labels, crumbs, shortLabels are collision-free (#2174)", () => {
     expect(byId.get("scanner")!.navGroup).toBe("options-screener");
     expect(byId.get("options-flows")!.navGroup).toBe("options-screener");
     expect(byId.get("reports")!.navGroup).toBe("workflow-runs");
-    expect(byId.get("schedules")!.navGroup).toBe("platform-admin");
+    // Issue #2957: schedules is its own nav group (was platform-admin
+    // via the #2709 follow-up).
+    expect(byId.get("schedules")!.navGroup).toBe("schedules");
     expect(byId.get("screeners")!.navGroup).toBe("screeners");
   });
 });

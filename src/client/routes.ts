@@ -559,7 +559,7 @@ export const ROUTES = [
   {
     id: "schedules",
     retain: true,
-    navGroup: "platform-admin",
+    navGroup: "schedules",
     crumb: "Schedules",
     category: "Platform",
     icon: "Screeners",

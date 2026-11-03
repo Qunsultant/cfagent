@@ -445,7 +445,6 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade }: Schedul
       align: "right",
       headerClassName: "schedule-row-actions-head",
       render: (s) => {
-        const recurring = s.type === "cron" || s.type === "interval";
         return (
           <div className="schedule-row-actions">
             <Button
@@ -480,20 +479,22 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade }: Schedul
             >
               {s.paused ? "Resume" : "Pause"}
             </Button>
-            {recurring && (
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={() => {
-                  setCadenceError(null);
-                  setCadenceTarget(s);
-                }}
-                title="Edit this schedule's cadence"
-              >
-                Edit frequency
-              </Button>
-            )}
+            {/* Issue #2957: every generic row gets Edit frequency —
+                picking a cadence converts a one-shot to recurring (the
+                backend treats a supplied cron/interval as a timing-kind
+                switch); the modal warns one-shot rows before they pick. */}
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                setCadenceError(null);
+                setCadenceTarget(s);
+              }}
+              title="Edit this schedule's cadence"
+            >
+              Edit frequency
+            </Button>
             <Button
               type="button"
               variant="danger"

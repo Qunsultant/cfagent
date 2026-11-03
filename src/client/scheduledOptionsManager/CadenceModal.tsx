@@ -59,6 +59,13 @@ export function CadenceModal({ item, busy, error, onApply, onClose }: CadenceMod
         </Notice>
       )}
 
+      {(item.type === "delayed" || item.type === "scheduled") && (
+        <Notice tone="warning" density="compact">
+          This schedule runs once — picking a cadence converts it to a
+          recurring schedule.
+        </Notice>
+      )}
+
       <section className="sched-detail-section">
         <h3 className="sched-detail-section-title">Presets</h3>
         <div className="sched-cadence-presets">

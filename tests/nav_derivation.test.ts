@@ -100,7 +100,10 @@ describe("nav derivation", () => {
     expect(isTabActive("options-screener", "options-screener")).toBe(true);
     expect(isTabActive("platform-admin", "platform-admin")).toBe(true);
     expect(isTabActive("workflow-runs", "reports")).toBe(true);
-    expect(isTabActive("platform-admin", "schedules")).toBe(true);
+    // Issue #2957: schedules is its own nav group (was platform-admin
+    // via the #2709 follow-up).
+    expect(isTabActive("schedules", "schedules")).toBe(true);
+    expect(isTabActive("platform-admin", "schedules")).toBe(false);
     expect(isTabActive("portfolio", "portfolio")).toBe(true);
     expect(isTabActive("portfolio", "ledger")).toBe(false);
     expect(isTabActive("screeners", "social")).toBe(false);

@@ -6,7 +6,9 @@
  *  3. Stock Hub: the stock-specific hub (issue #2896), contains stocks, new-screen & research
  *  4. Options Screener: contains options, scanner, options-flows, iv-history; no docs/runs/schedules
  *  5. Workflows menu: hosts docs, workflow-runs, reports, review, track-record
- *  6. Platform menu: hosts platform-admin, schedules, agents, audit, workflows, endpoints
+ *  6. Platform menu: hosts platform-admin, schedules, agents, audit
+ *     (issue #2957: workflows moved to the Workflow Runs menu by #2843;
+ *     endpoints is an Agents sub-item, never top-level Platform)
  *  7. Billing menu: separated from Platform, hosts payments, revenue, ledger, checkout
  *  8. Intelligence menu: hosts Goal Screen as its own top-level menu item
  *  9. Sandbox menu: hosts payment-assurance and checkout sandbox
@@ -24,6 +26,7 @@ import {
   findNavItemConfig,
   isNavItemOrSubItemActive,
 } from "../src/client/navConfig";
+import { getNavGroup } from "../src/client/routes";
 
 let container: HTMLDivElement;
 let root: Root;
@@ -115,6 +118,28 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
     const itemIds = plat!.items.map((i) => i.id);
     expect(itemIds).not.toContain("workflows");
     expect(itemIds).toContain("schedules");
+  });
+
+  it("on ?tab=schedules, Schedules is active and Platform Admin is neither active nor auto-expanded (#2957)", async () => {
+    await renderNavBar({ activeTab: "schedules" });
+    expect(getNavGroup("schedules")).toBe("schedules");
+
+    const buttons = Array.from(container.querySelectorAll(".sidebar-nav-item"));
+    const schedulesBtn = buttons.find((b) => b.textContent?.includes("Schedules"));
+    expect(schedulesBtn).toBeDefined();
+    expect(schedulesBtn!.classList.contains("active")).toBe(true);
+
+    const platformAdminBtn = buttons.find((b) => b.textContent?.includes("Platform Admin"));
+    expect(platformAdminBtn).toBeDefined();
+    expect(platformAdminBtn!.classList.contains("active")).toBe(false);
+
+    // Platform Admin's sub-menu stays collapsed on landing: its wrapper
+    // carries no "expanded" class (before #2957 the platform-admin
+    // navGroup made it active and auto-expanded here).
+    const wrappers = Array.from(container.querySelectorAll(".sidebar-nav-item-wrapper"));
+    const platformAdminWrapper = wrappers.find((w) => w.textContent?.includes("Platform Admin"));
+    expect(platformAdminWrapper).toBeDefined();
+    expect(platformAdminWrapper!.classList.contains("expanded")).toBe(false);
   });
 
   it("configures Stock Hub with stocks, new-screen, research, patterns and presets sub-menus", () => {
