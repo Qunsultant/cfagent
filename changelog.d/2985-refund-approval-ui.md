@@ -1,0 +1,3 @@
+### Added
+
+- Refund approval UI (#2985, monetization Phase 2.19): an operator refund-policy section in the Billing servicing surface over the existing 2.7 routes only — current policy values, the disclosure copy, and per-kind approval state (approved or not, by whom, when), with per-kind approve/withdraw actions calling POST refund-policy/approve and reflecting the result from a fresh policy read (never an optimistic assertion). Non-operators see values and state read-only with no action buttons (server routes remain the access control); failures render as fixed strings by HTTP status. No refund request/approve/execute flow, no policy value editing, no new server route. Built only from src/client/components/ui/ primitives with token-only styling.
