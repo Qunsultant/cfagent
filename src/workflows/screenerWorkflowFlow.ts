@@ -24,25 +24,33 @@
  *    (workflow:<jobId>:<shardId>) so re-delivery converges
  *    in the outcome sink. A store/deliver error is recorded,
  *    never fatal: the screen outcome stands.
- *  - runParentFlow: fan-out, poll, collate, project. Shards
- *    run as child workflows in batches of maxParallelShards;
- *    the parent polls child statuses on a sleep loop and
- *    enforces a per-shard deadline. A shard past its
- *    deadline is timed_out and collation proceeds with a
- *    qualified partial — never a total failure. Timed-out
- *    children are NOT terminated: they may still complete
- *    and project their own row, and the parent's collation
- *    stands as the deadline-time truth.
+ *  - runParentFlow: fan-out, poll, collate, project, store
+ *    parent. Shards run as child workflows in batches of
+ *    maxParallelShards; the parent polls child statuses on
+ *    a sleep loop and enforces a per-shard deadline. A shard
+ *    past its deadline is timed_out and collation proceeds
+ *    with a qualified partial — never a total failure.
+ *    Timed-out children are NOT terminated: they may still
+ *    complete and project their own row, and the parent's
+ *    collation stands as the deadline-time truth. Issue
+ *    #2910 (G3): after projection the parent stores ONE
+ *    canonical mas_reports row for the parent run
+ *    (generationId = jobId, collation + child linkage,
+ *    summary only — no bulk data, no fabricated results).
+ *    The parent still never DELIVERS: delivery stays with
+ *    the children, whose flags the parent collates.
  *
  * Durability shape: every durable fact is a step output or a
  * projection row. The parent reads child SUMMARIES from
  * child instance outputs (status().output), never from rows
  * — rows are progress visibility (jobs/history), not the
- * result channel. The parent never stores or delivers: it
- * collates the children's stored/delivered flags into the
- * parent row's collation summary. Projection failures never
- * fail a run (R5): a failed project is recorded in the
- * result and the run continues.
+ * result channel. The parent collates the children's
+ * stored/delivered flags into the parent row's collation
+ * summary and, since #2910 (G3), stores one parent
+ * canonical row from that collation (summary + linkage
+ * only); it never delivers. Projection and parent-store
+ * failures never fail a run (R5): a failed project or
+ * store is recorded in the result and the run continues.
  *
  * Stage honesty: a completed shard ran feed (quotes),
  * gather (technicals/enrichment), and analysis (screen)
@@ -75,6 +83,8 @@ import {
   DEFAULT_SHARD_TIMEOUT_MS,
   WORKFLOW_STEP_MAX_RETRIES,
   workflowIdForJob,
+  type ParentScreenReportInput,
+  type ParentScreenReportOutcome,
   type ScreenMode,
   type ShardOutcome,
   type StageTransition,
@@ -163,6 +173,14 @@ export interface ShardScreenResult {
   delivered?: boolean;
   storeError?: string;
   deliverError?: string;
+  /**
+   * Issue #2910 (G3): the child's canonical report id, when
+   * the child's store door returned one (the goal door
+   * does; the market door returns void). Surfaced on the
+   * child output so the parent can link its row to the
+   * child's; never used for re-delivery.
+   */
+  reportId?: string;
 }
 
 /**
@@ -218,6 +236,22 @@ export interface ScreenerWorkflowDeps {
    * market door returns void (no id to surface).
    */
   storeReport: (payload: unknown, userLogin: string) => Promise<string | void>;
+  /**
+   * Issue #2910 (G3): the PARENT canonical row's persist
+   * (the orchestrator's parent door in production). The
+   * payload is the collation + linkage, never bulk data:
+   * the children already stored their full rows. Optional
+   * so older fakes keep compiling: when absent the parent
+   * flow skips the store step and the collation simply
+   * carries no parentReport outcome. A throwing store is
+   * caught by the flow and recorded as a storeError — the
+   * screen outcome stands, exactly like a child store
+   * error. The parent store NEVER delivers.
+   */
+  storeParentReport?: (
+    input: ParentScreenReportInput,
+    userLogin: string,
+  ) => Promise<ParentScreenReportOutcome>;
   /**
    * Tracked-pipeline delivery (the route's deliver decision,
    * via the owner's door). Same opaque payload. The door
@@ -363,6 +397,7 @@ export function asShardScreenResult(value: unknown): ShardScreenResult | null {
     ...(typeof v.delivered === "boolean" ? { delivered: v.delivered } : {}),
     ...(typeof v.storeError === "string" ? { storeError: v.storeError } : {}),
     ...(typeof v.deliverError === "string" ? { deliverError: v.deliverError } : {}),
+    ...(typeof v.reportId === "string" ? { reportId: v.reportId } : {}),
   };
 }
 
@@ -384,8 +419,10 @@ export function collationDetail(collation: WorkflowCollation): string {
  * when every completed shard was stored by its child;
  * Completed otherwise (qualified when any shard failed or
  * timed out). Stored/delivered sets and error maps come
- * from the child outputs' flags — the parent never stores
- * or delivers, it only collates.
+ * from the child outputs' flags — collation itself stores
+ * nothing; the parent canonical row is written by
+ * runParentFlow's store-parent step from this collation
+ * (issue #2910), and the parent never delivers.
  */
 export function collateShards(
   jobId: string,
@@ -764,11 +801,15 @@ export async function runShardFlow(
   });
   await traceStep(deps, command, "projection", "project-shard");
   // Strip `full`: the parent collects summaries + flags only.
+  // Issue #2910 (G3): the child's canonical report id rides
+  // the output (when the store door returned one) so the
+  // parent can link its row to the child's.
   const { full: _dropped, ...output } = result;
   return {
     ...output,
     stored,
     delivered,
+    ...(reportId ? { reportId } : {}),
     ...(storeError ? { storeError } : {}),
     ...(deliverError ? { deliverError } : {}),
   };
@@ -1004,13 +1045,29 @@ export async function runParentFlow(
   // Issue #2530: the mode the run executed in, on the run's
   // collation record (always set by the parent flow).
   collation.screenMode = screenMode;
+  // Issue #2910 (G3): parent/child linkage, set before
+  // projection so the projected parent row carries it too.
+  // Market shards link by canonical run id
+  // (`screener:<timestamp>`); goal shards link by report
+  // id (their rows key on `goal-screen:<taskId>`, not on a
+  // timestamp, so no run id is derived for them).
+  collation.childRunIds = command.goalScreen
+    ? []
+    : outcomeList
+        .map((o) => (o.timestamp ? `screener:${o.timestamp}` : null))
+        .filter((id): id is string => id !== null);
+  collation.childReportIds = outcomeList
+    .map((o) => o.reportId)
+    .filter((id): id is string => typeof id === "string" && id.length > 0);
 
   // Project the final parent row + one row per shard. The
   // collation already carries the final lifecycle (computed
   // from the child outputs' stored flags) and the error maps,
   // so this single write closes the run — no second
-  // project-close step, no journal: the parent never stores
-  // or delivers, it only collates what the children did.
+  // project-close step, no journal: the parent collates
+  // what the children did, and (since #2910) stores one
+  // parent canonical row from that collation in the step
+  // below. It never delivers.
   await step.do("project-final", async () => {
     const legs: LegOutcome[] = [
       {
@@ -1086,6 +1143,43 @@ export async function runParentFlow(
     warnUnprojected(command.jobId, "deliver", await projectBestEffort(deps, command.tenantId, command.jobId, legs, nowMs()));
   });
   await traceStep(deps, command, "projection", "project-final");
+
+  // Issue #2910 (G3): one canonical mas_reports row for the
+  // parent run (generationId = jobId), carrying the
+  // collation summary, partial qualification, per-format
+  // keys, and the child linkage above — summary only, no
+  // bulk data, no fabricated results. Best-effort like a
+  // child store: a store error is recorded on the
+  // collation and the run continues; when no parent store
+  // is configured the step is skipped and the collation
+  // simply carries no parentReport outcome. The parent
+  // store never delivers (children own delivery).
+  if (deps.storeParentReport) {
+    const parentOutcome = await step.do("store-parent", async (): Promise<ParentScreenReportOutcome> => {
+      try {
+        return await deps.storeParentReport!(
+          {
+            jobId: command.jobId,
+            userLogin: command.userLogin,
+            trigger: command.trigger,
+            goalScreen: Boolean(command.goalScreen),
+            collation,
+            childRunIds: collation.childRunIds ?? [],
+            childReportIds: collation.childReportIds ?? [],
+            createdAt: new Date(nowMs()).toISOString(),
+          },
+          command.userLogin,
+        );
+      } catch (err) {
+        return {
+          stored: false,
+          storeError: err instanceof Error ? err.message : String(err),
+        };
+      }
+    });
+    collation.parentReport = parentOutcome;
+    await traceStep(deps, command, "workflow-step", "store-parent");
+  }
 
   return collation;
 }
@@ -1163,11 +1257,17 @@ async function pollBatch(
             ...(result.csvKey ? { csvKey: result.csvKey } : {}),
             ...(result.error ? { error: result.error } : {}),
             // The child's own store/deliver flags (the parent
-            // collates them; it never stores or delivers).
+            // collates them; since #2910 it stores one parent
+            // row, but it still never delivers).
             ...(result.stored !== undefined ? { stored: result.stored } : {}),
             ...(result.delivered !== undefined ? { delivered: result.delivered } : {}),
             ...(result.storeError ? { storeError: result.storeError } : {}),
             ...(result.deliverError ? { deliverError: result.deliverError } : {}),
+            // Issue #2910 (G3): timestamp + report id are the
+            // parent/child linkage (canonical run id for
+            // market shards, report id for goal shards).
+            timestamp: result.timestamp,
+            ...(result.reportId ? { reportId: result.reportId } : {}),
           });
         } else {
           outcomes.set(s.shardId, {

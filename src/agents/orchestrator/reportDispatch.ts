@@ -15,6 +15,7 @@ import type { DatabaseORM } from "../../orm";
 import type { Env } from "../../types";
 import { ETradeEmailTradingService } from "../../trading";
 import { ETradeWebhookService } from "../../services/tradingWebhooks";
+import type { ParentScreenReportInput } from "../../workflows/workflowPorts";
 import {
   getCanonicalReport,
   isCanonicalReportOwnedBy,
@@ -380,6 +381,107 @@ export async function persistScreenerReportCanonical(ctx: ReportDispatchContext,
   } catch {
     // Non-critical: persistence failure must not break the screen.
   }
+}
+
+/**
+ * Issue #2910 (G3): persist a workflow parent run's ONE
+ * canonical row in mas_reports. The parent row is a
+ * summary + linkage record, not a second screen result:
+ * it carries the collation (lifecycle, qualified partial,
+ * coverage, per-shard outcomes, per-format keys/statuses)
+ * and the child linkage (childRunIds / childReportIds),
+ * and it carries NO opportunities, NO bulk results, NO
+ * fabricated counts — the children already stored their
+ * own full rows, which stay in mas_reports and stay
+ * reachable by id. The Runs merge absorbs the child rows
+ * into this row (see mergeRunSummaries), so one parent
+ * run is one top-level Docs row.
+ *
+ * Keying: generationId = runId = the parent jobId, so a
+ * re-execution under the same job id adopts the existing
+ * parent row (the shard generation-dedupe rule) instead
+ * of writing a second parent row. Per-format statuses use
+ * the G4 target vocabulary in its narrow sense: generated
+ * when a key exists, failed when the run failed with no
+ * key, missing when no key and no failure (G4 unifies the
+ * full language, including never-attempted/skipped, for
+ * every format leg). Returns the stored report id, or
+ * null when the row was refused (no owner) or the store
+ * seam returned nothing — callers record that outcome,
+ * they do not claim a store that never landed. Unlike
+ * the sibling persist this function swallows nothing: the
+ * store seam itself returns null (and logs) on failure,
+ * and any other throw propagates to the parent flow's
+ * store-parent step, which records it as a storeError —
+ * a persistence failure never breaks the screen, and it
+ * is never silently dropped either.
+ */
+export async function persistParentScreenReportCanonical(
+  ctx: ReportDispatchContext,
+  input: ParentScreenReportInput,
+): Promise<{ reportId: string } | null> {
+  if (!input.userLogin) {
+    console.error(`[reportDispatch] Parent screen report store refused: no owning userLogin (job: ${input.jobId}).`);
+    return null;
+  }
+  const c = input.collation;
+  const done = c.shards.filter((s) => s.status === "completed").length;
+  const total = c.shards.length;
+  const failed = c.shards.filter((s) => s.status !== "completed");
+  const success = c.lifecycle !== "Failed";
+  const coverage =
+    c.coverage.ratio === null
+      ? "no coverage recorded"
+      : `${Math.round(c.coverage.ratio * 100)}% coverage (${c.coverage.evaluated} of ${c.coverage.considered} evaluated)`;
+  const summary =
+    `Parent screen run: ${done}/${total} shards completed, ${coverage}` +
+    (c.qualified
+      ? `. Qualified partial — failed/timed out shards: ${failed.map((s) => s.shardId).join(", ") || "none"}.`
+      : ".") +
+    (c.lifecycle === "Failed" ? ` Run failed: ${c.error ?? "no usable shard"}.` : "") +
+    ` Shard rows retained (see child linkage in the report body).`;
+  const formatStatus = (keys: string[] | undefined): string =>
+    keys && keys.length > 0 ? "generated" : success ? "missing" : "failed";
+  const stored = await storeReportAtGenerationWithR2(ctx.ensureTables(), ctx.env, {
+    runId: input.jobId,
+    generationId: input.jobId,
+    title: input.goalScreen
+      ? `Goal screen (parent run) — ${input.trigger}`
+      : `Market screen (parent run) — ${input.trigger}`,
+    source: input.goalScreen ? "goal_screen" : "screener",
+    summary,
+    userLogin: input.userLogin,
+    body: {
+      parentJobId: input.jobId,
+      jobId: input.jobId,
+      trigger: input.trigger,
+      success,
+      lifecycle: c.lifecycle,
+      qualified: c.qualified,
+      coverage: c.coverage,
+      shards: c.shards,
+      childRunIds: input.childRunIds,
+      childReportIds: input.childReportIds,
+      reportKeys: c.reportKeys,
+      xlsxKeys: c.xlsxKeys ?? [],
+      csvKeys: c.csvKeys ?? [],
+      storedShards: c.storedShards,
+      deliveredShards: c.deliveredShards,
+      storeErrors: c.storeErrors ?? {},
+      deliverErrors: c.deliverErrors ?? {},
+      runSource: input.goalScreen ? "goal" : "stock",
+      pdfKey: c.reportKeys[0] ?? null,
+      pdfStatus: formatStatus(c.reportKeys),
+      ...(success ? {} : { pdfError: c.error ?? "Parent run failed." }),
+      xlsxKey: (c.xlsxKeys ?? [])[0] ?? null,
+      xlsxStatus: formatStatus(c.xlsxKeys),
+      csvKey: (c.csvKeys ?? [])[0] ?? null,
+      csvStatus: formatStatus(c.csvKeys),
+      error: c.error,
+    },
+    createdAt: input.createdAt,
+  });
+  return stored ? { reportId: stored.reportId } : null;
 }
 
 /** Shared send leg for POST /trading/reports/email (immediate + confirmed paths). */

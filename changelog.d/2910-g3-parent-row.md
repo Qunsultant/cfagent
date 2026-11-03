@@ -1,0 +1,3 @@
+### Changed
+
+- **Workflow parent canonical row, G3 (#2910, under #2764):** a sharded workflow parent run now stores exactly one canonical mas_reports row (generationId = runId = the parent jobId) carrying the collation summary, qualified-partial marking, per-format keys/statuses, and parent/child linkage (childRunIds for market shards, childReportIds for goal shards). The Runs merge absorbs the per-shard rows into that parent row, so one parent run is one top-level Docs/Reports row; the shard rows stay in mas_reports and stay reachable by id. The parent store is best-effort (a store error is recorded on the collation, never fatal) and the parent never delivers — delivery stays with the children. No shard execution change, no deletions, no screening semantics change.

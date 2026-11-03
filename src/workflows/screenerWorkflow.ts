@@ -199,6 +199,25 @@ function buildDeps(env: Env, command: WorkflowJobCommand): ScreenerWorkflowDeps 
         await orchestrator.recordWorkflowScreenReport(payload as ScreenerRunResult);
       }
     },
+    // Issue #2910 (G3): the parent canonical row — one
+    // mas_reports row per parent run (generationId = jobId)
+    // carrying the collation summary + child linkage,
+    // through the orchestrator's parent door. Summary
+    // only: the children already stored their full rows,
+    // and the parent row never triggers delivery.
+    storeParentReport: async (input) => {
+      // The parent door returns its canonical report id, or
+      // null when the row could not be written (owner
+      // missing, store refused): the flow records that
+      // outcome truthfully instead of claiming a store that
+      // never landed — the run still continues. The owner
+      // rides on the input (command.userLogin, stamped by
+      // the flow), so the door takes no second login arg.
+      const stored = await orchestrator.recordWorkflowParentScreenReport(input);
+      return stored
+        ? { stored: true, reportId: stored.reportId }
+        : { stored: false, storeError: "Parent canonical row was not written (store refused or owner missing)." };
+    },
     // Issue #1996 — goal commands deliver through the goal
     // delivery seam (channels + emailTo ride the command);
     // the market outcome sink is not used for goal runs,
