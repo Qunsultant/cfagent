@@ -66,6 +66,7 @@ export class InMemoryCanonicalReportStore
       summary: r.summary,
       body: r.body,
       bodyR2Key: r.body_r2_key,
+      ...(r.user_login ? { userLogin: r.user_login } : {}),
     };
   }
 
