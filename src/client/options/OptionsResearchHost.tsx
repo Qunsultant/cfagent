@@ -1,4 +1,10 @@
 /**
+ * DEPRECATED (issue #2954): superseded by src/client/OptionsHub.tsx.
+ * The host's Symbol research / Autonomous runs toggle is flattened
+ * into the copy hub's single tab row (Options Runs tab + research
+ * modes), so nothing renders this host anymore. Kept, not deleted,
+ * per the repo's deprecate-don't-delete rule.
+ *
  * S8 (consolidation, umbrella #958): the options research host —
  * the "Symbol research / Autonomous runs" toggle over
  * OptionsResearchPanel and ResearchRunsPanel (issue #319: one

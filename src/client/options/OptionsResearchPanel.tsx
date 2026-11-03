@@ -49,6 +49,18 @@ interface OptionsResearchPanelProps {
    *  Schedules tab — the in-hub successor to this panel's schedules
    *  mode "moved" note. Absent when the panel is hosted elsewhere. */
   onOpenSchedules?: () => void;
+  /** Issue #2954: controlled mode. When provided, the host owns the
+   *  mode (the Options copy hub's tab row) and the panel neither
+   *  adopts nor writes the ?research= param. Absent = legacy
+   *  uncontrolled behavior, unchanged. */
+  mode?: ResearchMode;
+  onModeChange?: (mode: ResearchMode) => void;
+  /** Issue #2954: hide the panel's own mode bar (the host's tab row
+   *  is the single row of tabs). */
+  hideModeNav?: boolean;
+  /** Issue #2954: initial discovery-panel view (builder = Builder /
+   *  Payoff Analyzer, discovery = Discovery Scanner). */
+  initialDiscoveryView?: "builder" | "discovery";
 }
 
 export type { TradeOrderContext } from "../trading/tradeOrderContext";
@@ -757,8 +769,18 @@ type NlqResultView = {
 
 export type ResearchMode = "discovery" | "contracts" | "custom" | "nlq" | "llm-ideas" | "schedules";
 
-export function OptionsResearchPanel({ activeEnv, userLogin, onPreviewTrade, onJobStateChange, onSendPrompt, onOpenSchedules }: OptionsResearchPanelProps) {
-  const [researchMode, setResearchMode] = useState<ResearchMode>("discovery");
+export function OptionsResearchPanel({ activeEnv, userLogin, onPreviewTrade, onJobStateChange, onSendPrompt, onOpenSchedules, mode, onModeChange, hideModeNav, initialDiscoveryView }: OptionsResearchPanelProps) {
+  const [internalMode, setInternalMode] = useState<ResearchMode>("discovery");
+  // Issue #2954: controlled when the host passes mode, uncontrolled
+  // otherwise — existing hosts keep their exact behavior.
+  const researchMode = mode ?? internalMode;
+  const setResearchMode = (m: ResearchMode) => {
+    if (mode !== undefined) {
+      onModeChange?.(m);
+    } else {
+      setInternalMode(m);
+    }
+  };
   // Issue #2784: the ?research= surface param. Adopt it on mount and
   // on every route change (nav sub clicks pushState while this
   // shell-retained panel stays mounted); write the mode back with
@@ -768,6 +790,8 @@ export function OptionsResearchPanel({ activeEnv, userLogin, onPreviewTrade, onJ
   const appliedResearchRef = useRef<string | null>(null);
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
+    // Issue #2954: controlled hosts own the mode; never adopt ?research=.
+    if (mode !== undefined) return undefined;
     const adoptFromUrl = () => {
       const parsed = researchSurfaceForParam(
         new URLSearchParams(window.location.search).get("research"),
@@ -787,6 +811,8 @@ export function OptionsResearchPanel({ activeEnv, userLogin, onPreviewTrade, onJ
   }, []);
   useEffect(() => {
     if (typeof window === "undefined") return;
+    // Issue #2954: controlled hosts own the mode; never write ?research=.
+    if (mode !== undefined) return;
     const params = new URLSearchParams(window.location.search);
     const next = researchParamForMode(researchMode, appliedResearchRef.current);
     if (params.get("research") === next) return;
@@ -1139,6 +1165,8 @@ export function OptionsResearchPanel({ activeEnv, userLogin, onPreviewTrade, onJ
         <p className="options-error" role="alert">Option chain data problem: {screenMeta.fetchErrors.map((item: { symbol?: string; reason?: string }) => `${item.symbol ?? ""} ${item.reason ?? ""}`.trim()).join("; ")}</p>
       )}
 
+      {/* Issue #2954: the host's tab row replaces this bar when hidden. */}
+      {!hideModeNav && (
       <CapabilityNavBar
         ariaLabel="Options Research Mode"
         activeTabId={researchMode}
@@ -1156,7 +1184,7 @@ export function OptionsResearchPanel({ activeEnv, userLogin, onPreviewTrade, onJ
           },
           {
             id: "contracts",
-            label: "Raw Contracts Screener",
+            label: "Contracts Screener",
             icon: "📋",
             tooltip: {
               eyebrow: "LIVE CHAIN FILTERING",
@@ -1176,7 +1204,7 @@ export function OptionsResearchPanel({ activeEnv, userLogin, onPreviewTrade, onJ
           },
           {
             id: "nlq",
-            label: "Natural Language Screen (NLQ)",
+            label: "NLQ-options",
             icon: "💬",
             badge: "AI",
             badgeType: "cyan",
@@ -1220,6 +1248,7 @@ export function OptionsResearchPanel({ activeEnv, userLogin, onPreviewTrade, onJ
           </div>
         }
       />
+      )}
 
       {researchMode === "schedules" && (
         <>
@@ -1264,6 +1293,7 @@ export function OptionsResearchPanel({ activeEnv, userLogin, onPreviewTrade, onJ
           <div id="options-research-strategy">
             <StrategyDiscoveryPanel
               initialSymbol={symbol.trim() || "TSLA"}
+              initialView={initialDiscoveryView}
               activeEnv={activeEnv}
               userLogin={userLogin}
               onPreviewTrade={onPreviewTrade}

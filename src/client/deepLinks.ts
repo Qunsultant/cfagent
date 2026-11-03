@@ -25,7 +25,7 @@ import { navigateToTab } from "./router";
 import { resolveRouteId, type RouteId } from "./routes";
 import { SCREENER_HUB_TABS } from "./ScreenersHub";
 import { STOCK_HUB_TABS } from "./StockHub";
-import { OPTIONS_RESEARCH_SURFACE_VALUES } from "./options/researchSurface";
+import { OPTIONS_HUB_TABS } from "./OptionsHub";
 
 export type DeepLink =
   | { tab: RouteId; view?: string; params?: Record<string, string> }
@@ -39,7 +39,7 @@ export type DeepLink =
  */
 export const DEEP_LINK_OVERRIDES: Record<string, DeepLink> = {
   // Top-level specials.
-  "goal-screen": { tab: "screeners", view: "goal-screen" },
+  "goal-screen": { tab: "assets-hub", view: "goal-screen" },
   sandbox: { href: "/checkout/sandbox", newTab: true },
   // Bare sandbox-checkout id (NavigationMenu path) shares the sub-item's
   // link; the resolver falls back to the bare id when no parent:key entry
@@ -49,34 +49,47 @@ export const DEEP_LINK_OVERRIDES: Record<string, DeepLink> = {
   "stock-hub:new-screen": { tab: "stock-hub", view: "new-screen" },
   "stock-hub:screeners": { tab: "stock-hub", view: "stocks" },
   "stock-hub:research": { tab: "stock-hub", view: "research" },
-  // Old-hub views: sub-items that live under ?tab=screeners.
-  "options-screener:scanner": { tab: "screeners", view: "scanner" },
-  "options-screener:iv-history": { tab: "screeners", view: "iv-history" },
-  // Options research surfaces (issue #2784): the research param names
-  // the surface on the options host; the panel adopts mode + section.
-  // The Contract Screen sub used to resolve to bare ?tab=options, which
-  // lands on the default discovery mode — it now carries contracts.
-  "options-screener:options": { tab: "options", params: { research: "contracts" } },
-  "options-screener:discovery": { tab: "options", params: { research: "discovery" } },
-  "options-screener:strategy-panel": { tab: "options", params: { research: "strategy-panel" } },
+  "stock-hub:patterns": { tab: "stock-hub", view: "patterns" },
+  "stock-hub:presets": { tab: "stock-hub", view: "presets" },
+  // Assets Hub views: sub-items that live under ?tab=assets-hub.
+  "assets-hub:forex": { tab: "assets-hub", view: "forex" },
+  "assets-hub:futures": { tab: "assets-hub", view: "futures" },
+  "assets-hub:commodities": { tab: "assets-hub", view: "commodities" },
+  "assets-hub:bonds": { tab: "assets-hub", view: "bonds" },
+  "assets-hub:goal-screen": { tab: "assets-hub", view: "goal-screen" },
+  "assets-hub:reports": { tab: "assets-hub", view: "reports" },
+  "assets-hub:schedules": { tab: "assets-hub", view: "schedules" },
+  "assets-hub:review": { tab: "assets-hub", view: "review" },
+  "assets-hub:track-record": { tab: "assets-hub", view: "track-record" },
+  // Options copy hub (issue #2954): the options-screener subs link to
+  // the copy hub's tabs. Discovery and Strategy Panel share the
+  // strategy-discovery tab and differ by the discoveryView param
+  // (Discovery Scanner vs Builder / Payoff Analyzer).
+  "options-screener:strategy-scanner": { tab: "options", view: "strategy-scanner" },
+  "options-screener:options-runs": { tab: "options", view: "options-runs" },
+  "options-screener:discovery": { tab: "options", view: "strategy-discovery", params: { discoveryView: "discovery" } },
+  "options-screener:strategy-panel": { tab: "options", view: "strategy-discovery", params: { discoveryView: "builder" } },
+  "options-screener:contracts-screener": { tab: "options", view: "contracts-screener" },
+  "options-screener:custom-thesis": { tab: "options", view: "custom-thesis" },
+  "options-screener:nlq-options": { tab: "options", view: "nlq-options" },
+  "options-screener:ai-strategy-ideas": { tab: "options", view: "ai-strategy-ideas" },
+  "options-screener:scheduled-screening": { tab: "options", view: "scheduled-screening" },
+  "options-screener:iv-history": { tab: "options", view: "iv-history" },
+  "options-screener:options-flows": { tab: "options", view: "options-flows" },
+  // Best Trade keeps its page, as it does today: the legacy research
+  // param lands on the copy hub's custom-thesis tab via the hub's
+  // legacy mapping.
   "options-screener:best-trade": { tab: "options", params: { research: "best-trade" } },
-  "options-screener:compare": { tab: "options", params: { research: "compare" } },
-  "options-screener:llm-ideas": { tab: "options", params: { research: "llm-ideas" } },
-  "options-screener:llm-evaluate": { tab: "options", params: { research: "llm-evaluate" } },
-  // Run-records and NLQ surfaces (issue #2801): the panel already
-  // adopts these modes (#2784's mapping); the subs only need to name them.
-  "options-screener:run-records": { tab: "options", params: { research: "schedules" } },
-  "options-screener:nlq": { tab: "options", params: { research: "nlq" } },
-  "workflow-runs:review": { tab: "screeners", view: "review" },
-  "workflow-runs:track-record": { tab: "screeners", view: "track-record" },
+  "workflow-runs:review": { tab: "assets-hub", view: "review" },
+  "workflow-runs:track-record": { tab: "assets-hub", view: "track-record" },
   // Planned menu (issue #2783): subs link to their hub views. The
   // parent links to its first sub; the parent itself renders as a
   // toggle-only button in the sidebar, never as a link.
-  planned: { tab: "screeners", view: "forex" },
-  "planned:forex": { tab: "screeners", view: "forex" },
-  "planned:futures": { tab: "screeners", view: "futures" },
-  "planned:commodities": { tab: "screeners", view: "commodities" },
-  "planned:bonds": { tab: "screeners", view: "bonds" },
+  planned: { tab: "assets-hub", view: "forex" },
+  "planned:forex": { tab: "assets-hub", view: "forex" },
+  "planned:futures": { tab: "assets-hub", view: "futures" },
+  "planned:commodities": { tab: "assets-hub", view: "commodities" },
+  "planned:bonds": { tab: "assets-hub", view: "bonds" },
 };
 
 /** Catalog key for a nav node: bare id for top-level items, parent:id for subs. */
@@ -203,10 +216,10 @@ export const SURFACE_TAB_DEFS: SurfaceTabDef[] = [
   { surface: "screeners-hub", page: "screeners", param: "view", values: SCREENER_HUB_TABS },
   { surface: "stock-hub", page: "stock-hub", param: "view", values: STOCK_HUB_TABS },
   {
-    surface: "options-research",
+    surface: "options-hub",
     page: "options",
-    param: "research",
-    values: OPTIONS_RESEARCH_SURFACE_VALUES,
+    param: "view",
+    values: OPTIONS_HUB_TABS,
   },
   {
     surface: "platform-admin",

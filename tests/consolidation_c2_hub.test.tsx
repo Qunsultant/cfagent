@@ -299,7 +299,13 @@ describe("C2 source pins", () => {
     const tradingHub = readSrc("client/ETradeTradingHub.tsx");
     expect(tradingHub).not.toContain("ScreeningMovedNotice");
     expect(tradingHub).not.toContain("Screening Moved to the Screeners Hub");
-    for (const tab of ["options", "scanner", "iv-history", "reports", "schedules"]) {
+    // Issue #2954: the options/scanner/iv-history subtabs render the
+    // Options copy hub now; reports/schedules still render the
+    // ScreenersHub (Assets Hub).
+    expect(tradingHub).toContain('renderOptionsHub()');
+    expect(tradingHub).toContain('renderOptionsHub("strategy-scanner")');
+    expect(tradingHub).toContain('renderOptionsHub("iv-history")');
+    for (const tab of ["reports", "schedules"]) {
       expect(tradingHub).toContain(`renderScreenersHub("${tab}")`);
     }
     // Reports/Schedules are hosted by the hub now, not mounted here.

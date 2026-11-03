@@ -145,6 +145,9 @@ interface StrategyDiscoveryPanelProps {
   initialStrategyName?: string;
   initialExpirationDate?: string;
   onBackToFlows?: () => void;
+  /** Issue #2954: initial view (builder = Builder / Payoff Analyzer,
+   *  discovery = Discovery Scanner). Defaults to builder, as today. */
+  initialView?: "builder" | "discovery";
 }
 
 interface StockQuoteState {
@@ -265,9 +268,12 @@ export function StrategyDiscoveryPanel({
   initialStrategyName,
   initialExpirationDate,
   onBackToFlows,
+  initialView,
 }: StrategyDiscoveryPanelProps) {
   // Navigation View: "discovery" or "builder"
-  const [activeView, setActiveView] = useState<"discovery" | "builder">("builder");
+  const [activeView, setActiveView] = useState<"discovery" | "builder">(
+    initialView ?? "builder",
+  );
 
   // LLM Strategy Evaluation Modal State
   const [evaluatingStrategy, setEvaluatingStrategy] = useState<StrategyToEvaluate | null>(null);

@@ -6,6 +6,9 @@
  * screener menu keeps its three sub-menus, repointed at the Hub, each
  * linked to its own tab. The old hub loses both stocks tabs; its
  * default becomes options. One home per tab: nothing is duplicated.
+ *
+ * Issue #2954: the options tab leaves the old hub for its own copy
+ * hub, so the old hub's default becomes forex, not options.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -42,20 +45,21 @@ describe("Stock Hub split (#2896)", () => {
     const old = getRoute("screeners");
     expect(old).toBeDefined();
     expect(hasNavEntry(old!)).toBe(false);
-    expect(ROUTES.filter(hasNavEntry)).toHaveLength(30);
+    // Issue #2954 adds the Assets Hub nav entry: 30 → 31.
+    expect(ROUTES.filter(hasNavEntry)).toHaveLength(31);
   });
 
-  it("defines the Hub tab set: stocks, new-screen (+run-screen alias), research", () => {
-    expect([...STOCK_HUB_TABS]).toEqual(["stocks", "new-screen", "run-screen", "research"]);
+  it("defines the Hub tab set: stocks, new-screen (+run-screen alias), research (+ patterns, presets #2954)", () => {
+    expect([...STOCK_HUB_TABS]).toEqual(["stocks", "new-screen", "run-screen", "research", "patterns", "presets"]);
     expect(isValidStockHubTab("stocks")).toBe(true);
     expect(isValidStockHubTab("research")).toBe(true);
     expect(isValidStockHubTab("options")).toBe(false);
   });
 
-  it("keeps the stock screener menu's three sub-menus, repointed at Hub tabs", () => {
+  it("keeps the stock screener menu's sub-menus, repointed at Hub tabs (+ patterns, presets #2954)", () => {
     const subs = SUB_MENU_CONFIGS["stock-hub"];
     expect(subs).toBeDefined();
-    expect(subs.map((s) => s.id)).toEqual(["screeners", "new-screen", "research"]);
+    expect(subs.map((s) => s.id)).toEqual(["screeners", "new-screen", "research", "patterns", "presets"]);
     for (const sub of subs) {
       expect(sub.description.length).toBeGreaterThan(0);
       expect(NAV_ICON_MAP[sub.icon!]).toBeDefined();
@@ -78,14 +82,14 @@ describe("Stock Hub split (#2896)", () => {
     expect(SUB_MENU_CONFIGS["screeners"]).toBeUndefined();
   });
 
-  it("removes both stocks tabs from the old hub and defaults it to options", () => {
+  it("removes both stocks tabs from the old hub and defaults it to forex (#2954)", () => {
     expect((SCREENER_HUB_TABS as readonly string[])).not.toContain("stocks");
     expect((SCREENER_HUB_TABS as readonly string[])).not.toContain("new-screen");
     expect((SCREENER_HUB_TABS as readonly string[])).not.toContain("run-screen");
     expect(isValidScreenerTab("stocks")).toBe(false);
     expect(oldHubSrc).not.toContain('id="screener-tabpanel-stocks"');
     expect(oldHubSrc).not.toContain('id="screener-tabpanel-new-screen"');
-    expect(oldHubSrc).toContain('defaultTab: "options"');
+    expect(oldHubSrc).toContain('defaultTab: "forex"');
   });
 
   it("renders all three Hub tabs in the StockHub copy", () => {

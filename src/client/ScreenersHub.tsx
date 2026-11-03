@@ -5,29 +5,23 @@ import {
   type ScreeningAssetClass,
 } from "./screeningAdapters";
 import type { ScreenedStockItem } from "../types";
-import { navigateToTab } from "./router";
 import { CapabilityNavBar, CopilotTriggerButton, type CapabilityTabItem } from "./components/CapabilityNavBar";
-import { ScannerPanel } from "./ScannerPanel";
 import { GoalScreenPanel } from "./GoalScreenPanel";
 import { ErrorBoundary } from "./ErrorBoundary";
-import { IvHistoryPanel } from "./IvHistoryPanel";
 import { ReportsPanel } from "./ReportsPanel";
-import { PatternsPanel } from "./PatternsPanel";
-import { buildAppliedPatternParams } from "./patternApplyHandoff";
-import { stockPatternById } from "../workflows/stockPatternCatalog";
-import { PresetsPanel } from "./PresetsPanel";
 import { SchedulesPanel } from "./SchedulesPanel";
 import { ScreeningReviewPanel } from "./ScreeningReviewPanel";
 import { ScreeningOutcomesPanel } from "./ScreeningOutcomesPanel";
 import { CalibrationDashboard } from "./CalibrationDashboard";
 import { EnrichmentDashboard } from "./EnrichmentDashboard";
-import { OptionsResearchHost } from "./options/OptionsResearchHost";
 import type { TradeOrderContext } from "./trading/tradeOrderContext";
 import "./optionsResearch.css";
 
 /** S8 (consolidation, umbrella #958): the hub's tabs — the screening
- *  asset classes plus the folded Strategy/Symbol Scanner and IV
- *  History surfaces (formerly Trading Hub subtabs).
+ *  asset classes plus the folded Goal Screen surface.
+ *  Issue #2954: this hub is now the Assets Hub — the options research,
+ *  scanner, IV history, patterns, and presets tabs moved out (options
+ *  to the Options copy hub, patterns/presets to StockHub).
  *  C1 (consolidation #1151, issue #1201): the Goal Screen tab — the
  *  #1096 unified stack's surface (goal-driven screens + backtest).
  *  C2 (consolidation #1151, issue #1246): Reports and Schedules move
@@ -78,36 +72,26 @@ export function buildStockRunRequestBody(
 }
 
 export type ScreenersHubTab =
-  | "options"
   | "forex"
   | "futures"
   | "commodities"
   | "bonds"
-  | "scanner"
-  | "iv-history"
   | "goal-screen"
   | "reports"
   | "schedules"
   | "review"
-  | "track-record"
-  | "patterns"
-  | "presets";
+  | "track-record";
 
 export const SCREENER_HUB_TABS: readonly ScreenersHubTab[] = [
-  "options",
   "forex",
   "futures",
   "commodities",
   "bonds",
-  "scanner",
-  "iv-history",
   "goal-screen",
   "reports",
   "schedules",
   "review",
   "track-record",
-  "patterns",
-  "presets",
 ] as const;
 
 export function isValidScreenerTab(tab: unknown): tab is ScreenersHubTab {
@@ -219,10 +203,7 @@ function numberFilter(value: string): number | undefined {
 export function ScreenersHub({
   activeEnv,
   userLogin,
-  onStocksLoaded,
   onPreviewTrade,
-  onSendPrompt,
-  onJobStateChange,
   initialTab,
   onTabChange,
 }: ScreenersHubProps) {
@@ -234,34 +215,25 @@ export function ScreenersHub({
       param: "view",
       aliases: ["screenerTab", "tab"],
       isValid: isValidScreenerTab,
-      defaultTab: "options",
+      defaultTab: "forex",
       initialTab: initialTab ?? null,
       onTabChange,
     });
 
   // The provider-adapter machinery below serves the asset classes;
-  // the folded scanner / iv-history tabs have no adapter, so they
-  // borrow "stocks" for the (unused) provider lookups.
+  // the folded goal-screen / reports / schedules / review /
+  // track-record tabs have no adapter, so they borrow "stocks" for
+  // the (unused) provider lookups.
   const assetClass: ScreeningAssetClass =
-    hubTab === "scanner" ||
-    hubTab === "iv-history" ||
     hubTab === "goal-screen" ||
     hubTab === "reports" ||
     hubTab === "schedules" ||
     hubTab === "review" ||
-    hubTab === "track-record" ||
-    hubTab === "patterns" ||
-    hubTab === "presets"
+    hubTab === "track-record"
       ? "stocks"
       : hubTab;
   const screenerTabs: CapabilityTabItem[] = useMemo(() => {
     const descriptions: Record<string, { eyebrow: string; title: string; desc: string; icon: string }> = {
-      options: {
-        eyebrow: "DERIVATIVES SCREENING",
-        title: "Options Research",
-        desc: "Strategy discovery, the raw contracts screener, custom thesis scans, NLQ, and the LLM idea experiment — the full options research surface, hosted here.",
-        icon: "⚡",
-      },
       forex: {
         eyebrow: "CURRENCY PAIRS",
         title: "Forex Screener · Planned",
@@ -288,7 +260,7 @@ export function ScreenersHub({
       },
     };
 
-    const assetTabs: CapabilityTabItem[] = SCREENING_ASSET_CLASSES.filter((asset) => asset.id !== "stocks").map((asset) => {
+    const assetTabs: CapabilityTabItem[] = SCREENING_ASSET_CLASSES.filter((asset) => asset.id !== "stocks" && asset.id !== "options").map((asset) => {
       const info = descriptions[asset.id] || {
         eyebrow: "MARKET SCREENER",
         title: asset.label,
@@ -310,34 +282,9 @@ export function ScreenersHub({
       };
     });
 
-    // S8: the folded surfaces ride the same tab bar, right after
-    // Options — the Strategy/Symbol Scanner and IV History, formerly
-    // Trading Hub subtabs.
-
-    const optionsIndex = assetTabs.findIndex((tab) => tab.id === "options");
-    assetTabs.splice(optionsIndex + 1, 0,
-      {
-        id: "scanner",
-        label: "Strategy Scanner",
-        icon: "🎯",
-        badge: "AI",
-        badgeType: "purple",
-        tooltip: {
-          eyebrow: "STRATEGY / SYMBOL SCANNING",
-          title: "Strategy/Symbol Scanner",
-          description: "Best strategy for a name, or names that fit your strategy — across the full strategy catalog.",
-        },
-      },
-      {
-        id: "iv-history",
-        label: "IV History",
-        icon: "📈",
-        tooltip: {
-          eyebrow: "IMPLIED VOLATILITY",
-          title: "IV History",
-          description: "Daily option-chain IV snapshots: per-symbol coverage, IV rank, and the latest readings.",
-        },
-      },
+    // Issue #2954: the scanner / IV history tabs moved to the Options
+    // copy hub. Goal Screen stays, right after the asset classes.
+    assetTabs.push(
       {
         // C1 (consolidation #1151, issue #1201): the goal-driven
         // screen — one goal, one screen across stocks + options
@@ -400,33 +347,6 @@ export function ScreenersHub({
           description: "What happened to issued recommendations, from the outcome ledger — Unverified stays Unverified.",
         },
       },
-      {
-        // Issue #2884: the stock pattern catalog — read-only in
-        // v1, select/apply to New Screen. Patterns stay separate
-        // from presets; this tab never touches preset storage.
-        id: "patterns",
-        label: "Patterns",
-        icon: "🧩",
-        tooltip: {
-          eyebrow: "STOCK PATTERN CATALOG",
-          title: "Patterns",
-          description: "Stock market setup signatures from the setup catalog — read-only, apply one to a new screen.",
-        },
-      },
-      {
-        // Issue #2886: the presets catalog — My Presets plus
-        // proposed starters (copy-to-mine). Presets stay
-        // separate from patterns; this tab never touches
-        // pattern definitions.
-        id: "presets",
-        label: "Presets",
-        icon: "💾",
-        tooltip: {
-          eyebrow: "PRESET CATALOG",
-          title: "Presets",
-          description: "Your saved screening configurations, plus proposed starter presets to copy to My Presets.",
-        },
-      },
     );
     // Issue #2783: the #2438 exclusion is removed — the Planned tabs
     // return to the primary bar with their PLANNED badges (nothing
@@ -456,54 +376,6 @@ export function ScreenersHub({
           Panels mount on first visit and stay preserved in the DOM with role="tabpanel",
           id, and aria-labelledby linking back to their corresponding tab button. */}
 
-      {/* 2. Options Research Panel */}
-      {visitedTabs.has("options") && (
-        <div
-          role="tabpanel"
-          id="screener-tabpanel-options"
-          aria-labelledby="cap-tab-options"
-          hidden={hubTab !== "options"}
-          style={hubTab !== "options" ? { display: "none" } : undefined}
-        >
-          <OptionsResearchHost
-            activeEnv={activeEnv}
-            userLogin={userLogin}
-            onPreviewTrade={onPreviewTrade}
-            onJobStateChange={onJobStateChange}
-            onSendPrompt={onSendPrompt}
-            onOpenSchedules={() => handleTabChange("schedules")}
-          />
-        </div>
-      )}
-
-      {/* 3. Strategy/Symbol Scanner Panel */}
-      {visitedTabs.has("scanner") && (
-        <div
-          role="tabpanel"
-          id="screener-tabpanel-scanner"
-          aria-labelledby="cap-tab-scanner"
-          hidden={hubTab !== "scanner"}
-          style={hubTab !== "scanner" ? { display: "none" } : undefined}
-        >
-          <ErrorBoundary label="Strategy/Symbol Scanner panel">
-            <ScannerPanel activeEnv={activeEnv} userLogin={userLogin} onPreviewTrade={onPreviewTrade} />
-          </ErrorBoundary>
-        </div>
-      )}
-
-      {/* 4. IV History Panel */}
-      {visitedTabs.has("iv-history") && (
-        <div
-          role="tabpanel"
-          id="screener-tabpanel-iv-history"
-          aria-labelledby="cap-tab-iv-history"
-          hidden={hubTab !== "iv-history"}
-          style={hubTab !== "iv-history" ? { display: "none" } : undefined}
-        >
-          <IvHistoryPanel />
-        </div>
-      )}
-
       {/* 5. Goal Screen Panel */}
       {visitedTabs.has("goal-screen") && (
         <div
@@ -520,58 +392,6 @@ export function ScreenersHub({
       )}
 
       {/* 6. Reports Panel */}
-      {/* Issue #2884: Patterns catalog tab (?tab=screeners&view=patterns). */}
-      {visitedTabs.has("patterns") && (
-        <div
-          role="tabpanel"
-          id="screener-tabpanel-patterns"
-          aria-labelledby="cap-tab-patterns"
-          hidden={hubTab !== "patterns"}
-          style={hubTab !== "patterns" ? { display: "none" } : undefined}
-        >
-          <ErrorBoundary label="Patterns panel">
-            <PatternsPanel
-              onApplyPattern={(filter, patternId) => {
-                // Issue #2909 (G2): Apply fully determines the New
-                // Screen panel — the pattern (id, pinned version,
-                // filter, unmapped guardrails) rides as URL params
-                // the StockHub decodes into its criteria, instead
-                // of being dropped on navigation (audit F1).
-                // Unknown ids fall back to the bare navigation,
-                // never an invented pattern; preset storage is
-                // never touched.
-                const pattern = stockPatternById(patternId);
-                navigateToTab(
-                  "stock-hub",
-                  "new-screen",
-                  pattern ? buildAppliedPatternParams(pattern) : undefined,
-                );
-              }}
-            />
-          </ErrorBoundary>
-        </div>
-      )}
-
-      {/* Issue #2886: Presets catalog tab (?tab=screeners&view=presets). */}
-      {visitedTabs.has("presets") && (
-        <div
-          role="tabpanel"
-          id="screener-tabpanel-presets"
-          aria-labelledby="cap-tab-presets"
-          hidden={hubTab !== "presets"}
-          style={hubTab !== "presets" ? { display: "none" } : undefined}
-        >
-          <ErrorBoundary label="Presets panel">
-            <PresetsPanel
-              userLogin={userLogin}
-              currentFilter={{}}
-              onApplyPreset={() => navigateToTab("stock-hub", "new-screen")}
-              onNavigateNewScreen={() => navigateToTab("stock-hub", "new-screen")}
-            />
-          </ErrorBoundary>
-        </div>
-      )}
-
       {visitedTabs.has("reports") && (
         <div
           role="tabpanel"

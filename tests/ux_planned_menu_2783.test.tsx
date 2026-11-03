@@ -53,14 +53,14 @@ describe("Planned menu (issue #2783)", () => {
     ]);
   });
 
-  it("resolves every Planned sub to its hub view link", () => {
+  it("resolves every Planned sub to its hub view link (#2954: hub is Assets Hub now)", () => {
     for (const id of PLANNED_IDS) {
       expect(deepLinkForNavNode("planned", id)).toEqual({
-        tab: "screeners",
+        tab: "assets-hub",
         view: id,
       });
-      expect(deepLinkHref({ tab: "screeners", view: id })).toBe(
-        `?tab=screeners&view=${id}`,
+      expect(deepLinkHref({ tab: "assets-hub", view: id })).toBe(
+        `?tab=assets-hub&view=${id}`,
       );
     }
   });

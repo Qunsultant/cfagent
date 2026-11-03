@@ -20,6 +20,7 @@ import { TradingApprovalsQueue } from "./TradingApprovalsQueue";
 import { AccountPanels } from "./AccountPanels";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { ScreenersHub, type ScreenersHubTab } from "./ScreenersHub";
+import { OptionsHub, type OptionsHubTab } from "./OptionsHub";
 import { StockHub, type StockHubTab } from "./StockHub";
 import { ETradeDynamicMenu, type ETradeDynamicMenuProps } from "./ETradeDynamicMenu";
 import {
@@ -61,6 +62,7 @@ export type TradingSubTab =
   | "schedules"
   | "iv-history"
   | "options"
+  | "assets-hub"
   | "order"
   | "portfolio"
   | "ledger"
@@ -113,7 +115,18 @@ export function ETradeTradingHub({
     <ScreenersHub
       activeEnv={activeEnv}
       userLogin={user?.login}
-      onStocksLoaded={setScreenerStocks}
+      initialTab={tab}
+      onPreviewTrade={handleTradeOrder}
+    />
+  );
+
+  // Issue #2954: the Options copy hub — the options subtabs render it
+  // on the equivalent tab, with the same trade/prompt/job props.
+  const renderOptionsHub = (tab?: OptionsHubTab) => (
+    <OptionsHub
+      activeEnv={activeEnv}
+      userLogin={user?.login}
+      user={user}
       initialTab={tab}
       onPreviewTrade={handleTradeOrder}
       onSendPrompt={onSendPrompt}
@@ -1354,6 +1367,7 @@ export function ETradeTradingHub({
       schedules: "Schedules",
       "iv-history": "IV History",
       options: "Auto Options Research",
+      "assets-hub": "Assets Hub",
       order: "Order Ticket",
       portfolio: "Portfolio",
       ledger: "Order History",
@@ -1731,9 +1745,10 @@ export function ETradeTradingHub({
 
       {/* C2: the screening subtabs render the one hub directly on
           the equivalent tab — no redirect notices. */}
-      {effectiveSubTab === "iv-history" && renderScreenersHub("iv-history")}
+      {effectiveSubTab === "iv-history" && renderOptionsHub("iv-history")}
 
-      {effectiveSubTab === "screeners" && renderScreenersHub("options")}
+      {effectiveSubTab === "screeners" && renderScreenersHub("forex")}
+      {effectiveSubTab === "assets-hub" && renderScreenersHub("forex")}
       {effectiveSubTab === "stock-hub" && renderStockHub("stocks")}
 
       {effectiveSubTab === "reports" && renderScreenersHub("reports")}
@@ -1741,9 +1756,9 @@ export function ETradeTradingHub({
       {effectiveSubTab === "schedules" && renderScreenersHub("schedules")}
 
       {/* SUBTAB 1: MARKET SCREENER & SCANNER — folded into the hub. */}
-      {effectiveSubTab === "scanner" && renderScreenersHub("scanner")}
+      {effectiveSubTab === "scanner" && renderOptionsHub("strategy-scanner")}
 
-      {effectiveSubTab === "options" && renderScreenersHub("options")}
+      {effectiveSubTab === "options" && renderOptionsHub()}
 
       {/* SUBTAB 2: ORDER TICKET & HITL PREVIEW */}
       {effectiveSubTab === "order" && (

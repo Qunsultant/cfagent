@@ -79,7 +79,7 @@ describe("Deep-link catalog (issue #2776)", () => {
       view: "ads",
     });
     expect(deepLinkForNavNode(null, "goal-screen")).toEqual({
-      tab: "screeners",
+      tab: "assets-hub",
       view: "goal-screen",
     });
     expect(deepLinkForNavNode(null, "sandbox")).toEqual({
@@ -105,12 +105,15 @@ describe("Deep-link catalog (issue #2776)", () => {
       tab: "stock-hub",
       view: "stocks",
     });
-    expect(deepLinkForNavNode("options-screener", "scanner")).toEqual({
-      tab: "screeners",
-      view: "scanner",
+    // Issue #2954: the options-screener scanner sub is the copy hub's
+    // strategy-scanner tab now.
+    expect(deepLinkForNavNode("options-screener", "strategy-scanner")).toEqual({
+      tab: "options",
+      view: "strategy-scanner",
     });
+    // Issue #2954: review lives on the Assets Hub now.
     expect(deepLinkForNavNode("workflow-runs", "review")).toEqual({
-      tab: "screeners",
+      tab: "assets-hub",
       view: "review",
     });
     expect(deepLinkForNavNode("platform-admin", "platform-admin:ads")).toEqual({
