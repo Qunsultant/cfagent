@@ -60,6 +60,7 @@ import { AdminQueueWipePanel } from "./AdminQueueWipePanel";
 import { ServiceUserSection } from "./ServiceUserSection";
 import { ServiceTokensPanel } from "./ServiceTokensPanel";
 import { RoleGrantsPanel } from "./RoleGrantsPanel";
+import { PolicyProposalsPanel } from "./PolicyProposalsPanel";
 import { fetchRoleGrants } from "./roleGrantsApi";
 import "./iaaaAdminPanel.css";
 
@@ -435,6 +436,14 @@ export function IaaaAdminPanel() {
         this same section through the limited view above. */}
         <h4>Role grants</h4>
         <RoleGrantsPanel />
+
+        {/* Issue #2838: policy proposals live on Overview beside
+        the role-grants section, not a new tab (tab indices
+        unchanged) and not duplicated elsewhere: like them, policy
+        administration is platform state. Tenant-admins never see
+        this section (the limited view above returns early). */}
+        <h4>Policy proposals</h4>
+        <PolicyProposalsPanel />
 
         <p className="iaaa-admin-note">
           Audit events are read-only. Pending access requests below can be
