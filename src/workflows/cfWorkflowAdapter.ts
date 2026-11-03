@@ -1,9 +1,9 @@
 /**
  * Issue #1737 — the provider adapter for the workflow port.
- * This module (plus the workflow class and the composition
- * root) is the ONLY place that touches the workflow binding.
- * Domain code imports the port and the composition root,
- * never this module and never a binding.
+ * Starts route through the ONE seam (workflowInstanceSeam): this
+ * module no longer hand-rolls create → adopt → fallback. Domain
+ * code imports the port and the composition root, never this
+ * module and never a binding.
  *
  * Idempotent start: creating an instance with an id that
  * already exists is an error, not a second run — so a create
@@ -17,7 +17,6 @@ import {
   assertWorkflowJobCommand,
   workflowIdForJob,
   workflowStatusUrl,
-  WorkflowError,
   type WorkflowHandle,
   type WorkflowInstanceStatus,
   type WorkflowJobCommand,
@@ -25,21 +24,17 @@ import {
   type WorkflowStatus,
 } from "./workflowPorts";
 
+import {
+  startManagedWorkflowInstance,
+  type ManagedWorkflowBinding,
+  type ManagedWorkflowBindingInstance,
+} from "./workflowInstanceSeam";
+
 /** Minimal structural surface the adapter needs from a binding (no provider types). */
-export interface WorkflowBindingInstance {
-  id: string;
-  status(): Promise<{
-    status: string;
-    output?: unknown;
-    error?: { message: string };
-  }>;
-}
+export type WorkflowBindingInstance = ManagedWorkflowBindingInstance;
 
 /** Minimal structural surface of a workflow binding. */
-export interface WorkflowBindingLike {
-  create(options: { id: string; params: unknown }): Promise<{ id: string }>;
-  get(id: string): Promise<WorkflowBindingInstance>;
-}
+export type WorkflowBindingLike = ManagedWorkflowBinding;
 
 /** Map a raw instance status onto the port's vocabulary (unknown strings → "unknown"). */
 export function mapInstanceStatus(raw: string): WorkflowInstanceStatus {
@@ -73,61 +68,25 @@ async function fallbackWorkflowId(jobId: string): Promise<string> {
   return `screen-${hex.slice(0, 40)}`;
 }
 
-/** Provider error text, safe to log (never returned to a client). */
-function errorText(err: unknown): string {
-  const text = err instanceof Error ? err.message : String(err);
-  return text.length > 300 ? `${text.slice(0, 300)}…` : text;
-}
-
 /**
- * Start one instance idempotently: create, or adopt the
- * existing instance when create reports the id is taken
- * (any create error falls through to the get — the error
- * shape for a duplicate id is provider detail, and a get
- * that succeeds proves the instance exists).
- *
- * Issue #2065: when the derived id is unusable (over the provider's
- * 100-character ceiling, rejected characters) or the collision has no
- * adoptable instance, the job is not lost — one retry uses a short
- * provider-safe id (`screen-<uuid>`). The job id still rides in params,
- * so the run stays traceable, and a genuine provider outage still fails
- * loudly with the original error preserved for the logs.
+ * Start one instance idempotently via the ONE seam
+ * (workflowInstanceSeam): create under the derived id, adopt on
+ * collision, one retry under a short provider-safe id when the
+ * derived id is unusable (Issue #2065: a 122-char goal job id) or
+ * the collision has no adoptable instance. The job id still rides
+ * in params, so the run stays traceable, and a genuine provider
+ * outage still fails loudly with the original error preserved
+ * for the logs (inside the seam's start_failed message).
  */
 export async function startWorkflowInstance(
   binding: WorkflowBindingLike,
   command: WorkflowJobCommand,
 ): Promise<{ workflowId: string; existing: boolean; adoptedFallbackId?: boolean }> {
-  let firstError: unknown = null;
-  let derivedId: string | null = null;
-  try {
-    derivedId = workflowIdForJob(command.jobId);
-    const instance = await binding.create({ id: derivedId, params: command });
-    return { workflowId: instance.id, existing: false };
-  } catch (err) {
-    firstError = err;
-  }
-  if (derivedId) {
-    try {
-      const instance = await binding.get(derivedId);
-      await instance.status();
-      return { workflowId: derivedId, existing: true };
-    } catch {
-      // No adoptable instance: fall through to the fallback-id retry.
-    }
-  }
-  const fallbackId = await fallbackWorkflowId(command.jobId);
-  try {
-    const instance = await binding.create({ id: fallbackId, params: command });
-    console.warn(
-      `[workflows] start used fallback instance id ${fallbackId} for job ${command.jobId} after the derived id failed: ${errorText(firstError)}`,
-    );
-    return { workflowId: instance.id, existing: false, adoptedFallbackId: true };
-  } catch (retryErr) {
-    throw new WorkflowError(
-      "start_failed",
-      `Workflow start failed for job ${command.jobId} (derived id: ${errorText(firstError)}; fallback id: ${errorText(retryErr)}).`,
-    );
-  }
+  return startManagedWorkflowInstance(binding, {
+    id: workflowIdForJob(command.jobId),
+    fallbackId: () => fallbackWorkflowId(command.jobId),
+    params: command,
+  });
 }
 
 /** Provider adapter: the workflow port over a workflow binding. */
@@ -152,6 +111,7 @@ export class CfWorkflowAdapter implements WorkflowPort {
   async status(workflowId: string): Promise<WorkflowStatus | null> {
     try {
       const instance = await this.binding.get(workflowId);
+      if (typeof instance.status !== "function") return null;
       const s = await instance.status();
       return { workflowId, status: mapInstanceStatus(s.status) };
     } catch {
