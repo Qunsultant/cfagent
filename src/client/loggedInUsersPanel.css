@@ -1,0 +1,103 @@
+/* Logged-in users section (issue #2836) — lup- prefixed, token-only. */
+
+.lup-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.lup-desc {
+  margin: 0;
+  font-size: var(--font-size-body-sm);
+  color: var(--color-text-muted);
+}
+
+.lup-loading {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.lup-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.lup-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid var(--color-border-medium);
+  border-radius: var(--radius-md);
+}
+
+.lup-item-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.lup-item-user {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.lup-item-tenants,
+.lup-item-count,
+.lup-item-times,
+.lup-item-recent {
+  font-size: var(--font-size-body-sm);
+  color: var(--color-text-muted);
+}
+
+.lup-sessions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.lup-session {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.5rem;
+  border: 1px solid var(--color-border-medium);
+  border-radius: var(--radius-sm);
+}
+
+.lup-session-id {
+  font-size: var(--font-size-body-sm);
+  overflow-wrap: anywhere;
+}
+
+.lup-session-provider,
+.lup-session-times {
+  font-size: var(--font-size-body-sm);
+  color: var(--color-text-muted);
+}
+
+.lup-session-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.lup-confirm-text {
+  font-size: var(--font-size-body-sm);
+  font-weight: 600;
+}
+
+.lup-note {
+  margin: 0;
+  font-size: var(--font-size-body-sm);
+  color: var(--color-text-muted);
+}
