@@ -70,6 +70,7 @@ import type { StoreTier } from "../../data/commercialPorts";
 import { resolveEffectiveTier } from "../../data/subscriptionPorts";
 import type { MeteredGateOptions } from "../../services/meteredPaymentGate";
 import { screenAlreadyRunningDetails } from "../../services/screenInFlight";
+import { quotaExceededDetails } from "../../security/userRequestQuota";
 
 /** The subset of OrchestratorAgent surface the premium handlers need. */
 export interface PremiumRouteContext {
@@ -619,6 +620,15 @@ export async function handlePremiumRoutes(
             // second submitter; the retryable shape is unchanged.
             const details = screenAlreadyRunningDetails(screenErr);
             return { success: false, service: tier.name, receipt, error: "Screen already running; retry shortly.", retryable: true, runId: details?.runId ?? null, status: details?.status ?? "running" };
+          }
+          // Issue #2842: quota refusal carries limit/usage/reset;
+          // a counter failure fails closed (never an uncounted run).
+          if (error.includes("quota exceeded")) {
+            const details = quotaExceededDetails(screenErr);
+            return { success: false, service: tier.name, receipt, error: "Request quota exceeded.", retryable: true, limit: details?.limit ?? null, usage: details?.usage ?? null, window: details?.window ?? null, resetAt: details?.resetAtIso ?? null, resetAtMs: details?.resetAtMs ?? null };
+          }
+          if (error.includes("quota unavailable")) {
+            return { success: false, service: tier.name, receipt, error: "Request quota unavailable.", retryable: true };
           }
           throw screenErr;
         }

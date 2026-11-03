@@ -207,6 +207,134 @@ export async function revokeLoggedInSession(
   };
 }
 
+export interface QuotaOverrideView {
+  id: string;
+  tenantId: string;
+  userLogin: string;
+  windowKind: string;
+  windowKey: string;
+  extraRuns: number;
+  grantedBy: string;
+  reason: string;
+  createdMs: number;
+  expiresMs: number | null;
+}
+
+export interface QuotaWindowView {
+  window: string;
+  limit: number;
+  usage: number;
+  remaining: number;
+  resetAtMs: number;
+  resetAtIso: string;
+  overrides: QuotaOverrideView[];
+}
+
+export interface QuotaUsageResponse {
+  ok: boolean;
+  scope: string;
+  userLogin: string;
+  tenantPartition: string;
+  usage: { daily: QuotaWindowView; weekly: QuotaWindowView; monthly: QuotaWindowView };
+  overrides: QuotaOverrideView[];
+}
+
+export interface GrantQuotaOverrideResult {
+  ok: boolean;
+  override: QuotaOverrideView;
+  audited: boolean;
+}
+
+function parseQuotaOverride(value: unknown): QuotaOverrideView {
+  if (!isRecord(value)) throw new Error("Quota response was malformed.");
+  const { id, tenantId, userLogin, windowKind, windowKey, extraRuns, grantedBy, reason, createdMs, expiresMs } = value;
+  if (
+    typeof id !== "string" || typeof tenantId !== "string" || typeof userLogin !== "string" ||
+    typeof windowKind !== "string" || typeof windowKey !== "string" ||
+    typeof extraRuns !== "number" || typeof grantedBy !== "string" ||
+    typeof reason !== "string" || typeof createdMs !== "number" ||
+    (expiresMs !== null && typeof expiresMs !== "number")
+  ) {
+    throw new Error("Quota response was malformed.");
+  }
+  return { id, tenantId, userLogin, windowKind, windowKey, extraRuns, grantedBy, reason, createdMs, expiresMs };
+}
+
+function parseQuotaWindow(value: unknown): QuotaWindowView {
+  if (!isRecord(value)) throw new Error("Quota response was malformed.");
+  const { window, limit, usage, remaining, resetAtMs, resetAtIso, overrides } = value;
+  if (
+    typeof window !== "string" || typeof limit !== "number" || typeof usage !== "number" ||
+    typeof remaining !== "number" || typeof resetAtMs !== "number" ||
+    typeof resetAtIso !== "string" || !Array.isArray(overrides)
+  ) {
+    throw new Error("Quota response was malformed.");
+  }
+  return { window, limit, usage, remaining, resetAtMs, resetAtIso, overrides: overrides.map(parseQuotaOverride) };
+}
+
+/**
+ * Issue #2842: per-user quota usage (self, or an admin's lookup
+ * by login). The server scopes every lookup; this client only
+ * renders what the server returns and surfaces refusals.
+ */
+export async function fetchQuotaUsage(userLogin?: string): Promise<QuotaUsageResponse> {
+  const path = userLogin !== undefined
+    ? `/api/iaaa/quota-usage?userLogin=${encodeURIComponent(userLogin)}`
+    : "/api/iaaa/quota-usage";
+  const res = await apiFetch(path);
+  if (!res.ok) throw await readError(res, "Failed to load quota usage.");
+  const body = (await res.json().catch(() => null)) as {
+    scope?: unknown;
+    userLogin?: unknown;
+    tenantPartition?: unknown;
+    usage?: unknown;
+    overrides?: unknown;
+  } | null;
+  if (
+    !body || typeof body.scope !== "string" || typeof body.userLogin !== "string" ||
+    typeof body.tenantPartition !== "string" || !isRecord(body.usage) || !Array.isArray(body.overrides)
+  ) {
+    throw new Error("Quota response was malformed.");
+  }
+  return {
+    ok: true,
+    scope: body.scope,
+    userLogin: body.userLogin,
+    tenantPartition: body.tenantPartition,
+    usage: {
+      daily: parseQuotaWindow(body.usage.daily),
+      weekly: parseQuotaWindow(body.usage.weekly),
+      monthly: parseQuotaWindow(body.usage.monthly),
+    },
+    overrides: body.overrides.map(parseQuotaOverride),
+  };
+}
+
+/**
+ * Issue #2842: admin override grant. The grant targets the
+ * current window of its kind; the server fills the window key
+ * and the grant expires at that window's end. The result notice
+ * reports whether the grant was audited — never a clean success
+ * on a failed audit write.
+ */
+export async function grantQuotaOverride(input: {
+  userLogin: string;
+  windowKind: "daily" | "weekly" | "monthly";
+  extraRuns: number;
+  reason: string;
+}): Promise<GrantQuotaOverrideResult> {
+  const res = await apiFetch("/api/iaaa/quota-usage/override", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw await readError(res, "Failed to grant quota override.");
+  const body = (await res.json().catch(() => null)) as { override?: unknown; audited?: unknown } | null;
+  if (!body) throw new Error("Quota override response was malformed.");
+  return { ok: true, override: parseQuotaOverride(body.override), audited: body.audited === true };
+}
+
 export function fmtLoggedInTime(ms: number | null): string {
   if (ms === null || ms === undefined) return "—";
   try {
