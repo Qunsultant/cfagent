@@ -72,10 +72,10 @@ describe("nav-config.json shape (issue #2977)", () => {
     for (const id of navData.hostedIds as string[]) expect(ids.has(id)).toBe(true);
   });
 
-  it("deepLinks: 36 overrides, every tab target is a route", () => {
+  it("deepLinks: 31 overrides, every tab target is a route", () => {
     const ids = new Set((navData.routes as { id: string }[]).map((r) => r.id));
     const entries = Object.entries(navData.deepLinks as Record<string, { tab?: string }>);
-    expect(entries).toHaveLength(36);
+    expect(entries).toHaveLength(31);
     for (const [, link] of entries) {
       if (link.tab) expect(ids.has(link.tab)).toBe(true);
     }
@@ -114,7 +114,7 @@ describe("nav-config.json shape (issue #2977)", () => {
 describe("nav-config.json loaders (issue #2977)", () => {
   it("loaders re-export the data file unchanged", () => {
     expect(ROUTES).toHaveLength(41);
-    expect(Object.keys(DEEP_LINK_OVERRIDES)).toHaveLength(36);
+    expect(Object.keys(DEEP_LINK_OVERRIDES)).toHaveLength(31);
     expect(SURFACE_TAB_DEFS).toHaveLength(14);
     // 6 metadata sections + sandbox + planned menu-only sections.
     const built = buildDefaultLeftNavConfig().sections;

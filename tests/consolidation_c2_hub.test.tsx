@@ -313,14 +313,14 @@ describe("C2 source pins", () => {
     expect(tradingHub).toContain("<SchedulesPanel");
   });
 
-  it("the hub hosts reports, schedules, the review inbox, and the track record", () => {
+  it("the hub no longer hosts the own pages (#2971)", () => {
     const hub = readSrc("client/ScreenersHub.tsx");
-    expect(hub).toContain("<ReportsPanel");
-    expect(hub).toContain("<SchedulesPanel");
-    expect(hub).toContain("<ScreeningReviewPanel");
-    expect(hub).toContain("<ScreeningOutcomesPanel");
-    for (const tab of ['"reports"', '"schedules"', '"review"', '"track-record"']) {
-      expect(hub).toContain(tab);
+    expect(hub).not.toContain("<ReportsPanel");
+    expect(hub).not.toContain("<SchedulesPanel");
+    expect(hub).not.toContain("<ScreeningReviewPanel");
+    expect(hub).not.toContain("<ScreeningOutcomesPanel");
+    for (const tab of ['"reports"', '"schedules"', '"review"', '"track-record"', '"goal-screen"']) {
+      expect(hub).not.toContain(tab);
     }
   });
 
@@ -411,14 +411,18 @@ describe("C2 hub + panels (render)", () => {
     vi.unstubAllGlobals();
   });
 
-  it("the hub's tab bar carries Reports, Schedules, Review, and Track Record", async () => {
-    // Default tab is options since #2896, and its panel needs toast context.
+  it("the hub's tab bar carries only the four asset tabs (#2971)", async () => {
+    // The default tab's panel needs toast context.
     await act(async () => {
       root.render(<ToastProvider><ScreenersHub activeEnv="PROD" userLogin="alice" /></ToastProvider>);
     });
     await flush();
-    for (const label of ["Reports", "Schedules", "Review", "Track Record"]) {
-      expect(container.textContent).toContain(label);
+    const tabText = [...container.querySelectorAll(".capability-tab-btn")].map((b) => b.textContent ?? "").join(" ");
+    for (const label of ["Forex", "Futures", "Commodities", "Bonds"]) {
+      expect(tabText).toContain(label);
+    }
+    for (const label of ["Goal Screen", "Reports", "Schedules", "Review", "Track Record"]) {
+      expect(tabText).not.toContain(label);
     }
   });
 
@@ -431,13 +435,17 @@ describe("C2 hub + panels (render)", () => {
     expect(container.textContent).toContain("Strategy Discovery & Payoff Analyzer");
   });
 
-  it("the hub opens on the Review tab via initialTab", async () => {
+  it("a stale own-page ?view falls back to the default asset tab (#2971)", async () => {
+    window.history.replaceState(null, "", "/screeners?view=review");
     await act(async () => {
-      root.render(<ScreenersHub activeEnv="PROD" userLogin="alice" initialTab="review" />);
+      root.render(<ToastProvider><ScreenersHub activeEnv="PROD" userLogin="alice" /></ToastProvider>);
     });
     await flush();
-    expect(container.textContent).toContain("Proposal Review");
-    expect(container.textContent).toContain("Covered-call income on SPY");
+    const active = container.querySelector('.capability-tab-btn[aria-selected="true"]');
+    expect(active?.textContent).toContain("Forex");
+    expect(container.querySelector("#screener-tabpanel-review")).toBeNull();
+    expect(container.textContent).not.toContain("Proposal Review");
+    window.history.replaceState(null, "", "/screeners");
   });
 
   it("the review inbox shows challengers, goals, read-only re-selections, and weights", async () => {

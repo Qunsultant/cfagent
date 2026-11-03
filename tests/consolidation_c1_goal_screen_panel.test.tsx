@@ -10,7 +10,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { GoalScreenPanel } from "../src/client/GoalScreenPanel";
-import { ScreenersHub } from "../src/client/ScreenersHub";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -193,13 +192,5 @@ describe("C1 GoalScreenPanel", () => {
     expect(csvLink).not.toBeNull();
     expect(csvLink.href).toContain("/api/screening/goal-screen/report.csv?key=goal_screen%3Acsv%3Atest1234");
     expect(csvLink.textContent).toContain("Download CSV");
-  });
-
-  it("the hub hosts the panel under its goal-screen tab", async () => {
-    await act(async () => {
-      root.render(<ScreenersHub activeEnv="PROD" userLogin="alice" initialTab="goal-screen" />);
-    });
-    expect(container.textContent).toContain("Run goal screen");
-    expect(container.textContent).toContain("Goal Screen");
   });
 });
