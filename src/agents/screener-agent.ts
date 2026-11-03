@@ -29,6 +29,16 @@ import { DatabaseORM } from "../orm";
 import { ETradeService } from "../services/etrade";
 import { createScreenRunLockPort } from "../data/createScreenRunLockPorts";
 import type { ScreenRunLockPort } from "../data/screenRunLockPorts";
+import { createUserRequestQuotaPort } from "../data/createUserRequestQuotaPorts";
+import type { UserRequestQuotaPort } from "../data/userRequestQuotaPorts";
+import {
+  checkAndChargeUserRequestQuota,
+  getUserRequestQuotaUsage,
+  quotaWindowEndForKey,
+  resolveUserRequestQuota,
+  validateQuotaOverrideInput,
+  type QuotaUsageView,
+} from "../security/userRequestQuota";
 import {
   ScreenAlreadyRunningError,
   screenInFlightFromProbe,
@@ -137,6 +147,15 @@ export interface ScreenerRunRequest {
   maxSymbols?: number;
   /** User login for E*TRADE auth scoping. */
   userLogin?: string;
+  /**
+   * Issue #2842: tenant partition for the quota charge. When
+   * absent, the run owner's login is the partition (the #2426
+   * rule: captures already partition by owner login, and no
+   * route today carries an IAAA tenant into a screen request).
+   * A caller that later supplies a tenant must use the same
+   * partition for quota-usage lookups, or the lookup misses.
+   */
+  tenantId?: string;
   /** E*TRADE environment selected by the signed-in user. */
   environment?: "TEST" | "PROD";
   /**
@@ -651,6 +670,106 @@ export class ScreenerAgent extends PortThink {
     return this.screenRunLockCache;
   }
 
+  private userRequestQuotaCache: UserRequestQuotaPort | null = null;
+
+  /**
+   * Issue #2842: the per-user report-run quota counters behind
+   * their port, composed over this instance's own storage —
+   * the same residency as the screen lock (the instance IS the
+   * user partition). The accessor is synchronous and memoized;
+   * composition executes nothing.
+   */
+  private userRequestQuota(): UserRequestQuotaPort {
+    if (!this.userRequestQuotaCache) {
+      this.userRequestQuotaCache = createUserRequestQuotaPort(
+        this.ctx.storage.sql,
+      );
+    }
+    return this.userRequestQuotaCache;
+  }
+
+  /**
+   * Issue #2842: resolve the quota policy from env, logging
+   * invalid keys (they fall back to defaults, never silently).
+   */
+  private userRequestQuotaPolicy() {
+    const resolved = resolveUserRequestQuota(this.env);
+    if (resolved.invalid.length > 0) {
+      console.warn(
+        `[ScreenerAgent] user request quota config error: ${resolved.invalid.join(", ")} — falling back to defaults`,
+      );
+    }
+    return resolved;
+  }
+
+  /**
+   * Issue #2842: remaining quota for a user, pre-run. The
+   * tenant partition defaults to the login (the gate's default
+   * when no caller supplies one); pass the same tenantId the
+   * run gate saw, or the lookup misses that partition's rows.
+   */
+  async getUserRequestQuotaUsage(
+    userLogin?: string,
+    tenantId?: string,
+  ): Promise<QuotaUsageView> {
+    const login = userLogin ?? (await this.userLogin());
+    return getUserRequestQuotaUsage({
+      port: this.userRequestQuota(),
+      policy: this.userRequestQuotaPolicy(),
+      tenantId: tenantId ?? login,
+      userLogin: login,
+    });
+  }
+
+  /**
+   * Issue #2842: all override rows for a user (newest first),
+   * for the admin surface. Same partition rule as the usage view.
+   */
+  async listUserRequestQuotaOverrides(
+    userLogin?: string,
+    tenantId?: string,
+  ) {
+    const login = userLogin ?? (await this.userLogin());
+    return this.userRequestQuota().listOverrides({
+      tenantId: tenantId ?? login,
+      userLogin: login,
+    });
+  }
+
+  /**
+   * Issue #2842: record an audited admin override grant. The
+   * grant targets the CURRENT window of its kind (the route
+   * passes the current window key); a null expiry fills to
+   * that window's end, so a grant can never leak into the next
+   * window. The row itself is the auditable record (admin,
+   * user, tenant, grant, timestamp); the server route also
+   * writes the IAAA audit event and reports `audited` honestly.
+   */
+  async grantUserRequestQuotaOverride(input: {
+    tenantId?: string;
+    userLogin: string;
+    windowKind: "daily" | "weekly" | "monthly";
+    windowKey: string;
+    extraRuns: number;
+    grantedBy: string;
+    reason: string;
+    expiresMs?: number | null;
+  }) {
+    const login = input.userLogin;
+    const validated = validateQuotaOverrideInput({
+      tenantId: input.tenantId ?? login,
+      userLogin: login,
+      windowKind: input.windowKind,
+      windowKey: input.windowKey,
+      extraRuns: input.extraRuns,
+      grantedBy: input.grantedBy,
+      reason: input.reason,
+    });
+    const expiresMs =
+      input.expiresMs ?? quotaWindowEndForKey(validated.windowKind, validated.windowKey);
+    return this.userRequestQuota().grantOverride({ ...validated, expiresMs });
+  }
+
   async isScreenRunning(
     universe: string,
     userLogin?: string,
@@ -737,6 +856,25 @@ export class ScreenerAgent extends PortThink {
     }
     if (lock.tookOverStale) {
       console.warn(`[ScreenerAgent] Stale lock detected, taking over.`);
+    }
+    // Issue #2842: the run-submission gate — checked BEFORE the
+    // run starts, AFTER the lock (an already-running refusal
+    // charges nothing, and the lock is released explicitly on
+    // a quota refusal because the try/finally below has not
+    // started yet). The run id is the #2840 derived id, so the
+    // charge is idempotent on the accepted run.
+    try {
+      checkAndChargeUserRequestQuota({
+        port: this.userRequestQuota(),
+        policy: this.userRequestQuotaPolicy(),
+        tenantId: req.tenantId ?? lockLogin,
+        userLogin: lockLogin,
+        kind: "screen",
+        runId: `screen:${lockLogin}:${lockUniverse}:${lock.startedAt ?? Date.now()}`,
+      });
+    } catch (quotaErr) {
+      this.screenRunLock().release(lockLogin, lockUniverse, lock.token);
+      throw quotaErr;
     }
     // Issue #2868: logging + failure-classification aspects,
     // wired once at this funnel (every sync and workflow-child
@@ -1282,6 +1420,8 @@ export class ScreenerAgent extends PortThink {
     trigger: "manual" | "scheduled";
     idempotencyKey: string;
     userLogin?: string;
+    /** Issue #2842: tenant partition for the quota charge (defaults to the owner login, as in runScreen). */
+    tenantId?: string;
     environment?: "TEST" | "PROD";
     assetClasses?: ScreeningProviderAssetClass[];
     symbols?: string[];
@@ -1303,6 +1443,22 @@ export class ScreenerAgent extends PortThink {
     yahooDeps?: import("../trading").YahooScreenerDeps;
   }): Promise<{ task: ScreenerTask; executed: boolean; result?: GoalDrivenScreenResult }> {
     const userLogin = req.userLogin || (await this.userLogin());
+    // Issue #2842: the run-submission gate, before any work
+    // (before the E*TRADE client, before the universe bundle).
+    // The caller's idempotencyKey IS the run id, so a retried
+    // goal screen with the same key never double-charges; a
+    // duplicate delivery that reaches here passes the gate
+    // already-counted and is deduped downstream without a new
+    // charge. A quota refusal throws (fail-visible to the
+    // scheduled/A2A caller) and charges nothing.
+    checkAndChargeUserRequestQuota({
+      port: this.userRequestQuota(),
+      policy: this.userRequestQuotaPolicy(),
+      tenantId: req.tenantId ?? userLogin,
+      userLogin,
+      kind: "goalScreen",
+      runId: `goalScreen:${req.idempotencyKey}`,
+    });
     const etrade = new ETradeService(
       this.getOrm(),
       this.env,

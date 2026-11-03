@@ -840,7 +840,13 @@ const STEP5B_PORT_SITES: Array<[string, string, number]> = [
   // three (sessions, memberships for the tenant check, memberships
   // for the audit-tenant lookup), same factory — no new funnel,
   // no bypass.
-  ["src/server.ts", "listSessionFamilyEntries", 13],
+  // Bumped 13 -> 15 for issue #2842: the quota-usage lookup and
+  // override routes share one tenancy helper in server.ts with
+  // two list sites (sessions for the login->identity map,
+  // memberships for the active-membership check), same factory
+  // as the revoke handler's tenant check — no new funnel,
+  // no bypass.
+  ["src/server.ts", "listSessionFamilyEntries", 15],
   ["src/server.ts", "wiredAccessRequestStore", 1],
   ["src/server.ts", "wiredMembershipStore", 10],
 ];

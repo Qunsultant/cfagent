@@ -14,6 +14,12 @@ import {
 } from "./messaging/deadLetter";
 import { getSessionCached, getSessionCachedFetchedAt, invalidateSessionCache } from "./security/sessionCache";
 import { resolveIdleTimeoutMs } from "./security/sessionPolicy";
+import { resolveScreenerAgentName } from "./agents/screenerAgentName";
+import {
+  quotaWindowKey,
+  type QuotaUsageView,
+} from "./security/userRequestQuota";
+import type { UserRequestQuotaOverride } from "./data/userRequestQuotaPorts";
 import {
   buildLoggedInUserRows,
   parseLoggedInSessionEntry,
@@ -2936,6 +2942,8 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
       path === "/api/iaaa/role-grants/revoke" ||
       path === "/api/iaaa/logged-in-users" ||
       path === "/api/iaaa/logged-in-users/revoke" ||
+      path === "/api/iaaa/quota-usage" ||
+      path === "/api/iaaa/quota-usage/override" ||
       path === "/api/iaaa/policy-proposals" ||
       path === "/api/iaaa/policy-proposals/active" ||
       path === "/api/iaaa/policy-proposals/propose" ||
@@ -3685,6 +3693,243 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
           } catch {
             return Response.json({ error: "Session revoke unavailable." }, { status: 500 });
           }
+        }
+        // Issue #2842 — per-user report-run quota, additive to
+        // the #2836 admin surface (same guard block, same admin
+        // rules, no change to the logged-in-users endpoints).
+        // Counters live in the per-owner ScreenerAgent instance's
+        // own SQLite, so both routes stub that instance by the
+        // target's screener login (display login). The charge
+        // partition defaults to the login itself (the #2426
+        // rule); only a platform admin may name another
+        // partition, and only when they know runs charge there.
+        // A null listing or a throwing stub answers 500 with no
+        // partial data, mirroring #2836.
+        if (path === "/api/iaaa/quota-usage" || path === "/api/iaaa/quota-usage/override") {
+          const quotaDenyAudit = async (action: string): Promise<void> => {
+            try {
+              await recordAuditEvent(createWiredAuditStore(env), {
+                timestamp: nowMs,
+                type: "iaaa.lifecycle",
+                actorPrincipalId: session.internalUserId as string,
+                actorType: "human",
+                initiatingPrincipalId: session.internalUserId as string,
+                tenantId,
+                correlationId: crypto.randomUUID(),
+                action,
+                decision: "deny",
+                policyVersion: IAAA_AUDIT_POLICY_VERSION,
+                outcome: "failed",
+                errorCode: "QUOTA_USAGE_DENIED",
+              });
+            } catch {
+              /* denial attribution is best-effort; the deny stands */
+            }
+          };
+          // Resolve a target login to its wired identity + active
+          // tenant memberships (the revoke handler's rule, verbatim:
+          // unrevoked + at least one unexpired binding). A login
+          // with no active session row yields no identity, so a
+          // tenant admin can never verify it — fail-closed.
+          const quotaTargetTenancy = async (
+            targetLogin: string,
+          ): Promise<
+            | { status: "ok"; internalUserId: string | undefined; tenantIds: string[] }
+            | { status: "unavailable" }
+          > => {
+            const sessionEntries = await listSessionFamilyEntries(env, "");
+            const membershipEntries = await listSessionFamilyEntries(env, "iaaa-membership:");
+            if (!sessionEntries || !membershipEntries) return { status: "unavailable" };
+            const idleTimeoutMs = resolveIdleTimeoutMs(env.SESSION_IDLE_TIMEOUT_MS);
+            let internalUserId: string | undefined;
+            for (const entry of sessionEntries) {
+              const parsed = parseLoggedInSessionEntry(entry.key, entry.value, nowMs, idleTimeoutMs, () => null);
+              if (parsed && parsed.displayLogin === targetLogin) {
+                internalUserId = parsed.internalUserId;
+                break;
+              }
+            }
+            const tenantIds = listMembershipsFromEntries(membershipEntries)
+              .filter(
+                (m) =>
+                  m.internalUserId === internalUserId &&
+                  m.revokedAtMs === undefined &&
+                  m.roleBindings.some(
+                    (b) => b.expiresAtMs === undefined || b.expiresAtMs > nowMs,
+                  ),
+              )
+              .map((m) => m.tenantId);
+            return { status: "ok", internalUserId, tenantIds };
+          };
+          type QuotaAgentStub = {
+            getUserRequestQuotaUsage(userLogin?: string, tenantId?: string): Promise<QuotaUsageView>;
+            listUserRequestQuotaOverrides(userLogin?: string, tenantId?: string): Promise<UserRequestQuotaOverride[]>;
+            grantUserRequestQuotaOverride(input: {
+              tenantId?: string;
+              userLogin: string;
+              windowKind: "daily" | "weekly" | "monthly";
+              windowKey: string;
+              extraRuns: number;
+              grantedBy: string;
+              reason: string;
+            }): Promise<UserRequestQuotaOverride>;
+          };
+          const quotaStub = (targetLogin: string): QuotaAgentStub =>
+            actorGateway.stub<QuotaAgentStub>(
+              env.SCREENER_AGENT,
+              resolveScreenerAgentName(env, targetLogin),
+            );
+          if (path === "/api/iaaa/quota-usage") {
+            if (request.method !== "GET") {
+              return Response.json({ error: "Method not allowed" }, { status: 405 });
+            }
+            const requestedLogin = url.searchParams.get("userLogin");
+            const requestedPartition = url.searchParams.get("tenantId");
+            if (requestedPartition !== null && !callerIsPlatformAdmin) {
+              await quotaDenyAudit("quota_usage.list");
+              return Response.json({ error: "Forbidden: naming a quota partition requires platform admin access." }, { status: 403 });
+            }
+            let targetLogin: string;
+            if (requestedLogin !== null) {
+              if (requestedLogin.trim() === "") {
+                return Response.json({ error: "userLogin must not be empty." }, { status: 400 });
+              }
+              targetLogin = requestedLogin;
+              if (!callerIsPlatformAdmin) {
+                const tenantAdmin = await callerCanGrantTenantAdmin();
+                if (!tenantAdmin) {
+                  await quotaDenyAudit("quota_usage.list");
+                  return Response.json({ error: "Forbidden: looking up another user's quota requires admin access." }, { status: 403 });
+                }
+                const tenancy = await quotaTargetTenancy(targetLogin);
+                if (tenancy.status === "unavailable") {
+                  return Response.json({ error: "Quota lookup unavailable." }, { status: 500 });
+                }
+                if (!tenancy.tenantIds.includes(tenantId)) {
+                  await quotaDenyAudit("quota_usage.list");
+                  return Response.json({ error: "Forbidden: that user is outside your tenant." }, { status: 403 });
+                }
+              }
+            } else {
+              // Self: the screener login is the session's login.
+              if (!session.githubLogin) {
+                return Response.json({ error: "No screener login resolvable for this session." }, { status: 404 });
+              }
+              targetLogin = session.githubLogin;
+            }
+            const partition = requestedPartition ?? targetLogin;
+            try {
+              const stub = quotaStub(targetLogin);
+              const usage = await stub.getUserRequestQuotaUsage(targetLogin, partition);
+              const overrides = await stub.listUserRequestQuotaOverrides(targetLogin, partition);
+              return Response.json({
+                ok: true,
+                scope: requestedLogin !== null ? (callerIsPlatformAdmin ? "platform" : "tenant") : "self",
+                userLogin: targetLogin,
+                tenantPartition: partition,
+                usage,
+                overrides,
+              });
+            } catch {
+              return Response.json({ error: "Quota usage unavailable." }, { status: 500 });
+            }
+          }
+          // POST /api/iaaa/quota-usage/override — audited admin grant.
+          if (request.method !== "POST") {
+            return Response.json({ error: "Method not allowed" }, { status: 405 });
+          }
+          let body: unknown;
+          try {
+            body = await request.json();
+          } catch {
+            return Response.json({ error: "Invalid request body." }, { status: 400 });
+          }
+          const grant = (body ?? {}) as {
+            userLogin?: unknown;
+            windowKind?: unknown;
+            extraRuns?: unknown;
+            reason?: unknown;
+            tenantId?: unknown;
+          };
+          if (typeof grant.userLogin !== "string" || grant.userLogin.trim() === "") {
+            return Response.json({ error: "userLogin is required." }, { status: 400 });
+          }
+          if (grant.windowKind !== "daily" && grant.windowKind !== "weekly" && grant.windowKind !== "monthly") {
+            return Response.json({ error: "windowKind must be daily, weekly, or monthly." }, { status: 400 });
+          }
+          if (typeof grant.extraRuns !== "number" || !Number.isInteger(grant.extraRuns) || grant.extraRuns < 1) {
+            return Response.json({ error: "extraRuns must be an integer >= 1." }, { status: 400 });
+          }
+          if (typeof grant.reason !== "string" || grant.reason.trim() === "") {
+            return Response.json({ error: "reason is required." }, { status: 400 });
+          }
+          if (grant.tenantId !== undefined && typeof grant.tenantId !== "string") {
+            return Response.json({ error: "tenantId must be a string." }, { status: 400 });
+          }
+          if (!callerIsPlatformAdmin) {
+            const tenantAdmin = await callerCanGrantTenantAdmin();
+            if (!tenantAdmin) {
+              await quotaDenyAudit("quota_usage.override");
+              return Response.json({ error: "Forbidden: granting quota overrides requires admin access." }, { status: 403 });
+            }
+            if (grant.tenantId !== undefined) {
+              return Response.json({ error: "Tenant admins grant into the login partition; only platform admins may name a partition." }, { status: 400 });
+            }
+            const tenancy = await quotaTargetTenancy(grant.userLogin);
+            if (tenancy.status === "unavailable") {
+              return Response.json({ error: "Quota override unavailable." }, { status: 500 });
+            }
+            if (!tenancy.tenantIds.includes(tenantId)) {
+              await quotaDenyAudit("quota_usage.override");
+              return Response.json({ error: "Forbidden: that user is outside your tenant." }, { status: 403 });
+            }
+          }
+          const partition = callerIsPlatformAdmin && grant.tenantId !== undefined
+            ? (grant.tenantId as string)
+            : grant.userLogin;
+          let override: UserRequestQuotaOverride;
+          try {
+            override = await quotaStub(grant.userLogin).grantUserRequestQuotaOverride({
+              tenantId: partition,
+              userLogin: grant.userLogin,
+              windowKind: grant.windowKind,
+              windowKey: quotaWindowKey(grant.windowKind, nowMs),
+              extraRuns: grant.extraRuns,
+              grantedBy: session.internalUserId as string,
+              reason: grant.reason,
+            });
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            if (message.startsWith("Invalid quota override")) {
+              return Response.json({ error: message }, { status: 400 });
+            }
+            return Response.json({ error: "Quota override unavailable." }, { status: 500 });
+          }
+          // Audit-after-grant with an honest flag (the #2836
+          // revoke pattern): a failed audit write does not
+          // un-grant and is not hidden.
+          let auditTenantId = tenantId;
+          if (callerIsPlatformAdmin) {
+            const tenancy = await quotaTargetTenancy(grant.userLogin);
+            if (tenancy.status === "ok" && tenancy.tenantIds.length > 0) {
+              auditTenantId = tenancy.tenantIds[0];
+            }
+          }
+          const auditResult = await recordAuditEvent(createWiredAuditStore(env), {
+            timestamp: nowMs,
+            type: "iaaa.lifecycle",
+            actorPrincipalId: session.internalUserId as string,
+            actorType: "human",
+            initiatingPrincipalId: session.internalUserId as string,
+            tenantId: auditTenantId,
+            correlationId: override.id,
+            resourceId: grant.userLogin,
+            action: "user_request_quota.override",
+            decision: "allow",
+            policyVersion: IAAA_AUDIT_POLICY_VERSION,
+            outcome: "succeeded",
+          }).catch(() => ({ ok: false }));
+          return Response.json({ ok: true, override, audited: auditResult.ok === true });
         }
         // #2838 — PAP editor: approval-gated policy administration.
         // Platform-admin ONLY (tenant admins never administer
