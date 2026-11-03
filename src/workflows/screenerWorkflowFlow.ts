@@ -91,6 +91,7 @@ import {
 } from "./stageRunnerPorts";
 import {
   DEFAULT_MAX_PARALLEL_SHARDS,
+  SHARD_DONE_EVENT,
   DEFAULT_POLL_INTERVAL_MS,
   DEFAULT_SHARD_TIMEOUT_MS,
   WORKFLOW_STEP_MAX_RETRIES,
@@ -126,6 +127,16 @@ export interface ScreenerWorkflowStep {
     opts?: { retries?: { limit: number } },
   ): Promise<T>;
   sleep(name: string, durationMs: number): Promise<void>;
+  /**
+   * Issue #3025: durable wait on a shard-completion event, bounded by
+   * the shard deadline. Optional so a test double (or an older
+   * adapter) that cannot wait keeps the deadline-bounded sleep path
+   * instead — the decisions are identical either way.
+   */
+  waitForEvent?<T>(
+    name: string,
+    opts: { type: string; timeoutMs: number },
+  ): Promise<T>;
 }
 
 /** Child-workflow operations, as the parent flow sees them. */
@@ -1105,7 +1116,12 @@ export async function runParentFlow(
       const created = await step.do(`fan-out-batch-${batchIndex}`, async () => {
         const out: Array<{ shard: WorkflowJobCommand["shards"][number]; workflowId: string }> = [];
         for (const shard of batch) {
-          const child = await childOps.createChild(shardCommandFor(runCommand, shard));
+          // Issue #3025: the child signals this instance when its run
+          // ends; the id is on the command, not in a shared registry.
+          const child = await childOps.createChild({
+            ...shardCommandFor(runCommand, shard),
+            parentWorkflowId: workflowId,
+          });
           out.push({ shard, workflowId: child.workflowId });
         }
         return out;
@@ -1368,7 +1384,25 @@ async function pollBatch(
       return true;
     });
     if (remaining.length === 0) return;
-    await step.sleep(`poll-wait-${round}`, pollIntervalMs);
+    if (step.waitForEvent) {
+      // Issue #3025 — event-first: wait for any shard-completion signal,
+      // bounded by the nearest shard deadline. A timeout (or a refused
+      // wait) is not an error: the single reconciliation sweep below
+      // reads the children once and the deadline rules still apply.
+      const untilDeadline = Math.min(...remaining.map((p) => p.deadlineMs)) - now;
+      try {
+        await step.waitForEvent(`shard-done-${round}`, {
+          type: SHARD_DONE_EVENT,
+          timeoutMs: Math.max(1, untilDeadline),
+        });
+      } catch {
+        // Deadline reached or wait refused — reconcile once, below.
+      }
+    } else {
+      // No wait surface (test doubles / older adapters): the same
+      // deadline-bounded sleep as before. Production always waits.
+      await step.sleep(`poll-wait-${round}`, pollIntervalMs);
+    }
     const snapshot = await step.do(`poll-${round}`, async () => {
       const out: Array<{
         shardId: string;
