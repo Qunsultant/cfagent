@@ -171,7 +171,6 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
       "scheduled-screening",
       "iv-history",
       "options-flows",
-      "best-trade",
     ]);
     expect(subIds).not.toContain("docs");
     expect(subIds).not.toContain("workflow-runs");

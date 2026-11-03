@@ -202,7 +202,6 @@ describe("options screener navigation (issue #2596)", () => {
       "scheduled-screening",
       "iv-history",
       "options-flows",
-      "best-trade",
     ]);
     expect(isNavItemOrSubItemActive(item!, "options-screener")).toBe(true);
     expect(isNavItemOrSubItemActive(item!, "options")).toBe(true);

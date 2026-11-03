@@ -34,7 +34,6 @@ const hubSrc = readFileSync(join(__dirname, "../src/client/ETradeTradingHub.tsx"
 const KEPT_SUBS = [
   { id: "discovery", label: "Discovery" },
   { id: "strategy-panel", label: "Strategy Panel" },
-  { id: "best-trade", label: "Best Trade" },
 ] as const;
 
 describe("options-screener sub-menus (#2784)", () => {
@@ -50,12 +49,14 @@ describe("options-screener sub-menus (#2784)", () => {
     }
     // #2954 removed the compare / LLM ideas / LLM evaluate subs (their
     // content folded into Custom Thesis / the AI Ideas tab).
-    for (const id of ["compare", "llm-ideas", "llm-evaluate"]) {
+    // #2994 removed the Best Trade sub the same way; its research link
+    // survives as a kept override (see the deep-link test below).
+    for (const id of ["compare", "llm-ideas", "llm-evaluate", "best-trade"]) {
       expect(subs.find((s) => s.id === id)).toBeUndefined();
     }
   });
 
-  it("deep-links the surviving subs: views for discovery/strategy-panel, research for best-trade", () => {
+  it("deep-links discovery/strategy-panel views and the kept best-trade research link", () => {
     const cases = [
       [
         "discovery",

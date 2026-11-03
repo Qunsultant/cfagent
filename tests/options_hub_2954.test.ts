@@ -100,7 +100,7 @@ describe("sub-menu mapping (#2954)", () => {
       expect(ids).toContain(id);
     }
     // Removed subs stay removed.
-    for (const id of ["compare", "llm-ideas", "llm-evaluate"]) {
+    for (const id of ["compare", "llm-ideas", "llm-evaluate", "best-trade"]) {
       expect(ids).not.toContain(id);
     }
     // Renamed subs carry the matched names.
@@ -111,9 +111,9 @@ describe("sub-menu mapping (#2954)", () => {
     expect(subs.find((s) => s.id === "nlq-options")?.label).toBe("NLQ-options");
   });
 
-  it("keeps best-trade in options-screener and docs/workflow-runs in workflow-runs", () => {
+  it("removes best-trade from options-screener and keeps docs/workflow-runs in workflow-runs", () => {
     const ids = SUB_MENU_CONFIGS["options-screener"].map((s) => s.id);
-    expect(ids).toContain("best-trade");
+    expect(ids).not.toContain("best-trade");
     const workflowIds = SUB_MENU_CONFIGS["workflow-runs"].map((s) => s.id);
     expect(workflowIds).toContain("docs");
     expect(workflowIds).toContain("workflow-runs");
