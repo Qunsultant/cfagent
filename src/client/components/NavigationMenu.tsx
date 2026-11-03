@@ -1,8 +1,15 @@
 import React, { useState, useEffect } from "react";
 import type { ThemeMode } from "../theme";
 import { StockSearchBar } from "./StockSearchBar";
-import { Badge, Button, type BadgeTone } from "./ui";
-import { ROUTES, DEFAULT_VISIBLE_NAV_TABS, getNavGroup, hasNavEntry, type RouteId, type NavEntryMeta, type RouteCategory } from "../routes";
+import { Badge, Button, Menu, type BadgeTone, type MenuItem } from "./ui";
+import { ROUTES, DEFAULT_VISIBLE_NAV_TABS, getNavGroup, getRoute, hasNavEntry, type RouteId, type NavEntryMeta, type RouteCategory } from "../routes";
+import {
+  DEFAULT_LEFT_NAV_CONFIG,
+  findNavItemConfig,
+  isNavItemOrSubItemActive,
+  type NavMenuItemConfig,
+  type NavSubMenuItemConfig,
+} from "../navConfig";
 export { DEFAULT_VISIBLE_NAV_TABS };
 import { MarketStatusPill } from "./MarketStatusPill";
 import { adjustFontScale, getStoredFontScale } from "../typography";
@@ -636,6 +643,38 @@ export const NAVIGATION_ITEMS: NavItemDef[] = ROUTES.filter(hasNavEntry)
     };
   });
 
+/**
+ * Sub-menu items for a top-strip entry, mirroring the sidebar (#2996):
+ * the entry's left-nav config item, gated by the sidebar's own sub
+ * visibility rule (feature flag only — the sidebar does not apply
+ * visibleTabs to subs). A strip id that is itself a sub (e.g. docs)
+ * resolves to a synthetic item without subItems, so it yields [].
+ */
+export function topStripSubItems(itemId: string): NavSubMenuItemConfig[] {
+  const item = findNavItemConfig(DEFAULT_LEFT_NAV_CONFIG, itemId);
+  if (!item?.subItems) return [];
+  return item.subItems.filter((sub) => isTabFeatureEnabled(sub.id as NavTabId));
+}
+
+/**
+ * Menu-only parents appended to the top strip (#2996): left-nav items
+ * with sub-menus whose id has no route entry (orders, sandbox today).
+ * They never appear in NAVIGATION_ITEMS, so without this their
+ * sub-menus would stay unreachable in top mode.
+ */
+export function topStripMenuOnlyParents(): NavMenuItemConfig[] {
+  const parents: NavMenuItemConfig[] = [];
+  for (const section of DEFAULT_LEFT_NAV_CONFIG.sections) {
+    for (const item of section.items) {
+      if (!item.subItems || item.subItems.length === 0) continue;
+      const route = getRoute(item.id);
+      if (route && hasNavEntry(route)) continue;
+      parents.push(item);
+    }
+  }
+  return parents;
+}
+
 export function NavigationMenu({
   layout,
   onToggleLayout,
@@ -824,6 +863,55 @@ export function NavigationMenu({
             const active = isTabActive(item.id, activeTab);
             const Icon = item.icon;
             const itemLink = deepLinkForNavNode(null, item.id);
+            // Issue #2996: entries with sub-menus render a dropdown
+            // sourced from the left-nav config, not a flat button. The
+            // trigger toggles only (the Menu primitive calls the
+            // trigger's onClick and then toggles, so a navigating
+            // trigger would never show the menu); the parent page
+            // itself is the first menu item, so every destination
+            // stays one click away.
+            const subs = topStripSubItems(item.id);
+            if (subs.length > 0) {
+              const configItem = findNavItemConfig(DEFAULT_LEFT_NAV_CONFIG, item.id);
+              const menuActive = configItem
+                ? isNavItemOrSubItemActive(configItem, activeTab)
+                : active;
+              const menuItems: MenuItem[] = [
+                {
+                  id: item.id,
+                  label: item.label,
+                  onSelect: () => handleSelectNavId(item.id),
+                },
+                ...subs.map((sub) => ({
+                  id: sub.id,
+                  label: sub.label,
+                  onSelect: () =>
+                    navigateToDeepLink(deepLinkForNavNode(item.id, sub.id)),
+                })),
+              ];
+              return (
+                <Menu
+                  key={item.id}
+                  trigger={
+                    <Button
+                      variant="ghost"
+                      className={`top-menu-item-btn ${menuActive ? "active" : ""}`}
+                      title={item.description}
+                    >
+                      <Icon active={menuActive} />
+                      <span className="top-menu-label">{item.label}</span>
+                      {item.badge && (
+                        <Badge size="sm" tone={NAV_BADGE_TONES[item.badgeType || "default"]}>
+                          {item.badge}
+                        </Badge>
+                      )}
+                    </Button>
+                  }
+                  items={menuItems}
+                  ariaLabel={`${item.label} sub-menu`}
+                />
+              );
+            }
             return (
               <Button
                 variant="ghost"
@@ -856,6 +944,44 @@ export function NavigationMenu({
               </Button>
             );
           })}
+          {/* Issue #2996: menu-only parents (no route entry) are not
+              route items, so they need their own strip entries or
+              their sub-menus stay unreachable in top mode. Their
+              triggers toggle without navigating, as in the sidebar;
+              visibility matches the sidebar's item rule. */}
+          {topStripMenuOnlyParents()
+            .filter((parent) => isTabVisible(parent.id) && topStripSubItems(parent.id).length > 0)
+            .map((parent) => {
+              const Icon = NAV_ICON_MAP[parent.icon] || NavIcons.Screeners;
+              const menuActive = isNavItemOrSubItemActive(parent, activeTab);
+              return (
+                <Menu
+                  key={parent.id}
+                  trigger={
+                    <Button
+                      variant="ghost"
+                      className={`top-menu-item-btn ${menuActive ? "active" : ""}`}
+                      title={parent.description}
+                    >
+                      <Icon active={menuActive} />
+                      <span className="top-menu-label">{parent.label}</span>
+                      {parent.badge && (
+                        <Badge size="sm" tone={NAV_BADGE_TONES[parent.badgeType || "default"]}>
+                          {parent.badge}
+                        </Badge>
+                      )}
+                    </Button>
+                  }
+                  items={topStripSubItems(parent.id).map((sub) => ({
+                    id: sub.id,
+                    label: sub.label,
+                    onSelect: () =>
+                      navigateToDeepLink(deepLinkForNavNode(parent.id, sub.id)),
+                  }))}
+                  ariaLabel={`${parent.label} sub-menu`}
+                />
+              );
+            })}
         </div>
       </nav>
     </div>
