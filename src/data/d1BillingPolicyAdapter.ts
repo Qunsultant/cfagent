@@ -60,6 +60,7 @@ export async function ensureBillingPolicySchema(db: BillingPolicyDb): Promise<nu
     [BILLING_POLICY_KEYS.prorationBehavior, PROPOSED_SEED_BILLING_POLICY.prorationBehavior],
     [BILLING_POLICY_KEYS.repurchaseMigration, PROPOSED_SEED_BILLING_POLICY.repurchaseMigration],
     [BILLING_POLICY_KEYS.stripePriceByPlan, PROPOSED_SEED_BILLING_POLICY.stripePriceByPlan],
+    [BILLING_POLICY_KEYS.cfpayChannelFixedPriceUSD, PROPOSED_SEED_BILLING_POLICY.cfpayChannelFixedPriceUSD],
   ];
   for (const [key, value] of seedRows) {
     await db
@@ -92,6 +93,7 @@ export class D1BillingPolicyAdapter implements BillingPolicyStore {
       [BILLING_POLICY_KEYS.prorationBehavior]: "prorationBehavior",
       [BILLING_POLICY_KEYS.repurchaseMigration]: "repurchaseMigration",
       [BILLING_POLICY_KEYS.stripePriceByPlan]: "stripePriceByPlan",
+      [BILLING_POLICY_KEYS.cfpayChannelFixedPriceUSD]: "cfpayChannelFixedPriceUSD",
     };
     for (const [key, field] of Object.entries(fieldByKey)) {
       const raw = byKey[key];

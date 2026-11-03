@@ -703,7 +703,7 @@ export interface TransactionRecord {
   amount: number;
   currency: string;
   customer: string;
-  gateway: "stripe" | "paypal" | "lemonsqueezy" | "sandbox" | "x402" | "mpp";
+  gateway: "stripe" | "paypal" | "lemonsqueezy" | "sandbox" | "x402" | "mpp" | "cfpay-channel";
   gatewayRef?: string;
   /** "simulated" marks local records of simulated agentic payments — no real payment occurred (issue #122). */
   status: "draft" | "awaiting_confirmation" | "authorized" | "completed" | "failed" | "rejected" | "simulated";

@@ -180,6 +180,22 @@ import {
   requestRefund,
 } from "../../services/refundService";
 import { PaymentGatewayService } from "../../services/payments";
+import {
+  codedMessage,
+  resolveOutcome,
+  BusinessError,
+} from "../../outcomes/outcomeAspects";
+import {
+  confirmChannelPurchase,
+  mintChannelPurchase,
+  reconcileChannel,
+  type CfpayChannelClient,
+} from "../../services/cfpayChannel";
+import {
+  createChannelDraftAdapter,
+  ensureChannelSchema,
+} from "../../data/createCfpayChannelPorts";
+import type { ChannelDraft } from "../../data/cfpayChannelPorts";
 import type { D1SubscriptionAdapter } from "../../data/d1SubscriptionAdapter";
 import { resolveEffectiveTier, resolveTierTransition } from "../../data/subscriptionPorts";
 import {
@@ -2232,6 +2248,295 @@ export async function handleAgenticPaymentsRoutes(
       return Response.json({ policy: updated });
     } catch (err: any) {
       return Response.json({ error: err.message || "Failed to handle billing policy" }, { status: 500 });
+    }
+  }
+
+  // ================================================================
+  // cfpay channel (#2945, Phase 2.17): pay-per-use runs through the
+  // cfpay payments agent, offered through the catalog entry only
+  // (Phase 5 single-entry rule) — never a competing purchase path.
+  // The card takes no amount input, so the channel sells ONLY listed
+  // catalogue products whose APPROVED price exactly equals the
+  // operator-attested channel fixed price (billing policy; null =
+  // unconfigured). Mint creates no entitlement; confirm (the HITL
+  // step, mirroring 2.1 Billing's "I have paid") verifies by
+  // retrieve and only then tops up commercial credits + records the
+  // ledger row. No subscription via the channel (no subscription
+  // operation exists). Refunds go through the 2.7 machinery with
+  // rail cfpay-channel: the request path needs no source, and
+  // execution refuses with the existing not-resolvable 422 while no
+  // payment intent is resolvable for the run — the draft's stored
+  // paymentIntentId is the wiring point for that resolver, and no
+  // refund operation is invented (the card cannot move funds).
+  // Channel messages are outcome-catalog codes.
+  // ================================================================
+  const channelErrorResponse = (err: unknown): Response => {
+    if (err instanceof BusinessError) {
+      const outcome = resolveOutcome(err.code);
+      return new Response(JSON.stringify({ error: codedMessage(err.code), code: err.code }), {
+        status: outcome.entry?.httpStatus ?? 500,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    const message = err instanceof Error ? err.message : "Channel operation failed.";
+    const status = /email is required|Invalid price family|channel request id|must be a string|No commercial account/.test(
+      message,
+    )
+      ? 400
+      : 500;
+    return new Response(JSON.stringify({ error: message }), {
+      status,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  const channelClientFor = (
+    config: NonNullable<ReturnType<typeof getCfpayConfig>>,
+  ): CfpayChannelClient => ({
+    createCheckout: (input) => cfpayA2AOperation(config, "/a2a/payments", "checkout.create", input),
+    getStatus: (requestId) => cfpayA2AOperation(config, "/a2a/payments", "checkout.status", { requestId }),
+    fulfil: (requestId, paymentIntentId) =>
+      cfpayA2AOperation(config, "/a2a/payments", "checkout.fulfil", { requestId, paymentIntentId }),
+    listPayments: (limit) => cfpayA2AOperation(config, "/a2a/payments", "payments.list", { limit }),
+    paymentsTotals: () => cfpayA2AOperation(config, "/a2a/payments", "payments.totals", {}),
+  });
+
+  const requireChannelConfig = (): NonNullable<ReturnType<typeof getCfpayConfig>> | Response => {
+    const config = getCfpayConfig(ctx.env);
+    if (!config) {
+      return new Response(
+        JSON.stringify({
+          error: codedMessage("FAILURE_CHANNEL_NOT_CONFIGURED", "cfpay A2A token is not configured"),
+          code: "FAILURE_CHANNEL_NOT_CONFIGURED",
+        }),
+        { status: 503, headers: { "content-type": "application/json" } },
+      );
+    }
+    return config;
+  };
+
+  /**
+   * The ledger row for a fulfilled channel purchase, written through
+   * the ORM so the existing receipts route surfaces it (bounded
+   * customer query, no gateway filter). Best-effort by the journal
+   * precedent: a projection failure is loud + audited, never a
+   * failed purchase — the draft (fulfilled) + audit trail remain the
+   * record, and the purchases list still shows the payment.
+   */
+  const recordChannelTransactionBestEffort = async (draft: ChannelDraft): Promise<void> => {
+    try {
+      const orm = ctx.getOrm();
+      const nowIso = new Date().toISOString();
+      await orm.transactions.create({
+        id: `tx_${draft.id}`,
+        sessionId: draft.userLogin,
+        action: "agentic_payment",
+        amount: draft.expectedPriceUSD,
+        currency: "USD",
+        customer: draft.userLogin,
+        gateway: "cfpay-channel",
+        gatewayRef: draft.id,
+        status: "completed",
+        proposerDid: `did:key:${draft.userLogin}`,
+        proofSignature: draft.id,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      });
+    } catch (err) {
+      ctx.audit("commercial.channel.receipt_row_failed", "payments", {
+        userLogin: draft.userLogin,
+        draftId: draft.id,
+        error: err instanceof Error ? err.message : "unknown",
+      });
+    }
+  };
+
+const requireChannelMonetization = async (): Promise<Response | null> => {
+    const flagOn = await createFeatureFlagPort(ctx.env).isEnabled("monetization");
+    if (!flagOn) {
+      return Response.json({ error: "monetization flag is OFF; cfpay channel purchases are disabled." }, { status: 403 });
+    }
+    return null;
+  };
+
+  // POST /payments/agentic/commercial/channel/checkout — mint.
+  if (path.endsWith("/commercial/channel/checkout") && request.method === "POST") {
+    const login = request.headers.get("x-user-login");
+    if (!login) return new Response(JSON.stringify({ error: "Not authenticated." }), { status: 401, headers: { "content-type": "application/json" } });
+    const flagError = await requireChannelMonetization();
+    if (flagError) return flagError;
+    const configOrError = requireChannelConfig();
+    if (configOrError instanceof Response) return configOrError;
+    try {
+      const body = (await request.json().catch(() => null)) as { family?: unknown; email?: unknown } | null;
+      const store = createCommercialAdapter(ctx.env as { AGENT_DB?: unknown });
+      const subs = createSubscriptionAdapter(ctx.env as { AGENT_DB?: unknown });
+      const policyAdapter = createBillingPolicyAdapter(ctx.env as { AGENT_DB?: unknown });
+      const catalogue = createPriceCatalogueAdapter(ctx.env as { AGENT_DB?: unknown });
+      const drafts = createChannelDraftAdapter(ctx.env as { AGENT_DB?: unknown });
+      if (!store || !subs || !policyAdapter || !catalogue || !drafts) {
+        return new Response(JSON.stringify({ error: "Store is not available." }), { status: 503, headers: { "content-type": "application/json" } });
+      }
+      await ensureCommercialSchema(store.db);
+      await ensureSubscriptionSchema(subs.db);
+      await ensureBillingPolicySchema(policyAdapter.db);
+      await ensurePriceCatalogueSchema(catalogue.db);
+      await ensureChannelSchema(drafts.db);
+      const identity = await resolvePlatformIdentity(
+        { commercial: store, subscriptions: subs },
+        { userId: login, nowMs: Date.now() },
+      );
+      const policy = await policyAdapter.getPolicy();
+      const result = await mintChannelPurchase(
+        {
+          drafts,
+          catalogue,
+          channelFixedPriceUSD: policy.cfpayChannelFixedPriceUSD,
+          cfpay: channelClientFor(configOrError),
+          nowMs: Date.now(),
+        },
+        {
+          userLogin: login,
+          tenantId: identity.tenantId ?? login,
+          email: body?.email,
+          family: body?.family,
+        },
+      );
+      ctx.audit("commercial.channel.checkout_created", "payments", {
+        userLogin: login,
+        draftId: result.draft.id,
+        family: result.draft.family,
+        expectedPriceUSD: result.draft.expectedPriceUSD,
+      });
+      return new Response(JSON.stringify(result), {
+        status: 201,
+        headers: { "content-type": "application/json" },
+      });
+    } catch (err) {
+      return channelErrorResponse(err);
+    }
+  }
+
+  // POST /payments/agentic/commercial/channel/purchase — confirm (HITL).
+  if (path.endsWith("/commercial/channel/purchase") && request.method === "POST") {
+    const login = request.headers.get("x-user-login");
+    if (!login) return new Response(JSON.stringify({ error: "Not authenticated." }), { status: 401, headers: { "content-type": "application/json" } });
+    const flagError = await requireChannelMonetization();
+    if (flagError) return flagError;
+    const configOrError = requireChannelConfig();
+    if (configOrError instanceof Response) return configOrError;
+    try {
+      const body = (await request.json().catch(() => null)) as { channelRequestId?: unknown } | null;
+      const channelRequestId =
+        typeof body?.channelRequestId === "string" && body.channelRequestId.trim()
+          ? body.channelRequestId.trim()
+          : (() => {
+              throw new Error("channel request id is required.");
+            })();
+      const store = createCommercialAdapter(ctx.env as { AGENT_DB?: unknown });
+      const subs = createSubscriptionAdapter(ctx.env as { AGENT_DB?: unknown });
+      const drafts = createChannelDraftAdapter(ctx.env as { AGENT_DB?: unknown });
+      if (!store || !subs || !drafts) {
+        return new Response(JSON.stringify({ error: "Store is not available." }), { status: 503, headers: { "content-type": "application/json" } });
+      }
+      await ensureCommercialSchema(store.db);
+      await ensureSubscriptionSchema(subs.db);
+      await ensureChannelSchema(drafts.db);
+      // A first-time buyer has no commercial account yet: create it
+      // (Free tier). Tenant falls back to the login, the same
+      // fallback the billing-purchase route uses
+      // (identity.tenantId ?? login).
+      const identity = await resolvePlatformIdentity(
+        { commercial: store, subscriptions: subs },
+        { userId: login, nowMs: Date.now() },
+      );
+      const existing = await store.getAccount(login);
+      if (!existing) {
+        await store.upsertAccount({ userId: login, tenantId: identity.tenantId ?? login, tier: "Free" });
+      }
+      const result = await confirmChannelPurchase(
+        {
+          drafts,
+          cfpay: channelClientFor(configOrError),
+          adjustCredits: async (userId, deltaUSD) => {
+            const record = await store.adjustCredits(userId, deltaUSD);
+            return { userId, creditsUSD: record.creditsUSD };
+          },
+          recordTransaction: recordChannelTransactionBestEffort,
+          audit: (type, payload) => ctx.audit(type, "payments", payload),
+          nowMs: Date.now(),
+        },
+        { userLogin: login, channelRequestId },
+      );
+      ctx.audit("commercial.channel.fulfilled", "payments", {
+        userLogin: login,
+        draftId: result.draft.id,
+        family: result.draft.family,
+        creditedUSD: result.account.creditsUSD,
+        fulfilSkippedReason: result.draft.fulfilSkippedReason,
+      });
+      return new Response(JSON.stringify(result), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    } catch (err) {
+      return channelErrorResponse(err);
+    }
+  }
+
+  // GET /payments/agentic/commercial/channel/purchases?userId= — read, not flag-gated.
+  if (path.endsWith("/commercial/channel/purchases") && request.method === "GET") {
+    const login = request.headers.get("x-user-login");
+    if (!login) return new Response(JSON.stringify({ error: "Not authenticated." }), { status: 401, headers: { "content-type": "application/json" } });
+    const targetUser = url.searchParams.get("userId") ?? login;
+    if (!canAccessAccount(login, targetUser)) {
+      return new Response(JSON.stringify({ error: "Forbidden." }), { status: 403, headers: { "content-type": "application/json" } });
+    }
+    try {
+      const drafts = createChannelDraftAdapter(ctx.env as { AGENT_DB?: unknown });
+      if (!drafts) {
+        return new Response(JSON.stringify({ error: "Store is not available." }), { status: 503, headers: { "content-type": "application/json" } });
+      }
+      await ensureChannelSchema(drafts.db);
+      const purchases = await drafts.listByUser(targetUser);
+      return new Response(JSON.stringify({ purchases }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    } catch (err) {
+      return channelErrorResponse(err);
+    }
+  }
+
+  // POST /payments/agentic/commercial/channel/reconcile — operator-only, not flag-gated.
+  if (path.endsWith("/commercial/channel/reconcile") && request.method === "POST") {
+    const login = request.headers.get("x-user-login");
+    if (!login) return new Response(JSON.stringify({ error: "Not authenticated." }), { status: 401, headers: { "content-type": "application/json" } });
+    if (!isStoreOperator(login)) {
+      return new Response(JSON.stringify({ error: "Forbidden." }), { status: 403, headers: { "content-type": "application/json" } });
+    }
+    const configOrError = requireChannelConfig();
+    if (configOrError instanceof Response) return configOrError;
+    try {
+      const drafts = createChannelDraftAdapter(ctx.env as { AGENT_DB?: unknown });
+      if (!drafts) {
+        return new Response(JSON.stringify({ error: "Store is not available." }), { status: 503, headers: { "content-type": "application/json" } });
+      }
+      await ensureChannelSchema(drafts.db);
+      const result = await reconcileChannel({ drafts, cfpay: channelClientFor(configOrError) });
+      ctx.audit("commercial.channel.reconciled", "payments", {
+        userLogin: login,
+        verdict: result.verdict,
+        localFulfilledCount: result.local.count,
+        localTotalUSD: result.local.totalUSD,
+        reason: result.reason,
+      });
+      return new Response(JSON.stringify(result), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    } catch (err) {
+      return channelErrorResponse(err);
     }
   }
 

@@ -1483,6 +1483,27 @@ ALTER TABLE agent_refund_policy ADD COLUMN approved_at_ms INTEGER;
 `,
 };
 
+export const MIGRATION_0037_CFPAY_CHANNEL: DataMigration = {
+  version: 37,
+  name: "0037_cfpay_channel",
+  sql: `
+CREATE TABLE IF NOT EXISTS agent_cfpay_channel_purchases (
+  id TEXT PRIMARY KEY,
+  user_login TEXT NOT NULL,
+  tenant_id TEXT NOT NULL,
+  email TEXT NOT NULL,
+  family TEXT NOT NULL,
+  expected_price_usd REAL NOT NULL,
+  status TEXT NOT NULL,
+  created_at_ms INTEGER NOT NULL,
+  fulfilled_at_ms INTEGER,
+  payment_intent_id TEXT,
+  fulfil_skipped_reason TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_cfpay_channel_user ON agent_cfpay_channel_purchases (user_login);
+`,
+};
+
 export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANCE,
   MIGRATION_0002_AGENT_CHAINS_SCHEDULES,
   MIGRATION_0003_AGENT_SHARD_JOBS,
@@ -1519,6 +1540,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0034_BREAKER_STATE,
   MIGRATION_0035_DIGEST_PASS,
   MIGRATION_0036_REFUND_POLICY_APPROVAL,
+  MIGRATION_0037_CFPAY_CHANNEL,
 ];
 
 function splitStatements(sqlText: string): string[] {

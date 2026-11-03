@@ -196,10 +196,10 @@ export async function requestRefund(
   const rail =
     kind === "subscription"
       ? (source?.rail ?? "card")
-      : input.rail === "card" || input.rail === "crypto"
+      : input.rail === "card" || input.rail === "crypto" || input.rail === "cfpay-channel"
         ? input.rail
         : (() => {
-            throw new Error("rail is required for pay-per-run refunds (card or crypto).");
+            throw new Error("rail is required for pay-per-run refunds (card, crypto, or cfpay-channel).");
           })();
   const tenantId =
     source?.tenantId ??

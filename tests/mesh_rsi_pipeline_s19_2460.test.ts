@@ -61,6 +61,7 @@ import {
   MIGRATION_0034_BREAKER_STATE,
   MIGRATION_0035_DIGEST_PASS,
   MIGRATION_0036_REFUND_POLICY_APPROVAL,
+  MIGRATION_0037_CFPAY_CHANNEL,
 } from "../src/data/migrationRunner";
 import { agentMeshProposals } from "../src/data/drizzleSchema";
 import { InMemoryMeshProposalStore } from "../src/data/inMemoryMeshProposalAdapter";
@@ -208,7 +209,7 @@ describe("door budget guard", () => {
 /* ------------------------------------------------------------------ */
 
 describe("mesh proposal store", () => {
-  it("migration 0025 is registered and 0036 is last (#2662, after #2659 Phase 2.4), and the drizzle schema carries the table", () => {
+  it("migration 0025 is registered and 0037 is last (#2945, after #2662 Phase 2.7), and the drizzle schema carries the table", () => {
     expect(MIGRATION_0025_AGENT_MESH_PROPOSALS.version).toBe(25);
     expect(MIGRATION_0025_AGENT_MESH_PROPOSALS.sql).toContain("agent_mesh_proposals");
     expect(ALL_MIGRATIONS).toContain(MIGRATION_0025_AGENT_MESH_PROPOSALS);
@@ -234,8 +235,10 @@ describe("mesh proposal store", () => {
     expect(ALL_MIGRATIONS).toContain(MIGRATION_0035_DIGEST_PASS);
     // #2662 (Phase 2.7) appends migration 0036 (refund policy approval) after 0035.
     expect(ALL_MIGRATIONS).toContain(MIGRATION_0036_REFUND_POLICY_APPROVAL);
+    // #2945 (Phase 2.17) appends migration 0037 (cfpay channel purchases) after 0036.
+    expect(ALL_MIGRATIONS).toContain(MIGRATION_0037_CFPAY_CHANNEL);
     expect(ALL_MIGRATIONS[ALL_MIGRATIONS.length - 1]).toBe(
-      MIGRATION_0036_REFUND_POLICY_APPROVAL,
+      MIGRATION_0037_CFPAY_CHANNEL,
     );
     expect(getTableName(agentMeshProposals)).toBe("agent_mesh_proposals");
   });
