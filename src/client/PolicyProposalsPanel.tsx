@@ -158,7 +158,7 @@ export function PolicyProposalsPanel() {
         Policy proposals are platform-admin only. A proposal has no effect until a
         different platform admin approves it and it is promoted; the compiled policy
         stays active until then. Active source: {activeSource}. The frozen obligation
-        policy (#1751) is not editable here.
+        policy is not editable here.
       </p>
       {draft && (
         <>
@@ -183,11 +183,11 @@ export function PolicyProposalsPanel() {
             </div>
           ))}
           <div>
-            <Button onClick={doPreview} disabled={previewing}>
-              {previewing ? "Previewing…" : "Preview impact"}
+            <Button onClick={doPreview} loading={previewing} disabled={previewing}>
+              Preview impact
             </Button>{" "}
-            <Button onClick={doPropose} disabled={proposing}>
-              {proposing ? "Proposing…" : "Propose change"}
+            <Button onClick={doPropose} loading={proposing} disabled={proposing}>
+              Propose change
             </Button>
           </div>
           {preview && (
