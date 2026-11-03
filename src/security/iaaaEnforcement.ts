@@ -64,6 +64,12 @@
 
 import { getValidatedSession } from "./iaaaLogin";
 import { touchSession } from "./iaaaSessionActivity";
+import {
+  isSessionStoreBreakerOpen,
+  isSessionStoreLimitError,
+  noteSuppressedSessionStoreRead,
+  tripSessionStoreBreaker,
+} from "./sessionQuotaResilience";
 import type { SessionData } from "../types";
 
 /** Store operations the wired validation path needs, injectable for tests. */
@@ -82,6 +88,7 @@ export interface WiredSessionStoreDeps {
 
 export type WiredSessionValidation =
   | { wired: true; session: SessionData }
+  | { wired: true; session: SessionData; degraded: true }
   | { wired: true; session: null }
   | { wired: false };
 
@@ -190,7 +197,60 @@ export async function validateAndTouchWiredSession(
       return { wired: true, session: locallyValidated.session };
     }
   }
-  const fresh = await deps.freshRead(sessionId);
+  // Issue #2666 — quota resilience (the 2026-10-26 sign-in-down failure
+  // mode). While the session-store breaker is open, NO store read is
+  // attempted at all: the read is counted as suppressed, and a
+  // locally-valid cached session is served degraded instead of
+  // failing the request. TRADE-OFF, stated plainly (same family as
+  // the #2444 gate's): revocation and step-up propagation are delayed
+  // until the store recovers, because the authoritative record cannot
+  // be read. Bounded to limit errors only, and local absolute + idle
+  // expiry still apply — an expired cached copy NEVER serves, even
+  // degraded. A blocked validation with no valid cached copy throws
+  // a typed quota error (never null: auth null means
+  // "unauthenticated", and returning it during an outage would lie
+  // and could drop cookies); the error boundary turns it into a 503.
+  if (isSessionStoreBreakerOpen()) {
+    noteSuppressedSessionStoreRead();
+    const breakerValidated = getValidatedSession(cached, nowMs, options);
+    if (breakerValidated.ok) {
+      console.warn(
+        `[iaaa] wired session ${sessionId} served degraded: session-store breaker open; revocation/step-up propagation delayed until the store recovers`,
+      );
+      return {
+        wired: true,
+        session: breakerValidated.session,
+        degraded: true,
+      };
+    }
+    throw new Error(
+      "session store quota exhausted: breaker open and no locally-valid cached session",
+    );
+  }
+  let fresh: SessionData | null;
+  try {
+    fresh = await deps.freshRead(sessionId);
+  } catch (error) {
+    // Non-limit errors propagate UNCHANGED — only a provider limit
+    // error degrades. A limit error trips the breaker, then the same
+    // local-validation fallback applies: valid cached → degraded
+    // serve; invalid cached → the original error rethrown (fail
+    // closed), becoming a typed 503 via the error boundary.
+    if (!isSessionStoreLimitError(error)) throw error;
+    tripSessionStoreBreaker(error);
+    const fallbackValidated = getValidatedSession(cached, nowMs, options);
+    if (fallbackValidated.ok) {
+      console.warn(
+        `[iaaa] wired session ${sessionId} served degraded: session-store limit error; revocation/step-up propagation delayed until the store recovers`,
+      );
+      return {
+        wired: true,
+        session: fallbackValidated.session,
+        degraded: true,
+      };
+    }
+    throw error;
+  }
   if (!fresh) {
     // The store record is gone but the cached copy proves this was a
     // wired session: deny, do not resurrect it from cache.
