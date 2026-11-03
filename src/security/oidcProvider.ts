@@ -63,6 +63,33 @@
  *   them; the exchange still fails closed upstream.
  * (#1254 PR-B deleted the redirectPathOverride option with its
  * only consumer, PR-A's legacy-callback bridge.)
+ *
+ * Apple deltas (#2686), each an option, none a parallel login path:
+ * - profileFromIdToken: Apple has no userinfo endpoint, so the
+ *   profile comes from the token response's id_token (decoded, not
+ *   signature-verified — see decodeIdTokenPayload: the token arrives
+ *   from the provider's token endpoint over TLS as the result of
+ *   OUR confidential code exchange, exactly the trust the userinfo
+ *   fetch has always relied on; no endpoint accepts a client-
+ *   supplied id_token, so a forged token alone cannot create a
+ *   session. Full JWKS signature verification is a later slice,
+ *   and would apply to Google's ignored id_token too, for
+ *   consistency — it is not smuggled in for one provider);
+ * - useStateAsNonce: the authorize request carries nonce=<state>
+ *   and the callback verifies the id_token's nonce claim against
+ *   the already-verified state — the state's random UUID is the
+ *   per-attempt unpredictable value, so no new nonce store and no
+ *   state-format change. A nonce without an ID-token profile is a
+ *   misconfiguration and fails closed at start (nothing to verify
+ *   against);
+ * - extraAuthorizeParams: response_mode=query (Apple's `user` name
+ *   payload arrives only via form_post, which this slice does not
+ *   use — see the #2686 doc: display name falls back to the login
+ *   key, and the implementation never depends on re-reading a name);
+ * - clientSecretResolver: Apple's token endpoint requires an ES256
+ *   JWT minted from the .p8 key (see ./appleClientSecret), not a
+ *   static secret — the resolver mints per exchange, so no stored
+ *   secret can silently expire.
  */
 import type { Env } from "../types";
 import { authOutcomeLoginUrl } from "./authOutcome";
@@ -87,11 +114,46 @@ export interface OidcProviderOptions {
   displayName: string;
   authorizationEndpoint: string;
   tokenEndpoint: string;
-  userinfoEndpoint: string;
+  /**
+   * Userinfo endpoint. Unused (and may be omitted) when
+   * profileFromIdToken is set; the userinfo path fails closed
+   * when it is missing.
+   */
+  userinfoEndpoint?: string;
   /** Env key holding the OAuth client id (e.g. "GOOGLE_CLIENT_ID"). */
   clientIdEnv: string;
-  /** Env key holding the OAuth client secret (never committed, never logged). */
-  clientSecretEnv: string;
+  /**
+   * Env key holding the OAuth client secret (never committed, never logged).
+   * Optional when clientSecretResolver is set (the resolver owns the secret).
+   */
+  clientSecretEnv?: string;
+  /**
+   * #2686 — resolve the exchange secret at call time instead of
+   * reading a static env secret (Apple's ES256 client-secret JWT,
+   * minted per exchange). A throw or an undefined/empty return
+   * means "not configured": the credentials gate fails closed.
+   */
+  clientSecretResolver?: (env: Env) => Promise<string | undefined> | string | undefined;
+  /**
+   * #2686 — when true, the profile comes from the token response's
+   * id_token instead of a userinfo fetch (Apple has no userinfo
+   * endpoint). The id_token is decoded, never signature-verified
+   * (see the header comment for the trust model).
+   */
+  profileFromIdToken?: boolean;
+  /**
+   * #2686 — when true, the authorize request carries nonce=<state>
+   * and the callback verifies the id_token's nonce claim against
+   * the verified state. Requires profileFromIdToken; otherwise the
+   * provider is misconfigured and start fails closed.
+   */
+  useStateAsNonce?: boolean;
+  /**
+   * Extra authorize-request parameters, set before the standard
+   * ones (so a collision can never override client_id,
+   * redirect_uri, response_type, scope, or state).
+   */
+  extraAuthorizeParams?: Record<string, string>;
   scope: string;
   /** Registry protocol tag. Default "oidc"; "oauth2" for profile-fetch providers (GitHub). */
   protocol?: "oidc" | "oauth2";
@@ -121,9 +183,49 @@ export interface OidcProviderOptions {
   requireConfiguredCredentials?: boolean;
 }
 
-function readEnvString(env: Env, key: string): string | undefined {
+function readEnvString(env: Env, key: string | undefined): string | undefined {
+  if (!key) return undefined;
   const value = (env as unknown as Record<string, unknown>)[key];
   return typeof value === "string" && value.trim() !== "" ? value : undefined;
+}
+
+/**
+ * #2686 — resolve the exchange secret: a resolver (Apple's minted
+ * JWT) wins over a static env secret. A resolver throw is "not
+ * configured", never a reason to proceed without a secret.
+ */
+async function resolveClientSecret(env: Env, options: OidcProviderOptions): Promise<string | undefined> {
+  if (options.clientSecretResolver) {
+    try {
+      const secret = await options.clientSecretResolver(env);
+      return typeof secret === "string" && secret.trim() !== "" ? secret : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  return readEnvString(env, options.clientSecretEnv);
+}
+
+/**
+ * #2686 — decode an ID-token payload without verifying its
+ * signature. Trust model (see header): the token arrives from the
+ * provider's token endpoint over TLS as the result of this
+ * server's confidential code exchange — the same trust the
+ * userinfo fetch has always relied on. Returns null on any
+ * malformed input; the caller fails closed.
+ */
+function decodeIdTokenPayload(idToken: string): Record<string, unknown> | null {
+  try {
+    const parts = idToken.split(".");
+    if (parts.length !== 3 || !parts[1]) return null;
+    const json = JSON.parse(
+      atob(parts[1].replace(/-/g, "+").replace(/_/g, "/"))
+    ) as unknown;
+    if (!json || typeof json !== "object" || Array.isArray(json)) return null;
+    return json as Record<string, unknown>;
+  } catch {
+    return null;
+  }
 }
 
 function redirectUri(env: Env, options: OidcProviderOptions): string {
@@ -243,15 +345,23 @@ export function createOidcProvider(options: OidcProviderOptions): LoginProvider 
 
   async function startLogin(env: Env): Promise<Response> {
     const clientId = readEnvString(env, options.clientIdEnv);
-    const clientSecret = readEnvString(env, options.clientSecretEnv);
+    const clientSecret = await resolveClientSecret(env, options);
     if (credentialsGate && (!clientId || !clientSecret)) {
       return errorPage(
         `${options.displayName} login is not configured (missing OAuth client credentials)`,
         500
       );
     }
+    // #2686: a nonce with no ID-token profile has nothing to verify
+    // against — misconfiguration, fail closed before redirecting.
+    if (options.useStateAsNonce && !options.profileFromIdToken) {
+      return errorPage(`${options.displayName} login is misconfigured (nonce without ID-token profile)`, 500);
+    }
     const state = await createState(env);
     const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(options.extraAuthorizeParams ?? {})) {
+      params.set(key, value);
+    }
     // With the credentials gate off (GitHub), a missing client id
     // serializes exactly as the legacy flow serialized it.
     params.set("client_id", String(clientId));
@@ -259,6 +369,7 @@ export function createOidcProvider(options: OidcProviderOptions): LoginProvider 
     if (options.includeResponseType ?? true) params.set("response_type", "code");
     params.set("scope", options.scope);
     params.set("state", state);
+    if (options.useStateAsNonce) params.set("nonce", state);
     return new Response(null, {
       status: 302,
       headers: { Location: `${options.authorizationEndpoint}?${params}` },
@@ -294,23 +405,22 @@ export function createOidcProvider(options: OidcProviderOptions): LoginProvider 
 
     try {
       const clientId = readEnvString(env, options.clientIdEnv);
-      const clientSecret = readEnvString(env, options.clientSecretEnv);
+      const clientSecret = await resolveClientSecret(env, options);
       if (credentialsGate && (!clientId || !clientSecret)) {
         return errorPage(
           `${options.displayName} login is not configured (missing OAuth client credentials)`,
           500
         );
       }
-      let accessToken: string;
+      let tokenSet: Awaited<ReturnType<typeof exchangeAuthorizationCodeConfidential>>;
       try {
-        const tokenSet = await exchangeAuthorizationCodeConfidential({
+        tokenSet = await exchangeAuthorizationCodeConfidential({
           tokenEndpoint: options.tokenEndpoint,
           code,
           redirectUri: redirectUri(env, options),
           clientId: clientId ?? "",
           clientSecret,
         });
-        accessToken = tokenSet.accessToken;
       } catch (err) {
         if (err instanceof OAuth2Error) {
           if (err.status !== undefined) {
@@ -328,6 +438,50 @@ export function createOidcProvider(options: OidcProviderOptions): LoginProvider 
         }
         throw err;
       }
+      // #2686 — ID-token profile path (Apple has no userinfo
+      // endpoint): the profile is the token response's id_token.
+      // The access token is discarded; no provider token is ever
+      // retained, so there is nothing to revoke later (see the
+      // #2686 doc). Subject/login-key/email-verified failures
+      // follow exactly the userinfo path's rules below.
+      if (options.profileFromIdToken) {
+        const idToken = tokenSet.idToken;
+        if (!idToken) {
+          throw new OidcAuthError(`${options.displayName} did not return an ID token`, 502);
+        }
+        const rawProfile = decodeIdTokenPayload(idToken);
+        if (!rawProfile) {
+          throw new OidcAuthError(`${options.displayName} returned an unusable ID token`, 502);
+        }
+        if (options.useStateAsNonce && rawProfile["nonce"] !== state) {
+          throw new OidcAuthError("ID token nonce does not match the login attempt", 400);
+        }
+        const normalized = normalizeUserinfo(rawProfile, {
+          subjectField,
+          loginKeyField: options.loginKeyField,
+          requireEmailVerified: options.requireEmailVerified,
+          avatarField: options.avatarField,
+        });
+        if (!normalized.ok) {
+          if (normalized.kind === "emailVerified") {
+            return errorPage(normalized.error, 400);
+          }
+          return await completeWiredLogin(
+            env,
+            options.issuer,
+            extractPartialProfile(rawProfile, options),
+            tailOptions
+          );
+        }
+        return await completeWiredLogin(env, options.issuer, normalized.profile, tailOptions);
+      }
+      if (!options.userinfoEndpoint) {
+        throw new OidcAuthError(
+          `${options.displayName} login is misconfigured (no userinfo endpoint)`,
+          500
+        );
+      }
+      const accessToken = tokenSet.accessToken;
       const profileResp = await fetch(options.userinfoEndpoint, {
         headers: {
           Authorization: `Bearer ${accessToken}`,

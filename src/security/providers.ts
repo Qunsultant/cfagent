@@ -36,17 +36,22 @@
  *   flow keep working: the wired session fields are optional and the
  *   legacy fields are unchanged (see iaaaLogin.ts).
  *
- * Registered providers: "github" and "google", both declarative
- * createOidcProvider calls in this module (#1254 rationalized
- * GitHub onto the factory; its deltas are options, not code).
+ * Registered providers: "github", "google", and "apple", all
+ * declarative createOidcProvider calls in this module (#1254
+ * rationalized GitHub onto the factory; its deltas are options,
+ * not code; #2686 registers Apple the same way — its deltas are
+ * options too: ID-token profile, state-as-nonce, response_mode,
+ * and a minted client-secret JWT, see oidcProvider.ts).
  * #1254 PR-B deleted the wiring-off legacy GitHub flow and the
  * exact /auth/login + /auth/callback routes: every provider,
  * GitHub included, is served only by the generic registry routes.
  * No PDP, delegation, or audit wiring lives here. To onboard
- * another provider, see docs/iaaa-provider-onboarding.md.
+ * another provider, see docs/architecture/security/apple-login-2686.md
+ * for the worked Apple example (the generic onboarding shape).
  */
 import type { Env } from "../types";
 import type { AuditStore } from "./iaaaAudit";
+import { mintAppleClientSecret } from "./appleClientSecret";
 import { authOutcomeLoginUrl } from "./authOutcome";
 import { createOidcProvider } from "./oidcProvider";
 
@@ -163,6 +168,61 @@ export const defaultRegistry: ProviderRegistry = (() => {
       subjectField: "sub",
       loginKeyField: "email",
       requireEmailVerified: true,
+    })
+  );
+  // Apple (#2686), the same declarative shape: one factory call,
+  // no other file changed to register it. True identity is Slice 1
+  // (https://appleid.apple.com, sub); the email — real or private-
+  // relay — is only the adapter-supplied legacy login key, never
+  // identity, so a relay→real email change never moves the binding.
+  // Apple deltas, all factory options (see oidcProvider.ts): no
+  // userinfo endpoint (profile from the id_token), nonce bound to
+  // the login attempt's state, response_mode=query (Apple's `user`
+  // name payload arrives only via form_post, which this slice does
+  // not use — display name falls back to the login key, and no
+  // flow depends on re-reading a name), and a client-secret JWT
+  // minted per exchange from the .p8 key (no stored secret can
+  // silently expire). The APPLE_* values are owner-set secrets
+  // (Cloudflare dashboard or `wrangler secret put`), never
+  // committed: until they exist, startLogin fails closed and no
+  // button appears. Surfacing is the wiring flag + the enabled
+  // list: adding "apple" to IAAA_ENABLED_PROVIDERS shows the
+  // button when wiring is on, and wiring off hides it — the button
+  // is never ungated. Login via Apple grants no admin role by
+  // itself, like every other provider (owner clarification on
+  // #2686). Cross-provider account linking is NOT in this slice.
+  registry.registerProvider(
+    createOidcProvider({
+      providerId: "apple",
+      issuer: "https://appleid.apple.com",
+      displayName: "Apple",
+      protocol: "oidc",
+      authorizationEndpoint: "https://appleid.apple.com/auth/authorize",
+      tokenEndpoint: "https://appleid.apple.com/auth/token",
+      clientIdEnv: "APPLE_CLIENT_ID",
+      scope: "name email",
+      subjectField: "sub",
+      loginKeyField: "email",
+      requireEmailVerified: true,
+      profileFromIdToken: true,
+      useStateAsNonce: true,
+      extraAuthorizeParams: { response_mode: "query" },
+      clientSecretResolver: async (env: Env) => {
+        const record = env as unknown as Record<string, unknown>;
+        const teamId = typeof record["APPLE_TEAM_ID"] === "string" ? (record["APPLE_TEAM_ID"] as string) : "";
+        const keyId = typeof record["APPLE_KEY_ID"] === "string" ? (record["APPLE_KEY_ID"] as string) : "";
+        const privateKeyPem = typeof record["APPLE_PRIVATE_KEY"] === "string" ? (record["APPLE_PRIVATE_KEY"] as string) : "";
+        const clientId = typeof record["APPLE_CLIENT_ID"] === "string" ? (record["APPLE_CLIENT_ID"] as string) : "";
+        // A throw inside mint (bad key, missing input) is caught by
+        // the factory's resolver handling and fails the login closed.
+        return mintAppleClientSecret({
+          teamId,
+          keyId,
+          privateKeyPem,
+          clientId,
+          nowMs: Date.now(),
+        });
+      },
     })
   );
   return registry;
