@@ -25,6 +25,8 @@ import { ReportsPanel } from "./ReportsPanel";
 import { SchedulesPanel } from "./SchedulesPanel";
 import { ScreeningReviewPanel } from "./ScreeningReviewPanel";
 import { ScreeningOutcomesPanel } from "./ScreeningOutcomesPanel";
+import { CalibrationDashboard } from "./CalibrationDashboard";
+import { EnrichmentDashboard } from "./EnrichmentDashboard";
 import { OptionsHub, type OptionsHubTab } from "./OptionsHub";
 import { StockHub, type StockHubTab } from "./StockHub";
 import { ETradeDynamicMenu, type ETradeDynamicMenuProps } from "./ETradeDynamicMenu";
@@ -118,14 +120,9 @@ export function ETradeTradingHub({
   };
   // C2: every screening subtab renders the one hub on the
   // equivalent tab — the same props the hub has always received
-  // here, with initialTab selecting the folded surface.
+  // here, with initialTab selecting the asset tab.
   const renderScreenersHub = (tab: ScreenersHubTab) => (
-    <ScreenersHub
-      activeEnv={activeEnv}
-      userLogin={user?.login}
-      initialTab={tab}
-      onPreviewTrade={handleTradeOrder}
-    />
+    <ScreenersHub activeEnv={activeEnv} userLogin={user?.login} initialTab={tab} />
   );
 
   // Issue #2954: the Options copy hub — the options subtabs render it
@@ -1764,8 +1761,8 @@ export function ETradeTradingHub({
 
       {/* Issue #2970: reports, schedules, goal-screen, review, and
           track-record render their panels directly — the same props
-          the hub passed them. The hub still hosts these tabs until
-          the slimming slice (#2971) removes them. */}
+          the hub passed them. Issue #2971 removed them from the hub,
+          so these branches are now the only home for those panels. */}
       {effectiveSubTab === "reports" && <ReportsPanel />}
 
       {effectiveSubTab === "schedules" && (
@@ -1776,7 +1773,21 @@ export function ETradeTradingHub({
 
       {effectiveSubTab === "review" && <ScreeningReviewPanel userLogin={user?.login} />}
 
-      {effectiveSubTab === "track-record" && <ScreeningOutcomesPanel userLogin={user?.login} />}
+      {effectiveSubTab === "track-record" && (
+        <>
+          <ErrorBoundary label="Calibration dashboard">
+            <CalibrationDashboard userLogin={user?.login} />
+          </ErrorBoundary>
+          {/* Issue #1888: enrichment dashboard panel — provider, coverage,
+              breaker state, killswitch state, recent runs. */}
+          <ErrorBoundary label="Enrichment dashboard">
+            <EnrichmentDashboard userLogin={user?.login} />
+          </ErrorBoundary>
+          <ErrorBoundary label="Track Record panel">
+            <ScreeningOutcomesPanel userLogin={user?.login} />
+          </ErrorBoundary>
+        </>
+      )}
 
       {/* SUBTAB 1: MARKET SCREENER & SCANNER — folded into the hub. */}
       {effectiveSubTab === "scanner" && renderOptionsHub("strategy-scanner")}

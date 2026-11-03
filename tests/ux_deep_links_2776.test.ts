@@ -110,10 +110,17 @@ describe("Deep-link catalog (issue #2776)", () => {
       tab: "options",
       view: "strategy-scanner",
     });
-    // Issue #2970: review has its own page now (the hub tab stays
-    // until #2971 via the keyed assets-hub:review override).
+    // Issue #2970: review has its own page now; issue #2971
+    // removes the hub tab, so the keyed assets-hub:review override
+    // is gone and the hub parent falls through to the own page.
     expect(deepLinkForNavNode("workflow-runs", "review")).toEqual({
       tab: "review",
+    });
+    expect(deepLinkForNavNode("assets-hub", "review")).toEqual({
+      tab: "review",
+    });
+    expect(deepLinkForNavNode("assets-hub", "goal-screen")).toEqual({
+      tab: "goal-screen",
     });
     expect(deepLinkForNavNode("platform-admin", "platform-admin:ads")).toEqual({
       tab: "platform-admin",

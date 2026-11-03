@@ -6,31 +6,18 @@ import {
 } from "./screeningAdapters";
 import type { ScreenedStockItem } from "../types";
 import { CapabilityNavBar, CopilotTriggerButton, type CapabilityTabItem } from "./components/CapabilityNavBar";
-import { GoalScreenPanel } from "./GoalScreenPanel";
 import { ErrorBoundary } from "./ErrorBoundary";
-import { ReportsPanel } from "./ReportsPanel";
-import { SchedulesPanel } from "./SchedulesPanel";
-import { ScreeningReviewPanel } from "./ScreeningReviewPanel";
-import { ScreeningOutcomesPanel } from "./ScreeningOutcomesPanel";
-import { CalibrationDashboard } from "./CalibrationDashboard";
-import { EnrichmentDashboard } from "./EnrichmentDashboard";
-import type { TradeOrderContext } from "./trading/tradeOrderContext";
 import "./optionsResearch.css";
 
-/** S8 (consolidation, umbrella #958): the hub's tabs — the screening
- *  asset classes plus the folded Goal Screen surface.
+/** S8 (consolidation, umbrella #958): the hub's tabs — the four
+ *  planned asset classes only.
  *  Issue #2954: this hub is now the Assets Hub — the options research,
  *  scanner, IV history, patterns, and presets tabs moved out (options
  *  to the Options copy hub, patterns/presets to StockHub).
- *  C1 (consolidation #1151, issue #1201): the Goal Screen tab — the
- *  #1096 unified stack's surface (goal-driven screens + backtest).
- *  C2 (consolidation #1151, issue #1246): Reports and Schedules move
- *  INTO the hub as tabs (they were standalone nav entries), and the
- *  hub gains the proposal Review inbox and the recommendation Track
- *  Record — the #1096 surfaces users could not reach before.
- *  Issue #2896: the stocks tabs moved to Stock Hub; this hub keeps
- *  options, planned assets, scanner, IV history, goal screen, reports,
- *  schedules, review, and track record. */
+ *  Issue #2970: goal-screen, reports, schedules, review, and
+ *  track-record became own pages; issue #2971 removes them from this
+ *  hub, so the hub keeps only forex, futures, commodities, bonds.
+ *  Issue #2896: the stocks tabs moved to Stock Hub. */
 /**
  * Issue #2545: the Stocks one-shot form's delivery selection — the
  * scheduled "Stock Market Screen" job's delivery fields, named
@@ -71,27 +58,13 @@ export function buildStockRunRequestBody(
   };
 }
 
-export type ScreenersHubTab =
-  | "forex"
-  | "futures"
-  | "commodities"
-  | "bonds"
-  | "goal-screen"
-  | "reports"
-  | "schedules"
-  | "review"
-  | "track-record";
+export type ScreenersHubTab = "forex" | "futures" | "commodities" | "bonds";
 
 export const SCREENER_HUB_TABS: readonly ScreenersHubTab[] = [
   "forex",
   "futures",
   "commodities",
   "bonds",
-  "goal-screen",
-  "reports",
-  "schedules",
-  "review",
-  "track-record",
 ] as const;
 
 export function isValidScreenerTab(tab: unknown): tab is ScreenersHubTab {
@@ -102,10 +75,6 @@ interface ScreenersHubProps {
   activeEnv: "TEST" | "PROD";
   userLogin?: string;
   onStocksLoaded?: (rows: ScreenedStockItem[]) => void;
-  /** S8: the trade-preview handoff threaded into the folded panels —
-   *  the Trading Hub passes its order-ticket handler, exactly as it
-   *  did when the panels were its own subtabs. */
-  onPreviewTrade?: (ctx: TradeOrderContext) => void;
   onSendPrompt?: (prompt: string, sourceTab?: string) => void;
   onJobStateChange?: (state: "idle" | "running" | "ready") => void;
   /** S8: the tab to open on — the Trading Hub's screening redirects
@@ -203,7 +172,6 @@ function numberFilter(value: string): number | undefined {
 export function ScreenersHub({
   activeEnv,
   userLogin,
-  onPreviewTrade,
   initialTab,
   onTabChange,
 }: ScreenersHubProps) {
@@ -220,18 +188,10 @@ export function ScreenersHub({
       onTabChange,
     });
 
-  // The provider-adapter machinery below serves the asset classes;
-  // the folded goal-screen / reports / schedules / review /
-  // track-record tabs have no adapter, so they borrow "stocks" for
-  // the (unused) provider lookups.
-  const assetClass: ScreeningAssetClass =
-    hubTab === "goal-screen" ||
-    hubTab === "reports" ||
-    hubTab === "schedules" ||
-    hubTab === "review" ||
-    hubTab === "track-record"
-      ? "stocks"
-      : hubTab;
+  // The provider-adapter machinery below serves the asset classes.
+  // Issue #2971: the folded tabs are gone, so the hub tab IS the
+  // asset class — no borrowing.
+  const assetClass: ScreeningAssetClass = hubTab;
   const screenerTabs: CapabilityTabItem[] = useMemo(() => {
     const descriptions: Record<string, { eyebrow: string; title: string; desc: string; icon: string }> = {
       forex: {
@@ -282,72 +242,6 @@ export function ScreenersHub({
       };
     });
 
-    // Issue #2954: the scanner / IV history tabs moved to the Options
-    // copy hub. Goal Screen stays, right after the asset classes.
-    assetTabs.push(
-      {
-        // C1 (consolidation #1151, issue #1201): the goal-driven
-        // screen — one goal, one screen across stocks + options
-        // through the unified screening stack, with backtest-on-screen.
-        id: "goal-screen",
-        label: "Goal Screen",
-        icon: "🧭",
-        badge: "AI",
-        badgeType: "purple",
-        tooltip: {
-          eyebrow: "GOAL-DRIVEN SCREENING",
-          title: "Goal Screen",
-          description: "Pick a goal; the unified screening stack screens stocks and options for it — and can backtest the hits.",
-        },
-      },
-    );
-    // C2 (consolidation #1151, issue #1246): the hub's own surfaces —
-    // Reports and Schedules (formerly standalone nav entries) and the
-    // #1096 Review inbox + recommendation Track Record.
-    assetTabs.push(
-      {
-        id: "reports",
-        label: "Reports",
-        icon: "📄",
-        tooltip: {
-          eyebrow: "SCREENING REPORTS",
-          title: "Reports",
-          description: "Generated screening reports — view, download, and regenerate them here.",
-        },
-      },
-      {
-        id: "schedules",
-        label: "Schedules",
-        icon: "🗓️",
-        tooltip: {
-          eyebrow: "SCREENING SCHEDULES",
-          title: "Schedules",
-          description: "The one scheduling surface for screening runs — create, pause, and inspect scheduled jobs.",
-        },
-      },
-      {
-        id: "review",
-        label: "Review",
-        icon: "🧾",
-        badge: "AI",
-        badgeType: "purple",
-        tooltip: {
-          eyebrow: "PROPOSAL REVIEW",
-          title: "Proposal Review",
-          description: "Decide what the system proposed: goal proposals, adaptation candidates, and strategy re-selections — nothing activates without a person.",
-        },
-      },
-      {
-        id: "track-record",
-        label: "Track Record",
-        icon: "📈",
-        tooltip: {
-          eyebrow: "RECOMMENDATION OUTCOMES",
-          title: "Track Record",
-          description: "What happened to issued recommendations, from the outcome ledger — Unverified stays Unverified.",
-        },
-      },
-    );
     // Issue #2783: the #2438 exclusion is removed — the Planned tabs
     // return to the primary bar with their PLANNED badges (nothing
     // hidden); the left-nav Planned menu links to the same views.
@@ -376,90 +270,7 @@ export function ScreenersHub({
           Panels mount on first visit and stay preserved in the DOM with role="tabpanel",
           id, and aria-labelledby linking back to their corresponding tab button. */}
 
-      {/* 5. Goal Screen Panel */}
-      {visitedTabs.has("goal-screen") && (
-        <div
-          role="tabpanel"
-          id="screener-tabpanel-goal-screen"
-          aria-labelledby="cap-tab-goal-screen"
-          hidden={hubTab !== "goal-screen"}
-          style={hubTab !== "goal-screen" ? { display: "none" } : undefined}
-        >
-          <ErrorBoundary label="Goal Screen panel">
-            <GoalScreenPanel activeEnv={activeEnv} userLogin={userLogin} />
-          </ErrorBoundary>
-        </div>
-      )}
-
-      {/* 6. Reports Panel */}
-      {visitedTabs.has("reports") && (
-        <div
-          role="tabpanel"
-          id="screener-tabpanel-reports"
-          aria-labelledby="cap-tab-reports"
-          hidden={hubTab !== "reports"}
-          style={hubTab !== "reports" ? { display: "none" } : undefined}
-        >
-          <ErrorBoundary label="Reports panel">
-            <ReportsPanel />
-          </ErrorBoundary>
-        </div>
-      )}
-
-      {/* 7. Schedules Panel */}
-      {visitedTabs.has("schedules") && (
-        <div
-          role="tabpanel"
-          id="screener-tabpanel-schedules"
-          aria-labelledby="cap-tab-schedules"
-          hidden={hubTab !== "schedules"}
-          style={hubTab !== "schedules" ? { display: "none" } : undefined}
-        >
-          <ErrorBoundary label="Schedules panel">
-            <SchedulesPanel activeEnv={activeEnv} userLogin={userLogin} onPreviewTrade={onPreviewTrade} />
-          </ErrorBoundary>
-        </div>
-      )}
-
-      {/* 8. Proposal Review Panel */}
-      {visitedTabs.has("review") && (
-        <div
-          role="tabpanel"
-          id="screener-tabpanel-review"
-          aria-labelledby="cap-tab-review"
-          hidden={hubTab !== "review"}
-          style={hubTab !== "review" ? { display: "none" } : undefined}
-        >
-          <ErrorBoundary label="Proposal Review panel">
-            <ScreeningReviewPanel userLogin={userLogin} />
-          </ErrorBoundary>
-        </div>
-      )}
-
-      {/* 9. Track Record Panel */}
-      {visitedTabs.has("track-record") && (
-        <div
-          role="tabpanel"
-          id="screener-tabpanel-track-record"
-          aria-labelledby="cap-tab-track-record"
-          hidden={hubTab !== "track-record"}
-          style={hubTab !== "track-record" ? { display: "none" } : undefined}
-        >
-          <ErrorBoundary label="Calibration dashboard">
-            <CalibrationDashboard userLogin={userLogin} />
-          </ErrorBoundary>
-          {/* Issue #1888: enrichment dashboard panel — provider, coverage,
-              breaker state, killswitch state, recent runs. */}
-          <ErrorBoundary label="Enrichment dashboard">
-            <EnrichmentDashboard userLogin={userLogin} />
-          </ErrorBoundary>
-          <ErrorBoundary label="Track Record panel">
-            <ScreeningOutcomesPanel userLogin={userLogin} />
-          </ErrorBoundary>
-        </div>
-      )}
-
-      {/* 10. Multi-Asset Planned Panels (forex, futures, commodities, bonds) */}
+      {/* 5. Multi-Asset Planned Panels (forex, futures, commodities, bonds) */}
       {(["forex", "futures", "commodities", "bonds"] as const).map((asset) =>
         visitedTabs.has(asset) ? (
           <div

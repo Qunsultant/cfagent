@@ -66,16 +66,11 @@ describe("own pages (#2970)", () => {
     expect(deepLinkForNavNode(null, "goal-screen")).toEqual({ tab: "goal-screen" });
     expect(deepLinkHrefForNavNode("workflow-runs", "review")).toBe("?tab=review");
     expect(deepLinkHrefForNavNode("workflow-runs", "track-record")).toBe("?tab=track-record");
-    // Until #2971 removes the hub tabs, the hub's own submenu items
-    // still land on the hub views (keyed overrides, untouched).
-    for (const [view, sub] of [
-      ["goal-screen", "goal-screen"],
-      ["reports", "reports"],
-      ["schedules", "schedules"],
-      ["review", "review"],
-      ["track-record", "track-record"],
-    ]) {
-      expect(deepLinkForNavNode("assets-hub", sub)).toEqual({ tab: "assets-hub", view });
+    // Issue #2971 removes the hub tabs: the keyed assets-hub:*
+    // overrides are gone, so the former hub submenu items land on
+    // the own pages too.
+    for (const sub of ["goal-screen", "reports", "schedules", "review", "track-record"]) {
+      expect(deepLinkForNavNode("assets-hub", sub)).toEqual({ tab: sub });
     }
   });
 });

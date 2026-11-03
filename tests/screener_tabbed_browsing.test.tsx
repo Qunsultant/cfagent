@@ -33,7 +33,7 @@ describe("ScreenersHub Tabbed Browsing Reference Implementation", () => {
     vi.restoreAllMocks();
   });
 
-  it("exports SCREENER_HUB_TABS without the moved stocks tabs, and STOCK_HUB_TABS carries them (#2896; #2954 moves options/scanner/iv-history to OptionsHub)", () => {
+  it("exports SCREENER_HUB_TABS without the moved stocks tabs, and STOCK_HUB_TABS carries them (#2896; #2954 moves options/scanner/iv-history to OptionsHub; #2971 moves the own pages out)", () => {
     expect(SCREENER_HUB_TABS).toBeDefined();
     expect(SCREENER_HUB_TABS).not.toContain("stocks");
     expect(SCREENER_HUB_TABS).not.toContain("new-screen");
@@ -41,18 +41,18 @@ describe("ScreenersHub Tabbed Browsing Reference Implementation", () => {
     expect(SCREENER_HUB_TABS).not.toContain("options");
     expect(SCREENER_HUB_TABS).not.toContain("scanner");
     expect(SCREENER_HUB_TABS).not.toContain("iv-history");
-    expect(SCREENER_HUB_TABS).toContain("goal-screen");
-    expect(SCREENER_HUB_TABS).toContain("reports");
-    expect(SCREENER_HUB_TABS).toContain("schedules");
-    expect(SCREENER_HUB_TABS).toContain("review");
-    expect(SCREENER_HUB_TABS).toContain("track-record");
+    expect(SCREENER_HUB_TABS).not.toContain("goal-screen");
+    expect(SCREENER_HUB_TABS).not.toContain("reports");
+    expect(SCREENER_HUB_TABS).not.toContain("schedules");
+    expect(SCREENER_HUB_TABS).not.toContain("review");
+    expect(SCREENER_HUB_TABS).not.toContain("track-record");
     expect(STOCK_HUB_TABS).toContain("stocks");
     expect(STOCK_HUB_TABS).toContain("new-screen");
     expect(STOCK_HUB_TABS).toContain("research");
   });
 
   it("deep-links directly into the tab specified by the canonical ?view param", async () => {
-    window.history.replaceState(null, "", "/screeners?view=schedules");
+    window.history.replaceState(null, "", "/screeners?view=bonds");
 
     await act(async () => {
       root?.render(<ScreenersHub activeEnv="TEST" />);
@@ -60,15 +60,15 @@ describe("ScreenersHub Tabbed Browsing Reference Implementation", () => {
 
     const activeTab = container?.querySelector('.capability-tab-btn[aria-selected="true"]');
     expect(activeTab).not.toBeNull();
-    expect(activeTab?.textContent).toContain("Schedules");
+    expect(activeTab?.textContent).toContain("Bonds");
 
-    const schedulesPanel = container?.querySelector('#screener-tabpanel-schedules');
-    expect(schedulesPanel).not.toBeNull();
-    expect(schedulesPanel?.hasAttribute("hidden")).toBe(false);
+    const bondsPanel = container?.querySelector('#screener-tabpanel-bonds');
+    expect(bondsPanel).not.toBeNull();
+    expect(bondsPanel?.hasAttribute("hidden")).toBe(false);
   });
 
   it("still deep-links via a hash tab", async () => {
-    window.history.replaceState(null, "", "/screeners#goal-screen");
+    window.history.replaceState(null, "", "/screeners#bonds");
 
     await act(async () => {
       root?.render(<ScreenersHub activeEnv="TEST" />);
@@ -76,11 +76,11 @@ describe("ScreenersHub Tabbed Browsing Reference Implementation", () => {
 
     const activeTab = container?.querySelector('.capability-tab-btn[aria-selected="true"]');
     expect(activeTab).not.toBeNull();
-    expect(activeTab?.textContent).toContain("Goal");
+    expect(activeTab?.textContent).toContain("Bonds");
   });
 
   it("deep-links directly into the tab specified by URL query param ?screenerTab", async () => {
-    window.history.replaceState(null, "", "/screeners?screenerTab=schedules");
+    window.history.replaceState(null, "", "/screeners?screenerTab=bonds");
 
     await act(async () => {
       root?.render(<ScreenersHub activeEnv="TEST" />);
@@ -88,12 +88,12 @@ describe("ScreenersHub Tabbed Browsing Reference Implementation", () => {
 
     const activeTab = container?.querySelector('.capability-tab-btn[aria-selected="true"]');
     expect(activeTab).not.toBeNull();
-    expect(activeTab?.textContent).toContain("Schedules");
+    expect(activeTab?.textContent).toContain("Bonds");
 
-    // Schedules panel tabpanel is rendered and active (not hidden)
-    const schedulesPanel = container?.querySelector('#screener-tabpanel-schedules');
-    expect(schedulesPanel).not.toBeNull();
-    expect(schedulesPanel?.hasAttribute("hidden")).toBe(false);
+    // Bonds panel tabpanel is rendered and active (not hidden)
+    const bondsPanel = container?.querySelector('#screener-tabpanel-bonds');
+    expect(bondsPanel).not.toBeNull();
+    expect(bondsPanel?.hasAttribute("hidden")).toBe(false);
   });
 
   it("updates URL and history state when switching tabs (StockHub, #2896)", async () => {

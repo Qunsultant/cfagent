@@ -56,7 +56,7 @@
       "crumb": "Assets Hub",
       "category": "Intelligence",
       "icon": "Screeners",
-      "description": "Multi-asset screening hub: forex, futures, commodities, and bonds, plus goal screens, reports, schedules, proposal review, and the recommendation track record",
+      "description": "Multi-asset screening hub: forex, futures, commodities, and bonds",
       "navEntry": {
         "label": "Assets Hub",
         "shortLabel": "Assets",
@@ -826,51 +826,6 @@
         "badge": "Planned",
         "badgeType": "neutral",
         "description": "Screen bonds \u2014 planned, no provider adapter yet"
-      },
-      {
-        "id": "goal-screen",
-        "label": "Goal Screen",
-        "shortLabel": "Goal",
-        "icon": "Goal",
-        "badge": "Goal",
-        "badgeType": "ai",
-        "description": "Goal-driven screening flow with AI-orchestrated criteria"
-      },
-      {
-        "id": "reports",
-        "label": "Reports",
-        "shortLabel": "Reports",
-        "icon": "Reports",
-        "badge": "Reports",
-        "badgeType": "pro",
-        "description": "Generated screening reports \u2014 view, download, and regenerate them here"
-      },
-      {
-        "id": "schedules",
-        "label": "Schedules",
-        "shortLabel": "Schedules",
-        "icon": "Schedules",
-        "badge": "Cron",
-        "badgeType": "neutral",
-        "description": "The one scheduling surface for screening runs \u2014 create, pause, and inspect scheduled jobs"
-      },
-      {
-        "id": "review",
-        "label": "Proposal Review",
-        "shortLabel": "Review",
-        "icon": "Review",
-        "badge": "Review",
-        "badgeType": "ai",
-        "description": "Decide what the system proposed: goal proposals, adaptation candidates, and strategy re-selections \u2014 nothing activates without a person"
-      },
-      {
-        "id": "track-record",
-        "label": "Track Record",
-        "shortLabel": "Record",
-        "icon": "TrackRecord",
-        "badge": "Track",
-        "badgeType": "pro",
-        "description": "What happened to issued recommendations, from the outcome ledger \u2014 Unverified stays Unverified"
       }
     ],
     "workflow-runs": [
@@ -1165,26 +1120,6 @@
       "tab": "assets-hub",
       "view": "bonds"
     },
-    "assets-hub:goal-screen": {
-      "tab": "assets-hub",
-      "view": "goal-screen"
-    },
-    "assets-hub:reports": {
-      "tab": "assets-hub",
-      "view": "reports"
-    },
-    "assets-hub:schedules": {
-      "tab": "assets-hub",
-      "view": "schedules"
-    },
-    "assets-hub:review": {
-      "tab": "assets-hub",
-      "view": "review"
-    },
-    "assets-hub:track-record": {
-      "tab": "assets-hub",
-      "view": "track-record"
-    },
     "options-screener:strategy-scanner": {
       "tab": "options",
       "view": "strategy-scanner"
@@ -1277,12 +1212,7 @@
         "forex",
         "futures",
         "commodities",
-        "bonds",
-        "goal-screen",
-        "reports",
-        "schedules",
-        "review",
-        "track-record"
+        "bonds"
       ]
     },
     {

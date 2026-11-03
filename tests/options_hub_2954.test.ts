@@ -56,18 +56,8 @@ describe("options copy hub tabs (#2954)", () => {
 });
 
 describe("assets hub tabs (#2954)", () => {
-  it("keeps only the tabs on neither the copy nor StockHub", () => {
-    expect(SCREENER_HUB_TABS).toEqual([
-      "forex",
-      "futures",
-      "commodities",
-      "bonds",
-      "goal-screen",
-      "reports",
-      "schedules",
-      "review",
-      "track-record",
-    ]);
+  it("keeps only the tabs on neither the copy nor StockHub (#2971: the 5 own pages leave the hub)", () => {
+    expect(SCREENER_HUB_TABS).toEqual(["forex", "futures", "commodities", "bonds"]);
     for (const tab of SCREENER_HUB_TABS) {
       expect(OPTIONS_HUB_TABS).not.toContain(tab);
       expect(STOCK_HUB_TABS).not.toContain(tab);
@@ -129,7 +119,7 @@ describe("sub-menu mapping (#2954)", () => {
     expect(workflowIds).toContain("workflow-runs");
   });
 
-  it("adds patterns + presets to the stock-hub menu and all 9 to assets-hub", () => {
+  it("adds patterns + presets to the stock-hub menu and all 4 to assets-hub", () => {
     expect(SUB_MENU_CONFIGS["stock-hub"].map((s) => s.id)).toEqual([
       "screeners",
       "new-screen",
@@ -142,11 +132,6 @@ describe("sub-menu mapping (#2954)", () => {
       "futures",
       "commodities",
       "bonds",
-      "goal-screen",
-      "reports",
-      "schedules",
-      "review",
-      "track-record",
     ]);
   });
 });

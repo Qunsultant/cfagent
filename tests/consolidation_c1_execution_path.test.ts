@@ -836,9 +836,9 @@ describe("C1: production callers exist (source pins)", () => {
     expect(readSrc("agents/orchestrator.ts")).toContain('"autonomousGoalScreen"');
   });
 
-  it("the hub hosts the goal-screen surface", () => {
-    const src = readSrc("client/ScreenersHub.tsx");
+  it("the trading hub hosts the goal-screen surface (#2971: own page, not a hub tab)", () => {
+    const src = readSrc("client/ETradeTradingHub.tsx");
     expect(src).toContain("GoalScreenPanel");
-    expect(src).toContain('"goal-screen"');
+    expect(src).toContain('effectiveSubTab === "goal-screen"');
   });
 });
