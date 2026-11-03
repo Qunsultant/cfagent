@@ -28,6 +28,8 @@ import { ScreenerResultsView, type ScreenerResultData } from "./ScreenerResultsV
 import { RunDetailView, type RunDetailConfirmation } from "./RunDetailView";
 import { MorningDigest } from "./MorningDigest";
 import { MarketDataResearchHub, type User as ResearchUser } from "./MarketDataResearchHub";
+import { PatternsPanel } from "./PatternsPanel";
+import { PresetsPanel } from "./PresetsPanel";
 import { navigateToTab, subscribeToRouteChanges } from "./router";
 import type { TradeOrderContext } from "./trading/tradeOrderContext";
 import "./optionsResearch.css";
@@ -77,13 +79,15 @@ export function buildStockRunRequestBody(
   };
 }
 
-export type StockHubTab = "stocks" | "new-screen" | "run-screen" | "research";
+export type StockHubTab = "stocks" | "new-screen" | "run-screen" | "research" | "patterns" | "presets";
 
 export const STOCK_HUB_TABS: readonly StockHubTab[] = [
   "stocks",
   "new-screen",
   "run-screen",
   "research",
+  "patterns",
+  "presets",
 ] as const;
 
 export function isValidStockHubTab(tab: unknown): tab is StockHubTab {
@@ -560,6 +564,28 @@ export function StockHub({
         description: "Zero-credential Yahoo Finance and Alpaca dual feed, fundamental peer comparison.",
       },
     },
+    {
+      // Issue #2954: Patterns + Presets move here from ScreenersHub
+      // and exist nowhere else.
+      id: "patterns",
+      label: "Patterns",
+      icon: "🧩",
+      tooltip: {
+        eyebrow: "STOCK PATTERN CATALOG",
+        title: "Patterns",
+        description: "Stock market setup signatures from the setup catalog — read-only, apply one to a new screen.",
+      },
+    },
+    {
+      id: "presets",
+      label: "Presets",
+      icon: "💾",
+      tooltip: {
+        eyebrow: "PRESET CATALOG",
+        title: "Presets",
+        description: "Your saved screening configurations, plus proposed starter presets to copy to My Presets.",
+      },
+    },
   ];
 
   return (
@@ -572,20 +598,6 @@ export function StockHub({
         rightContent={
           <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", fontSize: "var(--font-size-body-sm)", color: "var(--color-text-muted)" }}>
             <CopilotTriggerButton label="✨ Ask Copilot" />
-            {/* Issue #2438: the header shows the selected run's identity
-                or nothing — never manual-run leftovers ("Last scan" /
-                "N matched" described a manual run the user may never
-                have made, above autonomous content). */}
-            {hubTab === "stocks" && selectedAutoRun && (
-              <span>
-                Viewing:{" "}
-                <strong style={{ color: "var(--color-text-primary)" }}>
-                  {(selectedAutoRun.universe || "nasdaq100").toUpperCase()} ·{" "}
-                  {new Date(selectedAutoRun.timestamp).toLocaleString()} ·{" "}
-                  {SCREEN_RUN_STATUS_LABELS[screenRunStatus(selectedAutoRun)]}
-                </strong>
-              </span>
-            )}
           </div>
         }
       />
@@ -1011,6 +1023,39 @@ export function StockHub({
             user={user}
             onSendPrompt={onSendPrompt}
             onTradeSymbol={() => navigateToTab("order")}
+          />
+        </div>
+      )}
+
+      {/* 4. Patterns Panel (Issue #2954: moved here from ScreenersHub). */}
+      {visitedTabs.has("patterns") && (
+        <div
+          role="tabpanel"
+          id="screener-tabpanel-patterns"
+          aria-labelledby="cap-tab-patterns"
+          hidden={hubTab !== "patterns"}
+          style={hubTab !== "patterns" ? { display: "none" } : undefined}
+        >
+          <PatternsPanel
+            onApplyPattern={() => handleTabChange("new-screen")}
+          />
+        </div>
+      )}
+
+      {/* 5. Presets Panel (Issue #2954: moved here from ScreenersHub). */}
+      {visitedTabs.has("presets") && (
+        <div
+          role="tabpanel"
+          id="screener-tabpanel-presets"
+          aria-labelledby="cap-tab-presets"
+          hidden={hubTab !== "presets"}
+          style={hubTab !== "presets" ? { display: "none" } : undefined}
+        >
+          <PresetsPanel
+            userLogin={userLogin}
+            currentFilter={{}}
+            onApplyPreset={() => handleTabChange("new-screen")}
+            onNavigateNewScreen={() => handleTabChange("new-screen")}
           />
         </div>
       )}
