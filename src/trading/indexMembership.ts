@@ -29,6 +29,29 @@
  *   providers: Wikipedia writes `BRK.B`, Yahoo wants `BRK-B`.
  * - Point-in-time historical membership is OUT of scope (follow-up):
  *   this slice serves the current list only.
+ *
+ * #2962 — Extended universe (follow-up to #1852/#1980).
+ * New keys: `sp400` (S&P MidCap 400, Wikipedia table, same layout
+ * as S&P 500), `russell3000` (holdings-adapter union of IWB +
+ * IWM — Russell 3000 IS definitionally Russell 1000 + Russell
+ * 2000: the top 1,000 + the next 2,000 of the 3,000 largest US
+ * stocks; verified against FTSE Russell methodology summaries
+ * 2026-11-03), and the 11 GICS sector universes (members of the
+ * S&P 500 table filtered by its GICS Sector column — the sector
+ * definition, not a second taxonomy). Sector keys are
+ * `sector-<slug>`; the Select Sector SPDR ticker per sector is
+ * recorded as the holdings-adapter cross-check key. Russell
+ * reconstitution (annually in June historically; FTSE Russell
+ * announced a move to semi-annual reconstitution from late
+ * 2026) is handled by the union rule, not a special case: the
+ * union's snapshot date is the OLDER leg's as-of date, so a
+ * mixed-vintage union around reconstitution is refused as stale
+ * once the older leg exceeds the 3-day holdings budget, and the
+ * source label names both legs' as-of dates so the vintage mix
+ * is visible, never silent. The Wikipedia adapter memoizes
+ * fetches per instance: the 11 sector keys share the one S&P 500
+ * page fetch, so the weekly refresh job fetches 5 pages for 16
+ * Wikipedia-family keys, not 16.
  */
 import type { NasdaqExchange, NasdaqStockListing } from "../services/nasdaqListings";
 import type { ETradeQuote, StockScreenerFilter } from "../types";
@@ -39,14 +62,100 @@ import {
   type QuoteScreenerDeps,
 } from "./screenerPipeline";
 
-/** Indexes this port serves. `sp100` is the S&P 100 (100 names). */
+/** The 11 GICS sectors, keyed `sector-<slug>` (#2962). */
+export type SectorId =
+  | "sector-energy"
+  | "sector-materials"
+  | "sector-industrials"
+  | "sector-consumer-discretionary"
+  | "sector-consumer-staples"
+  | "sector-health-care"
+  | "sector-financials"
+  | "sector-information-technology"
+  | "sector-communication-services"
+  | "sector-utilities"
+  | "sector-real-estate";
+
+/** All sector keys, in GICS code order (10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60). */
+export const SECTOR_IDS: SectorId[] = [
+  "sector-energy",
+  "sector-materials",
+  "sector-industrials",
+  "sector-consumer-discretionary",
+  "sector-consumer-staples",
+  "sector-health-care",
+  "sector-financials",
+  "sector-information-technology",
+  "sector-communication-services",
+  "sector-utilities",
+  "sector-real-estate",
+];
+
+/** Wikipedia GICS Sector cell value per sector key (#2962). */
+export const SECTOR_GICS_NAME: Record<SectorId, string> = {
+  "sector-energy": "Energy",
+  "sector-materials": "Materials",
+  "sector-industrials": "Industrials",
+  "sector-consumer-discretionary": "Consumer Discretionary",
+  "sector-consumer-staples": "Consumer Staples",
+  "sector-health-care": "Health Care",
+  "sector-financials": "Financials",
+  "sector-information-technology": "Information Technology",
+  "sector-communication-services": "Communication Services",
+  "sector-utilities": "Utilities",
+  "sector-real-estate": "Real Estate",
+};
+
+/**
+ * Wikipedia GICS Sector cell → sector key. Case-insensitive:
+ * the live tables write "Information Technology" but a fixture
+ * or a table edit may differ in case; the sector name is a
+ * label, not an identity, so matching is normalized.
+ */
+export function sectorIdForGicsName(
+  name: string | undefined
+): SectorId | undefined {
+  if (!name) return undefined;
+  const norm = name.trim().toLowerCase();
+  for (const id of SECTOR_IDS) {
+    if (SECTOR_GICS_NAME[id].toLowerCase() === norm) return id;
+  }
+  return undefined;
+}
+
+export function isSectorIndex(index: string): index is SectorId {
+  return (SECTOR_IDS as string[]).includes(index);
+}
+
+/** Select Sector SPDR cross-check ticker per sector (State Street). */
+export const SECTOR_SPDR_ETF: Record<SectorId, string> = {
+  "sector-energy": "XLE",
+  "sector-materials": "XLB",
+  "sector-industrials": "XLI",
+  "sector-consumer-discretionary": "XLY",
+  "sector-consumer-staples": "XLP",
+  "sector-health-care": "XLV",
+  "sector-financials": "XLF",
+  "sector-information-technology": "XLK",
+  "sector-communication-services": "XLC",
+  "sector-utilities": "XLU",
+  "sector-real-estate": "XLRE",
+};
+
+/**
+ * Indexes this port serves. `sp100` is the S&P 100 (100 names).
+ * #2962 adds `sp400`, `russell3000`, and the 11 `sector-*` keys.
+ */
 export type IndexId =
   | "dow"
   | "sp500"
   | "sp100"
   | "nasdaq100"
   | "russell2000"
-  | "russell1000";
+  | "russell1000"
+  | "sp400"
+  | "russell3000"
+  | SectorId;
 
 export interface IndexMember {
   symbol: string;
@@ -228,9 +337,12 @@ interface WikipediaLayout {
  * Symbol | Name | Sector; Nasdaq-100 lives on its own list page as
  * Ticker | Company | ISIN | ICB Industry | …. No exchange column
  * exists on the S&P 500 / S&P 100 / Nasdaq-100 tables.
+ * #2962, verified 2026-11-03: S&P 400 is Symbol | Security | GICS
+ * Sector | GICS Sub-Industry | Headquarters Location | SEC
+ * filings — the S&P 500 layout, so it shares its columns.
  */
 const WIKIPEDIA_LAYOUTS: Record<
-  "dow" | "sp500" | "sp100" | "nasdaq100",
+  "dow" | "sp500" | "sp100" | "nasdaq100" | "sp400",
   WikipediaLayout
 > = {
   dow: {
@@ -261,17 +373,104 @@ const WIKIPEDIA_LAYOUTS: Record<
     sectorCol: 3,
     exchangeCol: null,
   },
+  sp400: {
+    page: "List_of_S%26P_400_companies",
+    symbolCol: 0,
+    nameCol: 1,
+    sectorCol: 2,
+    exchangeCol: null,
+  },
 };
 
 export type WikipediaFetcher = (url: string) => Promise<string>;
+
+/** Shared row → member conversion for table layouts (sector filter optional). */
+function rowsToMembers(
+  rows: string[][],
+  symbolCol: number,
+  nameCol: number,
+  sectorCol: number,
+  exchangeCol: number | null,
+  sectorFilter?: (sector: string | undefined) => boolean
+): IndexMember[] {
+  const symbols: IndexMember[] = [];
+  for (const row of rows.slice(1)) {
+    const raw = row[symbolCol];
+    if (!raw) continue;
+    const sector = row[sectorCol] || undefined;
+    if (sectorFilter && !sectorFilter(sector)) continue;
+    let symbol: string;
+    try {
+      symbol = normalizeTicker(raw);
+    } catch {
+      continue;
+    }
+    symbols.push({
+      symbol,
+      name: row[nameCol] || undefined,
+      sector,
+      exchange:
+        exchangeCol !== null ? mapExchange(row[exchangeCol]) : undefined,
+    });
+  }
+  return symbols;
+}
 
 /** Adapter 1 — Wikipedia component tables (CC BY-SA). */
 export function createWikipediaIndexMembershipAdapter(
   fetchHtml: WikipediaFetcher,
   today: string = new Date().toISOString().slice(0, 10)
 ): IndexMembershipPort {
+  // Per-instance memo, keyed by URL: the 11 sector keys share
+  // the one S&P 500 page fetch, so a weekly refresh of all
+  // sector keys costs one fetch of that page, not eleven.
+  // Failures are not memoized (a retry re-fetches); instances
+  // are short-lived (one tick / one request), so `today` never
+  // goes stale inside the cache.
+  const htmlCache = new Map<string, Promise<string>>();
+  const fetchCached = (url: string): Promise<string> => {
+    const hit = htmlCache.get(url);
+    if (hit) return hit;
+    const pending = fetchHtml(url);
+    htmlCache.set(url, pending);
+    pending.catch(() => {
+      if (htmlCache.get(url) === pending) htmlCache.delete(url);
+    });
+    return pending;
+  };
   return {
     async getMembers(index: IndexId): Promise<IndexMembership> {
+      // #2962 sector keys: the S&P 500 table filtered by its
+      // GICS Sector column. The sector definition IS this
+      // column — no second taxonomy, no invented list.
+      if (isSectorIndex(index)) {
+        const layout = WIKIPEDIA_LAYOUTS.sp500;
+        const html = await fetchCached(
+          `https://en.wikipedia.org/wiki/${layout.page}`
+        );
+        const rows = parseHtmlRows(html);
+        const symbols = rowsToMembers(
+          rows,
+          layout.symbolCol,
+          layout.nameCol,
+          layout.sectorCol,
+          layout.exchangeCol,
+          (sector) => sectorIdForGicsName(sector) === index
+        );
+        if (symbols.length === 0) {
+          throw new Error(
+            `Wikipedia table for ${index} yielded no members — refusing an empty list`
+          );
+        }
+        return {
+          index,
+          snapshotDate: today,
+          symbols,
+          source: "wikipedia",
+          sourceLabel: `Wikipedia S&P 500 GICS Sector column (CC BY-SA), sector ${SECTOR_GICS_NAME[index]}, fetched ${today}`,
+          derivedFromHoldings: false,
+        };
+      }
       const layout =
         WIKIPEDIA_LAYOUTS[index as keyof typeof WIKIPEDIA_LAYOUTS];
       if (!layout) {
@@ -279,30 +478,17 @@ export function createWikipediaIndexMembershipAdapter(
           `${index} is not served by the Wikipedia adapter (use the holdings adapter)`
         );
       }
-      const html = await fetchHtml(
+      const html = await fetchCached(
         `https://en.wikipedia.org/wiki/${layout.page}`
       );
       const rows = parseHtmlRows(html);
-      const symbols: IndexMember[] = [];
-      for (const row of rows.slice(1)) {
-        const raw = row[layout.symbolCol];
-        if (!raw) continue;
-        let symbol: string;
-        try {
-          symbol = normalizeTicker(raw);
-        } catch {
-          continue;
-        }
-        symbols.push({
-          symbol,
-          name: row[layout.nameCol] || undefined,
-          sector: row[layout.sectorCol] || undefined,
-          exchange:
-            layout.exchangeCol !== null
-              ? mapExchange(row[layout.exchangeCol])
-              : undefined,
-        });
-      }
+      const symbols = rowsToMembers(
+        rows,
+        layout.symbolCol,
+        layout.nameCol,
+        layout.sectorCol,
+        layout.exchangeCol
+      );
       if (symbols.length === 0) {
         throw new Error(
           `Wikipedia table for ${index} yielded no members — refusing an empty list`
@@ -391,15 +577,96 @@ export function parseHoldingsAsOfDate(
 
 export type HoldingsFetcher = (etf: string) => Promise<string>;
 
-/** ETF ticker per index for the holdings adapter (primary + cross-checks). */
-export const HOLDINGS_ETF_BY_INDEX: Record<IndexId, string> = {
+/**
+ * ETF ticker per index for the holdings adapter (primary + cross-checks).
+ * `russell3000` is deliberately absent: it is not a single fund but
+ * the IWB + IWM union (see the adapter below), and mapping it to
+ * IWV would mislabel the cross-check as the primary.
+ */
+export const HOLDINGS_ETF_BY_INDEX: Record<
+  Exclude<IndexId, "russell3000">,
+  string
+> = {
   dow: "DIA",
   sp500: "SPY",
   sp100: "OEF",
   nasdaq100: "QQQ",
   russell2000: "IWM",
   russell1000: "IWB",
+  sp400: "MDY",
+  "sector-energy": "XLE",
+  "sector-materials": "XLB",
+  "sector-industrials": "XLI",
+  "sector-consumer-discretionary": "XLY",
+  "sector-consumer-staples": "XLP",
+  "sector-health-care": "XLV",
+  "sector-financials": "XLF",
+  "sector-information-technology": "XLK",
+  "sector-communication-services": "XLC",
+  "sector-utilities": "XLU",
+  "sector-real-estate": "XLRE",
 };
+
+/**
+ * Parse one holdings file into its as-of date + equity members.
+ * Shared by the single-ETF path, the Russell 3000 union legs, and
+ * the IWV cross-check, so all three agree on what a row means.
+ * Non-equity rows (cash, money-market, derivatives) are filtered
+ * out when the file says what each row is; a file without an
+ * "Asset Class" column keeps every row with a parsable ticker.
+ */
+function parseHoldingsFile(
+  text: string,
+  fallbackDate: string,
+  label: string
+): { snapshotDate: string; members: IndexMember[] } {
+  const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  const headerIdx = lines.findIndex(
+    (l) => parseCsvLine(l)[0]?.toLowerCase() === "ticker"
+  );
+  if (headerIdx === -1) {
+    throw new Error(
+      `Holdings file for ${label} has no Ticker header row — refusing to guess columns`
+    );
+  }
+  const header = parseCsvLine(lines[headerIdx]).map((h) => h.toLowerCase());
+  const col = (name: string) => header.indexOf(name);
+  const tickerCol = col("ticker");
+  const nameCol = col("name");
+  const assetCol = col("asset class");
+  const sectorCol = col("sector");
+  const exchangeCol = col("exchange");
+  const snapshotDate = parseHoldingsAsOfDate(
+    lines.slice(0, headerIdx).join("\n"),
+    fallbackDate
+  );
+  const members: IndexMember[] = [];
+  for (const line of lines.slice(headerIdx + 1)) {
+    const row = parseCsvLine(line);
+    const raw = row[tickerCol];
+    if (!raw) continue;
+    // Fund files include cash/derivatives/sampling rows: keep only
+    // equities when the file says what each row is.
+    if (assetCol !== -1) {
+      const asset = (row[assetCol] ?? "").toLowerCase();
+      if (!asset.includes("equit")) continue;
+    }
+    let symbol: string;
+    try {
+      symbol = normalizeTicker(raw);
+    } catch {
+      continue;
+    }
+    members.push({
+      symbol,
+      name: nameCol !== -1 ? row[nameCol] || undefined : undefined,
+      sector: sectorCol !== -1 ? row[sectorCol] || undefined : undefined,
+      exchange:
+        exchangeCol !== -1 ? mapExchange(row[exchangeCol]) : undefined,
+    });
+  }
+  return { snapshotDate, members };
+}
 
 /**
  * Adapter 2 — ETF holdings files. PRIMARY for Russell 2000 (IWM) and
@@ -407,6 +674,8 @@ export const HOLDINGS_ETF_BY_INDEX: Record<IndexId, string> = {
  * small-caps. SPY / QQQ / DIA / OEF serve as cross-checks elsewhere.
  * Non-equity rows (cash, money-market, derivatives) are filtered out;
  * results are labelled holdings-derived, never official.
+ * #2962: sp400 via MDY, sector keys via their Select Sector SPDR
+ * tickers, and russell3000 as the IWB + IWM union (see below).
  */
 export function createEtfHoldingsIndexMembershipAdapter(
   fetchCsv: HoldingsFetcher,
@@ -414,59 +683,58 @@ export function createEtfHoldingsIndexMembershipAdapter(
 ): IndexMembershipPort {
   return {
     async getMembers(index: IndexId): Promise<IndexMembership> {
+      // #2962 Russell 3000 union: Russell 3000 IS Russell 1000 +
+      // Russell 2000 (top 1,000 + next 2,000 of the 3,000 largest
+      // US stocks). Both legs are fetched; a failing leg fails
+      // the whole union — a partial union is never served. The
+      // union's snapshot date is the OLDER leg's as-of date, so
+      // staleness is governed by the stalest leg (this is the
+      // reconstitution guard: around a June — now moving to
+      // semi-annual — reconstitution, the legs update on
+      // different days, and the label names both legs' dates so
+      // any vintage mix is visible). On an overlap, the Russell
+      // 1000 (IWB) record wins; the legs are disjoint by
+      // construction, so an overlap is a data anomaly, not a
+      // second member.
+      if (index === "russell3000") {
+        const [iwbText, iwmText] = await Promise.all([
+          fetchCsv("IWB"),
+          fetchCsv("IWM"),
+        ]);
+        const iwb = parseHoldingsFile(iwbText, today, "IWB");
+        const iwm = parseHoldingsFile(iwmText, today, "IWM");
+        const bySymbol = new Map<string, IndexMember>();
+        for (const m of iwb.members) bySymbol.set(m.symbol, m);
+        for (const m of iwm.members) {
+          if (!bySymbol.has(m.symbol)) bySymbol.set(m.symbol, m);
+        }
+        const symbols = [...bySymbol.values()];
+        if (symbols.length === 0) {
+          throw new Error(
+            "Russell 3000 union yielded no equity members — refusing an empty list"
+          );
+        }
+        const snapshotDate =
+          iwb.snapshotDate < iwm.snapshotDate
+            ? iwb.snapshotDate
+            : iwm.snapshotDate;
+        return {
+          index,
+          snapshotDate,
+          symbols,
+          source: "iwb+iwm",
+          sourceLabel: `IWB+IWM holdings-derived union (IWB as of ${iwb.snapshotDate}, IWM as of ${iwm.snapshotDate}) — NOT the official index list`,
+          derivedFromHoldings: true,
+        };
+      }
       const etf = HOLDINGS_ETF_BY_INDEX[index];
       if (!etf) throw new UnknownIndexError(index);
       const text = await fetchCsv(etf);
-      const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
-      const headerIdx = lines.findIndex(
-        (l) => parseCsvLine(l)[0]?.toLowerCase() === "ticker"
+      const { snapshotDate, members: symbols } = parseHoldingsFile(
+        text,
+        today,
+        etf
       );
-      if (headerIdx === -1) {
-        throw new Error(
-          `Holdings file for ${etf} has no Ticker header row — refusing to guess columns`
-        );
-      }
-      const header = parseCsvLine(lines[headerIdx]).map((h) =>
-        h.toLowerCase()
-      );
-      const col = (name: string) => header.indexOf(name);
-      const tickerCol = col("ticker");
-      const nameCol = col("name");
-      const assetCol = col("asset class");
-      const sectorCol = col("sector");
-      const exchangeCol = col("exchange");
-      const snapshotDate = parseHoldingsAsOfDate(
-        lines.slice(0, headerIdx).join("\n"),
-        today
-      );
-      const symbols: IndexMember[] = [];
-      for (const line of lines.slice(headerIdx + 1)) {
-        const row = parseCsvLine(line);
-        const raw = row[tickerCol];
-        if (!raw) continue;
-        // Fund files include cash/derivatives/sampling rows: keep only
-        // equities when the file says what each row is.
-        if (assetCol !== -1) {
-          const asset = (row[assetCol] ?? "").toLowerCase();
-          if (!asset.includes("equit")) continue;
-        }
-        let symbol: string;
-        try {
-          symbol = normalizeTicker(raw);
-        } catch {
-          continue;
-        }
-        symbols.push({
-          symbol,
-          name: nameCol !== -1 ? row[nameCol] || undefined : undefined,
-          sector:
-            sectorCol !== -1 ? row[sectorCol] || undefined : undefined,
-          exchange:
-            exchangeCol !== -1
-              ? mapExchange(row[exchangeCol])
-              : undefined,
-        });
-      }
       if (symbols.length === 0) {
         throw new Error(
           `Holdings file for ${etf} yielded no equity members — refusing an empty list`
@@ -501,6 +769,14 @@ export interface IndexCrossCheck {
   onlyInHoldings: string[];
 }
 
+export interface Russell3000CrossCheck {
+  index: "russell3000";
+  unionCount: number;
+  iwvCount: number;
+  onlyInUnion: string[];
+  onlyInIwv: string[];
+}
+
 export function createIndexMembershipService(deps: IndexMembershipServiceDeps) {
   const route = (index: IndexId): IndexMembershipPort => {
     switch (index) {
@@ -508,11 +784,14 @@ export function createIndexMembershipService(deps: IndexMembershipServiceDeps) {
       case "sp500":
       case "sp100":
       case "nasdaq100":
+      case "sp400":
         return deps.wikipedia;
       case "russell2000":
       case "russell1000":
+      case "russell3000":
         return deps.holdings;
       default:
+        if (isSectorIndex(index)) return deps.wikipedia;
         throw new UnknownIndexError(index);
     }
   };
@@ -549,10 +828,15 @@ export function createIndexMembershipService(deps: IndexMembershipServiceDeps) {
       };
     },
     /**
-     * Cross-check: Wikipedia table vs ETF holdings file for the four
-     * indexes that have both. Reports set differences (capped samples);
-     * it does not pick a winner — the primary route above stays
-     * authoritative for screening.
+     * Cross-check: Wikipedia table vs ETF holdings file for the
+     * indexes that have both (#2962: sp400 via MDY, sector keys
+     * via their SPDR tickers). Reports set differences (capped
+     * samples); it does not pick a winner — the primary route
+     * above stays authoritative for screening. russell3000 has
+     * no Wikipedia table, so it uses crossCheckRussell3000Union
+     * instead — calling this with russell3000 throws from the
+     * Wikipedia side, loudly, rather than comparing against
+     * nothing.
      */
     async crossCheck(index: IndexId): Promise<IndexCrossCheck> {
       const [wiki, hold] = await Promise.all([
@@ -567,6 +851,29 @@ export function createIndexMembershipService(deps: IndexMembershipServiceDeps) {
         holdingsCount: h.size,
         onlyInWikipedia: [...w].filter((s) => !h.has(s)).slice(0, 20),
         onlyInHoldings: [...h].filter((s) => !w.has(s)).slice(0, 20),
+      };
+    },
+    /**
+     * #2962 Russell 3000 cross-check: the IWB + IWM union vs an
+     * IWV (iShares Russell 3000) holdings file supplied by the
+     * caller ("where fetchable" — the file text is injected,
+     * like every other fetcher in this module). Reports set
+     * differences (capped samples); it does not pick a winner
+     * — the union route above stays authoritative.
+     */
+    async crossCheckRussell3000Union(
+      iwvCsvText: string
+    ): Promise<Russell3000CrossCheck> {
+      const union = await deps.holdings.getMembers("russell3000");
+      const iwv = parseHoldingsFile(iwvCsvText, union.snapshotDate, "IWV");
+      const u = new Set(union.symbols.map((s) => s.symbol));
+      const v = new Set(iwv.members.map((s) => s.symbol));
+      return {
+        index: "russell3000",
+        unionCount: u.size,
+        iwvCount: v.size,
+        onlyInUnion: [...u].filter((s) => !v.has(s)).slice(0, 20),
+        onlyInIwv: [...v].filter((s) => !u.has(s)).slice(0, 20),
       };
     },
   };

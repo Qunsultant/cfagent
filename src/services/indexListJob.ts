@@ -12,10 +12,18 @@
  * Wikipedia tables refresh weekly (10-day cap), ETF holdings
  * files refresh daily (3-day budget). The groups are the two
  * ScheduledAgent goal operations' index sets (see
- * src/agents/scheduled-agent.ts).
+ * src/agents/scheduled-agent.ts). #2962: the Wikipedia group
+ * gains sp400 + the 11 sector keys (sectors share the S&P 500
+ * page fetch via the adapter memo); the holdings group gains
+ * russell3000 (IWB + IWM union). The holdings goal still ships
+ * DISABLED (no holdings fetcher binding in code — see
+ * src/schedule.ts), so russell3000's stored refresh is a
+ * carried item until that binding lands, exactly like the two
+ * older Russell legs.
  */
 import type { IndexListStore } from "../data/indexListPorts";
 import type { IndexId } from "../trading";
+import { SECTOR_IDS } from "../trading";
 import {
   produceIndexListSnapshot,
   type IndexListDescriptor,
@@ -26,8 +34,8 @@ export const INDEX_REFRESH_INDICES: {
   wikipedia: IndexId[];
   holdings: IndexId[];
 } = {
-  wikipedia: ["dow", "sp500", "sp100", "nasdaq100"],
-  holdings: ["russell2000", "russell1000"],
+  wikipedia: ["dow", "sp500", "sp100", "nasdaq100", "sp400", ...SECTOR_IDS],
+  holdings: ["russell2000", "russell1000", "russell3000"],
 };
 
 export type IndexRefreshOperation = "index.refresh_wikipedia" | "index.refresh_holdings";
