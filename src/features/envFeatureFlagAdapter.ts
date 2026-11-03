@@ -135,16 +135,6 @@ export class EnvFeatureFlagAdapter implements FeatureFlagPort {
       return true;
     }
 
-    // Issue #2783: planned_asset_tabs is default-ON (owner direction),
-    // mirroring payment_assurance. Bulk JSON and the direct var above
-    // already returned for an explicit enable or disable, so reaching
-    // here means no explicit setting: the Planned menu is visible.
-    // Rollback is an explicit disable (FEATURE_FLAGS bulk false, or
-    // FEATURE_PLANNED_ASSET_TABS=0) + redeploy.
-    if (flag === "planned_asset_tabs") {
-      return true;
-    }
-
     // 5. For other registered features:
     // When feature configuration is present in the environment (bulk flags set,
     // or direct FEATURE_<FLAG> configured), non-enabled features default to OFF (closed).

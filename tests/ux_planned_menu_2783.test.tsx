@@ -1,10 +1,13 @@
 /** @vitest-environment jsdom */
 /**
- * Issue #2783: Planned menu in the left nav for forex/futures/commodities/
- * bonds, hub-bar exclusion removed (nothing hidden), feature-flagged and
- * enabled for now. Pins: nav config section + subs, catalog overrides,
- * flag map + defaults, hub bar, and menu-only parent behavior (toggle
- * without navigating, hidden entirely when the flag is off).
+ * Issue #2972 (retires issue #2783): the Planned menu is gone from the
+ * left nav — no PLANNED section, no planned item, no planned_asset_tabs
+ * flag. This file pins that absence. What stays: the planned deep links
+ * (bookmarks still resolve to the Assets Hub views) and the #2438
+ * hub-bar exclusion removal.
+ *
+ * The file name keeps the #2783 origin (no-deletion gate); the content
+ * asserts the #2972 end state.
  */
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -17,13 +20,10 @@ import { LeftNavBar } from "../src/client/components/LeftNavBar";
 import {
   DEFAULT_LEFT_NAV_CONFIG,
   SUB_MENU_CONFIGS,
+  findNavItemConfig,
 } from "../src/client/navConfig";
 import { deepLinkForNavNode, deepLinkHref } from "../src/client/deepLinks";
-import {
-  TAB_TO_FEATURE_MAP,
-  isTabFeatureEnabled,
-} from "../src/client/featureFlags";
-import type { NavTabId } from "../src/client/components/NavigationMenu";
+import { TAB_TO_FEATURE_MAP } from "../src/client/featureFlags";
 import { ALL_FEATURE_FLAGS } from "../src/features/featureFlagPorts";
 
 const ROOT = join(__dirname, "..");
@@ -34,26 +34,34 @@ const hubSource = readFileSync(
 
 const PLANNED_IDS = ["forex", "futures", "commodities", "bonds"] as const;
 
-describe("Planned menu (issue #2783)", () => {
-  it("adds a PLANNED section with the four asset subs", () => {
-    const section = DEFAULT_LEFT_NAV_CONFIG.sections.find(
-      (s) => s.id === "section-planned",
-    );
-    expect(section).toBeDefined();
-    expect(section!.title).toBe("PLANNED");
-    expect(section!.items.map((i) => i.id)).toEqual(["planned"]);
-    expect(section!.items[0].subItems!.map((s) => s.id)).toEqual([
-      ...PLANNED_IDS,
-    ]);
-    for (const sub of section!.items[0].subItems!) {
-      expect(sub.badge).toBe("Planned");
-    }
-    expect(SUB_MENU_CONFIGS.planned.map((s) => s.id)).toEqual([
-      ...PLANNED_IDS,
-    ]);
+describe("Planned menu removal (issue #2972)", () => {
+  it("has no PLANNED section and no planned item anywhere in the nav", () => {
+    expect(
+      DEFAULT_LEFT_NAV_CONFIG.sections.find(
+        (s) => s.id === "section-planned",
+      ),
+    ).toBeUndefined();
+    expect(
+      DEFAULT_LEFT_NAV_CONFIG.sections.find((s) => s.title === "PLANNED"),
+    ).toBeUndefined();
+    expect(findNavItemConfig(DEFAULT_LEFT_NAV_CONFIG, "planned")).toBeUndefined();
   });
 
-  it("resolves every Planned sub to its hub view link (#2954: hub is Assets Hub now)", () => {
+  it("has no planned sub-menu group in the externalized config", () => {
+    expect(SUB_MENU_CONFIGS.planned).toBeUndefined();
+    expect(Object.keys(SUB_MENU_CONFIGS)).not.toContain("planned");
+  });
+
+  it("retires the planned_asset_tabs flag from the registry and the tab map", () => {
+    expect(ALL_FEATURE_FLAGS as readonly string[]).not.toContain(
+      "planned_asset_tabs",
+    );
+    for (const id of ["planned", ...PLANNED_IDS]) {
+      expect(id in TAB_TO_FEATURE_MAP).toBe(false);
+    }
+  });
+
+  it("keeps every Planned deep link resolving to its hub view (bookmarks safe, #2972)", () => {
     for (const id of PLANNED_IDS) {
       expect(deepLinkForNavNode("planned", id)).toEqual({
         tab: "assets-hub",
@@ -63,19 +71,10 @@ describe("Planned menu (issue #2783)", () => {
         `?tab=assets-hub&view=${id}`,
       );
     }
-  });
-
-  it("gates the menu and its subs on the planned_asset_tabs flag", () => {
-    expect(ALL_FEATURE_FLAGS).toContain("planned_asset_tabs");
-    for (const id of ["planned", ...PLANNED_IDS]) {
-      expect(TAB_TO_FEATURE_MAP[id as NavTabId]).toBe("planned_asset_tabs");
-    }
-    for (const id of ["planned", ...PLANNED_IDS]) {
-      expect(
-        isTabFeatureEnabled(id as NavTabId, { planned_asset_tabs: true }),
-      ).toBe(true);
-      expect(isTabFeatureEnabled(id as NavTabId, {})).toBe(false);
-    }
+    expect(deepLinkForNavNode(null, "planned")).toEqual({
+      tab: "assets-hub",
+      view: "forex",
+    });
   });
 
   it("removes the hub-bar exclusion (issue #2438 filter is gone)", () => {
@@ -83,7 +82,7 @@ describe("Planned menu (issue #2783)", () => {
   });
 });
 
-describe("Planned menu behavior (issue #2783)", () => {
+describe("Planned menu absence in the rendered nav (issue #2972)", () => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -123,26 +122,16 @@ describe("Planned menu behavior (issue #2783)", () => {
     );
   }
 
-  it("toggles the submenu open without navigating when the flag is on", async () => {
+  it("renders no Planned row even when the retired flag is still set", async () => {
     (window as any).__FEATURES__ = { planned_asset_tabs: true };
-    await renderNavBar();
-    const row = plannedRow();
-    expect(row).toBeDefined();
-    await act(async () => {
-      (row as HTMLElement).click();
-    });
-    for (const id of PLANNED_IDS) {
-      expect(container.textContent).toContain(
-        id.charAt(0).toUpperCase() + id.slice(1),
-      );
-    }
-    expect(window.location.search).toBe("?tab=autopilot");
-  });
-
-  it("hides the whole menu when the flag is off", async () => {
     await renderNavBar();
     expect(plannedRow()).toBeUndefined();
     expect(container.textContent).not.toContain("PLANNED");
-    expect(container.textContent).not.toContain("Forex");
+  });
+
+  it("renders no Planned row with no feature flags set", async () => {
+    await renderNavBar();
+    expect(plannedRow()).toBeUndefined();
+    expect(container.textContent).not.toContain("PLANNED");
   });
 });

@@ -55,9 +55,9 @@ describe("nav-config.json shape (issue #2977)", () => {
     }
   });
 
-  it("subMenus: 11 groups, every sub-item has id and label", () => {
+  it("subMenus: 10 groups, every sub-item has id and label", () => {
     const groups = Object.keys(navData.subMenus as Record<string, unknown[]>);
-    expect(groups).toHaveLength(11);
+    expect(groups).toHaveLength(10);
     for (const items of Object.values(navData.subMenus as Record<string, { id: string; label: string }[]>)) {
       for (const item of items) {
         expect(item.id).toBeTruthy();
@@ -116,9 +116,9 @@ describe("nav-config.json loaders (issue #2977)", () => {
     expect(ROUTES).toHaveLength(41);
     expect(Object.keys(DEEP_LINK_OVERRIDES)).toHaveLength(31);
     expect(SURFACE_TAB_DEFS).toHaveLength(14);
-    // 6 metadata sections + sandbox + planned menu-only sections.
+    // 6 metadata sections + sandbox menu-only section.
     const built = buildDefaultLeftNavConfig().sections;
-    expect(built).toHaveLength(8);
+    expect(built).toHaveLength(7);
     expect(built.slice(0, 6).map((s) => s.title)).toEqual(
       (navData.sections as { title: string }[]).map((s) => s.title),
     );
