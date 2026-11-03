@@ -1,0 +1,4 @@
+### Added
+- Per-user report-run quota (#2842): screen + goalScreen runs share one per-user pool (daily 10, weekly 70, monthly 300 for all tiers, pending the CBO/owner decision) over UTC calendar windows, enforced at the run-submission gate before any work starts. Counters live in the per-owner ScreenerAgent instance's SQLite, idempotent on run id (screens use the #2840 derived run id, goal screens use the caller's idempotency key); over-quota answers 429 with limit, usage, and reset time, and a counter failure fails closed as 503. Admin overrides (current window only, expiring at the window's end) are durable auditable rows plus an IAAA audit event, visible with remaining quota via GET /api/iaaa/quota-usage and the logged-in-users panel's quota lookup block. Research-run enforcement is carried (different DO instance, no shared counter store yet) and research runs are uncounted until then.
+
+#CISO-bhdm
