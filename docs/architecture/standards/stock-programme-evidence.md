@@ -16,7 +16,7 @@
 | WCAG 2.2 AA | Required product target for complete supported journeys (`docs/agents/tech-standards.md`, `docs/agents/ux-architecture.md` §20) | Component-scoped only: palette listbox semantics + modal focus trap (`tests/stock_search_palette_a11y_1695.test.ts`, `tests/ui_modal_focus_trap.test.tsx`); hub UX tests. Known gaps: `docs/architecture/UX/assessment-01.md` lists Non-Compliant items (target size 2.5.8, status messages 4.1.3). Patterns/presets tabs: NOT VERIFIED (audit #2860 §10) | **TARGET-ONLY** with named gaps — not compliant |
 | SOC 2 | Conditional customer/business requirement; an assurance report, not a general software certification (`docs/agents/tech-standards.md`) | Control mechanisms exist repo-wide and are formalized (not attested) in `docs/architecture/security/soc2-controls-1774.md` — audit store, hash chain, PDP. No SOC 2 report or auditor opinion exists for the stock programme | **NO ATTESTATION** — not claimed |
 | ISO (27001 / 9001 / other) | Nothing in repo standards names an ISO requirement for stock code | No ISO claim found in stock code or stock docs | **NO CLAIM** |
-| 15-factor | `docs/architecture/application/screener.md` §9 carries a FULL COMPLIANCE table for the pre-existing screener capability | The table describes the pre-existing capability; it is not evidence for new stock-programme code (see the §9 scope note added with this pack). The per-factor re-audit for new stock code is the separate #2860 follow-up item | **QUALIFIED** — pre-existing description only |
+| 15-factor | `docs/architecture/application/screener.md` §9 carries a FULL COMPLIANCE table for the pre-existing screener capability | The table describes the pre-existing capability; it is not evidence for new stock-programme code (see the §9 scope note added with this pack). The per-factor re-audit for new stock code is now published at `docs/architecture/standards/stock-15-factor-reaudit.md`: 10 PASS / 5 PARTIAL / 0 FAIL / 0 NOT VERIFIED — NOT COMPLIANT as a whole | **QUALIFIED** — pre-existing description only; re-audit published, no compliance claim |
 
 ## What stock code DOES follow, with evidence
 
@@ -44,6 +44,9 @@ can open:
   alone never becomes attestation.
 - ISO: a named ISO requirement adopted for stock code, with its own
   evidence — until then, nothing is claimed.
-- 15-factor: the #2860 per-factor re-audit (separate item), reported
-  factor by factor from code evidence — never the hardcoded-COMPLIANT
-  test, which asserts its own conclusion and must not be cited.
+- 15-factor: the #2860 per-factor re-audit, now published at
+  `docs/architecture/standards/stock-15-factor-reaudit.md` (10 PASS /
+  5 PARTIAL / 0 FAIL / 0 NOT VERIFIED — NOT COMPLIANT as a whole),
+  reported factor by factor from code evidence — never the
+  hardcoded-COMPLIANT test, which asserts its own conclusion and must
+  not be cited.
