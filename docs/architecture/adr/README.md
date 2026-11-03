@@ -39,6 +39,7 @@ PR.
 | [0020](0020-do-d1-r2-topology.md) | DO vs D1 vs R2 — actor runtime, queryable projection, blob storage | Accepted |
 | [0024](0024-durable-turn-submissions.md) | Durable chat-turn submission via Think's submission queue (ADR 0005 follow-up D2) | Accepted |
 | [0025](0025-web-search-provider-seam.md) | Web search behind a named-provider seam (Brave first), fail-loud with web_search_provider_not_configured until the owner sets the provider secret (#2731) | Accepted |
+| [0027](0027-one-stage-runner-contract.md) | One stage-runner contract for every screen invocation mode: plan + checkpoint + three drivers, `mas_async_jobs` as the single unit store, retry budgets from `pipelinePolicy`, fan-out cap named not truncated (#2601, #2621) | Proposed |
 
 ## Template
 
