@@ -86,6 +86,9 @@ const KNOWN_ORPHANS = [
   // Deprecated in place in #2723 (superseded by DataProvidersPanel);
   // preserved under the zero-deletions policy gate (§22).
   "src/client/ProviderConnectivityDashboard.tsx",
+  // Deprecated in place in #2954 (superseded by OptionsHub.tsx);
+  // preserved under the zero-deletions policy gate (§22).
+  "src/client/options/OptionsResearchHost.tsx",
 ];
 
 describe("tab content wiring gates (#2083)", () => {

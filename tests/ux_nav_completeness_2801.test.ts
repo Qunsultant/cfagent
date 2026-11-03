@@ -21,7 +21,7 @@ import {
   deepLinkForNavNode,
   deepLinkHrefForNavNode,
 } from "../src/client/deepLinks";
-import { researchSurfaceForParam } from "../src/client/options/researchSurface";
+import { OPTIONS_HUB_TABS } from "../src/client/OptionsHub";
 
 const hubSrc = readFileSync(join(__dirname, "../src/client/ETradeTradingHub.tsx"), "utf8");
 
@@ -36,18 +36,18 @@ describe("nav completeness (#2801)", () => {
     expect(found!.icon).toBe("Goal");
     expect(NAV_ICON_MAP[found!.icon!]).toBeDefined();
     expect(deepLinkForNavNode(null, "goal-screen")).toEqual({
-      tab: "screeners",
+      tab: "assets-hub",
       view: "goal-screen",
     });
     expect(deepLinkHrefForNavNode(null, "goal-screen")).toBe(
-      "?tab=screeners&view=goal-screen",
+      "?tab=assets-hub&view=goal-screen",
     );
   });
 
-  it("adds Run Records and NLQ as sub-menus under options-screener", () => {
-    for (const [id, label, icon, research] of [
-      ["run-records", "Run Records", "Runs", "schedules"],
-      ["nlq", "NLQ", "Search", "nlq"],
+  it("renames Run Records and NLQ to Options Runs and NLQ-options (#2954)", () => {
+    for (const [id, label, icon, view] of [
+      ["options-runs", "Options Runs", "Runs", "options-runs"],
+      ["nlq-options", "NLQ-options", "Search", "nlq-options"],
     ] as const) {
       const found = SUB_MENU_CONFIGS["options-screener"].find((s) => s.id === id);
       expect(found).toBeDefined();
@@ -57,14 +57,13 @@ describe("nav completeness (#2801)", () => {
       expect(NAV_ICON_MAP[found!.icon!]).toBeDefined();
       expect(deepLinkForNavNode("options-screener", id)).toEqual({
         tab: "options",
-        params: { research },
+        view,
       });
       expect(deepLinkHrefForNavNode("options-screener", id)).toBe(
-        `?tab=options&research=${research}`,
+        `?tab=options&view=${view}`,
       );
-      // The panel already adopts these modes (#2784's mapping); the
-      // new subs only need to name them.
-      expect(researchSurfaceForParam(research)).not.toBeNull();
+      // The subs name copy-hub tabs now, not research modes.
+      expect(OPTIONS_HUB_TABS as readonly string[]).toContain(view);
     }
   });
 

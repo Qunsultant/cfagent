@@ -37,6 +37,7 @@ import {
 } from "../src/client/navConfig";
 import { getRoute } from "../src/client/routes";
 import { deepLinkForNavNode } from "../src/client/deepLinks";
+import { OPTIONS_HUB_TABS } from "../src/client/OptionsHub";
 import { OPTIONS_RESEARCH_SURFACE_VALUES } from "../src/client/options/researchSurface";
 import {
   getClientFeatureFlags,
@@ -190,18 +191,18 @@ describe("options screener navigation (issue #2596)", () => {
     expect(item).toBeDefined();
     expect(item!.label).toBe("Options Screener");
     expect(item!.subItems!.map((s) => s.id)).toEqual([
-      "options",
-      "scanner",
-      "options-flows",
-      "iv-history",
+      "strategy-scanner",
+      "options-runs",
       "discovery",
       "strategy-panel",
+      "contracts-screener",
+      "custom-thesis",
+      "nlq-options",
+      "ai-strategy-ideas",
+      "scheduled-screening",
+      "iv-history",
+      "options-flows",
       "best-trade",
-      "compare",
-      "llm-ideas",
-      "llm-evaluate",
-      "run-records",
-      "nlq",
     ]);
     expect(isNavItemOrSubItemActive(item!, "options-screener")).toBe(true);
     expect(isNavItemOrSubItemActive(item!, "options")).toBe(true);
@@ -215,18 +216,18 @@ describe("options screener navigation (issue #2596)", () => {
     expect(screeners.subItems!.map((s) => s.id)).toContain("research");
   });
 
-  it("every sub-menu entry is a real route, a view-driven hub entry, or a research surface (#2685, #2784, #2801)", () => {
+  it("every sub-menu entry is a real route, a view-driven hub entry, or a research surface (#2685, #2784, #2801, #2954)", () => {
     const item = findNavItemConfig(DEFAULT_LEFT_NAV_CONFIG, "options-screener")!;
     for (const sub of item.subItems!) {
-      // Real tabs resolve in the route table; view-driven entries link to their host route;
-      // research surfaces link to the options host with their research param.
-      // (#2801: run-records names the schedules surface, so the param — not the
-      // sub id — is what must be a valid research value.)
+      // Real tabs resolve in the route table; view-driven entries link
+      // to the copy hub's tab row; research surfaces link to the
+      // options host with their research param (best-trade only, since
+      // #2954 — the other research subs became view links).
       const link = deepLinkForNavNode("options-screener", sub.id);
       if ("params" in link && link.params?.research) {
         expect(OPTIONS_RESEARCH_SURFACE_VALUES as readonly string[]).toContain(link.params.research);
-      } else if (sub.id === "iv-history") {
-        expect(sub.href || sub.id).toBeTruthy();
+      } else if ("view" in link && link.tab === "options") {
+        expect(OPTIONS_HUB_TABS as readonly string[]).toContain(link.view);
       } else {
         expect(getRoute(sub.id)).toBeDefined();
       }

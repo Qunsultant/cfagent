@@ -19,16 +19,18 @@
  * order; pin updated in the same PR per the §7 pin rule.)
  * (#2896 replaced the screeners nav entry with the Stock Hub entry
  * (navOrder 6, icon Scanner, badge Stocks); nav count stays 30.)
+ * (#2954 added the Assets Hub nav entry, navOrder 30, last in display
+ * order; pin updated in the same PR per the §7 pin rule.)
  */
 import { describe, it, expect } from "vitest";
 import { ROUTES, hasNavEntry } from "../src/client/routes";
 import { NAVIGATION_ITEMS } from "../src/client/components/NavigationMenu";
 
 const navRoutes = ROUTES.filter(hasNavEntry);
-const NAV_COUNT = 30;
+const NAV_COUNT = 31;
 
 describe("left-nav unique icons and badges", () => {
-  it("has the full 30-item nav", () => {
+  it("has the full 31-item nav", () => {
     expect(navRoutes).toHaveLength(NAV_COUNT);
     expect(NAVIGATION_ITEMS).toHaveLength(NAV_COUNT);
   });
@@ -75,5 +77,8 @@ describe("left-nav unique icons and badges", () => {
     expect(byId.get("billing")!.icon).toBe("Billing");
     expect(byId.get("billing")!.navEntry.badge).toBe("Billing");
     expect(byId.get("billing")!.navEntry.navOrder).toBe(29);
+    expect(byId.get("assets-hub")!.icon).toBe("Screeners");
+    expect(byId.get("assets-hub")!.navEntry.badge).toBe("Assets");
+    expect(byId.get("assets-hub")!.navEntry.navOrder).toBe(30);
   });
 });

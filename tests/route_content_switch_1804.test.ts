@@ -42,7 +42,9 @@ function shellContentKeys(src: string): string[] {
 }
 
 // #2896: the Stock Hub route is shell-retained, so the set gains stock-hub.
+// #2954: the Assets Hub route is retained, so the set gains assets-hub.
 const HISTORICAL_TRADING_IDS = [
+  "assets-hub",
   "autopilot",
   "ledger",
   "omnichannel",
@@ -95,7 +97,7 @@ describe("route-table-derived content switch (#2077)", () => {
     expect(chatSrc.slice(start, end)).not.toContain('{tab === "');
   });
 
-  it("the retained set is exactly the historical trading set (#388, #2896)", () => {
+  it("the retained set is exactly the historical trading set (#388, #2896, #2954)", () => {
     expect([...TRADING_TABS].sort()).toEqual([...HISTORICAL_TRADING_IDS].sort());
   });
 

@@ -19,6 +19,8 @@
  * (#2740, Platform Phase 6, added the Billing nav entry, navOrder 29,
  * last in display order; pin updated in the same PR per the §7 pin
  * rule.)
+ * (#2954 added the Assets Hub nav entry, navOrder 30, last in display
+ * order; pin updated in the same PR per the pin rule.)
  * (#2896 replaced the screeners nav entry with the Stock Hub entry at
  * the same navOrder 6 slot; pin updated in the same PR per the pin rule.)
  */
@@ -60,10 +62,11 @@ const EXPECTED_ORDER = [
   "payment-assurance",
   "products",
   "billing",
+  "assets-hub",
 ];
 
 describe("nav derivation", () => {
-  it("derives the 30 nav items in display order", () => {
+  it("derives the 31 nav items in display order", () => {
     expect(NAVIGATION_ITEMS.map((i) => i.id)).toEqual(EXPECTED_ORDER);
   });
 
@@ -82,6 +85,7 @@ describe("nav derivation", () => {
     expect(byId.get("autopilot")!.label).toBe("Autopilot Control");
     expect(byId.get("order")!.label).toBe("Fast Order Ticket");
     expect(byId.get("stock-hub")!.label).toBe("Stock Hub");
+    expect(byId.get("assets-hub")!.label).toBe("Assets Hub");
     expect(byId.get("social")!.label).toBe("Social Posting");
     expect(byId.get("approvals")!.label).toBe("Approvals");
     expect(byId.get("docs")!.label).toBe("Docs & Reports");

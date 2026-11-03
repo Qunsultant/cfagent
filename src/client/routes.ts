@@ -135,6 +135,24 @@ export const ROUTES = [
     },
   },
   {
+    id: "assets-hub",
+    retain: true,
+    navGroup: "assets-hub",
+    crumb: "Assets Hub",
+    category: "Intelligence",
+    icon: "Screeners",
+    description:
+      "Multi-asset screening hub: forex, futures, commodities, and bonds, plus goal screens, reports, schedules, proposal review, and the recommendation track record",
+    navEntry: {
+      label: "Assets Hub",
+      shortLabel: "Assets",
+      navOrder: 30,
+      defaultVisible: true,
+      badge: "Assets",
+      badgeType: "pro",
+    },
+  },
+  {
     id: "audit",
     navGroup: "audit",
     crumb: "Audit Vault",
@@ -555,7 +573,7 @@ export const ROUTES = [
     category: "Intelligence",
     icon: "Screeners",
     description:
-      "Multi-asset screening hub: options research, the strategy scanner, IV history, goal screens, reports, schedules, proposal review, and the recommendation track record",
+      "Multi-asset screening hub: forex, futures, commodities, and bonds, plus goal screens, reports, schedules, proposal review, and the recommendation track record",
   },
   {
     id: "search",

@@ -55,6 +55,8 @@ export function mapTabToTradingSubTab(targetTab: string): TradingSubTab {
       return "schedules";
     case "options":
       return "options";
+    case "assets-hub":
+      return "assets-hub";
     case "voice":
       return "voice";
     case "omnichannel":

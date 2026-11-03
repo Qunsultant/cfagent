@@ -117,11 +117,11 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
     expect(itemIds).toContain("schedules");
   });
 
-  it("configures Stock Hub with stocks, new-screen and research sub-menus", () => {
+  it("configures Stock Hub with stocks, new-screen, research, patterns and presets sub-menus", () => {
     const stockSubItems = SUB_MENU_CONFIGS["stock-hub"];
     expect(stockSubItems).toBeDefined();
     const subIds = stockSubItems.map((s) => s.id);
-    expect(subIds).toEqual(["screeners", "new-screen", "research"]);
+    expect(subIds).toEqual(["screeners", "new-screen", "research", "patterns", "presets"]);
     expect(subIds).not.toContain("options");
     expect(subIds).not.toContain("scanner");
     expect(subIds).not.toContain("options-flows");
@@ -133,18 +133,18 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
     expect(optionsSubItems).toBeDefined();
     const subIds = optionsSubItems.map((s) => s.id);
     expect(subIds).toEqual([
-      "options",
-      "scanner",
-      "options-flows",
-      "iv-history",
+      "strategy-scanner",
+      "options-runs",
       "discovery",
       "strategy-panel",
+      "contracts-screener",
+      "custom-thesis",
+      "nlq-options",
+      "ai-strategy-ideas",
+      "scheduled-screening",
+      "iv-history",
+      "options-flows",
       "best-trade",
-      "compare",
-      "llm-ideas",
-      "llm-evaluate",
-      "run-records",
-      "nlq",
     ]);
     expect(subIds).not.toContain("docs");
     expect(subIds).not.toContain("workflow-runs");

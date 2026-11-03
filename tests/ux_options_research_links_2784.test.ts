@@ -6,6 +6,9 @@
  * state today, so this issue adds the `research` URL param scheme on
  * the options host (?tab=options) and wires the nav subs, the catalog
  * page cards, and the panel's mode/section adoption to it.
+ * (Issue #2954: the nav subs became copy-hub view links, except
+ * Best Trade which keeps its research link; the research scheme itself
+ * survives as the copy hub's legacy mapping.)
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -17,6 +20,7 @@ import {
   deepLinkHrefForNavNode,
   SURFACE_TAB_DEFS,
 } from "../src/client/deepLinks";
+import { OPTIONS_HUB_TABS } from "../src/client/OptionsHub";
 import {
   researchSurfaceForParam,
   researchParamForMode,
@@ -27,19 +31,16 @@ const panelSrc = readFileSync(join(__dirname, "../src/client/options/OptionsRese
 const catalogSrc = readFileSync(join(__dirname, "../src/client/OptionsScreenerPage.tsx"), "utf8");
 const hubSrc = readFileSync(join(__dirname, "../src/client/ETradeTradingHub.tsx"), "utf8");
 
-const NEW_SUBS = [
+const KEPT_SUBS = [
   { id: "discovery", label: "Discovery" },
   { id: "strategy-panel", label: "Strategy Panel" },
   { id: "best-trade", label: "Best Trade" },
-  { id: "compare", label: "Compare" },
-  { id: "llm-ideas", label: "LLM Ideas" },
-  { id: "llm-evaluate", label: "LLM Evaluate" },
 ] as const;
 
 describe("options-screener sub-menus (#2784)", () => {
-  it("lists the six research surfaces as sub-menus under options-screener", () => {
+  it("lists the surviving research surfaces as sub-menus under options-screener", () => {
     const subs = SUB_MENU_CONFIGS["options-screener"];
-    for (const sub of NEW_SUBS) {
+    for (const sub of KEPT_SUBS) {
       const found = subs.find((s) => s.id === sub.id);
       expect(found).toBeDefined();
       expect(found!.label).toBe(sub.label);
@@ -47,33 +48,50 @@ describe("options-screener sub-menus (#2784)", () => {
       expect(found!.icon).toBeDefined();
       expect(NAV_ICON_MAP[found!.icon!]).toBeDefined();
     }
-  });
-
-  it("deep-links every new sub to the options host with its research value", () => {
-    for (const sub of NEW_SUBS) {
-      expect(deepLinkForNavNode("options-screener", sub.id)).toEqual({
-        tab: "options",
-        params: { research: sub.id },
-      });
-      expect(deepLinkHrefForNavNode("options-screener", sub.id)).toBe(
-        `?tab=options&research=${sub.id}`,
-      );
+    // #2954 removed the compare / LLM ideas / LLM evaluate subs (their
+    // content folded into Custom Thesis / the AI Ideas tab).
+    for (const id of ["compare", "llm-ideas", "llm-evaluate"]) {
+      expect(subs.find((s) => s.id === id)).toBeUndefined();
     }
   });
 
-  it("fixes the Contract Screen sub: it lands on contracts mode, not the default mode", () => {
-    expect(deepLinkForNavNode("options-screener", "options")).toEqual({
+  it("deep-links the surviving subs: views for discovery/strategy-panel, research for best-trade", () => {
+    const cases = [
+      [
+        "discovery",
+        { tab: "options", view: "strategy-discovery", params: { discoveryView: "discovery" } },
+        "?tab=options&view=strategy-discovery&discoveryView=discovery",
+      ],
+      [
+        "strategy-panel",
+        { tab: "options", view: "strategy-discovery", params: { discoveryView: "builder" } },
+        "?tab=options&view=strategy-discovery&discoveryView=builder",
+      ],
+      [
+        "best-trade",
+        { tab: "options", params: { research: "best-trade" } },
+        "?tab=options&research=best-trade",
+      ],
+    ] as const;
+    for (const [id, link, href] of cases) {
+      expect(deepLinkForNavNode("options-screener", id)).toEqual(link);
+      expect(deepLinkHrefForNavNode("options-screener", id)).toBe(href);
+    }
+  });
+
+  it("renames the Contract Screen sub to Contracts Screener (#2954): it lands on the contracts tab", () => {
+    expect(deepLinkForNavNode("options-screener", "contracts-screener")).toEqual({
       tab: "options",
-      params: { research: "contracts" },
+      view: "contracts-screener",
     });
   });
 
-  it("registers the options-research surface in the deep-link catalog", () => {
-    const def = SURFACE_TAB_DEFS.find((d) => d.surface === "options-research");
+  it("registers the options-hub surface in the deep-link catalog", () => {
+    const def = SURFACE_TAB_DEFS.find((d) => d.surface === "options-hub");
     expect(def).toBeDefined();
     expect(def!.page).toBe("options");
-    expect(def!.param).toBe("research");
-    for (const value of OPTIONS_RESEARCH_SURFACE_VALUES) {
+    expect(def!.param).toBe("view");
+    for (const value of OPTIONS_HUB_TABS) {
       expect(def!.values).toContain(value);
     }
   });

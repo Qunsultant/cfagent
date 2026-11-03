@@ -46,6 +46,7 @@ import {
 import { buildStrategyRequest } from "../src/client/options/serverDiscovery";
 import { SCREENING_ASSET_CLASSES } from "../src/client/screeningAdapters";
 import { ScreenersHub } from "../src/client/ScreenersHub";
+import { OptionsHub } from "../src/client/OptionsHub";
 import { ToastProvider } from "../src/client/components/ui/Toast";
 import { ETradeTradingHub } from "../src/client/ETradeTradingHub";
 
@@ -189,6 +190,7 @@ describe("S8 one construction path (source pins)", () => {
 
 describe("S8 hub inventory coverage (source pins)", () => {
   const hub = read("src/client/ScreenersHub.tsx");
+  const optionsHub = read("src/client/OptionsHub.tsx");
   const tradingHub = read("src/client/ETradeTradingHub.tsx");
 
   it("the options asset class is available in the hub — no longer PLANNED", () => {
@@ -201,19 +203,25 @@ describe("S8 hub inventory coverage (source pins)", () => {
     ]);
   });
 
-  it("the hub hosts the options research surface, the scanner, and IV history", () => {
-    expect(hub).toContain("<OptionsResearchHost");
-    expect(hub).toContain("<ScannerPanel");
-    expect(hub).toContain("<IvHistoryPanel");
+  it("the options copy hub hosts the options research surface, the scanner, and IV history (#2954)", () => {
+    expect(optionsHub).toContain("<OptionsResearchPanel");
+    expect(optionsHub).toContain("<ScannerPanel");
+    expect(optionsHub).toContain("<IvHistoryPanel");
     // The pre-S8 options redirect notice is gone — options is home here.
-    expect(hub).not.toContain("Options Capabilities Moved to Auto Options Research");
+    expect(optionsHub).not.toContain("Options Capabilities Moved to Auto Options Research");
+    // And the old hub no longer hosts them: they moved to the copy hub.
+    expect(hub).not.toContain("<OptionsResearchHost");
+    expect(hub).not.toContain("<ScannerPanel");
+    expect(hub).not.toContain("<IvHistoryPanel");
   });
 
-  it("the hub threads the trade-preview and prompt handoffs into the folded panels", () => {
-    expect(hub).toContain("onPreviewTrade={onPreviewTrade}");
-    expect(hub).toContain("onSendPrompt={onSendPrompt}");
+  it("the options copy hub threads the trade-preview and prompt handoffs into the folded panels (#2954)", () => {
+    expect(optionsHub).toContain("onPreviewTrade={onPreviewTrade}");
+    expect(optionsHub).toContain("onSendPrompt={onSendPrompt}");
     // The Trading Hub threads its order-ticket handler into the hub.
     expect(tradingHub).toContain("onPreviewTrade={handleTradeOrder}");
+    // The old hub no longer threads prompts: its panels don't take them.
+    expect(hub).not.toContain("onSendPrompt={onSendPrompt}");
   });
 
   // C2 (#1246) supersedes the S8 redirect pins below: the acceptance
@@ -226,9 +234,11 @@ describe("S8 hub inventory coverage (source pins)", () => {
     expect(tradingHub).not.toContain("<IvHistoryPanel");
     expect(tradingHub).not.toContain("ScreeningMovedNotice");
     expect(tradingHub).not.toContain("Screening Moved to the Screeners Hub");
-    expect(tradingHub).toContain('renderScreenersHub("options")');
-    expect(tradingHub).toContain('renderScreenersHub("scanner")');
-    expect(tradingHub).toContain('renderScreenersHub("iv-history")');
+    // Issue #2954: options/scanner/iv-history render the Options copy
+    // hub; reports/schedules still render the ScreenersHub (Assets Hub).
+    expect(tradingHub).toContain('renderOptionsHub()');
+    expect(tradingHub).toContain('renderOptionsHub("strategy-scanner")');
+    expect(tradingHub).toContain('renderOptionsHub("iv-history")');
     expect(tradingHub).toContain('renderScreenersHub("reports")');
     expect(tradingHub).toContain('renderScreenersHub("schedules")');
   });
@@ -274,17 +284,17 @@ describe("S8 render pins", () => {
     vi.unstubAllGlobals();
   });
 
-  it("the hub renders the options research surface under its options tab", async () => {
+  it("the options copy hub renders the options research surface under its strategy-discovery tab (#2954)", async () => {
     await act(async () => {
-      root.render(<ToastProvider><ScreenersHub activeEnv="PROD" userLogin="tester" initialTab="options" /></ToastProvider>);
+      root.render(<ToastProvider><OptionsHub activeEnv="PROD" userLogin="tester" initialTab="strategy-discovery" /></ToastProvider>);
     });
     expect(container.textContent).toContain("Strategy Discovery & Payoff Analyzer");
     expect(container.textContent).toContain("AI Strategy Ideas & Exporter");
   });
 
-  it("the hub renders IV history under its iv-history tab", async () => {
+  it("the options copy hub renders IV history under its iv-history tab (#2954)", async () => {
     await act(async () => {
-      root.render(<ToastProvider><ScreenersHub activeEnv="PROD" userLogin="tester" initialTab="iv-history" /></ToastProvider>);
+      root.render(<ToastProvider><OptionsHub activeEnv="PROD" userLogin="tester" initialTab="iv-history" /></ToastProvider>);
     });
     expect(container.textContent).toContain("IV History");
   });
