@@ -59,6 +59,8 @@ import {
 import { AdminQueueWipePanel } from "./AdminQueueWipePanel";
 import { ServiceUserSection } from "./ServiceUserSection";
 import { ServiceTokensPanel } from "./ServiceTokensPanel";
+import { RoleGrantsPanel } from "./RoleGrantsPanel";
+import { fetchRoleGrants } from "./roleGrantsApi";
 import "./iaaaAdminPanel.css";
 
 type IaaaAdminTab = "overview" | "members" | "api" | "mcp" | "iaaa" | "correlations" | "queue";
@@ -82,6 +84,26 @@ export function IaaaAdminPanel() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notAdmin, setNotAdmin] = useState(false);
+  // #2688: a tenant-admin fails the platform-gated overview fetch
+  // but may still hold role-grant rights in their own tenant. When
+  // the overview gate refuses, one role-grants list probe decides
+  // whether the limited tenant-admin view below renders; the
+  // server scopes that list, so this probe grants nothing itself.
+  const [roleGrantsAllowed, setRoleGrantsAllowed] = useState(false);
+  useEffect(() => {
+    if (!notAdmin) return;
+    let cancelled = false;
+    fetchRoleGrants()
+      .then(() => {
+        if (!cancelled) setRoleGrantsAllowed(true);
+      })
+      .catch(() => {
+        /* stays in the not-an-admin state */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [notAdmin]);
   // Deep links (#2776): the IAAA tabs live in `?iaaaTab=` via the shared
   // hook (aliased to the old tab/setTab names, so the panel below and
   // the members lazy-load effect are untouched). `view` is taken by the
@@ -269,6 +291,21 @@ export function IaaaAdminPanel() {
 
   if (loading) return <Spinner />;
   if (notAdmin) {
+    // #2688 limited view: tenant-admins get the Role grants
+    // section only — never Overview data, Service tokens, or
+    // Service user state, which stay platform-gated server-side.
+    if (roleGrantsAllowed) {
+      return (
+        <div className="iaaa-admin-panel">
+          <p className="iaaa-admin-note">
+            You are a tenant admin, not a platform admin. Only role grants for your own
+            tenant are available here; the rest of IAAA Admin requires platform-admin.
+          </p>
+          <h4>Role grants</h4>
+          <RoleGrantsPanel />
+        </div>
+      );
+    }
     return (
       <EmptyState
         title="Not an IAAA admin"
@@ -390,6 +427,14 @@ export function IaaaAdminPanel() {
         they are platform state. */}
         <h4>Service tokens</h4>
         <ServiceTokensPanel />
+
+        {/* Issue #2688: human role grants live on Overview beside
+        the service-user and service-token sections, not a new tab
+        (tab indices unchanged) and not duplicated elsewhere: like
+        them, admin grants are platform state. Tenant-admins reach
+        this same section through the limited view above. */}
+        <h4>Role grants</h4>
+        <RoleGrantsPanel />
 
         <p className="iaaa-admin-note">
           Audit events are read-only. Pending access requests below can be
