@@ -217,6 +217,8 @@ import {
   type EmailSender,
 } from "../../services/lifecycleEmail";
 import { sendDueDigests } from "../../services/lifecycleDigestPass";
+import { createDigestContentProvider } from "../../services/digestContentProvider";
+import { readReports } from "../../data/createAuditReportPorts";
 import { digestDayKey } from "../../data/lifecyclePorts";
 import { getServiceUserLogin } from "../../security/serviceIdentity";
 import {
@@ -4112,9 +4114,11 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // a thrown pass is a 500 with NO marker (retry next tick;
   // per-user day guards make the retry idempotent). The day
   // marker is written only after a completed pass. The tick
-  // supplies no items, so scheduled passes skip-on-empty until
-  // a digest content provider lands; an operator/system caller
-  // may supply itemsByUser. No unsubscribe link is attached:
+  // supplies no itemsByUser, so scheduled sends use the
+  // digest content provider (#2981: tenant projection
+  // highlights); an operator/system caller may still supply
+  // itemsByUser, which wins per subscriber. A subscriber with
+  // no windowed reports honestly skips. No unsubscribe link is attached:
   // the scheduled path has no trustworthy public origin (the
   // tick is a cron event, not a user-facing request) — opt-out
   // remains via the preferences panel and the unsubscribe route.
@@ -4146,11 +4150,25 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
             : [];
         }
       }
+      // Issue #2981 (monetization Phase 2.18): the tick's
+      // itemsProvider. An operator/system caller may still supply
+      // itemsByUser (including an explicit empty override); when
+      // no override exists for a subscriber, the digest content
+      // provider reads that subscriber's tenant projection
+      // (agent_reports via readReports). The provider never
+      // invents content: no windowed reports → [] → the pass
+      // honestly skips that subscriber.
+      const digestContentProvider = createDigestContentProvider((tenantId) =>
+        readReports(ctx.env as { AGENT_DB?: unknown }, tenantId),
+      );
       const summary = await sendDueDigests({
         store: lifecycle,
         sender,
         tierResolver: (userId) => resolveEmailTier(userId),
-        itemsProvider: async (userId) => itemsByUser[userId] ?? [],
+        itemsProvider: async (userId, tenantId) =>
+          itemsByUser[userId] !== undefined
+            ? itemsByUser[userId]
+            : digestContentProvider(userId, tenantId),
       });
       await lifecycle.markDigestPassRun(day);
       try {
