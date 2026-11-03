@@ -89,7 +89,10 @@ import type { Env, StockScreenerFilter } from "../../types";
 import { UNIVERSES, type UniverseId } from "../../trading";
 import { createWorkflowPorts, workflowPortsUnavailableReason } from "../../workflows/createWorkflowPorts";
 import { workflowTenantId } from "../../workflows/screenerWorkflowRoutes";
-import { shardsForUniverse } from "../../workflows/screenExecutionBroker";
+import {
+  buildParentScreenCommand,
+  shardsForUniverse,
+} from "../../workflows/screenExecutionBroker";
 import {
   assertWorkflowJobCommand,
   workflowStatusUrl,
@@ -445,16 +448,16 @@ function buildScreenCommand(
   const jobId = `screener:chat:${req.universeId}:${startedAtIso}:${crypto.randomUUID().slice(0, 8)}`;
   const tenantId = workflowTenantId(ctx.env);
   const traceparent = ctx.traceparent?.();
-  const command: WorkflowJobCommand = {
+  // Issue #2914 (G7): the command comes from the broker's
+  // one builder — the literal lived here before, now shared.
+  // Issue #2908 (G1): the mesh trigger rides the command
+  // instead of collapsing to "manual" in provenance.
+  const command: WorkflowJobCommand = buildParentScreenCommand({
     jobId,
-    type: "run-screen",
     source: "mesh-door",
     trigger: "manual",
-    // Issue #2908 (G1): the mesh trigger rides the command
-    // instead of collapsing to "manual" in provenance.
     specTrigger: "mesh",
     userLogin: req.userLogin,
-    role: "parent",
     tenantId,
     shards,
     filters: req.filters as unknown as Record<string, unknown>,
@@ -464,7 +467,7 @@ function buildScreenCommand(
       ? { screenMode: req.screenMode, screenIntent: req.screenIntent }
       : {}),
     ...(traceparent ? { traceparent } : {}),
-  };
+  });
   return { command, jobId, tenantId, shards, startedAtIso };
 }
 
