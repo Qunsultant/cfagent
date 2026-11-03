@@ -18,6 +18,12 @@ Title convention + label (check one; title prefix and label must match):
 - [ ] `[Hotfix] - <title>` + `hotfix`: urgent production fix (emergency rules, gitops §18.2, still apply)
 - [ ] Task (no type prefix; `lane:<lane>` label still required)
 
+## Size
+<!-- Estimate the work, not the importance. Pick one. -->
+- [ ] Small — one focused change, one PR, no migration, no cross-surface coordination
+- [ ] Medium — several files or one migration, one PR, coordination with one other surface or lane
+- [ ] Large — multi-PR or multi-slice work, migrations, or cross-lane coordination; split into smaller issues when possible
+
 ## Problem
 
 ## Outcome

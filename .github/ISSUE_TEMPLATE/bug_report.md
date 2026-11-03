@@ -12,6 +12,12 @@ assignees: []
 ## Type
 - [x] `[Bug] - <title>` + `bug`
 
+## Size
+<!-- Estimate the work, not the importance. Pick one. -->
+- [ ] Small — one focused change, one PR, no migration, no cross-surface coordination
+- [ ] Medium — several files or one migration, one PR, coordination with one other surface or lane
+- [ ] Large — multi-PR or multi-slice work, migrations, or cross-lane coordination; split into smaller issues when possible
+
 ## Problem
 Observed behavior (what actually happens):
 Expected behavior (what should happen):
