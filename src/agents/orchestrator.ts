@@ -104,6 +104,8 @@ import type { GovernedHaltState } from "../data/governedHalt";
 import { ETradeWebhookService } from "../services/tradingWebhooks";
 import { deliverScreenerToSlackA2A } from "../services/screenerSlackDelivery";
 import { createFollowupDeliveryPort } from "../services/screenerFollowupDelivery";
+import { createSqlDeliverySuppressionStore } from "../data/deliveryClaimsStore";
+import { createDeliverySuppressor } from "../workflows/screenDeliverySuppression";
 import { ScheduledTasksService, type AutonomousOptionsAnalysisOptions, type AutonomousStrategyDiscoveryOptions } from "../services/scheduledTasks";
 // Issue #278: durable scheduled-run reports for the NextGenTP agent.
 // Issue #308: the single generate→store seam + canonical report bodies.
@@ -627,6 +629,7 @@ export class OrchestratorAgent extends PortThink {
         getOrm: () => this.getOrm(),
         getScreenerAgent: (userLogin) => this.getScreenerAgent(userLogin),
       }),
+      deliverySuppressor: createDeliverySuppressor(createSqlDeliverySuppressionStore(() => this.ensureTables())), // Issue #2913 (G6): durable suppression — one claims table shared by every context built here (lazy store).
       serviceMembershipStore: createKvMembershipStore(sessionStore(this.env)),
       notifyStuckRun: async (info) => {
         // Issue #2567: stuck-running alert via postSlackText (the #1819

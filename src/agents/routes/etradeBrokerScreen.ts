@@ -96,10 +96,26 @@ async function publishOrBridge(
     ? { ...(result as Record<string, unknown>), ...enrichment }
     : result;
   if (ctx.scheduleScreenerFollowups) {
-    await ctx.scheduleScreenerFollowups(
-      screenerOutcomeFromRunResult("stock", enriched as Record<string, unknown>, ctx.env.APP_BASE_URL),
-      userLogin,
-    );
+    const outcome = screenerOutcomeFromRunResult("stock", enriched as Record<string, unknown>, ctx.env.APP_BASE_URL);
+    // Issue #2913 (G6): stamp the stable deliveryId the legacy
+    // fallback already uses (`manual:<timestamp>:<universe>`)
+    // when the outcome has none, so a bridge delivery and a
+    // legacy-fallback delivery for one run share one
+    // (runId, destination) suppression key instead of two —
+    // and a resubmitted deliver job is matched across
+    // instances. Left unstamped when timestamp or universe
+    // is missing: the jobId keying then stands, unchanged.
+    // (Stamped here, not in screenerOutcomeFromRunResult: that
+    // builder also serves options + workflow callers, and this
+    // stock REST route must not change their key space.)
+    if (
+      !outcome.deliveryId &&
+      typeof (enriched as Record<string, unknown>).timestamp === "string" &&
+      typeof (enriched as Record<string, unknown>).universe === "string"
+    ) {
+      outcome.deliveryId = `manual:${(enriched as Record<string, unknown>).timestamp as string}:${(enriched as Record<string, unknown>).universe as string}`;
+    }
+    await ctx.scheduleScreenerFollowups(outcome, userLogin);
     return;
   }
   await publishManualScreenerRun(ctx.env, ctx.getOrm(), userLogin, enriched as any);
