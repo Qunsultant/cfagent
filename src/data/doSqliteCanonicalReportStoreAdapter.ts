@@ -163,7 +163,7 @@ export class DoSqliteCanonicalReportStore
   findStoredContent(id: string): CanonicalReportStoredContent | null {
     const rows = Array.from(
       this.sql.exec(
-        `SELECT title, source, summary, body, body_r2_key FROM ${TABLE} WHERE id = ? LIMIT 1`,
+        `SELECT title, source, summary, body, body_r2_key, user_login FROM ${TABLE} WHERE id = ? LIMIT 1`,
         id
       )
     ) as Array<Record<string, unknown>>;
@@ -175,6 +175,7 @@ export class DoSqliteCanonicalReportStore
       summary: typeof row.summary === "string" ? row.summary : "",
       body: typeof row.body === "string" ? row.body : "",
       bodyR2Key: typeof row.body_r2_key === "string" ? row.body_r2_key : null,
+      ...(typeof row.user_login === "string" ? { userLogin: row.user_login } : {}),
     };
   }
 
