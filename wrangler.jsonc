@@ -82,7 +82,7 @@
       { "name": "SCREENER_AGENT", "class_name": "ScreenerAgent" },
       // Issue #319 — ResearchAgent DO (autonomous options research)
       { "name": "RESEARCH_AGENT", "class_name": "ResearchAgent" },
-      // Issue #329 — sessions + E*TRADE credentials off KV (no daily read cap)
+      // Issue #329 — sessions + E*TRADE credentials off KV (Durable Objects SQLite limits DO apply: 5M rows read/day, 100k writes/day — see #1819; #2666 resilience keeps sign-in degraded, never down, on exhaustion)
       { "name": "SESSION_STORE", "class_name": "SessionStore" },
       // Issue #680 — ReportAssetAgent DO (single owner for Generate)
       { "name": "REPORT_ASSET_AGENT", "class_name": "ReportAssetAgent" },

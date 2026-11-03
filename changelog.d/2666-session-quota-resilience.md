@@ -1,0 +1,3 @@
+### Fixed
+
+- **Session-store quota resilience (#2666, #1819):** sign-in and core paths no longer hard-fail when the provider limit is hit. Durable Objects / D1 rows-limit errors are now classified (previously they fell through to a generic 500) and mapped to a typed, retryable 503 (`FAILURE_STORE_QUOTA_EXHAUSTED`); a wired session validation that hits a store limit serves a locally-valid cached session degraded instead of failing, and a session-store breaker suppresses doomed re-reads while the outage lasts. Fresh-read-miss still denies (no resurrection from cache), and an expired cached session never serves degraded.
