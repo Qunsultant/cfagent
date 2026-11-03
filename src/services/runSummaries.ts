@@ -117,6 +117,27 @@ export interface RunSummary {
    *  ("stock" / "options" / "goal" / "strategy"), when the store
    *  records one. Optional so pre-#2062 rows still typecheck. */
   runSource?: string | null;
+  /**
+   * Issue #2910 (G3): the child canonical run ids a parent
+   * row absorbs (`screener:<timestamp>` per market shard),
+   * carried so the merge below can drop the child rows and
+   * so detail views can link parent → shards. Null/absent
+   * on every non-parent row.
+   */
+  childRunIds?: string[] | null;
+  /**
+   * Issue #2910 (G3): the child canonical report ids a
+   * parent row absorbs, when the child doors returned them
+   * (the goal join — goal child rows do not key on
+   * timestamps). Null/absent on every non-parent row.
+   */
+  childReportIds?: string[] | null;
+}
+
+function strArrayOrNull(v: unknown): string[] | null {
+  if (!Array.isArray(v)) return null;
+  const ids = v.filter((x): x is string => typeof x === "string" && x.length > 0);
+  return ids.length > 0 ? ids : null;
 }
 
 function parseBody(body: unknown): Record<string, any> {
@@ -296,6 +317,11 @@ export function runSummaryFromReport(hit: ScheduledReportHit): RunSummary {
     discoveryRunId: kind === "discovery" ? canonicalDiscoveryRunId(hit.body) : null,
     source: hit.source,
     runSource: strOrNull(body?.runSource) ?? RUN_SOURCE_BY_KIND[kind] ?? null,
+    // Issue #2910 (G3): a parent canonical row carries its
+    // child linkage in the body; the merge below absorbs
+    // the child rows into this row.
+    childRunIds: strArrayOrNull(body?.childRunIds),
+    childReportIds: strArrayOrNull(body?.childReportIds),
   };
 }
 
@@ -442,6 +468,14 @@ export function mergeRunSummaries(lists: RunSummary[][], limit: number): RunSumm
   const scanTwins = new Map<string, RunSummary>();
   const screenerTwins = new Map<string, RunSummary>();
   const discoveryTwins = new Map<string, RunSummary>();
+  // Issue #2910 (G3): the child rows a parent canonical row
+  // absorbs, keyed by both joins — canonical run id
+  // (market shards) and canonical report id (goal shards).
+  // parentKeys guards the parent rows themselves: a parent
+  // is never absorbed by its own linkage.
+  const absorbedRunIds = new Set<string>();
+  const absorbedReportIds = new Set<string>();
+  const parentKeys = new Set<string>();
   for (const list of lists) {
     for (const row of list) {
       if (row.reportId === null) {
@@ -453,6 +487,11 @@ export function mergeRunSummaries(lists: RunSummary[][], limit: number): RunSumm
       if (row.kind === "options_scanner" && row.scanRunId) canonicalScanIds.add(row.scanRunId);
       if (row.kind === "screener") canonicalScreenerRunIds.add(row.runId);
       if (row.kind === "discovery" && row.discoveryRunId) canonicalDiscoveryIds.add(row.discoveryRunId);
+      if (row.childRunIds || row.childReportIds) {
+        parentKeys.add(`${row.kind}:${row.id}`);
+        for (const id of row.childRunIds ?? []) absorbedRunIds.add(id);
+        for (const id of row.childReportIds ?? []) absorbedReportIds.add(id);
+      }
     }
   }
   const seen = new Set<string>();
@@ -469,6 +508,17 @@ export function mergeRunSummaries(lists: RunSummary[][], limit: number): RunSumm
         continue; // the canonical twin wins
       }
       const key = `${row.kind}:${row.id}`;
+      // Issue #2910 (G3): a child row absorbed by a parent
+      // canonical row is detail, not a top-level row — the
+      // parent row carries the shard linkage, and the child
+      // rows stay in mas_reports, reachable by id. The
+      // parent row itself is exempt via parentKeys.
+      if (
+        !parentKeys.has(key) &&
+        (absorbedRunIds.has(row.runId) || absorbedReportIds.has(row.id))
+      ) {
+        continue; // the parent row wins; the shard row is its detail
+      }
       if (seen.has(key)) continue;
       seen.add(key);
       if (row.reportId !== null) {

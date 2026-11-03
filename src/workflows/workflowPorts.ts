@@ -584,13 +584,30 @@ export interface ShardOutcome {
   error?: string;
   /**
    * Issue #1737: set by the CHILD workflow, which owns store
-   * and deliver of its own full result. The parent never
-   * stores or delivers — it only collates these flags.
+   * and deliver of its own full result. The parent collates
+   * these flags (and, since #2910, stores one parent
+   * canonical row — it still never delivers: delivery stays
+   * with the children).
    */
   stored?: boolean;
   delivered?: boolean;
   storeError?: string;
   deliverError?: string;
+  /**
+   * Issue #2910 (G3): the child screen result's timestamp,
+   * carried so the parent can derive the child's canonical
+   * run id (`screener:<timestamp>`) for parent/child
+   * linkage. Market shards only: goal child rows key on
+   * `goal-screen:<taskId>`, not on a timestamp.
+   */
+  timestamp?: string;
+  /**
+   * Issue #2910 (G3): the child's canonical report id, when
+   * the child's store door returned one (the goal door
+   * does; the market door returns void). Carried for
+   * parent/child linkage, never for re-delivery.
+   */
+  reportId?: string;
 }
 
 /** One lifecycle transition on the job's journal. */
@@ -652,6 +669,63 @@ export interface WorkflowCollation {
   deliverErrors?: Record<string, string>;
   /** Top-level error when lifecycle is Failed. */
   error?: string;
+  /**
+   * Issue #2910 (G3): the child canonical run ids this
+   * parent run absorbs (`screener:<timestamp>` per market
+   * shard; empty for goal parents, whose child rows key on
+   * `goal-screen:<taskId>` and link by report id instead).
+   * The Runs merge drops rows with these run ids so one
+   * parent run is one top-level Docs row; the shard rows
+   * stay in mas_reports and stay reachable by id.
+   */
+  childRunIds?: string[];
+  /**
+   * Issue #2910 (G3): the child canonical report ids this
+   * parent run absorbs, when the child doors returned them.
+   * The Runs merge drops rows with these ids (the goal
+   * join, where run ids do not derive from timestamps).
+   */
+  childReportIds?: string[];
+  /**
+   * Issue #2910 (G3): the parent canonical row's own store
+   * outcome, set by runParentFlow's store-parent step when
+   * a parent store is configured. Absent when no parent
+   * store is wired (older fakes, unit deps without the
+   * seam): the collation still stands, it just has no
+   * parent row yet. A store error is recorded here, never
+   * fatal: the screen outcome stands.
+   */
+  parentReport?: { stored: boolean; reportId?: string; storeError?: string };
+}
+
+/**
+ * Issue #2910 (G3): the parent canonical row's input. The
+ * parent stores a SUMMARY + linkage row only — collation,
+ * per-format keys, partial qualification, child run/report
+ * ids — never bulk results, never fabricated opportunities:
+ * the children already stored their own full rows. The
+ * writer keys the row by generationId = jobId, so a
+ * re-execution under the same job id adopts the existing
+ * parent row (the shard generation-dedupe rule), never a
+ * second parent row.
+ */
+export interface ParentScreenReportInput {
+  jobId: string;
+  userLogin: string;
+  trigger: "manual" | "scheduled";
+  goalScreen: boolean;
+  collation: WorkflowCollation;
+  childRunIds: string[];
+  childReportIds: string[];
+  /** ISO timestamp for the parent row's created_at. */
+  createdAt: string;
+}
+
+/** Issue #2910 (G3): the parent canonical row's store outcome. */
+export interface ParentScreenReportOutcome {
+  stored: boolean;
+  reportId?: string;
+  storeError?: string;
 }
 
 /** Status URL for a job (existing jobs-history path; no new status route). */

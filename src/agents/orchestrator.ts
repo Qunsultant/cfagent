@@ -82,7 +82,7 @@ import { submitAsyncJob, recoverQueuedAsyncJobs, getAsyncJob, listAsyncJobs, exe
 import { submitChatTurn, awaitChatTurnSubmission, type DurableTurnContext, type SubmittedTurnHandle } from "./orchestrator/durableTurnSubmission";
 import type { ScreenerRunOutcome } from "../services/screenerFollowups";
 import { marketDateKey, readAutopilotStateRaw, getAutopilotState, writeAutopilotState, incrementAutopilotOrdersToday, fetchBrokerBalanceSnapshot, openNotionalForSymbol, evaluateAndRecordAutopilotVerdict, type AutopilotContext } from "./orchestrator/autopilot";
-import { readSettingRaw, writeSetting, getReportDispatchHitl, setReportDispatchHitl, createReportConfirmation, getReportConfirmation, decideReportConfirmation, storeResearchReportCanonicalAsync, confirmationDeliveryMeta, deliverStoredReportEmail, deliverStoredReportWebhook, persistScreenerReportCanonical, sendReportEmail, sendReportWebhook, type ReportDispatchContext } from "./orchestrator/reportDispatch";
+import { readSettingRaw, writeSetting, getReportDispatchHitl, setReportDispatchHitl, createReportConfirmation, getReportConfirmation, decideReportConfirmation, storeResearchReportCanonicalAsync, confirmationDeliveryMeta, deliverStoredReportEmail, deliverStoredReportWebhook, persistScreenerReportCanonical, persistParentScreenReportCanonical, sendReportEmail, sendReportWebhook, type ReportDispatchContext } from "./orchestrator/reportDispatch";
 import { extractMessageText, createTurnTools, deriveTurn, assembleGrounding, type ChatTurnHelpersContext } from "./orchestrator/chatTurnHelpers";
 import { createOpenaimpMcpFetch, ensureOpenaimpMcpConnection, chatNlqTurnGate, type EnsureOpenaimpMcpResult } from "./orchestrator/meshMcpClient";
 import { logChatActivity, enqueueHttpRequest, type HttpEntryContext } from "./orchestrator/httpEntry";
@@ -1735,6 +1735,9 @@ export class OrchestratorAgent extends PortThink {
   }): Promise<void> {
     return this.persistScreenerReportCanonical(result);
   }
+
+  /** #2910 (G3): door — owner rides on the input; id or null, never delivers. */
+  async recordWorkflowParentScreenReport(input: Parameters<typeof persistParentScreenReportCanonical>[1]): Promise<{ reportId: string } | null> { return persistParentScreenReportCanonical(this.reportDispatchContext(), input); }
 
   async deliverWorkflowScreenOutcome(
     outcome: ScreenerRunOutcome,
