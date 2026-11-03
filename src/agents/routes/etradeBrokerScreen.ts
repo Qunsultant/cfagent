@@ -263,8 +263,15 @@ export async function executeEtradeScreen(args: {
       })),
     });
   }
+  // Issue #2912 (G5): one persist + one deliver definition for the
+  // single-run path — the success site below and the runScreen-throw
+  // site share them, so a thrown failure persists-then-delivers
+  // exactly like a returned result, through the #2861 finalizer.
+  const persistCanonical = (r: Parameters<EtradeBrokerRouteContext["persistScreenerReportCanonical"]>[0]) =>
+    ctx.persistScreenerReportCanonical({ ...r, userLogin, criteria: spec.filters, ...specCanonicalFields(spec) });
+  const deliverResult = (r: unknown) => publishOrBridge(ctx, userLogin, r, delivery);
   // Issue #424: if runScreen throws (instead of returning a failed
-  // result), publish the failure notification before propagating.
+  // result), persist-then-deliver the failure before propagating.
   let result;
   try {
     result = await agent.runScreen({
@@ -288,12 +295,32 @@ export async function executeEtradeScreen(args: {
         { status: 429 }
       );
     }
-    await publishOrBridge(ctx, userLogin, {
-      success: false,
-      error,
+    // Issue #2912 (G5): the thrown failure is not a persistable run
+    // result as thrown, so fabricate the failed-run shape a returned
+    // failure carries (zero counts, empty sets, the thrown error) and
+    // run it through the same persist-then-deliver finalizer. The
+    // canonical store dedupes on generationId `screener:<timestamp>`,
+    // so persisting this result again never creates a second row.
+    // The throw still propagates: the route contract is unchanged,
+    // only the previously invisible run is now visible in Reports.
+    const failedResult = {
       timestamp: new Date().toISOString(),
-      universe: universe as any,
-    }, delivery);
+      trigger: "manual" as const,
+      universe,
+      sector: (validatedFilters as { sector?: string } | undefined)?.sector ?? "ALL",
+      success: false,
+      totalScanned: 0,
+      matchedCount: 0,
+      opportunities: [],
+      allStocks: [],
+      discoveryMessage: "",
+      error,
+    };
+    await persistThenDeliverAll({
+      results: [failedResult],
+      persist: persistCanonical,
+      deliver: deliverResult,
+    });
     throw screenErr;
   }
   ctx.audit("etrade.screened", "trading", {
@@ -309,9 +336,8 @@ export async function executeEtradeScreen(args: {
   // sharded path above; order unchanged here, now pinned.
   await persistThenDeliverAll({
     results: [result],
-    // Issue #2863: record the run's criteria with the canonical copy.
-    persist: (r) => ctx.persistScreenerReportCanonical({ ...r, userLogin, criteria: spec.filters, ...specCanonicalFields(spec) }),
-    deliver: (r) => publishOrBridge(ctx, userLogin, r, delivery),
+    persist: persistCanonical,
+    deliver: deliverResult,
   });
   if (!result.success) {
     return Response.json({ error: result.error || "E*TRADE unavailable" }, { status: 502 });
