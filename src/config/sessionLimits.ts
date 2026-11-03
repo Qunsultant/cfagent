@@ -43,6 +43,15 @@ export interface SessionLimits {
   publicOAuthPendingMaxAgeMs: number;
   /** Refresh a Public OAuth token this long before its real expiry (60s). */
   oauthExpirySkewMs: number;
+  /**
+   * #2840: maximum concurrent ACTIVE sessions per user (10).
+   * Not a TTL — #1749 owns the TTL bounds, which this key does
+   * not change. At the cap, a new login evicts the oldest
+   * active session (oldest-out); the eviction is audited and
+   * visible on the #2836 logged-in-users surface (the evicted
+   * session disappears from the user's session list).
+   */
+  maxConcurrentSessionsPerUser: number;
 }
 
 export const SESSION_LIMITS: SessionLimits = raw as SessionLimits;

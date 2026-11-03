@@ -113,7 +113,15 @@ describe("wiring (#1993)", () => {
     // delegate) and by the step-4e conformance suite.
     expect(agentSrc).toContain("this.screenRunLock().acquire(");
     expect(agentSrc).toContain("this.screenRunLock().release(");
-    expect(agentSrc).toContain("Screen already running for");
+    // #2840: the refusal message moved into
+    // src/services/screenInFlight.ts (formatScreenAlreadyRunning,
+    // which preserves the "Screen already running for
+    // <universe>" prefix verbatim); runScreen now throws the
+    // typed ScreenAlreadyRunningError carrying run id + status.
+    // The exact message shape is pinned in
+    // tests/sessions_runs_quota_2840.test.ts.
+    expect(agentSrc).toContain("new ScreenAlreadyRunningError(");
+    expect(agentSrc).toContain("screenInFlight");
     // The async-KV lock is gone: no screen_lock: key remains anywhere.
     expect(agentSrc).not.toContain("screen_lock:");
   });
