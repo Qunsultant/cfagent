@@ -305,6 +305,8 @@ To elevate the screening codebase to enterprise quality, the following patterns 
 
 ## 9. Compliance with 15-Factor App Methodology
 
+> **Scope note (#2860):** the table below describes the pre-existing screener capability as documented. It is not evidence for new stock-programme code (#2764 slices) — new code is audited factor by factor in the #2860 re-audit, and the hardcoded-COMPLIANT test (`tests/fifteen_factor_and_usability.test.ts`, which asserts its own conclusion) must not be cited as evidence for it. Do not quote this table as a compliance claim for programme code.
+
 The screening capability is evaluated against the 15-Factor App methodology for cloud-native SaaS systems:
 
 | Factor | Factor Description | Screener Compliance Status | Implementation & Architectural Details |
