@@ -50,6 +50,11 @@
 
 import { createAsyncJobPorts } from "../data/createAsyncJobPorts";
 import { assembleOptionsResultForServe } from "./unifiedReportPipeline";
+import {
+  RUNNER_STAGE_ORDER,
+  STAGE_RETRY_BUCKET,
+} from "../workflows/stageRunnerPorts";
+import type { StageName } from "../messaging/messagingPorts";
 import type {
   AsyncJobChannel,
   AsyncJobSubmission,
@@ -87,13 +92,26 @@ export interface ShardRow {
   parentJobId?: string;
 }
 
-export const PIPELINE_STAGE_ORDER: readonly PipelineStage[] = [
-  "feed",
-  "generate",
-  "store",
-  "serve",
-  "deliver",
-];
+/**
+ * The chain stage order is the stage-runner order (issue #2601 seam A):
+ * one order in the contract, projected here into the five stages that
+ * carry a mas_async_jobs row. gather has no chain row (it runs inside the
+ * analysis unit) and is the only contract stage the chain does not plan.
+ * The relative order of the five is unchanged from the legacy literal, and
+ * tests/stage_runner_seam_a_2601.test.ts pins that exact sequence.
+ */
+const CHAIN_STAGE_FOR_RUNNER_STAGE: Record<StageName, PipelineStage | null> = {
+  feed: "feed",
+  gather: null,
+  analysis: "generate",
+  store: "store",
+  serve: "serve",
+  deliver: "deliver",
+};
+
+export const PIPELINE_STAGE_ORDER: readonly PipelineStage[] = RUNNER_STAGE_ORDER
+  .map((stage) => CHAIN_STAGE_FOR_RUNNER_STAGE[stage])
+  .filter((stage): stage is PipelineStage => stage !== null);
 
 /**
  * Issue #1355, item 8: per-stage attempt caps are the existing
@@ -108,10 +126,10 @@ export const SHARD_RETRY_BUCKET: Record<
   "feed" | "generate" | "store" | "deliver",
   "acquisition" | "report" | "delivery"
 > = {
-  feed: "acquisition",
-  generate: "report",
-  store: "report",
-  deliver: "delivery",
+  feed: STAGE_RETRY_BUCKET.feed,
+  generate: STAGE_RETRY_BUCKET.analysis,
+  store: STAGE_RETRY_BUCKET.store,
+  deliver: STAGE_RETRY_BUCKET.deliver,
 };
 
 /** Staggered not-before time for a shard index inside a stage. */
