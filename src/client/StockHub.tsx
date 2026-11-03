@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePolling } from "./usePolling";
 import { useAutoRefresh } from "./autoRefresh";
 import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
@@ -14,21 +14,17 @@ import {
   StockCriteriaPanel,
   defaultStockCriteria,
   stockCriteriaToFilter,
-  stockFilterToCriteria,
   type StockCriteriaState,
 } from "./StockCriteriaPanel";
-import {
-  parseAppliedPatternParams,
-  patternQualificationLines,
-  type AppliedPattern,
-} from "./patternApplyHandoff";
 import { ScreenerPresetManager } from "./ScreenerPresetManager";
 import { CapabilityNavBar, CopilotTriggerButton, type CapabilityTabItem } from "./components/CapabilityNavBar";
 import { ScreenerResultsView, type ScreenerResultData } from "./ScreenerResultsView";
 import { RunDetailView, type RunDetailConfirmation } from "./RunDetailView";
 import { MorningDigest } from "./MorningDigest";
 import { MarketDataResearchHub, type User as ResearchUser } from "./MarketDataResearchHub";
-import { navigateToTab, subscribeToRouteChanges } from "./router";
+import { PatternsPanel } from "./PatternsPanel";
+import { PresetsPanel } from "./PresetsPanel";
+import { navigateToTab } from "./router";
 import type { TradeOrderContext } from "./trading/tradeOrderContext";
 import "./optionsResearch.css";
 
@@ -77,13 +73,15 @@ export function buildStockRunRequestBody(
   };
 }
 
-export type StockHubTab = "stocks" | "new-screen" | "run-screen" | "research";
+export type StockHubTab = "stocks" | "new-screen" | "run-screen" | "research" | "patterns" | "presets";
 
 export const STOCK_HUB_TABS: readonly StockHubTab[] = [
   "stocks",
   "new-screen",
   "run-screen",
   "research",
+  "patterns",
+  "presets",
 ] as const;
 
 export function isValidStockHubTab(tab: unknown): tab is StockHubTab {
@@ -230,40 +228,6 @@ export function StockHub({
   // Issue #1496 (#940-B): stock criteria panel state. All toggles default
   // off, so existing run behavior is unchanged until the user opts in.
   const [stockCriteria, setStockCriteria] = useState<StockCriteriaState>(defaultStockCriteria);
-  // Issue #2909 (G2): the pattern most recently applied from the
-  // Patterns tab, when its criteria are still intact. Any manual
-  // criteria edit (or a preset application) clears it, so a run
-  // is only ever a "pattern run" while its criteria are exactly
-  // the pattern's — an edited run is a hand-built run, and its
-  // spec carries no patternRef.
-  const [appliedPattern, setAppliedPattern] = useState<AppliedPattern | null>(null);
-  const appliedSearchRef = useRef<string | null>(null);
-  const handleCriteriaChange = useCallback((next: StockCriteriaState) => {
-    setStockCriteria(next);
-    setAppliedPattern(null);
-  }, []);
-  // Issue #2909 (G2): consume the Apply handoff on every route
-  // change (the hub is retained across tab switches, so a
-  // mount-only effect would miss a later Apply). A search string
-  // already consumed is never re-applied, so user edits after
-  // Apply are never overwritten by a stale handoff.
-  useEffect(() => {
-    const applyFromSearch = () => {
-      if (typeof window === "undefined") return;
-      const search = window.location.search;
-      if (appliedSearchRef.current === search) return;
-      const parsed = parseAppliedPatternParams(search);
-      if (!parsed) return;
-      appliedSearchRef.current = search;
-      setStockCriteria(stockFilterToCriteria(parsed.filter));
-      setAppliedPattern(parsed);
-    };
-    // The navigation that carries the handoff may predate this
-    // mount (the Patterns hub navigates before StockHub mounts),
-    // so consume once on mount as well as on later changes.
-    applyFromSearch();
-    return subscribeToRouteChanges(applyFromSearch);
-  }, []);
   // Issue #2545: delivery/report selection for the one-shot run — the
   // scheduled stock screen's delivery defaults (Slack push on, PDF
   // report attached), so the form opens at scheduled-run parity.
@@ -397,22 +361,6 @@ export function StockHub({
         webhookUrl: deliveryWebhookUrl,
         generatePdf: deliveryGeneratePdf,
       });
-      // Issue #2909 (G2): a run with intact applied-pattern
-      // criteria pins the pattern at run creation — the server
-      // stamps patternRef onto the spec and the canonical body,
-      // and replay shows it. Unmapped guardrails ride as a run
-      // qualification, never as filter fields they are not.
-      // An edited criteria set clears appliedPattern above, so
-      // no patternRef is sent for a hand-built run.
-      if (appliedPattern) {
-        requestBody.patternRef = {
-          patternId: appliedPattern.patternId,
-          version: appliedPattern.version,
-        };
-        if (appliedPattern.unmappedGuardrails.length > 0) {
-          requestBody.patternQualifications = patternQualificationLines(appliedPattern.unmappedGuardrails);
-        }
-      }
 
       const response = await fetch(endpoint, {
         method: "POST",
@@ -560,6 +508,28 @@ export function StockHub({
         description: "Zero-credential Yahoo Finance and Alpaca dual feed, fundamental peer comparison.",
       },
     },
+    {
+      // Issue #2954: Patterns + Presets move here from ScreenersHub
+      // and exist nowhere else.
+      id: "patterns",
+      label: "Patterns",
+      icon: "🧩",
+      tooltip: {
+        eyebrow: "STOCK PATTERN CATALOG",
+        title: "Patterns",
+        description: "Stock market setup signatures from the setup catalog — read-only, apply one to a new screen.",
+      },
+    },
+    {
+      id: "presets",
+      label: "Presets",
+      icon: "💾",
+      tooltip: {
+        eyebrow: "PRESET CATALOG",
+        title: "Presets",
+        description: "Your saved screening configurations, plus proposed starter presets to copy to My Presets.",
+      },
+    },
   ];
 
   return (
@@ -572,20 +542,6 @@ export function StockHub({
         rightContent={
           <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", fontSize: "var(--font-size-body-sm)", color: "var(--color-text-muted)" }}>
             <CopilotTriggerButton label="✨ Ask Copilot" />
-            {/* Issue #2438: the header shows the selected run's identity
-                or nothing — never manual-run leftovers ("Last scan" /
-                "N matched" described a manual run the user may never
-                have made, above autonomous content). */}
-            {hubTab === "stocks" && selectedAutoRun && (
-              <span>
-                Viewing:{" "}
-                <strong style={{ color: "var(--color-text-primary)" }}>
-                  {(selectedAutoRun.universe || "nasdaq100").toUpperCase()} ·{" "}
-                  {new Date(selectedAutoRun.timestamp).toLocaleString()} ·{" "}
-                  {SCREEN_RUN_STATUS_LABELS[screenRunStatus(selectedAutoRun)]}
-                </strong>
-              </span>
-            )}
           </div>
         }
       />
@@ -830,22 +786,6 @@ export function StockHub({
             <p style={{ fontSize: "var(--font-size-body)", color: "var(--color-text-muted)", margin: "0 0 0.75rem" }}>
               Provider health: see the <a href="/?tab=platform-admin&view=data-providers">provider dashboard</a> in Platform Admin.
             </p>
-            {appliedPattern && (
-              <Notice tone={appliedPattern.unmappedGuardrails.length > 0 ? "warning" : "success"} density="compact">
-                Pattern {appliedPattern.patternId} (v{appliedPattern.version}) applied — the criteria below carry its filter.
-                {appliedPattern.unmappedGuardrails.length > 0 && (
-                  <>
-                    {" "}Qualified run: this pattern's guardrails below are NOT enforced by this screen and will be recorded
-                    as a run qualification, never silently dropped:
-                    <ul style={{ marginTop: "var(--space-1)", paddingLeft: "var(--space-4)" }}>
-                      {patternQualificationLines(appliedPattern.unmappedGuardrails).map((line) => (
-                        <li key={line}>{line}</li>
-                      ))}
-                    </ul>
-                  </>
-                )}
-              </Notice>
-            )}
             <form className="options-request-form screeners-filter-form" onSubmit={(event) => void runScreen(event)}>
               <Select label="Data provider / API" value={providerId} onChange={(event) => setProviderId(event.target.value)}>
                 {providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.label}</option>)}
@@ -916,11 +856,11 @@ export function StockHub({
                   assetClass="stocks"
                   userLogin={userLogin}
                   currentFilter={stockCriteriaToFilter(stockCriteria)}
-                  onApplyPreset={handleCriteriaChange}
+                  onApplyPreset={setStockCriteria}
                 />
                 <StockCriteriaPanel
                   criteria={stockCriteria}
-                  onChange={handleCriteriaChange}
+                  onChange={setStockCriteria}
                   lastSentFilters={lastSentStockFilters}
                 />
               </div>
@@ -1011,6 +951,39 @@ export function StockHub({
             user={user}
             onSendPrompt={onSendPrompt}
             onTradeSymbol={() => navigateToTab("order")}
+          />
+        </div>
+      )}
+
+      {/* 4. Patterns Panel (Issue #2954: moved here from ScreenersHub). */}
+      {visitedTabs.has("patterns") && (
+        <div
+          role="tabpanel"
+          id="screener-tabpanel-patterns"
+          aria-labelledby="cap-tab-patterns"
+          hidden={hubTab !== "patterns"}
+          style={hubTab !== "patterns" ? { display: "none" } : undefined}
+        >
+          <PatternsPanel
+            onApplyPattern={() => handleTabChange("new-screen")}
+          />
+        </div>
+      )}
+
+      {/* 5. Presets Panel (Issue #2954: moved here from ScreenersHub). */}
+      {visitedTabs.has("presets") && (
+        <div
+          role="tabpanel"
+          id="screener-tabpanel-presets"
+          aria-labelledby="cap-tab-presets"
+          hidden={hubTab !== "presets"}
+          style={hubTab !== "presets" ? { display: "none" } : undefined}
+        >
+          <PresetsPanel
+            userLogin={userLogin}
+            currentFilter={{}}
+            onApplyPreset={() => handleTabChange("new-screen")}
+            onNavigateNewScreen={() => handleTabChange("new-screen")}
           />
         </div>
       )}
