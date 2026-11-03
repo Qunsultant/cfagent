@@ -1026,6 +1026,17 @@
         "badgeType": "neutral",
         "description": "Payment assurance"
       }
+    ],
+    "order": [
+      {
+        "id": "options-order",
+        "label": "Options order",
+        "shortLabel": "Options",
+        "icon": "Options",
+        "badge": "Options",
+        "badgeType": "pro",
+        "description": "Manual options order ticket \u2014 build a multi-leg strategy with broker preview and human approval"
+      }
     ]
   },
   "deepLinks": {
@@ -1157,6 +1168,12 @@
     "planned:bonds": {
       "tab": "assets-hub",
       "view": "bonds"
+    },
+    "order:options-order": {
+      "tab": "order",
+      "params": {
+        "assetClass": "options"
+      }
     }
   },
   "deepLinkSurfaces": [

@@ -4,6 +4,7 @@ import { apiFetch as fetch } from "./apiFetch";
 import { getDisplayUserDid } from "../agents/did";
 import { Card, Badge, TextInput, Button, EmptyState, Select, Spinner, Table, Modal, Notice, PageShell, FieldShell, useToast } from "./components/ui";
 import { getRoute } from "./routes";
+import { parseTabFromSearch, subscribeToRouteChanges } from "./router";
 import {
   ETradeQuote,
   ScreenedStockItem,
@@ -1100,6 +1101,37 @@ export function ETradeTradingHub({
     onSelectSubTab?.("order");
   };
 
+  // Issue #3038: the Options order sub-menu lands on
+  // ?tab=order&assetClass=options. Seed a manual options ticket
+  // through the existing no-legs path (one blank BUY CALL leg),
+  // then consume the param (replaceState, no event) so it acts as
+  // a one-shot trigger: every sub-menu click opens a fresh manual
+  // ticket, while the parent Fast Order Ticket entry (no param)
+  // never touches the ticket — a strategy or in-progress ticket
+  // survives it, and the param cannot linger into later tab
+  // navigations. Seeding changes no tab, so it cannot loop.
+  useEffect(() => {
+    const seedManualOptionsOrder = () => {
+      if (typeof window === "undefined") return;
+      if (parseTabFromSearch(window.location.search) !== "order") return;
+      if (new URLSearchParams(window.location.search).get("assetClass") !== "options") return;
+      handleTradeOrder({
+        assetClass: "options",
+        symbol: "",
+        action: "BUY",
+        quantity: 1,
+        label: "Options Order Ticket",
+        legs: [],
+      });
+      const params = new URLSearchParams(window.location.search);
+      params.delete("assetClass");
+      const s = params.toString();
+      window.history.replaceState(null, "", `${window.location.pathname}${s ? `?${s}` : ""}${window.location.hash}`);
+    };
+    seedManualOptionsOrder();
+    return subscribeToRouteChanges(seedManualOptionsOrder);
+  }, [effectiveSubTab]);
+
   const updateOptionLeg = (index: number, patch: Partial<NonNullable<TradeOrderContext["optionLegs"]>[number]>) => {
     setOrderContext((current) => {
       if (!current?.optionLegs) return current;
@@ -1797,10 +1829,6 @@ export function ETradeTradingHub({
       {/* SUBTAB 2: ORDER TICKET & HITL PREVIEW */}
       {effectiveSubTab === "order" && (
         <div className="trading-section order-ticket-section">
-          {/* Issue #1327: approvals queue above the ticket — pending proposals first. */}
-          <div style={{ marginBottom: "1rem" }}>
-            <TradingApprovalsQueue />
-          </div>
           <div className="order-ticket-layout">
             {/* Left: Interactive Order Ticket Form */}
             <div className="order-form-card">
@@ -1892,11 +1920,18 @@ export function ETradeTradingHub({
                         className="ticker-input"
                         placeholder="e.g. NVDA, AAPL"
                         value={orderSymbol}
-                        readOnly={orderAssetClass === "options"}
+                        // Issue #3038: the symbol stays read-only only
+                        // for a strategy ticket (a strategy set its
+                        // underlying); a manual options ticket seeded
+                        // from the Options order sub-menu has no
+                        // strategy symbol yet, so the underlying is
+                        // editable — and typing it keeps the seeded
+                        // legs (context clears on equity only).
+                        readOnly={orderAssetClass === "options" && !!orderContext?.symbol}
                         onChange={(e) => {
                           const s = e.target.value.toUpperCase();
                           setOrderSymbol(s);
-                          setOrderContext(null);
+                          if (orderAssetClass !== "options") setOrderContext(null);
                           setActiveDraft(null);
                           setLastExecutionResult(null);
                         }}
@@ -2301,6 +2336,12 @@ export function ETradeTradingHub({
                 </div>
               </div>
             </div>
+          </div>
+          {/* Issue #3038: approvals queue below the ticket — the ticket
+              first, pending proposals at the bottom of the order page.
+              (Supersedes the #1327 above-the-ticket placement.) */}
+          <div style={{ marginTop: "1rem" }}>
+            <TradingApprovalsQueue />
           </div>
         </div>
       )}
