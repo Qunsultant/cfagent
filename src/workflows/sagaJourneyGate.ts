@@ -58,6 +58,7 @@
 
 import { SHARED_ORCHESTRATOR_INSTANCE } from "../security/serviceIdentity";
 import { sagaCompensationDisclosure } from "./sagaCompensation";
+import { renderChannelText } from "../outcomes/outcomeAspects";
 
 /** Decision surfaces (ruling Q1). Email is notification only. */
 export type JourneySurface = "slack" | "panel" | "chat";
@@ -135,9 +136,13 @@ export function buildSlackJourneyPrompt(prompt: JourneyGatePrompt): {
   text: string;
   blocks: Array<Record<string, unknown>>;
 } {
-  const text =
-    `${prompt.copy.title} — run ${prompt.runRequestId} (${prompt.family}). ` +
-    `${prompt.copy.body} ${prompt.copy.compensationLine}`;
+  const text = renderChannelText("saga_journey_prompt", "slack", {
+    title: prompt.copy.title,
+    runRequestId: prompt.runRequestId,
+    family: prompt.family,
+    body: prompt.copy.body,
+    compensationLine: prompt.copy.compensationLine,
+  }, "legacy_saga_journey_prompt");
   return {
     text,
     blocks: [

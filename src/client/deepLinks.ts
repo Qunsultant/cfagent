@@ -3,8 +3,8 @@
  *
  * Follows the externalized-menu idiom (#2529 navConfig.ts, #2624
  * platformAdminConfig.ts): navigation is DATA, components stay layout-only.
- * To add or change a link, edit DEEP_LINK_OVERRIDES below — not the nav
- * components. Nodes without an override resolve by rule:
+ * To add or change a link, edit nav-config.json (issue #2977) — not
+ * the nav components. Nodes without an override resolve by rule:
  * - `platform-admin:<section>` ids → ?tab=platform-admin&view=<section>
  *   (same destination as today's `?tab=platform-admin:<section>` parse);
  * - every other id → ?tab=<id>, with unknown ids falling back to autopilot
@@ -23,9 +23,7 @@ import {
 } from "./navConfig";
 import { navigateToTab } from "./router";
 import { resolveRouteId, type RouteId } from "./routes";
-import { SCREENER_HUB_TABS } from "./ScreenersHub";
-import { STOCK_HUB_TABS } from "./StockHub";
-import { OPTIONS_HUB_TABS } from "./OptionsHub";
+import navConfigData from "./nav-config.json";
 
 export type DeepLink =
   | { tab: RouteId; view?: string; params?: Record<string, string> }
@@ -37,66 +35,8 @@ export type DeepLink =
  * and every entry here documents a real behavioral special case (today's
  * hardcoded branches in LeftNavBar.handleItemClick/handleSubItemClick).
  */
-export const DEEP_LINK_OVERRIDES: Record<string, DeepLink> = {
-  // Top-level specials.
-  // Issue #2970: Goal Screen's own page — the Intelligence menu item
-  // links here now; the hub tab stays until #2971 (its keyed
-  // assets-hub:goal-screen override below still lands on the hub).
-  "goal-screen": { tab: "goal-screen" },
-  sandbox: { href: "/checkout/sandbox", newTab: true },
-  // Bare sandbox-checkout id (NavigationMenu path) shares the sub-item's
-  // link; the resolver falls back to the bare id when no parent:key entry
-  // exists, so both paths resolve identically.
-  "sandbox-checkout": { href: "/checkout/sandbox", newTab: true },
-  // Stock Hub views: sub-items that live under ?tab=stock-hub.
-  "stock-hub:new-screen": { tab: "stock-hub", view: "new-screen" },
-  "stock-hub:screeners": { tab: "stock-hub", view: "stocks" },
-  "stock-hub:research": { tab: "stock-hub", view: "research" },
-  "stock-hub:patterns": { tab: "stock-hub", view: "patterns" },
-  "stock-hub:presets": { tab: "stock-hub", view: "presets" },
-  // Assets Hub views: sub-items that live under ?tab=assets-hub.
-  "assets-hub:forex": { tab: "assets-hub", view: "forex" },
-  "assets-hub:futures": { tab: "assets-hub", view: "futures" },
-  "assets-hub:commodities": { tab: "assets-hub", view: "commodities" },
-  "assets-hub:bonds": { tab: "assets-hub", view: "bonds" },
-  "assets-hub:goal-screen": { tab: "assets-hub", view: "goal-screen" },
-  "assets-hub:reports": { tab: "assets-hub", view: "reports" },
-  "assets-hub:schedules": { tab: "assets-hub", view: "schedules" },
-  "assets-hub:review": { tab: "assets-hub", view: "review" },
-  "assets-hub:track-record": { tab: "assets-hub", view: "track-record" },
-  // Options copy hub (issue #2954): the options-screener subs link to
-  // the copy hub's tabs. Discovery and Strategy Panel share the
-  // strategy-discovery tab and differ by the discoveryView param
-  // (Discovery Scanner vs Builder / Payoff Analyzer).
-  "options-screener:strategy-scanner": { tab: "options", view: "strategy-scanner" },
-  "options-screener:options-runs": { tab: "options", view: "options-runs" },
-  "options-screener:discovery": { tab: "options", view: "strategy-discovery", params: { discoveryView: "discovery" } },
-  "options-screener:strategy-panel": { tab: "options", view: "strategy-discovery", params: { discoveryView: "builder" } },
-  "options-screener:contracts-screener": { tab: "options", view: "contracts-screener" },
-  "options-screener:custom-thesis": { tab: "options", view: "custom-thesis" },
-  "options-screener:nlq-options": { tab: "options", view: "nlq-options" },
-  "options-screener:ai-strategy-ideas": { tab: "options", view: "ai-strategy-ideas" },
-  "options-screener:scheduled-screening": { tab: "options", view: "scheduled-screening" },
-  "options-screener:iv-history": { tab: "options", view: "iv-history" },
-  "options-screener:options-flows": { tab: "options", view: "options-flows" },
-  // Best Trade keeps its page, as it does today: the legacy research
-  // param lands on the copy hub's custom-thesis tab via the hub's
-  // legacy mapping.
-  "options-screener:best-trade": { tab: "options", params: { research: "best-trade" } },
-  // Issue #2970: Review and Track Record's own pages — the Workflow
-  // Runs submenu items link here now; the hub tabs stay until #2971
-  // (their keyed assets-hub:* overrides below still land on the hub).
-  "workflow-runs:review": { tab: "review" },
-  "workflow-runs:track-record": { tab: "track-record" },
-  // Planned menu (issue #2783): subs link to their hub views. The
-  // parent links to its first sub; the parent itself renders as a
-  // toggle-only button in the sidebar, never as a link.
-  planned: { tab: "assets-hub", view: "forex" },
-  "planned:forex": { tab: "assets-hub", view: "forex" },
-  "planned:futures": { tab: "assets-hub", view: "futures" },
-  "planned:commodities": { tab: "assets-hub", view: "commodities" },
-  "planned:bonds": { tab: "assets-hub", view: "bonds" },
-};
+export const DEEP_LINK_OVERRIDES: Record<string, DeepLink> =
+  navConfigData.deepLinks as unknown as Record<string, DeepLink>;
 
 /** Catalog key for a nav node: bare id for top-level items, parent:id for subs. */
 export function navNodeKey(parentId: string | null, id: string): string {
@@ -218,83 +158,8 @@ export interface SurfaceTabDef {
  * The modal surface has no fixed page: its href is built with the host
  * page at link time (see surfaceTabHref).
  */
-export const SURFACE_TAB_DEFS: SurfaceTabDef[] = [
-  { surface: "screeners-hub", page: "screeners", param: "view", values: SCREENER_HUB_TABS },
-  { surface: "stock-hub", page: "stock-hub", param: "view", values: STOCK_HUB_TABS },
-  {
-    surface: "options-hub",
-    page: "options",
-    param: "view",
-    values: OPTIONS_HUB_TABS,
-  },
-  {
-    surface: "platform-admin",
-    page: "platform-admin",
-    param: "view",
-    values: [
-      "ads",
-      "background-tasks",
-      "scheduled-goals",
-      "provenance",
-      "api-keys",
-      "data-providers",
-      "iaaa-admin",
-      "admin-access",
-    ],
-  },
-  {
-    surface: "payments",
-    page: "payments",
-    param: "view",
-    values: ["create", "gateways", "ledger", "stats", "wallet"],
-  },
-  {
-    surface: "social",
-    page: "social",
-    param: "view",
-    values: ["approvals", "brief", "goal", "posts", "tokens"],
-  },
-  { surface: "ads", page: "ads", param: "view", values: ["offers", "submit"] },
-  {
-    surface: "referrals",
-    page: "referrals",
-    param: "view",
-    values: ["activity", "community", "links", "share"],
-  },
-  {
-    surface: "revenue",
-    page: "revenue",
-    param: "view",
-    values: ["ads", "categories", "metrics", "placements", "schemas"],
-  },
-  {
-    surface: "workflows",
-    page: "workflows",
-    param: "view",
-    values: ["faq", "workflows", "decisioning", "matrix", "improvements"],
-  },
-  { surface: "checkout", page: "checkout", param: "checkoutTab", values: ["pay", "subscriptions"] },
-  {
-    surface: "iaaa-admin",
-    page: "platform-admin",
-    pageView: "iaaa-admin",
-    param: "iaaaTab",
-    values: ["overview", "members", "api", "mcp", "iaaa", "correlations", "queue"],
-  },
-  {
-    surface: "reports-panel",
-    page: "screeners",
-    pageView: "reports",
-    param: "reportsTab",
-    values: ["reports", "ideas", "track"],
-  },
-  {
-    surface: "risk-analysis",
-    page: null,
-    param: "riskTab",
-    values: ["anatomy", "playbook", "scenarios", "ai"],
-  },
-];
+export const SURFACE_TAB_DEFS: SurfaceTabDef[] =
+  navConfigData.deepLinkSurfaces as unknown as SurfaceTabDef[];
 
 export interface SurfaceTabEntry {
   surface: string;
