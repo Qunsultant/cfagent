@@ -507,6 +507,20 @@ function RunDetail({ run }: { run: WorkflowRun }) {
         </Notice>
       )}
 
+      {/* Issue #3039: what the contract recorded about fan-out and resume —
+          absent renders nothing, never an invented "no cap" claim. */}
+      {run.fanoutCapReason && (
+        <Notice tone="info" density="compact" variant="strip" title="Fan-out capped">
+          {run.fanoutCapReason}
+        </Notice>
+      )}
+      {run.resumedSkippedUnits.length > 0 && (
+        <Notice tone="neutral" density="compact" variant="strip" title="Resumed run">
+          Skipped {run.resumedSkippedUnits.length} unit(s) already recorded as complete:{" "}
+          {run.resumedSkippedUnits.join(", ")}
+        </Notice>
+      )}
+
       <dl className="workflow-runs-facts">
         <div className="workflow-runs-fact">
           <dt>Trigger</dt>

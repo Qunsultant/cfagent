@@ -116,6 +116,14 @@ export interface WorkflowRun {
   deliveryStates: Record<string, string>;
   /** The run's first coded error, when any stage or the outcome recorded one. */
   error: string | null;
+  /**
+   * Issue #3039: the collation's named cap reason, when a fan-out round
+   * deferred a tail (#3028 records it; the tail still ran). Null when the
+   * run was not capped — absent is the normal case, never an omission.
+   */
+  fanoutCapReason: string | null;
+  /** Issue #3039: units a resumed run skipped because they were already complete. */
+  resumedSkippedUnits: string[];
 }
 
 /** The columns of mas_async_jobs this model reads (payload included). */
@@ -823,6 +831,21 @@ export function runFromJobs(
     : recordedStageStatus;
   const firstError =
     stages.map((s) => s.error).find((e) => Boolean(e)) ?? str(outcome?.codedError) ?? null;
+  // Issue #3039: the parent flow writes its collation into the main row's
+  // result as `{ shardJobIds, result: <collation> }`. Read the two fields
+  // the contract records; absent or malformed degrades to "not recorded".
+  const mainResult = parseObject(main.result_json);
+  const collation =
+    mainResult && typeof mainResult.result === "object" && mainResult.result !== null
+      ? (mainResult.result as Record<string, unknown>)
+      : null;
+  const fanoutCapReason =
+    typeof collation?.fanoutCapReason === "string" && collation.fanoutCapReason
+      ? collation.fanoutCapReason
+      : null;
+  const resumedSkippedUnits = Array.isArray(collation?.resumedSkippedUnits)
+    ? collation.resumedSkippedUnits.filter((v): v is string => typeof v === "string")
+    : [];
 
   return {
     id: str(jobs[0]?.chain_id) ?? main.job_id,
@@ -847,6 +870,8 @@ export function runFromJobs(
     artifacts,
     deliveryStates: outcome?.deliveryStates ?? {},
     error: firstError,
+    fanoutCapReason,
+    resumedSkippedUnits,
   };
 }
 
@@ -994,6 +1019,10 @@ export function runFromOutcome(
     artifacts: artifactsForOutcome(outcome),
     deliveryStates: outcome.deliveryStates ?? {},
     error: outcome.codedError ?? feedError,
+    // Issue #3039: an outcome row is not a workflow collation, so neither
+    // field is recorded there — absent, never invented.
+    fanoutCapReason: null,
+    resumedSkippedUnits: [],
   };
 }
 
@@ -1163,6 +1192,9 @@ export function runFromSagaChain(input: SagaChainRunInput): WorkflowRun | null {
     artifacts: [],
     deliveryStates: {},
     error: firstError ?? (ended && !ended.startsWith("SUCCESS_") ? ended : null),
+    // Issue #3039: a saga run is not a workflow collation.
+    fanoutCapReason: null,
+    resumedSkippedUnits: [],
   };
 }
 
