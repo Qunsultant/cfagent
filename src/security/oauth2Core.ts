@@ -60,6 +60,14 @@ export interface OAuth2TokenSet {
   refreshToken?: string;
   /** Absolute expiry (ms epoch) when the response carried expires_in. */
   expiresAt?: number;
+  /**
+   * #2686 — ID token when the grant carried one (Apple's profile
+   * source: Apple has no userinfo endpoint). Preserved verbatim;
+   * callers that use it decode the payload (see oidcProvider.ts
+   * for the trust model — the token comes from the confidential
+   * exchange over TLS, never from client input).
+   */
+  idToken?: string;
 }
 
 export class OAuth2Error extends Error {
@@ -255,6 +263,8 @@ interface TokenResponseBody {
   access_token?: string;
   refresh_token?: string;
   expires_in?: number | string;
+  /** #2686 — carried through to OAuth2TokenSet.idToken when present. */
+  id_token?: string;
   error?: string;
   error_description?: string;
 }
@@ -305,6 +315,7 @@ function parseTokenResponse(body: TokenResponseBody): OAuth2TokenSet {
       typeof expiresIn === "number" && Number.isFinite(expiresIn)
         ? Date.now() + expiresIn * 1000
         : undefined,
+    idToken: typeof body.id_token === "string" && body.id_token !== "" ? body.id_token : undefined,
   };
 }
 
