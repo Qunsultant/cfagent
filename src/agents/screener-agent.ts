@@ -29,6 +29,10 @@ import { DatabaseORM } from "../orm";
 import { ETradeService } from "../services/etrade";
 import { createScreenRunLockPort } from "../data/createScreenRunLockPorts";
 import type { ScreenRunLockPort } from "../data/screenRunLockPorts";
+import {
+  ScreenAlreadyRunningError,
+  screenInFlightFromProbe,
+} from "../services/screenInFlight";
 import { defaultBreakerRegistry } from "../breakers/createBreakerPorts";
 import {
   applyPortfolioContextToOpportunities,
@@ -650,9 +654,17 @@ export class ScreenerAgent extends PortThink {
   async isScreenRunning(
     universe: string,
     userLogin?: string,
-  ): Promise<{ running: boolean; startedAt: number | null }> {
+  ): Promise<{ running: boolean; startedAt: number | null; runId: string | null; status: "running" | "idle" }> {
     const login = userLogin ?? (await this.userLogin());
-    return this.screenRunLock().isRunning(login, universe || "nasdaq100");
+    const universeKey = universe || "nasdaq100";
+    // #2840: the probe now also names the in-flight run (id +
+    // status) so a second session can be told what it is waiting
+    // on; `running`/`startedAt` are unchanged for existing gates.
+    return screenInFlightFromProbe(
+      this.screenRunLock().isRunning(login, universeKey),
+      login,
+      universeKey,
+    );
   }
 
   /**
@@ -706,8 +718,10 @@ export class ScreenerAgent extends PortThink {
     const lockUniverse = req.universe || "nasdaq100";
     const lock = this.screenRunLock().acquire(lockLogin, lockUniverse);
     if (!lock.acquired) {
-      const age = lock.startedAt ? Math.round((Date.now() - lock.startedAt) / 1000) : 0;
-      const err = new Error(`Screen already running for ${lockUniverse} (started ${age}s ago). Please wait for it to complete.`);
+      // #2840: the refusal now names the in-flight run (id +
+      // status) for the second submitter; the historical message
+      // prefix is preserved so the #832 routes still match.
+      const err = new ScreenAlreadyRunningError(lockLogin, lockUniverse, lock.startedAt, Date.now());
       // Issue #2868: the lock refusal is a classified, logged
       // failure (retryable) — the throw itself is unchanged.
       logScreenRunEvent({

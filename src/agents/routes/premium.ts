@@ -69,6 +69,7 @@ import { createSubscriptionAdapter } from "../../data/createSubscriptionPorts";
 import type { StoreTier } from "../../data/commercialPorts";
 import { resolveEffectiveTier } from "../../data/subscriptionPorts";
 import type { MeteredGateOptions } from "../../services/meteredPaymentGate";
+import { screenAlreadyRunningDetails } from "../../services/screenInFlight";
 
 /** The subset of OrchestratorAgent surface the premium handlers need. */
 export interface PremiumRouteContext {
@@ -614,7 +615,10 @@ export async function handlePremiumRoutes(
         } catch (screenErr) {
           const error = screenErr instanceof Error ? screenErr.message : String(screenErr);
           if (error.includes("already running")) {
-            return { success: false, service: tier.name, receipt, error: "Screen already running; retry shortly.", retryable: true };
+            // #2840: name the in-flight run (id + status) for the
+            // second submitter; the retryable shape is unchanged.
+            const details = screenAlreadyRunningDetails(screenErr);
+            return { success: false, service: tier.name, receipt, error: "Screen already running; retry shortly.", retryable: true, runId: details?.runId ?? null, status: details?.status ?? "running" };
           }
           throw screenErr;
         }

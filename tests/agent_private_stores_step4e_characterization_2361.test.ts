@@ -569,9 +569,13 @@ describe("characterization 4e: ScreenerAgent lock wiring", () => {
   it("fresh agent: probe reports not-running and creates the lock table in the agent's own storage", async () => {
     const sql = new SqliteTestStorage();
     const agent = makeScreenerAgent(sql);
+    // #2840: the probe also reports the in-flight run id + status
+    // (null / "idle" when nothing runs).
     await expect(agent.isScreenRunning("nasdaq100", "owner")).resolves.toEqual({
       running: false,
       startedAt: null,
+      runId: null,
+      status: "idle",
     });
     expect(sql.tableNames()).toContain("screen_run_locks");
   });
@@ -585,10 +589,14 @@ describe("characterization 4e: ScreenerAgent lock wiring", () => {
     await expect(agent.isScreenRunning("nasdaq100", "owner")).resolves.toEqual({
       running: true,
       startedAt: held.startedAt,
+      runId: `screen:owner:nasdaq100:${held.startedAt}`,
+      status: "running",
     });
     await expect(agent.isScreenRunning("sp500", "owner")).resolves.toEqual({
       running: false,
       startedAt: null,
+      runId: null,
+      status: "idle",
     });
     await expect(
       agent.runScreen({ userLogin: "owner", universe: "nasdaq100" } as any)
@@ -605,6 +613,8 @@ describe("characterization 4e: ScreenerAgent lock wiring", () => {
     await expect(agent.isScreenRunning("nasdaq100", "owner")).resolves.toEqual({
       running: false,
       startedAt: staleAt,
+      runId: null,
+      status: "idle",
     });
   });
 });

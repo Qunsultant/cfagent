@@ -1,7 +1,7 @@
 /**
  * Issue #2402: sign-in shows an outcome message for both success and
  * failure. One outcome channel, allowlisted end to end:
- * - parseAuthOutcome admits only the five known codes; anything else
+ * - parseAuthOutcome admits only the known codes; anything else
  *   (unknown strings, injection attempts, wrong case) is null.
  * - Failure notices carry user-safe text only: no quota numbers, no
  *   row counts, no store names, no token details. Technical cause
@@ -29,6 +29,8 @@ const FAILURE_CODES: Array<Exclude<AuthOutcomeCode, "signed_in">> = [
   "signin_failed",
   "provider_unavailable",
   "wiring_disabled",
+  // #2840: the session-cap check could not run.
+  "session_limit_unavailable",
 ];
 
 const FORBIDDEN_SUBSTRINGS = [
@@ -42,13 +44,14 @@ const FORBIDDEN_SUBSTRINGS = [
 ];
 
 describe("parseAuthOutcome", () => {
-  it("admits exactly the five known codes", () => {
+  it("admits exactly the known codes", () => {
     const codes: AuthOutcomeCode[] = [
       "signed_in",
       "session_unreadable",
       "signin_failed",
       "provider_unavailable",
       "wiring_disabled",
+      "session_limit_unavailable",
     ];
     for (const code of codes) {
       expect(parseAuthOutcome(code)).toBe(code);

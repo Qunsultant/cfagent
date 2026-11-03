@@ -32,11 +32,15 @@
 import { D1ResourceUsageAdapter, type ResourceD1Db } from "../telemetry/d1ResourceUsageAdapter";
 import {
   buildComparisonReport,
+  buildTierAlertText,
   evaluateCapAlert,
+  evaluateCapTiers,
   previousUtcDay,
   rollupRowsFromTotals,
+  tierAlertKey,
   utcDayBounds,
   utcDayOf,
+  type CapBreach,
   type ComparisonReport,
   type DailyRollupRow,
 } from "../telemetry/resourceRollup";
@@ -193,6 +197,14 @@ export interface CapAlertResult {
   alerted: string[];
   undelivered: Array<{ budget: string; error: string }>;
   noDestination: Array<{ budget: string }>;
+  /** #2840: budgets at the 90%/100% tiers this evaluation (tier keys, e.g. "rowsRead:90"). */
+  tierBreaches: string[];
+  /** #2840: tier keys actually posted by this evaluation. */
+  tierAlerted: string[];
+  /** #2840: tier keys that failed delivery (unmarked, so the next tick retries). */
+  tierUndelivered: Array<{ budget: string; error: string }>;
+  /** #2840: tier keys with no Slack destination (marked, one tick error per tier-day). */
+  tierNoDestination: Array<{ budget: string }>;
 }
 
 /**
@@ -200,6 +212,13 @@ export interface CapAlertResult {
  * Delivery is deduped by alert state per (budget, day): an already-alerted
  * budget is never re-posted, which is what makes the twice-per-hour
  * evaluation (see the onCron branch note) safe.
+ *
+ * #2840: the same evaluation then applies the 90% (escalate) and
+ * 100% (critical) tiers. Tier delivery dedups per (tier key, day)
+ * — the tier key suffixes the tier, so a 90% alert is never
+ * swallowed by the day's already-marked 70% alert for the same
+ * budget, and never re-posts for its own tier-day. The 70%
+ * behavior above is unchanged.
  */
 export async function runResourceCapAlert(deps: {
   db: ResourceGoalDb;
@@ -236,6 +255,43 @@ export async function runResourceCapAlert(deps: {
       }
     }
   }
+  // #2840: 90% escalate + 100% critical tiers. Each tier posts
+  // its own text (the watch text above never names the tier
+  // action), deduped per tier key + day. A budget already at
+  // critical posts only the critical text, not both tiers —
+  // the critical text subsumes the escalation.
+  const tiers = evaluateCapTiers(cumulative);
+  const tierBreaches: string[] = [];
+  const tierAlerted: string[] = [];
+  const tierUndelivered: Array<{ budget: string; error: string }> = [];
+  const tierNoDestination: Array<{ budget: string }> = [];
+  const breachByBudget = new Map<string, CapBreach>(breaches.map((b) => [b.budget, b]));
+  for (const assessment of [tiers.rowsRead, tiers.rowsWritten, tiers.doRequests]) {
+    if (assessment.tier !== "escalate" && assessment.tier !== "critical") continue;
+    const key = tierAlertKey(assessment.budget, assessment.tier, day);
+    tierBreaches.push(key);
+    const existing = await getAlertState(deps.db, key, day);
+    if (existing) continue;
+    // The breach row for the tier text: the 70% breach row when
+    // present (same budget, same cumulative), else a tier-built row.
+    const breach: CapBreach = breachByBudget.get(assessment.budget) ?? {
+      budget: assessment.budget,
+      cumulative: assessment.cumulative,
+      limit: assessment.limit,
+      pct: assessment.pct,
+    };
+    const text = buildTierAlertText(day, assessment.tier, [breach]);
+    const res = await postSlackText({ post: deps.post, env: deps.env, text });
+    if (res.ok) {
+      await markAlerted(deps.db, key, day, true, `delivered via ${res.method}`);
+      tierAlerted.push(key);
+    } else if (res.noDestination) {
+      await markAlerted(deps.db, key, day, false, res.error);
+      tierNoDestination.push({ budget: key });
+    } else {
+      tierUndelivered.push({ budget: key, error: res.error });
+    }
+  }
   return {
     day,
     cumulative,
@@ -243,6 +299,10 @@ export async function runResourceCapAlert(deps: {
     alerted,
     undelivered,
     noDestination,
+    tierBreaches,
+    tierAlerted,
+    tierUndelivered,
+    tierNoDestination,
   };
 }
 
