@@ -57,6 +57,7 @@ Excluded:
 ## Test plan
 
 ## Dependencies
+Cross-lane need: if this requires another lane's capability, link that lane's separately created and assigned issue here — do not fold their work into this issue.
 
 ## Change management (expected)
 Expected impact:

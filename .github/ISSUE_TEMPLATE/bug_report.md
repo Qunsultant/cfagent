@@ -65,6 +65,7 @@ Excluded:
 Levels/types (ISTQB, per G5): unit / integration / system / acceptance; functional / regression / confirmation:
 
 ## Dependencies
+Cross-lane need: if this requires another lane's capability, link that lane's separately created and assigned issue here — do not fold their work into this issue.
 
 ## Root cause analysis (ITIL problem management — required before close)
 Timeline (facts only, with times: what happened, when, when detected, when workaround/fix landed):
