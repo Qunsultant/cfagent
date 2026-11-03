@@ -55,6 +55,7 @@ import {
   TextInput,
 } from "./components/ui";
 import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
+import { startPolling } from "./polling";
 import {
   buildGoalCommand,
   buildNonGoalCommand,
@@ -203,13 +204,21 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
   }, [userLogin, refreshSubscription]);
 
   // Poll the workflow status while a paid run is in flight.
+  // Issue #2376 slice 1: the hand-rolled 5s chain rides the shared
+  // polling contract (startPolling) — same 5s cadence, same
+  // immediate first read, same 60-poll cap, same stop on a
+  // transient read failure (the user can still use the verify
+  // button and re-read status manually). Effect cleanup stops
+  // the poller; the cap/failure paths stop it directly.
   React.useEffect(() => {
     if (!submitResult?.workflowId || submitResult.status === "redeemed_started" || !polling) return;
     let stopped = false;
     let polls = 0;
+    let stop: () => void = () => {};
     const tick = async () => {
       if (stopped || polls >= 60) {
         setPolling(false);
+        stop();
         return;
       }
       polls += 1;
@@ -220,12 +229,13 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
         // A transient status-read failure stops polling; the user can
         // still use the verify button and re-read status manually.
         if (!stopped) setPolling(false);
+        stop();
       }
-      if (!stopped) setTimeout(tick, 5000);
     };
-    tick();
+    stop = startPolling(tick, { fastMs: 5_000, idleMs: 5_000, immediate: true });
     return () => {
       stopped = true;
+      stop();
     };
   }, [submitResult, polling]);
 

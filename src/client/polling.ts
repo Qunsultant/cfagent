@@ -19,6 +19,16 @@ export interface PollSchedule {
   idleMs: number;
   /** Optional: true when the fast cadence is warranted (e.g. a running job). */
   isBusy?: () => boolean;
+  /**
+   * Issue #2376 slice 1 — run once at subscribe, then follow the cadence.
+   * Surfaces that fetch on mount (saga status, journey gates, checkout
+   * status) need the first fetch immediately, not after one cadence.
+   * Default false preserves the existing schedule (first run after the
+   * cadence) for every current caller. A hidden tab still runs nothing
+   * until visible: the tick's hidden check wins over immediacy, and the
+   * visibility handler runs the first tick when the tab returns.
+   */
+  immediate?: boolean;
   /** Injectable for tests; defaults to the global document. */
   doc?: Pick<Document, "visibilityState" | "addEventListener" | "removeEventListener">;
 }
@@ -81,7 +91,12 @@ export function startPolling(
   };
 
   doc?.addEventListener("visibilitychange", onVisibility);
-  arm();
+  if (schedule.immediate) {
+    // First run now, then the cadence (after the run settles, as usual).
+    void tick();
+  } else {
+    arm();
+  }
 
   return () => {
     stopped = true;

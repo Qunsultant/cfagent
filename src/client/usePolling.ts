@@ -27,7 +27,7 @@ export function usePolling(
   runRef.current = run;
   busyRef.current = schedule.isBusy;
 
-  const { fastMs, idleMs, enabled = true } = schedule;
+  const { fastMs, idleMs, enabled = true, immediate } = schedule;
 
   useEffect(() => {
     if (!enabled) return;
@@ -36,8 +36,9 @@ export function usePolling(
       {
         fastMs,
         idleMs,
+        immediate,
         isBusy: busyRef.current ? () => busyRef.current?.() ?? false : undefined,
       }
     );
-  }, [fastMs, idleMs, enabled]);
+  }, [fastMs, idleMs, enabled, immediate]);
 }
