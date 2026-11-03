@@ -111,6 +111,20 @@ export interface Env {
   // IAAA_ENABLED_PROVIDERS) is a separate owner step after these exist.
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
+  // #2686 Apple-as-plugin — Apple Sign in credentials. Optional:
+  // Apple login only exists as a wired provider, and its adapter
+  // fails closed when these are absent. They are owner-set secrets
+  // (Cloudflare dashboard or `wrangler secret put`), NEVER committed
+  // to the repo or to wrangler.jsonc. APPLE_CLIENT_ID is the Service
+  // ID; APPLE_PRIVATE_KEY is the .p8 private-key PEM — the client
+  // secret JWT is minted per exchange from these (see
+  // src/security/appleClientSecret.ts), so there is no stored
+  // secret to expire. Enablement (adding "apple" to
+  // IAAA_ENABLED_PROVIDERS) is a separate owner step after these exist.
+  APPLE_CLIENT_ID?: string;
+  APPLE_TEAM_ID?: string;
+  APPLE_KEY_ID?: string;
+  APPLE_PRIVATE_KEY?: string;
   APP_BASE_URL: string;
   SESSION_SECRET: string;
   // #945 Wiring Phase 1 — config-gated enablement. Both optional; absence
