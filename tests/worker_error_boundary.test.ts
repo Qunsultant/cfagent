@@ -107,3 +107,41 @@ describe("worker error boundary (#329)", () => {
     });
   });
 });
+
+describe("worker error boundary: DO/D1 store quota (#2666)", () => {
+  it("turns a DO rows-read exhaustion into 503 with the store-quota code", async () => {
+    const wrapped = withErrorBoundary(async () => {
+      throw new Error("Exceeded allowed rows read in Durable Objects free tier.");
+    }, { log: () => undefined });
+
+    const res = await wrapped(request, {});
+    const body = (await res.json()) as { code: string; error: string };
+
+    expect(res.status).toBe(503);
+    expect(body.code).toBe("FAILURE_STORE_QUOTA_EXHAUSTED");
+    expect(body.error).toContain("[FAILURE_STORE_QUOTA_EXHAUSTED]");
+    expect(res.headers.get("Retry-After")).toBe("30");
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
+  });
+
+  it("turns a D1 free-tier row-limit exhaustion into the same 503", () => {
+    const classified = classifyError(
+      new Error(
+        "Your account has exceeded D1's free tier daily row read limit. Upgrade to a paid plan or wait until tomorrow (midnight UTC) to continue.",
+      ),
+    );
+    expect(classified.status).toBe(503);
+    expect(classified.body.code).toBe("FAILURE_STORE_QUOTA_EXHAUSTED");
+  });
+
+  it("never leaks the provider message into the 503 body", async () => {
+    const wrapped = withErrorBoundary(async () => {
+      throw new Error("Exceeded allowed rows read in Durable Objects free tier.");
+    }, { log: () => undefined });
+
+    const res = await wrapped(request, {});
+    const body = (await res.json()) as { code: string; error: string };
+    expect(body.error).not.toContain("Durable Objects");
+    expect(body.error).not.toContain("rows read");
+  });
+});
