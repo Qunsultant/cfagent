@@ -51,8 +51,18 @@ describe("Deep-link catalog (issue #2776)", () => {
     const keys = new Set(collectNodeKeys());
     const ids = new Set<string>();
     for (const key of keys) ids.add(key.split(":").pop()!);
+    // Issue #2972: the planned:* keys are intentionally kept after the
+    // Planned menu retired, so old node references still generate the
+    // Assets Hub view links. They are legacy, not stale-by-neglect.
+    const legacyKeys = new Set([
+      "planned",
+      "planned:forex",
+      "planned:futures",
+      "planned:commodities",
+      "planned:bonds",
+    ]);
     for (const key of Object.keys(DEEP_LINK_OVERRIDES)) {
-      expect(keys.has(key) || ids.has(key)).toBe(true);
+      expect(keys.has(key) || ids.has(key) || legacyKeys.has(key)).toBe(true);
     }
   });
 

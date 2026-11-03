@@ -32,10 +32,6 @@ export type FeatureFlag =
   // explicit disable); ON = assurance page visible (test-only, fake
   // seams).
   | "payment_assurance"
-  // Issue #2783: Planned asset tabs left-nav menu. Provider key
-  // "planned_asset_tabs": default ON (adapters, mirroring
-  // payment_assurance); OFF only on explicit disable.
-  | "planned_asset_tabs"
   // Issue #2596 (Options Screener product programme, slice 1):
   // parent flag for the whole options product line. Its own parent
   // is options_research (see OPTIONS_PRODUCT_FLAG_PARENTS), so an
@@ -80,10 +76,6 @@ export const ALL_FEATURE_FLAGS: readonly FeatureFlag[] = [
   // Default is ON since issue #2054 (adapters); an explicit
   // disable still wins everywhere.
   "payment_assurance",
-  // Issue #2783: Planned asset tabs menu, registered here.
-  // Default is ON (adapters, mirroring payment_assurance); an
-  // explicit disable still wins everywhere.
-  "planned_asset_tabs",
   // Issue #2596: options product line (parent + per-product flags).
   // Defaults are resolved by inheritance in the adapters, never here:
   // an absent flag inherits its parent, an explicit OFF always wins.
