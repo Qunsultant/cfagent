@@ -84,6 +84,8 @@ function run(over: Partial<WorkflowRun> = {}): WorkflowRun {
     artifacts: [{ kind: "pdf", label: "PDF report", url: "/api/screener/report.pdf?key=report" }],
     deliveryStates: { slack: "failed" },
     error: "[SLACK_002] channel not configured",
+    fanoutCapReason: null,
+    resumedSkippedUnits: [],
     ...over,
   };
 }
