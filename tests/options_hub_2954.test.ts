@@ -193,10 +193,10 @@ describe("deep links (#2954)", () => {
       "?tab=assets-hub&view=forex",
     );
     expect(deepLinkHrefForNavNode(null, "goal-screen")).toBe(
-      "?tab=assets-hub&view=goal-screen",
+      "?tab=goal-screen",
     );
     expect(deepLinkHrefForNavNode("workflow-runs", "review")).toBe(
-      "?tab=assets-hub&view=review",
+      "?tab=review",
     );
   });
 });

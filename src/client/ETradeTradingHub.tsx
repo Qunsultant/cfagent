@@ -20,6 +20,11 @@ import { TradingApprovalsQueue } from "./TradingApprovalsQueue";
 import { AccountPanels } from "./AccountPanels";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { ScreenersHub, type ScreenersHubTab } from "./ScreenersHub";
+import { GoalScreenPanel } from "./GoalScreenPanel";
+import { ReportsPanel } from "./ReportsPanel";
+import { SchedulesPanel } from "./SchedulesPanel";
+import { ScreeningReviewPanel } from "./ScreeningReviewPanel";
+import { ScreeningOutcomesPanel } from "./ScreeningOutcomesPanel";
 import { OptionsHub, type OptionsHubTab } from "./OptionsHub";
 import { StockHub, type StockHubTab } from "./StockHub";
 import { ETradeDynamicMenu, type ETradeDynamicMenuProps } from "./ETradeDynamicMenu";
@@ -60,6 +65,9 @@ export type TradingSubTab =
   | "stock-hub"
   | "reports"
   | "schedules"
+  | "goal-screen"
+  | "review"
+  | "track-record"
   | "iv-history"
   | "options"
   | "assets-hub"
@@ -1365,6 +1373,9 @@ export function ETradeTradingHub({
       "stock-hub": "Stock Hub",
       reports: "Reports",
       schedules: "Schedules",
+      "goal-screen": "Goal Screen",
+      review: "Proposal Review",
+      "track-record": "Track Record",
       "iv-history": "IV History",
       options: "Auto Options Research",
       "assets-hub": "Assets Hub",
@@ -1751,9 +1762,21 @@ export function ETradeTradingHub({
       {effectiveSubTab === "assets-hub" && renderScreenersHub("forex")}
       {effectiveSubTab === "stock-hub" && renderStockHub("stocks")}
 
-      {effectiveSubTab === "reports" && renderScreenersHub("reports")}
+      {/* Issue #2970: reports, schedules, goal-screen, review, and
+          track-record render their panels directly — the same props
+          the hub passed them. The hub still hosts these tabs until
+          the slimming slice (#2971) removes them. */}
+      {effectiveSubTab === "reports" && <ReportsPanel />}
 
-      {effectiveSubTab === "schedules" && renderScreenersHub("schedules")}
+      {effectiveSubTab === "schedules" && (
+        <SchedulesPanel activeEnv={activeEnv} userLogin={user?.login} onPreviewTrade={handleTradeOrder} />
+      )}
+
+      {effectiveSubTab === "goal-screen" && <GoalScreenPanel activeEnv={activeEnv} userLogin={user?.login} />}
+
+      {effectiveSubTab === "review" && <ScreeningReviewPanel userLogin={user?.login} />}
+
+      {effectiveSubTab === "track-record" && <ScreeningOutcomesPanel userLogin={user?.login} />}
 
       {/* SUBTAB 1: MARKET SCREENER & SCANNER — folded into the hub. */}
       {effectiveSubTab === "scanner" && renderOptionsHub("strategy-scanner")}

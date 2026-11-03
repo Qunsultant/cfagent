@@ -8,6 +8,8 @@
  * groups resolving to real nav entries, and derived defaults.
  * (#2954: the assets-hub tab was added, appended at navOrder 30 so no
  * existing item moves.)
+ * (#2970: goal-screen, review, and track-record routes added — own
+ * pages with no nav entries, so the nav-entry count stays 31.)
  * (#2137 rebuild: checkout added at navOrder 24; search restored at
  * navOrder 23 — the old branch's search-for-checkout swap at order 23
  * is NOT carried, since main ships the Search Hub tab.)
@@ -35,6 +37,7 @@ const EXPECTED_IDS = [
   "checkout",
   "docs",
   "endpoints",
+  "goal-screen",
   "ledger",
   "nlq",
   "omnichannel",
@@ -52,12 +55,14 @@ const EXPECTED_IDS = [
   "reports",
   "research",
   "revenue",
+  "review",
   "scanner",
   "schedules",
   "screeners",
   "search",
   "social",
   "stock-hub",
+  "track-record",
   "trading",
   "voice",
   "workflow-runs",
@@ -67,7 +72,7 @@ const EXPECTED_IDS = [
 const ALIAS_IDS = ["options", "orders", "reports", "scanner", "schedules", "trading"];
 
 describe("route table", () => {
-  it("has exactly the 38 tab ids, sorted and unique", () => {
+  it("has exactly the 41 tab ids, sorted and unique", () => {
     const ids = ROUTES.map((r) => r.id);
     expect(ids).toEqual(EXPECTED_IDS);
     expect(new Set(ids).size).toBe(ids.length);
@@ -142,6 +147,10 @@ describe("route table", () => {
     expect(getCrumb("scanner")).toBe("Strategy/Symbol Scanner");
     expect(getCrumb("reports")).toBe("Reports");
     expect(getCrumb("docs")).toBe("Docs & Reports");
+    // Issue #2970: the own pages' crumbs.
+    expect(getCrumb("goal-screen")).toBe("Goal Screen");
+    expect(getCrumb("review")).toBe("Proposal Review");
+    expect(getCrumb("track-record")).toBe("Track Record");
     expect(getCrumb("schedules")).toBe("Schedules");
     expect(getCrumb("options")).toBe("Options");
     expect(getCrumb("social")).toBe("Social");
@@ -161,6 +170,11 @@ describe("route table", () => {
     // Issue #2957: schedules is its own nav group (was platform-admin
     // via the #2709 follow-up).
     expect(getNavGroup("schedules")).toBe("schedules");
+    // Issue #2970: the own pages — goal-screen groups under itself
+    // (host-route exception), review/track-record under workflow-runs.
+    expect(getNavGroup("goal-screen")).toBe("goal-screen");
+    expect(getNavGroup("review")).toBe("workflow-runs");
+    expect(getNavGroup("track-record")).toBe("workflow-runs");
     expect(getNavGroup("options")).toBe("options-screener");
     expect(getNavGroup("bogus")).toBe("autopilot");
   });

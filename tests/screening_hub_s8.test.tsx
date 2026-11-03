@@ -235,12 +235,13 @@ describe("S8 hub inventory coverage (source pins)", () => {
     expect(tradingHub).not.toContain("ScreeningMovedNotice");
     expect(tradingHub).not.toContain("Screening Moved to the Screeners Hub");
     // Issue #2954: options/scanner/iv-history render the Options copy
-    // hub; reports/schedules still render the ScreenersHub (Assets Hub).
+    // hub. Issue #2970: reports/schedules render their panels
+    // directly now (the hub still hosts them until #2971).
     expect(tradingHub).toContain('renderOptionsHub()');
     expect(tradingHub).toContain('renderOptionsHub("strategy-scanner")');
     expect(tradingHub).toContain('renderOptionsHub("iv-history")');
-    expect(tradingHub).toContain('renderScreenersHub("reports")');
-    expect(tradingHub).toContain('renderScreenersHub("schedules")');
+    expect(tradingHub).toContain("<ReportsPanel");
+    expect(tradingHub).toContain("<SchedulesPanel");
   });
 
   it("the Trading Hub's non-screening subtabs are intact", () => {
@@ -248,10 +249,10 @@ describe("S8 hub inventory coverage (source pins)", () => {
       expect(tradingHub).toContain(`effectiveSubTab === "${subtab}"`);
     }
     expect(tradingHub).toContain("<AutopilotControlCenter");
-    // C2: Reports/Schedules render through the hub now (see the pin
-    // above) — the Trading Hub no longer mounts those panels itself.
-    expect(tradingHub).not.toContain("<ReportsPanel");
-    expect(tradingHub).not.toContain("<SchedulesPanel");
+    // Issue #2970: Reports/Schedules render their panels directly
+    // now (see the pin above) — the Trading Hub mounts them itself.
+    expect(tradingHub).toContain("<ReportsPanel");
+    expect(tradingHub).toContain("<SchedulesPanel");
   });
 });
 

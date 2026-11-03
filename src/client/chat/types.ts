@@ -53,6 +53,12 @@ export function mapTabToTradingSubTab(targetTab: string): TradingSubTab {
       return "reports";
     case "schedules":
       return "schedules";
+    case "goal-screen":
+      return "goal-screen";
+    case "review":
+      return "review";
+    case "track-record":
+      return "track-record";
     case "options":
       return "options";
     case "assets-hub":
