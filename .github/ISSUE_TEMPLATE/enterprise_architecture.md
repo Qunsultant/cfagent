@@ -35,6 +35,14 @@ Journey:
 User:
 How value surfaces in UX:
 
+## Existing / similar issues (required — search BEFORE creating)
+- [ ] I searched existing issues (open and closed) for the same or similar work before creating this issue.
+- Same or similar issues found (reference each by number; state whether it already covers this work, only overlaps it, or is distinct):
+  - #NNNN — <title> — <covers / overlaps / distinct because …>
+  - (If none found, write "None found" and give the search terms used below.)
+- Search terms used:
+- If an existing issue already covers this work, do NOT create a duplicate — comment on that issue instead. A new issue is justified only when no existing issue covers it, or when the difference is stated above. (Record confirmed relationships under Related issues below.)
+
 ## Related issues
 Parent epic:
 Blocks / Blocked by:
