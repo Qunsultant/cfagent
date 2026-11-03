@@ -285,7 +285,11 @@ describe("C2 nav collapse", () => {
     expect(isTabActive("options-screener", "options")).toBe(true);
     expect(isTabActive("options-screener", "scanner")).toBe(true);
     expect(isTabActive("workflow-runs", "reports")).toBe(true);
-    expect(isTabActive("platform-admin", "schedules")).toBe(true);
+    // Issue #2957: schedules is its own nav group now (was
+    // platform-admin via the #2709 follow-up) — it reads active on
+    // its own entry, not on Platform Admin.
+    expect(isTabActive("schedules", "schedules")).toBe(true);
+    expect(isTabActive("platform-admin", "schedules")).toBe(false);
     expect(isTabActive("screeners", "portfolio")).toBe(false);
   });
 });

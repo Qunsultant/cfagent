@@ -158,7 +158,9 @@ describe("route table", () => {
     expect(getNavGroup("scanner")).toBe("options-screener");
     expect(getNavGroup("reports")).toBe("workflow-runs");
     expect(getNavGroup("docs")).toBe("workflow-runs");
-    expect(getNavGroup("schedules")).toBe("platform-admin");
+    // Issue #2957: schedules is its own nav group (was platform-admin
+    // via the #2709 follow-up).
+    expect(getNavGroup("schedules")).toBe("schedules");
     expect(getNavGroup("options")).toBe("options-screener");
     expect(getNavGroup("bogus")).toBe("autopilot");
   });
