@@ -5608,9 +5608,11 @@ export default {
       // Fire/no-fire is decided inside the route (once per UTC
       // day — durable marker in agent_digest_pass_days), so this
       // dispatch is unconditional; the route returns fired:false
-      // on later ticks the same day, and the pass supplies no
-      // items, so scheduled passes skip-on-empty until a digest
-      // content provider lands. Dispatches as the service user
+      // on later ticks the same day, and the tick supplies no
+      // itemsByUser, so scheduled sends use the digest content
+      // provider (#2981: tenant projection highlights); a
+      // subscriber with no windowed reports honestly skips.
+      // Dispatches as the service user
       // (backgroundDispatchHeaders), which is the only identity
       // the run-due route accepts.
       const digestPassPromise = agent.fetch(

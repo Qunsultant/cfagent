@@ -22,9 +22,11 @@
  * day guards make the retry idempotent).
  *
  * Content is an explicit seam: items come from the caller's
- * itemsProvider. The tick supplies no items, so scheduled passes
- * skip-on-empty until a content provider lands — nothing here
- * invents digest content. The unsubscribe link is likewise
+ * itemsProvider. Since #2981 the run-due route supplies the
+ * digest content provider for scheduled sends (operator
+ * itemsByUser still wins per subscriber); a subscriber with no
+ * windowed reports honestly skips — nothing here invents
+ * digest content. The unsubscribe link is likewise
  * optional: the scheduled path has no trustworthy public origin
  * (the tick is a cron event, not a user-facing request), so the
  * trigger route omits it; opt-out remains via the preferences
