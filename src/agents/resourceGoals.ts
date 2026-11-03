@@ -55,6 +55,7 @@ import {
   type SlackDeliveryEnv,
   type SlackPostFn,
 } from "./social/delivery";
+import { renderChannelText } from "../outcomes/outcomeAspects";
 
 export type ResourceGoalDb = ResourceD1Db;
 
@@ -166,17 +167,23 @@ function buildAlertText(
   cumulative: { rowsRead: number; rowsWritten: number; ops: number },
   breaches: Array<{ budget: string; cumulative: number; limit: number; pct: number }>
 ): string {
-  const lines = breaches.map(
-    (b) => `- ${b.budget}: ${fmt(b.cumulative)} / ${fmt(b.limit)} (${(b.pct * 100).toFixed(1)}% of cap, 70% alert threshold)`
-  );
-  return [
-    `⚠️ SessionStore cap alert — ${day} (UTC, day-to-date)`,
-    ...lines,
-    `Day-to-date totals: rowsRead ${fmt(cumulative.rowsRead)}, rowsWritten ${fmt(cumulative.rowsWritten)}, ` +
-      `DO requests (SessionStore ops, lower bound) ${fmt(cumulative.ops)}.`,
-    "Scope: SessionStore projection only — a breach here implies the account is at >=70%; " +
-      "no breach does not prove account safety (other DO namespaces uncounted). See #1819.",
-  ].join("\n");
+  const breachLines = breaches
+    .map((b) =>
+      renderChannelText("resource_cap_breach_line", "slack", {
+        budget: b.budget,
+        cumulative: fmt(b.cumulative),
+        limit: fmt(b.limit),
+        pct: (b.pct * 100).toFixed(1),
+      }, "legacy_resource_cap_breach_line"),
+    )
+    .join("\n");
+  return renderChannelText("resource_cap_alert", "slack", {
+    day,
+    breachLines,
+    rowsRead: fmt(cumulative.rowsRead),
+    rowsWritten: fmt(cumulative.rowsWritten),
+    ops: fmt(cumulative.ops),
+  }, "legacy_resource_cap_alert");
 }
 
 export interface CapAlertResult {

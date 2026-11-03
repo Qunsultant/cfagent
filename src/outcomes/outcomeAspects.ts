@@ -93,6 +93,45 @@ export function codedMessage(code: string, detail?: string): string {
 }
 
 /**
+ * Issue #2975 (Phase 5 Slice 9) — channel rendering from the catalog.
+ *
+ * Templates live in the catalog file's top-level "channelTemplates"
+ * section, NOT as outcome entries: the #2381 pin requires every
+ * outcomes key to match SUCCESS|FAILURE and carry full outcome
+ * fields, and notice/alert texts are not outcomes. Each shipped
+ * template has a frozen "legacy_*" twin with identical text at ship
+ * time (no copy change); the renderer falls back to the twin when
+ * the primary template is missing. A read never fails: unknown keys
+ * render a non-blank sentinel, never a throw, never blank.
+ */
+export interface ChannelTemplateSet {
+  slack?: string;
+}
+
+export function renderChannelText(
+  templateKey: string,
+  channel: "slack",
+  vars: Record<string, string | number>,
+  fallbackTemplateKey?: string,
+): string {
+  try {
+    const templates = (
+      catalog as { channelTemplates?: Record<string, ChannelTemplateSet> }
+    ).channelTemplates;
+    const template =
+      templates?.[templateKey]?.[channel] ??
+      (fallbackTemplateKey ? templates?.[fallbackTemplateKey]?.[channel] : undefined);
+    if (!template) return `[unrendered:${templateKey}]`;
+    return template.replace(/\{(\w+)\}/g, (_, name: string) => {
+      const value = vars[name];
+      return value === undefined || value === null ? "" : String(value);
+    });
+  } catch {
+    return `[unrendered:${templateKey}]`;
+  }
+}
+
+/**
  * True when a message already carries a cataloged (or aliased)
  * outcome code in its leading "[CODE]" bracket — used by the report
  * parsers so an already-coded error is preserved, not double-wrapped.
