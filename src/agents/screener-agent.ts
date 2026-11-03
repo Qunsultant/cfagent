@@ -281,7 +281,6 @@ const HISTORY_KEY = "screener:history";
 const PDF_KEY_PREFIX = "screener:pdf:";
 const PDF_LATEST_KEY = "screener:latest.pdf";
 // XLSX report storage
-const XLSX_KEY_PREFIX = "screener:xlsx:";
 const XLSX_LATEST_KEY = "screener:latest.xlsx";
 const CSV_LATEST_KEY = "screener:latest.csv";
 // Issue #361: Options PDF storage (mirrors stock pattern). Since #1023
@@ -1850,36 +1849,23 @@ export class ScreenerAgent extends PortThink {
   private async persistRun(result: ScreenerRunResult): Promise<void> {
     // Issue #269/#914: PDF generation + storage lives in generateRunPdf
     // (shared with regeneration, #1278).
-    // Issue #1793: Generate PDF + XLSX BEFORE writing result into storage
-    // so LATEST and HISTORY retain pdfKey, pdfStatus, xlsxKey, and xlsxStatus.
+    // Issue #1793: Generate the full document set BEFORE writing result
+    // into storage so LATEST and HISTORY retain pdfKey, pdfStatus,
+    // xlsxKey, xlsxStatus, csvKey, and csvStatus.
+    // Issue #2911 (G4): the tabular legs no longer live here — XLSX +
+    // CSV come from the one generation module
+    // (src/services/stockReportArtifacts.ts), which is also the shard
+    // executor's stock path. Issue #2062: every stock run records its
+    // full document set.
     await this.generateRunPdf(result);
-
-    // XLSX Multi-tab report generation (Screened Stocks + Formulas & Methodology)
-    // Issue #1278 (#1173 R5): generate+store retries under the R1 report
-    // policy — a transient blob-store failure no longer fails the XLSX.
-    try {
-      const { putReportPdf } = await import("../services/reportBlobStore");
-      const { withRetry } = await import("../services/resilience");
-      const { resolvePipelinePolicy } = await import("../services/pipelinePolicy");
-      const reportRetry = resolvePipelinePolicy(this.env as unknown as Record<string, unknown>).retry.report;
-      const xlsxKey = `${XLSX_KEY_PREFIX}${crypto.randomUUID().slice(0, 8)}`;
-      await withRetry(async () => {
-        const { generateScreenerXlsx, screenerXlsxFileName } = await import("../trading");
-        const xlsxBytes = generateScreenerXlsx(result);
-        const xlsxFileName = screenerXlsxFileName(result);
-        await putReportPdf(this.env, this.ctx.storage as any, xlsxKey, xlsxFileName, xlsxBytes);
-        await putReportPdf(this.env, this.ctx.storage as any, XLSX_LATEST_KEY, xlsxFileName, xlsxBytes);
-        result.xlsxKey = xlsxKey;
-        result.xlsxStatus = "generated";
-      }, reportRetry, { label: "screener-xlsx" });
-    } catch (xlsxErr) {
-      result.xlsxStatus = "failed";
-      result.xlsxError = codedMessage("FAILURE_REPORT_XLSX_GENERATION", xlsxErr instanceof Error ? xlsxErr.message : String(xlsxErr));
-      console.error("[ScreenerAgent] XLSX generation failed:", result.xlsxError);
-    }
-
-    // Issue #2062: every stock run records its full document set.
-    await this.generateRunCsv(result);
+    const { generateStockReportArtifacts } = await import("../services/stockReportArtifacts");
+    await generateStockReportArtifacts({
+      env: this.env,
+      storage: this.ctx.storage as any,
+      result,
+      userLogin: await this.userLogin(),
+      formats: ["xlsx", "csv"],
+    });
 
     await this.ctx.storage.put(LATEST_KEY, result);
     const history =
@@ -1898,38 +1884,6 @@ export class ScreenerAgent extends PortThink {
   }
 
   /**
-   * Issue #2062: generate + store the per-run CSV artifact.
-   *
-   * Every stock run records a full document set (PDF + XLSX + CSV); the
-   * CSV is the machine-readable companion the Docs and Reports page links
-   * beside the workbook. Same contract as the XLSX leg: retried under the
-   * R1 report policy, and a real failure is recorded on the run
-   * (`csvStatus` / `csvError`) instead of failing the screen.
-   */
-  private async generateRunCsv(result: ScreenerRunResult): Promise<void> {
-    try {
-      const { putReportPdf } = await import("../services/reportBlobStore");
-      const { withRetry } = await import("../services/resilience");
-      const { resolvePipelinePolicy } = await import("../services/pipelinePolicy");
-      const { generateScreenerCsv, screenerCsvFileName, SCREENER_CSV_KEY_PREFIX } = await import("../trading");
-      const reportRetry = resolvePipelinePolicy(this.env as unknown as Record<string, unknown>).retry.report;
-      const csvKey = `${SCREENER_CSV_KEY_PREFIX}${crypto.randomUUID().slice(0, 8)}`;
-      await withRetry(async () => {
-        const csvBytes = new TextEncoder().encode(generateScreenerCsv(result));
-        const csvFileName = screenerCsvFileName(result);
-        await putReportPdf(this.env, this.ctx.storage as any, csvKey, csvFileName, csvBytes, "text/csv");
-        await putReportPdf(this.env, this.ctx.storage as any, CSV_LATEST_KEY, csvFileName, csvBytes, "text/csv");
-        result.csvKey = csvKey;
-        result.csvStatus = "generated";
-      }, reportRetry, { label: "screener-csv" });
-    } catch (csvErr) {
-      result.csvStatus = "failed";
-      result.csvError = codedMessage("FAILURE_REPORT_CSV_GENERATION", csvErr instanceof Error ? csvErr.message : String(csvErr));
-      console.error("[ScreenerAgent] CSV generation failed:", result.csvError);
-    }
-  }
-
-  /**
    * Issue #269: generate + store the report PDF for download/delivery.
    * Issue #297: Store with per-run key (not shared) to prevent franken-PDFs.
    * Issue #605: blobs go to R2 when bound, else legacy DO storage.
@@ -1937,55 +1891,40 @@ export class ScreenerAgent extends PortThink {
    * manual + scheduled). Mutates result.pdfKey/pdfStatus/pdfError.
    * Extracted from persistRun for #1278 so regeneration runs the exact
    * same generation path (which itself retries per #1278 part A).
+   * Issue #2911 (G4): the pipeline call itself lives in the one
+   * generation module (src/services/stockReportArtifacts.ts); this
+   * method keeps only the latest-pointer copy, which needs the agent's
+   * ReportAssetAgent fallback — storage, not generation.
    */
   private async generateRunPdf(result: ScreenerRunResult): Promise<void> {
-    const { runReportPipeline } = await import("../services/unifiedReportPipeline");
+    const { generateStockReportArtifacts } = await import("../services/stockReportArtifacts");
     const { putReportPdf, getReportPdf } = await import("../services/reportBlobStore");
-    // Issue #2088: section config — code defaults plus env overrides —
-    // threaded through the pipeline to the screener generator.
-    const { resolveScreenerPdfSectionConfig } = await import("../trading");
-    const pdfOptions = {
-      sections: resolveScreenerPdfSectionConfig(this.env as unknown as Record<string, string | undefined>),
-    };
-    const pipelineResult = await runReportPipeline(
-      this.env,
-      this.ctx.storage as any,
-      {
-        type: "screener",
-        trigger: result.trigger === "manual" ? "manual" : "scheduled",
-        result,
-        userLogin: await this.userLogin(),
-        title: `Market screen — ${String((result as any).universe ?? (result as any).sector ?? "ALL")}`,
-        summary: result.success
-          ? `Scanned ${result.totalScanned} symbols, ${result.matchedCount} matched.`
-          : `Screen failed: ${(result as any).error ?? "unknown error"}.`,
-        timestamp: result.timestamp,
-        pdfOptions,
-      }
-    );
-    if (pipelineResult.pdfStatus === "generated") {
+    const { pdf } = await generateStockReportArtifacts({
+      env: this.env,
+      storage: this.ctx.storage as any,
+      result,
+      userLogin: await this.userLogin(),
+      formats: ["pdf"],
+    });
+    if (pdf.status === "generated" && pdf.key) {
       // Keep the "latest" pointer for backward compatibility.
-      let stored = await getReportPdf(this.env, this.ctx.storage as any, pipelineResult.pdfKey);
+      let stored = await getReportPdf(this.env, this.ctx.storage as any, pdf.key);
       if (!stored) {
         const { getPdfAsset } = await import("./report-asset-agent");
-        stored = await getPdfAsset(this.env, await this.userLogin(), pipelineResult.pdfKey);
+        stored = await getPdfAsset(this.env, await this.userLogin(), pdf.key);
       }
       if (stored) {
-        await putReportPdf(this.env, this.ctx.storage as any, pipelineResult.pdfKey, stored.fileName, stored.bytes);
+        await putReportPdf(this.env, this.ctx.storage as any, pdf.key, stored.fileName, stored.bytes);
         await putReportPdf(this.env, this.ctx.storage as any, PDF_LATEST_KEY, stored.fileName, stored.bytes);
       }
-      result.pdfKey = pipelineResult.pdfKey;
-      result.pdfStatus = "generated";
-      // A regenerated run must not keep its previous failure on record.
-      delete result.pdfError;
+      // result.pdfKey/pdfStatus already set by the module; a regenerated
+      // run must not keep its previous failure on record (the module
+      // deletes pdfError on success).
     } else {
       // Issue #1023 (S4): NO direct-generator fallback — the unified
       // pipeline is the only PDF path (#914/#680). Issue #822: do NOT
-      // swallow. Record the failure explicitly so the publisher knows
-      // not to fall back to a stale PDF.
-      result.pdfStatus = "failed";
-      result.pdfError = pipelineResult.pdfError;
-      console.error("[ScreenerAgent] PDF generation failed:", result.pdfError);
+      // swallow. The module records the failure explicitly on the run
+      // so the publisher knows not to fall back to a stale PDF.
     }
   }
 

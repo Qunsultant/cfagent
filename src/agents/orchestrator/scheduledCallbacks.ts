@@ -28,8 +28,28 @@ import {
 } from "../../security/serviceDispatch";
 import { getServiceUserLogin } from "../../security/serviceIdentity";
 import type { MembershipStore } from "../../security/authorization";
+import type { JobRunOutcome } from "../../data/jobRunRecordPorts";
 
 type ETradeEnvironment = "TEST" | "PROD";
+
+/**
+ * Issue #2964 — the outcome a scheduled callback reports to its
+ * recording wrapper. The callbacks deliberately never throw for a
+ * failed or skipped run (platform callback retry is not used for
+ * scheduled jobs — see the failure contract on
+ * ScheduledTasksService), so a throw-based record would mark every
+ * failed screen as a success. The outcome object carries the truth
+ * instead: success with a descriptor (+ artifact refs), failure
+ * with error text, skipped with its reason. The orchestrator
+ * methods stay Promise<void> — they record, then discard.
+ */
+export interface ScheduledCallbackOutcome {
+  outcome: JobRunOutcome;
+  detail?: string;
+  descriptor?: string;
+  error?: string;
+  artifactRefs?: string[];
+}
 
 /**
  * #2331 slice 2: one dispatch decision for every schedule callback.
@@ -260,13 +280,18 @@ export async function autonomousMarketScreen(ctx: ScheduledCallbacksContext, pay
   /** Issue #1355: run this scheduled screen as sharded jobs
    *  (validated by marketScreenScheduleCriteriaSchema). */
   sharded?: boolean;
-}): Promise<void> {
+}): Promise<ScheduledCallbackOutcome> {
   try {
     await ctx.waitUntilStable({ timeout: 30_000 });
   } catch {
     // Continue if timeout or unhandled
   }
-  const runScreen = async () => {
+  // Issue #2964: the outcome stash. runScreen assigns it on every
+  // return; the outer function returns the stashed value after
+  // awaiting, whatever keepAliveWhile returns (its return type is
+  // not the callback's outcome).
+  let outcome: ScheduledCallbackOutcome = { outcome: "skipped", detail: "callback did not run" };
+  const runScreen = async (): Promise<ScheduledCallbackOutcome> => {
     const trigger = payload?.trigger || "scheduled";
     const universe = payload?.universe || "NASDAQ100";
     const savedContext = await ctx.getScreenerExecutionContext();
@@ -286,7 +311,7 @@ export async function autonomousMarketScreen(ctx: ScheduledCallbacksContext, pay
         await ctx.removeUnownedBaselineSchedules();
         console.warn("[OrchestratorAgent] Skipping unowned scheduled market screen.");
       }
-      return;
+      return (outcome = { outcome: "skipped", detail: `dispatch denied (${dispatch.reason})` });
     }
     const resolvedLogin = dispatch.login;
     if (trigger === "scheduled") {
@@ -296,14 +321,16 @@ export async function autonomousMarketScreen(ctx: ScheduledCallbacksContext, pay
       const slot = new Date().toISOString().slice(0, 16);
       const slotKey = `${universe}:${slot}`;
       ctx.scheduledScreenerSlots ??= new Set<string>();
-      if (ctx.scheduledScreenerSlots.has(slotKey)) return;
+      if (ctx.scheduledScreenerSlots.has(slotKey)) {
+        return (outcome = { outcome: "skipped", detail: `duplicate minute slot for ${universe} (in-memory)` });
+      }
       if (ctx.scheduledScreenerSlots.size > 32) ctx.scheduledScreenerSlots.clear();
       ctx.scheduledScreenerSlots.add(slotKey);
       const key = `screener:scheduled:last-slot:${universe}`;
       const last = await ctx.agentCtx.storage.get<{ slot: string }>(key);
       if (last?.slot === slot) {
         console.warn(`[OrchestratorAgent] Suppressing duplicate scheduled screen for ${universe} in ${slot}Z`);
-        return;
+        return (outcome = { outcome: "skipped", detail: `duplicate minute slot for ${universe} (persistent)` });
       }
       await ctx.agentCtx.storage.put(key, { slot });
     }
@@ -316,7 +343,9 @@ export async function autonomousMarketScreen(ctx: ScheduledCallbacksContext, pay
       // this file already uses for broadcast/keepAliveWhile.
       (spec) => (ctx.self as any).submitAsyncJob(spec));
     const res = await service.autonomousMarketScreen({ ...payload, userLogin: resolvedLogin, environment, trigger });
-    if ((res as any).skipped) return;
+    if ((res as any).skipped) {
+      return (outcome = { outcome: "skipped", detail: "service skipped" });
+    }
     // Issue #212: persist the run for the "last results" UX endpoint.
     try {
       const key = "screener:last_runs";
@@ -441,6 +470,16 @@ export async function autonomousMarketScreen(ctx: ScheduledCallbacksContext, pay
         }
       }
     }
+    // Issue #2964: the run's outcome for the recording wrapper.
+    return (outcome = res.success
+      ? {
+          outcome: "success",
+          descriptor: `Scanned ${res.data?.totalScanned ?? 0} symbols, ${res.data?.matchedCount ?? 0} matched, ${res.data?.opportunities?.length ?? 0} opportunities.`,
+          artifactRefs: [res.data?.pdfKey, res.data?.xlsxKey, res.data?.csvKey].filter(
+            (k): k is string => typeof k === "string",
+          ),
+        }
+      : { outcome: "failure", error: res.error ?? "scheduled screen failed" });
   };
 
   if (typeof (ctx.self as any).keepAliveWhile === "function") {
@@ -448,6 +487,7 @@ export async function autonomousMarketScreen(ctx: ScheduledCallbacksContext, pay
   } else {
     await runScreen();
   }
+  return outcome;
 }
 
 /**
@@ -480,13 +520,15 @@ export async function autonomousGoalScreen(ctx: ScheduledCallbacksContext, paylo
    *  payload, forwarded to the service (spread into the service call
    *  below) so a completed goal screen bridges generate + serve. */
   stageChain?: import("../../types").StageChainConfig;
-}): Promise<void> {
+}): Promise<ScheduledCallbackOutcome> {
   try {
     await ctx.waitUntilStable({ timeout: 30_000 });
   } catch {
     // Continue if timeout or unhandled
   }
-  const runGoalScreen = async () => {
+  // Issue #2964: outcome stash, same pattern as autonomousMarketScreen.
+  let outcome: ScheduledCallbackOutcome = { outcome: "skipped", detail: "callback did not run" };
+  const runGoalScreen = async (): Promise<ScheduledCallbackOutcome> => {
     const trigger = payload?.trigger || "scheduled";
     const savedContext = await ctx.getScreenerExecutionContext();
     const userLogin = resolveScheduledLogin(payload?.userLogin, savedContext?.userLogin);
@@ -501,12 +543,14 @@ export async function autonomousGoalScreen(ctx: ScheduledCallbacksContext, paylo
         await ctx.removeUnownedBaselineSchedules();
         console.warn("[OrchestratorAgent] Skipping unowned scheduled goal screen.");
       }
-      return;
+      return (outcome = { outcome: "skipped", detail: `dispatch denied (${dispatch.reason})` });
     }
     const resolvedLogin = dispatch.login;
     const service = new ScheduledTasksService(ctx.env, ctx.getOrm(), resolvedLogin, createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).scanRuns, undefined, undefined, undefined, ctx.scheduleScreenerFollowups, { sql: ctx.agentCtx.storage.sql, blobStorage: ctx.agentCtx.storage as any, env: ctx.env });
     const res = await service.autonomousGoalScreen({ ...payload, userLogin: resolvedLogin, environment, trigger });
-    if ((res as any).skipped) return;
+    if ((res as any).skipped) {
+      return (outcome = { outcome: "skipped", detail: "service skipped" });
+    }
     if (typeof (ctx.self as any).broadcast === "function") {
       try {
         (ctx.self as any).broadcast(
@@ -536,6 +580,13 @@ export async function autonomousGoalScreen(ctx: ScheduledCallbacksContext, paylo
         // Non-critical broadcast error
       }
     }
+    // Issue #2964: the run's outcome for the recording wrapper.
+    return (outcome = res.success
+      ? {
+          outcome: "success",
+          descriptor: `goal screen ${res.data?.goalKind || payload?.goalKind || ""} ${res.data?.status || ""} (hits: ${res.data?.hits ?? 0})`.trim(),
+        }
+      : { outcome: "failure", error: res.error ?? "goal screen failed" });
   };
 
   if (typeof (ctx.self as any).keepAliveWhile === "function") {
@@ -543,6 +594,7 @@ export async function autonomousGoalScreen(ctx: ScheduledCallbacksContext, paylo
   } else {
     await runGoalScreen();
   }
+  return outcome;
 }
 
 /**
@@ -559,13 +611,15 @@ export async function autonomousGoalScreen(ctx: ScheduledCallbacksContext, paylo
  * itself audits and records the session message. Deliberately no
  * throw: see the failure contract on ScheduledTasksService.
  */
-export async function autonomousStrategyDiscovery(ctx: ScheduledCallbacksContext, payload?: AutonomousStrategyDiscoveryOptions): Promise<void> {
+export async function autonomousStrategyDiscovery(ctx: ScheduledCallbacksContext, payload?: AutonomousStrategyDiscoveryOptions): Promise<ScheduledCallbackOutcome> {
   try {
     await ctx.waitUntilStable({ timeout: 30_000 });
   } catch {
     // Continue if timeout or unhandled
   }
-  const runDiscovery = async () => {
+  // Issue #2964: outcome stash, same pattern as autonomousMarketScreen.
+  let outcome: ScheduledCallbackOutcome = { outcome: "skipped", detail: "callback did not run" };
+  const runDiscovery = async (): Promise<ScheduledCallbackOutcome> => {
     const savedContext = await ctx.getScreenerExecutionContext();
     const userLogin = resolveScheduledLogin(payload?.userLogin, savedContext?.userLogin);
     const environment = payload?.environment || savedContext?.environment;
@@ -580,7 +634,7 @@ export async function autonomousStrategyDiscovery(ctx: ScheduledCallbacksContext
         await ctx.removeUnownedBaselineSchedules();
         console.warn("[OrchestratorAgent] Skipping unowned scheduled strategy discovery.");
       }
-      return;
+      return (outcome = { outcome: "skipped", detail: `dispatch denied (${dispatch.reason})` });
     }
     const resolvedLogin = dispatch.login;
     if (payload?.trigger !== "manual") {
@@ -613,14 +667,16 @@ export async function autonomousStrategyDiscovery(ctx: ScheduledCallbacksContext
       }
       const slotKey = `${resolvedLogin}:${slot}:${(hash >>> 0).toString(36)}`;
       ctx.scheduledDiscoverySlots ??= new Set<string>();
-      if (ctx.scheduledDiscoverySlots.has(slotKey)) return;
+      if (ctx.scheduledDiscoverySlots.has(slotKey)) {
+        return (outcome = { outcome: "skipped", detail: "duplicate minute slot (in-memory)" });
+      }
       if (ctx.scheduledDiscoverySlots.size > 32) ctx.scheduledDiscoverySlots.clear();
       ctx.scheduledDiscoverySlots.add(slotKey);
       const key = `discovery:scheduled:last-slot:${(hash >>> 0).toString(36)}`;
       const last = await ctx.agentCtx.storage.get<{ slot: string; userLogin: string }>(key);
       if (last?.slot === slot && last?.userLogin === resolvedLogin) {
         console.warn(`[OrchestratorAgent] Suppressing duplicate scheduled strategy discovery in ${slot}Z`);
-        return;
+        return (outcome = { outcome: "skipped", detail: "duplicate minute slot (persistent)" });
       }
       await ctx.agentCtx.storage.put(key, { slot, userLogin: resolvedLogin });
     }
@@ -641,7 +697,9 @@ export async function autonomousStrategyDiscovery(ctx: ScheduledCallbacksContext
       createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).feedSnapshots
     );
     const res = await service.autonomousStrategyDiscovery({ ...payload, userLogin: resolvedLogin, environment });
-    if ((res as any).skipped) return;
+    if ((res as any).skipped) {
+      return (outcome = { outcome: "skipped", detail: "service skipped" });
+    }
     if (typeof (ctx.self as any).broadcast === "function") {
       try {
         if (res.success && res.data) {
@@ -677,6 +735,13 @@ export async function autonomousStrategyDiscovery(ctx: ScheduledCallbacksContext
         // Non-critical broadcast error
       }
     }
+    // Issue #2964: the run's outcome for the recording wrapper.
+    return (outcome = res.success
+      ? {
+          outcome: "success",
+          descriptor: `discovery run ${res.data?.runId || ""} ${res.data?.status || ""} (${res.data?.completedCount ?? 0} completed, ${res.data?.failedCount ?? 0} failed)`.trim(),
+        }
+      : { outcome: "failure", error: res.error ?? "strategy discovery failed" });
   };
 
   if (typeof (ctx.self as any).keepAliveWhile === "function") {
@@ -684,6 +749,7 @@ export async function autonomousStrategyDiscovery(ctx: ScheduledCallbacksContext
   } else {
     await runDiscovery();
   }
+  return outcome;
 }
 
 /**

@@ -43,6 +43,13 @@ export interface ReportItem {
    *  unavailable (and why) instead of silently omitting the link. */
   pdfStatus?: string | null;
   pdfError?: string | null;
+  /** Recorded XLSX / CSV generation state + failure reason (#2911 G4):
+   *  a failed tabular leg renders its unavailable notice instead of
+   *  silently omitting the link, mirroring the PDF leg above. */
+  xlsxStatus?: string | null;
+  xlsxError?: string | null;
+  csvStatus?: string | null;
+  csvError?: string | null;
   /** Partial-coverage qualification (#1850): carried through from
    *  the Runs-API row so the card model holds it; the qualifier
    *  itself renders via the row summary text, which carries the
@@ -79,6 +86,10 @@ function runToReportItem(r: any): ReportItem {
     csvUrl: r.csvUrl ?? undefined,
     pdfStatus: r.pdfStatus ?? null,
     pdfError: r.pdfError ?? null,
+    xlsxStatus: r.xlsxStatus ?? null,
+    xlsxError: r.xlsxError ?? null,
+    csvStatus: r.csvStatus ?? null,
+    csvError: r.csvError ?? null,
     partial: r.partial ?? null,
     kind: r.kind,
     status: r.status ?? null,
@@ -343,6 +354,16 @@ export function ReportsPanel() {
               {!r.reportUrl && (r.pdfStatus || r.pdfError) && (
                 <Notice tone="danger" density="compact" className="report-pdf-unavailable">
                   📄 PDF unavailable{r.pdfError ? ` — ${r.pdfError}` : ""}
+                </Notice>
+              )}
+              {!r.xlsxUrl && (r.xlsxStatus === "failed" || r.xlsxError) && (
+                <Notice tone="danger" density="compact" className="report-pdf-unavailable">
+                  📊 XLSX unavailable{r.xlsxError ? ` — ${r.xlsxError}` : ""}
+                </Notice>
+              )}
+              {!r.csvUrl && (r.csvStatus === "failed" || r.csvError) && (
+                <Notice tone="danger" density="compact" className="report-pdf-unavailable">
+                  📋 CSV unavailable{r.csvError ? ` — ${r.csvError}` : ""}
                 </Notice>
               )}
               {!r.reportUrl && r.pdfStatus === "failed" && (

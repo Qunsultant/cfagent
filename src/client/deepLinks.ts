@@ -39,7 +39,10 @@ export type DeepLink =
  */
 export const DEEP_LINK_OVERRIDES: Record<string, DeepLink> = {
   // Top-level specials.
-  "goal-screen": { tab: "assets-hub", view: "goal-screen" },
+  // Issue #2970: Goal Screen's own page — the Intelligence menu item
+  // links here now; the hub tab stays until #2971 (its keyed
+  // assets-hub:goal-screen override below still lands on the hub).
+  "goal-screen": { tab: "goal-screen" },
   sandbox: { href: "/checkout/sandbox", newTab: true },
   // Bare sandbox-checkout id (NavigationMenu path) shares the sub-item's
   // link; the resolver falls back to the bare id when no parent:key entry
@@ -80,8 +83,11 @@ export const DEEP_LINK_OVERRIDES: Record<string, DeepLink> = {
   // param lands on the copy hub's custom-thesis tab via the hub's
   // legacy mapping.
   "options-screener:best-trade": { tab: "options", params: { research: "best-trade" } },
-  "workflow-runs:review": { tab: "assets-hub", view: "review" },
-  "workflow-runs:track-record": { tab: "assets-hub", view: "track-record" },
+  // Issue #2970: Review and Track Record's own pages — the Workflow
+  // Runs submenu items link here now; the hub tabs stay until #2971
+  // (their keyed assets-hub:* overrides below still land on the hub).
+  "workflow-runs:review": { tab: "review" },
+  "workflow-runs:track-record": { tab: "track-record" },
   // Planned menu (issue #2783): subs link to their hub views. The
   // parent links to its first sub; the parent itself renders as a
   // toggle-only button in the sidebar, never as a link.

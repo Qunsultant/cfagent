@@ -9,7 +9,9 @@
  *  6. Platform menu: hosts platform-admin, schedules, agents, audit
  *     (issue #2957: workflows moved to the Workflow Runs menu by #2843;
  *     endpoints is an Agents sub-item, never top-level Platform)
- *  7. Billing menu: separated from Platform, hosts payments, revenue, ledger, checkout
+ *  7. Orders/Billings/Payments section: three menus — Orders (checkout,
+ *     ledger), Billing (billing, revenue), Payments (payments,
+ *     payment-assurance) (issue #2968)
  *  8. Intelligence menu: hosts Goal Screen as its own top-level menu item
  *  9. Sandbox menu: hosts payment-assurance and checkout sandbox
  */
@@ -27,6 +29,7 @@ import {
   isNavItemOrSubItemActive,
 } from "../src/client/navConfig";
 import { getNavGroup } from "../src/client/routes";
+import { deepLinkHrefForNavNode } from "../src/client/deepLinks";
 
 let container: HTMLDivElement;
 let root: Root;
@@ -65,7 +68,7 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
     expect(titles).toContain("INTELLIGENCE & COPILOT");
     expect(titles).toContain("WORKFLOWS");
     expect(titles).toContain("MARKETING");
-    expect(titles).toContain("BILLINGS/PAYMENTS");
+    expect(titles).toContain("ORDERS/BILLINGS/PAYMENTS");
     expect(titles).toContain("PLATFORM");
     expect(titles).toContain("PLANNED");
     expect(titles).toContain("SANDBOX");
@@ -183,7 +186,7 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
     expect(subIds).toEqual(["docs", "workflow-runs", "workflows", "reports", "review", "track-record"]);
   });
 
-  it("configures Sandbox menu with sandbox-checkout, and BILLINGS/PAYMENTS with payment-assurance", () => {
+  it("configures Sandbox menu with sandbox-checkout, and ORDERS/BILLINGS/PAYMENTS menus (#2968)", () => {
     const sandboxSubItems = SUB_MENU_CONFIGS.sandbox;
     expect(sandboxSubItems).toBeDefined();
     const subIds = sandboxSubItems.map((s) => s.id);
@@ -191,9 +194,25 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
 
     const billingSec = DEFAULT_LEFT_NAV_CONFIG.sections.find((s) => s.id === "section-billing");
     expect(billingSec).toBeDefined();
-    expect(billingSec!.title).toBe("BILLINGS/PAYMENTS");
+    expect(billingSec!.title).toBe("ORDERS/BILLINGS/PAYMENTS");
     const itemIds = billingSec!.items.map((i) => i.id);
-    expect(itemIds).toContain("payment-assurance");
+    expect(itemIds).toEqual(["orders", "billing", "payments"]);
+    // The pages live as submenus, not as separate top-level items:
+    // revenue, ledger, checkout, and payment-assurance appear only
+    // under a parent. (billing and payments ARE top-level ids too,
+    // as the menu parents — the shared-id precedent workflow-runs
+    // sets — and their pages are their submenu children.)
+    for (const id of ["revenue", "ledger", "checkout", "payment-assurance"]) {
+      expect(itemIds).not.toContain(id);
+    }
+    expect(SUB_MENU_CONFIGS.orders.map((s) => s.id)).toEqual(["checkout", "ledger"]);
+    expect(SUB_MENU_CONFIGS.billing.map((s) => s.id)).toEqual(["billing", "revenue"]);
+    expect(SUB_MENU_CONFIGS.payments.map((s) => s.id)).toEqual(["payments", "payment-assurance"]);
+    // Submenu links land on the same ?tab=X destinations the
+    // top-level items used (default route resolution, no overrides).
+    expect(deepLinkHrefForNavNode("orders", "checkout")).toBe("?tab=checkout");
+    expect(deepLinkHrefForNavNode("billing", "revenue")).toBe("?tab=revenue");
+    expect(deepLinkHrefForNavNode("payments", "payment-assurance")).toBe("?tab=payment-assurance");
   });
 
   it("toggles sub-menu open and closed on menu row click", async () => {
@@ -264,16 +283,16 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
     await renderNavBar();
     expect(container.textContent).toContain("Goal Screen");
   });
-  it("renders distinct icons for all eight Platform Admin sub-menu items", async () => {
+  it("renders distinct icons for all nine Platform Admin sub-menu items", async () => {
     const adminItem = findNavItemConfig(DEFAULT_LEFT_NAV_CONFIG, "platform-admin");
     expect(adminItem).toBeDefined();
-    expect(adminItem?.subItems).toHaveLength(8);
+    expect(adminItem?.subItems).toHaveLength(9);
     for (const sub of adminItem!.subItems!) {
       expect(sub.icon, `Sub-item ${sub.id} missing icon`).toBeDefined();
       expect(sub.icon!.length).toBeGreaterThan(0);
     }
     const icons = adminItem!.subItems!.map((s) => s.icon);
-    expect(new Set(icons).size).toBe(8);
+    expect(new Set(icons).size).toBe(9);
 
     await renderNavBar();
     const chevronBtn = container.querySelector('[aria-controls="submenu-platform-admin"]') as HTMLButtonElement;
@@ -285,7 +304,7 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
     const submenu = container.querySelector('#submenu-platform-admin');
     expect(submenu).toBeTruthy();
     const svgs = submenu!.querySelectorAll('.submenu-item-bullet svg');
-    expect(svgs.length).toBe(8);
+    expect(svgs.length).toBe(9);
   });
   it("renders Schedules under Platform with distinct Schedules icon and handles navigation", async () => {
     const platform = DEFAULT_LEFT_NAV_CONFIG.sections.find((s) => s.id === "section-platform");

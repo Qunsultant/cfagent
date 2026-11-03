@@ -130,6 +130,27 @@ export const SCHEDULE_UNIFICATION_ANSWERS: ScheduleUnificationAnswer[] = [
       "Deliberately: it rides the */30 tick via the research schedule guard instead of adding a trigger, per the free-plan ceiling note in wrangler.jsonc. Adding a trigger is a deployment decision, not a schedule-creation action.",
     evidence: "wrangler.jsonc crons comment; src/server.ts scheduled() research dispatch on the */30 tick.",
   },
+  {
+    question: "What does the unified Jobs UI list?",
+    answer:
+      "One surface (PlatformAdmin Jobs panel) listing all three systems' jobs: ScheduledAgent goals with their per-run history, Orchestrator durable schedules with theirs, and Worker cron triggers read-only and labelled deployment-only. It merges the management surface only — the stores, endpoints, and existing panels all stay.",
+    evidence:
+      "UNIFIED_JOBS_UI in this module; src/client/JobsPanel.tsx; GET /api/schedule/runs, GET /api/schedules/runs, GET /api/schedule/systems.",
+  },
+  {
+    question: "What does a per-run job record contain?",
+    answer:
+      "System, job/goal id, operation/callback, started/finished, a three-valued outcome (success/failure/skipped — skipped is its own value because executors genuinely skip), triggeredBy (scheduled/manual), error text on failure, the skip reason on skipped, and a descriptor plus artifact references on success. A failure without error text and a skip without a reason cannot be constructed.",
+    evidence:
+      "src/data/jobRunRecordPorts.ts; src/services/jobRunRecords.ts buildJobRunRecord; tests/job-run-records-2964.test.ts.",
+  },
+  {
+    question: "Which firings leave a per-run record?",
+    answer:
+      "Every ScheduledAgent goal firing that reaches a terminal point (budget rejections, pipeline/social/resource/index/chain outcomes, generic job creation, and loop-catch failures); every firing of the four creatable orchestrator callbacks, SDK or manual, recorded by their method wrappers with the outcome the callback itself reports; and manual triggers of non-creatable callbacks via the generic trigger route, recorded invocation-level. Disabled or not-due goals and refused (paused) triggers leave no record — no run happened. SDK firings of internal-only callbacks are the named gap, carried below.",
+    evidence:
+      "src/agents/scheduled-agent.ts onCron recordGoalRun points; src/agents/orchestrator/scheduleCallbackRunRecords.ts; src/agents/routes/schedules.ts trigger branch.",
+  },
 ];
 
 export interface ScheduleUnificationCarried {
@@ -157,8 +178,70 @@ export const SCHEDULE_UNIFICATION_CARRIED: ScheduleUnificationCarried[] = [
     reason:
       "Genuinely separate slice: it requires a store migration, a merged creation API, and a merged UI, and must keep both existing paths working behind a switch per NEVER-EITHER/OR. This slice documents the seam instead of merging it.",
   },
+  {
+    question: "Do SDK firings of internal-only callbacks leave per-run records?",
+    owner: "follow-up slice",
+    reason:
+      "Not in this slice: executeAsyncJob, expireStaleOrderDraft, collectIvHistory, and autoRenewETradeTokens have no outcome-reporting wrapper, and wrapping async-job plumbing would expand scope into its own outcome feed. Their outcomes stay visible via their existing feeds (job outcomes, audit rows, scan runs, token-renewal claim rows). Manual triggers of those callbacks via the generic trigger route ARE recorded, invocation-level; the unified UI says so rather than implying completeness.",
+  },
 ];
 
 export function findScheduleSystem(id: string): ScheduleSystem | undefined {
   return SCHEDULE_SYSTEMS.find((system) => system.id === id);
 }
+
+/**
+ * Issue #2964 — the unified Jobs management surface. This is a UI
+ * merge, NOT a store merge: every existing panel, endpoint, and
+ * store stays (see SCHEDULE_UNIFICATION_CARRIED's store-merge item,
+ * still carried). The Jobs panel reads the existing endpoints and
+ * adds per-run records beside them.
+ */
+export interface UnifiedJobsSection {
+  id: string;
+  source: string;
+  editable: boolean;
+  note?: string;
+}
+
+export const UNIFIED_JOBS_UI: {
+  panel: string;
+  mount: string;
+  sections: UnifiedJobsSection[];
+} = {
+  panel: "JobsPanel",
+  mount: "PlatformAdmin, beside the Scheduled goals panel",
+  sections: [
+    {
+      id: "scheduled-agent-goals",
+      source: "GET /api/schedule/goals + GET /api/schedule/runs; create via POST /api/schedule/goals; trigger via POST /api/schedule/goals/:id/trigger",
+      editable: true,
+    },
+    {
+      id: "orchestrator-schedules",
+      source: "GET /api/schedules + GET /api/schedules/runs + GET /api/schedules/callbacks; create via POST /api/schedules/create; trigger via POST /api/schedules/:id/trigger",
+      editable: true,
+    },
+    {
+      id: "worker-cron-triggers",
+      source: "GET /api/schedule/systems (this module's WORKER_CRON_TRIGGERS_INVENTORY, test-pinned to wrangler.jsonc)",
+      editable: false,
+      note: "deployment-only: Worker cron triggers are declared in wrangler.jsonc and deployed, never edited from the UI",
+    },
+  ],
+};
+
+/** The per-run record fields, in storage order (see data/jobRunRecordPorts.ts). */
+export const JOB_RUN_RECORD_FIELDS: readonly string[] = [
+  "system",
+  "jobId",
+  "operation",
+  "started",
+  "finished",
+  "outcome",
+  "triggeredBy",
+  "error",
+  "detail",
+  "descriptor",
+  "artifactRefs",
+];

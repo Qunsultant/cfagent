@@ -120,10 +120,13 @@ export const DEFAULT_SCHEDULES: ScheduledGoal[] = [
     // adding an entry here does not inject it into an already-
     // running deployment. Both run on the existing */30 tick;
     // no new scheduler, no new wrangler cron triggers.
-    // Wikipedia weekly (Sunday 04:00 UTC): the four Wikipedia
-    // indices, within the #1852 10-day freshness cap. The
-    // production path is live: D1 store via AGENT_DB + global
-    // fetch over the adapter's own Wikipedia URLs.
+    // Wikipedia weekly (Sunday 04:00 UTC): the Wikipedia
+    // indices — dow, sp500, sp100, nasdaq100, sp400 (#2962),
+    // and the 11 GICS sector keys (#2962, filtered from the
+    // S&P 500 table's GICS Sector column) — within the #1852
+    // 10-day freshness cap. The production path is live: D1
+    // store via AGENT_DB + global fetch over the adapter's own
+    // Wikipedia URLs.
     // Holdings daily (03:00 UTC) ships DISABLED, the
     // daily-social-post precedent: no ETF holdings-file fetcher
     // binding exists in code (no holdings URL is established
@@ -132,7 +135,9 @@ export const DEFAULT_SCHEDULES: ScheduledGoal[] = [
     // it via Settings → Scheduled goals once the holdings
     // fetcher is bound (see docs/architecture/security/
     // index-list-snapshots-1980.md); forced triggerGoal still
-    // exercises it before then.
+    // exercises it before then. #2962 adds russell3000 (IWB +
+    // IWM union) to this disabled group — its stored refresh
+    // is a carried item until the binding lands.
     id: "index-refresh-wikipedia",
     name: "Index-list refresh (Wikipedia)",
     cron: "0 4 * * 0",

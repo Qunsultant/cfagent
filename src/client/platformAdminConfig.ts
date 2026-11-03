@@ -17,6 +17,7 @@ export type PlatformAdminSectionId =
   | "ads"
   | "background-tasks"
   | "scheduled-goals"
+  | "jobs"
   | "provenance"
   | "api-keys"
   | "data-providers"
@@ -49,6 +50,7 @@ export const DEFAULT_PLATFORM_ADMIN_CONFIG: PlatformAdminConfig = {
         { id: "ads", label: "Ads & Partner Banners", description: "Workspace banners and sponsor placements", icon: "Banners" },
         { id: "background-tasks", label: "Background Tasks", description: "Async jobs & execution queue", icon: "Tasks" },
         { id: "scheduled-goals", label: "Scheduled goals", description: "ScheduledAgent goals, ticks & add-goal form", icon: "ScheduledGoals" },
+        { id: "jobs", label: "Jobs", description: "All scheduled jobs & per-run results", icon: "Jobs" },
         { id: "provenance", label: "Technical Diagnostics & Provenance", description: "DID, MCP client, attestation & ledger", icon: "Provenance" },
         { id: "api-keys", label: "API Keys", description: "MCP transport access for external clients", icon: "ApiKeys" },
         { id: "data-providers", label: "Data Providers", description: "Provisioning lifecycle for market-data providers", icon: "DataProviders" },

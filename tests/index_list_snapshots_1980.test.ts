@@ -324,11 +324,30 @@ describe("index-list refresh job (#1980)", () => {
     ).rejects.toThrow(/every index/i);
     expect(await store.latest("dow")).toBeUndefined();
   });
-  it("refresh index groups cover all six indices", () => {
+  it("refresh index groups cover all indices (six original + #2962 extension)", () => {
     expect([...INDEX_REFRESH_INDICES.wikipedia].sort()).toEqual(
-      ["dow", "nasdaq100", "sp100", "sp500"],
+      [
+        "dow",
+        "nasdaq100",
+        "sector-communication-services",
+        "sector-consumer-discretionary",
+        "sector-consumer-staples",
+        "sector-energy",
+        "sector-financials",
+        "sector-health-care",
+        "sector-industrials",
+        "sector-information-technology",
+        "sector-materials",
+        "sector-real-estate",
+        "sector-utilities",
+        "sp100",
+        "sp400",
+        "sp500",
+      ].sort(),
     );
-    expect([...INDEX_REFRESH_INDICES.holdings].sort()).toEqual(["russell1000", "russell2000"]);
+    expect([...INDEX_REFRESH_INDICES.holdings].sort()).toEqual(
+      ["russell1000", "russell2000", "russell3000"].sort(),
+    );
   });
 });
 

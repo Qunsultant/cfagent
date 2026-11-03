@@ -324,12 +324,20 @@ describe("#1023 one PDF path — source pins", () => {
     const start = agent.indexOf("private async persistRun");
     expect(start).toBeGreaterThan(-1);
     const region = agent.slice(start, start + 9000);
-    expect(region).toContain("runReportPipeline");
+    // Issue #2911 (G4): persistRun reaches the PDF path only through
+    // generateRunPdf (shared with regeneration); the pipeline call and
+    // the failure recording live in the one generation module, which
+    // this pin now checks directly — the intent (one PDF path, the
+    // pipeline's own error recorded, no fallback generation) is
+    // unchanged, only the file holding the call moved.
+    expect(region).toContain("this.generateRunPdf");
     expect(region).not.toMatch(/generateScreenerPdf\s*\(/);
-    expect(region).toContain('result.pdfStatus = "failed"');
+    const module = readFileSync(join(SRC_ROOT, "services/stockReportArtifacts.ts"), "utf8");
+    expect(module).toContain("runReportPipeline(");
+    expect(module).toContain('result.pdfStatus = "failed"');
     // Exact assignment of the pipeline's own error — ctrl's fallback
     // version reads `= pipelineResult.pdfError || (fallbackErr ...)`.
-    expect(region).toContain("result.pdfError = pipelineResult.pdfError;");
+    expect(module).toContain("result.pdfError = pipelineResult.pdfError;");
   });
 
   it("(b) storeOptionsPdf is gone from production code (no definition, no callers)", () => {

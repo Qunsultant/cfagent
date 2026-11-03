@@ -83,9 +83,13 @@ describe("scheduled report store failure (#2178 S2)", () => {
     };
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
-      await expect(
-        autonomousMarketScreen(makeCtx(orm), { trigger: "manual", userLogin: "alice", universe: "NASDAQ100" }),
-      ).resolves.toBeUndefined();
+      // Issue #2964: the extracted callback now returns its outcome
+      // object instead of void (the recording wrapper's truth source).
+      // The no-throw contract this test pins is unchanged: the call
+      // still resolves, and the audit failure still surfaces via the
+      // error path rather than a throw.
+      const outcome = await autonomousMarketScreen(makeCtx(orm), { trigger: "manual", userLogin: "alice", universe: "NASDAQ100" });
+      expect(outcome.outcome).toBe("success");
       expect(errorSpy).toHaveBeenCalled();
     } finally {
       errorSpy.mockRestore();

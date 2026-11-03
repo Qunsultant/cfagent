@@ -277,6 +277,18 @@ export const ROUTES = [
     },
   },
   {
+    // Issue #2970: Goal Screen's own page — the Intelligence menu item
+    // links here now (deepLinks bare "goal-screen"); the hub tab stays
+    // until the slimming slice (#2971) removes it.
+    id: "goal-screen",
+    retain: true,
+    navGroup: "goal-screen",
+    crumb: "Goal Screen",
+    category: "Intelligence",
+    icon: "Goal",
+    description: "Goal-driven screening flow with AI-orchestrated criteria",
+  },
+  {
     id: "ledger",
     retain: true,
     navGroup: "ledger",
@@ -548,6 +560,18 @@ export const ROUTES = [
     },
   },
   {
+    // Issue #2970: Review's own page — the Workflow Runs submenu item
+    // links here now; the hub tab stays until #2971.
+    id: "review",
+    retain: true,
+    navGroup: "workflow-runs",
+    crumb: "Proposal Review",
+    category: "Playbooks",
+    icon: "Review",
+    description:
+      "Decide what the system proposed: goal proposals, adaptation candidates, and strategy re-selections — nothing activates without a person",
+  },
+  {
     id: "scanner",
     retain: true,
     navGroup: "options-screener",
@@ -625,6 +649,18 @@ export const ROUTES = [
       badge: "Stocks",
       badgeType: "pro",
     },
+  },
+  {
+    // Issue #2970: Track Record's own page — the Workflow Runs submenu
+    // item links here now; the hub tab stays until #2971.
+    id: "track-record",
+    retain: true,
+    navGroup: "workflow-runs",
+    crumb: "Track Record",
+    category: "Playbooks",
+    icon: "TrackRecord",
+    description:
+      "What happened to issued recommendations, from the outcome ledger — Unverified stays Unverified",
   },
   {
     id: "trading",

@@ -36,11 +36,10 @@ describe("nav completeness (#2801)", () => {
     expect(found!.icon).toBe("Goal");
     expect(NAV_ICON_MAP[found!.icon!]).toBeDefined();
     expect(deepLinkForNavNode(null, "goal-screen")).toEqual({
-      tab: "assets-hub",
-      view: "goal-screen",
+      tab: "goal-screen",
     });
     expect(deepLinkHrefForNavNode(null, "goal-screen")).toBe(
-      "?tab=assets-hub&view=goal-screen",
+      "?tab=goal-screen",
     );
   });
 
