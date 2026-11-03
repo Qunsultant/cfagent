@@ -93,13 +93,18 @@ describe("bespoke-styling ceiling (issue #2177)", () => {
         // Bumped 3871 -> 3891 and 2648 -> 2659 for issue #2720: Multi-broker harmonization.
     // Bumped 3891 -> 3905 and 2659 -> 2664 for issue #2723: Tabular DataProvidersPanel
     // and consolidated provider connectivity callout (tokens only).
-    expect(braces).toBeLessThanOrEqual(3905);
+    // Bumped 3905 -> 3920 and 2669 -> 2686 for issue #2688: the RoleGrantsPanel
+    // stylesheet (15 braces, 17 rgp- classes, tokens only, registered in
+    // one_off_stylesheets_1337.json). Sanctioned growth named in the PR body,
+    // per this test's own rule.
+    expect(braces).toBeLessThanOrEqual(3920);
     // Classes bumped 2619 -> 2646 for the same #2681 sheet (27 stp-
     // classes, tokens only).
     // Classes bumped 2646 -> 2648 for issue #2703 (platform-admin-menu-row, platform-admin-menu-icon).
     // Classes bumped 2648 -> 2659 for issue #2720 (etrade-controls-single-line, btn-env-mini, etc.).
     // Classes bumped 2659 -> 2669 for issue #2723 (provider-dashboard-callout, provider-callout-inner, etc.).
-    expect(classes.size).toBeLessThanOrEqual(2669); // ratcheted from 2622 by the #2177 close
+    // Classes bumped 2669 -> 2686 for issue #2688 (17 rgp- classes, tokens only).
+    expect(classes.size).toBeLessThanOrEqual(2686); // ratcheted from 2622 by the #2177 close
   });
 
   it("inline styles and raw labels outside the primitives do not grow", () => {

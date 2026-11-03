@@ -1,0 +1,98 @@
+/* Role grants section (issue #2688) — rgp- prefixed, token-only. */
+
+.rgp-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.rgp-desc {
+  margin: 0;
+  font-size: var(--font-size-body-sm);
+  color: var(--color-text-muted);
+}
+
+.rgp-grant-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.rgp-grant-row {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+
+.rgp-target-field,
+.rgp-email-field {
+  flex: 2 1 16rem;
+}
+
+.rgp-role-field,
+.rgp-tenant-field {
+  flex: 1 1 10rem;
+}
+
+.rgp-loading {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  color: var(--color-text-muted);
+}
+
+.rgp-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.rgp-item {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem;
+  border: 1px solid var(--color-border-medium);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.rgp-item-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.rgp-item-user {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-body-sm);
+  word-break: break-all;
+}
+
+.rgp-item-role {
+  font-size: var(--font-size-body-sm);
+}
+
+.rgp-item-times {
+  font-size: var(--font-size-caption);
+  color: var(--color-text-muted);
+}
+
+.rgp-item-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.rgp-confirm-text {
+  font-size: var(--font-size-body-sm);
+  color: var(--color-text-muted);
+}

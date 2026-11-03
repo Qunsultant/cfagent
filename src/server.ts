@@ -60,6 +60,13 @@ import {
   canManagePermissionDenial,
 } from "./security/permissionDenials";
 import { canGrantRole, type AuthorizationScope, type Role } from "./security/authorization";
+import {
+  canRevokeRoleGrant,
+  flattenRoleGrants,
+  removeRoleBinding,
+  toRoleGrantView,
+  validateRoleGrantRequest,
+} from "./security/roleGrants";
 import { buildAdminOverview, computeAdminCounts, isPlatformAdmin } from "./security/iaaaAdminOverview";
 import {
   evaluateWithObligations,
@@ -2875,6 +2882,9 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
       path === "/api/iaaa/membership/edit" ||
       path === "/api/iaaa/permission/deny" ||
       path === "/api/iaaa/permission/clear" ||
+      path === "/api/iaaa/role-grants" ||
+      path === "/api/iaaa/role-grants/grant" ||
+      path === "/api/iaaa/role-grants/revoke" ||
       path === "/api/iaaa/memberships" ||
       path === "/api/iaaa/deactivate" ||
       path === "/api/iaaa/offboard"
@@ -2961,6 +2971,32 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
         });
         return result.ok;
       };
+      // #2688 — best-effort deny audit for role-grant denials.
+      // Allows keep the obligation channel's audit-before-allow;
+      // denials are recorded here so a refused grant, revoke, or
+      // list is attributable (grantor, grantee, role, tenant,
+      // timestamp) without ever converting a deny into an allow:
+      // a failed audit write leaves the deny standing.
+      const roleGrantDenyAudit = async (action: string, tenant: string): Promise<void> => {
+        try {
+          await recordAuditEvent(createWiredAuditStore(env), {
+            timestamp: nowMs,
+            type: "iaaa.lifecycle",
+            actorPrincipalId: session.internalUserId as string,
+            actorType: "human",
+            initiatingPrincipalId: session.internalUserId as string,
+            tenantId: tenant,
+            correlationId: crypto.randomUUID(),
+            action,
+            decision: "deny",
+            policyVersion: IAAA_AUDIT_POLICY_VERSION,
+            outcome: "failed",
+            errorCode: "ROLE_GRANT_DENIED",
+          });
+        } catch {
+          /* denial attribution is best-effort; the deny stands */
+        }
+      };
       const offboardDeps = () => ({
         sessions: {
           async list() {
@@ -3041,6 +3077,274 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
             ? all
             : all.filter((m) => m.tenantId === tenantId);
           return Response.json({ ok: true, memberships });
+        }
+        // #2688 — dedicated admin-grant surface. Distinct from the
+        // #1758 membership routes in three ways: (1) only
+        // platform-admin / tenant-admin bindings are listed or
+        // touched, flattened per binding with grantor + grant
+        // time; (2) revoke removes ONE binding, preserving sibling
+        // bindings on the same membership; (3) tenant-admins are
+        // first-class callers here (their own tenant, tenant-scope
+        // grants only) — the IAAA panel's platform gate never
+        // admitted them to a grant UI. Gates are the shared ones:
+        // canGrantRole for grant and revoke, the route-level
+        // self-grant refusal for grants, and the #1751 obligation
+        // channel (step-up + audit-before-allow for role:assign,
+        // audit-before-allow for membership:revoke, with the
+        // documented platform-scope audit-before-revoke exception
+        // for platform grants). A platform-admin is NOT a tenant
+        // superuser: granting tenant-admin additionally requires
+        // role:assign in that tenant, exactly as canGrantRole
+        // decides — the issue body's shorthand does not widen it.
+        if (path === "/api/iaaa/role-grants") {
+          if (request.method !== "GET") {
+            return Response.json({ error: "Method not allowed" }, { status: 405 });
+          }
+          const canListTenant = await callerCanGrantTenantAdmin();
+          if (!callerIsPlatformAdmin && !canListTenant) {
+            await roleGrantDenyAudit("role_grant.list", tenantId);
+            return Response.json({ error: "Forbidden: listing role grants requires admin access." }, { status: 403 });
+          }
+          const entries = await listSessionFamilyEntries(env, "iaaa-membership:");
+          if (!entries) {
+            return Response.json({ error: "Role-grant listing unavailable." }, { status: 500 });
+          }
+          const all = listMembershipsFromEntries(entries);
+          const visible = callerIsPlatformAdmin
+            ? all
+            : all.filter((m) => m.tenantId === tenantId);
+          const grants = flattenRoleGrants(visible).filter(
+            (g) => callerIsPlatformAdmin || g.scope === "tenant",
+          );
+          // Identity enrichment, best-effort: issuer:subject from
+          // the binding user-index (never invented — a user with
+          // no binding entry lists with identity null), plus the
+          // grantee email captured at grant time (#2661).
+          const identityByUser = new Map<string, string>();
+          const emailByMembership = new Map<string, string>();
+          for (const m of visible) {
+            if (m.email) emailByMembership.set(m.membershipId, m.email);
+          }
+          const bindingEntries = await listSessionFamilyEntries(env, "iaaa-binding:user:");
+          if (bindingEntries) {
+            for (const entry of bindingEntries) {
+              try {
+                const parsed = JSON.parse(entry.value) as {
+                  internalUserId?: unknown;
+                  providerIssuer?: unknown;
+                  providerSubject?: unknown;
+                };
+                if (
+                  typeof parsed.internalUserId === "string" &&
+                  typeof parsed.providerIssuer === "string" &&
+                  typeof parsed.providerSubject === "string" &&
+                  !identityByUser.has(parsed.internalUserId)
+                ) {
+                  identityByUser.set(
+                    parsed.internalUserId,
+                    `${parsed.providerIssuer}:${parsed.providerSubject}`,
+                  );
+                }
+              } catch {
+                continue;
+              }
+            }
+          }
+          return Response.json({
+            ok: true,
+            grants: grants.map((g) => ({
+              ...g,
+              identity: identityByUser.get(g.internalUserId) ?? null,
+              email: emailByMembership.get(g.membershipId) ?? null,
+            })),
+          });
+        }
+        if (path === "/api/iaaa/role-grants/grant") {
+          if (request.method !== "POST") {
+            return Response.json({ error: "Method not allowed" }, { status: 405 });
+          }
+          const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+          const targetId = typeof body?.internalUserId === "string" ? body.internalUserId.trim() : "";
+          const role = typeof body?.role === "string" ? body.role.trim() : "";
+          const requestedTenant = typeof body?.tenantId === "string" ? body.tenantId.trim() : undefined;
+          if (targetId === "" || role === "") {
+            return Response.json({ error: "internalUserId and role are required." }, { status: 400 });
+          }
+          const emailRaw = typeof body?.email === "string" ? body.email.trim() : "";
+          const granteeEmail = emailRaw === "" ? undefined : emailRaw;
+          if (granteeEmail !== undefined && (granteeEmail.length > 512 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(granteeEmail))) {
+            return Response.json({ error: "email must be a valid email address." }, { status: 400 });
+          }
+          const validated = validateRoleGrantRequest({
+            granterInternalUserId: session.internalUserId as string,
+            targetInternalUserId: targetId,
+            role,
+            tenantId: requestedTenant,
+            resolvedTenantId: tenantId,
+          });
+          if (!validated.ok) {
+            await roleGrantDenyAudit("role:assign", tenantId);
+            return Response.json(
+              { error: validated.error, code: validated.code },
+              { status: validated.code === "SELF_GRANT" ? 403 : 400 },
+            );
+          }
+          // Idempotent no-op, mirroring the membership grant
+          // route: a live covering binding is returned, not
+          // duplicated — after the same canGrantRole check, so a
+          // non-granter learns nothing beyond a denial.
+          const existingLive = await membershipStore.getMembershipsByUser(targetId);
+          const covering = existingLive.find(
+            (m) =>
+              m.tenantId === validated.tenantId &&
+              m.revokedAtMs === undefined &&
+              m.roleBindings.some(
+                (b) =>
+                  b.role === validated.role &&
+                  b.scope === validated.scope &&
+                  (b.expiresAtMs === undefined || b.expiresAtMs > nowMs),
+              ),
+          );
+          if (covering) {
+            const check = await canGrantRole(membershipStore, {
+              granterInternalUserId: session.internalUserId as string,
+              targetTenantId: validated.tenantId,
+              targetScope: validated.scope,
+              targetRole: validated.role,
+              nowMs,
+            });
+            if (check.decision === "deny") {
+              await roleGrantDenyAudit("role:assign", validated.tenantId);
+              return Response.json(
+                { error: "Forbidden: grant denied.", code: check.reason, reason: check.reason },
+                { status: 403 },
+              );
+            }
+            const index = covering.roleBindings.findIndex(
+              (b) => b.role === validated.role && b.scope === validated.scope,
+            );
+            return Response.json({
+              ok: true,
+              grant: toRoleGrantView(covering, index),
+              alreadyGranted: true,
+            });
+          }
+          const evaluated = await evaluateWithObligations(membershipStore, {
+            internalUserId: session.internalUserId,
+            tenantId: validated.tenantId,
+            permission: "role:assign",
+            scope: validated.scope,
+            nowMs,
+            authTimeMs: session.authTimeMs,
+            audit: wiredAuditWriter("role:assign"),
+          });
+          if (evaluated.decision === "deny") {
+            await roleGrantDenyAudit("role:assign", validated.tenantId);
+            return Response.json(
+              { error: "Forbidden: grant denied.", code: evaluated.reason, reason: evaluated.reason },
+              { status: 403 },
+            );
+          }
+          const granted = await grantMembership(membershipStore, {
+            granterInternalUserId: session.internalUserId,
+            internalUserId: targetId,
+            tenantId: validated.tenantId,
+            roleBindings: [
+              {
+                role: validated.role,
+                scope: validated.scope,
+                grantedBy: session.internalUserId as string,
+              },
+            ],
+            nowMs,
+            ...(granteeEmail !== undefined ? { email: granteeEmail } : {}),
+          });
+          if (!granted.ok) {
+            await roleGrantDenyAudit("role:assign", validated.tenantId);
+            return Response.json(
+              { error: granted.error, code: granted.code },
+              { status: granted.code === "GRANT_DENIED" ? 403 : 400 },
+            );
+          }
+          return Response.json(
+            { ok: true, grant: toRoleGrantView(granted.membership, 0) },
+            { status: 201 },
+          );
+        }
+        if (path === "/api/iaaa/role-grants/revoke") {
+          if (request.method !== "POST") {
+            return Response.json({ error: "Method not allowed" }, { status: 405 });
+          }
+          const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+          const membershipId = typeof body?.membershipId === "string" ? body.membershipId.trim() : "";
+          const bindingIndex = typeof body?.bindingIndex === "number" ? body.bindingIndex : -1;
+          if (membershipId === "" || !Number.isInteger(bindingIndex) || bindingIndex < 0) {
+            return Response.json({ error: "membershipId and a non-negative integer bindingIndex are required." }, { status: 400 });
+          }
+          const record = await readMembershipById(kv, membershipId);
+          if (!record) {
+            return Response.json({ error: "Membership not found." }, { status: 404 });
+          }
+          if (record.revokedAtMs !== undefined) {
+            return Response.json({ ok: true, grantId: `${membershipId}:${bindingIndex}`, alreadyRevoked: true });
+          }
+          const view = toRoleGrantView(record, bindingIndex);
+          if (!view) {
+            return Response.json({ error: "No admin grant at that binding index." }, { status: 400 });
+          }
+          const revokable = await canRevokeRoleGrant(membershipStore, {
+            revokerInternalUserId: session.internalUserId as string,
+            grant: view,
+            nowMs,
+          });
+          if (revokable.decision === "deny") {
+            await roleGrantDenyAudit("membership:revoke", record.tenantId);
+            return Response.json(
+              { error: "Forbidden: revoke denied.", code: revokable.reason, reason: revokable.reason },
+              { status: 403 },
+            );
+          }
+          if (view.scope === "platform") {
+            // Same platform-scope exception as the membership
+            // revoke route: PDP platform grants carry no
+            // membership:revoke, so a platform-scope revoke is
+            // gated on live platform-admin + audit BEFORE the
+            // revoke, failing closed on audit failure.
+            if (!callerIsPlatformAdmin) {
+              await roleGrantDenyAudit("membership:revoke", record.tenantId);
+              return Response.json({ error: "Forbidden: revoking a platform grant requires platform-admin." }, { status: 403 });
+            }
+            const audited = await offboardAudit("membership:revoke", session.internalUserId, record.tenantId, nowMs);
+            if (!audited) {
+              return Response.json({ error: "Forbidden: audit-before-revoke failed.", code: "AUDIT_FAILED" }, { status: 403 });
+            }
+          } else {
+            const evaluated = await evaluateWithObligations(membershipStore, {
+              internalUserId: session.internalUserId,
+              tenantId: record.tenantId,
+              permission: "membership:revoke",
+              scope: "tenant",
+              nowMs,
+              audit: wiredAuditWriter("membership:revoke"),
+            });
+            if (evaluated.decision === "deny") {
+              await roleGrantDenyAudit("membership:revoke", record.tenantId);
+              return Response.json(
+                { error: "Forbidden: revoke denied.", code: evaluated.reason, reason: evaluated.reason },
+                { status: 403 },
+              );
+            }
+          }
+          const removed = removeRoleBinding(record, bindingIndex);
+          if (!removed.ok) {
+            return Response.json({ error: removed.error, code: removed.code }, { status: 400 });
+          }
+          if (removed.emptied) {
+            await membershipStore.revokeMembership(membershipId, nowMs);
+          } else {
+            await membershipStore.put(removed.membership);
+          }
+          return Response.json({ ok: true, grantId: view.grantId, emptied: removed.emptied, revoked: true });
         }
         if (path === "/api/iaaa/membership/grant") {
           if (request.method !== "POST") {
