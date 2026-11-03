@@ -21,16 +21,18 @@
  * (navOrder 6, icon Scanner, badge Stocks); nav count stays 30.)
  * (#2954 added the Assets Hub nav entry, navOrder 30, last in display
  * order; pin updated in the same PR per the §7 pin rule.)
+ * (#2973 added the Queues nav entry, navOrder 31, last in display
+ * order; pin updated in the same PR per the §7 pin rule.)
  */
 import { describe, it, expect } from "vitest";
 import { ROUTES, hasNavEntry } from "../src/client/routes";
 import { NAVIGATION_ITEMS } from "../src/client/components/NavigationMenu";
 
 const navRoutes = ROUTES.filter(hasNavEntry);
-const NAV_COUNT = 31;
+const NAV_COUNT = 32;
 
 describe("left-nav unique icons and badges", () => {
-  it("has the full 31-item nav", () => {
+  it("has the full 32-item nav", () => {
     expect(navRoutes).toHaveLength(NAV_COUNT);
     expect(NAVIGATION_ITEMS).toHaveLength(NAV_COUNT);
   });
