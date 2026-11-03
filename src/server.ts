@@ -14,6 +14,11 @@ import {
 } from "./messaging/deadLetter";
 import { getSessionCached, getSessionCachedFetchedAt, invalidateSessionCache } from "./security/sessionCache";
 import { resolveIdleTimeoutMs } from "./security/sessionPolicy";
+import {
+  buildLoggedInUserRows,
+  parseLoggedInSessionEntry,
+} from "./security/iaaaLoggedInUsers";
+import { SESSION_REVOCATION_CROSS_ISOLATE_BOUND_MS } from "./security/revocationTargets";
 import { deleteSession, getSession, listSessionFamilyEntries, sessionStore, updateSession, wiredAccessRequestStore, wiredMembershipStore } from "./security/session";
 import { listStoreEntries, type DoNamespaceLike, type DoStubLike } from "./security/durableKv";
 import type { ActorNamespaceLike } from "./services/actorGatewayPorts";
@@ -2929,6 +2934,8 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
       path === "/api/iaaa/role-grants" ||
       path === "/api/iaaa/role-grants/grant" ||
       path === "/api/iaaa/role-grants/revoke" ||
+      path === "/api/iaaa/logged-in-users" ||
+      path === "/api/iaaa/logged-in-users/revoke" ||
       path === "/api/iaaa/policy-proposals" ||
       path === "/api/iaaa/policy-proposals/active" ||
       path === "/api/iaaa/policy-proposals/propose" ||
@@ -3043,6 +3050,29 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
             policyVersion: IAAA_AUDIT_POLICY_VERSION,
             outcome: "failed",
             errorCode: "ROLE_GRANT_DENIED",
+          });
+        } catch {
+          /* denial attribution is best-effort; the deny stands */
+        }
+      };
+      // #2836 — best-effort deny audit for logged-in-users
+      // denials. Mirrors roleGrantDenyAudit: a failed audit
+      // write leaves the deny standing, never converts it.
+      const loggedInUsersDenyAudit = async (action: string, tenant: string): Promise<void> => {
+        try {
+          await recordAuditEvent(createWiredAuditStore(env), {
+            timestamp: nowMs,
+            type: "iaaa.lifecycle",
+            actorPrincipalId: session.internalUserId as string,
+            actorType: "human",
+            initiatingPrincipalId: session.internalUserId as string,
+            tenantId: tenant,
+            correlationId: crypto.randomUUID(),
+            action,
+            decision: "deny",
+            policyVersion: IAAA_AUDIT_POLICY_VERSION,
+            outcome: "failed",
+            errorCode: "LOGGED_IN_USERS_DENIED",
           });
         } catch {
           /* denial attribution is best-effort; the deny stands */
@@ -3396,6 +3426,265 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
             await membershipStore.put(removed.membership);
           }
           return Response.json({ ok: true, grantId: view.grantId, emptied: removed.emptied, revoked: true });
+        }
+        // #2836 — admin surface for logged-in users. GET lists
+        // active sessions + per-user login history; POST revokes
+        // one session. Both routes reuse this block's gates
+        // exactly: requireAuth (401), wired session (403 for
+        // legacy), then platform-admin OR tenant-admin in the
+        // resolved tenant (the #2688 tenant-admin proxy:
+        // canGrantRole for tenant-admin in scope). A tenant
+        // admin sees only users with an active membership in
+        // their tenant and only that tenant's login events;
+        // legacy sessions (no tenant attribution) are platform
+        // only. Non-admin denials are audited best-effort.
+        // Sources are the existing durable records only —
+        // SessionStore sessions, retained auth.login audit
+        // events, iaaa-alias: records, iaaa-binding: records,
+        // iaaa-membership: records. No second login record is
+        // invented, and no token, secret, or payload is ever
+        // returned: rows carry identity, tenant, times, counts,
+        // and status only. A null listing or a throwing audit
+        // read answers 500 with no partial data (fail-visible,
+        // never a partial admin view).
+        if (path === "/api/iaaa/logged-in-users") {
+          if (request.method !== "GET") {
+            return Response.json({ error: "Method not allowed" }, { status: 405 });
+          }
+          const callerIsTenantAdmin = await callerCanGrantTenantAdmin();
+          if (!callerIsPlatformAdmin && !callerIsTenantAdmin) {
+            await loggedInUsersDenyAudit("logged_in_users.list", tenantId);
+            return Response.json({ error: "Forbidden: listing logged-in users requires admin access." }, { status: 403 });
+          }
+          try {
+            const sessionEntries = await listSessionFamilyEntries(env, "");
+            const membershipEntries = await listSessionFamilyEntries(env, "iaaa-membership:");
+            const aliasEntries = await listSessionFamilyEntries(env, "iaaa-alias:user:");
+            const bindingEntries = await listSessionFamilyEntries(env, "iaaa-binding:user:");
+            if (!sessionEntries || !membershipEntries || !aliasEntries || !bindingEntries) {
+              return Response.json({ error: "Logged-in-users listing unavailable." }, { status: 500 });
+            }
+            const allEvents = await createWiredAuditStore(env).list();
+            const loginEvents = allEvents
+              .filter((event) => event.type === "auth.login")
+              .map((event) => ({
+                actorPrincipalId: event.actorPrincipalId,
+                tenantId: event.tenantId,
+                timestamp: event.timestamp,
+                outcome: event.outcome,
+              }));
+            // A membership counts for tenant visibility only
+            // when unrevoked AND holding at least one unexpired
+            // binding; binding expiry is folded into `revoked`
+            // here so the module's single-expiry test stays exact.
+            const memberships = listMembershipsFromEntries(membershipEntries).map((m) => ({
+              internalUserId: m.internalUserId,
+              tenantId: m.tenantId,
+              revoked:
+                m.revokedAtMs !== undefined ||
+                !m.roleBindings.some(
+                  (b) => b.expiresAtMs === undefined || b.expiresAtMs > nowMs,
+                ),
+              expiresAtMs: undefined,
+            }));
+            const aliases = aliasEntries.flatMap((entry) => {
+              try {
+                const parsed = JSON.parse(entry.value) as {
+                  internalUserId?: unknown;
+                  recordedAtMs?: unknown;
+                };
+                if (
+                  typeof parsed.internalUserId !== "string" ||
+                  typeof parsed.recordedAtMs !== "number"
+                ) {
+                  return [];
+                }
+                return [{ internalUserId: parsed.internalUserId, recordedAtMs: parsed.recordedAtMs }];
+              } catch {
+                return [];
+              }
+            });
+            const identityByUser: Record<string, string> = {};
+            for (const entry of bindingEntries) {
+              try {
+                const parsed = JSON.parse(entry.value) as {
+                  internalUserId?: unknown;
+                  providerIssuer?: unknown;
+                  providerSubject?: unknown;
+                };
+                if (
+                  typeof parsed.internalUserId === "string" &&
+                  typeof parsed.providerIssuer === "string" &&
+                  typeof parsed.providerSubject === "string" &&
+                  identityByUser[parsed.internalUserId] === undefined
+                ) {
+                  identityByUser[parsed.internalUserId] =
+                    `${parsed.providerIssuer}:${parsed.providerSubject}`;
+                }
+              } catch {
+                continue;
+              }
+            }
+            const users = buildLoggedInUserRows({
+              sessionEntries,
+              loginEvents,
+              aliases,
+              memberships,
+              identityByUser,
+              scope: callerIsPlatformAdmin ? "platform" : "tenant",
+              tenantId,
+              nowMs,
+              idleTimeoutMs: resolveIdleTimeoutMs(env.SESSION_IDLE_TIMEOUT_MS),
+              resolveProvider: (issuer) => {
+                const found = getProviderByIssuer(issuer);
+                return found
+                  ? { providerId: found.providerId, displayName: found.displayName }
+                  : null;
+              },
+            });
+            return Response.json({
+              ok: true,
+              scope: callerIsPlatformAdmin ? "platform" : "tenant",
+              tenantId: callerIsPlatformAdmin ? undefined : tenantId,
+              users,
+              coverage: {
+                // The count's basis, stated in the payload so no
+                // consumer can mistake it for a lifetime total.
+                loginCountBasis: "retained-auth-login-events",
+                loginCountNote:
+                  "loginCount counts retained auth.login succeeded audit events only. " +
+                  "The audit store is bounded (22,000 events) and login writes are " +
+                  "best-effort, so logins outside the retained window — or lost to a " +
+                  "failed write — are absent. A lifetime login count needs an " +
+                  "unbounded login-event record (carried follow-up tied to #2808's " +
+                  "login-trace kind); it is never estimated here.",
+                lastSeenNote:
+                  "lastSeenMs is the last RECORDED activity; touches land at most " +
+                  "once per 300s, so it lags true activity by up to 300s.",
+                firstSeenNote:
+                  "firstSeenMs is the first wired-login observation from the " +
+                  "login-alias record, not a login history.",
+              },
+            });
+          } catch {
+            return Response.json({ error: "Logged-in-users listing unavailable." }, { status: 500 });
+          }
+        }
+        // #2836 — admin revoke of one session. The session must
+        // be currently active and in the caller's scope (tenant
+        // admins: user with an active membership in their tenant;
+        // legacy sessions are platform-only). Revocation is a
+        // store delete + same-isolate cache invalidation, then
+        // an audit record (admin, target user, session, tenant,
+        // timestamp) whose success is reported honestly: a failed
+        // audit write does not un-revoke, and is not hidden.
+        // Bound (#1750 session-revocation target): 0 ms on the
+        // revoking isolate and for wired sessions on fresh reads
+        // everywhere; at most the 60s isolate-cache TTL for an
+        // isolate holding a stale cached copy.
+        if (path === "/api/iaaa/logged-in-users/revoke") {
+          if (request.method !== "POST") {
+            return Response.json({ error: "Method not allowed" }, { status: 405 });
+          }
+          let body: unknown;
+          try {
+            body = await request.json();
+          } catch {
+            return Response.json({ error: "Invalid request body." }, { status: 400 });
+          }
+          const sessionId =
+            typeof body === "object" && body !== null
+              ? (body as { sessionId?: unknown }).sessionId
+              : undefined;
+          if (typeof sessionId !== "string" || sessionId.trim() === "") {
+            return Response.json({ error: "sessionId is required." }, { status: 400 });
+          }
+          const callerIsTenantAdmin = await callerCanGrantTenantAdmin();
+          if (!callerIsPlatformAdmin && !callerIsTenantAdmin) {
+            await loggedInUsersDenyAudit("logged_in_users.revoke", tenantId);
+            return Response.json({ error: "Forbidden: revoking sessions requires admin access." }, { status: 403 });
+          }
+          try {
+            const sessionEntries = await listSessionFamilyEntries(env, "");
+            if (!sessionEntries) {
+              return Response.json({ error: "Session listing unavailable." }, { status: 500 });
+            }
+            const idleTimeoutMs = resolveIdleTimeoutMs(env.SESSION_IDLE_TIMEOUT_MS);
+            const target = sessionEntries
+              .map((entry) =>
+                parseLoggedInSessionEntry(entry.key, entry.value, nowMs, idleTimeoutMs, () => null),
+              )
+              .find((parsed) => parsed !== null && parsed.sessionId === sessionId);
+            if (!target) {
+              return Response.json({ error: "No active session with that id." }, { status: 404 });
+            }
+            let auditTenantId = tenantId;
+            if (!callerIsPlatformAdmin) {
+              if (target.internalUserId === undefined) {
+                await loggedInUsersDenyAudit("logged_in_users.revoke", tenantId);
+                return Response.json({ error: "Forbidden: legacy sessions are platform-admin only." }, { status: 403 });
+              }
+              const membershipEntries = await listSessionFamilyEntries(env, "iaaa-membership:");
+              if (!membershipEntries) {
+                return Response.json({ error: "Membership listing unavailable." }, { status: 500 });
+              }
+              const inTenant = listMembershipsFromEntries(membershipEntries).some(
+                (m) =>
+                  m.internalUserId === target.internalUserId &&
+                  m.tenantId === tenantId &&
+                  m.revokedAtMs === undefined &&
+                  m.roleBindings.some(
+                    (b) => b.expiresAtMs === undefined || b.expiresAtMs > nowMs,
+                  ),
+              );
+              if (!inTenant) {
+                await loggedInUsersDenyAudit("logged_in_users.revoke", tenantId);
+                return Response.json({ error: "Forbidden: that session is outside your tenant." }, { status: 403 });
+              }
+            } else if (target.internalUserId !== undefined) {
+              const membershipEntries = await listSessionFamilyEntries(env, "iaaa-membership:");
+              if (membershipEntries) {
+                const owner = listMembershipsFromEntries(membershipEntries).find(
+                  (m) =>
+                    m.internalUserId === target.internalUserId &&
+                    m.revokedAtMs === undefined &&
+                    m.roleBindings.some(
+                      (b) => b.expiresAtMs === undefined || b.expiresAtMs > nowMs,
+                    ),
+                );
+                if (owner) auditTenantId = owner.tenantId;
+              }
+            }
+            await deleteSession(env, sessionId);
+            invalidateSessionCache(sessionId);
+            const auditResult = await recordAuditEvent(createWiredAuditStore(env), {
+              timestamp: nowMs,
+              type: "iaaa.lifecycle",
+              actorPrincipalId: session.internalUserId as string,
+              actorType: "human",
+              initiatingPrincipalId: session.internalUserId as string,
+              tenantId: auditTenantId,
+              correlationId: sessionId,
+              resourceId: target.internalUserId ?? target.displayLogin,
+              action: "session.revoke",
+              decision: "allow",
+              policyVersion: IAAA_AUDIT_POLICY_VERSION,
+              outcome: "succeeded",
+            }).catch(() => ({ ok: false }));
+            return Response.json({
+              ok: true,
+              revokedSessionId: sessionId,
+              audited: auditResult.ok === true,
+              revokeBoundMs: SESSION_REVOCATION_CROSS_ISOLATE_BOUND_MS,
+              revokeBoundNote:
+                "Wired sessions deny immediately on fresh reads everywhere; " +
+                "an isolate holding a stale cached copy denies within the " +
+                "60s cache TTL. The revoked session id is the audit " +
+                "correlation id; the target user is the resource id.",
+            });
+          } catch {
+            return Response.json({ error: "Session revoke unavailable." }, { status: 500 });
+          }
         }
         // #2838 — PAP editor: approval-gated policy administration.
         // Platform-admin ONLY (tenant admins never administer

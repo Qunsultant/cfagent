@@ -829,7 +829,13 @@ const STEP5B_PORT_SITES: Array<[string, string, number]> = [
   // Bumped 5 -> 6 for issue #2838: the policy-proposals list
   // route adds one list site in server.ts (proposal records by
   // prefix), same factory — no new funnel, no bypass.
-  ["src/server.ts", "listSessionFamilyEntries", 6],
+  // Bumped 6 -> 13 for issue #2836: the logged-in-users list
+  // route adds four list sites in server.ts (sessions, memberships,
+  // login aliases, bindings) and the session-revoke route adds
+  // three (sessions, memberships for the tenant check, memberships
+  // for the audit-tenant lookup), same factory — no new funnel,
+  // no bypass.
+  ["src/server.ts", "listSessionFamilyEntries", 13],
   ["src/server.ts", "wiredAccessRequestStore", 1],
   ["src/server.ts", "wiredMembershipStore", 10],
 ];
