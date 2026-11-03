@@ -59,7 +59,28 @@ import {
   MANAGEABLE_DENIED_PERMISSIONS,
   canManagePermissionDenial,
 } from "./security/permissionDenials";
-import { canGrantRole, type AuthorizationScope, type Role } from "./security/authorization";
+import {
+  ALL_ROLES,
+  canGrantRole,
+  PERMISSIONS,
+  type AuthorizationScope,
+  type Role,
+} from "./security/authorization";
+import {
+  approveProposal,
+  createKvPolicyProposalStore,
+  createProposal,
+  diffPolicySnapshots,
+  parseStoredProposal,
+  policyProposalAuditInput,
+  previewDecisions,
+  promoteProposal,
+  rejectProposal,
+  POLICY_PROPOSAL_ACTIVE_KEY,
+  POLICY_PROPOSAL_KEY_PREFIX,
+  type PolicyProposal,
+  type PolicyProposalAuditAction,
+} from "./security/policyProposals";
 import {
   canRevokeRoleGrant,
   flattenRoleGrants,
@@ -2885,6 +2906,13 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
       path === "/api/iaaa/role-grants" ||
       path === "/api/iaaa/role-grants/grant" ||
       path === "/api/iaaa/role-grants/revoke" ||
+      path === "/api/iaaa/policy-proposals" ||
+      path === "/api/iaaa/policy-proposals/active" ||
+      path === "/api/iaaa/policy-proposals/propose" ||
+      path === "/api/iaaa/policy-proposals/approve" ||
+      path === "/api/iaaa/policy-proposals/reject" ||
+      path === "/api/iaaa/policy-proposals/promote" ||
+      path === "/api/iaaa/policy-proposals/preview" ||
       path === "/api/iaaa/memberships" ||
       path === "/api/iaaa/deactivate" ||
       path === "/api/iaaa/offboard"
@@ -3345,6 +3373,219 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
             await membershipStore.put(removed.membership);
           }
           return Response.json({ ok: true, grantId: view.grantId, emptied: removed.emptied, revoked: true });
+        }
+        // #2838 — PAP editor: approval-gated policy administration.
+        // Platform-admin ONLY (tenant admins never administer
+        // platform policy): every handler below refuses a
+        // non-platform caller with 403 before touching state.
+        // A proposal is inert until approved AND promoted; the
+        // compiled tables stay live until a promotion completes,
+        // and live adoption of a promoted snapshot goes through
+        // the existing platform-only IAAA_PDP_POLICY_SNAPSHOT_JSON
+        // switch (#1755) — this slice never flips live PDP policy
+        // by itself. Audit order is audit-before-persist: a
+        // transition whose #1760 chained audit append fails is
+        // NOT persisted, so no unaudited transition exists. The
+        // audit record carries the proposal's correlationId
+        // verbatim (body correlationId, else the request's
+        // traceparent header), joining it to #2808 traces.
+        if (
+          path === "/api/iaaa/policy-proposals" ||
+          path === "/api/iaaa/policy-proposals/active" ||
+          path === "/api/iaaa/policy-proposals/propose" ||
+          path === "/api/iaaa/policy-proposals/approve" ||
+          path === "/api/iaaa/policy-proposals/reject" ||
+          path === "/api/iaaa/policy-proposals/promote" ||
+          path === "/api/iaaa/policy-proposals/preview"
+        ) {
+          const papStore = createKvPolicyProposalStore(kv);
+          const papAudit = async (
+            action: PolicyProposalAuditAction,
+            proposal: PolicyProposal,
+            actor: string,
+            atMs: number,
+          ): Promise<boolean> => {
+            const input = policyProposalAuditInput(proposal, action, actor);
+            const result = await recordAuditEvent(createWiredAuditStore(env), {
+              ...input,
+              timestamp: atMs,
+              decision: "allow",
+              policyVersion: IAAA_AUDIT_POLICY_VERSION,
+              outcome: "succeeded",
+            });
+            return result.ok;
+          };
+          const papDenyAudit = async (): Promise<void> => {
+            try {
+              await recordAuditEvent(createWiredAuditStore(env), {
+                type: "iaaa.policy",
+                actorPrincipalId: session.internalUserId as string,
+                actorType: "human",
+                initiatingPrincipalId: session.internalUserId as string,
+                tenantId: "platform",
+                correlationId: crypto.randomUUID(),
+                action: "policy.access_denied",
+                timestamp: nowMs,
+                decision: "deny",
+                policyVersion: IAAA_AUDIT_POLICY_VERSION,
+                outcome: "failed",
+                errorCode: "PAP_FORBIDDEN",
+              });
+            } catch {
+              /* denial attribution is best-effort; the deny stands */
+            }
+          };
+          if (!callerIsPlatformAdmin) {
+            await papDenyAudit();
+            return Response.json(
+              { error: "Forbidden: policy administration requires platform-admin." },
+              { status: 403 },
+            );
+          }
+          if (path === "/api/iaaa/policy-proposals" && request.method === "GET") {
+            const entries = await listSessionFamilyEntries(env, POLICY_PROPOSAL_KEY_PREFIX);
+            if (!entries) {
+              return Response.json({ error: "Policy-proposal listing unavailable." }, { status: 500 });
+            }
+            const proposals: PolicyProposal[] = [];
+            let skippedCorrupt = 0;
+            for (const entry of entries) {
+              if (entry.key === POLICY_PROPOSAL_ACTIVE_KEY) continue;
+              const parsed = parseStoredProposal(entry.value);
+              if (parsed) proposals.push(parsed);
+              else skippedCorrupt++;
+            }
+            proposals.sort((a, b) => a.createdAtMs - b.createdAtMs);
+            return Response.json({ ok: true, proposals, skippedCorrupt });
+          }
+          if (path === "/api/iaaa/policy-proposals/active" && request.method === "GET") {
+            const rawActive = await kv.get(POLICY_PROPOSAL_ACTIVE_KEY);
+            const active = await papStore.getActiveSnapshot();
+            return Response.json({
+              ok: true,
+              active,
+              source: rawActive === null ? "compiled" : "pap-promoted",
+            });
+          }
+          if (path === "/api/iaaa/policy-proposals/preview" && request.method === "POST") {
+            const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+            const active = await papStore.getActiveSnapshot();
+            const created = createProposal({
+              proposer: session.internalUserId as string,
+              snapshotInput: body?.snapshot,
+              beforeSnapshot: active,
+              nowMs,
+            });
+            if (!created.ok) {
+              return Response.json({ error: created.error, code: created.code }, { status: 400 });
+            }
+            const probes = ALL_ROLES.flatMap((role) =>
+              PERMISSIONS.map((permission) => ({ role, permission })),
+            );
+            const decisions = await previewDecisions(
+              active,
+              created.proposal.proposedSnapshot,
+              probes,
+              nowMs,
+            );
+            return Response.json({
+              ok: true,
+              beforeRef: created.proposal.beforeRef,
+              afterRef: created.proposal.afterRef,
+              diff: diffPolicySnapshots(active, created.proposal.proposedSnapshot),
+              changedDecisions: decisions.filter((d) => d.changed),
+            });
+          }
+          if (request.method !== "POST") {
+            return Response.json({ error: "Method not allowed" }, { status: 405 });
+          }
+          const papBody = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+          const loadProposal = async (): Promise<PolicyProposal | null> => {
+            const id = typeof papBody?.proposalId === "string" ? papBody.proposalId.trim() : "";
+            if (id === "") return null;
+            return papStore.getProposal(id);
+          };
+          if (path === "/api/iaaa/policy-proposals/propose") {
+            const correlationId =
+              (typeof papBody?.correlationId === "string" && papBody.correlationId.trim() !== ""
+                ? papBody.correlationId.trim()
+                : request.headers.get("traceparent") ?? undefined) ?? undefined;
+            const created = createProposal({
+              proposer: session.internalUserId as string,
+              snapshotInput: papBody?.snapshot,
+              beforeSnapshot: await papStore.getActiveSnapshot(),
+              ...(correlationId !== undefined ? { correlationId } : {}),
+              nowMs,
+            });
+            if (!created.ok) {
+              return Response.json({ error: created.error, code: created.code }, { status: 400 });
+            }
+            if (!(await papAudit("policy.proposed", created.proposal, session.internalUserId as string, nowMs))) {
+              return Response.json({ error: "Audit-before-propose failed; proposal not stored." }, { status: 500 });
+            }
+            await papStore.putProposal(created.proposal);
+            return Response.json({ ok: true, proposal: created.proposal }, { status: 201 });
+          }
+          if (path === "/api/iaaa/policy-proposals/approve") {
+            const proposal = await loadProposal();
+            if (!proposal) return Response.json({ error: "Proposal not found." }, { status: 404 });
+            const exceptionReason =
+              typeof papBody?.exceptionReason === "string" ? papBody.exceptionReason : undefined;
+            const approved = approveProposal(proposal, {
+              approver: session.internalUserId as string,
+              approverIsPlatformAdmin: callerIsPlatformAdmin,
+              ...(exceptionReason !== undefined ? { exceptionReason } : {}),
+              nowMs,
+            });
+            if (!approved.ok) {
+              return Response.json(
+                { error: approved.error, code: approved.code },
+                { status: approved.code === "NOT_PLATFORM_ADMIN" || approved.code === "SELF_APPROVAL" ? 403 : 400 },
+              );
+            }
+            if (!(await papAudit("policy.approved", approved.proposal, session.internalUserId as string, nowMs))) {
+              return Response.json({ error: "Audit-before-approve failed; approval not stored." }, { status: 500 });
+            }
+            await papStore.putProposal(approved.proposal);
+            return Response.json({ ok: true, proposal: approved.proposal });
+          }
+          if (path === "/api/iaaa/policy-proposals/reject") {
+            const proposal = await loadProposal();
+            if (!proposal) return Response.json({ error: "Proposal not found." }, { status: 404 });
+            const rejected = rejectProposal(proposal, {
+              reviewer: session.internalUserId as string,
+              reviewerIsPlatformAdmin: callerIsPlatformAdmin,
+              nowMs,
+            });
+            if (!rejected.ok) {
+              return Response.json({ error: rejected.error, code: rejected.code }, { status: 400 });
+            }
+            if (!(await papAudit("policy.rejected", rejected.proposal, session.internalUserId as string, nowMs))) {
+              return Response.json({ error: "Audit-before-reject failed; rejection not stored." }, { status: 500 });
+            }
+            await papStore.putProposal(rejected.proposal);
+            return Response.json({ ok: true, proposal: rejected.proposal });
+          }
+          if (path === "/api/iaaa/policy-proposals/promote") {
+            const proposal = await loadProposal();
+            if (!proposal) return Response.json({ error: "Proposal not found." }, { status: 404 });
+            const active = await papStore.getActiveSnapshot();
+            const promoted = promoteProposal(proposal, { activeSnapshot: active, nowMs });
+            if (!promoted.ok) {
+              return Response.json({ error: promoted.error, code: promoted.code }, { status: 400 });
+            }
+            if (!(await papAudit("policy.promoted", promoted.proposal, session.internalUserId as string, nowMs))) {
+              return Response.json({ error: "Audit-before-promote failed; previous policy stays active." }, { status: 500 });
+            }
+            await papStore.putActiveSnapshot(promoted.activeSnapshot);
+            await papStore.putProposal(promoted.proposal);
+            return Response.json({
+              ok: true,
+              proposal: promoted.proposal,
+              active: promoted.activeSnapshot,
+            });
+          }
+          return Response.json({ error: "Method not allowed" }, { status: 405 });
         }
         if (path === "/api/iaaa/membership/grant") {
           if (request.method !== "POST") {
