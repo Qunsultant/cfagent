@@ -32,6 +32,14 @@ import type { StockScreenerFilter } from "../types";
 
 export interface StockPattern {
   id: string;
+  /**
+   * Issue #2909 (G2): the pinned version for a pattern run.
+   * The setup catalog carries no per-setup version field, so
+   * catalog patterns pin version "1" until catalog versioning
+   * exists — a run's patternRef is { patternId, version },
+   * never a re-resolved id alone.
+   */
+  version: string;
   label: string;
   description: string;
   assetClass: "stock";
@@ -67,6 +75,7 @@ export function stockPatternFromSetup(setup: MarketSetup): StockPattern {
   }
   return {
     id: setup.id,
+    version: "1",
     label: setup.label,
     description: setup.description,
     assetClass: "stock",

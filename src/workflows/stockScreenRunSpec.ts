@@ -104,6 +104,13 @@ export interface StockScreenRunProvenance {
   goalId?: string;
   patternRef?: StockScreenPatternRef;
   presetRef?: StockScreenPresetRef;
+  /**
+   * Issue #2909 (G2): run qualifications for pattern guardrails
+   * with no filter field — human lines naming each guardrail
+   * and stating it is not enforced. Recorded on the canonical
+   * body and shown on replay; never converted into filters.
+   */
+  patternQualifications?: string[];
 }
 
 /**
@@ -160,6 +167,7 @@ export function withRunProvenance(
   if (provenance.goalId !== undefined) out.goalId = provenance.goalId;
   if (provenance.patternRef !== undefined) out.patternRef = provenance.patternRef;
   if (provenance.presetRef !== undefined) out.presetRef = provenance.presetRef;
+  if (provenance.patternQualifications !== undefined) out.patternQualifications = provenance.patternQualifications;
   return out;
 }
 
@@ -183,6 +191,7 @@ export function specCanonicalFields(spec: StockScreenRunSpec): Record<string, un
     ...(spec.goalId !== undefined ? { goalId: spec.goalId } : {}),
     ...(spec.patternRef !== undefined ? { patternRef: spec.patternRef } : {}),
     ...(spec.presetRef !== undefined ? { presetRef: spec.presetRef } : {}),
+    ...(spec.patternQualifications !== undefined ? { patternQualifications: spec.patternQualifications } : {}),
   };
 }
 
@@ -210,6 +219,7 @@ export function buildStockScreenRunSpec(args: {
   goalId?: string;
   patternRef?: StockScreenPatternRef;
   presetRef?: StockScreenPresetRef;
+  patternQualifications?: string[];
 }): BuildStockScreenRunSpecResult {
   const modeSelection =
     args.modeSelection ??
@@ -225,6 +235,12 @@ export function buildStockScreenRunSpec(args: {
   }
   const { filters, universe, minScore, emailTo, pushToSlack, slackChannel, webhookUrl, generatePdf } =
     parsedScreen.value;
+  // Issue #2909 (G2): the request body's pattern provenance
+  // rides the spec — an explicit builder arg wins, otherwise
+  // the parsed request's patternRef/qualifications (sent by
+  // the New Screen form for an intact applied pattern).
+  const patternRef = args.patternRef ?? parsedScreen.value.patternRef;
+  const patternQualifications = args.patternQualifications ?? parsedScreen.value.patternQualifications;
   const delivery: StockScreenDelivery =
     args.source === "etrade"
       ? { emailTo, pushToSlack, slackChannel, webhookUrl, generatePdf }
@@ -250,8 +266,9 @@ export function buildStockScreenRunSpec(args: {
       ...(args.scheduleId !== undefined ? { scheduleId: args.scheduleId } : {}),
       ...(args.jobId !== undefined ? { jobId: args.jobId } : {}),
       ...(args.goalId !== undefined ? { goalId: args.goalId } : {}),
-      ...(args.patternRef !== undefined ? { patternRef: args.patternRef } : {}),
+      ...(patternRef !== undefined ? { patternRef } : {}),
       ...(args.presetRef !== undefined ? { presetRef: args.presetRef } : {}),
+      ...(patternQualifications !== undefined ? { patternQualifications } : {}),
     },
   };
 }

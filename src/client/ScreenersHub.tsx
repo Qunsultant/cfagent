@@ -13,6 +13,8 @@ import { ErrorBoundary } from "./ErrorBoundary";
 import { IvHistoryPanel } from "./IvHistoryPanel";
 import { ReportsPanel } from "./ReportsPanel";
 import { PatternsPanel } from "./PatternsPanel";
+import { buildAppliedPatternParams } from "./patternApplyHandoff";
+import { stockPatternById } from "../workflows/stockPatternCatalog";
 import { PresetsPanel } from "./PresetsPanel";
 import { SchedulesPanel } from "./SchedulesPanel";
 import { ScreeningReviewPanel } from "./ScreeningReviewPanel";
@@ -529,11 +531,21 @@ export function ScreenersHub({
         >
           <ErrorBoundary label="Patterns panel">
             <PatternsPanel
-              onApplyPattern={(filter) => {
-                // Apply fully determines the New Screen panel
-                // (stockFilterToCriteria semantics) and navigates
-                // there; preset storage is never touched.
-                navigateToTab("stock-hub", "new-screen");
+              onApplyPattern={(filter, patternId) => {
+                // Issue #2909 (G2): Apply fully determines the New
+                // Screen panel — the pattern (id, pinned version,
+                // filter, unmapped guardrails) rides as URL params
+                // the StockHub decodes into its criteria, instead
+                // of being dropped on navigation (audit F1).
+                // Unknown ids fall back to the bare navigation,
+                // never an invented pattern; preset storage is
+                // never touched.
+                const pattern = stockPatternById(patternId);
+                navigateToTab(
+                  "stock-hub",
+                  "new-screen",
+                  pattern ? buildAppliedPatternParams(pattern) : undefined,
+                );
               }}
             />
           </ErrorBoundary>

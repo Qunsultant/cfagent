@@ -122,6 +122,7 @@ export async function startStockScreenWorkflowOrNull(args: {
     ...(spec.goalId !== undefined ? { goalId: spec.goalId } : {}),
     ...(spec.patternRef !== undefined ? { patternRef: spec.patternRef } : {}),
     ...(spec.presetRef !== undefined ? { presetRef: spec.presetRef } : {}),
+    ...(spec.patternQualifications !== undefined ? { patternQualifications: spec.patternQualifications } : {}),
     deliver: spec.deliver,
     ...(spec.provider ? { provider: spec.provider } : {}),
     filters: spec.filters as unknown as Record<string, unknown>,
