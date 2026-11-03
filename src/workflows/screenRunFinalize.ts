@@ -22,12 +22,15 @@
  * is added here — those belong to pipelinePolicy, breakerDecorator,
  * and outcomeCatalog, reused as-is by the callers.
  *
- * Known exception, unchanged: the E*TRADE runScreen-throw failure
- * path publishes a failure notification without a canonical persist,
- * because the thrown failure object is not a persistable run result
- * (it lacks the report fields persistScreenerReportCanonical
- * requires). That path does not go through this finalizer, and
- * this slice does not change it.
+ * Former known exception, closed by #2912 (G5): the E*TRADE
+ * runScreen-throw failure path used to publish a failure notification
+ * without a canonical persist, because the thrown failure object is
+ * not a persistable run result (it lacks the report fields
+ * persistScreenerReportCanonical requires). The route now fabricates
+ * the failed-run shape a returned failure carries and runs it through
+ * this finalizer, so a thrown failure persists-then-delivers exactly
+ * like a returned result (and the store dedupes on generationId, so
+ * a retry never creates a second row).
  *
  * Ordering within a shard list is sequential and per-result, not
  * persist-all-then-deliver-all: a later shard is never delivered
