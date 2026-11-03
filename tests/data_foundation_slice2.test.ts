@@ -39,6 +39,7 @@ import {
 import { InMemoryShardJobAdapter } from "../src/data/inMemoryShardJobAdapter";
 import {
   MIGRATION_0003_AGENT_SHARD_JOBS,
+  MIGRATION_0038_AGENT_SHARD_JOBS_WORKFLOW_RUN_ID,
   applyMigrations,
 } from "../src/data/migrationRunner";
 import { agentShardJobs } from "../src/data/drizzleSchema";
@@ -281,7 +282,13 @@ describe("migration 0003 (#1676)", () => {
       .split("CREATE TABLE IF NOT EXISTS agent_shard_jobs (")[1]
       .split("\n);")[0];
     const ddlColumns = [...block.matchAll(/^\s{2}(\w+) /gm)].map((m) => m[1]);
-    expect(ddlColumns.sort()).toEqual(schemaColumns.sort());
+    // Issue #2989: migration 0038 adds workflow_run_id by ALTER
+    // (0003 is already applied and still owns the CREATE DDL),
+    // so the expected set is 0003's columns plus the ALTERed one.
+    const altered = [
+      ...MIGRATION_0038_AGENT_SHARD_JOBS_WORKFLOW_RUN_ID.sql.matchAll(/ADD COLUMN (\w+)/g),
+    ].map((m) => m[1]);
+    expect([...ddlColumns, ...altered].sort()).toEqual(schemaColumns.sort());
   });
 });
 

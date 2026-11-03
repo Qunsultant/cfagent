@@ -1012,6 +1012,8 @@ export async function runParentFlow(
         status: "timed_out",
         timedOut: true,
         error: `Shard exceeded its ${shardTimeoutMs}ms deadline.`,
+        // Issue #2989: the pending entry's child instance id.
+        workflowRunId: p.workflowId,
       });
     }
   }
@@ -1094,6 +1096,10 @@ export async function runParentFlow(
           stage: "analysis",
           status: "completed",
           detail: `Shard ${o.shardId} completed.`,
+          // Issue #2989: the child instance id, for the row
+          // (fills the child row's missing correlation at
+          // version+1 when the child projected first).
+          ...(o.workflowRunId ? { workflowRunId: o.workflowRunId } : {}),
           result: {
             shardJobIds: [`shard:${o.shardId}`],
             result: {
@@ -1126,6 +1132,8 @@ export async function runParentFlow(
           o.status === "timed_out"
             ? `Shard ${o.shardId} timed out after ${shardTimeoutMs}ms.`
             : `Shard ${o.shardId} failed: ${o.error ?? "screen failed"}`,
+        // Issue #2989: the child instance id, for the row.
+        ...(o.workflowRunId ? { workflowRunId: o.workflowRunId } : {}),
         result: {
           shardJobIds: [`shard:${o.shardId}`],
           result: {
@@ -1216,6 +1224,8 @@ async function pollBatch(
           status: "timed_out",
           timedOut: true,
           error: `Shard exceeded its ${shardTimeoutMs}ms deadline.`,
+          // Issue #2989: the pending entry's child instance id.
+          workflowRunId: p.workflowId,
         });
         return false;
       }
@@ -1226,6 +1236,7 @@ async function pollBatch(
     const snapshot = await step.do(`poll-${round}`, async () => {
       const out: Array<{
         shardId: string;
+        workflowId: string;
         status: WorkflowInstanceStatus;
         output?: unknown;
         error?: { message: string };
@@ -1234,6 +1245,10 @@ async function pollBatch(
         const s = await childOps.getChildStatus(p.workflowId);
         out.push({
           shardId: p.shard.shardId,
+          // Issue #2989: the pending entry's child instance id
+          // rides the snapshot so the outcome — and then the
+          // projected row — carries the seam-returned run id.
+          workflowId: p.workflowId,
           status: s?.status ?? "unknown",
           ...(s?.output !== undefined ? { output: s.output } : {}),
           ...(s?.error ? { error: s.error } : {}),
@@ -1268,12 +1283,15 @@ async function pollBatch(
             // market shards, report id for goal shards).
             timestamp: result.timestamp,
             ...(result.reportId ? { reportId: result.reportId } : {}),
+            // Issue #2989: the child instance id, for the row.
+            ...(s.workflowId ? { workflowRunId: s.workflowId } : {}),
           });
         } else {
           outcomes.set(s.shardId, {
             shardId: s.shardId,
             status: "failed",
             error: "Child workflow output malformed — cannot be a screen result.",
+            ...(s.workflowId ? { workflowRunId: s.workflowId } : {}),
           });
         }
       } else if (s.status === "errored" || s.status === "terminated") {
@@ -1281,6 +1299,7 @@ async function pollBatch(
           shardId: s.shardId,
           status: "failed",
           error: s.error?.message ?? `Child workflow ${s.status}.`,
+          ...(s.workflowId ? { workflowRunId: s.workflowId } : {}),
         });
       }
       // queued/running/waiting/paused/unknown: still outstanding.

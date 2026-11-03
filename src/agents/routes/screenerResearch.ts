@@ -1710,7 +1710,10 @@ export async function handleScreenerResearchRoutes(
               sessionId: userLogin,
               type: "goal_screen.workflow_submitted",
               agent: "orchestrator",
-              payload: { principalKind: "session", jobId: idempotencyKey, trigger: "manual" },
+              // Issue #2989: the started workflow id, mirroring
+              // the scheduled path (which already records it) —
+              // the manual submit's job record at start time.
+              payload: { principalKind: "session", jobId: idempotencyKey, trigger: "manual", workflowId: handle.workflowId },
               createdAt: new Date().toISOString(),
             });
           } catch (auditErr) {

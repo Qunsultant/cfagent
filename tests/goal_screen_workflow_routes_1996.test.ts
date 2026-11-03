@@ -194,6 +194,11 @@ describe("POST /screening/goal-screen async flag (#1996)", () => {
     // Issue #2178 S1: payloads are stored as JSON text (the #1968 read
     // path parses); read the stored form, not the mock's old object shape.
     expect((JSON.parse(rows[0].payload as unknown as string) as { principalKind: string }).principalKind).toBe("session");
+    // Issue #2989: the manual submit audit carries the started workflow
+    // id (mirroring the scheduled path, which already records it).
+    expect((JSON.parse(rows[0].payload as unknown as string) as { workflowId: string }).workflowId).toBe(
+      HANDLE.workflowId,
+    );
   });
 
   it("a manual start failure leaves a session-principal run_failed audit row (#1999)", async () => {

@@ -21,6 +21,7 @@ import type {
 } from "./retentionPorts";
 import {
   MIGRATION_0003_AGENT_SHARD_JOBS,
+  MIGRATION_0038_AGENT_SHARD_JOBS_WORKFLOW_RUN_ID,
   applyMigrations,
 } from "./migrationRunner";
 
@@ -32,7 +33,10 @@ export function createD1ShardJobDb(d1: unknown) {
 
 /** Create agent_shard_jobs if absent (idempotent; safe to call per request). */
 export async function ensureShardJobSchema(db: D1ShardJobDb): Promise<void> {
-  await applyMigrations(db, [MIGRATION_0003_AGENT_SHARD_JOBS]);
+  await applyMigrations(db, [
+    MIGRATION_0003_AGENT_SHARD_JOBS,
+    MIGRATION_0038_AGENT_SHARD_JOBS_WORKFLOW_RUN_ID,
+  ]);
 }
 
 function toRow(record: typeof agentShardJobs.$inferSelect): ShardJobRow {
@@ -52,6 +56,7 @@ function toRow(record: typeof agentShardJobs.$inferSelect): ShardJobRow {
     provenanceWriter: record.provenanceWriter,
     provenanceSourceDo: record.provenanceSourceDo,
     provenanceSourceVersion: record.provenanceSourceVersion,
+    workflowRunId: record.workflowRunId ?? undefined,
   };
 }
 
@@ -101,6 +106,7 @@ export class D1ShardJobAdapter
         provenanceWriter: row.provenanceWriter,
         provenanceSourceDo: row.provenanceSourceDo,
         provenanceSourceVersion: row.provenanceSourceVersion,
+        workflowRunId: row.workflowRunId ?? null,
       })
       .onConflictDoNothing();
   }

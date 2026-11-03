@@ -62,6 +62,7 @@ import {
   MIGRATION_0035_DIGEST_PASS,
   MIGRATION_0036_REFUND_POLICY_APPROVAL,
   MIGRATION_0037_CFPAY_CHANNEL,
+  MIGRATION_0038_AGENT_SHARD_JOBS_WORKFLOW_RUN_ID,
 } from "../src/data/migrationRunner";
 import { agentMeshProposals } from "../src/data/drizzleSchema";
 import { InMemoryMeshProposalStore } from "../src/data/inMemoryMeshProposalAdapter";
@@ -209,7 +210,7 @@ describe("door budget guard", () => {
 /* ------------------------------------------------------------------ */
 
 describe("mesh proposal store", () => {
-  it("migration 0025 is registered and 0037 is last (#2945, after #2662 Phase 2.7), and the drizzle schema carries the table", () => {
+  it("migration 0025 is registered and 0038 is last (#2989, after #2945 Phase 2.17), and the drizzle schema carries the table", () => {
     expect(MIGRATION_0025_AGENT_MESH_PROPOSALS.version).toBe(25);
     expect(MIGRATION_0025_AGENT_MESH_PROPOSALS.sql).toContain("agent_mesh_proposals");
     expect(ALL_MIGRATIONS).toContain(MIGRATION_0025_AGENT_MESH_PROPOSALS);
@@ -237,8 +238,12 @@ describe("mesh proposal store", () => {
     expect(ALL_MIGRATIONS).toContain(MIGRATION_0036_REFUND_POLICY_APPROVAL);
     // #2945 (Phase 2.17) appends migration 0037 (cfpay channel purchases) after 0036.
     expect(ALL_MIGRATIONS).toContain(MIGRATION_0037_CFPAY_CHANNEL);
+    // #2989 appends migration 0038 (shard-job workflow run id) after 0037.
+    expect(ALL_MIGRATIONS).toContain(
+      MIGRATION_0038_AGENT_SHARD_JOBS_WORKFLOW_RUN_ID,
+    );
     expect(ALL_MIGRATIONS[ALL_MIGRATIONS.length - 1]).toBe(
-      MIGRATION_0037_CFPAY_CHANNEL,
+      MIGRATION_0038_AGENT_SHARD_JOBS_WORKFLOW_RUN_ID,
     );
     expect(getTableName(agentMeshProposals)).toBe("agent_mesh_proposals");
   });

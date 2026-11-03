@@ -200,6 +200,13 @@ export async function recordSagaProjectionRow(
     runRequestId: string;
     tenantId: string;
     statusUrl: string;
+    /**
+     * Issue #2989: the seam-started saga instance id (the
+     * Cloudflare workflow id). Carried on the row so the
+     * just-created saga stays addressable even before its
+     * first audit row lands.
+     */
+    workflowRunId?: string;
   },
 ): Promise<void> {
   const nowMs = Date.now();
@@ -223,6 +230,7 @@ export async function recordSagaProjectionRow(
     provenanceWriter: "saga-entry-route",
     provenanceSourceDo: "saga",
     provenanceSourceVersion: "1",
+    ...(input.workflowRunId ? { workflowRunId: input.workflowRunId } : {}),
   });
 }
 

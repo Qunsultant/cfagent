@@ -1504,6 +1504,20 @@ CREATE INDEX IF NOT EXISTS idx_cfpay_channel_user ON agent_cfpay_channel_purchas
 `,
 };
 
+/**
+ * Issue #2989: the Cloudflare workflow run-id on shard job rows.
+ * Additive only (nullable TEXT, no backfill): rows projected
+ * before #2989 keep correlating via the derived id, and the
+ * seam's resolveWorkflowRunId prefers a stored id when present.
+ * A separate migration (never an edit to 0003, which is already
+ * applied): 0003 still owns the table's CREATE DDL.
+ */
+export const MIGRATION_0038_AGENT_SHARD_JOBS_WORKFLOW_RUN_ID: DataMigration = {
+  version: 38,
+  name: "0038_agent_shard_jobs_workflow_run_id",
+  sql: `ALTER TABLE agent_shard_jobs ADD COLUMN workflow_run_id TEXT;`,
+};
+
 export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANCE,
   MIGRATION_0002_AGENT_CHAINS_SCHEDULES,
   MIGRATION_0003_AGENT_SHARD_JOBS,
@@ -1541,6 +1555,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0035_DIGEST_PASS,
   MIGRATION_0036_REFUND_POLICY_APPROVAL,
   MIGRATION_0037_CFPAY_CHANNEL,
+  MIGRATION_0038_AGENT_SHARD_JOBS_WORKFLOW_RUN_ID,
 ];
 
 function splitStatements(sqlText: string): string[] {

@@ -608,6 +608,14 @@ export interface ShardOutcome {
    * parent/child linkage, never for re-delivery.
    */
   reportId?: string;
+  /**
+   * Issue #2989: the workflow runtime's run-id of the child
+   * instance that produced this outcome (the seam-returned id
+   * from the parent's pending map). Carried into the projected
+   * row; absent for outcomes with no child instance (refusals,
+   * timeouts before creation, parent legs).
+   */
+  workflowRunId?: string;
 }
 
 /** One lifecycle transition on the job's journal. */

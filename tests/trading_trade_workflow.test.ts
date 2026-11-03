@@ -189,4 +189,34 @@ describe("trade workflow wiring (#291 T3b)", () => {
       .catch((e: any) => e);
     expect(anon.code).toBe("invalid_input");
   });
+
+  it("startTradeApproval records a trade.approval_started audit carrying the workflow id (#2989)", async () => {
+    const agent: any = Object.create(TradingAgent.prototype);
+    agent.env = { TRADE_WORKFLOW: {} };
+    agent.runWorkflow = async () => "trade-wf-1";
+    agent.instanceUserLogin = () => "alice";
+    const created: any[] = [];
+    agent.getOrm = () => ({ events: { create: (row: any) => { created.push(row); return row; } } });
+    const res = await agent.startTradeApproval({ orderId: "draft-1", provider: "fake", userLogin: "alice" });
+    expect(res).toEqual({ workflowId: "trade-wf-1", orderId: "draft-1", status: "awaiting_approval" });
+    const started = created.find((r) => r.type === "trade.approval_started");
+    expect(started).toBeDefined();
+    expect(started.payload).toMatchObject({ orderId: "draft-1", workflowId: "trade-wf-1" });
+  });
+
+  it("a failing start audit never fails the trade approval start (#2989)", async () => {
+    const agent: any = Object.create(TradingAgent.prototype);
+    agent.env = { TRADE_WORKFLOW: {} };
+    agent.runWorkflow = async () => "trade-wf-1";
+    agent.instanceUserLogin = () => "alice";
+    agent.getOrm = () => { throw new Error("orm down"); };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const res = await agent.startTradeApproval({ orderId: "draft-1", provider: "fake", userLogin: "alice" });
+      expect(res.workflowId).toBe("trade-wf-1");
+      expect(warn).toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
 });
