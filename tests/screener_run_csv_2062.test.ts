@@ -1,7 +1,9 @@
 /**
  * Issue #2062: every stock screener run records a full document set.
  *
- * Pins the CSV leg of ScreenerAgent's document generation (persistRun):
+ * Pins the CSV leg of the stock document generation (persistRun calls
+ * it; since #2911 G4 the leg itself lives in the one generation module,
+ * src/services/stockReportArtifacts.ts):
  *  - the run records `csvKey` in the `screener:csv:` family and
  *    `csvStatus: "generated"`, plus the `screener:latest.csv` pointer;
  *  - the stored bytes ARE the run's CSV report (header + one row per
@@ -11,6 +13,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { ScreenerAgent } from "../src/agents/screener-agent";
+import { generateStockReportArtifacts } from "../src/services/stockReportArtifacts";
 import { SCREENER_CSV_COLUMNS, parseScreenerCsv } from "../src/trading";
 
 class FakeStorage {
@@ -63,10 +66,15 @@ const RUN = {
 describe("ScreenerAgent CSV artifact (#2062)", () => {
   it("stores a per-run CSV plus the latest pointer and records the key on the run", async () => {
     const storage = new FakeStorage();
-    const agent = makeAgent(storage);
     const run = { ...RUN } as any;
 
-    await (agent as any).generateRunCsv(run);
+    await generateStockReportArtifacts({
+      env: {} as any,
+      storage: storage as any,
+      result: run,
+      userLogin: "owner",
+      formats: ["csv"],
+    });
 
     expect(run.csvStatus).toBe("generated");
     expect(run.csvKey).toMatch(/^screener:csv:[0-9a-f]{8}$/);
@@ -87,10 +95,16 @@ describe("ScreenerAgent CSV artifact (#2062)", () => {
   });
 
   it("records a blob-store failure on the run instead of throwing", async () => {
-    const agent = makeAgent(new FailingStorage());
     const run = { ...RUN } as any;
 
-    await expect((agent as any).generateRunCsv(run)).resolves.toBeUndefined();
+    const out = await generateStockReportArtifacts({
+      env: {} as any,
+      storage: new FailingStorage() as any,
+      result: run,
+      userLogin: "owner",
+      formats: ["csv"],
+    });
+    expect(out.csv.status).toBe("failed");
     expect(run.csvStatus).toBe("failed");
     expect(run.csvKey).toBeUndefined();
     expect(run.csvError).toContain("blob store down");

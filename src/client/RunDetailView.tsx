@@ -7,8 +7,9 @@
  *  - partial qualification (#462 stamp): prominent banner with quoted
  *    vs requested counts, failed symbols, failure reasons — a qualified
  *    partial is never a complete screen, never a failure
- *  - artifacts: PDF/XLSX links + pdfStatus/pdfError (a failed artifact
- *    shows its coded error, never a silent missing link)
+ *  - artifacts: PDF/XLSX/CSV links + per-format status/error (a failed
+ *    artifact shows its coded error, never a silent missing link; a
+ *    never-attempted or skipped format says so, never "no record")
  *  - delivery status per channel: the run's confirmations incl.
  *    held (pending) / approved / rejected / expired state
  *
@@ -22,6 +23,10 @@
 import { useState } from "react";
 import { Badge, Button, Card, EmptyState, Notice, Spinner } from "./components/ui";
 import { replayReport, replaySummary, type ReplayResponse } from "./replayReport";
+import {
+  resolveStockReportFormatStatus,
+  type StockReportFormatStatus,
+} from "../services/stockReportFormatStatus";
 
 export interface RunDetailPartial {
   quotedCount: number;
@@ -50,6 +55,10 @@ export interface RunDetailRun {
   xlsxKey?: string;
   xlsxStatus?: string;
   xlsxError?: string;
+  /** Issue #2911 (G4): the CSV leg joins the artifacts section. */
+  csvKey?: string;
+  csvStatus?: string;
+  csvError?: string;
 }
 
 export interface RunDetailConfirmation {
@@ -90,6 +99,26 @@ function outcomeOf(run: RunDetailRun): { label: string; tone: "success" | "warni
   return { label: "Complete", tone: "success" };
 }
 
+/**
+ * Issue #2911 (G4): the no-link fallback sentence for one format, from
+ * the resolved vocabulary status — a failed leg says it failed, a
+ * never-attempted or skipped leg says so, and only a genuinely missing
+ * leg says "no record". The coded-error Notice above this branch keeps
+ * precedence: an errored leg shows its error, not this sentence.
+ */
+function artifactStatusText(formatLabel: string, status: StockReportFormatStatus): string {
+  switch (status) {
+    case "failed":
+      return `${formatLabel} generation failed.`;
+    case "never-attempted":
+      return `${formatLabel} not attempted for this run.`;
+    case "skipped":
+      return `${formatLabel} skipped for this run.`;
+    default:
+      return `No ${formatLabel} recorded for this run.`;
+  }
+}
+
 function confirmationLabel(status: string): string {
   if (status === "pending") return "Held for review";
   if (status === "approved") return "Approved";
@@ -102,6 +131,7 @@ export function RunDetailView({ run, confirmations, confirmationsLoading, chrome
   const outcome = outcomeOf(run);
   const pdfUrl = run.reportUrl || (run.pdfKey ? `/api/screener/report.pdf?key=${encodeURIComponent(run.pdfKey)}` : null);
   const xlsxUrl = run.xlsxKey ? `/api/screener/report.xlsx?key=${encodeURIComponent(run.xlsxKey)}` : null;
+  const csvUrl = run.csvKey ? `/api/screener/report.csv?key=${encodeURIComponent(run.csvKey)}` : null;
   const [replayLoading, setReplayLoading] = useState(false);
   const [replay, setReplay] = useState<ReplayResponse | null>(null);
   const onReplay = async () => {
@@ -189,10 +219,14 @@ export function RunDetailView({ run, confirmations, confirmationsLoading, chrome
               <Notice tone="danger" density="compact">
                 📄 PDF unavailable — {run.pdfError}
               </Notice>
-            ) : run.pdfStatus === "failed" ? (
-              <span>📄 PDF generation failed.</span>
             ) : (
-              <span>📄 No PDF recorded for this run.</span>
+              <span>
+                📄{" "}
+                {artifactStatusText(
+                  "PDF",
+                  resolveStockReportFormatStatus({ key: run.pdfKey, status: run.pdfStatus, runFailed: !run.success }),
+                )}
+              </span>
             )}
           </div>
           <div>
@@ -204,10 +238,33 @@ export function RunDetailView({ run, confirmations, confirmationsLoading, chrome
               <Notice tone="danger" density="compact">
                 📊 XLSX unavailable — {run.xlsxError}
               </Notice>
-            ) : run.xlsxStatus === "failed" ? (
-              <span>📊 XLSX generation failed.</span>
             ) : (
-              <span>📊 No XLSX recorded for this run.</span>
+              <span>
+                📊{" "}
+                {artifactStatusText(
+                  "XLSX",
+                  resolveStockReportFormatStatus({ key: run.xlsxKey, status: run.xlsxStatus, runFailed: !run.success }),
+                )}
+              </span>
+            )}
+          </div>
+          <div>
+            {csvUrl ? (
+              <a href={csvUrl} target="_blank" rel="noreferrer">
+                📋 Download CSV report
+              </a>
+            ) : run.csvError ? (
+              <Notice tone="danger" density="compact">
+                📋 CSV unavailable — {run.csvError}
+              </Notice>
+            ) : (
+              <span>
+                📋{" "}
+                {artifactStatusText(
+                  "CSV",
+                  resolveStockReportFormatStatus({ key: run.csvKey, status: run.csvStatus, runFailed: !run.success }),
+                )}
+              </span>
             )}
           </div>
         </div>

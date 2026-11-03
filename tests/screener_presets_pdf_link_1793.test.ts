@@ -5,25 +5,27 @@ import path from "node:path";
 const repoRoot = path.resolve(__dirname, "..");
 
 describe("Issue #1793 — Screener Presets Layout and Report Persistence", () => {
-  it("persistRun generates PDF and XLSX before writing to DO storage (keys preserved)", () => {
+  it("persistRun generates the full document set via the one generation module before writing to DO storage (keys preserved)", () => {
     const src = readFileSync(path.join(repoRoot, "src/agents/screener-agent.ts"), "utf-8");
     const start = src.indexOf("private async persistRun");
     expect(start).toBeGreaterThan(-1);
     const persistRun = src.slice(start, start + 3000);
 
+    // Issue #2911 (G4): PDF still flows through generateRunPdf (shared
+    // with regeneration) and the tabular legs through the one
+    // generation module — both MUST occur before saving to DO storage.
     const pdfIndex = persistRun.indexOf("this.generateRunPdf");
-    const xlsxIndex = persistRun.indexOf("generateScreenerXlsx");
+    const moduleIndex = persistRun.indexOf("generateStockReportArtifacts");
     const storagePutLatest = persistRun.indexOf("this.ctx.storage.put(LATEST_KEY");
     const storagePutHistory = persistRun.indexOf("HISTORY_KEY", storagePutLatest);
 
     expect(pdfIndex).toBeGreaterThan(-1);
-    expect(xlsxIndex).toBeGreaterThan(-1);
+    expect(moduleIndex).toBeGreaterThan(-1);
     expect(storagePutLatest).toBeGreaterThan(-1);
     expect(storagePutHistory).toBeGreaterThan(-1);
 
-    // PDF and XLSX generation MUST occur before saving to DO storage
     expect(pdfIndex).toBeLessThan(storagePutLatest);
-    expect(xlsxIndex).toBeLessThan(storagePutLatest);
+    expect(moduleIndex).toBeLessThan(storagePutLatest);
     expect(storagePutLatest).toBeLessThan(storagePutHistory);
   });
 

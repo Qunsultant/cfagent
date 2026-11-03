@@ -168,3 +168,44 @@ describe("Issue #1326 — RunDetailView", () => {
     expect(hub).toContain("RunDetailView");
   });
 });
+
+describe("Issue #2911 (G4) — RunDetailView artifact statuses", () => {
+  it("a generated CSV renders its download link", async () => {
+    const run: RunDetailRun = { ...baseRun, csvKey: "screener:csv:deadbeef", csvStatus: "generated" };
+    await render(<RunDetailView run={run} confirmations={[]} confirmationsLoading={false} />);
+    const link = container.querySelector('a[href*="report.csv"]');
+    expect(link).not.toBeNull();
+    expect(link!.textContent || "").toContain("CSV");
+  });
+
+  it("a never-attempted CSV says so, never 'no record'", async () => {
+    const run: RunDetailRun = { ...baseRun, csvStatus: "never-attempted" };
+    await render(<RunDetailView run={run} confirmations={[]} confirmationsLoading={false} />);
+    const text = container.textContent || "";
+    expect(text).toContain("CSV not attempted for this run.");
+    expect(text).not.toContain("No CSV recorded for this run.");
+  });
+
+  it("a skipped XLSX says so, never 'no record'", async () => {
+    const run: RunDetailRun = { ...baseRun, xlsxStatus: "skipped" };
+    await render(<RunDetailView run={run} confirmations={[]} confirmationsLoading={false} />);
+    const text = container.textContent || "";
+    expect(text).toContain("XLSX skipped for this run.");
+    expect(text).not.toContain("No XLSX recorded for this run.");
+  });
+
+  it("a failed run with no artifact record says generation failed, not 'no record'", async () => {
+    const run: RunDetailRun = { ...baseRun, success: false, reportUrl: undefined, pdfKey: undefined, pdfStatus: undefined };
+    await render(<RunDetailView run={run} confirmations={[]} confirmationsLoading={false} />);
+    const text = container.textContent || "";
+    expect(text).toContain("PDF generation failed.");
+    expect(text).not.toContain("No PDF recorded for this run.");
+  });
+
+  it("a missing artifact on a successful run still says 'no record'", async () => {
+    const run: RunDetailRun = { ...baseRun, reportUrl: undefined, pdfKey: undefined, pdfStatus: undefined };
+    await render(<RunDetailView run={run} confirmations={[]} confirmationsLoading={false} />);
+    const text = container.textContent || "";
+    expect(text).toContain("No PDF recorded for this run.");
+  });
+});
