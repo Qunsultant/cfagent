@@ -1296,6 +1296,29 @@ export class TradingAgent extends PortThink {
       ...(input.traceparent ? { traceparent: input.traceparent } : {}),
     };
     const workflowId = await this.approvalWorkflow().start(params);
+    // Issue #2989: the trade approval start's job record at start
+    // time. Best-effort, never blocking: the workflow already
+    // started, so a failing audit store must warn, not strand
+    // the run (contrast decideTradeApproval's blocking audit,
+    // where an unaudited decision must never take effect).
+    try {
+      recordBlockingAudit(this.getOrm().events, {
+        id: crypto.randomUUID(),
+        sessionId: this.instanceUserLogin() ?? "unknown",
+        type: "trade.approval_started",
+        agent: "trading",
+        payload: {
+          orderId: input.orderId,
+          workflowId,
+          userLogin: ownerLogin,
+        },
+        createdAt: new Date().toISOString(),
+      });
+    } catch (auditErr) {
+      console.warn(
+        `[trading] trade.approval_started audit failed for order ${input.orderId}: ${auditErr instanceof Error ? auditErr.message : String(auditErr)}`,
+      );
+    }
     return { workflowId, orderId: input.orderId, status: "awaiting_approval" };
   }
 

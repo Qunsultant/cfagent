@@ -504,6 +504,10 @@ describe("saga flow Leg 0/1 (S1, #2041) and gate entry (S2)", () => {
     const decided = auditEvents.find((e) => e.type === "saga.journey_decided");
     expect(decided?.decidingSurface).toBe("slack");
     expect(decided?.decision).toBe("approved");
+    // Issue #2989: the payment leg's audit rows carry the seam-started
+    // payment instance id (the Cloudflare workflow id), not just the leg.
+    const paymentStartedEvent = auditEvents.find((e) => e.type === "saga.payment_started");
+    expect(paymentStartedEvent?.paymentWorkflowId).toBe("pay-wf-1");
     const ended = auditEvents.find((e) => e.type === "saga.ended");
     expect(ended?.outcomeCode).toBe("SUCCESS_SAGA_TRADE_SETTLED");
     expect(ended?.decidingSurface).toBe("slack");
@@ -597,6 +601,10 @@ describe("saga flow Leg 0/1 (S1, #2041) and gate entry (S2)", () => {
       "saga.ended",
       ]);
       expect(legPort.statusCalls.some((c) => c.leg === "screener")).toBe(false);
+      // Issue #2989: the payment_not_completed row carries the payment
+      // instance id, so the failed leg stays addressable after the fact.
+      const notCompleted = auditEvents.find((e) => e.type === "saga.payment_not_completed");
+      expect(notCompleted?.paymentWorkflowId).toBe("pay-wf-1");
     },
   );
 

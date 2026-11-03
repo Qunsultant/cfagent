@@ -3,20 +3,19 @@
  *
  * What this is NOT: a reuse of the screener's child ops. The
  * screener's fan-out (`screenerWorkflow.ts` child ops) is scoped to
- * that workflow's own binding and its shard children. There is no
- * shared start + status port across workflow bindings, so the saga
- * gets its own: one port, keyed by leg, that starts a leg instance
- * under a saga-derived id and reads its status back through the
- * binding's `instance.status()`, mapped through the same
- * `mapInstanceStatus` vocabulary the screener adapter uses.
+ * that workflow's own binding and its shard children. Starts route
+ * through the ONE seam (workflowInstanceSeam) — this port keeps
+ * only its leg-scoped status reads and its binding-missing-throws
+ * behavior, not a second create → adopt → fallback variant.
  *
- * Idempotent start mirrors `cfWorkflowAdapter.startWorkflowInstance`:
- * creating an instance with an id that already exists adopts it
- * instead of failing, so a retried start (and a saga re-run with
- * the same sagaId) converges on one instance per leg. A create
- * failure with no adoptable instance falls back to a hashed id;
- * a genuine provider outage still fails loudly with the original
- * error preserved.
+ * Idempotent start mirrors `cfWorkflowAdapter.startWorkflowInstance`
+ * (both now ride the same seam): creating an instance with an id
+ * that already exists adopts it instead of failing, so a retried
+ * start (and a saga re-run with the same sagaId) converges on one
+ * instance per leg. A create failure with no adoptable instance
+ * falls back to a hashed id; a genuine provider outage still fails
+ * loudly with the original error preserved (inside the seam's
+ * start_failed message).
  *
  * Deliberate difference from the screener's child ops: an absent
  * binding THROWS here instead of returning null. A saga must not
@@ -33,6 +32,7 @@
  */
 
 import { mapInstanceStatus, type WorkflowBindingLike } from "./cfWorkflowAdapter";
+import { startManagedWorkflowInstance } from "./workflowInstanceSeam";
 import type { WorkflowInstanceStatus } from "./workflowPorts";
 
 /** Saga legs. S1 uses payment + screener; trade arrives with S4. */
@@ -111,34 +111,19 @@ export function sagaLegPort(
   return {
     async startLeg(leg: SagaLeg, params: unknown): Promise<{ workflowId: string; existing: boolean }> {
       const binding = bindingFor(leg);
-      const derivedId = sagaLegInstanceId(sagaId, leg);
-      let firstError: unknown = null;
-      try {
-        const instance = await binding.create({ id: derivedId, params });
-        return { workflowId: instance.id, existing: false };
-      } catch (err) {
-        firstError = err;
-      }
-      try {
-        const instance = await binding.get(derivedId);
-        await instance.status();
-        return { workflowId: derivedId, existing: true };
-      } catch {
-        // No adoptable instance: fall through to the hashed-id retry.
-      }
-      const fallbackId = `saga-h-${hashSagaId(`${sagaId}:${leg}:fallback`)}`;
-      try {
-        const instance = await binding.create({ id: fallbackId, params });
-        return { workflowId: instance.id, existing: false };
-      } catch {
-        throw firstError;
-      }
+      const started = await startManagedWorkflowInstance(binding, {
+        id: sagaLegInstanceId(sagaId, leg),
+        fallbackId: () => `saga-h-${hashSagaId(`${sagaId}:${leg}:fallback`)}`,
+        params,
+      });
+      return { workflowId: started.workflowId, existing: started.existing };
     },
 
     async getLegStatus(leg: SagaLeg, workflowId: string): Promise<SagaLegInstanceStatus | null> {
       const binding = bindingFor(leg);
       try {
         const instance = await binding.get(workflowId);
+        if (typeof instance.status !== "function") return null;
         const s = await instance.status();
         return {
           status: mapInstanceStatus(s.status),

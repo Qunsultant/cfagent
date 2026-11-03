@@ -165,7 +165,15 @@ export async function projectLegOutcomes(
           input.chainId,
           jobKey,
         );
-        if (latest !== null && latest.status === status) {
+        // Issue #2989: replaying the same status is a no-op —
+        // UNLESS the leg carries a workflow run id the row lacks
+        // (a child row projected before the parent's deliver leg
+        // knew the child instance id). That fill is new
+        // information, not a replay, so it writes version+1.
+        const needsCorrelation =
+          outcome.workflowRunId !== undefined &&
+          latest?.workflowRunId !== outcome.workflowRunId;
+        if (latest !== null && latest.status === status && !needsCorrelation) {
           skippedJobs += 1;
           continue;
         }
@@ -185,6 +193,7 @@ export async function projectLegOutcomes(
           provenanceWriter: input.writer,
           provenanceSourceDo: input.provenanceSourceDo ?? "ScheduledAgent",
           provenanceSourceVersion: "1",
+          ...(outcome.workflowRunId ? { workflowRunId: outcome.workflowRunId } : {}),
         });
         projectedJobs += 1;
       }

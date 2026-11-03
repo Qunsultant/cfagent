@@ -196,6 +196,15 @@ export interface SagaAuditEvent {
   orderId?: string;
   /** Trade child workflow id (S4 trade leg rows only). */
   tradeWorkflowId?: string;
+  /**
+   * Issue #2989: payment child workflow id (payment leg rows
+   * only) — the seam-returned id from startLeg, i.e. the
+   * Cloudflare workflow id. Follows the screenerWorkflowId /
+   * tradeWorkflowId per-leg convention; sagaStatus already
+   * reads tradeWorkflowId from payloads, so this field is
+   * read-capable the same way.
+   */
+  paymentWorkflowId?: string;
   /** Pre-payment disclosure text (S4: saga.started row only, from sagaCompensationDisclosure). */
   disclosure?: string;
   /** Outcome-notice delivery receipts (S4: saga.outcome_notice rows only). */
@@ -632,7 +641,7 @@ export async function runSagaWorkflowFlow(
           reason: "payment_deadline_exceeded",
           ...(params.rail ? { rail: params.rail } : {}),
         },
-        { type: "saga.payment_not_completed", leg: "payment", outcomeCode: "FAILURE_SAGA_PAYMENT_NOT_COMPLETED", reason: "payment_deadline_exceeded" },
+        { type: "saga.payment_not_completed", leg: "payment", outcomeCode: "FAILURE_SAGA_PAYMENT_NOT_COMPLETED", reason: "payment_deadline_exceeded", paymentWorkflowId: payment.workflowId },
       );
     }
     if (payTerminal.terminal === "errored" || payTerminal.terminal === "terminated") {
@@ -651,7 +660,7 @@ export async function runSagaWorkflowFlow(
           reason,
           ...(params.rail ? { rail: params.rail } : {}),
         },
-        { type: "saga.payment_not_completed", leg: "payment", outcomeCode: "FAILURE_SAGA_PAYMENT_NOT_COMPLETED", reason },
+        { type: "saga.payment_not_completed", leg: "payment", outcomeCode: "FAILURE_SAGA_PAYMENT_NOT_COMPLETED", reason, paymentWorkflowId: payment.workflowId },
       );
     }
 
@@ -670,7 +679,7 @@ export async function runSagaWorkflowFlow(
             reason: "payment_output_unrecognized",
             ...(params.rail ? { rail: params.rail } : {}),
           },
-          { type: "saga.payment_not_completed", leg: "payment", outcomeCode: "FAILURE_SAGA_PAYMENT_NOT_COMPLETED", reason: "payment_output_unrecognized" },
+          { type: "saga.payment_not_completed", leg: "payment", outcomeCode: "FAILURE_SAGA_PAYMENT_NOT_COMPLETED", reason: "payment_output_unrecognized", paymentWorkflowId: payment.workflowId },
         );
       }
       await step.do("record-audit-payment-started", () =>
@@ -679,6 +688,8 @@ export async function runSagaWorkflowFlow(
           type: "saga.payment_started",
           leg: "payment",
           screenerWorkflowId,
+          // Issue #2989: the payment leg's own instance id.
+          paymentWorkflowId: payment.workflowId,
           existing: payment.existing,
         }),
       );
@@ -866,7 +877,7 @@ export async function runSagaWorkflowFlow(
         reason,
         ...(params.rail ? { rail: params.rail } : {}),
       },
-      { type: "saga.payment_not_completed", leg: "payment", outcomeCode: "FAILURE_SAGA_PAYMENT_NOT_COMPLETED", reason },
+      { type: "saga.payment_not_completed", leg: "payment", outcomeCode: "FAILURE_SAGA_PAYMENT_NOT_COMPLETED", reason, paymentWorkflowId: payment.workflowId },
     );
   } catch (err) {
     // #2810 catch-all: an uncaught leg error becomes a visible
