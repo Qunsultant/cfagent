@@ -36,17 +36,25 @@
  *
  * The scheduled sharded chain bypasses runScreen (it runs
  * through shard jobs), so its aspects live at the chain's own
- * join points: planFeedStart audit, mas_async_jobs completion
- * marking, and collation — named here so the gap is explicit,
- * not hidden. Nothing about the chain changes in this slice.
+ * join points: chain submission logging + classification
+ * (#2860: screen.started on submission, screen.failed with
+ * the classifier's verdict on submission failure, the
+ * inner audit carrying the same classification), the
+ * planFeedStart audit, mas_async_jobs completion marking,
+ * and collation. Remaining boundary, stated plainly:
+ * in-flight job failures surface via the async_job.failed
+ * audit + job rows, NOT classified — the generic executor
+ * is shared runtime, so classifying there is a #2621
+ * decision, not a stock slice. Nothing about the chain's
+ * execution changes in this slice.
  */
 
 export const SCREEN_RUN_ASPECTS = {
-  logging: { joinPoint: "ScreenerAgent.runScreen via logScreenRunEvent (this module)" },
+  logging: { joinPoint: "ScreenerAgent.runScreen via logScreenRunEvent (this module); chain submission via the same fn (scheduledTasks autonomousMarketScreenSharded)" },
   authScoping: { joinPoint: "ScreenerAgent.recordOwner + screenRunLock (#1185, #828, #1993)" },
   paidRun: { joinPoint: "Chat monetization budget gate (nlqPorts / meshScreenDoor paid paths)" },
   retry: { joinPoint: "pipelinePolicy retry budgets" },
-  failureClassification: { joinPoint: "classifyScreenFailure (this module), wired in runScreen" },
+  failureClassification: { joinPoint: "classifyScreenFailure (this module), wired in runScreen + chain submission (scheduledTasks autonomousMarketScreenSharded)" },
   partialResultMarking: { joinPoint: "collateShards qualified rule + ScreenerRunResult.partial (#462)" },
   delivery: { joinPoint: "persistThenDeliverAll + deliverySuppressor (Slices 3 and 7)" },
   provenance: { joinPoint: "manualWorkflowJobId + workflow traceparent + canonical generation screener:<timestamp>" },

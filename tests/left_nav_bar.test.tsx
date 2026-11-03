@@ -6,7 +6,7 @@
  *  3. Stock Hub: the stock-specific hub (issue #2896), contains stocks, new-screen & research
  *  4. Options Screener: contains options, scanner, options-flows, iv-history; no docs/runs/schedules
  *  5. Workflows menu: hosts docs, workflow-runs, reports, review, track-record
- *  6. Platform menu: hosts platform-admin, schedules, agents, audit
+ *  6. Platform menu: hosts platform-admin, schedules, agents, audit, queues
  *     (issue #2957: workflows moved to the Workflow Runs menu by #2843;
  *     endpoints is an Agents sub-item, never top-level Platform)
  *  7. Orders/Billings/Payments section: three menus — Orders (checkout,

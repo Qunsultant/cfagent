@@ -388,6 +388,22 @@
       }
     },
     {
+      "id": "queues",
+      "navGroup": "queues",
+      "crumb": "Queues",
+      "category": "Platform",
+      "icon": "Jobs",
+      "description": "Every queue with work waiting: async jobs, the dead-letter queue, and trade approvals, composed in one place",
+      "navEntry": {
+        "label": "Queues",
+        "shortLabel": "Queues",
+        "navOrder": 31,
+        "defaultVisible": true,
+        "badge": "Pending",
+        "badgeType": "neutral"
+      }
+    },
+    {
       "id": "referrals",
       "shellRetain": true,
       "navGroup": "referrals",
