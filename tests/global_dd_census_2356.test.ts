@@ -814,6 +814,11 @@ function step5bPortSites(): Array<[string, string, number]> {
 
 const STEP5B_PORT_SITES: Array<[string, string, number]> = [
   ["src/data/createSessionPorts.ts", "createSessionPorts", 1],
+  // Added for issue #2840: the per-user session-cap enforcement
+  // in the wired login tail lists the user's sessions via the
+  // same listSessionFamilyEntries factory — no new funnel, no
+  // bypass (the cap counts the existing family listing).
+  ["src/security/iaaaLogin.ts", "listSessionFamilyEntries", 1],
   ["src/security/iaaaLogin.ts", "sessionFamilyPorts", 1],
   ["src/security/iaaaLogin.ts", "wiredMembershipStore", 2],
   ["src/security/session.ts", "createSessionPorts", 1],

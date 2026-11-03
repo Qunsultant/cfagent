@@ -80,6 +80,12 @@ import {
 import { ensureChainScheduleSchema } from "../data/d1ChainScheduleAdapter";
 import { projectRunLegs } from "../data/createShardJobPorts";
 import { recordAuditEventBestEffort } from "../data/createAuditReportPorts";
+import {
+  claimGoalFiring,
+  goalFiringKey,
+  releaseGoalFiring,
+  type GoalFiringMarker,
+} from "../services/goalFiringClaims";
 import type {
   IndexListJobResult,
   IndexRefreshOperation,
@@ -254,6 +260,14 @@ export interface ScheduledAgentCronOpts {
 export const SCHEDULED_AGENT_AUDIT_ACTOR = "scheduled-agent";
 
 export class ScheduledAgent extends PortThink {
+  /**
+   * #2840: in-memory firing claims for this isolate (the
+   * synchronous half of the goal in-flight guard; the durable
+   * half is the goalFiring: marker in ctx.storage). Keyed by
+   * goal id; see src/services/goalFiringClaims.ts.
+   */
+  private goalFiringClaims = new Map<string, GoalFiringMarker>();
+
   private async getGoals(): Promise<ScheduledGoal[]> {
     const stored = await this.ctx.storage.get<ScheduledGoal[]>("goals");
     if (!stored) {
@@ -404,6 +418,45 @@ export class ScheduledAgent extends PortThink {
           triggeredBy,
           ...extra,
         });
+
+      // #2840: in-flight firing guard (the screen-lock pattern,
+      // extended to goals). A second submission — manual trigger
+      // from another browser session, or a cron tick landing
+      // while a manual firing runs — is answered "already in
+      // flight" with the first run's id, never a duplicate
+      // firing. The claim is released in the finally below on
+      // every firing exit (including every `continue` inside
+      // the branch); only a crashed isolate leaves a marker,
+      // which goes stale after GOAL_FIRING_STALE_MS.
+      let firingClaim: { claimed: true; runId: string } | null = null;
+      try {
+        const claim = await claimGoalFiring(this.goalFiringClaims, {
+          goalId: goal.id,
+          triggeredBy,
+          nowMs: Date.now(),
+          readMarker: () => this.ctx.storage.get(goalFiringKey(goal.id)),
+          writeMarker: (marker) => this.ctx.storage.put(goalFiringKey(goal.id), marker),
+        });
+        if (!claim.claimed) {
+          tick.errors.push(`${goal.id}: already in flight (run ${claim.runId}, status running)`);
+          tick.jobsSkipped++;
+          await recordGoalRun("skipped", { detail: `already in flight: run ${claim.runId} (status running)` });
+          continue;
+        }
+        firingClaim = claim;
+      } catch (err) {
+        // A claim that cannot be proven (storage failure) fails
+        // this goal's firing visibly — firing without a claim
+        // would be exactly the duplicate this guard exists for.
+        tick.errors.push(
+          `${goal.id}: firing claim failed: ${err instanceof Error ? err.message : String(err)}`
+        );
+        tick.jobsSkipped++;
+        await recordGoalRun("failure", {
+          error: `firing claim failed: ${err instanceof Error ? err.message : String(err)}`,
+        });
+        continue;
+      }
 
       try {
         // #1779: the shared PaymentsAgentStub (budgetCheck) via the
@@ -944,6 +997,19 @@ export class ScheduledAgent extends PortThink {
         await recordGoalRun("failure", {
           error: err instanceof Error ? err.message : String(err),
         });
+      } finally {
+        // #2840: release only the claim this firing holds; the
+        // release overwrites the marker with status "completed"
+        // via put (best-effort — a failed write leaves a
+        // "running" marker the stale window reaps), so it needs
+        // no delete method on the storage.
+        if (firingClaim) {
+          await releaseGoalFiring(this.goalFiringClaims, {
+            goalId: goal.id,
+            runId: firingClaim.runId,
+            writeMarker: (marker) => this.ctx.storage.put(goalFiringKey(goal.id), marker),
+          });
+        }
       }
     }
 

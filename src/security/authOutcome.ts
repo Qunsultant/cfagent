@@ -25,7 +25,8 @@ export type AuthOutcomeCode =
   | "session_unreadable"
   | "signin_failed"
   | "provider_unavailable"
-  | "wiring_disabled";
+  | "wiring_disabled"
+  | "session_limit_unavailable";
 
 /** The single query parameter carrying an outcome code. */
 export const AUTH_OUTCOME_PARAM = "auth_outcome";
@@ -36,6 +37,7 @@ const KNOWN_CODES: ReadonlySet<string> = new Set([
   "signin_failed",
   "provider_unavailable",
   "wiring_disabled",
+  "session_limit_unavailable",
 ]);
 
 /** Allowlisted parse: anything not exactly a known code is null. */
@@ -68,6 +70,15 @@ const FAILURE_NOTICES: Record<FailureCode, { title: string; message: string }> =
   wiring_disabled: {
     title: "Sign-in disabled",
     message: "Sign-in is currently disabled. Please try again later.",
+  },
+  // #2840: the session-cap check could not run (the session
+  // listing was unavailable), so no new session was created
+  // rather than creating one over the cap. Static text only:
+  // no counts, no store names, no internals (the #2402 rule).
+  session_limit_unavailable: {
+    title: "Sign-in could not check your sessions",
+    message:
+      "Your active sessions could not be checked, so no new session was created. Please try again.",
   },
 };
 

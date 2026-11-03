@@ -52,6 +52,7 @@ import { startStockScreenWorkflowOrNull } from "../../workflows/screenExecutionB
 import { persistThenDeliverAll } from "../../workflows/screenRunFinalize";
 import { buildStockScreenRunSpec, specCanonicalFields, withRunProvenance } from "../../workflows/stockScreenRunSpec";
 import type { ScreenerAgent } from "../screener-agent";
+import { screenAlreadyRunningDetails } from "../../services/screenInFlight";
 import type { AgentName, Env } from "../../types";
 
 /** The subset of OrchestratorAgent surface the market-data research handlers need. */
@@ -409,10 +410,12 @@ export async function handleMarketDataCompareScreenRoutes(
       } catch (screenErr) {
         // Issue #832 parity with /etrade/screen: "already running" is
         // not a failure — a 429 the client can retry.
+        // #2840: the 429 also names the in-flight run (id + status).
         const error = screenErr instanceof Error ? screenErr.message : String(screenErr);
         if (error.includes("already running")) {
+          const details = screenAlreadyRunningDetails(screenErr);
           return Response.json(
-            { error: "Screen already running", message: error, retryable: true },
+            { error: "Screen already running", message: error, retryable: true, runId: details?.runId ?? null, status: details?.status ?? "running" },
             { status: 429 }
           );
         }
