@@ -821,7 +821,12 @@ const STEP5B_PORT_SITES: Array<[string, string, number]> = [
   ["src/security/session.ts", "sessionFamilyPorts", 10],
   ["src/security/session.ts", "wiredAccessRequestStore", 1],
   ["src/security/session.ts", "wiredMembershipStore", 1],
-  ["src/server.ts", "listSessionFamilyEntries", 3],
+  // Bumped 3 -> 5 for issue #2688: the role-grants list route adds
+  // two list sites in server.ts (membership listing for the grant
+  // rows, binding listing for issuer:subject enrichment), using
+  // the same listSessionFamilyEntries factory as the existing
+  // membership-listing site — no new funnel, no bypass.
+  ["src/server.ts", "listSessionFamilyEntries", 5],
   ["src/server.ts", "wiredAccessRequestStore", 1],
   ["src/server.ts", "wiredMembershipStore", 10],
 ];
