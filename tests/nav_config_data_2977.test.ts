@@ -22,20 +22,20 @@ const CATEGORIES = ["Execution", "Intelligence", "Playbooks", "Platform", "Billi
 const BADGE_TYPES = ["pro", "live", "ai", "mcp", "new", "neutral"];
 
 describe("nav-config.json shape (issue #2977)", () => {
-  it("routes: 41 ids, sorted ascending, unique", () => {
+  it("routes: 42 ids, sorted ascending, unique", () => {
     const ids = (navData.routes as { id: string }[]).map((r) => r.id);
-    expect(ids).toHaveLength(41);
+    expect(ids).toHaveLength(42);
     expect([...ids].sort()).toEqual(ids);
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it("routes: navOrders are exactly 0..30 across the 31 nav entries", () => {
+  it("routes: navOrders are exactly 0..31 across the 32 nav entries", () => {
     const orders = (navData.routes as { navEntry?: { navOrder: number } }[])
       .filter((r) => r.navEntry)
       .map((r) => r.navEntry!.navOrder);
-    expect(orders).toHaveLength(31);
+    expect(orders).toHaveLength(32);
     expect([...orders].sort((a, b) => a - b)).toEqual(
-      Array.from({ length: 31 }, (_, i) => i),
+      Array.from({ length: 32 }, (_, i) => i),
     );
   });
 
@@ -113,7 +113,7 @@ describe("nav-config.json shape (issue #2977)", () => {
 
 describe("nav-config.json loaders (issue #2977)", () => {
   it("loaders re-export the data file unchanged", () => {
-    expect(ROUTES).toHaveLength(41);
+    expect(ROUTES).toHaveLength(42);
     expect(Object.keys(DEEP_LINK_OVERRIDES)).toHaveLength(31);
     expect(SURFACE_TAB_DEFS).toHaveLength(14);
     // 6 metadata sections + sandbox menu-only section.

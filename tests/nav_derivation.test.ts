@@ -63,10 +63,11 @@ const EXPECTED_ORDER = [
   "products",
   "billing",
   "assets-hub",
+  "queues",
 ];
 
 describe("nav derivation", () => {
-  it("derives the 31 nav items in display order", () => {
+  it("derives the 32 nav items in display order", () => {
     expect(NAVIGATION_ITEMS.map((i) => i.id)).toEqual(EXPECTED_ORDER);
   });
 
