@@ -861,10 +861,11 @@ export class ScheduledTasksService {
     // Issue #2866: the sharded scheduled run is planned through
     // the one planner, like the monolithic path (Slice 5) — same
     // values (universe default TECH, sector precedence request >
-    // filters > ALL), derived once instead of by hand. The chain
-    // submission below is the broker's async branch for scheduled
-    // runs: planFeedStart + the shardSubmit async-job port
-    // (#2621 mas_async_jobs, reused as-is).
+    // filters > ALL), derived once instead of by hand. Issue
+    // #2914 (G7): the chain submission below is the broker's
+    // scheduled-async branch (startScheduledShardedChain,
+    // feed-start submission + the shardSubmit async-job port,
+    // #2621 mas_async_jobs reused as-is).
     const shardedPlan = planScheduledScreen(
       {
         sector: options.sector,
@@ -922,15 +923,21 @@ export class ScheduledTasksService {
       }
     }
     try {
-      const { planFeedStart } = await import("./shardJobs");
+      // Issue #2914 (G7): the chain start lives in the
+      // broker — scheduledTasks plans (above) and gates
+      // (lock probe + active-chain probe), the broker
+      // submits. The chain keeps its engine; see the
+      // broker's note on why execution does not move to
+      // the ScreenerScreenWorkflow.
+      const { startScheduledShardedChain } = await import("../workflows/screenExecutionBroker");
       const channels = [
         ...(options.emailTo ? ["email"] : []),
         ...(options.pushToSlack !== false ? ["slack"] : []),
         ...(options.webhookUrl ? ["webhook"] : []),
       ] as import("../types").AsyncJobChannel[];
       const chainId = crypto.randomUUID();
-      const submitted = await this.shardSubmit(
-        planFeedStart({
+      const submitted = await startScheduledShardedChain({
+        chain: {
           chainId,
           universe,
           userLogin,
@@ -943,8 +950,9 @@ export class ScheduledTasksService {
           slackChannel: options.slackChannel,
           webhookUrl: options.webhookUrl,
           stageChain: options.stageChain,
-        })
-      );
+        },
+        submit: (s) => this.shardSubmit!(s),
+      });
       this.audit("screener.sharded_chain_submitted", {
         sector,
         universe,
