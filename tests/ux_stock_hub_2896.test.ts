@@ -46,7 +46,7 @@ describe("Stock Hub split (#2896)", () => {
     expect(old).toBeDefined();
     expect(hasNavEntry(old!)).toBe(false);
     // Issue #2954 adds the Assets Hub nav entry: 30 → 31.
-    expect(ROUTES.filter(hasNavEntry)).toHaveLength(31);
+    expect(ROUTES.filter(hasNavEntry)).toHaveLength(32);
   });
 
   it("defines the Hub tab set: stocks, new-screen (+run-screen alias), research (+ patterns, presets #2954)", () => {
