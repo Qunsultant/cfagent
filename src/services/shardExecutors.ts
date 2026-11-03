@@ -504,25 +504,27 @@ async function generateTabular(
   try {
     ({ fileName, bytes } = await withRetry(
       async () => {
+        // Issue #2911 (G4): the stock tabular leg routes through the one
+        // generation module (src/services/stockReportArtifacts.ts) — the
+        // same code persistRun uses. The options branches below keep
+        // their own options generators: options is a separate domain
+        // (#2621), not a second stock path.
         if (format === "xlsx") {
           if (chain.screenType === "options") {
             const { generateOptionsXlsx, optionsXlsxFileName, adaptOpportunityScanToOptionScreenResult } = await import("../trading");
             const adapted = adaptOpportunityScanToOptionScreenResult(dataset as any);
             return { fileName: optionsXlsxFileName(adapted), bytes: generateOptionsXlsx(adapted) };
           }
-          const { generateScreenerXlsx, screenerXlsxFileName } = await import("../trading");
-          return { fileName: screenerXlsxFileName(dataset), bytes: generateScreenerXlsx(dataset) };
+          const { generateStockTabularBytes } = await import("./stockReportArtifacts");
+          return generateStockTabularBytes("xlsx", dataset);
         }
         if (chain.screenType === "options") {
           const { generateOptionsCsv, optionsCsvFileName, adaptOpportunityScanToOptionScreenResult } = await import("../trading");
           const adapted = adaptOpportunityScanToOptionScreenResult(dataset as any);
           return { fileName: optionsCsvFileName(adapted), bytes: new TextEncoder().encode(generateOptionsCsv(adapted)) };
         }
-        const { generateScreenerCsv, screenerCsvFileName } = await import("../trading");
-        return {
-          fileName: screenerCsvFileName(dataset),
-          bytes: new TextEncoder().encode(generateScreenerCsv(dataset)),
-        };
+        const { generateStockTabularBytes } = await import("./stockReportArtifacts");
+        return generateStockTabularBytes("csv", dataset);
       },
       policy,
       { label: `shard.generate.${format}` }

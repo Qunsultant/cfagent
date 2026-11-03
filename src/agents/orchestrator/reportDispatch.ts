@@ -16,6 +16,7 @@ import type { Env } from "../../types";
 import { ETradeEmailTradingService } from "../../trading";
 import { ETradeWebhookService } from "../../services/tradingWebhooks";
 import type { ParentScreenReportInput } from "../../workflows/workflowPorts";
+import { resolveStockReportFormatStatus } from "../../services/stockReportFormatStatus";
 import {
   getCanonicalReport,
   isCanonicalReportOwnedBy,
@@ -440,8 +441,16 @@ export async function persistParentScreenReportCanonical(
       : ".") +
     (c.lifecycle === "Failed" ? ` Run failed: ${c.error ?? "no usable shard"}.` : "") +
     ` Shard rows retained (see child linkage in the report body).`;
+  // Issue #2911 (G4): per-format statuses through the one vocabulary
+  // resolver — a key means generated, a failed run with no key means
+  // failed, anything else requested-but-absent means missing. Same
+  // mapping this writer hand-rolled before, now shared with the
+  // artifact module and the client.
   const formatStatus = (keys: string[] | undefined): string =>
-    keys && keys.length > 0 ? "generated" : success ? "missing" : "failed";
+    resolveStockReportFormatStatus({
+      key: keys && keys.length > 0 ? keys[0] : null,
+      runFailed: !success,
+    });
   const stored = await storeReportAtGenerationWithR2(ctx.ensureTables(), ctx.env, {
     runId: input.jobId,
     generationId: input.jobId,
