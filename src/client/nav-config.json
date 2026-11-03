@@ -1,0 +1,1524 @@
+{
+  "routes": [
+    {
+      "id": "ads",
+      "shellRetain": true,
+      "navGroup": "ads",
+      "crumb": "Marketplace",
+      "category": "Marketing",
+      "icon": "Ads",
+      "description": "Curated partner marketplace, developer sponsorships, and deal feed",
+      "navEntry": {
+        "label": "Sponsored Marketplace",
+        "shortLabel": "Deals",
+        "navOrder": 13,
+        "defaultVisible": true,
+        "badge": "Partners",
+        "badgeType": "neutral"
+      }
+    },
+    {
+      "id": "agents",
+      "navGroup": "agents",
+      "crumb": "Agents",
+      "category": "Platform",
+      "icon": "Agents",
+      "description": "The agent fleet as the G0 registry records it: every class, its bindings, doors and gates, identity and credential posture, and the honest degraded/absent records",
+      "navEntry": {
+        "label": "Agents",
+        "shortLabel": "Agents",
+        "navOrder": 20,
+        "defaultVisible": true,
+        "badge": "Registry",
+        "badgeType": "neutral"
+      }
+    },
+    {
+      "id": "approvals",
+      "navGroup": "approvals",
+      "crumb": "Approvals",
+      "category": "Execution",
+      "icon": "Approvals",
+      "description": "Every consequential action awaiting your decision \u2014 trade drafts and held deliveries, composed in one place",
+      "navEntry": {
+        "label": "Approvals",
+        "shortLabel": "Approvals",
+        "navOrder": 3,
+        "defaultVisible": true,
+        "badge": "Queue",
+        "badgeType": "neutral"
+      }
+    },
+    {
+      "id": "assets-hub",
+      "retain": true,
+      "navGroup": "assets-hub",
+      "crumb": "Assets Hub",
+      "category": "Intelligence",
+      "icon": "Screeners",
+      "description": "Multi-asset screening hub: forex, futures, commodities, and bonds, plus goal screens, reports, schedules, proposal review, and the recommendation track record",
+      "navEntry": {
+        "label": "Assets Hub",
+        "shortLabel": "Assets",
+        "navOrder": 30,
+        "defaultVisible": true,
+        "badge": "Assets",
+        "badgeType": "pro"
+      }
+    },
+    {
+      "id": "audit",
+      "navGroup": "audit",
+      "crumb": "Audit Vault",
+      "category": "Platform",
+      "icon": "Audit",
+      "description": "W3C Agent DID verification, memory vault, and immutable audit logs",
+      "navEntry": {
+        "label": "Audit Vault",
+        "shortLabel": "Audit Log",
+        "navOrder": 21,
+        "defaultVisible": true,
+        "badge": "DID",
+        "badgeType": "pro"
+      }
+    },
+    {
+      "id": "autopilot",
+      "retain": true,
+      "navGroup": "autopilot",
+      "crumb": "Autopilot",
+      "category": "Execution",
+      "icon": "Autopilot",
+      "description": "Autonomous policy execution within limits, E*TRADE broker desk & real-time kill switch",
+      "navEntry": {
+        "label": "Autopilot Control",
+        "shortLabel": "Autopilot",
+        "navOrder": 0,
+        "defaultVisible": true,
+        "badge": "LIVE",
+        "badgeType": "live"
+      }
+    },
+    {
+      "id": "billing",
+      "navGroup": "billing",
+      "crumb": "Billing",
+      "category": "Billing",
+      "icon": "Billing",
+      "description": "Your subscription, receipts, plans, and referral-credit balance \u2014 read-only servicing over existing routes",
+      "navEntry": {
+        "label": "Billing",
+        "shortLabel": "Billing",
+        "navOrder": 29,
+        "defaultVisible": true,
+        "badge": "Billing",
+        "badgeType": "neutral"
+      }
+    },
+    {
+      "id": "chat",
+      "navGroup": "chat",
+      "crumb": "Copilot Ideas",
+      "category": "Intelligence",
+      "icon": "Copilot",
+      "description": "Conversational trading copilot, natural language strategies, and agent chat",
+      "navEntry": {
+        "label": "Copilot Ideas",
+        "shortLabel": "Copilot",
+        "navOrder": 8,
+        "defaultVisible": true,
+        "badge": "AI",
+        "badgeType": "ai"
+      }
+    },
+    {
+      "id": "checkout",
+      "navGroup": "checkout",
+      "crumb": "Checkout",
+      "category": "Billing",
+      "icon": "Checkout",
+      "description": "Pay for a screener run or manage a subscription: per-run checkout with the failure policy disclosed before payment, and plan purchase, status, and cancel-at-period-end",
+      "navEntry": {
+        "label": "Checkout",
+        "shortLabel": "Checkout",
+        "navOrder": 18,
+        "defaultVisible": true,
+        "badge": "Testnet",
+        "badgeType": "pro"
+      }
+    },
+    {
+      "id": "docs",
+      "navGroup": "workflow-runs",
+      "crumb": "Docs & Reports",
+      "category": "Playbooks",
+      "icon": "Docs",
+      "description": "Every document set a screener-workflow run produced \u2014 stock, options, goal and strategy \u2014 with its PDF, XLSX and CSV downloads and run id",
+      "navEntry": {
+        "label": "Docs & Reports",
+        "shortLabel": "Docs",
+        "navOrder": 26,
+        "defaultVisible": true,
+        "badge": "PDF",
+        "badgeType": "neutral"
+      }
+    },
+    {
+      "id": "endpoints",
+      "navGroup": "agents",
+      "crumb": "MCP Explorer",
+      "category": "Platform",
+      "icon": "Endpoints",
+      "description": "Interactive Model Context Protocol (MCP) tool and REST endpoint testing suite",
+      "navEntry": {
+        "label": "Developer & MCP",
+        "shortLabel": "Endpoints",
+        "navOrder": 25,
+        "defaultVisible": true,
+        "badge": "MCP",
+        "badgeType": "mcp"
+      }
+    },
+    {
+      "id": "goal-screen",
+      "retain": true,
+      "navGroup": "goal-screen",
+      "crumb": "Goal Screen",
+      "category": "Intelligence",
+      "icon": "Goal",
+      "description": "Goal-driven screening flow with AI-orchestrated criteria"
+    },
+    {
+      "id": "ledger",
+      "retain": true,
+      "navGroup": "ledger",
+      "crumb": "Ledger",
+      "category": "Billing",
+      "icon": "Ledger",
+      "description": "Full chronological ledger of open, executed, and cancelled orders with upstream IDs",
+      "navEntry": {
+        "label": "Order History Ledger",
+        "shortLabel": "Ledger",
+        "navOrder": 17,
+        "defaultVisible": true,
+        "badge": "AUDIT",
+        "badgeType": "pro"
+      }
+    },
+    {
+      "id": "nlq",
+      "navGroup": "nlq",
+      "crumb": "Records NLQ",
+      "category": "Playbooks",
+      "icon": "Database",
+      "description": "Natural language records analytics, enterprise schema inspector & data browser",
+      "navEntry": {
+        "label": "Records NLQ",
+        "shortLabel": "Records",
+        "navOrder": 11,
+        "defaultVisible": true,
+        "badge": "NLQ",
+        "badgeType": "neutral"
+      }
+    },
+    {
+      "id": "omnichannel",
+      "retain": true,
+      "navGroup": "omnichannel",
+      "crumb": "Email & Slack",
+      "category": "Execution",
+      "icon": "Omnichannel",
+      "description": "Autonomous alerts, trade approvals, and scheduled market briefings dispatched to Slack and Email",
+      "navEntry": {
+        "label": "Email & Slack Agents",
+        "shortLabel": "Omnichannel",
+        "navOrder": 5,
+        "defaultVisible": true,
+        "badge": "Relay",
+        "badgeType": "new"
+      }
+    },
+    {
+      "id": "options",
+      "retain": true,
+      "navGroup": "options-screener",
+      "crumb": "Options",
+      "category": "Intelligence",
+      "icon": "Screeners",
+      "description": "The one screening hub: stock + options screening, the strategy scanner, IV history, goal screens, reports, schedules, proposal review, and the recommendation track record"
+    },
+    {
+      "id": "options-flows",
+      "navGroup": "options-screener",
+      "crumb": "Options Flows",
+      "category": "Intelligence",
+      "icon": "Flows",
+      "description": "Options flows, dark pool prints, institutional sweeps, blocks, and insider disclosures",
+      "navEntry": {
+        "label": "Options Flows",
+        "shortLabel": "Flows",
+        "navOrder": 23,
+        "defaultVisible": true,
+        "badge": "Sweeps",
+        "badgeType": "pro"
+      }
+    },
+    {
+      "id": "options-screener",
+      "navGroup": "options-screener",
+      "crumb": "Options Screener",
+      "category": "Intelligence",
+      "icon": "Options",
+      "description": "The one options home: contract screen, strategy panel, best-trade, compare, LLM ideas and evaluate, discovery, scheduled runs, IV history, flows, reports, workflow runs, and schedules \u2014 linked to their existing surfaces, not duplicated (issue 2596, slice 1)",
+      "navEntry": {
+        "label": "Options Screener",
+        "shortLabel": "Options",
+        "navOrder": 7,
+        "defaultVisible": true,
+        "badge": "Options",
+        "badgeType": "ai"
+      }
+    },
+    {
+      "id": "order",
+      "retain": true,
+      "navGroup": "order",
+      "crumb": "Order Ticket",
+      "category": "Execution",
+      "icon": "Order",
+      "description": "Build and validate live equity orders with two-step preview validation & DID signing",
+      "navEntry": {
+        "label": "Fast Order Ticket",
+        "shortLabel": "Orders",
+        "navOrder": 1,
+        "defaultVisible": true,
+        "badge": "HITL",
+        "badgeType": "pro"
+      }
+    },
+    {
+      "id": "orders",
+      "retain": true,
+      "navGroup": "order",
+      "crumb": "Order Ticket",
+      "category": "Execution",
+      "icon": "Order",
+      "description": "Build and validate live equity orders with two-step preview validation & DID signing"
+    },
+    {
+      "id": "payment-assurance",
+      "navGroup": "payment-assurance",
+      "crumb": "Payment Assurance",
+      "category": "Billing",
+      "icon": "Assurance",
+      "description": "Test-only assurance harness for PaymentWorkflow: the real flow and gate behind fake cfpay/screener seams, no charge, no real run",
+      "navEntry": {
+        "label": "Payment Assurance",
+        "shortLabel": "Assurance",
+        "navOrder": 27,
+        "defaultVisible": true,
+        "badge": "Test",
+        "badgeType": "neutral"
+      }
+    },
+    {
+      "id": "payments",
+      "shellRetain": true,
+      "navGroup": "payments",
+      "crumb": "Payments",
+      "category": "Billing",
+      "icon": "Payments",
+      "description": "x402 protocol, MPP micropayments, Stripe, PayPal, and DID billing",
+      "navEntry": {
+        "label": "Payments",
+        "shortLabel": "Payments",
+        "navOrder": 15,
+        "defaultVisible": true,
+        "badge": "x402",
+        "badgeType": "neutral"
+      }
+    },
+    {
+      "id": "platform-admin",
+      "navGroup": "platform-admin",
+      "crumb": "Platform Admin",
+      "category": "Platform",
+      "icon": "Settings",
+      "description": "Administration surfaces for this workspace: ads, tasks, keys, providers, and IAAA",
+      "navEntry": {
+        "label": "Platform Admin",
+        "shortLabel": "Admin",
+        "navOrder": 19,
+        "defaultVisible": true,
+        "badge": "Admin",
+        "badgeType": "neutral"
+      }
+    },
+    {
+      "id": "portfolio",
+      "retain": true,
+      "navGroup": "portfolio",
+      "crumb": "Portfolio",
+      "category": "Execution",
+      "icon": "Portfolio",
+      "description": "Inspect open equity and options holdings, cost basis, unrealized gain/loss & allocations",
+      "navEntry": {
+        "label": "Portfolio & Holdings",
+        "shortLabel": "Portfolio",
+        "navOrder": 2,
+        "defaultVisible": true,
+        "badge": "Broker",
+        "badgeType": "live"
+      }
+    },
+    {
+      "id": "products",
+      "navGroup": "products",
+      "crumb": "Products",
+      "category": "Marketing",
+      "icon": "Workflows",
+      "description": "The product catalog as the Phase 2 registry records it, with Phase 3 access parity: listed products, approved prices, and purchase paths",
+      "navEntry": {
+        "label": "Products",
+        "shortLabel": "Products",
+        "navOrder": 28,
+        "defaultVisible": true,
+        "badge": "Catalog",
+        "badgeType": "neutral"
+      }
+    },
+    {
+      "id": "referrals",
+      "shellRetain": true,
+      "navGroup": "referrals",
+      "crumb": "Referrals",
+      "category": "Marketing",
+      "icon": "Referrals",
+      "description": "Community referral engine, reward tracking, and social share links",
+      "navEntry": {
+        "label": "Referrals & Earn",
+        "shortLabel": "Referrals",
+        "navOrder": 12,
+        "defaultVisible": true,
+        "badge": "Earn",
+        "badgeType": "new"
+      }
+    },
+    {
+      "id": "reports",
+      "retain": true,
+      "navGroup": "workflow-runs",
+      "crumb": "Reports",
+      "category": "Playbooks",
+      "icon": "Screeners",
+      "description": "The one screening hub: stock + options screening, the strategy scanner, IV history, goal screens, reports, schedules, proposal review, and the recommendation track record"
+    },
+    {
+      "id": "research",
+      "navGroup": "stock-hub",
+      "crumb": "Research",
+      "category": "Intelligence",
+      "icon": "Research",
+      "description": "Zero-credential Yahoo Finance and Alpaca dual feed, fundamental peer comparison",
+      "navEntry": {
+        "label": "Research & Dual Feed",
+        "shortLabel": "Research",
+        "navOrder": 24,
+        "defaultVisible": true,
+        "badge": "Feed",
+        "badgeType": "new"
+      }
+    },
+    {
+      "id": "revenue",
+      "shellRetain": true,
+      "navGroup": "revenue",
+      "crumb": "Revenue",
+      "category": "Billing",
+      "icon": "Revenue",
+      "description": "Platform monetization engine, ad network yield, CPM/CPC metrics, and ledger",
+      "navEntry": {
+        "label": "Revenue Analytics",
+        "shortLabel": "Revenue",
+        "navOrder": 16,
+        "defaultVisible": true,
+        "badge": "Yield",
+        "badgeType": "new"
+      }
+    },
+    {
+      "id": "review",
+      "retain": true,
+      "navGroup": "workflow-runs",
+      "crumb": "Proposal Review",
+      "category": "Playbooks",
+      "icon": "Review",
+      "description": "Decide what the system proposed: goal proposals, adaptation candidates, and strategy re-selections \u2014 nothing activates without a person"
+    },
+    {
+      "id": "scanner",
+      "retain": true,
+      "navGroup": "options-screener",
+      "crumb": "Strategy/Symbol Scanner",
+      "category": "Intelligence",
+      "icon": "Screeners",
+      "description": "The one screening hub: stock + options screening, the strategy scanner, IV history, goal screens, reports, schedules, proposal review, and the recommendation track record"
+    },
+    {
+      "id": "schedules",
+      "retain": true,
+      "navGroup": "schedules",
+      "crumb": "Schedules",
+      "category": "Platform",
+      "icon": "Screeners",
+      "description": "The one screening hub: stock + options screening, the strategy scanner, IV history, goal screens, reports, schedules, proposal review, and the recommendation track record"
+    },
+    {
+      "id": "screeners",
+      "retain": true,
+      "navGroup": "screeners",
+      "crumb": "Screeners",
+      "category": "Intelligence",
+      "icon": "Screeners",
+      "description": "Multi-asset screening hub: forex, futures, commodities, and bonds, plus goal screens, reports, schedules, proposal review, and the recommendation track record"
+    },
+    {
+      "id": "search",
+      "navGroup": "search",
+      "crumb": "Search",
+      "category": "Intelligence",
+      "icon": "Search",
+      "description": "One search hub: NLQ records, AI search agent, semantic report search, agent memory, platform knowledge, and tool catalog",
+      "navEntry": {
+        "label": "Search",
+        "shortLabel": "Search",
+        "navOrder": 9,
+        "defaultVisible": true,
+        "badge": "Hub",
+        "badgeType": "mcp"
+      }
+    },
+    {
+      "id": "social",
+      "shellRetain": true,
+      "navGroup": "social",
+      "crumb": "Social",
+      "category": "Marketing",
+      "icon": "Social",
+      "description": "Today's social brief editor, manual daily-post trigger, pending approvals, and per-channel token health",
+      "navEntry": {
+        "label": "Social Posting",
+        "shortLabel": "Social",
+        "navOrder": 14,
+        "defaultVisible": true,
+        "badge": "Daily",
+        "badgeType": "new"
+      }
+    },
+    {
+      "id": "stock-hub",
+      "retain": true,
+      "navGroup": "stock-hub",
+      "crumb": "Stock Hub",
+      "category": "Intelligence",
+      "icon": "Scanner",
+      "description": "Stock Hub: autonomous stock screens, manual stock screens, and market research",
+      "navEntry": {
+        "label": "Stock Hub",
+        "shortLabel": "Stocks",
+        "navOrder": 6,
+        "defaultVisible": true,
+        "badge": "Stocks",
+        "badgeType": "pro"
+      }
+    },
+    {
+      "id": "track-record",
+      "retain": true,
+      "navGroup": "workflow-runs",
+      "crumb": "Track Record",
+      "category": "Playbooks",
+      "icon": "TrackRecord",
+      "description": "What happened to issued recommendations, from the outcome ledger \u2014 Unverified stays Unverified"
+    },
+    {
+      "id": "trading",
+      "retain": true,
+      "navGroup": "autopilot",
+      "crumb": "Autopilot",
+      "category": "Execution",
+      "icon": "Autopilot",
+      "description": "Autonomous policy execution within limits, E*TRADE broker desk & real-time kill switch"
+    },
+    {
+      "id": "voice",
+      "retain": true,
+      "navGroup": "voice",
+      "crumb": "Voice Desk",
+      "category": "Execution",
+      "icon": "Voice",
+      "description": "Hands-free voice recognition desk for querying quotes, screening setups, and trade confirmation",
+      "navEntry": {
+        "label": "Voice Trading Desk",
+        "shortLabel": "Voice Desk",
+        "navOrder": 4,
+        "defaultVisible": true,
+        "badge": "Audio",
+        "badgeType": "ai"
+      }
+    },
+    {
+      "id": "workflow-runs",
+      "navGroup": "workflow-runs",
+      "crumb": "Workflow Runs",
+      "category": "Playbooks",
+      "icon": "Runs",
+      "description": "Every recorded workflow run with its stages, inputs, outputs, failures, artifacts, and how it was triggered",
+      "navEntry": {
+        "label": "Workflows",
+        "shortLabel": "Workflows",
+        "navOrder": 10,
+        "defaultVisible": true,
+        "badge": "Trace",
+        "badgeType": "neutral"
+      }
+    },
+    {
+      "id": "workflows",
+      "navGroup": "workflow-runs",
+      "crumb": "Workflows",
+      "category": "Playbooks",
+      "icon": "Guides",
+      "description": "Platform architecture guides, strategy playbooks, order mechanics & FAQ",
+      "navEntry": {
+        "label": "Workflows & FAQ",
+        "shortLabel": "Guides",
+        "navOrder": 22,
+        "defaultVisible": true,
+        "badge": "14 Guides",
+        "badgeType": "neutral"
+      }
+    }
+  ],
+  "sections": [
+    {
+      "category": "Execution",
+      "title": "TRADING & EXECUTION",
+      "id": "section-execution"
+    },
+    {
+      "category": "Intelligence",
+      "title": "INTELLIGENCE & COPILOT",
+      "id": "section-intelligence"
+    },
+    {
+      "category": "Playbooks",
+      "title": "WORKFLOWS",
+      "id": "section-workflows"
+    },
+    {
+      "category": "Marketing",
+      "title": "MARKETING",
+      "id": "section-marketing"
+    },
+    {
+      "category": "Billing",
+      "title": "ORDERS/BILLINGS/PAYMENTS",
+      "id": "section-billing"
+    },
+    {
+      "category": "Platform",
+      "title": "PLATFORM",
+      "id": "section-platform"
+    }
+  ],
+  "subMenus": {
+    "stock-hub": [
+      {
+        "id": "screeners",
+        "label": "Stock Screener",
+        "shortLabel": "Stocks",
+        "icon": "Screeners",
+        "badge": "Stocks",
+        "badgeType": "pro",
+        "description": "Multi-factor equity screener and fundamental valuation filters"
+      },
+      {
+        "id": "new-screen",
+        "label": "Run a new screen",
+        "shortLabel": "Run",
+        "icon": "Screeners",
+        "badge": "New",
+        "badgeType": "ai",
+        "description": "Execute a manual multi-factor stock screener with customizable criteria and filters"
+      },
+      {
+        "id": "research",
+        "label": "Market Research",
+        "shortLabel": "Research",
+        "icon": "Research",
+        "badge": "Feed",
+        "badgeType": "new",
+        "description": "Zero-credential Yahoo Finance and Alpaca dual feed, fundamental peer comparison"
+      },
+      {
+        "id": "patterns",
+        "label": "Patterns",
+        "shortLabel": "Patterns",
+        "icon": "StrategyScan",
+        "badge": "Patterns",
+        "badgeType": "ai",
+        "description": "Stock market setup signatures from the setup catalog \u2014 read-only, apply one to a new screen"
+      },
+      {
+        "id": "presets",
+        "label": "Presets",
+        "shortLabel": "Presets",
+        "icon": "Screeners",
+        "badge": "Presets",
+        "badgeType": "ai",
+        "description": "Your saved screening configurations, plus proposed starter presets to copy to My Presets"
+      }
+    ],
+    "options-screener": [
+      {
+        "id": "strategy-scanner",
+        "label": "Strategy Scanner",
+        "shortLabel": "Scanner",
+        "icon": "StrategyScan",
+        "badge": "Scan",
+        "badgeType": "mcp",
+        "description": "Pattern matching, technical breakout, and momentum scans"
+      },
+      {
+        "id": "options-runs",
+        "label": "Options Runs",
+        "shortLabel": "Runs",
+        "icon": "Runs",
+        "badge": "Runs",
+        "badgeType": "neutral",
+        "description": "The options run record: manual and scheduled research runs"
+      },
+      {
+        "id": "discovery",
+        "label": "Discovery",
+        "shortLabel": "Discovery",
+        "icon": "Research",
+        "badge": "Runs",
+        "badgeType": "neutral",
+        "description": "The Discovery Scanner view: discovered strategies for a symbol or universe"
+      },
+      {
+        "id": "strategy-panel",
+        "label": "Strategy Panel",
+        "shortLabel": "Strategy",
+        "icon": "StrategyScan",
+        "badge": "Strategy",
+        "badgeType": "ai",
+        "description": "The Builder / Payoff Analyzer view: build and analyze multi-leg strategies with payoff charts and Greeks"
+      },
+      {
+        "id": "contracts-screener",
+        "label": "Contracts Screener",
+        "shortLabel": "Contracts",
+        "icon": "Contracts",
+        "badge": "Contracts",
+        "badgeType": "ai",
+        "description": "Directly filter individual Call and Put contracts across symbols, DTE windows, strikes, and Greeks"
+      },
+      {
+        "id": "custom-thesis",
+        "label": "Custom Thesis & Strategy Universe",
+        "shortLabel": "Thesis",
+        "icon": "Goal",
+        "badge": "Thesis",
+        "badgeType": "ai",
+        "description": "Declare target prices, target dates, and IV assumptions to filter and rank tailored candidate structures"
+      },
+      {
+        "id": "nlq-options",
+        "label": "NLQ-options",
+        "shortLabel": "NLQ",
+        "icon": "Search",
+        "badge": "NLQ",
+        "badgeType": "neutral",
+        "description": "Natural-language options screen: describe the trade and scan underlyings for it"
+      },
+      {
+        "id": "ai-strategy-ideas",
+        "label": "AI Strategy Ideas & Exporter",
+        "shortLabel": "AI Ideas",
+        "icon": "Copilot",
+        "badge": "AI",
+        "badgeType": "ai",
+        "description": "Multi-stage AI evaluation of option chains against raw market data, with export"
+      },
+      {
+        "id": "scheduled-screening",
+        "label": "Scheduled Screening & Schedulers",
+        "shortLabel": "Schedules",
+        "icon": "Runs",
+        "badge": "Durable",
+        "badgeType": "pro",
+        "description": "Create and monitor autonomous scheduled options scans with persistent background timers"
+      },
+      {
+        "id": "iv-history",
+        "label": "IV History",
+        "shortLabel": "IV",
+        "icon": "Volatility",
+        "badge": "IV",
+        "badgeType": "neutral",
+        "description": "Historical and implied volatility percentile ranks"
+      },
+      {
+        "id": "options-flows",
+        "label": "Options Flows",
+        "shortLabel": "Flows",
+        "icon": "Flows",
+        "badge": "Flows",
+        "badgeType": "live",
+        "description": "Institutional block trades, sweeps, and dark pool prints"
+      },
+      {
+        "id": "best-trade",
+        "label": "Best Trade",
+        "shortLabel": "Best",
+        "icon": "Goal",
+        "badge": "Best",
+        "badgeType": "pro",
+        "description": "The single best trade for a name, plus alternatives"
+      }
+    ],
+    "assets-hub": [
+      {
+        "id": "forex",
+        "label": "Forex",
+        "shortLabel": "Forex",
+        "icon": "Screeners",
+        "badge": "Planned",
+        "badgeType": "neutral",
+        "description": "Screen foreign-exchange pairs \u2014 planned, no provider adapter yet"
+      },
+      {
+        "id": "futures",
+        "label": "Futures",
+        "shortLabel": "Futures",
+        "icon": "Screeners",
+        "badge": "Planned",
+        "badgeType": "neutral",
+        "description": "Screen futures contracts \u2014 planned, no provider adapter yet"
+      },
+      {
+        "id": "commodities",
+        "label": "Commodities",
+        "shortLabel": "Commodities",
+        "icon": "Screeners",
+        "badge": "Planned",
+        "badgeType": "neutral",
+        "description": "Screen commodities \u2014 planned, no provider adapter yet"
+      },
+      {
+        "id": "bonds",
+        "label": "Bonds",
+        "shortLabel": "Bonds",
+        "icon": "Screeners",
+        "badge": "Planned",
+        "badgeType": "neutral",
+        "description": "Screen bonds \u2014 planned, no provider adapter yet"
+      },
+      {
+        "id": "goal-screen",
+        "label": "Goal Screen",
+        "shortLabel": "Goal",
+        "icon": "Goal",
+        "badge": "Goal",
+        "badgeType": "ai",
+        "description": "Goal-driven screening flow with AI-orchestrated criteria"
+      },
+      {
+        "id": "reports",
+        "label": "Reports",
+        "shortLabel": "Reports",
+        "icon": "Reports",
+        "badge": "Reports",
+        "badgeType": "pro",
+        "description": "Generated screening reports \u2014 view, download, and regenerate them here"
+      },
+      {
+        "id": "schedules",
+        "label": "Schedules",
+        "shortLabel": "Schedules",
+        "icon": "Schedules",
+        "badge": "Cron",
+        "badgeType": "neutral",
+        "description": "The one scheduling surface for screening runs \u2014 create, pause, and inspect scheduled jobs"
+      },
+      {
+        "id": "review",
+        "label": "Proposal Review",
+        "shortLabel": "Review",
+        "icon": "Review",
+        "badge": "Review",
+        "badgeType": "ai",
+        "description": "Decide what the system proposed: goal proposals, adaptation candidates, and strategy re-selections \u2014 nothing activates without a person"
+      },
+      {
+        "id": "track-record",
+        "label": "Track Record",
+        "shortLabel": "Record",
+        "icon": "TrackRecord",
+        "badge": "Track",
+        "badgeType": "pro",
+        "description": "What happened to issued recommendations, from the outcome ledger \u2014 Unverified stays Unverified"
+      }
+    ],
+    "workflow-runs": [
+      {
+        "id": "docs",
+        "label": "Reports & Docs",
+        "shortLabel": "Docs",
+        "icon": "Docs",
+        "badge": "Docs",
+        "badgeType": "pro",
+        "description": "Generated options and stock reports with PDF/XLSX/CSV downloads"
+      },
+      {
+        "id": "workflow-runs",
+        "label": "Workflow Runs",
+        "shortLabel": "Runs",
+        "icon": "Runs",
+        "badge": "Runs",
+        "badgeType": "neutral",
+        "description": "Every recorded workflow run with its stages and artifacts"
+      },
+      {
+        "id": "workflows",
+        "label": "Workflows & FAQ",
+        "shortLabel": "Guides",
+        "icon": "Guides",
+        "badge": "14 Guides",
+        "badgeType": "neutral",
+        "description": "Platform architecture guides, strategy playbooks, order mechanics & FAQ"
+      },
+      {
+        "id": "reports",
+        "label": "Screener Reports",
+        "shortLabel": "Reports",
+        "icon": "Reports",
+        "badge": "Reports",
+        "badgeType": "pro",
+        "description": "Comprehensive market screener reports and run details"
+      },
+      {
+        "id": "review",
+        "label": "Proposal Review",
+        "shortLabel": "Review",
+        "icon": "Review",
+        "badge": "Review",
+        "badgeType": "ai",
+        "description": "Autonomous proposal evaluation and human-in-the-loop approvals"
+      },
+      {
+        "id": "track-record",
+        "label": "Track Record",
+        "shortLabel": "Record",
+        "icon": "TrackRecord",
+        "badge": "Track",
+        "badgeType": "pro",
+        "description": "Recommendation track record, hit rates, and historical outcomes"
+      }
+    ],
+    "agents": [
+      {
+        "id": "agents",
+        "label": "Agent Mesh Registry",
+        "shortLabel": "Agents",
+        "icon": "Agents",
+        "badge": "Mesh",
+        "badgeType": "ai",
+        "description": "Autonomous agents, capabilities, heartbeats, and peer delegations"
+      },
+      {
+        "id": "endpoints",
+        "label": "API Endpoints",
+        "shortLabel": "Endpoints",
+        "icon": "Endpoints",
+        "badge": "MCP",
+        "badgeType": "mcp",
+        "description": "Model Context Protocol tools, OpenAPI schemas, and server endpoints"
+      }
+    ],
+    "platform-admin": [
+      {
+        "id": "platform-admin:ads",
+        "label": "Ads & Partner Banners",
+        "shortLabel": "Workspace banners and sponsor placements",
+        "icon": "Banners",
+        "description": "Workspace banners and sponsor placements"
+      },
+      {
+        "id": "platform-admin:background-tasks",
+        "label": "Background Tasks",
+        "shortLabel": "Async jobs & execution queue",
+        "icon": "Tasks",
+        "description": "Async jobs & execution queue"
+      },
+      {
+        "id": "platform-admin:scheduled-goals",
+        "label": "Scheduled goals",
+        "shortLabel": "ScheduledAgent goals, ticks & add-goal form",
+        "icon": "ScheduledGoals",
+        "description": "ScheduledAgent goals, ticks & add-goal form"
+      },
+      {
+        "id": "platform-admin:provenance",
+        "label": "Technical Diagnostics & Provenance",
+        "shortLabel": "DID, MCP client, attestation & ledger",
+        "icon": "Provenance",
+        "description": "DID, MCP client, attestation & ledger"
+      },
+      {
+        "id": "platform-admin:api-keys",
+        "label": "API Keys",
+        "shortLabel": "MCP transport access for external clients",
+        "icon": "ApiKeys",
+        "description": "MCP transport access for external clients"
+      },
+      {
+        "id": "platform-admin:data-providers",
+        "label": "Data Providers",
+        "shortLabel": "Provisioning lifecycle for market-data providers",
+        "icon": "DataProviders",
+        "description": "Provisioning lifecycle for market-data providers"
+      },
+      {
+        "id": "platform-admin:iaaa-admin",
+        "label": "IAAA Admin",
+        "shortLabel": "Read-only memberships, genesis & audit",
+        "icon": "IaaaAdmin",
+        "description": "Read-only memberships, genesis & audit"
+      },
+      {
+        "id": "platform-admin:admin-access",
+        "label": "Request admin access",
+        "shortLabel": "Ask the platform owner for admin rights",
+        "icon": "AdminAccess",
+        "description": "Ask the platform owner for admin rights"
+      }
+    ],
+    "sandbox": [
+      {
+        "id": "sandbox-checkout",
+        "label": "Checkout sandbox",
+        "shortLabel": "Sandbox",
+        "icon": "Checkout",
+        "badge": "Demo",
+        "badgeType": "pro",
+        "description": "Demo checkout terminal (public sandbox page)"
+      }
+    ],
+    "orders": [
+      {
+        "id": "checkout",
+        "label": "Checkout",
+        "shortLabel": "Checkout",
+        "icon": "Checkout",
+        "badge": "Testnet",
+        "badgeType": "pro",
+        "description": "Checkout flows"
+      },
+      {
+        "id": "ledger",
+        "label": "Order History Ledger",
+        "shortLabel": "Ledger",
+        "icon": "Ledger",
+        "badge": "AUDIT",
+        "badgeType": "pro",
+        "description": "Every recorded trade order, with its ledger status"
+      }
+    ],
+    "billing": [
+      {
+        "id": "billing",
+        "label": "Billing",
+        "shortLabel": "Billing",
+        "icon": "Billing",
+        "badge": "Billing",
+        "badgeType": "neutral",
+        "description": "Your subscription, receipts, plans, and referral-credit balance \u2014 read-only servicing"
+      },
+      {
+        "id": "revenue",
+        "label": "Revenue Analytics",
+        "shortLabel": "Revenue",
+        "icon": "Revenue",
+        "badge": "Yield",
+        "badgeType": "new",
+        "description": "Revenue analytics"
+      }
+    ],
+    "payments": [
+      {
+        "id": "payments",
+        "label": "Payments",
+        "shortLabel": "Payments",
+        "icon": "Payments",
+        "badge": "x402",
+        "badgeType": "neutral",
+        "description": "Payments"
+      },
+      {
+        "id": "payment-assurance",
+        "label": "Payment Assurance",
+        "shortLabel": "Assurance",
+        "icon": "Assurance",
+        "badge": "Test",
+        "badgeType": "neutral",
+        "description": "Payment assurance"
+      }
+    ],
+    "planned": [
+      {
+        "id": "forex",
+        "label": "Forex",
+        "shortLabel": "Forex",
+        "icon": "Screeners",
+        "badge": "Planned",
+        "badgeType": "neutral",
+        "description": "Screen foreign-exchange pairs \u2014 planned, no provider adapter yet"
+      },
+      {
+        "id": "futures",
+        "label": "Futures",
+        "shortLabel": "Futures",
+        "icon": "Screeners",
+        "badge": "Planned",
+        "badgeType": "neutral",
+        "description": "Screen futures contracts \u2014 planned, no provider adapter yet"
+      },
+      {
+        "id": "commodities",
+        "label": "Commodities",
+        "shortLabel": "Commodities",
+        "icon": "Screeners",
+        "badge": "Planned",
+        "badgeType": "neutral",
+        "description": "Screen commodities \u2014 planned, no provider adapter yet"
+      },
+      {
+        "id": "bonds",
+        "label": "Bonds",
+        "shortLabel": "Bonds",
+        "icon": "Screeners",
+        "badge": "Planned",
+        "badgeType": "neutral",
+        "description": "Screen bonds \u2014 planned, no provider adapter yet"
+      }
+    ]
+  },
+  "deepLinks": {
+    "goal-screen": {
+      "tab": "goal-screen"
+    },
+    "sandbox": {
+      "href": "/checkout/sandbox",
+      "newTab": true
+    },
+    "sandbox-checkout": {
+      "href": "/checkout/sandbox",
+      "newTab": true
+    },
+    "stock-hub:new-screen": {
+      "tab": "stock-hub",
+      "view": "new-screen"
+    },
+    "stock-hub:screeners": {
+      "tab": "stock-hub",
+      "view": "stocks"
+    },
+    "stock-hub:research": {
+      "tab": "stock-hub",
+      "view": "research"
+    },
+    "stock-hub:patterns": {
+      "tab": "stock-hub",
+      "view": "patterns"
+    },
+    "stock-hub:presets": {
+      "tab": "stock-hub",
+      "view": "presets"
+    },
+    "assets-hub:forex": {
+      "tab": "assets-hub",
+      "view": "forex"
+    },
+    "assets-hub:futures": {
+      "tab": "assets-hub",
+      "view": "futures"
+    },
+    "assets-hub:commodities": {
+      "tab": "assets-hub",
+      "view": "commodities"
+    },
+    "assets-hub:bonds": {
+      "tab": "assets-hub",
+      "view": "bonds"
+    },
+    "assets-hub:goal-screen": {
+      "tab": "assets-hub",
+      "view": "goal-screen"
+    },
+    "assets-hub:reports": {
+      "tab": "assets-hub",
+      "view": "reports"
+    },
+    "assets-hub:schedules": {
+      "tab": "assets-hub",
+      "view": "schedules"
+    },
+    "assets-hub:review": {
+      "tab": "assets-hub",
+      "view": "review"
+    },
+    "assets-hub:track-record": {
+      "tab": "assets-hub",
+      "view": "track-record"
+    },
+    "options-screener:strategy-scanner": {
+      "tab": "options",
+      "view": "strategy-scanner"
+    },
+    "options-screener:options-runs": {
+      "tab": "options",
+      "view": "options-runs"
+    },
+    "options-screener:discovery": {
+      "tab": "options",
+      "view": "strategy-discovery",
+      "params": {
+        "discoveryView": "discovery"
+      }
+    },
+    "options-screener:strategy-panel": {
+      "tab": "options",
+      "view": "strategy-discovery",
+      "params": {
+        "discoveryView": "builder"
+      }
+    },
+    "options-screener:contracts-screener": {
+      "tab": "options",
+      "view": "contracts-screener"
+    },
+    "options-screener:custom-thesis": {
+      "tab": "options",
+      "view": "custom-thesis"
+    },
+    "options-screener:nlq-options": {
+      "tab": "options",
+      "view": "nlq-options"
+    },
+    "options-screener:ai-strategy-ideas": {
+      "tab": "options",
+      "view": "ai-strategy-ideas"
+    },
+    "options-screener:scheduled-screening": {
+      "tab": "options",
+      "view": "scheduled-screening"
+    },
+    "options-screener:iv-history": {
+      "tab": "options",
+      "view": "iv-history"
+    },
+    "options-screener:options-flows": {
+      "tab": "options",
+      "view": "options-flows"
+    },
+    "options-screener:best-trade": {
+      "tab": "options",
+      "params": {
+        "research": "best-trade"
+      }
+    },
+    "workflow-runs:review": {
+      "tab": "review"
+    },
+    "workflow-runs:track-record": {
+      "tab": "track-record"
+    },
+    "planned": {
+      "tab": "assets-hub",
+      "view": "forex"
+    },
+    "planned:forex": {
+      "tab": "assets-hub",
+      "view": "forex"
+    },
+    "planned:futures": {
+      "tab": "assets-hub",
+      "view": "futures"
+    },
+    "planned:commodities": {
+      "tab": "assets-hub",
+      "view": "commodities"
+    },
+    "planned:bonds": {
+      "tab": "assets-hub",
+      "view": "bonds"
+    }
+  },
+  "deepLinkSurfaces": [
+    {
+      "surface": "screeners-hub",
+      "page": "screeners",
+      "param": "view",
+      "values": [
+        "forex",
+        "futures",
+        "commodities",
+        "bonds",
+        "goal-screen",
+        "reports",
+        "schedules",
+        "review",
+        "track-record"
+      ]
+    },
+    {
+      "surface": "stock-hub",
+      "page": "stock-hub",
+      "param": "view",
+      "values": [
+        "stocks",
+        "new-screen",
+        "run-screen",
+        "research",
+        "patterns",
+        "presets"
+      ]
+    },
+    {
+      "surface": "options-hub",
+      "page": "options",
+      "param": "view",
+      "values": [
+        "strategy-scanner",
+        "options-runs",
+        "strategy-discovery",
+        "contracts-screener",
+        "custom-thesis",
+        "nlq-options",
+        "ai-strategy-ideas",
+        "scheduled-screening",
+        "iv-history",
+        "options-flows"
+      ]
+    },
+    {
+      "surface": "platform-admin",
+      "page": "platform-admin",
+      "param": "view",
+      "values": [
+        "ads",
+        "background-tasks",
+        "scheduled-goals",
+        "provenance",
+        "api-keys",
+        "data-providers",
+        "iaaa-admin",
+        "admin-access"
+      ]
+    },
+    {
+      "surface": "payments",
+      "page": "payments",
+      "param": "view",
+      "values": [
+        "create",
+        "gateways",
+        "ledger",
+        "stats",
+        "wallet"
+      ]
+    },
+    {
+      "surface": "social",
+      "page": "social",
+      "param": "view",
+      "values": [
+        "approvals",
+        "brief",
+        "goal",
+        "posts",
+        "tokens"
+      ]
+    },
+    {
+      "surface": "ads",
+      "page": "ads",
+      "param": "view",
+      "values": [
+        "offers",
+        "submit"
+      ]
+    },
+    {
+      "surface": "referrals",
+      "page": "referrals",
+      "param": "view",
+      "values": [
+        "activity",
+        "community",
+        "links",
+        "share"
+      ]
+    },
+    {
+      "surface": "revenue",
+      "page": "revenue",
+      "param": "view",
+      "values": [
+        "ads",
+        "categories",
+        "metrics",
+        "placements",
+        "schemas"
+      ]
+    },
+    {
+      "surface": "workflows",
+      "page": "workflows",
+      "param": "view",
+      "values": [
+        "faq",
+        "workflows",
+        "decisioning",
+        "matrix",
+        "improvements"
+      ]
+    },
+    {
+      "surface": "checkout",
+      "page": "checkout",
+      "param": "checkoutTab",
+      "values": [
+        "pay",
+        "subscriptions"
+      ]
+    },
+    {
+      "surface": "iaaa-admin",
+      "page": "platform-admin",
+      "pageView": "iaaa-admin",
+      "param": "iaaaTab",
+      "values": [
+        "overview",
+        "members",
+        "api",
+        "mcp",
+        "iaaa",
+        "correlations",
+        "queue"
+      ]
+    },
+    {
+      "surface": "reports-panel",
+      "page": "screeners",
+      "pageView": "reports",
+      "param": "reportsTab",
+      "values": [
+        "reports",
+        "ideas",
+        "track"
+      ]
+    },
+    {
+      "surface": "risk-analysis",
+      "page": null,
+      "param": "riskTab",
+      "values": [
+        "anatomy",
+        "playbook",
+        "scenarios",
+        "ai"
+      ]
+    }
+  ],
+  "hostedIds": [
+    "options-flows",
+    "research",
+    "docs",
+    "workflows",
+    "endpoints",
+    "platform-admin",
+    "payments",
+    "revenue",
+    "ledger",
+    "checkout",
+    "payment-assurance",
+    "billing"
+  ],
+  "platformAdminSections": [
+    {
+      "id": "section-platform-admin",
+      "title": "Platform Admin",
+      "items": [
+        {
+          "id": "ads",
+          "label": "Ads & Partner Banners",
+          "description": "Workspace banners and sponsor placements",
+          "icon": "Banners"
+        },
+        {
+          "id": "background-tasks",
+          "label": "Background Tasks",
+          "description": "Async jobs & execution queue",
+          "icon": "Tasks"
+        },
+        {
+          "id": "scheduled-goals",
+          "label": "Scheduled goals",
+          "description": "ScheduledAgent goals, ticks & add-goal form",
+          "icon": "ScheduledGoals"
+        },
+        {
+          "id": "jobs",
+          "label": "Jobs",
+          "description": "All scheduled jobs & per-run results",
+          "icon": "Jobs"
+        },
+        {
+          "id": "provenance",
+          "label": "Technical Diagnostics & Provenance",
+          "description": "DID, MCP client, attestation & ledger",
+          "icon": "Provenance"
+        },
+        {
+          "id": "api-keys",
+          "label": "API Keys",
+          "description": "MCP transport access for external clients",
+          "icon": "ApiKeys"
+        },
+        {
+          "id": "data-providers",
+          "label": "Data Providers",
+          "description": "Provisioning lifecycle for market-data providers",
+          "icon": "DataProviders"
+        },
+        {
+          "id": "iaaa-admin",
+          "label": "IAAA Admin",
+          "description": "Read-only memberships, genesis & audit",
+          "icon": "IaaaAdmin"
+        },
+        {
+          "id": "admin-access",
+          "label": "Request admin access",
+          "description": "Ask the platform owner for admin rights",
+          "icon": "AdminAccess"
+        }
+      ]
+    }
+  ]
+}
