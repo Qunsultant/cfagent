@@ -421,6 +421,8 @@ function existingReportRowForId(
   summary: string;
   body: string;
   bodyR2Key: string | null;
+  /** Issue #2602: the row's owner, for the redelivery owner re-check. */
+  userLogin?: string;
 } | null {
   try {
     return storePorts(sql).write.findStoredContent(id);
@@ -506,48 +508,81 @@ export const CANONICAL_ARTIFACT_BACKFILL_FIELDS = [
 ] as const;
 
 /**
- * Merge missing artifact fields from a redelivery body into a stored
- * inline canonical body. Returns the merged body JSON, or null when
- * nothing was missing (or either body is not a JSON object). Only
- * fills empty/missing fields — an existing key, status, or error is
- * never overwritten, and nested `report.result` fields are filled
- * the same way when both sides carry that object.
+ * Why a redelivery could not be merged into the stored body. Every one
+ * of these is NAMED on the log line, never guessed around (issue #2602:
+ * name the record that cannot be backfilled).
  */
-export function backfillArtifactKeys(
+export type ArtifactBackfillReason =
+  | "stored-body-not-json"
+  | "stored-body-not-object"
+  | "redelivery-body-not-object"
+  | "owner-mismatch";
+
+/** The backfill decision for one redelivery (issue #2602). */
+export type ArtifactBackfillOutcome =
+  | { status: "merged"; bodyJson: string; filled: string[] }
+  | { status: "noop" }
+  | { status: "not-backfillable"; reason: ArtifactBackfillReason };
+
+/**
+ * Plan the first-write-win backfill of one stored inline canonical body
+ * from a redelivery body (issues #2528 slice 1, #2602).
+ *
+ * Rules, all pinned by tests/canonical_backfill_2602.test.ts:
+ *  - only MISSING fields fill; an existing key/status/error is never
+ *    overwritten;
+ *  - monotonic per format: a failed status may upgrade to generated on
+ *    a successful redelivery, and a generated status is never
+ *    downgraded (a later failure may still fill the error field);
+ *  - an identical replay is a no-op (no body rewrite at all);
+ *  - fields never truncate: the merged body is the stored body plus
+ *    fills, so long keys and unrelated arrays are preserved;
+ *  - owner is re-checked when both sides carry one;
+ *  - anything that cannot be merged safely is REFUSED with a named
+ *    reason instead of guessing (non-JSON body, non-object body,
+ *    owner mismatch).
+ */
+export function planArtifactBackfill(
   storedBodyJson: string,
   redeliveryBody: unknown,
-): string | null {
+  opts: { owner?: string; storedOwner?: string } = {},
+): ArtifactBackfillOutcome {
   let stored: Record<string, unknown>;
   try {
     const parsed: unknown = JSON.parse(storedBodyJson);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { status: "not-backfillable", reason: "stored-body-not-object" };
+    }
     stored = parsed as Record<string, unknown>;
   } catch {
-    return null;
+    return { status: "not-backfillable", reason: "stored-body-not-json" };
   }
-  const incoming: Record<string, unknown> =
-    redeliveryBody && typeof redeliveryBody === "object" && !Array.isArray(redeliveryBody)
-      ? (redeliveryBody as Record<string, unknown>)
-      : {};
-  let changed = false;
-  const fill = (target: Record<string, unknown>, source: Record<string, unknown>) => {
+  if (!redeliveryBody || typeof redeliveryBody !== "object" || Array.isArray(redeliveryBody)) {
+    return { status: "not-backfillable", reason: "redelivery-body-not-object" };
+  }
+  if (opts.owner && opts.storedOwner && opts.owner !== opts.storedOwner) {
+    return { status: "not-backfillable", reason: "owner-mismatch" };
+  }
+  const incoming = redeliveryBody as Record<string, unknown>;
+  const filled: string[] = [];
+  const fill = (target: Record<string, unknown>, source: Record<string, unknown>, prefix: string) => {
     for (const field of CANONICAL_ARTIFACT_BACKFILL_FIELDS) {
       const existing = target[field];
       const next = source[field];
       if (next === undefined || next === null || next === "") continue;
-      // Monotonic per format (RCA v2b): missing fills, and a
-      // failed status may upgrade to generated on a successful
-      // redelivery — but a generated key/status is never
-      // overwritten or downgraded by a later failed attempt.
+      // Monotonic per format (RCA v2b): missing fills, and a failed
+      // status may upgrade to generated on a successful redelivery —
+      // but a generated key/status is never overwritten or downgraded
+      // by a later failed attempt.
       const statusUpgrade =
         field.endsWith("Status") && existing === "failed" && next === "generated";
-      if ((existing === undefined || existing === null || existing === "") || statusUpgrade) {
+      if (existing === undefined || existing === null || existing === "" || statusUpgrade) {
         target[field] = next;
-        changed = true;
+        filled.push(`${prefix}${field}`);
       }
     }
   };
-  fill(stored, incoming);
+  fill(stored, incoming, "");
   const storedResult =
     stored.report && typeof stored.report === "object" && !Array.isArray(stored.report)
       ? (stored.report as Record<string, unknown>)
@@ -563,9 +598,25 @@ export function backfillArtifactKeys(
     const incomingNested = incomingResult.result && typeof incomingResult.result === "object" && !Array.isArray(incomingResult.result)
       ? (incomingResult.result as Record<string, unknown>)
       : null;
-    if (nested && incomingNested) fill(nested, incomingNested);
+    if (nested && incomingNested) fill(nested, incomingNested, "report.result.");
   }
-  return changed ? JSON.stringify(stored) : null;
+  if (filled.length === 0) return { status: "noop" };
+  return { status: "merged", bodyJson: JSON.stringify(stored), filled };
+}
+
+/**
+ * @deprecated Issue #2602 — compatibility wrapper over
+ * planArtifactBackfill (superseded by src/services/scheduledReports.ts
+ * `planArtifactBackfill`, which also names why a record cannot be
+ * backfilled). Returns the merged body JSON, or null when nothing was
+ * missing or the merge was refused. Do not add callers.
+ */
+export function backfillArtifactKeys(
+  storedBodyJson: string,
+  redeliveryBody: unknown,
+): string | null {
+  const outcome = planArtifactBackfill(storedBodyJson, redeliveryBody);
+  return outcome.status === "merged" ? outcome.bodyJson : null;
 }
 
 export function storeReportAtGeneration(
@@ -597,11 +648,28 @@ export function storeReportAtGeneration(
           // Never overwrite an existing key/status, never touch
           // R2-pointer rows (their body lives in R2, not here),
           // and never fail the redelivery if the backfill fails.
-          if (!row.bodyR2Key) {
+          if (row.bodyR2Key) {
+            // Issue #2602 — R2 fail-closed: the body lives out of line, so
+            // an inline merge would fork the record from its pointer. Skip
+            // the merge and NAME the row; the pointer is never rewritten
+            // by a redelivery.
+            console.warn(
+              `[scheduledReports] storeReportAtGeneration: artifact-key backfill skipped for report ${id}: body-in-r2 (first-write-win; the R2 body is the record).`,
+            );
+          } else {
             try {
-              const merged = backfillArtifactKeys(row.body, input.body);
-              if (merged) {
-                storePorts(sql).write.updateBody(id, merged);
+              const outcome = planArtifactBackfill(row.body, input.body, {
+                owner,
+                ...(row.userLogin ? { storedOwner: row.userLogin } : {}),
+              });
+              if (outcome.status === "merged") {
+                storePorts(sql).write.updateBody(id, outcome.bodyJson);
+              } else if (outcome.status === "not-backfillable") {
+                // Never guessed: the row stays exactly as stored and the
+                // reason is on the record's log line.
+                console.warn(
+                  `[scheduledReports] storeReportAtGeneration: report ${id} cannot be backfilled (${outcome.reason}); stored body left untouched.`,
+                );
               }
             } catch (err) {
               console.warn(
@@ -724,6 +792,14 @@ export async function storeReportAtGenerationWithR2(
           dedupeStatuses.aiSearch
         );
         if (row) {
+          if (row.bodyR2Key) {
+            // Issue #2602 — the R2 path never merges a redelivery into the
+            // body (the object is the record); name it rather than leaving
+            // the skip implicit.
+            console.warn(
+              `[scheduledReports] storeReportAtGenerationWithR2: artifact-key backfill skipped for report ${id}: body-in-r2 (first-write-win; the R2 body is the record).`,
+            );
+          }
           try {
             storePorts(sql).write.updateFanoutOutcome(id, JSON.stringify(dedupedFanout));
           } catch (err) {
