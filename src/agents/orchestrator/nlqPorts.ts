@@ -12,7 +12,11 @@ import type { AgentScheduleItem, Env, StockScreenerFilter } from "../../types";
 import type { NLQSchedulingPort, NLQSocialBriefPort, NLQStockScreenPort, NLQStockScreenRunResult } from "../nlq";
 import type { ScreenerAgent, ScreenerRunRequest } from "../screener-agent";
 import type { SocialBriefStore } from "../social/briefStore";
-import { shardsForUniverse } from "../../workflows/screenExecutionBroker";
+import {
+  buildParentScreenCommand,
+  shardsForUniverse,
+  startStockScreenWorkflowOrNull,
+} from "../../workflows/screenExecutionBroker";
 import { planStockScreenRun } from "../../workflows/stockScreenPlanner";
 import { createWorkflowPorts } from "../../workflows/createWorkflowPorts";
 import { workflowTenantId } from "../../workflows/screenerWorkflowRoutes";
@@ -284,6 +288,27 @@ export function nlqStockScreenPort(ctx: NlqPortsContext): NLQStockScreenPort {
         { trigger: "manual", filters, universe },
         new Date().toISOString(),
       );
+      // Issue #2914 (G7): the fallback runs through spec +
+      // broker + planner, not around them. The spec carries
+      // source "nlq" and asyncRequested false, so the broker
+      // returns null — its sync-branch routing decision, per
+      // its own contract — and only then does the caller run
+      // sync. A future async NLQ path would route through
+      // this same consult instead of growing a second start.
+      await startStockScreenWorkflowOrNull({
+        env: ctx.env,
+        spec: {
+          source: "nlq",
+          trigger: "manual",
+          deliver: false,
+          filters,
+          universe: fallbackPlan.universe,
+          asyncRequested: false,
+          delivery: {},
+          userLogin: login,
+        },
+        userLogin: login,
+      });
       return ctx.getScreenerAgent(userLogin).runScreen({
         trigger: "manual",
         filters,
@@ -346,23 +371,23 @@ function buildChatScreenCommand(
   // share the turn's ONE trace id. No resolver / no turn → no
   // stamp: an untraced run, honestly.
   const traceparent = ctx.traceparent?.();
-  const command: WorkflowJobCommand = {
+  // Issue #2914 (G7): the command comes from the broker's
+  // one builder — the literal lived here before, now shared.
+  // Issue #2908 (G1): the NLQ trigger rides the command
+  // instead of collapsing to "manual" in provenance.
+  const command: WorkflowJobCommand = buildParentScreenCommand({
     jobId,
-    type: "run-screen",
     source: "nlq-chat",
     trigger: "manual",
-    // Issue #2908 (G1): the NLQ trigger rides the command
-    // instead of collapsing to "manual" in provenance.
     specTrigger: "nlq",
     userLogin: req.userLogin,
-    role: "parent",
     tenantId,
     shards,
     filters: req.filters as unknown as Record<string, unknown>,
     maxItems: 10,
     pollIntervalMs: CHAT_SCREEN_PARENT_POLL_INTERVAL_MS,
     ...(traceparent ? { traceparent } : {}),
-  };
+  });
   return { command, jobId, tenantId, shards, startedAtIso };
 }
 

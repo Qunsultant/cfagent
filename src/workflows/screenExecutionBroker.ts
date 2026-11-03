@@ -40,7 +40,7 @@
  */
 
 import { shardableUniverses } from "../trading";
-import type { Env } from "../types";
+import type { AsyncJobSubmission, Env, ShardChainContext } from "../types";
 import {
   manualWorkflowJobId,
   tryStartScreenerWorkflow,
@@ -76,6 +76,78 @@ export function shardsForUniverse(universe: string): WorkflowShard[] {
 }
 
 /**
+ * Issue #2914 (G7) — the one parent command builder. Every
+ * server-side run-screen parent command is built here: the
+ * broker's REST start below, the NLQ chat-screen builder,
+ * and the mesh door's builder (which previously each wrote
+ * the literal out by hand, sharing only shardsForUniverse).
+ * Defined fields ride; genuinely unknown fields stay
+ * absent — the builder never invents a value. The goal
+ * command keeps its own builder (buildGoalScreenCommand):
+ * it carries the goalScreen descriptor, not a market
+ * command. The paid-fulfillment path (premium.ts) keeps its
+ * own literal too, out of G7 scope (own symbols-shard
+ * scheme, own tests) — named in the G7 pin test, not
+ * silently passed.
+ */
+export interface ParentScreenCommandInput {
+  jobId: string;
+  source: string;
+  trigger: "manual" | "scheduled";
+  specTrigger?: WorkflowJobCommand["specTrigger"];
+  userLogin: string;
+  tenantId?: string;
+  shards: WorkflowShard[];
+  filters: Record<string, unknown>;
+  maxItems?: number;
+  pollIntervalMs?: number;
+  traceparent?: string;
+  screenMode?: WorkflowJobCommand["screenMode"];
+  screenIntent?: string;
+  deliver?: boolean;
+  provider?: string;
+  environment?: "TEST" | "PROD";
+  portfolioContext?: boolean;
+  scheduleId?: string;
+  goalId?: string;
+  patternRef?: WorkflowJobCommand["patternRef"];
+  presetRef?: WorkflowJobCommand["presetRef"];
+  patternQualifications?: string[];
+}
+
+export function buildParentScreenCommand(
+  input: ParentScreenCommandInput,
+): WorkflowJobCommand {
+  return {
+    jobId: input.jobId,
+    type: "run-screen",
+    source: input.source,
+    trigger: input.trigger,
+    ...(input.specTrigger !== undefined ? { specTrigger: input.specTrigger } : {}),
+    userLogin: input.userLogin,
+    role: "parent",
+    tenantId: input.tenantId,
+    shards: input.shards,
+    ...(input.scheduleId !== undefined ? { scheduleId: input.scheduleId } : {}),
+    ...(input.goalId !== undefined ? { goalId: input.goalId } : {}),
+    ...(input.patternRef !== undefined ? { patternRef: input.patternRef } : {}),
+    ...(input.presetRef !== undefined ? { presetRef: input.presetRef } : {}),
+    ...(input.patternQualifications !== undefined ? { patternQualifications: input.patternQualifications } : {}),
+    ...(input.deliver !== undefined ? { deliver: input.deliver } : {}),
+    ...(input.provider ? { provider: input.provider } : {}),
+    filters: input.filters,
+    ...(input.maxItems !== undefined ? { maxItems: input.maxItems } : {}),
+    ...(input.pollIntervalMs !== undefined ? { pollIntervalMs: input.pollIntervalMs } : {}),
+    ...(input.traceparent ? { traceparent: input.traceparent } : {}),
+    ...(input.environment !== undefined ? { environment: input.environment } : {}),
+    ...(input.portfolioContext !== undefined ? { portfolioContext: input.portfolioContext } : {}),
+    ...(input.screenMode
+      ? { screenMode: input.screenMode, screenIntent: input.screenIntent }
+      : {}),
+  };
+}
+
+/**
  * Start a REST stock screen via workflow when the spec asks
  * for async, otherwise return null for the sync path.
  */
@@ -108,14 +180,14 @@ export async function startStockScreenWorkflowOrNull(args: {
   const shards: WorkflowShard[] = shardsForUniverse(spec.universe);
   const starter = args.starter ?? tryStartScreenerWorkflow;
   // ND throw propagates by design — see module header.
-  const handle = await starter(env, {
+  // Issue #2914 (G7): the command comes from the one
+  // builder — the literal lived here before, now shared.
+  const handle = await starter(env, buildParentScreenCommand({
     jobId,
-    type: "run-screen",
     source: "manual",
     trigger: workflowTriggerForSpec(spec),
     ...(spec.trigger !== undefined ? { specTrigger: spec.trigger } : {}),
     userLogin: spec.userLogin ?? userLogin,
-    role: "parent",
     tenantId: workflowTenantId(env),
     shards,
     ...(spec.scheduleId !== undefined ? { scheduleId: spec.scheduleId } : {}),
@@ -131,7 +203,45 @@ export async function startStockScreenWorkflowOrNull(args: {
     ...(spec.screenMode
       ? { screenMode: spec.screenMode, screenIntent: spec.screenIntent }
       : {}),
-  });
+  }));
   if (!handle) return null;
   return { handle, jobId, shards };
+}
+
+/**
+ * Issue #2914 (G7) — the broker's scheduled-async branch:
+ * start a scheduled sharded run's chain. The submission
+ * (planFeedStart + the shardSubmit async-job port) moved
+ * here from ScheduledTasksService, so scheduledTasks no
+ * longer imports the chain planner for its start — the
+ * broker owns every screen start, and the chain keeps its
+ * own engine (below).
+ *
+ * What this is NOT: a migration of scheduled-sharded
+ * execution onto the ScreenerScreenWorkflow. That literal
+ * migration was considered and rejected in G7, for the
+ * record: (1) the chain is the stage pipeline — its
+ * stageChain config (serve delays, stage options) has no
+ * workflow equivalent (zero stageChain references in
+ * src/workflows/); (2) the chain run model (chain_id) is
+ * read by the workflowRuns surface as one run, and the
+ * chain's serve step feeds the same delivery bridge
+ * (followup.report -> followup.deliver) the workflow
+ * feeds; (3) per-run delivery channels (emailTo,
+ * slackChannel, webhookUrl) ride the chain context, while
+ * the workflow command carries no channel fields. Moving
+ * execution would drop staging + channels and fight the
+ * #2869 production-wiring direction (chain stages -> the
+ * bridge). If a workflow-start migration is ever wanted,
+ * it needs channel plumbing + stageChain-in-workflow +
+ * chain-run-model migration as its own designed issue,
+ * not a silent side effect of G7.
+ */
+export async function startScheduledShardedChain(args: {
+  chain: ShardChainContext;
+  /** Injectable for tests; production passes the async-job submission port. */
+  submit: (submission: AsyncJobSubmission) => Promise<{ jobId: string }>;
+}): Promise<{ jobId: string }> {
+  const { planFeedStart } = await import("../services/shardJobs");
+  return args.submit(planFeedStart(args.chain));
 }
