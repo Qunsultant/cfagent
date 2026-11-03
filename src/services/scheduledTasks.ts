@@ -30,6 +30,7 @@ import type { ScreenerTrace } from "./screenerTrace";
 import { withRetry } from "./resilience";
 import { resolvePipelinePolicy } from "./pipelinePolicy";
 import { planScheduledScreen } from "../workflows/stockScreenPlanner";
+import { classifyScreenFailure, logScreenRunEvent } from "../workflows/screenRunAspects";
 import { DynamicMarketScreener } from "../trading";
 import {
   type ScannedStock,
@@ -883,7 +884,29 @@ export class ScheduledTasksService {
       // runs the full failure path (audit + session message +
       // screener.failed bus event). The run still never executes
       // unsharded under a sharded label.
-      throw new Error("Sharded runs require the async-job submission port; run unsharded or configure the host.");
+      // Issue #2860: the chain bypasses runScreen, so its
+      // submission failures carry the funnel's classification
+      // + structured log event HERE, at the chain's own join
+      // point (same double-record shape as the inner catch
+      // below: this audit is the submission-attempt record,
+      // distinct from the caller run-failure record).
+      const portError = new Error("Sharded runs require the async-job submission port; run unsharded or configure the host.");
+      this.audit("screener.screen_failed", {
+        sector: sector || "ALL",
+        error: portError.message,
+        sharded: true,
+        classification: classifyScreenFailure(portError),
+      });
+      logScreenRunEvent({
+        event: "screen.failed",
+        trigger: options.trigger || "scheduled",
+        universe,
+        userLogin,
+        traceId: crypto.randomUUID(),
+        classification: classifyScreenFailure(portError),
+        error: portError.message,
+      });
+      throw portError;
     }
     // Issue #1993: sharded chains bypass runScreen, so they never
     // acquire the run lock. Refuse submission while a monolithic run
@@ -922,6 +945,12 @@ export class ScheduledTasksService {
         return { success: true, taskType: "market_screen", skipped: true, skippedReason: "already-running", sharded: true, timestamp } as any;
       }
     }
+    // Issue #2860: the chainId is the submission attempt's
+    // correlation id — generated before the try so the
+    // catch's failed event can carry it too (a UUID
+    // generation has no side effects, so this moves
+    // nothing else).
+    const chainId = crypto.randomUUID();
     try {
       // Issue #2914 (G7): the chain start lives in the
       // broker — scheduledTasks plans (above) and gates
@@ -935,7 +964,6 @@ export class ScheduledTasksService {
         ...(options.pushToSlack !== false ? ["slack"] : []),
         ...(options.webhookUrl ? ["webhook"] : []),
       ] as import("../types").AsyncJobChannel[];
-      const chainId = crypto.randomUUID();
       const submitted = await startScheduledShardedChain({
         chain: {
           chainId,
@@ -958,6 +986,20 @@ export class ScheduledTasksService {
         universe,
         chainId,
         jobId: submitted.jobId,
+      });
+      // Issue #2860: the chain's submission IS its
+      // screen.started — trace_id is the chainId, the
+      // correlation id the whole chain's rows + logs
+      // share. Completion is async (serve/deliver jobs),
+      // so no screen.completed is emitted here; the
+      // chain's completion surfaces via the job rows +
+      // collation, not a second log line.
+      logScreenRunEvent({
+        event: "screen.started",
+        trigger: options.trigger || "scheduled",
+        universe,
+        userLogin,
+        traceId: chainId,
       });
       return {
         success: true,
@@ -991,6 +1033,16 @@ export class ScheduledTasksService {
         sector: sector || "ALL",
         error: err.message,
         sharded: true,
+        classification: classifyScreenFailure(err),
+      });
+      logScreenRunEvent({
+        event: "screen.failed",
+        trigger: options.trigger || "scheduled",
+        universe,
+        userLogin,
+        traceId: chainId,
+        classification: classifyScreenFailure(err),
+        error: err.message,
       });
       throw err;
     }
