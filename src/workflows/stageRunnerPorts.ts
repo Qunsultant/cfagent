@@ -64,14 +64,19 @@ export type StageRetryBucket = keyof PipelinePolicy["retry"];
 
 /**
  * Default retry bucket per stage. Acquisition covers the provider-facing
- * stages (feed and the gather it feeds, plus the screen that consumes
- * them); report covers generation/recording (assemble, render, store);
+ * stages (feed and the gather it feeds); report covers the screen's
+ * compute and the artifacts built from it (analysis/generation, store);
  * delivery covers every channel send.
+ *
+ * analysis maps to "report" because the chain planner has always run the
+ * generate row (the analysis stage) under the report budget
+ * (SHARD_RETRY_BUCKET.generate); that table now derives from this one, so
+ * the two cannot drift apart again.
  */
 export const STAGE_RETRY_BUCKET: Record<StageName, StageRetryBucket> = {
   feed: "acquisition",
   gather: "acquisition",
-  analysis: "acquisition",
+  analysis: "report",
   store: "report",
   serve: "report",
   deliver: "delivery",
