@@ -1,4 +1,4 @@
-## Added
+### Added
 
 - Sign in with Apple as a login provider (#2686): registered in the
   generic OIDC provider registry behind `IAAA_WIRING_ENABLED` (button
