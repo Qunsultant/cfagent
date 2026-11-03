@@ -98,14 +98,21 @@ afterEach(async () => {
 
 describe("#2120 slice 1 nav registration (source pins)", () => {
   it("ROUTES has the search entry with the designed shape", () => {
-    const routes = src("client/routes.ts");
-    expect(routes).toContain('id: "search"');
-    const start = routes.indexOf('id: "search"');
-    const block = routes.slice(start, start + 600);
-    expect(block).toContain('category: "Intelligence"');
-    expect(block).toContain('icon: "Search"');
-    expect(block).toContain("navOrder: 9");
-    expect(block).toContain("defaultVisible: true");
+    // Route table data now lives in nav-config.json (issue #2977).
+    const data = JSON.parse(src("client/nav-config.json")) as {
+      routes: {
+        id: string;
+        category: string;
+        icon: string;
+        navEntry?: { navOrder: number; defaultVisible: boolean };
+      }[];
+    };
+    const search = data.routes.find((r) => r.id === "search");
+    expect(search).toBeDefined();
+    expect(search?.category).toBe("Intelligence");
+    expect(search?.icon).toBe("Search");
+    expect(search?.navEntry?.navOrder).toBe(9);
+    expect(search?.navEntry?.defaultVisible).toBe(true);
   });
 
   it("TAB_CONTENT has the search key", () => {
@@ -117,9 +124,12 @@ describe("#2120 slice 1 nav registration (source pins)", () => {
   });
 
   it("pre-hub ROUTES ids are all still present (superset)", () => {
-    const routes = src("client/routes.ts");
+    const data = JSON.parse(src("client/nav-config.json")) as {
+      routes: { id: string }[];
+    };
+    const ids = new Set(data.routes.map((r) => r.id));
     for (const id of ["nlq", "screeners", "social", "docs", "chat", "endpoints", "audit", "payments", "referrals", "research", "revenue", "workflows"]) {
-      expect(routes).toContain(`id: "${id}"`);
+      expect(ids.has(id)).toBe(true);
     }
   });
 
