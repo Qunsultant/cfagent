@@ -373,6 +373,70 @@ export const SUB_MENU_CONFIGS: Record<string, NavSubMenuItemConfig[]> = {
       description: "Demo checkout terminal (public sandbox page)",
     },
   ],
+  // Issue #2968: Billing menus — the six Billing pages live as
+  // submenus under Orders / Billing / Payments. Submenu ids are the
+  // page routes, so their links resolve to the same ?tab=X
+  // destinations the top-level items used (no overrides needed).
+  orders: [
+    {
+      id: "checkout",
+      label: "Checkout",
+      shortLabel: "Checkout",
+      icon: "Checkout",
+      badge: "Testnet",
+      badgeType: "pro",
+      description: "Checkout flows",
+    },
+    {
+      id: "ledger",
+      label: "Order History Ledger",
+      shortLabel: "Ledger",
+      icon: "Ledger",
+      badge: "AUDIT",
+      badgeType: "pro",
+      description: "Every recorded trade order, with its ledger status",
+    },
+  ],
+  billing: [
+    {
+      id: "billing",
+      label: "Billing",
+      shortLabel: "Billing",
+      icon: "Billing",
+      badge: "Billing",
+      badgeType: "neutral",
+      description: "Your subscription, receipts, plans, and referral-credit balance — read-only servicing",
+    },
+    {
+      id: "revenue",
+      label: "Revenue Analytics",
+      shortLabel: "Revenue",
+      icon: "Revenue",
+      badge: "Yield",
+      badgeType: "new",
+      description: "Revenue analytics",
+    },
+  ],
+  payments: [
+    {
+      id: "payments",
+      label: "Payments",
+      shortLabel: "Payments",
+      icon: "Payments",
+      badge: "x402",
+      badgeType: "neutral",
+      description: "Payments",
+    },
+    {
+      id: "payment-assurance",
+      label: "Payment Assurance",
+      shortLabel: "Assurance",
+      icon: "Assurance",
+      badge: "Test",
+      badgeType: "neutral",
+      description: "Payment assurance",
+    },
+  ],
   // Issue #2783: Planned asset classes — valid hub views with no
   // provider adapter yet. Their links are catalog overrides
   // (planned:<id> → screeners view); their visibility is the
@@ -422,7 +486,7 @@ const SECTION_METADATA: { category: RouteCategory; title: string; id: string }[]
   { category: "Intelligence", title: "INTELLIGENCE & COPILOT", id: "section-intelligence" },
   { category: "Playbooks", title: "WORKFLOWS", id: "section-workflows" },
   { category: "Marketing", title: "MARKETING", id: "section-marketing" },
-  { category: "Billing", title: "BILLINGS/PAYMENTS", id: "section-billing" },
+  { category: "Billing", title: "ORDERS/BILLINGS/PAYMENTS", id: "section-billing" },
   { category: "Platform", title: "PLATFORM", id: "section-platform" },
 ];
 
@@ -447,6 +511,14 @@ const SUB_MENU_HOSTED_IDS = new Set([
   "workflows",
   "endpoints",
   PLATFORM_ADMIN_NAV_ID,
+  // Billing menus (issue #2968): the six Billing pages live as
+  // submenus under Orders / Billing / Payments, not top-level.
+  "payments",
+  "revenue",
+  "ledger",
+  "checkout",
+  "payment-assurance",
+  "billing",
 ]);
 
 export function buildDefaultLeftNavConfig(): LeftNavConfig {
@@ -515,6 +587,46 @@ export function buildDefaultLeftNavConfig(): LeftNavConfig {
         badgeType: "neutral",
         description: "The one scheduling surface for screening runs — create, pause, and inspect scheduled jobs",
       });
+    }
+
+    // Billing menus (issue #2968): the section holds three menu
+    // parents, not six top-level pages — the pages live as submenus
+    // (their routes are sub-menu-hosted above, so they do not repeat
+    // as top-level items). The "billing" parent shares its id with
+    // the Billing page route, like "workflow-runs" does today: the
+    // parent click toggles and lands on the Billing page.
+    if (sec.id === "section-billing") {
+      items.splice(
+        0,
+        items.length,
+        {
+          id: "orders",
+          label: "Orders",
+          shortLabel: "Orders",
+          category: "Billing",
+          icon: "Order",
+          description: "Checkout and the order history ledger",
+          subItems: SUB_MENU_CONFIGS.orders,
+        },
+        {
+          id: "billing",
+          label: "Billing",
+          shortLabel: "Billing",
+          category: "Billing",
+          icon: "Billing",
+          description: "Billing servicing and revenue analytics",
+          subItems: SUB_MENU_CONFIGS.billing,
+        },
+        {
+          id: "payments",
+          label: "Payments",
+          shortLabel: "Payments",
+          category: "Billing",
+          icon: "Payments",
+          description: "Payments and payment assurance",
+          subItems: SUB_MENU_CONFIGS.payments,
+        },
+      );
     }
 
     return {

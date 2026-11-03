@@ -5,6 +5,8 @@
  * 1. Move tab=workflows to Workflows sub-menu (SUB_MENU_CONFIGS["workflow-runs"])
  *    and SUB_MENU_HOSTED_IDS.
  * 2. Rename Billing section to BILLINGS/PAYMENTS in SECTION_METADATA.
+ *    (Issue #2968 renames it again to ORDERS/BILLINGS/PAYMENTS and
+ *    groups the pages under Orders/Billing/Payments menus.)
  * 3. Move tab=payment-assurance to category Billing and section-billing (BILLINGS/PAYMENTS).
  * 4. Modernize ProductCatalogPanel UI with container padding, structured cards,
  *    tables for receipts and sales rails, and Notice callouts.
@@ -59,17 +61,16 @@ describe("Workflows, Billings/Payments Nav & Products UI (issue #2843)", () => {
     expect(platformIds).not.toContain("workflows");
   });
 
-  it("renames Billing section to BILLINGS/PAYMENTS and places payment-assurance within it", () => {
+  it("renames Billing section to ORDERS/BILLINGS/PAYMENTS with Orders, Billing, Payments menus (#2968)", () => {
     const billingSec = DEFAULT_LEFT_NAV_CONFIG.sections.find((s) => s.id === "section-billing");
     expect(billingSec).toBeDefined();
-    expect(billingSec!.title).toBe("BILLINGS/PAYMENTS");
+    expect(billingSec!.title).toBe("ORDERS/BILLINGS/PAYMENTS");
     expect(billingSec!.category).toBe("Billing");
 
-    const billingItemIds = billingSec!.items.map((i) => i.id);
-    expect(billingItemIds).toContain("payment-assurance");
-    expect(billingItemIds).toContain("payments");
-    expect(billingItemIds).toContain("checkout");
-    expect(billingItemIds).toContain("billing");
+    expect(billingSec!.items.map((i) => i.id)).toEqual(["orders", "billing", "payments"]);
+    expect(SUB_MENU_CONFIGS.orders.map((s) => s.id)).toEqual(["checkout", "ledger"]);
+    expect(SUB_MENU_CONFIGS.billing.map((s) => s.id)).toEqual(["billing", "revenue"]);
+    expect(SUB_MENU_CONFIGS.payments.map((s) => s.id)).toEqual(["payments", "payment-assurance"]);
 
     const assuranceRoute = getRoute("payment-assurance");
     expect(assuranceRoute).toBeDefined();
