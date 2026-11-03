@@ -243,6 +243,10 @@
  * array to 301 entries; the delegation sequence is unchanged
  * (same handler, same position).
  *
+ * Issue #2964 added two — GET /schedules/runs and GET
+ * /schedules/callbacks (in handleSchedulesRoutes, before
+ * get-by-id, so the runs routes are never swallowed by it).
+ *
  * Issue #2656 (Phase 2.1) added four — POST
  * /payments/agentic/commercial/subscription/billing-checkout,
  * POST /payments/agentic/commercial/subscription/billing-purchase,
@@ -712,6 +716,8 @@ const EXPECTED_INVENTORY = [
   "handleSchedulesRoutes :: includes(\"/schedules/cancel/\")",
   "handleSchedulesRoutes :: includes(\"/schedules/\")",
   "handleSchedulesRoutes :: endsWith(\"/schedules/cancel-all\")",
+  "handleSchedulesRoutes :: === \"/schedules/runs\"",
+  "handleSchedulesRoutes :: === \"/schedules/callbacks\"",
   "handleSchedulesRoutes :: includes(\"/schedules/\")",
   "handleSchedulesRoutes :: includes(\"/schedules/\")",
   "handleSchedulesRoutes :: endsWith(\"/pause\")",

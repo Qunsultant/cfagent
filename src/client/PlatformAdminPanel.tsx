@@ -30,6 +30,7 @@ import {
 } from "./adBannerConfig";
 import { AsyncJobsPanel } from "./AsyncJobsPanel";
 import { ScheduledGoalsPanel } from "./ScheduledGoalsPanel";
+import { JobsPanel } from "./JobsPanel";
 import { ApiKeysPanel } from "./ApiKeysPanel";
 import { DataProvidersPanel } from "./DataProvidersPanel";
 import { IaaaAdminPanel } from "./IaaaAdminPanel";
@@ -434,6 +435,15 @@ export function PlatformAdminPanel({
                   <small>ScheduledAgent goals, ticks &amp; add-goal form</small>
                 </div>
                 <ScheduledGoalsPanel embedded />
+              </div>
+            )}
+            {active === "jobs" && (
+              <div className="etrade-panel-section">
+                <div className="section-label-row">
+                  <span>Jobs</span>
+                  <small>All scheduled jobs &amp; per-run results</small>
+                </div>
+                <JobsPanel embedded />
               </div>
             )}
             {active === "provenance" && <ProvenanceSection />}

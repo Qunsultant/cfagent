@@ -19,6 +19,7 @@ import { listStoreEntries, type DoNamespaceLike, type DoStubLike } from "./secur
 import type { ActorNamespaceLike } from "./services/actorGatewayPorts";
 import { zonedDateParts } from "./schedule";
 import { OPERATION_CATALOG } from "./orchestrate";
+import { SCHEDULE_SYSTEMS, WORKER_CRON_TRIGGERS_INVENTORY } from "./services/scheduleSystems";
 import {
   SOCIAL_BRIEF_MAX_CHARS,
   createSocialBriefStoreFromNamespace,
@@ -1507,6 +1508,7 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
         removeGoal(id: string): Promise<boolean>;
         setGoalEnabled(id: string, enabled: boolean): Promise<boolean>;
         triggerGoal(id: string): Promise<unknown>;
+        listJobRuns(jobId?: string, limit?: number): Promise<unknown[]>;
       }>((env as any).SCHEDULED_AGENT, "default");
 
       if (path === "/api/schedule/goals" && request.method === "GET") {
@@ -1543,6 +1545,27 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
       if (path === "/api/schedule/ticks" && request.method === "GET") {
         const limit = Number(new URL(request.url).searchParams.get("limit") || 20);
         return Response.json({ ok: true, ticks: await sched.getTickHistory(limit) });
+      }
+      // Issue #2964 — per-run result records for ScheduledAgent goals
+      // (newest first; jobId filters to one goal). The aggregate tick
+      // history above stays as the aggregate view; this is the
+      // per-run view the unified Jobs UI reads.
+      if (path === "/api/schedule/runs" && request.method === "GET") {
+        const params = new URL(request.url).searchParams;
+        const jobId = params.get("jobId") || undefined;
+        const limit = Number(params.get("limit") || 50);
+        return Response.json({ ok: true, runs: await sched.listJobRuns(jobId, limit) });
+      }
+      // Issue #2964 — the schedule-systems inventory for the unified
+      // Jobs UI: the three systems plus the Worker cron triggers,
+      // read from the inventory (never duplicated client-side), so
+      // the read-only cron list cannot drift from wrangler.jsonc.
+      if (path === "/api/schedule/systems" && request.method === "GET") {
+        return Response.json({
+          ok: true,
+          systems: SCHEDULE_SYSTEMS,
+          cronTriggers: WORKER_CRON_TRIGGERS_INVENTORY,
+        });
       }
       const goalMatch = path.match(/^\/api\/schedule\/goals\/([^/]+)\/(enabled|trigger)$/);
       if (goalMatch && request.method === "POST") {

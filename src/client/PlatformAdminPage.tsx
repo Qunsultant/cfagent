@@ -39,6 +39,7 @@ import {
 } from "./adBannerConfig";
 import { AsyncJobsPanel } from "./AsyncJobsPanel";
 import { ScheduledGoalsPanel } from "./ScheduledGoalsPanel";
+import { JobsPanel } from "./JobsPanel";
 import { ApiKeysPanel } from "./ApiKeysPanel";
 import { DataProvidersPanel } from "./DataProvidersPanel";
 import { IaaaAdminPanel } from "./IaaaAdminPanel";
@@ -69,6 +70,7 @@ export const PLATFORM_ADMIN_TABS: TabOption<PlatformAdminSectionId>[] = [
   { id: "ads", label: "Ads & Banners", icon: <NavIcons.Banners /> },
   { id: "background-tasks", label: "Background Tasks", icon: <NavIcons.Tasks /> },
   { id: "scheduled-goals", label: "Scheduled Goals", icon: <NavIcons.ScheduledGoals /> },
+  { id: "jobs", label: "Jobs", icon: <NavIcons.Jobs /> },
   { id: "provenance", label: "Diagnostics & Provenance", icon: <NavIcons.Provenance /> },
   { id: "api-keys", label: "API Keys", icon: <NavIcons.ApiKeys /> },
   { id: "data-providers", label: "Data Providers", icon: <NavIcons.DataProviders /> },
@@ -213,6 +215,16 @@ export function PlatformAdminPage({
             <small>ScheduledAgent goals, ticks &amp; add-goal form</small>
           </div>
           <ScheduledGoalsPanel embedded />
+        </Card>
+      </TabPanel>
+
+      <TabPanel idBase="platform-admin" tabId="jobs" active={active === "jobs"}>
+        <Card padding="md">
+          <div className="section-label-row">
+            <span>Jobs</span>
+            <small>All scheduled jobs &amp; per-run results</small>
+          </div>
+          <JobsPanel embedded />
         </Card>
       </TabPanel>
 

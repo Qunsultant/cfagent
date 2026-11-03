@@ -501,6 +501,16 @@ export const NavIcons = {
       <line x1="19" y1="12" x2="22" y2="12" />
     </svg>
   ),
+  Jobs: ({ active }: { active?: boolean; className?: string }) => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="4" width="18" height="18" rx="2" fill={active ? "currentColor" : "none"} fillOpacity={0.15} />
+      <circle cx="15.5" cy="9.5" r="3.5" />
+      <polyline points="15.5 7.5 15.5 9.5 17 10.5" />
+      <line x1="7" y1="9" x2="10" y2="9" />
+      <line x1="7" y1="14" x2="12" y2="14" />
+      <line x1="7" y1="18" x2="12" y2="18" />
+    </svg>
+  ),
   Provenance: ({ active }: { active?: boolean; className?: string }) => (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M12 2v4" />
@@ -600,6 +610,7 @@ export const NAV_ICON_MAP: Record<string, NavItemDef["icon"]> = {
   Banners: NavIcons.Banners,
   Tasks: NavIcons.Tasks,
   ScheduledGoals: NavIcons.ScheduledGoals,
+  Jobs: NavIcons.Jobs,
   Provenance: NavIcons.Provenance,
   ApiKeys: NavIcons.ApiKeys,
   DataProviders: NavIcons.DataProviders,

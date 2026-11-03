@@ -44,6 +44,8 @@ import { findDuplicateSchedule } from "../../services/scheduleDedupe";
 import { runStorageRetention } from "../../security/storageRetention";
 import { createBlobStore } from "../../services/blobStoreR2Adapter";
 import { pruneJobOutcomes } from "../../services/jobOutcomes";
+import { SqlJobRunRecordStore } from "../../data/doSqliteJobRunRecordAdapter";
+import { recordScheduleCallbackRun } from "../orchestrator/scheduleCallbackRunRecords";
 import {
   buildSnapshotManifest,
   ORPHAN_SWEEP_PREFIX,
@@ -369,6 +371,37 @@ export async function handleSchedulesRoutes(
       }
     }
 
+    // Issue #2964 — per-run job records + the creatable-callback
+    // catalog for the unified Jobs UI. These MUST be matched BEFORE
+    // the get-by-id block below: /schedules/abc/runs would otherwise
+    // misparse "runs" as the id and 404, and /schedules/callbacks
+    // would misparse "callbacks" as the id.
+    if (path === "/schedules/runs" && request.method === "GET") {
+      try {
+        const params = new URL(request.url).searchParams;
+        const scheduleId = params.get("scheduleId") || undefined;
+        const limit = Number(params.get("limit") || 50);
+        const store = new SqlJobRunRecordStore(ctx.agentCtx.storage.sql);
+        const runs = scheduleId ? store.listByJob(scheduleId, limit) : store.listRecent(limit);
+        return Response.json({ ok: true, runs });
+      } catch (err: any) {
+        return Response.json({ error: err.message || "Failed to list job runs" }, { status: 500 });
+      }
+    }
+    const scheduleRunsMatch = path.match(/^\/schedules\/([^/]+)\/runs$/);
+    if (scheduleRunsMatch && request.method === "GET") {
+      try {
+        const limit = Number(new URL(request.url).searchParams.get("limit") || 50);
+        const store = new SqlJobRunRecordStore(ctx.agentCtx.storage.sql);
+        return Response.json({ ok: true, runs: store.listByJob(scheduleRunsMatch[1], limit) });
+      } catch (err: any) {
+        return Response.json({ error: err.message || "Failed to list job runs" }, { status: 500 });
+      }
+    }
+    if (path === "/schedules/callbacks" && request.method === "GET") {
+      return Response.json({ ok: true, callbacks: ctx.creatableScheduleCallbacks });
+    }
+
     // Get specific schedule by ID (GET /api/schedules/:id)
     if (path.includes("/schedules/") && request.method === "GET") {
       try {
@@ -468,7 +501,24 @@ export async function handleSchedulesRoutes(
           schedule.payload && typeof schedule.payload === "object"
             ? { ...(schedule.payload as Record<string, unknown>), trigger: "manual", scheduleId }
             : schedule.payload;
-        await ctx.runScheduleCallback(schedule.callback, payload);
+        // Issue #2964: record the manual run. Creatable callbacks
+        // record their own runs in the method wrapper (outcome-aware),
+        // so the route must not double-record them; non-creatable
+        // callbacks have no wrapper, so the route records the
+        // invocation itself (invocation-level success, since the
+        // callback reports no outcome). Paused schedules refused
+        // above with 409 record nothing — no run happened.
+        if ((ctx.creatableScheduleCallbacks as readonly string[]).includes(schedule.callback)) {
+          await ctx.runScheduleCallback(schedule.callback, payload);
+        } else {
+          await recordScheduleCallbackRun(
+            ctx.agentCtx.storage.sql,
+            schedule.callback,
+            payload,
+            { id: scheduleId },
+            () => ctx.runScheduleCallback(schedule.callback, payload),
+          );
+        }
         ctx.audit("schedule.triggered", "orchestrator", { scheduleId, callback: schedule.callback });
         return Response.json({ success: true, scheduleId, callback: schedule.callback });
       } catch (err: any) {

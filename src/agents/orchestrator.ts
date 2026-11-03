@@ -66,7 +66,8 @@ import { buildChatErrorFallback, type ChatErrorFallbackContext } from "./chatErr
 import { getScreenerExecutionContext, migrateLegacyScreenSchedules, removeUnownedBaselineSchedules, ensureStrategyScanSchedule, resolveScheduledLogin, type ScheduleMaintenanceContext } from "./orchestrator/scheduleMaintenance";
 import { declareStrategyScanObserveTasks, type ScheduledTasksObserveContext } from "./orchestrator/scheduledTasksObserve";
 import { buildOrchestratorSkillSources } from "./orchestrator/skillPacks";
-import { autoRenewETradeTokens, autonomousGoalScreen, autonomousMarketScreen, autonomousStrategyDiscovery, collectIvHistory, expireStaleOrderDraft, sendScheduledReminder, type ScheduledCallbacksContext } from "./orchestrator/scheduledCallbacks";
+import { autoRenewETradeTokens, autonomousGoalScreen, autonomousMarketScreen, autonomousStrategyDiscovery, collectIvHistory, expireStaleOrderDraft, sendScheduledReminder, type ScheduledCallbackOutcome, type ScheduledCallbacksContext } from "./orchestrator/scheduledCallbacks";
+import { recordScheduleCallbackRun } from "./orchestrator/scheduleCallbackRunRecords";
 import { nlqSchedulingPort, nlqSocialBriefPort, nlqStockScreenPort, type NlqPortsContext } from "./orchestrator/nlqPorts";
 import { formatTraceparent, newTraceContext, parseTraceparent } from "../observability/observabilityPorts";
 import { observeDoRouteDispatch } from "../observability/scheduledJobOutcomes";
@@ -1128,6 +1129,10 @@ export class OrchestratorAgent extends PortThink {
   }
 
   // Issue #992: extracted to ./orchestrator/scheduledCallbacks.ts (autonomousMarketScreen);
+  // Issue #2964: the SDK fires this as method.call(this, payload, schedule),
+  // so the schedule object arrives as the second argument and the wrapper
+  // records the run against schedule.id (manual triggers resolve via the
+  // payload's stamped scheduleId instead). The method stays Promise<void>.
   async autonomousMarketScreen(payload?: {
     sector?: string;
     universe?: string;
@@ -1143,11 +1148,18 @@ export class OrchestratorAgent extends PortThink {
     filters?: import("../types").StockScreenerFilter;
     provider?: import("../trading").StockScreenProvider;
     stageChain?: import("../types").StageChainConfig;
-  }): Promise<void> {
-    return autonomousMarketScreen(this.scheduledCallbacksContext(), payload);
+  }, schedule?: { id?: unknown }): Promise<void> {
+    return recordScheduleCallbackRun(
+      this.ctx.storage.sql,
+      "autonomousMarketScreen",
+      payload,
+      schedule,
+      () => autonomousMarketScreen(this.scheduledCallbacksContext(), payload),
+    );
   }
 
   // Consolidation C1 (issue #1201): extracted to ./orchestrator/scheduledCallbacks.ts (autonomousGoalScreen);
+  // Issue #2964: recording wrapper, same pattern as autonomousMarketScreen.
   async autonomousGoalScreen(payload?: {
     goalKind?: string;
     direction?: string;
@@ -1160,49 +1172,63 @@ export class OrchestratorAgent extends PortThink {
     emailTo?: string;
     slackChannel?: string;
     pushToSlack?: boolean;
-  }): Promise<void> {
-    return autonomousGoalScreen(this.scheduledCallbacksContext(), payload);
+  }, schedule?: { id?: unknown }): Promise<void> {
+    return recordScheduleCallbackRun(
+      this.ctx.storage.sql,
+      "autonomousGoalScreen",
+      payload,
+      schedule,
+      () => autonomousGoalScreen(this.scheduledCallbacksContext(), payload),
+    );
   }
 
   /**
    * Cloudflare Agents Scheduled Callback: Autonomous Options Intelligence
    * Runs cross-symbol options discovery and dispatches omnichannel push alerts
    */
-  async autonomousOptionsAnalysis(payload?: AutonomousOptionsAnalysisOptions): Promise<void> {
+  async autonomousOptionsAnalysis(payload?: AutonomousOptionsAnalysisOptions, schedule?: { id?: unknown }): Promise<void> {
     try {
       await this.waitForPendingTurn({ timeout: 30_000 });
     } catch {
       // Continue if timeout or unhandled
     }
-    const runAnalysis = async () => {
+    // Issue #2964: outcome stash, same pattern as the extracted callbacks.
+    let outcome: ScheduledCallbackOutcome = { outcome: "skipped", detail: "callback did not run" };
+    const runAnalysis = async (): Promise<ScheduledCallbackOutcome> => {
       const savedContext = await this.getScreenerExecutionContext();
       const userLogin = resolveScheduledLogin(payload?.userLogin, savedContext?.userLogin) || "";
       const environment = payload?.environment || savedContext?.environment;
       if (payload?.trigger !== "manual" && !userLogin) {
         await this.removeUnownedBaselineSchedules();
         console.warn("[OrchestratorAgent] Skipping unowned scheduled options screen.");
-        return;
+        return (outcome = { outcome: "skipped", detail: "unowned scheduled options screen" });
       }
       if (payload?.trigger !== "manual") {
         const slot = new Date().toISOString().slice(0, 16);
         const thesis = payload?.thesis || "bullish";
         const slotKey = `${thesis}:${slot}`;
         this.scheduledOptionsSlots ??= new Set<string>();
-        if (this.scheduledOptionsSlots.has(slotKey)) return;
+        if (this.scheduledOptionsSlots.has(slotKey)) {
+          return (outcome = { outcome: "skipped", detail: "duplicate minute slot (in-memory)" });
+        }
         if (this.scheduledOptionsSlots.size > 32) this.scheduledOptionsSlots.clear();
         this.scheduledOptionsSlots.add(slotKey);
         const key = `options:scheduled:last-slot:${thesis}`;
         const last = await this.ctx.storage.get<{ slot: string }>(key);
         if (last?.slot === slot) {
           console.warn(`[OrchestratorAgent] Suppressing duplicate scheduled options scan (${thesis}) in ${slot}Z`);
-          return;
+          return (outcome = { outcome: "skipped", detail: "duplicate minute slot (persistent)" });
         }
         await this.ctx.storage.put(key, { slot });
       }
       const service = new ScheduledTasksService(this.env, this.getOrm(), userLogin, createOptionsDiscoveryPorts({ sql: this.ctx.storage.sql, storage: this.ctx.storage }).scanRuns, undefined, undefined, undefined, (outcome, schedulerUserLogin, chainReport) => scheduleScreenerFollowups(this.asyncJobsContext(), outcome, schedulerUserLogin, chainReport), {sql:this.ctx.storage.sql,blobStorage:this.ctx.storage,env:this.env}, (spec) => (this as any).submitAsyncJob(spec));
       const res = await service.autonomousOptionsAnalysis({ ...payload, userLogin, environment, sharded: payload?.sharded });
-      if ((res as any).skipped) return;
-      if (res.data?.sharded) return;
+      if ((res as any).skipped) {
+        return (outcome = { outcome: "skipped", detail: "service skipped" });
+      }
+      if (res.data?.sharded) {
+        return (outcome = { outcome: "success", descriptor: "sharded to async-job rails; per-shard rows carry the outcome" });
+      }
       // Issue #223 + #910 + #2091: history row + canonical row, via
       // the shared recorder (extracted so orchestrator.ts stays
       // within the #992 size budget). Failures warn inside it and
@@ -1272,18 +1298,41 @@ export class OrchestratorAgent extends PortThink {
           }
         }
       }
+      // Issue #2964: the run's outcome for the recording wrapper.
+      return (outcome = res.success
+        ? { outcome: "success", descriptor: res.data?.summary || "options analysis complete" }
+        : { outcome: "failure", error: res.error ?? "options analysis failed" });
     };
 
-    if (typeof (this as any).keepAliveWhile === "function") {
-      await (this as any).keepAliveWhile(runAnalysis);
-    } else {
-      await runAnalysis();
-    }
+    // Issue #2964: record the run, then return void as before. A
+    // throwing run records a failure and the throw still propagates
+    // (SDK retry policy preserved).
+    await recordScheduleCallbackRun(
+      this.ctx.storage.sql,
+      "autonomousOptionsAnalysis",
+      payload,
+      schedule,
+      async () => {
+        if (typeof (this as any).keepAliveWhile === "function") {
+          await (this as any).keepAliveWhile(runAnalysis);
+        } else {
+          await runAnalysis();
+        }
+        return outcome;
+      },
+    );
   }
 
   // Issue #992: extracted to ./orchestrator/scheduledCallbacks.ts (autonomousStrategyDiscovery);
-  async autonomousStrategyDiscovery(payload?: AutonomousStrategyDiscoveryOptions): Promise<void> {
-    return autonomousStrategyDiscovery(this.scheduledCallbacksContext(), payload);
+  // Issue #2964: recording wrapper, same pattern as autonomousMarketScreen.
+  async autonomousStrategyDiscovery(payload?: AutonomousStrategyDiscoveryOptions, schedule?: { id?: unknown }): Promise<void> {
+    return recordScheduleCallbackRun(
+      this.ctx.storage.sql,
+      "autonomousStrategyDiscovery",
+      payload,
+      schedule,
+      () => autonomousStrategyDiscovery(this.scheduledCallbacksContext(), payload),
+    );
   }
 
   // Issue #992: extracted to ./orchestrator/scheduledCallbacks.ts (collectIvHistory);

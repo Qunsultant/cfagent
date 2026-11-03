@@ -35,6 +35,11 @@ import {
   type ScheduledGoal,
   type ScheduleTick,
 } from "../schedule";
+import {
+  buildJobRunRecord,
+  SCHEDULED_AGENT_JOB_RUN_CAP,
+  type JobRunRecord,
+} from "../services/jobRunRecords";
 import { createSocialStoresFromNamespace } from "./social/durableStores";
 import { createSocialBriefStoreFromNamespace } from "./social/briefStore";
 import {
@@ -275,6 +280,45 @@ export class ScheduledAgent extends PortThink {
   }
 
   /**
+   * Issue #2964 — per-run result records. Same DO key-value pattern
+   * as goals/tickHistory, under the "jobRunRecords" key, newest
+   * first, capped. The aggregate tick history stays as the aggregate
+   * view; these records are the per-run view. Recording never
+   * breaks a tick: a storage failure is swallowed, so a run that
+   * happened but left no record is still visible via the tick.
+   */
+  private async getJobRuns(): Promise<JobRunRecord[]> {
+    const stored = await this.ctx.storage.get<JobRunRecord[]>("jobRunRecords");
+    return stored ?? [];
+  }
+
+  private async recordJobRun(
+    record: Omit<JobRunRecord, "system">,
+  ): Promise<void> {
+    try {
+      const built = buildJobRunRecord({ system: "scheduled-agent-goal", ...record });
+      const runs = await this.getJobRuns();
+      runs.unshift(built);
+      await this.ctx.storage.put("jobRunRecords", runs.slice(0, SCHEDULED_AGENT_JOB_RUN_CAP));
+    } catch {
+      // Recording never breaks the tick.
+    }
+  }
+
+  /** Per-run history for one goal (newest first), or all goals. */
+  async listJobRuns(jobId?: string, limit: number = 50): Promise<JobRunRecord[]> {
+    const runs = await this.getJobRuns();
+    const filtered = jobId ? runs.filter((r) => r.jobId === jobId) : runs;
+    return filtered.slice(0, Math.max(1, Math.min(200, limit)));
+  }
+
+  /** One goal's newest run, or undefined when it never ran. */
+  async getLatestJobRun(jobId: string): Promise<JobRunRecord | undefined> {
+    const runs = await this.getJobRuns();
+    return runs.find((r) => r.jobId === jobId);
+  }
+
+  /**
    * Cron entrypoint, invoked by the Workers runtime on each
    * triggers.crons tick. Evaluates due goals and dispatches work.
    *
@@ -340,6 +384,27 @@ export class ScheduledAgent extends PortThink {
 
       if (!isForced && !isDue(goal.cron, goal.lastRun, now, goal.timeZone)) continue;
 
+      // Issue #2964: per-run record inputs for this firing. `started`
+      // is captured before the branch; each terminal point records
+      // its own outcome (success/failure/skipped) with the finished
+      // time of that point. Disabled or not-due goals never reach
+      // here, so they leave no record — no run happened.
+      const runStarted = now.toISOString();
+      const triggeredBy = isForced ? "manual" : "scheduled";
+      const recordGoalRun = (
+        outcome: JobRunRecord["outcome"],
+        extra: { error?: string; detail?: string; descriptor?: string; artifactRefs?: string[] },
+      ): Promise<void> =>
+        this.recordJobRun({
+          jobId: goal.id,
+          operation: goal.operation,
+          started: runStarted,
+          finished: new Date().toISOString(),
+          outcome,
+          triggeredBy,
+          ...extra,
+        });
+
       try {
         // #1779: the shared PaymentsAgentStub (budgetCheck) via the
         // ActorGateway — replaces this site's inline stub type.
@@ -358,6 +423,7 @@ export class ScheduledAgent extends PortThink {
         if (!budgetOk.allowed) {
           tick.errors.push(`${goal.id}: budget check rejected: ${budgetOk.reason ?? "disallowed"}`);
           tick.jobsSkipped++;
+          await recordGoalRun("skipped", { detail: `budget check rejected: ${budgetOk.reason ?? "disallowed"}` });
           continue;
         }
 
@@ -379,11 +445,13 @@ export class ScheduledAgent extends PortThink {
           if (!stores) {
             tick.errors.push(`${goal.id}: SESSION_STORE binding unavailable, goal left due`);
             tick.jobsSkipped++;
+            await recordGoalRun("skipped", { detail: "SESSION_STORE binding unavailable, goal left due" });
             continue;
           }
           if (goal.operation !== SOCIAL_DAILY_PIPELINE_ID) {
             tick.errors.push(`${goal.id}: unknown pipeline: ${goal.operation}`);
             tick.jobsSkipped++;
+            await recordGoalRun("skipped", { detail: `unknown pipeline: ${goal.operation}` });
             continue;
           }
           const pipelineResult = await runSocialDailyPipeline({
@@ -418,12 +486,19 @@ export class ScheduledAgent extends PortThink {
           if (pipelineResult.status === "completed") {
             goal.lastRun = now.toISOString();
             tick.jobsCreated++;
-          } else {
-            // Skipped (e.g. noBrief) or failed: lastRun untouched,
-            // the goal stays due and retries on the next tick. A
-            // failed run resumes at the first incomplete stage via
-            // the pipeline ledger; a skipped run starts fresh.
+            await recordGoalRun("success", { descriptor: "pipeline completed" });
+          } else if (pipelineResult.status === "failed") {
+            // Failed: lastRun untouched, the goal stays due and
+            // retries on the next tick; a failed run resumes at the
+            // first incomplete stage via the pipeline ledger.
             tick.jobsSkipped++;
+            await recordGoalRun("failure", { error: pipelineResult.errors.join("; ") || "pipeline failed" });
+          } else {
+            // Skipped (e.g. noBrief): lastRun untouched, the goal
+            // stays due and retries on the next tick; a skipped run
+            // starts fresh.
+            tick.jobsSkipped++;
+            await recordGoalRun("skipped", { detail: `pipeline ${pipelineResult.status}` });
           }
           continue;
         }
@@ -437,6 +512,7 @@ export class ScheduledAgent extends PortThink {
           if (!stores) {
             tick.errors.push(`${goal.id}: SESSION_STORE binding unavailable, goal left due`);
             tick.jobsSkipped++;
+            await recordGoalRun("skipped", { detail: "SESSION_STORE binding unavailable, goal left due" });
             continue;
           }
           // #1077 Phase 5b slice 2: production reads the firing
@@ -534,6 +610,20 @@ export class ScheduledAgent extends PortThink {
               }
             }
           }
+          if (!result.fired) {
+            await recordGoalRun("skipped", { detail: `skipped (${result.reason ?? "not fired"})` });
+          } else {
+            const publishErrors = [
+              ...result.publish.results.filter((r) => r.outcome === "error"),
+              ...result.catchUp.flatMap((entry) => entry.results.filter((r) => r.outcome === "error")),
+            ];
+            await recordGoalRun("success", {
+              descriptor:
+                publishErrors.length > 0
+                  ? `social post fired; ${publishErrors.length} channel errors (see tick errors)`
+                  : "social post fired",
+            });
+          }
           continue;
         }
 
@@ -554,12 +644,14 @@ export class ScheduledAgent extends PortThink {
           if (!db) {
             tick.errors.push(`${goal.id}: AGENT_DB binding unavailable, goal left due`);
             tick.jobsSkipped++;
+            await recordGoalRun("skipped", { detail: "AGENT_DB binding unavailable, goal left due" });
             continue;
           }
           if (goal.operation === "resource.rollup_daily") {
             await runResourceRollup({ db, nowMs: now.getTime() });
             goal.lastRun = now.toISOString();
             tick.jobsCreated++;
+            await recordGoalRun("success", { descriptor: "rollup complete" });
             continue;
           }
           if (goal.operation === "resource.cap_alert") {
@@ -590,8 +682,16 @@ export class ScheduledAgent extends PortThink {
               // next matching tick retries. lastRun untouched by
               // design (see above).
               tick.jobsSkipped++;
+              await recordGoalRun("skipped", {
+                detail: `alert delivery failed (${result.undelivered.map((u) => u.budget).join(", ")})`,
+              });
             } else {
               tick.jobsCreated++;
+              // The record, not lastRun, is this branch's success
+              // signal — lastRun stays unstamped by design (see
+              // above), which used to leave hourly alert runs
+              // unobservable run by run.
+              await recordGoalRun("success", { descriptor: "alert evaluated" });
             }
             continue;
           }
@@ -604,10 +704,12 @@ export class ScheduledAgent extends PortThink {
             // no tick error (the rollup goal's own errors surface a
             // real breakage), goal stays due and retries tomorrow.
             tick.jobsSkipped++;
+            await recordGoalRun("skipped", { detail: "no completed rollup yet" });
             continue;
           }
           goal.lastRun = now.toISOString();
           tick.jobsCreated++;
+          await recordGoalRun("success", { descriptor: "comparison complete" });
           continue;
         }
 
@@ -651,12 +753,16 @@ export class ScheduledAgent extends PortThink {
               `${goal.id}: holdings fetcher not bound — no ETF holdings-file fetcher is bound in this deployment, goal left due`,
             );
             tick.jobsSkipped++;
+            await recordGoalRun("skipped", {
+              detail: "holdings fetcher not bound — no ETF holdings-file fetcher is bound in this deployment, goal left due",
+            });
             continue;
           } else {
             const db = (env as unknown as { AGENT_DB?: unknown }).AGENT_DB;
             if (!db) {
               tick.errors.push(`${goal.id}: AGENT_DB binding unavailable, goal left due`);
               tick.jobsSkipped++;
+              await recordGoalRun("skipped", { detail: "AGENT_DB binding unavailable, goal left due" });
               continue;
             }
             const { D1IndexListStore } = await import("../data/d1IndexListAdapter");
@@ -692,6 +798,12 @@ export class ScheduledAgent extends PortThink {
           }
           goal.lastRun = now.toISOString();
           tick.jobsCreated++;
+          await recordGoalRun("success", {
+            descriptor:
+              refreshResult.failures.length > 0
+                ? `stored ${refreshResult.artifacts.length} index lists; failed: ${refreshResult.failures.map((f) => f.index).join(", ")}`
+                : `stored ${refreshResult.artifacts.length} index lists`,
+          });
           continue;
         }
 
@@ -719,6 +831,9 @@ export class ScheduledAgent extends PortThink {
               `${goal.id}: no synthesized record for chain goal — refusing to fire, goal left due`,
             );
             tick.jobsSkipped++;
+            await recordGoalRun("skipped", {
+              detail: "no synthesized record for chain goal — refusing to fire, goal left due",
+            });
             continue;
           }
           const decision = decideChainFiring(record, now, {
@@ -738,6 +853,7 @@ export class ScheduledAgent extends PortThink {
               }
             }
             tick.jobsSkipped++;
+            await recordGoalRun("skipped", { detail: `chain firing blocked (${decision.reason})` });
             continue;
           }
           let runResult: ChainRunResult | null = null;
@@ -761,11 +877,16 @@ export class ScheduledAgent extends PortThink {
                   .join("; ")})`,
               );
               tick.jobsSkipped++;
+              await recordGoalRun("failure", {
+                error: `chain execution failed (${failed
+                  .map((l) => `${l.capabilityId}: ${l.detail}`)
+                  .join("; ")})`,
+              });
               continue;
             }
           }
           const { createJob } = await import("../orchestrate");
-          await createJob(env, {
+          const job = await createJob(env, {
             goalId: goal.id,
             goalName: goal.name,
             operation: goal.operation,
@@ -780,6 +901,7 @@ export class ScheduledAgent extends PortThink {
           );
           goal.lastRun = now.toISOString();
           tick.jobsCreated++;
+          await recordGoalRun("success", { descriptor: `job:${job.jobId}` });
           // Success audit only when every leg completed or was
           // submitted to the rails: a run with unimplemented legs
           // (e.g. deliver awaiting the serve hook) has no complete
@@ -804,7 +926,7 @@ export class ScheduledAgent extends PortThink {
         }
 
         const { createJob } = await import("../orchestrate");
-        await createJob(env, {
+        const job = await createJob(env, {
           goalId: goal.id,
           goalName: goal.name,
           operation: goal.operation,
@@ -813,11 +935,15 @@ export class ScheduledAgent extends PortThink {
 
         goal.lastRun = now.toISOString();
         tick.jobsCreated++;
+        await recordGoalRun("success", { descriptor: `job:${job.jobId}` });
       } catch (err) {
         tick.errors.push(
           `${goal.id}: ${err instanceof Error ? err.message : String(err)}`
         );
         tick.jobsSkipped++;
+        await recordGoalRun("failure", {
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
 
