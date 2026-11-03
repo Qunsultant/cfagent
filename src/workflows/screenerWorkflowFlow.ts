@@ -77,9 +77,16 @@
  * Deterministic commands run none of this.
  */
 
-import { planStageFanout } from "./stageRunnerPlan";
+import {
+  fanoutCapExceeded,
+  planNext,
+  planRun,
+  planStageFanout,
+} from "./stageRunnerPlan";
 import {
   STAGE_RETRY_BUCKET,
+  type StageRunnerCheckpoint,
+  type StageRunnerPlan,
   type StageRunnerStage,
 } from "./stageRunnerPorts";
 import {
@@ -838,6 +845,41 @@ function shardFanoutStage(maxParallel: number, timeoutMs: number): StageRunnerSt
   };
 }
 
+/**
+ * Issue #3028 — a resume whose checkpoint says every unit is already
+ * terminal starts nothing. Its record is built from the checkpoint
+ * instead of from fresh outcomes, so a completed resume reports its
+ * stored result rather than the "no shard ran" failure a zero-outcome
+ * collation would produce.
+ */
+function outcomesFromCheckpoint(
+  plan: StageRunnerPlan,
+  checkpoint: StageRunnerCheckpoint,
+): ShardOutcome[] {
+  return plan.units.map((unit) => {
+    const entry = checkpoint.units.find((u) => u.unitId === unit.unitId);
+    switch (entry?.status) {
+      case "completed":
+      case "skipped":
+        return { shardId: unit.unitId, status: "completed" };
+      case "timed_out":
+        return { shardId: unit.unitId, status: "timed_out", timedOut: true };
+      case "failed":
+        return {
+          shardId: unit.unitId,
+          status: "failed",
+          ...(entry.error ? { error: entry.error } : {}),
+        };
+      default:
+        return {
+          shardId: unit.unitId,
+          status: "failed",
+          error: "Shard never ran (checkpoint carries no terminal status).",
+        };
+    }
+  });
+}
+
 interface PendingShard {
   shard: WorkflowJobCommand["shards"][number];
   workflowId: string;
@@ -854,6 +896,13 @@ export async function runParentFlow(
   step: ScreenerWorkflowStep,
   deps: ScreenerWorkflowDeps,
   childOps: ChildWorkflowOps,
+  /**
+   * Issue #3028: the run's checkpoint, when this is a RESUME rather
+   * than a first execution (the production adapter is
+   * createAsyncJobStageCheckpointStore, #3027). Absent = a first run,
+   * whose units are all outstanding — today's behaviour exactly.
+   */
+  resumeFrom?: StageRunnerCheckpoint | null,
 ): Promise<WorkflowCollation> {
   const nowMs = deps.nowMs;
   const workflowId = workflowIdForJob(command.jobId);
@@ -983,6 +1032,10 @@ export async function runParentFlow(
   const pending: PendingShard[] = [];
   const outcomes = new Map<string, ShardOutcome>();
   const childResults = new Map<string, ShardScreenResult>();
+  /** Issue #3028: the deferred-tail reasons this run recorded (normally none). */
+  const fanoutCapReasons: string[] = [];
+  /** Issue #3028: units a resume skipped as already complete. */
+  const resumedSkipped: string[] = [];
   if (refusalReasons) {
     // Issue #2530: a refused interpretation starts ZERO
     // shards. Every shard is a failed outcome carrying the
@@ -998,10 +1051,56 @@ export async function runParentFlow(
   } else {
     const fanoutStage = shardFanoutStage(maxParallel, shardTimeoutMs);
     const shardById = new Map(command.shards.map((shard) => [shard.shardId, shard]));
-    let queue = command.shards.map((shard) => ({ unitId: shard.shardId }));
+    const runPlan: StageRunnerPlan = planRun({
+      runId: command.jobId,
+      invocation: "workflow-shard",
+      stages: [fanoutStage],
+      units: command.shards.map((shard) => ({ unitId: shard.shardId })),
+    });
+    // Issue #3028: a resume asks the contract which units are still
+    // outstanding; a first run starts them all. A completed unit is
+    // never started again by a resume.
+    const outstanding = resumeFrom ? planNext(runPlan, resumeFrom) : { units: runPlan.units };
+    let queue = outstanding?.units ?? [];
+    if (resumeFrom) {
+      const resumedIds = new Set(queue.map((unit) => unit.unitId));
+      const skipped = runPlan.units
+        .filter((unit) => !resumedIds.has(unit.unitId))
+        .map((unit) => unit.unitId);
+      if (skipped.length > 0) {
+        resumedSkipped.push(...skipped);
+        // A skipped unit did not run in this invocation but it IS part of
+        // the run's record: seed its outcome from the checkpoint so the
+        // collation reports the stored result instead of "never started".
+        for (const unitId of skipped) {
+          outcomes.set(unitId, { shardId: unitId, status: "completed" });
+        }
+      }
+    }
+    if (resumeFrom && queue.length === 0) {
+      // Nothing outstanding: record the checkpoint's result, start no child.
+      const recorded = outcomesFromCheckpoint(runPlan, resumeFrom);
+      for (const outcome of recorded) {
+        stageTransitions.push(...stageTransitionsForShard(outcome, nowMs()));
+      }
+      return {
+        ...collateShards(
+          command.jobId,
+          workflowId,
+          recorded,
+          lifecycleTransitions,
+          stageTransitions,
+        ),
+        ...(resumedSkipped.length > 0 ? { resumedSkippedUnits: resumedSkipped } : {}),
+      };
+    }
     let batchIndex = 0;
     while (queue.length > 0) {
       const fanout = planStageFanout(fanoutStage, queue);
+      // Issue #3028: a deferred tail is a pace signal on the record,
+      // never a silent truncation — the loop below starts it next round.
+      const capReason = fanoutCapExceeded(fanout);
+      if (capReason) fanoutCapReasons.push(capReason);
       const batch = fanout.started.map((unit) => shardById.get(unit.unitId)!);
       const created = await step.do(`fan-out-batch-${batchIndex}`, async () => {
         const out: Array<{ shard: WorkflowJobCommand["shards"][number]; workflowId: string }> = [];
@@ -1065,13 +1164,17 @@ export async function runParentFlow(
   if (outcomeList.some((o) => o.status !== "completed")) {
     lifecycleTransitions.push({ lifecycle: "BudgetConstrained", atMs: nowMs() });
   }
-  const collation = collateShards(
-    command.jobId,
-    workflowId,
-    outcomeList,
-    lifecycleTransitions,
-    stageTransitions,
-  );
+  const collation: WorkflowCollation = {
+    ...collateShards(
+      command.jobId,
+      workflowId,
+      outcomeList,
+      lifecycleTransitions,
+      stageTransitions,
+    ),
+    ...(fanoutCapReasons.length > 0 ? { fanoutCapReason: fanoutCapReasons[0] } : {}),
+    ...(resumedSkipped.length > 0 ? { resumedSkippedUnits: resumedSkipped } : {}),
+  };
   lifecycleTransitions.push({
     lifecycle: collation.lifecycle,
     atMs: nowMs(),
