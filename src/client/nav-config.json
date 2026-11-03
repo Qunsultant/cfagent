@@ -1032,44 +1032,6 @@
         "badgeType": "neutral",
         "description": "Payment assurance"
       }
-    ],
-    "planned": [
-      {
-        "id": "forex",
-        "label": "Forex",
-        "shortLabel": "Forex",
-        "icon": "Screeners",
-        "badge": "Planned",
-        "badgeType": "neutral",
-        "description": "Screen foreign-exchange pairs \u2014 planned, no provider adapter yet"
-      },
-      {
-        "id": "futures",
-        "label": "Futures",
-        "shortLabel": "Futures",
-        "icon": "Screeners",
-        "badge": "Planned",
-        "badgeType": "neutral",
-        "description": "Screen futures contracts \u2014 planned, no provider adapter yet"
-      },
-      {
-        "id": "commodities",
-        "label": "Commodities",
-        "shortLabel": "Commodities",
-        "icon": "Screeners",
-        "badge": "Planned",
-        "badgeType": "neutral",
-        "description": "Screen commodities \u2014 planned, no provider adapter yet"
-      },
-      {
-        "id": "bonds",
-        "label": "Bonds",
-        "shortLabel": "Bonds",
-        "icon": "Screeners",
-        "badge": "Planned",
-        "badgeType": "neutral",
-        "description": "Screen bonds \u2014 planned, no provider adapter yet"
-      }
     ]
   },
   "deepLinks": {

@@ -197,27 +197,6 @@ export function buildDefaultLeftNavConfig(): LeftNavConfig {
     ],
   });
 
-  // Dedicated Planned section (issue #2783): mirrors the Sandbox
-  // section — a menu-only parent (no route) whose subs link to hub
-  // views. Screening family, so the Intelligence category.
-  sections.push({
-    id: "section-planned",
-    title: "PLANNED",
-    category: "Intelligence",
-    items: [
-      {
-        id: "planned",
-        label: "Planned",
-        shortLabel: "Planned",
-        category: "Intelligence",
-        icon: "Screeners",
-        description:
-          "Planned asset classes — forex, futures, commodities, and bonds (no provider adapters yet)",
-        subItems: SUB_MENU_CONFIGS.planned,
-      },
-    ],
-  });
-
   return { sections };
 }
 
