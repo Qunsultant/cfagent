@@ -29,13 +29,13 @@ describe("nav-config.json shape (issue #2977)", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it("routes: navOrders are exactly 0..31 across the 32 nav entries", () => {
+  it("routes: navOrders are exactly 0..30 across the 31 nav entries", () => {
     const orders = (navData.routes as { navEntry?: { navOrder: number } }[])
       .filter((r) => r.navEntry)
       .map((r) => r.navEntry!.navOrder);
-    expect(orders).toHaveLength(32);
+    expect(orders).toHaveLength(31);
     expect([...orders].sort((a, b) => a - b)).toEqual(
-      Array.from({ length: 32 }, (_, i) => i),
+      Array.from({ length: 31 }, (_, i) => i),
     );
   });
 
@@ -116,10 +116,10 @@ describe("nav-config.json loaders (issue #2977)", () => {
     expect(ROUTES).toHaveLength(42);
     expect(Object.keys(DEEP_LINK_OVERRIDES)).toHaveLength(31);
     expect(SURFACE_TAB_DEFS).toHaveLength(14);
-    // 6 metadata sections + sandbox menu-only section.
+    // 5 metadata sections + sandbox menu-only section.
     const built = buildDefaultLeftNavConfig().sections;
-    expect(built).toHaveLength(7);
-    expect(built.slice(0, 6).map((s) => s.title)).toEqual(
+    expect(built).toHaveLength(6);
+    expect(built.slice(0, 5).map((s) => s.title)).toEqual(
       (navData.sections as { title: string }[]).map((s) => s.title),
     );
   });

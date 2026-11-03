@@ -23,16 +23,19 @@
  * order; pin updated in the same PR per the §7 pin rule.)
  * (#2973 added the Queues nav entry, navOrder 31, last in display
  * order; pin updated in the same PR per the §7 pin rule.)
+ * (#2974 removed the Research & Dual Feed nav entry (route stays,
+ * surface tab stays); nav count 32 → 31; pin updated in the same
+ * PR per the §7 pin rule.)
  */
 import { describe, it, expect } from "vitest";
 import { ROUTES, hasNavEntry } from "../src/client/routes";
 import { NAVIGATION_ITEMS } from "../src/client/components/NavigationMenu";
 
 const navRoutes = ROUTES.filter(hasNavEntry);
-const NAV_COUNT = 32;
+const NAV_COUNT = 31;
 
 describe("left-nav unique icons and badges", () => {
-  it("has the full 32-item nav", () => {
+  it("has the full 31-item nav", () => {
     expect(navRoutes).toHaveLength(NAV_COUNT);
     expect(NAVIGATION_ITEMS).toHaveLength(NAV_COUNT);
   });
