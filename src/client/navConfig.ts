@@ -117,7 +117,13 @@ export function buildDefaultLeftNavConfig(): LeftNavConfig {
         subItems: PLATFORM_ADMIN_NAV_ITEMS,
       });
 
-      const workflowsIndex = items.findIndex((i) => i.id === "workflows");
+      // Issue #2974: insert Schedules before the Workflows item, whose
+      // id is "workflow-runs" (its label is "Workflows"). The "workflows"
+      // id is the FAQ page, a Workflows sub-menu entry — it never sits
+      // in Platform items, so looking it up always fell through to the
+      // end and Schedules landed last. Retargeting the lookup is what
+      // yields the Platform Admin, Schedules, Workflows order.
+      const workflowsIndex = items.findIndex((i) => i.id === "workflow-runs");
       const insertAt = workflowsIndex !== -1 ? workflowsIndex : items.length;
       items.splice(insertAt, 0, {
         id: "schedules",
