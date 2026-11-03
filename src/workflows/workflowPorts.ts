@@ -704,6 +704,14 @@ export interface WorkflowCollation {
    * fatal: the screen outcome stands.
    */
   parentReport?: { stored: boolean; reportId?: string; storeError?: string };
+  /**
+   * Issue #3028: the named cap reason when a fan-out round deferred a
+   * tail (the tail still ran, so this is a budget/pace signal on the
+   * record, never a truncation).
+   */
+  fanoutCapReason?: string;
+  /** Issue #3028: units a resumed run skipped because they were already complete. */
+  resumedSkippedUnits?: string[];
 }
 
 /**
