@@ -642,11 +642,18 @@ describe("buildStockScreenWorkflowCommand (#2373 Slice A extraction)", () => {
     expect(started).not.toBeNull();
     expect(seen).toHaveLength(1);
     expect((seen[0] as { jobId: string }).jobId).toBe(started!.jobId);
-    expect(seen[0]).toEqual(
-      buildStockScreenWorkflowCommand(baseSpec(), {
-        userLogin: LOGIN,
-        tenantId: workflowTenantId({} as never),
-      }),
-    );
+    // Issue #3094: the builder derives jobId from `new Date()` — two builds can
+    // straddle a millisecond boundary and differ by 1 ms. The jobId identity is
+    // asserted above against the value the broker returned; here the rest of the
+    // contract is compared, which is what this test is about.
+    const expected = buildStockScreenWorkflowCommand(baseSpec(), {
+      userLogin: LOGIN,
+      tenantId: workflowTenantId({} as never),
+    });
+    const { jobId: expectedJobId, ...expectedRest } = expected as Record<string, unknown>;
+    const { jobId: actualJobId, ...actualRest } = seen[0] as Record<string, unknown>;
+    expect(typeof expectedJobId).toBe("string");
+    expect(typeof actualJobId).toBe("string");
+    expect(actualRest).toEqual(expectedRest);
   });
 });

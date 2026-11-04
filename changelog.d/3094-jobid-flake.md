@@ -1,0 +1,3 @@
+### Fixed
+
+- **Flaky jobId comparison in the #2373 route test (#3094):** `paid_screen_stock_routes_2373` built the stock-screen workflow command twice and deep-equalled the results, but `buildStockScreenWorkflowCommand` derives `jobId` from `new Date()` — the two builds could straddle a millisecond boundary and differ by 1 ms (observed twice in CI shard 2, `...17.657Z` vs `...17.656Z`). The test now compares every stable field and asserts the jobId's identity once, against the value the broker actually returned. Verified by running the suite 12× with zero failures and by mutating the comparison (the assertion still fails when the objects differ), so the contract check is not weakened.
