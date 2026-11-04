@@ -51,6 +51,7 @@
  */
 
 import { createKvMembershipStore, grantMembership } from "../../security/iaaaMembershipStore";
+import { resolveGrantDefaultExpiryDays } from "../../security/grantRules";
 import { getStoredTokens } from "../../security/etradeOAuth";
 import { isPlatformAdmin } from "../../security/iaaaAdminOverview";
 import { lookupInternalUserIdByLogin } from "../../security/iaaaMigration";
@@ -213,6 +214,13 @@ async function provisionServiceUser(
       { role: "member", scope: scope as "platform" | "tenant", grantedBy: caller.internalUserId },
     ],
     nowMs: Date.now(),
+    // Issue #3155 (Q9): tenant-tier service memberships carry the
+    // default expiry like any tenant grant. Platform-scope bindings
+    // are untouched by the default. Known interaction, not fixed
+    // here: dispatch checks revokedAtMs only, so an expired
+    // tenant-tier service membership still dispatches until
+    // revoked — expiry-aware dispatch is a separate slice.
+    defaultExpiryDays: resolveGrantDefaultExpiryDays(ctx.env.IAAA_GRANT_DEFAULT_EXPIRY_DAYS),
   });
   if (!result.ok) {
     if (result.code === "GRANT_DENIED") {

@@ -145,6 +145,7 @@ export function IaaaAdminPanel() {
   // hold both; the route itself accepts any tenant-admin granter.
   const [accessRequests, setAccessRequests] = useState<AccessRequestView[]>([]);
   const [accessError, setAccessError] = useState("");
+  const [accessNotice, setAccessNotice] = useState("");
   const [decidingId, setDecidingId] = useState<string | null>(null);
   // #1758: Members tab state. Memberships load lazily when the tab
   // is first selected; the grant/edit forms post to the server
@@ -158,6 +159,7 @@ export function IaaaAdminPanel() {
   const [grantScope, setGrantScope] = useState<string>("tenant");
   const [grantEmail, setGrantEmail] = useState("");
   const [grantWelcome, setGrantWelcome] = useState<{ sent: boolean; reason?: string } | null>(null);
+  const [grantNotice, setGrantNotice] = useState("");
   const [editRole, setEditRole] = useState<Record<string, string>>({});
   const [editScope, setEditScope] = useState<Record<string, string>>({});
   const [deactivateArmed, setDeactivateArmed] = useState(false);
@@ -221,6 +223,7 @@ export function IaaaAdminPanel() {
     setActingId("grant");
     setMembersError("");
     setGrantWelcome(null);
+    setGrantNotice("");
     try {
       // #2661 — an optional grantee email is captured on the
       // record and best-effort triggers the welcome send.
@@ -229,6 +232,16 @@ export function IaaaAdminPanel() {
         [{ role: grantRole, scope: grantScope }],
         grantEmail.trim() === "" ? undefined : grantEmail.trim(),
       );
+      // Issue #3155 (Q9): an admin-role grant from the first
+      // approver proposes, it does not mint — say so plainly
+      // instead of showing the success path.
+      if (result.pending) {
+        setGrantNotice(
+          "Admin-role grant proposed — a second, distinct admin must approve the same grant before it mints.",
+        );
+        await loadMemberships();
+        return;
+      }
       setGrantTarget("");
       setGrantEmail("");
       setGrantWelcome(result.welcome ?? null);
@@ -298,9 +311,17 @@ export function IaaaAdminPanel() {
     async (requestId: string, decision: "approve" | "deny") => {
       setDecidingId(requestId);
       setAccessError("");
+      setAccessNotice("");
       try {
         const updated = await decideAccessRequest(requestId, decision);
         setAccessRequests((prev) => prev.map((r) => (r.requestId === requestId ? updated : r)));
+        // Issue #3155 (Q9): a first approval leaves the request
+        // pending — say so plainly, or the click looks like a no-op.
+        if (decision === "approve" && updated.status === "pending") {
+          setAccessNotice(
+            "Approval recorded — a second, distinct admin must approve before the grant mints.",
+          );
+        }
       } catch (err: any) {
         setAccessError(err?.message || "Failed to decide the access request.");
       } finally {
@@ -517,6 +538,7 @@ export function IaaaAdminPanel() {
 
         <h4>Access requests</h4>
         {accessError && <Notice tone="danger">{accessError}</Notice>}
+        {accessNotice && <Notice>{accessNotice}</Notice>}
         {accessRequests.length === 0 ? (
           <EmptyState title="No access requests" description="No elevation requests recorded for this tenant yet." />
         ) : (
@@ -590,6 +612,7 @@ export function IaaaAdminPanel() {
           authentication for the step-up obligation, so a stale session must sign in again.
         </p>
         {membersError && <Notice tone="danger">{membersError}</Notice>}
+        {grantNotice && <Notice>{grantNotice}</Notice>}
         <h4>Grant membership</h4>
         <TextInput
           label="Target internal user id"

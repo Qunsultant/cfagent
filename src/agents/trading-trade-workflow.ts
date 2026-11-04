@@ -33,9 +33,22 @@ import {
 import { getServiceUserLogin } from "../security/serviceIdentity";
 import { recordWorkflowTraceHop } from "../observability/meshTrace";
 import { meshTraceStoreForEnv } from "../data/createMeshTracePorts";
+import { createStageBoundaryEmitter } from "../workflows/stageBoundaryEmitter";
 
 /** How long a proposal waits for its decision before lapsing. */
 export const TRADE_APPROVAL_TIMEOUT = "24 hours";
+
+/**
+ * Issue #3191 - the trading leg's durable step ids live in the shared,
+ * dependency-free `stageRuntimeIds` module: the workflow catalog renders in
+ * the browser, so it must never import this file (doing so pulled the agents
+ * SDK into the frontend bundle and broke the build). Re-exported here so the
+ * flow and the catalog read one declaration;
+ * tests/options_trading_stage_ids_3191.test.ts scans this file and fails if
+ * the two drift.
+ */
+export { TRADE_APPROVAL_STEP_IDS } from "../workflows/stageRuntimeIds";
+export type { TradeApprovalStepId } from "../workflows/stageRuntimeIds";
 
 /** Minimal structural step surface the flow needs (fakeable in tests). */
 export interface TradeApprovalStep {
@@ -106,6 +119,29 @@ async function settleThroughApprovalDoor(
  * #1743 rule). Trace carriage is data — it never branches the
  * flow, gates the settle, or alters a step input.
  */
+/**
+ * Issue #3073 - publish the stage boundary for one completed trading step on
+ * the shared #2869 seam. Same degradation rule as tracing: the trade does not
+ * depend on the seam, so every failure is logged and swallowed.
+ */
+async function emitBoundary(
+  env: Env,
+  params: TradeApprovalParams,
+  stageId: string,
+): Promise<void> {
+  try {
+    const emit = createStageBoundaryEmitter({
+      family: "trading",
+      runId: params.orderId,
+      userLogin: params.userLogin,
+      queue: (env as { SCREENER_EVENTS?: { send: (body: unknown) => Promise<unknown> } }).SCREENER_EVENTS,
+    });
+    await emit({ stageId });
+  } catch {
+    // Best-effort by design (the #1743 degradation rule).
+  }
+}
+
 async function traceTradeStep(
   env: Env,
   params: TradeApprovalParams,
@@ -146,6 +182,10 @@ export async function runTradeApprovalFlow(
       timeout: TRADE_APPROVAL_TIMEOUT,
     });
     decision = event.payload;
+    // Issue #3073: the approval wait is a stage; its boundary publishes after
+    // the event lands and before anything settles. Best-effort by the #1743
+    // rule - a seam failure must never block or alter a trade decision.
+    await emitBoundary(env, params, "await-approval");
   } catch {
     // The wait completed with no decision: the hop records the
     // elapsed wait under the carried trace, noted as expired.
@@ -156,6 +196,9 @@ export async function runTradeApprovalFlow(
   const result = await step.do("settle-trade", () =>
     settleThroughApprovalDoor(env, params, decision),
   );
+  // The completed settlement step is the durable artifact the message
+  // references; publish only after it returns.
+  await emitBoundary(env, params, "settle-trade");
   await traceTradeStep(env, params, "settle-trade");
   return { status: "settled", orderId: params.orderId, decision: decision.decision, result };
 }
