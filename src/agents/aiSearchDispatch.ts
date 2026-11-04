@@ -232,7 +232,7 @@ export function aiSearchA2AOutcome(data: AiSearchA2ADataResult): AiSearchA2AOutc
   if (!data.ok) {
     if (data.code === "degraded_fallback") {
       return {
-        text: `aisearch.search degraded: the REST path answered from its built-in semantic cache instead of the live AI Search instance; the fallback rows were withheld, not served as results.`,
+        text: `aisearch.search degraded: the REST path could not be served by the live AI Search instance; the degraded answer was withheld, not served as results.`,
         data,
       };
     }
