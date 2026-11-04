@@ -1,0 +1,4 @@
+### Added
+- Reviewed bootstrap changes (#3077, #945 Q3): approval-gated administration of the IAAA_BOOTSTRAP_ADMINS list under IAAA Admin (Overview, beside Policy proposals). A platform admin proposes an add/remove, a different platform admin approves it (self-approval only with a named reason recorded on the proposal), and the operator confirms application after changing the list through the existing secrets channel — the panel never writes the env var itself. Every transition is audited to the #1760 chained-hash store before it is stored. Removing an identifier never drops a membership: it stays until explicitly revoked, and the current view surfaces bootstrap-granted members no longer listed. The first platform admin cannot be approved here (no reviewer exists yet) — initial genesis stays owner-via-secrets + audited. After genesis, a platform: entry grants tenant-admin only; platform-admin grants go through Role grants.
+
+#CISO-bhdm
