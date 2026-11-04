@@ -366,6 +366,10 @@ async function handleStatus(_request: Request, url: URL, ctx: PaymentAssuranceLi
       checkout = await card.retrieveCardSession({
         sessionId: sessionLookupKey(workflowId, {
           sessionId: url.searchParams.get("sessionId"),
+          // Retrieve-by-reference parity with check-payment: a
+          // stored checkoutId (the card checkout join key) is an
+          // explicit lookup key here too, not just sessionId.
+          checkoutId: url.searchParams.get("checkoutId"),
         }),
       });
     } catch (err) {
