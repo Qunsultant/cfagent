@@ -177,6 +177,7 @@ const CONFORMING_ROUTES: Record<string, string> = {
   revenue: "src/client/chat/tabs/RevenueTab.tsx",
   docs: "src/client/DocsAndReportsPanel.tsx",
   billing: "src/client/BillingServicingPanel.tsx",
+  "risk-analysis": "src/client/RiskAnalysisPanel.tsx",
 };
 
 /** Routes rendered inline in Chat.tsx's TAB_CONTENT (entry-slice check). */
@@ -229,6 +230,7 @@ const EXPECTED_TAB_CONTENT_KEYS = [
   "search",
   "workflow-runs",
   "workflows",
+  "risk-analysis",
 ];
 
 const EXPECTED_SUB_TABS = [
