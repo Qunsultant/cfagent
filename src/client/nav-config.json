@@ -464,6 +464,14 @@
       "description": "Decide what the system proposed: goal proposals, adaptation candidates, and strategy re-selections \u2014 nothing activates without a person"
     },
     {
+      "id": "risk-analysis",
+      "navGroup": "order",
+      "crumb": "Risk Analysis",
+      "category": "Execution",
+      "icon": "Order",
+      "description": "Symbol-based risk profile: anatomy, defense playbook, stress scenarios, and AI risk dossier"
+    },
+    {
       "id": "scanner",
       "retain": true,
       "navGroup": "options-screener",
@@ -949,6 +957,13 @@
         "description": "Read-only memberships, genesis & audit"
       },
       {
+        "id": "platform-admin:users",
+        "label": "Users",
+        "shortLabel": "User profiles, tenant memberships & account linkage",
+        "icon": "Agents",
+        "description": "User profiles, tenant memberships & account linkage"
+      },
+      {
         "id": "platform-admin:admin-access",
         "label": "Request admin access",
         "shortLabel": "Ask the platform owner for admin rights",
@@ -1029,6 +1044,15 @@
     ],
     "order": [
       {
+        "id": "stock-order",
+        "label": "Stock order",
+        "shortLabel": "Stock",
+        "icon": "Order",
+        "badge": "Stock",
+        "badgeType": "neutral",
+        "description": "Equity order ticket \u2014 build a stock order with broker preview and human approval"
+      },
+      {
         "id": "options-order",
         "label": "Options order",
         "shortLabel": "Options",
@@ -1036,6 +1060,15 @@
         "badge": "Options",
         "badgeType": "pro",
         "description": "Manual options order ticket \u2014 build a multi-leg strategy with broker preview and human approval"
+      },
+      {
+        "id": "risk-analysis",
+        "label": "Risk Analysis",
+        "shortLabel": "Risk",
+        "icon": "Order",
+        "badge": "Risk",
+        "badgeType": "neutral",
+        "description": "Symbol-based risk profile \u2014 anatomy, playbook, scenarios, and AI dossier"
       }
     ]
   },
@@ -1169,11 +1202,21 @@
       "tab": "assets-hub",
       "view": "bonds"
     },
-    "order:options-order": {
+    "order:stock-order": {
+    "tab": "order",
+    "params": {
+      "orderTab": "stock"
+    }
+  },
+  "order:options-order": {
       "tab": "order",
       "params": {
         "assetClass": "options"
       }
+    }
+,
+    "order:risk-analysis": {
+      "tab": "risk-analysis"
     }
   },
   "deepLinkSurfaces": [
@@ -1414,6 +1457,12 @@
           "label": "IAAA Admin",
           "description": "Read-only memberships, genesis & audit",
           "icon": "IaaaAdmin"
+        },
+        {
+          "id": "users",
+          "label": "Users",
+          "description": "User profiles, tenant memberships & account linkage",
+          "icon": "Agents"
         },
         {
           "id": "admin-access",

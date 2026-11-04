@@ -1,0 +1,3 @@
+### Workflow Runs
+
+- **Workflow Runs Part 2: every job surfaces, labeled** — broker screens surface through the #2869 stage contract + canonical store (no new side recording); http.request rows name their work (market-data comparisons carry their symbols, ad beacons carry their id) instead of rendering as "Background job"; columns sort with Docs-tab parity; read traces hide only behind a visible toggle with a count; ad beacons pause per-browser from the toolbar; history prunes session-scoped with a preview, running rows never deleted; server-side filters + paging keep every match reachable (Qunsultant/cfagent#2786).

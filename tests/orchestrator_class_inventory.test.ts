@@ -299,9 +299,14 @@ const ORCH = "agents/orchestrator.ts";
  *  itself lives in src/services/scheduledTasks.ts; the class
  *  gains no logic) — measured 3,198 lines / 153,161 B on the
  *  combined tree, so budget lines rise to 3210 and bytes rise
- *  to 153_500. */
-const BUDGET_LINES = 3210;
-const BUDGET_BYTES = 153_500;
+ *  to 153_500.
+ *  Issue #2220 adds the platform-users import + delegation block
+ *  (after the agentic-payments delegation, no other orchestrator
+ *  logic changed) — measured 3,209 lines / 153,727 B after the
+ *  addition; budget lines rise to 3220 and bytes rise to
+ *  154_100, keeping similar headroom. */
+const BUDGET_LINES = 3220;
+const BUDGET_BYTES = 154_100;
 
 const count = (haystack: string, needle: string) =>
   haystack.split(needle).length - 1;
