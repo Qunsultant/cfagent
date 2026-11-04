@@ -291,7 +291,10 @@ describe("golden harness: runner + store (#2439)", () => {
     // #2662 (Phase 2.7) appends migration 0036 (refund policy approval) after 0035.
     // #2945 (Phase 2.17) appends migration 0037 (cfpay channel purchases) after 0036.
     // #2989 appends migration 0038 (shard-job workflow run id) after 0037.
-    expect(Math.max(...ALL_MIGRATIONS.map((m) => m.version))).toBe(38);
+    // NOTE (#3189): no "latest" assertion lives here anymore. The
+    // registry's "latest" is owned solely by tests/migration_registry.test.ts,
+    // which asserts derived invariants only; this test keeps its own
+    // feature assertions (0024 registration + schema table).
     expect(getTableName(agentMeshEvalResults)).toBe("agent_mesh_eval_results");
   });
 });
