@@ -379,6 +379,31 @@ export async function persistScreenerReportCanonical(ctx: ReportDispatchContext,
       },
       createdAt: result.timestamp,
     });
+    // Issue #2869 slice 1 — publish AFTER the canonical row
+    // lands, never before: persist-then-publish ordering from
+    // the stageMessage contract. Only successful runs with a
+    // full analysis set publish (a failed/empty run has no
+    // persisted analysis for the consumer to generate from,
+    // and the consumer refuses to regenerate it). The parent
+    // row (persistParentScreenReportCanonical) does NOT
+    // publish: it carries no single analysis key, and its
+    // children already published their own messages. A
+    // publish failure never fails the run — the row is
+    // durable and the in-process PDF leg already ran
+    // (publishAnalysisDone reports, never throws).
+    if (
+      result.success &&
+      Array.isArray(result.allStocks) &&
+      result.allStocks.length > 0 &&
+      result.userLogin
+    ) {
+      const { publishAnalysisDone } = await import("../../workflows/stageQueueTransport");
+      await publishAnalysisDone({
+        queue: ctx.env.SCREENER_EVENTS as never,
+        timestamp: result.timestamp,
+        userLogin: result.userLogin,
+      });
+    }
   } catch {
     // Non-critical: persistence failure must not break the screen.
   }
