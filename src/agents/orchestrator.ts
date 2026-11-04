@@ -84,7 +84,7 @@ import { submitAsyncJob, recoverQueuedAsyncJobs, getAsyncJob, listAsyncJobs, exe
 import { submitChatTurn, awaitChatTurnSubmission, type DurableTurnContext, type SubmittedTurnHandle } from "./orchestrator/durableTurnSubmission";
 import type { ScreenerRunOutcome } from "../services/screenerFollowups";
 import { marketDateKey, readAutopilotStateRaw, getAutopilotState, writeAutopilotState, incrementAutopilotOrdersToday, fetchBrokerBalanceSnapshot, openNotionalForSymbol, evaluateAndRecordAutopilotVerdict, type AutopilotContext } from "./orchestrator/autopilot";
-import { readSettingRaw, writeSetting, getReportDispatchHitl, setReportDispatchHitl, createReportConfirmation, getReportConfirmation, decideReportConfirmation, storeResearchReportCanonicalAsync, confirmationDeliveryMeta, deliverStoredReportEmail, deliverStoredReportWebhook, persistScreenerReportCanonical, persistParentScreenReportCanonical, sendReportEmail, sendReportWebhook, type ReportDispatchContext } from "./orchestrator/reportDispatch";
+import { readSettingRaw, writeSetting, getReportDispatchHitl, setReportDispatchHitl, createReportConfirmation, getReportConfirmation, decideReportConfirmation, storeResearchReportCanonicalAsync, confirmationDeliveryMeta, deliverStoredReportEmail, deliverStoredReportWebhook, persistScreenerReportCanonical, persistParentScreenReportCanonical, refreshCanonicalPdfFields, sendReportEmail, sendReportWebhook, type ReportDispatchContext } from "./orchestrator/reportDispatch";
 import { extractMessageText, createTurnTools, deriveTurn, assembleGrounding, type ChatTurnHelpersContext } from "./orchestrator/chatTurnHelpers";
 import { createOpenaimpMcpFetch, ensureOpenaimpMcpConnection, chatNlqTurnGate, type EnsureOpenaimpMcpResult } from "./orchestrator/meshMcpClient";
 import { logChatActivity, enqueueHttpRequest, type HttpEntryContext } from "./orchestrator/httpEntry";
@@ -159,6 +159,7 @@ import { handleScheduledJobOutcomeRoute } from "./routes/scheduledJobOutcome";
 import { handleSchedulesRoutes, makeRunScheduleCallback } from "./routes/schedules";
 import { handleMaintenanceRoutes } from "./routes/maintenance";
 import { handleServiceUserRoutes } from "./routes/serviceUser";
+import { handleDelegationRoutes } from "./routes/delegations";
 import { handleOrchestratorMigrationRoutes } from "./routes/orchestratorMigration";
 import { handleAdminTenantQueueRoutes } from "./routes/adminTenantQueues";
 import { handlePlatformTenantRoutes } from "./routes/platformTenants";
@@ -1800,6 +1801,9 @@ export class OrchestratorAgent extends PortThink {
     return this.persistScreenerReportCanonical(result);
   }
 
+  /** #2869: door over the one recorder's PDF refresh (update-only, monotonic, owner re-checked). */
+  async refreshCanonicalPdfFields(input: Parameters<typeof refreshCanonicalPdfFields>[1]) { return refreshCanonicalPdfFields(this.reportDispatchContext(), input); }
+
   /** #2910 (G3): door — owner rides on the input; id or null, never delivers. */
   async recordWorkflowParentScreenReport(input: Parameters<typeof persistParentScreenReportCanonical>[1]): Promise<{ reportId: string } | null> { return persistParentScreenReportCanonical(this.reportDispatchContext(), input); }
 
@@ -3170,6 +3174,16 @@ export class OrchestratorAgent extends PortThink {
       audit: (type, agent, payload) => this.audit(type, agent, payload),
     });
     if (serviceUserResponse) return serviceUserResponse;
+
+    // Issue #3153: delegation management routes run after
+    // service-user, before admin tenant queues; the route logic
+    // itself lives in routes/delegations.ts, the class gains no
+    // logic.
+    const delegationResponse = await handleDelegationRoutes(request, url, path, sessionId, {
+      env: this.env,
+      audit: (type, agent, payload) => this.audit(type, agent, payload),
+    });
+    if (delegationResponse) return delegationResponse;
 
     // Issue #2457: cross-tenant queue routes run after service-user,
     // before schedules; the route logic itself lives in
