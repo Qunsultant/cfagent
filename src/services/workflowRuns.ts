@@ -32,7 +32,10 @@
  *    records one — the classification never guesses from a label.
  *  - a standalone http.request GET/HEAD row is a read trace, not a
  *    run, and is filtered out (#2456); POST submissions and
- *    chain-member request stages stay.
+ *    chain-member request stages stay. #2786 (2026-11-03 ruling)
+ *    OVERRIDES the #2815 impression/click carve-out: POST ad
+ *    beacons are real submissions and surface labeled — only
+ *    GET/HEAD traces hide, and only behind the visible toggle.
  */
 
 export type WorkflowRunTrigger = "manual" | "scheduled" | "autonomous" | "webhook" | "agent" | "unknown";
@@ -56,6 +59,8 @@ export type WorkflowRunFamily =
   | "feed"
   | "tool"
   | "nlq"
+  | "research"
+  | "ads"
   | "other";
 
 export interface WorkflowRunArtifact {
@@ -260,6 +265,22 @@ const STAGE_LABELS: Record<string, string> = {
   serve: "Serve — artifact retrieval",
   deliver: "Deliver — channel dispatch",
   analysis: "Analysis — screen evaluation",
+  // #2869 stage-message ids (src/workflows/stageMessage.ts) — labeled
+  // here so a stage message's id renders as its stage, never raw.
+  // Keys are lowercase because stageLabel lowercases before lookup;
+  // "deliver" above is shared with the #2869 deliver stage.
+  plan: "Plan — run plan",
+  brokerstart: "Broker start — execution branch",
+  acquireuniverse: "Acquire universe — symbols",
+  fetchquotes: "Fetch quotes — market data",
+  enrich: "Enrich — symbol data",
+  computeindicatorsandscores: "Compute indicators & scores",
+  applyfilters: "Apply filters — screening criteria",
+  rankandgrade: "Rank & grade — opportunities",
+  detectstandouts: "Detect standouts",
+  persistcanonicalresults: "Persist canonical results",
+  "analysis-done": "Analysis done — report ready",
+  shapereport: "Shape report — artifacts",
 };
 
 const CAPABILITY_LABELS: Record<string, string> = {
@@ -503,6 +524,9 @@ export function workflowFamilyForJobs(jobs: WorkflowRunJobRow[], outcome?: Workf
     if (path.includes("/etrade/screen") || path.includes("/screener")) return "stock";
     if (path.toLowerCase().includes("discovery")) return "discovery";
     if (path.includes("/goal")) return "goal";
+    if (path.includes("/external-ads/impression") || path.includes("/external-ads/click")) return "ads";
+    if (path.includes("/market-data/screen") || path.includes("/foss/screen")) return "stock";
+    if (path.includes("/market-data/") || path.includes("/foss/")) return "research";
   }
   if (jobs.some((j) => j.capability.startsWith("followup."))) return "delivery";
   return "other";
@@ -517,6 +541,8 @@ const FAMILY_WORKFLOW: Record<WorkflowRunFamily, string> = {
   feed: "Feed pipeline",
   tool: "MCP tool run",
   nlq: "NLQ execution",
+  research: "Market data research",
+  ads: "Advertising",
   other: "Background job",
 };
 
@@ -546,6 +572,22 @@ function triggerEvidence(job: WorkflowRunJobRow): { trigger?: string; detail?: s
   if (str(payload.webhookUrl) || payload.webhook === true) return { trigger: "webhook" };
   const actor = str(payload.requestedBy) ?? str(payload.userLogin) ?? str(payload.actor);
   if (actor) return { trigger: "manual", actor };
+  // #2786 Part 2 (scope b): an http.request row that records no trigger
+  // evidence still states its submission channel honestly — it was
+  // submitted as an async API request — instead of rendering "Not
+  // recorded". The trigger stays "unknown": the channel is evidence
+  // of HOW it arrived, never a guess at manual/scheduled. Headers are
+  // deliberately NOT read here: httpEntry stores x-user-login as a
+  // sessionKey fallback when no login exists, and a session key must
+  // never render as an actor.
+  if (job.capability === "http.request" && str(payload.pathAndQuery)) {
+    const method = typeof payload.method === "string" ? payload.method.toUpperCase() : "";
+    const pathOnly = str(payload.pathAndQuery)?.split("?")[0] ?? "";
+    return {
+      trigger: "unknown",
+      detail: method && pathOnly ? `Submitted as an async API request — ${method} ${pathOnly}` : "Submitted as an async API request",
+    };
+  }
   return {};
 }
 
@@ -686,18 +728,19 @@ export function runGroupKey(job: WorkflowRunJobRow): string {
  * a chain main in formation. A row with no readable method is kept:
  * unclassifiable rows are never hidden. The row stays in the store
  * and in audit; only this read model hides it. Nothing is deleted.
+ *
+ * #2786 OVERRIDE (2026-11-03 ruling, "nothing excluded"): the
+ * #2815 impression/click carve-out is REMOVED. POST ad beacons are
+ * real submissions and surface labeled through the ads family; only
+ * GET/HEAD traces hide, and only behind the panel's visible toggle.
  */
-function isStandaloneRequestTrace(job: WorkflowRunJobRow): boolean {
+export function isStandaloneRequestTrace(job: WorkflowRunJobRow): boolean {
   if (job.capability !== "http.request") return false;
   if (str(job.chain_id) || str(job.parent_job_id) || str(job.stage)) return false;
   const payload = parseObject(job.payload_json);
   if (payload && "stageChain" in payload) return false;
   const method = typeof payload?.method === "string" ? payload.method.toUpperCase() : "";
   if (method === "GET" || method === "HEAD") return true;
-  const path = str(payload?.pathAndQuery) ?? "";
-  if (path.includes("/external-ads/impression") || path.includes("/external-ads/click")) {
-    return true;
-  }
   return false;
 }
 
@@ -819,6 +862,55 @@ function outputsForGroup(
   return Object.keys(out).length > 0 ? out : null;
 }
 
+/**
+ * #2786 Part 2 (scope b): derive a human purpose title for an
+ * http.request row from its actual work — never "Background job".
+ *  - /market-data/compare (or its /foss alias) → a market-data
+ *    comparison WITH the symbols compared, taken from body.symbols or
+ *    the ?symbols= query. When the payload records no symbols, the
+ *    title says so by omission — it NEVER fabricates the handler's
+ *    defaults (NVDA/AAPL/MSFT) as if they were recorded.
+ *  - /external-ads/impression|click → an ad beacon with its id, or
+ *    the bare beacon name when no id is recorded.
+ *  - any other http.request row with an empty display name → METHOD +
+ *    path, so no row renders only "Background job" + an id. Rows with
+ *    a meaningful display name keep it (null here).
+ * Non-http.request rows always return null.
+ */
+export function httpRequestRunIdentity(job: WorkflowRunJobRow): { title: string } | null {
+  if (job.capability !== "http.request") return null;
+  const payload = parseObject(job.payload_json);
+  if (!payload) return null;
+  const pathAndQuery = str(payload.pathAndQuery) ?? "";
+  const [pathOnly, query] = pathAndQuery.split("?");
+  const method = typeof payload.method === "string" ? payload.method.toUpperCase() : "";
+  const body = asObject(payload.body) ?? parseObject(payload.body);
+
+  if (pathOnly.endsWith("/market-data/compare") || pathOnly.endsWith("/foss/compare")) {
+    const fromBody = Array.isArray(body?.symbols)
+      ? (body.symbols as unknown[]).filter((s): s is string => typeof s === "string" && s.trim() !== "").map((s) => s.trim())
+      : [];
+    let symbols = fromBody;
+    if (symbols.length === 0 && query) {
+      const fromQuery = new URLSearchParams(query).get("symbols");
+      symbols = fromQuery ? fromQuery.split(",").map((s) => s.trim()).filter(Boolean) : [];
+    }
+    return { title: symbols.length > 0 ? `Market data comparison — ${symbols.join(", ")}` : "Market data comparison" };
+  }
+  if (pathOnly.includes("/external-ads/impression")) {
+    const id = str(body?.id) ?? (query ? new URLSearchParams(query).get("id") : null);
+    return { title: id ? `Ad impression — ${id}` : "Ad impression beacon" };
+  }
+  if (pathOnly.includes("/external-ads/click")) {
+    const id = str(body?.id) ?? (query ? new URLSearchParams(query).get("id") : null);
+    return { title: id ? `Ad click — ${id}` : "Ad click beacon" };
+  }
+  if (!str(job.display_name) && method && pathOnly) {
+    return { title: `${method} ${pathOnly}` };
+  }
+  return null;
+}
+
 export function runFromJobs(
   jobs: WorkflowRunJobRow[],
   transitions: WorkflowRunStageTransition[],
@@ -827,7 +919,11 @@ export function runFromJobs(
   const main = mainJobOf(jobs);
   const family = workflowFamilyForJobs(jobs, outcome);
   const stages = stageRowsForGroup(jobs, transitions);
-  const triggerEvidenceForRun = jobs.map(triggerEvidence).find((t) => t.trigger) ?? {};
+  // Real trigger evidence wins; an "unknown" API-channel evidence is
+  // the fallback, never a mask over a job that recorded a real one.
+  const evidences = jobs.map(triggerEvidence);
+  const triggerEvidenceForRun =
+    evidences.find((t) => t.trigger && t.trigger !== "unknown") ?? evidences.find((t) => t.trigger) ?? {};
   const outcomeTrigger = outcome ? triggerFromOutcome(outcome) : null;
   const trigger: WorkflowRunTrigger =
     (triggerEvidenceForRun.trigger as WorkflowRunTrigger | undefined) ?? outcomeTrigger?.trigger ?? "unknown";
@@ -881,7 +977,11 @@ export function runFromJobs(
     runId: str(jobs[0]?.chain_id) ?? main.job_id,
     workflow: FAMILY_WORKFLOW[family],
     family,
-    title: main.display_name || FAMILY_WORKFLOW[family],
+    // #2786 Part 2 (scope b): an http.request row's title names the
+    // work it actually did (comparison + symbols, beacon + id, or
+    // METHOD + path) — never a bare "Background job". A meaningful
+    // display name is kept for already-specific rows.
+    title: (main.capability === "http.request" ? httpRequestRunIdentity(main)?.title : null) ?? (main.display_name || FAMILY_WORKFLOW[family]),
     source: "job-chain",
     trigger,
     triggerDetail,
@@ -1327,10 +1427,9 @@ export function runFromSagaChain(input: SagaChainRunInput): WorkflowRun | null {
   };
 }
 
-/** Group, attach outcomes, and merge — newest first, capped at limit. */
-export function buildWorkflowRuns(input: BuildWorkflowRunsInput): WorkflowRun[] {
-  const limit = Math.max(1, Math.min(Math.floor(input.limit ?? 40) || 40, 100));
-  const jobs = input.jobs.filter((job) => !isStandaloneRequestTrace(job));
+/** Group, attach outcomes, and merge — newest first, uncapped. The caller slices. */
+function collectWorkflowRuns(input: BuildWorkflowRunsInput, includeTraces: boolean): WorkflowRun[] {
+  const jobs = includeTraces ? [...input.jobs] : input.jobs.filter((job) => !isStandaloneRequestTrace(job));
   const groups = new Map<string, RunGroup>();
   for (const job of jobs) {
     const key = runGroupKey(job);
@@ -1379,7 +1478,13 @@ export function buildWorkflowRuns(input: BuildWorkflowRunsInput): WorkflowRun[] 
   }
 
   runs.sort(compareWorkflowRunsNewestFirst);
-  return runs.slice(0, limit);
+  return runs;
+}
+
+/** Legacy wrapper: traces excluded, newest-first, sliced to limit. */
+export function buildWorkflowRuns(input: BuildWorkflowRunsInput): WorkflowRun[] {
+  const limit = Math.max(1, Math.min(Math.floor(input.limit ?? 40) || 40, 100));
+  return collectWorkflowRuns(input, false).slice(0, limit);
 }
 
 /** Counts for the run list's header, computed from the returned rows. */
@@ -1411,4 +1516,138 @@ export function summarizeWorkflowRuns(runs: WorkflowRun[]): {
     else if (run.status === "running" || run.status === "queued" || run.status === "awaiting") active += 1;
   }
   return { total: runs.length, completed, partial, failed, active, byTrigger };
+}
+
+/**
+ * Server-side run filtering (#2786 Part 2, scope e): trigger/status/
+ * search apply BEFORE paging, so a match past the page limit stays
+ * reachable. Mirrors the panel's client-side semantics (status
+ * "active" = running|queued|awaiting; search over title, run id,
+ * workflow, trigger detail, error, and stage fields).
+ */
+export function filterWorkflowRuns(
+  runs: WorkflowRun[],
+  filters: { trigger?: string; status?: string; search?: string; reportsOnly?: boolean },
+): WorkflowRun[] {
+  const trigger = filters.trigger && filters.trigger !== "all" ? filters.trigger : null;
+  const status = filters.status && filters.status !== "all" ? filters.status : null;
+  const needle = filters.search?.trim().toLowerCase() || "";
+  return runs.filter((run) => {
+    if (filters.reportsOnly && !hasReportDocuments(run)) return false;
+    if (trigger && run.trigger !== trigger) return false;
+    if (status) {
+      if (status === "active") {
+        if (run.status !== "running" && run.status !== "queued" && run.status !== "awaiting") return false;
+      } else if (run.status !== status) {
+        return false;
+      }
+    }
+    if (needle) {
+      const hay = [
+        run.title,
+        run.runId,
+        run.workflow,
+        run.triggerDetail,
+        run.error ?? "",
+        ...run.stages.map((s) => [s.label, s.detail ?? "", s.reason ?? "", s.error ?? ""].join(" ")),
+      ]
+        .join(" ")
+        .toLowerCase();
+      if (!hay.includes(needle)) return false;
+    }
+    return true;
+  });
+}
+
+export interface WorkflowRunsPageOptions {
+  /** When true, GET/HEAD read traces join the list; otherwise they are counted, not shown. */
+  includeTraces?: boolean;
+  trigger?: string;
+  status?: string;
+  search?: string;
+  /** Page start over the filtered, newest-first list. Clamped 0..10000. */
+  offset?: number;
+  /**
+   * Runs produced outside the job/outcome trees (saga chains, #2780).
+   * They join BEFORE filter/slice, so a saga run obeys the same
+   * filters and paging as every other run — never appended after.
+   */
+  extraRuns?: WorkflowRun[];
+  /**
+   * Canonical report documents (Part 3). When present, their columns
+   * attach to twin runs and unclaimed rows mint report-only runs —
+   * BEFORE filter/slice, so the reports filter and paging see them.
+   */
+  reportDocs?: Array<{
+    documents: WorkflowRunDocuments;
+    matchKeys: string[];
+    stages: UnifiedWorkflowRunRecord["stages"];
+    summary: {
+      runId: string;
+      title: string;
+      trigger: string | null;
+      status: string | null;
+      createdAt: string;
+    };
+  }>;
+  /** When true, only report-backed runs survive filtering. */
+  reportsOnly?: boolean;
+}
+
+/**
+ * The paged read model (#2786 Part 2, scope e): filter BEFORE slice,
+ * then page with offset. hiddenTraceCount is the count of read traces
+ * in the input window when traces are hidden (0 when shown) — the
+ * toggle's visible effect, never a silent drop.
+ */
+export function buildWorkflowRunsPage(
+  input: BuildWorkflowRunsInput & WorkflowRunsPageOptions,
+): { runs: WorkflowRun[]; hiddenTraceCount: number; totalMatched: number } {
+  const includeTraces = input.includeTraces === true;
+  const all = collectWorkflowRuns(input, includeTraces);
+  if (input.extraRuns) all.push(...input.extraRuns);
+  // Issue #2786 Part 3: attach Docs columns to their runs (first
+  // newest row wins per key), then mint report-only runs for
+  // canonical rows with no job/outcome twin. A run id already
+  // claimed — by a built run or an earlier report-only run — is
+  // never minted twice. This runs BEFORE filter/slice so the
+  // reports filter and paging both see the full list.
+  if (input.reportDocs && input.reportDocs.length > 0) {
+    const docByKey = new Map<string, WorkflowRunDocuments>();
+    for (const entry of input.reportDocs) {
+      for (const key of entry.matchKeys) {
+        if (!docByKey.has(key)) docByKey.set(key, entry.documents);
+      }
+    }
+    const runIds = new Set<string>();
+    for (const run of all) {
+      runIds.add(run.runId);
+      const doc = docByKey.get(run.runId);
+      if (doc && run.documents == null) run.documents = doc;
+    }
+    for (const entry of input.reportDocs) {
+      if (entry.matchKeys.some((key) => runIds.has(key))) continue;
+      const engineFamily = entry.documents.family === "strategy" ? "discovery" : entry.documents.family;
+      const reportRun = runFromReportDocument({
+        reportId: entry.documents.reportId,
+        runId: entry.summary.runId,
+        title: entry.summary.title,
+        engineFamily,
+        documents: entry.documents,
+        trigger: entry.summary.trigger,
+        status: entry.summary.status,
+        createdAt: entry.summary.createdAt,
+        stages: stagesFromUnifiedStages(entry.stages, entry.summary.createdAt),
+      });
+      all.push(reportRun);
+      runIds.add(reportRun.runId);
+    }
+  }
+  all.sort(compareWorkflowRunsNewestFirst);
+  const hiddenTraceCount = includeTraces ? 0 : input.jobs.filter(isStandaloneRequestTrace).length;
+  const filtered = filterWorkflowRuns(all, { trigger: input.trigger, status: input.status, search: input.search, reportsOnly: input.reportsOnly });
+  const totalMatched = filtered.length;
+  const offset = Math.max(0, Math.min(Math.floor(input.offset ?? 0) || 0, 10000));
+  const limit = Math.max(1, Math.min(Math.floor(input.limit ?? 40) || 40, 100));
+  return { runs: filtered.slice(offset, offset + limit), hiddenTraceCount, totalMatched };
 }

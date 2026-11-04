@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from "react";
 import { apiFetch as fetch } from "./apiFetch";
 import { Button } from "./components/ui";
+import { isAdBeaconsPaused } from "./adBeacons";
 
 export interface GoogleAdUnitProps {
   format?: "leaderboard" | "rectangle" | "responsive" | "mobile";
@@ -66,9 +67,11 @@ export function GoogleAdUnit({
     ? new URL(campaign.targetUrl).hostname.replace(/^www\./, "")
     : "google.com/ads";
 
-  // Automatically track impression once per mount
+  // Automatically track impression once per mount — unless the user
+  // paused ad beacons from the Workflow Runs toolbar (#2786 Part 2).
+  // Pausing stops the tracking fetch only; the ad still renders.
   useEffect(() => {
-    if (!trackedRef.current && ad?.id) {
+    if (!trackedRef.current && ad?.id && !isAdBeaconsPaused()) {
       trackedRef.current = true;
       try {
         fetch("/api/external-ads/impression", {
@@ -86,7 +89,7 @@ export function GoogleAdUnit({
     e.preventDefault();
     if (onTrackClick) {
       onTrackClick(campaign);
-    } else if (ad?.id) {
+    } else if (ad?.id && !isAdBeaconsPaused()) {
       try {
         fetch("/api/external-ads/click", {
           method: "POST",
