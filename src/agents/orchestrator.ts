@@ -149,6 +149,7 @@ import {
   handleEtradeBrokerRoutes,
   handleEtradeBrokerActivityRoutes,
 } from "./routes/etradeBroker";
+import { handleBrokerOrderRoutes } from "./routes/brokerOrders";
 import { handleEtradeOptionsRoutes } from "./routes/etradeOptions";
 import { handleOptionsProviderGateRoutes } from "./routes/optionsProviderGate";
 import { resolveBrokerEnvironmentFromSettings } from "./routes/brokerEnvironment";
@@ -3020,6 +3021,30 @@ export class OrchestratorAgent extends PortThink {
       cancelSchedule: (id) => this.cancelSchedule(id),
     });
     if (etradeBrokerResponse) return etradeBrokerResponse;
+
+    // Issue #3089: broker-routed order endpoints (preview/execute/
+    // orders resolve the platform from the registry and bind the
+    // draft to its broker). Invoked right after the E*TRADE block;
+    // the legacy /etrade/* order routes above are untouched.
+    const brokerOrderResponse = await handleBrokerOrderRoutes(request, url, path, sessionId, {
+      env: this.env,
+      traceId: parseTraceparent(request.headers.get("traceparent"))?.traceId ?? null,
+      asyncJobId: request.headers.get("x-async-job-id") || undefined,
+      scheduleScreenerFollowups: (outcome: ScreenerRunOutcome, userLogin: string) =>
+        scheduleScreenerFollowups(this.asyncJobsContext(), outcome, userLogin),
+      getOrm: () => this.getOrm(),
+      readSettingRaw: (key) => this.readSettingRaw(key),
+      writeSetting: (key, value) => this.writeSetting(key, value),
+      audit: (type, agent, payload) => this.audit(type, agent, payload),
+      getScreenerAgent: (userLogin) => this.getScreenerAgent(userLogin),
+      persistScreenerReportCanonical: (result) => this.persistScreenerReportCanonical(result),
+      evaluateAndRecordAutopilotVerdict: (params) => this.evaluateAndRecordAutopilotVerdict(params),
+      getAutopilotState: () => this.getAutopilotState(),
+      incrementAutopilotOrdersToday: () => this.incrementAutopilotOrdersToday(),
+      schedule: (when, callback, payload) => this.schedule(when, callback as keyof this, payload),
+      cancelSchedule: (id) => this.cancelSchedule(id),
+    });
+    if (brokerOrderResponse) return brokerOrderResponse;
 
     // The requestedEnv binding stays inline in the dispatcher: it is
     // computed once here and passed through the context to the E*TRADE

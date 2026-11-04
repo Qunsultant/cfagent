@@ -348,10 +348,23 @@ export class DatabaseORM {
         proof_signature TEXT NOT NULL,
         preview_notes TEXT,
         expiration_schedule_id TEXT,
+        broker TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       )
     `);
+
+    // Issue #3089: broker stamp on stored drafts. Pre-existing tables
+    // lack the column (CREATE TABLE IF NOT EXISTS never alters), so
+    // guard the ALTER with a PRAGMA check — the #308 generation_id
+    // precedent: an unguarded DDL change throws on every schema init
+    // for tables that predate it.
+    {
+      const cols = Array.from(this.sql.exec("PRAGMA table_info(mas_trades)")) as Array<{ name?: unknown }>;
+      if (!cols.some((c) => c.name === "broker")) {
+        this.sql.exec("ALTER TABLE mas_trades ADD COLUMN broker TEXT");
+      }
+    }
 
     // 10. Watchlists Table (E*TRADE & Local Agent Watchlists)
     ensureSharedTable(this.sql, "mas_watchlists");
