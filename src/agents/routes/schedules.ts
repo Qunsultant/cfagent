@@ -42,6 +42,7 @@ import { getStoredTokens, isTokenExpiredEt, etradeIdentityFromLogin } from "../.
 import { isLoginShaped } from "../../security/serviceIdentity";
 import { findDuplicateSchedule } from "../../services/scheduleDedupe";
 import { runStorageRetention } from "../../security/storageRetention";
+import { verifyStoredAuditChainAndAlert } from "../../services/auditTamperAlert";
 import { createBlobStore } from "../../services/blobStoreR2Adapter";
 import { pruneJobOutcomes } from "../../services/jobOutcomes";
 import { SqlJobRunRecordStore } from "../../data/doSqliteJobRunRecordAdapter";
@@ -881,11 +882,44 @@ export async function handleSchedulesRoutes(
     // #1766 doc, not papered over).
     if (path.endsWith("/schedules/trigger-retention") && request.method === "POST") {
       try {
-        const result = runStorageRetention(ctx.getOrm(), {
-          retentionDays: ctx.env.MAS_MESSAGES_RETENTION_DAYS,
-          eventsRetentionDays: ctx.env.MAS_EVENTS_RETENTION_DAYS,
-          memoryRetentionDays: ctx.env.MAS_MEMORY_RETENTION_DAYS,
-        });
+        // #3156 (Q7): verify the mas_events tamper chain BEFORE any
+        // pruning. A failed verification records a loud, blocking
+        // alert and SKIPS the storage-retention prune this run —
+        // pruning a broken chain would destroy the evidence the
+        // review needs. If the alert write itself fails, the run
+        // returns 503 rather than silently continuing (a
+        // deliberate exception to this route's best-effort
+        // philosophy for job-outcome pruning: tamper-evidence
+        // handling is not best-effort). The orphan sweep, snapshot
+        // export, and job-outcome prune do not touch mas_events
+        // and still run. Retention windows themselves are
+        // unchanged by this slice.
+        let auditChainVerification;
+        try {
+          auditChainVerification = verifyStoredAuditChainAndAlert(ctx.getOrm());
+        } catch (err) {
+          console.error(
+            "[retention] tamper alert write failed; retention aborted:",
+            err instanceof Error ? err.message : String(err),
+          );
+          return Response.json(
+            { error: "Audit chain verification alert could not be recorded; retention aborted." },
+            { status: 503 },
+          );
+        }
+        const auditChainPruneSkipped = !auditChainVerification.valid;
+        if (auditChainPruneSkipped) {
+          console.error(
+            `[retention] audit chain verification FAILED brokenIndex=${auditChainVerification.brokenIndex} reason=${auditChainVerification.reason}; storage-retention prune skipped, evidence preserved.`,
+          );
+        }
+        const result = auditChainPruneSkipped
+          ? { skipped: true, pruned: 0 }
+          : runStorageRetention(ctx.getOrm(), {
+              retentionDays: ctx.env.MAS_MESSAGES_RETENTION_DAYS,
+              eventsRetentionDays: ctx.env.MAS_EVENTS_RETENTION_DAYS,
+              memoryRetentionDays: ctx.env.MAS_MEMORY_RETENTION_DAYS,
+            });
         // #2294: the outcome feed had no retention decision at all. Bound it
         // in the same nightly pass so history cannot grow into the read path.
         // Best-effort: a context without raw SQL (tests, older callers) or a
@@ -1064,6 +1098,8 @@ export async function handleSchedulesRoutes(
         return Response.json({
           success: true,
           ...result,
+          auditChainVerification,
+          auditChainPruneSkipped,
           jobOutcomesPruned: jobOutcomes.deletedByAge + jobOutcomes.deletedByCap,
           jobOutcomesByAge: jobOutcomes.deletedByAge,
           jobOutcomesByCap: jobOutcomes.deletedByCap,

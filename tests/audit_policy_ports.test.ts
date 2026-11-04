@@ -39,10 +39,10 @@
  *    port never blocks (pre-sign-off default, loudly logged).
  */
 import { describe, it, expect } from "vitest";
-import { DatabaseSync } from "node:sqlite";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { getTableConfig } from "drizzle-orm/sqlite-core";
+import { MockD1Database } from "./mock-d1";
 import {
   createD1AuditPolicyDb,
   D1AuditPolicyAdapter,
@@ -72,57 +72,6 @@ import {
   appendAuditChainBestEffort,
   checkAuditGate,
 } from "../src/services/auditGate";
-
-/** Minimal D1Database stand-in over node:sqlite (test-only). */
-class MockD1Database {
-  readonly sqlite = new DatabaseSync(":memory:");
-  prepare(sql: string) {
-    const db = this.sqlite;
-    return {
-      bind(...params: unknown[]) {
-        return {
-          async run() {
-            const info = db.prepare(sql).run(...(params as any[]));
-            return {
-              success: true,
-              meta: {
-                changes: info.changes,
-                last_row_id: info.lastInsertRowid,
-              },
-              results: [],
-            };
-          },
-          async all() {
-            return { results: db.prepare(sql).all(...(params as any[])) };
-          },
-          async first() {
-            return db.prepare(sql).get(...(params as any[])) ?? null;
-          },
-          async raw() {
-            return db
-              .prepare(sql)
-              .all(...(params as any[]))
-              .map((row: any) => Object.values(row));
-          },
-        };
-      },
-    };
-  }
-  async batch(statements: any[]) {
-    const results: any[] = [];
-    this.sqlite.exec("BEGIN");
-    try {
-      for (const stmt of statements) {
-        results.push(await stmt.run());
-      }
-      this.sqlite.exec("COMMIT");
-    } catch (err) {
-      this.sqlite.exec("ROLLBACK");
-      throw err;
-    }
-    return results;
-  }
-}
 
 async function makeD1Store(): Promise<{
   port: AuditPolicyPort;
@@ -387,26 +336,43 @@ describe("audit-policy D1 seeds (#2183) — re-ensure never overwrites an operat
   });
 });
 
-describe("audit-policy gate helper (#2183)", () => {
-  it("audit-only would-block is logged and allowed; enforcing blocks", async () => {
+describe("audit-policy gate helper (#2183, enforcement forced ON by #3156)", () => {
+  it("stored audit-only mode is overridden to enforcing; a failed audit write blocks", async () => {
     const port = new InMemoryAuditPolicyAdapter();
-    const auditOnly = await checkAuditGate(async () => port, "payment.charge", false);
-    expect(auditOnly.allowed).toBe(true);
-    expect(auditOnly.wouldBlock).toBe(true);
-    expect(auditOnly.blocked).toBe(false);
+    // The seed mode is audit-only, but #3156 forces enforcing: the
+    // stored setting no longer disables enforcement.
+    const seededAuditOnly = await checkAuditGate(async () => port, "payment.charge", false);
+    expect(seededAuditOnly.blocked).toBe(true);
+    expect(seededAuditOnly.allowed).toBe(false);
+    expect(seededAuditOnly.mode).toBe("enforcing");
     await port.setSetting(AUDIT_POLICY_SETTING_ENFORCEMENT_MODE, "enforcing");
     const enforcing = await checkAuditGate(async () => port, "payment.charge", false);
     expect(enforcing.blocked).toBe(true);
     expect(enforcing.allowed).toBe(false);
+    // A successful audit write still passes the gate.
+    const written = await checkAuditGate(async () => port, "payment.charge", true);
+    expect(written.blocked).toBe(false);
+    expect(written.allowed).toBe(true);
     const read = await checkAuditGate(async () => port, "audit.read", false);
     expect(read.allowed).toBe(true);
     expect(read.blocked).toBe(false);
   });
 
-  it("null adapter and throwing port never block", async () => {
+  it("null adapter and throwing port fail closed: block money actions, allow seeded non-blocking reads", async () => {
     const nullDecision = await checkAuditGate(async () => null, "payment.charge", false);
-    expect(nullDecision.allowed).toBe(true);
-    expect(nullDecision.blocked).toBe(false);
+    expect(nullDecision.blocked).toBe(true);
+    expect(nullDecision.allowed).toBe(false);
+    // Fail-closed regardless of the caller's audit-write report: without
+    // the store the gate cannot verify policy or chain evidence.
+    const nullWritten = await checkAuditGate(async () => null, "payment.charge", true);
+    expect(nullWritten.blocked).toBe(true);
+    expect(nullWritten.allowed).toBe(false);
+    const nullRead = await checkAuditGate(async () => null, "audit.read", false);
+    expect(nullRead.allowed).toBe(true);
+    expect(nullRead.blocked).toBe(false);
+    const nullUnknown = await checkAuditGate(async () => null, "payment.invoice", false);
+    expect(nullUnknown.blocked).toBe(true);
+    expect(nullUnknown.allowed).toBe(false);
     const throwingPort = {
       async listActionPolicies(): Promise<never> {
         throw new Error("D1 unavailable");
@@ -423,8 +389,11 @@ describe("audit-policy gate helper (#2183)", () => {
       "payment.charge",
       false,
     );
-    expect(throwingDecision.allowed).toBe(true);
-    expect(throwingDecision.blocked).toBe(false);
+    expect(throwingDecision.blocked).toBe(true);
+    expect(throwingDecision.allowed).toBe(false);
+    const throwingRead = await checkAuditGate(async () => throwingPort, "audit.read", false);
+    expect(throwingRead.allowed).toBe(true);
+    expect(throwingRead.blocked).toBe(false);
     await expect(
       appendAuditChainBestEffort(async () => throwingPort, {
         tenantId: "tenant-a",

@@ -42,6 +42,7 @@ vi.mock("../src/services/marketDataResearch", async (importOriginal) => ({
 
 import { DatabaseORM } from "../src/orm";
 import { MockSqlStorage } from "./mock-sql";
+import { InMemoryAuditPolicyAdapter } from "../src/data/inMemoryAuditPolicyAdapter";
 import { McpToolFactory } from "../src/mcps/openaimp/commands";
 import {
   DraftPaymentCommand,
@@ -320,6 +321,10 @@ describe("#1728 P-2 confirm_payment_draft: envelope unification", () => {
       env: mockEnv,
       ensureTables: () => sql,
       getOrm: () => orm,
+      // #3156: the money-path audit gate needs a reachable policy
+      // store, or it fails closed (503). The in-memory adapter
+      // stands in for the orchestrator's D1 port here.
+      getAuditPolicyPort: async () => new InMemoryAuditPolicyAdapter(),
       audit: auditMock,
     };
     const draftCtx: any = { env: mockEnv, orm, sessionId: "p2-route", audit: vi.fn() };

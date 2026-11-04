@@ -67,6 +67,7 @@ vi.mock("agents/x402", () => {
 
 import { OrchestratorAgent } from "../src/agents/orchestrator";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
 import { DatabaseORM } from "../src/orm";
 import { DraftPaymentCommand, ConfirmPaymentDraftCommand } from "../src/mcps/openaimp/commands";
 import type { McpToolContext } from "../src/patterns/interfaces";
@@ -88,6 +89,10 @@ const makeEnv = (overrides: Record<string, unknown> = {}): Env =>
     PAYPAL_CLIENT_SECRET: "paypal-secret-1690",
     LEMONSQUEEZY_API_KEY: "ls-key-1690",
     LEMONSQUEEZY_STORE_ID: "store-1690",
+    // #3156: the money-path audit gate needs a reachable policy
+    // store, or it fails closed (503). The mock D1 stands in for
+    // the bound AGENT_DB; the orchestrator ensures its schema.
+    AGENT_DB: new MockD1Database() as any,
     ...overrides,
   }) as Env;
 

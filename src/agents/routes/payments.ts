@@ -89,6 +89,9 @@ import {
 } from "../../services/nativeWebhook";
 import type { AgentName, Env, TransactionRecord } from "../../types";
 import { DatabaseORM, type SqlStorage } from "../../orm";
+import { checkAuditGate } from "../../services/auditGate";
+import { recordBlockingAudit } from "../../security/auditChain";
+import type { AuditPolicyPort } from "../../data/auditPolicyPorts";
 import { executeMCPTool } from "../../mcps/openaimp/index";
 import { runRestTool } from "./restToolBridge";
 import {
@@ -123,6 +126,15 @@ export interface PaymentsRouteContext {
    * it build a DatabaseORM over ensureTables() (same tables, no seeding).
    */
   getOrm?: () => DatabaseORM;
+  /**
+   * #3156 (Q7): audit-policy port accessor for the money-path
+   * gate, populated by the orchestrator from env (AGENT_DB),
+   * schema-ensured once per instance. Optional — routes without
+   * it fail closed (the gate helper blocks on a null port).
+   * Never fall back to an in-memory port in production: that
+   * would be fail-open and violate the 2026-11-04 directive.
+   */
+  getAuditPolicyPort?: () => Promise<AuditPolicyPort | null>;
   audit(
     type: string,
     agent: AgentName | "judge" | "nlq" | "orchestrator",
@@ -263,6 +275,54 @@ function flowModeForRequest(ctx: PaymentsRouteContext): PaymentsFlowMode {
     });
   }
   return resolved.mode;
+}
+
+/**
+ * #3156 (Q7): audit-gate enforcement for money execution.
+ *
+ * Writes the pre-execution audit record through the BLOCKING seam
+ * FIRST (a failed write throws, the route's catch returns 500, and
+ * money never moves), then runs the gate with
+ * auditWriteSucceeded=true. Returns a 503 Response when the gate
+ * blocks, or null when execution may proceed. Callers invoke it
+ * ONLY immediately before a money-moving call — never on reads,
+ * never on a rejected decision, never when no money call follows
+ * (missing draft, existing checkout kept).
+ *
+ * Gate-action mapping (the #2183 blocking set, unchanged):
+ * charge -> payment.charge; refund -> payment.refund; invoice ->
+ * payment.invoice (an unknown invoice action would be a mapping
+ * bug, never silently relabeled — hence the explicit union).
+ * Capture settles a charge, so it maps to payment.charge.
+ */
+async function gatePaymentExecution(
+  ctx: PaymentsRouteContext,
+  sessionId: string,
+  action: "payment.charge" | "payment.refund" | "payment.invoice",
+  reference: Record<string, unknown>,
+): Promise<Response | null> {
+  const orm = ctx.getOrm?.() ?? new DatabaseORM(ctx.ensureTables());
+  recordBlockingAudit(orm.events, {
+    id: `gate_${crypto.randomUUID().slice(0, 8)}`,
+    sessionId,
+    type: "payment.execution_started",
+    agent: "payments",
+    payload: { action, ...reference },
+    createdAt: new Date().toISOString(),
+  });
+  const setup = ctx.getAuditPolicyPort
+    ? () => ctx.getAuditPolicyPort!()
+    : async () => null;
+  const decision = await checkAuditGate(setup, action, true);
+  if (!decision.blocked) return null;
+  console.error(
+    `[audit-gate] money execution BLOCKED action=${action} reference=${JSON.stringify(reference)}: audit gate denied.`,
+  );
+  ctx.audit("payment.gate_blocked", "payments", { action, ...reference, reason: "audit gate blocked" });
+  return Response.json(
+    { error: `Payment execution blocked by the audit gate: audit could not be verified for ${action}.` },
+    { status: 503 },
+  );
 }
 
 /**
@@ -768,6 +828,15 @@ export async function handlePaymentsRoutes(
           let gatewayRef = tx?.gatewayRef || "";
 
           if (tx && (tx.action === "charge" || tx.action === "invoice") && !checkoutUrl) {
+            // #3156: gate immediately before money moves; a missing
+            // draft or an existing checkout never reaches this branch.
+            const gateBlocked = await gatePaymentExecution(
+              ctx,
+              sessionId,
+              tx.action === "invoice" ? "payment.invoice" : "payment.charge",
+              { draftId },
+            );
+            if (gateBlocked) return gateBlocked;
             const res = await paymentService.createCheckout({
               draftId,
               amount: Number(tx.amount),
@@ -780,6 +849,9 @@ export async function handlePaymentsRoutes(
             checkoutUrl = res.checkoutUrl;
             gatewayRef = res.gatewayRef;
           } else if (tx && tx.action === "refund") {
+            // #3156: gate immediately before money moves.
+            const gateBlocked = await gatePaymentExecution(ctx, sessionId, "payment.refund", { draftId });
+            if (gateBlocked) return gateBlocked;
             const res = await paymentService.executeRefund({
               transactionId: draftId,
               amount: Number(tx.amount),
@@ -842,6 +914,25 @@ export async function handlePaymentsRoutes(
       // closed to "rest" with a payment.config_error audit.
       const confirmMode = resolvePaymentsRouteMode(ctx, "confirm", body.mode, "rest");
 
+      // #3156: gate approved HITL execution before the command moves
+      // money (charge/invoice create a checkout, refund executes one).
+      // A missing draft skips the gate — the command still throws
+      // and maps to 404 below, preserving that behavior. A rejected
+      // decision moves no money and is never gated.
+      if (decision === "approved") {
+        const hitlTx = ledger().findById(draftId);
+        if (hitlTx && (hitlTx.action === "charge" || hitlTx.action === "invoice" || hitlTx.action === "refund")) {
+          const gateAction =
+            hitlTx.action === "refund"
+              ? "payment.refund"
+              : hitlTx.action === "invoice"
+                ? "payment.invoice"
+                : "payment.charge";
+          const gateBlocked = await gatePaymentExecution(ctx, sessionId, gateAction, { draftId });
+          if (gateBlocked) return gateBlocked;
+        }
+      }
+
       let out: any;
       try {
         out = await executeMCPTool("confirm_payment_draft", {
@@ -898,6 +989,9 @@ export async function handlePaymentsRoutes(
       if (!orderId) {
         return Response.json({ error: "orderId is required" }, { status: 400 });
       }
+      // #3156: capture settles a charge — gate immediately before money moves.
+      const gateBlocked = await gatePaymentExecution(ctx, sessionId, "payment.charge", { orderId });
+      if (gateBlocked) return gateBlocked;
       const paymentService = new PaymentGatewayService(ctx.env);
       const result = await paymentService.capturePayment({
         gateway,

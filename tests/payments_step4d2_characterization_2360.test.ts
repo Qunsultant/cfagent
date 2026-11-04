@@ -54,6 +54,7 @@ import { SETTLEMENT_OWNER_HEADER } from "../src/payments/draftOwners";
 import { PaymentGatewayService } from "../src/services/payments";
 import { computeHmacSha256Hex } from "../src/services/cryptoUtils";
 import { SHARED_TABLE_DDL } from "../src/data/ormSchema";
+import { InMemoryAuditPolicyAdapter } from "../src/data/inMemoryAuditPolicyAdapter";
 
 const SESSION = "user-session-2360";
 const SENTINEL = "2000-01-01T00:00:00.000Z";
@@ -66,6 +67,11 @@ class SqliteRouteStorage {
   readonly sqlite = new DatabaseSync(":memory:");
   constructor() {
     this.sqlite.exec(SHARED_TABLE_DDL.mas_transactions);
+    // #3156: money execution now writes a payment.execution_started
+    // audit through the chained mas_events repository (chain columns
+    // are added by ensureAuditChainColumns on first write), so the
+    // characterization storage must carry the audit table too.
+    this.sqlite.exec(SHARED_TABLE_DDL.mas_events);
   }
   exec(query: string, ...params: unknown[]): unknown[] {
     const stmt = this.sqlite.prepare(query);
@@ -140,6 +146,10 @@ function makeCtx(
       ...envOverrides,
     },
     ensureTables: () => storage as any,
+    // #3156: the money-path audit gate needs a reachable policy
+    // store, or it fails closed (503). The in-memory adapter stands
+    // in for the orchestrator's D1 port on this direct route ctx.
+    getAuditPolicyPort: async () => new InMemoryAuditPolicyAdapter(),
     audit: (type: string, agent: string, payload: Record<string, unknown>) => {
       audits.push({ type, agent, payload });
     },
@@ -699,5 +709,47 @@ describe("webhook settlement — the existence probes and the settle UPDATE (#23
     expect(res!.status).toBe(401);
     const json = (await res!.json()) as any;
     expect(json.error).toContain("Unsupported webhook provider");
+  });
+});
+
+describe("audit-gate enforcement (#3156)", () => {
+  it("a gate-blocked immediate confirm returns 503, moves no money, and audits the denial", async () => {
+    const storage = new SqliteRouteStorage();
+    const { ctx, audits } = makeCtx(storage);
+    // No policy port on this ctx: the gate fails closed (owner
+    // directive 2026-11-04 — store-unreachable blocks).
+    const blockedCtx = { ...ctx, getAuditPolicyPort: undefined } as PaymentsRouteContext;
+    storage.seed({ id: "pay_gate1", checkout_url: "" });
+    const res = await call(blockedCtx, "POST", "/payments/confirm", {
+      draftId: "pay_gate1",
+      decision: "approved",
+    });
+    expect(res!.status).toBe(503);
+    expect(storage.row("pay_gate1").status).toBe("pending_checkout");
+    expect(auditsOf(audits, "payment.confirmed")).toHaveLength(0);
+    const denied = auditsOf(audits, "payment.gate_blocked");
+    expect(denied).toHaveLength(1);
+    expect(denied[0].payload.action).toBe("payment.charge");
+  });
+
+  it("a gate-blocked capture returns 503 and never calls the gateway", async () => {
+    const captureSpy = vi.spyOn(PaymentGatewayService.prototype, "capturePayment").mockResolvedValue({
+      success: true,
+      captureId: "cap_x",
+      message: "captured",
+    });
+    const storage = new SqliteRouteStorage();
+    const { ctx, audits } = makeCtx(storage);
+    const blockedCtx = { ...ctx, getAuditPolicyPort: undefined } as PaymentsRouteContext;
+    storage.seed({ id: "cap_gate", gateway_ref: "cap_gate", status: "authorized" });
+    const res = await call(blockedCtx, "POST", "/payments/capture", {
+      orderId: "cap_gate",
+      gateway: "stripe",
+    });
+    expect(res!.status).toBe(503);
+    expect(captureSpy).not.toHaveBeenCalled();
+    expect(storage.row("cap_gate").status).toBe("authorized");
+    expect(auditsOf(audits, "payment.captured")).toHaveLength(0);
+    expect(auditsOf(audits, "payment.gate_blocked")).toHaveLength(1);
   });
 });

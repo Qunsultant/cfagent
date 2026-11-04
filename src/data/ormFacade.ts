@@ -76,8 +76,9 @@ import {
 import { buildMarketplacePorts } from "./buildMarketplacePorts";
 import { computeRevenueSummaryFromRows } from "./marketplacePorts";
 import {
+  diagnoseAuditChain,
   linkAuditRow,
-  verifyAuditChain,
+  type AuditChainDiagnosis,
   type AuditChainRow,
 } from "../security/auditChain";
 import {
@@ -142,7 +143,7 @@ export function requireOrm(orm: DatabaseORM | undefined, context: string): Datab
  * verifyAuditChain); a bypass writer that inserts without chaining
  * after chaining started fails verification — loudly, by design.
  */
-export function verifyStoredAuditChain(orm: DatabaseORM): boolean {
+export function diagnoseStoredAuditChain(orm: DatabaseORM): AuditChainDiagnosis {
   const rows = orm.events.findMany({ orderBy: "rowid ASC" });
   const chainRows: AuditChainRow[] = rows.map((r) => ({
     id: r.id,
@@ -154,7 +155,11 @@ export function verifyStoredAuditChain(orm: DatabaseORM): boolean {
     previousEventHash: r.previousEventHash ?? null,
     eventHash: r.eventHash ?? "",
   }));
-  return verifyAuditChain(chainRows);
+  return diagnoseAuditChain(chainRows);
+}
+
+export function verifyStoredAuditChain(orm: DatabaseORM): boolean {
+  return diagnoseStoredAuditChain(orm).valid;
 }
 
 export class DatabaseORM {
