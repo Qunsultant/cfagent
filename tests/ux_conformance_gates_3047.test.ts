@@ -205,7 +205,9 @@ const TRADING_ROUTES = [
 ];
 
 /** Sub-tabs already shell-conforming (flip target for migrations). */
-const CONFORMING_SUB_TABS: Record<string, string> = {};
+const CONFORMING_SUB_TABS: Record<string, string> = {
+  "track-record": "src/client/TrackRecordPanel.tsx",
+};
 
 const EXPECTED_TAB_CONTENT_KEYS = [
   "agents",
