@@ -95,7 +95,12 @@ import type { Env } from "../types";
 import { authOutcomeLoginUrl } from "./authOutcome";
 import type { LoginCallbackOptions, LoginProvider } from "./providers";
 import { completeWiredLogin, type NormalizedLoginProfile } from "./iaaaLogin";
-import { createState, verifyState } from "./session";
+import {
+  createState,
+  verifyState,
+  createStateWithReturnTarget,
+  extractStateReturnTarget,
+} from "./session";
 import { exchangeAuthorizationCodeConfidential, OAuth2Error } from "./oauth2Core";
 
 /** Error carrying the HTTP status the callback should answer with. */
@@ -343,7 +348,7 @@ export function createOidcProvider(options: OidcProviderOptions): LoginProvider 
   const subjectField = options.subjectField ?? "sub";
   const credentialsGate = options.requireConfiguredCredentials ?? true;
 
-  async function startLogin(env: Env): Promise<Response> {
+  async function startLogin(env: Env, returnTarget?: string): Promise<Response> {
     const clientId = readEnvString(env, options.clientIdEnv);
     const clientSecret = await resolveClientSecret(env, options);
     if (credentialsGate && (!clientId || !clientSecret)) {
@@ -357,7 +362,15 @@ export function createOidcProvider(options: OidcProviderOptions): LoginProvider 
     if (options.useStateAsNonce && !options.profileFromIdToken) {
       return errorPage(`${options.displayName} login is misconfigured (nonce without ID-token profile)`, 500);
     }
-    const state = await createState(env);
+    // #3015: seal a validated return target into the signed state;
+    // an absent or refused target starts a plain login (default
+    // landing afterwards) — the target never blocks login. For
+    // state-as-nonce providers the state IS the nonce, echoed back
+    // verbatim, so the target rides along untouched.
+    const state =
+      (returnTarget !== undefined
+        ? await createStateWithReturnTarget(env, returnTarget)
+        : null) ?? (await createState(env));
     const params = new URLSearchParams();
     for (const [key, value] of Object.entries(options.extraAuthorizeParams ?? {})) {
       params.set(key, value);
@@ -397,10 +410,16 @@ export function createOidcProvider(options: OidcProviderOptions): LoginProvider 
       return errorPage("Invalid or expired OAuth state session. Please try signing in again.", 403);
     }
 
+    // #3015: recover the return target from the signed state. The
+    // raw state is never trusted for the landing — only a target
+    // that verifies (signature + expiry) and re-validates here is
+    // passed on, and the wired tail validates it once more before
+    // any redirect uses it.
     const tailOptions = {
       auditStore: callbackOptions?.auditStore,
       auditTenantId: callbackOptions?.auditTenantId,
       postLoginEnabled: callbackOptions?.postLoginEnabled,
+      returnTarget: await extractStateReturnTarget(env, state),
     };
 
     try {
