@@ -27,6 +27,7 @@ import {
   resolveStockReportFormatStatus,
   type StockReportFormatStatus,
 } from "../services/stockReportFormatStatus";
+import { csrfHeaders } from "./apiFetch";
 
 export interface RunDetailPartial {
   quotedCount: number;
@@ -162,7 +163,7 @@ export function RunDetailView({
     try {
       const res = await fetch("/api/trading/options/regenerate", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        headers: { "Content-Type": "application/json", Accept: "application/json", ...csrfHeaders() },
         body: JSON.stringify({ reportId: regenerateRunId }),
       });
       const data = (await res.json().catch(() => null)) as { error?: unknown } | null;

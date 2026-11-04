@@ -10,6 +10,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { Badge, Button, EmptyState, Notice, Spinner } from "./components/ui";
+import { csrfHeaders } from "./apiFetch";
 
 /** Store row shape, mirroring the server's DeadLetterStoreRecord. */
 interface DlqRecord {
@@ -79,7 +80,7 @@ export function DlqPanel() {
       try {
         const response = await globalThis.fetch("/api/ops/dlq/replay", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...csrfHeaders() },
           body: JSON.stringify({ recordId }),
         });
         const data = (await response.json().catch(() => null)) as {

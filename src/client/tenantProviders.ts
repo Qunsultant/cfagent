@@ -13,6 +13,7 @@
  * never to a provider/broker the user did not select.
  */
 import { useEffect, useState } from "react";
+import { csrfHeaders } from "./apiFetch";
 
 export const TENANT_PROVIDERS_ENDPOINT = "/api/tenant/settings/providers";
 export const TENANT_PROVIDERS_CHANGED_EVENT = "cfagent-tenant-providers-changed";
@@ -115,7 +116,7 @@ export async function saveTenantProviders(
   try {
     const res = await globalThis.fetch(TENANT_PROVIDERS_ENDPOINT, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...csrfHeaders() },
       body: JSON.stringify(state),
     });
     if (!res.ok) throw new Error("Failed to save provider selection");

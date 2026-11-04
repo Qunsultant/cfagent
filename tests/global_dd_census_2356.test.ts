@@ -826,6 +826,11 @@ const STEP5B_PORT_SITES: Array<[string, string, number]> = [
   ["src/security/session.ts", "sessionFamilyPorts", 10],
   ["src/security/session.ts", "wiredAccessRequestStore", 1],
   ["src/security/session.ts", "wiredMembershipStore", 1],
+  // Added for issue #3113 (#945 Q5): the rotation env adapter lists
+  // the user's sessions via the same listSessionFamilyEntries
+  // factory — no new funnel, no bypass (rotation reuses the
+  // existing family listing).
+  ["src/security/sessionRotation.ts", "listSessionFamilyEntries", 1],
   // Bumped 3 -> 5 for issue #2688: the role-grants list route adds
   // two list sites in server.ts (membership listing for the grant
   // rows, binding listing for issuer:subject enrichment), using

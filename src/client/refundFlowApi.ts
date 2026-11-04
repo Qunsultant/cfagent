@@ -15,6 +15,7 @@
  * every action and render only the fresh read.
  */
 import type { RefundKind } from "./refundPolicyApi";
+import { withCsrfInit } from "./apiFetch";
 
 const BASE = "/api/payments/agentic/commercial";
 
@@ -64,7 +65,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 async function callJson(path: string, init?: RequestInit): Promise<unknown> {
   let res: Response;
   try {
-    res = await globalThis.fetch(path, init);
+    res = await globalThis.fetch(path, withCsrfInit(init));
   } catch {
     throw new RefundFlowApiError(0);
   }

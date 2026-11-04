@@ -116,7 +116,7 @@ export type WiredSessionValidation =
  * early, never late).
  */
 export interface WiredSessionValidationOptions {
-  /** Owner override for the idle window (default 30 minutes). */
+  /** Owner override for the idle window (default: the settled 8-hour config value). */
   idleTimeoutMs?: number;
   /**
    * Issue #2444: ms since epoch when the cached copy was fetched from
