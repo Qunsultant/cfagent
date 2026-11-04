@@ -126,6 +126,8 @@ import { handleMeterRoutes } from "./routes/meter";
 import { handleDlqRoutes } from "./routes/dlq";
 import { handleDataProviderRoutes } from "./routes/dataProviders";
 import { buildDataProviderPorts } from "../data/buildDataProviderPorts";
+import { createEnsuredAuditPolicyAdapter } from "../data/createAuditPolicyPorts";
+import type { AuditPolicyPort } from "../data/auditPolicyPorts";
 import type { D1ProviderConfigAdapter } from "../data/d1ProviderConfigAdapter";
 import type { D1ProviderCaptureAdapter } from "../data/d1ProviderCaptureAdapter";
 import { handleEnrichmentRoutes } from "./routes/enrichment";
@@ -275,6 +277,22 @@ export class OrchestratorAgent extends PortThink {
       this.dataProviderPortsPromise = buildDataProviderPorts(this.env);
     }
     return this.dataProviderPortsPromise;
+  }
+
+  /**
+   * #3156 (Q7): the audit-policy port for the money-path gate,
+   * built lazily from env (AGENT_DB), schema-ensured once per
+   * instance. Null when unbound — the gate helper then fails
+   * closed on its own. Memoized as a promise so concurrent first
+   * uses share one build (same shape as dataProviderPorts).
+   */
+  private auditPolicyPortPromise?: Promise<AuditPolicyPort | null>;
+
+  private auditPolicyPort(): Promise<AuditPolicyPort | null> {
+    if (!this.auditPolicyPortPromise) {
+      this.auditPolicyPortPromise = createEnsuredAuditPolicyAdapter(this.env);
+    }
+    return this.auditPolicyPortPromise;
   }
 
   /**
@@ -2877,6 +2895,7 @@ export class OrchestratorAgent extends PortThink {
       env: this.env,
       ensureTables: () => this.ensureTables(),
       getOrm: () => this.getOrm(),
+      getAuditPolicyPort: () => this.auditPolicyPort(),
       audit: (type, agent, payload) => this.audit(type, agent, payload),
       // #1735: session/user carriers for PAYMENTS_FLOW_MODE (run is
       // per-call on the route context and is not set here — there is

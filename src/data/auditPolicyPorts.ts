@@ -23,13 +23,14 @@
  * Enforcement default (proposal, NOT activation): the seeded
  * enforcement mode is "audit-only". In audit-only mode the gate
  * evaluator NEVER blocks — it records that an action WOULD have
- * blocked. Enforcement becomes blocking only when (a) CISO+CDO
- * sign off on the policy AND (b) an operator explicitly sets
- * enforcement_mode = "enforcing" in operator data. Until both
- * hold, no existing audit behavior changes from best-effort to
- * blocking. Money paths adopt the gate helper in
- * src/services/auditGate.ts only after sign-off; this slice does
- * not rewire money paths.
+ * blocked. NOTE (#3156, owner directive 2026-11-04): the caller
+ * helper in src/services/auditGate.ts now FORCES enforcing mode
+ * regardless of this stored setting, and fails closed when the
+ * store is unreachable — audit-only is OFF for live money paths.
+ * This pure evaluator and its seed keep their #2183 semantics
+ * (a future cleanup may remove the setting); only the helper's
+ * behavior changed, so the evaluator/seed/resolve tests below
+ * still assert the proposal values.
  *
  * Retention scope: the retention period here governs the D1
  * hash-chain evidence rows ONLY. It does not touch mas_events

@@ -44,6 +44,14 @@ vi.mock("../src/services/scheduledTasks", () => ({
 vi.mock("../src/security/storageRetention", () => ({
   runStorageRetention: vi.fn(),
 }));
+vi.mock("../src/services/auditTamperAlert", () => ({
+  verifyStoredAuditChainAndAlert: vi.fn(() => ({
+    valid: true,
+    brokenIndex: null,
+    reason: null,
+    alertRecorded: false,
+  })),
+}));
 vi.mock("../src/security/etradeOAuth", () => ({
   getStoredTokens: vi.fn(),
   isTokenExpiredEt: vi.fn(() => false),
@@ -52,6 +60,7 @@ vi.mock("../src/security/etradeOAuth", () => ({
 
 import { ScheduledTasksService } from "../src/services/scheduledTasks";
 import { runStorageRetention } from "../src/security/storageRetention";
+import { verifyStoredAuditChainAndAlert } from "../src/services/auditTamperAlert";
 import { getStoredTokens } from "../src/security/etradeOAuth";
 import {
   handleSchedulesRoutes,
@@ -366,6 +375,43 @@ describe("schedules behavior (extraction #379)", () => {
     expect(body).toMatchObject({ success: true, deleted: 4, retentionDays: 90 });
     expect(typeof body.jobOutcomesPruned).toBe("number");
     expect(runStorageRetention).toHaveBeenCalledWith({ tag: "orm" }, { retentionDays: undefined });
+  });
+
+  it("POST /schedules/trigger-retention reports a valid chain verification and prunes (#3156)", async () => {
+    (runStorageRetention as any).mockReturnValue({ deleted: 4, retentionDays: 90 });
+    const getOrm = vi.fn(() => ({ tag: "orm" }));
+    const ctx = baseCtx({ getOrm: getOrm as any });
+    const res = await handleSchedulesRoutes(req("POST", "/schedules/trigger-retention"), urlOf("/schedules/trigger-retention"), "/schedules/trigger-retention", "s1", ctx);
+    expect((res as Response).status).toBe(200);
+    const body = (await (res as Response).json()) as Record<string, unknown>;
+    expect(body.auditChainPruneSkipped).toBe(false);
+    expect(body.auditChainVerification).toMatchObject({ valid: true, alertRecorded: false });
+    expect(runStorageRetention).toHaveBeenCalled();
+  });
+
+  it("POST /schedules/trigger-retention SKIPS pruning on a failed chain verification (#3156)", async () => {
+    (verifyStoredAuditChainAndAlert as any).mockReturnValueOnce({
+      valid: false,
+      brokenIndex: 2,
+      reason: "eventHash recomputation mismatch (row payload modified)",
+      alertRecorded: true,
+      alertId: "tamper_ab12cd34",
+    });
+    const getOrm = vi.fn(() => ({ tag: "orm" }));
+    const ctx = baseCtx({ getOrm: getOrm as any });
+    const res = await handleSchedulesRoutes(req("POST", "/schedules/trigger-retention"), urlOf("/schedules/trigger-retention"), "/schedules/trigger-retention", "s1", ctx);
+    expect((res as Response).status).toBe(200);
+    const body = (await (res as Response).json()) as Record<string, unknown>;
+    // The run completes (sweep/snapshot still report), but the
+    // mas_events prune is skipped to preserve tamper evidence.
+    expect(body.auditChainPruneSkipped).toBe(true);
+    expect(body.auditChainVerification).toMatchObject({
+      valid: false,
+      brokenIndex: 2,
+      alertRecorded: true,
+      alertId: "tamper_ab12cd34",
+    });
+    expect(runStorageRetention).not.toHaveBeenCalled();
   });
 
   it("POST /schedules/trigger-iv-collection requires auth (401) and otherwise collects via the service", async () => {

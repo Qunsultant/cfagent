@@ -17,6 +17,7 @@ export {
   DatabaseORM,
   MissingOrmError,
   requireOrm,
+  diagnoseStoredAuditChain,
   verifyStoredAuditChain,
   type TableMetadata,
 } from "../data/ormFacade";

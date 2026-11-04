@@ -167,6 +167,49 @@ export function recordBlockingAudit(
   return events.create(record);
 }
 
+/** First break of a mas_events chain, for the #3156 alert path. */
+export interface AuditChainDiagnosis {
+  valid: boolean;
+  /** Index into the input rows array of the first broken row, or null when valid. */
+  brokenIndex: number | null;
+  /** Human-readable reason for the first break, or null when valid. */
+  reason: string | null;
+}
+
+/**
+ * Diagnose rows in insertion order. Same walk as verifyAuditChain:
+ * pre-chain rows (empty eventHash) before the first hashed row are
+ * skipped as a genesis boundary; the first hashed row must have
+ * previousEventHash null, every later row must link to its
+ * predecessor, and every hash must recompute. The first break is
+ * reported with its index so the tamper-response runbook can name
+ * the affected range; appending an alert onto a broken tail never
+ * repairs the break, so the diagnosis is stable across alerts.
+ */
+export function diagnoseAuditChain(rows: AuditChainRow[]): AuditChainDiagnosis {
+  let previousHash: string | null = null;
+  let chaining = false;
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    if (!chaining) {
+      if (!row.eventHash) continue;
+      chaining = true;
+    }
+    if (!row.eventHash) {
+      return { valid: false, brokenIndex: i, reason: "missing eventHash after chaining started (bypass writer or deleted hash)" };
+    }
+    if (row.previousEventHash !== previousHash) {
+      return { valid: false, brokenIndex: i, reason: "previousEventHash mismatch (predecessor modified, deleted, or reordered)" };
+    }
+    const { eventHash, ...rest } = row;
+    if (sha256HexSync(canonicalizeAuditRow(rest)) !== eventHash) {
+      return { valid: false, brokenIndex: i, reason: "eventHash recomputation mismatch (row payload modified)" };
+    }
+    previousHash = eventHash;
+  }
+  return { valid: true, brokenIndex: null, reason: null };
+}
+
 /**
  * Verify rows in insertion order. Pre-chain rows (empty eventHash)
  * before the first hashed row are skipped as a genesis boundary; the
@@ -174,18 +217,5 @@ export function recordBlockingAudit(
  * must link to its predecessor, and every hash must recompute.
  */
 export function verifyAuditChain(rows: AuditChainRow[]): boolean {
-  let previousHash: string | null = null;
-  let chaining = false;
-  for (const row of rows) {
-    if (!chaining) {
-      if (!row.eventHash) continue;
-      chaining = true;
-    }
-    if (!row.eventHash) return false;
-    if (row.previousEventHash !== previousHash) return false;
-    const { eventHash, ...rest } = row;
-    if (sha256HexSync(canonicalizeAuditRow(rest)) !== eventHash) return false;
-    previousHash = eventHash;
-  }
-  return true;
+  return diagnoseAuditChain(rows).valid;
 }
