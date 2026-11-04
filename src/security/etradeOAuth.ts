@@ -23,6 +23,7 @@ import { sessionStore } from "./session";
 import { generateOAuth1Header, rfc3986 } from "../services/cryptoUtils";
 import { resolveEnvironmentConfig } from "../config/environment";
 import { ETradeError, ETradeErrorCode } from "../aspects/errorCodes";
+import { BusinessError, codedMessage } from "../outcomes/outcomeAspects";
 import { withAspects } from "../aspects/loggingAspect";
 import { createDidAttestationSync, AGENT_DIDS } from "../agents/did";
 
@@ -233,10 +234,12 @@ async function readResolvedTokenSet(
 }
 
 /**
- * Issue #2386 — renew failure reasons, mapped to EXISTING catalog
- * codes only (no new catalog; the outcome-catalog build #2381 owns
- * any new code surface). The renew route reports these so the panel
- * can tell the user the real reason instead of one generic 400.
+ * Issue #2386 — renew failure reasons. The renew route reports these
+ * so the panel can tell the user the real reason instead of one
+ * generic 400. Issue #3197: the upstream-rejection reason is now an
+ * outcome-catalog code (the catalog build #2381 owns the code
+ * surface); the other three reasons keep their ETradeErrorCode
+ * values, which the panel already keys on.
  */
 export type RenewFailureKind =
   | "NO_TOKENS"
@@ -263,8 +266,8 @@ export function renewFailureDetail(kind: RenewFailureKind): { code: string; mess
       };
     case "UPSTREAM_REJECTED":
       return {
-        code: ETradeErrorCode.UPSTREAM_ERROR,
-        message: "E*TRADE rejected the renewal request. Try again, or reconnect E*TRADE if the problem persists.",
+        code: "FAILURE_ETRADE_OAUTH_RENEW_FAILED",
+        message: codedMessage("FAILURE_ETRADE_OAUTH_RENEW_FAILED"),
       };
   }
 }
@@ -598,15 +601,14 @@ export async function getETradeRequestToken(
 
       if (!res.ok) {
         const errorBody = await res.text().catch(() => "");
-        const isLiveProd = envConfig.isLive;
-        const diagnosticNote =
-          res.status === 401 && isLiveProd
-            ? " — E*TRADE Production Gateway (api.etrade.com) rejected credentials. If your ET_API_KEY is a Sandbox key, switch environment to TEST. Live production requires an approved Morgan Stanley Production Key & Secret."
-            : "";
-        throw new ETradeError(
-          ETradeErrorCode.UPSTREAM_ERROR,
-          `E*TRADE request_token failed [HTTP ${res.status}]${diagnosticNote}: ${errorBody.slice(0, 300)}`
+        // Issue #3197: the raw upstream body (often an HTML error
+        // page) is logged server-side only — the surfaced error is
+        // the outcome-catalog entry, whose message carries the
+        // sandbox-key remediation the diagnostic note used to inline.
+        console.warn(
+          `[getETradeRequestToken] upstream rejected request_token: HTTP ${res.status}: ${errorBody.slice(0, 300)}`
         );
+        throw new BusinessError("FAILURE_ETRADE_OAUTH_REQUEST_TOKEN_FAILED");
       }
 
       const responseBody = await res.text();
@@ -615,10 +617,11 @@ export async function getETradeRequestToken(
       const requestTokenSecret = params.get("oauth_token_secret");
 
       if (!requestToken || !requestTokenSecret) {
-        throw new ETradeError(
-          ETradeErrorCode.UPSTREAM_ERROR,
-          `Invalid response from E*TRADE request_token: missing oauth_token in ${responseBody}`
-        );
+        // Issue #3197: same outcome as an upstream rejection. The
+        // body is NOT logged here — a request_token response carries
+        // the token secret itself.
+        console.warn("[getETradeRequestToken] upstream response missing oauth_token");
+        throw new BusinessError("FAILURE_ETRADE_OAUTH_REQUEST_TOKEN_FAILED");
       }
 
       await storeRequestTokenSecret(env, userLogin, requestToken, requestTokenSecret, overrideEnv);
@@ -693,10 +696,13 @@ export async function exchangeETradeVerifier(
 
       if (!res.ok) {
         const errorBody = await res.text().catch(() => "");
-        throw new ETradeError(
-          ETradeErrorCode.UPSTREAM_ERROR,
-          `E*TRADE access_token exchange failed [HTTP ${res.status}]: ${errorBody.slice(0, 300)}`
+        // Issue #3197: the raw upstream body (the owner's 401 arrived
+        // as an HTML dump) is logged server-side only — the surfaced
+        // error is the outcome-catalog entry.
+        console.warn(
+          `[exchangeETradeVerifier] upstream rejected access_token: HTTP ${res.status}: ${errorBody.slice(0, 300)}`
         );
+        throw new BusinessError("FAILURE_ETRADE_OAUTH_EXCHANGE_FAILED");
       }
 
       const responseBody = await res.text();
@@ -705,10 +711,11 @@ export async function exchangeETradeVerifier(
       const accessTokenSecret = params.get("oauth_token_secret");
 
       if (!accessToken || !accessTokenSecret) {
-        throw new ETradeError(
-          ETradeErrorCode.UPSTREAM_ERROR,
-          `E*TRADE access_token response missing tokens: ${responseBody.slice(0, 200)}`
-        );
+        // Issue #3197: same outcome as an upstream rejection. The
+        // body is NOT logged here — an access_token response carries
+        // the token secret itself.
+        console.warn("[exchangeETradeVerifier] upstream response missing access tokens");
+        throw new BusinessError("FAILURE_ETRADE_OAUTH_EXCHANGE_FAILED");
       }
 
       await storeAccessTokens(env, userLogin, accessToken, accessTokenSecret, overrideEnv);

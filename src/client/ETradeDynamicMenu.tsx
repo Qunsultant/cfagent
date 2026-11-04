@@ -8,6 +8,7 @@ import {
 import { isTabFeatureEnabled } from "./featureFlags";
 import { PillGroup, Button, TextInput, Select } from "./components/ui";
 import { apiFetch } from "./apiFetch";
+import { codedMessage } from "../outcomes/outcomeAspects";
 import { fetchWatchlists, type ETradeWatchlist } from "./accountApi";
 import {
   loadTapeSelection,
@@ -164,6 +165,7 @@ export function SettingsMenu({
   const [localMask, setLocalMask] = useState(true);
   const [localMsg, setLocalMsg] = useState("");
   const [localDiagLoading, setLocalDiagLoading] = useState(false);
+  const [localAlpacaLoading, setLocalAlpacaLoading] = useState(false);
 
   // Issue #2481 — when uncontrolled, the menu reads the same
   // central switch (autoRefresh.ts) as every gated surface, not
@@ -583,6 +585,33 @@ export function SettingsMenu({
     }
   };
 
+  // Issue #3197: Alpaca's own connect entry. Alpaca has no OAuth
+  // flow — connecting means verifying the configured API
+  // credentials against the existing market-data account route.
+  // Menu Connect for Alpaca must never fire E*TRADE's OAuth start,
+  // so this handler does not touch onStartOAuth (or its event)
+  // at all. The route's error body is already outcome-encoded;
+  // the fallback covers a network failure reaching it.
+  const handleAlpacaConnect = async () => {
+    setLocalMsg("");
+    setLocalAlpacaLoading(true);
+    try {
+      const res = await apiFetch("/api/market-data/alpaca/account");
+      const data = (await res.json().catch(() => ({}))) as any;
+      if (res.ok && data?.success && data?.account) {
+        setLocalMsg(
+          data.account.id ? `Alpaca connected (account ${data.account.id}).` : "Alpaca connected.",
+        );
+      } else {
+        setLocalMsg(data?.error || codedMessage("FAILURE_ALPACA_UPSTREAM"));
+      }
+    } catch {
+      setLocalMsg(codedMessage("FAILURE_ALPACA_UPSTREAM"));
+    } finally {
+      setLocalAlpacaLoading(false);
+    }
+  };
+
   const isDiagnosticsRunning = diagnosticsLoading || localDiagLoading;
 
   return (
@@ -734,7 +763,19 @@ export function SettingsMenu({
               >
                 🔄 Sync
               </Button>
-              {isConnected ? (
+              {selectedBrokerId === "alpaca" ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  className="btn-action-mini connect"
+                  disabled={localAlpacaLoading}
+                  onClick={handleAlpacaConnect}
+                  loading={localAlpacaLoading}
+                  title="Connect to Alpaca"
+                >
+                  {`🦙 Connect Alpaca`}
+                </Button>
+              ) : isConnected ? (
                 <>
                   {oauthStatus?.renewable && (
                     <Button
