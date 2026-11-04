@@ -320,15 +320,21 @@ const ORCH = "agents/orchestrator.ts";
  *  logic changed) — measured 3,238 lines / 155,218 B after the
  *  addition; budget lines rise to 3250 and bytes rise to
  *  155_800, keeping similar headroom.
- *  Issue #3089 adds the broker-order import + delegation block
- *  (after the E*TRADE block, no other orchestrator logic
- *  changed) and issue #3169 (program #2218) adds the channel-admin
+ *  Issue #3169 (program #2218) adds the channel-admin
  *  delegation block (import + dispatch after the account
- *  block). Stacked on the merged tree: measured 3,278 lines /
- *  157,779 B, so budget lines rise to 3290 and bytes rise to
- *  158,800, keeping similar headroom. */
+ *  block) — measured 3,239 lines / 155,343 B on the stacked
+ *  tree, so budget lines rise to 3250 and bytes rise to
+ *  155_800, keeping similar headroom.
+ *  Merged #3153 + #3169 tree measures 3,253 lines / 156,154 B,
+ *  so budget lines rise to 3270 and bytes rise to 156_800,
+ *  keeping similar headroom.
+ *  Q7 #3156 adds the audit-policy-port wiring (import +
+ *  auditPolicyPortPromise/auditPolicyPort() + context entry) —
+ *  measured 3,272 lines / 156,989 B on the stacked tree, so
+ *  budget lines rise to 3290 and bytes rise to 157_600,
+ *  keeping similar headroom. */
 const BUDGET_LINES = 3290;
-const BUDGET_BYTES = 158_800;
+const BUDGET_BYTES = 157_600;
 
 const count = (haystack: string, needle: string) =>
   haystack.split(needle).length - 1;
@@ -425,9 +431,7 @@ describe("orchestrator class inventory (#992 standing gate)", () => {
     // Bumped 6 -> 7 / 3 -> 4 for issue #2681: the migration context
     // binds schedule/scheduleEvery as pass-throughs; the re-arm itself
     // lives in routes/orchestratorMigration.ts, not inline.
-    // Bumped 7 -> 8 for issue #3089: the broker-order delegation
-    // block copies the E*TRADE context's schedule: binding arrow.
-    expect(count(text, "this.schedule(")).toBeLessThanOrEqual(8);
+    expect(count(text, "this.schedule(")).toBeLessThanOrEqual(7);
     expect(count(text, "this.scheduleEvery(")).toBeLessThanOrEqual(4);
   });
 
