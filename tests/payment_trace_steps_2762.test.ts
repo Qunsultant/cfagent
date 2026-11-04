@@ -256,6 +256,9 @@ describe("issue #2762 — PaymentWorkflow step hops join the carried trace", () 
       "await-payment-verified",
       "confirm-paid",
       "record-payment",
+      // #2192 follow-up: the best-effort native-ledger step traces
+      // between record-payment and start-screener on paid runs.
+      "record-native-ledger",
       "start-screener",
     ]);
     // The approval audit contract (#2550) is untouched by tracing:
@@ -266,7 +269,7 @@ describe("issue #2762 — PaymentWorkflow step hops join the carried trace", () 
     expect(events.filter((e) => e.type === "payment.confirmed")).toHaveLength(1);
   });
 
-  it("a metered (saga) paid run records the record-usage hop after record-payment", async () => {
+  it("a metered (saga) paid run records the record-usage hop after record-native-ledger", async () => {
     const env: Record<string, unknown> = {};
     const params = tracedParams({ meterContext: { category: "saga", userLogin: "alice" } });
     const { deps } = wiredDeps(env, params, checkoutGate(paidConfirm), {
@@ -287,6 +290,7 @@ describe("issue #2762 — PaymentWorkflow step hops join the carried trace", () 
       "await-payment-verified",
       "confirm-paid",
       "record-payment",
+      "record-native-ledger",
       "record-usage",
       "start-screener",
     ]);
