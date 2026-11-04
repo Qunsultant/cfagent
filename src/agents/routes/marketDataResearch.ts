@@ -48,6 +48,7 @@ import {
   marketDataBarsAuditEvent,
 } from "../../config/marketDataModes";
 import { workflowAcceptedResponse } from "../../workflows/screenerWorkflowRoutes";
+import { extractCheckoutEmail, submitPaidStockScreenOrNull } from "./paidStockScreenSeam";
 import { startStockScreenWorkflowOrNull } from "../../workflows/screenExecutionBroker";
 import { persistThenDeliverAll } from "../../workflows/screenRunFinalize";
 import { buildStockScreenRunSpec, specCanonicalFields, withRunProvenance } from "../../workflows/stockScreenRunSpec";
@@ -309,6 +310,11 @@ export async function handleMarketDataCompareScreenRoutes(
           ? (filters as { async?: unknown }).async === true
           : url.searchParams.get("async") === "1";
       if (request.method === "POST") delete (filters as { async?: unknown }).async;
+      // Issue #2373 (Slice A): the checkout contact for the paid
+      // path only, read before spec building (the seam module
+      // strips it like `async` so the strict schema never sees
+      // it). Required when monetization is ON; ignored OFF.
+      const checkoutEmail = extractCheckoutEmail(request.method, filters, url.searchParams);
       // Issue #2809: dual-mode admission (#2530) and the ONE shared
       // stock-screen schema (#959) are built once here by the
       // single spec builder — ND refuses 400 before any execution
@@ -332,6 +338,20 @@ export async function handleMarketDataCompareScreenRoutes(
       // Issue #2908 (G1): the builder runs before auth here, so
       // the login is overlaid after it (same spec, no rebuild).
       const spec = withRunProvenance(specResult.spec, { userLogin });
+      // Issue #2373 (Slice A): monetization ON routes the
+      // screen through the paid seam (sibling module); null =
+      // flag OFF, so the broker-or-sync path below runs
+      // unchanged.
+      const paid = await submitPaidStockScreenOrNull({
+        env: ctx.env,
+        userLogin,
+        checkoutEmail,
+        spec,
+        auditType: "market_data.screener.payment_started",
+        auditAgent: "research",
+        audit: ctx.audit,
+      });
+      if (paid) return paid;
       const agent = ctx.getScreenerAgent(userLogin);
       // Issue #2827: async path via ScreenExecutionBroker
       // (store only, no deliver — the market-data route has
