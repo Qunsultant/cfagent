@@ -295,6 +295,12 @@
  * delegated immediately after the agentic-payments delegation, before
  * premium) — bringing the delegation sequence to 38 calls and the
  * pinned inventory to 354 entries (measured: 352 + 2).
+ * Issue #2222 added three — GET /platform/accounts/self, POST
+ * /platform/accounts/setup, and GET /platform/accounts/lookup (in
+ * handlePlatformAccountRoutes, delegated immediately after the
+ * platform-users delegation, before premium) — bringing the
+ * delegation sequence to 40 calls and the pinned inventory to
+ * 357 entries (measured: 354 + 3).
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -322,6 +328,7 @@ const HANDLER_FILE: Record<string, string> = {
   "handlePaymentAssuranceLiveRoutes": "paymentAssuranceLive.ts",
   "handleAgenticPaymentsRoutes": "agenticPayments.ts",
   "handlePlatformUsersRoutes": "platformUsers.ts",
+  "handlePlatformAccountRoutes": "platformAccounts.ts",
   "handlePremiumRoutes": "premium.ts",
   "handleEtradeBrokerRoutes": "etradeBroker.ts",
   "handleBrokerGateRoutes": "brokerGate.ts",
@@ -364,6 +371,7 @@ const EXPECTED_DELEGATIONS = [
   "handlePaymentAssuranceLiveRoutes",
   "handleAgenticPaymentsRoutes",
   "handlePlatformUsersRoutes",
+  "handlePlatformAccountRoutes",
   "handlePremiumRoutes",
   "handleBrokerGateRoutes",
   "handleEtradeBrokerRoutes",
@@ -532,6 +540,9 @@ const EXPECTED_INVENTORY = [
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/lifecycle/unsubscribe\")",
   "handlePlatformUsersRoutes :: endsWith(\"/admin/platform-users/me\")",
   "handlePlatformUsersRoutes :: endsWith(\"/admin/platform-users/lookup\")",
+  "handlePlatformAccountRoutes :: endsWith(\"/platform/accounts/self\")",
+  "handlePlatformAccountRoutes :: endsWith(\"/platform/accounts/setup\")",
+  "handlePlatformAccountRoutes :: endsWith(\"/platform/accounts/lookup\")",
   "handlePremiumRoutes :: includes(\"/premium/options-scan\")",
   "handlePremiumRoutes :: includes(\"/premium/market-research\")",
   "handlePremiumRoutes :: includes(\"/premium/stock-signals\")",
