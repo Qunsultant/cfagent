@@ -275,6 +275,70 @@ describe("WorkflowRunsPanel", () => {
     expect(container.textContent).toContain("Could not load workflow runs");
   });
 
+  it("renders lifecycle + schedule columns and filters by them (#3021)", async () => {
+    payload = {
+      count: 2,
+      runs: [
+        run({
+          id: "sched-1",
+          runId: "sched-1",
+          title: "Scheduled market screen",
+          workflow: "Scheduled task",
+          source: "schedule",
+          status: "queued",
+          lifecycle: "scheduled",
+          schedule: {
+            mechanism: "agent-scheduler",
+            identity: "0 3 * * *",
+            reason: "Nightly market scan",
+            nextFiringAt: "2026-11-05T03:00:00.000Z",
+            delaySeconds: null,
+          },
+          stages: [],
+          stageCount: 0,
+          completedStages: 0,
+          failedStages: 0,
+          error: null,
+          artifacts: [],
+          deliveryStates: {},
+        }),
+        run({
+          id: "chain-2",
+          runId: "chain-2",
+          title: "Manual options run",
+          trigger: "manual",
+          triggerDetail: "Manual — recorded by the operator",
+          status: "completed",
+          lifecycle: "done",
+          schedule: { mechanism: "manual", identity: null, reason: null, nextFiringAt: null, delaySeconds: null },
+          failedStages: 0,
+          stages: [],
+          stageCount: 0,
+          error: null,
+          artifacts: [],
+          deliveryStates: {},
+        }),
+      ],
+    };
+    await renderPanel();
+    const text = container.textContent ?? "";
+    expect(text).toContain("Scheduled market screen");
+    expect(text).toContain("Agent scheduler");
+    expect(text).toContain("0 3 * * *");
+    expect(text).toContain("Nightly market scan");
+    expect(text).toContain("Done");
+    const lifecycleGroup = container.querySelector('[aria-label="Filter runs by lifecycle state"]');
+    const scheduledPill = [...(lifecycleGroup?.querySelectorAll("button") ?? [])].find(
+      (b) => b.textContent?.trim() === "Scheduled",
+    );
+    expect(scheduledPill).not.toBeUndefined();
+    await act(async () => {
+      scheduledPill!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(container.textContent).toContain("Scheduled market screen");
+    expect(container.textContent).not.toContain("Manual options run");
+  });
+
   it("keeps Refresh and Retry reachable on a failed load (#2283 stream 3)", async () => {
     status = 500;
     await renderPanel();

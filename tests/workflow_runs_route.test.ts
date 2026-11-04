@@ -124,7 +124,8 @@ describe("GET /workflow-runs", () => {
     expect(res).not.toBeNull();
     expect(res!.status).toBe(200);
     const body = (await res!.json()) as any;
-    expect(body.count).toBe(1);
+    // One job-chain run plus the #3021 binding schedule row (last).
+    expect(body.count).toBe(2);
     const run = body.runs[0];
     expect(run.id).toBe("chain-1");
     expect(run.stages.map((s: any) => s.stage)).toEqual(["generate", "deliver"]);
@@ -133,7 +134,10 @@ describe("GET /workflow-runs", () => {
     expect(run.status).toBe("failed");
     expect(run.trigger).toBe("scheduled");
     expect(run.artifacts[0]).toMatchObject({ kind: "pdf" });
-    expect(body.summary.total).toBe(1);
+    expect(body.runs[1]).toMatchObject({ source: "schedule", lifecycle: "scheduled" });
+    expect(body.runs[1].schedule.mechanism).toBe("workflow-binding");
+    expect(body.summary.total).toBe(2);
+    expect(body.summary.scheduled).toBe(1);
     expect(body.summary.failed).toBe(1);
     expect(body.generatedAt).toMatch(/^\d{4}-/);
   });
@@ -152,9 +156,11 @@ describe("GET /workflow-runs", () => {
     });
     const res = await handleWorkflowRunsRoutes(request(), new URL("https://agent.internal/workflow-runs"), "/workflow-runs", "session-1", ctxFor(sql));
     const body = (await res!.json()) as any;
-    expect(body.count).toBe(1);
+    // The outcome run plus the #3021 binding schedule row (last).
+    expect(body.count).toBe(2);
     expect(body.runs[0]).toMatchObject({ id: "discovery-9", source: "job-outcome", trigger: "manual", status: "completed" });
     expect(body.runs[0].stages).toEqual([]);
+    expect(body.runs[1]).toMatchObject({ source: "schedule", lifecycle: "scheduled" });
   });
 
   it("never returns raw payloads or secret values", async () => {
@@ -188,7 +194,11 @@ describe("GET /workflow-runs", () => {
       ctxFor(sql, ""),
     );
     const body = (await res!.json()) as any;
-    expect(body.count).toBe(0);
+    // No stage records leak without identity — but the #3021 binding
+    // schedule row is platform config, not user data, so it still
+    // shows. The store error naming the missing scope is the point.
+    expect(body.count).toBe(1);
+    expect(body.runs[0]).toMatchObject({ source: "schedule", lifecycle: "scheduled" });
     expect(body.storeErrors.stages).toContain("no authenticated user identity");
   });
 

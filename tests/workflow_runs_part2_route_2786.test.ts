@@ -78,8 +78,11 @@ describe("GET /workflow-runs Part 2 params", () => {
     insertJob(sql, { jobId: "cmp-1", displayName: "POST /market-data/compare", payload: comparePayload(["NVDA", "AAPL"]), createdAt: "2026-11-03T10:00:00.000Z" });
     insertJob(sql, { jobId: "imp-1", displayName: "POST /external-ads/impression", payload: { method: "POST", pathAndQuery: "/external-ads/impression", body: JSON.stringify({ id: "e1" }) }, createdAt: "2026-11-03T10:01:00.000Z" });
     const body = await get(sql, "/workflow-runs");
-    expect(body.runs.map((r) => r.title)).toEqual(["Ad impression — e1", "Market data comparison — NVDA, AAPL"]);
-    expect(body.runs.map((r) => r.workflow)).toEqual(["Advertising", "Market data research"]);
+    // Issue #3021: the registered binding schedule joins the page as
+    // a scheduled row (sorted last — a configured schedule has no
+    // start time), after the execution rows.
+    expect(body.runs.map((r) => r.title)).toEqual(["Ad impression — e1", "Market data comparison — NVDA, AAPL", "Scheduled — screener-screen-workflow (*/30 * * * *)"]);
+    expect(body.runs.map((r) => r.workflow)).toEqual(["Advertising", "Market data research", "Scheduled task"]);
   });
 
   it("hides GET traces by default with a count, and reveals them with traces=all", async () => {
@@ -87,10 +90,12 @@ describe("GET /workflow-runs Part 2 params", () => {
     insertJob(sql, { jobId: "trace-1", displayName: "GET /api/workflow-runs", payload: { method: "GET", pathAndQuery: "/api/workflow-runs?limit=50" }, createdAt: "2026-11-03T09:00:00.000Z" });
     insertJob(sql, { jobId: "cmp-1", displayName: "POST /market-data/compare", payload: comparePayload(["NVDA"]), createdAt: "2026-11-03T10:00:00.000Z" });
     const hidden = await get(sql, "/workflow-runs");
-    expect(hidden.runs).toHaveLength(1);
+    // The trace hides (count 1); the compare row and the #3021
+    // binding schedule row remain.
+    expect(hidden.runs).toHaveLength(2);
     expect(hidden.hiddenTraceCount).toBe(1);
     const shown = await get(sql, "/workflow-runs?traces=all");
-    expect(shown.runs).toHaveLength(2);
+    expect(shown.runs).toHaveLength(3);
     expect(shown.hiddenTraceCount).toBe(0);
   });
 
@@ -103,7 +108,8 @@ describe("GET /workflow-runs Part 2 params", () => {
     expect(searched.totalMatched).toBe(1);
     expect(searched.runs.map((r) => r.title)).toEqual(["Market data comparison — SYM4"]);
     const paged = await get(sql, "/workflow-runs?limit=2&offset=2");
-    expect(paged.totalMatched).toBe(5);
+    // Five executions plus the #3021 binding schedule row (last).
+    expect(paged.totalMatched).toBe(6);
     expect(paged.offset).toBe(2);
     expect(paged.limit).toBe(2);
     expect(paged.runs.map((r) => r.title)).toEqual(["Market data comparison — SYM2", "Market data comparison — SYM1"]);
