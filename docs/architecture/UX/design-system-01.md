@@ -1,5 +1,12 @@
 # UX Design System & Page Patterns
 
+> **Consolidated successor:** this document's subject is consolidated
+> into [`consolidated-design-system.md`](./consolidated-design-system.md)
+> (DRAFT, placed 2026-11-04 per issue #3096). This file stays in place
+> per the no-deletion gate; the consolidated doc is the successor for
+> new work, while `docs/agents/ux-architecture.md` remains the live
+> contract until the consolidated doc's §5 owner decisions land.
+
 Status: accepted (2026-10-26). Deciders: owner, CPO-dhmp.
 Issues: #1804 (epic), #1808 (S1: route table + PageShell foundation).
 Governs with: ADR-0004 (token compliance mandatory, no exemptions),
