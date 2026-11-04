@@ -46,6 +46,7 @@ import {
   fetchPlatformIdentity,
   FirstRunApiError,
 } from "./firstRunApi";
+import { csrfHeaders } from "./apiFetch";
 
 const SELLING_BASE = "/api/payments/agentic/commercial";
 
@@ -222,7 +223,7 @@ async function postJson(
   try {
     res = await globalThis.fetch(path, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...csrfHeaders() },
       body: JSON.stringify(payload),
     });
   } catch {
