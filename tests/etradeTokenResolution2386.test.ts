@@ -166,7 +166,8 @@ describe("E*TRADE unified token resolution (#2386)", () => {
     expect(renewFailureDetail("NO_TOKENS").code).toBe("ETRADE_AUTH_REQUIRED");
     expect(renewFailureDetail("TOKEN_EXPIRED").code).toBe("ETRADE_TOKEN_EXPIRED");
     expect(renewFailureDetail("CREDENTIALS_MISSING").code).toBe("ETRADE_CREDENTIALS_MISSING");
-    expect(renewFailureDetail("UPSTREAM_REJECTED").code).toBe("ETRADE_UPSTREAM_ERROR");
+    // Issue #3197: the upstream-rejection reason is an outcome-catalog code now.
+    expect(renewFailureDetail("UPSTREAM_REJECTED").code).toBe("FAILURE_ETRADE_OAUTH_RENEW_FAILED");
     const messages = new Set([
       renewFailureDetail("NO_TOKENS").message,
       renewFailureDetail("TOKEN_EXPIRED").message,
