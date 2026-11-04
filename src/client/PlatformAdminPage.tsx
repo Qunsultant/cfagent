@@ -13,6 +13,7 @@ import { NavIcons } from "./components/NavigationMenu";
  *  - api-keys: MCP transport access for external clients
  *  - tenants: Tenant create, list, settings, and read-only membership view (#2221)
  *  - data-providers: Market-data provider provisioning lifecycle
+ *  - accounts: Account administration — self-service setup, tier, credits, subscriptions & catalogue
  *  - iaaa-admin: Read-only memberships, genesis, and audit
  *  - users: User profiles, tenant memberships & account linkage
  *  - admin-access: Request admin access from the platform owner
@@ -45,6 +46,7 @@ import { JobsPanel } from "./JobsPanel";
 import { ApiKeysPanel } from "./ApiKeysPanel";
 import { DataProvidersPanel } from "./DataProvidersPanel";
 import { TenantAdminPanel } from "./TenantAdminPanel";
+import { AccountAdminPanel } from "./AccountAdminPanel";
 import { IaaaAdminPanel } from "./IaaaAdminPanel";
 import { UserAdminPanel } from "./UserAdminPanel";
 import {
@@ -80,6 +82,7 @@ export const PLATFORM_ADMIN_TABS: TabOption<PlatformAdminSectionId>[] = [
   { id: "api-keys", label: "API Keys", icon: <NavIcons.ApiKeys /> },
   { id: "tenants", label: "Tenants", icon: <NavIcons.Agents /> },
   { id: "data-providers", label: "Data Providers", icon: <NavIcons.DataProviders /> },
+  { id: "accounts", label: "Accounts", icon: <NavIcons.Contracts /> },
   { id: "iaaa-admin", label: "IAAA Admin", icon: <NavIcons.IaaaAdmin /> },
   { id: "users", label: "Users", icon: <NavIcons.Agents /> },
   { id: "admin-access", label: "Admin Access", icon: <NavIcons.AdminAccess /> },
@@ -268,6 +271,16 @@ export function PlatformAdminPage({
             <small>Provisioning lifecycle for market-data providers</small>
           </div>
           <DataProvidersPanel />
+        </Card>
+      </TabPanel>
+
+      <TabPanel idBase="platform-admin" tabId="accounts" active={active === "accounts"}>
+        <Card padding="md">
+          <div className="section-label-row">
+            <span>Accounts</span>
+            <small>Self-service account setup, tier, credits, subscriptions &amp; catalogue</small>
+          </div>
+          <AccountAdminPanel />
         </Card>
       </TabPanel>
 
