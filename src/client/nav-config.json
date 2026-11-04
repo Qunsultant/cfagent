@@ -957,6 +957,13 @@
         "description": "Read-only memberships, genesis & audit"
       },
       {
+        "id": "platform-admin:users",
+        "label": "Users",
+        "shortLabel": "User profiles, tenant memberships & account linkage",
+        "icon": "Agents",
+        "description": "User profiles, tenant memberships & account linkage"
+      },
+      {
         "id": "platform-admin:admin-access",
         "label": "Request admin access",
         "shortLabel": "Ask the platform owner for admin rights",
@@ -1435,6 +1442,12 @@
           "label": "IAAA Admin",
           "description": "Read-only memberships, genesis & audit",
           "icon": "IaaaAdmin"
+        },
+        {
+          "id": "users",
+          "label": "Users",
+          "description": "User profiles, tenant memberships & account linkage",
+          "icon": "Agents"
         },
         {
           "id": "admin-access",
