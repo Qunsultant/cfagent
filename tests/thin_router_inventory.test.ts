@@ -353,6 +353,7 @@ const HANDLER_FILE: Record<string, string> = {
   "handleDelegationRoutes": "delegations.ts",
   "handleAdminTenantQueueRoutes": "adminTenantQueues.ts",
   "handlePlatformTenantRoutes": "platformTenants.ts",
+  "handlePlatformChannelRoutes": "platformChannels.ts",
   "handleKvWipeRoutes": "kvWipe.ts",
   "handleOrchestratorMigrationRoutes": "orchestratorMigration.ts",
   "handleSchedulesRoutes": "schedules.ts"
@@ -381,6 +382,7 @@ const EXPECTED_DELEGATIONS = [
   "handlePlatformUsersRoutes",
   "handlePlatformTenantRoutes",
   "handlePlatformAccountRoutes",
+  "handlePlatformChannelRoutes",
   "handlePremiumRoutes",
   "handleBrokerGateRoutes",
   "handleEtradeBrokerRoutes",
@@ -555,6 +557,7 @@ const EXPECTED_INVENTORY = [
   "handlePlatformAccountRoutes :: endsWith(\"/platform/accounts/self\")",
   "handlePlatformAccountRoutes :: endsWith(\"/platform/accounts/setup\")",
   "handlePlatformAccountRoutes :: endsWith(\"/platform/accounts/lookup\")",
+  "handlePlatformChannelRoutes :: includes(\"/platform-channels/\")",
   "handlePremiumRoutes :: includes(\"/premium/options-scan\")",
   "handlePremiumRoutes :: includes(\"/premium/market-research\")",
   "handlePremiumRoutes :: includes(\"/premium/stock-signals\")",

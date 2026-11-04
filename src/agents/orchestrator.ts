@@ -165,6 +165,7 @@ import { handleDelegationRoutes } from "./routes/delegations";
 import { handleOrchestratorMigrationRoutes } from "./routes/orchestratorMigration";
 import { handleAdminTenantQueueRoutes } from "./routes/adminTenantQueues";
 import { handlePlatformTenantRoutes } from "./routes/platformTenants";
+import { handlePlatformChannelRoutes } from "./routes/platformChannels";
 import { handleKvWipeRoutes } from "./routes/kvWipe";
 import { TRADING_PAID_SERVICES } from "../services/agenticPayments";
 import type {
@@ -2961,6 +2962,17 @@ export class OrchestratorAgent extends PortThink {
       audit: (type, agent, payload) => this.audit(type, agent, payload),
     });
     if (platformAccountResponse) return platformAccountResponse;
+
+    // Issue #3169 (program #2218): platform channel
+    // administration routes (routes/platformChannels.ts), after
+    // the account-admin handler and before premium; a non-null
+    // return matched. Tenant-level delivery-channel enablement
+    // flags, operator-gated like the tenant slice.
+    const platformChannelResponse = await handlePlatformChannelRoutes(request, url, path, sessionId, {
+      env: this.env,
+      audit: (type, agent, payload) => this.audit(type, agent, payload),
+    });
+    if (platformChannelResponse) return platformChannelResponse;
 
     // Issue #359-08: premium paid-trading routes (Paid Trading Service:
     // Institutional Options Screener, Equity Research, Anomaly Signals)

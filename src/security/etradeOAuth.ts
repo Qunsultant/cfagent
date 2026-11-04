@@ -18,6 +18,11 @@ import {
 } from "./etradeTokenCache";
 import { consumeStoreKey, createStoreKv, listStoreEntries, type DoNamespaceLike } from "./durableKv";
 import { type KvLike } from "./kvResilience";
+import {
+  createTokenPorts,
+  isTokenPortsEnabled,
+} from "../data/createTokenPorts";
+import type { TokenFamilyPorts } from "../data/tokenPorts";
 import { lookupInternalUserIdByLogin, lookupLoginByUserId } from "./iaaaMigration";
 import { sessionStore } from "./session";
 import { generateOAuth1Header, rfc3986 } from "../services/cryptoUtils";
@@ -289,6 +294,40 @@ function getKv(env: Env): KvLike {
 }
 
 /**
+ * Issue #2434 (#1976 step 5c): the token family's composition
+ * root handle. When TOKEN_PORTS_ENABLED is on, the exported
+ * storage functions below delegate to these ports (over the
+ * SAME SessionStore DO and kv_store table); when it is off,
+ * this module's direct funnel composition above is the
+ * serving path, unchanged. Signatures never change either
+ * way — existing callers are untouched (the #2386 discipline).
+ */
+export function tokenFamilyPorts(env: Env): TokenFamilyPorts {
+  return createTokenPorts(env);
+}
+
+/**
+ * Issue #2434: the etrade bucket listing seam (bulk renewal
+ * below + server.ts's offboarding hasTokens check) —
+ * port-composed when the flag is on (the port's named
+ * listing operation), today's listStoreEntries when off.
+ * Null means unavailable in both compositions.
+ */
+export async function listTokenFamilyEntries(
+  env: Env,
+  prefix: string
+): Promise<Array<{ key: string; value: string }> | null> {
+  if (isTokenPortsEnabled(env)) {
+    return tokenFamilyPorts(env).etrade.listTokenEntries(prefix);
+  }
+  return listStoreEntries({
+    namespace: env.SESSION_STORE as unknown as DoNamespaceLike | undefined,
+    namespaceName: "etrade",
+    prefix,
+  });
+}
+
+/**
  * Returns today's midnight in US Eastern time (America/New_York) as UTC timestamp (ms).
  */
 export function getMidnightEtUtcMs(referenceDateMs: number = Date.now()): number {
@@ -352,6 +391,14 @@ export async function storeAccessTokens(
   overrideEnv?: string,
   identity?: ETradeTokenIdentity
 ): Promise<void> {
+  if (isTokenPortsEnabled(env)) {
+    return tokenFamilyPorts(env).etrade.storeAccessTokens(
+      userLogin,
+      accessToken,
+      accessTokenSecret,
+      { overrideEnv, identity }
+    );
+  }
   const kv = getKv(env);
   const envConfig = resolveEnvironmentConfig(env, overrideEnv);
   const payload: ETradeTokenSet = {
@@ -396,6 +443,14 @@ export async function storeRequestTokenSecret(
   requestTokenSecret: string,
   overrideEnv?: string
 ): Promise<void> {
+  if (isTokenPortsEnabled(env)) {
+    return tokenFamilyPorts(env).etrade.storeRequestTokenSecret(
+      userLogin,
+      requestToken,
+      requestTokenSecret,
+      { overrideEnv }
+    );
+  }
   const kv = getKv(env);
   const envConfig = resolveEnvironmentConfig(env, overrideEnv);
   const payload = { requestToken, requestTokenSecret, createdAt: new Date().toISOString() };
@@ -414,6 +469,12 @@ export async function getRequestTokenSecret(
   overrideEnv?: string,
   identity?: ETradeTokenIdentity
 ): Promise<{ requestToken: string; requestTokenSecret: string } | null> {
+  if (isTokenPortsEnabled(env)) {
+    return tokenFamilyPorts(env).etrade.getRequestTokenSecret(userLogin, {
+      overrideEnv,
+      identity,
+    });
+  }
   const kv = getKv(env);
   const envConfig = resolveEnvironmentConfig(env, overrideEnv);
   // Issue #1759: dual-read. Request secrets are 15-minute handshake
@@ -456,6 +517,15 @@ export async function getStoredTokens(
   // Issue #2386: delegates to the one resolution seam
   // (readResolvedTokenSet); this function keeps its shape so
   // existing callers are untouched.
+  // Issue #2434: with TOKEN_PORTS_ENABLED on, the seam is the
+  // port's resolveTokenSet — the same candidate order over
+  // the same store.
+  if (isTokenPortsEnabled(env)) {
+    return tokenFamilyPorts(env).etrade.getStoredTokens(userLogin, {
+      overrideEnv,
+      identity,
+    });
+  }
   const resolved = await readResolvedTokenSet(env, userLogin, overrideEnv, identity);
   return resolved?.tokens ?? null;
 }
@@ -464,6 +534,12 @@ export async function getStoredTokens(
  * Revokes and deletes stored tokens from the SessionStore DO across all environments
  */
 export async function revokeStoredTokens(env: Env, userLogin: string, overrideEnv?: string, identity?: ETradeTokenIdentity): Promise<void> {
+  if (isTokenPortsEnabled(env)) {
+    return tokenFamilyPorts(env).etrade.revokeStoredTokens(userLogin, {
+      overrideEnv,
+      identity,
+    });
+  }
   const kv = getKv(env);
   const logins = Array.from(new Set([userLogin, userLogin.toLowerCase(), userLogin.toUpperCase()]));
   // Issue #1759: with an identity, the internal-id key and the
@@ -836,11 +912,7 @@ export async function renewETradeAccessToken(
 
 /** Renew every active account token from the Durable Object store. */
 export async function renewAllStoredETradeTokens(env: Env): Promise<{ renewed: number; skipped: number; failed: number }> {
-  const entries = await listStoreEntries({
-    namespace: env.SESSION_STORE as unknown as DoNamespaceLike | undefined,
-    namespaceName: "etrade",
-    prefix: "etrade:token:",
-  });
+  const entries = await listTokenFamilyEntries(env, "etrade:token:");
   if (!entries) throw new Error("SessionStore token listing is unavailable.");
 
   let renewed = 0;
@@ -901,6 +973,16 @@ export async function getValidTokens(
   overrideEnv?: string,
   identity?: ETradeTokenIdentity
 ): Promise<ETradeTokenSet | null> {
+  // Issue #2434: with TOKEN_PORTS_ENABLED on, the decision
+  // tree below is the port's getValidTokens contract — same
+  // cache rules, epoch guard, seam order, unscoped guard,
+  // and expired-read revocation over the same store.
+  if (isTokenPortsEnabled(env)) {
+    return tokenFamilyPorts(env).etrade.getValidTokens(userLogin, {
+      overrideEnv,
+      identity,
+    });
+  }
   const envConfig = resolveEnvironmentConfig(env, overrideEnv);
   // Issue #329 follow-up: this function runs once per E*TRADE request, so the
   // token-store read is the hottest remaining read path. Serve repeats from
@@ -969,6 +1051,12 @@ export async function getETradeTokenScopePresence(
   overrideEnv?: string,
   identity?: ETradeTokenIdentity
 ): Promise<ETradeTokenScopePresence> {
+  if (isTokenPortsEnabled(env)) {
+    return tokenFamilyPorts(env).etrade.getTokenScopePresence(userLogin, {
+      overrideEnv,
+      identity,
+    });
+  }
   const none: ETradeTokenScopePresence = {
     loginScoped: false,
     unscoped: false,
