@@ -1,0 +1,2 @@
+### Added
+- Docs & Reports and Billing pages now render inside the PageShell template (#3049): Docs keeps its scroll-owning outer div (the flex-item contract with .tab-viewport) with the shell inside it; Billing wraps its existing PageSection in the shell. Both routes flip from migration entries to the conforming map in the same PR. docsAndReports.css stays for the inner row/cell/table classes (already grandfathered in the CSS registry); only the retired page-header classes are now unused.
