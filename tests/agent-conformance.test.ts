@@ -251,8 +251,8 @@ describe("Agent conformance (issue #1738)", () => {
     expect(src).toContain("https://developers.cloudflare.com/ai-search/agent-sdks/agents-sdk/");
     expect(src).toContain("https://developers.cloudflare.com/ai-search/api/search/mcp/");
     // OUT of scope (S4-5 bridge, #1169): no provisioning, no upload
-    // calls on the class. (The semantic_cache fallback gate itself
-    // lives in the runner, src/agents/aiSearchPaths.ts, and is
+    // calls on the class. (The REST degraded gate itself lives in
+    // the runner, src/agents/aiSearchPaths.ts, and is
     // behavior-pinned in tests/a2a_aisearch_dispatch_p2223.test.ts.)
     expect(src).not.toMatch(/\.create\s*\(/);
     expect(src).not.toMatch(/items\.upload/);
