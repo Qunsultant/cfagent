@@ -38,10 +38,14 @@ describe("catalog <-> runtime stage parity (#3166)", () => {
   });
 
   it("families that are not mapped say so instead of implying coverage", () => {
-    const options = workflowById("options-screener")!;
-    const trading = workflowById("trading-leg")!;
-    expect(options.stages.every((s) => s.runtimeStageIds === undefined)).toBe(true);
-    expect(trading.stages.every((s) => s.runtimeStageIds === undefined)).toBe(true);
+    // Issue #3191 mapped options and trading, so the families still carrying a
+    // named gap are goal and strategy - both of which run on another family's
+    // seam and must say so rather than borrow its ids.
+    for (const id of ["goal-screen", "strategy-discovery"]) {
+      const workflow = workflowById(id)!;
+      expect(workflow.stages.every((stage) => stage.runtimeStageIds === undefined)).toBe(true);
+      expect((workflow.runtimeMappingGap ?? "").trim().length).toBeGreaterThan(10);
+    }
   });
 
   it("refuses the same runtime id assigned to two stages", () => {

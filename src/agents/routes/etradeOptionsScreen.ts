@@ -48,6 +48,19 @@ import type { EtradeOptionsRouteContext } from "./etradeOptions";
 
 type OptionsScreenValue = Extract<ReturnType<typeof parseOptionsScreenRequest>, { ok: true }>["value"];
 
+/**
+ * Issue #3191 - options screens are NOT a durable workflow: this request
+ * handler is the runtime. Declaring `step.do` ids here would be invention,
+ * so the handler's three real phases are named instead, and
+ * tests/options_trading_stage_ids_3191.test.ts proves each phase still
+ * corresponds to a real call in this file (provider screen, the unified
+ * report pipeline, and a delivery call). If the handler gains or loses a
+ * phase, that pin fails before the catalog can drift.
+ */
+export const OPTIONS_SCREEN_PHASES = ["provider-screen", "report-pipeline", "deliver"] as const;
+
+export type OptionsScreenPhase = (typeof OPTIONS_SCREEN_PHASES)[number];
+
 export async function executeOptionsScreen(args: {
   ctx: EtradeOptionsRouteContext;
   userLogin: string;
