@@ -179,6 +179,19 @@ export interface ResolvedOptionsReportScope {
   content: OptionsReportContentConfig;
   warnings: ScopeWarning[];
   provenance: OptionsReportScopeProvenance;
+  /**
+   * Issue #2604: a stored preset that does not exist. The scope still
+   * resolves (total, never throwing — the #2577 contract), but a caller that
+   * is about to RUN must refuse instead of running the built-in defaults.
+   */
+  invalidPreset: string | null;
+  /**
+   * Issue #2604: the explicit strategy list that resolved to nothing. The
+   * scope widens to "all" for compatibility, but this records that the "all"
+   * is a FALLBACK — the "no stored mode, all scope" hazard #2604 exists for.
+   * A caller about to run must refuse.
+   */
+  invalidStrategyList: string[] | null;
 }
 
 const THESIS_SET: ReadonlySet<string> = new Set(["bullish", "bearish", "range_bound", "large_move"]);
@@ -326,11 +339,17 @@ export function resolveOptionsReportScope(
   // layer over the deployment's own defaults.
   let base = mergeScope(config.defaults, envConfig.patch);
 
+  /** Issue #2604: a stored preset that does not exist (the run must not default). */
+  let invalidPreset: string | null = null;
   const presetName =
     input.preset ??
     input.env?.OPTIONS_REPORT_PRESET ??
     (typeof envConfig.patch?.preset === "string" ? (envConfig.patch.preset as string) : base.preset);
   if (!config.allowed.presets.includes(presetName)) {
+    // Issue #2604 (#2764 preset rule): the scope keeps its total resolution,
+    // but it MARKS the unusable preset so the caller refuses the run instead
+    // of silently running the built-in defaults.
+    invalidPreset = presetName;
     warnings.push({
       axis: "presets",
       value: presetName,
@@ -377,6 +396,8 @@ export function resolveOptionsReportScope(
   let strategyScope: OptionsReportStrategyScope;
   let strategyIds: string[];
   let unknownStrategies: string[] = [];
+  /** Issue #2604: the explicit list that resolved to nothing (an "all" nobody chose). */
+  let invalidStrategyList: string[] | null = null;
   if (strategyValues === "all") {
     strategyScope = "all";
     strategyIds = registry.ids();
@@ -393,6 +414,10 @@ export function resolveOptionsReportScope(
       });
     }
     if (strategyIds.length === 0) {
+      // Issue #2604: keep the total resolution, but MARK that this "all" is a
+      // FALLBACK, not a choice. The caller refuses the run rather than let a
+      // stored list silently widen to every strategy.
+      invalidStrategyList = [...strategyValues];
       strategyScope = "all";
       strategyIds = registry.ids();
       warnings.push({
@@ -536,6 +561,8 @@ export function resolveOptionsReportScope(
     gates,
     content,
     warnings,
+    invalidPreset,
+    invalidStrategyList,
     provenance: {
       preset,
       source: requestOverrides.length > 0 ? "request" : envOverrides.length > 0 ? "env" : "builtin",
