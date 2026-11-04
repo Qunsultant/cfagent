@@ -24,9 +24,11 @@
  *   - Goal stock leg (issue #2882): source "goal", deliver
  *     false, provider unset, universe "ALL", asyncRequested
  *     false, delivery = {}. Goal delivery and the goal
- *     provider stay owned by goal dispatch; the broker never
- *     starts a screener workflow for a goal spec (it returns
- *     null). "ALL" records that goal legs are not
+ *     provider stay owned by goal dispatch until the
+ *     migration follow-up; the broker guard is retired
+ *     (#2991) — a goal spec with async requested now routes
+ *     like any spec, carrying goal provenance (specTrigger)
+ *     through the command. "ALL" records that goal legs are not
  *     universe-scoped (the registry provider screens its
  *     listings feed) — it is not a coverage claim, and the
  *     spec is a canonical record of the leg, not an

@@ -5,7 +5,7 @@ import { NavIcons } from "./components/NavigationMenu";
  * Promotes Platform Admin from an overlay drawer dialog into a first-class,
  * full-page destination in the main viewport (<main className="tab-viewport">).
  *
- * Tabbed interface covers the eight administration surfaces from platformAdminConfig:
+ * Tabbed interface covers the nine administration surfaces from platformAdminConfig:
  *  - ads: Workspace Banners & Sponsor Spotlight
  *  - background-tasks: Async execution queue & background jobs
  *  - scheduled-goals: ScheduledAgent goals, ticks, and add-goal form
@@ -13,6 +13,7 @@ import { NavIcons } from "./components/NavigationMenu";
  *  - api-keys: MCP transport access for external clients
  *  - data-providers: Market-data provider provisioning lifecycle
  *  - iaaa-admin: Read-only memberships, genesis, and audit
+ *  - users: User profiles, tenant memberships & account linkage
  *  - admin-access: Request admin access from the platform owner
  *
  * Built strictly with src/client/components/ui/ primitives (PageShell, Card, Tabs, TabPanel)
@@ -43,6 +44,7 @@ import { JobsPanel } from "./JobsPanel";
 import { ApiKeysPanel } from "./ApiKeysPanel";
 import { DataProvidersPanel } from "./DataProvidersPanel";
 import { IaaaAdminPanel } from "./IaaaAdminPanel";
+import { UserAdminPanel } from "./UserAdminPanel";
 import {
   AdsSection,
   ProvenanceSection,
@@ -75,6 +77,7 @@ export const PLATFORM_ADMIN_TABS: TabOption<PlatformAdminSectionId>[] = [
   { id: "api-keys", label: "API Keys", icon: <NavIcons.ApiKeys /> },
   { id: "data-providers", label: "Data Providers", icon: <NavIcons.DataProviders /> },
   { id: "iaaa-admin", label: "IAAA Admin", icon: <NavIcons.IaaaAdmin /> },
+  { id: "users", label: "Users", icon: <NavIcons.Agents /> },
   { id: "admin-access", label: "Admin Access", icon: <NavIcons.AdminAccess /> },
 ];
 
@@ -261,6 +264,16 @@ export function PlatformAdminPage({
             <small>Read-only memberships, genesis &amp; audit</small>
           </div>
           <IaaaAdminPanel />
+        </Card>
+      </TabPanel>
+
+      <TabPanel idBase="platform-admin" tabId="users" active={active === "users"}>
+        <Card padding="md">
+          <div className="section-label-row">
+            <span>Users</span>
+            <small>User profiles, tenant memberships &amp; account linkage</small>
+          </div>
+          <UserAdminPanel />
         </Card>
       </TabPanel>
 

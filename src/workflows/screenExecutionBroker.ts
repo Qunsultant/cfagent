@@ -219,12 +219,13 @@ export async function startStockScreenWorkflowOrNull(args: {
   starter?: ScreenWorkflowStarter;
 }): Promise<ScreenExecutionBrokerResult | null> {
   const { env, spec, userLogin, environment, portfolioContext } = args;
-  // Issue #2882: goal stock legs never start a screener
-  // workflow. Goal execution and delivery stay owned by goal
-  // dispatch; the goal spec is a canonical record, not an
-  // execution request. Returning null here is the broker's
-  // routing decision for source "goal", not a failure.
-  if (spec.source === "goal") return null;
+  // Issue #2991: the #2882 broker guard (source "goal" -> null)
+  // is retired. Goal dispatch becomes a caller of the one
+  // pipeline, so a goal spec with async requested routes like
+  // any spec, carrying goal provenance (specTrigger) through
+  // the command. Goal delivery stays goal-owned until the
+  // migration follow-up; no live caller passed goal specs to
+  // the broker before this change.
   if (!spec.asyncRequested) return null;
   const starter = args.starter ?? tryStartScreenerWorkflow;
   // ND throw propagates by design — see module header.
