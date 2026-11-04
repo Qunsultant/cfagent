@@ -41,12 +41,14 @@
  *   path: when the in-process leg failed (its claim is released
  *   on generation failure), the queued consume can still
  *   generate from persisted data.
- * - It does not refresh the canonical mas_reports row's pdfKey
- *   when a queued consume generates after the in-process leg
- *   failed; the generated pdf fields land on the persisted
- *   analysis key (what replay reads). Refreshing the canonical
- *   row from a queued consume is a follow-up decision, not
- *   smuggled into this slice.
+ * - It does not itself refresh the canonical mas_reports row's
+ *   pdfKey when a queued consume generates after the in-process
+ *   leg failed; the generated pdf fields land on the persisted
+ *   analysis key (what replay reads). The slice 1 follow-up
+ *   (#2869 pdfKey refresh, refreshCanonicalReportPdfFields via
+ *   the one recorder) refreshes the canonical row from the
+ *   queue handler on a generated queued outcome; this
+ *   transport's consume return carries the pdf fields for it.
  * - Failed runs publish nothing: a run with no full analysis set
  *   (allStocks empty) has nothing for the consumer to generate
  *   from, and the consumer would throw rather than regenerate.
@@ -78,6 +80,8 @@ import {
   type StockStageId,
 } from "./stageMessage";
 import { stageAnalysisKey } from "./stageReportProduction";
+import { STAGE_IDS_BY_FAMILY, type StageFamily } from "./stageMessage";
+import { maxAttemptsForStage, resolveStageConfig } from "./stageConfig";
 
 /** The queue send seam: a Cloudflare Queue binding's send. */
 export interface StageQueueSend {
@@ -195,6 +199,8 @@ export async function executeAnalysisDoneQueueMessage(args: {
   message: StageMessage;
   attempt?: number;
   maxAttempts?: number;
+  /** Environment for externalized stage config; omit to run on code defaults. */
+  env?: Record<string, string | undefined>;
   consume: (input: {
     message: StageMessage;
     attempt: number;
@@ -214,7 +220,8 @@ export async function executeAnalysisDoneQueueMessage(args: {
   const outcome = await args.consume({
     message: args.message,
     attempt: args.attempt ?? 1,
-    maxAttempts: args.maxAttempts ?? 3,
+    // Issue #3075: the budget is externalized config, not a literal at the seam.
+    maxAttempts: args.maxAttempts ?? maxAttemptsForStage(resolveStageConfig(args.env ?? {}), args.message.stageId),
   });
   if (outcome.status === "dead-lettered") {
     return { action: "ack", status: outcome.status, reason: outcome.reason };
@@ -275,9 +282,12 @@ export function stageBoundaryKey(timestamp: string, stageId: StockStageId): stri
 export function isStageMessage(value: unknown): value is StageMessage {
   if (!value || typeof value !== "object") return false;
   const m = value as Partial<StageMessage>;
+  const family = m.family ?? "stock";
+  const familyIds = STAGE_IDS_BY_FAMILY[family as StageFamily];
   return (
     typeof m.stageId === "string" &&
-    (STOCK_STAGE_IDS as readonly string[]).includes(m.stageId) &&
+    Array.isArray(familyIds) &&
+    familyIds.includes(m.stageId) &&
     typeof m.runId === "string" &&
     m.runId.trim() !== "" &&
     Array.isArray(m.artifactKeys) &&
@@ -299,13 +309,19 @@ export function isStageBoundaryMessage(value: unknown): value is StageMessage {
 
 /** Build one stage-boundary message for a run. Reuses the stage contract. */
 export function buildStageBoundaryMessage(args: {
-  timestamp: string;
+  /** Stock keeps its timestamp-derived run id; other families pass their own runId. */
+  timestamp?: string;
+  runId?: string;
+  family?: StageFamily;
   userLogin: string;
-  stageId: StockStageId;
+  stageId: string;
   artifactKeys: string[];
 }): StageMessage {
+  const family = args.family ?? "stock";
+  const runId = args.runId ?? (args.timestamp ? `screener:${args.timestamp}` : "");
   return stageMessage({
-    runId: `screener:${args.timestamp}`,
+    runId,
+    family,
     stageId: args.stageId,
     artifactKeys: args.artifactKeys,
     userLogin: args.userLogin,

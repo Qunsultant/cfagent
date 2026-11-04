@@ -50,6 +50,8 @@ import {
   isAnalysisDoneMessage,
   type StageMessage,
 } from "./stageMessage";
+import { DEFAULT_STAGE_CONFIG, formatStageMessage, maxAttemptsForStage, resolveStageConfig, type StageConfigEnv } from "./stageConfig";
+import { describeStageAdvice, withStageAdvice } from "./stageAdvice";
 
 export type StageConsumeStatus =
   | "generated"
@@ -95,6 +97,8 @@ export async function consumeAnalysisDone(args: {
   message: StageMessage;
   attempt?: number;
   maxAttempts?: number;
+  /** Environment for externalized stage config; omit to run on code defaults. */
+  env?: StageConfigEnv;
   claims?: StageClaimStore;
   readPersisted: (artifactKey: string) => Promise<PersistedAnalysis | null>;
   generate: (input: {
@@ -107,21 +111,34 @@ export async function consumeAnalysisDone(args: {
 }): Promise<StageConsumeResult> {
   const { message } = args;
   const attempt = args.attempt ?? 1;
-  const maxAttempts = args.maxAttempts ?? 3;
+  // Issue #3075: the budget is externalized stage config - code default,
+  // environment on top - not a magic number at the seam. A caller-supplied
+  // maxAttempts still wins (tests and explicit call sites).
+  const stageConfig = resolveStageConfig((args.env ?? {}) as StageConfigEnv);
+  const maxAttempts = args.maxAttempts ?? maxAttemptsForStage(stageConfig, message.stageId);
   const deadLetter = async (reason: string): Promise<StageConsumeResult> => {
     if (args.deadLetter) await args.deadLetter({ message, reason });
     return { status: "dead-lettered", reason };
   };
   // Poison: wrong stage, or no reference to persisted output.
   if (!isAnalysisDoneMessage(message)) {
-    return deadLetter(`poison message: stage "${message.stageId}" is not analysis-done; refusing without retry.`);
+    return deadLetter(
+      formatStageMessage(
+        "STAGE_WRONG_TARGET",
+        `stage "${message.stageId}" is not analysis-done; refusing without retry`,
+      ),
+    );
   }
   if (!message.runId?.trim() || !message.artifactKeys || message.artifactKeys.length === 0) {
-    return deadLetter("poison message: runId or artifactKeys missing; refusing without retry.");
+    return deadLetter(
+      formatStageMessage("STAGE_MISSING_ARTIFACT_REF", "runId or artifactKeys missing; refusing without retry"),
+    );
   }
   // Budget: past it, dead-letter rather than retry forever.
   if (attempt > maxAttempts) {
-    return deadLetter(`retry budget exhausted: attempt ${attempt} exceeds maxAttempts ${maxAttempts}.`);
+    return deadLetter(
+      formatStageMessage("STAGE_RETRY_EXHAUSTED", `attempt ${attempt} exceeds maxAttempts ${maxAttempts}`),
+    );
   }
   // Exactly-once effect: redelivery of a claimed key suppresses.
   const claims = args.claims;
@@ -139,11 +156,21 @@ export async function consumeAnalysisDone(args: {
   }
   let output: unknown;
   try {
-    output = await args.generate({
-      result: persisted,
-      runId: message.runId,
-      userLogin: message.userLogin,
-      partial: persisted.partial !== undefined && persisted.partial !== null,
+    // Issue #3075 - the stage body runs under the one advice pass: timings
+    // and the coded verdict are recorded identically for every stage, and a
+    // failure is rethrown unchanged so retry/DLQ behaviour is as before.
+    output = await withStageAdvice({
+      stageId: message.stageId,
+      log: (event) => {
+        if (event.outcome === "failed") console.warn(`[stage] ${describeStageAdvice(event)}`);
+      },
+      run: () =>
+        args.generate({
+          result: persisted,
+          runId: message.runId,
+          userLogin: message.userLogin,
+          partial: persisted.partial !== undefined && persisted.partial !== null,
+        }),
     });
   } catch (err) {
     // Release-on-failure (G8 #2869): a failed generation

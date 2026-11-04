@@ -213,12 +213,26 @@ export async function grantMembershipApi(
   internalUserId: string,
   roleBindings: MembershipMutationBinding[],
   email?: string,
-): Promise<{ membership: AdminMembershipView; welcome?: { sent: boolean; reason?: string } }> {
-  const data = await postJson<{ membership?: unknown; welcome?: unknown }>("/api/iaaa/membership/grant", {
+): Promise<{
+  membership?: AdminMembershipView;
+  welcome?: { sent: boolean; reason?: string };
+  pending?: boolean;
+  proposalId?: string;
+}> {
+  const data = await postJson<{ membership?: unknown; welcome?: unknown; pending?: unknown; proposalId?: unknown }>("/api/iaaa/membership/grant", {
     internalUserId,
     roleBindings,
     ...(email ? { email } : {}),
   });
+  // Issue #3155 (Q9): an admin-role grant proposed by the first
+  // approver returns 202 with no membership — that is a pending
+  // proposal, not an error. The panel shows an awaiting notice.
+  if (data.pending === true) {
+    return {
+      pending: true,
+      ...(typeof data.proposalId === "string" ? { proposalId: data.proposalId } : {}),
+    };
+  }
   if (!isMembership(data.membership)) throw new Error("Unexpected grant response.");
   const welcome =
     data.welcome && typeof data.welcome === "object" && typeof (data.welcome as { sent?: unknown }).sent === "boolean"

@@ -9,8 +9,10 @@
  *   no-membership, 201 member, 409 duplicate pending, 400 bad role.
  * - GET /api/iaaa/access-requests: 401 unauthenticated, 403 non-admin,
  *   200 for a tenant-admin.
- * - POST /api/iaaa/access-request/decision: 401/403 gating, approve
- *   grants exactly the requested role, deny/pending grant nothing,
+ * - POST /api/iaaa/access-request/decision: 401/403 gating, first
+ *   approve records the approver and leaves the request pending
+ *   (#3155 second-approver rule), second distinct approve grants
+ *   exactly the requested role, deny/pending grant nothing,
  *   unknown id 404, non-pending 409.
  * Never a live provider; memberships are seeded via createMembership.
  */
@@ -48,10 +50,12 @@ import type { Env } from "../src/types";
 const NOW = 1_790_000_000_000;
 const MEMBER_SESSION = "0d9a3120-1c2b-4e3f-8a5b-31200000000b";
 const ADMIN_SESSION = "0d9a3120-1c2b-4e3f-8a5b-31200000000c";
+const ADMIN2_SESSION = "0d9a3120-1c2b-4e3f-8a5b-31200000000f";
 const LEGACY_SESSION = "0d9a3120-1c2b-4e3f-8a5b-31200000000d";
 const NO_MEMBER_SESSION = "0d9a3120-1c2b-4e3f-8a5b-31200000000e";
 const MEMBER_ID = "v1:routemember00000000000000000000000000000000000000000000001";
 const ADMIN_ID = "v1:routeadmin000000000000000000000000000000000000000000000001";
+const ADMIN2_ID = "v1:routeadmin20000000000000000000000000000000000000000000001";
 const NOMEMBER_ID = "v1:routenomember00000000000000000000000000000000000000000001";
 
 async function makeEnv() {
@@ -67,6 +71,13 @@ async function makeEnv() {
     githubLogin: "admin-user",
     githubName: "Admin User",
     internalUserId: ADMIN_ID,
+    providerIssuer: "https://accounts.google.com",
+    createdAt: NOW,
+  });
+  seed("sessions", ADMIN2_SESSION, {
+    githubLogin: "admin2-user",
+    githubName: "Admin2 User",
+    internalUserId: ADMIN2_ID,
     providerIssuer: "https://accounts.google.com",
     createdAt: NOW,
   });
@@ -88,6 +99,13 @@ async function makeEnv() {
   });
   await createMembership(membershipStore, {
     internalUserId: ADMIN_ID,
+    tenantId: "primary",
+    roleBindings: [{ role: "tenant-admin", scope: "tenant", grantedBy: "test-seed" }],
+    createdBy: "test-seed",
+    nowMs: NOW,
+  });
+  await createMembership(membershipStore, {
+    internalUserId: ADMIN2_ID,
     tenantId: "primary",
     roleBindings: [{ role: "tenant-admin", scope: "tenant", grantedBy: "test-seed" }],
     createdBy: "test-seed",
@@ -178,7 +196,7 @@ describe("access-request routes (#1274)", () => {
     expect(Array.isArray(body.requests)).toBe(true);
   });
 
-  it("decision: non-admin → 403; approve grants tenant-admin; deny grants nothing", async () => {
+  it("decision: non-admin → 403; two distinct approvers grant tenant-admin; deny grants nothing", async () => {
     const env = await makeEnv();
     const created = await worker.fetch(req("POST", "/api/iaaa/access-request", { requestedRole: "tenant-admin" }, MEMBER_SESSION), env);
     const createdBody = (await created.json()) as { request: { requestId: string } };
@@ -190,16 +208,38 @@ describe("access-request routes (#1274)", () => {
     );
     expect(nonAdmin.status).toBe(403);
 
-    const approved = await worker.fetch(
+    // Issue #3155 (Q9): the first approval records the approver
+    // and leaves the request pending — no grant yet.
+    const first = await worker.fetch(
       req("POST", "/api/iaaa/access-request/decision", { requestId, decision: "approve" }, ADMIN_SESSION),
+      env,
+    );
+    expect(first.status).toBe(200);
+    const firstBody = (await first.json()) as { pendingSecondApproval: boolean; request: { status: string } };
+    expect(firstBody.pendingSecondApproval).toBe(true);
+    expect(firstBody.request.status).toBe("pending");
+    const membershipStore = createKvMembershipStore(sessionStore(env));
+    expect(
+      (await membershipStore.getMembershipsByUser(MEMBER_ID)).some((m) =>
+        m.tenantId === "primary" && m.roleBindings.some((b) => b.role === "tenant-admin"),
+      ),
+    ).toBe(false);
+
+    // The same admin cannot confirm their own approval.
+    const same = await worker.fetch(
+      req("POST", "/api/iaaa/access-request/decision", { requestId, decision: "approve" }, ADMIN_SESSION),
+      env,
+    );
+    expect(same.status).toBe(409);
+
+    // A second, distinct admin approves: the grant lands.
+    const approved = await worker.fetch(
+      req("POST", "/api/iaaa/access-request/decision", { requestId, decision: "approve" }, ADMIN2_SESSION),
       env,
     );
     expect(approved.status).toBe(200);
     const approvedBody = (await approved.json()) as { request: { status: string } };
     expect(approvedBody.request.status).toBe("approved");
-
-    // The grant landed: the requester now holds tenant-admin in primary.
-    const membershipStore = createKvMembershipStore(sessionStore(env));
     const memberships = await membershipStore.getMembershipsByUser(MEMBER_ID);
     expect(memberships.some((m) => m.tenantId === "primary" && m.roleBindings.some((b) => b.role === "tenant-admin"))).toBe(true);
 

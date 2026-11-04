@@ -17,10 +17,16 @@
  *
  * What is covered (spec §6 acceptance cases):
  * - Approvals: a record granting named actions in a tenant for one
- *   proposal hash, until expiry or revocation. A material proposal
- *   change (proposalHash mismatch) invalidates a prior approval,
- *   as do expiry and revocation. An approval never grants an
- *   action it does not name, or authority in another tenant.
+ *   proposal hash + version, until expiry or revocation. A
+ *   material proposal change (proposalHash OR proposalVersion
+ *   mismatch) invalidates a prior approval, as do expiry and
+ *   revocation. An approval never grants an action it does not
+ *   name, or authority in another tenant. Issue #3153 (Q8, owner
+ *   directive 2026-11-04): the version binding is stored on the
+ *   record here and enforced at live call sites by the
+ *   agent-access gate (src/security/agentAccess.ts step 3b), not
+ *   by this module — this module still touches no route, job, or
+ *   execution flow itself.
  * - Revocation propagation: revokePrincipal() revokes a principal's
  *   sessions (Slice 2 store), memberships (Slice 3 store), and
  *   delegations (Slice 4 store) and reports exactly what was
@@ -85,13 +91,19 @@ function normalize(value: string): string {
 
 /**
  * An approval record: one approver, one tenant, named granted
- * actions, one proposal hash. `scope` is a label for the grant
- * (default "tenant"); it does not widen the grant beyond the
- * tenant and actions named here.
+ * actions, one proposal hash + version. `scope` is a label for
+ * the grant (default "tenant"); it does not widen the grant
+ * beyond the tenant and actions named here. The version binds
+ * the approval to one proposal revision: a settlement carrying
+ * a different version fails validation (PROPOSAL_CHANGED), so a
+ * material proposal change after approval cannot settle on the
+ * old approval (Q8 #3153).
  */
 export interface Approval {
   id: string;
   proposalHash: string;
+  /** Proposal revision this approval was granted for (required). */
+  proposalVersion: string;
   approverInternalUserId: string;
   tenantId: string;
   grantedActions: Permission[];
@@ -102,6 +114,7 @@ export interface Approval {
 
 export type ApprovalErrorCode =
   | "INVALID_PROPOSAL_HASH"
+  | "INVALID_PROPOSAL_VERSION"
   | "INVALID_APPROVER"
   | "INVALID_TENANT"
   | "EMPTY_GRANTED_ACTIONS"
@@ -114,6 +127,7 @@ export type ApprovalResult =
 
 export interface CreateApprovalInput {
   proposalHash: string;
+  proposalVersion: string;
   approverInternalUserId: string;
   tenantId: string;
   grantedActions: Permission[];
@@ -130,6 +144,9 @@ export interface CreateApprovalInput {
 export function createApproval(input: CreateApprovalInput): ApprovalResult {
   if (!isValidField(input.proposalHash)) {
     return { ok: false, code: "INVALID_PROPOSAL_HASH", error: "proposalHash must be a non-empty string" };
+  }
+  if (!isValidField(input.proposalVersion)) {
+    return { ok: false, code: "INVALID_PROPOSAL_VERSION", error: "proposalVersion must be a non-empty string" };
   }
   if (!isValidField(input.approverInternalUserId)) {
     return { ok: false, code: "INVALID_APPROVER", error: "approverInternalUserId must be a non-empty string" };
@@ -153,6 +170,7 @@ export function createApproval(input: CreateApprovalInput): ApprovalResult {
     approval: {
       id: crypto.randomUUID(),
       proposalHash: normalize(input.proposalHash),
+      proposalVersion: normalize(input.proposalVersion),
       approverInternalUserId: normalize(input.approverInternalUserId),
       tenantId: normalize(input.tenantId),
       grantedActions: [...input.grantedActions],
@@ -174,6 +192,8 @@ export type ApprovalValidityReason =
 
 export interface ValidateApprovalRequest {
   proposalHash: string;
+  /** When given, the approval must carry this proposal version. */
+  proposalVersion?: string;
   /** When given, the approval must name this action. */
   action?: Permission;
   /** When given, the approval must be for this tenant. */
@@ -189,11 +209,14 @@ export interface ApprovalValidation {
 /**
  * Validate an approval at `nowMs`. Order matters and is deliberate:
  * a revoked approval is invalid even if unexpired and unchanged;
- * an expired approval is invalid even if unchanged; only then is
- * the proposal hash compared, so a material proposal change is
- * never masked by an earlier failure, and an unchanged proposal
- * never rescues a revoked or expired approval. Expiry is
+ * an expired approval is invalid even if unchanged; only then are
+ * the proposal hash and version compared, so a material proposal
+ * change is never masked by an earlier failure, and an unchanged
+ * proposal never rescues a revoked or expired approval. Expiry is
  * exclusive: an approval expiring exactly at nowMs is expired.
+ * A versioned request against a version-less (pre-#3153) record
+ * is a change: a record that cannot prove which revision it
+ * approved cannot settle a versioned settlement.
  */
 export function validateApproval(
   approval: Approval,
@@ -209,6 +232,12 @@ export function validateApproval(
   if (!isValidField(request.proposalHash) || normalize(request.proposalHash) !== approval.proposalHash) {
     return { valid: false, reason: "PROPOSAL_CHANGED" };
   }
+  if (
+    request.proposalVersion !== undefined &&
+    normalize(request.proposalVersion) !== approval.proposalVersion
+  ) {
+    return { valid: false, reason: "PROPOSAL_CHANGED" };
+  }
   if (request.tenantId !== undefined && normalize(request.tenantId) !== approval.tenantId) {
     return { valid: false, reason: "TENANT_MISMATCH" };
   }
@@ -216,6 +245,24 @@ export function validateApproval(
     return { valid: false, reason: "ACTION_NOT_GRANTED" };
   }
   return { valid: true, reason: "VALID" };
+}
+
+/** Store an approval record by id, for settlement-time resolution (Q8 #3153). */
+export interface ApprovalStore {
+  get(id: string): Promise<Approval | null>;
+  put(approval: Approval): Promise<void>;
+}
+
+export function createMemoryApprovalStore(): ApprovalStore {
+  const byId = new Map<string, Approval>();
+  return {
+    async get(id: string): Promise<Approval | null> {
+      return byId.get(id) ?? null;
+    },
+    async put(approval: Approval): Promise<void> {
+      byId.set(approval.id, approval);
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------

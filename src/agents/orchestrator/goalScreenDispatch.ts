@@ -28,6 +28,7 @@ import {
   formatGoalScreenDelivery,
   type ScreeningChannel,
 } from "../../services/screeningDelivery";
+import { resolveTenantChannelGate } from "../../services/tenantChannelGate";
 
 /** The orchestrator-owned context the goal doors need. */
 export interface GoalScreenDispatchContext {
@@ -189,6 +190,9 @@ export async function deliverWorkflowGoalScreenOutcome(
   const result = envelope.result;
   const formatted = formatGoalScreenDelivery(result);
   const orm = ctx.getOrm();
+  // Issue #3169: the tenant channel gate, resolved best-effort
+  // (null = ungated, prior behavior — see tenantChannelGate).
+  const channelGate = await resolveTenantChannelGate(ctx.env, userLogin);
   await deliverScreeningContent({
     channels,
     subject: formatted.subject,
@@ -205,5 +209,6 @@ export async function deliverWorkflowGoalScreenOutcome(
     senders: createScreeningDeliverySenders(ctx.env, orm, userLogin),
     sql: orm as any,
     userLogin,
+    ...(channelGate ? { channelGate } : {}),
   });
 }

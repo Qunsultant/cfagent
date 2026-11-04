@@ -71,6 +71,57 @@
  * chain generateTabular leg decision (slice 3, still open).
  */
 
+import {
+  OPTIONS_SCREEN_PHASES,
+  PAYMENT_STEP_IDS,
+  SAGA_STEP_IDS,
+  TRADE_APPROVAL_STEP_IDS,
+} from "./stageRuntimeIds";
+
+/**
+ * Issue #3073 - the seam is no longer stock-only.
+ *
+ * #2869 built the stage contract for the stock screen, so `stageId` was
+ * `StockStageId` and the stock ids were the only legal values. Every other
+ * family (#3069 S2/S3) therefore had a declared contract and no seam. The
+ * message now names its `family` and its `stageId` is validated against that
+ * family's declared runtime ids - the same ids the workflow catalog shows,
+ * from the same module (`stageRuntimeIds`), so a family cannot publish a
+ * stage the catalog does not know about, or vice versa.
+ */
+export const STAGE_FAMILIES = ["stock", "options", "trading", "payment", "saga"] as const;
+
+export type StageFamily = (typeof STAGE_FAMILIES)[number];
+
+/** The declared runtime stage ids of each family (the catalog's projection). */
+export const STAGE_IDS_BY_FAMILY: Record<StageFamily, readonly string[]> = {
+  stock: [
+    "plan",
+    "brokerStart",
+    "acquireUniverse",
+    "fetchQuotes",
+    "enrich",
+    "computeIndicatorsAndScores",
+    "applyFilters",
+    "rankAndGrade",
+    "detectStandouts",
+    "persistCanonicalResults",
+    "analysis-done",
+    "shapeReport",
+    "deliver",
+  ],
+  options: OPTIONS_SCREEN_PHASES,
+  trading: TRADE_APPROVAL_STEP_IDS,
+  payment: PAYMENT_STEP_IDS,
+  saga: SAGA_STEP_IDS,
+};
+
+/**
+ * Stock keeps the historical shape: its ids must equal STOCK_STAGE_IDS, which
+ * is declared below. The map above is written out rather than derived from
+ * STOCK_STAGE_IDS to keep this module import-cycle free; the pin in
+ * tests/stage_seam_families_3073.test.ts asserts the two agree.
+ */
 export const STOCK_STAGE_IDS = [
   "plan",
   "brokerStart",
@@ -92,13 +143,15 @@ export type StockStageId = (typeof STOCK_STAGE_IDS)[number];
 /** One stage message: references persisted output, never carries it. */
 export interface StageMessage {
   runId: string;
-  stageId: StockStageId;
+  /** Which family's seam carried this message (#3073). Absent means stock, for pre-#3073 messages. */
+  family?: StageFamily;
+  stageId: string;
   /** The next stage's persisted input, by canonical artifact key. */
   artifactKeys: string[];
   /** Owning user login — required, never "default" (#1185). */
   userLogin: string;
   /** The stage that produced this message (== stageId, except analysis-done, produced by persistCanonicalResults). */
-  producedBy: StockStageId;
+  producedBy: string;
   /** Idempotency key: runId + stageId (exactly-once effect). */
   idempotencyKey: string;
   provenance: {
@@ -108,20 +161,36 @@ export interface StageMessage {
   };
 }
 
-/** The exactly-once-effect key for one stage of one run. */
-export function stageIdempotencyKey(runId: string, stageId: StockStageId): string {
-  return `${runId}::${stageId}`;
+/**
+ * The exactly-once-effect key for one stage of one run.
+ *
+ * Stock keys keep their historical shape (`run::stage`) because claims written
+ * by running instances must still match after this change; every other family
+ * is namespaced by family, so two families cannot collide on a shared id.
+ */
+export function stageIdempotencyKey(runId: string, stageId: string, family: StageFamily = "stock"): string {
+  return family === "stock" ? `${runId}::${stageId}` : `${runId}::${family}::${stageId}`;
 }
 
 /** Build a stage message. Refuses loudly (never a malformed message): runId, userLogin, and at least one artifact key are required. */
 export function stageMessage(args: {
   runId: string;
-  stageId: StockStageId;
+  stageId: string;
+  family?: StageFamily;
   artifactKeys: string[];
   userLogin: string;
-  producedBy?: StockStageId;
+  producedBy?: string;
   traceId?: string;
 }): StageMessage {
+  const family = args.family ?? "stock";
+  if (!STAGE_IDS_BY_FAMILY[family]) {
+    throw new Error(`stageMessage refused: unknown stage family "${family}".`);
+  }
+  if (!STAGE_IDS_BY_FAMILY[family].includes(args.stageId)) {
+    throw new Error(
+      `stageMessage refused: stage "${args.stageId}" is not a declared ${family} stage id.`,
+    );
+  }
   const runId = args.runId.trim();
   const userLogin = args.userLogin.trim();
   if (!runId) throw new Error("stageMessage refused: runId is required.");
@@ -133,11 +202,12 @@ export function stageMessage(args: {
   }
   return {
     runId,
+    family,
     stageId: args.stageId,
     artifactKeys: [...args.artifactKeys],
     userLogin,
     producedBy: args.producedBy ?? args.stageId,
-    idempotencyKey: stageIdempotencyKey(runId, args.stageId),
+    idempotencyKey: stageIdempotencyKey(runId, args.stageId, family),
     provenance: {
       parentRunId: runId,
       ...(args.traceId ? { traceId: args.traceId } : {}),

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { apiFetch as fetch } from "./apiFetch";
 import { getDisplayUserDid } from "../agents/did";
+import { codedMessage, resolveOutcome } from "../outcomes/outcomeAspects";
 import { Card, Badge, TextInput, Button, EmptyState, Select, Spinner, Table, Modal, Notice, PageShell, FieldShell, useToast } from "./components/ui";
 import { getRoute } from "./routes";
 import { parseTabFromSearch, subscribeToRouteChanges } from "./router";
@@ -94,6 +95,49 @@ const NLQ_ROW_RENDER_LIMIT = 500;
 function formatNlqColumn(key: string): string {
   const spaced = key.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/_/g, " ");
   return spaced.replace(/\bOi\b/g, "OI").replace(/\bIv\b/g, "IV").replace(/\bDte\b/g, "DTE").toUpperCase();
+}
+
+/**
+ * Issue #3197: a pre-opened authorization tab must never be left
+ * blank on start failure. Close it when possible; when the close
+ * does not take effect (the tab stays open), navigate it back to
+ * the app with the outcome code, so the hub banner in THAT tab
+ * shows the error. Only the code — never free text — travels in
+ * the URL, and it is resolved against the outcome catalog on
+ * mount, so no URL-supplied text is ever rendered (same principle
+ * as #2402's auth_outcome handling).
+ */
+function reclaimFailedStartTab(
+  authTab: { close(): void; readonly closed: boolean; location: { href: string } } | null,
+  code: string,
+) {
+  if (!authTab) return;
+  try {
+    authTab.close();
+  } catch {
+    // A tab the user already closed throws on close; fall through
+    // to the check below.
+  }
+  let stillOpen = false;
+  try {
+    stillOpen = !authTab.closed;
+  } catch {
+    stillOpen = true;
+  }
+  if (!stillOpen) return;
+  try {
+    const url = new URL(window.location.href);
+    url.searchParams.set("etrade_connect_error", code);
+    authTab.location.href = url.toString();
+  } catch {
+    // Last resort: the original tab's banner still carries the error.
+  }
+}
+
+/** Issue #3197: only a catalog-resolving server code rides the reclaimed tab's URL; anything else falls back to the start-failure outcome. */
+function outcomeCodeForStartFailure(code: unknown): string {
+  if (typeof code === "string" && resolveOutcome(code).entry) return code;
+  return "FAILURE_ETRADE_OAUTH_START_FAILED";
 }
 
 export function ETradeTradingHub({
@@ -654,6 +698,18 @@ export function ETradeTradingHub({
       fetchBrokerStatus(activeEnv);
       fetchPositions(activeEnv);
     }
+    // Issue #3197: a start failure reclaims the pre-opened tab by
+    // navigating it here with an outcome code. Resolve the code
+    // against the catalog (never render URL-supplied text), show
+    // the business message, and strip the param so a refresh does
+    // not re-show it.
+    const connectError = params.get("etrade_connect_error");
+    if (connectError && resolveOutcome(connectError).entry) {
+      setOauthMsg(codedMessage(connectError));
+      params.delete("etrade_connect_error");
+      const next = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ""}${window.location.hash}`;
+      window.history.replaceState(null, "", next);
+    }
   }, [activeEnv]);
 
   // Listen for open-etapi-tuning and etrade-env-changed events from SettingsMenu
@@ -713,9 +769,18 @@ export function ETradeTradingHub({
     // authorize URL surfaces as a fallback link in the hub banner.
     const authTab =
       typeof window !== "undefined" ? window.open("", "_blank", "noopener,noreferrer") : null;
+    // Issue #3197: the start fetch must not hang forever — a hung
+    // fetch used to leave the pre-opened tab blank with no branch
+    // ever running. The timeout forces the failure branch, which
+    // reclaims the tab instead of stranding it.
+    const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const timeoutId = controller
+      ? window.setTimeout(() => controller.abort(), 30000)
+      : undefined;
     try {
       const resp = await fetch("/api/etrade/oauth/start", {
         headers: { "x-environment": envToUse },
+        signal: controller?.signal,
       });
       const data = (await resp.json()) as any;
       if (resp.ok && data.authorizeUrl) {
@@ -727,13 +792,19 @@ export function ETradeTradingHub({
           setBlockedAuthUrl(data.authorizeUrl);
         }
       } else {
-        authTab?.close();
-        setOauthMsg(data.error || "Failed to start E*TRADE OAuth session");
+        // Issue #3197: never strand the pre-opened tab on failure.
+        // The server's outcome code (when it resolves in the
+        // catalog) rides the reclaimed tab's URL so the error is
+        // visible where the user is looking, not only on the
+        // original tab's banner.
+        reclaimFailedStartTab(authTab, outcomeCodeForStartFailure(data?.code));
+        setOauthMsg(data.error || codedMessage("FAILURE_ETRADE_OAUTH_START_FAILED"));
       }
     } catch (err: any) {
-      authTab?.close();
-      setOauthMsg(err.message || "Failed to initiate OAuth request");
+      reclaimFailedStartTab(authTab, "FAILURE_ETRADE_OAUTH_START_FAILED");
+      setOauthMsg(codedMessage("FAILURE_ETRADE_OAUTH_START_FAILED"));
     } finally {
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
       setOauthLoading(false);
     }
   };
@@ -1508,9 +1579,13 @@ export function ETradeTradingHub({
           )}
         </Notice>
       )}
-      {/* Blocked-popup fallback after the PIN modal is dismissed: the
-          modal itself already links the authorize URL while open; this
-          keeps that link reachable once the user closes the modal. */}
+      {/* Blocked-popup fallback after the PIN modal is dismissed (#3197):
+          the button re-opens the PIN modal bound to the ORIGINAL
+          request token — it does NOT start a fresh Connect. A fresh
+          Connect would mint a new token and invalidate the PIN the
+          user obtained from this banner's link (comment 6635403540):
+          the modal itself links the authorize URL while open, so
+          re-opening the modal keeps both the link and the token. */}
       {!showPinModal && !oauthMsg && blockedAuthUrl && (
         <Notice
           tone="warning"
@@ -1518,10 +1593,10 @@ export function ETradeTradingHub({
           title="E*TRADE connection"
           onDismiss={() => setBlockedAuthUrl(null)}
         >
-          Your browser blocked the E*TRADE authorization tab. Open it here:
+          Your browser blocked the E*TRADE authorization tab. Reopen the PIN form to open it from there:
           <div>
-            <Button href={blockedAuthUrl} target="_blank" variant="primary" size="sm">
-              Open E*TRADE authorization →
+            <Button type="button" variant="primary" size="sm" onClick={() => setShowPinModal(true)}>
+              Reopen PIN form →
             </Button>
           </div>
         </Notice>

@@ -604,6 +604,125 @@ export function planArtifactBackfill(
   return { status: "merged", bodyJson: JSON.stringify(stored), filled };
 }
 
+export type RefreshCanonicalPdfFieldsStatus =
+  | "refreshed"
+  | "noop"
+  | "missing-row"
+  | "not-backfillable"
+  | "failed";
+
+export interface RefreshCanonicalPdfFieldsResult {
+  status: RefreshCanonicalPdfFieldsStatus;
+  reportId?: string;
+  filled?: string[];
+  reason?: string;
+}
+
+/**
+ * Issue #2869 slice 1 follow-up — refresh a canonical
+ * mas_reports row's PDF fields after a queued consume
+ * generates them (in-process leg failed, claim released,
+ * queued consume generated). The generated fields land on
+ * the persisted analysis key by the consumer; without this
+ * refresh the canonical row — what the Reports tab reads —
+ * keeps showing no PDF for a run that now has one.
+ *
+ * Rules, all inherited from planArtifactBackfill (#2602):
+ *  - UPDATE ONLY, never create: a missing row is reported
+ *    as "missing-row", never written — the one recorder
+ *    (persistScreenerReportCanonical) owns row creation.
+ *  - Monotonic per format: only missing fields fill, a
+ *    failed status may upgrade to generated, and a
+ *    generated key/status is never overwritten or
+ *    downgraded. A duplicate-suppressed consume therefore
+ *    cannot clobber anything — and callers only invoke
+ *    this on a "generated" consume outcome in any case.
+ *  - Owner re-checked: the row is looked up by
+ *    (generationId, owner), so one tenant can never
+ *    refresh another's row.
+ *  - R2-pointer rows: the body lives in the R2 object, so
+ *    the merged body is put back to the SAME R2 key (the
+ *    pointer never changes, no new object, no fork). This
+ *    is a recovery correction to a run's own record, not
+ *    a regeneration — regeneration still mints a new
+ *    report id, per the R2-body immutability note on
+ *    reportBodyR2Key. The merge itself is the same
+ *    missing-fields-only rule as inline rows, so an
+ *    already-generated PDF is never rewritten.
+ *  - Never throws: every failure is a returned status
+ *    with a named reason, logged — a queue consumer must
+ *    never fail a run (or a queue ack) on a refresh.
+ */
+export async function refreshCanonicalReportPdfFields(
+  sql: SqlStorage,
+  env: { REPORTS_BUCKET?: R2Bucket; APP_BASE_URL?: string },
+  input: {
+    generationId: string;
+    userLogin: string;
+    pdfKey: string;
+    pdfStatus?: string;
+    pdfError?: string;
+  },
+): Promise<RefreshCanonicalPdfFieldsResult> {
+  try {
+    if (!input.generationId?.trim() || !input.userLogin?.trim() || !input.pdfKey?.trim()) {
+      return { status: "failed", reason: "generationId, userLogin, and pdfKey are required" };
+    }
+    ensureScheduledReportsTable(sql);
+    const id = storePorts(sql).write.findIdByGeneration(
+      input.generationId,
+      input.userLogin,
+    );
+    if (!id) return { status: "missing-row", reason: `no canonical row for generation ${input.generationId} owned by ${input.userLogin}` };
+    const row = storePorts(sql).write.findStoredContent(id);
+    if (!row) return { status: "missing-row", reason: `canonical row ${id} could not be loaded` };
+    if (row.userLogin && row.userLogin !== input.userLogin) {
+      return { status: "not-backfillable", reason: "owner-mismatch" };
+    }
+    const reportUrl = `${env.APP_BASE_URL || "https://agent.openaimp.com"}/api/screener/report.pdf?key=${encodeURIComponent(input.pdfKey)}`;
+    const incoming = {
+      pdfKey: input.pdfKey,
+      pdfStatus: input.pdfStatus ?? "generated",
+      ...(input.pdfError !== undefined ? { pdfError: input.pdfError } : {}),
+      reportUrl,
+    };
+    let storedBodyJson: string;
+    if (row.bodyR2Key) {
+      const store = createBlobStore(env);
+      if (!store) return { status: "failed", reason: "R2 body unreadable: no blob store bound" };
+      const obj = await store.get(row.bodyR2Key);
+      if (!obj) return { status: "failed", reason: `R2 body object ${row.bodyR2Key} missing` };
+      storedBodyJson = blobText(obj);
+      if (!storedBodyJson) return { status: "failed", reason: `R2 body object ${row.bodyR2Key} unreadable` };
+    } else {
+      storedBodyJson = row.body;
+    }
+    const outcome = planArtifactBackfill(storedBodyJson, incoming, {
+      owner: input.userLogin,
+      ...(row.userLogin ? { storedOwner: row.userLogin } : {}),
+    });
+    if (outcome.status === "noop") return { status: "noop", reportId: id };
+    if (outcome.status === "not-backfillable") {
+      return { status: "not-backfillable", reportId: id, reason: outcome.reason };
+    }
+    if (row.bodyR2Key) {
+      const store = createBlobStore(env);
+      if (!store) return { status: "failed", reason: "R2 body unwritable: no blob store bound" };
+      await store.put(row.bodyR2Key, outcome.bodyJson, {
+        contentType: "application/json",
+      });
+    } else {
+      storePorts(sql).write.updateBody(id, outcome.bodyJson);
+    }
+    return { status: "refreshed", reportId: id, filled: outcome.filled };
+  } catch (err) {
+    console.error(
+      `[scheduledReports] refreshCanonicalReportPdfFields failed for generation ${input?.generationId}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return { status: "failed", reason: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 /**
  * @deprecated Issue #2602 — compatibility wrapper over
  * planArtifactBackfill (superseded by src/services/scheduledReports.ts

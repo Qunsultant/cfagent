@@ -14,7 +14,10 @@
  *     value and stays allowed, exactly as in the #677 gate).
  *  2. The palette holds EXACTLY the colour values the five files used
  *     before the migration (the pre-migration survey, as a value set) —
- *     the migration is output-preserving by construction.
+ *     the migration is output-preserving by construction — PLUS the
+ *     Carbon v11 Gray 100 values added deliberately for #3146 (one
+ *     page's new design; no existing surface uses them, so prior
+ *     output is unchanged).
  *  3. Token-aligned palette entries equal the corresponding
  *     tokens.css dark-theme values, and no other entry equals any
  *     dark --color-* token value (the hand-mirror cannot drift
@@ -100,7 +103,7 @@ describe("server palette — zero literals in the five migrated files (#678)", (
 // (surveyed on the pre-#678 tree; the named colour `white` is counted
 // as its exact equivalent #ffffff, the --color-on-gradient value).
 const SURVEYED_VALUES = [
-  "#0284c7", "#030712", "#060913", "#06b6d4", "#090d16", "#0a0f1d", "#0b0f19", "#0b1120",
+  "#0284c7", "#030712", "#060913", "#06b6d4", "#090d16", "#0a0f1d", "#0b0f19", "#0b1120", "#002d9c", "#0353e9", "#0f62fe", "#161616", "#262626", "#333333", "#393939", "#78a9ff", "#a6c8ff", "#c6c6c6", "#f4f4f4",
   "#0c1222", "#0f172a", "#111827", "#15803d", "#1e1b4b", "#1e293b", "#1e3a8a", "#22c55e",
   "#2563eb", "#334155", "#34d399", "#38bdf8", "#3b82f6", "#475569", "#60a5fa", "#6366f1",
   "#64748b", "#818cf8", "#94a3b8", "#a78bfa", "#b91c1c", "#cbd5e1", "#e2e8f0", "#ef4444",

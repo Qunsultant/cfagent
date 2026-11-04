@@ -3,8 +3,9 @@
  * The route module is NEW: on the pristine tree these pins fail at
  * COLLECTION (module does not exist) — an unrun file, not a pass.
  * Agent tab with env lacking AI_SEARCH_ENDPOINT exercises the
- * service-native shape via its fallback branch (provider
- * "semantic_cache"); it asserts the shape, never live index results.
+ * service-native shape via its degraded contract (#1169 S3: zero
+ * results + degraded "endpoint_not_configured"); it asserts the
+ * shape, never live index results.
  */
 import { describe, it, expect } from "vitest";
 import { handleSearchHubRoutes } from "../src/agents/routes/searchHub";
@@ -44,14 +45,21 @@ describe("#2120 slice 1 searchHub routes", () => {
     expect(res!.status).toBe(400);
   });
 
-  it("POST /search/agent returns the service-native shape", async () => {
+  it("POST /search/agent returns the service-native shape (degraded, no endpoint configured)", async () => {
+    // Adapted by #1169 S3: this pin asserted results.length > 0 with
+    // no endpoint configured — that was the removed fallback corpus
+    // answering through the route. Post-S3 the honest shape is zero
+    // results + the in-band degraded reason, asserted here at
+    // greater strength (exact reason + exact zero counts).
     const res = await post("/api/search/agent", { query: "options risk" });
     expect(res!.status).toBe(200);
     const body = await res!.json();
     expect(body.query).toBe("options risk");
     expect(Array.isArray(body.results)).toBe(true);
-    expect(body.results.length).toBeGreaterThan(0);
-    expect(typeof body.provider).toBe("string");
+    expect(body.results).toEqual([]);
+    expect(body.degraded).toBe("endpoint_not_configured");
+    expect(body.provider).toBe("cloudflare_ai_search");
+    expect(body.totalMatches).toBe(0);
     expect(typeof body.totalMatches).toBe("number");
   });
 

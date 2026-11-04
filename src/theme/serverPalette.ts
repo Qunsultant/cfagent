@@ -13,7 +13,10 @@
  *
  * OUTPUT-PRESERVING BY CONSTRUCTION: every entry holds exactly the
  * value the literals held before the migration — the rendered output
- * of the five surfaces is unchanged. Where a historical literal equals
+ * of the five surfaces is unchanged. The one exception is the Carbon
+ * section (#3146): those values are new (a new design for one page),
+ * not migrated literals, and no existing surface uses them, so prior
+ * output is still unchanged. Where a historical literal equals
  * a tokens.css value (matched by VALUE against the dark theme — the
  * theme these theme-less surfaces were styled after), the entry takes
  * the token's role name and is listed in SERVER_PALETTE_TOKEN_SOURCES;
@@ -130,6 +133,34 @@ export const SERVER_PALETTE = {
   loginCard: "rgba(17, 24, 39, 0.75)",
   /** Sandbox checkout card. */
   checkoutCard: "rgba(18, 26, 47, 0.9)",
+  // --- Carbon v11 Gray 100 tokens (#3146): the /checkout/sandbox page's
+  // Carbon visual system. These are Carbon's values, not tokens.css
+  // values (verified: none equals a dark --color-* token), so they are
+  // non-aligned entries. Carbon's button text (#ffffff) is NOT duplicated
+  // here: it reuses onGradient, already token-aligned to
+  // --color-on-gradient. No other surface uses these entries.
+  /** Carbon Gray 100: background */
+  carbonBackground: "#161616",
+  /** Carbon Gray 100: layer-01 */
+  carbonLayer01: "#262626",
+  /** Carbon Gray 100: layer-01 hover */
+  carbonLayerHover01: "#333333",
+  /** Carbon Gray 100: border-subtle */
+  carbonBorderSubtle: "#393939",
+  /** Carbon Gray 100: text-primary */
+  carbonTextPrimary: "#f4f4f4",
+  /** Carbon Gray 100: text-secondary */
+  carbonTextSecondary: "#c6c6c6",
+  /** Carbon Gray 100: button-primary (blue 60) */
+  carbonButtonPrimary: "#0f62fe",
+  /** Carbon Gray 100: button-primary hover */
+  carbonButtonPrimaryHover: "#0353e9",
+  /** Carbon Gray 100: link-primary (blue 40) */
+  carbonLinkPrimary: "#78a9ff",
+  /** Carbon Gray 100: blue tag background (dark theme) */
+  carbonTagBlueBg: "#002d9c",
+  /** Carbon Gray 100: blue tag text (dark theme) */
+  carbonTagBlueText: "#a6c8ff",
 } as const;
 
 export type ServerPaletteKey = keyof typeof SERVER_PALETTE;

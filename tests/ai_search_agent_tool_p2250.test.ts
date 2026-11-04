@@ -203,8 +203,11 @@ describe("ai_search_agent_search — the orchestrator's door onto AiSearchAgent 
   });
 
   it("a degraded agent failure stays degraded in the tool answer — stated, with zero fabricated rows", async () => {
+    // Mirrors the runner's post-#1169 S3 degraded wording verbatim
+    // (src/agents/aiSearchPaths.ts): the fake stands in for the
+    // agent, so its note is what the runner would produce.
     const degradedNote =
-      'The REST path answered from its built-in semantic cache (provider "semantic_cache") because the AI Search instance did not serve the query. Those fallback rows are not live AI Search results and are withheld here rather than presented as results.';
+      "The REST path is degraded (upstream_unreachable): the AI Search instance did not serve the query. The degraded answer is withheld here rather than presented as results.";
     const { namespace } = fakeNamespace(async () => ({
       ok: false,
       path: "rest" as const,

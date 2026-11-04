@@ -311,7 +311,7 @@ export class ThinkTradeValidationCommand implements IMcpToolCommand<{
  */
 export class AISearchFinancialDocsCommand implements IMcpToolCommand<{ query: string; limit?: number }> {
   readonly name = "ai_search_financial_docs";
-  readonly description = "Perform semantic search across SEC 10-K/10-Q filings, broker rules, and options disclosures";
+  readonly description = "Perform semantic search across SEC 10-K/10-Q filings, broker rules, and options disclosures. Answers come from the live AI Search instance only: when the instance does not serve, the result carries zero documents and a `degraded` reason (the built-in fallback corpus was removed by #1169 S3) — never substitute documents.";
   readonly jsonSchema = {
     type: "object" as const,
     properties: {
@@ -328,7 +328,11 @@ export class AISearchFinancialDocsCommand implements IMcpToolCommand<{ query: st
   async execute(input: { query: string; limit?: number }, context: McpToolContext) {
     const aiSearch = new ETradeAISearchService(context.env);
     const result = await aiSearch.searchFinancialDocs(input.query, input.limit || 5);
-    context.audit("ai_search.query", "search", { query: input.query, matches: result.totalMatches });
+    context.audit("ai_search.query", "search", {
+      query: input.query,
+      matches: result.totalMatches,
+      ...(result.degraded ? { degraded: result.degraded } : {}),
+    });
     return result;
   }
 }

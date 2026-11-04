@@ -301,6 +301,12 @@
  * platform-users delegation, before premium) — bringing the
  * delegation sequence to 40 calls and the pinned inventory to
  * 357 entries (measured: 354 + 3).
+ *
+ * Issue #3153 added three — POST /api/iaaa/delegations/create,
+ * POST /api/iaaa/delegations/revoke, GET /api/iaaa/delegations
+ * (in handleDelegationRoutes, after the service-user handler) —
+ * bringing the delegation sequence to 42 calls and the pinned
+ * inventory to 362 entries (measured).
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -344,8 +350,10 @@ const HANDLER_FILE: Record<string, string> = {
   "handleScreenerResearchRoutes": "screenerResearch.ts",
   "handleMaintenanceRoutes": "maintenance.ts",
   "handleServiceUserRoutes": "serviceUser.ts",
+  "handleDelegationRoutes": "delegations.ts",
   "handleAdminTenantQueueRoutes": "adminTenantQueues.ts",
   "handlePlatformTenantRoutes": "platformTenants.ts",
+  "handlePlatformChannelRoutes": "platformChannels.ts",
   "handleKvWipeRoutes": "kvWipe.ts",
   "handleOrchestratorMigrationRoutes": "orchestratorMigration.ts",
   "handleSchedulesRoutes": "schedules.ts"
@@ -374,6 +382,7 @@ const EXPECTED_DELEGATIONS = [
   "handlePlatformUsersRoutes",
   "handlePlatformTenantRoutes",
   "handlePlatformAccountRoutes",
+  "handlePlatformChannelRoutes",
   "handlePremiumRoutes",
   "handleBrokerGateRoutes",
   "handleEtradeBrokerRoutes",
@@ -389,6 +398,7 @@ const EXPECTED_DELEGATIONS = [
   "handleScreenerResearchRoutes",
   "handleMaintenanceRoutes",
   "handleServiceUserRoutes",
+  "handleDelegationRoutes",
   "handleAdminTenantQueueRoutes",
   "handleKvWipeRoutes",
   "handleOrchestratorMigrationRoutes",
@@ -547,6 +557,7 @@ const EXPECTED_INVENTORY = [
   "handlePlatformAccountRoutes :: endsWith(\"/platform/accounts/self\")",
   "handlePlatformAccountRoutes :: endsWith(\"/platform/accounts/setup\")",
   "handlePlatformAccountRoutes :: endsWith(\"/platform/accounts/lookup\")",
+  "handlePlatformChannelRoutes :: includes(\"/platform-channels/\")",
   "handlePremiumRoutes :: includes(\"/premium/options-scan\")",
   "handlePremiumRoutes :: includes(\"/premium/market-research\")",
   "handlePremiumRoutes :: includes(\"/premium/stock-signals\")",
@@ -726,6 +737,9 @@ const EXPECTED_INVENTORY = [
   "handleServiceUserRoutes :: endsWith(\"/admin/service-user/provision\")",
   "handleServiceUserRoutes :: endsWith(\"/admin/service-user/revoke\")",
   "handleServiceUserRoutes :: endsWith(\"/admin/service-user/status\")",
+  "handleDelegationRoutes :: endsWith(\"/api/iaaa/delegations/create\")",
+  "handleDelegationRoutes :: endsWith(\"/api/iaaa/delegations/revoke\")",
+  "handleDelegationRoutes :: endsWith(\"/api/iaaa/delegations\")",
   "handleAdminTenantQueueRoutes :: endsWith(\"/admin/tenants\")",
   "handleAdminTenantQueueRoutes :: endsWith(\"/queues/resolve\")",
   "handleAdminTenantQueueRoutes :: endsWith(\"/queues/dump\")",

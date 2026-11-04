@@ -2443,7 +2443,7 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
     type?: "market" | "limit" | "stop" | "stop_limit";
     limit_price?: number;
     time_in_force?: "day" | "gtc" | "ioc" | "fok";
-  }): Promise<{ success: boolean; orderId?: string; status?: string; symbol?: string; qty?: number; side?: string; message: string }> {
+  }): Promise<{ success: boolean; orderId?: string; status?: string; symbol?: string; qty?: number; side?: string; message: string; httpStatus?: number }> {
     if (!this.isConfigured()) {
       return {
         success: false,
@@ -2486,6 +2486,7 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
 
       return {
         success: false,
+        httpStatus: res.status,
         message: data?.message || `Alpaca order placement failed: HTTP ${res.status}`,
       };
     } catch (err: any) {
@@ -2496,7 +2497,7 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
   /**
    * Real Alpaca Trading v2: Get Account Details
    */
-  async getAccount(): Promise<{ success: boolean; account?: any; message?: string }> {
+  async getAccount(): Promise<{ success: boolean; account?: any; message?: string; httpStatus?: number }> {
     if (!this.isConfigured()) {
       return {
         success: false,
@@ -2512,7 +2513,7 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
       if (res.ok && data?.id) {
         return { success: true, account: data };
       }
-      return { success: false, message: data?.message || "Failed to fetch Alpaca account" };
+      return { success: false, httpStatus: res.status, message: data?.message || "Failed to fetch Alpaca account" };
     } catch (err: any) {
       return { success: false, message: err.message || "Network error" };
     }
@@ -2521,7 +2522,7 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
   /**
    * Real Alpaca Trading v2: Get Open Positions
    */
-  async getPositions(): Promise<{ success: boolean; positions?: any[]; message?: string }> {
+  async getPositions(): Promise<{ success: boolean; positions?: any[]; message?: string; httpStatus?: number }> {
     if (!this.isConfigured()) {
       return {
         success: false,
@@ -2537,7 +2538,7 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
       if (res.ok && Array.isArray(data)) {
         return { success: true, positions: data };
       }
-      return { success: false, message: data?.message || "Failed to fetch Alpaca positions" };
+      return { success: false, httpStatus: res.status, message: data?.message || "Failed to fetch Alpaca positions" };
     } catch (err: any) {
       return { success: false, message: err.message || "Network error" };
     }

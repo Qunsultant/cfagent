@@ -50,7 +50,14 @@ describe("the catalog declares what can be run (#3071)", () => {
       for (const stage of workflow.stages) {
         expect(stage.checkpointed).toBe(true);
         expect(stage.persists.trim().length).toBeGreaterThan(0);
-        expect(stage.publishes.trim().length).toBeGreaterThan(0);
+        // Issue #3174/#3072/#3073: topics exist only where the seam is wired,
+        // and a wired stage publishes exactly the steps it executes.
+        if (workflow.stageSeam) {
+          expect(stage.publishes.length).toBeGreaterThan(0);
+          expect(stage.publishes).toEqual(stage.runtimeStageIds ?? []);
+        } else {
+          expect(stage.publishes).toEqual([]);
+        }
       }
     }
   });

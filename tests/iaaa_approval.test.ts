@@ -11,6 +11,9 @@ import type { Approval } from "../src/security/lifecycle";
  * expiry or revocation. It is NOT live enforcement and does not
  * touch any route, task, or execution flow. A later slice wires
  * it into live call sites; until then it is testable policy.
+ * Issue #3153 wires the version binding into live call sites:
+ * the agent-access gate validates the stored approval record at
+ * invocation (see tests/iaaa_delegation_wiring_3153.test.ts).
  */
 
 const NOW = 1_800_000_000_000;
@@ -19,6 +22,7 @@ function approval(overrides: Partial<Approval> = {}): Approval {
   return {
     id: "approval-1",
     proposalHash: "hash-abc",
+    proposalVersion: "v1",
     approverInternalUserId: "approver-1",
     tenantId: "tenant-a",
     grantedActions: ["task:create", "action:execute"],
@@ -33,6 +37,7 @@ describe("iaaa approval (#945 slice 6)", () => {
   it("validates an approval for the unchanged proposal within expiry", () => {
     const result = validateApproval(approval(), {
       proposalHash: "hash-abc",
+      proposalVersion: "v1",
       action: "task:create",
       tenantId: "tenant-a",
       nowMs: NOW,
@@ -44,6 +49,32 @@ describe("iaaa approval (#945 slice 6)", () => {
   it("invalidates a prior approval when the proposal changes materially", () => {
     const result = validateApproval(approval(), {
       proposalHash: "hash-CHANGED",
+      action: "task:create",
+      tenantId: "tenant-a",
+      nowMs: NOW,
+    });
+    expect(result.valid).toBe(false);
+    expect(result.reason).toBe("PROPOSAL_CHANGED");
+  });
+
+  it("invalidates a prior approval when the proposal version changes after approval (#3153)", () => {
+    const result = validateApproval(approval(), {
+      proposalHash: "hash-abc",
+      proposalVersion: "v2",
+      action: "task:create",
+      tenantId: "tenant-a",
+      nowMs: NOW,
+    });
+    expect(result.valid).toBe(false);
+    expect(result.reason).toBe("PROPOSAL_CHANGED");
+  });
+
+  it("treats a versioned request against a version-less record as a change (#3153)", () => {
+    const legacy = approval();
+    delete (legacy as Partial<Approval>).proposalVersion;
+    const result = validateApproval(legacy, {
+      proposalHash: "hash-abc",
+      proposalVersion: "v1",
       action: "task:create",
       tenantId: "tenant-a",
       nowMs: NOW,
@@ -107,6 +138,7 @@ describe("iaaa approval (#945 slice 6)", () => {
   it("rejects an approval with no granted actions at creation and writes nothing new", () => {
     const result = createApproval({
       proposalHash: "hash-abc",
+      proposalVersion: "v1",
       approverInternalUserId: "approver-1",
       tenantId: "tenant-a",
       grantedActions: [],
@@ -121,6 +153,7 @@ describe("iaaa approval (#945 slice 6)", () => {
   it("rejects an approval whose expiry is not in the future", () => {
     const result = createApproval({
       proposalHash: "hash-abc",
+      proposalVersion: "v1",
       approverInternalUserId: "approver-1",
       tenantId: "tenant-a",
       grantedActions: ["task:create"],
@@ -135,6 +168,7 @@ describe("iaaa approval (#945 slice 6)", () => {
   it("creates a usable approval with a generated id", () => {
     const result = createApproval({
       proposalHash: "hash-abc",
+      proposalVersion: "v1",
       approverInternalUserId: "approver-1",
       tenantId: "tenant-a",
       grantedActions: ["task:create"],
@@ -148,11 +182,27 @@ describe("iaaa approval (#945 slice 6)", () => {
     expect(
       validateApproval(result.approval, {
         proposalHash: "hash-abc",
+        proposalVersion: "v1",
         action: "task:create",
         tenantId: "tenant-a",
         nowMs: NOW,
       }).valid,
     ).toBe(true);
+  });
+
+  it("rejects an approval with no proposal version at creation (#3153)", () => {
+    const result = createApproval({
+      proposalHash: "hash-abc",
+      proposalVersion: "",
+      approverInternalUserId: "approver-1",
+      tenantId: "tenant-a",
+      grantedActions: ["task:create"],
+      expiresAtMs: NOW + 60_000,
+      nowMs: NOW,
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected rejection");
+    expect(result.code).toBe("INVALID_PROPOSAL_VERSION");
   });
 
   it("lets a legitimate unchanged approval succeed (a system that denies everything fails)", () => {

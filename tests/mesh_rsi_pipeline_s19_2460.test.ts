@@ -63,6 +63,7 @@ import {
   MIGRATION_0036_REFUND_POLICY_APPROVAL,
   MIGRATION_0037_CFPAY_CHANNEL,
   MIGRATION_0038_AGENT_SHARD_JOBS_WORKFLOW_RUN_ID,
+  MIGRATION_0039_TENANT_CHANNELS,
 } from "../src/data/migrationRunner";
 import { agentMeshProposals } from "../src/data/drizzleSchema";
 import { InMemoryMeshProposalStore } from "../src/data/inMemoryMeshProposalAdapter";
@@ -242,8 +243,10 @@ describe("mesh proposal store", () => {
     expect(ALL_MIGRATIONS).toContain(
       MIGRATION_0038_AGENT_SHARD_JOBS_WORKFLOW_RUN_ID,
     );
+    // #3169 appends migration 0039 (tenant channels) after 0038.
+    expect(ALL_MIGRATIONS).toContain(MIGRATION_0039_TENANT_CHANNELS);
     expect(ALL_MIGRATIONS[ALL_MIGRATIONS.length - 1]).toBe(
-      MIGRATION_0038_AGENT_SHARD_JOBS_WORKFLOW_RUN_ID,
+      MIGRATION_0039_TENANT_CHANNELS,
     );
     expect(getTableName(agentMeshProposals)).toBe("agent_mesh_proposals");
   });

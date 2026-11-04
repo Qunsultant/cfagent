@@ -43,11 +43,14 @@
  * - A configured path that throws (or returns an unrecognized
  *   shape) falls through to the next configured path, and the
  *   failure is recorded in the result's `degraded` note.
- * - If the REST leg returns fallback-labelled results (provider
- *   "semantic_cache" — the service's built-in FINANCIAL_KNOWLEDGE_BASE
- *   matcher), they are surfaced as DEGRADED and withheld from
- *   `results`: this agent does not launder the fallback #1169 S3
- *   exists to remove.
+ * - If the REST leg's service reports a degraded answer (its
+ *   in-band `degraded` reason — endpoint unconfigured or the
+ *   instance did not serve; since #1169 S3 the service has no
+ *   fallback corpus to answer from), the outcome is DEGRADED
+ *   (code degraded_fallback) with zero results: an unavailable
+ *   index is never presented as an empty success. A genuinely
+ *   empty OK answer (the instance served, nothing matched) stays
+ *   ok with zero items — the two are distinguishable.
  * - Report-type results (issue #2246: items this fleet uploads with
  *   document ids `report:<reportId>` and metadata kind "report")
  *   are served ONLY to their owner's login: the search must carry
@@ -148,8 +151,9 @@ export interface AiSearchAgentSearchResult {
   path?: AiSearchPath;
   /**
    * Set whenever the answer is degraded: earlier configured paths
-   * failed before this one served, or the serving path's own output
-   * was fallback-labelled and withheld.
+   * failed before this one served, the serving path's own output
+   * was degraded and withheld, or report-type results were withheld
+   * under the login discipline.
    */
   degraded?: string;
   /** Stable local outcome token when ok is false. */
@@ -179,7 +183,7 @@ export interface AiSearchAgentSearchOptions {
  * Injectable path executors. The defaults are the real doors; tests
  * substitute fakes per path. namespaceSearch receives the resolved
  * binding instance; mcpSearch the endpoint URL; restSearch returns
- * the service's native response so the fallback label stays visible.
+ * the service's native response so its degraded signal stays visible.
  */
 export interface AiSearchAgentDeps {
   namespaceSearch?: (
@@ -456,8 +460,8 @@ export async function runAiSearchPaths(
   }
 
   // 3. rest (LAST RESORT): the hub's own service, reused as-is. Its
-  // fallback label is checked by the runner below, not in the
-  // attempt, because a fallback answer is a DEGRADED outcome, not a
+  // degraded signal is checked by the runner below, not in the
+  // attempt, because a degraded answer is a DEGRADED outcome, not a
   // path failure — there is no further path to fall through to.
   const restEndpoint = nonEmptyString(env.AI_SEARCH_ENDPOINT);
   let restResponse: AISearchQueryResponse | null = null;
@@ -504,13 +508,12 @@ export async function runAiSearchPaths(
     try {
       const { items, withheld } = await attempt.run();
       if (attempt.path === "rest" && restResponse !== null) {
-        const provider = (restResponse as AISearchQueryResponse).provider;
-        if (provider === "semantic_cache") {
-          // The service's built-in knowledge-base matcher answered —
-          // fabricated rows, honestly labelled by the service itself.
-          // Surface as degraded and withhold them from results.
-          const degraded =
-            'The REST path answered from its built-in semantic cache (provider "semantic_cache") because the AI Search instance did not serve the query. Those fallback rows are not live AI Search results and are withheld here rather than presented as results.';
+        const degradedReason = (restResponse as AISearchQueryResponse).degraded;
+        if (degradedReason) {
+          // The service reports the instance did not serve (#1169
+          // S3 degraded contract: zero results + a stable reason).
+          // Surface as degraded — never as an ok empty answer.
+          const degraded = `The REST path is degraded (${degradedReason}): the AI Search instance did not serve the query. The degraded answer is withheld here rather than presented as results.`;
           return {
             ok: false,
             path: "rest",

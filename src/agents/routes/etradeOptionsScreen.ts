@@ -45,8 +45,19 @@ import {
 import { ETradeEmailTradingService } from "../../trading";
 import { getEventCalendarCoverage, toEventCalendarInfo } from "../../services/eventCalendar";
 import type { EtradeOptionsRouteContext } from "./etradeOptions";
+import { emitOptionsStageBoundaries } from "../../workflows/optionsStageSeam";
 
 type OptionsScreenValue = Extract<ReturnType<typeof parseOptionsScreenRequest>, { ok: true }>["value"];
+
+/**
+ * Issue #3191 - options screens are NOT a durable workflow: this request
+ * handler is the runtime, so its phases are named in the shared
+ * `stageRuntimeIds` module rather than given invented `step.do` ids. The pin
+ * in tests/options_trading_stage_ids_3191.test.ts proves each phase still
+ * corresponds to a real call in this file.
+ */
+export { OPTIONS_SCREEN_PHASES } from "../../workflows/stageRuntimeIds";
+export type { OptionsScreenPhase } from "../../workflows/stageRuntimeIds";
 
 export async function executeOptionsScreen(args: {
   ctx: EtradeOptionsRouteContext;
@@ -340,6 +351,26 @@ export async function executeOptionsScreen(args: {
       console.warn("[Orchestrator] Manual options outcome record failed:", outcomeErr instanceof Error ? outcomeErr.message : String(outcomeErr));
     }
   }
+
+  // Issue #3072 - the options stage seam. Published here, at the end of a
+  // successful run, because that is when every phase's artifact exists: the
+  // canonical report row (generationId), the report keys, and the recorded
+  // delivery states. A run that failed earlier published nothing - a boundary
+  // is evidence, not a progress bar. Never throws; a seam gap is not a failed
+  // screen.
+  await emitOptionsStageBoundaries({
+    artifacts: {
+      runId: generationId,
+      userLogin,
+      ...(optionsPdfKey || optionsXlsxKey || optionsCsvKey
+        ? { reportKey: optionsPdfKey ?? optionsXlsxKey ?? optionsCsvKey }
+        : {}),
+      ...(slackState || emailState
+        ? { deliveryState: `options:delivery:${generationId}:${[slackState, emailState].filter(Boolean).join("+")}` }
+        : {}),
+    },
+    queue: (ctx.env as { SCREENER_EVENTS?: { send: (body: unknown) => Promise<unknown> } }).SCREENER_EVENTS,
+  });
 
   return Response.json({ ...result, pdfKey: optionsPdfKey, reportUrl: optionsReportUrl, xlsxKey: optionsXlsxKey, xlsxUrl: optionsXlsxUrl, csvKey: optionsCsvKey, csvUrl: optionsCsvUrl });
 }
