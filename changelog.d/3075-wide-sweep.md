@@ -1,0 +1,5 @@
+### Added
+
+- **The sweep now covers every stage module, not one file (#3075, #3069 R7):** the previous slice swept `stageReportConsumer` and said so; this one discovers every `src/workflows/stage*.ts` by pattern, so a **new stage module is swept automatically** rather than being forgotten. On a swept surface it fails closed for: a raw `deadLetter("…")` literal, a code that isn't in `STAGE_MESSAGE_CATALOG`, and a magic retry budget (`maxAttempts ?? 3` / `maxAttempts: 3`). The allow-list is one entry with a stated reason (the module that *declares* the default), and a stale allow-list entry fails too — so it cannot quietly become a dumping ground.
+- **The sweep found a real one:** `stageQueueTransport` still resolved the analysis-done budget as `maxAttempts ?? 3`. It now goes through `resolveStageConfig` + `maxAttemptsForStage`, matching the consumer, and takes an optional `env`.
+- **The tabular consumer got codes.** Its two dead-letter paths (`format is not xlsx or csv`, `runId missing`) were the last raw prose reasons on a swept surface; they are now `TABULAR_WRONG_FORMAT` and `TABULAR_MISSING_RUN` with remediation and severity, catalogued beside the rest.
