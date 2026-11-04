@@ -136,12 +136,52 @@ describe("catalog last-run column (#3130)", () => {
     expect(text).toContain("feed");
   });
 
+  it("shows the recorded detail, error and window for each stage of that run", async () => {
+    await renderWith({
+      runs: [
+        run({
+          stages: [
+            {
+              key: "job-feed",
+              order: 1,
+              stage: "feed",
+              label: "Feed",
+              status: "completed",
+              recordedBy: "job",
+              startedAt: "2026-11-04T00:00:00.000Z",
+              finishedAt: "2026-11-04T00:00:30.000Z",
+              durationMs: 30000,
+              detail: "NASDAQ listings fetched (5,012 symbols)",
+              reason: null,
+              error: null,
+              capability: "marketdata.feed",
+              jobKind: "main",
+              channel: null,
+              input: { universe: "NASDAQ100" },
+              output: { pdfKey: "stocks/report.pdf", matchedCount: 12 },
+            } as never,
+          ],
+        }),
+      ],
+    });
+    const text = container.textContent ?? "";
+    expect(text).toContain("Stage detail (last run)");
+    expect(text).toContain("NASDAQ listings fetched");
+    expect(text).toContain("marketdata");
+    expect(text).toContain("pdfKey");
+  });
+
+  it("states plainly when a stage has no detail or did not run", async () => {
+    await renderWith({ runs: [] });
+    expect(container.textContent).toContain("Run the workflow to see stage detail.");
+  });
+
   it("maps the run's generate verb onto the catalog's analysis stage", async () => {
     await renderWith({ runs: [run()] });
     // The stock card is the one with a run; its analysis row must carry the
     // failed generate status, not a phantom "never attempted".
     const analysisRows = [...container.querySelectorAll("tr")].filter((tr) =>
-      ((tr.querySelector("strong")?.textContent ?? "") === "analysis"),
+      (tr.querySelector("strong")?.textContent ?? "").startsWith("Analysis"),
     );
     expect(analysisRows.length).toBeGreaterThan(0);
     expect(analysisRows.some((tr) => (tr.textContent ?? "").includes("failed"))).toBe(true);

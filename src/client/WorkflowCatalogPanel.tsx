@@ -90,6 +90,46 @@ function lastRunCell(stage: StageDeclaration, latest: WorkflowRun | undefined): 
   );
 }
 
+function summariseOutput(output: unknown): string | null {
+  if (output === null || output === undefined) return null;
+  try {
+    const json = JSON.stringify(output);
+    if (!json) return null;
+    return json.length > 160 ? `${json.slice(0, 160)}...` : json;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Issue #3074: what the LAST RUN actually recorded for this stage - the
+ * stage's own detail line, why it stopped, its error, its window and a
+ * capped view of its output (artifact keys included). Read-only; the run
+ * itself stays the authority.
+ */
+function stageDetailCell(stage: StageDeclaration, latest: WorkflowRun | undefined): React.ReactNode {
+  if (!latest) return <span>Run the workflow to see stage detail.</span>;
+  const row = lastRunStage(stage, latest);
+  if (!row) return <span>This stage has not run in the latest run.</span>;
+  const output = summariseOutput(row.output);
+  return (
+    <Stack gap="1">
+      <span>{row.detail ?? "No detail recorded for this stage."}</span>
+      {row.reason && <span>Reason: {row.reason}</span>}
+      {row.error && (
+        <Notice tone="danger" density="compact">
+          {row.error}
+        </Notice>
+      )}
+      <span>
+        {row.startedAt ?? "not started"} to {row.finishedAt ?? "not finished"}
+        {row.capability ? ` via ${row.capability}` : ""}
+      </span>
+      {output && <code>{output}</code>}
+    </Stack>
+  );
+}
+
 function stageColumns(
   latest: WorkflowRun | undefined,
 ): Array<{
@@ -103,7 +143,7 @@ function stageColumns(
       header: "Stage",
       render: (stage) => (
         <>
-          <strong>{stage.stage}</strong>
+          <strong>{stage.label}</strong>
           {stage.requiresApproval && (
             <>
               {" "}
@@ -132,6 +172,11 @@ function stageColumns(
       render: (stage) => (stage.checkpointed ? "yes" : "no"),
     },
     { key: "lastRun", header: "Last run", render: (stage) => lastRunCell(stage, latest) },
+    {
+      key: "detail",
+      header: "Stage detail (last run)",
+      render: (stage) => stageDetailCell(stage, latest),
+    },
   ];
 }
 
@@ -146,7 +191,7 @@ function WorkflowCard({
     <Card padding="md">
       <Stack gap="3">
         <Flex align="center" justify="between" gap="3">
-          <strong>{workflow.labelKey}</strong>
+          <strong>{workflow.label}</strong>
           <Flex align="center" gap="2">
             <Badge tone={workflow.runnable ? "success" : "neutral"} size="sm">
               {workflow.runnable ? "Runnable" : "Read-only"}
