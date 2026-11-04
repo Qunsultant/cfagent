@@ -305,12 +305,15 @@ describe("requiresStepUpForMint (API-key mint pilot)", () => {
     ).toBe(true);
   });
 
-  it("wiring on allows minting when authentication is fresh", () => {
+  // #3102 (#945 Q4): mint uses the 5-minute
+  // integration-credential-management window, not the 15-minute
+  // default — so the fresh point moves from 5 minutes to 4.
+  it("wiring on allows minting when authentication is fresh (inside the 5-minute Q4 window)", () => {
     expect(
       requiresStepUpForMint(
         wiredSession({ authTimeMs: 1_000_000 }),
         true,
-        1_000_000 + 5 * 60 * 1000,
+        1_000_000 + 4 * 60 * 1000,
       ),
     ).toBe(false);
   });

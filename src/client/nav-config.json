@@ -464,6 +464,14 @@
       "description": "Decide what the system proposed: goal proposals, adaptation candidates, and strategy re-selections \u2014 nothing activates without a person"
     },
     {
+      "id": "risk-analysis",
+      "navGroup": "order",
+      "crumb": "Risk Analysis",
+      "category": "Execution",
+      "icon": "Order",
+      "description": "Symbol-based risk profile: anatomy, defense playbook, stress scenarios, and AI risk dossier"
+    },
+    {
       "id": "scanner",
       "retain": true,
       "navGroup": "options-screener",
@@ -1043,6 +1051,15 @@
         "badge": "Options",
         "badgeType": "pro",
         "description": "Manual options order ticket \u2014 build a multi-leg strategy with broker preview and human approval"
+      },
+      {
+        "id": "risk-analysis",
+        "label": "Risk Analysis",
+        "shortLabel": "Risk",
+        "icon": "Order",
+        "badge": "Risk",
+        "badgeType": "neutral",
+        "description": "Symbol-based risk profile \u2014 anatomy, playbook, scenarios, and AI dossier"
       }
     ]
   },
@@ -1181,6 +1198,10 @@
       "params": {
         "assetClass": "options"
       }
+    }
+,
+    "order:risk-analysis": {
+      "tab": "risk-analysis"
     }
   },
   "deepLinkSurfaces": [
