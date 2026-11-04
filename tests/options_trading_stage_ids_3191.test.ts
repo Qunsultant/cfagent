@@ -11,8 +11,7 @@
  */
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { TRADE_APPROVAL_STEP_IDS } from "../src/agents/trading-trade-workflow";
-import { OPTIONS_SCREEN_PHASES } from "../src/agents/routes/etradeOptionsScreen";
+import { OPTIONS_SCREEN_PHASES, TRADE_APPROVAL_STEP_IDS } from "../src/workflows/stageRuntimeIds";
 import { workflowById } from "../src/workflows/workflowCatalog";
 
 const read = (path: string) => readFileSync(path, "utf8");
@@ -62,6 +61,18 @@ describe("options screen phases (#3191)", () => {
   it("the catalog declares an exact partition of the phases", () => {
     const declared = workflowById("options-screener")!.stages.flatMap((s) => s.runtimeStageIds ?? []);
     expect([...declared].sort()).toEqual([...OPTIONS_SCREEN_PHASES].sort());
+  });
+});
+
+describe("the catalog stays importable from the browser (#3191)", () => {
+  it("its ids come from a dependency-free module, never from a server flow", () => {
+    const catalog = readFileSync("src/workflows/workflowCatalog.ts", "utf8");
+    // A server import here pulls the agents SDK (`cloudflare:workers`) into the
+    // client bundle and breaks the frontend build - it did, once.
+    expect(catalog).not.toMatch(/from "\.\.\/agents\//);
+    expect(catalog).not.toMatch(/from "\.\/(paymentWorkflowFlow|sagaWorkflowFlow)"/);
+    const shared = readFileSync("src/workflows/stageRuntimeIds.ts", "utf8");
+    expect(shared).not.toMatch(/^import /m);
   });
 });
 

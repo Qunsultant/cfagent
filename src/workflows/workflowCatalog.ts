@@ -16,10 +16,12 @@
  */
 
 import { STAGE_NAMES, type StageName } from "../messaging/messagingPorts";
-import { PAYMENT_STEP_IDS } from "./paymentWorkflowFlow";
-import { SAGA_STEP_IDS } from "./sagaWorkflowFlow";
-import { TRADE_APPROVAL_STEP_IDS } from "../agents/trading-trade-workflow";
-import { OPTIONS_SCREEN_PHASES } from "../agents/routes/etradeOptionsScreen";
+import {
+  OPTIONS_SCREEN_PHASES,
+  PAYMENT_STEP_IDS,
+  SAGA_STEP_IDS,
+  TRADE_APPROVAL_STEP_IDS,
+} from "./stageRuntimeIds";
 import type { StageRetryBucket } from "./stageRunnerPorts";
 
 /** The families the programme covers. */
