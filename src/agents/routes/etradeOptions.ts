@@ -4,27 +4,10 @@
  * no behavior change.
  *
  * Owns the contiguous options block (between the E*TRADE broker
- * account-activity delegation and the E*TRADE watchlists block):
- *   GET  /etrade/options/chains
- *   GET  /options/latest                       (#223 autonomous options runs)
- *   POST /etrade/options/strategy          (#314 advertised spelling -
- *         delegates to the single-owner strategy-discovery handler)
- *   GET  /etrade/options/expire-dates
- *   GET  /etrade/options/scans
- *   GET  /etrade/options/scans/diff
- *   GET  /etrade/options/discovery-runs        (#126 scheduled discovery)
- *   GET  /etrade/options/discovery-runs/:id    (#126 scheduled discovery)
- *   GET  /etrade/options/iv-history
- *   GET  /etrade/options/profiles
- *   POST /etrade/options/profiles
- *   POST /trading/options/llm-ideas
- *   POST /trading/options/compare
- *   POST /trading/options/recommend        (the #314 single-owner handler)
- *   GET  /trading/options/catalog
- *   POST /trading/options/strategies | POST /trading/options/best-trade
- *   POST|GET /trading/options/screen
- *   POST|GET /trading/options/unified
- *   POST|GET /trading/options/config
+ * account-activity delegation and the E*TRADE watchlists block). Its
+ * route list and order are pinned by tests/thin_router_inventory.test.ts
+ * and tests/etrade_routes_resplit_995.test.ts; the list is not repeated
+ * here, so the pins stay the one place a route change is recorded.
  *
  * The blocks were contiguous in routeRequest, so this module exports ONE
  * handler invoked from routeRequest at the EXACT position the original
@@ -47,6 +30,7 @@
  */
 
 import { unauthenticatedResponse } from "./routeIdentity";
+import { executeOptionsRegenerate } from "./optionsRegenerate";
 import type { AgentContext } from "agents";
 import { ETradeService } from "../../services/etrade";
 import {
@@ -907,6 +891,12 @@ export async function handleEtradeOptionsRoutes(
         }
         return Response.json({ error }, { status: 500 });
       }
+    }
+
+    // Issue #2603: regenerate a stored options run. Sibling of the unified
+    // route: the request is rebuilt server-side from the stored record.
+    if (path.endsWith("/trading/options/regenerate") && request.method === "POST") {
+      return executeOptionsRegenerate({ request, sessionId, ctx });
     }
 
     // Omnichannel Unified Options Intelligence Endpoint

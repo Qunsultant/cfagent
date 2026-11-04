@@ -605,6 +605,8 @@ const EXPECTED_INVENTORY = [
   "handleEtradeOptionsRoutes :: endsWith(\"/trading/options/best-trade\")",
   "handleEtradeOptionsRoutes :: endsWith(\"/best-trade\")",
   "handleEtradeOptionsRoutes :: endsWith(\"/trading/options/screen\")",
+  // Issue #2603: options-run regenerate (sibling of the unified route).
+  "handleEtradeOptionsRoutes :: endsWith(\"/trading/options/regenerate\")",
   "handleEtradeOptionsRoutes :: endsWith(\"/trading/options/unified\")",
   "handleEtradeOptionsRoutes :: endsWith(\"/trading/options/config\")",
   "handleEtradeOptionsRoutes :: endsWith(\"/options/strategy-reviews\")",
