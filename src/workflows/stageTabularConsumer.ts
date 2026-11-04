@@ -71,6 +71,7 @@
  */
 
 import type { StageClaimStore } from "./stageReportConsumer";
+import { formatStageMessage } from "./stageConfig";
 
 export type TabularFormat = "xlsx" | "csv";
 
@@ -157,12 +158,12 @@ export async function consumeTabularGenerate(args: {
   // Poison: wrong format, or no reference to a run.
   if (format !== "xlsx" && format !== "csv") {
     return deadLetter(
-      `poison tabular generate: format "${String(format)}" is not xlsx or csv; refusing without retry.`,
+      formatStageMessage("TABULAR_WRONG_FORMAT", `format "${String(format)}" is not xlsx or csv; refusing without retry`),
     );
   }
   if (!runId?.trim()) {
     return deadLetter(
-      "poison tabular generate: runId missing; refusing without retry.",
+      formatStageMessage("TABULAR_MISSING_RUN", "runId missing; refusing without retry"),
     );
   }
   // Exactly-once effect: redelivery of a claimed key suppresses.
