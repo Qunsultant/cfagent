@@ -846,7 +846,12 @@ const STEP5B_PORT_SITES: Array<[string, string, number]> = [
   // memberships for the active-membership check), same factory
   // as the revoke handler's tenant check — no new funnel,
   // no bypass.
-  ["src/server.ts", "listSessionFamilyEntries", 15],
+  // Bumped 15 -> 17 for issue #3077: the bootstrap-proposals list
+  // route adds one list site in server.ts (proposal records by
+  // prefix) and the bootstrap-current route adds one (memberships
+  // for the bootstrap-divergence check), same factory — no new
+  // funnel, no bypass.
+  ["src/server.ts", "listSessionFamilyEntries", 17],
   ["src/server.ts", "wiredAccessRequestStore", 1],
   ["src/server.ts", "wiredMembershipStore", 10],
 ];
