@@ -10,8 +10,7 @@
  */
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { PAYMENT_STEP_IDS } from "../src/workflows/paymentWorkflowFlow";
-import { SAGA_STEP_IDS } from "../src/workflows/sagaWorkflowFlow";
+import { PAYMENT_STEP_IDS, SAGA_STEP_IDS } from "../src/workflows/stageRuntimeIds";
 import { WORKFLOW_CATALOG, workflowById } from "../src/workflows/workflowCatalog";
 
 function stepIdsIn(sourcePath: string): string[] {
