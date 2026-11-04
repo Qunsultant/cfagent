@@ -6,6 +6,7 @@ import { codedMessage, resolveOutcome } from "../outcomes/outcomeAspects";
 import { Card, Badge, TextInput, Button, EmptyState, Select, Spinner, Table, Modal, Notice, PageShell, FieldShell, useToast } from "./components/ui";
 import { getRoute } from "./routes";
 import { parseTabFromSearch, subscribeToRouteChanges } from "./router";
+import { readTenantProvidersState, BROKER_OPTIONS } from "./tenantProviders";
 import {
   ETradeQuote,
   ScreenedStockItem,
@@ -1014,10 +1015,14 @@ export function ETradeTradingHub({
   const fetchOrders = async () => {
     setOrdersLoading(true);
     try {
-      const resp = await fetch("/api/etrade/orders");
+      const resp = await fetch("/api/broker/orders");
       if (resp.ok) {
-        const data = await resp.json() as { total: number; orders: TradeRecord[] };
-        if (data.orders) setOrders(data.orders);
+        const data = await resp.json() as { total: number; orders: TradeRecord[]; trades?: TradeRecord[] };
+        // Issue #3089: the broker route lists stored drafts as `trades`
+        // (the legacy route's shape); the old `orders` shape is kept as
+        // a fallback so either listing populates the table.
+        const rows = data.trades ?? data.orders;
+        if (rows) setOrders(rows);
       }
     } catch {
       // Ignore
@@ -1341,10 +1346,15 @@ export function ETradeTradingHub({
     }
 
     try {
-      const resp = await fetch("/api/etrade/order/preview", {
+      // Issue #3089: preview routes through the selected broker, not
+      // the hardwired E*TRADE route.
+      const brokerId = readTenantProvidersState().brokerId;
+      const brokerLabel = BROKER_OPTIONS.find((o) => o.id === brokerId)?.label ?? brokerId;
+      const resp = await fetch("/api/broker/order/preview", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-environment": activeEnv },
         body: JSON.stringify({
+          broker: brokerId,
           assetClass: orderAssetClass,
           symbol: orderSymbol.toUpperCase(),
           orderAction,
@@ -1362,7 +1372,7 @@ export function ETradeTradingHub({
         setActiveDraft(data);
         fetchOrders();
       } else {
-        setOrderError(data.error || "Failed to preview order on E*TRADE");
+        setOrderError(data.error || `Failed to preview order on ${brokerLabel}`);
       }
     } catch (err: any) {
       setOrderError(err.message || "Failed to preview order");
@@ -1380,7 +1390,7 @@ export function ETradeTradingHub({
     setExecutingDraft(true);
     setOrderError("");
     try {
-      const resp = await fetch("/api/etrade/order/execute", {
+      const resp = await fetch("/api/broker/order/execute", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-environment": activeEnv },
         body: JSON.stringify({
@@ -1424,10 +1434,11 @@ export function ETradeTradingHub({
     setExecutingDraft(true);
     setOrderError("");
     try {
-      const previewResp = await fetch("/api/etrade/order/preview", {
+      const previewResp = await fetch("/api/broker/order/preview", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-environment": activeEnv },
         body: JSON.stringify({
+          broker: readTenantProvidersState().brokerId,
           assetClass: activeDraft.optionLegs?.some((leg) => leg.securityType === "OPTN") ? "options" : "equity",
           symbol: activeDraft.symbol,
           orderAction: activeDraft.action,
@@ -1445,7 +1456,8 @@ export function ETradeTradingHub({
         setLastExecutionResult(null);
         setOrderError("Fresh preview ready — review the updated execution preview above, then approve to submit. Nothing has been executed.");
       } else {
-        setOrderError(freshDraft.error || "Failed to generate fresh preview on E*TRADE");
+        const brokerLabel = BROKER_OPTIONS.find((o) => o.id === readTenantProvidersState().brokerId)?.label ?? "E*TRADE";
+        setOrderError(freshDraft.error || `Failed to generate fresh preview on ${brokerLabel}`);
       }
     } catch (err: any) {
       setOrderError(err.message || "Failed to refresh preview");

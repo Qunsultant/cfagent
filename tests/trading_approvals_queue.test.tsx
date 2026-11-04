@@ -4,7 +4,7 @@
  * (preview -> proposal -> 24h wait -> executeApprovedOrder) but the door
  * had no UI. The approvals queue lists proposed orders with authorizer,
  * expiry, and approve/reject actions wired to the EXISTING approval path
- * (POST /etrade/order/execute) — no new backend route.
+ * (POST /broker/order/execute) — the broker-routed approval path (#3089).
  *
  * Data source: GET /etrade/orders (existing, last 50 trades), filtered
  * client-side to status 'previewed'. Expiry is the preview flow's own
@@ -99,12 +99,12 @@ function mockOrders(lists: Array<Record<string, unknown>[]>, executeStatus = 200
       body = undefined;
     }
     calls.push({ url, method, body });
-    if (url.includes("/etrade/orders") && method === "GET") {
+    if (url.includes("/broker/orders") && method === "GET") {
       const list = lists[Math.min(listCalls, lists.length - 1)];
       listCalls += 1;
       return { ok: true, status: 200, json: async () => ({ count: list.length, trades: list }) } as any;
     }
-    if (url.includes("/etrade/order/execute") && method === "POST") {
+    if (url.includes("/broker/order/execute") && method === "POST") {
       return { ok: executeStatus >= 200 && executeStatus < 300, status: executeStatus, json: async () => executeBody } as any;
     }
     return { ok: false, status: 404, json: async () => ({ error: "not found" }) } as any;
@@ -156,7 +156,7 @@ describe("Issue #1327 — TradingApprovalsQueue", () => {
       buttonByText("Approve and place order")!.click();
     });
     await flush();
-    const execute = calls.find((c) => c.url.includes("/etrade/order/execute"));
+    const execute = calls.find((c) => c.url.includes("/broker/order/execute"));
     expect(execute).toBeDefined();
     expect(execute!.method).toBe("POST");
     expect(execute!.body).toMatchObject({ orderId: "ord-1", decision: "approved" });
@@ -177,7 +177,7 @@ describe("Issue #1327 — TradingApprovalsQueue", () => {
       buttonByText("Reject proposal")!.click();
     });
     await flush();
-    const execute = calls.find((c) => c.url.includes("/etrade/order/execute"));
+    const execute = calls.find((c) => c.url.includes("/broker/order/execute"));
     expect(execute).toBeDefined();
     expect(execute!.body).toMatchObject({ orderId: "ord-1", decision: "rejected" });
     expect(container.textContent || "").toContain("No pending approvals");

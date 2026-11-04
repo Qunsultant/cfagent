@@ -61,7 +61,7 @@ function installFetch(opts: { dlqStatus?: number; dlqAfterReplay?: unknown[] } =
     if (url === "/api/jobs?limit=30") {
       return { ok: true, status: 200, json: async () => ({ jobs: [jobRow("job-1", "Nightly screen", "completed"), jobRow("job-2", "Options scan", "failed")] }) } as Response;
     }
-    if (url === "/api/etrade/orders") {
+    if (url === "/api/broker/orders") {
       return { ok: true, status: 200, json: async () => ({ trades: [] }) } as Response;
     }
     if (url === "/api/ops/dlq/records") {
