@@ -21,9 +21,11 @@ import {
   getCanonicalReport,
   isCanonicalReportOwnedBy,
   parseResearchReportBody,
+  refreshCanonicalReportPdfFields,
   resolveCanonicalReportBodyWithBackfill,
   sha256Hex,
   storeReportAtGenerationWithR2,
+  type RefreshCanonicalPdfFieldsResult,
 } from "../../services/scheduledReports";
 
 /**
@@ -442,6 +444,36 @@ export async function persistScreenerReportCanonical(ctx: ReportDispatchContext,
  * a persistence failure never breaks the screen, and it
  * is never silently dropped either.
  */
+/**
+ * Issue #2869 slice 1 follow-up — refresh a canonical
+ * mas_reports row's PDF fields after a queued consume
+ * generated them. Thin wrapper over
+ * scheduledReports.refreshCanonicalReportPdfFields, so
+ * the one recorder owns the update: update-only (never
+ * creates a row), monotonic (missing fills, failed may
+ * upgrade to generated, generated never overwritten),
+ * owner re-checked. Called by the OrchestratorAgent
+ * door (refreshCanonicalPdfFields) from the queue
+ * handler, never by the ScreenerAgent — the screener
+ * keeps zero canonical-store references.
+ */
+export async function refreshCanonicalPdfFields(
+  ctx: ReportDispatchContext,
+  input: {
+    generationId: string;
+    userLogin: string;
+    pdfKey: string;
+    pdfStatus?: string;
+    pdfError?: string;
+  },
+): Promise<RefreshCanonicalPdfFieldsResult> {
+  return refreshCanonicalReportPdfFields(
+    ctx.ensureTables() as never,
+    ctx.env as never,
+    input,
+  );
+}
+
 export async function persistParentScreenReportCanonical(
   ctx: ReportDispatchContext,
   input: ParentScreenReportInput,

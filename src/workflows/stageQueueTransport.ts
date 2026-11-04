@@ -41,12 +41,14 @@
  *   path: when the in-process leg failed (its claim is released
  *   on generation failure), the queued consume can still
  *   generate from persisted data.
- * - It does not refresh the canonical mas_reports row's pdfKey
- *   when a queued consume generates after the in-process leg
- *   failed; the generated pdf fields land on the persisted
- *   analysis key (what replay reads). Refreshing the canonical
- *   row from a queued consume is a follow-up decision, not
- *   smuggled into this slice.
+ * - It does not itself refresh the canonical mas_reports row's
+ *   pdfKey when a queued consume generates after the in-process
+ *   leg failed; the generated pdf fields land on the persisted
+ *   analysis key (what replay reads). The slice 1 follow-up
+ *   (#2869 pdfKey refresh, refreshCanonicalReportPdfFields via
+ *   the one recorder) refreshes the canonical row from the
+ *   queue handler on a generated queued outcome; this
+ *   transport's consume return carries the pdf fields for it.
  * - Failed runs publish nothing: a run with no full analysis set
  *   (allStocks empty) has nothing for the consumer to generate
  *   from, and the consumer would throw rather than regenerate.
