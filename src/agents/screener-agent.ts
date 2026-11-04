@@ -2184,9 +2184,11 @@ export class ScreenerAgent extends PortThink {
    * dead-lettered, the caller also acks (the consumer
    * already dead-lettered); on a missing persisted
    * analysis the consumer throws and the caller retries
-   * into the DLQ. This method does NOT refresh the
-   * canonical report row's pdfKey — that refresh is
-   * not in slice 1 (see stageQueueTransport.ts).
+   * into the DLQ. This method does NOT itself refresh
+   * the canonical report row's pdfKey — on a generated
+   * outcome it returns the generated PDF fields so the
+   * queue handler refreshes the row through the one
+   * recorder (slice 1 follow-up, #2869).
    * (No canonical-store reference lives in this file:
    * the canonical report copy is written exactly once by
    * the orchestrator seam, never here.)
@@ -2202,7 +2204,7 @@ export class ScreenerAgent extends PortThink {
       provenance: { parentRunId: string; traceId?: string };
     },
     attempt = 1,
-  ): Promise<{ status: "generated" | "duplicate-suppressed" | "dead-lettered"; reason?: string }> {
+  ): Promise<{ status: "generated" | "duplicate-suppressed" | "dead-lettered"; reason?: string; pdfKey?: string; pdfStatus?: string; pdfError?: string }> {
     const { consumeAnalysisDoneMessage } = await import("../workflows/stageReportProduction");
     const { isAnalysisDoneStageMessage } = await import("../workflows/stageQueueTransport");
     if (!isAnalysisDoneStageMessage(message)) {
@@ -2234,6 +2236,22 @@ export class ScreenerAgent extends PortThink {
       // pdf fields (what replay reads), mirroring the
       // in-process leg's copy-back.
       await this.ctx.storage.put(message.artifactKeys[0], generatedPersisted);
+      // Issue #2869 slice 1 follow-up: carry the generated
+      // PDF fields back to the queue handler, which refreshes
+      // the canonical row through the one recorder. This
+      // method itself keeps zero canonical-store references
+      // — it only reports what generation produced.
+      const gp = generatedPersisted as Partial<{
+        pdfKey: unknown;
+        pdfStatus: unknown;
+        pdfError: unknown;
+      }>;
+      return {
+        ...outcome,
+        ...(typeof gp.pdfKey === "string" ? { pdfKey: gp.pdfKey } : {}),
+        ...(typeof gp.pdfStatus === "string" ? { pdfStatus: gp.pdfStatus } : {}),
+        ...(typeof gp.pdfError === "string" ? { pdfError: gp.pdfError } : {}),
+      };
     }
     return outcome;
   }
