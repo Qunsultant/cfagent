@@ -50,7 +50,7 @@ function mockFetch() {
       return okJson({ oauthAuthenticated: true, activeEnvironment: "TEST", environment: "TEST", configured: true, hasApiKey: true });
     }
     if (url.startsWith("/api/etrade/positions")) return okJson({ account: null, positions: [] });
-    if (url.startsWith("/api/etrade/orders")) return okJson({ orders: [] });
+    if (url.startsWith("/api/broker/orders")) return okJson({ orders: [] });
     return okJson({});
   });
   vi.stubGlobal("fetch", fetchMock);

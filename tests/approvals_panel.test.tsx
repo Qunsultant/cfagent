@@ -53,7 +53,7 @@ afterEach(() => {
 function mockFetch(trades: unknown[], pending: unknown[]) {
   const fetchMock = vi.fn(async (input: any) => {
     const url = String(input);
-    if (url === "/api/etrade/orders") {
+    if (url === "/api/broker/orders") {
       return { ok: true, status: 200, json: async () => ({ trades }) } as any;
     }
     if (url === "/api/trading/reports/pending") {

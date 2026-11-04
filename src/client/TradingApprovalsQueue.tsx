@@ -34,6 +34,13 @@ import { useCallback, useEffect, useState } from "react";
 import { apiFetch as fetch } from "./apiFetch";
 import { Badge, Button, Card, EmptyState, Modal, Notice, Spinner } from "./components/ui";
 import { formatCountdown } from "./PendingReviewQueue";
+import { BROKER_OPTIONS } from "./tenantProviders";
+
+/** Issue #3089: broker label for a stored draft. Legacy rows carry no
+ * broker — every pre-S3 draft is E*TRADE. */
+export function brokerLabelForTrade(trade: { broker?: string | null }): string {
+  return BROKER_OPTIONS.find((o) => o.id === trade.broker)?.label ?? "E*TRADE";
+}
 
 /** The preview flow's HITL window: draft created at preview, schedule fires 900s later. */
 export const PREVIEW_WINDOW_MS = 900 * 1000;
@@ -50,6 +57,9 @@ export interface TradeProposal {
   proposerDid: string | null;
   authorizerDid: string | null;
   previewNotes: string | null;
+  /** Issue #3089: broker the draft was previewed on. Absent on
+   * legacy rows (all E*TRADE). */
+  broker?: string | null;
   /** Server-computed payload version (issue #1703); absent on pre-#1703 responses. */
   payloadHash?: string;
   createdAt: string;
@@ -112,7 +122,7 @@ export function TradingApprovalsQueue() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/etrade/orders");
+      const res = await fetch("/api/broker/orders");
       const data = (await res.json().catch(() => null)) as { trades?: unknown } | null;
       if (!res.ok) {
         setError("Failed to load pending approvals.");
@@ -143,7 +153,7 @@ export function TradingApprovalsQueue() {
     setError(null);
     setNotice(null);
     try {
-      const res = await fetch("/api/etrade/order/execute", {
+      const res = await fetch("/api/broker/order/execute", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({ orderId: confirm.trade.id, decision: confirm.decision }),
@@ -163,7 +173,7 @@ export function TradingApprovalsQueue() {
       }
       setNotice(
         confirm.decision === "approved"
-          ? `Order ${confirm.trade.id} approved.`
+          ? `Order ${confirm.trade.id} approved at ${brokerLabelForTrade(confirm.trade)}.`
           : `Proposal ${confirm.trade.id} rejected.`
       );
       setConfirm(null);
@@ -232,7 +242,7 @@ export function TradingApprovalsQueue() {
                     {trade.action} {trade.quantity} × {trade.symbol}
                   </span>
                   <span style={{ fontSize: "var(--font-size-body)", color: "var(--color-text-muted)" }}>
-                    {trade.orderType} · ${trade.price} · total ${trade.totalValue}
+                    {trade.orderType} · ${trade.price} · total ${trade.totalValue} · {brokerLabelForTrade(trade)}
                   </span>
                 </div>
                 <div style={{ fontSize: "var(--font-size-body)", color: "var(--color-text-muted)", marginTop: "0.25rem" }}>
@@ -296,7 +306,7 @@ export function TradingApprovalsQueue() {
       <Modal
         open={confirm !== null}
         onClose={() => setConfirm(null)}
-        title={confirm?.decision === "approved" ? "Approve order" : "Reject proposal"}
+        title={confirm?.decision === "approved" ? `Approve order at ${confirm ? brokerLabelForTrade(confirm.trade) : "E*TRADE"}` : "Reject proposal"}
         footer={
           <>
             <Button variant="secondary" size="sm" onClick={() => setConfirm(null)} disabled={acting}>
@@ -312,7 +322,7 @@ export function TradingApprovalsQueue() {
           <div>
             {confirm.decision === "approved" ? (
               <p>
-                Approve and place this order? {confirm.trade.action} {confirm.trade.quantity} ×{" "}
+                Approve and place this order at {brokerLabelForTrade(confirm.trade)}? {confirm.trade.action} {confirm.trade.quantity} ×{" "}
                 {confirm.trade.symbol} ({confirm.trade.orderType}) at ${confirm.trade.price}, total $
                 {confirm.trade.totalValue}. This places a real order through the approval door.
               </p>
