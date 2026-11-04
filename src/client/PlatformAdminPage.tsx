@@ -5,13 +5,14 @@ import { NavIcons } from "./components/NavigationMenu";
  * Promotes Platform Admin from an overlay drawer dialog into a first-class,
  * full-page destination in the main viewport (<main className="tab-viewport">).
  *
- * Tabbed interface covers the eight administration surfaces from platformAdminConfig:
+ * Tabbed interface covers the nine administration surfaces from platformAdminConfig:
  *  - ads: Workspace Banners & Sponsor Spotlight
  *  - background-tasks: Async execution queue & background jobs
  *  - scheduled-goals: ScheduledAgent goals, ticks, and add-goal form
  *  - provenance: Technical diagnostics, DID, MCP client, and institutional ledger
  *  - api-keys: MCP transport access for external clients
  *  - data-providers: Market-data provider provisioning lifecycle
+ *  - accounts: Account administration — self-service setup, tier, credits, subscriptions & catalogue
  *  - iaaa-admin: Read-only memberships, genesis, and audit
  *  - admin-access: Request admin access from the platform owner
  *
@@ -42,6 +43,7 @@ import { ScheduledGoalsPanel } from "./ScheduledGoalsPanel";
 import { JobsPanel } from "./JobsPanel";
 import { ApiKeysPanel } from "./ApiKeysPanel";
 import { DataProvidersPanel } from "./DataProvidersPanel";
+import { AccountAdminPanel } from "./AccountAdminPanel";
 import { IaaaAdminPanel } from "./IaaaAdminPanel";
 import {
   AdsSection,
@@ -74,6 +76,7 @@ export const PLATFORM_ADMIN_TABS: TabOption<PlatformAdminSectionId>[] = [
   { id: "provenance", label: "Diagnostics & Provenance", icon: <NavIcons.Provenance /> },
   { id: "api-keys", label: "API Keys", icon: <NavIcons.ApiKeys /> },
   { id: "data-providers", label: "Data Providers", icon: <NavIcons.DataProviders /> },
+  { id: "accounts", label: "Accounts", icon: <NavIcons.Contracts /> },
   { id: "iaaa-admin", label: "IAAA Admin", icon: <NavIcons.IaaaAdmin /> },
   { id: "admin-access", label: "Admin Access", icon: <NavIcons.AdminAccess /> },
 ];
@@ -251,6 +254,16 @@ export function PlatformAdminPage({
             <small>Provisioning lifecycle for market-data providers</small>
           </div>
           <DataProvidersPanel />
+        </Card>
+      </TabPanel>
+
+      <TabPanel idBase="platform-admin" tabId="accounts" active={active === "accounts"}>
+        <Card padding="md">
+          <div className="section-label-row">
+            <span>Accounts</span>
+            <small>Self-service account setup, tier, credits, subscriptions &amp; catalogue</small>
+          </div>
+          <AccountAdminPanel />
         </Card>
       </TabPanel>
 

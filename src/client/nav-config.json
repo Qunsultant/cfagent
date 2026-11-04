@@ -942,6 +942,13 @@
         "description": "Provisioning lifecycle for market-data providers"
       },
       {
+        "id": "platform-admin:accounts",
+        "label": "Accounts",
+        "shortLabel": "Self-service account setup, tier, credits, subscriptions & catalogue",
+        "icon": "Contracts",
+        "description": "Self-service account setup, tier, credits, subscriptions & catalogue"
+      },
+      {
         "id": "platform-admin:iaaa-admin",
         "label": "IAAA Admin",
         "shortLabel": "Read-only memberships, genesis & audit",
@@ -1229,6 +1236,7 @@
         "provenance",
         "api-keys",
         "data-providers",
+        "accounts",
         "iaaa-admin",
         "admin-access"
       ]
@@ -1408,6 +1416,12 @@
           "label": "Data Providers",
           "description": "Provisioning lifecycle for market-data providers",
           "icon": "DataProviders"
+        },
+        {
+          "id": "accounts",
+          "label": "Accounts",
+          "description": "Self-service account setup, tier, credits, subscriptions & catalogue",
+          "icon": "Contracts"
         },
         {
           "id": "iaaa-admin",

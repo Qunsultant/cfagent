@@ -23,6 +23,7 @@ export type PlatformAdminSectionId =
   | "provenance"
   | "api-keys"
   | "data-providers"
+  | "accounts"
   | "iaaa-admin"
   | "admin-access";
 
