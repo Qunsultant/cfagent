@@ -126,6 +126,65 @@ function inMemoryStageClaimStore(): StageClaimStore {
   };
 }
 
+/**
+ * Issue #2869 slice 1 — the shared consume of one analysis-done
+ * message, used by BOTH the in-process PDF leg below and the
+ * queue executor (ScreenerAgent.consumeQueuedAnalysisDone).
+ * One helper, not two consume paths: claims (SQL-backed when
+ * sql is supplied, in-memory only for contexts without SQL),
+ * persisted-analysis read by artifact key, the one generation
+ * module's PDF leg as the default generate, and a logged
+ * dead-letter. It does NOT re-put the generated analysis:
+ * the caller owns copy-back (the in-process leg copies pdf
+ * fields onto its live result; the queue leg re-puts the
+ * generated persisted object). A missing persisted analysis
+ * throws from consumeAnalysisDone — the queue caller retries
+ * it to the DLQ; the in-process caller records it as a
+ * failed leg. Never a second consumer, never a second claim
+ * store, never a live re-fetch.
+ */
+export async function consumeAnalysisDoneMessage(args: {
+  env: unknown;
+  storage: StagePdfBlobStore;
+  sql?: SqlStorage;
+  claims?: StageClaimStore;
+  message: import("./stageMessage").StageMessage;
+  userLogin: string;
+  attempt?: number;
+  generate?: StagePdfGenerate;
+}): Promise<import("./stageReportConsumer").StageConsumeResult> {
+  const { env, storage, message, userLogin } = args;
+  const claims: StageClaimStore =
+    args.claims ??
+    (args.sql
+      ? createSqlStageClaimStore(() => args.sql as SqlStorage)
+      : inMemoryStageClaimStore());
+  const generate: StagePdfGenerate =
+    args.generate ??
+    (async (input) => {
+      const { generateStockReportArtifacts } = await import(
+        "../services/stockReportArtifacts"
+      );
+      return generateStockReportArtifacts({
+        env: env as never,
+        storage: storage as never,
+        result: input.result as never,
+        userLogin: input.userLogin,
+        formats: ["pdf"],
+      });
+    });
+  return consumeAnalysisDone({
+    message,
+    attempt: args.attempt ?? 1,
+    claims,
+    readPersisted: async (key) => (await storage.get(key)) as PersistedAnalysis | null,
+    generate,
+    deadLetter: async ({ reason }) => {
+      console.warn("[stageReportProduction] stage message dead-lettered:", reason);
+    },
+  });
+}
+
 export async function generateRunPdfViaStageConsumer(args: {
   env: unknown;
   storage: StagePdfBlobStore;
@@ -185,14 +244,13 @@ export async function generateRunPdfViaStageConsumer(args: {
         formats: ["pdf"],
       });
     };
-    const outcome = await consumeAnalysisDone({
-      message,
+    const outcome = await consumeAnalysisDoneMessage({
+      env,
+      storage,
       claims,
-      readPersisted: async (key) => (await storage.get(key)) as PersistedAnalysis | null,
+      message,
+      userLogin,
       generate,
-      deadLetter: async ({ reason }) => {
-        console.warn("[stageReportProduction] stage message dead-lettered:", reason);
-      },
     });
     if (outcome.status === "duplicate-suppressed") {
       // Raced claim between the pre-check and consume:

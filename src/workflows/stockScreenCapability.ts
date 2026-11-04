@@ -193,7 +193,7 @@ export const STOCK_SCREEN_CAPABILITIES: readonly StockScreenCapability[] = [
     name: "Report generation (generate/store/serve)",
     entry: "unifiedReportPipeline via ReportAssetAgent (analysis-done consumer)",
     engine:
-      "consumeAnalysisDone (production PDF leg) via stageReportProduction.generateRunPdfViaStageConsumer; tabular XLSX/CSV legs stay in the one generation module (stockReportArtifacts)",
+      "consumeAnalysisDone (production PDF leg) via stageReportProduction.generateRunPdfViaStageConsumer; tabular XLSX/CSV legs stay in the one generation module (stockReportArtifacts); slice 1 queue transport: analysis-done published to screener-events after the canonical persist and consumed via ScreenerAgent.consumeQueuedAnalysisDone (same consumer, durable claims)",
     provider: "none (report generation never fetches)",
     persistence: "mas_reports via storeReportStage (idempotent on generationId)",
     delivery: "Delivery bridge via serveReportStage consumers",
@@ -201,6 +201,7 @@ export const STOCK_SCREEN_CAPABILITIES: readonly StockScreenCapability[] = [
       "stageReportConsumer.consumeAnalysisDone (production PDF leg)",
       "stageReportProduction.generateRunPdfViaStageConsumer",
       "stageMessage (analysis-done)",
+      "stageQueueTransport (slice 1 queue transport + executor)",
     ],
     status: "canonical",
     extensionPoint: "stage",
