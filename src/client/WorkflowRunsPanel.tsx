@@ -360,6 +360,17 @@ export function WorkflowRunsPanel() {
   // #2786 Part 2 (scope d-ii): per-browser beacon preference.
   const [beaconsPaused, setBeaconsPaused] = useState(() => isAdBeaconsPaused());
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  /**
+   * Issue #3163: a deep link can name the run to open (`?run=<id>`), which is
+   * how the workflow catalog links a stage's last run to its full record.
+   * Read once on mount; an id that is not in the loaded page simply leaves
+   * the ledger closed rather than opening an empty dialog.
+   */
+  const [pendingRunId] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    const id = new URLSearchParams(window.location.search).get("run");
+    return id && id.trim() ? id.trim() : null;
+  });
   const [loadedAt, setLoadedAt] = useState<string | null>(null);
   // #2786 Part 2 (scope d-iii): session-scoped prune, preview first.
   const [pruneOpen, setPruneOpen] = useState(false);
@@ -492,6 +503,10 @@ export function WorkflowRunsPanel() {
   const filtersActive = triggerFilter !== "all" || statusFilter !== "all" || query.trim() !== "";
 
   const selected = useMemo(() => runs.find((run) => run.id === selectedId) ?? null, [runs, selectedId]);
+  useEffect(() => {
+    if (!pendingRunId) return;
+    if (runs.some((run) => run.id === pendingRunId)) setSelectedId(pendingRunId);
+  }, [pendingRunId, runs]);
 
   const columns = [
     {
@@ -953,10 +968,10 @@ function RunDetail({ run }: { run: WorkflowRun }) {
           {run.fanoutCapReason}
         </Notice>
       )}
-      {run.resumedSkippedUnits.length > 0 && (
+      {(run.resumedSkippedUnits ?? []).length > 0 && (
         <Notice tone="neutral" density="compact" variant="strip" title="Resumed run">
           Skipped {run.resumedSkippedUnits.length} unit(s) already recorded as complete:{" "}
-          {run.resumedSkippedUnits.join(", ")}
+          {(run.resumedSkippedUnits ?? []).join(", ")}
         </Notice>
       )}
 

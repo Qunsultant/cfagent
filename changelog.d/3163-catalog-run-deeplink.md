@@ -1,0 +1,3 @@
+### Added
+
+- **The catalog's last run is a deep link into Workflow Runs (#3163):** the "Last run" id on each catalog card is now a link to `?tab=workflow-runs&run=<id>`, and `WorkflowRunsPanel` honours that parameter by opening the named run's detail once the ledger loads. An id that is not in the loaded page leaves the ledger closed instead of opening an empty dialog, so a stale link degrades quietly rather than lying. The catalog stays the contract view; the run record (inputs, outputs, artifacts, delivery states) remains Workflow Runs' own surface. Three pins cover the link, the honoured parameter and the unknown-id case.
