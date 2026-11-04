@@ -50,6 +50,11 @@ import type {
 } from "./researchDiscovery";
 import type { GoalDrivenScreenResult } from "./goalDrivenScreen";
 import { recordScreeningActivity } from "./screeningActivity";
+import {
+  channelDisabledError,
+  mapScreeningChannelToTenantChannel,
+  type TenantChannelGate,
+} from "./tenantChannelGate";
 
 export const SCREENING_DRAFT_FOOTER =
   "Research only — a draft for human review; no trades were placed and no outcome is guaranteed.";
@@ -205,6 +210,12 @@ export function formatBundleDelivery(bundle: RecommendationBundle): {
  * Every channel is attempted independently; the per-channel results
  * are returned in request order. When `sql` + `userLogin` are given,
  * the attempt is recorded in the screening activity log.
+ *
+ * Issue #3169: when `channelGate` is supplied, a channel the
+ * tenant disabled records a per-channel failure and its sender
+ * is never attempted; other channels still send. Without a gate
+ * the behavior is unchanged (callers without tenant context
+ * pass none).
  */
 export async function deliverScreeningContent(input: {
   channels: ScreeningChannel[];
@@ -218,6 +229,8 @@ export async function deliverScreeningContent(input: {
   sql?: { exec: (q: string, ...a: unknown[]) => Iterable<unknown> };
   userLogin?: string;
   actor?: string;
+  /** Tenant channel gate (#3169); absent = ungated (prior behavior). */
+  channelGate?: TenantChannelGate;
 }): Promise<ScreeningChannelResult[]> {
   const results: ScreeningChannelResult[] = [];
   for (const channel of input.channels) {
@@ -227,6 +240,21 @@ export async function deliverScreeningContent(input: {
         ok: false,
         error:
           "Voice is a conversational channel, not a push transport: screening results are spoken through the NLQ/chat path (e.g. ask \"what strategies fit NVDA?\"). Nothing was sent.",
+      });
+      continue;
+    }
+    // Issue #3169: a tenant-disabled channel is refused before
+    // any sender is attempted. Voice never reaches here (above).
+    const tenantChannel = mapScreeningChannelToTenantChannel(channel);
+    if (
+      input.channelGate &&
+      tenantChannel &&
+      !input.channelGate.isEnabled(tenantChannel)
+    ) {
+      results.push({
+        channel,
+        ok: false,
+        error: channelDisabledError(tenantChannel, input.channelGate.tenantId),
       });
       continue;
     }
@@ -374,6 +402,8 @@ export async function deliverDiscoveryDirect(input: {
   outcome: ScreenerRunOutcome;
   config: ScreenerFollowupConfig;
   userLogin: string;
+  /** Tenant channel gate (#3169); absent = ungated (prior behavior). */
+  channelGate?: TenantChannelGate;
 }): Promise<DiscoveryDirectResult[]> {
   const { port, outcome, config, userLogin } = input;
   const channels: AsyncJobChannel[] = [];
@@ -382,6 +412,26 @@ export async function deliverDiscoveryDirect(input: {
   if (outcome.webhookUrl) channels.push("webhook");
   const results: DiscoveryDirectResult[] = [];
   for (const channel of channels) {
+    // Issue #3169: a tenant-disabled channel is refused before
+    // the allowlist check and before the port is called. The
+    // refusal uses this funnel's coded-error idiom (the email
+    // gate below does the same for its refusal).
+    const tenantChannel = mapScreeningChannelToTenantChannel(channel);
+    if (
+      input.channelGate &&
+      tenantChannel &&
+      !input.channelGate.isEnabled(tenantChannel)
+    ) {
+      results.push({
+        channel,
+        ok: false,
+        error: codedMessage(
+          "FAILURE_DELIVERY_CHANNEL_DISABLED",
+          channelDisabledError(tenantChannel, input.channelGate.tenantId),
+        ),
+      });
+      continue;
+    }
     if (channel === "email" && outcome.emailTo && !isEmailAllowed(config, outcome.emailTo, outcome)) {
       results.push({
         channel,

@@ -319,9 +319,17 @@ const ORCH = "agents/orchestrator.ts";
  *  (after the service-user delegation, no other orchestrator
  *  logic changed) — measured 3,238 lines / 155,218 B after the
  *  addition; budget lines rise to 3250 and bytes rise to
- *  155_800, keeping similar headroom. */
-const BUDGET_LINES = 3250;
-const BUDGET_BYTES = 155_800;
+ *  155_800, keeping similar headroom.
+ *  Issue #3169 (program #2218) adds the channel-admin
+ *  delegation block (import + dispatch after the account
+ *  block) — measured 3,239 lines / 155,343 B on the stacked
+ *  tree, so budget lines rise to 3250 and bytes rise to
+ *  155_800, keeping similar headroom.
+ *  Merged #3153 + #3169 tree measures 3,253 lines / 156,154 B,
+ *  so budget lines rise to 3270 and bytes rise to 156_800,
+ *  keeping similar headroom. */
+const BUDGET_LINES = 3270;
+const BUDGET_BYTES = 156_800;
 
 const count = (haystack: string, needle: string) =>
   haystack.split(needle).length - 1;

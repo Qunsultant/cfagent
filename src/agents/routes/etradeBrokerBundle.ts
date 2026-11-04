@@ -23,6 +23,7 @@ import type { GoalKind } from "../../services/goalScenarioStore";
 import type { FalsificationInput } from "../../services/researchFalsification";
 import type { StrategyCandidate } from "../../trading";
 import { sharedCorrelationService } from "../../services/correlationService";
+import { resolveTenantChannelGate } from "../../services/tenantChannelGate";
 import type { ETradeService } from "../../services/etrade";
 import type { RepairAnalysis } from "../../services/repairProposals";
 import type {
@@ -131,6 +132,9 @@ export async function completeBundleRoute(
   if (Array.isArray(body.deliver?.channels) && body.deliver.channels.length > 0) {
     const { deliverScreeningContent, formatBundleDelivery, createScreeningDeliverySenders } = await import("../../services/screeningDelivery");
     const formatted = formatBundleDelivery(bundle);
+    // Issue #3169: the tenant channel gate, resolved best-effort
+    // (null = ungated, prior behavior — see tenantChannelGate).
+    const channelGate = await resolveTenantChannelGate(ctx.env, userLogin);
     delivery = await deliverScreeningContent({
       channels: body.deliver.channels,
       subject: formatted.subject,
@@ -142,6 +146,7 @@ export async function completeBundleRoute(
       sql: ctx.getOrm(),
       userLogin,
       actor: "bundle-route",
+      ...(channelGate ? { channelGate } : {}),
     });
   }
   if (outcomeId !== null || delivery !== null || reportPersistenceRequested) {
