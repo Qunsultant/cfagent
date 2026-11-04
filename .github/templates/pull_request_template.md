@@ -51,3 +51,15 @@ The full report for this PR — implementation, test evidence, change management
 - [ ] Linked issue's completion report updated with this PR's full report
 - [ ] Related issues recorded above (parent epic, blocks/blocked-by, related, supersedes — or none)
 - [ ] Surfaces touched named (UX / CLI / API / MCP — or none)
+
+## Pre-merge checklist — first-attempt merge
+- [ ] Linked issue uses the full reference OpenAIMP/cfagent#<number> (a bare #N fails gate check (a); add a closing keyword only when this PR fully resolves the issue)
+- [ ] Every pin file this change affects is updated in this PR, including counts in files the slice did not otherwise touch (nav counts, panel/page pins, route inventory, orchestrator budgets — gitops §7)
+- [ ] PR CI green on its head, with the full check set present — a head showing only the label check after ~15 min is a dropped trigger: re-trigger (no-op push) and re-judge; never mark ready on a partial tab
+- [ ] Mark ready with auto-merge on as soon as PR CI is green, and let the merge queue validate (merge_group) against current main and merge — do NOT hold the PR as a draft while main moves. Manual base-update-judge cycles are the failure mode, not the fix: the queue absorbs main movement, and gate check (f) is bypassed in merge_group mode, so a stale-but-non-conflicting branch merges via the queue
+- [ ] Intervene only if the queue kicks the PR out: conflict → rebuild once (keep both blocks, fix pins, verify the stacked tree); merge_group CI failure → fix the real failure once, then re-ready
+- [ ] Multiple ready + auto-merge PRs are fine — the queue serializes them. A 405 means the queue owns the merge; never force-push; rebase merges only
+- [ ] Latest run per check name governs — a Cancelled run with a later Success is not a failure
+
+## Process documentation impact
+Process documentation impact: <none, or what process docs this PR changes>
