@@ -22,7 +22,9 @@ export type PlatformAdminSectionId =
   | "jobs"
   | "provenance"
   | "api-keys"
+  | "tenants"
   | "data-providers"
+  | "accounts"
   | "iaaa-admin"
   | "users"
   | "admin-access";

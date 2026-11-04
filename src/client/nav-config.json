@@ -960,11 +960,25 @@
         "description": "MCP transport access for external clients"
       },
       {
+        "id": "platform-admin:tenants",
+        "label": "Tenants",
+        "shortLabel": "Tenant create, list, settings, and members",
+        "icon": "Agents",
+        "description": "Tenant create, list, settings, and members"
+      },
+      {
         "id": "platform-admin:data-providers",
         "label": "Data Providers",
         "shortLabel": "Provisioning lifecycle for market-data providers",
         "icon": "DataProviders",
         "description": "Provisioning lifecycle for market-data providers"
+      },
+      {
+        "id": "platform-admin:accounts",
+        "label": "Accounts",
+        "shortLabel": "Self-service account setup, tier, credits, subscriptions & catalogue",
+        "icon": "Contracts",
+        "description": "Self-service account setup, tier, credits, subscriptions & catalogue"
       },
       {
         "id": "platform-admin:iaaa-admin",
@@ -1291,7 +1305,9 @@
         "scheduled-goals",
         "provenance",
         "api-keys",
+        "tenants",
         "data-providers",
+        "accounts",
         "iaaa-admin",
         "admin-access"
       ]
@@ -1467,10 +1483,22 @@
           "icon": "ApiKeys"
         },
         {
+          "id": "tenants",
+          "label": "Tenants",
+          "description": "Tenant create, list, settings, and members",
+          "icon": "Agents"
+        },
+        {
           "id": "data-providers",
           "label": "Data Providers",
           "description": "Provisioning lifecycle for market-data providers",
           "icon": "DataProviders"
+        },
+        {
+          "id": "accounts",
+          "label": "Accounts",
+          "description": "Self-service account setup, tier, credits, subscriptions & catalogue",
+          "icon": "Contracts"
         },
         {
           "id": "iaaa-admin",

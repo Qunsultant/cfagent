@@ -11,7 +11,9 @@ import { NavIcons } from "./components/NavigationMenu";
  *  - scheduled-goals: ScheduledAgent goals, ticks, and add-goal form
  *  - provenance: Technical diagnostics, DID, MCP client, and institutional ledger
  *  - api-keys: MCP transport access for external clients
+ *  - tenants: Tenant create, list, settings, and read-only membership view (#2221)
  *  - data-providers: Market-data provider provisioning lifecycle
+ *  - accounts: Account administration — self-service setup, tier, credits, subscriptions & catalogue
  *  - iaaa-admin: Read-only memberships, genesis, and audit
  *  - users: User profiles, tenant memberships & account linkage
  *  - admin-access: Request admin access from the platform owner
@@ -43,6 +45,8 @@ import { ScheduledGoalsPanel } from "./ScheduledGoalsPanel";
 import { JobsPanel } from "./JobsPanel";
 import { ApiKeysPanel } from "./ApiKeysPanel";
 import { DataProvidersPanel } from "./DataProvidersPanel";
+import { TenantAdminPanel } from "./TenantAdminPanel";
+import { AccountAdminPanel } from "./AccountAdminPanel";
 import { IaaaAdminPanel } from "./IaaaAdminPanel";
 import { UserAdminPanel } from "./UserAdminPanel";
 import {
@@ -76,7 +80,9 @@ export const PLATFORM_ADMIN_TABS: TabOption<PlatformAdminSectionId>[] = [
   { id: "jobs", label: "Jobs", icon: <NavIcons.Jobs /> },
   { id: "provenance", label: "Diagnostics & Provenance", icon: <NavIcons.Provenance /> },
   { id: "api-keys", label: "API Keys", icon: <NavIcons.ApiKeys /> },
+  { id: "tenants", label: "Tenants", icon: <NavIcons.Agents /> },
   { id: "data-providers", label: "Data Providers", icon: <NavIcons.DataProviders /> },
+  { id: "accounts", label: "Accounts", icon: <NavIcons.Contracts /> },
   { id: "iaaa-admin", label: "IAAA Admin", icon: <NavIcons.IaaaAdmin /> },
   { id: "users", label: "Users", icon: <NavIcons.Agents /> },
   { id: "admin-access", label: "Admin Access", icon: <NavIcons.AdminAccess /> },
@@ -248,6 +254,16 @@ export function PlatformAdminPage({
         </Card>
       </TabPanel>
 
+      <TabPanel idBase="platform-admin" tabId="tenants" active={active === "tenants"}>
+        <Card padding="md">
+          <div className="section-label-row">
+            <span>Tenants</span>
+            <small>Tenant create, list, settings &amp; members</small>
+          </div>
+          <TenantAdminPanel />
+        </Card>
+      </TabPanel>
+
       <TabPanel idBase="platform-admin" tabId="data-providers" active={active === "data-providers"}>
         <Card padding="md">
           <div className="section-label-row">
@@ -255,6 +271,16 @@ export function PlatformAdminPage({
             <small>Provisioning lifecycle for market-data providers</small>
           </div>
           <DataProvidersPanel />
+        </Card>
+      </TabPanel>
+
+      <TabPanel idBase="platform-admin" tabId="accounts" active={active === "accounts"}>
+        <Card padding="md">
+          <div className="section-label-row">
+            <span>Accounts</span>
+            <small>Self-service account setup, tier, credits, subscriptions &amp; catalogue</small>
+          </div>
+          <AccountAdminPanel />
         </Card>
       </TabPanel>
 
