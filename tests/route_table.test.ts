@@ -69,6 +69,7 @@ const EXPECTED_IDS = [
   "track-record",
   "trading",
   "voice",
+  "workflow-catalog",
   "workflow-runs",
   "workflows",
 ];
@@ -76,7 +77,7 @@ const EXPECTED_IDS = [
 const ALIAS_IDS = ["options", "orders", "reports", "scanner", "schedules", "trading"];
 
 describe("route table", () => {
-  it("has exactly the 43 tab ids, sorted and unique", () => {
+  it("has exactly the declared tab ids, sorted and unique", () => {
     const ids = ROUTES.map((r) => r.id);
     expect(ids).toEqual(EXPECTED_IDS);
     expect(new Set(ids).size).toBe(ids.length);

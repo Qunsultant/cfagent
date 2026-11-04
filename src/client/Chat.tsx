@@ -18,6 +18,7 @@ import { OptionsScreenerPage } from "./OptionsScreenerPage";
 import { RiskAnalysisPanel } from "./RiskAnalysisPanel";
 import { PlatformAdminPage } from "./PlatformAdminPage";
 import { WorkflowsHub } from "./WorkflowsHub";
+import { WorkflowCatalogPage } from "./WorkflowCatalogPage";
 import { WorkflowRunsPanel } from "./WorkflowRunsPanel";
 import { AgentsPanel } from "./AgentsPanel";
 import { ProductCatalogPanel } from "./ProductCatalogPanel";
@@ -1424,6 +1425,11 @@ export function Chat({ user }: { user: User }) {
     ),
     "workflow-runs": (
           <WorkflowRunsPanel />
+    ),
+    "workflow-catalog": (
+      <ErrorBoundary label="Workflow catalog">
+        <WorkflowCatalogPage />
+      </ErrorBoundary>
     ),
     workflows: (
           <div className="workflows-view" style={{ width: "100%", height: "100%", flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>

@@ -1,0 +1,3 @@
+### Added
+
+- **The Workflow Catalog is its own page under the Workflows menu (#3116, #3069 S4):** promoted from the hub's sub-tab to a first-class route — `?tab=workflow-catalog` — declared in the externalized nav data (`src/client/nav-config.json`: a `workflow-catalog` route plus a matching item in the Workflows sub-menu, and no top-level `navEntry` so the Platform column keeps exactly its seven items) and rendered by `WorkflowCatalogPage` (PageShell + PageSection around the existing `WorkflowCatalogPanel`). The hub sub-tab is removed, so there is one surface, not two. Pins updated in the same change: the route count (now 44) and the Workflows sub-menu list; nav shape, left-nav, deep-link, derivation and panel suites green.
