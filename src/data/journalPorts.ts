@@ -55,9 +55,11 @@ export interface JournalAccount {
  * (Deferred revenue, liability) is written by the subscription
  * purchase mapping (#2155 follow-up): a purchase is NOT
  * immediate revenue. The RECOGNITION schedule (deferred →
- * earned over the subscription period) is a FOLLOW-UP slice,
- * deliberately not built here: no periodic recognition sweeper,
- * no cron, no earned-revenue amortization logic in this slice.
+ * earned over the subscription period) is built as a
+ * follow-up slice in src/services/journalRecognition.ts
+ * (schedule + posting function through this port; still no
+ * periodic recognition sweeper, no cron — nothing in that
+ * module runs autonomously).
  */
 export const MINIMAL_CHART: readonly JournalAccount[] = [
   { code: "1000", name: "Funds received", type: "asset" },

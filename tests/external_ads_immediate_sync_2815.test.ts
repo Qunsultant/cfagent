@@ -5,7 +5,10 @@
  *  1. Worker forwards /api/external-ads/impression with immediate sync (no x-async-eligible).
  *  2. Worker forwards /api/external-ads/click with immediate sync.
  *  3. Orchestrator regex recognizes external-ads and categories/referrals/revenue/ads as immediate.
- *  4. Workflow runs read-model drops standalone POST /external-ads/impression and /click rows.
+ *  4. SUPERSEDED by #2786 Part 2 (2026-11-03 ruling, "nothing excluded"):
+ *     the Workflow Runs read model SURFACES standalone POST
+ *     /external-ads/impression and /click rows labeled (ads family),
+ *     instead of dropping them. The sync-routing pins above stand.
  */
 import { describe, it, expect, vi } from "vitest";
 
@@ -109,7 +112,7 @@ describe("External Ads Immediate Sync & Workflow Runs Exclusion (#2815)", () => 
     expect(isImmediateEndpoint.test("/api/ads")).toBe(true);
   });
 
-  it("buildWorkflowRuns drops standalone POST /external-ads/impression request traces", () => {
+  it("buildWorkflowRuns surfaces standalone POST /external-ads/impression rows labeled (#2786 overrides #2815 item 4)", () => {
     const runs = buildWorkflowRuns({
       jobs: [
         {
@@ -128,10 +131,13 @@ describe("External Ads Immediate Sync & Workflow Runs Exclusion (#2815)", () => 
       outcomes: [],
       transitions: [],
     });
-    expect(runs).toHaveLength(0);
+    expect(runs).toHaveLength(1);
+    expect(runs[0].title).toBe("Ad impression — e1");
+    expect(runs[0].family).toBe("ads");
+    expect(runs[0].workflow).toBe("Advertising");
   });
 
-  it("buildWorkflowRuns drops standalone POST /external-ads/click request traces", () => {
+  it("buildWorkflowRuns surfaces standalone POST /external-ads/click rows labeled (#2786 overrides #2815 item 4)", () => {
     const runs = buildWorkflowRuns({
       jobs: [
         {
@@ -150,7 +156,10 @@ describe("External Ads Immediate Sync & Workflow Runs Exclusion (#2815)", () => 
       outcomes: [],
       transitions: [],
     });
-    expect(runs).toHaveLength(0);
+    expect(runs).toHaveLength(1);
+    expect(runs[0].title).toBe("Ad click — e1");
+    expect(runs[0].family).toBe("ads");
+    expect(runs[0].workflow).toBe("Advertising");
   });
 
   it("buildWorkflowRuns keeps real workflow POST submissions", () => {

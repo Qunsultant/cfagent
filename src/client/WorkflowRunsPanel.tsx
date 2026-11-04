@@ -45,6 +45,14 @@ import type {
   WorkflowRunStatus,
   WorkflowRunTrigger,
 } from "../services/workflowRuns";
+import {
+  WORKFLOW_RUN_SORT_DEFAULT,
+  nextWorkflowRunSort,
+  sortWorkflowRuns,
+  type WorkflowRunSort,
+  type WorkflowRunSortKey,
+} from "./workflowRunSort";
+import { isAdBeaconsPaused, setAdBeaconsPaused } from "./adBeacons";
 import { RunDetailSections } from "./components/RunDetailsModal";
 import type { RunDetail } from "./runDetails";
 
@@ -62,6 +70,12 @@ interface WorkflowRunsResponse {
   storeErrors?: Record<string, string>;
   generatedAt?: string;
   error?: string;
+  /** Read traces hidden from this window when the toggle hides them. */
+  hiddenTraceCount?: number;
+  /** Runs matching the server filters, before paging. */
+  totalMatched?: number;
+  offset?: number;
+  limit?: number;
 }
 
 type TriggerFilter = "all" | WorkflowRunTrigger;
@@ -215,6 +229,40 @@ function runMatchesStatus(run: WorkflowRun, filter: StatusFilter): boolean {
 }
 
 /**
+ * Sortable column header, Docs-tab pattern (#2786 Part 2, scope c):
+ * ghost button, direction indicator, and a stable "Sort by" aria-label
+ * (the column's aria-sort carries the direction).
+ */
+function SortHeader({
+  label,
+  sortKey,
+  sort,
+  onSort,
+}: {
+  label: string;
+  sortKey: WorkflowRunSortKey;
+  sort: WorkflowRunSort;
+  onSort: (key: WorkflowRunSortKey) => void;
+}) {
+  const active = sort.key === sortKey;
+  const direction = sort.dir === "asc" ? "ascending" : "descending";
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      className={`ui-table-sort${active ? " active" : ""}`}
+      onClick={() => onSort(sortKey)}
+      title={active ? `Sorted ${direction} — click to reverse` : `Sort by ${label}`}
+      aria-label={`Sort by ${label}`}
+    >
+      <span>{label}</span>
+      <span className="ui-table-sort-indicator" aria-hidden="true">
+        {active ? (sort.dir === "asc" ? "▲" : "▼") : "↕"}
+      </span>
+    </Button>
+  );
+}
+/**
  * Issue #2786 Part 3: the run's Docs cells. Canonical documents win
  * (they carry generation statuses and failure reasons); without
  * them, the outcome's artifact urls are the fallback, with no status
@@ -284,6 +332,7 @@ export function WorkflowRunsPanel() {
   const [summary, setSummary] = useState<WorkflowRunsResponse["summary"] | null>(null);
   const [storeErrors, setStoreErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [triggerFilter, setTriggerFilter] = useState<TriggerFilter>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -298,50 +347,157 @@ export function WorkflowRunsPanel() {
       return "";
     }
   });
+  // Search is debounced server-side (300 ms) so typing does not fire
+  // a request per keystroke; the client filter below still applies
+  // instantly to the loaded window.
+  const [debouncedQuery, setDebouncedQuery] = useState(query);
+  // #2786 Part 2 (scope d-i): read traces hide by default, but the
+  // toggle is visible and shows the hidden count — never silent.
+  const [showTraces, setShowTraces] = useState(false);
+  const [hiddenTraceCount, setHiddenTraceCount] = useState(0);
+  const [totalMatched, setTotalMatched] = useState<number | null>(null);
+  const [sort, setSort] = useState<WorkflowRunSort>(WORKFLOW_RUN_SORT_DEFAULT);
+  // #2786 Part 2 (scope d-ii): per-browser beacon preference.
+  const [beaconsPaused, setBeaconsPaused] = useState(() => isAdBeaconsPaused());
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loadedAt, setLoadedAt] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(
-        `/api/workflow-runs?limit=50${reportsFilter === "reports" ? "&reports=only" : ""}`,
-      );
-      const data = (await res.json().catch(() => null)) as WorkflowRunsResponse | null;
-      if (!res.ok) throw new Error(`Could not load workflow runs (HTTP ${res.status})${data?.error ? `: ${data.error}` : "."}`);
-      setRuns(Array.isArray(data?.runs) ? data!.runs! : []);
-      setSummary(data?.summary ?? null);
-      setStoreErrors(data?.storeErrors ?? {});
-      setLoadedAt(data?.generatedAt ?? new Date().toISOString());
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not load workflow runs.");
-    } finally {
-      setLoading(false);
-    }
-  }, [reportsFilter]);
+  // #2786 Part 2 (scope d-iii): session-scoped prune, preview first.
+  const [pruneOpen, setPruneOpen] = useState(false);
+  const [prunePreview, setPrunePreview] = useState<{
+    wouldDelete: number;
+    breakdown: Record<string, number>;
+    skippedRunning: number;
+  } | null>(null);
+  const [pruneLoading, setPruneLoading] = useState(false);
+  const [pruneError, setPruneError] = useState<string | null>(null);
+  const [pruneNotice, setPruneNotice] = useState<string | null>(null);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    const timer = setTimeout(() => setDebouncedQuery(query), 300);
+    return () => clearTimeout(timer);
+  }, [query]);
 
-  const filtered = useMemo(
+  const loadRuns = useCallback(
+    async (mode: "replace" | "append", offsetValue: number) => {
+      if (mode === "replace") setLoading(true);
+      else setLoadingMore(true);
+      setError(null);
+      try {
+        const params = new URLSearchParams({ limit: "50" });
+        if (offsetValue > 0) params.set("offset", String(offsetValue));
+        if (showTraces) params.set("traces", "all");
+        if (triggerFilter !== "all") params.set("trigger", triggerFilter);
+        if (statusFilter !== "all") params.set("status", statusFilter);
+        const search = debouncedQuery.trim();
+        if (search) params.set("search", search);
+        if (reportsFilter === "reports") params.set("reports", "only");
+        const res = await fetch(`/api/workflow-runs?${params.toString()}`);
+        const data = (await res.json().catch(() => null)) as WorkflowRunsResponse | null;
+        if (!res.ok) throw new Error(`Could not load workflow runs (HTTP ${res.status})${data?.error ? `: ${data.error}` : "."}`);
+        const next = Array.isArray(data?.runs) ? data.runs : [];
+        if (mode === "replace") {
+          setRuns(next);
+          setSummary(data?.summary ?? null);
+        } else {
+          setRuns((prev) => [...prev, ...next]);
+        }
+        setHiddenTraceCount(typeof data?.hiddenTraceCount === "number" ? data.hiddenTraceCount : 0);
+        setTotalMatched(typeof data?.totalMatched === "number" ? data.totalMatched : next.length);
+        setStoreErrors(data?.storeErrors ?? {});
+        setLoadedAt(data?.generatedAt ?? new Date().toISOString());
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "Could not load workflow runs.");
+      } finally {
+        setLoading(false);
+        setLoadingMore(false);
+      }
+    },
+    [showTraces, triggerFilter, statusFilter, debouncedQuery, reportsFilter],
+  );
+
+  // Any filter change refetches from offset 0; the mount load is this
+  // same effect's first run.
+  useEffect(() => {
+    void loadRuns("replace", 0);
+  }, [loadRuns]);
+
+  const loadPrunePreview = useCallback(async () => {
+    setPruneLoading(true);
+    setPruneError(null);
+    setPrunePreview(null);
+    try {
+      const res = await fetch("/api/maintenance/clear-table", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ table: "mas_async_jobs" }),
+      });
+      const data = (await res.json().catch(() => null)) as {
+        wouldDelete?: number;
+        breakdown?: Record<string, number>;
+        skippedRunning?: number;
+        error?: string;
+      } | null;
+      if (!res.ok) throw new Error(`Could not preview prune (HTTP ${res.status})${data?.error ? `: ${data.error}` : "."}`);
+      setPrunePreview({
+        wouldDelete: typeof data?.wouldDelete === "number" ? data.wouldDelete : 0,
+        breakdown: data?.breakdown ?? {},
+        skippedRunning: typeof data?.skippedRunning === "number" ? data.skippedRunning : 0,
+      });
+    } catch (cause) {
+      setPruneError(cause instanceof Error ? cause.message : "Could not preview prune.");
+    } finally {
+      setPruneLoading(false);
+    }
+  }, []);
+
+  const confirmPrune = useCallback(async () => {
+    setPruneLoading(true);
+    setPruneError(null);
+    try {
+      const res = await fetch("/api/maintenance/clear-table", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ table: "mas_async_jobs", confirm: true }),
+      });
+      const data = (await res.json().catch(() => null)) as { deleted?: number; error?: string } | null;
+      if (!res.ok) throw new Error(`Could not prune history (HTTP ${res.status})${data?.error ? `: ${data.error}` : "."}`);
+      const deleted = typeof data?.deleted === "number" ? data.deleted : 0;
+      setPruneNotice(`Deleted ${deleted} history rows. Running rows were never deleted.`);
+      setPruneOpen(false);
+      setPrunePreview(null);
+      void loadRuns("replace", 0);
+    } catch (cause) {
+      setPruneError(cause instanceof Error ? cause.message : "Could not prune history.");
+    } finally {
+      setPruneLoading(false);
+    }
+  }, [loadRuns]);
+
+  // Server filters make deep matches reachable; the client filter
+  // over the loaded window is retained for responsiveness and for
+  // the existing panel contract (a mock-backed server ignores the
+  // params, and the pills still filter what is shown).
+  const displayed = useMemo(
     () =>
-      runs.filter(
+      sortWorkflowRuns(runs, sort).filter(
         (run) =>
           (triggerFilter === "all" || run.trigger === triggerFilter) &&
           runMatchesStatus(run, statusFilter) &&
           runMatchesQuery(run, query.trim()),
       ),
-    [runs, triggerFilter, statusFilter, query],
+    [runs, sort, triggerFilter, statusFilter, query],
   );
+
+  const hasMore = totalMatched !== null && runs.length < totalMatched;
+  const filtersActive = triggerFilter !== "all" || statusFilter !== "all" || query.trim() !== "";
 
   const selected = useMemo(() => runs.find((run) => run.id === selectedId) ?? null, [runs, selectedId]);
 
   const columns = [
     {
       key: "started",
-      header: "Started",
+      header: <SortHeader label="Started" sortKey="started" sort={sort} onSort={(key) => setSort(nextWorkflowRunSort(sort, key))} />,
+      ariaSort: (sort.key === "started" ? (sort.dir === "asc" ? "ascending" : "descending") : "none") as "ascending" | "descending" | "none",
       render: (run: WorkflowRun) => (
         <div className="workflow-runs-when">
           <span>{formatTimestamp(run.startedAt)}</span>
@@ -351,7 +507,8 @@ export function WorkflowRunsPanel() {
     },
     {
       key: "workflow",
-      header: "Workflow",
+      header: <SortHeader label="Workflow" sortKey="workflow" sort={sort} onSort={(key) => setSort(nextWorkflowRunSort(sort, key))} />,
+      ariaSort: (sort.key === "workflow" ? (sort.dir === "asc" ? "ascending" : "descending") : "none") as "ascending" | "descending" | "none",
       render: (run: WorkflowRun) => (
         <div className="workflow-runs-workflow">
           <span className="workflow-runs-title">{run.title}</span>
@@ -363,7 +520,8 @@ export function WorkflowRunsPanel() {
     },
     {
       key: "trigger",
-      header: "Trigger",
+      header: <SortHeader label="Trigger" sortKey="trigger" sort={sort} onSort={(key) => setSort(nextWorkflowRunSort(sort, key))} />,
+      ariaSort: (sort.key === "trigger" ? (sort.dir === "asc" ? "ascending" : "descending") : "none") as "ascending" | "descending" | "none",
       render: (run: WorkflowRun) => (
         <div className="workflow-runs-trigger">
           <Badge tone={TRIGGER_TONE[run.trigger]} size="sm">
@@ -375,7 +533,8 @@ export function WorkflowRunsPanel() {
     },
     {
       key: "status",
-      header: "Status",
+      header: <SortHeader label="Status" sortKey="status" sort={sort} onSort={(key) => setSort(nextWorkflowRunSort(sort, key))} />,
+      ariaSort: (sort.key === "status" ? (sort.dir === "asc" ? "ascending" : "descending") : "none") as "ascending" | "descending" | "none",
       render: (run: WorkflowRun) => (
         <Badge tone={STATUS_TONE[run.status]} size="sm" dot>
           {statusLabel(run.status)}
@@ -384,7 +543,8 @@ export function WorkflowRunsPanel() {
     },
     {
       key: "source",
-      header: "Source",
+      header: <SortHeader label="Source" sortKey="source" sort={sort} onSort={(key) => setSort(nextWorkflowRunSort(sort, key))} />,
+      ariaSort: (sort.key === "source" ? (sort.dir === "asc" ? "ascending" : "descending") : "none") as "ascending" | "descending" | "none",
       render: (run: WorkflowRun) => (
         <span className="workflow-runs-muted">
           {run.documents
@@ -395,7 +555,8 @@ export function WorkflowRunsPanel() {
     },
     {
       key: "pdf",
-      header: "PDF",
+      header: <SortHeader label="PDF" sortKey="pdf" sort={sort} onSort={(key) => setSort(nextWorkflowRunSort(sort, key))} />,
+      ariaSort: (sort.key === "pdf" ? (sort.dir === "asc" ? "ascending" : "descending") : "none") as "ascending" | "descending" | "none",
       render: (run: WorkflowRun) => {
         const d = documentsForRun(run);
         return <DocumentCell url={d.pdfUrl} status={d.pdfStatus} error={d.pdfError} kind="PDF" />;
@@ -403,7 +564,8 @@ export function WorkflowRunsPanel() {
     },
     {
       key: "xlsx",
-      header: "XLSX",
+      header: <SortHeader label="XLSX" sortKey="xlsx" sort={sort} onSort={(key) => setSort(nextWorkflowRunSort(sort, key))} />,
+      ariaSort: (sort.key === "xlsx" ? (sort.dir === "asc" ? "ascending" : "descending") : "none") as "ascending" | "descending" | "none",
       render: (run: WorkflowRun) => {
         const d = documentsForRun(run);
         return <DocumentCell url={d.xlsxUrl} status={d.xlsxStatus} error={d.xlsxError} kind="XLSX" />;
@@ -411,7 +573,8 @@ export function WorkflowRunsPanel() {
     },
     {
       key: "csv",
-      header: "CSV",
+      header: <SortHeader label="CSV" sortKey="csv" sort={sort} onSort={(key) => setSort(nextWorkflowRunSort(sort, key))} />,
+      ariaSort: (sort.key === "csv" ? (sort.dir === "asc" ? "ascending" : "descending") : "none") as "ascending" | "descending" | "none",
       render: (run: WorkflowRun) => {
         const d = documentsForRun(run);
         return <DocumentCell url={d.csvUrl} status={d.csvStatus} error={d.csvError} kind="CSV" />;
@@ -419,13 +582,15 @@ export function WorkflowRunsPanel() {
     },
     {
       key: "duration",
-      header: "Duration",
+      header: <SortHeader label="Duration" sortKey="duration" sort={sort} onSort={(key) => setSort(nextWorkflowRunSort(sort, key))} />,
+      ariaSort: (sort.key === "duration" ? (sort.dir === "asc" ? "ascending" : "descending") : "none") as "ascending" | "descending" | "none",
       align: "right" as const,
       render: (run: WorkflowRun) => <span className="workflow-runs-mono">{formatDuration(run.durationMs)}</span>,
     },
     {
       key: "stages",
-      header: "Stages",
+      header: <SortHeader label="Stages" sortKey="stages" sort={sort} onSort={(key) => setSort(nextWorkflowRunSort(sort, key))} />,
+      ariaSort: (sort.key === "stages" ? (sort.dir === "asc" ? "ascending" : "descending") : "none") as "ascending" | "descending" | "none",
       render: (run: WorkflowRun) =>
         run.stageCount === 0 ? (
           <span className="workflow-runs-muted">No stages recorded</span>
@@ -444,7 +609,8 @@ export function WorkflowRunsPanel() {
     },
     {
       key: "result",
-      header: "Result",
+      header: <SortHeader label="Result" sortKey="result" sort={sort} onSort={(key) => setSort(nextWorkflowRunSort(sort, key))} />,
+      ariaSort: (sort.key === "result" ? (sort.dir === "asc" ? "ascending" : "descending") : "none") as "ascending" | "descending" | "none",
       render: (run: WorkflowRun) => {
         const outputs = (run.outputs ?? {}) as Record<string, any>;
         const outcome = outputs.outcome ?? {};
@@ -499,17 +665,22 @@ export function WorkflowRunsPanel() {
       {error && (
         <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", marginBottom: "var(--space-3)" }}>
           <Notice tone="danger">{error}</Notice>
-          <Button variant="secondary" size="sm" onClick={() => void load()} loading={loading} disabled={loading}>
+          <Button variant="secondary" size="sm" onClick={() => void loadRuns("replace", 0)} loading={loading} disabled={loading}>
             Retry
           </Button>
         </div>
+      )}
+      {pruneNotice && (
+        <Notice tone="success" density="compact" variant="strip">
+          {pruneNotice}
+        </Notice>
       )}
       <PageSection
         title="Runs"
         description={
           loadedAt
-            ? `Newest first · ${runs.length} run${runs.length === 1 ? "" : "s"} loaded · snapshot ${formatTimestamp(loadedAt)}`
-            : "Newest first"
+            ? `${runs.length} of ${totalMatched ?? runs.length} matching runs shown · snapshot ${formatTimestamp(loadedAt)}`
+            : "Workflow runs"
         }
       >
         <Card padding="md" className="workflow-runs-controls">
@@ -534,9 +705,51 @@ export function WorkflowRunsPanel() {
               size="sm"
             />
           </div>
-          <Button variant="secondary" size="sm" onClick={() => void load()} loading={loading} disabled={loading}>
+          <Button variant="secondary" size="sm" onClick={() => void loadRuns("replace", 0)} loading={loading} disabled={loading}>
             ↻ Refresh
           </Button>
+          {/* #2786 Part 2 (scope d): the add-ons are visible toolbar
+              controls with observable effects, never silent switches. */}
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => setShowTraces((value) => !value)}
+            title={showTraces ? "Hide standalone GET/HEAD read traces" : "Show standalone GET/HEAD read traces"}
+          >
+            {showTraces ? "Read traces: shown" : `Read traces: hidden (${hiddenTraceCount})`}
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              const next = !beaconsPaused;
+              setAdBeaconsPaused(next);
+              setBeaconsPaused(next);
+            }}
+            title={
+              beaconsPaused
+                ? "Resume ad impression and click beacons in this browser"
+                : "Pause ad impression and click beacons in this browser (undercounts ad attribution while paused)"
+            }
+          >
+            {beaconsPaused ? "Ad beacons: off" : "Ad beacons: on"}
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              setPruneOpen(true);
+              void loadPrunePreview();
+            }}
+          >
+            Prune history
+          </Button>
+          <div className="workflow-runs-filter">
+            <span className="workflow-runs-muted">
+              Pausing ad beacons is per-browser and undercounts ad attribution while paused. Prune is session-scoped;
+              running rows are never deleted.
+            </span>
+          </div>
         </Card>
 
         {summary && (
@@ -569,22 +782,22 @@ export function WorkflowRunsPanel() {
         <Card padding="none" className="workflow-runs-table-card">
           <Table
             columns={columns}
-            rows={filtered}
+            rows={displayed}
             rowKey={(run) => run.id}
-            caption="Workflow runs, newest first"
+            caption="Workflow runs"
             containerClassName="workflow-runs-table-container"
             empty={
               <EmptyState
                 framed
                 icon="🧭"
-                title={runs.length === 0 ? "No workflow runs recorded yet" : "No runs match these filters"}
+                title={filtersActive ? "No runs match these filters" : "No workflow runs recorded yet"}
                 description={
-                  runs.length === 0
-                    ? "Runs appear here as the engine records a screen, options scan, goal run, discovery, or delivery chain — with every stage it executed."
-                    : "Clear the trigger, status, reports, or search filters to see the recorded runs."
+                  filtersActive
+                    ? "Clear the trigger, status, reports, or search filters to see the recorded runs."
+                    : "Runs appear here as the engine records a screen, options scan, goal run, discovery, or delivery chain — with every stage it executed."
                 }
                 action={
-                  runs.length > 0 ? (
+                  filtersActive ? (
                     <Button
                       variant="secondary"
                       size="sm"
@@ -603,7 +816,51 @@ export function WorkflowRunsPanel() {
             }
           />
         </Card>
+
+        {hasMore && (
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => void loadRuns("append", runs.length)}
+            loading={loadingMore}
+            disabled={loadingMore}
+          >
+            Load more
+          </Button>
+        )}
       </PageSection>
+
+      {pruneOpen && (
+        <Modal open onClose={() => setPruneOpen(false)} title="Prune history">
+          <p className="workflow-runs-muted">
+            Session-scoped: only this session&apos;s async-job rows are counted. Running rows are never deleted.
+          </p>
+          {pruneLoading && !prunePreview && <p>Loading preview…</p>}
+          {pruneError && <Notice tone="danger">{pruneError}</Notice>}
+          {prunePreview && (
+            <div>
+              <p>
+                {prunePreview.wouldDelete} rows would be deleted.
+              </p>
+              <p>
+                {prunePreview.skippedRunning} running rows will be kept — running rows are never deleted.
+              </p>
+              {Object.entries(prunePreview.breakdown).length > 0 && (
+                <ul>
+                  {Object.entries(prunePreview.breakdown).map(([status, count]) => (
+                    <li key={status}>
+                      {status}: {count}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <Button variant="secondary" size="sm" onClick={() => void confirmPrune()} loading={pruneLoading} disabled={pruneLoading}>
+                Confirm prune
+              </Button>
+            </div>
+          )}
+        </Modal>
+      )}
 
       {selected && (
         <Modal
