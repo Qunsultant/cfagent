@@ -578,7 +578,7 @@ export const API_ENDPOINT_CATALOG: ApiEndpointEntry[] = [
     aliases: [],
     kind: "http",
     auth: "session",
-    authNote: "401 unauthenticated; 404 unknown request; 403 unless the caller can grant the requested role; 409 when no longer pending. Approve calls grantMembership (idempotent when the requester already holds the role); deny grants nothing.",
+    authNote: "401 unauthenticated; 404 unknown request; 403 unless the caller can grant the requested role; 409 when no longer pending. Approve calls grantMembership (idempotent when the requester already holds the role); deny grants nothing. Issue #3155 (Q9): an approval needs two distinct approvers — the first approve records the approver and leaves the request pending (200, pendingSecondApproval), the second approve grants and decides approved; a deny stays single-admin.",
     source: "src/server.ts branch: path === /api/iaaa/access-request/decision",
   },
   {
@@ -588,7 +588,7 @@ export const API_ENDPOINT_CATALOG: ApiEndpointEntry[] = [
     aliases: [],
     kind: "http",
     auth: "session",
-    authNote: "401 unauthenticated; 403 legacy sessions, self-grants, non-granters, and failed step-up/audit obligations; 400 for empty bindings, unknown roles, or a malformed grantee email. Grants through grantMembership (canGrantRole re-enforced); platform-admin grants platform roles only (#1758). #2661: optional email is captured on the record and best-effort sends the tier-selected welcome; re-granting held bindings is a no-op (200, alreadyProvisioned).",
+    authNote: "401 unauthenticated; 403 legacy sessions, self-grants, non-granters, and failed step-up/audit obligations; 400 for empty bindings, unknown roles, or a malformed grantee email. Grants through grantMembership (canGrantRole re-enforced); platform-admin grants platform roles only (#1758). #2661: optional email is captured on the record and best-effort sends the tier-selected welcome; re-granting held bindings is a no-op (200, alreadyProvisioned). Issue #3155 (Q9): tenant-admin and platform-admin grants need two distinct approvers — the first admin's grant proposes (202, pending), the second admin's identical grant mints (201); non-admin grants mint immediately. Non-platform bindings without an explicit expiry carry the configurable default lifetime (90 days, IAAA_GRANT_DEFAULT_EXPIRY_DAYS).",
     source: "src/server.ts branch: path === /api/iaaa/membership/grant",
   },
   {
@@ -598,7 +598,7 @@ export const API_ENDPOINT_CATALOG: ApiEndpointEntry[] = [
     aliases: [],
     kind: "http",
     auth: "session",
-    authNote: "401 unauthenticated; 404 unknown membership; 403 unless the caller passes the membership:revoke obligation channel (tenant) or is platform-admin with audit-before-revoke (platform scope). Revoke does not delete sessions (#1758).",
+    authNote: "401 unauthenticated; 404 unknown membership; 403 unless the caller passes the membership:revoke obligation channel (tenant) or is platform-admin with audit-before-revoke (platform scope). Revoke does not delete sessions (#1758). Issue #3155 (Q9): after a revoke leaves the revoked user with no live memberships, a revocation pass revokes that user's matrix-violating grants (grants that could never have minted) and leaves valid grants for the review queue.",
     source: "src/server.ts branch: path === /api/iaaa/membership/revoke",
   },
   {
@@ -608,7 +608,7 @@ export const API_ENDPOINT_CATALOG: ApiEndpointEntry[] = [
     aliases: [],
     kind: "http",
     auth: "session",
-    authNote: "401 unauthenticated; 404 unknown membership; 403 self-edits and non-granters. Grants the new bindings first, then revokes the old record; a failed revoke is reported, never hidden (#1758).",
+    authNote: "401 unauthenticated; 404 unknown membership; 403 self-edits and non-granters. Grants the new bindings first, then revokes the old record; a failed revoke is reported, never hidden (#1758). Issue #3155 (Q9): edits that add tenant-admin or platform-admin bindings need two distinct approvers — the first admin's edit proposes (202, pending), the second admin's identical edit applies (200); non-admin edits apply immediately.",
     source: "src/server.ts branch: path === /api/iaaa/membership/edit",
   },
   {
@@ -618,7 +618,7 @@ export const API_ENDPOINT_CATALOG: ApiEndpointEntry[] = [
     aliases: [],
     kind: "http",
     auth: "session",
-    authNote: "401 unauthenticated; 403 legacy sessions and non-admins (denial audited). Platform-admins list all tenants; tenant-admins list tenant-scope grants in their own tenant only. Rows carry grantor (grantedBy) and grant time (createdAtMs), plus issuer:subject identity when a binding exists and the grantee email when captured (#2688).",
+    authNote: "401 unauthenticated; 403 legacy sessions and non-admins (denial audited). Platform-admins list all tenants; tenant-admins list tenant-scope grants in their own tenant only. Rows carry grantor (grantedBy) and grant time (createdAtMs), plus issuer:subject identity when a binding exists and the grantee email when captured (#2688). Issue #3155 (Q9): ?review=true returns the granter-review queue — live grants whose granter of record is fully revoked — instead of the grant list.",
     source: "src/server.ts branch: path === /api/iaaa/role-grants",
   },
   {
@@ -628,7 +628,7 @@ export const API_ENDPOINT_CATALOG: ApiEndpointEntry[] = [
     aliases: [],
     kind: "http",
     auth: "session",
-    authNote: "401 unauthenticated; 403 legacy sessions, self-grants (SELF_GRANT), non-granters, and failed step-up/audit obligations (denials audited); 400 for unknown or non-admin roles. Only platform-admin and tenant-admin are grantable; a platform-admin grants platform-admin only, and a tenant-admin grant requires role:assign in that tenant (canGrantRole, #2688). Re-granting a held binding is a no-op (200, alreadyGranted).",
+    authNote: "401 unauthenticated; 403 legacy sessions, self-grants (SELF_GRANT), non-granters, and failed step-up/audit obligations (denials audited); 400 for unknown or non-admin roles. Only platform-admin and tenant-admin are grantable; a platform-admin grants platform-admin only, and a tenant-admin grant requires role:assign in that tenant (canGrantRole, #2688). Re-granting a held binding is a no-op (200, alreadyGranted). Issue #3155 (Q9): every grant here needs two distinct approvers — the first admin's grant proposes (202, pending), the second admin's identical grant mints (201).",
     source: "src/server.ts branch: path === /api/iaaa/role-grants/grant",
   },
   {

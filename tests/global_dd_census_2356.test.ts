@@ -856,7 +856,12 @@ const STEP5B_PORT_SITES: Array<[string, string, number]> = [
   // prefix) and the bootstrap-current route adds one (memberships
   // for the bootstrap-divergence check), same factory — no new
   // funnel, no bypass.
-  ["src/server.ts", "listSessionFamilyEntries", 17],
+  // Bumped 17 -> 20 for issue #3155 (Q9): the role-grants review
+  // queue adds one list site in server.ts (full membership set
+  // for the granter-revocation judgment) and the two revoke routes
+  // add one each (granter-revocation pass), same factory — no new
+  // funnel, no bypass.
+  ["src/server.ts", "listSessionFamilyEntries", 20],
   ["src/server.ts", "wiredAccessRequestStore", 1],
   ["src/server.ts", "wiredMembershipStore", 10],
 ];

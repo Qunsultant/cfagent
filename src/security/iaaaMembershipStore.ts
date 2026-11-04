@@ -70,6 +70,7 @@ import {
   type RoleBinding,
 } from "./authorization";
 import type { KvLike } from "./kvResilience";
+import { applyDefaultGrantExpiry, resolveGrantDefaultExpiryDays } from "./grantRules";
 
 /** Prefix for every IAAA membership key in the SessionStore DO. */
 export const IAAA_MEMBERSHIP_KEY_PREFIX = "iaaa-membership:";
@@ -247,6 +248,16 @@ export interface GrantMembershipInput {
   nowMs: number;
   /** #2661 — optional grantee email, stored on the record when supplied. */
   email?: string;
+  /**
+   * Issue #3155 (Q9): default grant lifetime in days, applied to
+   * non-platform-scope bindings without an explicit expiresAtMs.
+   * Absent resolves to the adopted default (90 days); a non-positive
+   * or unparseable value also resolves to 90, never to unbounded.
+   * Routes pass the env-resolved value; direct callers get the
+   * adopted default. The bootstrap path bypasses grantMembership
+   * entirely, so genesis grants are exempt by construction.
+   */
+  defaultExpiryDays?: number;
 }
 
 export type GrantMembershipResult =
@@ -278,7 +289,17 @@ export async function grantMembership(
   store: MembershipStore,
   input: GrantMembershipInput,
 ): Promise<GrantMembershipResult> {
-  for (const binding of input.roleBindings) {
+  // Issue #3155 (Q9): stamp the default expiry before the grant is
+  // written, so every minted tenant binding carries a lifetime
+  // unless the caller set one explicitly. Platform-scope bindings
+  // are untouched, and the canGrantRole loop below still runs on
+  // the stamped bindings (expiry never changes grantability).
+  const roleBindings = applyDefaultGrantExpiry(
+    input.roleBindings,
+    input.nowMs,
+    resolveGrantDefaultExpiryDays(input.defaultExpiryDays),
+  );
+  for (const binding of roleBindings) {
     const decision = await canGrantRole(store, {
       granterInternalUserId: input.granterInternalUserId,
       targetTenantId: input.tenantId,
@@ -301,7 +322,7 @@ export async function grantMembership(
     internalUserId: input.internalUserId,
     tenantId: input.tenantId,
     workspaceId: input.workspaceId,
-    roleBindings: input.roleBindings.map((b) => ({
+    roleBindings: roleBindings.map((b) => ({
       ...b,
       grantedBy: input.granterInternalUserId,
     })),
