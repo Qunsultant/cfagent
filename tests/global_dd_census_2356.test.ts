@@ -731,7 +731,25 @@ function funnelCallSites(): Array<[string, string, string]> {
  *  site (2x createStoreKv + 2x listStoreEntries, bucket
  *  "sessions" — its env and namespace factory functions);
  *  session.ts's own createStoreKv site REMAINS (the flag-off
- *  branch still calls the funnel from inside the factory). */
+ *  branch still calls the funnel from inside the factory).
+ *  Step 5c (#2434) delta, honestly recorded: server.ts's
+ *  etrade list site (the offboarding hasTokens check) RETIRES
+ *  into etradeOAuth.ts's listTokenFamilyEntries factory (its
+ *  flag-off branch is etradeOAuth.ts's existing listStoreEntries
+ *  site — count there unchanged); the token family's
+ *  composition root (src/data/createTokenPorts.ts) is a NEW
+ *  funnel composition site (createStoreKv "etrade" +
+ *  "public" + "<dynamic>" — the credential-reference bucket
+ *  factory — + listStoreEntries "etrade", all inside its one
+ *  shared composition builder); etradeOAuth.ts's and
+ *  publicOAuth.ts's own sites REMAIN (the flag-off branches
+ *  still call the funnel from inside the factories, the 5b
+ *  shape), including etradeOAuth.ts's consumeStoreKey site —
+ *  the #1245 renewal single-flight CLAIM, which is not token
+ *  storage and stays module-side in both compositions until
+ *  5e's ClaimPort. kvWipe.ts's etrade sites also REMAIN: the
+ *  admin wipe route's own composition, not the token
+ *  lifecycle family's. */
 const STEP5_FUNNEL_SITES: Array<[string, string, string]> = [
   ["src/agents/routes/adminTenantQueues.ts", "listStoreEntries", "sessions"],
   ["src/agents/routes/adminTenantQueues.ts", "listStoreEntries", "sessions"],
@@ -742,6 +760,10 @@ const STEP5_FUNNEL_SITES: Array<[string, string, string]> = [
   ["src/data/createSessionPorts.ts", "createStoreKv", "sessions"],
   ["src/data/createSessionPorts.ts", "listStoreEntries", "sessions"],
   ["src/data/createSessionPorts.ts", "listStoreEntries", "sessions"],
+  ["src/data/createTokenPorts.ts", "createStoreKv", "<dynamic>"],
+  ["src/data/createTokenPorts.ts", "createStoreKv", "etrade"],
+  ["src/data/createTokenPorts.ts", "createStoreKv", "public"],
+  ["src/data/createTokenPorts.ts", "listStoreEntries", "etrade"],
   ["src/payments/draftOwners.ts", "consumeStoreKey", "payments"],
   ["src/payments/draftOwners.ts", "createStoreKv", "payments"],
   ["src/security/apiKeys.ts", "createStoreKv", "api_keys"],
@@ -755,7 +777,6 @@ const STEP5_FUNNEL_SITES: Array<[string, string, string]> = [
   ["src/security/serviceTokens.ts", "createStoreKv", "service_tokens"],
   ["src/security/session.ts", "createStoreKv", "sessions"],
   ["src/security/session.ts", "listStoreEntries", "sessions"],
-  ["src/server.ts", "listStoreEntries", "etrade"],
   ["src/services/agenticPayments.ts", "consumeStoreKey", "payments"],
   ["src/services/agenticPayments.ts", "createStoreKv", "payments"],
   ["src/trading/channels/intake.ts", "consumeStoreKey", "slack_principal_links"],
@@ -892,6 +913,79 @@ describe("global D-D census: step 5b — session family port composition sites (
       ["src/agents/routes/kvWipe.ts", "listStoreEntries", "sessions"],
       ["src/security/iaaaAuditStore.ts", "createStoreSender", "sessions"],
       ["src/security/iaaaAuditStore.ts", "listStoreEntries", "sessions"],
+    ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Step 5c (#2434) — OAuth token family port composition
+// ---------------------------------------------------------------------------
+//
+// The "composes ports" evidence for 5c: the family's façades
+// route through the composition root / family selectors as an
+// exact [file, function, count] set (definition sites counted,
+// comments stripped). A façade that stops composing ports —
+// or a new composition site — fails here. This pin is also
+// the flag-wiring evidence: the dual-composition behaviour is
+// identical by design, so a façade that ignored
+// TOKEN_PORTS_ENABLED would show up here as a missing branch
+// call, not as a behaviour difference.
+
+const STEP5C_PORT_FUNCTIONS = [
+  "createTokenPorts",
+  "tokenFamilyPorts",
+  "listTokenFamilyEntries",
+  "publicTokenPort",
+] as const;
+
+function step5cPortSites(): Array<[string, string, number]> {
+  const out: Array<[string, string, number]> = [];
+  for (const f of SRC_FILES) {
+    const text = STRIPPED.get(f)!;
+    for (const fn of STEP5C_PORT_FUNCTIONS) {
+      const n = (text.match(new RegExp(`\\b${fn}\\s*\\(`, "g")) ?? []).length;
+      if (n > 0) out.push([f, fn, n]);
+    }
+  }
+  return out.sort((a, b) => a.join("|").localeCompare(b.join("|")));
+}
+
+const STEP5C_PORT_SITES: Array<[string, string, number]> = [
+  ["src/data/createTokenPorts.ts", "createTokenPorts", 1],
+  ["src/security/etradeOAuth.ts", "createTokenPorts", 1],
+  ["src/security/etradeOAuth.ts", "listTokenFamilyEntries", 2],
+  ["src/security/etradeOAuth.ts", "tokenFamilyPorts", 9],
+  ["src/security/publicOAuth.ts", "createTokenPorts", 1],
+  ["src/security/publicOAuth.ts", "publicTokenPort", 8],
+  ["src/server.ts", "listTokenFamilyEntries", 1],
+];
+
+describe("global D-D census: step 5c — token family port composition sites (#2434)", () => {
+  it("the family's façades compose ports at exactly the pinned sites", () => {
+    expect(step5cPortSites()).toEqual(STEP5C_PORT_SITES);
+  });
+
+  it("etrade/public-bucket funnel use outside the factories is exactly the named remainder", () => {
+    // Outside the family's façades (etradeOAuth.ts /
+    // publicOAuth.ts) and its composition root
+    // (createTokenPorts.ts), the only remaining funnel sites
+    // for this family's buckets are the admin wipe route's
+    // own composition (kvWipe.ts — a route-level wipe/verify
+    // surface, not the token lifecycle). Any NEW
+    // outside-factory consumer for these buckets fails here.
+    const factories = new Set([
+      "src/security/etradeOAuth.ts",
+      "src/security/publicOAuth.ts",
+      "src/data/createTokenPorts.ts",
+    ]);
+    const rest = funnelCallSites().filter(
+      ([f, , bucket]) =>
+        (bucket === "etrade" || bucket === "public" || bucket === "<dynamic>") &&
+        !factories.has(f),
+    );
+    expect(rest).toEqual([
+      ["src/agents/routes/kvWipe.ts", "createStoreKv", "etrade"],
+      ["src/agents/routes/kvWipe.ts", "listStoreEntries", "etrade"],
     ]);
   });
 });
