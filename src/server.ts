@@ -29,6 +29,14 @@ import {
 } from "./security/iaaaLoggedInUsers";
 import { SESSION_REVOCATION_CROSS_ISOLATE_BOUND_MS } from "./security/revocationTargets";
 import { deleteSession, getSession, listSessionFamilyEntries, sessionStore, updateSession, wiredAccessRequestStore, wiredMembershipStore } from "./security/session";
+import {
+  isAdminRoleGrant,
+  listGrantsForReview,
+  resolveGrantDefaultExpiryDays,
+  runGranterRevocationPass,
+  type GranterRevocationPassResult,
+} from "./security/grantRules";
+import { createGrantProposalStore, resolveAdminGrantProposal } from "./security/grantProposals";
 import { listStoreEntries, type DoNamespaceLike, type DoStubLike } from "./security/durableKv";
 import type { ActorNamespaceLike } from "./services/actorGatewayPorts";
 import { zonedDateParts } from "./schedule";
@@ -2922,12 +2930,42 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
               ),
           );
           if (!alreadyAdmin) {
+            // Issue #3155 (Q9): an approval needs two distinct
+            // approvers. The first approve records the approver
+            // and leaves the request pending (no grant, no
+            // rotation); the second approve grants and decides.
+            // A third distinct approver can still unblock a
+            // request whose grant was denied after two approvals.
+            const approval = await requestStore.recordApprover(
+              requestId,
+              session.internalUserId as string,
+              nowMs,
+            );
+            if (!approval.ok) {
+              return Response.json(
+                {
+                  error:
+                    approval.code === "ALREADY_APPROVER"
+                      ? "This admin already approved this request."
+                      : "Access request is no longer pending.",
+                },
+                { status: 409 },
+              );
+            }
+            if (approval.approverCount < 2) {
+              return Response.json({
+                ok: true,
+                pendingSecondApproval: true,
+                request: approval.request,
+              });
+            }
             const granted = await grantMembership(membershipStore, {
               granterInternalUserId: session.internalUserId,
               internalUserId: existing.requesterInternalUserId,
               tenantId,
               roleBindings: [{ role: existing.requestedRole, scope: "tenant", grantedBy: session.internalUserId }],
               nowMs,
+              defaultExpiryDays: resolveGrantDefaultExpiryDays(env.IAAA_GRANT_DEFAULT_EXPIRY_DAYS),
             });
             if (!granted.ok) {
               return Response.json({ error: "Forbidden: grant denied." }, { status: 403 });
@@ -3276,6 +3314,25 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
             await roleGrantDenyAudit("role_grant.list", tenantId);
             return Response.json({ error: "Forbidden: listing role grants requires admin access." }, { status: 403 });
           }
+          // Issue #3155 (Q9): ?review=true returns the
+          // granter-review queue instead of the grant list.
+          // Revocation is judged over the FULL membership set
+          // (a granter with a live membership anywhere is not
+          // revoked); the returned queue is then filtered to
+          // what this caller may see, mirroring the list below.
+          if (new URL(request.url).searchParams.get("review") === "true") {
+            const reviewEntries = await listSessionFamilyEntries(env, "iaaa-membership:");
+            if (!reviewEntries) {
+              return Response.json({ error: "Role-grant listing unavailable." }, { status: 500 });
+            }
+            const reviewQueue = listGrantsForReview(listMembershipsFromEntries(reviewEntries), nowMs);
+            return Response.json({
+              ok: true,
+              reviewQueue: callerIsPlatformAdmin
+                ? reviewQueue
+                : reviewQueue.filter((q) => q.tenantId === tenantId),
+            });
+          }
           const entries = await listSessionFamilyEntries(env, "iaaa-membership:");
           if (!entries) {
             return Response.json({ error: "Role-grant listing unavailable." }, { status: 500 });
@@ -3425,6 +3482,34 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
               { status: 403 },
             );
           }
+          // Issue #3155 (Q9): this surface grants admin roles
+          // only, so every grant here needs two distinct
+          // approvers — the first proposes (202, pending), the
+          // second's identical grant confirms and mints below.
+          // Both approvers pass the obligation chain above, on
+          // their own calls.
+          {
+            const proposalStore = createGrantProposalStore(kv);
+            const resolved = await resolveAdminGrantProposal(proposalStore, {
+              kind: "grant",
+              granteeInternalUserId: targetId,
+              tenantId: validated.tenantId,
+              roleBindings: [{ role: validated.role, scope: validated.scope }],
+              callerInternalUserId: session.internalUserId as string,
+              nowMs,
+            });
+            if (resolved.action !== "confirm") {
+              return Response.json(
+                {
+                  ok: true,
+                  pending: true,
+                  proposalId: resolved.proposal.proposalId,
+                  approvers: resolved.proposal.approvers,
+                },
+                { status: 202 },
+              );
+            }
+          }
           const granted = await grantMembership(membershipStore, {
             granterInternalUserId: session.internalUserId,
             internalUserId: targetId,
@@ -3437,6 +3522,7 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
               },
             ],
             nowMs,
+            defaultExpiryDays: resolveGrantDefaultExpiryDays(env.IAAA_GRANT_DEFAULT_EXPIRY_DAYS),
             ...(granteeEmail !== undefined ? { email: granteeEmail } : {}),
           });
           if (!granted.ok) {
@@ -3544,8 +3630,51 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
             console.warn("[iaaa] session rotation skipped: session listing unavailable");
           }
           const revokeRotationCookie = sessionRotationCookie(request, revokeRotation);
+          // Issue #3155 (Q9): granter-revocation pass, mirroring
+          // the membership revoke route — matrix-violating grants
+          // by a now-fully-revoked user are revoked with them;
+          // valid grants stay for the review queue. Never fails
+          // the revoke; failures skip loudly with a reason.
+          let granterRevocationPass: GranterRevocationPassResult & { auditFailures: string[]; reason?: string };
+          try {
+            const passEntries = await listSessionFamilyEntries(env, "iaaa-membership:");
+            if (!passEntries) {
+              console.warn("[iaaa] granter-revocation pass skipped: membership listing unavailable");
+              granterRevocationPass = { reviewed: 0, revokedBindings: 0, revokedMemberships: [], skipped: true, auditFailures: [], reason: "listing-unavailable" };
+            } else {
+              const pass = await runGranterRevocationPass({
+                store: membershipStore,
+                allMemberships: listMembershipsFromEntries(passEntries),
+                revokedUserId: record.internalUserId,
+                nowMs,
+              });
+              const auditFailures: string[] = [];
+              for (const passRevokedId of pass.revokedMemberships) {
+                try {
+                  const audited = await wiredAuditWriter("membership:revoke")({
+                    permission: "membership:revoke",
+                    principalId: session.internalUserId as string,
+                    tenantId: record.tenantId,
+                    decision: "allow",
+                    nowMs,
+                  });
+                  if (!audited) {
+                    console.warn(`[iaaa] granter-revocation pass audit failed for ${passRevokedId}`);
+                    auditFailures.push(passRevokedId);
+                  }
+                } catch {
+                  console.warn(`[iaaa] granter-revocation pass audit threw for ${passRevokedId}`);
+                  auditFailures.push(passRevokedId);
+                }
+              }
+              granterRevocationPass = { ...pass, auditFailures };
+            }
+          } catch {
+            console.warn("[iaaa] granter-revocation pass failed; grants remain visible in the review queue");
+            granterRevocationPass = { reviewed: 0, revokedBindings: 0, revokedMemberships: [], skipped: true, auditFailures: [], reason: "pass-error" };
+          }
           return Response.json(
-            { ok: true, grantId: view.grantId, emptied: removed.emptied, revoked: true, sessionRotation: { rotatedCount: revokeRotation.rotated.length, unavailable: revokeRotation.unavailable } },
+            { ok: true, grantId: view.grantId, emptied: removed.emptied, revoked: true, granterRevocationPass, sessionRotation: { rotatedCount: revokeRotation.rotated.length, unavailable: revokeRotation.unavailable } },
             revokeRotationCookie ? { headers: { "Set-Cookie": revokeRotationCookie } } : undefined,
           );
         }
@@ -4648,6 +4777,39 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
               );
             }
           }
+          // Issue #3155 (Q9): tenant-admin and platform-admin
+          // grants need two distinct approvers. The first admin's
+          // grant proposes (202, pending) and mints nothing; the
+          // second admin's identical grant confirms the proposal
+          // and falls through to mint below. Both approvers pass
+          // the obligation chain above, on their own calls.
+          // Non-admin grants skip this block and mint immediately.
+          if (isAdminRoleGrant(requestedBindings)) {
+            const proposalStore = createGrantProposalStore(kv);
+            const resolved = await resolveAdminGrantProposal(proposalStore, {
+              kind: "grant",
+              granteeInternalUserId: targetId,
+              tenantId: grantTenantId,
+              roleBindings: requestedBindings.map((b) => ({
+                role: b.role as Role,
+                scope: b.scope,
+                ...(b.workspaceId ? { workspaceId: b.workspaceId } : {}),
+              })),
+              callerInternalUserId: session.internalUserId as string,
+              nowMs,
+            });
+            if (resolved.action !== "confirm") {
+              return Response.json(
+                {
+                  ok: true,
+                  pending: true,
+                  proposalId: resolved.proposal.proposalId,
+                  approvers: resolved.proposal.approvers,
+                },
+                { status: 202 },
+              );
+            }
+          }
           const granted = await grantMembership(membershipStore, {
             granterInternalUserId: session.internalUserId,
             internalUserId: targetId,
@@ -4662,6 +4824,7 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
               };
             }),
             nowMs,
+            defaultExpiryDays: resolveGrantDefaultExpiryDays(env.IAAA_GRANT_DEFAULT_EXPIRY_DAYS),
             ...(granteeEmail !== undefined ? { email: granteeEmail } : {}),
           });
           if (!granted.ok) {
@@ -4757,8 +4920,53 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
             console.warn("[iaaa] session rotation skipped: session listing unavailable");
           }
           const memberRevokeRotationCookie = sessionRotationCookie(request, memberRevokeRotation);
+          // Issue #3155 (Q9): granter-revocation pass. Once this
+          // revoke leaves the revoked user with no live
+          // memberships, matrix-violating grants they made are
+          // revoked with them; valid grants stay for the review
+          // queue. The pass never fails the revoke: a missing
+          // listing or a pass error skips it loudly, and audit
+          // failures are counted in the response, not hidden.
+          let granterRevocationPass: GranterRevocationPassResult & { auditFailures: string[]; reason?: string };
+          try {
+            const passEntries = await listSessionFamilyEntries(env, "iaaa-membership:");
+            if (!passEntries) {
+              console.warn("[iaaa] granter-revocation pass skipped: membership listing unavailable");
+              granterRevocationPass = { reviewed: 0, revokedBindings: 0, revokedMemberships: [], skipped: true, auditFailures: [], reason: "listing-unavailable" };
+            } else {
+              const pass = await runGranterRevocationPass({
+                store: membershipStore,
+                allMemberships: listMembershipsFromEntries(passEntries),
+                revokedUserId: record.internalUserId,
+                nowMs,
+              });
+              const auditFailures: string[] = [];
+              for (const passRevokedId of pass.revokedMemberships) {
+                try {
+                  const audited = await wiredAuditWriter("membership:revoke")({
+                    permission: "membership:revoke",
+                    principalId: session.internalUserId as string,
+                    tenantId: record.tenantId,
+                    decision: "allow",
+                    nowMs,
+                  });
+                  if (!audited) {
+                    console.warn(`[iaaa] granter-revocation pass audit failed for ${passRevokedId}`);
+                    auditFailures.push(passRevokedId);
+                  }
+                } catch {
+                  console.warn(`[iaaa] granter-revocation pass audit threw for ${passRevokedId}`);
+                  auditFailures.push(passRevokedId);
+                }
+              }
+              granterRevocationPass = { ...pass, auditFailures };
+            }
+          } catch {
+            console.warn("[iaaa] granter-revocation pass failed; grants remain visible in the review queue");
+            granterRevocationPass = { reviewed: 0, revokedBindings: 0, revokedMemberships: [], skipped: true, auditFailures: [], reason: "pass-error" };
+          }
           return Response.json(
-            { ok: true, membershipId, revoked: true, sessionRotation: { rotatedCount: memberRevokeRotation.rotated.length, unavailable: memberRevokeRotation.unavailable } },
+            { ok: true, membershipId, revoked: true, granterRevocationPass, sessionRotation: { rotatedCount: memberRevokeRotation.rotated.length, unavailable: memberRevokeRotation.unavailable } },
             memberRevokeRotationCookie ? { headers: { "Set-Cookie": memberRevokeRotationCookie } } : undefined,
           );
         }
@@ -4806,6 +5014,51 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
               );
             }
           }
+          // Issue #3155 (Q9): edits that add tenant-admin or
+          // platform-admin bindings need two distinct approvers.
+          // The first admin's edit proposes (202, pending) and
+          // changes nothing; the second admin's identical edit
+          // confirms and runs the grant-then-revoke sequence
+          // below. Both approvers pass the obligation chain
+          // above, on their own calls. Non-admin edits apply
+          // immediately.
+          if (
+            isAdminRoleGrant(
+              bindings.map((raw) => {
+                const binding = raw as { role?: unknown };
+                return { role: typeof binding.role === "string" ? binding.role : "" };
+              }),
+            )
+          ) {
+            const proposalStore = createGrantProposalStore(kv);
+            const resolved = await resolveAdminGrantProposal(proposalStore, {
+              kind: "edit",
+              targetMembershipId: membershipId,
+              granteeInternalUserId: record.internalUserId,
+              tenantId: record.tenantId,
+              roleBindings: bindings.map((raw) => {
+                const binding = raw as { role: string; scope?: string; workspaceId?: string };
+                return {
+                  role: binding.role as Role,
+                  scope: (binding.scope ?? "tenant") as AuthorizationScope,
+                  ...(binding.workspaceId ? { workspaceId: binding.workspaceId } : {}),
+                };
+              }),
+              callerInternalUserId: session.internalUserId as string,
+              nowMs,
+            });
+            if (resolved.action !== "confirm") {
+              return Response.json(
+                {
+                  ok: true,
+                  pending: true,
+                  proposalId: resolved.proposal.proposalId,
+                  approvers: resolved.proposal.approvers,
+                },
+                { status: 202 },
+              );
+            }
+          }
           const granted = await grantMembership(membershipStore, {
             granterInternalUserId: session.internalUserId,
             internalUserId: record.internalUserId,
@@ -4821,6 +5074,7 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
               };
             }),
             nowMs,
+            defaultExpiryDays: resolveGrantDefaultExpiryDays(env.IAAA_GRANT_DEFAULT_EXPIRY_DAYS),
           });
           if (!granted.ok) {
             return Response.json(

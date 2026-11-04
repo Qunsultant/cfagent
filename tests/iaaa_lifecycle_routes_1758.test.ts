@@ -42,12 +42,14 @@ import type { Env } from "../src/types";
 
 const ADMIN_SESSION = "0d9a3120-1c2b-4e3f-8a5b-3120000000a1";
 const PLATFORM_SESSION = "0d9a3120-1c2b-4e3f-8a5b-3120000000a2";
+const PLATFORM2_SESSION = "0d9a3120-1c2b-4e3f-8a5b-3120000000a6";
 const MEMBER_SESSION = "0d9a3120-1c2b-4e3f-8a5b-3120000000a3";
 const TARGET_SESSION_1 = "0d9a3120-1c2b-4e3f-8a5b-3120000000b1";
 const TARGET_SESSION_2 = "0d9a3120-1c2b-4e3f-8a5b-3120000000b2";
 const LEGACY_SESSION = "0d9a3120-1c2b-4e3f-8a5b-3120000000a4";
 const ADMIN_ID = "v1:routeadmin00000000000000000000000000000000000000000001";
 const PLATFORM_ID = "v1:routeplatform000000000000000000000000000000000000001";
+const PLATFORM2_ID = "v1:routeplatform2000000000000000000000000000000000000001";
 const MEMBER_ID = "v1:routemember00000000000000000000000000000000000000001";
 const TARGET_ID = "v1:routetarget00000000000000000000000000000000000000001";
 
@@ -65,6 +67,7 @@ async function makeEnv() {
   });
   seed("sessions", ADMIN_SESSION, session("admin-user", ADMIN_ID, true));
   seed("sessions", PLATFORM_SESSION, session("platform-user", PLATFORM_ID, true));
+  seed("sessions", PLATFORM2_SESSION, session("platform2-user", PLATFORM2_ID, true));
   seed("sessions", MEMBER_SESSION, session("member-user", MEMBER_ID, true));
   seed("sessions", TARGET_SESSION_1, session("target-user", TARGET_ID, true));
   seed("sessions", TARGET_SESSION_2, session("target-user", TARGET_ID, true));
@@ -104,6 +107,13 @@ async function makeEnv() {
     createdBy: "test-seed",
     nowMs: now,
   });
+  const platform2Membership = await createMembership(membershipStore, {
+    internalUserId: PLATFORM2_ID,
+    tenantId: "primary",
+    roleBindings: [{ role: "platform-admin", scope: "platform", grantedBy: "test-seed" }],
+    createdBy: "test-seed",
+    nowMs: now,
+  });
   const memberMembership = await createMembership(membershipStore, {
     internalUserId: MEMBER_ID,
     tenantId: "primary",
@@ -118,7 +128,7 @@ async function makeEnv() {
     createdBy: "test-seed",
     nowMs: now,
   });
-  if (!adminMembership.ok || !platformMembership.ok || !memberMembership.ok || !targetMembership.ok) {
+  if (!adminMembership.ok || !platformMembership.ok || !platform2Membership.ok || !memberMembership.ok || !targetMembership.ok) {
     throw new Error("test seed failed");
   }
   return {
@@ -194,11 +204,21 @@ describe("admin grant route (#1758 F-14/F-15)", () => {
 
   it("lets a platform-admin grant a platform role, but not a tenant role", async () => {
     const { env } = await makeEnv();
-    const platformGrant = await worker.fetch(
+    // Issue #3155 (Q9): the first platform admin's grant
+    // proposes (202); a second platform admin confirms it (201).
+    const platformProposed = await worker.fetch(
       req("POST", "/api/iaaa/membership/grant", {
         internalUserId: "v1:newplatform0000000000000000000000000000000000000001",
         roleBindings: [{ role: "platform-admin", scope: "platform" }],
       }, PLATFORM_SESSION),
+      env,
+    );
+    expect(platformProposed.status).toBe(202);
+    const platformGrant = await worker.fetch(
+      req("POST", "/api/iaaa/membership/grant", {
+        internalUserId: "v1:newplatform0000000000000000000000000000000000000001",
+        roleBindings: [{ role: "platform-admin", scope: "platform" }],
+      }, PLATFORM2_SESSION),
       env,
     );
     expect(platformGrant.status).toBe(201);

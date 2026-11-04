@@ -103,15 +103,24 @@ export interface GrantRoleGrantInput {
   email?: string;
 }
 
-export async function grantRoleGrant(input: GrantRoleGrantInput): Promise<{ grant: RoleGrantInfo; alreadyGranted?: boolean }> {
+export async function grantRoleGrant(input: GrantRoleGrantInput): Promise<{ grant?: RoleGrantInfo; alreadyGranted?: boolean; pending?: boolean; proposalId?: string }> {
   const res = await apiFetch("/api/iaaa/role-grants/grant", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
   });
   if (!res.ok) throw await readError(res, "Failed to grant role.");
-  const body = (await res.json().catch(() => null)) as { grant?: unknown; alreadyGranted?: unknown } | null;
+  const body = (await res.json().catch(() => null)) as { grant?: unknown; alreadyGranted?: unknown; pending?: unknown; proposalId?: unknown } | null;
   if (!body) throw new Error("Role-grant response was malformed.");
+  // Issue #3155 (Q9): a first-approver grant returns 202 with no
+  // grant — a pending proposal, not an error. The panel shows an
+  // awaiting notice.
+  if (body.pending === true) {
+    return {
+      pending: true,
+      ...(typeof body.proposalId === "string" ? { proposalId: body.proposalId } : {}),
+    };
+  }
   return {
     grant: parseGrant(body.grant),
     ...(body.alreadyGranted === true ? { alreadyGranted: true as const } : {}),

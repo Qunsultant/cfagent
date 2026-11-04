@@ -39,6 +39,13 @@ export interface AccessRequest {
   createdAtMs: number;
   decidedAtMs?: number;
   decidedBy?: string;
+  /**
+   * Issue #3155 (Q9 second-approver rule): approvers of an approval
+   * decision, in order. Absent (pre-#3155 records) means no recorded
+   * approval yet. The route records each approver; the request moves
+   * to "approved" (and grants) only on the second distinct approver.
+   */
+  approvers?: string[];
 }
 
 export type AccessRequestCreateResult =
@@ -48,6 +55,10 @@ export type AccessRequestCreateResult =
 export type AccessRequestDecideResult =
   | { ok: true; request: AccessRequest }
   | { ok: false; code: "NOT_FOUND" | "NOT_PENDING" };
+
+export type AccessRequestApproveResult =
+  | { ok: true; request: AccessRequest; approverCount: number }
+  | { ok: false; code: "NOT_FOUND" | "NOT_PENDING" | "ALREADY_APPROVER" };
 
 export interface AccessRequestStore {
   create(input: {
@@ -64,6 +75,17 @@ export interface AccessRequestStore {
     decidedBy: string,
     nowMs: number,
   ): Promise<AccessRequestDecideResult>;
+  /**
+   * Issue #3155: record one approver of an approval decision without
+   * changing status. The route calls this on approve, then grants
+   * and decides "approved" only when approverCount reaches 2. A deny
+   * still goes through decide("denied") directly, single-admin.
+   */
+  recordApprover(
+    requestId: string,
+    approver: string,
+    nowMs: number,
+  ): Promise<AccessRequestApproveResult>;
 }
 
 const RECORD_PREFIX = "iaaa-access-request:";
@@ -82,7 +104,9 @@ function isAccessRequest(value: unknown): value is AccessRequest {
     typeof r.tenantId === "string" &&
     r.tenantId !== "" &&
     (r.status === "pending" || r.status === "approved" || r.status === "denied") &&
-    typeof r.createdAtMs === "number"
+    typeof r.createdAtMs === "number" &&
+    (r.approvers === undefined ||
+      (Array.isArray(r.approvers) && r.approvers.every((a) => typeof a === "string")))
   );
 }
 
@@ -183,6 +207,20 @@ export function createAccessRequestStore(kv: KvLike): AccessRequestStore {
       };
       await kv.put(`${RECORD_PREFIX}${requestId}`, JSON.stringify(decided));
       return { ok: true, request: decided };
+    },
+
+    async recordApprover(requestId, approver, nowMs) {
+      const request = await this.get(requestId);
+      if (!request) return { ok: false, code: "NOT_FOUND" };
+      if (request.status !== "pending") return { ok: false, code: "NOT_PENDING" };
+      const approvers = request.approvers ?? [];
+      if (approvers.includes(approver)) return { ok: false, code: "ALREADY_APPROVER" };
+      const updated: AccessRequest = {
+        ...request,
+        approvers: [...approvers, approver],
+      };
+      await kv.put(`${RECORD_PREFIX}${requestId}`, JSON.stringify(updated));
+      return { ok: true, request: updated, approverCount: approvers.length + 1 };
     },
   };
 }
