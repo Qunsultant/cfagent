@@ -57,7 +57,7 @@ function mockFetch() {
   const fetchMock = vi.fn(async (input: any) => {
     const url = String(input);
     const okJson = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
-    if (url.startsWith("/api/etrade/orders")) return okJson({ orders: [] });
+    if (url.startsWith("/api/broker/orders")) return okJson({ orders: [] });
     return okJson({});
   });
   vi.stubGlobal("fetch", fetchMock);

@@ -953,6 +953,9 @@ export interface TradeRecord {
   proofSignature: string;
   previewNotes?: string;
   expirationScheduleId?: string;
+  /** Issue #3089: broker the draft was previewed on (etrade/alpaca).
+   * Absent on legacy rows — those are all E*TRADE. */
+  broker?: string;
   createdAt: string;
   updatedAt: string;
 }
