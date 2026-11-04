@@ -4,9 +4,11 @@
  * Two POST routes, no new envelope, no new store, no new binding:
  * - POST /search/agent -> ETradeAISearchService.searchFinancialDocs
  *   (service-native AISearchQueryResponse: query/results/totalMatches/
- *   provider/timestamp). The service's fallback branch is untouched
- *   (S3, probe-first); the tab renders `provider` honestly per result
- *   set (cloudflare_ai_search vs semantic_cache).
+ *   provider/timestamp, plus `degraded` when the live index did not
+ *   serve). Since #1169 S3 the service has no fallback corpus: an
+ *   unserved query returns zero results with an in-band `degraded`
+ *   reason, and the tab renders that degraded state as a visible
+ *   notice — never as silent emptiness or substitute rows.
  * - POST /search/knowledge -> searchPlatformKnowledge, PLATFORM MODE
  *   ONLY: the catalog function is called directly, with no AI-endpoint
  *   attempt and no blend, so agent chunks and catalog entries never
