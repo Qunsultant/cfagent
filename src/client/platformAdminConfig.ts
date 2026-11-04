@@ -24,6 +24,7 @@ export type PlatformAdminSectionId =
   | "api-keys"
   | "tenants"
   | "data-providers"
+  | "accounts"
   | "iaaa-admin"
   | "users"
   | "admin-access";
