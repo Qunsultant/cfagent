@@ -314,9 +314,14 @@ const ORCH = "agents/orchestrator.ts";
  *  Issue #2222 (v3 rebuild stacking users + tenant + account)
  *  reorders the tenant block before the account block and
  *  re-measures: 3,227 lines / 154,701 B on the stacked tree,
- *  within the 3230 / 154_800 budget, so no bump is needed. */
-const BUDGET_LINES = 3230;
-const BUDGET_BYTES = 154_800;
+ *  within the 3230 / 154_800 budget, so no bump is needed.
+ *  Issue #3153 adds the delegations import + delegation block
+ *  (after the service-user delegation, no other orchestrator
+ *  logic changed) — measured 3,238 lines / 155,218 B after the
+ *  addition; budget lines rise to 3250 and bytes rise to
+ *  155_800, keeping similar headroom. */
+const BUDGET_LINES = 3250;
+const BUDGET_BYTES = 155_800;
 
 const count = (haystack: string, needle: string) =>
   haystack.split(needle).length - 1;
