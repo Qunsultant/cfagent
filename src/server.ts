@@ -80,6 +80,25 @@ import {
   type Role,
 } from "./security/authorization";
 import {
+  approveBootstrapProposal,
+  bootstrapProposalAuditInput,
+  confirmBootstrapApplied,
+  createBootstrapProposal,
+  createKvBootstrapProposalStore,
+  currentBootstrapEntries,
+  findBootstrapDivergence,
+  parseStoredBootstrapProposal,
+  rejectBootstrapProposal,
+  BOOTSTRAP_PROPOSAL_KEY_PREFIX,
+  type BootstrapProposal,
+  type BootstrapProposalAuditAction,
+} from "./security/bootstrapProposals";
+import {
+  parseBootstrapAdmins,
+  resolveBootstrapEntries,
+} from "./security/iaaaBootstrap";
+import { createWiredBindingStore } from "./security/iaaaLogin";
+import {
   approveProposal,
   createKvPolicyProposalStore,
   createProposal,
@@ -2963,6 +2982,12 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
       path === "/api/iaaa/policy-proposals/reject" ||
       path === "/api/iaaa/policy-proposals/promote" ||
       path === "/api/iaaa/policy-proposals/preview" ||
+      path === "/api/iaaa/bootstrap-proposals" ||
+      path === "/api/iaaa/bootstrap-proposals/current" ||
+      path === "/api/iaaa/bootstrap-proposals/propose" ||
+      path === "/api/iaaa/bootstrap-proposals/approve" ||
+      path === "/api/iaaa/bootstrap-proposals/reject" ||
+      path === "/api/iaaa/bootstrap-proposals/confirm-applied" ||
       path === "/api/iaaa/memberships" ||
       path === "/api/iaaa/deactivate" ||
       path === "/api/iaaa/offboard"
@@ -4153,6 +4178,282 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
               proposal: promoted.proposal,
               active: promoted.activeSnapshot,
             });
+          }
+          return Response.json({ error: "Method not allowed" }, { status: 405 });
+        }
+        // #3077 (#945 Q3) — reviewed bootstrap changes: approval-gated
+        // administration of the IAAA_BOOTSTRAP_ADMINS list. Platform-admin
+        // ONLY: every handler below refuses a non-platform caller with
+        // 403 before touching state. A proposal is inert: it changes
+        // nothing until approved, and approval changes nothing until
+        // the operator confirms application through the secrets
+        // channel — this slice never writes the env var itself.
+        // Audit order is audit-before-persist: a transition whose
+        // #1760 chained audit append fails is NOT persisted, so no
+        // unaudited transition exists. The audit record carries the
+        // proposal's correlationId verbatim (body correlationId, else
+        // the request's traceparent header), joining it to #2808 traces.
+        // List-removal retains: removing an identifier never drops a
+        // membership — it stays until explicitly revoked; the current
+        // view surfaces bootstrap-granted members no longer listed.
+        if (
+          path === "/api/iaaa/bootstrap-proposals" ||
+          path === "/api/iaaa/bootstrap-proposals/current" ||
+          path === "/api/iaaa/bootstrap-proposals/propose" ||
+          path === "/api/iaaa/bootstrap-proposals/approve" ||
+          path === "/api/iaaa/bootstrap-proposals/reject" ||
+          path === "/api/iaaa/bootstrap-proposals/confirm-applied"
+        ) {
+          const bootStore = createKvBootstrapProposalStore(kv);
+          const bootAudit = async (
+            action: BootstrapProposalAuditAction,
+            proposal: BootstrapProposal,
+            actor: string,
+            atMs: number,
+          ): Promise<boolean> => {
+            const input = bootstrapProposalAuditInput(proposal, action, actor);
+            const result = await recordAuditEvent(createWiredAuditStore(env), {
+              ...input,
+              timestamp: atMs,
+              decision: "allow",
+              policyVersion: IAAA_AUDIT_POLICY_VERSION,
+              outcome: "succeeded",
+            });
+            return result.ok;
+          };
+          const bootDenyAudit = async (): Promise<void> => {
+            try {
+              await recordAuditEvent(createWiredAuditStore(env), {
+                type: "iaaa.bootstrap",
+                actorPrincipalId: session.internalUserId as string,
+                actorType: "human",
+                initiatingPrincipalId: session.internalUserId as string,
+                tenantId: "platform",
+                correlationId: crypto.randomUUID(),
+                action: "bootstrap.access_denied",
+                timestamp: nowMs,
+                decision: "deny",
+                policyVersion: IAAA_AUDIT_POLICY_VERSION,
+                outcome: "failed",
+              });
+            } catch {
+              /* denial attribution is best-effort; the deny stands */
+            }
+          };
+          if (!callerIsPlatformAdmin) {
+            await bootDenyAudit();
+            return Response.json(
+              { error: "Forbidden: bootstrap administration requires platform-admin." },
+              { status: 403 },
+            );
+          }
+          // Resolve the current env list to internal user ids (bare
+          // ids pass through; provider entries resolve through the
+          // Slice 1 binding store; unresolvable entries resolve to
+          // nobody and are reported, never invented).
+          const resolveCurrentList = async (): Promise<{
+            entries: string[];
+            resolvedInternalUserIds: string[];
+            unresolvedEntries: string[];
+          }> => {
+            const entries = currentBootstrapEntries(env.IAAA_BOOTSTRAP_ADMINS);
+            const parsed = entries.map((entry) => {
+              const inner = entry.startsWith("platform:")
+                ? entry.slice("platform:".length)
+                : entry;
+              return { entry, parsed: parseBootstrapAdmins(inner) };
+            });
+            const toResolve = parsed
+              .filter((p) => p.parsed.entries.length === 1)
+              .map((p) => p.parsed.entries[0]);
+            const resolved = await resolveBootstrapEntries(
+              createWiredBindingStore(env),
+              toResolve,
+            );
+            const unresolvedEntries = parsed
+              .filter((p) => p.parsed.entries.length !== 1)
+              .map((p) => p.entry);
+            for (const u of resolved.unresolved) {
+              unresolvedEntries.push(
+                `${u.providerIssuer}:${u.providerSubject}`,
+              );
+            }
+            return {
+              entries,
+              resolvedInternalUserIds: resolved.internalUserIds,
+              unresolvedEntries,
+            };
+          };
+          if (path === "/api/iaaa/bootstrap-proposals" && request.method === "GET") {
+            const entries = await listSessionFamilyEntries(env, BOOTSTRAP_PROPOSAL_KEY_PREFIX);
+            if (!entries) {
+              return Response.json({ error: "Bootstrap-proposal listing unavailable." }, { status: 500 });
+            }
+            const proposals: BootstrapProposal[] = [];
+            let skippedCorrupt = 0;
+            for (const entry of entries) {
+              const parsed = parseStoredBootstrapProposal(entry.value);
+              if (parsed) proposals.push(parsed);
+              else skippedCorrupt++;
+            }
+            proposals.sort((a, b) => a.createdAtMs - b.createdAtMs);
+            return Response.json({ ok: true, proposals, skippedCorrupt });
+          }
+          if (path === "/api/iaaa/bootstrap-proposals/current" && request.method === "GET") {
+            const current = await resolveCurrentList();
+            const memberEntries = await listSessionFamilyEntries(env, "iaaa-membership:");
+            if (!memberEntries) {
+              return Response.json({ error: "Membership listing unavailable." }, { status: 500 });
+            }
+            const divergence = findBootstrapDivergence(
+              current.resolvedInternalUserIds,
+              listMembershipsFromEntries(memberEntries),
+              nowMs,
+            );
+            return Response.json({
+              ok: true,
+              entries: current.entries,
+              resolvedInternalUserIds: current.resolvedInternalUserIds,
+              unresolvedEntries: current.unresolvedEntries,
+              divergence,
+            });
+          }
+          if (request.method !== "POST") {
+            return Response.json({ error: "Method not allowed" }, { status: 405 });
+          }
+          const bootBody = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+          const loadBootstrapProposal = async (): Promise<BootstrapProposal | null> => {
+            const id = typeof bootBody?.proposalId === "string" ? bootBody.proposalId.trim() : "";
+            if (id === "") return null;
+            return bootStore.getProposal(id);
+          };
+          if (path === "/api/iaaa/bootstrap-proposals/propose") {
+            const action =
+              bootBody?.action === "add" || bootBody?.action === "remove" ? bootBody.action : null;
+            if (action === null) {
+              return Response.json({ error: "action must be add or remove." }, { status: 400 });
+            }
+            const correlationId =
+              (typeof bootBody?.correlationId === "string" && bootBody.correlationId.trim() !== ""
+                ? bootBody.correlationId.trim()
+                : request.headers.get("traceparent") ?? undefined) ?? undefined;
+            const created = createBootstrapProposal({
+              proposer: session.internalUserId as string,
+              action,
+              identifier: typeof bootBody?.identifier === "string" ? bootBody.identifier : "",
+              reason: typeof bootBody?.reason === "string" ? bootBody.reason : "",
+              ...(correlationId !== undefined ? { correlationId } : {}),
+              nowMs,
+            });
+            if (!created.ok) {
+              return Response.json({ error: created.error, code: created.code }, { status: 400 });
+            }
+            const current = await resolveCurrentList();
+            const proposalInternalId = (
+              await resolveBootstrapEntries(
+                createWiredBindingStore(env),
+                parseBootstrapAdmins(
+                  created.proposal.identifier.startsWith("platform:")
+                    ? created.proposal.identifier.slice("platform:".length)
+                    : created.proposal.identifier,
+                ).entries,
+              )
+            ).internalUserIds[0];
+            const listedByIdentity =
+              proposalInternalId !== undefined &&
+              current.resolvedInternalUserIds.includes(proposalInternalId);
+            const listedByString = current.entries.includes(created.proposal.identifier);
+            if (action === "add" && (listedByIdentity || listedByString)) {
+              return Response.json({ error: "identifier is already in the bootstrap list." }, { status: 400 });
+            }
+            if (action === "remove" && !listedByIdentity && !listedByString) {
+              return Response.json({ error: "identifier is not in the bootstrap list." }, { status: 400 });
+            }
+            let proposal = created.proposal;
+            // List-removal retains: record a bootstrap-granted active
+            // membership for the removed identifier, so the UI can
+            // state plainly that it stays until explicitly revoked.
+            if (action === "remove" && proposalInternalId !== undefined) {
+              const memberships = await membershipStore.getMembershipsByUser(proposalInternalId);
+              const retained = memberships.find(
+                (m) =>
+                  m.revokedAtMs === undefined &&
+                  m.roleBindings.some(
+                    (b) =>
+                      (b.grantedBy === "system:bootstrap" || b.grantedBy === "system:bootstrap-genesis") &&
+                      (b.expiresAtMs === undefined || b.expiresAtMs > nowMs),
+                  ),
+              );
+              if (retained) {
+                proposal = {
+                  ...proposal,
+                  retained: { internalUserId: proposalInternalId, membershipId: retained.membershipId },
+                };
+              }
+            }
+            if (!(await bootAudit("bootstrap.proposed", proposal, session.internalUserId as string, nowMs))) {
+              return Response.json({ error: "Audit-before-propose failed; proposal not stored." }, { status: 500 });
+            }
+            await bootStore.putProposal(proposal);
+            return Response.json({ ok: true, proposal }, { status: 201 });
+          }
+          if (path === "/api/iaaa/bootstrap-proposals/approve") {
+            const proposal = await loadBootstrapProposal();
+            if (!proposal) return Response.json({ error: "Proposal not found." }, { status: 404 });
+            const exceptionReason =
+              typeof bootBody?.exceptionReason === "string" ? bootBody.exceptionReason : undefined;
+            const approved = approveBootstrapProposal(proposal, {
+              approver: session.internalUserId as string,
+              approverIsPlatformAdmin: callerIsPlatformAdmin,
+              ...(exceptionReason !== undefined ? { exceptionReason } : {}),
+              nowMs,
+            });
+            if (!approved.ok) {
+              return Response.json(
+                { error: approved.error, code: approved.code },
+                { status: approved.code === "NOT_PLATFORM_ADMIN" || approved.code === "SELF_APPROVAL" ? 403 : 400 },
+              );
+            }
+            if (!(await bootAudit("bootstrap.approved", approved.proposal, session.internalUserId as string, nowMs))) {
+              return Response.json({ error: "Audit-before-approve failed; approval not stored." }, { status: 500 });
+            }
+            await bootStore.putProposal(approved.proposal);
+            return Response.json({ ok: true, proposal: approved.proposal });
+          }
+          if (path === "/api/iaaa/bootstrap-proposals/reject") {
+            const proposal = await loadBootstrapProposal();
+            if (!proposal) return Response.json({ error: "Proposal not found." }, { status: 404 });
+            const rejected = rejectBootstrapProposal(proposal, {
+              reviewer: session.internalUserId as string,
+              reviewerIsPlatformAdmin: callerIsPlatformAdmin,
+              nowMs,
+            });
+            if (!rejected.ok) {
+              return Response.json({ error: rejected.error, code: rejected.code }, { status: 400 });
+            }
+            if (!(await bootAudit("bootstrap.rejected", rejected.proposal, session.internalUserId as string, nowMs))) {
+              return Response.json({ error: "Audit-before-reject failed; rejection not stored." }, { status: 500 });
+            }
+            await bootStore.putProposal(rejected.proposal);
+            return Response.json({ ok: true, proposal: rejected.proposal });
+          }
+          if (path === "/api/iaaa/bootstrap-proposals/confirm-applied") {
+            const proposal = await loadBootstrapProposal();
+            if (!proposal) return Response.json({ error: "Proposal not found." }, { status: 404 });
+            const applied = confirmBootstrapApplied(proposal, {
+              appliedBy: session.internalUserId as string,
+              appliedByIsPlatformAdmin: callerIsPlatformAdmin,
+              applicationNote: typeof bootBody?.applicationNote === "string" ? bootBody.applicationNote : undefined,
+              nowMs,
+            });
+            if (!applied.ok) {
+              return Response.json({ error: applied.error, code: applied.code }, { status: 400 });
+            }
+            if (!(await bootAudit("bootstrap.applied", applied.proposal, session.internalUserId as string, nowMs))) {
+              return Response.json({ error: "Audit-before-confirm failed; application not recorded." }, { status: 500 });
+            }
+            await bootStore.putProposal(applied.proposal);
+            return Response.json({ ok: true, proposal: applied.proposal });
           }
           return Response.json({ error: "Method not allowed" }, { status: 405 });
         }
