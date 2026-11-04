@@ -1044,6 +1044,15 @@
     ],
     "order": [
       {
+        "id": "stock-order",
+        "label": "Stock order",
+        "shortLabel": "Stock",
+        "icon": "Order",
+        "badge": "Stock",
+        "badgeType": "neutral",
+        "description": "Equity order ticket \u2014 build a stock order with broker preview and human approval"
+      },
+      {
         "id": "options-order",
         "label": "Options order",
         "shortLabel": "Options",
@@ -1193,7 +1202,13 @@
       "tab": "assets-hub",
       "view": "bonds"
     },
-    "order:options-order": {
+    "order:stock-order": {
+    "tab": "order",
+    "params": {
+      "orderTab": "stock"
+    }
+  },
+  "order:options-order": {
       "tab": "order",
       "params": {
         "assetClass": "options"
