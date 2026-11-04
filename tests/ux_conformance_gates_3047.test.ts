@@ -175,6 +175,8 @@ const CONFORMING_ROUTES: Record<string, string> = {
   ads: "src/client/chat/tabs/AdsTab.tsx",
   referrals: "src/client/chat/tabs/ReferralsTab.tsx",
   revenue: "src/client/chat/tabs/RevenueTab.tsx",
+  docs: "src/client/DocsAndReportsPanel.tsx",
+  billing: "src/client/BillingServicingPanel.tsx",
 };
 
 /** Routes rendered inline in Chat.tsx's TAB_CONTENT (entry-slice check). */
