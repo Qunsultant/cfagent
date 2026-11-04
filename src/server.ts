@@ -6721,7 +6721,7 @@ export default {
                 consumeQueuedAnalysisDone: (
                   message: unknown,
                   attempt?: number,
-                ) => Promise<{ status: string; reason?: string }>;
+                ) => Promise<{ status: string; reason?: string; pdfKey?: string; pdfStatus?: string; pdfError?: string }>;
               };
               const outcome = await agent.consumeQueuedAnalysisDone(
                 stageMsg,
@@ -6729,6 +6729,62 @@ export default {
                   ? ((msg as { attempts: number }).attempts as number)
                   : 1,
               );
+              // Issue #2869 slice 1 follow-up: on a queued
+              // generation (in-process leg failed, claim
+              // released, queued consume generated), refresh
+              // the canonical row's PDF fields through the
+              // one recorder — otherwise the Reports tab
+              // keeps showing no PDF for a run that now has
+              // one. Refresh is update-only, monotonic, and
+              // owner-scoped, so a duplicate-suppressed
+              // consume (no pdfKey carried) refreshes
+              // nothing, and a refresh failure never fails
+              // the queue ack: the generated PDF is already
+              // durable on the persisted analysis key.
+              // Addressing, stated plainly: the recorder
+              // instance that wrote the row is the REST
+              // path's per-user orchestrator instance for
+              // manual runs, and the shared orchestrator
+              // instance for workflow runs — so the
+              // handler tries the per-user instance first
+              // and the shared instance when that reports
+              // no row. Both attempts are update-only and
+              // owner-scoped, so a miss refreshes nothing.
+              if (outcome.status === "generated" && outcome.pdfKey) {
+                try {
+                  const refreshInput = {
+                    generationId: stageMsg.runId,
+                    userLogin: stageMsg.userLogin,
+                    pdfKey: outcome.pdfKey,
+                    ...(outcome.pdfStatus ? { pdfStatus: outcome.pdfStatus } : {}),
+                    ...(outcome.pdfError ? { pdfError: outcome.pdfError } : {}),
+                  };
+                  type RefreshOrchestrator = {
+                    refreshCanonicalPdfFields: (
+                      input: typeof refreshInput,
+                    ) => Promise<{ status: string; reportId?: string }>;
+                  };
+                  const perUser = actorGateway.stub<RefreshOrchestrator>(
+                    env.SEARCH_AGENT,
+                    stageMsg.userLogin,
+                  );
+                  const first = await perUser.refreshCanonicalPdfFields(refreshInput);
+                  if (first.status === "missing-row") {
+                    const shared = actorGateway.stub<RefreshOrchestrator>(
+                      env.SEARCH_AGENT,
+                      SHARED_ORCHESTRATOR_INSTANCE,
+                    );
+                    const second = await shared.refreshCanonicalPdfFields(refreshInput);
+                    if (second.status !== "refreshed" && second.status !== "noop") {
+                      console.warn(`[Queue Handler] canonical PDF refresh unresolved: per-user ${first.status}, shared ${second.status} (run ${stageMsg.runId}).`);
+                    }
+                  } else if (first.status !== "refreshed" && first.status !== "noop") {
+                    console.warn(`[Queue Handler] canonical PDF refresh ${first.status} (run ${stageMsg.runId}).`);
+                  }
+                } catch (refreshErr) {
+                  console.warn(`[Queue Handler] canonical PDF refresh failed (run ${stageMsg.runId}); generated PDF remains on the persisted analysis key:`, refreshErr);
+                }
+              }
               if (typeof msg.ack === "function") msg.ack();
               if (outcome.status === "dead-lettered") {
                 console.warn("[Queue Handler] analysis-done stage message dead-lettered:", outcome.reason ?? "unknown");
