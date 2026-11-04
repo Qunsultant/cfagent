@@ -25,7 +25,7 @@ describe("catalog <-> runtime stage parity (#3166)", () => {
 
   it("every declared publish name is a real runtime stage id", () => {
     for (const stage of stock().stages) {
-      expect(STOCK_STAGE_IDS).toContain(stage.publishes);
+      for (const topic of stage.publishes) expect(STOCK_STAGE_IDS).toContain(topic);
     }
   });
 
@@ -54,7 +54,7 @@ describe("catalog <-> runtime stage parity (#3166)", () => {
     );
     expect(() =>
       assertWorkflowCatalog([{ ...stock(), id: "broken", stages: broken as never }]),
-    ).toThrow(/two stages/i);
+    ).toThrow(/publishes .* but executes/i);
   });
 
   it("keeps the catalog valid as declared", () => {

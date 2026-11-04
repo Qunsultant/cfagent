@@ -158,11 +158,12 @@ function stageColumns(
     { key: "modes", header: "Modes", render: modesCell },
     {
       key: "flow",
-      header: "Consumes -> persists -> publishes",
+      header: "Consumes -> persists -> publishes (one message per step)",
       render: (stage) => (
         <Stack gap="1">
           <span>
-            {stage.consumes ?? "start of run"} -&gt; {stage.persists} -&gt; {stage.publishes}
+            {stage.consumes ?? "start of run"} -&gt; {stage.persists} -&gt;{" "}
+            {stage.publishes.length > 0 ? stage.publishes.join(", ") : "nothing published"}
           </span>
           {stage.runtimeStageIds && stage.runtimeStageIds.length > 0 ? (
             <code>{stage.runtimeStageIds.join(", ")}</code>
