@@ -960,6 +960,13 @@
         "description": "MCP transport access for external clients"
       },
       {
+        "id": "platform-admin:tenants",
+        "label": "Tenants",
+        "shortLabel": "Tenant create, list, settings, and members",
+        "icon": "Agents",
+        "description": "Tenant create, list, settings, and members"
+      },
+      {
         "id": "platform-admin:data-providers",
         "label": "Data Providers",
         "shortLabel": "Provisioning lifecycle for market-data providers",
@@ -1291,6 +1298,7 @@
         "scheduled-goals",
         "provenance",
         "api-keys",
+        "tenants",
         "data-providers",
         "iaaa-admin",
         "admin-access"
@@ -1465,6 +1473,12 @@
           "label": "API Keys",
           "description": "MCP transport access for external clients",
           "icon": "ApiKeys"
+        },
+        {
+          "id": "tenants",
+          "label": "Tenants",
+          "description": "Tenant create, list, settings, and members",
+          "icon": "Agents"
         },
         {
           "id": "data-providers",
