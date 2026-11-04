@@ -28,6 +28,9 @@ import {
 } from "../../security/serviceDispatch";
 import { getServiceUserLogin } from "../../security/serviceIdentity";
 import type { MembershipStore } from "../../security/authorization";
+import { enforceOwnerDispatch } from "../../security/runRevocationGate";
+import { sessionStore } from "../../security/session";
+import { lookupInternalUserIdByLogin } from "../../security/iaaaMigration";
 import type { JobRunOutcome } from "../../data/jobRunRecordPorts";
 
 type ETradeEnvironment = "TEST" | "PROD";
@@ -76,6 +79,26 @@ async function resolveCallbackDispatch(
   const broker = enforceBrokerDispatch(identity.kind, needsBroker);
   if ("denied" in broker) return broker;
   if (identity.kind === "owner") {
+    // #3154 (Q6): revocation-mid-run consumer — an owner firing
+    // re-checks live membership at dispatch, mirroring the service
+    // tier's membership check. The resolver is the iaaa-alias login
+    // lookup over the SessionStore KV (the same store the
+    // membership store reads); an unresolvable login, a missing
+    // store, or a lookup failure preserves pre-existing behavior
+    // (allow, logged inside enforceOwnerDispatch) — see
+    // runRevocationGate.ts. A denial audits via auditCallbackDenial
+    // at the call sites and preserves the schedule.
+    const owner = await enforceOwnerDispatch({
+      store: ctx.serviceMembershipStore,
+      resolveInternalUserId:
+        ctx.resolveOwnerInternalUserId ??
+        ((login) => lookupInternalUserIdByLogin(sessionStore(ctx.env), login)),
+      login: identity.login,
+      nowMs: Date.now(),
+    });
+    if ("denied" in owner) {
+      return { denied: true, reason: "OWNER_MEMBERSHIP_REVOKED", detail: owner.detail };
+    }
     return { allowed: true, kind: "owner", login: identity.login };
   }
   const store = ctx.serviceMembershipStore;
@@ -145,6 +168,16 @@ export interface ScheduledCallbacksContext {
    *  KV store; a context without one denies every service dispatch
    *  (fail closed — an unverifiable service identity never runs). */
   serviceMembershipStore?: MembershipStore;
+  /**
+   * #3154 (Q6): owner-identity resolver for the revocation-mid-run
+   *  consumer. When supplied (tests, and any future builder that
+   *  resolves identity outside the SessionStore), the dispatch
+   *  guard uses it instead of the default iaaa-alias lookup over
+   *  sessionStore(ctx.env). The default keeps production contexts
+   *  (built by the orchestrator builder, which does not set this
+   *  port) working with no builder change.
+   */
+  resolveOwnerInternalUserId?: (login: string) => Promise<string | null>;
 }
 
 /**
