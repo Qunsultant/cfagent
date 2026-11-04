@@ -28,6 +28,8 @@ export type WorkflowRunSortKey =
   | "workflow"
   | "trigger"
   | "status"
+  | "lifecycle"
+  | "schedule"
   | "source"
   | "pdf"
   | "xlsx"
@@ -52,6 +54,8 @@ const SORT_DEFAULT_DIRECTION: Record<WorkflowRunSortKey, WorkflowRunSortDirectio
   workflow: "asc",
   trigger: "asc",
   status: "asc",
+  lifecycle: "asc",
+  schedule: "asc",
   source: "asc",
   pdf: "desc",
   xlsx: "desc",
@@ -95,6 +99,17 @@ function workflowRunSortValue(run: WorkflowRun, key: WorkflowRunSortKey): SortVa
       return run.trigger === "unknown" ? null : run.trigger;
     case "status":
       return run.status === "unknown" ? null : run.status;
+    case "lifecycle":
+      // Issue #3021: the four-state lifecycle, labels A→Z; a run
+      // without a lifecycle (older shapes) sorts last, never first.
+      return run.lifecycle ?? null;
+    case "schedule": {
+      // Issue #3021: mechanism + identity as one label; a run with
+      // no schedule provenance sorts last.
+      const schedule = run.schedule ?? null;
+      if (!schedule) return null;
+      return schedule.identity ? `${schedule.mechanism} ${schedule.identity}` : schedule.mechanism;
+    }
     case "duration":
       return typeof run.durationMs === "number" ? run.durationMs : null;
     case "stages":

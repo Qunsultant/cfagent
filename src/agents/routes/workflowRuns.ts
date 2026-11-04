@@ -41,6 +41,9 @@ import {
   type WorkflowRunOutcomeRow,
   type WorkflowRunStageTransition,
 } from "../../services/workflowRuns";
+import {
+  scheduleRunsFromItems,
+} from "../../services/workflowLifecycle";
 import { mapSagaAuditToJobs, readSagaAuditRows } from "./sagaStatus";
 
 export interface WorkflowRunsSql {
@@ -56,6 +59,13 @@ export interface WorkflowRunsRouteContext {
   sagaAuditStub?: AuditOwnerStub;
   sagaProjectionReader?: Pick<ShardJobReader, "listJobsForChain">;
   sagaTenantId?: string;
+  /**
+   * Issue #3021 deliverable (b): agent-scheduler schedule rows.
+   * Production builds this from env (orchestrator stub, mirroring
+   * the saga audit read); tests inject a mock list. A failing read
+   * is named in storeErrors and never hides the other runs.
+   */
+  scheduleReader?: () => Promise<unknown[]>;
 }
 
 const DEFAULT_LIMIT = 40;
@@ -453,6 +463,17 @@ export function buildSagaChainRuns(input: SagaChainRunsInput): WorkflowRun[] {
   return runs;
 }
 
+/** Production schedule reader: the orchestrator's schedule list over its stub (same stub as the saga audit read). */
+export async function readScheduleItemsFromOrchestrator(env: unknown): Promise<unknown[]> {
+  const stub = sagaAuditOwnerStub(env);
+  const res = await stub.fetch(new Request("https://agent.internal/api/schedules", { method: "GET" }));
+  if (!res.ok) {
+    throw new Error(`Schedule list read failed: HTTP ${res.status}.`);
+  }
+  const body = (await res.json().catch(() => null)) as { schedules?: unknown } | null;
+  return Array.isArray(body?.schedules) ? body.schedules : [];
+}
+
 export async function handleWorkflowRunsRoutes(
   request: Request,
   url: URL,
@@ -477,6 +498,10 @@ export async function handleWorkflowRunsRoutes(
   const triggerParam = url.searchParams.get("trigger");
   const statusParam = url.searchParams.get("status");
   const searchParam = url.searchParams.get("search");
+  // Issue #3021: lifecycle + schedule-type filters, server-side like
+  // trigger/status — the page builder filters BEFORE slicing.
+  const lifecycleParam = url.searchParams.get("lifecycle");
+  const scheduleParam = url.searchParams.get("schedule");
   // Issue #2786 Part 3: the Reports filter is server-side. The page
   // builder filters BEFORE slicing, so report runs past the fetched
   // window still show (no intermediate widening needed — the
@@ -597,10 +622,26 @@ export async function handleWorkflowRunsRoutes(
     }
   }
 
+  // Issue #3021 deliverable (b): agent-scheduler schedules join the
+  // list as scheduled rows, owner-scoped and fail-soft exactly like
+  // saga chains. A failed schedule read is named in storeErrors and
+  // never hides the other runs.
+  let scheduleRuns: WorkflowRun[] = [];
+  if (ctx.env !== undefined && ctx.userLogin) {
+    try {
+      const reader = ctx.scheduleReader ?? (() => readScheduleItemsFromOrchestrator(ctx.env));
+      const items = await reader();
+      scheduleRuns = scheduleRunsFromItems(items, ctx.userLogin);
+    } catch (err) {
+      storeErrors.schedules = err instanceof Error ? err.message : String(err);
+    }
+  }
+
   // Saga chains (#2780) join BEFORE filter/slice (#2786 Part 2), and
   // Part 3 Docs attach + report-only minting happen inside the page
-  // builder BEFORE filter/slice, so a saga run, a report run, and a
-  // job-backed run all obey the same filters and paging.
+  // builder BEFORE filter/slice, so a saga run, a report run, a
+  // schedule run, and a job-backed run all obey the same filters
+  // and paging.
   const page = buildWorkflowRunsPage({
     jobs,
     outcomes,
@@ -612,9 +653,12 @@ export async function handleWorkflowRunsRoutes(
     trigger: triggerParam ?? undefined,
     status: statusParam ?? undefined,
     search: searchParam ?? undefined,
+    lifecycle: lifecycleParam ?? undefined,
+    schedule: scheduleParam ?? undefined,
+    nowMs: Date.now(),
     reportsOnly,
     reportDocs,
-    extraRuns: sagaRuns,
+    extraRuns: [...sagaRuns, ...scheduleRuns],
   });
   return Response.json({
     count: page.runs.length,

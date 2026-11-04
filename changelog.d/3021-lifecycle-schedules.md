@@ -1,0 +1,5 @@
+### Workflow Runs
+
+- **Workflow Runs shows one lifecycle state per run (scheduled / in-progress / done / cancelled) with schedule provenance** — Qunsultant/cfagent#3021. Every run carries its lifecycle state and, where recorded, its schedule mechanism (workflow binding, agent scheduler, cron trigger, delayed queue, manual), identity, reason, next firing, and delay, with server-side lifecycle and schedule-type filters and sortable Lifecycle and Schedule columns.
+- **Agent-scheduler schedules and delayed-queue work surface as runs** — Qunsultant/cfagent#3021. The session user's own agent schedules (including paused ones) join the page as scheduled rows, owner-scoped and fail-soft; queued jobs with a future not-before surface as scheduled queue runs.
+- **First workflow-binding schedule registered** — Qunsultant/cfagent#3021. The screener-screen workflow binding carries a schedules entry; a binding firing completes as an explicit logged cheap skip with no duplicate execution. No live schedule is migrated onto it in this slice; that migration is tracked in Qunsultant/cfagent#3160, and cancelled-schedule visibility in Qunsultant/cfagent#3161.

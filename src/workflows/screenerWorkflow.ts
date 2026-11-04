@@ -25,6 +25,7 @@
  * projection rows + instance status, which is the design.
  */
 import { ThinkWorkflow } from "@cloudflare/think/workflows";
+import { resolveScheduleBranch } from "../services/workflowLifecycle";
 import type { WorkflowEvent, WorkflowStep } from "cloudflare:workers";
 import type { DefaultProgress } from "agents/workflows";
 import type { Env } from "../types";
@@ -353,6 +354,30 @@ export class ScreenerScreenWorkflow extends ThinkWorkflow<
     event: WorkflowEvent<WorkflowJobCommand>,
     step: WorkflowStep,
   ): Promise<unknown> {
+    // Issue #3021 (deliverable a): a binding-schedule firing carries
+    // event.schedule and no command payload. It must be handled
+    // BEFORE the userLogin gate — a schedule firing has no run owner
+    // and must not fail closed as a missing identity, and must not
+    // execute screens the tick still owns. At ship the branch
+    // evaluates binding-owned schedules only (none migrated yet), so
+    // a firing completes as an explicit cheap skip, logged, with no
+    // ledger row and no duplicate execution. The first schedule
+    // migration (evaluation + ownership + tick-skip) is a follow-up:
+    // until it lands, the binding schedule's visible run is its
+    // config row on the Workflow Runs page, and firings stay cheap.
+    const scheduleBranch = resolveScheduleBranch(event);
+    if (scheduleBranch.handled) {
+      console.log(
+        `[screener-workflow] binding-schedule firing (${scheduleBranch.cron}) — no binding-owned schedules due; skipping without executing (issue #3021).`,
+      );
+      return {
+        scheduleFiring: true,
+        cron: scheduleBranch.cron,
+        scheduledTime: scheduleBranch.scheduledTime ?? null,
+        bindingOwnedDue: 0,
+        outcome: "no binding-owned schedules due",
+      };
+    }
     const command = event.payload;
     // Issue #1185: the workflow acts under the run owner's
     // login, recorded in the payload at start â€” absent
