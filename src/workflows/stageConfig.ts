@@ -29,6 +29,8 @@ export const STAGE_MESSAGE_CODES = [
   "STAGE_RETRY_EXHAUSTED",
   "STAGE_PERSISTED_MISSING",
   "STAGE_CONFIG_INVALID",
+  "TABULAR_WRONG_FORMAT",
+  "TABULAR_MISSING_RUN",
 ] as const;
 
 export type StageMessageCode = (typeof STAGE_MESSAGE_CODES)[number];
@@ -68,6 +70,17 @@ export const STAGE_MESSAGE_CATALOG: Record<StageMessageCode, StageMessageMetadat
     remediation:
       "Re-run the producing stage for this run; the report stage refuses to regenerate analysis it did not produce.",
     severity: "data",
+  },
+  TABULAR_WRONG_FORMAT: {
+    text: "poison tabular generate - the requested format is neither xlsx nor csv",
+    remediation:
+      "Fix the caller's format; a tabular render is asked for one of two formats and anything else can never validate.",
+    severity: "poison",
+  },
+  TABULAR_MISSING_RUN: {
+    text: "poison tabular generate - no runId to render",
+    remediation: "The producer must address the tabular stage with the run it belongs to; refuse without retry.",
+    severity: "poison",
   },
   STAGE_CONFIG_INVALID: {
     text: "the stage configuration in the environment is not usable",

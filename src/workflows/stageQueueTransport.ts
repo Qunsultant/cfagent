@@ -81,6 +81,7 @@ import {
 } from "./stageMessage";
 import { stageAnalysisKey } from "./stageReportProduction";
 import { STAGE_IDS_BY_FAMILY, type StageFamily } from "./stageMessage";
+import { maxAttemptsForStage, resolveStageConfig } from "./stageConfig";
 
 /** The queue send seam: a Cloudflare Queue binding's send. */
 export interface StageQueueSend {
@@ -198,6 +199,8 @@ export async function executeAnalysisDoneQueueMessage(args: {
   message: StageMessage;
   attempt?: number;
   maxAttempts?: number;
+  /** Environment for externalized stage config; omit to run on code defaults. */
+  env?: Record<string, string | undefined>;
   consume: (input: {
     message: StageMessage;
     attempt: number;
@@ -217,7 +220,8 @@ export async function executeAnalysisDoneQueueMessage(args: {
   const outcome = await args.consume({
     message: args.message,
     attempt: args.attempt ?? 1,
-    maxAttempts: args.maxAttempts ?? 3,
+    // Issue #3075: the budget is externalized config, not a literal at the seam.
+    maxAttempts: args.maxAttempts ?? maxAttemptsForStage(resolveStageConfig(args.env ?? {}), args.message.stageId),
   });
   if (outcome.status === "dead-lettered") {
     return { action: "ack", status: outcome.status, reason: outcome.reason };
