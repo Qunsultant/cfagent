@@ -14,7 +14,10 @@
  * invented.
  */
 
-import { sessionRequiresStepUp } from "./iaaaSessionActivity";
+import {
+  sessionRequiresStepUpForAction,
+  type StepUpAction,
+} from "./stepUpActions";
 import type { SessionData } from "../types";
 
 /**
@@ -43,11 +46,32 @@ export function logoutAuditTenant(input: {
 }
 
 /**
+ * Wiring-aware step-up gate for one Q4 action (#3102, #945 Q4).
+ * Wiring OFF never requires step-up (legacy behavior, same as the
+ * pilot predicate below); wiring ON delegates to the action's
+ * window in stepUpActions.ts. A session without a fresh authTimeMs
+ * (including every legacy session) is stale for every action.
+ */
+export function requiresStepUpForAction(
+  session: SessionData,
+  action: StepUpAction,
+  wiringEnabled: boolean,
+  nowMs: number,
+): boolean {
+  if (!wiringEnabled) return false;
+  return sessionRequiresStepUpForAction(session, action, nowMs);
+}
+
+/**
  * Step-up gate for the API-key mint pilot (POST /api/api-keys).
  * Wiring OFF never requires step-up; wiring ON fails closed: a
  * session without a fresh authTimeMs (including every legacy
  * session) must re-authenticate before minting a credential.
- * Listing and revoking keys are NOT gated by this predicate.
+ * #3102 (#945 Q4) retimed this predicate from the 15-minute
+ * default to the 5-minute integration-credential-management
+ * window; the 15-minute default survives only as the fallback
+ * for unlisted actions. Listing and revoking keys are NOT gated
+ * by this predicate.
  */
 export function requiresStepUpForMint(
   session: SessionData,
@@ -55,5 +79,9 @@ export function requiresStepUpForMint(
   nowMs: number,
 ): boolean {
   if (!wiringEnabled) return false;
-  return sessionRequiresStepUp(session, nowMs);
+  return sessionRequiresStepUpForAction(
+    session,
+    "integration-credential-management",
+    nowMs,
+  );
 }
