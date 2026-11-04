@@ -72,8 +72,10 @@
 import type { StageConsumeResult } from "./stageReportConsumer";
 import {
   isAnalysisDoneMessage,
+  STOCK_STAGE_IDS,
   stageMessage,
   type StageMessage,
+  type StockStageId,
 } from "./stageMessage";
 import { stageAnalysisKey } from "./stageReportProduction";
 
@@ -218,4 +220,158 @@ export async function executeAnalysisDoneQueueMessage(args: {
     return { action: "ack", status: outcome.status, reason: outcome.reason };
   }
   return { action: "ack", status: outcome.status };
+}
+
+/**
+ * Issue #2869 slice 2 (under #2764) — per-boundary stage messages
+ * inside runScreenInner, over slice 1's transport, and nothing else.
+ *
+ * Boundary semantics, stated plainly so no message overclaims:
+ * - Each message references a stage artifact the producer persisted
+ *   FIRST in the owning ScreenerAgent DO's storage (persist-then-
+ *   publish, stageMessage contract): the artifact is a small stage
+ *   summary (counts, keys, statuses), never the stage's full payload
+ *   and never live data. The next stage in the fused path already
+ *   ran in-process; the queued message is the boundary record and
+ *   the recovery journal, exactly like slice 1's analysis-done
+ *   message (in-process primary, queued consume as record /
+ *   recovery). It does not re-execute a stage.
+ * - brokerStart marks the broker-routed command entering the agent
+ *   (the broker's start decision itself is upstream, in the route /
+ *   workflow child — this message does not re-decide it).
+ * - persistCanonicalResults marks the agent's persistRun boundary
+ *   (latest/history + per-run artifacts in DO storage); the
+ *   canonical row in the orchestrator seam lands downstream and
+ *   its own boundary is slice 1's analysis-done publish.
+ * - shapeReport marks report artifacts recorded by persistRun
+ *   (generation ran inside persistRun, before the agent-local
+ *   persist — emission order here follows the stage list, not
+ *   the generation/persist interleaving).
+ * - deliver marks handoff of the persisted result to the delivery
+ *   bridge; actual delivery and (runId, destination) suppression
+ *   are the bridge's (G6) responsibility and are NOT claimed by
+ *   this message.
+ * - analysis-done is NOT emitted here: slice 1 already publishes
+ *   it after the canonical row lands. Emitting it twice would
+ *   double-publish one boundary.
+ * Publish failure never fails a run: the boundary artifact is
+ * already durable, so a later republish with the same
+ * idempotencyKey (runId::stageId) replays the same message.
+ * Poison (wrong stage, missing keys, default identity) is
+ * dead-lettered by the caller and acked — never retried.
+ * A missing persisted artifact throws from the recorder, so
+ * the platform retries to max_retries, then DLQs — loud,
+ * never silently dropped (same discipline as analysis-done).
+ */
+
+/** The per-run stage artifact key family for boundary summaries. */
+export const STAGE_BOUNDARY_KEY_PREFIX = "screener:stage:";
+
+export function stageBoundaryKey(timestamp: string, stageId: StockStageId): string {
+  return `${STAGE_BOUNDARY_KEY_PREFIX}${timestamp}:${stageId}`;
+}
+
+/** True only for a well-shaped stage message of any stage id. */
+export function isStageMessage(value: unknown): value is StageMessage {
+  if (!value || typeof value !== "object") return false;
+  const m = value as Partial<StageMessage>;
+  return (
+    typeof m.stageId === "string" &&
+    (STOCK_STAGE_IDS as readonly string[]).includes(m.stageId) &&
+    typeof m.runId === "string" &&
+    m.runId.trim() !== "" &&
+    Array.isArray(m.artifactKeys) &&
+    m.artifactKeys.length > 0 &&
+    typeof m.userLogin === "string" &&
+    m.userLogin.trim() !== "" &&
+    m.userLogin !== "default" &&
+    typeof m.idempotencyKey === "string" &&
+    m.idempotencyKey !== "" &&
+    typeof m.producedBy === "string" &&
+    (m.producedBy as string).length > 0
+  );
+}
+
+/** True only for a well-shaped non-analysis-done stage message. */
+export function isStageBoundaryMessage(value: unknown): value is StageMessage {
+  return isStageMessage(value) && !isAnalysisDoneMessage(value as StageMessage);
+}
+
+/** Build one stage-boundary message for a run. Reuses the stage contract. */
+export function buildStageBoundaryMessage(args: {
+  timestamp: string;
+  userLogin: string;
+  stageId: StockStageId;
+  artifactKeys: string[];
+}): StageMessage {
+  return stageMessage({
+    runId: `screener:${args.timestamp}`,
+    stageId: args.stageId,
+    artifactKeys: args.artifactKeys,
+    userLogin: args.userLogin,
+  });
+}
+
+export type PublishStageBoundaryResult =
+  | { published: true; message: StageMessage }
+  | { published: false; reason: string };
+
+/**
+ * Publish one stage-boundary message. Never throws: absence of a
+ * queue binding, a bad timestamp/login, or a send failure is
+ * reported, because the caller has already persisted the boundary
+ * artifact and the in-process stage has already run — a publish
+ * failure must not turn a persisted run into a failed request.
+ */
+export async function publishStageBoundaryMessage(args: {
+  queue?: StageQueueSend | null;
+  message: StageMessage;
+}): Promise<PublishStageBoundaryResult> {
+  if (!isStageMessage(args.message)) {
+    return { published: false, reason: "refusing to publish a malformed stage message." };
+  }
+  if (!args.queue || typeof args.queue.send !== "function") {
+    return { published: false, reason: "no SCREENER_EVENTS queue binding; publish skipped (legacy in-process path only)." };
+  }
+  try {
+    await args.queue.send(args.message);
+  } catch (err) {
+    console.error(
+      "[stageQueueTransport] stage-boundary publish failed (boundary persisted, in-process stage already ran):",
+      err instanceof Error ? err.message : String(err),
+    );
+    return { published: false, reason: err instanceof Error ? err.message : String(err) };
+  }
+  return { published: true, message: args.message };
+}
+
+export type StageBoundaryRecordStatus = "recorded" | "duplicate-suppressed" | "dead-lettered";
+
+/**
+ * The queue executor core for stage-boundary messages: map one
+ * message onto an injected record function, then onto ack.
+ * The record function (production: the owning ScreenerAgent's
+ * boundary recorder, which claims the idempotencyKey and
+ * verifies the artifact key exists) throws on a missing
+ * persisted artifact, so the caller retries into the DLQ —
+ * this executor never swallows that throw into an ack.
+ * Non-boundary bodies are dead-lettered and acked, never
+ * retried: this executor could never consume them.
+ */
+export async function executeStageBoundaryQueueMessage(args: {
+  message: StageMessage;
+  record: (input: { message: StageMessage }) => Promise<StageBoundaryRecordStatus>;
+  deadLetter?: (info: { message: StageMessage; reason: string }) => Promise<void> | void;
+}): Promise<{ action: "ack"; status: StageBoundaryRecordStatus; reason?: string }> {
+  if (!isStageBoundaryMessage(args.message)) {
+    if (args.deadLetter) {
+      await args.deadLetter({
+        message: args.message,
+        reason: "poison message: not a well-shaped non-analysis-done stage message; refusing without retry.",
+      });
+    }
+    return { action: "ack", status: "dead-lettered", reason: "poison message: not a well-shaped non-analysis-done stage message." };
+  }
+  const status = await args.record({ message: args.message });
+  return { action: "ack", status };
 }

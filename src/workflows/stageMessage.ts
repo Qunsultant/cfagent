@@ -57,14 +57,18 @@
  * queue and consumed via ScreenerAgent.consumeQueuedAnalysisDone
  * (same consumer, durable claims; in the normal path it
  * duplicate-suppresses, because the in-process leg already
- * claimed). That path is the degenerate case this
- * contract migrates: a follow-up slice under #2869 emits
- * one stage message per stage boundary inside runScreenInner
- * (persist-then-publish, same contract), after which the
- * fused path is gone. This slice lands the contract, the
- * report consumer, and the batching primitives; it does NOT
+ * claimed). Slice 2 #2869 emits one stage message per stage
+ * boundary inside runScreenInner (persist-then-publish, same
+ * contract, same queue): the fused path is now a
+ * producer/consumer path at every boundary — the in-process
+ * stage still executes, and its boundary message is recorded
+ * by the queue executor (ScreenerAgent.recordQueuedStageBoundary,
+ * durable claims, artifact verified). analysis-done is not
+ * re-emitted by slice 2 (slice 1 already publishes it after
+ * the canonical row lands); deliver marks handoff to the
+ * delivery bridge, not delivery itself. Slice 2 does NOT
  * rewrite any stage's execution, and it does not claim the
- * migration is done.
+ * chain generateTabular leg decision (slice 3, still open).
  */
 
 export const STOCK_STAGE_IDS = [
