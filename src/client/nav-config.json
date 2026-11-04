@@ -584,6 +584,14 @@
       }
     },
     {
+      "id": "workflow-catalog",
+      "navGroup": "workflow-runs",
+      "crumb": "Workflow Catalog",
+      "category": "Platform",
+      "icon": "Runs",
+      "description": "Every workflow the platform can run and the full contract of each of its stages"
+    },
+    {
       "id": "workflow-runs",
       "navGroup": "workflow-runs",
       "crumb": "Workflow Runs",
@@ -859,6 +867,15 @@
         "description": "Platform architecture guides, strategy playbooks, order mechanics & FAQ"
       },
       {
+        "id": "workflow-catalog",
+        "label": "Workflow Catalog",
+        "shortLabel": "Catalog",
+        "icon": "Runs",
+        "badge": "Stages",
+        "badgeType": "neutral",
+        "description": "Every runnable workflow and each stage's modes, artifacts, checkpoint and approval"
+    },
+    {
         "id": "reports",
         "label": "Screener Reports",
         "shortLabel": "Reports",

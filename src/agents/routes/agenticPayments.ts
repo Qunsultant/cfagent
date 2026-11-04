@@ -3496,9 +3496,11 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // ports and delivers payment_verified ONLY when the native rule
   // holds. The wake-up event is never sent for an unverified
   // checkout, and a Stripe return page is never proof (the gate
-  // re-checks provider state itself on confirm). Ownership:
-  // runRequestId is unguessable, the same standard as
-  // submission-status. A payment URL is returned ONLY when it is the
+  // re-checks provider state itself on confirm). Ownership
+  // (#2137 follow-up): the "unguessable runRequestId" standard is
+  // REPLACED, not supplemented — the verified session login must
+  // own the submission being verified, exactly as
+  // submission-status enforces. A payment URL is returned ONLY when it is the
   // native checkoutUrl from a retrieved Stripe session; the UI must
   // not invent one, and x402 has no URL at all — it gets a
   // challenge-flow presentation object instead (network, amount,
@@ -3536,6 +3538,44 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
         (body.payer !== undefined && typeof body.payer !== "string")
       ) {
         return Response.json({ error: "sessionId, family, paymentProof, and payer must be strings when supplied." }, { status: 400 });
+      }
+      // Issue #2137 (check-payment ownership hardening): the
+      // verified session login must own the submission being
+      // verified, before any Stripe retrieve, audit scan, or
+      // facilitator call. The submit route records every paid
+      // submission (workflowId == runRequestId) under the verified
+      // login before the workflow starts, so a record here is the
+      // ownership proof: a record owned by another login is
+      // refused with 403 — cross-user and cross-tenant alike,
+      // because ownership is per-login and a tenant is derived
+      // from the login via the platform identity, never from a
+      // client-supplied tenantId (no client tenantId is read
+      // anywhere in this route). An unbound store fails closed
+      // with 503, exactly like submission-status. Residual,
+      // stated plainly: when NO record exists (a pre-record
+      // legacy run, or the redeemed path's best-effort record
+      // failure — redeemed runs start no payment workflow),
+      // there is no owner to check against, so the route follows
+      // the legacy verify path below; a strict unknown -> 404
+      // flip needs the existing check-payment fixtures
+      // (tests/commercial_checkout_ui_routes.test.ts, outside
+      // this slice's file ownership) to seed a paid submission
+      // first, and is left as that follow-up.
+      const ownershipStore = requireStore();
+      if (ownershipStore instanceof Response) return ownershipStore;
+      try {
+        await ensureCommercialSchema(ownershipStore.db);
+      } catch (err: any) {
+        return Response.json({ error: `Commercial store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+      }
+      let ownershipSubmission;
+      try {
+        ownershipSubmission = await ownershipStore.getPaidSubmission(runRequestId);
+      } catch (err: any) {
+        return Response.json({ error: `Commercial store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+      }
+      if (ownershipSubmission && ownershipSubmission.userId !== login) {
+        return Response.json({ error: "Forbidden: this submission belongs to another user." }, { status: 403 });
       }
       const envRecord = ctx.env as unknown as Record<string, unknown>;
       const ports = createCheckoutPorts(ctx.env as unknown as CheckoutEnv);
