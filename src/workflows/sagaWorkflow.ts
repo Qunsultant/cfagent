@@ -99,6 +99,7 @@ import {
   type SagaParams,
   type SagaWorkflowStep,
 } from "./sagaWorkflowFlow";
+import { createStageBoundaryEmitter } from "./stageBoundaryEmitter";
 
 /** Wrangler binding name for the saga workflow (wrangler.jsonc). */
 export const SAGA_WORKFLOW_BINDING = "SAGA_WORKFLOW";
@@ -258,6 +259,15 @@ export class CrossDomainSagaWorkflow extends ThinkWorkflow<any, SagaParams, Defa
     const deps = {
       legPort: sagaLegPort(bindings, params.sagaId),
       recordAudit: (auditEvent: SagaAuditEvent) => recordSagaAudit(this.env as Env, auditEvent),
+      // Issue #3073: one stage-boundary message per completed saga stage on the
+      // shared #2869 seam. The completed step is the durable artifact the
+      // message references; a missing queue degrades to a logged skip.
+      stageBoundary: createStageBoundaryEmitter({
+        family: "saga",
+        runId: params.runRequestId,
+        userLogin: params.email,
+        queue: (this.env as { SCREENER_EVENTS?: { send: (body: unknown) => Promise<unknown> } }).SCREENER_EVENTS,
+      }),
       // Prompt delivery (S2): Slack post via the gate module;
       // panel and chat are state-driven off the prompted audit
       // row, so they need no prompt action here.

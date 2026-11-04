@@ -16,7 +16,11 @@ import { WORKFLOW_CATALOG, workflowById } from "../src/workflows/workflowCatalog
 function stepIdsIn(sourcePath: string): string[] {
   const src = readFileSync(sourcePath, "utf8");
   const found = new Set<string>();
-  for (const match of src.matchAll(/step\.do\(\s*"([a-z0-9-]+)"/g)) found.add(match[1]!);
+  // Issue #3073 routed payment steps through a `doStep` wrapper that emits a
+  // boundary after each stage; saga calls it doStage. The scan follows the
+  // code, so it accepts any of the three shapes and still requires every id
+  // to be declared.
+  for (const match of src.matchAll(/(?:step\.do|doStep|doStage)\(\s*"([a-z0-9-]+)"/g)) found.add(match[1]!);
   return [...found].sort();
 }
 

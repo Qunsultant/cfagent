@@ -80,6 +80,7 @@ import {
   type StockStageId,
 } from "./stageMessage";
 import { stageAnalysisKey } from "./stageReportProduction";
+import { STAGE_IDS_BY_FAMILY, type StageFamily } from "./stageMessage";
 
 /** The queue send seam: a Cloudflare Queue binding's send. */
 export interface StageQueueSend {
@@ -277,9 +278,12 @@ export function stageBoundaryKey(timestamp: string, stageId: StockStageId): stri
 export function isStageMessage(value: unknown): value is StageMessage {
   if (!value || typeof value !== "object") return false;
   const m = value as Partial<StageMessage>;
+  const family = m.family ?? "stock";
+  const familyIds = STAGE_IDS_BY_FAMILY[family as StageFamily];
   return (
     typeof m.stageId === "string" &&
-    (STOCK_STAGE_IDS as readonly string[]).includes(m.stageId) &&
+    Array.isArray(familyIds) &&
+    familyIds.includes(m.stageId) &&
     typeof m.runId === "string" &&
     m.runId.trim() !== "" &&
     Array.isArray(m.artifactKeys) &&
@@ -301,13 +305,19 @@ export function isStageBoundaryMessage(value: unknown): value is StageMessage {
 
 /** Build one stage-boundary message for a run. Reuses the stage contract. */
 export function buildStageBoundaryMessage(args: {
-  timestamp: string;
+  /** Stock keeps its timestamp-derived run id; other families pass their own runId. */
+  timestamp?: string;
+  runId?: string;
+  family?: StageFamily;
   userLogin: string;
-  stageId: StockStageId;
+  stageId: string;
   artifactKeys: string[];
 }): StageMessage {
+  const family = args.family ?? "stock";
+  const runId = args.runId ?? (args.timestamp ? `screener:${args.timestamp}` : "");
   return stageMessage({
-    runId: `screener:${args.timestamp}`,
+    runId,
+    family,
     stageId: args.stageId,
     artifactKeys: args.artifactKeys,
     userLogin: args.userLogin,
