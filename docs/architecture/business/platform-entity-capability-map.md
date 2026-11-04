@@ -13,8 +13,8 @@ reporting, engines); this page maps the *platform-management* axis instead:
 which entity owns, scopes, or performs each capability.
 
 **Related issues:** program OpenAIMP/cfagent#2218 (platform management);
-this doc OpenAIMP/cfagent#3168; channel-configuration UI in build under
-OpenAIMP/cfagent#3169 (not on main at doc time — see §5.4);
+this doc OpenAIMP/cfagent#3168; channel-configuration UI shipped under
+OpenAIMP/cfagent#3169 (PR #3196, merged 2026-11-04 — see §5.4);
 multi-dimensional isolation matrix OpenAIMP/cfagent#2856 (CFO lane, open,
 track not started — the target in §5, not current state).
 
@@ -119,7 +119,7 @@ capability, not who owns the data.
 
 | Entity | Capability | Sub-capabilities (surface) | Gate |
 |---|---|---|---|
-| Platform (console) | Admin console | 12 sections: ads, background-tasks, scheduled-goals, jobs, provenance, api-keys, tenants, data-providers, accounts, iaaa-admin, users, admin-access (`PlatformAdminPage`, `platformAdminConfig`, `nav-config.json`) | Section-dependent (see rows below) |
+| Platform (console) | Admin console | 13 sections: ads, background-tasks, scheduled-goals, jobs, provenance, api-keys, tenants, channels, data-providers, accounts, iaaa-admin, users, admin-access (`PlatformAdminPage`, `platformAdminConfig`, `nav-config.json`) | Section-dependent (see rows below) |
 | Tenant | Tenant administration | List tenants (derived ids + settings + memberCount); create tenant (settings row with defaults, idempotent); detail (settings + account-row members); patch settings: ads, auto-refresh, providers | Store operator (env `COMMERCIAL_STORE_OPERATORS` UNION store list; empty = deny) |
 | Tenant | Tenant settings | Ads flag (tenant ANDed with account tier for ads serving); auto-refresh (enabled, interval); providers (dataProviderId, brokerId) | Store operator |
 | Tenant | Membership view (read-only) | Memberships filtered by tenant, displayed in Tenant Admin | Store operator (view); mutation is CISO lane |
@@ -136,7 +136,7 @@ capability, not who owns the data.
 | Membership | Admin offboarding | Offboard another principal (or self via admin path); 200 with full report even when verification fails (caller checks `verified`) | Platform-admin or tenant-granting admin |
 | Run / schedule | Runs | Manual paid runs (gate → payment-or-coverage → screener); scheduled runs (one-off via authorized-at-submission checkout; recurring via subscription/credits only; uncovered → skip/audit/explain, never charged unattended) | Submitter login; tick runs under the owner's login |
 | Run / schedule | Premium x402 calls | Session login OR x402 payer fallback (`x-user-login || payerScopeId(receipt.payer)`); tier from the login's account; metered through the usage port; Subscribed users still pay per call | Session or payer identity |
-| Delivery | Delivery channels | Email, Slack, webhook (see §5.3 for verification status); Copilot card and Docs are NOT delivery channels on main | Per-run/per-schedule selection; no tenant-level channel admin on main (in build: #3169) |
+| Delivery | Delivery channels | Email, Slack, webhook (see §5.3 for verification status); Copilot card and Docs are NOT delivery channels on main | Per-run/per-schedule selection; tenant-level channel enablement shipped (#3169, PR #3196); recipient verification still missing (see §5.1) |
 
 ## 4. The four dimensions, answered per entity
 
@@ -209,7 +209,7 @@ auto-creates the account server-side when missing and audits
 | Feature flags (`monetization`, etc.) | Platform-wide; no per-tenant flags found | Flagship dashboard when `FLAGS` bound, else Env adapter. Flagship `monetization` defaults ON (owner direction); Env adapter defaults it OFF unless explicitly enabled (§7.17) |
 | IAAA role grants | Membership (login × tenant × role × scope) | Platform-admin grants platform-admin; tenant-admin grants require `role:assign` in that tenant. CISO lane owns IAAA writes |
 | Q7 audit policy (blocking set, retention, mode) | Global | Operator data; activation gated on CISO+CDO sign-off — mechanism built, enforcement not activated |
-| Delivery channels | **No tenant-level config on main** | In build under #3169 (tenant-level enablement flags, operator-gated, no secrets in v1). Per-schedule/per-run channel fields and per-user notification preferences are the only channel-adjacent config today |
+| Delivery channels | Tenant-level enablement flags (operator-gated, no secrets in v1) | Shipped under #3169 (PR #3196, migration 0039). Per-schedule/per-run channel fields and per-user notification preferences remain adjacent config; recipient verification still missing (see §5.1) |
 
 ### 4.4 Activities performed — who acts, who is the subject?
 
@@ -306,8 +306,12 @@ Channel verdict for the record: **rendering-from-one-record:
 implemented on the followup path; recipient verification: not
 implemented at any channel layer; Slack is deployment-global; email is
 format/domain only; Copilot card and Docs are not delivery channels on
-main at all.** Tenant-level channel enablement is in build under #3169;
-it does not by itself add recipient verification.
+main at all (their flags are configuration-only until a dispatch funnel
+exists).** Tenant-level channel enablement SHIPPED under #3169 (PR
+#3196, merged 2026-11-04 as baa674c, migration 0039, enforcement on
+the main funnels); it does not by itself add recipient verification —
+that remains missing (follow-ups #3177 direct Slack publishers, #3178
+Copilot/Docs funnels).
 
 ### 5.2 Depth: multi-user — owner-scoped reads within tenant
 
@@ -380,18 +384,20 @@ payer-fallback — the user leg can be a wallet-derived id instead of a
 login. (8) `mas_events` payloads — the tuple is present only if the
 emitting caller included it; the schema does not require it.
 
-### 5.4 Channel configuration UI (the gap this doc's companion slice closes)
+### 5.4 Channel configuration UI (the gap this doc's companion slice closed)
 
-No UI configures delivery channels at tenant or platform level on main
-at doc time. Tenant settings cover ads, auto-refresh, providers only;
-delivery senders are operator/code wiring; per-schedule fields and
-per-user notification preferences are adjacent surfaces, not channel
-administration. Issue #3169 (sub-issue of #2218) builds the
-tenant-level Channels sub-tab in Platform Admin: enablement flags for
-email, Slack, webhook, Copilot card, Docs; operator-gated; D1 store
-behind a port; no secrets in v1; delivery dispatch must consult the
-config (no fake toggles). Until #3169 lands, this section of the map
-describes an absence, not a capability.
+A Channels sub-tab now configures delivery channels at tenant level
+(shipped 2026-11-04, see below). Tenant settings cover ads,
+auto-refresh, providers; per-schedule fields and per-user notification
+preferences are adjacent surfaces, not channel administration. Issue
+#3169 (sub-issue of #2218) built the tenant-level Channels sub-tab in
+Platform Admin (PR #3196, merged 2026-11-04 as baa674c): enablement
+flags for email, Slack, webhook, Copilot card, Docs; operator-gated; D1
+store behind a port (migration 0039); no secrets in v1; delivery
+dispatch on the main funnels consults the config (disabled → refused;
+no fake toggles). Recipient verification is still missing (see §5.1;
+follow-ups #3177, #3178). This section of the map now describes a
+capability, not an absence.
 
 ## 6. Other dimensions that must be documented and considered
 

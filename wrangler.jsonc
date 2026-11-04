@@ -14,7 +14,7 @@
   "assets": { "directory": "./dist/", "binding": "ASSETS", "run_worker_first": ["/", "/index.html"] },
   "workflows": [
     { "name": "trading-trade-workflow", "binding": "TRADE_WORKFLOW", "class_name": "TradingTradeWorkflow" },
-    { "name": "screener-screen-workflow", "binding": "SCREENER_WORKFLOW", "class_name": "ScreenerScreenWorkflow" },
+    { "name": "screener-screen-workflow", "binding": "SCREENER_WORKFLOW", "class_name": "ScreenerScreenWorkflow", "schedules": ["*/30 * * * *"] },
     { "name": "payment-workflow", "binding": "PAYMENT_WORKFLOW", "class_name": "PaymentWorkflow" },
     { "name": "saga-workflow", "binding": "SAGA_WORKFLOW", "class_name": "CrossDomainSagaWorkflow" }
   ],

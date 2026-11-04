@@ -45,6 +45,10 @@ import type {
   WorkflowRunStatus,
   WorkflowRunTrigger,
 } from "../services/workflowRuns";
+import type {
+  WorkflowLifecycleState,
+  WorkflowScheduleMechanism,
+} from "../services/workflowLifecycle";
 import {
   WORKFLOW_RUN_SORT_DEFAULT,
   nextWorkflowRunSort,
@@ -65,6 +69,8 @@ interface WorkflowRunsResponse {
     partial: number;
     failed: number;
     active: number;
+    /** Issue #3021: runs in the scheduled lifecycle state. */
+    scheduled?: number;
     byTrigger: Record<WorkflowRunTrigger, number>;
   };
   storeErrors?: Record<string, string>;
@@ -81,6 +87,12 @@ interface WorkflowRunsResponse {
 type TriggerFilter = "all" | WorkflowRunTrigger;
 type StatusFilter = "all" | "completed" | "partial" | "failed" | "active";
 type ReportsFilter = "all" | "reports";
+// Issue #3021: lifecycle + schedule-type filters are server-side
+// (like Reports) so scheduled rows past the fetched window still
+// show; the client window filter below mirrors them for
+// mock-backed servers that ignore the params.
+type LifecycleFilter = "all" | WorkflowLifecycleState;
+type ScheduleFilter = "all" | WorkflowScheduleMechanism;
 
 const TRIGGER_LABEL: Record<WorkflowRunTrigger, string> = {
   manual: "Manual",
@@ -124,6 +136,40 @@ const STATUS_OPTIONS: Array<{ id: StatusFilter; label: string }> = [
 const REPORTS_OPTIONS: Array<{ id: ReportsFilter; label: string }> = [
   { id: "all", label: "All runs" },
   { id: "reports", label: "Reports only" },
+];
+
+const LIFECYCLE_LABEL: Record<WorkflowLifecycleState, string> = {
+  scheduled: "Scheduled",
+  "in-progress": "In progress",
+  done: "Done",
+  cancelled: "Cancelled",
+};
+
+const LIFECYCLE_OPTIONS: Array<{ id: LifecycleFilter; label: string }> = [
+  { id: "all", label: "All lifecycles" },
+  { id: "scheduled", label: "Scheduled" },
+  { id: "in-progress", label: "In progress" },
+  { id: "done", label: "Done" },
+  { id: "cancelled", label: "Cancelled" },
+];
+
+const SCHEDULE_MECHANISM_LABEL: Record<WorkflowScheduleMechanism, string> = {
+  "workflow-binding": "Workflow binding",
+  "agent-scheduler": "Agent scheduler",
+  "cron-trigger": "Cron trigger",
+  queue: "Delayed queue",
+  manual: "Manual",
+  unknown: "Not recorded",
+};
+
+const SCHEDULE_OPTIONS: Array<{ id: ScheduleFilter; label: string }> = [
+  { id: "all", label: "All schedule types" },
+  { id: "workflow-binding", label: "Workflow binding" },
+  { id: "agent-scheduler", label: "Agent scheduler" },
+  { id: "cron-trigger", label: "Cron trigger" },
+  { id: "queue", label: "Delayed queue" },
+  { id: "manual", label: "Manual" },
+  { id: "unknown", label: "Not recorded" },
 ];
 
 // Issue #2786 Part 3: the Docs-tab Source column. A run with
@@ -337,6 +383,8 @@ export function WorkflowRunsPanel() {
   const [triggerFilter, setTriggerFilter] = useState<TriggerFilter>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [reportsFilter, setReportsFilter] = useState<ReportsFilter>("all");
+  const [lifecycleFilter, setLifecycleFilter] = useState<LifecycleFilter>("all");
+  const [scheduleFilter, setScheduleFilter] = useState<ScheduleFilter>("all");
   // Issue #2777 — deep link by run id: `?tab=workflow-runs&run=<id>`
   // pre-fills the search so a link from another view lands on that run.
   const [query, setQuery] = useState(() => {
@@ -401,6 +449,8 @@ export function WorkflowRunsPanel() {
         if (showTraces) params.set("traces", "all");
         if (triggerFilter !== "all") params.set("trigger", triggerFilter);
         if (statusFilter !== "all") params.set("status", statusFilter);
+        if (lifecycleFilter !== "all") params.set("lifecycle", lifecycleFilter);
+        if (scheduleFilter !== "all") params.set("schedule", scheduleFilter);
         const search = debouncedQuery.trim();
         if (search) params.set("search", search);
         if (reportsFilter === "reports") params.set("reports", "only");
@@ -425,7 +475,7 @@ export function WorkflowRunsPanel() {
         setLoadingMore(false);
       }
     },
-    [showTraces, triggerFilter, statusFilter, debouncedQuery, reportsFilter],
+    [showTraces, triggerFilter, statusFilter, lifecycleFilter, scheduleFilter, debouncedQuery, reportsFilter],
   );
 
   // Any filter change refetches from offset 0; the mount load is this
@@ -496,13 +546,20 @@ export function WorkflowRunsPanel() {
         (run) =>
           (triggerFilter === "all" || run.trigger === triggerFilter) &&
           runMatchesStatus(run, statusFilter) &&
+          (lifecycleFilter === "all" || run.lifecycle === lifecycleFilter) &&
+          (scheduleFilter === "all" || run.schedule?.mechanism === scheduleFilter) &&
           runMatchesQuery(run, query.trim()),
       ),
-    [runs, sort, triggerFilter, statusFilter, query],
+    [runs, sort, triggerFilter, statusFilter, lifecycleFilter, scheduleFilter, query],
   );
 
   const hasMore = totalMatched !== null && runs.length < totalMatched;
-  const filtersActive = triggerFilter !== "all" || statusFilter !== "all" || query.trim() !== "";
+  const filtersActive =
+    triggerFilter !== "all" ||
+    statusFilter !== "all" ||
+    lifecycleFilter !== "all" ||
+    scheduleFilter !== "all" ||
+    query.trim() !== "";
 
   const selected = useMemo(() => runs.find((run) => run.id === selectedId) ?? null, [runs, selectedId]);
   useEffect(() => {
@@ -557,6 +614,38 @@ export function WorkflowRunsPanel() {
           {statusLabel(run.status)}
         </Badge>
       ),
+    },
+    {
+      key: "lifecycle",
+      header: <SortHeader label="Lifecycle" sortKey="lifecycle" sort={sort} onSort={(key) => setSort(nextWorkflowRunSort(sort, key))} />,
+      ariaSort: (sort.key === "lifecycle" ? (sort.dir === "asc" ? "ascending" : "descending") : "none") as "ascending" | "descending" | "none",
+      render: (run: WorkflowRun) => (
+        <span className="workflow-runs-muted">
+          {run.lifecycle ? LIFECYCLE_LABEL[run.lifecycle] : "Not recorded"}
+        </span>
+      ),
+    },
+    {
+      key: "schedule",
+      header: <SortHeader label="Schedule" sortKey="schedule" sort={sort} onSort={(key) => setSort(nextWorkflowRunSort(sort, key))} />,
+      ariaSort: (sort.key === "schedule" ? (sort.dir === "asc" ? "ascending" : "descending") : "none") as "ascending" | "descending" | "none",
+      render: (run: WorkflowRun) => {
+        const schedule = run.schedule ?? null;
+        if (!schedule) return <span className="workflow-runs-muted">Not recorded</span>;
+        return (
+          <div className="workflow-runs-trigger">
+            <span className="workflow-runs-muted">{SCHEDULE_MECHANISM_LABEL[schedule.mechanism]}</span>
+            {schedule.identity && <span className="workflow-runs-muted">{schedule.identity}</span>}
+            {schedule.reason && <span className="workflow-runs-muted">{schedule.reason}</span>}
+            {schedule.nextFiringAt && (
+              <span className="workflow-runs-muted">Next: {formatTimestamp(schedule.nextFiringAt)}</span>
+            )}
+            {typeof schedule.delaySeconds === "number" && (
+              <span className="workflow-runs-muted">Delay: {schedule.delaySeconds}s</span>
+            )}
+          </div>
+        );
+      },
     },
     {
       key: "source",
@@ -710,6 +799,14 @@ export function WorkflowRunsPanel() {
             <PillGroup options={STATUS_OPTIONS} value={statusFilter} onChange={setStatusFilter} size="sm" ariaLabel="Filter runs by status" />
           </div>
           <div className="workflow-runs-filter">
+            <span className="workflow-runs-filter-label">Lifecycle</span>
+            <PillGroup options={LIFECYCLE_OPTIONS} value={lifecycleFilter} onChange={setLifecycleFilter} size="sm" ariaLabel="Filter runs by lifecycle state" />
+          </div>
+          <div className="workflow-runs-filter">
+            <span className="workflow-runs-filter-label">Schedule</span>
+            <PillGroup options={SCHEDULE_OPTIONS} value={scheduleFilter} onChange={setScheduleFilter} size="sm" ariaLabel="Filter runs by schedule type" />
+          </div>
+          <div className="workflow-runs-filter">
             <span className="workflow-runs-filter-label">Reports</span>
             <PillGroup options={REPORTS_OPTIONS} value={reportsFilter} onChange={setReportsFilter} size="sm" ariaLabel="Filter runs by report documents" />
           </div>
@@ -777,6 +874,9 @@ export function WorkflowRunsPanel() {
               { label: "Partial", value: summary.partial },
               { label: "Failed", value: summary.failed },
               { label: "In flight", value: summary.active },
+              ...(typeof summary.scheduled === "number"
+                ? [{ label: "Scheduled lifecycle", value: summary.scheduled }]
+                : []),
               { label: "Scheduled", value: summary.byTrigger.scheduled },
               { label: "Manual", value: summary.byTrigger.manual },
               { label: "Autonomous", value: summary.byTrigger.autonomous },
