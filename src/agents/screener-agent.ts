@@ -941,6 +941,19 @@ export class ScreenerAgent extends PortThink {
     const sector = plan.sector;
     const screener = new DynamicMarketScreener();
     const userLogin = req.userLogin || (await this.userLogin());
+    // Issue #2869 slice 2 — stage boundaries, emitted in the
+    // order the fused path actually crosses them (the stage
+    // list names the set; the pipeline computes indicators
+    // before enriching with history technicals, so enrich
+    // follows applyFilters here). brokerStart marks the
+    // broker-routed command entering the agent — the broker
+    // start decision itself is upstream, not re-decided here.
+    await this.emitStageBoundary(timestamp, userLogin, "brokerStart", { trigger: req.trigger });
+    await this.emitStageBoundary(timestamp, userLogin, "plan", {
+      universe: plan.universe,
+      provider: plan.provider,
+      sector: plan.sector,
+    });
     const universe: UniverseId = plan.universe;
     const provider: StockScreenProvider = plan.provider;
     const providerFallback = plan.providerFallback;
@@ -1084,6 +1097,13 @@ export class ScreenerAgent extends PortThink {
         ? (requestedMaxSymbols > 0 ? symbols.slice(0, requestedMaxSymbols) : symbols)
         : [];
       expectedCount = selectedSymbols.length;
+      // Issue #2869 slice 2 — universe membership resolved to
+      // symbols (the acquireUniverse boundary); quotes are
+      // fetched by the next stage.
+      await this.emitStageBoundary(timestamp, userLogin, "acquireUniverse", {
+        universe,
+        symbolCount: selectedSymbols.length,
+      });
       // Issue #816: create a QuoteTrace to capture the pipeline details for the UI.
       const { QuoteTrace } = await import("../trading");
       const quoteTrace = new QuoteTrace();
@@ -1207,9 +1227,27 @@ export class ScreenerAgent extends PortThink {
             quoteDeps: platformQuoteDeps!,
           });
       await beat();
+      // Issue #2869 slice 2 — quotes fetched for the resolved
+      // universe (the fetchQuotes boundary).
+      await this.emitStageBoundary(timestamp, userLogin, "fetchQuotes", {
+        quotes: acquired.quotes.length,
+        ...(acquired.partial ? { partial: acquired.partial } : {}),
+        discoveryMessage: acquired.discovery.message,
+      });
       const screenResult = screenUniverse(screener, acquired, {
         ...(req.filters ?? {}),
         sector,
+      });
+      // Issue #2869 slice 2 — indicators/scores computed, then
+      // filters applied (the computeIndicatorsAndScores and
+      // applyFilters boundaries, in pipeline order).
+      await this.emitStageBoundary(timestamp, userLogin, "computeIndicatorsAndScores", {
+        totalScanned: screenResult.totalScanned,
+        matchedCount: screenResult.matchedCount,
+      });
+      await this.emitStageBoundary(timestamp, userLogin, "applyFilters", {
+        matchedCount: screenResult.matchedCount,
+        filterSummary: screenResult.filterSummary,
       });
 
       // Issue #269: Yahoo history complement — real RSI/MACD/gaps.
@@ -1234,10 +1272,21 @@ export class ScreenerAgent extends PortThink {
 
       // Issue #266: SA-style factor grades, computed percentile-relative
       // across the full scanned universe, then joined onto opportunities.
-      const allStocks = attachTechnicals(
-        attachFactorGrades(buildAllStocks(acquired.quotes, screenResult.stocks)),
-        technicalsBySymbol
-      );
+      // Issue #2869 slice 2 — factor grades attached (the
+      // rankAndGrade boundary), then history technicals joined
+      // (the enrich boundary). The expression is split into
+      // two statements for exactly these two boundaries;
+      // the computation is unchanged.
+      const gradedStocks = attachFactorGrades(buildAllStocks(acquired.quotes, screenResult.stocks));
+      await this.emitStageBoundary(timestamp, userLogin, "rankAndGrade", {
+        symbols: gradedStocks.length,
+      });
+      const allStocks = attachTechnicals(gradedStocks, technicalsBySymbol);
+      await this.emitStageBoundary(timestamp, userLogin, "enrich", {
+        symbols: allStocks.length,
+        withMacd: technicalsCoverage.withMacd,
+        withGap: technicalsCoverage.withGap,
+      });
       const bySymbol = new Map(allStocks.map((s) => [s.symbol, s]));
       let opportunities = selectStandouts(
         screenResult.stocks,
@@ -1248,6 +1297,13 @@ export class ScreenerAgent extends PortThink {
         return graded
           ? { ...opp, factorGrades: graded.factorGrades, technicals: graded.technicals }
           : opp;
+      });
+      // Issue #2869 slice 2 — standouts selected (the
+      // detectStandouts boundary). Portfolio context below
+      // may re-rank them; it is a modifier, not a stage.
+      await this.emitStageBoundary(timestamp, userLogin, "detectStandouts", {
+        opportunities: opportunities.length,
+        matchedCount: screenResult.matchedCount,
       });
 
       // Issue #17: portfolio context (opt-in). The modifier runs only
@@ -1336,6 +1392,40 @@ export class ScreenerAgent extends PortThink {
 
       await beat();
       await this.persistRun(result);
+      // Issue #2869 slice 2 — the remaining boundaries, in
+      // stage-list order. persistCanonicalResults marks the
+      // agent's persistRun boundary (latest/history +
+      // per-run artifacts in DO storage); the canonical row
+      // in the orchestrator seam lands downstream, and its
+      // own boundary is slice 1's analysis-done publish.
+      // shapeReport marks the artifacts persistRun recorded
+      // (generation ran inside persistRun, before the
+      // agent-local persist). deliver marks handoff of the
+      // persisted result to the delivery bridge — actual
+      // delivery and suppression are the bridge's, and are
+      // not claimed by this message. analysis-done is NOT
+      // emitted here: slice 1 already publishes it after
+      // the canonical row lands.
+      await this.emitStageBoundary(timestamp, userLogin, "persistCanonicalResults", {
+        success: result.success,
+        totalScanned: result.totalScanned,
+        matchedCount: result.matchedCount,
+        ...(result.pdfKey ? { pdfKey: result.pdfKey } : {}),
+        ...(result.xlsxKey ? { xlsxKey: result.xlsxKey } : {}),
+        ...(result.csvKey ? { csvKey: result.csvKey } : {}),
+      });
+      await this.emitStageBoundary(timestamp, userLogin, "shapeReport", {
+        ...(result.pdfKey ? { pdfKey: result.pdfKey } : {}),
+        ...(result.pdfStatus ? { pdfStatus: result.pdfStatus } : {}),
+        ...(result.xlsxKey ? { xlsxKey: result.xlsxKey } : {}),
+        ...(result.csvKey ? { csvKey: result.csvKey } : {}),
+      });
+      await this.emitStageBoundary(timestamp, userLogin, "deliver", {
+        success: result.success,
+        totalScanned: result.totalScanned,
+        matchedCount: result.matchedCount,
+        opportunities: result.opportunities.length,
+      });
       // Issue #607: complete the task with a deterministic honesty
       // evaluation of the outcome. Best-effort — the run stands either way.
       if (taskId) {
@@ -1390,6 +1480,15 @@ export class ScreenerAgent extends PortThink {
         ...(platformRunId ? { runId: platformRunId } : {}),
       };
       await this.persistRun(result);
+      // Issue #2869 slice 2 — the failed result was persisted
+      // too, so its persist boundary is emitted; shapeReport
+      // and deliver are not (no report was shaped or handed
+      // to delivery for a failed run), and the missing later
+      // boundaries are the loud-failure signal.
+      await this.emitStageBoundary(timestamp, userLogin, "persistCanonicalResults", {
+        success: false,
+        error: message,
+      });
       // Issue #607: a failed screen escalates its task for a human
       // instead of existing only as a result blob nobody may open.
       if (taskId) {
@@ -2137,6 +2236,111 @@ export class ScreenerAgent extends PortThink {
       await this.ctx.storage.put(message.artifactKeys[0], generatedPersisted);
     }
     return outcome;
+  }
+
+  /**
+   * Issue #2869 slice 2 — one stage-boundary message per stage
+   * boundary inside runScreenInner, persist-then-publish: the
+   * boundary summary is put to this DO's storage FIRST under
+   * the stage artifact key, then the message referencing that
+   * key is published to the shared screener-events queue.
+   * Never throws and never fails a run: a missing queue
+   * binding, a storage failure, or a publish failure is
+   * logged and the in-process stage's result stands — the
+   * artifact is durable (or the run already failed for its
+   * own reason), so a later republish with the same
+   * idempotencyKey replays the same message. The summary
+   * is counts/keys/statuses only, never the stage payload.
+   */
+  private async emitStageBoundary(
+    timestamp: string,
+    userLogin: string,
+    stageId: import("../workflows/stageMessage").StockStageId,
+    summary: Record<string, unknown>,
+  ): Promise<void> {
+    try {
+      const { stageBoundaryKey } = await import("../workflows/stageQueueTransport");
+      const { buildStageBoundaryMessage, publishStageBoundaryMessage } = await import("../workflows/stageQueueTransport");
+      const key = stageBoundaryKey(timestamp, stageId);
+      await this.ctx.storage.put(key, {
+        runId: `screener:${timestamp}`,
+        stageId,
+        timestamp,
+        userLogin,
+        ...summary,
+      });
+      await publishStageBoundaryMessage({
+        queue: (this.env as { SCREENER_EVENTS?: { send: (body: unknown) => Promise<unknown> } }).SCREENER_EVENTS as never,
+        message: buildStageBoundaryMessage({ timestamp, userLogin, stageId, artifactKeys: [key] }),
+      });
+    } catch (err) {
+      console.warn(
+        `[ScreenerAgent] Stage-boundary publish skipped for ${stageId} (run stands):`,
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  }
+
+  /**
+   * Issue #2869 slice 2 — the queue executor's agent-side
+   * endpoint for non-analysis-done stage-boundary messages.
+   * server.ts queue() routes a well-shaped stage message
+   * here, addressed to the owning ScreenerAgent DO (per-owner
+   * instance, so the durable stage claims in that DO's SQL
+   * are the same claims any redelivery would hit).
+   * It claims the message's idempotencyKey and verifies the
+   * artifact key exists in this DO's storage: a claimed key
+   * is duplicate-suppressed (never re-recorded), a missing
+   * artifact THROWS so the platform retries into the DLQ
+   * (the boundary was never persisted — nothing to record),
+   * and a well-shaped message for analysis-done is
+   * dead-lettered here (that stage has its own endpoint,
+   * consumeQueuedAnalysisDone). This method never
+   * re-executes a stage and never calls the report
+   * consumer — the Factor 6 pin (only one production
+   * caller of the consumer) stays intact.
+   */
+  async recordQueuedStageBoundary(
+    message: {
+      runId: string;
+      stageId: string;
+      artifactKeys: string[];
+      userLogin: string;
+      idempotencyKey: string;
+      producedBy: string;
+      provenance: { parentRunId: string; traceId?: string };
+    },
+    _attempt = 1,
+  ): Promise<{ status: "recorded" | "duplicate-suppressed" | "dead-lettered"; reason?: string }> {
+    const { isStageBoundaryMessage } = await import("../workflows/stageQueueTransport");
+    if (!isStageBoundaryMessage(message)) {
+      console.warn("[screener-agent] queued stage message dead-lettered: not a well-shaped non-analysis-done stage message.");
+      return { status: "dead-lettered", reason: "poison message: not a well-shaped non-analysis-done stage message." };
+    }
+    const sql = (this.ctx.storage as { sql?: unknown }).sql as import("../orm").SqlStorage | undefined;
+    const claims = sql
+      ? (await import("../data/stageClaimsStore")).createSqlStageClaimStore(() => sql)
+      : (() => {
+          const seen = new Set<string>();
+          return {
+            has: (key: string) => seen.has(key),
+            add: (key: string) => {
+              seen.add(key);
+            },
+            delete: (key: string) => {
+              seen.delete(key);
+            },
+          };
+        })();
+    if (claims.has(message.idempotencyKey)) {
+      return { status: "duplicate-suppressed" };
+    }
+    const artifact = await this.ctx.storage.get(message.artifactKeys[0]);
+    if (artifact === undefined || artifact === null) {
+      throw new Error(`stage boundary artifact missing for ${message.stageId} (${message.artifactKeys[0]}); refusing to record a boundary that was never persisted.`);
+    }
+    claims.add(message.idempotencyKey);
+    return { status: "recorded" };
   }
 
   private async generateRunPdf(result: ScreenerRunResult): Promise<void> {

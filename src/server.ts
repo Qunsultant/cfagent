@@ -15,7 +15,7 @@ import {
 import { getSessionCached, getSessionCachedFetchedAt, invalidateSessionCache } from "./security/sessionCache";
 import { resolveIdleTimeoutMs } from "./security/sessionPolicy";
 import { resolveScreenerAgentName } from "./agents/screenerAgentName";
-import { isAnalysisDoneStageMessage } from "./workflows/stageQueueTransport";
+import { isAnalysisDoneStageMessage, isStageBoundaryMessage } from "./workflows/stageQueueTransport";
 import {
   quotaWindowKey,
   type QuotaUsageView,
@@ -6402,6 +6402,44 @@ export default {
               }
             } catch (queueErr) {
               console.warn("[Queue Handler] Failed to consume analysis-done stage message; retrying:", queueErr);
+              if (typeof msg.retry === "function") msg.retry();
+            }
+          } else if (isStageBoundaryMessage(msg.body)) {
+            // Issue #2869 slice 2 — the stage-boundary queue
+            // executor. The message routes to the OWNING
+            // ScreenerAgent DO (per-owner instance, so the
+            // durable stage claims are the in-process leg's
+            // claims): the recorder claims the idempotencyKey
+            // and verifies the boundary artifact exists, then
+            // acks on recorded / duplicate-suppressed /
+            // dead-lettered; it throws (retry to max_retries,
+            // then the screener-events-dlq) only on a missing
+            // persisted artifact, which the recorder refuses
+            // to fabricate. Without this branch these messages
+            // would fall through to the undecodable drop below.
+            try {
+              const stageMsg = msg.body;
+              const agentId = env.SCREENER_AGENT.idFromName(
+                resolveScreenerAgentName(env, stageMsg.userLogin),
+              );
+              const agent = env.SCREENER_AGENT.get(agentId) as unknown as {
+                recordQueuedStageBoundary: (
+                  message: unknown,
+                  attempt?: number,
+                ) => Promise<{ status: string; reason?: string }>;
+              };
+              const outcome = await agent.recordQueuedStageBoundary(
+                stageMsg,
+                typeof (msg as { attempts?: unknown }).attempts === "number"
+                  ? ((msg as { attempts: number }).attempts as number)
+                  : 1,
+              );
+              if (typeof msg.ack === "function") msg.ack();
+              if (outcome.status === "dead-lettered") {
+                console.warn("[Queue Handler] stage-boundary message dead-lettered:", outcome.reason ?? "unknown");
+              }
+            } catch (queueErr) {
+              console.warn("[Queue Handler] Failed to record stage-boundary message; retrying:", queueErr);
               if (typeof msg.retry === "function") msg.retry();
             }
           } else if (isMessageEnvelope(msg.body)) {
