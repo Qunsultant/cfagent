@@ -20,9 +20,10 @@
  *   payment-intent id is refused at request time, not queued for
  *   an execution that can never resolve. A pay-per-run request
  *   carries requester-supplied original details that the
- *   approving operator verifies before approving, until the
- *   native ledger slice (#2194) wires its run→PI lookup into the
- *   resolver seam.
+ *   approving operator verifies before approving; at execution
+ *   the PI resolves through the resolver seam (pay-per-run half:
+ *   createPayPerRunPaymentResolver over the native ledger), and
+ *   a run whose PI still does not resolve fails closed there.
  * - decide: "requested" -> "approved" | "denied" only. The service
  *   records the approver; the route restricts approvers to the
  *   operator list (policy approver is operator_hitl only).
@@ -419,8 +420,23 @@ export async function executeRefund(
     nowMs,
   );
   let paymentIntentId = record.paymentIntentId;
-  if (!paymentIntentId && record.kind === "subscription" && deps.sourceResolver) {
+  if (!paymentIntentId && deps.sourceResolver) {
+    // Issue #2204 follow-up: the kind guard is dropped — a
+    // pay-per-run execution now also consults the resolver, so a
+    // PI carried by the native ledger charge row resolves here
+    // instead of failing closed. A resolver that returns null for
+    // the ref (subscription resolver on a run id, ledger resolver
+    // on a subscription id or an unresolvable row) changes nothing.
+    // Session-scoped ALWAYS: a resolved source whose tenant differs
+    // from the refund record's tenant is refused before any gateway
+    // call — refund lookups never cross tenants.
     const source = await deps.sourceResolver.resolve(record.originalPaymentRef);
+    if (source && source.tenantId !== record.tenantId) {
+      throw new Error(
+        `Cross-tenant payment source: the resolved payment belongs to a different tenant ` +
+          `than refund ${record.id}; refund refused — no cross-tenant lookup.`,
+      );
+    }
     paymentIntentId = source?.paymentIntentId ?? null;
   }
   if (!paymentIntentId) {

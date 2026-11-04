@@ -179,6 +179,7 @@ import {
   executeRefund,
   requestRefund,
 } from "../../services/refundService";
+import { createPayPerRunPaymentResolver } from "../../services/refundPaymentIntent";
 import { PaymentGatewayService } from "../../services/payments";
 import {
   codedMessage,
@@ -3251,11 +3252,31 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       const refundUserId = refundBefore?.userId ?? null;
       const refundBeforeAccount = refundUserId ? await store.getAccount(refundUserId) : null;
       const refundBeforeSubscriptions = refundUserId ? await subs.listSubscriptions(refundUserId) : [];
+      // Issue #2204 follow-up: composite resolver — the subscription
+      // resolver OR the pay-per-run resolver over the native ledger
+      // (charge row, card rail only; null when unresolvable, so an
+      // unresolvable run still fails closed exactly as before).
+      // The native adapter is null when AGENT_DB is unbound, in
+      // which case only the subscription half is wired. The
+      // check-payment section below is untouched (draft PR #3106).
+      const nativeLedger = createNativeLedgerAdapter(ctx.env as { AGENT_DB?: unknown });
+      if (nativeLedger) {
+        await ensureNativeLedgerSchema(nativeLedger.db);
+      }
+      const subscriptionResolver = createSubscriptionPaymentResolver(subs);
+      const payPerRunResolver = nativeLedger
+        ? createPayPerRunPaymentResolver(nativeLedger)
+        : null;
+      const sourceResolver = {
+        resolve: async (originalPaymentRef: string) =>
+          (await subscriptionResolver.resolve(originalPaymentRef)) ??
+          (payPerRunResolver ? await payPerRunResolver.resolve(originalPaymentRef) : null),
+      };
       const record = await executeRefund(
         {
           policyStore: ports.policy,
           refundStore: ports.store,
-          sourceResolver: createSubscriptionPaymentResolver(subs),
+          sourceResolver,
           subscriptionStore: subs,
           commercialStore: store,
           // Issue #2549: the XOR guard's failure-credit lookup
@@ -3325,7 +3346,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
           ? 409
           : /Gateway refund failed/.test(message)
             ? 502
-            : /not resolvable|non-refundable|window expired|not allowed|exceeds|not configured|flag is OFF|already received its automatic replacement-run credit|failure-credit lookup|not owner-approved/.test(message)
+            : /not resolvable|non-refundable|window expired|not allowed|exceeds|not configured|flag is OFF|already received its automatic replacement-run credit|failure-credit lookup|not owner-approved|cross-tenant/.test(message)
               ? 422
               : 500;
       return Response.json({ error: message }, { status });
