@@ -24,6 +24,12 @@ Title convention + label (check one; title prefix and label must match):
 - [ ] Medium — several files or one migration, one PR, coordination with one other surface or lane
 - [ ] Large — multi-PR or multi-slice work, migrations, or cross-lane coordination; split into smaller issues when possible
 
+## Priority
+<!-- How urgent this is, not how big it is. Pick one. -->
+- [ ] Low — nice to have; no deadline, deferrable without user impact
+- [ ] Medium — needed for a planned milestone; short deferral acceptable
+- [ ] High — blocks users, a release, or another lane's work; needs prompt attention
+
 ## Problem
 
 ## Outcome
