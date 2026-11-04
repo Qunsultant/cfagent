@@ -94,11 +94,18 @@ deletes every candidate. Landing, login and app-shell HTML are served
 refresh reads as a sign-out even while the cookie is still valid.
 - **Rotation and revocation:** sessions rotate, and revocation is stored
   so a revoked session stays revoked.
-- **Step-up:** sensitive operations (API-key mint is the live example)
-  require a recent authentication. The step-up window default is 15
-  minutes, which is a **proposed** value, not a settled CISO threshold —
-  and a step-up gate fails closed when `authTimeMs` is missing, so legacy
-  sessions cannot mint keys until they re-login through wiring.
+- **Step-up:** sensitive operations require a recent authentication.
+  The default window is 15 minutes (settled CISO value, #1757); the
+  per-action windows are settled by #945 Q4 (#3102): 5 minutes for
+  privileged role assignment, integration-credential management
+  (API-key mint is the live example, retimed from the default),
+  auth-method change, provider linking, and payment-configuration
+  change; 10 minutes for sensitive export. See
+  `docs/architecture/security/step-up-windows-3102.md` for the full
+  table, the legacy-session rule, and the deliberately ungated list.
+  A step-up gate fails closed when `authTimeMs` is missing, so legacy
+  sessions are stale for every step-up action until they re-login
+  through wiring.
 
 Sessions live in the SessionStore Durable Object. Bindings created by
 wiring live under `iaaa-binding:` keys with no TTL; rollback of wiring

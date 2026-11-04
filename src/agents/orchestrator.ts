@@ -137,6 +137,7 @@ import { handleMemoryResetRoutes } from "./routes/memoryReset";
 import { handlePaymentsRoutes } from "./routes/payments";
 import { handlePaymentAssuranceLiveRoutes } from "./routes/paymentAssuranceLive";
 import { handleAgenticPaymentsRoutes } from "./routes/agenticPayments";
+import { handlePlatformUsersRoutes } from "./routes/platformUsers";
 // Issue #359-08: premium routes live in src/agents/routes/premium.ts;
 // routeRequest delegates to handlePremiumRoutes at the original position.
 import { handlePremiumRoutes, makePremiumRouteContext } from "./routes/premium";
@@ -2909,6 +2910,16 @@ export class OrchestratorAgent extends PortThink {
       audit: (type, agent, payload) => this.audit(type, agent, payload),
     });
     if (agenticPaymentsResponse) return agenticPaymentsResponse;
+
+    // Issue #2220 (program #2218 slice 2): user administration
+    // routes live in src/agents/routes/platformUsers.ts. Invoked
+    // immediately after the agentic-payments handler, before
+    // premium; a non-null return matched.
+    const platformUsersResponse = await handlePlatformUsersRoutes(request, url, path, sessionId, {
+      env: this.env,
+      audit: (type, agent, payload) => this.audit(type, agent, payload),
+    });
+    if (platformUsersResponse) return platformUsersResponse;
 
     // Issue #359-08: premium paid-trading routes (Paid Trading Service:
     // Institutional Options Screener, Equity Research, Anomaly Signals)

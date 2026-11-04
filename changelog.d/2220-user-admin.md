@@ -1,0 +1,3 @@
+### Added
+
+- **User administration surface (#2220, program #2218 slice 2):** Platform Admin gains a read-only Users tab — the signed-in account's verified-login profile, tenant memberships, and commercial account linkage, plus a platform-admin-only user lookup. Server routes `GET /api/admin/platform-users/me` (self-only, session-scoped) and `GET /api/admin/platform-users/lookup` (platform-admin gate, the IAAA panel's gate reused) read through slice 1's `resolvePlatformIdentity` and the IAAA membership store; no user store is invented, no IAAA state is written, and no schema is ensured on a read path. The Users tab reuses the Agents people-network glyph until a dedicated Users glyph lands. Process documentation impact: none (slice PR carries its own line).

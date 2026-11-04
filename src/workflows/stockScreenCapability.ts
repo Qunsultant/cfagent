@@ -149,9 +149,9 @@ export const STOCK_SCREEN_CAPABILITIES: readonly StockScreenCapability[] = [
     provider: "provider registry (goal stock leg)",
     persistence: "Goal screen reports (goalScreenReports)",
     delivery: "Goal dispatch delivery (goal-owned)",
-    canonical: ["goalStockScreenSpec (source: goal, deliver: false)", "stockScreenPlanner.planGoalStockLeg", "screenExecutionBroker goal guard (returns null)"],
+    canonical: ["goalStockScreenSpec (source: goal, deliver: false)", "stockScreenPlanner.planGoalStockLeg", "screenExecutionBroker goal routing (guard retired #2991)"],
     status: "target",
-    current: "Decision 2026-11-03 (G7 #2914): goal execution stays goal-owned — goalDrivenScreen.buildGoalScreenPlan + goalScreenDispatch own execution today because the goal engine screens thesis legs internally via the provider registry (not universe-scoped, multi-leg), goal reports (goalScreenReports) and delivery (goal dispatch) are goal-owned surfaces, and the broker guard (null for goal specs) is the routing decision, not a gap. Translation (spec + broker guard + planner mapping, #2882) built; execution migration revisit trigger: the workflow gains multi-leg goal semantics + goal report/delivery parity.",
+    current: "Decision 2026-11-03 (G7 #2914): goal execution stays goal-owned — goalDrivenScreen.buildGoalScreenPlan + goalScreenDispatch own execution (goal engine screens thesis legs internally via the provider registry; goal reports and delivery are goal-owned surfaces). Broker guard retired (#2991, one-solution direction — the #2882 'routing decision, not a gap' premise is superseded); goal dispatch becomes a caller of the one pipeline; execution migration still open (revisit trigger per G7 #2914: the workflow gains multi-leg goal semantics + goal report/delivery parity).",
     extensionPoint: "stage",
   },
   {

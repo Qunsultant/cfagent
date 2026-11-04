@@ -29,10 +29,16 @@
  * to `saga-h-<32 hex>` via two-seed FNV-1a, so the same saga id
  * always maps to the same instance id (retries adopt, never
  * duplicate).
+ *
+ * Issue #2991 (#2770 Phase A): the closed leg union is now
+ * registry entries — this module delegates to legRegistry. The
+ * derivation, the adopt/fallback semantics, and every export here
+ * are byte-identical in behavior to the pre-registry port; only
+ * the construction moved.
  */
 
-import { mapInstanceStatus, type WorkflowBindingLike } from "./cfWorkflowAdapter";
-import { startManagedWorkflowInstance } from "./workflowInstanceSeam";
+import type { WorkflowBindingLike } from "./cfWorkflowAdapter";
+import { createLegRegistry, legPortFromRegistry } from "./legRegistry";
 import type { WorkflowInstanceStatus } from "./workflowPorts";
 
 /** Saga legs. S1 uses payment + screener; trade arrives with S4. */
@@ -92,47 +98,25 @@ export function sagaLegInstanceId(sagaId: string, leg: SagaLeg): string {
  * Build a saga-scoped leg port from the worker environment's
  * workflow bindings. Bindings may be absent (the port throws on
  * use for that leg); the caller never touches a binding directly.
+ *
+ * #2991: delegates to the leg registry — the three legs below
+ * are the saga's registry entries, with the original derivation
+ * (including the exact fallback-id formula) carried verbatim.
  */
 export function sagaLegPort(
   bindings: Partial<Record<SagaLegBinding, WorkflowBindingLike | undefined>>,
   sagaId: string,
 ): SagaLegPort {
-  const bindingFor = (leg: SagaLeg): WorkflowBindingLike => {
-    const bindingName = SAGA_LEG_BINDINGS[leg];
-    const binding = bindings[bindingName];
-    if (!binding) {
-      throw new Error(
-        `Saga leg binding ${bindingName} is not configured; cannot start or observe the ${leg} leg.`,
-      );
-    }
-    return binding;
-  };
-
-  return {
-    async startLeg(leg: SagaLeg, params: unknown): Promise<{ workflowId: string; existing: boolean }> {
-      const binding = bindingFor(leg);
-      const started = await startManagedWorkflowInstance(binding, {
-        id: sagaLegInstanceId(sagaId, leg),
-        fallbackId: () => `saga-h-${hashSagaId(`${sagaId}:${leg}:fallback`)}`,
-        params,
-      });
-      return { workflowId: started.workflowId, existing: started.existing };
-    },
-
-    async getLegStatus(leg: SagaLeg, workflowId: string): Promise<SagaLegInstanceStatus | null> {
-      const binding = bindingFor(leg);
-      try {
-        const instance = await binding.get(workflowId);
-        if (typeof instance.status !== "function") return null;
-        const s = await instance.status();
-        return {
-          status: mapInstanceStatus(s.status),
-          ...(s.output !== undefined ? { output: s.output } : {}),
-          ...(s.error ? { error: { message: s.error.message } } : {}),
-        };
-      } catch {
-        return null;
-      }
-    },
-  };
+  const registry = createLegRegistry(
+    (["payment", "screener", "trade"] as SagaLeg[]).map((leg) => ({
+      id: leg,
+      bindingName: SAGA_LEG_BINDINGS[leg],
+      parameterSchema: ["runRequestId"],
+      stageContract: { observeStages: ["start", "poll"] },
+      terminalSemantics: { complete: "SUCCESS" },
+      deriveInstanceId: (id: string) => sagaLegInstanceId(id, leg),
+      deriveFallbackId: (id: string) => `saga-h-${hashSagaId(`${id}:${leg}:fallback`)}`,
+    })),
+  );
+  return legPortFromRegistry(registry, bindings, sagaId);
 }
