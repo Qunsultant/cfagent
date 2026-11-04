@@ -869,7 +869,8 @@ export function NavigationMenu({
             // trigger's onClick and then toggles, so a navigating
             // trigger would never show the menu); the parent page
             // itself is the first menu item, so every destination
-            // stays one click away.
+            // stays one click away. Issue #3163: the dropdown also
+            // opens on hover (hoverOpen on the Menu primitive).
             const subs = topStripSubItems(item.id);
             if (subs.length > 0) {
               const configItem = findNavItemConfig(DEFAULT_LEFT_NAV_CONFIG, item.id);
@@ -892,6 +893,7 @@ export function NavigationMenu({
               return (
                 <Menu
                   key={item.id}
+                  hoverOpen
                   trigger={
                     <Button
                       variant="ghost"
@@ -957,6 +959,7 @@ export function NavigationMenu({
               return (
                 <Menu
                   key={parent.id}
+                  hoverOpen
                   trigger={
                     <Button
                       variant="ghost"
