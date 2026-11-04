@@ -30,11 +30,37 @@ import {
 } from "./screenerFollowups";
 import { SCREENING_DRAFT_FOOTER } from "./screeningDelivery";
 import type { AsyncJobChannel } from "../types";
+import {
+  channelDisabledError,
+  mapScreeningChannelToTenantChannel,
+  resolveTenantChannelGate,
+  type TenantChannelGate,
+} from "./tenantChannelGate";
 
 export interface FollowupDeliveryDeps {
   env: Env;
   getOrm: () => DatabaseORM;
   getScreenerAgent: (userLogin?: string) => ScreenerAgent;
+  /**
+   * Issue #3169 — test seam for tenant channel gate resolution.
+   * When absent, the gate resolves from deps.env (commercial
+   * account row for the verified login + channel store); a
+   * null result means ungated (prior behavior).
+   */
+  getTenantChannelGate?: (userLogin: string) => Promise<TenantChannelGate | null>;
+}
+
+/** Resolve the tenant channel gate for one delivery, never throwing. */
+async function resolveDeliveryGate(
+  deps: FollowupDeliveryDeps,
+  userLogin: string,
+): Promise<TenantChannelGate | null> {
+  try {
+    if (deps.getTenantChannelGate) return await deps.getTenantChannelGate(userLogin);
+    return await resolveTenantChannelGate(deps.env, userLogin);
+  } catch {
+    return null;
+  }
 }
 
 export interface FollowupDeliveryInput {
@@ -66,6 +92,15 @@ export function createFollowupDeliveryPort(deps: FollowupDeliveryDeps): {
 } {
   return {
     deliver: async ({ channel, userLogin, outcome, artifacts }) => {
+      // Issue #3169: a tenant-disabled channel is refused before
+      // any artifact is fetched or any transport is attempted.
+      // A null gate (unbound store, no tenant, resolution
+      // failure) means ungated — prior behavior, never a refusal.
+      const gate = await resolveDeliveryGate(deps, userLogin);
+      const tenantChannel = mapScreeningChannelToTenantChannel(channel);
+      if (gate && tenantChannel && !gate.isEnabled(tenantChannel)) {
+        return { ok: false, error: channelDisabledError(tenantChannel, gate.tenantId) };
+      }
       const config = resolveScreenerFollowupConfig(deps.env as unknown as Record<string, unknown>);
       const text = followupDeliveryText(outcome);
       const agent = deps.getScreenerAgent(userLogin);
@@ -193,6 +228,14 @@ export function createFollowupDeliveryPort(deps: FollowupDeliveryDeps): {
     // Issue #1123 S4: text-only lifecycle notifications (no artifact).
     notify: async ({ channel, userLogin, text, emailTo, slackChannel }) => {
       const config = resolveScreenerFollowupConfig(deps.env as unknown as Record<string, unknown>);
+      // Issue #3169: same gate as deliver() (slack/email only in
+      // practice — webhook below keeps its existing error when
+      // enabled, and is refused by the gate when disabled).
+      const gate = await resolveDeliveryGate(deps, userLogin);
+      const tenantChannel = mapScreeningChannelToTenantChannel(channel);
+      if (gate && tenantChannel && !gate.isEnabled(tenantChannel)) {
+        return { ok: false, error: channelDisabledError(tenantChannel, gate.tenantId) };
+      }
       if (channel === "slack") {
         // Issue #1191: per-task channel wins, mirroring deliveries.
         return deliverScreenerToSlack(deps.env, { text, channel: slackChannel ?? config.channels.slack.channel });

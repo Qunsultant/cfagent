@@ -1,0 +1,3 @@
+### Added
+
+- **Tenant delivery-channel configuration (#3169):** Platform Admin gains a Channels sub-tab (`?tab=platform-admin&view=channels`) where a store operator enables or disables delivery channels (email, Slack, webhook, Copilot card, Docs) per tenant. Flags live in a new D1 table (`agent_tenant_channels`, migration 0039) behind a port; no webhook URLs, tokens, or secrets are stored. A disabled channel is refused at dispatch with a typed error — enforced in the screening delivery funnels, the followup delivery port (chain + scheduled paths), and all four direct delivery call sites. Copilot card and Docs flags are configuration only until a push dispatch funnel exists for them (see the PR body for the named remainder).
