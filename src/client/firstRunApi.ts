@@ -30,6 +30,7 @@
  * caller-facing strings; server error bodies are never rendered — they
  * can carry internal detail.
  */
+import { withCsrfInit } from "./apiFetch";
 
 const BASE = "/api/payments/agentic/commercial";
 
@@ -89,10 +90,10 @@ export function errorMessageForStatus(status: number): string {
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
-    res = await globalThis.fetch(`${BASE}${path}`, {
+    res = await globalThis.fetch(`${BASE}${path}`, withCsrfInit({
       ...init,
       headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
-    });
+    }));
   } catch {
     throw new FirstRunApiError(0);
   }

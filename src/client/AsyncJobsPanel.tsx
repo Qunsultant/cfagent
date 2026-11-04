@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Button, TextInput } from "./components/ui";
 import { usePolling } from "./usePolling";
 import { useAutoRefresh } from "./autoRefresh";
+import { csrfHeaders } from "./apiFetch";
 
 type AsyncJob = {
   jobId: string;
@@ -116,7 +117,9 @@ export function AsyncJobsPanel({ embedded = false }: AsyncJobsPanelProps = {}) {
   const retryJob = async (jobId: string) => {
     setError("");
     try {
-      const response = await globalThis.fetch(`/api/jobs/${jobId}/retry`, { method: "POST" });
+      // Q5 slice: direct fetch bypasses apiFetch, so attach the
+      // CSRF header explicitly (same-origin mutation).
+      const response = await globalThis.fetch(`/api/jobs/${jobId}/retry`, { method: "POST", headers: csrfHeaders() });
       const data = await response.json() as { error?: string };
       if (!response.ok) throw new Error(data.error || "Could not retry the job.");
       await refresh();

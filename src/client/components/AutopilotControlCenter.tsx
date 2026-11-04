@@ -4,6 +4,7 @@ import { EmptyState, Table, Badge, Button, PillGroup, TextInput, Select, Notice,
 import { BRAND } from "../branding";
 import { normalizeAutopilotLimits, type AutopilotPolicyLimits } from "../../services/riskPolicyEngine";
 import type { TradeRecord } from "../../types";
+import { csrfHeaders } from "../apiFetch";
 
 /**
  * Limits are defined by the policy engine — the single source of truth shared
@@ -620,7 +621,7 @@ export function AutopilotControlCenter({
     try {
       const res = await fetch("/api/autopilot/state", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...csrfHeaders() },
         body: JSON.stringify({ running: next }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -648,7 +649,7 @@ export function AutopilotControlCenter({
     try {
       const res = await fetch("/api/autopilot/limits", {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...csrfHeaders() },
         body: JSON.stringify({ limits: normalized }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -697,7 +698,7 @@ export function AutopilotControlCenter({
       };
       const res = await fetch("/api/autopilot/evaluate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...csrfHeaders() },
         body: JSON.stringify(intents),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -1594,7 +1595,7 @@ export function AutopilotControlCenter({
                     // stays open with the true state named.
                     const res = await fetch("/api/autopilot/kill-switch", {
                       method: "POST",
-                      headers: { "Content-Type": "application/json" },
+                      headers: { "Content-Type": "application/json", ...csrfHeaders() },
                       body: JSON.stringify({
                         active: next,
                         reason: next ? `Activated from control center by ${user?.login || "operator"}` : null,

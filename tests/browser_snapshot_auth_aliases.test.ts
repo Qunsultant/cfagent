@@ -102,7 +102,8 @@ const req = (
   new Request(`https://agent.test${path}`, {
     method: opts.method || "GET",
     headers: {
-      ...(opts.cookie ? { Cookie: `session_id=${opts.cookie}` } : {}),
+      // Q5 slice: cookie-authenticated test requests carry the CSRF token a real client sends.
+      ...(opts.cookie ? { Cookie: `session_id=${opts.cookie}; csrf_token=csrf-test-token`, "X-CSRF-Token": "csrf-test-token" } : {}),
       ...(opts.body !== undefined ? { "Content-Type": "application/json" } : {}),
       ...(opts.headers || {}),
     },

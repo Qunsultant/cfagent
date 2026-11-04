@@ -6,6 +6,7 @@
  * x-user-login header is set by server.ts from the verified session,
  * so callers pass no identity here.
  */
+import { csrfHeaders } from "./apiFetch";
 export interface ReplayResponse {
   ok: boolean;
   replay?: {
@@ -35,7 +36,7 @@ export async function replayReport(args: {
 }): Promise<ReplayResponse> {
   const res = await fetch("/api/reports/replay", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...csrfHeaders() },
     body: JSON.stringify(args),
   });
   const data = (await res.json().catch(() => ({}))) as { replay?: unknown; error?: string };

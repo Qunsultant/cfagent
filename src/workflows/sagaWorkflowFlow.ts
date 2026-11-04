@@ -123,6 +123,7 @@ import type {
 import { runJourneyGateCapability } from "./journeyGateCapability";
 import { createSagaFinisher } from "./sagaTerminal";
 import type { SagaLeg, SagaLegInstanceStatus, SagaLegPort } from "./sagaLegPort";
+import type { SagaRiskAssessment } from "./sagaRiskStage";
 import {
   compensateFailedScreen,
   sagaCompensationDisclosure,
@@ -204,6 +205,10 @@ export interface SagaAuditEvent {
   /** Trade child workflow id (S4 trade leg rows only). */
   tradeWorkflowId?: string;
   /**
+   * Issue #3000: risk-stage assessment attached to trade-leg rows
+   * (trade_proposed survivors and proposal_failed violations alike).
+   */
+  riskAssessment?: SagaRiskAssessment;  /**
    * Issue #2989: payment child workflow id (payment leg rows
    * only) — the seam-returned id from startLeg, i.e. the
    * Cloudflare workflow id. Follows the screenerWorkflowId /

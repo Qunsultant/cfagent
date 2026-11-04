@@ -200,6 +200,65 @@ exemption from it.
   mounted-hidden, ARIA tablist/tabpanel with roving tabindex.
   The `Tabs` primitive is the one tab mechanism for new work;
   ScreenersHub's bespoke tablist is the known leftover (§4, C3).
+- Panels separate content from chrome: a panel's content renders
+  bare inside another page's tab, and the route owns the
+  `PageShell`. A panel that can only render inside its own shell
+  is not composable (issue #3125: `RiskAnalysisContent` embeds in
+  the order page's Risk tab while `RiskAnalysisPanel` keeps the
+  shell for the standalone route).
+
+### 1.6a Modularity and composability — the order-workspace pattern
+
+The stock and options order pages are the reference composition: they
+are beautiful because of structure, not decoration. Every page that
+carries a workflow must be at least as composed as the order page, and
+the composition must work without editing the component being
+composed. The order-workspace pattern has six elements:
+
+1. **Form card** — the whole input flow in one bordered, padded card
+   with a distributed header row (bold title left, muted subtitle
+   right) and labeled fields at consistent density.
+2. **Summary card** — a sunken surface with the headline numbers as
+   label/value rows (the calc-card equivalent): the answer before the
+   detail. A page of bare tables with no summary surface is not
+   acceptable — that was the S1 risk page's failure.
+3. **Responsive grid** — the `Grid` primitive's auto-fit row (form and
+   summary side by side on wide screens, one column on narrow ones).
+   Fixed two-column CSS that never collapses is not acceptable.
+4. **A card per content block** — every section renders a `Card`
+   surface with its own header; content never sits bare in a section.
+5. **Context strip** — the live context (symbol, spot, strategy) as a
+   sunken strip or summary rows, so the page never shows numbers
+   without saying what they belong to.
+6. **Alerts as `Notice`s in flow** — warnings and disclosures inline
+   where they apply, never as a second-class footnote.
+
+**Composability rule.** Chrome is host-applied, never component-owned
+beyond declaring it. A panel renders its `PageShell` (title +
+scopeNote) exactly once, and the host decides how that shell renders
+via `PageChromeContext` (`PageShell.tsx`):
+
+- `page` (default): the standalone route — full shell, h1 + scope note.
+- `tab`: the panel is a tab on another page — the tab's label is the
+  title, so the shell renders content only, no second header.
+- `nested`: the panel sits inside another panel — it becomes a `Card`
+  surface with its title as the card heading, never a second h1.
+
+Three moves must work with zero changes to the composed component:
+
+- a pane nested inside other panels (wrap it in a `nested` provider);
+- a page showing up as a tab on another page (wrap it in a `tab`
+  provider inside a `TabPanel`);
+- a tab promoted to a standalone page, or a page demoted to a tab
+  (move the same component between hosts; the route owns the shell).
+
+Only `PageShell` reads the context. A panel that branches on its host
+(`if (isTab) …`), strips its own shell for embedding, or ships a
+separate bare variant is not composable — that was the first #3125
+approach (a split `RiskAnalysisContent`), replaced by host-applied
+chrome. Data travels by props (a tab may seed a panel, e.g. the live
+ticket into Risk); structure travels by context. Props customize what
+a panel shows, never how it is composed.
 - Capability tabs in the top bar (`CapabilityNavBar`, ids
   `cap-tab-<id>`) are a separate mechanism from left-nav pages:
   they switch capability views within the chat surface.
@@ -220,11 +279,15 @@ exemption from it.
 5. URL: `?tab=` works on reload and back/forward; hub inner views
    use `view` and stay in sync; a deep-link entry if the page's
    link differs from the default rule.
-6. States: settled-but-empty renders `EmptyState`, never a
+6. Composition hosts: the panel renders correctly as a standalone
+   route, as a tab (`PageChromeContext` = `tab`), and nested
+   (`PageChromeContext` = `nested`) — pin tests cover all three
+   hosts for the SAME component, with no per-host edits (§1.6a).
+7. States: settled-but-empty renders `EmptyState`, never a
    "Loading…" empty state; async buttons use the Button `loading`
    prop, never a label swap; a completed action that changes
    nothing visible gets a transient Toast (§2.5).
-7. Access: keyboard flow, visible focus, programmatic labels,
+8. Access: keyboard flow, visible focus, programmatic labels,
    live-region announcements for milestones only (§2.4).
 8. Pins: route-table, nav-derivation, shell-conformance, and
    wiring-gate pins updated in the same PR (pin rule, §2.7).

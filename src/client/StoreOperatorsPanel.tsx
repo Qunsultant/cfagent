@@ -29,6 +29,7 @@ import { Notice } from "./components/ui/Notice";
 import { Spinner } from "./components/ui/Spinner";
 import { Table } from "./components/ui/Table";
 import { TextInput } from "./components/ui/TextInput";
+import { withCsrfInit } from "./apiFetch";
 
 const LIST_PATH = "/api/payments/agentic/commercial/operators";
 const ADD_PATH = "/api/payments/agentic/commercial/operators/add";
@@ -72,7 +73,7 @@ export interface EffectiveOperatorRow {
 }
 
 async function callJson(path: string, init?: RequestInit): Promise<unknown> {
-  const res = await globalThis.fetch(path, init);
+  const res = await globalThis.fetch(path, withCsrfInit(init));
   const data: unknown = await res.json().catch(() => ({}));
   if (!res.ok) {
     const message =

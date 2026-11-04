@@ -160,6 +160,7 @@ import { handleMaintenanceRoutes } from "./routes/maintenance";
 import { handleServiceUserRoutes } from "./routes/serviceUser";
 import { handleOrchestratorMigrationRoutes } from "./routes/orchestratorMigration";
 import { handleAdminTenantQueueRoutes } from "./routes/adminTenantQueues";
+import { handlePlatformTenantRoutes } from "./routes/platformTenants";
 import { handleKvWipeRoutes } from "./routes/kvWipe";
 import { TRADING_PAID_SERVICES } from "../services/agenticPayments";
 import type {
@@ -2920,6 +2921,12 @@ export class OrchestratorAgent extends PortThink {
       audit: (type, agent, payload) => this.audit(type, agent, payload),
     });
     if (platformUsersResponse) return platformUsersResponse;
+
+    // Issue #2221: tenant admin routes, after agentic-payments.
+    const platformTenantResponse = await handlePlatformTenantRoutes(request, url, path, sessionId, {
+      env: this.env,
+    });
+    if (platformTenantResponse) return platformTenantResponse;
 
     // Issue #359-08: premium paid-trading routes (Paid Trading Service:
     // Institutional Options Screener, Equity Research, Anomaly Signals)

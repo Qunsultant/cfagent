@@ -16,6 +16,7 @@
  * operators are operator-only server-side (the UI is never the
  * access control, only the affordance).
  */
+import { withCsrfInit } from "./apiFetch";
 
 const BASE = "/api/payments/agentic/commercial";
 
@@ -61,7 +62,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 async function callJson(path: string, init?: RequestInit): Promise<unknown> {
   let res: Response;
   try {
-    res = await globalThis.fetch(path, init);
+    res = await globalThis.fetch(path, withCsrfInit(init));
   } catch {
     throw new RefundPolicyApiError(0);
   }

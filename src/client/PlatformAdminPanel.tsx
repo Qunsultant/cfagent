@@ -42,6 +42,7 @@ import {
   type PlatformAdminMenuItemConfig,
   type PlatformAdminSectionId,
 } from "./platformAdminConfig";
+import { csrfHeaders } from "./apiFetch";
 
 export type { PlatformAdminSectionId };
 
@@ -313,7 +314,7 @@ export function PlatformAdminPanel({
     try {
       const res = await globalThis.fetch("/api/iaaa/access-request", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...csrfHeaders() },
         body: JSON.stringify({ requestedRole: "tenant-admin" }),
       });
       const data = (await res.json().catch(() => ({}))) as { error?: string };

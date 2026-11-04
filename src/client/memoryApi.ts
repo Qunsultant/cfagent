@@ -1,6 +1,7 @@
 /**
  * Issue #164: client API for the VectorMemory browser.
  */
+import { csrfHeaders } from "./apiFetch";
 
 export interface MemoryChunk {
   summary: string;
@@ -15,7 +16,7 @@ export async function searchMemory(
 ): Promise<{ chunks: MemoryChunk[] }> {
   const response = await globalThis.fetch("/api/memory/search", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...csrfHeaders() },
     body: JSON.stringify({
       query,
       topK: opts.topK ?? 10,

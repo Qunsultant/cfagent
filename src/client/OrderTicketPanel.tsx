@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useMemo, useRef } from "react";
 import {
   Badge,
   Button,
@@ -16,7 +16,12 @@ import { TradingApprovalsQueue } from "./TradingApprovalsQueue";
 import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
 import type { ETradeOrderDraft, ETradeQuote } from "../types";
 import type { TradeAssetClass, TradeOrderContext } from "./trading/tradeOrderContext";
-import type { RiskSubject } from "./options/riskManagementEngine";
+import type {
+  RiskLeg,
+  RiskSubject,
+} from "./options/riskManagementEngine";
+import { RiskAnalysisPanel } from "./RiskAnalysisPanel";
+import { PageChromeContext } from "./components/ui/PageShell";
 
 /**
  * OrderTicketPanel — the Fast Order Ticket as its own shell-conforming
@@ -35,7 +40,7 @@ import type { RiskSubject } from "./options/riskManagementEngine";
  * never disagree with the ticket it shows.
  */
 
-export type OrderTicketTab = "stock" | "options";
+export type OrderTicketTab = "stock" | "options" | "risk";
 
 export interface OrderTicketModel {
   orderSymbol: string;
@@ -122,6 +127,9 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
   } = ticket;
 
   const applyTab = (tab: OrderTicketTab) => {
+    // The Risk tab analyzes the ticket; it never changes the ticket's
+    // asset class. Leaving Risk for an asset tab applies that tab below.
+    if (tab === "risk") return;
     if (tab === "options" && !orderContext) {
       seedManualOptions(orderSymbol);
       return;
@@ -134,10 +142,16 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
   const { activeTab, handleTabChange } = useUrlSyncedTabs<OrderTicketTab>({
     param: "orderTab",
     isValid: (value: unknown): value is OrderTicketTab =>
-      value === "stock" || value === "options",
+      value === "stock" || value === "options" || value === "risk",
     defaultTab: "stock",
     onTabChange: applyTab,
   });
+
+  // The post-mount effect below reads the live tab, not the render that
+  // scheduled it: a seed landing while the Risk tab is open must refresh
+  // the risk seed, never yank the user off Risk onto an asset tab.
+  const activeTabRef = useRef(activeTab);
+  activeTabRef.current = activeTab;
 
   // Mount: the URL tab and the ticket can disagree two ways, and each
   // direction wins in exactly one case. An explicit ?orderTab= in the URL
@@ -148,6 +162,10 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
   useEffect(() => {
     if (typeof window === "undefined") return;
     const urlTab = new URLSearchParams(window.location.search).get("orderTab");
+    if (urlTab === "risk") {
+      // The Risk tab is not an asset class: show it, touch nothing.
+      return;
+    }
     if (urlTab === "stock" || urlTab === "options") {
       const assetTab: OrderTicketTab =
         orderAssetClass === "options" ? "options" : "stock";
@@ -169,11 +187,80 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
   useEffect(() => {
     if (prevAssetClassRef.current === orderAssetClass) return;
     prevAssetClassRef.current = orderAssetClass;
+    // A seed landing while Risk is open refreshes the risk seed (via
+    // riskSeedKey below); it must not move the selected tab.
+    if (activeTabRef.current === "risk") return;
     const assetTab: OrderTicketTab =
       orderAssetClass === "options" ? "options" : "stock";
     if (assetTab !== activeTab) handleTabChange(assetTab);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orderAssetClass]);
+
+  // Risk seed (#3125): the ticket as a RiskSubject. An equity ticket
+  // seeds Long Equity sized to the ticket; an options ticket seeds its
+  // legs as a multi-leg subject (ticket legs carry no IV, so the engine
+  // excludes them from Greek sums and the tab discloses the gap). No
+  // symbol, or an options ticket with no struck leg, seeds nothing and
+  // the tab shows the manual analyze form instead.
+  const riskSeed: RiskSubject | null = useMemo(() => {
+    const cleanSymbol = orderSymbol.trim().toUpperCase();
+    if (!cleanSymbol) return null;
+    const spot =
+      orderContext?.underlyingPrice ??
+      orderQuote?.lastPrice ??
+      orderQuote?.price ??
+      undefined;
+    if (orderAssetClass === "options") {
+      const validLegs = orderLegs.filter(
+        (l) => l.securityType === "EQ" || (l.strike != null && l.strike > 0),
+      );
+      if (validLegs.length === 0) return null;
+      const legs: RiskLeg[] = validLegs.map((l) => ({
+        side: l.side,
+        optionType: l.securityType === "EQ" ? "STOCK" : l.optionType,
+        strike: l.strike,
+        expirationDate: l.expirationDate,
+        quantity: l.quantity,
+      }));
+      const singleOptn =
+        validLegs.length === 1 && validLegs[0].securityType === "OPTN";
+      return {
+        title: `${cleanSymbol} — Ticket strategy`,
+        underlyingSymbol: cleanSymbol,
+        underlyingPrice: spot,
+        strategyType: "Ticket strategy",
+        sentiment: "directional",
+        quantity: validLegs.reduce((sum, l) => sum + (l.quantity ?? 1), 0),
+        positionType: singleOptn ? "OPTION" : "MULTI_LEG",
+        legs,
+      };
+    }
+    return {
+      title: `${cleanSymbol} — Long Equity`,
+      underlyingSymbol: cleanSymbol,
+      underlyingPrice: spot,
+      strategyType: "Long Equity",
+      sentiment: "bullish",
+      quantity: Math.max(1, orderQuantity || 1),
+      positionType: "EQUITY",
+    };
+  }, [
+    orderSymbol,
+    orderAssetClass,
+    orderLegs,
+    orderContext,
+    orderQuote,
+    orderQuantity,
+  ]);
+  const riskSeedKey = useMemo(
+    () =>
+      `${orderSymbol}|${orderAssetClass}|${orderLegs
+        .map((l) =>
+          [l.side, l.securityType, l.optionType, l.strike, l.expirationDate, l.quantity].join(":"),
+        )
+        .join(";")}|${orderQuantity}`,
+    [orderSymbol, orderAssetClass, orderLegs, orderQuantity],
+  );
 
   return (
     <PageShell title="Order Ticket">
@@ -183,12 +270,18 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
         tabs={[
           { id: "stock", label: "Stock order" },
           { id: "options", label: "Options order" },
+          { id: "risk", label: "Risk analysis" },
         ]}
         value={activeTab}
         onChange={(tab) => handleTabChange(tab)}
       />
       <Stack gap="4">
-        <TabPanel idBase="order-ticket" tabId={activeTab} active>
+        <TabPanel
+          idBase="order-ticket"
+          tabId={orderAssetClass === "options" ? "options" : "stock"}
+          active={activeTab !== "risk"}
+          retain
+        >
           <div className="trading-section order-ticket-section">
             <div className="order-ticket-layout">
               {/* Left: Interactive Order Ticket Form */}
@@ -688,6 +781,28 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
               </div>
             </div>
           </div>
+        </TabPanel>
+        <TabPanel
+          idBase="order-ticket"
+          tabId="risk"
+          active={activeTab === "risk"}
+          retain
+        >
+          {/*
+            Composition without component changes (#3125): the Risk tab
+            renders the SAME RiskAnalysisPanel the standalone route
+            renders. The tab host applies chrome via context, so the
+            panel's PageShell collapses to content only here and renders
+            fully on its own route — the panel itself is never edited
+            for the host it lands in.
+          */}
+          <PageChromeContext.Provider value="tab">
+            <RiskAnalysisPanel
+              seededSubject={riskSeed}
+              seedKey={riskSeedKey}
+              onSendPrompt={(prompt) => sendNlqToChat(prompt)}
+            />
+          </PageChromeContext.Provider>
         </TabPanel>
         <TradingApprovalsQueue />
       </Stack>
