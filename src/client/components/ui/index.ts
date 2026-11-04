@@ -47,6 +47,10 @@
  *   backdrop close, focus trap + restore, scroll lock; sides left/right).
  * - SkipLink — keyboard entry to main content (visually hidden until
  *   focus; target region carries tabIndex={-1}).
+ * - Stack / Flex / Grid — layout primitives (gap from the token spacing
+ *   scale only; Stack is a flex column, Flex a flex row with wrap +
+ *   inline modes, Grid a fixed-count or auto-fit grid) — the
+ *   componentized form of hand-rolled flex/grid inline styles.
  *
  * Styles live in ./primitives.css (imported once by main.tsx). New
  * primitives are added here with their styles + tests in the same PR.
@@ -74,3 +78,7 @@ export { Menu, type MenuProps, type MenuItem } from "./Menu";
 export { Popover, type PopoverProps } from "./Popover";
 export { Drawer, type DrawerProps } from "./Drawer";
 export { SkipLink } from "./SkipLink";
+export { Stack, type StackProps } from "./Stack";
+export { Flex, type FlexProps } from "./Flex";
+export { Grid, type GridProps } from "./Grid";
+export type { LayoutGap, LayoutAlign, LayoutJustify, GridMinWidth } from "./layout";
