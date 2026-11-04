@@ -280,6 +280,12 @@ export async function autonomousMarketScreen(ctx: ScheduledCallbacksContext, pay
   /** Issue #1355: run this scheduled screen as sharded jobs
    *  (validated by marketScreenScheduleCriteriaSchema). */
   sharded?: boolean;
+  /** Issue #2373 (slice C): schedule kind + submission
+   *  authorization, carried through the {...payload} spread to
+   *  ScheduledTasksService.autonomousMarketScreen. Absent fails
+   *  closed to recurring at the tick. */
+  scheduleKind?: "one_off" | "recurring";
+  authorizedAtSubmission?: boolean;
 }): Promise<ScheduledCallbackOutcome> {
   try {
     await ctx.waitUntilStable({ timeout: 30_000 });
@@ -520,6 +526,13 @@ export async function autonomousGoalScreen(ctx: ScheduledCallbacksContext, paylo
    *  payload, forwarded to the service (spread into the service call
    *  below) so a completed goal screen bridges generate + serve. */
   stageChain?: import("../../types").StageChainConfig;
+  /** Issue #2373 (slice C): schedule kind + submission
+   *  authorization, carried through the {...payload} spread to
+   *  ScheduledTasksService.autonomousGoalScreen (which already
+   *  declared these options; the wrapper type did not). Absent
+   *  fails closed to recurring at the tick. */
+  scheduleKind?: "one_off" | "recurring";
+  authorizedAtSubmission?: boolean;
 }): Promise<ScheduledCallbackOutcome> {
   try {
     await ctx.waitUntilStable({ timeout: 30_000 });
