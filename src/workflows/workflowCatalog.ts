@@ -45,6 +45,8 @@ export interface StageDeclaration {
   stage: StageName;
   /** Human label key — resolved through the message catalog at render time. */
   labelKey: string;
+  /** Human label the UI renders (externalized data, never a literal in a component). */
+  label: string;
   /** What the stage persists before announcing (an artifact kind, never bulk data). */
   persists: string;
   /** The stage-message id this stage publishes (the #2869 seam). */
@@ -66,6 +68,8 @@ export interface WorkflowDeclaration {
   id: string;
   family: WorkflowFamily;
   labelKey: string;
+  /** Human label, externalized here (data, not a literal in a component). */
+  label: string;
   /**
    * True only when a verified submission path exists. The catalog UI may
    * offer Run only for these; a read-only entry names the missing runner.
@@ -81,6 +85,16 @@ export interface WorkflowDeclaration {
   stages: readonly StageDeclaration[];
 }
 
+/** The stage labels the UI renders (externalized data, one place). */
+export const STAGE_LABELS: Record<StageName, string> = {
+  feed: "Feed (quotes)",
+  gather: "Gather (enrichment)",
+  analysis: "Analysis (screen)",
+  store: "Store (canonical report)",
+  serve: "Serve (report availability)",
+  deliver: "Deliver (channels)",
+};
+
 const ALL_MODES: StageModes = {
   timing: ["sync", "async"],
   concurrency: ["sequential", "parallel"],
@@ -95,6 +109,7 @@ function stage(
   return {
     stage: name,
     labelKey: `workflow.stage.${name}`,
+    label: STAGE_LABELS[name],
     consumes: null,
     modes: ALL_MODES,
     retryBucket: name === "deliver" ? "delivery" : name === "store" || name === "serve" ? "report" : "acquisition",
@@ -112,6 +127,7 @@ const STOCK_SCREENER: WorkflowDeclaration = {
   id: "stock-screener",
   family: "stock",
   labelKey: "workflow.stock-screener",
+  label: "Stock screener",
   runnable: true,
   runPath: "?tab=stock-hub&view=new-screen",
   stages: [
@@ -129,6 +145,7 @@ const OPTIONS_SCREENER: WorkflowDeclaration = {
   id: "options-screener",
   family: "options",
   labelKey: "workflow.options-screener",
+  label: "Options screener",
   runnable: true,
   runPath: "?tab=options-screener",
   stages: [
@@ -146,6 +163,7 @@ const TRADING_LEG: WorkflowDeclaration = {
   id: "trading-leg",
   family: "trading",
   labelKey: "workflow.trading-leg",
+  label: "Trading leg",
   runnable: false,
   runPath: null,
   stages: [
@@ -195,6 +213,9 @@ export function assertWorkflowCatalog(
       throw new Error(`Workflow catalog refused: duplicate workflow id ${workflow.id}.`);
     }
     seen.add(workflow.id);
+    if (!workflow.label.trim()) {
+      throw new Error(`Workflow catalog refused: ${workflow.id} carries no human label.`);
+    }
     if (workflow.runnable && !workflow.runPath) {
       throw new Error(
         `Workflow catalog refused: ${workflow.id} is runnable but names no runPath (the catalog must link a verified submission surface, never invent one).`,
@@ -231,6 +252,11 @@ export function assertWorkflowCatalog(
             `Workflow catalog refused: ${workflow.id}/${stageDeclaration.stage} declares no ${axis} mode (#3069 R3 requires all four axes).`,
           );
         }
+      }
+      if (!stageDeclaration.label.trim()) {
+        throw new Error(
+          `Workflow catalog refused: ${workflow.id}/${stageDeclaration.stage} carries no human label.`,
+        );
       }
       if (!stageDeclaration.checkpointed) {
         throw new Error(
