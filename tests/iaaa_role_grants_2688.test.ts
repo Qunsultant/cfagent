@@ -285,12 +285,16 @@ describe("roleGrants pure module (#2688)", () => {
 // ---------------------------------------------------------------------------
 
 const PLATFORM_SESSION = "0d9a3120-1c2b-4e3f-8a5b-3120000000a2";
+const PLATFORM2_SESSION = "0d9a3120-1c2b-4e3f-8a5b-3120000000a6";
 const TENANT_SESSION = "0d9a3120-1c2b-4e3f-8a5b-3120000000a1";
+const TENANT2_SESSION = "0d9a3120-1c2b-4e3f-8a5b-3120000000a7";
 const OTHER_TENANT_SESSION = "0d9a3120-1c2b-4e3f-8a5b-3120000000a5";
 const MEMBER_SESSION = "0d9a3120-1c2b-4e3f-8a5b-3120000000a3";
 const LEGACY_SESSION = "0d9a3120-1c2b-4e3f-8a5b-3120000000a4";
 const PLATFORM_ID = "v1:routeplatform000000000000000000000000000000000000001";
+const PLATFORM2_ID = "v1:routeplatform2000000000000000000000000000000000000001";
 const TENANT_ID = "v1:routetenant0000000000000000000000000000000000000001";
+const TENANT2_ID = "v1:routetenant20000000000000000000000000000000000000001";
 const OTHER_ID = "v1:routeotherten000000000000000000000000000000000000001";
 const MEMBER_ID = "v1:routemember00000000000000000000000000000000000000001";
 const TARGET_ID = "v1:routetarget00000000000000000000000000000000000000001";
@@ -308,7 +312,9 @@ async function makeEnv() {
     ...(fresh ? { authTimeMs: now } : {}),
   });
   seed("sessions", PLATFORM_SESSION, session("platform-user", PLATFORM_ID, true));
+  seed("sessions", PLATFORM2_SESSION, session("platform2-user", PLATFORM2_ID, true));
   seed("sessions", TENANT_SESSION, session("tenant-user", TENANT_ID, true));
+  seed("sessions", TENANT2_SESSION, session("tenant2-user", TENANT2_ID, true));
   seed("sessions", OTHER_TENANT_SESSION, session("other-user", OTHER_ID, true));
   seed("sessions", MEMBER_SESSION, session("member-user", MEMBER_ID, true));
   seed("sessions", LEGACY_SESSION, { githubLogin: "legacy-user" });
@@ -328,6 +334,20 @@ async function makeEnv() {
     createdBy: "system:bootstrap-genesis",
     nowMs: now,
   });
+  const platform2 = await createMembership(membershipStore, {
+    internalUserId: PLATFORM2_ID,
+    tenantId: "primary",
+    roleBindings: [{ role: "platform-admin", scope: "platform", grantedBy: "system:bootstrap-genesis" }],
+    createdBy: "system:bootstrap-genesis",
+    nowMs: now,
+  });
+  const tenant2 = await createMembership(membershipStore, {
+    internalUserId: TENANT2_ID,
+    tenantId: "primary",
+    roleBindings: [{ role: "tenant-admin", scope: "tenant", grantedBy: "system:bootstrap-genesis" }],
+    createdBy: "system:bootstrap-genesis",
+    nowMs: now,
+  });
   const other = await createMembership(membershipStore, {
     internalUserId: OTHER_ID,
     tenantId: "other",
@@ -342,7 +362,7 @@ async function makeEnv() {
     createdBy: "system:bootstrap-genesis",
     nowMs: now,
   });
-  if (!platform.ok || !tenant.ok || !other.ok || !member.ok) throw new Error("seed failed");
+  if (!platform.ok || !platform2.ok || !tenant.ok || !tenant2.ok || !other.ok || !member.ok) throw new Error("seed failed");
   return {
     env,
     membershipIds: {
@@ -398,11 +418,15 @@ describe("role-grants routes (#2688)", () => {
 
   it("lets a platform admin grant platform-admin and refuses self-grant and non-admin roles", async () => {
     const { env } = await makeEnv();
+    // Issue #3155 (Q9): the first admin's grant proposes (202),
+    // it does not mint; a second platform admin confirms it.
     const grant = await worker.fetch(
       req("POST", "/api/iaaa/role-grants/grant", { internalUserId: TARGET_ID, role: "platform-admin" }, PLATFORM_SESSION),
       env,
     );
-    expect(grant.status).toBe(201);
+    expect(grant.status).toBe(202);
+    const grantBody = (await grant.json()) as { pending: boolean };
+    expect(grantBody.pending).toBe(true);
     const self = await worker.fetch(
       req("POST", "/api/iaaa/role-grants/grant", { internalUserId: PLATFORM_ID, role: "platform-admin" }, PLATFORM_SESSION),
       env,
@@ -419,15 +443,22 @@ describe("role-grants routes (#2688)", () => {
       env,
     );
     expect(unknown.status).toBe(400);
+    const confirmed = await worker.fetch(
+      req("POST", "/api/iaaa/role-grants/grant", { internalUserId: TARGET_ID, role: "platform-admin" }, PLATFORM2_SESSION),
+      env,
+    );
+    expect(confirmed.status).toBe(201);
   });
 
   it("lets a tenant admin grant tenant-admin in their own tenant only, never platform-admin", async () => {
     const { env } = await makeEnv();
+    // Issue #3155 (Q9): first admin proposes (202), second
+    // tenant admin confirms (201).
     const own = await worker.fetch(
       req("POST", "/api/iaaa/role-grants/grant", { internalUserId: TARGET_ID, role: "tenant-admin", tenantId: "primary" }, TENANT_SESSION),
       env,
     );
-    expect(own.status).toBe(201);
+    expect(own.status).toBe(202);
     const platform = await worker.fetch(
       req("POST", "/api/iaaa/role-grants/grant", { internalUserId: TARGET_ID, role: "platform-admin" }, TENANT_SESSION),
       env,
@@ -445,6 +476,11 @@ describe("role-grants routes (#2688)", () => {
       env,
     );
     expect(platTenant.status).toBe(403);
+    const confirmed = await worker.fetch(
+      req("POST", "/api/iaaa/role-grants/grant", { internalUserId: TARGET_ID, role: "tenant-admin", tenantId: "primary" }, TENANT2_SESSION),
+      env,
+    );
+    expect(confirmed.status).toBe(201);
   });
 
   it("a fresh login via any provider has no admin rights on these routes", async () => {
@@ -458,16 +494,27 @@ describe("role-grants routes (#2688)", () => {
 
   it("revokes one binding immediately and preserves sibling bindings", async () => {
     const { env, membershipIds } = await makeEnv();
-    // Tenant admin grants tenant-admin to the target (their own tenant).
-    const grant = await worker.fetch(
+    // Tenant admin grants tenant-admin to the target (their own tenant),
+    // via the #3155 two-step flow: propose, then a second admin confirms.
+    const proposed = await worker.fetch(
       req("POST", "/api/iaaa/role-grants/grant", { internalUserId: TARGET_ID, role: "tenant-admin", tenantId: "primary" }, TENANT_SESSION),
+      env,
+    );
+    expect(proposed.status).toBe(202);
+    const grant = await worker.fetch(
+      req("POST", "/api/iaaa/role-grants/grant", { internalUserId: TARGET_ID, role: "tenant-admin", tenantId: "primary" }, TENANT2_SESSION),
       env,
     );
     expect(grant.status).toBe(201);
     const granted = (await grant.json()) as { grant: { grantId: string; membershipId: string; bindingIndex: number } };
     // The new admin can immediately grant in turn (live, unrevoked).
-    const second = await worker.fetch(
+    const secondProposed = await worker.fetch(
       req("POST", "/api/iaaa/role-grants/grant", { internalUserId: MEMBER_ID, role: "tenant-admin", tenantId: "primary" }, TENANT_SESSION),
+      env,
+    );
+    expect(secondProposed.status).toBe(202);
+    const second = await worker.fetch(
+      req("POST", "/api/iaaa/role-grants/grant", { internalUserId: MEMBER_ID, role: "tenant-admin", tenantId: "primary" }, TENANT2_SESSION),
       env,
     );
     expect(second.status).toBe(201);

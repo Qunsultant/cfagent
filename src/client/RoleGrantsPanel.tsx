@@ -77,6 +77,13 @@ export function RoleGrantsPanel() {
         ...(role === "tenant-admin" && tenantId.trim() !== "" ? { tenantId: tenantId.trim() } : {}),
         ...(email.trim() !== "" ? { email: email.trim() } : {}),
       });
+      // Issue #3155 (Q9): a first-approver grant proposes, it does
+      // not mint — say so plainly instead of claiming success.
+      if (result.pending) {
+        setNotice("Role grant proposed — a second, distinct admin must approve the same grant before it mints.");
+        await load();
+        return;
+      }
       setNotice(
         result.alreadyGranted
           ? "That user already holds this admin role — nothing was duplicated."
