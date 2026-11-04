@@ -1,0 +1,3 @@
+### Added
+
+- **The stage seam now reads the externalized config, and the sweep fails closed (#3075, #3069 R7):** `consumeAnalysisDone` no longer carries a magic `maxAttempts ?? 3` — the budget comes from `resolveStageConfig(env)` via `maxAttemptsForStage`, so a per-stage `WORKFLOW_STAGE_MAX_ATTEMPTS__ANALYSIS_DONE` actually changes the dead-letter threshold, and a bad value throws `STAGE_CONFIG_INVALID` at the seam rather than running on defaults. The surface sweep pins the property the coded messages exist for: no raw dead-letter literal may reappear on a swept surface, every code literal must be catalogued, and no magic retry budget may sit at the seam. Six new pins; the stage-queue and message pins stay green.
