@@ -142,6 +142,13 @@ export interface Env {
   // NOTE: removing this var does NOT disable gating (the code default
   // is 30s); only "0" disables it.
   IAAA_WIRED_FRESHNESS_MS?: string;
+  // Issue #3155 (Q9) — default grant lifetime in days for
+  // non-platform-scope bindings without an explicit expiry. Adopted
+  // initial value 90. Unlike the freshness gate, "0" does NOT disable
+  // the default (it resolves to 90): unbounded tenant grants are
+  // what the default exists to prevent. Rollback is restoring "90"
+  // (or any positive integer) and redeploying — no code change.
+  IAAA_GRANT_DEFAULT_EXPIRY_DAYS?: string;
   // Issue #2419 — externalized polling cadences (AOP). All optional;
   // absence means the pollingConfig defaults apply. Values are
   // milliseconds, except CHAT_AUTO_REFRESH_FLOOR_S (seconds, matching

@@ -255,6 +255,11 @@
     // removing the var does NOT disable gating (the code default is
     // 30s); only "0" disables it.
     "IAAA_WIRED_FRESHNESS_MS": "30000",
+    // Issue #3155 (Q9) — default grant lifetime in days for
+    // non-platform-scope bindings without an explicit expiry.
+    // Adopted initial value 90; "0" resolves to 90, never to
+    // unbounded (see src/security/grantRules.ts).
+    "IAAA_GRANT_DEFAULT_EXPIRY_DAYS": "90",
     "IAAA_ENABLED_PROVIDERS": "github,google",
     // Issue #945, GitHub activation (owner-authorized, updated 2026-10-23
     // after #1182 stable identity): bootstrap the owner by issuer:subject
