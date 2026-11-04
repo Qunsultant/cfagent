@@ -420,6 +420,16 @@ export type PaymentWorkflowOutcome =
 /** How long a checkout waits for verified payment before lapsing. */
 export const PAYMENT_VERIFICATION_TIMEOUT = "24 hours";
 
+/**
+ * Issue #3191 - the payment workflow's real step ids live in the shared,
+ * dependency-free `stageRuntimeIds` module (the workflow catalog renders in
+ * the browser and must not import this file). Re-exported here so the flow
+ * and the catalog read one declaration; tests/payment_saga_stage_ids_3191.test.ts
+ * scans this file and fails if the two drift.
+ */
+export { PAYMENT_STEP_IDS } from "./stageRuntimeIds";
+export type { PaymentStepId } from "./stageRuntimeIds";
+
 export async function runPaymentWorkflowFlow(
   params: PaymentWorkflowParams,
   deps: PaymentWorkflowDeps,

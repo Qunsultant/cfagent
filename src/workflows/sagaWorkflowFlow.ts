@@ -421,6 +421,16 @@ export type LegTerminal =
  * leg (S4, sagaTradeLeg.ts) reuses this same poll instead of a
  * second copy of the loop.
  */
+/**
+ * Issue #3191 - the saga workflow's real step ids live in the shared,
+ * dependency-free `stageRuntimeIds` module (the workflow catalog renders in
+ * the browser and must not import this file). Re-exported here so the flow
+ * and the catalog read one declaration; tests/payment_saga_stage_ids_3191.test.ts
+ * scans this file and fails if the two drift.
+ */
+export { SAGA_STEP_IDS } from "./stageRuntimeIds";
+export type { SagaStepId } from "./stageRuntimeIds";
+
 export async function pollLegToTerminal(
   deps: { legPort: SagaLegPort; nowMs: () => number },
   step: SagaWorkflowStep,

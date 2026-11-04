@@ -27,6 +27,7 @@
     "@cloudflare/think": "0.23.0",
     "@cloudflare/voice": "^0.5.0",
     "@e965/xlsx": "^0.20.3",
+    "@fluentui/react-components": "^9.75.1",
     "@modelcontextprotocol/sdk": "1.32.2",
     "@modelcontextprotocol/server": "2.4.0",
     "@x402/core": "^2.28.0",

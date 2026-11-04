@@ -94,7 +94,12 @@ describe("Phase 4 CI enforcement pin (#1772)", () => {
 
   it("the phases 1-3 exceptions pin is present (Phase 4 builds on it, not instead of it)", () => {
     expect(existsSync(EXCEPTIONS_PIN), "44-file pin must exist").toBe(true);
-    expect(readFileSync(EXCEPTIONS_PIN, "utf8")).toContain("ZERO_PRIMITIVE_28");
+    // Issue #3146 restructures the pin, same 44 files covered: the
+    // chat file moves from the zero-primitive list to its own Fluent
+    // experiment list, so the list name drops 28 -> 27.
+    const pin = readFileSync(EXCEPTIONS_PIN, "utf8");
+    expect(pin).toContain("ZERO_PRIMITIVE_27");
+    expect(pin).toContain("FLUENT_EXPERIMENT_3146");
   });
 
   it("a new raw-control file is flagged, a nested one too, primitives and mentions are not", () => {

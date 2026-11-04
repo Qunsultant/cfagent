@@ -16,6 +16,12 @@
  */
 
 import { STAGE_NAMES, type StageName } from "../messaging/messagingPorts";
+import {
+  OPTIONS_SCREEN_PHASES,
+  PAYMENT_STEP_IDS,
+  SAGA_STEP_IDS,
+  TRADE_APPROVAL_STEP_IDS,
+} from "./stageRuntimeIds";
 import type { StageRetryBucket } from "./stageRunnerPorts";
 
 /** The families the programme covers. */
@@ -193,18 +199,28 @@ const OPTIONS_SCREENER: WorkflowDeclaration = {
   labelKey: "workflow.options-screener",
   label: "Options screener",
   stageSeam: false,
-  runtimeSteps: [],
-  runtimeMappingGap:
-    "options stages run inside ScreenerAgent.runScreen; no stage-message ids are declared for them yet (#3072).",
+  runtimeSteps: OPTIONS_SCREEN_PHASES,
   runnable: true,
   runPath: "?tab=options-screener",
   stages: [
-    stage("feed", { persists: "options-chains", publishes: null, consumes: null }),
-    stage("gather", { persists: "enrichment", publishes: null, consumes: "options-chains" }),
-    stage("analysis", { persists: "strategy-candidates", publishes: null, consumes: "enrichment" }),
-    stage("store", { persists: "per-format-artifacts", publishes: null, consumes: "strategy-candidates" }),
-    stage("serve", { persists: "served-report", publishes: null, consumes: "per-format-artifacts" }),
-    stage("deliver", { persists: "delivery-state", publishes: null, consumes: "served-report" }),
+    stage("feed", {
+      persists: "options-chains",
+      publishes: null,
+      consumes: null,
+      runtimeStageIds: ["provider-screen"],
+    }),
+    stage("store", {
+      persists: "per-format-artifacts",
+      publishes: null,
+      consumes: "options-chains",
+      runtimeStageIds: ["report-pipeline"],
+    }),
+    stage("deliver", {
+      persists: "delivery-state",
+      publishes: null,
+      consumes: "per-format-artifacts",
+      runtimeStageIds: ["deliver"],
+    }),
   ],
 };
 
@@ -215,19 +231,24 @@ const TRADING_LEG: WorkflowDeclaration = {
   labelKey: "workflow.trading-leg",
   label: "Trading leg",
   stageSeam: false,
-  runtimeSteps: ["approval", "execute", "fill", "reconcile"],
-  runtimeMappingGap:
-    "trading legs execute through TradingTradeWorkflow; their step ids are not declared as stage-message topics yet (#3073).",
+  runtimeSteps: TRADE_APPROVAL_STEP_IDS,
   runnable: false,
   runPath: null,
   stages: [
     stage("feed", { persists: "quote-snapshot", publishes: null, consumes: null }),
-    stage("analysis", { persists: "preview", publishes: null, consumes: "quote-snapshot" }),
+    stage("analysis", {
+      persists: "approval-decision",
+      publishes: null,
+      consumes: "quote-snapshot",
+      requiresApproval: true,
+      runtimeStageIds: ["await-approval"],
+    }),
     stage("store", {
       persists: "order-draft",
       publishes: null,
-      consumes: "preview",
+      consumes: "approval-decision",
       requiresApproval: true,
+      runtimeStageIds: ["settle-trade"],
     }),
     stage("deliver", { persists: "fill-state", publishes: null, consumes: "order-draft" }),
   ],
@@ -249,18 +270,34 @@ const PAYMENT_RUN: WorkflowDeclaration = {
     "record-native-ledger",
     "record-usage",
   ],
-  runtimeMappingGap:
-    "payment stages are workflow steps (paymentWorkflowFlow); no stage-message ids are declared for them yet (#3073).",
+
   runnable: false,
   runPath: null,
   stages: [
-    stage("analysis", { persists: "gate-decision", publishes: null, consumes: null }),
-    stage("store", { persists: "payment-record", publishes: null, consumes: "gate-decision" }),
+    stage("analysis", {
+      persists: "gate-decision",
+      publishes: null,
+      consumes: null,
+      runtimeStageIds: ["gate-check", "record-coverage-required", "consume-coverage"],
+    }),
+    stage("store", {
+      persists: "payment-record",
+      publishes: null,
+      consumes: "gate-decision",
+      runtimeStageIds: [
+        "record-checkout",
+        "record-approval",
+        "record-expiry",
+        "record-rejection",
+        "record-payment",
+      ],
+    }),
     stage("deliver", {
       persists: "checkout-state",
       publishes: null,
       consumes: "payment-record",
       requiresApproval: true,
+      runtimeStageIds: ["confirm-paid", "record-native-ledger", "record-usage", "issue-failure-credit", "start-screener"],
     }),
   ],
 };
@@ -279,8 +316,7 @@ const SAGA_RUN: WorkflowDeclaration = {
     "record-audit-screen-completed",
     "compensate-failed-screen",
   ],
-  runtimeMappingGap:
-    "saga legs are workflow steps with polling (sagaWorkflowFlow); their stage ids are not declared as stage-message topics yet (#3073).",
+
   runnable: false,
   runPath: null,
   stages: [
@@ -289,10 +325,20 @@ const SAGA_RUN: WorkflowDeclaration = {
       publishes: null,
       consumes: null,
       requiresApproval: true,
+      runtimeStageIds: ["record-audit-saga-started", "start-payment-leg", "record-audit-payment-started"],
     }),
-    stage("analysis", { persists: "screen-leg", publishes: null, consumes: "payment-leg" }),
-    stage("store", { persists: "journey-record", publishes: null, consumes: "screen-leg" }),
-    stage("deliver", { persists: "compensation-state", publishes: null, consumes: "journey-record" }),
+    stage("analysis", {
+      persists: "screen-leg",
+      publishes: null,
+      consumes: "payment-leg",
+      runtimeStageIds: ["record-audit-screen-completed"],
+    }),
+    stage("deliver", {
+      persists: "compensation-state",
+      publishes: null,
+      consumes: "screen-leg",
+      runtimeStageIds: ["compensate-failed-screen"],
+    }),
   ],
 };
 

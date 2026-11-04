@@ -11,12 +11,30 @@ import type { AdItem, User } from "./types";
 import { MarkdownContent } from "./MarkdownContent";
 import { ReasoningView } from "./ReasoningView";
 import { ToolResultView } from "./ToolResultView";
-import { Badge } from "../components/ui/Badge";
-import { Button } from "../components/ui/Button";
-import { Notice } from "../components/ui/Notice";
-import { TextInput } from "../components/ui/TextInput";
-import { useToast } from "../components/ui/Toast";
-import { Modal } from "../components/ui/Modal";
+// Fluent v9 replaces our primitives on this page only (#3146 experiment).
+// Measured gaps vs our primitives: no danger button (secondary used),
+// no tone system (chips collapse to subtle), no strip/box Notice variant.
+import {
+  Badge,
+  Button,
+  Dialog,
+  DialogActions,
+  DialogBody,
+  DialogContent,
+  DialogSurface,
+  DialogTitle,
+  FluentProvider,
+  Input,
+  MessageBar,
+  MessageBarBody,
+  Spinner,
+  Toast,
+  Toaster,
+  ToastTitle,
+  useToastController,
+  webDarkTheme,
+  webLightTheme,
+} from "@fluentui/react-components";
 export type ChatSubView = "general" | "options";
 
 export function isValidChatSubView(view: unknown): view is ChatSubView {
@@ -39,7 +57,7 @@ interface AgentChatTabContentProps {
   showSponsorSpotlight?: boolean;
 }
 
-export function AgentChatTabContent({
+export function AgentChatTabContentInner({
   user,
   ads,
   onAdClick,
@@ -56,7 +74,7 @@ export function AgentChatTabContent({
 }: AgentChatTabContentProps) {
   const [input, setInput] = useState("");
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
-  const toast = useToast();
+  const { dispatchToast } = useToastController();
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const { activeTab: activeView, handleTabChange: handleViewChange } = useUrlSyncedTabs<ChatSubView>({
@@ -211,33 +229,39 @@ export function AgentChatTabContent({
               <span>Queries generate structured strategy cards with multi-leg execution plans, Greeks, and interactive payoff visualizers.</span>
             </div>
           </div>
-          <Badge size="xs" uppercase tone="accent">Structured Outputs</Badge>
+          <Badge size="extra-small" style={{ textTransform: "uppercase" }} color="brand" appearance="tint">Structured Outputs</Badge>
         </div>
       )}
-      <Modal
+      <Dialog
         open={clearConfirmOpen}
-        onClose={() => setClearConfirmOpen(false)}
-        title="Clear conversation history?"
-        footer={
-          <>
-            <Button
-              type="button"
-              variant="danger"
-              onClick={() => {
-                setClearConfirmOpen(false);
-                onResetSession(true);
-              }}
-            >
-              Clear history
-            </Button>{" "}
-            <Button type="button" variant="secondary" onClick={() => setClearConfirmOpen(false)}>
-              Cancel
-            </Button>
-          </>
-        }
+        onOpenChange={(_e, data) => {
+          if (!data.open) setClearConfirmOpen(false);
+        }}
       >
-        <p>Clear this conversation history? This cannot be undone.</p>
-      </Modal>
+        <DialogSurface>
+          <DialogBody>
+            <DialogTitle>Clear conversation history?</DialogTitle>
+            <DialogContent>
+              <p>Clear this conversation history? This cannot be undone.</p>
+            </DialogContent>
+            <DialogActions>
+              <Button
+                type="button"
+                appearance="secondary"
+                onClick={() => {
+                  setClearConfirmOpen(false);
+                  onResetSession(true);
+                }}
+              >
+                Clear history
+              </Button>
+              <Button type="button" appearance="secondary" onClick={() => setClearConfirmOpen(false)}>
+                Cancel
+              </Button>
+            </DialogActions>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
       {/* Top Sponsor Spotlight Bar (Configurable via Settings) */}
       {showSponsorSpotlight && ads.length > 0 && (
         <div
@@ -258,6 +282,7 @@ export function AgentChatTabContent({
           </div>
           <div className="sponsor-actions">
             <Button
+              appearance="primary"
               className="sponsor-cta-btn"
               style={{ background: ads[0].accentColor }}
               onClick={() => onAdClick(ads[0])}
@@ -265,8 +290,8 @@ export function AgentChatTabContent({
               {ads[0].ctaText}
             </Button>
             <Button
-              variant="secondary"
-              size="sm"
+              appearance="secondary"
+              size="small"
               onClick={onOpenAdsTab}
               title="View all partner offers"
             >
@@ -281,26 +306,28 @@ export function AgentChatTabContent({
         <span className="chat-subtitle">Stateful Distributed Ledger Session</span>
         {messages.length > 0 && (
           <Button
-            variant="ghost"
-            size="sm"
+            appearance="subtle"
+            size="small"
             onClick={handleClearWithConfirm}
             disabled={isResetting}
             title="Clear conversation and reset session"
-           loading={isResetting}>
-            {"🗑️ Clear chat"}
+          >
+{isResetting ? (<><Spinner size="tiny" />{"🗑️ Clear chat"}</>) : ("🗑️ Clear chat")}
           </Button>
         )}
       </div>
 
       {resetNotice && (
-        <Notice tone="success" variant="strip" icon={authExpired ? "🔒" : "✅"}>
-          <span className="notice-text">{resetNotice}</span>
-          {authExpired && (
-            <a href="/login" className="notice-link-btn">
-              Log In Again ➔
-            </a>
-          )}
-        </Notice>
+        <MessageBar intent="success">
+          <MessageBarBody>
+            <span className="notice-text">{resetNotice}</span>
+            {authExpired && (
+              <a href="/login" className="notice-link-btn">
+                Log In Again ➔
+              </a>
+            )}
+          </MessageBarBody>
+        </MessageBar>
       )}
 
       {/* Messages Stream */}
@@ -315,54 +342,48 @@ export function AgentChatTabContent({
               </p>
               <div className="quick-chips">
                 <Button
-                  variant="primary"
-                  tone="subtle"
-                  size="sm"
+                  appearance="subtle"
+                  size="small"
                   disabled={isBusy || isResetting}
                   onClick={() => handleChipClick("Screen for Bull Put credit spreads with max loss <= $30 and max profit > 0", "Options Strategy Guide")}
                 >
                   🎯 Bull Put Spread (&le; $30 Max Loss)
                 </Button>
                 <Button
-                  variant="primary"
-                  tone="subtle"
-                  size="sm"
+                  appearance="subtle"
+                  size="small"
                   disabled={isBusy || isResetting}
                   onClick={() => handleChipClick("Find delta-neutral Iron Condors on SPY with 30-45 DTE and probability of profit > 70%", "Options Strategy Guide")}
                 >
                   🦅 SPY Iron Condor (High POP)
                 </Button>
                 <Button
-                  variant="secondary"
-                  tone="subtle"
-                  size="sm"
+                  appearance="subtle"
+                  size="small"
                   disabled={isBusy || isResetting}
                   onClick={() => handleChipClick("Find covered call setups on AAPL targeting 15-20 delta with 30 DTE", "Options Strategy Guide")}
                 >
                   📈 AAPL Covered Call (Income)
                 </Button>
                 <Button
-                  variant="secondary"
-                  tone="subtle"
-                  size="sm"
+                  appearance="subtle"
+                  size="small"
                   disabled={isBusy || isResetting}
                   onClick={() => handleChipClick("Show recent aggressive institutional options sweeps and unusual volume alerts", "Options Flow Guide")}
                 >
                   🌊 Unusual Options Flow Sweeps
                 </Button>
                 <Button
-                  variant="secondary"
-                  tone="subtle"
-                  size="sm"
+                  appearance="subtle"
+                  size="small"
                   disabled={isBusy || isResetting}
                   onClick={() => handleChipClick("Evaluate straddle pricing, implied move, and volatility skew for upcoming earnings on NVDA", "Options Strategy Guide")}
                 >
                   ⚡ NVDA Straddle / Volatility
                 </Button>
                 <Button
-                  variant="secondary"
-                  tone="subtle"
-                  size="sm"
+                  appearance="subtle"
+                  size="small"
                   disabled={isBusy || isResetting}
                   onClick={() => handleChipClick("Calculate a delta-neutral portfolio hedge using index put options", "Trading Safety Guide")}
                 >
@@ -379,81 +400,72 @@ export function AgentChatTabContent({
             </p>
             <div className="quick-chips">
               <Button
-                variant="primary"
-                tone="subtle"
-                size="sm"
+                appearance="subtle"
+                size="small"
                 disabled={isBusy || isResetting}
                 onClick={() => handleChipClick("What are the capabilities of this platform and how do I use the 8 core workflows?", "Platform Capabilities")}
               >
                 ⚡ What can this platform do?
               </Button>
               <Button
-                variant="primary"
-                tone="subtle"
-                size="sm"
+                appearance="subtle"
+                size="small"
                 disabled={isBusy || isResetting}
                 onClick={() => handleChipClick("How do I use the Stock Screener to find oversold tech stocks with RSI < 35?", "Stock Screener Guide")}
               >
                 📈 How do I screen stocks?
               </Button>
               <Button
-                variant="primary"
-                tone="subtle"
-                size="sm"
+                appearance="subtle"
+                size="small"
                 disabled={isBusy || isResetting}
                 onClick={() => handleChipClick("How do I screen for options strategies with max profit > 0 and max loss <= $30?", "Options Strategy Guide")}
               >
                 🎯 Options: Max Profit &amp; Loss &le; $30
               </Button>
               <Button
-                variant="secondary"
-                tone="subtle"
-                size="sm"
+                appearance="subtle"
+                size="small"
                 disabled={isBusy || isResetting}
                 onClick={() => handleChipClick("Explain how the PickBestTrades algorithm evaluates and scores setups.", "PickBestTrades Engine")}
               >
                 🧠 How does PickBestTrades work?
               </Button>
               <Button
-                variant="secondary"
-                tone="subtle"
-                size="sm"
+                appearance="subtle"
+                size="small"
                 disabled={isBusy || isResetting}
                 onClick={() => handleChipClick("How does Human-in-the-Loop (HITL) order execution and DID attestation work?", "Trading Safety Guide")}
               >
                 🛡️ How does HITL order execution work?
               </Button>
               <Button
-                variant="secondary"
-                tone="subtle"
-                size="sm"
+                appearance="subtle"
+                size="small"
                 disabled={isBusy || isResetting}
                 onClick={() => handleChipClick("How does the real-time Options Flow tracker identify institutional sweeps and sentiment?", "Options Flow Guide")}
               >
                 🌊 How do options flow alerts work?
               </Button>
               <Button
-                variant="secondary"
-                tone="subtle"
-                size="sm"
+                appearance="subtle"
+                size="small"
                 disabled={isBusy || isResetting}
                 onClick={() => handleChipClick("Perform market-data equity research on NVDA using yfinance and Alpaca", "Equity Research")}
               >
                 🔬 Research NVDA (Market Data)
               </Button>
               <Button
-                variant="secondary"
-                tone="subtle"
-                size="sm"
+                appearance="subtle"
+                size="small"
                 disabled={isBusy || isResetting}
                 onClick={() => handleChipClick("Draft a high-priority task: Complete SOC2 compliance review by next Monday", "Task Management")}
               >
                 📋 Draft High-Priority Task
               </Button>
               <Button
-                variant="secondary"
-                tone="subtle"
-                size="sm"
+                appearance="subtle"
+                size="small"
                 disabled={isBusy || isResetting}
                 onClick={() => handleChipClick("Remember that our enterprise team prefers TypeScript and dark-mode designs", "Memory Management")}
               >
@@ -556,14 +568,14 @@ export function AgentChatTabContent({
 
       {/* Aspect-Oriented Error Diagnostic Card with Code, Cause & Actionable Resolution Playbook */}
       {errorAspect && (
-        <Notice tone="danger" variant="box" className="chat-error-diagnostic-card">
-          <div className="chat-error-card-header">
-            <span className="error-badge-icon">⚠️</span>
-            <div className="error-title-group">
+        <MessageBar intent="error" className="chat-error-diagnostic-card">
+          <MessageBarBody>
+            <div className="chat-error-card-header">
+              <div className="error-title-group">
               <div className="error-badge-row">
-                <Badge size="xs" tone="danger">{errorAspect.code}</Badge>
+                <Badge size="extra-small" color="danger" appearance="filled">{errorAspect.code}</Badge>
                 {errorAspect.isAiQuota && (
-                  <Badge size="xs" uppercase tone="warning">Daily Free Quota Limit</Badge>
+                  <Badge size="extra-small" style={{ textTransform: "uppercase" }} color="warning" appearance="tint">Daily Free Quota Limit</Badge>
                 )}
               </div>
               <strong className="error-headline">{errorAspect.title}</strong>
@@ -586,7 +598,7 @@ export function AgentChatTabContent({
           <div className="error-card-actions">
             {errorAspect.suggestedTab && onNavigateTab && (
               <Button
-                variant="primary"
+                appearance="primary"
                 onClick={() => onNavigateTab(errorAspect.suggestedTab as any)}
                 title={`Navigate directly to ${errorAspect.suggestedTabLabel || errorAspect.suggestedTab}`}
               >
@@ -594,8 +606,7 @@ export function AgentChatTabContent({
               </Button>
             )}
             <Button
-              variant="secondary"
-              tone="subtle"
+              appearance="subtle"
               disabled={isResetting}
               onClick={() => {
                 if (typeof (agent as any).reconnect === "function") {
@@ -612,29 +623,33 @@ export function AgentChatTabContent({
               🔄 Reconnect
             </Button>
             <Button
-              variant="danger"
-              tone="subtle"
+              appearance="secondary"
               disabled={isResetting}
               onClick={() => handleClearWithConfirm()}
               title="Reset conversation state and clear history"
-             loading={isResetting}>
-              {"Reset & Clear History"}
+            >
+{isResetting ? (<><Spinner size="tiny" />{"Reset & Clear History"}</>) : ("Reset & Clear History")}
             </Button>
             <Button
               className="error-action-btn copy"
-              variant="secondary"
-              tone="subtle"
+              appearance="subtle"
               onClick={() => {
                 const info = `Error Code: ${errorAspect.code}\nTitle: ${errorAspect.title}\nDetails: ${errorAspect.message}\nRemediation:\n${errorAspect.resolutionSteps.map((s, i) => `${i + 1}. ${s}`).join("\n")}`;
                 navigator.clipboard.writeText(info);
-                toast.success("Diagnostic error information copied to clipboard.");
+                dispatchToast(
+                  <Toast>
+                    <ToastTitle>Diagnostic error information copied to clipboard.</ToastTitle>
+                  </Toast>,
+                  { intent: "success" },
+                );
               }}
               title="Copy error code and diagnostic information"
             >
               📋 Copy Diagnostics
             </Button>
-          </div>
-        </Notice>
+            </div>
+          </MessageBarBody>
+        </MessageBar>
       )}
 
 
@@ -656,9 +671,8 @@ export function AgentChatTabContent({
           💡 Guides:
         </span>
         <Button
-          variant="accent"
-          tone="subtle"
-          size="sm"
+          appearance="subtle"
+          size="small"
           disabled={isBusy || isResetting}
           onClick={() => handleChipClick("What are the capabilities of this platform and how do I use the 8 core workflows?", "Platform Capabilities")}
           title="Overview of all 8 platform workflows"
@@ -666,9 +680,8 @@ export function AgentChatTabContent({
           ⚡ Platform Capabilities
         </Button>
         <Button
-          variant="primary"
-          tone="subtle"
-          size="sm"
+          appearance="subtle"
+          size="small"
           disabled={isBusy || isResetting}
           onClick={() => handleChipClick("How do I use the Stock Screener to find equities and what fallback logic does it use?", "Stock Screener Guide")}
           title="Stock screener steps & fallback logic"
@@ -676,9 +689,8 @@ export function AgentChatTabContent({
           📈 Stock Screener
         </Button>
         <Button
-          variant="accent"
-          tone="subtle"
-          size="sm"
+          appearance="subtle"
+          size="small"
           disabled={isBusy || isResetting}
           onClick={() => handleChipClick("How do I screen for options strategies with max profit > 0 and max loss <= $30?", "Options Strategy Guide")}
           title="Screen options with budget risk limits"
@@ -686,9 +698,8 @@ export function AgentChatTabContent({
           🎯 Options: Max Profit & Loss
         </Button>
         <Button
-          variant="warning"
-          tone="subtle"
-          size="sm"
+          appearance="subtle"
+          size="small"
           disabled={isBusy || isResetting}
           onClick={() => handleChipClick("Explain how the PickBestTrades algorithm evaluates and scores setups.", "PickBestTrades Engine")}
           title="Multivariate opportunity scoring"
@@ -696,9 +707,8 @@ export function AgentChatTabContent({
           🧠 PickBestTrades Logic
         </Button>
         <Button
-          variant="danger"
-          tone="subtle"
-          size="sm"
+          appearance="secondary"
+          size="small"
           disabled={isBusy || isResetting}
           onClick={() => handleChipClick("How does Human-in-the-Loop (HITL) order execution and DID attestation work?", "Trading Safety Guide")}
           title="Safe trading with DID attestations"
@@ -706,9 +716,8 @@ export function AgentChatTabContent({
           🛡️ HITL Trading Guardrails
         </Button>
         <Button
-          variant="accent"
-          tone="subtle"
-          size="sm"
+          appearance="subtle"
+          size="small"
           disabled={isBusy || isResetting}
           onClick={() => handleChipClick("How does the real-time Options Flow tracker identify institutional sweeps and sentiment?", "Options Flow Guide")}
           title="Smart money sweeps and sentiment"
@@ -719,11 +728,11 @@ export function AgentChatTabContent({
 
       {/* Chat Input Bar */}
       <form className="chat-input-bar" onSubmit={handleSendChat}>
-        <TextInput
+        <Input
           type="text"
           aria-label="Ask the agent"
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(_e, data) => setInput(data.value)}
           placeholder={
             isResetting
               ? "Resetting session…"
@@ -738,12 +747,34 @@ export function AgentChatTabContent({
         />
         <Button
           type="submit"
-          variant="primary"
+          appearance="primary"
           disabled={!input.trim() || isBusy || isResetting}
-         loading={isBusy}>
-          {"Send ➔"}
+        >
+{isBusy ? (<><Spinner size="tiny" />{"Send ➔"}</>) : ("Send ➔")}
         </Button>
       </form>
     </div>
+  );
+}
+
+function readFluentTheme() {
+  if (typeof document === "undefined") return webLightTheme;
+  return document.documentElement.getAttribute("data-theme") === "dark"
+    ? webDarkTheme
+    : webLightTheme;
+}
+
+export function AgentChatTabContent(props: AgentChatTabContentProps) {
+  const [fluentTheme, setFluentTheme] = useState(readFluentTheme);
+  useEffect(() => {
+    const update = () => setFluentTheme(readFluentTheme());
+    window.addEventListener("theme-changed", update);
+    return () => window.removeEventListener("theme-changed", update);
+  }, []);
+  return (
+    <FluentProvider theme={fluentTheme}>
+      <Toaster />
+      <AgentChatTabContentInner {...props} />
+    </FluentProvider>
   );
 }

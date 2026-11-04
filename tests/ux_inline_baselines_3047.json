@@ -25,7 +25,7 @@
   "src/client/TradingApprovalsQueue.tsx": 17,
   "src/client/WorkflowRunsPanel.tsx": 1,
   "src/client/WorkflowsHub.tsx": 70,
-  "src/client/chat/AgentChatTabContent.tsx": 7,
+  "src/client/chat/AgentChatTabContent.tsx": 9,
   "src/client/chat/MarkdownContent.tsx": 3,
   "src/client/chat/OptionsStrategyCard.tsx": 3,
   "src/client/chat/tabs/AdsTab.tsx": 3,
