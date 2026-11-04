@@ -289,6 +289,12 @@
  *
  * LANDMARK RULE (#405): all position assertions anchor to DELEGATION
  * CALLS - the only landmarks a thin router has.
+ *
+ * Issue #2220 added two — GET /api/admin/platform-users/me and GET
+ * /api/admin/platform-users/lookup (in handlePlatformUsersRoutes,
+ * delegated immediately after the agentic-payments delegation, before
+ * premium) — bringing the delegation sequence to 38 calls and the
+ * pinned inventory to 354 entries (measured: 352 + 2).
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -315,6 +321,7 @@ const HANDLER_FILE: Record<string, string> = {
   "handlePaymentsRoutes": "payments.ts",
   "handlePaymentAssuranceLiveRoutes": "paymentAssuranceLive.ts",
   "handleAgenticPaymentsRoutes": "agenticPayments.ts",
+  "handlePlatformUsersRoutes": "platformUsers.ts",
   "handlePremiumRoutes": "premium.ts",
   "handleEtradeBrokerRoutes": "etradeBroker.ts",
   "handleBrokerGateRoutes": "brokerGate.ts",
@@ -356,6 +363,7 @@ const EXPECTED_DELEGATIONS = [
   "handlePaymentsRoutes",
   "handlePaymentAssuranceLiveRoutes",
   "handleAgenticPaymentsRoutes",
+  "handlePlatformUsersRoutes",
   "handlePremiumRoutes",
   "handleBrokerGateRoutes",
   "handleEtradeBrokerRoutes",
@@ -522,6 +530,8 @@ const EXPECTED_INVENTORY = [
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/lifecycle/digest/send\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/lifecycle/digest/run-due\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/lifecycle/unsubscribe\")",
+  "handlePlatformUsersRoutes :: endsWith(\"/admin/platform-users/me\")",
+  "handlePlatformUsersRoutes :: endsWith(\"/admin/platform-users/lookup\")",
   "handlePremiumRoutes :: includes(\"/premium/options-scan\")",
   "handlePremiumRoutes :: includes(\"/premium/market-research\")",
   "handlePremiumRoutes :: includes(\"/premium/stock-signals\")",

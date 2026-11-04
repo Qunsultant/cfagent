@@ -16,10 +16,12 @@
  *  - SYNC + workflow-child + regeneration runs only:
  *    every path that goes through ScreenerAgent
  *    .generateRunPdf (persistRun, regenerateLatestReport
- *    #1278). The chain generate leg (generateTabular)
- *    and the tabular XLSX/CSV legs stay in the one
- *    generation module — the consumer is PDF-only by
- *    contract (its generate is runReportPipeline).
+ *    #1278). The chain tabular legs went through the
+ *    tabular-aware consumer (stageTabularConsumer,
+ *    slice 3); the monolithic tabular XLSX/CSV legs stay
+ *    in the one generation module — this helper's
+ *    consumer is PDF-only by contract (its generate is
+ *    runReportPipeline).
  *  - NOT queue transport: the message is built and
  *    consumed in-process here. Publishing analysis-done
  *    to Queues/mas_async_jobs and consuming it from a

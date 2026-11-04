@@ -22,11 +22,12 @@
  *   - "ALL" records that goal legs are not universe-scoped
  *     (the registry provider screens its listings feed).
  *     It is not a coverage claim.
- *   - It is NOT an execution reroute: goal execution stays
- *     in goalDrivenScreen + goal dispatch. The broker
- *     returns null for goal specs (it never starts a
- *     screener workflow for them), and goal delivery stays
- *     goal-owned. The planner mapping below is the
+ *   - It is NOT an execution reroute today: goal execution
+ *     stays in goalDrivenScreen + goal dispatch, and goal
+ *     delivery stays goal-owned, until the migration
+ *     follow-up. The broker guard is retired (#2991): a goal
+ *     spec with async requested routes like any spec,
+ *     carrying goal provenance. The planner mapping below is the
  *     canonical coordinates of the leg (sector precedence,
  *     universe ALL, planner-default provider as the
  *     would-apply default — NOT the leg's actual provider,
@@ -72,7 +73,7 @@ export function goalStockSpecFromPlan(
   };
 }
 
-/** True when a spec is a goal stock-leg spec. The broker guard keys on this. */
+/** True when a spec is a goal stock-leg spec. The planner keys on this (goal vs REST planning branch). */
 export function isGoalStockSpec(spec: StockScreenRunSpec): boolean {
   return spec.source === "goal";
 }

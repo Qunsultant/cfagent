@@ -22,9 +22,9 @@ const CATEGORIES = ["Execution", "Intelligence", "Playbooks", "Platform", "Billi
 const BADGE_TYPES = ["pro", "live", "ai", "mcp", "new", "neutral"];
 
 describe("nav-config.json shape (issue #2977)", () => {
-  it("routes: 42 ids, sorted ascending, unique", () => {
+  it("routes: 43 ids, sorted ascending, unique", () => {
     const ids = (navData.routes as { id: string }[]).map((r) => r.id);
-    expect(ids).toHaveLength(42);
+    expect(ids).toHaveLength(43);
     expect([...ids].sort()).toEqual(ids);
     expect(new Set(ids).size).toBe(ids.length);
   });
@@ -72,10 +72,10 @@ describe("nav-config.json shape (issue #2977)", () => {
     for (const id of navData.hostedIds as string[]) expect(ids.has(id)).toBe(true);
   });
 
-  it("deepLinks: 32 overrides, every tab target is a route", () => {
+  it("deepLinks: 34 overrides, every tab target is a route", () => {
     const ids = new Set((navData.routes as { id: string }[]).map((r) => r.id));
     const entries = Object.entries(navData.deepLinks as Record<string, { tab?: string }>);
-    expect(entries).toHaveLength(32);
+    expect(entries).toHaveLength(34);
     for (const [, link] of entries) {
       if (link.tab) expect(ids.has(link.tab)).toBe(true);
     }
@@ -96,14 +96,14 @@ describe("nav-config.json shape (issue #2977)", () => {
     }
   });
 
-  it("platformAdminSections: one section, 9 items, unique ids", () => {
+  it("platformAdminSections: one section, 10 items, unique ids", () => {
     const sections = navData.platformAdminSections as {
       id: string;
       items: { id: string; label: string; description: string }[];
     }[];
     expect(sections).toHaveLength(1);
-    expect(sections[0].items).toHaveLength(9);
-    expect(new Set(sections[0].items.map((i) => i.id)).size).toBe(9);
+    expect(sections[0].items).toHaveLength(10);
+    expect(new Set(sections[0].items.map((i) => i.id)).size).toBe(10);
     for (const item of sections[0].items) {
       expect(item.label).toBeTruthy();
       expect(item.description).toBeTruthy();
@@ -113,8 +113,8 @@ describe("nav-config.json shape (issue #2977)", () => {
 
 describe("nav-config.json loaders (issue #2977)", () => {
   it("loaders re-export the data file unchanged", () => {
-    expect(ROUTES).toHaveLength(42);
-    expect(Object.keys(DEEP_LINK_OVERRIDES)).toHaveLength(32);
+    expect(ROUTES).toHaveLength(43);
+    expect(Object.keys(DEEP_LINK_OVERRIDES)).toHaveLength(34);
     expect(SURFACE_TAB_DEFS).toHaveLength(14);
     // 5 metadata sections + sandbox menu-only section.
     const built = buildDefaultLeftNavConfig().sections;

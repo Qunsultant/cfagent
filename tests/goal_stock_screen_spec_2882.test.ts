@@ -77,8 +77,15 @@ describe("goal stock leg translation #2882", () => {
     );
   });
 
-  it("broker guard: a goal spec never starts a screener workflow, even async", async () => {
-    const starter = vi.fn();
+  it("broker guard RETIRED (#2991): a goal spec routes like any spec when async", async () => {
+    // The #2882 guard (source "goal" -> null) is retired by #2991:
+    // goal dispatch becomes a caller of the one pipeline, so a goal
+    // spec with async requested starts a workflow and carries its
+    // goal provenance (specTrigger "goal") through the command.
+    // No live caller passed goal specs to the broker before this
+    // change, so no live route changes behavior today; the guard
+    // removal enables the goal-dispatch migration follow-up.
+    const starter = vi.fn().mockResolvedValue({ workflowId: "wf-1" });
     const spec = goalStockSpecFromPlan(PLAN);
     const result = await startStockScreenWorkflowOrNull({
       env: {} as never,
@@ -86,8 +93,12 @@ describe("goal stock leg translation #2882", () => {
       userLogin: "alice",
       starter: starter as never,
     });
-    expect(result).toBeNull();
-    expect(starter).not.toHaveBeenCalled();
+    expect(result).not.toBeNull();
+    expect(starter).toHaveBeenCalledTimes(1);
+    const command = starter.mock.calls[0][1] as Record<string, unknown>;
+    expect(command.specTrigger).toBe("goal");
+    expect(command.filters).toEqual(PLAN.stockFilter);
+    expect(result!.shards.length).toBeGreaterThan(0);
   });
 
   it("filter is copied, never aliased: mutating the spec filter leaves the plan intact", () => {

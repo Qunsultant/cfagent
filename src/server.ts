@@ -59,7 +59,7 @@ import {
   validateAndTouchWiredSession,
 } from "./security/iaaaEnforcement";
 import { isPlatformServiceProvisioned } from "./security/serviceDispatch";
-import { requiresStepUpForMint } from "./security/iaaaGates";
+import { requiresStepUpForAction, requiresStepUpForMint } from "./security/iaaaGates";
 import { createWiredAuditStore } from "./security/iaaaAuditStore";
 import {
   createKvMembershipStore,
@@ -784,6 +784,13 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
         });
       }
       if (path === "/api/privacy/export") {
+        // #3102 (#945 Q4): sensitive export requires fresh
+        // authentication inside the 10-minute window. Wiring OFF
+        // keeps legacy behavior; a null session is left to the
+        // export handler's own gate (401).
+        if (session && requiresStepUpForAction(session, "sensitive-export", isWiringEnabled(env), Date.now())) {
+          return Response.json({ error: "Step-up authentication required: please sign in again and retry." }, { status: 403 });
+        }
         return handlePrivacyExportRoute({
           session,
           method: request.method,
@@ -3355,6 +3362,15 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
               alreadyGranted: true,
             });
           }
+          // #3102 (#945 Q4): a real grant (past the idempotent
+          // no-op check above) requires fresh authentication
+          // inside the 5-minute privileged-role-assignment window.
+          // This gate is tighter than the #1751 obligation default
+          // (15 min), so the tighter window governs; wiring OFF
+          // keeps legacy behavior.
+          if (requiresStepUpForAction(session, "privileged-role-assignment", isWiringEnabled(env), nowMs)) {
+            return Response.json({ error: "Step-up authentication required: please sign in again and retry." }, { status: 403 });
+          }
           const evaluated = await evaluateWithObligations(membershipStore, {
             internalUserId: session.internalUserId,
             tenantId: validated.tenantId,
@@ -4400,6 +4416,14 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
           if (path === "/api/iaaa/bootstrap-proposals/approve") {
             const proposal = await loadBootstrapProposal();
             if (!proposal) return Response.json({ error: "Proposal not found." }, { status: 404 });
+            // #3102 (#945 Q4): approving a bootstrap proposal
+            // authorizes a platform-admin grant, so it is
+            // privileged role assignment (5-minute window). The
+            // decision itself is unchanged; only stale sessions
+            // are refused before it is written.
+            if (requiresStepUpForAction(session, "privileged-role-assignment", isWiringEnabled(env), nowMs)) {
+              return Response.json({ error: "Step-up authentication required: please sign in again and retry." }, { status: 403 });
+            }
             const exceptionReason =
               typeof bootBody?.exceptionReason === "string" ? bootBody.exceptionReason : undefined;
             const approved = approveBootstrapProposal(proposal, {
@@ -4531,6 +4555,14 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
               }
             }
             return Response.json({ ok: true, membership: covering, alreadyProvisioned: true });
+          }
+          // #3102 (#945 Q4): a real grant (past the idempotent
+          // no-op check above) requires fresh authentication
+          // inside the 5-minute privileged-role-assignment window,
+          // tighter than the #1751 obligation default (15 min).
+          // Wiring OFF keeps legacy behavior.
+          if (requiresStepUpForAction(session, "privileged-role-assignment", isWiringEnabled(env), nowMs)) {
+            return Response.json({ error: "Step-up authentication required: please sign in again and retry." }, { status: 403 });
           }
           for (const raw of bindings) {
             const binding = raw as { role?: unknown; scope?: unknown; workspaceId?: unknown };
