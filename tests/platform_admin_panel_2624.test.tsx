@@ -77,7 +77,7 @@ function panel(over: Partial<React.ComponentProps<typeof PlatformAdminPanel>> = 
 }
 
 describe("platform admin config (#2624)", () => {
-  it("lists the ten extracted items in dropdown order", () => {
+  it("lists the eleven extracted items in dropdown order", () => {
     const items = platformAdminItems();
     expect(items.map((item) => item.id)).toEqual([
       "ads",
@@ -86,6 +86,7 @@ describe("platform admin config (#2624)", () => {
       "jobs",
       "provenance",
       "api-keys",
+      "tenants",
       "data-providers",
       "iaaa-admin",
       "users",
@@ -115,17 +116,17 @@ describe("platform admin config (#2624)", () => {
 describe("platform admin in the left navigation (#2624)", () => {
   const adminSection = DEFAULT_LEFT_NAV_CONFIG.sections.find((section) => section.id === "section-platform");
 
-  it("is a left-nav item with its own ten-item sub-menu", () => {
+  it("is a left-nav item with its own eleven-item sub-menu", () => {
     expect(adminSection).toBeTruthy();
     expect(adminSection!.title).toBe("PLATFORM");
     const item = adminSection!.items.find((i) => i.id === "platform-admin")!;
     expect(item).toBeTruthy();
     expect(item.id).toBe("platform-admin");
     expect(item.label).toBe("Platform Admin");
-    expect(item.subItems).toHaveLength(10);
+    expect(item.subItems).toHaveLength(11);
     expect(item.subItems![0].id).toBe("platform-admin:ads");
-    expect(item.subItems![8].id).toBe("platform-admin:users");
-    expect(item.subItems![9].id).toBe("platform-admin:admin-access");
+    expect(item.subItems![9].id).toBe("platform-admin:users");
+    expect(item.subItems![10].id).toBe("platform-admin:admin-access");
   });
 
   it("maps sub-item ids to drawer sections, and nothing else", () => {
@@ -152,9 +153,9 @@ describe("platform admin panel (#2624)", () => {
     expect(container.querySelector(".platform-admin-title")?.textContent).toBe("Platform Admin");
 
     const menuItems = container.querySelectorAll(".platform-admin-menu-item");
-    expect(menuItems).toHaveLength(10);
+    expect(menuItems).toHaveLength(11);
     expect(menuItems[0].textContent).toContain("Ads & Partner Banners");
-    expect(menuItems[9].textContent).toContain("Request admin access");
+    expect(menuItems[10].textContent).toContain("Request admin access");
   });
 
   it("opens at the section the nav asked for", async () => {
