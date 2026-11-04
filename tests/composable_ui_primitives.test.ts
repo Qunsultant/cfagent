@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import React from "react";
-import { SegmentedControl, PillGroup, Badge, Button, Spinner, EmptyState, Card, Notice, Tabs, TabPanel, TextInput, Select, FileInput, Modal, Table, Skeleton, Checkbox, PageShell, PageSection, ToastProvider, useToast, Menu, Popover, Drawer, SkipLink } from "../src/client/components/ui";
+import { SegmentedControl, PillGroup, Badge, Button, Spinner, EmptyState, Card, Notice, Tabs, TabPanel, TextInput, Select, FileInput, Modal, Table, Skeleton, Checkbox, PageShell, PageSection, ToastProvider, useToast, Menu, Popover, Drawer, SkipLink, Stack, Flex, Grid } from "../src/client/components/ui";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -451,5 +451,31 @@ describe("SkipLink (#2673 slice 6)", () => {
   it("is the keyboard entry to main content", () => {
     const element = React.createElement(SkipLink);
     expect(element.type).toBe(SkipLink);
+  });
+});
+
+describe("Layout primitives (#3048)", () => {
+  it("Stack is a flex column with a token-scale gap", () => {
+    const element = React.createElement(Stack, { gap: "5" }, "a", "b");
+    expect(element.type).toBe(Stack);
+    expect(element.props.gap).toBe("5");
+  });
+
+  it("Flex is a flex row with wrap and inline modes", () => {
+    const element = React.createElement(Flex, { gap: "2", wrap: true }, "a");
+    expect(element.type).toBe(Flex);
+    expect(element.props.wrap).toBe(true);
+    const inline = React.createElement(Flex, { as: "span", inline: true, gap: "1-5" }, "a");
+    expect(inline.props.as).toBe("span");
+    expect(inline.props.inline).toBe(true);
+  });
+
+  it("Grid takes a column count or an auto-fit preset", () => {
+    const element = React.createElement(Grid, { columns: 3, gap: "3" }, "a");
+    expect(element.type).toBe(Grid);
+    expect(element.props.columns).toBe(3);
+    const auto = React.createElement(Grid, { autoFit: true, minColumnWidth: "lg", gap: "5" }, "a");
+    expect(auto.props.autoFit).toBe(true);
+    expect(auto.props.minColumnWidth).toBe("lg");
   });
 });

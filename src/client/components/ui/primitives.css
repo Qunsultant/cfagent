@@ -1060,3 +1060,54 @@ div.ui-drawer-title {
   padding: var(--space-4);
   flex: 1;
 }
+
+/* ---------- Layout primitives (#3048) ---------- */
+.ui-stack { display: flex; flex-direction: column; }
+.ui-flex { display: flex; }
+.ui-flex.inline { display: inline-flex; }
+.ui-flex.wrap { flex-wrap: wrap; }
+.ui-grid { display: grid; }
+
+/* Gap scale (tokens.css spacing scale), shared across all three. */
+.ui-stack.gap-0, .ui-flex.gap-0, .ui-grid.gap-0 { gap: var(--space-0); }
+.ui-stack.gap-0-5, .ui-flex.gap-0-5, .ui-grid.gap-0-5 { gap: var(--space-0-5); }
+.ui-stack.gap-1, .ui-flex.gap-1, .ui-grid.gap-1 { gap: var(--space-1); }
+.ui-stack.gap-1-5, .ui-flex.gap-1-5, .ui-grid.gap-1-5 { gap: var(--space-1-5); }
+.ui-stack.gap-2, .ui-flex.gap-2, .ui-grid.gap-2 { gap: var(--space-2); }
+.ui-stack.gap-2-5, .ui-flex.gap-2-5, .ui-grid.gap-2-5 { gap: var(--space-2-5); }
+.ui-stack.gap-3, .ui-flex.gap-3, .ui-grid.gap-3 { gap: var(--space-3); }
+.ui-stack.gap-4, .ui-flex.gap-4, .ui-grid.gap-4 { gap: var(--space-4); }
+.ui-stack.gap-5, .ui-flex.gap-5, .ui-grid.gap-5 { gap: var(--space-5); }
+.ui-stack.gap-6, .ui-flex.gap-6, .ui-grid.gap-6 { gap: var(--space-6); }
+.ui-stack.gap-8, .ui-flex.gap-8, .ui-grid.gap-8 { gap: var(--space-8); }
+.ui-stack.gap-10, .ui-flex.gap-10, .ui-grid.gap-10 { gap: var(--space-10); }
+.ui-stack.gap-12, .ui-flex.gap-12, .ui-grid.gap-12 { gap: var(--space-12); }
+.ui-stack.gap-16, .ui-flex.gap-16, .ui-grid.gap-16 { gap: var(--space-16); }
+
+/* Cross-axis alignment (Stack + Flex). */
+.ui-stack.align-start, .ui-flex.align-start { align-items: flex-start; }
+.ui-stack.align-center, .ui-flex.align-center { align-items: center; }
+.ui-stack.align-end, .ui-flex.align-end { align-items: flex-end; }
+.ui-stack.align-stretch, .ui-flex.align-stretch { align-items: stretch; }
+
+/* Main-axis distribution (Stack + Flex). */
+.ui-stack.justify-start, .ui-flex.justify-start { justify-content: flex-start; }
+.ui-stack.justify-center, .ui-flex.justify-center { justify-content: center; }
+.ui-stack.justify-end, .ui-flex.justify-end { justify-content: flex-end; }
+.ui-stack.justify-between, .ui-flex.justify-between { justify-content: space-between; }
+.ui-stack.justify-around, .ui-flex.justify-around { justify-content: space-around; }
+
+/* Fixed column counts. */
+.ui-grid.cols-1 { grid-template-columns: repeat(1, 1fr); }
+.ui-grid.cols-2 { grid-template-columns: repeat(2, 1fr); }
+.ui-grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
+.ui-grid.cols-4 { grid-template-columns: repeat(4, 1fr); }
+.ui-grid.cols-5 { grid-template-columns: repeat(5, 1fr); }
+.ui-grid.cols-6 { grid-template-columns: repeat(6, 1fr); }
+
+/* Auto-fit floors (component-internal layout constants, see layout.ts). */
+.ui-grid.autofit-xs { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+.ui-grid.autofit-sm { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+.ui-grid.autofit-md { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+.ui-grid.autofit-lg { grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); }
+.ui-grid.autofit-xl { grid-template-columns: repeat(auto-fit, minmax(480px, 1fr)); }
