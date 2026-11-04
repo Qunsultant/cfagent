@@ -111,6 +111,7 @@ const OPTIONS_CONDITIONS_BASELINE = [
   'endsWith("/trading/options/best-trade")',
   'endsWith("/best-trade")',
   'endsWith("/trading/options/screen")',
+  'endsWith("/trading/options/regenerate")',
   'endsWith("/trading/options/unified")',
   'endsWith("/trading/options/config")',
   'endsWith("/options/strategy-reviews")',

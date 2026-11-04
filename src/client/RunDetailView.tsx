@@ -91,6 +91,16 @@ export interface RunDetailViewProps {
    * Absent when the caller cannot name the canonical row.
    */
   replayRunId?: string;
+  /**
+   * Issue #2603: the stored options run id, when this run is an options
+   * run the caller can name. When present, "Regenerate this run" re-runs
+   * the SAME request from the stored record as a NEW run — the original
+   * row is never overwritten — and a refused regenerate names what the
+   * stored record is missing.
+   */
+  regenerateRunId?: string;
+  /** Fired after a successful regenerate so the parent refreshes its list. */
+  onRegenerated?: () => void;
 }
 
 function outcomeOf(run: RunDetailRun): { label: string; tone: "success" | "warning" | "danger" } {
@@ -127,12 +137,51 @@ function confirmationLabel(status: string): string {
   return status;
 }
 
-export function RunDetailView({ run, confirmations, confirmationsLoading, chrome = "card", replayRunId }: RunDetailViewProps) {
+export function RunDetailView({
+  run,
+  confirmations,
+  confirmationsLoading,
+  chrome = "card",
+  replayRunId,
+  regenerateRunId,
+  onRegenerated,
+}: RunDetailViewProps) {
   const outcome = outcomeOf(run);
   const pdfUrl = run.reportUrl || (run.pdfKey ? `/api/screener/report.pdf?key=${encodeURIComponent(run.pdfKey)}` : null);
   const xlsxUrl = run.xlsxKey ? `/api/screener/report.xlsx?key=${encodeURIComponent(run.xlsxKey)}` : null;
   const csvUrl = run.csvKey ? `/api/screener/report.csv?key=${encodeURIComponent(run.csvKey)}` : null;
   const [replayLoading, setReplayLoading] = useState(false);
+  const [regenerateLoading, setRegenerateLoading] = useState(false);
+  const [regenerateError, setRegenerateError] = useState<string | null>(null);
+  const [regenerateDone, setRegenerateDone] = useState(false);
+  const onRegenerate = async () => {
+    if (!regenerateRunId || regenerateLoading) return;
+    setRegenerateLoading(true);
+    setRegenerateError(null);
+    setRegenerateDone(false);
+    try {
+      const res = await fetch("/api/trading/options/regenerate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ reportId: regenerateRunId }),
+      });
+      const data = (await res.json().catch(() => null)) as { error?: unknown } | null;
+      if (!res.ok) {
+        setRegenerateError(
+          typeof data?.error === "string" && data.error
+            ? data.error
+            : "Regenerate failed. No new run was recorded.",
+        );
+        return;
+      }
+      setRegenerateDone(true);
+      onRegenerated?.();
+    } catch {
+      setRegenerateError("Regenerate failed. No new run was recorded.");
+    } finally {
+      setRegenerateLoading(false);
+    }
+  };
   const [replay, setReplay] = useState<ReplayResponse | null>(null);
   const onReplay = async () => {
     if (!replayRunId || replayLoading) return;
@@ -269,6 +318,29 @@ export function RunDetailView({ run, confirmations, confirmationsLoading, chrome
           </div>
         </div>
       </section>
+
+      {regenerateRunId && (
+        <section aria-label="Regenerate">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => void onRegenerate()}
+            loading={regenerateLoading}
+          >
+            Regenerate this run
+          </Button>
+          {regenerateError && (
+            <Notice tone="danger" density="compact">
+              {regenerateError}
+            </Notice>
+          )}
+          {regenerateDone && (
+            <Notice tone="success" density="compact">
+              Regenerated as a new run. The original run is unchanged.
+            </Notice>
+          )}
+        </section>
+      )}
 
       {replayRunId && (
         <section aria-label="Replay" style={{ margin: "1rem 0" }}>
