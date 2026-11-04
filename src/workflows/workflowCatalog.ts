@@ -56,11 +56,17 @@ export interface StageDeclaration {
   /** What the stage persists before announcing (an artifact kind, never bulk data). */
   persists: string;
   /**
-   * The stage-message id this stage publishes (the #2869 seam). Non-null only
+   * The stage-message ids this stage publishes (the #2869 seam). One entry per
+   * runtime id that emits a boundary, so a stage with five steps publishes
+   * five topics - the old single-topic field under-declared every such stage,
+   * stock's feed included. A stage of a seam-wired family must publish exactly
+   * its own runtime ids; an unwired family publishes nothing.
+   *
+   * Was: the stage-message id this stage publishes (the #2869 seam). Non-null only
    * where the family actually wires the seam; for an unwired family this is
    * null and the page says so, instead of naming a topic nobody emits.
    */
-  publishes: string | null;
+  publishes: readonly string[];
   /** The previous stage's seam topic, or null where the seam is unwired. */
   consumesStageMessage: string | null;
   /**
@@ -183,12 +189,12 @@ const STOCK_SCREENER: WorkflowDeclaration = {
   runnable: true,
   runPath: "?tab=stock-hub&view=new-screen",
   stages: [
-    stage("feed", { persists: "quotes", publishes: "fetchQuotes", consumes: null, runtimeStageIds: ["plan", "brokerStart", "acquireUniverse", "fetchQuotes"] }),
-    stage("gather", { persists: "enrichment", publishes: "enrich", consumes: "quotes", runtimeStageIds: ["enrich", "computeIndicatorsAndScores"] }),
-    stage("analysis", { persists: "screen-result", publishes: "detectStandouts", consumes: "enrichment", runtimeStageIds: ["applyFilters", "rankAndGrade", "detectStandouts"] }),
-    stage("store", { persists: "canonical-report", publishes: "analysis-done", consumes: "screen-result", runtimeStageIds: ["persistCanonicalResults", "analysis-done"] }),
-    stage("serve", { persists: "served-report", publishes: "shapeReport", consumes: "canonical-report", runtimeStageIds: ["shapeReport"] }),
-    stage("deliver", { persists: "delivery-state", publishes: "deliver", consumes: "served-report", runtimeStageIds: ["deliver"] }),
+    stage("feed", { persists: "quotes", publishes: ["plan", "brokerStart", "acquireUniverse", "fetchQuotes"], consumes: null, runtimeStageIds: ["plan", "brokerStart", "acquireUniverse", "fetchQuotes"] }),
+    stage("gather", { persists: "enrichment", publishes: ["enrich", "computeIndicatorsAndScores"], consumes: "quotes", runtimeStageIds: ["enrich", "computeIndicatorsAndScores"] }),
+    stage("analysis", { persists: "screen-result", publishes: ["applyFilters", "rankAndGrade", "detectStandouts"], consumes: "enrichment", runtimeStageIds: ["applyFilters", "rankAndGrade", "detectStandouts"] }),
+    stage("store", { persists: "canonical-report", publishes: ["persistCanonicalResults", "analysis-done"], consumes: "screen-result", runtimeStageIds: ["persistCanonicalResults", "analysis-done"] }),
+    stage("serve", { persists: "served-report", publishes: ["shapeReport"], consumes: "canonical-report", runtimeStageIds: ["shapeReport"] }),
+    stage("deliver", { persists: "delivery-state", publishes: ["deliver"], consumes: "served-report", runtimeStageIds: ["deliver"] }),
   ],
 };
 
@@ -198,26 +204,26 @@ const OPTIONS_SCREENER: WorkflowDeclaration = {
   family: "options",
   labelKey: "workflow.options-screener",
   label: "Options screener",
-  stageSeam: false,
+  stageSeam: true,
   runtimeSteps: OPTIONS_SCREEN_PHASES,
   runnable: true,
   runPath: "?tab=options-screener",
   stages: [
     stage("feed", {
       persists: "options-chains",
-      publishes: null,
+      publishes: ["provider-screen"],
       consumes: null,
       runtimeStageIds: ["provider-screen"],
     }),
     stage("store", {
       persists: "per-format-artifacts",
-      publishes: null,
+      publishes: ["report-pipeline"],
       consumes: "options-chains",
       runtimeStageIds: ["report-pipeline"],
     }),
     stage("deliver", {
       persists: "delivery-state",
-      publishes: null,
+      publishes: ["deliver"],
       consumes: "per-format-artifacts",
       runtimeStageIds: ["deliver"],
     }),
@@ -230,27 +236,27 @@ const TRADING_LEG: WorkflowDeclaration = {
   family: "trading",
   labelKey: "workflow.trading-leg",
   label: "Trading leg",
-  stageSeam: false,
+  stageSeam: true,
   runtimeSteps: TRADE_APPROVAL_STEP_IDS,
   runnable: false,
   runPath: null,
   stages: [
-    stage("feed", { persists: "quote-snapshot", publishes: null, consumes: null }),
+    // Two stages, because the flow has two: no feed and no separate delivery
+    // stage exist in TradingTradeWorkflow (#3191 removed the invented four).
     stage("analysis", {
       persists: "approval-decision",
-      publishes: null,
-      consumes: "quote-snapshot",
+      publishes: ["await-approval"],
+      consumes: null,
       requiresApproval: true,
       runtimeStageIds: ["await-approval"],
     }),
     stage("store", {
-      persists: "order-draft",
-      publishes: null,
+      persists: "settlement",
+      publishes: ["settle-trade"],
       consumes: "approval-decision",
       requiresApproval: true,
       runtimeStageIds: ["settle-trade"],
     }),
-    stage("deliver", { persists: "fill-state", publishes: null, consumes: "order-draft" }),
   ],
 };
 
@@ -260,7 +266,7 @@ const PAYMENT_RUN: WorkflowDeclaration = {
   family: "payment",
   labelKey: "workflow.payment-run",
   label: "Payment run",
-  stageSeam: false,
+  stageSeam: true,
   runtimeSteps: [
     "gate-check",
     "record-checkout",
@@ -276,13 +282,19 @@ const PAYMENT_RUN: WorkflowDeclaration = {
   stages: [
     stage("analysis", {
       persists: "gate-decision",
-      publishes: null,
+      publishes: ["gate-check", "record-coverage-required", "consume-coverage"],
       consumes: null,
       runtimeStageIds: ["gate-check", "record-coverage-required", "consume-coverage"],
     }),
     stage("store", {
       persists: "payment-record",
-      publishes: null,
+      publishes: [
+        "record-checkout",
+        "record-approval",
+        "record-expiry",
+        "record-rejection",
+        "record-payment",
+      ],
       consumes: "gate-decision",
       runtimeStageIds: [
         "record-checkout",
@@ -294,7 +306,7 @@ const PAYMENT_RUN: WorkflowDeclaration = {
     }),
     stage("deliver", {
       persists: "checkout-state",
-      publishes: null,
+      publishes: ["confirm-paid", "record-native-ledger", "record-usage", "issue-failure-credit", "start-screener"],
       consumes: "payment-record",
       requiresApproval: true,
       runtimeStageIds: ["confirm-paid", "record-native-ledger", "record-usage", "issue-failure-credit", "start-screener"],
@@ -308,7 +320,7 @@ const SAGA_RUN: WorkflowDeclaration = {
   family: "saga",
   labelKey: "workflow.saga-run",
   label: "Goal saga",
-  stageSeam: false,
+  stageSeam: true,
   runtimeSteps: [
     "record-audit-saga-started",
     "start-payment-leg",
@@ -322,20 +334,20 @@ const SAGA_RUN: WorkflowDeclaration = {
   stages: [
     stage("feed", {
       persists: "payment-leg",
-      publishes: null,
+      publishes: ["record-audit-saga-started", "start-payment-leg", "record-audit-payment-started"],
       consumes: null,
       requiresApproval: true,
       runtimeStageIds: ["record-audit-saga-started", "start-payment-leg", "record-audit-payment-started"],
     }),
     stage("analysis", {
       persists: "screen-leg",
-      publishes: null,
+      publishes: ["record-audit-screen-completed"],
       consumes: "payment-leg",
       runtimeStageIds: ["record-audit-screen-completed"],
     }),
     stage("deliver", {
       persists: "compensation-state",
-      publishes: null,
+      publishes: ["compensate-failed-screen"],
       consumes: "screen-leg",
       runtimeStageIds: ["compensate-failed-screen"],
     }),
@@ -355,10 +367,10 @@ const GOAL_SCREEN: WorkflowDeclaration = {
   runnable: false,
   runPath: null,
   stages: [
-    stage("feed", { persists: "goal-universe", publishes: null, consumes: null }),
-    stage("analysis", { persists: "goal-matches", publishes: null, consumes: "goal-universe" }),
-    stage("store", { persists: "goal-report", publishes: null, consumes: "goal-matches" }),
-    stage("deliver", { persists: "goal-outcome", publishes: null, consumes: "goal-report" }),
+    stage("feed", { persists: "goal-universe", publishes: [], consumes: null }),
+    stage("analysis", { persists: "goal-matches", publishes: [], consumes: "goal-universe" }),
+    stage("store", { persists: "goal-report", publishes: [], consumes: "goal-matches" }),
+    stage("deliver", { persists: "goal-outcome", publishes: [], consumes: "goal-report" }),
   ],
 };
 
@@ -375,9 +387,9 @@ const STRATEGY_DISCOVERY: WorkflowDeclaration = {
   runnable: true,
   runPath: "?tab=options-screener",
   stages: [
-    stage("analysis", { persists: "ranked-strategies", publishes: null, consumes: null }),
-    stage("store", { persists: "canonical-run-record", publishes: null, consumes: "ranked-strategies" }),
-    stage("deliver", { persists: "delivery-state", publishes: null, consumes: "canonical-run-record" }),
+    stage("analysis", { persists: "ranked-strategies", publishes: [], consumes: null }),
+    stage("store", { persists: "canonical-run-record", publishes: [], consumes: "ranked-strategies" }),
+    stage("deliver", { persists: "delivery-state", publishes: [], consumes: "canonical-run-record" }),
   ],
 };
 
@@ -420,15 +432,25 @@ export function assertWorkflowCatalog(
     }
     seen.add(workflow.id);
     for (const stageDeclaration of workflow.stages) {
-      const hasTopic = stageDeclaration.publishes !== null;
-      if (workflow.stageSeam && !hasTopic) {
+      const topics = stageDeclaration.publishes;
+      if (workflow.stageSeam) {
+        // Issue #3072/#3073: a wired stage publishes one boundary per runtime
+        // step it executes - not a summary of them. Anything else is a claim
+        // about messages nobody sends.
+        const stagesIds = stageDeclaration.runtimeStageIds ?? [];
+        if (topics.length === 0) {
+          throw new Error(
+            `Workflow catalog refused: ${workflow.id}/${stageDeclaration.stage} is in a seam-wired workflow but publishes nothing.`,
+          );
+        }
+        if (topics.join("|") !== stagesIds.join("|")) {
+          throw new Error(
+            `Workflow catalog refused: ${workflow.id}/${stageDeclaration.stage} publishes [${topics.join(", ")}] but executes [${stagesIds.join(", ")}]; a seam-wired stage publishes exactly its runtime steps.`,
+          );
+        }
+      } else if (topics.length > 0) {
         throw new Error(
-          `Workflow catalog refused: ${workflow.id}/${stageDeclaration.stage} is in a seam-wired workflow but names no published topic.`,
-        );
-      }
-      if (!workflow.stageSeam && hasTopic) {
-        throw new Error(
-          `Workflow catalog refused: ${workflow.id}/${stageDeclaration.stage} names a topic for a family whose seam is not wired.`,
+          `Workflow catalog refused: ${workflow.id}/${stageDeclaration.stage} publishes topics for a family whose seam is not wired.`,
         );
       }
     }
