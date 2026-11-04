@@ -759,12 +759,16 @@ export async function handleScreenerResearchRoutes(
                 if (screeningFlags.isScreeningChannelsEnabled(readScreeningSetting)) {
                   try {
                     const { deliverScreeningContent, createScreeningDeliverySenders } = await import("../../services/screeningDelivery");
+                    const { resolveTenantChannelGate } = await import("../../services/tenantChannelGate");
                     const channels: Array<"slack" | "email" | "webhook"> = ["slack", "webhook"];
                     const emailTo = researchConfig?.autoEmail && researchConfig?.emailTo ? researchConfig.emailTo : undefined;
                     if (emailTo) channels.push("email");
                     const text =
                       `Goal/scenario discovery (scheduled): ${(out as Record<string, unknown>).discoveryPersisted ?? 0} new proposed goal(s) are waiting in the dashboard for review. ` +
                       `Proposals never activate or trade on their own.`;
+                    // Issue #3169: the tenant channel gate, resolved
+                    // best-effort (null = ungated, prior behavior).
+                    const channelGate = await resolveTenantChannelGate(ctx.env, userLogin);
                     await deliverScreeningContent({
                       channels,
                       subject: "Screening discovery: new proposed goals",
@@ -776,6 +780,7 @@ export async function handleScreenerResearchRoutes(
                       sql: orm,
                       userLogin,
                       actor: "scheduled-tick",
+                      ...(channelGate ? { channelGate } : {}),
                     });
                     steps.delivery = true;
                   } catch (err) {

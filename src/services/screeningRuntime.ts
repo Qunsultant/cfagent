@@ -86,6 +86,7 @@ import {
   type ScreeningChannel,
   type ScreeningChannelResult,
 } from "./screeningDelivery";
+import { resolveTenantChannelGate } from "./tenantChannelGate";
 import { recordScreeningActivity } from "./screeningActivity";
 import type { DatabaseORM } from "../orm";
 
@@ -407,6 +408,9 @@ export async function executeGoalScreenRun(input: {
   let delivery: ScreeningChannelResult[] | undefined;
   if (input.deliver && input.deliver.length > 0) {
     const formatted = formatGoalScreenDelivery(result);
+    // Issue #3169: the tenant channel gate, resolved best-effort
+    // (null = ungated, prior behavior — see tenantChannelGate).
+    const channelGate = await resolveTenantChannelGate(input.env, input.userLogin);
     delivery = await deliverScreeningContent({
       channels: input.deliver,
       subject: formatted.subject,
@@ -424,6 +428,7 @@ export async function executeGoalScreenRun(input: {
       sql: input.orm as any,
       userLogin: input.userLogin,
       actor: input.actor,
+      ...(channelGate ? { channelGate } : {}),
     });
   }
   return {

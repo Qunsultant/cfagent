@@ -443,7 +443,7 @@ describe("issue #2428 — registry spine + migration pins", () => {
     }
   });
 
-  it("migration 0023 is registered and creates the hop table (0038 is last since #2989, after #2945 Phase 2.17)", async () => {
+  it("migration 0023 is registered and creates the hop table (0039 is last since #3169, after #2989)", async () => {
     const {
       ALL_MIGRATIONS,
       MIGRATION_0023_AGENT_MESH_TRACE_HOPS,
@@ -461,6 +461,7 @@ describe("issue #2428 — registry spine + migration pins", () => {
       MIGRATION_0036_REFUND_POLICY_APPROVAL,
       MIGRATION_0037_CFPAY_CHANNEL,
       MIGRATION_0038_AGENT_SHARD_JOBS_WORKFLOW_RUN_ID,
+      MIGRATION_0039_TENANT_CHANNELS,
     } = await import(
       "../src/data/migrationRunner"
     );
@@ -498,8 +499,10 @@ describe("issue #2428 — registry spine + migration pins", () => {
     expect(ALL_MIGRATIONS).toContain(
       MIGRATION_0038_AGENT_SHARD_JOBS_WORKFLOW_RUN_ID,
     );
+    // #3169 appends migration 0039 (tenant channels) after 0038.
+    expect(ALL_MIGRATIONS).toContain(MIGRATION_0039_TENANT_CHANNELS);
     expect(ALL_MIGRATIONS[ALL_MIGRATIONS.length - 1]).toBe(
-      MIGRATION_0038_AGENT_SHARD_JOBS_WORKFLOW_RUN_ID,
+      MIGRATION_0039_TENANT_CHANNELS,
     );
     expect(MIGRATION_0023_AGENT_MESH_TRACE_HOPS.version).toBe(23);
     expect(MIGRATION_0023_AGENT_MESH_TRACE_HOPS.sql).toContain("agent_mesh_trace_hops");
