@@ -38,6 +38,16 @@
  *    GET/HEAD traces hide, and only behind the visible toggle.
  */
 
+import {
+  bindingScheduleRows,
+  isDelayedRun,
+  lifecycleStateForRun,
+  scheduleProvenanceForJobs,
+  scheduleProvenanceForTrigger,
+  type WorkflowLifecycleState,
+  type WorkflowRunSchedule,
+} from "./workflowLifecycle";
+
 export type WorkflowRunTrigger = "manual" | "scheduled" | "autonomous" | "webhook" | "agent" | "unknown";
 
 export type WorkflowRunStatus =
@@ -102,12 +112,30 @@ export interface WorkflowRun {
   workflow: string;
   family: WorkflowRunFamily;
   title: string;
-  source: "job-chain" | "job-outcome" | "report";
+  source: "job-chain" | "job-outcome" | "report" | "schedule";
   trigger: WorkflowRunTrigger;
   /** How the trigger was evidenced, e.g. "Scheduled (job-tree)" or "Not recorded by the source". */
   triggerDetail: string;
   triggeredBy: string | null;
   status: WorkflowRunStatus;
+  /**
+   * Issue #3021: the run's lifecycle state — exactly one of
+   * scheduled / in-progress / done / cancelled — rolled up from the
+   * recorded status (and, for delayed runs, from not_before). The
+   * raw status stays on the row; the lifecycle is the filterable,
+   * sortable rollup, never a replacement for the recorded verb.
+   * Optional so older cached responses still type-check; builders
+   * always set it.
+   */
+  lifecycle?: WorkflowLifecycleState;
+  /**
+   * Issue #3021: the run's schedule provenance — mechanism +
+   * identity + reason + next firing + delay. Null when the run
+   * carries no scheduling evidence (an untriggered run's schedule
+   * is unknown, never guessed). Builders always set it (possibly
+   * null); schedule rows always carry it.
+   */
+  schedule?: WorkflowRunSchedule | null;
   startedAt: string;
   finishedAt: string | null;
   durationMs: number | null;
@@ -915,6 +943,7 @@ export function runFromJobs(
   jobs: WorkflowRunJobRow[],
   transitions: WorkflowRunStageTransition[],
   outcome?: WorkflowRunOutcomeRow,
+  nowMs: number = Date.now(),
 ): WorkflowRun {
   const main = mainJobOf(jobs);
   const family = workflowFamilyForJobs(jobs, outcome);
@@ -987,6 +1016,14 @@ export function runFromJobs(
     triggerDetail,
     triggeredBy: outcomeTrigger?.triggeredBy ?? triggerEvidenceForRun.actor ?? null,
     status: runStatus,
+    // Issue #3021: lifecycle + schedule provenance. A chain with no
+    // started stage and a not-yet-due job is scheduled, not
+    // in-progress — the status verb alone cannot say that, because
+    // "queued" covers both due and delayed work.
+    lifecycle: isDelayedRun(jobs, nowMs)
+      ? "scheduled"
+      : lifecycleStateForRun({ status: runStatus, stages }),
+    schedule: scheduleProvenanceForJobs(jobs, trigger, nowMs),
     startedAt,
     finishedAt,
     durationMs: durationBetween(startedAt, finishedAt),
@@ -1144,6 +1181,10 @@ export function runFromOutcome(
     triggerDetail: unified?.triggerDetail ?? trigger.detail,
     triggeredBy: trigger.triggeredBy,
     status,
+    // Issue #3021: lifecycle from the recorded verb; schedule from
+    // the trigger alone (an outcome carries no schedule identity).
+    lifecycle: lifecycleStateForRun({ status, stages }),
+    schedule: scheduleProvenanceForTrigger(trigger.trigger),
     startedAt: outcome.createdAt,
     finishedAt: outcome.createdAt,
     durationMs: null,
@@ -1237,6 +1278,10 @@ export function runFromReportDocument(input: {
           : "Not recorded by the source",
     triggeredBy: null,
     status: reportStatus(input.status),
+    // Issue #3021: lifecycle from the recorded verb; schedule from
+    // the trigger alone (a canonical row carries no schedule id).
+    lifecycle: lifecycleStateForRun({ status: reportStatus(input.status), stages }),
+    schedule: scheduleProvenanceForTrigger(trigger),
     startedAt: input.createdAt,
     finishedAt: input.createdAt,
     durationMs: null,
@@ -1403,6 +1448,10 @@ export function runFromSagaChain(input: SagaChainRunInput): WorkflowRun | null {
     triggerDetail: "Not recorded by the source",
     triggeredBy: input.triggeredBy,
     status,
+    // Issue #3021: lifecycle from the recorded verb; a saga chain
+    // carries no schedule evidence, so its schedule is unknown.
+    lifecycle: lifecycleStateForRun({ status, stages }),
+    schedule: scheduleProvenanceForTrigger("unknown"),
     startedAt,
     finishedAt,
     durationMs: durationBetween(startedAt, finishedAt),
@@ -1428,7 +1477,7 @@ export function runFromSagaChain(input: SagaChainRunInput): WorkflowRun | null {
 }
 
 /** Group, attach outcomes, and merge — newest first, uncapped. The caller slices. */
-function collectWorkflowRuns(input: BuildWorkflowRunsInput, includeTraces: boolean): WorkflowRun[] {
+function collectWorkflowRuns(input: BuildWorkflowRunsInput, includeTraces: boolean, nowMs: number = Date.now()): WorkflowRun[] {
   const jobs = includeTraces ? [...input.jobs] : input.jobs.filter((job) => !isStandaloneRequestTrace(job));
   const groups = new Map<string, RunGroup>();
   for (const job of jobs) {
@@ -1457,7 +1506,7 @@ function collectWorkflowRuns(input: BuildWorkflowRunsInput, includeTraces: boole
   for (const [key, group] of groups) {
     const jobIds = new Set(group.jobs.map((j) => j.job_id));
     const outcome = input.outcomes.find((o) => outcomeMatchesGroup(o.id, jobIds));
-    runs.push(runFromJobs(group.jobs, transitionsByRun.get(key) ?? [], outcome));
+    runs.push(runFromJobs(group.jobs, transitionsByRun.get(key) ?? [], outcome, nowMs));
   }
 
   for (const outcome of input.outcomes) {
@@ -1494,6 +1543,8 @@ export function summarizeWorkflowRuns(runs: WorkflowRun[]): {
   partial: number;
   failed: number;
   active: number;
+  /** Issue #3021: runs in the scheduled lifecycle state (schedule rows + delayed runs). */
+  scheduled: number;
   byTrigger: Record<WorkflowRunTrigger, number>;
 } {
   const byTrigger: Record<WorkflowRunTrigger, number> = {
@@ -1508,29 +1559,44 @@ export function summarizeWorkflowRuns(runs: WorkflowRun[]): {
   let partial = 0;
   let failed = 0;
   let active = 0;
+  let scheduled = 0;
   for (const run of runs) {
     byTrigger[run.trigger] += 1;
+    // Issue #3021: a schedule row is not an in-flight run — it counts
+    // as scheduled, never as active, even though its status verb is
+    // "queued". A delayed queue run is likewise scheduled, not active.
+    const lifecycle = run.lifecycle ?? lifecycleStateForRun(run);
+    if (lifecycle === "scheduled") {
+      scheduled += 1;
+      continue;
+    }
     if (run.status === "completed") completed += 1;
     else if (run.status === "partial") partial += 1;
     else if (run.status === "failed") failed += 1;
     else if (run.status === "running" || run.status === "queued" || run.status === "awaiting") active += 1;
   }
-  return { total: runs.length, completed, partial, failed, active, byTrigger };
+  return { total: runs.length, completed, partial, failed, active, scheduled, byTrigger };
 }
 
 /**
- * Server-side run filtering (#2786 Part 2, scope e): trigger/status/
- * search apply BEFORE paging, so a match past the page limit stays
- * reachable. Mirrors the panel's client-side semantics (status
- * "active" = running|queued|awaiting; search over title, run id,
- * workflow, trigger detail, error, and stage fields).
+ * Server-side run filtering (#2786 Part 2, scope e; #3021 lifecycle +
+ * schedule): trigger/status/search/lifecycle/schedule apply BEFORE
+ * paging, so a match past the page limit stays reachable. Mirrors the
+ * panel's client-side semantics (status "active" =
+ * running|queued|awaiting; search over title, run id, workflow,
+ * trigger detail, error, and stage fields). Lifecycle and schedule
+ * filter on the computed rollup/provenance, never the raw verb alone:
+ * a delayed queued run matches lifecycle "scheduled" even though its
+ * status verb is "queued".
  */
 export function filterWorkflowRuns(
   runs: WorkflowRun[],
-  filters: { trigger?: string; status?: string; search?: string; reportsOnly?: boolean },
+  filters: { trigger?: string; status?: string; search?: string; reportsOnly?: boolean; lifecycle?: string; schedule?: string },
 ): WorkflowRun[] {
   const trigger = filters.trigger && filters.trigger !== "all" ? filters.trigger : null;
   const status = filters.status && filters.status !== "all" ? filters.status : null;
+  const lifecycle = filters.lifecycle && filters.lifecycle !== "all" ? filters.lifecycle : null;
+  const schedule = filters.schedule && filters.schedule !== "all" ? filters.schedule : null;
   const needle = filters.search?.trim().toLowerCase() || "";
   return runs.filter((run) => {
     if (filters.reportsOnly && !hasReportDocuments(run)) return false;
@@ -1542,6 +1608,8 @@ export function filterWorkflowRuns(
         return false;
       }
     }
+    if (lifecycle && (run.lifecycle ?? lifecycleStateForRun(run)) !== lifecycle) return false;
+    if (schedule && (run.schedule?.mechanism ?? "unknown") !== schedule) return false;
     if (needle) {
       const hay = [
         run.title,
@@ -1565,6 +1633,12 @@ export interface WorkflowRunsPageOptions {
   trigger?: string;
   status?: string;
   search?: string;
+  /** Issue #3021: lifecycle-state filter (scheduled / in-progress / done / cancelled). */
+  lifecycle?: string;
+  /** Issue #3021: schedule-mechanism filter (cron-trigger / queue / agent-scheduler / workflow-binding / manual / unknown). */
+  schedule?: string;
+  /** Clock for delayed-run evaluation (not_before vs now); defaults to Date.now(). */
+  nowMs?: number;
   /** Page start over the filtered, newest-first list. Clamped 0..10000. */
   offset?: number;
   /**
@@ -1604,8 +1678,15 @@ export function buildWorkflowRunsPage(
   input: BuildWorkflowRunsInput & WorkflowRunsPageOptions,
 ): { runs: WorkflowRun[]; hiddenTraceCount: number; totalMatched: number } {
   const includeTraces = input.includeTraces === true;
-  const all = collectWorkflowRuns(input, includeTraces);
+  const nowMs = input.nowMs ?? Date.now();
+  const all = collectWorkflowRuns(input, includeTraces, nowMs);
   if (input.extraRuns) all.push(...input.extraRuns);
+  // Issue #3021: registered binding schedules join as scheduled
+  // rows BEFORE filter/slice, so the lifecycle and schedule filters
+  // see them exactly like any other run. Their startedAt is empty
+  // (a configured schedule has no start time), so they sort after
+  // timed runs and are reached via the filters.
+  all.push(...bindingScheduleRows());
   // Issue #2786 Part 3: attach Docs columns to their runs (first
   // newest row wins per key), then mint report-only runs for
   // canonical rows with no job/outcome twin. A run id already
@@ -1645,7 +1726,7 @@ export function buildWorkflowRunsPage(
   }
   all.sort(compareWorkflowRunsNewestFirst);
   const hiddenTraceCount = includeTraces ? 0 : input.jobs.filter(isStandaloneRequestTrace).length;
-  const filtered = filterWorkflowRuns(all, { trigger: input.trigger, status: input.status, search: input.search, reportsOnly: input.reportsOnly });
+  const filtered = filterWorkflowRuns(all, { trigger: input.trigger, status: input.status, search: input.search, reportsOnly: input.reportsOnly, lifecycle: input.lifecycle, schedule: input.schedule });
   const totalMatched = filtered.length;
   const offset = Math.max(0, Math.min(Math.floor(input.offset ?? 0) || 0, 10000));
   const limit = Math.max(1, Math.min(Math.floor(input.limit ?? 40) || 40, 100));

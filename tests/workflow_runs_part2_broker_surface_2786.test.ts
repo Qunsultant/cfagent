@@ -224,8 +224,10 @@ describe("nothing silently dropped (#2786 Part 2, scope e)", () => {
   it("counts hidden traces and reveals them when the visible toggle includes them", () => {
     const page = buildWorkflowRunsPage({ jobs: [trace, compareJob(["NVDA"])], outcomes: [], transitions: [] });
     expect(page.hiddenTraceCount).toBe(1);
-    expect(page.totalMatched).toBe(1);
-    expect(page.runs).toHaveLength(1);
+    // The compare row plus the #3021 binding schedule row (last).
+    expect(page.totalMatched).toBe(2);
+    expect(page.runs).toHaveLength(2);
+    expect(page.runs[1].source).toBe("schedule");
     const shown = buildWorkflowRunsPage({
       jobs: [trace, compareJob(["NVDA"])],
       outcomes: [],
@@ -233,8 +235,9 @@ describe("nothing silently dropped (#2786 Part 2, scope e)", () => {
       includeTraces: true,
     });
     expect(shown.hiddenTraceCount).toBe(0);
-    expect(shown.totalMatched).toBe(2);
-    expect(shown.runs).toHaveLength(2);
+    expect(shown.totalMatched).toBe(3);
+    expect(shown.runs).toHaveLength(3);
+    expect(shown.runs[2].source).toBe("schedule");
   });
 
   it("filters before slicing: a match past the page limit is still reachable", () => {
@@ -265,7 +268,9 @@ describe("nothing silently dropped (#2786 Part 2, scope e)", () => {
       jobs.push(job);
     }
     const page = buildWorkflowRunsPage({ jobs, outcomes: [], transitions: [], limit: 2, offset: 2 });
-    expect(page.totalMatched).toBe(5);
+    // Five executions plus the #3021 binding schedule row (last, so
+    // this page's titles are unchanged).
+    expect(page.totalMatched).toBe(6);
     expect(page.runs.map((r) => r.title)).toEqual([
       "Market data comparison — SYM2",
       "Market data comparison — SYM1",
@@ -329,7 +334,7 @@ describe("mode uniformity (#2786 Part 2, scope g; uniformity update)", () => {
       limit: 1,
       extraRuns: [saga],
     });
-    expect(page.totalMatched).toBe(2);
+    expect(page.totalMatched).toBe(3);
     expect(page.runs.map((r) => r.title)).toEqual(["Saga run — saga-1"]);
     const filtered = buildWorkflowRunsPage({
       jobs: [compareJob(["NVDA"])],
