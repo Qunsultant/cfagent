@@ -1151,6 +1151,10 @@ export class OrchestratorAgent extends PortThink {
     filters?: import("../types").StockScreenerFilter;
     provider?: import("../trading").StockScreenProvider;
     stageChain?: import("../types").StageChainConfig;
+    /** Issue #2373 (slice C): schedule kind + submission
+     *  authorization, forwarded to the scheduled callback. */
+    scheduleKind?: "one_off" | "recurring";
+    authorizedAtSubmission?: boolean;
   }, schedule?: { id?: unknown }): Promise<void> {
     return recordScheduleCallbackRun(
       this.ctx.storage.sql,
@@ -1175,6 +1179,10 @@ export class OrchestratorAgent extends PortThink {
     emailTo?: string;
     slackChannel?: string;
     pushToSlack?: boolean;
+    /** Issue #2373 (slice C): schedule kind + submission
+     *  authorization, forwarded to the scheduled callback. */
+    scheduleKind?: "one_off" | "recurring";
+    authorizedAtSubmission?: boolean;
   }, schedule?: { id?: unknown }): Promise<void> {
     return recordScheduleCallbackRun(
       this.ctx.storage.sql,
