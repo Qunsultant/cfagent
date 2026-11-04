@@ -16,6 +16,8 @@
  */
 
 import { STAGE_NAMES, type StageName } from "../messaging/messagingPorts";
+import { PAYMENT_STEP_IDS } from "./paymentWorkflowFlow";
+import { SAGA_STEP_IDS } from "./sagaWorkflowFlow";
 import type { StageRetryBucket } from "./stageRunnerPorts";
 
 /** The families the programme covers. */
@@ -249,18 +251,34 @@ const PAYMENT_RUN: WorkflowDeclaration = {
     "record-native-ledger",
     "record-usage",
   ],
-  runtimeMappingGap:
-    "payment stages are workflow steps (paymentWorkflowFlow); no stage-message ids are declared for them yet (#3073).",
+
   runnable: false,
   runPath: null,
   stages: [
-    stage("analysis", { persists: "gate-decision", publishes: null, consumes: null }),
-    stage("store", { persists: "payment-record", publishes: null, consumes: "gate-decision" }),
+    stage("analysis", {
+      persists: "gate-decision",
+      publishes: null,
+      consumes: null,
+      runtimeStageIds: ["gate-check", "record-coverage-required", "consume-coverage"],
+    }),
+    stage("store", {
+      persists: "payment-record",
+      publishes: null,
+      consumes: "gate-decision",
+      runtimeStageIds: [
+        "record-checkout",
+        "record-approval",
+        "record-expiry",
+        "record-rejection",
+        "record-payment",
+      ],
+    }),
     stage("deliver", {
       persists: "checkout-state",
       publishes: null,
       consumes: "payment-record",
       requiresApproval: true,
+      runtimeStageIds: ["confirm-paid", "record-native-ledger", "record-usage", "issue-failure-credit", "start-screener"],
     }),
   ],
 };
@@ -279,8 +297,7 @@ const SAGA_RUN: WorkflowDeclaration = {
     "record-audit-screen-completed",
     "compensate-failed-screen",
   ],
-  runtimeMappingGap:
-    "saga legs are workflow steps with polling (sagaWorkflowFlow); their stage ids are not declared as stage-message topics yet (#3073).",
+
   runnable: false,
   runPath: null,
   stages: [
@@ -289,10 +306,20 @@ const SAGA_RUN: WorkflowDeclaration = {
       publishes: null,
       consumes: null,
       requiresApproval: true,
+      runtimeStageIds: ["record-audit-saga-started", "start-payment-leg", "record-audit-payment-started"],
     }),
-    stage("analysis", { persists: "screen-leg", publishes: null, consumes: "payment-leg" }),
-    stage("store", { persists: "journey-record", publishes: null, consumes: "screen-leg" }),
-    stage("deliver", { persists: "compensation-state", publishes: null, consumes: "journey-record" }),
+    stage("analysis", {
+      persists: "screen-leg",
+      publishes: null,
+      consumes: "payment-leg",
+      runtimeStageIds: ["record-audit-screen-completed"],
+    }),
+    stage("deliver", {
+      persists: "compensation-state",
+      publishes: null,
+      consumes: "screen-leg",
+      runtimeStageIds: ["compensate-failed-screen"],
+    }),
   ],
 };
 

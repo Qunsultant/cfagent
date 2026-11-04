@@ -421,6 +421,21 @@ export type LegTerminal =
  * leg (S4, sagaTradeLeg.ts) reuses this same poll instead of a
  * second copy of the loop.
  */
+/**
+ * Issue #3191 - the saga workflow's real `step.do` ids (the polling waits are
+ * not steps and stay out). Pinned against this file by
+ * tests/payment_saga_stage_ids_3191.test.ts.
+ */
+export const SAGA_STEP_IDS = [
+  "record-audit-saga-started",
+  "start-payment-leg",
+  "record-audit-payment-started",
+  "record-audit-screen-completed",
+  "compensate-failed-screen",
+] as const;
+
+export type SagaStepId = (typeof SAGA_STEP_IDS)[number];
+
 export async function pollLegToTerminal(
   deps: { legPort: SagaLegPort; nowMs: () => number },
   step: SagaWorkflowStep,

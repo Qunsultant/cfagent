@@ -420,6 +420,30 @@ export type PaymentWorkflowOutcome =
 /** How long a checkout waits for verified payment before lapsing. */
 export const PAYMENT_VERIFICATION_TIMEOUT = "24 hours";
 
+/**
+ * Issue #3191 - the payment workflow's real step ids, exported so the
+ * workflow catalog can declare a projection of them instead of guessing.
+ * `tests/payment_saga_stage_ids_3191.test.ts` scans this file for
+ * `step.do("...")` and fails if this list and the code disagree.
+ */
+export const PAYMENT_STEP_IDS = [
+  "gate-check",
+  "record-coverage-required",
+  "consume-coverage",
+  "record-checkout",
+  "record-approval",
+  "record-expiry",
+  "record-rejection",
+  "confirm-paid",
+  "record-payment",
+  "record-native-ledger",
+  "record-usage",
+  "issue-failure-credit",
+  "start-screener",
+] as const;
+
+export type PaymentStepId = (typeof PAYMENT_STEP_IDS)[number];
+
 export async function runPaymentWorkflowFlow(
   params: PaymentWorkflowParams,
   deps: PaymentWorkflowDeps,
