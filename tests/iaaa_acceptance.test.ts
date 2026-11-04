@@ -128,6 +128,7 @@ describe("iaaa acceptance end to end (#945 slice 6)", () => {
     // approval flag stands in for): valid for the unchanged proposal.
     const approval = await createApproval({
       proposalHash: "hash-proposal-1",
+      proposalVersion: "v1",
       approverInternalUserId: "approver-1",
       tenantId: "tenant-a",
       grantedActions: ["task:create"],
