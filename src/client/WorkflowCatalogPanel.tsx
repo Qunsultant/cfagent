@@ -211,7 +211,17 @@ function WorkflowCard({
         </span>
         {latest && (
           <span>
-            Last run: <code>{latest.id}</code> | {latest.status} | {latest.trigger}
+            Last run:{" "}
+            {/* Issue #3163: the run id is the deep link into Workflow Runs,
+                where the full record (inputs, outputs, artifacts) lives. */}
+            <Button
+              href={`?tab=workflow-runs&run=${encodeURIComponent(latest.id)}`}
+              variant="secondary"
+              size="sm"
+            >
+              {latest.id}
+            </Button>{" "}
+            | {latest.status} | {latest.trigger}
           </span>
         )}
         <Table
