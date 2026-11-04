@@ -22,7 +22,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Button } from "./components/ui/Button";
 import { Card } from "./components/ui/Card";
-import { PageSection } from "./components/ui/PageShell";
+import { PageShell, PageSection } from "./components/ui/PageShell";
 import { fetchPlatformIdentity } from "./firstRunApi";
 import { receiptKindLabel } from "./agenticWalletApi";
 import { RefundPolicySection } from "./RefundPolicySection";
@@ -112,10 +112,8 @@ export function BillingServicingPanel() {
   }, [load]);
 
   return (
-    <PageSection
-      title="Billing"
-      description="Your subscription, receipts, plans, and referral-credit balance — servicing over existing routes. This view never charges, purchases, cancels, or deactivates. Operators also approve refund-policy kinds here and decide and execute refunds; any verified login may request and verify their own refunds."
-    >
+    <PageShell title="Billing">
+      <PageSection description="Your subscription, receipts, plans, and referral-credit balance — servicing over existing routes. This view never charges, purchases, cancels, or deactivates. Operators also approve refund-policy kinds here and decide and execute refunds; any verified login may request and verify their own refunds.">
       {loading && <p>Loading billing view</p>}
       {!loading && loadError && (
         <>
@@ -175,6 +173,7 @@ export function BillingServicingPanel() {
           </Card>
         </>
       )}
-    </PageSection>
+      </PageSection>
+    </PageShell>
   );
 }
