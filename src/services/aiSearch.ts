@@ -260,7 +260,8 @@ export class ETradeAISearchService {
     // 1. If Cloudflare AI Search endpoint is configured, query upstream
     if (this.env?.AI_SEARCH_ENDPOINT) {
       try {
-        const resp = await fetch(this.env.AI_SEARCH_ENDPOINT, {
+        const searchUrl = `${this.env.AI_SEARCH_ENDPOINT.replace(/\/+$/, "")}/search`;
+        const resp = await fetch(searchUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({

@@ -297,6 +297,70 @@ describe("#1169 S2 service mapping (flag-gated, endpoint stubbed)", () => {
   });
 });
 
+describe("#1169 searchFinancialDocs primary search path", () => {
+  it("calls the primary fetch with a URL ending in /search", async () => {
+    const fetchMock = vi.fn(async (_url: string) => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ success: true, result: { chunks: [SCORED_CAT] } }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const svc = new ETradeAISearchService({ AI_SEARCH_ENDPOINT: "https://search.example.test" } as any);
+
+    await svc.searchFinancialDocs("broker rules", 5);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe("https://search.example.test/search");
+    expect(fetchMock.mock.calls[0][0]).toMatch(/\/search$/);
+  });
+
+  it("uses cloudflare_ai_search and mapped results when /search succeeds, not the fallback", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (!url.endsWith("/search")) {
+        return {
+          ok: false,
+          status: 302,
+          json: async () => {
+            throw new SyntaxError("Unexpected end of JSON input");
+          },
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ success: true, result: { chunks: [SCORED_CAT] } }),
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const svc = new ETradeAISearchService({ AI_SEARCH_ENDPOINT: "https://search.example.test" } as any);
+
+    const res = await svc.searchFinancialDocs("broker rules", 5);
+
+    expect(res.provider).toBe("cloudflare_ai_search");
+    expect(res.provider).not.toBe("semantic_cache");
+    expect(res.totalMatches).toBe(1);
+    expect(res.results).toEqual([
+      { id: "doc-1", title: "Doc One", snippet: "snip", url: "https://example.com/doc", score: 0.73, category: "sec_filing" },
+    ]);
+  });
+
+  it("normalizes a trailing slash so the URL has exactly one /search suffix", async () => {
+    const fetchMock = vi.fn(async (_url: string) => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ success: true, result: { chunks: [SCORED_CAT] } }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const svc = new ETradeAISearchService({ AI_SEARCH_ENDPOINT: "https://search.example.test/" } as any);
+
+    await svc.searchFinancialDocs("broker rules", 5);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe("https://search.example.test/search");
+    expect(fetchMock.mock.calls[0][0]).not.toContain(".test//search");
+  });
+});
+
 describe("#1169 S2 serving route GET /knowledge/file", () => {
   let storage: ReturnType<typeof makeStorage>;
   let b: ReturnType<typeof makeBucket>;
