@@ -207,11 +207,19 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
     expect(subIds).not.toContain("schedules");
   });
 
-  it("configures Workflows menu with docs, workflow-runs, workflows, reports, review, track-record", () => {
+  it("configures Workflows menu with docs, workflow-runs, workflows, workflow-catalog, reports, review, track-record", () => {
     const workflowSubItems = SUB_MENU_CONFIGS["workflow-runs"];
     expect(workflowSubItems).toBeDefined();
     const subIds = workflowSubItems.map((s) => s.id);
-    expect(subIds).toEqual(["docs", "workflow-runs", "workflows", "reports", "review", "track-record"]);
+    expect(subIds).toEqual([
+      "docs",
+      "workflow-runs",
+      "workflows",
+      "workflow-catalog",
+      "reports",
+      "review",
+      "track-record",
+    ]);
   });
 
   it("configures Sandbox menu with sandbox-checkout, and ORDERS/BILLINGS/PAYMENTS menus (#2968)", () => {

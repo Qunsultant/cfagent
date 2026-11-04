@@ -34,6 +34,7 @@ import { ErrorBoundary } from "./ErrorBoundary";
 import { AgenticWalletPanel } from "./AgenticWalletPanel";
 import { didProofSignatureDisplay } from "./didProofCard";
 import type { GatewayInfo, TransactionItem, User } from "./chat/types";
+import { csrfHeaders } from "./apiFetch";
 
 type PaymentsTab = "gateways" | "stats" | "wallet" | "create" | "ledger";
 
@@ -134,7 +135,7 @@ export function PaymentsPage({ active, user }: { active: boolean; user: User }) 
     try {
       const res = await fetch("/api/payments/create", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...csrfHeaders() },
         body: JSON.stringify({
           amount: amt,
           currency: newPayCurrency,
@@ -168,7 +169,7 @@ export function PaymentsPage({ active, user }: { active: boolean; user: User }) 
     try {
       const res = await fetch("/api/payments/confirm", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...csrfHeaders() },
         body: JSON.stringify({ draftId, decision }),
       });
       const data = await res.json() as { success?: boolean; status?: string; checkoutUrl?: string };

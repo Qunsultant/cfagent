@@ -134,6 +134,31 @@ export function validateSagaEntryBody(
       throw bad("tradeIntent.optionLegs must have at least one leg for options.");
     }
   }
+  // Issue #3000: optional caller-supplied risk limits for the trading
+  // leg's risk stage. Validated, then passed through verbatim with the
+  // rest of the intent; absent limits record unassessed, never block.
+  if (tradeIntent["riskLimits"] !== undefined) {
+    const limits = tradeIntent["riskLimits"];
+    if (!isRecord(limits)) {
+      throw bad("tradeIntent.riskLimits must be an object.");
+    }
+    if (
+      typeof limits["maxPlannedLoss"] !== "number" ||
+      !(limits["maxPlannedLoss"] as number > 0)
+    ) {
+      throw bad(
+        "tradeIntent.riskLimits.maxPlannedLoss must be a positive number.",
+      );
+    }
+    if (
+      typeof limits["minRewardRisk"] !== "number" ||
+      (limits["minRewardRisk"] as number) < 0
+    ) {
+      throw bad(
+        "tradeIntent.riskLimits.minRewardRisk must be a non-negative number.",
+      );
+    }
+  }
   if (
     body["family"] !== undefined &&
     body["family"] !== "goal"

@@ -59,6 +59,7 @@ import {
   parseViewFromSearch,
   subscribeToRouteChanges,
 } from "./router";
+import { csrfHeaders } from "./apiFetch";
 
 export interface PlatformAdminPageProps {
   initialSection?: string;
@@ -160,7 +161,7 @@ export function PlatformAdminPage({
     try {
       const res = await globalThis.fetch("/api/iaaa/access-request", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...csrfHeaders() },
         body: JSON.stringify({ requestedRole: "tenant-admin" }),
       });
       const data = (await res.json().catch(() => ({}))) as { error?: string };
