@@ -50,7 +50,7 @@ import {
   isAnalysisDoneMessage,
   type StageMessage,
 } from "./stageMessage";
-import { formatStageMessage } from "./stageConfig";
+import { DEFAULT_STAGE_CONFIG, formatStageMessage, maxAttemptsForStage, resolveStageConfig, type StageConfigEnv } from "./stageConfig";
 import { describeStageAdvice, withStageAdvice } from "./stageAdvice";
 
 export type StageConsumeStatus =
@@ -97,6 +97,8 @@ export async function consumeAnalysisDone(args: {
   message: StageMessage;
   attempt?: number;
   maxAttempts?: number;
+  /** Environment for externalized stage config; omit to run on code defaults. */
+  env?: StageConfigEnv;
   claims?: StageClaimStore;
   readPersisted: (artifactKey: string) => Promise<PersistedAnalysis | null>;
   generate: (input: {
@@ -109,7 +111,11 @@ export async function consumeAnalysisDone(args: {
 }): Promise<StageConsumeResult> {
   const { message } = args;
   const attempt = args.attempt ?? 1;
-  const maxAttempts = args.maxAttempts ?? 3;
+  // Issue #3075: the budget is externalized stage config - code default,
+  // environment on top - not a magic number at the seam. A caller-supplied
+  // maxAttempts still wins (tests and explicit call sites).
+  const stageConfig = resolveStageConfig((args.env ?? {}) as StageConfigEnv);
+  const maxAttempts = args.maxAttempts ?? maxAttemptsForStage(stageConfig, message.stageId);
   const deadLetter = async (reason: string): Promise<StageConsumeResult> => {
     if (args.deadLetter) await args.deadLetter({ message, reason });
     return { status: "dead-lettered", reason };
