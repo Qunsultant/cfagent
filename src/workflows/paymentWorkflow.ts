@@ -153,6 +153,7 @@ import { postJournalBestEffort } from "../services/journalPosting";
 import { createFeatureFlagPort } from "../features/createFeatureFlagPort";
 import { createWorkflowPorts, type WorkflowEnv } from "./createWorkflowPorts";
 import type { WorkflowJobCommand } from "./workflowPorts";
+import { createStageBoundaryEmitter } from "./stageBoundaryEmitter";
 
 export type { PaymentWorkflowParams, PaymentWorkflowOutcome };
 
@@ -541,6 +542,17 @@ export class PaymentWorkflow extends ThinkWorkflow<
       // traceparent (see paymentTraceHop above). Observational
       // only; the flow calls it after each journaled step.
       traceHop: paymentTraceHop(this.env, p),
+      // Issue #3073: one stage-boundary message per completed payment step, on
+      // the shared #2869 seam. The emitter persists nothing itself: a completed
+      // `step.do` IS the durable record the message references, so the publish
+      // always happens after the artifact exists. A missing queue binding or a
+      // rejected send degrades to a logged skip - never a failed payment.
+      stageBoundary: createStageBoundaryEmitter({
+        family: "payment",
+        runId: p.runRequestId,
+        userLogin: p.email,
+        queue: (this.env as { SCREENER_EVENTS?: { send: (body: unknown) => Promise<unknown> } }).SCREENER_EVENTS,
+      }),
     };
 
     if (!p.screenerCommand || typeof p.screenerCommand.jobId !== "string") {
