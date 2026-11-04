@@ -21,8 +21,8 @@
  * exactly as any MCP client would. LAST RESORT is the standalone
  * REST API, via ETradeAISearchService reused exactly as-is. Every
  * answer is labelled with the path that served it, and degradation
- * is honest: an unconfigured agent and a fallback-labelled answer
- * are reported as degraded, never dressed up as live results.
+ * is honest: an unconfigured agent and a degraded REST answer are
+ * reported as degraded, never dressed up as live results.
  * Result and config conventions are aligned with the SearchHub
  * knowledge surface (shared AI_SEARCH_ENDPOINT instance config; S2
  * result fields and bucket-key provenance via the shared mapping).
