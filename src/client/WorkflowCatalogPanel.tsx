@@ -160,9 +160,16 @@ function stageColumns(
       key: "flow",
       header: "Consumes -> persists -> publishes",
       render: (stage) => (
-        <span>
-          {stage.consumes ?? "start of run"} -&gt; {stage.persists} -&gt; {stage.publishes}
-        </span>
+        <Stack gap="1">
+          <span>
+            {stage.consumes ?? "start of run"} -&gt; {stage.persists} -&gt; {stage.publishes}
+          </span>
+          {stage.runtimeStageIds && stage.runtimeStageIds.length > 0 ? (
+            <code>{stage.runtimeStageIds.join(", ")}</code>
+          ) : (
+            <span>runtime mapping pending</span>
+          )}
+        </Stack>
       ),
     },
     { key: "retry", header: "Retry bucket", render: (stage) => stage.retryBucket },
