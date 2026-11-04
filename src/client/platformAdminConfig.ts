@@ -24,6 +24,7 @@ export type PlatformAdminSectionId =
   | "api-keys"
   | "data-providers"
   | "iaaa-admin"
+  | "users"
   | "admin-access";
 
 export interface PlatformAdminMenuItemConfig {
