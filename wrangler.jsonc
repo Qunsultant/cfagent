@@ -215,6 +215,14 @@
     // cache module's honesty note). 300000 = 5 minutes; 200 entries.
     "AI_SEARCH_CACHE_TTL_MS": "300000",
     "AI_SEARCH_CACHE_MAX_ENTRIES": "200",
+    // Issue #1169 enablement (owner direction 2026-11-04): knowledge
+    // serving and AI Search report indexing are ON. The
+    // ai_search_namespaces binding + instance configuration land
+    // separately; until then the indexing leg records its typed
+    // not-configured outcome and never fails a report store.
+    // Rollback is unsetting these two vars and redeploying.
+    "KNOWLEDGE_SERVING_ENABLED": "1",
+    "AI_SEARCH_REPORT_INDEXING_ENABLED": "1",
     "APP_NAME": "NextGenTP",
     // Issue #2419 — externalized polling cadences (AOP). All optional;
     // absence means the pollingConfig defaults apply. Milliseconds,
