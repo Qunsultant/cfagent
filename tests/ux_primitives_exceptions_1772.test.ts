@@ -27,6 +27,14 @@ import * as ts from "typescript";
  * The Phase 4 CI enforcement pin itself is the #1580 freeze
  * (tests/ux_primitive_usage_freeze_1580.test.ts, empty allowlist);
  * #1772's Phase 4 follow-up PR adds its negative test.
+ *
+ * #3146 moves AgentChatTabContent.tsx out of the zero-primitive
+ * list into a Fluent-experiment list: the Ceos-directed Fluent v9
+ * chat chrome replaces every ui-primitive import with
+ * @fluentui/react-components, so the file no longer satisfies the
+ * primitive-import assertion — but it still renders 0 raw controls
+ * and is still pinned, to its new system. Same 44 files covered:
+ * 27 zero-primitive + 16 partial + 1 Fluent experiment.
  */
 
 const ROOT = process.cwd();
@@ -55,11 +63,15 @@ export function importsUiPrimitive(source: string): boolean {
   return /from\s+["'](?:[^"']*components\/ui[^"']*|(?:\.{1,2}\/)+ui)["']/.test(source);
 }
 
-/** The 28 zero-primitive exceptions (doc Category 1 minus Category 3). */
-const ZERO_PRIMITIVE_28 = [
+/** A Fluent import: the #3146 chat surface's component system. */
+export function importsFluent(source: string): boolean {
+  return /from\s+["']@fluentui\/react-components["']/.test(source);
+}
+
+/** The 27 zero-primitive exceptions (doc Category 1 minus Category 3, minus the #3146 Fluent move). */
+const ZERO_PRIMITIVE_27 = [
   "src/client/SocialPostingPanel.tsx",
   "src/client/ScheduledGoalsPanel.tsx",
-  "src/client/chat/AgentChatTabContent.tsx",
   "src/client/chat/ToolResultView.tsx",
   "src/client/chat/tabs/ReferralsTab.tsx",
   "src/client/chat/tabs/RevenueTab.tsx",
@@ -115,7 +127,12 @@ const ALREADY_COMPLIANT_2 = [
   "src/client/components/PartnerDealsModal.tsx",
 ];
 
-const ALL_44 = [...ZERO_PRIMITIVE_28, ...PARTIAL_16];
+/** The #3146 Fluent experiment surface (moved out of zero-primitive). */
+const FLUENT_EXPERIMENT_3146 = [
+  "src/client/chat/AgentChatTabContent.tsx",
+];
+
+const ALL_44 = [...ZERO_PRIMITIVE_27, ...PARTIAL_16, ...FLUENT_EXPERIMENT_3146];
 
 function assertConverted(file: string): void {
   const full = join(ROOT, file);
@@ -123,6 +140,14 @@ function assertConverted(file: string): void {
   const source = readFileSync(full, "utf8");
   expect(countRawControls1772(source, file), `${file} must render 0 raw controls`).toBe(0);
   expect(importsUiPrimitive(source), `${file} must import a ui primitive`).toBe(true);
+}
+
+function assertFluent(file: string): void {
+  const full = join(ROOT, file);
+  expect(existsSync(full), `${file} must still exist`).toBe(true);
+  const source = readFileSync(full, "utf8");
+  expect(countRawControls1772(source, file), `${file} must render 0 raw controls`).toBe(0);
+  expect(importsFluent(source), `${file} must import Fluent (the #3146 system)`).toBe(true);
 }
 
 describe("countRawControls1772 (#1772)", () => {
@@ -151,17 +176,24 @@ describe("countRawControls1772 (#1772)", () => {
 });
 
 describe("UX primitives exceptions pin (#1772 phases 1-3)", () => {
-  it("the 44 exception files are exactly 28 zero-primitive + 16 partial", () => {
-    expect(ZERO_PRIMITIVE_28).toHaveLength(28);
+  it("the 44 exception files are exactly 27 zero-primitive + 16 partial + 1 Fluent experiment", () => {
+    expect(ZERO_PRIMITIVE_27).toHaveLength(27);
     expect(PARTIAL_16).toHaveLength(16);
+    expect(FLUENT_EXPERIMENT_3146).toHaveLength(1);
     expect(ALL_44).toHaveLength(44);
     expect(new Set(ALL_44).size, "no file listed twice").toBe(44);
     expect(ALL_44.filter((f) => ALREADY_COMPLIANT_2.includes(f))).toEqual([]);
   });
 
   it("every zero-primitive exception file is converted (0 raw controls, imports a primitive)", () => {
-    for (const file of ZERO_PRIMITIVE_28) {
+    for (const file of ZERO_PRIMITIVE_27) {
       assertConverted(file);
+    }
+  });
+
+  it("the Fluent experiment file is converted (0 raw controls, imports Fluent)", () => {
+    for (const file of FLUENT_EXPERIMENT_3146) {
+      assertFluent(file);
     }
   });
 
