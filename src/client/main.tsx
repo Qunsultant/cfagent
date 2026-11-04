@@ -2,7 +2,12 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { Chat } from "./Chat";
 import { BootToast } from "./BootToast";
-import { signedInMessage, stripAuthOutcomeParam } from "./authOutcome";
+import {
+  signedInMessage,
+  stripAuthOutcomeParam,
+  isDefaultLandingUrl,
+  bootReturnTarget,
+} from "./authOutcome";
 import { ToastProvider } from "./components/ui";
 import { applyThemeToDocument, getStoredTheme, initThemeListener } from "./theme";
 import { applyTypographyToDocument, getStoredFontScale, getStoredFontStyle, initTypographyListener } from "./typography";
@@ -41,19 +46,30 @@ if (!user) {
   // generic provider route for the default provider (github)
   // is the login start. Remember the page being refreshed so the
   // post-login boot returns to it instead of the default tab.
+  // #3015: the same page is ALSO carried as a ?target= parameter
+  // into startLogin, which seals it into signed state — so the
+  // return survives even when sessionStorage is unavailable
+  // (private mode), and the signed-state path agrees with the
+  // sessionStorage path instead of racing it. The storage save
+  // is deliberately isolated: a private-mode failure must never
+  // wipe the target the ?target= leg carries.
+  const next = bootReturnTarget(
+    window.location.pathname,
+    window.location.search,
+    window.location.hash
+  );
   try {
     // #2402: the saved return page never carries the outcome
     // parameter, so a post-login restore cannot reshow an outcome.
-    const next = stripAuthOutcomeParam(
-      `${window.location.pathname}${window.location.search}${window.location.hash}`
-    );
-    if (next.startsWith("/") && !next.startsWith("//")) {
-      window.sessionStorage.setItem("auth:next", next);
-    }
+    if (next !== "") window.sessionStorage.setItem("auth:next", next);
   } catch {
     // sessionStorage can be unavailable (private mode); the login still works.
   }
-  window.location.replace("/auth/login/github");
+  window.location.replace(
+    next !== "" && next !== "/"
+      ? `/auth/login/github?target=${encodeURIComponent(next)}`
+      : "/auth/login/github"
+  );
 } else {
   // #2402: one-time sign-in confirmation. The parameter is stripped
   // before anything else reads the URL, so a refresh never reshows
@@ -63,8 +79,9 @@ if (!user) {
     (window as any).__AUTH_OUTCOME__,
     user.name ?? user.login
   );
+  let cleaned = window.location.href;
   try {
-    const cleaned = stripAuthOutcomeParam(window.location.href);
+    cleaned = stripAuthOutcomeParam(window.location.href);
     if (cleaned !== window.location.href) {
       window.history.replaceState({}, "", cleaned);
     }
@@ -74,9 +91,17 @@ if (!user) {
   }
   // Restore the page saved before the login redirect, before Chat reads
   // the URL, so a refresh lands back on the same tab/view.
+  // #3015: restore ONLY on the default landing. After a
+  // target-carrying callback the URL already IS the bookmarked
+  // page, and a stale saved page must never clobber it.
   try {
     const next = window.sessionStorage.getItem("auth:next");
-    if (next && next.startsWith("/") && !next.startsWith("//")) {
+    if (
+      next &&
+      next.startsWith("/") &&
+      !next.startsWith("//") &&
+      isDefaultLandingUrl(cleaned)
+    ) {
       window.sessionStorage.removeItem("auth:next");
       window.history.replaceState({}, "", next);
     }

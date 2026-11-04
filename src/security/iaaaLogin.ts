@@ -129,10 +129,10 @@ import {
   wiredMembershipStore,
 } from "./session";
 import {
-  AUTH_OUTCOME_PARAM,
   authOutcomeLoginUrl,
   type AuthOutcomeCode,
 } from "./authOutcome";
+import { buildPostLoginRedirect } from "./returnTarget";
 import {
   parseBootstrapListWithGenesis,
   resolveIaaaTenant,
@@ -580,6 +580,12 @@ export interface WiredLoginOptions {
   /** End-to-end: alias recording + bootstrap-on-login. Default off. */
   postLoginEnabled?: boolean;
   /**
+   * #3015: return target recovered from the signed OAuth state
+   * (or null). Validated once more at redirect time; null keeps
+   * the default landing.
+   */
+  returnTarget?: string | null;
+  /**
    * #1182 login-time migration stores. When omitted, they default
    * to the env-derived SessionStore DO stores — so production
    * logins always migrate. Tests pass explicit memory stores.
@@ -830,10 +836,14 @@ export async function completeWiredLogin(
   // boot can show a one-time "Signed in as …" confirmation. The /
   // handler turns a just-created-but-unreadable session (the #2280
   // loop) into the session_unreadable login notice instead.
+  // #3015: a validated return target replaces the default landing
+  // (the outcome still travels on it, so the boot toast still
+  // shows and the parameter is still stripped on boot); an absent
+  // or invalid target keeps exactly the default landing above.
   return new Response(null, {
     status: 302,
     headers: {
-      Location: `/?${AUTH_OUTCOME_PARAM}=signed_in`,
+      Location: buildPostLoginRedirect(options?.returnTarget ?? null),
       "Set-Cookie": setSessionCookie(sessionId),
     },
   });
