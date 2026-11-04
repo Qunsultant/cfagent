@@ -637,10 +637,10 @@ not deviations from it.
 
 | Non-conforming case | Status | Justification |
 |---|---|---|
-| **Nav badge metadata types (6)** — `pro`, `live`, `ai`, `mcp`, `new`, `neutral` | Exception candidate; owner pick owed (decision 2) | They encode product metadata (capability flags, freshness), not severity; the visual treatments map to 3 (default / live-accent / new). If the owner picks option (a) (metadata, not visual types), this row becomes the recorded exception. If (b), the metadata collapses to 3 and the row closes. |
-| **PillGroup vs SegmentedControl overlap** | Exception candidate; owner pick owed (decision 3) | If the owner picks "document the split", the justification is the multi-select vs single-select distinction. If "merge", the row closes. |
-| **C10: landing-page theme code** (`landing.ts` own theme maps + toggle cycle) | Exception candidate; owner pick owed (decision 7) | Draft justification: the landing page is vanilla (no component runtime, so it cannot import `theme.ts`); it consumes the same generated tokens, so it cannot drift in color. If the owner picks the exception, this justification is recorded; if the fold, the row closes. |
-| **C3: ScreenersHub bespoke tablist** (own tab rendering, no `Tabs` primitive, no `role="tablist"`) | Exception candidate; **justification owed** (decision 7) | None recorded: the draft records only that S2 never landed for the hub or the direction was superseded. No reason is on record for why the `Tabs` primitive cannot serve it. If it becomes an exception, that reason must be written here first. |
+| **Nav badge metadata types (6)** — `pro`, `live`, `ai`, `mcp`, `new`, `neutral` | Proposal for #3052 (standard change; current types stand) | They encode product metadata (capability flags, freshness), not severity; the visual treatments map to 3 (default / live-accent / new). Collapsing the metadata to 3 is a standard change needing explicit owner approval per fold. |
+| **PillGroup vs SegmentedControl overlap** | Proposal for #3052 (standard change; both stand) | The split is multi-select vs single-select. Merging them is a standard change needing explicit owner approval. |
+| **C10: landing-page theme code** (`landing.ts` own theme maps + toggle cycle) | Recorded exception (decision 7 resolved, #3099) | The landing page is vanilla (no component runtime, so it cannot import `theme.ts`); it consumes the same generated tokens, so it cannot drift in color. |
+| **C3: ScreenersHub bespoke tablist** (own tab rendering, no `Tabs` primitive, no `role="tablist"`) | Recorded exception (decision 7 resolved, #3099) | Hub tab chrome is the hub's shape by design (see the uniformity audit: hubs are divergent by shape, not non-conforming): hubs render their own URL-synced tab chrome rather than the `Tabs` primitive, and migrating it would change hub chrome behavior. Recorded as an exception to the "one mechanism" direction, not a violation. |
 | **Any collapse proposal the owner rejects** (decisions 1, 4) | Becomes an exception on rejection | Justification owed at the moment of rejection — the reason the family cannot collapse, written into this register. |
 
 ---
@@ -789,28 +789,42 @@ disagreement.
 
 ---
 
-## 5. Decisions owed (owner)
+## 5. Decisions — resolved under the conformance principle
 
-Under the guideline framing (§0, §3.6), a rejection is a
-complete answer: a rejected collapse becomes an exception entry
-with its justification recorded, not a violation left open.
+Owner direction, 2026-11-04 (issue #3099): where a design standard
+is already established, everything conforms to it. Applied to the
+seven items this section previously listed as owed, that direction
+resolves them as follows — none of them is an open conformance
+question anymore:
 
-1. **Collapse mappings (§3.3–§3.4):** approve, amend, or reject
-   each fold — especially ghost → secondary + subtle (72
-   sites) and the unified 3-tone vocabulary (info/warning
-   merges).
-2. **Nav badge types (§3.2):** metadata-vs-visual split, or
-   collapse the metadata to 3.
-3. **PillGroup vs SegmentedControl (§3.3):** merge, or document
-   the multi-select vs single-select split.
-4. **Card padding (§3.3):** which of the 4 steps merges.
-5. **This document's placement:** replace `design-system-01.md`
-   + the UX sections of `ux-architecture.md` §6, or live
-   alongside them with this doc marked canonical and the old
-   docs marked superseded (the no-deletion gate forbids deleting
-   the old files; deprecate in place with a successor pointer).
-6. **C2:** does the shell-conformance list grow to 41, or is
-   its job done and the template the mechanism?
-7. **C3/C10:** is the ScreenersHub tablist reconciliation and
-   the landing theme fold still wanted work, or recorded
-   exceptions to the "one mechanism" direction?
+- **Decisions 1–4 (collapse mappings, nav badge types, PillGroup
+  vs SegmentedControl, card padding) are standard-change
+  proposals, not conformance gaps.** The established standard is
+  the primitives as they exist today (7 button variants, 6 nav
+  badge metadata types, and so on). Conformance means the current
+  variants stand. A fold changes the standard itself, so each fold
+  needs its own explicit owner approval and lives as a proposal
+  under #3052 (design-system consolidation implementation) — it is
+  not an open decision on this document.
+- **Decision 5 (placement) — RESOLVED 2026-11-04.** This document
+  was placed at `docs/architecture/UX/consolidated-design-system.md`
+  via issue #3096 / PR #3097 (merged 3a51d91), with
+  `design-system-01.md` pointing here as its consolidated
+  successor. No replacement of `ux-architecture.md` was made: it
+  remains the live contract.
+- **Decision 6 (C2) — RESOLVED as historical.** The S4
+  shell-conformance list is a historical record of the S4
+  migration. The live conformance mechanism is the #3047 gate map
+  plus the page template (§1): new pages conform by construction
+  (see the page scaffold), and the gate map is the list that
+  grows.
+- **Decision 7 (C3/C10) — RESOLVED as recorded exceptions
+  (§3.6).** The ScreenersHub tablist and the landing theme are
+  exceptions with justification recorded in §3.6, which under §0
+  is compliant with the guideline — a documented exception is not
+  a violation. Neither is wanted rework unless the owner later
+  directs it as #3052 work.
+
+A rejection of any #3052 fold likewise becomes an exception entry
+in §3.6 with its justification recorded, not a violation left
+open (§0).
