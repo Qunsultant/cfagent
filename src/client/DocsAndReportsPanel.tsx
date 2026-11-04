@@ -24,6 +24,7 @@ import {
   Button,
   EmptyState,
   Notice,
+  PageShell,
   Spinner,
   Table,
   type TableColumn,
@@ -318,24 +319,18 @@ export function DocsAndReportsPanel() {
 
   return (
     <div className="docs-report-page">
-      <header className="docs-header">
-        <div>
-          <h2 className="docs-title">Docs & Reports</h2>
-          <p className="docs-scope">
-            Every document set produced by a screener-workflow run — stock, options, goal and
-            strategy — with the PDF, XLSX and CSV that run generated. Links are shown only when
-            the run recorded that artifact.
-          </p>
-        </div>
+      <PageShell
+        title="Docs & Reports"
+        scopeNote="Every document set produced by a screener-workflow run — stock, options, goal and strategy — with the PDF, XLSX and CSV that run generated. Links are shown only when the run recorded that artifact."
+      >
         <div className="docs-toolbar">
           {loadedAt && <span className="docs-loaded-at">Updated {loadedAt}</span>}
           <Button variant="secondary" size="sm" onClick={() => void load()} disabled={loading}>
             Refresh
           </Button>
         </div>
-      </header>
 
-      {error && (
+        {error && (
         <Notice tone="danger" title="Documents unavailable">
           {error}{" "}
           <Button variant="ghost" size="sm" onClick={() => void load()}>
@@ -395,6 +390,7 @@ export function DocsAndReportsPanel() {
           />
         </>
       )}
+      </PageShell>
     </div>
   );
 }
