@@ -41,6 +41,11 @@ import type { Env } from "../types";
 import { SESSION_LIMITS } from "../config/sessionLimits";
 import { createStoreKv, type DoNamespaceLike } from "./durableKv";
 import { type KvLike } from "./kvResilience";
+import {
+  createTokenPorts,
+  isTokenPortsEnabled,
+} from "../data/createTokenPorts";
+import type { PublicTokenPort } from "../data/tokenPorts";
 import { createState, verifyState } from "./session";
 import {
   buildAuthorizationUrl,
@@ -128,8 +133,24 @@ function getKv(env: Env): KvLike {
   });
 }
 
+/**
+ * Issue #2434 (#1976 step 5c): the token family's Public port.
+ * When TOKEN_PORTS_ENABLED is on, the storage functions below
+ * delegate to it (over the SAME SessionStore DO and kv_store
+ * table); when off, this module's direct funnel composition
+ * above is the serving path, unchanged. Signatures never
+ * change either way — existing callers are untouched.
+ */
+function publicTokenPort(env: Env): PublicTokenPort {
+  return createTokenPorts(env).public;
+}
+
 /** Stores a confirmed token set in the SessionStore DO. */
 export async function storePublicTokens(env: Env, tokenSet: PublicTokenSet): Promise<void> {
+  if (isTokenPortsEnabled(env)) {
+    await publicTokenPort(env).storeTokenSet(tokenSet);
+    return;
+  }
   await getKv(env).put(publicTokenKey(tokenSet.userLogin), JSON.stringify(tokenSet));
 }
 
@@ -138,6 +159,9 @@ export async function getStoredPublicTokens(
   env: Env,
   userLogin: string
 ): Promise<PublicTokenSet | null> {
+  if (isTokenPortsEnabled(env)) {
+    return publicTokenPort(env).getTokenSet(userLogin);
+  }
   const raw = await getKv(env).get(publicTokenKey(userLogin));
   if (!raw) return null;
   try {
@@ -152,6 +176,10 @@ export async function getStoredPublicTokens(
 
 /** Deletes the stored token set locally (no upstream call). */
 export async function revokeStoredPublicTokens(env: Env, userLogin: string): Promise<void> {
+  if (isTokenPortsEnabled(env)) {
+    await publicTokenPort(env).deleteTokenSet(userLogin);
+    return;
+  }
   await getKv(env).delete(publicTokenKey(userLogin));
 }
 
@@ -303,12 +331,21 @@ export async function resolvePublicCredentialRef(
     if (!ns || !key) {
       return { ok: false, error: `credential reference "${credentialRef}" is not a complete sessionstore reference (expected sessionstore:<namespace>:<key>).` };
     }
-    const kv = createStoreKv({
-      namespace: env.SESSION_STORE as unknown as DoNamespaceLike | undefined,
-      namespaceName: ns,
-      legacyFallback: false,
-    });
-    const raw = await kv.get(key);
+    // Issue #2434: with TOKEN_PORTS_ENABLED on, the per-call
+    // bucket read is the port's readRefRecord operation (the
+    // referenced bucket composed by the family's root); off,
+    // the per-call funnel composition here serves, unchanged.
+    let raw: string | null;
+    if (isTokenPortsEnabled(env)) {
+      raw = await publicTokenPort(env).readRefRecord(ns, key);
+    } else {
+      const kv = createStoreKv({
+        namespace: env.SESSION_STORE as unknown as DoNamespaceLike | undefined,
+        namespaceName: ns,
+        legacyFallback: false,
+      });
+      raw = await kv.get(key);
+    }
     if (!raw) {
       return {
         ok: false,
@@ -385,6 +422,10 @@ export function publicClientMetadataDocument(origin: string): Record<string, unk
 /* ------------------------------ pending ------------------------------ */
 
 async function storePublicOAuthPending(env: Env, pending: PublicOAuthPending): Promise<void> {
+  if (isTokenPortsEnabled(env)) {
+    await publicTokenPort(env).storePending(pending);
+    return;
+  }
   await getKv(env).put(publicPendingKey(pending.state), JSON.stringify(pending), {
     expirationTtl: Math.floor(PENDING_MAX_AGE_MS / 1000),
   });
@@ -394,6 +435,9 @@ export async function getPublicOAuthPending(
   env: Env,
   state: string
 ): Promise<PublicOAuthPending | null> {
+  if (isTokenPortsEnabled(env)) {
+    return publicTokenPort(env).getPending(state);
+  }
   const raw = await getKv(env).get(publicPendingKey(state));
   if (!raw) return null;
   try {
@@ -404,6 +448,10 @@ export async function getPublicOAuthPending(
 }
 
 async function clearPublicOAuthPending(env: Env, state: string): Promise<void> {
+  if (isTokenPortsEnabled(env)) {
+    await publicTokenPort(env).deletePending(state);
+    return;
+  }
   await getKv(env).delete(publicPendingKey(state));
 }
 
