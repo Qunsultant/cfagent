@@ -2287,14 +2287,43 @@ export class ScheduledTasksService {
     // the report: the wanted set does. `allowedStrategies` from the
     // schedule is a request-level narrowing (a schedule naming three
     // strategies gets three); omitting it resolves to the full registry.
-    const reportScope = resolveOptionsReportScope({
-      ...(options.thesis ? { thesis: options.thesis as string } : {}),
+    const reportScope = (() => {
+      try {
+        const resolved = resolveOptionsReportScope({
+          ...(options.thesis ? { thesis: options.thesis as string } : {}),
       ...(options.allowedStrategies?.length
         ? { strategies: options.allowedStrategies.map(String) }
         : {}),
       ...(options.symbols?.length ? { symbols: options.symbols } : {}),
-      env: this.env as { OPTIONS_REPORT_CONFIG?: string; OPTIONS_REPORT_PRESET?: string },
-    });
+          env: this.env as { OPTIONS_REPORT_CONFIG?: string; OPTIONS_REPORT_PRESET?: string },
+        });
+        // Issue #2604 (#2764 preset rule): a stored scope that cannot be
+        // honoured fails the run LOUDLY. Running the built-in defaults, or
+        // widening a dead strategy list to every strategy, would silently
+        // produce a different report than the schedule stored.
+        const invalid =
+          resolved.invalidPreset !== null
+            ? { axis: "preset", value: resolved.invalidPreset, known: resolved.preset }
+            : resolved.invalidStrategyList !== null
+              ? { axis: "strategies", value: resolved.invalidStrategyList.join(", "), known: "" }
+              : null;
+        if (invalid) {
+          this.audit("options.report_scope_invalid", { ...invalid });
+          throw new Error(
+            `Options schedule refused: the stored scope cannot be honoured (${invalid.axis} ${JSON.stringify(invalid.value)}). Fix the schedule's scope; the run is not defaulted or widened.`,
+          );
+        }
+        return resolved;
+      } catch (err) {
+        // Issue #2604: a stored scope that cannot be honoured fails the run
+        // loudly (never a silent default run), with the axis on the audit.
+        this.audit("options.report_scope_invalid", {
+          error: err instanceof Error ? err.message : String(err),
+          ...(err instanceof Error && "axis" in err ? { axis: String((err as { axis: unknown }).axis) } : {}),
+        });
+        throw err;
+      }
+    })();
     // One execution per thesis per run today; a multi-thesis scope names
     // its remaining theses in the audit stamp so the gap is visible.
     const targetThesis = (reportScope.theses[0] ?? "bullish") as OptionThesis;

@@ -15,6 +15,7 @@ import {
 import { getSessionCached, getSessionCachedFetchedAt, invalidateSessionCache } from "./security/sessionCache";
 import { resolveIdleTimeoutMs } from "./security/sessionPolicy";
 import { resolveScreenerAgentName } from "./agents/screenerAgentName";
+import { isAnalysisDoneStageMessage } from "./workflows/stageQueueTransport";
 import {
   quotaWindowKey,
   type QuotaUsageView,
@@ -6363,7 +6364,47 @@ export default {
       const envelopeMessages: any[] = [];
       if (batch?.messages && Array.isArray(batch.messages)) {
         for (const msg of batch.messages) {
-          if (isMessageEnvelope(msg.body)) {
+          if (isAnalysisDoneStageMessage(msg.body)) {
+            // Issue #2869 slice 1 — the analysis-done queue
+            // executor. The message routes to the OWNING
+            // ScreenerAgent DO (per-owner instance, so the
+            // durable stage claims are the in-process leg's
+            // claims: a normal-path redelivery is
+            // duplicate-suppressed, never regenerated).
+            // Ack on generated / duplicate-suppressed /
+            // dead-lettered; retry (to max_retries, then
+            // the screener-events-dlq) only when the
+            // consumer throws — a missing persisted
+            // analysis, which the consumer refuses to
+            // fabricate. A poison body can never reach
+            // here: the guard above only passes
+            // well-shaped analysis-done messages.
+            try {
+              const stageMsg = msg.body;
+              const agentId = env.SCREENER_AGENT.idFromName(
+                resolveScreenerAgentName(env, stageMsg.userLogin),
+              );
+              const agent = env.SCREENER_AGENT.get(agentId) as unknown as {
+                consumeQueuedAnalysisDone: (
+                  message: unknown,
+                  attempt?: number,
+                ) => Promise<{ status: string; reason?: string }>;
+              };
+              const outcome = await agent.consumeQueuedAnalysisDone(
+                stageMsg,
+                typeof (msg as { attempts?: unknown }).attempts === "number"
+                  ? ((msg as { attempts: number }).attempts as number)
+                  : 1,
+              );
+              if (typeof msg.ack === "function") msg.ack();
+              if (outcome.status === "dead-lettered") {
+                console.warn("[Queue Handler] analysis-done stage message dead-lettered:", outcome.reason ?? "unknown");
+              }
+            } catch (queueErr) {
+              console.warn("[Queue Handler] Failed to consume analysis-done stage message; retrying:", queueErr);
+              if (typeof msg.retry === "function") msg.retry();
+            }
+          } else if (isMessageEnvelope(msg.body)) {
             envelopeMessages.push(msg);
           } else if (msg.body?.taskType === "options_analysis") {
             // @deprecated Legacy taskType queue shape — superseded by CloudEvents envelope work items routed through the QueuePort screener-events consumer (src/messaging/screenerEventsConsumer.ts). Kept as a thin wrapper; do not add new producers.

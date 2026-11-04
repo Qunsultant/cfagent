@@ -2066,6 +2066,79 @@ export class ScreenerAgent extends PortThink {
    * method keeps only the latest-pointer copy, which needs the agent's
    * ReportAssetAgent fallback — storage, not generation.
    */
+  /**
+   * Issue #2869 slice 1 — the queue executor's agent-side
+   * endpoint. server.ts queue() routes a screener-events
+   * analysis-done message here, addressed to the owning
+   * ScreenerAgent DO (per-owner instance, so the durable
+   * stage claims in that DO's SQL are the same claims the
+   * in-process leg used — a redelivery is suppressed
+   * across isolates, not just within one worker).
+   * It consumes the GIVEN message through the shared
+   * consumeAnalysisDoneMessage helper (never rebuilds a
+   * message, never re-runs a screen, never live-fetches):
+   * the persisted analysis is read by the message's own
+   * artifact key, generated through the one generation
+   * module's PDF leg, and re-put with its pdf fields so
+   * replay reads the generated artifact. On generated,
+   * the caller acks; on duplicate-suppressed or
+   * dead-lettered, the caller also acks (the consumer
+   * already dead-lettered); on a missing persisted
+   * analysis the consumer throws and the caller retries
+   * into the DLQ. This method does NOT refresh the
+   * canonical report row's pdfKey — that refresh is
+   * not in slice 1 (see stageQueueTransport.ts).
+   * (No canonical-store reference lives in this file:
+   * the canonical report copy is written exactly once by
+   * the orchestrator seam, never here.)
+   */
+  async consumeQueuedAnalysisDone(
+    message: {
+      runId: string;
+      stageId: string;
+      artifactKeys: string[];
+      userLogin: string;
+      idempotencyKey: string;
+      producedBy: string;
+      provenance: { parentRunId: string; traceId?: string };
+    },
+    attempt = 1,
+  ): Promise<{ status: "generated" | "duplicate-suppressed" | "dead-lettered"; reason?: string }> {
+    const { consumeAnalysisDoneMessage } = await import("../workflows/stageReportProduction");
+    const { isAnalysisDoneStageMessage } = await import("../workflows/stageQueueTransport");
+    if (!isAnalysisDoneStageMessage(message)) {
+      console.warn("[screener-agent] queued stage message dead-lettered: not a well-shaped analysis-done message.");
+      return { status: "dead-lettered", reason: "poison message: not a well-shaped analysis-done stage message." };
+    }
+    let generatedPersisted: unknown;
+    const outcome = await consumeAnalysisDoneMessage({
+      env: this.env,
+      storage: this.ctx.storage as never,
+      sql: (this.ctx.storage as { sql?: unknown }).sql as never,
+      message: message as never,
+      userLogin: message.userLogin,
+      attempt,
+      generate: async (input) => {
+        generatedPersisted = input.result;
+        const { generateStockReportArtifacts } = await import("../services/stockReportArtifacts");
+        return generateStockReportArtifacts({
+          env: this.env as never,
+          storage: this.ctx.storage as never,
+          result: input.result as never,
+          userLogin: input.userLogin,
+          formats: ["pdf"],
+        });
+      },
+    });
+    if (outcome.status === "generated" && generatedPersisted) {
+      // Re-put so the analysis key holds the run WITH its
+      // pdf fields (what replay reads), mirroring the
+      // in-process leg's copy-back.
+      await this.ctx.storage.put(message.artifactKeys[0], generatedPersisted);
+    }
+    return outcome;
+  }
+
   private async generateRunPdf(result: ScreenerRunResult): Promise<void> {
     // Issue #2869 (G8): PDF generation runs through the
     // stage consumer — the helper persists the analysis,
