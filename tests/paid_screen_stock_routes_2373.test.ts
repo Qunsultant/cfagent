@@ -620,6 +620,13 @@ describe("buildStockScreenWorkflowCommand (#2373 Slice A extraction)", () => {
   });
 
   it("the broker's contract is preserved: async false → null, and the broker builds the same command", async () => {
+    // Issue #3084: both builds below must carry the SAME spec jobId.
+    // Without it, each build stamps jobId from new Date().toISOString()
+    // and the toEqual below passes only when both builds land in the
+    // same millisecond — a real race that failed CI shard 2/4 once
+    // (and the #3049 full suite before it). Derivation itself stays
+    // covered by the "job id derived from the spec" test above.
+    const specJobId = "broker-contract-job";
     const sync = await startStockScreenWorkflowOrNull({
       env: {} as never,
       spec: baseSpec({ asyncRequested: false }),
@@ -632,7 +639,7 @@ describe("buildStockScreenWorkflowCommand (#2373 Slice A extraction)", () => {
     const seen: unknown[] = [];
     const started = await startStockScreenWorkflowOrNull({
       env: {} as never,
-      spec: baseSpec(),
+      spec: baseSpec({ jobId: specJobId }),
       userLogin: LOGIN,
       starter: async (_env, command) => {
         seen.push(command);
@@ -643,7 +650,7 @@ describe("buildStockScreenWorkflowCommand (#2373 Slice A extraction)", () => {
     expect(seen).toHaveLength(1);
     expect((seen[0] as { jobId: string }).jobId).toBe(started!.jobId);
     expect(seen[0]).toEqual(
-      buildStockScreenWorkflowCommand(baseSpec(), {
+      buildStockScreenWorkflowCommand(baseSpec({ jobId: specJobId }), {
         userLogin: LOGIN,
         tenantId: workflowTenantId({} as never),
       }),
