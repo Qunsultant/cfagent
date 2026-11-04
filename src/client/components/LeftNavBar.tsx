@@ -49,6 +49,11 @@ export function LeftNavBar({
   brandTitle = BRAND.name,
   brandTagline = BRAND.tagline,
 }: LeftNavBarProps) {
+  // Issue #3163: hovered row in the expanded sidebar. The visible
+  // sub-menu is pinned (expandedMenus, chevron click) OR hovered:
+  // hovering a row shows its sub-menu, leaving hides it unless the
+  // chevron pinned it.
+  const [hoveredItem, setHoveredItem] = useState<string | null>(null);
   // Track open/closed state of sub-menus by item id
   const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>(() => {
     // Automatically expand any menu whose sub-item is active
@@ -88,12 +93,15 @@ export function LeftNavBar({
     id: string;
     top: number;
     left: number;
+    // Issue #3163: clicked-open flyouts survive mouse-leave until
+    // toggled or Escape; hover-opened ones stay transient.
+    pinned: boolean;
   } | null>(null);
 
-  const openFlyoutFor = (itemId: string, el: HTMLElement | null) => {
+  const openFlyoutFor = (itemId: string, el: HTMLElement | null, pinned = false) => {
     if (!el) return;
     const rect = el.getBoundingClientRect();
-    setFlyout({ id: itemId, top: rect.top, left: rect.right });
+    setFlyout({ id: itemId, top: rect.top, left: rect.right, pinned });
   };
 
   const closeFlyout = () => setFlyout(null);
@@ -207,7 +215,8 @@ export function LeftNavBar({
       className={`app-sidebar nextgentp-sidebar ${collapsed ? "collapsed" : ""} ${className}`.trim()}
       aria-label="Sidebar Navigation"
       onMouseLeave={() => {
-        if (collapsed) closeFlyout();
+        // Issue #3163: a pinned flyout survives leaving the sidebar.
+        if (collapsed && !flyout?.pinned) closeFlyout();
       }}
     >
       {/* Brand Header */}
@@ -262,7 +271,10 @@ export function LeftNavBar({
               <div className="sidebar-items-group" role="tree">
                 {visibleItems.map((item) => {
                   const hasSubMenu = Boolean(item.subItems && item.subItems.length > 0);
-                  const isExpanded = Boolean(!collapsed && expandedMenus[item.id]);
+                  // Issue #3163: visible = pinned OR hovered.
+                  const isExpanded = Boolean(
+                    !collapsed && (expandedMenus[item.id] || hoveredItem === item.id),
+                  );
                   const visibleSubItems = (item.subItems ?? []).filter(isSubVisible);
                   const flyoutOpen = Boolean(collapsed && flyout?.id === item.id && visibleSubItems.length > 0);
                   const active =
@@ -280,11 +292,21 @@ export function LeftNavBar({
                       role="treeitem"
                       aria-expanded={hasSubMenu ? (collapsed ? flyoutOpen : isExpanded) : undefined}
                       onMouseEnter={(e) => {
-                        if (collapsed && visibleSubItems.length > 0) {
-                          openFlyoutFor(item.id, e.currentTarget);
-                        } else if (collapsed) {
-                          closeFlyout();
+                        if (collapsed) {
+                          // A pinned flyout is kept open: hovering
+                          // another row must not replace it (#3163).
+                          if (flyout?.pinned) return;
+                          if (visibleSubItems.length > 0) {
+                            openFlyoutFor(item.id, e.currentTarget);
+                          } else {
+                            closeFlyout();
+                          }
+                        } else if (hasSubMenu && visibleSubItems.length > 0) {
+                          setHoveredItem(item.id);
                         }
+                      }}
+                      onMouseLeave={() => {
+                        if (!collapsed) setHoveredItem(null);
                       }}
                     >
                       <div className={`sidebar-nav-item-row ${active ? "active" : ""}`}>
@@ -296,7 +318,7 @@ export function LeftNavBar({
                           target={"href" in itemLink && itemLink.newTab ? "_blank" : undefined}
                           onClick={(e) => handleItemClick(e, item, hasSubMenu)}
                           onFocus={(e) => {
-                            if (collapsed && visibleSubItems.length > 0) {
+                            if (collapsed && !flyout?.pinned && visibleSubItems.length > 0) {
                               openFlyoutFor(item.id, e.currentTarget.closest(".sidebar-nav-item-wrapper") as HTMLElement | null);
                             }
                           }}
@@ -354,10 +376,12 @@ export function LeftNavBar({
                             className={`submenu-toggle-btn ${flyoutOpen ? "open" : ""}`}
                             onClick={(e) => {
                               e.stopPropagation();
-                              if (flyoutOpen) {
+                              // Issue #3163: click pins the flyout
+                              // open; clicking again unpins it.
+                              if (flyoutOpen && flyout?.pinned) {
                                 closeFlyout();
                               } else {
-                                openFlyoutFor(item.id, e.currentTarget.closest(".sidebar-nav-item-wrapper") as HTMLElement | null);
+                                openFlyoutFor(item.id, e.currentTarget.closest(".sidebar-nav-item-wrapper") as HTMLElement | null, true);
                               }
                             }}
                             title={flyoutOpen ? `Close ${item.label} sub-menu` : `Open ${item.label} sub-menu`}
@@ -423,7 +447,11 @@ export function LeftNavBar({
                           id={`flyout-submenu-${item.id}`}
                           role="group"
                           aria-label={`${item.label} sub-menu`}
-                          onMouseLeave={closeFlyout}
+                          onMouseLeave={() => {
+                            // Issue #3163: a pinned flyout survives
+                            // mouse-leave until toggled or Escape.
+                            if (!flyout.pinned) closeFlyout();
+                          }}
                           onKeyDown={(e) => {
                             if (e.key === "Escape") closeFlyout();
                           }}

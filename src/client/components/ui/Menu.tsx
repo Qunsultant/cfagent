@@ -18,7 +18,26 @@ export interface MenuProps {
   align?: "start" | "end";
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  /**
+   * Issue #3163: open on pointer hover in addition to click.
+   * Hovering the trigger opens the panel; leaving the trigger starts
+   * a short close delay that entering the panel cancels, so the
+   * pointer can travel from trigger to panel (the panel is portaled,
+   * so the trigger wrapper alone cannot cover the transit). Click
+   * still toggles (the touch path): it pins the menu open, and a
+   * second click unpins. Escape dismisses and suppresses hover
+   * reopening until the pointer leaves and re-enters. Keyboard open
+   * (Enter / Space / ArrowDown) is unchanged; hover adds no
+   * focus-driven opening, so the portaled panel never traps focus
+   * handling.
+   */
+  hoverOpen?: boolean;
 }
+
+/** Delay before a hover-opened menu closes after the pointer leaves
+ * both trigger and panel — long enough to cross the trigger→panel
+ * gap, short enough to feel immediate. */
+const HOVER_CLOSE_DELAY_MS = 200;
 
 /**
  * Menu (#2283 stream 5)
@@ -36,9 +55,20 @@ export function Menu({
   align = "start",
   open: controlledOpen,
   onOpenChange,
+  hoverOpen = false,
 }: MenuProps) {
   const [internalOpen, setInternalOpen] = React.useState(false);
-  const open = controlledOpen ?? internalOpen;
+  // Issue #3163 hover state. `hovered` = pointer over the trigger
+  // wrapper; `panelHovered` = pointer over the portaled panel;
+  // `dismissed` = Escape / click-to-close / item select suppressed a
+  // hover opening until the pointer leaves and re-enters.
+  const [hovered, setHovered] = React.useState(false);
+  const [panelHovered, setPanelHovered] = React.useState(false);
+  const [dismissed, setDismissed] = React.useState(false);
+  const closeTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const openedByHover = React.useRef(false);
+  const hoverDrivenOpen = hoverOpen && (hovered || panelHovered) && !dismissed;
+  const open = controlledOpen ?? (internalOpen || hoverDrivenOpen);
   const wrapRef = React.useRef<HTMLSpanElement | null>(null);
   const panelRef = React.useRef<HTMLDivElement | null>(null);
   const itemRefs = React.useRef<Array<HTMLButtonElement | null>>([]);
@@ -48,10 +78,71 @@ export function Menu({
   const setOpen = React.useCallback(
     (next: boolean) => {
       if (controlledOpen === undefined) setInternalOpen(next);
+      if (next) {
+        setDismissed(false);
+        openedByHover.current = false;
+      } else if (hoverOpen && (hovered || panelHovered)) {
+        // Closing while the pointer is still over the menu (Escape,
+        // click-to-close, item select): suppress hover reopening
+        // until the pointer leaves and re-enters.
+        setDismissed(true);
+      }
       onOpenChange?.(next);
     },
-    [controlledOpen, onOpenChange],
+    [controlledOpen, onOpenChange, hoverOpen, hovered, panelHovered],
   );
+
+  // Issue #3163: shared hover-leave timer. Leaving the trigger or
+  // the panel starts it; entering either cancels it. On expiry the
+  // pointer is over neither, so hover state clears (a pinned menu
+  // stays open via internalOpen; a controlled caller that mirrored
+  // a hover opening gets onOpenChange(false)).
+  const clearCloseTimer = React.useCallback(() => {
+    if (closeTimer.current) {
+      clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+  }, []);
+
+  React.useEffect(() => clearCloseTimer, [clearCloseTimer]);
+
+  const scheduleHoverClose = React.useCallback(() => {
+    clearCloseTimer();
+    closeTimer.current = setTimeout(() => {
+      closeTimer.current = null;
+      setHovered(false);
+      setPanelHovered(false);
+      if (controlledOpen !== undefined && openedByHover.current) {
+        openedByHover.current = false;
+        onOpenChange?.(false);
+      }
+    }, HOVER_CLOSE_DELAY_MS);
+  }, [clearCloseTimer, controlledOpen, onOpenChange]);
+
+  const handleTriggerEnter = React.useCallback(() => {
+    if (!hoverOpen) return;
+    clearCloseTimer();
+    setDismissed(false);
+    if (!open) openedByHover.current = true;
+    setHovered(true);
+    if (controlledOpen !== undefined) onOpenChange?.(true);
+  }, [hoverOpen, clearCloseTimer, open, controlledOpen, onOpenChange]);
+
+  const handleTriggerLeave = React.useCallback(() => {
+    if (!hoverOpen) return;
+    scheduleHoverClose();
+  }, [hoverOpen, scheduleHoverClose]);
+
+  const handlePanelEnter = React.useCallback(() => {
+    if (!hoverOpen) return;
+    clearCloseTimer();
+    setPanelHovered(true);
+  }, [hoverOpen, clearCloseTimer]);
+
+  const handlePanelLeave = React.useCallback(() => {
+    if (!hoverOpen) return;
+    scheduleHoverClose();
+  }, [hoverOpen, scheduleHoverClose]);
 
   const enabledIndexes = React.useMemo(
     () => items.map((item, i) => (item.disabled ? -1 : i)).filter((i) => i >= 0),
@@ -137,6 +228,8 @@ export function Menu({
       aria-label={ariaLabel}
       className="ui-menu"
       style={{ top: pos.top, left: pos.left }}
+      onMouseEnter={handlePanelEnter}
+      onMouseLeave={handlePanelLeave}
       onKeyDown={(event) => {
         if (event.key === "ArrowDown") {
           event.preventDefault();
@@ -181,7 +274,12 @@ export function Menu({
 
   return (
     <>
-      <span ref={wrapRef} className="ui-menu-trigger">
+      <span
+        ref={wrapRef}
+        className="ui-menu-trigger"
+        onMouseEnter={handleTriggerEnter}
+        onMouseLeave={handleTriggerLeave}
+      >
         {triggerEl}
       </span>
       {typeof document !== "undefined" && panel ? createPortal(panel, document.body) : panel}
