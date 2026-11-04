@@ -245,7 +245,7 @@ describe("#2120 slice 1 tab backends (native shapes)", () => {
             },
           ],
           totalMatches: 1,
-          provider: "semantic_cache",
+          provider: "cloudflare_ai_search",
           timestamp: "2026-10-28T00:00:00Z",
         });
       }
@@ -255,7 +255,31 @@ describe("#2120 slice 1 tab backends (native shapes)", () => {
     setInputValue(container.querySelector("input")!, "options risk");
     await submitForm();
     expect(text()).toContain("OCC disclosure");
-    expect(text()).toContain("semantic_cache");
+    expect(text()).toContain("cloudflare_ai_search");
+    expect(text()).not.toContain("Live index unavailable");
+  });
+
+  it("agent tab shows the degraded notice when the live index did not serve (#1169 S3)", async () => {
+    stubFetch((url) => {
+      if (url === "/api/search/agent") {
+        return okJson({
+          query: "options risk",
+          results: [],
+          totalMatches: 0,
+          provider: "cloudflare_ai_search",
+          timestamp: "2026-11-04T00:00:00Z",
+          degraded: "upstream_unreachable",
+        });
+      }
+      return okJson({});
+    });
+    await render(<SearchAgentTab />);
+    setInputValue(container.querySelector("input")!, "options risk");
+    await submitForm();
+    // Visible degraded state — not silent emptiness, not stub rows.
+    expect(text()).toContain("Live index unavailable");
+    expect(text()).toContain("upstream_unreachable");
+    expect(text()).toContain("0 results");
   });
 
   it("semantic tab hydrates hits via /api/reports and shows semantic bool", async () => {
