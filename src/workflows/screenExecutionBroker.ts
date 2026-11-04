@@ -148,6 +148,62 @@ export function buildParentScreenCommand(
 }
 
 /**
+ * Issue #2373 (Slice A) — the spec -> parent-command mapping,
+ * extracted from startStockScreenWorkflowOrNull so the paid
+ * seam (which hands the same command to the payment workflow
+ * instead of starting the screener directly) builds exactly
+ * one command, never a second literal. Pure: the tenant id
+ * arrives via deps (callers resolve it from env with
+ * workflowTenantId), so no env access lives here. The broker
+ * below and the paid seam both call this; the broker's
+ * contract is unchanged.
+ */
+export interface StockScreenWorkflowCommandDeps {
+  userLogin: string;
+  tenantId?: string;
+  /** Optional: E*TRADE passes its requested env; market-data passes none. */
+  environment?: "TEST" | "PROD";
+  /** Optional: E*TRADE passes its flag; market-data passes none. */
+  portfolioContext?: boolean;
+}
+
+export function buildStockScreenWorkflowCommand(
+  spec: StockScreenRunSpec,
+  deps: StockScreenWorkflowCommandDeps,
+): WorkflowJobCommand {
+  // Issue #2908 (G1): the job id and identity come from the
+  // spec when it carries them — no field re-derived by hand
+  // downstream. The workflow trigger maps from the spec
+  // trigger (scheduled only for scheduled specs); the spec's
+  // own trigger rides as specTrigger so NLQ/mesh/research
+  // provenance survives the workflow hop.
+  // Issue #2914 (G7): the command comes from the one
+  // builder — the literal lived in the broker before, now shared.
+  return buildParentScreenCommand({
+    jobId: spec.jobId ?? manualWorkflowJobId(spec.universe),
+    source: "manual",
+    trigger: workflowTriggerForSpec(spec),
+    ...(spec.trigger !== undefined ? { specTrigger: spec.trigger } : {}),
+    userLogin: spec.userLogin ?? deps.userLogin,
+    tenantId: deps.tenantId,
+    shards: shardsForUniverse(spec.universe),
+    ...(spec.scheduleId !== undefined ? { scheduleId: spec.scheduleId } : {}),
+    ...(spec.goalId !== undefined ? { goalId: spec.goalId } : {}),
+    ...(spec.patternRef !== undefined ? { patternRef: spec.patternRef } : {}),
+    ...(spec.presetRef !== undefined ? { presetRef: spec.presetRef } : {}),
+    ...(spec.patternQualifications !== undefined ? { patternQualifications: spec.patternQualifications } : {}),
+    deliver: spec.deliver,
+    ...(spec.provider ? { provider: spec.provider } : {}),
+    filters: spec.filters as unknown as Record<string, unknown>,
+    ...(deps.environment !== undefined ? { environment: deps.environment } : {}),
+    ...(deps.portfolioContext !== undefined ? { portfolioContext: deps.portfolioContext } : {}),
+    ...(spec.screenMode
+      ? { screenMode: spec.screenMode, screenIntent: spec.screenIntent }
+      : {}),
+  });
+}
+
+/**
  * Start a REST stock screen via workflow when the spec asks
  * for async, otherwise return null for the sync path.
  */
@@ -170,42 +226,19 @@ export async function startStockScreenWorkflowOrNull(args: {
   // routing decision for source "goal", not a failure.
   if (spec.source === "goal") return null;
   if (!spec.asyncRequested) return null;
-  // Issue #2908 (G1): the job id and identity come from the
-  // spec when it carries them — no field re-derived by hand
-  // downstream. The workflow trigger maps from the spec
-  // trigger (scheduled only for scheduled specs); the spec's
-  // own trigger rides as specTrigger so NLQ/mesh/research
-  // provenance survives the workflow hop.
-  const jobId = spec.jobId ?? manualWorkflowJobId(spec.universe);
-  const shards: WorkflowShard[] = shardsForUniverse(spec.universe);
   const starter = args.starter ?? tryStartScreenerWorkflow;
   // ND throw propagates by design — see module header.
-  // Issue #2914 (G7): the command comes from the one
-  // builder — the literal lived here before, now shared.
-  const handle = await starter(env, buildParentScreenCommand({
-    jobId,
-    source: "manual",
-    trigger: workflowTriggerForSpec(spec),
-    ...(spec.trigger !== undefined ? { specTrigger: spec.trigger } : {}),
-    userLogin: spec.userLogin ?? userLogin,
+  // Issue #2373 (Slice A): the command comes from the one
+  // spec -> command mapping above, shared with the paid seam.
+  const command = buildStockScreenWorkflowCommand(spec, {
+    userLogin,
     tenantId: workflowTenantId(env),
-    shards,
-    ...(spec.scheduleId !== undefined ? { scheduleId: spec.scheduleId } : {}),
-    ...(spec.goalId !== undefined ? { goalId: spec.goalId } : {}),
-    ...(spec.patternRef !== undefined ? { patternRef: spec.patternRef } : {}),
-    ...(spec.presetRef !== undefined ? { presetRef: spec.presetRef } : {}),
-    ...(spec.patternQualifications !== undefined ? { patternQualifications: spec.patternQualifications } : {}),
-    deliver: spec.deliver,
-    ...(spec.provider ? { provider: spec.provider } : {}),
-    filters: spec.filters as unknown as Record<string, unknown>,
     ...(environment !== undefined ? { environment } : {}),
     ...(portfolioContext !== undefined ? { portfolioContext } : {}),
-    ...(spec.screenMode
-      ? { screenMode: spec.screenMode, screenIntent: spec.screenIntent }
-      : {}),
-  }));
+  });
+  const handle = await starter(env, command);
   if (!handle) return null;
-  return { handle, jobId, shards };
+  return { handle, jobId: command.jobId, shards: command.shards };
 }
 
 /**

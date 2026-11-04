@@ -12,6 +12,12 @@ assignees: []
 ## Type
 - [x] `[Bug] - <title>` + `bug`
 
+## Size
+<!-- Estimate the work, not the importance. Pick one. -->
+- [ ] Small — one focused change, one PR, no migration, no cross-surface coordination
+- [ ] Medium — several files or one migration, one PR, coordination with one other surface or lane
+- [ ] Large — multi-PR or multi-slice work, migrations, or cross-lane coordination; split into smaller issues when possible
+
 ## Problem
 Observed behavior (what actually happens):
 Expected behavior (what should happen):
@@ -29,6 +35,14 @@ Impact (users affected, degradation vs outage):
 Priority (P1 service down / P2 major degradation / P3 minor degradation / P4 cosmetic — a FIELD, not a label):
 Workaround in place (or none):
 Linked incident issue (or none — a bug that IS the incident record carries the `incident` label itself when service impact is confirmed):
+
+## Existing / similar issues (required — search BEFORE creating)
+- [ ] I searched existing issues (open and closed) for the same or similar work before creating this issue.
+- Same or similar issues found (reference each by number; state whether it already covers this work, only overlaps it, or is distinct):
+  - #NNNN — <title> — <covers / overlaps / distinct because …>
+  - (If none found, write "None found" and give the search terms used below.)
+- Search terms used:
+- If an existing issue already covers this work, do NOT create a duplicate — comment on that issue instead. A new issue is justified only when no existing issue covers it, or when the difference is stated above. (Record confirmed relationships under Related issues below.)
 
 ## Related issues
 Parent epic:
@@ -51,6 +65,7 @@ Excluded:
 Levels/types (ISTQB, per G5): unit / integration / system / acceptance; functional / regression / confirmation:
 
 ## Dependencies
+Cross-lane need: if this requires another lane's capability, link that lane's separately created and assigned issue here — do not fold their work into this issue.
 
 ## Root cause analysis (ITIL problem management — required before close)
 Timeline (facts only, with times: what happened, when, when detected, when workaround/fix landed):

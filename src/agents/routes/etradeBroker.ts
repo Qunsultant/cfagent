@@ -79,6 +79,7 @@ import type { AgentName, Env } from "../../types";
 import type { DatabaseORM } from "../../orm";
 import type { ScreenerAgent } from "../screener-agent";
 import { handleEtradeDiagnostics } from "./etradeBrokerDiagnostics";
+import { extractCheckoutEmail, submitPaidStockScreenOrNull } from "./paidStockScreenSeam";
 import { executeEtradeScreen, executeEtradeScreenListings } from "./etradeBrokerScreen";
 import { etradePositionsMcpEnvelope, etradeQuoteMcp, etradePreviewLocal } from "./etradeBrokerModes";
 import {
@@ -299,6 +300,11 @@ export async function handleEtradeBrokerRoutes(
           ? (filters as { async?: unknown }).async === true
           : url.searchParams.get("async") === "1";
       if (request.method === "POST") delete (filters as { async?: unknown }).async;
+      // Issue #2373 (Slice A): the checkout contact for the paid
+      // path only, read before spec building (the seam module
+      // strips it like `async` so the strict schema never sees
+      // it). Required when monetization is ON; ignored OFF.
+      const checkoutEmail = extractCheckoutEmail(request.method, filters, url.searchParams);
       // Issue #2530: dual-mode fields (distinct from the E01
       // `mode` switch below): ND refuses 400 before any path.
       const modeSelection = admitScreenModeSelection(ctx.env, request.method, filters, url.searchParams, { asyncRequested });
@@ -336,6 +342,23 @@ export async function handleEtradeBrokerRoutes(
       if (!specResult.ok) {
         return Response.json({ error: specResult.error }, { status: 400 });
       }
+      // Issue #2373 (Slice A): monetization ON routes the
+      // screen through the paid seam (sibling module); null =
+      // flag OFF, so the broker-or-sync path below runs
+      // unchanged. The `listings` branch above returns before
+      // spec building, so it never reaches the payment stage.
+      const paid = await submitPaidStockScreenOrNull({
+        env: ctx.env,
+        userLogin,
+        checkoutEmail,
+        spec: specResult.spec,
+        ...(requestedEnv !== undefined ? { environment: requestedEnv } : {}),
+        readSettingRaw: ctx.readSettingRaw,
+        auditType: "etrade.screen_payment_started",
+        auditAgent: "trading",
+        audit: ctx.audit,
+      });
+      if (paid) return paid;
       const agent = ctx.getScreenerAgent(userLogin);
       return await executeEtradeScreen({ ctx, sessionId, requestedEnv, userLogin, agent, spec: specResult.spec });
     } catch (err) {
