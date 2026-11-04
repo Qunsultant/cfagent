@@ -563,7 +563,7 @@ export async function handleEtradeBrokerRoutes(
       }
 
       const etrade = new ETradeService(ctx.getOrm(), ctx.env, userLogin, requestedEnv);
-      return await completeEtradeOrderExecution({ ctx, sessionId, body, orderId, decision, userLogin, userDid, existingRecord, symbol, action, quantity, orderType, limitPrice, strategyOrder, executionVerdict, etrade });
+      return await completeEtradeOrderExecution({ ctx, sessionId, body, orderId, decision, userLogin, userDid, existingRecord, symbol, action, quantity, orderType, limitPrice, strategyOrder, executionVerdict, executor: etrade });
     } catch (err) {
       return Response.json({ error: err instanceof Error ? err.message : "Failed to execute trade order" }, { status: 500 });
     }

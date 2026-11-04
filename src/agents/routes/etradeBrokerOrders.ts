@@ -16,7 +16,6 @@ import { ETradeSlackTradingService } from "../../trading";
 import { ETradeBrowserService } from "../../services/browserAgent";
 import { orderPayloadHash } from "./orderPayloadHash";
 import type { EtradeBrokerRouteContext } from "./etradeBroker";
-import type { ETradeService } from "../../services/etrade";
 import type { PolicyVerdict } from "../../services/riskPolicyEngine";
 
 /**
@@ -84,6 +83,7 @@ export async function completeEtradeOrderPreview(args: {
     estimatedTotal: preview.estimatedTotal,
     proposerDid: preview.proposerDid,
     payloadHash: previewPayloadHash,
+    broker: (preview as any).broker ?? undefined,
   });
 
   // Autopilot policy envelope (autopilot Phase 1). Evaluated server-side
@@ -183,13 +183,33 @@ export async function completeEtradeOrderExecution(args: {
   limitPrice: number | undefined;
   strategyOrder: any;
   executionVerdict: PolicyVerdict | null;
-  etrade: ETradeService;
+  /**
+   * Issue #3089: the execution backend. The E*TRADE route passes its
+   * ETradeService; the broker route passes the draft's resolved
+   * platform. Only the two methods below are used: an optional
+   * remote-submit path and the platform HITL execute path.
+   */
+  executor: {
+    placeOrderRemote?: (params: any) => Promise<any>;
+    executeOrder: (orderId: string, authorizerDid: string, decision: any, expectedTerms?: any) => any;
+  };
 }): Promise<Response> {
-  const { ctx, sessionId, body, orderId, decision, userLogin, userDid, existingRecord, symbol, action, quantity, orderType, limitPrice, strategyOrder, executionVerdict, etrade } = args;
+  const { ctx, sessionId, body, orderId, decision, userLogin, userDid, existingRecord, symbol, action, quantity, orderType, limitPrice, strategyOrder, executionVerdict, executor } = args;
   let result: any;
 
-  if (ctx.env.ETRADE_CONSUMER_KEY || ctx.env.ETRADE_MCP_SERVER_URL || ctx.env.ET_API_KEY) {
-    result = await etrade.placeOrderRemote({
+  // Issue #3089: the draft's broker decides the backend. For E*TRADE
+  // the remote-submit path still requires configured credentials
+  // (the pre-S3 condition, unchanged); any other broker with a
+  // remote-submit method uses it, otherwise the platform HITL
+  // execute path runs — which for a broker without a placement
+  // client fails honestly instead of fabricating a fill.
+  const broker = ((existingRecord as any)?.broker as string | undefined) || "etrade";
+  const remoteConfigured =
+    broker === "etrade"
+      ? Boolean(ctx.env.ETRADE_CONSUMER_KEY || ctx.env.ETRADE_MCP_SERVER_URL || ctx.env.ET_API_KEY)
+      : true;
+  if (typeof executor.placeOrderRemote === "function" && remoteConfigured) {
+    result = await executor.placeOrderRemote({
       orderId,
       symbol,
       action,
@@ -215,7 +235,7 @@ export async function completeEtradeOrderExecution(args: {
       ctx.incrementAutopilotOrdersToday();
     }
   } else {
-    result = await etrade.executeOrder(orderId, userDid, decision);
+    result = await executor.executeOrder(orderId, userDid, decision);
   }
 
   // Cancel the scheduled expiration timer since the order has been executed
@@ -249,6 +269,7 @@ export async function completeEtradeOrderExecution(args: {
     executionId: result.executionId,
     policyVerdictId: executionVerdict?.verdictId ?? null,
     payloadHash: executedPayloadHash,
+    broker,
   });
 
   // Automatically dispatch official transaction snap to Slack via ETradeBrowserService
@@ -276,5 +297,5 @@ export async function completeEtradeOrderExecution(args: {
     }
   }
 
-  return Response.json(result);
+  return Response.json({ ...result, broker });
 }
