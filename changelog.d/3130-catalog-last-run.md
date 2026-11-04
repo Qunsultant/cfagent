@@ -1,0 +1,3 @@
+### Added
+
+- **Per-stage last-run state on the workflow catalog (#3147, #3069 S4/R5):** the catalog joins each workflow to its family's most recent recorded run and renders a **Last run** column beside the declared contract - a status badge and duration per stage, **"never attempted"** for a stage with no row in that run (never "missing"), and "no run recorded" when the family has no run at all. The join states the one vocabulary difference in code (`generate` in the run model is `analysis` in the catalog) instead of duplicating it, and an unavailable `GET /api/workflow-runs` degrades to a warning notice with a Retry while the stage contract stays readable. Four new pins plus the registry, panel, Run-link and UX-conformance suites - 37 green.
