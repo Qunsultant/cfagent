@@ -4,9 +4,9 @@
  *
  * Verifies:
  *  - Platform Admin renders as a dedicated full page inside PageShell;
- *  - renders a tab list with all nine administration surfaces;
+ *  - renders a tab list with all ten administration surfaces;
  *  - tab switching activates corresponding panel (ads, background-tasks,
- *    scheduled-goals, jobs, provenance, api-keys, data-providers, iaaa-admin, admin-access);
+ *    scheduled-goals, jobs, provenance, api-keys, data-providers, iaaa-admin, users, admin-access);
  *  - respects initialSection prop and ?view= query parameter;
  *  - updates URL view param on tab selection;
  *  - Chat.tsx registers "platform-admin" in TAB_CONTENT.
@@ -74,8 +74,8 @@ describe("PlatformAdminPage component", () => {
     expect(tablist).toBeTruthy();
 
     const tabs = container.querySelectorAll('[role="tab"]');
-    expect(tabs).toHaveLength(9);
-    expect(PLATFORM_ADMIN_TABS).toHaveLength(9);
+    expect(tabs).toHaveLength(10);
+    expect(PLATFORM_ADMIN_TABS).toHaveLength(10);
 
     // Initial default tab is ads
     expect(tabs[0].getAttribute("aria-selected")).toBe("true");
@@ -155,7 +155,16 @@ describe("PlatformAdminPage component", () => {
     });
     expect(container.querySelector('[data-testid="iaaa-admin-panel"]')).toBeTruthy();
 
-    // 7. Switch to Admin Access
+    // 7. Switch to Users (#2220: the tab renders its panel shell;
+    // the panel's own fetch resolves asynchronously, so assert the
+    // page-level section copy, not the fetched profile).
+    const usersTab = Array.from(tabs).find((t) => t.textContent === "Users") as HTMLElement;
+    await act(async () => {
+      usersTab.click();
+    });
+    expect(container.textContent).toContain("User profiles, tenant memberships");
+
+    // 8. Switch to Admin Access
     const accessTab = Array.from(tabs).find((t) => t.textContent?.includes("Admin Access")) as HTMLElement;
     await act(async () => {
       accessTab.click();
