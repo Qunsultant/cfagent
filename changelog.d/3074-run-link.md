@@ -1,0 +1,3 @@
+### Added
+
+- **Run action on the workflow catalog (#3074, #3069 R8):** each runnable workflow now carries a `runPath` — the application URL of its existing, gated submission surface (stock to `?tab=stock-hub&view=new-screen`, options to `?tab=options-screener`) — and the catalog renders a `Run` link to it. The catalog never invents a submission path and never bypasses that surface's flags or payment gates; a non-runnable workflow declares `runPath: null` and keeps its read-only notice. `assertWorkflowCatalog` refuses both mismatches: runnable without a path, and a path on a non-runnable workflow. Four new pins (links render per family, no link for read-only, registry lockstep, both refusals) plus the panel, registry and shell-conformance suites — 31 green.

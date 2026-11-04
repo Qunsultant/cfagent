@@ -3,6 +3,7 @@ import type { NavTabId } from "./NavigationMenu";
 import { Button, Drawer, TextInput } from "./ui";
 import { usePolling } from "../usePolling";
 import { BRAND } from "../branding";
+import { csrfHeaders } from "../apiFetch";
 
 export interface AskAgentWidgetProps {
   onAskAgent: (prompt: string) => void;
@@ -147,7 +148,7 @@ export function AskAgentWidget({
     try {
       const res = await globalThis.fetch("/api/saga/journey-decision", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...csrfHeaders() },
         body: JSON.stringify({ sagaId, decision, surface: "chat" }),
       });
       const data = (await res.json().catch(() => null)) as {

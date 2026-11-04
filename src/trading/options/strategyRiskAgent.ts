@@ -87,7 +87,21 @@ export class StrategyRiskAgent {
     return recommendNoViewStrategies(contracts, request);
   }
 
-  riskReport(candidate: StrategyCandidate, request: Pick<StrategyRequest, "maxPlannedLoss">): StrategyRiskReport {
+  /**
+   * Issue #3000: the parameter is the shared candidate core, not the
+   * viewed shape — the report reads only shared fields (id, maxLoss,
+   * maxProfit, breakevens, POP, Greeks, scenarios, netDebit), so a
+   * no-view candidate (which omits targetPnl/targetRewardRisk by
+   * design) reports identically. Widening the type instead of
+   * fabricating view fields on a view-less candidate.
+   */
+  riskReport(
+    candidate: Omit<
+      StrategyCandidate,
+      "targetPnl" | "targetRewardRisk" | "scoreBreakdown"
+    >,
+    request: Pick<StrategyRequest, "maxPlannedLoss">,
+  ): StrategyRiskReport {
     const byPnl = [...candidate.scenarios].sort((a, b) => a.pnl - b.pnl);
     const pick = (s?: StrategyCandidate["scenarios"][number]) =>
       s ?? { underlyingPrice: 0, daysToExpiry: 0, ivChangePct: 0, pnl: 0 };

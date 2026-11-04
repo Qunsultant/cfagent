@@ -70,15 +70,17 @@ describe("risk analysis page (#3087)", () => {
     expect(order.label).toBe("Risk Analysis");
   });
 
-  it("resolves order:risk-analysis to ?tab=risk-analysis", () => {
+  it("retargets order:risk-analysis to the order page's Risk tab (#3125)", () => {
     expect(DEEP_LINK_OVERRIDES["order:risk-analysis"]).toEqual({
-      tab: "risk-analysis",
+      tab: "order",
+      params: { orderTab: "risk" },
     });
     expect(deepLinkForNavNode("order", "risk-analysis")).toEqual({
-      tab: "risk-analysis",
+      tab: "order",
+      params: { orderTab: "risk" },
     });
     expect(deepLinkHrefForNavNode("order", "risk-analysis")).toBe(
-      "?tab=risk-analysis",
+      "?tab=order&orderTab=risk",
     );
   });
 

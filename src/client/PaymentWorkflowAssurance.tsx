@@ -83,6 +83,7 @@ import {
 } from "./components/ui";
 import { StoreOperatorsPanel } from "./StoreOperatorsPanel";
 import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
+import { withCsrfInit, csrfHeaders } from "./apiFetch";
 
 export interface FakeConfig {
   monetizationOn: boolean;
@@ -543,7 +544,7 @@ export function PriceApprovalSection({ userLogin }: { userLogin?: string }) {
     try {
       const res = await globalThis.fetch("/api/payments/agentic/commercial/prices", {
         method: "POST",
-        headers: { ...headers, "content-type": "application/json" },
+        headers: { ...headers, "content-type": "application/json", ...csrfHeaders() },
         body: "{}",
       });
       // The probe may run schema-ensure on a FRESH store only (seeding
@@ -568,7 +569,7 @@ export function PriceApprovalSection({ userLogin }: { userLogin?: string }) {
     try {
       const res = await globalThis.fetch("/api/payments/agentic/commercial/prices", {
         method: "POST",
-        headers: { "x-user-login": userLogin, "content-type": "application/json" },
+        headers: { "x-user-login": userLogin, "content-type": "application/json", ...csrfHeaders() },
         body: JSON.stringify({ family, approvalStatus: "approved" }),
       });
       const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
@@ -688,7 +689,7 @@ export function PriceApprovalSection({ userLogin }: { userLogin?: string }) {
     try {
       const res = await globalThis.fetch("/api/payments/agentic/commercial/prices", {
         method: "POST",
-        headers: { "x-user-login": userLogin, "content-type": "application/json" },
+        headers: { "x-user-login": userLogin, "content-type": "application/json", ...csrfHeaders() },
         body: JSON.stringify(body),
       });
       const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
@@ -916,7 +917,7 @@ export function PaymentWorkflowAssurance({ userLogin }: { userLogin?: string }) 
   });
 
   const liveCall = async (path: string, init?: RequestInit): Promise<unknown> => {
-    const res = await globalThis.fetch(path, init);
+    const res = await globalThis.fetch(path, withCsrfInit(init));
     const data: unknown = await res.json().catch(() => ({}));
     if (!res.ok) {
       const message = data && typeof data === "object" && typeof (data as { error?: unknown }).error === "string"

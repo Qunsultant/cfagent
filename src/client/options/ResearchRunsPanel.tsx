@@ -15,6 +15,7 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import { Button, Checkbox, Table, TextInput, type TableColumn } from "../components/ui";
+import { csrfHeaders } from "../apiFetch";
 
 interface ResearchRunsPanelProps {
   userLogin?: string;
@@ -291,7 +292,7 @@ export function ResearchRunsPanel({ userLogin, onSendPrompt }: ResearchRunsPanel
       }
       const res = await fetch("/api/research/settings", {
         method: "POST",
-        headers: hdrs(userLogin),
+        headers: { ...hdrs(userLogin), ...csrfHeaders() },
         body: JSON.stringify(patch),
       });
       const data = (await res.json()) as { config?: Record<string, unknown>; errors?: string[] };
@@ -312,7 +313,7 @@ export function ResearchRunsPanel({ userLogin, onSendPrompt }: ResearchRunsPanel
     setRunning(true);
     setRunMsg("Running research…");
     try {
-      const res = await fetch("/api/research/run", { method: "POST", headers: hdrs(userLogin) });
+      const res = await fetch("/api/research/run", { method: "POST", headers: { ...hdrs(userLogin), ...csrfHeaders() } });
       const data = (await res.json()) as { success?: boolean; error?: string; report?: ReportView; reportId?: string };
       if (data.success && data.report) {
         setReport(data.report);
@@ -333,7 +334,7 @@ export function ResearchRunsPanel({ userLogin, onSendPrompt }: ResearchRunsPanel
     try {
       const res = await fetch("/api/research/evaluate", {
         method: "POST",
-        headers: hdrs(userLogin),
+        headers: { ...hdrs(userLogin), ...csrfHeaders() },
         body: JSON.stringify({ runId }),
       });
       const data = (await res.json()) as { evaluation?: { aggregates?: Record<string, unknown> } | null };

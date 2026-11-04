@@ -2,6 +2,24 @@ import React from "react";
 import { Spinner } from "./Spinner";
 import { EmptyState } from "./EmptyState";
 import { Notice } from "./Notice";
+import { Card } from "./Card";
+
+/**
+ * Page chrome mode (issue #3125): who owns the chrome around a panel.
+ * - "page": the standalone route — full shell with h1 title + scope note.
+ * - "tab": the panel is a tab on another page — the tab's label IS the
+ *   title, so the shell renders only its content, no second header.
+ * - "nested": the panel sits inside another panel — it becomes a Card
+ *   surface with its title as the card heading, never a second h1.
+ *
+ * The mode is host-applied context, never a panel prop and never a
+ * branch inside a panel: the SAME component renders in all three hosts
+ * with zero changes to itself. Only PageShell reads this context; panels
+ * must not (a panel that branches on its host is not composable).
+ */
+export type PageChromeMode = "page" | "tab" | "nested";
+export const PageChromeContext =
+  React.createContext<PageChromeMode>("page");
 
 export interface PageShellProps {
   /** Page title (the page's h1). */
@@ -50,23 +68,39 @@ export function PageShell({
   emptyAction,
   children,
 }: PageShellProps) {
+  const chrome = React.useContext(PageChromeContext);
+  const body = loading ? (
+    <div className="ui-page-shell-state">
+      <Spinner label={loadingLabel} />
+    </div>
+  ) : error ? (
+    <Notice tone="danger">{error}</Notice>
+  ) : empty ? (
+    <EmptyState title={emptyTitle} description={emptyDescription} action={emptyAction} />
+  ) : (
+    <div className="ui-page-shell-sections">{children}</div>
+  );
+  // Tab host: the tab label is the title — render content only, so the
+  // same panel never produces a second header inside its host page.
+  if (chrome === "tab") return <>{body}</>;
+  // Nested host: the panel becomes a card surface; its title drops from
+  // the page h1 to the card heading.
+  if (chrome === "nested") {
+    return (
+      <Card>
+        <PageSection title={title} description={scopeNote}>
+          {body}
+        </PageSection>
+      </Card>
+    );
+  }
   return (
     <div className="ui-page-shell">
       <div className="ui-page-shell-header">
         <h1 className="ui-page-shell-title">{title}</h1>
         {scopeNote && <p className="ui-page-shell-scope">{scopeNote}</p>}
       </div>
-      {loading ? (
-        <div className="ui-page-shell-state">
-          <Spinner label={loadingLabel} />
-        </div>
-      ) : error ? (
-        <Notice tone="danger">{error}</Notice>
-      ) : empty ? (
-        <EmptyState title={emptyTitle} description={emptyDescription} action={emptyAction} />
-      ) : (
-        <div className="ui-page-shell-sections">{children}</div>
-      )}
+      {body}
     </div>
   );
 }

@@ -128,6 +128,7 @@ import {
   sessionStore,
   wiredMembershipStore,
 } from "./session";
+import { setCsrfCookie } from "./csrf";
 import {
   authOutcomeLoginUrl,
   type AuthOutcomeCode,
@@ -840,12 +841,16 @@ export async function completeWiredLogin(
   // (the outcome still travels on it, so the boot toast still
   // shows and the parameter is still stripped on boot); an absent
   // or invalid target keeps exactly the default landing above.
+  // Issue #3113 (#945 Q5): mint the CSRF token cookie alongside the
+  // session cookie at login — every post-login mutation needs it.
+  const loginHeaders = new Headers({
+    Location: buildPostLoginRedirect(options?.returnTarget ?? null),
+  });
+  loginHeaders.append("Set-Cookie", setSessionCookie(sessionId));
+  loginHeaders.append("Set-Cookie", setCsrfCookie(crypto.randomUUID()));
   return new Response(null, {
     status: 302,
-    headers: {
-      Location: buildPostLoginRedirect(options?.returnTarget ?? null),
-      "Set-Cookie": setSessionCookie(sessionId),
-    },
+    headers: loginHeaders,
   });
 }
 

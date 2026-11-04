@@ -6,6 +6,7 @@
  * The brief editor stores only what the user types; this module never
  * invents content.
  */
+import { withCsrfInit } from "./apiFetch";
 
 /** Server cap (src/agents/social/briefStore.ts SOCIAL_BRIEF_MAX_CHARS). */
 export const SOCIAL_BRIEF_MAX_CHARS = 4000;
@@ -45,7 +46,7 @@ export function todayInNewYork(now = new Date()): string {
 }
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await globalThis.fetch(path, init);
+  const response = await globalThis.fetch(path, withCsrfInit(init));
   const data = (await response.json()) as T & { error?: string };
   if (!response.ok) throw new Error(data.error || `Request failed: ${path}`);
   return data;

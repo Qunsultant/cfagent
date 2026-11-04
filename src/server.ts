@@ -14,6 +14,8 @@ import {
 } from "./messaging/deadLetter";
 import { getSessionCached, getSessionCachedFetchedAt, invalidateSessionCache } from "./security/sessionCache";
 import { resolveIdleTimeoutMs } from "./security/sessionPolicy";
+import { csrfGateResult, ensureCsrfCookie } from "./security/csrf";
+import { rotateUserSessionsForEnv, sessionRotationCookie } from "./security/sessionRotation";
 import { resolveScreenerAgentName } from "./agents/screenerAgentName";
 import { isAnalysisDoneStageMessage, isStageBoundaryMessage } from "./workflows/stageQueueTransport";
 import {
@@ -652,6 +654,16 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
     // binding before `requireAuth` can spend a session-store read on them.
     const staticAsset = await serveStaticAsset(request, path, env);
     if (staticAsset) return staticAsset;
+
+    // Issue #3113 (#945 Q5): CSRF gate for cookie-authenticated
+    // mutations. Runs before routing so a rejected request changes
+    // no state; safe methods, requests without a session cookie,
+    // and exempt paths (login/callback, HMAC webhooks,
+    // token-authenticated /mcp and /a2a, Slack events) pass.
+    const csrf = csrfGateResult(request);
+    if (!csrf.pass) {
+      return Response.json({ error: csrf.error, code: csrf.code }, { status: 403 });
+    }
 
     // Issue #241: abuse throttling on expensive ingress routes.
     // `null` = allowed, otherwise a 429 Response to return immediately.
@@ -1905,6 +1917,10 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
       if (!session) {
         return Response.json({ authenticated: false });
       }
+      // Issue #3113 (#945 Q5): self-heal for pre-slice sessions —
+      // mint a CSRF token cookie on this authenticated GET when the
+      // request carries none, so the next mutation can carry it.
+      const meCsrfCookie = ensureCsrfCookie(request);
       // #1274: login-provider display. Derived from the session's own
       // providerIssuer (set at wired login from the binding, never
       // from user input) via the provider registry — so a future
@@ -1940,7 +1956,7 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
               },
             }
           : {}),
-      });
+      }, meCsrfCookie ? { headers: { "Set-Cookie": meCsrfCookie } } : undefined);
     }
 
     // Issue Qunsultant/cfagent#488 — per-user email destination as data.
@@ -2892,6 +2908,9 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
         if (existing.status !== "pending") {
           return Response.json({ error: "Access request is no longer pending.", request: existing }, { status: 409 });
         }
+        // Issue #3113 (#945 Q5): an approval that grants is a
+        // privilege change — its rotation runs below, after decide.
+        let approvedGrant = false;
         if (decision === "approve") {
           const targetMemberships = await membershipStore.getMembershipsByUser(existing.requesterInternalUserId);
           const alreadyAdmin = targetMemberships.some(
@@ -2913,13 +2932,32 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
             if (!granted.ok) {
               return Response.json({ error: "Forbidden: grant denied." }, { status: 403 });
             }
+            approvedGrant = true;
           }
         }
         const decided = await requestStore.decide(requestId, decision === "approve" ? "approved" : "denied", session.internalUserId, nowMs);
         if (!decided.ok) {
           return Response.json({ error: "Access request is no longer pending." }, { status: 409 });
         }
-        return Response.json({ ok: true, request: decided.request });
+        // Issue #3113 (#945 Q5): an approval-grant rotates the
+        // requester's active sessions (old ids dead). A denial or
+        // an already-admin no-op changes nothing and rotates nothing.
+        let approveRotationCount = 0;
+        let approveRotationUnavailable = false;
+        let approveRotationCookie: string | null = null;
+        if (approvedGrant) {
+          const approveRotation = await rotateUserSessionsForEnv(env, existing.requesterInternalUserId, nowMs);
+          approveRotationCount = approveRotation.rotated.length;
+          approveRotationUnavailable = approveRotation.unavailable;
+          if (approveRotation.unavailable) {
+            console.warn("[iaaa] session rotation skipped: session listing unavailable");
+          }
+          approveRotationCookie = sessionRotationCookie(request, approveRotation);
+        }
+        return Response.json(
+          { ok: true, request: decided.request, sessionRotation: { rotatedCount: approveRotationCount, unavailable: approveRotationUnavailable } },
+          approveRotationCookie ? { headers: { "Set-Cookie": approveRotationCookie } } : undefined,
+        );
       } catch {
         return Response.json({ error: "Access requests unavailable." }, { status: 500 });
       }
@@ -3408,9 +3446,22 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
               { status: granted.code === "GRANT_DENIED" ? 403 : 400 },
             );
           }
+          // Issue #3113 (#945 Q5): a real grant rotates the
+          // affected user's active sessions (old ids dead);
+          // re-issue the acting session's cookie when it rotated.
+          // Counts only, never ids, in the response.
+          const grantRotation = await rotateUserSessionsForEnv(env, targetId, nowMs);
+          if (grantRotation.unavailable) {
+            console.warn("[iaaa] session rotation skipped: session listing unavailable");
+          }
+          const grantRotationCookie = sessionRotationCookie(request, grantRotation);
           return Response.json(
-            { ok: true, grant: toRoleGrantView(granted.membership, 0) },
-            { status: 201 },
+            {
+              ok: true,
+              grant: toRoleGrantView(granted.membership, 0),
+              sessionRotation: { rotatedCount: grantRotation.rotated.length, unavailable: grantRotation.unavailable },
+            },
+            { status: 201, ...(grantRotationCookie ? { headers: { "Set-Cookie": grantRotationCookie } } : {}) },
           );
         }
         if (path === "/api/iaaa/role-grants/revoke") {
@@ -3486,7 +3537,17 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
           } else {
             await membershipStore.put(removed.membership);
           }
-          return Response.json({ ok: true, grantId: view.grantId, emptied: removed.emptied, revoked: true });
+          // Issue #3113 (#945 Q5): a real revoke rotates the
+          // affected user's active sessions (old ids dead).
+          const revokeRotation = await rotateUserSessionsForEnv(env, record.internalUserId, nowMs);
+          if (revokeRotation.unavailable) {
+            console.warn("[iaaa] session rotation skipped: session listing unavailable");
+          }
+          const revokeRotationCookie = sessionRotationCookie(request, revokeRotation);
+          return Response.json(
+            { ok: true, grantId: view.grantId, emptied: removed.emptied, revoked: true, sessionRotation: { rotatedCount: revokeRotation.rotated.length, unavailable: revokeRotation.unavailable } },
+            revokeRotationCookie ? { headers: { "Set-Cookie": revokeRotationCookie } } : undefined,
+          );
         }
         // #2836 — admin surface for logged-in users. GET lists
         // active sessions + per-user login history; POST revokes
@@ -4623,9 +4684,21 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
               tenantId: grantTenantId,
             });
           }
+          // Issue #3113 (#945 Q5): a real grant rotates the
+          // affected user's active sessions (old ids dead).
+          const memberGrantRotation = await rotateUserSessionsForEnv(env, targetId, nowMs);
+          if (memberGrantRotation.unavailable) {
+            console.warn("[iaaa] session rotation skipped: session listing unavailable");
+          }
+          const memberGrantRotationCookie = sessionRotationCookie(request, memberGrantRotation);
           return Response.json(
-            { ok: true, membership: granted.membership, ...(welcome ? { welcome } : {}) },
-            { status: 201 },
+            {
+              ok: true,
+              membership: granted.membership,
+              ...(welcome ? { welcome } : {}),
+              sessionRotation: { rotatedCount: memberGrantRotation.rotated.length, unavailable: memberGrantRotation.unavailable },
+            },
+            { status: 201, ...(memberGrantRotationCookie ? { headers: { "Set-Cookie": memberGrantRotationCookie } } : {}) },
           );
         }
         if (path === "/api/iaaa/membership/revoke") {
@@ -4677,7 +4750,17 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
           if (!revoked) {
             return Response.json({ error: "Membership not found." }, { status: 404 });
           }
-          return Response.json({ ok: true, membershipId, revoked: true });
+          // Issue #3113 (#945 Q5): a real revoke rotates the
+          // affected user's active sessions (old ids dead).
+          const memberRevokeRotation = await rotateUserSessionsForEnv(env, record.internalUserId, nowMs);
+          if (memberRevokeRotation.unavailable) {
+            console.warn("[iaaa] session rotation skipped: session listing unavailable");
+          }
+          const memberRevokeRotationCookie = sessionRotationCookie(request, memberRevokeRotation);
+          return Response.json(
+            { ok: true, membershipId, revoked: true, sessionRotation: { rotatedCount: memberRevokeRotation.rotated.length, unavailable: memberRevokeRotation.unavailable } },
+            memberRevokeRotationCookie ? { headers: { "Set-Cookie": memberRevokeRotationCookie } } : undefined,
+          );
         }
         if (path === "/api/iaaa/membership/edit") {
           if (request.method !== "POST") {
@@ -4746,12 +4829,23 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
             );
           }
           const oldRevoked = await membershipStore.revokeMembership(membershipId, nowMs);
-          return Response.json({
-            ok: true,
-            membership: granted.membership,
-            oldRevoked,
-            ...(oldRevoked ? {} : { warning: "New membership granted but the old record could not be revoked; the principal currently holds both." }),
-          });
+          // Issue #3113 (#945 Q5): an edit is a privilege change —
+          // rotate the affected user's active sessions (old ids dead).
+          const editRotation = await rotateUserSessionsForEnv(env, granted.membership.internalUserId, nowMs);
+          if (editRotation.unavailable) {
+            console.warn("[iaaa] session rotation skipped: session listing unavailable");
+          }
+          const editRotationCookie = sessionRotationCookie(request, editRotation);
+          return Response.json(
+            {
+              ok: true,
+              membership: granted.membership,
+              oldRevoked,
+              ...(oldRevoked ? {} : { warning: "New membership granted but the old record could not be revoked; the principal currently holds both." }),
+              sessionRotation: { rotatedCount: editRotation.rotated.length, unavailable: editRotation.unavailable },
+            },
+            editRotationCookie ? { headers: { "Set-Cookie": editRotationCookie } } : undefined,
+          );
         }
         // #2450 — per-user integration:connect denial. The blanket
         // member grant gives every member connect; these routes let
@@ -4817,7 +4911,17 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
             deniedBy: session.internalUserId,
             deniedAtMs: nowMs,
           });
-          return Response.json({ ok: true, denial }, { status: 201 });
+          // Issue #3113 (#945 Q5): a deny changes what the user's
+          // sessions may do — rotate the affected user's sessions.
+          const denyRotation = await rotateUserSessionsForEnv(env, targetId, nowMs);
+          if (denyRotation.unavailable) {
+            console.warn("[iaaa] session rotation skipped: session listing unavailable");
+          }
+          const denyRotationCookie = sessionRotationCookie(request, denyRotation);
+          return Response.json(
+            { ok: true, denial, sessionRotation: { rotatedCount: denyRotation.rotated.length, unavailable: denyRotation.unavailable } },
+            { status: 201, ...(denyRotationCookie ? { headers: { "Set-Cookie": denyRotationCookie } } : {}) },
+          );
         }
         if (path === "/api/iaaa/permission/clear") {
           if (request.method !== "POST") {
@@ -4870,7 +4974,17 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
             return Response.json({ ok: true, cleared: false });
           }
           await denialStore.clearDenial(existing.denialId);
-          return Response.json({ ok: true, cleared: true, denialId: existing.denialId });
+          // Issue #3113 (#945 Q5): clearing a deny restores what
+          // the user's sessions may do — rotate them as well.
+          const clearRotation = await rotateUserSessionsForEnv(env, targetId, nowMs);
+          if (clearRotation.unavailable) {
+            console.warn("[iaaa] session rotation skipped: session listing unavailable");
+          }
+          const clearRotationCookie = sessionRotationCookie(request, clearRotation);
+          return Response.json(
+            { ok: true, cleared: true, denialId: existing.denialId, sessionRotation: { rotatedCount: clearRotation.rotated.length, unavailable: clearRotation.unavailable } },
+            clearRotationCookie ? { headers: { "Set-Cookie": clearRotationCookie } } : undefined,
+          );
         }
         if (path === "/api/iaaa/deactivate") {
           if (request.method !== "POST") {
@@ -6202,13 +6316,16 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
           console.warn("[session] renewal failed; page served with the existing session", renewErr);
         }
 
-        return new Response(modified, {
-          headers: {
-            "Content-Type": "text/html; charset=utf-8",
-            "Cache-Control": "no-store",
-            "Set-Cookie": setSessionCookie(sessionId),
-          },
+        // Issue #3113 (#945 Q5): re-issue the session cookie and,
+        // for pre-slice sessions, mint a CSRF token cookie alongside.
+        const pageHeaders = new Headers({
+          "Content-Type": "text/html; charset=utf-8",
+          "Cache-Control": "no-store",
         });
+        pageHeaders.append("Set-Cookie", setSessionCookie(sessionId));
+        const renewalCsrf = ensureCsrfCookie(request);
+        if (renewalCsrf) pageHeaders.append("Set-Cookie", renewalCsrf);
+        return new Response(modified, { headers: pageHeaders });
       }
     }
 

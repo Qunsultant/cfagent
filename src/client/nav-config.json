@@ -1233,7 +1233,10 @@
     }
 ,
     "order:risk-analysis": {
-      "tab": "risk-analysis"
+      "tab": "order",
+      "params": {
+        "orderTab": "risk"
+      }
     }
   },
   "deepLinkSurfaces": [

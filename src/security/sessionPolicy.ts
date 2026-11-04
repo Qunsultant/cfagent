@@ -218,14 +218,16 @@ export const DEFAULT_STEP_UP_FRESHNESS_MS = SESSION_LIMITS.stepUpFreshnessMs;
 
 export interface SessionPolicy {
   absoluteTtlMs: number;
+  /** Hard lifetime cap from first login, even with renewals (30 days). */
+  maxLifetimeMs: number;
   idleTimeoutMs: number;
   stepUpFreshnessMs: number;
 }
 
 /**
  * Resolve the idle window from an owner override (ms as a string) with the
- * settled 30-minute default. Values under 5 minutes are clamped up (a typo
- * like "3000" must not mean 3 seconds), and
+ * settled 8-hour config default (#3113, #945 Q5). Values under 5 minutes
+ * are clamped up (a typo like "3000" must not mean 3 seconds), and
  * values above the absolute TTL are clamped down: idle can never exceed the
  * session's own lifetime.
  */
@@ -235,6 +237,7 @@ export const MIN_IDLE_TIMEOUT_MS = SESSION_LIMITS.minIdleTimeoutMs;
 
 export const DEFAULT_SESSION_POLICY: SessionPolicy = {
   absoluteTtlMs: SESSION_ABSOLUTE_TTL_MS,
+  maxLifetimeMs: SESSION_LIMITS.maxLifetimeSeconds * 1000,
   idleTimeoutMs: DEFAULT_IDLE_TIMEOUT_MS,
   stepUpFreshnessMs: DEFAULT_STEP_UP_FRESHNESS_MS,
 };
@@ -248,12 +251,22 @@ export interface SessionState {
   sessionId: string;
   internalUserId: string;
   createdAtMs: number;
+  /**
+   * First creation time, preserved across sliding renewals. Absent
+   * on legacy states, where createdAtMs is the first creation time
+   * and the cap falls back to it.
+   */
+  firstCreatedAtMs?: number;
   lastActivityMs: number;
   /** Milliseconds of the last authentication (or step-up) event. */
   authTimeMs: number;
 }
 
-export type SessionExpiryReason = "OK" | "ABSOLUTE_EXPIRED" | "IDLE_EXPIRED";
+export type SessionExpiryReason =
+  | "OK"
+  | "ABSOLUTE_EXPIRED"
+  | "LIFETIME_EXPIRED"
+  | "IDLE_EXPIRED";
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
@@ -272,12 +285,23 @@ function isValidSessionState(session: SessionState, nowMs: number): boolean {
   );
 }
 
-/** Pure expiry check: absolute deadline first, then idle deadline. Both are exclusive. */
+/**
+ * Pure expiry check: lifetime cap first (the outermost bound), then
+ * absolute deadline, then idle deadline. All are exclusive. The cap
+ * is measured from firstCreatedAtMs, falling back to createdAtMs
+ * for legacy states — matching production enforcement
+ * (getValidatedSession), which already applied the cap while this
+ * pure helper did not.
+ */
 export function sessionExpiryReason(
   session: SessionState,
   policy: SessionPolicy,
   nowMs: number
 ): SessionExpiryReason {
+  const firstCreatedAtMs = isFiniteNumber(session.firstCreatedAtMs)
+    ? (session.firstCreatedAtMs as number)
+    : session.createdAtMs;
+  if (nowMs >= firstCreatedAtMs + policy.maxLifetimeMs) return "LIFETIME_EXPIRED";
   if (nowMs >= session.createdAtMs + policy.absoluteTtlMs) return "ABSOLUTE_EXPIRED";
   if (nowMs >= session.lastActivityMs + policy.idleTimeoutMs) return "IDLE_EXPIRED";
   return "OK";
@@ -330,6 +354,7 @@ export type SessionUsabilityReason =
   | "INVALID_SESSION"
   | "REVOKED"
   | "ABSOLUTE_EXPIRED"
+  | "LIFETIME_EXPIRED"
   | "IDLE_EXPIRED";
 
 export interface SessionUsability {
