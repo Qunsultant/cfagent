@@ -61,6 +61,7 @@ import { ServiceUserSection } from "./ServiceUserSection";
 import { ServiceTokensPanel } from "./ServiceTokensPanel";
 import { RoleGrantsPanel } from "./RoleGrantsPanel";
 import { PolicyProposalsPanel } from "./PolicyProposalsPanel";
+import { BootstrapProposalsPanel } from "./BootstrapProposalsPanel";
 import { LoggedInUsersPanel } from "./LoggedInUsersPanel";
 import { fetchRoleGrants } from "./roleGrantsApi";
 import { fetchLoggedInUsers } from "./loggedInUsersApi";
@@ -480,6 +481,14 @@ export function IaaaAdminPanel() {
         this section (the limited view above returns early). */}
         <h4>Policy proposals</h4>
         <PolicyProposalsPanel />
+
+        {/* Issue #3077 (#945 Q3): bootstrap proposals live on Overview beside
+        the policy-proposals section, not a new tab (tab indices
+        unchanged) and not duplicated elsewhere: like them, bootstrap
+        administration is platform state. Tenant-admins never see
+        this section (the limited view above returns early). */}
+        <h4>Bootstrap proposals</h4>
+        <BootstrapProposalsPanel />
 
         {/* Issue #2836: logged-in users live on Overview beside
         the policy-proposals section, not a new tab (tab indices
