@@ -147,8 +147,14 @@ export function LoggedInUsersPanel() {
   return (
     <div className="lup-panel">
       <p className="lup-desc">
-        Active sessions and per-user login history from the durable records. Login counts cover
-        retained audit events only — see the coverage note below.
+        Active sessions and per-user login history from the durable records. Each row below is
+        one active login session. Login counts cover retained audit events only — see the
+        coverage note below.
+      </p>
+      <p className="lup-desc">
+        Each row is one active login session. Created = when this login happened. Last seen = its
+        last activity. Expires = when it stops counting as active (last activity + 8-hour idle
+        window). Revoke ends only this session.
       </p>
       {notice !== "" && <Notice tone="success">{notice}</Notice>}
       {error !== "" && <Notice tone="danger">{error}</Notice>}
