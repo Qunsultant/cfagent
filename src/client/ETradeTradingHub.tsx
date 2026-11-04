@@ -25,9 +25,7 @@ import { GoalScreenPanel } from "./GoalScreenPanel";
 import { ReportsPanel } from "./ReportsPanel";
 import { SchedulesPanel } from "./SchedulesPanel";
 import { ScreeningReviewPanel } from "./ScreeningReviewPanel";
-import { ScreeningOutcomesPanel } from "./ScreeningOutcomesPanel";
-import { CalibrationDashboard } from "./CalibrationDashboard";
-import { EnrichmentDashboard } from "./EnrichmentDashboard";
+import { TrackRecordPanel } from "./TrackRecordPanel";
 import { OptionsHub, type OptionsHubTab } from "./OptionsHub";
 import { StockHub, type StockHubTab } from "./StockHub";
 import { ETradeDynamicMenu, type ETradeDynamicMenuProps } from "./ETradeDynamicMenu";
@@ -1806,19 +1804,7 @@ export function ETradeTradingHub({
       {effectiveSubTab === "review" && <ScreeningReviewPanel userLogin={user?.login} />}
 
       {effectiveSubTab === "track-record" && (
-        <>
-          <ErrorBoundary label="Calibration dashboard">
-            <CalibrationDashboard userLogin={user?.login} />
-          </ErrorBoundary>
-          {/* Issue #1888: enrichment dashboard panel — provider, coverage,
-              breaker state, killswitch state, recent runs. */}
-          <ErrorBoundary label="Enrichment dashboard">
-            <EnrichmentDashboard userLogin={user?.login} />
-          </ErrorBoundary>
-          <ErrorBoundary label="Track Record panel">
-            <ScreeningOutcomesPanel userLogin={user?.login} />
-          </ErrorBoundary>
-        </>
+        <TrackRecordPanel userLogin={user?.login} />
       )}
 
       {/* SUBTAB 1: MARKET SCREENER & SCANNER — folded into the hub. */}
