@@ -71,6 +71,13 @@ export interface WorkflowDeclaration {
    * offer Run only for these; a read-only entry names the missing runner.
    */
   runnable: boolean;
+  /**
+   * Issue #3074: where a runnable workflow is started — the application URL
+   * of its existing, gated submission surface (never a second submission
+   * path invented here, and never a bypass of that surface's flags/payment
+   * gates). Null exactly when `runnable` is false.
+   */
+  runPath: string | null;
   stages: readonly StageDeclaration[];
 }
 
@@ -106,6 +113,7 @@ const STOCK_SCREENER: WorkflowDeclaration = {
   family: "stock",
   labelKey: "workflow.stock-screener",
   runnable: true,
+  runPath: "?tab=stock-hub&view=new-screen",
   stages: [
     stage("feed", { persists: "quotes", publishes: "feed-done", consumes: null }),
     stage("gather", { persists: "enrichment", publishes: "gather-done", consumes: "quotes" }),
@@ -122,6 +130,7 @@ const OPTIONS_SCREENER: WorkflowDeclaration = {
   family: "options",
   labelKey: "workflow.options-screener",
   runnable: true,
+  runPath: "?tab=options-screener",
   stages: [
     stage("feed", { persists: "options-chains", publishes: "feed-done", consumes: null }),
     stage("gather", { persists: "enrichment", publishes: "gather-done", consumes: "options-chains" }),
@@ -138,6 +147,7 @@ const TRADING_LEG: WorkflowDeclaration = {
   family: "trading",
   labelKey: "workflow.trading-leg",
   runnable: false,
+  runPath: null,
   stages: [
     stage("feed", { persists: "quote-snapshot", publishes: "feed-done", consumes: null }),
     stage("analysis", { persists: "preview", publishes: "analysis-done", consumes: "quote-snapshot" }),
@@ -185,6 +195,16 @@ export function assertWorkflowCatalog(
       throw new Error(`Workflow catalog refused: duplicate workflow id ${workflow.id}.`);
     }
     seen.add(workflow.id);
+    if (workflow.runnable && !workflow.runPath) {
+      throw new Error(
+        `Workflow catalog refused: ${workflow.id} is runnable but names no runPath (the catalog must link a verified submission surface, never invent one).`,
+      );
+    }
+    if (!workflow.runnable && workflow.runPath) {
+      throw new Error(
+        `Workflow catalog refused: ${workflow.id} is not runnable but declares a runPath.`,
+      );
+    }
     if (workflow.stages.length === 0) {
       throw new Error(`Workflow catalog refused: workflow ${workflow.id} declares no stages.`);
     }
