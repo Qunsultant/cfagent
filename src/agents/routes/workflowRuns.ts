@@ -31,12 +31,8 @@ import { resolveIaaaTenant } from "../../security/iaaaGithubEndToEnd";
 import { sagaAuditOwnerStub, type AuditOwnerStub } from "../../workflows/sagaJourneyGate";
 import type { SqlStorage } from "../../orm";
 import {
-  buildWorkflowRuns,
-  compareWorkflowRunsNewestFirst,
-  hasReportDocuments,
-  runFromReportDocument,
+  buildWorkflowRunsPage,
   runFromSagaChain,
-  stagesFromUnifiedStages,
   summarizeWorkflowRuns,
   type UnifiedWorkflowRunRecord,
   type WorkflowRun,
@@ -471,16 +467,24 @@ export async function handleWorkflowRunsRoutes(
   }
 
   const limit = clampLimit(url.searchParams.get("limit"));
-  // Issue #2786 Part 3: the Reports filter is server-side. When it is
-  // active the run list is built wider (MAX_LIMIT) and filtered to
-  // report-backed runs BEFORE slicing — filtering the displayed
-  // 50-window client-side would silently drop report runs sitting
-  // past position 50.
+  // #2786 Part 2 (scope e): paging + server-side filters. Windows
+  // scale with offset so a deep page still reads enough rows to fill
+  // itself; transitions stay windowed at 400 (deep pages may show
+  // fewer transition enrichments — stages still come from job rows).
+  const offsetRaw = Number.parseInt(url.searchParams.get("offset") ?? "", 10);
+  const offset = Number.isFinite(offsetRaw) ? Math.max(0, Math.min(offsetRaw, 10000)) : 0;
+  const includeTraces = url.searchParams.get("traces") === "all";
+  const triggerParam = url.searchParams.get("trigger");
+  const statusParam = url.searchParams.get("status");
+  const searchParam = url.searchParams.get("search");
+  // Issue #2786 Part 3: the Reports filter is server-side. The page
+  // builder filters BEFORE slicing, so report runs past the fetched
+  // window still show (no intermediate widening needed — the
+  // canonical read is independent of the job windows).
   const reportsOnly = url.searchParams.get("reports") === "only";
-  const buildLimit = reportsOnly ? MAX_LIMIT : limit;
   // Jobs are grouped into runs, so read more rows than runs requested —
   // a 5-stage chain must not displace five single-job runs.
-  const jobLimit = Math.min(MAX_LIMIT * 10, Math.max(120, limit * 8));
+  const jobLimit = Math.min(MAX_LIMIT * 10, Math.max(120, (limit + offset) * 8));
   const storeErrors: Record<string, string> = {};
 
   let jobs: WorkflowRunJobRow[] = [];
@@ -495,7 +499,7 @@ export async function handleWorkflowRunsRoutes(
     storeErrors.jobs = err instanceof Error ? err.message : String(err);
   }
   try {
-    outcomes = listJobOutcomes(ctx.ensureTables(), Math.min(MAX_LIMIT * 2, Math.max(50, limit * 2))).map(outcomeRow);
+    outcomes = listJobOutcomes(ctx.ensureTables(), Math.min(MAX_LIMIT * 2, Math.max(50, (limit + offset) * 2))).map(outcomeRow);
   } catch (err) {
     storeErrors.outcomes = err instanceof Error ? err.message : String(err);
   }
@@ -593,49 +597,33 @@ export async function handleWorkflowRunsRoutes(
     }
   }
 
-  const runs = buildWorkflowRuns({ jobs, outcomes, transitions, unifiedRecords, limit: buildLimit });
-  // Issue #2786 Part 3: attach Docs columns to their runs (first
-  // newest row wins per key), then mint report-only runs for
-  // canonical rows with no job/outcome twin. A run id already
-  // claimed — by a built run or an earlier report-only run — is
-  // never minted twice.
-  const docByKey = new Map<string, WorkflowRunDocuments>();
-  for (const entry of reportDocs) {
-    for (const key of entry.matchKeys) {
-      if (!docByKey.has(key)) docByKey.set(key, entry.documents);
-    }
-  }
-  const runIds = new Set<string>();
-  for (const run of runs) {
-    runIds.add(run.runId);
-    const doc = docByKey.get(run.runId);
-    if (doc && run.documents == null) run.documents = doc;
-  }
-  for (const entry of reportDocs) {
-    if (entry.matchKeys.some((key) => runIds.has(key))) continue;
-    const engineFamily = entry.documents.family === "strategy" ? "discovery" : entry.documents.family;
-    const reportRun = runFromReportDocument({
-      reportId: entry.documents.reportId,
-      runId: entry.summary.runId,
-      title: entry.summary.title,
-      engineFamily,
-      documents: entry.documents,
-      trigger: entry.summary.trigger,
-      status: entry.summary.status,
-      createdAt: entry.summary.createdAt,
-      stages: stagesFromUnifiedStages(entry.stages, entry.summary.createdAt),
-    });
-    runs.push(reportRun);
-    runIds.add(reportRun.runId);
-  }
-  runs.push(...sagaRuns);
-  runs.sort(compareWorkflowRunsNewestFirst);
-  const visible = reportsOnly ? runs.filter(hasReportDocuments) : runs;
-  const limited = visible.slice(0, limit);
+  // Saga chains (#2780) join BEFORE filter/slice (#2786 Part 2), and
+  // Part 3 Docs attach + report-only minting happen inside the page
+  // builder BEFORE filter/slice, so a saga run, a report run, and a
+  // job-backed run all obey the same filters and paging.
+  const page = buildWorkflowRunsPage({
+    jobs,
+    outcomes,
+    transitions,
+    unifiedRecords,
+    limit,
+    offset,
+    includeTraces,
+    trigger: triggerParam ?? undefined,
+    status: statusParam ?? undefined,
+    search: searchParam ?? undefined,
+    reportsOnly,
+    reportDocs,
+    extraRuns: sagaRuns,
+  });
   return Response.json({
-    count: limited.length,
-    runs: limited,
-    summary: summarizeWorkflowRuns(limited),
+    count: page.runs.length,
+    runs: page.runs,
+    summary: summarizeWorkflowRuns(page.runs),
+    hiddenTraceCount: page.hiddenTraceCount,
+    totalMatched: page.totalMatched,
+    offset,
+    limit,
     ...(Object.keys(storeErrors).length > 0 ? { storeErrors } : {}),
     generatedAt: new Date().toISOString(),
   });

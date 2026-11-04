@@ -15,6 +15,7 @@ import { SettingsMenu, type ETradeDynamicMenuProps } from "./ETradeDynamicMenu";
 import { MarketDataResearchHub } from "./MarketDataResearchHub";
 import { OptionsFlowsHub } from "./options/flows";
 import { OptionsScreenerPage } from "./OptionsScreenerPage";
+import { RiskAnalysisPanel } from "./RiskAnalysisPanel";
 import { PlatformAdminPage } from "./PlatformAdminPage";
 import { WorkflowsHub } from "./WorkflowsHub";
 import { WorkflowRunsPanel } from "./WorkflowRunsPanel";
@@ -1361,6 +1362,18 @@ export function Chat({ user }: { user: User }) {
         onSelectTab={(newTab) => {
           handleSelectTab(newTab);
           setTbdMenuOpen(false);
+        }}
+      />
+    ),
+    // Issue #3087: the Risk Analysis page. It is not a retained
+    // trading-hub tab, so it lives in TAB_CONTENT like the other
+    // standalone pages; it renders the risk engine inline, it does
+    // not re-render the hub's RiskAnalysisModal.
+    "risk-analysis": (
+      <RiskAnalysisPanel
+        onSendPrompt={(prompt, sourceTab) => {
+          setPendingPrompt({ prompt, sourceTab: sourceTab || "Risk Analysis" });
+          handleSelectTab("chat");
         }}
       />
     ),

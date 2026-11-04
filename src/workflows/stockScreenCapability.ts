@@ -149,9 +149,9 @@ export const STOCK_SCREEN_CAPABILITIES: readonly StockScreenCapability[] = [
     provider: "provider registry (goal stock leg)",
     persistence: "Goal screen reports (goalScreenReports)",
     delivery: "Goal dispatch delivery (goal-owned)",
-    canonical: ["goalStockScreenSpec (source: goal, deliver: false)", "stockScreenPlanner.planGoalStockLeg", "screenExecutionBroker goal guard (returns null)"],
+    canonical: ["goalStockScreenSpec (source: goal, deliver: false)", "stockScreenPlanner.planGoalStockLeg", "screenExecutionBroker goal routing (guard retired #2991)"],
     status: "target",
-    current: "Decision 2026-11-03 (G7 #2914): goal execution stays goal-owned — goalDrivenScreen.buildGoalScreenPlan + goalScreenDispatch own execution today because the goal engine screens thesis legs internally via the provider registry (not universe-scoped, multi-leg), goal reports (goalScreenReports) and delivery (goal dispatch) are goal-owned surfaces, and the broker guard (null for goal specs) is the routing decision, not a gap. Translation (spec + broker guard + planner mapping, #2882) built; execution migration revisit trigger: the workflow gains multi-leg goal semantics + goal report/delivery parity.",
+    current: "Decision 2026-11-03 (G7 #2914): goal execution stays goal-owned — goalDrivenScreen.buildGoalScreenPlan + goalScreenDispatch own execution (goal engine screens thesis legs internally via the provider registry; goal reports and delivery are goal-owned surfaces). Broker guard retired (#2991, one-solution direction — the #2882 'routing decision, not a gap' premise is superseded); goal dispatch becomes a caller of the one pipeline; execution migration still open (revisit trigger per G7 #2914: the workflow gains multi-leg goal semantics + goal report/delivery parity).",
     extensionPoint: "stage",
   },
   {
@@ -193,12 +193,13 @@ export const STOCK_SCREEN_CAPABILITIES: readonly StockScreenCapability[] = [
     name: "Report generation (generate/store/serve)",
     entry: "unifiedReportPipeline via ReportAssetAgent (analysis-done consumer)",
     engine:
-      "consumeAnalysisDone (production PDF leg) via stageReportProduction.generateRunPdfViaStageConsumer; tabular XLSX/CSV legs stay in the one generation module (stockReportArtifacts); slice 1 queue transport: analysis-done published to screener-events after the canonical persist and consumed via ScreenerAgent.consumeQueuedAnalysisDone (same consumer, durable claims)",
+      "consumeAnalysisDone (production PDF leg) via stageReportProduction.generateRunPdfViaStageConsumer; chain tabular XLSX/CSV legs via stageTabularConsumer.consumeTabularGenerate (slice 3, persisted assemble dataset only, format-specific claims); monolithic tabular legs stay in the one generation module (stockReportArtifacts); slice 1 queue transport: analysis-done published to screener-events after the canonical persist and consumed via ScreenerAgent.consumeQueuedAnalysisDone (same consumer, durable claims)",
     provider: "none (report generation never fetches)",
     persistence: "mas_reports via storeReportStage (idempotent on generationId)",
     delivery: "Delivery bridge via serveReportStage consumers",
     canonical: [
       "stageReportConsumer.consumeAnalysisDone (production PDF leg)",
+      "stageTabularConsumer.consumeTabularGenerate (chain tabular legs)",
       "stageReportProduction.generateRunPdfViaStageConsumer",
       "stageMessage (analysis-done)",
       "stageQueueTransport (slice 1 queue transport + executor)",
