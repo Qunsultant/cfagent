@@ -52,7 +52,10 @@ describe("Workflows, Billings/Payments Nav & Products UI (issue #2843)", () => {
 
     const workflowsRoute = getRoute("workflows");
     expect(workflowsRoute).toBeDefined();
-    expect(workflowsRoute!.category).toBe("Playbooks");
+    // Issue #2974 moved the Workflows family into Platform with the
+    // section removal; the FAQ page stays a sub-menu entry, never a
+    // top-level Platform item.
+    expect(workflowsRoute!.category).toBe("Platform");
     expect(workflowsRoute!.navGroup).toBe("workflow-runs");
 
     const platformSec = DEFAULT_LEFT_NAV_CONFIG.sections.find((s) => s.id === "section-platform");

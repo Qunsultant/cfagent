@@ -261,6 +261,8 @@ describe("ScreenerAgent start-up recovery (#2733)", () => {
     expect(await b.isScreenRunning("nasdaq100", "alice")).toEqual({
       running: true,
       startedAt: t0,
+      runId: `screen:alice:nasdaq100:${t0}`,
+      status: "running",
     });
     expect(lock.acquire("alice", "nasdaq100", t0 + 60_000).acquired).toBe(
       false

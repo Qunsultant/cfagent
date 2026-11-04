@@ -27,6 +27,8 @@ import { persistThenDeliverAll } from "../../workflows/screenRunFinalize";
 import { publishManualScreenerRun } from "./etradeBroker";
 import type { EtradeBrokerRouteContext } from "./etradeBroker";
 import type { ScreenerAgent } from "../screener-agent";
+import { screenAlreadyRunningDetails } from "../../services/screenInFlight";
+import { quotaExceededDetails } from "../../security/userRequestQuota";
 
 /**
  * Issue #2545: the manual screen's delivery selection — the scheduled
@@ -305,10 +307,30 @@ export async function executeEtradeScreen(args: {
   } catch (screenErr) {
     const error = screenErr instanceof Error ? screenErr.message : String(screenErr);
     // Issue #832: "already running" is not a failure — return 429, don't spam Slack.
+    // #2840: the 429 also names the in-flight run (id + status)
+    // so the second submitter knows what it is waiting on.
     if (error.includes("already running")) {
+      const details = screenAlreadyRunningDetails(screenErr);
       return Response.json(
-        { error: "Screen already running", message: error, retryable: true },
+        { error: "Screen already running", message: error, retryable: true, runId: details?.runId ?? null, status: details?.status ?? "running" },
         { status: 429 }
+      );
+    }
+    // Issue #2842: a quota refusal is not a run result — it
+    // returns 429 with limit, usage, and reset time and is never
+    // persisted as a failed run; a counter failure fails closed
+    // as 503, never as an uncounted run.
+    if (error.includes("quota exceeded")) {
+      const details = quotaExceededDetails(screenErr);
+      return Response.json(
+        { error: "Request quota exceeded", message: error, retryable: true, limit: details?.limit ?? null, usage: details?.usage ?? null, window: details?.window ?? null, resetAt: details?.resetAtIso ?? null, resetAtMs: details?.resetAtMs ?? null },
+        { status: 429 }
+      );
+    }
+    if (error.includes("quota unavailable")) {
+      return Response.json(
+        { error: "Request quota unavailable", message: error, retryable: true },
+        { status: 503 }
       );
     }
     // Issue #2912 (G5): the thrown failure is not a persistable run

@@ -87,8 +87,15 @@ import {
   recordWiredAuthAudit,
 } from "./iaaaAuthAudit";
 import type { AuditStore } from "./iaaaAudit";
+import { IAAA_AUDIT_POLICY_VERSION } from "./iaaaAudit";
 import type { KvLike } from "./kvResilience";
-import { DEFAULT_IDLE_TIMEOUT_MS } from "./sessionPolicy";
+import { DEFAULT_IDLE_TIMEOUT_MS, resolveIdleTimeoutMs } from "./sessionPolicy";
+import {
+  enforceSessionCap,
+  sessionCap,
+  SessionCapError,
+} from "./sessionCap";
+import { invalidateSessionCache } from "./sessionCache";
 import {
   createMemoryIdentityBindingStore,
   deriveInternalUserId,
@@ -109,6 +116,8 @@ import {
 } from "./iaaaMigration";
 import {
   createSession,
+  deleteSession,
+  listSessionFamilyEntries,
   SESSION_MAX_TTL,
   SESSION_TTL,
   setSessionCookie,
@@ -122,6 +131,7 @@ import {
 import {
   AUTH_OUTCOME_PARAM,
   authOutcomeLoginUrl,
+  type AuthOutcomeCode,
 } from "./authOutcome";
 import {
   parseBootstrapListWithGenesis,
@@ -690,6 +700,70 @@ export async function completeWiredLogin(
     nowMs
   );
 
+  // #2840: per-user concurrent-session cap (oldest-out),
+  // enforced BEFORE the new session is created, so a login
+  // can never silently push a user over the cap. A listing or
+  // eviction failure fails the login visibly (the
+  // session_limit_unavailable outcome + a failure audit) rather
+  // than creating over the cap. Evictions are audited
+  // best-effort and the isolate cache is invalidated per
+  // evicted id, so an evicted session stops serving at once;
+  // the #2836 panel shows it gone.
+  try {
+    const capResult = await enforceSessionCap({
+      listEntries: () => listSessionFamilyEntries(env, ""),
+      deleteSession: (id) => deleteSession(env, id),
+      internalUserId: bindingResult.binding.internalUserId,
+      cap: sessionCap(),
+      nowMs,
+      idleTimeoutMs: resolveIdleTimeoutMs(env.SESSION_IDLE_TIMEOUT_MS),
+      onEvicted: async (evictedId) => {
+        invalidateSessionCache(evictedId);
+        if (options?.auditStore && options.auditTenantId) {
+          await recordWiredAuthAudit(options.auditStore, {
+            timestamp: nowMs,
+            type: "auth.session",
+            actorPrincipalId: bindingResult.binding.internalUserId,
+            actorType: "human",
+            initiatingPrincipalId: bindingResult.binding.internalUserId,
+            tenantId: options.auditTenantId,
+            correlationId: evictedId,
+            action: "session.evicted",
+            decision: "deny",
+            policyVersion: IAAA_AUDIT_POLICY_VERSION,
+            outcome: "succeeded",
+          });
+        }
+      },
+    });
+    if (capResult.evictedSessionIds.length > 0) {
+      console.warn(
+        `[auth] session cap: evicted ${capResult.evictedSessionIds.length} oldest session(s) before a new login`,
+      );
+    }
+  } catch (err) {
+    if (options?.auditStore && options.auditTenantId && err instanceof SessionCapError) {
+      await recordWiredAuthAudit(options.auditStore, {
+        timestamp: nowMs,
+        type: "auth.login",
+        actorPrincipalId: bindingResult.binding.internalUserId,
+        actorType: "human",
+        initiatingPrincipalId: bindingResult.binding.internalUserId,
+        tenantId: options.auditTenantId,
+        correlationId: crypto.randomUUID(),
+        action: "auth.login",
+        decision: "deny",
+        policyVersion: IAAA_AUDIT_POLICY_VERSION,
+        outcome: "failed",
+        errorCode: err.code,
+      });
+    }
+    return errorOutcomePage(
+      `session cap enforcement failed: ${err instanceof Error ? err.message : String(err)}`,
+      "session_limit_unavailable",
+    );
+  }
+
   const sessionId = await createSession(env, sessionData);
   // End-to-end post-login work (best-effort; never changes the login
   // outcome): alias recording + bootstrap-on-login. A failure here
@@ -778,5 +852,21 @@ function errorPage(message: string, status = 400): Response {
   return new Response(null, {
     status: 302,
     headers: { Location: authOutcomeLoginUrl("signin_failed") },
+  });
+}
+
+/**
+ * #2840: a login failure with its own outcome code, for
+ * failures whose cause the user can act on distinctly from a
+ * generic sign-in failure (here: the session-cap check could
+ * not run). The notice text stays static and internal-free
+ * (the #2402 rule); the technical cause goes to the log and
+ * the failure audit at the call site.
+ */
+function errorOutcomePage(message: string, code: AuthOutcomeCode): Response {
+  console.warn(`[auth] sign-in failed (${code}): ${message}`);
+  return new Response(null, {
+    status: 302,
+    headers: { Location: authOutcomeLoginUrl(code) },
   });
 }

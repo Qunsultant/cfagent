@@ -1,0 +1,3 @@
+### Changed
+
+- Platform nav (issue #2974, last nav re-org slice): the Workflows item moved into Platform intact with its six-entry sub-menu (Docs, Workflow Runs, Workflows & FAQ, Screener Reports, Proposal Review, Track Record); Records NLQ moved into Platform last; the Workflows section header is gone and no route carries the Playbooks category anymore. Final Platform order: Platform Admin, Schedules, Workflows, Queues, Agents, Audit Vault, Records NLQ. The Research & Dual Feed top-level entry goes away (its route and the Stock Hub research tab stay). The Schedules injection now targets the Workflows item's id, so Schedules sits before Workflows instead of last in Platform.

@@ -8,6 +8,8 @@
  * groups resolving to real nav entries, and derived defaults.
  * (#2954: the assets-hub tab was added, appended at navOrder 30 so no
  * existing item moves.)
+ * (#2973: the queues tab was added, appended at navOrder 31 so no
+ * existing item moves.)
  * (#2970: goal-screen, review, and track-record routes added — own
  * pages with no nav entries, so the nav-entry count stays 31.)
  * (#2137 rebuild: checkout added at navOrder 24; search restored at
@@ -51,6 +53,7 @@ const EXPECTED_IDS = [
   "platform-admin",
   "portfolio",
   "products",
+  "queues",
   "referrals",
   "reports",
   "research",
@@ -72,7 +75,7 @@ const EXPECTED_IDS = [
 const ALIAS_IDS = ["options", "orders", "reports", "scanner", "schedules", "trading"];
 
 describe("route table", () => {
-  it("has exactly the 41 tab ids, sorted and unique", () => {
+  it("has exactly the 42 tab ids, sorted and unique", () => {
     const ids = ROUTES.map((r) => r.id);
     expect(ids).toEqual(EXPECTED_IDS);
     expect(new Set(ids).size).toBe(ids.length);

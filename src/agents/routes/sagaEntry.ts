@@ -35,6 +35,7 @@ import {
 import type { NativeCommercialAccount } from "../../services/nativeMonetization";
 import { sagaCompensationDisclosure } from "../../workflows/sagaCompensation";
 import { sagaWorkflowInstanceId } from "../../workflows/sagaJourneyGate";
+import { startManagedWorkflowInstance } from "../../workflows/workflowInstanceSeam";
 import type { SagaTradeIntent } from "../../workflows/sagaTradeLeg";
 import type { SagaParams } from "../../workflows/sagaWorkflowFlow";
 import type { WorkflowJobCommand } from "../../workflows/workflowPorts";
@@ -201,27 +202,21 @@ export function buildSagaEntryParams(
 }
 
 /**
- * Create-or-adopt under the S2 contract id (mirroring the
- * payment seam's create-failure → get+status → adopt): a create
- * failure with a readable instance adopts it; anything else
- * rethrows the original create error.
+ * Create-or-adopt under the S2 contract id via the ONE seam
+ * (workflowInstanceSeam, no fallback — mirroring the payment
+ * seam's create-failure → get+status → adopt): a create failure
+ * with a readable instance adopts it; anything else rethrows
+ * the original create error.
  */
 export async function startSagaViaBinding(
   binding: SagaEntryBinding,
   params: SagaParams,
 ): Promise<{ workflowId: string; existing: boolean }> {
-  const id = sagaWorkflowInstanceId(params.sagaId);
-  try {
-    const created = await binding.create({ id, params });
-    return { workflowId: created.id, existing: false };
-  } catch (createErr) {
-    try {
-      await binding.get(id).then((inst) => inst.status());
-      return { workflowId: id, existing: true };
-    } catch {
-      throw createErr;
-    }
-  }
+  const started = await startManagedWorkflowInstance(binding, {
+    id: sagaWorkflowInstanceId(params.sagaId),
+    params,
+  });
+  return { workflowId: started.workflowId, existing: started.existing };
 }
 
 export interface SagaEntryOverrides {
@@ -333,6 +328,9 @@ export async function handleSagaEntryRoutes(
         runRequestId: params.runRequestId,
         tenantId,
         statusUrl,
+        // Issue #2989: the seam-started instance id rides the
+        // projection row (the saga's job record at start time).
+        workflowRunId: started.workflowId,
       });
     } catch (err) {
       console.warn(

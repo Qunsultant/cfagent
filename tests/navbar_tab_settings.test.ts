@@ -61,7 +61,10 @@ describe("Navbar Visible Tabs Settings", () => {
 
     expect(visibleIds).toContain("autopilot");
     expect(visibleIds).toContain("order");
-    expect(visibleIds).toContain("research");
+    // Issue #2974 removed the Research & Dual Feed nav entry, so the
+    // research route no longer renders as a nav item; chat stands in
+    // as the always-visible Intelligence item here.
+    expect(visibleIds).toContain("chat");
     expect(visibleIds).not.toContain("ads");
     expect(visibleIds).not.toContain("referrals");
     expect(visibleIds).not.toContain("revenue");

@@ -21,6 +21,11 @@
  * (navOrder 6, icon Scanner, badge Stocks); nav count stays 30.)
  * (#2954 added the Assets Hub nav entry, navOrder 30, last in display
  * order; pin updated in the same PR per the §7 pin rule.)
+ * (#2973 added the Queues nav entry, navOrder 31, last in display
+ * order; pin updated in the same PR per the §7 pin rule.)
+ * (#2974 removed the Research & Dual Feed nav entry (route stays,
+ * surface tab stays); nav count 32 → 31; pin updated in the same
+ * PR per the §7 pin rule.)
  */
 import { describe, it, expect } from "vitest";
 import { ROUTES, hasNavEntry } from "../src/client/routes";

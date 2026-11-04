@@ -61,7 +61,9 @@ import { ServiceUserSection } from "./ServiceUserSection";
 import { ServiceTokensPanel } from "./ServiceTokensPanel";
 import { RoleGrantsPanel } from "./RoleGrantsPanel";
 import { PolicyProposalsPanel } from "./PolicyProposalsPanel";
+import { LoggedInUsersPanel } from "./LoggedInUsersPanel";
 import { fetchRoleGrants } from "./roleGrantsApi";
+import { fetchLoggedInUsers } from "./loggedInUsersApi";
 import "./iaaaAdminPanel.css";
 
 type IaaaAdminTab = "overview" | "members" | "api" | "mcp" | "iaaa" | "correlations" | "queue";
@@ -97,6 +99,27 @@ export function IaaaAdminPanel() {
     fetchRoleGrants()
       .then(() => {
         if (!cancelled) setRoleGrantsAllowed(true);
+      })
+      .catch(() => {
+        /* stays in the not-an-admin state */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [notAdmin]);
+  // #2836: same probe shape as role grants — a tenant-admin
+  // fails the platform-gated overview fetch but may still hold
+  // logged-in-users rights in their own tenant. When the
+  // overview gate refuses, one logged-in-users list probe
+  // decides whether that section renders in the limited view;
+  // the server scopes that list, so this probe grants nothing.
+  const [loggedInUsersAllowed, setLoggedInUsersAllowed] = useState(false);
+  useEffect(() => {
+    if (!notAdmin) return;
+    let cancelled = false;
+    fetchLoggedInUsers()
+      .then(() => {
+        if (!cancelled) setLoggedInUsersAllowed(true);
       })
       .catch(() => {
         /* stays in the not-an-admin state */
@@ -295,15 +318,28 @@ export function IaaaAdminPanel() {
     // #2688 limited view: tenant-admins get the Role grants
     // section only — never Overview data, Service tokens, or
     // Service user state, which stay platform-gated server-side.
-    if (roleGrantsAllowed) {
+    // #2836 extends the limited view with Logged-in users for
+    // the tenant admin's own tenant (server-scoped); Policy
+    // proposals stay platform-only.
+    if (roleGrantsAllowed || loggedInUsersAllowed) {
       return (
         <div className="iaaa-admin-panel">
           <p className="iaaa-admin-note">
-            You are a tenant admin, not a platform admin. Only role grants for your own
-            tenant are available here; the rest of IAAA Admin requires platform-admin.
+            You are a tenant admin, not a platform admin. Only your own tenant&apos;s
+            sections are available here; the rest of IAAA Admin requires platform-admin.
           </p>
-          <h4>Role grants</h4>
-          <RoleGrantsPanel />
+          {roleGrantsAllowed && (
+            <>
+              <h4>Role grants</h4>
+              <RoleGrantsPanel />
+            </>
+          )}
+          {loggedInUsersAllowed && (
+            <>
+              <h4>Logged-in users</h4>
+              <LoggedInUsersPanel />
+            </>
+          )}
         </div>
       );
     }
@@ -444,6 +480,14 @@ export function IaaaAdminPanel() {
         this section (the limited view above returns early). */}
         <h4>Policy proposals</h4>
         <PolicyProposalsPanel />
+
+        {/* Issue #2836: logged-in users live on Overview beside
+        the policy-proposals section, not a new tab (tab indices
+        unchanged) and not duplicated elsewhere. Unlike policy
+        proposals, tenant-admins DO reach this section through
+        the limited view above — server-scoped to their tenant. */}
+        <h4>Logged-in users</h4>
+        <LoggedInUsersPanel />
 
         <p className="iaaa-admin-note">
           Audit events are read-only. Pending access requests below can be

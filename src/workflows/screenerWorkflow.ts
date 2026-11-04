@@ -1,27 +1,27 @@
-/**
- * Issue #1737 — ScreenerScreenWorkflow: the adapter-side
+﻿/**
+ * Issue #1737 â€” ScreenerScreenWorkflow: the adapter-side
  * workflow class for screener decoupling. Thin by design
  * (mirroring TradingTradeWorkflow): run() validates the
  * payload, builds the flow deps from the environment, and
  * delegates to runParentFlow / runShardFlow. Every decision
  * lives in screenerWorkflowFlow.ts, behind fakeable
- * interfaces — this module is the only place that names
+ * interfaces â€” this module is the only place that names
  * bindings, stubs, and provider types.
  *
  * Data discipline (claim-check): workflow params and
  * outputs carry commands, summaries, and flags only. The
- * child's full agent result travels store→door directly
+ * child's full agent result travels storeâ†’door directly
  * inside the child run, never through a parent output.
  *
  * Base class note: ThinkWorkflow, NOT WorkflowEntrypoint.
- * WorkflowEntrypoint is undefined outside workerd — proven
+ * WorkflowEntrypoint is undefined outside workerd â€” proven
  * by 28 test files failing to collect on it (the
  * `cloudflare:workers` stub in vitest carries no such
  * value). ThinkWorkflow is the repo's real runtime base
  * (TradingTradeWorkflow proves it). The agent type is
  * intentionally `any`: no Think agent exists for screener
  * (ScreenerAgent is an Agents SDK Agent) and this class
- * never uses agent tracking — runs are tracked via D1
+ * never uses agent tracking â€” runs are tracked via D1
  * projection rows + instance status, which is the design.
  */
 import { ThinkWorkflow } from "@cloudflare/think/workflows";
@@ -62,6 +62,7 @@ import {
 } from "./screenerWorkflowFlow";
 import type { WorkflowGoalScreenEnvelope } from "../agents/orchestrator/goalScreenDispatch";
 import {
+  SHARD_DONE_EVENT,
   assertWorkflowJobCommand,
   type WorkflowJobCommand,
 } from "./workflowPorts";
@@ -107,7 +108,7 @@ function screenerAgentRunner(env: Env, userLogin: string): ScreenRunner {
   const agent = env.SCREENER_AGENT.get(id) as unknown as ScreenerAgent;
   return {
     runScreen: async (req) => toShardResult(await agent.runScreen(toAgentRequest(req))),
-    // Issue #1996 — goal-screen execution for workflow children.
+    // Issue #1996 â€” goal-screen execution for workflow children.
     // A deduplicated run without a result has no outcome to
     // store: fail loudly (step retries, then the shard fails)
     // rather than recording a fake empty success.
@@ -147,7 +148,7 @@ function orchestratorStub(env: Env): OrchestratorAgent {
   return env.SEARCH_AGENT.get(id) as unknown as OrchestratorAgent;
 }
 
-/** Child operations against this workflow's own binding (parent → child fan-out). */
+/** Child operations against this workflow's own binding (parent â†’ child fan-out). */
 function workflowChildOps(env: Env): ChildWorkflowOps {
   return {
     createChild: async (cmd) => {
@@ -180,7 +181,7 @@ function buildDeps(env: Env, command: WorkflowJobCommand): ScreenerWorkflowDeps 
   return {
     screenRunner: screenerAgentRunner(env, command.userLogin),
     shardStore: createShardJobAdapter(env),
-    // Issue #1996 — goal commands store a goal canonical
+    // Issue #1996 â€” goal commands store a goal canonical
     // report (source "goal_screen") through the goal door,
     // not the market door: the shapes differ, and a goal
     // result stored as a market screen would be invisible
@@ -199,7 +200,7 @@ function buildDeps(env: Env, command: WorkflowJobCommand): ScreenerWorkflowDeps 
         await orchestrator.recordWorkflowScreenReport(payload as ScreenerRunResult);
       }
     },
-    // Issue #2910 (G3): the parent canonical row — one
+    // Issue #2910 (G3): the parent canonical row â€” one
     // mas_reports row per parent run (generationId = jobId)
     // carrying the collation summary + child linkage,
     // through the orchestrator's parent door. Summary
@@ -210,7 +211,7 @@ function buildDeps(env: Env, command: WorkflowJobCommand): ScreenerWorkflowDeps 
       // null when the row could not be written (owner
       // missing, store refused): the flow records that
       // outcome truthfully instead of claiming a store that
-      // never landed — the run still continues. The owner
+      // never landed â€” the run still continues. The owner
       // rides on the input (command.userLogin, stamped by
       // the flow), so the door takes no second login arg.
       const stored = await orchestrator.recordWorkflowParentScreenReport(input);
@@ -218,11 +219,11 @@ function buildDeps(env: Env, command: WorkflowJobCommand): ScreenerWorkflowDeps 
         ? { stored: true, reportId: stored.reportId }
         : { stored: false, storeError: "Parent canonical row was not written (store refused or owner missing)." };
     },
-    // Issue #1996 — goal commands deliver through the goal
+    // Issue #1996 â€” goal commands deliver through the goal
     // delivery seam (channels + emailTo ride the command);
     // the market outcome sink is not used for goal runs,
     // matching the direct path (no deliveryId convergence
-    // there either — deliver retries share the direct path's
+    // there either â€” deliver retries share the direct path's
     // at-least-once property).
     deliverOutcome: async (payload) => {
       if (command.goalScreen) {
@@ -249,11 +250,11 @@ function buildDeps(env: Env, command: WorkflowJobCommand): ScreenerWorkflowDeps 
       }
     },
     nowMs: () => Date.now(),
-    // Issue #2530: the ND mode's three deps — the gate
+    // Issue #2530: the ND mode's three deps â€” the gate
     // resolved from this run's env (an invalid switch value
     // fails closed to off and is logged as the config error),
     // the gateway-backed interpreter (undefined without an
-    // AI binding → ND commands fail closed in the flow), and
+    // AI binding â†’ ND commands fail closed in the flow), and
     // the mas_events audit sink on the shared orchestrator
     // (the #2530 workflow door, next to the report doors
     // above). All three are consulted only by ND commands;
@@ -262,7 +263,7 @@ function buildDeps(env: Env, command: WorkflowJobCommand): ScreenerWorkflowDeps 
       const gate = resolveScreenerNdGateFromEnv(env);
       if (gate.invalid) {
         console.warn(
-          `[screener-workflow] ${screenerNdConfigErrorEvent()}: SCREENER_ND_MODE value ${JSON.stringify(gate.raw)} is not "on"/"off" — failing closed to off.`,
+          `[screener-workflow] ${screenerNdConfigErrorEvent()}: SCREENER_ND_MODE value ${JSON.stringify(gate.raw)} is not "on"/"off" â€” failing closed to off.`,
         );
       }
       return gate.enabled;
@@ -275,7 +276,7 @@ function buildDeps(env: Env, command: WorkflowJobCommand): ScreenerWorkflowDeps 
     // recorded from the command's traceparent into the
     // env-resolved hop store. A command without a traceparent
     // records nothing (recordWorkflowTraceHop's contract);
-    // a store failure is swallowed here — tracing degrades,
+    // a store failure is swallowed here â€” tracing degrades,
     // the run does not.
     traceHop: async (cmd, event) => {
       try {
@@ -297,6 +298,7 @@ function adaptStep(step: WorkflowStep): ScreenerWorkflowStep {
   const s = step as unknown as {
     do<T>(name: string, configOrCallback: unknown, callback?: unknown): Promise<T>;
     sleep(name: string, duration: string): Promise<void>;
+    waitForEvent<T>(name: string, opts: { type: string; timeout: string }): Promise<T>;
   };
   return {
     // Provider retries require a delay; the flow only
@@ -306,10 +308,39 @@ function adaptStep(step: WorkflowStep): ScreenerWorkflowStep {
         ? s.do(name, { retries: { limit: opts.retries.limit, delay: "1 seconds" } }, fn)
         : s.do(name, fn),
     // Provider sleep takes whole-second strings (no ms
-    // label); ceiling to seconds. Poll granularity only —
+    // label); ceiling to seconds. Poll granularity only â€”
     // deadlines are enforced by the flow's clock checks.
     sleep: (name, ms) => s.sleep(name, `${Math.max(1, Math.ceil(ms / 1000))} seconds`),
+    // Issue #3025: the durable wait, provider units (whole seconds).
+    waitForEvent: <T,>(name: string, opts: { type: string; timeoutMs: number }) =>
+      s.waitForEvent<T>(name, {
+        type: opts.type,
+        timeout: `${Math.max(1, Math.ceil(opts.timeoutMs / 1000))} seconds`,
+      }),
   };
+}
+
+/**
+ * Issue #3025 â€” signal the parent instance that this shard finished.
+ * The payload is the shard id only; the parent reads status/output
+ * through the binding, so no result body rides the event.
+ */
+export async function notifyParentShardDone(env: Env, command: WorkflowJobCommand): Promise<void> {
+  const parentId = command.parentWorkflowId;
+  if (!parentId || !env.SCREENER_WORKFLOW) return;
+  const shardId = command.shard?.shardId ?? command.jobId;
+  try {
+    const parent = await env.SCREENER_WORKFLOW.get(parentId);
+    await (
+      parent as unknown as {
+        sendEvent: (event: { type: string; payload: unknown }) => Promise<void>;
+      }
+    ).sendEvent({ type: SHARD_DONE_EVENT, payload: { shardId } });
+  } catch (err) {
+    console.warn(
+      `[screener-workflow] parent notify failed for ${parentId} (shard ${shardId}): ${err instanceof Error ? err.message : String(err)} â€” the parent's deadline sweep is the backstop.`,
+    );
+  }
 }
 
 export class ScreenerScreenWorkflow extends ThinkWorkflow<
@@ -324,7 +355,7 @@ export class ScreenerScreenWorkflow extends ThinkWorkflow<
   ): Promise<unknown> {
     const command = event.payload;
     // Issue #1185: the workflow acts under the run owner's
-    // login, recorded in the payload at start — absent
+    // login, recorded in the payload at start â€” absent
     // means the run fails closed, never under a synthetic
     // identity.
     if (!command?.userLogin) {
@@ -334,8 +365,15 @@ export class ScreenerScreenWorkflow extends ThinkWorkflow<
     const deps = buildDeps(this.env, command);
     const adapted = adaptStep(step);
     if (command.role === "shard") {
-      return runShardFlow(command, adapted, deps);
+      const result = await runShardFlow(command, adapted, deps);
+      // Issue #3025: tell the parent this shard is done so it can stop
+      // waiting. Never fatal: the parent's deadline sweep reads the
+      // child's status when a signal is lost, so a failed send costs a
+      // wait, not the run.
+      await notifyParentShardDone(this.env, command);
+      return result;
     }
     return runParentFlow(command, adapted, deps, workflowChildOps(this.env));
   }
 }
+

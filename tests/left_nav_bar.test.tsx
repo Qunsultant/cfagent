@@ -5,10 +5,13 @@
  *  2. Dual-target toggle: clicking the menu item row or chevron toggles sub-menus
  *  3. Stock Hub: the stock-specific hub (issue #2896), contains stocks, new-screen & research
  *  4. Options Screener: contains options, scanner, options-flows, iv-history; no docs/runs/schedules
- *  5. Workflows menu: hosts docs, workflow-runs, reports, review, track-record
- *  6. Platform menu: hosts platform-admin, schedules, agents, audit
- *     (issue #2957: workflows moved to the Workflow Runs menu by #2843;
- *     endpoints is an Agents sub-item, never top-level Platform)
+ *  5. Workflows menu: hosts docs, workflow-runs, workflows, reports, review, track-record
+ *  6. Platform menu: hosts platform-admin, schedules, workflow-runs, queues, agents, audit, nlq
+ *     (issue #2974: the Workflows item moved into Platform intact with its
+ *     six-entry sub-menu; Schedules sits before it via the retargeted
+ *     injection; Records NLQ moved in last; endpoints is an Agents
+ *     sub-item, never top-level Platform)
+ *     (issue #2957: workflows moved to the Workflow Runs menu by #2843)
  *  7. Orders/Billings/Payments section: three menus — Orders (checkout,
  *     ledger), Billing (billing, revenue), Payments (payments,
  *     payment-assurance) (issue #2968)
@@ -28,7 +31,8 @@ import {
   findNavItemConfig,
   isNavItemOrSubItemActive,
 } from "../src/client/navConfig";
-import { getNavGroup } from "../src/client/routes";
+import { ROUTES, getRoute, hasNavEntry, getNavGroup } from "../src/client/routes";
+import { NAVIGATION_ITEMS } from "../src/client/components/NavigationMenu";
 import { deepLinkHrefForNavNode } from "../src/client/deepLinks";
 
 let container: HTMLDivElement;
@@ -61,16 +65,42 @@ async function renderNavBar(props: Partial<React.ComponentProps<typeof LeftNavBa
 }
 
 describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
-  it("renders the 7 configured sections: Execution, Intelligence, Workflows, Marketing, Billing, Platform, Sandbox", () => {
-    expect(DEFAULT_LEFT_NAV_CONFIG.sections).toHaveLength(7);
+  it("renders the 6 configured sections: Execution, Intelligence, Marketing, Billing, Platform, Sandbox", () => {
+    expect(DEFAULT_LEFT_NAV_CONFIG.sections).toHaveLength(6);
     const titles = DEFAULT_LEFT_NAV_CONFIG.sections.map((s) => s.title);
     expect(titles).toContain("TRADING & EXECUTION");
     expect(titles).toContain("INTELLIGENCE & COPILOT");
-    expect(titles).toContain("WORKFLOWS");
+    expect(titles).not.toContain("WORKFLOWS");
     expect(titles).toContain("MARKETING");
     expect(titles).toContain("ORDERS/BILLINGS/PAYMENTS");
     expect(titles).toContain("PLATFORM");
     expect(titles).toContain("SANDBOX");
+  });
+
+  it("holds the final Platform order: Platform Admin, Schedules, Workflows, Queues, Agents, Audit Vault, Records NLQ (#2974)", () => {
+    const plat = DEFAULT_LEFT_NAV_CONFIG.sections.find((s) => s.id === "section-platform");
+    expect(plat).toBeDefined();
+    expect(plat!.items.map((i) => i.id)).toEqual([
+      "platform-admin",
+      "schedules",
+      "workflow-runs",
+      "queues",
+      "agents",
+      "audit",
+      "nlq",
+    ]);
+  });
+
+  it("leaves no Playbooks stragglers: no section-workflows, no Playbooks route category (#2974)", () => {
+    expect(DEFAULT_LEFT_NAV_CONFIG.sections.map((s) => s.id)).not.toContain("section-workflows");
+    expect(ROUTES.filter((r) => r.category === "Playbooks")).toEqual([]);
+  });
+
+  it("removes the Research & Dual Feed top-level entry: route stays, nav entry and strip item go (#2974)", () => {
+    const research = getRoute("research");
+    expect(research).toBeDefined();
+    expect(hasNavEntry(research!)).toBe(false);
+    expect(NAVIGATION_ITEMS.map((i) => i.id)).not.toContain("research");
   });
 
   it("configures Marketing menu with referrals, ads, and social", () => {
@@ -171,7 +201,6 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
       "scheduled-screening",
       "iv-history",
       "options-flows",
-      "best-trade",
     ]);
     expect(subIds).not.toContain("docs");
     expect(subIds).not.toContain("workflow-runs");

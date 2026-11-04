@@ -71,6 +71,7 @@ export const agentShardJobs = sqliteTable(
     provenanceWriter: text("provenance_writer").notNull(),
     provenanceSourceDo: text("provenance_source_do").notNull(),
     provenanceSourceVersion: text("provenance_source_version").notNull(),
+    workflowRunId: text("workflow_run_id"),
   },
   (table) => [
     primaryKey({

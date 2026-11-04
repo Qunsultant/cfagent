@@ -68,6 +68,9 @@ export interface CanonicalReportStoredContent {
   summary: string;
   body: string;
   bodyR2Key: string | null;
+  /** Issue #2602: the row owner, so a redelivery can re-check it before
+   *  backfilling the stored body. */
+  userLogin?: string;
 }
 
 /** The shared INSERT's input (the seam computes every field,

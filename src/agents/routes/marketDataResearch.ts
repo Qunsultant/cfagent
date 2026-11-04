@@ -52,6 +52,8 @@ import { startStockScreenWorkflowOrNull } from "../../workflows/screenExecutionB
 import { persistThenDeliverAll } from "../../workflows/screenRunFinalize";
 import { buildStockScreenRunSpec, specCanonicalFields, withRunProvenance } from "../../workflows/stockScreenRunSpec";
 import type { ScreenerAgent } from "../screener-agent";
+import { screenAlreadyRunningDetails } from "../../services/screenInFlight";
+import { quotaExceededDetails } from "../../security/userRequestQuota";
 import type { AgentName, Env } from "../../types";
 
 /** The subset of OrchestratorAgent surface the market-data research handlers need. */
@@ -409,11 +411,29 @@ export async function handleMarketDataCompareScreenRoutes(
       } catch (screenErr) {
         // Issue #832 parity with /etrade/screen: "already running" is
         // not a failure — a 429 the client can retry.
+        // #2840: the 429 also names the in-flight run (id + status).
         const error = screenErr instanceof Error ? screenErr.message : String(screenErr);
         if (error.includes("already running")) {
+          const details = screenAlreadyRunningDetails(screenErr);
           return Response.json(
-            { error: "Screen already running", message: error, retryable: true },
+            { error: "Screen already running", message: error, retryable: true, runId: details?.runId ?? null, status: details?.status ?? "running" },
             { status: 429 }
+          );
+        }
+        // Issue #2842: quota refusal (429 with limit/usage/reset)
+        // and counter failure (fail-closed 503) — never a run
+        // result, never an uncounted run.
+        if (error.includes("quota exceeded")) {
+          const details = quotaExceededDetails(screenErr);
+          return Response.json(
+            { error: "Request quota exceeded", message: error, retryable: true, limit: details?.limit ?? null, usage: details?.usage ?? null, window: details?.window ?? null, resetAt: details?.resetAtIso ?? null, resetAtMs: details?.resetAtMs ?? null },
+            { status: 429 }
+          );
+        }
+        if (error.includes("quota unavailable")) {
+          return Response.json(
+            { error: "Request quota unavailable", message: error, retryable: true },
+            { status: 503 }
           );
         }
         throw screenErr;

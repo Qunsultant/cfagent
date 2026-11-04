@@ -1,4 +1,5 @@
 import { isKvLimitError } from "./kvResilience";
+import { isSessionStoreLimitError } from "./sessionQuotaResilience";
 import { codedMessage } from "../outcomes/outcomeAspects";
 
 /**
@@ -27,7 +28,7 @@ export interface ErrorBoundaryOptions {
 
 export interface ErrorBody {
   error: string;
-  code: "kv_quota_exhausted" | "FAILURE_UNEXPECTED_ERROR";
+  code: "kv_quota_exhausted" | "FAILURE_STORE_QUOTA_EXHAUSTED" | "FAILURE_UNEXPECTED_ERROR";
 }
 
 export function classifyError(error: unknown): { status: number; body: ErrorBody } {
@@ -38,6 +39,21 @@ export function classifyError(error: unknown): { status: number; body: ErrorBody
         error:
           "Session storage is temporarily unavailable. Retry shortly; reads resume automatically once the store recovers.",
         code: "kv_quota_exhausted",
+      },
+    };
+  }
+  // #2666: DO/D1 store-limit errors are a distinct, retryable condition
+  // with their own catalog-coded 503 — they must NOT fall through to
+  // the generic 500. The KV branch above stays first: the KV leg is
+  // also matched by isSessionStoreLimitError, and its legacy code is
+  // kept for existing clients. The provider's raw wording stays in
+  // the log only; the body carries the catalog business message.
+  if (isSessionStoreLimitError(error)) {
+    return {
+      status: 503,
+      body: {
+        error: codedMessage("FAILURE_STORE_QUOTA_EXHAUSTED"),
+        code: "FAILURE_STORE_QUOTA_EXHAUSTED",
       },
     };
   }

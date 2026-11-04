@@ -13,5 +13,6 @@
   "oauthStateMaxAgeMs": 600000,
   "oauthStateFutureSkewMs": 60000,
   "publicOAuthPendingMaxAgeMs": 600000,
-  "oauthExpirySkewMs": 60000
+  "oauthExpirySkewMs": 60000,
+  "maxConcurrentSessionsPerUser": 10
 }

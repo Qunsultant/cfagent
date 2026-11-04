@@ -151,7 +151,7 @@
       "id": "docs",
       "navGroup": "workflow-runs",
       "crumb": "Docs & Reports",
-      "category": "Playbooks",
+      "category": "Platform",
       "icon": "Docs",
       "description": "Every document set a screener-workflow run produced \u2014 stock, options, goal and strategy \u2014 with its PDF, XLSX and CSV downloads and run id",
       "navEntry": {
@@ -209,13 +209,13 @@
       "id": "nlq",
       "navGroup": "nlq",
       "crumb": "Records NLQ",
-      "category": "Playbooks",
+      "category": "Platform",
       "icon": "Database",
       "description": "Natural language records analytics, enterprise schema inspector & data browser",
       "navEntry": {
         "label": "Records NLQ",
         "shortLabel": "Records",
-        "navOrder": 11,
+        "navOrder": 22,
         "defaultVisible": true,
         "badge": "NLQ",
         "badgeType": "neutral"
@@ -257,7 +257,7 @@
       "navEntry": {
         "label": "Options Flows",
         "shortLabel": "Flows",
-        "navOrder": 23,
+        "navOrder": 24,
         "defaultVisible": true,
         "badge": "Sweeps",
         "badgeType": "pro"
@@ -388,6 +388,22 @@
       }
     },
     {
+      "id": "queues",
+      "navGroup": "queues",
+      "crumb": "Queues",
+      "category": "Platform",
+      "icon": "Jobs",
+      "description": "Every queue with work waiting: async jobs, the dead-letter queue, and trade approvals, composed in one place",
+      "navEntry": {
+        "label": "Queues",
+        "shortLabel": "Queues",
+        "navOrder": 11,
+        "defaultVisible": true,
+        "badge": "Pending",
+        "badgeType": "neutral"
+      }
+    },
+    {
       "id": "referrals",
       "shellRetain": true,
       "navGroup": "referrals",
@@ -409,7 +425,7 @@
       "retain": true,
       "navGroup": "workflow-runs",
       "crumb": "Reports",
-      "category": "Playbooks",
+      "category": "Platform",
       "icon": "Screeners",
       "description": "The one screening hub: stock + options screening, the strategy scanner, IV history, goal screens, reports, schedules, proposal review, and the recommendation track record"
     },
@@ -419,15 +435,7 @@
       "crumb": "Research",
       "category": "Intelligence",
       "icon": "Research",
-      "description": "Zero-credential Yahoo Finance and Alpaca dual feed, fundamental peer comparison",
-      "navEntry": {
-        "label": "Research & Dual Feed",
-        "shortLabel": "Research",
-        "navOrder": 24,
-        "defaultVisible": true,
-        "badge": "Feed",
-        "badgeType": "new"
-      }
+      "description": "Zero-credential Yahoo Finance and Alpaca dual feed, fundamental peer comparison"
     },
     {
       "id": "revenue",
@@ -451,7 +459,7 @@
       "retain": true,
       "navGroup": "workflow-runs",
       "crumb": "Proposal Review",
-      "category": "Playbooks",
+      "category": "Platform",
       "icon": "Review",
       "description": "Decide what the system proposed: goal proposals, adaptation candidates, and strategy re-selections \u2014 nothing activates without a person"
     },
@@ -537,7 +545,7 @@
       "retain": true,
       "navGroup": "workflow-runs",
       "crumb": "Track Record",
-      "category": "Playbooks",
+      "category": "Platform",
       "icon": "TrackRecord",
       "description": "What happened to issued recommendations, from the outcome ledger \u2014 Unverified stays Unverified"
     },
@@ -571,7 +579,7 @@
       "id": "workflow-runs",
       "navGroup": "workflow-runs",
       "crumb": "Workflow Runs",
-      "category": "Playbooks",
+      "category": "Platform",
       "icon": "Runs",
       "description": "Every recorded workflow run with its stages, inputs, outputs, failures, artifacts, and how it was triggered",
       "navEntry": {
@@ -587,13 +595,13 @@
       "id": "workflows",
       "navGroup": "workflow-runs",
       "crumb": "Workflows",
-      "category": "Playbooks",
+      "category": "Platform",
       "icon": "Guides",
       "description": "Platform architecture guides, strategy playbooks, order mechanics & FAQ",
       "navEntry": {
         "label": "Workflows & FAQ",
         "shortLabel": "Guides",
-        "navOrder": 22,
+        "navOrder": 23,
         "defaultVisible": true,
         "badge": "14 Guides",
         "badgeType": "neutral"
@@ -610,11 +618,6 @@
       "category": "Intelligence",
       "title": "INTELLIGENCE & COPILOT",
       "id": "section-intelligence"
-    },
-    {
-      "category": "Playbooks",
-      "title": "WORKFLOWS",
-      "id": "section-workflows"
     },
     {
       "category": "Marketing",
@@ -779,15 +782,6 @@
         "badge": "Flows",
         "badgeType": "live",
         "description": "Institutional block trades, sweeps, and dark pool prints"
-      },
-      {
-        "id": "best-trade",
-        "label": "Best Trade",
-        "shortLabel": "Best",
-        "icon": "Goal",
-        "badge": "Best",
-        "badgeType": "pro",
-        "description": "The single best trade for a name, plus alternatives"
       }
     ],
     "assets-hub": [
@@ -1032,6 +1026,17 @@
         "badgeType": "neutral",
         "description": "Payment assurance"
       }
+    ],
+    "order": [
+      {
+        "id": "options-order",
+        "label": "Options order",
+        "shortLabel": "Options",
+        "icon": "Options",
+        "badge": "Options",
+        "badgeType": "pro",
+        "description": "Manual options order ticket \u2014 build a multi-leg strategy with broker preview and human approval"
+      }
     ]
   },
   "deepLinks": {
@@ -1163,6 +1168,12 @@
     "planned:bonds": {
       "tab": "assets-hub",
       "view": "bonds"
+    },
+    "order:options-order": {
+      "tab": "order",
+      "params": {
+        "assetClass": "options"
+      }
     }
   },
   "deepLinkSurfaces": [

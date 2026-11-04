@@ -45,7 +45,7 @@ describe("Stock Hub split (#2896)", () => {
     const old = getRoute("screeners");
     expect(old).toBeDefined();
     expect(hasNavEntry(old!)).toBe(false);
-    // Issue #2954 adds the Assets Hub nav entry: 30 → 31.
+    // Issue #2974 removes the Research & Dual Feed nav entry: 32 → 31.
     expect(ROUTES.filter(hasNavEntry)).toHaveLength(31);
   });
 

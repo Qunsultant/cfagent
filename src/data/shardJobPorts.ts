@@ -84,6 +84,18 @@ export interface ShardJobRow {
   provenanceSourceDo: string;
   /** Row-shape version of the mapping (1 in slice 2). */
   provenanceSourceVersion: string;
+  /**
+   * Issue #2989: the Cloudflare workflow run-id for this job —
+   * the ACTUAL instance id used at start (derived or fallback),
+   * as returned by the ONE seam (workflowInstanceSeam). It IS
+   * the Cloudflare workflow id: create() returns only instance.id
+   * and status() returns only status/output/error, so there is
+   * no second identifier to store. Absent on rows projected
+   * before #2989 and on rows whose starter never knew its own
+   * instance id (a parent flow cannot know its own id from
+   * inside); those rows keep correlating via the derived id.
+   */
+  workflowRunId?: string;
 }
 
 /** One leg outcome handed to the projector by a run. */
@@ -101,6 +113,14 @@ export interface LegOutcome {
    * spec payload.
    */
   result?: unknown;
+  /**
+   * Issue #2989: the Cloudflare workflow run-id of the child
+   * instance that produced this outcome, when the projecting
+   * flow knows it (the screener parent's pending map). Carried
+   * onto the projected row; absent where the flow never started
+   * a child (refusals, parent legs).
+   */
+  workflowRunId?: string;
 }
 
 /** Tenant-scoped reads over the shard job projection. */

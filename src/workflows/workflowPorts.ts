@@ -136,6 +136,14 @@ export const DEFAULT_POLL_INTERVAL_MS = 15 * 1000;
 /** Max retries per workflow step (blueprint ADR-0003 NFR). */
 export const WORKFLOW_STEP_MAX_RETRIES = 3;
 
+/**
+ * Issue #3025: the event a shard sends its parent when its run reaches
+ * a terminal state. The payload carries the shard id only — the parent
+ * reads the child's status/output through the workflow binding, so no
+ * bulk data rides an event (claim-check).
+ */
+export const SHARD_DONE_EVENT = "screener-shard-done";
+
 /** Max explicit symbols on one command (claim-check: the request, not bulk data). */
 export const MAX_COMMAND_SYMBOLS = 200;
 
@@ -242,6 +250,14 @@ export interface WorkflowJobCommand {
   role: "parent" | "shard";
   /** Parent job id (shard commands only). */
   parentJobId?: string;
+  /**
+   * Issue #3025: the parent's workflow instance id (shard commands
+   * only). The shard signals its completion to this instance so the
+   * parent can wait on an event instead of polling. Absent on a shard
+   * started by an older parent — such a child simply never signals, and
+   * the parent's deadline sweep covers it.
+   */
+  parentWorkflowId?: string;
   /** This shard's descriptor (shard commands only). */
   shard?: WorkflowShard;
   /** Tenant id resolved by the starter (absent → projection best-effort skipped). */
@@ -608,6 +624,14 @@ export interface ShardOutcome {
    * parent/child linkage, never for re-delivery.
    */
   reportId?: string;
+  /**
+   * Issue #2989: the workflow runtime's run-id of the child
+   * instance that produced this outcome (the seam-returned id
+   * from the parent's pending map). Carried into the projected
+   * row; absent for outcomes with no child instance (refusals,
+   * timeouts before creation, parent legs).
+   */
+  workflowRunId?: string;
 }
 
 /** One lifecycle transition on the job's journal. */
@@ -696,6 +720,14 @@ export interface WorkflowCollation {
    * fatal: the screen outcome stands.
    */
   parentReport?: { stored: boolean; reportId?: string; storeError?: string };
+  /**
+   * Issue #3028: the named cap reason when a fan-out round deferred a
+   * tail (the tail still ran, so this is a budget/pace signal on the
+   * record, never a truncation).
+   */
+  fanoutCapReason?: string;
+  /** Issue #3028: units a resumed run skipped because they were already complete. */
+  resumedSkippedUnits?: string[];
 }
 
 /**

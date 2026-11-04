@@ -70,6 +70,110 @@ export interface CapBreach {
   pct: number;
 }
 
+/**
+ * Issue #2840 (Q3) — quota tiers on #1819's measurement base.
+ * 70% stays the watch tier (the existing alert, unchanged);
+ * 90% is the escalate tier (a second, distinct alert, because
+ * the day's watch alert already fired and must not swallow it);
+ * 100% is the critical tier (the provider limit itself: the
+ * next SessionStore op throws, and the #2666 degradation —
+ * breaker + cached-session serve + typed 503 for fresh logins
+ * — is what the user actually experiences).
+ *
+ * Boundaries are AT the threshold, like the 70% rule: 90%
+ * fires at exactly 90%, 100% at exactly 100%. Tiers are per
+ * budget: rowsRead can be critical while rowsWritten is
+ * still watch. The totals remain the SessionStore-only lower
+ * bound, so every tier inherits #1819's caveat (a tier breach
+ * proves the account is at least there; no breach proves
+ * nothing about the uncounted namespaces).
+ */
+export type CapTier = "none" | "watch" | "escalate" | "critical";
+
+export const CAP_TIER_FRACTIONS = {
+  watch: 0.7,
+  escalate: 0.9,
+  critical: 1.0,
+} as const;
+
+export interface CapTierAssessment {
+  budget: CapBreach["budget"];
+  cumulative: number;
+  limit: number;
+  pct: number;
+  tier: CapTier;
+}
+
+export function tierForPct(pct: number): CapTier {
+  if (pct >= CAP_TIER_FRACTIONS.critical) return "critical";
+  if (pct >= CAP_TIER_FRACTIONS.escalate) return "escalate";
+  if (pct >= CAP_TIER_FRACTIONS.watch) return "watch";
+  return "none";
+}
+
+export function evaluateCapTiers(cumulative: CapCumulative): {
+  rowsRead: CapTierAssessment;
+  rowsWritten: CapTierAssessment;
+  doRequests: CapTierAssessment;
+} {
+  const candidates: Array<{ budget: CapBreach["budget"]; cumulative: number; limit: number }> = [
+    { budget: "rowsRead", cumulative: cumulative.rowsRead, limit: FREE_TIER_BUDGETS.rowsRead },
+    { budget: "rowsWritten", cumulative: cumulative.rowsWritten, limit: FREE_TIER_BUDGETS.rowsWritten },
+    { budget: "doRequests", cumulative: cumulative.ops, limit: FREE_TIER_BUDGETS.doRequests },
+  ];
+  const out = {} as Record<CapBreach["budget"], CapTierAssessment>;
+  for (const c of candidates) {
+    const pct = c.cumulative / c.limit;
+    out[c.budget] = { budget: c.budget, cumulative: c.cumulative, limit: c.limit, pct, tier: tierForPct(pct) };
+  }
+  return out;
+}
+
+/**
+ * Alert-state key for a tier. The watch tier keeps the
+ * historical bare budget key (`rowsRead`) so the existing
+ * 70% dedup is untouched; escalate/critical suffix their
+ * tier (`rowsRead:90`, `rowsRead:100`) so a higher-tier alert
+ * is never swallowed by the already-marked watch alert for
+ * the same budget-day, and never re-posts for its own tier-day.
+ */
+export function tierAlertKey(budget: CapBreach["budget"], tier: CapTier, _day: string): string {
+  if (tier === "escalate") return `${budget}:90`;
+  if (tier === "critical") return `${budget}:100`;
+  return budget;
+}
+
+/**
+ * Plain-text body for a tier alert. The escalation names the
+ * action (act on the alert: nothing sheds automatically — see
+ * the #2840 doc for why auto-shedding on a lower-bound
+ * projection would drop real work on a false signal); the
+ * critical text names the degradation the user experiences
+ * (breaker + cached serve + typed 503 for fresh logins).
+ * Delivered through the same Slack route as the watch alert.
+ */
+export function buildTierAlertText(
+  day: string,
+  tier: "escalate" | "critical",
+  breaches: CapBreach[],
+): string {
+  const lines = breaches.map(
+    (b) => `- ${b.budget}: ${b.cumulative.toLocaleString("en-US")} of ${b.limit.toLocaleString("en-US")} (${Math.round(b.pct * 100)}%)`,
+  );
+  if (tier === "critical") {
+    return [
+      `CRITICAL: SessionStore free-tier quota at 100% for ${day} (SessionStore-only lower bound).`,
+      ...lines,
+      "The provider limit is hit: further SessionStore ops throw. Degradation in force: the session-store breaker suppresses store reads, cached sessions keep serving degraded, and fresh logins without a cached session answer a typed 503. No work is shed automatically; act on this alert.",
+    ].join("\n");
+  }
+  return [
+    `ESCALATION: SessionStore free-tier quota at 90% for ${day} (SessionStore-only lower bound).`,
+    ...lines,
+    "Act on this alert: at 100% the provider limit throws and the #2666 degradation (breaker + cached serve + typed 503 for fresh logins) takes over. Nothing sheds automatically before then.",
+  ].join("\n");
+}
+
 /** Breach AT the threshold, not past it: at 70% the alert fires. */
 export function evaluateCapAlert(cumulative: CapCumulative): {
   breached: boolean;

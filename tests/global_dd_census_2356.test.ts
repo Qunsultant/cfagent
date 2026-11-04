@@ -814,6 +814,11 @@ function step5bPortSites(): Array<[string, string, number]> {
 
 const STEP5B_PORT_SITES: Array<[string, string, number]> = [
   ["src/data/createSessionPorts.ts", "createSessionPorts", 1],
+  // Added for issue #2840: the per-user session-cap enforcement
+  // in the wired login tail lists the user's sessions via the
+  // same listSessionFamilyEntries factory — no new funnel, no
+  // bypass (the cap counts the existing family listing).
+  ["src/security/iaaaLogin.ts", "listSessionFamilyEntries", 1],
   ["src/security/iaaaLogin.ts", "sessionFamilyPorts", 1],
   ["src/security/iaaaLogin.ts", "wiredMembershipStore", 2],
   ["src/security/session.ts", "createSessionPorts", 1],
@@ -829,7 +834,19 @@ const STEP5B_PORT_SITES: Array<[string, string, number]> = [
   // Bumped 5 -> 6 for issue #2838: the policy-proposals list
   // route adds one list site in server.ts (proposal records by
   // prefix), same factory — no new funnel, no bypass.
-  ["src/server.ts", "listSessionFamilyEntries", 6],
+  // Bumped 6 -> 13 for issue #2836: the logged-in-users list
+  // route adds four list sites in server.ts (sessions, memberships,
+  // login aliases, bindings) and the session-revoke route adds
+  // three (sessions, memberships for the tenant check, memberships
+  // for the audit-tenant lookup), same factory — no new funnel,
+  // no bypass.
+  // Bumped 13 -> 15 for issue #2842: the quota-usage lookup and
+  // override routes share one tenancy helper in server.ts with
+  // two list sites (sessions for the login->identity map,
+  // memberships for the active-membership check), same factory
+  // as the revoke handler's tenant check — no new funnel,
+  // no bypass.
+  ["src/server.ts", "listSessionFamilyEntries", 15],
   ["src/server.ts", "wiredAccessRequestStore", 1],
   ["src/server.ts", "wiredMembershipStore", 10],
 ];

@@ -23,6 +23,9 @@
  * order; pin updated in the same PR per the pin rule.)
  * (#2896 replaced the screeners nav entry with the Stock Hub entry at
  * the same navOrder 6 slot; pin updated in the same PR per the pin rule.)
+ * (#2974 moved Workflows + Records NLQ into Platform, removed the
+ * Research & Dual Feed nav entry, and reordered queues/nlq into the
+ * final Platform order; pin updated in the same PR per the pin rule.)
  */
 import { describe, it, expect } from "vitest";
 import {
@@ -43,7 +46,7 @@ const EXPECTED_ORDER = [
   "chat",
   "search",
   "workflow-runs",
-  "nlq",
+  "queues",
   "referrals",
   "ads",
   "social",
@@ -54,9 +57,9 @@ const EXPECTED_ORDER = [
   "platform-admin",
   "agents",
   "audit",
+  "nlq",
   "workflows",
   "options-flows",
-  "research",
   "endpoints",
   "docs",
   "payment-assurance",

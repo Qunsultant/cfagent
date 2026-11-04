@@ -532,6 +532,17 @@ export async function runChain(
       });
       continue;
     }
+    // #2840 budget pin: budgetCents is enforced at every
+    // user-facing declaration point — compile vs cap (above),
+    // and the governed firing paths (ScheduledAgent's
+    // PaymentsAgent check before any firing). This per-leg
+    // callback is an OPTIONAL caller-supplied gate, not a user
+    // declaration: a caller that supplies an executor without
+    // a budgetCheck owns the spend decision (pinned by
+    // tests/mcp_goal_chain.test.ts), and the MCP tool path
+    // supplies no executor at all, so no paid action runs
+    // there regardless. Do NOT "fix" this into a required
+    // gate without renegotiating those pins.
     if (validated.budgetCents > 0 && opts.budgetCheck) {
       const allowed = await opts.budgetCheck(validated.budgetCents);
       if (!allowed) {

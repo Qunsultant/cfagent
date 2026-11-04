@@ -58,6 +58,7 @@
 
 import type { CommercialAccount } from "../services/cfpayMonetization";
 import type { PaymentWorkflowEventParams } from "../workflows/paymentWorkflow";
+import { startManagedWorkflowInstance } from "../workflows/workflowInstanceSeam";
 import type { WorkflowJobCommand } from "../workflows/workflowPorts";
 
 export const PAYMENT_WORKFLOW_BINDING = "PAYMENT_WORKFLOW" as const;
@@ -116,7 +117,7 @@ export interface PaymentWorkflowBinding {
   create(options: { id: string; params: unknown }): Promise<{ id: string }>;
   get(id: string): Promise<{
     sendEvent?: (event: { type: string; payload: unknown }) => Promise<void>;
-    status?: () => Promise<{ status: string; output?: unknown; error?: unknown }>;
+    status?: () => Promise<{ status: string; output?: unknown; error?: { message: string } }>;
   }>;
 }
 
@@ -125,7 +126,7 @@ export interface PaymentWorkflowHost {
   sendWorkflowEvent(binding: string, workflowId: string, event: { type: string; payload: unknown }): Promise<void>;
 }
 
-/** Binding path: create the payment workflow instance. Throws if unbound. */
+/** Binding path: create the payment workflow instance via the ONE seam. Throws if unbound. */
 export async function startPaymentWorkflowViaBinding(
   binding: PaymentWorkflowBinding | undefined,
   params: PaymentWorkflowEventParams,
@@ -135,32 +136,25 @@ export async function startPaymentWorkflowViaBinding(
       "Payment workflow binding PAYMENT_WORKFLOW is not configured; refusing to start a screener for free while monetization is on.",
     );
   }
-  try {
-    const instance = await binding.create({ id: params.runRequestId, params });
-    return { workflowId: instance.id };
-  } catch (err) {
-    // Issue #2409 (G6): create-or-adopt, mirroring
-    // cfWorkflowAdapter.startWorkflowInstance. The Workflows
-    // binding errors when the instance id is already taken, so
-    // a retried submission whose first create actually landed
-    // (e.g. the caller timed out waiting) would fail here
-    // instead of adopting the run it already started — and a
-    // caller that then re-submitted under a NEW run-request id
-    // would double-charge, against this seam's own contract
-    // (header: one run per run-request; a retried start adopts
-    // the same instance). A get whose status() resolves proves
-    // the instance exists; adopt it. Any other failure
-    // rethrows the original create error — a genuine provider
-    // outage must stay loud, never be masked as an adoption.
-    try {
-      const existing = await binding.get(params.runRequestId);
-      if (!existing || typeof existing.status !== "function") throw err;
-      await existing.status();
-    } catch {
-      throw err;
-    }
-    return { workflowId: params.runRequestId };
-  }
+  // Issue #2409 (G6): create-or-adopt via the ONE seam
+  // (workflowInstanceSeam, no fallback — the run-request id IS
+  // the instance id, so there is no second id to fall back to).
+  // The Workflows binding errors when the instance id is already
+  // taken, so a retried submission whose first create actually
+  // landed (e.g. the caller timed out waiting) would fail here
+  // instead of adopting the run it already started — and a caller
+  // that then re-submitted under a NEW run-request id would
+  // double-charge, against this seam's own contract (header: one
+  // run per run-request; a retried start adopts the same
+  // instance). A get whose status() resolves proves the instance
+  // exists; adopt it. Any other failure rethrows the original
+  // create error — a genuine provider outage must stay loud,
+  // never be masked as an adoption.
+  const started = await startManagedWorkflowInstance(binding, {
+    id: params.runRequestId,
+    params,
+  });
+  return { workflowId: started.workflowId };
 }
 
 /** Host-agent path: start via an agent's runWorkflow. Throws if host lacks it. */

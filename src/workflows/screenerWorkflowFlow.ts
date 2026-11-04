@@ -78,7 +78,20 @@
  */
 
 import {
+  fanoutCapExceeded,
+  planNext,
+  planRun,
+  planStageFanout,
+} from "./stageRunnerPlan";
+import {
+  STAGE_RETRY_BUCKET,
+  type StageRunnerCheckpoint,
+  type StageRunnerPlan,
+  type StageRunnerStage,
+} from "./stageRunnerPorts";
+import {
   DEFAULT_MAX_PARALLEL_SHARDS,
+  SHARD_DONE_EVENT,
   DEFAULT_POLL_INTERVAL_MS,
   DEFAULT_SHARD_TIMEOUT_MS,
   WORKFLOW_STEP_MAX_RETRIES,
@@ -114,6 +127,16 @@ export interface ScreenerWorkflowStep {
     opts?: { retries?: { limit: number } },
   ): Promise<T>;
   sleep(name: string, durationMs: number): Promise<void>;
+  /**
+   * Issue #3025: durable wait on a shard-completion event, bounded by
+   * the shard deadline. Optional so a test double (or an older
+   * adapter) that cannot wait keeps the deadline-bounded sleep path
+   * instead — the decisions are identical either way.
+   */
+  waitForEvent?<T>(
+    name: string,
+    opts: { type: string; timeoutMs: number },
+  ): Promise<T>;
 }
 
 /** Child-workflow operations, as the parent flow sees them. */
@@ -815,6 +838,59 @@ export async function runShardFlow(
   };
 }
 
+/**
+ * Issue #2601 seam C - the shard fan-out as the runner contract sees
+ * it: one parallel stage over the shard units, capped by the command
+ * (default DEFAULT_MAX_PARALLEL_SHARDS), retrying under the analysis
+ * bucket. The cap is the contract's decision; the batched loop below
+ * consumes its started/deferred partition, so the tail is always
+ * queued as the next round - never truncated.
+ */
+function shardFanoutStage(maxParallel: number, timeoutMs: number): StageRunnerStage {
+  return {
+    stage: "analysis",
+    execution: "parallel",
+    maxParallel,
+    timeoutMs,
+    retryBucket: STAGE_RETRY_BUCKET.analysis,
+  };
+}
+
+/**
+ * Issue #3028 — a resume whose checkpoint says every unit is already
+ * terminal starts nothing. Its record is built from the checkpoint
+ * instead of from fresh outcomes, so a completed resume reports its
+ * stored result rather than the "no shard ran" failure a zero-outcome
+ * collation would produce.
+ */
+function outcomesFromCheckpoint(
+  plan: StageRunnerPlan,
+  checkpoint: StageRunnerCheckpoint,
+): ShardOutcome[] {
+  return plan.units.map((unit) => {
+    const entry = checkpoint.units.find((u) => u.unitId === unit.unitId);
+    switch (entry?.status) {
+      case "completed":
+      case "skipped":
+        return { shardId: unit.unitId, status: "completed" };
+      case "timed_out":
+        return { shardId: unit.unitId, status: "timed_out", timedOut: true };
+      case "failed":
+        return {
+          shardId: unit.unitId,
+          status: "failed",
+          ...(entry.error ? { error: entry.error } : {}),
+        };
+      default:
+        return {
+          shardId: unit.unitId,
+          status: "failed",
+          error: "Shard never ran (checkpoint carries no terminal status).",
+        };
+    }
+  });
+}
+
 interface PendingShard {
   shard: WorkflowJobCommand["shards"][number];
   workflowId: string;
@@ -831,6 +907,13 @@ export async function runParentFlow(
   step: ScreenerWorkflowStep,
   deps: ScreenerWorkflowDeps,
   childOps: ChildWorkflowOps,
+  /**
+   * Issue #3028: the run's checkpoint, when this is a RESUME rather
+   * than a first execution (the production adapter is
+   * createAsyncJobStageCheckpointStore, #3027). Absent = a first run,
+   * whose units are all outstanding — today's behaviour exactly.
+   */
+  resumeFrom?: StageRunnerCheckpoint | null,
 ): Promise<WorkflowCollation> {
   const nowMs = deps.nowMs;
   const workflowId = workflowIdForJob(command.jobId);
@@ -960,6 +1043,10 @@ export async function runParentFlow(
   const pending: PendingShard[] = [];
   const outcomes = new Map<string, ShardOutcome>();
   const childResults = new Map<string, ShardScreenResult>();
+  /** Issue #3028: the deferred-tail reasons this run recorded (normally none). */
+  const fanoutCapReasons: string[] = [];
+  /** Issue #3028: units a resume skipped as already complete. */
+  const resumedSkipped: string[] = [];
   if (refusalReasons) {
     // Issue #2530: a refused interpretation starts ZERO
     // shards. Every shard is a failed outcome carrying the
@@ -973,12 +1060,68 @@ export async function runParentFlow(
       });
     }
   } else {
-    for (let i = 0; i < command.shards.length; i += maxParallel) {
-      const batch = command.shards.slice(i, i + maxParallel);
-      const created = await step.do(`fan-out-batch-${i / maxParallel}`, async () => {
+    const fanoutStage = shardFanoutStage(maxParallel, shardTimeoutMs);
+    const shardById = new Map(command.shards.map((shard) => [shard.shardId, shard]));
+    const runPlan: StageRunnerPlan = planRun({
+      runId: command.jobId,
+      invocation: "workflow-shard",
+      stages: [fanoutStage],
+      units: command.shards.map((shard) => ({ unitId: shard.shardId })),
+    });
+    // Issue #3028: a resume asks the contract which units are still
+    // outstanding; a first run starts them all. A completed unit is
+    // never started again by a resume.
+    const outstanding = resumeFrom ? planNext(runPlan, resumeFrom) : { units: runPlan.units };
+    let queue = outstanding?.units ?? [];
+    if (resumeFrom) {
+      const resumedIds = new Set(queue.map((unit) => unit.unitId));
+      const skipped = runPlan.units
+        .filter((unit) => !resumedIds.has(unit.unitId))
+        .map((unit) => unit.unitId);
+      if (skipped.length > 0) {
+        resumedSkipped.push(...skipped);
+        // A skipped unit did not run in this invocation but it IS part of
+        // the run's record: seed its outcome from the checkpoint so the
+        // collation reports the stored result instead of "never started".
+        for (const unitId of skipped) {
+          outcomes.set(unitId, { shardId: unitId, status: "completed" });
+        }
+      }
+    }
+    if (resumeFrom && queue.length === 0) {
+      // Nothing outstanding: record the checkpoint's result, start no child.
+      const recorded = outcomesFromCheckpoint(runPlan, resumeFrom);
+      for (const outcome of recorded) {
+        stageTransitions.push(...stageTransitionsForShard(outcome, nowMs()));
+      }
+      return {
+        ...collateShards(
+          command.jobId,
+          workflowId,
+          recorded,
+          lifecycleTransitions,
+          stageTransitions,
+        ),
+        ...(resumedSkipped.length > 0 ? { resumedSkippedUnits: resumedSkipped } : {}),
+      };
+    }
+    let batchIndex = 0;
+    while (queue.length > 0) {
+      const fanout = planStageFanout(fanoutStage, queue);
+      // Issue #3028: a deferred tail is a pace signal on the record,
+      // never a silent truncation — the loop below starts it next round.
+      const capReason = fanoutCapExceeded(fanout);
+      if (capReason) fanoutCapReasons.push(capReason);
+      const batch = fanout.started.map((unit) => shardById.get(unit.unitId)!);
+      const created = await step.do(`fan-out-batch-${batchIndex}`, async () => {
         const out: Array<{ shard: WorkflowJobCommand["shards"][number]; workflowId: string }> = [];
         for (const shard of batch) {
-          const child = await childOps.createChild(shardCommandFor(runCommand, shard));
+          // Issue #3025: the child signals this instance when its run
+          // ends; the id is on the command, not in a shared registry.
+          const child = await childOps.createChild({
+            ...shardCommandFor(runCommand, shard),
+            parentWorkflowId: workflowId,
+          });
           out.push({ shard, workflowId: child.workflowId });
         }
         return out;
@@ -988,7 +1131,7 @@ export async function runParentFlow(
       // this slice it was the one parent step that never
       // emitted, so the trace jumped from announce straight
       // to the shards' steps with the fan-out invisible.
-      await traceStep(deps, runCommand, "workflow-step", `fan-out-batch-${i / maxParallel}`);
+      await traceStep(deps, runCommand, "workflow-step", `fan-out-batch-${batchIndex}`);
       for (const c of created) {
         pending.push({
           shard: c.shard,
@@ -999,6 +1142,11 @@ export async function runParentFlow(
       // Poll this batch to terminal-or-timeout before the next
       // batch starts: this is what bounds concurrency.
       await pollBatch(pending, outcomes, childResults, runCommand, step, deps, childOps, pollIntervalMs, nowMs);
+      // The contract partition consumes the tail as the next round:
+      // a shard is deferred, never dropped, and the loop ends only
+      // when every unit has started.
+      queue = fanout.deferred;
+      batchIndex += 1;
     }
   }
 
@@ -1012,6 +1160,8 @@ export async function runParentFlow(
         status: "timed_out",
         timedOut: true,
         error: `Shard exceeded its ${shardTimeoutMs}ms deadline.`,
+        // Issue #2989: the pending entry's child instance id.
+        workflowRunId: p.workflowId,
       });
     }
   }
@@ -1030,13 +1180,17 @@ export async function runParentFlow(
   if (outcomeList.some((o) => o.status !== "completed")) {
     lifecycleTransitions.push({ lifecycle: "BudgetConstrained", atMs: nowMs() });
   }
-  const collation = collateShards(
-    command.jobId,
-    workflowId,
-    outcomeList,
-    lifecycleTransitions,
-    stageTransitions,
-  );
+  const collation: WorkflowCollation = {
+    ...collateShards(
+      command.jobId,
+      workflowId,
+      outcomeList,
+      lifecycleTransitions,
+      stageTransitions,
+    ),
+    ...(fanoutCapReasons.length > 0 ? { fanoutCapReason: fanoutCapReasons[0] } : {}),
+    ...(resumedSkipped.length > 0 ? { resumedSkippedUnits: resumedSkipped } : {}),
+  };
   lifecycleTransitions.push({
     lifecycle: collation.lifecycle,
     atMs: nowMs(),
@@ -1094,6 +1248,10 @@ export async function runParentFlow(
           stage: "analysis",
           status: "completed",
           detail: `Shard ${o.shardId} completed.`,
+          // Issue #2989: the child instance id, for the row
+          // (fills the child row's missing correlation at
+          // version+1 when the child projected first).
+          ...(o.workflowRunId ? { workflowRunId: o.workflowRunId } : {}),
           result: {
             shardJobIds: [`shard:${o.shardId}`],
             result: {
@@ -1126,6 +1284,8 @@ export async function runParentFlow(
           o.status === "timed_out"
             ? `Shard ${o.shardId} timed out after ${shardTimeoutMs}ms.`
             : `Shard ${o.shardId} failed: ${o.error ?? "screen failed"}`,
+        // Issue #2989: the child instance id, for the row.
+        ...(o.workflowRunId ? { workflowRunId: o.workflowRunId } : {}),
         result: {
           shardJobIds: [`shard:${o.shardId}`],
           result: {
@@ -1216,16 +1376,37 @@ async function pollBatch(
           status: "timed_out",
           timedOut: true,
           error: `Shard exceeded its ${shardTimeoutMs}ms deadline.`,
+          // Issue #2989: the pending entry's child instance id.
+          workflowRunId: p.workflowId,
         });
         return false;
       }
       return true;
     });
     if (remaining.length === 0) return;
-    await step.sleep(`poll-wait-${round}`, pollIntervalMs);
+    if (step.waitForEvent) {
+      // Issue #3025 — event-first: wait for any shard-completion signal,
+      // bounded by the nearest shard deadline. A timeout (or a refused
+      // wait) is not an error: the single reconciliation sweep below
+      // reads the children once and the deadline rules still apply.
+      const untilDeadline = Math.min(...remaining.map((p) => p.deadlineMs)) - now;
+      try {
+        await step.waitForEvent(`shard-done-${round}`, {
+          type: SHARD_DONE_EVENT,
+          timeoutMs: Math.max(1, untilDeadline),
+        });
+      } catch {
+        // Deadline reached or wait refused — reconcile once, below.
+      }
+    } else {
+      // No wait surface (test doubles / older adapters): the same
+      // deadline-bounded sleep as before. Production always waits.
+      await step.sleep(`poll-wait-${round}`, pollIntervalMs);
+    }
     const snapshot = await step.do(`poll-${round}`, async () => {
       const out: Array<{
         shardId: string;
+        workflowId: string;
         status: WorkflowInstanceStatus;
         output?: unknown;
         error?: { message: string };
@@ -1234,6 +1415,10 @@ async function pollBatch(
         const s = await childOps.getChildStatus(p.workflowId);
         out.push({
           shardId: p.shard.shardId,
+          // Issue #2989: the pending entry's child instance id
+          // rides the snapshot so the outcome — and then the
+          // projected row — carries the seam-returned run id.
+          workflowId: p.workflowId,
           status: s?.status ?? "unknown",
           ...(s?.output !== undefined ? { output: s.output } : {}),
           ...(s?.error ? { error: s.error } : {}),
@@ -1268,12 +1453,15 @@ async function pollBatch(
             // market shards, report id for goal shards).
             timestamp: result.timestamp,
             ...(result.reportId ? { reportId: result.reportId } : {}),
+            // Issue #2989: the child instance id, for the row.
+            ...(s.workflowId ? { workflowRunId: s.workflowId } : {}),
           });
         } else {
           outcomes.set(s.shardId, {
             shardId: s.shardId,
             status: "failed",
             error: "Child workflow output malformed — cannot be a screen result.",
+            ...(s.workflowId ? { workflowRunId: s.workflowId } : {}),
           });
         }
       } else if (s.status === "errored" || s.status === "terminated") {
@@ -1281,6 +1469,7 @@ async function pollBatch(
           shardId: s.shardId,
           status: "failed",
           error: s.error?.message ?? `Child workflow ${s.status}.`,
+          ...(s.workflowId ? { workflowRunId: s.workflowId } : {}),
         });
       }
       // queued/running/waiting/paused/unknown: still outstanding.

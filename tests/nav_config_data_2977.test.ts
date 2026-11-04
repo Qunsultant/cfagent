@@ -22,9 +22,9 @@ const CATEGORIES = ["Execution", "Intelligence", "Playbooks", "Platform", "Billi
 const BADGE_TYPES = ["pro", "live", "ai", "mcp", "new", "neutral"];
 
 describe("nav-config.json shape (issue #2977)", () => {
-  it("routes: 41 ids, sorted ascending, unique", () => {
+  it("routes: 42 ids, sorted ascending, unique", () => {
     const ids = (navData.routes as { id: string }[]).map((r) => r.id);
-    expect(ids).toHaveLength(41);
+    expect(ids).toHaveLength(42);
     expect([...ids].sort()).toEqual(ids);
     expect(new Set(ids).size).toBe(ids.length);
   });
@@ -55,9 +55,9 @@ describe("nav-config.json shape (issue #2977)", () => {
     }
   });
 
-  it("subMenus: 10 groups, every sub-item has id and label", () => {
+  it("subMenus: 11 groups, every sub-item has id and label", () => {
     const groups = Object.keys(navData.subMenus as Record<string, unknown[]>);
-    expect(groups).toHaveLength(10);
+    expect(groups).toHaveLength(11);
     for (const items of Object.values(navData.subMenus as Record<string, { id: string; label: string }[]>)) {
       for (const item of items) {
         expect(item.id).toBeTruthy();
@@ -72,10 +72,10 @@ describe("nav-config.json shape (issue #2977)", () => {
     for (const id of navData.hostedIds as string[]) expect(ids.has(id)).toBe(true);
   });
 
-  it("deepLinks: 31 overrides, every tab target is a route", () => {
+  it("deepLinks: 32 overrides, every tab target is a route", () => {
     const ids = new Set((navData.routes as { id: string }[]).map((r) => r.id));
     const entries = Object.entries(navData.deepLinks as Record<string, { tab?: string }>);
-    expect(entries).toHaveLength(31);
+    expect(entries).toHaveLength(32);
     for (const [, link] of entries) {
       if (link.tab) expect(ids.has(link.tab)).toBe(true);
     }
@@ -113,13 +113,13 @@ describe("nav-config.json shape (issue #2977)", () => {
 
 describe("nav-config.json loaders (issue #2977)", () => {
   it("loaders re-export the data file unchanged", () => {
-    expect(ROUTES).toHaveLength(41);
-    expect(Object.keys(DEEP_LINK_OVERRIDES)).toHaveLength(31);
+    expect(ROUTES).toHaveLength(42);
+    expect(Object.keys(DEEP_LINK_OVERRIDES)).toHaveLength(32);
     expect(SURFACE_TAB_DEFS).toHaveLength(14);
-    // 6 metadata sections + sandbox menu-only section.
+    // 5 metadata sections + sandbox menu-only section.
     const built = buildDefaultLeftNavConfig().sections;
-    expect(built).toHaveLength(7);
-    expect(built.slice(0, 6).map((s) => s.title)).toEqual(
+    expect(built).toHaveLength(6);
+    expect(built.slice(0, 5).map((s) => s.title)).toEqual(
       (navData.sections as { title: string }[]).map((s) => s.title),
     );
   });

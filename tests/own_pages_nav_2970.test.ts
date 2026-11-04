@@ -20,8 +20,8 @@ describe("own pages (#2970)", () => {
   it("adds goal-screen, review, and track-record routes with no nav entries", () => {
     const expected = [
       { id: "goal-screen", navGroup: "goal-screen", crumb: "Goal Screen", category: "Intelligence", icon: "Goal" },
-      { id: "review", navGroup: "workflow-runs", crumb: "Proposal Review", category: "Playbooks", icon: "Review" },
-      { id: "track-record", navGroup: "workflow-runs", crumb: "Track Record", category: "Playbooks", icon: "TrackRecord" },
+      { id: "review", navGroup: "workflow-runs", crumb: "Proposal Review", category: "Platform", icon: "Review" },
+      { id: "track-record", navGroup: "workflow-runs", crumb: "Track Record", category: "Platform", icon: "TrackRecord" },
     ];
     for (const e of expected) {
       const route = getRoute(e.id);
