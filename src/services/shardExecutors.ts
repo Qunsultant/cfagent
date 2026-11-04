@@ -494,73 +494,90 @@ async function generateTabular(
   const prefix = chain.screenType === "options"
     ? (format === "xlsx" ? "options:xlsx:" : "options:csv:")
     : (format === "xlsx" ? "screener:xlsx:" : "screener:csv:");
-  const key = `${prefix}${crypto.randomUUID().slice(0, 8)}`;
   const { putReportPdf } = await import("./reportBlobStore");
-  // Issue #2621 P0 (options only): generate + store failures are a
-  // per-format failed outcome, not a chain failure — same rule as
-  // generatePdf above. Stock chains keep the existing throw.
-  let fileName: string;
-  let bytes: Uint8Array;
+  // Issue #2869 slice 3: the tabular leg runs through the
+  // tabular-aware stage consumer (src/workflows/
+  // stageTabularConsumer.ts) — persisted assemble dataset
+  // only, injected generate + store. No claims store is
+  // passed here, deliberately: the chain's own shard job
+  // row is this leg's exactly-once guard (a completed
+  // generate shard is never re-executed, and a crashed
+  // in-flight shard must be allowed to regenerate — a
+  // pre-generation SQL claim would suppress that recovery
+  // with no key to hand the store shard). The consumer's
+  // claim path is exercised by its own tests and remains
+  // available to callers whose retry cannot recover a key.
+  // The per-domain failure rule is UNCHANGED and stays at
+  // this caller (issue #2621 P0, options only): generate
+  // + store failures are a per-format failed outcome, not
+  // a chain failure — same rule as generatePdf above.
+  // Stock chains keep the existing throw. The blob store
+  // is the generate leg's store: putReportPdf writes the
+  // bytes (R2 when bound, DO storage otherwise) under the
+  // per-run key. The mas_reports row is the store shard's
+  // job. Content type follows the goal-screen pattern
+  // (explicit per format), not persistRun's PDF default.
+  const { consumeTabularGenerate } = await import("../workflows/stageTabularConsumer");
+  let outcome: Awaited<ReturnType<typeof consumeTabularGenerate>>;
   try {
-    ({ fileName, bytes } = await withRetry(
-      async () => {
-        // Issue #2911 (G4): the stock tabular leg routes through the one
-        // generation module (src/services/stockReportArtifacts.ts) — the
-        // same code persistRun uses. The options branches below keep
-        // their own options generators: options is a separate domain
-        // (#2621), not a second stock path.
-        if (format === "xlsx") {
-          if (chain.screenType === "options") {
-            const { generateOptionsXlsx, optionsXlsxFileName, adaptOpportunityScanToOptionScreenResult } = await import("../trading");
-            const adapted = adaptOpportunityScanToOptionScreenResult(dataset as any);
-            return { fileName: optionsXlsxFileName(adapted), bytes: generateOptionsXlsx(adapted) };
-          }
-          const { generateStockTabularBytes } = await import("./stockReportArtifacts");
-          return generateStockTabularBytes("xlsx", dataset);
-        }
-        if (chain.screenType === "options") {
-          const { generateOptionsCsv, optionsCsvFileName, adaptOpportunityScanToOptionScreenResult } = await import("../trading");
-          const adapted = adaptOpportunityScanToOptionScreenResult(dataset as any);
-          return { fileName: optionsCsvFileName(adapted), bytes: new TextEncoder().encode(generateOptionsCsv(adapted)) };
-        }
-        const { generateStockTabularBytes } = await import("./stockReportArtifacts");
-        return generateStockTabularBytes("csv", dataset);
+    outcome = await consumeTabularGenerate({
+      runId: `${chain.screenType === "options" ? "options" : "screener"}:${chain.chainId}`,
+      format,
+      dataset,
+      keyPrefix: prefix,
+      generate: async ({ format: fmt, dataset: ds }) =>
+        withRetry(
+          async () => {
+            // Issue #2911 (G4): the stock tabular leg routes through the one
+            // generation module (src/services/stockReportArtifacts.ts) — the
+            // same code persistRun uses. The options branches below keep
+            // their own options generators: options is a separate domain
+            // (#2621), not a second stock path.
+            if (fmt === "xlsx") {
+              if (chain.screenType === "options") {
+                const { generateOptionsXlsx, optionsXlsxFileName, adaptOpportunityScanToOptionScreenResult } = await import("../trading");
+                const adapted = adaptOpportunityScanToOptionScreenResult(ds as any);
+                return { fileName: optionsXlsxFileName(adapted), bytes: generateOptionsXlsx(adapted) };
+              }
+              const { generateStockTabularBytes } = await import("./stockReportArtifacts");
+              return generateStockTabularBytes("xlsx", ds as never);
+            }
+            if (chain.screenType === "options") {
+              const { generateOptionsCsv, optionsCsvFileName, adaptOpportunityScanToOptionScreenResult } = await import("../trading");
+              const adapted = adaptOpportunityScanToOptionScreenResult(ds as any);
+              return { fileName: optionsCsvFileName(adapted), bytes: new TextEncoder().encode(generateOptionsCsv(adapted)) };
+            }
+            const { generateStockTabularBytes } = await import("./stockReportArtifacts");
+            return generateStockTabularBytes("csv", ds as never);
+          },
+          policy,
+          { label: `shard.generate.${fmt}` },
+        ),
+      store: async ({ key, fileName, bytes, contentType }) => {
+        await putReportPdf(deps.env as any, deps.storage as any, key, fileName, bytes, contentType);
       },
-      policy,
-      { label: `shard.generate.${format}` }
-    ));
+      deadLetter: async ({ reason }) => {
+        console.warn(`[shardExecutors] tabular generate dead-lettered: ${reason}`);
+      },
+    });
   } catch (err) {
     if (chain.screenType === "options") {
       return { format, status: "failed", error: err instanceof Error ? err.message : String(err) };
     }
     throw err;
   }
-  // The blob store is the generate leg's store: putReportPdf writes
-  // the bytes (R2 when bound, DO storage otherwise) under the
-  // per-run key. The mas_reports row is the store shard's job.
-  // Content type follows the goal-screen pattern (explicit per
-  // format), not persistRun's PDF default.
-  try {
-    await putReportPdf(
-      deps.env as any,
-      deps.storage as any,
-      key,
-      fileName,
-      bytes,
-      format === "csv"
-        ? "text/csv"
-        : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    );
-  } catch (err) {
-    // Issue #2621 P0 (options only): a blob-store failure on this
-    // leg is the format's failure, not the chain's — same rule as
-    // the renderer failure above. Stock chains keep the throw.
+  if (outcome.status !== "generated" || !outcome.key || !outcome.fileName) {
+    // A dead-lettered (or, without claims, unreachable
+    // duplicate-suppressed) tabular leg is a failed format,
+    // never a silent skip: options records the per-format
+    // failure; stock chains throw, as before.
+    const reason = outcome.reason ?? "tabular generate produced no blob";
     if (chain.screenType === "options") {
-      return { format, status: "failed", error: err instanceof Error ? err.message : String(err) };
+      return { format, status: "failed", error: reason };
     }
-    throw err;
+    throw new Error(reason);
   }
-  return { format, key, fileName };
+  return { format, key: outcome.key, fileName: outcome.fileName };
 }
 
 async function storeFormat(
