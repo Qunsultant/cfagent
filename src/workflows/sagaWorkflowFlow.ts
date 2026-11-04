@@ -422,19 +422,14 @@ export type LegTerminal =
  * second copy of the loop.
  */
 /**
- * Issue #3191 - the saga workflow's real `step.do` ids (the polling waits are
- * not steps and stay out). Pinned against this file by
- * tests/payment_saga_stage_ids_3191.test.ts.
+ * Issue #3191 - the saga workflow's real step ids live in the shared,
+ * dependency-free `stageRuntimeIds` module (the workflow catalog renders in
+ * the browser and must not import this file). Re-exported here so the flow
+ * and the catalog read one declaration; tests/payment_saga_stage_ids_3191.test.ts
+ * scans this file and fails if the two drift.
  */
-export const SAGA_STEP_IDS = [
-  "record-audit-saga-started",
-  "start-payment-leg",
-  "record-audit-payment-started",
-  "record-audit-screen-completed",
-  "compensate-failed-screen",
-] as const;
-
-export type SagaStepId = (typeof SAGA_STEP_IDS)[number];
+export { SAGA_STEP_IDS } from "./stageRuntimeIds";
+export type { SagaStepId } from "./stageRuntimeIds";
 
 export async function pollLegToTerminal(
   deps: { legPort: SagaLegPort; nowMs: () => number },

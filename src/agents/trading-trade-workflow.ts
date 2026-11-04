@@ -37,6 +37,18 @@ import { meshTraceStoreForEnv } from "../data/createMeshTracePorts";
 /** How long a proposal waits for its decision before lapsing. */
 export const TRADE_APPROVAL_TIMEOUT = "24 hours";
 
+/**
+ * Issue #3191 - the trading leg's durable step ids live in the shared,
+ * dependency-free `stageRuntimeIds` module: the workflow catalog renders in
+ * the browser, so it must never import this file (doing so pulled the agents
+ * SDK into the frontend bundle and broke the build). Re-exported here so the
+ * flow and the catalog read one declaration;
+ * tests/options_trading_stage_ids_3191.test.ts scans this file and fails if
+ * the two drift.
+ */
+export { TRADE_APPROVAL_STEP_IDS } from "../workflows/stageRuntimeIds";
+export type { TradeApprovalStepId } from "../workflows/stageRuntimeIds";
+
 /** Minimal structural step surface the flow needs (fakeable in tests). */
 export interface TradeApprovalStep {
   waitForEvent(

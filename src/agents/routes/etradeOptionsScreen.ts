@@ -48,6 +48,16 @@ import type { EtradeOptionsRouteContext } from "./etradeOptions";
 
 type OptionsScreenValue = Extract<ReturnType<typeof parseOptionsScreenRequest>, { ok: true }>["value"];
 
+/**
+ * Issue #3191 - options screens are NOT a durable workflow: this request
+ * handler is the runtime, so its phases are named in the shared
+ * `stageRuntimeIds` module rather than given invented `step.do` ids. The pin
+ * in tests/options_trading_stage_ids_3191.test.ts proves each phase still
+ * corresponds to a real call in this file.
+ */
+export { OPTIONS_SCREEN_PHASES } from "../../workflows/stageRuntimeIds";
+export type { OptionsScreenPhase } from "../../workflows/stageRuntimeIds";
+
 export async function executeOptionsScreen(args: {
   ctx: EtradeOptionsRouteContext;
   userLogin: string;
