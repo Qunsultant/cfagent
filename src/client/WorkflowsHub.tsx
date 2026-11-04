@@ -2,7 +2,6 @@ import React, { useState, useMemo } from "react";
 import "./workflowsHub.css";
 import { Button, PillGroup, Table, TextInput, PageShell, Tabs, Stack, Flex, Grid } from "./components/ui";
 import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
-import { WorkflowCatalogPanel } from "./WorkflowCatalogPanel";
 import { STRATEGY_LIBRARY } from "./options/strategyLibrary";
 import {
   FAQ_QUESTIONS,
@@ -912,18 +911,12 @@ export interface WorkflowsHubProps {
   onSendPrompt?: (prompt: string, sourceTab?: string) => void;
 }
 
-export type WorkflowsSubTab =
-  | "faq"
-  | "workflows"
-  | "catalog"
-  | "decisioning"
-  | "matrix"
-  | "improvements";
+export type WorkflowsSubTab = "faq" | "workflows" | "decisioning" | "matrix" | "improvements";
 
 export function isValidWorkflowsSubTab(tab: unknown): tab is WorkflowsSubTab {
   return (
     typeof tab === "string" &&
-    (["faq", "workflows", "catalog", "decisioning", "matrix", "improvements"] as readonly string[]).includes(tab)
+    (["faq", "workflows", "decisioning", "matrix", "improvements"] as readonly string[]).includes(tab)
   );
 }
 
@@ -1112,7 +1105,6 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
           tabs={[
             { id: "faq", icon: "💡", label: "Quantitative Playbooks (8 Core FAQs)" },
             { id: "workflows", icon: "🧭", label: "Platform Workflows (14 Track A & E)" },
-            { id: "catalog", icon: "🧩", label: "Workflow & Stage Catalog" },
             { id: "decisioning", icon: "⚖️", label: "Algorithmic Decisioning Rules (6 Engines)" },
             { id: "matrix", icon: "📋", label: "Capability & Lookup Matrix" },
             { id: "improvements", icon: "🚀", label: "Optimization Roadmap (6 Enhancements)" },
@@ -1561,8 +1553,6 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
       )}
 
       {/* VIEW 3: ALGORITHMIC DECISIONING RULES (6 ENGINES) */}
-      {activeTab === "catalog" && <WorkflowCatalogPanel />}
-
       {activeTab === "decisioning" && (
         <Stack gap="5" role="tabpanel" id="workflows-panel-decisioning" aria-labelledby="workflows-tab-decisioning">
           {/* Decisioning Hero Note */}
