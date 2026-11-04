@@ -1,6 +1,7 @@
 /**
  * Issue #159: client API for the ScheduledAgent dashboard.
  */
+import { withCsrfInit } from "./apiFetch";
 
 export interface ScheduledGoal {
   id: string;
@@ -28,7 +29,7 @@ export interface ScheduleTick {
 }
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await globalThis.fetch(path, init);
+  const response = await globalThis.fetch(path, withCsrfInit(init));
   const data = (await response.json()) as T & { error?: string };
   if (!response.ok) throw new Error(data.error || `Request failed: ${path}`);
   return data;

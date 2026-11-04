@@ -14,7 +14,7 @@
  * authorization.
  */
 
-import { apiFetch } from "./apiFetch";
+import { apiFetch, csrfHeaders } from "./apiFetch";
 
 export interface ServiceUserPlatformStatus {
   membershipId: string;
@@ -109,7 +109,7 @@ export async function provisionPlatformTier(): Promise<ProvisionOutcome> {
   try {
     resp = await globalThis.fetch("/api/admin/service-user/provision", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...csrfHeaders() },
       body: JSON.stringify({ tier: "platform" }),
     });
   } catch {

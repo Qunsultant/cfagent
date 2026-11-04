@@ -6,6 +6,7 @@
  * creation logic lives here.
  */
 import type { JobRunRecord } from "../services/jobRunRecords";
+import { withCsrfInit } from "./apiFetch";
 
 export type { JobRunRecord };
 
@@ -38,7 +39,7 @@ export interface SystemsResponse {
 }
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, init);
+  const res = await fetch(path, withCsrfInit(init));
   const data = (await res.json().catch(() => ({}))) as any;
   if (!res.ok || data.ok === false || data.success === false) {
     throw new Error(data.error || `HTTP ${res.status}`);

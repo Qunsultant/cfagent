@@ -55,6 +55,7 @@
 
 import { useEffect, useState } from "react";
 import { POLLING_CONFIG_DEFAULTS } from "./pollingConfig";
+import { csrfHeaders } from "./apiFetch";
 
 export const AUTO_REFRESH_ENABLED_KEY = "cfagent_global_autorefresh_enabled";
 export const AUTO_REFRESH_INTERVAL_KEY = "cfagent_global_autorefresh_interval";
@@ -257,7 +258,7 @@ export async function saveAutoRefresh(enabled: boolean, interval?: number): Prom
     }
     const res = await fetchFn(AUTO_REFRESH_ENDPOINT, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      headers: { "Content-Type": "application/json", Accept: "application/json", ...csrfHeaders() },
       body: JSON.stringify({ enabled, intervalS: optimistic.interval }),
     });
     if (!res.ok) {

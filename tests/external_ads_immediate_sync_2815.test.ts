@@ -74,7 +74,9 @@ function req(path: string, method = "POST", body: unknown = { id: "test-ad" }) {
     method,
     headers: {
       "Content-Type": "application/json",
-      Cookie: `session_id=${SESSION_ID}`,
+      // Q5 slice: cookie-authenticated test requests carry the CSRF token a real client sends.
+      Cookie: `session_id=${SESSION_ID}; csrf_token=csrf-test-token`,
+      "X-CSRF-Token": "csrf-test-token",
     },
     body: method === "GET" || method === "HEAD" ? undefined : JSON.stringify(body),
   });

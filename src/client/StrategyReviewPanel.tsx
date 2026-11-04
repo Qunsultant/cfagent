@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { Button } from "./components/ui";
+import { csrfHeaders } from "./apiFetch";
 
 interface StrategyReview {
   id: string;
@@ -41,7 +42,7 @@ export function StrategyReviewPanel() {
   const decide = async (id: string, decision: "approved" | "rejected") => {
     await fetch("/api/options/strategy-reviews/decide", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...csrfHeaders() },
       body: JSON.stringify({ id, decision }),
     });
     fetchReviews();

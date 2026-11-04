@@ -56,7 +56,8 @@ function req(method: string, body?: unknown, cookie?: string, path = "/api/socia
   return new Request(`https://agent.test${path}`, {
     method,
     headers: {
-      ...(cookie ? { Cookie: `session_id=${cookie}` } : {}),
+      // Q5 slice: cookie-authenticated test requests carry the CSRF token a real client sends.
+      ...(cookie ? { Cookie: `session_id=${cookie}; csrf_token=csrf-test-token`, "X-CSRF-Token": "csrf-test-token" } : {}),
       ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
     },
     body: body === undefined ? undefined : typeof body === "string" ? body : JSON.stringify(body),
