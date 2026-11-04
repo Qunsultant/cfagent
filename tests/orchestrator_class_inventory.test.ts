@@ -319,9 +319,14 @@ const ORCH = "agents/orchestrator.ts";
  *  (after the service-user delegation, no other orchestrator
  *  logic changed) — measured 3,238 lines / 155,218 B after the
  *  addition; budget lines rise to 3250 and bytes rise to
- *  155_800, keeping similar headroom. */
-const BUDGET_LINES = 3250;
-const BUDGET_BYTES = 155_800;
+ *  155_800, keeping similar headroom.
+ *  Issue #3089 adds the broker-order import + delegation block
+ *  (after the E*TRADE block, no other orchestrator logic
+ *  changed) — measured 3,266 lines / 157,137 B on the merged
+ *  tree, so budget lines rise to 3275 and bytes rise to
+ *  157_800, keeping similar headroom. */
+const BUDGET_LINES = 3275;
+const BUDGET_BYTES = 157_800;
 
 const count = (haystack: string, needle: string) =>
   haystack.split(needle).length - 1;
@@ -418,7 +423,9 @@ describe("orchestrator class inventory (#992 standing gate)", () => {
     // Bumped 6 -> 7 / 3 -> 4 for issue #2681: the migration context
     // binds schedule/scheduleEvery as pass-throughs; the re-arm itself
     // lives in routes/orchestratorMigration.ts, not inline.
-    expect(count(text, "this.schedule(")).toBeLessThanOrEqual(7);
+    // Bumped 7 -> 8 for issue #3089: the broker-order delegation
+    // block copies the E*TRADE context's schedule: binding arrow.
+    expect(count(text, "this.schedule(")).toBeLessThanOrEqual(8);
     expect(count(text, "this.scheduleEvery(")).toBeLessThanOrEqual(4);
   });
 

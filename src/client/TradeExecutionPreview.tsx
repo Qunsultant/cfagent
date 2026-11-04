@@ -25,7 +25,7 @@ export function TradeExecutionPreview({ draft }: { draft: TradeExecutionDraft })
       </h4>
       <div>
         <strong>
-          Exact execution payload (POST /api/etrade/order/execute)
+          Exact execution payload (POST /api/broker/order/execute)
         </strong>
         <pre className="code-block">
           <code>{preview.payloadJson}</code>

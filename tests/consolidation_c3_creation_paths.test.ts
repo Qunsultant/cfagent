@@ -50,8 +50,8 @@ const ARMING_PATTERN = /\.(schedule|scheduleEvery)\s*\(/;
 /** Post-C3 enumeration: file → number of arming call sites + role. */
 const ARMING_SITES: Record<string, { count: number; role: string }> = {
   "src/agents/orchestrator.ts": {
-    count: 11,
-    role: "context binding arrows for the extracted modules + the stale-task sweep arm (non-screening) + the #2681 migration re-arm pass-throughs (schedule/scheduleEvery bound into the migration context; actual arming happens in routes/orchestratorMigration.ts, not inline)",
+    count: 12,
+    role: "context binding arrows for the extracted modules + the stale-task sweep arm (non-screening) + the #2681 migration re-arm pass-throughs (schedule/scheduleEvery bound into the migration context; actual arming happens in routes/orchestratorMigration.ts, not inline) + the #3089 broker-order route context binding arrow (same pass-through pattern as the E*TRADE route context; no inline arming)",
   },
   "src/agents/routes/orchestratorMigration.ts": {
     count: 3,
