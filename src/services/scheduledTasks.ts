@@ -1080,6 +1080,17 @@ export class ScheduledTasksService {
      *  monolithic runScreen path. Absent/false keeps today's
      *  behaviour exactly. */
     sharded?: boolean;
+    /** Issue #2373 (slice C): schedule kind for paid routing —
+     *  absent fails closed to recurring (coverage-only), exactly
+     *  like the goal tick. Carried on the schedule payload by the
+     *  schedule-creation guard in src/agents/routes/schedules.ts;
+     *  legacy payloads without it are treated as recurring. */
+    scheduleKind?: "one_off" | "recurring";
+    /** Issue #2373 (slice C): human authorization at submission
+     *  for a one-off run. Stock ticks never start a checkout (see
+     *  the payment-decision block below), so an authorized one-off
+     *  without coverage still skips — honestly, not charged. */
+    authorizedAtSubmission?: boolean;
   } = {}): Promise<ScheduledTaskResult<{
     totalScanned: number;
     matchedCount: number;
@@ -1119,6 +1130,141 @@ export class ScheduledTasksService {
       const userLogin = options.userLogin || this.userLogin;
       if (!userLogin) {
         throw new Error("No authenticated E*TRADE account is associated with this scheduled screen. Open the schedules panel while signed in and run it again.");
+      }
+      // Issue #2373 (slice C): monetization ON gates scheduled
+      // stock screens at the tick, mirroring the goal tick's
+      // admission stage — but as a payment DECISION, not a
+      // workflow start. Scheduled stock runs execute as CHAINS
+      // (sharded) or as a direct ScreenerAgent.runScreen call
+      // (monolithic); neither rides ScreenerScreenWorkflow, and
+      // CLO G7 (#2914) explicitly rejected migrating sharded
+      // execution onto it, so no payment workflow is ever started
+      // here and no one-off checkout is available for stock
+      // schedules. Covered runs consume FIRST (subscription
+      // included run, else credits) through the workflow's own
+      // consume ports, then run exactly as today. Uncovered runs
+      // skip, audited and explained — never charged unattended,
+      // never run uncovered. A consume error skips too: unlike
+      // the workflow's best-effort consume (the run is already
+      // paid there), nothing is paid yet at this tick, so a failed
+      // consume must not yield an uncovered run. A missing,
+      // invalid, or UNAPPROVED stock price THROWS into the
+      // run_failed path below (getApprovedPrice returns null for
+      // #2547-proposed prices, exactly like a missing price — never
+      // a code-constant fallback). No checkout contact is needed
+      // on this path and none is invented: no checkout is ever
+      // started, so the goal tick's skipped_no_checkout_contact
+      // check (which guards its workflow start) has no stock
+      // equivalent; the account read passes emailTo ?? "" only
+      // as an identity field. Manual triggers (trigger "manual")
+      // bypass this block entirely and keep today's behaviour.
+      // Flag OFF → this block is skipped and the run is exactly
+      // as today.
+      const effectiveTrigger = options.trigger || "scheduled";
+      if (effectiveTrigger === "scheduled") {
+        const monetizationOn = await (
+          await import("../features/createFeatureFlagPort")
+        ).createFeatureFlagPort(this.env).isEnabled("monetization");
+        if (monetizationOn) {
+          const { resolveIaaaTenant } = await import("../security/iaaaGithubEndToEnd");
+          const tenantId = resolveIaaaTenant(this.env);
+          const { createPriceCatalogueAdapter, ensurePriceCatalogueSchema } =
+            await import("../data/createPriceCataloguePorts");
+          const priceCatalogue = createPriceCatalogueAdapter(this.env as { AGENT_DB?: unknown });
+          if (!priceCatalogue) {
+            throw new Error(
+              "Price catalogue is unavailable; refusing to route a paid scheduled screen without operator price data.",
+            );
+          }
+          await ensurePriceCatalogueSchema(priceCatalogue.db);
+          const stockPriceUSD = await priceCatalogue.getApprovedPrice("stock");
+          if (stockPriceUSD === null || !Number.isFinite(stockPriceUSD) || stockPriceUSD <= 0) {
+            throw new Error(
+              "No valid approved stored price for family stock: refusing to route a paid scheduled screen (fail-closed).",
+            );
+          }
+          const skipStock = (status: string, reason: string) => {
+            this.audit("stock_screen.skipped_uncovered", {
+              universe: options.universe || "NASDAQ100",
+              sector: options.sector || "ALL",
+              sharded: Boolean(options.sharded),
+              trigger: effectiveTrigger,
+              status,
+              reason,
+              priceUSD: stockPriceUSD,
+            });
+            return {
+              success: true,
+              taskType: "market_screen",
+              skipped: true,
+              skippedReason: status,
+              timestamp,
+              data: { status, reason, priceUSD: stockPriceUSD, universe: options.universe || "NASDAQ100" },
+            } as any;
+          };
+          const { createCommercialAdapter, ensureCommercialSchema } =
+            await import("../data/createCommercialPorts");
+          const { createSubscriptionAdapter, ensureSubscriptionSchema } =
+            await import("../data/createSubscriptionPorts");
+          const {
+            coverageForAccount,
+            resolvePaidScreenAction,
+            resolvePaidScreenAccount,
+          } = await import("./paidScreenSubmission");
+          const commercial = createCommercialAdapter(this.env as { AGENT_DB?: unknown });
+          const subscriptions = createSubscriptionAdapter(this.env as { AGENT_DB?: unknown });
+          if (!commercial || !subscriptions) {
+            throw new Error(
+              "Commercial account store is unavailable; refusing to route a paid scheduled screen without verified coverage.",
+            );
+          }
+          await ensureCommercialSchema(commercial.db);
+          await ensureSubscriptionSchema(subscriptions.db);
+          const { account } = await resolvePaidScreenAccount(
+            { commercial, subscriptions },
+            { userId: userLogin, email: options.emailTo ?? "", tenantId, nowMs: Date.now() },
+          );
+          const coverage = coverageForAccount(account, stockPriceUSD);
+          const scheduleKind = options.scheduleKind ?? "recurring";
+          const action = resolvePaidScreenAction({
+            monetizationOn: true,
+            trigger: "scheduled",
+            scheduleKind,
+            authorizedAtSubmission: options.authorizedAtSubmission,
+            coverage,
+            priceUSD: stockPriceUSD,
+          });
+          if (action.action === "skip") {
+            return skipStock("skipped_uncovered", action.reason);
+          }
+          if (!coverage) {
+            // Uncovered one-off authorized: resolvePaidScreenAction
+            // says start_payment, but there is no workflow for a
+            // stock chain/monolith to ride, so no checkout can
+            // happen. Skip with an honest explanation — this is
+            // the documented #2373 limitation, not a bug to work
+            // around, and the G7-rejected migration is NOT
+            // re-proposed here. (Covered one-off runs take the
+            // consume path below; coverage, not the one-off claim,
+            // is what lets a stock schedule run.)
+            return skipStock(
+              "skipped_one_off_unavailable",
+              "One-off checkout is unavailable for scheduled stock screens: the chain/monolithic run cannot ride the payment workflow, so an uncovered one-off scheduled stock run is skipped rather than charged unattended. Run it manually via the paid screen seam or use a covered recurring schedule.",
+            );
+          }
+          try {
+            if (coverage === "subscription_included") {
+              await commercial.consumeIncludedRun(userLogin);
+            } else {
+              await commercial.consumeCredits(userLogin, stockPriceUSD);
+            }
+          } catch (err) {
+            return skipStock(
+              "skipped_consume_failed",
+              `Scheduled stock run coverage could not be consumed (${err instanceof Error ? err.message : String(err)}); skipped rather than running uncovered.`,
+            );
+          }
+        }
       }
       // Issue #1499 (#940-E): a schedule's presetId resolves at RUN time
       // against the caller's own presets, before any broker work — so a
@@ -1628,6 +1774,15 @@ export class ScheduledTasksService {
         // failures below — coverage unknown is not a skip, and no
         // price is ever guessed. A fresh store seeds the proposed
         // goal price at ensure time, so the value is unchanged.
+        // Issue #2373 (slice C): the read is approval-aware
+        // (#2547) — getApprovedPrice returns null for a PROPOSED
+        // (unapproved) price exactly like a missing one, so an
+        // unapproved goal price fails closed here instead of
+        // routing to the payment workflow. (The tick previously
+        // read the raw getPrice, bypassing #2547; the workflow's
+        // own gate would still have refused the charge, but the
+        // tick would have reported payment_started for a run that
+        // could never pay.)
         const { createPriceCatalogueAdapter, ensurePriceCatalogueSchema } =
           await import("../data/createPriceCataloguePorts");
         const priceCatalogue = createPriceCatalogueAdapter(this.env as { AGENT_DB?: unknown });
@@ -1637,10 +1792,10 @@ export class ScheduledTasksService {
           );
         }
         await ensurePriceCatalogueSchema(priceCatalogue.db);
-        const goalScreenPriceUSD = await priceCatalogue.getPrice("goal");
+        const goalScreenPriceUSD = await priceCatalogue.getApprovedPrice("goal");
         if (goalScreenPriceUSD === null || !Number.isFinite(goalScreenPriceUSD) || goalScreenPriceUSD <= 0) {
           throw new Error(
-            "No valid stored price for family goal: refusing to route a paid scheduled screen (fail-closed).",
+            "No valid approved stored price for family goal: refusing to route a paid scheduled screen (fail-closed).",
           );
         }
         const skipPaid = (status: string, reason: string) => {

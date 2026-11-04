@@ -637,6 +637,62 @@ export async function handleSchedulesRoutes(
         }
         const { userLogin: _untrustedUserLogin, environment: _untrustedEnvironment, ...safePayload } =
           payload && typeof payload === "object" ? payload : {};
+        // Issue #2373 (slice C): schedule-creation guard for
+        // STOCK schedules, under monetization ON only. Stock
+        // ticks cannot ride the payment workflow (chain /
+        // monolithic execution, G7-rejected migration — see the
+        // tick decision in src/services/scheduledTasks.ts), so a
+        // one-off stock schedule can never checkout: claiming
+        // one_off without authorization is a 400 (authorization
+        // never given), and claiming one_off WITH authorization
+        // is also a 400 with the honest explanation (no checkout
+        // exists for it — run manually via the paid screen seam
+        // or use a covered recurring schedule). An absent
+        // scheduleKind is stamped "recurring" below (fail-closed
+        // default, covering legacy schedules); the tick itself
+        // also defaults absent → recurring. Goal callbacks are
+        // NOT guarded here: goal ticks already handle one_off
+        // via the payment-workflow seam. The guard validates on
+        // the raw payload BEFORE buildSchedulePayload, because
+        // the builder's strict criteria schema does not know
+        // these fields and would reject them as unknown; the
+        // fields are stripped from the builder input and stamped
+        // back onto the stored payload after the build.
+        let stampedScheduleKind: "one_off" | "recurring" | undefined;
+        if (callback === "autonomousMarketScreen") {
+          const monetizationOn = await (
+            await import("../../features/createFeatureFlagPort")
+          ).createFeatureFlagPort(ctx.env).isEnabled("monetization");
+          if (monetizationOn) {
+            const claimedKind = (safePayload as Record<string, unknown>).scheduleKind;
+            const claimedAuth = (safePayload as Record<string, unknown>).authorizedAtSubmission;
+            if (
+              claimedKind !== undefined &&
+              claimedKind !== "one_off" &&
+              claimedKind !== "recurring"
+            ) {
+              return Response.json(
+                { success: false, error: `Invalid scheduleKind '${String(claimedKind)}': expected "one_off" or "recurring".` },
+                { status: 400 },
+              );
+            }
+            if (claimedKind === "one_off" && claimedAuth !== true) {
+              return Response.json(
+                { success: false, error: "A one-off stock schedule requires authorizedAtSubmission: a one-off run may not claim authorization never given." },
+                { status: 400 },
+              );
+            }
+            if (claimedKind === "one_off") {
+              return Response.json(
+                { success: false, error: "One-off checkout is unavailable for scheduled stock screens: the chain/monolithic run cannot ride the payment workflow. Run it manually via the paid screen seam or use a covered recurring schedule." },
+                { status: 400 },
+              );
+            }
+            stampedScheduleKind = (claimedKind as "recurring" | undefined) ?? "recurring";
+            delete (safePayload as Record<string, unknown>).scheduleKind;
+            delete (safePayload as Record<string, unknown>).authorizedAtSubmission;
+          }
+        }
         // Issue #959 (screening consolidation S1): criteria validation
         // and payload assembly live in ONE shared builder —
         // buildSchedulePayload in src/trading/screeningSchemas.ts —
@@ -666,6 +722,19 @@ export async function handleSchedulesRoutes(
           screeningPayload = built.value;
         } else {
           screeningPayload = payload;
+        }
+        // Issue #2373 (slice C): stamp the guard-validated
+        // scheduleKind onto the stored payload (fail-closed
+        // default "recurring" when the creator claimed none), so
+        // the tick reads the same kind the guard approved. Flag
+        // OFF (stampedScheduleKind undefined) leaves the payload
+        // exactly as today.
+        if (
+          stampedScheduleKind !== undefined &&
+          typeof screeningPayload === "object" &&
+          screeningPayload !== null
+        ) {
+          (screeningPayload as Record<string, unknown>).scheduleKind = stampedScheduleKind;
         }
 
         // No fabricated success (#111): this route never invents a
