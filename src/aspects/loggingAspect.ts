@@ -8,6 +8,7 @@
  */
 
 import { ETradeError, ETradeErrorCode, AgentError, AgentErrorCode, resolveErrorAspect } from "./errorCodes";
+import { BusinessError } from "../outcomes/outcomeAspects";
 import { isETradeHost } from "../config/environment";
 
 export interface AspectContext {
@@ -96,8 +97,13 @@ export async function withAspects<T>(
   } catch (err: unknown) {
     const durationMs = Math.round(performance.now() - start);
 
-    if (err instanceof ETradeError) {
-      console.warn(`[Aspect][${operationName}] Handled ETradeError [${err.code}]: ${err.message} (${durationMs}ms)`);
+    // Issue #3197: outcome-coded errors pass through like ETradeError —
+    // wrapping a BusinessError in INTERNAL_ERROR would strip the
+    // outcome code the routes and the hub rely on, while the message
+    // alone cannot identify the outcome. Genuinely unhandled errors
+    // still take the INTERNAL_ERROR path below.
+    if (err instanceof ETradeError || err instanceof BusinessError) {
+      console.warn(`[Aspect][${operationName}] Handled error [${err.code}]: ${err.message} (${durationMs}ms)`);
       if (audit) {
         audit(`etrade.${operationName}.failed`, "trading", {
           code: err.code,

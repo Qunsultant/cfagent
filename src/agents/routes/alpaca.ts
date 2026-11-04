@@ -37,6 +37,7 @@
  */
 
 import { MarketDataResearchService } from "../../services/marketDataResearch";
+import { codedMessage } from "../../outcomes/outcomeAspects";
 import type { AgentName, Env } from "../../types";
 import {
   resolveMarketDataRestSwitch,
@@ -59,6 +60,27 @@ export interface AlpacaRouteContext {
   ): void;
   /** #1727: optional session/user carriers for the market-data switches (run comes from query `?mode=` / body `mode`, global env from `env`). Populated by the execution-context owner; unset carriers fall through to env. See src/config/marketDataModes.ts. */
   scopedMarketDataModes?: import("../../config/marketDataModes").MarketDataScopedModes;
+}
+
+/**
+ * Issue #3197: Alpaca non-placement reads surface AOP outcome-encoded
+ * errors, never raw provider messages. One code covers the read
+ * surface: its business message already tells the user to verify
+ * credentials, which covers both the unconfigured-keys and the
+ * upstream-rejection cases without string-matching provider text.
+ * The order-placement routes are #3158's domain and do NOT use this.
+ */
+function alpacaUpstreamOutcome(): { error: string; code: string } {
+  return { error: codedMessage("FAILURE_ALPACA_UPSTREAM"), code: "FAILURE_ALPACA_UPSTREAM" };
+}
+
+/** Same mapping for a service result: a !success read keeps its shape and gains the outcome fields, with the raw provider message replaced. */
+function withAlpacaOutcome<T extends { success: boolean; message?: string }>(
+  result: T,
+): T & { error?: string; code?: string } {
+  if (result.success) return result;
+  const outcome = alpacaUpstreamOutcome();
+  return { ...result, message: outcome.error, error: outcome.error, code: outcome.code };
 }
 
 /** #1727: adapts this module's route context to the marketDataModes switch host (the ctx audit type is narrower than the host's, so it is wrapped rather than passed through). */
@@ -129,9 +151,9 @@ export async function handleAlpacaTradingRoutes(
           portfolioValue: account.account?.portfolio_value,
         });
       }
-      return Response.json(account);
+      return Response.json(withAlpacaOutcome(account));
     } catch (err: any) {
-      return Response.json({ error: err.message || "Failed to fetch Alpaca account" }, { status: 500 });
+      return Response.json(alpacaUpstreamOutcome(), { status: 500 });
     }
   }
 
@@ -149,9 +171,9 @@ export async function handleAlpacaTradingRoutes(
           symbols: positions.positions?.map((p: any) => p.symbol) || [],
         });
       }
-      return Response.json(positions);
+      return Response.json(withAlpacaOutcome(positions));
     } catch (err: any) {
-      return Response.json({ error: err.message || "Failed to fetch Alpaca positions" }, { status: 500 });
+      return Response.json(alpacaUpstreamOutcome(), { status: 500 });
     }
   }
 
@@ -169,9 +191,9 @@ export async function handleAlpacaTradingRoutes(
           count: orders.orders?.length || 0,
         });
       }
-      return Response.json(orders);
+      return Response.json(withAlpacaOutcome(orders));
     } catch (err: any) {
-      return Response.json({ error: err.message || "Failed to fetch Alpaca orders" }, { status: 500 });
+      return Response.json(alpacaUpstreamOutcome(), { status: 500 });
     }
   }
 
@@ -205,7 +227,7 @@ export async function handleAlpacaMarketDataRoutes(
       ctx.audit(event, "trading", payload);
       return Response.json(snapshot);
     } catch (err) {
-      return Response.json({ error: err instanceof Error ? err.message : "Failed to fetch Alpaca market snapshot" }, { status: 500 });
+      return Response.json(alpacaUpstreamOutcome(), { status: 500 });
     }
   }
 
@@ -226,9 +248,9 @@ export async function handleAlpacaMarketDataRoutes(
           portfolioValue: result.account?.portfolio_value,
         });
       }
-      return Response.json(result);
+      return Response.json(withAlpacaOutcome(result));
     } catch (err) {
-      return Response.json({ error: err instanceof Error ? err.message : "Failed to fetch Alpaca account" }, { status: 500 });
+      return Response.json(alpacaUpstreamOutcome(), { status: 500 });
     }
   }
 
@@ -246,9 +268,9 @@ export async function handleAlpacaMarketDataRoutes(
           symbols: result.positions?.map((p: any) => p.symbol) || [],
         });
       }
-      return Response.json(result);
+      return Response.json(withAlpacaOutcome(result));
     } catch (err) {
-      return Response.json({ error: err instanceof Error ? err.message : "Failed to fetch Alpaca positions" }, { status: 500 });
+      return Response.json(alpacaUpstreamOutcome(), { status: 500 });
     }
   }
 
@@ -266,9 +288,9 @@ export async function handleAlpacaMarketDataRoutes(
           count: result.orders?.length || 0,
         });
       }
-      return Response.json(result);
+      return Response.json(withAlpacaOutcome(result));
     } catch (err) {
-      return Response.json({ error: err instanceof Error ? err.message : "Failed to fetch Alpaca orders" }, { status: 500 });
+      return Response.json(alpacaUpstreamOutcome(), { status: 500 });
     }
   }
 
