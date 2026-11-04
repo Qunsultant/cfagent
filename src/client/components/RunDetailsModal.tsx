@@ -21,51 +21,26 @@ function FieldValue({ value, store }: { value: string | null; store: string }) {
   return value ? <span>{value}</span> : <Unknown store={store} />;
 }
 
-export function RunDetailsModal({
-  open,
-  onClose,
+/**
+ * Issue #2786 losslessness fix: the five RunDetail sections (request,
+ * provenance, lineage, stages, reasons), shared by the Docs Run Details
+ * modal below and by the Workflow Runs detail — one renderer for the
+ * one /api/runs/details payload, never a divergent second copy. The
+ * filter control stays in RunDetailsModal: it is view chrome, not
+ * content, and the Workflow Runs detail always renders all sections.
+ */
+export function RunDetailSections({
   detail,
-  loading,
-  error,
+  levelFilter,
 }: {
-  open: boolean;
-  onClose: () => void;
-  detail: RunDetail | null;
-  loading: boolean;
-  error: string | null;
+  detail: RunDetail;
+  levelFilter: RunDetailLevelFilter;
 }) {
-  const [filter, setFilter] = useState<RunDetailLevelFilter>("all");
-  const sections = runDetailVisibleSections(filter);
+  const sections = runDetailVisibleSections(levelFilter);
   const show = (s: "request" | "provenance" | "lineage" | "stages" | "reasons") => sections.includes(s);
 
   return (
-    <Modal open={open} onClose={onClose} size="lg" title={detail ? `Run Details — ${detail.title}` : "Run Details"}>
-      {loading && <p>Loading run details…</p>}
-      {error && !loading && <p role="alert">{error}</p>}
-      {detail && !loading && !error && (
-        <div>
-          <SegmentedControl
-            value={filter}
-            onChange={(v) => setFilter(v as RunDetailLevelFilter)}
-            options={[
-              { id: "all", label: "All levels" },
-              { id: "info", label: "Info" },
-              { id: "debugging", label: "Debugging" },
-              { id: "error", label: "Error" },
-            ]}
-            ariaLabel="Filter run details by level"
-          />
-          <p>
-            Run <code>{detail.runId}</code> · {detail.kind} / {detail.source} ·{" "}
-            <time dateTime={detail.createdAt}>{formatRunDetailTimestamp(detail.createdAt)}</time>
-            {detail.status ? (
-              <span>
-                {" "}
-                <Badge size="sm" tone={detail.status === "failed" ? "danger" : "neutral"}>{detail.status}</Badge>
-              </span>
-            ) : null}
-          </p>
-
+    <>
           {show("request") && (
             <section aria-label="Request">
               <h3>Request</h3>
@@ -180,6 +155,54 @@ export function RunDetailsModal({
               />
             </section>
           )}
+    </>
+  );
+}
+
+export function RunDetailsModal({
+  open,
+  onClose,
+  detail,
+  loading,
+  error,
+}: {
+  open: boolean;
+  onClose: () => void;
+  detail: RunDetail | null;
+  loading: boolean;
+  error: string | null;
+}) {
+  const [filter, setFilter] = useState<RunDetailLevelFilter>("all");
+
+  return (
+    <Modal open={open} onClose={onClose} size="lg" title={detail ? `Run Details — ${detail.title}` : "Run Details"}>
+      {loading && <p>Loading run details…</p>}
+      {error && !loading && <p role="alert">{error}</p>}
+      {detail && !loading && !error && (
+        <div>
+          <SegmentedControl
+            value={filter}
+            onChange={(v) => setFilter(v as RunDetailLevelFilter)}
+            options={[
+              { id: "all", label: "All levels" },
+              { id: "info", label: "Info" },
+              { id: "debugging", label: "Debugging" },
+              { id: "error", label: "Error" },
+            ]}
+            ariaLabel="Filter run details by level"
+          />
+          <p>
+            Run <code>{detail.runId}</code> · {detail.kind} / {detail.source} ·{" "}
+            <time dateTime={detail.createdAt}>{formatRunDetailTimestamp(detail.createdAt)}</time>
+            {detail.status ? (
+              <span>
+                {" "}
+                <Badge size="sm" tone={detail.status === "failed" ? "danger" : "neutral"}>{detail.status}</Badge>
+              </span>
+            ) : null}
+          </p>
+
+          <RunDetailSections detail={detail} levelFilter={filter} />
           <p>
             <Button variant="ghost" size="sm" onClick={onClose}>
               Close
