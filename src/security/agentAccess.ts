@@ -37,9 +37,20 @@
  * - delegation.ts: delegation validity is re-checked at every
  *   invocation (never assumed from creation), and budget
  *   consumption follows its persist-the-returned-copy discipline —
- *   except this module persists the incremented grant itself, so
+ *   this module persists the incremented grant itself, so
  *   budget exhaustion is enforced by the gate rather than by
- *   caller discipline (see authorizeAgentInvocation).
+ *   caller discipline (see authorizeAgentInvocation). Issue
+ *   #3153 (Q8, owner directive 2026-11-04) extends that
+ *   discipline to the delegation itself: a delegation-backed
+ *   allow persists the delegation's incremented usedActions
+ *   alongside the grant's, and a delegation whose action-count
+ *   budget is spent denies with BUDGET_EXHAUSTED. The same
+ *   slice adds approval-record binding at invocation (step 3b):
+ *   an invocation carrying an approval is allowed only when
+ *   the stored approval record validates — same hash, same
+ *   version, same tenant, action granted, unexpired, unrevoked
+ *   — so a material proposal change after approval cannot
+ *   settle on the old approval.
  *
  * Identity: an agent id is `agent:<kind>:<slug>` — a namespace no
  * user id can collide with (user ids are UUIDs, `v1:` hashes, or
@@ -128,8 +139,14 @@ import {
 } from "./authorization";
 import {
   recheckDelegation,
+  type Delegation,
   type DelegationStore,
 } from "./delegation";
+import {
+  validateApproval,
+  type Approval,
+  type ApprovalStore,
+} from "./lifecycle";
 import { checkPermission } from "./iaaaPdpSeam";
 import {
   evaluateWithObligations,
@@ -373,6 +390,8 @@ export type AgentGrantErrorCode =
   | "INVALID_BUDGET"
   | "DELEGATION_UNKNOWN"
   | "DELEGATION_MISMATCH"
+  | "DELEGATION_REVOKED"
+  | "DELEGATION_EXPIRED"
   | "ACTION_NOT_DELEGATED";
 
 export type AgentGrantResult =
@@ -433,6 +452,19 @@ export async function createAgentGrant(
     const delegation = await delegations.get(input.delegationId);
     if (!delegation) {
       return { ok: false, code: "DELEGATION_UNKNOWN", error: `unknown delegation: ${input.delegationId}` };
+    }
+    // A revoked or expired delegation backs nothing new: creation
+    // re-checks validity, not just existence (#3153). A grant
+    // minted against a dead delegation would deny at its first
+    // invocation anyway; refusing it here keeps dead grants out
+    // of the store entirely.
+    const recheck = recheckDelegation(delegation, input.nowMs);
+    if (!recheck.valid) {
+      return {
+        ok: false,
+        code: recheck.reason,
+        error: recheck.reason === "DELEGATION_REVOKED" ? "delegation is revoked" : "delegation is expired",
+      };
     }
     if (
       delegation.delegateAgentId !== input.agentId ||
@@ -644,6 +676,106 @@ export function createKvAgentGrantStore(kv: KvLike): AgentGrantStore {
 }
 
 // ---------------------------------------------------------------------------
+// KV adapters for delegations and approvals (#3153): same pattern as
+// the grant adapter — record keys plus a delegator index for
+// delegations; corrupt records read as null, never thrown, so a
+// corrupt row denies (fail-closed) instead of crashing the gate.
+// ---------------------------------------------------------------------------
+
+const DELEGATION_KEY_PREFIX = "delegation:";
+const DELEGATIONS_INDEX_PREFIX = "delegations:";
+const APPROVAL_KEY_PREFIX = "approval:";
+
+function isDelegationValue(value: unknown): value is Delegation {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.id === "string" &&
+    typeof v.delegatorInternalUserId === "string" &&
+    typeof v.delegateAgentId === "string" &&
+    typeof v.tenantId === "string" &&
+    Array.isArray(v.allowedActions) &&
+    Array.isArray(v.resourceScope) &&
+    typeof v.expiresAtMs === "number" &&
+    typeof v.usedActions === "number" &&
+    typeof v.reDelegationAllowed === "boolean" &&
+    typeof v.revoked === "boolean" &&
+    typeof v.createdAtMs === "number"
+  );
+}
+
+function isApprovalValue(value: unknown): value is Approval {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.id === "string" &&
+    typeof v.proposalHash === "string" &&
+    typeof v.proposalVersion === "string" &&
+    typeof v.approverInternalUserId === "string" &&
+    typeof v.tenantId === "string" &&
+    Array.isArray(v.grantedActions) &&
+    typeof v.scope === "string" &&
+    typeof v.expiresAtMs === "number" &&
+    typeof v.revoked === "boolean"
+  );
+}
+
+export function createKvDelegationStore(kv: KvLike): DelegationStore {
+  return {
+    async get(id: string): Promise<Delegation | null> {
+      return parseJson(await kv.get(`${DELEGATION_KEY_PREFIX}${id}`), isDelegationValue);
+    },
+    async put(delegation: Delegation): Promise<void> {
+      await kv.put(`${DELEGATION_KEY_PREFIX}${delegation.id}`, JSON.stringify(delegation));
+      const indexKey = `${DELEGATIONS_INDEX_PREFIX}${delegation.delegatorInternalUserId}`;
+      let ids: string[] = [];
+      const raw = await kv.get(indexKey);
+      if (raw !== null) {
+        try {
+          const parsed: unknown = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.every((x) => typeof x === "string")) {
+            ids = parsed;
+          }
+        } catch {
+          ids = [];
+        }
+      }
+      if (!ids.includes(delegation.id)) ids.push(delegation.id);
+      await kv.put(indexKey, JSON.stringify(ids));
+    },
+    async listByDelegator(delegatorInternalUserId: string): Promise<Delegation[]> {
+      const raw = await kv.get(`${DELEGATIONS_INDEX_PREFIX}${delegatorInternalUserId}`);
+      if (raw === null) return [];
+      let ids: string[];
+      try {
+        const parsed: unknown = JSON.parse(raw);
+        if (!Array.isArray(parsed) || !parsed.every((x) => typeof x === "string")) return [];
+        ids = parsed;
+      } catch {
+        return [];
+      }
+      const out: Delegation[] = [];
+      for (const id of ids) {
+        const delegation = parseJson(await kv.get(`${DELEGATION_KEY_PREFIX}${id}`), isDelegationValue);
+        if (delegation) out.push(delegation);
+      }
+      return out;
+    },
+  };
+}
+
+export function createKvApprovalStore(kv: KvLike): ApprovalStore {
+  return {
+    async get(id: string): Promise<Approval | null> {
+      return parseJson(await kv.get(`${APPROVAL_KEY_PREFIX}${id}`), isApprovalValue);
+    },
+    async put(approval: Approval): Promise<void> {
+      await kv.put(`${APPROVAL_KEY_PREFIX}${approval.id}`, JSON.stringify(approval));
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Enforcement
 // ---------------------------------------------------------------------------
 
@@ -700,6 +832,8 @@ export interface AgentAccessDeps {
   identities: AgentIdentityStore;
   grants: AgentGrantStore;
   delegations?: DelegationStore;
+  /** Approval store for the #3153 settlement binding (step 3b). */
+  approvals?: ApprovalStore;
   /** PDP checker; required for permission-bearing grants (fail-closed without it). */
   pdp?: AgentPdpChecker;
   /** Membership store for the optional #1751 obligations phase. */
@@ -720,6 +854,19 @@ export interface AgentInvocationRequest {
   enforceObligations?: boolean;
   authTimeMs?: number;
   obligationAudit?: ObligationAuditWriter;
+  /**
+   * Settlement approval (#3153, Q8): when present, the stored
+   * approval record must validate — same hash, same version,
+   * same tenant, action granted, unexpired, unrevoked — or the
+   * invocation denies. The id is a lookup key, never authority:
+   * the record is loaded and validated, so a caller-supplied id
+   * grants nothing by itself. Absent, this step is skipped.
+   */
+  approval?: {
+    id: string;
+    proposalHash: string;
+    proposalVersion?: string;
+  };
 }
 
 export type AgentDenyReason =
@@ -738,6 +885,8 @@ export type AgentDenyReason =
   | "DELEGATION_EXPIRED"
   | "DELEGATE_MISMATCH"
   | "ACTION_NOT_DELEGATED"
+  | "APPROVAL_UNKNOWN"
+  | "APPROVAL_INVALID"
   | "PDP_UNAVAILABLE"
   | "PDP_DENIED"
   | "PDP_ERROR"
@@ -767,8 +916,11 @@ export interface AgentInvocationDecision {
  * On allow, the incremented grant copy is persisted here (a
  * persist failure denies with PERSIST_FAILED) so budget
  * exhaustion is enforced by the gate, not by caller discipline.
- * The caller must re-authorize per invocation: a decision is a
- * point-in-time verdict, and revocation after it does not recall it.
+ * A delegation-backed allow additionally persists the
+ * delegation's incremented copy (#3153): the delegation budget
+ * is consumed by the gate, not by a pure-copy caller. The caller
+ * must re-authorize per invocation: a decision is a point-in-time
+ * verdict, and revocation after it does not recall it.
  */
 export async function authorizeAgentInvocation(
   deps: AgentAccessDeps,
@@ -778,6 +930,9 @@ export async function authorizeAgentInvocation(
   let identity: AgentIdentity | null = null;
   let grant: AgentGrant | null = null;
   let delegatingPrincipal: string | null = null;
+  // The delegation backing this invocation, when any — captured in
+  // step 3 for the allow-path budget persist (step 6).
+  let delegation: Delegation | null = null;
 
   const audit = async (
     decision: "allow" | "deny",
@@ -860,8 +1015,9 @@ export async function authorizeAgentInvocation(
   const delegationId = grant.delegationId ?? identity.delegationId;
   if (delegationId !== undefined) {
     if (!deps.delegations) return deny("DELEGATION_UNKNOWN");
-    const delegation = await deps.delegations.get(delegationId);
-    if (!delegation) return deny("DELEGATION_UNKNOWN");
+    const found = await deps.delegations.get(delegationId);
+    if (!found) return deny("DELEGATION_UNKNOWN");
+    delegation = found;
     delegatingPrincipal =
       identity.delegatingPrincipalInternalUserId ?? delegation.delegatorInternalUserId;
     const validity = recheckDelegation(delegation, request.nowMs);
@@ -883,8 +1039,41 @@ export async function authorizeAgentInvocation(
     ) {
       return deny("OUT_OF_RESOURCE_SCOPE");
     }
+    // 3a. Delegation budget (#3153): the delegation's own
+    // action-count budget is enforced here, not just the grant's.
+    // A delegation with no budget is unbounded, as before.
+    if (
+      delegation.budget?.maxActions !== undefined &&
+      delegation.usedActions >= delegation.budget.maxActions
+    ) {
+      return deny("BUDGET_EXHAUSTED");
+    }
   } else {
     delegatingPrincipal = identity.delegatingPrincipalInternalUserId ?? null;
+  }
+
+  // 3b. Approval binding (#3153, Q8): when the invocation carries
+  // a settlement approval, the stored record must validate. A
+  // material proposal change after approval — hash or version
+  // mismatch — denies with APPROVAL_INVALID, as do revocation,
+  // expiry, tenant mismatch, and an ungranted action. An
+  // unresolvable approval (no store wired, or no such record)
+  // denies with APPROVAL_UNKNOWN: an approval that cannot be
+  // verified never settles. This step runs after the delegation
+  // checks, so the first deny names the delegation failure when
+  // both fail.
+  if (request.approval !== undefined) {
+    if (!deps.approvals) return deny("APPROVAL_UNKNOWN");
+    const approval = await deps.approvals.get(request.approval.id);
+    if (!approval) return deny("APPROVAL_UNKNOWN");
+    const validation = validateApproval(approval, {
+      proposalHash: request.approval.proposalHash,
+      proposalVersion: request.approval.proposalVersion,
+      action: grant.permission,
+      tenantId,
+      nowMs: request.nowMs,
+    });
+    if (!validation.valid) return deny("APPROVAL_INVALID");
   }
 
   // 4. PDP seam: permission-bearing grants need a PDP allow for the
@@ -927,7 +1116,15 @@ export async function authorizeAgentInvocation(
   }
 
   // 6. Allow: audit first (a failing sink denies, persisting
-  // nothing), then persist the consumed budget.
+  // nothing), then persist the consumed budget: the delegation's
+  // incremented copy first (#3153), then the grant's. Ordering
+  // is fail-closed in one direction only, and it is stated
+  // plainly: if the delegation persist succeeds but the grant
+  // persist fails, the delegation has consumed one action
+  // without a grant consumption — the delegation budget denies
+  // earlier, never allows extra. The reverse order would risk
+  // the opposite: a consumed grant against an unconsumed
+  // delegation, i.e. one extra delegated action.
   const incremented: AgentGrant = { ...grant, usedActions: grant.usedActions + 1 };
   const allowEvent = await audit("allow", "ALLOW");
   if (deps.auditSink) {
@@ -938,6 +1135,9 @@ export async function authorizeAgentInvocation(
     }
   }
   try {
+    if (delegation !== null && deps.delegations !== undefined) {
+      await deps.delegations.put({ ...delegation, usedActions: delegation.usedActions + 1 });
+    }
     await deps.grants.put(incremented);
   } catch {
     const persistEvent = await audit("deny", "PERSIST_FAILED");
