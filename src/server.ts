@@ -6390,6 +6390,11 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
     // (KEEP PUBLIC); escaping + CSP are the fix, not gating. The
     // Authorize href keeps raw values under encodeURIComponent, the
     // correct encoding for a URL query context.
+    // Styling (#3146): Carbon v11 Gray 100 tokens inlined below — this page
+    // allows no external resources, so Carbon's React components and the
+    // IBM Plex font cannot load here; the visual system is Carbon's tokens,
+    // spacing, type scale, and button treatment on the same markup. CSP
+    // and escaping are unchanged.
     if (path === "/checkout/sandbox") {
       const escapeHtml = (s: string) =>
         s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -6408,32 +6413,31 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
   <title>${escapeHtml(provider)} Payment Terminal — Multi-Agent Studio</title>
   <style>
     body {
-      margin: 0; padding: 0; background: ${SERVER_PALETTE.surface}; color: ${SERVER_PALETTE.textPrimary};
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      margin: 0; padding: 0; background: ${SERVER_PALETTE.carbonBackground}; color: ${SERVER_PALETTE.carbonTextPrimary};
+      font-family: 'IBM Plex Sans', 'Helvetica Neue', Arial, sans-serif;
       display: flex; align-items: center; justify-content: center; min-height: 100vh;
     }
     .card {
-      background: ${SERVER_PALETTE.checkoutCard}; border: 1px solid ${SERVER_PALETTE.indigoAlpha40};
-      border-radius: 20px; padding: 2.5rem; max-width: 440px; width: 90%;
-      box-shadow: 0 20px 50px ${SERVER_PALETTE.blackAlpha60}; backdrop-filter: blur(20px);
+      background: ${SERVER_PALETTE.carbonLayer01}; border: 1px solid ${SERVER_PALETTE.carbonBorderSubtle};
+      border-radius: 0; padding: 2rem; max-width: 440px; width: 90%; box-sizing: border-box;
     }
-    .badge { display: inline-block; background: ${SERVER_PALETTE.indigoAlpha20}; color: ${SERVER_PALETTE.indigo400}; padding: 0.25rem 0.65rem; border-radius: 6px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; margin-bottom: 1rem; }
-    h2 { margin: 0 0 0.5rem 0; font-size: 1.5rem; color: ${SERVER_PALETTE.onGradient}; }
-    .amount { font-size: 2.4rem; font-weight: 800; color: ${SERVER_PALETTE.accent}; margin: 1rem 0; }
-    .did-box { background: ${SERVER_PALETTE.blackAlpha40}; border: 1px solid ${SERVER_PALETTE.cardBorder}; border-radius: 10px; padding: 0.85rem; font-family: monospace; font-size: 0.75rem; color: ${SERVER_PALETTE.textMuted}; word-break: break-all; margin-bottom: 1.5rem; }
-    .btn { display: block; width: 100%; padding: 0.85rem; border-radius: 10px; font-size: 0.95rem; font-weight: 700; cursor: pointer; text-align: center; text-decoration: none; border: 0; margin-bottom: 0.75rem; box-sizing: border-box; }
-    .btn-pay { background: linear-gradient(135deg, ${SERVER_PALETTE.indigo500} 0%, ${SERVER_PALETTE.cyan500} 100%); color: ${SERVER_PALETTE.onGradient}; }
-    .btn-pay:hover { filter: brightness(1.15); }
-    .btn-cancel { background: transparent; color: ${SERVER_PALETTE.slate500}; }
-    .btn-cancel:hover { color: ${SERVER_PALETTE.dangerText}; }
+    .badge { display: inline-block; background: ${SERVER_PALETTE.carbonTagBlueBg}; color: ${SERVER_PALETTE.carbonTagBlueText}; padding: 0.25rem 0.5rem; border-radius: 0; font-size: 0.75rem; font-weight: 400; letter-spacing: 0.02rem; text-transform: uppercase; margin-bottom: 1rem; }
+    h2 { margin: 0 0 0.5rem 0; font-size: 1.25rem; font-weight: 400; color: ${SERVER_PALETTE.carbonTextPrimary}; }
+    .amount { font-size: 2rem; font-weight: 400; color: ${SERVER_PALETTE.carbonTextPrimary}; margin: 1rem 0; }
+    .did-box { background: ${SERVER_PALETTE.carbonBackground}; border: 1px solid ${SERVER_PALETTE.carbonBorderSubtle}; border-radius: 0; padding: 1rem; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 0.75rem; color: ${SERVER_PALETTE.carbonTextSecondary}; word-break: break-all; margin-bottom: 1.5rem; }
+    .btn { display: flex; align-items: center; justify-content: center; width: 100%; min-height: 3rem; padding: 0 1rem; border-radius: 0; font-size: 0.875rem; font-weight: 400; cursor: pointer; text-align: center; text-decoration: none; border: 0; margin-bottom: 0.75rem; box-sizing: border-box; }
+    .btn-pay { background: ${SERVER_PALETTE.carbonButtonPrimary}; color: ${SERVER_PALETTE.onGradient}; }
+    .btn-pay:hover { background: ${SERVER_PALETTE.carbonButtonPrimaryHover}; }
+    .btn-cancel { background: transparent; color: ${SERVER_PALETTE.carbonLinkPrimary}; }
+    .btn-cancel:hover { background: ${SERVER_PALETTE.carbonLayerHover01}; }
   </style>
 </head>
 <body>
   <div class="card">
     <span class="badge">${escapeHtml(provider)} Sandbox Terminal</span>
     <h2>Secure Payment Authorization</h2>
-    <p style="color: ${SERVER_PALETTE.textMuted}; font-size: 0.88rem; margin: 0;">Recipient: Multi-Agent Studio (${escapeHtml(customer)})</p>
-    <div class="amount">$${escapeHtml(amount)} <span style="font-size: 1rem; color: ${SERVER_PALETTE.textMuted};">${escapeHtml(currency)}</span></div>
+    <p style="color: ${SERVER_PALETTE.carbonTextSecondary}; font-size: 0.875rem; margin: 0;">Recipient: Multi-Agent Studio (${escapeHtml(customer)})</p>
+    <div class="amount">$${escapeHtml(amount)} <span style="font-size: 1rem; color: ${SERVER_PALETTE.carbonTextSecondary};">${escapeHtml(currency)}</span></div>
     <div class="did-box">
       <div><strong>Proposer:</strong> did:agent:openaimp:payments</div>
       <div><strong>Intent Hash:</strong> ${escapeHtml(sig)}...</div>
