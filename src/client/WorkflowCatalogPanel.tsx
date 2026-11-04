@@ -10,7 +10,7 @@
  */
 
 import React from "react";
-import { Badge, Card, Flex, Notice, Stack, Table } from "./components/ui";
+import { Badge, Button, Card, Flex, Notice, Stack, Table } from "./components/ui";
 import {
   listWorkflows,
   type StageDeclaration,
@@ -86,9 +86,19 @@ function WorkflowCard({ workflow }: { workflow: WorkflowDeclaration }) {
       <Stack gap="3">
         <Flex align="center" justify="between" gap="3">
           <strong>{workflow.labelKey}</strong>
-          <Badge tone={workflow.runnable ? "success" : "neutral"} size="sm">
-            {workflow.runnable ? "Runnable" : "Read-only"}
-          </Badge>
+          <Flex align="center" gap="2">
+            <Badge tone={workflow.runnable ? "success" : "neutral"} size="sm">
+              {workflow.runnable ? "Runnable" : "Read-only"}
+            </Badge>
+            {/* Issue #3074: Run links the family's EXISTING, gated submission
+                surface — the catalog never invents a submission path and never
+                bypasses that surface's flags or payment gates. */}
+            {workflow.runnable && workflow.runPath ? (
+              <Button href={workflow.runPath} variant="secondary" size="sm">
+                Run
+              </Button>
+            ) : null}
+          </Flex>
         </Flex>
         <span>
           <code>{workflow.id}</code> | family {workflow.family} | {workflow.stages.length} stages
