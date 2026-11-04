@@ -74,8 +74,8 @@ describe("WorkflowCatalogPanel (#3074)", () => {
     expect(buttons.some((b) => (b.textContent ?? "").trim() === "Run")).toBe(false);
   });
 
-  it("carries the read-only banner for this slice", async () => {
+  it("states what the last-run column means", async () => {
     await render();
-    expect(container.textContent).toContain("read-only in this slice");
+    expect(container.textContent).toContain("Last run column reads");
   });
 });
