@@ -329,7 +329,9 @@ export async function runGoalDrivenScreen(input: {
     plan,
     // Issue #2882: the goal stock leg's canonical spec rides
     // the result when stocks were requested. Record only:
-    // nothing downstream executes from it (broker guard).
+    // nothing in the result path executes from it. (#2991:
+    // the broker guard that once guaranteed this is retired —
+    // the record status comes from this path, not the guard.)
     ...(requested.includes("stocks") ? { stockSpec: goalStockSpecFromPlan(plan) } : {}),
     status,
     hits,
