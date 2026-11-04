@@ -67,10 +67,22 @@ export interface LoginCallbackOptions {
   auditStore?: AuditStore;
   auditTenantId?: string;
   postLoginEnabled?: boolean;
+  /**
+   * #3015: the return target recovered from the signed OAuth
+   * state, or null. The wired tail validates it again at use
+   * time before any redirect; null keeps the default landing.
+   */
+  returnTarget?: string | null;
 }
 
 /** A login provider adapter. startLogin begins the flow; handleCallback finishes it. */
 export interface LoginProvider {
+  /**
+   * #3015: startLogin optionally seals a return target into the
+   * signed OAuth state. An absent or refused target starts a
+   * plain login (default landing afterwards) — never an error.
+   */
+  startLogin(env: Env, returnTarget?: string): Promise<Response>;
   providerId: string;
   /** "oidc" for ID-token providers, "oauth2" for OAuth2 + profile-fetch providers (GitHub). */
   protocol: "oidc" | "oauth2";
@@ -78,7 +90,6 @@ export interface LoginProvider {
   issuer: string;
   /** Human-readable name for the login page button. Optional; falls back to providerId. */
   displayName?: string;
-  startLogin(env: Env): Promise<Response>;
   handleCallback(env: Env, request: Request, options?: LoginCallbackOptions): Promise<Response>;
 }
 

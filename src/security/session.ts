@@ -1,5 +1,6 @@
 import type { Env, SessionData } from "../types";
 import { SESSION_LIMITS } from "../config/sessionLimits";
+import { validateReturnTarget } from "./returnTarget";
 import {
   createStoreKv,
   listStoreEntries,
@@ -388,12 +389,24 @@ export async function createState(env: Env): Promise<string> {
 
 /**
  * Validates the OAuth state parameter in constant time and ensures it hasn't expired.
+ *
+ * #3015: accepts both the plain 3-part form (random.timestamp.sig)
+ * and the return-target 4-part form (random.timestamp.target.sig).
+ * The signature always covers every segment before it, so a
+ * tampered target segment fails exactly like a tampered signature.
+ * Plain states keep verifying exactly as before — in-flight logins
+ * at deploy time and other createState callers are unaffected.
  */
 export async function verifyState(env: Env, state: string): Promise<boolean> {
-  const parts = state.split(".");
-  if (parts.length !== 3) return false;
-  const [random, timestampStr, sig] = parts;
+  return verifyStateParts(env, state.split("."));
+}
+
+async function verifyStateParts(env: Env, parts: string[]): Promise<boolean> {
+  if (parts.length !== 3 && parts.length !== 4) return false;
+  const [random, timestampStr] = parts;
+  const sig = parts[parts.length - 1];
   if (!random || !timestampStr || !sig) return false;
+  if (parts.length === 4 && !parts[2]) return false;
 
   const timestamp = parseInt(timestampStr, 10);
   if (
@@ -404,7 +417,7 @@ export async function verifyState(env: Env, state: string): Promise<boolean> {
     return false; // State expired or in the future
   }
 
-  const payload = `${random}.${timestampStr}`;
+  const payload = parts.slice(0, -1).join(".");
   const expectedSig = await hmacSign(env.SESSION_SECRET, payload);
 
   // Constant-time string equality check to prevent timing side channels
@@ -414,4 +427,73 @@ export async function verifyState(env: Env, state: string): Promise<boolean> {
     mismatch |= sig.charCodeAt(i) ^ expectedSig.charCodeAt(i);
   }
   return mismatch === 0;
+}
+
+/**
+ * #3015: base64url helpers for the state target segment. The
+ * segment alphabet excludes "." (the state separator) and the
+ * URL-unsafe "+/=" characters, so the segment survives provider
+ * round-trips as a query parameter. Validated targets are ASCII
+ * (URL serialization percent-encodes the rest); a failure here
+ * fails closed to null.
+ */
+function base64UrlEncode(text: string): string | null {
+  try {
+    return btoa(text).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+  } catch {
+    return null;
+  }
+}
+
+function base64UrlDecode(segment: string): string | null {
+  try {
+    const restored = segment.replace(/-/g, "+").replace(/_/g, "/");
+    const pad = (4 - (restored.length % 4)) % 4;
+    return atob(restored + "=".repeat(pad));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * #3015: creates a signed OAuth state carrying a validated return
+ * target. Returns null when the target is refused, so the caller
+ * falls back to a plain createState — a tampered target never
+ * blocks login, it just drops the target. The state (and, for
+ * Apple, the nonce, which IS this state) stays one opaque string
+ * the provider echoes back verbatim.
+ */
+export async function createStateWithReturnTarget(
+  env: Env,
+  rawTarget: unknown
+): Promise<string | null> {
+  const target = validateReturnTarget(rawTarget);
+  if (!target) return null;
+  const segment = base64UrlEncode(target);
+  if (!segment) return null;
+  const random = crypto.randomUUID();
+  const timestamp = Date.now().toString();
+  const payload = `${random}.${timestamp}.${segment}`;
+  const sig = await hmacSign(env.SESSION_SECRET, payload);
+  return `${payload}.${sig}`;
+}
+
+/**
+ * #3015: recovers the return target from a signed state, or null
+ * when the state carries none, fails verification, or decodes to
+ * a refused target. Verification (signature + expiry) runs again
+ * here even though handleCallback already verified the state —
+ * extraction is safe as a standalone API, and the target is
+ * validated once more before any redirect uses it.
+ */
+export async function extractStateReturnTarget(
+  env: Env,
+  state: string
+): Promise<string | null> {
+  const parts = state.split(".");
+  if (parts.length !== 4) return null;
+  if (!(await verifyStateParts(env, parts))) return null;
+  const decoded = base64UrlDecode(parts[2]);
+  if (decoded === null) return null;
+  return validateReturnTarget(decoded);
 }

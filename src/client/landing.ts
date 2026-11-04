@@ -2,8 +2,13 @@ import { generatedThemeTokens } from "./designTokens";
 import { BRAND } from "./branding";
 import { TAPE_SYMBOLS } from "./quotes/symbolSets";
 import { resolvePollingConfig, type PollingConfig } from "./pollingConfig";
+import { validateReturnTarget } from "../security/returnTarget";
 
-export function renderLandingPage(appName?: string, polling?: Partial<PollingConfig>): string {
+export function renderLandingPage(
+  appName?: string,
+  polling?: Partial<PollingConfig>,
+  loginTarget?: string | null
+): string {
   const name = appName || BRAND.name;
   const darkTokens = Object.entries(generatedThemeTokens.dark)
     .map(([k, v]) => `  ${k}: ${v};`)
@@ -54,7 +59,7 @@ export function renderLandingPage(appName?: string, polling?: Partial<PollingCon
   // the script itself.
   const pollingConfigLiteral = JSON.stringify(resolvePollingConfig(polling));
 
-  return `<!DOCTYPE html>
+  const html = `<!DOCTYPE html>
 <html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8">
@@ -1856,4 +1861,20 @@ ${hcTokens}
   </script>
 </body>
 </html>`;
+  // #3015: a signed-out deep-link visit is served this page, so
+  // the page itself must carry the target forward — every sign-in
+  // link gains ?target=<validated target>, which the /login page
+  // embeds into every provider button and startLogin seals into
+  // signed state. Without a target (the plain / visit) the page
+  // is byte-identical to before: no rewrite runs. A fragment
+  // cannot ride along here — the browser never sends it to the
+  // server — so this leg carries path + query; a hash survives
+  // only when a client-side caller percent-encodes it into the
+  // target (the SPA boot does exactly that).
+  const validatedTarget = loginTarget ? validateReturnTarget(loginTarget) : null;
+  if (!validatedTarget) return html;
+  return html.replaceAll(
+    'href="/login"',
+    `href="/login?target=${encodeURIComponent(validatedTarget)}"`
+  );
 }

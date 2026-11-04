@@ -236,6 +236,7 @@ import {
   authOutcomeLoginUrl,
   parseAuthOutcome,
 } from "./security/authOutcome";
+import { validateReturnTarget } from "./security/returnTarget";
 import {
   disabledLoginResponse,
   enabledProviders,
@@ -955,11 +956,17 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
         .map((id) => getProvider(id))
         .filter((p): p is NonNullable<typeof p> => p !== null)
         .map((p) => ({ id: p.providerId, displayName: p.displayName ?? p.providerId }));
+      // #3015: a ?target= on the login page rides into every
+      // provider button (and survives a provider switch there);
+      // an absent or refused target renders the plain page.
+      const loginReturnTarget =
+        validateReturnTarget(url.searchParams.get("target")) ?? undefined;
       return new Response(
         renderLoginPage(
           env,
           enabled.length > 0 ? enabled : undefined,
-          parseAuthOutcome(url.searchParams.get(AUTH_OUTCOME_PARAM))
+          parseAuthOutcome(url.searchParams.get(AUTH_OUTCOME_PARAM)),
+          loginReturnTarget
         ), {
         headers: {
           "Content-Type": "text/html; charset=utf-8",
@@ -981,7 +988,11 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
       if (!provider || disabledReason) {
         return disabledLoginResponse(disabledReason ?? "provider-not-registered");
       }
-      return provider.startLogin(env);
+      // #3015: the target travels in, is validated and sealed into
+      // signed state by startLogin, and is never trusted raw at
+      // callback time. An absent or refused target starts a plain
+      // login (default landing afterwards).
+      return provider.startLogin(env, url.searchParams.get("target") ?? undefined);
     }
     const callbackProviderMatch = path.match(/^\/auth\/callback\/([^/]+)$/);
     if (callbackProviderMatch) {
@@ -5761,12 +5772,35 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
           parseAuthOutcome(url.searchParams.get(AUTH_OUTCOME_PARAM)) ===
           "signed_in"
         ) {
+          // #3015: a just-created session that cannot be read back
+          // still preserves a deep link: the current request URL
+          // (outcome stripped, validated) rides on the login
+          // redirect as ?target=, so the retry lands back on the
+          // bookmarked page instead of the default. A plain /
+          // visit keeps the redirect byte-identical.
+          const unreadableTarget = validateReturnTarget(
+            `${url.pathname}${url.search}`
+          );
+          const targetSuffix =
+            unreadableTarget && unreadableTarget !== "/"
+              ? `&target=${encodeURIComponent(unreadableTarget)}`
+              : "";
           return new Response(null, {
             status: 302,
-            headers: { Location: authOutcomeLoginUrl("session_unreadable") },
+            headers: {
+              Location: `${authOutcomeLoginUrl("session_unreadable")}${targetSuffix}`,
+            },
           });
         }
-        return new Response(renderLandingPage(env.APP_NAME, resolvePollingConfigFromEnv(env)), {
+        // #3015: a signed-out deep-link visit is served this page,
+        // so the page carries the target on its sign-in links
+        // (path + query; the browser never sends a fragment). A
+        // plain / visit passes no target and the page is
+        // byte-identical to before.
+        const landingTarget = validateReturnTarget(
+          `${url.pathname}${url.search}`
+        );
+        return new Response(renderLandingPage(env.APP_NAME, resolvePollingConfigFromEnv(env), landingTarget && landingTarget !== "/" ? landingTarget : undefined), {
           headers: {
             "Content-Type": "text/html; charset=utf-8",
             // Auth HTML must never be replayed from a cache: a stale landing
