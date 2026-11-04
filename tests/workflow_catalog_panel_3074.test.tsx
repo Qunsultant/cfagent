@@ -45,8 +45,15 @@ describe("WorkflowCatalogPanel (#3074)", () => {
   it("shows the stock screener's six stages with all four mode axes", async () => {
     await render();
     const text = container.textContent ?? "";
-    for (const stage of ["feed", "gather", "analysis", "store", "serve", "deliver"]) {
-      expect(text).toContain(stage);
+    for (const label of [
+      "Feed (quotes)",
+      "Gather (enrichment)",
+      "Analysis (screen)",
+      "Store (canonical report)",
+      "Serve (report availability)",
+      "Deliver (channels)",
+    ]) {
+      expect(text).toContain(label);
     }
     expect(text).toContain("Timing:");
     expect(text).toContain("Concurrency:");
