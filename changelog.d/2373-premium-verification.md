@@ -1,0 +1,3 @@
+### Added
+
+- Premium stock-signals payment-gate verification (#2373 Slice B): `tests/paid_screen_premium_2373.test.ts` proves the `/premium/stock-signals` handler is already paid on both branches (async workflow handle and sync screen) in all flag states — unpaid requests get 402 with nothing served, verified x402/MPP payments serve, anonymous traffic is metered under the verified payer scope (#183), and a Subscribed tier never waives payment. No route, price, meter, or flag behavior changed; seam-unification onto `paidScreenSubmission` remains an open owner decision (anonymous-traffic blocker).
