@@ -37,7 +37,7 @@ import {
   type GranterRevocationPassResult,
 } from "./security/grantRules";
 import { createGrantProposalStore, resolveAdminGrantProposal } from "./security/grantProposals";
-import { listStoreEntries, type DoNamespaceLike, type DoStubLike } from "./security/durableKv";
+import { type DoNamespaceLike, type DoStubLike } from "./security/durableKv";
 import type { ActorNamespaceLike } from "./services/actorGatewayPorts";
 import { zonedDateParts } from "./schedule";
 import { OPERATION_CATALOG } from "./orchestrate";
@@ -293,6 +293,7 @@ import {
   renewFailureDetail,
   etradeIdentityFromSession,
   isTokenExpiredEt,
+  listTokenFamilyEntries,
 } from "./services/etradeOAuth";
 import {
   PublicClientRejectedError,
@@ -3239,11 +3240,10 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
             await revokeRemoteAccessToken(env, login);
           },
           async hasTokens(login: string) {
-            const entries = await listStoreEntries({
-              namespace: env.SESSION_STORE as unknown as DoNamespaceLike | undefined,
-              namespaceName: "etrade",
-              prefix: "etrade:token:",
-            });
+            // #2434 (step 5c): the token listing goes through
+            // the token family's listing seam (port-composed
+            // when TOKEN_PORTS_ENABLED is on).
+            const entries = await listTokenFamilyEntries(env, "etrade:token:");
             // Cannot prove absence when the listing is unavailable:
             // fail closed to "tokens present" so verification fails
             // visibly instead of passing on an unknown store state.
