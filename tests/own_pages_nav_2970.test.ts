@@ -15,6 +15,9 @@ import { deepLinkForNavNode, deepLinkHrefForNavNode } from "../src/client/deepLi
 
 const here = dirname(fileURLToPath(import.meta.url));
 const tradingHubSrc = readFileSync(join(here, "..", "src", "client", "ETradeTradingHub.tsx"), "utf8");
+// Issue #3050 PR1: the hub no longer imports the track-record dashboards
+// directly — it renders TrackRecordPanel, which composes them.
+const trackRecordSrc = readFileSync(join(here, "..", "src", "client", "TrackRecordPanel.tsx"), "utf8");
 
 describe("own pages (#2970)", () => {
   it("adds goal-screen, review, and track-record routes with no nav entries", () => {
@@ -50,10 +53,20 @@ describe("own pages (#2970)", () => {
       "ReportsPanel",
       "SchedulesPanel",
       "ScreeningReviewPanel",
-      "ScreeningOutcomesPanel",
+      "TrackRecordPanel",
     ]) {
       expect(tradingHubSrc).toContain(`import { ${panel} } from "./${panel}"`);
       expect(tradingHubSrc).toContain(`<${panel}`);
+    }
+    // Issue #3050 PR1: the track-record dashboards moved one level down —
+    // the hub renders TrackRecordPanel, which composes all three.
+    for (const dashboard of [
+      "CalibrationDashboard",
+      "EnrichmentDashboard",
+      "ScreeningOutcomesPanel",
+    ]) {
+      expect(trackRecordSrc).toContain(`import { ${dashboard} } from "./${dashboard}"`);
+      expect(trackRecordSrc).toContain(`<${dashboard}`);
     }
     for (const subtab of ["goal-screen", "review", "track-record", "reports", "schedules"]) {
       expect(tradingHubSrc).toContain(`effectiveSubTab === "${subtab}"`);
