@@ -14,6 +14,10 @@
  *  - the normalized inputs/outputs the stage persisted, artifacts, and
  *    per-channel delivery states;
  *  - the run's first coded error, verbatim.
+ *  - for a run backed by a canonical row, the Docs RunDetail sections
+ *    (request, provenance, lineage, stages, reasons) from the same
+ *    /api/runs/details payload the Docs tab renders (issue #2786
+ *    losslessness fix) — additive only; every section above stays.
  *
  * Compliance (docs/agents/ux-architecture.md §20): ui/ primitives only,
  * semantic tokens only, server state is authoritative, and a field the
@@ -41,6 +45,8 @@ import type {
   WorkflowRunStatus,
   WorkflowRunTrigger,
 } from "../services/workflowRuns";
+import { RunDetailSections } from "./components/RunDetailsModal";
+import type { RunDetail } from "./runDetails";
 
 interface WorkflowRunsResponse {
   count?: number;
@@ -60,6 +66,7 @@ interface WorkflowRunsResponse {
 
 type TriggerFilter = "all" | WorkflowRunTrigger;
 type StatusFilter = "all" | "completed" | "partial" | "failed" | "active";
+type ReportsFilter = "all" | "reports";
 
 const TRIGGER_LABEL: Record<WorkflowRunTrigger, string> = {
   manual: "Manual",
@@ -95,6 +102,32 @@ const STATUS_OPTIONS: Array<{ id: StatusFilter; label: string }> = [
   { id: "failed", label: "Failed" },
   { id: "active", label: "In flight" },
 ];
+
+// Issue #2786 Part 3: the Reports filter is server-side (unlike
+// Trigger/Status, which filter the fetched window client-side) —
+// selecting it refetches with reports=only so report runs past the
+// 50-window still show.
+const REPORTS_OPTIONS: Array<{ id: ReportsFilter; label: string }> = [
+  { id: "all", label: "All runs" },
+  { id: "reports", label: "Reports only" },
+];
+
+// Issue #2786 Part 3: the Docs-tab Source column. A run with
+// canonical documents shows the canonical family (a discovery-kind
+// row reads "Strategy", exactly as Docs labels it); every other run
+// shows its engine family.
+const SOURCE_LABEL: Record<string, string> = {
+  stock: "Stock",
+  options: "Options",
+  goal: "Goal",
+  strategy: "Strategy",
+  discovery: "Strategy",
+  delivery: "Delivery",
+  feed: "Feed",
+  tool: "Tool",
+  nlq: "NLQ",
+  other: "Other",
+};
 
 const STATUS_TONE: Record<WorkflowRunStatus, "success" | "warning" | "danger" | "info" | "neutral"> = {
   completed: "success",
@@ -181,6 +214,71 @@ function runMatchesStatus(run: WorkflowRun, filter: StatusFilter): boolean {
   return run.status === filter;
 }
 
+/**
+ * Issue #2786 Part 3: the run's Docs cells. Canonical documents win
+ * (they carry generation statuses and failure reasons); without
+ * them, the outcome's artifact urls are the fallback, with no status
+ * — a link when the outcome recorded the key, "—" otherwise. Never
+ * a link to a key the run did not record.
+ */
+function documentsForRun(run: WorkflowRun): {
+  pdfUrl: string | null;
+  pdfStatus: string | null;
+  pdfError: string | null;
+  xlsxUrl: string | null;
+  xlsxStatus: string | null;
+  xlsxError: string | null;
+  csvUrl: string | null;
+  csvStatus: string | null;
+  csvError: string | null;
+} {
+  const docs = run.documents ?? null;
+  const artifact = (kind: string) => run.artifacts.find((a) => a.kind === kind)?.url ?? null;
+  return {
+    pdfUrl: docs?.pdfUrl ?? artifact("pdf") ?? artifact("report"),
+    pdfStatus: docs?.pdfStatus ?? null,
+    pdfError: docs?.pdfError ?? null,
+    xlsxUrl: docs?.xlsxUrl ?? artifact("xlsx"),
+    xlsxStatus: docs?.xlsxStatus ?? null,
+    xlsxError: docs?.xlsxError ?? null,
+    csvUrl: docs?.csvUrl ?? artifact("csv"),
+    csvStatus: docs?.csvStatus ?? null,
+    csvError: docs?.csvError ?? null,
+  };
+}
+
+/** Issue #2786 Part 3: one Docs artifact cell — the Docs tab's
+ *  ArtifactLink semantics (link / failed badge with reason / "—"). */
+function DocumentCell({
+  url,
+  status,
+  error,
+  kind,
+}: {
+  url: string | null;
+  status: string | null;
+  error: string | null;
+  kind: "PDF" | "XLSX" | "CSV";
+}) {
+  if (!url && status === "failed") {
+    // Issue #2088: a recorded leg failure renders as a failure
+    // state with its reason, never a bare "—".
+    return (
+      <span title={error ?? undefined}>
+        <Badge size="sm" tone="danger">failed</Badge>
+      </span>
+    );
+  }
+  if (!url) {
+    return <span className="workflow-runs-muted">—</span>;
+  }
+  return (
+    <a href={url} download aria-label={`Download the ${kind}`}>
+      {kind}
+    </a>
+  );
+}
+
 export function WorkflowRunsPanel() {
   const [runs, setRuns] = useState<WorkflowRun[]>([]);
   const [summary, setSummary] = useState<WorkflowRunsResponse["summary"] | null>(null);
@@ -189,6 +287,7 @@ export function WorkflowRunsPanel() {
   const [error, setError] = useState<string | null>(null);
   const [triggerFilter, setTriggerFilter] = useState<TriggerFilter>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [reportsFilter, setReportsFilter] = useState<ReportsFilter>("all");
   // Issue #2777 — deep link by run id: `?tab=workflow-runs&run=<id>`
   // pre-fills the search so a link from another view lands on that run.
   const [query, setQuery] = useState(() => {
@@ -206,7 +305,9 @@ export function WorkflowRunsPanel() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/workflow-runs?limit=50");
+      const res = await fetch(
+        `/api/workflow-runs?limit=50${reportsFilter === "reports" ? "&reports=only" : ""}`,
+      );
       const data = (await res.json().catch(() => null)) as WorkflowRunsResponse | null;
       if (!res.ok) throw new Error(`Could not load workflow runs (HTTP ${res.status})${data?.error ? `: ${data.error}` : "."}`);
       setRuns(Array.isArray(data?.runs) ? data!.runs! : []);
@@ -218,7 +319,7 @@ export function WorkflowRunsPanel() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [reportsFilter]);
 
   useEffect(() => {
     void load();
@@ -280,6 +381,41 @@ export function WorkflowRunsPanel() {
           {statusLabel(run.status)}
         </Badge>
       ),
+    },
+    {
+      key: "source",
+      header: "Source",
+      render: (run: WorkflowRun) => (
+        <span className="workflow-runs-muted">
+          {run.documents
+            ? (SOURCE_LABEL[run.documents.family] ?? run.documents.family)
+            : (SOURCE_LABEL[run.family] ?? run.family)}
+        </span>
+      ),
+    },
+    {
+      key: "pdf",
+      header: "PDF",
+      render: (run: WorkflowRun) => {
+        const d = documentsForRun(run);
+        return <DocumentCell url={d.pdfUrl} status={d.pdfStatus} error={d.pdfError} kind="PDF" />;
+      },
+    },
+    {
+      key: "xlsx",
+      header: "XLSX",
+      render: (run: WorkflowRun) => {
+        const d = documentsForRun(run);
+        return <DocumentCell url={d.xlsxUrl} status={d.xlsxStatus} error={d.xlsxError} kind="XLSX" />;
+      },
+    },
+    {
+      key: "csv",
+      header: "CSV",
+      render: (run: WorkflowRun) => {
+        const d = documentsForRun(run);
+        return <DocumentCell url={d.csvUrl} status={d.csvStatus} error={d.csvError} kind="CSV" />;
+      },
     },
     {
       key: "duration",
@@ -385,6 +521,10 @@ export function WorkflowRunsPanel() {
             <span className="workflow-runs-filter-label">Status</span>
             <PillGroup options={STATUS_OPTIONS} value={statusFilter} onChange={setStatusFilter} size="sm" ariaLabel="Filter runs by status" />
           </div>
+          <div className="workflow-runs-filter">
+            <span className="workflow-runs-filter-label">Reports</span>
+            <PillGroup options={REPORTS_OPTIONS} value={reportsFilter} onChange={setReportsFilter} size="sm" ariaLabel="Filter runs by report documents" />
+          </div>
           <div className="workflow-runs-filter workflow-runs-filter-grow">
             <TextInput
               value={query}
@@ -441,7 +581,7 @@ export function WorkflowRunsPanel() {
                 description={
                   runs.length === 0
                     ? "Runs appear here as the engine records a screen, options scan, goal run, discovery, or delivery chain — with every stage it executed."
-                    : "Clear the trigger, status, or search filters to see the recorded runs."
+                    : "Clear the trigger, status, reports, or search filters to see the recorded runs."
                 }
                 action={
                   runs.length > 0 ? (
@@ -451,6 +591,7 @@ export function WorkflowRunsPanel() {
                       onClick={() => {
                         setTriggerFilter("all");
                         setStatusFilter("all");
+                        setReportsFilter("all");
                         setQuery("");
                       }}
                     >
@@ -480,6 +621,47 @@ export function WorkflowRunsPanel() {
 }
 
 function RunDetail({ run }: { run: WorkflowRun }) {
+  // Issue #2786 Part 3: when canonical documents exist they are the
+  // authoritative doc links — the outcome's doc-kind artifacts are
+  // the same files, so they are hidden here and the modal never
+  // links the same document twice.
+  const visibleArtifacts = run.documents
+    ? run.artifacts.filter(
+        (a) => a.kind !== "report" && a.kind !== "pdf" && a.kind !== "xlsx" && a.kind !== "csv",
+      )
+    : run.artifacts;
+  // Issue #2786 losslessness fix: a run backed by a canonical row
+  // carries the Docs RunDetail sections (request, provenance,
+  // lineage, stages, reasons) from the same /api/runs/details payload
+  // the Docs tab renders — fetched by canonical row id, so a run
+  // whose runId is an asyncJobId twin resolves too. Runs without
+  // canonical documents keep exactly today's detail: no fetch, no
+  // section, nothing removed.
+  const docsReportId = run.documents?.reportId ?? null;
+  const [docsDetail, setDocsDetail] = useState<RunDetail | null>(null);
+  const [docsLoading, setDocsLoading] = useState(false);
+  const [docsError, setDocsError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!docsReportId) return;
+    let cancelled = false;
+    setDocsLoading(true);
+    setDocsError(null);
+    fetch(`/api/runs/details?id=${encodeURIComponent(docsReportId)}`)
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`Docs run details unavailable (${res.status})`);
+        const payload = (await res.json()) as { detail?: RunDetail | null };
+        if (!cancelled) setDocsDetail(payload.detail ?? null);
+      })
+      .catch((err) => {
+        if (!cancelled) setDocsError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (!cancelled) setDocsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [docsReportId]);
   return (
     <div className="workflow-runs-detail">
       <div className="workflow-runs-detail-header">
@@ -488,7 +670,7 @@ function RunDetail({ run }: { run: WorkflowRun }) {
           <div className="workflow-runs-detail-subtitle">
             <span>{run.workflow}</span>
             <span className="workflow-runs-mono">{run.runId}</span>
-            <span className="workflow-runs-muted">{run.source === "job-chain" ? "Job tree" : run.stageCount > 0 ? "Unified run record" : "Outcome record only"}</span>
+            <span className="workflow-runs-muted">{run.source === "job-chain" ? "Job tree" : run.source === "report" ? "Report record only" : run.stageCount > 0 ? "Unified run record" : "Outcome record only"}</span>
           </div>
         </div>
         <div className="workflow-runs-detail-actions">
@@ -554,8 +736,9 @@ function RunDetail({ run }: { run: WorkflowRun }) {
       <h4 className="workflow-runs-subheading">Stages</h4>
       {run.stages.length === 0 ? (
         <Notice tone="neutral" density="compact">
-          No stage records exist for this run — the producing store recorded only the run outcome. Stages are
-          never inferred.
+          {run.source === "report"
+            ? "No stage records exist for this run — its canonical row records documents, not an execution trace. Stages are never inferred."
+            : "No stage records exist for this run — the producing store recorded only the run outcome. Stages are never inferred."}
         </Notice>
       ) : (
         <div className="workflow-runs-stage-list">
@@ -641,13 +824,40 @@ function RunDetail({ run }: { run: WorkflowRun }) {
         </section>
       </div>
 
+      {run.documents && (
+        <section className="workflow-runs-io" aria-label="Documents">
+          <h4 className="workflow-runs-subheading">Documents</h4>
+          <div className="workflow-runs-artifacts">
+            <DocumentCell url={run.documents.pdfUrl} status={run.documents.pdfStatus} error={run.documents.pdfError} kind="PDF" />
+            <DocumentCell url={run.documents.xlsxUrl} status={run.documents.xlsxStatus} error={run.documents.xlsxError} kind="XLSX" />
+            <DocumentCell url={run.documents.csvUrl} status={run.documents.csvStatus} error={run.documents.csvError} kind="CSV" />
+          </div>
+          <p className="workflow-runs-muted">Canonical row {run.documents.reportId}</p>
+        </section>
+      )}
+
+      {run.documents && (
+        <section className="workflow-runs-io" aria-label="Docs run details">
+          <h4 className="workflow-runs-subheading">Docs run details</h4>
+          {docsLoading && <p className="workflow-runs-muted">Loading docs run details…</p>}
+          {docsError && !docsLoading && (
+            <Notice tone="neutral" density="compact">
+              Docs run details could not be loaded: {docsError}
+            </Notice>
+          )}
+          {docsDetail && !docsLoading && !docsError && (
+            <RunDetailSections detail={docsDetail} levelFilter="all" />
+          )}
+        </section>
+      )}
+
       <section className="workflow-runs-io" aria-label="Artifacts and delivery">
         <h4 className="workflow-runs-subheading">Artifacts & delivery</h4>
-        {run.artifacts.length === 0 && Object.keys(run.deliveryStates).length === 0 ? (
+        {visibleArtifacts.length === 0 && Object.keys(run.deliveryStates).length === 0 ? (
           <p className="workflow-runs-muted">No artifacts or delivery states recorded for this run.</p>
         ) : (
           <div className="workflow-runs-artifacts">
-            {run.artifacts.map((artifact) => (
+            {visibleArtifacts.map((artifact) => (
               <a key={`${artifact.kind}:${artifact.url}`} href={artifact.url} target="_blank" rel="noreferrer">
                 {artifact.label}
               </a>

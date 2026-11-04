@@ -522,6 +522,11 @@ export async function handlePremiumRoutes(
   }
 
   // Paid Trading Service: Real-Time Quantitative Anomaly Signals ($0.02 USDC)
+  // #2373 Slice B (verification): paid via the x402/MPP gate below in ALL
+  // flag states — the gate reads no flag. Seam-unification onto
+  // paidScreenSubmission is an open owner decision: the seam needs a verified
+  // login + account row, but anonymous traffic here has only a verified payer
+  // scope (see premiumPaymentService, #183).
   if (path.includes("/premium/stock-signals") && (request.method === "GET" || request.method === "POST")) {
     const paymentService = premiumPaymentService(ctx, sessionId, request);
     const tier = TRADING_PAID_SERVICES.STOCK_SIGNALS;

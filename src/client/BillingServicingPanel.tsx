@@ -2,15 +2,18 @@
  * Issue #2740 (Platform Phase 6, program #2468) — servicing.
  *
  * Read-only Billing servicing view, except the operator refund-policy
- * approval section (2.19, #2985): it CALLS existing routes only and
- * creates none: identity (#2219, session-derived, self-only),
+ * approval section (2.19, #2985) and the refund flow section (2.20,
+ * #3045): both CALL existing routes only and create none: identity
+ * (#2219, session-derived, self-only),
  * subscription read + plans list (2.1 Billing API), paid-call receipts
  * (slice 4), referral balance (2.2 — this panel is its first client
  * caller), refund policy read + per-kind approve/withdraw (2.7 routes
  * via RefundPolicySection — policy configuration only, never a refund
- * request, approval, or execution). It never purchases (Selling owns
+ * request, approval, or execution), and refund request / record
+ * approve-deny / execute / verify (2.7 routes via RefundFlowSection).
+ * It never purchases (Selling owns
  * purchase), never cancels (rescoped 2.14 owns cancel-action UI), never
- * deactivates (2.5), never refunds (2.7), never invents a price,
+ * deactivates (2.5), never invents a price,
  * balance, tier, or period end. Failures render as fixed error strings;
  * server error bodies are never rendered. Referral rule values render as
  * operator-set PROPOSED, pending owner approval (per #2657 §15).
@@ -23,6 +26,7 @@ import { PageSection } from "./components/ui/PageShell";
 import { fetchPlatformIdentity } from "./firstRunApi";
 import { receiptKindLabel } from "./agenticWalletApi";
 import { RefundPolicySection } from "./RefundPolicySection";
+import { RefundFlowSection } from "./RefundFlowSection";
 import {
   buildBillingView,
   type BillingPlanInput,
@@ -110,7 +114,7 @@ export function BillingServicingPanel() {
   return (
     <PageSection
       title="Billing"
-      description="Your subscription, receipts, plans, and referral-credit balance — servicing over existing routes. This view never charges, purchases, cancels, deactivates, or refunds. Operators also approve refund-policy kinds here; approval is policy configuration, never a refund."
+      description="Your subscription, receipts, plans, and referral-credit balance — servicing over existing routes. This view never charges, purchases, cancels, or deactivates. Operators also approve refund-policy kinds here and decide and execute refunds; any verified login may request and verify their own refunds."
     >
       {loading && <p>Loading billing view</p>}
       {!loading && loadError && (
@@ -157,6 +161,7 @@ export function BillingServicingPanel() {
             <p>{view.referral.rulesNote}</p>
           </Card>
           <RefundPolicySection />
+          <RefundFlowSection />
           <Card>
             <p>Support snapshot</p>
             <p>Account: {view.supportSnapshot.login}</p>

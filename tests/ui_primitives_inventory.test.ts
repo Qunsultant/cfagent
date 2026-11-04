@@ -49,10 +49,14 @@ const INVENTORY: Record<string, string[]> = {
   "Drawer.tsx": ["Drawer"],
   // #2673 slice 6: keyboard entry to main content.
   "SkipLink.tsx": ["SkipLink"],
+  // #3048 layout primitives: componentized flex/grid layouts.
+  "Stack.tsx": ["Stack"],
+  "Flex.tsx": ["Flex"],
+  "Grid.tsx": ["Grid"],
 };
 
 /** Non-primitive files allowed in components/ui (helpers + styles). */
-const HELPERS = new Set(["Field.tsx", "segmentedNavigation.ts", "index.ts", "primitives.css", "anchorPosition.ts"]);
+const HELPERS = new Set(["Field.tsx", "segmentedNavigation.ts", "index.ts", "primitives.css", "anchorPosition.ts", "layout.ts"]);
 
 const ALL_PRIMITIVES = Object.values(INVENTORY).flat();
 

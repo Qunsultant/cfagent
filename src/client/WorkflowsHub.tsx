@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from "react";
 import "./workflowsHub.css";
-import { Button, PillGroup, Table, TextInput, PageShell, Tabs } from "./components/ui";
+import { Button, PillGroup, Table, TextInput, PageShell, Tabs, Stack, Flex, Grid } from "./components/ui";
 import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
 import { STRATEGY_LIBRARY } from "./options/strategyLibrary";
 import {
@@ -1116,7 +1116,7 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
 
       {/* VIEW 1: QUANTITATIVE PLAYBOOKS & FAQS (THE 8 CORE QUESTIONS) */}
       {activeTab === "faq" && (
-        <div className="faq-section-container" style={{ display: "flex", flexDirection: "column", gap: "var(--space-5)" }} role="tabpanel" id="workflows-panel-faq" aria-labelledby="workflows-tab-faq">
+        <Stack gap="5" className="faq-section-container" role="tabpanel" id="workflows-panel-faq" aria-labelledby="workflows-tab-faq">
           {/* FAQ Search & Category Filter */}
           <div className="workflows-filter-strip">
             <div className="workflows-search-box">
@@ -1177,7 +1177,7 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
 
                       {/* Key Parameter Badges Row */}
                       {faq.parameterBadges && faq.parameterBadges.length > 0 && (
-                        <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-1-5)" }}>
+                        <Stack gap="1-5">
                           <span className="faq-param-heading">
                             ⚙️ Key Input Parameters &amp; Filter Settings
                           </span>
@@ -1189,7 +1189,7 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
                               </div>
                             ))}
                           </div>
-                        </div>
+                        </Stack>
                       )}
 
                       {/* 3 Distinct Execution Methods */}
@@ -1287,14 +1287,14 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
 
                       {/* Action Footer */}
                       <div className="workflow-action-footer">
-                        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", flexWrap: "wrap" }}>
+                        <Flex align="center" gap="3" wrap>
                           <span style={{ fontSize: "var(--font-size-caption)", color: "var(--color-text-muted)" }}>Primary Workflow:</span>
                           <span className="workflow-tag-badge green">{faq.primaryWorkflow}</span>
                           <span style={{ fontSize: "var(--font-size-caption)", color: "var(--color-text-muted)" }}>Secondary:</span>
                           <span className="workflow-tag-badge blue">{faq.secondaryWorkflow}</span>
-                        </div>
+                        </Flex>
 
-                        <div style={{ display: "flex", gap: "var(--space-2)" }}>
+                        <Flex gap="2">
                           <Button
                           variant="primary"
                             className="workflow-cta-btn"
@@ -1320,7 +1320,7 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
                               Ask AI Agent 💬
                             </Button>
                           )}
-                        </div>
+                        </Flex>
                       </div>
                     </div>
                   )}
@@ -1328,12 +1328,12 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
               );
             })}
           </div>
-        </div>
+        </Stack>
       )}
 
       {/* VIEW 2: PLATFORM WORKFLOWS (ALL 14 ANALYSIS & EXECUTION WORKFLOWS) */}
       {activeTab === "workflows" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-5)" }} role="tabpanel" id="workflows-panel-workflows" aria-labelledby="workflows-tab-workflows">
+        <Stack gap="5" role="tabpanel" id="workflows-panel-workflows" aria-labelledby="workflows-tab-workflows">
           {/* Track Filter Tabs */}
           <div className="workflow-track-tabs">
             <span style={{ fontSize: "var(--font-size-body-sm)", color: "var(--color-text-muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", marginRight: "0.3rem" }}>
@@ -1508,7 +1508,7 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
                           API: <code>{wf.apiEndpoint}</code>
                         </div>
 
-                        <div style={{ display: "flex", gap: "var(--space-2)" }}>
+                        <Flex gap="2">
                           <Button
                           variant="primary"
                             className="workflow-cta-btn"
@@ -1534,7 +1534,7 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
                               Ask AI Agent 💬
                             </Button>
                           )}
-                        </div>
+                        </Flex>
                       </div>
                     </div>
                   )}
@@ -1549,12 +1549,12 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
               </div>
             )}
           </div>
-        </div>
+        </Stack>
       )}
 
       {/* VIEW 3: ALGORITHMIC DECISIONING RULES (6 ENGINES) */}
       {activeTab === "decisioning" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-5)" }} role="tabpanel" id="workflows-panel-decisioning" aria-labelledby="workflows-tab-decisioning">
+        <Stack gap="5" role="tabpanel" id="workflows-panel-decisioning" aria-labelledby="workflows-tab-decisioning">
           {/* Decisioning Hero Note */}
           <div style={{ background: "var(--color-surface-sunken)", border: "1px solid var(--color-border-subtle)", borderRadius: "10px", padding: "var(--space-5) var(--space-6)" }}>
             <h4 style={{ margin: "0 0 0.5rem", color: "var(--color-accent)", fontSize: "var(--font-size-title-sm)" }}>
@@ -1696,7 +1696,7 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
                           Architecture: <code>src/trading/options/ · src/client/options/</code>
                         </div>
 
-                        <div style={{ display: "flex", gap: "var(--space-2)" }}>
+                        <Flex gap="2">
                           {onSendPrompt && (
                             <Button
                             variant="accent"
@@ -1709,7 +1709,7 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
                               Ask AI Agent 💬
                             </Button>
                           )}
-                        </div>
+                        </Flex>
                       </div>
                     </div>
                   )}
@@ -1717,12 +1717,12 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
               );
             })}
           </div>
-        </div>
+        </Stack>
       )}
 
       {/* VIEW 4: CAPABILITY & LOOKUP MATRIX */}
       {activeTab === "matrix" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-5)" }} role="tabpanel" id="workflows-panel-matrix" aria-labelledby="workflows-tab-matrix">
+        <Stack gap="5" role="tabpanel" id="workflows-panel-matrix" aria-labelledby="workflows-tab-matrix">
           {/* Matrix Header Callout */}
           <div style={{ background: "var(--color-surface-sunken)", border: "1px solid var(--color-border-subtle)", borderRadius: "10px", padding: "var(--space-5) var(--space-6)" }}>
             <h4 style={{ margin: "0 0 0.5rem", color: "var(--color-accent)", fontSize: "var(--font-size-title-sm)" }}>
@@ -1764,12 +1764,12 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
               />
             </div>
           </div>
-        </div>
+        </Stack>
       )}
 
       {/* VIEW 5: WORKFLOW IMPROVEMENTS & ARCHITECTURAL ROADMAP */}
       {activeTab === "improvements" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-5)" }} role="tabpanel" id="workflows-panel-improvements" aria-labelledby="workflows-tab-improvements">
+        <Stack gap="5" role="tabpanel" id="workflows-panel-improvements" aria-labelledby="workflows-tab-improvements">
           {/* Architectural Analysis Hero Note */}
           <div style={{ background: "var(--color-surface-sunken)", border: "1px solid var(--color-border-subtle)", borderRadius: "10px", padding: "var(--space-5) var(--space-6)" }}>
             <h4 style={{ margin: "0 0 0.5rem", color: "var(--color-accent)", fontSize: "var(--font-size-title-sm)" }}>
@@ -1809,7 +1809,7 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
           </div>
 
           {/* The 6 Improvement Cards */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: "var(--space-5)" }}>
+          <Grid autoFit minColumnWidth="lg" gap="5">
             {WORKFLOW_IMPROVEMENTS.map((imp) => (
               <div key={imp.id} className="improvement-card">
                 <div className="improvement-header">
@@ -1844,8 +1844,8 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
                 </div>
               </div>
             ))}
-          </div>
-        </div>
+          </Grid>
+        </Stack>
       )}
     </PageShell>
     </div>
