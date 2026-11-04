@@ -18,6 +18,12 @@ Title convention + label (check one; title prefix and label must match):
 - [ ] `[Hotfix] - <title>` + `hotfix`: urgent production fix (emergency rules, gitops §18.2, still apply)
 - [ ] Task (no type prefix; `lane:<lane>` label still required)
 
+## Size
+<!-- Estimate the work, not the importance. Pick one. -->
+- [ ] Small — one focused change, one PR, no migration, no cross-surface coordination
+- [ ] Medium — several files or one migration, one PR, coordination with one other surface or lane
+- [ ] Large — multi-PR or multi-slice work, migrations, or cross-lane coordination; split into smaller issues when possible
+
 ## Problem
 
 ## Outcome
@@ -26,6 +32,14 @@ Title convention + label (check one; title prefix and label must match):
 Journey (which user journey this change serves):
 User (who the user is):
 How value surfaces in UX (what the user sees/does differently):
+
+## Existing / similar issues (required — search BEFORE creating)
+- [ ] I searched existing issues (open and closed) for the same or similar work before creating this issue.
+- Same or similar issues found (reference each by number; state whether it already covers this work, only overlaps it, or is distinct):
+  - #NNNN — <title> — <covers / overlaps / distinct because …>
+  - (If none found, write "None found" and give the search terms used below.)
+- Search terms used:
+- If an existing issue already covers this work, do NOT create a duplicate — comment on that issue instead. A new issue is justified only when no existing issue covers it, or when the difference is stated above. (Record confirmed relationships under Related issues below.)
 
 ## Related issues
 Parent epic:
@@ -43,6 +57,7 @@ Excluded:
 ## Test plan
 
 ## Dependencies
+Cross-lane need: if this requires another lane's capability, link that lane's separately created and assigned issue here — do not fold their work into this issue.
 
 ## Change management (expected)
 Expected impact:

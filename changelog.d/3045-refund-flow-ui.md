@@ -1,0 +1,3 @@
+### Added
+
+- Refund flow UI in the Billing servicing surface (#3045, monetization Phase 2.20): request form (kind, original payment reference, amount, reason), record lifecycle view (requested → approved|denied → executed|execution_failed, with entitlement consequence on executed records), and refundId verify, over the EXISTING 2.7 routes only. Operator decide/execute buttons render only when GET /operators succeeds (2.19 rule); otherwise read-only. No new server route, no policy-value editing, no behavior change to the refund rail. Fixed status strings throughout, never raw error text; honest limits in copy (pay-per-run execution still unresolvable, crypto non-refundable, legacy rows without a stored payment-intent id refused, never guessed).

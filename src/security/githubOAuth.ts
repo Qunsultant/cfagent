@@ -24,6 +24,7 @@ import {
   authOutcomeNoticeHtml,
   type AuthOutcomeCode,
 } from "./authOutcome";
+import { validateReturnTarget } from "./returnTarget";
 
 /**
  * Audit seam for the logout hook (Phase 2b-part1). The caller —
@@ -152,9 +153,20 @@ export interface LoginPageProvider {
 export function renderLoginPage(
   env: Env,
   providers?: LoginPageProvider[],
-  outcome?: AuthOutcomeCode | null
+  outcome?: AuthOutcomeCode | null,
+  returnTarget?: string | null
 ): string {
   const multiProvider = Array.isArray(providers) && providers.length > 0;
+  // #3015: a validated return target rides on every provider
+  // button, so switching providers mid-flow (GitHub → Google, or
+  // back to /login and another button) keeps the same target —
+  // each button seals it into its own signed state at startLogin.
+  // An absent or refused target renders the plain buttons,
+  // byte-identical to before.
+  const validatedTarget = returnTarget ? validateReturnTarget(returnTarget) : null;
+  const targetSuffix = validatedTarget
+    ? `?target=${encodeURIComponent(validatedTarget)}`
+    : "";
   // #2402: an outcome notice renders only when a failure code is
   // passed; with no outcome the section below reproduces the
   // previous bytes exactly (the no-arg page is golden-pinned).
@@ -174,7 +186,7 @@ export function renderLoginPage(
     ? providers!
         .map((p) => {
           const mark = p.id === "github" ? `${githubMark}\n        ` : "";
-          return `<a href="/auth/login/${encodeURIComponent(p.id)}" class="btn btn-${escapeHtml(p.id)}">\n        ${mark}<span>Sign in with ${escapeHtml(p.displayName)}</span>\n        <span class="btn-arrow" aria-hidden="true">&rarr;</span>\n      </a>`;
+          return `<a href="/auth/login/${encodeURIComponent(p.id)}${targetSuffix}" class="btn btn-${escapeHtml(p.id)}">\n        ${mark}<span>Sign in with ${escapeHtml(p.displayName)}</span>\n        <span class="btn-arrow" aria-hidden="true">&rarr;</span>\n      </a>`;
         })
         .join("\n      ")
     : `<a href="/auth/login" class="btn btn-github">
