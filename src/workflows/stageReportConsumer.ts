@@ -50,6 +50,8 @@ import {
   isAnalysisDoneMessage,
   type StageMessage,
 } from "./stageMessage";
+import { formatStageMessage } from "./stageConfig";
+import { describeStageAdvice, withStageAdvice } from "./stageAdvice";
 
 export type StageConsumeStatus =
   | "generated"
@@ -114,14 +116,23 @@ export async function consumeAnalysisDone(args: {
   };
   // Poison: wrong stage, or no reference to persisted output.
   if (!isAnalysisDoneMessage(message)) {
-    return deadLetter(`poison message: stage "${message.stageId}" is not analysis-done; refusing without retry.`);
+    return deadLetter(
+      formatStageMessage(
+        "STAGE_WRONG_TARGET",
+        `stage "${message.stageId}" is not analysis-done; refusing without retry`,
+      ),
+    );
   }
   if (!message.runId?.trim() || !message.artifactKeys || message.artifactKeys.length === 0) {
-    return deadLetter("poison message: runId or artifactKeys missing; refusing without retry.");
+    return deadLetter(
+      formatStageMessage("STAGE_MISSING_ARTIFACT_REF", "runId or artifactKeys missing; refusing without retry"),
+    );
   }
   // Budget: past it, dead-letter rather than retry forever.
   if (attempt > maxAttempts) {
-    return deadLetter(`retry budget exhausted: attempt ${attempt} exceeds maxAttempts ${maxAttempts}.`);
+    return deadLetter(
+      formatStageMessage("STAGE_RETRY_EXHAUSTED", `attempt ${attempt} exceeds maxAttempts ${maxAttempts}`),
+    );
   }
   // Exactly-once effect: redelivery of a claimed key suppresses.
   const claims = args.claims;
@@ -139,11 +150,21 @@ export async function consumeAnalysisDone(args: {
   }
   let output: unknown;
   try {
-    output = await args.generate({
-      result: persisted,
-      runId: message.runId,
-      userLogin: message.userLogin,
-      partial: persisted.partial !== undefined && persisted.partial !== null,
+    // Issue #3075 - the stage body runs under the one advice pass: timings
+    // and the coded verdict are recorded identically for every stage, and a
+    // failure is rethrown unchanged so retry/DLQ behaviour is as before.
+    output = await withStageAdvice({
+      stageId: message.stageId,
+      log: (event) => {
+        if (event.outcome === "failed") console.warn(`[stage] ${describeStageAdvice(event)}`);
+      },
+      run: () =>
+        args.generate({
+          result: persisted,
+          runId: message.runId,
+          userLogin: message.userLogin,
+          partial: persisted.partial !== undefined && persisted.partial !== null,
+        }),
     });
   } catch (err) {
     // Release-on-failure (G8 #2869): a failed generation
