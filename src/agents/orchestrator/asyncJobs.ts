@@ -42,6 +42,9 @@ import {
 } from "../../security/serviceDispatch";
 import { getServiceUserLogin } from "../../security/serviceIdentity";
 import type { MembershipStore } from "../../security/authorization";
+import { enforceOwnerDispatch } from "../../security/runRevocationGate";
+import { sessionStore } from "../../security/session";
+import { lookupInternalUserIdByLogin } from "../../security/iaaaMigration";
 import { executeMCPTool } from "../../mcps/openaimp";
 import { recordTraceHopBestEffort } from "../../data/createMeshTracePorts";
 import { childContextOfTraceparent } from "../../observability/meshTrace";
@@ -109,6 +112,15 @@ export interface AsyncJobsContext {
    *  KV store; a context without one denies every service dispatch
    *  (fail closed — an unverifiable service identity never runs). */
   serviceMembershipStore?: MembershipStore;
+  /**
+   * #3154 (Q6): owner-identity resolver for the revocation-mid-run
+   *  consumer. When supplied, the execution guard uses it instead
+   *  of the default iaaa-alias lookup over sessionStore(ctx.env).
+   *  The default keeps production contexts (built by the
+   *  orchestrator builder, which does not set this port) working
+   *  with no builder change.
+   */
+  resolveOwnerInternalUserId?: (login: string) => Promise<string | null>;
   /**
    * Issue #2867: the (runId, destination) delivery suppressor
    * for followup.deliver jobs. The orchestrator builder may
@@ -816,6 +828,37 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
           ...(decision.detail ? { detail: decision.detail } : {}),
         });
         throw new Error(`Async job dispatch denied: ${decision.reason}`);
+      }
+    }
+    // #3154 (Q6): revocation-mid-run consumer — an owner job
+    // re-checks live membership at execution, mirroring the service
+    // tier above. This is also the stage boundary: every pipeline
+    // stage re-executes through executeAsyncJob, so a job whose
+    // owner was revoked mid-pipeline denies at the next stage's
+    // execution, is marked failed (via the throw into the catch
+    // below, which audits async_job.failed), and never reaches a
+    // capability leg. The schedule that queued it is preserved.
+    // The resolver is the iaaa-alias login lookup over the
+    // SessionStore KV; unresolvable logins, a missing store, or a
+    // lookup failure preserve pre-existing behavior (allow, logged
+    // inside enforceOwnerDispatch) — see runRevocationGate.ts.
+    if (identity.kind === "owner") {
+      const owner = await enforceOwnerDispatch({
+        store: ctx.serviceMembershipStore,
+        resolveInternalUserId:
+          ctx.resolveOwnerInternalUserId ??
+          ((login) => lookupInternalUserIdByLogin(sessionStore(ctx.env), login)),
+        login: identity.login,
+        nowMs: Date.now(),
+      });
+      if ("denied" in owner) {
+        ctx.audit("async_job.dispatch_denied", "orchestrator", {
+          jobId,
+          capability: job.capability,
+          reason: "OWNER_MEMBERSHIP_REVOKED",
+          ...(owner.detail ? { detail: owner.detail } : {}),
+        });
+        throw new Error("Async job dispatch denied: OWNER_MEMBERSHIP_REVOKED");
       }
     }
 
