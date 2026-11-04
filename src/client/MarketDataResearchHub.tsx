@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
 import { apiFetch as fetch } from "./apiFetch";
-import { EmptyState, Spinner, Button, Select, Table, TextInput, PageShell, PageSection, FieldShell } from "./components/ui";
+import { EmptyState, Spinner, Button, Select, Table, TextInput, PageShell, PageSection, FieldShell, Stack, Flex, Grid } from "./components/ui";
 import { ResearchReportActions } from "./ResearchReportActions";
 import { replayReport, replaySummary, type ReplayResponse } from "./replayReport";
 import { TabHoverItem } from "./TabHoverItem";
@@ -691,12 +691,12 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
                   <span className="dual-feed-card-title yahoo-title">
                     📊 Yahoo Finance Feed
                   </span>
-                  <span style={{ display: "inline-flex", gap: "var(--space-1-5)", alignItems: "center" }}>
+                  <Flex as="span" inline gap="1-5" align="center">
                     <MarketDataResearchProvenanceBadge provenance={yfinanceQuote?.provenance} note={yfinanceQuote?.note} />
                     <span className="dual-feed-market-state">
                       {yfinanceQuote?.marketState || "REGULAR"}
                     </span>
-                  </span>
+                  </Flex>
                 </div>
                 <div className="dual-feed-price-row">
                   <span className="dual-feed-price-val">
@@ -732,12 +732,12 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
                   <span className="dual-feed-card-title alpaca-title">
                     🦙 Alpaca Market Data v2
                   </span>
-                  <span style={{ display: "inline-flex", gap: "var(--space-1-5)", alignItems: "center" }}>
+                  <Flex as="span" inline gap="1-5" align="center">
                     <MarketDataResearchProvenanceBadge provenance={alpacaQuote?.provenance ?? snapshot?.provenance} note={alpacaQuote?.note ?? snapshot?.note} />
                     <span className="dual-feed-snapshot-badge">
                       {snapshot ? (snapshot.provenance === "live" ? "Live Snapshot" : "Market Data Profile Snapshot") : "Alpaca Feed"}
                     </span>
-                  </span>
+                  </Flex>
                 </div>
                 <div className="dual-feed-price-row">
                   <span className="dual-feed-price-val">
@@ -886,7 +886,7 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
 
             <div className="control-item">
               <FieldShell id="marketdata-quick-presets" label="Quick Presets">
-                <div style={{ display: "flex", gap: "var(--space-1-5)" }}>
+                <Flex gap="1-5">
                   <Button
                     type="button"
                     className={`btn-filter-pill ${screenerGainersOnly ? "active gainers" : ""}`}
@@ -926,7 +926,7 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
                   >
                     Reset
                   </Button>
-                </div>
+                </Flex>
               </FieldShell>
             </div>
 
@@ -966,10 +966,10 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
                     key: "security",
                     header: "Security",
                     render: (stock) => (
-                      <div style={{ display: "flex", flexDirection: "column" }}>
+                      <Stack>
                         <span style={{ fontWeight: 700, color: "var(--color-accent)" }}>{stock.symbol}</span>
                         <span style={{ fontSize: "0.75rem", color: "var(--color-text-muted)" }}>{stock.companyName}</span>
-                      </div>
+                      </Stack>
                     ),
                   },
                   {
@@ -1033,14 +1033,14 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
                     key: "momentum",
                     header: "Momentum Signal",
                     render: (stock) => (
-                      <div style={{ display: "flex", flexDirection: "column" }}>
+                      <Stack>
                         <span style={{ fontSize: "var(--font-size-caption)", fontWeight: 600, color: stock.changePercent > 0 ? "var(--color-success)" : "var(--color-warning)" }}>
                           {stock.signal || "RANGE_BOUND"}
                         </span>
                         <span style={{ fontSize: "var(--font-size-caption)", color: "var(--color-text-dim)" }}>
                           Score: {stock.momentumScore || 50}/100
                         </span>
-                      </div>
+                      </Stack>
                     ),
                   },
                   {
@@ -1067,7 +1067,7 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
                     header: "Actions",
                     align: "center",
                     render: (stock) => (
-                      <div style={{ display: "flex", gap: "var(--space-1-5)", justifyContent: "center" }}>
+                      <Flex gap="1-5" justify="center">
                         <Button variant="accent" tone="subtle" size="sm"
                           type="button"
                           title="Generate AI Research Report with Yahoo Finance & Alpaca"
@@ -1099,7 +1099,7 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
                             ⚡ Trade on E*TRADE
                           </Button>
                         )}
-                      </div>
+                      </Flex>
                     ),
                   },
                 ]}
@@ -1346,10 +1346,10 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
                   <span className="dot yf-dot" />
                   <h4>Yahoo Finance Engine</h4>
                 </div>
-                <span style={{ display: "inline-flex", gap: "var(--space-1-5)", alignItems: "center" }}>
+                <Flex as="span" inline gap="1-5" align="center">
                   <MarketDataResearchProvenanceBadge provenance={yfinanceQuote?.provenance} note={yfinanceQuote?.note} />
                   <span className="provider-tag">yfinance API</span>
-                </span>
+                </Flex>
               </div>
 
               {yfinanceQuote ? (
@@ -1415,10 +1415,10 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
                   <span className="dot alpaca-dot" />
                   <h4>Alpaca Market Data v2</h4>
                 </div>
-                <span style={{ display: "inline-flex", gap: "var(--space-1-5)", alignItems: "center" }}>
+                <Flex as="span" inline gap="1-5" align="center">
                   <MarketDataResearchProvenanceBadge provenance={alpacaQuote?.provenance} note={alpacaQuote?.note} />
                   <span className="provider-tag">Level 1/2 REST &amp; Paper</span>
-                </span>
+                </Flex>
               </div>
 
               {alpacaQuote ? (
@@ -1656,12 +1656,12 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
 
           {barsMeta && (
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "0.5rem 0.25rem 0.75rem 0.25rem", fontSize: "var(--font-size-body-sm)", color: "var(--color-text-muted)" }}>
-              <span style={{ display: "inline-flex", gap: "var(--space-2)", alignItems: "center" }}>
+              <Flex as="span" inline gap="2" align="center">
                 <span>
                   📡 Source: <strong style={{ color: "var(--color-accent)" }}>{barsMeta.source || (barProvider === "alpaca" ? "Alpaca Market Data v2" : "Yahoo Finance Chart API")}</strong>
                 </span>
                 <MarketDataResearchProvenanceBadge provenance={barsMeta.provenance} />
-              </span>
+              </Flex>
               <span>
                 {barsMeta.provenance === "live" ? "Live Synced" : "Retrieved"}: {barsMeta.timestamp ? new Date(barsMeta.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString()}
               </span>
@@ -1717,10 +1717,10 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
                   <span className="dot alpaca-dot" />
                   <h4>Alpaca Market Data v2 Snapshot: {snapshot.symbol}</h4>
                 </div>
-                <span style={{ display: "inline-flex", gap: "var(--space-1-5)", alignItems: "center" }}>
+                <Flex as="span" inline gap="1-5" align="center">
                   <MarketDataResearchProvenanceBadge provenance={snapshot.provenance} note={snapshot.note} />
                   <span className="asset-tag">{snapshot.assetClass.toUpperCase()}</span>
-                </span>
+                </Flex>
               </div>
 
               <div className="snapshot-grid">
@@ -1757,7 +1757,7 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
 
           <div className="section-intro-card" style={{ marginTop: "1.5rem" }}>
             <div className="section-intro-card-header" style={{ marginBottom: "0.75rem" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
+              <Flex align="center" gap="2">
                 <span style={{ fontSize: "1.25rem" }}>🛡️</span>
                 <h4 className="section-intro-title">
                   Alpaca Agentic Tracing Stream &amp; Provenance Ledger
@@ -1765,7 +1765,7 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
                 <span className="pill-badge positive">
                   W3C DID ATTESTED
                 </span>
-              </div>
+              </Flex>
               <Button variant="secondary"
                 type="button"
                 onClick={loadAlpacaTraces}
