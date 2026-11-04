@@ -342,14 +342,25 @@ describe("live status evidence — non-command families (#2417)", () => {
     expect(family!.source).toContain("publicMcp");
   });
 
-  it("ai-search-service: the REST service exists, and its labelled in-repo fallback is the one the family notes record", () => {
+  it("ai-search-service: the REST service exists, and its failure contract is the honest degraded one the family notes record (#1169 S3 acceptance)", () => {
+    // Replaced by #1169 S3 (user directive 2026-11-04): this pin
+    // asserted the in-repo fallback EXISTS (FINANCIAL_KNOWLEDGE_BASE
+    // + provider "semantic_cache") because the family notes recorded
+    // it. S3 removes the fallback; the acceptance pin now asserts
+    // the opposite at greater strength — the constant and the
+    // provider value are ABSENT from the service, the degraded
+    // contract is present, and the notes record the degraded
+    // contract (and no longer describe a live semantic_cache path).
     const service = read("src/services/aiSearch.ts");
     expect(service).toContain("ETradeAISearchService");
-    expect(service).toContain("FINANCIAL_KNOWLEDGE_BASE");
-    expect(service).toContain('"semantic_cache"');
-    expect(getToolFamily("ai-search-service")!.notes ?? "").toContain(
-      "semantic_cache",
-    );
+    expect(service).not.toContain("FINANCIAL_KNOWLEDGE_BASE");
+    expect(service).not.toContain("semantic_cache");
+    expect(service).toContain("AiSearchDegradedReason");
+    expect(service).toContain("endpoint_not_configured");
+    const notes = getToolFamily("ai-search-service")!.notes ?? "";
+    expect(notes).toContain("degraded");
+    expect(notes).toContain("endpoint_not_configured");
+    expect(notes).toContain("REMOVED by #1169 S3");
     // The instance endpoint the primary path runs against is
     // configured in wrangler vars.
     expect(

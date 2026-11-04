@@ -74,8 +74,8 @@ describe("PlatformAdminPage component", () => {
     expect(tablist).toBeTruthy();
 
     const tabs = container.querySelectorAll('[role="tab"]');
-    expect(tabs).toHaveLength(12);
-    expect(PLATFORM_ADMIN_TABS).toHaveLength(12);
+    expect(tabs).toHaveLength(13);
+    expect(PLATFORM_ADMIN_TABS).toHaveLength(13);
 
     // Initial default tab is ads
     expect(tabs[0].getAttribute("aria-selected")).toBe("true");
@@ -164,7 +164,17 @@ describe("PlatformAdminPage component", () => {
     });
     expect(container.textContent).toContain("User profiles, tenant memberships");
 
-    // 8. Switch to Admin Access
+    // 8. Switch to Channels (#3169: same shell assertion as Users
+    // — the panel's tenant fetch resolves asynchronously).
+    const channelsTab = Array.from(tabs).find((t) => t.textContent === "Channels") as HTMLElement;
+    await act(async () => {
+      channelsTab.click();
+    });
+    expect(container.textContent).toContain("Delivery-channel enablement per tenant");
+    expect(onSelectSection).toHaveBeenCalledWith("channels");
+    expect(window.location.search).toContain("view=channels");
+
+    // 9. Switch to Admin Access
     const accessTab = Array.from(tabs).find((t) => t.textContent?.includes("Admin Access")) as HTMLElement;
     await act(async () => {
       accessTab.click();

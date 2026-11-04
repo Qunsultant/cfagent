@@ -461,6 +461,7 @@ describe("issue #2428 — registry spine + migration pins", () => {
       MIGRATION_0036_REFUND_POLICY_APPROVAL,
       MIGRATION_0037_CFPAY_CHANNEL,
       MIGRATION_0038_AGENT_SHARD_JOBS_WORKFLOW_RUN_ID,
+      MIGRATION_0039_TENANT_CHANNELS,
     } = await import(
       "../src/data/migrationRunner"
     );
@@ -498,6 +499,8 @@ describe("issue #2428 — registry spine + migration pins", () => {
     expect(ALL_MIGRATIONS).toContain(
       MIGRATION_0038_AGENT_SHARD_JOBS_WORKFLOW_RUN_ID,
     );
+    // #3169 appends migration 0039 (tenant channels) after 0038.
+    expect(ALL_MIGRATIONS).toContain(MIGRATION_0039_TENANT_CHANNELS);
     // NOTE (#3189): no "latest" assertion lives here anymore. The
     // registry's "latest" is owned solely by tests/migration_registry.test.ts.
     expect(MIGRATION_0023_AGENT_MESH_TRACE_HOPS.version).toBe(23);

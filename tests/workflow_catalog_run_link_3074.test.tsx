@@ -42,11 +42,13 @@ describe("catalog Run action (#3074 R8)", () => {
     const hrefs = runLinks().map((a) => a.getAttribute("href"));
     expect(hrefs).toContain("?tab=stock-hub&view=new-screen");
     expect(hrefs).toContain("?tab=options-screener");
+    // options and strategy both point at the options surface
+    expect(hrefs.filter((href) => href === "?tab=options-screener").length).toBe(2);
   });
 
   it("offers no Run link for a workflow that is not runnable", () => {
     // trading-leg is the read-only one
-    expect(runLinks()).toHaveLength(2);
+    expect(runLinks()).toHaveLength(3);
     expect(container.textContent).toContain("No submission path yet");
   });
 

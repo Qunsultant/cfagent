@@ -39,17 +39,23 @@ import { createMAS } from "../src/agents/mas";
  *     item?: { id?: string;
  *              metadata?: { title?: string; description?: string;
  *                           category?: string } } }
- * The fallback (FINANCIAL_KNOWLEDGE_BASE constant + branch, aiSearch.ts
- * :32-~73 / :129-150) is NOT touched by S2: flag-ON with no endpoint or
- * a failed endpoint still returns the fallback verbatim (pinned below).
- * G1 (two hardcoded score: 1.0 in src/mcps/openaimp/commands.ts:120 and :150) is
+ * S3 UPDATE (2026-11-04, user directive — fallback removal ahead of
+ * the content probe): the fallback S2 did not touch (the
+ * FINANCIAL_KNOWLEDGE_BASE constant + branch in aiSearch.ts) is
+ * REMOVED by S3. The pins below that asserted the fallback verbatim
+ * were adapted in place to the honest degraded contract (zero
+ * results + an in-band `degraded` reason) at equal or greater
+ * strength, and the S3 describe at the end of this file pins the
+ * full failure matrix. G1 (two hardcoded score: 1.0 in
+ * src/mcps/openaimp/commands.ts:120 and :150) is
  * untouched by S2 and named for S3.
  *
  * CROSS-CUTTING (user directive 2026-10-25, agentic-SaaS aspects):
  * - Typed errors: AiSearchMappingError (extends the aspects
  *   catalog's KnowledgeError) for malformed flag-ON chunks; the
- *   service rethrows it PAST the fallback (visible failure, never
- *   stub substitution). Flag-OFF never throws (today's behavior).
+ *   service rethrows it instead of returning a degraded response
+ *   (visible failure, never stub substitution). Flag-OFF never
+ *   throws (the lenient mapping is unchanged).
  * - Externalized messages: S2's new route/mapping messages live in
  *   KNOWLEDGE_ERROR_CATALOG (src/aspects/errorCodes.ts), reusing the
  *   ETradeError idiom; the shared 401 body is deliberately NOT
@@ -278,22 +284,32 @@ describe("#1169 S2 service mapping (flag-gated, endpoint stubbed)", () => {
     ]);
   });
 
-  it("flag-ON with no endpoint still returns the fallback verbatim (S3 owns it)", async () => {
+  it("flag-ON with no endpoint returns the degraded contract (S3: fallback removed)", async () => {
+    // Adapted by #1169 S3 (user directive 2026-11-04): this pin
+    // asserted the fallback verbatim; the fallback is removed, so
+    // the pin now asserts the honest degraded contract at greater
+    // strength (reason + zero results + honest provider).
     const svc = new ETradeAISearchService({ KNOWLEDGE_SERVING_ENABLED: "1" } as any);
     const res = await svc.searchFinancialDocs("nvidia 10k", 5);
-    expect(res.provider).toBe("semantic_cache");
-    expect(res.results.length).toBe(5);
-    expect(res.results[0].id).toBe("sec_nvda_10k_2025");
+    expect(res.provider).toBe("cloudflare_ai_search");
+    expect(res.degraded).toBe("endpoint_not_configured");
+    expect(res.results).toEqual([]);
+    expect(res.totalMatches).toBe(0);
   });
 
-  it("flag-ON with a failed endpoint still returns the fallback verbatim", async () => {
+  it("flag-ON with a failed endpoint returns the degraded contract (S3: fallback removed)", async () => {
+    // Adapted by #1169 S3: was "still returns the fallback verbatim"
+    // (provider semantic_cache on a 502). Now the degraded contract.
     vi.stubGlobal("fetch", stubUpstreamFetch([], false, 502));
     const svc = new ETradeAISearchService({
       AI_SEARCH_ENDPOINT: "https://search.example.test",
       KNOWLEDGE_SERVING_ENABLED: "1",
     } as any);
     const res = await svc.searchFinancialDocs("nvidia 10k", 5);
-    expect(res.provider).toBe("semantic_cache");
+    expect(res.provider).toBe("cloudflare_ai_search");
+    expect(res.degraded).toBe("upstream_http_error");
+    expect(res.results).toEqual([]);
+    expect(res.totalMatches).toBe(0);
   });
 });
 
@@ -596,22 +612,27 @@ describe("#1169 S2 cross-cutting: mapping validation fails visibly (never defaul
     expect((r as any).score).toBe("high");
   });
 
-  it("flag-ON service rethrows past the fallback (no stub substitution)", async () => {
+  it("flag-ON service rethrows instead of degrading (no silent substitution)", async () => {
     vi.stubGlobal("fetch", stubUpstreamFetch([
       { key: "knowledge/broker_rules/" + "a".repeat(64), score: "high", item: { id: "d1", metadata: { title: "T", category: "broker_rules" } } },
     ] as any));
     const svc = new ETradeAISearchService({ AI_SEARCH_ENDPOINT: "https://x.test", KNOWLEDGE_SERVING_ENABLED: "1" } as any);
     await expect(svc.searchFinancialDocs("broker rules", 5)).rejects.toThrowError(AiSearchMappingError);
-    // The rejection is the proof: had the error fallen through to
-    // the fallback, the promise would have RESOLVED with
-    // provider "semantic_cache" instead of rejecting.
+    // The rejection is the proof: had the error been swallowed, the
+    // promise would have RESOLVED — as stub results before S3, or as
+    // a degraded response after it — instead of rejecting.
   });
 
-  it("flag-OFF service still falls back on endpoint failure (behavior unchanged)", async () => {
+  it("flag-OFF service returns the degraded contract on endpoint failure (S3: fallback removed for both flag states)", async () => {
+    // Adapted by #1169 S3: was "still falls back on endpoint failure
+    // (behavior unchanged)". The flag gates MAPPING only; the
+    // failure contract is flag-independent after S3.
     vi.stubGlobal("fetch", stubUpstreamFetch([], false, 502));
     const svc = new ETradeAISearchService({ AI_SEARCH_ENDPOINT: "https://x.test" } as any);
     const res = await svc.searchFinancialDocs("broker rules", 5);
-    expect(res.provider).toBe("semantic_cache");
+    expect(res.provider).toBe("cloudflare_ai_search");
+    expect(res.degraded).toBe("upstream_http_error");
+    expect(res.results).toEqual([]);
   });
 });
 
@@ -711,5 +732,121 @@ describe("#1169 S2 cross-cutting: externalized catalog + route logs", () => {
       infoSpy.mockRestore();
       warnSpy.mockRestore();
     }
+  });
+});
+
+describe("#1169 S3: honest degraded contract — the built-in fallback corpus is removed", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const ENDPOINT = "https://search.example.test";
+  const flagOn = () => ({ AI_SEARCH_ENDPOINT: ENDPOINT, KNOWLEDGE_SERVING_ENABLED: "1" });
+
+  const liveChunk = (over: Record<string, unknown> = {}) => ({
+    key: "knowledge/sec_filing/live-1",
+    score: 0.9,
+    snippet: "snippet from the live index",
+    item: {
+      id: "live-1",
+      metadata: { title: "Live index doc", description: "desc", category: "sec_filing" },
+    },
+    ...over,
+  });
+
+  it("endpoint unset -> degraded endpoint_not_configured, zero results, no stub rows", async () => {
+    const svc = new ETradeAISearchService({} as any);
+    const res = await svc.searchFinancialDocs("pattern day trader");
+    expect(res.degraded).toBe("endpoint_not_configured");
+    expect(res.results).toEqual([]);
+    expect(res.totalMatches).toBe(0);
+    expect(res.provider).toBe("cloudflare_ai_search");
+    expect(res.provider).not.toBe("semantic_cache");
+  });
+
+  it("upstream fetch throws -> degraded upstream_unreachable, zero results", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("network down");
+      }),
+    );
+    const svc = new ETradeAISearchService({ AI_SEARCH_ENDPOINT: ENDPOINT } as any);
+    const res = await svc.searchFinancialDocs("margin rules");
+    expect(res.degraded).toBe("upstream_unreachable");
+    expect(res.results).toEqual([]);
+    expect(res.totalMatches).toBe(0);
+    expect(res.provider).not.toBe("semantic_cache");
+  });
+
+  it("upstream HTTP 500 -> degraded upstream_http_error, zero results", async () => {
+    vi.stubGlobal("fetch", stubUpstreamFetch([], false, 500));
+    const svc = new ETradeAISearchService({ AI_SEARCH_ENDPOINT: ENDPOINT } as any);
+    const res = await svc.searchFinancialDocs("margin rules");
+    expect(res.degraded).toBe("upstream_http_error");
+    expect(res.results).toEqual([]);
+    expect(res.totalMatches).toBe(0);
+  });
+
+  it("upstream answers a non-JSON body (redirect to the web UI / HTML) -> degraded upstream_invalid_response", async () => {
+    // The failure mode the 2026-11-04 probe found on the bare
+    // endpoint: an HTTP 302 to the AI Search web UI. fetch follows
+    // redirects, so the service sees an HTML page whose .json()
+    // throws — an invalid response, never data.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => {
+          throw new SyntaxError("Unexpected token '<', \"<html>\" is not valid JSON");
+        },
+      })),
+    );
+    const svc = new ETradeAISearchService({ AI_SEARCH_ENDPOINT: ENDPOINT } as any);
+    const res = await svc.searchFinancialDocs("margin rules");
+    expect(res.degraded).toBe("upstream_invalid_response");
+    expect(res.results).toEqual([]);
+    expect(res.totalMatches).toBe(0);
+  });
+
+  it("upstream JSON without success -> degraded upstream_invalid_response", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ success: false }) })),
+    );
+    const svc = new ETradeAISearchService({ AI_SEARCH_ENDPOINT: ENDPOINT } as any);
+    const res = await svc.searchFinancialDocs("margin rules");
+    expect(res.degraded).toBe("upstream_invalid_response");
+    expect(res.results).toEqual([]);
+  });
+
+  it("upstream JSON with success but no chunks array -> degraded upstream_invalid_response", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ success: true, result: {} }) })),
+    );
+    const svc = new ETradeAISearchService({ AI_SEARCH_ENDPOINT: ENDPOINT } as any);
+    const res = await svc.searchFinancialDocs("margin rules");
+    expect(res.degraded).toBe("upstream_invalid_response");
+    expect(res.results).toEqual([]);
+  });
+
+  it("/search success with chunks: [] -> ok, zero results, NOT degraded (an empty index is not a failure)", async () => {
+    vi.stubGlobal("fetch", stubUpstreamFetch([]));
+    const svc = new ETradeAISearchService(flagOn() as any);
+    const res = await svc.searchFinancialDocs("unindexed topic");
+    expect(res.degraded).toBeUndefined();
+    expect(res.results).toEqual([]);
+    expect(res.totalMatches).toBe(0);
+    expect(res.provider).toBe("cloudflare_ai_search");
+  });
+
+  it("/search success with chunks -> mapped live results only, NOT degraded", async () => {
+    vi.stubGlobal("fetch", stubUpstreamFetch([liveChunk()]));
+    const svc = new ETradeAISearchService(flagOn() as any);
+    const res = await svc.searchFinancialDocs("risk disclosure");
+    expect(res.degraded).toBeUndefined();
+    expect(res.results).toHaveLength(1);
+    expect((res.results[0] as { id?: string }).id).toBe("live-1");
+    expect(res.provider).toBe("cloudflare_ai_search");
   });
 });

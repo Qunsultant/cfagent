@@ -63,6 +63,7 @@ import {
   MIGRATION_0036_REFUND_POLICY_APPROVAL,
   MIGRATION_0037_CFPAY_CHANNEL,
   MIGRATION_0038_AGENT_SHARD_JOBS_WORKFLOW_RUN_ID,
+  MIGRATION_0039_TENANT_CHANNELS,
 } from "../src/data/migrationRunner";
 import { agentMeshProposals } from "../src/data/drizzleSchema";
 import { InMemoryMeshProposalStore } from "../src/data/inMemoryMeshProposalAdapter";
@@ -242,6 +243,8 @@ describe("mesh proposal store", () => {
     expect(ALL_MIGRATIONS).toContain(
       MIGRATION_0038_AGENT_SHARD_JOBS_WORKFLOW_RUN_ID,
     );
+    // #3169 appends migration 0039 (tenant channels) after 0038.
+    expect(ALL_MIGRATIONS).toContain(MIGRATION_0039_TENANT_CHANNELS);
     // NOTE (#3189): no "latest" assertion lives here anymore. The
     // registry's "latest" is owned solely by tests/migration_registry.test.ts.
     expect(getTableName(agentMeshProposals)).toBe("agent_mesh_proposals");
