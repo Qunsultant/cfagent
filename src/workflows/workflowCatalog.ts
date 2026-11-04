@@ -49,8 +49,18 @@ export interface StageDeclaration {
   label: string;
   /** What the stage persists before announcing (an artifact kind, never bulk data). */
   persists: string;
-  /** The stage-message id this stage publishes (the #2869 seam). */
+  /**
+   * The stage-message id this stage publishes (the #2869 seam). For a mapped
+   * family this MUST name a real runtime stage id - the parity pin fails on an
+   * invented topic (that is how the first version shipped five of them).
+   */
   publishes: string;
+  /**
+   * Issue #3166: the runtime stage ids (`StockStageId` for stock) this
+   * declared stage executes, in order. Absent = the family is not mapped to
+   * the runtime yet, and the page says so rather than implying coverage.
+   */
+  runtimeStageIds?: readonly string[];
   /** The previous stage's artifact the stage consumes, or null for the entry stage. */
   consumes: string | null;
   modes: StageModes;
@@ -131,12 +141,12 @@ const STOCK_SCREENER: WorkflowDeclaration = {
   runnable: true,
   runPath: "?tab=stock-hub&view=new-screen",
   stages: [
-    stage("feed", { persists: "quotes", publishes: "feed-done", consumes: null }),
-    stage("gather", { persists: "enrichment", publishes: "gather-done", consumes: "quotes" }),
-    stage("analysis", { persists: "screen-result", publishes: "analysis-done", consumes: "enrichment" }),
-    stage("store", { persists: "canonical-report", publishes: "store-done", consumes: "screen-result" }),
-    stage("serve", { persists: "served-report", publishes: "serve-done", consumes: "canonical-report" }),
-    stage("deliver", { persists: "delivery-state", publishes: "deliver-done", consumes: "served-report" }),
+    stage("feed", { persists: "quotes", publishes: "fetchQuotes", consumes: null, runtimeStageIds: ["plan", "brokerStart", "acquireUniverse", "fetchQuotes"] }),
+    stage("gather", { persists: "enrichment", publishes: "enrich", consumes: "quotes", runtimeStageIds: ["enrich", "computeIndicatorsAndScores"] }),
+    stage("analysis", { persists: "screen-result", publishes: "detectStandouts", consumes: "enrichment", runtimeStageIds: ["applyFilters", "rankAndGrade", "detectStandouts"] }),
+    stage("store", { persists: "canonical-report", publishes: "analysis-done", consumes: "screen-result", runtimeStageIds: ["persistCanonicalResults", "analysis-done"] }),
+    stage("serve", { persists: "served-report", publishes: "shapeReport", consumes: "canonical-report", runtimeStageIds: ["shapeReport"] }),
+    stage("deliver", { persists: "delivery-state", publishes: "deliver", consumes: "served-report", runtimeStageIds: ["deliver"] }),
   ],
 };
 
@@ -230,6 +240,7 @@ export function assertWorkflowCatalog(
       throw new Error(`Workflow catalog refused: workflow ${workflow.id} declares no stages.`);
     }
     let lastIndex = -1;
+    const seenRuntimeIds = new Set<string>();
     for (const stageDeclaration of workflow.stages) {
       if (!STAGE_NAMES.includes(stageDeclaration.stage)) {
         throw new Error(
@@ -257,6 +268,14 @@ export function assertWorkflowCatalog(
         throw new Error(
           `Workflow catalog refused: ${workflow.id}/${stageDeclaration.stage} carries no human label.`,
         );
+      }
+      for (const runtimeId of stageDeclaration.runtimeStageIds ?? []) {
+        if (seenRuntimeIds.has(runtimeId)) {
+          throw new Error(
+            `Workflow catalog refused: ${workflow.id} assigns runtime stage id ${runtimeId} to two stages.`,
+          );
+        }
+        seenRuntimeIds.add(runtimeId);
       }
       if (!stageDeclaration.checkpointed) {
         throw new Error(

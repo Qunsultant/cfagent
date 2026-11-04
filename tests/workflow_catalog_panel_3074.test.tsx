@@ -57,7 +57,7 @@ describe("WorkflowCatalogPanel (#3074)", () => {
 
   it("names the producer to consumer chain for a stage", async () => {
     await render();
-    expect(container.textContent).toContain("quotes -> enrichment -> gather-done");
+    expect(container.textContent).toContain("quotes -> enrichment -> enrich");
   });
 
   it("marks the approval-gated leg and the read-only workflows", async () => {
