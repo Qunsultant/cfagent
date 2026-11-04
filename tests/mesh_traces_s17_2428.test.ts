@@ -443,7 +443,7 @@ describe("issue #2428 — registry spine + migration pins", () => {
     }
   });
 
-  it("migration 0023 is registered and creates the hop table (0039 is last since #3169, after #2989)", async () => {
+  it("migration 0023 is registered and creates the hop table", async () => {
     const {
       ALL_MIGRATIONS,
       MIGRATION_0023_AGENT_MESH_TRACE_HOPS,
@@ -501,9 +501,8 @@ describe("issue #2428 — registry spine + migration pins", () => {
     );
     // #3169 appends migration 0039 (tenant channels) after 0038.
     expect(ALL_MIGRATIONS).toContain(MIGRATION_0039_TENANT_CHANNELS);
-    expect(ALL_MIGRATIONS[ALL_MIGRATIONS.length - 1]).toBe(
-      MIGRATION_0039_TENANT_CHANNELS,
-    );
+    // NOTE (#3189): no "latest" assertion lives here anymore. The
+    // registry's "latest" is owned solely by tests/migration_registry.test.ts.
     expect(MIGRATION_0023_AGENT_MESH_TRACE_HOPS.version).toBe(23);
     expect(MIGRATION_0023_AGENT_MESH_TRACE_HOPS.sql).toContain("agent_mesh_trace_hops");
     const versions = ALL_MIGRATIONS.map((m) => m.version);

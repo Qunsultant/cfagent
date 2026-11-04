@@ -211,7 +211,7 @@ describe("door budget guard", () => {
 /* ------------------------------------------------------------------ */
 
 describe("mesh proposal store", () => {
-  it("migration 0025 is registered and 0038 is last (#2989, after #2945 Phase 2.17), and the drizzle schema carries the table", () => {
+  it("migration 0025 is registered, and the drizzle schema carries the table", () => {
     expect(MIGRATION_0025_AGENT_MESH_PROPOSALS.version).toBe(25);
     expect(MIGRATION_0025_AGENT_MESH_PROPOSALS.sql).toContain("agent_mesh_proposals");
     expect(ALL_MIGRATIONS).toContain(MIGRATION_0025_AGENT_MESH_PROPOSALS);
@@ -245,9 +245,8 @@ describe("mesh proposal store", () => {
     );
     // #3169 appends migration 0039 (tenant channels) after 0038.
     expect(ALL_MIGRATIONS).toContain(MIGRATION_0039_TENANT_CHANNELS);
-    expect(ALL_MIGRATIONS[ALL_MIGRATIONS.length - 1]).toBe(
-      MIGRATION_0039_TENANT_CHANNELS,
-    );
+    // NOTE (#3189): no "latest" assertion lives here anymore. The
+    // registry's "latest" is owned solely by tests/migration_registry.test.ts.
     expect(getTableName(agentMeshProposals)).toBe("agent_mesh_proposals");
   });
 
