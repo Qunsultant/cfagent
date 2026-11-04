@@ -267,6 +267,12 @@ export interface SagaDeps {
    * a failed audit write must propagate, never be swallowed.
    * The flow never catches recordAudit failures.
    */
+  /**
+   * Issue #3073 - one boundary message per completed saga stage (the polling
+   * waits are not stages and emit nothing). Best-effort: a seam failure never
+   * changes a saga's outcome.
+   */
+  stageBoundary?: (input: { stageId: string }) => Promise<unknown>;
   recordAudit: (event: SagaAuditEvent) => Promise<void>;
   /**
    * Journey prompt delivery (S2). Best-effort per surface (see
@@ -430,6 +436,8 @@ export type LegTerminal =
  */
 export { SAGA_STEP_IDS } from "./stageRuntimeIds";
 export type { SagaStepId } from "./stageRuntimeIds";
+import type { SagaStepId as SagaStepIdValue } from "./stageRuntimeIds";
+type SagaStepId = SagaStepIdValue;
 
 export async function pollLegToTerminal(
   deps: { legPort: SagaLegPort; nowMs: () => number },
@@ -483,6 +491,20 @@ export async function runSagaWorkflowFlow(
   deps: SagaDeps,
   step: SagaWorkflowStep,
 ): Promise<SagaWorkflowOutcome> {
+  /**
+   * Issue #3073: the one place a saga stage runs. `poll-<leg>-<round>` is a
+   * dynamic wait, not a stage, so it stays a bare `step.do` and publishes
+   * nothing - a boundary no catalog declares would be noise.
+   */
+  const doStage = async <T,>(stageId: SagaStepId, fn: () => Promise<T>): Promise<T> => {
+    const result = await step.do(stageId, fn);
+    try {
+      await deps.stageBoundary?.({ stageId });
+    } catch {
+      // Best-effort by design (the #1743 degradation rule).
+    }
+    return result;
+  };
   if (!params.sagaId || !params.runRequestId) {
     throw new Error("Saga payload is missing sagaId or runRequestId.");
   }
@@ -530,7 +552,7 @@ export async function runSagaWorkflowFlow(
   // The started row carries the pre-payment disclosure (S4: the
   // same single source the entry route returns — one function,
   // two surfaces, no copy drift).
-  await step.do("record-audit-saga-started", () =>
+  await doStage("record-audit-saga-started", () =>
     deps.recordAudit({
       ...baseAudit,
       type: "saga.started",
@@ -552,7 +574,7 @@ export async function runSagaWorkflowFlow(
 
   try {
     // Leg 0 — start the payment child, poll it to terminal.
-    const payment = await step.do("start-payment-leg", () =>
+    const payment = await doStage("start-payment-leg", () =>
       deps.legPort.startLeg("payment", {
         runRequestId: params.runRequestId,
         family: params.family,
@@ -633,7 +655,7 @@ export async function runSagaWorkflowFlow(
           { type: "saga.payment_not_completed", leg: "payment", outcomeCode: "FAILURE_SAGA_PAYMENT_NOT_COMPLETED", reason: "payment_output_unrecognized", paymentWorkflowId: payment.workflowId },
         );
       }
-      await step.do("record-audit-payment-started", () =>
+      await doStage("record-audit-payment-started", () =>
         deps.recordAudit({
           ...baseAudit,
           type: "saga.payment_started",
@@ -670,7 +692,7 @@ export async function runSagaWorkflowFlow(
       // outcome. Journey denied/expired never reach this helper
       // (Q3 default: the screen was delivered).
       const compensateAndEnd = async (reason: string): Promise<SagaWorkflowOutcome> => {
-        const compensation = await step.do("compensate-failed-screen", () =>
+        const compensation = await doStage("compensate-failed-screen", () =>
           compensateFailedScreen(
             {
               issueCredit: deps.issueCredit,
@@ -770,7 +792,7 @@ export async function runSagaWorkflowFlow(
       if (lifecycle === "Completed" || lifecycle === "ReportGenerated") {
         // Leg 1 completion is a milestone row, not a terminal
         // outcome: S2 continues to the journey gate (Leg 2).
-        await step.do("record-audit-screen-completed", () =>
+        await doStage("record-audit-screen-completed", () =>
           deps.recordAudit({
             ...baseAudit,
             type: "saga.screen_completed",
