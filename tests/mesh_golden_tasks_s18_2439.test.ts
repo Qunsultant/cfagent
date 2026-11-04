@@ -292,7 +292,10 @@ describe("golden harness: runner + store (#2439)", () => {
     // #2945 (Phase 2.17) appends migration 0037 (cfpay channel purchases) after 0036.
     // #2989 appends migration 0038 (shard-job workflow run id) after 0037.
     // #3169 appends migration 0039 (tenant channels) after 0038.
-    expect(Math.max(...ALL_MIGRATIONS.map((m) => m.version))).toBe(39);
+    // NOTE (#3189): no "latest" assertion lives here anymore. The
+    // registry's "latest" is owned solely by tests/migration_registry.test.ts,
+    // which asserts derived invariants only; this test keeps its own
+    // feature assertions (0024 registration + schema table).
     expect(getTableName(agentMeshEvalResults)).toBe("agent_mesh_eval_results");
   });
 });

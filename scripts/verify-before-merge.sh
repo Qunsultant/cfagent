@@ -36,6 +36,9 @@ echo "Base OK: $BRANCH is rebased onto origin/main ($MAIN_HEAD)"
 echo "--- TypeScript strict type check ---"
 npm run typecheck || fail "typecheck failed"
 
+echo "--- Migration latest-pin lint (#3189) ---"
+bash scripts/check-migration-pins.sh || fail "migration latest-pin lint failed"
+
 echo "--- Full test suite ---"
 npm run test:ci || fail "test suite failed"
 
