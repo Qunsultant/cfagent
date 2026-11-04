@@ -39,6 +39,11 @@ import type {
 } from "./sagaWorkflowFlow";
 import type { JourneySurface } from "./sagaJourneyGate";
 import { pollLegToTerminal, type LegTerminal } from "./sagaWorkflowFlow";
+import {
+  assessSagaTradeRisk,
+  type SagaRiskInputs,
+  type SagaRiskLimits,
+} from "./sagaRiskStage";
 
 /** Working default (Q2-open): trade poll deadline mirrors the payment leg's 24h + margin. */
 export const SAGA_TRADE_POLL_DEADLINE_MS_DEFAULT = 25 * 60 * 60 * 1000;
@@ -55,6 +60,8 @@ export interface SagaTradeIntent {
   optionLegs?: Array<Record<string, unknown>>;
   strategyNetDebit?: number;
   provider?: string;
+  /** Issue #3000: caller-supplied risk limits for the risk stage (optional). */
+  riskLimits?: SagaRiskLimits;
 }
 
 /**
@@ -73,6 +80,12 @@ export interface SagaTradeDeps {
   recordAudit: (event: SagaAuditEvent) => Promise<void>;
   proposeTrade: (intent: SagaTradeIntent) => Promise<ProposeTradeResult>;
   nowMs: () => number;
+  /**
+   * Issue #3000: market data for the risk stage. Production supplies
+   * none today (the leg has no market-data dep) — this is the data
+   * seam's home; absent inputs record unassessed, never block.
+   */
+  riskInputs?: SagaRiskInputs;
 }
 
 /** Trade-leg outcomes: the trade members of SagaWorkflowOutcome. */
@@ -316,6 +329,34 @@ export async function runTradeLeg(
       },
     );
   }
+  // Issue #3000: risk-analysis stage, after gate approval (the flow
+  // only calls this leg post-gate) and before any draft exists. A
+  // violation fails closed: no startLeg, no child, no execution path.
+  // Unassessed never blocks — it is recorded on the draft instead.
+  const riskAssessment = await step.do("assess-trade-risk", async () =>
+    assessSagaTradeRisk({
+      intent: args.tradeIntent as SagaTradeIntent,
+      limits: args.tradeIntent?.riskLimits,
+      contracts: deps.riskInputs?.contracts,
+      marketSnapshot: deps.riskInputs?.marketSnapshot,
+    }),
+  );
+  if (riskAssessment.status === "assessed" && riskAssessment.violation) {
+    return finish(
+      {
+        status: "proposal_failed",
+        code: "FAILURE_SAGA_PROPOSAL_FAILED",
+        ...shared,
+        reason: "risk_violation",
+      },
+      {
+        type: "saga.proposal_failed",
+        reason: "risk_violation",
+        riskAssessment,
+        ...shared,
+      },
+    );
+  }
   const started = await step.do("start-trade-leg", () =>
     deps.legPort.startLeg("trade", {
       orderId: proposed.orderId,
@@ -329,6 +370,7 @@ export async function runTradeLeg(
       type: "saga.trade_proposed",
       orderId: proposed.orderId,
       tradeWorkflowId: started.workflowId,
+      riskAssessment,
     }),
   );
   return pollAdoptedTrade(args, deps, step, started.workflowId, finish, proposed.orderId);
