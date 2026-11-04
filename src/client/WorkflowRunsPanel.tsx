@@ -342,7 +342,9 @@ export function WorkflowRunsPanel() {
   const [query, setQuery] = useState(() => {
     try {
       if (typeof window === "undefined") return "";
-      return new URLSearchParams(window.location.search).get("run") ?? "";
+      const params = new URLSearchParams(window.location.search);
+      // `run` wins (it names one run); `q` carries the catalog's family link.
+      return params.get("run") ?? params.get("q") ?? "";
     } catch {
       return "";
     }

@@ -211,11 +211,30 @@ function WorkflowCard({
                 Run
               </Button>
             ) : null}
+            {/* Issue #3174: every workflow links to its own runs in the ledger. */}
+            <Button
+              href={`?tab=workflow-runs&q=${encodeURIComponent(workflow.family)}`}
+              variant="secondary"
+              size="sm"
+            >
+              All runs
+            </Button>
           </Flex>
         </Flex>
         <span>
-          <code>{workflow.id}</code> | family {workflow.family} | {workflow.stages.length} stages
+          <code>{workflow.id}</code> | family {workflow.family} | {workflow.stages.length} stages |{" "}
+          {workflow.stageSeam ? "stage seam wired" : "stage seam not wired yet"}
         </span>
+        {workflow.runtimeSteps.length > 0 && (
+          <span>
+            Runtime steps: <code>{workflow.runtimeSteps.join(", ")}</code>
+          </span>
+        )}
+        {workflow.runtimeMappingGap && (
+          <Notice tone="neutral" density="compact" title="Runtime mapping gap">
+            {workflow.runtimeMappingGap}
+          </Notice>
+        )}
         {latest && (
           <span>
             Last run:{" "}
