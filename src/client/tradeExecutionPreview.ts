@@ -6,7 +6,7 @@
  * execution payload, the fees, and the slippage limits — not a
  * summary. The exact payload is the body
  * ETradeTradingHub.handleExecuteDraft POSTs to
- * /api/etrade/order/execute. Execution itself is driven by the
+ * /api/broker/order/execute. Execution itself is driven by the
  * stored draft (src/agents/routes/etradeBroker.ts re-reads the
  * record and checks the body's action/symbol/quantity against it),
  * so the preview also restates the draft terms the server will

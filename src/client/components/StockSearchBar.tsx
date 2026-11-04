@@ -4,6 +4,7 @@ import { SEARCH_SYMBOLS, type NamedQuoteSymbol } from "../quotes/symbolSets";
 import type { NavTabId } from "./NavigationMenu";
 import { Badge, Button, Modal, PillGroup, TextInput, type BadgeTone, type PillOption } from "./ui";
 import { BRAND } from "../branding";
+import { useTenantProviders, BROKER_OPTIONS } from "../tenantProviders";
 
 export type StockTickerItem = NamedQuoteSymbol & {
   bid?: string;
@@ -99,6 +100,11 @@ export function StockSearchBar({ onSelectTab, onAskAgent, className = "" }: Stoc
   const [filterType, setFilterType] = useState<"all" | "tickers" | "navigation" | "actions">("all");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Issue #3089: the broker indicator — orders placed from anywhere in
+  // the app route through the selected broker, so the search control
+  // shows which broker that is, live from the tenant providers state.
+  const [tenantProviders] = useTenantProviders();
+  const brokerLabel = BROKER_OPTIONS.find((o) => o.id === tenantProviders.brokerId)?.label ?? tenantProviders.brokerId;
   const listRef = useRef<HTMLDivElement>(null);
 
   // Issue #2100: the feed lifecycle (socket, fallback, flash) lives in
@@ -274,6 +280,9 @@ export function StockSearchBar({ onSelectTab, onAskAgent, className = "" }: Stoc
           <span className="stock-search-placeholder">Search stocks...</span>
           <kbd className="stock-search-kbd">{shortcutHint}</kbd>
         </Button>
+        <Badge tone="accent" title={`Orders will use ${brokerLabel}`}>
+          {brokerLabel}
+        </Badge>
       </div>
 
       {/* Global Command Palette / Stock Search Modal (Modal primitive, #1695) */}

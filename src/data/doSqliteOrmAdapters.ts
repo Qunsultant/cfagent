@@ -191,6 +191,7 @@ export const TRADE_COLUMN_MAP = {
   proofSignature: "proof_signature",
   previewNotes: "preview_notes",
   expirationScheduleId: "expiration_schedule_id",
+  broker: "broker",
   createdAt: "created_at",
   updatedAt: "updated_at",
 } as const;

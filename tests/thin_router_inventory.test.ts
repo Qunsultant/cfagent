@@ -307,6 +307,13 @@
  * (in handleDelegationRoutes, after the service-user handler) —
  * bringing the delegation sequence to 42 calls and the pinned
  * inventory to 362 entries (measured).
+ *
+ * Issue #3089 added three — POST /broker/order/preview, POST
+ * /broker/order/execute, and GET /broker/orders (in
+ * handleBrokerOrderRoutes, delegated immediately after the
+ * E*TRADE block, before trading-integrations) — bringing the
+ * delegation sequence to 43 calls and the pinned inventory to
+ * 365 entries (measured: 362 + 3).
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -337,6 +344,7 @@ const HANDLER_FILE: Record<string, string> = {
   "handlePlatformAccountRoutes": "platformAccounts.ts",
   "handlePremiumRoutes": "premium.ts",
   "handleEtradeBrokerRoutes": "etradeBroker.ts",
+  "handleBrokerOrderRoutes": "brokerOrders.ts",
   "handleBrokerGateRoutes": "brokerGate.ts",
   "handleEtradeBrokerActivityRoutes": "etradeBroker.ts",
   "handleTradingIntegrationsRoutes": "tradingIntegrations.ts",
@@ -384,6 +392,7 @@ const EXPECTED_DELEGATIONS = [
   "handlePremiumRoutes",
   "handleBrokerGateRoutes",
   "handleEtradeBrokerRoutes",
+  "handleBrokerOrderRoutes",
   "handleTradingIntegrationsRoutes",
   "handleEtradeBrokerActivityRoutes",
   "handleOptionsProviderGateRoutes",
@@ -583,6 +592,9 @@ const EXPECTED_INVENTORY = [
   "handleEtradeBrokerRoutes :: endsWith(\"/etrade/orders\")",
   "handleEtradeBrokerRoutes :: endsWith(\"/etrade/orders/remote\")",
   "handleEtradeBrokerRoutes :: endsWith(\"/etrade/orders/cancel\")",
+  "handleBrokerOrderRoutes :: endsWith(\"/broker/order/preview\")",
+  "handleBrokerOrderRoutes :: endsWith(\"/broker/order/execute\")",
+  "handleBrokerOrderRoutes :: endsWith(\"/broker/orders\")",
   "handleTradingIntegrationsRoutes :: endsWith(\"/trading/email/inbound\")",
   "handleTradingIntegrationsRoutes :: endsWith(\"/trading/email/approve-link\")",
   "handleTradingIntegrationsRoutes :: endsWith(\"/trading/slack/event\")",
