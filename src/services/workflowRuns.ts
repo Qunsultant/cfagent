@@ -97,7 +97,7 @@ export interface WorkflowRun {
   workflow: string;
   family: WorkflowRunFamily;
   title: string;
-  source: "job-chain" | "job-outcome";
+  source: "job-chain" | "job-outcome" | "report";
   trigger: WorkflowRunTrigger;
   /** How the trigger was evidenced, e.g. "Scheduled (job-tree)" or "Not recorded by the source". */
   triggerDetail: string;
@@ -117,6 +117,13 @@ export interface WorkflowRun {
   /** The run's first coded error, when any stage or the outcome recorded one. */
   error: string | null;
   /**
+   * Issue #2786 Part 3: the run's Docs columns, from its canonical
+   * mas_reports row when one exists. Absent (null/undefined) when no
+   * canonical row matches — the PDF/XLSX/CSV cells then render —
+   * (or the outcome's artifact urls as fallback), never invented.
+   */
+  documents?: WorkflowRunDocuments | null;
+  /**
    * Issue #3039: the collation's named cap reason, when a fan-out round
    * deferred a tail (#3028 records it; the tail still ran). Null when the
    * run was not capped — absent is the normal case, never an omission.
@@ -124,6 +131,28 @@ export interface WorkflowRun {
   fanoutCapReason: string | null;
   /** Issue #3039: units a resumed run skipped because they were already complete. */
   resumedSkippedUnits: string[];
+}
+
+/**
+ * Issue #2786 Part 3: the Docs-tab columns for one run, carried from
+ * its canonical mas_reports row (via runSummaryFromReport). The family
+ * is the Docs family (stock / options / goal / strategy), not the
+ * engine family — a discovery-kind row reads "strategy" here, exactly
+ * as the Docs tab labels it.
+ */
+export interface WorkflowRunDocuments {
+  /** The mas_reports row id backing these documents. */
+  reportId: string;
+  family: "stock" | "options" | "goal" | "strategy";
+  pdfUrl: string | null;
+  pdfStatus: string | null;
+  pdfError: string | null;
+  xlsxUrl: string | null;
+  xlsxStatus: string | null;
+  xlsxError: string | null;
+  csvUrl: string | null;
+  csvStatus: string | null;
+  csvError: string | null;
 }
 
 /** The columns of mas_async_jobs this model reads (payload included). */
@@ -875,6 +904,41 @@ export function runFromJobs(
   };
 }
 
+/**
+ * Issue #2786 losslessness fix: the unified-record stage conversion,
+ * shared by the outcome-twin path (runFromOutcome) and the
+ * report-only path (the route's second canonical read). One mapping
+ * for both — a canonical body's stages render identically wherever
+ * they surface, never a divergent second copy. The synthetic
+ * "recording" stage is NOT added here: runFromOutcome appends it for
+ * outcome twins, while a report-only run IS its canonical record and
+ * keeps exactly the body's stages (or an honest empty list).
+ */
+export function stagesFromUnifiedStages(
+  stages: UnifiedWorkflowRunRecord["stages"],
+  createdAt: string,
+): WorkflowRunStage[] {
+  return stages.map((s, index) => ({
+    key: `unified:${s.stage}`,
+    order: index + 1,
+    stage: s.stage,
+    label: stageLabel(s.stage, ""),
+    status: s.status,
+    recordedBy: "unified-record" as const,
+    startedAt: isoOrNull(createdAt),
+    finishedAt: isoOrNull(createdAt),
+    durationMs: typeof s.durationMs === "number" ? s.durationMs : null,
+    detail: s.detail ?? null,
+    reason: s.reason ?? null,
+    error: s.error ?? null,
+    capability: null,
+    jobKind: null,
+    channel: null,
+    input: s.input ?? null,
+    output: s.output ?? null,
+  }));
+}
+
 export function runFromOutcome(
   outcome: WorkflowRunOutcomeRow,
   transitions: WorkflowRunStageTransition[] = [],
@@ -892,25 +956,7 @@ export function runFromOutcome(
             ? "discovery"
             : "other";
   const unifiedStages: WorkflowRunStage[] = unified
-    ? unified.stages.map((s, index) => ({
-        key: `unified:${s.stage}`,
-        order: index + 1,
-        stage: s.stage,
-        label: stageLabel(s.stage, ""),
-        status: s.status,
-        recordedBy: "unified-record" as const,
-        startedAt: isoOrNull(outcome.createdAt),
-        finishedAt: isoOrNull(outcome.createdAt),
-        durationMs: typeof s.durationMs === "number" ? s.durationMs : null,
-        detail: s.detail ?? null,
-        reason: s.reason ?? null,
-        error: s.error ?? null,
-        capability: null,
-        jobKind: null,
-        channel: null,
-        input: s.input ?? null,
-        output: s.output ?? null,
-      }))
+    ? stagesFromUnifiedStages(unified.stages, outcome.createdAt)
     : [];
   // The recording stage is derived from the written canonical row,
   // exactly as Docs Run Details derives it — never stored as
@@ -1021,6 +1067,89 @@ export function runFromOutcome(
     error: outcome.codedError ?? feedError,
     // Issue #3039: an outcome row is not a workflow collation, so neither
     // field is recorded there — absent, never invented.
+    fanoutCapReason: null,
+    resumedSkippedUnits: [],
+  };
+}
+
+/** Issue #2786 Part 3: a run counts as a report run when it carries
+ *  canonical documents, or when its outcome recorded document
+ *  artifacts (report / PDF / XLSX / CSV). Used by the route's
+ *  reports=only filter. Any other artifact kind does not qualify. */
+export function hasReportDocuments(run: WorkflowRun): boolean {
+  if (run.documents != null) return true;
+  return run.artifacts.some(
+    (a) => a.kind === "report" || a.kind === "pdf" || a.kind === "xlsx" || a.kind === "csv",
+  );
+}
+
+/** Normalize a canonical body's recorded trigger onto WorkflowRunTrigger. */
+function reportTrigger(trigger: string | null): WorkflowRunTrigger {
+  const t = (trigger ?? "").trim().toLowerCase();
+  if (t.startsWith("manual")) return "manual";
+  if (t.startsWith("schedul") || t === "cron") return "scheduled";
+  return "unknown";
+}
+
+/** Normalize a canonical row's recorded status onto WorkflowRunStatus. */
+function reportStatus(status: string | null): WorkflowRunStatus {
+  if (status === "completed" || status === "partial" || status === "failed") return status;
+  return "unknown";
+}
+
+/**
+ * Issue #2786 Part 3: a run backed ONLY by its canonical mas_reports
+ * row — no job chain, no outcome twin. It carries the run's Docs
+ * columns and, when the canonical body carries stages, those stages
+ * (losslessness fix: a staged canonical row keeps its trace here,
+ * exactly as the unified overlay keeps it for outcome twins). A
+ * report with no body stages keeps an honest empty stage list: no
+ * execution trace says so, exactly as an outcome-only run does. The
+ * detail view must render "no stage records" for it, never inferred
+ * stages.
+ */
+export function runFromReportDocument(input: {
+  reportId: string;
+  runId: string;
+  title: string;
+  engineFamily: WorkflowRunFamily;
+  documents: WorkflowRunDocuments;
+  trigger: string | null;
+  status: string | null;
+  createdAt: string;
+  stages?: WorkflowRunStage[];
+}): WorkflowRun {
+  const trigger = reportTrigger(input.trigger);
+  const stages = input.stages ?? [];
+  return {
+    id: input.runId,
+    runId: input.runId,
+    workflow: FAMILY_WORKFLOW[input.engineFamily],
+    family: input.engineFamily,
+    title: input.title,
+    source: "report",
+    trigger,
+    triggerDetail:
+      trigger === "manual"
+        ? "Manual — recorded on the canonical row"
+        : trigger === "scheduled"
+          ? "Scheduled — recorded on the canonical row"
+          : "Not recorded by the source",
+    triggeredBy: null,
+    status: reportStatus(input.status),
+    startedAt: input.createdAt,
+    finishedAt: input.createdAt,
+    durationMs: null,
+    stageCount: stages.length,
+    completedStages: stages.filter((s) => s.status === "completed").length,
+    failedStages: stages.filter((s) => s.status === "failed").length,
+    stages,
+    inputs: {},
+    outputs: { status: input.status ?? null },
+    artifacts: [],
+    deliveryStates: {},
+    error: null,
+    documents: input.documents,
     fanoutCapReason: null,
     resumedSkippedUnits: [],
   };

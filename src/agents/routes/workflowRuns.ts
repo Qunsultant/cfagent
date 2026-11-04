@@ -26,16 +26,21 @@ import type { ShardJobReader, ShardJobRow } from "../../data/shardJobPorts";
 import { listJobOutcomes } from "../../services/jobOutcomes";
 import { listScreeningActivity } from "../../services/screeningActivity";
 import { listScheduledReports } from "../../services/scheduledReports";
+import { runSummaryFromReport, type RunSummary } from "../../services/runSummaries";
 import { resolveIaaaTenant } from "../../security/iaaaGithubEndToEnd";
 import { sagaAuditOwnerStub, type AuditOwnerStub } from "../../workflows/sagaJourneyGate";
 import type { SqlStorage } from "../../orm";
 import {
   buildWorkflowRuns,
   compareWorkflowRunsNewestFirst,
+  hasReportDocuments,
+  runFromReportDocument,
   runFromSagaChain,
+  stagesFromUnifiedStages,
   summarizeWorkflowRuns,
   type UnifiedWorkflowRunRecord,
   type WorkflowRun,
+  type WorkflowRunDocuments,
   type WorkflowRunJobRow,
   type WorkflowRunOutcomeRow,
   type WorkflowRunStageTransition,
@@ -132,6 +137,51 @@ export function readWorkflowRunTransitions(sql: WorkflowRunsSql, userLogin: stri
  * stored stage trace are skipped, never fabricated — a legacy
  * strategy run keeps its outcome-only view.
  */
+/**
+ * Issue #2786 losslessness fix: the canonical body.stages parser,
+ * shared by the options_strategy unified overlay and the Part 3
+ * second-read report-only path. One parser for both — a canonical
+ * body's stages mean the same thing wherever they surface. Entries
+ * without a string stage and status are dropped, never invented;
+ * the feed/analysis/generation/delivery detail synthesis is the
+ * unified path's own wording, moved verbatim.
+ */
+export function canonicalBodyStages(body: unknown): UnifiedWorkflowRunRecord["stages"] {
+  if (!body || typeof body !== "object") return [];
+  const stages = (body as Record<string, unknown>).stages;
+  if (!Array.isArray(stages)) return [];
+  return stages
+    .map((s) => {
+      const o = s && typeof s === "object" ? (s as Record<string, unknown>) : null;
+      if (!o || typeof o.stage !== "string" || typeof o.status !== "string") return null;
+      const evidence =
+        o.evidence && typeof o.evidence === "object" && !Array.isArray(o.evidence)
+          ? (o.evidence as Record<string, unknown>)
+          : {};
+      const detail =
+        o.stage === "feed"
+          ? `Feed — ${String(evidence.connector ?? "unknown connector")}: ${String(evidence.contractsEvaluated ?? "unknown")} contracts evaluated, ${String(evidence.fetchErrorCount ?? 0)} fetch errors`
+          : o.stage === "analysis"
+            ? `Analysis — ${String(evidence.rankedCount ?? "unknown")} ranked, ${String(evidence.screenedOutCount ?? "unknown")} screened out`
+            : o.stage === "generation"
+              ? `Generation — PDF ${String(evidence.pdfStatus ?? "unknown")}, XLSX ${String(evidence.xlsxStatus ?? "unknown")}, CSV ${String(evidence.csvStatus ?? "unknown")}`
+              : o.stage === "delivery"
+                ? "Delivery — no delivery channel requested for this panel run"
+                : null;
+      return {
+        stage: o.stage,
+        status: o.status,
+        durationMs: typeof o.durationMs === "number" ? o.durationMs : null,
+        detail,
+        reason: typeof o.reason === "string" ? o.reason : null,
+        error: typeof o.error === "string" ? o.error : null,
+        input: Array.isArray(o.inputIds) ? o.inputIds : undefined,
+        output: Array.isArray(o.outputIds) ? o.outputIds : evidence,
+      };
+    })
+    .filter((s): s is NonNullable<typeof s> => s !== null);
+}
+
 export function unifiedRecordsFromCanonicalReports(
   hits: Array<{ id: string; runId: string; title: string; body: unknown }>,
 ): UnifiedWorkflowRunRecord[] {
@@ -144,36 +194,7 @@ export function unifiedRecordsFromCanonicalReports(
       continue;
     }
     if (!body || typeof body !== "object" || body.jobType !== "options-strategy-panel") continue;
-    if (!Array.isArray(body.stages) || body.stages.length === 0) continue;
-    const stages = (body.stages as unknown[])
-      .map((s) => {
-        const o = s && typeof s === "object" ? (s as Record<string, unknown>) : null;
-        if (!o || typeof o.stage !== "string" || typeof o.status !== "string") return null;
-        const evidence = o.evidence && typeof o.evidence === "object" && !Array.isArray(o.evidence)
-          ? (o.evidence as Record<string, unknown>)
-          : {};
-        const detail =
-          o.stage === "feed"
-            ? `Feed — ${String(evidence.connector ?? "unknown connector")}: ${String(evidence.contractsEvaluated ?? "unknown")} contracts evaluated, ${String(evidence.fetchErrorCount ?? 0)} fetch errors`
-            : o.stage === "analysis"
-              ? `Analysis — ${String(evidence.rankedCount ?? "unknown")} ranked, ${String(evidence.screenedOutCount ?? "unknown")} screened out`
-              : o.stage === "generation"
-                ? `Generation — PDF ${String(evidence.pdfStatus ?? "unknown")}, XLSX ${String(evidence.xlsxStatus ?? "unknown")}, CSV ${String(evidence.csvStatus ?? "unknown")}`
-                : o.stage === "delivery"
-                  ? "Delivery — no delivery channel requested for this panel run"
-                  : null;
-        return {
-          stage: o.stage,
-          status: o.status,
-          durationMs: typeof o.durationMs === "number" ? o.durationMs : null,
-          detail,
-          reason: typeof o.reason === "string" ? o.reason : null,
-          error: typeof o.error === "string" ? o.error : null,
-          input: Array.isArray(o.inputIds) ? o.inputIds : undefined,
-          output: Array.isArray(o.outputIds) ? o.outputIds : evidence,
-        };
-      })
-      .filter((s): s is NonNullable<typeof s> => s !== null);
+    const stages = canonicalBodyStages(body);
     if (stages.length === 0) continue;
     const input = body.input && typeof body.input === "object" ? body.input : {};
     const feed = body.feed && typeof body.feed === "object" ? (body.feed as Record<string, unknown>) : {};
@@ -203,6 +224,139 @@ export function unifiedRecordsFromCanonicalReports(
     });
   }
   return records;
+}
+
+/**
+ * Issue #2786 Part 3: the Docs-tab family for a Runs row. This mirrors
+ * src/client/docsAndReports.ts documentRunSource exactly — recorded
+ * runSource wins, then kind, then store source — so a row the Docs
+ * tab lists lands in the same family here, and a row Docs filters
+ * out (research reports, IV collection) yields null here too. The
+ * agreement test pins the two together over a (kind, source,
+ * runSource) matrix; change one and the test names the other.
+ */
+export type DocsReportFamily = "stock" | "options" | "goal" | "strategy";
+
+const DOCS_SOURCE_BY_KIND: Record<string, DocsReportFamily> = {
+  screener: "stock",
+  options_scanner: "options",
+  goal: "goal",
+  discovery: "strategy",
+};
+
+const DOCS_SOURCE_BY_STORE_SOURCE: Record<string, DocsReportFamily> = {
+  screener: "stock",
+  options_scanner: "options",
+  options_screen: "options",
+  options_research: "options",
+  goal_screen: "goal",
+  discovery: "strategy",
+};
+
+const DOCS_RECORDED_SOURCES: Record<string, DocsReportFamily> = {
+  stock: "stock",
+  options: "options",
+  goal: "goal",
+  strategy: "strategy",
+  screener: "stock",
+  options_scanner: "options",
+  options_screen: "options",
+  goal_screen: "goal",
+  discovery: "strategy",
+};
+
+export function docsFamilyForRunSummary(
+  summary: Pick<RunSummary, "kind" | "source" | "runSource">,
+): DocsReportFamily | null {
+  const recorded =
+    typeof summary.runSource === "string" ? DOCS_RECORDED_SOURCES[summary.runSource] : undefined;
+  if (recorded) return recorded;
+  const byKind = DOCS_SOURCE_BY_KIND[summary.kind];
+  if (byKind) return byKind;
+  return DOCS_SOURCE_BY_STORE_SOURCE[summary.source] ?? null;
+}
+
+/**
+ * Issue #2786 Part 3: a canonical mas_reports row's Docs columns.
+ * Null when the row is not a Docs family (research reports, IV
+ * collection) — those rows never appear in the Docs tab, so they
+ * never attach here either. matchKeys are the run ids this row may
+ * twin with: its own runId, plus the async job id its body records
+ * (the unified-overlay twin case, where the outcome id differs from
+ * the canonical runId). Pure: no I/O.
+ */
+export function reportDocumentsFromCanonicalHit(hit: {
+  id: string;
+  runId: string;
+  title: string;
+  source: string;
+  summary: string;
+  body: string;
+  createdAt: string;
+  bodyR2Key: string | null;
+  fanoutOutcome: unknown;
+}): { documents: WorkflowRunDocuments; matchKeys: string[]; stages: UnifiedWorkflowRunRecord["stages"] } | null {
+  const summary = runSummaryFromReport(hit as never);
+  const family = docsFamilyForRunSummary(summary);
+  if (!family) return null;
+  let body: Record<string, unknown> = {};
+  try {
+    body = typeof hit.body === "string" ? JSON.parse(hit.body || "{}") : {};
+  } catch {
+    body = {};
+  }
+  const asyncJobId =
+    typeof body.asyncJobId === "string" && body.asyncJobId ? body.asyncJobId : null;
+  return {
+    documents: {
+      reportId: hit.id,
+      family,
+      pdfUrl: summary.reportUrl,
+      pdfStatus: summary.pdfStatus,
+      pdfError: summary.pdfError,
+      xlsxUrl: summary.xlsxUrl,
+      xlsxStatus: summary.xlsxStatus ?? null,
+      xlsxError: summary.xlsxError ?? null,
+      csvUrl: summary.csvUrl,
+      csvStatus: summary.csvStatus ?? null,
+      csvError: summary.csvError ?? null,
+    },
+    matchKeys: asyncJobId ? [hit.runId, asyncJobId] : [hit.runId],
+    stages: canonicalBodyStages(body),
+  };
+}
+
+/**
+ * Issue #2786 Part 3: the #2910 (G3) parent-absorption rule, mirrored
+ * from mergeRunSummaries so Workflow Runs agrees with Docs on which
+ * rows are top-level: a row absorbed by a parent canonical row
+ * (childRunIds / childReportIds) is dropped, and a parent row is
+ * never absorbed by its own linkage. Pure: no I/O.
+ */
+export function dropAbsorbedReportSummaries<
+  T extends {
+    id: string;
+    runId: string;
+    kind: string;
+    childRunIds?: string[] | null;
+    childReportIds?: string[] | null;
+  },
+>(rows: T[]): T[] {
+  const absorbedRunIds = new Set<string>();
+  const absorbedReportIds = new Set<string>();
+  const parentKeys = new Set<string>();
+  for (const row of rows) {
+    if (row.childRunIds || row.childReportIds) {
+      parentKeys.add(`${row.kind}:${row.id}`);
+      for (const id of row.childRunIds ?? []) absorbedRunIds.add(id);
+      for (const id of row.childReportIds ?? []) absorbedReportIds.add(id);
+    }
+  }
+  return rows.filter(
+    (row) =>
+      parentKeys.has(`${row.kind}:${row.id}`) ||
+      (!absorbedRunIds.has(row.runId) && !absorbedReportIds.has(row.id)),
+  );
 }
 
 function outcomeRow(row: ReturnType<typeof listJobOutcomes>[number]): WorkflowRunOutcomeRow {
@@ -317,6 +471,13 @@ export async function handleWorkflowRunsRoutes(
   }
 
   const limit = clampLimit(url.searchParams.get("limit"));
+  // Issue #2786 Part 3: the Reports filter is server-side. When it is
+  // active the run list is built wider (MAX_LIMIT) and filtered to
+  // report-backed runs BEFORE slicing — filtering the displayed
+  // 50-window client-side would silently drop report runs sitting
+  // past position 50.
+  const reportsOnly = url.searchParams.get("reports") === "only";
+  const buildLimit = reportsOnly ? MAX_LIMIT : limit;
   // Jobs are grouped into runs, so read more rows than runs requested —
   // a 5-stage chain must not displace five single-job runs.
   const jobLimit = Math.min(MAX_LIMIT * 10, Math.max(120, limit * 8));
@@ -361,6 +522,36 @@ export async function handleWorkflowRunsRoutes(
     }
   }
 
+  // Issue #2786 Part 3: Docs columns for every report family. A second
+  // canonical read (newest 100 rows, all sources — the same window
+  // Docs itself shows) feeds the documents attachment + report-only
+  // runs. The options_strategy unified fetch above stays exactly as
+  // it was, so strategy stage overlays cannot regress. Scoping is
+  // the same owner filter as the unified fetch: without a userLogin
+  // no canonical rows are read at all, so no other user's rows can
+  // attach or appear here.
+  let reportDocs: Array<{
+    documents: WorkflowRunDocuments;
+    matchKeys: string[];
+    stages: UnifiedWorkflowRunRecord["stages"];
+    summary: RunSummary;
+  }> = [];
+  if (ctx.userLogin) {
+    try {
+      const hits = listScheduledReports(ctx.ensureTables(), { userLogin: ctx.userLogin, limit: 100 });
+      const summaries = hits.map((h) => runSummaryFromReport(h));
+      const kept = new Set(dropAbsorbedReportSummaries(summaries));
+      hits.forEach((h, i) => {
+        if (!kept.has(summaries[i])) return;
+        const entry = reportDocumentsFromCanonicalHit(h);
+        if (!entry) return;
+        reportDocs.push({ ...entry, summary: summaries[i] });
+      });
+    } catch (err) {
+      storeErrors.canonicalDocs = err instanceof Error ? err.message : String(err);
+    }
+  }
+
   // Saga chains (#2780): projection chains with jobKey "saga" join the
   // list. Discovery is owner-scoped by construction — chains are found
   // in the session user's own audit rows. The D1 projection row carries
@@ -402,10 +593,45 @@ export async function handleWorkflowRunsRoutes(
     }
   }
 
-  const runs = buildWorkflowRuns({ jobs, outcomes, transitions, unifiedRecords, limit });
+  const runs = buildWorkflowRuns({ jobs, outcomes, transitions, unifiedRecords, limit: buildLimit });
+  // Issue #2786 Part 3: attach Docs columns to their runs (first
+  // newest row wins per key), then mint report-only runs for
+  // canonical rows with no job/outcome twin. A run id already
+  // claimed — by a built run or an earlier report-only run — is
+  // never minted twice.
+  const docByKey = new Map<string, WorkflowRunDocuments>();
+  for (const entry of reportDocs) {
+    for (const key of entry.matchKeys) {
+      if (!docByKey.has(key)) docByKey.set(key, entry.documents);
+    }
+  }
+  const runIds = new Set<string>();
+  for (const run of runs) {
+    runIds.add(run.runId);
+    const doc = docByKey.get(run.runId);
+    if (doc && run.documents == null) run.documents = doc;
+  }
+  for (const entry of reportDocs) {
+    if (entry.matchKeys.some((key) => runIds.has(key))) continue;
+    const engineFamily = entry.documents.family === "strategy" ? "discovery" : entry.documents.family;
+    const reportRun = runFromReportDocument({
+      reportId: entry.documents.reportId,
+      runId: entry.summary.runId,
+      title: entry.summary.title,
+      engineFamily,
+      documents: entry.documents,
+      trigger: entry.summary.trigger,
+      status: entry.summary.status,
+      createdAt: entry.summary.createdAt,
+      stages: stagesFromUnifiedStages(entry.stages, entry.summary.createdAt),
+    });
+    runs.push(reportRun);
+    runIds.add(reportRun.runId);
+  }
   runs.push(...sagaRuns);
   runs.sort(compareWorkflowRunsNewestFirst);
-  const limited = runs.slice(0, limit);
+  const visible = reportsOnly ? runs.filter(hasReportDocuments) : runs;
+  const limited = visible.slice(0, limit);
   return Response.json({
     count: limited.length,
     runs: limited,
