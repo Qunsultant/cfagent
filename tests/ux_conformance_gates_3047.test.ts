@@ -15,6 +15,9 @@
  *     above its ux_inline_baselines_3047.json baseline; a file with no
  *     baseline must have zero. Baselines are deliberate: raising one
  *     is a PR-body decision, never silent.
+ *     Issue #3146 raises AgentChatTabContent 7 -> 9: Fluent's Badge
+ *     has no uppercase prop, so the two migrated badges use a
+ *     style={{ textTransform }} instead; no other inline styles added.
  *
  * Scanner discipline copied from the #2283 no-native-alert pin:
  * comments stripped (line comments guarded so https:// survives),
