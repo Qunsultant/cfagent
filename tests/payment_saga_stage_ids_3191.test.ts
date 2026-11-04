@@ -49,16 +49,17 @@ describe("saga stage ids (#3191)", () => {
 });
 
 describe("every family is either mapped or names its gap (#3191)", () => {
-  it("options and trading stay explicitly unmapped with a named reason", () => {
+  it("options and trading are mapped too now (#3191 second half)", () => {
     for (const id of ["options-screener", "trading-leg"]) {
       const workflow = workflowById(id)!;
-      expect(workflow.stages.every((stage) => stage.runtimeStageIds === undefined)).toBe(true);
-      expect((workflow.runtimeMappingGap ?? "").trim().length).toBeGreaterThan(10);
+      const ids = workflow.stages.flatMap((stage) => stage.runtimeStageIds ?? []);
+      expect(ids.length).toBeGreaterThan(0);
+      expect(workflow.runtimeMappingGap).toBeUndefined();
     }
   });
 
   it("a mapped family carries no gap note", () => {
-    for (const id of ["stock-screener", "payment-run", "saga-run"]) {
+    for (const id of ["stock-screener", "options-screener", "trading-leg", "payment-run", "saga-run"]) {
       const workflow = workflowById(id)!;
       expect(workflow.runtimeMappingGap).toBeUndefined();
     }

@@ -18,6 +18,8 @@
 import { STAGE_NAMES, type StageName } from "../messaging/messagingPorts";
 import { PAYMENT_STEP_IDS } from "./paymentWorkflowFlow";
 import { SAGA_STEP_IDS } from "./sagaWorkflowFlow";
+import { TRADE_APPROVAL_STEP_IDS } from "../agents/trading-trade-workflow";
+import { OPTIONS_SCREEN_PHASES } from "../agents/routes/etradeOptionsScreen";
 import type { StageRetryBucket } from "./stageRunnerPorts";
 
 /** The families the programme covers. */
@@ -195,18 +197,28 @@ const OPTIONS_SCREENER: WorkflowDeclaration = {
   labelKey: "workflow.options-screener",
   label: "Options screener",
   stageSeam: false,
-  runtimeSteps: [],
-  runtimeMappingGap:
-    "options stages run inside ScreenerAgent.runScreen; no stage-message ids are declared for them yet (#3072).",
+  runtimeSteps: OPTIONS_SCREEN_PHASES,
   runnable: true,
   runPath: "?tab=options-screener",
   stages: [
-    stage("feed", { persists: "options-chains", publishes: null, consumes: null }),
-    stage("gather", { persists: "enrichment", publishes: null, consumes: "options-chains" }),
-    stage("analysis", { persists: "strategy-candidates", publishes: null, consumes: "enrichment" }),
-    stage("store", { persists: "per-format-artifacts", publishes: null, consumes: "strategy-candidates" }),
-    stage("serve", { persists: "served-report", publishes: null, consumes: "per-format-artifacts" }),
-    stage("deliver", { persists: "delivery-state", publishes: null, consumes: "served-report" }),
+    stage("feed", {
+      persists: "options-chains",
+      publishes: null,
+      consumes: null,
+      runtimeStageIds: ["provider-screen"],
+    }),
+    stage("store", {
+      persists: "per-format-artifacts",
+      publishes: null,
+      consumes: "options-chains",
+      runtimeStageIds: ["report-pipeline"],
+    }),
+    stage("deliver", {
+      persists: "delivery-state",
+      publishes: null,
+      consumes: "per-format-artifacts",
+      runtimeStageIds: ["deliver"],
+    }),
   ],
 };
 
@@ -217,19 +229,24 @@ const TRADING_LEG: WorkflowDeclaration = {
   labelKey: "workflow.trading-leg",
   label: "Trading leg",
   stageSeam: false,
-  runtimeSteps: ["approval", "execute", "fill", "reconcile"],
-  runtimeMappingGap:
-    "trading legs execute through TradingTradeWorkflow; their step ids are not declared as stage-message topics yet (#3073).",
+  runtimeSteps: TRADE_APPROVAL_STEP_IDS,
   runnable: false,
   runPath: null,
   stages: [
     stage("feed", { persists: "quote-snapshot", publishes: null, consumes: null }),
-    stage("analysis", { persists: "preview", publishes: null, consumes: "quote-snapshot" }),
+    stage("analysis", {
+      persists: "approval-decision",
+      publishes: null,
+      consumes: "quote-snapshot",
+      requiresApproval: true,
+      runtimeStageIds: ["await-approval"],
+    }),
     stage("store", {
       persists: "order-draft",
       publishes: null,
-      consumes: "preview",
+      consumes: "approval-decision",
       requiresApproval: true,
+      runtimeStageIds: ["settle-trade"],
     }),
     stage("deliver", { persists: "fill-state", publishes: null, consumes: "order-draft" }),
   ],

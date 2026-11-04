@@ -1,0 +1,80 @@
+/**
+ * Issue #3191 - the options + trading half of the runtime-id mapping pins.
+ *
+ * Trading: exactly two durable steps exist (`await-approval`, `settle-trade`);
+ * the constant must equal what the flow source actually contains, and the
+ * catalog must be an exact partition of it.
+ *
+ * Options: there is no durable workflow - the request handler IS the runtime -
+ * so each declared phase must still correspond to a real call in that file.
+ * A phase whose call disappears fails here rather than lingering in the page.
+ */
+import { readFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+import { TRADE_APPROVAL_STEP_IDS } from "../src/agents/trading-trade-workflow";
+import { OPTIONS_SCREEN_PHASES } from "../src/agents/routes/etradeOptionsScreen";
+import { workflowById } from "../src/workflows/workflowCatalog";
+
+const read = (path: string) => readFileSync(path, "utf8");
+
+describe("trading leg runtime ids (#3191)", () => {
+  const source = read("src/agents/trading-trade-workflow.ts");
+
+  it("declares exactly the durable steps the flow contains", () => {
+    const waits = [...source.matchAll(/step\.waitForEvent\(\s*"([a-z0-9-]+)"/g)].map((m) => m[1]!);
+    const dos = [...source.matchAll(/step\.do\(\s*"([a-z0-9-]+)"/g)].map((m) => m[1]!);
+    expect([...waits, ...dos].sort()).toEqual([...TRADE_APPROVAL_STEP_IDS].sort());
+  });
+
+  it("invents no fill or reconcile step", () => {
+    expect(source).not.toMatch(/step\.do\(\s*"(fill|reconcile)/);
+    expect([...TRADE_APPROVAL_STEP_IDS]).not.toContain("fill");
+    expect([...TRADE_APPROVAL_STEP_IDS]).not.toContain("reconcile");
+  });
+
+  it("the catalog declares an exact partition of them", () => {
+    const declared = workflowById("trading-leg")!.stages.flatMap((s) => s.runtimeStageIds ?? []);
+    expect([...declared].sort()).toEqual([...TRADE_APPROVAL_STEP_IDS].sort());
+    expect(new Set(declared).size).toBe(declared.length);
+  });
+
+  it("keeps the approval gate on the stage that waits for it", () => {
+    const workflow = workflowById("trading-leg")!;
+    const waiting = workflow.stages.find((s) => (s.runtimeStageIds ?? []).includes("await-approval"));
+    expect(waiting?.requiresApproval).toBe(true);
+  });
+});
+
+describe("options screen phases (#3191)", () => {
+  const source = read("src/agents/routes/etradeOptionsScreen.ts");
+
+  it("each declared phase still maps to a real call in the handler", () => {
+    expect(source).toMatch(/provider\.screen\(/);
+    expect(source).toMatch(/runReportPipeline\(/);
+    expect(source).toMatch(/deliverScreenerToSlackA2A\(|sendOptionsRunEmail\(/);
+  });
+
+  it("declares no step ids, because the handler is not a durable workflow", () => {
+    expect(source).not.toMatch(/step\.do\(/);
+    expect(workflowById("options-screener")!.runtimeMappingGap).toBeUndefined();
+  });
+
+  it("the catalog declares an exact partition of the phases", () => {
+    const declared = workflowById("options-screener")!.stages.flatMap((s) => s.runtimeStageIds ?? []);
+    expect([...declared].sort()).toEqual([...OPTIONS_SCREEN_PHASES].sort());
+  });
+});
+
+describe("no family is left without either ids or a named gap (#3191)", () => {
+  it("every family is mapped or says why not", () => {
+    for (const id of ["stock-screener", "options-screener", "trading-leg", "payment-run", "saga-run"]) {
+      const workflow = workflowById(id)!;
+      const ids = workflow.stages.flatMap((s) => s.runtimeStageIds ?? []);
+      expect(ids.length).toBeGreaterThan(0);
+      expect(workflow.runtimeMappingGap).toBeUndefined();
+    }
+    for (const id of ["goal-screen", "strategy-discovery"]) {
+      expect((workflowById(id)!.runtimeMappingGap ?? "").trim().length).toBeGreaterThan(10);
+    }
+  });
+});

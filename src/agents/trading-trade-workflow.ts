@@ -37,6 +37,19 @@ import { meshTraceStoreForEnv } from "../data/createMeshTracePorts";
 /** How long a proposal waits for its decision before lapsing. */
 export const TRADE_APPROVAL_TIMEOUT = "24 hours";
 
+/**
+ * Issue #3191 - the trading leg's real durable step ids, exported so the
+ * workflow catalog declares what the flow actually does instead of a
+ * plausible-looking shape. There are exactly two: the approval wait (a
+ * `step.waitForEvent`) and the settle (a `step.do`). No fill/reconcile
+ * steps exist in this flow - settlement happens inside `settle-trade`
+ * through the owner's approval door. Pinned against this file by
+ * tests/options_trading_stage_ids_3191.test.ts.
+ */
+export const TRADE_APPROVAL_STEP_IDS = ["await-approval", "settle-trade"] as const;
+
+export type TradeApprovalStepId = (typeof TRADE_APPROVAL_STEP_IDS)[number];
+
 /** Minimal structural step surface the flow needs (fakeable in tests). */
 export interface TradeApprovalStep {
   waitForEvent(
