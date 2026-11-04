@@ -55,6 +55,7 @@ export type DispatchDenialReason =
   | "SERVICE_NOT_PROVISIONED"
   | "SERVICE_TENANT_MISMATCH"
   | "BROKER_REQUIRED"
+  | "OWNER_MEMBERSHIP_REVOKED"
   | "PDP_DENIED";
 
 export type DispatchIdentity =
