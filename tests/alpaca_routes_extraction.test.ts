@@ -300,7 +300,12 @@ describe("handleAlpacaTradingRoutes behavior", () => {
       baseCtx()
     );
     expect(res!.status).toBe(500);
-    expect(await res!.json()).toEqual({ error: "boom" });
+    // Issue #3197: the raw thrown message is no longer surfaced —
+    // the body carries the outcome code + business message instead.
+    const body = (await res!.json()) as any;
+    expect(body.code).toBe("FAILURE_ALPACA_UPSTREAM");
+    expect(body.error).toMatch(/\[FAILURE_ALPACA_UPSTREAM\]/);
+    expect(body.error).not.toMatch(/boom/);
   });
 });
 

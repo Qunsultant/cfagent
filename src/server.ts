@@ -1107,7 +1107,12 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
         }
         return Response.json(result);
       } catch (err: any) {
-        return Response.json({ error: err.message || "Failed to initiate E*TRADE OAuth" }, { status: 500 });
+        // Issue #3197: the hub reclaims a stranded pre-opened tab by
+        // navigating it to the app with this code (etrade_connect_error),
+        // so the code rides alongside the outcome message. BusinessError
+        // carries an outcome-catalog code; other errors carry theirs or
+        // none (JSON drops an undefined code).
+        return Response.json({ error: err.message || "Failed to initiate E*TRADE OAuth", code: err.code }, { status: 500 });
       }
     }
 
@@ -1219,7 +1224,10 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
         const tokens = await exchangeETradeVerifier(env, session.githubLogin, verifier, body.requestToken, body.requestTokenSecret, reqEnv);
         return Response.json({ success: true, environment: tokens.environment, storedAt: tokens.storedAt });
       } catch (err: any) {
-        return Response.json({ error: err.message || "Failed to exchange verifier" }, { status: 400 });
+        // Issue #3197: outcome code alongside the message, as on the
+        // start route (BusinessError message is already the catalog
+        // business message, never the raw upstream body).
+        return Response.json({ error: err.message || "Failed to exchange verifier", code: err.code }, { status: 400 });
       }
     }
 
