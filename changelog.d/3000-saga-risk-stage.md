@@ -1,0 +1,3 @@
+### Saga
+
+- **Risk-analysis stage in the saga trading leg (#3000):** after gate approval and before any draft exists, the leg assesses the trade intent — options via the existing no-view risk engine (an engine-validated candidate passes with its risk report; a non-matching intent fails closed with no draft) and stocks via the strict AVWAP guard (spot must remain strictly above AVWAP). Missing limits or market data record an explicit unassessed-with-reason assessment and the draft proceeds; per-order approval is unchanged. The leg data seam (chain-fetch or screen-report-read) and caller adoption of entry risk limits are named follow-ups.
