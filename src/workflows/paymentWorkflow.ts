@@ -70,13 +70,18 @@
  *     the caller resolves the account from it by verified userId
  *     (paidScreenSubmission), and covered runs consume coverage
  *     from the store. Recurring scheduled runs are coverage-only.
- *   - Ledger: durable. Confirmed payments and failure credits
- *     write deduped rows through the cfpay ledger service
- *     (mas_transactions) AND the native D1 ledger, with a
- *     double-entry journal projection (#2155). Nothing about
- *     the ledger is in-memory. (recordLedgerPayment is NOT
- *     reused because it builds x402 PaymentsAgent-origin rows
- *     only.)
+ *   - Ledger: durable. Confirmed payments write deduped rows
+ *     through the cfpay ledger service (mas_transactions), with
+ *     a double-entry journal projection (#2155), and — since
+ *     the #2192 gate→native-ledger follow-up — a confirmed
+ *     native charge additionally records a best-effort native
+ *     D1 ledger row via the flow's nativeLedger dep (a wiring
+ *     failure never fails the payment). Failure credits write
+ *     the cfpay credit row + D1 claim; a native credit row for
+ *     them is a separate follow-up, not this slice. Nothing
+ *     about the ledger is in-memory. (recordLedgerPayment is
+ *     NOT reused because it builds x402 PaymentsAgent-origin
+ *     rows only.)
  *   - Failure credit: IMPLEMENTED (#2019/#2015). A screener
  *     failure after payment issues exactly one replacement-run
  *     credit, deduped in the ledger and recorded as a D1 credit
@@ -136,6 +141,10 @@ import {
   createJournalAdapter,
   ensureJournalSchema,
 } from "../data/createJournalPorts";
+import {
+  createNativeLedgerAdapter,
+  ensureNativeLedgerSchema,
+} from "../data/createNativeLedgerPorts";
 import {
   mapChargeToJournalEntries,
   mapFailureCreditToJournalEntries,
@@ -303,9 +312,31 @@ export class PaymentWorkflow extends ThinkWorkflow<
       },
     );
 
+    // Issue #2192 follow-up: the native ledger port for the flow's
+    // best-effort charge-row step. Construction itself is
+    // best-effort — an unbound AGENT_DB or a schema failure logs
+    // loudly and leaves the dep null, so a wiring failure never
+    // fails a payment (the flow's recordNativeLedgerBestEffort
+    // swallows record failures the same way).
+    let nativeLedger: Awaited<ReturnType<typeof createNativeLedgerAdapter>> = null;
+    try {
+      const adapter = createNativeLedgerAdapter(this.env as { AGENT_DB?: unknown });
+      if (adapter) {
+        await ensureNativeLedgerSchema(adapter.db);
+        nativeLedger = adapter;
+      }
+    } catch (err) {
+      console.error(
+        `[payment-workflow] native ledger port unavailable for run ${p.runRequestId} — charge rows will be skipped, payment unaffected:`,
+        err instanceof Error ? err.message : String(err),
+      );
+      nativeLedger = null;
+    }
+
     const deps = {
       gate,
       account: p.account,
+      nativeLedger,
       startScreener: async (params: PaymentWorkflowParams) => {
         // Operational: the caller-supplied screener command goes,
         // unchanged, through the existing screener workflow port

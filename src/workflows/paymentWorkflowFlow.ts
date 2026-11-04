@@ -69,6 +69,7 @@ import {
   type ScheduleKind,
   type ScreenerFamily,
 } from "../services/cfpayMonetization";
+import type { NativeLedgerPort } from "../data/nativeLedgerPorts";
 
 /**
  * Issue #2193 (slice 1, #2146) — the structural gate surface the
@@ -278,6 +279,23 @@ export interface PaymentWorkflowDeps {
     priceUSD: number;
   }) => Promise<void>;
   /**
+   * Issue #2192 follow-up (umbrella #2146): gate → native-ledger
+   * wiring. The native ledger port the flow records a charge row
+   * through after a successful native charge confirmation (see
+   * recordNativeLedgerBestEffort below). Optional and purely
+   * best-effort: absent → today's behavior exactly (no rows);
+   * a recording failure is loud-logged and never thrown into
+   * the payment path, so the payment outcome is identical with
+   * the wiring on or off, except for the recorded row. The port
+   * dedupes per run+kind, so a retried step never double-records.
+   * The production adapter wires it in paymentWorkflow.ts from
+   * AGENT_DB (createNativeLedgerAdapter); flow test doubles pass
+   * the in-memory adapter. Only the flow's confirmed-native-charge
+   * path calls it — covered runs, cfpay-era confirmations, and
+   * unconfirmed payments record no native row here.
+   */
+  nativeLedger?: NativeLedgerPort | null;
+  /**
    * Issue #2762 (tracker #2708 A6, S17 #2428): trace hop recorder
    * for this run's steps — the screener flow's traceHop pattern.
    * Optional and purely observational: called AFTER a step's
@@ -292,6 +310,86 @@ export interface PaymentWorkflowDeps {
    * traceStep(), which swallows.
    */
   traceHop?: (event: { operation: string; note?: string }) => Promise<void>;
+}
+
+/**
+ * Issue #2192 follow-up (umbrella #2146): record one native
+ * ledger charge row for a confirmed native payment, best-effort
+ * (never throws into the flow — the DO/cfpay ledger row the
+ * record-payment step just wrote stays authoritative, and this
+ * D1 row is its native projection; a failure here is a loud log
+ * + a reconcile flag, not a failed payment).
+ *
+ * Rail is truthful per paidVia: "stripe_checkout" → stripe,
+ * "x402" → x402. Any other paidVia (covered, already_paid,
+ * cfpay-era) is not a native charge and records nothing — the
+ * cfpay-era path already records its own row. Tenant comes from
+ * the verified flow params (the flow throws on tenant mismatch
+ * before any step runs, so no client-supplied tenant can scope
+ * this row); the price is the gate-check price, for the same
+ * resume reason as the record-payment comment above. A missing
+ * or non-positive price, or an unbound port, logs loudly and
+ * skips — never a guessed row, never an invented tenant.
+ * Replay is safe: the port returns the existing row as a
+ * duplicate instead of writing a second row.
+ */
+async function recordNativeLedgerBestEffort(
+  port: NativeLedgerPort | null | undefined,
+  row: {
+    runRequestId: string;
+    tenantId: string;
+    userId: string;
+    family: ScreenerFamily;
+    priceUSD: number;
+    paidVia?: string;
+    sessionId?: string;
+    paymentIntentId?: string;
+    claimTxHash?: string;
+  },
+): Promise<void> {
+  try {
+    if (!port) {
+      console.error(
+        `[payment-workflow] native ledger row skipped for run=${row.runRequestId} (native ledger port unbound); payment unaffected.`,
+      );
+      return;
+    }
+    const rail =
+      row.paidVia === "stripe_checkout"
+        ? "stripe"
+        : row.paidVia === "x402"
+          ? "x402"
+          : null;
+    if (!rail) return;
+    if (!Number.isFinite(row.priceUSD) || row.priceUSD <= 0) {
+      console.error(
+        `[payment-workflow] native ledger row refused for run=${row.runRequestId} without a positive price; payment unaffected.`,
+      );
+      return;
+    }
+    const { duplicate } = await port.recordRow({
+      kind: "charge",
+      runRequestId: row.runRequestId,
+      tenantId: row.tenantId,
+      userId: row.userId,
+      family: row.family,
+      priceUSD: row.priceUSD,
+      rail,
+      sessionId: row.sessionId,
+      paymentIntentId: row.paymentIntentId,
+      claimTxHash: row.claimTxHash,
+    });
+    if (duplicate) {
+      console.log(
+        `[payment-workflow] native ledger charge row already exists for run=${row.runRequestId} (retried step, deduped)`,
+      );
+    }
+  } catch (err) {
+    console.error(
+      `[payment-workflow] native ledger record failed for run=${row.runRequestId} — payment unaffected:`,
+      err instanceof Error ? err.message : String(err),
+    );
+  }
 }
 
 /**
@@ -498,6 +596,29 @@ export async function runPaymentWorkflowFlow(
       }),
     );
     await traceStep(deps, "record-payment");
+    // Issue #2192 follow-up: project the confirmed native charge
+    // into the native D1 ledger (best-effort, never thrown — see
+    // recordNativeLedgerBestEffort). This is a separate step from
+    // record-payment so a durable replay replays it independently
+    // and the port dedupe absorbs the retry. The charge journal
+    // projection needs no second wiring: the adapter's
+    // record-payment handler already posts it (rail-agnostic,
+    // same runRequestId ref, best-effort, replay-safe), so a
+    // second post here would be a duplicate no-op.
+    await step.do("record-native-ledger", () =>
+      recordNativeLedgerBestEffort(deps.nativeLedger, {
+        runRequestId: params.runRequestId,
+        tenantId: params.tenantId,
+        userId: params.userId,
+        family: params.family,
+        priceUSD: gateDecision.priceUSD,
+        paidVia: confirmed.paidVia,
+        sessionId: verified.sessionId,
+        paymentIntentId: verified.paymentIntentId,
+        claimTxHash: verified.claimTxHash,
+      }),
+    );
+    await traceStep(deps, "record-native-ledger");
     // #2041 G-METERING: one usage row for a saga paid run, after
     // confirm-paid succeeds and before the screen starts. Earlier
     // would over-meter (unpaid runs); the covered path never
