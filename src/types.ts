@@ -142,6 +142,13 @@ export interface Env {
   // NOTE: removing this var does NOT disable gating (the code default
   // is 30s); only "0" disables it.
   IAAA_WIRED_FRESHNESS_MS?: string;
+  // Issue #3155 (Q9) — default grant lifetime in days for
+  // non-platform-scope bindings without an explicit expiry. Adopted
+  // initial value 90. Unlike the freshness gate, "0" does NOT disable
+  // the default (it resolves to 90): unbounded tenant grants are
+  // what the default exists to prevent. Rollback is restoring "90"
+  // (or any positive integer) and redeploying — no code change.
+  IAAA_GRANT_DEFAULT_EXPIRY_DAYS?: string;
   // Issue #2419 — externalized polling cadences (AOP). All optional;
   // absence means the pollingConfig defaults apply. Values are
   // milliseconds, except CHAT_AUTO_REFRESH_FLOOR_S (seconds, matching
@@ -161,12 +168,15 @@ export interface Env {
   // product call. Rollback is unsetting the var and redeploying.
   TICKER_PUSH_INTERVAL_S?: string;
   // #1169 S2 — flag-gated corpus serving. Same idiom as IAAA above:
-  // "1"/"true"/"on" (case-insensitive) = on; absence = OFF (the var is
-  // deliberately NOT in wrangler.jsonc — S2 ships default-off).
-  // Flag-ON enables the aiSearch mapping fixes, GET /knowledge/file,
-  // and result provenance. Rollback is unsetting the var (or "0")
-  // and redeploying — no code change. The flag NEVER touches the
-  // aiSearch fallback (S3 owns it) or the G1 1.0 scores.
+  // "1"/"true"/"on" (case-insensitive) = on; absence = OFF. S2 shipped
+  // default-off (the var was deliberately not in wrangler.jsonc);
+  // ENABLED 2026-11-04 per the owner's enablement direction — the var
+  // is set to "1" in wrangler.jsonc. Flag-ON enables the strict
+  // aiSearch chunk mapping, GET /knowledge/file, and result
+  // provenance. Rollback is unsetting the var (or "0") and
+  // redeploying — no code change. The flag never touched the aiSearch
+  // fallback (S3 removed it; the degraded contract is flag-independent)
+  // and never touches the G1 1.0 scores.
   KNOWLEDGE_SERVING_ENABLED?: string;
   // #2433 (#1976 step 5b) — flag-gated session/identity family
   // ports. Same idiom as KNOWLEDGE_SERVING_ENABLED above:
@@ -179,17 +189,31 @@ export interface Env {
   // byte-identical. Rollback is unsetting the var — no code
   // change, no data migration.
   SESSION_PORTS_ENABLED?: string;
+  // #2434 (#1976 step 5c) — flag-gated OAuth token family
+  // ports. Same idiom as SESSION_PORTS_ENABLED above:
+  // "1"/"true"/"on" (case-insensitive) = on; absence = OFF (the
+  // var is deliberately NOT in wrangler.jsonc — the slice ships
+  // default-off). Flag-ON composes E*TRADE and Public token
+  // storage through src/data/createTokenPorts.ts over the SAME
+  // SessionStore DO and kv_store table; flag-OFF is today's
+  // funnel composition in security/etradeOAuth.ts /
+  // security/publicOAuth.ts, byte-identical. Rollback is
+  // unsetting the var — no code change, no data migration.
+  TOKEN_PORTS_ENABLED?: string;
   // #2246 — flag-gated report indexing into the AI Search instance.
   // Same idiom as KNOWLEDGE_SERVING_ENABLED above: "1"/"true"/"on"
-  // (case-insensitive) = on; absence = OFF (the var is deliberately
-  // NOT in wrangler.jsonc — the slice ships default-off). Flag-ON
-  // makes the canonical report store seams ALSO upload each report
-  // to the instance via AiSearchAgent's indexing executor
-  // (src/agents/aiSearchPaths.ts), best-effort beside the Vectorize
-  // leg. Enablement follows the #1169 probe gate (owner adds the
-  // ai_search_namespaces binding + AI_SEARCH_INSTANCE, the probe
-  // verifies, then the flag flips). Rollback is unsetting the var —
-  // no code change, no data migration.
+  // (case-insensitive) = on; absence = OFF. The slice shipped
+  // default-off (the var was deliberately not in wrangler.jsonc);
+  // ENABLED 2026-11-04 per the owner's enablement direction — the var
+  // is set to "1" in wrangler.jsonc. Flag-ON makes the canonical
+  // report store seams ALSO upload each report to the instance via
+  // AiSearchAgent's indexing executor (src/agents/aiSearchPaths.ts),
+  // best-effort beside the Vectorize leg. Until the owner adds the
+  // ai_search_namespaces binding + AI_SEARCH_INSTANCE (the #1169
+  // configuration step), each attempt records its typed
+  // not-configured outcome on the report row and never fails the
+  // store. Rollback is unsetting the var — no code change, no data
+  // migration.
   AI_SEARCH_REPORT_INDEXING_ENABLED?: string;
   // Comma-separated provider ids. Default when wiring is on: "github".
   // An id with no registered adapter is ignored, never a fallback.

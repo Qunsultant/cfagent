@@ -6,7 +6,11 @@
  * Implements:
  * - Semantic vector search over SEC filings, 10-K/10-Q disclosures, and broker rules
  * - Cloudflare AI Search endpoint and Vectorize binding integration
- * - Built-in semantic retrieval with ranking and snippet extraction
+ * - Retrieval from the live AI Search instance only: when the
+ *   instance does not serve, searchFinancialDocs returns an explicit
+ *   degraded response (zero results + a degraded reason) — there is
+ *   no built-in fallback corpus (removed by issue #1169 S3; the
+ *   constant is superseded by this degraded contract).
  */
 
 import type { Env } from "../types";
@@ -25,10 +29,11 @@ import { KnowledgeError, KnowledgeErrorCode } from "../aspects/errorCodes";
  * Issue #1169 (S2): a flag-ON mapping failure, typed and explicit.
  * Thrown by mapAiSearchChunks when an upstream chunk is malformed
  * (wrong-typed field, non-object chunk). The service rethrows it
- * past the fallback — a malformed chunk must fail VISIBLY, never
- * silently substitute stub results. `details` names the chunk index
- * and field so the probe can pinpoint the shape mismatch. Flag-OFF
- * never throws: it reproduces today's lenient mapping verbatim.
+ * instead of returning a degraded response — a malformed chunk must
+ * fail VISIBLY, never silently degrade or substitute results.
+ * `details` names the chunk index and field so the probe can
+ * pinpoint the shape mismatch. Flag-OFF never throws: it reproduces
+ * today's lenient mapping verbatim.
  */
 export class AiSearchMappingError extends KnowledgeError {
   public readonly chunkIndex: number;
@@ -55,23 +60,10 @@ export interface AISearchResultItem {
    * Issue #1169 (S2, flag-gated): optional since the flag-ON mapping
    * preserves the TRUE index score/category — an upstream chunk that
    * carries no score (or no category) yields no score (or no
-   * category), never a defaulted 0.9 or a forced "sec_filing". The
-   * fallback branch below still always sets both: its constant's
-   * annotation narrows to Required for score/category (see the
-   * NOTE below), so no fallback logic line needed to change.
+   * category), never a defaulted 0.9 or a forced "sec_filing".
    */
   score?: number;
   category?: "sec_filing" | "broker_rules" | "options_disclosure" | "market_education";
-  /**
-   * NOTE on the optionality above: the fallback branch below still
-   * always sets both (its constant entries all carry scores and
-   * categories — the constant's annotation below narrows to
-   * Required for exactly those two fields, so the fallback's
-   * arithmetic still typechecks). No fallback LOGIC line is touched
-   * by S2; the narrowing fails CLOSED at compile time if a future
-   * entry ever omits a score/category, instead of silently
-   * defaulting one.
-   */
   /**
    * Issue #1169 (S2, flag-gated) provenance. Present only when
    * KNOWLEDGE_SERVING_ENABLED is on: bucketKey is the chunk's R2 key
@@ -106,8 +98,8 @@ export function mapAiSearchChunks(chunks: readonly unknown[], flagOn: boolean): 
   return (chunks as any[]).map((c: any, idx: number) => {
     if (flagOn) {
       // Strict validation, flag-ON only: a malformed chunk fails
-      // visibly (AiSearchMappingError, rethrown past the fallback
-      // by the service) instead of being silently defaulted or
+      // visibly (AiSearchMappingError, rethrown by the service)
+      // instead of being silently defaulted or
       // coerced. ABSENT fields are fine (they yield absent
       // score/category); PRESENT-but-wrong-typed fields are not.
       // Flag-OFF skips this block entirely — today's lenient
@@ -164,64 +156,39 @@ export function mapAiSearchChunks(chunks: readonly unknown[], flagOn: boolean): 
   });
 }
 
+/**
+ * Issue #1169 (S3): the stable, machine-readable reasons a
+ * searchFinancialDocs answer is DEGRADED — the live AI Search
+ * instance did not serve it. These tokens are part of the served
+ * contract: consumers (SearchHub tab, MCP command, AiSearchAgent
+ * runner) key their degraded presentation/outcome off them, so the
+ * values must stay stable; add new reasons, never repurpose one.
+ */
+export type AiSearchDegradedReason =
+  | "endpoint_not_configured"
+  | "upstream_unreachable"
+  | "upstream_http_error"
+  | "upstream_invalid_response";
+
 export interface AISearchQueryResponse {
   query: string;
   results: AISearchResultItem[];
   totalMatches: number;
-  provider: "cloudflare_ai_search" | "vectorize" | "semantic_cache";
+  provider: "cloudflare_ai_search" | "vectorize";
   timestamp: string;
+  /**
+   * Issue #1169 (S3): present EXACTLY when the live index did not
+   * serve this answer. A degraded response always carries zero
+   * results — since S3 removed the built-in fallback corpus, there
+   * is nothing else an unserved answer could honestly contain.
+   * `provider` names the serving system the answer was requested
+   * from; this field is what says it did not serve. Absent on a
+   * served answer — including a served EMPTY answer (upstream
+   * chunks: []), which is an honest empty index, not a failure;
+   * the two stay distinguishable by this field alone.
+   */
+  degraded?: AiSearchDegradedReason;
 }
-
-// Built-in institutional knowledge base for financial trading docs
-// Issue #1169 (S2, TYPE-ONLY): the constant's entries always carry a
-// score and a category (all five do), so the annotation narrows those
-// two fields to Required. This keeps the fallback branch's arithmetic
-// typechecking after AISearchResultItem.score/category became optional
-// for the flag-ON mapping. NO fallback logic line is touched, and the
-// narrowing fails CLOSED (compile error) if a future entry omits one.
-const FINANCIAL_KNOWLEDGE_BASE: (AISearchResultItem &
-  Required<Pick<AISearchResultItem, "score" | "category">>)[] = [
-  {
-    id: "sec_nvda_10k_2025",
-    title: "NVIDIA Corp - Annual 10-K Filing (Risk Factors & Data Center Revenue)",
-    snippet: "Data Center revenue grew 140% driven by accelerated computing and Blackwell GPU architecture. Key risks include export controls and supply chain concentration.",
-    score: 0.95,
-    category: "sec_filing",
-    url: "https://www.sec.gov/edgar/data/1045810/nvda-10k.htm",
-  },
-  {
-    id: "etrade_order_types_guide",
-    title: "E*TRADE Advanced Order Types & Routing Guide",
-    snippet: "E*TRADE supports Market, Limit, Stop, Stop-Limit, Trailing Stop ($ and %), and Conditional Orders. Extended hours trading available 07:00-09:30 ET and 16:00-20:00 ET.",
-    score: 0.92,
-    category: "broker_rules",
-    url: "https://us.etrade.com/knowledge/order-types",
-  },
-  {
-    id: "finra_rule_4210_pdt",
-    title: "FINRA Rule 4210: Pattern Day Trader (PDT) Margin Requirements",
-    snippet: "Pattern day traders must maintain minimum equity of $25,000 on any day on which day trading occurs. A pattern day trader executes 4 or more day trades within 5 business days.",
-    score: 0.89,
-    category: "broker_rules",
-    url: "https://www.finra.org/rules-guidance/rulebooks/finra-rules/4210",
-  },
-  {
-    id: "options_clearing_corp_odg",
-    title: "Characteristics and Risks of Standardized Options (ODD)",
-    snippet: "Options involve risk and are not suitable for all investors. Option buyers risk the loss of entire premium; uncovered option writers face potentially unlimited losses.",
-    score: 0.88,
-    category: "options_disclosure",
-    url: "https://www.theocc.com/company-information/documents-and-archives/options-disclosure-document",
-  },
-  {
-    id: "sec_aapl_10q_services",
-    title: "Apple Inc - 10-Q Quarterly Report (Services & Gross Margin)",
-    snippet: "Services gross margin reached 74.2%, with installed active device base exceeding 2.2 billion active devices globally.",
-    score: 0.85,
-    category: "sec_filing",
-    url: "https://www.sec.gov/edgar/data/320193/aapl-10q.htm",
-  },
-];
 
 export class ETradeAISearchService {
   constructor(private env?: Env) {}
@@ -233,10 +200,13 @@ export class ETradeAISearchService {
    * Response untouched — status handling, chunk extraction, the
    * abort timeout, the TTL cache, and the audit calls all stay
    * with the MAS caller, verbatim. This is deliberately NOT
-   * searchFinancialDocs: that path posts to the bare endpoint
-   * with ai_search_options, maps chunks, and falls back to the
-   * local corpus — a different contract the MAS tool must not
-   * inherit (it surfaces upstream failure, never stub docs).
+   * searchFinancialDocs: that path posts to the instance's /search
+   * path with ai_search_options, maps chunks, and — since #1169 S3
+   * removed its built-in fallback corpus — returns an explicit
+   * degraded response (zero results + a degraded reason) when the
+   * instance does not serve, never stub docs. A different contract
+   * the MAS tool must not inherit (it surfaces upstream failure,
+   * never stub docs).
    */
   async searchRaw(
     query: string,
@@ -251,93 +221,117 @@ export class ETradeAISearchService {
   }
 
   /**
-   * Search financial documentation and SEC filings using AI Search
+   * Search financial documentation and SEC filings using AI Search.
+   *
+   * Issue #1169 (S3): answers come from the live AI Search instance
+   * or not at all. The built-in fallback corpus this method used to
+   * serve on any failure is REMOVED — it is
+   * superseded by the degraded contract on AISearchQueryResponse:
+   * when the instance does not serve (endpoint unconfigured, fetch
+   * failure, non-OK status, or an unusable response body), the
+   * answer is zero results plus a stable `degraded` reason, logged
+   * via the repo's console-stream idiom (bracket prefix; reason and
+   * status only — never query text, chunk content, or logins). A
+   * served answer — including an empty one (chunks: []) — carries
+   * no `degraded` field. AiSearchMappingError still propagates:
+   * a malformed chunk fails visibly, it does not degrade.
    */
   async searchFinancialDocs(query: string, limit: number = 5): Promise<AISearchQueryResponse> {
     const timestamp = new Date().toISOString();
     const cleanQuery = query.trim().toLowerCase();
 
-    // 1. If Cloudflare AI Search endpoint is configured, query upstream
-    if (this.env?.AI_SEARCH_ENDPOINT) {
-      try {
-        const searchUrl = `${this.env.AI_SEARCH_ENDPOINT.replace(/\/+$/, "")}/search`;
-        const resp = await fetch(searchUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            messages: [{ role: "user", content: cleanQuery }],
-            ai_search_options: {
-              retrieval: {
-                max_num_results: Math.min(limit, 10),
-              },
-            },
-          }),
-        });
-
-        if (resp.ok) {
-          const json = (await resp.json()) as any;
-          if (json.success && json.result?.chunks) {
-            // Issue #1169 (S2, flag-gated): the primary-path mapping
-            // lives in mapAiSearchChunks above. Flag-OFF reproduces
-            // the pre-S2 mapping verbatim; flag-ON preserves true
-            // scores/categories + provenance. The fallback branch
-            // below is untouched by S2 (S3 owns it).
-            // Cross-cutting (S2): mapping application is logged via
-            // the repo's console-stream idiom (see loggingAspect.ts:
-            // standard console streams, bracket prefix, no sensitive
-            // fields — counts and flag state only, never chunk
-            // content, keys, or logins).
-            const flagOn = isKnowledgeServingEnabled(this.env);
-            const results = mapAiSearchChunks(json.result.chunks, flagOn);
-            console.info(
-              `[knowledgeMapping] aiSearch mapped chunks=${json.result.chunks.length} results=${results.length} flag=${flagOn ? "on" : "off"}`
-            );
-
-            return {
-              query,
-              results,
-              totalMatches: results.length,
-              provider: "cloudflare_ai_search",
-              timestamp,
-            };
-          }
-        }
-      } catch (err) {
-        // Cross-cutting (S2): a mapping failure is VISIBLE, never a
-        // silent substitution — it is rethrown past the fallback
-        // below (S3 owns the fallback; S2 must not let a malformed
-        // chunk silently become stub results). Every other primary-
-        // path failure keeps today's fall-through behavior exactly.
-        if (err instanceof AiSearchMappingError) {
-          console.warn(
-            `[knowledgeMapping] aiSearch mapping failed chunkIndex=${err.chunkIndex} field=${err.field} code=${err.code}`
-          );
-          throw err;
-        }
-        // Fall through to semantic cache
-      }
-    }
-
-    // 2. Local semantic matcher over preloaded financial knowledge base
-    const terms = cleanQuery.split(/\s+/).filter(Boolean);
-    const scored = FINANCIAL_KNOWLEDGE_BASE.map((doc) => {
-      let matchCount = 0;
-      const docText = `${doc.title} ${doc.snippet} ${doc.category}`.toLowerCase();
-      for (const t of terms) {
-        if (docText.includes(t)) matchCount++;
-      }
-      const score = terms.length > 0 ? parseFloat((matchCount / terms.length).toFixed(2)) : 0.5;
-      return { ...doc, score: Math.max(score, doc.score * (matchCount > 0 ? 1 : 0.4)) };
+    const degradedResponse = (reason: AiSearchDegradedReason): AISearchQueryResponse => ({
+      query,
+      results: [],
+      totalMatches: 0,
+      provider: "cloudflare_ai_search",
+      timestamp,
+      degraded: reason,
     });
 
-    scored.sort((a, b) => b.score - a.score);
-    const topResults = scored.slice(0, limit);
+    if (!this.env?.AI_SEARCH_ENDPOINT) {
+      console.warn(`[knowledgeSearch] aiSearch degraded reason=endpoint_not_configured`);
+      return degradedResponse("endpoint_not_configured");
+    }
+
+    let json: any;
+    try {
+      const searchUrl = `${this.env.AI_SEARCH_ENDPOINT.replace(/\/+$/, "")}/search`;
+      const resp = await fetch(searchUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: [{ role: "user", content: cleanQuery }],
+          ai_search_options: {
+            retrieval: {
+              max_num_results: Math.min(limit, 10),
+            },
+          },
+        }),
+      });
+
+      if (!resp.ok) {
+        console.warn(
+          `[knowledgeSearch] aiSearch degraded reason=upstream_http_error status=${resp.status}`
+        );
+        return degradedResponse("upstream_http_error");
+      }
+
+      try {
+        json = await resp.json();
+      } catch {
+        // A non-JSON body — e.g. the HTML web UI a redirect to the
+        // bare endpoint lands on (the 2026-11-04 probe finding) —
+        // is an invalid response, not search data.
+        console.warn(
+          `[knowledgeSearch] aiSearch degraded reason=upstream_invalid_response detail=non_json_body`
+        );
+        return degradedResponse("upstream_invalid_response");
+      }
+    } catch (err) {
+      console.warn(
+        `[knowledgeSearch] aiSearch degraded reason=upstream_unreachable error=${err instanceof Error ? err.name : "unknown"}`
+      );
+      return degradedResponse("upstream_unreachable");
+    }
+
+    if (!json?.success || !Array.isArray(json?.result?.chunks)) {
+      console.warn(
+        `[knowledgeSearch] aiSearch degraded reason=upstream_invalid_response detail=missing_success_or_chunks`
+      );
+      return degradedResponse("upstream_invalid_response");
+    }
+
+    // Issue #1169 (S2, flag-gated): the primary-path mapping lives
+    // in mapAiSearchChunks above. Flag-OFF reproduces the pre-S2
+    // mapping verbatim; flag-ON preserves true scores/categories +
+    // provenance. Cross-cutting (S2): mapping application is logged
+    // via the repo's console-stream idiom (see loggingAspect.ts:
+    // standard console streams, bracket prefix, no sensitive fields
+    // — counts and flag state only, never chunk content, keys, or
+    // logins). A mapping failure is VISIBLE, never a silent
+    // degradation — it is rethrown, as before.
+    const flagOn = isKnowledgeServingEnabled(this.env);
+    let results: AISearchResultItem[];
+    try {
+      results = mapAiSearchChunks(json.result.chunks, flagOn);
+    } catch (err) {
+      if (err instanceof AiSearchMappingError) {
+        console.warn(
+          `[knowledgeMapping] aiSearch mapping failed chunkIndex=${err.chunkIndex} field=${err.field} code=${err.code}`
+        );
+      }
+      throw err;
+    }
+    console.info(
+      `[knowledgeMapping] aiSearch mapped chunks=${json.result.chunks.length} results=${results.length} flag=${flagOn ? "on" : "off"}`
+    );
 
     return {
       query,
-      results: topResults,
-      totalMatches: topResults.length,
-      provider: "semantic_cache",
+      results,
+      totalMatches: results.length,
+      provider: "cloudflare_ai_search",
       timestamp,
     };
   }

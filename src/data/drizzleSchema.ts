@@ -329,6 +329,23 @@ export const agentTenantSettings = sqliteTable("agent_tenant_settings", {
 });
 
 /**
+ * Issue #3169 — per-tenant delivery-channel enablement flags.
+ * One row per tenant, one flag per channel. Absent row = every
+ * channel enabled (the port's DEFAULT_TENANT_CHANNELS). Flags
+ * ONLY: this table never holds a webhook URL, token, or
+ * secret — those stay in worker bindings.
+ */
+export const agentTenantChannels = sqliteTable("agent_tenant_channels", {
+  tenantId: text("tenant_id").primaryKey(),
+  emailEnabled: integer("email_enabled").notNull().default(1),
+  slackEnabled: integer("slack_enabled").notNull().default(1),
+  webhookEnabled: integer("webhook_enabled").notNull().default(1),
+  copilotEnabled: integer("copilot_enabled").notNull().default(1),
+  docsEnabled: integer("docs_enabled").notNull().default(1),
+  updatedAtMs: integer("updated_at_ms").notNull(),
+});
+
+/**
  * Redeemable failure-credit claims (#2019). One row per failed paid
  * run, written by the payment adapter alongside the DO ledger
  * credit row (the ledger row is the financial audit record; this

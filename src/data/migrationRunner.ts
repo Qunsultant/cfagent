@@ -1518,6 +1518,31 @@ export const MIGRATION_0038_AGENT_SHARD_JOBS_WORKFLOW_RUN_ID: DataMigration = {
   sql: `ALTER TABLE agent_shard_jobs ADD COLUMN workflow_run_id TEXT;`,
 };
 
+/**
+ * Migration 0039 — per-tenant delivery-channel enablement flags
+ * (#3169, program #2218). One row per tenant, one flag per
+ * channel (email, Slack, webhook, Copilot card, Docs). Absent
+ * row = every channel enabled (the port default). Flags ONLY:
+ * no URL, token, or secret column — secrets stay in worker
+ * bindings. Portable subset: CREATE TABLE IF NOT EXISTS only,
+ * no params, no dialect date functions.
+ */
+export const MIGRATION_0039_TENANT_CHANNELS: DataMigration = {
+  version: 39,
+  name: "0039_tenant_channels",
+  sql: `
+CREATE TABLE IF NOT EXISTS agent_tenant_channels (
+  tenant_id TEXT PRIMARY KEY,
+  email_enabled INTEGER NOT NULL DEFAULT 1,
+  slack_enabled INTEGER NOT NULL DEFAULT 1,
+  webhook_enabled INTEGER NOT NULL DEFAULT 1,
+  copilot_enabled INTEGER NOT NULL DEFAULT 1,
+  docs_enabled INTEGER NOT NULL DEFAULT 1,
+  updated_at_ms INTEGER NOT NULL
+);
+`,
+};
+
 export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANCE,
   MIGRATION_0002_AGENT_CHAINS_SCHEDULES,
   MIGRATION_0003_AGENT_SHARD_JOBS,
@@ -1556,6 +1581,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0036_REFUND_POLICY_APPROVAL,
   MIGRATION_0037_CFPAY_CHANNEL,
   MIGRATION_0038_AGENT_SHARD_JOBS_WORKFLOW_RUN_ID,
+  MIGRATION_0039_TENANT_CHANNELS,
 ];
 
 function splitStatements(sqlText: string): string[] {

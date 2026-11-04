@@ -29,7 +29,15 @@ import {
 } from "./security/iaaaLoggedInUsers";
 import { SESSION_REVOCATION_CROSS_ISOLATE_BOUND_MS } from "./security/revocationTargets";
 import { deleteSession, getSession, listSessionFamilyEntries, sessionStore, updateSession, wiredAccessRequestStore, wiredMembershipStore } from "./security/session";
-import { listStoreEntries, type DoNamespaceLike, type DoStubLike } from "./security/durableKv";
+import {
+  isAdminRoleGrant,
+  listGrantsForReview,
+  resolveGrantDefaultExpiryDays,
+  runGranterRevocationPass,
+  type GranterRevocationPassResult,
+} from "./security/grantRules";
+import { createGrantProposalStore, resolveAdminGrantProposal } from "./security/grantProposals";
+import { type DoNamespaceLike, type DoStubLike } from "./security/durableKv";
 import type { ActorNamespaceLike } from "./services/actorGatewayPorts";
 import { zonedDateParts } from "./schedule";
 import { OPERATION_CATALOG } from "./orchestrate";
@@ -285,6 +293,7 @@ import {
   renewFailureDetail,
   etradeIdentityFromSession,
   isTokenExpiredEt,
+  listTokenFamilyEntries,
 } from "./services/etradeOAuth";
 import {
   PublicClientRejectedError,
@@ -1099,7 +1108,12 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
         }
         return Response.json(result);
       } catch (err: any) {
-        return Response.json({ error: err.message || "Failed to initiate E*TRADE OAuth" }, { status: 500 });
+        // Issue #3197: the hub reclaims a stranded pre-opened tab by
+        // navigating it to the app with this code (etrade_connect_error),
+        // so the code rides alongside the outcome message. BusinessError
+        // carries an outcome-catalog code; other errors carry theirs or
+        // none (JSON drops an undefined code).
+        return Response.json({ error: err.message || "Failed to initiate E*TRADE OAuth", code: err.code }, { status: 500 });
       }
     }
 
@@ -1211,7 +1225,10 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
         const tokens = await exchangeETradeVerifier(env, session.githubLogin, verifier, body.requestToken, body.requestTokenSecret, reqEnv);
         return Response.json({ success: true, environment: tokens.environment, storedAt: tokens.storedAt });
       } catch (err: any) {
-        return Response.json({ error: err.message || "Failed to exchange verifier" }, { status: 400 });
+        // Issue #3197: outcome code alongside the message, as on the
+        // start route (BusinessError message is already the catalog
+        // business message, never the raw upstream body).
+        return Response.json({ error: err.message || "Failed to exchange verifier", code: err.code }, { status: 400 });
       }
     }
 
@@ -2922,12 +2939,42 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
               ),
           );
           if (!alreadyAdmin) {
+            // Issue #3155 (Q9): an approval needs two distinct
+            // approvers. The first approve records the approver
+            // and leaves the request pending (no grant, no
+            // rotation); the second approve grants and decides.
+            // A third distinct approver can still unblock a
+            // request whose grant was denied after two approvals.
+            const approval = await requestStore.recordApprover(
+              requestId,
+              session.internalUserId as string,
+              nowMs,
+            );
+            if (!approval.ok) {
+              return Response.json(
+                {
+                  error:
+                    approval.code === "ALREADY_APPROVER"
+                      ? "This admin already approved this request."
+                      : "Access request is no longer pending.",
+                },
+                { status: 409 },
+              );
+            }
+            if (approval.approverCount < 2) {
+              return Response.json({
+                ok: true,
+                pendingSecondApproval: true,
+                request: approval.request,
+              });
+            }
             const granted = await grantMembership(membershipStore, {
               granterInternalUserId: session.internalUserId,
               internalUserId: existing.requesterInternalUserId,
               tenantId,
               roleBindings: [{ role: existing.requestedRole, scope: "tenant", grantedBy: session.internalUserId }],
               nowMs,
+              defaultExpiryDays: resolveGrantDefaultExpiryDays(env.IAAA_GRANT_DEFAULT_EXPIRY_DAYS),
             });
             if (!granted.ok) {
               return Response.json({ error: "Forbidden: grant denied." }, { status: 403 });
@@ -3201,11 +3248,10 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
             await revokeRemoteAccessToken(env, login);
           },
           async hasTokens(login: string) {
-            const entries = await listStoreEntries({
-              namespace: env.SESSION_STORE as unknown as DoNamespaceLike | undefined,
-              namespaceName: "etrade",
-              prefix: "etrade:token:",
-            });
+            // #2434 (step 5c): the token listing goes through
+            // the token family's listing seam (port-composed
+            // when TOKEN_PORTS_ENABLED is on).
+            const entries = await listTokenFamilyEntries(env, "etrade:token:");
             // Cannot prove absence when the listing is unavailable:
             // fail closed to "tokens present" so verification fails
             // visibly instead of passing on an unknown store state.
@@ -3275,6 +3321,25 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
           if (!callerIsPlatformAdmin && !canListTenant) {
             await roleGrantDenyAudit("role_grant.list", tenantId);
             return Response.json({ error: "Forbidden: listing role grants requires admin access." }, { status: 403 });
+          }
+          // Issue #3155 (Q9): ?review=true returns the
+          // granter-review queue instead of the grant list.
+          // Revocation is judged over the FULL membership set
+          // (a granter with a live membership anywhere is not
+          // revoked); the returned queue is then filtered to
+          // what this caller may see, mirroring the list below.
+          if (new URL(request.url).searchParams.get("review") === "true") {
+            const reviewEntries = await listSessionFamilyEntries(env, "iaaa-membership:");
+            if (!reviewEntries) {
+              return Response.json({ error: "Role-grant listing unavailable." }, { status: 500 });
+            }
+            const reviewQueue = listGrantsForReview(listMembershipsFromEntries(reviewEntries), nowMs);
+            return Response.json({
+              ok: true,
+              reviewQueue: callerIsPlatformAdmin
+                ? reviewQueue
+                : reviewQueue.filter((q) => q.tenantId === tenantId),
+            });
           }
           const entries = await listSessionFamilyEntries(env, "iaaa-membership:");
           if (!entries) {
@@ -3425,6 +3490,34 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
               { status: 403 },
             );
           }
+          // Issue #3155 (Q9): this surface grants admin roles
+          // only, so every grant here needs two distinct
+          // approvers — the first proposes (202, pending), the
+          // second's identical grant confirms and mints below.
+          // Both approvers pass the obligation chain above, on
+          // their own calls.
+          {
+            const proposalStore = createGrantProposalStore(kv);
+            const resolved = await resolveAdminGrantProposal(proposalStore, {
+              kind: "grant",
+              granteeInternalUserId: targetId,
+              tenantId: validated.tenantId,
+              roleBindings: [{ role: validated.role, scope: validated.scope }],
+              callerInternalUserId: session.internalUserId as string,
+              nowMs,
+            });
+            if (resolved.action !== "confirm") {
+              return Response.json(
+                {
+                  ok: true,
+                  pending: true,
+                  proposalId: resolved.proposal.proposalId,
+                  approvers: resolved.proposal.approvers,
+                },
+                { status: 202 },
+              );
+            }
+          }
           const granted = await grantMembership(membershipStore, {
             granterInternalUserId: session.internalUserId,
             internalUserId: targetId,
@@ -3437,6 +3530,7 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
               },
             ],
             nowMs,
+            defaultExpiryDays: resolveGrantDefaultExpiryDays(env.IAAA_GRANT_DEFAULT_EXPIRY_DAYS),
             ...(granteeEmail !== undefined ? { email: granteeEmail } : {}),
           });
           if (!granted.ok) {
@@ -3544,8 +3638,51 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
             console.warn("[iaaa] session rotation skipped: session listing unavailable");
           }
           const revokeRotationCookie = sessionRotationCookie(request, revokeRotation);
+          // Issue #3155 (Q9): granter-revocation pass, mirroring
+          // the membership revoke route — matrix-violating grants
+          // by a now-fully-revoked user are revoked with them;
+          // valid grants stay for the review queue. Never fails
+          // the revoke; failures skip loudly with a reason.
+          let granterRevocationPass: GranterRevocationPassResult & { auditFailures: string[]; reason?: string };
+          try {
+            const passEntries = await listSessionFamilyEntries(env, "iaaa-membership:");
+            if (!passEntries) {
+              console.warn("[iaaa] granter-revocation pass skipped: membership listing unavailable");
+              granterRevocationPass = { reviewed: 0, revokedBindings: 0, revokedMemberships: [], skipped: true, auditFailures: [], reason: "listing-unavailable" };
+            } else {
+              const pass = await runGranterRevocationPass({
+                store: membershipStore,
+                allMemberships: listMembershipsFromEntries(passEntries),
+                revokedUserId: record.internalUserId,
+                nowMs,
+              });
+              const auditFailures: string[] = [];
+              for (const passRevokedId of pass.revokedMemberships) {
+                try {
+                  const audited = await wiredAuditWriter("membership:revoke")({
+                    permission: "membership:revoke",
+                    principalId: session.internalUserId as string,
+                    tenantId: record.tenantId,
+                    decision: "allow",
+                    nowMs,
+                  });
+                  if (!audited) {
+                    console.warn(`[iaaa] granter-revocation pass audit failed for ${passRevokedId}`);
+                    auditFailures.push(passRevokedId);
+                  }
+                } catch {
+                  console.warn(`[iaaa] granter-revocation pass audit threw for ${passRevokedId}`);
+                  auditFailures.push(passRevokedId);
+                }
+              }
+              granterRevocationPass = { ...pass, auditFailures };
+            }
+          } catch {
+            console.warn("[iaaa] granter-revocation pass failed; grants remain visible in the review queue");
+            granterRevocationPass = { reviewed: 0, revokedBindings: 0, revokedMemberships: [], skipped: true, auditFailures: [], reason: "pass-error" };
+          }
           return Response.json(
-            { ok: true, grantId: view.grantId, emptied: removed.emptied, revoked: true, sessionRotation: { rotatedCount: revokeRotation.rotated.length, unavailable: revokeRotation.unavailable } },
+            { ok: true, grantId: view.grantId, emptied: removed.emptied, revoked: true, granterRevocationPass, sessionRotation: { rotatedCount: revokeRotation.rotated.length, unavailable: revokeRotation.unavailable } },
             revokeRotationCookie ? { headers: { "Set-Cookie": revokeRotationCookie } } : undefined,
           );
         }
@@ -4648,6 +4785,39 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
               );
             }
           }
+          // Issue #3155 (Q9): tenant-admin and platform-admin
+          // grants need two distinct approvers. The first admin's
+          // grant proposes (202, pending) and mints nothing; the
+          // second admin's identical grant confirms the proposal
+          // and falls through to mint below. Both approvers pass
+          // the obligation chain above, on their own calls.
+          // Non-admin grants skip this block and mint immediately.
+          if (isAdminRoleGrant(requestedBindings)) {
+            const proposalStore = createGrantProposalStore(kv);
+            const resolved = await resolveAdminGrantProposal(proposalStore, {
+              kind: "grant",
+              granteeInternalUserId: targetId,
+              tenantId: grantTenantId,
+              roleBindings: requestedBindings.map((b) => ({
+                role: b.role as Role,
+                scope: b.scope,
+                ...(b.workspaceId ? { workspaceId: b.workspaceId } : {}),
+              })),
+              callerInternalUserId: session.internalUserId as string,
+              nowMs,
+            });
+            if (resolved.action !== "confirm") {
+              return Response.json(
+                {
+                  ok: true,
+                  pending: true,
+                  proposalId: resolved.proposal.proposalId,
+                  approvers: resolved.proposal.approvers,
+                },
+                { status: 202 },
+              );
+            }
+          }
           const granted = await grantMembership(membershipStore, {
             granterInternalUserId: session.internalUserId,
             internalUserId: targetId,
@@ -4662,6 +4832,7 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
               };
             }),
             nowMs,
+            defaultExpiryDays: resolveGrantDefaultExpiryDays(env.IAAA_GRANT_DEFAULT_EXPIRY_DAYS),
             ...(granteeEmail !== undefined ? { email: granteeEmail } : {}),
           });
           if (!granted.ok) {
@@ -4757,8 +4928,53 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
             console.warn("[iaaa] session rotation skipped: session listing unavailable");
           }
           const memberRevokeRotationCookie = sessionRotationCookie(request, memberRevokeRotation);
+          // Issue #3155 (Q9): granter-revocation pass. Once this
+          // revoke leaves the revoked user with no live
+          // memberships, matrix-violating grants they made are
+          // revoked with them; valid grants stay for the review
+          // queue. The pass never fails the revoke: a missing
+          // listing or a pass error skips it loudly, and audit
+          // failures are counted in the response, not hidden.
+          let granterRevocationPass: GranterRevocationPassResult & { auditFailures: string[]; reason?: string };
+          try {
+            const passEntries = await listSessionFamilyEntries(env, "iaaa-membership:");
+            if (!passEntries) {
+              console.warn("[iaaa] granter-revocation pass skipped: membership listing unavailable");
+              granterRevocationPass = { reviewed: 0, revokedBindings: 0, revokedMemberships: [], skipped: true, auditFailures: [], reason: "listing-unavailable" };
+            } else {
+              const pass = await runGranterRevocationPass({
+                store: membershipStore,
+                allMemberships: listMembershipsFromEntries(passEntries),
+                revokedUserId: record.internalUserId,
+                nowMs,
+              });
+              const auditFailures: string[] = [];
+              for (const passRevokedId of pass.revokedMemberships) {
+                try {
+                  const audited = await wiredAuditWriter("membership:revoke")({
+                    permission: "membership:revoke",
+                    principalId: session.internalUserId as string,
+                    tenantId: record.tenantId,
+                    decision: "allow",
+                    nowMs,
+                  });
+                  if (!audited) {
+                    console.warn(`[iaaa] granter-revocation pass audit failed for ${passRevokedId}`);
+                    auditFailures.push(passRevokedId);
+                  }
+                } catch {
+                  console.warn(`[iaaa] granter-revocation pass audit threw for ${passRevokedId}`);
+                  auditFailures.push(passRevokedId);
+                }
+              }
+              granterRevocationPass = { ...pass, auditFailures };
+            }
+          } catch {
+            console.warn("[iaaa] granter-revocation pass failed; grants remain visible in the review queue");
+            granterRevocationPass = { reviewed: 0, revokedBindings: 0, revokedMemberships: [], skipped: true, auditFailures: [], reason: "pass-error" };
+          }
           return Response.json(
-            { ok: true, membershipId, revoked: true, sessionRotation: { rotatedCount: memberRevokeRotation.rotated.length, unavailable: memberRevokeRotation.unavailable } },
+            { ok: true, membershipId, revoked: true, granterRevocationPass, sessionRotation: { rotatedCount: memberRevokeRotation.rotated.length, unavailable: memberRevokeRotation.unavailable } },
             memberRevokeRotationCookie ? { headers: { "Set-Cookie": memberRevokeRotationCookie } } : undefined,
           );
         }
@@ -4806,6 +5022,51 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
               );
             }
           }
+          // Issue #3155 (Q9): edits that add tenant-admin or
+          // platform-admin bindings need two distinct approvers.
+          // The first admin's edit proposes (202, pending) and
+          // changes nothing; the second admin's identical edit
+          // confirms and runs the grant-then-revoke sequence
+          // below. Both approvers pass the obligation chain
+          // above, on their own calls. Non-admin edits apply
+          // immediately.
+          if (
+            isAdminRoleGrant(
+              bindings.map((raw) => {
+                const binding = raw as { role?: unknown };
+                return { role: typeof binding.role === "string" ? binding.role : "" };
+              }),
+            )
+          ) {
+            const proposalStore = createGrantProposalStore(kv);
+            const resolved = await resolveAdminGrantProposal(proposalStore, {
+              kind: "edit",
+              targetMembershipId: membershipId,
+              granteeInternalUserId: record.internalUserId,
+              tenantId: record.tenantId,
+              roleBindings: bindings.map((raw) => {
+                const binding = raw as { role: string; scope?: string; workspaceId?: string };
+                return {
+                  role: binding.role as Role,
+                  scope: (binding.scope ?? "tenant") as AuthorizationScope,
+                  ...(binding.workspaceId ? { workspaceId: binding.workspaceId } : {}),
+                };
+              }),
+              callerInternalUserId: session.internalUserId as string,
+              nowMs,
+            });
+            if (resolved.action !== "confirm") {
+              return Response.json(
+                {
+                  ok: true,
+                  pending: true,
+                  proposalId: resolved.proposal.proposalId,
+                  approvers: resolved.proposal.approvers,
+                },
+                { status: 202 },
+              );
+            }
+          }
           const granted = await grantMembership(membershipStore, {
             granterInternalUserId: session.internalUserId,
             internalUserId: record.internalUserId,
@@ -4821,6 +5082,7 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
               };
             }),
             nowMs,
+            defaultExpiryDays: resolveGrantDefaultExpiryDays(env.IAAA_GRANT_DEFAULT_EXPIRY_DAYS),
           });
           if (!granted.ok) {
             return Response.json(
@@ -6136,6 +6398,11 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
     // (KEEP PUBLIC); escaping + CSP are the fix, not gating. The
     // Authorize href keeps raw values under encodeURIComponent, the
     // correct encoding for a URL query context.
+    // Styling (#3146): Carbon v11 Gray 100 tokens inlined below — this page
+    // allows no external resources, so Carbon's React components and the
+    // IBM Plex font cannot load here; the visual system is Carbon's tokens,
+    // spacing, type scale, and button treatment on the same markup. CSP
+    // and escaping are unchanged.
     if (path === "/checkout/sandbox") {
       const escapeHtml = (s: string) =>
         s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -6154,32 +6421,31 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
   <title>${escapeHtml(provider)} Payment Terminal — Multi-Agent Studio</title>
   <style>
     body {
-      margin: 0; padding: 0; background: ${SERVER_PALETTE.surface}; color: ${SERVER_PALETTE.textPrimary};
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      margin: 0; padding: 0; background: ${SERVER_PALETTE.carbonBackground}; color: ${SERVER_PALETTE.carbonTextPrimary};
+      font-family: 'IBM Plex Sans', 'Helvetica Neue', Arial, sans-serif;
       display: flex; align-items: center; justify-content: center; min-height: 100vh;
     }
     .card {
-      background: ${SERVER_PALETTE.checkoutCard}; border: 1px solid ${SERVER_PALETTE.indigoAlpha40};
-      border-radius: 20px; padding: 2.5rem; max-width: 440px; width: 90%;
-      box-shadow: 0 20px 50px ${SERVER_PALETTE.blackAlpha60}; backdrop-filter: blur(20px);
+      background: ${SERVER_PALETTE.carbonLayer01}; border: 1px solid ${SERVER_PALETTE.carbonBorderSubtle};
+      border-radius: 0; padding: 2rem; max-width: 440px; width: 90%; box-sizing: border-box;
     }
-    .badge { display: inline-block; background: ${SERVER_PALETTE.indigoAlpha20}; color: ${SERVER_PALETTE.indigo400}; padding: 0.25rem 0.65rem; border-radius: 6px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; margin-bottom: 1rem; }
-    h2 { margin: 0 0 0.5rem 0; font-size: 1.5rem; color: ${SERVER_PALETTE.onGradient}; }
-    .amount { font-size: 2.4rem; font-weight: 800; color: ${SERVER_PALETTE.accent}; margin: 1rem 0; }
-    .did-box { background: ${SERVER_PALETTE.blackAlpha40}; border: 1px solid ${SERVER_PALETTE.cardBorder}; border-radius: 10px; padding: 0.85rem; font-family: monospace; font-size: 0.75rem; color: ${SERVER_PALETTE.textMuted}; word-break: break-all; margin-bottom: 1.5rem; }
-    .btn { display: block; width: 100%; padding: 0.85rem; border-radius: 10px; font-size: 0.95rem; font-weight: 700; cursor: pointer; text-align: center; text-decoration: none; border: 0; margin-bottom: 0.75rem; box-sizing: border-box; }
-    .btn-pay { background: linear-gradient(135deg, ${SERVER_PALETTE.indigo500} 0%, ${SERVER_PALETTE.cyan500} 100%); color: ${SERVER_PALETTE.onGradient}; }
-    .btn-pay:hover { filter: brightness(1.15); }
-    .btn-cancel { background: transparent; color: ${SERVER_PALETTE.slate500}; }
-    .btn-cancel:hover { color: ${SERVER_PALETTE.dangerText}; }
+    .badge { display: inline-block; background: ${SERVER_PALETTE.carbonTagBlueBg}; color: ${SERVER_PALETTE.carbonTagBlueText}; padding: 0.25rem 0.5rem; border-radius: 0; font-size: 0.75rem; font-weight: 400; letter-spacing: 0.02rem; text-transform: uppercase; margin-bottom: 1rem; }
+    h2 { margin: 0 0 0.5rem 0; font-size: 1.25rem; font-weight: 400; color: ${SERVER_PALETTE.carbonTextPrimary}; }
+    .amount { font-size: 2rem; font-weight: 400; color: ${SERVER_PALETTE.carbonTextPrimary}; margin: 1rem 0; }
+    .did-box { background: ${SERVER_PALETTE.carbonBackground}; border: 1px solid ${SERVER_PALETTE.carbonBorderSubtle}; border-radius: 0; padding: 1rem; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 0.75rem; color: ${SERVER_PALETTE.carbonTextSecondary}; word-break: break-all; margin-bottom: 1.5rem; }
+    .btn { display: flex; align-items: center; justify-content: center; width: 100%; min-height: 3rem; padding: 0 1rem; border-radius: 0; font-size: 0.875rem; font-weight: 400; cursor: pointer; text-align: center; text-decoration: none; border: 0; margin-bottom: 0.75rem; box-sizing: border-box; }
+    .btn-pay { background: ${SERVER_PALETTE.carbonButtonPrimary}; color: ${SERVER_PALETTE.onGradient}; }
+    .btn-pay:hover { background: ${SERVER_PALETTE.carbonButtonPrimaryHover}; }
+    .btn-cancel { background: transparent; color: ${SERVER_PALETTE.carbonLinkPrimary}; }
+    .btn-cancel:hover { background: ${SERVER_PALETTE.carbonLayerHover01}; }
   </style>
 </head>
 <body>
   <div class="card">
     <span class="badge">${escapeHtml(provider)} Sandbox Terminal</span>
     <h2>Secure Payment Authorization</h2>
-    <p style="color: ${SERVER_PALETTE.textMuted}; font-size: 0.88rem; margin: 0;">Recipient: Multi-Agent Studio (${escapeHtml(customer)})</p>
-    <div class="amount">$${escapeHtml(amount)} <span style="font-size: 1rem; color: ${SERVER_PALETTE.textMuted};">${escapeHtml(currency)}</span></div>
+    <p style="color: ${SERVER_PALETTE.carbonTextSecondary}; font-size: 0.875rem; margin: 0;">Recipient: Multi-Agent Studio (${escapeHtml(customer)})</p>
+    <div class="amount">$${escapeHtml(amount)} <span style="font-size: 1rem; color: ${SERVER_PALETTE.carbonTextSecondary};">${escapeHtml(currency)}</span></div>
     <div class="did-box">
       <div><strong>Proposer:</strong> did:agent:openaimp:payments</div>
       <div><strong>Intent Hash:</strong> ${escapeHtml(sig)}...</div>

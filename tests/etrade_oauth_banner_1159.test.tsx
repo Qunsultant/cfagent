@@ -110,7 +110,9 @@ describe("E*TRADE OAuth hub feedback (#1159)", () => {
     await renderHub();
     await startOAuth();
     // The modal itself links the URL while open; dismiss it and the
-    // hub banner must keep the link reachable.
+    // hub banner must keep the way back. Issue #3197: the banner
+    // button re-opens the modal bound to the ORIGINAL token instead
+    // of linking out, so a PIN obtained from it still submits.
     const cancel = [...document.querySelectorAll("button")].find((b) =>
       (b.textContent || "").includes("Cancel"),
     );
@@ -118,7 +120,17 @@ describe("E*TRADE OAuth hub feedback (#1159)", () => {
       (cancel as HTMLButtonElement).click();
     });
     await flush(40);
-    const link = container.querySelector('a[href="https://api.etrade.com/oauth/authorize?token=rt"]');
+    const reopen = [...document.querySelectorAll("button")].find((b) =>
+      (b.textContent || "").includes("Reopen PIN form"),
+    );
+    expect(reopen).toBeDefined();
+    await act(async () => {
+      (reopen as HTMLButtonElement).click();
+    });
+    await flush(40);
+    // The modal renders through a portal to document.body.
+    expect(document.body.textContent).toMatch(/Authorize E\*TRADE Application/);
+    const link = document.querySelector('a[href="https://api.etrade.com/oauth/authorize?token=rt"]');
     expect(link).not.toBeNull();
   });
 

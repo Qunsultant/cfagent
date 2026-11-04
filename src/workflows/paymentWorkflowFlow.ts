@@ -310,6 +310,13 @@ export interface PaymentWorkflowDeps {
    * traceStep(), which swallows.
    */
   traceHop?: (event: { operation: string; note?: string }) => Promise<void>;
+  /**
+   * Issue #3073 - one stage-boundary message per completed step, on the
+   * shared #2869 seam. Injected by PaymentWorkflow.run (the flow itself has
+   * no queue binding). Best-effort by the same #1743 rule as traceHop: a
+   * boundary that cannot be published never fails a payment.
+   */
+  stageBoundary?: (input: { stageId: PaymentStepId }) => Promise<unknown>;
 }
 
 /**
@@ -420,11 +427,39 @@ export type PaymentWorkflowOutcome =
 /** How long a checkout waits for verified payment before lapsing. */
 export const PAYMENT_VERIFICATION_TIMEOUT = "24 hours";
 
+/**
+ * Issue #3191 - the payment workflow's real step ids live in the shared,
+ * dependency-free `stageRuntimeIds` module (the workflow catalog renders in
+ * the browser and must not import this file). Re-exported here so the flow
+ * and the catalog read one declaration; tests/payment_saga_stage_ids_3191.test.ts
+ * scans this file and fails if the two drift.
+ */
+export { PAYMENT_STEP_IDS } from "./stageRuntimeIds";
+export type { PaymentStepId } from "./stageRuntimeIds";
+import type { PaymentStepId as PaymentStepIdValue } from "./stageRuntimeIds";
+type PaymentStepId = PaymentStepIdValue;
+
 export async function runPaymentWorkflowFlow(
   params: PaymentWorkflowParams,
   deps: PaymentWorkflowDeps,
   step: PaymentWorkflowStep,
 ): Promise<PaymentWorkflowOutcome> {
+  /**
+   * Issue #3073: the one place a payment step runs. Durable step first,
+   * then the boundary message - so the artifact the message references
+   * (the step's own persisted record) exists before anything is published.
+   * The emit is awaited behind a swallow, so a seam failure cannot alter
+   * the flow's outcome.
+   */
+  const doStep = async <T,>(stageId: PaymentStepId, fn: () => Promise<T>): Promise<T> => {
+    const result = await step.do(stageId, fn);
+    try {
+      await deps.stageBoundary?.({ stageId });
+    } catch {
+      // Best-effort by design (the #1743 degradation rule).
+    }
+    return result;
+  };
   if (!params.userId || !params.email || !params.tenantId) {
     throw new Error(
       "Payment workflow payload is missing verified userId, email, or tenantId: no default identity, fail closed.",
@@ -434,7 +469,7 @@ export async function runPaymentWorkflowFlow(
     throw new Error("Tenant mismatch: run tenant must equal the verified account tenant.");
   }
 
-  const gateDecision = await step.do("gate-check", () =>
+  const gateDecision = await doStep("gate-check", () =>
     deps.gate.check({
       id: params.runRequestId,
       family: params.family,
@@ -451,7 +486,7 @@ export async function runPaymentWorkflowFlow(
     if (gateDecision.status === "coverage_required") {
       // #2019: a skip is audited, not silent — the gate's in-memory
       // skip note would otherwise be lost with the workflow instance.
-      await step.do("record-coverage-required", () =>
+      await doStep("record-coverage-required", () =>
         deps.recordEvent({
           runRequestId: params.runRequestId,
           tenantId: params.tenantId,
@@ -467,7 +502,7 @@ export async function runPaymentWorkflowFlow(
     // pre-existing checkout (gateDecision.checkout undefined) is not
     // re-announced as created.
     if (gateDecision.checkout !== undefined) {
-      await step.do("record-checkout", () =>
+      await doStep("record-checkout", () =>
         deps.recordEvent({
           runRequestId: params.runRequestId,
           tenantId: params.tenantId,
@@ -487,7 +522,7 @@ export async function runPaymentWorkflowFlow(
       // #2550: the at-submission record names its authorizing
       // principal — the verified submitter whose authorization
       // the params carry — symmetric with the waited path below.
-      await step.do("record-approval", () =>
+      await doStep("record-approval", () =>
         deps.recordEvent({
           runRequestId: params.runRequestId,
           tenantId: params.tenantId,
@@ -510,7 +545,7 @@ export async function runPaymentWorkflowFlow(
         // The wait completed with no decision: the hop records the
         // elapsed wait under the carried trace, noted as expired.
         await traceStep(deps, "await-payment-approval", "expired");
-        await step.do("record-expiry", () =>
+        await doStep("record-expiry", () =>
           deps.recordEvent({ runRequestId: params.runRequestId, tenantId: params.tenantId, type: "payment.approval_expired" }),
         );
         await traceStep(deps, "record-expiry");
@@ -518,7 +553,7 @@ export async function runPaymentWorkflowFlow(
       }
       await traceStep(deps, "await-payment-approval");
       if (approval.approved !== true) {
-        await step.do("record-rejection", () =>
+        await doStep("record-rejection", () =>
           deps.recordEvent({ runRequestId: params.runRequestId, tenantId: params.tenantId, type: "payment.approval_rejected" }),
         );
         await traceStep(deps, "record-rejection");
@@ -530,7 +565,7 @@ export async function runPaymentWorkflowFlow(
       // amount, and the time, recorded before the verified-
       // payment wait so the trail exists even if payment never
       // completes.
-      await step.do("record-approval", () =>
+      await doStep("record-approval", () =>
         deps.recordEvent({
           runRequestId: params.runRequestId,
           tenantId: params.tenantId,
@@ -552,14 +587,14 @@ export async function runPaymentWorkflowFlow(
       verified = (event.payload ?? {}) as PaymentVerifiedEvent;
     } catch {
       await traceStep(deps, "await-payment-verified", "expired");
-      await step.do("record-expiry", () =>
+      await doStep("record-expiry", () =>
         deps.recordEvent({ runRequestId: params.runRequestId, tenantId: params.tenantId, type: "payment.expired" }),
       );
       await traceStep(deps, "record-expiry");
       return { status: "expired", runRequestId: params.runRequestId };
     }
     await traceStep(deps, "await-payment-verified");
-    const confirmed = await step.do("confirm-paid", () =>
+    const confirmed = await doStep("confirm-paid", () =>
       deps.gate.confirmPaid(
         { id: params.runRequestId, userId: params.userId, email: params.email, family: params.family },
         {
@@ -580,7 +615,7 @@ export async function runPaymentWorkflowFlow(
         checkout: gateDecision.checkout,
       };
     }
-    await step.do("record-payment", () =>
+    await doStep("record-payment", () =>
       deps.recordEvent({
         runRequestId: params.runRequestId,
         tenantId: params.tenantId,
@@ -605,7 +640,7 @@ export async function runPaymentWorkflowFlow(
     // record-payment handler already posts it (rail-agnostic,
     // same runRequestId ref, best-effort, replay-safe), so a
     // second post here would be a duplicate no-op.
-    await step.do("record-native-ledger", () =>
+    await doStep("record-native-ledger", () =>
       recordNativeLedgerBestEffort(deps.nativeLedger, {
         runRequestId: params.runRequestId,
         tenantId: params.tenantId,
@@ -647,7 +682,7 @@ export async function runPaymentWorkflowFlow(
           `Payment workflow cannot meter run ${params.runRequestId}: confirmed payment carries no provider receipt id.`,
         );
       }
-      await step.do("record-usage", () =>
+      await doStep("record-usage", () =>
         deps.recordUsage!({
           ...receipt,
           userLogin: params.meterContext!.userLogin,
@@ -666,7 +701,7 @@ export async function runPaymentWorkflowFlow(
   }
 
   // Covered, already paid, or free (flag OFF): no wait, no new charge.
-  await step.do("record-payment", () =>
+  await doStep("record-payment", () =>
     deps.recordEvent({
       runRequestId: params.runRequestId,
       tenantId: params.tenantId,
@@ -681,7 +716,7 @@ export async function runPaymentWorkflowFlow(
   // the adapter (see the dep doc): a failed consumption never
   // blocks this covered run.
   if (deps.consumeCoverage) {
-    await step.do("consume-coverage", () =>
+    await doStep("consume-coverage", () =>
       deps.consumeCoverage!({
         userId: params.userId,
         paidVia: gateDecision.paidVia ?? gateDecision.status,
@@ -706,8 +741,19 @@ async function startScreenerOrCredit(
   paidVia: string,
   priceUSD: number,
 ): Promise<PaymentWorkflowOutcome> {
+  // Issue #3073: same durable step, same boundary - declared here because this
+  // helper owns its own `step` handle (the flow's wrapper is out of scope).
+  const doStep = async <T,>(stageId: PaymentStepId, fn: () => Promise<T>): Promise<T> => {
+    const result = await step.do(stageId, fn);
+    try {
+      await deps.stageBoundary?.({ stageId });
+    } catch {
+      // Best-effort by design (the #1743 degradation rule).
+    }
+    return result;
+  };
   try {
-    const started = await step.do("start-screener", () => deps.startScreener(params));
+    const started = await doStep("start-screener", () => deps.startScreener(params));
     await traceStep(deps, "start-screener");
     return {
       status: "started",
@@ -722,7 +768,7 @@ async function startScreenerOrCredit(
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    await step.do("issue-failure-credit", async () => {
+    await doStep("issue-failure-credit", async () => {
       await deps.issueFailureCredit(params.runRequestId, priceUSD);
       await deps.recordEvent({
         runRequestId: params.runRequestId,
