@@ -1,0 +1,2 @@
+### Changed
+- Knowledge serving and AI Search report indexing are enabled in the production configuration (issue 1169 enablement): agent search uses the strict live-index mapping with per-result provenance, the session-gated corpus file route is active, and newly stored reports are offered to the AI Search index — recorded as not-configured on the report row until the instance binding is configured, never failing the store.
