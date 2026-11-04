@@ -18,10 +18,11 @@
  *
  * Honesty: no path configured -> typed degraded result, zero
  * fabricated results; a path that throws falls through with the
- * failure recorded; the REST fallback's provider "semantic_cache"
- * rows (the fabricated FINANCIAL_KNOWLEDGE_BASE) are surfaced as
- * DEGRADED, never as results — this agent does not launder the
- * fallback #1169 S3 exists to remove.
+ * failure recorded; a REST answer carrying the service's in-band
+ * `degraded` reason is surfaced as DEGRADED (code degraded_fallback),
+ * never as results and never as an ok empty answer — since #1169 S3
+ * removed the service's fabricated FINANCIAL_KNOWLEDGE_BASE fallback,
+ * an unserved REST answer is zero results plus that reason.
  *
  * Result items are hub-consistent: the S2 fields of
  * AISearchResultItem (title/snippet/source/score + bucket-key
@@ -42,6 +43,7 @@ import {
   dispatchAiSearchA2A,
   aiSearchA2AOutcome,
 } from "../src/agents/aiSearchDispatch";
+import type { AISearchQueryResponse } from "../src/services/aiSearch";
 import { getAgentCard } from "../src/a2a/agent-cards";
 import { resolveA2AAgent, resolveA2AInstanceName } from "../src/a2a/resolution";
 import { RemoteMcpClient } from "../src/mcps/client/mcpClient";
@@ -99,21 +101,17 @@ const LIVE_REST = {
   timestamp: "2026-10-29T00:00:00Z",
 };
 
-const FALLBACK_REST = {
+// Post-#1169 S3 the REST service has no fallback corpus to answer
+// from: an unserved answer is zero results + an in-band degraded
+// reason (provider stays "cloudflare_ai_search"; no served result
+// can carry "semantic_cache" anymore).
+const DEGRADED_REST_FIXTURE = {
   query: "q",
-  results: [
-    {
-      id: "finra_rule_4210_pdt",
-      title: "FINRA Rule 4210: Pattern Day Trader (PDT) Margin Requirements",
-      snippet: "Pattern day traders must maintain minimum equity of $25,000.",
-      score: 0.95,
-      category: "broker_rules" as const,
-      url: "https://www.finra.org/rules-guidance/rulebooks/finra-rules/4210",
-    },
-  ],
-  totalMatches: 1,
-  provider: "semantic_cache" as const,
-  timestamp: "2026-10-29T00:00:00Z",
+  results: [],
+  totalMatches: 0,
+  provider: "cloudflare_ai_search" as const,
+  timestamp: "2026-11-04T00:00:00Z",
+  degraded: "upstream_http_error" as const,
 };
 
 describe("AiSearchAgent path priority (#2223)", () => {
@@ -278,24 +276,31 @@ describe("AiSearchAgent path priority (#2223)", () => {
 });
 
 describe("AiSearchAgent REST honesty (#2223)", () => {
-  it("fallback-labelled REST output (semantic_cache) is surfaced as DEGRADED, never as results", async () => {
+  it("degraded REST output (in-band degraded reason) is surfaced as DEGRADED, never as results", async () => {
+    // Adapted by #1169 S3 (user directive 2026-11-04): was
+    // "fallback-labelled REST output (semantic_cache)…". The service
+    // no longer has a fallback to label; the runner now keys off the
+    // response's `degraded` reason. Assertions kept at equal or
+    // greater strength (reason surfaced, withholding stated, no rows).
     const env = { AI_SEARCH_ENDPOINT: "https://example.search.ai.cloudflare.com" } as unknown as EnvLike;
-    const deps: AiSearchAgentDeps = { restSearch: async () => FALLBACK_REST };
+    const deps: AiSearchAgentDeps = { restSearch: async () => DEGRADED_REST_FIXTURE };
     const result = await runAiSearchPaths(env, "pattern day trader", {}, deps);
     expect(result.ok).toBe(false);
     expect(result.path).toBe("rest");
     expect(result.code).toBe("degraded_fallback");
-    expect(result.degraded).toMatch(/semantic_cache/);
-    expect(result.degraded).toMatch(/not live AI Search results/i);
-    // The fabricated knowledge-base rows are withheld, not laundered.
+    expect(result.degraded).toMatch(/upstream_http_error/);
+    expect(result.degraded).toMatch(/did not serve the query/i);
+    expect(result.degraded).toMatch(/withheld/);
+    // The degraded answer is withheld, not laundered into results.
     expect(result.results).toBeUndefined();
   });
 
   it("DEFAULT rest executor constructs the real ETradeAISearchService (reuse, not reimplementation)", async () => {
     // No deps override: the runner builds the service over env.
     // With the endpoint configured but unreachable (test netblock /
-    // hermetic fetch), the service falls back to its semantic_cache
-    // branch — and the agent must surface exactly that as degraded.
+    // hermetic fetch), the service returns its degraded contract
+    // (#1169 S3) — and the agent must surface exactly that as
+    // degraded, never as an ok empty answer.
     const env = { AI_SEARCH_ENDPOINT: "https://unreachable.invalid/ai-search" } as unknown as EnvLike;
     const result = await runAiSearchPaths(env, "pattern day trader", {}, {});
     expect(result.ok).toBe(false);
@@ -416,7 +421,7 @@ describe("AiSearchAgent A2A dispatch (#2223)", () => {
       results: undefined,
       path: "rest",
       code: "degraded_fallback",
-      degraded: "semantic_cache fallback withheld",
+      degraded: "REST path degraded (upstream_unreachable); answer withheld",
     });
     const data = await dispatchAiSearchA2A(ENV, { operation: "aisearch.search", query: "x" }, { search });
     expect(data.ok).toBe(false);
@@ -485,6 +490,31 @@ describe("AiSearchAgent A2A dispatch (#2223)", () => {
     expect(resolution!.binding).toBe("AI_SEARCH_AGENT");
     expect(resolution!.instanceName).toBeUndefined();
     expect(resolveA2AInstanceName(resolution!, "aisearch", ENV as never)).toBe("aisearch");
+  });
+});
+
+describe("AiSearchAgent REST degraded contract (#1169 S3)", () => {
+  const ENV = { AI_SEARCH_ENDPOINT: "https://example.search.ai.cloudflare.com" } as unknown as EnvLike;
+
+  // The degraded-answer half of this contract is pinned by the
+  // adapted "REST honesty" test above (degraded reason ->
+  // degraded_fallback). This pin covers the other half: the rewire
+  // must not over-block a served answer.
+  const EMPTY_OK_REST: AISearchQueryResponse = {
+    query: "unindexed topic",
+    results: [],
+    totalMatches: 0,
+    provider: "cloudflare_ai_search",
+    timestamp: "2026-11-04T00:00:00.000Z",
+  };
+
+  it("REST-leg ok-but-empty answer (empty index) -> ok with zero items, NOT degraded", async () => {
+    const deps: AiSearchAgentDeps = { restSearch: async () => EMPTY_OK_REST };
+    const result = await runAiSearchPaths(ENV, "unindexed topic", {}, deps);
+    expect(result.ok).toBe(true);
+    expect(result.path).toBe("rest");
+    expect(result.results).toEqual([]);
+    expect(result.code).toBeUndefined();
   });
 });
 
