@@ -1306,6 +1306,7 @@
         "provenance",
         "api-keys",
         "tenants",
+        "channels",
         "data-providers",
         "accounts",
         "iaaa-admin",
@@ -1487,6 +1488,12 @@
           "label": "Tenants",
           "description": "Tenant create, list, settings, and members",
           "icon": "Agents"
+        },
+        {
+          "id": "channels",
+          "label": "Channels",
+          "description": "Delivery-channel enablement per tenant",
+          "icon": "Omnichannel"
         },
         {
           "id": "data-providers",

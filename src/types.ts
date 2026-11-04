@@ -189,6 +189,17 @@ export interface Env {
   // byte-identical. Rollback is unsetting the var — no code
   // change, no data migration.
   SESSION_PORTS_ENABLED?: string;
+  // #2434 (#1976 step 5c) — flag-gated OAuth token family
+  // ports. Same idiom as SESSION_PORTS_ENABLED above:
+  // "1"/"true"/"on" (case-insensitive) = on; absence = OFF (the
+  // var is deliberately NOT in wrangler.jsonc — the slice ships
+  // default-off). Flag-ON composes E*TRADE and Public token
+  // storage through src/data/createTokenPorts.ts over the SAME
+  // SessionStore DO and kv_store table; flag-OFF is today's
+  // funnel composition in security/etradeOAuth.ts /
+  // security/publicOAuth.ts, byte-identical. Rollback is
+  // unsetting the var — no code change, no data migration.
+  TOKEN_PORTS_ENABLED?: string;
   // #2246 — flag-gated report indexing into the AI Search instance.
   // Same idiom as KNOWLEDGE_SERVING_ENABLED above: "1"/"true"/"on"
   // (case-insensitive) = on; absence = OFF. The slice shipped

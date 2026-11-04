@@ -46,6 +46,7 @@ import { JobsPanel } from "./JobsPanel";
 import { ApiKeysPanel } from "./ApiKeysPanel";
 import { DataProvidersPanel } from "./DataProvidersPanel";
 import { TenantAdminPanel } from "./TenantAdminPanel";
+import { ChannelsAdminPanel } from "./ChannelsAdminPanel";
 import { AccountAdminPanel } from "./AccountAdminPanel";
 import { IaaaAdminPanel } from "./IaaaAdminPanel";
 import { UserAdminPanel } from "./UserAdminPanel";
@@ -81,6 +82,7 @@ export const PLATFORM_ADMIN_TABS: TabOption<PlatformAdminSectionId>[] = [
   { id: "provenance", label: "Diagnostics & Provenance", icon: <NavIcons.Provenance /> },
   { id: "api-keys", label: "API Keys", icon: <NavIcons.ApiKeys /> },
   { id: "tenants", label: "Tenants", icon: <NavIcons.Agents /> },
+  { id: "channels", label: "Channels", icon: <NavIcons.Omnichannel /> },
   { id: "data-providers", label: "Data Providers", icon: <NavIcons.DataProviders /> },
   { id: "accounts", label: "Accounts", icon: <NavIcons.Contracts /> },
   { id: "iaaa-admin", label: "IAAA Admin", icon: <NavIcons.IaaaAdmin /> },
@@ -261,6 +263,16 @@ export function PlatformAdminPage({
             <small>Tenant create, list, settings &amp; members</small>
           </div>
           <TenantAdminPanel />
+        </Card>
+      </TabPanel>
+
+      <TabPanel idBase="platform-admin" tabId="channels" active={active === "channels"}>
+        <Card padding="md">
+          <div className="section-label-row">
+            <span>Channels</span>
+            <small>Delivery-channel enablement per tenant</small>
+          </div>
+          <ChannelsAdminPanel />
         </Card>
       </TabPanel>
 

@@ -1,0 +1,2 @@
+### Added
+- #1976 step 5c (#2434): the E*TRADE and Public OAuth token families now sit behind ports — `EtradeTokenPort` + `PublicTokenPort` in `src/data/` with Durable Object and in-memory adapters — flag-gated by `TOKEN_PORTS_ENABLED` (default off, not in wrangler.jsonc; the existing `etradeOAuth` / `publicOAuth` functions are delegating façades when the flag is on, with unchanged signatures). Internal platform change: no user-visible behaviour change, no stored key or value shape changes, and flag-off is the previous composition byte-identical.
