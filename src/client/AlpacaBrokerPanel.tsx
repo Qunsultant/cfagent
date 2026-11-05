@@ -1,7 +1,11 @@
 import React, { useEffect, useState } from "react";
 import { Badge, Card, EmptyState, Flex, Notice, Spinner, Stack, Table } from "./components/ui";
-import type { BrokerAccount, BrokerPosition } from "../types";
-import { tradingTypeFor, type TradingEnvironment } from "../trading/brokerCatalog";
+import type { BrokerAccount, BrokerPosition, BrokerStatus } from "../types";
+import {
+  brokerCredentialGuidance,
+  tradingTypeFor,
+  type TradingEnvironment,
+} from "../trading/brokerCatalog";
 import { BrokerSurfaceGate } from "./BrokerSurfaceGate";
 
 /**
@@ -40,6 +44,12 @@ interface PositionsPayload {
   broker: string;
   environment: TradingEnvironment;
   result: { account: BrokerAccount; positions: BrokerPosition[] };
+}
+
+interface StatusPayload {
+  broker: string;
+  environment: TradingEnvironment;
+  status: BrokerStatus;
 }
 
 const ACCOUNT_COLUMNS = [
@@ -116,13 +126,59 @@ export interface AlpacaBrokerPanelProps {
 export function AlpacaBrokerPanel({ activeEnv }: AlpacaBrokerPanelProps) {
   const accounts = useBrokerRead<AccountsPayload>("/broker/accounts");
   const positions = useBrokerRead<PositionsPayload>("/broker/positions");
+  const status = useBrokerRead<StatusPayload>("/broker/status");
 
   const environment =
-    accounts.state === "ready" ? accounts.environment : positions.state === "ready" ? positions.environment : null;
+    accounts.state === "ready"
+      ? accounts.environment
+      : positions.state === "ready"
+        ? positions.environment
+        : status.state === "ready"
+          ? status.environment
+          : null;
   const tradingType = environment ? tradingTypeFor("alpaca", environment) : null;
+
+  // Issue #3330: Alpaca signs in with a key pair, not E*TRADE's OAuth redirect.
+  // The guidance comes from the catalogue's declaration (#3232) so the surface
+  // asks for the credential kind the broker actually uses — and names the
+  // deployment variables, because the browser never handles the secret.
+  const guidance = brokerCredentialGuidance("alpaca");
+  const guidanceEnvNames = tradingType ? guidance.envNames[tradingType] : guidance.envNames.paper;
+  const configured = status.state === "ready" ? status.data.status?.configured === true : null;
 
   return (
     <Stack gap="3" data-broker="alpaca" data-broker-panel="alpaca" data-active-env={activeEnv ?? ""}>
+      <Card>
+        <Flex align="center" gap="2">
+          <h4>Connection</h4>
+          {configured !== null && (
+            <Badge tone={configured ? "success" : "warning"} size="sm">
+              {configured ? "Configured" : "Not configured"}
+            </Badge>
+          )}
+          {status.state === "ready" && status.data.status?.apiUrl && (
+            <Badge tone="neutral" size="sm">
+              {status.data.status.apiUrl}
+            </Badge>
+          )}
+        </Flex>
+        {status.state === "loading" && <Spinner size="sm" label="Loading Alpaca connection status" />}
+        {status.state === "error" && <ReadFailure code={status.code} message={status.message} />}
+        {status.state === "ready" && (
+          <Stack gap="2">
+            <p data-broker-credential-kind={guidance.kind}>{guidance.summary}</p>
+            {configured === false && (
+              <Notice tone="warning" title="Alpaca credentials are not set">
+                <span data-broker-credential-vars={guidanceEnvNames.join(",")}>
+                  Set {guidanceEnvNames.join(", ")} for {tradingType ?? "paper"} trading. The key and secret are deployment
+                  secrets; this surface never asks for them.
+                </span>
+              </Notice>
+            )}
+          </Stack>
+        )}
+      </Card>
+
       <Card>
         <Flex align="center" gap="2">
           <h4>Alpaca</h4>
