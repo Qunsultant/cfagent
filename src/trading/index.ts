@@ -50,6 +50,7 @@ export * from "./agent";
 export * from "./etrade/client";
 export * from "./etrade/platform";
 export * from "./alpaca/platform";
+export * from "./alpaca/fillLots";
 export * from "./optionsScreener";
 
 // --- boundary surface (#290): every capability external code used via deep paths ---
