@@ -5,7 +5,7 @@ import {
   createStoreKv,
   listStoreEntries,
   type DoNamespaceLike,
-} from "./durableKv";
+} from "../data/durableKv";
 import { type KvLike } from "./kvResilience";
 import {
   createSessionPorts,
