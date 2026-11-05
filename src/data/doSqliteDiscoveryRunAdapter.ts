@@ -24,6 +24,8 @@ import {
   DISCOVERY_RUN_RETENTION_DAYS,
   discoveryRunVisibleToCaller,
   type DiscoveryRunInput,
+  type DiscoveryRunBroker,
+  normalizeDiscoveryRunBroker,
   type DiscoveryRunStore,
   type DiscoveryRunStoreOptions,
   type DiscoveryRunSummary,
@@ -67,6 +69,8 @@ function summarize(input: DiscoveryRunInput, id: string): DiscoveryRunSummary {
   return {
     id,
     createdAt: input.createdAt,
+    // Issue #3388: provenance lives in the summary (no column migration).
+    broker: normalizeDiscoveryRunBroker(input.broker),
     ...(input.userLogin !== undefined ? { userLogin: input.userLogin } : {}),
     trigger: input.trigger,
     ...(input.scheduleId !== undefined ? { scheduleId: input.scheduleId } : {}),
@@ -182,23 +186,40 @@ export class SqlDiscoveryRunStore implements DiscoveryRunStore {
     return run;
   }
 
-  async list(options: { limit?: number; offset?: number; userLogin?: string } = {}): Promise<DiscoveryRunSummary[]> {
+  async list(options: { limit?: number; offset?: number; userLogin?: string; broker?: DiscoveryRunBroker } = {}): Promise<DiscoveryRunSummary[]> {
     this.ensure();
     const limit = options.limit ?? 25;
     const offset = options.offset ?? 0;
-    const rows = Array.from(this.sql.exec(LIST_SQL, options.userLogin ?? null, limit, offset)) as Array<{
-      summary_json: string;
-    }>;
-    return rows.map((r) => JSON.parse(r.summary_json) as DiscoveryRunSummary);
+    // Issue #3388: provenance lives inside summary_json, so a broker-scoped
+    // read filters after parsing. It reads the bounded window (the table is
+    // capped by maxRows) and slices here, which keeps pagination honest instead
+    // of returning short pages from a filtered LIMIT — and keeps this adapter
+    // at the same number of SQL statements the D-D census pins.
+    const brokerScoped = Boolean(options.broker);
+    const rows = Array.from(
+      this.sql.exec(
+        LIST_SQL,
+        options.userLogin ?? null,
+        brokerScoped ? this.maxRows : limit,
+        brokerScoped ? 0 : offset,
+      ),
+    ) as Array<{ summary_json: string }>;
+    const summaries = rows.map((r) => JSON.parse(r.summary_json) as DiscoveryRunSummary);
+    if (!options.broker) return summaries;
+    return summaries
+      .filter((summary) => normalizeDiscoveryRunBroker(summary.broker) === options.broker)
+      .slice(offset, offset + limit);
   }
 
-  async get(id: string, options: { userLogin?: string } = {}): Promise<StoredDiscoveryRun | null> {
+  async get(id: string, options: { userLogin?: string; broker?: DiscoveryRunBroker } = {}): Promise<StoredDiscoveryRun | null> {
     this.ensure();
     const rows = Array.from(this.sql.exec(GET_SQL, id)) as Array<{ summary_json: string; run_json: string }>;
     if (!rows.length) return null;
     const summary = JSON.parse(rows[0].summary_json) as DiscoveryRunSummary;
     // The summary is the scoping authority; an invisible run reads as absent.
     if (!discoveryRunVisibleToCaller(summary, options.userLogin)) return null;
+    // Issue #3388: another broker's run reads exactly like a missing one.
+    if (options.broker && normalizeDiscoveryRunBroker(summary.broker) !== options.broker) return null;
     const body = JSON.parse(rows[0].run_json) as Pick<
       StoredDiscoveryRun,
       "requests" | "outcomes" | "constraintSets"

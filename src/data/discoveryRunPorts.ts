@@ -180,9 +180,28 @@ export interface DiscoverySymbolOutcome {
 }
 
 /** The listing projection of a stored discovery run. */
+/** Issue #3388: the brokers a discovery run can be produced from. */
+export type DiscoveryRunBroker = "etrade" | "alpaca";
+
+/**
+ * Issue #3388: normalize a stored or legacy value. Absent or unrecognised
+ * reads as `etrade` because every run written before provenance existed was
+ * produced by the E*TRADE-wired engine — never as another broker's evidence.
+ */
+export function normalizeDiscoveryRunBroker(value: unknown): DiscoveryRunBroker {
+  return value === "alpaca" ? "alpaca" : "etrade";
+}
+
 export interface DiscoveryRunSummary {
   id: string;
   createdAt: string;
+  /**
+   * Issue #3388: which broker's chains produced this run. Stamped inside the
+   * summary (no column migration, the #3327 shape); rows written before this
+   * existed were E*TRADE's — the only broker wired then — so they read as
+   * `etrade` and are never served as another broker's evidence.
+   */
+  broker: DiscoveryRunBroker;
   /** The login that owns the run (issue #103 scoping). Optional
    *  deliberately: an absent login is what makes a run "legacy" under
    *  the visibility rule. Scheduled runs are always saved WITH the
@@ -241,6 +260,12 @@ export interface DiscoveryRunInput {
   constraintSets?: DiscoveryConstraintSet[];
   outcomes: DiscoverySymbolOutcome[];
   status: DiscoveryRunStatus;
+  /**
+   * Issue #3388: the broker whose chains produced this run. Optional at the
+   * input so callers that predate provenance still compile; absent is stamped
+   * as `etrade`, which is what the E*TRADE-wired engine actually used.
+   */
+  broker?: DiscoveryRunBroker;
 }
 
 export interface DiscoveryRunStore {
@@ -249,10 +274,11 @@ export interface DiscoveryRunStore {
   save(input: DiscoveryRunInput): Promise<StoredDiscoveryRun>;
   /** Newest-first summaries (createdAt descending, id descending on
    *  ties), paginated, filtered by the issue #103 visibility rule. */
-  list(options?: { limit?: number; offset?: number; userLogin?: string }): Promise<DiscoveryRunSummary[]>;
+  list(options?: { limit?: number; offset?: number; userLogin?: string; broker?: DiscoveryRunBroker }): Promise<DiscoveryRunSummary[]>;
   /** The full stored run, or null when unknown/pruned/not visible to
-   *  the scope — invisibility reads exactly like absence. */
-  get(id: string, options?: { userLogin?: string }): Promise<StoredDiscoveryRun | null>;
+   *  the scope — invisibility reads exactly like absence. A run produced
+   *  by another broker reads the same way (issue #3388). */
+  get(id: string, options?: { userLogin?: string; broker?: DiscoveryRunBroker }): Promise<StoredDiscoveryRun | null>;
   /** Delete rows older than the retention window and rows beyond the
    *  row cap; returns how many rows were deleted. */
   prune(now: Date): Promise<number>;
