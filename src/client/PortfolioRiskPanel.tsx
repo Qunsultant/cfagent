@@ -318,71 +318,72 @@ export function PortfolioRiskPanel({ activeEnv, onPreviewHedge, broker = "etrade
         </>
       )}
 
-      {etradeOnly ? (<>
-      {/* Hedge drafts (#54) */}
-      <div className="prp-subhead">Hedge Proposals <span className="prp-badge prp-badge-draft">DRAFT — HITL review only</span></div>
-      {hedge?.status === "within-tolerance" && <div className="ui-footnote">{hedge.reason}</div>}
-      {hedge?.status === "unavailable" && <div className="ui-footnote ui-warning">{hedge.reason}</div>}
-      {hedge && hedge.symbolsMissingBeta.length > 0 && (
-        <div className="ui-footnote ui-warning">Sized on covered exposure only — no beta for: {hedge.symbolsMissingBeta.join(", ")}</div>
-      )}
-      {hedge?.proposals.map((proposal, i) => (
-        <div className="prp-hedge-card" key={`${proposal.instrument}-${i}`}>
-          <div className="prp-hedge-main">
-            <div className="prp-card-title-row">
-              <strong>{proposal.side} {proposal.quantity} {proposal.instrument === "SPY_SHARES" ? "SPY shares" : `SPY ${proposal.strike} PUT ${proposal.expirationDate}`}</strong>
-              {proposal.executableOrder?.isExecutable && (
-                <span className="prp-badge prp-badge-executable">Executable Ticket Ready</span>
-              )}
-            </div>
-            <span>Est. {proposal.estimatedCost >= 0 ? "cost" : "credit"} {fmtUsd(Math.abs(proposal.estimatedCost), 2)} · β-weighted Δ {fmtSignedUsd(proposal.preHedgeBetaWeightedDeltaDollars)} → {fmtSignedUsd(proposal.postHedgeBetaWeightedDeltaDollars)} {proposal.withinToleranceAfterHedge ? "(within tolerance)" : "(residual above tolerance)"}</span>
-            {proposal.executableOrder && (
-              <div className="prp-exec-details">
-                ⚡ <strong>Order:</strong> {proposal.executableOrder.action} {proposal.executableOrder.quantity} {proposal.executableOrder.symbol} {proposal.executableOrder.assetClass === "options" ? "Options" : "Shares"} · Limit: ${proposal.executableOrder.limitPrice.toFixed(2)} {proposal.executableOrder.strategyNetDebit !== undefined ? `· Net: ${proposal.executableOrder.strategyNetDebit < 0 ? "Credit" : "Debit"} $${(Math.abs(proposal.executableOrder.strategyNetDebit) / 100).toFixed(2)}` : ""}
+      {etradeOnly ? (
+        <>
+        {/* Hedge drafts (#54) */}
+        <div className="prp-subhead">Hedge Proposals <span className="prp-badge prp-badge-draft">DRAFT — HITL review only</span></div>
+        {hedge?.status === "within-tolerance" && <div className="ui-footnote">{hedge.reason}</div>}
+        {hedge?.status === "unavailable" && <div className="ui-footnote ui-warning">{hedge.reason}</div>}
+        {hedge && hedge.symbolsMissingBeta.length > 0 && (
+          <div className="ui-footnote ui-warning">Sized on covered exposure only — no beta for: {hedge.symbolsMissingBeta.join(", ")}</div>
+        )}
+        {hedge?.proposals.map((proposal, i) => (
+          <div className="prp-hedge-card" key={`${proposal.instrument}-${i}`}>
+            <div className="prp-hedge-main">
+              <div className="prp-card-title-row">
+                <strong>{proposal.side} {proposal.quantity} {proposal.instrument === "SPY_SHARES" ? "SPY shares" : `SPY ${proposal.strike} PUT ${proposal.expirationDate}`}</strong>
+                {proposal.executableOrder?.isExecutable && (
+                  <span className="prp-badge prp-badge-executable">Executable Ticket Ready</span>
+                )}
               </div>
-            )}
-            <p>{proposal.rationale}</p>
+              <span>Est. {proposal.estimatedCost >= 0 ? "cost" : "credit"} {fmtUsd(Math.abs(proposal.estimatedCost), 2)} · β-weighted Δ {fmtSignedUsd(proposal.preHedgeBetaWeightedDeltaDollars)} → {fmtSignedUsd(proposal.postHedgeBetaWeightedDeltaDollars)} {proposal.withinToleranceAfterHedge ? "(within tolerance)" : "(residual above tolerance)"}</span>
+              {proposal.executableOrder && (
+                <div className="prp-exec-details">
+                  ⚡ <strong>Order:</strong> {proposal.executableOrder.action} {proposal.executableOrder.quantity} {proposal.executableOrder.symbol} {proposal.executableOrder.assetClass === "options" ? "Options" : "Shares"} · Limit: ${proposal.executableOrder.limitPrice.toFixed(2)} {proposal.executableOrder.strategyNetDebit !== undefined ? `· Net: ${proposal.executableOrder.strategyNetDebit < 0 ? "Credit" : "Debit"} $${(Math.abs(proposal.executableOrder.strategyNetDebit) / 100).toFixed(2)}` : ""}
+                </div>
+              )}
+              <p>{proposal.rationale}</p>
+            </div>
+            <Button className="prp-preview-btn" onClick={() => onPreviewHedge(hedgeProposalToTradeContext(proposal, report?.spyPrice ?? null))} variant="primary" size="sm">
+              ⚡ Preview in Order Ticket →
+            </Button>
           </div>
-          <Button className="prp-preview-btn" onClick={() => onPreviewHedge(hedgeProposalToTradeContext(proposal, report?.spyPrice ?? null))} variant="primary" size="sm">
-            ⚡ Preview in Order Ticket →
-          </Button>
-        </div>
-      ))}
+        ))}
 
-      {/* Repair drafts (#355) */}
-      <div className="prp-subhead">Repair Proposals <span className="prp-badge prp-badge-draft">DRAFT — HITL review only</span></div>
-      {repair?.status === "not-underwater" && <div className="ui-footnote">{repair.reason}</div>}
-      {repair?.status === "unavailable" && <div className="ui-footnote ui-warning">{repair.reason}</div>}
-      {repair && repair.symbolsUnavailable.length > 0 && (
-        <div className="ui-footnote ui-warning">No repair proposed for: {repair.symbolsUnavailable.map((s) => `${s} (${repair.unavailableReasons[s]})`).join("; ")}</div>
-      )}
-      {repair?.proposals.map((proposal, i) => (
-        <div className="prp-hedge-card" key={`${proposal.symbol}-${i}`}>
-          <div className="prp-hedge-main">
-            <div className="prp-card-title-row">
-              <strong>{proposal.symbol} 1×2 call ratio — buy {proposal.legLong.strike}C, sell 2× {proposal.legShort.strike}C ({proposal.legLong.expirationDate})</strong>
-              {proposal.executableOrder?.isExecutable && (
-                <span className="prp-badge prp-badge-executable">Executable Ticket Ready</span>
-              )}
-            </div>
-            <span>{proposal.netDebitPerUnit <= 0 ? "Credit" : "Debit"} {fmtUsd(Math.abs(proposal.netDebitPerUnit), 2)}/unit · recover at {fmtUsd(proposal.breakevenAtExpiry, 2)} · capped above {fmtUsd(proposal.upsideCappedAbove, 2)} · <em>no downside protection</em></span>
-            {proposal.executableOrder && (
-              <div className="prp-exec-details">
-                ⚡ <strong>Order:</strong> {proposal.executableOrder.quantity} unit(s) · Buy 1x {proposal.legLong.strike}C / Sell 2x {proposal.legShort.strike}C exp {proposal.legLong.expirationDate} · Limit: ${proposal.executableOrder.limitPrice.toFixed(2)} ({proposal.netDebitPerUnit <= 0 ? "Credit" : "Debit"})
+        {/* Repair drafts (#355) */}
+        <div className="prp-subhead">Repair Proposals <span className="prp-badge prp-badge-draft">DRAFT — HITL review only</span></div>
+        {repair?.status === "not-underwater" && <div className="ui-footnote">{repair.reason}</div>}
+        {repair?.status === "unavailable" && <div className="ui-footnote ui-warning">{repair.reason}</div>}
+        {repair && repair.symbolsUnavailable.length > 0 && (
+          <div className="ui-footnote ui-warning">No repair proposed for: {repair.symbolsUnavailable.map((s) => `${s} (${repair.unavailableReasons[s]})`).join("; ")}</div>
+        )}
+        {repair?.proposals.map((proposal, i) => (
+          <div className="prp-hedge-card" key={`${proposal.symbol}-${i}`}>
+            <div className="prp-hedge-main">
+              <div className="prp-card-title-row">
+                <strong>{proposal.symbol} 1×2 call ratio — buy {proposal.legLong.strike}C, sell 2× {proposal.legShort.strike}C ({proposal.legLong.expirationDate})</strong>
+                {proposal.executableOrder?.isExecutable && (
+                  <span className="prp-badge prp-badge-executable">Executable Ticket Ready</span>
+                )}
               </div>
-            )}
-            <p>{proposal.rationale}</p>
+              <span>{proposal.netDebitPerUnit <= 0 ? "Credit" : "Debit"} {fmtUsd(Math.abs(proposal.netDebitPerUnit), 2)}/unit · recover at {fmtUsd(proposal.breakevenAtExpiry, 2)} · capped above {fmtUsd(proposal.upsideCappedAbove, 2)} · <em>no downside protection</em></span>
+              {proposal.executableOrder && (
+                <div className="prp-exec-details">
+                  ⚡ <strong>Order:</strong> {proposal.executableOrder.quantity} unit(s) · Buy 1x {proposal.legLong.strike}C / Sell 2x {proposal.legShort.strike}C exp {proposal.legLong.expirationDate} · Limit: ${proposal.executableOrder.limitPrice.toFixed(2)} ({proposal.netDebitPerUnit <= 0 ? "Credit" : "Debit"})
+                </div>
+              )}
+              <p>{proposal.rationale}</p>
+            </div>
+            <Button className="prp-preview-btn" onClick={() => onPreviewHedge(repairProposalToTradeContext(proposal))} variant="primary" size="sm">
+              ⚡ Preview in Order Ticket →
+            </Button>
           </div>
-          <Button className="prp-preview-btn" onClick={() => onPreviewHedge(repairProposalToTradeContext(proposal))} variant="primary" size="sm">
-            ⚡ Preview in Order Ticket →
-          </Button>
-        </div>
-      ))}
+        ))}
         </>
       ) : (
-        <div className="ui-footnote" data-broker-surface="hedge-repair">
-          Hedge and repair proposals are E*TRADE features; {brokerLabel} supplies no proposal model, so none are drafted and no order is prepared.
-        </div>
+          <div className="ui-footnote" data-broker-surface="hedge-repair">
+            Hedge and repair proposals are E*TRADE features; {brokerLabel} supplies no proposal model, so none are drafted and no order is prepared.
+          </div>
       )}
 
       {/* Correlation & concentration (#35) */}
@@ -473,55 +474,56 @@ export function PortfolioRiskPanel({ activeEnv, onPreviewHedge, broker = "etrade
         </div>
       )}
 
-      {etradeOnly ? (<>
-      {/* Recommendation Bundle — Best Trade v2 (#1135, Phase 4 of #1096) */}
-      <div className="prp-subhead">Recommendation Bundle (Best Trade v2)</div>
-      <div className="ui-footnote">Paste a strategy candidate (strategy-engine JSON) to build its full bundle against the live book: trade + falsification + post-trade risk + optimizer verdict + hedge/repair plans + alternatives including no-trade. Draft only — human approval is required for any order.</div>
-      <div className="prp-form-grid">
-        <TextInput label="Symbol beta (blank = unknown)" value={bundleBeta} onChange={(e) => setBundleBeta(e.target.value)} placeholder="e.g. 1.1" inputMode="decimal" />
-      </div>
-      <TextInput multiline
-        className="prp-bundle-json"
-        value={bundleJson}
-        onChange={(e) => setBundleJson(e.target.value)}
-        placeholder='{"id": "…", "symbol": "XYZ", "underlyingPrice": 200, "legs": [ … ], "netGreeks": {"delta": 0.5, "gamma": 0.02, "theta": -0.02, "vega": 0.05}, …}'
-        rows={5}
-        style={{ width: "100%" }}
-      />
-      {bundleStagedNote && <div className="ui-footnote">{bundleStagedNote}</div>}
-      {bundleTextState.status === "empty" && <div className="ui-footnote">{bundleTextState.message}</div>}
-      {bundleTextState.status === "invalid" && <div className="prp-error">{bundleTextState.message}</div>}
-      <Button className="prp-size-btn" onClick={insertExampleBundleCandidate} variant="secondary" size="sm">
-        Insert example candidate
-      </Button>
-      <Button className="prp-size-btn" onClick={() => void runBundle()} disabled={bundleLoading || bundleTextState.status !== "valid"} loading={bundleLoading} variant="secondary" size="sm">
-        {"Build bundle"}
-      </Button>
-      {bundleError && <div className="prp-error">{bundleError}</div>}
-      {bundle && (
-        <div className="prp-sizing-result">
-          <div className="ui-footnote">
-            <strong>{bundle.decision === "trade" ? bundle.trade?.label : "No trade"}</strong>
-            {" "}· status {bundle.status} · qualification <strong>{bundle.qualification}</strong> · confidence {bundle.confidence}
-            {" "}· optimizer verdict <strong>{bundle.optimizer.verdict}</strong> (score {fmtNumber(bundle.optimizer.score, 1)}, expected P/L {fmtSignedUsd(bundle.optimizer.expectedPnl)}, CVaR {fmtSignedUsd(bundle.optimizer.cvarPnl)})
-          </div>
-          <p className="prp-rationale">{bundle.rationale.join(" ")}</p>
-          {bundle.optimizer.evidence.map((e, i) => <div key={i} className="ui-footnote">{e}</div>)}
-          {bundle.optimizer.breaches.map((b, i) => <div key={i} className="prp-error">Breach: {b}</div>)}
-          <div className="ui-footnote">
-            Hedging: {bundle.hedging.status}{bundle.hedging.options.length ? ` — top: ${bundle.hedging.options[0].label} (cost ${fmtUsd(bundle.hedging.options[0].estimatedCost)}, removes ${fmtUsd(bundle.hedging.options[0].riskRemovedDollars)} β-weighted Δ)` : ""}
-            {" "}· Repairs: {bundle.repairs.status}{bundle.repairs.options.length ? ` — top: ${bundle.repairs.options[0].label}` : ""}
-          </div>
-          <div className="ui-footnote">Alternatives: {bundle.alternatives.map((a) => `${a.label} (score ${fmtNumber(a.score, 1)})`).join("; ")}</div>
-          {bundle.limitations.map((l, i) => <div key={i} className="ui-footnote">Limitation: {l}</div>)}
-          <div className="ui-footnote">Human approval required. {bundle.disclaimer}</div>
+      {etradeOnly ? (
+        <>
+        {/* Recommendation Bundle — Best Trade v2 (#1135, Phase 4 of #1096) */}
+        <div className="prp-subhead">Recommendation Bundle (Best Trade v2)</div>
+        <div className="ui-footnote">Paste a strategy candidate (strategy-engine JSON) to build its full bundle against the live book: trade + falsification + post-trade risk + optimizer verdict + hedge/repair plans + alternatives including no-trade. Draft only — human approval is required for any order.</div>
+        <div className="prp-form-grid">
+          <TextInput label="Symbol beta (blank = unknown)" value={bundleBeta} onChange={(e) => setBundleBeta(e.target.value)} placeholder="e.g. 1.1" inputMode="decimal" />
         </div>
-      )}
+        <TextInput multiline
+          className="prp-bundle-json"
+          value={bundleJson}
+          onChange={(e) => setBundleJson(e.target.value)}
+          placeholder='{"id": "…", "symbol": "XYZ", "underlyingPrice": 200, "legs": [ … ], "netGreeks": {"delta": 0.5, "gamma": 0.02, "theta": -0.02, "vega": 0.05}, …}'
+          rows={5}
+          style={{ width: "100%" }}
+        />
+        {bundleStagedNote && <div className="ui-footnote">{bundleStagedNote}</div>}
+        {bundleTextState.status === "empty" && <div className="ui-footnote">{bundleTextState.message}</div>}
+        {bundleTextState.status === "invalid" && <div className="prp-error">{bundleTextState.message}</div>}
+        <Button className="prp-size-btn" onClick={insertExampleBundleCandidate} variant="secondary" size="sm">
+          Insert example candidate
+        </Button>
+        <Button className="prp-size-btn" onClick={() => void runBundle()} disabled={bundleLoading || bundleTextState.status !== "valid"} loading={bundleLoading} variant="secondary" size="sm">
+          {"Build bundle"}
+        </Button>
+        {bundleError && <div className="prp-error">{bundleError}</div>}
+        {bundle && (
+          <div className="prp-sizing-result">
+            <div className="ui-footnote">
+              <strong>{bundle.decision === "trade" ? bundle.trade?.label : "No trade"}</strong>
+              {" "}· status {bundle.status} · qualification <strong>{bundle.qualification}</strong> · confidence {bundle.confidence}
+              {" "}· optimizer verdict <strong>{bundle.optimizer.verdict}</strong> (score {fmtNumber(bundle.optimizer.score, 1)}, expected P/L {fmtSignedUsd(bundle.optimizer.expectedPnl)}, CVaR {fmtSignedUsd(bundle.optimizer.cvarPnl)})
+            </div>
+            <p className="prp-rationale">{bundle.rationale.join(" ")}</p>
+            {bundle.optimizer.evidence.map((e, i) => <div key={i} className="ui-footnote">{e}</div>)}
+            {bundle.optimizer.breaches.map((b, i) => <div key={i} className="prp-error">Breach: {b}</div>)}
+            <div className="ui-footnote">
+              Hedging: {bundle.hedging.status}{bundle.hedging.options.length ? ` — top: ${bundle.hedging.options[0].label} (cost ${fmtUsd(bundle.hedging.options[0].estimatedCost)}, removes ${fmtUsd(bundle.hedging.options[0].riskRemovedDollars)} β-weighted Δ)` : ""}
+              {" "}· Repairs: {bundle.repairs.status}{bundle.repairs.options.length ? ` — top: ${bundle.repairs.options[0].label}` : ""}
+            </div>
+            <div className="ui-footnote">Alternatives: {bundle.alternatives.map((a) => `${a.label} (score ${fmtNumber(a.score, 1)})`).join("; ")}</div>
+            {bundle.limitations.map((l, i) => <div key={i} className="ui-footnote">Limitation: {l}</div>)}
+            <div className="ui-footnote">Human approval required. {bundle.disclaimer}</div>
+          </div>
+        )}
         </>
       ) : (
-        <div className="ui-footnote" data-broker-surface="bundle">
-          Recommendation bundles and the trade guardrail check are E*TRADE features; {brokerLabel} has no equivalent proposal model, so none is built and no draft is produced.
-        </div>
+          <div className="ui-footnote" data-broker-surface="bundle">
+            Recommendation bundles and the trade guardrail check are E*TRADE features; {brokerLabel} has no equivalent proposal model, so none is built and no draft is produced.
+          </div>
       )}
 
       {/* Post-trade evaluator (#34 endpoint, surfaced by #67) */}
@@ -555,39 +557,41 @@ export function PortfolioRiskPanel({ activeEnv, onPreviewHedge, broker = "etrade
         />
       )}
 
-      {etradeOnly && (<>
-      {/* Think-harness guardrail check (#37, surfaced by #67) */}
-      <div className="prp-subhead">Trade Guardrail Check</div>
-      <div className="ui-footnote">Runs the think harness on live account state. It fails closed — when price, balance, or spread cannot be resolved from the broker, the verdict is INPUTS_UNAVAILABLE and no draft is produced.</div>
-      <div className="prp-form-grid">
-        <TextInput label="Symbol" value={thinkSymbol} onChange={(e) => setThinkSymbol(e.target.value)} placeholder="ACME" />
-        <Select label="Action" value={thinkAction} onChange={(e) => setThinkAction(e.target.value as "BUY" | "SELL")}>
-          <option value="BUY">BUY</option><option value="SELL">SELL</option>
-        </Select>
-        <TextInput label="Quantity" value={thinkQuantity} onChange={(e) => setThinkQuantity(e.target.value)} inputMode="numeric" />
-        <Select label="Order type" value={thinkOrderType} onChange={(e) => setThinkOrderType(e.target.value as "MARKET" | "LIMIT" | "STOP")}>
-          <option value="MARKET">MARKET</option><option value="LIMIT">LIMIT</option><option value="STOP">STOP</option>
-        </Select>
-        <TextInput label="Price (optional)" value={thinkPrice} onChange={(e) => setThinkPrice(e.target.value)} inputMode="decimal" />
-      </div>
-      <Button className="prp-size-btn" onClick={() => void runThink()} disabled={thinkLoading || !thinkSymbol.trim() || !thinkQuantity.trim()} loading={thinkLoading} variant="secondary" size="sm">
-        {"Run guardrail check"}
-      </Button>
-      {thinkError && <div className="prp-error">{thinkError}</div>}
-      {verdict && (
-        <div className="prp-sizing-result">
-          <div className="ui-footnote">
-            <span className={`prp-badge prp-badge-${verdict.recommendation === "PROCEED_TO_HITL" ? "measured" : verdict.recommendation === "REVISE_PARAMETERS" ? "proxy-sector" : "unknown"}`}>{verdict.recommendation}</span>
-            {" "}approved: {verdict.approved ? "yes" : "no"} · confidence {fmtNumber(verdict.overallConfidence, 2)}
-          </div>
-          <p className="prp-rationale">{verdict.reason}</p>
-          <div className="ui-footnote">
-            Inputs — price: <span className="prp-badge">{verdict.inputSources.price}</span> balance: <span className="prp-badge">{verdict.inputSources.accountBalance}</span> spread: <span className="prp-badge">{verdict.inputSources.spread}</span>
-            {verdict.proposedDraft ? " · a draft was produced for HITL review in the order flow" : " · no draft produced"}
-          </div>
+      {etradeOnly && (
+        <>
+        {/* Think-harness guardrail check (#37, surfaced by #67) */}
+        <div className="prp-subhead">Trade Guardrail Check</div>
+        <div className="ui-footnote">Runs the think harness on live account state. It fails closed — when price, balance, or spread cannot be resolved from the broker, the verdict is INPUTS_UNAVAILABLE and no draft is produced.</div>
+        <div className="prp-form-grid">
+          <TextInput label="Symbol" value={thinkSymbol} onChange={(e) => setThinkSymbol(e.target.value)} placeholder="ACME" />
+          <Select label="Action" value={thinkAction} onChange={(e) => setThinkAction(e.target.value as "BUY" | "SELL")}>
+            <option value="BUY">BUY</option><option value="SELL">SELL</option>
+          </Select>
+          <TextInput label="Quantity" value={thinkQuantity} onChange={(e) => setThinkQuantity(e.target.value)} inputMode="numeric" />
+          <Select label="Order type" value={thinkOrderType} onChange={(e) => setThinkOrderType(e.target.value as "MARKET" | "LIMIT" | "STOP")}>
+            <option value="MARKET">MARKET</option><option value="LIMIT">LIMIT</option><option value="STOP">STOP</option>
+          </Select>
+          <TextInput label="Price (optional)" value={thinkPrice} onChange={(e) => setThinkPrice(e.target.value)} inputMode="decimal" />
         </div>
+        <Button className="prp-size-btn" onClick={() => void runThink()} disabled={thinkLoading || !thinkSymbol.trim() || !thinkQuantity.trim()} loading={thinkLoading} variant="secondary" size="sm">
+          {"Run guardrail check"}
+        </Button>
+        {thinkError && <div className="prp-error">{thinkError}</div>}
+        {verdict && (
+          <div className="prp-sizing-result">
+            <div className="ui-footnote">
+              <span className={`prp-badge prp-badge-${verdict.recommendation === "PROCEED_TO_HITL" ? "measured" : verdict.recommendation === "REVISE_PARAMETERS" ? "proxy-sector" : "unknown"}`}>{verdict.recommendation}</span>
+              {" "}approved: {verdict.approved ? "yes" : "no"} · confidence {fmtNumber(verdict.overallConfidence, 2)}
+            </div>
+            <p className="prp-rationale">{verdict.reason}</p>
+            <div className="ui-footnote">
+              Inputs — price: <span className="prp-badge">{verdict.inputSources.price}</span> balance: <span className="prp-badge">{verdict.inputSources.accountBalance}</span> spread: <span className="prp-badge">{verdict.inputSources.spread}</span>
+              {verdict.proposedDraft ? " · a draft was produced for HITL review in the order flow" : " · no draft produced"}
+            </div>
+          </div>
+        )}
+        </>
       )}
-      </>)}
       </>
       )}
     </section>
