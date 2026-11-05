@@ -29,6 +29,7 @@ import {
   resolveScheduleRunTrigger,
   type JobRunRecord,
 } from "../../services/jobRunRecords";
+import { buildLedgerLinkage } from "../../services/consolidatedScheduling";
 import type { ScheduledCallbackOutcome } from "./scheduledCallbacks";
 
 type OutcomeInput = ScheduledCallbackOutcome | void;
@@ -63,15 +64,30 @@ export async function recordScheduleCallbackRun(
   run: () => Promise<OutcomeInput>,
 ): Promise<void> {
   const started = new Date().toISOString();
+  // Issue #3121 S1 — the §4 consolidated-ledger linkage, stamped at
+  // this write site: the trigger resolves from the firing payload
+  // (the trigger route stamps `trigger: "manual"` + `scheduleId` on
+  // manual triggers; SDK firings carry the stored schedule payload),
+  // the schedule id is the real schedule id when one exists (the
+  // `callback:<name>` job-id fallback is never laundered into a
+  // schedule id), and asyncJobId/workflowId ride the payload when a
+  // producer stamped them — explicit nulls otherwise.
+  const jobId = resolveScheduleRunJobId(callback, payload, schedule);
+  const linkage = buildLedgerLinkage({
+    payload,
+    schedule,
+    triggeredBy: resolveScheduleRunTrigger(payload),
+  });
   try {
     const outcome = normalize(await run());
     storeRecord(sql, {
-      jobId: resolveScheduleRunJobId(callback, payload, schedule),
+      jobId,
       operation: callback,
       started,
       finished: new Date().toISOString(),
       outcome: outcome.outcome,
       triggeredBy: resolveScheduleRunTrigger(payload),
+      ...linkage,
       ...(outcome.error ? { error: outcome.error } : {}),
       ...(outcome.detail ? { detail: outcome.detail } : {}),
       ...(outcome.descriptor ? { descriptor: outcome.descriptor } : {}),
@@ -79,12 +95,13 @@ export async function recordScheduleCallbackRun(
     });
   } catch (err) {
     storeRecord(sql, {
-      jobId: resolveScheduleRunJobId(callback, payload, schedule),
+      jobId,
       operation: callback,
       started,
       finished: new Date().toISOString(),
       outcome: "failure",
       triggeredBy: resolveScheduleRunTrigger(payload),
+      ...linkage,
       error: err instanceof Error ? err.message : String(err),
     });
     throw err;

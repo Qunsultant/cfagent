@@ -103,6 +103,14 @@ export const ALARM_SURFACE_REGISTER: readonly AlarmSurfaceEntry[] = [
       "Read/delete for a legal obligation; schedules nothing. It must keep seeing these rows, so it stays even after any narrowing.",
     singleShot: true,
   },
+  {
+    file: "src/services/consolidatedScheduling.ts",
+    kind: "framework-queue-index",
+    what: "Shared scheduling primitives (#3121 S1): pins the Agents SDK hung-timeout mechanism location (O1) and resolves the consolidated-ledger linkage for alarm firings.",
+    documentedGap:
+      "Documentation-only reference to the framework jobs table's hung-timeout column: the module names cf_agents_jobs.hung_timeout_seconds to pin where the 30s SDK default lives (O1); it performs no queue I/O, arms nothing, and reads no rows. The reference stays so the mechanism location is greppable from the scheduler core instead of living only in node_modules.",
+    singleShot: true,
+  },
 ];
 
 /** The files the register covers. */

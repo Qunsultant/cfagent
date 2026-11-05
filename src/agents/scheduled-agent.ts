@@ -37,9 +37,11 @@ import {
 } from "../schedule";
 import {
   buildJobRunRecord,
+  normalizeJobRunRecord,
   SCHEDULED_AGENT_JOB_RUN_CAP,
   type JobRunRecord,
 } from "../services/jobRunRecords";
+import { provenanceFromPayload } from "../services/consolidatedScheduling";
 import { createSocialStoresFromNamespace } from "./social/durableStores";
 import { createSocialBriefStoreFromNamespace } from "./social/briefStore";
 import {
@@ -303,7 +305,9 @@ export class ScheduledAgent extends PortThink {
    */
   private async getJobRuns(): Promise<JobRunRecord[]> {
     const stored = await this.ctx.storage.get<JobRunRecord[]>("jobRunRecords");
-    return stored ?? [];
+    // Issue #3121 S1 — rows stored before the §4 columns read back
+    // normalized (trigger "unknown", ids null); no silent backfill.
+    return (stored ?? []).map((record) => normalizeJobRunRecord(record));
   }
 
   private async recordJobRun(
@@ -407,7 +411,14 @@ export class ScheduledAgent extends PortThink {
       const triggeredBy = isForced ? "manual" : "scheduled";
       const recordGoalRun = (
         outcome: JobRunRecord["outcome"],
-        extra: { error?: string; detail?: string; descriptor?: string; artifactRefs?: string[] },
+        extra: {
+          error?: string;
+          detail?: string;
+          descriptor?: string;
+          artifactRefs?: string[];
+          asyncJobId?: string | null;
+          workflowId?: string | null;
+        },
       ): Promise<void> =>
         this.recordJobRun({
           jobId: goal.id,
@@ -416,6 +427,15 @@ export class ScheduledAgent extends PortThink {
           finished: new Date().toISOString(),
           outcome,
           triggeredBy,
+          // Issue #3121 S1 — the §4 consolidated-ledger linkage for
+          // a tick-evaluated firing: the schedule id IS the goal id;
+          // the trigger derives from `triggeredBy` in the builder
+          // (forced → manual, tick → scheduled); the async job id
+          // rides the success branches that create an Orchestrator
+          // job (null elsewhere — social/resource/index/pipeline
+          // firings create no Orchestrator job); no goal firing runs
+          // through a workflow, so workflowId is null.
+          scheduleId: goal.id,
           ...extra,
         });
 
@@ -954,7 +974,7 @@ export class ScheduledAgent extends PortThink {
           );
           goal.lastRun = now.toISOString();
           tick.jobsCreated++;
-          await recordGoalRun("success", { descriptor: `job:${job.jobId}` });
+          await recordGoalRun("success", { descriptor: `job:${job.jobId}`, asyncJobId: job.jobId });
           // Success audit only when every leg completed or was
           // submitted to the rails: a run with unimplemented legs
           // (e.g. deliver awaiting the serve hook) has no complete
@@ -988,7 +1008,7 @@ export class ScheduledAgent extends PortThink {
 
         goal.lastRun = now.toISOString();
         tick.jobsCreated++;
-        await recordGoalRun("success", { descriptor: `job:${job.jobId}` });
+        await recordGoalRun("success", { descriptor: `job:${job.jobId}`, asyncJobId: job.jobId });
       } catch (err) {
         tick.errors.push(
           `${goal.id}: ${err instanceof Error ? err.message : String(err)}`
@@ -1044,6 +1064,7 @@ export class ScheduledAgent extends PortThink {
     budgetCents: number;
     enabled?: boolean;
     timeZone?: string;
+    provenance?: unknown;
   }): Promise<ScheduledGoal> {
     const id = goal.id.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-");
     if (!id) throw new Error("Goal id is required.");
@@ -1068,6 +1089,11 @@ export class ScheduledAgent extends PortThink {
     const { OPERATION_CATALOG } = await import("../orchestrate");
     const known = OPERATION_CATALOG.some((e) => e.operations.includes(goal.operation));
     if (!known) throw new Error(`Unknown operation: ${goal.operation}`);
+    // Issue #3121 S1 — creation provenance travels with the goal.
+    // Validated, never trusted raw: a malformed stamp is dropped,
+    // and a goal created without one simply has none ("not
+    // recorded", never backfilled).
+    const provenance = provenanceFromPayload(goal);
     const created: ScheduledGoal = {
       id,
       name: goal.name.trim(),
@@ -1076,6 +1102,7 @@ export class ScheduledAgent extends PortThink {
       budgetCents: Math.floor(goal.budgetCents),
       enabled: goal.enabled !== false,
       ...(timeZone ? { timeZone } : {}),
+      ...(provenance ? { provenance } : {}),
     };
     goals.push(created);
     await this.saveGoals(goals);

@@ -170,7 +170,22 @@ describe("characterization 4a: submit", () => {
     expect(row.job_kind).toBe("main");
     expect(row.parent_job_id).toBeNull();
     expect(h.scheduled).toEqual([
-      { delay: 0, callback: "executeAsyncJob", payload: { jobId: out.jobId } },
+      {
+        delay: 0,
+        callback: "executeAsyncJob",
+        payload: {
+          jobId: out.jobId,
+          // Issue #3121 S1 — provenance travels in the arm payload
+          // (origin system / async-job-arm); createdAt is minted at
+          // submit time, so it is pinned by shape, not by value.
+          provenance: expect.objectContaining({
+            origin: "system",
+            createdBy: "system",
+            reason: "async-job-arm",
+            createdAt: expect.any(String),
+          }),
+        },
+      },
     ]);
     expect(h.audits).toEqual([
       { type: "async_job.queued", payload: { jobId: out.jobId, capability: "task.draft" } },
@@ -343,7 +358,17 @@ describe("characterization 4a: reads and the reap-inside-a-read", () => {
       .run(new Date(Date.now() + 600_000).toISOString());
     await recoverQueuedAsyncJobs(h.ctx);
     expect(h.scheduled).toHaveLength(1);
-    expect(h.scheduled[0].payload).toEqual({ jobId: "q1" });
+    // Issue #3121 S1 — a recovery re-arm carries origin system /
+    // recovery in its payload; createdAt is minted at re-arm time.
+    expect(h.scheduled[0].payload).toEqual({
+      jobId: "q1",
+      provenance: expect.objectContaining({
+        origin: "system",
+        createdBy: "system",
+        reason: "recovery",
+        createdAt: expect.any(String),
+      }),
+    });
     expect(Number(h.scheduled[0].delay)).toBeGreaterThan(500);
   });
 });

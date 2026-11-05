@@ -34,6 +34,22 @@ export function canonicalJson(value: unknown): string {
   }
 }
 
+/**
+ * Issue #3121 S1 — canonical JSON with the top-level `provenance`
+ * key removed. Provenance is creation metadata (origin, creator,
+ * creation time); it must never participate in duplicate comparison,
+ * or a re-submit could never match a schedule created after S1.
+ * Only the top level is stripped: a nested `provenance` inside a
+ * criteria object is criteria, not the creation stamp.
+ */
+export function canonicalJsonWithoutProvenance(value: unknown): string {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const { provenance: _provenance, ...rest } = value as Record<string, unknown>;
+    return canonicalJson(rest);
+  }
+  return canonicalJson(value);
+}
+
 /** Cadence fields a create request specifies. Absent fields are not compared. */
 export interface ScheduleCadence {
   type?: unknown;
@@ -47,6 +63,16 @@ export interface ScheduleCadence {
 /**
  * The already-armed schedule this request duplicates, or undefined.
  * Compares callback + payload, then every cadence field the request names.
+ *
+ * Issue #3121 S1 — provenance is creation metadata, not criteria: a
+ * stored payload carries the `provenance` stamp of its creation
+ * (origin, creator, creation time) while a fresh duplicate check
+ * carries none (the route stamps AFTER dedup, so the fresh timestamp
+ * cannot defeat it). Comparing payloads verbatim would therefore never
+ * match an S1-created schedule and #2071 idempotency would silently
+ * die. Both sides are compared with the top-level `provenance` key
+ * removed, so two schedules with the same criteria, callback, and
+ * cadence are duplicates regardless of who created them or when.
  */
 export function findDuplicateSchedule<T extends Record<string, any>>(
   schedules: readonly T[],
@@ -54,10 +80,10 @@ export function findDuplicateSchedule<T extends Record<string, any>>(
   payload: unknown,
   cadence: ScheduleCadence,
 ): T | undefined {
-  const wantedPayload = canonicalJson(payload ?? null);
+  const wantedPayload = canonicalJsonWithoutProvenance(payload ?? null);
   return schedules.find((schedule) => {
     if (!schedule || schedule.callback !== callback) return false;
-    if (canonicalJson(schedule.payload ?? null) !== wantedPayload) return false;
+    if (canonicalJsonWithoutProvenance(schedule.payload ?? null) !== wantedPayload) return false;
     if (cadence.type !== undefined && schedule.type !== cadence.type) return false;
     if (cadence.cron !== undefined && schedule.cron !== cadence.cron) return false;
     if (cadence.intervalSeconds !== undefined && schedule.intervalSeconds !== cadence.intervalSeconds) return false;

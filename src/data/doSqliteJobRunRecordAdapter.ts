@@ -15,6 +15,7 @@ import {
   type JobRunRecord,
   type JobRunRecordStore,
 } from "./jobRunRecordPorts";
+import { normalizeJobRunRecord } from "../services/jobRunRecords";
 
 function ensureTable(sql: SqlStorage): void {
   sql.exec(`CREATE TABLE IF NOT EXISTS ${JOB_RUN_RECORDS_TABLE} (
@@ -26,11 +27,36 @@ function ensureTable(sql: SqlStorage): void {
       finished TEXT NOT NULL,
       outcome TEXT NOT NULL,
       triggered_by TEXT NOT NULL,
+      trigger_text TEXT,
+      schedule_id TEXT,
+      async_job_id TEXT,
+      workflow_id TEXT,
       error_text TEXT,
       detail TEXT,
       descriptor TEXT,
       artifact_refs_json TEXT
     )`);
+  // Issue #3121 S1 — the §4 consolidated-ledger columns, added when
+  // missing so existing DO tables upgrade in place (the probed
+  // additive-column pattern from doSqliteAsyncJobAdapter). `trigger`
+  // is stored as trigger_text (`trigger` reads as a keyword in some
+  // SQLite contexts; the column name stays unambiguous).
+  const cols = Array.from(
+    sql.exec(`PRAGMA table_info(${JOB_RUN_RECORDS_TABLE})`),
+  ) as Array<{ name?: unknown }>;
+  const names = new Set(cols.map((c) => String(c?.name ?? "")));
+  if (!names.has("trigger_text")) {
+    sql.exec(`ALTER TABLE ${JOB_RUN_RECORDS_TABLE} ADD COLUMN trigger_text TEXT`);
+  }
+  if (!names.has("schedule_id")) {
+    sql.exec(`ALTER TABLE ${JOB_RUN_RECORDS_TABLE} ADD COLUMN schedule_id TEXT`);
+  }
+  if (!names.has("async_job_id")) {
+    sql.exec(`ALTER TABLE ${JOB_RUN_RECORDS_TABLE} ADD COLUMN async_job_id TEXT`);
+  }
+  if (!names.has("workflow_id")) {
+    sql.exec(`ALTER TABLE ${JOB_RUN_RECORDS_TABLE} ADD COLUMN workflow_id TEXT`);
+  }
   sql.exec(`CREATE INDEX IF NOT EXISTS ${JOB_RUN_RECORDS_TABLE}_job_idx ON ${JOB_RUN_RECORDS_TABLE} (job_id, started DESC, id DESC)`);
 }
 
@@ -44,7 +70,11 @@ function rowToRecord(row: Record<string, unknown>): JobRunRecord {
       artifactRefs = undefined;
     }
   }
-  return {
+  // Issue #3121 S1 — a row stored before the §4 columns existed reads
+  // back normalized: trigger "unknown", ids null (legacy rows only;
+  // no silent backfill — the read value is normalized, the stored
+  // row is untouched).
+  return normalizeJobRunRecord({
     system: String(row.system) as JobRunRecord["system"],
     jobId: String(row.job_id),
     operation: String(row.operation),
@@ -52,19 +82,25 @@ function rowToRecord(row: Record<string, unknown>): JobRunRecord {
     finished: String(row.finished),
     outcome: String(row.outcome) as JobRunRecord["outcome"],
     triggeredBy: String(row.triggered_by) as JobRunRecord["triggeredBy"],
+    ...(row.trigger_text != null
+      ? { trigger: String(row.trigger_text) as JobRunRecord["trigger"] }
+      : {}),
+    ...(row.schedule_id != null ? { scheduleId: String(row.schedule_id) } : {}),
+    ...(row.async_job_id != null ? { asyncJobId: String(row.async_job_id) } : {}),
+    ...(row.workflow_id != null ? { workflowId: String(row.workflow_id) } : {}),
     ...(row.error_text != null ? { error: String(row.error_text) } : {}),
     ...(row.detail != null ? { detail: String(row.detail) } : {}),
     ...(row.descriptor != null ? { descriptor: String(row.descriptor) } : {}),
     ...(artifactRefs !== undefined ? { artifactRefs } : {}),
-  };
+  });
 }
 
 function recordSync(sql: SqlStorage, record: JobRunRecord): void {
   ensureTable(sql);
   sql.exec(
     `INSERT INTO ${JOB_RUN_RECORDS_TABLE}
-         (system, job_id, operation, started, finished, outcome, triggered_by, error_text, detail, descriptor, artifact_refs_json)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (system, job_id, operation, started, finished, outcome, triggered_by, trigger_text, schedule_id, async_job_id, workflow_id, error_text, detail, descriptor, artifact_refs_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     record.system,
     record.jobId,
     record.operation,
@@ -72,6 +108,10 @@ function recordSync(sql: SqlStorage, record: JobRunRecord): void {
     record.finished,
     record.outcome,
     record.triggeredBy,
+    record.trigger ?? null,
+    record.scheduleId ?? null,
+    record.asyncJobId ?? null,
+    record.workflowId ?? null,
     record.error ?? null,
     record.detail ?? null,
     record.descriptor ?? null,

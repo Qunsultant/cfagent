@@ -41,6 +41,11 @@ import { resolveEnvironmentConfig } from "../../config/environment";
 import { getStoredTokens, isTokenExpiredEt, etradeIdentityFromLogin } from "../../security/etradeOAuth";
 import { isLoginShaped } from "../../security/serviceIdentity";
 import { findDuplicateSchedule } from "../../services/scheduleDedupe";
+import {
+  buildScheduleProvenance,
+  carryScheduleProvenance,
+  stampScheduleProvenance,
+} from "../../services/consolidatedScheduling";
 import { runStorageRetention } from "../../security/storageRetention";
 import { verifyStoredAuditChainAndAlert } from "../../services/auditTamperAlert";
 import { createBlobStore } from "../../services/blobStoreR2Adapter";
@@ -547,7 +552,11 @@ export async function handleSchedulesRoutes(
           const updated: PausedScheduleRecord = {
             id: paused.id,
             callback: paused.callback,
-            payload: resolution.payload,
+            // Issue #3121 S1 — a rebuilt payload keeps the original
+            // creation provenance verbatim (an update never rewrites
+            // creation time); a payload with no prior provenance is
+            // returned untouched.
+            payload: carryScheduleProvenance(paused.payload, resolution.payload),
             type: resolution.timing.type,
             pausedAt: paused.pausedAt,
             ...(resolution.timing.type === "cron" ? { cron: resolution.timing.cron } : {}),
@@ -573,7 +582,11 @@ export async function handleSchedulesRoutes(
           return Response.json({ success: false, error: resolution.error }, { status: 400 });
         }
         await ctx.cancelSchedule(scheduleId);
-        const schedule = await armFromTiming(resolution.timing, existing.callback, resolution.payload);
+        const schedule = await armFromTiming(
+          resolution.timing,
+          existing.callback,
+          carryScheduleProvenance(existing.payload, resolution.payload),
+        );
         ctx.audit("schedule.updated", "orchestrator", { scheduleId, newScheduleId: schedule?.id, callback: existing.callback });
         return Response.json({ success: true, previousId: scheduleId, schedule });
       } catch (err: any) {
@@ -769,6 +782,22 @@ export async function handleSchedulesRoutes(
           });
           return Response.json({ success: true, schedule: duplicate, duplicate: true });
         }
+
+        // Issue #3121 S1 — creation provenance travels in the stored
+        // payload (#2366 items 3–4): origin user, the trusted creator
+        // identity (null when none was established — recorded
+        // explicitly, never invented), creation time. Stamped AFTER
+        // the duplicate check, so the fresh timestamp cannot defeat
+        // dedup; a payload that already carries provenance keeps its
+        // original creation record. The SDK-owned table schema is
+        // untouched — the payload is the app's JSON blob on the row.
+        screeningPayload = stampScheduleProvenance(
+          screeningPayload,
+          buildScheduleProvenance({
+            origin: "user",
+            createdBy: trustedUserLogin || null,
+          }),
+        );
 
         let schedule: Schedule<unknown> | undefined;
         if (scheduleType === "interval" && intervalSeconds) {

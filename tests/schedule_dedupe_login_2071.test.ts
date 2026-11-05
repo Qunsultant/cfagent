@@ -103,4 +103,44 @@ describe("findDuplicateSchedule (#2071)", () => {
       findDuplicateSchedule([EXISTING], "autonomousOptionsAnalysis", { ...EXISTING.payload }, {}),
     ).toBe(EXISTING);
   });
+
+  it("ignores creation provenance on either side (issue #3121 S1)", () => {
+    // A stored schedule carries its creation stamp; a fresh duplicate
+    // check carries none (the route stamps after dedup). Provenance
+    // is creation metadata, not criteria — dedup must still match.
+    const stored = {
+      ...EXISTING,
+      payload: {
+        ...EXISTING.payload,
+        provenance: {
+          origin: "user",
+          createdBy: "owner@example.com",
+          createdAt: "2026-11-05T00:00:00.000Z",
+        },
+      },
+    };
+    expect(
+      findDuplicateSchedule([stored], "autonomousOptionsAnalysis", { ...EXISTING.payload }, {
+        type: "interval",
+        intervalSeconds: 3600,
+      }),
+    ).toBe(stored);
+    // And the reverse: a fresh payload that already carries a stamp
+    // (re-submit of a stamped payload) still matches the unstamped row.
+    expect(
+      findDuplicateSchedule(
+        [EXISTING],
+        "autonomousOptionsAnalysis",
+        {
+          ...EXISTING.payload,
+          provenance: {
+            origin: "user",
+            createdBy: "owner@example.com",
+            createdAt: "2026-11-05T01:00:00.000Z",
+          },
+        },
+        { type: "interval", intervalSeconds: 3600 },
+      ),
+    ).toBe(EXISTING);
+  });
 });

@@ -20,6 +20,7 @@ import {
   parseScheduledJobOutcomeRow,
   recordScheduledJobOutcome,
   type ScheduledJobOutcomeInput,
+  type ScheduledJobOutcomeRow,
   type ScheduledJobOutcomeStore,
 } from "../../observability/scheduledJobOutcomes";
 import { postSlackText, resourceSlackPost } from "../resourceGoals";
@@ -72,8 +73,7 @@ function reflectionOutcomeDeps(ctx: EtradeBrokerRouteContext): {
         })
         .map(parseScheduledJobOutcomeRow)
         .filter(
-          (row): row is { job: string; outcome: string; createdAt: string } =>
-            row !== null,
+          (row): row is ScheduledJobOutcomeRow => row !== null,
         );
     },
   };
