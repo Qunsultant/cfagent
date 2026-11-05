@@ -4,13 +4,15 @@
  * Implements ITradingPlatform for Alpaca Trading API v2
  */
 
-import type { Env, BrokerQuote, BrokerAccount, BrokerPosition, BrokerOrderDraft, BrokerOrderExecutionResult, BrokerStatus, BrokerOptionChain, BrokerOptionContract, BrokerOptionExpireDate } from "../../types";
+import type { Env, BrokerQuote, BrokerAccount, BrokerPosition, BrokerPositionLot, BrokerOrderDraft, BrokerOrderExecutionResult, BrokerStatus, BrokerOptionChain, BrokerOptionContract, BrokerOptionExpireDate, StockScreenerFilter, StockScreenResult } from "../../types";
 import type { DatabaseORM } from "../../orm";
 import type { ITradingPlatform, OrderPreviewParams, PlaceOrderParams } from "../interfaces";
 import { BROKER_CATALOG, type TradingType } from "../brokerCatalog";
-import { formatOccSymbol, parseOccSymbol } from "./occSymbol";
+import { deriveLotsFromFills, parseAlpacaFill, type DerivedLots } from "./fillLots";
 import { NeutralMarketScreener } from "../neutralMarketScreener";
 import { platformQuoteSource } from "../stockQuoteSource";
+import { formatOccSymbol, parseOccSymbol } from "./occSymbol";
+import { withAlpacaCredentials } from "./credentials";
 import {
   fetchAlpacaOptionContracts,
   fetchAlpacaOptionSnapshots,
@@ -199,7 +201,12 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
     if (!userLogin) {
       throw new Error("AlpacaTradingPlatform requires an explicit userLogin (issue #1185: no default identity).");
     }
-    this.alpacaData = new AlpacaMarketDataProvider(env);
+    // Issue #3330: the deployment writes ALPACA_{PAPER,LIVE}_*; this adapter
+    // reads the generic names. Map the side once, here, so status, quotes,
+    // chains, orders and the market-data provider all see ONE credential set
+    // instead of each deciding paper-vs-live for itself.
+    this.env = withAlpacaCredentials(env, overrideEnv);
+    this.alpacaData = new AlpacaMarketDataProvider(this.env);
   }
 
   async getStatus(): Promise<BrokerStatus> {
@@ -292,6 +299,23 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
       source: "Alpaca Real-Time NBBO Feed",
       timestamp: new Date().toISOString(),
     };
+  }
+
+  /**
+   * Issue #3325 (programme #3292): stock screening on Alpaca's own quotes.
+   *
+   * Screening was declared `false` for Alpaca with the reasoning "Alpaca has no
+   * screener API" — true, but beside the point: the screening math is the
+   * platform's (the same `NeutralMarketScreener` #3272 built), and the only
+   * broker-specific input is quotes, which this adapter already reads. Declaring
+   * the capability absent meant a surface refused work the engine could do.
+   *
+   * The universe resolves through the live listings feed; an unresolvable
+   * universe or an unconfigured broker is a named refusal from the screener,
+   * never an empty "no matches" or another broker's quotes.
+   */
+  async screenMarkets(filter: StockScreenerFilter = {}): Promise<StockScreenResult> {
+    return new NeutralMarketScreener({ quoteSource: platformQuoteSource(this) }).screenMarkets(filter);
   }
 
   async getAccounts(): Promise<BrokerAccount[]> {
@@ -477,6 +501,57 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
       account: accounts[0],
       positions: res.positions.map(mapAlpacaPosition),
     };
+  }
+
+  /**
+   * Issue #3328 (programme #3292): tax lots, derived from Alpaca fills.
+   *
+   * Alpaca has no lot endpoint — the reason `positionLots` was declared
+   * unsupported — but it reports account fills with quantity, price and time,
+   * and FIFO over those answers the same question. This is the detailed form:
+   * it carries the coverage the array-returning contract method cannot, so a
+   * caller can say "3 of 5 shares are explained by retained fills".
+   */
+  async derivePositionLots(positionId: string | number): Promise<DerivedLots> {
+    const symbol = String(positionId ?? "").trim().toUpperCase();
+    if (!symbol) {
+      throw new Error("Alpaca position lots require the position id (the symbol).");
+    }
+    const holdings = await this.getPositions();
+    const position = holdings.positions.find((candidate) => candidate.symbol === symbol);
+    if (!position) {
+      throw new Error(`Alpaca reports no open position for ${symbol}, so its lots cannot be derived.`);
+    }
+    const fills = await this.alpacaData.getFills(symbol);
+    if (!fills.success || !Array.isArray(fills.fills)) {
+      throw new Error(mapAlpacaFailureToBusiness(fills.httpStatus, "positions"));
+    }
+    const parsed = fills.fills
+      .map((row: Record<string, unknown>) => parseAlpacaFill(row))
+      .filter((row): row is NonNullable<typeof row> => row !== null);
+    // An unreadable row is stated, never silently treated as a fill.
+    const derived = deriveLotsFromFills(parsed, position.quantity);
+    return { ...derived, incomplete: parsed.length !== fills.fills.length };
+  }
+
+  /**
+   * The contract method. Returns the lots the retained fills explain; the
+   * coverage gap is available through `derivePositionLots`, which the route
+   * layer reads. Nothing is invented to fill a gap in the array.
+   */
+  async getPositionLots(accountKey: string, positionId: string | number): Promise<BrokerPositionLot[]> {
+    const derived = await this.derivePositionLots(positionId);
+    const symbol = String(positionId ?? "").trim().toUpperCase();
+    return derived.lots.map((lot) => ({
+      positionId: symbol,
+      price: lot.price,
+      adjustedPrice: lot.price,
+      originalQty: lot.quantity,
+      remainingQty: lot.quantity,
+      availableQty: lot.quantity,
+      acquiredDate: Date.parse(lot.acquiredAt),
+      settlementCurrency: "USD",
+    }));
   }
 
   /**
