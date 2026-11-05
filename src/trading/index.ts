@@ -36,6 +36,7 @@ export * from "./registry";
 export * from "./brokerCatalog";
 export * from "./brokerPanels";
 export * from "./optionChainSource";
+export * from "./stockQuoteSource";
 export * from "./screeningProvider";
 export * from "./dataProviders";
 export * from "./screener";
