@@ -36,7 +36,7 @@
  * signal-conditioned forward returns on its real bars.
  */
 
-import type { SqlStorage } from "../orm";
+import type { StockCopilotPositionPort } from "../data/stockCopilotStorePorts";
 import type { Env } from "../types";
 import {
   resolveAlpacaTradingBase,
@@ -145,7 +145,9 @@ export function isUsMarketOpen(now: Date): boolean {
 
 export interface StockCopilotDeps {
   env: Env;
-  sql: SqlStorage;
+  /** The copilot's position store, through the data layer's
+   *  port (composed by the host via createStockCopilotStorePorts). */
+  positions: StockCopilotPositionPort;
   /** The instance's acting login (order attribution + store scope). */
   userLogin: string;
   /** The Alpaca platform, obtained through the TradingPlatform seam. */
@@ -453,7 +455,7 @@ export async function runStockCopilotCycle(
   }
 
   const nowIso = now.toISOString();
-  const store = new StockCopilotPositionStore(deps.sql);
+  const store = new StockCopilotPositionStore(deps.positions);
   const universe = (deps.universe ?? copilotUniverseFromEnv(deps.env)).map((s) =>
     s.toUpperCase(),
   );
