@@ -55,6 +55,7 @@ import { handlePremiumRoutes, makePremiumRouteContext } from "../routes/premium"
 import { handleTradingIntegrationsRoutes } from "../routes/tradingIntegrations";
 import { handleEtradeBrokerRoutes, handleEtradeBrokerActivityRoutes } from "../routes/etradeBroker";
 import { handleBrokerOrderRoutes } from "../routes/brokerOrders";
+import { handleBrokerOptionsRoutes } from "../routes/brokerOptions";
 import { handleEtradeOptionsRoutes } from "../routes/etradeOptions";
 import { handleOptionsProviderGateRoutes } from "../routes/optionsProviderGate";
 import { resolveBrokerEnvironmentFromSettings } from "../routes/brokerEnvironment";
@@ -472,6 +473,17 @@ export async function routeRequest(deps: RouteRequestDeps, request: Request): Pr
   // block); a non-null return matched.
   const premiumResponse = await handlePremiumRoutes(request, url, path, sessionId, makePremiumRouteContext(deps));
   if (premiumResponse) return premiumResponse;
+
+  // Issue #3233 (program #3216): broker-neutral options reads. The selected
+  // broker serves /broker/options/*; a capability it does not implement is a
+  // coded 501 naming that broker. The legacy /etrade/options/* block below is
+  // untouched (its route inventory is byte-pinned by #995).
+  const brokerOptionsResponse = await handleBrokerOptionsRoutes(request, url, path, sessionId, {
+    env: deps.env,
+    getOrm: () => deps.getOrm(),
+    readSettingRaw: (key) => deps.readSettingRaw(key),
+  });
+  if (brokerOptionsResponse) return brokerOptionsResponse;
 
   // Provider/broker slice 1: the broker gate delegation
   // (src/agents/routes/brokerGate.ts). Invoked at this exact

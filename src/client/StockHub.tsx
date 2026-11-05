@@ -9,6 +9,15 @@ import {
   providerSupportsFilter,
   type ScreeningAssetClass,
 } from "./screeningAdapters";
+import {
+  buildPaidScreenBody,
+  isMonetizationWorkflowError,
+  isPaymentStarted,
+  mapScreenError,
+  readMonetizationState,
+  type MonetizationState,
+} from "./paidScreenSubmit";
+import { checkPayment, getPricing } from "./commercialApi";
 import type { ScreenedStockItem } from "../types";
 import {
   StockCriteriaPanel,
@@ -292,6 +301,24 @@ export function StockHub({
   const [summary, setSummary] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  // Issue #3239: paid-seam state for the manual run — the monetization
+  // flag decides whether the run rides the payment workflow, and a
+  // 202 payment_started parks here until the payment is verified.
+  const [monetization, setMonetization] = useState<MonetizationState>("unknown");
+  const [checkoutEmail, setCheckoutEmail] = useState("");
+  const [paymentStarted, setPaymentStarted] = useState<{
+    runRequestId: string;
+    workflowId?: string;
+  } | null>(null);
+  const [paymentCheck, setPaymentCheck] = useState("");
+  const [paymentLink, setPaymentLink] = useState<string | null>(null);
+  const [paymentChallenge, setPaymentChallenge] = useState<{
+    network: string | null;
+    amountUSD?: number;
+    recipient?: string;
+  } | null>(null);
+  const [checkingPayment, setCheckingPayment] = useState(false);
+  const [retryPaid, setRetryPaid] = useState(false);
   // Issue #212: latest screener runs (retained history; each run carries
   // its own trigger — manual runs are not scheduled runs).
   const [autoRuns, setAutoRuns] = useState<ScreenRun[]>([]);
@@ -347,6 +374,20 @@ export function StockHub({
     void loadAuto();
   }, [loadAuto]);
 
+  // Issue #3239: the monetization flag decides whether the run below
+  // rides the paid seam. A failed read stays "unknown": the run keeps
+  // today's sync request and a 402 maps to the payment message with a
+  // retry action, instead of the client guessing the flag.
+  useEffect(() => {
+    let cancelled = false;
+    void readMonetizationState(getPricing).then((state) => {
+      if (!cancelled) setMonetization(state);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Issue #329 (P1): 30 s -> 60 s, and paused entirely while the tab is hidden.
   // Issue #2481 — screener auto-load polling is gated by the
   // global auto-refresh switch; the initial load above is unaffected.
@@ -364,9 +405,25 @@ export function StockHub({
 
   const runScreen = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    await executeScreen(false);
+  };
+
+  // Issue #3239: the retry action after a 402 re-runs the same screen
+  // through the payment workflow instead of re-sending a sync request
+  // the seam will refuse again.
+  const retryPaidScreen = async () => {
+    await executeScreen(true);
+  };
+
+  const executeScreen = async (forcePaid: boolean) => {
     if (!endpoint || loading) return;
     setLoading(true);
     setError("");
+    setRetryPaid(false);
+    setPaymentStarted(null);
+    setPaymentCheck("");
+    setPaymentLink(null);
+    setPaymentChallenge(null);
     setManualResult(null);
     setSummary("");
     try {
@@ -420,6 +477,21 @@ export function StockHub({
         }
       }
 
+      // Issue #3239: monetization ON rides the paid seam (async +
+      // checkout email); every other state sends today's sync body
+      // unchanged. A forced-paid retry always rides the seam. The
+      // checkout email is required for a paid run — without it the
+      // seam would 400, so the run stops here with the prompt.
+      const paidMode = forcePaid || monetization === "on";
+      const checkout = checkoutEmail.trim();
+      if (paidMode && !checkout) {
+        setRetryPaid(true);
+        throw new Error("Enter a checkout email to run this paid screen.");
+      }
+      const paidBody = paidMode
+        ? buildPaidScreenBody(requestBody, { monetization: "on", checkoutEmail: checkout })
+        : requestBody;
+
       const response = await fetch(endpoint, {
         method: "POST",
         headers: {
@@ -427,11 +499,16 @@ export function StockHub({
           "x-environment": activeEnv,
           ...(userLogin ? { "x-user-login": userLogin } : {}),
         },
-        body: JSON.stringify(requestBody),
+        body: JSON.stringify(paidBody),
       });
 
-      const data = (await response.json()) as {
+      // Issue #3239: parse-safe — a non-JSON error body (the #3197
+      // raw-HTML class) must not become a parser message.
+      const data = (await response.json().catch(() => ({}))) as {
         error?: string;
+        status?: string;
+        runRequestId?: string;
+        workflowId?: string;
         stocks?: ScreenedStockItem[];
         opportunities?: Array<{
           symbol: string;
@@ -458,7 +535,19 @@ export function StockHub({
         reportUrl?: string;
       };
 
-      if (!response.ok) throw new Error(data.error || `Screening request failed [HTTP ${response.status}].`);
+      // Issue #3239: the seam's 202 answers payment state, not rows —
+      // park it for the payment notice below instead of rendering
+      // an empty result.
+      if (isPaymentStarted(data)) {
+        setPaymentStarted({ runRequestId: data.runRequestId, workflowId: data.workflowId });
+        setShardedResults([]);
+        setSummary(`Payment started — run request ${data.runRequestId}. Complete the payment to start the run.`);
+        return;
+      }
+      if (!response.ok) {
+        if (isMonetizationWorkflowError(response.status, data.error)) setRetryPaid(true);
+        throw new Error(mapScreenError(response.status, data.error));
+      }
       if (data.validationError) throw new Error(data.validationError);
 
       // Issue #261: manual results feed the unified ScreenerResultsView.
@@ -526,6 +615,43 @@ export function StockHub({
       setError(cause instanceof Error ? cause.message : "Screening request failed.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Issue #3239: manual re-read of the payment state, mirroring the
+  // checkout panel's verify button — no auto-poller over status
+  // values this panel does not own.
+  const handleCheckPayment = async () => {
+    if (!paymentStarted) return;
+    setCheckingPayment(true);
+    setPaymentCheck("");
+    setPaymentLink(null);
+    setPaymentChallenge(null);
+    try {
+      const res = await checkPayment(paymentStarted.runRequestId);
+      if (res.paid && res.delivered) {
+        setPaymentCheck("Payment verified — the run is starting. Results will appear in Stocks history and your delivery targets.");
+      } else if (res.paid && !res.delivered) {
+        setPaymentCheck("Payment verified, but the run could not be woken yet. Tap Check payment status again to retry.");
+      } else {
+        setPaymentCheck(
+          `Not paid yet (checkout state: ${res.state ?? "unknown"}).${res.paymentUrl ? " Use the payment link below, then check again." : " Complete the payment for this request, then check again."}`,
+        );
+      }
+      setPaymentLink(res.paymentUrl ?? null);
+      setPaymentChallenge(
+        res.challengeFlow
+          ? {
+              network: res.challengeFlow.network,
+              amountUSD: res.challengeFlow.amountUSD,
+              recipient: res.challengeFlow.recipient,
+            }
+          : null,
+      );
+    } catch {
+      setPaymentCheck("Could not read the payment status. Try again.");
+    } finally {
+      setCheckingPayment(false);
     }
   };
 
@@ -971,15 +1097,47 @@ export function StockHub({
                   </FieldShell>
                 </div>
               </div>
+              {(monetization === "on" || retryPaid) && (
+                <TextInput label="Checkout email"
+                  type="email"
+                  value={checkoutEmail}
+                  onChange={(event) => setCheckoutEmail(event.target.value)}
+                  placeholder="Payment contact email"
+                  hint="Required when monetization is on — the payment contact for this run."
+                />
+              )}
               <div className="options-form-footer">
                 <Button type="submit" variant="primary" disabled={loading || !endpoint} loading={loading}>{"Run stock screen"}</Button>
               </div>
             </form>
 
+            {paymentStarted && (
+              <Notice tone="info" density="compact" onDismiss={() => setPaymentStarted(null)}>
+                Payment started — run request {paymentStarted.runRequestId}. Complete the payment to start the run.
+                <Button loading={checkingPayment} onClick={() => void handleCheckPayment()}>Check payment status</Button>
+                {paymentCheck && <p>{paymentCheck}</p>}
+                {paymentLink && (
+                  <p>
+                    <a href={paymentLink} target="_blank" rel="noreferrer">
+                      Complete payment
+                    </a>
+                  </p>
+                )}
+                {paymentChallenge && (
+                  <p>
+                    Pay {paymentChallenge.amountUSD ?? "?"} USDC on {paymentChallenge.network ?? "the configured network"}
+                    {paymentChallenge.recipient ? ` to ${paymentChallenge.recipient}` : ""}.
+                  </p>
+                )}
+              </Notice>
+            )}
             {error && (
               <Notice tone="danger" density="compact" onDismiss={() => setError("")}>
                 {error}
               </Notice>
+            )}
+            {retryPaid && (
+              <Button onClick={() => void retryPaidScreen()} disabled={loading}>Start payment workflow</Button>
             )}
             {manualResult && <ScreenerResultsView result={manualResult} />}
             {shardedResults.length > 0 && shardedResults.map((r) => (

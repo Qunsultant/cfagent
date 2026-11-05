@@ -61,7 +61,7 @@ const PRUNE_CAP_SQL =
 const TABLE_INFO_SQL = `PRAGMA table_info(${TABLE})`;
 const ADD_USER_LOGIN_COLUMN_SQL = `ALTER TABLE ${TABLE} ADD COLUMN user_login TEXT`;
 
-function summarize(id: string, result: OpportunityScanResult, userLogin?: string): ScanRunSummary {
+function summarize(id: string, result: OpportunityScanResult, userLogin?: string, trigger?: "manual" | "scheduled"): ScanRunSummary {
   return {
     id,
     generatedAt: result.generatedAt,
@@ -74,6 +74,10 @@ function summarize(id: string, result: OpportunityScanResult, userLogin?: string
     xlsxKey: result.xlsxKey ?? null,
     csvKey: result.csvKey ?? null,
     partial: result.partial ?? null,
+    // Issue #3264: the trigger rides inside summary_json (no column
+    // migration — the summary object is serialized wholesale), so
+    // older rows simply lack the field and read back as null.
+    ...(trigger ? { trigger } : {}),
     ...(userLogin !== undefined ? { userLogin } : {}),
   };
 }
@@ -128,10 +132,10 @@ export class SqlScanRunStore implements ScanRunStore {
     return Number(rows[0]?.count ?? 0);
   }
 
-  async save(result: OpportunityScanResult, options: { userLogin?: string; id?: string } = {}): Promise<StoredScanRun> {
+  async save(result: OpportunityScanResult, options: { userLogin?: string; id?: string; trigger?: "manual" | "scheduled" } = {}): Promise<StoredScanRun> {
     this.ensure();
     const id = options.id ?? this.idFactory();
-    const summary = summarize(id, result, options.userLogin);
+    const summary = summarize(id, result, options.userLogin, options.trigger);
     const run: StoredScanRun = { ...summary, result };
     const insert = () => {
       this.sql.exec(

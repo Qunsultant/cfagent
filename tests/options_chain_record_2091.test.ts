@@ -147,11 +147,40 @@ describe("Options chain record wiring (#2091)", () => {
       modelVersion: "v1", gate: { fit: 1, borderline: 0, noFit: 0 },
       coverage: { considered: 1, scanned: 1, evaluated: 1, errors: 0, withTrades: 1, eventCalendar: { covered: 1, total: 1, coveragePct: 100 } },
       profileRef: null, pdfKey: "report:pdf:abc", xlsxKey: "report:xlsx:abc", csvKey: "report:csv:abc",
+      trigger: "scheduled",
     } as unknown as ScanRunSummary;
     const summary = runSummaryFromScanRun(scan);
     expect(summary.xlsxKey).toBe("report:xlsx:abc");
     expect(summary.csvKey).toBe("report:csv:abc");
     expect(summary.xlsxUrl).toMatch(/xlsx/);
     expect(summary.csvUrl).toMatch(/csv/);
+    // Issue #3264: the recorded trigger reaches the Docs Run Type
+    // instead of rendering "—".
+    expect(summary.trigger).toBe("scheduled");
+  });
+
+  it("scan-run mapper keeps trigger null when the row records none (never guessed)", () => {
+    const scan = {
+      id: "scan-2", generatedAt: "2026-10-28T12:00:00.000Z", mode: "per_name_best",
+      modelVersion: "v1", gate: { fit: 1, borderline: 0, noFit: 0 },
+      coverage: { considered: 1, scanned: 1, evaluated: 1, errors: 0, withTrades: 1, eventCalendar: { covered: 1, total: 1, coveragePct: 100 } },
+      profileRef: null, pdfKey: "report:pdf:abc",
+    } as unknown as ScanRunSummary;
+    expect(runSummaryFromScanRun(scan).trigger).toBeNull();
+  });
+
+  it("scan-run save with trigger persists it on the listed row (#3264)", async () => {
+    const { InMemoryScanRunStore } = await import("../src/data/inMemoryScanRunAdapter");
+    const store = new InMemoryScanRunStore({ idFactory: () => "scan-trigger-1" });
+    const result = {
+      generatedAt: "2026-10-28T12:00:00.000Z", mode: "per_name_best", modelVersion: "v1",
+      gate: { fit: 1, borderline: 0, noFit: 0 },
+      coverage: { considered: 1, scanned: 1, evaluated: 1, errors: 0, withTrades: 1, eventCalendar: { covered: 1, total: 1, coveragePct: 100 } },
+      profileRef: null,
+    } as unknown as Parameters<typeof store.save>[0];
+    await store.save(result, { userLogin: "tester", trigger: "scheduled" });
+    const rows = await store.list({ userLogin: "tester" });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].trigger).toBe("scheduled");
   });
 });

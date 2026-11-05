@@ -664,6 +664,12 @@ export const unifiedOptionsRequestFields = {
   // route schema's refinement below, never resolved silently.
   strategyMode: z.enum(["thesis", "all", "no-view"]).optional(),
   farDated: z.boolean().optional(),
+  // Issue #3264: the run trigger (manual/scheduled) carried into the
+  // scan-run save so Docs can show the Run Type. Server-populated
+  // only — a client-supplied value is never trusted: the unified
+  // route deletes it after parsing (like eventCalendarBySymbol),
+  // and only the scheduled caller passes it to the service.
+  trigger: z.enum(["manual", "scheduled"]).optional(),
   candidateLimit: z.union([intAtLeast(1), z.literal("all")]).optional(),
 } satisfies Record<keyof UnifiedOptionsRequest, z.ZodType>;
 

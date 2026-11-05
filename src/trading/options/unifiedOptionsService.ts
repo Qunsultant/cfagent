@@ -90,6 +90,14 @@ export interface UnifiedOptionsRequest {
   /** Issue #738: max symbols for the scanner to process (overrides the 20-symbol default cap). */
   maxSymbols?: number;
   thesis?: OptionThesis;
+  /**
+   * Issue #3264: how this run was started, when the caller knows
+   * it. Carried ONLY into the scan-run save (the history row's
+   * trigger) — never into the cache key, the scan template, or the
+   * request snapshot, so a manual and a scheduled run over the
+   * same scan still share one cached result.
+   */
+  trigger?: "manual" | "scheduled";
   targetPrice?: number;
   targetDate?: string;
   expectedIvDirection?: ExpectedIvDirection;
@@ -935,6 +943,10 @@ export class UnifiedOptionsService {
               const saved = await this.scanRunStore.save(scanResult, {
                 userLogin: this.userLogin,
                 ...(platformRunId ? { id: platformRunId } : {}),
+                // Issue #3264: stamp the run's trigger on the history
+                // row so Docs can say how it started; absent, the row
+                // records none (never a guessed trigger).
+                ...(req.trigger ? { trigger: req.trigger } : {}),
               });
               executionData = { ...scanResult, scanRunId: saved.id, persisted: true };
             } catch (err) {
