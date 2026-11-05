@@ -36,8 +36,8 @@ function section(start: string, end: string): string {
 describe("deploy.yml — secret sync (#590)", () => {
   it("keeps no inline wrapper: every secret step sources the shared helper", () => {
     expect(workflow).not.toContain("put_secret() {");
-    // Five steps: core, E*TRADE, gateways, Google OAuth, Threads.
-    expect(workflow.match(/source scripts\/ci\/put-secret\.sh/g) ?? []).toHaveLength(5);
+    // Six steps: core, E*TRADE, Alpaca, gateways, Google OAuth, Threads.
+    expect(workflow.match(/source scripts\/ci\/put-secret\.sh/g) ?? []).toHaveLength(6);
   });
 
   it("runs secrets in their own non-blocking job after the code deploy", () => {
@@ -89,6 +89,22 @@ describe("deploy.yml — email principals secret sync (#1518)", () => {
     expect(workflow).toMatch(
       /optional_secret CHANNEL_EMAIL_PRINCIPALS "\$S_CHANNEL_EMAIL_PRINCIPALS"/
     );
+  });
+});
+
+describe("deploy.yml — Alpaca secret sync (#3277)", () => {
+  it("pushes the dual-mode paper and live Alpaca secrets", () => {
+    for (const secret of [
+      "ALPACA_LIVE_API_KEY",
+      "ALPACA_LIVE_SECRET_KEY",
+      "ALPACA_LIVE_URL",
+      "ALPACA_MARKET_URL",
+      "ALPACA_PAPER_API_KEY",
+      "ALPACA_PAPER_SECRET_KEY",
+      "ALPACA_PAPER_URL",
+    ]) {
+      expect(workflow).toContain(`require_secret ${secret} "$S_${secret}"`);
+    }
   });
 });
 

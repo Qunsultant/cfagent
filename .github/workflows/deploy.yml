@@ -290,6 +290,33 @@ jobs:
           require_secret ET_BASE_URL "$TARGET_URL"
           require_secret APP_ENV "$ACTIVE_ENV_NAME"
 
+      - name: Set Alpaca secrets on Cloudflare Worker [${{ needs.load-environment.outputs.target_env }}]
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          S_ALPACA_LIVE_API_KEY: ${{ secrets.ALPACA_LIVE_API_KEY }}
+          S_ALPACA_LIVE_SECRET_KEY: ${{ secrets.ALPACA_LIVE_SECRET_KEY }}
+          S_ALPACA_LIVE_URL: ${{ secrets.ALPACA_LIVE_URL }}
+          S_ALPACA_MARKET_URL: ${{ secrets.ALPACA_MARKET_URL }}
+          S_ALPACA_PAPER_API_KEY: ${{ secrets.ALPACA_PAPER_API_KEY }}
+          S_ALPACA_PAPER_SECRET_KEY: ${{ secrets.ALPACA_PAPER_SECRET_KEY }}
+          S_ALPACA_PAPER_URL: ${{ secrets.ALPACA_PAPER_URL }}
+        run: |
+          set -euo pipefail
+          source scripts/ci/put-secret.sh
+
+          # Issue #3277 (S3): the owner created all seven Alpaca secrets, so a
+          # missing one is a configuration failure, not a reason to skip.
+          # GitHub secret names mirror Worker secret names; no code reads
+          # these names yet — the dual-mode resolver lands separately.
+          require_secret ALPACA_LIVE_API_KEY "$S_ALPACA_LIVE_API_KEY"
+          require_secret ALPACA_LIVE_SECRET_KEY "$S_ALPACA_LIVE_SECRET_KEY"
+          require_secret ALPACA_LIVE_URL "$S_ALPACA_LIVE_URL"
+          require_secret ALPACA_MARKET_URL "$S_ALPACA_MARKET_URL"
+          require_secret ALPACA_PAPER_API_KEY "$S_ALPACA_PAPER_API_KEY"
+          require_secret ALPACA_PAPER_SECRET_KEY "$S_ALPACA_PAPER_SECRET_KEY"
+          require_secret ALPACA_PAPER_URL "$S_ALPACA_PAPER_URL"
+
       - name: Set Payment Gateway secrets on Cloudflare Worker [${{ needs.load-environment.outputs.target_env }}]
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
