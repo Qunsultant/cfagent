@@ -518,3 +518,97 @@ describe("S0-P27 drift D6: the #2366 hung-timeout claim is not locatable under s
     }
   });
 });
+
+describe("U-P01 URL inventory (§8 U-01): nav-config.json schedules route is retained with no nav entry", () => {
+  it("pins retain:true, no navEntry, and the screening-hub description", () => {
+    const config = JSON.parse(read("src/client/nav-config.json")) as {
+      routes: Array<Record<string, unknown>>;
+    };
+    const route = config.routes.find((r) => r.id === "schedules");
+    expect(route).toBeDefined();
+    expect(route!.retain).toBe(true);
+    expect(route!).not.toHaveProperty("navEntry");
+    expect(route!.navGroup).toBe("schedules");
+    expect(route!.description as string).toContain("schedules");
+  });
+});
+
+describe("U-P02 URL inventory (§8 U-01/U-02): navConfig.ts #2974 synthesizes the Schedules nav item", () => {
+  it("pins the label, Cron badge, description, and dual-address active logic", () => {
+    const nav = read("src/client/navConfig.ts");
+    expect(nav).toContain("// Issue #2974: insert Schedules before the Workflows item");
+    expect(nav).toContain('label: "Schedules"');
+    expect(nav).toContain('badge: "Cron"');
+    expect(nav).toContain(
+      'description: "The one scheduling surface for screening runs — create, pause, and inspect scheduled jobs"',
+    );
+    expect(nav).toContain('if (item.id === "schedules") {');
+    expect(nav).toContain('if (currentTab === "schedules") return true;');
+    expect(nav).toContain(
+      'return currentTab === "screeners" && (view === "schedules" || view === "schemas");',
+    );
+  });
+});
+
+describe("U-P03 URL inventory (§8 U-03/U-04/U-05): deep links and deep-link surfaces for schedules", () => {
+  it("pins the options scheduled-screening deep link and the platform-admin view values", () => {
+    const config = JSON.parse(read("src/client/nav-config.json")) as {
+      deepLinks: Record<string, unknown>;
+      deepLinkSurfaces: Array<{ page: string; values: string[] }>;
+    };
+    expect(config.deepLinks["options-screener:scheduled-screening"]).toEqual({
+      tab: "options",
+      view: "scheduled-screening",
+    });
+    const optionsHub = config.deepLinkSurfaces.find((s) => s.page === "options");
+    expect(optionsHub).toBeDefined();
+    expect(optionsHub!.values).toContain("scheduled-screening");
+    const platformAdmin = config.deepLinkSurfaces.find((s) => s.page === "platform-admin");
+    expect(platformAdmin).toBeDefined();
+    expect(platformAdmin!.values).toContain("scheduled-goals");
+    // "jobs" is a platform-admin section (and a PlatformAdminPage tab),
+    // not a deepLinkSurfaces value — the view is read from ?view= directly.
+    const sections = (
+      config as { platformAdminSections: Array<{ items: Array<{ id: string }> }> }
+    ).platformAdminSections.flatMap((s) => s.items.map((i) => i.id));
+    expect(sections).toContain("scheduled-goals");
+    expect(sections).toContain("jobs");
+  });
+});
+
+describe("U-P04 URL inventory (§8 U-01): Chat.tsx renders schedules through the retained ETradeTradingHub", () => {
+  it("pins the tab-to-sub-tab mapping and the URL-driven hub selection", () => {
+    const types = read("src/client/chat/types.ts");
+    expect(types).toContain('    case "schedules":\n      return "schedules";');
+    const chat = read("src/client/Chat.tsx");
+    expect(chat).toContain("activeSubTab={mapTabToTradingSubTab(tab)}");
+    expect(chat).toContain("the URL is the source of truth for navigation");
+    expect(chat).toContain("onSelectSubTab={(newSubTab) => {");
+    expect(chat).toContain("handleSelectTab(newSubTab);");
+    const hub = read("src/client/ETradeTradingHub.tsx");
+    expect(hub).toContain('{effectiveSubTab === "schedules" && (');
+    expect(hub).toContain("<SchedulesPanel");
+  });
+});
+
+describe("U-P05 URL inventory (§8 U-06): the IAAA admin Queue sub-tab is URL-addressable via ?iaaaTab=", () => {
+  it("pins the nested iaaaTab deep link and the AdminQueueWipePanel mount", () => {
+    const panel = read("src/client/IaaaAdminPanel.tsx");
+    expect(panel).toContain('param: "iaaaTab"');
+    expect(panel).toContain('{ id: "queue", label: "Queue" }');
+    expect(panel).toContain('<TabPanel idBase="iaaa-admin" tabId="queue" active={tab === "queue"}>');
+    expect(panel).toContain("<AdminQueueWipePanel />");
+  });
+});
+
+describe("U-P06 URL inventory (§8): the hub sub-tab is a local mirror of the URL-driven value", () => {
+  it("pins the local subTab state synced from the activeSubTab prop", () => {
+    const hub = read("src/client/ETradeTradingHub.tsx");
+    expect(hub).toContain(
+      "const [subTab, setSubTab] = useState<TradingSubTab>(activeSubTab || \"autopilot\");",
+    );
+    expect(hub).toContain(
+      'const effectiveSubTab: TradingSubTab = activeSubTab || subTab || "autopilot";',
+    );
+  });
+});
