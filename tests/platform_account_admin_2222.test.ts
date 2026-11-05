@@ -29,6 +29,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { InMemoryCommercialAdapter } from "../src/data/inMemoryCommercialAdapter";
+import { InMemoryOnboardingAdapter } from "../src/data/inMemoryOnboardingAdapter";
 import { InMemoryPriceCatalogueAdapter } from "../src/data/inMemoryPriceCatalogueAdapter";
 import { InMemoryStoreOperatorsAdapter } from "../src/data/inMemoryStoreOperatorsAdapter";
 import { InMemorySubscriptionAdapter } from "../src/data/inMemorySubscriptionAdapter";
@@ -48,6 +49,7 @@ function makePorts(overrides: Partial<PlatformAccountPorts> = {}): PlatformAccou
     subscriptions: new InMemorySubscriptionAdapter(),
     prices: new InMemoryPriceCatalogueAdapter({ stock: 0.02, options: 0.05 }),
     operators: new InMemoryStoreOperatorsAdapter(),
+    onboarding: new InMemoryOnboardingAdapter(),
     ...overrides,
   };
 }

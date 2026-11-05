@@ -8,6 +8,16 @@
  * checkout-panel precedent): the screen's own logic — steps, read-only
  * identity display, preferences save, completion — runs for real, and
  * the completion store functions are the real ones (importActual).
+ *
+ * Issue #3256 (sub-issue of #3241) extended the screen from 4 steps
+ * to 5 (account creation, trial, brokerage, preferences, summary):
+ * step 1 now CREATES the account on entry when none exists, step 2
+ * is the trial choice, step 3 connects E*TRADE for real (the old
+ * "open-settings-menu" event is gone — the flow never dispatches
+ * it), and step 5 is a true server-fetched summary. The tests below
+ * were updated for that intentional change; the #2471 behaviors
+ * (read-only identity, preferences save, completion, error-not-skip)
+ * are preserved.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React, { act } from "react";
@@ -27,6 +37,11 @@ const apiState = vi.hoisted(() => ({
   identityError: null as null | Error,
   preferences: { userId: "second-user", tenantId: "tenant-1", digestEnabled: false, welcomeEnabled: true, updatedAtMs: 1 },
   savedBody: null as null | Record<string, unknown>,
+  setupCalls: 0,
+  stateCalls: [] as Record<string, unknown>[],
+  etradeAuthenticated: false,
+  oauthStarted: 0,
+  plans: [] as { id: string; name: string; priceUSD: number; periodDays: number; includedRuns: number; trialDays: number | null }[],
 }));
 
 vi.mock("../src/client/firstRunApi", async (importOriginal) => {
@@ -38,10 +53,57 @@ vi.mock("../src/client/firstRunApi", async (importOriginal) => {
       if (!apiState.identity) throw new Error("no mocked identity");
       return apiState.identity;
     }),
+    setupAccount: vi.fn(async () => {
+      apiState.setupCalls += 1;
+      apiState.identity = {
+        userLogin: "second-user",
+        tenantId: "second-user",
+        hasAccount: true,
+        tier: "Free",
+        creditsUSD: 0,
+        includedRunsRemaining: 0,
+      };
+      return { created: true, identity: apiState.identity };
+    }),
+    fetchOnboardingState: vi.fn(async () => null),
+    saveOnboardingState: vi.fn(async (input: Record<string, unknown>) => {
+      apiState.stateCalls.push(input);
+      return {
+        userLogin: "second-user",
+        tenantId: "second-user",
+        currentStep: input.currentStep as number,
+        completedAtMs: input.completed === true ? 1700000000000 : null,
+        trialPlanId: null,
+        trialStartedAtMs: null,
+        updatedAtMs: 1700000000000,
+      };
+    }),
+    fetchETradeStatus: vi.fn(async () => ({
+      authenticated: apiState.etradeAuthenticated,
+      environment: "TEST",
+    })),
+    startETradeOAuth: vi.fn(() => {
+      apiState.oauthStarted += 1;
+    }),
+    fetchAccountSelf: vi.fn(async () => ({
+      identity: apiState.identity,
+      subscriptions: [],
+    })),
     fetchNotificationPreferences: vi.fn(async () => apiState.preferences),
     saveNotificationPreferences: vi.fn(async (input: Record<string, unknown>) => {
       apiState.savedBody = input;
       return { ...apiState.preferences, digestEnabled: input.digestEnabled as boolean, welcomeEnabled: input.welcomeEnabled as boolean };
+    }),
+  };
+});
+
+vi.mock("../src/client/commercialApi", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/client/commercialApi")>();
+  return {
+    ...actual,
+    listPlans: vi.fn(async () => ({ plans: apiState.plans })),
+    subscriptionTrial: vi.fn(async () => {
+      throw new Error("trial not exercised in the #2471 walk");
     }),
   };
 });
@@ -111,6 +173,13 @@ beforeEach(() => {
   apiState.identityError = null;
   apiState.preferences = { userId: "second-user", tenantId: "tenant-1", digestEnabled: false, welcomeEnabled: true, updatedAtMs: 1 };
   apiState.savedBody = null;
+  apiState.setupCalls = 0;
+  apiState.stateCalls = [];
+  apiState.etradeAuthenticated = false;
+  apiState.oauthStarted = 0;
+  apiState.plans = [
+    { id: "plan-starter", name: "Starter", priceUSD: 10, periodDays: 30, includedRuns: 5, trialDays: 7 },
+  ];
 });
 
 afterEach(async () => {
@@ -135,28 +204,35 @@ describe("FirstRunScreen (#2471)", () => {
     }
   });
 
-  it("walks account -> E*TRADE guidance -> preferences -> completion, saves, and marks complete", async () => {
+  it("walks account -> trial choice -> brokerage -> preferences -> summary, saves, and marks complete", async () => {
     const { container, root, completed } = await renderScreen({ userLogin: "screen-user-2" });
     try {
-      // Step 1 -> step 2.
+      // Step 1 -> step 2 (trial choice).
       click(container, "Continue");
       await flush();
-      expect(container.textContent ?? "").toContain("Settings");
-      expect(container.textContent ?? "").toContain("E*TRADE");
+      expect(container.textContent ?? "").toContain("Step 2 of 5");
+      expect(container.textContent ?? "").toContain("Starter");
 
-      // Step 2's guidance button reuses the existing Settings menu event.
+      // Step 2 -> step 3: the trial is a choice, skip it here.
+      click(container, "Skip trial for now");
+      await flush();
+      expect(container.textContent ?? "").toContain("Step 3 of 5");
+      expect(container.textContent ?? "").toContain("Not connected");
+
+      // Step 3 no longer dispatches the old Settings-menu event:
+      // the flow connects for real (startETradeOAuth) or continues
+      // without connecting. Continuing must fire no such event.
       const opened: Event[] = [];
       const listener = (e: Event) => opened.push(e);
       window.addEventListener("open-settings-menu", listener);
       try {
-        click(container, "Open Settings");
+        click(container, "Continue without connecting");
       } finally {
         window.removeEventListener("open-settings-menu", listener);
       }
-      expect(opened.length).toBe(1);
+      expect(opened.length).toBe(0);
 
-      // Step 2 -> step 3: preferences reflect the existing route's values.
-      click(container, "Continue");
+      // Step 3 -> step 4: preferences reflect the existing route's values.
       await flush();
       const digest = container.querySelector('input[name="digestEnabled"]') as HTMLInputElement | null;
       const welcome = container.querySelector('input[name="welcomeEnabled"]') as HTMLInputElement | null;
@@ -165,7 +241,7 @@ describe("FirstRunScreen (#2471)", () => {
       expect(digest!.checked).toBe(false);
       expect(welcome!.checked).toBe(true);
 
-      // Toggle digest on, save, and finish.
+      // Toggle digest on, save, and finish from the true summary.
       clickLabel(container, "Digest");
       click(container, "Save");
       await flush();
@@ -175,10 +251,14 @@ describe("FirstRunScreen (#2471)", () => {
         digestEnabled: true,
         welcomeEnabled: true,
       });
-      expect(container.textContent ?? "").toContain("You are all set");
+      expect(container.textContent ?? "").toContain("Step 5 of 5");
+      expect(container.textContent ?? "").toContain("No trial started");
+      expect(container.textContent ?? "").toContain("Not connected");
       click(container, "Finish");
+      await flush();
       expect(completed()).toBe(1);
       expect(isFirstRunComplete("screen-user-2")).toBe(true);
+      expect(apiState.stateCalls.some((c) => c.completed === true)).toBe(true);
     } finally {
       await act(async () => {
         root.unmount();
@@ -199,7 +279,7 @@ describe("FirstRunScreen (#2471)", () => {
     }
   });
 
-  it("with no account tenant, explains preferences are unavailable and still allows completion", async () => {
+  it("with no account, creates it on entry — preferences are then available — and still allows completion", async () => {
     apiState.identity = {
       userLogin: "second-user",
       tenantId: null,
@@ -210,15 +290,28 @@ describe("FirstRunScreen (#2471)", () => {
     };
     const { container, root, completed } = await renderScreen({ userLogin: "screen-user-4" });
     try {
+      // Step 1 created the account on entry (#3256): no dead end.
+      expect(apiState.setupCalls).toBe(1);
+      expect(container.textContent ?? "").toContain("Active");
       click(container, "Continue");
       await flush();
-      click(container, "Continue");
+      click(container, "Skip trial for now");
       await flush();
-      expect(container.textContent ?? "").toContain("account");
-      expect(apiState.savedBody).toBeNull();
-      click(container, "Continue");
+      click(container, "Continue without connecting");
       await flush();
+      // Preferences now save against the created account's tenant.
+      clickLabel(container, "Digest");
+      click(container, "Save");
+      await flush();
+      expect(apiState.savedBody).toEqual({
+        userId: "second-user",
+        tenantId: "second-user",
+        digestEnabled: true,
+        welcomeEnabled: true,
+      });
+      expect(container.textContent ?? "").toContain("Step 5 of 5");
       click(container, "Finish");
+      await flush();
       expect(completed()).toBe(1);
       expect(isFirstRunComplete("screen-user-4")).toBe(true);
     } finally {
