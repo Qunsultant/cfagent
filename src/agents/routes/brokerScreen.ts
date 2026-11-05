@@ -30,6 +30,7 @@ import {
   brokerSupports,
   gatherQuotes,
   platformQuoteSource,
+  resolveUniverseSymbols,
   screenSymbolsWithSource,
 } from "../../trading";
 import { resolveTenantBroker } from "../../services/tenantProviders";
@@ -75,16 +76,10 @@ export async function handleBrokerScreenRoutes(
   if (symbols.length === 0) {
     const id = requestedUniverse ?? "NASDAQ100";
     try {
-      const { fetchAllUsStockListings } = await import("../../services/nasdaqListings");
-      const { resolveUniverse } = await import("../../trading/universes");
-      const listings = await fetchAllUsStockListings();
-      const resolved = resolveUniverse(id as never, listings);
-      universeSize = resolved.length;
-      for (const listing of resolved) {
-        if (symbols.length >= MAX_SCREEN_SYMBOLS) break;
-        symbols.push(String(listing.symbol).toUpperCase());
-      }
-      truncated = universeSize > symbols.length;
+      const resolved = await resolveUniverseSymbols(id, MAX_SCREEN_SYMBOLS);
+      symbols.push(...resolved.symbols);
+      universeSize = resolved.universeSize;
+      truncated = resolved.truncated;
       universe = id;
     } catch (error) {
       const reason = error instanceof Error ? error.message : "the listings feed failed";

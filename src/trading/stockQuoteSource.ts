@@ -113,3 +113,22 @@ export async function screenSymbolsWithSource(
   const result = new DynamicMarketScreener().screenWithQuotes(quotes.quotes, filter);
   return { quotes, result };
 }
+
+/**
+ * Resolve a named universe to symbols through the LIVE listings feed.
+ *
+ * Inside the trading layer so routes keep the #290 boundary. Throws when the
+ * feed fails: the caller must answer coded, never substitute a curated table
+ * (#1554).
+ */
+export async function resolveUniverseSymbols(
+  id: string,
+  cap: number,
+): Promise<{ symbols: string[]; universeSize: number; truncated: boolean }> {
+  const { fetchAllUsStockListings } = await import("../services/nasdaqListings");
+  const { resolveUniverse } = await import("./universes");
+  const listings = await fetchAllUsStockListings();
+  const resolved = resolveUniverse(id as never, listings);
+  const symbols = resolved.slice(0, cap).map((listing) => String(listing.symbol).toUpperCase());
+  return { symbols, universeSize: resolved.length, truncated: resolved.length > symbols.length };
+}
