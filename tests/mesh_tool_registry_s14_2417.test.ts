@@ -359,7 +359,7 @@ describe("live status evidence — non-command families (#2417)", () => {
     // contract is present, and the notes record the degraded
     // contract (and no longer describe a live semantic_cache path).
     const service = read("src/services/aiSearch.ts");
-    expect(service).toContain("ETradeAISearchService");
+    expect(service).toContain("AiSearchInstanceService");
     expect(service).not.toContain("FINANCIAL_KNOWLEDGE_BASE");
     expect(service).not.toContain("semantic_cache");
     expect(service).toContain("AiSearchDegradedReason");
