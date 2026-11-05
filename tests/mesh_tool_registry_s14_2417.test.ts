@@ -242,7 +242,10 @@ describe("degraded status evidence (#2417)", () => {
 
   it("ai-search-platform: the ai_search_namespaces binding is declared in wrangler.jsonc (namespace \"default\", #1169), and the env type records it", () => {
     expect(wrangler["ai_search_namespaces"]).toEqual([
-      { name: "AI_SEARCH", namespace: "default", remote: true },
+      // "binding", not "name": wrangler's schema for this binding
+      // type (issue #3321 — the "name" form shipped in #3319 was
+      // rejected by the production deploy).
+      { binding: "AI_SEARCH", namespace: "default", remote: true },
     ]);
     expect(read("src/types.ts")).toContain("AI_SEARCH?: AiSearchNamespace");
     // The three-path runner the agent degrades through exists.

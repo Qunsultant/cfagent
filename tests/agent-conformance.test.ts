@@ -283,8 +283,20 @@ describe("Agent conformance (issue #1738)", () => {
     // wrangler.jsonc / src/types.ts don't trip it.
     const configOnly = wrangler.replace(/\/\/[^\n]*/g, "");
     expect(configOnly).toContain('"ai_search_namespaces"');
+    // The entry's shape is the one WRANGLER's schema enforces
+    // (issue #3321): ai_search_namespaces entries take a "binding"
+    // field, NOT the "name" field the Durable Object entries use.
+    // The enablement PR (#3319) shipped "name" and the pin asserted
+    // it; the unit suite passed and the production deploy rejected
+    // the config (wrangler deploy --dry-run is the authority:
+    // 'bindings should have a string "binding" field'). This pin
+    // now asserts the schema shape, including the negative: no
+    // "name" key on the entry.
     expect(configOnly).toMatch(
-      /"name":\s*"AI_SEARCH",\s*"namespace":\s*"default",\s*"remote":\s*true/
+      /"binding":\s*"AI_SEARCH",\s*"namespace":\s*"default",\s*"remote":\s*true/
+    );
+    expect(configOnly).not.toMatch(
+      /"ai_search_namespaces":\s*\[\s*\{\s*"name"/
     );
   });
 
