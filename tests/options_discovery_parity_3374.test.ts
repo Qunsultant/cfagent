@@ -116,6 +116,8 @@ describe("E*TRADE behaviour is unchanged (#3374)", () => {
       limit: 25,
       offset: 0,
       userLogin: "etrade@example.com",
+      // Issue #3388: the read is scoped to the resolved broker too.
+      broker: "etrade",
     });
   });
 
@@ -126,7 +128,7 @@ describe("E*TRADE behaviour is unchanged (#3374)", () => {
     const res = await handleOptionsDiscoveryRunById(request, "session", {} as never, match, ctx());
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({ id: "run-1", status: "completed" });
-    expect(discoveryStore.get).toHaveBeenCalledWith("run-1", { userLogin: "etrade@example.com" });
+    expect(discoveryStore.get).toHaveBeenCalledWith("run-1", { userLogin: "etrade@example.com", broker: "etrade" });
   });
 });
 
