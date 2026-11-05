@@ -1294,6 +1294,26 @@ export function ETradeTradingHub({
     setOrderError("");
   };
 
+  // Issue #3090: a built strategy REPLACES the ticket's legs wholesale
+  // (a strategy is a whole structure, not an addition). The label and
+  // legs text move with the legs so the context block never shows a
+  // stale strategy name; strategyNetDebit clears so the broker preview
+  // re-establishes pricing from live quotes instead of inheriting the
+  // replaced structure's net. Same draft/result/error invalidation as
+  // the other leg editors.
+  const setOptionLegs = (
+    legs: NonNullable<TradeOrderContext["optionLegs"]>,
+    label: string,
+    legsText: string[],
+  ) => {
+    setOrderContext((current) => current
+      ? { ...current, optionLegs: legs, label, legs: legsText, strategyNetDebit: undefined }
+      : current);
+    setActiveDraft(null);
+    setLastExecutionResult(null);
+    setOrderError("");
+  };
+
   const setOptionNetOrderDirection = (credit: boolean) => {
     setOrderContext((current) => current ? {
       ...current,
@@ -1978,6 +1998,7 @@ export function ETradeTradingHub({
             updateOptionLeg,
             addOptionLeg,
             removeOptionLeg,
+            setOptionLegs,
             setOptionNetOrderDirection,
             handlePreviewOrder,
             handleStartOAuth,
