@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
 import { apiFetch as fetch } from "./apiFetch";
+import { mapScreenError } from "./paidScreenSubmit";
 import { EmptyState, Spinner, Button, Select, Table, TextInput, PageShell, PageSection, FieldShell, Stack, Flex, Grid } from "./components/ui";
 import { ResearchReportActions } from "./ResearchReportActions";
 import { replayReport, replaySummary, type ReplayResponse } from "./replayReport";
@@ -226,8 +227,14 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
       if (maxRsi !== undefined) params.set("maxRsi", String(maxRsi));
 
       const resp = await fetch(`/api/market-data/screen?${params.toString()}`);
-      const data = (await resp.json()) as any;
-      if (!resp.ok) throw new Error(data.error || `Stock screening failed [HTTP ${resp.status}].`);
+      // Issue #3239: parse-safe (a non-JSON error body must not become
+      // a parser message) and outcome-encoded: a 402 (and any screen
+      // error) surfaces with remediation, never the raw server code.
+      // Full paid-path wiring for this hub (which auto-fires on mount,
+      // so it must never auto-send a paid submission) is a named
+      // follow-up in the #3239 PR body.
+      const data = (await resp.json().catch(() => ({}))) as any;
+      if (!resp.ok) throw new Error(mapScreenError(resp.status, data.error));
       setScreenerStocks(data.stocks || data.results || []);
       if (data.filterSummary) setScreenerSummary(data.filterSummary);
       setScreenerLastScanned(new Date().toLocaleTimeString());

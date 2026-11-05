@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { apiFetch as fetch } from "./apiFetch";
+import { mapScreenError } from "./paidScreenSubmit";
 import { getDisplayUserDid } from "../agents/did";
 import { codedMessage, resolveOutcome } from "../outcomes/outcomeAspects";
 import { Card, Badge, TextInput, Button, EmptyState, Select, Spinner, Table, Modal, Notice, PageShell, FieldShell, useToast } from "./components/ui";
@@ -1104,7 +1105,11 @@ export function ETradeTradingHub({
         setScannedAt(data.scannedAt || new Date().toLocaleTimeString());
       } else {
         const data = await resp.json().catch(() => ({})) as any;
-        setScanMessage(data.error || `E*TRADE screening request failed [HTTP ${resp.status}].`);
+        // Issue #3239: a 402 (and any screen error) surfaces as an
+        // outcome-encoded message with remediation, never the raw
+        // server code. Full paid-path wiring for this hub is a
+        // named follow-up in the #3239 PR body.
+        setScanMessage(mapScreenError(resp.status, data.error));
         setScanStatus("scan_failed");
       }
     } catch (error) {
