@@ -51,7 +51,7 @@
  * The listed values are never returned to the client — only counts.
  */
 
-import { createStoreKv, listStoreEntries } from "../../security/durableKv";
+import { createStoreKv, listStoreEntries } from "../../data/durableKv";
 import {
   platformGenesisMarkerKey,
   resolveIaaaTenant,
@@ -63,7 +63,7 @@ import { isLoginShaped } from "../../security/serviceIdentity";
 import { sessionStore } from "../../security/session";
 import type { MembershipStore } from "../../security/authorization";
 import type { KvLike } from "../../security/kvResilience";
-import type { DoNamespaceLike } from "../../security/durableKv";
+import type { DoNamespaceLike } from "../../data/durableKv";
 import type { Env } from "../../types";
 
 export const KV_WIPE_ROWS = [
