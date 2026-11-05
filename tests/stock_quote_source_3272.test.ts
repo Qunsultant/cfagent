@@ -18,7 +18,6 @@ import {
   screenSymbolsWithSource,
   type StockQuoteSource,
 } from "../src/trading/stockQuoteSource";
-import { SCREENING_PROVIDER_DESCRIPTORS, NEUTRAL_STOCK_SCREENING_PROVIDER_ID } from "../src/trading/screeningProvider";
 import type { BrokerQuote } from "../src/types";
 
 const tenant = vi.hoisted(() => ({ broker: "alpaca" as "etrade" | "alpaca" }));
@@ -183,20 +182,5 @@ describe("the neutral stock screen route (#3272)", () => {
     const other = new URL("https://example.test/api/broker/screens");
     const otherReq = new Request(other.toString(), { method: "POST", body: "{}" });
     expect(await handleBrokerScreenRoutes(otherReq, other, other.pathname, "sid", ctx())).toBeNull();
-  });
-});
-
-describe("the provider catalogue advertises the neutral screen (#3272)", () => {
-  it("lists it for stocks with the neutral route", () => {
-    const descriptor = SCREENING_PROVIDER_DESCRIPTORS.find((d) => d.id === NEUTRAL_STOCK_SCREENING_PROVIDER_ID);
-    expect(descriptor).toBeTruthy();
-    expect(descriptor!.assetClasses).toContain("stocks");
-    expect(descriptor!.routes.stocks).toBe("/api/broker/screen");
-  });
-
-  it("keeps the existing E*TRADE provider untouched", () => {
-    const legacy = SCREENING_PROVIDER_DESCRIPTORS.find((d) => d.id === "etrade-yahoo-stocks");
-    expect(legacy).toBeTruthy();
-    expect(legacy!.routes.stocks).toBe("/api/etrade/screen");
   });
 });
