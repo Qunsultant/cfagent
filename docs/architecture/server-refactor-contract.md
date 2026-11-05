@@ -575,3 +575,51 @@ conflict on Qunsultant/cfagent#2902.
   recorded in the PR body.
 - Q3 stays open for Slice 9; Q4 stays open for Slice 8. No new open
   question is raised by Slice 5.
+
+## 13. Slice 6 note (2026-11-05, PR for #2902 Slice 6)
+
+- Baseline at Slice 6: `origin/main` `08159218` (Slice 5 merged),
+  `src/server.ts` 2,683 lines / 126,903 bytes. Messaging & social move
+  to `src/server/routes/messaging.ts` (913 lines) as three handlers in
+  dispatch order: `handleMessagingSagaRoutes` (`/api/saga/*`, the three
+  NLQ webhook spellings, `/api/qa/investigate`, `/api/memory/search`),
+  `handleMessagingSocialRoutes` (`/api/social/*`),
+  `handleMessagingSlackRoutes` (`/slack/*`). `handleNlqWebhookRequest`
+  and `NLQ_WEBHOOK_SERVICE_LOGIN` move with this slice (contract §2.5:
+  the NLQ branches are their only caller). The saga handler takes the
+  handleFetch ingress `throttle`, which the NLQ branch passes to
+  `handleNlqWebhookRequest`.
+  `src/server.ts` after Slice 6: 1,866 lines.
+- The 148-descriptor pin is unchanged (the scanner reconstructs the
+  identical ordered list before and after). Two scanner/pin facts this
+  slice: the AuthLogin/CoreHealth delegations sat between the NLQ and
+  QA branches inside the moved saga region, so they now run nested
+  inside `handleMessagingSagaRoutes`, in the same position — they no
+  longer appear in server.ts's own delegation list (fourteen entries
+  now), and the pin test's `scanFunction` now follows nested
+  route-module delegations (seen-set against cycles/duplicates) so the
+  reconstruction stays 1:1. Delegations to handlers outside
+  `src/server/routes/*` (e.g. the saga agent-route handlers) are
+  implementations, not route branches, and are ignored. The pin test's
+  dispatch smoke gains a Slice 6 check that every moved route answers
+  exactly as on clean main before the move (session families 401; NLQ
+  webhooks 503 on the unconfigured secret; Slack webhook routes 503 on
+  the unconfigured signing secret; `/slack/install` and
+  `/slack/oauth_callback` 500 in the harness).
+- Pin updates in the same PR (repo pin rule): the source-presence pins
+  in `tests/nlq_webhook_alias.test.ts`, `tests/slack_signature_gate.test.ts`
+  (#147: mandatory gate on all three Slack routes),
+  `tests/hybrid-retrieval-wiring.test.ts` (memory_search graph expansion),
+  `tests/mcp_chat_nlq_routes_extraction.test.ts` (#313: single-owner
+  NLQ handler), `tests/mesh_channels_s13_2412.test.ts` (#2412: Slack
+  per-team forward, NLQ service identity), and
+  `tests/mesh_conformance_s4_2339.test.ts` (#2339: chat forward via
+  routeAgentRequest) read the entry surface as
+  `server.ts` + `routes/messaging.ts` instead of `server.ts` alone
+  (assertions unchanged, only the files scanned); the D-D census in
+  `tests/global_dd_census_2356.test.ts` gains the new durableKv
+  importer pair `["src/server/routes/messaging.ts",
+  "../../data/durableKv"]` (the `DoNamespaceLike` import the moved
+  SESSION_STORE casts need).
+- Q3 stays open for Slice 9; Q4 stays open for Slice 8. No new open
+  question is raised by Slice 6.

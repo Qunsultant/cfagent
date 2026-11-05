@@ -149,7 +149,11 @@ describe("populate route (seed-route pattern, platform-admin only)", () => {
 
 describe("wiring source pins + retention decision (R8)", () => {
   it("memory_search route expands graph context additively", () => {
-    const server = src("server.ts");
+    // Slice 6 of Qunsultant/cfagent#2902 (2026-11-05): the memory_search
+    // route moved from src/server.ts to src/server/routes/messaging.ts;
+    // the entry surface is server.ts + routes/*.ts, so the pin reads
+    // both files.
+    const server = src("server.ts") + src("server/routes/messaging.ts");
     expect(server).toMatch(/expandGraphContext/);
     expect(server).toMatch(/graphDegraded/);
   });

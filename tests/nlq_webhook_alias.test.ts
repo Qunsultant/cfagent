@@ -151,7 +151,11 @@ describe("POST /api/nlq/webhook alias equivalence (#313)", () => {
   });
 
   it("the advertised /api spelling is pinned in the route condition", () => {
-    const src = readFileSync("src/server.ts", "utf8");
+    // Slice 6 of Qunsultant/cfagent#2902 (2026-11-05): the NLQ webhook
+    // branches moved from src/server.ts to src/server/routes/messaging.ts;
+    // the entry surface is server.ts + routes/*.ts, so the pin reads
+    // both files.
+    const src = readFileSync("src/server.ts", "utf8") + readFileSync("src/server/routes/messaging.ts", "utf8");
     expect(src).toContain('path === "/api/nlq/webhook"');
   });
 });
