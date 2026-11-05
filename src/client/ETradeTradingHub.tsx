@@ -23,6 +23,7 @@ import { PortfolioRiskPanel } from "./PortfolioRiskPanel";
 import { TradingApprovalsQueue } from "./TradingApprovalsQueue";
 import { AccountPanels } from "./AccountPanels";
 import { AlpacaBrokerPanel } from "./AlpacaBrokerPanel";
+import { stockScreenEndpoint } from "./brokerEndpoints";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { ScreenersHub, type ScreenersHubTab } from "./ScreenersHub";
 import { GoalScreenPanel } from "./GoalScreenPanel";
@@ -1080,7 +1081,8 @@ export function ETradeTradingHub({
       if (perfFilter === "losers") body.losersOnly = true;
       if (screenerSearch.trim()) body.search = screenerSearch.trim();
 
-      const resp = await fetch("/api/etrade/screen", {
+      // Issue #3272: the selected broker decides which stock screen serves.
+      const resp = await fetch(stockScreenEndpoint(), {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-environment": envToUse },
         body: JSON.stringify(body),
