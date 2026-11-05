@@ -68,6 +68,8 @@
  *   canonicalization.
  */
 
+import type { AuditStore } from "../data/auditLogPorts";
+
 export type ActorType = "human" | "service" | "agent";
 export type AuditDecision = "allow" | "deny";
 export type AuditOutcome = "succeeded" | "failed" | "pending" | "unknown";
@@ -107,31 +109,16 @@ export type CreateIaaaAuditEventInput = Omit<
 >;
 
 /**
- * Append-only: deliberately no update, delete, or remove operation.
- *
- * #1760 — transactional append: a backend that can chain and store
- * an event atomically exposes `appendAtomic`, and recordAuditEvent
- * prefers it over the list-then-link-then-append path. The legacy
- * path (list + append) stays for backends without an atomic op
- * (the in-memory store, the Kv store), but it is NOT safe under
- * concurrency: two parallel recordAuditEvent calls can read the
- * same tail and fork the chain or lose an event. Production wiring
- * (createWiredAuditStore) is atomic; an atomic backend's append()
- * throws, because storing a caller-chained event verbatim would
- * bypass the atomic chaining — append through recordAuditEvent.
+ * The AuditStore contract is carried as the AuditLog family's
+ * port in the data layer since #1976 step 5d (#2435):
+ * src/data/auditLogPorts.ts defines it (semantics unchanged —
+ * append-only, #1760 transactional append), and this module
+ * re-exports it (below, from the import at the top of this
+ * file) so every existing import keeps working. The pure
+ * model, validation and failure policy in this module do NOT
+ * move.
  */
-export interface AuditStore {
-  append(event: IaaaAuditEvent): Promise<void>;
-  list(): Promise<IaaaAuditEvent[]>;
-  /**
-   * Atomically chain (assign id, previousEventHash, eventHash) and
-   * store one validated event input. The whole step is one backend
-   * operation on atomic backends (one SessionStore DO request), so
-   * parallel appends cannot interleave between the tail read and
-   * the write. Absent on legacy backends.
-   */
-  appendAtomic?(input: CreateIaaaAuditEventInput): Promise<AuditResult>;
-}
+export type { AuditStore };
 
 export function createMemoryAuditStore(): AuditStore {
   const events: IaaaAuditEvent[] = [];
