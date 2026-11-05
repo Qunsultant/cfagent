@@ -38,7 +38,11 @@
  */
 
 import type { Env } from "../../types";
-import { createStoreKv, consumeStoreKey, type DoNamespaceLike } from "../../security/durableKv";
+import {
+  createBucketPorts,
+  isBucketPortsEnabled,
+} from "../../data/createBucketPorts";
+import { createStoreKv, consumeStoreKey, type DoNamespaceLike } from "../../data/durableKv";
 import type { KvLike } from "../../security/kvResilience";
 import type { executeNaturalLanguageQuery } from "../../agents/nlq";
 
@@ -282,6 +286,24 @@ export function createMemorySlackPrincipalLinkStore(): SlackPrincipalLinkStore {
  */
 export function slackPrincipalLinkStoreFromEnv(env: Env): SlackPrincipalLinkStore {
   const namespace = (env as { SESSION_STORE?: unknown }).SESSION_STORE as DoNamespaceLike | undefined;
+  // Issue #2436 (#1976 step 5e): when BUCKET_PORTS_ENABLED is
+  // on, the link store composes through the residual bucket
+  // family (bucket kv + the ClaimPort for the single-use code
+  // claim) in src/data/createBucketPorts.ts; off, the direct
+  // funnel composition below serves, unchanged. The claim's
+  // outcomes stay distinct inside createSlackPrincipalLinkStore:
+  // anything but "consumed" fails the spend closed.
+  if (isBucketPortsEnabled(env)) {
+    const ports = createBucketPorts(env);
+    const claim = async (key: string, value: string) =>
+      ports.claims.consume(
+        SLACK_LINK_STORE_NAMESPACE,
+        key,
+        value,
+        Math.ceil(SLACK_LINK_CODE_TTL_MS / 1000) + 60
+      );
+    return createSlackPrincipalLinkStore(ports.bucketKv("slackLinks"), claim);
+  }
   const kv = createStoreKv({
     namespace: namespace ?? null,
     namespaceName: SLACK_LINK_STORE_NAMESPACE,
