@@ -53,6 +53,12 @@ export * from "./etrade/platform";
 export * from "./alpaca/platform";
 export * from "./alpaca/fillLots";
 export * from "./alpaca/occSymbol";
+// Issue #3351: the sign-in surface. Exported through the boundary so route
+// handlers never import a trading-internal path (issue #290).
+export * from "./alpaca/credentials";
+export * from "./alpaca/credentialStore";
+export * from "./alpaca/credentialResolution";
+export * from "./alpaca/signIn";
 export * from "./optionsScreener";
 
 // --- boundary surface (#290): every capability external code used via deep paths ---
