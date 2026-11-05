@@ -23,7 +23,13 @@ import { PortfolioRiskPanel } from "./PortfolioRiskPanel";
 import { TradingApprovalsQueue } from "./TradingApprovalsQueue";
 import { AccountPanels } from "./AccountPanels";
 import { AlpacaBrokerPanel } from "./AlpacaBrokerPanel";
-import { stockScreenEndpoint } from "./brokerEndpoints";
+import {
+  diagnosticsEndpoint,
+  positionsEndpoint,
+  quoteEndpoint,
+  statusEndpoint,
+  stockScreenEndpoint,
+} from "./brokerEndpoints";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { ScreenersHub, type ScreenersHubTab } from "./ScreenersHub";
 import { GoalScreenPanel } from "./GoalScreenPanel";
@@ -949,7 +955,8 @@ export function ETradeTradingHub({
   const fetchBrokerStatus = async (override?: string) => {
     const envToUse = override || activeEnv;
     try {
-      const resp = await fetch("/api/etrade/status", {
+      // Issue #3294: the hub read follows the selection.
+      const resp = await fetch(statusEndpoint(), {
         headers: { "x-environment": envToUse },
       });
       if (resp.ok) {
@@ -971,7 +978,7 @@ export function ETradeTradingHub({
     const envToUse = override || activeEnv;
     setPositionsLoading(true);
     try {
-      const resp = await fetch("/api/etrade/positions", {
+      const resp = await fetch(positionsEndpoint(), {
         headers: { "x-environment": envToUse },
       });
       if (resp.ok) {
@@ -993,7 +1000,18 @@ export function ETradeTradingHub({
     const envToUse = override || activeEnv;
     setDiagnosticsLoading(true);
     try {
-      const resp = await fetch("/api/etrade/diagnostics", {
+      // Issue #3294: diagnostics read E*TRADE OAuth state; there is no neutral
+      // equivalent, so another broker gets a stated refusal, not E*TRADE data.
+      const diagnosticsUrl = diagnosticsEndpoint();
+      if (!diagnosticsUrl) {
+        setDiagnostics({
+          unavailable: true,
+          message: "Broker diagnostics read E*TRADE OAuth state and are not available for the selected broker.",
+        });
+        setShowDiagnosticsModal(true);
+        return;
+      }
+      const resp = await fetch(diagnosticsUrl, {
         headers: { "x-environment": envToUse },
       });
       const data = (await resp.json()) as any;
@@ -1131,7 +1149,7 @@ export function ETradeTradingHub({
     const envToUse = typeof envOverride === "string" ? envOverride : activeEnv;
     setQuoteLoading(true);
     try {
-      const resp = await fetch(`/api/etrade/quote?symbol=${encodeURIComponent(sym)}`, {
+      const resp = await fetch(`${quoteEndpoint()}?symbol=${encodeURIComponent(sym)}`, {
         headers: { "x-environment": envToUse },
       });
       if (resp.ok) {
@@ -1167,7 +1185,7 @@ export function ETradeTradingHub({
       setInspectQuote(null);
     }
     try {
-      const resp = await fetch(`/api/etrade/quote?symbol=${encodeURIComponent(sym)}`, {
+      const resp = await fetch(`${quoteEndpoint()}?symbol=${encodeURIComponent(sym)}`, {
         headers: { "x-environment": activeEnv },
       });
       if (resp.ok) {
