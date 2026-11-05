@@ -61,7 +61,6 @@ const PINNED_STAR_REEXPORTS = [
   "./etrade/client",
   "./etrade/platform",
   "./alpaca/platform",
-  "./alpaca/fillLots",
   "./alpaca/occSymbol",
   "./optionsScreener",
   "./technicals",
