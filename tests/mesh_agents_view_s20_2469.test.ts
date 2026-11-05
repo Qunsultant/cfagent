@@ -9,8 +9,9 @@
  *  - every registry class carries a recorded status + reason (S20
  *    registry extension), and the degraded set is exactly the two
  *    classes whose degradation is evidenced in repo facts
- *    (AiSearchAgent: the ai_search_namespaces binding is not declared
- *    in wrangler.jsonc; SandboxAgent: no container backend is
+ *    (AiSearchAgent: its namespace path is configured since #1169
+ *    but not yet verified end-to-end — the seed+probe step is
+ *    outstanding; SandboxAgent: no container backend is
  *    configured, so runs return executed:false);
  *  - the payload builder derives every section from the registry
  *    module — class set, per-class door census, census totals, tool
@@ -63,15 +64,17 @@ describe("registry per-agent status records (S20 extension)", () => {
 
   it("the degraded records cite the repo facts that evidence them", () => {
     // Strip // comments first: wrangler.jsonc DISCUSSES both facts in
-    // comments (the #2223 note explains the binding is not declared;
+    // comments (the #1169 note records the binding's declaration;
     // the #2253 note names the missing Containers configuration).
-    // The evidence is the absence of a DECLARATION, not of the word.
+    // The evidence is the DECLARATION state, not of the word.
     const wrangler = readFileSync(join(repoRoot, "wrangler.jsonc"), "utf8")
       .split("\n")
       .map((line) => line.split("//")[0])
       .join("\n");
-    // AiSearchAgent: the namespace binding is dashboard-issued, not declared.
-    expect(wrangler).not.toContain("ai_search_namespaces");
+    // AiSearchAgent: the namespace binding IS declared (namespace
+    // "default", #1169); the record stays degraded on the
+    // not-yet-probe-verified path, and its reason cites the config.
+    expect(wrangler).toContain("ai_search_namespaces");
     const aiSearch = MESH_AGENTS.find((a) => a.className === "AiSearchAgent")!;
     expect(aiSearch.statusReason).toContain("wrangler.jsonc");
     // SandboxAgent: no container backend is configured in wrangler.jsonc.
