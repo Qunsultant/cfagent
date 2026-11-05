@@ -11,11 +11,13 @@
  * (createFreeRunCounterPorts.ts) maps a Worker binding to an
  * adapter.
  *
- * Shape of the data (all in D1, migration 0043):
+ * Shape of the data (all in D1, migration 0043, seeded by
+ * migration 0044):
  * - agent_free_run_allowances: one row per family, the current
  *   allowance (runs per calendar month). Operator data, seeded
- *   at 10 per family at ensure time (INSERT OR IGNORE, so an
- *   operator edit survives re-ensure).
+ *   by migration 0044's INSERT OR IGNORE rows (the decided
+ *   allowance, 10 runs per product per month), so an operator
+ *   edit survives every later migration run.
  * - agent_free_run_counts: one row per (login, family, month),
  *   the runs consumed in that month. A missing row reads as 0.
  *
@@ -30,10 +32,9 @@
  * reads as null, and the gate treats null as "no free-run
  * allowance configured" — it falls through to the paid path,
  * exactly as today. There is no runtime fallback anywhere in
- * this module: the seed value below is WRITE-time data only.
- * It is written into the store once, at schema-ensure time
- * (D1) or at adapter construction (in-memory test double), and
- * from then on the store is the only source of truth.
+ * this module: the seed lives as migration 0044's INSERT OR
+ * IGNORE rows, and from then on the store is the only source
+ * of truth. No code constant holds an allowance value.
  *
  * Concurrency note: consumeFreeRun checks the cap, then
  * increments with a single conditional upsert (the increment
@@ -51,15 +52,6 @@ import type { PriceFamily } from "./priceCataloguePorts";
 
 /** Families with a free-run allowance. Mirrors the gate's family union. */
 export const FREE_RUN_FAMILIES: readonly PriceFamily[] = ["stock", "goal", "options", "strategy"];
-
-/**
- * Seed allowance (runs per product per month), NOT an activation
- * and NOT a runtime value. Seeded into the store at ensure time
- * so a fresh store has allowances to read; the gate never reads
- * this constant. An operator changes the allowance in operator
- * data, not in code.
- */
-export const DEFAULT_FREE_RUN_ALLOWANCE = 10;
 
 export function assertFreeRunAllowance(runs: unknown): number {
   const value = Number(runs);

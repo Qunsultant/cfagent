@@ -1511,6 +1511,12 @@
           "icon": "Contracts"
         },
         {
+          "id": "free-runs",
+          "label": "Free Runs",
+          "description": "Free-run allowance per product, per month",
+          "icon": "Runs"
+        },
+        {
           "id": "iaaa-admin",
           "label": "IAAA Admin",
           "description": "Read-only memberships, genesis & audit",

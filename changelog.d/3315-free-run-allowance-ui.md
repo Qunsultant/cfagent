@@ -1,0 +1,3 @@
+### Added
+
+- Operator UI for the free-run allowance (#3315, sub-issue of #3241): the Free allowance is now viewable and changeable per product (stock, goal, options, strategy) from Platform Admin → Free Runs, through operator-gated, audited GET + POST routes (`/payments/agentic/commercial/free-run-allowance`) that reuse the #3305 port — no second allowance source. The `DEFAULT_FREE_RUN_ALLOWANCE` code constant is gone: the decided allowance (10 runs per product per month) now lives only as migration 0044's INSERT OR IGNORE seed rows, and an operator edit survives every later migration run. The gate's fail-closed contract is unchanged — a family with no stored row gets no free runs — and no price, flag, or secret changes.

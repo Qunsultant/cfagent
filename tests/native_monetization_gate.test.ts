@@ -339,7 +339,12 @@ describe("native gate: free-run counter (#3305)", () => {
   function freeGate(opts: { allowances?: Partial<Record<PriceFamily, number>>; approved?: boolean } = {}) {
     const { client, creates } = stripeClient(() => goalEvidence());
     const ports: CheckoutPorts = { card: new StripeCheckoutAdapter(client), x402: null };
-    const counter = new InMemoryFreeRunCounterAdapter(opts.allowances);
+    // #3315: the in-memory adapter starts empty (no hardcoded
+    // defaults), so the fixture passes the decided allowances
+    // explicitly — 10 per family unless the test says otherwise.
+    const counter = new InMemoryFreeRunCounterAdapter(
+      opts.allowances ?? { stock: 10, goal: 10, options: 10, strategy: 10 },
+    );
     const gate = new NativeMonetizationGate({
       monetizationEnabled: true,
       priceCatalogue: new InMemoryPriceCatalogueAdapter(
@@ -450,7 +455,7 @@ describe("native gate: free-run counter (#3305)", () => {
   });
 
   it("free runs work with unapproved (PROPOSED) prices; the 11th fails closed instead of minting", async () => {
-    const counter = new InMemoryFreeRunCounterAdapter();
+    const counter = new InMemoryFreeRunCounterAdapter({ goal: 10 });
     const gate = new NativeMonetizationGate({
       monetizationEnabled: true,
       priceCatalogue: new InMemoryPriceCatalogueAdapter(undefined),
