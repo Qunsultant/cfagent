@@ -58,6 +58,25 @@
  *   grows to the nine delegations in dispatch order; the 148-descriptor
  *   EXPECTED list is unchanged (verified identical by the scanner before
  *   and after).
+ *
+ * Slice 5 decisions recorded here:
+ * - Trading & market live in src/server/routes/trading.ts as four
+ *   handlers in dispatch order: handleTradingScheduleRoutes
+ *   (/api/schedule/*), handleTradingOmniRoutes
+ *   (/api/trading/email/*, /api/trading/slack/*, /api/trading/voice/*,
+ *   /api/trading/options/*, /trading/options/*, /api/schedules forward),
+ *   handleTradingQuotesRoutes (/api/market-data/quotes,
+ *   /api/market/quotes, /api/foss/quotes, /api/market/quotes/source),
+ *   handleTradingApproveRoutes (/trade/approve, /clear, /reset,
+ *   /api/clear, /api/reset, /api/options/flows/*). The delegation-order
+ *   assertion below grows to the thirteen delegations in dispatch order;
+ *   the 148-descriptor EXPECTED list is unchanged (verified identical by
+ *   the scanner before and after). The WebSocket upgrade dispatch
+ *   (dispatchWsUpgrade) is NOT a route branch and stays inline in
+ *   server.ts between the schedules forward and the quotes branches, in
+ *   its original position; the scanner does not see it (no path
+ *   condition) and the pin does not cover it. No options behaviour
+ *   change: the /api/options/flows/* block moves as a whole.
  */
 import { describe, it, expect, vi } from "vitest";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
@@ -432,23 +451,30 @@ describe("server route inventory pin (#2902)", () => {
     expect(reconstruct()).toEqual(EXPECTED_ROUTES);
   });
 
-  it("delegates Core + Auth + Privacy branches in handleFetch in the original order", () => {
+  it("delegates Core + Auth + Privacy + Trading branches in handleFetch in the original order", () => {
     const serverSrc = readFileSync("src/server.ts", "utf8");
     const calls = [...serverSrc.matchAll(/(?:await )?(handle\w+Routes)\(request, env, url, path/g)].map((m) => m[1]);
     // Slice 2 landed the three Core delegations; Slice 3 (#2902) adds the
     // three Auth delegations in their original dispatch positions, between
     // the Core ones. Slice 4 (#2902) adds the three Privacy delegations in
-    // their original dispatch positions. Later slices extend this list in
-    // dispatch order.
+    // their original dispatch positions. Slice 5 (#2902) adds the four
+    // Trading delegations in their original dispatch positions; the
+    // WebSocket upgrade dispatch stays inline between the schedules
+    // forward and the quotes branches (it is not a delegation).
+    // Later slices extend this list in dispatch order.
     expect(calls).toEqual([
       "handleCoreEarlyRoutes",
       "handlePrivacyRoutes",
       "handleAuthLoginRoutes",
       "handleCoreHealthRoutes",
+      "handleTradingScheduleRoutes",
       "handleAuthMeRoutes",
       "handlePrivacyChainsRoutes",
       "handlePrivacyReportsRoutes",
       "handleAuthIaaaRoutes",
+      "handleTradingOmniRoutes",
+      "handleTradingQuotesRoutes",
+      "handleTradingApproveRoutes",
       "handleCoreLateRoutes",
     ]);
   });
@@ -554,6 +580,49 @@ describe("core dispatch smoke (#2902 Slice 2)", () => {
     ];
     for (const [p, status] of expected) {
       expect((await fetchWorker(p)).status).toBe(status);
+    }
+  });
+
+  it("moved Slice 5 routes answer exactly as before the move without a session", async () => {
+    // Statuses measured on clean main ab336f60 before the move. Most
+    // routes 401 via requireAuth; the exceptions pin the dispatch: the
+    // batch quotes are public by the recorded #1725 M10 decision (200),
+    // /api/trading/email/approve answers 200 without a session (its
+    // approval-link forward has no session gate on this path), and bare
+    // /trade/approve 400s on the missing orderId before any session
+    // check. A dropped route would 401 at the /api/* fallthrough (or
+    // 404 at the Core late tail for /trade/approve, /clear, /reset),
+    // so these values pin the dispatch, not just the auth.
+    const expected: Array<[string, string, number]> = [
+      ["GET", "/api/schedule/goals", 401],
+      ["GET", "/api/schedule/operations", 401],
+      ["GET", "/api/schedule/ticks", 401],
+      ["GET", "/api/schedule/runs", 401],
+      ["GET", "/api/schedule/systems", 401],
+      ["POST", "/api/trading/email/inbound", 401],
+      ["GET", "/api/trading/email/approve", 200],
+      ["POST", "/api/trading/slack/test", 401],
+      ["POST", "/api/trading/slack/link", 401],
+      ["POST", "/api/trading/voice/turn", 401],
+      ["POST", "/api/trading/voice/test", 401],
+      ["GET", "/api/trading/voice/greeting", 401],
+      ["GET", "/api/trading/options/status", 401],
+      ["POST", "/api/trading/options/status", 401],
+      ["GET", "/api/schedules", 401],
+      ["GET", "/api/market-data/quotes", 200],
+      ["GET", "/api/market/quotes", 200],
+      ["GET", "/api/foss/quotes", 200],
+      ["GET", "/api/market/quotes/source", 401],
+      ["POST", "/api/market/quotes/source", 401],
+      ["GET", "/trade/approve", 400],
+      ["GET", "/clear", 401],
+      ["GET", "/reset", 401],
+      ["GET", "/api/clear", 401],
+      ["GET", "/api/reset", 401],
+      ["GET", "/api/options/flows/live", 401],
+    ];
+    for (const [method, p, status] of expected) {
+      expect((await fetchWorker(p, method)).status).toBe(status);
     }
   });
 });

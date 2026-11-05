@@ -377,21 +377,27 @@ describe("worker voice-trading WebSocket — session required before accept (#15
 // ---------------------------------------------------------------------------
 
 describe("source pins (#154)", () => {
-  it("server.ts: the fixed fallback identities are gone", () => {
-    const server = src("server.ts");
+  // Slice 5 of Qunsultant/cfagent#2902 (2026-11-05): the omnichannel
+  // trading blocks moved verbatim from src/server.ts to
+  // src/server/routes/trading.ts; the entry surface is server.ts +
+  // routes/*.ts, so the pins read both files.
+  const entry = src("server.ts") + src("server/routes/trading.ts");
+
+  it("server entry: the fixed fallback identities are gone", () => {
+    const server = entry;
     expect(server).not.toContain("omnichannel_email_trader");
     expect(server).not.toContain("omnichannel_slack_trader");
     expect(server).not.toContain("omnichannel_voice_trader");
     expect(server).not.toContain('|| "voice_trader"');
   });
 
-  it("server.ts: no route derives identity from the caller-supplied x-user-login header", () => {
-    const server = src("server.ts");
+  it("server entry: no route derives identity from the caller-supplied x-user-login header", () => {
+    const server = entry;
     expect(server).not.toContain('session?.githubLogin || request.headers.get("x-user-login")');
   });
 
-  it("server.ts: the omnichannel test routes reject a null session (401) before forwarding", () => {
-    const server = src("server.ts");
+  it("server entry: the omnichannel test routes reject a null session (401) before forwarding", () => {
+    const server = entry;
     // The 401 guard appears once per fixed route block: email/inbound,
     // slack/test, voice turn/test, voice greeting, options forwarder,
     // schedules forwarder, voice WS — plus the E*TRADE diagnostics

@@ -608,8 +608,13 @@ describe("S1-P08 O2 — goal lifecycle audit events (#3121)", () => {
     expect(await postGoalScheduleAuditEvent(throwingFetch as never, event)).toBe(false);
   });
 
-  it("the server.ts goal funnel wires all four mutations through the poster", () => {
-    const server = source("src/server.ts");
+  it("the server entry goal funnel wires all four mutations through the poster", () => {
+    // Slice 5 of Qunsultant/cfagent#2902 (2026-11-05): the goal funnel
+    // moved verbatim from src/server.ts to src/server/routes/trading.ts
+    // (rebased onto main 5d0db98c, which carries the #3121 S1 audit
+    // wiring); the entry surface is server.ts + routes/*.ts, so the
+    // pin reads both files.
+    const server = source("src/server.ts") + source("src/server/routes/trading.ts");
     for (const event of GOAL_SCHEDULE_AUDIT_EVENTS) {
       expect(server).toContain(`"${event}"`);
     }

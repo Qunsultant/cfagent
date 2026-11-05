@@ -217,8 +217,12 @@ describe("source pins (#149)", () => {
     expect(src("services/platformKnowledge.ts")).toContain("No bearer/signed approval links exist");
   });
 
-  it("server.ts: the fallback identity is gone and the route requires a session", () => {
-    const server = src("server.ts");
+  it("server entry: the fallback identity is gone and the route requires a session", () => {
+    // Slice 5 of Qunsultant/cfagent#2902 (2026-11-05): the /trade/approve
+    // block moved verbatim from src/server.ts to
+    // src/server/routes/trading.ts; the entry surface is server.ts +
+    // routes/*.ts, so the pin reads both files.
+    const server = src("server.ts") + src("server/routes/trading.ts");
     expect(server).not.toContain("email_authorized_user");
     expect(server).toContain("Unauthorized: sign in to approve a trade.");
   });

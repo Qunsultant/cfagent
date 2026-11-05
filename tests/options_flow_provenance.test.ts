@@ -203,7 +203,13 @@ describe("Issue #119 — /api/options/flows route envelopes disclose provenance"
 
 describe("Issue #119 — fabricated news wire stays deleted (source pins)", () => {
   const flowServiceSrc = readFileSync("src/trading/options/flows/flowService.ts", "utf8");
-  const serverSrc = readFileSync("src/server.ts", "utf8");
+  // Slice 5 of Qunsultant/cfagent#2902 (2026-11-05): the options-flows
+  // block moved verbatim from src/server.ts to
+  // src/server/routes/trading.ts; the entry surface is server.ts +
+  // routes/*.ts, so the pin reads both files.
+  const serverSrc =
+    readFileSync("src/server.ts", "utf8") +
+    readFileSync("src/server/routes/trading.ts", "utf8");
   // Issue #399: nlq.ts was decomposed into src/agents/nlq/* modules; the
   // flow-answer prose now lives in the execution module. The barrel
   // src/agents/nlq.ts only re-exports.
@@ -218,7 +224,7 @@ describe("Issue #119 — fabricated news wire stays deleted (source pins)", () =
     expect(flowServiceSrc).not.toContain("authentic execution points");
   });
 
-  it("server.ts no longer imports the deleted news wire and stamps route provenance", () => {
+  it("the server entry no longer imports the deleted news wire and stamps route provenance", () => {
     expect(serverSrc).not.toContain("RAW_NEWS_FLOW_ITEMS");
     expect(serverSrc).toContain("summarizeFlowProvenance(flows)");
   });
@@ -232,7 +238,11 @@ describe("Issue #119 — fabricated news wire stays deleted (source pins)", () =
 
 describe("Issue #131 — fabricated insider/congress fixture tables stay deleted (source pins)", () => {
   const flowServiceSrc = readFileSync("src/trading/options/flows/flowService.ts", "utf8");
-  const serverSrc = readFileSync("src/server.ts", "utf8");
+  // Slice 5 of Qunsultant/cfagent#2902 (2026-11-05): as above, the
+  // entry surface is server.ts + src/server/routes/trading.ts.
+  const serverSrc =
+    readFileSync("src/server.ts", "utf8") +
+    readFileSync("src/server/routes/trading.ts", "utf8");
 
   // Every TypeScript source under src/, concatenated — the fabricated
   // tables and the people invented for them must not resurface anywhere.
