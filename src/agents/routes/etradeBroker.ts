@@ -34,7 +34,6 @@
 import { unauthenticatedResponse } from "./routeIdentity";
 import {
   brokerFailureResponse,
-  codedBrokerMessage,
   genericBrokerFailureResponse,
 } from "./brokerCodedError";
 import {
@@ -43,27 +42,14 @@ import {
   handleEnvironmentSwitch,
 } from "./brokerEnvironment";
 export { publishManualScreenerRun } from "./etradeBrokerPublish";
-import {
-  computePortfolioRisk,
-  aggregatePortfolioRisk,
-  resolvePositionsSnapshot,
-  evaluatePostTradeTotals,
-  type CandidateGreekContribution,
-} from "../../services/portfolioRisk";
 import { ETradeThinkHarness } from "../../services/thinkHarness";
 import { TradingPlatformRegistry, fetchQuoteLiveStrict } from "../../trading";
 import { resolveEnvironmentConfig } from "../../config/environment";
-import { assessPortfolioConcentration } from "../../services/portfolioConcentration";
-import {
-  sizeCandidateAgainstPortfolio,
-  type SizingCandidate,
-} from "../../services/positionSizing";
 import { generateHedgeProposals } from "../../services/hedgeProposals";
 import { normalizeBundleCandidates } from "../../services/recommendationBundle";
 import { executeBundleRoute, type BundleRouteRequestBody } from "./etradeBrokerBundle";
 import { orderPayloadHash, parseStrategyOrder } from "./orderPayloadHash";
 import type { ScreeningChannel, ScreeningChannelResult } from "../../services/screeningDelivery";
-import { sharedCorrelationService } from "../../services/correlationService";
 import { ETradeService } from "../../services/etrade";
 import { etradeIdentityFromLogin } from "../../security/etradeOAuth";
 import { getUserDid } from "../did";
@@ -79,6 +65,15 @@ import type { AgentName, Env } from "../../types";
 import type { DatabaseORM } from "../../orm";
 import type { ScreenerAgent } from "../screener-agent";
 import { handleEtradeDiagnostics } from "./etradeBrokerDiagnostics";
+import type { CandidateGreekContribution } from "../../services/portfolioRisk";
+import type { SizingCandidate } from "../../services/positionSizing";
+import {
+  getPortfolioRiskReport,
+  evaluatePostTradeTotalsForCandidate,
+  assessPortfolioConcentrationForCandidate,
+  sizeCandidateForPortfolio,
+  getPositionsWithCodedError,
+} from "./etradeBrokerPortfolioRisk";
 import { extractCheckoutEmail, submitPaidStockScreenOrNull } from "./paidStockScreenSeam";
 import { executeEtradeScreen, executeEtradeScreenListings } from "./etradeBrokerScreen";
 import { etradePositionsMcpEnvelope, etradeQuoteMcp, etradePreviewLocal } from "./etradeBrokerModes";
@@ -580,19 +575,7 @@ export async function handleEtradeBrokerRoutes(
       if (positionsMode === "mcp") {
         return Response.json(await etradePositionsMcpEnvelope(etrade));
       }
-      const holdings = await etrade.fetchPortfolioRemote(undefined, true);
-      // Issue #2573: the portfolio error field is user-facing
-      // (ETradeTradingHub renders it as the OAuth message), so it
-      // carries the coded message, never the raw lastError string.
-      // The 200 envelope shape is unchanged.
-      const codedError =
-        holdings.account.accountId === "unconnected"
-          ? codedBrokerMessage(etrade, "positions")
-          : null;
-      return Response.json({
-        ...holdings,
-        error: codedError ?? undefined,
-      });
+      return Response.json(await getPositionsWithCodedError(etrade));
     } catch (err) {
       return Response.json({ error: err instanceof Error ? err.message : "Failed to fetch positions" }, { status: 500 });
     }
@@ -605,8 +588,7 @@ export async function handleEtradeBrokerRoutes(
       const userLogin = request.headers.get("x-user-login");
       if (!userLogin) return unauthenticatedResponse();
       const etrade = new ETradeService(ctx.getOrm(), ctx.env, userLogin, requestedEnv);
-      const report = await computePortfolioRisk(etrade);
-      return Response.json(report);
+      return Response.json(await getPortfolioRiskReport(etrade));
     } catch (err) {
       return Response.json({ error: err instanceof Error ? err.message : "Failed to compute portfolio risk" }, { status: 500 });
     }
@@ -623,15 +605,7 @@ export async function handleEtradeBrokerRoutes(
       const userLogin = request.headers.get("x-user-login");
       if (!userLogin) return unauthenticatedResponse();
       const etrade = new ETradeService(ctx.getOrm(), ctx.env, userLogin, requestedEnv);
-      const { account, positions } = await etrade.fetchPortfolioRemote(undefined, true);
-      const resolved = await resolvePositionsSnapshot(etrade, positions);
-      const spyChain = await etrade.getOptionChains({ symbol: "SPY" }).catch(() => null);
-      const report = aggregatePortfolioRisk(resolved, {
-        nav: account.netAccountValue || account.totalAccountValue || 0,
-        spyPrice: spyChain?.underlyingPrice ?? null,
-        asOf: new Date().toISOString(),
-      });
-      return Response.json({ current: report, postTradeTotals: evaluatePostTradeTotals(report, body.candidate) });
+      return Response.json(await evaluatePostTradeTotalsForCandidate(etrade, body.candidate));
     } catch (err) {
       return Response.json({ error: err instanceof Error ? err.message : "Failed to evaluate post-trade totals" }, { status: 500 });
     }
@@ -648,13 +622,7 @@ export async function handleEtradeBrokerRoutes(
       const userLogin = request.headers.get("x-user-login");
       if (!userLogin) return unauthenticatedResponse();
       const etrade = new ETradeService(ctx.getOrm(), ctx.env, userLogin, requestedEnv);
-      const report = await computePortfolioRisk(etrade);
-      const concentration = await assessPortfolioConcentration(
-        report,
-        (a, b) => sharedCorrelationService.estimate(a, b),
-        body.candidateSymbol,
-      );
-      return Response.json(concentration);
+      return Response.json(await assessPortfolioConcentrationForCandidate(etrade, body.candidateSymbol));
     } catch (err) {
       return Response.json({ error: err instanceof Error ? err.message : "Failed to assess concentration" }, { status: 500 });
     }
@@ -672,8 +640,7 @@ export async function handleEtradeBrokerRoutes(
       const userLogin = request.headers.get("x-user-login");
       if (!userLogin) return unauthenticatedResponse();
       const etrade = new ETradeService(ctx.getOrm(), ctx.env, userLogin, requestedEnv);
-      const report = await computePortfolioRisk(etrade);
-      return Response.json(sizeCandidateAgainstPortfolio(report, body.candidate));
+      return Response.json(await sizeCandidateForPortfolio(etrade, body.candidate));
     } catch (err) {
       return Response.json({ error: err instanceof Error ? err.message : "Failed to size candidate" }, { status: 500 });
     }
