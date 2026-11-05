@@ -20,7 +20,6 @@ import {
 } from "../types";
 import type { TradeAssetClass, TradeOrderContext } from "./trading/tradeOrderContext";
 import { PortfolioRiskPanel } from "./PortfolioRiskPanel";
-import { brokerSectionNav } from "./brokerSectionNav";
 import type { RiskBroker } from "./portfolioRiskApi";
 import { brokerSupports, isBrokerId } from "../trading/brokerCatalog";
 import { TradingApprovalsQueue } from "./TradingApprovalsQueue";
@@ -37,7 +36,6 @@ import { ErrorBoundary } from "./ErrorBoundary";
 import { ScreenersHub, type ScreenersHubTab } from "./ScreenersHub";
 import { GoalScreenPanel } from "./GoalScreenPanel";
 import { ReportsPanel } from "./ReportsPanel";
-import { SchedulesPanel } from "./SchedulesPanel";
 import { ScreeningReviewPanel } from "./ScreeningReviewPanel";
 import { TrackRecordPanel } from "./TrackRecordPanel";
 import { OrderTicketPanel } from "./OrderTicketPanel";
@@ -57,11 +55,13 @@ import type { RiskSubject } from "./options/riskManagementEngine";
 /**
  * C2 (consolidation #1151, issue #1246): the S8 "Screening Moved"
  * redirect notices are retired. The Trading Hub's screening subtabs
- * (options research, strategy scanner, IV history, reports,
- * schedules) render the ONE screening hub — ScreenersHub — directly
- * on the equivalent tab, so every legacy deep link lands on the live
- * surface with no interstitial. Reports and Schedules are hosted by
- * the hub as tabs now; they are no longer mounted here.
+ * (options research, strategy scanner, IV history, reports)
+ * render the ONE screening hub — ScreenersHub — directly on the
+ * equivalent tab, so every legacy deep link lands on the live
+ * surface with no interstitial. Reports is hosted by the hub as a
+ * tab now; it is no longer mounted here. Schedules left the hub in
+ * #3121 S2 — it renders from the shell (Chat.tsx TAB_CONTENT →
+ * SchedulesHome), the one schedules surface.
  */
 import { ResearchReportActions } from "./ResearchReportActions";
 import { AutopilotControlCenter } from "./components/AutopilotControlCenter";
@@ -80,7 +80,6 @@ export type TradingSubTab =
   | "screeners"
   | "stock-hub"
   | "reports"
-  | "schedules"
   | "goal-screen"
   | "review"
   | "track-record"
@@ -1584,7 +1583,6 @@ export function ETradeTradingHub({
       screeners: "Multi-Asset Screeners",
       "stock-hub": "Stock Hub",
       reports: "Reports",
-      schedules: "Schedules",
       "goal-screen": "Goal Screen",
       review: "Proposal Review",
       "track-record": "Track Record",
@@ -1984,9 +1982,9 @@ export function ETradeTradingHub({
           so these branches are now the only home for those panels. */}
       {effectiveSubTab === "reports" && <ReportsPanel />}
 
-      {effectiveSubTab === "schedules" && (
-        <SchedulesPanel activeEnv={activeEnv} userLogin={user?.login} onPreviewTrade={handleTradeOrder} />
-      )}
+      {/* Issue #3121 S2: the schedules branch is gone — the
+          consolidated home renders from the shell (Chat.tsx
+          TAB_CONTENT), not through this hub. */}
 
       {effectiveSubTab === "goal-screen" && <GoalScreenPanel activeEnv={activeEnv} userLogin={user?.login} />}
 
@@ -2177,10 +2175,14 @@ export function ETradeTradingHub({
               flags, and portfolio-aware sizing. */}
           {/* Section nav (issue #69) */}
           <nav className="portfolio-section-nav" style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)", marginTop: "1.25rem" }}>
-            {/* Issue #3367: the chips follow the broker being rendered. A chip that
-                scrolls to a section this broker's panel does not render is a dead
-                control, and the list used to be E*TRADE's for every broker. */}
-            {brokerSectionNav(selectedBroker).map(({ label, id }) => (
+            {[
+              ["Positions", "section-positions"],
+              ["Alerts", "section-alerts"],
+              ["Transactions", "section-transactions"],
+              ["Watchlists", "section-watchlists"],
+              ["Orders", "section-orders"],
+              ["Portfolio Risk", "section-portfolio-risk"],
+            ].map(([label, id]) => (
               <Button
                 variant="secondary"
                 size="sm"

@@ -538,14 +538,17 @@ describe("S0-P27 drift D6: the #2366 hung-timeout claim is not locatable under s
   });
 });
 
-describe("U-P01 URL inventory (§8 U-01): nav-config.json schedules route is retained with no nav entry", () => {
-  it("pins retain:true, no navEntry, and the screening-hub description", () => {
+describe("U-P01 URL inventory (§8 U-01): nav-config.json schedules route is de-hubbed in S2", () => {
+  it("pins no retain flag, no navEntry, and the schedules-home description", () => {
     const config = JSON.parse(read("src/client/nav-config.json")) as {
       routes: Array<Record<string, unknown>>;
     };
     const route = config.routes.find((r) => r.id === "schedules");
     expect(route).toBeDefined();
-    expect(route!.retain).toBe(true);
+    // S2 (#3121): the home renders from the shell (Chat.tsx
+    // TAB_CONTENT), not through the retained ETradeTradingHub — the
+    // route lost its retain flag.
+    expect(route!.retain).toBeUndefined();
     expect(route!).not.toHaveProperty("navEntry");
     expect(route!.navGroup).toBe("schedules");
     expect(route!.description as string).toContain("schedules");
@@ -553,7 +556,7 @@ describe("U-P01 URL inventory (§8 U-01): nav-config.json schedules route is ret
 });
 
 describe("U-P02 URL inventory (§8 U-01/U-02): navConfig.ts #2974 synthesizes the Schedules nav item", () => {
-  it("pins the label, Cron badge, description, and dual-address active logic", () => {
+  it("pins the label, Cron badge, description, and home-only active logic", () => {
     const nav = read("src/client/navConfig.ts");
     expect(nav).toContain("// Issue #2974: insert Schedules before the Workflows item");
     expect(nav).toContain('label: "Schedules"');
@@ -562,10 +565,10 @@ describe("U-P02 URL inventory (§8 U-01/U-02): navConfig.ts #2974 synthesizes th
       'description: "The one scheduling surface for screening runs — create, pause, and inspect scheduled jobs"',
     );
     expect(nav).toContain('if (item.id === "schedules") {');
-    expect(nav).toContain('if (currentTab === "schedules") return true;');
-    expect(nav).toContain(
-      'return currentTab === "screeners" && (view === "schedules" || view === "schemas");',
-    );
+    expect(nav).toContain('return currentTab === "schedules";');
+    // S2 (#3121): the dual address is retired — no screeners address
+    // may activate the Schedules item anymore.
+    expect(nav).not.toContain('currentTab === "screeners" && (view === "schedules"');
   });
 });
 
@@ -595,28 +598,31 @@ describe("U-P03 URL inventory (§8 U-03/U-04/U-05): deep links and deep-link sur
   });
 });
 
-describe("U-P04 URL inventory (§8 U-01): Chat.tsx renders schedules through the retained ETradeTradingHub", () => {
-  it("pins the tab-to-sub-tab mapping and the URL-driven hub selection", () => {
+describe("U-P04 URL inventory (§8 U-01): Chat.tsx renders schedules from the shell, de-hubbed in S2", () => {
+  it("pins the home in TAB_CONTENT and the absence of any hub mapping", () => {
     const types = read("src/client/chat/types.ts");
-    expect(types).toContain('    case "schedules":\n      return "schedules";');
+    expect(types).not.toContain('case "schedules":\n      return "schedules";');
     const chat = read("src/client/Chat.tsx");
-    expect(chat).toContain("activeSubTab={mapTabToTradingSubTab(tab)}");
     expect(chat).toContain("the URL is the source of truth for navigation");
-    expect(chat).toContain("onSelectSubTab={(newSubTab) => {");
-    expect(chat).toContain("handleSelectTab(newSubTab);");
+    expect(chat).toContain("schedules: (\n      <SchedulesHome");
+    expect(chat).toContain('import { SchedulesHome } from "./SchedulesHome";');
     const hub = read("src/client/ETradeTradingHub.tsx");
-    expect(hub).toContain('{effectiveSubTab === "schedules" && (');
-    expect(hub).toContain("<SchedulesPanel");
+    expect(hub).not.toContain('{effectiveSubTab === "schedules" && (');
+    expect(hub).not.toContain("<SchedulesPanel");
   });
 });
 
-describe("U-P05 URL inventory (§8 U-06): the IAAA admin Queue sub-tab is URL-addressable via ?iaaaTab=", () => {
-  it("pins the nested iaaaTab deep link and the AdminQueueWipePanel mount", () => {
+describe("U-P05 URL inventory (§8 U-06): the IAAA admin Queue sub-tab is retired to the home in S2", () => {
+  it("pins the redirect (not a mount): the queue lives at ?tab=schedules&view=queue", () => {
     const panel = read("src/client/IaaaAdminPanel.tsx");
-    expect(panel).toContain('param: "iaaaTab"');
-    expect(panel).toContain('{ id: "queue", label: "Queue" }');
-    expect(panel).toContain('<TabPanel idBase="iaaa-admin" tabId="queue" active={tab === "queue"}>');
-    expect(panel).toContain("<AdminQueueWipePanel />");
+    expect(panel).not.toContain('{ id: "queue", label: "Queue" }');
+    expect(panel).not.toContain("<AdminQueueWipePanel />");
+    const home = read("src/client/schedulesHome.ts");
+    expect(home).toContain('params.get("iaaaTab") === "queue"');
+    expect(home).toContain('return { tab: SCHEDULES_HOME_TAB, view: "queue" };');
+    const queueView = read("src/client/ScheduleQueueView.tsx");
+    expect(queueView).toContain("fetchAdminOverview()");
+    expect(queueView).toContain("<AdminQueueWipePanel />");
   });
 });
 

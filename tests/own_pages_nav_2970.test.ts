@@ -4,6 +4,10 @@
  * directly through the Trading Hub, and Reports/Schedules stop going
  * through the ScreenersHub. The hub still hosts all five tabs until
  * the slimming slice (#2971) removes them.
+ *
+ * Issue #3121 S2: schedules left the hub before #2971 — it renders
+ * from the shell (Chat.tsx TAB_CONTENT → SchedulesHome). The four
+ * remaining own pages still render through the hub.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -44,20 +48,27 @@ describe("own pages (#2970)", () => {
     expect(mapTabToTradingSubTab("review")).toBe("review");
     expect(mapTabToTradingSubTab("track-record")).toBe("track-record");
     expect(mapTabToTradingSubTab("reports")).toBe("reports");
-    expect(mapTabToTradingSubTab("schedules")).toBe("schedules");
+    // Issue #3121 S2: schedules is de-hubbed — it falls to the hub
+    // default because the shell owns it now, not the hub.
+    expect(mapTabToTradingSubTab("schedules")).toBe("autopilot");
   });
 
-  it("renders the five panels directly in the Trading Hub", () => {
+  it("renders the four panels directly in the Trading Hub", () => {
     for (const panel of [
       "GoalScreenPanel",
       "ReportsPanel",
-      "SchedulesPanel",
       "ScreeningReviewPanel",
       "TrackRecordPanel",
     ]) {
       expect(tradingHubSrc).toContain(`import { ${panel} } from "./${panel}"`);
       expect(tradingHubSrc).toContain(`<${panel}`);
     }
+    // Issue #3121 S2: schedules renders from the shell, not the hub.
+    expect(tradingHubSrc).not.toContain('import { SchedulesPanel } from "./SchedulesPanel"');
+    expect(tradingHubSrc).not.toContain("<SchedulesPanel");
+    const chatSrc = readFileSync(join(here, "..", "src", "client", "Chat.tsx"), "utf8");
+    expect(chatSrc).toContain('import { SchedulesHome } from "./SchedulesHome";');
+    expect(chatSrc).toContain("schedules: (\n      <SchedulesHome");
     // Issue #3050 PR1: the track-record dashboards moved one level down —
     // the hub renders TrackRecordPanel, which composes all three.
     for (const dashboard of [
@@ -68,9 +79,10 @@ describe("own pages (#2970)", () => {
       expect(trackRecordSrc).toContain(`import { ${dashboard} } from "./${dashboard}"`);
       expect(trackRecordSrc).toContain(`<${dashboard}`);
     }
-    for (const subtab of ["goal-screen", "review", "track-record", "reports", "schedules"]) {
+    for (const subtab of ["goal-screen", "review", "track-record", "reports"]) {
       expect(tradingHubSrc).toContain(`effectiveSubTab === "${subtab}"`);
     }
+    expect(tradingHubSrc).not.toContain('effectiveSubTab === "schedules"');
     expect(tradingHubSrc).not.toContain('renderScreenersHub("reports")');
     expect(tradingHubSrc).not.toContain('renderScreenersHub("schedules")');
   });

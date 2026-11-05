@@ -56,7 +56,6 @@ import {
   MCP_RESOURCES_CATALOG,
   MCP_TOOLS_CATALOG,
 } from "./mcpEndpointsData";
-import { AdminQueueWipePanel } from "./AdminQueueWipePanel";
 import { ServiceUserSection } from "./ServiceUserSection";
 import { ServiceTokensPanel } from "./ServiceTokensPanel";
 import { RoleGrantsPanel } from "./RoleGrantsPanel";
@@ -67,7 +66,7 @@ import { fetchRoleGrants } from "./roleGrantsApi";
 import { fetchLoggedInUsers } from "./loggedInUsersApi";
 import "./iaaaAdminPanel.css";
 
-type IaaaAdminTab = "overview" | "members" | "api" | "mcp" | "iaaa" | "correlations" | "queue";
+type IaaaAdminTab = "overview" | "members" | "api" | "mcp" | "iaaa" | "correlations";
 
 const IAAA_ADMIN_TABS = [
   { id: "overview", label: "Overview" },
@@ -76,8 +75,11 @@ const IAAA_ADMIN_TABS = [
   { id: "mcp", label: "MCP" },
   { id: "iaaa", label: "IAAA" },
   { id: "correlations", label: "Correlations" },
-  // #2173 queue wipe slice: appended last so existing tab indices are unchanged.
-  { id: "queue", label: "Queue" },
+  // Issue #3121 S2: the Queue tab (#2173) moved out — the admin queue
+  // is now a view of the schedules home (`?tab=schedules&view=queue`,
+  // ScheduleQueueView, same platform-admin overview gate). The old
+  // address `?tab=platform-admin&view=iaaa-admin&iaaaTab=queue`
+  // redirects there (schedulesHome.ts `legacySchedulesRedirect`).
 ] as const;
 
 const MEMBER_ROLES = ["member", "approver", "auditor", "workspace-admin", "tenant-admin", "platform-admin"] as const;
@@ -923,9 +925,6 @@ export function IaaaAdminPanel() {
           rows={IAAA_CORRELATION_ROWS.filter((row) => row.kind === "event-endpoint")}
           rowKey={(_row, index) => `event-endpoint-${index}`}
         />
-      </TabPanel>
-      <TabPanel idBase="iaaa-admin" tabId="queue" active={tab === "queue"}>
-        <AdminQueueWipePanel />
       </TabPanel>
     </div>
   );

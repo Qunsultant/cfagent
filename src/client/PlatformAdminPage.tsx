@@ -5,10 +5,9 @@ import { NavIcons } from "./components/NavigationMenu";
  * Promotes Platform Admin from an overlay drawer dialog into a first-class,
  * full-page destination in the main viewport (<main className="tab-viewport">).
  *
- * Tabbed interface covers the nine administration surfaces from platformAdminConfig:
+ * Tabbed interface covers the administration surfaces from platformAdminConfig:
  *  - ads: Workspace Banners & Sponsor Spotlight
  *  - background-tasks: Async execution queue & background jobs
- *  - scheduled-goals: ScheduledAgent goals, ticks, and add-goal form
  *  - provenance: Technical diagnostics, DID, MCP client, and institutional ledger
  *  - api-keys: MCP transport access for external clients
  *  - tenants: Tenant create, list, settings, and read-only membership view (#2221)
@@ -19,6 +18,17 @@ import { NavIcons } from "./components/NavigationMenu";
  *  - users: User profiles, tenant memberships & account linkage
  *  - data-lifecycle: Clean state, platform bootstrap, and tenant bootstrap (#3250)
  *  - admin-access: Request admin access from the platform owner
+ *
+ * Issue #3121 S2 folded two sections into the schedules home
+ * (`?tab=schedules`): `scheduled-goals` → `view=goals`
+ * (ScheduledGoalsPanel) and `jobs` → `view=runs`
+ * (ScheduleRunLedgerPanel). Their old addresses redirect there (see
+ * schedulesHome.ts `legacySchedulesRedirect`), and the left-nav
+ * entries link straight to the home (nav-config.json deep-link
+ * overrides) — so they are gone from this page's tab list, not kept
+ * as a second home. The section ids stay valid in
+ * platformAdminConfig (the nav entries still exist); this page simply
+ * no longer renders panels for them.
  *
  * Built strictly with src/client/components/ui/ primitives (PageShell, Card, Tabs, TabPanel)
  * and token-only styling per docs/agents/ux-architecture.md §20.
@@ -43,8 +53,6 @@ import {
   type AdBannerConfig,
 } from "./adBannerConfig";
 import { AsyncJobsPanel } from "./AsyncJobsPanel";
-import { ScheduledGoalsPanel } from "./ScheduledGoalsPanel";
-import { JobsPanel } from "./JobsPanel";
 import { ApiKeysPanel } from "./ApiKeysPanel";
 import { DataProvidersPanel } from "./DataProvidersPanel";
 import { TenantAdminPanel } from "./TenantAdminPanel";
@@ -81,8 +89,6 @@ export interface PlatformAdminPageProps {
 export const PLATFORM_ADMIN_TABS: TabOption<PlatformAdminSectionId>[] = [
   { id: "ads", label: "Ads & Banners", icon: <NavIcons.Banners /> },
   { id: "background-tasks", label: "Background Tasks", icon: <NavIcons.Tasks /> },
-  { id: "scheduled-goals", label: "Scheduled Goals", icon: <NavIcons.ScheduledGoals /> },
-  { id: "jobs", label: "Jobs", icon: <NavIcons.Jobs /> },
   { id: "provenance", label: "Diagnostics & Provenance", icon: <NavIcons.Provenance /> },
   { id: "api-keys", label: "API Keys", icon: <NavIcons.ApiKeys /> },
   { id: "tenants", label: "Tenants", icon: <NavIcons.Agents /> },
@@ -223,26 +229,6 @@ export function PlatformAdminPage({
             <small>Async jobs &amp; execution queue</small>
           </div>
           <AsyncJobsPanel embedded />
-        </Card>
-      </TabPanel>
-
-      <TabPanel idBase="platform-admin" tabId="scheduled-goals" active={active === "scheduled-goals"}>
-        <Card padding="md">
-          <div className="section-label-row">
-            <span>Scheduled goals</span>
-            <small>ScheduledAgent goals, ticks &amp; add-goal form</small>
-          </div>
-          <ScheduledGoalsPanel embedded />
-        </Card>
-      </TabPanel>
-
-      <TabPanel idBase="platform-admin" tabId="jobs" active={active === "jobs"}>
-        <Card padding="md">
-          <div className="section-label-row">
-            <span>Jobs</span>
-            <small>All scheduled jobs &amp; per-run results</small>
-          </div>
-          <JobsPanel embedded />
         </Card>
       </TabPanel>
 

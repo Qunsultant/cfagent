@@ -44,9 +44,12 @@ export function parseTabFromSearch(search: string): RouteId {
  * `orderTab`/`assetClass` live on the order page; `riskTab` on the Risk
  * Analysis page and inside the order page's risk tab; `reportsTab` on
  * the hub's reports sub-tab; `iaaaTab` on platform-admin; `run`/`q`
- * (legacy alias) on workflow-runs; `screenerTab` is the legacy alias
- * the three screener hubs read for `view`; `research`/`discoveryView`
- * on the options hub; `checkoutTab` on checkout.
+ * (legacy alias) on workflow-runs, and `run` also on the schedules
+ * home (#3121 S2, where it deep-links one job's run history);
+ * `schedule` on the schedules home (#3121 S2, one schedule);
+ * `screenerTab` is the legacy alias the three screener hubs read for
+ * `view`; `research`/`discoveryView` on the options hub; `checkoutTab`
+ * on checkout.
  */
 export const TAB_PARAM_OWNERS: Readonly<Record<string, readonly RouteId[]>> = {
   orderTab: ["order"],
@@ -54,12 +57,17 @@ export const TAB_PARAM_OWNERS: Readonly<Record<string, readonly RouteId[]>> = {
   riskTab: ["risk-analysis", "order"],
   reportsTab: ["reports"],
   iaaaTab: ["platform-admin"],
-  run: ["workflow-runs"],
+  run: ["workflow-runs", "schedules"],
   q: ["workflow-runs"],
   screenerTab: ["screeners", "options", "stock-hub"],
   research: ["options"],
   discoveryView: ["options"],
   checkoutTab: ["checkout"],
+  // Issue #3121 S2: the schedules home's deep links — `schedule=<id>`
+  // (one schedule) and `run=<id>` (one job's run history) — are owned
+  // by the home, so they survive navigation to it and drop on the way
+  // out, like every other page-owned param (#3238).
+  schedule: ["schedules"],
 };
 
 /** Query string with `tab` set, keeping only the destination's own params. */
@@ -113,6 +121,27 @@ export function buildSearchWithView(currentSearch: string, view: string): string
  * actually navigates instead of no-opping.
  */
 export function navigateToTab(tab: string, view?: string, extraParams?: Record<string, string>): RouteId {
+  return goToTab(tab, view, extraParams, "push");
+}
+
+/**
+ * Replace the current URL with a tab (issue #3121 S2): the same
+ * resolution, scoping, and already-there check as `navigateToTab`, but
+ * `replaceState` instead of `pushState`. For redirects (retired
+ * addresses): replacing means back/forward never re-lands on the
+ * retired address. Still dispatches `routechange`, so subscribers
+ * re-read the URL exactly as they do for a push.
+ */
+export function replaceToTab(tab: string, view?: string, extraParams?: Record<string, string>): RouteId {
+  return goToTab(tab, view, extraParams, "replace");
+}
+
+function goToTab(
+  tab: string,
+  view: string | undefined,
+  extraParams: Record<string, string> | undefined,
+  mode: "push" | "replace",
+): RouteId {
   const section = platformAdminSectionFromNavId(tab);
   const targetTab = section ? "platform-admin" : tab;
   const targetView = view ?? section;
@@ -150,7 +179,11 @@ export function navigateToTab(tab: string, view?: string, extraParams?: Record<s
     search = s ? `?${s}` : "";
   }
   const url = `${window.location.pathname}${search}${window.location.hash}`;
-  window.history.pushState(null, "", url);
+  if (mode === "replace") {
+    window.history.replaceState(null, "", url);
+  } else {
+    window.history.pushState(null, "", url);
+  }
   window.dispatchEvent(new Event("routechange"));
   return next;
 }

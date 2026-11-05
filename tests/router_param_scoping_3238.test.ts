@@ -86,6 +86,7 @@ describe("router param scoping (#3238)", () => {
       "iaaaTab",
       "run",
       "q",
+      "schedule",
       "screenerTab",
       "research",
       "discoveryView",

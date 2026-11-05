@@ -28,7 +28,7 @@
  * definition in the paused store; see services/scheduleManagement.ts).
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Badge,
   Button,
@@ -168,6 +168,14 @@ interface SchedulesPanelProps {
   userLogin?: string;
   /** S7: forwarded to the screening section's live-result preview. */
   onPreviewTrade?: (candidate: any) => void;
+  /**
+   * Issue #3121 S2: `schedule=<id>` deep link — once the list loads,
+   * open the detail dialog for this schedule (the panel's per-schedule
+   * view). A missing id shows a notice instead of silently landing on
+   * the unfiltered list. Re-applies when the id changes; closing the
+   * dialog does not re-open it.
+   */
+  focusScheduleId?: string | null;
 }
 
 export const SCREENING_CALLBACKS = new Set([
@@ -191,13 +199,14 @@ function genericCadence(s: ScheduleItem): string {
   return s.type;
 }
 
-export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade }: SchedulesPanelProps) {
+export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusScheduleId = null }: SchedulesPanelProps) {
   const toast = useToast();
   const [schedules, setSchedules] = useState<ScheduleItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<ScheduleGroup>("all");
   const [actionError, setActionError] = useState<string | null>(null);
+  const [focusMissing, setFocusMissing] = useState(false);
   const [refreshSignal, setRefreshSignal] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<ScheduleItem | null>(null);
@@ -327,6 +336,27 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade }: Schedul
       setDetailLoading(false);
     }
   };
+
+  // Issue #3121 S2: `schedule=<id>` deep link — open the detail dialog
+  // for the focused schedule once the list has loaded. The applied id
+  // is tracked so a refresh or a modal close does not re-open it, and
+  // a new id re-applies. A list that loads without the id reports it
+  // instead of silently showing the unfiltered list.
+  const focusAppliedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!focusScheduleId || loading) return;
+    if (focusAppliedRef.current === focusScheduleId) return;
+    focusAppliedRef.current = focusScheduleId;
+    const found = schedules.find((s) => s.id === focusScheduleId);
+    if (found) {
+      setFocusMissing(false);
+      setDetailsTarget(found);
+      void readDetails(found);
+    } else {
+      setFocusMissing(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusScheduleId, loading, schedules]);
 
   // The screening kinds render in the screening section (kind rows);
   // the generic table below carries every other callback.
@@ -599,6 +629,12 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade }: Schedul
       {actionError && (
         <Notice tone="danger" title="Schedule action failed" onDismiss={() => setActionError(null)}>
           {actionError}
+        </Notice>
+      )}
+
+      {focusMissing && focusScheduleId && (
+        <Notice tone="warning" title="Schedule not found" onDismiss={() => setFocusMissing(false)}>
+          No schedule with id <code>{focusScheduleId}</code> is in the list.
         </Notice>
       )}
 

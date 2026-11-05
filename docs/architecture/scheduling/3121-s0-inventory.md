@@ -43,6 +43,22 @@
   (`src/services/scheduleDedupe.ts`), so S1-created schedules stay
   idempotent under #2071 — provenance is creation metadata, not
   criteria.
+- **S2 amendment (Slice S2, #3121):** the §8.3 home is implemented:
+  `?tab=schedules` renders the consolidated home directly from the
+  shell (`src/client/SchedulesHome.tsx` — list / runs / goals / queue
+  views), de-hubbed (the `ETradeTradingHub` schedules branch is gone;
+  the route is no longer `retain`). U-02 redirects to the home; U-04
+  redirects to `view=goals`; U-05 redirects to `view=runs`; U-06
+  redirects to `view=queue` (same platform-admin overview gate,
+  `ScheduleQueueView`). U-03 is retired *as a schedules address* but
+  NOT redirected: the OptionsHub schedules mode is options-research
+  state (one-shot run form #2545, autonomous-runs record #223,
+  activity log #1162), not a schedules listing, and in-hub tab clicks
+  write the same `?view=` URL a redirect would match — see §8. The
+  preview-trade candidate prefill is lost in the de-hub (hub-local
+  order state); filed as sub-issue #3361. No file is deleted in S2;
+  the two retired admin tabs and the IAAA Queue tab are removed from
+  their panels (their mount sites move to the home), not renamed.
 
 ## 1. Re-verified inventory (fresh main)
 
@@ -716,15 +732,15 @@ Two verified facts about the shell, which the table relies on:
 
 | # | URL | Renders | Backend | Addressability | Review note (the problem it has as a home) |
 |---|-----|---------|---------|----------------|--------------------------------------------|
-| U-01 | `https://agent.openaimp.com/?tab=schedules` | `SchedulesPanel` — generic screen schedules (list, trigger, pause/resume, delete, detail, edit) with `ScheduledOptionsManager` embedded as a section | `/api/schedules` | URL-driven (top-level tab) | The only real top-level schedules address — but it renders THROUGH the retained `ETradeTradingHub` (`Chat.tsx` `activeSubTab={mapTabToTradingSubTab(tab)}`, `chat/types.ts` maps `"schedules"` → `"schedules"`, hub renders `<SchedulesPanel>` when `effectiveSubTab === "schedules"`). A broker-branded home, in tension with the broker-neutral program #3216. |
-| U-02 | `https://agent.openaimp.com/?tab=screeners&view=schedules` | The same `SchedulesPanel` — the nav active logic (`navConfig.ts`) treats `screeners` + `view` in (`"schedules"`, `"schemas"`) as the Schedules item | `/api/schedules` | URL-driven (tab + view) | Duplicate address for U-01: two URLs, one surface. |
-| U-03 | `https://agent.openaimp.com/?tab=options&view=scheduled-screening` | `OptionsHub` schedules mode — options schedules only (`TAB_TO_MODE`: `"scheduled-screening"` → `"schedules"`; deep link `options-screener:scheduled-screening`) | `/api/schedules` | URL-driven (deep link) | Options-only duplicate: a third address for the same schedules, scoped to one family. |
-| U-04 | `https://agent.openaimp.com/?tab=platform-admin&view=scheduled-goals` | `ScheduledGoalsPanel` (embedded) — goal schedules, ticks, add-goal form | `/api/schedule/goals` (separate family) | URL-driven (tab + view; section read from `?view=` on mount and on route change) | Goal schedules live under Platform Admin, not under the schedules home — a different backend and a different area. |
-| U-05 | `https://agent.openaimp.com/?tab=platform-admin&view=jobs` | Jobs view — all scheduled jobs & per-run results | Run-ledger reads (`job_run_records`) | URL-driven (tab + view) | The run history lives in the admin area, next to the goals but apart from the schedules that produced the runs. |
-| U-06 | `https://agent.openaimp.com/?tab=platform-admin&view=iaaa-admin&iaaaTab=queue` | `AdminQueueWipePanel` — dump, cancel-all, clear-table, KV wipe, events export, purge, Track 1 recreate | `/api/schedules` (dump, cancel-all) + `/api/maintenance/*` | URL-driven via a nested third-level param `?iaaaTab=` (deep links #2776; `useUrlSyncedTabs`, param `"iaaaTab"`, valid ids include `"queue"`) | Addressable — but only three params deep inside the admin area. The queue is an outpost, not part of any schedules home. Correction to the §8 brief: the queue was described as not URL-addressable; verified on main `90fb058b` it IS, via `?iaaaTab=queue`. |
+| U-01 | `https://agent.openaimp.com/?tab=schedules` | `SchedulesHome` — the consolidated home: list (`SchedulesPanel` + embedded `ScheduledOptionsManager`), runs/ledger (`ScheduleRunLedgerPanel`), goals (`ScheduledGoalsPanel`), queue (`ScheduleQueueView`) | `/api/schedules` + `/api/schedule/goals` (goals until S3) | URL-driven (top-level tab + `?view=` sub-routes) | S2: de-hubbed — renders directly from the shell (`Chat.tsx` `TAB_CONTENT`), no longer through the retained `ETradeTradingHub` (route no longer `retain`; `mapTabToTradingSubTab` has no `schedules` case; the hub has no schedules branch). Sub-routes `view=list\|runs\|ledger\|goals\|queue` + `schedule=<id>` / `run=<id>` deep links. |
+| U-02 | `https://agent.openaimp.com/?tab=screeners&view=schedules` | (retired) | `/api/schedules` | URL-driven (tab + view) | S2: RETIRED — redirects to `?tab=schedules` (`legacySchedulesRedirect`, replace not push). The nav active logic no longer activates the Schedules item for any screeners address. |
+| U-03 | `https://agent.openaimp.com/?tab=options&view=scheduled-screening` | `OptionsHub` schedules mode — options-research state, NOT a schedules listing: one-shot run form (#2545), autonomous-runs record (#223), screening activity log (#1162); no schedule CRUD (the mode's own note points schedule management at the Schedules tab) | `/api/schedules` (runs record reads) | URL-driven (deep link) | S2: retired AS A SCHEDULES ADDRESS, address preserved for its options-research content — NOT redirected, because in-hub tab clicks write the same `?view=` URL a redirect would match, and the mode carries real options-family state. Schedule management itself already lives only in the consolidated home (S7/C2). |
+| U-04 | `https://agent.openaimp.com/?tab=platform-admin&view=scheduled-goals` | (retired as an address) | `/api/schedule/goals` (separate family) | URL-driven (tab + view) | S2: RETIRED — redirects to `?tab=schedules&view=goals` (`legacySchedulesRedirect`, replace not push). The Platform Admin tab and panel are gone; the left-nav entry links straight to the home (nav-config.json deep-link override). |
+| U-05 | `https://agent.openaimp.com/?tab=platform-admin&view=jobs` | (retired as an address) | Run-ledger reads (`job_run_records`) | URL-driven (tab + view) | S2: RETIRED — redirects to `?tab=schedules&view=runs` (`legacySchedulesRedirect`, replace not push). The Platform Admin tab and panel are gone; the left-nav entry links straight to the home (nav-config.json deep-link override). |
+| U-06 | `https://agent.openaimp.com/?tab=platform-admin&view=iaaa-admin&iaaaTab=queue` | (retired as an address) | `/api/schedules` (dump, cancel-all) + `/api/maintenance/*` | URL-driven via a nested third-level param `?iaaaTab=` (deep links #2776) | S2: RETIRED — redirects to `?tab=schedules&view=queue` (`legacySchedulesRedirect`, replace not push), gated at the route by the same platform-admin overview probe (`ScheduleQueueView`). The IAAA Queue tab and its mount are gone; the queue's only mount site is the home. |
 | U-07 | `https://agent.openaimp.com/?tab=queues` | Queues — async jobs, the dead-letter queue, and trade approvals (nav entry "Queues") | `mas_async_jobs` | URL-driven (top-level tab) | The T4 follow-up chain lives here, disconnected from the schedules that minted it. |
 | U-08 | `https://agent.openaimp.com/?tab=workflow-runs&run=<id>` | `WorkflowRunsPanel`, one run's record (`?run=` deep link, #3163) | Workflow-runs ledger | URL-driven | Deep-links a run but carries no schedule linkage — the #3264 gap on the read path. |
-| U-09 | `/api/schedules/runs?scheduleId=<id>` (API only — no page URL) | Per-run records for one schedule (`jobsApi.ts` `listScheduleRuns`) | `/api/schedules/runs` | API param only | The ONLY `scheduleId`-in-a-URL anywhere — and it is an API call, not a page. No page URL carries a schedule id. |
+| U-09 | `/api/schedules/runs?scheduleId=<id>` (API only — no page URL) | Per-run records for one schedule (`jobsApi.ts` `listScheduleRuns`) | `/api/schedules/runs` | API param only | S2: joined by page URLs at last — `?tab=schedules&schedule=<id>` deep-links one schedule (list detail) and `?tab=schedules&view=runs&schedule=<id>` filters the ledger to it; `?tab=schedules&view=runs&run=<id>` deep-links one job's run history. |
 | U-10 | (no URL — does not exist) | Chat Scheduler sub-view (#3122, planned): conversational schedule management as a third `ChatSubView` | — | — | The agentic home is planned only; only General Copilot and Options Copilot exist in the chat shell. A second home must not be built by accident. |
 
 ### 8.2 Review (five findings)
@@ -803,10 +819,17 @@ S1 design law, not §8 content.)
 S2, `?tab=schedules` stays E*TRADE-hub-hosted until the hub is retired
 — record that as a known limitation, not a design choice. The address
 does not change either way; only what renders behind it does.
+**S2 outcome: the fallback was NOT needed — de-hubbing landed in S2**
+(the home renders from the shell; see the S2 amendment at the top of
+this document and the U-01 row above).
 
 **Scope note:** the home URL and the three conditions above are DECIDED
 (owner-approved 2026-11-05). The sub-route scheme in (ii) is the S2
 decision to implement; this section records the home-URL decision, it
 does not implement the scheme. S2 owns the view ids, the redirect, and
 the role gate; this inventory only records the current addresses so S2
-can retire them without losing one.
+can retire them without losing one. **S2 implemented the scheme**
+(`src/client/SchedulesHome.tsx` + `src/client/schedulesHome.ts`):
+view ids `list | runs (= ledger) | goals | queue`, the four redirects,
+and the route-level queue gate — the U-rows above are the as-built
+record.

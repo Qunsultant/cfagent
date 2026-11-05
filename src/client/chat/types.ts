@@ -51,8 +51,10 @@ export function mapTabToTradingSubTab(targetTab: string): TradingSubTab {
       return "scanner";
     case "reports":
       return "reports";
-    case "schedules":
-      return "schedules";
+    // Issue #3121 S2: "schedules" is de-hubbed — the consolidated home
+    // renders from the shell (Chat.tsx TAB_CONTENT), so the tab no
+    // longer maps into the trading hub; it falls through to the
+    // default below, which no caller should reach for it.
     case "goal-screen":
       return "goal-screen";
     case "review":

@@ -227,7 +227,9 @@ describe("S8 hub inventory coverage (source pins)", () => {
   // C2 (#1246) supersedes the S8 redirect pins below: the acceptance
   // criteria retire the "Screening Moved" notices — the Trading Hub's
   // screening subtabs now render the hub itself on the equivalent
-  // tab, and Reports/Schedules are hosted BY the hub, not mounted here.
+  // tab, and Reports is hosted BY the hub, not mounted here.
+  // Issue #3121 S2: schedules left the hub — it renders from the
+  // shell (Chat.tsx TAB_CONTENT → SchedulesHome).
   it("the Trading Hub's screening subtabs render the hub directly, not second surfaces", () => {
     expect(tradingHub).not.toContain("<OptionsResearchPanel");
     expect(tradingHub).not.toContain("<ScannerPanel");
@@ -235,24 +237,28 @@ describe("S8 hub inventory coverage (source pins)", () => {
     expect(tradingHub).not.toContain("ScreeningMovedNotice");
     expect(tradingHub).not.toContain("Screening Moved to the Screeners Hub");
     // Issue #2954: options/scanner/iv-history render the Options copy
-    // hub. Issue #2970: reports/schedules render their panels
-    // directly now (the hub still hosts them until #2971).
+    // hub. Issue #2970: reports renders its panel directly now (the
+    // hub still hosts it until #2971).
     expect(tradingHub).toContain('renderOptionsHub()');
     expect(tradingHub).toContain('renderOptionsHub("strategy-scanner")');
     expect(tradingHub).toContain('renderOptionsHub("iv-history")');
     expect(tradingHub).toContain("<ReportsPanel");
-    expect(tradingHub).toContain("<SchedulesPanel");
+    expect(tradingHub).not.toContain("<SchedulesPanel");
+    const chat = read("src/client/Chat.tsx");
+    expect(chat).toContain('import { SchedulesHome } from "./SchedulesHome";');
   });
 
   it("the Trading Hub's non-screening subtabs are intact", () => {
-    for (const subtab of ["autopilot", "order", "portfolio", "ledger", "reports", "schedules", "omnichannel", "voice"]) {
+    for (const subtab of ["autopilot", "order", "portfolio", "ledger", "reports", "omnichannel", "voice"]) {
       expect(tradingHub).toContain(`effectiveSubTab === "${subtab}"`);
     }
+    expect(tradingHub).not.toContain('effectiveSubTab === "schedules"');
     expect(tradingHub).toContain("<AutopilotControlCenter");
-    // Issue #2970: Reports/Schedules render their panels directly
-    // now (see the pin above) — the Trading Hub mounts them itself.
+    // Issue #2970: Reports renders its panel directly now (see the
+    // pin above) — the Trading Hub mounts it itself. Issue #3121 S2:
+    // Schedules renders from the shell, not the hub.
     expect(tradingHub).toContain("<ReportsPanel");
-    expect(tradingHub).toContain("<SchedulesPanel");
+    expect(tradingHub).not.toContain("<SchedulesPanel");
   });
 });
 

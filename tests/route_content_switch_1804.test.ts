@@ -45,6 +45,8 @@ function shellContentKeys(src: string): string[] {
 // #2954: the Assets Hub route is retained, so the set gains assets-hub.
 // #2970: the own-pages routes are retained, so the set gains
 // goal-screen, review, and track-record.
+// #3121 S2: schedules leaves the set — the consolidated home renders
+// from the shell (Chat.tsx TAB_CONTENT), not through the hub.
 const HISTORICAL_TRADING_IDS = [
   "assets-hub",
   "autopilot",
@@ -58,7 +60,6 @@ const HISTORICAL_TRADING_IDS = [
   "reports",
   "review",
   "scanner",
-  "schedules",
   "screeners",
   "stock-hub",
   "track-record",
@@ -102,7 +103,7 @@ describe("route-table-derived content switch (#2077)", () => {
     expect(chatSrc.slice(start, end)).not.toContain('{tab === "');
   });
 
-  it("the retained set is exactly the historical trading set (#388, #2896, #2954, #2970)", () => {
+  it("the retained set is exactly the historical trading set (#388, #2896, #2954, #2970, #3121 S2)", () => {
     expect([...TRADING_TABS].sort()).toEqual([...HISTORICAL_TRADING_IDS].sort());
   });
 
