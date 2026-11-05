@@ -51,6 +51,8 @@ const PINNED_STAR_REEXPORTS = [
   "./optionChainSource",
   // Issue #3272 S2: the stock quote source port joins the public trading surface.
   "./stockQuoteSource",
+  // Issue #3272 S3: the neutral screener joins the public trading surface.
+  "./neutralMarketScreener",
   "./screeningProvider",
   "./dataProviders",
   "./screener",
