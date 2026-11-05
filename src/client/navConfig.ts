@@ -262,11 +262,12 @@ export function isNavItemOrSubItemActive(
     return false;
   }
   if (item.id === "schedules") {
-    if (currentTab === "schedules") return true;
-    if (typeof window !== "undefined") {
-      const view = new URLSearchParams(window.location.search).get("view");
-      return currentTab === "screeners" && (view === "schedules" || view === "schemas");
-    }
+    // Issue #3121 S2: the schedules item is active exactly when the
+    // schedules home is open. The old dual address
+    // (`?tab=screeners&view=schedules`, and `view=schemas` with it)
+    // is retired — that URL now redirects to `?tab=schedules`, so no
+    // screeners address may activate this item anymore.
+    return currentTab === "schedules";
   }
   if (getNavGroup(currentTab) === item.id) return true;
   if (item.subItems) {

@@ -1,0 +1,234 @@
+/**
+ * Issue #3121 Slice S2 — the consolidated run ledger view.
+ *
+ * The `view=runs` / `view=ledger` view of the one schedules home. It
+ * reads the S1 ledger (`job_run_records`, §4 columns `trigger`,
+ * `scheduleId`, `asyncJobId`, `workflowId`) through the existing reads
+ * (`jobsApi.listScheduleRuns` + `listGoalRuns` — the same reads
+ * `JobsPanel` uses; no second ledger read path) and normalizes every
+ * row with `normalizeJobRunRecord`, so a legacy row reads as
+ * `trigger: "unknown"` with null ids instead of dropping out.
+ *
+ * Null-handling is the §4 rule, rendered not hidden: a null linkage id
+ * shows as "—" (title "not applicable"), never a reason to drop the
+ * row; an unjoinable run is a defect, not a gap to note — and the
+ * ledger makes it visible by construction. A run row's identity is its
+ * `jobId` (schedule/goal id) plus its start time; the S1 ledger mints
+ * no standalone run id, so `run=<id>` deep-links that job's run
+ * history, newest first, and `schedule=<id>` filters to that schedule.
+ */
+import { useCallback, useEffect, useState } from "react";
+import {
+  Badge,
+  Button,
+  EmptyState,
+  Notice,
+  Spinner,
+  Table,
+  type TableColumn,
+} from "./components/ui";
+import { listGoalRuns, listScheduleRuns } from "./jobsApi";
+import {
+  normalizeJobRunRecord,
+  type JobRunRecord,
+} from "../services/jobRunRecords";
+import { navigateToTab } from "./router";
+
+/** A null linkage id is a recorded fact: rendered, never dropped. */
+export function ledgerLinkageCell(value: string | null | undefined): string {
+  return typeof value === "string" && value ? value : "—";
+}
+
+export function ledgerLinkageTitle(value: string | null | undefined): string {
+  return typeof value === "string" && value ? value : "not applicable";
+}
+
+function outcomeTone(outcome: JobRunRecord["outcome"]): "success" | "danger" | "warning" {
+  if (outcome === "success") return "success";
+  if (outcome === "failure") return "danger";
+  return "warning";
+}
+
+function runSummary(run: JobRunRecord): string {
+  if (run.outcome === "failure") return run.error ?? "failed";
+  if (run.outcome === "skipped") return run.detail ?? "skipped";
+  return run.descriptor ?? "ok";
+}
+
+function fmtTime(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
+}
+
+/**
+ * Merge the two ledger read streams into one newest-first list. Both
+ * streams are already newest-first; the merge re-sorts by start time
+ * so a goal run and a schedule run interleave correctly.
+ */
+export function mergeLedgerRuns(
+  scheduleRuns: JobRunRecord[],
+  goalRuns: JobRunRecord[],
+): JobRunRecord[] {
+  const merged = [...scheduleRuns, ...goalRuns].map(normalizeJobRunRecord);
+  merged.sort((a, b) => Date.parse(b.started) - Date.parse(a.started));
+  return merged;
+}
+
+/** Apply the home's deep-link filter: a run id is a job id (see the header). */
+export function filterLedgerRuns(
+  runs: JobRunRecord[],
+  scheduleId: string | null | undefined,
+  runId: string | null | undefined,
+): JobRunRecord[] {
+  if (runId) return runs.filter((r) => r.jobId === runId);
+  if (scheduleId) {
+    return runs.filter((r) => r.scheduleId === scheduleId || r.jobId === scheduleId);
+  }
+  return runs;
+}
+
+export interface ScheduleRunLedgerPanelProps {
+  scheduleId?: string | null;
+  runId?: string | null;
+}
+
+const LEDGER_COLUMNS: TableColumn<JobRunRecord>[] = [
+  { key: "jobId", header: "Job", render: (r) => <code>{r.jobId}</code> },
+  { key: "operation", header: "Operation", render: (r) => <>{r.operation}</> },
+  { key: "system", header: "System", render: (r) => <>{r.system}</> },
+  { key: "started", header: "Started", render: (r) => <>{fmtTime(r.started)}</> },
+  {
+    key: "outcome",
+    header: "Outcome",
+    render: (r) => <Badge size="xs" tone={outcomeTone(r.outcome)}>{r.outcome}</Badge>,
+  },
+  { key: "triggeredBy", header: "Triggered by", render: (r) => <>{r.triggeredBy}</> },
+  {
+    key: "trigger",
+    header: "Trigger",
+    render: (r) => (
+      <span title={r.trigger === "unknown" ? "Legacy row — producing path not recorded" : r.trigger}>
+        {r.trigger ?? "unknown"}
+      </span>
+    ),
+  },
+  {
+    key: "scheduleId",
+    header: "Schedule",
+    render: (r) => (
+      <span title={ledgerLinkageTitle(r.scheduleId)}>{ledgerLinkageCell(r.scheduleId)}</span>
+    ),
+  },
+  {
+    key: "asyncJobId",
+    header: "Async job",
+    render: (r) => (
+      <span title={ledgerLinkageTitle(r.asyncJobId)}>{ledgerLinkageCell(r.asyncJobId)}</span>
+    ),
+  },
+  {
+    key: "workflowId",
+    header: "Workflow",
+    render: (r) => (
+      <span title={ledgerLinkageTitle(r.workflowId)}>{ledgerLinkageCell(r.workflowId)}</span>
+    ),
+  },
+  { key: "summary", header: "Summary", render: (r) => <>{runSummary(r)}</> },
+];
+
+export function ScheduleRunLedgerPanel({
+  scheduleId = null,
+  runId = null,
+}: ScheduleRunLedgerPanelProps = {}) {
+  const [runs, setRuns] = useState<JobRunRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [scheduleRuns, goalRuns] = await Promise.all([
+        listScheduleRuns(undefined, 200),
+        listGoalRuns(undefined, 200),
+      ]);
+      setRuns(mergeLedgerRuns(scheduleRuns, goalRuns));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load run ledger");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const visible = filterLedgerRuns(runs, scheduleId, runId);
+  const filterLabel = runId ?? scheduleId;
+
+  return (
+    <div className="schedule-run-ledger">
+      <div className="schedules-toolbar">
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          onClick={() => void refresh()}
+          loading={loading}
+          title="Reload the consolidated run ledger"
+        >
+          ↻ Refresh
+        </Button>
+        {filterLabel && (
+          <>
+            <span className="ui-meta">
+              Showing runs for <code>{filterLabel}</code>
+              {runId ? " (run history for this job)" : ""}
+            </span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => navigateToTab("schedules", "runs")}
+              title="Show every run in the ledger"
+            >
+              Clear filter
+            </Button>
+          </>
+        )}
+      </div>
+
+      {error && (
+        <Notice tone="danger" title="Run ledger could not be loaded">
+          {error}{" "}
+          <Button type="button" variant="secondary" size="sm" onClick={() => void refresh()}>
+            Retry
+          </Button>
+        </Notice>
+      )}
+
+      {loading && runs.length === 0 ? (
+        <Spinner />
+      ) : (
+        <Table
+          columns={LEDGER_COLUMNS}
+          rows={visible}
+          rowKey={(r, i) => `${r.jobId}:${r.started}:${i}`}
+          rowTitle={(r) => `${r.jobId} · ${r.operation} · ${r.started}`}
+          caption="Consolidated run ledger — every run with its schedule, async-job, and workflow linkage"
+          empty={
+            <EmptyState
+              title="No runs in the ledger"
+              description={
+                filterLabel
+                  ? "No run in the ledger links to this id — the filter, not the ledger, is empty."
+                  : "No schedule or goal has recorded a run yet."
+              }
+            />
+          }
+        />
+      )}
+    </div>
+  );
+}

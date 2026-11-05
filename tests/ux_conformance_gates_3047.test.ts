@@ -178,6 +178,10 @@ const CONFORMING_ROUTES: Record<string, string> = {
   workflows: "src/client/WorkflowsHub.tsx",
   payments: "src/client/PaymentsPage.tsx",
   social: "src/client/SocialPostingPanel.tsx",
+  // Issue #3121 S2: schedules renders from the shell (Chat.tsx
+  // TAB_CONTENT → SchedulesHome), which carries the PageShell — it is
+  // conforming now, not a hub-hosted trading route.
+  schedules: "src/client/SchedulesHome.tsx",
   ads: "src/client/chat/tabs/AdsTab.tsx",
   referrals: "src/client/chat/tabs/ReferralsTab.tsx",
   revenue: "src/client/chat/tabs/RevenueTab.tsx",
@@ -196,7 +200,6 @@ const TRADING_ROUTES = [
   "screeners",
   "stock-hub",
   "reports",
-  "schedules",
   "goal-screen",
   "review",
   "track-record",
@@ -239,6 +242,9 @@ const EXPECTED_TAB_CONTENT_KEYS = [
   "workflow-runs",
   "workflows",
   "risk-analysis",
+  // Issue #3121 S2: schedules renders from the shell — its
+  // TAB_CONTENT entry joins the shell-conforming keys.
+  "schedules",
 ];
 
 const EXPECTED_SUB_TABS = [
@@ -247,7 +253,6 @@ const EXPECTED_SUB_TABS = [
   "screeners",
   "stock-hub",
   "reports",
-  "schedules",
   "goal-screen",
   "review",
   "track-record",

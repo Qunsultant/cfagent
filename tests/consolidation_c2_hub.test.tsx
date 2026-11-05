@@ -304,13 +304,18 @@ describe("C2 source pins", () => {
     expect(tradingHub).not.toContain("ScreeningMovedNotice");
     expect(tradingHub).not.toContain("Screening Moved to the Screeners Hub");
     // Issue #2954: the options/scanner/iv-history subtabs render the
-    // Options copy hub now. Issue #2970: reports/schedules render
-    // their panels directly (the hub still hosts them until #2971).
+    // Options copy hub now. Issue #2970: reports renders its panel
+    // directly (the hub still hosts it until #2971). Issue #3121 S2:
+    // schedules left the hub — it renders from the shell (Chat.tsx
+    // TAB_CONTENT → SchedulesHome), never from the hub again.
     expect(tradingHub).toContain('renderOptionsHub()');
     expect(tradingHub).toContain('renderOptionsHub("strategy-scanner")');
     expect(tradingHub).toContain('renderOptionsHub("iv-history")');
     expect(tradingHub).toContain("<ReportsPanel");
-    expect(tradingHub).toContain("<SchedulesPanel");
+    expect(tradingHub).not.toContain("<SchedulesPanel");
+    const chat = readSrc("client/Chat.tsx");
+    expect(chat).toContain('import { SchedulesHome } from "./SchedulesHome";');
+    expect(chat).toContain("schedules: (\n      <SchedulesHome");
   });
 
   it("the hub no longer hosts the own pages (#2971)", () => {

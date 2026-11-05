@@ -51,6 +51,20 @@ describe("Deep-link catalog (issue #2776)", () => {
     const keys = new Set(collectNodeKeys());
     const ids = new Set<string>();
     for (const key of keys) ids.add(key.split(":").pop()!);
+    // Issue #3121 S2: platform-admin sub-item ids are pre-prefixed
+    // (`platform-admin:scheduled-goals`), so their full id is a real
+    // node id even though the catalog key double-prefixes it — the
+    // bare-id fallback in deepLinkForNavNode resolves them. Collect
+    // the full ids too, not just their last segments.
+    for (const section of DEFAULT_LEFT_NAV_CONFIG.sections) {
+      const walkIds = (nodes: Array<{ id: string; subItems?: Array<{ id: string }> }>) => {
+        for (const node of nodes) {
+          ids.add(node.id);
+          if (node.subItems) walkIds(node.subItems);
+        }
+      };
+      walkIds(section.items);
+    }
     // Issue #2972: the planned:* keys are intentionally kept after the
     // Planned menu retired, so old node references still generate the
     // Assets Hub view links. They are legacy, not stale-by-neglect.
@@ -238,7 +252,7 @@ describe("Surface-tab catalog (issue #2776, expanded scope)", () => {
       ["ads", "src/client/chat/tabs/AdsTab.tsx", ["offers", "submit"]],
       ["referrals", "src/client/chat/tabs/ReferralsTab.tsx", ["activity", "community", "links", "share"]],
       ["revenue", "src/client/chat/tabs/RevenueTab.tsx", ["ads", "categories", "metrics", "placements", "schemas"]],
-      ["iaaa-admin", "src/client/IaaaAdminPanel.tsx", ["overview", "members", "api", "mcp", "iaaa", "correlations", "queue"]],
+      ["iaaa-admin", "src/client/IaaaAdminPanel.tsx", ["overview", "members", "api", "mcp", "iaaa", "correlations"]],
       ["risk-analysis", "src/client/options/RiskAnalysisModal.tsx", ["anatomy", "playbook", "scenarios", "ai"]],
     ];
     for (const [surface, file, values] of checks) {

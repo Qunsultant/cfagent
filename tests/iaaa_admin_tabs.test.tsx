@@ -85,11 +85,12 @@ afterEach(async () => {
 });
 
 describe("IAAA admin tabs", () => {
-  it("renders seven tabs and starts on Overview with the v1 content intact", async () => {
+  it("renders six tabs and starts on Overview with the v1 content intact", async () => {
     await renderPanel();
     // #1758 pin update (§7): the Members tab joins the five v1/v2 tabs.
-    // #2173 queue wipe slice: the Queue tab is appended last so existing indices stand.
-    expect(tabLabels()).toEqual(["Overview", "Members", "API", "MCP", "IAAA", "Correlations", "Queue"]);
+    // #3121 S2: the Queue tab moved out — the admin queue is now a
+    // view of the schedules home (`?tab=schedules&view=queue`).
+    expect(tabLabels()).toEqual(["Overview", "Members", "API", "MCP", "IAAA", "Correlations"]);
     expect(container.textContent).toContain("primary");
     expect(container.textContent).toContain("platform-admin (platform)");
     expect(container.textContent).toContain("Completed");
@@ -131,17 +132,11 @@ describe("IAAA admin tabs", () => {
     expect(container.textContent).toContain("UNMAPPED");
   });
 
-  it("#2173: Queue tab mounts the wipe surface (dump fetch is panel-owned)", async () => {
+  it("#3121 S2: no Queue tab — the admin queue is a schedules-home view now", async () => {
     await renderPanel();
-    await act(async () => {
-      tabButtons()[6].click();
-    });
-    // The Queue panel renders its own sections; its dump fetch hits the
-    // tabs harness stub (overview payload), so it reports a dump error
-    // rather than rows — the dedicated panel suite covers the flows.
-    expect(container.textContent).toContain("Queue dump");
-    expect(container.textContent).toContain("Cancel all schedules");
-    expect(container.textContent).toContain("Recreate Track 1");
+    expect(tabLabels()).not.toContain("Queue");
+    expect(container.textContent).not.toContain("Queue dump");
+    expect(container.textContent).not.toContain("Cancel all schedules");
   });
 
   it("#2173: overview with adminCounts renders the counts section and per-tenant breakdown", async () => {

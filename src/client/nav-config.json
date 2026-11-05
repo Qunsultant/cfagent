@@ -482,12 +482,11 @@
     },
     {
       "id": "schedules",
-      "retain": true,
       "navGroup": "schedules",
       "crumb": "Schedules",
       "category": "Platform",
       "icon": "Screeners",
-      "description": "The one screening hub: stock + options screening, the strategy scanner, IV history, goal screens, reports, schedules, proposal review, and the recommendation track record"
+      "description": "The one scheduling surface — schedules, goal schedules, the consolidated run ledger, and the admin queue"
     },
     {
       "id": "screeners",
@@ -1193,6 +1192,14 @@
       "tab": "options",
       "view": "scheduled-screening"
     },
+    "platform-admin:scheduled-goals": {
+      "tab": "schedules",
+      "view": "goals"
+    },
+    "platform-admin:jobs": {
+      "tab": "schedules",
+      "view": "runs"
+    },
     "options-screener:iv-history": {
       "tab": "options",
       "view": "iv-history"
@@ -1404,8 +1411,7 @@
         "api",
         "mcp",
         "iaaa",
-        "correlations",
-        "queue"
+        "correlations"
       ]
     },
     {

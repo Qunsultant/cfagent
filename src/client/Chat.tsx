@@ -26,7 +26,9 @@ import { BillingServicingPanel } from "./BillingServicingPanel";
 import { AdBannerConfig, applyServerAdsConfig, getStoredAdBannerConfig, saveStoredAdBannerConfig, type ServerAdsConfig } from "./adBannerConfig";
 import { PartnerDealsModal } from "./components/PartnerDealsModal";
 import { NavigationMenu, NavTabId, NavLayoutMode, NavIcons, DEFAULT_VISIBLE_NAV_TABS } from "./components/NavigationMenu";
-import { navigateToTab, readTabFromLocation, subscribeToRouteChanges } from "./router";
+import { navigateToTab, readTabFromLocation, replaceToTab, subscribeToRouteChanges } from "./router";
+import { legacySchedulesRedirect } from "./schedulesHome";
+import { SchedulesHome } from "./SchedulesHome";
 import { getCrumb } from "./routes";
 import { StockSearchBar } from "./components/StockSearchBar";
 import { MarketTickerTape } from "./components/MarketTickerTape";
@@ -77,8 +79,21 @@ export function Chat({ user }: { user: User }) {
   });
   // S1 (#1808): the URL is the source of truth for navigation. Tab state
   // follows the router: the initial ?tab=, back/forward, and every
-  // navigation through handleSelectTab below.
-  useEffect(() => subscribeToRouteChanges(() => { setTab(readTabFromLocation()); }), []);
+  // navigation through handleSelectTab below. Issue #3121 S2: a retired
+  // schedules address (duplicate or admin outpost) is replaced by the
+  // consolidated home on arrival and on every route change, so the old
+  // address never renders a surface — see schedulesHome.ts.
+  useEffect(() => {
+    const applyRoute = () => {
+      setTab(readTabFromLocation());
+      if (typeof window !== "undefined") {
+        const redirect = legacySchedulesRedirect(window.location.search);
+        if (redirect) replaceToTab(redirect.tab, redirect.view, redirect.params);
+      }
+    };
+    applyRoute();
+    return subscribeToRouteChanges(applyRoute);
+  }, []);
   // Accepts values and updater functions, like the state setter it
   // replaces (the trading view passes it as setTab): updaters resolve
   // against the current URL tab, which mirrors tab state.
@@ -932,8 +947,10 @@ export function Chat({ user }: { user: User }) {
   // tests/route_content_switch_1804.test.ts. Trading ids have no entry
   // here — they render through the retained ETradeTradingHub below,
   // hidden for non-trading tabs via isTradingTab (table-backed retain
-  // flags, see routes.ts). docs previously rendered blank; its existing
-  // panel is wired here (no props).
+  // flags, see routes.ts) — with one exception: "schedules" is
+  // de-hubbed (#3121 S2) and renders its home here, not through the
+  // hub. docs previously rendered blank; its existing panel is wired
+  // here (no props).
   const TAB_CONTENT: Record<string, ReactNode> = {
     agents: (
       <ErrorBoundary label="Agents">
@@ -1385,6 +1402,13 @@ export function Chat({ user }: { user: User }) {
         onUpdateAdBannerConfig={handleUpdateAdBannerConfig}
         onOpenPartnerDeals={() => setShowPartnerDealsModal(true)}
       />
+    ),
+    // Issue #3121 S2: the consolidated schedules home — the ONE
+    // schedules surface. De-hubbed: it renders directly from the shell,
+    // not through the retained ETradeTradingHub (a broker-neutral home
+    // cannot live inside a broker hub, #3216).
+    schedules: (
+      <SchedulesHome userLogin={user.login} />
     ),
     products: (
       <ErrorBoundary label="Products">
