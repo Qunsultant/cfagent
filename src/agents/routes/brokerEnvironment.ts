@@ -74,6 +74,33 @@ export function resolveBrokerEnvironmentFromSettings(
 }
 
 /**
+ * Issue #3382 — the mode a TRADE is authorised under, for both brokers.
+ *
+ * Reads and actions do not share a default, and that asymmetry is the point:
+ * the deployment's environment is right for READS (a tenant on the live worker
+ * sees the live account), but it is wrong for an ACTION. A tenant who has never
+ * chosen anything previews, executes and signs in on PAPER; live is an explicit
+ * act that persists a selection. Without this, a first order on a live worker is
+ * a live order nobody asked for.
+ *
+ * Only the trade routes use this: brokerOrders (preview + execute) and
+ * brokerConnect (which credential side is verified and stored). Read routes keep
+ * resolveBrokerEnvironmentFromSettings so the data plane does not move.
+ */
+export function resolveTradeEnvironmentFromSettings(
+  readSettingRaw: ((key: string) => string | null) | undefined,
+  workerEnv: Partial<Env>,
+): BrokerEnvironment {
+  const stored =
+    typeof readSettingRaw === "function"
+      ? readSettingRaw(BROKER_ENVIRONMENT_SETTING_KEY)
+      : null;
+  if (isBrokerEnvironment(stored)) return stored;
+  void workerEnv;
+  return "TEST";
+}
+
+/**
  * Settings access the switch handler needs. The writer is optional
  * because older test-constructed contexts carry only the reader; the
  * switch handler fails closed (500) without it rather than returning
