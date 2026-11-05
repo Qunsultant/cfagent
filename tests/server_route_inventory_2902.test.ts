@@ -59,6 +59,25 @@
  *   EXPECTED list is unchanged (verified identical by the scanner before
  *   and after).
  *
+ * Slice 6 decisions recorded here:
+ * - Messaging & social live in src/server/routes/messaging.ts as three
+ *   handlers in dispatch order: handleMessagingSagaRoutes
+ *   (/api/saga/*, the three NLQ webhook spellings, /api/qa/investigate,
+ *   /api/memory/search), handleMessagingSocialRoutes (/api/social/*),
+ *   handleMessagingSlackRoutes (/slack/*). handleNlqWebhookRequest and
+ *   NLQ_WEBHOOK_SERVICE_LOGIN move with this slice (contract §2.5).
+ *   The saga handler takes the handleFetch ingress `throttle`, which
+ *   the NLQ branch passes to handleNlqWebhookRequest.
+ * - The AuthLogin/CoreHealth delegations sat between the NLQ and QA
+ *   branches inside the moved saga region, so they now run nested
+ *   inside handleMessagingSagaRoutes, in the same position; they no
+ *   longer appear in server.ts's own delegation list below, and the
+ *   scanner's scanFunction now follows such nested route-module
+ *   delegations (with a seen-set against cycles/duplicates) so the
+ *   148-descriptor list is unchanged. Delegations to handlers outside
+ *   src/server/routes/* (e.g. the saga agent-route handlers) are
+ *   implementations, not route branches, and are ignored.
+ *
  * Slice 5 decisions recorded here:
  * - Trading & market live in src/server/routes/trading.ts as four
  *   handlers in dispatch order: handleTradingScheduleRoutes
@@ -160,11 +179,46 @@ function conditionTokens(cond: string): string[] {
   return toks.map((t) => t.text);
 }
 
-function scanFunction(lines: string[], indent: number): string[] {
+// Matches a route-handler delegation call. Hoisted to module scope so
+// scanFunction can follow nested delegations too (Slice 6).
+const delegationRe = /(?:await )?(handle\w+Routes)\(request, env, url, path(?:, [^)]*)?\)/;
+
+function scanFunction(
+  lines: string[],
+  indent: number,
+  modules?: Record<string, string>,
+  seen?: Set<string>,
+): string[] {
   const pad = " ".repeat(indent);
   const out: string[] = [];
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
+    // Nested delegation (Slice 6): a handler may itself delegate to
+    // another route-module handler at its own top level —
+    // handleMessagingSagaRoutes calls handleAuthLoginRoutes and
+    // handleCoreHealthRoutes between the NLQ and QA branches, exactly
+    // where handleFetch used to call them. Expand it in place so the
+    // inventory stays 1:1. Only top-level (indent-4) statements are
+    // followed: deeper calls are sub-handler implementations (e.g. the
+    // saga agent-route handlers), not route branches, and a target
+    // outside src/server/routes/* is ignored rather than unresolved.
+    // `seen` guards against cycles and duplicate expansion.
+    if (modules && seen && line.startsWith(pad) && !line.startsWith(pad + " ")) {
+      const del = line.match(delegationRe);
+      if (del) {
+        const func = del[1];
+        if (!seen.has(func)) {
+          for (const src of Object.values(modules)) {
+            if (src.includes(`function ${func}(`)) {
+              seen.add(func);
+              out.push(...scanFunction(handlerBody(src, func), 4, modules, seen));
+              break;
+            }
+          }
+        }
+        continue;
+      }
+    }
     if (line.startsWith(pad + "return ") && line.includes("fetchStaticAsset")) {
       out.push("FALLBACK static");
       continue;
@@ -229,8 +283,8 @@ function reconstruct(): string[] {
       modules[f.replace(/\.ts$/, "")] = readFileSync(`${routesDir}/${f}`, "utf8");
     }
   }
-  const delegationRe = /(?:await )?(handle\w+Routes)\(request, env, url, path(?:, [^)]*)?\)/;
   const result: string[] = [];
+  const seen = new Set<string>();
   let preludeApiSeen = false;
   for (let i = 0; i < regionLines.length; i++) {
     const line = regionLines[i];
@@ -240,7 +294,8 @@ function reconstruct(): string[] {
       let found = false;
       for (const src of Object.values(modules)) {
         if (src.includes(`function ${func}(`)) {
-          result.push(...scanFunction(handlerBody(src, func), 4));
+          seen.add(func);
+          result.push(...scanFunction(handlerBody(src, func), 4, modules, seen));
           found = true;
           break;
         }
@@ -451,7 +506,7 @@ describe("server route inventory pin (#2902)", () => {
     expect(reconstruct()).toEqual(EXPECTED_ROUTES);
   });
 
-  it("delegates Core + Auth + Privacy + Trading branches in handleFetch in the original order", () => {
+  it("delegates Core + Privacy + Messaging + Trading branches in handleFetch in the original order", () => {
     const serverSrc = readFileSync("src/server.ts", "utf8");
     const calls = [...serverSrc.matchAll(/(?:await )?(handle\w+Routes)\(request, env, url, path/g)].map((m) => m[1]);
     // Slice 2 landed the three Core delegations; Slice 3 (#2902) adds the
@@ -460,20 +515,26 @@ describe("server route inventory pin (#2902)", () => {
     // their original dispatch positions. Slice 5 (#2902) adds the four
     // Trading delegations in their original dispatch positions; the
     // WebSocket upgrade dispatch stays inline between the schedules
-    // forward and the quotes branches (it is not a delegation).
+    // forward and the quotes branches (it is not a delegation). Slice 6
+    // (#2902) adds the three Messaging delegations in their original
+    // dispatch positions. The AuthLogin/CoreHealth delegations sat
+    // between the NLQ and QA branches inside the moved saga region, so
+    // they now run nested inside handleMessagingSagaRoutes and no longer
+    // appear in this server.ts list; the scanner follows them there.
     // Later slices extend this list in dispatch order.
     expect(calls).toEqual([
       "handleCoreEarlyRoutes",
       "handlePrivacyRoutes",
-      "handleAuthLoginRoutes",
-      "handleCoreHealthRoutes",
+      "handleMessagingSagaRoutes",
       "handleTradingScheduleRoutes",
+      "handleMessagingSocialRoutes",
       "handleAuthMeRoutes",
       "handlePrivacyChainsRoutes",
       "handlePrivacyReportsRoutes",
       "handleAuthIaaaRoutes",
       "handleTradingOmniRoutes",
       "handleTradingQuotesRoutes",
+      "handleMessagingSlackRoutes",
       "handleTradingApproveRoutes",
       "handleCoreLateRoutes",
     ]);
@@ -620,6 +681,47 @@ describe("core dispatch smoke (#2902 Slice 2)", () => {
       ["GET", "/api/clear", 401],
       ["GET", "/api/reset", 401],
       ["GET", "/api/options/flows/live", 401],
+    ];
+    for (const [method, p, status] of expected) {
+      expect((await fetchWorker(p, method)).status).toBe(status);
+    }
+  });
+
+  it("moved Slice 6 routes answer exactly as before the move without a session", async () => {
+    // Statuses measured on clean main 08159218 before the move. The
+    // session-gated families 401 via requireAuth; the NLQ webhooks
+    // 503 on the unconfigured INBOUND_NLQ_WEBHOOK_SECRET (throttle
+    // passes, secret check fires before signature verification); the
+    // Slack webhook routes 503 on the unconfigured SLACK_SIGNING_SECRET
+    // (loud 503 per #147, never a silent pass-through); /slack/install
+    // and /slack/oauth_callback 500 in this harness. A dropped route
+    // would 401 at the /api/* fallthrough (or 404 at the Core late
+    // tail for the non-/api/ paths), so these values pin the dispatch,
+    // not just the auth.
+    const expected: Array<[string, string, number]> = [
+      ["GET", "/api/saga/journey-gates", 401],
+      ["GET", "/api/saga/journey-decision", 401],
+      ["GET", "/api/saga/start", 401],
+      ["GET", "/api/saga/abc/status", 401],
+      ["POST", "/nlq/webhook", 503],
+      ["POST", "/api/trading/nlq/webhook", 503],
+      ["POST", "/api/nlq/webhook", 503],
+      ["POST", "/api/qa/investigate", 401],
+      ["POST", "/api/memory/search", 401],
+      ["GET", "/api/social/brief", 401],
+      ["POST", "/api/social/brief", 401],
+      ["GET", "/api/social/approval", 401],
+      ["POST", "/api/social/approval", 401],
+      ["GET", "/api/social/approvals", 401],
+      ["GET", "/api/social/posts", 401],
+      ["GET", "/api/social/token-health", 401],
+      ["POST", "/slack/commands", 503],
+      ["POST", "/slack/slash", 503],
+      ["POST", "/slack", 503],
+      ["POST", "/slack/events", 503],
+      ["POST", "/slack/interactions", 503],
+      ["GET", "/slack/install", 500],
+      ["GET", "/slack/oauth_callback", 500],
     ];
     for (const [method, p, status] of expected) {
       expect((await fetchWorker(p, method)).status).toBe(status);

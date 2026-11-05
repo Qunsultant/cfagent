@@ -835,8 +835,12 @@ describe("state pins — round 1 (#2339)", () => {
 // ---------------------------------------------------------------------------
 
 describe("routing pins — round 1 (#2339)", () => {
-  it("chat reaches the orchestrator through routeAgentRequest in server.ts", () => {
-    expect(read("src/server.ts")).toContain("routeAgentRequest(request, env");
+  it("chat reaches the orchestrator through routeAgentRequest in the server entry", () => {
+    // Slice 6 of Qunsultant/cfagent#2902 (2026-11-05): the chat forward
+    // moved from src/server.ts to src/server/routes/messaging.ts (it sat
+    // inside the moved saga region); the entry surface is server.ts +
+    // routes/*.ts, so the pin reads both files.
+    expect(read("src/server.ts") + read("src/server/routes/messaging.ts")).toContain("routeAgentRequest(request, env");
   });
 
   it("the OptionsScannerMCP surface is addressed from server.ts by its binding", () => {

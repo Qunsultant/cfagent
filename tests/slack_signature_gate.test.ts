@@ -698,8 +698,12 @@ describe("SlackAgent.onRequest — mandatory gate (#147)", () => {
 // ===========================================================================
 
 describe("source pins (#147)", () => {
-  it("server.ts applies the mandatory gate on all three Slack routes", () => {
-    const server = src("server.ts");
+  it("the server entry applies the mandatory gate on all three Slack routes", () => {
+    // Slice 6 of Qunsultant/cfagent#2902 (2026-11-05): the Slack routes
+    // moved from src/server.ts to src/server/routes/messaging.ts; the
+    // entry surface is server.ts + routes/*.ts, so the pin reads both
+    // files.
+    const server = src("server.ts") + src("server/routes/messaging.ts");
     expect(server).not.toContain("if (env.SLACK_SIGNING_SECRET)");
     expect(server.match(/gateSlackRequest\(request, env\.SLACK_SIGNING_SECRET\)/g)).toHaveLength(3);
   });
