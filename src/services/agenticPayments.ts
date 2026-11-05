@@ -71,7 +71,12 @@ import {
   type MeteredGateOptions,
 } from "./meteredPaymentGate";
 import type { StoreTier } from "../data/commercialPorts";
-import { consumeStoreKey, createStoreKv, type DoNamespaceLike } from "../security/durableKv";
+import {
+  createBucketPorts,
+  isBucketPortsEnabled,
+} from "../data/createBucketPorts";
+import type { BucketFamilyPorts } from "../data/bucketPorts";
+import { consumeStoreKey, createStoreKv, type DoNamespaceLike } from "../data/durableKv";
 
 // Fallback replay guard used only when no SessionStore namespace is bound.
 const consumedTxHashes = new Set<string>();
@@ -370,17 +375,42 @@ export class ETradeAgenticPaymentService {
     });
   }
 
+  /**
+   * Issue #2436 (#1976 step 5e): the residual bucket family
+   * composition for this service's claims, when
+   * BUCKET_PORTS_ENABLED is on; null when off (the direct
+   * funnel composition below serves, unchanged).
+   */
+  private bucketPorts(): BucketFamilyPorts | null {
+    return this.env && isBucketPortsEnabled(this.env)
+      ? createBucketPorts(this.env)
+      : null;
+  }
+
   private async consumeTxHash(txHash: string): Promise<boolean> {
     const key = `x402tx:${txHash.toLowerCase()}`;
     // Issue #329 P3: this used to be a KV `get`-then-`put`, which two colos
     // could both win. The DO serialises the check and the claim.
-    const outcome = await consumeStoreKey({
-      namespace: this.env?.SESSION_STORE as unknown as DoNamespaceLike | undefined,
-      namespaceName: "payments",
-      key,
-      value: new Date().toISOString(),
-      ttlSeconds: 60 * 60 * 24 * 365,
-    });
+    // Issue #2436: the claim is the named ClaimPort's consume
+    // contract (Q-6) — flag-on composes through
+    // src/data/createBucketPorts.ts; the three outcomes stay
+    // distinct below: "duplicate" is a replay, "unavailable"
+    // is NOT fresh (the isolate-local fallback decides).
+    const ports = this.bucketPorts();
+    const outcome = ports
+      ? await ports.claims.consume(
+          "payments",
+          key,
+          new Date().toISOString(),
+          60 * 60 * 24 * 365
+        )
+      : await consumeStoreKey({
+          namespace: this.env?.SESSION_STORE as unknown as DoNamespaceLike | undefined,
+          namespaceName: "payments",
+          key,
+          value: new Date().toISOString(),
+          ttlSeconds: 60 * 60 * 24 * 365,
+        });
 
     if (outcome === "consumed") return true;
     if (outcome === "duplicate") return false;
@@ -394,10 +424,18 @@ export class ETradeAgenticPaymentService {
 
   private async releaseTxHash(txHash: string): Promise<void> {
     const key = `x402tx:${txHash.toLowerCase()}`;
-    await createStoreKv({
-      namespace: this.env?.SESSION_STORE as unknown as DoNamespaceLike | undefined,
-      namespaceName: "payments",
-    }).delete(key);
+    // Issue #2436: flag-on releases through the ClaimPort's
+    // release (the claim's named inverse); flag-off is the
+    // direct funnel delete below, unchanged.
+    const ports = this.bucketPorts();
+    if (ports) {
+      await ports.claims.release("payments", key);
+    } else {
+      await createStoreKv({
+        namespace: this.env?.SESSION_STORE as unknown as DoNamespaceLike | undefined,
+        namespaceName: "payments",
+      }).delete(key);
+    }
     consumedTxHashes.delete(key);
   }
 
