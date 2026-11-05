@@ -878,7 +878,7 @@ export const MESH_TOOL_FAMILIES: MeshToolFamilyEntry[] = [
   {
     id: "ai-search-service",
     name: "AI Search service (REST path)",
-    source: "src/services/aiSearch.ts (ETradeAISearchService)",
+    source: "src/services/aiSearch.ts (AiSearchInstanceService)",
     status: "live",
     commands: [],
     notes:
@@ -1663,7 +1663,7 @@ export const MESH_CAPABILITY_DOORS: MeshCapabilityDoorEntry[] = [
     status: "not-exposed",
     operations: [],
     reason:
-      "Search HTTP routes drive the MAS/service paths (POST /search/mas, ETradeAISearchService); the class is reached via the catalog command (chat + MCP) and A2A.",
+      "Search HTTP routes drive the MAS/service paths (POST /search/mas, AiSearchInstanceService); the class is reached via the catalog command (chat + MCP) and A2A.",
   },
   {
     className: "AiSearchAgent",
