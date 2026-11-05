@@ -19,7 +19,7 @@
  * the same answer from the same door. SECOND is the instance's
  * public MCP endpoint, consumed through the repo's RemoteMcpClient
  * exactly as any MCP client would. LAST RESORT is the standalone
- * REST API, via ETradeAISearchService reused exactly as-is. Every
+ * REST API, via AiSearchInstanceService reused exactly as-is. Every
  * answer is labelled with the path that served it, and degradation
  * is honest: an unconfigured agent and a degraded REST answer are
  * reported as degraded, never dressed up as live results.
