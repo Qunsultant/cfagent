@@ -342,3 +342,77 @@ describe("dedicated paid-submission route (#2015)", () => {
     expect(anon?.status).toBe(401);
   });
 });
+
+describe("free-run allowance routes (#3315)", () => {
+  it("operator reads the seeded allowances; non-operators are refused", async () => {
+    const { ctx } = await setup();
+    const res = await call(ctx, "GET", "/payments/agentic/commercial/free-run-allowance", "op1");
+    expect(res?.status).toBe(200);
+    // The GET ensure applies migration 0044, so a fresh store
+    // reads the seeded allowances — the only place the decided
+    // value lives (#3315: no code constant).
+    expect(await res?.json()).toEqual({
+      allowances: [
+        { family: "stock", runs: 10 },
+        { family: "goal", runs: 10 },
+        { family: "options", runs: 10 },
+        { family: "strategy", runs: 10 },
+      ],
+    });
+    const userRead = await call(ctx, "GET", "/payments/agentic/commercial/free-run-allowance", "u1");
+    expect(userRead?.status).toBe(403);
+    const anon = await call(ctx, "GET", "/payments/agentic/commercial/free-run-allowance", null);
+    expect(anon?.status).toBe(401);
+  });
+
+  it("operator sets one family, audited; invalid family or runs are 400; non-operators are refused", async () => {
+    const { ctx } = await setup();
+    const set = await call(ctx, "POST", "/payments/agentic/commercial/free-run-allowance", "op1", {
+      family: "goal",
+      runs: 25,
+    });
+    expect(set?.status).toBe(200);
+    expect(await set?.json()).toEqual({ family: "goal", runs: 25 });
+    const audit = (ctx.audit as any).mock.calls.find(
+      ([t]: [string]) => t === "commercial.free_run_allowance.set",
+    );
+    expect(audit).toBeDefined();
+    expect(audit[2]).toMatchObject({ family: "goal", runs: 25, operator: "op1" });
+    const reread = await call(ctx, "GET", "/payments/agentic/commercial/free-run-allowance", "op1");
+    const body = (await reread?.json()) as { allowances: Array<{ family: string; runs: number | null }> };
+    expect(body.allowances.find((row) => row.family === "goal")).toEqual({ family: "goal", runs: 25 });
+    expect(body.allowances.find((row) => row.family === "stock")).toEqual({ family: "stock", runs: 10 });
+    const forbidden = await call(ctx, "POST", "/payments/agentic/commercial/free-run-allowance", "u1", {
+      family: "goal",
+      runs: 25,
+    });
+    expect(forbidden?.status).toBe(403);
+    const badFamily = await call(ctx, "POST", "/payments/agentic/commercial/free-run-allowance", "op1", {
+      family: "nope",
+      runs: 5,
+    });
+    expect(badFamily?.status).toBe(400);
+    const badRuns = await call(ctx, "POST", "/payments/agentic/commercial/free-run-allowance", "op1", {
+      family: "goal",
+      runs: -1,
+    });
+    expect(badRuns?.status).toBe(400);
+    const fractional = await call(ctx, "POST", "/payments/agentic/commercial/free-run-allowance", "op1", {
+      family: "goal",
+      runs: 2.5,
+    });
+    expect(fractional?.status).toBe(400);
+  });
+
+  it("a zero allowance disables free runs for that family", async () => {
+    const { ctx } = await setup();
+    const set = await call(ctx, "POST", "/payments/agentic/commercial/free-run-allowance", "op1", {
+      family: "stock",
+      runs: 0,
+    });
+    expect(set?.status).toBe(200);
+    const reread = await call(ctx, "GET", "/payments/agentic/commercial/free-run-allowance", "op1");
+    const body = (await reread?.json()) as { allowances: Array<{ family: string; runs: number | null }> };
+    expect(body.allowances.find((row) => row.family === "stock")).toEqual({ family: "stock", runs: 0 });
+  });
+});

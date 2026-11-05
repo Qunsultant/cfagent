@@ -26,6 +26,12 @@ function tableTargets(sql: string): string[] {
   for (const re of [
     /CREATE TABLE IF NOT EXISTS (\w+)/g,
     /ALTER TABLE (\w+)/g,
+    // Data migrations (#3315): a seed-only migration touches its
+    // table through INSERT, not DDL. The table-existence check
+    // below is the point — an INSERT into a table the drizzle
+    // schema does not know is still caught — so INSERT targets
+    // count exactly like DDL targets.
+    /INSERT (?:OR (?:IGNORE|REPLACE) )?INTO (\w+)/g,
   ]) {
     for (const m of sql.matchAll(re)) targets.add(m[1]);
   }

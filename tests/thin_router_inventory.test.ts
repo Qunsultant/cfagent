@@ -530,6 +530,8 @@ const EXPECTED_INVENTORY = [
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/identity\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/account\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/account/credits\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/free-run-allowance\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/free-run-allowance\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/tenant-settings\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/tenant-settings\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/submit\")",
