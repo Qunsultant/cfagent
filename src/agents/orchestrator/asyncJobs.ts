@@ -20,7 +20,7 @@
 
 import type { AgentContext, ScheduleOptions } from "agents";
 import type { DatabaseORM } from "../../orm";
-import { TradingPlatformRegistry } from "../../trading/registry";
+import { TradingPlatformRegistry } from "../../trading";
 import { resolveTenantBroker } from "../../services/tenantProviders";
 import type {
   AgentName,
@@ -1772,3 +1772,4 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
     }
   }
 }
+
