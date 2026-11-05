@@ -58,6 +58,11 @@ export type BrokerOperation =
   // none in this build, and the surface must say so rather than render
   // another broker's risk numbers.
   | "portfolioRisk"
+  // Issue #3295: saved strategy profiles and scan history. The scan ENGINE is
+  // broker-neutral (it runs on OptionChainSource, #3272), but the #28/#27
+  // stores hold E*TRADE rows, so the scanner surface has no neutral backend
+  // yet. Declared rather than silently routed to E*TRADE.
+  | "optionsScanner"
   | "orderPreview"
   | "orderPlace"
   | "marketScreening";
@@ -107,6 +112,7 @@ export const BROKER_CATALOG = {
       orderPreview: true,
       orderPlace: true,
       marketScreening: true,
+      optionsScanner: true,
     },
     statusVocabulary: {
       protocol: "etrade_oauth_rest",
@@ -134,6 +140,7 @@ export const BROKER_CATALOG = {
       orderPlace: true,
       // Alpaca has no screener API; screening stays provider-side (#2144).
       marketScreening: false,
+      optionsScanner: false,
     },
     statusVocabulary: {
       protocol: "alpaca_rest_v2",
