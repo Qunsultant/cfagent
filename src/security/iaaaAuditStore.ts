@@ -64,9 +64,30 @@
  * with NO expiry — audit evidence must outlive any one session.
  * The single log key cannot collide with session keys (bare
  * UUIDs) or binding keys ("iaaa-binding:").
+ *
+ * #1976 step 5d (#2435): the AuditStore contract and the key/cap
+ * constants below are carried as the AuditLog family's port in
+ * src/data/auditLogPorts.ts (this module re-exports them, so
+ * every existing import keeps working). createWiredAuditStore
+ * delegates to the family's composition root
+ * (src/data/createAuditPorts.ts) when AUDIT_PORTS_ENABLED is on
+ * (#1169 semantics; absence = off; not in wrangler); with the
+ * flag off it returns createAtomicAuditStore exactly as before.
+ * Both compositions run against the SAME Durable Object and
+ * table — the flag switches the serving code path only.
  */
 
 import type { Env } from "../types";
+import { createAuditPorts } from "../data/createAuditPorts";
+import {
+  IAAA_AUDIT_ARCHIVE_KEY_PREFIX,
+  IAAA_AUDIT_DEFAULT_LIVE_MAX,
+  IAAA_AUDIT_DEFAULT_MAX_ARCHIVE_SEGMENTS,
+  IAAA_AUDIT_DEFAULT_SEGMENT_SIZE,
+  IAAA_AUDIT_KEY_PREFIX,
+  IAAA_AUDIT_LOG_KEY,
+  isAuditPortsEnabled,
+} from "../data/auditLogPorts";
 import type {
   AuditResult,
   AuditStore,
@@ -80,19 +101,19 @@ import {
   type DoNamespaceLike,
 } from "./durableKv";
 
-/** Prefix for every IAAA audit key in the SessionStore DO. */
-export const IAAA_AUDIT_KEY_PREFIX = "iaaa-audit:";
-
-/** The live log key holding the JSON array of newest audit events. */
-export const IAAA_AUDIT_LOG_KEY = `${IAAA_AUDIT_KEY_PREFIX}events`;
-
-/** Prefix for rotated archive segment keys (`iaaa-audit:archive:NNNNNN`). */
-export const IAAA_AUDIT_ARCHIVE_KEY_PREFIX = `${IAAA_AUDIT_KEY_PREFIX}archive:`;
-
-/** Default bound: live key size, segment size, archive segment count. */
-export const IAAA_AUDIT_DEFAULT_LIVE_MAX = 2000;
-export const IAAA_AUDIT_DEFAULT_SEGMENT_SIZE = 2000;
-export const IAAA_AUDIT_DEFAULT_MAX_ARCHIVE_SEGMENTS = 10;
+/**
+ * The audit key/cap constants are defined with the AuditLog
+ * port (src/data/auditLogPorts.ts, #2435) and re-exported here
+ * under their long-standing names.
+ */
+export {
+  IAAA_AUDIT_ARCHIVE_KEY_PREFIX,
+  IAAA_AUDIT_DEFAULT_LIVE_MAX,
+  IAAA_AUDIT_DEFAULT_MAX_ARCHIVE_SEGMENTS,
+  IAAA_AUDIT_DEFAULT_SEGMENT_SIZE,
+  IAAA_AUDIT_KEY_PREFIX,
+  IAAA_AUDIT_LOG_KEY,
+};
 
 export interface AtomicAuditStoreOptions {
   liveMax?: number;
@@ -123,8 +144,13 @@ async function readLog(kv: KvLike): Promise<IaaaAuditEvent[]> {
 
 /**
  * Legacy append-only store (see the header: retained, NOT
- * production wiring). Superseded by createAtomicAuditStore in
- * this file.
+ * production wiring).
+ *
+ * @deprecated superseded by createAtomicAuditStore and the
+ * AuditLog port (src/data/auditLogPorts.ts, composed by
+ * src/data/createAuditPorts.ts). Retained only for reads of
+ * logs written before #1760 and for Kv-backed tests; do not
+ * wire it into a live write path.
  */
 export function createKvAuditStore(kv: KvLike): AuditStore {
   return {
@@ -256,8 +282,18 @@ export function createAtomicAuditStore(
  * (AUDIT_WRITE_FAILED) instead of vanishing silently, and list()
  * reads empty — the pre-#1760 Kv wiring silently dropped writes
  * in that case, which is exactly the failure mode this slice ends.
+ *
+ * #1976 step 5d (#2435): when AUDIT_PORTS_ENABLED is on, this
+ * factory delegates to the AuditLog family's composition root
+ * (src/data/createAuditPorts.ts) — same SessionStore DO, same
+ * audit-append op, same stored bytes; the flag switches the
+ * serving code path only. Flag off (the default) returns
+ * createAtomicAuditStore exactly as before.
  */
 export function createWiredAuditStore(env: Env): AuditStore {
+  if (isAuditPortsEnabled(env)) {
+    return createAuditPorts(env);
+  }
   return createAtomicAuditStore(
     env.SESSION_STORE as unknown as DoNamespaceLike | undefined,
   );
