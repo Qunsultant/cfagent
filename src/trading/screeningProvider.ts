@@ -96,7 +96,6 @@ export interface ScreeningProviderDescriptor {
 }
 
 export const STOCK_SCREENING_PROVIDER_ID = "etrade-yahoo-stocks";
-export const NEUTRAL_STOCK_SCREENING_PROVIDER_ID = "broker-neutral-stocks";
 export const OPTIONS_SCREENING_PROVIDER_ID = "dynamic-options";
 
 const STOCK_PROVIDER_FILTERS: readonly ScreeningFilter[] = [
@@ -128,27 +127,6 @@ export const SCREENING_PROVIDER_DESCRIPTORS: readonly ScreeningProviderDescripto
           label: "Yahoo Finance Engine (Market Data API)",
           kind: "market-data-api",
           endpoint: "/api/market-data/screen",
-          filters: STOCK_PROVIDER_FILTERS,
-        },
-      ],
-    },
-  },
-  {
-    // Issue #3272 S2: the same screening math over the SELECTED broker quotes,
-    // so a tenant on a broker without a screener API can still screen. The
-    // universe is explicit; discovery stays on the provider endpoints above.
-    id: NEUTRAL_STOCK_SCREENING_PROVIDER_ID,
-    label: "Selected broker quotes (neutral stock screen)",
-    kind: "broker-api",
-    assetClasses: ["stocks"],
-    routes: { stocks: "/api/broker/screen" },
-    clientEndpoints: {
-      stocks: [
-        {
-          id: "selected-broker",
-          label: "Selected broker quotes (explicit universe)",
-          kind: "broker-api",
-          endpoint: "/api/broker/screen",
           filters: STOCK_PROVIDER_FILTERS,
         },
       ],
