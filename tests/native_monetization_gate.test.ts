@@ -17,6 +17,8 @@ import { StripeCheckoutAdapter, type StripeCheckoutClient } from "../src/service
 import { X402CheckoutAdapter } from "../src/services/x402CheckoutAdapter";
 import { InMemoryCheckoutAdapter } from "../src/services/inMemoryCheckoutAdapter";
 import { InMemoryPriceCatalogueAdapter } from "../src/data/inMemoryPriceCatalogueAdapter";
+import { InMemoryFreeRunCounterAdapter } from "../src/data/inMemoryFreeRunCounterAdapter";
+import type { PriceFamily } from "../src/data/priceCataloguePorts";
 import type { CheckoutPorts } from "../src/services/checkoutPorts";
 import {
   extractCheckoutId,
@@ -327,5 +329,149 @@ describe("flow + native gate + extractCheckoutId", () => {
     expect(extractCheckoutId({ checkoutUrl: "https://checkout.example/session/run-1" })).toBeUndefined();
     expect(extractCheckoutId({ data: { id: "chk-9" } })).toBe("chk-9");
     expect(extractCheckoutId({ id: "https://checkout.example/only-url" })).toBeUndefined();
+  });
+});
+
+describe("native gate: free-run counter (#3305)", () => {
+  const NOV = Date.UTC(2026, 10, 15, 12, 0, 0);
+  const DEC = Date.UTC(2026, 11, 1, 0, 0, 0);
+
+  function freeGate(opts: { allowances?: Partial<Record<PriceFamily, number>>; approved?: boolean } = {}) {
+    const { client, creates } = stripeClient(() => goalEvidence());
+    const ports: CheckoutPorts = { card: new StripeCheckoutAdapter(client), x402: null };
+    const counter = new InMemoryFreeRunCounterAdapter(opts.allowances);
+    const gate = new NativeMonetizationGate({
+      monetizationEnabled: true,
+      priceCatalogue: new InMemoryPriceCatalogueAdapter(
+        undefined,
+        opts.approved === false ? undefined : { approvedBy: "test-operator" },
+      ),
+      checkout: ports,
+      freeRunCounter: counter,
+    });
+    return { gate, creates, counter };
+  }
+
+  function freeAccount(overrides: Partial<NativeCommercialAccount> = {}): NativeCommercialAccount {
+    return account({ tier: "Free", ...overrides });
+  }
+
+  it("a Free manual run under the cap is allowed at price 0, mints no checkout, spends no credits", async () => {
+    const { gate, creates, counter } = freeGate();
+    const acct = freeAccount({ creditsUSD: 5 });
+    const decision = await gate.check({ id: "run-1", family: "goal", trigger: "manual", nowMs: NOV, account: acct });
+    expect(decision).toEqual({ allowed: true, status: "paid", runRequestId: "run-1", priceUSD: 0, paidVia: "free_run_allowance" });
+    expect(creates).toHaveLength(0);
+    expect(acct.creditsUSD).toBe(5);
+    expect(await counter.getUsed({ login: "u1", family: "goal", month: "2026-11" })).toBe(1);
+  });
+
+  it("10 free runs are allowed; the 11th manual run falls through to a 402 checkout", async () => {
+    const { gate, creates, counter } = freeGate();
+    for (let i = 1; i <= 10; i++) {
+      const d = await gate.check({ id: `run-${i}`, family: "goal", trigger: "manual", nowMs: NOV, account: freeAccount() });
+      expect(d.allowed).toBe(true);
+    }
+    expect(await counter.getUsed({ login: "u1", family: "goal", month: "2026-11" })).toBe(10);
+    const eleventh = await gate.check({ id: "run-11", family: "goal", trigger: "manual", nowMs: NOV, account: freeAccount() });
+    expect(eleventh).toMatchObject({ allowed: false, status: "payment_required", httpStatus: 402, priceUSD: 0.1 });
+    expect((eleventh as { checkout?: unknown }).checkout).toBeDefined();
+    expect(creates).toEqual([{ draftId: "run-11", amount: 0.1 }]);
+    expect(await counter.getUsed({ login: "u1", family: "goal", month: "2026-11" })).toBe(10);
+  });
+
+  it("a Free scheduled run under the cap is allowed; at the cap it is coverage_required with no checkout", async () => {
+    const { gate, creates, counter } = freeGate();
+    for (let i = 1; i <= 10; i++) {
+      const d = await gate.check({ id: `run-${i}`, family: "goal", trigger: "scheduled", nowMs: NOV, account: freeAccount() });
+      expect(d.allowed).toBe(true);
+    }
+    const eleventh = await gate.check({ id: "run-11", family: "goal", trigger: "scheduled", nowMs: NOV, account: freeAccount() });
+    expect(eleventh).toMatchObject({ allowed: false, status: "coverage_required", httpStatus: 402 });
+    expect(creates).toHaveLength(0);
+    expect(await counter.getUsed({ login: "u1", family: "goal", month: "2026-11" })).toBe(10);
+  });
+
+  it("the counter is per product, and a re-check of the same run id does not double-count", async () => {
+    const { gate, counter } = freeGate();
+    await gate.check({ id: "run-g1", family: "goal", trigger: "manual", nowMs: NOV, account: freeAccount() });
+    await gate.check({ id: "run-g2", family: "goal", trigger: "manual", nowMs: NOV, account: freeAccount() });
+    await gate.check({ id: "run-g3", family: "goal", trigger: "manual", nowMs: NOV, account: freeAccount() });
+    await gate.check({ id: "run-s1", family: "stock", trigger: "manual", nowMs: NOV, account: freeAccount() });
+    expect(await counter.getUsed({ login: "u1", family: "goal", month: "2026-11" })).toBe(3);
+    expect(await counter.getUsed({ login: "u1", family: "stock", month: "2026-11" })).toBe(1);
+    // Idempotent on run-request id: the second check returns
+    // already_paid and consumes nothing.
+    const again = await gate.check({ id: "run-g1", family: "goal", trigger: "manual", nowMs: NOV, account: freeAccount() });
+    expect(again).toMatchObject({ allowed: true, status: "already_paid", paidVia: "free_run_allowance" });
+    expect(await counter.getUsed({ login: "u1", family: "goal", month: "2026-11" })).toBe(3);
+    expect((await gate.confirmPaid({ id: "run-g1", userId: "u1", email: "u1@example.com" })).status).toBe("already_paid");
+  });
+
+  it("the counter resets monthly: December starts at 0 while November stays at the cap", async () => {
+    const { gate, counter } = freeGate();
+    for (let i = 1; i <= 10; i++) {
+      await gate.check({ id: `nov-${i}`, family: "goal", trigger: "manual", nowMs: NOV, account: freeAccount() });
+    }
+    expect((await gate.check({ id: "nov-11", family: "goal", trigger: "manual", nowMs: NOV, account: freeAccount() })).allowed).toBe(false);
+    const dec = await gate.check({ id: "dec-1", family: "goal", trigger: "manual", nowMs: DEC, account: freeAccount() });
+    expect(dec).toMatchObject({ allowed: true, paidVia: "free_run_allowance" });
+    expect(await counter.getUsed({ login: "u1", family: "goal", month: "2026-12" })).toBe(1);
+    expect(await counter.getUsed({ login: "u1", family: "goal", month: "2026-11" })).toBe(10);
+  });
+
+  it("an unlimited-free grant bypasses the counter (grant-covered runs consume nothing)", async () => {
+    const { gate, counter } = freeGate();
+    const granted = freeAccount({
+      unlimitedFreeGrant: { grantedBy: "op1", reason: "Owner-approved pilot account", expiresAtMs: null },
+    });
+    const decision = await gate.check({ id: "run-1", family: "goal", trigger: "manual", nowMs: NOV, account: granted });
+    expect(decision).toMatchObject({ allowed: true, paidVia: "unlimited_free_grant" });
+    expect(await counter.getUsed({ login: "u1", family: "goal", month: "2026-11" })).toBe(0);
+  });
+
+  it("trial/Subscribed runs use included runs, not the counter", async () => {
+    const { gate, counter } = freeGate();
+    const sub = account({ tier: "Subscribed", includedRunsRemaining: 2 });
+    for (let i = 1; i <= 2; i++) {
+      const d = await gate.check({ id: `run-${i}`, family: "goal", trigger: "manual", nowMs: NOV, account: sub });
+      expect(d).toMatchObject({ allowed: true, paidVia: "subscription_included" });
+    }
+    expect(await counter.getUsed({ login: "u1", family: "goal", month: "2026-11" })).toBe(0);
+    const third = await gate.check({ id: "run-3", family: "goal", trigger: "manual", nowMs: NOV, account: sub });
+    expect(third).toMatchObject({ allowed: false, status: "payment_required" });
+    expect(await counter.getUsed({ login: "u1", family: "goal", month: "2026-11" })).toBe(0);
+  });
+
+  it("with no counter wired, a Free account gets today's behavior (402, no free runs)", async () => {
+    const { gate } = cardGate(() => goalEvidence());
+    const decision = await gate.check({ id: "run-1", family: "goal", trigger: "manual", nowMs: NOV, account: freeAccount() });
+    expect(decision).toMatchObject({ allowed: false, status: "payment_required", httpStatus: 402 });
+  });
+
+  it("free runs work with unapproved (PROPOSED) prices; the 11th fails closed instead of minting", async () => {
+    const counter = new InMemoryFreeRunCounterAdapter();
+    const gate = new NativeMonetizationGate({
+      monetizationEnabled: true,
+      priceCatalogue: new InMemoryPriceCatalogueAdapter(undefined),
+      checkout: null,
+      freeRunCounter: counter,
+    });
+    for (let i = 1; i <= 10; i++) {
+      const d = await gate.check({ id: `run-${i}`, family: "goal", trigger: "manual", nowMs: NOV, account: freeAccount() });
+      expect(d.allowed).toBe(true);
+    }
+    await expect(
+      gate.check({ id: "run-11", family: "goal", trigger: "manual", nowMs: NOV, account: freeAccount() }),
+    ).rejects.toThrow(/not approved/);
+  });
+
+  it("the allowance is operator-changeable: lowering it to 2 caps the month at 2", async () => {
+    const { gate, counter } = freeGate();
+    await counter.setAllowance({ family: "goal", runs: 2 });
+    for (let i = 1; i <= 2; i++) {
+      expect((await gate.check({ id: `run-${i}`, family: "goal", trigger: "manual", nowMs: NOV, account: freeAccount() })).allowed).toBe(true);
+    }
+    expect((await gate.check({ id: "run-3", family: "goal", trigger: "manual", nowMs: NOV, account: freeAccount() })).allowed).toBe(false);
   });
 });
