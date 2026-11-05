@@ -24,6 +24,11 @@
  * 5. Tenant: an existing account with a different tenant refuses
  *    (no cross-tenant activation); a missing account is created
  *    in the caller's tenant (the tenant is pinned from then on).
+ *
+ * Issue #3244 adds grantSubscription below: the same activation
+ * shape for an operator grant (no payment, provider "operator"),
+ * except the target account must already exist — its row is the
+ * grant's only tenant source.
  */
 import type { CommercialAccountRecord, CommercialStore } from "../data/commercialPorts";
 import {
@@ -52,6 +57,83 @@ export interface ActivationInput {
 export interface ActivationResult {
   subscription: SubscriptionRecord;
   account: CommercialAccountRecord;
+}
+
+export interface GrantInput {
+  subs: SubscriptionStore;
+  store: CommercialStore;
+  userId: string;
+  plan: SubscriptionPlanRecord;
+  /** Verified operator login performing the grant (recorded in the route audit, not on the row). */
+  grantedBy: string;
+  nowMs?: number;
+}
+
+/**
+ * Issue #3244 (slice 2 of #3241) — operator subscription grant.
+ *
+ * Mirrors activateSubscription exactly, minus the payment:
+ * 1. The plan must exist and be active (an operator-deactivated
+ *    plan cannot be granted either).
+ * 2. The target account must already exist: its row is the only
+ *    tenant source (a grant never takes a client-supplied
+ *    tenantId, and there is no tenant to invent for a missing
+ *    account — the operator creates the account first through
+ *    the existing Accounts UI flow). This is the one deliberate
+ *    difference from activation, which auto-creates the account
+ *    in the session-derived tenant after verified payment.
+ * 3. The period stacks from the latest paid-through instant, so
+ *    a re-grant before expiry loses no granted time.
+ * 4. The account keeps its stored tier and gains tierSource
+ *    "subscription" plus the plan's included runs — the gate
+ *    reads included runs from the account row only, so a
+ *    row-only grant would enable nothing (the Billing-path gap).
+ *    The effective tier is Subscribed while the period is
+ *    unexpired (see resolveEffectiveTier); at expiry it falls
+ *    back to the stored baseline and the normal gate resumes.
+ * 5. No checkout, no Stripe record: provider is "operator", the
+ *    payment ref is a minted `grant-` id (unique per grant, so
+ *    the replay guard can never collide), both Stripe ids null.
+ */
+export async function grantSubscription(input: GrantInput): Promise<ActivationResult> {
+  const { subs, store, userId, plan } = input;
+  const nowMs = input.nowMs ?? Date.now();
+  if (!plan.active) throw new Error(`Plan ${plan.id} is not active.`);
+  if (!input.grantedBy) throw new Error("grantedBy is required.");
+  const existing = await store.getAccount(userId);
+  if (!existing) {
+    throw new Error(
+      "No commercial account exists for this user; an operator must create the account first.",
+    );
+  }
+  const tenantId = existing.tenantId;
+  const prior = await subs.listSubscriptions(userId);
+  const periodStartMs = nextPeriodStartMs(
+    prior.map((s) => s.periodEndMs),
+    nowMs,
+  );
+  const periodEndMs = periodStartMs + plan.periodDays * MS_PER_DAY;
+  const subscription = await subs.createSubscription({
+    id: `sub-${crypto.randomUUID().slice(0, 8)}`,
+    userId,
+    tenantId,
+    planId: plan.id,
+    provider: "operator",
+    providerPaymentRef: `grant-${crypto.randomUUID()}`,
+    stripeSessionId: null,
+    stripePaymentIntentId: null,
+    periodStartMs,
+    periodEndMs,
+  });
+  const account = await store.upsertAccount({
+    userId,
+    tenantId,
+    tier: existing.tier,
+    tierSource: "subscription",
+    creditsUSD: existing.creditsUSD,
+    includedRuns: existing.includedRuns + plan.includedRuns,
+  });
+  return { subscription, account };
 }
 
 export async function activateSubscription(input: ActivationInput): Promise<ActivationResult> {
