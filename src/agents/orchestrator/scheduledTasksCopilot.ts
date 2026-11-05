@@ -29,6 +29,7 @@ import type {
 } from "../../actors/thinkAdapter";
 import type { Env } from "../../types";
 import type { ScreenerExecutionContext } from "./scheduleMaintenance";
+import { createStockCopilotPositionPort } from "../../data/createStockCopilotStorePorts";
 import { MarketDataResearchService } from "../../services/marketDataResearch";
 import {
   copilotUniverseFromEnv,
@@ -83,7 +84,7 @@ export async function runStockCopilotCycleForInstance(
   const marketData = new MarketDataResearchService(ctx.env);
   const result = await runStockCopilotCycle({
     env: ctx.env,
-    sql,
+    positions: createStockCopilotPositionPort(sql),
     userLogin,
     platform,
     overrideEnv: executionContext.environment,

@@ -11,7 +11,7 @@
  * - The scheduled-task declaration gates on the flag + instance login.
  */
 import { describe, it, expect } from "vitest";
-import type { SqlStorage } from "../src/orm";
+import { createInMemoryStockCopilotPositionPort } from "../src/data/createStockCopilotStorePorts";
 import {
   evaluateLatestPatternSignal,
   evaluatePatternSignalAt,
@@ -29,52 +29,6 @@ import { declareStockCopilotTasks } from "../src/agents/orchestrator/scheduledTa
 // ---------------------------------------------------------------------------
 // Fakes
 // ---------------------------------------------------------------------------
-
-/** Minimal SqlStorage fake covering the position store's statements. */
-function createFakeSql() {
-  const rows: Array<Record<string, unknown>> = [];
-  const exec = (query: string, ...args: unknown[]) => {
-    const q = query.trim();
-    const upper = q.toUpperCase();
-    let out: Array<Record<string, unknown>> = [];
-    if (upper.startsWith("CREATE TABLE") || upper.startsWith("CREATE INDEX")) {
-      out = [];
-    } else if (upper.startsWith("INSERT INTO STOCK_COPILOT_POSITIONS")) {
-      const cols = q
-        .match(/\(([^)]+)\)\s*VALUES/i)![1]
-        .split(",")
-        .map((c) => c.trim());
-      const rec: Record<string, unknown> = {};
-      cols.forEach((c, i) => {
-        rec[c] = args[i];
-      });
-      rows.push(rec);
-    } else if (upper.startsWith("UPDATE STOCK_COPILOT_POSITIONS")) {
-      const [status, exitOrderRef, exitPrice, exitReason, closedAt, id] = args;
-      for (const r of rows) {
-        if (r.id === id) {
-          Object.assign(r, {
-            status,
-            exit_broker_order_ref: exitOrderRef,
-            exit_price: exitPrice,
-            exit_reason: exitReason,
-            closed_at: closedAt,
-          });
-        }
-      }
-    } else if (upper.startsWith("SELECT")) {
-      if (/WHERE USER_LOGIN = \? AND STATUS = 'OPEN'/.test(upper)) {
-        out = rows.filter((r) => r.user_login === args[0] && r.status === "open");
-      } else if (/WHERE ID = \?/.test(upper)) {
-        out = rows.filter((r) => r.id === args[0]);
-      } else {
-        out = [...rows];
-      }
-    }
-    return out;
-  };
-  return { exec } as unknown as SqlStorage;
-}
 
 interface FakePlatform {
   platform: any;
@@ -139,7 +93,7 @@ function sawtoothCloses(): number[] {
 function baseDeps(overrides: Partial<StockCopilotDeps>): StockCopilotDeps {
   return {
     env: { STOCK_COPILOT_PAPER_ENABLED: "1" } as any,
-    sql: createFakeSql() as unknown as SqlStorage,
+    positions: createInMemoryStockCopilotPositionPort(),
     userLogin: "owner",
     platform: createFakePlatform().platform,
     loadBars: async () => sawtoothCloses(),
@@ -333,11 +287,11 @@ describe("stock copilot cycle", () => {
 
   it("entry signal: exactly one BUY through the platform, position tracked WITH its exit plan", async () => {
     const fake = createFakePlatform();
-    const sql = createFakeSql();
+    const positions = createInMemoryStockCopilotPositionPort();
     const result = await runStockCopilotCycle(
       baseDeps({
         platform: fake.platform,
-        sql: sql as unknown as SqlStorage,
+        positions,
         universe: ["TEST"],
         strategies: ["mean_reversion"],
       }),
@@ -349,7 +303,7 @@ describe("stock copilot cycle", () => {
     // Sizing: concentration cap binds — 15% of $100k NAV / $98 = 153 shares.
     expect(fake.placed[0].quantity).toBe(153);
 
-    const store = new StockCopilotPositionStore(sql as unknown as SqlStorage);
+    const store = new StockCopilotPositionStore(positions);
     const open = await store.listOpenPositions("owner");
     expect(open).toHaveLength(1);
     expect(open[0]).toMatchObject({
@@ -367,10 +321,8 @@ describe("stock copilot cycle", () => {
 
   it("second cycle with the position already open places no duplicate entry", async () => {
     const fake = createFakePlatform();
-    const sql = createFakeSql();
     const deps = baseDeps({
       platform: fake.platform,
-      sql: sql as unknown as SqlStorage,
       universe: ["TEST"],
       strategies: ["mean_reversion"],
     });
@@ -382,8 +334,8 @@ describe("stock copilot cycle", () => {
 
   it("exit evaluation: a held position hitting the strategy exit is sold and closed", async () => {
     const fake = createFakePlatform();
-    const sql = createFakeSql();
-    const store = new StockCopilotPositionStore(sql as unknown as SqlStorage);
+    const positions = createInMemoryStockCopilotPositionPort();
+    const store = new StockCopilotPositionStore(positions);
     await store.openPosition({
       userLogin: "owner",
       symbol: "TEST",
@@ -399,7 +351,7 @@ describe("stock copilot cycle", () => {
     const result = await runStockCopilotCycle(
       baseDeps({
         platform: fake.platform,
-        sql: sql as unknown as SqlStorage,
+        positions,
         universe: [],
         loadBars: async () => closes,
       }),
@@ -413,8 +365,8 @@ describe("stock copilot cycle", () => {
 
   it("exit evaluation: a held position breaching its stop is sold even without a strategy signal", async () => {
     const fake = createFakePlatform();
-    const sql = createFakeSql();
-    const store = new StockCopilotPositionStore(sql as unknown as SqlStorage);
+    const positions = createInMemoryStockCopilotPositionPort();
+    const store = new StockCopilotPositionStore(positions);
     await store.openPosition({
       userLogin: "owner",
       symbol: "TEST",
@@ -429,7 +381,7 @@ describe("stock copilot cycle", () => {
     const result = await runStockCopilotCycle(
       baseDeps({
         platform: fake.platform,
-        sql: sql as unknown as SqlStorage,
+        positions,
         universe: [],
         loadBars: async () => closes,
       }),
@@ -440,11 +392,9 @@ describe("stock copilot cycle", () => {
 
   it("sizing refusal: an account too small for one share under the caps places no order", async () => {
     const fake = createFakePlatform({ nav: 200 });
-    const sql = createFakeSql();
     const result = await runStockCopilotCycle(
       baseDeps({
         platform: fake.platform,
-        sql: sql as unknown as SqlStorage,
         universe: ["TEST"],
         strategies: ["mean_reversion"],
       }),
