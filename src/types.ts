@@ -200,6 +200,16 @@ export interface Env {
   // security/publicOAuth.ts, byte-identical. Rollback is
   // unsetting the var — no code change, no data migration.
   TOKEN_PORTS_ENABLED?: string;
+  // #2435 (#1976 step 5d) — flag-gated IAAA audit log family
+  // port. Same idiom as TOKEN_PORTS_ENABLED above:
+  // "1"/"true"/"on" (case-insensitive) = on; absence = OFF (the
+  // var is deliberately NOT in wrangler.jsonc — the slice ships
+  // default-off). Flag-ON composes the audit store through
+  // src/data/createAuditPorts.ts over the SAME SessionStore DO
+  // and its audit-append op; flag-OFF is today's atomic client
+  // in security/iaaaAuditStore.ts, byte-identical. Rollback is
+  // unsetting the var — no code change, no data migration.
+  AUDIT_PORTS_ENABLED?: string;
   // #2246 — flag-gated report indexing into the AI Search instance.
   // Same idiom as KNOWLEDGE_SERVING_ENABLED above: "1"/"true"/"on"
   // (case-insensitive) = on; absence = OFF. The slice shipped
