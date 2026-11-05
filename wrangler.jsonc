@@ -121,7 +121,7 @@
   // (env.AI_SEARCH.get(AI_SEARCH_INSTANCE)); the instance
   // "screener-search" lives in the "default" namespace.
   "ai_search_namespaces": [
-    { "name": "AI_SEARCH", "namespace": "default", "remote": true }
+    { "binding": "AI_SEARCH", "namespace": "default", "remote": true }
   ],
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["SearchAgent"] },
