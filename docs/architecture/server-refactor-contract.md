@@ -445,7 +445,7 @@ conflict on Qunsultant/cfagent#2902.
   Platform (Slice 7), moved as a whole, never split.
 - The <800-line pin (§2, open question 1) is **not set in Slice 2**:
   Slice 2 moves Core only and `server.ts` still holds every domain
-  block (6,982 lines after Slice 2), so no pin Slice 2 could set is
+  block (6,981 lines after Slice 2), so no pin Slice 2 could set is
   meetable. The proposal stands for review; Slice 9 sets the pin the
   slice actually achieves and never loosens a pin to fit.
 - Q3 (entrypoint exports) is not re-decided in Slice 2: the in-code
