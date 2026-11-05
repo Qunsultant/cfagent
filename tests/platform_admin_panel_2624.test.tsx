@@ -258,4 +258,14 @@ describe("nav shell owns the drawer; settings keeps the user card (#2624)", () =
     expect(settings).toContain("settings-user-login");
     expect(settings).toContain("Logged in via");
   });
+
+  it("shows the signed-in user at the top of the dropdown, above the account card (#3362)", () => {
+    // Each marker occurs exactly once in ETradeDynamicMenu.tsx, in JSX —
+    // so source order is the panel's section order.
+    const userAt = settings.indexOf("settings-user-card");
+    const accountAt = settings.indexOf("etrade-panel-account-card");
+    expect(userAt).toBeGreaterThan(-1);
+    expect(accountAt).toBeGreaterThan(-1);
+    expect(userAt).toBeLessThan(accountAt);
+  });
 });
