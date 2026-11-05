@@ -30,6 +30,8 @@ Supporting decisions worth recording, because each one rejected a plausible shor
 
 The account panels — orders, transactions, watchlists — are still E*TRADE-only (`AccountPanels` calls `/api/etrade/*`; `AlpacaBrokerPanel` renders accounts and positions). Calling the parity claim complete while that is true is exactly the failure this cycle was cleaning up, so it is recorded here as the **first row the register should carry as `blocked` with no blocker named** — which, by the plan's own rule ("an unnamed blocker is not a blocker"), makes it `proposed` and eligible for the next cycle.
 
+_**Superseded the same evening.** This paragraph was accurate when written and wrong within four hours: #3359 (account history), #3367 (section nav), #3368 (client calls), #3371 (first-run) and #3374 (discovery history) closed it. §8 records what landed and the measurement that closed the programme. The paragraph stays because the record is a log, not a brochure — and because the hours it was true are the F1 evidence §4 is about._
+
 ## 4. Evidence for the plan's own hypotheses
 
 The plan (F1) claims: *"the portfolio is written as prose and decays within days."* This cycle produced a direct test of that claim, in this program's own documents:
@@ -68,3 +70,24 @@ Nothing else is promoted. The parity program's remaining rows are behind those t
 ## 7. Authority
 
 Unchanged from the plan §7. This record makes no governance change: it adds measurements and one candidate ordering. Repository settings, governance templates, live trading, and risk limits remain outside this platform's authority.
+
+## 8. Cycle 2 result — the client surface closed (same day)
+
+Five slices landed after this record was written. Each closed an E*TRADE-shaped surface that still reached a tenant on another broker:
+
+| Issue | What changed | PR | Merged |
+|---|---|---|---|
+| #3359 | Account history on Alpaca's own reads; alerts and watchlists declared absent and named | #3366 | `3d824bff` |
+| #3367 | Hub section nav derived from the broker — every chip lands on a card | #3369 | `ea2ba4b8` |
+| #3368 | Sync and the autopilot feed follow the selection; the invented latency removed | #3370 | `ed02c6bf` |
+| #3371 | First-run asks the selected broker — the last E*TRADE-only journey | #3372 | `649e633a` |
+| #3374 | Discovery history refused by name for a broker with no discovery engine | #3376 | `0b12fa6f` |
+
+**The programme's second acceptance clause, measured on `0b12fa6f`:** `rg -c '/api/etrade' src/client` returns 78 occurrences across 14 files. Every one is a credential/connect surface, an endpoint catalogue, descriptive copy, or a legacy path whose server read resolves the tenant broker. The full classification lives on #3292, which is closed with that table. No entry is unexplained, and none of them delivers another broker's data.
+
+**What this cycle refused to do, and why that is the result.** Two shortcuts were available and both were rejected. Discovery runs could have carried provenance like scan history (#3327) — but no Alpaca discovery engine exists, so the honest state is a declared absence, not a stamped row (#3374). The scanner's legacy route names could have been renamed to look neutral — but they resolve the broker server-side, so a rename would move three route pins for no behaviour change and would read as parity work without being any. Both refusals are the same discipline §3's superseded paragraph is about.
+
+**What is still not claimed.** Product-surface parity is complete; execution is not proven. No Alpaca paper order has been placed and verified against a live paper account — that is #3306's P3, and it needs a session, not a suite. This record does not promote it.
+
+**Next cycle, per §6's rule:** no new row qualifies — every parity row is delivered or a declared permanent gap. The candidates are the ones §6 already named (the register, and C2's outcome field), both of which are governance items awaiting human approval rather than implementation.
+
