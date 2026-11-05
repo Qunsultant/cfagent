@@ -108,6 +108,23 @@ function formatNlqColumn(key: string): string {
  * mount, so no URL-supplied text is ever rendered (same principle
  * as #2402's auth_outcome handling).
  */
+/**
+ * Issue #3197: the pre-opened tab is ours for a few seconds while the
+ * start call runs. Fill it with an honest placeholder so the user never
+ * stares at a bare about:blank, even if the call hangs to its timeout.
+ * Same-origin about:blank, so this write is allowed; guarded because the
+ * user may already have closed the tab (or a policy may deny the access).
+ */
+function showConnectingPlaceholder(authTab: Window) {
+  try {
+    authTab.document.title = "Connecting to E*TRADE…";
+    authTab.document.body.textContent =
+      "Connecting to E*TRADE… You can keep this tab open; it will move on by itself. If it does not, return to the app tab for the error.";
+  } catch {
+    // Closed, cross-origin, or sandboxed: the in-app banner still carries the state.
+  }
+}
+
 function reclaimFailedStartTab(
   authTab: { close(): void; readonly closed: boolean; location: { href: string } } | null,
   code: string,
@@ -766,10 +783,21 @@ export function ETradeTradingHub({
     setBlockedAuthUrl(null);
     // Open the tab synchronously, while this is still the user's gesture:
     // a window.open issued after the await below is blocked by browsers
-    // as a popup (#1159). If the open itself is blocked (null), the
-    // authorize URL surfaces as a fallback link in the hub banner.
+    // as a popup (#1159). #3197: the features string must NOT request
+    // noopener/noreferrer — the HTML spec makes window.open return null
+    // in that case, so this tab could never be navigated (always
+    // about:blank) and the failure reclaim was dead code. Severing the
+    // opener reference ourselves keeps the handle we need.
     const authTab =
-      typeof window !== "undefined" ? window.open("", "_blank", "noopener,noreferrer") : null;
+      typeof window !== "undefined" ? window.open("about:blank", "_blank") : null;
+    if (authTab) {
+      try {
+        authTab.opener = null;
+      } catch {
+        // Already closed or not same-origin: nothing to sever.
+      }
+      showConnectingPlaceholder(authTab);
+    }
     // Issue #3197: the start fetch must not hang forever — a hung
     // fetch used to leave the pre-opened tab blank with no branch
     // ever running. The timeout forces the failure branch, which
