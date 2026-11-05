@@ -6,6 +6,21 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { Button, Select, Table } from "./components/ui";
+import { brokerSupports, isBrokerId } from "../trading/brokerCatalog";
+import { readTenantProvidersState } from "./tenantProviders";
+
+/**
+ * Issue #3292: IV history is collected from E*TRADE option-chain snapshots.
+ * Alpaca exposes no such endpoint and a one-snapshot series would be
+ * manufactured, so another broker is refused by name instead of being
+ * answered with E*TRADE data.
+ */
+function ivHistoryRefusal(): string | null {
+  const broker = readTenantProvidersState().brokerId;
+  if (!isBrokerId(broker)) return `IV history is not available for the selected broker (${broker}).`;
+  if (brokerSupports(broker, "ivHistory")) return null;
+  return `IV history is collected from E*TRADE option-chain snapshots and is not available for ${broker}; no series is synthesised in its place.`;
+}
 
 interface IvEntry {
   symbol: string;
@@ -62,6 +77,12 @@ export function IvHistoryPanel() {
     setLoading(true);
     setError("");
     try {
+      const refusal = ivHistoryRefusal();
+      if (refusal) {
+        setError(refusal);
+        setLoading(false);
+        return;
+      }
       const res = await fetch("/api/etrade/options/iv-history");
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = (await res.json()) as { names?: IvEntry[] };
