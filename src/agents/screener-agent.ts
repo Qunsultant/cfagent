@@ -1774,10 +1774,39 @@ export class ScreenerAgent extends PortThink {
         ...(gatherEnrichment ? { enrichment: gatherEnrichment } : {}),
       });
     }
+    // Issue #3272 S3: the goal path used to build its engines on the E*TRADE
+    // client regardless of the selection, so an Alpaca tenant's scheduled run
+    // would have screened E*TRADE data and labelled it etrade-yahoo-stocks.
+    // Non-E*TRADE selections run on the neutral engines and keep their own id.
+    const { resolveTenantBroker } = await import("../services/tenantProviders");
+    const {
+      TradingPlatformRegistry,
+      platformChainSource,
+      platformQuoteSource,
+      NeutralMarketScreener,
+      NEUTRAL_STOCK_SCREENING_PROVIDER_ID,
+    } = await import("../trading");
+    const selectedBroker = await resolveTenantBroker(this.env);
+    const goalPlatform =
+      selectedBroker === "etrade"
+        ? null
+        : TradingPlatformRegistry.getPlatform(selectedBroker, this.env, this.getOrm?.(), userLogin, req.environment);
+    const neutralChainSource = goalPlatform ? platformChainSource(goalPlatform) : null;
+    const neutralQuoteSource = goalPlatform ? platformQuoteSource(goalPlatform) : null;
     const out = await runProductionGoalScreen({
       ledger: this.taskLedger(),
-      ...(stockScreener ? { stockScreener } : {}),
-      optionsScreener: new DynamicOptionsScreener(etrade.client, undefined, goalUniverseDeps),
+      ...(neutralQuoteSource
+        ? {
+            neutralStockScreener: new NeutralMarketScreener({ quoteSource: neutralQuoteSource }),
+            stockProviderId: NEUTRAL_STOCK_SCREENING_PROVIDER_ID,
+          }
+        : stockScreener
+          ? { stockScreener }
+          : {}),
+      optionsScreener:
+        neutralChainSource && selectedBroker !== "etrade"
+          ? new DynamicOptionsScreener(neutralChainSource, undefined, goalUniverseDeps)
+          : new DynamicOptionsScreener(etrade.client, undefined, goalUniverseDeps),
       scenario: req.scenario,
       trigger: req.trigger,
       idempotencyKey: req.idempotencyKey,
