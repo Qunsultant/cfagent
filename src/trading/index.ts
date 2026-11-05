@@ -34,6 +34,7 @@ export * from "./interfaces";
 export * from "./registry";
 // Issue #3232: the broker catalog is part of the public trading surface.
 export * from "./brokerCatalog";
+export * from "./brokerPanels";
 export * from "./screeningProvider";
 export * from "./dataProviders";
 export * from "./screener";

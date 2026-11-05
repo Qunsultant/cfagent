@@ -11,7 +11,7 @@ import {
   type FeatureEvaluationContext,
   type FeatureFlag,
   type FeatureFlagPort,
-  getOptionsProductParentFlag,
+  getFeatureFlagParent,
   isKnownFeatureFlag,
 } from "./featureFlagPorts";
 
@@ -27,7 +27,7 @@ export class InMemoryFeatureFlagAdapter implements FeatureFlagPort {
     // and pre-filling false would mask that inheritance. Non-product
     // flags keep the historical defaults.
     for (const flag of ALL_FEATURE_FLAGS) {
-      if (!getOptionsProductParentFlag(flag)) {
+      if (!getFeatureFlagParent(flag)) {
         this.flags.set(
           flag,
           flag === "payment_assurance",
@@ -63,7 +63,7 @@ export class InMemoryFeatureFlagAdapter implements FeatureFlagPort {
     if (this.explicit.has(flag)) {
       return this.flags.get(flag) ?? false;
     }
-    const parent = getOptionsProductParentFlag(flag);
+    const parent = getFeatureFlagParent(flag);
     if (parent) {
       return this.isEnabled(parent, _context);
     }

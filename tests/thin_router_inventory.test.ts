@@ -351,6 +351,7 @@ const HANDLER_FILE: Record<string, string> = {
   "handleEtradeBrokerRoutes": "etradeBroker.ts",
   "handleBrokerOrderRoutes": "brokerOrders.ts",
   "handleBrokerOptionsRoutes": "brokerOptions.ts",
+  "handleBrokerReadsRoutes": "brokerReads.ts",
   "handleBrokerGateRoutes": "brokerGate.ts",
   "handleEtradeBrokerActivityRoutes": "etradeBroker.ts",
   "handleTradingIntegrationsRoutes": "tradingIntegrations.ts",
@@ -399,6 +400,7 @@ const EXPECTED_DELEGATIONS = [
   "handlePlatformChannelRoutes",
   "handlePremiumRoutes",
   "handleBrokerOptionsRoutes",
+  "handleBrokerReadsRoutes",
   "handleBrokerGateRoutes",
   "handleEtradeBrokerRoutes",
   "handleBrokerOrderRoutes",
@@ -580,6 +582,9 @@ const EXPECTED_INVENTORY = [
   // Issue #3233: broker-neutral options reads (chains + expiry dates).
   "handleBrokerOptionsRoutes :: endsWith(\"/broker/options/chains\")",
   "handleBrokerOptionsRoutes :: endsWith(\"/broker/options/expire-dates\")",
+  // Issue #2853: the neutral account/position reads the broker panels render.
+  "handleBrokerReadsRoutes :: endsWith(\"/broker/accounts\")",
+  "handleBrokerReadsRoutes :: endsWith(\"/broker/positions\")",
   "handleBrokerGateRoutes :: includes(\"/etrade/\")",
   "handleBrokerGateRoutes :: includes(\"/etrade/options/\")",
   "handleEtradeBrokerRoutes :: endsWith(\"/environment/switch\")",
