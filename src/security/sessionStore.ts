@@ -1,6 +1,15 @@
 import { DurableObject } from "cloudflare:workers";
 import type { Env } from "../types";
-import { runDoSchemaMigration } from "../data/doSchemaMarker";
+import {
+  DoSessionStoreAdapter,
+  STMT_ARCHIVE_INSERT,
+  STMT_ARCHIVE_LIST,
+  STMT_DELETE,
+  STMT_EXPIRES_GET,
+  STMT_LIST,
+  STMT_POINT_GET,
+  STMT_UPSERT,
+} from "../data/doSessionStoreAdapter";
 import {
   computeEventHash,
   type CreateIaaaAuditEventInput,
@@ -44,19 +53,6 @@ interface StoreOp {
   segmentSize?: number;
   maxArchiveSegments?: number;
 }
-
-/** Parameterized statement templates (placeholders only, never bound values). */
-const STMT_POINT_GET = "SELECT value, expires_at FROM kv_store WHERE ns = ? AND key = ?";
-const STMT_EXPIRES_GET = "SELECT expires_at FROM kv_store WHERE ns = ? AND key = ?";
-const STMT_LIST =
-  "SELECT key, value FROM kv_store WHERE ns = ? AND key LIKE ? AND (expires_at IS NULL OR expires_at > ?) ORDER BY key";
-const STMT_UPSERT =
-  "INSERT INTO kv_store (ns, key, value, expires_at) VALUES (?, ?, ?, ?) ON CONFLICT(ns, key) DO UPDATE SET value = excluded.value, expires_at = excluded.expires_at";
-const STMT_DELETE = "DELETE FROM kv_store WHERE ns = ? AND key = ?";
-const STMT_ARCHIVE_LIST =
-  "SELECT key, value FROM kv_store WHERE ns = ? AND key LIKE ? ORDER BY key";
-const STMT_ARCHIVE_INSERT =
-  "INSERT INTO kv_store (ns, key, value, expires_at) VALUES (?, ?, ?, NULL)";
 
 /**
  * #1760 — hard ceilings for the audit bound. A client may request
@@ -126,12 +122,6 @@ function auditEventFromInput(
   };
 }
 
-interface Measured<T> {
-  rows: T[];
-  rowsRead: number;
-  rowsWritten: number;
-}
-
 /**
  * The kv_store schema generation this code creates and serves
  * (ADR 0022 D-A.4). Generation 1 is the original shape — the
@@ -143,53 +133,41 @@ interface Measured<T> {
 export const SESSION_STORE_SCHEMA_VERSION = 1;
 
 export class SessionStore extends DurableObject<Env> {
+  /**
+   * Issue #2436 (#1976 step 5e): every kv_store statement
+   * this class executes — the constructor DDL, the D-A.4
+   * schema-marker recording and the seven op templates — is
+   * owned by the data-layer adapter
+   * (src/data/doSessionStoreAdapter.ts), built here over
+   * this DO's own SqlStorage handle. The class keeps the
+   * wire protocol and every policy decision (the list
+   * restriction, the audit-append chaining/rotation/caps,
+   * the expired-read delete); the adapter executes.
+   */
+  private kv?: DoSessionStoreAdapter;
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
-    this.ctx.storage.sql.exec(
-      `CREATE TABLE IF NOT EXISTS kv_store (
-         ns TEXT NOT NULL,
-         key TEXT NOT NULL,
-         value TEXT NOT NULL,
-         expires_at INTEGER,
-         PRIMARY KEY (ns, key)
-       )`
-    );
-    // #2432 (ADR 0022 D-A.4): record the schema-version marker
-    // for this instance. SessionStore was the last DO evolving
-    // schema with no version marker; generation 1's body is the
-    // CREATE TABLE above, which stays unconditional and
-    // IF NOT EXISTS exactly as before — the migration call only
-    // records that the generation is in place (marker written
-    // last, and only when the recorded version is older). The
-    // write is additive and idempotent: it touches only the
-    // marker module's own table, never kv_store, and no op's
-    // behaviour depends on it.
-    //
-    // The marker module is served through execCounted rather
-    // than the raw SqlStorage: execCounted's toArray() is the
-    // cursor surface every statement in this class already
-    // standardises on (#1819), while the marker's DoSchemaSql
-    // contract iterates the exec result — an adapter over
-    // execCounted satisfies it without a second cursor idiom.
-    runDoSchemaMigration(
-      {
-        exec: (query: string, ...params: unknown[]) =>
-          this.execCounted<Record<string, unknown>>(query, ...params).rows,
-      },
-      SESSION_STORE_SCHEMA_VERSION,
-      () => {},
-    );
+    this.store().ensureSchema();
   }
 
   /**
-   * Execute one statement and capture the platform-measured cursor totals.
-   * The cursor must be fully consumed (toArray) before rowsRead/rowsWritten
-   * are final — reading them off a partially iterated cursor understates.
+   * The adapter is built LAZILY, on first use: before this
+   * extraction the class kept no constructor-initialised
+   * state at all — every op resolved this.ctx at call time —
+   * and suites exercise the fetch logic on instances whose
+   * constructor never ran (Object.create over the prototype,
+   * #1819). The resolver inside the adapter likewise reads
+   * the CURRENT ctx per statement.
    */
-  private execCounted<T>(sql: string, ...params: unknown[]): Measured<T> {
-    const cursor = this.ctx.storage.sql.exec(sql, ...params);
-    const rows = cursor.toArray() as T[];
-    return { rows, rowsRead: cursor.rowsRead ?? 0, rowsWritten: cursor.rowsWritten ?? 0 };
+  private store(): DoSessionStoreAdapter {
+    if (!this.kv) {
+      this.kv = new DoSessionStoreAdapter(
+        () => this.ctx.storage.sql,
+        SESSION_STORE_SCHEMA_VERSION,
+      );
+    }
+    return this.kv;
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -229,7 +207,7 @@ export class SessionStore extends DurableObject<Env> {
         if (!sessionsListAllowed && !etradeListAllowed) {
           return Response.json({ error: "list is restricted to session entries and E*TRADE token entries" }, { status: 400 });
         }
-        const measured = this.execCounted<{ key: string; value: string }>(
+        const measured = this.store().exec<{ key: string; value: string }>(
           STMT_LIST,
           ns,
           `${listKey.replace(/[\\%_]/g, "\\$&")}%`,
@@ -244,7 +222,7 @@ export class SessionStore extends DurableObject<Env> {
       }
 
       if (op === "get") {
-        const measured = this.execCounted<{ value: string; expires_at: number | null }>(
+        const measured = this.store().exec<{ value: string; expires_at: number | null }>(
           STMT_POINT_GET,
           ns,
           key
@@ -260,7 +238,7 @@ export class SessionStore extends DurableObject<Env> {
           });
         }
         if (row.expires_at !== null && row.expires_at <= Date.now()) {
-          const deleted = this.execCounted(STMT_DELETE, ns, key);
+          const deleted = this.store().exec(STMT_DELETE, ns, key);
           return Response.json({
             value: null,
             rowsRead: measured.rowsRead + deleted.rowsRead,
@@ -280,7 +258,7 @@ export class SessionStore extends DurableObject<Env> {
         // Replay guard (issue #329 P3). A DO handles one request at a time, so
         // this read-then-write cannot interleave — unlike the KV get-then-put it
         // replaces, where two colos could both see "not consumed".
-        const existing = this.execCounted<{ expires_at: number | null }>(
+        const existing = this.store().exec<{ expires_at: number | null }>(
           STMT_EXPIRES_GET,
           ns,
           key
@@ -298,7 +276,7 @@ export class SessionStore extends DurableObject<Env> {
 
         const claimedUntil =
           typeof body.ttl === "number" ? Date.now() + body.ttl * 1000 : null;
-        const claimed = this.execCounted(STMT_UPSERT, ns, key, body.value ?? "", claimedUntil);
+        const claimed = this.store().exec(STMT_UPSERT, ns, key, body.value ?? "", claimedUntil);
         return Response.json({
           consumed: true,
           rowsRead: existing.rowsRead + claimed.rowsRead,
@@ -341,7 +319,7 @@ export class SessionStore extends DurableObject<Env> {
 
         let rowsRead = 0;
         let rowsWritten = 0;
-        const liveMeasured = this.execCounted<{ value: string }>(STMT_POINT_GET, ns, key);
+        const liveMeasured = this.store().exec<{ value: string }>(STMT_POINT_GET, ns, key);
         rowsRead += liveMeasured.rowsRead;
         rowsWritten += liveMeasured.rowsWritten;
         const liveRow = liveMeasured.rows[0];
@@ -359,7 +337,7 @@ export class SessionStore extends DurableObject<Env> {
             return Response.json({ error: "audit log corrupt" }, { status: 500 });
           }
         }
-        const archiveMeasured = this.execCounted<{ key: string; value: string }>(
+        const archiveMeasured = this.store().exec<{ key: string; value: string }>(
           STMT_ARCHIVE_LIST,
           ns,
           `${IAAA_AUDIT_ARCHIVE_KEY_PREFIX}%`,
@@ -422,11 +400,11 @@ export class SessionStore extends DurableObject<Env> {
           const segment = live.splice(0, segmentSize);
           const segmentKey = `${IAAA_AUDIT_ARCHIVE_KEY_PREFIX}${String(nextSegmentIndex).padStart(6, "0")}`;
           nextSegmentIndex += 1;
-          const inserted = this.execCounted(STMT_ARCHIVE_INSERT, ns, segmentKey, JSON.stringify(segment));
+          const inserted = this.store().exec(STMT_ARCHIVE_INSERT, ns, segmentKey, JSON.stringify(segment));
           rowsRead += inserted.rowsRead;
           rowsWritten += inserted.rowsWritten;
         }
-        const written = this.execCounted(STMT_UPSERT, ns, key, JSON.stringify(live), null);
+        const written = this.store().exec(STMT_UPSERT, ns, key, JSON.stringify(live), null);
         rowsRead += written.rowsRead;
         rowsWritten += written.rowsWritten;
         return Response.json({
@@ -443,7 +421,7 @@ export class SessionStore extends DurableObject<Env> {
           return Response.json({ error: "value is required for put" }, { status: 400 });
         }
         const expiresAt = typeof body.ttl === "number" ? Date.now() + body.ttl * 1000 : null;
-        const measured = this.execCounted(STMT_UPSERT, ns, key, body.value, expiresAt);
+        const measured = this.store().exec(STMT_UPSERT, ns, key, body.value, expiresAt);
         return Response.json({
           ok: true,
           rowsRead: measured.rowsRead,
@@ -452,7 +430,7 @@ export class SessionStore extends DurableObject<Env> {
         });
       }
 
-      const deleted = this.execCounted(STMT_DELETE, ns, key);
+      const deleted = this.store().exec(STMT_DELETE, ns, key);
       return Response.json({
         ok: true,
         rowsRead: deleted.rowsRead,

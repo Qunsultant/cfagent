@@ -16,7 +16,11 @@ import {
   tokenCacheKey,
   writeTokenCache,
 } from "./etradeTokenCache";
-import { consumeStoreKey, createStoreKv, listStoreEntries, type DoNamespaceLike } from "./durableKv";
+import {
+  createBucketPorts,
+  isBucketPortsEnabled,
+} from "../data/createBucketPorts";
+import { consumeStoreKey, createStoreKv, listStoreEntries, type ConsumeOutcome, type DoNamespaceLike } from "../data/durableKv";
 import { type KvLike } from "./kvResilience";
 import {
   createTokenPorts,
@@ -325,6 +329,42 @@ export async function listTokenFamilyEntries(
     namespaceName: "etrade",
     prefix,
   });
+}
+
+/**
+ * Issue #2436 (#1976 step 5e): the #1245 renewal single-flight
+ * CLAIM — the named ClaimPort's consume contract (Q-6). The
+ * claim is not token storage (5c's ruling), so it is governed
+ * by BUCKET_PORTS_ENABLED, not TOKEN_PORTS_ENABLED: flag-on
+ * composes through src/data/createBucketPorts.ts; flag-off
+ * is today's direct funnel claim here, unchanged. The
+ * outcomes stay the caller's, distinctly: "duplicate" →
+ * serve the tokens already read; "unavailable" → fail OPEN
+ * to the pre-#1245 behaviour (renewETradeAccessToken).
+ */
+async function claimRenewalLock(
+  env: Env,
+  lockKey: string
+): Promise<ConsumeOutcome> {
+  if (isBucketPortsEnabled(env)) {
+    return createBucketPorts(env).claims.consume("etrade", lockKey, "1", 120);
+  }
+  return consumeStoreKey({
+    namespace: env.SESSION_STORE as unknown as DoNamespaceLike | undefined,
+    namespaceName: "etrade",
+    key: lockKey,
+    value: "1",
+    ttlSeconds: 120,
+  });
+}
+
+/** The renewal claim's release — the ClaimPort's named inverse, flag-aware like the claim. */
+async function releaseRenewalLock(env: Env, lockKey: string): Promise<void> {
+  if (isBucketPortsEnabled(env)) {
+    await createBucketPorts(env).claims.release("etrade", lockKey);
+    return;
+  }
+  await getKv(env).delete(lockKey);
 }
 
 /**
@@ -843,13 +883,7 @@ export async function renewETradeAccessToken(
   // the same stored pair upstream and race their writes. The claim
   // rides the SessionStore DO's atomic consume op (120s TTL).
   const lockKey = `etrade:renew-lock:${envConfig.name}:${userLogin.toLowerCase()}`;
-  const claim = await consumeStoreKey({
-    namespace: env.SESSION_STORE as unknown as DoNamespaceLike | undefined,
-    namespaceName: "etrade",
-    key: lockKey,
-    value: "1",
-    ttlSeconds: 120,
-  });
+  const claim = await claimRenewalLock(env, lockKey);
   if (claim === "duplicate") {
     // Another renewal is in flight. The tokens already read stay
     // valid until midnight ET — serve this caller with them instead
@@ -902,7 +936,7 @@ export async function renewETradeAccessToken(
   } finally {
     if (claim === "consumed") {
       try {
-        await getKv(env).delete(lockKey);
+        await releaseRenewalLock(env, lockKey);
       } catch {
         // Best-effort release; the claim expires on its TTL regardless.
       }

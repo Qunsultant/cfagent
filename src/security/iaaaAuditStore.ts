@@ -99,7 +99,7 @@ import {
   createStoreSender,
   listStoreEntries,
   type DoNamespaceLike,
-} from "./durableKv";
+} from "../data/durableKv";
 
 /**
  * The audit key/cap constants are defined with the AuditLog

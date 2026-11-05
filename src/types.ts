@@ -210,6 +210,24 @@ export interface Env {
   // in security/iaaaAuditStore.ts, byte-identical. Rollback is
   // unsetting the var — no code change, no data migration.
   AUDIT_PORTS_ENABLED?: string;
+  // #2436 (#1976 step 5e) — flag-gated residual bucket family
+  // ports + the named ClaimPort. Same idiom as
+  // AUDIT_PORTS_ENABLED above: "1"/"true"/"on"
+  // (case-insensitive) = on; absence = OFF (the var is
+  // deliberately NOT in wrangler.jsonc — the slice ships
+  // default-off). Flag-ON composes the api_keys,
+  // service_tokens, payments and slack_principal_links
+  // buckets — and every `consume` claim, including the #1245
+  // E*TRADE renewal lock — through
+  // src/data/createBucketPorts.ts over the SAME SessionStore
+  // DO and kv_store table; flag-OFF is today's funnel
+  // composition in the façade modules, byte-identical.
+  // Rollback is unsetting the var — no code change, no data
+  // migration. End-state (decided in #2436): this flag and
+  // its step-5 siblings are RETAINED as permanent rollback
+  // levers — none has ever been on in production, so no soak
+  // exists; removal is a separate future proposal.
+  BUCKET_PORTS_ENABLED?: string;
   // #2246 — flag-gated report indexing into the AI Search instance.
   // Same idiom as KNOWLEDGE_SERVING_ENABLED above: "1"/"true"/"on"
   // (case-insensitive) = on; absence = OFF. The slice shipped

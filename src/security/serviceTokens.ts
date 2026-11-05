@@ -9,7 +9,11 @@ import {
   type Permission,
   type Role,
 } from "./authorization";
-import { createStoreKv, type DoNamespaceLike } from "./durableKv";
+import {
+  createBucketPorts,
+  isBucketPortsEnabled,
+} from "../data/createBucketPorts";
+import { createStoreKv, type DoNamespaceLike } from "../data/durableKv";
 import { type KvLike } from "./kvResilience";
 
 /**
@@ -103,7 +107,21 @@ const SECRET_PATTERN = /^svc_[A-Za-z0-9_-]{43}$/;
 // re-declared copy (#2688 consumption contract).
 const VALID_ROLES = ALL_ROLES;
 
+/**
+ * Issue #2436 (#1976 step 5e): the residual bucket family's
+ * service-token store. When BUCKET_PORTS_ENABLED is on, the
+ * store is the family's port composition (src/data/
+ * createBucketPorts.ts, over the SAME SessionStore DO and
+ * kv_store table); when off, this module's direct funnel
+ * composition below is the serving path, unchanged. This
+ * bucket landed after the step-5 audit (#2681, an apiKeys
+ * template clone) and is registered in the family so the
+ * step-5 census end-state has no silent remainder.
+ */
 export function serviceTokenStore(env: Env): KvLike {
+  if (isBucketPortsEnabled(env)) {
+    return createBucketPorts(env).bucketKv("serviceTokens");
+  }
   return createStoreKv({
     namespace: env.SESSION_STORE as unknown as DoNamespaceLike | undefined,
     namespaceName: "service_tokens",

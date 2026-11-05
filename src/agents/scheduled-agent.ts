@@ -65,7 +65,7 @@ import {
   type SocialTransport,
 } from "./social/publisher";
 import { createFetchSocialTransport } from "./social/liveTransport";
-import type { DoNamespaceLike } from "../security/durableKv";
+import type { DoNamespaceLike } from "../data/durableKv";
 import { readAgentDbHalt } from "../data/createGovernancePorts";
 import type { HaltReader } from "../data/governancePorts";
 import {

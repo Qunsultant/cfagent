@@ -26,7 +26,7 @@
  * Silent no-ops would lose drafts.
  */
 
-import type { DoNamespaceLike } from "../../security/durableKv";
+import type { DoNamespaceLike } from "../../data/durableKv";
 import { KNOWN_SOCIAL_CHANNELS } from "./config";
 import type { SocialDraft } from "./draft";
 import { isSocialDraft, type SocialLedger } from "./ledger";

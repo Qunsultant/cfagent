@@ -110,7 +110,11 @@ const STORAGE_ALLOW_LIST: Array<[string, number, string]> = [
   // the ai-chat lift's 3 sites moved to SqlLegacyChatStore, so
   // the file no longer appears in the above-layer population.
   ["src/services/learnings.ts", 7, "R-1 gated — NOT step 4c (two-host question open)"],
-  ["src/security/sessionStore.ts", 2, "step 5 (SessionStore / kv_store)"],
+  // Step 5e (#2436) retired sessionStore.ts's entry: the
+  // class's statements (constructor DDL + the execCounted
+  // funnel) moved to src/data/doSessionStoreAdapter.ts, so
+  // the file holds zero storage-exec sites (pinned in the
+  // step-5e section below, with the adapter's count).
   ["src/actors/cfAgentsAdapter.ts", 1, "permanent — Agents-SDK shim (ADR-out)"],
   ["src/services/receiptSurface.ts", 2, "issue #2543 receipt read-back: meter + tier reads over the sql seam (usage port drops detail_json; no port path exists)"],
   ["src/agents/routes/orchestratorMigration.ts", 3, "issue #2681 orchestrator migration: DO-internal table export/import — sqlite_master discovery, SELECT *, INSERT OR REPLACE; the migration driver must read the source instance's own storage, no port path exists for cross-instance table copy"],
@@ -304,8 +308,10 @@ describe("global D-D census: surface 1 — storage-shaped sites above the layer"
     // discovery, per-table SELECT * for the R2 snapshot —
     // same DO-internal class) → 21; issue #1776 (#1717
     // Adapter S2) retires orchestrator.ts's 3 (ai-chat lift →
-    // SqlLegacyChatStore) → 18.
-    expect(total).toBe(18);
+    // SqlLegacyChatStore) → 18; step 5e (#2436) retires
+    // sessionStore's 2 (the SessionStore DO's statements move
+    // to its data-layer adapter) → 16.
+    expect(total).toBe(16);
   });
 
   for (const file of STEP4C_SERVICE_FILES) {
@@ -653,7 +659,8 @@ describe("global D-D census: G-7 — mas_settings (port-owned since #2390)", () 
 // ---------------------------------------------------------------------------
 //
 // Step 5's population is invisible to the three surfaces above:
-// the client funnel (src/security/durableKv.ts) speaks an HTTP
+// the client funnel (src/data/durableKv.ts — moved inside
+// the data layer by step 5e, #2436) speaks an HTTP
 // protocol to the SessionStore DO, so no storage-shaped exec or
 // prepare() site exists above the DO itself (audit §1.2, R-2).
 // This section pins that population in the step-4 style:
@@ -693,7 +700,7 @@ function sameFileStringConst(text: string, name: string): string | null {
 function funnelCallSites(): Array<[string, string, string]> {
   const out: Array<[string, string, string]> = [];
   for (const f of SRC_FILES) {
-    if (f === "src/security/durableKv.ts") continue; // the funnel itself
+    if (f === "src/data/durableKv.ts") continue; // the funnel itself
     const text = STRIPPED.get(f)!;
     for (const fn of FUNNEL_FUNCTIONS) {
       for (const m of text.matchAll(new RegExp(`\\b${fn}\\s*\\(`, "g"))) {
@@ -759,7 +766,25 @@ function funnelCallSites(): Array<[string, string, string]> {
  *  site (createStoreSender "sessions" + listStoreEntries
  *  "sessions", inside its one shared backend builder). The
  *  root the flag-on path composes through is pinned in the
- *  STEP5D section below. */
+ *  STEP5D section below.
+ *  Step 5e (#2436) delta, honestly recorded: the funnel
+ *  itself MOVES into the data layer (src/security/durableKv.ts
+ *  → src/data/durableKv.ts, a rename — every importer now
+ *  names the data-layer path, pinned in the STEP5E section);
+ *  the residual-bucket family's composition root
+ *  (src/data/createBucketPorts.ts) is a NEW funnel
+ *  composition site (createStoreKv "<dynamic>" +
+ *  createStoreSender "<dynamic>" — one shared builder serves
+ *  every residual bucket, so no literal bucket exists at
+ *  either site); etradeOAuth.ts's consumeStoreKey site
+ *  REMAINS — the #1245 renewal claim's flag-off branch is
+ *  still the direct funnel claim inside the module's new
+ *  claimRenewalLock helper (the flag-on branch composes the
+ *  ClaimPort there). The
+ *  residual façades' own sites REMAIN (their flag-off
+ *  branches still call the funnel from inside the factories,
+ *  the 5b–5d shape). The roots the flag-on paths compose
+ *  through are pinned in the STEP5E section below. */
 const STEP5_FUNNEL_SITES: Array<[string, string, string]> = [
   ["src/agents/routes/adminTenantQueues.ts", "listStoreEntries", "sessions"],
   ["src/agents/routes/adminTenantQueues.ts", "listStoreEntries", "sessions"],
@@ -768,6 +793,8 @@ const STEP5_FUNNEL_SITES: Array<[string, string, string]> = [
   ["src/agents/routes/kvWipe.ts", "listStoreEntries", "sessions"],
   ["src/data/createAuditPorts.ts", "createStoreSender", "sessions"],
   ["src/data/createAuditPorts.ts", "listStoreEntries", "sessions"],
+  ["src/data/createBucketPorts.ts", "createStoreKv", "<dynamic>"],
+  ["src/data/createBucketPorts.ts", "createStoreSender", "<dynamic>"],
   ["src/data/createSessionPorts.ts", "createStoreKv", "sessions"],
   ["src/data/createSessionPorts.ts", "createStoreKv", "sessions"],
   ["src/data/createSessionPorts.ts", "listStoreEntries", "sessions"],
@@ -802,16 +829,19 @@ describe("global D-D census: step 5 — SessionStore funnel composition sites (#
 });
 
 describe("global D-D census: step 5 — kv_store writer set (#2432)", () => {
-  it("the only value writer is the SessionStore DO", () => {
+  it("the only value writer is the SessionStore DO's statement adapter", () => {
+    // Step 5e (#2436): the kv_store statements moved from the
+    // SessionStore class into its data-layer adapter; the
+    // class itself no longer names a kv_store write.
     const re = /(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+kv_store(?![\w])/gi;
     const actual = SRC_FILES.filter((f) => re.test(STRIPPED.get(f)!)).sort();
-    expect(actual).toEqual(["src/security/sessionStore.ts"]);
+    expect(actual).toEqual(["src/data/doSessionStoreAdapter.ts"]);
   });
 
-  it("the only DDL ensurer is the SessionStore DO", () => {
+  it("the only DDL ensurer is the SessionStore DO's statement adapter", () => {
     const re = /CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?\s+kv_store(?![\w])/gi;
     const actual = SRC_FILES.filter((f) => re.test(STRIPPED.get(f)!)).sort();
-    expect(actual).toEqual(["src/security/sessionStore.ts"]);
+    expect(actual).toEqual(["src/data/doSessionStoreAdapter.ts"]);
   });
 });
 
@@ -1015,6 +1045,12 @@ describe("global D-D census: step 5c — token family port composition sites (#2
     expect(rest).toEqual([
       ["src/agents/routes/kvWipe.ts", "createStoreKv", "etrade"],
       ["src/agents/routes/kvWipe.ts", "listStoreEntries", "etrade"],
+      // Step 5e (#2436): the residual-bucket family's
+      // composition root serves the etrade bucket too (the
+      // #1245 renewal ClaimPort) from its one shared builder,
+      // so its two sites classify "<dynamic>" here.
+      ["src/data/createBucketPorts.ts", "createStoreKv", "<dynamic>"],
+      ["src/data/createBucketPorts.ts", "createStoreSender", "<dynamic>"],
     ]);
   });
 });
@@ -1087,5 +1123,162 @@ describe("global D-D census: step 5d — audit log family port composition sites
       ["src/agents/routes/adminTenantQueues.ts", "listStoreEntries", "sessions"],
       ["src/agents/routes/kvWipe.ts", "listStoreEntries", "sessions"],
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Step 5e (#2436) — residual buckets + ClaimPort composition
+// ---------------------------------------------------------------------------
+//
+// The "composes ports" evidence for 5e: the residual
+// families' façades (apiKeys, serviceTokens, draftOwners,
+// agenticPayments' claim/release, intake's Slack-principal
+// store, etradeOAuth's renewal claim) route through the
+// bucket family's composition root when BUCKET_PORTS_ENABLED
+// is on, as an exact [file, function, count] set (definition
+// sites counted, comments stripped). A façade that stops
+// composing ports — or a new composition site — fails here.
+// This pin is also the flag-wiring evidence: the
+// dual-composition behaviour is identical by design, so a
+// façade that ignored BUCKET_PORTS_ENABLED would show up
+// here as a missing branch call, not as a behaviour
+// difference.
+
+const STEP5E_PORT_FUNCTIONS = [
+  "createBucketPorts",
+  "isBucketPortsEnabled",
+] as const;
+
+function step5ePortSites(): Array<[string, string, number]> {
+  const out: Array<[string, string, number]> = [];
+  for (const f of SRC_FILES) {
+    const text = STRIPPED.get(f)!;
+    for (const fn of STEP5E_PORT_FUNCTIONS) {
+      const n = (text.match(new RegExp(`\\b${fn}\\s*\\(`, "g")) ?? []).length;
+      if (n > 0) out.push([f, fn, n]);
+    }
+  }
+  return out.sort((a, b) => a.join("|").localeCompare(b.join("|")));
+}
+
+const STEP5E_PORT_SITES: Array<[string, string, number]> = [
+  ["src/data/bucketPorts.ts", "isBucketPortsEnabled", 1],
+  ["src/data/createBucketPorts.ts", "createBucketPorts", 1],
+  ["src/payments/draftOwners.ts", "createBucketPorts", 2],
+  ["src/payments/draftOwners.ts", "isBucketPortsEnabled", 2],
+  ["src/security/apiKeys.ts", "createBucketPorts", 1],
+  ["src/security/apiKeys.ts", "isBucketPortsEnabled", 1],
+  ["src/security/etradeOAuth.ts", "createBucketPorts", 2],
+  ["src/security/etradeOAuth.ts", "isBucketPortsEnabled", 2],
+  ["src/security/serviceTokens.ts", "createBucketPorts", 1],
+  ["src/security/serviceTokens.ts", "isBucketPortsEnabled", 1],
+  ["src/services/agenticPayments.ts", "createBucketPorts", 1],
+  ["src/services/agenticPayments.ts", "isBucketPortsEnabled", 1],
+  ["src/trading/channels/intake.ts", "createBucketPorts", 1],
+  ["src/trading/channels/intake.ts", "isBucketPortsEnabled", 1],
+];
+
+describe("global D-D census: step 5e — residual bucket family port composition sites (#2436)", () => {
+  it("the family's façades compose ports at exactly the pinned sites", () => {
+    expect(step5ePortSites()).toEqual(STEP5E_PORT_SITES);
+  });
+
+  it("residual-bucket funnel use outside the family's factories is exactly the named remainder", () => {
+    // Outside the family's façades and its composition root,
+    // NO funnel site remains for the residual buckets
+    // (api_keys / payments / slack_principal_links /
+    // service_tokens): the step-5 remainder for these buckets
+    // is EMPTY. (The etrade bucket's remainder — kvWipe's
+    // admin composition — is the 5c section's pin, above.)
+    const factories = new Set([
+      "src/security/apiKeys.ts",
+      "src/security/serviceTokens.ts",
+      "src/payments/draftOwners.ts",
+      "src/services/agenticPayments.ts",
+      "src/trading/channels/intake.ts",
+      "src/data/createBucketPorts.ts",
+    ]);
+    const rest = funnelCallSites().filter(
+      ([f, , bucket]) =>
+        (bucket === "api_keys" ||
+          bucket === "payments" ||
+          bucket === "slack_principal_links" ||
+          bucket === "service_tokens") &&
+        !factories.has(f),
+    );
+    expect(rest).toEqual([]);
+  });
+
+  it("the funnel lives in the data layer: the exact durableKv importer set, and no import of the retired path", () => {
+    // The funnel's end-state (step 5e): src/security/durableKv.ts
+    // moved to src/data/durableKv.ts. Every importer — src and
+    // tests — names the data-layer module by exactly the
+    // pinned [file, specifier] pairs; no file anywhere imports
+    // the retired security path. (This census file is excluded:
+    // it pins the surface and does not import the funnel.)
+    const testFiles: string[] = [];
+    (function walkTests(dir: string): void {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const path = join(dir, entry.name);
+        if (entry.isDirectory()) walkTests(path);
+        else if (entry.name.endsWith(".ts")) testFiles.push(path);
+      }
+    })("tests");
+    const pairs: Array<[string, string]> = [];
+    const scan = (f: string, raw: string): void => {
+      const stripped = stripComments(raw);
+      const seen = new Set<string>();
+      for (const m of stripped.matchAll(/from\s+"([^"]*durableKv)"/g)) {
+        if (!seen.has(m[1])) {
+          seen.add(m[1]);
+          pairs.push([f, m[1]]);
+        }
+      }
+    };
+    for (const f of SRC_FILES) scan(f, TEXT.get(f)!);
+    for (const f of testFiles) {
+      if (f === "tests/global_dd_census_2356.test.ts") continue;
+      scan(f, readFileSync(f, "utf8"));
+    }
+    pairs.sort((a, b) => a.join("|").localeCompare(b.join("|")));
+    expect(pairs).toEqual([
+      ["src/agents/orchestrator.ts", "../data/durableKv"],
+      ["src/agents/routes/adminTenantQueues.ts", "../../data/durableKv"],
+      ["src/agents/routes/kvWipe.ts", "../../data/durableKv"],
+      ["src/agents/scheduled-agent.ts", "../data/durableKv"],
+      ["src/agents/social/briefStore.ts", "../../data/durableKv"],
+      ["src/agents/social/durableStores.ts", "../../data/durableKv"],
+      ["src/agents/social/pipeline.ts", "../../data/durableKv"],
+      ["src/data/auditLogStoreImpl.ts", "./durableKv"],
+      ["src/data/createAuditPorts.ts", "./durableKv"],
+      ["src/data/createBucketPorts.ts", "./durableKv"],
+      ["src/data/createSessionPorts.ts", "./durableKv"],
+      ["src/data/createTokenPorts.ts", "./durableKv"],
+      ["src/data/inMemoryAuditLogAdapter.ts", "./durableKv"],
+      ["src/payments/draftOwners.ts", "../data/durableKv"],
+      ["src/security/apiKeys.ts", "../data/durableKv"],
+      ["src/security/etradeOAuth.ts", "../data/durableKv"],
+      ["src/security/iaaaAuditStore.ts", "../data/durableKv"],
+      ["src/security/publicOAuth.ts", "../data/durableKv"],
+      ["src/security/serviceTokens.ts", "../data/durableKv"],
+      ["src/security/session.ts", "../data/durableKv"],
+      ["src/server.ts", "./data/durableKv"],
+      ["src/services/actorGatewayPorts.ts", "../data/durableKv"],
+      ["src/services/agenticPayments.ts", "../data/durableKv"],
+      ["src/trading/channels/intake.ts", "../../data/durableKv"],
+      ["tests/durable_session_store.test.ts", "../src/data/durableKv"],
+      ["tests/payments_webhook_settlement.test.ts", "../src/data/durableKv"],
+      ["tests/step5a_characterization_2432.test.ts", "../src/data/durableKv"],
+      ["tests/store_op_metrics_v2_1819.test.ts", "../src/data/durableKv"],
+      ["tests/store_op_metrics.test.ts", "../src/data/durableKv"],
+    ]);
+  });
+
+  it("the SessionStore class holds zero storage-exec sites; its data-layer adapter holds exactly 2", () => {
+    // The constructor DDL site and the execCounted site that
+    // were surface 1's sessionStore entry now live in the
+    // adapter (its ensureSchema DDL + its exec funnel).
+    expect(countIn(STORAGE_EXEC_PATTERN, "src/security/sessionStore.ts")).toBe(0);
+    expect(countIn(STORAGE_EXEC_PATTERN, "src/data/doSessionStoreAdapter.ts")).toBe(2);
   });
 });

@@ -11,7 +11,7 @@
  *
  * This file carries types + the interface ONLY — no provider access.
  * The namespace shape reuses the existing `DoNamespaceLike` from
- * `src/security/durableKv.ts` (extended with the optional
+ * `src/data/durableKv.ts` (extended with the optional
  * `idFromString` that the payments webhook forwarder needs); no new
  * addressing scheme is introduced, and the agents-SDK seams stay
  * untouched (`routeAgentRequest` in `src/server.ts`, `ctx.exports`
@@ -42,7 +42,7 @@
  * dispatch exactly as before).
  */
 
-import type { DoNamespaceLike, DoStubLike } from "../security/durableKv";
+import type { DoNamespaceLike, DoStubLike } from "../data/durableKv";
 
 /**
  * A DO namespace as the gateway sees it: the existing

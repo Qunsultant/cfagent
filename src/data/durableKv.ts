@@ -1,5 +1,5 @@
-import type { KvLike } from "./kvResilience";
-import { recordStoreOp, type StoreOpOutcome } from "./storeMetrics";
+import type { KvLike } from "../security/kvResilience";
+import { recordStoreOp, type StoreOpOutcome } from "../security/storeMetrics";
 import type {
   ResourceAttribution,
   ResourceUsagePort,
@@ -20,6 +20,16 @@ import type {
  * Wire format is deliberately a tiny JSON protocol over `stub.fetch` rather
  * than RPC: it needs no `cloudflare:workers` import on the client side, which
  * keeps this module (and the fallback logic) unit-testable under Node.
+ *
+ * Issue #2436 (#1976 step 5e): this module's home is now the data
+ * layer (src/data/) — it is the DO adapters' client: every
+ * src/data/ family adapter (sessions 5b, tokens 5c, audit 5d,
+ * residual buckets 5e) composes it from inside the layer, and the
+ * only above-layer importers left are the family façades' flag-off
+ * branches and the named admin-route compositions, pinned exactly
+ * by the census (tests/global_dd_census_2356.test.ts, step-5e
+ * section). The wire protocol, metrics and semantics are
+ * unchanged by the move.
  */
 export interface DoStubLike {
   fetch(request: Request): Promise<Response>;

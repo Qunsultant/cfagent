@@ -24,7 +24,7 @@ import {
   createStoreSender,
   listStoreEntries,
   type DoNamespaceLike,
-} from "../security/durableKv";
+} from "./durableKv";
 import type { Env } from "../types";
 import {
   IAAA_AUDIT_KEY_PREFIX,

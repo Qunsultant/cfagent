@@ -48,8 +48,8 @@ import {
   createKvMembershipStore,
   listMembershipsFromEntries,
 } from "../../security/iaaaMembershipStore";
-import { listStoreEntries } from "../../security/durableKv";
-import type { DoNamespaceLike } from "../../security/durableKv";
+import { listStoreEntries } from "../../data/durableKv";
+import type { DoNamespaceLike } from "../../data/durableKv";
 import {
   lookupInternalUserIdByLogin,
   lookupLoginByUserId,

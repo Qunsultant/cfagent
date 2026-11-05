@@ -9,7 +9,7 @@
  * (#1743 stream) when one is wired — without ever failing the op.
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { createStoreKv, type DoNamespaceLike } from "../src/security/durableKv";
+import { createStoreKv, type DoNamespaceLike } from "../src/data/durableKv";
 import { setStoreOpSink, type StoreOpRecord } from "../src/security/storeMetrics";
 
 function makeNamespace(reply: Record<string, unknown>) {

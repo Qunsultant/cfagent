@@ -72,7 +72,7 @@ import {
   createStoreKv,
   listStoreEntries,
   type DoNamespaceLike,
-} from "../src/security/durableKv";
+} from "../src/data/durableKv";
 import {
   createSession,
   getSession,
