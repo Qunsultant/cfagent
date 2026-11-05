@@ -18,6 +18,15 @@ import { apiFetch } from "./apiFetch";
 
 export type BrokerEnvironment = "TEST" | "PROD";
 
+/**
+ * Issue #3297: the value is a trading type in everything but name — TEST is
+ * paper, PROD is live — and it now drives both brokers (#3280). The UI says
+ * Paper/Live; the wire keeps TEST/PROD, and the stored key stays
+ * `etrade:environment` because renaming it is a data migration, not a label
+ * change. A future key would be `broker:environment`, read as an alias here.
+ */
+export const BROKER_ENVIRONMENT_STORAGE_KEY = "etrade:environment";
+
 export const BROKER_ENV_CHANGED_EVENT = "etrade-env-changed";
 
 const STALE_BROKER_ENV_KEYS = ["cfagent_env", "etrade_active_env"] as const;
