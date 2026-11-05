@@ -1,0 +1,3 @@
+### Changed
+
+- **The trading-type control speaks Paper and Live (#3297, product-neutrality #3292):** the switch said `TEST | PROD` — E*TRADE's environment vocabulary — even though the value has been a trading type for both brokers since #3280. It now reads `Paper` and `Live` (menu entries, the status line and the settings tooltip), while the wire keeps `TEST`/`PROD` and the stored key stays `etrade:environment`. That key is documented in `brokerEnvironment.ts` as the shared selection with a note that a rename is a data migration and that a future key would be `broker:environment`; `BROKER_ENVIRONMENT_STORAGE_KEY` makes the promise greppable instead of leaving it in a comment. No resolver precedence changes (pin → selection → inference). #ceo-aimp
