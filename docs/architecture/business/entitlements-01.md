@@ -1,0 +1,212 @@
+# Free vs paid screen entitlements — definition
+
+- **Issue:** #3241 — "[Enhancement] - Define free vs paid screen entitlements per product/subscription: Free runs any screen; plans define run allowances by type"
+- **Status:** AGREED. The owner decisions of 2026-11-05 ~06:07 EST (recorded in §1 and §10) answer decisions 1–4; decision 5 (approved prices) remains open. This document is the deliverable #3241 asks for: the agreed definition, linked from the issue. It is **not** code, **not** a production config change, **not** a flag change, **not** a price change, and **not** a secret or permission change. Implementation follows as separate slices, each with its own issue, PR, and owner approval where it touches pricing or the gate. Issue #3241 closes on the agreed definition, not on code.
+- **Verified against:** `origin/main` = `9e6ef4144f673df1ac867947e4e3026f44e952fa` ("feat(3256): signup to trial onboarding flow"). The gate, tier, catalogue, and operator-lever facts were verified against main `b66d9cfd` (survey note `~/workspace/cbo-remaining-work/entitlement-model-verify-2026-11-05.md`), the trial facts against `aea19b4e`, and the cited line numbers re-verified against `9e6ef41` (the only delta since `aea19b4e` is the #3256 onboarding flow, which touches no money-path file).
+- **Parent program:** #2012 (commercialization). Related: #3239 (the incident that surfaced this), #2373 (the paid seam), #2185 (operator price catalogue), #2547 (price-approval state), #2549 (refund / failure-credit XOR guard), #3243 (trial), #3244 (operator subscription grant), #3245 (unlimited-free grant), #3246 (upgrade offers, unbuilt), #3247 (free-for-lifetime, undecided).
+
+## 1. The requirement (owner-directed, 2026-11-05 ~00:40 EST)
+
+> A person with free account must be able to run any screen i.e. stock/options/goal/strategy (manual, scheduled, triggered)......and non-free accounts must be able to run it as per the plan (pay-per use, credits, or subscriptions) and how many are enabled by each plan...one run, more runs and the types of runs...all of this must be defined for each product/subscription.
+
+Owner decisions on the open points (2026-11-05 ~06:07 EST):
+
+- **Triggered** is a scheduled run triggered on-demand by a user, as opposed to a timer-fired run — so a user is involved, and it must be tracked that way.
+- **Free is capped in number of runs for each product: 10 for now, and the count must be changeable.** Similar counts apply to paid users as well. The tiered subscriptions include what is in Free, versus Basic versus Premium (cumulative tiers).
+- **Nothing over-allowance is allowed.** A user who has used up their allowance is asked either to upgrade or to buy credits for pay-per-use, once they have exhausted their subscription quotas.
+
+## 2. The model as shipped — the deterministic rules this definition states
+
+These rules are what the code on main does today. The definition states them; it does not re-decide them. Where the code and the decided model differ, the difference is named in §3.1 and §7 — the decided model governs, and the gaps are implementation work, not silent re-decisions.
+
+### 2.1 The gate (the only entitlement path)
+
+Every paid-screen run goes through one gate, the native monetization gate (`src/services/nativeMonetization.ts`, `NativeMonetizationGate.check()`), reached through the paid-screen submission seam (`src/services/paidScreenSubmission.ts`). The gate consumes coverage only through `check()` / `confirmPaid()` and the existing tier/coverage model. There is no second entitlement path. (The conformance exception to this rule is stated in §8 — the chat/NLQ paid path currently uses a second price source and bypasses the approval check. That is an open conformance point, not a second approved path.)
+
+Gate order, verified (`nativeMonetization.ts`, main `9e6ef41`):
+
+1. **Verified identity required; tenant mismatch throws.** An existing paid row for the run returns `already_paid`.
+2. **Flag OFF → free, price 0, no price resolution.** A free run never depends on catalogue approval state.
+3. **Unlimited-free grant FIRST, before price resolution and before the scheduled coverage-only rule.** An active grant returns `allowed: true, status: "paid", priceUSD: 0, paidVia: "unlimited_free_grant"` (`nativeMonetization.ts:247–252`) and records a paid row, so a later `confirmPaid` returns `already_paid`. A grant-covered run therefore **never fails on a missing/unapproved family price** and **covers recurring runs** — a deliberate change to the recurring rule. Audit: the payment workflow records `payment.covered` with `paidVia: "unlimited_free_grant"`; `consumeCoverage` no-ops for it (no included run consumed, no credits deducted).
+4. **Price resolution** via `priceFor()`: only an APPROVED catalogue price charges; missing / unapproved / invalid throws fail-closed — never a guessed price.
+5. **Coverage, in order:** `Subscribed` + `includedRunsRemaining > 0` → `subscription_included` (one included run decremented); else `creditsUSD >= price` → `credits` (price deducted, cent-rounded); else no coverage.
+6. **Scheduled, not one-off-authorized → `coverage_required`, HTTP 402**, reason: "Scheduled runs need subscription included usage or prepaid credits. No unattended card charge is taken." One-off scheduled means `trigger === "scheduled" && scheduleKind === "one_off" && authorizedAtSubmission === true`; anything else scheduled (recurring, or no schedule kind stated) is coverage-only.
+7. **Manual / one-off-authorized, uncovered → checkout minted** (Stripe card or x402; no checkout ports → throw fail-closed), returned as 402 `payment_required` with the checkout attached.
+
+The caller side (`paidScreenSubmission.ts`, `resolvePaidScreenCoverage()` / `resolvePaidScreenAction()`) mirrors this order exactly: grant first, then Subscribed included runs, then credits; flag-OFF → free; covered scheduled / one-off-authorized → start the payment workflow; uncovered recurring / unstated → skip with the coverage-required reason. Identity is resolved from the verified session only; a client-supplied tenantId is never read.
+
+### 2.2 Tiers and effective tier
+
+- Three stored tiers: `Free | PayPerUse | Subscribed` (`src/data/commercialPorts.ts:26–28`), plus `tierSource` (`operator | subscription | null`). A missing account row is implicitly Free with no balance.
+- **Effective tier is resolved at read time** by `resolveEffectiveTier(account, subscriptions, nowMs)` (`src/data/subscriptionPorts.ts:140–151`): **any** subscription row with `periodEndMs > nowMs` confers `Subscribed`; no account → `Free`; a stored `Subscribed` with a non-operator `tierSource` and no live row → `Free`; otherwise the stored tier.
+- **Tier rule as written (period-end only, status-blind):** `resolveEffectiveTier` does **not** check subscription `status` — a canceled-but-unexpired row still confers `Subscribed` until period end (cancel-at-period-end keeps the tier). The deactivation gate `hasUnexpiredSubscription` (`subscriptionPorts.ts:160–165`) **does** require `status === "active"`, so the comment at `:156–158` ("same unexpired rule … can never disagree") overstates the agreement. This definition states the tier rule as written (period-end only), not as the comment claims.
+- **Included runs are read from the account row only** (`platformIdentity.ts:108`: `includedRunsRemaining: stored ? stored.includedRuns : 0`). No other source feeds the gate.
+- There is no fourth tier, no per-tenant tier, no sweeper, and no per-user / per-tenant monetization-flag exemption anywhere in the gate path. The flag is a single platform-wide boolean.
+
+### 2.3 Screen families and prices
+
+- Families: `stock | goal | options | strategy` (`src/data/priceCataloguePorts.ts:29–31`). The coverage rule in §2.1 is **identical across families** — the gate's coverage order does not vary by family. Only the price resolved in step 4 varies per family.
+- Prices come from the operator price catalogue. Only APPROVED prices can be charged; a missing or unapproved price fails closed (§8 for the full price note, including the parts that are not verifiable from the repo).
+
+## 3. The families × kinds × plans matrix — the decided model
+
+**How to read it.** Rows are account states (tier, grant, or trial). Columns are run kinds. The rule in each cell applies identically to all four families (stock, goal, options, strategy); the only per-family difference is the price resolved in gate step 4 (see §8). "Covers it" names the `paidVia` the gate records: `unlimited_free_grant`, `subscription_included`, `credits`, or a minted checkout. "At the limit" means the allowance for that state is used up — **nothing runs over allowance** (§7). "Skip" means the run does not start, is audited, and is explained — never charged unattended.
+
+| Account state | Manual | Scheduled (recurring, timer-fired) | Scheduled (one-off, authorized at submission) | Triggered (on-demand, user-invoked) |
+|---|---|---|---|---|
+| **Flag OFF** (any account) | Runs free, price 0. No price resolution, no coverage check. | Runs free, price 0. | Runs free, price 0. | Runs free, price 0. |
+| **Free, no grant** (allowance left, §4.1) | Runs, one free run consumed (10 per product). | Runs, one free run consumed. | Runs, one free run consumed. | Runs, one free run consumed. Tracked as user-triggered (§9). |
+| **Free, no grant** (allowance used up) | At the limit: asked to upgrade or buy credits (§7). Nothing runs. | At the limit: run skipped; owner asked to upgrade or buy credits (§7). Nothing runs. | At the limit: asked to upgrade or buy credits at submission (§7). Nothing runs unpaid. | At the limit: asked to upgrade or buy credits (§7). Nothing runs. |
+| **Free + active unlimited-free grant** (§5.1) | Runs, price 0, `paidVia: unlimited_free_grant`. No checkout, no credit deduction, no included-run consumption. Never fails on an unapproved family price. The grant overrides the 10-run cap. | Runs, price 0, same as manual. **The grant covers recurring runs.** | Runs, price 0, same as manual. | Runs, price 0, same as manual. Tracked as user-triggered (§9). |
+| **PayPerUse** (credits `>=` price) | Runs, price deducted from `creditsUSD` (`paidVia: credits`, cent-rounded). | Runs, price deducted from `creditsUSD` (`paidVia: credits`). | Runs, price deducted from credits. | Runs, price deducted from credits. Tracked as user-triggered (§9). |
+| **PayPerUse** (credits `<` price, or none) | At the limit: asked to upgrade or buy credits (§7). Nothing runs. | At the limit: run skipped; owner asked to upgrade or buy credits (§7). | At the limit: asked to upgrade or buy credits at submission (§7). | At the limit: asked to upgrade or buy credits (§7). |
+| **Subscribed** (included runs left, §4.2) | Runs, one included run consumed (`paidVia: subscription_included`). | Runs, one included run consumed. | Runs, one included run consumed. | Runs, one included run consumed. Tracked as user-triggered (§9). |
+| **Subscribed** (included runs exhausted) | Falls through to credits: credits `>=` price → runs, price deducted; else at the limit — asked to upgrade or buy credits (§7). | Falls through to credits: credits `>=` price → runs; else at the limit — run skipped, owner asked to upgrade or buy credits (§7). | Falls through to credits, else asked to upgrade or buy credits at submission (§7). | Falls through to credits, else at the limit (§7). Tracked as user-triggered (§9). |
+| **Trialing** (trial row unexpired, §6) | Runs while the trial is live: included runs consumed first (`subscription_included`), then credits, then at the limit (§7) — the same fall-through as Subscribed. | Runs while the trial is live, same fall-through. | Runs while the trial is live, same fall-through. | Runs while the trial is live, same fall-through. Tracked as user-triggered (§9). |
+| **Trial ended** (trial row lapsed) | Tier lapses to the stored tier (normally Free): free allowance if any remains, else at the limit (§7). Runs left in the counter are **not** clawed back, but they are only spendable while the account holds a Subscribed effective tier, so they sit unused unless the account subscribes again (§6). | Tier lapses: free allowance if any remains, else skipped + asked to upgrade or buy credits. | At the limit: asked to upgrade or buy credits at submission if the user authorizes it; runs once paid. | At the limit (§7). |
+| **Operator-granted subscription** (§5.2) | Same as Subscribed while the granted row is unexpired (included runs consumed first, then credits, then at the limit (§7)). | Same as Subscribed while unexpired. | Same as Subscribed while unexpired. | Same as Subscribed while unexpired. Tracked as user-triggered (§9). |
+| **Operator-granted subscription, expired** | Tier falls back at expiry (see §5.2): normally Free → free allowance if any remains, else at the limit (§7). | Tier falls back: free allowance if any remains, else skipped + asked to upgrade or buy credits. | Asked to upgrade or buy credits at submission if authorized; runs once paid. | At the limit (§7). |
+
+**Family note.** The matrix is family-symmetric by construction of the gate. The per-family differences are confined to price: the price resolved per family (approved catalogue price; see §8), and the fail-closed rule — a missing or unapproved family price blocks every path **except** flag-OFF runs and grant-covered runs, which never resolve a price. There is no family that is inherently free or inherently paid; a stock screen is free when the flag is off, covered by a grant / subscription / credits when it is on, or a per-use checkout when it is on and uncovered. The one exception recorded in #3241: listings return before any spec is built, so they never reach the payment stage.
+
+### 3.1 Decided vs shipped — the gaps this definition does not hide
+
+The matrix above is the **decided** model. Three parts of it are **not yet shipped**; they are implementation work in separate slices, not silent re-decisions:
+
+1. **The free-run counter (10 per product, §4.1).** No free-run counter exists in the gate today: a Free account without a grant currently meets 402 + checkout on manual runs and a skip on recurring scheduled runs. The 10-run allowance is decided; counting it needs a gate slice.
+2. **The at-limit upgrade-or-buy-credits offer (§7).** The client today maps any 402 to one fixed checkout message with no upgrade offer and no plan choice (#3246, unbuilt). The decided offer needs the upgrade surface plus the credits purchase path.
+3. **Triggered as a distinct tracked trigger (§9).** The money path today knows only `manual | scheduled` (`NativeRunTrigger`). Tracking a triggered run as user-invoked needs the trigger carried through the seam and audited with the invoking login.
+
+## 4. Allowances per plan
+
+### 4.1 Free allowance — DECIDED: 10 runs per product, changeable
+
+- **Free allowance = 10 runs per product.** The count is **operator-managed data, changeable without code** — never a hardcoded constant. "Changeable" means an operator can raise or lower the count per product through operator data; the gate reads the current value, it does not embed 10.
+- **The period over which the 10 runs are counted is OPEN** (decision 1, §10). The billing period is the natural candidate, given subscriptions are period-based, but the owner has not confirmed it. Until confirmed, the count has no stated reset — implementation must not invent one.
+- **The unlimited-free grant (§5.1) overrides the cap** for an approved account: a grant-covered run consumes no free run and is never blocked by the cap. The grant is the exception mechanism for approved accounts; the 10-run cap is the default for everyone else.
+- **A Free account without a grant and with its allowance left** runs under the "Free, no grant (allowance left)" row of the matrix (§3). This resolves the conflict #3241 named (a Free account under monetization ON could not run a manual screen) **for every Free account up to the cap**, and without limit for approved accounts via the grant.
+- **Free-for-lifetime** (#3247: access free forever, any activity requires payment) is a separate filed option. It is not decided by this definition and grants no runs.
+
+### 4.2 Per-plan included-run counts — shape DECIDED, numbers OPEN
+
+- **The same shape applies to paid users:** every plan carries an included-run count **per product**, just as Free carries 10 per product. Included runs are a per-plan operator value (`agent_subscription_plans.includedRuns`), not a number in this definition.
+- **Tiers are cumulative:** Basic includes everything Free includes; Premium includes everything Basic includes. A higher tier never removes an entitlement a lower tier has.
+- **The counts for Basic and Premium are OPEN** (decision 2, §10) and are set as operator data when decided — changeable, never hardcoded. This definition sets no Basic or Premium number.
+- The same applies to trial plans: a trial grants the trial plan's `includedRuns` for the trial period (§6). The number is the plan's operator value, not a number in this definition.
+- No plan carries a per-family included-run cap beyond the per-product count in the code today. A different per-family shape would be a scope addition, not something this definition invents.
+
+### 4.3 PayPerUse and Subscribed — the coverage order (as shipped, confirmed by the decided model)
+
+- **Coverage order, as shipped (gate order, §2.1 step 5) and kept by this definition:** included runs first, then existing credits, then the at-limit offer (§7). A PayPerUse account with `creditsUSD >= price` never sees an offer for that run; a Subscribed account with included runs left never draws credits for that run.
+- **When included runs are exhausted:** the fall-through is included runs → credits → at-limit offer. A Subscribed account with exhausted included runs and sufficient credits runs on credits; with neither, it meets the at-limit offer (§7) — asked to upgrade or buy credits. Buying credits is the pay-per-use path for a subscriber whose quotas are exhausted.
+- The credit/checkout order question from the draft (decision 2) is settled by the decided model: credits are drawn before any offer is made, and the offer itself is upgrade-or-buy-credits — there is no checkout-first or credits-only variant in the decided model.
+
+## 5. Operator grants
+
+### 5.1 Unlimited-free grant (shipped, #3245 → PR #3267, migration 0040)
+
+- **What it is:** an account-level operator grant on the commercial account row: `UnlimitedFreeGrant { grantedBy, reason, expiresAtMs }`, `expiresAtMs: null` = no expiry (`src/data/commercialPorts.ts:51–56`). Active iff it exists and expiry is null or in the future.
+- **Effect:** gate step 3 — covers every family × every kind, including recurring runs, at price 0, with no checkout, no credit deduction, no included-run consumption, and no failure on an unapproved family price. It overrides the 10-run free cap (§4.1).
+- **Write path:** the operator account upsert (`POST /payments/agentic/commercial/account`) accepts `unlimitedFreeGrant`; `undefined` = preserve, explicit `null` = revoke, object = grant. Operator-only, audited (granted/revoked), `grantedBy` = the session-verified operator login, never client-supplied. UI: `UnlimitedFreeGrantSection` in the Accounts admin panel. The grant is **not** gated on the monetization flag.
+- **Scope rule:** session-scoped always; scope derives from the verified session login only; no client-supplied tenantId is ever used for scoping.
+- **Still open (decision 1, §10):** who approves an account for unlimited free, and which account(s) first. No account is granted by code (no seeded grant exists); a grant is an operator act through the Accounts UI, audited, with `grantedBy` = the session operator login. The first approved account(s) have not been named. **Do not grant any real account unlimited free until Mars names the account(s).**
+- **Limit:** the draining cfpay gate does **not** honor the grant (its account interface carries the field for shape compatibility only). New runs use the native gate; draining runs do not get grant coverage.
+
+### 5.2 Operator subscription grant (shipped, #3244 → PR #3270, migration-free)
+
+- **What it is:** an operator picks an active plan and creates a **real subscription row** for a user, with no checkout and no Stripe record: `POST /payments/agentic/commercial/subscription/grant` (`grantSubscription()` in `src/services/subscriptionActivation.ts:98`, mirroring purchase activation). The subscription row **and** the account's included-runs bump are written together — the gate reads included runs from the account row only, so a grant that conferred tier without runs would enable nothing.
+- **Effect:** while the granted row is unexpired, the account is Subscribed with the plan's included runs (matrix row "Operator-granted subscription"). Expiry = the plan period; at expiry the tier falls back. The grant is **not** gated on the monetization flag.
+- **Rules:** operator-only (403 otherwise); 404 unknown plan; 409 inactive plan; **400, no account row — fail-closed** (the operator creates the account first; unlike the trial route, the grant does not auto-create the account). Client `tenantId` ignored; tenant from the target account row. Audited `commercial.subscription.granted` with before→after effective tier. UI: `SubscriptionGrantSection` in the Accounts admin panel.
+- **Known edge (carried, not hidden):** a grant to a user whose stored tier was operator-granted Subscribed overwrites `tierSource` to `subscription`, so at expiry the tier falls back to Free instead of keeping the operator grant. A follow-up slice would be needed to preserve the operator grant across a subscription-grant expiry.
+
+## 6. Trial subscriptions (shipped, #3243 → PR #3274, migration 0041)
+
+- **Plan trial days are operator data:** `trial_days` (nullable) on `agent_subscription_plans` (migration 0041, after 0040, before 0042 in `ALL_MIGRATIONS`, `migrationRunner.ts:1647–1649`). A plan offers a trial iff `trialDays` is a positive integer; `null` = no trial. No trial length or included-run count is hardcoded anywhere.
+- **Trial checkout is a $0, no-payment path:** `POST /payments/agentic/commercial/subscription/trial` (`src/agents/routes/agenticPayments.ts:1981`). There is **no Stripe involvement** — no Stripe trial parameter path exists in-repo, so no Stripe session is minted and no payment is taken; the row is provider `"trial"` with providerStatus `"trialing"` and no Stripe ids. No journal entry ($0, no money moved). The trial requires the monetization flag ON (flag OFF → trial signup disabled).
+- **Activation** (`activateTrialSubscription`, mirroring purchase activation):
+  1. The plan must exist and be active, and must offer a trial.
+  2. **One trial per user per plan:** a prior trial row for this plan refuses, live or expired.
+  3. The trial period starts **now** (it does not stack from the latest paid-through instant the way a repurchase does) and runs `trialDays` whole days.
+  4. The row confers effective tier Subscribed while unexpired, via the existing `resolveEffectiveTier` read — and it **lapses at periodEnd with no sweeper**, the same rule a lapsed paid subscription follows.
+  5. **The critical requirement:** the account gains the plan's included runs (`includedRuns: (existing ?? 0) + plan.includedRuns`). Tier alone enables nothing — the gate reads included runs from the account row only, and the Billing purchase route confers tier only. A trial that only conferred tier would land the user exactly where a Free user lands.
+  6. Tenant: an existing account with a different tenant refuses; a **missing account is created** in the caller's tenant (session-derived), so a first trial succeeds end-to-end with no operator step.
+- **Known limit, stated not hidden — the fungible counter:** the granted runs join the account's single `includedRuns` counter, so remaining trial runs are **not** clawed back separately at trial end. The consequence, following directly from the gate's coverage condition (`tier === "Subscribed" && includedRunsRemaining > 0`): after the trial lapses, the tier falls back (normally Free), the runs left in the counter stay on the row but are **not spendable** until the account holds a Subscribed effective tier again. A per-source run ledger (separate clawback / separate trial-run balance) would be a separate slice.
+- **Trial end:** the fallback is the tier lapse plus the outcome-encoded message `trialEndedMessage`: "Your free trial of {plan} has ended. Subscribe or pay per run to keep running screens." The started message is likewise outcome-encoded: "Your {N}-day free trial of {plan} started: {M} included runs, ending {date}. No payment was taken. When the trial ends, subscribe or pay per run to keep running screens."
+- **Client entry:** `ProductCatalogPanel.tsx` — "Start free trial" in the Selling section (same section as purchase, never a second purchase path), posting to `/subscription/trial`, with fixed per-status error copy (409: "This plan's trial is not available — it may already have been used, or the plan offers no trial."; flag OFF: "Trial signup is disabled (the monetization flag is off)."). The trial is also offered in the first-run onboarding flow (step 2, trial start-or-skip), which landed with #3256 → PR #3279.
+- **Not a trial:** Stripe's `trialing` provider-status tolerance is **not** a product trial. A trialing subscription via the Stripe Billing purchase route confers tier only, never included runs ("Included-run bypass stays OFF"), so it holds tier Subscribed with zero included runs and still 402s/skips — the same hole applies to a paid Billing subscription. Only the trial route (§6) grants runs. The definition distinguishes the two and does not treat Stripe `trialing` as a trial.
+
+## 7. At-limit behavior — DECIDED: nothing runs over allowance; the user is asked to upgrade or buy credits
+
+The #3239 lesson governs this section: **an at-limit outcome is always an outcome-encoded message, never a raw error code.** The sync-refusal code `monetization_enabled_workflow_required` is never rendered raw.
+
+**Decided rule:** nothing runs over allowance. When a user has used up their allowance, they are asked either to **upgrade** (to a higher tier) or to **buy credits for pay-per-use** (once their subscription quotas are exhausted). The run does not start until one of those is done.
+
+| Kind | At the limit (allowance used up) | What the user sees (decided) | Next step offered (decided) |
+|---|---|---|---|
+| Manual | Run does not start. | Outcome-encoded at-limit message: the allowance is used up, with the two options. | Upgrade, or buy credits (pay-per-use checkout). |
+| Scheduled (recurring, timer-fired) | Run SKIPPED, audited, explained. Never charged unattended. | The coverage-required reason plus the two options, delivered to the account owner (the run itself is unattended, so the prompt is not in-run). | Upgrade, or buy credits. No checkout is offered for the skipped run itself. |
+| Scheduled (one-off, authorized at submission) | Run does not start unpaid. | Outcome-encoded at-limit message at submission time. | Upgrade, or buy credits (pay-per-use checkout) to start the run. |
+| Triggered (on-demand, user-invoked) | Run does not start. | Outcome-encoded at-limit message. | Upgrade, or buy credits. |
+| Trial ended | Tier lapses; the next run meets the Free row (free allowance if any remains, else at the limit). | `trialEndedMessage`: "Your free trial of {plan} has ended. Subscribe or pay per run to keep running screens." | Subscribe (upgrade) or pay per run (buy credits). |
+| Trial unavailable | 409 / flag-OFF. | Fixed per-status copy (§6). | Pick a plan that offers a trial, or subscribe / pay per run. |
+
+**Shipped today (gap, not the decided rule):** the client maps **any** 402 on a screen route to one fixed message — "Screens require payment while monetization is on. Start the run through the payment workflow (Stock Hub → Run a new screen) — no screen has started yet." (`src/client/paidScreenSubmit.ts:86–93`) — which offers only the per-use checkout, with **no** upgrade offer and **no** plan choice, because no upgrade/upsell UI exists in the client today (#3246, unbuilt). The decided upgrade-or-buy-credits offer is implementation work: the upgrade surface (#3246) plus the credits purchase path. Until it ships, the at-limit experience is the fixed checkout message, and the definition records that as a gap rather than pretending the decided offer exists.
+
+There is also no side-by-side tier comparison and no choose-a-plan surface in the client today; plans are listed for purchase via the checkout panel and the product catalog, and the account tier / credits / included runs are displayed read-only. The upgrade offer needs that comparison surface; it is part of #3246's scope, not this definition's.
+
+## 8. Price catalogue note — approved vs proposed, and two open conformance points
+
+- **Seed values are PROPOSED, not approved:** `PROPOSED_SEED_PRICES = { stock: 0.02, goal: 0.10, options: 0.05, strategy: 0.10 }` (`src/data/priceCataloguePorts.ts:51–62`, header "PROPOSED seed prices, NOT owner-approved and NOT an activation"). The D1 ensure writes all four rows with `approvalStatus: "proposed"`, `approvedBy/approvedAtMs: null` (`src/data/d1PriceCatalogueAdapter.ts:49–76`); migration 0027 gives every seeded/pre-existing row `'proposed'`.
+- **Approval:** `PriceApprovalStatus = "proposed" | "approved"`; `getApprovedPrice` returns null unless the entry exists, is valid, and is APPROVED — that null is the gates' fail-closed signal. Writing a price always lands as PROPOSED with the approval record cleared; `approvePrice` records approver + time.
+- **"Gate triple stands" is NOT a catalogue-approval fact verifiable from the repo.** This is stated plainly because the earlier record said otherwise. Approval lives in the **live store** (operator data); code seeds everything as proposed, and no approval of any family is recorded in code. The actually-approved price set per family is **not verifiable from the repo** and is listed under "still to verify" (§12). Decision 5 (§10) — the approved per-family prices themselves — remains OPEN.
+- **Open conformance point 1 — a second hardcoded price source.** The "triple" (stock $0.02 / options $0.05 / research $0.10) actually lives in `TRADING_PAID_SERVICES` (`src/services/agenticPayments.ts:115`, `OPTIONS_SCREENER $0.05`, `MARKET_RESEARCH $0.10`, `STOCK_SIGNALS $0.02`), used by the NLQ/chat paid path (`src/agents/nlq/execution.ts:380–381, 2177, 2201`). The numbers agree with the catalogue seeds today, but the sources differ, and an operator price change diverges them. This is exactly what #3241's conformance note forbids ("no second pricing source"). The definition must resolve it, and does **not** pick a side here: either (a) align the chat/NLQ paid path to `getApprovedPrice` and retire `TRADING_PAID_SERVICES` as a price source, or (b) bless the second source explicitly as the chat path's price list, with a stated rule for what happens when it disagrees with the catalogue. Until the owner picks, the definition records the second source as a live violation of its own conformance line.
+- **Open conformance point 2 — F3 divergence (live on main).** The stock chat paid path reads the **raw** operator catalogue price with **no approval check** (`src/data/productAccess.ts:347`, with the header note at `:41` that "#2547 approval discipline is NOT honored", and a `TRADING_PAID_SERVICES` fallback at `:351`), while HTTP gates fail closed on PROPOSED prices. The same run can therefore be charged through the chat path on a price the HTTP gates refuse to charge. The file itself carries a divergent verdict (`:359–374`) and a note (`:387`) toward aligning the door + NLQ paid price sources to `getApprovedPrice`. The definition must resolve it, and does **not** pick a side here: either (a) align the chat path to `getApprovedPrice` (fail closed on PROPOSED, like the HTTP gates), or (b) bless the chat path's raw-price read as its own rule, with a stated reason. Until the owner picks, the divergence stands as recorded.
+- **Related conformance note:** the draining cfpay gate does not honor the unlimited-free grant (§5.1). New runs use the native gate; draining runs do not get grant coverage. The definition records this rather than pretending the gates agree.
+
+## 9. "Triggered" — ANSWERED (owner, 2026-11-05 ~06:07 EST)
+
+**Triggered is a scheduled run triggered on-demand by a user, as opposed to a timer-fired run.** A user is involved, and the run must be tracked that way.
+
+- **What it is:** the schedule exists (the run is a scheduled run), but the invocation is on-demand by a user — not the timer firing. The distinguishing fact is the invocation, not the schedule.
+- **Tracking:** a triggered run is audited and tracked with the invoking user's identity (the verified session login), as a user-involved action — never as an anonymous or timer event. The run's trigger is recorded as triggered, distinct from timer-fired scheduled runs, so usage, audit, and allowance accounting can tell them apart.
+- **Gate treatment:** because a user is present, a triggered run receives the **manual treatment** at the gate: the same coverage order as a manual run (grant → included runs → credits), and when uncovered the user is offered the at-limit choice (§7 — upgrade or buy credits), because a checkout can be presented to a present user. It never receives the unattended-skip rule that timer-fired recurring runs receive — the skip exists precisely because no user is present to authorize a charge, and that condition does not hold for a triggered run.
+- **What this replaces:** the draft carried this column as scope-OPEN with four candidates (`WorkflowRunTrigger`, `DiscoveryRunTrigger`, NLQ/chat-triggered, async-job follow-ups). The owner's answer settles the scope: triggered = on-demand user invocation of a scheduled run. The candidates are superseded as definitions of "triggered" — a run that matches one of them counts as triggered only insofar as it is an on-demand user invocation of a scheduled run. The money path today knows only `manual | scheduled` (`NativeRunTrigger = "manual" | "scheduled"`, `nativeMonetization.ts:80`), so carrying the triggered trigger through the seam and auditing it with the invoking login is implementation work (§3.1, gap 3). Until it ships, a triggered run reaches the gate as manual or scheduled and receives that kind's treatment.
+
+## 10. The five owner decisions — decided
+
+| # | Decision | Status | What is decided / still open |
+|---|---|---|---|
+| 1 | **Free allowance** — capped or unlimited? | **ANSWERED** (Mars, 2026-11-05 ~00:47 and ~06:07 EST) | **Default: 10 runs per product, changeable** (operator-managed data, never hardcoded). **Approved accounts: UNLIMITED free**, delivered by the operator unlimited-free grant (§5.1), which overrides the cap. Still open within the answer: **who approves** an account for unlimited free, **which account(s) first**, and **the period over which the 10 runs are counted** (the billing period is the natural candidate, unconfirmed). Do not grant any real account until Mars names the account(s). |
+| 2 | **Per-plan allowances** — included-run counts per subscription, and the credit/checkout order | **ANSWERED in shape, OPEN in numbers** (Mars, 2026-11-05 ~06:07 EST) | **Shape decided:** every plan carries an included-run count **per product**, same as Free; **tiers are cumulative** (Basic includes everything Free includes; Premium includes everything Basic includes); coverage order is included runs → existing credits → at-limit offer (§4.3). **Numbers open:** the Basic and Premium counts are not set in this definition — they are operator data, changeable, to be set when decided. |
+| 3 | **What "triggered" covers** | **ANSWERED** (Mars, 2026-11-05 ~06:07 EST) | **A scheduled run triggered on-demand by a user** (not timer-fired); tracked as user-involved, with the invoking login audited; receives manual treatment at the gate (§9). |
+| 4 | **Over-allowance behavior** | **ANSWERED** (Mars, 2026-11-05 ~06:07 EST) | **Nothing runs over allowance.** At the limit the user is asked either to **upgrade** or to **buy credits for pay-per-use**, once subscription quotas are exhausted (§7). The upgrade offer itself is implementation work (#3246, unbuilt); the shipped client today offers only the per-use checkout. |
+| 5 | **Approved per-family prices** | **OPEN** | Seeds are PROPOSED, not approved (§8). The actually-approved set lives in the live store and is not verifiable from the repo. No family price is approved by this definition. |
+
+## 11. Conformance — what implementation must reuse
+
+When implementation follows this definition, it reuses:
+
+- the existing gate interface (`check()` / `confirmPaid()`),
+- the existing tier/coverage model (§2.2) and the gate order (§2.1),
+- the existing price catalogue (§8),
+- the existing operator grant and trial mechanisms (§5, §6).
+
+It invents **no** parallel entitlement path, **no** second pricing source, and **no** PDP-seam bypass. Two live violations of that line are recorded as open conformance points in §8 (the `TRADING_PAID_SERVICES` second price source; the F3 stock-chat approval bypass) — they are to be resolved by the owner's pick, not silently blessed by this definition and not silently fixed by a slice. No new agent is assigned to decide pricing or allowances: the definition is a product decision (owner) plus a deterministic entitlement table (testable code when implemented).
+
+## 12. Verified against, and still to verify
+
+**Verified against:** `origin/main` = `9e6ef4144f673df1ac867947e4e3026f44e952fa` (onboarding flow, PR #3279, §18 complete). Verified on this SHA by direct read: migration order 0040 → 0041 → 0042 in `ALL_MIGRATIONS` (`migrationRunner.ts:1647–1649`); `trial_days` on plans (`drizzleSchema.ts:739`); the trial checkout route (`src/agents/routes/agenticPayments.ts:1981`); the unlimited-free grant in the gate (`nativeMonetization.ts:247–252`); the `TRADING_PAID_SERVICES` source (`src/services/agenticPayments.ts:115`); the F3 raw-price read (`src/data/productAccess.ts:347`, header note `:41`, fallback `:351`, divergent verdict `:359–374`). Gate, tier, catalogue, and operator-lever facts were re-verified against main `b66d9cfd` in the survey note cited in the header; the only deltas since are the trial slice (`aea19b4e`) and the onboarding flow (`9e6ef41`), neither of which touches a money-path file.
+
+**Still to verify (live-store facts code cannot verify):**
+
+- The actually-approved price set per family in the live store (decision 5).
+- Whether any real account holds an unlimited-free grant, an operator-granted subscription, or a live trial row — and, for the first of each, whether the grantor and the account were the ones Mars named.
+- The live at-limit rendering in the client (the messages quoted in §7 are the code's fixed copy; the live rendering is not verified here).
+- The free-cap counting period (decision 1, open) and the Basic/Premium counts (decision 2, open) — owner decisions, not verifiable from code.
+
+## 13. What this definition does not decide or change
+
+- No production config change, no flag change, no price change, no secret or permission change. The monetization flag stays as it is; no price is approved by this document; no account is granted anything by this document.
+- The definition does not set Basic/Premium included-run counts, the free-cap counting period, or trial lengths — those are operator data (or, for quotas, #3263, unbuilt) and are decided separately. It sets the Free count (10 per product) and the tier-inclusion rule, per the owner's decision.
+- Known implementation edges carried forward (not definition decisions): the $0-run failure-credit edge (a price-0 run whose screener fails throws in the flow's failure-credit step, which refuses a non-positive price); the #3244 `tierSource`-overwrite edge (§5.2); the trial fungible-counter edge (§6); the Billing-path tier-only hole (§6); the cfpay gate not honoring the grant (§5.1); the effective-tier period-end-only / status-blind nuance (§2.2).
+- The #3256 onboarding flow has landed (PR #3279, `9e6ef41`, §18 complete) and surfaces the trial in its 5-step first-run flow. The #3246 upgrade-offer surface and the #3263 per-service quota remain unbuilt; the free-run counter (§3.1) has no issue yet and needs one before implementation starts.
