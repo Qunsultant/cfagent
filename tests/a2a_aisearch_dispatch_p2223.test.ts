@@ -4,7 +4,7 @@
  *
  * The agent reaches the SAME Cloudflare AI Search instance the
  * SearchHub knowledge surface serves (POST /search/agent ->
- * ETradeAISearchService over AI_SEARCH_ENDPOINT), through three
+ * AiSearchInstanceService over AI_SEARCH_ENDPOINT), through three
  * access paths in user-set priority order (directive 2026-10-29):
  *
  * 1. namespace (PRIMARY) — the ai_search_namespaces binding
@@ -13,7 +13,7 @@
  * 2. mcp (SECOND) — the instance's public /mcp endpoint, tool
  *    "search", via the repo's RemoteMcpClient, gated on
  *    AI_SEARCH_MCP_ENDPOINT (dashboard Public Endpoint = owner gate).
- * 3. rest (LAST RESORT) — ETradeAISearchService reused exactly
+ * 3. rest (LAST RESORT) — AiSearchInstanceService reused exactly
  *    as-is, gated on AI_SEARCH_ENDPOINT (the hub's own var).
  *
  * Honesty: no path configured -> typed degraded result, zero
@@ -295,7 +295,7 @@ describe("AiSearchAgent REST honesty (#2223)", () => {
     expect(result.results).toBeUndefined();
   });
 
-  it("DEFAULT rest executor constructs the real ETradeAISearchService (reuse, not reimplementation)", async () => {
+  it("DEFAULT rest executor constructs the real AiSearchInstanceService (reuse, not reimplementation)", async () => {
     // No deps override: the runner builds the service over env.
     // With the endpoint configured but unreachable (test netblock /
     // hermetic fetch), the service returns its degraded contract
