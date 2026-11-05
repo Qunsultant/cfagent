@@ -419,3 +419,37 @@ conflict on Qunsultant/cfagent#2902.
 4. Confirm the scheduled/queue consumer ownership split in
    Slice 8 (screener-events vs options_analysis) with the
    messaging/trading lanes before moving them.
+
+## 9. Slice 2 re-baseline note (2026-11-05, PR for #2902 Slice 2)
+
+- Baseline at Slice 2: `origin/main` `5627c72b`, `src/server.ts`
+  **7,431 lines / 360,983 bytes** (was 5,343 at Slice 1). The §3 line
+  ranges are the Slice 1 baseline (`136e2293`) ranges and are superseded
+  as a locator by `tests/server_route_inventory_2902.test.ts`, which is
+  now the live inventory; the §3 path/method/auth list stands, with the
+  following re-baselined additions (no route changed, only recorded):
+  the `/auth/login/<id>` + `/auth/callback/<id>` provider family,
+  `/api/user/email-destination`, the WebSocket upgrade dispatch
+  (`dispatchWsUpgrade`, after `/api/schedules`, before the quotes
+  branches), the `/api/schedules` forward alongside `/api/schedule/*`,
+  the full IAAA lifecycle block (role-grants, logged-in-users,
+  quota-usage, policy-proposals, bootstrap-proposals sub-paths), and
+  the method guards `POST|GET` (trading options), `GET|POST` (market
+  quotes source), `OPTIONS` (premium/agentic preflight). Pin total:
+  **148 ordered descriptors**, including the public-REST burst-cap
+  prelude token and the static-asset fallback terminus.
+- Resolved in Slice 2 (see also the pin test header): A2A /
+  `.well-known` / `/api/features` are Core (contract §3 wins over the
+  #2902 body; file order supports it); `/api/etrade/*` OAuth routes are
+  Auth (Slice 3), not Trading. Q2 answered: browser-snapshot block is
+  Platform (Slice 7), moved as a whole, never split.
+- The <800-line pin (§2, open question 1) is **not set in Slice 2**:
+  Slice 2 moves Core only and `server.ts` still holds every domain
+  block (6,982 lines after Slice 2), so no pin Slice 2 could set is
+  meetable. The proposal stands for review; Slice 9 sets the pin the
+  slice actually achieves and never loosens a pin to fit.
+- Q3 (entrypoint exports) is not re-decided in Slice 2: the in-code
+  comments still state wrangler requires every bound DO class to be
+  exported from the entrypoint; Slice 9 re-checks and keeps any
+  required re-export with per-class justification.
+- Q4 (scheduled/queue consumer ownership) stays open for Slice 8.

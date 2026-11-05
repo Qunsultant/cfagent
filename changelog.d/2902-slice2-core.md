@@ -1,0 +1,3 @@
+### Changed
+
+- Server entry refactor, Slice 2 of Qunsultant/cfagent#2902 (Core dispatcher, moves only): shared auth helpers (`requireAuth`, `authenticateRequest`, `isAllowedOrigin`) now live once in `src/server/auth.ts`, and the Core branches (`/.well-known` metadata, `/a2a/*`, `/api/features`, `/health`, `/openapi.json` + `/api/docs`, the `/api/*` fallthrough to the Orchestrator, `/checkout/sandbox`, `/` + `/index.html`, static fallback) now live in `src/server/routes/core.ts`, called from `handleFetch` in their original order. No route, method, auth, or response-shape change. The 1:1 route pin lands as `tests/server_route_inventory_2902.test.ts` (148 ordered descriptors, re-baselined from current main). `src/server.ts` shrinks from 7,431 to 6,981 lines.

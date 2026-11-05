@@ -3,7 +3,8 @@
  *
  * The five server-rendered surfaces (trading email, unified options
  * email HTML, browser-agent SVG artwork, GitHub OAuth pages, and the
- * /checkout/sandbox page in src/server.ts) render outside the app
+ * /checkout/sandbox page in src/server/routes/core.ts since #2902
+ * Slice 2 moved the Core branches out of src/server.ts) render outside the app
  * shell and cannot consume the client design tokens as CSS variables.
  * Since #678 they take every colour from ONE shared module,
  * src/theme/serverPalette.ts. This suite pins that arrangement:
@@ -50,7 +51,9 @@ const FIVE_FILES = [
   "src/trading/options/unifiedOptionsService.ts",
   "src/services/browserAgent.ts",
   "src/security/githubOAuth.ts",
-  "src/server.ts",
+  // #2902 Slice 2: the /checkout/sandbox page moved from src/server.ts
+  // to src/server/routes/core.ts (moves only); the palette pin follows it.
+  "src/server/routes/core.ts",
 ] as const;
 
 const HEX_RE = /#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{4}|[0-9a-fA-F]{3})\b/g;
