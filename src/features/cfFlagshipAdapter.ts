@@ -13,7 +13,7 @@ import {
   type FeatureEvaluationContext,
   type FeatureFlag,
   type FeatureFlagPort,
-  getOptionsProductParentFlag,
+  getFeatureFlagParent,
   isKnownFeatureFlag,
 } from "./featureFlagPorts";
 
@@ -56,7 +56,7 @@ export class CfFlagshipAdapter implements FeatureFlagPort {
       // default. A dashboard value still wins (getBooleanValue
       // returns it, not the default), and an evaluation failure
       // still fails closed below.
-      const productParent = getOptionsProductParentFlag(flag);
+      const productParent = getFeatureFlagParent(flag);
       const inheritedDefault = productParent
         ? await this.isEnabled(productParent, context)
         : defaultValue;
