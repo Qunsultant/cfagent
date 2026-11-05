@@ -2,7 +2,7 @@
  * Issue #2120 (slice 1): thin REST routes for the Search hub.
  *
  * Two POST routes, no new envelope, no new store, no new binding:
- * - POST /search/agent -> ETradeAISearchService.searchFinancialDocs
+ * - POST /search/agent -> AiSearchInstanceService.searchFinancialDocs
  *   (service-native AISearchQueryResponse: query/results/totalMatches/
  *   provider/timestamp, plus `degraded` when the live index did not
  *   serve). Since #1169 S3 the service has no fallback corpus: an
@@ -53,7 +53,7 @@
  * route shapes from the same typed runner result
  * (AiSearchAgentSearchResult) the command shapes from.
  */
-import { ETradeAISearchService } from "../../services/aiSearch";
+import { AiSearchInstanceService } from "../../services/aiSearch";
 import { searchPlatformKnowledge } from "../../services/platformKnowledge";
 import { unauthenticatedResponse } from "./routeIdentity";
 import { createMAS, type MASOptions } from "../mas";
@@ -136,7 +136,7 @@ export async function handleSearchHubRoutes(
       return Response.json({ error: "Query parameter is required" }, { status: 400 });
     }
     const limit = typeof body.limit === "number" && body.limit > 0 ? body.limit : 5;
-    const service = new ETradeAISearchService(ctx.env);
+    const service = new AiSearchInstanceService(ctx.env);
     const result = await service.searchFinancialDocs(query, limit);
     return Response.json(result);
   }
