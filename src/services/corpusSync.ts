@@ -35,8 +35,15 @@
  *    reportSemanticIndex.ts) swept page by page until nextOffset is
  *    null. Idempotent (re-upserts the same `report:<id>` vector ids).
  *
- * NOT built: the bridge backfill (S4-5, dashboard-gated, unanswered)
- * — omitted entirely, not stubbed.
+ * 3. CORPUS INDEX BRIDGE (#3345; the S4-5 bridge backfill, pulled
+ *    forward): the corpus items-API backfill
+ *    (runCorpusAiSearchIndexBackfill in corpusAiSearchIndex.ts),
+ *    injected exactly like leg 2 — the sync comes to mean "bucket
+ *    bytes AND index items both reflect the canonical corpus",
+ *    with per-item indexing state reported on the result. The leg
+ *    uploads through the #2246 executor under `corpus:<key>` ids,
+ *    flag-gated by AI_SEARCH_CORPUS_INDEXING_ENABLED; without the
+ *    injected leg the result reports it skipped, never fabricated.
  *
  * SCHEDULE: rides the existing every-30-minutes tick (server.ts
  * scheduled(), same Workers Free ceiling constraint as
@@ -68,6 +75,7 @@ import {
   runCanonicalIndexBackfillPage,
   type IndexEnv,
 } from "./reportSemanticIndex";
+import type { CorpusIndexBackfillOutcome } from "./corpusAiSearchIndex";
 import type { SqlStorage } from "../orm";
 
 /** Durable marker key for the last completed corpus sync, in mas_settings. */
@@ -290,11 +298,23 @@ export interface CorpusBackfillOutcome {
 export interface CorpusSyncDeps extends CorpusIntegrityDeps {
   /** Production passes () => runCanonicalIndexBackfillAll(env, sql). */
   backfill?: () => Promise<CorpusBackfillOutcome>;
+  /** Issue #3345: production passes
+   * () => runCorpusAiSearchIndexBackfill(env, {...}). */
+  corpusIndex?: () => Promise<CorpusIndexBackfillOutcome>;
+}
+
+/** The corpus-index leg's outcome on the sync result: the backfill
+ * outcome, or a skipped outcome (no leg supplied) / a failed
+ * outcome with the reason (the leg threw) — never fabricated. */
+export interface CorpusSyncIndexOutcome extends CorpusIndexBackfillOutcome {
+  /** True only when no corpus-index leg was supplied. */
+  skipped?: boolean;
 }
 
 export interface CorpusSyncResult {
   integrity: CorpusIntegrityReport;
   backfill: CorpusBackfillOutcome;
+  corpusIndex: CorpusSyncIndexOutcome;
   /** True only when the integrity leg actually executed. */
   completed: boolean;
   ranAt: string;
@@ -336,9 +356,34 @@ export async function runCorpusSync(
       };
     }
   }
+  let corpusIndex: CorpusSyncIndexOutcome;
+  if (!deps.corpusIndex) {
+    corpusIndex = {
+      items: [],
+      indexed: 0,
+      notConfigured: 0,
+      failed: 0,
+      skipped: true,
+      reason: "No corpus index leg supplied; corpus indexing skipped.",
+    };
+  } else {
+    try {
+      corpusIndex = await deps.corpusIndex();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      corpusIndex = {
+        items: [],
+        indexed: 0,
+        notConfigured: 0,
+        failed: 0,
+        reason: `Corpus index leg failed: ${message}`,
+      };
+    }
+  }
   return {
     integrity,
     backfill,
+    corpusIndex,
     completed: integrity.reason === undefined,
     ranAt,
   };
