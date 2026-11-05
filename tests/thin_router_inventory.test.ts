@@ -377,6 +377,7 @@ const HANDLER_FILE: Record<string, string> = {
   "handlePlatformTenantRoutes": "platformTenants.ts",
   "handlePlatformChannelRoutes": "platformChannels.ts",
   "handleKvWipeRoutes": "kvWipe.ts",
+  "handleDataLifecycleRoutes": "dataLifecycle.ts",
   "handleOrchestratorMigrationRoutes": "orchestratorMigration.ts",
   "handleSchedulesRoutes": "schedules.ts"
 };
@@ -427,6 +428,7 @@ const EXPECTED_DELEGATIONS = [
   "handleDelegationRoutes",
   "handleAdminTenantQueueRoutes",
   "handleKvWipeRoutes",
+  "handleDataLifecycleRoutes",
   "handleOrchestratorMigrationRoutes",
   "handleSchedulesRoutes"
 ];
@@ -791,6 +793,11 @@ const EXPECTED_INVENTORY = [
   "handleAdminTenantQueueRoutes :: endsWith(\"/queues/cancel-all\")",
   "handleAdminTenantQueueRoutes :: endsWith(\"/queues/clear-table\")",
   "handleKvWipeRoutes :: endsWith(\"/maintenance/kv-wipe\")",
+  "handleDataLifecycleRoutes :: endsWith(\"/data-lifecycle/clean-state\")",
+  "handleDataLifecycleRoutes :: endsWith(\"/data-lifecycle/export\")",
+  "handleDataLifecycleRoutes :: endsWith(\"/data-lifecycle/bootstrap\")",
+  "handleDataLifecycleRoutes :: endsWith(\"/data-lifecycle/bootstrap\")",
+  "handleDataLifecycleRoutes :: endsWith(\"/data-lifecycle/tenant-bootstrap\")",
   "handleOrchestratorMigrationRoutes :: endsWith(\"/admin/orchestrator-migration/export\")",
   "handleOrchestratorMigrationRoutes :: endsWith(\"/admin/orchestrator-migration/import\")",
   "handleOrchestratorMigrationRoutes :: endsWith(\"/admin/orchestrator-migration/migrate\")",
