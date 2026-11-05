@@ -34,6 +34,16 @@
  *   comments in server.ts state wrangler requires every bound DO class to be
  *   exported from the entrypoint; Slice 9 re-checks and keeps any required
  *   re-export with per-class justification.
+ *
+ * Slice 3 decisions recorded here:
+ * - Auth & IAAA live in src/server/routes/auth.ts as three handlers in
+ *   dispatch order: handleAuthLoginRoutes (/login, /auth/login/<id>,
+ *   /auth/callback/<id>, /auth/logout, E*TRADE + public OAuth families),
+ *   handleAuthMeRoutes (/api/me, /api/user/email-destination,
+ *   /api/iaaa/overview, /api/governance/seed-halt), handleAuthIaaaRoutes
+ *   (access-request + full IAAA lifecycle + /api/api-keys). The delegation
+ *   -order assertion below grows by slice; the 148-descriptor EXPECTED list
+ *   is unchanged (verified identical by the scanner before and after).
  */
 import { describe, it, expect, vi } from "vitest";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
@@ -408,10 +418,20 @@ describe("server route inventory pin (#2902)", () => {
     expect(reconstruct()).toEqual(EXPECTED_ROUTES);
   });
 
-  it("delegates Core branches in handleFetch in the original order", () => {
+  it("delegates Core + Auth branches in handleFetch in the original order", () => {
     const serverSrc = readFileSync("src/server.ts", "utf8");
     const calls = [...serverSrc.matchAll(/(?:await )?(handle\w+Routes)\(request, env, url, path/g)].map((m) => m[1]);
-    expect(calls).toEqual(["handleCoreEarlyRoutes", "handleCoreHealthRoutes", "handleCoreLateRoutes"]);
+    // Slice 2 landed the three Core delegations; Slice 3 (#2902) adds the
+    // three Auth delegations in their original dispatch positions, between
+    // the Core ones. Later slices extend this list in dispatch order.
+    expect(calls).toEqual([
+      "handleCoreEarlyRoutes",
+      "handleAuthLoginRoutes",
+      "handleCoreHealthRoutes",
+      "handleAuthMeRoutes",
+      "handleAuthIaaaRoutes",
+      "handleCoreLateRoutes",
+    ]);
   });
 
   it("shared auth lives once in src/server/auth.ts, not in server.ts", () => {
