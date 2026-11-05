@@ -217,3 +217,61 @@ describe("Broker connect stranded-tab + banner-link trap (#3197)", () => {
     expect(container.textContent).toMatch(/E\*TRADE authorization could not be started/);
   });
 });
+
+/**
+ * #3197 root cause (found 2026-11-05): the pre-open used
+ * `window.open("", "_blank", "noopener,noreferrer")`. Per the HTML spec a
+ * `noopener` (or `noreferrer`, which implies it) request makes `window.open`
+ * return **null**, so `authTab` was always null: the success path could never
+ * navigate the tab and the failure reclaim was dead code. The tab therefore
+ * always stayed on about:blank, which is what the user reported.
+ *
+ * These tests stub window.open the way a browser actually behaves, so the
+ * regression cannot hide behind a fake handle again.
+ */
+describe("E*TRADE connect: the pre-opened tab is reachable and never stranded (#3197)", () => {
+  /** Spec-accurate stub: noopener/noreferrer returns null (MDN window.open). */
+  function specAccurateOpen(tab: any) {
+    return vi.fn((_url?: string, _target?: string, features?: string) => {
+      const f = String(features || "");
+      if (/(^|,)\s*(noopener|noreferrer)\b/i.test(f)) return null;
+      return tab;
+    });
+  }
+
+  it("navigates the pre-opened tab to the authorize URL, with the opener reference severed", async () => {
+    mockFetch({ kind: "ok", authorizeUrl: "https://api.etrade.com/oauth/authorize?token=rt" });
+    const tab: any = { location: { href: "about:blank" }, opener: {}, close: vi.fn(), closed: false };
+    window.open = specAccurateOpen(tab) as any;
+    await renderHub();
+    await startOAuth();
+    expect(tab.location.href).toBe("https://api.etrade.com/oauth/authorize?token=rt");
+    // The handle is only usable because opener is nulled explicitly instead
+    // of asking the browser to do it (which costs us the handle).
+    expect(tab.opener).toBeNull();
+  });
+
+  it("a failed start closes the tab instead of leaving it on about:blank", async () => {
+    mockFetch({ kind: "fail", error: "upstream exploded" });
+    const tab: any = { location: { href: "about:blank" }, opener: {}, closed: false };
+    tab.close = vi.fn(() => {
+      tab.closed = true;
+    });
+    window.open = specAccurateOpen(tab) as any;
+    await renderHub();
+    await startOAuth();
+    expect(tab.close).toHaveBeenCalled();
+    expect(tab.location.href).toBe("about:blank");
+  });
+
+  it("a genuinely blocked popup still offers the in-app fallback link", async () => {
+    const calls = mockFetch({ kind: "ok", authorizeUrl: "https://api.etrade.com/oauth/authorize?token=rt" });
+    window.open = vi.fn(() => null) as any;
+    await renderHub();
+    await startOAuth();
+    expect(calls.filter((c) => c.url.startsWith("/api/etrade/oauth/start"))).toHaveLength(1);
+    expect(document.body.textContent).toMatch(/Authorize E\*TRADE Application/);
+    const modalLink = document.querySelector('a[href="https://api.etrade.com/oauth/authorize?token=rt"]');
+    expect(modalLink).not.toBeNull();
+  });
+});
