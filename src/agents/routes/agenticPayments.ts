@@ -142,7 +142,11 @@ import {
 } from "../../data/journalPorts";
 import { postJournalBestEffort } from "../../services/journalPosting";
 import type { D1CommercialAdapter } from "../../data/d1CommercialAdapter";
-import { toCommercialAccount, type StoreTier } from "../../data/commercialPorts";
+import {
+  assertUnlimitedFreeGrant,
+  toCommercialAccount,
+  type StoreTier,
+} from "../../data/commercialPorts";
 import {
   createSubscriptionAdapter,
   ensureSubscriptionSchema,
@@ -991,6 +995,7 @@ export async function handleAgenticPaymentsRoutes(
       }
       const body = (await request.json().catch(() => ({}))) as {
         userId?: unknown; tenantId?: unknown; tier?: unknown; creditsUSD?: unknown; includedRuns?: unknown;
+        unlimitedFreeGrant?: unknown;
       };
       const store = requireStore();
       if (store instanceof Response) return store;
@@ -1005,15 +1010,43 @@ export async function handleAgenticPaymentsRoutes(
       const upsertUserId = typeof body.userId === "string" ? body.userId : "";
       const previousAccount = await store.getAccount(upsertUserId);
       const previousSubscriptions = await subs.listSubscriptions(upsertUserId);
+      // Issue #3245: an unlimited-free grant write on this route.
+      // The grant target is the operator-action subject (userId in
+      // the body, same pattern as the credits-adjust route); the
+      // tenant for the grant comes from the TARGET's account row,
+      // never from a client-supplied tenantId — a grant write on
+      // an existing row keeps that row's tenant even when the body
+      // names another. grantedBy is the session-verified operator
+      // login, never a client-supplied value. Absent
+      // unlimitedFreeGrant preserves the stored grant; explicit
+      // null revokes it. A grant object is validated before any
+      // write, so a bad grant is 400 and grants nothing.
+      const grantUpdate =
+        body.unlimitedFreeGrant === undefined
+          ? undefined
+          : body.unlimitedFreeGrant === null
+            ? null
+            : assertUnlimitedFreeGrant({
+                ...(typeof body.unlimitedFreeGrant === "object" && body.unlimitedFreeGrant !== null
+                  ? (body.unlimitedFreeGrant as Record<string, unknown>)
+                  : {}),
+                grantedBy: login,
+              });
       const record = await store.upsertAccount({
         userId: upsertUserId,
-        tenantId: typeof body.tenantId === "string" ? body.tenantId : "",
+        tenantId:
+          grantUpdate !== undefined && previousAccount
+            ? previousAccount.tenantId
+            : typeof body.tenantId === "string"
+              ? body.tenantId
+              : "",
         tier: body.tier,
         // An operator write is an operator grant: it survives a
         // lapsed subscription (see resolveEffectiveTier).
         tierSource: "operator",
         creditsUSD: body.creditsUSD,
         includedRuns: body.includedRuns,
+        unlimitedFreeGrant: grantUpdate,
       });
       const transition = resolveTierTransition(previousAccount, previousSubscriptions, record, previousSubscriptions, Date.now());
       ctx.audit("commercial.account.upserted", "payments", {
@@ -1023,6 +1056,22 @@ export async function handleAgenticPaymentsRoutes(
         previousEffectiveTier: transition.previousEffectiveTier,
         newEffectiveTier: transition.newEffectiveTier,
       });
+      if (grantUpdate !== undefined) {
+        ctx.audit(
+          grantUpdate === null
+            ? "commercial.account.unlimited_free_revoked"
+            : "commercial.account.unlimited_free_granted",
+          "payments",
+          {
+            userId: record.id,
+            tenantId: record.tenantId,
+            grantedBy: login,
+            ...(grantUpdate === null
+              ? {}
+              : { reason: grantUpdate.reason, expiresAtMs: grantUpdate.expiresAtMs }),
+          },
+        );
+      }
       return Response.json({ record });
     } catch (err: any) {
       const message = err.message || "Failed to upsert commercial account";

@@ -31,6 +31,9 @@
  *     included usage or prepaid credits only, never an unattended
  *     card/x402 charge. Uncovered, it is SKIPPED, audited, and explained
  *     by the caller; no payment workflow instance is started for it.
+ *     The ONE exception is an active unlimited-free grant (#3245):
+ *     a grant-covered recurring run routes to the payment workflow
+ *     and runs free at price 0, by owner direction.
  *   - Manual runs route to the payment workflow whenever monetization is
  *     on; the workflow itself resolves coverage vs checkout, so the
  *     caller needs no coverage pre-check for them.
@@ -71,19 +74,28 @@ export const SCHEDULED_COVERAGE_REQUIRED_REASON =
   "Scheduled runs need subscription included usage or prepaid credits. No unattended card charge is taken.";
 
 /** How a scheduled run is covered, per the gate's coverage rule. */
-export type PaidScreenCoverage = "subscription_included" | "credits" | null;
+export type PaidScreenCoverage = "subscription_included" | "credits" | "unlimited_free_grant" | null;
 
 /**
  * Caller-side coverage read from a resolved account snapshot. Mirrors the
- * gate's rule exactly (subscription included runs first, then credits at
- * or above price). The gate re-checks inside the payment workflow, so a
- * race between this read and the workflow start can only ever resolve to
- * a coverage_required outcome there — never to a free run or a charge.
+ * gate's rule exactly (an active unlimited-free grant first — #3245 — then
+ * subscription included runs, then credits at or above price). The gate
+ * re-checks inside the payment workflow, so a race between this read and
+ * the workflow start can only ever resolve to a coverage_required outcome
+ * there — never to a free run or a charge.
  */
 export function coverageForAccount(
   account: CommercialAccount,
   priceUSD: number,
+  nowMs: number = Date.now(),
 ): PaidScreenCoverage {
+  if (
+    account.unlimitedFreeGrant &&
+    (account.unlimitedFreeGrant.expiresAtMs === null ||
+      account.unlimitedFreeGrant.expiresAtMs > nowMs)
+  ) {
+    return "unlimited_free_grant";
+  }
   if (account.tier === "Subscribed" && account.includedRunsRemaining > 0) {
     return "subscription_included";
   }
@@ -140,7 +152,10 @@ export function resolvePaidScreenAction(input: {
   if (input.coverage) {
     return {
       action: "start_payment",
-      reason: `Scheduled run covered by ${input.coverage}; the payment workflow re-checks, consumes coverage, and starts the screener.`,
+      reason:
+        input.coverage === "unlimited_free_grant"
+          ? "Scheduled run covered by an active unlimited-free grant (#3245); the payment workflow re-checks the grant and starts the screener with no charge and no deduction."
+          : `Scheduled run covered by ${input.coverage}; the payment workflow re-checks, consumes coverage, and starts the screener.`,
     };
   }
   return {

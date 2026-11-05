@@ -36,6 +36,79 @@ export const VALID_TIERS: readonly StoreTier[] = ["Free", "PayPerUse", "Subscrib
  */
 export type TierSource = "operator" | "subscription";
 
+/**
+ * Issue #3245 (slice 1 of #3241) — unlimited-free grant for an
+ * approved account. An operator-granted, account-level entitlement:
+ * a granted account runs any screener family, manual or scheduled
+ * (including recurring), free and unlimited, at price 0, with no
+ * checkout and no credit/included-run deduction. The grant is
+ * stored on the commercial account row (migration 0040) so the
+ * gate reads it from the same record as tier/credits. `expiresAtMs`
+ * null = no expiry; a grant whose expiry has passed lapses to the
+ * normal gate. `grantedBy` is the session-verified operator login
+ * that wrote it (the route sets it, never the client).
+ */
+export interface UnlimitedFreeGrant {
+  grantedBy: string;
+  reason: string;
+  expiresAtMs: number | null;
+}
+
+/** A grant is live only while it exists and its expiry (if any) is in the future. */
+export function isUnlimitedFreeGrantActive(
+  grant: UnlimitedFreeGrant | null | undefined,
+  nowMs: number,
+): boolean {
+  if (!grant) return false;
+  return grant.expiresAtMs === null || grant.expiresAtMs > nowMs;
+}
+
+/**
+ * Validate a grant object. The route passes the session-verified
+ * operator login as grantedBy; a missing/blank grantedBy or reason,
+ * or a non-null expiry that is not a finite positive epoch-ms,
+ * throws (the route maps it to 400). Null is never valid here —
+ * null means "revoke", handled by the upsert, not by this helper.
+ */
+export function assertUnlimitedFreeGrant(value: unknown): UnlimitedFreeGrant {
+  if (typeof value !== "object" || value === null) {
+    throw new Error("Unlimited-free grant must be an object with grantedBy, reason, and expiresAtMs.");
+  }
+  const grant = value as Record<string, unknown>;
+  const grantedBy = typeof grant.grantedBy === "string" ? grant.grantedBy.trim() : "";
+  if (!grantedBy) {
+    throw new Error("Unlimited-free grant grantedBy must be a non-empty string.");
+  }
+  const reason = typeof grant.reason === "string" ? grant.reason.trim() : "";
+  if (!reason) {
+    throw new Error("Unlimited-free grant reason must be a non-empty string.");
+  }
+  const expiresAtMs = grant.expiresAtMs;
+  if (
+    expiresAtMs !== null &&
+    (typeof expiresAtMs !== "number" || !Number.isFinite(expiresAtMs) || expiresAtMs <= 0)
+  ) {
+    throw new Error("Unlimited-free grant expiresAtMs must be null or a finite positive epoch-ms.");
+  }
+  return { grantedBy, reason, expiresAtMs: expiresAtMs as number | null };
+}
+
+/**
+ * Resolve a grant update for an upsert. `undefined` preserves the
+ * stored grant (an upsert that says nothing about the grant changes
+ * nothing); explicit `null` revokes it; an object grants it.
+ * Anything else throws. The adapters share this so the two
+ * implementations cannot drift on preserve-vs-revoke semantics.
+ */
+export function resolveUnlimitedFreeGrantUpdate(
+  input: unknown,
+  existing: UnlimitedFreeGrant | null | undefined,
+): UnlimitedFreeGrant | null {
+  if (input === undefined) return existing ?? null;
+  if (input === null) return null;
+  return assertUnlimitedFreeGrant(input);
+}
+
 export interface CommercialAccountRecord {
   id: string;
   tenantId: string;
@@ -43,6 +116,8 @@ export interface CommercialAccountRecord {
   tierSource?: TierSource | null;
   creditsUSD: number;
   includedRuns: number;
+  /** Issue #3245: operator-granted unlimited-free entitlement (null = none). */
+  unlimitedFreeGrant?: UnlimitedFreeGrant | null;
   updatedAtMs: number;
 }
 
@@ -177,6 +252,10 @@ export function toCommercialAccount(
     tier: record.tier,
     creditsUSD: record.creditsUSD,
     includedRunsRemaining: record.includedRuns,
+    // Issue #3245: the grant rides on the resolved account so the
+    // gate sees it without a second store read. The gate, not this
+    // mapping, decides whether it is live at run time (expiry).
+    unlimitedFreeGrant: record.unlimitedFreeGrant ?? null,
   };
 }
 
@@ -189,6 +268,12 @@ export interface CommercialStore {
     tierSource?: unknown;
     creditsUSD?: unknown;
     includedRuns?: unknown;
+    /**
+     * Issue #3245: undefined preserves the stored grant, null
+     * revokes it, an object grants it (see
+     * resolveUnlimitedFreeGrantUpdate).
+     */
+    unlimitedFreeGrant?: unknown;
   }): Promise<CommercialAccountRecord>;
   adjustCredits(userId: string, deltaUSD: number): Promise<CommercialAccountRecord>;
   consumeIncludedRun(userId: string): Promise<CommercialAccountRecord>;

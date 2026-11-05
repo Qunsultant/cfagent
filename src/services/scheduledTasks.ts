@@ -1253,9 +1253,13 @@ export class ScheduledTasksService {
             );
           }
           try {
+            // Issue #3245: a grant-covered run consumes nothing —
+            // no included run, no credits. Only the two spending
+            // coverages consume here; the old bare `else` would
+            // have charged credits for a free grant run.
             if (coverage === "subscription_included") {
               await commercial.consumeIncludedRun(userLogin);
-            } else {
+            } else if (coverage === "credits") {
               await commercial.consumeCredits(userLogin, stockPriceUSD);
             }
           } catch (err) {

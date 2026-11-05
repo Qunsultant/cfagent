@@ -127,6 +127,8 @@ describe("commercial account records (#2015)", () => {
       tier: "Subscribed",
       creditsUSD: 2,
       includedRunsRemaining: 4,
+      // Issue #3245: no grant on this row reads as null.
+      unlimitedFreeGrant: null,
     });
     expect(toCommercialAccount("u9", null, "u9@example.com", "t9")).toEqual({
       userId: "u9",

@@ -95,6 +95,19 @@ export interface CommercialAccount {
   tier: "Free" | "PayPerUse" | "Subscribed";
   creditsUSD: number;
   includedRunsRemaining: number;
+  /**
+   * Issue #3245: operator-granted unlimited-free entitlement
+   * (null/undefined = none; same shape as UnlimitedFreeGrant in
+   * src/data/commercialPorts.ts, inlined here because that module
+   * imports this interface). The native gate checks it FIRST;
+   * the draining cfpay gate does not honor it — new runs use
+   * the native gate.
+   */
+  unlimitedFreeGrant?: {
+    grantedBy: string;
+    reason: string;
+    expiresAtMs: number | null;
+  } | null;
 }
 
 export interface MonetizationConfig {

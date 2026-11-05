@@ -310,6 +310,10 @@ export const agentCommercialAccounts = sqliteTable("agent_commercial_accounts", 
   tierSource: text("tier_source"),
   creditsUSD: real("credits_usd").notNull(),
   includedRuns: integer("included_runs").notNull(),
+  /** Issue #3245: unlimited-free grant (migration 0040). NULL = no grant. */
+  unlimitedFreeGrantedBy: text("unlimited_free_granted_by"),
+  unlimitedFreeReason: text("unlimited_free_reason"),
+  unlimitedFreeExpiresAtMs: integer("unlimited_free_expires_at_ms"),
   updatedAtMs: integer("updated_at_ms").notNull(),
 });
 

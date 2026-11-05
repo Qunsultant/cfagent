@@ -11,6 +11,7 @@ import {
   assertIncludedRuns,
   assertNonNegativeCredits,
   assertStoreTier,
+  resolveUnlimitedFreeGrantUpdate,
   DEFAULT_TENANT_AUTO_REFRESH,
   DEFAULT_TENANT_PROVIDERS,
   round2,
@@ -42,6 +43,7 @@ export class InMemoryCommercialAdapter implements CommercialStore {
     tierSource?: unknown;
     creditsUSD?: unknown;
     includedRuns?: unknown;
+    unlimitedFreeGrant?: unknown;
   }): Promise<CommercialAccountRecord> {
     if (!input.userId || !input.tenantId) {
       throw new Error("userId and tenantId are required.");
@@ -58,6 +60,12 @@ export class InMemoryCommercialAdapter implements CommercialStore {
       tierSource,
       creditsUSD: input.creditsUSD === undefined ? 0 : assertNonNegativeCredits(input.creditsUSD),
       includedRuns: input.includedRuns === undefined ? 0 : assertIncludedRuns(input.includedRuns),
+      // Issue #3245: preserve (undefined) / revoke (null) / grant
+      // (object), same semantics as the D1 adapter.
+      unlimitedFreeGrant: resolveUnlimitedFreeGrantUpdate(
+        input.unlimitedFreeGrant,
+        existing?.unlimitedFreeGrant,
+      ),
       updatedAtMs: Date.now(),
     };
     this.accounts.set(record.id, record);

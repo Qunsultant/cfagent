@@ -16,6 +16,10 @@
  * the workflow adapter this gate supersedes — see the deprecation
  * note there and on that class):
  * - One charge per run-request, never per stage/shard/leg/retry/re-serve.
+ * - An active unlimited-free grant (#3245) covers the run FIRST,
+ *   before price resolution and before the scheduled coverage-only
+ *   rule: price 0, no checkout, no coverage consumed, including
+ *   recurring runs. An expired grant lapses to the normal gate.
  * - Manual runs: subscription/credits first, then checkout (402).
  * - Scheduled runs: subscription/credits only, never unattended
  *   card, EXCEPT a one-off scheduled run authorized by a human
@@ -62,6 +66,7 @@
  *   table at all.
  */
 import type { PriceCatalogue, PriceFamily } from "../data/priceCataloguePorts";
+import { isUnlimitedFreeGrantActive, type UnlimitedFreeGrant } from "../data/commercialPorts";
 import {
   claimRedemptionKey,
   x402NonceRedemptionKey,
@@ -82,6 +87,12 @@ export interface NativeCommercialAccount {
   tier: "Free" | "PayPerUse" | "Subscribed";
   creditsUSD: number;
   includedRunsRemaining: number;
+  /**
+   * Issue #3245: operator-granted unlimited-free entitlement
+   * (null/undefined = none). check() honors an active grant
+   * FIRST, before price resolution.
+   */
+  unlimitedFreeGrant?: UnlimitedFreeGrant | null;
 }
 
 export interface NativeMonetizationConfig {
@@ -151,6 +162,12 @@ export interface NativeCheckInput {
   account: NativeCommercialAccount;
   /** Requested rail; default is card when a card port exists, else x402. */
   rail?: CheckoutRail;
+  /**
+   * Issue #3245: evaluation time for the unlimited-free grant's
+   * expiry. Defaults to Date.now(); tests pass it explicitly so
+   * grant expiry is deterministic.
+   */
+  nowMs?: number;
 }
 
 export interface NativeConfirmProof {
@@ -219,6 +236,20 @@ export class NativeMonetizationGate {
     // catalogue, or on the catalogue existing).
     if (!this.config.monetizationEnabled) {
       return { allowed: true, status: "free_flag_off", runRequestId: run.id, priceUSD: 0 };
+    }
+    // Issue #3245: an active unlimited-free grant covers the run
+    // FIRST, before price resolution — so a grant-covered run at
+    // price 0 must NOT fail on a missing/unapproved family price —
+    // and before the scheduled coverage-only rule, so it also
+    // covers recurring runs (a deliberate change to that rule).
+    // Price 0, no checkout, no credit/included-run deduction:
+    // the covered path records payment.covered (audited, paidVia
+    // unlimited_free_grant) and consumeCoverage no-ops on it.
+    // The paid row makes a later confirmPaid return already_paid
+    // through the existing path.
+    if (isUnlimitedFreeGrantActive(account.unlimitedFreeGrant, run.nowMs ?? Date.now())) {
+      this.byRun.set(run.id, { runRequestId: run.id, userId: account.userId, tenantId: run.tenantId ?? account.tenantId, family: run.family, trigger: run.trigger, priceUSD: 0, status: "paid", paidVia: "unlimited_free_grant" });
+      return { allowed: true, status: "paid", runRequestId: run.id, priceUSD: 0, paidVia: "unlimited_free_grant" };
     }
     const priceUSD = await this.priceFor(run.family);
 
