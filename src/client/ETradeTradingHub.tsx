@@ -20,6 +20,8 @@ import {
 } from "../types";
 import type { TradeAssetClass, TradeOrderContext } from "./trading/tradeOrderContext";
 import { PortfolioRiskPanel } from "./PortfolioRiskPanel";
+import type { RiskBroker } from "./portfolioRiskApi";
+import { brokerSupports, isBrokerId } from "../trading/brokerCatalog";
 import { TradingApprovalsQueue } from "./TradingApprovalsQueue";
 import { AccountPanels } from "./AccountPanels";
 import { AlpacaBrokerPanel } from "./AlpacaBrokerPanel";
@@ -181,6 +183,9 @@ export function ETradeTradingHub({
   // Issue #2853 (gap G2): the selected broker decides which broker surface
   // renders. Previously every panel was E*TRADE regardless of selection.
   const selectedBroker = readTenantProvidersState().brokerId;
+  // Issue #3356: an unrecognised stored id is refused rather than becoming an
+  // E*TRADE read by default - the same fail-closed rule the catalog applies.
+  const riskBroker: RiskBroker | null = isBrokerId(selectedBroker) ? selectedBroker : null;
   // S4-D (#1991): the hub is the route outlet for every trading page, so
   // the shell title/scope follow the active subtab via the route table.
   // iv-history is an inner hub tab with no route entry.
@@ -2200,12 +2205,15 @@ export function ETradeTradingHub({
           </ErrorBoundary>
 
           <ErrorBoundary label="Portfolio Risk panel">
-            {selectedBroker === "etrade" ? (
-              <PortfolioRiskPanel activeEnv={activeEnv} onPreviewHedge={handleTradeOrder} />
+            {/* Issue #3356: the catalogue decides whether risk is served, and the
+                panel reads the SELECTED broker's book. A broker that declares no risk
+                model gets a named notice instead of another broker's numbers. */}
+            {riskBroker && brokerSupports(riskBroker, "portfolioRisk") ? (
+              <PortfolioRiskPanel activeEnv={activeEnv} onPreviewHedge={handleTradeOrder} broker={riskBroker} />
             ) : (
               <Notice tone="neutral" title="Portfolio risk analytics are not available for this broker">
-                Portfolio risk, correlation and hedge drafts read the E*TRADE portfolio model. No other
-                broker's positions are substituted for it.
+                The selected broker declares no portfolio risk model. No other broker's positions are
+                substituted for it.
               </Notice>
             )}
           </ErrorBoundary>

@@ -27,8 +27,26 @@ async function postJson<T>(path: string, env: string, body?: unknown): Promise<T
   return data;
 }
 
-export async function fetchPortfolioRisk(env: string): Promise<PortfolioRiskReport> {
-  const resp = await apiFetch("/api/etrade/portfolio-risk", { headers: { "x-environment": env } });
+/**
+ * Issue #3356: which backend serves a risk read for the SELECTED broker.
+ *
+ * The neutral `/broker/portfolio-risk*` routes (#3324) compute the same report
+ * from the selected broker's own book, Greeks and spot price - they are the only
+ * backend a non-E*TRADE broker has. E*TRADE keeps its own routes here on purpose:
+ * they are the surface its pins describe, and moving E*TRADE onto the neutral
+ * route needs an equivalence proof of its own, not a side effect of this slice.
+ */
+export type RiskBroker = "etrade" | "alpaca";
+
+export function riskApiPath(broker: RiskBroker, suffix: string): string {
+  return broker === "etrade" ? `/api/etrade${suffix}` : `/api/broker${suffix}`;
+}
+
+export async function fetchPortfolioRisk(
+  env: string,
+  broker: RiskBroker = "etrade",
+): Promise<PortfolioRiskReport> {
+  const resp = await apiFetch(riskApiPath(broker, "/portfolio-risk"), { headers: { "x-environment": env } });
   const data = (await resp.json().catch(() => ({}))) as PortfolioRiskReport & { error?: string };
   if (!resp.ok) throw new Error(data.error || `Request failed (${resp.status})`);
   // Shape guard (issue #71): a 200 body that is not a report (e.g. an
@@ -49,12 +67,20 @@ export async function fetchHedgeAnalysis(env: string): Promise<HedgeAnalysis> {
   return analysis;
 }
 
-export function fetchConcentration(env: string, candidateSymbol?: string): Promise<ConcentrationReport> {
-  return postJson<ConcentrationReport>("/api/etrade/portfolio-risk/correlation", env, { candidateSymbol });
+export function fetchConcentration(
+  env: string,
+  candidateSymbol?: string,
+  broker: RiskBroker = "etrade",
+): Promise<ConcentrationReport> {
+  return postJson<ConcentrationReport>(riskApiPath(broker, "/portfolio-risk/correlation"), env, { candidateSymbol });
 }
 
-export function fetchSizing(env: string, candidate: SizingCandidate): Promise<SizingResult> {
-  return postJson<SizingResult>("/api/etrade/portfolio-risk/size", env, { candidate });
+export function fetchSizing(
+  env: string,
+  candidate: SizingCandidate,
+  broker: RiskBroker = "etrade",
+): Promise<SizingResult> {
+  return postJson<SizingResult>(riskApiPath(broker, "/portfolio-risk/size"), env, { candidate });
 }
 
 // ---------------------------------------------------------------------------
@@ -195,8 +221,12 @@ export interface EvaluateResult {
   postTradeTotals: PortfolioRiskTotals;
 }
 
-export function fetchEvaluate(env: string, candidate: CandidateGreekContribution): Promise<EvaluateResult> {
-  return postJson<EvaluateResult>("/api/etrade/portfolio-risk/evaluate", env, { candidate });
+export function fetchEvaluate(
+  env: string,
+  candidate: CandidateGreekContribution,
+  broker: RiskBroker = "etrade",
+): Promise<EvaluateResult> {
+  return postJson<EvaluateResult>(riskApiPath(broker, "/portfolio-risk/evaluate"), env, { candidate });
 }
 
 // ---------------------------------------------------------------------------
