@@ -44,6 +44,7 @@ import {
   TextInput,
 } from "./components/ui";
 import { apiFetch } from "./apiFetch";
+import { SubscriptionGrantSection } from "./SubscriptionGrantSection";
 import { UnlimitedFreeGrantSection } from "./UnlimitedFreeGrantSection";
 
 export interface AccountIdentityView {
@@ -349,6 +350,11 @@ export function AccountAdminPanel() {
           />
         )}
       </div>
+
+      <SubscriptionGrantSection
+        targetLogin={lookup?.identity.userLogin ?? null}
+        onGranted={() => void runLookup()}
+      />
 
       <div>
         <h3>Price catalogue bindings</h3>
