@@ -29,7 +29,39 @@ interface SyncResult {
   completed?: boolean;
   integrity?: { ok: boolean };
   backfill?: { upserted: number; skippedRetention: number; rows: number; pages: number; complete: boolean };
+  corpusIndex?: CorpusIndexOutcome;
   error?: string;
+}
+
+interface CorpusIndexItemState {
+  bucketKey: string;
+  docId: string;
+  title?: string;
+  sha256: string;
+  state: "indexed" | "not-configured" | "failed";
+  reason?: string;
+}
+
+interface CorpusIndexOutcome {
+  items: CorpusIndexItemState[];
+  indexed: number;
+  notConfigured: number;
+  failed: number;
+  skipped?: boolean;
+  reason?: string;
+}
+
+function indexingStateLabel(state: string): string {
+  switch (state) {
+    case "indexed":
+      return "indexed";
+    case "not-configured":
+      return "not configured";
+    case "failed":
+      return "failed";
+    default:
+      return state;
+  }
 }
 
 interface UploadResult {
@@ -43,6 +75,7 @@ interface UploadResult {
   contentType?: string;
   ingestedAt?: string;
   idempotent?: boolean;
+  indexing?: { state: string };
   error?: string;
 }
 
@@ -62,7 +95,9 @@ interface UploadResult {
  *   shared exporter (#1065 one-exporter rule).
  * - Sync: POST /api/knowledge/corpus-sync. Shows the completed
  *   outcome or the honest skip (skipped + reason, e.g. too-soon
- *   with lastFiredAt). The sync also runs weekly on the existing
+ *   with lastFiredAt), plus the corpus index bridge's per-item
+ *   indexing state from the sync response (issue 3345: indexed /
+ *   not configured / failed per document). The sync also runs weekly on the existing
  *   every-30-minutes tick; this button is only a manual trigger.
  * - Upload: POST /api/knowledge/corpus. Displays exactly what the
  *   API returns: 201 fresh vs 200 replay plus the returned key
@@ -274,12 +309,32 @@ export function CorpusTab({ onHealth }: SearchTabProps) {
               {syncResult.lastFiredAt ? ` · last fired at ${syncResult.lastFiredAt}` : ""}
             </p>
           ) : (
-            <p>
-              Sync completed: integrity {syncResult.integrity?.ok ? "ok" : "has findings"}
-              {syncResult.backfill
-                ? ` · backfill ${syncResult.backfill.upserted} upserted, ${syncResult.backfill.skippedRetention} skipped (retention), ${syncResult.backfill.rows} rows in ${syncResult.backfill.pages} page(s)`
-                : ""}
-            </p>
+            <div>
+              <p>
+                Sync completed: integrity {syncResult.integrity?.ok ? "ok" : "has findings"}
+                {syncResult.backfill
+                  ? ` · backfill ${syncResult.backfill.upserted} upserted, ${syncResult.backfill.skippedRetention} skipped (retention), ${syncResult.backfill.rows} rows in ${syncResult.backfill.pages} page(s)`
+                  : ""}
+              </p>
+              {syncResult.corpusIndex &&
+                (syncResult.corpusIndex.skipped ? (
+                  <p>Index bridge (issue 3345): skipped — {syncResult.corpusIndex.reason}</p>
+                ) : (
+                  <div>
+                    <p>
+                      Index bridge (issue 3345): {syncResult.corpusIndex.indexed} indexed ·{" "}
+                      {syncResult.corpusIndex.notConfigured} not configured · {syncResult.corpusIndex.failed} failed
+                      {syncResult.corpusIndex.reason ? ` · ${syncResult.corpusIndex.reason}` : ""}
+                    </p>
+                    {syncResult.corpusIndex.items.map((item, i) => (
+                      <p key={i}>
+                        <strong>{item.title ?? item.bucketKey}</strong> · indexing: {indexingStateLabel(item.state)}
+                        {item.reason ? ` (${item.reason})` : ""} · {item.bucketKey}
+                      </p>
+                    ))}
+                  </div>
+                ))}
+            </div>
           )}
         </div>
       )}
@@ -318,6 +373,7 @@ export function CorpusTab({ onHealth }: SearchTabProps) {
           {uploadResult.fileName && <p>File name: {uploadResult.fileName}</p>}
           {uploadResult.contentType && <p>Content type: {uploadResult.contentType}</p>}
           {uploadResult.ingestedAt && <p>Ingested at: {uploadResult.ingestedAt}</p>}
+          {uploadResult.indexing && <p>Indexing (issue 3345): {indexingStateLabel(uploadResult.indexing.state)}</p>}
           {uploadResult.sourceUrl && <p>Source: {uploadResult.sourceUrl}</p>}
         </div>
       )}
