@@ -21,6 +21,7 @@ import {
   MIGRATION_0008_SUBSCRIPTIONS,
   MIGRATION_0013_SUBSCRIPTION_STRIPE_IDS,
   MIGRATION_0014_BILLING,
+  MIGRATION_0041_PLAN_TRIAL_DAYS,
   type MigrationDb,
 } from "./migrationRunner";
 import {
@@ -48,9 +49,9 @@ export function createD1SubscriptionDb(d1: D1Database): SubscriptionDb {
   });
 }
 
-/** Idempotent schema-ensure: applies migrations 0008 + 0013 + 0014 if unapplied (0013 adds the native Stripe id columns; 0014 adds the Billing provider columns + policy table). */
+/** Idempotent schema-ensure: applies migrations 0008 + 0013 + 0014 + 0041 if unapplied (0013 adds the native Stripe id columns; 0014 adds the Billing provider columns + policy table; 0041 adds the plan trial-days column). */
 export async function ensureSubscriptionSchema(db: SubscriptionDb): Promise<number[]> {
-  return applyMigrations(db as unknown as MigrationDb, [MIGRATION_0008_SUBSCRIPTIONS, MIGRATION_0013_SUBSCRIPTION_STRIPE_IDS, MIGRATION_0014_BILLING]);
+  return applyMigrations(db as unknown as MigrationDb, [MIGRATION_0008_SUBSCRIPTIONS, MIGRATION_0013_SUBSCRIPTION_STRIPE_IDS, MIGRATION_0014_BILLING, MIGRATION_0041_PLAN_TRIAL_DAYS]);
 }
 
 function toPlan(raw: typeof agentSubscriptionPlans.$inferSelect): SubscriptionPlanRecord {
@@ -60,6 +61,7 @@ function toPlan(raw: typeof agentSubscriptionPlans.$inferSelect): SubscriptionPl
     priceUSD: raw.priceUSD,
     periodDays: raw.periodDays,
     includedRuns: raw.includedRuns,
+    trialDays: raw.trialDays ?? null,
     active: raw.active === 1,
     createdAtMs: raw.createdAtMs,
     updatedAtMs: raw.updatedAtMs,
@@ -97,6 +99,7 @@ export class D1SubscriptionAdapter implements SubscriptionStore {
     priceUSD?: unknown;
     periodDays?: unknown;
     includedRuns?: unknown;
+    trialDays?: unknown;
   }): Promise<SubscriptionPlanRecord> {
     const plan = assertPlan(input);
     const id = plan.id || `plan-${crypto.randomUUID().slice(0, 8)}`;
@@ -109,6 +112,7 @@ export class D1SubscriptionAdapter implements SubscriptionStore {
         priceUSD: record.priceUSD,
         periodDays: record.periodDays,
         includedRuns: record.includedRuns,
+        trialDays: record.trialDays,
         active: 1,
         createdAtMs: record.createdAtMs,
         updatedAtMs: record.updatedAtMs,

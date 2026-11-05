@@ -46,6 +46,7 @@ import {
   fetchPlatformIdentity,
   FirstRunApiError,
 } from "./firstRunApi";
+import { trialEndedMessage } from "../services/trialSubscriptionActivation";
 import { csrfHeaders } from "./apiFetch";
 
 const SELLING_BASE = "/api/payments/agentic/commercial";
@@ -172,6 +173,17 @@ function sellingConfirmError(status: number): string {
   return errorMessageForStatus(status);
 }
 
+/** Fixed caller-facing trial messages per HTTP status (#3243). */
+function trialErrorMessage(status: number): string {
+  if (status === 409) {
+    return "This plan's trial is not available — it may already have been used, or the plan offers no trial.";
+  }
+  if (status === 403) {
+    return "Trial signup is disabled (the monetization flag is off).";
+  }
+  return errorMessageForStatus(status);
+}
+
 /** Fixed caller-facing cfpay channel messages per HTTP status (#2945). */
 function channelMintError(status: number): string {
   if (status === 503) {
@@ -244,6 +256,7 @@ function parsePlans(body: unknown): SellingPlanInput[] {
     priceUSD: typeof p.priceUSD === "number" ? p.priceUSD : 0,
     periodDays: typeof p.periodDays === "number" ? p.periodDays : 0,
     includedRuns: typeof p.includedRuns === "number" ? p.includedRuns : 0,
+    trialDays: typeof p.trialDays === "number" ? p.trialDays : null,
     active: p.active === true,
   }));
 }
@@ -302,6 +315,15 @@ function SellingSection({
   } | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState(false);
+  // Issue #3243 — trial signup state (same Selling section, never
+  // a second purchase path: the trial is a $0 checkout on the
+  // selected plan, and the paid Billing checkout above is untouched).
+  const [trialStarted, setTrialStarted] = useState<{
+    planName: string;
+    message: string;
+    trialEndsAtMs: number;
+  } | null>(null);
+  const [trialError, setTrialError] = useState<string | null>(null);
   // Issue #2945 — cfpay channel card state (same Selling section, never
   // a second purchase path: the catalog entry stays the single entry).
   const [channelFamily, setChannelFamily] = useState("");
@@ -397,6 +419,27 @@ function SellingSection({
     }
   }
 
+  async function startTrial() {
+    if (!selectedPlanId) return;
+    setTrialError(null);
+    setTrialStarted(null);
+    try {
+      const res = await postJson(`${SELLING_BASE}/subscription/trial`, { planId: selectedPlanId });
+      if (res.status !== 200) {
+        setTrialError(trialErrorMessage(res.status));
+        return;
+      }
+      const message = typeof res.body.message === "string" ? res.body.message : "";
+      const trialEndsAtMs = typeof res.body.trialEndsAtMs === "number" ? res.body.trialEndsAtMs : 0;
+      const planName = plans.find((p) => p.id === selectedPlanId)?.name ?? selectedPlanId;
+      setTrialStarted({ planName, message, trialEndsAtMs });
+      const identity = await fetchPlatformIdentity();
+      await load(identity.userLogin);
+    } catch {
+      setTrialError("Trial could not be started. Try again later.");
+    }
+  }
+
   async function channelMint() {
     if (!channelFamily || !channelEmail.trim()) return;
     setChannelError(null);
@@ -466,6 +509,15 @@ function SellingSection({
         })
       : null;
 
+  // Issue #3243 — trial state for the selected plan, derived from
+  // the rows the subscription read already returns: a trial row
+  // (provider "trial") means the trial was used; a trial row
+  // past periodEnd means it ended. The server enforces both —
+  // this is display only.
+  const selectedPlan = plans.find((p) => p.id === selectedPlanId) ?? null;
+  const trialRow = rows.find((r) => r.planId === selectedPlanId && r.provider === "trial") ?? null;
+  const trialExpired = trialRow !== null && trialRow.periodEndMs <= Date.now();
+
   return (
     <PageSection
       title="Selling"
@@ -521,10 +573,32 @@ function SellingSection({
                 Start checkout
               </Button>
             )}
+            {!minted && selectedPlan && selectedPlan.trialDays !== null && !trialRow && (
+              <Button variant="secondary" onClick={startTrial}>
+                Start free trial ({selectedPlan.trialDays} days)
+              </Button>
+            )}
           </div>
 
           {actionError && <Notice tone="danger" title="Checkout Error">{actionError}</Notice>}
           {confirmed && <Notice tone="success" title="Subscription Activated">Subscription activated.</Notice>}
+          {selectedPlan && selectedPlan.trialDays !== null && !trialRow && (
+            <p style={detailMutedTextStyle}>
+              Free trial: {selectedPlan.trialDays} days, {selectedPlan.includedRuns} included runs.
+              No payment is taken. When the trial ends, subscribe or pay per run to keep running screens.
+            </p>
+          )}
+          {trialError && <Notice tone="danger" title="Trial Error">{trialError}</Notice>}
+          {trialStarted && (
+            <Notice tone="success" title="Free Trial Started">
+              {trialStarted.message}
+            </Notice>
+          )}
+          {trialExpired && selectedPlan && (
+            <Notice tone="neutral" title="Trial Ended">
+              {trialEndedMessage(selectedPlan.name)}
+            </Notice>
+          )}
           {!minted && selling.plans.length === 0 && (
             <Notice tone="neutral">No active subscription plan — operator data missing.</Notice>
           )}
