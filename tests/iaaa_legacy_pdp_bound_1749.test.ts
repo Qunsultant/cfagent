@@ -128,7 +128,17 @@ describe("shouldEnforcePdp with the #1749 bound", () => {
 
 describe("server.ts gate wiring (#1749)", () => {
   it("passes an explicit clock to every shouldEnforcePdp gate and names the grace-expired denial at each gated route", () => {
-    const server = readFileSync("src/server.ts", "utf8");
+    // Slice 3 of Qunsultant/cfagent#2902 (2026-11-05): the four
+    // gated routes (E*TRADE start, E*TRADE verifier, Public start,
+    // Public connect) move verbatim from src/server.ts to
+    // src/server/routes/auth.ts with the login family. The gate
+    // wiring is scanned across both files — the entry surface is
+    // server.ts plus its route modules — and the counts are
+    // unchanged: still four gates, each with its own explicit
+    // clock, and the grace-expired denial named at each.
+    const server =
+      readFileSync("src/server.ts", "utf8") +
+      readFileSync("src/server/routes/auth.ts", "utf8");
     // #1755: the four gated routes (E*TRADE start, E*TRADE verifier,
     // Public start, Public connect) now call the shared gateway
     // helper instead of shouldEnforcePdp directly — the gate logic

@@ -453,3 +453,33 @@ conflict on Qunsultant/cfagent#2902.
   exported from the entrypoint; Slice 9 re-checks and keeps any
   required re-export with per-class justification.
 - Q4 (scheduled/queue consumer ownership) stays open for Slice 8.
+
+## 10. Slice 3 note (2026-11-05, PR for #2902 Slice 3)
+
+- Baseline at Slice 3: `origin/main` `29e25b78` (Slice 2 merged),
+  `src/server.ts` 6,981 lines / 338,401 bytes. Auth & IAAA move to
+  `src/server/routes/auth.ts` (3,344 lines) as three handlers in dispatch
+  order: `handleAuthLoginRoutes` (`/login`, `/auth/login/<id>`,
+  `/auth/callback/<id>`, `/auth/logout`, E*TRADE + public OAuth families),
+  `handleAuthMeRoutes` (`/api/me`, `/api/user/email-destination`,
+  `/api/iaaa/overview`, `/api/governance/seed-halt`),
+  `handleAuthIaaaRoutes` (access-request + full IAAA lifecycle +
+  `/api/api-keys`). `loginProviderMatch` / `callbackProviderMatch` /
+  `reqEnv` move inside `handleAuthLoginRoutes` with their branches.
+  `src/server.ts` after Slice 3: 3,755 lines / 174,274 bytes.
+- The 148-descriptor pin is unchanged (scanner reconstructs the identical
+  ordered list before and after); the pin test's delegation-order assertion
+  grows to the six delegations in dispatch order (Core early, Auth login,
+  Core health, Auth me, Auth IAAA, Core late). No route changed.
+- Pin updates in the same PR (repo pin rule): the D-D census pins in
+  `tests/global_dd_census_2356.test.ts` move with the code — step 5b
+  (session family: 20 list sites + 1 access-request site + 4 of 10
+  membership-store sites to `auth.ts`, 6 membership-store sites remain in
+  `server.ts`, totals unchanged) and step 5c (token family: the single
+  `listTokenFamilyEntries` site to `auth.ts`); `tests/iaaa_legacy_pdp_bound_1749.test.ts`
+  scans `server.ts` + `routes/auth.ts` for the same four PEP gates (each
+  with its own explicit clock, grace-expired denial named), counts
+  unchanged. Both files pass on clean main before the move and on the
+  branch after the pin update.
+- Q3 stays open for Slice 9; Q4 stays open for Slice 8. No new open
+  question is raised by Slice 3.

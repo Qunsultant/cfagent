@@ -924,9 +924,20 @@ const STEP5B_PORT_SITES: Array<[string, string, number]> = [
   // for the granter-revocation judgment) and the two revoke routes
   // add one each (granter-revocation pass), same factory — no new
   // funnel, no bypass.
-  ["src/server.ts", "listSessionFamilyEntries", 20],
-  ["src/server.ts", "wiredAccessRequestStore", 1],
-  ["src/server.ts", "wiredMembershipStore", 10],
+  // Slice 3 of Qunsultant/cfagent#2902 (2026-11-05): the 20 list
+  // sites move verbatim from src/server.ts to
+  // src/server/routes/auth.ts with the IAAA lifecycle; the count
+  // is unchanged, only the file. The same slice moves the single
+  // wiredAccessRequestStore site and 4 of the 10
+  // wiredMembershipStore sites to auth.ts; 6 membership-store
+  // sites remain in server.ts (privacy/trading/messaging/
+  // platform/queue branches), so the family total is unchanged.
+  // (Order is the scanner's sort: "src/server.ts" sorts before
+  // "src/server/routes/auth.ts".)
+  ["src/server.ts", "wiredMembershipStore", 6],
+  ["src/server/routes/auth.ts", "listSessionFamilyEntries", 20],
+  ["src/server/routes/auth.ts", "wiredAccessRequestStore", 1],
+  ["src/server/routes/auth.ts", "wiredMembershipStore", 4],
 ];
 
 describe("global D-D census: step 5b — session family port composition sites (#2433)", () => {
@@ -1001,7 +1012,11 @@ const STEP5C_PORT_SITES: Array<[string, string, number]> = [
   ["src/security/etradeOAuth.ts", "tokenFamilyPorts", 9],
   ["src/security/publicOAuth.ts", "createTokenPorts", 1],
   ["src/security/publicOAuth.ts", "publicTokenPort", 8],
-  ["src/server.ts", "listTokenFamilyEntries", 1],
+  // Slice 3 of Qunsultant/cfagent#2902 (2026-11-05): the single
+  // listTokenFamilyEntries site moves verbatim from src/server.ts
+  // to src/server/routes/auth.ts with the E*TRADE OAuth family;
+  // the count is unchanged, only the file.
+  ["src/server/routes/auth.ts", "listTokenFamilyEntries", 1],
 ];
 
 describe("global D-D census: step 5c — token family port composition sites (#2434)", () => {
