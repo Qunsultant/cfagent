@@ -1051,6 +1051,9 @@ export type PriceRegime = "UP" | "DN" | "RNG";
 export type CompositeBias = "Bullish" | "Bearish" | "Neutral";
 
 export interface StockScreenerFilter {
+  /** Issue #3272: which universe a provider-side scan should cover
+   *  (e.g. NASDAQ100). Absent means the provider picks its own. */
+  universe?: string;
   sector?: string;
   minPrice?: number;
   maxPrice?: number;

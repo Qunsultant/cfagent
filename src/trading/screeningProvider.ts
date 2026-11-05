@@ -27,6 +27,7 @@ import type {
   OptionScreenResult,
 } from "../types";
 import type { IMarketScreener } from "./interfaces";
+import { NeutralMarketScreener } from "./neutralMarketScreener";
 import type { DynamicOptionsScreener } from "./optionsScreener";
 
 export type ScreeningProviderAssetClass = "stocks" | "options";
@@ -96,6 +97,7 @@ export interface ScreeningProviderDescriptor {
 }
 
 export const STOCK_SCREENING_PROVIDER_ID = "etrade-yahoo-stocks";
+export const NEUTRAL_STOCK_SCREENING_PROVIDER_ID = "broker-neutral-stocks";
 export const OPTIONS_SCREENING_PROVIDER_ID = "dynamic-options";
 
 const STOCK_PROVIDER_FILTERS: readonly ScreeningFilter[] = [
@@ -139,6 +141,27 @@ export const SCREENING_PROVIDER_DESCRIPTORS: readonly ScreeningProviderDescripto
     assetClasses: ["options"],
     routes: { options: "/trading/options/screen" },
     clientEndpoints: {},
+  },
+  {
+    // Issue #3272: the same screening math over the SELECTED broker quotes.
+    // The universe is explicit via filter.universe; no broker context is a
+    // named refusal, never an empty result.
+    id: NEUTRAL_STOCK_SCREENING_PROVIDER_ID,
+    label: "Selected broker quotes (neutral stock screen)",
+    kind: "broker-api",
+    assetClasses: ["stocks"],
+    routes: { stocks: "/api/broker/screen" },
+    clientEndpoints: {
+      stocks: [
+        {
+          id: "selected-broker",
+          label: "Selected broker quotes (explicit universe)",
+          kind: "broker-api",
+          endpoint: "/api/broker/screen",
+          filters: STOCK_PROVIDER_FILTERS,
+        },
+      ],
+    },
   },
 ];
 
@@ -243,9 +266,20 @@ export class ScreeningProviderRegistry {
 export function createDefaultScreeningRegistry(deps: {
   stockScreener: IMarketScreener;
   optionsScreener: Pick<DynamicOptionsScreener, "screenOptions">;
+  /** Issue #3272: the broker-neutral stock screen. Omitted callers get one
+   *  that refuses with a named reason instead of reporting "no matches". */
+  neutralStockScreener?: IMarketScreener;
 }): ScreeningProviderRegistry {
   const registry = new ScreeningProviderRegistry();
   registry.register(createStockScreeningProvider(STOCK_SCREENING_PROVIDER_ID, deps.stockScreener));
   registry.register(createOptionsScreeningProvider(OPTIONS_SCREENING_PROVIDER_ID, deps.optionsScreener));
+  // Issue #3272: always registered, so the descriptor table and this registry
+  // can never disagree about which providers exist.
+  registry.register(
+    createStockScreeningProvider(
+      NEUTRAL_STOCK_SCREENING_PROVIDER_ID,
+      deps.neutralStockScreener ?? new NeutralMarketScreener(),
+    ),
+  );
   return registry;
 }

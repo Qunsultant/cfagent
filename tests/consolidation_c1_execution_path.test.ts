@@ -22,6 +22,7 @@ import {
   SCREENING_PROVIDER_DESCRIPTORS,
   STOCK_SCREENING_PROVIDER_ID,
   OPTIONS_SCREENING_PROVIDER_ID,
+  NEUTRAL_STOCK_SCREENING_PROVIDER_ID,
 } from "../src/trading/screeningProvider";
 import {
   SCREENING_PROVIDERS,
@@ -168,6 +169,8 @@ describe("C1 R2: descriptor table is the one registry source", () => {
     expect(described.map((d) => d.id)).toEqual([
       STOCK_SCREENING_PROVIDER_ID,
       OPTIONS_SCREENING_PROVIDER_ID,
+      // Issue #3272: registered, therefore describable.
+      NEUTRAL_STOCK_SCREENING_PROVIDER_ID,
     ]);
   });
 
@@ -190,10 +193,15 @@ describe("C1 R2: descriptor table is the one registry source", () => {
 
   it("client stock providers keep today's ids, endpoints and filters", () => {
     const stocks = getScreeningProviders("stocks");
-    expect(stocks.map((p) => p.id)).toEqual(["etrade", "yahoo-finance"]);
+    expect(stocks.map((p) => p.id)).toEqual(["etrade", "yahoo-finance", "selected-broker"]);
     expect(stocks[0].endpointByAssetClass.stocks).toBe("/api/etrade/screen");
     expect(stocks[1].endpointByAssetClass.stocks).toBe("/api/market-data/screen");
-    for (const p of stocks) {
+    // Issue #3272: the neutral endpoint is a first-class stock provider choice.
+    expect(stocks[2].endpointByAssetClass.stocks).toBe("/api/broker/screen");
+    expect(stocks[2].registryProviderId).toBe(NEUTRAL_STOCK_SCREENING_PROVIDER_ID);
+    // The first two endpoints belong to the legacy stock provider; the third
+    // (neutral, #3272) belongs to its own registry entry, asserted above.
+    for (const p of stocks.slice(0, 2)) {
       expect(p.registryProviderId).toBe(STOCK_SCREENING_PROVIDER_ID);
       expect(providerSupportsFilter(p, "stocks", "search")).toBe(true);
       expect(providerSupportsFilter(p, "stocks", "price-range")).toBe(true);
