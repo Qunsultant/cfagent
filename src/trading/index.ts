@@ -20,7 +20,12 @@ import { assertBrokerCatalogComplete } from "./brokerCatalog";
 
 // Register default pluggable platforms (unchanged)
 TradingPlatformRegistry.register("etrade", (env, orm, userLogin, overrideEnv, storage) => new ETradeTradingPlatform(env, orm, userLogin, overrideEnv, undefined, storage));
-TradingPlatformRegistry.register("alpaca", (env, orm, userLogin) => new AlpacaTradingPlatform(env, orm, userLogin));
+// Issue #3272: the selection must reach the adapter, or `paper` can never be
+// chosen for Alpaca and the hub switch stays E*TRADE-only.
+TradingPlatformRegistry.register(
+  "alpaca",
+  (env, orm, userLogin, overrideEnv) => new AlpacaTradingPlatform(env, orm, userLogin, overrideEnv),
+);
 TradingPlatformRegistry.register("sandbox", (env, orm, userLogin, overrideEnv, storage) => new ETradeTradingPlatform(env, orm, userLogin, overrideEnv, undefined, storage));
 
 // Issue #3232 (program #3216): every registered platform id must be a broker
