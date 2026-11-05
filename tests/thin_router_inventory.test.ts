@@ -185,6 +185,11 @@
  * handleSearchHubRoutes, after /search/knowledge) — bringing the
  * pinned array to 264 entries; the delegation sequence is
  * unchanged (same handler, same position).
+ *
+ * Issue #3323 added one — POST /search/ai-agent (in
+ * handleSearchHubRoutes, after /search/mas) — bringing the pinned
+ * array to 386 entries; the delegation sequence is unchanged
+ * (same handler, same position).
  * Rebuild of #2137 onto current main (superseding #2163)
  * re-applies the same three checkout UI routes (pricing,
  * submission check-payment, goal-command, in
@@ -492,6 +497,7 @@ const EXPECTED_INVENTORY = [
   "handleSearchHubRoutes :: endsWith(\"/search/agent\")",
   "handleSearchHubRoutes :: endsWith(\"/search/knowledge\")",
   "handleSearchHubRoutes :: endsWith(\"/search/mas\")",
+  "handleSearchHubRoutes :: endsWith(\"/search/ai-agent\")",
   "handleAutopilotRoutes :: endsWith(\"/autopilot\")",
   "handleAutopilotRoutes :: endsWith(\"/autopilot/jobs\")",
   "handleAutopilotRoutes :: endsWith(\"/autopilot/state\")",
