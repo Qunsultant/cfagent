@@ -131,7 +131,7 @@ export function IvHistoryPanel() {
       {error && <div style={{ color: "var(--color-danger)" }}>{error}</div>}
       {loading && !names.length && <div>Loading…</div>}
       {!loading && !error && names.length > 0 && totalObs === 0 && (
-        <div data-iv-series-empty={seriesBroker} style={{ color: "var(--color-text-muted)", marginBottom: "0.5rem" }}>
+        <div data-iv-series-empty={seriesBroker} className="ui-empty-text">
           No observations recorded for {seriesBroker || "this broker"} yet — the series starts with the first
           collection run on this broker. Nothing is backfilled or relabelled.
         </div>
