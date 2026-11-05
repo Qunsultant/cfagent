@@ -37,7 +37,7 @@ import {
   type GranterRevocationPassResult,
 } from "./security/grantRules";
 import { createGrantProposalStore, resolveAdminGrantProposal } from "./security/grantProposals";
-import { type DoNamespaceLike, type DoStubLike } from "./security/durableKv";
+import { type DoNamespaceLike, type DoStubLike } from "./data/durableKv";
 import type { ActorNamespaceLike } from "./services/actorGatewayPorts";
 import { zonedDateParts } from "./schedule";
 import { OPERATION_CATALOG } from "./orchestrate";
