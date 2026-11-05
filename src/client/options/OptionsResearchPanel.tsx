@@ -38,6 +38,7 @@ import { CapabilityNavBar, CopilotTriggerButton, type CapabilityTabItem } from "
 import { OptionsDataDownloadDropdown } from "./OptionsDataDownloadDropdown";
 import "./strategyDiscovery.css";
 import "./optionsResearch.css";
+import { optionScreenEndpoint } from "../brokerEndpoints";
 
 interface OptionsResearchPanelProps {
   activeEnv: "TEST" | "PROD";
@@ -883,7 +884,8 @@ export function OptionsResearchPanel({ activeEnv, userLogin, onPreviewTrade, onJ
     setChainRefreshing(true);
     setChainRefreshError("");
     try {
-      const response = await fetch("/api/trading/options/screen", {
+      // Issue #3272: the selected broker decides which screen endpoint serves.
+      const response = await fetch(optionScreenEndpoint(), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

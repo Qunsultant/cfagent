@@ -14,6 +14,7 @@ import { ScreenerPresetManager } from "../ScreenerPresetManager";
 import type { TradeOrderContext } from "../trading/tradeOrderContext";
 import { RiskAnalysisModal } from "./RiskAnalysisModal";
 import type { RiskSubject } from "./riskManagementEngine";
+import { optionScreenEndpoint } from "../brokerEndpoints";
 
 interface RawContractsScreenerProps {
   activeEnv: "TEST" | "PROD";
@@ -81,7 +82,8 @@ export function RawContractsScreener({
   const [payStatus, setPayStatus] = useState("");
 
   const callScreen = async (filters: Record<string, unknown>, paymentSignature?: string) => {
-    const response = await fetch("/api/trading/options/screen", {
+    // Issue #3272: the selected broker decides which screen endpoint serves.
+    const response = await fetch(optionScreenEndpoint(), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
