@@ -7,7 +7,7 @@ import { codedMessage, resolveOutcome } from "../outcomes/outcomeAspects";
 import { Card, Badge, TextInput, Button, EmptyState, Select, Spinner, Table, Modal, Notice, PageShell, FieldShell, useToast } from "./components/ui";
 import { getRoute } from "./routes";
 import { parseTabFromSearch, subscribeToRouteChanges } from "./router";
-import { readTenantProvidersState, BROKER_OPTIONS } from "./tenantProviders";
+import { readTenantProvidersState, useTenantProviders, BROKER_OPTIONS } from "./tenantProviders";
 import {
   ETradeQuote,
   ScreenedStockItem,
@@ -183,7 +183,9 @@ export function ETradeTradingHub({
   const effectiveSubTab: TradingSubTab = activeSubTab || subTab || "autopilot";
   // Issue #2853 (gap G2): the selected broker decides which broker surface
   // renders. Previously every panel was E*TRADE regardless of selection.
-  const selectedBroker = readTenantProvidersState().brokerId;
+  // Issue #3411: subscribe to useTenantProviders() so broker switches reactively update.
+  const [tenantProviders] = useTenantProviders();
+  const selectedBroker = tenantProviders.brokerId;
   // Issue #3356: an unrecognised stored id is refused rather than becoming an
   // E*TRADE read by default - the same fail-closed rule the catalog applies.
   const riskBroker: RiskBroker | null = isBrokerId(selectedBroker) ? selectedBroker : null;
