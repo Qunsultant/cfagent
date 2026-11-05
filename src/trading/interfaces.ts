@@ -17,6 +17,8 @@ import type {
   BrokerPosition,
   BrokerPositionLot,
   BrokerAccount,
+  BrokerActivity,
+  BrokerRemoteOrder,
   BrokerStatus,
   BrokerOptionChain,
   BrokerOptionExpireDate,
@@ -140,6 +142,16 @@ export interface ITradingPlatform {
    * Optional — platforms without a detailed read omit it.
    */
   getQuoteDetailed?(symbol: string): Promise<{ quote: BrokerQuote | null; error: string | null }>;
+  /**
+   * Account-history reads (issue #3359). Optional for the same reason as every
+   * other capability: a broker without order history omits it and the surface
+   * says so, instead of an empty table reading like "no orders".
+   *
+   * Both return the broker's own rows mapped onto the neutral shapes — never
+   * another broker's data, never a synthesised row.
+   */
+  getOrderHistory?(status: "open" | "closed" | "all"): Promise<BrokerRemoteOrder[]>;
+  getAccountActivity?(activityType?: string): Promise<BrokerActivity[]>;
 }
 
 export interface IMarketScreener {

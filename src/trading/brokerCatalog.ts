@@ -72,7 +72,15 @@ export type BrokerOperation =
   | "ivHistory"
   | "orderPreview"
   | "orderPlace"
-  | "marketScreening";
+  | "marketScreening"
+  // Issue #3359: the account-history reads. Declared for the same reason as
+  // every other operation: an Alpaca tenant looking at their account must see
+  // either their own activity or a sentence naming what the broker lacks --
+  // never an empty table that reads like "you did nothing today".
+  | "orderHistory"
+  | "accountActivity"
+  | "alerts"
+  | "watchlists";
 
 export interface BrokerDefinition {
   readonly id: BrokerId;
@@ -161,6 +169,12 @@ export const BROKER_CATALOG = {
       marketScreening: true,
       optionsScanner: true,
       ivHistory: true,
+      // E*TRADE serves all four through its own routes (/etrade/orders/remote,
+      // /etrade/transactions, /etrade/alerts, /etrade/watchlists).
+      orderHistory: true,
+      accountActivity: true,
+      alerts: true,
+      watchlists: true,
     },
     statusVocabulary: {
       protocol: "etrade_oauth_rest",
@@ -197,6 +211,14 @@ export const BROKER_CATALOG = {
       marketScreening: true,
       optionsScanner: true,
       ivHistory: true,
+      // Issue #3359: Alpaca serves order history (`GET /v2/orders`) and account
+      // activities (`GET /v2/account/activities`). It has no alerts model, and
+      // its watchlists are not the platform's E*TRADE-shaped watchlist store --
+      // both are declared false so the panel states the gap by name.
+      orderHistory: true,
+      accountActivity: true,
+      alerts: false,
+      watchlists: false,
     },
     statusVocabulary: {
       protocol: "alpaca_rest_v2",

@@ -24,13 +24,28 @@
 import { BROKER_CATALOG, ROUTED_BROKER_IDS, type BrokerId, type BrokerOperation } from "./brokerCatalog";
 
 /** A panel a broker can render in the trading hub. */
-export type BrokerPanelSurface = "accounts" | "positions" | "orders" | "options";
+export type BrokerPanelSurface =
+  | "accounts"
+  | "positions"
+  | "orders"
+  | "options"
+  // Issue #3359: the account-history surfaces. They are separate from
+  // `orders` (which is the order TICKET: preview + place) because history is a
+  // read, and a broker can perfectly well have one without the other.
+  | "orderHistory"
+  | "activity"
+  | "alerts"
+  | "watchlists";
 
 /** Every surface, in render order. */
 export const BROKER_PANEL_SURFACES: readonly BrokerPanelSurface[] = [
   "accounts",
   "positions",
   "orders",
+  "orderHistory",
+  "activity",
+  "alerts",
+  "watchlists",
   "options",
 ];
 
@@ -43,6 +58,10 @@ export const SURFACE_OPERATIONS: Readonly<Record<BrokerPanelSurface, readonly Br
   accounts: ["accounts"],
   positions: ["positions"],
   orders: ["orderPreview", "orderPlace"],
+  orderHistory: ["orderHistory"],
+  activity: ["accountActivity"],
+  alerts: ["alerts"],
+  watchlists: ["watchlists"],
   options: ["optionChains", "optionExpireDates"],
 };
 
@@ -51,6 +70,10 @@ export const SURFACE_LABELS: Readonly<Record<BrokerPanelSurface, string>> = {
   accounts: "Accounts",
   positions: "Positions",
   orders: "Orders",
+  orderHistory: "Order history",
+  activity: "Account activity",
+  alerts: "Alerts",
+  watchlists: "Watchlists",
   options: "Options",
 };
 

@@ -619,6 +619,10 @@ const EXPECTED_INVENTORY = [
   // Issue #3293: status and quote reads are neutral too.
   "handleBrokerReadsRoutes :: endsWith(\"/broker/status\")",
   "handleBrokerReadsRoutes :: endsWith(\"/broker/quote\")",
+  // Issue #3359: the account-history reads (distinct from /broker/orders, the
+  // stored-draft route).
+  "handleBrokerReadsRoutes :: endsWith(\"/broker/orders/history\")",
+  "handleBrokerReadsRoutes :: endsWith(\"/broker/activities\")",
   // Issue #3324: the risk model runs on the selected broker's book.
   "handleBrokerRiskRoutes :: endsWith(\"/broker/portfolio-risk\")",
   "handleBrokerRiskRoutes :: endsWith(\"/broker/portfolio-risk/evaluate\")",
