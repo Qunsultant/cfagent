@@ -1251,6 +1251,9 @@
       "params": {
         "orderTab": "risk"
       }
+    },
+    "autopilot": {
+      "tab": "autopilot"
     }
   },
   "deepLinkSurfaces": [
