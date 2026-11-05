@@ -20,10 +20,10 @@ import { DatabaseORM } from "../src/orm";
 import { MockSqlStorage } from "./mock-sql";
 import { ScheduledTasksService } from "../src/services/scheduledTasks";
 import { UnifiedOptionsService } from "../src/trading";
-import { deliverScreenerToSlackA2A } from "../src/services/screenerSlackDelivery";
+import { deliverGatedSlack } from "../src/services/gatedSlackDelivery";
 import type { Env } from "../src/types";
 
-const mockDeliverA2A = vi.mocked(deliverScreenerToSlackA2A);
+const mockDeliverGatedSlack = vi.mocked(deliverGatedSlack);
 
 vi.mock("../src/trading", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
@@ -39,13 +39,9 @@ vi.mock("../src/trading", async (importOriginal) => {
   };
 });
 
-vi.mock("../src/services/screenerSlackDelivery", async (importOriginal) => {
-  const actual = (await importOriginal()) as Record<string, unknown>;
-  return {
-    ...actual,
-    deliverScreenerToSlackA2A: vi.fn(async () => ({ ok: true as const })),
-  };
-});
+vi.mock("../src/services/gatedSlackDelivery", () => ({
+  deliverGatedSlack: vi.fn(async () => ({ ok: true as const })),
+}));
 
 class MockKVNamespace {
   private store = new Map<string, string>();
@@ -100,7 +96,7 @@ const baseScan = (data: Record<string, unknown>) => ({
 
 describe("F3 auto-shard is trigger-independent (#2599)", () => {
   beforeEach(() => {
-    mockDeliverA2A.mockClear();
+    mockDeliverGatedSlack.mockClear();
     (UnifiedOptionsService as any).scan = null;
   });
 
@@ -152,7 +148,7 @@ describe("F3 auto-shard is trigger-independent (#2599)", () => {
 
 describe("F5 missing-coverage publish-nothing gate (#2599)", () => {
   beforeEach(() => {
-    mockDeliverA2A.mockClear();
+    mockDeliverGatedSlack.mockClear();
     (UnifiedOptionsService as any).scan = null;
   });
 

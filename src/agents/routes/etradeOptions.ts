@@ -69,7 +69,7 @@ import { DEFAULT_AI_MODEL } from "../model";
 import type { Env, ETradeOptionChain, ETradeOptionExpireDate } from "../../types";
 import type { DatabaseORM, SqlStorage } from "../../orm";
 import type { ScreenerAgent } from "../screener-agent";
-import { deliverScreenerToSlackA2A } from "../../services/screenerSlackDelivery";
+import { deliverGatedSlack } from "../../services/gatedSlackDelivery";
 import { screenerOutcomeFromRunResult } from "../../services/screenerFollowups";
 import { RecommendationService, type KernelSnapshot } from "../../services/recommendationKernel";
 import { listComparisonOutcomes, runProductionComparison } from "../../services/comparisonRunner";
@@ -882,11 +882,12 @@ export async function handleEtradeOptionsRoutes(
               request.headers.get("x-user-login") as string,
             );
           } else {
-            const sent = await deliverScreenerToSlackA2A(ctx.env, {
-              channel: filter.slackChannel || (ctx.env as any).SCREENER_SLACK_CHANNEL,
+            const sent = await deliverGatedSlack(ctx.env, {
+              userLogin,
+              channel: filter.slackChannel,
               text: `⚠️ Options Contract Screen FAILED — ${(filter.underlyingSymbols || []).join(", ") || filter.universe || "selected underlyings"}\nError: ${error}`,
             });
-            if (!sent.ok) console.warn("[Orchestrator] Slack A2A options contract failure notification failed:", sent.error);
+            if (!sent.ok) console.warn("[Orchestrator] Slack options contract failure notification failed:", sent.error);
           }
         }
         return Response.json({ error }, { status: 500 });

@@ -2,7 +2,7 @@
  * Issue #424: failed screener runs do not notify Slack.
  *
  * The market screen's failures fan out through the event bus publishers and
- * the options analysis failure sends a Slack A2A notice — but scheduled
+ * the options analysis failure sends a gated Slack notice — but scheduled
  * strategy discovery failures were audit + session-message only, invisible
  * to anyone not watching the app. These tests pin the fan-out for the
  * discovery variants, and the audited skip when no channel is configured.
@@ -10,9 +10,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ScheduledTasksService } from "../src/services/scheduledTasks";
 import { DatabaseORM } from "../src/orm";
-import { ETradeSlackTradingService } from "../src/trading/slack/agent";
+import { deliverGatedSlack } from "../src/services/gatedSlackDelivery";
 import { ETradeWebhookService } from "../src/services/tradingWebhooks";
 import type { Env } from "../src/types";
+
+const mockDeliverGatedSlack = vi.mocked(deliverGatedSlack);
+
+vi.mock("../src/services/gatedSlackDelivery", () => ({
+  deliverGatedSlack: vi.fn(async () => ({ ok: true as const })),
+}));
 
 function makeService(env: Partial<Env>) {
   const mockSql = { exec: vi.fn(() => []) };
@@ -28,13 +34,11 @@ function makeService(env: Partial<Env>) {
 }
 
 describe("strategy discovery failure notifications (#424)", () => {
-  let slackSpy: ReturnType<typeof vi.spyOn>;
   let webhookSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    slackSpy = vi
-      .spyOn(ETradeSlackTradingService.prototype, "postSlackMessage")
-      .mockResolvedValue({ ok: true } as any);
+    mockDeliverGatedSlack.mockClear();
+    mockDeliverGatedSlack.mockResolvedValue({ ok: true });
     webhookSpy = vi
       .spyOn(ETradeWebhookService.prototype, "dispatchOutboundWebhook")
       .mockResolvedValue({ success: true } as any);
@@ -51,9 +55,11 @@ describe("strategy discovery failure notifications (#424)", () => {
     });
     const result = await service.autonomousStrategyDiscovery({ requests: [] });
     expect(result.success).toBe(false);
-    expect(slackSpy).toHaveBeenCalledTimes(1);
-    const slackText = (slackSpy.mock.calls[0][0] as any).text as string;
-    expect(slackText).toContain("Strategy Discovery FAILED");
+    expect(mockDeliverGatedSlack).toHaveBeenCalledTimes(1);
+    const slackCall = mockDeliverGatedSlack.mock.calls[0][1] as Record<string, unknown>;
+    expect(String(slackCall.text ?? "")).toContain("Strategy Discovery FAILED");
+    // #3177: the tick gates on the run owner's login.
+    expect(slackCall.userLogin).toBe("test_trader");
     expect(webhookSpy).toHaveBeenCalledTimes(1);
     expect(webhookSpy.mock.calls[0][0]).toBe("options.strategy_discovery_failed");
   });
@@ -69,7 +75,7 @@ describe("strategy discovery failure notifications (#424)", () => {
       symbols: ["AAPL"],
     });
     expect(result.success).toBe(false);
-    expect(slackSpy).toHaveBeenCalledTimes(1);
+    expect(mockDeliverGatedSlack).toHaveBeenCalledTimes(1);
     expect(webhookSpy).toHaveBeenCalledTimes(1);
   });
 
@@ -77,9 +83,15 @@ describe("strategy discovery failure notifications (#424)", () => {
     const service = makeService({});
     const auditSpy = vi.fn();
     (service as any).audit = auditSpy;
+    // The helper is attempted (and reports the unconfigured transport),
+    // but no channel was configured, so the #424 skip is still audited.
+    mockDeliverGatedSlack.mockResolvedValueOnce({
+      ok: false,
+      error: "Neither SLACK_BOT_TOKEN nor SLACK_WEBHOOK_URL is configured for direct delivery",
+    });
     const result = await service.autonomousStrategyDiscovery({ requests: [] });
     expect(result.success).toBe(false);
-    expect(slackSpy).not.toHaveBeenCalled();
+    expect(mockDeliverGatedSlack).toHaveBeenCalledTimes(1);
     expect(webhookSpy).not.toHaveBeenCalled();
     const skip = auditSpy.mock.calls.find(
       (c) => c[0] === "options.strategy_discovery_notify_skipped"

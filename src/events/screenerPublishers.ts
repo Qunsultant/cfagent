@@ -45,7 +45,8 @@ import {
   cfpaySendEmail,
   cfpaySendEmailWithAttachments,
 } from "../services/cfpayA2A";
-import { deliverScreenerToSlack, deliverScreenerToSlackA2A } from "../services/screenerSlackDelivery";
+import { deliverScreenerToSlack } from "../services/screenerSlackDelivery";
+import { deliverGatedSlack } from "../services/gatedSlackDelivery";
 import { checkScreenerDeliveryConfig } from "../services/screenerDeliveryConfig";
 import {
   getStoredEmailDestination,
@@ -493,21 +494,28 @@ async function publishFailed(
   const text = `⚠️ Market Screen FAILED — ${event.universe || "TECH"}${event.sector && event.sector !== "ALL" ? ` · ${event.sector}` : ""} · ${triggerLabel}\nError: ${event.error}\n_Time: ${event.timestamp}_`;
 
   const cfpay = getCfpayConfig(deps.env);
-  const slackChannel = event.slackChannel || (deps.env as any).SCREENER_SLACK_CHANNEL || (deps.env as any).SLACK_CHANNEL;
   let attempted = false;
-  if (cfpay) {
-    attempted = true;
-    const result = await deliverScreenerToSlackA2A(deps.env, { text, channel: slackChannel });
-    if (!result.ok) console.warn("[ScreenerPublishers] Slack A2A failure-notify failed:", result.error);
-  } else if (deps.env.SLACK_BOT_TOKEN || deps.env.SLACK_WEBHOOK_URL) {
-    attempted = true;
-    try {
-      const slack = new ETradeSlackTradingService(deps.env, deps.orm, deps.userLogin);
-      await slack.postSlackMessage({ text, channel: slackChannel } as any);
-    } catch (err) {
-      console.warn("[ScreenerPublishers] Slack failure-notify failed:", err instanceof Error ? err.message : String(err));
-    }
-  }
+  // #3177: one gated dispatch replaces the A2A-only branch and the
+  // ETradeSlackTradingService fallback. The fallback is provably
+  // equivalent-or-better: same channel, same text, same auth sources
+  // (bot token / webhook / cfpay A2A) — and the master sender adds the
+  // A2A->direct fallback the old branch lacked (an A2A failure used to
+  // end the attempt), and never double-posts when both a webhook and a
+  // bot token are configured (the ETrade sender tried both).
+  // `attempted` keeps its #424 meaning ("a notification channel was
+  // available"): a gate refusal is a deliberate, logged outcome, not
+  // a missing channel, so a configured Slack counts as attempted even
+  // when the tenant disabled it.
+  const slackConfigured = Boolean(
+    cfpay || deps.env.SLACK_BOT_TOKEN || deps.env.SLACK_WEBHOOK_URL,
+  );
+  const result = await deliverGatedSlack(deps.env, {
+    userLogin: deps.userLogin,
+    text,
+    channel: event.slackChannel,
+  });
+  attempted = attempted || slackConfigured;
+  if (!result.ok) console.warn("[ScreenerPublishers] Slack failure-notify failed:", result.error);
 
   const emailTo = await resolvePublisherEmailTo(deps, event);
   if (emailTo) {

@@ -105,7 +105,6 @@ import {
 import type { ScreeningChannel } from "../services/screeningDelivery";
 import type { GovernedHaltState } from "../data/governedHalt";
 import { ETradeWebhookService } from "../services/tradingWebhooks";
-import { deliverScreenerToSlackA2A } from "../services/screenerSlackDelivery";
 import { createFollowupDeliveryPort } from "../services/screenerFollowupDelivery";
 import { createSqlDeliverySuppressionStore } from "../data/deliveryClaimsStore";
 import { createDeliverySuppressor } from "../workflows/screenDeliverySuppression";

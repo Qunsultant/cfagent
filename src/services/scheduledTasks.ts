@@ -71,7 +71,7 @@ import {
   defaultRegistry,
 } from "../trading";
 import { DEFAULT_SUBREQUEST_BUDGET, getOpportunityScannerConfig } from "../config/etapiConfig";
-import { tagOpportunitiesWithDirection, ETradeSlackTradingService } from "../trading";
+import { tagOpportunitiesWithDirection } from "../trading";
 // Issue #1291: the scheduled path's unified scan result is an
 // OpportunityScanResult, not the OptionScreenResult the workbook
 // generator reads — adapt at this seam (XLSX; #1569 applies the
@@ -130,7 +130,7 @@ import {
   getStoredEmailDestination,
   resolveEmailDestination,
 } from "./userEmailDestination";
-import { deliverScreenerToSlackA2A } from "./screenerSlackDelivery";
+import { deliverGatedSlack } from "./gatedSlackDelivery";
 import { getEventCalendarCoverage, getSymbolEventCalendar } from "./eventCalendar";
 
 export interface AutonomousOptionsAnalysisOptions {
@@ -2836,7 +2836,6 @@ export class ScheduledTasksService {
       // One A2A file operation creates one Slack notification with the
       // summary attached, avoiding the old text-plus-file duplicate pair.
       if (shouldNotifySlack && !chainMode) {
-        const slackChannel = options.slackChannel || (this.env as any).SCREENER_SLACK_CHANNEL || (this.env as any).SLACK_CHANNEL;
         // Issue #1718: a below-floor partial is NOT broadcast as a
         // success — degraded notice only, no PDF/files, no report link.
         // Persistence above (run record, canonical report, PDF) is
@@ -2844,9 +2843,9 @@ export class ScheduledTasksService {
         if (optionsCoverageBelowBroadcastFloor(scanData?.partial)) {
           const degraded = formatDegradedCoverageNotice(scanData.partial, "Options screen", targetThesis);
           try {
-            const delivery = await deliverScreenerToSlackA2A(this.env, { text: degraded, channel: slackChannel });
+            const delivery = await deliverGatedSlack(this.env, { userLogin, text: degraded, channel: options.slackChannel });
             notifications.slack = delivery.ok;
-            if (!delivery.ok) console.warn("[ScheduledTasksService] Slack A2A degraded-coverage notice failed:", delivery.error);
+            if (!delivery.ok) console.warn("[ScheduledTasksService] Slack degraded-coverage notice failed:", delivery.error);
           } catch (noticeErr) {
             console.warn("[ScheduledTasksService] Options Slack degraded-coverage notice failed:", noticeErr instanceof Error ? noticeErr.message : String(noticeErr));
             notifications.slack = false;
@@ -2856,9 +2855,10 @@ export class ScheduledTasksService {
         const text = typeof slackPayload === "string" ? slackPayload : slackPayload.text || JSON.stringify(slackPayload);
         const matchCount = response.data?.matchedCount || response.data?.opportunities?.length || 0;
         try {
-          const delivery = await deliverScreenerToSlackA2A(this.env, {
+          const delivery = await deliverGatedSlack(this.env, {
+            userLogin,
             text,
-            channel: slackChannel,
+            channel: options.slackChannel,
             ...(optionsPdf && optionsPdfFile ? { pdf: {
               bytes: optionsPdf,
               fileName: optionsPdfFile,
@@ -2877,12 +2877,12 @@ export class ScheduledTasksService {
             }] } : {}),
           });
           notifications.slack = delivery.ok;
-          if (!delivery.ok) console.warn("[ScheduledTasksService] Slack A2A PDF delivery failed:", delivery.error);
+          if (!delivery.ok) console.warn("[ScheduledTasksService] Slack PDF delivery failed:", delivery.error);
         } catch (pdfErr) {
           console.warn("[ScheduledTasksService] Options Slack delivery failed:", pdfErr instanceof Error ? pdfErr.message : String(pdfErr));
-          const delivery = await deliverScreenerToSlackA2A(this.env, { text, channel: slackChannel });
+          const delivery = await deliverGatedSlack(this.env, { userLogin, text, channel: options.slackChannel });
           notifications.slack = delivery.ok;
-          if (!delivery.ok) console.warn("[ScheduledTasksService] Slack A2A notification failed:", delivery.error);
+          if (!delivery.ok) console.warn("[ScheduledTasksService] Slack notification failed:", delivery.error);
         }
         } // end else: at-or-above-floor success delivery (#1718)
       }
@@ -3102,11 +3102,15 @@ export class ScheduledTasksService {
       // notifications cover the failure, so the direct notice is
       // suppressed (same exactly-once rule as the success path).
       if (shouldNotifySlack && !options.stageChain) {
-        const failure = await deliverScreenerToSlackA2A(this.env, {
+        const failure = await deliverGatedSlack(this.env, {
+          // The local `userLogin` (options.userLogin || this.userLogin)
+          // is declared inside the try block, so it is out of scope in
+          // this catch — spell out the same resolution here.
+          userLogin: options.userLogin || this.userLogin,
           channel: options.slackChannel,
           text: `⚠️ Scheduled Options Screen FAILED — ${options.universe || symbols.join(", ") || "NASDAQ100"} (${targetThesis})\nError: ${err.message || "Scheduled options analysis failed"}\n_Time: ${timestamp}_`,
         });
-        if (!failure.ok) console.warn("[ScheduledTasksService] Slack A2A failure notification failed:", failure.error);
+        if (!failure.ok) console.warn("[ScheduledTasksService] Slack failure notification failed:", failure.error);
       }
 
       // Issue #223: the failure joins the bus too, mirroring screener.failed.
@@ -3172,16 +3176,18 @@ export class ScheduledTasksService {
       `Error: ${args.error}\n_Time: ${new Date().toISOString()}_`;
     let attempted = false;
     try {
-      if (getCfpayConfig(this.env)) {
-        attempted = true;
-        const result = await deliverScreenerToSlackA2A(this.env, { text });
-        if (!result.ok) {
-          console.warn("[ScheduledTasksService] Discovery failure Slack A2A failed:", result.error);
-        }
-      } else if (this.env.SLACK_BOT_TOKEN || this.env.SLACK_WEBHOOK_URL) {
-        attempted = true;
-        const slack = new ETradeSlackTradingService(this.env, this.orm, this.userLogin);
-        await slack.postSlackMessage({ text } as any);
+      // #3177: one gated dispatch replaces the A2A-only branch and the
+      // ETradeSlackTradingService fallback (same equivalence as
+      // screenerPublishers publishFailed: same channel, text, and auth
+      // sources; master adds the A2A->direct fallback and never
+      // double-posts). `attempted` keeps its #424 meaning.
+      const slackConfigured = Boolean(
+        getCfpayConfig(this.env) || this.env.SLACK_BOT_TOKEN || this.env.SLACK_WEBHOOK_URL,
+      );
+      const result = await deliverGatedSlack(this.env, { userLogin: this.userLogin, text });
+      attempted = attempted || slackConfigured;
+      if (!result.ok) {
+        console.warn("[ScheduledTasksService] Discovery failure Slack failed:", result.error);
       }
     } catch (err) {
       console.warn(

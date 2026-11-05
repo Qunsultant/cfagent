@@ -27,7 +27,7 @@ import {
 import { createOptionsDiscoveryPorts } from "../../data/createOptionsDiscoveryPorts";
 import { isDemoCalibratedChainsEnabled } from "../../config/demoMode";
 import { buildDataProviderPorts } from "../../data/buildDataProviderPorts";
-import { deliverScreenerToSlackA2A } from "../../services/screenerSlackDelivery";
+import { deliverGatedSlack } from "../../services/gatedSlackDelivery";
 import { screenerOutcomeFromRunResult } from "../../services/screenerFollowups";
 import { recordJobOutcome } from "../../services/jobOutcomes";
 import { recordOptionsRunOutcome, storeOptionsCanonicalReport } from "../../services/optionsServeRecord";
@@ -201,11 +201,11 @@ export async function executeOptionsScreen(args: {
     ? `/api/options/report.csv?key=${encodeURIComponent(optionsCsvKey)}`
     : undefined;
 
-  // Deliver over A2A to Slack channel unless caller explicitly opted out
+  // Deliver over gated Slack (#3177) unless caller explicitly opted out
   // (or the tracked follow-up pipeline owns delivery — issue #1123).
   // S5a: when the host provides the follow-up bridge, the run is
   // recorded + chained through the pipeline instead of delivering
-  // inline; the A2A block remains the fallback for hosts without it.
+  // inline; the gated dispatch remains the fallback for hosts without it.
   const shouldNotifySlack = screenPushToSlack !== false && !deferDelivery;
   // Issue #1333: delivery states for the inline outcome record below
   // (the bridged path records through the job-tree hook instead).
@@ -231,12 +231,12 @@ export async function executeOptionsScreen(args: {
       userLogin,
     );
   } else if (shouldNotifySlack) {
-    const slackChannel = screenSlackChannel || (ctx.env as any).SCREENER_SLACK_CHANNEL || (ctx.env as any).SLACK_CHANNEL;
     const summary = `📊 Options Contract Screen — ${(screenFilter.underlyingSymbols || []).join(", ") || screenUniverseLabel || "selected underlyings"}\n${result.totalUnderlyingsScanned} underlyings scanned · ${result.totalContractsEvaluated} contracts evaluated · ${result.matchedCount} matched.\n${result.filterSummary || ""}`;
     try {
-      const sent = await deliverScreenerToSlackA2A(ctx.env, {
+      const sent = await deliverGatedSlack(ctx.env, {
+        userLogin,
         text: summary,
-        channel: slackChannel,
+        channel: screenSlackChannel,
         ...(pdfBytes && fileName ? {
           pdf: {
             bytes: pdfBytes,
@@ -253,9 +253,9 @@ export async function executeOptionsScreen(args: {
         } : {}),
       });
       slackState = sent.ok ? "sent" : "failed";
-      if (!sent.ok) console.warn("[Orchestrator] Slack A2A options contract PDF delivery failed:", sent.error);
+      if (!sent.ok) console.warn("[Orchestrator] Slack options contract PDF delivery failed:", sent.error);
     } catch (slackErr) {
-      console.warn("[Orchestrator] Slack A2A options delivery error:", slackErr instanceof Error ? slackErr.message : String(slackErr));
+      console.warn("[Orchestrator] Slack options delivery error:", slackErr instanceof Error ? slackErr.message : String(slackErr));
     }
   }
 
@@ -538,14 +538,14 @@ export async function executeUnifiedOptions(args: {
 
     const shouldNotifySlack = reqData.pushToSlack !== false && reqData.pushToSlack !== "false";
     if (shouldNotifySlack) {
-      const slackChannel = reqData.slackChannel || (ctx.env as any).SCREENER_SLACK_CHANNEL || (ctx.env as any).SLACK_CHANNEL;
       try {
         const slackPayload = result.toSlack();
         const text = typeof slackPayload === "string" ? slackPayload : slackPayload.text || JSON.stringify(slackPayload);
         const matchCount = result.data?.opportunities?.length ?? result.data?.matchedCount ?? 0;
-        const sent = await deliverScreenerToSlackA2A(ctx.env, {
+        const sent = await deliverGatedSlack(ctx.env, {
+          userLogin,
           text,
-          channel: slackChannel,
+          channel: reqData.slackChannel,
           ...(scannerPdfBytes && scannerPdfFileName ? {
             pdf: {
               bytes: scannerPdfBytes,
@@ -561,7 +561,7 @@ export async function executeUnifiedOptions(args: {
             files: [{ bytes: scannerCsvBytes, fileName: scannerCsvFileName, title: scannerCsvFileName }],
           } : {}),
         });
-        if (!sent.ok) console.warn("[Orchestrator] Slack A2A PDF delivery (manual options) failed:", sent.error);
+        if (!sent.ok) console.warn("[Orchestrator] Slack PDF delivery (manual options) failed:", sent.error);
       } catch (slackErr) {
         console.warn("[Orchestrator] Slack notification (manual options) error:", slackErr instanceof Error ? slackErr.message : String(slackErr));
       }
@@ -687,11 +687,10 @@ export async function executeUnifiedOptions(args: {
       },
     );
   } else if (!result.success && reqData.pushToSlack !== false && reqData.pushToSlack !== "false") {
-    const slackChannel = reqData.slackChannel || (ctx.env as any).SCREENER_SLACK_CHANNEL || (ctx.env as any).SLACK_CHANNEL;
     const slackPayload = result.toSlack();
     const text = typeof slackPayload === "string" ? slackPayload : slackPayload.text || JSON.stringify(slackPayload);
-    const sent = await deliverScreenerToSlackA2A(ctx.env, { text, channel: slackChannel });
-    if (!sent.ok) console.warn("[Orchestrator] Slack A2A notification (manual options failed) error:", sent.error);
+    const sent = await deliverGatedSlack(ctx.env, { userLogin, text, channel: reqData.slackChannel });
+    if (!sent.ok) console.warn("[Orchestrator] Slack notification (manual options failed) error:", sent.error);
   }
 
   const channel = reqData.channel || "ui";

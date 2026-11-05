@@ -50,7 +50,7 @@ describe("options screen phases (#3191)", () => {
   it("each declared phase still maps to a real call in the handler", () => {
     expect(source).toMatch(/provider\.screen\(/);
     expect(source).toMatch(/runReportPipeline\(/);
-    expect(source).toMatch(/deliverScreenerToSlackA2A\(|sendOptionsRunEmail\(/);
+    expect(source).toMatch(/deliverGatedSlack\(|sendOptionsRunEmail\(/);
   });
 
   it("declares no step ids, because the handler is not a durable workflow", () => {

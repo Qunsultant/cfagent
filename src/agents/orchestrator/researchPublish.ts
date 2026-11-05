@@ -13,6 +13,7 @@ import type { Env } from "../../types";
 import { ETradeEmailTradingService } from "../../trading";
 import { codedMessage } from "../../outcomes/outcomeAspects";
 import { storeReportAtGeneration } from "../../services/scheduledReports";
+import { deliverGatedSlack } from "../../services/gatedSlackDelivery";
 import {
   evaluateResearchOutcome,
   type ResearchExecutionPath,
@@ -418,30 +419,26 @@ export async function deliverResearchReport(ctx: ResearchPublishContext,
     : null;
   const reportUrl = `${ctx.env.APP_BASE_URL || "https://agent.openaimp.com"}/api/research/report.pdf${opts.pdfKey ? `?key=${encodeURIComponent(opts.pdfKey)}` : ""}`;
 
-  // 1. Slack via cfpay A2A (with PDF attach where supported).
+  // 1. Slack via the gated dispatch (#3177): the tenant gate refuses a
+  // disabled Slack before any sender is attempted; otherwise the master
+  // sender tries A2A first and falls back to direct (previously nothing
+  // was sent at all when cfpay was unconfigured).
   try {
-    const { getCfpayConfig } = await import("../../services/cfpayA2A");
-    const { deliverScreenerToSlackA2A } = await import("../../services/screenerSlackDelivery");
-    const cfpay = getCfpayConfig(ctx.env);
-    const slackChannel =
-      (ctx.env as any).SCREENER_SLACK_CHANNEL || (ctx.env as any).SLACK_CHANNEL;
-    if (cfpay) {
-      const delivery = await deliverScreenerToSlackA2A(ctx.env, {
-        text,
-        channel: slackChannel,
-        ...(pdf
-          ? {
-              pdf: {
-                ...pdf,
-                title: `Options research — ${report.trigger} ${report.createdAt.slice(0, 10)}`,
-                comment: text,
-              },
-            }
-          : {}),
-      });
-      result.slack = delivery.ok;
-      if (!delivery.ok) console.warn("[OrchestratorAgent] Research Slack delivery failed:", delivery.error);
-    }
+    const delivery = await deliverGatedSlack(ctx.env, {
+      userLogin: opts.userLogin,
+      text,
+      ...(pdf
+        ? {
+            pdf: {
+              ...pdf,
+              title: `Options research — ${report.trigger} ${report.createdAt.slice(0, 10)}`,
+              comment: text,
+            },
+          }
+        : {}),
+    });
+    result.slack = delivery.ok;
+    if (!delivery.ok) console.warn("[OrchestratorAgent] Research Slack delivery failed:", delivery.error);
   } catch (err) {
     console.warn("[OrchestratorAgent] Research Slack delivery failed:", err);
   }
