@@ -1581,6 +1581,30 @@ export const MIGRATION_0041_PLAN_TRIAL_DAYS: DataMigration = {
   sql: `ALTER TABLE agent_subscription_plans ADD COLUMN trial_days INTEGER;`,
 };
 
+/**
+ * Migration 0042 — server-side onboarding state (#3256, sub-issue
+ * of #3241). One row per verified login: the current step (1..5),
+ * completion, and the trial plan started from the flow. The
+ * tenantId is stamped server-side from the resolved platform
+ * identity at write time; it is informational only, never a
+ * scoping input. Additive only (new table, no backfill): users
+ * who finished the #2471 localStorage-only flow have no row and
+ * keep the localStorage fallback.
+ */
+export const MIGRATION_0042_ONBOARDING_STATE: DataMigration = {
+  version: 42,
+  name: "0042_onboarding_state",
+  sql: `CREATE TABLE IF NOT EXISTS agent_onboarding_state (
+  user_login TEXT PRIMARY KEY,
+  tenant_id TEXT,
+  current_step INTEGER NOT NULL DEFAULT 1,
+  completed_at_ms INTEGER,
+  trial_plan_id TEXT,
+  trial_started_at_ms INTEGER,
+  updated_at_ms INTEGER NOT NULL
+);`,
+};
+
 export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANCE,
   MIGRATION_0002_AGENT_CHAINS_SCHEDULES,
   MIGRATION_0003_AGENT_SHARD_JOBS,
@@ -1622,6 +1646,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0039_TENANT_CHANNELS,
   MIGRATION_0040_UNLIMITED_FREE_GRANT,
   MIGRATION_0041_PLAN_TRIAL_DAYS,
+  MIGRATION_0042_ONBOARDING_STATE,
 ];
 
 function splitStatements(sqlText: string): string[] {
