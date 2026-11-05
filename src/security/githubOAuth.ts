@@ -141,9 +141,12 @@ export async function handleLogout(env: Env, request: Request, options?: LogoutA
  * the legacy GitHub-only page, byte for byte. When server.ts passes
  * the enabled providers (computed there and passed in, so this
  * renderer stays registry-agnostic), the
- * page renders one button per provider, href /auth/login/<id>,
- * labelled "Sign in with <displayName>". Provider ids and display
- * names are HTML-escaped; the GitHub button keeps its brand mark.
+ * page renders one icon-only link per provider, href
+ * /auth/login/<id>, with the provider's brand mark as the whole
+ * button and "Sign in with <displayName>" as its accessible name
+ * (#3363). Provider ids and display names are HTML-escaped; marks
+ * are monochrome (currentColor) so the server-palette gate (#678)
+ * still sees zero colour literals in this file.
  */
 export interface LoginPageProvider {
   id: string;
@@ -182,18 +185,34 @@ export function renderLoginPage(
     ? "Sign in with your authorized credentials to access your trading workspace."
     : "Sign in with your GitHub account to access your trading workspace.";
   const githubMark = `<svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>`;
+  // #3363: Google's mark is the single-path monochrome "G" from
+  // simple-icons, currentColor only — no brand-colour literals,
+  // so the server-palette gate (#678) still passes this file.
+  const googleMark = `<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M12.48 10.92v3.28h7.84c-.24 1.84-.853 3.187-1.787 4.133-1.147 1.147-2.933 2.4-6.053 2.4-4.827 0-8.6-3.893-8.6-8.72s3.773-8.72 8.6-8.72c2.6 0 4.507 1.027 5.907 2.347l2.307-2.307C18.747 1.44 16.133 0 12.48 0 5.867 0 .307 5.387.307 12s5.56 12 12.173 12c3.573 0 6.267-1.173 8.373-3.36 2.16-2.16 2.84-5.213 2.84-7.667 0-.76-.053-1.467-.173-2.053H12.48z"/></svg>`;
+  // #3363: icon-only provider links — the mark is the whole button
+  // and the name lives in the accessible name, never in visible
+  // text. A provider with no mark yet falls back to its initial,
+  // so the link is never empty.
+  const markForProvider = (p: LoginPageProvider): string => {
+    if (p.id === "github") return githubMark;
+    if (p.id === "google") return googleMark;
+    const initial = (p.displayName || p.id).slice(0, 1).toUpperCase();
+    return `<span class="provider-initial" aria-hidden="true">${escapeHtml(initial)}</span>`;
+  };
+  const iconLink = (href: string, id: string, displayName: string, mark: string): string =>
+    `<a href="${href}" class="btn btn-${escapeHtml(id)} provider-icon" aria-label="Sign in with ${escapeHtml(displayName)}" title="Sign in with ${escapeHtml(displayName)}">${mark}</a>`;
   const buttons = multiProvider
     ? providers!
-        .map((p) => {
-          const mark = p.id === "github" ? `${githubMark}\n        ` : "";
-          return `<a href="/auth/login/${encodeURIComponent(p.id)}${targetSuffix}" class="btn btn-${escapeHtml(p.id)}">\n        ${mark}<span>Sign in with ${escapeHtml(p.displayName)}</span>\n        <span class="btn-arrow" aria-hidden="true">&rarr;</span>\n      </a>`;
-        })
+        .map((p) =>
+          iconLink(
+            `/auth/login/${encodeURIComponent(p.id)}${targetSuffix}`,
+            p.id,
+            p.displayName,
+            markForProvider(p)
+          )
+        )
         .join("\n      ")
-    : `<a href="/auth/login" class="btn btn-github">
-        ${githubMark}
-        <span>Sign in with GitHub</span>
-        <span class="btn-arrow" aria-hidden="true">&rarr;</span>
-      </a>`;
+    : iconLink("/auth/login", "github", "GitHub", githubMark);
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -274,7 +293,8 @@ export function renderLoginPage(
     }
     .btn-stack {
       display: flex;
-      flex-direction: column;
+      flex-direction: row;
+      justify-content: center;
       gap: 0.85rem;
       margin-bottom: 2rem;
     }
@@ -282,15 +302,16 @@ export function renderLoginPage(
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      gap: 0.75rem;
       background: ${SERVER_PALETTE.onGradient};
       color: ${SERVER_PALETTE.card};
       text-decoration: none;
-      padding: 0.9rem 1.5rem;
-      border-radius: 14px;
+      padding: 0;
+      border-radius: 50%;
       font-size: 0.95rem;
       font-weight: 600;
-      width: 100%;
+      width: 52px;
+      height: 52px;
+      flex: none;
       transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
       box-shadow: 0 4px 14px ${SERVER_PALETTE.whiteAlpha15}, 0 0 24px ${SERVER_PALETTE.primaryAlpha};
       border: 1px solid ${SERVER_PALETTE.whiteAlpha15};
@@ -305,21 +326,10 @@ export function renderLoginPage(
       transform: translateY(0);
     }
     .btn svg {
-      width: 18px;
-      height: 18px;
+      width: 24px;
+      height: 24px;
       fill: ${SERVER_PALETTE.card};
       flex-shrink: 0;
-    }
-    .btn-arrow {
-      margin-left: auto;
-      opacity: 0.6;
-      transition: transform 0.2s ease, opacity 0.2s ease;
-      font-size: 1.15rem;
-      line-height: 1;
-    }
-    .btn:hover .btn-arrow {
-      opacity: 1;
-      transform: translateX(3px);
     }
     .card-footer {
       border-top: 1px solid ${SERVER_PALETTE.cardBorder};

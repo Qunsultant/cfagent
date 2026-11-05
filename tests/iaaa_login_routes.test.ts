@@ -225,10 +225,12 @@ describe("composable /login page", () => {
     expect(html).toContain(
       '<p class="subtitle">Sign in with your GitHub account to access your trading workspace.</p>'
     );
-    // The sleek GitHub anchor block
-    expect(html).toContain('<a href="/auth/login" class="btn btn-github">');
-    expect(html).toContain("<span>Sign in with GitHub</span>");
-    expect(html).toContain('<span class="btn-arrow" aria-hidden="true">&rarr;</span>');
+    // The GitHub provider is an icon-only link (#3363)
+    expect(html).toContain(
+      '<a href="/auth/login" class="btn btn-github provider-icon" aria-label="Sign in with GitHub"'
+    );
+    expect(html).not.toContain("<span>Sign in with GitHub</span>");
+    expect(html).not.toContain("btn-arrow");
   });
 
   it("wiring on with google enabled → one button per enabled provider", async () => {
