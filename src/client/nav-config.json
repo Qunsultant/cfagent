@@ -1523,6 +1523,12 @@
           "icon": "Agents"
         },
         {
+          "id": "data-lifecycle",
+          "label": "Data Lifecycle",
+          "description": "Clean state, platform bootstrap & tenant bootstrap",
+          "icon": "Database"
+        },
+        {
           "id": "admin-access",
           "label": "Request admin access",
           "description": "Ask the platform owner for admin rights",
