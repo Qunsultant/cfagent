@@ -749,13 +749,25 @@ function funnelCallSites(): Array<[string, string, string]> {
  *  storage and stays module-side in both compositions until
  *  5e's ClaimPort. kvWipe.ts's etrade sites also REMAIN: the
  *  admin wipe route's own composition, not the token
- *  lifecycle family's. */
+ *  lifecycle family's.
+ *  Step 5d (#2435) delta, honestly recorded: NO site retires
+ *  — iaaaAuditStore.ts's two sessions-bucket sites REMAIN
+ *  (the flag-off branch of createWiredAuditStore still
+ *  composes the atomic client there, the 5b/5c shape); the
+ *  audit family's composition root
+ *  (src/data/createAuditPorts.ts) is a NEW funnel composition
+ *  site (createStoreSender "sessions" + listStoreEntries
+ *  "sessions", inside its one shared backend builder). The
+ *  root the flag-on path composes through is pinned in the
+ *  STEP5D section below. */
 const STEP5_FUNNEL_SITES: Array<[string, string, string]> = [
   ["src/agents/routes/adminTenantQueues.ts", "listStoreEntries", "sessions"],
   ["src/agents/routes/adminTenantQueues.ts", "listStoreEntries", "sessions"],
   ["src/agents/routes/kvWipe.ts", "createStoreKv", "etrade"],
   ["src/agents/routes/kvWipe.ts", "listStoreEntries", "etrade"],
   ["src/agents/routes/kvWipe.ts", "listStoreEntries", "sessions"],
+  ["src/data/createAuditPorts.ts", "createStoreSender", "sessions"],
+  ["src/data/createAuditPorts.ts", "listStoreEntries", "sessions"],
   ["src/data/createSessionPorts.ts", "createStoreKv", "sessions"],
   ["src/data/createSessionPorts.ts", "createStoreKv", "sessions"],
   ["src/data/createSessionPorts.ts", "listStoreEntries", "sessions"],
@@ -911,6 +923,8 @@ describe("global D-D census: step 5b — session family port composition sites (
       ["src/agents/routes/adminTenantQueues.ts", "listStoreEntries", "sessions"],
       ["src/agents/routes/adminTenantQueues.ts", "listStoreEntries", "sessions"],
       ["src/agents/routes/kvWipe.ts", "listStoreEntries", "sessions"],
+      ["src/data/createAuditPorts.ts", "createStoreSender", "sessions"],
+      ["src/data/createAuditPorts.ts", "listStoreEntries", "sessions"],
       ["src/security/iaaaAuditStore.ts", "createStoreSender", "sessions"],
       ["src/security/iaaaAuditStore.ts", "listStoreEntries", "sessions"],
     ]);
@@ -986,6 +1000,77 @@ describe("global D-D census: step 5c — token family port composition sites (#2
     expect(rest).toEqual([
       ["src/agents/routes/kvWipe.ts", "createStoreKv", "etrade"],
       ["src/agents/routes/kvWipe.ts", "listStoreEntries", "etrade"],
+    ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Step 5d (#2435) — IAAA audit log family port composition
+// ---------------------------------------------------------------------------
+//
+// The "composes ports" evidence for 5d: the family's façade
+// (createWiredAuditStore in security/iaaaAuditStore.ts)
+// routes through the composition root when AUDIT_PORTS_ENABLED
+// is on, as an exact [file, function, count] set (definition
+// sites counted, comments stripped). A façade that stops
+// composing ports — or a new composition site — fails here.
+// This pin is also the flag-wiring evidence: the
+// dual-composition behaviour is identical by design, so a
+// façade that ignored AUDIT_PORTS_ENABLED would show up here
+// as a missing branch call, not as a behaviour difference.
+
+const STEP5D_PORT_FUNCTIONS = [
+  "createAuditPorts",
+  "isAuditPortsEnabled",
+] as const;
+
+function step5dPortSites(): Array<[string, string, number]> {
+  const out: Array<[string, string, number]> = [];
+  for (const f of SRC_FILES) {
+    const text = STRIPPED.get(f)!;
+    for (const fn of STEP5D_PORT_FUNCTIONS) {
+      const n = (text.match(new RegExp(`\\b${fn}\\s*\\(`, "g")) ?? []).length;
+      if (n > 0) out.push([f, fn, n]);
+    }
+  }
+  return out.sort((a, b) => a.join("|").localeCompare(b.join("|")));
+}
+
+const STEP5D_PORT_SITES: Array<[string, string, number]> = [
+  ["src/data/auditLogPorts.ts", "isAuditPortsEnabled", 1],
+  ["src/data/createAuditPorts.ts", "createAuditPorts", 1],
+  ["src/security/iaaaAuditStore.ts", "createAuditPorts", 1],
+  ["src/security/iaaaAuditStore.ts", "isAuditPortsEnabled", 1],
+];
+
+describe("global D-D census: step 5d — audit log family port composition sites (#2435)", () => {
+  it("the family's façade composes ports at exactly the pinned sites", () => {
+    expect(step5dPortSites()).toEqual(STEP5D_PORT_SITES);
+  });
+
+  it("sessions-bucket funnel use outside every step-5 family's factories is exactly the named remainder", () => {
+    // Outside all four step-5 factory/root pairs (session
+    // 5b, token 5c — different buckets — and audit 5d: the
+    // façade iaaaAuditStore.ts + the root
+    // createAuditPorts.ts), the only remaining
+    // funnel-for-"sessions" sites are the admin-tenant-queues
+    // route's ctx-injected listing seams and the admin wipe
+    // route's own composition. This is the remainder 5e
+    // inherits for this bucket. Any NEW outside-factory
+    // consumer fails here.
+    const factories = new Set([
+      "src/security/session.ts",
+      "src/data/createSessionPorts.ts",
+      "src/security/iaaaAuditStore.ts",
+      "src/data/createAuditPorts.ts",
+    ]);
+    const rest = funnelCallSites().filter(
+      ([f, , bucket]) => bucket === "sessions" && !factories.has(f),
+    );
+    expect(rest).toEqual([
+      ["src/agents/routes/adminTenantQueues.ts", "listStoreEntries", "sessions"],
+      ["src/agents/routes/adminTenantQueues.ts", "listStoreEntries", "sessions"],
+      ["src/agents/routes/kvWipe.ts", "listStoreEntries", "sessions"],
     ]);
   });
 });
