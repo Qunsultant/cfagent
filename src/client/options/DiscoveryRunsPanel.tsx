@@ -43,12 +43,26 @@ import {
   type StoredDiscoveryRun,
 } from "../discoveryApi";
 import { discoveryTriggerLabel, downloadDiscoveryExport } from "../runExport";
+import { brokerSupports, isBrokerId } from "../../trading/brokerCatalog";
+import { readTenantProvidersState } from "../tenantProviders";
 import { ConfidenceMethodBreakdown } from "./ConfidenceMethodBreakdown";
 import {
   NO_VIEW_DEFAULT_MIN_PROBABILITY_OF_PROFIT,
   type DiscoveryInputModel,
   type DiscoveryRunStatus,
 } from "../../trading";
+
+/**
+ * Issue #3374: discovery runs are produced by an engine wired to one broker's
+ * chains, so the stored history is that broker's evidence. A broker without the
+ * capability gets a sentence naming it instead of another broker's runs — the
+ * panel never asks, so it can never show them.
+ */
+export function discoveryRefusal(brokerId: string = readTenantProvidersState().brokerId): string | null {
+  if (!isBrokerId(brokerId)) return `Options discovery is not available for the selected broker (${brokerId}).`;
+  if (brokerSupports(brokerId, "optionsDiscovery")) return null;
+  return `Options discovery is not available for ${brokerId}; no other broker's runs are shown in its place.`;
+}
 
 interface DiscoveryRunsPanelProps {
   activeEnv: "TEST" | "PROD";
@@ -437,6 +451,9 @@ function OutcomeView({ outcome }: { outcome: DiscoverySymbolOutcome }) {
 }
 
 export function DiscoveryRunsPanel({ activeEnv, userLogin }: DiscoveryRunsPanelProps) {
+  // Issue #3374: resolved once per render; a broker that cannot produce runs
+  // never triggers a read.
+  const refusal = discoveryRefusal();
   const [runs, setRuns] = useState<DiscoveryRunSummary[] | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -446,6 +463,7 @@ export function DiscoveryRunsPanel({ activeEnv, userLogin }: DiscoveryRunsPanelP
 
   const loadRuns = useCallback(async () => {
     setListError(null);
+    if (refusal) return;
     try {
       const listed = await listDiscoveryRuns(activeEnv, userLogin);
       setRuns(listed);
@@ -457,7 +475,7 @@ export function DiscoveryRunsPanel({ activeEnv, userLogin }: DiscoveryRunsPanelP
     } catch (err) {
       setListError(err instanceof Error ? err.message : "Failed to load discovery runs");
     }
-  }, [activeEnv, userLogin]);
+  }, [activeEnv, userLogin, refusal]);
 
   useEffect(() => {
     setRuns(null);
@@ -467,7 +485,7 @@ export function DiscoveryRunsPanel({ activeEnv, userLogin }: DiscoveryRunsPanelP
   }, [loadRuns]);
 
   useEffect(() => {
-    if (!selectedId) {
+    if (refusal || !selectedId) {
       setDetail(null);
       return;
     }
@@ -522,19 +540,28 @@ export function DiscoveryRunsPanel({ activeEnv, userLogin }: DiscoveryRunsPanelP
         </Button>
       </div>
 
-      {listError && (
+      {refusal && (
+        <EmptyState
+          framed
+          icon="🔒"
+          title="Discovery runs are not available for the selected broker"
+          description={refusal}
+        />
+      )}
+
+      {!refusal && listError && (
         <div className="discovery-runs-error" role="alert">
           {listError}
         </div>
       )}
 
-      {runs === null && !listError && (
+      {!refusal && runs === null && !listError && (
         <div className="discovery-runs-loading" role="status">
           <Spinner size="sm" label="Loading discovery runs" /> Loading discovery runs…
         </div>
       )}
 
-      {runs !== null && runs.length === 0 && !listError && (
+      {!refusal && runs !== null && runs.length === 0 && !listError && (
         <EmptyState
           framed
           icon="🔍"
@@ -543,7 +570,7 @@ export function DiscoveryRunsPanel({ activeEnv, userLogin }: DiscoveryRunsPanelP
         />
       )}
 
-      {runs !== null && runs.length > 0 && (
+      {!refusal && runs !== null && runs.length > 0 && (
         <div className="discovery-run-list" aria-label="Persisted discovery runs">
           {runs.map((run) => {
             const selected = run.id === selectedId;

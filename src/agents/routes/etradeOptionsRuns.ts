@@ -118,8 +118,30 @@ export async function handleOptionsScanRunById(request: Request, sessionId: stri
   }
 }
 
-export async function handleOptionsDiscoveryRunsList(request: Request, url: URL, sessionId: string, sql: SqlStorage): Promise<Response> {
+export async function handleOptionsDiscoveryRunsList(
+  request: Request,
+  url: URL,
+  sessionId: string,
+  sql: SqlStorage,
+  ctx: EtradeOptionsRouteContext,
+): Promise<Response> {
   try {
+    // Issue #3374: discovery runs are produced by an engine wired to ONE
+    // broker's chains, so the history is that broker's evidence. A broker
+    // without the capability is refused by name before the store is read:
+    // never another broker's runs, never an empty list that reads as "none".
+    const broker = await resolveTenantBroker(ctx.env);
+    if (!brokerSupports(broker, "optionsDiscovery")) {
+      return Response.json(
+        {
+          code: "provider_unsupported",
+          broker,
+          message: `Options discovery is not available for the selected broker (${broker}); no other broker's runs are shown in its place.`,
+          retryable: false,
+        },
+        { status: 501 },
+      );
+    }
     const limit = url.searchParams.get("limit") ? Number(url.searchParams.get("limit")) : 25;
     const offset = url.searchParams.get("offset") ? Number(url.searchParams.get("offset")) : 0;
     const userLogin = request.headers.get("x-user-login");
@@ -132,8 +154,28 @@ export async function handleOptionsDiscoveryRunsList(request: Request, url: URL,
   }
 }
 
-export async function handleOptionsDiscoveryRunById(request: Request, sessionId: string, sql: SqlStorage, discoveryRunIdMatch: RegExpMatchArray): Promise<Response> {
+export async function handleOptionsDiscoveryRunById(
+  request: Request,
+  sessionId: string,
+  sql: SqlStorage,
+  discoveryRunIdMatch: RegExpMatchArray,
+  ctx: EtradeOptionsRouteContext,
+): Promise<Response> {
   try {
+    // Issue #3374: same rule as the list — a broker that cannot produce runs
+    // is refused by name, not answered from another broker's store.
+    const broker = await resolveTenantBroker(ctx.env);
+    if (!brokerSupports(broker, "optionsDiscovery")) {
+      return Response.json(
+        {
+          code: "provider_unsupported",
+          broker,
+          message: `Options discovery is not available for the selected broker (${broker}); no other broker's runs are shown in its place.`,
+          retryable: false,
+        },
+        { status: 501 },
+      );
+    }
     // Issue #103: scoped like the list — another user's run is
     // indistinguishable from a pruned one (same 404).
     const userLogin = request.headers.get("x-user-login");

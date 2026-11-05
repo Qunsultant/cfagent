@@ -80,7 +80,14 @@ export type BrokerOperation =
   | "orderHistory"
   | "accountActivity"
   | "alerts"
-  | "watchlists";
+  | "watchlists"
+  // Issue #3374: the persisted runs of the autonomous OPTIONS DISCOVERY engine
+  // (#126/#18). Unlike the scanner (#3327), discovery has no neutral engine to
+  // scope to: its production wiring builds ETrade chains
+  // (`createDiscoveryService`). Declared so the run history names the gap
+  // instead of serving E*TRADE-produced runs to another broker's tenant, and so
+  // the declaration flips to true on the day a second source is wired.
+  | "optionsDiscovery";
 
 export interface BrokerDefinition {
   readonly id: BrokerId;
@@ -175,6 +182,8 @@ export const BROKER_CATALOG = {
       accountActivity: true,
       alerts: true,
       watchlists: true,
+      // Issue #3374: the discovery engine runs on this broker's chains.
+      optionsDiscovery: true,
     },
     statusVocabulary: {
       protocol: "etrade_oauth_rest",
@@ -219,6 +228,9 @@ export const BROKER_CATALOG = {
       accountActivity: true,
       alerts: false,
       watchlists: false,
+      // Issue #3374: no Alpaca discovery engine exists, so the stored runs are
+      // not this tenant's evidence. Stated, never substituted.
+      optionsDiscovery: false,
     },
     statusVocabulary: {
       protocol: "alpaca_rest_v2",

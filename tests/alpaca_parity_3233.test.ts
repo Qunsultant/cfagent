@@ -19,8 +19,13 @@ import { BROKER_CATALOG, brokerSupports, type BrokerId, type BrokerOperation } f
 
 const CREDS = { ALPACA_API_KEY: "key", ALPACA_SECRET_KEY: "secret" } as any;
 
-/** catalog operation → the platform method that implements it. */
-const OPERATION_METHOD: Record<BrokerOperation, string> = {
+/**
+ * Catalog operation → the platform method that implements it. `optionsDiscovery`
+ * (#3374) is an ENGINE capability — the discovery service, not a platform
+ * method — so it is excluded here and declared per broker in the catalog, where
+ * the run-history surface reads it.
+ */
+const OPERATION_METHOD: Record<Exclude<BrokerOperation, "optionsDiscovery">, string> = {
   quote: "getQuote",
   detailedQuote: "getQuoteDetailed",
   accounts: "getAccounts",

@@ -373,12 +373,12 @@ export async function handleEtradeOptionsRoutes(
     // requests, and per-symbol outcomes. Scoped per user exactly like
     // the scan runs above (issue #103 rule, enforced by the store).
     if (path.endsWith("/etrade/options/discovery-runs") && request.method === "GET") {
-      return handleOptionsDiscoveryRunsList(request, url, sessionId, sql);
+      return handleOptionsDiscoveryRunsList(request, url, sessionId, sql, ctx);
     }
 
     const discoveryRunIdMatch = path.match(/\/etrade\/options\/discovery-runs\/([^/]+)$/);
     if (discoveryRunIdMatch && request.method === "GET") {
-      return handleOptionsDiscoveryRunById(request, sessionId, sql, discoveryRunIdMatch);
+      return handleOptionsDiscoveryRunById(request, sessionId, sql, discoveryRunIdMatch, ctx);
     }
 
     // IV history (issue #15): the daily collector's stored series,
