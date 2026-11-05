@@ -2188,12 +2188,24 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
 
   getApiKey(env?: Env): string {
     const activeEnv = env || this.env;
-    return activeEnv?.ALPACA_API_KEY || activeEnv?.ALPACA_API_KEY_ID || "";
+    return (
+      activeEnv?.ALPACA_API_KEY ||
+      activeEnv?.ALPACA_API_KEY_ID ||
+      activeEnv?.ALPACA_LIVE_API_KEY ||
+      activeEnv?.ALPACA_PAPER_API_KEY ||
+      ""
+    );
   }
 
   getApiSecret(env?: Env): string {
     const activeEnv = env || this.env;
-    return activeEnv?.ALPACA_SECRET_KEY || activeEnv?.ALPACA_API_SECRET_KEY || "";
+    return (
+      activeEnv?.ALPACA_SECRET_KEY ||
+      activeEnv?.ALPACA_API_SECRET_KEY ||
+      activeEnv?.ALPACA_LIVE_SECRET_KEY ||
+      activeEnv?.ALPACA_PAPER_SECRET_KEY ||
+      ""
+    );
   }
 
   isConfigured(env?: Env): boolean {
