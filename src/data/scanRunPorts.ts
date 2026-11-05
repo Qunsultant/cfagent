@@ -45,6 +45,21 @@ export const SCAN_RUN_RETENTION_DAYS = 365;
  *  the retention window. */
 export const SCAN_RUN_MAX_ROWS = 1000;
 
+/**
+ * Issue #3327 (programme #3292): which broker's chain produced a scan run.
+ *
+ * The scan ENGINE is neutral (#3272), but a run is evidence about one broker's
+ * chains, so history has to say which. A run saved before this field existed
+ * was produced by E*TRADE — the only broker wired to the scanner then — and
+ * reads back as `etrade`, exactly like the IV series (#3326). The field rides
+ * inside `summary_json`, so no column migration is needed.
+ */
+export type ScanRunBroker = "etrade" | "alpaca";
+
+export function normalizeScanRunBroker(value: unknown): ScanRunBroker {
+  return String(value ?? "").trim().toLowerCase() === "alpaca" ? "alpaca" : "etrade";
+}
+
 /** The listing projection of a stored run: everything a history view
  *  needs, without hauling the full result. */
 export interface ScanRunSummary {
@@ -89,6 +104,9 @@ export interface ScanRunSummary {
    * guessed trigger (the Docs Run Type renders "—" for null).
    */
   trigger?: "manual" | "scheduled" | null;
+  /** Issue #3327: the broker whose chains the run read. Absent on runs saved
+   *  before provenance existed — readers normalize absent to `etrade`. */
+  broker?: ScanRunBroker | null;
   /** The login that saved the run (issue #103 per-user scoping).
    *  Optional deliberately: runs persisted before scoping existed —
    *  and runs saved by contexts with no identity — carry none, and
@@ -115,12 +133,12 @@ export interface ScanRunStore {
    *  `trigger` (issue #3264) stamps the producing run's trigger so
    *  the history row can say how the run started; absent, the row
    *  records none. */
-  save(result: OpportunityScanResult, options?: { userLogin?: string; id?: string; trigger?: "manual" | "scheduled" }): Promise<StoredScanRun>;
+  save(result: OpportunityScanResult, options?: { userLogin?: string; id?: string; trigger?: "manual" | "scheduled"; broker?: ScanRunBroker }): Promise<StoredScanRun>;
   /** Newest-first summaries (generatedAt descending, id descending on
    *  ties), paginated by limit/offset, filtered by the visibility
    *  rule when a `userLogin` scope is given (and when it is not — an
    *  unscoped caller sees only unscoped runs). */
-  list(options?: { limit?: number; offset?: number; userLogin?: string }): Promise<ScanRunSummary[]>;
+  list(options?: { limit?: number; offset?: number; userLogin?: string; broker?: ScanRunBroker }): Promise<ScanRunSummary[]>;
   /** The full stored run, or null when the id is unknown (or pruned)
    *  or the run is not visible to the `userLogin` scope — invisibility
    *  reads exactly like absence, so a run's existence never leaks

@@ -27,7 +27,9 @@ import type { OpportunityScanResult } from "../trading";
 import {
   SCAN_RUN_MAX_ROWS,
   SCAN_RUN_RETENTION_DAYS,
+  normalizeScanRunBroker,
   visibleToCaller,
+  type ScanRunBroker,
   type ScanRunStore,
   type ScanRunStoreOptions,
   type ScanRunSummary,
@@ -61,7 +63,13 @@ const PRUNE_CAP_SQL =
 const TABLE_INFO_SQL = `PRAGMA table_info(${TABLE})`;
 const ADD_USER_LOGIN_COLUMN_SQL = `ALTER TABLE ${TABLE} ADD COLUMN user_login TEXT`;
 
-function summarize(id: string, result: OpportunityScanResult, userLogin?: string, trigger?: "manual" | "scheduled"): ScanRunSummary {
+function summarize(
+  id: string,
+  result: OpportunityScanResult,
+  userLogin?: string,
+  trigger?: "manual" | "scheduled",
+  broker?: ScanRunBroker,
+): ScanRunSummary {
   return {
     id,
     generatedAt: result.generatedAt,
@@ -78,6 +86,8 @@ function summarize(id: string, result: OpportunityScanResult, userLogin?: string
     // migration — the summary object is serialized wholesale), so
     // older rows simply lack the field and read back as null.
     ...(trigger ? { trigger } : {}),
+    // Issue #3327: provenance rides inside summary_json (no column migration).
+    broker: normalizeScanRunBroker(broker),
     ...(userLogin !== undefined ? { userLogin } : {}),
   };
 }
@@ -132,10 +142,13 @@ export class SqlScanRunStore implements ScanRunStore {
     return Number(rows[0]?.count ?? 0);
   }
 
-  async save(result: OpportunityScanResult, options: { userLogin?: string; id?: string; trigger?: "manual" | "scheduled" } = {}): Promise<StoredScanRun> {
+  async save(
+    result: OpportunityScanResult,
+    options: { userLogin?: string; id?: string; trigger?: "manual" | "scheduled"; broker?: ScanRunBroker } = {},
+  ): Promise<StoredScanRun> {
     this.ensure();
     const id = options.id ?? this.idFactory();
-    const summary = summarize(id, result, options.userLogin, options.trigger);
+    const summary = summarize(id, result, options.userLogin, options.trigger, options.broker);
     const run: StoredScanRun = { ...summary, result };
     const insert = () => {
       this.sql.exec(
@@ -171,14 +184,29 @@ export class SqlScanRunStore implements ScanRunStore {
     return run;
   }
 
-  async list(options: { limit?: number; offset?: number; userLogin?: string } = {}): Promise<ScanRunSummary[]> {
+  async list(
+    options: { limit?: number; offset?: number; userLogin?: string; broker?: ScanRunBroker } = {},
+  ): Promise<ScanRunSummary[]> {
     this.ensure();
     const limit = options.limit ?? 25;
     const offset = options.offset ?? 0;
-    const rows = Array.from(this.sql.exec(LIST_SQL, options.userLogin ?? null, limit, offset)) as Array<{
+    if (!options.broker) {
+      const rows = Array.from(this.sql.exec(LIST_SQL, options.userLogin ?? null, limit, offset)) as Array<{
+        summary_json: string;
+      }>;
+      return rows.map((r) => JSON.parse(r.summary_json) as ScanRunSummary);
+    }
+    // Issue #3327: provenance lives inside summary_json, so the broker filter
+    // happens after parsing. The table is capped at SCAN_RUN_MAX_ROWS, so
+    // reading the (bounded) visible window and slicing here keeps pagination
+    // honest instead of returning short pages from a filtered LIMIT.
+    const rows = Array.from(this.sql.exec(LIST_SQL, options.userLogin ?? null, this.maxRows, 0)) as Array<{
       summary_json: string;
     }>;
-    return rows.map((r) => JSON.parse(r.summary_json) as ScanRunSummary);
+    return rows
+      .map((r) => JSON.parse(r.summary_json) as ScanRunSummary)
+      .filter((summary) => normalizeScanRunBroker(summary.broker) === options.broker)
+      .slice(offset, offset + limit);
   }
 
   async get(id: string, options: { userLogin?: string } = {}): Promise<StoredScanRun | null> {
