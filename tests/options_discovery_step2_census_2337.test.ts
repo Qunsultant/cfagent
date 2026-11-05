@@ -47,6 +47,21 @@
  * exactly where ADR D-D requires them; the pin rule (gitops §7)
  * updates the pin in the same PR rather than shrinking the fix.
  */
+// #3326 count update: 71 -> 74. The IV-history adapter gained THREE
+// statements when an observation began recording the broker whose chain
+// measured it: the create-time probe now selects the column list (so a table
+// created before provenance still reads its broker as etrade), plus one
+// statement each for the broker-scoped series and symbol reads. The statements
+// live IN the data layer, behind the port, exactly where ADR D-D requires them
+// -- and the broker scoping is only possible with them, so the pin moves with
+// the change (gitops section 7) rather than the feature being split around a
+// census number.
+// #3327 count update: 74 -> 75. The scan-run adapter gained ONE statement when a
+// saved run began recording the broker whose chains produced it: the
+// broker-scoped list reads the same bounded window with the stamp filter applied,
+// which needs its own statement rather than filtering in the route (a route-side
+// filter would return short pages and hide rows). The statement lives in the data
+// layer, behind the port, where ADR D-D requires it.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
@@ -70,11 +85,15 @@ const ADAPTER_FILES: Array<[string, number]> = [
   // [file, exec sites at the step-2 landing — the audit's 69]
   // 12 at step 2; 16 since #2524: updateXlsxKey + updateCsvKey
   // backfills mirror updatePdfKey (summary+result each).
-  ["src/data/doSqliteScanRunAdapter.ts", 16],
+  // 9 at the step-2 landing; 10 since #3233; 17 since #3327: the broker-scoped
+  // list reads the bounded window with the run's provenance stamp applied.
+  ["src/data/doSqliteScanRunAdapter.ts", 17],
   ["src/data/doSqliteDiscoveryRunAdapter.ts", 8],
   ["src/data/doSqliteDiscoverySetupAdapter.ts", 9],
   ["src/data/doSqliteDiscoveryAlertAdapter.ts", 4],
-  ["src/data/doSqliteIvHistoryAdapter.ts", 8],
+  // 8 at step 2; 11 since #3326: the provenance column probe plus the
+  // broker-scoped series and symbol reads.
+  ["src/data/doSqliteIvHistoryAdapter.ts", 11],
   ["src/data/doSqliteStrategyProfileAdapter.ts", 7],
   ["src/data/doSqliteFeedSnapshotAdapter.ts", 7],
   ["src/data/doSqlitePausedScheduleAdapter.ts", 7],
@@ -109,7 +128,7 @@ describe("#2337 D-D census — options/discovery family entries (shrink-only)", 
     }
   });
 
-  it("the family's statements live in the data layer's adapters (71 sites)", () => {
+  it("the family's statements live in the data layer's adapters (75 sites)", () => {
     let total = 0;
     for (const [file, expected] of ADAPTER_FILES) {
       const text = readFileSync(file, "utf8");
@@ -117,6 +136,6 @@ describe("#2337 D-D census — options/discovery family entries (shrink-only)", 
       expect(count, `${file} holds the family's statements`).toBe(expected);
       total += count;
     }
-    expect(total).toBe(71);
+    expect(total).toBe(75);
   });
 });

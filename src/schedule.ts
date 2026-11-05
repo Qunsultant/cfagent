@@ -27,6 +27,35 @@ export interface ScheduledGoal {
    * a timeZone use zone wall-clock matching instead.
    */
   timeZone?: string;
+  /**
+   * Issue #3121 S1 — creation provenance (#2366 items 3–4, on the
+   * consolidated path). Stamped at creation by the creating route;
+   * carried with the goal thereafter. Absent on legacy goals whose
+   * creation predates stamping — "not recorded", never backfilled.
+   */
+  provenance?: ScheduleProvenance;
+}
+
+/**
+ * Issue #3121 S1 — schedule creation provenance (#2366 items 3–4).
+ *
+ * Travels in the schedule payload (the SDK-owned table schema is
+ * untouched: the payload is the app's JSON blob on the row). `origin`
+ * is who created the schedule: a user-facing route (`user`) or
+ * framework machinery (`system`). `createdBy` is the creator identity
+ * when one was established at creation — the session login for a user
+ * create, `"system"` for framework-internal rows — and `null` when no
+ * creator identity was established (recorded explicitly, never
+ * invented). `reason` names the framework cause for system rows
+ * (`"recovery"` for recovery re-arms, `"async-job-arm"` for the
+ * executeAsyncJob arming); user rows carry it only when the creator
+ * supplied one. `createdAt` is the creation ISO timestamp.
+ */
+export interface ScheduleProvenance {
+  origin: "user" | "system";
+  createdBy: string | null;
+  reason?: string;
+  createdAt: string;
 }
 
 export interface ScheduleTick {

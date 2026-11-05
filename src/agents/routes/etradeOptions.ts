@@ -343,7 +343,7 @@ export async function handleEtradeOptionsRoutes(
     // diffed run-over-run. Declared in list → diff → by-id order: the
     // diff route must win over the by-id pattern below.
     if (path.endsWith("/etrade/options/scans") && request.method === "GET") {
-      return handleOptionsScansList(request, url, sessionId, sql);
+      return handleOptionsScansList(request, url, sessionId, sql, ctx);
     }
 
     if (path.endsWith("/etrade/options/scans/diff") && request.method === "GET") {

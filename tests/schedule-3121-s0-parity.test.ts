@@ -181,7 +181,7 @@ describe("S0-P07 per-schedule audit events (B-T2-06): the eight lifecycle events
 });
 
 describe("S0-P08 per-run records (B-T2-07, B-T3-08): job_run_records shape and validation", () => {
-  it("pins the record fields — and the absence of ledger linkage columns", () => {
+  it("pins the record fields — S1 adds the §4 ledger linkage columns", () => {
     expect(JOB_RUN_RECORDS_TABLE).toBe("job_run_records");
     expect(JOB_RUN_RECORDS_PER_JOB_CAP).toBe(100);
     expect(JOB_RUN_RECORD_FIELDS).toEqual([
@@ -192,16 +192,22 @@ describe("S0-P08 per-run records (B-T2-07, B-T3-08): job_run_records shape and v
       "finished",
       "outcome",
       "triggeredBy",
+      // Issue #3121 S1 — the §4 consolidated-ledger linkage, stamped
+      // at write time (B-L-01 closed). The #3264 gap is closed for
+      // job_run_records: a run row now joins to its schedule, workflow,
+      // and async job; B-L-02/03 (async jobs, scans) remain — see S0-P24.
+      "trigger",
+      "scheduleId",
+      "asyncJobId",
+      "workflowId",
       "error",
       "detail",
       "descriptor",
       "artifactRefs",
     ]);
-    // The #3264 gap, pinned: no scheduleId / asyncJobId / workflowId.
-    expect(JOB_RUN_RECORD_FIELDS).not.toContain("scheduleId");
-    expect(JOB_RUN_RECORD_FIELDS).not.toContain("asyncJobId");
-    expect(JOB_RUN_RECORD_FIELDS).not.toContain("workflowId");
-    expect(JOB_RUN_RECORD_FIELDS).not.toContain("trigger");
+    for (const field of ["trigger", "scheduleId", "asyncJobId", "workflowId"]) {
+      expect(JOB_RUN_RECORD_FIELDS).toContain(field);
+    }
   });
 
   it("builds a valid record and rejects an unknown trigger", () => {
@@ -216,6 +222,12 @@ describe("S0-P08 per-run records (B-T2-07, B-T3-08): job_run_records shape and v
       descriptor: "screen ran",
     });
     expect(record.triggeredBy).toBe("scheduled");
+    // Issue #3121 S1 — the builder derives the ledger trigger and
+    // fills explicit nulls for the linkage ids it was not given.
+    expect(record.trigger).toBe("scheduled");
+    expect(record.scheduleId).toBeNull();
+    expect(record.asyncJobId).toBeNull();
+    expect(record.workflowId).toBeNull();
     expect(() =>
       buildJobRunRecord({
         system: "orchestrator-schedule",
@@ -473,7 +485,14 @@ describe("S0-P23 keyless options runs (B-T4-05): a keyless run is recorded, neve
   });
 });
 
-describe("S0-P24 ledger gap (B-L-01/02/03): no run store carries trigger/scheduleId/asyncJobId/workflowId", () => {
+describe("S0-P24 ledger gap (B-L-01/02/03): S1 closes B-L-01 on job_run_records; B-L-02/03 remain", () => {
+  it("pins job_run_records as carrying the four §4 linkage columns (B-L-01 closed by S1)", () => {
+    const adapter = read("src/data/doSqliteJobRunRecordAdapter.ts");
+    for (const col of ["trigger_text", "schedule_id", "async_job_id", "workflow_id"]) {
+      expect(adapter).toContain(col);
+    }
+  });
+
   it("pins mas_async_jobs as carrying no schedule/workflow/trigger column", () => {
     const adapter = read("src/data/doSqliteAsyncJobAdapter.ts");
     expect(adapter).not.toContain("schedule_id");
@@ -494,11 +513,11 @@ describe("S0-P24 ledger gap (B-L-01/02/03): no run store carries trigger/schedul
   });
 });
 
-describe("S0-P25 provenance gap (B-L-04): no origin/provenance on any schedule path", () => {
-  it("finds no provenance field on the schedule routes or schedule management", () => {
-    for (const rel of ["src/agents/routes/schedules.ts", "src/services/scheduleManagement.ts"]) {
-      expect(read(rel)).not.toContain("provenance");
-    }
+describe("S0-P25 provenance gap (B-L-04): S1 stamps provenance on the create route; scheduleManagement stays provenance-free", () => {
+  it("finds provenance stamping on the schedule create route, none in schedule management", () => {
+    expect(read("src/agents/routes/schedules.ts")).toContain("provenance");
+    expect(read("src/agents/routes/schedules.ts")).toContain("stampScheduleProvenance");
+    expect(read("src/services/scheduleManagement.ts")).not.toContain("provenance");
   });
 });
 

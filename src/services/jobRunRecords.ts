@@ -12,13 +12,20 @@
  */
 import {
   JOB_RUN_RECORDS_PER_JOB_CAP,
+  type JobRunLedgerTrigger,
   type JobRunOutcome,
   type JobRunRecord,
   type JobRunSystem,
   type JobRunTrigger,
 } from "../data/jobRunRecordPorts";
+import {
+  isLedgerTrigger,
+  normalizeLedgerLinkage,
+  resolveLedgerTrigger,
+} from "./consolidatedScheduling";
 
 export type {
+  JobRunLedgerTrigger,
   JobRunOutcome,
   JobRunRecord,
   JobRunSystem,
@@ -46,6 +53,16 @@ const TRIGGERS: readonly string[] = ["scheduled", "manual"];
  * outcome / trigger, empty jobId or operation, unparseable dates,
  * finished before started, failure without error text, skip
  * without a detail reason.
+ *
+ * Issue #3121 S1 — the §4 consolidated-ledger linkage: `trigger`,
+ * `scheduleId`, `asyncJobId`, `workflowId` are stamped on every NEW
+ * row (extended, not a rewrite). An explicit `trigger` must be a
+ * valid ledger trigger and is never `"unknown"` (unknown is
+ * legacy-rows-only — a new row that cannot name its path derives
+ * from `triggeredBy` instead, so no new row is ever unknown or
+ * null); an absent `trigger` derives from `triggeredBy` via
+ * `resolveLedgerTrigger`. Absent linkage ids default to explicit
+ * nulls (a recorded fact, never a missing column).
  */
 export function buildJobRunRecord(input: JobRunRecordInput): JobRunRecord {
   if (!SYSTEMS.includes(input.system)) {
@@ -62,6 +79,29 @@ export function buildJobRunRecord(input: JobRunRecordInput): JobRunRecord {
   }
   if (!TRIGGERS.includes(input.triggeredBy)) {
     throw new Error(`Unknown job run trigger: ${String(input.triggeredBy)}`);
+  }
+  let trigger: JobRunLedgerTrigger;
+  if (input.trigger !== undefined) {
+    if (!isLedgerTrigger(input.trigger)) {
+      throw new Error(`Unknown job run ledger trigger: ${String(input.trigger)}`);
+    }
+    if (input.trigger === "unknown") {
+      throw new Error(
+        'A new job run record cannot carry trigger "unknown": unknown is legacy rows only; derive from triggeredBy instead.',
+      );
+    }
+    trigger = input.trigger;
+  } else {
+    trigger = resolveLedgerTrigger(undefined, input.triggeredBy);
+  }
+  for (const key of ["scheduleId", "asyncJobId", "workflowId"] as const) {
+    const value = input[key];
+    if (value !== undefined && value !== null && typeof value !== "string") {
+      throw new Error(`Job run ${key} must be a string or null.`);
+    }
+    if (typeof value === "string" && !value.trim()) {
+      throw new Error(`Job run ${key} must be a non-empty string or null.`);
+    }
   }
   const startedMs = Date.parse(input.started);
   const finishedMs = Date.parse(input.finished);
@@ -88,11 +128,35 @@ export function buildJobRunRecord(input: JobRunRecordInput): JobRunRecord {
     finished: input.finished,
     outcome: input.outcome,
     triggeredBy: input.triggeredBy,
+    trigger,
+    scheduleId: input.scheduleId ?? null,
+    asyncJobId: input.asyncJobId ?? null,
+    workflowId: input.workflowId ?? null,
     ...(input.error !== undefined ? { error: input.error } : {}),
     ...(input.detail !== undefined ? { detail: input.detail } : {}),
     ...(input.descriptor !== undefined ? { descriptor: input.descriptor } : {}),
     ...(input.artifactRefs !== undefined ? { artifactRefs: input.artifactRefs } : {}),
   };
+}
+
+/**
+ * Issue #3121 S1 — normalize a run record read back from storage.
+ * Rows stored before S1 carry none of the four §4 fields; they read
+ * as `trigger: "unknown"` with all three ids null (the §4
+ * null-handling rule: a null is a value the ledger stores and the
+ * read path renders, never a reason to drop the row). No silent
+ * backfill: this normalizes the READ value only and never writes
+ * anything back. A record that already carries the fields passes
+ * through unchanged.
+ */
+export function normalizeJobRunRecord(record: JobRunRecord): JobRunRecord {
+  const linkage = normalizeLedgerLinkage({
+    trigger: record.trigger,
+    scheduleId: record.scheduleId,
+    asyncJobId: record.asyncJobId,
+    workflowId: record.workflowId,
+  });
+  return { ...record, ...linkage };
 }
 
 /** Keep the newest `cap` records of a newest-first list. */

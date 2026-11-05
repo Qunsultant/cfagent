@@ -14,10 +14,13 @@
  * else gets 401. With no service login configured, nothing is
  * background and the route refuses everyone — fail-closed.
  *
- * Body: { job, outcome, traceId?, errorCode?, reason? }. Codes only:
+ * Body: { job, outcome, traceId?, errorCode?, reason?, linkage? }. Codes only:
  * a malformed traceId degrades to null (the #1743 ingress rule),
  * an invalid job/outcome is 400, and no message field is ever
- * accepted or stored.
+ * accepted or stored. Issue #3121 S1: an optional §4 `linkage`
+ * ({ trigger, scheduleId, asyncJobId, workflowId }) rides the body
+ * and is normalized by the builder; absent it defaults to the
+ * 30-minute tick linkage.
  */
 import { resolveActorAttribution } from "../../security/backgroundAttribution";
 import { getServiceUserLogin } from "../../security/serviceIdentity";
@@ -32,8 +35,10 @@ import {
   parseScheduledJobOutcomeRow,
   recordScheduledJobOutcome,
   type ScheduledJobOutcomeInput,
+  type ScheduledJobOutcomeRow,
   type ScheduledJobOutcomeStore,
 } from "../../observability/scheduledJobOutcomes";
+import type { LedgerLinkage } from "../../data/jobRunRecordPorts";
 
 export interface ScheduledJobOutcomeRouteContext {
   /** Audit writer (owner: OrchestratorAgent — funnels to mas_events). */
@@ -70,7 +75,19 @@ export interface ScheduledJobOutcomeRouteContext {
 
 function parseOutcomePayload(
   raw: unknown,
-): { job: string; outcome: string; traceId: string | null; errorCode?: string; reason?: string } | null {
+): {
+  job: string;
+  outcome: string;
+  traceId: string | null;
+  errorCode?: string;
+  reason?: string;
+  linkage?: {
+    trigger?: unknown;
+    scheduleId?: unknown;
+    asyncJobId?: unknown;
+    workflowId?: unknown;
+  };
+} | null {
   if (!raw || typeof raw !== "object") return null;
   const body = raw as Record<string, unknown>;
   const job = body.job;
@@ -80,12 +97,25 @@ function parseOutcomePayload(
     typeof body.traceId === "string" && /^[0-9a-f]{32}$/.test(body.traceId)
       ? body.traceId
       : null;
+  // Issue #3121 S1 — an optional §4 linkage rides the body; the
+  // builder normalizes it (absent → the tick linkage), so the route
+  // only passes the shape through, never invents values.
+  const linkage =
+    body.linkage && typeof body.linkage === "object" && !Array.isArray(body.linkage)
+      ? (body.linkage as {
+          trigger?: unknown;
+          scheduleId?: unknown;
+          asyncJobId?: unknown;
+          workflowId?: unknown;
+        })
+      : undefined;
   return {
     job,
     outcome,
     traceId,
     errorCode: typeof body.errorCode === "string" ? body.errorCode : undefined,
     reason: typeof body.reason === "string" ? body.reason : undefined,
+    ...(linkage !== undefined ? { linkage } : {}),
   };
 }
 
@@ -124,6 +154,11 @@ export async function handleScheduledJobOutcomeRoute(
     traceId: parsed.traceId,
     errorCode: parsed.errorCode,
     reason: parsed.reason,
+    // Issue #3121 S1 — passed through as-is; the builder normalizes
+    // (invalid trigger → worker-cron, missing ids → tick linkage).
+    ...(parsed.linkage !== undefined
+      ? { linkage: parsed.linkage as unknown as LedgerLinkage }
+      : {}),
   };
   const store: ScheduledJobOutcomeStore = {
     writeOutcome: async (entry) => {
@@ -146,8 +181,7 @@ export async function handleScheduledJobOutcomeRoute(
         return rows
           .map(parseScheduledJobOutcomeRow)
           .filter(
-            (row): row is { job: string; outcome: string; createdAt: string } =>
-              row !== null,
+            (row): row is ScheduledJobOutcomeRow => row !== null,
           );
       } catch {
         return [];

@@ -18,6 +18,7 @@
  */
 
 import type { AsyncJobChannel, AsyncJobSubmission, StageChainConfig } from "../types";
+import type { LedgerLinkage } from "../data/jobRunRecordPorts";
 import type { OptionsPartialQualification } from "../trading";
 import {
   formatTraceBlock,
@@ -79,6 +80,21 @@ export interface ScreenerRunOutcome {
   kind: ScreenerKind;
   trigger: "manual" | "scheduled";
   success: boolean;
+  /**
+   * Issue #3121 S1 — the §4 consolidated-ledger linkage, where the
+   * run's producer knows it. `scheduleId` is the originating
+   * schedule (SDK schedule id / goal id / cron expression) when the
+   * run was fired from one; `workflowId` is the workflow instance
+   * when the run executed through one. Both are optional because no
+   * producer stamps them yet — absent reads as an explicit null at
+   * the bridge record, never a missing column. Threading the
+   * originating ids from the firing into the outcome is filed as
+   * sub-issue #3313 (bridge + follow-up joinability). The run's own
+   * async-job id is the bridge record's main job id (see
+   * recordScreenerRunMainJob).
+   */
+  scheduleId?: string;
+  workflowId?: string;
   /** Stored report artifact keys (one per universe for sharded runs). */
   pdfKeys: string[];
   pdfStatus?: "generated" | "failed" | "skipped";
@@ -279,6 +295,37 @@ export function followupChannelLabel(channel: AsyncJobChannel): string {
 }
 
 /**
+ * Issue #3121 S1 — the §4 linkage stamped into a follow-up
+ * submission's payload (inventory §4 Q(c): every follow-up row
+ * carries trigger, scheduleId, asyncJobId, workflowId). The step is
+ * minted by the chain, so its trigger is `async-chain`;
+ * `scheduleId`/`workflowId` are the run's (null when the run names
+ * none); `asyncJobId` is the chain-parent main job id — the
+ * follow-up's own id is minted at submit time and is the row's own
+ * job_id, while parent_job_id already links the row to this parent.
+ * Executors read their own payload keys; the extra top-level key is
+ * inert to them. The payload is stored verbatim, so a retry resubmit
+ * carries the linkage forward unchanged.
+ */
+export function followupLedgerLinkage(
+  outcome: ScreenerRunOutcome,
+  mainJobId: string,
+): LedgerLinkage {
+  return {
+    trigger: "async-chain",
+    scheduleId:
+      typeof outcome.scheduleId === "string" && outcome.scheduleId
+        ? outcome.scheduleId
+        : null,
+    asyncJobId: mainJobId,
+    workflowId:
+      typeof outcome.workflowId === "string" && outcome.workflowId
+        ? outcome.workflowId
+        : null,
+  };
+}
+
+/**
  * Issue #1123 S3: when the report sub-job completes, plan one delivery
  * sub-job per configured channel, parented to the MAIN job (the tree
  * reads main → report / deliveries / notifications as siblings). A
@@ -358,7 +405,14 @@ export function planDeliveryFollowups(
   for (const channel of plannedDeliveryChannels(outcome, config)) {
     specs.push({
       capability: "followup.deliver",
-      payload: { outcome, userLogin, channel, artifacts, skipReason },
+      payload: {
+        outcome,
+        userLogin,
+        channel,
+        artifacts,
+        skipReason,
+        ledgerLinkage: followupLedgerLinkage(outcome, mainJobId),
+      },
       parentJobId: mainJobId,
       jobKind: "delivery",
       channel,
@@ -428,7 +482,14 @@ export function planLifecycleNotifications(
     if (!config.channels[channel].configured && !override) continue;
     specs.push({
       capability: "followup.notify",
-      payload: { event, outcome, userLogin, channel, detail },
+      payload: {
+        event,
+        outcome,
+        userLogin,
+        channel,
+        detail,
+        ledgerLinkage: followupLedgerLinkage(outcome, mainJobId),
+      },
       parentJobId: mainJobId,
       jobKind: "notification",
       channel,
@@ -795,6 +856,7 @@ export function planInitialFollowups(
       payload: {
         outcome,
         userLogin,
+        ledgerLinkage: followupLedgerLinkage(outcome, mainJobId),
         ...(chained
           ? { stageChain: outcome.stageChain, chainId: chained.chainId }
           : {}),

@@ -658,7 +658,20 @@ describe("#959 cross-entry schedule parity (REST route / NLQ / builder)", () => 
     );
     expect(built.ok).toBe(true);
     if (!built.ok) return;
-    expect(scheduleCalls[0][2]).toEqual(built.value);
+    // Issue #3121 S1 — the REST route stamps creation provenance
+    // onto the armed payload; the builder is the criteria→payload
+    // function, so parity is compared on the criteria payload with
+    // provenance asserted separately (same shape in both tests).
+    const armedOptions = scheduleCalls[0][2] as Record<string, unknown>;
+    expect(armedOptions.provenance).toEqual(
+      expect.objectContaining({
+        origin: "user",
+        createdBy: authenticatedLogin,
+        createdAt: expect.any(String),
+      }),
+    );
+    const { provenance: _droppedOptions, ...optionsCriteria } = armedOptions;
+    expect(optionsCriteria).toEqual(built.value);
   });
 
   it("discovery saved-request: REST-armed payload equals the builder's", async () => {
@@ -678,7 +691,16 @@ describe("#959 cross-entry schedule parity (REST route / NLQ / builder)", () => 
     );
     expect(built.ok).toBe(true);
     if (!built.ok) return;
-    expect(scheduleCalls[0][2]).toEqual(built.value);
+    const armedDiscovery = scheduleCalls[0][2] as Record<string, unknown>;
+    expect(armedDiscovery.provenance).toEqual(
+      expect.objectContaining({
+        origin: "user",
+        createdBy: authenticatedLogin,
+        createdAt: expect.any(String),
+      }),
+    );
+    const { provenance: _droppedDiscovery, ...discoveryCriteria } = armedDiscovery;
+    expect(discoveryCriteria).toEqual(built.value);
   });
 
   it("REST create still enforces its explicit-universe policy for stock schedules (route policy over the shared builder)", async () => {

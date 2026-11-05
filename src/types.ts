@@ -2611,6 +2611,14 @@ export interface AsyncJobRecord {
 
 export interface AsyncJobPayload {
   jobId: string;
+  /**
+   * Issue #3121 S1 — framework-internal provenance for the
+   * executeAsyncJob arming (the schedule payload that wakes the
+   * executor). Origin `system`, reason `"async-job-arm"` on submit
+   * and `"recovery"` on a recovery re-arm; the job's own payload
+   * carries its own provenance separately.
+   */
+  provenance?: import("./schedule").ScheduleProvenance;
 }
 
 export type AsyncJobSubmission =
@@ -2668,6 +2676,13 @@ export type AsyncJobSubmission =
       payload: {
         outcome: import("./services/screenerFollowups").ScreenerRunOutcome;
         userLogin: string;
+        /**
+         * Issue #3121 S1 — the §4 linkage for this chain step
+         * (trigger async-chain, the run's schedule/workflow ids, the
+         * chain-parent main job id). Stamped by the planner; the
+         * executor ignores it.
+         */
+        ledgerLinkage?: import("./data/jobRunRecordPorts").LedgerLinkage;
         /** Consolidation C3 (#1277): when this job is a chain's serve
          *  stage, the chain config + id ride the payload so the
          *  deliver hop planned at its completion can read its own
@@ -2693,6 +2708,8 @@ export type AsyncJobSubmission =
         artifacts: Array<{ key: string; fileName: string }>;
         skipReason?: string;
         approvedConfirmationId?: string;
+        /** Issue #3121 S1 — the §4 linkage for this chain step (see followup.report). */
+        ledgerLinkage?: import("./data/jobRunRecordPorts").LedgerLinkage;
         /** Consolidation C3 (#1277): set on a per-stage retry — the
          *  job id of the failed job this submission retries. */
         retryOf?: string;
@@ -2708,6 +2725,8 @@ export type AsyncJobSubmission =
         userLogin: string;
         channel: AsyncJobChannel;
         detail?: string;
+        /** Issue #3121 S1 — the §4 linkage for this chain step (see followup.report). */
+        ledgerLinkage?: import("./data/jobRunRecordPorts").LedgerLinkage;
       };
     } & AsyncJobGraphFields)
   | ({

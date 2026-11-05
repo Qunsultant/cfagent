@@ -21,6 +21,7 @@ import type { ScreenedOptionContractItem } from "../../types";
 import {
   computeIvStats,
   nyDateString,
+  type IvBroker,
   type IvHistoryRecord,
   type IvHistoryStore,
   type IvStats,
@@ -194,6 +195,12 @@ export interface IvCollectionReport {
 
 export interface CollectIvHistoryDeps {
   store: IvHistoryStore;
+  /**
+   * Issue #3326: which broker's chains this run reads. The observation is
+   * stamped with it, so a series can never be served under a broker that did
+   * not produce it. Required: a run that cannot name its source must not write.
+   */
+  broker: IvBroker;
   /** Live chain source — in production an OptionsDataAgent snapshot;
    *  in tests, a stub. May throw; a throw is one name's failure. */
   fetchChain: (symbol: string) => Promise<IvChainFetchResult>;
@@ -218,6 +225,9 @@ export async function collectIvHistory(deps: CollectIvHistoryDeps): Promise<IvCo
   const outcomes: IvCollectionOutcome[] = [];
 
   for (const symbol of symbols) {
+    // One observation per (symbol, date) regardless of broker: the day's first
+    // observation is the record, and a later broker's run reports
+    // already_recorded instead of rewriting provenance.
     const existing = await deps.store.get(symbol, date);
     if (existing) {
       outcomes.push({ symbol, status: "already_recorded" });
@@ -253,6 +263,7 @@ export async function collectIvHistory(deps: CollectIvHistoryDeps): Promise<IvCo
     }
     const record: IvHistoryRecord = {
       symbol,
+      broker: deps.broker,
       date,
       atmIv: derived.atmIv,
       spot: derived.spot,
@@ -296,9 +307,13 @@ export interface IvHistoryEntry {
  *  logic for a single symbol, factored out for testing). A symbol
  *  with no records is a state, not an error: observations 0,
  *  warmingUp true, latest/rank/percentile null. */
-export async function getIvHistoryEntry(store: IvHistoryStore, symbol: string): Promise<IvHistoryEntry> {
+export async function getIvHistoryEntry(
+  store: IvHistoryStore,
+  symbol: string,
+  broker?: IvBroker,
+): Promise<IvHistoryEntry> {
   const clean = symbol.trim().toUpperCase();
-  const series = await store.listSeries(clean);
+  const series = await store.listSeries(clean, broker ? { broker } : {});
   const stats: IvStats = computeIvStats(series);
   return {
     symbol: clean,

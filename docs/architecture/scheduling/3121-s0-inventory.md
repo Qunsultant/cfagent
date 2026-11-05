@@ -18,6 +18,31 @@
   scheduling), #2461 (ET-aware timing rides the consolidated scheduler after
   parity), #2489 (wipe/recreation), #2457 (cross-tenant rules), #3264 (the
   null-trigger run-ledger gap this program closes).
+- **S1 amendment (Slice S1, #3121):** O4 decided below (§4, "O4 decision
+  (S1)": `trigger` sits ALONGSIDE `triggeredBy`, it does not supersede
+  it); O1 located (§7: the hung-timeout mechanism is the Agents SDK's
+  `cf_agents_jobs.hung_timeout_seconds`, SDK default 30s — the #2366
+  seed claim stands, corrected to SDK 0.32.0); O2 enumerated + wired
+  (§7: the four `schedule.goal.*` lifecycle audit events). O3 stays
+  open for S3. The §4 ledger columns are implemented in S1 on the
+  `job_run_records` shape (extended, not rewritten); `mas_async_jobs`
+  gains no columns in S1 — follow-up minting stamps linkage into the
+  job payload/result instead, and the workflow-run record's existing
+  trigger evidence is untouched. `mas_opportunity_scans` likewise
+  gains no columns in S1; joining its rows to the ledger is filed as
+  sub-issue #3314 (B-L-03). Reconciliation to the owner "one of
+  everything" mandate (#3121 comment 6660031391) is in §3 ("S1
+  reconciliation"): one engine / one agent / one workflow mapped onto
+  the §3 answers, hexagonal + AOP + standards checked — no genuine
+  conflict found, so no open owner decision is recorded. Two
+  correctness fixes found by the full-suite run ride in S1: the
+  goal-audit orchestrator stub is built lazily inside the audit call
+  (an eager stub 500d every `/api/schedule/*` route in envs without
+  the SEARCH_AGENT binding); duplicate detection compares payloads
+  with the top-level `provenance` key removed
+  (`src/services/scheduleDedupe.ts`), so S1-created schedules stay
+  idempotent under #2071 — provenance is creation metadata, not
+  criteria.
 
 ## 1. Re-verified inventory (fresh main)
 
@@ -290,15 +315,16 @@ a defect in the old inventory, not permission to drop the feature:
   the row still carries no trigger/scheduleId/asyncJobId/workflowId.
 - **D5 — `daily-social-post` is a shipped goal instance** (#1077 Phase 5b,
   disabled by default). It is an instance of T3, not a new type.
-- **D6 — #2366 seed item NOT re-located:** the seed claimed "SDK default
-  30s, per-job `hungTimeoutSeconds` option (verified in SDK 0.24.0
-  bundle)". On fresh main there is no `hungTimeout` match anywhere under
-  `src/`. The claim is carried as UNVERIFIED — S1 must locate the current
-  hung-timeout mechanism or correct the seed, not silently drop the
-  behavior. All other #2366 seed items re-verified: schedule/scheduleEvery
-  ports, NLQ `scheduleEvery` port (`src/agents/nlq/execution.ts`), stale
-  sweep (`STALE_SWEEP_INTERVAL_SECONDS = 6h`), retention constants,
-  recovery `LIMIT 100` / 30-day cutoff / 2-hour stale threshold.
+- **D6 — #2366 seed item LOCATED in S1 (was UNVERIFIED in S0):** the
+  seed claimed "SDK default 30s, per-job `hungTimeoutSeconds` option
+  (verified in SDK 0.24.0 bundle)". The mechanism is the Agents SDK
+  job queue: `DEFAULT_HUNG_TIMEOUT_SECONDS = 30`, per-job
+  `hungTimeoutSeconds` on the queue insert into
+  `cf_agents_jobs.hung_timeout_seconds`, scheduler-level
+  `hungScheduleTimeoutSeconds` default 30 — verified in the installed
+  SDK 0.32.0 bundle (see §7 O1). The claim STANDS, corrected to SDK
+  0.32.0; cfagent sets no per-job timeout, so all cfagent schedules
+  ride the 30s default. Nothing was silently dropped.
 - **D7 — Hardcoded defaults are still hardcoded (#2366 item 1, untouched
   by S0).** `STALE_SWEEP_INTERVAL_SECONDS = 6h`, `RESEARCH_SCHEDULED_FIRE_HOUR_UTC = 21`,
   retention 365-day defaults, recovery `LIMIT 100`, 30-day cutoff,
@@ -403,6 +429,94 @@ there is one), `asyncJobId` (its own `job_id`), and `workflowId` (when
 the step runs through a workflow). Parity: same chain graph, same
 delivery channels, same retry/refusal rules, same recovery behavior.
 
+### S1 reconciliation — one of everything (owner mandate, #3121 comment 6660031391)
+
+**Mandate (binding program law for S1 and every slice after it):** one UX
+(the decided `?tab=schedules` home + sub-route scheme), one scheduling
+engine (one firing contract for alarm + tick-evaluated kinds), one
+scheduling agent (sub-agents only where a sub-task genuinely earns one),
+one scheduling workflow (one durable execution path for scheduled work);
+hexagonal architecture with no exceptions (the scheduler core must not
+use Cloudflare directly — Worker crons, DO alarms, the Agents SDK
+scheduler, Cloudflare Workflows, Queues, D1/DO storage sit behind ports,
+reached only through adapters); full AOP (externalized config, coded
+messages in the outcome catalog, exception handling through the AOP seam,
+audit as a cross-cutting concern); standards with no exceptions (SOLID,
+GoF, GRASP, 15-factor, TDD with pins in the same PR, no UX drift, no
+architecture drift). Reconciliation duty: show how one-engine /
+one-agent / one-workflow maps onto the §3 answers above; a genuine
+conflict is recorded as an open owner decision and that piece stops — a
+deviation without an owner decision is a review finding.
+
+**Mapping — the §3 answers are mechanisms behind adapters; the mandate
+is one core behind ports. No genuine conflict exists, so no open owner
+decision is recorded and no piece is stopped:**
+
+- **One engine / one firing contract — Q(a), Q(b), Q(c).** Q(a) already
+  designs two firing *kinds* under one scheduler (alarm + tick-evaluated),
+  not two engines; S1 supplies the contract's shared pieces in
+  `src/services/consolidatedScheduling.ts`: one timing classifier
+  (`resolveTimingForm` — the four timing forms resolve through it),
+  one tick-evaluation semantics (`isDue` / `isValidCron` /
+  `zonedDateParts` re-exported verbatim, never reimplemented), one
+  ledger (the §4 four columns on every run row), one lifecycle/audit
+  vocabulary. Q(b)'s Worker crons are trigger *ports* (adapters)
+  dispatching into named scheduler entry points — a wake-up layer, not
+  an engine. Q(c)'s follow-up chain is the one durable execution path's
+  async-job mechanism, behind the same ledger. Alarm + tick are kinds
+  of the one engine, distinguished by kind, never by separate engines.
+- **One agent.** `ScheduledAgent` (T3) is the one scheduling agent. S1
+  adds no agent and no sub-agent; the goal-audit poster is a function,
+  not an agent. S3 migrates goal schedules onto the tick-evaluated kind
+  within the same agent.
+- **One workflow.** One durable execution path for scheduled work: the
+  follow-up chain (async-job) + the ledger. Workflow submissions stamp
+  `workflowId` linkage in S1 so a workflow's runs join to their
+  schedule; S1 introduces no second workflow.
+- **One UX.** Out of S1's scope by the program plan: the home URL is
+  decided and the sub-route scheme is the S2 decision to implement
+  (see §6 sequencing). S1 touches no UI.
+- **Hexagonal.** The S1 core (`consolidatedScheduling.ts` + the ledger
+  builder in `src/services/jobRunRecords.ts` + the ledger ports in
+  `src/data/jobRunRecordPorts.ts`) uses Cloudflare nowhere: its imports
+  are app-relative modules only, and the S1 diff adds zero new
+  `agents` / Cloudflare imports anywhere under `src/` (pinned by
+  S1-P17). Cloudflare surfaces sit behind the existing ports/adapters:
+  `SqlJobRunRecordStore` over `SqlStorage`, the goal-audit POST through
+  the orchestrator audit route (`POST /api/audit/event`, the same
+  `mas_events` sink the T2 events use), SDK schedule objects passed in
+  as data. This follows the ADR 0006 port-first spine
+  (`docs/architecture/adr/0006-cloudflare-feature-flags.md`: zero
+  Cloudflare types in the core interface, no env lookups in business
+  logic). S1 adds no feature flag and invents no second flag spine.
+- **AOP.** Externalized config: S1 adds no decision-values.
+  `WORKER_TICK_CRON` names the existing `wrangler.jsonc` tick
+  expression as one named constant (the expression itself lives in
+  `wrangler.jsonc` and in `WORKER_CRON_TRIGGERS_INVENTORY`);
+  `SDK_HUNG_TIMEOUT_DEFAULT_SECONDS` pins the SDK's mechanism default,
+  not a decision — S1 chooses no timeout. Coded messages: S1 adds no
+  outcome-catalog entries because it changes no outcomes; the goal
+  audit events are event types in the existing `mas_events` funnel,
+  validated by `validateStrictAuditWrite`. Exception handling through
+  the seam: the goal-audit poster never throws (mirrors the `this.audit`
+  swallow rule — an audit failure must never fail the mutation it
+  records); the record builder throws fail-closed on invalid input
+  (the existing builder contract); recording never breaks the callback
+  (the `storeRecord` swallow, pre-existing). Audit as a cross-cutting
+  concern: the O2 events go through the shared audit primitive, and
+  the lifecycle map is the single source S2 migrates the routes onto;
+  the A2A-path DO-side sink gap is filed as sub-issue #3312.
+- **Standards / no drift.** Checked against
+  `docs/compliance/multiple-implementations.md`: S1 creates no new
+  parallel implementation — it reuses `isDue` / `isValidCron` /
+  `zonedDateParts` by re-export, one timing classifier, one linkage
+  resolver set, one audit funnel. The goal-audit POST is the same
+  `mas_events` sink reached through the only transport available at
+  the server layer, not a second audit system. No UX drift (no UI
+  touched). No architecture drift (no boundary bypass: no direct SQL
+  outside the adapters, no fat routers, no PDP-seam bypass). TDD pins
+  in this PR: S1-P01–S1-P17 plus the S0 pin updates.
+
 ## 4. Consolidated run ledger (acceptance item carried from #3264)
 
 **Requirement (non-negotiable, from incident #3264): the consolidated run
@@ -443,6 +557,50 @@ extended — not in S0):**
    surfaces (`JobsPanel`, Autopilot, `WorkflowRunsPanel`) read it, and
    the per-schedule audit events (§1.4 B-T2-06) remain the lifecycle
    trail alongside it.
+
+### O4 decision (S1): `trigger` sits ALONGSIDE `triggeredBy` — it does not supersede it
+
+**Decision (pinned in S1, before any write-site change):** the §4
+`trigger` column is ADDITIVE. `triggeredBy` (`scheduled | manual`) is
+retained exactly as today — required, validated by
+`buildJobRunRecord`, rendered by `JobsPanel` / `WorkflowRunsPanel`,
+and typed into the #2840 in-flight firing claim
+(`goalFiringClaims.ts`). `trigger` is the five-valued ledger
+vocabulary (`scheduled | manual | worker-cron | async-chain |
+unknown`) that distinguishes firings `triggeredBy` cannot express.
+
+Why alongside, not supersede:
+
+1. Superseding would be a migration, not a primitive: every stored
+   row (DO SQLite `job_run_records` + ScheduledAgent KV
+   `jobRunRecords` arrays) carries `triggeredBy` and no `trigger`;
+   the claim guard, both panels, and the builder all type on the
+   two-valued field. Rewriting them in the primitives slice would
+   risk behavior change in exactly the slice that must have none.
+2. The two fields answer different questions. `triggeredBy` is the
+   human-facing origin a reader already understands (did the cadence
+   fire it, or did a person press trigger?). `trigger` is the
+   joinable ledger vocabulary (which producing path — cadence,
+   manual, Worker cron, async chain — made this row?).
+3. Derivation is total, so no new row is ever `unknown` or null: a
+   write site stamps `trigger` explicitly when it knows its path
+   (worker-cron at cron dispatches, async-chain at chain minting);
+   otherwise the builder derives it from `triggeredBy`
+   (`scheduled` → `scheduled`, `manual` → `manual`). `unknown` is
+   legacy-rows-only, produced only by the read normalizer for rows
+   written before S1.
+4. Retiring `triggeredBy` is S6 territory at the earliest: only
+   after every reader (panels, claims, audit) has moved to `trigger`,
+   and then by deprecation only — never by deletion in this program.
+
+**Derivation rule (normative, implemented in
+`src/services/consolidatedScheduling.ts` `resolveLedgerTrigger`):**
+explicit valid `trigger` on the firing payload wins, except an
+explicit `"unknown"` (a payload may never stamp legacy); an invalid
+or absent explicit trigger falls back to the `triggeredBy`
+derivation; a write site that cannot determine either records the
+derivation and the reason in the audit event, so the gap stays
+visible until closed.
 
 **#2366 convergence:** the same S1 implements #2366 items 3–4 on the
 consolidated path — provenance (`origin` user | system, creator identity,
@@ -487,19 +645,52 @@ audited in the consolidated ledger).
 
 ## 7. Open items (not settled by S0)
 
-- **O1 (S1):** locate the current hung-timeout mechanism or correct the
-  #2366 seed (§2 D6) — no `hungTimeout` exists under `src/` on fresh main.
-- **O2 (S1):** per-schedule audit events for goal-schedule lifecycle
-  (add/enable/trigger/remove) — the T2 audit funnel is inventoried
-  (B-T2-06); the T3 lifecycle audit trail needs the same enumeration in S1.
+- **O1 (S1) — RESOLVED in S1 (located, not dropped):** the
+  hung-timeout mechanism is the Agents SDK's job-queue hung check,
+  not cfagent code. Verified in the installed SDK (agents@0.32.0,
+  `node_modules/agents/dist/lifecycle-v1rKHV2C.js`):
+  `DEFAULT_HUNG_TIMEOUT_SECONDS = 30`; a per-job `hungTimeoutSeconds`
+  option on the job-queue insert lands in
+  `cf_agents_jobs.hung_timeout_seconds`; the scheduler passes its own
+  `hungScheduleTimeoutSeconds` option (default 30) as that per-job
+  value on schedule inserts. The #2366 seed claim ("SDK default 30s,
+  per-job `hungTimeoutSeconds` option") STANDS, corrected from SDK
+  0.24.0 to 0.32.0 and from "verified in the bundle" to the located
+  bundle symbols above. cfagent never sets `hungTimeoutSeconds`
+  anywhere under `src/` — every cfagent schedule rides the SDK 30s
+  default — and the mechanism is visible in-repo through
+  `src/data/frameworkQueueIndexSchema.ts`, which indexes
+  `cf_agents_jobs.hung_timeout_seconds` for the hung-recheck MIN.
+  D6 below is closed by the same finding. S1 pins the default as
+  `SDK_HUNG_TIMEOUT_DEFAULT_SECONDS` in
+  `src/services/consolidatedScheduling.ts`; a slice that ever sets a
+  per-job timeout must use that constant and pin the change.
+- **O2 (S1) — RESOLVED in S1 (enumerated + wired):** the
+  per-schedule audit events for the goal-schedule lifecycle are
+  `schedule.goal.added`, `schedule.goal.enabled`,
+  `schedule.goal.triggered`, `schedule.goal.removed` — the same
+  `schedule.<verb>` funnel shape as B-T2-06, goal-qualified so they
+  cannot collide with the T2 events (`schedule.triggered` etc.).
+  Enumerated in `src/services/consolidatedScheduling.ts`
+  (`GOAL_SCHEDULE_AUDIT_EVENTS`) with a shared event builder, and
+  wired at the `/api/schedule/goals` route funnel in `src/server.ts`:
+  each mutation best-effort POSTs its event to the orchestrator's
+  `POST /api/audit/event` (the same mas_events funnel B-T2-06
+  writes through `ctx.audit`), never failing the mutation when the
+  audit write fails — the `this.audit` swallow rule. Tracked gap:
+  the A2A dispatch path (`handleA2A` → DO methods directly) bypasses
+  the server.ts funnel, so agent-driven goal mutations leave no
+  lifecycle audit event — filed as sub-issue #3312 (DO-side sink;
+  natural home S3).
 - **O3 (S3):** confirm the consolidated tick's per-tick budget accounting
   matches `onCron` exactly when a tick evaluates goals across tenants
   (#2457 owns cross-tenant rules; the consolidated surface enforces the
   same gates).
-- **O4 (S1):** the `unknown` trigger vocabulary vs the existing
-  `triggeredBy: scheduled | manual` — S1 decides whether `trigger`
-  supersedes `triggeredBy` (with a migration) or sits alongside it, and
-  pins the choice in the ledger design before any write site changes.
+- **O4 (S1) — RESOLVED in S1 (decision pinned in §4 above):** `trigger`
+  sits ALONGSIDE `triggeredBy`; it does not supersede it. Derivation
+  rule and rationale are in §4 ("O4 decision (S1)"); the implementation
+  is `resolveLedgerTrigger` in
+  `src/services/consolidatedScheduling.ts`.
 
 ## 8. URL inventory: where schedules live today
 

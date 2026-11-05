@@ -33,6 +33,10 @@ import type {
 } from "../../types";
 import { recordScreeningActivity } from "../../services/screeningActivity";
 import { recordJobOutcome } from "../../services/jobOutcomes";
+import {
+  recoveryProvenance,
+  systemProvenance,
+} from "../../services/consolidatedScheduling";
 import type { NLQSchedulingPort, NLQStockScreenPort } from "../nlq";
 import { codedMessage } from "../../outcomes/outcomeAspects";
 import { recordBlockingAudit } from "../../security/auditChain";
@@ -330,7 +334,10 @@ export async function submitAsyncJob(ctx: AsyncJobsContext,
     // Consolidation C3 (#1277): a job with a not-before time is armed
     // at the remaining delay instead of immediately — the executor
     // still refuses an early claim (defense in depth for re-arms).
-    await ctx.schedule(delaySecondsUntil(job.runAt, Date.now()), "executeAsyncJob", { jobId } satisfies AsyncJobPayload, {
+    // Issue #3121 S1 — the executeAsyncJob arming is framework
+    // machinery, not a user schedule: it carries origin system /
+    // async-job-arm provenance in its payload.
+    await ctx.schedule(delaySecondsUntil(job.runAt, Date.now()), "executeAsyncJob", { jobId, provenance: systemProvenance("async-job-arm") } satisfies AsyncJobPayload, {
       idempotent: true,
       retry: { maxAttempts: 1 },
     });
@@ -356,11 +363,12 @@ export async function recoverQueuedAsyncJobs(ctx: AsyncJobsContext): Promise<voi
     try {
       // Consolidation C3 (#1277): re-arm at the remaining delay — a
       // deferred stage must not fire early just because the DO
-      // restarted and recovered its queue.
+      // restarted and recovered its queue. Issue #3121 S1 — a
+      // recovery re-arm carries origin system / recovery provenance.
       await ctx.schedule(
         delaySecondsUntil(typeof row.not_before === "string" ? row.not_before : undefined, Date.now()),
         "executeAsyncJob",
-        { jobId } satisfies AsyncJobPayload,
+        { jobId, provenance: recoveryProvenance() } satisfies AsyncJobPayload,
         {
           idempotent: true,
           retry: { maxAttempts: 1 },
@@ -583,6 +591,13 @@ export async function recordScreenerRunMainJob(
       status: outcome.success ? "completed" : "failed",
       kind: outcome.kind,
       trigger: outcome.trigger,
+      // Issue #3121 S1 — the §4 linkage on the bridged run record:
+      // the originating schedule / workflow when the run names one
+      // (explicit nulls otherwise — never a missing column), and this
+      // main job's own id as the run's async job.
+      scheduleId: outcome.scheduleId ?? null,
+      asyncJobId: jobId,
+      workflowId: outcome.workflowId ?? null,
       matchedCount: outcome.matchedCount,
       totalScanned: outcome.totalScanned,
       reportUrl: outcome.reportUrl,
@@ -797,7 +812,9 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
   if (preRow?.status === "queued" && typeof preRow.not_before === "string") {
     const remainingSeconds = delaySecondsUntil(preRow.not_before, Date.now());
     if (remainingSeconds > 0) {
-      await ctx.schedule(remainingSeconds, "executeAsyncJob", { jobId } satisfies AsyncJobPayload, {
+      // Issue #3121 S1 — an early-fire re-arm is framework machinery:
+      // origin system / recovery provenance, as on the recovery path.
+      await ctx.schedule(remainingSeconds, "executeAsyncJob", { jobId, provenance: recoveryProvenance() } satisfies AsyncJobPayload, {
         idempotent: true,
         retry: { maxAttempts: 1 },
       });

@@ -38,10 +38,12 @@ import {
   applyMigrations,
   type MigrationDb,
 } from "./migrationRunner";
-import type {
-  IvHistoryCoverage,
-  IvHistoryRecord,
-  IvHistoryStore,
+import {
+  normalizeIvBroker,
+  type IvBroker,
+  type IvHistoryCoverage,
+  type IvHistoryRecord,
+  type IvHistoryStore,
 } from "./ivHistoryPorts";
 
 /** Drizzle D1 database object carrying the IV-history schema. */
@@ -67,6 +69,8 @@ function rowToRecord(row: IvRow): IvHistoryRecord {
   return {
     symbol: row.symbol,
     date: row.date,
+    // A pre-#3326 row has no broker; it was collected from E*TRADE chains.
+    broker: normalizeIvBroker((row as { broker?: string | null }).broker),
     atmIv: row.atmIv,
     spot: row.spot,
     expiryDate: row.expiryDate,
@@ -85,6 +89,8 @@ export class D1IvHistoryStore implements IvHistoryStore {
 
   async record(record: IvHistoryRecord): Promise<boolean> {
     const symbol = normalizeSymbol(record.symbol);
+    // First write wins per (symbol, date), whichever broker produced it: the
+    // day has one observation, and a second broker must not rewrite provenance.
     if (await this.get(symbol, record.date)) return false;
     await this.db
       .insert(agentIvHistory)
@@ -96,20 +102,21 @@ export class D1IvHistoryStore implements IvHistoryStore {
         expiryDate: record.expiryDate,
         dte: record.dte,
         collectedAt: record.collectedAt,
+        broker: normalizeIvBroker(record.broker),
       })
       .onConflictDoNothing();
     return true;
   }
 
-  async get(symbol: string, date: string): Promise<IvHistoryRecord | null> {
+  async get(symbol: string, date: string, broker?: IvBroker): Promise<IvHistoryRecord | null> {
+    const symbolMatch = eq(agentIvHistory.symbol, normalizeSymbol(symbol));
     const rows = await this.db
       .select()
       .from(agentIvHistory)
       .where(
-        and(
-          eq(agentIvHistory.symbol, normalizeSymbol(symbol)),
-          eq(agentIvHistory.date, date),
-        ),
+        broker
+          ? and(symbolMatch, eq(agentIvHistory.date, date), eq(agentIvHistory.broker, normalizeIvBroker(broker)))
+          : and(symbolMatch, eq(agentIvHistory.date, date)),
       )
       .limit(1);
     return rows.length ? rowToRecord(rows[0]) : null;
@@ -117,18 +124,24 @@ export class D1IvHistoryStore implements IvHistoryStore {
 
   async listSeries(
     symbol: string,
-    options: { limit?: number } = {},
+    options: { limit?: number; broker?: IvBroker } = {},
   ): Promise<IvHistoryRecord[]> {
+    const symbolMatch = eq(agentIvHistory.symbol, normalizeSymbol(symbol));
     const query = this.db
       .select()
       .from(agentIvHistory)
-      .where(eq(agentIvHistory.symbol, normalizeSymbol(symbol)))
+      .where(
+        options.broker
+          ? and(symbolMatch, eq(agentIvHistory.broker, normalizeIvBroker(options.broker)))
+          : symbolMatch,
+      )
       .orderBy(desc(agentIvHistory.date));
     const rows = options.limit !== undefined ? await query.limit(options.limit) : await query;
     return rows.map(rowToRecord);
   }
 
-  async coverage(symbol: string): Promise<IvHistoryCoverage> {
+  async coverage(symbol: string, broker?: IvBroker): Promise<IvHistoryCoverage> {
+    const symbolMatch = eq(agentIvHistory.symbol, normalizeSymbol(symbol));
     const [row] = await this.db
       .select({
         count: sql<number>`COUNT(*)`,
@@ -136,7 +149,9 @@ export class D1IvHistoryStore implements IvHistoryStore {
         lastDate: sql<string | null>`MAX(${agentIvHistory.date})`,
       })
       .from(agentIvHistory)
-      .where(eq(agentIvHistory.symbol, normalizeSymbol(symbol)));
+      .where(
+        broker ? and(symbolMatch, eq(agentIvHistory.broker, normalizeIvBroker(broker))) : symbolMatch,
+      );
     return {
       observations: Number(row?.count ?? 0),
       firstDate: row?.firstDate ?? null,
@@ -144,11 +159,12 @@ export class D1IvHistoryStore implements IvHistoryStore {
     };
   }
 
-  async listSymbols(): Promise<string[]> {
-    const rows = await this.db
-      .selectDistinct({ symbol: agentIvHistory.symbol })
-      .from(agentIvHistory)
-      .orderBy(asc(agentIvHistory.symbol));
+  async listSymbols(options: { broker?: IvBroker } = {}): Promise<string[]> {
+    const query = this.db.selectDistinct({ symbol: agentIvHistory.symbol }).from(agentIvHistory);
+    const rows = await (options.broker
+      ? query.where(eq(agentIvHistory.broker, normalizeIvBroker(options.broker)))
+      : query
+    ).orderBy(asc(agentIvHistory.symbol));
     return rows.map((r) => r.symbol);
   }
 }

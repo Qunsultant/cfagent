@@ -84,6 +84,7 @@ import { InMemoryPausedScheduleStore } from "../src/data/inMemoryPausedScheduleA
 import {
   ALL_MIGRATIONS,
   MIGRATION_0020_IV_HISTORY,
+  MIGRATION_0045_IV_HISTORY_BROKER,
 } from "../src/data/migrationRunner";
 import { agentIvHistory } from "../src/data/drizzleSchema";
 import type { StrategyProfileSpec } from "../src/trading/options/strategyProfile";
@@ -967,7 +968,14 @@ describe("#2337 structural pins", () => {
     const ddlColumns = [...block.matchAll(/^\s{2}(\w+) /gm)]
       .map((m) => m[1])
       .filter((name) => name !== "PRIMARY");
-    expect(ddlColumns.sort()).toEqual(schemaColumns.sort());
+    // Issue #3326: provenance is added by migration 0045, not by editing 0020
+    // (which is already applied everywhere). The pin therefore compares the
+    // schema against 0020 + every later ALTER of this table — still one DDL
+    // authority per statement, and no drift between mapping and DDL.
+    const alteredColumns = [MIGRATION_0045_IV_HISTORY_BROKER.sql]
+      .flatMap((statement) => [...statement.matchAll(/ADD COLUMN (\w+)/g)].map((m) => m[1]));
+    expect(ddlColumns.sort()).toEqual(schemaColumns.filter((c) => !alteredColumns.includes(c)).sort());
+    expect(alteredColumns.every((c) => schemaColumns.includes(c))).toBe(true);
   });
 
   it("port modules import no store client (types only across the boundary)", () => {

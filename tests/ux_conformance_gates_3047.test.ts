@@ -3,7 +3,8 @@
  *
  * A page that diverges must fail CI, not just look wrong. Three gates
  * share one scanner (no drift between them):
- *  1. Route→shell: every nav route renders inside a PageShell, or is
+ *  1. Route→shell: every nav route renders inside a PageShell (or a
+ *     PageTemplate, which renders PageShell — #3131), or is
  *     listed in ux_shell_exceptions_3047.json (migration with a tracking
  *     slice, permanent shape, or exception with justification). A
  *     migration entry whose file GAINS a PageShell fails — the entry
@@ -157,7 +158,8 @@ function loadRegister(): ShellRegister {
   );
 }
 
-/** Route id -> panel file that must contain <PageShell (repo-relative). */
+/** Route id -> panel file that must contain <PageShell, or <PageTemplate
+ *  (which renders PageShell — #3131; the template carries the shell). */
 const CONFORMING_ROUTES: Record<string, string> = {
   agents: "src/client/AgentsPanel.tsx",
   approvals: "src/client/ApprovalsPanel.tsx",
@@ -315,9 +317,9 @@ describe("route shell conformance (#3047)", () => {
     };
 
     for (const [id, file] of Object.entries(CONFORMING_ROUTES)) {
-      const shell = clean(readFileSync(join(HERE, file), "utf8")).includes(
-        "<PageShell",
-      );
+      const src = clean(readFileSync(join(HERE, file), "utf8"));
+      const shell =
+        src.includes("<PageShell") || src.includes("<PageTemplate");
       check(id, shell, false, `expected <PageShell in ${file}`);
     }
     for (const id of CHAT_INLINE_ROUTES) {

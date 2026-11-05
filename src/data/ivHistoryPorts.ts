@@ -51,9 +51,27 @@ export const IV_STATS_WINDOW = 252;
  *  must treat IV-rank-dependent inference as reduced-confidence. */
 export const IV_WARMING_UP_THRESHOLD = 60;
 
+/**
+ * Issue #3326 (programme #3292): which broker's chain produced an observation.
+ *
+ * The row is still one observation per (symbol, date) — ATM IV on a given day
+ * is one market fact — but the snapshot it was read from came from a specific
+ * broker, and the series a surface shows must be that broker's own or say it
+ * has none. Without this field the only honest options were "refuse Alpaca" or
+ * "relabel E*TRADE rows", and relabelling is fabrication.
+ */
+export type IvBroker = "etrade" | "alpaca";
+
+/** Legacy rows (and any unrecognised value) were collected from E*TRADE chains. */
+export function normalizeIvBroker(value: unknown): IvBroker {
+  return String(value ?? "").trim().toLowerCase() === "alpaca" ? "alpaca" : "etrade";
+}
+
 /** One day's ATM IV observation for one tracked name. */
 export interface IvHistoryRecord {
   symbol: string;
+  /** Broker whose chain produced this observation. Absent = legacy E*TRADE row. */
+  broker?: IvBroker;
   /** Collection day, YYYY-MM-DD in America/New_York. */
   date: string;
   /** ATM IV as a fraction (0.32 = 32%), derived from the live chain —
@@ -100,17 +118,21 @@ export interface IvStats {
 export interface IvHistoryStore {
   /** Persist one day's record. Returns true when the row was
    *  written, false when (symbol, date) already existed — first
-   *  write wins, so a same-day rerun is a no-op. */
+   *  write wins, so a same-day rerun is a no-op. The day's FIRST
+   *  observation is the record whichever broker produced it: a second
+   *  broker on the same day is not a second data point, and its run
+   *  reports already_recorded rather than rewriting provenance. */
   record(record: IvHistoryRecord): Promise<boolean>;
-  /** The record for one (symbol, date), or null. */
-  get(symbol: string, date: string): Promise<IvHistoryRecord | null>;
+  /** The record for one (symbol, date), or null. `broker` filters to rows that
+   *  broker produced; omit for the day's record whichever broker wrote it. */
+  get(symbol: string, date: string, broker?: IvBroker): Promise<IvHistoryRecord | null>;
   /** Stored series for a symbol, NEWEST first (house list style);
-   *  `limit` caps the rows returned (default: the whole series). */
-  listSeries(symbol: string, options?: { limit?: number }): Promise<IvHistoryRecord[]>;
-  /** Observation count and date span for a symbol. */
-  coverage(symbol: string): Promise<IvHistoryCoverage>;
-  /** Every symbol with at least one stored record, ascending. */
-  listSymbols(): Promise<string[]>;
+   *  `limit` caps the rows returned, `broker` filters by provenance. */
+  listSeries(symbol: string, options?: { limit?: number; broker?: IvBroker }): Promise<IvHistoryRecord[]>;
+  /** Observation count and date span for a symbol (optionally per broker). */
+  coverage(symbol: string, broker?: IvBroker): Promise<IvHistoryCoverage>;
+  /** Every symbol with at least one stored record, ascending (optionally per broker). */
+  listSymbols(options?: { broker?: IvBroker }): Promise<string[]>;
 }
 
 /**

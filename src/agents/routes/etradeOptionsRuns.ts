@@ -20,6 +20,8 @@ import {
   flattenWatchlistSymbols,
   resolveTrackedSymbols,
 } from "../../trading";
+import { resolveTenantBroker } from "../../services/tenantProviders";
+import { brokerSupports } from "../../trading";
 import {
   buildOptionsDiscoveryPorts,
   createOptionsDiscoveryPorts,
@@ -44,7 +46,13 @@ export async function handleOptionsLatestRuns(ctx: EtradeOptionsRouteContext): P
   }
 }
 
-export async function handleOptionsScansList(request: Request, url: URL, sessionId: string, sql: SqlStorage): Promise<Response> {
+export async function handleOptionsScansList(
+  request: Request,
+  url: URL,
+  sessionId: string,
+  sql: SqlStorage,
+  ctx: EtradeOptionsRouteContext,
+): Promise<Response> {
   try {
     const limit = url.searchParams.get("limit") ? Number(url.searchParams.get("limit")) : 25;
     const offset = url.searchParams.get("offset") ? Number(url.searchParams.get("offset")) : 0;
@@ -54,8 +62,12 @@ export async function handleOptionsScansList(request: Request, url: URL, session
     const userLogin = request.headers.get("x-user-login");
     if (!userLogin) return unauthenticatedResponse();
     const store = createOptionsDiscoveryPorts({ sql }).scanRuns;
-    const scans = await store.list({ limit, offset, userLogin });
-    return Response.json({ count: scans.length, scans });
+    // Issue #3327: history is the SELECTED broker's runs. Runs saved before
+    // provenance existed were E*TRADE's (the only broker wired then), so they
+    // read as `etrade` — never as another broker's evidence.
+    const broker = await resolveTenantBroker(ctx.env);
+    const scans = await store.list({ limit, offset, userLogin, broker });
+    return Response.json({ broker, count: scans.length, scans });
   } catch (err) {
     return Response.json({ error: err instanceof Error ? err.message : "Failed to list scan runs" }, { status: 500 });
   }
@@ -137,8 +149,28 @@ export async function handleOptionsDiscoveryRunById(request: Request, sessionId:
   }
 }
 
+/**
+ * IV history for the SELECTED broker (issue #3326, programme #3292).
+ *
+ * The path keeps E*TRADE's legacy name, but the series is not E*TRADE's: every
+ * observation records which broker's chain produced it, and this endpoint
+ * answers with the selected broker's rows only. An Alpaca tenant therefore sees
+ * Alpaca's own (possibly still warming up) series — never E*TRADE's relabelled.
+ */
 export async function handleOptionsIvHistory(url: URL, ctx: EtradeOptionsRouteContext, sql: SqlStorage): Promise<Response> {
   try {
+    const broker = await resolveTenantBroker(ctx.env);
+    if (!brokerSupports(broker, "ivHistory")) {
+      return Response.json(
+        {
+          code: "provider_unsupported",
+          broker,
+          message: `IV history is not available for the selected broker (${broker}); no other broker's series is shown in its place.`,
+          retryable: false,
+        },
+        { status: 501 },
+      );
+    }
     // Issue #2337 cutover (R-2): IV reads serve through the
     // env-aware build — the D1 store when AGENT_DB is bound,
     // the DO store only on the explicit rollback lever or an
@@ -146,11 +178,12 @@ export async function handleOptionsIvHistory(url: URL, ctx: EtradeOptionsRouteCo
     const store = (await buildOptionsDiscoveryPorts(ctx.env, { sql })).ivHistory;
     const symbolParam = url.searchParams.get("symbol");
     if (symbolParam) {
-      const entry = await getIvHistoryEntry(store, symbolParam);
+      const entry = await getIvHistoryEntry(store, symbolParam, broker);
       // ?series=true includes the full time series for charting.
       if (url.searchParams.get("series") === "true") {
-        const series = await store.listSeries(symbolParam.toUpperCase(), { limit: 365 });
+        const series = await store.listSeries(symbolParam.toUpperCase(), { limit: 365, broker });
         return Response.json({
+          broker,
           ...entry,
           series: series.reverse().map((r) => ({
             date: r.date,
@@ -159,7 +192,7 @@ export async function handleOptionsIvHistory(url: URL, ctx: EtradeOptionsRouteCo
           })),
         });
       }
-      return Response.json(entry);
+      return Response.json({ broker, ...entry });
     }
     let watchlistSymbols: string[] = [];
     try {
@@ -171,13 +204,13 @@ export async function handleOptionsIvHistory(url: URL, ctx: EtradeOptionsRouteCo
       getCuratedStockUniverse().map((s) => s.symbol),
       watchlistSymbols
     );
-    const recorded = await store.listSymbols();
+    const recorded = await store.listSymbols({ broker });
     const names = [...new Set([...tracked, ...recorded])].sort();
     const entries = [];
     for (const symbol of names) {
-      entries.push(await getIvHistoryEntry(store, symbol));
+      entries.push(await getIvHistoryEntry(store, symbol, broker));
     }
-    return Response.json({ count: entries.length, names: entries });
+    return Response.json({ broker, count: entries.length, names: entries });
   } catch (err) {
     return Response.json({ error: err instanceof Error ? err.message : "Failed to fetch IV history" }, { status: 500 });
   }

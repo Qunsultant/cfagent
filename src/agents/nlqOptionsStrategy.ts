@@ -625,6 +625,12 @@ export interface OptionsStrategyDeps {
   scanRunStore?: ScanRunStore;
   profileStore?: StrategyProfileStore;
   userLogin?: string;
+  /**
+   * Issue #3327: the broker whose chains this run reads. Stamped on the saved
+   * run so history is that broker's evidence; absent, the run records E*TRADE
+   * (the only broker wired before provenance existed), never a guess.
+   */
+  broker?: "etrade" | "alpaca";
   /** Issue #14: the Phase 1 discovery runner (createDiscoveryService's
    *  return shape). When absent, the unified options_fit_discovery
    *  action's scope leg fails with an availability error — the same
@@ -1210,7 +1216,7 @@ async function runOpportunityScan(
   let persisted = false;
   if (scanRunStore) {
     try {
-      const saved = await scanRunStore.save(result, { userLogin: deps?.userLogin });
+      const saved = await scanRunStore.save(result, { userLogin: deps?.userLogin, broker: deps?.broker });
       scanRunId = saved.id;
       persisted = true;
     } catch (err) {

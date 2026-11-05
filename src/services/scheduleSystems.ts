@@ -140,9 +140,9 @@ export const SCHEDULE_UNIFICATION_ANSWERS: ScheduleUnificationAnswer[] = [
   {
     question: "What does a per-run job record contain?",
     answer:
-      "System, job/goal id, operation/callback, started/finished, a three-valued outcome (success/failure/skipped — skipped is its own value because executors genuinely skip), triggeredBy (scheduled/manual), error text on failure, the skip reason on skipped, and a descriptor plus artifact references on success. A failure without error text and a skip without a reason cannot be constructed.",
+      "System, job/goal id, operation/callback, started/finished, a three-valued outcome (success/failure/skipped — skipped is its own value because executors genuinely skip), triggeredBy (scheduled/manual), the §4 consolidated-ledger linkage (trigger — the five-valued ledger vocabulary sitting alongside triggeredBy per the O4 decision — plus scheduleId, asyncJobId, and workflowId, each an explicit null when the run has none), error text on failure, the skip reason on skipped, and a descriptor plus artifact references on success. A failure without error text and a skip without a reason cannot be constructed.",
     evidence:
-      "src/data/jobRunRecordPorts.ts; src/services/jobRunRecords.ts buildJobRunRecord; tests/job-run-records-2964.test.ts.",
+      "src/data/jobRunRecordPorts.ts; src/services/jobRunRecords.ts buildJobRunRecord; src/services/consolidatedScheduling.ts resolveLedgerTrigger; tests/job-run-records-2964.test.ts.",
   },
   {
     question: "Which firings leave a per-run record?",
@@ -231,7 +231,7 @@ export const UNIFIED_JOBS_UI: {
   ],
 };
 
-/** The per-run record fields, in storage order (see data/jobRunRecordPorts.ts). */
+/** The per-run record fields, in storage order (see data/jobRunRecordPorts.ts). Issue #3121 S1 extends the #2964 shape with the §4 ledger linkage (trigger, scheduleId, asyncJobId, workflowId) — extended, not rewritten. */
 export const JOB_RUN_RECORD_FIELDS: readonly string[] = [
   "system",
   "jobId",
@@ -240,6 +240,10 @@ export const JOB_RUN_RECORD_FIELDS: readonly string[] = [
   "finished",
   "outcome",
   "triggeredBy",
+  "trigger",
+  "scheduleId",
+  "asyncJobId",
+  "workflowId",
   "error",
   "detail",
   "descriptor",

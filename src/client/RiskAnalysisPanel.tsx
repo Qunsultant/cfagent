@@ -11,7 +11,7 @@ import {
   Flex,
   Grid,
   Notice,
-  PageShell,
+  PageTemplate,
   Select,
   Stack,
   Table,
@@ -93,7 +93,7 @@ function SummaryRow({ label, value, strong }: { label: string; value: string; st
  * grid, and a card per content block — the same composition the stock
  * and options order pages use, not a stack of full-width tables.
  *
- * The panel owns its PageShell and nothing else about chrome: the host
+ * The panel owns its PageTemplate and nothing else about chrome: the host
  * decides how that shell renders via PageChromeContext (standalone
  * route → full shell; order page Risk tab → content only; nested host
  * → card surface). The SAME component renders in all three hosts with
@@ -330,7 +330,7 @@ export function RiskAnalysisPanel({
     !symbol.trim() || (securityType === "options" && validLegCount === 0);
 
   return (
-    <PageShell
+    <PageTemplate
       title="Risk Analysis"
       scopeNote="Symbol-based risk profile — computed locally by the risk engine; no position needed."
     >
@@ -654,6 +654,6 @@ export function RiskAnalysisPanel({
           </>
         )}
       </Stack>
-    </PageShell>
+    </PageTemplate>
   );
 }

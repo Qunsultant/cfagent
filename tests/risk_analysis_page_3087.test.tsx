@@ -6,8 +6,9 @@
  *   sub-menu pages), a `risk-analysis` sub-menu entry under `order`,
  *   and the deep-link override order:risk-analysis -> ?tab=risk-analysis.
  * - Chat: a TAB_CONTENT entry renders RiskAnalysisPanel.
- * - Gate: the panel is shell-conforming (PageShell, primitives only,
- *   no inline styles, no bespoke classes) and does not touch the hub's
+ * - Gate: the panel is shell-conforming (PageTemplate over the
+ *   PageShell chrome since #3131, primitives only, no inline styles,
+ *   no bespoke classes) and does not touch the hub's
  *   RiskAnalysisModal.
  * - Render: a symbol input builds a RiskSubject through the existing
  *   engine; anatomy, scenarios, and AI tabs render from it.
@@ -90,7 +91,11 @@ describe("risk analysis page (#3087)", () => {
   });
 
   it("is shell-conforming with primitives only", () => {
-    expect(PANEL_SRC).toContain("<PageShell");
+    // #3131: the panel renders through PageTemplate, which carries
+    // the PageShell chrome — the pin follows the template, not the
+    // shell directly (PageTemplate itself is pinned to render
+    // PageShell in tests/page_template_3131.test.tsx).
+    expect(PANEL_SRC).toContain("<PageTemplate");
     expect(PANEL_SRC).not.toContain("style={");
     expect(PANEL_SRC).not.toContain("className=");
     expect(PANEL_SRC).not.toContain("<RiskAnalysisModal");
