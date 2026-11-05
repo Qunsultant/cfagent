@@ -8,16 +8,16 @@
  * activity sections — which had no ids at all. A control that lands nowhere is
  * worse than an absent control: it reads as a broken page.
  *
- * The rule here is the same one the panels follow: the selection decides. The
- * ids returned are the ones the rendered panel actually carries — pinned by
- * `tests/broker_section_nav_3367.test.ts`, which asserts each id exists in the
- * module that renders that broker's panel.
+ * The branch here is deliberately the SAME branch the hub uses to choose a
+ * panel (`selectedBroker === "etrade" ? AccountPanels : AlpacaBrokerPanel`), so
+ * an unrecognised stored id gets Alpaca's list because it gets Alpaca's panel —
+ * one rule, not two. This module holds no broker list of its own: it knows which
+ * sections each of the two panels renders, and nothing about what a broker can
+ * do (that is the catalogue's, and the panels read it).
  *
- * Deliberately NOT here: the absences. Alpaca's alerts and watchlists are
- * explained inside its panel (#3359); linking the nav to an explanation the user
- * then has to read is slower than seeing it where it is.
+ * No trading import: the boundary (#290) keeps client modules out of
+ * `src/trading`, and nothing here needs a capacity — only DOM anchors.
  */
-import { isBrokerId, type BrokerId } from "../trading/brokerCatalog";
 
 export interface BrokerSection {
   /** The chip's text. */
@@ -46,13 +46,10 @@ const ALPACA_SECTIONS: readonly BrokerSection[] = [
 const RISK_SECTION: BrokerSection = { label: "Portfolio Risk", id: "section-portfolio-risk" };
 
 /**
- * The chips for one broker. An unrecognised stored id is treated as E*TRADE's
- * list, because that is the panel the hub renders for an unknown value — the
- * other place that decision is made, kept consistent rather than duplicated
- * with a different rule.
+ * The chips for one broker. The comparison matches the hub's panel branch
+ * exactly: E*TRADE's panel for `"etrade"`, Alpaca's for everything else.
  */
 export function brokerSectionNav(broker: unknown): BrokerSection[] {
-  const id: BrokerId = isBrokerId(broker) ? (broker as BrokerId) : "etrade";
-  const own = id === "alpaca" ? ALPACA_SECTIONS : ETRADE_SECTIONS;
+  const own = broker === "etrade" ? ETRADE_SECTIONS : ALPACA_SECTIONS;
   return [...own, RISK_SECTION];
 }

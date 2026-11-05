@@ -8,7 +8,7 @@
  *      asserted against the panel modules themselves, not against a second list,
  *      so a renamed section fails here instead of becoming a dead chip.
  *   4. An unrecognised stored broker id follows the same rule the hub's render
- *      branch applies (the E*TRADE panel), not a third rule.
+ *      branch applies (the Alpaca panel), not a third rule.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -64,8 +64,11 @@ describe("the section nav follows the broker (#3367)", () => {
     }
   });
 
-  it("treats an unknown stored id the way the hub renders it — as E*TRADE's panel", () => {
-    expect(brokerSectionNav("sandbox")).toEqual(brokerSectionNav("etrade"));
-    expect(brokerSectionNav(undefined)).toEqual(brokerSectionNav("etrade"));
+  it("treats an unknown stored id the way the hub renders it — as Alpaca's panel", () => {
+    // The hub's branch is `selectedBroker === "etrade" ? AccountPanels : AlpacaBrokerPanel`,
+    // so an unrecognised id renders the Alpaca panel and must get Alpaca's chips.
+    // One rule, not two: this is the only place the nav could disagree with the panel.
+    expect(brokerSectionNav("sandbox")).toEqual(brokerSectionNav("alpaca"));
+    expect(brokerSectionNav(undefined)).toEqual(brokerSectionNav("alpaca"));
   });
 });
