@@ -6,9 +6,9 @@
  * Why a new route: `/etrade/screen` lives in the E*TRADE broker module, needs
  * an E*TRADE login, and gathers its universe through the E*TRADE client. That
  * is fine for E*TRADE and impossible for anyone else. Screening is declared
- * provider-side (#2144) and `Alpaca.marketScreening` is `false` — no broker-side
- * screener API is expected — so the platform does the math and only the quotes
- * come from the selected broker.
+ * provider-side (#2144), and issue #3325 made the catalogue say so for both
+ * brokers: neither offers a screener API, both screen their own quotes.
+ * The platform does the math; only the quotes come from the selected broker.
  *
  * Honesty rules, identical to `/broker/options/*`:
  *   - a broker without a quote read answers `501 provider_unsupported` naming

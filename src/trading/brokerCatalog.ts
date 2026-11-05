@@ -143,8 +143,11 @@ export const BROKER_CATALOG = {
       optionExpireDates: true,
       orderPreview: true,
       orderPlace: true,
-      // Alpaca has no screener API; screening stays provider-side (#2144).
-      marketScreening: false,
+      // Issue #3325: Alpaca has no screener API, and it does not need one — the
+      // screening math is the platform's (#3272) and only the quotes are the
+      // broker's. The adapter implements `screenMarkets` on its own quotes, so
+      // the capability is real rather than provider-side wishful thinking.
+      marketScreening: true,
       optionsScanner: false,
       ivHistory: false,
     },

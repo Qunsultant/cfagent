@@ -4,10 +4,12 @@
  * Implements ITradingPlatform for Alpaca Trading API v2
  */
 
-import type { Env, BrokerQuote, BrokerAccount, BrokerPosition, BrokerOrderDraft, BrokerOrderExecutionResult, BrokerStatus, BrokerOptionChain, BrokerOptionContract, BrokerOptionExpireDate } from "../../types";
+import type { Env, BrokerQuote, BrokerAccount, BrokerPosition, BrokerOrderDraft, BrokerOrderExecutionResult, BrokerStatus, BrokerOptionChain, BrokerOptionContract, BrokerOptionExpireDate, StockScreenerFilter, StockScreenResult } from "../../types";
 import type { DatabaseORM } from "../../orm";
 import type { ITradingPlatform, OrderPreviewParams, PlaceOrderParams } from "../interfaces";
 import { BROKER_CATALOG, type TradingType } from "../brokerCatalog";
+import { NeutralMarketScreener } from "../neutralMarketScreener";
+import { platformQuoteSource } from "../stockQuoteSource";
 import {
   fetchAlpacaOptionContracts,
   fetchAlpacaOptionSnapshots,
@@ -274,6 +276,23 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
       source: "Alpaca Real-Time NBBO Feed",
       timestamp: new Date().toISOString(),
     };
+  }
+
+  /**
+   * Issue #3325 (programme #3292): stock screening on Alpaca's own quotes.
+   *
+   * Screening was declared `false` for Alpaca with the reasoning "Alpaca has no
+   * screener API" — true, but beside the point: the screening math is the
+   * platform's (the same `NeutralMarketScreener` #3272 built), and the only
+   * broker-specific input is quotes, which this adapter already reads. Declaring
+   * the capability absent meant a surface refused work the engine could do.
+   *
+   * The universe resolves through the live listings feed; an unresolvable
+   * universe or an unconfigured broker is a named refusal from the screener,
+   * never an empty "no matches" or another broker's quotes.
+   */
+  async screenMarkets(filter: StockScreenerFilter = {}): Promise<StockScreenResult> {
+    return new NeutralMarketScreener({ quoteSource: platformQuoteSource(this) }).screenMarkets(filter);
   }
 
   async getAccounts(): Promise<BrokerAccount[]> {
