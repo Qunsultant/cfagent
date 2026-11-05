@@ -20,6 +20,7 @@ import {
 } from "../types";
 import type { TradeAssetClass, TradeOrderContext } from "./trading/tradeOrderContext";
 import { PortfolioRiskPanel } from "./PortfolioRiskPanel";
+import { brokerSectionNav } from "./brokerSectionNav";
 import type { RiskBroker } from "./portfolioRiskApi";
 import { brokerSupports, isBrokerId } from "../trading/brokerCatalog";
 import { TradingApprovalsQueue } from "./TradingApprovalsQueue";
@@ -2175,14 +2176,10 @@ export function ETradeTradingHub({
               flags, and portfolio-aware sizing. */}
           {/* Section nav (issue #69) */}
           <nav className="portfolio-section-nav" style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)", marginTop: "1.25rem" }}>
-            {[
-              ["Positions", "section-positions"],
-              ["Alerts", "section-alerts"],
-              ["Transactions", "section-transactions"],
-              ["Watchlists", "section-watchlists"],
-              ["Orders", "section-orders"],
-              ["Portfolio Risk", "section-portfolio-risk"],
-            ].map(([label, id]) => (
+            {/* Issue #3367: the chips follow the broker being rendered. A chip that
+                scrolls to a section this broker's panel does not render is a dead
+                control, and the list used to be E*TRADE's for every broker. */}
+            {brokerSectionNav(selectedBroker).map(({ label, id }) => (
               <Button
                 variant="secondary"
                 size="sm"
