@@ -1,5 +1,9 @@
 import type { Env } from "../types";
-import { createStoreKv, type DoNamespaceLike } from "./durableKv";
+import {
+  createBucketPorts,
+  isBucketPortsEnabled,
+} from "../data/createBucketPorts";
+import { createStoreKv, type DoNamespaceLike } from "../data/durableKv";
 import { type KvLike } from "./kvResilience";
 
 /**
@@ -48,7 +52,20 @@ interface ApiKeyRecord extends ApiKeyMetadata {
 
 const SECRET_PATTERN = /^cfk_[A-Za-z0-9_-]{43}$/;
 
+/**
+ * Issue #2436 (#1976 step 5e): the residual bucket family's
+ * api-keys store. When BUCKET_PORTS_ENABLED is on, the store
+ * is the family's port composition (src/data/
+ * createBucketPorts.ts, over the SAME SessionStore DO and
+ * kv_store table); when off, this module's direct funnel
+ * composition below is the serving path, unchanged.
+ * Signatures never change either way — existing callers are
+ * untouched.
+ */
 export function apiKeyStore(env: Env): KvLike {
+  if (isBucketPortsEnabled(env)) {
+    return createBucketPorts(env).bucketKv("apiKeys");
+  }
   return createStoreKv({
     namespace: env.SESSION_STORE as unknown as DoNamespaceLike | undefined,
     namespaceName: "api_keys",
