@@ -35,7 +35,7 @@ import {
   type ETradeTokenIdentity,
 } from "../security/etradeOAuth";
 import { codedMessage } from "../outcomes/outcomeAspects";
-import { deliverScreenerToSlackA2A } from "./screenerSlackDelivery";
+import { deliverGatedSlack } from "./gatedSlackDelivery";
 import type { ScreenerRunOutcome } from "./screenerFollowups";
 import {
   formatTraceBlock,
@@ -282,8 +282,10 @@ export async function guardScheduledETradeAuth(
       if (opts.sendSlackAlert) {
         sends.push(opts.sendSlackAlert(text));
       } else {
+        // #3177: system reconnect alert — ungated (no login passed),
+        // master-routed so it no longer depends on cfpay being configured.
         sends.push(
-          deliverScreenerToSlackA2A(opts.env, { text }).then((r) => {
+          deliverGatedSlack(opts.env, { text }).then((r) => {
             if (!r.ok) {
               console.warn("[etradeAuthPreflight] Slack reconnect alert not delivered:", r.error);
             }

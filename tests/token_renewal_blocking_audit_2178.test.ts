@@ -28,8 +28,8 @@ vi.mock("../src/services/etradeAuthPreflight", () => ({
   fireAuthEpisodeAlertOnce: async () => {},
 }));
 
-vi.mock("../src/services/screenerSlackDelivery", () => ({
-  deliverScreenerToSlackA2A: async () => {},
+vi.mock("../src/services/gatedSlackDelivery", () => ({
+  deliverGatedSlack: async () => ({ ok: true }),
 }));
 
 import { autoRenewETradeTokens } from "../src/agents/orchestrator/scheduledCallbacks";

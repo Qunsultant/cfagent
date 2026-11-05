@@ -19,6 +19,7 @@ import {
   createOptionsDiscoveryPorts,
 } from "../../data/createOptionsDiscoveryPorts";
 import { resolveScheduledLogin, type ScreenerExecutionContext } from "./scheduleMaintenance";
+import { deliverGatedSlack } from "../../services/gatedSlackDelivery";
 import { recordBlockingAudit } from "../../security/auditChain";
 import {
   enforceBrokerDispatch,
@@ -245,12 +246,14 @@ export async function autoRenewETradeTokens(ctx: ScheduledCallbacksContext, payl
     // episode flag with the run-time guard) instead of leaving it as
     // a log line nobody reads until six runs have failed.
     const { etradeAuthEpisodeKey, fireAuthEpisodeAlertOnce } = await import("../../services/etradeAuthPreflight");
-    const { deliverScreenerToSlackA2A } = await import("../../services/screenerSlackDelivery");
     await fireAuthEpisodeAlertOnce(
       ctx.agentCtx.storage as any,
       etradeAuthEpisodeKey(userLogin, Date.now()),
       async () => {
-        await deliverScreenerToSlackA2A(ctx.env, {
+        // #3177: system auth alert — ungated (no login passed, the gate
+        // is never consulted), but master-routed so the alert no longer
+        // depends on cfpay being configured. Exact text and dedupe kept.
+        await deliverGatedSlack(ctx.env, {
           text: "⚠️ E*TRADE connection expired — automatic token renewal failed. Reconnect your account in Settings to keep scheduled runs working. Runs stay blocked (quietly) until you reconnect.",
         });
       }

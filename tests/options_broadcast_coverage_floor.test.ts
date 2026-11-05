@@ -28,10 +28,10 @@ import {
 } from "../src/services/screenerFollowups";
 import type { OptionsPartialQualification } from "../src/trading/options/opportunityScanner";
 import { UnifiedOptionsService } from "../src/trading";
-import { deliverScreenerToSlackA2A } from "../src/services/screenerSlackDelivery";
+import { deliverGatedSlack } from "../src/services/gatedSlackDelivery";
 import type { Env } from "../src/types";
 
-const mockDeliverA2A = vi.mocked(deliverScreenerToSlackA2A);
+const mockDeliverGatedSlack = vi.mocked(deliverGatedSlack);
 
 // The stubbed UnifiedOptionsService returns whatever scan its static
 // `scan` field holds; tests set it per case through the mocked binding
@@ -50,13 +50,9 @@ vi.mock("../src/trading", async (importOriginal) => {
   };
 });
 
-vi.mock("../src/services/screenerSlackDelivery", async (importOriginal) => {
-  const actual = (await importOriginal()) as Record<string, unknown>;
-  return {
-    ...actual,
-    deliverScreenerToSlackA2A: vi.fn(async () => ({ ok: true as const })),
-  };
-});
+vi.mock("../src/services/gatedSlackDelivery", () => ({
+  deliverGatedSlack: vi.fn(async () => ({ ok: true as const })),
+}));
 
 class MockKVNamespace {
   private store = new Map<string, string>();
@@ -276,7 +272,7 @@ describe("direct Slack delivery in autonomousOptionsAnalysis", () => {
   const sessionId = "coverage_floor_test_trader";
 
   beforeEach(() => {
-    mockDeliverA2A.mockClear();
+    mockDeliverGatedSlack.mockClear();
     (UnifiedOptionsService as any).scan = null;
     sql = new MockSqlStorage();
     orm = new DatabaseORM(sql);
@@ -326,8 +322,10 @@ describe("direct Slack delivery in autonomousOptionsAnalysis", () => {
   it("below floor sends the degraded notice only — no success text, no report link, no attachments", async () => {
     const res = await runScheduled(partial(), 3);
     expect(res.success).toBe(true);
-    expect(mockDeliverA2A).toHaveBeenCalledTimes(1);
-    const call = mockDeliverA2A.mock.calls[0][1] as Record<string, unknown>;
+    expect(mockDeliverGatedSlack).toHaveBeenCalledTimes(1);
+    const call = mockDeliverGatedSlack.mock.calls[0][1] as Record<string, unknown>;
+    // #3177: the tick gates on the run owner's login.
+    expect(call.userLogin).toBe("coverage_floor_test_trader");
     const text = String(call.text ?? "");
     expect(text).toContain("3 of 100");
     expect(text).toContain("97");
@@ -347,8 +345,8 @@ describe("direct Slack delivery in autonomousOptionsAnalysis", () => {
     const atFloor = partial({ evaluatedCount: 50, consideredCount: 100, coverageErrors: 50, topSkipCount: 50 });
     const res = await runScheduled(atFloor, 50);
     expect(res.success).toBe(true);
-    expect(mockDeliverA2A).toHaveBeenCalledTimes(1);
-    const call = mockDeliverA2A.mock.calls[0][1] as Record<string, unknown>;
+    expect(mockDeliverGatedSlack).toHaveBeenCalledTimes(1);
+    const call = mockDeliverGatedSlack.mock.calls[0][1] as Record<string, unknown>;
     expect(String(call.text ?? "")).toContain("✅ Screen completed");
   });
 
@@ -356,8 +354,8 @@ describe("direct Slack delivery in autonomousOptionsAnalysis", () => {
     const above = partial({ evaluatedCount: 75, consideredCount: 100, coverageErrors: 25, topSkipCount: 25 });
     const res = await runScheduled(above, 75);
     expect(res.success).toBe(true);
-    expect(mockDeliverA2A).toHaveBeenCalledTimes(1);
-    const call = mockDeliverA2A.mock.calls[0][1] as Record<string, unknown>;
+    expect(mockDeliverGatedSlack).toHaveBeenCalledTimes(1);
+    const call = mockDeliverGatedSlack.mock.calls[0][1] as Record<string, unknown>;
     expect(String(call.text ?? "")).toContain("✅ Screen completed");
   });
 
@@ -388,8 +386,8 @@ describe("direct Slack delivery in autonomousOptionsAnalysis", () => {
     expect(res.success).toBe(false);
     expect(res.error).toContain("FAILURE_SCREEN_NO_CONTRACTS_EVALUATED");
     // The only Slack send is the failure notice, never a degraded or success notice.
-    expect(mockDeliverA2A).toHaveBeenCalledTimes(1);
-    const text = String((mockDeliverA2A.mock.calls[0][1] as Record<string, unknown>).text ?? "");
+    expect(mockDeliverGatedSlack).toHaveBeenCalledTimes(1);
+    const text = String((mockDeliverGatedSlack.mock.calls[0][1] as Record<string, unknown>).text ?? "");
     expect(text).toContain("FAILED");
     expect(text).toContain("FAILURE_SCREEN_NO_CONTRACTS_EVALUATED");
     expect(text).not.toContain("degraded");
