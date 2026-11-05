@@ -136,8 +136,10 @@ export const BROKER_CATALOG = {
       detailedQuote: true,
       accounts: true,
       positions: true,
-      // Alpaca exposes no tax-lot endpoint; positions carry cost basis only.
-      positionLots: false,
+      // Issue #3328: Alpaca exposes no tax-lot endpoint, and it does not need
+      // one — FIFO over its account fills derives the lots, and quantity whose
+      // fills predate the retained window is reported as a coverage gap.
+      positionLots: true,
       portfolioRisk: false,
       optionChains: true,
       optionExpireDates: true,

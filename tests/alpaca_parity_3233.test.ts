@@ -62,15 +62,17 @@ describe("declared capabilities match the implementation (#3233)", () => {
     }
   });
 
-  it("states Alpaca's remaining gap, and no longer counts screening as one (#3325)", () => {
-    // #3328 will close positionLots; until then the declaration stays honest.
-    expect(brokerSupports("alpaca", "positionLots")).toBe(false);
-    // #3325: screening is the platform's math on the broker's own quotes, so the
-    // adapter implements it and the declaration says so.
+  it("states what Alpaca now has, and what it still does not (#3325, #3328)", () => {
+    // #3328: lots are derived from fills, so the adapter implements the method.
+    expect(brokerSupports("alpaca", "positionLots")).toBe(true);
+    // #3325: screening is the platform's math on the broker's own quotes.
     expect(brokerSupports("alpaca", "marketScreening")).toBe(true);
     const platform = new AlpacaTradingPlatform(CREDS, undefined, "user@example.com") as any;
-    expect(platform.getPositionLots).toBeUndefined();
+    expect(typeof platform.getPositionLots).toBe("function");
     expect(typeof platform.screenMarkets).toBe("function");
+    // Option ORDER placement is still equity-only in the adapter; #3329 closes
+    // that, and until then the declaration must keep saying what is true.
+    expect(brokerSupports("alpaca", "orderPlace")).toBe(true);
   });
 
   it("states E*TRADE's full support", () => {

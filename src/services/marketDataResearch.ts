@@ -2545,6 +2545,45 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
   }
 
   /**
+   * Issue #3328 (programme #3292): account fills, for tax-lot derivation.
+   *
+   * Alpaca has no lot endpoint, which is why `positionLots` was declared
+   * unsupported. It does expose account activities of type FILL, each carrying
+   * the executed quantity, price and transaction time — enough to derive lots
+   * per symbol without inventing anything. `page_size=100` is the documented
+   * maximum; a caller that needs more pages asks again with a symbol filter.
+   *
+   * A failed read is reported as a failure. An empty list means "no fills in
+   * the retained window", which the lot deriver states as unmatched quantity
+   * rather than presenting a zero-cost lot.
+   */
+  async getFills(symbol?: string): Promise<{ success: boolean; fills?: any[]; message?: string; httpStatus?: number }> {
+    if (!this.isConfigured()) {
+      return {
+        success: false,
+        message: "Alpaca Trading error: ALPACA_API_KEY_ID and ALPACA_API_SECRET_KEY are required.",
+      };
+    }
+
+    try {
+      const query = new URLSearchParams({ page_size: "100" });
+      const res = await fetch(`${this.getTradingUrl()}/v2/account/activities/FILL?${query.toString()}`, {
+        headers: this.getHeaders(),
+      });
+      const data = (await res.json().catch(() => ([]))) as any;
+      if (res.ok && Array.isArray(data)) {
+        const rows = symbol
+          ? data.filter((row) => String(row?.symbol ?? "").toUpperCase() === symbol.toUpperCase())
+          : data;
+        return { success: true, fills: rows };
+      }
+      return { success: false, httpStatus: res.status, message: data?.message || "Failed to fetch Alpaca fills" };
+    } catch (err: any) {
+      return { success: false, message: err.message || "Network error" };
+    }
+  }
+
+  /**
    * Real Alpaca Trading v2: Get Orders
    */
   async getOrders(status: "open" | "closed" | "all" = "open"): Promise<{ success: boolean; orders?: any[]; message?: string }> {
