@@ -310,7 +310,7 @@ export function AlpacaBrokerPanel({ activeEnv }: AlpacaBrokerPanelProps) {
         </BrokerSurfaceGate>
       </Card>
 
-      <Card>
+      <Card id="section-positions" className="ui-anchor">
         <BrokerSurfaceGate broker="alpaca" surface="positions">
           {positions.state === "loading" && <Spinner size="sm" label="Loading Alpaca positions" />}
           {positions.state === "error" && <ReadFailure code={positions.code} message={positions.message} />}
@@ -327,7 +327,7 @@ export function AlpacaBrokerPanel({ activeEnv }: AlpacaBrokerPanelProps) {
       </Card>
 
       {/* Issue #3359: the broker's own order history. */}
-      <Card>
+      <Card id="section-order-history" className="ui-anchor">
         <Flex align="center" gap="2">
           <h4>Order history</h4>
         </Flex>
@@ -355,7 +355,7 @@ export function AlpacaBrokerPanel({ activeEnv }: AlpacaBrokerPanelProps) {
       </Card>
 
       {/* Issue #3359: the broker's own account activity, in its own vocabulary. */}
-      <Card>
+      <Card id="section-activity" className="ui-anchor">
         <Flex align="center" gap="2">
           <h4>Account activity</h4>
         </Flex>
