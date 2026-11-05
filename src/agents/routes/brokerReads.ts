@@ -40,6 +40,8 @@ export interface BrokerReadsRouteContext {
 const UNSUPPORTED_CODE = "provider_unsupported";
 const STATUS_FAILED_CODE = "BROKER_STATUS_FAILED";
 const QUOTE_FAILED_CODE = "BROKER_QUOTE_FAILED";
+const HISTORY_FAILED_CODE = "BROKER_ORDER_HISTORY_FAILED";
+const ACTIVITY_FAILED_CODE = "BROKER_ACTIVITY_FAILED";
 const FEATURE_DISABLED_CODE = "FEATURE_DISABLED";
 
 function unsupportedResponse(broker: string, capability: string): Response {
@@ -77,7 +79,14 @@ export async function handleBrokerReadsRoutes(
   const wantsPositions = path.endsWith("/broker/positions");
   const wantsStatus = path.endsWith("/broker/status");
   const wantsQuote = path.endsWith("/broker/quote");
-  if (!wantsAccounts && !wantsPositions && !wantsStatus && !wantsQuote) return null;
+  // Issue #3359: account history. `/broker/orders` is the stored-draft route
+  // (brokerOrders.ts); these two are reads of the BROKER's own records and are
+  // deliberately distinct paths so a draft can never be mistaken for an order
+  // at the venue.
+  const wantsOrderHistory = path.endsWith("/broker/orders/history");
+  const wantsActivity = path.endsWith("/broker/activities");
+  if (!wantsAccounts && !wantsPositions && !wantsStatus && !wantsQuote && !wantsOrderHistory && !wantsActivity)
+    return null;
   if (request.method !== "GET") return null;
 
   // Flag first: a disabled surface must not touch the broker at all.
@@ -96,6 +105,14 @@ export async function handleBrokerReadsRoutes(
     if (!brokerSupports(broker, operation)) {
       return unsupportedResponse(broker, wantsAccounts ? "Accounts" : "Positions");
     }
+  }
+
+  // Issue #3359: history is a declared capability, like every other read.
+  if (wantsOrderHistory && !brokerSupports(broker, "orderHistory")) {
+    return unsupportedResponse(broker, "Order history");
+  }
+  if (wantsActivity && !brokerSupports(broker, "accountActivity")) {
+    return unsupportedResponse(broker, "Account activity");
   }
 
   // Issue #3293: validate the quote request before constructing the broker,
@@ -127,6 +144,55 @@ export async function handleBrokerReadsRoutes(
     }
     const result = await platform.getPositions();
     return Response.json({ broker, environment, result });
+  }
+
+  // Issue #3359: the broker's own order history. An unconfigured or failed read
+  // is a named failure — an empty list would read as "no orders", which is a
+  // different fact entirely.
+  if (wantsOrderHistory) {
+    if (typeof platform.getOrderHistory !== "function") {
+      return unsupportedResponse(broker, "Order history");
+    }
+    const statusParam = String(url.searchParams.get("status") ?? "open").trim().toLowerCase();
+    const status = statusParam === "closed" || statusParam === "all" ? statusParam : "open";
+    try {
+      const orders = await platform.getOrderHistory(status);
+      return Response.json({ broker, environment, status, orders });
+    } catch (error) {
+      const reason = (error as Error)?.message || "the order-history read failed";
+      return Response.json(
+        {
+          code: HISTORY_FAILED_CODE,
+          broker,
+          message: `The selected broker (${broker}) could not list its orders: ${reason}.`,
+          retryable: true,
+        },
+        { status: 502 },
+      );
+    }
+  }
+
+  // Issue #3359: the broker's own account activity, in its own vocabulary.
+  if (wantsActivity) {
+    if (typeof platform.getAccountActivity !== "function") {
+      return unsupportedResponse(broker, "Account activity");
+    }
+    const activityType = String(url.searchParams.get("type") ?? "").trim();
+    try {
+      const activities = await platform.getAccountActivity(activityType || undefined);
+      return Response.json({ broker, environment, activities });
+    } catch (error) {
+      const reason = (error as Error)?.message || "the activity read failed";
+      return Response.json(
+        {
+          code: ACTIVITY_FAILED_CODE,
+          broker,
+          message: `The selected broker (${broker}) could not list account activity: ${reason}.`,
+          retryable: true,
+        },
+        { status: 502 },
+      );
+    }
   }
 
   // Shared by the two reads below; placed after the position branch so the

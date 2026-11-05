@@ -1947,7 +1947,15 @@ export interface BrokerRemoteOrder {
   details?: string;
   orderType: string;
   orderValue?: number;
-  status: "OPEN" | "EXECUTED" | "CANCELLED" | "INDIVIDUAL_FILLS" | "REJECTED";
+  /**
+   * Issue #3359: `UNKNOWN` is a real state, not a placeholder. Alpaca returns
+   * statuses the platform does not model (suspended, pending_replace, replaced);
+   * mapping one to OPEN or REJECTED would invent a fact, so the row keeps its
+   * raw status (`rawStatus`) and says it is unrecognised.
+   */
+  status: "OPEN" | "EXECUTED" | "CANCELLED" | "INDIVIDUAL_FILLS" | "REJECTED" | "UNKNOWN";
+  /** The broker's own status word, carried verbatim for audit and display. */
+  rawStatus?: string;
   placedTime?: number;
   executedTime?: number;
   orderTerm?: string;
@@ -1957,6 +1965,27 @@ export interface BrokerRemoteOrder {
   orderAction?: string;
   quantity?: number;
   symbol?: string;
+}
+
+/**
+ * Issue #3359: one account-activity row, in the broker's own vocabulary.
+ *
+ * Deliberately NOT `BrokerTransaction`: forcing Alpaca's activities (FILL, DIV,
+ * FEE, ...) into E*TRADE's transaction model would either drop fields or invent
+ * them. A neutral activity keeps the broker's `activityType` word and carries
+ * only what the row actually has.
+ */
+export interface BrokerActivity {
+  activityId: string;
+  /** The broker's own activity type word (e.g. FILL, DIV, FEE). */
+  activityType: string;
+  /** Epoch milliseconds. */
+  activityDate: number;
+  symbol?: string;
+  quantity?: number;
+  price?: number;
+  netAmount?: number;
+  orderId?: string;
 }
 
 export interface BrokerCancelOrderResult {

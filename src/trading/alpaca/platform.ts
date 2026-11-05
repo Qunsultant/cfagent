@@ -4,7 +4,7 @@
  * Implements ITradingPlatform for Alpaca Trading API v2
  */
 
-import type { Env, BrokerQuote, BrokerAccount, BrokerPosition, BrokerPositionLot, BrokerOrderDraft, BrokerOrderExecutionResult, BrokerStatus, BrokerOptionChain, BrokerOptionContract, BrokerOptionExpireDate, StockScreenerFilter, StockScreenResult } from "../../types";
+import type { Env, BrokerQuote, BrokerAccount, BrokerPosition, BrokerPositionLot, BrokerOrderDraft, BrokerOrderExecutionResult, BrokerStatus, BrokerOptionChain, BrokerOptionContract, BrokerOptionExpireDate, StockScreenerFilter, StockScreenResult, BrokerRemoteOrder, BrokerActivity } from "../../types";
 import type { DatabaseORM } from "../../orm";
 import type { ITradingPlatform, OrderPreviewParams, PlaceOrderParams } from "../interfaces";
 import { BROKER_CATALOG, type TradingType } from "../brokerCatalog";
@@ -111,6 +111,84 @@ function finiteAlpacaNumber(value: unknown, field: string): number {
     throw new Error(`Alpaca returned an unreadable ${field} value.`);
   }
   return n;
+}
+
+/**
+ * Issue #3359: Alpaca's order statuses, mapped once, totally.
+ *
+ * The neutral status is the platform's vocabulary; `rawStatus` carries Alpaca's
+ * own word alongside it, so nothing is lost and no display has to guess. A
+ * status the platform does not model becomes `UNKNOWN` — mapping an unfamiliar
+ * value onto OPEN or REJECTED would invent a fact about the user's order.
+ */
+const ALPACA_OPEN_ORDER_STATUSES = new Set([
+  "new",
+  "accepted",
+  "pending_new",
+  "accepted_for_bidding",
+  "held",
+  "calculated",
+  "pending_cancel",
+  "pending_replace",
+]);
+
+export function mapAlpacaOrderStatus(raw: unknown): BrokerRemoteOrder["status"] {
+  const status = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+  if (ALPACA_OPEN_ORDER_STATUSES.has(status)) return "OPEN";
+  if (status === "filled") return "EXECUTED";
+  if (status === "partially_filled") return "INDIVIDUAL_FILLS";
+  if (status === "canceled" || status === "cancelled" || status === "expired" || status === "replaced") {
+    return "CANCELLED";
+  }
+  if (status === "rejected") return "REJECTED";
+  return "UNKNOWN";
+}
+
+/** One Alpaca order as a neutral remote-order row. An id-less row is a bad response, not a row. */
+export function mapAlpacaOrderHistoryRow(raw: any): BrokerRemoteOrder {
+  const orderId = typeof raw?.id === "string" && raw.id ? raw.id : "";
+  if (!orderId) throw new Error("Alpaca returned an order without an id.");
+  const quantity = Number(raw?.qty);
+  const limitPrice = Number(raw?.limit_price);
+  const placedTime = Date.parse(String(raw?.submitted_at ?? ""));
+  return {
+    orderId,
+    orderType: typeof raw?.type === "string" ? raw.type : "unknown",
+    status: mapAlpacaOrderStatus(raw?.status),
+    rawStatus: typeof raw?.status === "string" ? raw.status : undefined,
+    ...(Number.isFinite(placedTime) ? { placedTime } : {}),
+    ...(Number.isFinite(quantity) ? { quantity } : {}),
+    ...(Number.isFinite(limitPrice) && raw?.limit_price !== null ? { limitPrice } : {}),
+    ...(typeof raw?.symbol === "string" && raw.symbol ? { symbol: raw.symbol.toUpperCase() } : {}),
+    ...(typeof raw?.side === "string" ? { orderAction: raw.side.toUpperCase() } : {}),
+  };
+}
+
+/**
+ * One Alpaca account activity as a neutral row. The activity type stays in
+ * Alpaca's words (FILL, DIV, FEE, ...); the surface shows them as they are.
+ * Dates arrive as `transaction_time` for trades and `date` for everything else.
+ */
+export function mapAlpacaActivityRow(raw: any): BrokerActivity {
+  const activityId = typeof raw?.id === "string" && raw.id ? raw.id : "";
+  if (!activityId) throw new Error("Alpaca returned an activity without an id.");
+  const activityType = typeof raw?.activity_type === "string" ? raw.activity_type : "unknown";
+  const parsed = Date.parse(String(raw?.transaction_time ?? raw?.date ?? ""));
+  const quantity = Number(raw?.qty);
+  const price = Number(raw?.price);
+  const netAmount = Number(raw?.net_amount);
+  return {
+    activityId,
+    activityType,
+    // An unparseable date is stated as epoch 0 only when the broker gave none;
+    // a malformed one is a bad response.
+    activityDate: Number.isFinite(parsed) ? parsed : 0,
+    ...(typeof raw?.symbol === "string" && raw.symbol ? { symbol: raw.symbol.toUpperCase() } : {}),
+    ...(Number.isFinite(quantity) ? { quantity } : {}),
+    ...(Number.isFinite(price) ? { price } : {}),
+    ...(Number.isFinite(netAmount) ? { netAmount } : {}),
+    ...(typeof raw?.order_id === "string" && raw.order_id ? { orderId: raw.order_id } : {}),
+  };
 }
 
 function mapAlpacaAccount(raw: any, isLive: boolean): BrokerAccount {
@@ -557,6 +635,38 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
    * it carries the coverage the array-returning contract method cannot, so a
    * caller can say "3 of 5 shares are explained by retained fills".
    */
+  /**
+   * Issue #3359: the broker's own order history, mapped to neutral rows.
+   *
+   * The read is gated the same way accounts and positions are: unconfigured
+   * credentials throw a business error rather than returning an empty list that
+   * would read as "you have no orders".
+   */
+  async getOrderHistory(status: "open" | "closed" | "all" = "open"): Promise<BrokerRemoteOrder[]> {
+    await this.ready();
+    if (!this.alpacaData.isConfigured()) {
+      throw new Error("Alpaca credentials are not configured; order history is unavailable.");
+    }
+    const res = await this.alpacaData.getOrders(status);
+    if (!res.success || !Array.isArray(res.orders)) {
+      throw new Error(mapAlpacaFailureToBusiness(undefined, "account"));
+    }
+    return res.orders.map(mapAlpacaOrderHistoryRow);
+  }
+
+  /** Issue #3359: the broker's own account activities, in its own vocabulary. */
+  async getAccountActivity(activityType?: string): Promise<BrokerActivity[]> {
+    await this.ready();
+    if (!this.alpacaData.isConfigured()) {
+      throw new Error("Alpaca credentials are not configured; account activity is unavailable.");
+    }
+    const res = await this.alpacaData.getAccountActivities(activityType);
+    if (!res.success || !Array.isArray(res.activities)) {
+      throw new Error(mapAlpacaFailureToBusiness(res.httpStatus, "account"));
+    }
+    return res.activities.map(mapAlpacaActivityRow);
+  }
+
   async derivePositionLots(positionId: string | number): Promise<DerivedLots> {
     await this.ready();
     const symbol = String(positionId ?? "").trim().toUpperCase();
