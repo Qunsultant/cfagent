@@ -29,6 +29,16 @@
  * HTTP status. errorMessageForStatus maps statuses to FIXED
  * caller-facing strings; server error bodies are never rendered — they
  * can carry internal detail.
+ *
+ * Issue #3256 (sub-issue of #3241) — Signup → Trial onboarding flow.
+ * The same contract extends to the new calls: setupAccount (POST
+ * /api/platform/accounts/setup, idempotent, session-scoped), the
+ * server-side onboarding state (GET/POST
+ * /api/platform/onboarding/state), the live E*TRADE status (GET
+ * /api/etrade/oauth/status), and the self account view (GET
+ * /api/platform/accounts/self, the summary's subscription source).
+ * None of these sends an identity header or a client-supplied
+ * tenantId; the session cookie is the identity throughout.
  */
 import { withCsrfInit } from "./apiFetch";
 
@@ -57,6 +67,49 @@ export interface SavePreferencesInput {
   tenantId: string;
   digestEnabled: boolean;
   welcomeEnabled: boolean;
+}
+
+/** One onboarding-state row, as the #3256 self-only routes return it. */
+export interface OnboardingStateView {
+  userLogin: string;
+  tenantId: string | null;
+  currentStep: number;
+  completedAtMs: number | null;
+  trialPlanId: string | null;
+  trialStartedAtMs: number | null;
+  updatedAtMs: number;
+}
+
+/** Caller-supplied save fields only — identity is never sent (the server stamps it). */
+export interface SaveOnboardingStateInput {
+  currentStep: number;
+  completed?: boolean;
+  trialPlanId?: string;
+}
+
+/** Live E*TRADE OAuth status: `authenticated` is the validity verdict. */
+export interface ETradeStatusView {
+  authenticated: boolean;
+  environment?: string;
+}
+
+/** One subscription row as the self account view exposes it. */
+export interface AccountSubscriptionView {
+  id: string;
+  planId: string;
+  provider: string;
+  providerStatus: string | null;
+  status: string;
+  periodStartMs: number;
+  periodEndMs: number;
+  canceledAtMs: number | null;
+}
+
+/** The self account view: identity plus subscription rows (the summary's trial source). */
+export interface AccountSelfView {
+  identity: PlatformIdentityView;
+  subscriptions: AccountSubscriptionView[];
+  catalogueAvailable: boolean;
 }
 
 export class FirstRunApiError extends Error {
@@ -91,6 +144,21 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
     res = await globalThis.fetch(`${BASE}${path}`, withCsrfInit({
+      ...init,
+      headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
+    }));
+  } catch {
+    throw new FirstRunApiError(0);
+  }
+  if (!res.ok) throw new FirstRunApiError(res.status);
+  return (await res.json()) as T;
+}
+
+/** Same contract as call(), for routes outside the commercial BASE. */
+async function callAbsolute<T>(path: string, init?: RequestInit): Promise<T> {
+  let res: Response;
+  try {
+    res = await globalThis.fetch(path, withCsrfInit({
       ...init,
       headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
     }));
@@ -153,6 +221,147 @@ function parsePreferences(value: unknown): NotificationPreferences {
 /** Read-only identity + tier for the first-run account step (#2219). */
 export async function fetchPlatformIdentity(): Promise<PlatformIdentityView> {
   return parseIdentity(await call<unknown>("/identity"));
+}
+
+function parseOnboardingState(value: unknown): OnboardingStateView | null {
+  if (!isRecord(value)) throw new FirstRunApiError(0);
+  // The routes return the row under a `state` envelope; a null
+  // envelope value means the flow never started.
+  const state = "state" in value ? value.state : value;
+  if (state === null) return null;
+  if (!isRecord(state)) throw new FirstRunApiError(0);
+  if (
+    typeof state.userLogin !== "string" ||
+    state.userLogin.length === 0 ||
+    (state.tenantId !== null && typeof state.tenantId !== "string") ||
+    typeof state.currentStep !== "number" ||
+    !Number.isInteger(state.currentStep) ||
+    state.currentStep < 1 ||
+    state.currentStep > 5 ||
+    (state.completedAtMs !== null && typeof state.completedAtMs !== "number") ||
+    (state.trialPlanId !== null && typeof state.trialPlanId !== "string") ||
+    (state.trialStartedAtMs !== null && typeof state.trialStartedAtMs !== "number") ||
+    typeof state.updatedAtMs !== "number"
+  ) {
+    throw new FirstRunApiError(0);
+  }
+  return {
+    userLogin: state.userLogin,
+    tenantId: state.tenantId as string | null,
+    currentStep: state.currentStep,
+    completedAtMs: state.completedAtMs as number | null,
+    trialPlanId: state.trialPlanId as string | null,
+    trialStartedAtMs: state.trialStartedAtMs as number | null,
+    updatedAtMs: state.updatedAtMs,
+  };
+}
+
+function parseETradeStatus(value: unknown): ETradeStatusView {
+  if (!isRecord(value)) throw new FirstRunApiError(0);
+  if (
+    typeof value.authenticated !== "boolean" ||
+    (value.environment !== undefined && typeof value.environment !== "string")
+  ) {
+    throw new FirstRunApiError(0);
+  }
+  return {
+    authenticated: value.authenticated,
+    environment: value.environment as string | undefined,
+  };
+}
+
+function parseAccountSelf(value: unknown): AccountSelfView {
+  if (!isRecord(value)) throw new FirstRunApiError(0);
+  const identity = parseIdentity(value.identity);
+  if (!Array.isArray(value.subscriptions)) throw new FirstRunApiError(0);
+  const subscriptions: AccountSubscriptionView[] = value.subscriptions.map((row: unknown) => {
+    if (!isRecord(row)) throw new FirstRunApiError(0);
+    if (
+      typeof row.id !== "string" ||
+      typeof row.planId !== "string" ||
+      typeof row.provider !== "string" ||
+      (row.providerStatus !== null && typeof row.providerStatus !== "string") ||
+      typeof row.status !== "string" ||
+      typeof row.periodStartMs !== "number" ||
+      typeof row.periodEndMs !== "number" ||
+      (row.canceledAtMs !== null && typeof row.canceledAtMs !== "number")
+    ) {
+      throw new FirstRunApiError(0);
+    }
+    return {
+      id: row.id,
+      planId: row.planId,
+      provider: row.provider,
+      providerStatus: row.providerStatus as string | null,
+      status: row.status,
+      periodStartMs: row.periodStartMs,
+      periodEndMs: row.periodEndMs,
+      canceledAtMs: row.canceledAtMs as number | null,
+    };
+  });
+  return {
+    identity,
+    subscriptions,
+    catalogueAvailable: value.catalogueAvailable === true,
+  };
+}
+
+/**
+ * Create the account for the verified session (#3256 step 1).
+ * Idempotent server-side: an existing account returns created
+ * false. The session cookie is the identity; no identity header
+ * and no client-supplied tenant are sent.
+ */
+export async function setupAccount(): Promise<{ created: boolean; identity: PlatformIdentityView }> {
+  const body = await callAbsolute<unknown>("/api/platform/accounts/setup", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+  if (!isRecord(body) || typeof body.created !== "boolean") throw new FirstRunApiError(0);
+  return { created: body.created, identity: parseIdentity(body.identity) };
+}
+
+/** Read the server-side onboarding state; null when the flow never started (#3256). */
+export async function fetchOnboardingState(): Promise<OnboardingStateView | null> {
+  return parseOnboardingState(await callAbsolute<unknown>("/api/platform/onboarding/state"));
+}
+
+/**
+ * Save the onboarding step (and completion / trial plan). Only the
+ * caller-supplied fields are sent — userLogin and tenantId are
+ * stamped server-side from the verified session.
+ */
+export async function saveOnboardingState(
+  input: SaveOnboardingStateInput,
+): Promise<OnboardingStateView | null> {
+  const body: Record<string, unknown> = { currentStep: input.currentStep };
+  if (input.completed !== undefined) body.completed = input.completed;
+  if (input.trialPlanId !== undefined) body.trialPlanId = input.trialPlanId;
+  return parseOnboardingState(
+    await callAbsolute<unknown>("/api/platform/onboarding/state", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  );
+}
+
+/** Live E*TRADE OAuth status for the verified session (#3256 step 3). */
+export async function fetchETradeStatus(): Promise<ETradeStatusView> {
+  return parseETradeStatus(await callAbsolute<unknown>("/api/etrade/oauth/status"));
+}
+
+/**
+ * Navigate to the real E*TRADE OAuth start (#3256 step 3). The
+ * caller persists the onboarding step first, so the flow resumes
+ * at the saved step after the OAuth callback returns to the hub.
+ */
+export function startETradeOAuth(): void {
+  globalThis.location.assign("/api/etrade/oauth/start?mode=redirect");
+}
+
+/** Self account view with subscription rows — the summary's trial source (#3256 step 5). */
+export async function fetchAccountSelf(): Promise<AccountSelfView> {
+  return parseAccountSelf(await callAbsolute<unknown>("/api/platform/accounts/self"));
 }
 
 /** Read notification preferences through the existing lifecycle route. */
