@@ -2649,6 +2649,46 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
   }
 
   /**
+   * Issue #3359: account activities, in the broker's own vocabulary.
+   *
+   * `GET /v2/account/activities` returns every activity type Alpaca settles
+   * (FILL, DIV, FEE, ...); the typed form (`/activities/FILL`, used by getFills
+   * for lot derivation) filters to one. Nothing is mapped here: the caller
+   * decides what a consumer needs, and an empty list means "none in the retained
+   * window", which the surface states rather than rendering a zero row.
+   */
+  async getAccountActivities(
+    activityType?: string
+  ): Promise<{ success: boolean; activities?: any[]; message?: string; httpStatus?: number }> {
+    if (!this.isConfigured()) {
+      return {
+        success: false,
+        message: "Alpaca Trading error: ALPACA_API_KEY_ID and ALPACA_API_SECRET_KEY are required.",
+      };
+    }
+
+    try {
+      const type = typeof activityType === "string" ? activityType.trim().toUpperCase() : "";
+      const path = type ? `/v2/account/activities/${encodeURIComponent(type)}` : "/v2/account/activities";
+      const query = new URLSearchParams({ page_size: "100" });
+      const res = await fetch(`${this.getTradingUrl()}${path}?${query.toString()}`, {
+        headers: this.getHeaders(),
+      });
+      const data = (await res.json().catch(() => ([]))) as any;
+      if (res.ok && Array.isArray(data)) {
+        return { success: true, activities: data };
+      }
+      return {
+        success: false,
+        httpStatus: res.status,
+        message: data?.message || "Failed to fetch Alpaca activities",
+      };
+    } catch (err: any) {
+      return { success: false, message: err.message || "Network error" };
+    }
+  }
+
+  /**
    * Real Alpaca Trading v2: Get Orders
    */
   async getOrders(status: "open" | "closed" | "all" = "open"): Promise<{ success: boolean; orders?: any[]; message?: string }> {

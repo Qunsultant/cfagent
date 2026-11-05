@@ -53,6 +53,103 @@ interface StatusPayload {
   status: BrokerStatus;
 }
 
+/**
+ * Issue #3359: the account-history reads. Both are the broker's own records -
+ * order history from `GET /v2/orders`, activity from `GET /v2/account/activities`
+ * - mapped by the adapter onto neutral rows and scoped here by the selection.
+ */
+interface OrderHistoryPayload {
+  broker: string;
+  environment: TradingEnvironment;
+  status: string;
+  orders: Array<{
+    orderId: string | number;
+    orderType: string;
+    status: string;
+    rawStatus?: string;
+    placedTime?: number;
+    quantity?: number;
+    limitPrice?: number;
+    symbol?: string;
+    orderAction?: string;
+  }>;
+}
+
+interface ActivityPayload {
+  broker: string;
+  environment: TradingEnvironment;
+  activities: Array<{
+    activityId: string;
+    activityType: string;
+    activityDate: number;
+    symbol?: string;
+    quantity?: number;
+    price?: number;
+    netAmount?: number;
+    orderId?: string;
+  }>;
+}
+
+function fmtWhen(value: number | undefined): string {
+  if (!value || !Number.isFinite(value)) return "-";
+  return new Date(value).toLocaleString();
+}
+
+function fmtNum(value: number | undefined): string {
+  return value === undefined || !Number.isFinite(value) ? "-" : String(value);
+}
+
+function fmtMoney(value: number | undefined): string {
+  return value === undefined || !Number.isFinite(value)
+    ? "-"
+    : value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+const ORDER_HISTORY_COLUMNS = [
+  { key: "symbol", header: "Symbol", render: (row: OrderHistoryPayload["orders"][number]) => row.symbol ?? "-" },
+  { key: "side", header: "Side", render: (row: OrderHistoryPayload["orders"][number]) => row.orderAction ?? "-" },
+  {
+    key: "qty",
+    header: "Qty",
+    align: "right" as const,
+    render: (row: OrderHistoryPayload["orders"][number]) => fmtNum(row.quantity),
+  },
+  { key: "type", header: "Type", render: (row: OrderHistoryPayload["orders"][number]) => row.orderType },
+  {
+    key: "status",
+    header: "Status",
+    // An unrecognised broker status is shown in the broker's own words, so the
+    // table never implies a state the platform did not establish.
+    render: (row: OrderHistoryPayload["orders"][number]) =>
+      row.status === "UNKNOWN" && row.rawStatus ? `UNKNOWN (${row.rawStatus})` : row.status,
+  },
+  { key: "placed", header: "Placed", render: (row: OrderHistoryPayload["orders"][number]) => fmtWhen(row.placedTime) },
+];
+
+const ACTIVITY_COLUMNS = [
+  { key: "when", header: "Date", render: (row: ActivityPayload["activities"][number]) => fmtWhen(row.activityDate) },
+  { key: "type", header: "Type", render: (row: ActivityPayload["activities"][number]) => row.activityType },
+  { key: "symbol", header: "Symbol", render: (row: ActivityPayload["activities"][number]) => row.symbol ?? "-" },
+  {
+    key: "qty",
+    header: "Qty",
+    align: "right" as const,
+    render: (row: ActivityPayload["activities"][number]) => fmtNum(row.quantity),
+  },
+  {
+    key: "price",
+    header: "Price",
+    align: "right" as const,
+    render: (row: ActivityPayload["activities"][number]) => fmtMoney(row.price),
+  },
+  {
+    key: "net",
+    header: "Net",
+    align: "right" as const,
+    render: (row: ActivityPayload["activities"][number]) => fmtMoney(row.netAmount),
+  },
+];
+
 const ACCOUNT_COLUMNS = [
   { key: "accountDesc", header: "Account", render: (a: BrokerAccount) => a.accountDesc },
   { key: "accountType", header: "Type", render: (a: BrokerAccount) => a.accountType },
@@ -128,6 +225,10 @@ export function AlpacaBrokerPanel({ activeEnv }: AlpacaBrokerPanelProps) {
   const accounts = useBrokerRead<AccountsPayload>("/broker/accounts");
   const positions = useBrokerRead<PositionsPayload>("/broker/positions");
   const status = useBrokerRead<StatusPayload>("/broker/status");
+  // Issue #3359: the broker's own history reads. `status=all` because a
+  // reconciliation view needs closed orders as much as open ones.
+  const orderHistory = useBrokerRead<OrderHistoryPayload>("/broker/orders/history?status=all");
+  const activity = useBrokerRead<ActivityPayload>("/broker/activities");
 
   const environment =
     accounts.state === "ready"
@@ -224,6 +325,74 @@ export function AlpacaBrokerPanel({ activeEnv }: AlpacaBrokerPanelProps) {
           )}
         </BrokerSurfaceGate>
       </Card>
+
+      {/* Issue #3359: the broker's own order history. */}
+      <Card>
+        <Flex align="center" gap="2">
+          <h4>Order history</h4>
+        </Flex>
+        <BrokerSurfaceGate broker="alpaca" surface="orderHistory">
+          {orderHistory.state === "loading" && <Spinner size="sm" label="Loading Alpaca order history" />}
+          {orderHistory.state === "error" && (
+            <ReadFailure code={orderHistory.code} message={orderHistory.message} />
+          )}
+          {orderHistory.state === "ready" && (
+            <Table
+              caption="Alpaca order history"
+              columns={ORDER_HISTORY_COLUMNS}
+              rows={orderHistory.data.orders ?? []}
+              rowKey={(row) => String(row.orderId)}
+              empty={
+                <EmptyState
+                  title="No Alpaca orders"
+                  description="The broker returned no orders in its retained window."
+                  framed
+                />
+              }
+            />
+          )}
+        </BrokerSurfaceGate>
+      </Card>
+
+      {/* Issue #3359: the broker's own account activity, in its own vocabulary. */}
+      <Card>
+        <Flex align="center" gap="2">
+          <h4>Account activity</h4>
+        </Flex>
+        <BrokerSurfaceGate broker="alpaca" surface="activity">
+          {activity.state === "loading" && <Spinner size="sm" label="Loading Alpaca account activity" />}
+          {activity.state === "error" && <ReadFailure code={activity.code} message={activity.message} />}
+          {activity.state === "ready" && (
+            <Table
+              caption="Alpaca account activity"
+              columns={ACTIVITY_COLUMNS}
+              rows={activity.data.activities ?? []}
+              rowKey={(row) => row.activityId}
+              empty={
+                <EmptyState
+                  title="No Alpaca activity"
+                  description="The broker returned no activity in its retained window."
+                  framed
+                />
+              }
+            />
+          )}
+        </BrokerSurfaceGate>
+      </Card>
+
+      {/* Issue #3359: the two surfaces Alpaca does not serve. The gate renders the
+          catalogued, named refusal; these children never mount. */}
+      <BrokerSurfaceGate broker="alpaca" surface="alerts">
+        <Card>
+          <h4>Alerts</h4>
+        </Card>
+      </BrokerSurfaceGate>
+
+      <BrokerSurfaceGate broker="alpaca" surface="watchlists">
+        <Card>
+          <h4>Watchlists</h4>
+        </Card>
+      </BrokerSurfaceGate>
     </Stack>
   );
 }

@@ -50,12 +50,22 @@ describe("panel availability is derived from the catalog (#2853)", () => {
     expect(availablePanels("etrade")).toEqual([...BROKER_PANEL_SURFACES]);
   });
 
-  it("gives Alpaca every surface this build exposes, because the catalog says so", () => {
-    // The catalogue, not this test, is the authority: Alpaca declares
-    // accounts, positions, preview+place and both options reads. Its two
-    // real gaps (positionLots, marketScreening) are not panel surfaces.
-    expect(availablePanels("alpaca")).toEqual([...BROKER_PANEL_SURFACES]);
+  it("gives Alpaca every surface it declares, and names the two it does not (#3359)", () => {
+    // The catalogue, not this test, is the authority. Since #3359 the account
+    // history surfaces are part of the contract, so Alpaca's answer is no longer
+    // "everything": it serves order history and activity from its own API, and
+    // declares alerts and watchlists absent. Both are named, not blank.
+    expect(availablePanels("alpaca")).toEqual(
+      BROKER_PANEL_SURFACES.filter((surface) => surface !== "alerts" && surface !== "watchlists"),
+    );
     expect(panelAvailability("alpaca", "options").available).toBe(true);
+
+    for (const surface of ["alerts", "watchlists"] as const) {
+      const gap = panelAvailability("alpaca", surface);
+      expect(gap.available, surface).toBe(false);
+      expect(gap.code).toBe(BROKER_UNAVAILABLE_CODE);
+      expect(gap.message).toContain("Alpaca");
+    }
   });
 
   it("produces a coded, named refusal when the catalog says the broker cannot", () => {
