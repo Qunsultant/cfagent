@@ -64,6 +64,7 @@ const PRO_PLAN: SellingPlanInput = {
   priceUSD: 10,
   periodDays: 30,
   includedRuns: 0,
+  trialDays: null,
   active: true,
 };
 
