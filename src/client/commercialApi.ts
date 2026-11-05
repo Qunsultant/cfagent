@@ -248,6 +248,21 @@ export const subscriptionPurchase = (body: {
   post("/subscription/purchase", body);
 export const subscriptionCancel = (): Promise<{ userId: string; canceled: SubscriptionView[]; accessThroughMs: number | null }> =>
   post("/subscription/cancel", {});
+/**
+ * Issue #3243 — start a $0 trial subscription (no payment taken).
+ * The server creates a trialing row and grants the plan's
+ * included runs; the response carries the trial end and the
+ * outcome-encoded trial message.
+ */
+export const subscriptionTrial = (body: {
+  planId: string;
+}): Promise<{
+  subscription: SubscriptionView;
+  account: CommercialAccountView;
+  effectiveTier: string;
+  trialEndsAtMs: number;
+  message: string;
+}> => post("/subscription/trial", body);
 
 /** Split a comma-separated symbols field into a clean list. */
 export function parseSymbols(input: string): string[] {

@@ -1564,6 +1564,23 @@ ALTER TABLE agent_commercial_accounts ADD COLUMN unlimited_free_expires_at_ms IN
 `,
 };
 
+/**
+ * Migration 0041 — trial days on subscription plans (#3243,
+ * slice 3 of #3241). One nullable column: how many days a
+ * trial of the plan runs, as OPERATOR DATA. A null/absent
+ * trialDays means the plan offers no trial; no trial length
+ * is hardcoded anywhere. Additive only (nullable INTEGER,
+ * no backfill): existing plans keep no trial. Portable
+ * subset: ALTER TABLE only, no params, no dialect date
+ * functions. NOTE: 0040 landed first (#3267); 0041 sits
+ * after it in ALL_MIGRATIONS (rebuilt as a fresh PR).
+ */
+export const MIGRATION_0041_PLAN_TRIAL_DAYS: DataMigration = {
+  version: 41,
+  name: "0041_plan_trial_days",
+  sql: `ALTER TABLE agent_subscription_plans ADD COLUMN trial_days INTEGER;`,
+};
+
 export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANCE,
   MIGRATION_0002_AGENT_CHAINS_SCHEDULES,
   MIGRATION_0003_AGENT_SHARD_JOBS,
@@ -1604,6 +1621,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0038_AGENT_SHARD_JOBS_WORKFLOW_RUN_ID,
   MIGRATION_0039_TENANT_CHANNELS,
   MIGRATION_0040_UNLIMITED_FREE_GRANT,
+  MIGRATION_0041_PLAN_TRIAL_DAYS,
 ];
 
 function splitStatements(sqlText: string): string[] {

@@ -712,6 +712,11 @@ export const agentSubscriptionPlans = sqliteTable("agent_subscription_plans", {
   priceUSD: real("price_usd").notNull(),
   periodDays: integer("period_days").notNull(),
   includedRuns: integer("included_runs").notNull(),
+  // Trial length in days (#3243, migration 0041): null = the
+  // plan offers no trial. This schema MAPS the table; it does
+  // not create it — DDL authority lives in migration 0041
+  // (src/data/migrationRunner.ts).
+  trialDays: integer("trial_days"),
   active: integer("active").notNull(),
   createdAtMs: integer("created_at_ms").notNull(),
   updatedAtMs: integer("updated_at_ms").notNull(),
