@@ -53,6 +53,7 @@ const PINNED_STAR_REEXPORTS = [
   "./stockQuoteSource",
   // Issue #3272 S3: the neutral screener joins the public trading surface.
   "./neutralMarketScreener",
+  "./portfolioRiskSource",
   "./screeningProvider",
   "./dataProviders",
   "./screener",
@@ -61,6 +62,7 @@ const PINNED_STAR_REEXPORTS = [
   "./etrade/platform",
   "./alpaca/platform",
   "./alpaca/fillLots",
+  "./alpaca/occSymbol",
   "./optionsScreener",
   "./technicals",
   "./platformHistory",

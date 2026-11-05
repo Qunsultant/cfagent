@@ -25,7 +25,7 @@
  *    with the missing Greeks named; nothing is zero-filled.
  */
 
-import type { ETradeOptionChain, ETradePosition } from "../types";
+import type { BrokerAccount, BrokerOptionChain, BrokerPosition, ETradePosition } from "../types";
 import type { ETradeService } from "./etrade";
 import { sharedBetaService, type BetaResolution, type BetaSource } from "./betaService";
 
@@ -305,7 +305,7 @@ type ContractLookup =
 
 const REQUIRED_GREEKS = ["delta", "gamma", "theta", "vega", "rho"] as const;
 
-function findContract(chain: ETradeOptionChain, position: ETradePosition): ContractLookup {
+function findContract(chain: BrokerOptionChain, position: BrokerPosition): ContractLookup {
   for (const pair of chain.pairs) {
     const contract = position.optionType === "CALL" ? pair.call : pair.put;
     if (!contract) continue;
@@ -329,24 +329,78 @@ function findContract(chain: ETradeOptionChain, position: ETradePosition): Contr
 
 export type BetaResolver = (symbol: string) => Promise<BetaResolution>;
 
+export interface OptionExpiry {
+  readonly year: number;
+  readonly month: number;
+  readonly day: number;
+}
+
 /**
- * Resolves a broker positions snapshot into aggregator inputs using live
- * E*TRADE chains for held option contracts and dynamically computed betas
- * (betaService). Positions that cannot be resolved come back with
+ * Issue #3324 (programme #3292): the neutral input to the risk model.
+ *
+ * Until this port existed the two entry points below were typed against
+ * `ETradeService`, so the only book the model could measure was E*TRADE's —
+ * even though the aggregator itself (`aggregatePortfolioRisk`) was already
+ * pure. Risk was therefore declared unavailable for Alpaca (#3296) rather
+ * than computed for it.
+ *
+ * A source is read-only and broker-owned: it reports the book, one expiry's
+ * chain for a held contract, and a spot price. It carries no notion of
+ * "default broker", and the model never asks a source other than the one it
+ * was given — a report can never mix two brokers' numbers.
+ */
+export interface PortfolioRiskSource {
+  /** The book: the account whose NAV sizes the percentages, and its positions. */
+  readBook(): Promise<{ account: BrokerAccount; positions: BrokerPosition[] }>;
+  /** One expiry's chain, from the broker that holds the contract. Null when the chain is unavailable. */
+  optionChain(symbol: string, expiry?: OptionExpiry): Promise<BrokerOptionChain | null>;
+  /** Last price for a symbol, used for the SPY denominator. Null when unreadable. */
+  spotPrice(symbol: string): Promise<number | null>;
+}
+
+/**
+ * The E*TRADE source: the same reads the endpoint used to perform inline,
+ * behind the neutral port. Keeping it here means the route and the adapter
+ * read the book the same way, so an E*TRADE report is unchanged by the
+ * introduction of the Alpaca path.
+ */
+export function etradePortfolioRiskSource(etrade: ETradeService): PortfolioRiskSource {
+  return {
+    readBook: () => etrade.fetchPortfolioRemote(undefined, true),
+    optionChain: (symbol, expiry) =>
+      etrade.getOptionChains({
+        symbol,
+        ...(expiry ? { expiryYear: expiry.year, expiryMonth: expiry.month, expiryDay: expiry.day } : {}),
+      }),
+    spotPrice: async (symbol) => {
+      try {
+        const quote = await etrade.getQuote(symbol);
+        return typeof quote?.lastPrice === "number" && Number.isFinite(quote.lastPrice) ? quote.lastPrice : null;
+      } catch {
+        return null;
+      }
+    },
+  };
+}
+
+/**
+ * Resolves a broker positions snapshot into aggregator inputs using that
+ * broker's live chains for held option contracts and dynamically computed
+ * betas (betaService). Positions that cannot be resolved come back with
  * greeks: null and a named reason — the aggregator lists them under
  * `excluded` rather than treating them as zero risk.
  */
 export async function resolvePositionsSnapshot(
-  etrade: ETradeService,
-  positions: ETradePosition[],
+  source: Pick<PortfolioRiskSource, "optionChain">,
+  positions: BrokerPosition[],
   betaResolver: BetaResolver = (symbol) => sharedBetaService.resolve(symbol),
 ): Promise<ResolvedPosition[]> {
-  const chainCache = new Map<string, Promise<ETradeOptionChain | null>>();
-  const chainFor = (symbol: string, expirationDate: string): Promise<ETradeOptionChain | null> => {
+  const chainCache = new Map<string, Promise<BrokerOptionChain | null>>();
+  const chainFor = (symbol: string, expirationDate: string): Promise<BrokerOptionChain | null> => {
     const key = `${symbol}|${expirationDate}`;
     if (!chainCache.has(key)) {
       const [year, month, day] = expirationDate.split("-").map(Number);
-      chainCache.set(key, etrade.getOptionChains({ symbol, expiryYear: year, expiryMonth: month, expiryDay: day }));
+      chainCache.set(key, source.optionChain(symbol, { year, month, day }));
     }
     return chainCache.get(key)!;
   };
@@ -419,12 +473,14 @@ export async function resolvePositionsSnapshot(
   return resolved;
 }
 
-/** Full pipeline used by the HTTP endpoint: fetch, resolve, aggregate. */
-export async function computePortfolioRisk(etrade: ETradeService): Promise<PortfolioRiskReport> {
-  const { account, positions } = await etrade.fetchPortfolioRemote(undefined, true);
+/** Full pipeline used by the HTTP endpoints: read, resolve, aggregate. */
+export async function computePortfolioRisk(source: PortfolioRiskSource): Promise<PortfolioRiskReport> {
+  const { account, positions } = await source.readBook();
   const nav = account.netAccountValue || account.totalAccountValue || 0;
-  const resolved = await resolvePositionsSnapshot(etrade, positions);
-  const spyChain = await etrade.getOptionChains({ symbol: "SPY" }).catch(() => null);
-  const spyPrice = spyChain?.underlyingPrice ?? null;
+  const resolved = await resolvePositionsSnapshot(source, positions);
+  // The SPY denominator comes from the selected broker's own spot read. A
+  // broker that cannot price SPY yields null, and the beta-weighted totals
+  // say so rather than borrowing another broker's price.
+  const spyPrice = await source.spotPrice("SPY").catch(() => null);
   return aggregatePortfolioRisk(resolved, { nav, spyPrice, asOf: new Date().toISOString() });
 }

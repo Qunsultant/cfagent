@@ -53,10 +53,10 @@ export type BrokerOperation =
   | "positionLots"
   | "optionChains"
   | "optionExpireDates"
-  // Issue #3296: portfolio risk analytics (correlation, hedge drafts,
-  // portfolio-repair, sizing). E*TRADE owns the model today; Alpaca has
-  // none in this build, and the surface must say so rather than render
-  // another broker's risk numbers.
+  // Issue #3296 declared portfolio risk; issue #3324 made it true for every
+  // broker. The model is the platform's (`PortfolioRiskSource`), and each
+  // broker supplies its own book, chains, and spot price — so a report never
+  // mixes brokers, and "no model for this broker" is no longer a state.
   | "portfolioRisk"
   // Issue #3295: saved strategy profiles and scan history. The scan ENGINE is
   // broker-neutral (it runs on OptionChainSource, #3272), but the #28/#27
@@ -140,7 +140,9 @@ export const BROKER_CATALOG = {
       // one — FIFO over its account fills derives the lots, and quantity whose
       // fills predate the retained window is reported as a coverage gap.
       positionLots: true,
-      portfolioRisk: false,
+      // Issue #3324: the risk model is the platform's, fed by this broker's
+      // own book, chains, and spot price.
+      portfolioRisk: true,
       optionChains: true,
       optionExpireDates: true,
       orderPreview: true,
