@@ -1,0 +1,2 @@
+### Fixed
+- Live Alpaca trading requires the user's own verified key pair (#3404). The deployment pair — one account shared by every tenant — remains the fallback for reads and for paper, but it can no longer place a live order: `previewOrder` and `placeOrderRemote` refuse with a sentence naming the missing pair, before anything is sent to Alpaca. Paper trading on the deployment's keys is unchanged, so first use still needs no setup.

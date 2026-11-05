@@ -13,6 +13,20 @@
  * broker execution without a broker order id in the stubbed response.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+
+// Issue #3404: live placement requires the user's OWN pair, so the live-host
+// assertions hand the adapter a stored pair instead of widening the guard.
+const storedPair = vi.hoisted(() => ({ record: null as null | { keyId: string; secretKey: string } }));
+vi.mock("../src/trading/alpaca/credentialStore", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/trading/alpaca/credentialStore")>();
+  return { ...actual, getAlpacaCredentials: async () => storedPair.record };
+});
+
+beforeEach(() => {
+  // Every case starts with no stored pair unless it says otherwise.
+  storedPair.record = null;
+});
+
 import { DatabaseORM } from "../src/orm";
 import { MockSqlStorage } from "./mock-sql";
 import { AlpacaTradingPlatform } from "../src/trading/alpaca/platform";
@@ -269,6 +283,10 @@ describe("Alpaca placeOrderRemote (#3158)", () => {
   });
 
   it("live base URL uses the live host and names live; an explicit paper host stays paper", async () => {
+    // Issue #3404: a live placement needs the user's own pair; the deployment
+    // pair is paper-only. The host behaviour is what this test is about, so the
+    // sign-in is supplied rather than the guard widened.
+    storedPair.record = { keyId: "user-live-key", secretKey: "user-live-secret" };
     const liveCalls = installFetch(async (call) => {
       expect(call.url).toBe("https://api.alpaca.markets/v2/orders");
       return jsonResponse(ORDER_OK);
