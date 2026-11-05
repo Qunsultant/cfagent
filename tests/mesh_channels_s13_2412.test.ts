@@ -125,8 +125,12 @@ describe("Agent Mesh S13 (#2412) — channel registry completeness", () => {
     expect(slack.gate).toContain("gateSlackRequest");
   });
 
-  it("the production Slack host is unchanged: server.ts still forwards to the per-team orchestrator instance", () => {
-    const server = read("src/server.ts");
+  it("the production Slack host is unchanged: the server entry still forwards to the per-team orchestrator instance", () => {
+    // Slice 6 of Qunsultant/cfagent#2902 (2026-11-05): the Slack routes
+    // moved from src/server.ts to src/server/routes/messaging.ts; the
+    // entry surface is server.ts + routes/*.ts, so the pin reads both
+    // files.
+    const server = read("src/server.ts") + read("src/server/routes/messaging.ts");
     // #1779: the per-team forward now rides the ActorGateway; the
     // pin tracks the gateway spelling, the instance still per-team.
     expect(server).toContain("actorGateway.dispatch(env.SEARCH_AGENT, `slack_${teamId}`");
@@ -147,7 +151,11 @@ describe("Agent Mesh S13 (#2412) — channel registry completeness", () => {
     const nlq = getChannel("nlq-webhook")!;
     expect(nlq.gate).toContain("HMAC");
     expect(nlq.identity).toContain("service identity");
-    const server = read("src/server.ts");
+    // Slice 6 of Qunsultant/cfagent#2902 (2026-11-05): the NLQ webhook
+    // handler moved from src/server.ts to src/server/routes/messaging.ts;
+    // the entry surface is server.ts + routes/*.ts, so the pin reads
+    // both files.
+    const server = read("src/server.ts") + read("src/server/routes/messaging.ts");
     expect(server).toContain('NLQ_WEBHOOK_SERVICE_LOGIN = "nlq_webhook"');
     expect(server).toContain("`nlq_webhook_${body.userId}`");
   });

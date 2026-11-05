@@ -109,11 +109,15 @@ describe("mcp/chat/nlq route inventory (extraction #364)", () => {
     expect(moduleSrc).toContain("// Issue #312: the advertised POST /api/chat.");
   });
 
-  it("the NLQ webhook spellings were never in routeRequest (single owner is src/server.ts, issue #313)", () => {
+  it("the NLQ webhook spellings were never in routeRequest (single owner is the server entry, issue #313)", () => {
     const orchSrc = src("agents/orchestrator.ts");
     const dispatchSrc = src("agents/orchestrator/routeRequest.ts");
     expect(orchSrc).not.toContain("/nlq/webhook");
-    const serverSrc = src("server.ts");
+    // Slice 6 of Qunsultant/cfagent#2902 (2026-11-05): the NLQ webhook
+    // handler moved from src/server.ts to src/server/routes/messaging.ts;
+    // the entry surface is server.ts + routes/*.ts, so the pin reads
+    // both files.
+    const serverSrc = src("server.ts") + src("server/routes/messaging.ts");
     expect(serverSrc).toContain("handleNlqWebhookRequest");
   });
 });

@@ -1274,6 +1274,10 @@ describe("global D-D census: step 5e — residual bucket family port composition
       ["src/security/serviceTokens.ts", "../data/durableKv"],
       ["src/security/session.ts", "../data/durableKv"],
       ["src/server.ts", "./data/durableKv"],
+      // Slice 6 of Qunsultant/cfagent#2902 (2026-11-05): the moved
+      // social/slack handlers' SESSION_STORE casts import
+      // DoNamespaceLike from the data layer, as server.ts did inline.
+      ["src/server/routes/messaging.ts", "../../data/durableKv"],
       // Slice 5 of Qunsultant/cfagent#2902 (2026-11-05): the moved
       // schedule handler's #3121 S1 audit wiring imports DoStubLike
       // from the data layer, as server.ts did inline.
