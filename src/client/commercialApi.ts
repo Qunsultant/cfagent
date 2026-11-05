@@ -109,6 +109,8 @@ export interface PlanView {
   periodDays: number;
   includedRuns: number;
   active?: boolean;
+  /** Issue #3243: trial length in days, operator data; null = no trial offered. */
+  trialDays?: number | null;
 }
 
 export interface SubscriptionView {

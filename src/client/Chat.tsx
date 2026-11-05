@@ -1581,8 +1581,8 @@ export function Chat({ user }: { user: User }) {
   return (
     <div className={`app-container ${navLayout === "left" ? "layout-sidebar" : "layout-top"} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <SkipLink />
-      {/* #2471: first-run setup over the hub until this user completes it. */}
-      <FirstRunGate userLogin={user.login} />
+      {/* #2471: first-run setup over the hub until this user completes it. #3256: "Sign up" inside the flow opens the checkout tab. */}
+      <FirstRunGate userLogin={user.login} onOpenCheckout={() => handleSelectTab("checkout")} />
       <Modal
         open={deleteTarget !== null}
         onClose={() => setDeleteTarget(null)}

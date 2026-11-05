@@ -8,7 +8,17 @@
  *   GET  /platform/accounts/self        self-service account view
  *   POST /platform/accounts/setup       self-service account setup
  *   GET  /platform/accounts/lookup      operator lookup by userId
+ *   GET  /platform/onboarding/state     self-only onboarding state
+ *   POST /platform/onboarding/state     self-only onboarding state save
  *
+ * (#3256, sub-issue of #3241: the onboarding state routes live here
+ * because they are self-service platform-account state, keyed by the
+ * verified login exactly like the self/setup endpoints. One row per
+ * login: current step 1..5, completion, and the trial plan started
+ * from the flow. A client-supplied userLogin/tenantId in the POST
+ * body is never read; the tenantId is stamped server-side from the
+ * resolved platform identity. An absent row reads as no state — the
+ * client falls back to the per-user localStorage flag, #2471.)
  * (Paths are the DO-internal spellings: src/server.ts strips the
  * /api prefix when forwarding, so externally these are
  * /api/platform/accounts/*.)
@@ -59,10 +69,12 @@
  * No store client imports, no env.AGENT_DB references, no SQL.
  */
 import { createCommercialAdapter } from "../../data/createCommercialPorts";
+import { createOnboardingAdapter } from "../../data/createOnboardingPorts";
 import { createPriceCatalogueAdapter } from "../../data/createPriceCataloguePorts";
 import { createStoreOperatorsAdapter } from "../../data/createStoreOperatorsPorts";
 import { createSubscriptionAdapter } from "../../data/createSubscriptionPorts";
 import type { CommercialStore } from "../../data/commercialPorts";
+import type { OnboardingStateStore } from "../../data/onboardingPorts";
 import type { PriceCatalogue, PriceEntry } from "../../data/priceCataloguePorts";
 import type { StoreOperators } from "../../data/storeOperatorsPorts";
 import type { SubscriptionStore } from "../../data/subscriptionPorts";
@@ -79,6 +91,8 @@ export interface PlatformAccountPorts {
   subscriptions: SubscriptionStore | null;
   prices: PriceCatalogue | null;
   operators: StoreOperators | null;
+  /** Onboarding state store (#3256); null when unbound — the state routes fail closed with 503. */
+  onboarding: OnboardingStateStore | null;
 }
 
 export interface PlatformAccountRouteContext {
@@ -135,6 +149,7 @@ function resolvePorts(ctx: PlatformAccountRouteContext): PlatformAccountPorts {
     subscriptions: createSubscriptionAdapter(env),
     prices: createPriceCatalogueAdapter(env),
     operators: createStoreOperatorsAdapter(env),
+    onboarding: createOnboardingAdapter(env),
   };
 }
 
@@ -218,7 +233,9 @@ export async function handlePlatformAccountRoutes(
   const isSelf = path.endsWith("/platform/accounts/self") && request.method === "GET";
   const isSetup = path.endsWith("/platform/accounts/setup") && request.method === "POST";
   const isLookup = path.endsWith("/platform/accounts/lookup") && request.method === "GET";
-  if (!isSelf && !isSetup && !isLookup) return null;
+  const isOnboardingGet = path.endsWith("/platform/onboarding/state") && request.method === "GET";
+  const isOnboardingSave = path.endsWith("/platform/onboarding/state") && request.method === "POST";
+  if (!isSelf && !isSetup && !isLookup && !isOnboardingGet && !isOnboardingSave) return null;
 
   const login = request.headers.get("x-user-login");
   const verifiedLogin = login && login.trim() ? login.trim() : null;
@@ -254,6 +271,68 @@ export async function handlePlatformAccountRoutes(
         return Response.json({ error: "Commercial account store is unavailable." }, { status: 503 });
       }
       return Response.json(await buildAccountView(ports, verifiedLogin));
+    }
+
+    // Onboarding state (#3256) — self only, keyed by the verified
+    // session login. The body is never trusted for identity: a
+    // client-supplied userLogin/tenantId is not read here at all,
+    // in any path. The tenantId is stamped server-side from the
+    // resolved platform identity (null when no account exists yet).
+    if (isOnboardingGet || isOnboardingSave) {
+      if (!ports.onboarding) {
+        return Response.json({ error: "Onboarding state store is unavailable." }, { status: 503 });
+      }
+      if (isOnboardingGet) {
+        return Response.json({ state: await ports.onboarding.getOnboardingState(verifiedLogin) });
+      }
+      const body = (await request.json().catch(() => ({}))) as {
+        currentStep?: unknown;
+        completed?: unknown;
+        trialPlanId?: unknown;
+      };
+      const currentStep = body.currentStep;
+      if (typeof currentStep !== "number" || !Number.isInteger(currentStep) || currentStep < 1 || currentStep > 5) {
+        return Response.json({ error: "currentStep must be an integer between 1 and 5." }, { status: 400 });
+      }
+      const completed = body.completed === true;
+      const trialPlanId =
+        typeof body.trialPlanId === "string" && body.trialPlanId.length > 0 ? body.trialPlanId : null;
+      const nowMs = Date.now();
+      const previous = await ports.onboarding.getOnboardingState(verifiedLogin);
+      let tenantId: string | null = previous?.tenantId ?? null;
+      if (ports.commercial && ports.subscriptions) {
+        try {
+          const identity = await resolvePlatformIdentity(
+            { commercial: ports.commercial, subscriptions: ports.subscriptions },
+            { userId: verifiedLogin, nowMs },
+          );
+          if (identity.tenantId) tenantId = identity.tenantId;
+        } catch {
+          // Identity unavailable: keep the previously stamped tenant.
+        }
+      }
+      const state = await ports.onboarding.saveOnboardingState({
+        userLogin: verifiedLogin,
+        tenantId,
+        currentStep,
+        completedAtMs: completed
+          ? (previous?.completedAtMs ?? nowMs)
+          : (previous?.completedAtMs ?? null),
+        trialPlanId: trialPlanId ?? previous?.trialPlanId ?? null,
+        trialStartedAtMs: trialPlanId
+          ? (previous?.trialPlanId === trialPlanId
+            ? (previous?.trialStartedAtMs ?? nowMs)
+            : nowMs)
+          : (previous?.trialStartedAtMs ?? null),
+        updatedAtMs: nowMs,
+      });
+      if (completed && !previous?.completedAtMs) {
+        ctx.audit("platform.onboarding.completed", "payments", {
+          userLogin: verifiedLogin,
+          tenantId,
+        });
+      }
+      return Response.json({ state });
     }
 
     // POST /platform/accounts/setup — self-service, idempotent.
