@@ -25,8 +25,22 @@ import {
   storeAlpacaCredentials,
 } from "../src/trading/alpaca/credentialStore";
 import { resolveAlpacaPair } from "../src/trading/alpaca/credentialResolution";
-import { handleBrokerConnectRoutes } from "../src/agents/routes/brokerConnect";
+import { handleBrokerConnectRoutes as handleConnectRoute } from "../src/agents/routes/brokerConnect";
 import { AlpacaTradingPlatform } from "../src/trading/alpaca/platform";
+
+/**
+ * The handler carries the router's delegation signature (request, url, path,
+ * sessionId, ctx — pinned by tests/thin_router_inventory.test.ts). These tests
+ * care about the path and the identity, so they adapt the call here instead of
+ * repeating four positional arguments at every site.
+ */
+function handleBrokerConnectRoutes(
+  request: Request,
+  path: string,
+  ctx: Parameters<typeof handleConnectRoute>[4],
+): Promise<Response | null> {
+  return handleConnectRoute(request, new URL(`https://app.test/api${path}`), path, "session-test", ctx);
+}
 
 /**
  * The SessionStore Durable Object as the store client sees it: one POST per
