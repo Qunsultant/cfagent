@@ -160,6 +160,8 @@ export const stockScreenerFilterFields = {
   minVolume: fin().optional(),
   search: z.string().optional(),
   limit: fin().optional(),
+  // Issue #3272: the universe a provider-side scan covers.
+  universe: z.string().optional(),
 } satisfies Record<keyof StockScreenerFilter, z.ZodType>;
 
 export const stockScreenerFilterSchema = z.strictObject(stockScreenerFilterFields);
