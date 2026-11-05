@@ -2605,6 +2605,10 @@ export class ScheduledTasksService {
         ...(options.candidateLimit !== undefined ? { candidateLimit: options.candidateLimit } : {}),
         channel: "ui",
         userLogin,
+        // Issue #3264: the run's trigger rides into the scan-store
+        // save (the history row's trigger) via the request — the
+        // service never forwards it to the scan template or cache.
+        trigger: options.trigger ?? "scheduled",
         overrideEnv: options.environment,
         // Issue #738: pass the symbol count so the scanner doesn't truncate to 20.
         maxSymbols: symbols.length,
@@ -2779,6 +2783,20 @@ export class ScheduledTasksService {
         if (data) optionsCsv = data.bytes;
       } catch (csvErr) {
         console.warn("[ScheduledTasksService] Options CSV generation/storage failed:", csvErr instanceof Error ? csvErr.message : String(csvErr));
+      }
+      // Issue #3264: stamp the generated keys onto the scan-store
+      // row (the manual route already does this) so the run's scan
+      // record carries its artifacts even when the canonical twin
+      // is missing. Failures warn only — the canonical row above
+      // is the primary record.
+      if (typeof scanData?.scanRunId === "string" && scanData.scanRunId && this.scanRunStore) {
+        try {
+          if (optionsPdfKey) await this.scanRunStore.updatePdfKey(scanData.scanRunId, optionsPdfKey, { userLogin });
+          if (optionsXlsxKey) await this.scanRunStore.updateXlsxKey(scanData.scanRunId, optionsXlsxKey, { userLogin });
+          if (optionsCsvKey) await this.scanRunStore.updateCsvKey(scanData.scanRunId, optionsCsvKey, { userLogin });
+        } catch (stampErr) {
+          console.warn("[ScheduledTasksService] Options scan-row key stamp failed:", stampErr instanceof Error ? stampErr.message : String(stampErr));
+        }
       }
       const reportUrl = optionsPdfKey
         ? `${this.env.APP_BASE_URL || "https://agent.openaimp.com"}/api/options/report.pdf?key=${encodeURIComponent(optionsPdfKey)}`

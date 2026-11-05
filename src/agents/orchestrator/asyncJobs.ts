@@ -738,6 +738,54 @@ export async function retryAsyncJob(
   return submitted;
 }
 
+/**
+ * Issue #3264: record a keyless options run before the serve stage
+ * skips it. The serve stage used to return `skipped` before the
+ * record call whenever no artifact was adoptable, so a run whose
+ * formats all failed left no canonical row, no history row, and no
+ * job-outcome row — invisible in Docs (beyond a scan-store twin,
+ * if any) and in Workflow Runs. The outcome already carries
+ * per-format failed statuses + errors from the serve planner; a
+ * format with no carried status and no key records "failed" with
+ * the skip reason, never a silent absence. A carried status
+ * ("generated" / "failed" / "skipped") is never rewritten.
+ * Never throws — recordOptionsServeReport warns and continues.
+ */
+async function recordKeylessOptionsServe(
+  ctx: AsyncJobsContext,
+  outcome: import("../../services/screenerFollowups").ScreenerRunOutcome,
+  reason: string,
+): Promise<void> {
+  if (outcome.kind !== "options" || !outcome.timestamp) return;
+  const { recordOptionsServeReport } = await import("../../services/optionsServeRecord");
+  type FormatStatus = NonNullable<import("../../services/screenerFollowups").ScreenerRunOutcome["pdfStatus"]>;
+  const normalize = (
+    status: FormatStatus | undefined,
+    key: string | undefined,
+    error: string | undefined,
+  ): { status: FormatStatus; error?: string } => {
+    const resolved = status ?? (key ? "generated" : "failed");
+    return resolved === "failed"
+      ? { status: resolved, error: error ?? reason }
+      : { status: resolved };
+  };
+  const pdf = normalize(outcome.pdfStatus, outcome.pdfKeys?.[0], outcome.pdfError);
+  const xlsx = normalize(outcome.xlsxStatus, outcome.xlsxKey, outcome.xlsxError);
+  const csv = normalize(outcome.csvStatus, outcome.csvKey, outcome.csvError);
+  await recordOptionsServeReport(
+    { orm: ctx.getOrm() as never, storage: ctx.agentCtx.storage },
+    {
+      ...outcome,
+      pdfStatus: pdf.status,
+      ...(pdf.error ? { pdfError: pdf.error } : {}),
+      xlsxStatus: xlsx.status,
+      ...(xlsx.error ? { xlsxError: xlsx.error } : {}),
+      csvStatus: csv.status,
+      ...(csv.error ? { csvError: csv.error } : {}),
+    },
+  );
+}
+
 export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJobPayload): Promise<void> {
   ctx.ensureTables();
   const family = ports(ctx);
@@ -989,7 +1037,12 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
         (outcome.xlsxKey && outcome.xlsxStatus !== "failed") ||
         (outcome.csvKey && outcome.csvStatus !== "failed");
       if (outcome.pdfStatus === "failed" && !tabularAdoptable) {
-        result = { status: "skipped", reason: codedMessage("FAILURE_REPORT_PDF_GENERATION", outcome.pdfError || undefined) };
+        // Issue #3264: the run is still recorded (canonical +
+        // history + outcome rows, per-format failures named) before
+        // the serve job skips — a failed run must not vanish.
+        const reason = codedMessage("FAILURE_REPORT_PDF_GENERATION", outcome.pdfError || undefined);
+        await recordKeylessOptionsServe(ctx, outcome, reason);
+        result = { status: "skipped", reason };
       } else if (outcome.canonicalReportId) {
         // Consolidation C4 (#1329): serve's schedulable content for
         // runs whose artifact is a canonical row (discovery, goal) —
@@ -1006,7 +1059,11 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
         }
         result = { status: "ready", artifacts: [], canonicalReportId: outcome.canonicalReportId };
       } else if ((!outcome.pdfKeys || outcome.pdfKeys.length === 0) && !tabularAdoptable) {
-        result = { status: "skipped", reason: codedMessage("FAILURE_REPORT_ARTIFACT_MISSING", "The run produced no report artifact key.") };
+        // Issue #3264: same record-before-skip as the PDF-failed
+        // branch above — a keyless run still lands its rows.
+        const reason = codedMessage("FAILURE_REPORT_ARTIFACT_MISSING", "The run produced no report artifact key.");
+        await recordKeylessOptionsServe(ctx, outcome, reason);
+        result = { status: "skipped", reason };
       } else {
         const port = ctx.followupReportPort();
         const artifacts: Array<{ key: string; fileName: string; kind?: "pdf" | "xlsx" | "csv" }> = [];
