@@ -43,12 +43,25 @@ describe("ETradeTradingPlatform options data reads (#291 T5b)", () => {
     ]);
   });
 
-  it("the contract marks both reads optional (platforms may omit them)", async () => {
+  it("the contract marks both reads optional, and Alpaca now implements them (#291 T5b, #3233)", async () => {
+    // Optionality is a CONTRACT property: both reads are declared with `?`, so a
+    // platform that omits them still satisfies ITradingPlatform. That invariant
+    // is pinned against the interface source below, not against one broker.
+    //
+    // This test used to assert Alpaca omitted both reads — that was the gap
+    // #3233 closed (options chains/expiries for Alpaca). A broker's gap must
+    // never be re-pinned as if it were the contract rule.
+    const { readFileSync } = await import("node:fs");
+    const contract = readFileSync(new URL("../src/trading/interfaces.ts", import.meta.url), "utf8");
+    expect(contract).toMatch(/getOptionChains\?\(/);
+    expect(contract).toMatch(/getOptionExpireDates\?\(/);
+    expect(contract).toMatch(/getQuoteDetailed\?\(/);
+
     const { AlpacaTradingPlatform } = await import("../src/trading/alpaca/platform");
     const alpaca: any = new AlpacaTradingPlatform(env, undefined, "default_trader");
-    expect(alpaca.getOptionChains).toBeUndefined();
-    expect(alpaca.getOptionExpireDates).toBeUndefined();
-    expect(alpaca.getQuoteDetailed).toBeUndefined();
+    expect(typeof alpaca.getOptionChains).toBe("function");
+    expect(typeof alpaca.getOptionExpireDates).toBe("function");
+    expect(typeof alpaca.getQuoteDetailed).toBe("function");
   });
 
   it("getQuoteDetailed delegates verbatim, carrying the error (#291 Q1)", async () => {
