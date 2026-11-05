@@ -21,8 +21,9 @@
  *   - nothing here caches, retries, or rewrites provenance. The port is a
  *     passthrough, exactly like the platform methods it adapts.
  */
-import type { BrokerOptionChain, BrokerOptionExpireDate } from "../types";
+import type { BrokerOptionChain, BrokerOptionExpireDate, OptionScreenResult, OptionScreenerFilter } from "../types";
 import type { ITradingPlatform, OptionRequestBudget } from "./interfaces";
+import type { EtapiScreenerConfig } from "../config/etapiConfig";
 
 /** The parameters a chain fetch accepts — a subset of `ITradingPlatform`. */
 export interface OptionChainParams {
@@ -84,4 +85,20 @@ export function platformChainSource(platform: ITradingPlatform | null | undefine
       return platform.getLastError?.();
     },
   };
+}
+
+/**
+ * Run the options screen over any source.
+ *
+ * Added in #3272 so a route can screen without importing a trading-internal
+ * module (#290 boundary, `tests/trading-boundary.test.ts`): the screener stays
+ * behind the barrel, and the caller only ever holds a source.
+ */
+export async function screenOptionsWithSource(
+  source: OptionChainSource,
+  filter: OptionScreenerFilter,
+  config?: Partial<EtapiScreenerConfig>,
+): Promise<OptionScreenResult> {
+  const { DynamicOptionsScreener } = await import("./optionsScreener");
+  return new DynamicOptionsScreener(source, config).screenOptions(filter);
 }

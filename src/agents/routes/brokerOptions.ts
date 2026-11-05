@@ -19,8 +19,8 @@
  */
 import type { Env } from "../../types";
 import type { DatabaseORM } from "../../orm";
-import { TradingPlatformRegistry, brokerSupports } from "../../trading";
-import { platformChainSource } from "../../trading/optionChainSource";
+import { TradingPlatformRegistry, brokerSupports, platformChainSource, screenOptionsWithSource } from "../../trading";
+import { getScreenerConfig } from "../../config/etapiConfig";
 import { resolveTenantBroker } from "../../services/tenantProviders";
 import { resolveBrokerEnvironmentFromSettings } from "./brokerEnvironment";
 
@@ -88,10 +88,7 @@ export async function handleBrokerOptionsRoutes(
     const source = platformChainSource(screenPlatform);
     if (!source) return unsupportedResponse(screenBroker, "Option screening");
 
-    const { DynamicOptionsScreener } = await import("../../trading/optionsScreener");
-    const { getScreenerConfig: resolveScreenerConfig } = await import("../../config/etapiConfig");
-    const screener = new DynamicOptionsScreener(source, resolveScreenerConfig(ctx.env));
-    const result = await screener.screenOptions(screenBody.filter ?? screenBody);
+    const result = await screenOptionsWithSource(source, screenBody.filter ?? screenBody, getScreenerConfig(ctx.env));
     return Response.json({ broker: screenBroker, environment: screenEnvironment, result });
   }
 
