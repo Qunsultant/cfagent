@@ -630,7 +630,7 @@ export function SettingsMenu({
         title={
           isPinned
             ? "Settings pinned open (click to unpin)"
-            : `Settings (${isLive ? "PROD" : "TEST"}) — Broker, preferences, layout & themes`
+            : `Settings (${isLive ? "Live" : "Paper"}) — Broker, preferences, layout & themes`
         }
         aria-label="Settings"
       >
@@ -664,7 +664,7 @@ export function SettingsMenu({
               >
                 {!isConnected
                   ? `${selectedBrokerLabel} · OFFLINE`
-                  : `${selectedBrokerLabel} · ${isLive ? "PROD" : "TEST"}`}
+                  : `${selectedBrokerLabel} · ${isLive ? "Live" : "Paper"}`}
               </span>
             </div>
           </div>
@@ -741,7 +741,7 @@ export function SettingsMenu({
                 onClick={() => onSwitchEnv("TEST")}
                 title="Switch to paper sandbox environment"
               >
-                🧪 TEST
+                🧪 Paper
               </Button>
               <Button
                 type="button"
@@ -750,7 +750,7 @@ export function SettingsMenu({
                 onClick={() => onSwitchEnv("PROD")}
                 title="Switch to live production environment"
               >
-                🔴 PROD
+                🔴 Live
               </Button>
               <Button
                 type="button"
