@@ -236,9 +236,9 @@ export const BROKER_CATALOG = {
       watchlists: false,
       // Issue #3390: both brokers cancel through the neutral order seam.
       orderCancel: true,
-      // Issue #3374: no Alpaca discovery engine exists, so the stored runs are
-      // not this tenant's evidence. Stated, never substituted.
-      optionsDiscovery: false,
+      // Issue #3388: the engine composes on the selected broker's chains
+      // (`platformChainSource`), so Alpaca produces its own runs.
+      optionsDiscovery: true,
     },
     statusVocabulary: {
       protocol: "alpaca_rest_v2",

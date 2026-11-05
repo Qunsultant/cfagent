@@ -20,6 +20,8 @@ import type {
 } from "../../types";
 import { DatabaseORM } from "../../orm";
 import type { DataProviderPorts } from "../../data/buildDataProviderPorts";
+import { TradingPlatformRegistry } from "../registry";
+import { resolveTenantBroker } from "../../services/tenantProviders";
 import { ETradeService } from "../../services/etrade";
 import type { ETradeRestClient } from "../etrade/client";
 import {
@@ -737,6 +739,14 @@ export class UnifiedOptionsService {
           const discoveryService = createDiscoveryService({
             env: this.env,
             userLogin: this.userLogin,
+            // Issue #3388: the run executes on the selected broker's chains.
+            platform: TradingPlatformRegistry.getPlatform(
+              await resolveTenantBroker(this.env),
+              this.env,
+              this.orm,
+              this.userLogin,
+              this.overrideEnv,
+            ),
             overrideEnv: this.overrideEnv,
             orm: this.orm,
             sql: this.discoverySql,

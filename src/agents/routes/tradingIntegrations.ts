@@ -27,6 +27,8 @@
 
 import type { AgentContext } from "agents";
 import { BrowserAgent } from "../browserAgent";
+import { TradingPlatformRegistry } from "../../trading/registry";
+import { resolveTenantBroker } from "../../services/tenantProviders";
 import {
   ETradeEmailTradingService,
   ETradeSlackTradingService,
@@ -92,7 +94,7 @@ async function buildChannelNlqDeps(
     scanRunStore: createOptionsDiscoveryPorts({ sql, storage: ctx.agentCtx.storage }).scanRuns,
     profileStore: createOptionsDiscoveryPorts({ sql, storage: ctx.agentCtx.storage }).strategyProfiles,
     schedulingPort: ctx.nlqSchedulingPort(),
-    discoveryRunner: createDiscoveryService({ env: ctx.env, userLogin, orm, sql, blobStorage: ctx.agentCtx.storage, ...(dpPorts.config ? { configPort: dpPorts.config } : {}), ...(dpPorts.captures ? { capturePort: dpPorts.captures } : {}) }),
+    discoveryRunner: createDiscoveryService({ env: ctx.env, userLogin, orm, sql, blobStorage: ctx.agentCtx.storage, platform: TradingPlatformRegistry.getPlatform(await resolveTenantBroker(ctx.env), ctx.env, orm, userLogin), ...(dpPorts.config ? { configPort: dpPorts.config } : {}), ...(dpPorts.captures ? { capturePort: dpPorts.captures } : {}) }),
     fitDiscoveryRunner: createFitDiscoveryRunner({ env: ctx.env, userLogin, sql, storage: ctx.agentCtx.storage }),
   };
 }

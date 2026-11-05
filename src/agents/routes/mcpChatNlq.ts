@@ -39,6 +39,8 @@
 import { unauthenticatedResponse } from "./routeIdentity";
 import type { AgentName, AsyncJobRecord, AsyncJobSubmission, Env } from "../../types";
 import type { DatabaseORM } from "../../orm";
+import { TradingPlatformRegistry } from "../../trading/registry";
+import { resolveTenantBroker } from "../../services/tenantProviders";
 import {
   MCP_PROMPTS,
   MCP_RESOURCES,
@@ -380,7 +382,7 @@ export async function handleMcpChatNlqRoutes(
             ctx.env,
             userLogin,
             userDid,
-            { context: contextHeader, validateWithLLM: body.validateWithLLM, scanRunStore: createOptionsDiscoveryPorts({ sql: ctx.getStorageSql(), storage: ctx.getStorage?.() }).scanRuns, profileStore: createOptionsDiscoveryPorts({ sql: ctx.getStorageSql(), storage: ctx.getStorage?.() }).strategyProfiles, schedulingPort: ctx.nlqSchedulingPort(), socialBriefPort, storage: ctx.getStorage?.(), discoveryRunner: createDiscoveryService({ env: ctx.env, userLogin, orm, sql: ctx.getStorageSql(), blobStorage: ctx.getStorage?.(), ...(nlqDpPorts?.config ? { configPort: nlqDpPorts.config } : {}), ...(nlqDpPorts?.captures ? { capturePort: nlqDpPorts.captures } : {}) }), fitDiscoveryRunner: createFitDiscoveryRunner({ env: ctx.env, userLogin, sql: ctx.getStorageSql(), storage: ctx.getStorage?.() }) }
+            { context: contextHeader, validateWithLLM: body.validateWithLLM, scanRunStore: createOptionsDiscoveryPorts({ sql: ctx.getStorageSql(), storage: ctx.getStorage?.() }).scanRuns, profileStore: createOptionsDiscoveryPorts({ sql: ctx.getStorageSql(), storage: ctx.getStorage?.() }).strategyProfiles, schedulingPort: ctx.nlqSchedulingPort(), socialBriefPort, storage: ctx.getStorage?.(), discoveryRunner: createDiscoveryService({ env: ctx.env, userLogin, orm, sql: ctx.getStorageSql(), blobStorage: ctx.getStorage?.(), platform: TradingPlatformRegistry.getPlatform(await resolveTenantBroker(ctx.env), ctx.env, orm, userLogin), ...(nlqDpPorts?.config ? { configPort: nlqDpPorts.config } : {}), ...(nlqDpPorts?.captures ? { capturePort: nlqDpPorts.captures } : {}) }), fitDiscoveryRunner: createFitDiscoveryRunner({ env: ctx.env, userLogin, sql: ctx.getStorageSql(), storage: ctx.getStorage?.() }) }
           );
       ctx.audit("nlq.executed", "nlq", {
         query,
