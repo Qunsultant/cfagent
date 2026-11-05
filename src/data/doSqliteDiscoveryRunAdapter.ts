@@ -190,21 +190,23 @@ export class SqlDiscoveryRunStore implements DiscoveryRunStore {
     this.ensure();
     const limit = options.limit ?? 25;
     const offset = options.offset ?? 0;
-    if (!options.broker) {
-      const rows = Array.from(this.sql.exec(LIST_SQL, options.userLogin ?? null, limit, offset)) as Array<{
-        summary_json: string;
-      }>;
-      return rows.map((r) => JSON.parse(r.summary_json) as DiscoveryRunSummary);
-    }
-    // Issue #3388: provenance lives inside summary_json, so the broker filter
-    // runs after parsing. The table is capped, so reading the bounded visible
-    // window and slicing here keeps pagination honest rather than returning
-    // short pages from a filtered LIMIT.
-    const rows = Array.from(this.sql.exec(LIST_SQL, options.userLogin ?? null, this.maxRows, 0)) as Array<{
-      summary_json: string;
-    }>;
-    return rows
-      .map((r) => JSON.parse(r.summary_json) as DiscoveryRunSummary)
+    // Issue #3388: provenance lives inside summary_json, so a broker-scoped
+    // read filters after parsing. It reads the bounded window (the table is
+    // capped by maxRows) and slices here, which keeps pagination honest instead
+    // of returning short pages from a filtered LIMIT — and keeps this adapter
+    // at the same number of SQL statements the D-D census pins.
+    const brokerScoped = Boolean(options.broker);
+    const rows = Array.from(
+      this.sql.exec(
+        LIST_SQL,
+        options.userLogin ?? null,
+        brokerScoped ? this.maxRows : limit,
+        brokerScoped ? 0 : offset,
+      ),
+    ) as Array<{ summary_json: string }>;
+    const summaries = rows.map((r) => JSON.parse(r.summary_json) as DiscoveryRunSummary);
+    if (!options.broker) return summaries;
+    return summaries
       .filter((summary) => normalizeDiscoveryRunBroker(summary.broker) === options.broker)
       .slice(offset, offset + limit);
   }
