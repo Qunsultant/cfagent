@@ -3,7 +3,7 @@
  * REAL AiSearchAgent.
  *
  * Before this slice the hub's "Search Agent" tab (POST /search/agent)
- * called ETradeAISearchService directly — no hub surface ever reached
+ * called AiSearchInstanceService directly — no hub surface ever reached
  * the AiSearchAgent. This route dispatches to the agent through the
  * AI_SEARCH_AGENT Durable Object binding on the fixed service
  * instance "aisearch", mirroring AISearchAgentSearchCommand.execute
