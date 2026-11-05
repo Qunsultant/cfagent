@@ -28,6 +28,7 @@ import type {
   QuantBacktestResult,
 } from "../types";
 import { AGENT_DIDS } from "../agents/did";
+import { evaluatePatternSignalAt } from "./patternSignals";
 
 const MAX_OUTPUT_CHARS = 10_000;
 const INACTIVITY_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
@@ -160,31 +161,24 @@ export class ETradeSandboxService {
     const slowPeriod = request.params?.slow || 20;
 
     for (let i = 0; i < bars.length; i++) {
-      if (strat === "sma_crossover") {
-        if (i >= slowPeriod) {
-          const fastSma = bars.slice(i - fastPeriod, i).reduce((a, b) => a + b, 0) / fastPeriod;
-          const slowSma = bars.slice(i - slowPeriod, i).reduce((a, b) => a + b, 0) / slowPeriod;
-
-          if (fastSma > slowSma && position === 0) {
-            openPosition(bars[i], i, ` (Fast SMA ${fastSma.toFixed(2)} > Slow ${slowSma.toFixed(2)})`);
-          } else if (fastSma < slowSma && position === 1) {
-            closePosition(bars[i], i, ` (Fast SMA ${fastSma.toFixed(2)} < Slow ${slowSma.toFixed(2)})`);
-          }
-        }
-      } else {
-        // Simplified mean-reversion rule; rsi_reversal, mean_reversion and
-        // breakout all share it in this demonstration (disclosed in the
-        // result note and tool description). Buy a >1.5% dip below the
-        // prior bar; exit on a +3% rise from entry.
-        if (i >= 14) {
-          const current = bars[i];
-          const prev = bars[i - 1];
-          if (current < prev * 0.985 && position === 0) {
-            openPosition(current, i, " (dip >1.5% below prior bar)");
-          } else if (current > entryPrice * 1.03 && position === 1) {
-            closePosition(current, i, " (+3% from entry)");
-          }
-        }
+      // Issue #3391: the per-bar decision comes from the shared
+      // pattern-signals module (src/services/patternSignals.ts) — the
+      // single implementation of this strategy set, which the Stock
+      // Copilot cycle also evaluates over live bars. The rules are
+      // unchanged, including the disclosed simplification that
+      // rsi_reversal, mean_reversion and breakout share one
+      // mean-reversion rule in this set.
+      const signal = evaluatePatternSignalAt(
+        strat,
+        bars,
+        i,
+        { holding: position === 1, entryPrice },
+        { fast: fastPeriod, slow: slowPeriod },
+      );
+      if (signal.action === "enter_long") {
+        openPosition(bars[i], i, signal.detail ? ` ${signal.detail}` : "");
+      } else if (signal.action === "exit_long") {
+        closePosition(bars[i], i, signal.detail ? ` ${signal.detail}` : "");
       }
       equityCurve.push(cash + (position === 1 ? bars[i] : 0));
     }

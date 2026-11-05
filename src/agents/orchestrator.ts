@@ -65,6 +65,7 @@ import { dispatchOrchestratorA2A, orchestratorA2AOutcome, type OrchestratorA2AOu
 import { buildChatErrorFallback, type ChatErrorFallbackContext } from "./chatErrorFallback";
 import { getScreenerExecutionContext, migrateLegacyScreenSchedules, removeUnownedBaselineSchedules, ensureStrategyScanSchedule, resolveScheduledLogin, type ScheduleMaintenanceContext } from "./orchestrator/scheduleMaintenance";
 import { declareStrategyScanObserveTasks, type ScheduledTasksObserveContext } from "./orchestrator/scheduledTasksObserve";
+import { declareStockCopilotTasks, type ScheduledTasksCopilotContext } from "./orchestrator/scheduledTasksCopilot";
 import { buildOrchestratorSkillSources } from "./orchestrator/skillPacks";
 import { autoRenewETradeTokens, autonomousGoalScreen, autonomousMarketScreen, autonomousStrategyDiscovery, collectIvHistory, expireStaleOrderDraft, sendScheduledReminder, type ScheduledCallbackOutcome, type ScheduledCallbacksContext } from "./orchestrator/scheduledCallbacks";
 import { recordScheduleCallbackRun } from "./orchestrator/scheduleCallbackRunRecords";
@@ -508,6 +509,20 @@ export class OrchestratorAgent extends PortThink {
     return {
       agentCtx: this.ctx,
       getScreenerExecutionContext: () => this.getScreenerExecutionContext(),
+      audit: (type, agent, payload) => this.audit(type, agent, payload),
+    };
+  }
+
+  // Issue #3391: ports for the Stock Copilot cycle declaration
+  // (./orchestrator/scheduledTasksCopilot.ts). The declaration itself
+  // gates on the STOCK_COPILOT_PAPER_ENABLED flag + this instance's
+  // screener execution context, so flag-off instances declare nothing.
+  private scheduledTasksCopilotContext(): ScheduledTasksCopilotContext {
+    return {
+      env: this.env,
+      agentCtx: this.ctx,
+      getScreenerExecutionContext: () => this.getScreenerExecutionContext(),
+      getOrm: () => this.getOrm(),
       audit: (type, agent, payload) => this.audit(type, agent, payload),
     };
   }
@@ -1095,8 +1110,17 @@ export class OrchestratorAgent extends PortThink {
   // reconciles this declaration on startup; the task's handler
   // records occurrences and never dispatches — the STRATEGY_SCAN_CRON
   // SDK row above keeps firing the real options scan.
-  override getScheduledTasks(): Promise<ThinkScheduledTasks> {
-    return declareStrategyScanObserveTasks(this.scheduledTasksObserveContext());
+  override async getScheduledTasks(): Promise<ThinkScheduledTasks> {
+    const observeTasks = await declareStrategyScanObserveTasks(
+      this.scheduledTasksObserveContext(),
+    );
+    // Issue #3391: the Stock Copilot cycle task joins the declaration
+    // (empty unless the flag is on and this instance holds a login
+    // context — see ./orchestrator/scheduledTasksCopilot.ts).
+    const copilotTasks = await declareStockCopilotTasks(
+      this.scheduledTasksCopilotContext(),
+    );
+    return { ...observeTasks, ...copilotTasks };
   }
 
   // Issue #2705 (Agents SDK Skills enablement, slice 1):

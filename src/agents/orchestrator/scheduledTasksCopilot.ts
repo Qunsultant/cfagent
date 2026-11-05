@@ -1,0 +1,141 @@
+/**
+ * Issue #3391: the Stock Copilot's Think scheduled-task declaration —
+ * extracted from OrchestratorAgent in the #992/#2693 pattern (the
+ * class owns storage, ORM and audit; this module owns the declaration
+ * and the cycle invocation, through the explicit context below).
+ *
+ * The task is declared ONLY on instances where both gates hold:
+ * - the STOCK_COPILOT_PAPER_ENABLED flag is on (default OFF — flag-off
+ *   instances declare nothing, run no cycles, place no orders), and
+ * - the instance holds a screener execution context (the per-login
+ *   instances that carry an acting identity; context-less instances
+ *   declare nothing, exactly as the #2693 observe task gates).
+ *
+ * Cadence: "every 30 minutes" (Think's interval grammar) — aligned
+ * with the fastest recurring cadence this platform's scheduling
+ * already runs (the Workers cron set's finest trigger is the `*\/30`
+ * tick; no new cron can be added, the account is at its trigger
+ * ceiling — see wrangler.jsonc). The cycle
+ * itself re-checks the flag, the Alpaca paper guard, and market hours
+ * on every firing, so a declaration that outlives a config change
+ * still cannot trade.
+ */
+
+import type { AgentContext } from "agents";
+import type { DatabaseORM, SqlStorage } from "../../orm";
+import type {
+  ThinkScheduledTaskContext,
+  ThinkScheduledTasks,
+} from "../../actors/thinkAdapter";
+import type { Env } from "../../types";
+import type { ScreenerExecutionContext } from "./scheduleMaintenance";
+import { MarketDataResearchService } from "../../services/marketDataResearch";
+import {
+  copilotUniverseFromEnv,
+  isStockCopilotPaperEnabled,
+  runStockCopilotCycle,
+} from "../../services/stockCopilot";
+import { TradingPlatformRegistry } from "../../trading";
+
+/** The one code-declared task this slice arms. */
+export const STOCK_COPILOT_TASK_ID = "stock-copilot-paper-cycle";
+/** 30 minutes — the platform's fastest existing scheduling cadence. */
+export const STOCK_COPILOT_SCHEDULE = "every 30 minutes" as const;
+
+/**
+ * Ports the copilot declaration receives from the class. Storage, ORM
+ * and audit ownership stay in OrchestratorAgent; these are bound
+ * views of the class's own members.
+ */
+export interface ScheduledTasksCopilotContext {
+  env: Env;
+  agentCtx: AgentContext;
+  getScreenerExecutionContext: () => Promise<ScreenerExecutionContext | undefined>;
+  getOrm: () => DatabaseORM | undefined;
+  audit: (
+    type: string,
+    agent: "orchestrator",
+    payload: Record<string, unknown>,
+  ) => void;
+}
+
+/**
+ * Run one cycle for the instance's login. Best-effort by design — the
+ * handler must never throw (a thrown handler invites engine retries
+ * that could double-fire a cycle), and the cycle itself already
+ * collects per-symbol failures into its result instead of throwing.
+ */
+export async function runStockCopilotCycleForInstance(
+  ctx: ScheduledTasksCopilotContext,
+  executionContext: ScreenerExecutionContext,
+  taskCtx: ThinkScheduledTaskContext,
+): Promise<void> {
+  const sql = (ctx.agentCtx?.storage as unknown as { sql?: SqlStorage } | undefined)?.sql;
+  if (!sql) return;
+  const userLogin = executionContext.userLogin;
+  const platform = TradingPlatformRegistry.getPlatform(
+    "alpaca",
+    ctx.env,
+    ctx.getOrm(),
+    userLogin,
+    executionContext.environment,
+  );
+  const marketData = new MarketDataResearchService(ctx.env);
+  const result = await runStockCopilotCycle({
+    env: ctx.env,
+    sql,
+    userLogin,
+    platform,
+    overrideEnv: executionContext.environment,
+    universe: copilotUniverseFromEnv(ctx.env),
+    loadBars: async (symbol: string) => {
+      // The facade's alpaca-first order with explicit-unavailable
+      // failure (#923): no synthetic bars are ever substituted, so a
+      // data outage surfaces as a cycle error entry, never a trade
+      // on invented prices.
+      const bars = await marketData.getHistoricalBars(symbol, "1D", 60, "alpaca");
+      return bars
+        .map((b) => b.close)
+        .filter((c) => Number.isFinite(c) && c > 0);
+    },
+  });
+  ctx.audit("stock_copilot.cycle", "orchestrator", {
+    taskId: taskCtx.taskId,
+    userLogin,
+    status: result.status,
+    entriesPlaced: result.entriesPlaced,
+    exitsPlaced: result.exitsPlaced,
+    rejections: result.rejections.length,
+    errors: result.errors.length,
+  });
+}
+
+/**
+ * The getScheduledTasks() contribution for OrchestratorAgent: exactly
+ * one copilot cycle task, and only on flag-enabled instances holding
+ * a login context. Re-declaring is a no-op shape-wise (Think
+ * reconciles by task id + schedule hash).
+ */
+export async function declareStockCopilotTasks(
+  ctx: ScheduledTasksCopilotContext,
+): Promise<ThinkScheduledTasks> {
+  if (!isStockCopilotPaperEnabled(ctx.env)) return {};
+  const executionContext = await ctx
+    .getScreenerExecutionContext()
+    .catch(() => undefined);
+  if (!executionContext?.userLogin) return {};
+  return {
+    [STOCK_COPILOT_TASK_ID]: {
+      schedule: STOCK_COPILOT_SCHEDULE,
+      handler: async (taskCtx: ThinkScheduledTaskContext): Promise<void> => {
+        await runStockCopilotCycleForInstance(ctx, executionContext, taskCtx).catch(
+          () => {
+            // Best-effort: a failed cycle is visible in the audit the
+            // cycle emits per firing when it runs; a throw here would
+            // only invite a retry double-fire.
+          },
+        );
+      },
+    },
+  };
+}
