@@ -818,6 +818,8 @@ const STEP5_FUNNEL_SITES: Array<[string, string, string]> = [
   ["src/security/session.ts", "listStoreEntries", "sessions"],
   ["src/services/agenticPayments.ts", "consumeStoreKey", "payments"],
   ["src/services/agenticPayments.ts", "createStoreKv", "payments"],
+  // Issue #3351: the per-user Alpaca credential record lives in its own bucket
+  ["src/trading/alpaca/credentialStore.ts", "createStoreKv", "alpaca"],
   ["src/trading/channels/intake.ts", "consumeStoreKey", "slack_principal_links"],
   ["src/trading/channels/intake.ts", "createStoreKv", "slack_principal_links"],
 ];
@@ -1274,6 +1276,7 @@ describe("global D-D census: step 5e — residual bucket family port composition
       ["src/server.ts", "./data/durableKv"],
       ["src/services/actorGatewayPorts.ts", "../data/durableKv"],
       ["src/services/agenticPayments.ts", "../data/durableKv"],
+      ["src/trading/alpaca/credentialStore.ts", "../../data/durableKv"],
       ["src/trading/channels/intake.ts", "../../data/durableKv"],
       ["tests/durable_session_store.test.ts", "../src/data/durableKv"],
       ["tests/payments_webhook_settlement.test.ts", "../src/data/durableKv"],

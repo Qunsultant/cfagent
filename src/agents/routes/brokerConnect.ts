@@ -23,16 +23,18 @@
 import type { Env } from "../../types";
 import type { DatabaseORM } from "../../orm";
 import { codedMessage, getOutcome } from "../../outcomes/outcomeAspects";
+// Issue #290: the trading boundary index is the only path out of src/trading.
 import {
+  alpacaTradingSide,
   describeAlpacaCredential,
   getAlpacaCredentials,
+  resolveAlpacaPair,
+  resolveAlpacaTradingBase,
   revokeAlpacaCredentials,
   storeAlpacaCredentials,
-} from "../../trading/alpaca/credentialStore";
-import { alpacaTradingSide, type AlpacaSide } from "../../trading/alpaca/credentials";
-import { resolveAlpacaPair } from "../../trading/alpaca/credentialResolution";
-import { resolveAlpacaTradingBase } from "../../trading/alpaca/platform";
-import { verifyAlpacaAccount } from "../../trading/alpaca/signIn";
+  verifyAlpacaAccount,
+  type AlpacaSide,
+} from "../../trading";
 import { resolveBrokerEnvironmentFromSettings } from "./brokerEnvironment";
 
 export interface BrokerConnectRouteContext {
