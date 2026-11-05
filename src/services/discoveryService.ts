@@ -39,7 +39,8 @@ import {
 } from "../config/etapiConfig";
 import type { Env } from "../types";
 import type { DatabaseORM } from "../orm";
-import { ETradeService } from "./etrade";
+import { platformChainSource } from "../trading/optionChainSource";
+import type { ITradingPlatform } from "../trading/interfaces";
 import { getSymbolEventCalendar, toEventCalendarInfo, type SymbolEventCalendar } from "./eventCalendar";
 import {
   bindYahooHistoryDeps,
@@ -369,11 +370,22 @@ export function createDiscoveryService(args: {
    *  (signed webhook); the alert-log record is the in-app channel
    *  and always lands. */
   alerts?: boolean;
+  /**
+   * Issue #3388: the platform whose chains this run executes on. REQUIRED on
+   * purpose — omitting it fails the type check, so a new call site cannot
+   * silently borrow E*TRADE's client. A platform with no options chain source
+   * refuses at composition, naming itself, rather than running on another
+   * broker's data.
+   */
+  platform: ITradingPlatform;
 }): { run(request: DiscoveryRunRequest): Promise<DiscoveryRunOutcome> } {
-  const etrade = args.orm
-    ? new ETradeService(args.orm, args.env, args.userLogin, args.overrideEnv)
-    : new ETradeService(args.env, undefined, args.userLogin, args.overrideEnv);
-  const screener = new DynamicOptionsScreener(etrade.client);
+  const chainSource = platformChainSource(args.platform);
+  if (!chainSource) {
+    throw new Error(
+      `${args.platform.platformId} has no options chain source, so no discovery run can execute on it. No other broker's chains were used.`,
+    );
+  }
+  const screener = new DynamicOptionsScreener(chainSource);
   const dataAgent = new OptionsDataAgent(screener);
   // #2337 (#1976 step 2): the family stores come from the data
   // layer's composition root. The transaction-capable storage
