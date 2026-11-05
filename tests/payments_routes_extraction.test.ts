@@ -88,7 +88,8 @@ describe("payments route inventory (extraction #370)", () => {
 
   it("the original inline blocks are gone from orchestrator.ts; one delegation stands at the original position", () => {
     const orchSrc = src("agents/orchestrator.ts");
-    expect(orchSrc).toContain("handlePaymentsRoutes(request, url, path, sessionId,");
+    const dispatchSrc = src("agents/orchestrator/routeRequest.ts");
+    expect(dispatchSrc).toContain("handlePaymentsRoutes(request, url, path, sessionId,");
     // Distinctive comment that headed the inline blocks before extraction.
     expect(orchSrc).not.toContain("// Multi-Gateway Payments & DID Management API");
     // No leftover inline conditions for these paths (the agentic-payments
@@ -109,20 +110,21 @@ describe("payments route inventory (extraction #370)", () => {
     const moduleSrc = src("agents/routes/payments.ts");
     expect(moduleSrc).toContain("// Multi-Gateway Payments & DID Management API");
     // Single call site.
-    const calls = [...orchSrc.matchAll(/handlePaymentsRoutes\(request, url, path, sessionId,/g)];
+    const calls = [...dispatchSrc.matchAll(/handlePaymentsRoutes\(request, url, path, sessionId,/g)];
     expect(calls).toHaveLength(1);
   });
 
   it("the delegation sits between the referrals+ads handler and the agentic-payments delegation", () => {
     const orchSrc = src("agents/orchestrator.ts");
-    const myIdx = orchSrc.indexOf("handlePaymentsRoutes(request, url, path, sessionId,");
-    const referralsIdx = orchSrc.indexOf("handleReferralsAdsRoutes(request, url, path, sessionId,");
+    const dispatchSrc = src("agents/orchestrator/routeRequest.ts");
+    const myIdx = dispatchSrc.indexOf("handlePaymentsRoutes(request, url, path, sessionId,");
+    const referralsIdx = dispatchSrc.indexOf("handleReferralsAdsRoutes(request, url, path, sessionId,");
     expect(referralsIdx).toBeGreaterThan(-1);
     expect(myIdx, "payments delegation must follow the referrals+ads handler").toBeGreaterThan(referralsIdx);
     // Upper bound: the agentic-payments DELEGATION CALL (landmark swap by
     // slice #359-17, which extracted the then-inline agentic block into
     // routes/agenticPayments.ts — see file header note).
-    const agenticIdx = orchSrc.indexOf("handleAgenticPaymentsRoutes(request, url, path, sessionId,");
+    const agenticIdx = dispatchSrc.indexOf("handleAgenticPaymentsRoutes(request, url, path, sessionId,");
     expect(agenticIdx).toBeGreaterThan(-1);
     expect(myIdx, "payments delegation must precede the agentic-payments delegation").toBeLessThan(agenticIdx);
     // The agentic block is NOT part of slice 07: its conditions live in

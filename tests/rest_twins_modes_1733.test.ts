@@ -321,7 +321,8 @@ describe("R01 /trading defaults deliberately left alone (#1733, freedom from #17
   });
   it("the orchestrator passes env into the audit routes (global-env level exists)", () => {
     const orchSrc = src("agents/orchestrator.ts");
-    const call = orchSrc.slice(orchSrc.indexOf("handleAuditRoutes(request, url, path, sessionId,"));
+    const dispatchSrc = src("agents/orchestrator/routeRequest.ts");
+    const call = dispatchSrc.slice(dispatchSrc.indexOf("handleAuditRoutes(request, url, path, sessionId,"));
     expect(call.slice(0, call.indexOf("});"))).toContain("env:");
   });
 });

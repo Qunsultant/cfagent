@@ -137,7 +137,8 @@ describe("schedules route inventory (extraction #379)", () => {
 
   it("the original inline block is gone from orchestrator.ts; one delegation stands at the original position", () => {
     const orchSrc = src("agents/orchestrator.ts");
-    expect(orchSrc).toContain("handleSchedulesRoutes(request, url, path, sessionId,");
+    const dispatchSrc = src("agents/orchestrator/routeRequest.ts");
+    expect(dispatchSrc).toContain("handleSchedulesRoutes(request, url, path, sessionId,");
     // No leftover inline conditions for these paths.
     for (const cond of [
       'path.endsWith("/schedules/cancel")',
@@ -156,27 +157,29 @@ describe("schedules route inventory (extraction #379)", () => {
     expect(orchSrc).not.toContain("isTokenExpiredEt");
     expect(orchSrc).not.toContain("runStorageRetention");
     expect(orchSrc).not.toContain("UNIVERSES");
-    // The #111 allow-list constants stayed module-owned by orchestrator.ts
-    // (CREATABLE_SCHEDULE_CALLBACKS is a public export) and are wired into
-    // the delegation context.
-    expect(orchSrc).toContain("export const CREATABLE_SCHEDULE_CALLBACKS");
-    expect(orchSrc).toContain("creatableScheduleCallbacks: CREATABLE_SCHEDULE_CALLBACKS");
-    expect(orchSrc).toContain("accountScopedScheduleCallbacks: ACCOUNT_SCOPED_SCHEDULE_CALLBACKS");
+    // The #111 allow-list constants moved with the dispatcher by #2942:
+    // their definition lives in src/agents/orchestrator/scheduleCallbacks.ts
+    // (CREATABLE_SCHEDULE_CALLBACKS stays a public export of orchestrator.ts
+    // via re-export) and they are wired into the delegation context.
+    expect(src("agents/orchestrator/scheduleCallbacks.ts")).toContain("export const CREATABLE_SCHEDULE_CALLBACKS");
+    expect(orchSrc).toContain("export { CREATABLE_SCHEDULE_CALLBACKS");
+    expect(dispatchSrc).toContain("creatableScheduleCallbacks: CREATABLE_SCHEDULE_CALLBACKS");
+    expect(dispatchSrc).toContain("accountScopedScheduleCallbacks: ACCOUNT_SCOPED_SCHEDULE_CALLBACKS");
     // The delegation is invoked after the screener + research delegation
     // (slice #359-15's reciprocal note: anchor to the delegation call) and
     // before routeRequest's Not-found fallthrough.
-    const prevIdx = orchSrc.indexOf("handleScreenerResearchRoutes(request, url, path, sessionId,");
-    const mineIdx = orchSrc.indexOf("handleSchedulesRoutes(request, url, path, sessionId,");
-    const fallIdx = orchSrc.indexOf('return new Response("Not found", { status: 404 });');
+    const prevIdx = dispatchSrc.indexOf("handleScreenerResearchRoutes(request, url, path, sessionId,");
+    const mineIdx = dispatchSrc.indexOf("handleSchedulesRoutes(request, url, path, sessionId,");
+    const fallIdx = dispatchSrc.indexOf('return new Response("Not found", { status: 404 });');
     expect(prevIdx, "screener/research delegation must exist").toBeGreaterThan(-1);
     expect(mineIdx, "schedules delegation must exist").toBeGreaterThan(-1);
     expect(mineIdx, "delegation must come after the screener/research delegation").toBeGreaterThan(prevIdx);
     expect(fallIdx, "Not-found fallthrough must exist").toBeGreaterThan(-1);
     expect(mineIdx, "delegation must come before the Not-found fallthrough").toBeLessThan(fallIdx);
     // Context wiring is present: orchestrator-owned helpers arrive via the object.
-    expect(orchSrc).toContain("listSchedules: (criteria) => this.listSchedules(criteria)");
-    expect(orchSrc).toContain("getOrm: () => this.getOrm()");
-    expect(orchSrc).toContain("if (schedulesResponse) return schedulesResponse;");
+    expect(dispatchSrc).toContain("listSchedules: (criteria) => deps.listSchedules(criteria)");
+    expect(dispatchSrc).toContain("getOrm: () => deps.getOrm()");
+    expect(dispatchSrc).toContain("if (schedulesResponse) return schedulesResponse;");
   });
 
   it("the module ends its handler with an explicit return null for non-owned paths", () => {

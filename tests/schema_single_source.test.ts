@@ -244,14 +244,16 @@ describe("issue #782: single-source shared mas_* schema", () => {
     // data-layer facade importing ./ormSchema directly; the
     // orchestrator still imports ../orm/schema, which is now the
     // §22 re-export shim over the same canonical module.
+    // #2942: the orchestrator's ensureTables (and its orm/schema import)
+    // moved into orchestrator/tableSchema.ts; the pin follows it.
     const ormFacade = readFileSync(path.join(srcRoot, "data/ormFacade.ts"), "utf-8");
     const orchestrator = readFileSync(
-      path.join(srcRoot, "agents/orchestrator.ts"),
+      path.join(srcRoot, "agents/orchestrator/tableSchema.ts"),
       "utf-8"
     );
     expect(ormFacade).toMatch(/from\s+["']\.\/ormSchema["']/);
     expect(ormFacade).toContain("ensureSharedTable");
-    expect(orchestrator).toMatch(/from\s+["']\.\.\/orm\/schema["']/);
+    expect(orchestrator).toMatch(/from\s+["']\.\.\/\.\.\/orm\/schema["']/);
     expect(orchestrator).toContain("ensureSharedTable");
   });
 

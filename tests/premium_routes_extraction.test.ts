@@ -64,7 +64,8 @@ describe("premium route inventory (extraction #371)", () => {
 
   it("the original inline blocks are gone from orchestrator.ts; one delegation stands at the original position", () => {
     const orchSrc = src("agents/orchestrator.ts");
-    expect(orchSrc).toContain("handlePremiumRoutes(request, url, path, sessionId,");
+    const dispatchSrc = src("agents/orchestrator/routeRequest.ts");
+    expect(dispatchSrc).toContain("handlePremiumRoutes(request, url, path, sessionId,");
     // No leftover inline conditions for these paths (GET|POST on all three).
     for (const cond of [
       'path.includes("/premium/options-scan")',
@@ -79,30 +80,31 @@ describe("premium route inventory (extraction #371)", () => {
     expect(moduleSrc).toContain("// Paid Trading Service: Autonomous Equity Research Report");
     expect(moduleSrc).toContain("// Paid Trading Service: Real-Time Quantitative Anomaly Signals");
     // Single call site.
-    const calls = [...orchSrc.matchAll(/handlePremiumRoutes\(request, url, path, sessionId,/g)];
+    const calls = [...dispatchSrc.matchAll(/handlePremiumRoutes\(request, url, path, sessionId,/g)];
     expect(calls).toHaveLength(1);
   });
 
   it("the delegation sits between the agentic-payments delegation and the E*TRADE block", () => {
     const orchSrc = src("agents/orchestrator.ts");
-    const myIdx = orchSrc.indexOf("handlePremiumRoutes(request, url, path, sessionId,");
+    const dispatchSrc = src("agents/orchestrator/routeRequest.ts");
+    const myIdx = dispatchSrc.indexOf("handlePremiumRoutes(request, url, path, sessionId,");
     // Lower bound: the agentic-payments DELEGATION CALL (landmark swap by
     // slice #359-17, which extracted the then-inline agentic block into
     // routes/agenticPayments.ts).
-    const agenticIdx = orchSrc.indexOf("handleAgenticPaymentsRoutes(request, url, path, sessionId,");
+    const agenticIdx = dispatchSrc.indexOf("handleAgenticPaymentsRoutes(request, url, path, sessionId,");
     expect(agenticIdx).toBeGreaterThan(-1);
     expect(myIdx, "premium delegation must follow the agentic-payments delegation").toBeGreaterThan(agenticIdx);
     // Upper bound: the E*TRADE broker delegation call (the "Environment &
     // E*TRADE Trading APIs" banner moved into src/agents/routes/etradeBroker.ts
     // with slice #359-09, so the landmark anchors on the delegation call per
     // the #405 rule).
-    const etradeIdx = orchSrc.indexOf("handleEtradeBrokerRoutes(request, url, path, sessionId,");
+    const etradeIdx = dispatchSrc.indexOf("handleEtradeBrokerRoutes(request, url, path, sessionId,");
     expect(etradeIdx).toBeGreaterThan(-1);
     expect(myIdx, "premium delegation must precede the E*TRADE block").toBeLessThan(etradeIdx);
     // The E*TRADE block itself stays inline (not part of slice 08).
     // Issue #2482: its environment binding now resolves from the
     // persisted selection, never from the request header.
-    expect(orchSrc).toContain("resolveBrokerEnvironmentFromSettings((key) => this.readSettingRaw(key), this.env)");
+    expect(dispatchSrc).toContain("resolveBrokerEnvironmentFromSettings((key) => deps.readSettingRaw(key), deps.env)");
   });
 });
 

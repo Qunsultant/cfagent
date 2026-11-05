@@ -97,7 +97,8 @@ describe("mcp/chat/nlq route inventory (extraction #364)", () => {
 
   it("the original inline blocks are gone from orchestrator.ts; the delegation stands in their place", () => {
     const orchSrc = src("agents/orchestrator.ts");
-    expect(orchSrc).toContain("handleMcpChatNlqRoutes(request, url, path, sessionId,");
+    const dispatchSrc = src("agents/orchestrator/routeRequest.ts");
+    expect(dispatchSrc).toContain("handleMcpChatNlqRoutes(request, url, path, sessionId,");
     // Distinctive comments that headed the inline blocks before extraction.
     expect(orchSrc).not.toContain("// Model Context Protocol (MCP) Server Endpoint (JSON-RPC 2.0 & Discovery)");
     expect(orchSrc).not.toContain('if (path.endsWith("/mcp")) {');
@@ -110,6 +111,7 @@ describe("mcp/chat/nlq route inventory (extraction #364)", () => {
 
   it("the NLQ webhook spellings were never in routeRequest (single owner is src/server.ts, issue #313)", () => {
     const orchSrc = src("agents/orchestrator.ts");
+    const dispatchSrc = src("agents/orchestrator/routeRequest.ts");
     expect(orchSrc).not.toContain("/nlq/webhook");
     const serverSrc = src("server.ts");
     expect(serverSrc).toContain("handleNlqWebhookRequest");

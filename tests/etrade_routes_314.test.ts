@@ -387,7 +387,8 @@ describe("options strategy discovery — /api/etrade/options/strategy (#314)", (
     expect(src).toContain('path.endsWith("/etrade/options/strategy")');
     const orch = readFileSync("src/agents/orchestrator.ts", "utf8");
     expect(orch).toMatch(/etrade\\\/options\\\/strategy/);
-    expect(orch).toContain("handleEtradeOptionsRoutes(request, url, path, sessionId,");
+    // #2942: the delegation moved with routeRequest into orchestrator/routeRequest.ts.
+    expect(readFileSync("src/agents/orchestrator/routeRequest.ts", "utf8")).toContain("handleEtradeOptionsRoutes(request, url, path, sessionId,");
   });
 
   it("imports trading only through the boundary index (tests/trading-boundary.test.ts)", () => {

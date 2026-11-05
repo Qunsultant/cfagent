@@ -107,6 +107,7 @@ describe("trading-integrations route inventory (extraction #373)", () => {
 
   it("the original inline blocks are gone from orchestrator.ts; one delegation stands at the original position", () => {
     const orchSrc = src("agents/orchestrator.ts");
+    const dispatchSrc = src("agents/orchestrator/routeRequest.ts");
     // No leftover inline conditions for these paths.
     for (const cond of ROUTE_MARKERS) {
       expect(orchSrc, `inline condition should be gone: ${cond}`).not.toContain(cond);
@@ -116,23 +117,24 @@ describe("trading-integrations route inventory (extraction #373)", () => {
     expect(moduleSrc).toContain("// Omnichannel Trading Channel: Inbound Email Trading Agent");
     expect(moduleSrc).toContain("// Omnichannel Trading Channel: Voice Trading Welcome Greeting");
     // Single call site.
-    const calls = [...orchSrc.matchAll(/handleTradingIntegrationsRoutes\(request, url, path, sessionId,/g)];
+    const calls = [...dispatchSrc.matchAll(/handleTradingIntegrationsRoutes\(request, url, path, sessionId,/g)];
     expect(calls).toHaveLength(1);
   });
 
   it("the delegation sits between the broker delegation and the broker-activity delegation", () => {
     const orchSrc = src("agents/orchestrator.ts");
-    const myIdx = orchSrc.indexOf("handleTradingIntegrationsRoutes(request, url, path, sessionId,");
+    const dispatchSrc = src("agents/orchestrator/routeRequest.ts");
+    const myIdx = dispatchSrc.indexOf("handleTradingIntegrationsRoutes(request, url, path, sessionId,");
     // Upper bound: the slice-09 (#359-09) broker delegation call. The
     // requestedEnv binding stays inline below it, but the landmark anchors
     // on the delegation call per the #405 rule.
-    const brokerIdx = orchSrc.indexOf("handleEtradeBrokerRoutes(request, url, path, sessionId,");
+    const brokerIdx = dispatchSrc.indexOf("handleEtradeBrokerRoutes(request, url, path, sessionId,");
     expect(brokerIdx).toBeGreaterThan(-1);
     expect(myIdx, "integrations delegation must follow the broker delegation").toBeGreaterThan(brokerIdx);
     // Lower bound: the slice-09 broker-activity delegation call (the trading
     // channels block's own banner comment moved into this module, so anchoring
     // on the banner would break; the delegation call is stable).
-    const activityIdx = orchSrc.indexOf("handleEtradeBrokerActivityRoutes(request, url, path, sessionId,");
+    const activityIdx = dispatchSrc.indexOf("handleEtradeBrokerActivityRoutes(request, url, path, sessionId,");
     expect(activityIdx).toBeGreaterThan(-1);
     expect(myIdx, "integrations delegation must precede the broker-activity delegation").toBeLessThan(activityIdx);
   });

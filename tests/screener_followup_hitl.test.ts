@@ -250,7 +250,8 @@ describe("approval-release wiring pins", () => {
     expect(src).toContain("submitFollowupDelivery");
   });
   it("the orchestrator keeps the release port but no longer wires async-job HITL ports (#1347)", () => {
-    const src = readFileSync("src/agents/orchestrator.ts", "utf8");
+    // #2942: the reports route context is built in orchestrator/routeRequest.ts.
+    const src = readFileSync("src/agents/orchestrator/routeRequest.ts", "utf8");
     expect(src).toContain("submitFollowupDelivery:");
     expect(src).not.toContain("reportDispatchHitlEnabled:");
     expect(src).not.toContain("createScreenerConfirmation:");

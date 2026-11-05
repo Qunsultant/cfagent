@@ -284,7 +284,8 @@ describe("stock-signals paid shape on current main (#2373 Slice B)", () => {
   });
 
   it("the only route entry is the orchestrator delegation; the worker forwards /api/premium/* with session identity stripped for anonymous traffic", () => {
-    const orchSrc = readFileSync("src/agents/orchestrator.ts", "utf8");
+    // #2942: the delegation moved with routeRequest into orchestrator/routeRequest.ts.
+    const orchSrc = readFileSync("src/agents/orchestrator/routeRequest.ts", "utf8");
     expect(orchSrc.match(/handlePremiumRoutes\(request, url, path, sessionId,/g)).toHaveLength(1);
     const serverSrc = readFileSync("src/server.ts", "utf8");
     expect(serverSrc).toContain('path.startsWith("/api/premium/")');

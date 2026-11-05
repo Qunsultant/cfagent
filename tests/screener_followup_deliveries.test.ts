@@ -303,7 +303,8 @@ describe("delivery chaining (executor)", () => {
 
 describe("inline-suppression wiring pins", () => {
   it("orchestrator passes the async job id into both screener route contexts", () => {
-    const src = readFileSync("src/agents/orchestrator.ts", "utf8");
+    // #2942: both screener route contexts are built in orchestrator/routeRequest.ts.
+    const src = readFileSync("src/agents/orchestrator/routeRequest.ts", "utf8");
     const occurrences = src.split('asyncJobId: request.headers.get("x-async-job-id")').length - 1;
     expect(occurrences).toBeGreaterThanOrEqual(2);
   });

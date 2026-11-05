@@ -45,7 +45,8 @@ describe("schedule systems inventory", () => {
   });
 
   it("tracks CREATABLE_SCHEDULE_CALLBACKS in src/agents/orchestrator.ts", () => {
-    const orchestrator = readFileSync(join(root, "src", "agents", "orchestrator.ts"), "utf8");
+    // #2942: the definition moved to orchestrator/scheduleCallbacks.ts (re-exported from orchestrator.ts).
+    const orchestrator = readFileSync(join(root, "src", "agents", "orchestrator", "scheduleCallbacks.ts"), "utf8");
     const slice = block(
       orchestrator,
       "export const CREATABLE_SCHEDULE_CALLBACKS = [",

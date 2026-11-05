@@ -103,20 +103,22 @@ describe("agentic payments route inventory (extraction #380)", () => {
     // The extracted module is the sole owner of this block now.
     expect(moduleSrc).toContain("// Cloudflare Agentic Payments (x402 & MPP)");
     const orchSrc = src("agents/orchestrator.ts");
+    const dispatchSrc = src("agents/orchestrator/routeRequest.ts");
     expect(orchSrc).not.toContain('path.endsWith("/payments/agentic/wallet")');
     expect(orchSrc).not.toContain('path.endsWith("/payments/agentic/auto-approve-limit")');
     expect(orchSrc).not.toContain("new ETradeAgenticPaymentService");
     expect(orchSrc).not.toContain("ETradeAgenticPaymentService");
     // Single call site.
-    const calls = [...orchSrc.matchAll(/handleAgenticPaymentsRoutes\(request, url, path, sessionId,/g)];
+    const calls = [...dispatchSrc.matchAll(/handleAgenticPaymentsRoutes\(request, url, path, sessionId,/g)];
     expect(calls).toHaveLength(1);
   });
 
   it("the delegation sits between the payments handler and the premium handler", () => {
     const orchSrc = src("agents/orchestrator.ts");
-    const myIdx = orchSrc.indexOf("handleAgenticPaymentsRoutes(request, url, path, sessionId,");
-    const paymentsIdx = orchSrc.indexOf("handlePaymentsRoutes(request, url, path, sessionId,");
-    const premiumIdx = orchSrc.indexOf("handlePremiumRoutes(request, url, path, sessionId,");
+    const dispatchSrc = src("agents/orchestrator/routeRequest.ts");
+    const myIdx = dispatchSrc.indexOf("handleAgenticPaymentsRoutes(request, url, path, sessionId,");
+    const paymentsIdx = dispatchSrc.indexOf("handlePaymentsRoutes(request, url, path, sessionId,");
+    const premiumIdx = dispatchSrc.indexOf("handlePremiumRoutes(request, url, path, sessionId,");
     expect(paymentsIdx).toBeGreaterThan(-1);
     expect(premiumIdx).toBeGreaterThan(-1);
     expect(myIdx, "agentic delegation must follow the payments handler").toBeGreaterThan(paymentsIdx);

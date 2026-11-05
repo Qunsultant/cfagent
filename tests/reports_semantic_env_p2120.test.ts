@@ -75,12 +75,13 @@ const callRoute = (ctx: ReportsRouteContext) =>
 describe("#2120 slice 0 reports semantic env", () => {
   it("mount passes env through to the reports routes (Red pin)", () => {
     const orchSrc = src("agents/orchestrator.ts");
-    const start = orchSrc.indexOf("handleReportsRoutes(request, url, path, sessionId,");
+    const dispatchSrc = src("agents/orchestrator/routeRequest.ts");
+    const start = dispatchSrc.indexOf("handleReportsRoutes(request, url, path, sessionId,");
     expect(start).toBeGreaterThan(-1);
-    const end = orchSrc.indexOf("if (reportsResponse) return reportsResponse;", start);
+    const end = dispatchSrc.indexOf("if (reportsResponse) return reportsResponse;", start);
     expect(end).toBeGreaterThan(start);
-    const mountBlock = orchSrc.slice(start, end);
-    expect(mountBlock).toContain("env: this.env");
+    const mountBlock = dispatchSrc.slice(start, end);
+    expect(mountBlock).toContain("env: deps.env");
   });
 
   it("semantic route returns semantic:true with stubbed bindings through ctx.env", async () => {

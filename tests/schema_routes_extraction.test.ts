@@ -72,19 +72,21 @@ describe("schema route inventory (extraction #380)", () => {
     expect(moduleSrc).toContain("// Schema Introspection & Database Tables via ORM");
     expect(moduleSrc).toContain("// Direct Table Query Execution via ORM");
     const orchSrc = src("agents/orchestrator.ts");
+    const dispatchSrc = src("agents/orchestrator/routeRequest.ts");
     expect(orchSrc).not.toContain('path.endsWith("/schema/tables")');
     expect(orchSrc).not.toContain('path.endsWith("/schema/query")');
     expect(orchSrc).not.toContain("// Schema Introspection & Database Tables via ORM");
     // Single call site.
-    const calls = [...orchSrc.matchAll(/handleSchemaRoutes\(request, url, path, sessionId,/g)];
+    const calls = [...dispatchSrc.matchAll(/handleSchemaRoutes\(request, url, path, sessionId,/g)];
     expect(calls).toHaveLength(1);
   });
 
   it("the delegation sits between the MCP/chat/NLQ handler and the ads/revenue/referrals handler", () => {
     const orchSrc = src("agents/orchestrator.ts");
-    const myIdx = orchSrc.indexOf("handleSchemaRoutes(request, url, path, sessionId,");
-    const mcpIdx = orchSrc.indexOf("handleMcpChatNlqRoutes(request, url, path, sessionId,");
-    const adsIdx = orchSrc.indexOf("handleAdsRevenueReferralsRoutes(request, url, path, sessionId,");
+    const dispatchSrc = src("agents/orchestrator/routeRequest.ts");
+    const myIdx = dispatchSrc.indexOf("handleSchemaRoutes(request, url, path, sessionId,");
+    const mcpIdx = dispatchSrc.indexOf("handleMcpChatNlqRoutes(request, url, path, sessionId,");
+    const adsIdx = dispatchSrc.indexOf("handleAdsRevenueReferralsRoutes(request, url, path, sessionId,");
     expect(mcpIdx).toBeGreaterThan(-1);
     expect(adsIdx).toBeGreaterThan(-1);
     expect(myIdx, "schema delegation must follow the MCP/chat/NLQ handler").toBeGreaterThan(mcpIdx);

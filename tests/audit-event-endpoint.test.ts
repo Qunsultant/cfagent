@@ -169,7 +169,8 @@ describe("POST /api/audit/event (#270)", () => {
     // orchestrator.ts delegates to handleAuditRoutes at the same position.
     const moduleSrc = readFileSync("src/agents/routes/audit.ts", "utf8");
     expect(moduleSrc).toContain('path.endsWith("/audit/event") && request.method === "POST"');
-    const orch = readFileSync("src/agents/orchestrator.ts", "utf8");
+    // #2942: the delegation moved with routeRequest into orchestrator/routeRequest.ts.
+    const orch = readFileSync("src/agents/orchestrator/routeRequest.ts", "utf8");
     expect(orch).toContain("handleAuditRoutes(request, url, path, sessionId,");
   });
 });

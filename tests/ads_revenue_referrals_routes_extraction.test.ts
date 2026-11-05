@@ -167,8 +167,9 @@ describe("ads/revenue/referrals route inventory (extraction #366)", () => {
 
   it("the original inline blocks are gone from orchestrator.ts; both delegations stand at the original positions", () => {
     const orchSrc = src("agents/orchestrator.ts");
-    expect(orchSrc).toContain("handleAdsRevenueReferralsRoutes(request, url, path, sessionId,");
-    expect(orchSrc).toContain("handleReferralsAdsRoutes(request, url, path, sessionId,");
+    const dispatchSrc = src("agents/orchestrator/routeRequest.ts");
+    expect(dispatchSrc).toContain("handleAdsRevenueReferralsRoutes(request, url, path, sessionId,");
+    expect(dispatchSrc).toContain("handleReferralsAdsRoutes(request, url, path, sessionId,");
     // Distinctive comments that headed the original inline blocks.
     for (const comment of [
       "// Referral Categories ORM Management API",
@@ -197,23 +198,23 @@ describe("ads/revenue/referrals route inventory (extraction #366)", () => {
     // inline /schema/query condition into routes/schema.ts, so the lower
     // bound anchors to the handleSchemaRoutes delegation call.
     // Delegation calls are the stable landmarks.
-    const callAIdx = orchSrc.indexOf("handleAdsRevenueReferralsRoutes(request, url, path, sessionId,");
-    expect(callAIdx).toBeGreaterThan(orchSrc.indexOf("handleSchemaRoutes(request, url, path, sessionId,"));
-    expect(callAIdx).toBeLessThan(orchSrc.indexOf("handleAuditRoutes(request, url, path, sessionId,"));
+    const callAIdx = dispatchSrc.indexOf("handleAdsRevenueReferralsRoutes(request, url, path, sessionId,");
+    expect(callAIdx).toBeGreaterThan(dispatchSrc.indexOf("handleSchemaRoutes(request, url, path, sessionId,"));
+    expect(callAIdx).toBeLessThan(dispatchSrc.indexOf("handleAuditRoutes(request, url, path, sessionId,"));
     // Call-site B sits between the memory/reset handler and the payments block.
     // Landmark rule (#405): anchor to the DELEGATION CALL, never to a
     // neighboring domain's inline block — slice 06 (#369) moved the inline
     // `if (path.endsWith("/memory"))` block into
     // src/agents/routes/memoryReset.ts, so anchoring to the inline condition
     // would resolve to indexOf -1 (trivially true, meaningless).
-    const callBIdx = orchSrc.indexOf("handleReferralsAdsRoutes(request, url, path, sessionId,");
-    expect(callBIdx).toBeGreaterThan(orchSrc.indexOf("handleMemoryResetRoutes(request, url, path, sessionId,"));
+    const callBIdx = dispatchSrc.indexOf("handleReferralsAdsRoutes(request, url, path, sessionId,");
+    expect(callBIdx).toBeGreaterThan(dispatchSrc.indexOf("handleMemoryResetRoutes(request, url, path, sessionId,"));
     // Landmark swap (#370): slice 07 extracted the payments block into
     // src/agents/routes/payments.ts, so the "// Multi-Gateway Payments & DID
     // Management API" banner comment is gone from orchestrator.ts — anchoring
     // to it would resolve to indexOf -1. The payments DELEGATION CALL stands
     // at exactly the position the banner occupied.
-    expect(callBIdx).toBeLessThan(orchSrc.indexOf("handlePaymentsRoutes(request, url, path, sessionId,"));
+    expect(callBIdx).toBeLessThan(dispatchSrc.indexOf("handlePaymentsRoutes(request, url, path, sessionId,"));
   });
 });
 
