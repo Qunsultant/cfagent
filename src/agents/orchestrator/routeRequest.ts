@@ -57,6 +57,7 @@ import { handleEtradeBrokerRoutes, handleEtradeBrokerActivityRoutes } from "../r
 import { handleBrokerOrderRoutes } from "../routes/brokerOrders";
 import { handleBrokerOptionsRoutes } from "../routes/brokerOptions";
 import { handleBrokerReadsRoutes } from "../routes/brokerReads";
+import { handleBrokerRiskRoutes } from "../routes/brokerRisk";
 import { handleBrokerScreenRoutes } from "../routes/brokerScreen";
 import { handleEtradeOptionsRoutes } from "../routes/etradeOptions";
 import { handleOptionsProviderGateRoutes } from "../routes/optionsProviderGate";
@@ -500,6 +501,16 @@ export async function routeRequest(deps: RouteRequestDeps, request: Request): Pr
     readSettingRaw: (key) => deps.readSettingRaw(key),
   });
   if (brokerReadsResponse) return brokerReadsResponse;
+
+  // Issue #3324: portfolio risk for the selected broker. The model is the
+  // platform's; the book, Greeks, and spot price come from the broker that
+  // holds them. Declared per broker in the catalogue.
+  const brokerRiskResponse = await handleBrokerRiskRoutes(request, url, path, sessionId, {
+    env: deps.env,
+    getOrm: () => deps.getOrm(),
+    readSettingRaw: (key) => deps.readSettingRaw(key),
+  });
+  if (brokerRiskResponse) return brokerRiskResponse;
 
   // Issue #3272 S2: stock screening for the selected broker. The platform
   // does the math; only the quotes come from the broker, so a broker with

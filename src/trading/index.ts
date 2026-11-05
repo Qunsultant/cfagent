@@ -43,6 +43,7 @@ export * from "./brokerPanels";
 export * from "./optionChainSource";
 export * from "./stockQuoteSource";
 export * from "./neutralMarketScreener";
+export * from "./portfolioRiskSource";
 export * from "./screeningProvider";
 export * from "./dataProviders";
 export * from "./screener";
@@ -51,6 +52,7 @@ export * from "./etrade/client";
 export * from "./etrade/platform";
 export * from "./alpaca/platform";
 export * from "./alpaca/fillLots";
+export * from "./alpaca/occSymbol";
 export * from "./optionsScreener";
 
 // --- boundary surface (#290): every capability external code used via deep paths ---

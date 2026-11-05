@@ -204,7 +204,13 @@ describe("resolvePositionsSnapshot", () => {
       equityPosition({ symbol: "MSFT", quantity: 1, securityType: "OPTN", optionType: "PUT", strikePrice: 400, expirationDate: "2026-11-20" }),
       equityPosition({ symbol: "QQQ", quantity: 3, securityType: "OPTN" }), // no contract detail
     ];
-    const resolvedList = await resolvePositionsSnapshot(fakeEtrade, positions, stubBeta);
+    // Issue #3324: the model reads a source, so the fixture supplies the
+    // chain reader directly instead of a service-shaped double.
+    const source = {
+      optionChain: (symbol: string) =>
+        fakeEtrade.getOptionChains({ symbol }),
+    };
+    const resolvedList = await resolvePositionsSnapshot(source, positions, stubBeta);
     expect(resolvedList[0].greeks).toEqual({ delta: 0.5, gamma: 0.02, theta: -0.05, vega: 0.12, rho: 0.03 });
     expect(resolvedList[0].referencePrice).toBe(800);
     expect(resolvedList[0].beta).toBe(1.5);

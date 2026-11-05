@@ -11,6 +11,7 @@ import { BROKER_CATALOG, type TradingType } from "../brokerCatalog";
 import { deriveLotsFromFills, parseAlpacaFill, type DerivedLots } from "./fillLots";
 import { NeutralMarketScreener } from "../neutralMarketScreener";
 import { platformQuoteSource } from "../stockQuoteSource";
+import { parseOccSymbol } from "./occSymbol";
 import {
   fetchAlpacaOptionContracts,
   fetchAlpacaOptionSnapshots,
@@ -135,7 +136,15 @@ function mapAlpacaAccount(raw: any, isLive: boolean): BrokerAccount {
   };
 }
 
-function mapAlpacaPosition(raw: any): BrokerPosition {
+/**
+ * Issue #3324: an Alpaca option position arrives as an OCC symbol with no
+ * strike/expiry/type fields, which left every option position unresolvable by
+ * the risk model. The OCC symbol IS the contract detail — parsed from the end
+ * of the symbol, never guessed — so the position carries the same three fields
+ * an E*TRADE position does. A symbol that does not parse stays unresolved (the
+ * risk report names it) rather than receiving a manufactured contract.
+ */
+export function mapAlpacaPosition(raw: any): BrokerPosition {
   const symbol = typeof raw.symbol === "string" ? raw.symbol.toUpperCase() : "";
   if (!symbol) {
     throw new Error("Alpaca returned a position without a symbol.");
@@ -149,11 +158,18 @@ function mapAlpacaPosition(raw: any): BrokerPosition {
     ? 0
     : finiteAlpacaNumber(raw.unrealized_intraday_plpc, "unrealized_intraday_plpc");
   const assetClass = typeof raw.asset_class === "string" ? raw.asset_class : "";
+  const isOption = assetClass === "us_option";
+  const contract = isOption ? parseOccSymbol(symbol) : null;
   return {
     symbol,
-    description: `${symbol} (Alpaca)`,
+    description: contract ? `${contract.root} option (Alpaca)` : `${symbol} (Alpaca)`,
+    // Neutral broker codes, not Alpaca's. "OPTN" is what the rest of the
+    // platform (and #34's risk classifier) reads; "us_option" is a vendor word.
+    securityType: assetClass === "us_equity" ? "EQ" : isOption ? "OPTN" : assetClass,
+    ...(contract
+      ? { optionType: contract.optionType, strikePrice: contract.strikePrice, expirationDate: contract.expirationDate }
+      : {}),
     quantity: finiteAlpacaNumber(raw.qty, "qty"),
-    securityType: assetClass === "us_equity" ? "EQ" : assetClass,
     positionType: raw.side === "short" ? "SHORT" : "LONG",
     pricePaid: finiteAlpacaNumber(raw.avg_entry_price, "avg_entry_price"),
     costBasis: finiteAlpacaNumber(raw.cost_basis, "cost_basis"),

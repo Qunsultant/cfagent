@@ -30,6 +30,7 @@ import {
   type CandidateGreekContribution,
   type PortfolioRiskReport,
   type PortfolioRiskTotals,
+  etradePortfolioRiskSource,
 } from "./portfolioRisk";
 
 export const REPAIR_POLICY = {
@@ -397,7 +398,7 @@ export async function generateRepairProposals(
 
   let report: PortfolioRiskReport | null = null;
   try {
-    report = await computePortfolioRisk(etrade);
+    report = await computePortfolioRisk(etradePortfolioRiskSource(etrade));
   } catch {
     // Post-repair Delta stays null; proposals still carry their own terms.
   }
