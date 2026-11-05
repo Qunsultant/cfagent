@@ -190,7 +190,7 @@ export interface AISearchQueryResponse {
   degraded?: AiSearchDegradedReason;
 }
 
-export class ETradeAISearchService {
+export class AiSearchInstanceService {
   constructor(private env?: Env) {}
 
   /**
@@ -336,3 +336,13 @@ export class ETradeAISearchService {
     };
   }
 }
+
+/**
+ * @deprecated superseded by AiSearchInstanceService (issue #3322:
+ * the platform is multi-broker and broker-neutral, and this service
+ * — a generic Cloudflare AI Search instance client with no broker
+ * coupling — must not carry a broker's brand). Retained as a
+ * compatibility alias for one step; the alias is removed in a later
+ * slice. Do not add new callers under this name.
+ */
+export { AiSearchInstanceService as ETradeAISearchService };
