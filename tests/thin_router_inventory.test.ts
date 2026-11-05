@@ -319,6 +319,12 @@
  * E*TRADE block, before trading-integrations) — bringing the
  * delegation sequence to 43 calls and the pinned inventory to
  * 365 entries (measured: 362 + 3).
+ *
+ * Issue #3256 added two — GET/POST /platform/onboarding/state (in
+ * handlePlatformAccountRoutes, after the lookup condition in
+ * source order) — bringing the pinned inventory to 367 entries
+ * (measured: 365 + 2); the delegation sequence is unchanged (same
+ * handler, same position).
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -579,6 +585,10 @@ const EXPECTED_INVENTORY = [
   "handlePlatformAccountRoutes :: endsWith(\"/platform/accounts/self\")",
   "handlePlatformAccountRoutes :: endsWith(\"/platform/accounts/setup\")",
   "handlePlatformAccountRoutes :: endsWith(\"/platform/accounts/lookup\")",
+  // Issue #3256 added two — GET/POST /platform/onboarding/state (in
+  // handlePlatformAccountRoutes, after lookup in source order).
+  "handlePlatformAccountRoutes :: endsWith(\"/platform/onboarding/state\")",
+  "handlePlatformAccountRoutes :: endsWith(\"/platform/onboarding/state\")",
   "handlePlatformChannelRoutes :: includes(\"/platform-channels/\")",
   "handlePremiumRoutes :: includes(\"/premium/options-scan\")",
   "handlePremiumRoutes :: includes(\"/premium/market-research\")",
