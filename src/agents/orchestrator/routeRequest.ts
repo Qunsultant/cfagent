@@ -330,6 +330,9 @@ export async function routeRequest(deps: RouteRequestDeps, request: Request): Pr
   // additionally receives the report store (the MAS tool's sql) and
   // the orchestrator audit (its type accepts the MAS "search"
   // agent value), mirroring the autopilot mount's audit pattern.
+  // Issue #3323: POST /search/ai-agent rides the same mount; it
+  // dispatches over deps.env's AI_SEARCH_AGENT Durable Object
+  // binding and threads this mount's session login as callerLogin.
   const searchHubResponse = await handleSearchHubRoutes(request, url, path, sessionId, {
     env: deps.env,
     userLogin: request.headers.get("x-user-login") || "",
