@@ -25,6 +25,7 @@ export class InMemorySubscriptionAdapter implements SubscriptionStore {
     priceUSD?: unknown;
     periodDays?: unknown;
     includedRuns?: unknown;
+    trialDays?: unknown;
   }): Promise<SubscriptionPlanRecord> {
     const plan = assertPlan(input);
     const id = plan.id || `plan-${crypto.randomUUID().slice(0, 8)}`;
