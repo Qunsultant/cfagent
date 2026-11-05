@@ -27,7 +27,7 @@
  *
  * #CDO-mha7
  */
-import type { StoreReply } from "../security/durableKv";
+import type { StoreReply } from "./durableKv";
 import type {
   AuditResult,
   CreateIaaaAuditEventInput,
