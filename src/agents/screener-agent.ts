@@ -148,6 +148,14 @@ export interface ScreenerRunRequest {
   /** User login for E*TRADE auth scoping. */
   userLogin?: string;
   /**
+   * Issue #3331: the broker whose quotes this run reads, and the environment
+   * it reads them in. Callers that know the selection pass it, and the run
+   * records it — so the saved result and the rendered artefact name the broker
+   * that produced them. Absent, the run keeps the legacy E*TRADE wording
+   * rather than borrowing the currently selected broker's name.
+   */
+  broker?: "etrade" | "alpaca";
+  /**
    * Issue #2842: tenant partition for the quota charge. When
    * absent, the run owner's login is the partition (the #2426
    * rule: captures already partition by owner login, and no
@@ -197,6 +205,15 @@ export interface ScreenerRunResult {
   trigger: "manual" | "scheduled";
   /** Issue #1007: the data provider that produced this run. */
   provider: StockScreenProvider;
+  /**
+   * Issue #3331 (programme #3292): the broker whose quotes produced this run.
+   * Absent on runs recorded before provenance existed — those were E*TRADE's,
+   * the only broker wired then — and the artifact says so rather than
+   * claiming whichever broker happens to be selected now.
+   */
+  broker?: "etrade" | "alpaca";
+  /** Issue #3331: the environment the run read quotes in (TEST = paper). */
+  environment?: "TEST" | "PROD";
   /**
    * Issue #1527: whole-run fallback marker, carried from the request
    * when the run fell back to its provider (see the request field).
@@ -1347,6 +1364,9 @@ export class ScreenerAgent extends PortThink {
         timestamp,
         trigger: req.trigger,
         provider,
+        // Issue #3331: provenance from the request, never from ambient state.
+        ...(req.broker ? { broker: req.broker } : {}),
+        ...(req.environment ? { environment: req.environment } : {}),
         ...(providerFallback ? { providerFallback } : {}),
         universe,
         sector,
@@ -1465,6 +1485,9 @@ export class ScreenerAgent extends PortThink {
         timestamp,
         trigger: req.trigger,
         provider,
+        // Issue #3331: provenance from the request, never from ambient state.
+        ...(req.broker ? { broker: req.broker } : {}),
+        ...(req.environment ? { environment: req.environment } : {}),
         ...(providerFallback ? { providerFallback } : {}),
         universe,
         sector,
