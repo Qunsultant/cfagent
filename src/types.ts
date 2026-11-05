@@ -250,14 +250,14 @@ export interface Env {
   // #3345 — flag-gated corpus indexing into the AI Search instance.
   // Same idiom as AI_SEARCH_REPORT_INDEXING_ENABLED above:
   // "1"/"true"/"on" (case-insensitive) = on; absence = OFF. The var
-  // is deliberately NOT in wrangler.jsonc: the corpus bridge ships
-  // default-off, and enablement is a later config change (the
-  // follow-up enablement step mirroring #3194), never a code
-  // change. Flag-ON makes corpus writes and the corpus sync ALSO
-  // upload each corpus document to the instance via the same
-  // indexing executor (best-effort, never failing the write or the
-  // sync; see src/services/corpusAiSearchIndex.ts). Rollback is
-  // unsetting the var.
+  // is set to "1" in wrangler.jsonc: the enablement landed as #3375
+  // (the follow-up config change mirroring #3194), so the corpus
+  // bridge is LIVE in production. Flag-ON makes corpus writes and
+  // the corpus sync ALSO upload each corpus document to the
+  // instance via the same indexing executor (best-effort, never
+  // failing the write or the sync; see
+  // src/services/corpusAiSearchIndex.ts). Rollback is unsetting
+  // the var — no code change, no data migration.
   AI_SEARCH_CORPUS_INDEXING_ENABLED?: string;
   // Comma-separated provider ids. Default when wiring is on: "github".
   // An id with no registered adapter is ignored, never a fallback.

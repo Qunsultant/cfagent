@@ -243,6 +243,13 @@
     // then redeploying.
     "KNOWLEDGE_SERVING_ENABLED": "1",
     "AI_SEARCH_REPORT_INDEXING_ENABLED": "1",
+    // Issue #3375 — corpus indexing enablement: the #3345 corpus
+    // items-API bridge is ON in production. Corpus writes and the
+    // corpus sync ALSO upload each corpus document to the instance
+    // through the bridge (best-effort, never failing the write or
+    // the sync), and the Corpus tab reports per-item indexing state
+    // as indexed. Rollback is unsetting this var and redeploying.
+    "AI_SEARCH_CORPUS_INDEXING_ENABLED": "1",
     "APP_NAME": "NextGenTP",
     // Issue #2419 — externalized polling cadences (AOP). All optional;
     // absence means the pollingConfig defaults apply. Milliseconds,
