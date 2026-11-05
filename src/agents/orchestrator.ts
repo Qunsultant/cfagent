@@ -76,7 +76,7 @@ import { createSocialBriefStoreFromNamespace } from "./social/briefStore";
 import { fetchSlackPost } from "./social/delivery";
 import { postSlackText } from "./resourceGoals";
 import { renderChannelText } from "../outcomes/outcomeAspects";
-import type { DoNamespaceLike } from "../security/durableKv";
+import type { DoNamespaceLike } from "../data/durableKv";
 import { createKvMembershipStore } from "../security/iaaaMembershipStore";
 import { isLoginShaped } from "../security/serviceIdentity";
 import { sessionStore } from "../security/session";
