@@ -16,6 +16,7 @@
 import type { Env } from "../types";
 import {
   KNOWLEDGE_CATEGORIES,
+  corpusBucketKeyFromIndexKey,
   isKnowledgeServingEnabled,
   servedFileLinkFor,
 } from "./knowledgeCorpus";
@@ -140,7 +141,15 @@ export function mapAiSearchChunks(chunks: readonly unknown[], flagOn: boolean): 
       (KNOWLEDGE_CATEGORIES as readonly string[]).includes(rawCategory)
         ? (rawCategory as AISearchResultItem["category"])
         : undefined;
-    const bucketKey = typeof c.key === "string" ? c.key : undefined;
+    const rawKey = typeof c.key === "string" ? c.key : undefined;
+    // Issue #3345: an items-API corpus chunk carries the corpus
+    // document id (`corpus:<bucketKey>`) as its key; resolve it to
+    // the servable bucket key so bucketKey / servedFileLink render
+    // exactly as they do for an R2-source corpus chunk. Any other
+    // key passes through verbatim.
+    const bucketKey = rawKey
+      ? (corpusBucketKeyFromIndexKey(rawKey) ?? rawKey)
+      : undefined;
     const servedFileLink = bucketKey ? servedFileLinkFor(bucketKey) : undefined;
     return {
       id,
