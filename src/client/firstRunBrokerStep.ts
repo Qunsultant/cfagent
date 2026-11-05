@@ -7,24 +7,27 @@
  * Alpaca tenant that is a screen asking the user to authorize a broker they do
  * not trade on — the last E*TRADE-only journey in the product (#3292).
  *
- * The decision is derived, not listed: the broker catalogue declares each
- * broker's `credentialKind` (#3232), and a key-pair broker signs in from its
- * panel in the trading view (#3351 owns that flow). This module answers only
- * what the wizard needs, and answers it for every broker, so a third broker
- * cannot arrive without one.
+ * This module is a pure decision: the caller (a `.tsx`, which may read the broker
+ * catalogue) passes the broker id, its label and its declared credential kind.
+ * That keeps `src/client/*.ts` out of `src/trading` (the boundary, #290) while
+ * keeping the rule in one testable place — and it means a third broker needs a
+ * catalogue entry, not a new branch here.
  */
-import {
-  BROKER_CATALOG,
-  brokerCredentialGuidance,
-  isBrokerId,
-  type BrokerId,
-} from "../trading/brokerCatalog";
 
 /** How this broker is connected, as the wizard needs to know it. */
 export type FirstRunBrokerMode = "oauth" | "key_pair";
 
+export interface FirstRunBrokerStepInput {
+  /** The stored selection, unvalidated: this function does not trust it. */
+  readonly broker: unknown;
+  /** The broker's own label, from the catalogue. */
+  readonly label: string;
+  /** The catalogue's `credentialKind` for this broker. */
+  readonly credentialKind: string;
+}
+
 export interface FirstRunBrokerStep {
-  readonly broker: BrokerId;
+  readonly broker: string;
   readonly label: string;
   readonly mode: FirstRunBrokerMode;
   /**
@@ -36,16 +39,19 @@ export interface FirstRunBrokerStep {
 }
 
 /**
- * An unrecognised stored selection resolves as E*TRADE, the same rule the hub
- * and the section nav apply — one fallback, expressed once per consumer rather
- * than three different defaults.
+ * The wizard's view of one broker.
+ *
+ * `broker === "etrade"` is the same branch the hub uses to pick a panel: an
+ * unrecognised stored id is not E*TRADE, so it must not be offered E*TRADE's
+ * authorization. The caller resolves the label and credential kind for the broker
+ * it decided on, so this function never invents either.
  */
-export function firstRunBrokerStep(broker: unknown): FirstRunBrokerStep {
-  const id: BrokerId = isBrokerId(broker) ? (broker as BrokerId) : "etrade";
-  const mode: FirstRunBrokerMode = brokerCredentialGuidance(id).kind === "api_key_pair" ? "key_pair" : "oauth";
+export function firstRunBrokerStep(input: FirstRunBrokerStepInput): FirstRunBrokerStep {
+  const broker = input.broker === "etrade" ? "etrade" : "alpaca";
+  const mode: FirstRunBrokerMode = input.credentialKind === "api_key_pair" ? "key_pair" : "oauth";
   return {
-    broker: id,
-    label: BROKER_CATALOG[id].label,
+    broker,
+    label: input.label,
     mode,
     connectsInWizard: mode === "oauth",
   };

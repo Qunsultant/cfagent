@@ -13,8 +13,11 @@ import { readFileSync } from "node:fs";
 import { firstRunBrokerStep } from "../src/client/firstRunBrokerStep";
 
 describe("first-run step 3 follows the broker (#3371)", () => {
+  const etrade = { broker: "etrade", label: "E*TRADE", credentialKind: "oauth1_per_login" } as const;
+  const alpaca = { broker: "alpaca", label: "Alpaca", credentialKind: "api_key_pair" } as const;
+
   it("keeps E*TRADE's OAuth connect in the wizard", () => {
-    expect(firstRunBrokerStep("etrade")).toEqual({
+    expect(firstRunBrokerStep(etrade)).toEqual({
       broker: "etrade",
       label: "E*TRADE",
       mode: "oauth",
@@ -23,7 +26,7 @@ describe("first-run step 3 follows the broker (#3371)", () => {
   });
 
   it("points an Alpaca tenant at the panel, not at an E*TRADE authorization", () => {
-    expect(firstRunBrokerStep("alpaca")).toEqual({
+    expect(firstRunBrokerStep(alpaca)).toEqual({
       broker: "alpaca",
       label: "Alpaca",
       mode: "key_pair",
@@ -31,9 +34,15 @@ describe("first-run step 3 follows the broker (#3371)", () => {
     });
   });
 
-  it("treats an unknown selection as E*TRADE, as every other consumer does", () => {
-    expect(firstRunBrokerStep("sandbox")).toEqual(firstRunBrokerStep("etrade"));
-    expect(firstRunBrokerStep(undefined)).toEqual(firstRunBrokerStep("etrade"));
+  it("does not offer E*TRADE's authorization for an unrecognised selection", () => {
+    // The hub renders Alpaca's panel for anything that is not "etrade"; the
+    // wizard must not contradict it by offering an E*TRADE redirect.
+    expect(firstRunBrokerStep({ broker: "sandbox", label: "Alpaca", credentialKind: "api_key_pair" })).toEqual(
+      firstRunBrokerStep(alpaca),
+    );
+    expect(firstRunBrokerStep({ broker: undefined, label: "Alpaca", credentialKind: "api_key_pair" }).connectsInWizard).toBe(
+      false,
+    );
   });
 });
 
