@@ -65,6 +65,7 @@ import {
 } from "./firstRunApi";
 import { readTenantProvidersState } from "./tenantProviders";
 import { firstRunBrokerStep } from "./firstRunBrokerStep";
+import { BROKER_CATALOG, brokerCredentialGuidance, isBrokerId } from "../trading/brokerCatalog";
 import { listPlans, subscriptionTrial, type PlanView } from "./commercialApi";
 import { NotificationPreferencesPanel } from "./NotificationPreferencesPanel";
 
@@ -132,7 +133,15 @@ export function FirstRunScreen({ userLogin, initialStep, onComplete, onDismiss, 
    * poll and no redirect to offer — asking the user to "Connect E*TRADE" was the
    * one journey still written for a single broker.
    */
-  const brokerStep = firstRunBrokerStep(readTenantProvidersState().brokerId);
+  const storedBrokerId = readTenantProvidersState().brokerId;
+  // The same branch the hub uses to pick a panel, so an unrecognised id cannot
+  // be offered E*TRADE's authorization here while the hub renders Alpaca's panel.
+  const knownBrokerId = isBrokerId(storedBrokerId) && storedBrokerId === "etrade" ? "etrade" : "alpaca";
+  const brokerStep = firstRunBrokerStep({
+    broker: storedBrokerId,
+    label: BROKER_CATALOG[knownBrokerId].label,
+    credentialKind: brokerCredentialGuidance(knownBrokerId).kind,
+  });
   const [prefsSaved, setPrefsSaved] = useState(false);
   const [summary, setSummary] = useState<{
     identity: PlatformIdentityView;
