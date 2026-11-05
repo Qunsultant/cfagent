@@ -363,6 +363,7 @@ const HANDLER_FILE: Record<string, string> = {
   "handleBrokerOrderRoutes": "brokerOrders.ts",
   "handleBrokerOptionsRoutes": "brokerOptions.ts",
   "handleBrokerReadsRoutes": "brokerReads.ts",
+  "handleBrokerRiskRoutes": "brokerRisk.ts",
   "handleBrokerScreenRoutes": "brokerScreen.ts",
   "handleBrokerGateRoutes": "brokerGate.ts",
   "handleEtradeBrokerActivityRoutes": "etradeBroker.ts",
@@ -414,6 +415,7 @@ const EXPECTED_DELEGATIONS = [
   "handlePremiumRoutes",
   "handleBrokerOptionsRoutes",
   "handleBrokerReadsRoutes",
+  "handleBrokerRiskRoutes",
   "handleBrokerScreenRoutes",
   "handleBrokerGateRoutes",
   "handleEtradeBrokerRoutes",
@@ -614,6 +616,11 @@ const EXPECTED_INVENTORY = [
   // Issue #3293: status and quote reads are neutral too.
   "handleBrokerReadsRoutes :: endsWith(\"/broker/status\")",
   "handleBrokerReadsRoutes :: endsWith(\"/broker/quote\")",
+  // Issue #3324: the risk model runs on the selected broker's book.
+  "handleBrokerRiskRoutes :: endsWith(\"/broker/portfolio-risk\")",
+  "handleBrokerRiskRoutes :: endsWith(\"/broker/portfolio-risk/evaluate\")",
+  "handleBrokerRiskRoutes :: endsWith(\"/broker/portfolio-risk/correlation\")",
+  "handleBrokerRiskRoutes :: endsWith(\"/broker/portfolio-risk/size\")",
   // Issue #3272 S2: the neutral stock screen.
   "handleBrokerScreenRoutes :: endsWith(\"/broker/screen\")",
   "handleBrokerGateRoutes :: includes(\"/etrade/\")",
