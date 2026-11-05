@@ -853,7 +853,7 @@ export function SettingsMenu({
             )}
             {selectedBrokerId === "alpaca" && showAlpacaSignIn && (
               <div className="etrade-panel-section">
-                <AlpacaSignInCard />
+                <AlpacaSignInCard activeEnv={isLive ? "PROD" : "TEST"} />
               </div>
             )}
           </div>
