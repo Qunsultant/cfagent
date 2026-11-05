@@ -4,10 +4,16 @@
  * Implements ITradingPlatform for Alpaca Trading API v2
  */
 
-import type { Env, BrokerQuote, BrokerAccount, BrokerPosition, BrokerOrderDraft, BrokerOrderExecutionResult, BrokerStatus } from "../../types";
+import type { Env, BrokerQuote, BrokerAccount, BrokerPosition, BrokerOrderDraft, BrokerOrderExecutionResult, BrokerStatus, BrokerOptionChain, BrokerOptionContract, BrokerOptionExpireDate } from "../../types";
 import type { DatabaseORM } from "../../orm";
 import type { ITradingPlatform, OrderPreviewParams, PlaceOrderParams } from "../interfaces";
 import { BROKER_CATALOG, type TradingType } from "../brokerCatalog";
+import {
+  fetchAlpacaOptionContracts,
+  fetchAlpacaOptionSnapshots,
+  displayPriceFor,
+  type AlpacaOptionsConfig,
+} from "./optionsData";
 import { AlpacaMarketDataProvider } from "../../services/marketDataResearch";
 import { AGENT_DIDS, createDidAttestationSync, getUserDid } from "../../agents/did";
 
@@ -19,6 +25,18 @@ import { AGENT_DIDS, createDidAttestationSync, getUserDid } from "../../agents/d
  * status and placement can never disagree about paper vs live.
  */
 function resolveAlpacaTradingBase(env: Env): { baseUrl: string; isLive: boolean } {
+  // Issue #3233: an explicit trading type wins over inference. Without it the
+  // legacy rule stands (paper host = paper), so nothing silently changes for
+  // an environment that only sets ALPACA_BASE_URL.
+  const explicit = String(env.ALPACA_TRADING_TYPE ?? "").trim().toLowerCase();
+  if (explicit === "paper") {
+    return { baseUrl: "https://paper-api.alpaca.markets", isLive: false };
+  }
+  if (explicit === "live") {
+    const configured = env.ALPACA_BASE_URL;
+    const liveUrl = configured && !configured.includes("paper-api") ? configured : "https://api.alpaca.markets";
+    return { baseUrl: liveUrl, isLive: true };
+  }
   const baseUrl = env.ALPACA_BASE_URL || "https://paper-api.alpaca.markets";
   return { baseUrl, isLive: !baseUrl.includes("paper-api") };
 }
@@ -248,6 +266,162 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
       throw new Error(mapAlpacaFailureToBusiness(res.httpStatus, "account"));
     }
     return [mapAlpacaAccount(res.account, resolveAlpacaTradingBase(this.env).isLive)];
+  }
+
+  /**
+   * Issue #3233: Alpaca's options data plane. Configuration comes from the same
+   * resolver the trading calls use, so a paper selection never reads live data
+   * by accident. `ALPACA_OPTIONS_FEED` selects the feed (indicative by default,
+   * which needs no OPRA subscription).
+   */
+  private optionsConfig(): AlpacaOptionsConfig {
+    const { baseUrl } = resolveAlpacaTradingBase(this.env);
+    return {
+      tradingUrl: baseUrl,
+      dataUrl: this.env.ALPACA_DATA_URL || "https://data.alpaca.markets",
+      headers: {
+        "APCA-API-KEY-ID": this.env.ALPACA_API_KEY || this.env.ALPACA_API_KEY_ID || "",
+        "APCA-API-SECRET-KEY": this.env.ALPACA_SECRET_KEY || this.env.ALPACA_API_SECRET_KEY || "",
+      },
+      feed: this.env.ALPACA_OPTIONS_FEED,
+    };
+  }
+
+  /**
+   * Expiry dates for one underlying, derived from the contracts Alpaca lists.
+   * Distinct and ascending; `expiryType` is echoed back when the caller asked
+   * for one (Alpaca does not label weekly vs monthly here, so it is not
+   * invented).
+   */
+  async getOptionExpireDates(
+    symbol: string,
+    expiryType?: string,
+    requestBudget?: import("../interfaces").OptionRequestBudget,
+  ): Promise<BrokerOptionExpireDate[]> {
+    if (requestBudget && !requestBudget.tryConsume()) {
+      throw new Error("Alpaca option expire-date request budget exhausted for this run.");
+    }
+    const contracts = await fetchAlpacaOptionContracts(this.optionsConfig(), { symbol });
+    const seen = new Set<string>();
+    const dates: BrokerOptionExpireDate[] = [];
+    for (const row of contracts) {
+      if (seen.has(row.expirationDate)) continue;
+      seen.add(row.expirationDate);
+      const [year, month, day] = row.expirationDate.split("-").map((part) => Number(part));
+      if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) continue;
+      dates.push({ year, month, day, ...(expiryType ? { expiryType } : {}) });
+    }
+    dates.sort((a, b) => a.year - b.year || a.month - b.month || a.day - b.day);
+    return dates;
+  }
+
+  /**
+   * One option chain, assembled from contracts + snapshots.
+   *
+   * Honesty rules (see optionsData.ts): a contract with no two-sided quote or no
+   * displayable price is omitted rather than emitted with invented numbers;
+   * greeks and IV appear only when Alpaca sends them.
+   */
+  async getOptionChains(
+    params: {
+      symbol: string;
+      expiryYear?: number;
+      expiryMonth?: number;
+      expiryDay?: number;
+      strikePrice?: number;
+      noOfStrikes?: number;
+      includeWeekly?: boolean;
+      chainType?: "CALL" | "PUT" | "CALLPUT";
+      includeRawResponse?: boolean;
+    },
+    requestBudget?: import("../interfaces").OptionRequestBudget,
+  ): Promise<BrokerOptionChain | null> {
+    if (requestBudget && !requestBudget.tryConsume()) {
+      throw new Error("Alpaca option chain request budget exhausted for this run.");
+    }
+    const cfg = this.optionsConfig();
+    const contracts = await fetchAlpacaOptionContracts(cfg, {
+      symbol: params.symbol,
+      expiryYear: params.expiryYear,
+      expiryMonth: params.expiryMonth,
+      expiryDay: params.expiryDay,
+      strikePrice: params.strikePrice,
+      chainType: params.chainType,
+    });
+    if (contracts.length === 0) return null;
+
+    if (requestBudget && !requestBudget.tryConsume()) {
+      throw new Error("Alpaca option snapshot request budget exhausted for this run.");
+    }
+    const symbols = contracts.map((row) => row.symbol);
+    const snapshots = await fetchAlpacaOptionSnapshots(cfg, params.symbol, symbols);
+
+    const underlying = await this.getQuote(params.symbol);
+    const byStrike = new Map<number, { call?: BrokerOptionContract; put?: BrokerOptionContract }>();
+    let matched = 0;
+
+    for (const row of contracts) {
+      const quote = snapshots.get(row.symbol);
+      if (!quote) continue;
+      if (quote.bid === undefined || quote.ask === undefined) continue;
+      const lastPrice = displayPriceFor(quote);
+      if (lastPrice === undefined) continue;
+      const contract: BrokerOptionContract = {
+        optionType: row.type === "call" ? "CALL" : "PUT",
+        strikePrice: row.strikePrice,
+        symbol: row.symbol,
+        bid: quote.bid,
+        ask: quote.ask,
+        lastPrice,
+        ...(quote.volume !== undefined ? { volume: quote.volume } : {}),
+        ...(quote.delta !== undefined ? { delta: quote.delta } : {}),
+        ...(quote.gamma !== undefined ? { gamma: quote.gamma } : {}),
+        ...(quote.theta !== undefined ? { theta: quote.theta } : {}),
+        ...(quote.vega !== undefined ? { vega: quote.vega } : {}),
+        ...(quote.rho !== undefined ? { rho: quote.rho } : {}),
+        ...(quote.impliedVolatility !== undefined
+          ? { impliedVolatility: quote.impliedVolatility }
+          : {}),
+      };
+      const pair = byStrike.get(row.strikePrice) ?? {};
+      if (row.type === "call") pair.call = contract;
+      else pair.put = contract;
+      byStrike.set(row.strikePrice, pair);
+      matched++;
+    }
+
+    if (matched === 0) return null;
+
+    let strikes = [...byStrike.keys()].sort((a, b) => a - b);
+    if (params.noOfStrikes && strikes.length > params.noOfStrikes) {
+      // Centre the window on the underlying so the returned strikes are the
+      // ones around the money, the same intent as E*TRADE's noOfStrikes.
+      const pivot = strikes.reduce((best, s) =>
+        Math.abs(s - underlying.lastPrice) < Math.abs(best - underlying.lastPrice) ? s : best,
+      );
+      const half = Math.floor(params.noOfStrikes / 2);
+      const idx = strikes.indexOf(pivot);
+      strikes = strikes.slice(Math.max(0, idx - half), Math.max(0, idx - half) + params.noOfStrikes);
+    }
+
+    return {
+      symbol: underlying.symbol,
+      underlyingPrice: underlying.lastPrice,
+      selectedExpiry:
+        params.expiryYear && params.expiryMonth && params.expiryDay
+          ? { year: params.expiryYear, month: params.expiryMonth, day: params.expiryDay }
+          : undefined,
+      pairs: strikes.map((strike) => byStrike.get(strike) ?? {}),
+    };
+  }
+
+  /** Verbatim live read with the error carried alongside (#3233 parity with E*TRADE). */
+  async getQuoteDetailed(symbol: string): Promise<{ quote: BrokerQuote | null; error: string | null }> {
+    try {
+      return { quote: await this.getQuote(symbol), error: null };
+    } catch (err: any) {
+      return { quote: null, error: err?.message ? String(err.message) : "Alpaca quote unavailable." };
+    }
   }
 
   async getPositions(): Promise<{ account: BrokerAccount; positions: BrokerPosition[] }> {
