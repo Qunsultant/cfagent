@@ -26,7 +26,7 @@
 import { TradingPlatformRegistry, ROUTED_BROKER_IDS } from "../../trading";
 import type { EtradeBrokerRouteContext } from "./etradeBroker";
 import { unauthenticatedResponse } from "./routeIdentity";
-import { resolveBrokerEnvironmentFromSettings } from "./brokerEnvironment";
+import { resolveTradeEnvironmentFromSettings } from "./brokerEnvironment";
 import {
   completeEtradeOrderPreview,
   completeEtradeOrderRejection,
@@ -107,7 +107,7 @@ export async function handleBrokerOrderRoutes(
   ctx: BrokerOrderRouteContext,
 ): Promise<Response | null> {
   const requestedEnv: "TEST" | "PROD" | undefined =
-    resolveBrokerEnvironmentFromSettings(ctx.readSettingRaw, ctx.env);
+    resolveTradeEnvironmentFromSettings(ctx.readSettingRaw, ctx.env);
 
   // Broker-routed order preview
   if (path.endsWith("/broker/order/preview") && request.method === "POST") {

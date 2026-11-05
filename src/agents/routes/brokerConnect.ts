@@ -35,7 +35,7 @@ import {
   verifyAlpacaAccount,
   type AlpacaSide,
 } from "../../trading";
-import { resolveBrokerEnvironmentFromSettings } from "./brokerEnvironment";
+import { resolveTradeEnvironmentFromSettings } from "./brokerEnvironment";
 
 export interface BrokerConnectRouteContext {
   env: Env;
@@ -237,7 +237,7 @@ export async function handleBrokerConnectRoutes(
 /** The raw environment selection, for the same base-URL rule the adapter uses. */
 function resolveEnvironmentFor(ctx: BrokerConnectRouteContext): string {
   const readSetting = (key: string) => ctx.readSettingRaw(key) ?? null;
-  return resolveBrokerEnvironmentFromSettings(readSetting, ctx.env);
+  return resolveTradeEnvironmentFromSettings(readSetting, ctx.env);
 }
 
 /** Exported for the pin tests: the code each refusal maps to. */
