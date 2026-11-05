@@ -195,7 +195,7 @@ export const BROKER_CATALOG = {
       // broker's. The adapter implements `screenMarkets` on its own quotes, so
       // the capability is real rather than provider-side wishful thinking.
       marketScreening: true,
-      optionsScanner: false,
+      optionsScanner: true,
       ivHistory: true,
     },
     statusVocabulary: {

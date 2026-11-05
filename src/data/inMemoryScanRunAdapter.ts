@@ -14,9 +14,17 @@ import {
   type ScanRunStoreOptions,
   type ScanRunSummary,
   type StoredScanRun,
+  normalizeScanRunBroker,
+  type ScanRunBroker,
 } from "./scanRunPorts";
 
-function summarize(id: string, result: OpportunityScanResult, userLogin?: string, trigger?: "manual" | "scheduled"): ScanRunSummary {
+function summarize(
+  id: string,
+  result: OpportunityScanResult,
+  userLogin?: string,
+  trigger?: "manual" | "scheduled",
+  broker?: ScanRunBroker,
+): ScanRunSummary {
   return {
     id,
     generatedAt: result.generatedAt,
@@ -32,6 +40,8 @@ function summarize(id: string, result: OpportunityScanResult, userLogin?: string
     // Issue #3264: same trigger-through-summary_json rule as the
     // DO-SQLite adapter — no migration, older rows lack the field.
     ...(trigger ? { trigger } : {}),
+    // Issue #3327: provenance rides inside the summary object.
+    broker: normalizeScanRunBroker(broker),
     ...(userLogin !== undefined ? { userLogin } : {}),
   };
 }
@@ -59,18 +69,27 @@ export class InMemoryScanRunStore implements ScanRunStore {
     this.maxRows = options.maxRows ?? SCAN_RUN_MAX_ROWS;
   }
 
-  async save(result: OpportunityScanResult, options: { userLogin?: string; id?: string; trigger?: "manual" | "scheduled" } = {}): Promise<StoredScanRun> {
-    const run: StoredScanRun = { ...summarize(options.id ?? this.idFactory(), result, options.userLogin, options.trigger), result };
+  async save(
+    result: OpportunityScanResult,
+    options: { userLogin?: string; id?: string; trigger?: "manual" | "scheduled"; broker?: ScanRunBroker } = {},
+  ): Promise<StoredScanRun> {
+    const run: StoredScanRun = {
+      ...summarize(options.id ?? this.idFactory(), result, options.userLogin, options.trigger, options.broker),
+      result,
+    };
     this.runs.push(run);
     await this.prune(new Date(result.generatedAt));
     return run;
   }
 
-  async list(options: { limit?: number; offset?: number; userLogin?: string } = {}): Promise<ScanRunSummary[]> {
+  async list(
+    options: { limit?: number; offset?: number; userLogin?: string; broker?: ScanRunBroker } = {},
+  ): Promise<ScanRunSummary[]> {
     const limit = options.limit ?? 25;
     const offset = options.offset ?? 0;
     return [...this.runs]
       .filter((r) => visibleToCaller(r, options.userLogin))
+      .filter((r) => (options.broker ? normalizeScanRunBroker(r.broker) === options.broker : true))
       .sort(byNewestFirst)
       .slice(offset, offset + limit)
       .map(({ result: _result, ...summary }) => summary);
