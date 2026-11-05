@@ -126,19 +126,29 @@ export function deriveCorpusIndexText(
   return body ? `${header}\n\n${body}` : header;
 }
 
+const HTML_ENTITIES: Record<string, string> = {
+  nbsp: " ",
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  "#39": "'",
+};
+
 /** Strip HTML to its text: script/style bodies are not document text. */
 function htmlToText(html: string): string {
   return html
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, " ")
-    .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, " ")
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script[^>]*>/gi, " ")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style[^>]*>/gi, " ")
     .replace(/<!--[\s\S]*?-->/g, " ")
     .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;|&apos;/gi, "'")
+    // Single-pass entity decoding: a source "&amp;lt;" is the literal
+    // text "&lt;", never a "<" — decoding must not feed itself.
+    .replace(
+      /&(nbsp|amp|lt|gt|quot|apos|#39);/gi,
+      (match, name: string) => HTML_ENTITIES[name.toLowerCase()] ?? match
+    )
     .replace(/\s+/g, " ")
     .trim();
 }
