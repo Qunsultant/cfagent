@@ -18,6 +18,12 @@ export const LEGACY_OPTION_SCREEN_ENDPOINT = "/api/trading/options/screen";
 export const NEUTRAL_OPTION_SCREEN_ENDPOINT = "/api/broker/options/screen";
 export const LEGACY_STOCK_SCREEN_ENDPOINT = "/api/etrade/screen";
 export const NEUTRAL_STOCK_SCREEN_ENDPOINT = "/api/broker/screen";
+export const LEGACY_STATUS_ENDPOINT = "/api/etrade/status";
+export const NEUTRAL_STATUS_ENDPOINT = "/api/broker/status";
+export const LEGACY_QUOTE_ENDPOINT = "/api/etrade/quote";
+export const NEUTRAL_QUOTE_ENDPOINT = "/api/broker/quote";
+export const LEGACY_POSITIONS_ENDPOINT = "/api/etrade/positions";
+export const NEUTRAL_POSITIONS_ENDPOINT = "/api/broker/positions";
 
 /** The options-screen endpoint for a broker selection (defaults to the live one). */
 export function optionScreenEndpoint(brokerId: string = readTenantProvidersState().brokerId): string {
@@ -27,4 +33,25 @@ export function optionScreenEndpoint(brokerId: string = readTenantProvidersState
 /** The stock-screen endpoint for a broker selection (defaults to the live one). */
 export function stockScreenEndpoint(brokerId: string = readTenantProvidersState().brokerId): string {
   return brokerId === "etrade" ? LEGACY_STOCK_SCREEN_ENDPOINT : NEUTRAL_STOCK_SCREEN_ENDPOINT;
+}
+
+/** Issue #3294: the hub reads follow the same rule. */
+export function statusEndpoint(brokerId: string = readTenantProvidersState().brokerId): string {
+  return brokerId === "etrade" ? LEGACY_STATUS_ENDPOINT : NEUTRAL_STATUS_ENDPOINT;
+}
+
+export function quoteEndpoint(brokerId: string = readTenantProvidersState().brokerId): string {
+  return brokerId === "etrade" ? LEGACY_QUOTE_ENDPOINT : NEUTRAL_QUOTE_ENDPOINT;
+}
+
+export function positionsEndpoint(brokerId: string = readTenantProvidersState().brokerId): string {
+  return brokerId === "etrade" ? LEGACY_POSITIONS_ENDPOINT : NEUTRAL_POSITIONS_ENDPOINT;
+}
+
+/**
+ * Diagnostics read E*TRADE OAuth state and have no neutral equivalent: the
+ * hub must not call them for another broker. Null means "do not call".
+ */
+export function diagnosticsEndpoint(brokerId: string = readTenantProvidersState().brokerId): string | null {
+  return brokerId === "etrade" ? "/api/etrade/diagnostics" : null;
 }
