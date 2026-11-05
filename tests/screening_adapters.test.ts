@@ -7,8 +7,14 @@ import {
 } from "../src/client/screeningAdapters";
 
 describe("provider- and asset-class screening adapters", () => {
-  it("registers the current E*TRADE and Yahoo stock-screening routes", () => {
-    expect(getScreeningProviders("stocks").map(({ id }) => id)).toEqual(["etrade", "yahoo-finance"]);
+  it("registers the current E*TRADE, Yahoo and neutral stock-screening routes", () => {
+    // Issue #3272: the neutral route joins as a first-class stock provider,
+    // so a tenant on another broker is no longer routed to an E*TRADE path.
+    expect(getScreeningProviders("stocks").map(({ id }) => id)).toEqual([
+      "etrade",
+      "yahoo-finance",
+      "selected-broker",
+    ]);
     expect(SCREENING_PROVIDERS.find(({ id }) => id === "etrade")?.endpointByAssetClass.stocks)
       .toBe("/api/etrade/screen");
   });
