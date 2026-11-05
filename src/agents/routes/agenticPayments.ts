@@ -209,6 +209,7 @@ import {
   toPlatformIdentityView,
 } from "../../services/platformIdentity";
 import { activateSubscription } from "../../services/subscriptionActivation";
+import { activateTrialSubscription, trialStartedMessage } from "../../services/trialSubscriptionActivation";
 import {
   createLifecycleAdapter,
   ensureLifecycleSchema,
@@ -1596,7 +1597,7 @@ export async function handleAgenticPaymentsRoutes(
         return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
       }
       const body = (await request.json().catch(() => ({}))) as {
-        id?: unknown; name?: unknown; priceUSD?: unknown; periodDays?: unknown; includedRuns?: unknown;
+        id?: unknown; name?: unknown; priceUSD?: unknown; periodDays?: unknown; includedRuns?: unknown; trialDays?: unknown;
       };
       const subs = requireSubs();
       if (subs instanceof Response) return subs;
@@ -1610,8 +1611,9 @@ export async function handleAgenticPaymentsRoutes(
         priceUSD: body.priceUSD,
         periodDays: body.periodDays,
         includedRuns: body.includedRuns,
+        trialDays: body.trialDays,
       });
-      ctx.audit("commercial.plan.created", "payments", { planId: plan.id, priceUSD: plan.priceUSD, periodDays: plan.periodDays, includedRuns: plan.includedRuns });
+      ctx.audit("commercial.plan.created", "payments", { planId: plan.id, priceUSD: plan.priceUSD, periodDays: plan.periodDays, includedRuns: plan.includedRuns, trialDays: plan.trialDays ?? null });
       return Response.json({ plan });
     } catch (err: any) {
       const message = err.message || "Failed to create plan";
@@ -1886,6 +1888,100 @@ export async function handleAgenticPaymentsRoutes(
         : /already activated/.test(message)
           ? 409
           : /required|must be|not active/.test(message)
+            ? 400
+            : 500;
+      return Response.json({ error: message }, { status });
+    }
+  }
+
+  // POST /payments/agentic/commercial/subscription/trial — $0 / no-payment trial checkout (#3243,
+  // slice 3 of #3241). Creates a TRIALING subscription for the user on our own path: there is no
+  // Stripe trial parameter in-repo, so no Stripe session is minted and no payment is taken — the
+  // row is provider "trial" with providerStatus "trialing" and no Stripe ids. The trial GRANTS
+  // the plan's included runs to the account (mirroring the one-time purchase activation): tier
+  // alone enables nothing, because the gate reads included runs from the account row only and
+  // the Billing purchase route confers tier only. One trial per user per plan; a plan with no
+  // trialDays refuses with 409. Trial-end: the row lapses at periodEnd via the existing
+  // unexpired-row reads (resolveEffectiveTier) and the response carries the outcome-encoded
+  // trial message, never a raw error code. No journal entry: $0, no money moved.
+  if (path.endsWith("/payments/agentic/commercial/subscription/trial") && request.method === "POST") {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      const flag = await requireMonetization();
+      if (flag) return flag;
+      const body = (await request.json().catch(() => ({}))) as { planId?: unknown; tenantId?: unknown };
+      const planId = typeof body.planId === "string" ? body.planId : "";
+      if (!planId) return Response.json({ error: "planId is required." }, { status: 400 });
+      const store = requireStore();
+      if (store instanceof Response) return store;
+      const subs = requireSubs();
+      if (subs instanceof Response) return subs;
+      const ensured = await ensureStores(store, subs);
+      if (ensured) return ensured;
+      const plan = await subs.getPlan(planId);
+      if (!plan) return Response.json({ error: `No plan ${planId}.` }, { status: 404 });
+      if (!plan.active) return Response.json({ error: `Plan ${planId} is not active.` }, { status: 409 });
+      if (plan.trialDays === null || plan.trialDays === undefined) {
+        return Response.json({ error: `Plan ${planId} offers no trial.` }, { status: 409 });
+      }
+      // #2219 fix, same as purchase: the tenant comes from the
+      // resolved identity, never the request body. A missing
+      // account does NOT fail closed here: activation creates
+      // the account row in the session-derived tenant, so a
+      // first trial succeeds end-to-end with no operator step.
+      let identity;
+      try {
+        identity = await resolvePlatformIdentity(
+          { commercial: store, subscriptions: subs },
+          { userId: login, nowMs: Date.now() },
+        );
+      } catch (err: any) {
+        return Response.json({ error: err.message || "Failed to resolve platform identity" }, { status: 503 });
+      }
+      const tenantId = identity.tenantId ?? login;
+      const previousSubscriptions = await subs.listSubscriptions(login);
+      const { subscription, account, trialEndsAtMs } = await activateTrialSubscription({
+        subs,
+        store,
+        userId: login,
+        tenantId,
+        plan,
+      });
+      const activatedSubscriptions = await subs.listSubscriptions(login);
+      const activationTransition = resolveTierTransition(
+        identity.stored,
+        previousSubscriptions,
+        account,
+        activatedSubscriptions,
+        Date.now(),
+      );
+      ctx.audit("commercial.subscription.trial_activated", "payments", {
+        userId: login,
+        tenantId,
+        planId: plan.id,
+        subscriptionId: subscription.id,
+        providerPaymentRef: subscription.providerPaymentRef,
+        trialDays: plan.trialDays,
+        trialEndsAtMs,
+        previousEffectiveTier: activationTransition.previousEffectiveTier,
+        newEffectiveTier: activationTransition.newEffectiveTier,
+      });
+      const effectiveTier = resolveEffectiveTier(account, [subscription], Date.now());
+      const message = trialStartedMessage({
+        planName: plan.name,
+        trialDays: plan.trialDays,
+        includedRuns: plan.includedRuns,
+        trialEndsAtMs,
+      });
+      return Response.json({ subscription, account, effectiveTier, trialEndsAtMs, message });
+    } catch (err: any) {
+      const message = err.message || "Failed to start trial";
+      const status = /Tenant mismatch/.test(message)
+        ? 403
+        : /already used|offers no trial|not active/.test(message)
+          ? 409
+          : /required|must be/.test(message)
             ? 400
             : 500;
       return Response.json({ error: message }, { status });
