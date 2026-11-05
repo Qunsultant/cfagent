@@ -17,6 +17,7 @@ import { readFileSync } from "node:fs";
 import { SearchHub, SEARCH_HUB_TABS, isValidSearchHubTab } from "../src/client/search/SearchHub";
 import { NlqSearchTab } from "../src/client/search/tabs/NlqSearchTab";
 import { SearchAgentTab } from "../src/client/search/tabs/SearchAgentTab";
+import { AiSearchAgentTab } from "../src/client/search/tabs/AiSearchAgentTab";
 import { SemanticSearchTab } from "../src/client/search/tabs/SemanticSearchTab";
 import { MemorySearchTab } from "../src/client/search/tabs/MemorySearchTab";
 import { KnowledgeTab } from "../src/client/search/tabs/KnowledgeTab";
@@ -160,14 +161,18 @@ describe("#2120 slice 1 nav registration (source pins)", () => {
 });
 
 describe("#2120 slice 1 hub chrome", () => {
-  it("tab registry has exactly the eight designed tabs", () => {
+  it("tab registry has exactly the nine designed tabs", () => {
     // #1169 S4-2 (disclosed §7 pin update): the MAS search tab joins
     // the registry; the six prior tabs are unchanged and in order.
     // #1169 knowledge UI (disclosed §7 pin update): the Corpus tab
     // joins the registry last; all prior tabs unchanged and in order.
+    // #3323 (disclosed §7 pin update): the AI Search Agent tab joins
+    // the registry after "search-agent"; all prior tabs unchanged
+    // and in order.
     expect([...SEARCH_HUB_TABS]).toEqual([
       "nlq",
       "search-agent",
+      "ai-search-agent",
       "semantic-search",
       "memory",
       "knowledge",
@@ -177,18 +182,26 @@ describe("#2120 slice 1 hub chrome", () => {
     ]);
     expect(isValidSearchHubTab("memory")).toBe(true);
     expect(isValidSearchHubTab("corpus")).toBe(true);
+    expect(isValidSearchHubTab("ai-search-agent")).toBe(true);
     expect(isValidSearchHubTab("bogus")).toBe(false);
   });
 
-  it("renders all eight tab labels and defaults to nlq", async () => {
+  it("renders all nine tab labels and defaults to nlq", async () => {
     window.history.pushState(null, "", "/?tab=search");
     await render(<SearchHub />);
     // #1169 S4-2 (disclosed §7 pin update): "MAS Search" joins the labels.
     // #1169 knowledge UI (disclosed §7 pin update): "Corpus" joins.
-    for (const label of ["NLQ", "Search Agent", "Semantic Search", "Memory", "Knowledge", "Tools", "MAS Search", "Corpus"]) {
+    // #3323 (disclosed §7 pin update): "AI Search Agent" joins.
+    for (const label of ["NLQ", "Search Agent", "AI Search Agent", "Semantic Search", "Memory", "Knowledge", "Tools", "MAS Search", "Corpus"]) {
       expect(text()).toContain(label);
     }
     expect(text()).toContain("NLQ records search");
+  });
+
+  it("?view=ai-search-agent lands on the AI Search Agent tab (#3323)", async () => {
+    window.history.pushState(null, "", "/?tab=search&view=ai-search-agent");
+    await render(<SearchHub />);
+    expect(text()).toContain("the real AiSearchAgent (a Durable Object) searches the AI Search instance");
   });
 
   it("?view=memory lands on the memory tab", async () => {
@@ -279,6 +292,90 @@ describe("#2120 slice 1 tab backends (native shapes)", () => {
     // Visible degraded state — not silent emptiness, not stub rows.
     expect(text()).toContain("Live index unavailable");
     expect(text()).toContain("upstream_unreachable");
+    expect(text()).toContain("0 results");
+  });
+
+  it("ai-agent tab posts to /api/search/ai-agent and renders the agent's path label + provenance (#3323)", async () => {
+    const calls = stubFetch((url) => {
+      if (url === "/api/search/ai-agent") {
+        return okJson({
+          ok: true,
+          path: "namespace",
+          results: [
+            {
+              title: "OCC disclosure",
+              snippet: "Options involve risk",
+              source: "knowledge/occ-odd.md",
+              score: 0.9,
+              category: "options_disclosure",
+              bucketKey: "knowledge/occ-odd.md",
+              servedFileLink: "/api/knowledge/file?key=knowledge%2Focc-odd.md",
+              indexingState: "indexed",
+            },
+          ],
+          correlationId: "corr-1",
+        });
+      }
+      return okJson({});
+    });
+    await render(<AiSearchAgentTab />);
+    setInputValue(container.querySelector("input")!, "options risk");
+    await submitForm();
+    expect(calls.some((c) => c.url === "/api/search/ai-agent")).toBe(true);
+    const body = JSON.parse(calls.find((c) => c.url === "/api/search/ai-agent")!.init.body);
+    expect(body.query).toBe("options risk");
+    expect(text()).toContain("OCC disclosure");
+    // The serving path is labelled — the agent's answer says which
+    // of its three paths served it.
+    expect(text()).toContain("path: namespace");
+    expect(text()).toContain("indexing: indexed");
+    expect(text()).not.toContain("did not serve live results");
+  });
+
+  it("ai-agent tab shows the agent's degraded note verbatim on a served-but-degraded answer (#3323)", async () => {
+    stubFetch((url) => {
+      if (url === "/api/search/ai-agent") {
+        return okJson({
+          ok: true,
+          path: "rest",
+          degraded: "namespace path failed (binding error); served by the REST path",
+          results: [],
+          correlationId: "corr-2",
+        });
+      }
+      return okJson({});
+    });
+    await render(<AiSearchAgentTab />);
+    setInputValue(container.querySelector("input")!, "options risk");
+    await submitForm();
+    expect(text()).toContain("Degraded answer");
+    expect(text()).toContain("namespace path failed (binding error); served by the REST path");
+    expect(text()).toContain("path: rest");
+    expect(text()).toContain("0 results");
+  });
+
+  it("ai-agent tab renders an unserved answer as a visible failure, never as empty success (#3323)", async () => {
+    stubFetch((url) => {
+      if (url === "/api/search/ai-agent") {
+        return okJson({
+          ok: false,
+          code: "not_configured",
+          errorToken: "ERR_UNKNOWN_AGENT_ERROR",
+          error: "the AI_SEARCH_AGENT Durable Object binding is not configured in this environment, so the AiSearchAgent cannot be reached",
+          results: [],
+          correlationId: "corr-3",
+        });
+      }
+      return okJson({});
+    });
+    await render(<AiSearchAgentTab />);
+    setInputValue(container.querySelector("input")!, "options risk");
+    await submitForm();
+    // Visible failure state with the agent's code + error verbatim —
+    // not silent emptiness, not stub rows.
+    expect(text()).toContain("AiSearchAgent did not serve live results");
+    expect(text()).toContain("not_configured");
+    expect(text()).toContain("the AI_SEARCH_AGENT Durable Object binding is not configured");
     expect(text()).toContain("0 results");
   });
 
