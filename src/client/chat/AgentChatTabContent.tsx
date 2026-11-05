@@ -25,6 +25,7 @@ import {
   DialogTitle,
   FluentProvider,
   Input,
+  makeStyles,
   MessageBar,
   MessageBarBody,
   Spinner,
@@ -36,6 +37,21 @@ import {
   webLightTheme,
 } from "@fluentui/react-components";
 export type ChatSubView = "general" | "options";
+
+// #3230: Fluent v9 Input renders a wrapper root around the inner
+// <input>, so the old `.chat-input-bar input { flex: 1 }` rule no
+// longer stretches the composer — the rule lands on the inner input,
+// which is not a flex item of the form, while the Fluent root has no
+// flex growth and collapses to intrinsic width. Grow the Fluent root
+// itself with Griffel (no .css change, no inline style): the composer
+// stretches full length across the bar minus the Send button, as
+// before #3146. minWidth: 0 lets it shrink below its content width.
+const useComposerStyles = makeStyles({
+  composerInput: {
+    flexGrow: 1,
+    minWidth: 0,
+  },
+});
 
 export function isValidChatSubView(view: unknown): view is ChatSubView {
   return typeof view === "string" && (view === "general" || view === "options");
@@ -73,6 +89,7 @@ export function AgentChatTabContentInner({
   showSponsorSpotlight = false,
 }: AgentChatTabContentProps) {
   const [input, setInput] = useState("");
+  const composerStyles = useComposerStyles();
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
   const { dispatchToast } = useToastController();
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -729,6 +746,7 @@ export function AgentChatTabContentInner({
       {/* Chat Input Bar */}
       <form className="chat-input-bar" onSubmit={handleSendChat}>
         <Input
+          className={composerStyles.composerInput}
           type="text"
           aria-label="Ask the agent"
           value={input}
