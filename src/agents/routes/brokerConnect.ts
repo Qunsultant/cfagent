@@ -80,24 +80,31 @@ function unauthenticatedResponse(): Response {
   return codedResponse(UNAUTHENTICATED_CODE, 401);
 }
 
-function readCredentials(body: unknown): { keyId: string; secretKey: string } | { error: string } {
+function readCredentials(body: unknown):
+  | { keyId: string; secretKey: string; environment?: string; side?: string }
+  | { error: string } {
   const record = (body ?? {}) as Record<string, unknown>;
   const keyId = typeof record.apiKey === "string" ? record.apiKey.trim() : "";
   const secretKey = typeof record.secretKey === "string" ? record.secretKey.trim() : "";
+  const environment = typeof record.environment === "string" ? record.environment.trim() : undefined;
+  const side = typeof record.side === "string" ? record.side.trim() : undefined;
   if (!keyId) return { error: "Enter your Alpaca API key id." };
   if (!secretKey) return { error: "Enter your Alpaca API secret key." };
   if (keyId.length > MAX_CREDENTIAL_LENGTH || secretKey.length > MAX_CREDENTIAL_LENGTH) {
     return { error: "That key is longer than an Alpaca credential; check you pasted only the key." };
   }
-  return { keyId, secretKey };
+  return { keyId, secretKey, environment, side };
 }
 
 /**
  * The trading type both verification and storage use. Same inputs, same rule as
  * the adapter, so the pair is proven against the host that will serve it.
  */
-function resolveSide(ctx: BrokerConnectRouteContext): AlpacaSide {
-  return alpacaTradingSide(ctx.env, resolveEnvironmentFor(ctx));
+function resolveSide(
+  ctx: BrokerConnectRouteContext,
+  requested?: string | null,
+): AlpacaSide {
+  return alpacaTradingSide(ctx.env, resolveEnvironmentFor(ctx, requested));
 }
 
 export async function handleBrokerConnectRoutes(
@@ -110,7 +117,6 @@ export async function handleBrokerConnectRoutes(
   sessionId: string,
   ctx: BrokerConnectRouteContext,
 ): Promise<Response | null> {
-  void url;
   void sessionId;
   const isConnect = path.endsWith("/broker/connect/alpaca");
   const isDisconnect = path.endsWith("/broker/disconnect/alpaca");
@@ -120,7 +126,8 @@ export async function handleBrokerConnectRoutes(
   const userLogin = request.headers.get("x-user-login") || "";
   if (!userLogin) return unauthenticatedResponse();
 
-  const side = resolveSide(ctx);
+  const queryTarget = url.searchParams.get("environment") ?? url.searchParams.get("side");
+  const side = resolveSide(ctx, queryTarget);
 
   if (isConnect && request.method === "GET") {
     const stored = describeAlpacaCredential(await getAlpacaCredentials(ctx.env, userLogin, side));
@@ -144,7 +151,11 @@ export async function handleBrokerConnectRoutes(
     const parsed = readCredentials(await request.json().catch(() => ({})));
     if ("error" in parsed) return invalidResponse(parsed.error);
 
-    const { baseUrl } = resolveAlpacaTradingBase(ctx.env, resolveEnvironmentFor(ctx));
+    const postTarget = parsed.environment ?? parsed.side ?? queryTarget;
+    const targetEnv = resolveEnvironmentFor(ctx, postTarget);
+    const targetSide = resolveSide(ctx, postTarget);
+
+    const { baseUrl } = resolveAlpacaTradingBase(ctx.env, targetEnv);
     const verified = await verifyAlpacaAccount({
       baseUrl,
       keyId: parsed.keyId,
@@ -157,7 +168,7 @@ export async function handleBrokerConnectRoutes(
       return codedResponse(
         verified.reason === "rejected" ? REJECTED_CODE : UNAVAILABLE_CODE,
         verified.reason === "rejected" ? 401 : 502,
-        { broker: "alpaca", side },
+        { broker: "alpaca", side: targetSide },
       );
     }
 
@@ -165,7 +176,7 @@ export async function handleBrokerConnectRoutes(
     try {
       stored = await storeAlpacaCredentials(ctx.env, {
         userLogin,
-        side,
+        side: targetSide,
         keyId: parsed.keyId,
         secretKey: parsed.secretKey,
       });
@@ -180,7 +191,7 @@ export async function handleBrokerConnectRoutes(
           timestamp: new Date().toISOString(),
         }),
       );
-      return codedResponse(UNAVAILABLE_CODE, 502, { broker: "alpaca", side });
+      return codedResponse(UNAVAILABLE_CODE, 502, { broker: "alpaca", side: targetSide });
     }
 
     console.log(
@@ -188,7 +199,7 @@ export async function handleBrokerConnectRoutes(
         component: "brokerConnect",
         event: "alpaca_signed_in",
         broker: "alpaca",
-        side,
+        side: targetSide,
         keyIdLast4: parsed.keyId.slice(-4),
         account: verified.accountId,
         timestamp: new Date().toISOString(),
@@ -197,7 +208,7 @@ export async function handleBrokerConnectRoutes(
 
     return Response.json({
       broker: "alpaca",
-      side,
+      side: targetSide,
       configured: true,
       signedIn: true,
       source: "user",
@@ -235,7 +246,15 @@ export async function handleBrokerConnectRoutes(
 }
 
 /** The raw environment selection, for the same base-URL rule the adapter uses. */
-function resolveEnvironmentFor(ctx: BrokerConnectRouteContext): string {
+function resolveEnvironmentFor(
+  ctx: BrokerConnectRouteContext,
+  explicitEnv?: string | null,
+): string {
+  if (explicitEnv) {
+    const norm = explicitEnv.trim().toUpperCase();
+    if (norm === "PROD" || norm === "LIVE") return "PROD";
+    if (norm === "TEST" || norm === "PAPER") return "TEST";
+  }
   const readSetting = (key: string) => ctx.readSettingRaw(key) ?? null;
   return resolveTradeEnvironmentFromSettings(readSetting, ctx.env);
 }
