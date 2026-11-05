@@ -73,10 +73,10 @@
  * config-gated exactly like the search paths, and returns typed
  * outcomes — never a fabricated success.
  *
- * OUT of scope (still the #1169 S4-5 bridge, dashboard-gated):
- * runtime provisioning (no namespace create call) and the
- * knowledge-corpus items.upload bridge — the only uploads this
- * module performs are report documents via the executor above.
+ * OUT of scope (dashboard-gated): runtime provisioning (no
+ * namespace create call). The knowledge-corpus items.upload bridge
+ * is issue #3345: it lives in src/services/corpusAiSearchIndex.ts
+ * and reuses this module's executor — it is not a second uploader.
  */
 import {
   AiSearchInstanceService,
@@ -580,6 +580,28 @@ export function isAiSearchReportIndexingEnabled(
   env?: { AI_SEARCH_REPORT_INDEXING_ENABLED?: string } | null,
 ): boolean {
   const v = env?.AI_SEARCH_REPORT_INDEXING_ENABLED;
+  if (typeof v !== "string") return false;
+  const norm = v.trim().toLowerCase();
+  return norm === "1" || norm === "true" || norm === "on";
+}
+
+/**
+ * Issue #3345: is corpus indexing into the AI Search instance
+ * enabled? The corpus bridge's flag, read with the exact idiom of
+ * isAiSearchReportIndexingEnabled above (and S2's
+ * isKnowledgeServingEnabled): "1"/"true"/"on" (case-insensitive,
+ * trimmed) means ON, ABSENCE means OFF. The var is deliberately
+ * NOT in wrangler.jsonc — the bridge ships default-off, and
+ * enablement is a config change after the #1169 probe, never a
+ * code change. When OFF, the hooks in
+ * src/services/corpusAiSearchIndex.ts record the honest
+ * not-configured state and corpus writes/syncs behave exactly as
+ * before #3345.
+ */
+export function isAiSearchCorpusIndexingEnabled(
+  env?: { AI_SEARCH_CORPUS_INDEXING_ENABLED?: string } | null,
+): boolean {
+  const v = env?.AI_SEARCH_CORPUS_INDEXING_ENABLED;
   if (typeof v !== "string") return false;
   const norm = v.trim().toLowerCase();
   return norm === "1" || norm === "true" || norm === "on";
