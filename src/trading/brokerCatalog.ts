@@ -97,46 +97,6 @@ export type BrokerProtocol = "etrade_oauth_rest" | "alpaca_rest_v2" | "mcp_json_
 /** Status mode strings, one per trading type per broker kind. */
 export type BrokerStatusMode = "live_oauth" | "paper_api" | "live_api" | "mcp_remote" | "simulated_engine" | "sandbox_api";
 
-/**
- * Issue #3330: what a connect surface must ask THIS broker for.
- *
- * The hub's connect flow was E*TRADE's OAuth redirect. Alpaca authenticates
- * with a key pair, so the surface has to branch — and it must branch on the
- * catalogue's declaration, not on a second list of brokers in the UI. Names are
- * the deployment's own (the `ALPACA_PAPER_*` / `ALPACA_LIVE_*` pairs), so the
- * instruction a user reads matches the secret they must set.
- */
-export interface BrokerCredentialGuidance {
-  readonly kind: BrokerCredentialKind;
-  /** Environment variable names to set, per trading type. */
-  readonly envNames: Readonly<Record<TradingType, readonly string[]>>;
-  /** Sentence describing the sign-in this broker uses. */
-  readonly summary: string;
-}
-
-const CREDENTIAL_GUIDANCE: Readonly<Record<BrokerId, BrokerCredentialGuidance>> = {
-  etrade: {
-    kind: "oauth1_per_login",
-    envNames: { paper: [], live: [] },
-    summary:
-      "E*TRADE signs in with OAuth 1.0a per user: authorize once, then enter the PIN E*TRADE issues. Tokens expire daily (Eastern) and renew from the hub.",
-  },
-  alpaca: {
-    kind: "api_key_pair",
-    envNames: {
-      paper: ["ALPACA_PAPER_API_KEY", "ALPACA_PAPER_SECRET_KEY", "ALPACA_PAPER_URL"],
-      live: ["ALPACA_LIVE_API_KEY", "ALPACA_LIVE_SECRET_KEY", "ALPACA_LIVE_URL"],
-    },
-    summary:
-      "Alpaca signs in with an API key pair for the selected trading type. The key and secret are deployment secrets — the browser never asks for them.",
-  },
-};
-
-/** The sign-in this broker requires. Total by type: every broker answers. */
-export function brokerCredentialGuidance(broker: BrokerId): BrokerCredentialGuidance {
-  return CREDENTIAL_GUIDANCE[broker];
-}
-
 export const BROKER_CATALOG = {
   etrade: {
     id: "etrade",
@@ -176,22 +136,15 @@ export const BROKER_CATALOG = {
       detailedQuote: true,
       accounts: true,
       positions: true,
-      // Issue #3328: Alpaca exposes no tax-lot endpoint, and it does not need
-      // one — FIFO over its account fills derives the lots, and quantity whose
-      // fills predate the retained window is reported as a coverage gap.
-      positionLots: true,
-      // Issue #3324: the risk model is the platform's, fed by this broker's
-      // own book, chains, and spot price.
+      // Alpaca exposes no tax-lot endpoint; positions carry cost basis only.
+      positionLots: false,
       portfolioRisk: true,
       optionChains: true,
       optionExpireDates: true,
       orderPreview: true,
       orderPlace: true,
-      // Issue #3325: Alpaca has no screener API, and it does not need one — the
-      // screening math is the platform's (#3272) and only the quotes are the
-      // broker's. The adapter implements `screenMarkets` on its own quotes, so
-      // the capability is real rather than provider-side wishful thinking.
-      marketScreening: true,
+      // Alpaca has no screener API; screening stays provider-side (#2144).
+      marketScreening: false,
       optionsScanner: false,
       ivHistory: false,
     },

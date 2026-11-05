@@ -4,15 +4,11 @@
  * Implements ITradingPlatform for Alpaca Trading API v2
  */
 
-import type { Env, BrokerQuote, BrokerAccount, BrokerPosition, BrokerPositionLot, BrokerOrderDraft, BrokerOrderExecutionResult, BrokerStatus, BrokerOptionChain, BrokerOptionContract, BrokerOptionExpireDate, StockScreenerFilter, StockScreenResult } from "../../types";
+import type { Env, BrokerQuote, BrokerAccount, BrokerPosition, BrokerOrderDraft, BrokerOrderExecutionResult, BrokerStatus, BrokerOptionChain, BrokerOptionContract, BrokerOptionExpireDate } from "../../types";
 import type { DatabaseORM } from "../../orm";
 import type { ITradingPlatform, OrderPreviewParams, PlaceOrderParams } from "../interfaces";
 import { BROKER_CATALOG, type TradingType } from "../brokerCatalog";
-import { deriveLotsFromFills, parseAlpacaFill, type DerivedLots } from "./fillLots";
-import { NeutralMarketScreener } from "../neutralMarketScreener";
-import { platformQuoteSource } from "../stockQuoteSource";
-import { parseOccSymbol } from "./occSymbol";
-import { withAlpacaCredentials } from "./credentials";
+import { formatOccSymbol, parseOccSymbol } from "./occSymbol";
 import {
   fetchAlpacaOptionContracts,
   fetchAlpacaOptionSnapshots,
@@ -201,12 +197,7 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
     if (!userLogin) {
       throw new Error("AlpacaTradingPlatform requires an explicit userLogin (issue #1185: no default identity).");
     }
-    // Issue #3330: the deployment writes ALPACA_{PAPER,LIVE}_*; this adapter
-    // reads the generic names. Map the side once, here, so status, quotes,
-    // chains, orders and the market-data provider all see ONE credential set
-    // instead of each deciding paper-vs-live for itself.
-    this.env = withAlpacaCredentials(env, overrideEnv);
-    this.alpacaData = new AlpacaMarketDataProvider(this.env);
+    this.alpacaData = new AlpacaMarketDataProvider(env);
   }
 
   async getStatus(): Promise<BrokerStatus> {
@@ -299,23 +290,6 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
       source: "Alpaca Real-Time NBBO Feed",
       timestamp: new Date().toISOString(),
     };
-  }
-
-  /**
-   * Issue #3325 (programme #3292): stock screening on Alpaca's own quotes.
-   *
-   * Screening was declared `false` for Alpaca with the reasoning "Alpaca has no
-   * screener API" — true, but beside the point: the screening math is the
-   * platform's (the same `NeutralMarketScreener` #3272 built), and the only
-   * broker-specific input is quotes, which this adapter already reads. Declaring
-   * the capability absent meant a surface refused work the engine could do.
-   *
-   * The universe resolves through the live listings feed; an unresolvable
-   * universe or an unconfigured broker is a named refusal from the screener,
-   * never an empty "no matches" or another broker's quotes.
-   */
-  async screenMarkets(filter: StockScreenerFilter = {}): Promise<StockScreenResult> {
-    return new NeutralMarketScreener({ quoteSource: platformQuoteSource(this) }).screenMarkets(filter);
   }
 
   async getAccounts(): Promise<BrokerAccount[]> {
@@ -504,59 +478,111 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
   }
 
   /**
-   * Issue #3328 (programme #3292): tax lots, derived from Alpaca fills.
+   * Issue #3329 (programme #3292): multi-leg option legs → Alpaca leg objects.
    *
-   * Alpaca has no lot endpoint — the reason `positionLots` was declared
-   * unsupported — but it reports account fills with quantity, price and time,
-   * and FIFO over those answers the same question. This is the detailed form:
-   * it carries the coverage the array-returning contract method cannot, so a
-   * caller can say "3 of 5 shares are explained by retained fills".
+   * Alpaca names contracts by OCC symbol and requires a ratio plus a position
+   * intent per leg. `PlaceOrderParams.optionLegs` are opening legs by contract,
+   * so the intent follows the side; an equity leg, a missing strike/expiry/type,
+   * or more than four legs is refused by name rather than sent as a guess.
    */
-  async derivePositionLots(positionId: string | number): Promise<DerivedLots> {
-    const symbol = String(positionId ?? "").trim().toUpperCase();
-    if (!symbol) {
-      throw new Error("Alpaca position lots require the position id (the symbol).");
+  private optionOrderLegs(legs: OrderPreviewParams["optionLegs"]): Array<{
+    symbol: string;
+    ratio_qty: string;
+    side: "buy" | "sell";
+    position_intent: string;
+  }> {
+    const optionLegs = (legs ?? []).filter((leg) => leg.securityType === "OPTN");
+    if (optionLegs.length === 0) {
+      throw new Error("Alpaca options orders require at least one option contract leg.");
     }
-    const holdings = await this.getPositions();
-    const position = holdings.positions.find((candidate) => candidate.symbol === symbol);
-    if (!position) {
-      throw new Error(`Alpaca reports no open position for ${symbol}, so its lots cannot be derived.`);
+    if (optionLegs.length !== (legs ?? []).length) {
+     	throw new Error(
+        "Alpaca multi-leg orders support option legs only in this client; an equity leg was not submitted. Use a separate equity order.",
+      );
     }
-    const fills = await this.alpacaData.getFills(symbol);
-    if (!fills.success || !Array.isArray(fills.fills)) {
-      throw new Error(mapAlpacaFailureToBusiness(fills.httpStatus, "positions"));
+    if (optionLegs.length > 4) {
+      throw new Error(`Alpaca supports at most 4 option legs per order; ${optionLegs.length} were given.`);
     }
-    const parsed = fills.fills
-      .map((row: Record<string, unknown>) => parseAlpacaFill(row))
-      .filter((row): row is NonNullable<typeof row> => row !== null);
-    // An unreadable row is stated, never silently treated as a fill.
-    const derived = deriveLotsFromFills(parsed, position.quantity);
-    return { ...derived, incomplete: parsed.length !== fills.fills.length };
-  }
-
-  /**
-   * The contract method. Returns the lots the retained fills explain; the
-   * coverage gap is available through `derivePositionLots`, which the route
-   * layer reads. Nothing is invented to fill a gap in the array.
-   */
-  async getPositionLots(accountKey: string, positionId: string | number): Promise<BrokerPositionLot[]> {
-    const derived = await this.derivePositionLots(positionId);
-    const symbol = String(positionId ?? "").trim().toUpperCase();
-    return derived.lots.map((lot) => ({
-      positionId: symbol,
-      price: lot.price,
-      adjustedPrice: lot.price,
-      originalQty: lot.quantity,
-      remainingQty: lot.quantity,
-      availableQty: lot.quantity,
-      acquiredDate: Date.parse(lot.acquiredAt),
-      settlementCurrency: "USD",
-    }));
+    return optionLegs.map((leg) => {
+      if (!leg.optionType || !leg.strike || !leg.expirationDate) {
+        throw new Error(
+          `Alpaca option leg for ${leg.underlyingSymbol || "an unnamed underlying"} needs a type, strike, and expiry date.`,
+        );
+      }
+      if (!Number.isFinite(leg.quantity) || leg.quantity <= 0) {
+        throw new Error("Alpaca option legs need a positive quantity.");
+      }
+      const symbol = formatOccSymbol({
+        root: leg.underlyingSymbol,
+        expirationDate: leg.expirationDate,
+        optionType: leg.optionType,
+        strikePrice: leg.strike,
+      });
+      return {
+        symbol,
+        ratio_qty: String(leg.quantity),
+        side: leg.side === "SELL" ? "sell" : "buy",
+        // Every leg a caller supplies here opens a position; a close is a
+        // separate order in this client, and pretending otherwise would let a
+        // closing intent ride on an opening approval.
+        position_intent: leg.side === "SELL" ? "sell_to_open" : "buy_to_open",
+      };
+    });
   }
 
   async previewOrder(params: OrderPreviewParams): Promise<BrokerOrderDraft> {
-    if (params.assetClass === "options" || params.optionLegs?.some((leg) => leg.securityType === "OPTN")) {
-      throw new Error("This broker adapter currently supports equity orders only. Options orders require a broker adapter with native options preview support.");
+    const optionLegs = params.optionLegs ?? [];
+    const isOptionsOrder = params.assetClass === "options" || optionLegs.some((leg) => leg.securityType === "OPTN");
+    if (isOptionsOrder) {
+      // The same contract E*TRADE requires, so a client does not branch on the
+      // broker: a finite net debit/credit and a positive limit price.
+      if (!Number.isFinite(params.strategyNetDebit) || params.orderType !== "LIMIT" || !Number.isFinite(params.limitPrice) || Number(params.limitPrice) <= 0) {
+        throw new Error(
+          "Alpaca options strategies require a finite net debit/credit and a positive limit price, as E*TRADE does.",
+        );
+      }
+      const legs = this.optionOrderLegs(optionLegs);
+      const quote = await this.getQuote(params.symbol);
+      const orderId = `alp_mleg_${crypto.randomUUID().slice(0, 8)}`;
+      const userDid = getUserDid(params.sessionId || this.userLogin);
+      const estimatedTotal = Number((Number(params.limitPrice) * 100 * params.quantity).toFixed(2));
+      const didProof = createDidAttestationSync({
+        draftId: orderId,
+        action: "options",
+        amount: estimatedTotal,
+        currency: "USD",
+        customer: `Alpaca:${params.symbol}`,
+        gateway: "sandbox",
+        proposerDid: AGENT_DIDS.TRADING,
+        authorizerDid: userDid,
+      });
+      const legSummary = legs.map((leg) => `${leg.side} ${leg.ratio_qty} ${leg.symbol}`).join(", ");
+      return {
+        orderId,
+        symbol: params.symbol.toUpperCase(),
+        action: params.action || params.orderAction || "BUY",
+        orderAction: params.action || params.orderAction || "BUY",
+        orderType: "LIMIT",
+        quantity: params.quantity,
+        estimatedPrice: Number(params.limitPrice),
+        limitPrice: params.limitPrice,
+        term: "GOOD_FOR_DAY",
+        estimatedCommission: 0,
+        estimatedTotal,
+        status: "previewed",
+        proposerDid: didProof.proposerDid,
+        authorizerDid: userDid,
+        proofSignature: didProof.signature,
+        previewMessage:
+          `Alpaca multi-leg preview (${legs.length} legs, ${params.quantity} spread${params.quantity === 1 ? "" : "s"}): ` +
+          `${legSummary} @ net ${Number(params.limitPrice).toFixed(2)} (limit). Estimated total: $${estimatedTotal.toLocaleString()} USD. ` +
+          `Underlying reference: ${quote.lastPrice.toFixed(2)}. Priced locally — Alpaca has no mleg preview endpoint.`,
+        safetyNotice: "SAFETY GUARANTEE: NO CAPITAL HAS BEEN MOVED. HUMAN APPROVAL REQUIRED BEFORE BROKER EXECUTION.",
+        placedAt: new Date().toISOString(),
+      };
+    }
+    if (optionLegs.length > 0) {
+      throw new Error("Option contract legs cannot be previewed as an equity order.");
     }
     const quote = await this.getQuote(params.symbol);
     const orderId = `alp_ord_${crypto.randomUUID().slice(0, 8)}`;
@@ -636,7 +662,47 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
     });
 
     if (params.optionLegs && params.optionLegs.length > 0) {
-      return failed("Alpaca supports equity orders only in this client. Options orders require a broker adapter with native options support, so this order was not placed.");
+      // Issue #3329: the strategy Alpaca accepts is a limit mleg order. A
+      // missing price or an unnameable leg is refused by name, never guessed.
+      let legs: ReturnType<AlpacaTradingPlatform["optionOrderLegs"]>;
+      try {
+        legs = this.optionOrderLegs(params.optionLegs);
+      } catch (error) {
+        return failed(error instanceof Error ? error.message + " The order was not placed." : "Alpaca option legs were rejected. The order was not placed.");
+      }
+      if (!Number.isFinite(params.limitPrice) || Number(params.limitPrice) <= 0) {
+        return failed("Alpaca option orders require a positive limit price. The order was not placed.");
+      }
+      if (!this.alpacaData.isConfigured()) {
+        return failed("Alpaca credentials are not configured, so the order was not placed. No funds were moved.");
+      }
+      const { isLive } = resolveAlpacaTradingBase(this.env, this.overrideEnv);
+      const mode = isLive ? "live" : "paper";
+      const placed = await this.alpacaData.placeOptionOrder({
+        qty: String(params.quantity),
+        limit_price: String(params.limitPrice),
+        time_in_force: "day",
+        legs,
+      });
+      if (!placed.success || !placed.orderId) {
+        return failed(mapAlpacaFailureToBusiness(placed.httpStatus, "order"));
+      }
+      return {
+        success: true,
+        orderId: params.orderId,
+        executionId: placed.orderId,
+        brokerOrderRef: placed.orderId,
+        authorizerDid: userDid,
+        status: "submitted",
+        symbol,
+        action: params.action,
+        quantity: params.quantity,
+        executionPrice: 0,
+        totalSettled: 0,
+        didAttestation: attestation,
+        message: `Alpaca ${mode} multi-leg order submitted: ${legs.length} legs (broker order ${placed.orderId}).`,
+        timestamp: now,
+      };
     }
     if (!symbol) {
       return failed("Alpaca order rejected: a symbol is required. The order was not placed.");
