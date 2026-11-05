@@ -53,6 +53,27 @@ const useComposerStyles = makeStyles({
   },
 });
 
+// #3407 (incident — chat stopped scrolling after #3146): Fluent v9's
+// FluentProvider renders a plain block <div> root (its Griffel styles
+// set only color/background/typography), so it broke the flex height
+// chain tab-viewport → .chat-view → .messages-stream: .chat-view's
+// flex: 1 went inert against a block parent, the stream grew with
+// content and never overflowed, and the scrollIntoView effect scrolled
+// the document instead of the pane. Grow the Fluent root itself with
+// Griffel (same pattern as the #3230 composer fix): the wrapper takes
+// over the flex-item role .chat-view used to have, and the theme
+// background is preserved (a real box, not display: contents).
+// minHeight: 0 lets it shrink below its content height so the stream
+// can overflow and scroll.
+const useProviderStyles = makeStyles({
+  provider: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    minHeight: 0,
+  },
+});
+
 export function isValidChatSubView(view: unknown): view is ChatSubView {
   return typeof view === "string" && (view === "general" || view === "options");
 }
@@ -784,13 +805,14 @@ function readFluentTheme() {
 
 export function AgentChatTabContent(props: AgentChatTabContentProps) {
   const [fluentTheme, setFluentTheme] = useState(readFluentTheme);
+  const providerStyles = useProviderStyles();
   useEffect(() => {
     const update = () => setFluentTheme(readFluentTheme());
     window.addEventListener("theme-changed", update);
     return () => window.removeEventListener("theme-changed", update);
   }, []);
   return (
-    <FluentProvider theme={fluentTheme}>
+    <FluentProvider theme={fluentTheme} className={providerStyles.provider}>
       <Toaster />
       <AgentChatTabContentInner {...props} />
     </FluentProvider>
