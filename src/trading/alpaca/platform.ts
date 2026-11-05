@@ -12,6 +12,7 @@ import { deriveLotsFromFills, parseAlpacaFill, type DerivedLots } from "./fillLo
 import { NeutralMarketScreener } from "../neutralMarketScreener";
 import { platformQuoteSource } from "../stockQuoteSource";
 import { parseOccSymbol } from "./occSymbol";
+import { withAlpacaCredentials } from "./credentials";
 import {
   fetchAlpacaOptionContracts,
   fetchAlpacaOptionSnapshots,
@@ -200,7 +201,12 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
     if (!userLogin) {
       throw new Error("AlpacaTradingPlatform requires an explicit userLogin (issue #1185: no default identity).");
     }
-    this.alpacaData = new AlpacaMarketDataProvider(env);
+    // Issue #3330: the deployment writes ALPACA_{PAPER,LIVE}_*; this adapter
+    // reads the generic names. Map the side once, here, so status, quotes,
+    // chains, orders and the market-data provider all see ONE credential set
+    // instead of each deciding paper-vs-live for itself.
+    this.env = withAlpacaCredentials(env, overrideEnv);
+    this.alpacaData = new AlpacaMarketDataProvider(this.env);
   }
 
   async getStatus(): Promise<BrokerStatus> {

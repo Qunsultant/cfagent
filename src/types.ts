@@ -625,6 +625,16 @@ export interface Env {
   // Market Data & Research Configuration (yfinance & Alpaca)
   ALPACA_API_KEY?: string;
   ALPACA_SECRET_KEY?: string;
+  // Issue #3330 (programme #3292): the paper/live pairs the deploy writes.
+  // Nothing read these names, so a deployed Worker reported Alpaca
+  // unconfigured while its credentials sat in the environment.
+  ALPACA_PAPER_API_KEY?: string;
+  ALPACA_PAPER_SECRET_KEY?: string;
+  ALPACA_PAPER_URL?: string;
+  ALPACA_LIVE_API_KEY?: string;
+  ALPACA_LIVE_SECRET_KEY?: string;
+  ALPACA_LIVE_URL?: string;
+  ALPACA_MARKET_URL?: string;
   ALPACA_API_KEY_ID?: string;
   ALPACA_API_SECRET_KEY?: string;
   ALPACA_BASE_URL?: string;

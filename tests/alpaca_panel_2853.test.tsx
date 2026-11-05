@@ -174,3 +174,57 @@ describe("the gate renders the contract's decision (#2853)", () => {
     }
   });
 });
+/**
+ * Issue #3330: the connect surface asks Alpaca for a key pair, not E*TRADE's
+ * OAuth redirect. The credential kind and the deployment variables come from
+ * the catalogue's declaration, so the copy a user reads matches the secret
+ * they must set.
+ */
+describe("the connect surface asks Alpaca for a key pair (#3330)", () => {
+  const STATUS = {
+    status: 200,
+    body: {
+      broker: "alpaca",
+      environment: "TEST",
+      status: {
+        broker: "alpaca",
+        name: "Alpaca Securities Brokerage (API v2)",
+        configured: false,
+        mode: "paper_api",
+        protocol: "alpaca_rest_v2",
+        environment: "paper",
+        apiUrl: "https://paper-api.alpaca.markets",
+        capabilities: [],
+      },
+    },
+  };
+
+  it("names the credential kind and the variables when unconfigured", async () => {
+    stubFetch({ "/broker/accounts": ACCOUNTS, "/broker/positions": POSITIONS, "/broker/status": STATUS });
+    await act(async () => {
+      root.render(<AlpacaBrokerPanel />);
+    });
+    await flush();
+
+    const kind = container.querySelector('[data-broker-credential-kind="api_key_pair"]');
+    expect(kind).toBeTruthy();
+    const vars = container.querySelector("[data-broker-credential-vars]");
+    expect(vars?.getAttribute("data-broker-credential-vars")).toContain("ALPACA_PAPER_API_KEY");
+    expect(container.textContent).toContain("Not configured");
+    expect(container.textContent).not.toContain("OAuth");
+  });
+
+  it("says Configured when the deployment has the credentials", async () => {
+    stubFetch({
+      "/broker/accounts": ACCOUNTS,
+      "/broker/positions": POSITIONS,
+      "/broker/status": { ...STATUS, body: { ...STATUS.body, status: { ...STATUS.body.status, configured: true } } },
+    });
+    await act(async () => {
+      root.render(<AlpacaBrokerPanel />);
+    });
+    await flush();
+    expect(container.textContent).toContain("Configured");
+    expect(container.querySelector("[data-broker-credential-vars]")).toBeNull();
+  });
+});
