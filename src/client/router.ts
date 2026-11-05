@@ -1,9 +1,17 @@
 /**
  * Query-param router (#1804 S1, issue #1808) — the URL is the source of
  * truth for navigation. The tab lives in `?tab=<id>` (query params, so no
- * Worker fallback is needed for deep links or reloads). All other query
- * params pass through untouched — notably the screening hub's own
- * `?screenerTab=`, which keeps working exactly as before.
+ * Worker fallback is needed for deep links or reloads).
+ *
+ * Every page's sub-state lives in its own query params, and a URL carries
+ * only its own page's params (#3238): when the tab changes, params the
+ * destination does not own are dropped — `?tab=order&orderTab=risk`
+ * followed by a move to portfolio lands on exactly `?tab=portfolio`,
+ * never `?tab=portfolio&orderTab=risk`. Same-tab navigation keeps
+ * everything (in-page sub-tab switches write their own param through
+ * `useUrlSyncedTabs`, not through here), and deep links set their params
+ * explicitly after scoping, so one-shot seeds (`?tab=order&assetClass=`)
+ * still arrive intact.
  *
  * Pure functions (parse/build) carry the testable behavior; the window
  * wrappers are thin. Navigation pushes state and dispatches a
@@ -20,9 +28,48 @@ export function parseTabFromSearch(search: string): RouteId {
   return resolveRouteId(section ? "platform-admin" : tab);
 }
 
-/** Query string with `tab` set, every other param preserved. */
+/**
+ * Query params owned by specific pages (#3238). A param not listed here
+ * is unowned and never survives a tab change; a listed param survives
+ * only when the destination tab is one of its owners. `view` is not
+ * listed: it is the shared sub-view param, already scoped by
+ * `navigateToTab` (dropped unless the destination sets it). One-shot
+ * params (`assetClass`, `etrade_auth`, `etrade_connect_error`, the auth
+ * outcome) are consumed and stripped by their owners on arrival, so
+ * they need no registry entry beyond `assetClass`, which must survive
+ * the navigation that carries it to the order page.
+ *
+ * Owners are the `?tab=<id>` values the owning component renders under
+ * (verified against Chat.tsx / ETradeTradingHub / nav-config deep links):
+ * `orderTab`/`assetClass` live on the order page; `riskTab` on the Risk
+ * Analysis page and inside the order page's risk tab; `reportsTab` on
+ * the hub's reports sub-tab; `iaaaTab` on platform-admin; `run`/`q`
+ * (legacy alias) on workflow-runs; `screenerTab` is the legacy alias
+ * the three screener hubs read for `view`; `research`/`discoveryView`
+ * on the options hub; `checkoutTab` on checkout.
+ */
+export const TAB_PARAM_OWNERS: Readonly<Record<string, readonly RouteId[]>> = {
+  orderTab: ["order"],
+  assetClass: ["order"],
+  riskTab: ["risk-analysis", "order"],
+  reportsTab: ["reports"],
+  iaaaTab: ["platform-admin"],
+  run: ["workflow-runs"],
+  q: ["workflow-runs"],
+  screenerTab: ["screeners", "options", "stock-hub"],
+  research: ["options"],
+  discoveryView: ["options"],
+  checkoutTab: ["checkout"],
+};
+
+/** Query string with `tab` set, keeping only the destination's own params. */
 export function buildSearchWithTab(currentSearch: string, tab: RouteId): string {
   const params = new URLSearchParams(currentSearch);
+  for (const key of [...params.keys()]) {
+    if (key === "tab" || key === "view") continue;
+    const owners = TAB_PARAM_OWNERS[key];
+    if (!owners || !owners.includes(tab)) params.delete(key);
+  }
   params.set("tab", tab);
   const serialized = params.toString();
   return serialized ? `?${serialized}` : "";
