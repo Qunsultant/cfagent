@@ -20,6 +20,16 @@
  *   before price resolution and before the scheduled coverage-only
  *   rule: price 0, no checkout, no coverage consumed, including
  *   recurring runs. An expired grant lapses to the normal gate.
+ * - Free-tier allowance (#3305): a Free account may run up to
+ *   the operator-managed allowance (10 runs per product per UTC
+ *   calendar month, seeded) without payment, before price
+ *   resolution — like the grant, a free run at price 0 must not
+ *   fail on a missing/unapproved family price, and per-run
+ *   prices are PROPOSED, not approved. The run is counted by
+ *   the free-run counter port; at the cap the gate falls through
+ *   to the paid path. Grant-covered runs never touch the
+ *   counter; trial/Subscribed runs use included runs, not the
+ *   counter. No counter wired = today's behavior (no free runs).
  * - Manual runs: subscription/credits first, then checkout (402).
  * - Scheduled runs: subscription/credits only, never unattended
  *   card, EXCEPT a one-off scheduled run authorized by a human
@@ -67,6 +77,7 @@
  */
 import type { PriceCatalogue, PriceFamily } from "../data/priceCataloguePorts";
 import { isUnlimitedFreeGrantActive, type UnlimitedFreeGrant } from "../data/commercialPorts";
+import { freeRunMonthKey, type FreeRunCounter } from "../data/freeRunCounterPorts";
 import {
   claimRedemptionKey,
   x402NonceRedemptionKey,
@@ -114,6 +125,16 @@ export interface NativeMonetizationConfig {
    * behavior, kept as the floor, not the ceiling).
    */
   proofRedemptions?: ProofRedemptionStore | null;
+  /**
+   * The free-run counter (#3305). When wired, a Free-tier run
+   * under the operator-managed allowance (10 runs per product
+   * per UTC calendar month, seeded) is allowed at price 0 and
+   * counted, before price resolution. When absent, the gate
+   * keeps today's behavior — no free runs, a Free account falls
+   * through to the paid path. The counter is operator data;
+   * absence is never a reason to guess an allowance.
+   */
+  freeRunCounter?: FreeRunCounter | null;
   /**
    * The checkout ports bundle, or null when nothing is configured.
    * Null means: no checkout can be minted and no payment can be
@@ -250,6 +271,32 @@ export class NativeMonetizationGate {
     if (isUnlimitedFreeGrantActive(account.unlimitedFreeGrant, run.nowMs ?? Date.now())) {
       this.byRun.set(run.id, { runRequestId: run.id, userId: account.userId, tenantId: run.tenantId ?? account.tenantId, family: run.family, trigger: run.trigger, priceUSD: 0, status: "paid", paidVia: "unlimited_free_grant" });
       return { allowed: true, status: "paid", runRequestId: run.id, priceUSD: 0, paidVia: "unlimited_free_grant" };
+    }
+    // Issue #3305: the Free-tier allowance — 10 runs per product
+    // per UTC calendar month, operator-managed and changeable.
+    // Evaluated BEFORE price resolution, like the grant: a free
+    // run at price 0 must NOT fail on a missing/unapproved
+    // family price (per-run prices are PROPOSED, not approved),
+    // and it consumes no credits and no included runs. Free runs
+    // are the Free tier's entitlement, so they are spent before
+    // paid credits. Trial and Subscribed runs never reach this
+    // branch (trial sets tier Subscribed; included runs are the
+    // Subscribed path below). When no counter is wired the gate
+    // keeps today's behavior — the allowance is operator data,
+    // and no data means no free runs, never a guessed allowance.
+    // At the cap the run falls through to the paid path below
+    // (402 manual / skip scheduled); the counter is untouched
+    // by a capped run.
+    if (account.tier === "Free" && this.config.freeRunCounter) {
+      const consumed = await this.config.freeRunCounter.consumeFreeRun({
+        login: account.userId,
+        family: run.family,
+        month: freeRunMonthKey(run.nowMs ?? Date.now()),
+      });
+      if (consumed.allowed) {
+        this.byRun.set(run.id, { runRequestId: run.id, userId: account.userId, tenantId: run.tenantId ?? account.tenantId, family: run.family, trigger: run.trigger, priceUSD: 0, status: "paid", paidVia: "free_run_allowance" });
+        return { allowed: true, status: "paid", runRequestId: run.id, priceUSD: 0, paidVia: "free_run_allowance" };
+      }
     }
     const priceUSD = await this.priceFor(run.family);
 
