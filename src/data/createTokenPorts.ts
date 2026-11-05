@@ -35,7 +35,7 @@ import {
   createStoreKv,
   listStoreEntries,
   type DoNamespaceLike,
-} from "../security/durableKv";
+} from "./durableKv";
 import { lookupLoginByUserId } from "../security/iaaaMigration";
 import { sessionStore } from "../security/session";
 import type { Env } from "../types";
