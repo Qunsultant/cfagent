@@ -1,0 +1,2 @@
+### Added
+- Fast Order Ticket options tab: strategy Select (STRATEGY_LIBRARY) plus one expiration picker auto-builds the ticket legs — choosing a strategy replaces the legs wholesale, with the leg editor still available for per-leg tweaks. Built legs map lossy by design (side / CALL-PUT / strike / quantity / expiry; STOCK becomes an EQ leg; model prices, greeks, and IV are dropped so the broker preview prices from live quotes). Refusals mirror discovery: no live quote, no expiration picked, or a past expiration changes nothing. No broker, approval, or preview changes.

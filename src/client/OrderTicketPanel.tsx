@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Badge,
   Button,
@@ -22,6 +22,8 @@ import type {
 } from "./options/riskManagementEngine";
 import { RiskAnalysisPanel } from "./RiskAnalysisPanel";
 import { PageChromeContext } from "./components/ui/PageShell";
+import { STRATEGY_LIBRARY } from "./options/strategyLibrary";
+import { buildTradeLegs, describeTradeLeg } from "./trading/strategyAutobuild";
 
 /**
  * OrderTicketPanel — the Fast Order Ticket as its own shell-conforming
@@ -80,6 +82,11 @@ export interface OrderTicketModel {
   ) => void;
   addOptionLeg: () => void;
   removeOptionLeg: (index: number) => void;
+  setOptionLegs: (
+    legs: NonNullable<TradeOrderContext["optionLegs"]>,
+    label: string,
+    legsText: string[],
+  ) => void;
   setOptionNetOrderDirection: (credit: boolean) => void;
   handlePreviewOrder: (e: React.FormEvent) => Promise<void>;
   handleStartOAuth: (override?: unknown) => Promise<void>;
@@ -118,6 +125,7 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
     updateOptionLeg,
     addOptionLeg,
     removeOptionLeg,
+    setOptionLegs,
     setOptionNetOrderDirection,
     handlePreviewOrder,
     handleStartOAuth,
@@ -262,6 +270,60 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
     [orderSymbol, orderAssetClass, orderLegs, orderQuantity],
   );
 
+  // Strategy auto-build (#3090): a strategy Select + one expiration
+  // picker that REPLACES the ticket's legs with the built structure
+  // (the editor stays available for per-leg tweaks after the build).
+  // The picker defaults to the legs' shared expiration when they all
+  // agree, otherwise it starts empty and the build refuses until a
+  // date is picked. Spot comes from the live ticket quote, falling
+  // back to the context's underlying price; with neither, the build
+  // refuses exactly as discovery does.
+  const todayLocalIso = () => {
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  };
+  const [buildExpiry, setBuildExpiry] = useState(() => {
+    const expiries = new Set(
+      orderLegs
+        .filter((l) => l.securityType === "OPTN" && l.expirationDate)
+        .map((l) => l.expirationDate as string),
+    );
+    return expiries.size === 1 ? [...expiries][0] : "";
+  });
+  const [strategyChoice, setStrategyChoice] = useState("");
+  const [builderNotice, setBuilderNotice] = useState("");
+  const strategyCategories = useMemo(
+    () => Array.from(new Set(STRATEGY_LIBRARY.map((d) => d.category))),
+    [],
+  );
+  const handleBuildStrategy = (strategyId: string) => {
+    setStrategyChoice(strategyId);
+    if (!strategyId) {
+      setBuilderNotice("");
+      return;
+    }
+    const definition = STRATEGY_LIBRARY.find((d) => d.id === strategyId);
+    if (!definition) return;
+    const spot = orderQuote?.lastPrice ?? orderContext?.underlyingPrice;
+    if (!spot || spot <= 0) {
+      setBuilderNotice("Quote unavailable — load a live quote before choosing a strategy.");
+      return;
+    }
+    if (!buildExpiry) {
+      setBuilderNotice("Pick an expiration date first.");
+      return;
+    }
+    if (buildExpiry < todayLocalIso()) {
+      setBuilderNotice("Expiration must be today or later.");
+      return;
+    }
+    const { legs } = buildTradeLegs(definition, spot, buildExpiry);
+    setOptionLegs(legs, `Built strategy: ${definition.name}`, legs.map(describeTradeLeg));
+    setBuilderNotice("");
+    setStrategyChoice("");
+  };
+
   return (
     <PageShell title="Order Ticket">
       <Tabs
@@ -339,6 +401,36 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
                             + Add leg
                           </Button>
                         </div>
+                        <Flex gap="2" wrap align="end">
+                          <Select
+                            label="Build from strategy"
+                            hint="Replaces the legs below with the strategy's structure."
+                            aria-label="Build from strategy"
+                            value={strategyChoice}
+                            onChange={(event) => handleBuildStrategy(event.target.value)}
+                          >
+                            <option value="">Choose a strategy…</option>
+                            {strategyCategories.map((category) => (
+                              <optgroup key={category} label={category}>
+                                {STRATEGY_LIBRARY.filter((d) => d.category === category).map((d) => (
+                                  <option key={d.id} value={d.id}>{d.name}</option>
+                                ))}
+                              </optgroup>
+                            ))}
+                          </Select>
+                          <TextInput
+                            label="Expiration"
+                            aria-label="Build expiration"
+                            type="date"
+                            min={todayLocalIso()}
+                            value={buildExpiry}
+                            onChange={(event) => {
+                              setBuildExpiry(event.target.value);
+                              setBuilderNotice("");
+                            }}
+                          />
+                        </Flex>
+                        {builderNotice && <Notice tone="warning">{builderNotice}</Notice>}
                         {orderLegs.map((leg, index) => (
                           <div className="options-leg-row" key={`option-leg-${index}`}>
                             <div className="options-leg-title"><strong>Leg {index + 1}</strong><span>{leg.securityType === "OPTN" ? "OPTION" : "STOCK"}</span></div>
