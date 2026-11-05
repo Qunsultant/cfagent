@@ -63,6 +63,10 @@ export type BrokerOperation =
   // stores hold E*TRADE rows, so the scanner surface has no neutral backend
   // yet. Declared rather than silently routed to E*TRADE.
   | "optionsScanner"
+  // Issue #3292: IV history. Collected from E*TRADE option-chain snapshots
+  // over time; Alpaca exposes no IV-history endpoint, and deriving one from
+  // a single snapshot would be a manufactured series.
+  | "ivHistory"
   | "orderPreview"
   | "orderPlace"
   | "marketScreening";
@@ -113,6 +117,7 @@ export const BROKER_CATALOG = {
       orderPlace: true,
       marketScreening: true,
       optionsScanner: true,
+      ivHistory: true,
     },
     statusVocabulary: {
       protocol: "etrade_oauth_rest",
@@ -141,6 +146,7 @@ export const BROKER_CATALOG = {
       // Alpaca has no screener API; screening stays provider-side (#2144).
       marketScreening: false,
       optionsScanner: false,
+      ivHistory: false,
     },
     statusVocabulary: {
       protocol: "alpaca_rest_v2",

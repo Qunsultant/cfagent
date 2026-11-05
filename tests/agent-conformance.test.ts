@@ -273,16 +273,31 @@ describe("Agent conformance (issue #1738)", () => {
     expect(wrangler).toMatch(
       /"tag":\s*"v12",\s*"new_sqlite_classes":\s*\[[^\]]*"AiSearchAgent"/
     );
-    // The ai_search_namespaces binding is NOT declared as config:
-    // its "namespace" value is dashboard-issued and not in the repo,
-    // and inventing one would bind the wrong namespace. The
-    // namespace code path ships config-gated (env.AI_SEARCH +
-    // AI_SEARCH_INSTANCE) as the slice's named residual. The check
-    // parses the config (comments stripped, as the slice-1
+    // The ai_search_namespaces binding IS declared as config since
+    // the #1169 owner enablement landed (2026-11-05): the owner
+    // provided the dashboard values (namespace "default", instance
+    // screener-search), so the namespace code path (env.AI_SEARCH +
+    // AI_SEARCH_INSTANCE) is configured as the live primary. The
+    // check parses the config (comments stripped, as the slice-1
     // foundation suite does) so the explanatory comments in
     // wrangler.jsonc / src/types.ts don't trip it.
     const configOnly = wrangler.replace(/\/\/[^\n]*/g, "");
-    expect(configOnly).not.toContain('"ai_search_namespaces"');
+    expect(configOnly).toContain('"ai_search_namespaces"');
+    // The entry's shape is the one WRANGLER's schema enforces
+    // (issue #3321): ai_search_namespaces entries take a "binding"
+    // field, NOT the "name" field the Durable Object entries use.
+    // The enablement PR (#3319) shipped "name" and the pin asserted
+    // it; the unit suite passed and the production deploy rejected
+    // the config (wrangler deploy --dry-run is the authority:
+    // 'bindings should have a string "binding" field'). This pin
+    // now asserts the schema shape, including the negative: no
+    // "name" key on the entry.
+    expect(configOnly).toMatch(
+      /"binding":\s*"AI_SEARCH",\s*"namespace":\s*"default",\s*"remote":\s*true/
+    );
+    expect(configOnly).not.toMatch(
+      /"ai_search_namespaces":\s*\[\s*\{\s*"name"/
+    );
   });
 
   it("SandboxAgent extends PortThink with deliberately unset port hooks (issue #2253)", () => {

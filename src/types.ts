@@ -70,15 +70,15 @@ export interface Env {
   VECTOR_MEMORY: any; // Vectorize binding (type varies by workers-types version)
   // Issue #2223 (AiSearchAgent): the ai_search_namespaces binding —
   // the agent-tool door onto the Cloudflare AI Search instance.
-  // Optional: the binding is NOT declared in wrangler.jsonc in this
-  // slice, because its "namespace" value is dashboard-issued (the
-  // account's AI Search namespace id) and is not recorded anywhere
-  // in this repo; inventing one would bind the wrong namespace.
-  // Absence = the namespace path is unconfigured and the agent
-  // degrades honestly to the MCP / REST paths. Owner enablement:
-  // add the ai_search_namespaces entry (binding "AI_SEARCH",
-  // namespace <dashboard value>, remote true) to wrangler.jsonc and
-  // set AI_SEARCH_INSTANCE.
+  // Declared in wrangler.jsonc under #1169 (owner enablement landed
+  // 2026-11-05): binding "AI_SEARCH", namespace "default" (the
+  // owner-provided dashboard value), remote true. The field stays
+  // optional in this type: absence = the namespace path is
+  // unconfigured and the agent degrades honestly to the MCP / REST
+  // paths. The instance name is in AI_SEARCH_INSTANCE below; the
+  // MCP path's endpoint var (AI_SEARCH_MCP_ENDPOINT) is
+  // deliberately unset in production (owner decision — the
+  // instance's public endpoint is not used).
   AI_SEARCH?: AiSearchNamespace;
   // Issue #2223 (AiSearchAgent): the instance name the namespace
   // path searches (env.AI_SEARCH.get(AI_SEARCH_INSTANCE)). Additive
@@ -87,9 +87,13 @@ export interface Env {
   AI_SEARCH_INSTANCE?: string;
   // Issue #2223 (AiSearchAgent): the instance's public MCP endpoint
   // URL (…search.ai.cloudflare.com/mcp) for the MCP path. Additive
-  // config; the endpoint exists only when the owner enables the
-  // instance's Public Endpoint in the Cloudflare dashboard, so
-  // absence = the MCP path is unconfigured, never an error.
+  // config, and DELIBERATELY UNSET in production (owner decision,
+  // 2026-11-05, #1169): the instance's Public Endpoint is an
+  // unauthenticated, shareable search URL, and once report indexing
+  // is live the index holds per-login report content that the app's
+  // login filtering cannot protect at the endpoint level — so no
+  // public endpoint is used, and absence = the MCP path is
+  // unconfigured by decision, never an error.
   AI_SEARCH_MCP_ENDPOINT?: string;
   // Issue #2731 (web_search): named web-search provider selection
   // for the seam in src/services/webSearch.ts. Both optional —

@@ -14,10 +14,12 @@
  *     configuration, so ETradeSandboxService returns executed:false.
  *     Bind a backend (the owner decision the registry notes name)
  *     and these pins fail until the status is updated in the same PR.
- *   - ai-search-platform is "degraded" BECAUSE the
- *     ai_search_namespaces binding is not declared in wrangler.jsonc
- *     (the namespace value is dashboard-issued; src/types.ts records
- *     the owner enablement steps).
+ *   - ai-search-platform is "degraded" BECAUSE, although the
+ *     ai_search_namespaces binding is now declared in wrangler.jsonc
+ *     (namespace "default", owner-provided under #1169; src/types.ts
+ *     records the landed enablement), the namespace path has not yet
+ *     been verified end-to-end — the #1169 seed+probe step is what
+ *     retires the degradation.
  *   - durable-fibers is "degraded" BECAUSE its live records sit in
  *     an in-memory Map (the same fact the S4 fibers cells rest on)
  *     and checkpoint read-back (#2763) covers only runs that carry
@@ -238,8 +240,13 @@ describe("degraded status evidence (#2417)", () => {
     expect(family!.notes ?? "").toContain("wrangler secret put BRAVE_SEARCH_API_KEY");
   });
 
-  it("ai-search-platform: the ai_search_namespaces binding is not declared in wrangler.jsonc, and the env type records it as owner-added config", () => {
-    expect(wrangler["ai_search_namespaces"]).toBeUndefined();
+  it("ai-search-platform: the ai_search_namespaces binding is declared in wrangler.jsonc (namespace \"default\", #1169), and the env type records it", () => {
+    expect(wrangler["ai_search_namespaces"]).toEqual([
+      // "binding", not "name": wrangler's schema for this binding
+      // type (issue #3321 — the "name" form shipped in #3319 was
+      // rejected by the production deploy).
+      { binding: "AI_SEARCH", namespace: "default", remote: true },
+    ]);
     expect(read("src/types.ts")).toContain("AI_SEARCH?: AiSearchNamespace");
     // The three-path runner the agent degrades through exists.
     expect(existsSync(resolve(root, "src/agents/aiSearchPaths.ts"))).toBe(true);

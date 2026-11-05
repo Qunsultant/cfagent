@@ -455,7 +455,7 @@ const MATRIX: MatrixRow[] = [
         "Turn-capable: portHooks are set in the constructor (aiSearchAgent.ts:86-99) mirroring ResearchAgent's — the namespace search is a model turn tool as well as a direct method (the agents/tools/ai-search pattern from the reference set), exposed through the MCP door as ai_search_agent_search (#2250).",
       ),
       routing: IMPL(
-        "Binding AI_SEARCH_AGENT (migration v12, #2223); A2A surface aisearch (registry). The ai_search_namespaces binding is dashboard-issued and not declared in wrangler.jsonc, so the primary path is config-gated and the agent degrades honestly to its MCP and REST paths (registry note).",
+        "Binding AI_SEARCH_AGENT (migration v12, #2223); A2A surface aisearch (registry). The ai_search_namespaces binding is declared in wrangler.jsonc (namespace \"default\", owner-provided 2026-11-05 under #1169) and AI_SEARCH_INSTANCE is set, so the primary path is live and the agent degrades honestly to its REST path when it is unavailable; the MCP path is deliberately unconfigured (owner decision — the instance's public endpoint is unauthenticated and unused) (registry note).",
       ),
       websockets: NA("No WebSocket surface of its own: it defines no onConnect/onMessage and no socket client connects to it (fleet pin below: onConnect exists only in TickerAgent)."),
       "sdk-scheduling": NA("No SDK scheduler use: the file contains no this.schedule/this.scheduleEvery call (fleet pin below: such calls exist only in OrchestratorAgent and TickerAgent)."),
