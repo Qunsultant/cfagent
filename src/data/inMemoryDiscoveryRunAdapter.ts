@@ -9,6 +9,8 @@ import {
   DISCOVERY_RUN_RETENTION_DAYS,
   discoveryRunVisibleToCaller,
   type DiscoveryRunInput,
+  type DiscoveryRunBroker,
+  normalizeDiscoveryRunBroker,
   type DiscoveryRunStore,
   type DiscoveryRunStoreOptions,
   type DiscoveryRunSummary,
@@ -29,6 +31,9 @@ function summarize(input: DiscoveryRunInput, id: string): DiscoveryRunSummary {
   return {
     id,
     createdAt: input.createdAt,
+    // Issue #3388: provenance lives in the summary, exactly as the SQL adapter
+    // stamps it, so both implementations answer the same reads.
+    broker: normalizeDiscoveryRunBroker(input.broker),
     ...(input.userLogin !== undefined ? { userLogin: input.userLogin } : {}),
     trigger: input.trigger,
     ...(input.scheduleId !== undefined ? { scheduleId: input.scheduleId } : {}),
@@ -85,19 +90,21 @@ export class InMemoryDiscoveryRunStore implements DiscoveryRunStore {
     return run;
   }
 
-  async list(options: { limit?: number; offset?: number; userLogin?: string } = {}): Promise<DiscoveryRunSummary[]> {
+  async list(options: { limit?: number; offset?: number; userLogin?: string; broker?: DiscoveryRunBroker } = {}): Promise<DiscoveryRunSummary[]> {
     const limit = options.limit ?? 25;
     const offset = options.offset ?? 0;
     return [...this.runs]
       .filter((r) => discoveryRunVisibleToCaller(r, options.userLogin))
+      .filter((r) => !options.broker || normalizeDiscoveryRunBroker(r.broker) === options.broker)
       .sort(byNewestFirst)
       .slice(offset, offset + limit)
       .map(({ requests: _requests, outcomes: _outcomes, ...summary }) => summary);
   }
 
-  async get(id: string, options: { userLogin?: string } = {}): Promise<StoredDiscoveryRun | null> {
+  async get(id: string, options: { userLogin?: string; broker?: DiscoveryRunBroker } = {}): Promise<StoredDiscoveryRun | null> {
     const run = this.runs.find((r) => r.id === id) ?? null;
     if (!run || !discoveryRunVisibleToCaller(run, options.userLogin)) return null;
+    if (options.broker && normalizeDiscoveryRunBroker(run.broker) !== options.broker) return null;
     return run;
   }
 

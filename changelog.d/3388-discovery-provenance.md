@@ -1,0 +1,3 @@
+### Changed
+- Discovery runs record the broker whose chains produced them (#3388 slice 1). Provenance rides inside the run summary — the #3327 shape — so there is no column migration: every persisted run is stamped at save, `list` and by-id reads are scoped to the selected broker, and a run from another broker reads exactly like a missing one. Rows written before provenance existed read as `etrade`, which is what the E*TRADE-wired engine actually used, and are never served as another broker's evidence.
+- No user-visible change in this slice: the options-discovery refusal for a broker with no engine stays until slice 2 composes the engine on the selected broker's chains.
