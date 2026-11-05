@@ -21,7 +21,7 @@ import type {
   ETradeOptionChain,
   ETradeOptionChainContract,
 } from "../types";
-import type { ETradeRestClient } from "./etrade/client";
+import type { OptionChainSource } from "./optionChainSource";
 import { type NasdaqStockListing } from "../services/nasdaqListings";
 import type { NasdaqUniverseDeps } from "./screenerPipeline";
 import { getScreenerConfig, type EtapiScreenerConfig } from "../config/etapiConfig";
@@ -83,7 +83,7 @@ export const SUBREQUEST_BUDGET_DEFERRED_REASON =
  * ledger is shared across every per-symbol call of one scan (the
  * opportunity scanner snapshots symbols one by one over one screener
  * instance), so the bound applies to the scan, not to each symbol.
- * The E*TRADE client charges it synchronously at each outbound fetch,
+ * The chain source charges it synchronously at each outbound fetch,
  * including any .json fallback, so concurrent calls cannot overspend.
  */
 export interface SubrequestBudget {
@@ -277,7 +277,7 @@ export function sanitizeOptionScreenerFilter(raw: OptionScreenerFilter = {}, con
 }
 
 export class DynamicOptionsScreener {
-  private client?: ETradeRestClient;
+  private source?: OptionChainSource;
   public config: EtapiScreenerConfig;
   /** Issue #1378: threaded universe seam (route-bound by the caller); absent → resolveUnderlyings throws. */
   private universeDeps?: NasdaqUniverseDeps;
@@ -285,12 +285,12 @@ export class DynamicOptionsScreener {
   private static testListingsFixture: NasdaqStockListing[] | null = null;
 
   constructor(
-    client?: ETradeRestClient,
+    source?: OptionChainSource,
     config?: Partial<EtapiScreenerConfig>,
     universeDeps?: NasdaqUniverseDeps
   ) {
-    this.client = client;
-    const base = getScreenerConfig((client as any)?.env, (client as any)?.overrideEnv);
+    this.source = source;
+    const base = getScreenerConfig((source as any)?.env, (source as any)?.overrideEnv);
     this.config = config ? { ...base, ...config } : base;
     this.universeDeps = universeDeps;
   }
@@ -354,15 +354,15 @@ export class DynamicOptionsScreener {
   ): Promise<{ chains: ETradeOptionChain[]; fetchErrors: OptionScreenFetchError[]; expirationsTruncated: number; deferred: boolean }> {
     const fixture = DynamicOptionsScreener.testChainsFixture[symbol];
     if (fixture) return { chains: [fixture], fetchErrors: [], expirationsTruncated: 0, deferred: false };
-    if (!this.client) {
+    if (!this.source) {
       return {
         chains: [],
-        fetchErrors: [{ symbol, reason: "No E*TRADE client configured for live chain fetch." }],
+        fetchErrors: [{ symbol, reason: "No option chain source configured for live chain fetch." }],
         expirationsTruncated: 0,
         deferred: false,
       };
     }
-    const client = this.client;
+    const client = this.source;
 
     // Issue #1204: budget gate. A symbol that cannot afford even its
     // expire-dates fetch is deferred — no fetch is issued for it, and
@@ -604,7 +604,7 @@ export class DynamicOptionsScreener {
     // legitimate empty slice (no error) or partial chains are not
     // retried; without a client the error is deterministic, so the pass
     // is skipped entirely.
-    if (this.client) {
+    if (this.source) {
       let retried = 0;
       for (let i = 0; i < symbols.length; i++) {
         const outcome = outcomes[i];

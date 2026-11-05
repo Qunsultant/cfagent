@@ -583,6 +583,8 @@ const EXPECTED_INVENTORY = [
   // Issue #3233: broker-neutral options reads (chains + expiry dates).
   "handleBrokerOptionsRoutes :: endsWith(\"/broker/options/chains\")",
   "handleBrokerOptionsRoutes :: endsWith(\"/broker/options/expire-dates\")",
+  // Issue #3272: the neutral options screen rides the same handler.
+  "handleBrokerOptionsRoutes :: endsWith(\"/broker/options/screen\")",
   // Issue #2853: the neutral account/position reads the broker panels render.
   "handleBrokerReadsRoutes :: endsWith(\"/broker/accounts\")",
   "handleBrokerReadsRoutes :: endsWith(\"/broker/positions\")",

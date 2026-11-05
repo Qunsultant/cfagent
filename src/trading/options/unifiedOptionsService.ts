@@ -35,6 +35,7 @@ import {
   type Tier,
 } from "../dataProviders";
 import { DEFAULT_MAX_DTE, DynamicOptionsScreener } from "../optionsScreener";
+import type { OptionChainSource } from "../optionChainSource";
 import {
   runPanelPipeline,
   type PipelineOptions,
@@ -475,20 +476,20 @@ export class UnifiedOptionsService {
   }
 
   static async runStrategyPipeline(
-    client: ETradeRestClient | undefined,
+    source: OptionChainSource | undefined,
     request: StrategyRequest,
     options: PipelineOptions = {}
   ): Promise<PipelineResult> {
-    return runPanelPipeline(new DynamicOptionsScreener(client), request, options);
+    return runPanelPipeline(new DynamicOptionsScreener(source), request, options);
   }
 
   static async scanOpportunities(
-    client: ETradeRestClient | undefined,
+    source: OptionChainSource | undefined,
     symbols: string[],
     template: ScanRequestTemplate,
     options: Parameters<OpportunityScanner["scan"]>[2] = {}
   ): Promise<OpportunityScanResult> {
-    return new OpportunityScanner(new DynamicOptionsScreener(client)).scan(symbols, template, options);
+    return new OpportunityScanner(new DynamicOptionsScreener(source)).scan(symbols, template, options);
   }
 
   private getCacheKey(req: UnifiedOptionsRequest, profile?: StrategyProfile): string {
