@@ -16,7 +16,7 @@ import {
   type StoredScanRun,
 } from "./scanRunPorts";
 
-function summarize(id: string, result: OpportunityScanResult, userLogin?: string): ScanRunSummary {
+function summarize(id: string, result: OpportunityScanResult, userLogin?: string, trigger?: "manual" | "scheduled"): ScanRunSummary {
   return {
     id,
     generatedAt: result.generatedAt,
@@ -29,6 +29,9 @@ function summarize(id: string, result: OpportunityScanResult, userLogin?: string
     xlsxKey: result.xlsxKey ?? null,
     csvKey: result.csvKey ?? null,
     partial: result.partial ?? null,
+    // Issue #3264: same trigger-through-summary_json rule as the
+    // DO-SQLite adapter — no migration, older rows lack the field.
+    ...(trigger ? { trigger } : {}),
     ...(userLogin !== undefined ? { userLogin } : {}),
   };
 }
@@ -56,8 +59,8 @@ export class InMemoryScanRunStore implements ScanRunStore {
     this.maxRows = options.maxRows ?? SCAN_RUN_MAX_ROWS;
   }
 
-  async save(result: OpportunityScanResult, options: { userLogin?: string; id?: string } = {}): Promise<StoredScanRun> {
-    const run: StoredScanRun = { ...summarize(options.id ?? this.idFactory(), result, options.userLogin), result };
+  async save(result: OpportunityScanResult, options: { userLogin?: string; id?: string; trigger?: "manual" | "scheduled" } = {}): Promise<StoredScanRun> {
+    const run: StoredScanRun = { ...summarize(options.id ?? this.idFactory(), result, options.userLogin, options.trigger), result };
     this.runs.push(run);
     await this.prune(new Date(result.generatedAt));
     return run;

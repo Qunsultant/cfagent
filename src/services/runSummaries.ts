@@ -345,7 +345,7 @@ export function runSummaryFromScanRun(scan: ScanRunSummary): RunSummary {
       (partial
         ? ` Partial coverage — qualified partial results: evaluated ${partial.evaluatedCount} of ${partial.consideredCount} underlyings (${partial.coverageErrors} failures, ${partial.truncatedCount} truncated).`
         : ""),
-    trigger: null,
+    trigger: scan.trigger ?? null,
     createdAt: scan.generatedAt,
     status: null,
     resultCount: evaluated,

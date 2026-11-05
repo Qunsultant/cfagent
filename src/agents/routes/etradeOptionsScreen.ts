@@ -402,6 +402,13 @@ export async function executeUnifiedOptions(args: {
   // never throws; uncovered names stay unverified.
   delete reqData.eventCalendarBySymbol;
   delete reqData.eventCalendar;
+  // Issue #3264: the run trigger is a server-side fact — a manual
+  // client must never stamp its own run "scheduled". This route is
+  // the manual entry point (manual runs + user-initiated
+  // regenerations of a stored plan), so the trigger is "manual"
+  // here; only the scheduled caller passes "scheduled" to the
+  // service. Overwrite, never trust a client-supplied value.
+  reqData.trigger = "manual";
   if (reqData.action === "opportunities" || reqData.action === "strategies" || reqData.action === "best_trade" || reqData.action === "compare" || reqData.action === "llm_ideas" || reqData.action === "llm_evaluate") {
     const calSymbols = reqData.action === "opportunities"
       ? (Array.isArray(reqData.symbols) && reqData.symbols.length > 0 ? reqData.symbols : (reqData.symbol ? [reqData.symbol] : []))
