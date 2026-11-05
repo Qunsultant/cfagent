@@ -64,6 +64,7 @@ Supersedes:
 ## Scope
 Included:
 Excluded:
+Scope discipline: every item excluded from this issue gets its own sub-issue under this issue, created at the time it is identified and linked under Related issues — never left as a follow-up note, TODO, or 'future work' line. An excluded item with no sub-issue is a review finding.
 
 ## Acceptance criteria
 - [ ] Decision recorded (ADR or governance doc) with trade-offs and gaps addressed
@@ -91,5 +92,5 @@ Rework justification (or none):
 Allocation (or none — architecture decisions are human judgment; agents draft, owners decide):
 
 ## Completion report (gitops §15 — fill on close)
-Follow-ups ledger (G2 rule — each item a linked issue or an explicit owner deferral with date and reason):
+Follow-ups ledger (G2 rule — every follow-up IS a sub-issue under this issue; list its sub-issue number here, or an explicit owner deferral with date and reason):
 - Next-step gate (PASS / BLOCKED + reason):
