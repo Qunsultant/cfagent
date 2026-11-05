@@ -7,6 +7,8 @@
  */
 import {
   computeIvStats,
+  normalizeIvBroker,
+  type IvBroker,
   type IvHistoryCoverage,
   type IvHistoryRecord,
   type IvHistoryStore,
@@ -25,26 +27,37 @@ export class InMemoryIvHistoryStore implements IvHistoryStore {
   }
 
   async record(record: IvHistoryRecord): Promise<boolean> {
+    // One observation per (symbol, date): the day's first write is the record,
+    // whichever broker produced it (#3326).
     const key = this.key(record.symbol, record.date);
     if (this.records.has(key)) return false;
-    this.records.set(key, { ...record, symbol: normalizeSymbol(record.symbol) });
+    this.records.set(key, {
+      ...record,
+      symbol: normalizeSymbol(record.symbol),
+      broker: normalizeIvBroker(record.broker),
+    });
     return true;
   }
 
-  async get(symbol: string, date: string): Promise<IvHistoryRecord | null> {
-    return this.records.get(this.key(symbol, date)) ?? null;
+  async get(symbol: string, date: string, broker?: IvBroker): Promise<IvHistoryRecord | null> {
+    const record = this.records.get(this.key(symbol, date)) ?? null;
+    if (!record) return null;
+    if (broker && normalizeIvBroker(record.broker) !== normalizeIvBroker(broker)) return null;
+    return record;
   }
 
-  async listSeries(symbol: string, options: { limit?: number } = {}): Promise<IvHistoryRecord[]> {
+  async listSeries(symbol: string, options: { limit?: number; broker?: IvBroker } = {}): Promise<IvHistoryRecord[]> {
     const sym = normalizeSymbol(symbol);
+    const broker = options.broker ? normalizeIvBroker(options.broker) : undefined;
     const series = [...this.records.values()]
       .filter((r) => r.symbol === sym)
+      .filter((r) => (broker ? normalizeIvBroker(r.broker) === broker : true))
       .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
     return options.limit !== undefined ? series.slice(0, options.limit) : series;
   }
 
-  async coverage(symbol: string): Promise<IvHistoryCoverage> {
-    const series = await this.listSeries(symbol);
+  async coverage(symbol: string, broker?: IvBroker): Promise<IvHistoryCoverage> {
+    const series = await this.listSeries(symbol, broker ? { broker } : {});
     return {
       observations: series.length,
       firstDate: series.length ? series[series.length - 1].date : null,
@@ -52,7 +65,14 @@ export class InMemoryIvHistoryStore implements IvHistoryStore {
     };
   }
 
-  async listSymbols(): Promise<string[]> {
-    return [...new Set([...this.records.values()].map((r) => r.symbol))].sort();
+  async listSymbols(options: { broker?: IvBroker } = {}): Promise<string[]> {
+    const broker = options.broker ? normalizeIvBroker(options.broker) : undefined;
+    return [
+      ...new Set(
+        [...this.records.values()]
+          .filter((r) => (broker ? normalizeIvBroker(r.broker) === broker : true))
+          .map((r) => r.symbol),
+      ),
+    ].sort();
   }
 }

@@ -32,6 +32,7 @@ import { resolvePipelinePolicy } from "./pipelinePolicy";
 import { planScheduledScreen } from "../workflows/stockScreenPlanner";
 import { classifyScreenFailure, logScreenRunEvent } from "../workflows/screenRunAspects";
 import { DynamicMarketScreener } from "../trading";
+import { TradingPlatformRegistry, platformChainSource } from "../trading";
 import {
   type ScannedStock,
   type OpportunityStock,
@@ -72,6 +73,7 @@ import {
 } from "../trading";
 import { DEFAULT_SUBREQUEST_BUDGET, getOpportunityScannerConfig } from "../config/etapiConfig";
 import { tagOpportunitiesWithDirection } from "../trading";
+import { resolveTenantBroker } from "./tenantProviders";
 // Issue #1291: the scheduled path's unified scan result is an
 // OpportunityScanResult, not the OptionScreenResult the workbook
 // generator reads — adapt at this seam (XLSX; #1569 applies the
@@ -4601,28 +4603,64 @@ export class ScheduledTasksService {
     }
 
     try {
-      // The same E*TRADE client construction the unified options
-      // service uses, so collection reads chains under the same
-      // identity/environment as every other options path.
-      const etrade = this.createETradeService(this.userLogin, options.environment);
-      const dataAgent = new OptionsDataAgent(new DynamicOptionsScreener(etrade.client, undefined, await this.scheduledUniverseDeps(this.userLogin)));
+      // Issue #3326 (programme #3292): the run reads the SELECTED broker's
+      // chains and stamps every observation with it. E*TRADE keeps the exact
+      // path it always had; another broker is read through its own platform's
+      // options data plane, so the series cannot be another broker's rows
+      // wearing this broker's name.
+      const broker = await resolveTenantBroker(this.env);
+      let fetchChain: (symbol: string) => Promise<{ contracts: any[]; error?: string }>;
 
-      const fetchChain = async (symbol: string) => {
-        const snapshot = await dataAgent.loadSnapshot({ symbol });
-        const fetchReasons = (snapshot.screen.fetchErrors ?? [])
-          .filter((e) => e.symbol === symbol)
-          .map((e) => e.reason);
-        const error =
-          snapshot.validationError ??
-          (fetchReasons.length ? fetchReasons.join("; ") : undefined);
-        return { contracts: snapshot.contracts, ...(error ? { error } : {}) };
-      };
+      if (broker === "etrade") {
+        // The same E*TRADE client construction the unified options
+        // service uses, so collection reads chains under the same
+        // identity/environment as every other options path.
+        const etrade = this.createETradeService(this.userLogin, options.environment);
+        const dataAgent = new OptionsDataAgent(new DynamicOptionsScreener(etrade.client, undefined, await this.scheduledUniverseDeps(this.userLogin)));
+
+        fetchChain = async (symbol: string) => {
+          const snapshot = await dataAgent.loadSnapshot({ symbol });
+          const fetchReasons = (snapshot.screen.fetchErrors ?? [])
+            .filter((e) => e.symbol === symbol)
+            .map((e) => e.reason);
+          const error =
+            snapshot.validationError ??
+            (fetchReasons.length ? fetchReasons.join("; ") : undefined);
+          return { contracts: snapshot.contracts, ...(error ? { error } : {}) };
+        };
+      } else {
+        const platform = TradingPlatformRegistry.getPlatform(
+          broker,
+          this.env,
+          this.orm,
+          this.userLogin,
+          options.environment,
+        );
+        const source = platformChainSource(platform);
+        if (!source) {
+          return {
+            success: false,
+            taskType: "options.iv_collection",
+            error: `${broker} has no options chain source, so no IV observation can be recorded for it.`,
+            timestamp,
+          };
+        }
+        fetchChain = async (symbol: string) => {
+          const chain = await source.getOptionChains({ symbol });
+          if (!chain) return { contracts: [], error: `${broker} returned no chain for ${symbol}` };
+          // Flatten the strike pairs into the contract rows the ATM derivation
+          // reads. Nothing is synthesised: the chain is passed through.
+          const contracts = chain.pairs.flatMap((pair) => [pair.call, pair.put]).filter((c): c is NonNullable<typeof c> => Boolean(c));
+          return { contracts: contracts as unknown as any[] };
+        };
+      }
 
       const curatedSymbols = options.symbols ?? getCuratedStockUniverse().map((s) => s.symbol);
       const watchlistSymbols = options.symbols ? [] : this.flattenWatchlistSymbols();
 
       const report = await collectIvHistory({
         store: this.ivHistoryStore,
+        broker,
         fetchChain,
         curatedSymbols,
         watchlistSymbols,

@@ -972,6 +972,8 @@ export const agentIvHistory = sqliteTable(
     expiryDate: text("expiry_date").notNull(),
     dte: integer("dte").notNull(),
     collectedAt: text("collected_at").notNull(),
+    /** Issue #3326: broker whose chain produced the observation (migration 0045). */
+    broker: text("broker").notNull().default("etrade"),
   },
   (table) => [
     primaryKey({ columns: [table.symbol, table.date] }),
