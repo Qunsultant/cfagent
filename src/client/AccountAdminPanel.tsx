@@ -44,6 +44,7 @@ import {
   TextInput,
 } from "./components/ui";
 import { apiFetch } from "./apiFetch";
+import { UnlimitedFreeGrantSection } from "./UnlimitedFreeGrantSection";
 
 export interface AccountIdentityView {
   userLogin: string;
@@ -439,6 +440,11 @@ export function AccountAdminPanel() {
               </div>
               {mutationNote && <Notice tone="info">{mutationNote}</Notice>}
             </Stack>
+            {/* Issue #3245: unlimited-free grant, anchored after the
+                tier/coverage section. The section reads/writes the
+                looked-up account through the commercial account
+                route itself. */}
+            <UnlimitedFreeGrantSection userId={lookup.identity.userLogin} />
           </Stack>
         )}
       </div>

@@ -27,12 +27,14 @@ import {
   MIGRATION_0010_PAID_SUBMISSIONS,
   MIGRATION_0026_TENANT_AUTO_REFRESH,
   MIGRATION_0028_TENANT_PROVIDERS,
+  MIGRATION_0040_UNLIMITED_FREE_GRANT,
   type MigrationDb,
 } from "./migrationRunner";
 import {
   assertIncludedRuns,
   assertNonNegativeCredits,
   assertStoreTier,
+  resolveUnlimitedFreeGrantUpdate,
   DEFAULT_TENANT_AUTO_REFRESH,
   DEFAULT_TENANT_PROVIDERS,
   round2,
@@ -75,7 +77,8 @@ export function createD1CommercialDb(d1: D1Database): CommercialDb {
  * table wherever the commercial store is ensured; 0026 (#2481)
  * adds the per-tenant auto-refresh columns to the tenant
  * settings row, so a commercial call site is also an ensure
- * site for the switch.
+ * site for the switch. 0040 (#3245) adds the unlimited-free
+ * grant columns to the accounts row, same pattern.
  */
 export async function ensureCommercialSchema(db: CommercialDb): Promise<number[]> {
   return applyMigrations(db as unknown as MigrationDb, [
@@ -83,10 +86,17 @@ export async function ensureCommercialSchema(db: CommercialDb): Promise<number[]
     MIGRATION_0010_PAID_SUBMISSIONS,
     MIGRATION_0026_TENANT_AUTO_REFRESH,
     MIGRATION_0028_TENANT_PROVIDERS,
+    MIGRATION_0040_UNLIMITED_FREE_GRANT,
   ]);
 }
 
 function toAccount(raw: typeof agentCommercialAccounts.$inferSelect): CommercialAccountRecord {
+  // Pre-0040 rows have NULL grant columns: the row reads as "no
+  // grant", never as an error. A half-written grant (grantedBy
+  // without a reason) also reads as no grant — fail closed.
+  const grantedBy = raw.unlimitedFreeGrantedBy ?? null;
+  const reason = raw.unlimitedFreeReason ?? null;
+  const expiresAtMs = raw.unlimitedFreeExpiresAtMs ?? null;
   return {
     id: raw.id,
     tenantId: raw.tenantId,
@@ -94,6 +104,10 @@ function toAccount(raw: typeof agentCommercialAccounts.$inferSelect): Commercial
     tierSource: raw.tierSource === "operator" || raw.tierSource === "subscription" ? raw.tierSource : null,
     creditsUSD: raw.creditsUSD,
     includedRuns: raw.includedRuns,
+    unlimitedFreeGrant:
+      grantedBy !== null && reason !== null
+        ? { grantedBy, reason, expiresAtMs }
+        : null,
     updatedAtMs: raw.updatedAtMs,
   };
 }
@@ -118,6 +132,7 @@ export class D1CommercialAdapter implements CommercialStore {
     tierSource?: unknown;
     creditsUSD?: unknown;
     includedRuns?: unknown;
+    unlimitedFreeGrant?: unknown;
   }): Promise<CommercialAccountRecord> {
     if (!input.userId || !input.tenantId) {
       throw new Error("userId and tenantId are required.");
@@ -132,6 +147,13 @@ export class D1CommercialAdapter implements CommercialStore {
       input.tierSource === "operator" || input.tierSource === "subscription"
         ? input.tierSource
         : (existing?.tierSource ?? "operator");
+    // Issue #3245: a grant update is preserve (undefined) /
+    // revoke (null) / grant (object), resolved by the shared
+    // port helper so this adapter and the in-memory one agree.
+    const unlimitedFreeGrant = resolveUnlimitedFreeGrantUpdate(
+      input.unlimitedFreeGrant,
+      existing?.unlimitedFreeGrant,
+    );
     const record: CommercialAccountRecord = {
       id: input.userId,
       tenantId: input.tenantId,
@@ -139,6 +161,7 @@ export class D1CommercialAdapter implements CommercialStore {
       tierSource,
       creditsUSD: input.creditsUSD === undefined ? 0 : assertNonNegativeCredits(input.creditsUSD),
       includedRuns: input.includedRuns === undefined ? 0 : assertIncludedRuns(input.includedRuns),
+      unlimitedFreeGrant,
       updatedAtMs: Date.now(),
     };
     await this.db
@@ -150,6 +173,9 @@ export class D1CommercialAdapter implements CommercialStore {
         tierSource: record.tierSource ?? null,
         creditsUSD: record.creditsUSD,
         includedRuns: record.includedRuns,
+        unlimitedFreeGrantedBy: record.unlimitedFreeGrant?.grantedBy ?? null,
+        unlimitedFreeReason: record.unlimitedFreeGrant?.reason ?? null,
+        unlimitedFreeExpiresAtMs: record.unlimitedFreeGrant?.expiresAtMs ?? null,
         updatedAtMs: record.updatedAtMs,
       })
       .onConflictDoUpdate({
@@ -160,6 +186,9 @@ export class D1CommercialAdapter implements CommercialStore {
           tierSource: record.tierSource ?? null,
           creditsUSD: record.creditsUSD,
           includedRuns: record.includedRuns,
+          unlimitedFreeGrantedBy: record.unlimitedFreeGrant?.grantedBy ?? null,
+          unlimitedFreeReason: record.unlimitedFreeGrant?.reason ?? null,
+          unlimitedFreeExpiresAtMs: record.unlimitedFreeGrant?.expiresAtMs ?? null,
           updatedAtMs: record.updatedAtMs,
         },
       });

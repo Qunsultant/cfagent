@@ -1543,6 +1543,27 @@ CREATE TABLE IF NOT EXISTS agent_tenant_channels (
 `,
 };
 
+/**
+ * Migration 0040 — unlimited-free grant columns on the commercial
+ * account row (#3245, slice 1 of #3241). Additive only (nullable,
+ * no backfill): pre-grant rows read as "no grant", so configuring
+ * nothing changes nothing. The three columns are the grant: who
+ * granted it (session-verified operator login), why, and the
+ * optional expiry epoch-ms (NULL = no expiry). Portable subset:
+ * ALTER TABLE ADD COLUMN only, no params, no dialect date
+ * functions. A separate migration (never an edit to 0007, which
+ * is already applied): 0007 still owns the table's CREATE DDL.
+ */
+export const MIGRATION_0040_UNLIMITED_FREE_GRANT: DataMigration = {
+  version: 40,
+  name: "0040_unlimited_free_grant",
+  sql: `
+ALTER TABLE agent_commercial_accounts ADD COLUMN unlimited_free_granted_by TEXT;
+ALTER TABLE agent_commercial_accounts ADD COLUMN unlimited_free_reason TEXT;
+ALTER TABLE agent_commercial_accounts ADD COLUMN unlimited_free_expires_at_ms INTEGER;
+`,
+};
+
 export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANCE,
   MIGRATION_0002_AGENT_CHAINS_SCHEDULES,
   MIGRATION_0003_AGENT_SHARD_JOBS,
@@ -1582,6 +1603,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0037_CFPAY_CHANNEL,
   MIGRATION_0038_AGENT_SHARD_JOBS_WORKFLOW_RUN_ID,
   MIGRATION_0039_TENANT_CHANNELS,
+  MIGRATION_0040_UNLIMITED_FREE_GRANT,
 ];
 
 function splitStatements(sqlText: string): string[] {
