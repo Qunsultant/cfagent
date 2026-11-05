@@ -3390,6 +3390,8 @@ export class ScheduledTasksService {
         trigger: options.trigger === "manual" ? "manual-trigger" : "scheduled",
         ...(options.scheduleId ? { scheduleId: options.scheduleId } : {}),
         userLogin,
+        // Issue #3388: the run records the broker whose chains produced it.
+        broker: await resolveTenantBroker(this.env),
         inputModel: "saved-request",
         requests,
         outcomes,
@@ -4049,6 +4051,8 @@ export class ScheduledTasksService {
         trigger: options.trigger === "manual" ? "manual-trigger" : "scheduled",
         ...(options.scheduleId ? { scheduleId: options.scheduleId } : {}),
         userLogin,
+        // Issue #3388: the run records the broker whose chains produced it.
+        broker: await resolveTenantBroker(this.env),
         inputModel: "profile-derived",
         profileRef,
         requests: constructed,
@@ -4356,6 +4360,8 @@ export class ScheduledTasksService {
         trigger: options.trigger === "manual" ? "manual-trigger" : "scheduled",
         ...(options.scheduleId ? { scheduleId: options.scheduleId } : {}),
         userLogin,
+        // Issue #3388: the run records the broker whose chains produced it.
+        broker: await resolveTenantBroker(this.env),
         inputModel: "no-view",
         requests: [],
         constraintSets: outcomes.flatMap((o) => (o.constraintSet ? [o.constraintSet] : [])),

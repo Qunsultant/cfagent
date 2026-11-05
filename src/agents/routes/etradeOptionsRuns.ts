@@ -147,7 +147,7 @@ export async function handleOptionsDiscoveryRunsList(
     const userLogin = request.headers.get("x-user-login");
     if (!userLogin) return unauthenticatedResponse();
     const store = createOptionsDiscoveryPorts({ sql }).discoveryRuns;
-    const runs = await store.list({ limit, offset, userLogin });
+    const runs = await store.list({ limit, offset, userLogin, broker });
     return Response.json({ count: runs.length, runs });
   } catch (err) {
     return Response.json({ error: err instanceof Error ? err.message : "Failed to list discovery runs" }, { status: 500 });
@@ -181,7 +181,7 @@ export async function handleOptionsDiscoveryRunById(
     const userLogin = request.headers.get("x-user-login");
     if (!userLogin) return unauthenticatedResponse();
     const store = createOptionsDiscoveryPorts({ sql }).discoveryRuns;
-    const run = await store.get(decodeURIComponent(discoveryRunIdMatch[1]), { userLogin });
+    const run = await store.get(decodeURIComponent(discoveryRunIdMatch[1]), { userLogin, broker });
     if (!run) {
       return Response.json({ error: "discovery run not found" }, { status: 404 });
     }
