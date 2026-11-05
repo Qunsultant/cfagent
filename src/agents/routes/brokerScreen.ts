@@ -30,6 +30,7 @@ import {
   brokerSupports,
   gatherQuotes,
   platformQuoteSource,
+  resolveUniverseSymbols,
   screenSymbolsWithSource,
 } from "../../trading";
 import { resolveTenantBroker } from "../../services/tenantProviders";
@@ -56,6 +57,10 @@ export async function handleBrokerScreenRoutes(
 
   const body = ((await request.json().catch(() => ({}))) as any) ?? {};
   const rawSymbols = Array.isArray(body.symbols) ? body.symbols : [];
+  // Issue #3272 (stock UI): a named universe resolves through the LIVE listings
+  // feed. No curated substitution: if the feed fails the answer is coded, not
+  // a plausible-looking table (the rule #1554 set for listings).
+  const requestedUniverse = typeof body.universe === "string" && body.universe.trim() ? body.universe.trim().toUpperCase() : null;
   const symbols: string[] = Array.from(
     new Set<string>(
       rawSymbols
@@ -65,13 +70,32 @@ export async function handleBrokerScreenRoutes(
     ),
   );
 
+  let universe: string | null = null;
+  let universeSize = 0;
+  let truncated = false;
+  if (symbols.length === 0) {
+    const id = requestedUniverse ?? "NASDAQ100";
+    try {
+      const resolved = await resolveUniverseSymbols(id, MAX_SCREEN_SYMBOLS);
+      symbols.push(...resolved.symbols);
+      universeSize = resolved.universeSize;
+      truncated = resolved.truncated;
+      universe = id;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "the listings feed failed";
+      return Response.json(
+        {
+          code: "LISTINGS_UNAVAILABLE",
+          message: `The ${id} universe could not be resolved (${reason}). No curated table is substituted.`,
+          retryable: true,
+        },
+        { status: 503 },
+      );
+    }
+  }
   if (symbols.length === 0) {
     return Response.json(
-      {
-        code: "invalid_request",
-        message:
-          "symbols is required: the neutral screen quotes an explicit universe. Universe discovery stays on the provider routes.",
-      },
+      { code: "invalid_request", message: "No symbols resolved for this universe." },
       { status: 400 },
     );
   }
@@ -123,8 +147,12 @@ export async function handleBrokerScreenRoutes(
 
   const { result, quotes } = await screenSymbolsWithSource(source, symbols, body.filter ?? {}, 6);
   return Response.json({
+    ...result,
     broker,
     environment,
+    universe,
+    universeSize,
+    truncated,
     requested: symbols,
     quotesRead: quotes.quotes.length,
     failures: quotes.failures,
