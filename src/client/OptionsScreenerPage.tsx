@@ -31,6 +31,7 @@ import {
   DATA_PROVIDER_OPTIONS,
   BROKER_OPTIONS,
   brokerUnavailableNotice,
+  isBrokerId,
 } from "./tenantProviders";
 import {
   deepLinkForNavNode,
@@ -180,7 +181,7 @@ export function OptionsScreenerPage({ onSelectTab }: OptionsScreenerPageProps) {
           <p>
             Data provider: {dataProviderLabel} · Broker: {brokerLabel}
           </p>
-          {tenantProviders.brokerId !== "etrade" && (
+          {!isBrokerId(tenantProviders.brokerId) && (
             <Notice tone="warning" title="[FAILURE_BROKER_UNAVAILABLE] Broker surface unavailable">
               {brokerUnavailableNotice(tenantProviders.brokerId, brokerLabel)}
             </Notice>

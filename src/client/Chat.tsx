@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { startPolling } from "./polling";
 import { getPollingConfig } from "./pollingConfig";
 import { useAutoRefresh } from "./autoRefresh";
-import { useTenantProviders, BROKER_OPTIONS, brokerUnavailableNotice } from "./tenantProviders";
+import { useTenantProviders, BROKER_OPTIONS, brokerUnavailableNotice, isBrokerId } from "./tenantProviders";
 import { BRAND } from "./branding";
 import { apiFetch as fetch } from "./apiFetch";
 import { McpApiExplorer } from "./McpApiExplorer";
@@ -1898,7 +1898,7 @@ export function Chat({ user }: { user: User }) {
         {/* E*TRADE Agentic Trading Hub */}
         {/* Kept mounted (hidden) so in-flight and finished requests survive tab switches */}
         <div className="trading-view" hidden={!isTradingTab(tab)}>
-          {tenantProviders.brokerId !== "etrade" ? (
+          {!isBrokerId(tenantProviders.brokerId) ? (
             <Notice tone="warning" title="[FAILURE_BROKER_UNAVAILABLE] Broker surface unavailable">
               {brokerUnavailableNotice(tenantProviders.brokerId, selectedBrokerLabel)}
             </Notice>

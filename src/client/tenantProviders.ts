@@ -14,6 +14,9 @@
  */
 import { useEffect, useState } from "react";
 import { csrfHeaders } from "./apiFetch";
+import { isBrokerId, type BrokerId } from "../trading/brokerCatalog";
+
+export { isBrokerId, type BrokerId };
 
 export const TENANT_PROVIDERS_ENDPOINT = "/api/tenant/settings/providers";
 export const TENANT_PROVIDERS_CHANGED_EVENT = "cfagent-tenant-providers-changed";
