@@ -41,6 +41,8 @@ const INVENTORY: Record<string, string[]> = {
   "Table.tsx": ["Table"],
   "Skeleton.tsx": ["Skeleton"],
   "PageShell.tsx": ["PageShell", "PageSection"],
+  // #3131 template layer: slots as props over the PageShell chrome.
+  "PageTemplate.tsx": ["PageTemplate"],
   // #2283 global toast: the single home for transient feedback.
   "Toast.tsx": ["ToastProvider", "useToast"],
   // #2283 stream 5: anchored surfaces join as primitives.

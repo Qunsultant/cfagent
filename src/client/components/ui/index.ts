@@ -73,6 +73,7 @@ export { Modal, type ModalProps } from "./Modal";
 export { Table, type TableProps, type TableColumn } from "./Table";
 export { Skeleton, type SkeletonProps } from "./Skeleton";
 export { PageShell, PageSection, type PageShellProps, type PageSectionProps } from "./PageShell";
+export { PageTemplate, type PageTemplateProps, type PageTemplateSlots } from "./PageTemplate";
 export { ToastProvider, useToast, type ToastTone, type ToastInput, type ToastApi } from "./Toast";
 export { Menu, type MenuProps, type MenuItem } from "./Menu";
 export { Popover, type PopoverProps } from "./Popover";

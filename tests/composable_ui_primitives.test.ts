@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import React from "react";
-import { SegmentedControl, PillGroup, Badge, Button, Spinner, EmptyState, Card, Notice, Tabs, TabPanel, TextInput, Select, FileInput, Modal, Table, Skeleton, Checkbox, PageShell, PageSection, ToastProvider, useToast, Menu, Popover, Drawer, SkipLink, Stack, Flex, Grid } from "../src/client/components/ui";
+import { SegmentedControl, PillGroup, Badge, Button, Spinner, EmptyState, Card, Notice, Tabs, TabPanel, TextInput, Select, FileInput, Modal, Table, Skeleton, Checkbox, PageShell, PageSection, PageTemplate, ToastProvider, useToast, Menu, Popover, Drawer, SkipLink, Stack, Flex, Grid } from "../src/client/components/ui";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -400,6 +400,29 @@ describe("PageShell + PageSection (#1804/#1808)", () => {
     expect(section.props.title).toBe("Overview");
     const shell = React.createElement(PageShell, { title: "Dashboard" }, section);
     expect(shell.props.title).toBe("Dashboard");
+  });
+});
+
+describe("PageTemplate (#3131)", () => {
+  it("carries the template slots over the PageShell chrome", () => {
+    const template = React.createElement(
+      PageTemplate,
+      {
+        title: "Risk Analysis",
+        contextStrip: "context",
+        kpiRibbon: "kpi",
+        actionBar: "actions",
+        queueRail: "queue",
+      },
+      "workspace",
+    );
+    expect(template.type).toBe(PageTemplate);
+    expect(template.props.title).toBe("Risk Analysis");
+    expect(template.props.contextStrip).toBe("context");
+    expect(template.props.kpiRibbon).toBe("kpi");
+    expect(template.props.actionBar).toBe("actions");
+    expect(template.props.queueRail).toBe("queue");
+    expect(template.props.children).toBe("workspace");
   });
 });
 

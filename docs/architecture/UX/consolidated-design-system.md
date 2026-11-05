@@ -263,6 +263,47 @@ a panel shows, never how it is composed.
   `cap-tab-<id>`) are a separate mechanism from left-nav pages:
   they switch capability views within the chat surface.
 
+### 1.6b Template slots — the seven slots (#3131)
+
+Every page is the same seven slots in the same order. `PageTemplate`
+(`src/client/components/ui/PageTemplate.tsx`) is the component that
+renders them: slots as props over the `PageShell` chrome (title +
+scope note + loading/error/empty states, §1.5), with the chrome
+hosts (page/tab/nested, §1.6a) preserved — `PageTemplate` renders
+`PageShell`, which reads `PageChromeContext`, so the same template
+renders as a standalone route, as a tab, and nested, with zero
+changes to itself.
+
+| # | Slot | Holds | Filled by |
+|---|---|---|---|
+| 1 | Header | Page title (h1) + scope note | `PageShell` (§1.5) |
+| 2 | Context strip | Live context: symbol, spot, strategy | `ContextStrip` (#3132); until then, the page's own primitive-built strip |
+| 3 | KPI ribbon | Headline numbers as label/value rows | `KpiRibbon` (#3132); until then, `SummaryCard` content in a `Card` |
+| 4 | Workspace | The page's sections — the work itself | `children` (the workspace slot); `WorkspaceGrid` (#3134) for the grid |
+| 5 | Action bar | The primary actions for the page | `ActionBar` (#3134); until then, `Button`s in a `Flex` row |
+| 6 | Queue rail | The side rail: queue, feed, approvals | `QueueFeed` (#3134); until then, the page's own `Card` rail |
+| 7 | States | Loading / error / empty, in precedence order | `PageShell` (§1.5) — states win over every slot |
+
+Composition rules for slots:
+
+- Pages compose slots, never layout CSS. A page that needs a new
+  arrangement gets a new slot or a new `WorkspaceGrid` variant, not
+  a bespoke wrapper class or inline style.
+- The rule of three (§0) applies at every level: ≤3 button types,
+  ≤3 card treatments, ≤3 header treatments — and ≤3 slot variants
+  per slot. A fourth variant is an exceptions-register entry (§3.6),
+  not a quiet addition.
+- Slot spacing is the template's, not the page's: slots render in a
+  `Stack` at the order-workspace gap. A slot never sets its own
+  outer margin.
+- A slot that has nothing to show renders nothing — no empty card,
+  no placeholder strip. The workspace alone is a complete page.
+
+First consumer: the risk page (`RiskAnalysisPanel`), already
+template-shaped, renders through `PageTemplate` with no visual
+change. Every further migration (#3138–#3140 onward) is the same
+move: same content, slots named, nothing else changed.
+
 ### 1.7 New-page checklist — what a page must provide
 
 1. Route entry: `id`, `navGroup`, `crumb`, `category`, `icon`,
@@ -271,8 +312,8 @@ a panel shows, never how it is composed.
 2. Content: a `TAB_CONTENT` entry, a `SHELL_CONTENT` entry, or a
    trading-hub sub-tab branch with a `tabLabels` entry — exactly
    one outlet, never two.
-3. Chrome: `PageShell` with `title` (+ `scopeNote`) and
-   `PageSection`s; loading/empty/error via the primitive states.
+3. Chrome: `PageTemplate` (`PageShell` chrome: `title` (+ `scopeNote`)
+   + states) with `PageSection`s in the workspace slot; loading/empty/error via the primitive states.
 4. Composition: primitives only (§2.3), token-only styling (§2.2),
    no new spacing scale, no raw controls, no hand-rolled
    card/badge/modal/toast.
