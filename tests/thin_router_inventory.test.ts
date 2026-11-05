@@ -365,6 +365,8 @@ const HANDLER_FILE: Record<string, string> = {
   "handleBrokerReadsRoutes": "brokerReads.ts",
   "handleBrokerRiskRoutes": "brokerRisk.ts",
   "handleBrokerScreenRoutes": "brokerScreen.ts",
+  // Issue #3351: Alpaca sign-in (verify, store, disconnect).
+  "handleBrokerConnectRoutes": "brokerConnect.ts",
   "handleBrokerGateRoutes": "brokerGate.ts",
   "handleEtradeBrokerActivityRoutes": "etradeBroker.ts",
   "handleTradingIntegrationsRoutes": "tradingIntegrations.ts",
@@ -417,6 +419,7 @@ const EXPECTED_DELEGATIONS = [
   "handleBrokerReadsRoutes",
   "handleBrokerRiskRoutes",
   "handleBrokerScreenRoutes",
+  "handleBrokerConnectRoutes",
   "handleBrokerGateRoutes",
   "handleEtradeBrokerRoutes",
   "handleBrokerOrderRoutes",
@@ -623,6 +626,9 @@ const EXPECTED_INVENTORY = [
   "handleBrokerRiskRoutes :: endsWith(\"/broker/portfolio-risk/size\")",
   // Issue #3272 S2: the neutral stock screen.
   "handleBrokerScreenRoutes :: endsWith(\"/broker/screen\")",
+  // Issue #3351: the credential surface for a key-pair broker.
+  "handleBrokerConnectRoutes :: endsWith(\"/broker/connect/alpaca\")",
+  "handleBrokerConnectRoutes :: endsWith(\"/broker/disconnect/alpaca\")",
   "handleBrokerGateRoutes :: includes(\"/etrade/\")",
   "handleBrokerGateRoutes :: includes(\"/etrade/options/\")",
   "handleEtradeBrokerRoutes :: endsWith(\"/environment/switch\")",

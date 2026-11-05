@@ -128,7 +128,7 @@ const CREDENTIAL_GUIDANCE: Readonly<Record<BrokerId, BrokerCredentialGuidance>> 
       live: ["ALPACA_LIVE_API_KEY", "ALPACA_LIVE_SECRET_KEY", "ALPACA_LIVE_URL"],
     },
     summary:
-      "Alpaca signs in with an API key pair for the selected trading type. The key and secret are deployment secrets — the browser never asks for them.",
+      "Alpaca signs in with an API key pair for the selected trading type. The key and secret are entered once by the user — the server verifies them against Alpaca before storing, and the secret is never shown again.",
   },
 };
 
