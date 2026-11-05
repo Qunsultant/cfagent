@@ -319,16 +319,16 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
     await renderNavBar();
     expect(container.textContent).toContain("Goal Screen");
   });
-  it("renders distinct icons for all thirteen Platform Admin sub-menu items", async () => {
+  it("renders distinct icons for all fourteen Platform Admin sub-menu items", async () => {
     const adminItem = findNavItemConfig(DEFAULT_LEFT_NAV_CONFIG, "platform-admin");
     expect(adminItem).toBeDefined();
-    expect(adminItem?.subItems).toHaveLength(13);
+    expect(adminItem?.subItems).toHaveLength(14);
     for (const sub of adminItem!.subItems!) {
       expect(sub.icon, `Sub-item ${sub.id} missing icon`).toBeDefined();
       expect(sub.icon!.length).toBeGreaterThan(0);
     }
     const icons = adminItem!.subItems!.map((s) => s.icon);
-    expect(new Set(icons).size).toBe(12);
+    expect(new Set(icons).size).toBe(13);
 
     await renderNavBar();
     const chevronBtn = container.querySelector('[aria-controls="submenu-platform-admin"]') as HTMLButtonElement;
@@ -340,7 +340,7 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
     const submenu = container.querySelector('#submenu-platform-admin');
     expect(submenu).toBeTruthy();
     const svgs = submenu!.querySelectorAll('.submenu-item-bullet svg');
-    expect(svgs.length).toBe(13);
+    expect(svgs.length).toBe(14);
   });
   it("renders Schedules under Platform with distinct Schedules icon and handles navigation", async () => {
     const platform = DEFAULT_LEFT_NAV_CONFIG.sections.find((s) => s.id === "section-platform");

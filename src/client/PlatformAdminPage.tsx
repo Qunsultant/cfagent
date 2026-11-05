@@ -16,6 +16,7 @@ import { NavIcons } from "./components/NavigationMenu";
  *  - accounts: Account administration — self-service setup, tier, credits, subscriptions & catalogue
  *  - iaaa-admin: Read-only memberships, genesis, and audit
  *  - users: User profiles, tenant memberships & account linkage
+ *  - data-lifecycle: Clean state, platform bootstrap, and tenant bootstrap (#3250)
  *  - admin-access: Request admin access from the platform owner
  *
  * Built strictly with src/client/components/ui/ primitives (PageShell, Card, Tabs, TabPanel)
@@ -46,6 +47,7 @@ import { JobsPanel } from "./JobsPanel";
 import { ApiKeysPanel } from "./ApiKeysPanel";
 import { DataProvidersPanel } from "./DataProvidersPanel";
 import { TenantAdminPanel } from "./TenantAdminPanel";
+import { DataLifecyclePanel } from "./DataLifecyclePanel";
 import { ChannelsAdminPanel } from "./ChannelsAdminPanel";
 import { AccountAdminPanel } from "./AccountAdminPanel";
 import { IaaaAdminPanel } from "./IaaaAdminPanel";
@@ -87,6 +89,7 @@ export const PLATFORM_ADMIN_TABS: TabOption<PlatformAdminSectionId>[] = [
   { id: "accounts", label: "Accounts", icon: <NavIcons.Contracts /> },
   { id: "iaaa-admin", label: "IAAA Admin", icon: <NavIcons.IaaaAdmin /> },
   { id: "users", label: "Users", icon: <NavIcons.Agents /> },
+  { id: "data-lifecycle", label: "Data Lifecycle", icon: <NavIcons.Database /> },
   { id: "admin-access", label: "Admin Access", icon: <NavIcons.AdminAccess /> },
 ];
 
@@ -313,6 +316,16 @@ export function PlatformAdminPage({
             <small>User profiles, tenant memberships &amp; account linkage</small>
           </div>
           <UserAdminPanel />
+        </Card>
+      </TabPanel>
+
+      <TabPanel idBase="platform-admin" tabId="data-lifecycle" active={active === "data-lifecycle"}>
+        <Card padding="md">
+          <div className="section-label-row">
+            <span>Data Lifecycle</span>
+            <small>Clean state, platform bootstrap &amp; tenant bootstrap</small>
+          </div>
+          <DataLifecyclePanel />
         </Card>
       </TabPanel>
 
