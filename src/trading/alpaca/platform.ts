@@ -24,21 +24,38 @@ import { AGENT_DIDS, createDidAttestationSync, getUserDid } from "../../agents/d
  * (AlpacaMarketDataProvider.getTradingUrl) uses the same default, so
  * status and placement can never disagree about paper vs live.
  */
-function resolveAlpacaTradingBase(env: Env): { baseUrl: string; isLive: boolean } {
+export function resolveAlpacaTradingBase(
+  env: Env,
+  overrideEnv?: string,
+): { baseUrl: string; isLive: boolean; source: "pin" | "selection" | "inference" } {
   // Issue #3233: an explicit trading type wins over inference. Without it the
   // legacy rule stands (paper host = paper), so nothing silently changes for
   // an environment that only sets ALPACA_BASE_URL.
   const explicit = String(env.ALPACA_TRADING_TYPE ?? "").trim().toLowerCase();
   if (explicit === "paper") {
-    return { baseUrl: "https://paper-api.alpaca.markets", isLive: false };
+    return { baseUrl: "https://paper-api.alpaca.markets", isLive: false, source: "pin" };
   }
   if (explicit === "live") {
     const configured = env.ALPACA_BASE_URL;
     const liveUrl = configured && !configured.includes("paper-api") ? configured : "https://api.alpaca.markets";
-    return { baseUrl: liveUrl, isLive: true };
+    return { baseUrl: liveUrl, isLive: true, source: "pin" };
+  }
+  // Issue #3272: the persisted selection is authoritative when the deployment
+  // has not pinned a trading type. TEST means paper, PROD means live - the
+  // same mapping the catalog declares for every broker (#3232), so the hub
+  // switch now means the same thing on both brokers instead of being an
+  // E*TRADE-only control that Alpaca silently ignored.
+  const selection = String(overrideEnv ?? "").trim().toUpperCase();
+  if (selection === "TEST") {
+    return { baseUrl: "https://paper-api.alpaca.markets", isLive: false, source: "selection" };
+  }
+  if (selection === "PROD") {
+    const configured = env.ALPACA_BASE_URL;
+    const liveUrl = configured && !configured.includes("paper-api") ? configured : "https://api.alpaca.markets";
+    return { baseUrl: liveUrl, isLive: true, source: "selection" };
   }
   const baseUrl = env.ALPACA_BASE_URL || "https://paper-api.alpaca.markets";
-  return { baseUrl, isLive: !baseUrl.includes("paper-api") };
+  return { baseUrl, isLive: !baseUrl.includes("paper-api"), source: "inference" };
 }
 
 /**
@@ -154,7 +171,12 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
   readonly name = "Alpaca Securities Brokerage (API v2)";
   private alpacaData: AlpacaMarketDataProvider;
 
-  constructor(private env: Env, private orm: DatabaseORM | undefined, private userLogin: string) {
+  constructor(
+    private env: Env,
+    private orm: DatabaseORM | undefined,
+    private userLogin: string,
+    private overrideEnv?: string,
+  ) {
     // Issue #1185: per-user platform — an explicit login is required.
     if (!userLogin) {
       throw new Error("AlpacaTradingPlatform requires an explicit userLogin (issue #1185: no default identity).");
@@ -166,7 +188,7 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
     const hasKey = Boolean(this.env.ALPACA_API_KEY || this.env.ALPACA_API_KEY_ID);
     const hasSecret = Boolean(this.env.ALPACA_SECRET_KEY || this.env.ALPACA_API_SECRET_KEY);
     const configured = hasKey && hasSecret;
-    const { baseUrl, isLive } = resolveAlpacaTradingBase(this.env);
+    const { baseUrl, isLive } = resolveAlpacaTradingBase(this.env, this.overrideEnv);
     // Issue #3232 (program #3216): Alpaca reports ALPACA's own vocabulary and
     // its own trading type. It used to report `protocol: "etrade_oauth_rest"`
     // and `mode: "live_oauth"` — another broker's words — and `environment:
@@ -265,7 +287,7 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
     if (!res.success || !res.account) {
       throw new Error(mapAlpacaFailureToBusiness(res.httpStatus, "account"));
     }
-    return [mapAlpacaAccount(res.account, resolveAlpacaTradingBase(this.env).isLive)];
+    return [mapAlpacaAccount(res.account, resolveAlpacaTradingBase(this.env, this.overrideEnv).isLive)];
   }
 
   /**
@@ -275,7 +297,7 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
    * which needs no OPRA subscription).
    */
   private optionsConfig(): AlpacaOptionsConfig {
-    const { baseUrl } = resolveAlpacaTradingBase(this.env);
+    const { baseUrl } = resolveAlpacaTradingBase(this.env, this.overrideEnv);
     return {
       tradingUrl: baseUrl,
       dataUrl: this.env.ALPACA_DATA_URL || "https://data.alpaca.markets",
@@ -548,7 +570,7 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
       return failed("Alpaca credentials are not configured, so the order was not placed. No funds were moved.");
     }
 
-    const { isLive } = resolveAlpacaTradingBase(this.env);
+    const { isLive } = resolveAlpacaTradingBase(this.env, this.overrideEnv);
     const mode = isLive ? "live" : "paper";
     const placed = await this.alpacaData.placeOrder({
       symbol,
