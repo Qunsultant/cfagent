@@ -45,6 +45,9 @@ pending with its owning issue. Delivery rules live in
 - Open program: Agentic UX (#3082, CPO lane) — the UI surface layer
   (AG-UI, A2UI, A2A, UCP, ACP-commerce), evaluated under #3142. A
   consolidated agentic-UX doc lands under #3082.
+- AI-agent orchestration with guardrails.
+- OWASP Top 10 for LLMs
+- Responsible AI Frameworks (NIST AI RMF)
 
 ## Integration architecture
 
@@ -92,9 +95,23 @@ pending with its owning issue. Delivery rules live in
 - [Standards](./standards/standards.md) and
   [tech-standards](../agents/tech-standards.md).
 - SOLID / GRASP / GoF conformance anchor is issue #488.
-- **15-factor is flagged as awaiting the owner's definition.** It
-  appears nowhere in the repo or issues, so it is NOT defined as a
-  standard here; this section will record it once its owner defines it.
+- Agentic patterns (ReAct, Reflection, Self-correction, Learning, Adaptive Router, Supervisor-Worker, Decentralized-Swarm, etc)
+- Security Models and Protocols (IAAA, 
+- Protocols (OIDC, MCP, A2A, ACP, UCP, etc)
+- 15-factor methodology.
+- AOP (Exception Handling, Coded Messages, Logging, Externalized Configuration, Security, Transaction Management, etc)
+- AI-native (perception-and-ingress, reasoning-and-planning, goal orientation and orchestration, memory and stateful, autonomous, adaptive, self-governing and RSI, action-and-tool layer, feedback-driven)
+- Cloud-native
+- API-native
+- Semantic Layer Standards
+- Contract-First & Composability Standards
+- Zero-Touch Operational Frameworks
+- Distributed Data & Continuous Learning Pipelines
+- CNCF Cloud Native Maturity Model
+- Well-Architected Frameworks (AWS, Azure, GCP)
+- OpenTelemetry & Cloud-Native Observability Standards
+- TOGAF, COBIT, ITIL
+- Ilities (Agility, RASUI, FURPS, RASR, ACID, RAMS)
 
 ## Diagrams
 
