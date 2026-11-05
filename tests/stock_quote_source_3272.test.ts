@@ -149,15 +149,21 @@ describe("the neutral stock screen route (#3272)", () => {
     expect(body.failures).toEqual([{ symbol: "NOPE", reason: "no such symbol" }]);
   });
 
-  it("requires an explicit universe and caps it", async () => {
-    const empty = post({});
-    const emptyRes = await handleBrokerScreenRoutes(empty.request, empty.url, empty.url.pathname, "sid", ctx());
-    expect(emptyRes!.status).toBe(400);
-
+  it("caps an explicit symbolic list", async () => {
     const tooMany = post({ symbols: Array.from({ length: MAX_SCREEN_SYMBOLS + 1 }, (_, i) => `S${i}`) });
     const tooManyRes = await handleBrokerScreenRoutes(tooMany.request, tooMany.url, tooMany.url.pathname, "sid", ctx());
     expect(tooManyRes!.status).toBe(400);
     expect((await tooManyRes!.json()).message).toContain(String(MAX_SCREEN_SYMBOLS));
+  });
+
+  it("resolves a default universe rather than demanding symbols", async () => {
+    // Since the stock-UI slice, an empty body means "the default universe";
+    // in this hermetic suite the listings feed is blocked, so the honest
+    // answer is a coded 503 — never a curated substitute.
+    const empty = post({});
+    const res = await handleBrokerScreenRoutes(empty.request, empty.url, empty.url.pathname, "sid", ctx());
+    expect(res!.status).toBe(503);
+    expect((await res!.json()).code).toBe("LISTINGS_UNAVAILABLE");
   });
 
   it("refuses a broker with no quote read, without constructing it", async () => {

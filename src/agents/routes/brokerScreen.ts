@@ -56,6 +56,10 @@ export async function handleBrokerScreenRoutes(
 
   const body = ((await request.json().catch(() => ({}))) as any) ?? {};
   const rawSymbols = Array.isArray(body.symbols) ? body.symbols : [];
+  // Issue #3272 (stock UI): a named universe resolves through the LIVE listings
+  // feed. No curated substitution: if the feed fails the answer is coded, not
+  // a plausible-looking table (the rule #1554 set for listings).
+  const requestedUniverse = typeof body.universe === "string" && body.universe.trim() ? body.universe.trim().toUpperCase() : null;
   const symbols: string[] = Array.from(
     new Set<string>(
       rawSymbols
@@ -65,13 +69,38 @@ export async function handleBrokerScreenRoutes(
     ),
   );
 
+  let universe: string | null = null;
+  let universeSize = 0;
+  let truncated = false;
+  if (symbols.length === 0) {
+    const id = requestedUniverse ?? "NASDAQ100";
+    try {
+      const { fetchAllUsStockListings } = await import("../../services/nasdaqListings");
+      const { resolveUniverse } = await import("../../trading/universes");
+      const listings = await fetchAllUsStockListings();
+      const resolved = resolveUniverse(id as never, listings);
+      universeSize = resolved.length;
+      for (const listing of resolved) {
+        if (symbols.length >= MAX_SCREEN_SYMBOLS) break;
+        symbols.push(String(listing.symbol).toUpperCase());
+      }
+      truncated = universeSize > symbols.length;
+      universe = id;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "the listings feed failed";
+      return Response.json(
+        {
+          code: "LISTINGS_UNAVAILABLE",
+          message: `The ${id} universe could not be resolved (${reason}). No curated table is substituted.`,
+          retryable: true,
+        },
+        { status: 503 },
+      );
+    }
+  }
   if (symbols.length === 0) {
     return Response.json(
-      {
-        code: "invalid_request",
-        message:
-          "symbols is required: the neutral screen quotes an explicit universe. Universe discovery stays on the provider routes.",
-      },
+      { code: "invalid_request", message: "No symbols resolved for this universe." },
       { status: 400 },
     );
   }
@@ -123,8 +152,12 @@ export async function handleBrokerScreenRoutes(
 
   const { result, quotes } = await screenSymbolsWithSource(source, symbols, body.filter ?? {}, 6);
   return Response.json({
+    ...result,
     broker,
     environment,
+    universe,
+    universeSize,
+    truncated,
     requested: symbols,
     quotesRead: quotes.quotes.length,
     failures: quotes.failures,
