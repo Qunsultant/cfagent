@@ -18,7 +18,7 @@ interface AiAgentResult {
 /**
  * AI Search Agent tab (issue #3323) — the Search hub's surface onto
  * the REAL AiSearchAgent, via POST /api/search/ai-agent. Unlike the
- * "Search Agent" tab (which calls ETradeAISearchService directly),
+ * "Search Agent" tab (which calls AiSearchInstanceService directly),
  * this route dispatches to the AiSearchAgent over its Durable
  * Object binding: the agent searches the instance namespace-first,
  * then MCP, then REST, and the answer is labelled with the path
