@@ -40,6 +40,21 @@
  * (issue #71) — never the global fetch.
  */
 
+/**
+ * Issue #3295: a coded refusal for a scanner surface with no neutral backend
+ * yet. Thrown BEFORE any request, so another broker never reaches
+ * `/api/etrade/options/*` and never sees E*TRADE profiles or scan history.
+ */
+export class ScannerUnavailableError extends Error {
+  readonly code = "provider_unsupported";
+  constructor(brokerId: string) {
+    super(
+      `Saved strategy profiles and scan history are not available for the selected broker (${brokerId}); the scan engine is broker-neutral but the profile and history stores are E*TRADE-only in this build.`,
+    );
+    this.name = "ScannerUnavailableError";
+  }
+}
+
 import { apiFetch } from "./apiFetch";
 import type {
   OpportunityScanResult,
