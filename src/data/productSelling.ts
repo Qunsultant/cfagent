@@ -63,6 +63,8 @@ export interface SellingPlanInput {
   priceUSD: number;
   periodDays: number;
   includedRuns: number;
+  /** Issue #3243: trial length in days, operator data; null = the plan offers no trial. */
+  trialDays: number | null;
   active: boolean;
 }
 

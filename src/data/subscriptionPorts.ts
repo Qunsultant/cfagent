@@ -36,6 +36,12 @@ export interface SubscriptionPlanRecord {
   priceUSD: number;
   periodDays: number;
   includedRuns: number;
+  /**
+   * Issue #3243 — trial length in days, OPERATOR DATA. Null
+   * (or absent on pre-0041 rows) means the plan offers no
+   * trial. No trial length is hardcoded in code.
+   */
+  trialDays: number | null;
   active: boolean;
   createdAtMs: number;
   updatedAtMs: number;
@@ -94,12 +100,15 @@ export function assertPlan(input: {
   priceUSD?: unknown;
   periodDays?: unknown;
   includedRuns?: unknown;
+  /** Issue #3243: trial length in days, operator data. Null/undefined/absent = no trial. */
+  trialDays?: unknown;
 }): {
   id: string;
   name: string;
   priceUSD: number;
   periodDays: number;
   includedRuns: number;
+  trialDays: number | null;
 } {
   const id = typeof input.id === "string" && input.id.trim() ? input.id.trim() : "";
   const name = typeof input.name === "string" ? input.name.trim() : "";
@@ -116,7 +125,18 @@ export function assertPlan(input: {
   if (!Number.isFinite(includedRuns) || includedRuns < 0 || Math.floor(includedRuns) !== includedRuns) {
     throw new Error("includedRuns must be a non-negative integer.");
   }
-  return { id, name, priceUSD: round2(priceUSD), periodDays, includedRuns };
+  // Trial days are optional: null/absent/undefined = no trial.
+  // A present value must be a positive integer; anything else
+  // (0, negative, fractional, non-numeric) is a caller bug.
+  let trialDays: number | null = null;
+  if (input.trialDays !== undefined && input.trialDays !== null) {
+    const days = Number(input.trialDays);
+    if (!Number.isFinite(days) || days < 1 || Math.floor(days) !== days) {
+      throw new Error("trialDays must be a positive integer when present.");
+    }
+    trialDays = days;
+  }
+  return { id, name, priceUSD: round2(priceUSD), periodDays, includedRuns, trialDays };
 }
 
 export function assertSubscriptionStatus(status: unknown): SubscriptionStatus {
@@ -137,6 +157,23 @@ export function assertSubscriptionStatus(status: unknown): SubscriptionStatus {
  * (tierSource "operator") or the stored tier is PayPerUse, which
  * survives untouched because activation never overwrites it.
  */
+/**
+ * Issue #3243 — is this row a trial subscription? A trial is
+ * our own $0 checkout (provider "trial", no Stripe session),
+ * recorded with providerStatus "trialing" — the same status
+ * string Stripe uses and billingService already treats as full
+ * access. The row's own status stays "active" (the
+ * SubscriptionStatus union has no trialing member), so the
+ * trial is identified by provider + providerStatus, never by
+ * a status value the port cannot hold.
+ */
+export function isTrialSubscription(row: {
+  provider: string;
+  providerStatus: string | null;
+}): boolean {
+  return row.provider === "trial" && row.providerStatus === "trialing";
+}
+
 export function resolveEffectiveTier(
   account: { tier: StoreTier; tierSource?: TierSource | null } | null,
   subscriptions: Array<{ periodEndMs: number }>,
@@ -212,6 +249,7 @@ export interface SubscriptionStore {
     priceUSD?: unknown;
     periodDays?: unknown;
     includedRuns?: unknown;
+    trialDays?: unknown;
   }): Promise<SubscriptionPlanRecord>;
   getPlan(planId: string): Promise<SubscriptionPlanRecord | null>;
   listPlans(activeOnly: boolean): Promise<SubscriptionPlanRecord[]>;
