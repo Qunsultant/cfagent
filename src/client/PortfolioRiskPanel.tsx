@@ -16,6 +16,7 @@ import {
   bundleCandidateTextState,
   exampleBundleCandidateJson,
   fetchBundle,
+  type RiskBroker,
   fetchConcentration,
   fetchEvaluate,
   fetchHedgeAnalysis,
@@ -49,9 +50,18 @@ import { Button, Table, TextInput, Select } from "./components/ui";
 interface PortfolioRiskPanelProps {
   activeEnv: string;
   onPreviewHedge: (ctx: TradeOrderContext) => void;
+  /**
+   * Issue #3356: the SELECTED broker. The risk model is the platform's (#3324) and
+   * runs on whichever broker holds the book; the hedge, repair, bundle and guardrail
+   * drafts are E*TRADE's and say so instead of being emulated.
+   */
+  broker?: RiskBroker;
 }
 
-export function PortfolioRiskPanel({ activeEnv, onPreviewHedge }: PortfolioRiskPanelProps) {
+export function PortfolioRiskPanel({ activeEnv, onPreviewHedge, broker = "etrade" }: PortfolioRiskPanelProps) {
+  /** Issue #3356: the E*TRADE-only half of this panel, decided once. */
+  const etradeOnly = broker === "etrade";
+  const brokerLabel = broker === "alpaca" ? "Alpaca" : "This broker";
   const [panelOpen, setPanelOpen] = useState(true);
   const [report, setReport] = useState<PortfolioRiskReport | null>(null);
   const [hedge, setHedge] = useState<HedgeAnalysis | null>(null);
@@ -95,11 +105,18 @@ export function PortfolioRiskPanel({ activeEnv, onPreviewHedge }: PortfolioRiskP
     setLoading(true);
     setError("");
     try {
-      const [riskResult, hedgeResult, repairResult] = await Promise.allSettled([fetchPortfolioRisk(activeEnv), fetchHedgeAnalysis(activeEnv), fetchRepairAnalysis(activeEnv)]);
+      // Issue #3356: the report is the platform's and runs on the selected broker; the hedge and repair drafts are E*TRADE's and are never requested for another broker (a request that cannot succeed is not a state a user should ever see).
+      const [riskResult, hedgeResult, repairResult] = await Promise.allSettled([
+        fetchPortfolioRisk(activeEnv, broker),
+        // E*TRADE-only drafts: an unrequested capability is better than a request
+        // that is guaranteed to fail.
+        etradeOnly ? fetchHedgeAnalysis(activeEnv) : Promise.resolve(null),
+        etradeOnly ? fetchRepairAnalysis(activeEnv) : Promise.resolve(null),
+      ]);
       if (riskResult.status === "fulfilled") setReport(riskResult.value);
       else setError(riskResult.reason?.message || "Failed to load portfolio risk");
-      if (hedgeResult.status === "fulfilled") setHedge(hedgeResult.value);
-      if (repairResult.status === "fulfilled") setRepair(repairResult.value);
+      if (hedgeResult.status === "fulfilled" && hedgeResult.value) setHedge(hedgeResult.value);
+      if (repairResult.status === "fulfilled" && repairResult.value) setRepair(repairResult.value);
     } finally {
       setLoading(false);
     }
@@ -113,7 +130,7 @@ export function PortfolioRiskPanel({ activeEnv, onPreviewHedge }: PortfolioRiskP
     setCorrLoading(true);
     setCorrError("");
     try {
-      setConcentration(await fetchConcentration(activeEnv, corrSymbol.trim() || undefined));
+      setConcentration(await fetchConcentration(activeEnv, corrSymbol.trim() || undefined, broker));
     } catch (err: any) {
       setCorrError(err?.message || "Correlation assessment failed");
     } finally {
@@ -138,7 +155,7 @@ export function PortfolioRiskPanel({ activeEnv, onPreviewHedge }: PortfolioRiskP
         requestedContracts: sizeRequested.trim() === "" ? undefined : Number(sizeRequested),
         maxMeasuredCorrelation: sizeCorr.trim() === "" ? null : Number(sizeCorr),
       };
-      const result = await fetchSizing(activeEnv, candidate);
+      const result = await fetchSizing(activeEnv, candidate, broker);
       setLastSizingCandidate(candidate);
       setSizing(result);
     } catch (err: any) {
@@ -207,7 +224,7 @@ export function PortfolioRiskPanel({ activeEnv, onPreviewHedge }: PortfolioRiskP
     setEvalLoading(true);
     setEvalError("");
     try {
-      setEvaluation(await fetchEvaluate(activeEnv, candidate));
+      setEvaluation(await fetchEvaluate(activeEnv, candidate, broker));
     } catch (err: any) {
       setEvalError(err?.message || "Evaluation failed");
     } finally {
@@ -301,6 +318,7 @@ export function PortfolioRiskPanel({ activeEnv, onPreviewHedge }: PortfolioRiskP
         </>
       )}
 
+      {etradeOnly ? (<>
       {/* Hedge drafts (#54) */}
       <div className="prp-subhead">Hedge Proposals <span className="prp-badge prp-badge-draft">DRAFT — HITL review only</span></div>
       {hedge?.status === "within-tolerance" && <div className="ui-footnote">{hedge.reason}</div>}
@@ -360,6 +378,12 @@ export function PortfolioRiskPanel({ activeEnv, onPreviewHedge }: PortfolioRiskP
           </Button>
         </div>
       ))}
+        </>
+      ) : (
+        <div className="ui-footnote" data-broker-surface="hedge-repair">
+          Hedge and repair proposals are E*TRADE features; {brokerLabel} supplies no proposal model, so none are drafted and no order is prepared.
+        </div>
+      )}
 
       {/* Correlation & concentration (#35) */}
       <div className="prp-subhead">Correlation &amp; Concentration</div>
@@ -449,6 +473,7 @@ export function PortfolioRiskPanel({ activeEnv, onPreviewHedge }: PortfolioRiskP
         </div>
       )}
 
+      {etradeOnly ? (<>
       {/* Recommendation Bundle — Best Trade v2 (#1135, Phase 4 of #1096) */}
       <div className="prp-subhead">Recommendation Bundle (Best Trade v2)</div>
       <div className="ui-footnote">Paste a strategy candidate (strategy-engine JSON) to build its full bundle against the live book: trade + falsification + post-trade risk + optimizer verdict + hedge/repair plans + alternatives including no-trade. Draft only — human approval is required for any order.</div>
@@ -492,6 +517,12 @@ export function PortfolioRiskPanel({ activeEnv, onPreviewHedge }: PortfolioRiskP
           <div className="ui-footnote">Human approval required. {bundle.disclaimer}</div>
         </div>
       )}
+        </>
+      ) : (
+        <div className="ui-footnote" data-broker-surface="bundle">
+          Recommendation bundles and the trade guardrail check are E*TRADE features; {brokerLabel} has no equivalent proposal model, so none is built and no draft is produced.
+        </div>
+      )}
 
       {/* Post-trade evaluator (#34 endpoint, surfaced by #67) */}
       <div className="prp-subhead">Post-Trade Evaluator</div>
@@ -524,6 +555,7 @@ export function PortfolioRiskPanel({ activeEnv, onPreviewHedge }: PortfolioRiskP
         />
       )}
 
+      {etradeOnly && (<>
       {/* Think-harness guardrail check (#37, surfaced by #67) */}
       <div className="prp-subhead">Trade Guardrail Check</div>
       <div className="ui-footnote">Runs the think harness on live account state. It fails closed — when price, balance, or spread cannot be resolved from the broker, the verdict is INPUTS_UNAVAILABLE and no draft is produced.</div>
@@ -555,6 +587,7 @@ export function PortfolioRiskPanel({ activeEnv, onPreviewHedge }: PortfolioRiskP
           </div>
         </div>
       )}
+      </>)}
       </>
       )}
     </section>
