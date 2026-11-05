@@ -102,11 +102,11 @@
       // Issue #2230 — TickerAgent DO (market quotes WebSocket, PortThink)
       { "name": "TICKER_AGENT", "class_name": "TickerAgent" },
       // Issue #2223 — AiSearchAgent DO (AI Search as an agent: namespace
-      // binding primary, MCP second, REST last resort). The
-      // ai_search_namespaces binding itself is NOT declared in this
-      // slice: its "namespace" value is dashboard-issued and not in the
-      // repo (see src/types.ts AI_SEARCH) — the code path is
-      // config-gated and degrades honestly until the owner adds it.
+      // binding primary, REST fallback; the MCP path is deliberately
+      // unconfigured — owner decision, no public endpoint). The
+      // ai_search_namespaces binding is declared below (namespace
+      // "default", owner-provided 2026-11-05 under #1169; see
+      // src/types.ts AI_SEARCH).
       { "name": "AI_SEARCH_AGENT", "class_name": "AiSearchAgent" },
       // Issue #2253 — SandboxAgent DO (fleet registration: the agent
       // delegates to ETradeSandboxService constructed with no
@@ -116,6 +116,13 @@
       { "name": "SANDBOX_AGENT", "class_name": "SandboxAgent" }
     ]
   },
+  // Issue #1169 (owner enablement, 2026-11-05) — the AI Search
+  // namespace binding the AiSearchAgent namespace path reads
+  // (env.AI_SEARCH.get(AI_SEARCH_INSTANCE)); the instance
+  // "screener-search" lives in the "default" namespace.
+  "ai_search_namespaces": [
+    { "name": "AI_SEARCH", "namespace": "default", "remote": true }
+  ],
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["SearchAgent"] },
     { "tag": "v2", "new_sqlite_classes": ["OptionsScannerMCP"] },
@@ -210,17 +217,30 @@
     }
   ],
   "vars": {
-    "AI_SEARCH_ENDPOINT": "https://f57a6011-bc38-4d64-856d-69ad4c90042a.search.ai.cloudflare.com",
+    "AI_SEARCH_ENDPOINT": "https://ebca6b8b-596d-4a06-94f2-aaa0a3eb1323.search.ai.cloudflare.com",
+    // Issue #1169 (owner enablement, 2026-11-05): the instance the
+    // namespace path searches. AI_SEARCH_ENDPOINT was re-pointed in
+    // the same change: it previously named a different (web-crawler)
+    // instance, so the REST leg now hits the same screener-search
+    // instance as the namespace path. AI_SEARCH_MCP_ENDPOINT is
+    // deliberately NOT set (owner decision, 2026-11-05): the
+    // instance's Public Endpoint is an unauthenticated, shareable
+    // URL, so the MCP path stays unconfigured and no traffic uses
+    // the public endpoint.
+    "AI_SEARCH_INSTANCE": "screener-search",
     // Issue #278: TTL cache for AI Search queries (in-isolate, per the
     // cache module's honesty note). 300000 = 5 minutes; 200 entries.
     "AI_SEARCH_CACHE_TTL_MS": "300000",
     "AI_SEARCH_CACHE_MAX_ENTRIES": "200",
     // Issue #1169 enablement (owner direction 2026-11-04): knowledge
     // serving and AI Search report indexing are ON. The
-    // ai_search_namespaces binding + instance configuration land
-    // separately; until then the indexing leg records its typed
-    // not-configured outcome and never fails a report store.
-    // Rollback is unsetting these two vars and redeploying.
+    // ai_search_namespaces binding + instance configuration landed
+    // 2026-11-05 (owner-provided namespace "default", instance
+    // screener-search), so the indexing leg uploads through the
+    // namespace path; it never fails a report store.
+    // Rollback is removing the ai_search_namespaces entry and
+    // unsetting these vars (the two flags, AI_SEARCH_INSTANCE),
+    // then redeploying.
     "KNOWLEDGE_SERVING_ENABLED": "1",
     "AI_SEARCH_REPORT_INDEXING_ENABLED": "1",
     "APP_NAME": "NextGenTP",
