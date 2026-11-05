@@ -70,7 +70,9 @@ describe("audit route inventory (extraction #367)", () => {
 
   it("the original inline blocks are gone from orchestrator.ts; the delegation stands in their place", () => {
     const orchSrc = src("agents/orchestrator.ts");
-    expect(orchSrc).toContain("handleAuditRoutes(request, url, path, sessionId,");
+    // Issue #2942: the delegation call moved with routeRequest into
+    // src/agents/orchestrator/routeRequest.ts; it must still exist exactly once there.
+    expect(src("agents/orchestrator/routeRequest.ts")).toContain("handleAuditRoutes(request, url, path, sessionId,");
     // Distinctive comments that headed the inline blocks before extraction.
     expect(orchSrc).not.toContain("// Audit logs endpoint");
     expect(orchSrc).not.toContain("// Audit event append");
@@ -82,7 +84,7 @@ describe("audit route inventory (extraction #367)", () => {
   });
 
   it("the audit blocks remain a single contiguous handler (no second position this slice)", () => {
-    const orchSrc = src("agents/orchestrator.ts");
+    const orchSrc = src("agents/orchestrator/routeRequest.ts");
     const calls = [...orchSrc.matchAll(/handleAuditRoutes\(request, url, path, sessionId,/g)];
     expect(calls).toHaveLength(1);
   });

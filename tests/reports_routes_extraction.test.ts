@@ -90,7 +90,8 @@ describe("reports/HITL route inventory (extraction #363)", () => {
 
   it("the original inline blocks are gone from orchestrator.ts; the delegation stands in their place", () => {
     const orchSrc = src("agents/orchestrator.ts");
-    expect(orchSrc).toContain("handleReportsRoutes(request, url, path, sessionId,");
+    const dispatchSrc = src("agents/orchestrator/routeRequest.ts");
+    expect(dispatchSrc).toContain("handleReportsRoutes(request, url, path, sessionId,");
     // Distinctive comment that headed the first inline block before extraction.
     expect(orchSrc).not.toContain("// Issue #277: list pending report-dispatch confirmations");
     expect(orchSrc).not.toContain("// List persisted reports (issue #309).");

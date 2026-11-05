@@ -101,7 +101,8 @@ describe("screener + research route inventory (extraction #378)", () => {
 
   it("the original inline blocks are gone from orchestrator.ts; one delegation stands at the original position", () => {
     const orchSrc = src("agents/orchestrator.ts");
-    expect(orchSrc).toContain("handleScreenerResearchRoutes(request, url, path, sessionId,");
+    const dispatchSrc = src("agents/orchestrator/routeRequest.ts");
+    expect(dispatchSrc).toContain("handleScreenerResearchRoutes(request, url, path, sessionId,");
     // No leftover inline conditions for these paths.
     for (const cond of [
       'path.endsWith("/screener/latest")',
@@ -123,15 +124,15 @@ describe("screener + research route inventory (extraction #378)", () => {
     expect(orchSrc).not.toContain("shouldFireResearchTick");
     // The delegation is invoked after the market-data compare/screen delegation
     // (slice #359-14's reciprocal note: anchor to the delegation call).
-    const compareScreenIdx = orchSrc.indexOf("handleMarketDataCompareScreenRoutes(request, url, path, sessionId,");
-    const mineIdx = orchSrc.indexOf("handleScreenerResearchRoutes(request, url, path, sessionId,");
+    const compareScreenIdx = dispatchSrc.indexOf("handleMarketDataCompareScreenRoutes(request, url, path, sessionId,");
+    const mineIdx = dispatchSrc.indexOf("handleScreenerResearchRoutes(request, url, path, sessionId,");
     expect(compareScreenIdx, "market-data screening delegation must exist").toBeGreaterThan(-1);
     expect(mineIdx, "screener/research delegation must exist").toBeGreaterThan(-1);
     expect(mineIdx, "delegation must come after the market-data screening delegation").toBeGreaterThan(compareScreenIdx);
     // Context wiring is present: orchestrator-owned helpers arrive via the object.
-    expect(orchSrc).toContain("getScreenerAgent: (userLogin?: string) => this.getScreenerAgent(userLogin)");
-    expect(orchSrc).toContain("runResearchAndPublish: (trigger, userLogin) => this.runResearchAndPublish(trigger, userLogin)");
-    expect(orchSrc).toContain("if (screenerResearchResponse) return screenerResearchResponse;");
+    expect(dispatchSrc).toContain("getScreenerAgent: (userLogin?: string) => deps.getScreenerAgent(userLogin)");
+    expect(dispatchSrc).toContain("runResearchAndPublish: (trigger, userLogin) => deps.runResearchAndPublish(trigger, userLogin)");
+    expect(dispatchSrc).toContain("if (screenerResearchResponse) return screenerResearchResponse;");
   });
 
   it("the module ends its handler with an explicit return null for non-owned paths", () => {

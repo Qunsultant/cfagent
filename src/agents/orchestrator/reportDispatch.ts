@@ -30,9 +30,10 @@ import {
 
 /**
  * Ports the report-dispatch functions receive from the class. The
- * HITL key and confirmation TTL remain the class's statics
- * (REPORT_DISPATCH_HITL_KEY / REPORT_CONFIRMATION_TTL_MS), passed by
- * value so stored keys and expiry math are unchanged.
+ * HITL key remains a class static (REPORT_DISPATCH_HITL_KEY) and the
+ * confirmation TTL lives in orchestrator/reportConfirmationTtl.ts
+ * (REPORT_CONFIRMATION_TTL_MS), passed by value so stored keys and
+ * expiry math are unchanged.
  */
 export interface ReportDispatchContext {
   env: Env;

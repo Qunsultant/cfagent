@@ -128,7 +128,7 @@ export interface ReportsRouteContext {
     agent: AgentName | "judge" | "nlq" | "orchestrator",
     payload: Record<string, unknown>
   ): void;
-  /** OrchestratorAgent.REPORT_CONFIRMATION_TTL_MS */
+  /** REPORT_CONFIRMATION_TTL_MS (src/agents/orchestrator/reportConfirmationTtl.ts) */
   reportConfirmationTtlMs(): number;
 }
 

@@ -91,7 +91,8 @@ describe("E*TRADE options route inventory (extraction #374)", () => {
 
   it("the original inline blocks are gone from orchestrator.ts; one delegation stands at the original position", () => {
     const orchSrc = src("agents/orchestrator.ts");
-    expect(orchSrc).toContain("handleEtradeOptionsRoutes(request, url, path, sessionId,");
+    const dispatchSrc = src("agents/orchestrator/routeRequest.ts");
+    expect(dispatchSrc).toContain("handleEtradeOptionsRoutes(request, url, path, sessionId,");
     // No leftover inline conditions for these paths.
     for (const cond of [
       'path.endsWith("/etrade/options/chains")',
@@ -119,26 +120,27 @@ describe("E*TRADE options route inventory (extraction #374)", () => {
     expect(moduleSrc).toContain("export interface EtradeOptionsRouteContext");
     // Single call site.
     const needle = "handleEtradeOptionsRoutes(request, url, path, sessionId,";
-    expect(orchSrc.split(needle).length - 1, "expected exactly one call site").toBe(1);
+    expect(dispatchSrc.split(needle).length - 1, "expected exactly one call site").toBe(1);
     // The requestedEnv binding stays inline in routeRequest; the delegation
     // passes it through the context.
     // Issue #2482: it now resolves from the persisted selection, never
     // from the request header.
-    expect(orchSrc).toContain("resolveBrokerEnvironmentFromSettings((key) => this.readSettingRaw(key), this.env)");
-    expect(orchSrc).toContain("requestedEnv,");
+    expect(dispatchSrc).toContain("resolveBrokerEnvironmentFromSettings((key) => deps.readSettingRaw(key), deps.env)");
+    expect(dispatchSrc).toContain("requestedEnv,");
   });
 
   it("the options delegation sits between the broker-activity delegation and the watchlists block", () => {
     const orchSrc = src("agents/orchestrator.ts");
-    const optionsIdx = orchSrc.indexOf("handleEtradeOptionsRoutes(request, url, path, sessionId,");
+    const dispatchSrc = src("agents/orchestrator/routeRequest.ts");
+    const optionsIdx = dispatchSrc.indexOf("handleEtradeOptionsRoutes(request, url, path, sessionId,");
     // Lower bound: the broker-activity delegation call (slice #359-09), a
     // delegation-call anchor per the #405 rule.
-    const activityIdx = orchSrc.indexOf("handleEtradeBrokerActivityRoutes(request, url, path, sessionId,");
+    const activityIdx = dispatchSrc.indexOf("handleEtradeBrokerActivityRoutes(request, url, path, sessionId,");
     expect(activityIdx).toBeGreaterThan(-1);
     expect(optionsIdx, "options delegation must follow the broker-activity delegation").toBeGreaterThan(activityIdx);
     // Upper bound: the watchlists delegation call (slice #359-12 performed
     // this swap; delegation-call anchor per the #405 rule).
-    const watchlistsIdx = orchSrc.indexOf("handleWatchlistsRoutes(request, url, path, sessionId,");
+    const watchlistsIdx = dispatchSrc.indexOf("handleWatchlistsRoutes(request, url, path, sessionId,");
     expect(watchlistsIdx).toBeGreaterThan(-1);
     expect(optionsIdx, "options delegation must precede the watchlists delegation").toBeLessThan(watchlistsIdx);
   });

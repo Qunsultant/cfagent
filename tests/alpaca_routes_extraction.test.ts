@@ -153,6 +153,7 @@ describe("alpaca route inventory (extraction #376)", () => {
 
   it("the original inline blocks are gone from orchestrator.ts; two delegations stand at the original positions", () => {
     const orchSrc = src("agents/orchestrator.ts");
+    const dispatchSrc = src("agents/orchestrator/routeRequest.ts");
     const moduleSrc = src("agents/routes/alpaca.ts");
     expect(moduleSrc).toContain("export async function handleAlpacaTradingRoutes");
     expect(moduleSrc).toContain("export async function handleAlpacaMarketDataRoutes");
@@ -167,7 +168,7 @@ describe("alpaca route inventory (extraction #376)", () => {
       "handleAlpacaTradingRoutes(request, url, path, sessionId,",
       "handleAlpacaMarketDataRoutes(request, url, path, sessionId,",
     ]) {
-      expect(orchSrc.split(needle).length - 1, `expected exactly one call site: ${needle}`).toBe(1);
+      expect(dispatchSrc.split(needle).length - 1, `expected exactly one call site: ${needle}`).toBe(1);
     }
     // Slice #359-14 (market-data research) legitimately moved this import: no
     // inline market-data blocks remain in orchestrator.ts, so MarketDataResearchService
@@ -181,11 +182,12 @@ describe("alpaca route inventory (extraction #376)", () => {
 
   it("the trading delegation sits after the watchlists delegation; the market-data delegation follows it", () => {
     const orchSrc = src("agents/orchestrator.ts");
-    const tradingIdx = orchSrc.indexOf("handleAlpacaTradingRoutes(request, url, path, sessionId,");
-    const alpacaIdx = orchSrc.indexOf("handleAlpacaMarketDataRoutes(request, url, path, sessionId,");
+    const dispatchSrc = src("agents/orchestrator/routeRequest.ts");
+    const tradingIdx = dispatchSrc.indexOf("handleAlpacaTradingRoutes(request, url, path, sessionId,");
+    const alpacaIdx = dispatchSrc.indexOf("handleAlpacaMarketDataRoutes(request, url, path, sessionId,");
     // Lower bound: the slice-12 watchlists delegation call (delegation-call
     // anchor per the #405 rule).
-    const watchlistsIdx = orchSrc.indexOf("handleWatchlistsRoutes(request, url, path, sessionId,");
+    const watchlistsIdx = dispatchSrc.indexOf("handleWatchlistsRoutes(request, url, path, sessionId,");
     expect(watchlistsIdx).toBeGreaterThan(-1);
     expect(tradingIdx, "trading delegation must follow the watchlists delegation").toBeGreaterThan(
       watchlistsIdx

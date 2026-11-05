@@ -50,8 +50,12 @@ const ARMING_PATTERN = /\.(schedule|scheduleEvery)\s*\(/;
 /** Post-C3 enumeration: file → number of arming call sites + role. */
 const ARMING_SITES: Record<string, { count: number; role: string }> = {
   "src/agents/orchestrator.ts": {
-    count: 12,
-    role: "context binding arrows for the extracted modules + the stale-task sweep arm (non-screening) + the #2681 migration re-arm pass-throughs (schedule/scheduleEvery bound into the migration context; actual arming happens in routes/orchestratorMigration.ts, not inline) + the #3089 broker-order route context binding arrow (same pass-through pattern as the E*TRADE route context; no inline arming)",
+    count: 5,
+    role: "context binding arrows for the remaining class-owned modules + the stale-task sweep arm (non-screening); the six dispatcher arrows moved to orchestrator/routeRequest.ts by #2942 (11 = 5 + 6, unchanged in total)",
+  },
+  "src/agents/orchestrator/routeRequest.ts": {
+    count: 7,
+    role: "dispatcher context binding arrows moved verbatim from orchestrator.ts by #2942 (etrade-broker, etrade-broker-activity, migration, schedules — schedule/scheduleEvery bound into the delegation contexts; actual arming happens in the route modules, not inline) + the #3089 broker-order route context binding arrow (same pass-through pattern as the E*TRADE route context; no inline arming)",
   },
   "src/agents/routes/orchestratorMigration.ts": {
     count: 3,

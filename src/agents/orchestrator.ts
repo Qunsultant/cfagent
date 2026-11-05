@@ -19,7 +19,7 @@ import { planNLQ, executeNLQQuery, executeNLQQueryAsync, type NLQSchedulingPort,
 import { resolveErrorAspect, AgentErrorCode } from "../aspects/errorCodes";
 import { logAspectEvent } from "../aspects/loggingAspect";
 import { DatabaseORM } from "../orm";
-import { ensureSharedTable } from "../orm/schema";
+
 import { PaymentGatewayService, normalizeGateway, isWebhookGateway, isSupportedGateway, SUPPORTED_GATEWAYS, type SupportedGateway } from "../services/payments";
 import { computePortfolioRisk, aggregatePortfolioRisk, resolvePositionsSnapshot, evaluatePostTradeTotals, type CandidateGreekContribution } from "../services/portfolioRisk";
 import { ETradeThinkHarness } from "../services/thinkHarness";
@@ -33,7 +33,7 @@ import { sizeCandidateAgainstPortfolio, type SizingCandidate } from "../services
 import { generateHedgeProposals } from "../services/hedgeProposals";
 import { ensureFrameworkQueueIndexes } from "../services/frameworkQueueIndexes";
 import { createResourceUsagePort } from "../telemetry/createResourceUsagePorts";
-import { ensureMasRetentionIndexes } from "../services/masRetentionIndexes";
+
 import { sharedCorrelationService } from "../services/correlationService";
 import type { ScreenerAgent } from "./screener-agent";
 import type { ResearchAgent } from "./research-agent";
@@ -56,7 +56,7 @@ import {
 import type { PaymentsFlowScopedModes } from "../config/paymentsFlowModes";
 import { diffScanRuns } from "../trading";
 import { createOptionsDiscoveryPorts } from "../data/createOptionsDiscoveryPorts";
-import { createOrchestratorTablePorts } from "../data/createOrchestratorTablePorts";
+
 import { createOrmPorts } from "../data/createOrmPorts";
 import { SqlLegacyChatStore } from "../data/doSqliteLegacyChatAdapter";
 import { createDidAttestation, resolveAgentDidDocument } from "./did";
@@ -69,7 +69,7 @@ import { buildOrchestratorSkillSources } from "./orchestrator/skillPacks";
 import { autoRenewETradeTokens, autonomousGoalScreen, autonomousMarketScreen, autonomousStrategyDiscovery, collectIvHistory, expireStaleOrderDraft, sendScheduledReminder, type ScheduledCallbackOutcome, type ScheduledCallbacksContext } from "./orchestrator/scheduledCallbacks";
 import { recordScheduleCallbackRun } from "./orchestrator/scheduleCallbackRunRecords";
 import { nlqSchedulingPort, nlqSocialBriefPort, nlqStockScreenPort, type NlqPortsContext } from "./orchestrator/nlqPorts";
-import { formatTraceparent, newTraceContext, parseTraceparent } from "../observability/observabilityPorts";
+import { formatTraceparent, newTraceContext } from "../observability/observabilityPorts";
 import { observeDoRouteDispatch } from "../observability/scheduledJobOutcomes";
 import { recordTraceHopBestEffort } from "../data/createMeshTracePorts";
 import { createSocialBriefStoreFromNamespace } from "./social/briefStore";
@@ -80,7 +80,10 @@ import type { DoNamespaceLike } from "../security/durableKv";
 import { createKvMembershipStore } from "../security/iaaaMembershipStore";
 import { isLoginShaped } from "../security/serviceIdentity";
 import { sessionStore } from "../security/session";
-import { submitAsyncJob, recoverQueuedAsyncJobs, getAsyncJob, listAsyncJobs, executeAsyncJob, ensureAsyncJobTables, scheduleScreenerFollowups, retryAsyncJob, type AsyncJobsContext } from "./orchestrator/asyncJobs";
+import { submitAsyncJob, recoverQueuedAsyncJobs, getAsyncJob, listAsyncJobs, executeAsyncJob, scheduleScreenerFollowups, retryAsyncJob, type AsyncJobsContext } from "./orchestrator/asyncJobs";
+import { ensureOrchestratorTables } from "./orchestrator/tableSchema";
+import { REPORT_CONFIRMATION_TTL_MS } from "./orchestrator/reportConfirmationTtl";
+import { routeRequest, type RouteRequestDeps } from "./orchestrator/routeRequest";
 import { submitChatTurn, awaitChatTurnSubmission, type DurableTurnContext, type SubmittedTurnHandle } from "./orchestrator/durableTurnSubmission";
 import type { ScreenerRunOutcome } from "../services/screenerFollowups";
 import { marketDateKey, readAutopilotStateRaw, getAutopilotState, writeAutopilotState, incrementAutopilotOrdersToday, fetchBrokerBalanceSnapshot, openNotionalForSymbol, evaluateAndRecordAutopilotVerdict, type AutopilotContext } from "./orchestrator/autopilot";
@@ -116,58 +119,45 @@ import {
 } from "../services/scheduledReports";
 // Issue #359-01: reports + HITL routes live in src/agents/routes/reports.ts;
 // routeRequest delegates to handleReportsRoutes at the original position.
-import { handleReportsRoutes, makeSubmitFollowupDelivery } from "./routes/reports";
-import { handleScreenerPresetRoutes } from "./routes/screenerPresets";
-import { handleMcpChatNlqRoutes } from "./routes/mcpChatNlq";
-import { handleSchemaRoutes } from "./routes/schema";
-import { handleAdsRevenueReferralsRoutes, handleReferralsAdsRoutes } from "./routes/adsRevenueReferrals";
-import { handleAuditRoutes } from "./routes/audit";
-import { handleMeterRoutes } from "./routes/meter";
-import { handleDlqRoutes } from "./routes/dlq";
-import { handleDataProviderRoutes } from "./routes/dataProviders";
+import { handleReportsRoutes } from "./routes/reports";
+
+
+
+
+
+
+
+
 import { buildDataProviderPorts } from "../data/buildDataProviderPorts";
 import { createEnsuredAuditPolicyAdapter } from "../data/createAuditPolicyPorts";
 import type { AuditPolicyPort } from "../data/auditPolicyPorts";
 import type { D1ProviderConfigAdapter } from "../data/d1ProviderConfigAdapter";
 import type { D1ProviderCaptureAdapter } from "../data/d1ProviderCaptureAdapter";
-import { handleEnrichmentRoutes } from "./routes/enrichment";
-import { handleWorkflowRunsRoutes } from "./routes/workflowRuns";
-import { handleKnowledgeCorpusRoutes } from "./routes/knowledgeCorpus";
-import { handleSearchHubRoutes } from "./routes/searchHub";
-import { handleAutopilotRoutes } from "./routes/autopilot";
-import { handleMemoryResetRoutes } from "./routes/memoryReset";
-import { handlePaymentsRoutes } from "./routes/payments";
-import { handlePaymentAssuranceLiveRoutes } from "./routes/paymentAssuranceLive";
-import { handleAgenticPaymentsRoutes } from "./routes/agenticPayments";
-import { handlePlatformUsersRoutes } from "./routes/platformUsers";
-import { handlePlatformAccountRoutes } from "./routes/platformAccounts";
+
+
+
+
+
+
+
+
+
+
+
 // Issue #359-08: premium routes live in src/agents/routes/premium.ts;
 // routeRequest delegates to handlePremiumRoutes at the original position.
-import { handlePremiumRoutes, makePremiumRouteContext } from "./routes/premium";
-import { handleTradingIntegrationsRoutes } from "./routes/tradingIntegrations";
-import {
-  handleEtradeBrokerRoutes,
-  handleEtradeBrokerActivityRoutes,
-} from "./routes/etradeBroker";
-import { handleBrokerOrderRoutes } from "./routes/brokerOrders";
-import { handleEtradeOptionsRoutes } from "./routes/etradeOptions";
-import { handleOptionsProviderGateRoutes } from "./routes/optionsProviderGate";
-import { resolveBrokerEnvironmentFromSettings } from "./routes/brokerEnvironment";
-import { handleWatchlistsRoutes } from "./routes/watchlists";
-import { handleBrokerGateRoutes } from "./routes/brokerGate";
-import { handleAlpacaMarketDataRoutes, handleAlpacaTradingRoutes } from "./routes/alpaca";
-import { handleMarketDataQuoteResearchRoutes, handleMarketDataCompareScreenRoutes } from "./routes/marketDataResearch";
-import { handleScreenerResearchRoutes } from "./routes/screenerResearch";
+import { handlePremiumRoutes } from "./routes/premium";
+
+
+
+
+
+
+
+
+
+
 import { handleScheduledJobOutcomeRoute } from "./routes/scheduledJobOutcome";
-import { handleSchedulesRoutes, makeRunScheduleCallback } from "./routes/schedules";
-import { handleMaintenanceRoutes } from "./routes/maintenance";
-import { handleServiceUserRoutes } from "./routes/serviceUser";
-import { handleDelegationRoutes } from "./routes/delegations";
-import { handleOrchestratorMigrationRoutes } from "./routes/orchestratorMigration";
-import { handleAdminTenantQueueRoutes } from "./routes/adminTenantQueues";
-import { handlePlatformTenantRoutes } from "./routes/platformTenants";
-import { handlePlatformChannelRoutes } from "./routes/platformChannels";
-import { handleKvWipeRoutes } from "./routes/kvWipe";
 import { TRADING_PAID_SERVICES } from "../services/agenticPayments";
 import type {
   Env,
@@ -196,35 +186,7 @@ import type {
  * transcript store.
  */
 
-/**
- * Callbacks a caller may arm through POST /api/schedules/create (#111).
- *
- * This route is the public way to create schedules, so it accepts only
- * user-creatable jobs. Internal-only callbacks — `executeAsyncJob` (the
- * async-job plumbing) and `expireStaleOrderDraft` (order-draft expiry) —
- * are armed by the agent itself and are deliberately NOT in this list;
- * the route rejects them with HTTP 400. Only stock screening, options
- * screening, and saved-request strategy discovery (issue #126)
- * callbacks can be created through this route. NLQ scheduling (#109)
- * uses its separate agent scheduling port.
- */
-export const CREATABLE_SCHEDULE_CALLBACKS = [
-  "autonomousOptionsAnalysis",
-  "autonomousMarketScreen",
-  "autonomousStrategyDiscovery",
-  // Consolidation C1 (issue #1201, epic #1151 R1): goal-driven
-  // screens are schedulable through the one schedule store.
-  "autonomousGoalScreen",
-] as const;
-
-const ACCOUNT_SCOPED_SCHEDULE_CALLBACKS = new Set<string>([
-  "autonomousOptionsAnalysis",
-  "autonomousMarketScreen",
-  "autonomousStrategyDiscovery",
-  "autonomousGoalScreen",
-]);
-
-export type CreatableScheduleCallback = (typeof CREATABLE_SCHEDULE_CALLBACKS)[number];
+export { CREATABLE_SCHEDULE_CALLBACKS, type CreatableScheduleCallback } from "./orchestrator/scheduleCallbacks";
 
 type ETradeEnvironment = "TEST" | "PROD";
 type ScreenerExecutionContext = { userLogin: string; environment?: ETradeEnvironment };
@@ -694,7 +656,7 @@ export class OrchestratorAgent extends PortThink {
       ensureTables: () => this.ensureTables(),
       getOrm: () => this.getOrm(),
       reportDispatchHitlKey: OrchestratorAgent.REPORT_DISPATCH_HITL_KEY,
-      reportConfirmationTtlMs: OrchestratorAgent.REPORT_CONFIRMATION_TTL_MS,
+      reportConfirmationTtlMs: REPORT_CONFIRMATION_TTL_MS,
       sendReportEmail: (recipient, title, fileName, attachmentBase64, userLogin) =>
         this.sendReportEmail(recipient, title, fileName, attachmentBase64, userLogin),
       sendReportWebhook: (title, query, sheets, userLogin) =>
@@ -1413,166 +1375,9 @@ export class OrchestratorAgent extends PortThink {
   }
 
   private ensureTables() {
-    const storage = this.ctx.storage;
-    const sql = storage.sql;
-    // Shared mas_* tables come from the canonical DDL in src/orm/schema
-    // (issue #782) — do not re-add their DDL here.
-    ensureSharedTable(sql, "mas_messages");
-    // Issue #2358 (#1976 step 4a): mas_async_jobs' DDL moved behind
-    // the async-job queue port (one owner per table, ADR 0022 D-A).
-    // This one call runs the family's whole schema ensure: the base
-    // table, the session index, the already-running gate's seek
-    // index (issue #2280 slice 2 — created right after the table,
-    // so no lazy-creation ordering issue), and the probed job-graph
-    // migration (issue #1123: parent/sub-job tracking columns,
-    // additive).
-    ensureAsyncJobTables(sql);
-    ensureSharedTable(sql, "mas_events");
-    // Issue #2280 (slice 3): the nightly retention batches' covering indexes.
-    // Both tables exist by now (mas_messages above, mas_events just created),
-    // so no lazy-creation ordering issue.
-    ensureMasRetentionIndexes(sql);
-    ensureSharedTable(sql, "mas_memory");
-    // Issue #2359 (#1976 step 4d): the four orchestrator-owned
-    // tables' DDL moved behind the orchestrator-table ports (one
-    // owner per table, ADR 0022 D-A). These calls run the four
-    // families' schema ensures in the legacy order: autopilot
-    // state, report confirmations (with the probed #308
-    // report_id migration), screener presets, policy verdicts
-    // (with its created-at index).
-    const tablePorts = createOrchestratorTablePorts(sql);
-    // Autopilot policy state (autopilot Phase 1): server-owned run state,
-    // limits, kill switch, and daily order budget. Previously all four lived in
-    // browser localStorage, so a reload cleared the kill switch and a second
-    // browser ran its own envelope.
-    tablePorts.autopilot.ensureSchema();
-    // Server-owned settings (issue #277): per-key runtime flags readable by
-    // the agent and writable through the /trading/settings routes.
-    // Issue #2390 (step 4g, gate G-7 ruled): the mas_settings DDL
-    // is owned by the dedicated settings port's adapter — this
-    // composition invokes its ensureSchema() and the class file
-    // no longer carries the CREATE. (Issue #2359 deliberately
-    // left the DDL here pending exactly this ruling.)
-    createOrmPorts(sql).settings.ensureSchema();
-    // Issue #277: pending HITL confirmations for research-report dispatch.
-    // Payloads are stored verbatim at creation time; the actual email or
-    // webhook send happens only when a human approves via
-    // POST /trading/reports/confirm. Mirrors the /payments/confirm flow.
-    // Issue #308: payload_json carries delivery metadata only (recipient /
-    // fileName / title); the report bytes themselves live once in
-    // mas_reports, referenced by report_id. Legacy rows (pre-#308) carry
-    // the full payload in payload_json and are read via a fallback.
-    tablePorts.confirmations.ensureSchema();
-    // Issue #1495 (#940-A): user-scoped screener presets (DO/SQLite, not KV per #415); criteria validated by the run path's strict parsers before storage.
-    tablePorts.presets.ensureSchema();
-    // Append-only verdict ledger: every policy decision, its inputs, and a
-    // signature produced server-side where the decision is made.
-    tablePorts.verdicts.ensureSchema();
-    ensureSharedTable(sql, "mas_referrals");
-    ensureSharedTable(sql, "mas_ads");
-
-    ensureSharedTable(sql, "mas_watchlists");
-
-    // Seed default sponsor offers if ads table is empty.
-    // Issue #2359 (#1976 step 4d): the count + inserts serve
-    // through the step-3a ads repository port (the table's port
-    // home) instead of raw statements here. The count==0 gate
-    // makes the port's insert-or-throw equivalent to the legacy
-    // INSERT OR IGNORE: the loop only runs on an empty table,
-    // so no conflicting row can exist.
-    try {
-      const ads = createOrmPorts(sql).ads;
-      if (ads.count() === 0) {
-        const now = new Date().toISOString();
-        const seedAds = [
-          {
-            id: "ad_workers_ai",
-            title: "Cloudflare Workers AI",
-            tagline: "Run state-of-the-art models (GLM-4.7, Llama 3.3) on serverless GPUs with zero cold starts.",
-            sponsor: "Cloudflare",
-            badge: "FLAGSHIP PARTNER",
-            url: "https://developers.cloudflare.com/workers-ai/",
-            cta_text: "Deploy in 60s →",
-            accent_color: "#f38020",
-          },
-          {
-            id: "ad_ai_search",
-            title: "Cloudflare AI Search",
-            tagline: "Build enterprise RAG pipelines with native auto-chunking, Vectorize indexes, and real-time semantic retrieval.",
-            sponsor: "Cloudflare AI",
-            badge: "FEATURED TOOL",
-            url: "https://developers.cloudflare.com/ai-search/",
-            cta_text: "Explore Docs →",
-            accent_color: "#38bdf8",
-          },
-          {
-            id: "ad_durable_objects",
-            title: "Durable Objects SQLite",
-            tagline: "Strongly consistent transactional databases running natively at the edge for stateful AI agents.",
-            sponsor: "Cloudflare Platform",
-            badge: "INFRASTRUCTURE",
-            url: "https://developers.cloudflare.com/durable-objects/",
-            cta_text: "Learn More →",
-            accent_color: "#a855f7",
-          },
-          {
-            id: "ad_openaimp",
-            title: "OpenAIMP Agent Studio",
-            tagline: "Scale autonomous multi-agent workflows with real-time LLM Judge routing and persistent memory.",
-            sponsor: "OpenAIMP",
-            badge: "SPONSOR",
-            url: "https://agent.openaimp.com",
-            cta_text: "Join Program →",
-            accent_color: "#10b981",
-          },
-        ];
-
-        for (const ad of seedAds) {
-          ads.create({
-            id: ad.id,
-            title: ad.title,
-            tagline: ad.tagline,
-            sponsor: ad.sponsor,
-            badge: ad.badge,
-            url: ad.url,
-            ctaText: ad.cta_text,
-            accentColor: ad.accent_color,
-            impressions: 0,
-            clicks: 0,
-            createdAt: now,
-          });
-        }
-      }
-    } catch {
-      // Ignore if seeding fails
-    }
-
-    ensureSharedTable(sql, "mas_transactions");
-
-    // Issue #175: this store previously seeded two fabricated "default"
-    // transactions on first use — completed charges carrying invented
-    // proof signatures and live-shaped gateway references, stamped with
-    // the user's own DID as authorizer and rendered by the payments
-    // ledger (including its volume/completed summary) as real payments.
-    // They are removed, not relabelled: nothing depends on them (wallet
-    // status counts only x402/mpp rows; the confirm flow requires a
-    // "previewed" draft, which these never were). Real draft ids are
-    // `pay_` + 8 random hex characters, so the two seed ids can only
-    // ever have come from that seeding — purge exactly those rows from
-    // stores seeded before this fix.
-    try {
-      // Issue #2359 (#1976 step 4d): the purge serves through
-      // the step-3a transaction-ledger port (the table's port
-      // home) instead of raw DELETEs here.
-      const transactions = createOrmPorts(sql).transactions;
-      transactions.delete("pay_init_stripe");
-      transactions.delete("pay_init_paypal");
-    } catch {
-      // Ignore if the purge fails
-    }
-
-    return sql;
+    return ensureOrchestratorTables(this.ctx.storage.sql);
   }
+
 
   // Issue #992: extracted to ./orchestrator/asyncJobs.ts (submitAsyncJob);
   private async submitAsyncJob(
@@ -1688,7 +1493,6 @@ export class OrchestratorAgent extends PortThink {
   /** Issue #277: setting key for optional HITL confirmation on report dispatch. */
   private static readonly REPORT_DISPATCH_HITL_KEY = "report_dispatch_hitl";
   /** Pending report confirmations expire unconfirmed after this long. */
-  private static readonly REPORT_CONFIRMATION_TTL_MS = 24 * 60 * 60 * 1000;
 
   // Issue #992: extracted to ./orchestrator/reportDispatch.ts (readSettingRaw);
   private readSettingRaw(key: string): string | null {
@@ -2668,630 +2472,7 @@ export class OrchestratorAgent extends PortThink {
     return enqueueHttpRequest(this.httpEntryContext(), request, url);
   }
 
-  private async routeRequest(request: Request): Promise<Response> {
-    const url = new URL(request.url);
-    const path = url.pathname;
-    const sql = this.ensureTables();
-    const sessionId = this.sessionKey();
-
-    // Issue #359-01: reports + HITL routes are handled by
-    // src/agents/routes/reports.ts. Invoked at this exact position in the
-    // sequential path.endsWith matching sequence; a non-null return matched.
-    const reportsResponse = await handleReportsRoutes(request, url, path, sessionId, {
-      env: this.env,
-      ensureTables: () => this.ensureTables(),
-      getScreenerAgent: (userLogin?: string) => this.getScreenerAgent(userLogin),
-      getScreenerExecutionContext: () => this.getScreenerExecutionContext(),
-      getReportDispatchHitl: () => this.getReportDispatchHitl(),
-      setReportDispatchHitl: (enabled) => this.setReportDispatchHitl(enabled),
-      getReportConfirmation: (id) => this.getReportConfirmation(id),
-      decideReportConfirmation: (id, status, decidedBy) =>
-        this.decideReportConfirmation(id, status, decidedBy),
-      createReportConfirmation: (kind, payloadJson, reportId, createdBy) =>
-        this.createReportConfirmation(kind, payloadJson, reportId, createdBy),
-      submitFollowupDelivery: makeSubmitFollowupDelivery((job) => this.submitAsyncJob(job)),
-      confirmationDeliveryMeta: (row) => this.confirmationDeliveryMeta(row),
-      deliverStoredReportEmail: (reportId, recipient, userLogin) =>
-        this.deliverStoredReportEmail(reportId, recipient, userLogin),
-      deliverStoredReportWebhook: (reportId, userLogin) =>
-        this.deliverStoredReportWebhook(reportId, userLogin),
-      sendReportEmail: (recipient, title, fileName, attachmentBase64, userLogin) =>
-        this.sendReportEmail(recipient, title, fileName, attachmentBase64, userLogin),
-      sendReportWebhook: (title, query, sheets, userLogin) =>
-        this.sendReportWebhook(title, query, sheets, userLogin),
-      storeResearchReportCanonicalAsync: (bodyJson, meta) =>
-        this.storeResearchReportCanonicalAsync(bodyJson, meta),
-      audit: (type, agent, payload) => this.audit(type, agent, payload),
-      reportConfirmationTtlMs: () => OrchestratorAgent.REPORT_CONFIRMATION_TTL_MS,
-    });
-    if (reportsResponse) return reportsResponse;
-
-    // Issue #1495 (#940-A): screener preset routes (screenerPresets.ts), invoked at this exact position in the sequential matching sequence.
-    const presetsResponse = await handleScreenerPresetRoutes(request, url, path, sessionId, { ensureTables: () => this.ensureTables() });
-    if (presetsResponse) return presetsResponse;
-
-    // Issue #359-02: MCP + chat + NLQ routes are handled by
-    // src/agents/routes/mcpChatNlq.ts. Invoked at this exact position in the
-    // sequential path.endsWith matching sequence; a non-null return matched.
-    const mcpChatNlqResponse = await handleMcpChatNlqRoutes(request, url, path, sessionId, {
-      getOrm: () => this.getOrm(),
-      getStorageSql: () => this.ctx.storage.sql,
-      // Issue #1661: DO blob handle for full capture on NLQ legs.
-      getStorage: () => this.ctx.storage,
-      env: this.env,
-      audit: (type, agent, payload) => this.audit(type, agent, payload),
-      submitAsyncJob: (job) => this.submitAsyncJob(job),
-      getAsyncJob: (jobId) => this.getAsyncJob(jobId),
-      listAsyncJobs: () => this.listAsyncJobs().map(({ result: _result, ...job }) => job),
-      extractMessageText: (message) => this.extractMessageText(message),
-      getMessages: () => this.getPortMessages(),
-      recordMessage: (role, content, agent) => this.recordMessage(role, content, agent),
-      runAgenticChatTurn: (opts) => this.runAgenticChatTurn(opts),
-      buildChatErrorFallback: (err, userText, userLogin) => this.buildChatErrorFallback(err, userText, userLogin),
-      scopedHttpDeliveryModes: this.scopedHttpDeliveryModes,
-      scopedJobListModes: this.scopedJobListModes,
-      nlqSchedulingPort: () => this.nlqSchedulingPort(),
-      nlqSocialBriefPort: () => this.nlqSocialBriefPort(),
-    });
-    if (mcpChatNlqResponse) return mcpChatNlqResponse;
-
-    // Issue #359-17: schema introspection routes (GET /schema/tables,
-    // POST /schema/query) are handled by src/agents/routes/schema.ts.
-    // Invoked at this exact position in the sequential path.endsWith
-    // matching sequence (between the MCP/chat/NLQ handler and the
-    // ads/revenue/referrals handler); a non-null return matched.
-    const schemaResponse = await handleSchemaRoutes(request, url, path, sessionId, {
-      getOrm: () => this.getOrm(),
-      audit: (type, agent, payload) => this.audit(type, agent, payload),
-    });
-    if (schemaResponse) return schemaResponse;
-
-    // Issue #359-03: ads / revenue / referrals (inventory group: categories,
-    // revenue, external ads) are handled by
-    // src/agents/routes/adsRevenueReferrals.ts. Invoked at this exact
-    // position in the sequential path.endsWith matching sequence (between
-    // /schema/query and /audit); a non-null return matched.
-    const adsRevenueReferralsResponse = await handleAdsRevenueReferralsRoutes(request, url, path, sessionId, {
-      getOrm: () => this.getOrm(),
-      ensureTables: () => this.ensureTables(),
-      audit: (type, agent, payload) => this.audit(type, agent, payload),
-      env: this.env, // #1721: global-env fallback for the ads/revenue switches.
-    });
-    if (adsRevenueReferralsResponse) return adsRevenueReferralsResponse;
-
-    // Issue #359-04: audit routes (GET/POST /audit, POST /audit/event) are
-    // handled by src/agents/routes/audit.ts. Invoked at this exact position
-    // in the sequential path.endsWith matching sequence (between the
-    // ads/revenue/referrals handler and the autopilot block); a non-null
-    // return matched.
-    const auditResponse = await handleAuditRoutes(request, url, path, sessionId, {
-      ensureTables: () => this.ensureTables(),
-      getOrm: () => this.getOrm(),
-      audit: (type, agent, payload) => this.audit(type, agent, payload),
-      recordAudit: (type, agent, payload) => this.recordAudit(type, agent, payload),
-      env: this.env, // #1733: global-env fallback for AUDIT_WRITE_MODE.
-    });
-    if (auditResponse) return auditResponse;
-
-    const meter = await handleMeterRoutes(request, url, path, sessionId, { sql: this.ctx.storage.sql, env: this.env });
-    if (meter) return meter;
-
-    const dlq = await handleDlqRoutes(request, url, path, sessionId, { env: this.env });
-    if (dlq) return dlq;
-
-    // Issue #1170 (E3): data-provider lifecycle routes are handled
-    // by src/agents/routes/dataProviders.ts. Invoked here (after the
-    // audit handler); a non-null return matched. The verified login
-    // (set by src/server.ts from the session, #1156) gates mutations
-    // and is the audit actor.
-    const dataProviderPorts = await this.dataProviderPorts();
-    const dataProvidersResponse = await handleDataProviderRoutes(request, url, path, sessionId, {
-      env: this.env,
-      sql: this.ctx.storage.sql,
-      configPort: dataProviderPorts.config,
-      capturePort: dataProviderPorts.captures,
-      userLogin: request.headers.get("x-user-login") || "",
-      recordAudit: (type, agent, payload) => this.recordAudit(type, agent, payload),
-    });
-    if (dataProvidersResponse) return dataProvidersResponse;
-
-    // Issue #1888: enrichment routes (routes/enrichment.ts), after data-providers; non-null return matched.
-    const enrichmentResponse = await handleEnrichmentRoutes(request, url, path, sessionId, {
-      env: this.env,
-      sql: this.ctx.storage.sql,
-      userLogin: request.headers.get("x-user-login") || "",
-      recordAudit: (type, agent, payload) => this.recordAudit(type, agent, payload),
-    });
-    if (enrichmentResponse) return enrichmentResponse;
-
-    // Workflow Runs ledger (routes/workflowRuns.ts), after enrichment.
-    const workflowRunsResponse = await handleWorkflowRunsRoutes(request, url, path, sessionId, {
-      ensureTables: () => this.ensureTables(),
-      userLogin: request.headers.get("x-user-login") || "", env: this.env,
-    });
-    if (workflowRunsResponse) return workflowRunsResponse;
-
-    // Issue #1169 (S1): knowledge-corpus admin upload routes (POST
-    // /knowledge/corpus) are handled by
-    // src/agents/routes/knowledgeCorpus.ts. Invoked at this exact
-    // position in the sequential matching sequence (after the
-    // data-provider handler, before autopilot); a non-null return
-    // matched. The verified login (set by src/server.ts from the
-    // session) gates ingestion; the corpus itself is not partitioned
-    // by login (see knowledgeCorpus.ts header).
-    // Issue #1169 (S4-4): the mount additionally passes the report
-    // store (sql) so the weekly corpus-sync branch can read/write
-    // its mas_settings marker and run the index backfill.
-    const knowledgeCorpusResponse = await handleKnowledgeCorpusRoutes(request, url, path, sessionId, {
-      env: this.env,
-      storage: this.ctx.storage,
-      userLogin: request.headers.get("x-user-login") || "",
-      sql: this.ctx.storage.sql,
-    });
-    if (knowledgeCorpusResponse) return knowledgeCorpusResponse;
-
-    // Issue #2120 (slice 1): Search hub routes (POST /search/agent,
-    // POST /search/knowledge). Mounted adjacent to the knowledgeCorpus
-    // mount; the new paths collide with no existing suffix.
-    // Issue #1169 (S4-2): POST /search/mas rides the same mount; it
-    // additionally receives the report store (the MAS tool's sql) and
-    // the orchestrator audit (its type accepts the MAS "search"
-    // agent value), mirroring the autopilot mount's audit pattern.
-    const searchHubResponse = await handleSearchHubRoutes(request, url, path, sessionId, {
-      env: this.env,
-      userLogin: request.headers.get("x-user-login") || "",
-      sql: this.ctx.storage.sql,
-      audit: (type, agent, payload) => this.audit(type, agent, payload),
-    });
-    if (searchHubResponse) return searchHubResponse;
-
-    // Issue #359-05: autopilot control center routes (GET /autopilot,
-    // POST /autopilot/state, POST /autopilot/kill-switch,
-    // POST|PUT /autopilot/limits, POST /autopilot/evaluate) are handled
-    // by src/agents/routes/autopilot.ts. Invoked at this exact position
-    // in the sequential matching sequence (between the audit handler and
-    // the Persistent Memory endpoint); a non-null return matched.
-    const autopilotResponse = await handleAutopilotRoutes(request, url, path, sessionId, {
-      ensureTables: () => this.ensureTables(),
-      audit: (type, agent, payload) => this.audit(type, agent, payload),
-      getAutopilotState: () => this.getAutopilotState(),
-      writeAutopilotState: (patch) => this.writeAutopilotState(patch),
-      evaluateAndRecordAutopilotVerdict: (params) => this.evaluateAndRecordAutopilotVerdict(params),
-    });
-    if (autopilotResponse) return autopilotResponse;
-
-    // Issue #359-06: memory + reset routes (GET/POST/DELETE /memory,
-    // POST|DELETE|GET /clear|/reset) are handled by
-    // src/agents/routes/memoryReset.ts. Invoked at this exact position
-    // in the sequential path.endsWith matching sequence (between the
-    // autopilot handler and the referrals+ads handler); a non-null
-    // return matched.
-    const memoryResetResponse = await handleMemoryResetRoutes(request, url, path, sessionId, {
-      ensureTables: () => this.ensureTables(),
-      getOrm: () => this.getOrm(),
-      // #1723: env for the MEMORY_READ_MODE env level on GET /memory.
-      env: this.env,
-      audit: (type, agent, payload) => this.audit(type, agent, payload),
-      abortAllRequests: (_reason) => this.abortAllRequests(),
-      resetTurnState: () => this.resetTurnState(),
-      clearConversationMessages: async () => {
-        await this.clearMessages();
-      },
-    });
-    if (memoryResetResponse) return memoryResetResponse;
-
-    // Issue #359-03: referrals + sponsored ads (community group) are
-    // handled by src/agents/routes/adsRevenueReferrals.ts. Invoked at this
-    // exact position in the sequential path.endsWith matching sequence
-    // (between /memory and the payments block); a non-null return matched.
-    const referralsAdsResponse = await handleReferralsAdsRoutes(request, url, path, sessionId, {
-      getOrm: () => this.getOrm(),
-      ensureTables: () => this.ensureTables(),
-      audit: (type, agent, payload) => this.audit(type, agent, payload),
-      env: this.env, // #1721: global-env fallback for the ads/revenue switches.
-    });
-    if (referralsAdsResponse) return referralsAdsResponse;
-
-    // Issue #359-07: payments routes (Multi-Gateway Payments & DID
-    // Management API) are handled by src/agents/routes/payments.ts.
-    // Invoked at this exact position in the sequential path.endsWith
-    // matching sequence (between the referrals+ads handler and the
-    // Cloudflare Agentic Payments block); a non-null return matched.
-    const paymentsResponse = await handlePaymentsRoutes(request, url, path, sessionId, {
-      env: this.env,
-      ensureTables: () => this.ensureTables(),
-      getOrm: () => this.getOrm(),
-      getAuditPolicyPort: () => this.auditPolicyPort(),
-      audit: (type, agent, payload) => this.audit(type, agent, payload),
-      // #1735: session/user carriers for PAYMENTS_FLOW_MODE (run is
-      // per-call on the route context and is not set here — there is
-      // no execution-owner run source on this path today, and a
-      // request-supplied run value must never flip the flow).
-      scopedPaymentsFlowModes: this.scopedPaymentsFlowModes,
-    });
-    if (paymentsResponse) return paymentsResponse;
-
-    // Issue #2059: live PaymentWorkflow assurance routes (test the
-    // live deployed workflow end-to-end with test inputs; no fake
-    // seams). Invoked at this exact position in the sequential
-    // path.endsWith matching sequence (between the payments
-    // handler and the Cloudflare Agentic Payments block); a
-    // non-null return matched. The handler itself enforces the
-    // payment_assurance flag, caller identity, and the
-    // PAYMENT_ASSURANCE_LIVE_LOGINS allowlist.
-    const paymentAssuranceLiveResponse = await handlePaymentAssuranceLiveRoutes(request, url, path, sessionId, {
-      env: this.env,
-    });
-    if (paymentAssuranceLiveResponse) return paymentAssuranceLiveResponse;
-
-    // Issue #359-17: Cloudflare Agentic Payments routes (x402 & MPP:
-    // GET /payments/agentic/wallet, GET|POST
-    // /payments/agentic/auto-approve-limit) are handled by
-    // src/agents/routes/agenticPayments.ts. Invoked at this exact
-    // position in the sequential path.endsWith matching sequence
-    // (between the payments handler and the premium handler);
-    // a non-null return matched.
-    const agenticPaymentsResponse = await handleAgenticPaymentsRoutes(request, url, path, sessionId, {
-      env: this.env,
-      getOrm: () => this.getOrm(),
-      audit: (type, agent, payload) => this.audit(type, agent, payload),
-    });
-    if (agenticPaymentsResponse) return agenticPaymentsResponse;
-
-    // Issue #2220 (program #2218 slice 2): user administration
-    // routes live in src/agents/routes/platformUsers.ts. Invoked
-    // immediately after the agentic-payments handler, before
-    // premium; a non-null return matched.
-    const platformUsersResponse = await handlePlatformUsersRoutes(request, url, path, sessionId, {
-      env: this.env,
-      audit: (type, agent, payload) => this.audit(type, agent, payload),
-    });
-    if (platformUsersResponse) return platformUsersResponse;
-    // Issue #2221: tenant admin routes, after agentic-payments.
-    const platformTenantResponse = await handlePlatformTenantRoutes(request, url, path, sessionId, {
-      env: this.env,
-    });
-    if (platformTenantResponse) return platformTenantResponse;
-
-    // Issue #2222 (program #2218, slice 4): platform account
-    // administration routes (routes/platformAccounts.ts), after
-    // the agentic-payments handler; a non-null return matched.
-    // The verified login (set by src/server.ts from the session)
-    // is the identity and the audit actor.
-    const platformAccountResponse = await handlePlatformAccountRoutes(request, url, path, sessionId, {
-      env: this.env,
-      audit: (type, agent, payload) => this.audit(type, agent, payload),
-    });
-    if (platformAccountResponse) return platformAccountResponse;
-
-    // Issue #3169 (program #2218): platform channel
-    // administration routes (routes/platformChannels.ts), after
-    // the account-admin handler and before premium; a non-null
-    // return matched. Tenant-level delivery-channel enablement
-    // flags, operator-gated like the tenant slice.
-    const platformChannelResponse = await handlePlatformChannelRoutes(request, url, path, sessionId, {
-      env: this.env,
-      audit: (type, agent, payload) => this.audit(type, agent, payload),
-    });
-    if (platformChannelResponse) return platformChannelResponse;
-
-    // Issue #359-08: premium paid-trading routes (Paid Trading Service:
-    // Institutional Options Screener, Equity Research, Anomaly Signals)
-    // are handled by src/agents/routes/premium.ts. Invoked at this exact
-    // position in the sequential matching sequence (between the Cloudflare
-    // Agentic Payments block and the Environment & E*TRADE Trading APIs
-    // block); a non-null return matched.
-    const premiumResponse = await handlePremiumRoutes(request, url, path, sessionId, makePremiumRouteContext(this));
-    if (premiumResponse) return premiumResponse;
-
-    // Provider/broker slice 1: the broker gate delegation
-    // (src/agents/routes/brokerGate.ts). Invoked at this exact
-    // position in the sequential matching sequence (after the
-    // premium delegation, before the E*TRADE broker delegation);
-    // a non-null return matched. It returns the coded
-    // FAILURE_BROKER_UNAVAILABLE response for /etrade/ broker and
-    // watchlist paths when the tenant broker is not etrade, and
-    // null otherwise (including /etrade/options/* data paths).
-    const brokerGateResponse = await handleBrokerGateRoutes(request, url, path, sessionId, {
-      env: this.env,
-    });
-    if (brokerGateResponse) return brokerGateResponse;
-
-    // Issue #359-09: E*TRADE broker routes (Environment & E*TRADE Trading
-    // APIs block) are handled by src/agents/routes/etradeBroker.ts
-    // (handleEtradeBrokerRoutes). Invoked at this exact position in the
-    // sequential matching sequence (after the premium delegation);
-    // a non-null return matched.
-    const etradeBrokerResponse = await handleEtradeBrokerRoutes(request, url, path, sessionId, {
-      env: this.env,
-      traceId: parseTraceparent(request.headers.get("traceparent"))?.traceId ?? null,
-      asyncJobId: request.headers.get("x-async-job-id") || undefined,
-      scheduleScreenerFollowups: (outcome: ScreenerRunOutcome, userLogin: string) =>
-        scheduleScreenerFollowups(this.asyncJobsContext(), outcome, userLogin),
-      getOrm: () => this.getOrm(),
-      readSettingRaw: (key) => this.readSettingRaw(key),
-      writeSetting: (key, value) => this.writeSetting(key, value),
-      audit: (type, agent, payload) => this.audit(type, agent, payload),
-      getScreenerAgent: (userLogin) => this.getScreenerAgent(userLogin),
-      persistScreenerReportCanonical: (result) => this.persistScreenerReportCanonical(result),
-      evaluateAndRecordAutopilotVerdict: (params) => this.evaluateAndRecordAutopilotVerdict(params),
-      getAutopilotState: () => this.getAutopilotState(),
-      incrementAutopilotOrdersToday: () => this.incrementAutopilotOrdersToday(),
-      schedule: (when, callback, payload) => this.schedule(when, callback as keyof this, payload),
-      cancelSchedule: (id) => this.cancelSchedule(id),
-    });
-    if (etradeBrokerResponse) return etradeBrokerResponse;
-
-    // Issue #3089: broker-routed order endpoints (preview/execute/
-    // orders resolve the platform from the registry and bind the
-    // draft to its broker). Invoked right after the E*TRADE block;
-    // the legacy /etrade/* order routes above are untouched.
-    const brokerOrderResponse = await handleBrokerOrderRoutes(request, url, path, sessionId, {
-      env: this.env,
-      traceId: parseTraceparent(request.headers.get("traceparent"))?.traceId ?? null,
-      asyncJobId: request.headers.get("x-async-job-id") || undefined,
-      scheduleScreenerFollowups: (outcome: ScreenerRunOutcome, userLogin: string) =>
-        scheduleScreenerFollowups(this.asyncJobsContext(), outcome, userLogin),
-      getOrm: () => this.getOrm(),
-      readSettingRaw: (key) => this.readSettingRaw(key),
-      writeSetting: (key, value) => this.writeSetting(key, value),
-      audit: (type, agent, payload) => this.audit(type, agent, payload),
-      getScreenerAgent: (userLogin) => this.getScreenerAgent(userLogin),
-      persistScreenerReportCanonical: (result) => this.persistScreenerReportCanonical(result),
-      evaluateAndRecordAutopilotVerdict: (params) => this.evaluateAndRecordAutopilotVerdict(params),
-      getAutopilotState: () => this.getAutopilotState(),
-      incrementAutopilotOrdersToday: () => this.incrementAutopilotOrdersToday(),
-      schedule: (when, callback, payload) => this.schedule(when, callback as keyof this, payload),
-      cancelSchedule: (id) => this.cancelSchedule(id),
-    });
-    if (brokerOrderResponse) return brokerOrderResponse;
-
-    // The requestedEnv binding stays inline in the dispatcher: it is
-    // computed once here and passed through the context to the E*TRADE
-    // options and watchlists delegations below. The broker handlers
-    // recompute their own copy inside the module.
-    // Issue #2482: the binding is the persisted per-login environment
-    // selection, never the request header — options and watchlist data
-    // must agree with every other broker surface.
-    const requestedEnv: "TEST" | "PROD" | undefined =
-      resolveBrokerEnvironmentFromSettings((key) => this.readSettingRaw(key), this.env);
-
-    // Issue #359-10: omnichannel trading channel routes (email / slack /
-    // browser / voice trading integrations) are handled by
-    // src/agents/routes/tradingIntegrations.ts
-    // (handleTradingIntegrationsRoutes). Invoked at this exact position in
-    // the sequential path.endsWith matching sequence (after the E*TRADE
-    // broker routes block, before the broker activity delegation); a
-    // non-null return matched.
-    const tradingIntegrationsResponse = await handleTradingIntegrationsRoutes(request, url, path, sessionId, {
-      env: this.env,
-      getOrm: () => this.getOrm(),
-      audit: (type, agent, payload) => this.audit(type, agent, payload),
-      agentCtx: this.ctx,
-      nlqSchedulingPort: () => this.nlqSchedulingPort(),
-      // Issue #1262 Phase 4: channel NLQ deps need DO storage SQL
-      // for the scan/profile stores and discovery runners.
-      getStorageSql: () => this.ctx.storage.sql,
-    });
-    if (tradingIntegrationsResponse) return tradingIntegrationsResponse;
-
-    // Issue #359-09: E*TRADE broker account-activity routes (transactions,
-    // alerts, product lookup) are handled by
-    // src/agents/routes/etradeBroker.ts (handleEtradeBrokerActivityRoutes).
-    // Invoked at this exact position in the sequential matching sequence
-    // (after the trading channels block, before the options block);
-    // a non-null return matched.
-    const etradeBrokerActivityResponse = await handleEtradeBrokerActivityRoutes(request, url, path, sessionId, {
-      env: this.env,
-      traceId: parseTraceparent(request.headers.get("traceparent"))?.traceId ?? null,
-      getOrm: () => this.getOrm(),
-      readSettingRaw: (key) => this.readSettingRaw(key),
-      writeSetting: (key, value) => this.writeSetting(key, value),
-      audit: (type, agent, payload) => this.audit(type, agent, payload),
-      getScreenerAgent: (userLogin) => this.getScreenerAgent(userLogin),
-      persistScreenerReportCanonical: (result) => this.persistScreenerReportCanonical(result),
-      evaluateAndRecordAutopilotVerdict: (params) => this.evaluateAndRecordAutopilotVerdict(params),
-      getAutopilotState: () => this.getAutopilotState(),
-      incrementAutopilotOrdersToday: () => this.incrementAutopilotOrdersToday(),
-      schedule: (when, callback, payload) => this.schedule(when, callback as keyof this, payload),
-      cancelSchedule: (id) => this.cancelSchedule(id),
-    });
-    if (etradeBrokerActivityResponse) return etradeBrokerActivityResponse;
-
-    // Provider/broker slice 2 (issue #2598): the options feed gate
-    // delegation (src/agents/routes/optionsProviderGate.ts). Invoked at
-    // this exact position in the sequential matching sequence
-    // (immediately before the E*TRADE options delegation); a non-null
-    // return matched. It returns the coded
-    // FAILURE_DATA_PROVIDER_UNAVAILABLE response for live-chain options
-    // paths when the tenant's selected data provider does not declare
-    // optionsChains, and null otherwise — including every stored-run
-    // read, the catalog, and config, which read no live chain.
-    const optionsProviderGateResponse = await handleOptionsProviderGateRoutes(request, url, path, sessionId, {
-      env: this.env,
-    });
-    if (optionsProviderGateResponse) return optionsProviderGateResponse;
-
-    // Issue #359-11: E*TRADE options routes (chains / expire-dates / scans /
-    // iv-history / profiles / strategy) and the trading/options routes
-    // (llm-ideas / compare / recommend / catalog / strategies / screen /
-    // unified / config) are handled by src/agents/routes/etradeOptions.ts
-    // (handleEtradeOptionsRoutes). Invoked at this exact position in the
-    // sequential path.endsWith matching sequence (after the E*TRADE broker
-    // account-activity delegation, before the watchlists block); a non-null
-    // return matched. The requestedEnv binding stays inline in the
-    // dispatcher (shared with the watchlists delegation below) and is
-    // passed through the context.
-    const etradeOptionsResponse = await handleEtradeOptionsRoutes(request, url, path, sessionId, {
-      env: this.env,
-      asyncJobId: request.headers.get("x-async-job-id") || undefined,
-      scheduleScreenerFollowups: (outcome: ScreenerRunOutcome, userLogin: string) =>
-        scheduleScreenerFollowups(this.asyncJobsContext(), outcome, userLogin),
-      getOrm: () => this.getOrm(),
-      agentCtx: this.ctx,
-      ensureTables: () => this.ensureTables(),
-      requestedEnv,
-      getScreenerAgent: (userLogin) => this.getScreenerAgent(userLogin),
-    });
-    if (etradeOptionsResponse) return etradeOptionsResponse;
-
-    // Issue #359-12: E*TRADE watchlists routes (list / details / create /
-    // save-screen / delete) are handled by src/agents/routes/watchlists.ts
-    // (handleWatchlistsRoutes). Invoked at this exact position in the
-    // sequential path.endsWith matching sequence (after the E*TRADE options
-    // delegation, before the Alpaca block); a non-null return matched. The
-    // requestedEnv binding stays inline and is passed through the context.
-    const watchlistsResponse = await handleWatchlistsRoutes(request, url, path, sessionId, {
-      env: this.env,
-      getOrm: () => this.getOrm(),
-      requestedEnv,
-    });
-    if (watchlistsResponse) return watchlistsResponse;
-
-    const alpacaTradingResponse = await handleAlpacaTradingRoutes(request, url, path, sessionId, {
-      env: this.env,
-      audit: (type, agent, payload) => this.audit(type, agent, payload),
-    });
-    if (alpacaTradingResponse) return alpacaTradingResponse;
-
-    // ==========================================
-    // Market Data Research & Quoting APIs (yfinance & Alpaca)
-    // ==========================================
-
-    const marketDataResearchResponse = await handleMarketDataQuoteResearchRoutes(request, url, path, sessionId, {
-      env: this.env,
-      audit: (type, agent, payload) => this.audit(type, agent, payload),
-      getScreenerAgent: (userLogin?: string) => this.getScreenerAgent(userLogin),
-      persistScreenerReportCanonical: (result) => this.persistScreenerReportCanonical(result),
-    });
-    if (marketDataResearchResponse) return marketDataResearchResponse;
-
-    const alpacaMarketDataResponse = await handleAlpacaMarketDataRoutes(request, url, path, sessionId, {
-      env: this.env,
-      audit: (type, agent, payload) => this.audit(type, agent, payload),
-    });
-    if (alpacaMarketDataResponse) return alpacaMarketDataResponse;
-
-    const marketDataScreeningResponse = await handleMarketDataCompareScreenRoutes(request, url, path, sessionId, {
-      env: this.env,
-      audit: (type, agent, payload) => this.audit(type, agent, payload),
-      getScreenerAgent: (userLogin?: string) => this.getScreenerAgent(userLogin),
-      persistScreenerReportCanonical: (result) => this.persistScreenerReportCanonical(result),
-    });
-    if (marketDataScreeningResponse) return marketDataScreeningResponse;
-
-    // ==========================================
-    // Cloudflare Agents Task Scheduling Management APIs
-    // ==========================================
-
-    // Issue #359-15: screener + autonomous research routes (/screener/*,
-    // options PDF, /research/*) live in src/agents/routes/screenerResearch.ts
-    // (handleScreenerResearchRoutes), invoked at this exact position in the
-    // sequential path.endsWith sequence (after the market-data compare/screen
-    // delegation, before the task schedules block); a non-null return
-    // matched. Orchestrator-owned helpers arrive via the context object.
-    const screenerResearchResponse = await handleScreenerResearchRoutes(request, url, path, sessionId, {
-      getScreenerAgent: (userLogin?: string) => this.getScreenerAgent(userLogin),
-      getScreenerExecutionContext: () => this.getScreenerExecutionContext(),
-      getResearchAgent: (userLogin?: string) => this.getResearchAgent(userLogin),
-      runResearchAndPublish: (trigger, userLogin) => this.runResearchAndPublish(trigger, userLogin),
-      getOrm: () => this.getOrm(),
-      traceId: parseTraceparent(request.headers.get("traceparent"))?.traceId ?? null,
-      // Issue #1661: DO blob handle for full capture on the backtest leg.
-      getStorage: () => this.ctx.storage,
-      readSettingRaw: (key) => this.readSettingRaw(key),
-      writeSetting: (key, value) => this.writeSetting(key, value),
-      env: this.env,
-    });
-    if (screenerResearchResponse) return screenerResearchResponse;
-    // Issue #2280: maintenance routes run before the schedules routes.
-    const maintenanceResponse = await handleMaintenanceRoutes(request, url, path, sessionId, {
-      agentCtx: this.ctx,
-      audit: (type, agent, payload) => this.audit(type, agent, payload),
-    });
-    if (maintenanceResponse) return maintenanceResponse;
-    // Issue #2331 slice 1: service-user provisioning routes run after
-    // maintenance, before schedules; the route logic itself lives in
-    // routes/serviceUser.ts, the class gains no logic.
-    const serviceUserResponse = await handleServiceUserRoutes(request, url, path, sessionId, {
-      env: this.env,
-      audit: (type, agent, payload) => this.audit(type, agent, payload),
-    });
-    if (serviceUserResponse) return serviceUserResponse;
-
-    // Issue #3153: delegation management routes run after
-    // service-user, before admin tenant queues; the route logic
-    // itself lives in routes/delegations.ts, the class gains no
-    // logic.
-    const delegationResponse = await handleDelegationRoutes(request, url, path, sessionId, {
-      env: this.env,
-      audit: (type, agent, payload) => this.audit(type, agent, payload),
-    });
-    if (delegationResponse) return delegationResponse;
-
-    // Issue #2457: cross-tenant queue routes run after service-user,
-    // before schedules; the route logic itself lives in
-    // routes/adminTenantQueues.ts, the class gains no logic.
-    const adminTenantQueueResponse = await handleAdminTenantQueueRoutes(request, url, path, sessionId, {
-      env: this.env,
-      audit: (type, agent, payload) => this.audit(type, agent, payload),
-    });
-    if (adminTenantQueueResponse) return adminTenantQueueResponse;
-
-    // Issue #2489: KV wipe routes run after admin tenant queues,
-    // before schedules; the route logic itself lives in
-    // routes/kvWipe.ts, the class gains no logic.
-    const kvWipeResponse = await handleKvWipeRoutes(request, url, path, sessionId, {
-      env: this.env,
-      audit: (type, agent, payload) => this.audit(type, agent, payload),
-    });
-    if (kvWipeResponse) return kvWipeResponse;
-
-    // Issue #2681: orchestrator-migration routes run after kvWipe,
-    // before schedules; the route logic itself lives in
-    // routes/orchestratorMigration.ts, the class gains no logic.
-    const migrationResponse = await handleOrchestratorMigrationRoutes(request, url, path, sessionId, {
-      env: this.env,
-      audit: (type, agent, payload) => this.audit(type, agent, payload),
-      storage: this.ctx.storage as never,
-      listSchedules: () => this.listSchedules() as unknown as Promise<import("./routes/orchestratorMigration").MigrationSchedule[]>,
-      schedule: (when, callback, payload, options) => this.schedule(when, callback as keyof this, payload, options),
-      scheduleEvery: (intervalSeconds, callback, payload) => this.scheduleEvery(intervalSeconds, callback as keyof this, payload),
-    });
-    if (migrationResponse) return migrationResponse;
-
-    // Issue #359-16: schedules task-scheduling routes (list/create/cancel/
-    // trigger-*) are handled by src/agents/routes/schedules.ts
-    // (handleSchedulesRoutes). Invoked at this exact position in the
-    // sequential path.endsWith matching sequence (after the screener +
-    // research delegation, before the Not-found fallthrough); a non-null
-    // return matched. Orchestrator-owned helpers (the SDK scheduling
-    // port, audit, getOrm, autonomousMarketScreen/autoRenewETradeTokens,
-    // getScreenerExecutionContext, the #111 callback allow-list constants)
-    // arrive via the context object.
-    const schedulesResponse = await handleSchedulesRoutes(request, url, path, sessionId, {
-      env: this.env,
-      agentCtx: this.ctx,
-      audit: (type, agent, payload) => this.audit(type, agent, payload),
-      listSchedules: (criteria) => this.listSchedules(criteria),
-      cancelSchedule: (id) => this.cancelSchedule(id),
-      getScheduleById: (id) => this.getScheduleById(id),
-      schedule: (when, callback, payload, options) => this.schedule(when, callback as keyof this, payload, options),
-      scheduleEvery: (intervalSeconds, callback, payload) => this.scheduleEvery(intervalSeconds, callback as keyof this, payload),
-      getScreenerExecutionContext: () => this.getScreenerExecutionContext(),
-      getOrm: () => this.getOrm(),
-      scheduleScreenerFollowups: (outcome: ScreenerRunOutcome, userLogin: string, chainReport?: boolean) =>
-        scheduleScreenerFollowups(this.asyncJobsContext(), outcome, userLogin, chainReport),
-      submitShardJob: (spec) => (this as any).submitAsyncJob(spec),
-      submitAsyncJob: (spec) => (this as any).submitAsyncJob(spec),
-      autonomousMarketScreen: (payload) => this.autonomousMarketScreen(payload),
-      autoRenewETradeTokens: (payload) => this.autoRenewETradeTokens(payload),
-      creatableScheduleCallbacks: CREATABLE_SCHEDULE_CALLBACKS,
-      accountScopedScheduleCallbacks: ACCOUNT_SCOPED_SCHEDULE_CALLBACKS,
-      runScheduleCallback: makeRunScheduleCallback(this),
-    });
-    if (schedulesResponse) return schedulesResponse;
-
-    return new Response("Not found", { status: 404 });
+  private routeRequest(request: Request): Promise<Response> {
+    return routeRequest(this as unknown as RouteRequestDeps, request);
   }
 }

@@ -220,11 +220,12 @@ describe("seed transactions removed (#175)", () => {
   });
 
   it("the seed ids survive in src/ only as the purge targets in orchestrator.ts", () => {
-    const orchestrator = readFileSync("src/agents/orchestrator.ts", "utf8");
+    // #2942: the purge moved with ensureTables into orchestrator/tableSchema.ts.
+    const orchestrator = readFileSync("src/agents/orchestrator/tableSchema.ts", "utf8");
     expect(orchestrator).not.toContain("Seed default transactions");
     for (const id of [SEED_ID_STRIPE, SEED_ID_PAYPAL]) {
       const occurrences = orchestrator.split(id).length - 1;
-      expect(occurrences, `${id} should appear exactly once (its DELETE) in orchestrator.ts`).toBe(1);
+      expect(occurrences, `${id} should appear exactly once (its DELETE) in orchestrator/tableSchema.ts`).toBe(1);
       // #2359 (#1976 step 4d) pin update: the purge serves
       // through step 3a's transactions port now — the seed id
       // survives as the port delete's argument instead of a

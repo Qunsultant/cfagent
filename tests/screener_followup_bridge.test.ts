@@ -213,7 +213,8 @@ describe("recordScreenerRunMainJob (the bridge)", () => {
 
 describe("route bridge wiring pins", () => {
   it("orchestrator wires the bridge into both screener route contexts", () => {
-    const src = readFileSync("src/agents/orchestrator.ts", "utf8");
+    // #2942: both screener route contexts are built in orchestrator/routeRequest.ts.
+    const src = readFileSync("src/agents/orchestrator/routeRequest.ts", "utf8");
     const occurrences = src.split("scheduleScreenerFollowups:").length - 1;
     expect(occurrences).toBeGreaterThanOrEqual(2);
   });

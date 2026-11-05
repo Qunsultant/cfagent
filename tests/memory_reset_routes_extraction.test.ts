@@ -74,7 +74,8 @@ describe("memory/reset route inventory (extraction #369)", () => {
 
   it("the original inline blocks are gone from orchestrator.ts; one delegation stands at the original position", () => {
     const orchSrc = src("agents/orchestrator.ts");
-    expect(orchSrc).toContain("handleMemoryResetRoutes(request, url, path, sessionId,");
+    const dispatchSrc = src("agents/orchestrator/routeRequest.ts");
+    expect(dispatchSrc).toContain("handleMemoryResetRoutes(request, url, path, sessionId,");
     // Distinctive comments that headed the inline blocks before extraction.
     expect(orchSrc).not.toContain("// Persistent Memory facts endpoint");
     expect(orchSrc).not.toContain("// Clear active conversation transcript and reset session state");
@@ -90,15 +91,16 @@ describe("memory/reset route inventory (extraction #369)", () => {
     expect(moduleSrc).toContain("// Persistent Memory facts endpoint");
     expect(moduleSrc).toContain("// Clear active conversation transcript and reset session state");
     // Single call site.
-    const calls = [...orchSrc.matchAll(/handleMemoryResetRoutes\(request, url, path, sessionId,/g)];
+    const calls = [...dispatchSrc.matchAll(/handleMemoryResetRoutes\(request, url, path, sessionId,/g)];
     expect(calls).toHaveLength(1);
   });
 
   it("the delegation sits between the autopilot and referrals+ads handlers (delegation-call landmarks, #405)", () => {
     const orchSrc = src("agents/orchestrator.ts");
-    const myIdx = orchSrc.indexOf("handleMemoryResetRoutes(request, url, path, sessionId,");
-    const autopilotIdx = orchSrc.indexOf("handleAutopilotRoutes(request, url, path, sessionId,");
-    const referralsIdx = orchSrc.indexOf("handleReferralsAdsRoutes(request, url, path, sessionId,");
+    const dispatchSrc = src("agents/orchestrator/routeRequest.ts");
+    const myIdx = dispatchSrc.indexOf("handleMemoryResetRoutes(request, url, path, sessionId,");
+    const autopilotIdx = dispatchSrc.indexOf("handleAutopilotRoutes(request, url, path, sessionId,");
+    const referralsIdx = dispatchSrc.indexOf("handleReferralsAdsRoutes(request, url, path, sessionId,");
     expect(autopilotIdx).toBeGreaterThan(-1);
     expect(referralsIdx).toBeGreaterThan(-1);
     expect(myIdx, "memory/reset delegation must follow the autopilot handler").toBeGreaterThan(autopilotIdx);

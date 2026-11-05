@@ -208,9 +208,10 @@ describe("market-data research route inventory (extraction #377)", () => {
 
   it("both delegations stand at the exact original positions around the alpaca-market-data delegation", () => {
     const orchSrc = src("agents/orchestrator.ts");
-    const quoteIdx = orchSrc.indexOf("handleMarketDataQuoteResearchRoutes(request, url, path, sessionId,");
-    const alpacaIdx = orchSrc.indexOf("handleAlpacaMarketDataRoutes(request, url, path, sessionId,");
-    const screenIdx = orchSrc.indexOf("handleMarketDataCompareScreenRoutes(request, url, path, sessionId,");
+    const dispatchSrc = src("agents/orchestrator/routeRequest.ts");
+    const quoteIdx = dispatchSrc.indexOf("handleMarketDataQuoteResearchRoutes(request, url, path, sessionId,");
+    const alpacaIdx = dispatchSrc.indexOf("handleAlpacaMarketDataRoutes(request, url, path, sessionId,");
+    const screenIdx = dispatchSrc.indexOf("handleMarketDataCompareScreenRoutes(request, url, path, sessionId,");
     expect(quoteIdx, "quote-research delegation missing").toBeGreaterThan(-1);
     expect(alpacaIdx, "slice-13 alpaca-market-data delegation missing").toBeGreaterThan(-1);
     expect(screenIdx, "market-data-screening delegation missing").toBeGreaterThan(-1);

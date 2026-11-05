@@ -88,7 +88,8 @@ describe("autopilot route inventory (extraction #368)", () => {
 
   it("the original inline blocks are gone from orchestrator.ts; the delegation stands in their place", () => {
     const orchSrc = src("agents/orchestrator.ts");
-    expect(orchSrc).toContain("handleAutopilotRoutes(request, url, path, sessionId,");
+    const dispatchSrc = src("agents/orchestrator/routeRequest.ts");
+    expect(dispatchSrc).toContain("handleAutopilotRoutes(request, url, path, sessionId,");
     // The extracted module is the sole owner of these blocks now.
     expect(orchSrc).not.toContain('if (path.endsWith("/autopilot") && request.method === "GET") {');
     expect(orchSrc).not.toContain('if (path.endsWith("/autopilot/evaluate") && request.method === "POST") {');
@@ -98,7 +99,8 @@ describe("autopilot route inventory (extraction #368)", () => {
 
   it("the autopilot blocks remain a single contiguous handler (no second position this slice)", () => {
     const orchSrc = src("agents/orchestrator.ts");
-    const calls = [...orchSrc.matchAll(/handleAutopilotRoutes\(request, url, path, sessionId,/g)];
+    const dispatchSrc = src("agents/orchestrator/routeRequest.ts");
+    const calls = [...dispatchSrc.matchAll(/handleAutopilotRoutes\(request, url, path, sessionId,/g)];
     expect(calls).toHaveLength(1);
   });
 });

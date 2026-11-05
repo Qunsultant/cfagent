@@ -271,8 +271,11 @@ describe("bridge with chainReport off (scheduled options)", () => {
 
 describe("scheduled wiring pins", () => {
   it("orchestrator wires the bridge into the scheduled callbacks + schedules contexts", () => {
-    const src = readFileSync("src/agents/orchestrator.ts", "utf8");
-    const occurrences = src.split("scheduleScreenerFollowups:").length - 1;
+    // #2942: the wiring split across the class (1) and the moved dispatcher (3);
+    // the total is unchanged at 4.
+    const occurrences =
+      readFileSync("src/agents/orchestrator.ts", "utf8").split("scheduleScreenerFollowups:").length - 1 +
+      readFileSync("src/agents/orchestrator/routeRequest.ts", "utf8").split("scheduleScreenerFollowups:").length - 1;
     expect(occurrences).toBeGreaterThanOrEqual(4);
   });
   it("scheduled callbacks and schedule routes pass a follow-up scheduler to the service", () => {

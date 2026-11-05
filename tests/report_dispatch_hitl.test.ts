@@ -292,16 +292,16 @@ describe("Issue #277 — source pins (no fabricated surfaces)", () => {
     const routesSrc = () => src("agents/routes/reports.ts");
     expect(routesSrc()).toContain("/trading/settings/report-dispatch-hitl");
     expect(routesSrc()).toContain("/trading/reports/confirm");
-    expect(agentSrc()).toContain("handleReportsRoutes(request, url, path, sessionId");
+    expect(src("agents/orchestrator/routeRequest.ts")).toContain("handleReportsRoutes(request, url, path, sessionId");
     // #2359 (#1976 step 4d) pin update: the confirmations DDL
     // moved behind the orchestrator-table ports — the class
     // now wires the table through the composition root
     // (ensureSchema) instead of naming the CREATE TABLE. The
     // pin's intent (the class owns the confirmations table's
     // wiring alongside mas_settings) is unchanged.
-    expect(agentSrc()).toContain("createOrchestratorTablePorts(");
-    expect(agentSrc()).toContain(".confirmations.ensureSchema()");
-    expect(agentSrc()).toContain("mas_settings");
+    expect(src("agents/orchestrator/tableSchema.ts")).toContain("createOrchestratorTablePorts(");
+    expect(src("agents/orchestrator/tableSchema.ts")).toContain(".confirmations.ensureSchema()");
+    expect(src("agents/orchestrator/tableSchema.ts")).toContain("mas_settings");
   });
 
   it("the Settings menu toggle writes through the real settings API", () => {

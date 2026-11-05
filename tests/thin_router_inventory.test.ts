@@ -2,6 +2,11 @@
  * Issue #359-17 (FINAL slice of the #359 orchestrator breakup): the
  * thin-router inventory.
  *
+ * Issue #2942 moved the dispatcher itself out of OrchestratorAgent into
+ * src/agents/orchestrator/routeRequest.ts (thin wrapper left on the class);
+ * the pinned delegation order, guards, prelude, terminus and full route
+ * inventory below are unchanged - only the file the scan reads moved.
+ *
  * After slices #359-01..16 extracted every domain block and this slice
  * extracted the last two inline blocks (schema introspection into
  * routes/schema.ts, Cloudflare Agentic Payments into
@@ -791,7 +796,7 @@ const EXPECTED_INVENTORY = [
 ];
 
 function routeRequestBody(orchSrc: string): string {
-  const start = orchSrc.indexOf("private async routeRequest");
+  const start = orchSrc.indexOf("export async function routeRequest(");
   expect(start, "routeRequest must exist").toBeGreaterThan(-1);
   return orchSrc.slice(start);
 }
@@ -819,7 +824,7 @@ function handlerConditions(handler: string): string[] {
 
 describe("thin router inventory (#359-17)", () => {
   it("routeRequest delegates to the route modules in the pinned order, each one guarded", () => {
-    const body = routeRequestBody(src("agents/orchestrator.ts"));
+    const body = routeRequestBody(src("agents/orchestrator/routeRequest.ts"));
     const delegations = [...body.matchAll(/const (\w+) = await (handle\w+Routes)\(request, url, path, sessionId,/g)];
     expect(delegations.map((m) => m[2])).toEqual(EXPECTED_DELEGATIONS);
     // Every delegation is guarded by `if (<var>) return <var>;` in the
@@ -830,7 +835,7 @@ describe("thin router inventory (#359-17)", () => {
   });
 
   it("routeRequest contains NO inline path-matching conditions", () => {
-    const body = routeRequestBody(src("agents/orchestrator.ts"));
+    const body = routeRequestBody(src("agents/orchestrator/routeRequest.ts"));
     const inline = [...body.matchAll(/path\.(endsWith|includes|startsWith)\("/g)];
     expect(inline, "no path.endsWith/includes/startsWith conditions may remain inline").toHaveLength(0);
     const inlineEq = [...body.matchAll(/path === "/g)];
@@ -838,12 +843,12 @@ describe("thin router inventory (#359-17)", () => {
   });
 
   it("the only logic left inline is the dispatcher prelude and the 404 terminus", () => {
-    const body = routeRequestBody(src("agents/orchestrator.ts"));
+    const body = routeRequestBody(src("agents/orchestrator/routeRequest.ts"));
     // Prelude: request-scoped bindings the delegations consume.
     expect(body).toContain("const url = new URL(request.url);");
     expect(body).toContain("const path = url.pathname;");
-    expect(body).toContain("const sql = this.ensureTables();");
-    expect(body).toContain("const sessionId = this.sessionKey();");
+    expect(body).toContain("const sql = deps.ensureTables();");
+    expect(body).toContain("const sessionId = deps.sessionKey();");
     // requestedEnv is computed once in the dispatcher and passed through
     // the context to the E*TRADE options and watchlists delegations.
     expect(body).toContain('const requestedEnv: "TEST" | "PROD" | undefined');
@@ -856,7 +861,7 @@ describe("thin router inventory (#359-17)", () => {
   });
 
   it("the full ordered route inventory across all modules matches the pinned pre-breakup sequence", () => {
-    const body = routeRequestBody(src("agents/orchestrator.ts"));
+    const body = routeRequestBody(src("agents/orchestrator/routeRequest.ts"));
     const inventory: string[] = [];
     const tokenRe =
       /handle\w+Routes\(request, url, path, sessionId,|path\.(endsWith|includes|startsWith)\("([^"]+)"\)|path === "([^"]+)"/g;
