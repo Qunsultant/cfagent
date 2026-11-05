@@ -10,16 +10,16 @@ import { brokerSupports, isBrokerId } from "../trading/brokerCatalog";
 import { readTenantProvidersState } from "./tenantProviders";
 
 /**
- * Issue #3292: IV history is collected from E*TRADE option-chain snapshots.
- * Alpaca exposes no such endpoint and a one-snapshot series would be
- * manufactured, so another broker is refused by name instead of being
- * answered with E*TRADE data.
+ * Issue #3326: IV history is collected per broker — each observation records
+ * which broker's chain produced it — so the panel shows the selected broker's
+ * own series. A broker that cannot collect is refused by name, and a broker
+ * with no observations yet says so instead of showing another broker's rows.
  */
 function ivHistoryRefusal(): string | null {
   const broker = readTenantProvidersState().brokerId;
   if (!isBrokerId(broker)) return `IV history is not available for the selected broker (${broker}).`;
   if (brokerSupports(broker, "ivHistory")) return null;
-  return `IV history is collected from E*TRADE option-chain snapshots and is not available for ${broker}; no series is synthesised in its place.`;
+  return `IV history is not available for ${broker}; no other broker's series is shown in its place.`;
 }
 
 interface IvEntry {
@@ -68,6 +68,7 @@ function IvSparkline({ series }: { series: IvSeriesPoint[] }) {
 
 export function IvHistoryPanel() {
   const [names, setNames] = useState<IvEntry[]>([]);
+  const [seriesBroker, setSeriesBroker] = useState<string>("");
   const [symbol, setSymbol] = useState("");
   const [detail, setDetail] = useState<(IvEntry & { series?: IvSeriesPoint[] }) | null>(null);
   const [loading, setLoading] = useState(false);
@@ -85,8 +86,9 @@ export function IvHistoryPanel() {
       }
       const res = await fetch("/api/etrade/options/iv-history");
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = (await res.json()) as { names?: IvEntry[] };
+      const data = (await res.json()) as { names?: IvEntry[]; broker?: string };
       setNames(data.names ?? []);
+      setSeriesBroker(data.broker ?? "");
       if (data.names?.length && !symbol) setSymbol(data.names[0].symbol);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load IV history");
@@ -123,11 +125,17 @@ export function IvHistoryPanel() {
     <div>
       <h2 style={{ fontSize: "var(--font-size-title-sm)", marginBottom: "0.25rem" }}>📈 IV History</h2>
       <div style={{ fontSize: "var(--font-size-body)", color: "var(--color-text-muted)", marginBottom: "1rem" }}>
-        Daily E*TRADE option-chain snapshots · {names.length} symbols · {totalObs} observations ·{" "}
+        Daily {seriesBroker ? `${seriesBroker} ` : ""}option-chain snapshots · {names.length} symbols · {totalObs} observations ·{" "}
         <Button onClick={loadCoverage} style={{ fontSize: "var(--font-size-body-sm)" }}>↻ Refresh</Button>
       </div>
       {error && <div style={{ color: "var(--color-danger)" }}>{error}</div>}
       {loading && !names.length && <div>Loading…</div>}
+      {!loading && !error && names.length > 0 && totalObs === 0 && (
+        <div data-iv-series-empty={seriesBroker} style={{ color: "var(--color-text-muted)", marginBottom: "0.5rem" }}>
+          No observations recorded for {seriesBroker || "this broker"} yet — the series starts with the first
+          collection run on this broker. Nothing is backfilled or relabelled.
+        </div>
+      )}
 
       {names.length > 0 && (
         <div style={{ display: "flex", gap: "var(--space-6)", flexWrap: "wrap" }}>

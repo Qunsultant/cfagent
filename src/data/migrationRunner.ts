@@ -1658,6 +1658,22 @@ export const MIGRATION_0044_FREE_RUN_ALLOWANCE_SEED: DataMigration = {
   ('strategy', 10, 0);`,
 };
 
+/**
+ * Migration 0045 — IV-history provenance (#3326, programme #3292).
+ *
+ * `agent_iv_history` was keyed (symbol, date) with no record of which broker's
+ * chain produced the observation, so serving an "Alpaca" series would have
+ * meant relabelling E*TRADE rows. This adds the provenance column; every
+ * pre-existing row defaults to `etrade`, which is what actually produced it.
+ * One observation per (symbol, date) is unchanged: the day has one value, and
+ * the column says who measured it.
+ */
+export const MIGRATION_0045_IV_HISTORY_BROKER: DataMigration = {
+  version: 45,
+  name: "0045_iv_history_broker",
+  sql: `ALTER TABLE agent_iv_history ADD COLUMN broker TEXT NOT NULL DEFAULT 'etrade'`,
+};
+
 export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANCE,
   MIGRATION_0002_AGENT_CHAINS_SCHEDULES,
   MIGRATION_0003_AGENT_SHARD_JOBS,
@@ -1702,6 +1718,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0042_ONBOARDING_STATE,
   MIGRATION_0043_FREE_RUN_COUNTER,
   MIGRATION_0044_FREE_RUN_ALLOWANCE_SEED,
+  MIGRATION_0045_IV_HISTORY_BROKER,
 ];
 
 function splitStatements(sqlText: string): string[] {
