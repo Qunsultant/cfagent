@@ -4,10 +4,14 @@
  *
  * The decided Free allowance (10 runs per product per UTC
  * calendar month, operator-managed, changeable) as durable
- * D1 state: migration 0043, the port contract (month key,
- * allowance seed/change, consume increments, cap, monthly
- * reset), and the D1 adapter round-trip. The gate's use of the
- * counter lives in tests/native_monetization_gate.test.ts.
+ * D1 state: migrations 0043 (tables) + 0044 (seed rows), the
+ * port contract (month key, allowance read/change, consume
+ * increments, cap, monthly reset), and the D1 adapter
+ * round-trip. The gate's use of the counter lives in
+ * tests/native_monetization_gate.test.ts. The seed value lives
+ * only as migration 0044's rows — no code constant holds it
+ * (#3315); the in-memory fixture below passes its allowances
+ * explicitly for exactly that reason.
  */
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
@@ -15,6 +19,7 @@ import { getTableColumns } from "drizzle-orm";
 import {
   ALL_MIGRATIONS,
   MIGRATION_0043_FREE_RUN_COUNTER,
+  MIGRATION_0044_FREE_RUN_ALLOWANCE_SEED,
   applyMigrations,
   type MigrationDb,
 } from "../src/data/migrationRunner";
@@ -23,7 +28,6 @@ import {
   agentFreeRunCounts,
 } from "../src/data/drizzleSchema";
 import {
-  DEFAULT_FREE_RUN_ALLOWANCE,
   freeRunMonthKey,
   type FreeRunCounter,
 } from "../src/data/freeRunCounterPorts";
@@ -81,6 +85,22 @@ describe("free-run counter: month key (#3305)", () => {
   });
 });
 
+describe("free-run counter: migration 0044 seed rows (#3315)", () => {
+  it("is registered (position-independent containment)", () => {
+    expect(ALL_MIGRATIONS).toContain(MIGRATION_0044_FREE_RUN_ALLOWANCE_SEED);
+    expect(MIGRATION_0044_FREE_RUN_ALLOWANCE_SEED.version).toBe(44);
+    expect(MIGRATION_0044_FREE_RUN_ALLOWANCE_SEED.name).toBe("0044_free_run_allowance_seed");
+  });
+
+  it("seeds every family with INSERT OR IGNORE (operator edits survive)", () => {
+    const sql = MIGRATION_0044_FREE_RUN_ALLOWANCE_SEED.sql;
+    expect(sql).toContain("INSERT OR IGNORE INTO agent_free_run_allowances");
+    for (const family of ["stock", "goal", "options", "strategy"]) {
+      expect(sql).toContain(`('${family}', 10, 0)`);
+    }
+  });
+});
+
 describe("free-run counter: migration 0043 registration", () => {
   it("is registered (position-independent containment)", () => {
     expect(ALL_MIGRATIONS).toContain(MIGRATION_0043_FREE_RUN_COUNTER);
@@ -116,7 +136,10 @@ interface CounterFixture {
 }
 
 describe.each([
-  ["in-memory", (): CounterFixture => ({ counter: new InMemoryFreeRunCounterAdapter() })],
+  // The in-memory adapter starts empty (#3315: no hardcoded
+  // defaults), so the fixture passes the decided allowances
+  // explicitly; the D1 fixture seeds them via migration 0044.
+  ["in-memory", (): CounterFixture => ({ counter: new InMemoryFreeRunCounterAdapter({ stock: 10, goal: 10, options: 10, strategy: 10 }) })],
   [
     "D1",
     (): CounterFixture => {
@@ -129,7 +152,7 @@ describe.each([
   it("seeds the allowance at 10 per family and reads 0 used for a fresh account", async () => {
     const { counter, setup } = make();
     if (setup) await setup();
-    expect(await counter.getAllowance("goal")).toBe(DEFAULT_FREE_RUN_ALLOWANCE);
+    expect(await counter.getAllowance("goal")).toBe(10);
     expect(await counter.getAllowance("stock")).toBe(10);
     expect(await counter.getUsed({ login: "u1", family: "goal", month: "2026-11" })).toBe(0);
   });
@@ -208,7 +231,10 @@ describe("free-run counter: D1 ensure", () => {
     await counter.setAllowance({ family: "goal", runs: 25 });
     await ensureFreeRunCounterSchema(db);
     expect(await counter.getAllowance("goal")).toBe(25);
-    // The ensure applies migration 0043 through the shared runner.
-    await applyMigrations(db as unknown as MigrationDb, [MIGRATION_0043_FREE_RUN_COUNTER]);
+    // The ensure applies migrations 0043+0044 through the shared runner.
+    await applyMigrations(db as unknown as MigrationDb, [
+      MIGRATION_0043_FREE_RUN_COUNTER,
+      MIGRATION_0044_FREE_RUN_ALLOWANCE_SEED,
+    ]);
   });
 });

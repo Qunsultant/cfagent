@@ -28,12 +28,11 @@ import { agentFreeRunAllowances, agentFreeRunCounts } from "./drizzleSchema";
 import {
   applyMigrations,
   MIGRATION_0043_FREE_RUN_COUNTER,
+  MIGRATION_0044_FREE_RUN_ALLOWANCE_SEED,
   type MigrationDb,
 } from "./migrationRunner";
 import {
   assertFreeRunAllowance,
-  DEFAULT_FREE_RUN_ALLOWANCE,
-  FREE_RUN_FAMILIES,
   type FreeRunConsumption,
   type FreeRunCounter,
   type FreeRunUsageInput,
@@ -57,23 +56,17 @@ export function createD1FreeRunCounterDb(d1: D1Database): FreeRunCounterDb {
 }
 
 /**
- * Idempotent schema-ensure: applies migration 0043 if unapplied,
- * then seeds the allowance (INSERT OR IGNORE — re-seeding is a
- * no-op, so an operator-edited allowance is never overwritten
- * by a later ensure). The seed is the decided default (10 runs
- * per product per month), not an activation: it only exists so a
- * fresh store has allowances to read.
+ * Idempotent schema-ensure: applies migrations 0043 (tables)
+ * and 0044 (allowance seed rows, INSERT OR IGNORE — re-ensure
+ * is a no-op, so an operator-edited allowance is never
+ * overwritten by a later ensure). The seed value lives only
+ * in migration 0044's rows, never in code.
  */
 export async function ensureFreeRunCounterSchema(db: FreeRunCounterDb): Promise<number[]> {
-  const applied = await applyMigrations(db as unknown as MigrationDb, [MIGRATION_0043_FREE_RUN_COUNTER]);
-  const now = Date.now();
-  for (const family of FREE_RUN_FAMILIES) {
-    await db
-      .insert(agentFreeRunAllowances)
-      .values({ family, runs: DEFAULT_FREE_RUN_ALLOWANCE, updatedAtMs: now })
-      .onConflictDoNothing();
-  }
-  return applied;
+  return applyMigrations(db as unknown as MigrationDb, [
+    MIGRATION_0043_FREE_RUN_COUNTER,
+    MIGRATION_0044_FREE_RUN_ALLOWANCE_SEED,
+  ]);
 }
 
 export class D1FreeRunCounterAdapter implements FreeRunCounter {

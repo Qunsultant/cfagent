@@ -1613,8 +1613,8 @@ export const MIGRATION_0042_ONBOARDING_STATE: DataMigration = {
  * family, UTC calendar month) with the runs consumed in that
  * month (a missing row reads as 0), and
  * agent_free_run_allowances holds one row per family with the
- * current allowance (seeded at 10 by the adapter ensure, INSERT
- * OR IGNORE, so an operator edit survives re-ensure). Additive
+ * current allowance (seeded by migration 0044, INSERT OR
+ * IGNORE, so an operator edit survives re-ensure). Additive
  * only (new tables, no backfill): accounts with no rows have
  * consumed nothing.
  */
@@ -1634,6 +1634,28 @@ CREATE TABLE IF NOT EXISTS agent_free_run_counts (
   updated_at_ms INTEGER NOT NULL,
   PRIMARY KEY (user_login, family, month)
 );`,
+};
+
+/**
+ * Migration 0044 — free-run allowance seed rows (#3315,
+ * sub-issue of #3241). The seed value is operator-managed
+ * seeded DATA, never a code constant: these INSERT OR IGNORE
+ * rows are the only place the decided allowance (10 runs per
+ * product per month, entitlements-01.md §4.1) is written for a
+ * fresh store. An operator edit survives (INSERT OR IGNORE
+ * never overwrites), and a family with no row stays
+ * fail-closed — the gate reads the store only and treats a
+ * missing row as "no free runs for that family". updated_at_ms
+ * 0 marks a seed row no operator has touched yet.
+ */
+export const MIGRATION_0044_FREE_RUN_ALLOWANCE_SEED: DataMigration = {
+  version: 44,
+  name: "0044_free_run_allowance_seed",
+  sql: `INSERT OR IGNORE INTO agent_free_run_allowances (family, runs, updated_at_ms) VALUES
+  ('stock', 10, 0),
+  ('goal', 10, 0),
+  ('options', 10, 0),
+  ('strategy', 10, 0);`,
 };
 
 export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANCE,
@@ -1679,6 +1701,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0041_PLAN_TRIAL_DAYS,
   MIGRATION_0042_ONBOARDING_STATE,
   MIGRATION_0043_FREE_RUN_COUNTER,
+  MIGRATION_0044_FREE_RUN_ALLOWANCE_SEED,
 ];
 
 function splitStatements(sqlText: string): string[] {

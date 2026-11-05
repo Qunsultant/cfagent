@@ -14,6 +14,7 @@ import { NavIcons } from "./components/NavigationMenu";
  *  - tenants: Tenant create, list, settings, and read-only membership view (#2221)
  *  - data-providers: Market-data provider provisioning lifecycle
  *  - accounts: Account administration — self-service setup, tier, credits, subscriptions & catalogue
+ *  - free-runs: Free-run allowance per product, per month (#3315)
  *  - iaaa-admin: Read-only memberships, genesis, and audit
  *  - users: User profiles, tenant memberships & account linkage
  *  - data-lifecycle: Clean state, platform bootstrap, and tenant bootstrap (#3250)
@@ -50,6 +51,7 @@ import { TenantAdminPanel } from "./TenantAdminPanel";
 import { DataLifecyclePanel } from "./DataLifecyclePanel";
 import { ChannelsAdminPanel } from "./ChannelsAdminPanel";
 import { AccountAdminPanel } from "./AccountAdminPanel";
+import { FreeRunAllowanceSection } from "./FreeRunAllowanceSection";
 import { IaaaAdminPanel } from "./IaaaAdminPanel";
 import { UserAdminPanel } from "./UserAdminPanel";
 import {
@@ -87,6 +89,7 @@ export const PLATFORM_ADMIN_TABS: TabOption<PlatformAdminSectionId>[] = [
   { id: "channels", label: "Channels", icon: <NavIcons.Omnichannel /> },
   { id: "data-providers", label: "Data Providers", icon: <NavIcons.DataProviders /> },
   { id: "accounts", label: "Accounts", icon: <NavIcons.Contracts /> },
+  { id: "free-runs", label: "Free Runs", icon: <NavIcons.Runs /> },
   { id: "iaaa-admin", label: "IAAA Admin", icon: <NavIcons.IaaaAdmin /> },
   { id: "users", label: "Users", icon: <NavIcons.Agents /> },
   { id: "data-lifecycle", label: "Data Lifecycle", icon: <NavIcons.Database /> },
@@ -296,6 +299,16 @@ export function PlatformAdminPage({
             <small>Self-service account setup, tier, credits, subscriptions &amp; catalogue</small>
           </div>
           <AccountAdminPanel />
+        </Card>
+      </TabPanel>
+
+      <TabPanel idBase="platform-admin" tabId="free-runs" active={active === "free-runs"}>
+        <Card padding="md">
+          <div className="section-label-row">
+            <span>Free Runs</span>
+            <small>Free-run allowance per product, per month</small>
+          </div>
+          <FreeRunAllowanceSection />
         </Card>
       </TabPanel>
 

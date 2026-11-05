@@ -120,6 +120,11 @@ import {
   ensureStoreOperatorsSchema,
 } from "../../data/createStoreOperatorsPorts";
 import {
+  createFreeRunCounterAdapter,
+  ensureFreeRunCounterSchema,
+} from "../../data/createFreeRunCounterPorts";
+import { FREE_RUN_FAMILIES } from "../../data/freeRunCounterPorts";
+import {
   assertOperatorLogin,
   type EffectiveOperatorEntry,
 } from "../../data/storeOperatorsPorts";
@@ -1103,6 +1108,74 @@ export async function handleAgenticPaymentsRoutes(
     } catch (err: any) {
       const message = err.message || "Failed to adjust credits";
       return Response.json({ error: message }, { status: /No commercial account|below zero/.test(message) ? 400 : 500 });
+    }
+  }
+
+  // Issue #3315 (sub-issue of #3241) — free-run allowance
+  // routes (operator only). The allowance is platform-wide
+  // operator data, one row per family in
+  // agent_free_run_allowances (migration 0043, seeded by
+  // migration 0044): it is read and written ONLY through the
+  // free-run counter port (getAllowance / setAllowance) — no
+  // second allowance source, no code constant anywhere. A
+  // family with no stored row reads as null and the gate
+  // treats it as "no free runs for that family" (fail-closed);
+  // the GET therefore returns nulls honestly instead of
+  // inventing a value. The counter is composed straight from
+  // env.AGENT_DB (D1 is shared, no canonical-instance hop);
+  // unbound AGENT_DB fails closed with 503, like the other
+  // money paths. The ensure applies migrations 0043+0044
+  // idempotently (INSERT OR IGNORE seeding, so an operator
+  // edit survives).
+  const requireFreeRunCounter = async () => {
+    const counter = createFreeRunCounterAdapter(ctx.env as { AGENT_DB?: unknown });
+    if (!counter) {
+      return Response.json({ error: "Free-run counter unavailable: AGENT_DB is not bound." }, { status: 503 });
+    }
+    await ensureFreeRunCounterSchema(counter.db);
+    return counter;
+  };
+
+  // GET /payments/agentic/commercial/free-run-allowance (operator only)
+  if (path.endsWith("/payments/agentic/commercial/free-run-allowance") && request.method === "GET") {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!isStoreOperator(login)) {
+        return Response.json({ error: "Forbidden: only a store operator may read the free-run allowance." }, { status: 403 });
+      }
+      const counter = await requireFreeRunCounter();
+      if (counter instanceof Response) return counter;
+      const allowances = [];
+      for (const family of FREE_RUN_FAMILIES) {
+        allowances.push({ family, runs: await counter.getAllowance(family) });
+      }
+      return Response.json({ allowances });
+    } catch (err: any) {
+      return Response.json({ error: err.message || "Failed to read the free-run allowance" }, { status: 500 });
+    }
+  }
+
+  // POST /payments/agentic/commercial/free-run-allowance (operator only)
+  if (path.endsWith("/payments/agentic/commercial/free-run-allowance") && request.method === "POST") {
+    try {
+      const login = commercialLogin();
+      if (!isStoreOperator(login)) {
+        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+      }
+      const body = (await request.json().catch(() => ({}))) as { family?: unknown; runs?: unknown };
+      const counter = await requireFreeRunCounter();
+      if (counter instanceof Response) return counter;
+      // setAllowance validates: unknown family → "Invalid price
+      // family", non-integer or negative runs → "must be a
+      // non-negative integer" — both surface as 400 below.
+      const runs = await counter.setAllowance({ family: body.family, runs: body.runs });
+      const family = typeof body.family === "string" ? body.family : "";
+      ctx.audit("commercial.free_run_allowance.set", "payments", { family, runs, operator: login });
+      return Response.json({ family, runs });
+    } catch (err: any) {
+      const message = err.message || "Failed to set the free-run allowance";
+      return Response.json({ error: message }, { status: /requires|Invalid|must be/.test(message) ? 400 : 500 });
     }
   }
 

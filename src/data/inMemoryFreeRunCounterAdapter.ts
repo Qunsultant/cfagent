@@ -7,12 +7,15 @@
  * at all. No migration concept applies here (there is no SQL to
  * migrate).
  *
- * Seeding: when `allowances` is omitted, the adapter starts with
- * the decided default allowance (10 runs per product per month
- * for every family, the same values the D1 ensure writes). When
- * `allowances` is given — even empty — it is used exactly, so a
- * fail-closed test can build a counter with no allowances at
- * all (`new InMemoryFreeRunCounterAdapter({})`).
+ * Seeding: there is none. When `allowances` is omitted the
+ * adapter starts EMPTY — a family with no row reads null
+ * (fail-closed, exactly like the D1 adapter on a store with no
+ * seed rows). Callers pass explicit allowances
+ * (`new InMemoryFreeRunCounterAdapter({ goal: 10 })`); a
+ * fail-closed test builds a counter with no allowances at all
+ * (`new InMemoryFreeRunCounterAdapter({})` or no argument).
+ * No allowance value is hardcoded anywhere in this module:
+ * the decided seed lives only as migration 0044's rows.
  *
  * consumeFreeRun mirrors the D1 adapter's contract: it checks
  * the cap, increments, and reports allowed only when the
@@ -23,8 +26,6 @@
  */
 import {
   assertFreeRunAllowance,
-  DEFAULT_FREE_RUN_ALLOWANCE,
-  FREE_RUN_FAMILIES,
   type FreeRunConsumption,
   type FreeRunCounter,
   type FreeRunUsageInput,
@@ -36,9 +37,7 @@ export class InMemoryFreeRunCounterAdapter implements FreeRunCounter {
   private counts = new Map<string, number>();
 
   constructor(allowances?: Partial<Record<PriceFamily, number>>) {
-    const seed: Partial<Record<PriceFamily, number>> =
-      allowances ?? Object.fromEntries(FREE_RUN_FAMILIES.map((f) => [f, DEFAULT_FREE_RUN_ALLOWANCE]));
-    for (const [family, runs] of Object.entries(seed)) {
+    for (const [family, runs] of Object.entries(allowances ?? {})) {
       if (runs === undefined) continue;
       this.allowances.set(assertPriceFamily(family), assertFreeRunAllowance(runs));
     }
