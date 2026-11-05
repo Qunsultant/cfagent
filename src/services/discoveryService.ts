@@ -39,8 +39,7 @@ import {
 } from "../config/etapiConfig";
 import type { Env } from "../types";
 import type { DatabaseORM } from "../orm";
-import { platformChainSource } from "../trading/optionChainSource";
-import type { ITradingPlatform } from "../trading/interfaces";
+import { platformChainSource, type ITradingPlatform } from "../trading";
 import { getSymbolEventCalendar, toEventCalendarInfo, type SymbolEventCalendar } from "./eventCalendar";
 import {
   bindYahooHistoryDeps,
@@ -556,3 +555,4 @@ export function formatDiscoveryRunSummary(outcome: DiscoveryRunOutcome): string 
   }
   return lines.join("\n");
 }
+

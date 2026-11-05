@@ -171,7 +171,6 @@ const CONSTRUCTION_LEDGER: Record<string, number> = {
   "mcps/openaimp/cloudflareAgentCommands.ts": 1,
   "mcps/openaimp/etradeCommands.ts": 6,
   "mcps/openaimp/index.ts": 1,
-  "services/discoveryService.ts": 2,
   "services/scheduledTasks.ts": 2,
   "services/thinkHarness.ts": 1,
   "services/tradingWebhooks.ts": 1,
@@ -220,6 +219,7 @@ describe("trading extraction ledger (issue #291 T0)", () => {
     // (C5 precedent); the construction lives in the sibling
     // module etradeOptionsNoView.ts, not in etradeOptions.ts,
     // which keeps its count at 6 and stays under the #359 ratchet.
-    expect(total).toBe(54);
+    // 54 ? 52 in #3388: discovery composes on the platform port, so\r\n    // services/discoveryService.ts no longer constructs ETradeService.\r\n    expect(total).toBe(52);
   });
 });
+

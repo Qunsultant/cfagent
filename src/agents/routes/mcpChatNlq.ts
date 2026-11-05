@@ -39,7 +39,7 @@
 import { unauthenticatedResponse } from "./routeIdentity";
 import type { AgentName, AsyncJobRecord, AsyncJobSubmission, Env } from "../../types";
 import type { DatabaseORM } from "../../orm";
-import { TradingPlatformRegistry } from "../../trading/registry";
+import { TradingPlatformRegistry } from "../../trading";
 import { resolveTenantBroker } from "../../services/tenantProviders";
 import {
   MCP_PROMPTS,
@@ -398,3 +398,4 @@ export async function handleMcpChatNlqRoutes(
   }
   return null;
 }
+

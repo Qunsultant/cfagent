@@ -27,7 +27,7 @@
 
 import type { AgentContext } from "agents";
 import { BrowserAgent } from "../browserAgent";
-import { TradingPlatformRegistry } from "../../trading/registry";
+import { TradingPlatformRegistry } from "../../trading";
 import { resolveTenantBroker } from "../../services/tenantProviders";
 import {
   ETradeEmailTradingService,
@@ -394,3 +394,4 @@ export async function handleTradingIntegrationsRoutes(
 
   return null;
 }
+
