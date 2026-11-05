@@ -19,7 +19,8 @@
  */
 import type { Env } from "../../types";
 import type { DatabaseORM } from "../../orm";
-import { TradingPlatformRegistry, brokerSupports } from "../../trading";
+import { TradingPlatformRegistry, brokerSupports, platformChainSource, screenOptionsWithSource } from "../../trading";
+import { getScreenerConfig } from "../../config/etapiConfig";
 import { resolveTenantBroker } from "../../services/tenantProviders";
 import { resolveBrokerEnvironmentFromSettings } from "./brokerEnvironment";
 
@@ -59,8 +60,37 @@ export async function handleBrokerOptionsRoutes(
 ): Promise<Response | null> {
   const wantsChains = path.endsWith("/broker/options/chains");
   const wantsExpiries = path.endsWith("/broker/options/expire-dates");
-  if (!wantsChains && !wantsExpiries) return null;
-  if (request.method !== "GET" && request.method !== "POST") return null;
+  const wantsScreen = path.endsWith("/broker/options/screen");
+  if (!wantsChains && !wantsExpiries && !wantsScreen) return null;
+  if (wantsScreen && request.method !== "POST") return null;
+  if (!wantsScreen && request.method !== "GET" && request.method !== "POST") return null;
+
+  // Issue #3272: the screen resolves its own broker/environment and takes a
+  // filter document, so it cannot share the single-symbol path below. The
+  // screener receives an OptionChainSource, so any broker with an options
+  // data plane screens on its own chains - no broker client reaches it.
+  if (wantsScreen) {
+    const screenBody = ((await request.json().catch(() => ({}))) as any) ?? {};
+    const screenBroker = await resolveTenantBroker(ctx.env);
+    const screenSettings = (key: string) => ctx.readSettingRaw(key) ?? null;
+    const screenEnvironment = resolveBrokerEnvironmentFromSettings(screenSettings, ctx.env);
+
+    if (!brokerSupports(screenBroker, "optionChains")) {
+      return unsupportedResponse(screenBroker, "Option screening");
+    }
+    const screenPlatform = TradingPlatformRegistry.getPlatform(
+      screenBroker,
+      ctx.env,
+      ctx.getOrm(),
+      request.headers.get("x-user-login") || "",
+      screenEnvironment,
+    );
+    const source = platformChainSource(screenPlatform);
+    if (!source) return unsupportedResponse(screenBroker, "Option screening");
+
+    const result = await screenOptionsWithSource(source, screenBody.filter ?? screenBody, getScreenerConfig(ctx.env));
+    return Response.json({ broker: screenBroker, environment: screenEnvironment, result });
+  }
 
   const body = request.method === "POST" ? ((await request.json().catch(() => ({}))) as any) : {};
   const query = (key: string) => (body?.[key] !== undefined ? body[key] : url.searchParams.get(key));

@@ -47,6 +47,8 @@ const PINNED_STAR_REEXPORTS = [
   "./brokerCatalog",
   // Issue #2853: the broker panel contract joins the public trading surface.
   "./brokerPanels",
+  // Issue #3272: the option chain source port joins the public trading surface.
+  "./optionChainSource",
   "./screeningProvider",
   "./dataProviders",
   "./screener",
