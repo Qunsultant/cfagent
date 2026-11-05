@@ -125,3 +125,4 @@ describe("Chat.tsx and ETradeTradingHub.tsx source pins (#3411)", () => {
     expect(hubSrc).toMatch(/useTenantProviders\(\)/);
   });
 });
+
