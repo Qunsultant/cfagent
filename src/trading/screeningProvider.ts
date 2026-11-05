@@ -166,8 +166,8 @@ export const SCREENING_PROVIDER_DESCRIPTORS: readonly ScreeningProviderDescripto
 ];
 
 export type ScreeningRequest =
-  | { assetClass: "stocks"; filter?: StockScreenerFilter }
-  | { assetClass: "options"; filter?: OptionScreenerFilter };
+  | { assetClass: "stocks"; filter?: StockScreenerFilter; providerId?: string }
+  | { assetClass: "options"; filter?: OptionScreenerFilter; providerId?: string };
 
 export type ScreeningResult =
   | { assetClass: "stocks"; providerId: string; result: StockScreenResult }
@@ -253,7 +253,14 @@ export class ScreeningProviderRegistry {
     throw new ScreeningProviderNotFoundError(assetClass);
   }
 
+  /** Issue #3272: a run may name the engine that served it, so the result
+   *  is labelled with that provider instead of whichever registered first. */
   async screen(request: ScreeningRequest): Promise<ScreeningResult> {
+    if (request.providerId) {
+      const named = this.get(request.providerId);
+      if (!named) throw new Error(`Unknown screening provider "${request.providerId}".`);
+      return named.screen(request);
+    }
     return this.resolve(request.assetClass).screen(request);
   }
 }

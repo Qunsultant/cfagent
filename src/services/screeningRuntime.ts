@@ -117,10 +117,14 @@ export function createLiveStockScreener(
 export function createProductionScreeningRegistry(deps: {
   stockScreener?: IMarketScreener;
   optionsScreener: Pick<DynamicOptionsScreener, "screenOptions">;
+  /** Issue #3272: when the goal run is built on a broker-neutral engine, it
+   *  is registered under the neutral id instead of masquerading as E*TRADE. */
+  neutralStockScreener?: IMarketScreener;
 }): ScreeningProviderRegistry {
   return createDefaultScreeningRegistry({
     stockScreener: deps.stockScreener ?? createLiveStockScreener(),
     optionsScreener: deps.optionsScreener,
+    ...(deps.neutralStockScreener ? { neutralStockScreener: deps.neutralStockScreener } : {}),
   });
 }
 
@@ -197,6 +201,9 @@ export interface GoalScreenAgentPort {
 export async function runProductionGoalScreen(input: {
   ledger: ScreenerTaskLedger;
   stockScreener?: IMarketScreener;
+  /** Issue #3272: the broker-neutral stock engine and the id it answers to. */
+  neutralStockScreener?: IMarketScreener;
+  stockProviderId?: string;
   optionsScreener: Pick<DynamicOptionsScreener, "screenOptions">;
   scenario: ScenarioDefinition;
   trigger: "manual" | "scheduled";
@@ -211,10 +218,12 @@ export async function runProductionGoalScreen(input: {
   const registry = createProductionScreeningRegistry({
     stockScreener: input.stockScreener,
     optionsScreener: input.optionsScreener,
+    ...(input.neutralStockScreener ? { neutralStockScreener: input.neutralStockScreener } : {}),
   });
   return runGoalDrivenScreenWithLedger({
     ledger: input.ledger,
     registry,
+    ...(input.stockProviderId ? { stockProviderId: input.stockProviderId } : {}),
     scenario: input.scenario,
     trigger: input.trigger,
     idempotencyKey: input.idempotencyKey,

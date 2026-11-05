@@ -202,6 +202,8 @@ export interface GoalDrivenScreenResult {
 
 export async function runGoalDrivenScreen(input: {
   registry: ScreeningProviderRegistry;
+  /** Issue #3272: forwarded to the ledger run so the stock leg keeps its id. */
+  stockProviderId?: string;
   scenario: ScenarioDefinition;
   assetClasses?: ScreeningProviderAssetClass[];
   symbols?: string[];
@@ -233,7 +235,11 @@ export async function runGoalDrivenScreen(input: {
     try {
       const screened: ScreeningResult =
         assetClass === "stocks"
-          ? await input.registry.screen({ assetClass: "stocks", filter: plan.stockFilter })
+          ? await input.registry.screen({
+              assetClass: "stocks",
+              filter: plan.stockFilter,
+              ...(input.stockProviderId ? { providerId: input.stockProviderId } : {}),
+            })
           : await input.registry.screen({ assetClass: "options", filter: plan.optionsFilter });
       // Issue #1963: a leg is failed by its RESULT STATUS, not only
       // by throwing. The options screener returns error-status
@@ -364,6 +370,9 @@ const TERMINAL_TASK_STATUSES = new Set(["completed", "failed", "escalated", "can
 export async function runGoalDrivenScreenWithLedger(input: {
   ledger: ScreenerTaskLedger;
   registry: ScreeningProviderRegistry;
+  /** Issue #3272: the stock provider this run was built with, so the legs
+   *  (and their provenance) name the engine that actually served them. */
+  stockProviderId?: string;
   scenario: ScenarioDefinition;
   trigger: "manual" | "scheduled";
   idempotencyKey: string;
@@ -396,6 +405,7 @@ export async function runGoalDrivenScreenWithLedger(input: {
   try {
     result = await runGoalDrivenScreen({
       registry: input.registry,
+    ...(input.stockProviderId ? { stockProviderId: input.stockProviderId } : {}),
       scenario: input.scenario,
       assetClasses: input.assetClasses,
       symbols: input.symbols,
