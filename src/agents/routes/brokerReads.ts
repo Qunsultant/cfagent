@@ -8,6 +8,8 @@
  *
  *   GET /broker/accounts
  *   GET /broker/positions
+ *   GET /broker/status
+ *   GET /broker/quote?symbol=…
  *
  * Same shape as the options reads (#3233): the SELECTED broker serves the
  * call, the persisted trading environment is echoed, and a capability the
@@ -36,6 +38,8 @@ export interface BrokerReadsRouteContext {
 }
 
 const UNSUPPORTED_CODE = "provider_unsupported";
+const STATUS_FAILED_CODE = "BROKER_STATUS_FAILED";
+const QUOTE_FAILED_CODE = "BROKER_QUOTE_FAILED";
 const FEATURE_DISABLED_CODE = "FEATURE_DISABLED";
 
 function unsupportedResponse(broker: string, capability: string): Response {
@@ -71,7 +75,9 @@ export async function handleBrokerReadsRoutes(
 ): Promise<Response | null> {
   const wantsAccounts = path.endsWith("/broker/accounts");
   const wantsPositions = path.endsWith("/broker/positions");
-  if (!wantsAccounts && !wantsPositions) return null;
+  const wantsStatus = path.endsWith("/broker/status");
+  const wantsQuote = path.endsWith("/broker/quote");
+  if (!wantsAccounts && !wantsPositions && !wantsStatus && !wantsQuote) return null;
   if (request.method !== "GET") return null;
 
   // Flag first: a disabled surface must not touch the broker at all.
@@ -84,9 +90,25 @@ export async function handleBrokerReadsRoutes(
   const readSetting = (key: string) => ctx.readSettingRaw(key) ?? null;
   const environment = resolveBrokerEnvironmentFromSettings(readSetting, ctx.env);
 
-  const operation = wantsAccounts ? "accounts" : "positions";
-  if (!brokerSupports(broker, operation)) {
-    return unsupportedResponse(broker, wantsAccounts ? "Accounts" : "Positions");
+  // Status and quote do not share the accounts/positions capability gate.
+  if (wantsAccounts || wantsPositions) {
+    const operation = wantsAccounts ? "accounts" : "positions";
+    if (!brokerSupports(broker, operation)) {
+      return unsupportedResponse(broker, wantsAccounts ? "Accounts" : "Positions");
+    }
+  }
+
+  // Issue #3293: validate the quote request before constructing the broker,
+  // so a refusal never instantiates a platform it cannot use.
+  let quoteSymbol = "";
+  if (wantsQuote) {
+    quoteSymbol = String(url.searchParams.get("symbol") ?? "").trim().toUpperCase();
+    if (!quoteSymbol) {
+      return Response.json({ code: "invalid_request", message: "symbol is required." }, { status: 400 });
+    }
+    if (!brokerSupports(broker, "quote")) {
+      return unsupportedResponse(broker, "Quotes");
+    }
   }
 
   const platform = TradingPlatformRegistry.getPlatform(broker, ctx.env, ctx.getOrm(), userLogin, environment);
@@ -99,9 +121,37 @@ export async function handleBrokerReadsRoutes(
     return Response.json({ broker, environment, result });
   }
 
-  if (typeof platform.getPositions !== "function") {
-    return unsupportedResponse(broker, "Positions");
+  if (wantsPositions) {
+    if (typeof platform.getPositions !== "function") {
+      return unsupportedResponse(broker, "Positions");
+    }
+    const result = await platform.getPositions();
+    return Response.json({ broker, environment, result });
   }
-  const result = await platform.getPositions();
-  return Response.json({ broker, environment, result });
+
+  // Shared by the two reads below; placed after the position branch so the
+  // route inventory keeps its file order (accounts, positions, status, quote).
+  if (wantsStatus) {
+    try {
+      const status = await platform.getStatus();
+      return Response.json({ broker, environment, status });
+    } catch (error) {
+      const reason = (error as Error)?.message || "the status read failed";
+      return Response.json(
+        { code: STATUS_FAILED_CODE, broker, message: `The selected broker (${broker}) could not report its status: ${reason}.` },
+        { status: 502 },
+      );
+    }
+  }
+
+  try {
+    const quote = await platform.getQuote(quoteSymbol);
+    return Response.json({ broker, environment, symbol: quoteSymbol, quote });
+  } catch (error) {
+    const reason = (error as Error)?.message || "the quote read failed";
+    return Response.json(
+      { code: QUOTE_FAILED_CODE, broker, symbol: quoteSymbol, message: `The selected broker (${broker}) could not quote ${quoteSymbol}: ${reason}.` },
+      { status: 502 },
+    );
+  }
 }
