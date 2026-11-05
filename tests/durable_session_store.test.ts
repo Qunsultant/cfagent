@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { consumeStoreKey, createStoreKv, type DoNamespaceLike } from "../src/security/durableKv";
+import { consumeStoreKey, createStoreKv, type DoNamespaceLike } from "../src/data/durableKv";
 import { createResilientKv } from "../src/security/kvResilience";
 
 /**
