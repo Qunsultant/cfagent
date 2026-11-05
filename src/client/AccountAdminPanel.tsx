@@ -44,6 +44,7 @@ import {
   TextInput,
 } from "./components/ui";
 import { apiFetch } from "./apiFetch";
+import { SubscriptionGrantSection } from "./SubscriptionGrantSection";
 
 export interface AccountIdentityView {
   userLogin: string;
@@ -348,6 +349,11 @@ export function AccountAdminPanel() {
           />
         )}
       </div>
+
+      <SubscriptionGrantSection
+        targetLogin={lookup?.identity.userLogin ?? null}
+        onGranted={() => void runLookup()}
+      />
 
       <div>
         <h3>Price catalogue bindings</h3>

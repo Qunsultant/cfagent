@@ -48,7 +48,9 @@
  *   GET|POST /payments/agentic/commercial/subscription/*
  *                                                  (issues #2020/#2127:
  *                                                  subscription checkout,
- *                                                  purchase, cancel, status)
+ *                                                  purchase, cancel, status;
+ *                                                  issue #3244: operator
+ *                                                  subscription grant)
  *
  * Each route constructs the ETradeAgenticPaymentService per request,
  * exactly as the inline block did. The handler ends with an explicit
@@ -204,7 +206,7 @@ import {
   resolvePlatformIdentity,
   toPlatformIdentityView,
 } from "../../services/platformIdentity";
-import { activateSubscription } from "../../services/subscriptionActivation";
+import { activateSubscription, grantSubscription } from "../../services/subscriptionActivation";
 import {
   createLifecycleAdapter,
   ensureLifecycleSchema,
@@ -1839,6 +1841,78 @@ export async function handleAgenticPaymentsRoutes(
           : /required|must be|not active/.test(message)
             ? 400
             : 500;
+      return Response.json({ error: message }, { status });
+    }
+  }
+
+  // POST /payments/agentic/commercial/subscription/grant (issue
+  // #3244, slice 2 of #3241) — operator grants a plan to a user.
+  // No checkout is involved and no Stripe record is created: the
+  // grant is operator data, like an operator tier grant (the
+  // account upsert route above), so this route is NOT gated on
+  // the monetization flag. The grant mirrors purchase activation
+  // exactly (grantSubscription): the subscription row AND the
+  // account's included-runs bump, because the gate reads included
+  // runs from the account row only. The row's tenantId comes
+  // from the target account row resolved server-side; a
+  // client-supplied tenantId is ignored, and a target with no
+  // account row fails closed (400) — the operator creates the
+  // account first through the existing Accounts UI flow.
+  if (path.endsWith("/payments/agentic/commercial/subscription/grant") && request.method === "POST") {
+    try {
+      const login = commercialLogin();
+      if (!login || !isStoreOperator(login)) {
+        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+      }
+      const body = (await request.json().catch(() => ({}))) as { userId?: unknown; planId?: unknown; tenantId?: unknown };
+      const userId = typeof body.userId === "string" ? body.userId : "";
+      const planId = typeof body.planId === "string" ? body.planId : "";
+      if (!userId) return Response.json({ error: "userId is required." }, { status: 400 });
+      if (!planId) return Response.json({ error: "planId is required." }, { status: 400 });
+      const store = requireStore();
+      if (store instanceof Response) return store;
+      const subs = requireSubs();
+      if (subs instanceof Response) return subs;
+      const ensured = await ensureStores(store, subs);
+      if (ensured) return ensured;
+      const plan = await subs.getPlan(planId);
+      if (!plan) return Response.json({ error: `No plan ${planId}.` }, { status: 404 });
+      if (!plan.active) return Response.json({ error: `Plan ${planId} is not active.` }, { status: 409 });
+      // Issue #2522: tier-change audit — capture the before rows
+      // so the audit can state previous → new effective tier.
+      const previousAccount = await store.getAccount(userId);
+      const previousSubscriptions = await subs.listSubscriptions(userId);
+      const { subscription, account } = await grantSubscription({
+        subs,
+        store,
+        userId,
+        plan,
+        grantedBy: login,
+      });
+      const grantedSubscriptions = await subs.listSubscriptions(userId);
+      const grantTransition = resolveTierTransition(
+        previousAccount,
+        previousSubscriptions,
+        account,
+        grantedSubscriptions,
+        Date.now(),
+      );
+      ctx.audit("commercial.subscription.granted", "payments", {
+        userId,
+        tenantId: subscription.tenantId,
+        planId: plan.id,
+        subscriptionId: subscription.id,
+        grantedBy: login,
+        providerPaymentRef: subscription.providerPaymentRef,
+        periodEndMs: subscription.periodEndMs,
+        previousEffectiveTier: grantTransition.previousEffectiveTier,
+        newEffectiveTier: grantTransition.newEffectiveTier,
+      });
+      const effectiveTier = resolveEffectiveTier(account, [subscription], Date.now());
+      return Response.json({ subscription, account, effectiveTier });
+    } catch (err: any) {
+      const message = err.message || "Failed to grant subscription";
+      const status = /No commercial account|required|must be|not active/.test(message) ? 400 : 500;
       return Response.json({ error: message }, { status });
     }
   }
