@@ -39,7 +39,7 @@
 
 import type { Env } from "../types";
 import { SESSION_LIMITS } from "../config/sessionLimits";
-import { createStoreKv, type DoNamespaceLike } from "./durableKv";
+import { createStoreKv, type DoNamespaceLike } from "../data/durableKv";
 import { type KvLike } from "./kvResilience";
 import {
   createTokenPorts,
