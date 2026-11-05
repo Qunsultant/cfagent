@@ -27,7 +27,7 @@ import type {
   SandboxExecutionResult,
 } from "../../types";
 import { ETradeThinkHarness } from "../../services/thinkHarness";
-import { ETradeAISearchService } from "../../services/aiSearch";
+import { AiSearchInstanceService } from "../../services/aiSearch";
 import { ETradeDurableFiberService } from "../../services/durableFibers";
 import { ETradeService } from "../../services/etrade";
 import type {
@@ -326,7 +326,7 @@ export class AISearchFinancialDocsCommand implements IMcpToolCommand<{ query: st
   });
 
   async execute(input: { query: string; limit?: number }, context: McpToolContext) {
-    const aiSearch = new ETradeAISearchService(context.env);
+    const aiSearch = new AiSearchInstanceService(context.env);
     const result = await aiSearch.searchFinancialDocs(input.query, input.limit || 5);
     context.audit("ai_search.query", "search", {
       query: input.query,
