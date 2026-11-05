@@ -603,6 +603,9 @@ const EXPECTED_INVENTORY = [
   // Issue #2853: the neutral account/position reads the broker panels render.
   "handleBrokerReadsRoutes :: endsWith(\"/broker/accounts\")",
   "handleBrokerReadsRoutes :: endsWith(\"/broker/positions\")",
+  // Issue #3293: status and quote reads are neutral too.
+  "handleBrokerReadsRoutes :: endsWith(\"/broker/status\")",
+  "handleBrokerReadsRoutes :: endsWith(\"/broker/quote\")",
   // Issue #3272 S2: the neutral stock screen.
   "handleBrokerScreenRoutes :: endsWith(\"/broker/screen\")",
   "handleBrokerGateRoutes :: includes(\"/etrade/\")",
