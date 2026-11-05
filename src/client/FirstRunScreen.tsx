@@ -63,6 +63,8 @@ import {
   type ETradeStatusView,
   type PlatformIdentityView,
 } from "./firstRunApi";
+import { readTenantProvidersState } from "./tenantProviders";
+import { firstRunBrokerStep } from "./firstRunBrokerStep";
 import { listPlans, subscriptionTrial, type PlanView } from "./commercialApi";
 import { NotificationPreferencesPanel } from "./NotificationPreferencesPanel";
 
@@ -123,6 +125,14 @@ export function FirstRunScreen({ userLogin, initialStep, onComplete, onDismiss, 
   const [etrade, setEtrade] = useState<ETradeStatusView | null>(null);
   const [etradeLoading, setEtradeLoading] = useState(false);
   const [etradeError, setEtradeError] = useState(false);
+
+  /**
+   * Issue #3371: step 3 asks the selected broker. A key-pair broker (Alpaca)
+   * signs in from its panel in the trading view, so there is no OAuth status to
+   * poll and no redirect to offer — asking the user to "Connect E*TRADE" was the
+   * one journey still written for a single broker.
+   */
+  const brokerStep = firstRunBrokerStep(readTenantProvidersState().brokerId);
   const [prefsSaved, setPrefsSaved] = useState(false);
   const [summary, setSummary] = useState<{
     identity: PlatformIdentityView;
@@ -207,6 +217,8 @@ export function FirstRunScreen({ userLogin, initialStep, onComplete, onDismiss, 
   // Step 3: live brokerage status when the step is entered.
   useEffect(() => {
     if (step !== 3) return;
+    // Issue #3371: a key-pair broker has no OAuth status to read.
+    if (!brokerStep.connectsInWizard) return;
     let cancelled = false;
     setEtradeLoading(true);
     setEtradeError(false);
@@ -223,7 +235,7 @@ export function FirstRunScreen({ userLogin, initialStep, onComplete, onDismiss, 
     return () => {
       cancelled = true;
     };
-  }, [step, etradeAttempt]);
+  }, [step, etradeAttempt, brokerStep.connectsInWizard]);
 
   // Step 5: true summary, re-fetched from the server when entered.
   useEffect(() => {
@@ -438,7 +450,19 @@ export function FirstRunScreen({ userLogin, initialStep, onComplete, onDismiss, 
           </Card>
         ) : step === 3 ? (
           <Card>
-            {etradeLoading ? (
+            {!brokerStep.connectsInWizard ? (
+              <>
+                <p>
+                  {brokerStep.label} signs in with an API key pair, so there is
+                  nothing to authorize here. Sign in from the trading view: the{" "}
+                  {brokerStep.label} panel asks for your key id and secret, verifies
+                  them against {brokerStep.label}, and never shows the secret again.
+                </p>
+                <Button type="button" variant="primary" onClick={() => goTo(4)}>
+                  Continue
+                </Button>{" "}
+              </>
+            ) : etradeLoading ? (
               <Spinner label="Checking brokerage status" />
             ) : etradeError || etrade === null ? (
               <>
