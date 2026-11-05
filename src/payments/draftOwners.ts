@@ -37,10 +37,14 @@
  * routes to.
  */
 import {
+  createBucketPorts,
+  isBucketPortsEnabled,
+} from "../data/createBucketPorts";
+import {
   consumeStoreKey,
   createStoreKv,
   type DoNamespaceLike,
-} from "../security/durableKv";
+} from "../data/durableKv";
 import type { Env } from "../types";
 
 /** SessionStore bucket shared with the x402 replay guard. */
@@ -82,12 +86,26 @@ export async function registerDraftOwner(
   draftId: string,
   ownerSessionId: string
 ): Promise<DraftOwnerRegistration> {
-  const outcome = await consumeStoreKey({
-    namespace: storeNamespace(env),
-    namespaceName: DRAFT_OWNER_NAMESPACE,
-    key: `${DRAFT_OWNER_KEY_PREFIX}${draftId}`,
-    value: ownerSessionId,
-  });
+  // Issue #2436 (#1976 step 5e): the registration claim is
+  // the named ClaimPort's consume contract. When
+  // BUCKET_PORTS_ENABLED is on it composes through
+  // src/data/createBucketPorts.ts; off, the direct funnel
+  // claim below serves, unchanged. The three outcomes are
+  // never collapsed: "unavailable" stays a loud routing
+  // failure, distinct from "duplicate".
+  const key = `${DRAFT_OWNER_KEY_PREFIX}${draftId}`;
+  const outcome = isBucketPortsEnabled(env)
+    ? await createBucketPorts(env).claims.consume(
+        DRAFT_OWNER_NAMESPACE,
+        key,
+        ownerSessionId
+      )
+    : await consumeStoreKey({
+        namespace: storeNamespace(env),
+        namespaceName: DRAFT_OWNER_NAMESPACE,
+        key,
+        value: ownerSessionId,
+      });
   if (outcome === "unavailable") {
     console.error(
       `[payments] draft owner registration unavailable for ${draftId}: SessionStore unreachable; ` +
@@ -104,11 +122,16 @@ export async function registerDraftOwner(
  * before this registry existed). Never throws.
  */
 export async function resolveDraftOwner(env: Env, draftId: string): Promise<string | null> {
-  const kv = createStoreKv({
-    namespace: storeNamespace(env),
-    namespaceName: DRAFT_OWNER_NAMESPACE,
-    legacyFallback: false,
-  });
+  // Issue #2436: flag-on resolves through the residual
+  // bucket port's payments bucket; flag-off is the direct
+  // funnel composition below. Never throws either way.
+  const kv = isBucketPortsEnabled(env)
+    ? createBucketPorts(env).bucketKv("payments")
+    : createStoreKv({
+        namespace: storeNamespace(env),
+        namespaceName: DRAFT_OWNER_NAMESPACE,
+        legacyFallback: false,
+      });
   const value = await kv.get(`${DRAFT_OWNER_KEY_PREFIX}${draftId}`);
   const owner = (value || "").trim();
   return owner ? owner : null;
