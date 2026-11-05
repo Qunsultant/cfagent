@@ -63,6 +63,12 @@ const PINNED_STAR_REEXPORTS = [
   "./alpaca/platform",
   "./alpaca/fillLots",
   "./alpaca/occSymbol",
+  // Issue #3351: the Alpaca sign-in surface, exported through the boundary so
+  // route handlers never import a trading-internal path (issue #290).
+  "./alpaca/credentials",
+  "./alpaca/credentialStore",
+  "./alpaca/credentialResolution",
+  "./alpaca/signIn",
   "./optionsScreener",
   "./technicals",
   "./platformHistory",
