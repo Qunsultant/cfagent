@@ -53,6 +53,11 @@ export type BrokerOperation =
   | "positionLots"
   | "optionChains"
   | "optionExpireDates"
+  // Issue #3296: portfolio risk analytics (correlation, hedge drafts,
+  // portfolio-repair, sizing). E*TRADE owns the model today; Alpaca has
+  // none in this build, and the surface must say so rather than render
+  // another broker's risk numbers.
+  | "portfolioRisk"
   | "orderPreview"
   | "orderPlace"
   | "marketScreening";
@@ -96,6 +101,7 @@ export const BROKER_CATALOG = {
       accounts: true,
       positions: true,
       positionLots: true,
+      portfolioRisk: true,
       optionChains: true,
       optionExpireDates: true,
       orderPreview: true,
@@ -121,6 +127,7 @@ export const BROKER_CATALOG = {
       positions: true,
       // Alpaca exposes no tax-lot endpoint; positions carry cost basis only.
       positionLots: false,
+      portfolioRisk: false,
       optionChains: true,
       optionExpireDates: true,
       orderPreview: true,
