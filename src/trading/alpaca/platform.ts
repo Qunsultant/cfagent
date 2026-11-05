@@ -763,7 +763,28 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
     });
   }
 
+  /**
+   * Issue #3401: live trading requires the user's OWN verified pair.
+   *
+   * The deployment pair is a legitimate fallback for reads and for paper — one
+   * shared Alpaca account the product can open with — but it is a single account
+   * shared by every tenant. Letting it place live orders would let any signed-in
+   * user trade the operator's account. Paper keeps working on deployment keys, so
+   * nothing about first use changes.
+   *
+   * Returns the refusal sentence, or null when the caller may trade.
+   */
+  private liveTradingRefusal(): string | null {
+    const { isLive } = resolveAlpacaTradingBase(this.env, this.overrideEnv);
+    if (!isLive) return null;
+    if (this.credentialSource === "user") return null;
+    return "Live trading needs your own Alpaca key pair. Sign in with a live key pair in the Alpaca panel — the deployment's keys can trade paper only. Nothing was sent to Alpaca.";
+  }
+
   async previewOrder(params: OrderPreviewParams): Promise<BrokerOrderDraft> {
+    await this.ready();
+    const liveRefusal = this.liveTradingRefusal();
+    if (liveRefusal) throw new Error(liveRefusal);
     const optionLegs = params.optionLegs ?? [];
     const isOptionsOrder = params.assetClass === "options" || optionLegs.some((leg) => leg.securityType === "OPTN");
     if (isOptionsOrder) {
@@ -885,6 +906,24 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
 
   async placeOrderRemote(params: PlaceOrderParams): Promise<BrokerOrderExecutionResult> {
     await this.ready();
+    const liveRefusal = this.liveTradingRefusal();
+    if (liveRefusal) {
+      return {
+        success: false,
+        orderId: params.orderId,
+        executionId: "",
+        brokerOrderRef: "",
+        authorizerDid: getUserDid(params.userLogin),
+        status: "failed",
+        symbol: (params.symbol || "").trim().toUpperCase(),
+        action: params.action,
+        quantity: params.quantity,
+        executionPrice: 0,
+        totalSettled: 0,
+        message: liveRefusal,
+        timestamp: new Date().toISOString(),
+      } as BrokerOrderExecutionResult;
+    }
     const now = new Date().toISOString();
     const userDid = getUserDid(params.userLogin);
     const draft = this.orm?.trades?.findById(params.orderId);
