@@ -552,8 +552,14 @@ describe("mappers (#1697)", () => {
 });
 
 describe("dashboard routes already exist (#1697)", () => {
-  it("the four dashboard reads are present in server.ts and catalogued", () => {
-    const server = readFileSync(resolve(__dirname, "../src/server.ts"), "utf8");
+  it("the four dashboard reads are present in the server entry and catalogued", () => {
+    // Slice 4 of Qunsultant/cfagent#2902 (2026-11-05): the four reads
+    // moved verbatim from src/server.ts to src/server/routes/privacy.ts;
+    // the entry surface is server.ts + routes/*.ts, so the pin reads
+    // both files. The catalog assertion is unchanged.
+    const server =
+      readFileSync(resolve(__dirname, "../src/server.ts"), "utf8") +
+      readFileSync(resolve(__dirname, "../src/server/routes/privacy.ts"), "utf8");
     for (const path of [
       "/api/chains/status",
       "/api/jobs/history",

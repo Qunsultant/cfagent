@@ -483,3 +483,40 @@ conflict on Qunsultant/cfagent#2902.
   branch after the pin update.
 - Q3 stays open for Slice 9; Q4 stays open for Slice 8. No new open
   question is raised by Slice 3.
+
+## 11. Slice 4 note (2026-11-05, PR for #2902 Slice 4)
+
+- Baseline at Slice 4: `origin/main` `57364bdb` (Slice 3 merged),
+  `src/server.ts` 3,755 lines / 174,270 bytes. Privacy & compliance move
+  to `src/server/routes/privacy.ts` (704 lines) as three handlers in
+  dispatch order: `handlePrivacyRoutes` (`/api/privacy/status`,
+  `/api/privacy/preferences`, `/api/privacy/export`,
+  `/api/privacy/erasure`), `handlePrivacyChainsRoutes`
+  (`/api/chains/status`, `/api/chains/reconcile`, `/api/jobs/history`,
+  `/api/traces`, `/api/agents/registry`, `/api/products/catalog`,
+  `/api/jobs/reconcile`, `/api/retention/purge`),
+  `handlePrivacyReportsRoutes` (`/api/audit/history`,
+  `/api/reports/list`, `/api/reports/seed-canonical`).
+  `src/server.ts` after Slice 4: 3,144 lines / 150,320 bytes.
+- The 148-descriptor pin is unchanged (scanner reconstructs the identical
+  ordered list before and after); the pin test's delegation-order assertion
+  grows to the nine delegations in dispatch order (Core early, Privacy,
+  Auth login, Core health, Auth me, Privacy chains, Privacy reports, Auth
+  IAAA, Core late), and its dispatch smoke gains a Slice 4 check that every
+  moved route answers exactly as on clean main before the move (reads 401;
+  chains/reconcile 500, jobs/reconcile, retention/purge and
+  reports/seed-canonical 503 — unbound DO/AgentDB in the test harness,
+  measured pre-move, not a move artifact). No route changed.
+- Pin update in the same PR (repo pin rule): the D-D census pin in
+  `tests/global_dd_census_2356.test.ts` step 5b moves 4 of the 6
+  `wiredMembershipStore` sites from `server.ts` to `privacy.ts`
+  (chains/reconcile, jobs/reconcile, retention/purge,
+  reports/seed-canonical); 2 remain in `server.ts` (telemetry decisions,
+  retrieval populate-market-graph — both Slice 7), totals unchanged.
+  Two more source-presence pins read the entry surface as `server.ts` +
+  `routes/privacy.ts` instead of `server.ts` alone (same PR, repo pin
+  rule): `tests/data_foundation_slice4.test.ts` (four dashboard reads)
+  and `tests/goal_chain_agentdb_modes_1729.test.ts` (audit/reports reads)
+  — assertions unchanged, only the files scanned.
+- Q3 stays open for Slice 9; Q4 stays open for Slice 8. No new open
+  question is raised by Slice 4.
