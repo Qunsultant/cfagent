@@ -332,9 +332,13 @@ const ORCH = "agents/orchestrator.ts";
  *  auditPolicyPortPromise/auditPolicyPort() + context entry) —
  *  measured 3,272 lines / 156,989 B on the stacked tree, so
  *  budget lines rise to 3290 and bytes rise to 157_600,
- *  keeping similar headroom. */
-const BUDGET_LINES = 3290;
-const BUDGET_BYTES = 157_600;
+ *  keeping similar headroom.
+ *  Bot merge of main adds the #3089 broker-routed order
+ *  endpoints block (+25 lines) — measured 3,297 lines /
+ *  158,614 B, so budget lines rise to 3310 and bytes rise
+ *  to 159_200, keeping similar headroom. */
+const BUDGET_LINES = 3310;
+const BUDGET_BYTES = 159_200;
 
 const count = (haystack: string, needle: string) =>
   haystack.split(needle).length - 1;
@@ -431,7 +435,10 @@ describe("orchestrator class inventory (#992 standing gate)", () => {
     // Bumped 6 -> 7 / 3 -> 4 for issue #2681: the migration context
     // binds schedule/scheduleEvery as pass-throughs; the re-arm itself
     // lives in routes/orchestratorMigration.ts, not inline.
-    expect(count(text, "this.schedule(")).toBeLessThanOrEqual(7);
+    // Bumped 7 -> 8 for issue #3089 (via main merge): the
+    // broker-routed order context binds schedule as a pass-through
+    // arrow in the same pattern; no inline registration added.
+    expect(count(text, "this.schedule(")).toBeLessThanOrEqual(8);
     expect(count(text, "this.scheduleEvery(")).toBeLessThanOrEqual(4);
   });
 
