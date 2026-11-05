@@ -350,6 +350,26 @@ export const agentTenantChannels = sqliteTable("agent_tenant_channels", {
 });
 
 /**
+ * Issue #3256 — server-side onboarding state: one row per verified
+ * login. currentStep is 1..5 (1 account, 2 trial, 3 brokerage, 4
+ * preferences, 5 summary); completedAtMs is set server-side when
+ * the user finishes; trialPlanId/trialStartedAtMs record the trial
+ * started from the flow, if any. tenantId is stamped server-side
+ * from the resolved platform identity — informational only, never
+ * a scoping input. This schema MAPS the table; DDL authority lives
+ * in migration 0042 (src/data/migrationRunner.ts).
+ */
+export const agentOnboardingState = sqliteTable("agent_onboarding_state", {
+  userLogin: text("user_login").primaryKey(),
+  tenantId: text("tenant_id"),
+  currentStep: integer("current_step").notNull().default(1),
+  completedAtMs: integer("completed_at_ms"),
+  trialPlanId: text("trial_plan_id"),
+  trialStartedAtMs: integer("trial_started_at_ms"),
+  updatedAtMs: integer("updated_at_ms").notNull(),
+});
+
+/**
  * Redeemable failure-credit claims (#2019). One row per failed paid
  * run, written by the payment adapter alongside the DO ledger
  * credit row (the ledger row is the financial audit record; this
