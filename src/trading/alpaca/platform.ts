@@ -4,9 +4,10 @@
  * Implements ITradingPlatform for Alpaca Trading API v2
  */
 
-import type { Env, ETradeQuote, ETradeAccount, ETradePosition, ETradeOrderDraft, ETradeOrderExecutionResult, ETradeBrokerStatus } from "../../types";
+import type { Env, BrokerQuote, BrokerAccount, BrokerPosition, BrokerOrderDraft, BrokerOrderExecutionResult, BrokerStatus } from "../../types";
 import type { DatabaseORM } from "../../orm";
 import type { ITradingPlatform, OrderPreviewParams, PlaceOrderParams } from "../interfaces";
+import { BROKER_CATALOG, type TradingType } from "../brokerCatalog";
 import { AlpacaMarketDataProvider } from "../../services/marketDataResearch";
 import { AGENT_DIDS, createDidAttestationSync, getUserDid } from "../../agents/did";
 
@@ -71,7 +72,7 @@ function finiteAlpacaNumber(value: unknown, field: string): number {
   return n;
 }
 
-function mapAlpacaAccount(raw: any, isLive: boolean): ETradeAccount {
+function mapAlpacaAccount(raw: any, isLive: boolean): BrokerAccount {
   if (typeof raw.id !== "string" || !raw.id) {
     throw new Error("Alpaca returned an unreadable account response.");
   }
@@ -96,7 +97,7 @@ function mapAlpacaAccount(raw: any, isLive: boolean): ETradeAccount {
   };
 }
 
-function mapAlpacaPosition(raw: any): ETradePosition {
+function mapAlpacaPosition(raw: any): BrokerPosition {
   const symbol = typeof raw.symbol === "string" ? raw.symbol.toUpperCase() : "";
   if (!symbol) {
     throw new Error("Alpaca returned a position without a symbol.");
@@ -143,19 +144,26 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
     this.alpacaData = new AlpacaMarketDataProvider(env);
   }
 
-  async getStatus(): Promise<ETradeBrokerStatus> {
+  async getStatus(): Promise<BrokerStatus> {
     const hasKey = Boolean(this.env.ALPACA_API_KEY || this.env.ALPACA_API_KEY_ID);
     const hasSecret = Boolean(this.env.ALPACA_SECRET_KEY || this.env.ALPACA_API_SECRET_KEY);
     const configured = hasKey && hasSecret;
     const { baseUrl, isLive } = resolveAlpacaTradingBase(this.env);
+    // Issue #3232 (program #3216): Alpaca reports ALPACA's own vocabulary and
+    // its own trading type. It used to report `protocol: "etrade_oauth_rest"`
+    // and `mode: "live_oauth"` — another broker's words — and `environment:
+    // "sandbox"` while `activeEnvironment` said TEST, i.e. two vocabularies for
+    // one fact, neither of them saying "paper".
+    const tradingType: TradingType = isLive ? "live" : "paper";
+    const vocabulary = BROKER_CATALOG.alpaca.statusVocabulary;
 
     return {
       broker: "alpaca",
       name: this.name,
       configured,
-      mode: isLive ? "live_oauth" : "sandbox_api",
-      protocol: isLive ? "etrade_oauth_rest" : "sandbox_simulated",
-      environment: isLive ? "live" : "sandbox",
+      mode: vocabulary.mode[tradingType],
+      protocol: vocabulary.protocol,
+      environment: vocabulary.environment[tradingType],
       activeEnvironment: isLive ? "PROD" : "TEST",
       apiUrl: baseUrl,
       hasApiKey: configured,
@@ -171,13 +179,13 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
     };
   }
 
-  async getQuote(symbol: string): Promise<ETradeQuote> {
+  async getQuote(symbol: string): Promise<BrokerQuote> {
     const cleanSym = symbol.trim().toUpperCase();
     const snap = await this.alpacaData.getQuote(cleanSym);
 
     // Issue #1555 (parent #913): pass through, never fabricate. The
     // Alpaca snapshot carries price/bid/ask/volume/OHLC only — it has
-    // no peRatio, marketCap, 52-week, or RSI. Those ETradeQuote
+    // no peRatio, marketCap, 52-week, or RSI. Those BrokerQuote
     // fields are OPTIONAL, so a snapshot that lacks them yields an
     // omitted field, never a hardcoded 28.0 / 50.0 / high*1.25 /
     // low*0.75 / 50.0. A real snapshot value, if a future Alpaca
@@ -228,7 +236,7 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
     };
   }
 
-  async getAccounts(): Promise<ETradeAccount[]> {
+  async getAccounts(): Promise<BrokerAccount[]> {
     // Issue #3158: the hardcoded paper stub (alpaca_paper_01, $100,000)
     // is replaced by the live Trading API read. Unconfigured or failed
     // reads fail explicit — a fabricated account is never returned.
@@ -242,7 +250,7 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
     return [mapAlpacaAccount(res.account, resolveAlpacaTradingBase(this.env).isLive)];
   }
 
-  async getPositions(): Promise<{ account: ETradeAccount; positions: ETradePosition[] }> {
+  async getPositions(): Promise<{ account: BrokerAccount; positions: BrokerPosition[] }> {
     // Issue #3158: live positions from the Trading API. A failed
     // positions read throws rather than reporting an empty list as
     // "no positions" — unknown is not empty.
@@ -257,7 +265,7 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
     };
   }
 
-  async previewOrder(params: OrderPreviewParams): Promise<ETradeOrderDraft> {
+  async previewOrder(params: OrderPreviewParams): Promise<BrokerOrderDraft> {
     if (params.assetClass === "options" || params.optionLegs?.some((leg) => leg.securityType === "OPTN")) {
       throw new Error("This broker adapter currently supports equity orders only. Options orders require a broker adapter with native options preview support.");
     }
@@ -311,7 +319,7 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
    * is reported only with a broker order id in hand; anything else is
    * a failed result, never a fabricated execution.
    */
-  async placeOrderRemote(params: PlaceOrderParams): Promise<ETradeOrderExecutionResult> {
+  async placeOrderRemote(params: PlaceOrderParams): Promise<BrokerOrderExecutionResult> {
     const now = new Date().toISOString();
     const userDid = getUserDid(params.userLogin);
     const draft = this.orm?.trades?.findById(params.orderId);
@@ -321,7 +329,7 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
       signature: draft?.proofSignature ?? "",
     };
     const symbol = (params.symbol || "").trim().toUpperCase();
-    const failed = (message: string): ETradeOrderExecutionResult => ({
+    const failed = (message: string): BrokerOrderExecutionResult => ({
       success: false,
       orderId: params.orderId,
       executionId: "",
@@ -407,7 +415,7 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
     };
   }
 
-  async executeOrder(orderId: string, authorizerDid: string, decision: "approved" | "rejected"): Promise<ETradeOrderExecutionResult> {
+  async executeOrder(orderId: string, authorizerDid: string, decision: "approved" | "rejected"): Promise<BrokerOrderExecutionResult> {
     const now = new Date().toISOString();
     // #2389: this adapter has no order-placement client (market data
     // only), so it can never execute. The previous implementation

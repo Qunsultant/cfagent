@@ -1,0 +1,179 @@
+/**
+ * Issue #3232 (program #3216): the broker catalog — one source of truth for
+ * which brokers exist, what each one can do, and what each platform
+ * environment means as a *trading type*.
+ *
+ * Why this module exists: the platform seam was broker-neutral in intent but
+ * named one broker in fact. `TradingPlatformId` listed "sandbox" — an
+ * environment — beside brokers; `ROUTED_BROKERS` in the routed-order route was
+ * a second, hand-maintained copy of the broker list; and the Alpaca platform
+ * reported `protocol: "etrade_oauth_rest"`, i.e. one broker's protocol as if it
+ * were the platform's. Every one of those is the same defect: a broker-shaped
+ * fact living outside a broker definition.
+ *
+ * This module is deliberately data + pure functions (15-factor: config lives
+ * in the environment, code holds defaults, nothing here reads the world at
+ * import). Adding a broker means adding one entry — the acceptance for the
+ * program's "no edits to shared paths" goal.
+ *
+ * Vocabulary, fixed here so the rest of the tree can stop inventing it:
+ *   - BrokerId          which firm executes (etrade, alpaca) — never an environment.
+ *   - TradingEnvironment the platform's environment token (TEST, PROD) — what
+ *                       existing routes and settings already carry.
+ *   - TradingType       what the user is doing (paper, live) — the user-facing
+ *                       answer to "type of trading", mapped per broker.
+ */
+
+/** Brokers with a registered `ITradingPlatform`. Never an environment. */
+export type BrokerId = "etrade" | "alpaca";
+
+/** The platform environment token carried by routes/settings today. */
+export type TradingEnvironment = "TEST" | "PROD";
+
+/** What the user is actually doing. `paper` is first-class, not an inference. */
+export type TradingType = "paper" | "live";
+
+/** How this broker authenticates. Each kind has exactly one seam (#2755). */
+export type BrokerCredentialKind = "oauth1_per_login" | "api_key_pair";
+
+/** Asset classes the platform can route orders for. */
+export type BrokerAssetClass = "equity" | "options";
+
+export interface BrokerDefinition {
+  readonly id: BrokerId;
+  readonly label: string;
+  readonly credentialKind: BrokerCredentialKind;
+  readonly assetClasses: readonly BrokerAssetClass[];
+  /** Environment → trading type. Total by type: every environment must resolve. */
+  readonly tradingTypeForEnvironment: Readonly<Record<TradingEnvironment, TradingType>>;
+  /**
+   * This broker's OWN status vocabulary. The status surface reports the
+   * selected broker's words; a broker never reports another broker's protocol.
+   */
+  readonly statusVocabulary: {
+    readonly protocol: BrokerProtocol;
+    readonly mode: Readonly<Record<TradingType, BrokerStatusMode>>;
+    readonly environment: Readonly<Record<TradingType, "paper" | "live">>;
+  };
+}
+
+/** Wire protocol strings, one per broker kind. Additive: existing values stay. */
+export type BrokerProtocol = "etrade_oauth_rest" | "alpaca_rest_v2" | "mcp_json_rpc" | "sandbox_simulated";
+
+/** Status mode strings, one per trading type per broker kind. */
+export type BrokerStatusMode = "live_oauth" | "paper_api" | "live_api" | "mcp_remote" | "simulated_engine" | "sandbox_api";
+
+export const BROKER_CATALOG = {
+  etrade: {
+    id: "etrade",
+    label: "E*TRADE",
+    credentialKind: "oauth1_per_login",
+    assetClasses: ["equity", "options"],
+    tradingTypeForEnvironment: { TEST: "paper", PROD: "live" },
+    statusVocabulary: {
+      protocol: "etrade_oauth_rest",
+      mode: { paper: "sandbox_api", live: "live_oauth" },
+      environment: { paper: "paper", live: "live" },
+    },
+  },
+  alpaca: {
+    id: "alpaca",
+    label: "Alpaca",
+    credentialKind: "api_key_pair",
+    assetClasses: ["equity", "options"],
+    tradingTypeForEnvironment: { TEST: "paper", PROD: "live" },
+    statusVocabulary: {
+      protocol: "alpaca_rest_v2",
+      mode: { paper: "paper_api", live: "live_api" },
+      environment: { paper: "paper", live: "live" },
+    },
+  },
+} as const satisfies Record<BrokerId, BrokerDefinition>;
+
+/**
+ * The ids the routed order surface accepts. Derived from the catalog so the
+ * route cannot drift from the broker list again (the previous hand-written
+ * copy admitted in its own comment that it "mirrors" the client list).
+ */
+export const ROUTED_BROKER_IDS = Object.keys(BROKER_CATALOG) as readonly BrokerId[];
+
+/**
+ * Legacy ids that were never brokers. `sandbox` is E*TRADE's test environment;
+ * it has been accepted as a platform id since the registry was introduced.
+ * Resolve it to the pair it always meant instead of rejecting historical
+ * callers, and never let it reach a broker-facing surface as a broker name.
+ */
+const LEGACY_BROKER_ALIASES: Readonly<
+  Record<string, { readonly broker: BrokerId; readonly environment: TradingEnvironment }>
+> = {
+  sandbox: { broker: "etrade", environment: "TEST" },
+};
+
+export interface BrokerSelection {
+  readonly broker: BrokerId;
+  readonly environment: TradingEnvironment;
+  readonly tradingType: TradingType;
+  /** True when the input used a legacy alias (e.g. `sandbox`). */
+  readonly legacy: boolean;
+}
+
+export function isBrokerId(value: unknown): value is BrokerId {
+  return typeof value === "string" && Object.prototype.hasOwnProperty.call(BROKER_CATALOG, value.toLowerCase());
+}
+
+/** Environment → trading type for one broker. Unknown broker is a caller bug. */
+export function tradingTypeFor(broker: BrokerId, environment: TradingEnvironment): TradingType {
+  return BROKER_CATALOG[broker].tradingTypeForEnvironment[environment];
+}
+
+/**
+ * Resolve a (broker, environment) request into the pair the platform acts on.
+ *
+ * Accepts the legacy `sandbox` id as (etrade, TEST). Refuses anything else it
+ * does not know — an unknown broker must never silently become the default,
+ * and an unknown environment must never silently become PROD.
+ */
+export function resolveBrokerSelection(input: {
+  broker?: unknown;
+  environment?: unknown;
+}): BrokerSelection | null {
+  const rawBroker = typeof input.broker === "string" ? input.broker.trim().toLowerCase() : "";
+  if (!rawBroker) return null;
+
+  const legacy = LEGACY_BROKER_ALIASES[rawBroker];
+  const broker: BrokerId | null = legacy ? legacy.broker : isBrokerId(rawBroker) ? (rawBroker as BrokerId) : null;
+  if (!broker) return null;
+
+  const rawEnv = typeof input.environment === "string" ? input.environment.trim().toUpperCase() : "";
+  const environment: TradingEnvironment | null =
+    rawEnv === "TEST" || rawEnv === "PROD"
+      ? (rawEnv as TradingEnvironment)
+      : rawEnv === ""
+        ? (legacy?.environment ?? null)
+        : null;
+  if (!environment) return null;
+
+  return {
+    broker,
+    environment,
+    tradingType: tradingTypeFor(broker, environment),
+    legacy: Boolean(legacy),
+  };
+}
+
+/**
+ * Guard used by the registry: every registered platform id must be a broker in
+ * the catalog, or a declared legacy alias. A new platform registered without a
+ * catalog entry fails here instead of surfacing as an unlabeled broker.
+ */
+export function assertBrokerCatalogComplete(registeredIds: readonly string[]): void {
+  const missing = registeredIds.filter(
+    (id) => !isBrokerId(id) && !Object.prototype.hasOwnProperty.call(LEGACY_BROKER_ALIASES, id.toLowerCase()),
+  );
+  if (missing.length > 0) {
+    throw new Error(
+      `Broker catalog incomplete (#3232): registered platform id(s) without a catalog entry: ${missing.join(", ")}. ` +
+        `Add the broker to src/trading/brokerCatalog.ts instead of registering it bare.`,
+    );
+  }
+}

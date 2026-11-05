@@ -8,26 +8,33 @@
  */
 
 import type {
-  ETradeQuote,
+  BrokerQuote,
   StockScreenerFilter,
   StockScreenResult,
   ScreenedStockItem,
-  ETradeOrderDraft,
-  ETradeOrderExecutionResult,
-  ETradePosition,
-  ETradePositionLot,
-  ETradeAccount,
-  ETradeBrokerStatus,
-  ETradeOptionChain,
-  ETradeOptionExpireDate,
+  BrokerOrderDraft,
+  BrokerOrderExecutionResult,
+  BrokerPosition,
+  BrokerPositionLot,
+  BrokerAccount,
+  BrokerStatus,
+  BrokerOptionChain,
+  BrokerOptionExpireDate,
 } from "../types";
+import type { BrokerId } from "./brokerCatalog";
 
 /** Optional invocation-wide limiter for outbound option API fetch attempts. */
 export interface OptionRequestBudget {
   tryConsume(): boolean;
 }
 
-export type TradingPlatformId = "etrade" | "alpaca" | "sandbox";
+/**
+ * Broker ids the platform contract accepts (#3232, program #3216).
+ * `sandbox` is NOT a broker — it was E*TRADE's test environment leaking into
+ * the id space. It stays accepted, as a declared legacy alias that resolves to
+ * (etrade, TEST) via `resolveBrokerSelection`; new code must use {@link BrokerId}.
+ */
+export type TradingPlatformId = BrokerId | "sandbox";
 /** Asset classes with implemented order forms and broker routing. Extend this union with a dedicated order adapter when a new market is added. */
 export type TradeAssetClass = "equity" | "options";
 
@@ -92,15 +99,15 @@ export interface ITradingPlatform {
   readonly platformId: TradingPlatformId;
   readonly name: string;
 
-  getStatus(): Promise<ETradeBrokerStatus>;
-  getQuote(symbol: string): Promise<ETradeQuote>;
+  getStatus(): Promise<BrokerStatus>;
+  getQuote(symbol: string): Promise<BrokerQuote>;
   screenMarkets?(filter?: StockScreenerFilter): Promise<StockScreenResult>;
-  getAccounts(): Promise<ETradeAccount[]>;
-  getPositions(accountKey?: string, includeBalance?: boolean): Promise<{ account: ETradeAccount; positions: ETradePosition[] }>;
-  getPositionLots?(accountKey: string, positionId: string): Promise<ETradePositionLot[]>;
-  previewOrder(params: OrderPreviewParams): Promise<ETradeOrderDraft>;
-  executeOrder(orderId: string, authorizerDid: string, decision: "approved" | "rejected", expectedTerms?: ExpectedTradeTerms): ETradeOrderExecutionResult | Promise<ETradeOrderExecutionResult>;
-  placeOrderRemote?(params: PlaceOrderParams): Promise<ETradeOrderExecutionResult>;
+  getAccounts(): Promise<BrokerAccount[]>;
+  getPositions(accountKey?: string, includeBalance?: boolean): Promise<{ account: BrokerAccount; positions: BrokerPosition[] }>;
+  getPositionLots?(accountKey: string, positionId: string): Promise<BrokerPositionLot[]>;
+  previewOrder(params: OrderPreviewParams): Promise<BrokerOrderDraft>;
+  executeOrder(orderId: string, authorizerDid: string, decision: "approved" | "rejected", expectedTerms?: ExpectedTradeTerms): BrokerOrderExecutionResult | Promise<BrokerOrderExecutionResult>;
+  placeOrderRemote?(params: PlaceOrderParams): Promise<BrokerOrderExecutionResult>;
   /**
    * Options data reads (issue #291 T5b). Optional: platforms without an
    * options data plane omit them and callers get provider_unsupported.
@@ -117,8 +124,8 @@ export interface ITradingPlatform {
     includeWeekly?: boolean;
     chainType?: "CALL" | "PUT" | "CALLPUT";
     includeRawResponse?: boolean;
-  }, requestBudget?: OptionRequestBudget): Promise<ETradeOptionChain | null>;
-  getOptionExpireDates?(symbol: string, expiryType?: string, requestBudget?: OptionRequestBudget): Promise<ETradeOptionExpireDate[]>;
+  }, requestBudget?: OptionRequestBudget): Promise<BrokerOptionChain | null>;
+  getOptionExpireDates?(symbol: string, expiryType?: string, requestBudget?: OptionRequestBudget): Promise<BrokerOptionExpireDate[]>;
   /**
    * The broker client's last recorded error, if any (issue #155 pattern:
    * read on the SAME instance that made the call). Optional — platforms
@@ -132,7 +139,7 @@ export interface ITradingPlatform {
    * names its failure policy (issue #291 quote unification, Q1).
    * Optional — platforms without a detailed read omit it.
    */
-  getQuoteDetailed?(symbol: string): Promise<{ quote: ETradeQuote | null; error: string | null }>;
+  getQuoteDetailed?(symbol: string): Promise<{ quote: BrokerQuote | null; error: string | null }>;
 }
 
 export interface IMarketScreener {

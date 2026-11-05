@@ -498,13 +498,13 @@ describe("Alpaca live accounts and positions (#3158)", () => {
   it("status reports paper by default and live only for a non-paper base URL", async () => {
     const unset = new AlpacaTradingPlatform(NO_KEYS_ENV, undefined, "boss");
     const unsetStatus = await unset.getStatus();
-    expect(unsetStatus.environment).toBe("sandbox");
+    expect(unsetStatus.environment).toBe("paper");
     expect(unsetStatus.apiUrl).toBe("https://paper-api.alpaca.markets");
     const live = new AlpacaTradingPlatform(LIVE_ENV, undefined, "boss");
     const liveStatus = await live.getStatus();
     expect(liveStatus.environment).toBe("live");
     expect(liveStatus.apiUrl).toBe("https://api.alpaca.markets");
     const paper = new AlpacaTradingPlatform(PAPER_HOST_ENV, undefined, "boss");
-    expect((await paper.getStatus()).environment).toBe("sandbox");
+    expect((await paper.getStatus()).environment).toBe("paper");
   });
 });

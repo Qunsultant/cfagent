@@ -16,15 +16,24 @@
 import { TradingPlatformRegistry } from "./registry";
 import { ETradeTradingPlatform } from "./etrade/platform";
 import { AlpacaTradingPlatform } from "./alpaca/platform";
+import { assertBrokerCatalogComplete } from "./brokerCatalog";
 
 // Register default pluggable platforms (unchanged)
 TradingPlatformRegistry.register("etrade", (env, orm, userLogin, overrideEnv, storage) => new ETradeTradingPlatform(env, orm, userLogin, overrideEnv, undefined, storage));
 TradingPlatformRegistry.register("alpaca", (env, orm, userLogin) => new AlpacaTradingPlatform(env, orm, userLogin));
 TradingPlatformRegistry.register("sandbox", (env, orm, userLogin, overrideEnv, storage) => new ETradeTradingPlatform(env, orm, userLogin, overrideEnv, undefined, storage));
 
+// Issue #3232 (program #3216): every registered platform id must be a broker
+// in the catalog, or a declared legacy alias ("sandbox" → etrade/TEST).
+// Registering a broker without a catalog entry fails HERE, at import time,
+// instead of surfacing later as an unlabeled or mis-vocabulated platform.
+assertBrokerCatalogComplete(TradingPlatformRegistry.getRegisteredPlatforms() as string[]);
+
 // --- boundary surface (pre-existing) ---
 export * from "./interfaces";
 export * from "./registry";
+// Issue #3232: the broker catalog is part of the public trading surface.
+export * from "./brokerCatalog";
 export * from "./screeningProvider";
 export * from "./dataProviders";
 export * from "./screener";
