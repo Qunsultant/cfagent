@@ -23,6 +23,7 @@ import {
   evaluatePostTradeTotals,
   type PortfolioRiskReport,
   type PortfolioRiskTotals,
+  etradePortfolioRiskSource,
 } from "./portfolioRisk";
 
 export const HEDGE_POLICY = {
@@ -299,7 +300,7 @@ export function selectSpyPut(chain: ETradeOptionChain, expirationDate: string): 
  * live SPY chain at the target expiry for the puts form, build drafts.
  */
 export async function generateHedgeProposals(etrade: ETradeService): Promise<HedgeAnalysis> {
-  const report = await computePortfolioRisk(etrade);
+  const report = await computePortfolioRisk(etradePortfolioRiskSource(etrade));
   const spyPut = await resolveSpyPutContract(etrade);
   return buildHedgeProposals(report, spyPut);
 }

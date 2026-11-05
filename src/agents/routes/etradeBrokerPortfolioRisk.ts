@@ -24,8 +24,7 @@
 
 import {
   computePortfolioRisk,
-  aggregatePortfolioRisk,
-  resolvePositionsSnapshot,
+  etradePortfolioRiskSource,
   evaluatePostTradeTotals,
   type CandidateGreekContribution,
 } from "../../services/portfolioRisk";
@@ -38,9 +37,14 @@ import {
 import type { ETradeService } from "../../services/etrade";
 import { codedBrokerMessage } from "./brokerCodedError";
 
-/** Aggregate risk report for the live book (issue #34, gap G1). */
+/**
+ * Aggregate risk report for the live book (issue #34, gap G1).
+ * Issue #3324: the model reads a `PortfolioRiskSource`, not this service, so the
+ * same computation serves every broker (`/broker/portfolio-risk`). The E*TRADE
+ * source is the identical three reads this endpoint used to perform inline.
+ */
 export async function getPortfolioRiskReport(etrade: ETradeService) {
-  return computePortfolioRisk(etrade);
+  return computePortfolioRisk(etradePortfolioRiskSource(etrade));
 }
 
 /** Post-trade evaluation (issue #34): current totals plus a candidate's Greek contribution. */
@@ -48,14 +52,9 @@ export async function evaluatePostTradeTotalsForCandidate(
   etrade: ETradeService,
   candidate: CandidateGreekContribution,
 ) {
-  const { account, positions } = await etrade.fetchPortfolioRemote(undefined, true);
-  const resolved = await resolvePositionsSnapshot(etrade, positions);
-  const spyChain = await etrade.getOptionChains({ symbol: "SPY" }).catch(() => null);
-  const report = aggregatePortfolioRisk(resolved, {
-    nav: account.netAccountValue || account.totalAccountValue || 0,
-    spyPrice: spyChain?.underlyingPrice ?? null,
-    asOf: new Date().toISOString(),
-  });
+  // Issue #3324: one pipeline for every broker, so the candidate is evaluated
+  // against the same book shape whichever broker supplied it.
+  const report = await computePortfolioRisk(etradePortfolioRiskSource(etrade));
   return { current: report, postTradeTotals: evaluatePostTradeTotals(report, candidate) };
 }
 
@@ -64,7 +63,7 @@ export async function assessPortfolioConcentrationForCandidate(
   etrade: ETradeService,
   candidateSymbol: string | undefined,
 ) {
-  const report = await computePortfolioRisk(etrade);
+  const report = await computePortfolioRisk(etradePortfolioRiskSource(etrade));
   return assessPortfolioConcentration(
     report,
     (a, b) => sharedCorrelationService.estimate(a, b),
@@ -77,7 +76,7 @@ export async function sizeCandidateForPortfolio(
   etrade: ETradeService,
   candidate: SizingCandidate,
 ) {
-  const report = await computePortfolioRisk(etrade);
+  const report = await computePortfolioRisk(etradePortfolioRiskSource(etrade));
   return sizeCandidateAgainstPortfolio(report, candidate);
 }
 

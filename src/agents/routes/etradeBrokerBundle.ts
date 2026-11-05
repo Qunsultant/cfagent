@@ -8,7 +8,7 @@
  * so the construction ledgers are unaffected.
  */
 import type { EtradeBrokerRouteContext } from "./etradeBroker";
-import { computePortfolioRisk } from "../../services/portfolioRisk";
+import { computePortfolioRisk, etradePortfolioRiskSource } from "../../services/portfolioRisk";
 import { assessPortfolioConcentration } from "../../services/portfolioConcentration";
 import { resolveSpyPutContract } from "../../services/hedgeProposals";
 import {
@@ -60,7 +60,7 @@ export async function executeBundleRoute(
   userLogin: string,
 ): Promise<Response> {
   const primary = candidates[0];
-  const report = await computePortfolioRisk(etrade);
+  const report = await computePortfolioRisk(etradePortfolioRiskSource(etrade));
   const concentration = await assessPortfolioConcentration(
     report,
     (a, b) => sharedCorrelationService.estimate(a, b),
