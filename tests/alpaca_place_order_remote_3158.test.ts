@@ -213,7 +213,7 @@ describe("Alpaca placeOrderRemote (#3158)", () => {
     expect(seen[2]).toMatchObject({ side: "buy", type: "market" });
   });
 
-  it("option legs are refused without any fetch", async () => {
+  it("option legs without contract detail are refused without any fetch (#3329)", async () => {
     const calls = installFetch(async () => jsonResponse(ORDER_OK));
     const alpaca = new AlpacaTradingPlatform(PAPER_ENV, undefined, "boss");
     const res = await alpaca.placeOrderRemote({
@@ -229,7 +229,10 @@ describe("Alpaca placeOrderRemote (#3158)", () => {
     expect(res.success).toBe(false);
     expect(res.status).toBe("failed");
     expect(res.brokerOrderRef).toBe("");
-    expect(res.message).toMatch(/equity/i);
+    // Issue #3329: option legs ARE placed now, with a limit price and OCC
+    // symbols. This leg carries no type/strike/expiry, so it is refused by
+    // name before any request — the same no-fetch guarantee as before.
+    expect(res.message).toMatch(/type, strike, and expiry/i);
   });
 
   it("invalid quantity and missing symbol are refused without any fetch", async () => {
