@@ -57,6 +57,7 @@ import { handleEtradeBrokerRoutes, handleEtradeBrokerActivityRoutes } from "../r
 import { handleBrokerOrderRoutes } from "../routes/brokerOrders";
 import { handleBrokerOptionsRoutes } from "../routes/brokerOptions";
 import { handleBrokerReadsRoutes } from "../routes/brokerReads";
+import { handleBrokerConnectRoutes } from "../routes/brokerConnect";
 import { handleBrokerRiskRoutes } from "../routes/brokerRisk";
 import { handleBrokerScreenRoutes } from "../routes/brokerScreen";
 import { handleEtradeOptionsRoutes } from "../routes/etradeOptions";
@@ -521,6 +522,16 @@ export async function routeRequest(deps: RouteRequestDeps, request: Request): Pr
     readSettingRaw: (key) => deps.readSettingRaw(key),
   });
   if (brokerScreenResponse) return brokerScreenResponse;
+
+  // Issue #3351: Alpaca sign-in. A credential surface, not a panel read: it is
+  // the one place a pair is verified and stored, so it sits with the broker
+  // routes rather than inside a broker-specific handler.
+  const brokerConnectResponse = await handleBrokerConnectRoutes(request, url, path, sessionId, {
+    env: deps.env,
+    getOrm: () => deps.getOrm(),
+    readSettingRaw: (key) => deps.readSettingRaw(key),
+  });
+  if (brokerConnectResponse) return brokerConnectResponse;
 
   // Provider/broker slice 1: the broker gate delegation
   // (src/agents/routes/brokerGate.ts). Invoked at this exact

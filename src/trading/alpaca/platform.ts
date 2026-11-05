@@ -12,7 +12,8 @@ import { deriveLotsFromFills, parseAlpacaFill, type DerivedLots } from "./fillLo
 import { NeutralMarketScreener } from "../neutralMarketScreener";
 import { platformQuoteSource } from "../stockQuoteSource";
 import { formatOccSymbol, parseOccSymbol } from "./occSymbol";
-import { withAlpacaCredentials } from "./credentials";
+import { withAlpacaCredentials, alpacaTradingSide } from "./credentials";
+import { applyAlpacaPair, resolveAlpacaPair, type AlpacaCredentialSource } from "./credentialResolution";
 import {
   fetchAlpacaOptionContracts,
   fetchAlpacaOptionSnapshots,
@@ -209,7 +210,45 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
     this.alpacaData = new AlpacaMarketDataProvider(this.env);
   }
 
+  /**
+   * Issue #3351 — the pair this instance will actually use, resolved once.
+   *
+   * Alpaca's credential has two possible sources after sign-in: this login's own
+   * verified pair and the deployment's. The adapter is constructed
+   * synchronously by the registry, so the resolution is lazy and memoised here
+   * rather than in five route handlers — every consumer (a quote, a chain, an
+   * order, the IV collector, a scheduled run) gets the same answer instead of
+   * each deciding for itself.
+   *
+   * `credentialSource` is kept for the status read: a surface must be able to say
+   * whether the pair in use is the user's or the operator's. Without that, a
+   * "connected" badge is a claim about the deployment, not about the account.
+   *
+   * A store read that cannot reach the Durable Object resolves to the deployment
+   * pair (the store returns null rather than throwing), and the source says so.
+   * That is the pre-slice behaviour, reported honestly — not a silent revival of
+   * a user's pair.
+   */
+  private credentialSource: AlpacaCredentialSource = "deployment";
+  private keyIdLast4: string | null = null;
+  private readyPromise: Promise<void> | null = null;
+
+  private ready(): Promise<void> {
+    this.readyPromise ??= (async () => {
+      const side = alpacaTradingSide(this.env, this.overrideEnv);
+      const pair = await resolveAlpacaPair(this.env, this.userLogin, side);
+      this.credentialSource = pair.source;
+      this.keyIdLast4 = pair.keyIdLast4;
+      if (pair.source === "user") {
+        this.env = applyAlpacaPair(this.env, pair);
+        this.alpacaData = new AlpacaMarketDataProvider(this.env);
+      }
+    })();
+    return this.readyPromise;
+  }
+
   async getStatus(): Promise<BrokerStatus> {
+    await this.ready();
     const hasKey = Boolean(this.env.ALPACA_API_KEY || this.env.ALPACA_API_KEY_ID);
     const hasSecret = Boolean(this.env.ALPACA_SECRET_KEY || this.env.ALPACA_API_SECRET_KEY);
     const configured = hasKey && hasSecret;
@@ -232,6 +271,8 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
       activeEnvironment: isLive ? "PROD" : "TEST",
       apiUrl: baseUrl,
       hasApiKey: configured,
+      credentialSource: this.credentialSource,
+      keyIdLast4: this.keyIdLast4 ?? undefined,
       oauthAuthenticated: true,
       capabilities: [
         "Real-Time Level 1 / Level 2 Market Depth (IEX/SIP)",
@@ -245,6 +286,7 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
   }
 
   async getQuote(symbol: string): Promise<BrokerQuote> {
+    await this.ready();
     const cleanSym = symbol.trim().toUpperCase();
     const snap = await this.alpacaData.getQuote(cleanSym);
 
@@ -319,6 +361,7 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
   }
 
   async getAccounts(): Promise<BrokerAccount[]> {
+    await this.ready();
     // Issue #3158: the hardcoded paper stub (alpaca_paper_01, $100,000)
     // is replaced by the live Trading API read. Unconfigured or failed
     // reads fail explicit — a fabricated account is never returned.
@@ -362,6 +405,7 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
     expiryType?: string,
     requestBudget?: import("../interfaces").OptionRequestBudget,
   ): Promise<BrokerOptionExpireDate[]> {
+    await this.ready();
     if (requestBudget && !requestBudget.tryConsume()) {
       throw new Error("Alpaca option expire-date request budget exhausted for this run.");
     }
@@ -400,6 +444,7 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
     },
     requestBudget?: import("../interfaces").OptionRequestBudget,
   ): Promise<BrokerOptionChain | null> {
+    await this.ready();
     if (requestBudget && !requestBudget.tryConsume()) {
       throw new Error("Alpaca option chain request budget exhausted for this run.");
     }
@@ -513,6 +558,7 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
    * caller can say "3 of 5 shares are explained by retained fills".
    */
   async derivePositionLots(positionId: string | number): Promise<DerivedLots> {
+    await this.ready();
     const symbol = String(positionId ?? "").trim().toUpperCase();
     if (!symbol) {
       throw new Error("Alpaca position lots require the position id (the symbol).");
@@ -712,6 +758,7 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
    * a failed result, never a fabricated execution.
    */
   async placeOrderRemote(params: PlaceOrderParams): Promise<BrokerOrderExecutionResult> {
+    await this.ready();
     const now = new Date().toISOString();
     const userDid = getUserDid(params.userLogin);
     const draft = this.orm?.trades?.findById(params.orderId);

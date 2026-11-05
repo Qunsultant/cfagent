@@ -7,6 +7,7 @@ import {
   type TradingEnvironment,
 } from "../trading/brokerCatalog";
 import { BrokerSurfaceGate } from "./BrokerSurfaceGate";
+import { AlpacaSignInCard } from "./AlpacaSignInCard";
 
 /**
  * Issue #2853 (gap G2): the first non-E*TRADE panel under the broker panel contract.
@@ -148,6 +149,10 @@ export function AlpacaBrokerPanel({ activeEnv }: AlpacaBrokerPanelProps) {
 
   return (
     <Stack gap="3" data-broker="alpaca" data-broker-panel="alpaca" data-active-env={activeEnv ?? ""}>
+      {/* Issue #3351: sign-in comes first on a broker panel — whose account is
+          connected is the question every number below depends on. */}
+      <AlpacaSignInCard activeEnv={activeEnv} />
+
       <Card>
         <Flex align="center" gap="2">
           <h4>Connection</h4>

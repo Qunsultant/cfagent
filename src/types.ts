@@ -1639,6 +1639,15 @@ export interface BrokerStatus {
   activeEnvironment?: "TEST" | "PROD" | string;
   apiUrl?: string;
   hasApiKey?: boolean;
+  /**
+   * Issue #3351: which credential served this status read. `user` means the
+   * signed-in account's own verified key pair; `deployment` means the Worker's
+   * own secrets; `none` means neither is set for this trading type. Optional so
+   * a broker without per-user credentials omits it rather than guessing.
+   */
+  credentialSource?: "user" | "deployment" | "none";
+  /** Last four characters of the key id in use. Never the key, never the secret. */
+  keyIdLast4?: string;
   oauthAuthenticated?: boolean;
   oauthExpiresAtEt?: string;
   oauthRenewable?: boolean;
