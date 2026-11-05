@@ -1111,3 +1111,11 @@ div.ui-drawer-title {
 .ui-grid.autofit-md { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
 .ui-grid.autofit-lg { grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); }
 .ui-grid.autofit-xl { grid-template-columns: repeat(auto-fit, minmax(480px, 1fr)); }
+
+/* Issue #3367: a section-nav anchor. `scrollIntoView` lands the section's top
+   under the page's sticky chrome, so the anchor carries a token-based offset —
+   the same effect the E*TRADE panels get from an inline scrollMarginTop, without
+   adding an inline style. */
+.ui-anchor {
+  scroll-margin-top: var(--space-10);
+}
