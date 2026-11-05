@@ -597,6 +597,15 @@ export interface Env {
   ALPACA_API_SECRET_KEY?: string;
   ALPACA_BASE_URL?: string;
   ALPACA_DATA_URL?: string;
+  /**
+   * Issue #3233 (program #3216): explicit trading type for Alpaca. `paper` or
+   * `live` overrides base-URL inference, so the trading type is a stated
+   * choice rather than a side effect of which URL happens to be set. Unset
+   * keeps the legacy inference (paper host = paper).
+   */
+  ALPACA_TRADING_TYPE?: string;
+  /** Options feed: `indicative` (default, no OPRA subscription) or `opra`. */
+  ALPACA_OPTIONS_FEED?: string;
   YFINANCE_API_ENDPOINT?: string;
   MARKET_DATA_PROVIDER?: "alpaca" | "yfinance" | "hybrid";
   // Cloudflare Email Service & Email Agent Configuration

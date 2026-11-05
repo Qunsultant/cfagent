@@ -39,11 +39,31 @@ export type BrokerCredentialKind = "oauth1_per_login" | "api_key_pair";
 /** Asset classes the platform can route orders for. */
 export type BrokerAssetClass = "equity" | "options";
 
+/**
+ * The operations a broker can actually perform (#3233). Declared per broker so
+ * callers and surfaces can say "Alpaca does not offer this" instead of showing
+ * an empty panel, and so a missing method is a stated fact rather than a bug
+ * discovered at execution time.
+ */
+export type BrokerOperation =
+  | "quote"
+  | "detailedQuote"
+  | "accounts"
+  | "positions"
+  | "positionLots"
+  | "optionChains"
+  | "optionExpireDates"
+  | "orderPreview"
+  | "orderPlace"
+  | "marketScreening";
+
 export interface BrokerDefinition {
   readonly id: BrokerId;
   readonly label: string;
   readonly credentialKind: BrokerCredentialKind;
   readonly assetClasses: readonly BrokerAssetClass[];
+  /** Which operations this broker supports. Total by type: every op is stated. */
+  readonly supports: Readonly<Record<BrokerOperation, boolean>>;
   /** Environment → trading type. Total by type: every environment must resolve. */
   readonly tradingTypeForEnvironment: Readonly<Record<TradingEnvironment, TradingType>>;
   /**
@@ -70,6 +90,18 @@ export const BROKER_CATALOG = {
     credentialKind: "oauth1_per_login",
     assetClasses: ["equity", "options"],
     tradingTypeForEnvironment: { TEST: "paper", PROD: "live" },
+    supports: {
+      quote: true,
+      detailedQuote: true,
+      accounts: true,
+      positions: true,
+      positionLots: true,
+      optionChains: true,
+      optionExpireDates: true,
+      orderPreview: true,
+      orderPlace: true,
+      marketScreening: true,
+    },
     statusVocabulary: {
       protocol: "etrade_oauth_rest",
       mode: { paper: "sandbox_api", live: "live_oauth" },
@@ -82,6 +114,20 @@ export const BROKER_CATALOG = {
     credentialKind: "api_key_pair",
     assetClasses: ["equity", "options"],
     tradingTypeForEnvironment: { TEST: "paper", PROD: "live" },
+    supports: {
+      quote: true,
+      detailedQuote: true,
+      accounts: true,
+      positions: true,
+      // Alpaca exposes no tax-lot endpoint; positions carry cost basis only.
+      positionLots: false,
+      optionChains: true,
+      optionExpireDates: true,
+      orderPreview: true,
+      orderPlace: true,
+      // Alpaca has no screener API; screening stays provider-side (#2144).
+      marketScreening: false,
+    },
     statusVocabulary: {
       protocol: "alpaca_rest_v2",
       mode: { paper: "paper_api", live: "live_api" },
@@ -159,6 +205,11 @@ export function resolveBrokerSelection(input: {
     tradingType: tradingTypeFor(broker, environment),
     legacy: Boolean(legacy),
   };
+}
+
+/** True when the selected broker can perform the operation (#3233). */
+export function brokerSupports(broker: BrokerId, operation: BrokerOperation): boolean {
+  return BROKER_CATALOG[broker].supports[operation];
 }
 
 /**
