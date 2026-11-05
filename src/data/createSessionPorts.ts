@@ -25,7 +25,7 @@ import {
   createStoreKv,
   listStoreEntries,
   type DoNamespaceLike,
-} from "../security/durableKv";
+} from "./durableKv";
 import type { Env } from "../types";
 import type {
   ResourceAttribution,
