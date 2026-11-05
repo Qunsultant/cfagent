@@ -7,7 +7,7 @@
  *
  * The agent reaches the SAME Cloudflare AI Search instance the
  * SearchHub knowledge surface serves (src/agents/routes/searchHub.ts:
- * POST /search/agent -> ETradeAISearchService over the shared
+ * POST /search/agent -> AiSearchInstanceService over the shared
  * AI_SEARCH_ENDPOINT var — the instance configuration is NOT
  * re-vocabularied here; AI_SEARCH_INSTANCE and AI_SEARCH_MCP_ENDPOINT
  * are additive config for the other two doors onto that instance).
@@ -24,7 +24,7 @@
  *    as any MCP client would. Gated on AI_SEARCH_MCP_ENDPOINT; the
  *    endpoint itself exists only when the owner enables the
  *    instance's Public Endpoint in the dashboard.
- * 3. rest (LAST RESORT) — ETradeAISearchService (src/services/
+ * 3. rest (LAST RESORT) — AiSearchInstanceService (src/services/
  *    aiSearch.ts) reused exactly as-is: its S2 mapping, provenance
  *    and KNOWLEDGE_SERVING_ENABLED behaviour come along untouched.
  *
@@ -79,7 +79,7 @@
  * module performs are report documents via the executor above.
  */
 import {
-  ETradeAISearchService,
+  AiSearchInstanceService,
   mapAiSearchChunks,
   type AISearchQueryResponse,
   type AISearchResultItem,
@@ -218,7 +218,7 @@ const defaultMcpSearch: NonNullable<AiSearchAgentDeps["mcpSearch"]> = (endpoint,
   });
 
 const defaultRestSearch: NonNullable<AiSearchAgentDeps["restSearch"]> = (env, query, limit) =>
-  new ETradeAISearchService(env).searchFinancialDocs(query, limit);
+  new AiSearchInstanceService(env).searchFinancialDocs(query, limit);
 
 function nonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
