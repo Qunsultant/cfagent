@@ -1605,6 +1605,37 @@ export const MIGRATION_0042_ONBOARDING_STATE: DataMigration = {
 );`,
 };
 
+/**
+ * Migration 0043 — free-run counter (#3305, sub-issue of #3241).
+ * The agreed Free allowance (10 runs per product per month,
+ * operator-managed, changeable) needs durable per-account
+ * counts: agent_free_run_counts holds one row per (login,
+ * family, UTC calendar month) with the runs consumed in that
+ * month (a missing row reads as 0), and
+ * agent_free_run_allowances holds one row per family with the
+ * current allowance (seeded at 10 by the adapter ensure, INSERT
+ * OR IGNORE, so an operator edit survives re-ensure). Additive
+ * only (new tables, no backfill): accounts with no rows have
+ * consumed nothing.
+ */
+export const MIGRATION_0043_FREE_RUN_COUNTER: DataMigration = {
+  version: 43,
+  name: "0043_free_run_counter",
+  sql: `CREATE TABLE IF NOT EXISTS agent_free_run_allowances (
+  family TEXT PRIMARY KEY,
+  runs INTEGER NOT NULL,
+  updated_at_ms INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS agent_free_run_counts (
+  user_login TEXT NOT NULL,
+  family TEXT NOT NULL,
+  month TEXT NOT NULL,
+  used INTEGER NOT NULL DEFAULT 0,
+  updated_at_ms INTEGER NOT NULL,
+  PRIMARY KEY (user_login, family, month)
+);`,
+};
+
 export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANCE,
   MIGRATION_0002_AGENT_CHAINS_SCHEDULES,
   MIGRATION_0003_AGENT_SHARD_JOBS,
@@ -1647,6 +1678,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0040_UNLIMITED_FREE_GRANT,
   MIGRATION_0041_PLAN_TRIAL_DAYS,
   MIGRATION_0042_ONBOARDING_STATE,
+  MIGRATION_0043_FREE_RUN_COUNTER,
 ];
 
 function splitStatements(sqlText: string): string[] {
