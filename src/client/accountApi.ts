@@ -164,7 +164,7 @@ export async function fetchRemoteOrders(env: string): Promise<{ count: number; o
 }
 
 export function cancelRemoteOrder(env: string, orderId: string | number): Promise<ETradeCancelOrderResult> {
-  return sendJson("/api/etrade/orders/cancel", env, "POST", { orderId });
+  return sendJson("/api/broker/order/cancel", env, "POST", { orderId });
 }
 
 // Helpers (unit-tested) ---------------------------------------------------------

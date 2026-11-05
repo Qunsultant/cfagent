@@ -23,7 +23,8 @@
  * stays on the legacy E*TRADE route); remote orders and cancel stay
  * E*TRADE-only. The legacy /api/etrade/* routes are untouched.
  */
-import { TradingPlatformRegistry, ROUTED_BROKER_IDS } from "../../trading";
+import { TradingPlatformRegistry, ROUTED_BROKER_IDS, brokerSupports } from "../../trading";
+import { resolveTenantBroker } from "../../services/tenantProviders";
 import type { EtradeBrokerRouteContext } from "./etradeBroker";
 import { unauthenticatedResponse } from "./routeIdentity";
 import { resolveTradeEnvironmentFromSettings } from "./brokerEnvironment";
@@ -297,6 +298,46 @@ export async function handleBrokerOrderRoutes(
       });
     } catch (err) {
       return Response.json({ error: err instanceof Error ? err.message : "Failed to execute trade order" }, { status: 500 });
+    }
+  }
+
+  // Issue #3390: neutral cancel. A remote order belongs to the broker that took
+  // it, not to a stored draft, so the broker is the tenant's selection — and a
+  // broker without the capability is refused by name, never asked to cancel
+  // someone else's order.
+  if (path.endsWith("/broker/order/cancel") && request.method === "POST") {
+    try {
+      const body = (await request.json().catch(() => ({}))) as any;
+      const cancelOrderId = String(body.orderId ?? body.id ?? "").trim();
+      if (!cancelOrderId) {
+        return Response.json({ error: "orderId is required" }, { status: 400 });
+      }
+      const userLogin = request.headers.get("x-user-login");
+      if (!userLogin) return unauthenticatedResponse();
+
+      const broker = await resolveTenantBroker(ctx.env);
+      const platform = brokerSupports(broker, "orderCancel")
+        ? TradingPlatformRegistry.getPlatform(broker, ctx.env, ctx.getOrm(), userLogin, requestedEnv)
+        : null;
+      if (!platform || typeof platform.cancelOrderRemote !== "function") {
+        return Response.json(
+          {
+            code: "provider_unsupported",
+            broker,
+            message: `${broker} does not provide order cancellation here; no other broker was asked to cancel it.`,
+            retryable: false,
+          },
+          { status: 501 },
+        );
+      }
+
+      const cancelled = await platform.cancelOrderRemote(cancelOrderId);
+      return Response.json(cancelled, { status: cancelled.success ? 200 : 409 });
+    } catch (err) {
+      return Response.json(
+        { error: err instanceof Error ? err.message : "Failed to cancel order" },
+        { status: 500 },
+      );
     }
   }
 
