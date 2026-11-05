@@ -2560,6 +2560,41 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
   }
 
   /**
+   * Real Alpaca Trading v2: Cancel an order (issue #3390).
+   *
+   * `DELETE /v2/orders/{id}` answers 204 on success. A 404 means the id is
+   * unknown or the order is already terminal, and a 422 means the broker
+   * refused — both are reported as failures with the broker's own status,
+   * never as a cancelled order.
+   */
+  async cancelOrder(orderId: string | number): Promise<{ success: boolean; orderId: string; message: string; httpStatus?: number }> {
+    const id = String(orderId ?? "").trim();
+    if (!id) return { success: false, orderId: "", message: "Alpaca cancel needs an order id." };
+    if (!this.isConfigured()) {
+      return {
+        success: false,
+        orderId: id,
+        message: "Alpaca Trading error: credentials are not configured, so no order was cancelled.",
+      };
+    }
+
+    try {
+      const res = await fetch(`${this.getTradingUrl()}/v2/orders/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        headers: { ...this.getHeaders(), Accept: "application/json" },
+      });
+      if (res.status === 204 || res.ok) {
+        return { success: true, orderId: id, message: `Alpaca order ${id} cancelled.`, httpStatus: res.status };
+      }
+      const data = (await res.json().catch(() => ({}))) as any;
+      const detail = typeof data?.message === "string" ? data.message : `HTTP ${res.status}`;
+      return { success: false, orderId: id, httpStatus: res.status, message: `Alpaca did not cancel order ${id}: ${detail}` };
+    } catch (err: any) {
+      return { success: false, orderId: id, message: `Alpaca cancel failed: ${err?.message || String(err)}` };
+    }
+  }
+
+  /**
    * Real Alpaca Trading v2: Get Account Details
    */
   async getAccount(): Promise<{ success: boolean; account?: any; message?: string; httpStatus?: number }> {

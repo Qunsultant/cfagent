@@ -4,7 +4,7 @@
  * Implements ITradingPlatform for Alpaca Trading API v2
  */
 
-import type { Env, BrokerQuote, BrokerAccount, BrokerPosition, BrokerPositionLot, BrokerOrderDraft, BrokerOrderExecutionResult, BrokerStatus, BrokerOptionChain, BrokerOptionContract, BrokerOptionExpireDate, StockScreenerFilter, StockScreenResult, BrokerRemoteOrder, BrokerActivity } from "../../types";
+import type { Env, BrokerQuote, BrokerAccount, BrokerPosition, BrokerPositionLot, BrokerOrderDraft, BrokerOrderExecutionResult, BrokerStatus, BrokerOptionChain, BrokerOptionContract, BrokerOptionExpireDate, StockScreenerFilter, StockScreenResult, BrokerRemoteOrder, BrokerActivity, BrokerCancelOrderResult } from "../../types";
 import type { DatabaseORM } from "../../orm";
 import type { ITradingPlatform, OrderPreviewParams, PlaceOrderParams } from "../interfaces";
 import { BROKER_CATALOG, type TradingType } from "../brokerCatalog";
@@ -867,6 +867,22 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
    * is reported only with a broker order id in hand; anything else is
    * a failed result, never a fabricated execution.
    */
+  /**
+   * Issue #3390: cancel through the same Alpaca client the placement uses, so
+   * the broker's own answer (204 / 404 / 422) is reported verbatim and a
+   * refusal is never rendered as a cancelled order.
+   */
+  async cancelOrderRemote(orderId: string | number): Promise<BrokerCancelOrderResult> {
+    await this.ready();
+    const res = await this.alpacaData.cancelOrder(orderId);
+    return {
+      success: res.success,
+      orderId: res.orderId,
+      message: res.message,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
   async placeOrderRemote(params: PlaceOrderParams): Promise<BrokerOrderExecutionResult> {
     await this.ready();
     const now = new Date().toISOString();

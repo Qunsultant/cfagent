@@ -22,6 +22,7 @@ import type {
   BrokerStatus,
   BrokerOptionChain,
   BrokerOptionExpireDate,
+  BrokerCancelOrderResult,
 } from "../types";
 import type { BrokerId } from "./brokerCatalog";
 
@@ -110,6 +111,12 @@ export interface ITradingPlatform {
   previewOrder(params: OrderPreviewParams): Promise<BrokerOrderDraft>;
   executeOrder(orderId: string, authorizerDid: string, decision: "approved" | "rejected", expectedTerms?: ExpectedTradeTerms): BrokerOrderExecutionResult | Promise<BrokerOrderExecutionResult>;
   placeOrderRemote?(params: PlaceOrderParams): Promise<BrokerOrderExecutionResult>;
+  /**
+   * Issue #3390: cancel a live order at the broker. Optional: a platform that
+   * cannot cancel omits it, and the neutral route answers `provider_unsupported`
+   * naming the broker instead of offering a control that does nothing.
+   */
+  cancelOrderRemote?(orderId: string | number, accountKey?: string): Promise<BrokerCancelOrderResult>;
   /**
    * Options data reads (issue #291 T5b). Optional: platforms without an
    * options data plane omit them and callers get provider_unsupported.

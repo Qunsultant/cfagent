@@ -7,7 +7,7 @@
  * - Human-in-the-Loop (HITL) Execution Safety with W3C Agent DID Attestations.
  */
 
-import type { Env, ETradeQuote, ETradeAccount, ETradePosition, ETradePositionLot, ETradeOrderDraft, ETradeOrderExecutionResult, ETradeBrokerStatus, StockScreenerFilter, StockScreenResult, ETradeOptionChain, ETradeOptionExpireDate } from "../../types";
+import type { Env, ETradeQuote, ETradeAccount, ETradePosition, ETradePositionLot, ETradeOrderDraft, ETradeOrderExecutionResult, ETradeBrokerStatus, StockScreenerFilter, StockScreenResult, ETradeOptionChain, ETradeOptionExpireDate, BrokerCancelOrderResult } from "../../types";
 import type { DatabaseORM } from "../../orm";
 import type { ExpectedTradeTerms, ITradingPlatform, OrderPreviewParams } from "../interfaces";
 import { etradeOrderKind, validateTradingOrderLegs } from "./optionOrders";
@@ -688,6 +688,14 @@ export class ETradeTradingPlatform implements ITradingPlatform {
     }
 
     return result;
+  }
+
+  /**
+   * Issue #3390: cancel through the client the other order calls already use.
+   * The broker's result is returned as-is — no invented success.
+   */
+  async cancelOrderRemote(orderId: string | number, accountKey?: string): Promise<BrokerCancelOrderResult> {
+    return this.client.cancelOrder(accountKey, orderId);
   }
 
   async placeOrderRemote(params: any): Promise<ETradeOrderExecutionResult> {

@@ -81,6 +81,10 @@ export type BrokerOperation =
   | "accountActivity"
   | "alerts"
   | "watchlists"
+  // Issue #3390: cancelling a live order at the broker. Declared because the
+  // neutral order routes must say "this broker cannot cancel" rather than
+  // render a control that does nothing; both brokers implement it today.
+  | "orderCancel"
   // Issue #3374: the persisted runs of the autonomous OPTIONS DISCOVERY engine
   // (#126/#18). Unlike the scanner (#3327), discovery has no neutral engine to
   // scope to: its production wiring builds ETrade chains
@@ -182,6 +186,8 @@ export const BROKER_CATALOG = {
       accountActivity: true,
       alerts: true,
       watchlists: true,
+      // Issue #3390: both brokers cancel through the neutral order seam.
+      orderCancel: true,
       // Issue #3374: the discovery engine runs on this broker's chains.
       optionsDiscovery: true,
     },
@@ -228,6 +234,8 @@ export const BROKER_CATALOG = {
       accountActivity: true,
       alerts: false,
       watchlists: false,
+      // Issue #3390: both brokers cancel through the neutral order seam.
+      orderCancel: true,
       // Issue #3374: no Alpaca discovery engine exists, so the stored runs are
       // not this tenant's evidence. Stated, never substituted.
       optionsDiscovery: false,
