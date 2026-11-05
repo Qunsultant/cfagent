@@ -11,16 +11,20 @@ import {
   type FeatureEvaluationContext,
   type FeatureFlag,
   type FeatureFlagPort,
+  getFeatureFlagParent,
   getOptionsProductParentFlag,
   isKnownFeatureFlag,
   OPTIONS_PRODUCT_FLAG_PARENTS,
+  SURFACE_FLAG_PARENTS,
 } from "../features/featureFlagPorts";
 import { createFeatureFlagPort } from "../features/createFeatureFlagPort";
 
 export {
   ALL_FEATURE_FLAGS,
   OPTIONS_PRODUCT_FLAG_PARENTS,
+  getFeatureFlagParent,
   getOptionsProductParentFlag,
+  SURFACE_FLAG_PARENTS,
   type FeatureEvaluationContext,
   type FeatureFlag,
   type FeatureFlagPort,

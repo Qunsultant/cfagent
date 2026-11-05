@@ -22,6 +22,7 @@ import type { TradeAssetClass, TradeOrderContext } from "./trading/tradeOrderCon
 import { PortfolioRiskPanel } from "./PortfolioRiskPanel";
 import { TradingApprovalsQueue } from "./TradingApprovalsQueue";
 import { AccountPanels } from "./AccountPanels";
+import { AlpacaBrokerPanel } from "./AlpacaBrokerPanel";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { ScreenersHub, type ScreenersHubTab } from "./ScreenersHub";
 import { GoalScreenPanel } from "./GoalScreenPanel";
@@ -170,6 +171,9 @@ export function ETradeTradingHub({
   // Navigation subtabs: synchronized directly with activeSubTab prop from Chat navigation
   const [subTab, setSubTab] = useState<TradingSubTab>(activeSubTab || "autopilot");
   const effectiveSubTab: TradingSubTab = activeSubTab || subTab || "autopilot";
+  // Issue #2853 (gap G2): the selected broker decides which broker surface
+  // renders. Previously every panel was E*TRADE regardless of selection.
+  const selectedBroker = readTenantProvidersState().brokerId;
   // S4-D (#1991): the hub is the route outlet for every trading page, so
   // the shell title/scope follow the active subtab via the route table.
   // iv-history is an inner hub tab with no route entry.
@@ -2168,11 +2172,22 @@ export function ETradeTradingHub({
           </nav>
 
           <ErrorBoundary label="Account panels (alerts, transactions, watchlists, orders)">
-            <AccountPanels activeEnv={activeEnv} onUnreadAlertsChange={onUnreadAlertsChange} />
+            {selectedBroker === "etrade" ? (
+              <AccountPanels activeEnv={activeEnv} onUnreadAlertsChange={onUnreadAlertsChange} />
+            ) : (
+              <AlpacaBrokerPanel activeEnv={activeEnv} />
+            )}
           </ErrorBoundary>
 
           <ErrorBoundary label="Portfolio Risk panel">
-            <PortfolioRiskPanel activeEnv={activeEnv} onPreviewHedge={handleTradeOrder} />
+            {selectedBroker === "etrade" ? (
+              <PortfolioRiskPanel activeEnv={activeEnv} onPreviewHedge={handleTradeOrder} />
+            ) : (
+              <Notice tone="neutral" title="Portfolio risk analytics are not available for this broker">
+                Portfolio risk, correlation and hedge drafts read the E*TRADE portfolio model. No other
+                broker's positions are substituted for it.
+              </Notice>
+            )}
           </ErrorBoundary>
         </div>
       )}

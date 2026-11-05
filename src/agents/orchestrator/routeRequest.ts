@@ -56,6 +56,7 @@ import { handleTradingIntegrationsRoutes } from "../routes/tradingIntegrations";
 import { handleEtradeBrokerRoutes, handleEtradeBrokerActivityRoutes } from "../routes/etradeBroker";
 import { handleBrokerOrderRoutes } from "../routes/brokerOrders";
 import { handleBrokerOptionsRoutes } from "../routes/brokerOptions";
+import { handleBrokerReadsRoutes } from "../routes/brokerReads";
 import { handleEtradeOptionsRoutes } from "../routes/etradeOptions";
 import { handleOptionsProviderGateRoutes } from "../routes/optionsProviderGate";
 import { resolveBrokerEnvironmentFromSettings } from "../routes/brokerEnvironment";
@@ -484,6 +485,16 @@ export async function routeRequest(deps: RouteRequestDeps, request: Request): Pr
     readSettingRaw: (key) => deps.readSettingRaw(key),
   });
   if (brokerOptionsResponse) return brokerOptionsResponse;
+
+  // Issue #2853 (gap G2): the account/position reads the neutral broker
+  // panels render. Gated by the broker_panel_contract flag; a broker that
+  // cannot serve the read answers a coded 501 naming that broker.
+  const brokerReadsResponse = await handleBrokerReadsRoutes(request, url, path, sessionId, {
+    env: deps.env,
+    getOrm: () => deps.getOrm(),
+    readSettingRaw: (key) => deps.readSettingRaw(key),
+  });
+  if (brokerReadsResponse) return brokerReadsResponse;
 
   // Provider/broker slice 1: the broker gate delegation
   // (src/agents/routes/brokerGate.ts). Invoked at this exact

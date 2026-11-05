@@ -50,7 +50,12 @@ export type FeatureFlag =
   | "options_discovery"
   | "options_scheduled"
   | "options_flows"
-  | "options_iv_history";
+  | "options_iv_history"
+  // Issue #2853 (programme #3216, gap G2): broker panel contract.
+  // Rollout/kill-switch flag for the neutral broker panels; an
+  // absent value inherits options_screener (see
+  // OPTIONS_PRODUCT_FLAG_PARENTS), an explicit OFF always wins.
+  | "broker_panel_contract";
 
 export const ALL_FEATURE_FLAGS: readonly FeatureFlag[] = [
   "screener",
@@ -90,6 +95,8 @@ export const ALL_FEATURE_FLAGS: readonly FeatureFlag[] = [
   "options_scheduled",
   "options_flows",
   "options_iv_history",
+  // Issue #2853: broker panel contract (inherits options_screener).
+  "broker_panel_contract",
 ] as const;
 
 /**
@@ -123,6 +130,24 @@ export function getOptionsProductParentFlag(
   flag: string
 ): FeatureFlag | null {
   return OPTIONS_PRODUCT_FLAG_PARENTS[flag] ?? null;
+}
+
+/**
+ * Issue #2853: flags that inherit a parent but are NOT options
+ * sub-products. They are kept out of OPTIONS_PRODUCT_FLAG_PARENTS so
+ * that map keeps its meaning ("the parent and one flag per options
+ * sub-product", pinned by tests/options_product_slice1.test.ts).
+ * `broker_panel_contract` inherits the options product tree because
+ * the broker panels live inside it today; when a broker-neutral shell
+ * owns them, only this mapping changes.
+ */
+export const SURFACE_FLAG_PARENTS: Readonly<Record<string, FeatureFlag>> = {
+  broker_panel_contract: "options_screener",
+} as const;
+
+/** The one parent lookup every adapter uses (#2596 + #2853). */
+export function getFeatureFlagParent(flag: string): FeatureFlag | null {
+  return OPTIONS_PRODUCT_FLAG_PARENTS[flag] ?? SURFACE_FLAG_PARENTS[flag] ?? null;
 }
 
 const KNOWN_FLAGS = new Set<string>(ALL_FEATURE_FLAGS);

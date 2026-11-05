@@ -17,7 +17,7 @@ import {
   type FeatureEvaluationContext,
   type FeatureFlag,
   type FeatureFlagPort,
-  getOptionsProductParentFlag,
+  getFeatureFlagParent,
   isKnownFeatureFlag,
 } from "./featureFlagPorts";
 
@@ -94,7 +94,7 @@ export class EnvFeatureFlagAdapter implements FeatureFlagPort {
     // is the value. This runs before the generic configured/bare
     // default below, so a configured environment with the parent ON
     // does not silently disable an absent per-product flag.
-    const productParent = getOptionsProductParentFlag(flag);
+    const productParent = getFeatureFlagParent(flag);
     if (productParent) {
       return this.isEnabled(productParent, _context);
     }
