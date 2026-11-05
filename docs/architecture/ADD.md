@@ -23,6 +23,29 @@ pending with its owning issue. Delivery rules live in
   parent issue (#1449); until it lands, the two docs above are the
   application architecture of record.
 
+## Agentic architecture
+
+- [Agentic Target Architecture](../agents/agentic-architecture.md)
+  (CAIO lane, issue #576, tracked by #571, both closed) — the agentic
+  target architecture of record: re-baselined runtime, Phase 2 slice,
+  gate record.
+- Related material in [agentic/](./agentic/):
+  [doors-and-layers](./agentic/doors-and-layers.md) (invocation model —
+  channels, turns, doors, agents — Agent Mesh program #2225, landed via
+  #2256),
+  [agents-sdk-conformance-matrix](./agentic/agents-sdk-conformance-matrix.md)
+  (fleet conformance, goal G7 round 1, landed via #2339),
+  [think-or-DO](./agentic/think-or-DO.md) (Think vs DO, placed for
+  #1926),
+  [multi-turn-agentic-workflows](./agentic/multi-turn-agentic-workflows.md)
+  (one stage contract, two executors; design note for #3069 R9),
+  [agent-as-a-service](./agentic/agent-as-a-service.md),
+  [social-delivery-and-scheduled-pipelines](./agentic/social-delivery-and-scheduled-pipelines.md)
+  (social posting #1077 and staged scheduling).
+- Open program: Agentic UX (#3082, CPO lane) — the UI surface layer
+  (AG-UI, A2UI, A2A, UCP, ACP-commerce), evaluated under #3142. A
+  consolidated agentic-UX doc lands under #3082.
+
 ## Integration architecture
 
 - **Pending — no owner established.** Integration architecture stays on
@@ -87,6 +110,10 @@ pending with its owning issue. Delivery rules live in
 Every change to this container or to any doc it links gets a changelog
 entry here, newest first:
 
+- 2026-11-05 — Agentic architecture section added: links the Agentic
+  Target Architecture (#576, tracked by #571) and the six docs under
+  agentic/, and records the open Agentic UX program (#3082, evaluated
+  under #3142).
 - 2026-10-28 — Container created (#1449): ten sections, links only,
   pending states for integration, data, security, networking,
   consolidated application doc, and diagrams; 15-factor flagged as
