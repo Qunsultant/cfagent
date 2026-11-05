@@ -370,6 +370,38 @@ export const agentOnboardingState = sqliteTable("agent_onboarding_state", {
 });
 
 /**
+ * Free-run allowance per family (#3305, sub-issue of #3241). One
+ * row per screener family with the current allowance (runs per
+ * UTC calendar month), operator data seeded at 10. This schema
+ * MAPS the table; DDL authority lives in migration 0043
+ * (src/data/migrationRunner.ts).
+ */
+export const agentFreeRunAllowances = sqliteTable("agent_free_run_allowances", {
+  family: text("family").primaryKey(),
+  runs: integer("runs").notNull(),
+  updatedAtMs: integer("updated_at_ms").notNull(),
+});
+
+/**
+ * Free runs consumed per account, product, and month (#3305).
+ * One row per (login, family, UTC calendar month "YYYY-MM");
+ * a missing row reads as 0 consumed. This schema MAPS the
+ * table; DDL authority lives in migration 0043
+ * (src/data/migrationRunner.ts).
+ */
+export const agentFreeRunCounts = sqliteTable(
+  "agent_free_run_counts",
+  {
+    userLogin: text("user_login").notNull(),
+    family: text("family").notNull(),
+    month: text("month").notNull(),
+    used: integer("used").notNull().default(0),
+    updatedAtMs: integer("updated_at_ms").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.userLogin, t.family, t.month] })],
+);
+
+/**
  * Redeemable failure-credit claims (#2019). One row per failed paid
  * run, written by the payment adapter alongside the DO ledger
  * credit row (the ledger row is the financial audit record; this

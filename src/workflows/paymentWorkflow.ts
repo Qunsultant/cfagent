@@ -146,6 +146,10 @@ import {
   ensureNativeLedgerSchema,
 } from "../data/createNativeLedgerPorts";
 import {
+  createFreeRunCounterAdapter,
+  ensureFreeRunCounterSchema,
+} from "../data/createFreeRunCounterPorts";
+import {
   mapChargeToJournalEntries,
   mapFailureCreditToJournalEntries,
 } from "../data/journalPorts";
@@ -297,6 +301,27 @@ export class PaymentWorkflow extends ThinkWorkflow<
     if (proofRedemptions) {
       await ensureProofRedemptionSchema(proofRedemptions.db);
     }
+    // Issue #3305: the free-run counter, wired from the same
+    // AGENT_DB binding. Best-effort like the native ledger (not
+    // fatal like the catalogue): a counter that cannot be ensured
+    // leaves the gate exactly as today — no free runs, a Free
+    // account falls through to the paid path — so a wiring
+    // failure never fails a payment and never gives away free
+    // runs.
+    let freeRunCounter: Awaited<ReturnType<typeof createFreeRunCounterAdapter>> = null;
+    try {
+      const counter = createFreeRunCounterAdapter(this.env as { AGENT_DB?: unknown });
+      if (counter) {
+        await ensureFreeRunCounterSchema(counter.db);
+        freeRunCounter = counter;
+      }
+    } catch (err) {
+      console.error(
+        `[payment-workflow] free-run counter unavailable for run ${p.runRequestId} — gate keeps today's paid behavior for Free accounts:`,
+        err instanceof Error ? err.message : String(err),
+      );
+      freeRunCounter = null;
+    }
     const gate = new NativeMonetizationGate(
       {
         // Flagship feature flag "monetization" (#2043): OFF = free
@@ -309,6 +334,7 @@ export class PaymentWorkflow extends ThinkWorkflow<
         ),
         priceCatalogue,
         proofRedemptions,
+        freeRunCounter,
         checkout: checkoutPorts,
       },
     );
