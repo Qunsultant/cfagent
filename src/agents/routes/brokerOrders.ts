@@ -23,7 +23,7 @@
  * stays on the legacy E*TRADE route); remote orders and cancel stay
  * E*TRADE-only. The legacy /api/etrade/* routes are untouched.
  */
-import { TradingPlatformRegistry } from "../../trading";
+import { TradingPlatformRegistry, ROUTED_BROKER_IDS } from "../../trading";
 import type { EtradeBrokerRouteContext } from "./etradeBroker";
 import { unauthenticatedResponse } from "./routeIdentity";
 import { resolveBrokerEnvironmentFromSettings } from "./brokerEnvironment";
@@ -42,11 +42,14 @@ import { parseStrategyOrder, orderPayloadHash } from "./orderPayloadHash";
 
 export type BrokerOrderRouteContext = EtradeBrokerRouteContext;
 
-/** The broker ids the routed surface accepts — mirrors the client
- * BROKER_OPTIONS in src/client/tenantProviders.ts (etrade, alpaca).
- * "sandbox" is an E*TRADE environment, not a broker, and is not
- * accepted here. */
-const ROUTED_BROKERS = ["etrade", "alpaca"] as const;
+/**
+ * Issue #3232 (program #3216): the routed brokers come from the one broker
+ * catalog. This used to be a second, hand-written copy whose own comment
+ * admitted it "mirrors the client BROKER_OPTIONS" — the exact drift the
+ * catalog exists to end. "sandbox" is E*TRADE's test environment, not a
+ * broker, and is still refused here.
+ */
+const ROUTED_BROKERS = ROUTED_BROKER_IDS;
 
 type RoutedBroker = (typeof ROUTED_BROKERS)[number];
 

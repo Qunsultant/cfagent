@@ -960,7 +960,7 @@ export interface TradeRecord {
   updatedAt: string;
 }
 
-export interface ETradeQuote {
+export interface BrokerQuote {
   symbol: string;
   companyName: string;
   lastPrice: number;
@@ -1120,7 +1120,7 @@ export interface StockScreenGatherSummary {
   error?: string;
 }
 
-export interface ScreenedStockItem extends ETradeQuote {
+export interface ScreenedStockItem extends BrokerQuote {
   price: number;
   rsi14?: number;
   /** Issue #1654 slice 1: Bollinger %B from real bar history, attached
@@ -1378,7 +1378,7 @@ export interface OptionScreenResult {
 // E*TRADE Watchlist Models & Persistence Types
 // =========================================================================
 
-export interface ETradeWatchlistItem {
+export interface BrokerWatchlistItem {
   symbol: string;
   ordered?: number;
   price?: number;
@@ -1390,7 +1390,7 @@ export interface ETradeWatchlistItem {
   addedAt?: string;
 }
 
-export interface ETradeWatchlist {
+export interface BrokerWatchlist {
   watchlistId: string | number;
   name: string;
   symbols: string[];
@@ -1432,7 +1432,7 @@ export interface OptionsChainCacheRecord {
   contractCount: number;
 }
 
-export interface ETradeOrderDraft {
+export interface BrokerOrderDraft {
   orderId: string;
   previewId?: string;
   symbol: string;
@@ -1471,7 +1471,7 @@ export interface ETradeOrderDraft {
   placedAt?: string;
 }
 
-export interface ETradeOrderExecutionResult {
+export interface BrokerOrderExecutionResult {
   success: boolean;
   orderId: string;
   executionId: string;
@@ -1492,7 +1492,7 @@ export interface ETradeOrderExecutionResult {
   timestamp: string;
 }
 
-export interface ETradePosition {
+export interface BrokerPosition {
   symbol: string;
   description: string;
   quantity: number;
@@ -1518,7 +1518,7 @@ export interface ETradePosition {
   daysGainPercent: number;
 }
 
-export interface ETradeAccount {
+export interface BrokerAccount {
   accountId: string;
   accountKey: string;
   accountIdKey?: string;
@@ -1540,7 +1540,7 @@ export interface ETradeAccount {
   dayTraderStatus: boolean;
 }
 
-export interface ETradePositionLot {
+export interface BrokerPositionLot {
   positionId?: number | string;
   positionLotId?: number | string;
   price?: number;
@@ -1569,14 +1569,19 @@ export interface ETradePositionLot {
   adjustedPrice?: number;
 }
 
-export interface ETradeBrokerStatus {
+export interface BrokerStatus {
   broker: "etrade" | "alpaca";
   name: string;
   configured: boolean;
-  mode: "live_oauth" | "sandbox_api" | "mcp_remote" | "simulated_engine";
-  protocol: "mcp_json_rpc" | "etrade_oauth_rest" | "sandbox_simulated";
+  /**
+   * Issue #3232: widened so a platform reports ITS OWN vocabulary. Alpaca
+   * reports `paper_api`/`live_api`; no broker may report another's strings.
+   */
+  mode: "live_oauth" | "sandbox_api" | "paper_api" | "live_api" | "mcp_remote" | "simulated_engine";
+  protocol: "mcp_json_rpc" | "etrade_oauth_rest" | "alpaca_rest_v2" | "sandbox_simulated";
   mcpServerUrl?: string;
-  environment: "sandbox" | "live";
+  /** `paper` is first-class since #3232; `sandbox` stays for legacy producers. */
+  environment: "paper" | "sandbox" | "live";
   activeEnvironment?: "TEST" | "PROD" | string;
   apiUrl?: string;
   hasApiKey?: boolean;
@@ -1761,7 +1766,7 @@ export interface MarketDataResearchProviderStatus {
 // Official E*TRADE API Models & Endpoints Contracts (Full Specification)
 // =========================================================================
 
-export interface ETradeTransaction {
+export interface BrokerTransaction {
   transactionId: string;
   accountId: string;
   transactionDate: number;
@@ -1775,7 +1780,7 @@ export interface ETradeTransaction {
   detailsURI?: string;
 }
 
-export interface ETradeTransactionDetails {
+export interface BrokerTransactionDetails {
   transactionId: string;
   accountId: string;
   transactionDate: number;
@@ -1799,7 +1804,7 @@ export interface ETradeTransactionDetails {
   };
 }
 
-export interface ETradeAlert {
+export interface BrokerAlert {
   id: number | string;
   createTime: number;
   subject: string;
@@ -1809,7 +1814,7 @@ export interface ETradeAlert {
   deleteTime?: number;
 }
 
-export interface ETradeAlertDetails {
+export interface BrokerAlertDetails {
   id: number | string;
   createTime: number;
   subject: string;
@@ -1821,13 +1826,13 @@ export interface ETradeAlertDetails {
   prev?: string;
 }
 
-export interface ETradeProductLookup {
+export interface BrokerProductLookup {
   symbol: string;
   description: string;
   type: string;
 }
 
-export interface ETradeOptionChainContract {
+export interface BrokerOptionContract {
   optionCategory?: string;
   optionRootSymbol?: string;
   timeStamp?: number;
@@ -1852,7 +1857,7 @@ export interface ETradeOptionChainContract {
   impliedVolatility?: number;
 }
 
-export interface ETradeOptionChain {
+export interface BrokerOptionChain {
   symbol: string;
   underlyingPrice: number;
   raw?: Record<string, unknown>;
@@ -1867,14 +1872,14 @@ export interface ETradeOptionChain {
   }>;
 }
 
-export interface ETradeOptionExpireDate {
+export interface BrokerOptionExpireDate {
   year: number;
   month: number;
   day: number;
   expiryType?: string;
 }
 
-export interface ETradeRemoteOrder {
+export interface BrokerRemoteOrder {
   orderId: number | string;
   details?: string;
   orderType: string;
@@ -1891,7 +1896,7 @@ export interface ETradeRemoteOrder {
   symbol?: string;
 }
 
-export interface ETradeCancelOrderResult {
+export interface BrokerCancelOrderResult {
   success: boolean;
   orderId: string;
   message: string;
@@ -2276,7 +2281,7 @@ export interface TradingViewWebhookPayload {
   timestamp?: string;
 }
 
-export interface ETradeWebhookPayload {
+export interface BrokerWebhookPayload {
   eventType: "ORDER_FILLED" | "ORDER_CANCELLED" | "ORDER_REJECTED" | "ACCOUNT_UPDATE";
   orderId?: string;
   symbol?: string;
@@ -2674,3 +2679,54 @@ export interface TWAPOrderConfig {
   intervalSeconds: number;
   maxPrice?: number;
 }
+
+// ---------------------------------------------------------------------------
+// Issue #3232 (program #3216): the platform contract is broker-neutral.
+//
+// Each interface above is declared under its neutral name. The E*TRADE-named
+// identifiers below are retained as deprecated aliases so no importer breaks;
+// they are superseded by the neutral names listed beside them. Do not add new
+// uses: `src/trading/interfaces.ts` (the contract) and every shared route use
+// the neutral names. Adapters keep their own broker-named internals by design.
+// ---------------------------------------------------------------------------
+
+/** @deprecated Use {@link BrokerQuote} — the quote contract is broker-neutral (#3232). */
+export type ETradeQuote = BrokerQuote;
+/** @deprecated Use {@link BrokerWatchlistItem} (#3232). */
+export type ETradeWatchlistItem = BrokerWatchlistItem;
+/** @deprecated Use {@link BrokerWatchlist} (#3232). */
+export type ETradeWatchlist = BrokerWatchlist;
+/** @deprecated Use {@link BrokerOrderDraft} (#3232). */
+export type ETradeOrderDraft = BrokerOrderDraft;
+/** @deprecated Use {@link BrokerOrderExecutionResult} (#3232). */
+export type ETradeOrderExecutionResult = BrokerOrderExecutionResult;
+/** @deprecated Use {@link BrokerPosition} (#3232). */
+export type ETradePosition = BrokerPosition;
+/** @deprecated Use {@link BrokerAccount} (#3232). */
+export type ETradeAccount = BrokerAccount;
+/** @deprecated Use {@link BrokerPositionLot} (#3232). */
+export type ETradePositionLot = BrokerPositionLot;
+/** @deprecated Use {@link BrokerStatus} (#3232). */
+export type ETradeBrokerStatus = BrokerStatus;
+/** @deprecated Use {@link BrokerTransaction} (#3232). */
+export type ETradeTransaction = BrokerTransaction;
+/** @deprecated Use {@link BrokerTransactionDetails} (#3232). */
+export type ETradeTransactionDetails = BrokerTransactionDetails;
+/** @deprecated Use {@link BrokerAlert} (#3232). */
+export type ETradeAlert = BrokerAlert;
+/** @deprecated Use {@link BrokerAlertDetails} (#3232). */
+export type ETradeAlertDetails = BrokerAlertDetails;
+/** @deprecated Use {@link BrokerProductLookup} (#3232). */
+export type ETradeProductLookup = BrokerProductLookup;
+/** @deprecated Use {@link BrokerOptionContract} (#3232). */
+export type ETradeOptionChainContract = BrokerOptionContract;
+/** @deprecated Use {@link BrokerOptionChain} (#3232). */
+export type ETradeOptionChain = BrokerOptionChain;
+/** @deprecated Use {@link BrokerOptionExpireDate} (#3232). */
+export type ETradeOptionExpireDate = BrokerOptionExpireDate;
+/** @deprecated Use {@link BrokerRemoteOrder} (#3232). */
+export type ETradeRemoteOrder = BrokerRemoteOrder;
+/** @deprecated Use {@link BrokerCancelOrderResult} (#3232). */
+export type ETradeCancelOrderResult = BrokerCancelOrderResult;
+/** @deprecated Use {@link BrokerWebhookPayload} (#3232). */
+export type ETradeWebhookPayload = BrokerWebhookPayload;
