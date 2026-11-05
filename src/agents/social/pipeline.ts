@@ -67,7 +67,7 @@ import {
   type SessionStoreStub,
 } from "./durableStores";
 import { createSessionStoreSocialBriefStore } from "./briefStore";
-import type { DoNamespaceLike } from "../../security/durableKv";
+import type { DoNamespaceLike } from "../../data/durableKv";
 import {
   executePipeline,
   type PipelineLedger,
