@@ -44,6 +44,20 @@
  *   (access-request + full IAAA lifecycle + /api/api-keys). The delegation
  *   -order assertion below grows by slice; the 148-descriptor EXPECTED list
  *   is unchanged (verified identical by the scanner before and after).
+ *
+ * Slice 4 decisions recorded here:
+ * - Privacy & compliance live in src/server/routes/privacy.ts as three
+ *   handlers in dispatch order: handlePrivacyRoutes
+ *   (/api/privacy/status, /api/privacy/preferences, /api/privacy/export,
+ *   /api/privacy/erasure), handlePrivacyChainsRoutes (/api/chains/status,
+ *   /api/chains/reconcile, /api/jobs/history, /api/traces,
+ *   /api/agents/registry, /api/products/catalog, /api/jobs/reconcile,
+ *   /api/retention/purge), handlePrivacyReportsRoutes
+ *   (/api/audit/history, /api/reports/list,
+ *   /api/reports/seed-canonical). The delegation-order assertion below
+ *   grows to the nine delegations in dispatch order; the 148-descriptor
+ *   EXPECTED list is unchanged (verified identical by the scanner before
+ *   and after).
  */
 import { describe, it, expect, vi } from "vitest";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
@@ -418,17 +432,22 @@ describe("server route inventory pin (#2902)", () => {
     expect(reconstruct()).toEqual(EXPECTED_ROUTES);
   });
 
-  it("delegates Core + Auth branches in handleFetch in the original order", () => {
+  it("delegates Core + Auth + Privacy branches in handleFetch in the original order", () => {
     const serverSrc = readFileSync("src/server.ts", "utf8");
     const calls = [...serverSrc.matchAll(/(?:await )?(handle\w+Routes)\(request, env, url, path/g)].map((m) => m[1]);
     // Slice 2 landed the three Core delegations; Slice 3 (#2902) adds the
     // three Auth delegations in their original dispatch positions, between
-    // the Core ones. Later slices extend this list in dispatch order.
+    // the Core ones. Slice 4 (#2902) adds the three Privacy delegations in
+    // their original dispatch positions. Later slices extend this list in
+    // dispatch order.
     expect(calls).toEqual([
       "handleCoreEarlyRoutes",
+      "handlePrivacyRoutes",
       "handleAuthLoginRoutes",
       "handleCoreHealthRoutes",
       "handleAuthMeRoutes",
+      "handlePrivacyChainsRoutes",
+      "handlePrivacyReportsRoutes",
       "handleAuthIaaaRoutes",
       "handleCoreLateRoutes",
     ]);
@@ -510,5 +529,31 @@ describe("core dispatch smoke (#2902 Slice 2)", () => {
     expect(me.status).toBe(200);
     expect(((await me.json()) as { authenticated: boolean }).authenticated).toBe(false);
     expect((await fetchWorker("/api/privacy/status")).status).toBe(401);
+  });
+
+  it("moved Slice 4 routes answer exactly as before the move without a session", async () => {
+    // Statuses measured on clean main 57364bdb before the move: the read
+    // routes 401 via their handlers (session null); the admin-pattern
+    // writes reach their own gates instead of the /api/* fallthrough
+    // (chains/reconcile hits the unbound DO stub -> 500; jobs/reconcile,
+    // retention/purge and reports/seed-canonical hit the unbound-AgentDB
+    // check -> 503). A dropped route would 401 at the fallthrough, so
+    // these values pin the dispatch, not just the auth.
+    const expected: Array<[string, number]> = [
+      ["/api/chains/status", 401],
+      ["/api/chains/reconcile", 500],
+      ["/api/jobs/history", 401],
+      ["/api/traces", 401],
+      ["/api/agents/registry", 401],
+      ["/api/products/catalog", 401],
+      ["/api/jobs/reconcile", 503],
+      ["/api/retention/purge", 503],
+      ["/api/audit/history", 401],
+      ["/api/reports/list", 401],
+      ["/api/reports/seed-canonical", 503],
+    ];
+    for (const [p, status] of expected) {
+      expect((await fetchWorker(p)).status).toBe(status);
+    }
   });
 });

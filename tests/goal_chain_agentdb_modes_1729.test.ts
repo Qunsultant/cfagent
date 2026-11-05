@@ -587,7 +587,13 @@ describe("G04 pinned: MCP mapper === REST route body for the same projection row
     expect(auditRoute).toContain("/audit");
     const reportsRoute = readFileSync(resolve(__dirname, "../src/agents/routes/reports.ts"), "utf8");
     expect(reportsRoute).toContain("mas_reports");
-    const server = readFileSync(resolve(__dirname, "../src/server.ts"), "utf8");
+    // Slice 4 of Qunsultant/cfagent#2902 (2026-11-05): the audit/reports
+    // reads moved verbatim from src/server.ts to
+    // src/server/routes/privacy.ts; the entry surface is server.ts +
+    // routes/*.ts, so the pin reads both files.
+    const server =
+      readFileSync(resolve(__dirname, "../src/server.ts"), "utf8") +
+      readFileSync(resolve(__dirname, "../src/server/routes/privacy.ts"), "utf8");
     expect(server).toContain('path === "/api/audit/history"');
     expect(server).toContain('path === "/api/reports/list"');
     const agentDb = readFileSync(resolve(__dirname, "../src/mcps/openaimp/agentDbReadCommands.ts"), "utf8");
