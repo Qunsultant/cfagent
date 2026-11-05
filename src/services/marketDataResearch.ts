@@ -2495,6 +2495,71 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
   }
 
   /**
+   * Issue #3329 (programme #3292): submit a multi-leg option order.
+   *
+   * Alpaca takes options through the same `/v2/orders` endpoint as equities,
+   * distinguished by `order_class: "mleg"` and a `legs` array of OCC symbols
+   * with a ratio and a position intent. There is no broker-side preview for
+   * mleg, so priced drafts are computed locally and only submission is remote.
+   *
+   * A success is reported only with a broker order id in hand; anything else
+   * is a failure, so a caller can never mistake "accepted for review" for a
+   * placed strategy.
+   */
+  async placeOptionOrder(payload: {
+    qty: string;
+    limit_price: string;
+    time_in_force?: string;
+    legs: Array<{ symbol: string; ratio_qty: string; side: "buy" | "sell"; position_intent: string }>;
+  }): Promise<{ success: boolean; orderId?: string; status?: string; httpStatus?: number; message?: string }> {
+    if (!this.isConfigured()) {
+      return {
+        success: false,
+        message: "Alpaca Trading error: ALPACA_API_KEY_ID and ALPACA_API_SECRET_KEY are required.",
+      };
+    }
+
+    try {
+      const body = {
+        order_class: "mleg",
+        qty: payload.qty,
+        type: "limit",
+        time_in_force: payload.time_in_force || "day",
+        limit_price: payload.limit_price,
+        legs: payload.legs,
+      };
+
+      const res = await fetch(`${this.getTradingUrl()}/v2/orders`, {
+        method: "POST",
+        headers: {
+          ...this.getHeaders(),
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+
+      const data = (await res.json().catch(() => ({}))) as any;
+      if (res.ok && data?.id) {
+        return {
+          success: true,
+          orderId: data.id,
+          status: data.status,
+          message: `Alpaca multi-leg order ${data.id} submitted. Status: ${data.status}`,
+        };
+      }
+
+      return {
+        success: false,
+        httpStatus: res.status,
+        message: data?.message || `Alpaca multi-leg order failed: HTTP ${res.status}`,
+      };
+    } catch (err: any) {
+      return { success: false, message: `Alpaca network exception: ${err.message || String(err)}` };
+    }
+  }
+
+  /**
    * Real Alpaca Trading v2: Get Account Details
    */
   async getAccount(): Promise<{ success: boolean; account?: any; message?: string; httpStatus?: number }> {

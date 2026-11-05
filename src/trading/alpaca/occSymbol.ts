@@ -37,6 +37,41 @@ export interface OccContract {
 const STRIKE_DIGITS = 8;
 const DATE_DIGITS = 6;
 
+/**
+ * Issue #3329: name a contract for order submission.
+ *
+ * Order legs arrive as strike / expiry / type rather than as a symbol, and
+ * Alpaca submits contracts by OCC symbol. This is the exact inverse of
+ * `parseOccSymbol`, refusing anything that would produce an ambiguous symbol
+ * instead of submitting a guess to the broker.
+ */
+export function formatOccSymbol(contract: {
+  root: string;
+  expirationDate: string;
+  optionType: "CALL" | "PUT";
+  strikePrice: number;
+}): string {
+  const root = String(contract.root ?? "").trim().toUpperCase();
+  if (!/^[A-Z0-9]{1,6}$/.test(root)) {
+    throw new Error(`Alpaca option legs need a 1-6 character underlying root (got "${contract.root ?? ""}").`);
+  }
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(contract.expirationDate ?? ""));
+  if (!match) {
+    throw new Error(`Alpaca option legs need an ISO expiry date (yyyy-mm-dd); got "${contract.expirationDate ?? ""}".`);
+  }
+  const strike = Number(contract.strikePrice);
+  if (!Number.isFinite(strike) || strike <= 0) {
+    throw new Error(`Alpaca option legs need a positive strike; got "${contract.strikePrice ?? ""}".`);
+  }
+  const strikeDigits = String(Math.round(strike * 1000)).padStart(STRIKE_DIGITS, "0");
+  if (strikeDigits.length !== STRIKE_DIGITS) {
+    throw new Error(`Alpaca option legs cannot represent a strike of ${strike} in OCC symbology.`);
+  }
+  const typeChar = contract.optionType === "CALL" ? "C" : "P";
+  const yymmdd = `${match[1].slice(2)}${match[2]}${match[3]}`;
+  return `${root}${yymmdd}${typeChar}${strikeDigits}`;
+}
+
 export function parseOccSymbol(symbol: string): OccContract | null {
   const raw = String(symbol ?? "").trim().toUpperCase();
   if (!raw) return null;
