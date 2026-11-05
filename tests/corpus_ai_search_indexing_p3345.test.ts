@@ -214,6 +214,25 @@ describe("C. corpus indexing hook (#3345)", () => {
     expect(uploads[0].content).not.toContain("track()");
   });
 
+  it("derived text decodes entities in a single pass and strips malformed script closers (CodeQL #33/#34)", async () => {
+    const { uploads, binding } = fakeNamespace();
+    const bytes = enc.encode(
+      "<html><body><script>secretScriptBody()</script foo>" +
+        "<p>Escapes shown as &amp;lt;tag&amp;gt; stay escaped once.</p></body></html>"
+    );
+    const meta = await finraMeta(bytes);
+    const outcome = await indexCorpusDocInAiSearch(
+      { AI_SEARCH: binding as any, AI_SEARCH_INSTANCE: INSTANCE, [FLAG]: "1" },
+      { meta, bytes }
+    );
+    expect(outcome.ok).toBe(true);
+    expect(uploads).toHaveLength(1);
+    // Single-pass decoding: the source literal "&lt;" is text, not a tag.
+    expect(uploads[0].content).toContain("shown as &lt;tag&gt; stay escaped once.");
+    // A script closed by a malformed tag is still script, not document text.
+    expect(uploads[0].content).not.toContain("secretScriptBody");
+  });
+
   it("flag ON + binding absent -> not-configured, no throw, no upload", async () => {
     const meta = await finraMeta();
     const outcome = await indexCorpusDocInAiSearch(
