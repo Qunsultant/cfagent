@@ -77,6 +77,7 @@ import { handleAdminTenantQueueRoutes } from "../routes/adminTenantQueues";
 import { handlePlatformTenantRoutes } from "../routes/platformTenants";
 import { handlePlatformChannelRoutes } from "../routes/platformChannels";
 import { handleKvWipeRoutes } from "../routes/kvWipe";
+import { handleDataLifecycleRoutes } from "../routes/dataLifecycle";
 import { scheduleScreenerFollowups } from "./asyncJobs";
 
 /** The orchestrator surface the route dispatch needs (see header note). */
@@ -769,6 +770,16 @@ export async function routeRequest(deps: RouteRequestDeps, request: Request): Pr
     audit: (type, agent, payload) => deps.audit(type, agent, payload),
   });
   if (kvWipeResponse) return kvWipeResponse;
+
+  // Issue #3250: admin data lifecycle routes (clean state,
+  // platform bootstrap, tenant bootstrap) run after kvWipe in
+  // the admin neighbourhood; every default is resolved inside
+  // routes/dataLifecycle.ts from env, the class gains no logic.
+  const dataLifecycleResponse = await handleDataLifecycleRoutes(request, url, path, sessionId, {
+    env: deps.env,
+    audit: (type, agent, payload) => deps.audit(type, agent, payload),
+  });
+  if (dataLifecycleResponse) return dataLifecycleResponse;
 
   // Issue #2681: orchestrator-migration routes run after kvWipe,
   // before schedules; the route logic itself lives in
