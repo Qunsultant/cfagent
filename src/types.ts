@@ -259,6 +259,19 @@ export interface Env {
   // src/services/corpusAiSearchIndex.ts). Rollback is unsetting
   // the var — no code change, no data migration.
   AI_SEARCH_CORPUS_INDEXING_ENABLED?: string;
+  // #3391 — Stock Copilot (Alpaca paper) master switch. Same idiom as
+  // the flags above: "1"/"true"/"on" (case-insensitive) = on; absence
+  // = OFF. The var is deliberately NOT in wrangler.jsonc: the copilot
+  // ships default-off, and enablement is a config change, never a code
+  // change. Flag-on declares a Think scheduled cycle task on per-login
+  // orchestrator instances; every cycle re-checks the flag and the
+  // Alpaca paper-only guard before any order. Rollback is unsetting
+  // the var.
+  STOCK_COPILOT_PAPER_ENABLED?: string;
+  // #3391 — optional comma-separated universe override for the Stock
+  // Copilot cycle; absence uses the service's default universe
+  // (src/services/stockCopilot.ts).
+  STOCK_COPILOT_UNIVERSE?: string;
   // Comma-separated provider ids. Default when wiring is on: "github".
   // An id with no registered adapter is ignored, never a fallback.
   IAAA_ENABLED_PROVIDERS?: string;
