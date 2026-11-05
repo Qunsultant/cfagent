@@ -95,7 +95,7 @@ import { OrchestratorAgent } from "../src/agents/orchestrator";
 import { createMAS } from "../src/agents/mas";
 import { DraftPaymentCommand } from "../src/mcps/openaimp/commands";
 import { DatabaseORM } from "../src/orm";
-import { createStoreKv, type DoNamespaceLike } from "../src/security/durableKv";
+import { createStoreKv, type DoNamespaceLike } from "../src/data/durableKv";
 import { computeHmacSha256Hex } from "../src/services/cryptoUtils";
 import { MockSqlStorage } from "./mock-sql";
 import type { Env } from "../src/types";
