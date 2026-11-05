@@ -1,6 +1,6 @@
 ---
 name: Bug report (gitops §5)
-about: Defect in shipped behavior — title "[Bug] - <title>", label "bug". Includes ITIL incident triage + problem-management RCA.
+about: Defect, incident, or problem record — pick Classification below; title prefix + label follow the choice. Includes ITIL incident triage + problem-management RCA.
 title: "[Bug] - "
 labels: [bug]
 assignees: []
@@ -11,6 +11,18 @@ assignees: []
 
 ## Type
 - [x] `[Bug] - <title>` + `bug`
+
+## Classification
+<!-- Pick exactly one. The title prefix + label follow the choice — edit the issue title and labels to match (the template default is Development/Bug). -->
+- [ ] Incident management — an unplanned interruption or reduction in service quality. Title prefix `[Incident] - `, label `incident`. This issue IS the incident record.
+- [ ] Problem management — the root-cause record behind one or more incidents. Title prefix `[Problem] - `, label `problem`. Linked incident issue(s) required.
+- [ ] Development — a defect fix or enhancement with no current service impact. Title prefix `[Bug] - ` + label `bug` (or the enhancement equivalent) stays.
+
+How the sections below bind to the choice:
+- Incident → the Incident triage section is REQUIRED (affected service/surfaces, detection time + how detected, impact, P1–P4 priority field, workaround or none, linked problem via Related issues + the RCA section). Incident lifecycle: detect → triage → workaround → restore → communicate. An incident closes only when service restoration is proven live AND its problem record is linked (or an explicit one-off decision with reason is recorded in the RCA section).
+- Problem → the Root cause analysis section is REQUIRED (evidenced root cause with code/log link, contributing causes, why it escaped, structural fix, recurrence prevention). Known-error rule: a problem with diagnosed root cause + documented workaround carries the `known-error` label until its fix merges.
+- Development → Incident triage and RCA stay as they are (most triage fields "none" for non-incidents; RCA required before close per the existing gate).
+- The §15 Completion report + RCA closing gate applies to Incident and Problem closes, not just bugs.
 
 ## Size
 <!-- Estimate the work, not the importance. Pick one. -->
@@ -33,14 +45,14 @@ Environment (surface: UX / CLI / API / MCP; version/commit if known):
 ## Impact
 Severity (who is affected, how badly, workaround if any):
 
-## Incident triage (ITIL — fill for every bug; most fields are "none" for non-incidents)
+## Incident triage (ITIL — REQUIRED when Classification is Incident; for Development, most fields are "none")
 Is this bug an incident (unplanned interruption or reduction in service quality)? (yes / no):
 Affected service/surfaces:
 Detection time + how detected:
 Impact (users affected, degradation vs outage):
 Priority (P1 service down / P2 major degradation / P3 minor degradation / P4 cosmetic — a FIELD, not a label):
 Workaround in place (or none):
-Linked incident issue (or none — a bug that IS the incident record carries the `incident` label itself when service impact is confirmed):
+Linked incident issue (or none — an issue classified Incident IS the incident record and carries the `incident` label itself when service impact is confirmed):
 
 ## Existing / similar issues (required — search BEFORE creating)
 - [ ] I searched existing issues (open and closed) for the same or similar work before creating this issue.
@@ -73,7 +85,7 @@ Levels/types (ISTQB, per G5): unit / integration / system / acceptance; function
 ## Dependencies
 Cross-lane need: if this requires another lane's capability, link that lane's separately created and assigned issue here — do not fold their work into this issue.
 
-## Root cause analysis (ITIL problem management — required before close)
+## Root cause analysis (ITIL problem management — REQUIRED when Classification is Problem; required before close for all classifications)
 Timeline (facts only, with times: what happened, when, when detected, when workaround/fix landed):
 Root cause (evidenced — link the code/log/record that proves it, not just an assertion):
 Contributing causes:
@@ -100,7 +112,8 @@ Regression risk + pins:
 ## Agentic design (docs/agents)
 Allocation (agent judgment vs deterministic code, or none — a bug fix is usually deterministic code):
 
-## Completion report (gitops §15 — fill on close)
+## Completion report (gitops §15 — fill on close; applies to Incident and Problem closes, not just bugs)
+An incident closes only when service restoration is proven live AND its problem record is linked (or an explicit one-off decision with reason is recorded in the RCA section).
 RCA closing gate (all must hold, or the issue stays open):
 - [ ] Root cause evidenced (code/log link in the RCA section)
 - [ ] Structural fix merged + verified in production (or known-error recorded with workaround + fix issue linked)
