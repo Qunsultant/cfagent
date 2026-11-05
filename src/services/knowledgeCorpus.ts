@@ -244,6 +244,41 @@ export function servedFileLinkFor(bucketKey: unknown): string | undefined {
 }
 
 /**
+ * Issue #3345: the AI Search document-id prefix for corpus items
+ * uploaded through the namespace binding's items API (the corpus
+ * bridge in src/services/corpusAiSearchIndex.ts, reusing the #2246
+ * upload executor). The document id is `corpus:<bucketKey>` — the
+ * bucket key rides inside the id so the serving-side mapping can
+ * recover the servable key (and its served-file link) from an
+ * index chunk without inventing provenance. The report leg's
+ * prefix (`report:` in aiSearchPaths.ts) is the sibling convention.
+ */
+export const AI_SEARCH_CORPUS_DOCUMENT_PREFIX = "corpus:";
+
+/**
+ * Issue #3345: the items-API document id for a corpus bucket key,
+ * or null when the key is not a servable corpus key (only real
+ * corpus documents get index identities).
+ */
+export function corpusIndexDocumentId(bucketKey: unknown): string | null {
+  if (!parseKnowledgeBucketKey(bucketKey) || typeof bucketKey !== "string") return null;
+  return `${AI_SEARCH_CORPUS_DOCUMENT_PREFIX}${bucketKey}`;
+}
+
+/**
+ * Issue #3345: recover the servable bucket key from an index item
+ * key carrying a corpus document id, or null when the key is not a
+ * corpus document id (or its remainder is not a servable corpus
+ * key). Callers fall back to the raw key — never a guessed key.
+ */
+export function corpusBucketKeyFromIndexKey(key: unknown): string | null {
+  if (typeof key !== "string") return null;
+  if (!key.startsWith(AI_SEARCH_CORPUS_DOCUMENT_PREFIX)) return null;
+  const remainder = key.slice(AI_SEARCH_CORPUS_DOCUMENT_PREFIX.length);
+  return parseKnowledgeBucketKey(remainder) ? remainder : null;
+}
+
+/**
  * Issue #1169 (S2): attach corpus provenance to one raw upstream
  * search chunk (MAS path). Index-returned chunks are, by definition,
  * indexed; a served-file link is attached ONLY when the chunk's key
@@ -255,7 +290,14 @@ export function servedFileLinkFor(bucketKey: unknown): string | undefined {
 export function attachCorpusProvenance(chunk: unknown): unknown {
   if (typeof chunk !== "object" || chunk === null || Array.isArray(chunk)) return chunk;
   const record = chunk as Record<string, unknown>;
-  const bucketKey = typeof record.key === "string" ? record.key : undefined;
+  const rawKey = typeof record.key === "string" ? record.key : undefined;
+  // Issue #3345: an items-API corpus chunk carries the corpus
+  // document id (`corpus:<bucketKey>`) as its key; resolve it to
+  // the servable bucket key so provenance renders exactly as it
+  // does for an R2-source corpus chunk.
+  const bucketKey = rawKey
+    ? (corpusBucketKeyFromIndexKey(rawKey) ?? rawKey)
+    : undefined;
   const servedFileLink = bucketKey ? servedFileLinkFor(bucketKey) : undefined;
   return {
     ...record,
