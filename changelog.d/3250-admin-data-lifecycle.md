@@ -1,0 +1,2 @@
+### Added
+- Admin data lifecycle in Platform Admin (#3250): a Data Lifecycle section with clean-state reset (tenant and platform scopes, preview-token-bound confirm, pre-wipe export bundle), platform bootstrap check + initialize (genesis claim performed exactly as the login path), and tenant bootstrap with a per-step completion report — every confirmed operation audited after its writes through the AuditLog port.
