@@ -28,7 +28,7 @@ import {
   type CreateIaaaAuditEventInput,
   type IaaaAuditEvent,
 } from "../security/iaaaAudit";
-import type { StoreReply } from "../security/durableKv";
+import type { StoreReply } from "./durableKv";
 import {
   IAAA_AUDIT_ARCHIVE_KEY_PREFIX,
   IAAA_AUDIT_DEFAULT_LIVE_MAX,
