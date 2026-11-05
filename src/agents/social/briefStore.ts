@@ -23,7 +23,7 @@
  */
 
 import { zonedDateParts } from "../../schedule";
-import type { DoNamespaceLike } from "../../security/durableKv";
+import type { DoNamespaceLike } from "../../data/durableKv";
 import { socialStoreOp, type SessionStoreStub } from "./durableStores";
 
 /** NLQ query cap, shared with the NLQ webhook (server.ts): briefs longer than this are refused, not truncated. */
