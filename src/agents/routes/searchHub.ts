@@ -30,12 +30,85 @@
  * and no provenance of its own. When the report store (sql) is
  * absent the route fails honestly with a 500 instead of serving
  * instance-only results as the full MAS answer.
+ *
+ * Issue #3323: POST /search/ai-agent dispatches to the REAL
+ * AiSearchAgent through the AI_SEARCH_AGENT Durable Object binding —
+ * the hub surface the "Search Agent" tab's name always implied but
+ * never was (that tab calls the service, above). The dispatch
+ * mirrors AISearchAgentSearchCommand.execute (#2250) exactly: the
+ * binding resolved off env (declared in wrangler.jsonc, not on the
+ * Env type — the #2223 posture), the fixed service instance
+ * "aisearch", the ROUTE's session login threaded as callerLogin (a
+ * login in the request body is never read — identity comes from the
+ * session only), and the agent's typed result shaped WITHOUT
+ * laundering: rows pass through with their chunk fields and
+ * provenance intact, the serving path is labelled, degraded notes
+ * and failure tokens ride along verbatim. An absent/misshapen
+ * binding answers the honest not_configured result in-band (200,
+ * like the /search/agent degraded contract) — never a throw, never
+ * fabricated rows. The shaping lives here rather than importing the
+ * MCP command module: shapeAiSearchAgentAnswer is not exported, and
+ * executing the command class would require fabricating an
+ * McpToolContext (its `orm` handle) this route does not own; the
+ * route shapes from the same typed runner result
+ * (AiSearchAgentSearchResult) the command shapes from.
  */
 import { ETradeAISearchService } from "../../services/aiSearch";
 import { searchPlatformKnowledge } from "../../services/platformKnowledge";
 import { unauthenticatedResponse } from "./routeIdentity";
 import { createMAS, type MASOptions } from "../mas";
+import { AgentErrorCode } from "../../aspects/errorCodes";
+import type {
+  AiSearchAgentResultItem,
+  AiSearchAgentSearchOptions,
+  AiSearchAgentSearchResult,
+  AiSearchPath,
+} from "../aiSearchPaths";
 import type { Env } from "../../types";
+
+/** The AiSearchAgent service instance (mirrors the #2250 command). */
+const AI_SEARCH_AGENT_SERVICE_INSTANCE = "aisearch";
+
+/** Structural minimum of the AiSearchAgent stub this route calls. */
+interface AiSearchAgentStubLike {
+  search(
+    query: string,
+    opts?: AiSearchAgentSearchOptions,
+  ): Promise<AiSearchAgentSearchResult>;
+}
+
+/**
+ * The route's answer shape — field-for-field the `data` half of the
+ * #2250 command's shaped answer (AiSearchAgentToolData): the agent's
+ * result with its rows unaltered, its serving path labelled, and its
+ * degraded/failure state carried, never laundered.
+ */
+export interface SearchHubAiAgentResponse {
+  ok: boolean;
+  path?: AiSearchPath;
+  degraded?: string;
+  results: AiSearchAgentResultItem[];
+  code?: AiSearchAgentSearchResult["code"];
+  errorToken?: AgentErrorCode;
+  error?: string;
+  correlationId: string;
+}
+
+/** Shape one typed agent search result into the route's answer. */
+function shapeAiAgentResponse(
+  result: AiSearchAgentSearchResult,
+): SearchHubAiAgentResponse {
+  return {
+    ok: result.ok,
+    ...(result.path ? { path: result.path } : {}),
+    ...(result.degraded ? { degraded: result.degraded } : {}),
+    results: result.results ?? [],
+    ...(result.code ? { code: result.code } : {}),
+    ...(result.errorToken ? { errorToken: result.errorToken } : {}),
+    ...(result.error ? { error: result.error } : {}),
+    correlationId: result.correlationId,
+  };
+}
 
 export interface SearchHubRouteContext {
   env?: Env;
@@ -125,6 +198,58 @@ export async function handleSearchHubRoutes(
       { toolCallId: crypto.randomUUID(), messages: [{ role: "user", content: query }], context: {} }
     );
     return Response.json(result);
+  }
+
+  if (path.endsWith("/search/ai-agent") && request.method === "POST") {
+    const login = ctx.userLogin || request.headers.get("x-user-login") || "";
+    if (!login) return unauthenticatedResponse();
+    const body = (await request.json().catch(() => ({}))) as {
+      query?: string;
+      limit?: number;
+    };
+    const query = (body.query || "").trim();
+    if (!query) {
+      return Response.json({ error: "Query parameter is required" }, { status: 400 });
+    }
+    const limit = typeof body.limit === "number" && body.limit > 0 ? body.limit : 5;
+    const audit = ctx.audit ?? (() => {});
+    const namespace = (ctx.env as any)?.AI_SEARCH_AGENT as
+      | DurableObjectNamespace
+      | undefined;
+    if (
+      !namespace ||
+      typeof namespace.get !== "function" ||
+      typeof namespace.idFromName !== "function"
+    ) {
+      const detail =
+        "the AI_SEARCH_AGENT Durable Object binding is not configured in this environment, so the AiSearchAgent cannot be reached";
+      audit("ai_search_agent.query", "search", {
+        query,
+        ok: false,
+        code: "not_configured",
+      });
+      const answer: SearchHubAiAgentResponse = {
+        ok: false,
+        code: "not_configured",
+        errorToken: AgentErrorCode.UNKNOWN_AGENT_ERROR,
+        error: detail,
+        results: [],
+        correlationId: crypto.randomUUID(),
+      };
+      return Response.json(answer);
+    }
+    const stub = namespace.get(
+      namespace.idFromName(AI_SEARCH_AGENT_SERVICE_INSTANCE),
+    ) as unknown as AiSearchAgentStubLike;
+    const result = await stub.search(query, { callerLogin: login, limit });
+    audit("ai_search_agent.query", "search", {
+      query,
+      ok: result.ok,
+      path: result.path,
+      matches: (result.results ?? []).length,
+      degraded: Boolean(result.degraded),
+    });
+    return Response.json(shapeAiAgentResponse(result));
   }
 
   return null;
