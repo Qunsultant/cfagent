@@ -520,3 +520,58 @@ conflict on Qunsultant/cfagent#2902.
   — assertions unchanged, only the files scanned.
 - Q3 stays open for Slice 9; Q4 stays open for Slice 8. No new open
   question is raised by Slice 4.
+
+## 12. Slice 5 note (2026-11-05, PR for #2902 Slice 5)
+
+- Baseline at Slice 5: `origin/main` `ab336f60` (Slice 4 merged),
+  `src/server.ts` 3,144 lines / 150,320 bytes. Trading & market move
+  to `src/server/routes/trading.ts` (559 lines) as four handlers in
+  dispatch order: `handleTradingScheduleRoutes` (`/api/schedule/*`),
+  `handleTradingOmniRoutes` (`/api/trading/email/*`,
+  `/api/trading/slack/*`, `/api/trading/voice/*`,
+  `/api/trading/options/*`, `/trading/options/*`, `/api/schedules`
+  forward), `handleTradingQuotesRoutes` (`/api/market-data/quotes`,
+  `/api/market/quotes`, `/api/foss/quotes`, `/api/market/quotes/source`),
+  `handleTradingApproveRoutes` (`/trade/approve`, `/clear`, `/reset`,
+  `/api/clear`, `/api/reset`, `/api/options/flows/*`).
+  `src/server.ts` after Slice 5: 2,683 lines / 126,903 bytes.
+- The 148-descriptor pin is unchanged (scanner reconstructs the identical
+  ordered list before and after); the pin test's delegation-order assertion
+  grows to the thirteen delegations in dispatch order (Core early, Privacy,
+  Auth login, Core health, Trading schedule, Auth me, Privacy chains,
+  Privacy reports, Auth IAAA, Trading omni, Trading quotes, Trading
+  approve, Core late), and its dispatch smoke gains a Slice 5 check that
+  every moved route answers exactly as on clean main before the move
+  (most 401; batch quotes 200 — public by the #1725 M10 decision;
+  `/api/trading/email/approve` 200; bare `/trade/approve` 400 on the
+  missing orderId). No route changed; no options behaviour change — the
+  `/api/options/flows/*` block moves as a whole.
+- The WebSocket upgrade dispatch (`dispatchWsUpgrade`) stays inline in
+  `server.ts` between the schedules forward and the quotes branches, in
+  its original position: it is not a route branch (no path condition),
+  the scanner does not see it, and the pin does not cover it. Slice 9
+  decides its final home; it must not be split from that position
+  without a recorded decision.
+- Pin updates in the same PR (repo pin rule): the source-presence pins
+  in `tests/options_flow_provenance.test.ts` read the entry surface as
+  `server.ts` + `routes/trading.ts` instead of `server.ts` alone
+  (assertions unchanged, only the files scanned); the same entry-surface
+  change applies to the #154 source pins in
+  `tests/fallback_identity_session_gate.test.ts` (401-guard count and
+  fallback-identity absence), the #149 source pin in
+  `tests/trade_approve_session_gate.test.ts` (approve-route session
+  gate), and the #3121 S1 source pin in
+  `tests/schedule-3121-s1-parity.test.ts` (goal-funnel audit wiring).
+- Rebase note: the branch was rebased onto main `5d0db98c`, whose #3121
+  S1 commit had added goal-lifecycle audit wiring
+  (`auditGoalLifecycle`, creation provenance, four
+  `schedule.goal.*` audit calls) inside the schedule block after Slice
+  5's extraction base. The conflict was resolved by keeping the Slice
+  5 move and porting the #3121 S1 changes verbatim into
+  `handleTradingScheduleRoutes` in `routes/trading.ts` (with the
+  `consolidatedScheduling`, `DoStubLike`, and
+  `SHARED_ORCHESTRATOR_INSTANCE` imports); no #3121 behaviour was
+  dropped or changed. Final sizes are measured after the rebase and
+  recorded in the PR body.
+- Q3 stays open for Slice 9; Q4 stays open for Slice 8. No new open
+  question is raised by Slice 5.

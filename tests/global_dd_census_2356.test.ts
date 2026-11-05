@@ -1274,6 +1274,10 @@ describe("global D-D census: step 5e — residual bucket family port composition
       ["src/security/serviceTokens.ts", "../data/durableKv"],
       ["src/security/session.ts", "../data/durableKv"],
       ["src/server.ts", "./data/durableKv"],
+      // Slice 5 of Qunsultant/cfagent#2902 (2026-11-05): the moved
+      // schedule handler's #3121 S1 audit wiring imports DoStubLike
+      // from the data layer, as server.ts did inline.
+      ["src/server/routes/trading.ts", "../../data/durableKv"],
       ["src/services/actorGatewayPorts.ts", "../data/durableKv"],
       ["src/services/agenticPayments.ts", "../data/durableKv"],
       ["src/trading/alpaca/credentialStore.ts", "../../data/durableKv"],
