@@ -317,8 +317,12 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
       const pair = await resolveAlpacaPair(this.env, this.userLogin, side);
       this.credentialSource = pair.source;
       this.keyIdLast4 = pair.keyIdLast4;
-      if (pair.source === "user") {
-        this.env = applyAlpacaPair(this.env, pair);
+      if (pair.source === "user" || pair.source === "deployment") {
+        const { baseUrl } = resolveAlpacaTradingBase(this.env, this.overrideEnv);
+        this.env = {
+          ...applyAlpacaPair(this.env, pair),
+          ALPACA_BASE_URL: baseUrl,
+        };
         this.alpacaData = new AlpacaMarketDataProvider(this.env);
       }
     })();

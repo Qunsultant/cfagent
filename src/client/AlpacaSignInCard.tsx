@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Badge, Button, Card, Flex, Notice, Spinner, Stack, TextInput } from "./components/ui";
+import { csrfHeaders } from "./apiFetch";
+import { useBrokerEnvironment } from "./brokerEnvironment";
 
 /**
  * Issue #3351 — Alpaca sign-in.
@@ -57,6 +59,8 @@ export interface AlpacaSignInCardProps {
 }
 
 export function AlpacaSignInCard({ activeEnv }: AlpacaSignInCardProps) {
+  const brokerEnv = useBrokerEnvironment();
+  const effectiveEnv = activeEnv ?? brokerEnv;
   const [load, setLoad] = useState<LoadState>({ state: "loading" });
   const [apiKey, setApiKey] = useState("");
   const [secretKey, setSecretKey] = useState("");
@@ -65,7 +69,8 @@ export function AlpacaSignInCard({ activeEnv }: AlpacaSignInCardProps) {
 
   const readStatus = useCallback(async () => {
     try {
-      const res = await fetch("/api/broker/connect/alpaca", { headers: { Accept: "application/json" } });
+      const url = `/api/broker/connect/alpaca?environment=${encodeURIComponent(effectiveEnv)}`;
+      const res = await fetch(url, { headers: { Accept: "application/json" } });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
         const detail = failure(body);
@@ -80,7 +85,7 @@ export function AlpacaSignInCard({ activeEnv }: AlpacaSignInCardProps) {
         message: "Alpaca could not be reached. Check your connection and try again.",
       });
     }
-  }, []);
+  }, [effectiveEnv]);
 
   useEffect(() => {
     void readStatus();
@@ -91,10 +96,15 @@ export function AlpacaSignInCard({ activeEnv }: AlpacaSignInCardProps) {
     setFormError(null);
     setSubmitting(true);
     try {
-      const res = await fetch("/api/broker/connect/alpaca", {
+      const url = `/api/broker/connect/alpaca?environment=${encodeURIComponent(effectiveEnv)}`;
+      const res = await fetch(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ apiKey, secretKey }),
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          ...csrfHeaders(),
+        },
+        body: JSON.stringify({ apiKey, secretKey, environment: effectiveEnv }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -116,9 +126,13 @@ export function AlpacaSignInCard({ activeEnv }: AlpacaSignInCardProps) {
     setFormError(null);
     setSubmitting(true);
     try {
-      const res = await fetch("/api/broker/disconnect/alpaca", {
+      const url = `/api/broker/disconnect/alpaca?environment=${encodeURIComponent(effectiveEnv)}`;
+      const res = await fetch(url, {
         method: "POST",
-        headers: { Accept: "application/json" },
+        headers: {
+          Accept: "application/json",
+          ...csrfHeaders(),
+        },
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -163,7 +177,7 @@ export function AlpacaSignInCard({ activeEnv }: AlpacaSignInCardProps) {
   const status = load.status;
 
   return (
-    <Card data-alpaca-signin="1" data-active-env={activeEnv ?? ""}>
+    <Card data-alpaca-signin="1" data-active-env={effectiveEnv}>
       <Flex align="center" gap="2">
         <h4>Alpaca sign-in</h4>
         <Badge tone={status.signedIn ? "success" : status.configured ? "neutral" : "warning"} size="sm">
