@@ -55,3 +55,20 @@ export function positionsEndpoint(brokerId: string = readTenantProvidersState().
 export function diagnosticsEndpoint(brokerId: string = readTenantProvidersState().brokerId): string | null {
   return brokerId === "etrade" ? "/api/etrade/diagnostics" : null;
 }
+
+/**
+ * Issue #3368: where the Sync control asks.
+ *
+ * E*TRADE's diagnostics answer a question only E*TRADE has (its OAuth session);
+ * `diagnosticsEndpoint` already says "do not call" for every other broker, and
+ * the menu used to ignore that. The neutral status read answers the question the
+ * control actually asks ("is this broker usable right now"), so it is the
+ * target when diagnostics do not exist — and `diagnostics` says whether
+ * E*TRADE's window events belong to the call.
+ */
+export function syncTarget(
+  brokerId: string = readTenantProvidersState().brokerId,
+): { path: string; diagnostics: boolean } {
+  const diagnostics = diagnosticsEndpoint(brokerId);
+  return diagnostics ? { path: diagnostics, diagnostics: true } : { path: statusEndpoint(brokerId), diagnostics: false };
+}
