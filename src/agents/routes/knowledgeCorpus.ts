@@ -41,6 +41,16 @@
  * #1168 note: knowledge/ keys are corpus, not reports — they carry
  * no mas_reports row by design and are excluded from the #1168
  * orphan sweep (see knowledgeCorpus.ts header).
+ *
+ * #3345 (corpus items-API bridge): the POST upload branch also
+ * fires the corpus indexing hook (corpusAiSearchIndex.ts) after a
+ * successful write and reports its honest state as
+ * `indexing.state` in the response; the corpus-sync branch runs
+ * the bridge backfill leg, so the sync response carries per-item
+ * indexing state under `corpusIndex`. Both are additive response
+ * fields — no existing field changes meaning. The hook and the
+ * leg are flag-gated (AI_SEARCH_CORPUS_INDEXING_ENABLED) and
+ * best-effort: neither can fail the write or the sync.
  */
 
 import { unauthenticatedResponse } from "./routeIdentity";
@@ -53,6 +63,10 @@ import {
   shouldFireCorpusSyncTick,
   CORPUS_SYNC_LAST_RUN_KEY,
 } from "../../services/corpusSync";
+import {
+  indexCorpusDocInAiSearch,
+  runCorpusAiSearchIndexBackfill,
+} from "../../services/corpusAiSearchIndex";
 import {
   settingReadFromSql,
   settingWriteFromSql,
@@ -97,6 +111,13 @@ export interface KnowledgeCorpusRouteContext {
     // orchestrator mount already passes the full env.
     AI?: any;
     VECTOR_MEMORY?: any;
+    // Issue #3345: the AI Search namespace door + the corpus
+    // indexing flag join the env (type-only widening, same idiom)
+    // so the upload branch can fire the corpus indexing hook and
+    // the corpus-sync branch can run the bridge backfill leg.
+    AI_SEARCH?: AiSearchNamespace;
+    AI_SEARCH_INSTANCE?: string;
+    AI_SEARCH_CORPUS_INDEXING_ENABLED?: string;
   };
   storage: BlobStorage;
   userLogin: string;
@@ -282,8 +303,23 @@ export async function handleKnowledgeCorpusRoutes(
         contentType,
         fileName,
       });
+      // Issue #3345: the corpus indexing hook fires on every
+      // successful write (fresh or hash-idempotent replay — the
+      // replay re-uploads the same document id, self-healing an
+      // index that missed the first write). Best-effort by
+      // contract: the hook never throws, and its honest state
+      // (indexed / not-configured / failed) rides the response.
+      const indexing = await indexCorpusDocInAiSearch(ctx.env, {
+        meta: result.meta,
+        bytes,
+      });
       return Response.json(
-        { success: true, ...result.meta, idempotent: result.idempotent },
+        {
+          success: true,
+          ...result.meta,
+          idempotent: result.idempotent,
+          indexing: { state: indexing.state },
+        },
         { status: result.idempotent ? 200 : 201 }
       );
     } catch (err) {
@@ -334,6 +370,15 @@ export async function handleKnowledgeCorpusRoutes(
       recordStore: ctx.storage,
       bucket: createBlobStore(ctx.env),
       backfill: () => runCanonicalIndexBackfillAll(ctx.env, sql),
+      // Issue #3345: sync also backfills the corpus items-API
+      // bridge — per-item indexing state rides the sync result
+      // (and therefore the Corpus tab, which renders sync results).
+      corpusIndex: () =>
+        runCorpusAiSearchIndexBackfill(ctx.env, {
+          manifest: SEED_MANIFEST_ENTRIES,
+          recordStore: ctx.storage,
+          bucket: createBlobStore(ctx.env),
+        }),
     });
     if (result.completed) {
       settingWriteFromSql(sql)(CORPUS_SYNC_LAST_RUN_KEY, result.ranAt);
