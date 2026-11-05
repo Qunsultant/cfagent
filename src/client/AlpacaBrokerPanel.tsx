@@ -276,8 +276,9 @@ export function AlpacaBrokerPanel({ activeEnv }: AlpacaBrokerPanelProps) {
             {configured === false && (
               <Notice tone="warning" title="Alpaca credentials are not set">
                 <span data-broker-credential-vars={guidanceEnvNames.join(",")}>
-                  Set {guidanceEnvNames.join(", ")} for {tradingType ?? "paper"} trading. The key and secret are deployment
-                  secrets; this surface never asks for them.
+                  Sign in above with your own key pair to trade your own Alpaca account, or configure{" "}
+                  {guidanceEnvNames.join(", ")} for {tradingType ?? "paper"} trading. The server verifies a pair
+                  before storing it and never shows the secret again.
                 </span>
               </Notice>
             )}
