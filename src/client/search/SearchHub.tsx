@@ -7,6 +7,7 @@ import { Button, TextInput } from "../components/ui";
 import type { PendingQuery, TabHealth } from "./searchTabTypes";
 import { NlqSearchTab } from "./tabs/NlqSearchTab";
 import { SearchAgentTab } from "./tabs/SearchAgentTab";
+import { AiSearchAgentTab } from "./tabs/AiSearchAgentTab";
 import { SearchMasTab } from "./tabs/SearchMasTab";
 import { SemanticSearchTab } from "./tabs/SemanticSearchTab";
 import { MemorySearchTab } from "./tabs/MemorySearchTab";
@@ -36,6 +37,7 @@ import { CorpusTab } from "./tabs/CorpusTab";
 export const SEARCH_HUB_TABS = [
   "nlq",
   "search-agent",
+  "ai-search-agent",
   "semantic-search",
   "memory",
   "knowledge",
@@ -53,6 +55,7 @@ export function isValidSearchHubTab(tab: unknown): tab is SearchHubTab {
 const TAB_META: Array<{ id: SearchHubTab; label: string; tooltip: string }> = [
   { id: "nlq", label: "NLQ", tooltip: "Records answers over POST /nlq" },
   { id: "search-agent", label: "Search Agent", tooltip: "AI Search instance results" },
+  { id: "ai-search-agent", label: "AI Search Agent", tooltip: "The real AiSearchAgent over its Durable Object binding — namespace path, per-login report discipline" },
   { id: "semantic-search", label: "Semantic Search", tooltip: "Report search, Vectorize + lexical" },
   { id: "memory", label: "Memory", tooltip: "Agent memory (plans, outcomes)" },
   { id: "knowledge", label: "Knowledge", tooltip: "Platform capability catalog" },
@@ -120,6 +123,8 @@ export function SearchHub() {
         return <NlqSearchTab {...props} />;
       case "search-agent":
         return <SearchAgentTab {...props} />;
+      case "ai-search-agent":
+        return <AiSearchAgentTab {...props} />;
       case "semantic-search":
         return <SemanticSearchTab {...props} />;
       case "memory":
