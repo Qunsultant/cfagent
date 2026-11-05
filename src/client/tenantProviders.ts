@@ -14,7 +14,7 @@
  */
 import { useEffect, useState } from "react";
 import { csrfHeaders } from "./apiFetch";
-import { isBrokerId, type BrokerId } from "../trading/brokerCatalog";
+import { isBrokerId, type BrokerId } from "../trading";
 
 export { isBrokerId, type BrokerId };
 
