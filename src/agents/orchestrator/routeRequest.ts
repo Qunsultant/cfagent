@@ -57,6 +57,7 @@ import { handleEtradeBrokerRoutes, handleEtradeBrokerActivityRoutes } from "../r
 import { handleBrokerOrderRoutes } from "../routes/brokerOrders";
 import { handleBrokerOptionsRoutes } from "../routes/brokerOptions";
 import { handleBrokerReadsRoutes } from "../routes/brokerReads";
+import { handleBrokerScreenRoutes } from "../routes/brokerScreen";
 import { handleEtradeOptionsRoutes } from "../routes/etradeOptions";
 import { handleOptionsProviderGateRoutes } from "../routes/optionsProviderGate";
 import { resolveBrokerEnvironmentFromSettings } from "../routes/brokerEnvironment";
@@ -495,6 +496,16 @@ export async function routeRequest(deps: RouteRequestDeps, request: Request): Pr
     readSettingRaw: (key) => deps.readSettingRaw(key),
   });
   if (brokerReadsResponse) return brokerReadsResponse;
+
+  // Issue #3272 S2: stock screening for the selected broker. The platform
+  // does the math; only the quotes come from the broker, so a broker with
+  // no screener API can still screen its own universe.
+  const brokerScreenResponse = await handleBrokerScreenRoutes(request, url, path, sessionId, {
+    env: deps.env,
+    getOrm: () => deps.getOrm(),
+    readSettingRaw: (key) => deps.readSettingRaw(key),
+  });
+  if (brokerScreenResponse) return brokerScreenResponse;
 
   // Provider/broker slice 1: the broker gate delegation
   // (src/agents/routes/brokerGate.ts). Invoked at this exact
