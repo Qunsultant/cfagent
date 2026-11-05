@@ -56,6 +56,7 @@ Supersedes:
 ## Scope
 Included:
 Excluded:
+Scope discipline: every item excluded from this issue gets its own sub-issue under this issue, created at the time it is identified and linked under Related issues — never left as a follow-up note, TODO, or 'future work' line. An excluded item with no sub-issue is a review finding.
 
 ## Acceptance criteria
 - [ ]
@@ -119,4 +120,5 @@ All development on this issue must follow:
 - Delivery and release (migration, feature flag, deployment impact, rollback; release state, version, environment):
 - Workflows operationalized:
 - How to harness this value from UX:
+- Follow-ups ledger (G2 rule — every follow-up IS a sub-issue under this issue; list its sub-issue number here, or an explicit owner deferral with date and reason):
 - Next-step gate (PASS / BLOCKED + reason):

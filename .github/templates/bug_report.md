@@ -72,6 +72,7 @@ Linked problem (ITIL — see RCA section):
 ## Scope
 Included (fix scope):
 Excluded:
+Scope discipline: every item excluded from this issue gets its own sub-issue under this issue, created at the time it is identified and linked under Related issues — never left as a follow-up note, TODO, or 'future work' line. An excluded item with no sub-issue is a review finding.
 
 ## Acceptance criteria
 - [ ] Defect no longer reproduces under the reported steps
@@ -119,5 +120,5 @@ RCA closing gate (all must hold, or the issue stays open):
 - [ ] Structural fix merged + verified in production (or known-error recorded with workaround + fix issue linked)
 - [ ] Problem linked, or explicit one-off decision recorded in the RCA section
 - [ ] §15 report filed below
-Follow-ups ledger (G2 rule — each item a linked issue or an explicit owner deferral with date and reason):
+Follow-ups ledger (G2 rule — every follow-up IS a sub-issue under this issue; list its sub-issue number here, or an explicit owner deferral with date and reason):
 - Next-step gate (PASS / BLOCKED + reason):
