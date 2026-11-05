@@ -80,6 +80,15 @@ export interface ScanRunSummary {
    *  runtime; readers must treat absent as null. Null (not absent)
    *  means the run evaluated completely. */
   partial?: OptionsPartialQualification | null;
+  /**
+   * Issue #3264: the trigger the producing run recorded ("manual" /
+   * "scheduled"), when the producer knew it. Optional deliberately,
+   * same pattern as pdfKey: summaries persisted before this field
+   * existed — and saves whose caller did not know the trigger —
+   * lack it at runtime; readers must treat absent as null, never a
+   * guessed trigger (the Docs Run Type renders "—" for null).
+   */
+  trigger?: "manual" | "scheduled" | null;
   /** The login that saved the run (issue #103 per-user scoping).
    *  Optional deliberately: runs persisted before scoping existed —
    *  and runs saved by contexts with no identity — carry none, and
@@ -102,8 +111,11 @@ export interface ScanRunStore {
    *  identity is never invented here. `id` (issue #1157, E2) lets a
    *  caller that minted the run id BEFORE the scan ran — so fetch-time
    *  captures could be attributed to it — persist the run under that
-   *  very id; absent, the store's idFactory mints one as before. */
-  save(result: OpportunityScanResult, options?: { userLogin?: string; id?: string }): Promise<StoredScanRun>;
+   *  very id; absent, the store's idFactory mints one as before.
+   *  `trigger` (issue #3264) stamps the producing run's trigger so
+   *  the history row can say how the run started; absent, the row
+   *  records none. */
+  save(result: OpportunityScanResult, options?: { userLogin?: string; id?: string; trigger?: "manual" | "scheduled" }): Promise<StoredScanRun>;
   /** Newest-first summaries (generatedAt descending, id descending on
    *  ties), paginated by limit/offset, filtered by the visibility
    *  rule when a `userLogin` scope is given (and when it is not — an

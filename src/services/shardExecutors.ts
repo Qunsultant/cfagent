@@ -618,7 +618,7 @@ async function storeFormat(
     summary: chain.screenType === "options"
       ? `Sharded options screen: ${chain.options?.thesis ?? "bullish"}, ${format} report, ${provenance.length} shards.`
       : `Sharded screen: ${chain.universe}, ${format} report, ${provenance.length} shards.`,
-    body: { format, key, fileName, universe: chain.universe, thesis: chain.options?.thesis, chainId: chain.chainId, shardIds: provenance },
+    body: { format, key, fileName, universe: chain.universe, thesis: chain.options?.thesis, chainId: chain.chainId, shardIds: provenance, trigger: chain.trigger ?? "scheduled" },
     createdAt: chain.timestamp,
     userLogin: chain.userLogin,
   },
