@@ -490,13 +490,16 @@ export function AutopilotControlCenter({
     } catch {}
   }, [actions]);
 
-  // Fetch live autonomous events from backend SQLite WAL audit ledger & E*TRADE orders
+  // Fetch live autonomous events from the audit ledger and the platform's stored
+  // draft ledger. Issue #3368: `/api/broker/orders` is the same table the
+  // E*TRADE route reads, with the same shape — the broker-neutral name is the
+  // honest one, and it is what a non-E*TRADE tenant should be calling.
   const fetchLiveAutonomousActions = useCallback(async (_isManualRefresh = false) => {
     setIsLoadingLive(true);
     try {
       const [auditRes, ordersRes] = await Promise.allSettled([
         fetch("/api/audit?limit=50"),
-        fetch("/api/etrade/orders"),
+        fetch("/api/broker/orders"),
       ]);
 
       const liveItems: AutonomousActionItem[] = [];

@@ -9,6 +9,7 @@ import { isTabFeatureEnabled } from "./featureFlags";
 import { PillGroup, Button, TextInput, Select } from "./components/ui";
 import { AlpacaSignInCard } from "./AlpacaSignInCard";
 import { apiFetch } from "./apiFetch";
+import { syncTarget } from "./brokerEndpoints";
 import { fetchWatchlists, type ETradeWatchlist } from "./accountApi";
 import {
   loadTapeSelection,
@@ -526,33 +527,56 @@ export function SettingsMenu({
     }
   };
 
+  /**
+   * Issue #3368: the Sync check follows the selection.
+   *
+   * E*TRADE's diagnostics read its OAuth session and have no neutral equivalent
+   * (`brokerEndpoints` says so); the control used to call them for every broker
+   * and fall back to a hardcoded 42 ms when the answer carried no latency. It now
+   * asks the selected broker's own surface, measures the round trip here, and
+   * fires E*TRADE's window events only when E*TRADE's diagnostics are what runs.
+   */
   const onRunDiagnostics = () => {
     setIsPinned(false);
     setIsHovered(false);
     if (runDiagnostics) {
       runDiagnostics();
-    } else {
-      if (typeof window !== "undefined") {
-        window.dispatchEvent(new CustomEvent("open-etrade-diagnostics"));
-        window.dispatchEvent(new CustomEvent("sync-etrade-api"));
-      }
-      setLocalDiagLoading(true);
-      fetch(`/api/etrade/diagnostics`, {
-        headers: { "x-environment": effectiveEnv },
-      })
-        .then((r) => r.json())
-        .then((data: any) => {
-          if (data && data.status) {
-            setLocalMsg(`API Diagnostics Result: ${data.status} (Ping: ${data.latencyMs ?? 42}ms)`);
-          }
-        })
-        .catch((err) => {
-          setLocalMsg(`Diagnostics Error: ${err.message}`);
-        })
-        .finally(() => {
-          setLocalDiagLoading(false);
-        });
+      return;
     }
+
+    const target = syncTarget(selectedBrokerId);
+    if (target.diagnostics && typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("open-etrade-diagnostics"));
+      window.dispatchEvent(new CustomEvent("sync-etrade-api"));
+    }
+
+    setLocalDiagLoading(true);
+    const startedAt = Date.now();
+    fetch(target.path, { headers: { "x-environment": effectiveEnv } })
+      .then(async (response) => ({ ok: response.ok, body: (await response.json().catch(() => ({}))) as any }))
+      .then(({ ok, body }) => {
+        const latency = Date.now() - startedAt;
+        if (!ok) {
+          setLocalMsg(`${selectedBrokerLabel} did not answer the check. Try again, or reconnect the broker in Settings.`);
+          return;
+        }
+        if (target.diagnostics) {
+          setLocalMsg(
+            body?.status
+              ? `API Diagnostics Result: ${body.status} (Ping: ${latency}ms)`
+              : `Diagnostics returned no status (Ping: ${latency}ms).`,
+          );
+          return;
+        }
+        const configured = body?.status?.configured === true;
+        setLocalMsg(`${selectedBrokerLabel} API status: ${configured ? "configured" : "not configured"} (Ping: ${latency}ms)`);
+      })
+      .catch(() => {
+        setLocalMsg(`${selectedBrokerLabel} status check failed.`);
+      })
+      .finally(() => {
+        setLocalDiagLoading(false);
+      });
   };
 
   const onStartOAuth = () => {
