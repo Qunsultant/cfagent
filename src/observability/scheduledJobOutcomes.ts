@@ -39,6 +39,13 @@ import type {
 } from "./observabilityPorts";
 import { traceContextFromHeaders } from "./observabilityPorts";
 import { createObservabilitySink } from "./createObservabilityPorts";
+import {
+  WORKER_TICK_CRON,
+  WORKER_TICK_LINKAGE,
+  isLedgerTrigger,
+  normalizeLedgerLinkage,
+  type LedgerLinkage,
+} from "../services/consolidatedScheduling";
 
 /** The single outcome sink type in mas_events. */
 export const SCHEDULED_JOB_OUTCOME_TYPE = "scheduled_job.outcome";
@@ -113,6 +120,15 @@ export interface ScheduledJobOutcomeInput {
   errorCode?: string;
   /** Skipped only; an internal skip reason, capped, never a message. */
   reason?: string;
+  /**
+   * Issue #3121 S1 — the §4 consolidated-ledger linkage for this
+   * dispatch. Absent on every current caller (all three jobs ride
+   * the 30-minute tick), so the builder defaults it to the tick
+   * linkage (worker-cron / the tick cron expression); a caller that
+   * knows a more specific linkage passes it and the builder
+   * normalizes it.
+   */
+  linkage?: LedgerLinkage;
 }
 
 export interface ScheduledJobOutcomePayload {
@@ -121,6 +137,37 @@ export interface ScheduledJobOutcomePayload {
   traceId: string | null;
   errorCode?: string;
   reason?: string;
+  /** Issue #3121 S1 — always present: the §4 linkage, never null. */
+  linkage: LedgerLinkage;
+}
+
+/**
+ * Normalize a caller-supplied linkage for an outcome row. The sink
+ * records tick-riding jobs only, so an absent or partial linkage
+ * defaults to the tick linkage — never to `unknown` (no NEW row is
+ * ever unknown). An explicit non-tick trigger is honored; an
+ * explicit `"unknown"` or invalid trigger falls back to worker-cron.
+ */
+function normalizeOutcomeLinkage(input?: LedgerLinkage): LedgerLinkage {
+  if (!input) return WORKER_TICK_LINKAGE;
+  return {
+    trigger:
+      isLedgerTrigger(input.trigger) && input.trigger !== "unknown"
+        ? input.trigger
+        : "worker-cron",
+    scheduleId:
+      typeof input.scheduleId === "string" && input.scheduleId
+        ? input.scheduleId
+        : WORKER_TICK_CRON,
+    asyncJobId:
+      typeof input.asyncJobId === "string" && input.asyncJobId
+        ? input.asyncJobId
+        : null,
+    workflowId:
+      typeof input.workflowId === "string" && input.workflowId
+        ? input.workflowId
+        : null,
+  };
 }
 
 export function buildScheduledJobOutcomePayload(
@@ -133,6 +180,7 @@ export function buildScheduledJobOutcomePayload(
       typeof input.traceId === "string" && /^[0-9a-f]{32}$/.test(input.traceId)
         ? input.traceId
         : null,
+    linkage: normalizeOutcomeLinkage(input.linkage),
   };
   if (input.outcome === "failed") {
     payload.errorCode = sanitizeScheduledJobErrorCode(input.errorCode);
@@ -158,13 +206,22 @@ export interface ScheduledJobOutcomeStore {
    * interleaved rows. Unbounded reads over a growing mas_events
    * table would turn every tick into a full-table scan.
    */
-  recentOutcomes(maxRows: number): Array<{
-    job: string;
-    outcome: string;
-    createdAt: string;
-  }> | Promise<
-    Array<{ job: string; outcome: string; createdAt: string }>
+  recentOutcomes(maxRows: number): Array<ScheduledJobOutcomeRow> | Promise<
+    Array<ScheduledJobOutcomeRow>
   >;
+}
+
+/**
+ * One parsed outcome row: the streak fields plus the §4 consolidated-
+ * ledger linkage (S1). The linkage is always present on a parsed row
+ * (legacy rows normalize to trigger `unknown` + null ids), so a
+ * consumer that reads recent outcomes always sees the join keys.
+ */
+export interface ScheduledJobOutcomeRow {
+  job: string;
+  outcome: string;
+  createdAt: string;
+  linkage: LedgerLinkage;
 }
 
 /**
@@ -176,7 +233,7 @@ export function parseScheduledJobOutcomeRow(row: {
   payload?: unknown;
   createdAt?: string;
   created_at?: string;
-}): { job: string; outcome: string; createdAt: string } | null {
+}): ScheduledJobOutcomeRow | null {
   let parsed: Record<string, unknown> | null = null;
   if (row.payload && typeof row.payload === "object") {
     parsed = row.payload as Record<string, unknown>;
@@ -194,10 +251,14 @@ export function parseScheduledJobOutcomeRow(row: {
   ) {
     return null;
   }
+  // Issue #3121 S1 — rows written before linkage stamping read back
+  // normalized (trigger "unknown", ids null); no silent backfill.
+  const linkage = parsed.linkage as Partial<LedgerLinkage> | undefined;
   return {
     job: parsed.job,
     outcome: parsed.outcome,
     createdAt: row.createdAt ?? row.created_at ?? "",
+    linkage: normalizeLedgerLinkage(linkage),
   };
 }
 
@@ -255,8 +316,7 @@ export function scheduledJobOutcomeStoreFromOrmEvents(
       return rows
         .map(parseScheduledJobOutcomeRow)
         .filter(
-          (row): row is { job: string; outcome: string; createdAt: string } =>
-            row !== null,
+          (row): row is ScheduledJobOutcomeRow => row !== null,
         );
     },
   };
@@ -426,6 +486,10 @@ export async function observeInternalDispatch(
         outcome: "failed",
         traceId: deps.trace.traceId,
         errorCode,
+        // Issue #3121 S1 — a dispatch failure is a Worker-cron
+        // dispatch failure: the §4 linkage rides the record
+        // explicitly instead of relying on the builder default.
+        linkage: WORKER_TICK_LINKAGE,
       });
     } catch {
       try {

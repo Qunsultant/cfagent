@@ -44,12 +44,52 @@ export type JobRunOutcome = "success" | "failure" | "skipped";
 export type JobRunTrigger = "scheduled" | "manual";
 
 /**
+ * Issue #3121 S1 — the consolidated run-ledger trigger vocabulary
+ * (inventory §4; O4 decision: sits ALONGSIDE `triggeredBy`, it does
+ * not supersede it). The five-way distinction `triggeredBy` cannot
+ * express: a cadence firing, a manual trigger, a Worker cron
+ * dispatch, an async-chain step, or — legacy rows only — `unknown`
+ * (the producing path predates trigger stamping). No NEW row is ever
+ * `unknown` or null: the builder derives `trigger` from
+ * `triggeredBy` when a write site does not stamp one explicitly.
+ */
+export type JobRunLedgerTrigger =
+  | "scheduled"
+  | "manual"
+  | "worker-cron"
+  | "async-chain"
+  | "unknown";
+
+/**
+ * Issue #3121 S1 — the four §4 linkage fields, as one value. A
+ * `null` is a recorded fact, never a missing column: `scheduleId`
+ * null = no originating schedule exists; `asyncJobId` null = this
+ * run neither is nor links to an async job; `workflowId` null = this
+ * run did not execute through a workflow. Legacy rows read back as
+ * `trigger: "unknown"` with all three ids null.
+ */
+export interface LedgerLinkage {
+  trigger: JobRunLedgerTrigger;
+  scheduleId: string | null;
+  asyncJobId: string | null;
+  workflowId: string | null;
+}
+
+/**
  * One run of one job. `operation` is the ScheduledAgent goal
  * operation (e.g. "index.refresh_wikipedia") or the orchestrator
  * callback name (e.g. "autonomousMarketScreen"). `error` is required
  * on failure, `detail` is required on skipped (the skip reason),
  * `descriptor`/`artifactRefs` carry the success summary and the
  * produced artifact references (report keys, job ids).
+ *
+ * Issue #3121 S1 — the §4 consolidated-ledger linkage: `trigger`,
+ * `scheduleId`, `asyncJobId`, `workflowId` (extended, not a rewrite).
+ * Optional on the interface so rows stored before S1 still parse;
+ * the builder always fills them on new rows (see
+ * `src/services/jobRunRecords.ts`), and the read normalizer fills
+ * them as `unknown`/null on legacy rows (see
+ * `src/services/consolidatedScheduling.ts`).
  */
 export interface JobRunRecord {
   system: JobRunSystem;
@@ -60,6 +100,14 @@ export interface JobRunRecord {
   finished: string;
   outcome: JobRunOutcome;
   triggeredBy: JobRunTrigger;
+  /** Issue #3121 S1 — §4 ledger trigger (five-valued; see JobRunLedgerTrigger). */
+  trigger?: JobRunLedgerTrigger;
+  /** Issue #3121 S1 — originating schedule id (SDK schedule id, goal id, or Worker cron expression); null = no originating schedule. */
+  scheduleId?: string | null;
+  /** Issue #3121 S1 — mas_async_jobs.job_id this run is or links to; null = no async job. */
+  asyncJobId?: string | null;
+  /** Issue #3121 S1 — Cloudflare Workflow instance id; null = did not execute through a workflow. */
+  workflowId?: string | null;
   /** Failure error text. Required when outcome is "failure". */
   error?: string;
   /** Skip reason. Required when outcome is "skipped". */

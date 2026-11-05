@@ -216,6 +216,13 @@ describe("POST /api/schedules/create (#111)", () => {
       userLogin: authenticatedLogin,
       environment: "TEST",
       trigger: "scheduled",
+      // Issue #3121 S1 — creation provenance travels in the armed
+      // payload; createdAt is minted at create time, pinned by shape.
+      provenance: expect.objectContaining({
+        origin: "user",
+        createdBy: authenticatedLogin,
+        createdAt: expect.any(String),
+      }),
     }]]);
     expect(scheduleCalls).toHaveLength(0);
   });
@@ -258,6 +265,13 @@ describe("POST /api/schedules/create (#111)", () => {
     expect(scheduleEveryCalls[0]).toEqual([300, "autonomousMarketScreen", {
       sector: "Technology", universe: "LEV_ETF", maxItems: 29,
       userLogin: authenticatedLogin, environment: "TEST", trigger: "scheduled",
+      // Issue #3121 S1 — creation provenance travels in the armed
+      // payload; createdAt is minted at create time, pinned by shape.
+      provenance: expect.objectContaining({
+        origin: "user",
+        createdBy: authenticatedLogin,
+        createdAt: expect.any(String),
+      }),
     }]);
   });
 
