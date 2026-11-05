@@ -135,7 +135,7 @@ export async function handleBrokerConnectRoutes(
       configured: resolved.source !== "none",
       signedIn: resolved.source === "user",
       source: resolved.source,
-      keyIdLast4: stored?.keyIdLast4 ?? resolved.keyIdLast4,
+      keyIdLast4: resolved.source === "user" ? stored?.keyIdLast4 ?? resolved.keyIdLast4 : null,
       storedAt: stored?.storedAt ?? null,
     });
   }
