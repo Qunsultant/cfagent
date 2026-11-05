@@ -669,6 +669,28 @@ export function SettingsMenu({
             </div>
           </div>
 
+          {/* User Account & Session */}
+          <div className="etrade-panel-section user-session-section">
+            <div className="settings-user-card compact">
+              <div className="settings-user-meta">
+                {userAvatar ? (
+                  <img src={userAvatar} alt={userLogin} className="settings-user-avatar" />
+                ) : (
+                  <div className="settings-user-avatar-placeholder">
+                    {userLogin.slice(0, 2).toUpperCase()}
+                  </div>
+                )}
+                <div className="settings-user-details">
+                  <span className="settings-user-name">{userName || userLogin}</span>
+                  <span className="settings-user-login">@{userLogin}</span>
+                  {loginProviderName && (
+                    <span className="settings-user-login">Logged in via {loginProviderName}</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* Account Details Card (Single Horizontal Line) */}
           <div className="etrade-panel-account-card">
             <div className="account-stat-cell">
@@ -1183,28 +1205,6 @@ export function SettingsMenu({
                   </Button>
                 );
               })}
-            </div>
-          </div>
-
-          {/* User Account & Session */}
-          <div className="etrade-panel-section user-session-section">
-            <div className="settings-user-card compact">
-              <div className="settings-user-meta">
-                {userAvatar ? (
-                  <img src={userAvatar} alt={userLogin} className="settings-user-avatar" />
-                ) : (
-                  <div className="settings-user-avatar-placeholder">
-                    {userLogin.slice(0, 2).toUpperCase()}
-                  </div>
-                )}
-                <div className="settings-user-details">
-                  <span className="settings-user-name">{userName || userLogin}</span>
-                  <span className="settings-user-login">@{userLogin}</span>
-                  {loginProviderName && (
-                    <span className="settings-user-login">Logged in via {loginProviderName}</span>
-                  )}
-                </div>
-              </div>
             </div>
           </div>
 
