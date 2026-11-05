@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from "react";
-import { Badge, Card, EmptyState, Flex, Notice, Spinner, Stack, Table } from "./components/ui";
+import React, { useCallback, useEffect, useState } from "react";
+import { Badge, Button, Card, EmptyState, Flex, Notice, Spinner, Stack, Table } from "./components/ui";
 import type { BrokerAccount, BrokerPosition, BrokerStatus } from "../types";
 import {
   brokerCredentialGuidance,
@@ -175,7 +175,7 @@ function readFailure(body: unknown): { code: string | null; message: string } {
   return { code, message };
 }
 
-function useBrokerRead<T>(path: string): ReadState<T> {
+function useBrokerRead<T>(path: string, nonce = 0): ReadState<T> {
   const [read, setRead] = useState<ReadState<T>>({ state: "loading" });
 
   useEffect(() => {
@@ -201,7 +201,7 @@ function useBrokerRead<T>(path: string): ReadState<T> {
     return () => {
       cancelled = true;
     };
-  }, [path]);
+  }, [path, nonce]);
 
   return read;
 }
@@ -222,13 +222,48 @@ export interface AlpacaBrokerPanelProps {
 }
 
 export function AlpacaBrokerPanel({ activeEnv }: AlpacaBrokerPanelProps) {
+  // Issue #3390: a cancelled order must disappear from the table, so the read
+  // is retriggered by a nonce instead of a page reload.
+  const [orderHistoryNonce, setOrderHistoryNonce] = useState(0);
+  const [cancelBusy, setCancelBusy] = useState<string | null>(null);
+  const [cancelMessage, setCancelMessage] = useState<string | null>(null);
   const accounts = useBrokerRead<AccountsPayload>("/broker/accounts");
   const positions = useBrokerRead<PositionsPayload>("/broker/positions");
   const status = useBrokerRead<StatusPayload>("/broker/status");
   // Issue #3359: the broker's own history reads. `status=all` because a
   // reconciliation view needs closed orders as much as open ones.
-  const orderHistory = useBrokerRead<OrderHistoryPayload>("/broker/orders/history?status=all");
+  const orderHistory = useBrokerRead<OrderHistoryPayload>("/broker/orders/history?status=all", orderHistoryNonce);
   const activity = useBrokerRead<ActivityPayload>("/broker/activities");
+
+  /**
+   * Issue #3390: cancel through the neutral route. The server resolves the
+   * broker from the selection; a refusal keeps the row visible and reports the
+   * broker's own words rather than a generic failure.
+   */
+  const cancelOrder = useCallback(async (orderId: string) => {
+    setCancelBusy(orderId);
+    setCancelMessage(null);
+    try {
+      const res = await fetch("/api/broker/order/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ orderId }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { message?: unknown; error?: unknown };
+      const message =
+        typeof body.message === "string"
+          ? body.message
+          : typeof body.error === "string"
+            ? body.error
+            : null;
+      setCancelMessage(message ?? (res.ok ? "Cancel requested." : "The broker did not cancel that order."));
+      if (res.ok) setOrderHistoryNonce((n) => n + 1);
+    } catch {
+      setCancelMessage("Alpaca could not be reached. The order may still be open.");
+    } finally {
+      setCancelBusy(null);
+    }
+  }, []);
 
   const environment =
     accounts.state === "ready"
@@ -337,10 +372,34 @@ export function AlpacaBrokerPanel({ activeEnv }: AlpacaBrokerPanelProps) {
           {orderHistory.state === "error" && (
             <ReadFailure code={orderHistory.code} message={orderHistory.message} />
           )}
+          {cancelMessage && (
+            <Notice tone="neutral" title="Cancel">
+              <span data-alpaca-cancel-message>{cancelMessage}</span>
+            </Notice>
+          )}
           {orderHistory.state === "ready" && (
             <Table
               caption="Alpaca order history"
-              columns={ORDER_HISTORY_COLUMNS}
+              columns={[
+                ...ORDER_HISTORY_COLUMNS,
+                {
+                  key: "cancel",
+                  header: "",
+                  render: (row: OrderHistoryPayload["orders"][number]) =>
+                    row.status === "OPEN" ? (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        disabled={cancelBusy === String(row.orderId)}
+                        loading={cancelBusy === String(row.orderId)}
+                        onClick={() => void cancelOrder(String(row.orderId))}
+                      >
+                        Cancel
+                      </Button>
+                    ) : null,
+                },
+              ]}
               rows={orderHistory.data.orders ?? []}
               rowKey={(row) => String(row.orderId)}
               empty={

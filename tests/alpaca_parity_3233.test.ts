@@ -35,6 +35,9 @@ const OPERATION_METHOD: Record<Exclude<BrokerOperation, "optionsDiscovery">, str
   optionExpireDates: "getOptionExpireDates",
   orderPreview: "previewOrder",
   orderPlace: "placeOrderRemote",
+  // Issue #3390: cancelling is a platform capability too, so it belongs in the
+  // same total map as placement — a broker that declares it must implement it.
+  orderCancel: "cancelOrderRemote",
   marketScreening: "screenMarkets",
 };
 
