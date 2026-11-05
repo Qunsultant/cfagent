@@ -45,6 +45,8 @@ const PINNED_STAR_REEXPORTS = [
   "./registry",
   // Issue #3232: the broker catalog joins the public trading surface.
   "./brokerCatalog",
+  // Issue #2853: the broker panel contract joins the public trading surface.
+  "./brokerPanels",
   "./screeningProvider",
   "./dataProviders",
   "./screener",
