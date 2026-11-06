@@ -57,6 +57,7 @@ flowchart LR
 | 4 | [#3450](https://github.com/Qunsultant/cfagent/issues/3450) | Multi-Format Reporting & Patterns | Generate executive summaries, PDF, HTML, JSON, and Markdown reports on demand. | Planned |
 | 5 | [#3453](https://github.com/Qunsultant/cfagent/issues/3453) | Pipeline & Workflow Reuse | Connect loop stages to `thinkWorkflow`, `thinkAdapter`, scheduler alarms, and audit ledgers. | Planned |
 | 6 | [#3588](https://github.com/Qunsultant/cfagent/issues/3588) | Tool-Driven Reflection & Introspection | Dynamic capability synthesis, pipeline self-explanation, and adaptive learning via tool metadata. | **Merged** |
+| 7 | [#3508](https://github.com/Qunsultant/cfagent/issues/3508) | Alpaca Wire Session Terms & Capability | Truthful `supportsSessionOrders` and wire terms (`extended_hours: true`) for pre-market, after-hours, and EXTO overnight. | **Merged** |
 
 ---
 
@@ -248,4 +249,61 @@ All changes in the Stock Copilot evolution adhere to the core repository standar
 - **TDD Red-Green Discipline:** Comprehensive unit test suites (`tests/stock_copilot_chat_door_3513.test.ts`, `tests/chat_copilots_subtabs_3449.test.tsx`, `tests/stock_copilot_modes_3451.test.ts`, `tests/stock_copilot_introspection_3588.test.ts`).
 - **Identity Discipline:** All mesh door tools require `actingLogin` and fail closed with `MeshDoorError("missing_acting_login")` if omitted.
 - **Traceability:** Every commit, PR, and report is attributed with the `#ceo-aimp` agent identifier and tracked against parent Epic [#3514](https://github.com/Qunsultant/cfagent/issues/3514).
+
+---
+
+## 7. Dual-Mode Operation Architecture (Issue #3519)
+
+Per Issue [#3519](https://github.com/Qunsultant/cfagent/issues/3519), Stock Copilot provides **dual-mode operation** across every channel (Chat, Scheduled, Webhook, Slack, Email, Voice, MCP):
+
+```mermaid
+flowchart TD
+    subgraph DUAL_MODE ["Stock Copilot Dual-Mode Engine"]
+        M1{"Active Mode<br/>(User Choice / Config)"}
+        
+        subgraph DETERMINISTIC ["Deterministic Trajectory"]
+            D_RUN["Fixed Pattern Loop<br/>(SMA Crossover, Mean Reversion)"]
+            D_SIZING["CVaR Mathematical Sizing<br/>(Hard Risk Bounds)"]
+            D_EXEC["Direct Limit / Bracket Order Dispatch"]
+            D_RUN --> D_SIZING --> D_EXEC
+        end
+        
+        subgraph AGENTIC ["Non-Deterministic Agentic Loop (Perceive-Plan-Execute-Reflect-Learn)"]
+            A_PERCEIVE["1. PERCEIVE<br/>(Market, Positions, Telemetry, Prior Learnings)"]
+            A_PLAN["2. PLAN with LLM<br/>(Reasoning over MCP & Tool Catalog)"]
+            A_INTENT["3. STRUCTURED INTENT<br/>(Data-Only Proposed Trades)"]
+            A_CRITIC{"4. REFLECT (Critic)<br/>Verify Goals & Risk Guards"}
+            A_EXEC["5. EXECUTE<br/>Cross into Deterministic Order Seam"]
+            A_LEARN["6. LEARN<br/>Distill Outcomes to Persistent Memory"]
+            
+            A_PERCEIVE --> A_PLAN
+            A_PLAN --> A_INTENT
+            A_INTENT --> A_CRITIC
+            A_CRITIC -->|"Accept"| A_EXEC
+            A_CRITIC -->|"Reject / Revise"| A_LEARN
+            A_EXEC --> A_LEARN
+            A_LEARN -.->|"Inform Future Cycles"| A_PERCEIVE
+        end
+        
+        M1 -->|"Deterministic Mode"| D_RUN
+        M1 -->|"Non-Deterministic Mode"| A_PERCEIVE
+    end
+    
+    D_EXEC --> LEDGER[("DO SQLite Storage<br/>(copilot_positions, stock_copilot_activity)")]
+    A_EXEC --> LEDGER
+    A_LEARN --> MEMORY[("DO SQLite Memory<br/>(copilot_learnings)")]
+```
+
+### 7.1 Core Principles & Guards
+1. **Model Output Never Directly Hits the Broker:**
+   - Raw LLM text never touches network trading APIs.
+   - The agentic loop outputs data-only structured trade intents (symbol, side, size constraints, stop/target bracket parameters).
+   - Structured intents pass through the identical deterministic validation pipeline (CVaR risk optimization, buying power checks, session enablement, venue limit-order requirements).
+2. **Tenancy-Scoped Memory & Self-Correction:**
+   - The Critic evaluates every non-deterministic cycle output (accepted, revised, or rejected with reasons).
+   - Distilled learnings persist in DO SQLite memory (`copilot_learnings`) per user login.
+   - The Copilot answers interactive retrospective queries: *"What did you learn from the last cycle?"* and *"Explain recent self-corrections"*.
+3. **Channel-Uniform Execution:**
+   - The agentic loop and deterministic trajectory are identically accessible through Chat, MCP tools, Webhooks, and Schedules.
+
 

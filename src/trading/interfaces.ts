@@ -80,6 +80,20 @@ export interface PlaceOrderParams {
   userLogin: string;
   optionLegs?: TradingOrderLeg[];
   strategyNetDebit?: number;
+  /**
+   * Issue #3508: trading session identifier ("pre_market", "regular",
+   * "after_hours", "exto").
+   */
+  session?: string;
+  /**
+   * Issue #3508: whether the order is eligible for execution in
+   * extended hours / overnight sessions.
+   */
+  extendedHours?: boolean;
+  /**
+   * Issue #3508: optional Time-In-Force specification.
+   */
+  timeInForce?: "day" | "gtc" | "ioc" | "fok" | "opg" | "cls";
 }
 
 /**
