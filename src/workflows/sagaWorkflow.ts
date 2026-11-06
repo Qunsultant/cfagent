@@ -45,12 +45,12 @@
  * payment leg's network; the payment leg's network policy governs.
  *
  * Audit: the recordAudit dep posts saga rows to POST /api/audit/event
- * through the SEARCH_AGENT stub (the same endpoint the payment
+ * through the ORCHESTRATOR_AGENT stub (the same endpoint the payment
  * workflow's recordEvent uses), with agent "saga" for provenance.
  * It is the saga's OWN forwarder — recordCfpayAuditEvent is NOT
  * reused: it hardcodes agent "payments" and the cfpay payload
  * shape. The forwarder THROWS on any non-2xx response, on a
- * missing SEARCH_AGENT binding, or on a missing service identity,
+ * missing ORCHESTRATOR_AGENT binding, or on a missing service identity,
  * so a failed audit write fails the step (durably retried) instead
  * of letting the saga complete with an unrecorded transition.
  * That is the Q7 S2 blocking shape as far as it is reachable
@@ -109,12 +109,12 @@ interface SagaAuditStub {
 }
 
 function sagaAuditStub(env: Env): SagaAuditStub {
-  const ns = (env as unknown as Record<string, unknown>)?.SEARCH_AGENT as
+  const ns = (env as unknown as Record<string, unknown>)?.ORCHESTRATOR_AGENT as
     | { idFromName: (name: string) => unknown; get: (id: unknown) => SagaAuditStub }
     | undefined;
   if (!ns || typeof ns.idFromName !== "function" || typeof ns.get !== "function") {
     throw new Error(
-      "saga audit unavailable: SEARCH_AGENT (the mas_events audit owner) is not bound",
+      "saga audit unavailable: ORCHESTRATOR_AGENT (the mas_events audit owner) is not bound",
     );
   }
   return ns.get(ns.idFromName(SHARED_ORCHESTRATOR_INSTANCE));
