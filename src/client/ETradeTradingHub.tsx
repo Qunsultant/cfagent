@@ -1181,7 +1181,7 @@ export function ETradeTradingHub({
         setScanStatus("scan_failed");
       }
     } catch (error) {
-      setScanMessage(error instanceof Error ? error.message : "Unable to reach the E*TRADE screening API.");
+      setScanMessage(error instanceof Error ? error.message : `Unable to reach the ${presentation.label} screening API.`);
       setScanStatus("scan_failed");
     } finally {
       setScreenerLoading(false);
@@ -1577,8 +1577,8 @@ export function ETradeTradingHub({
         setLastExecutionResult(null);
         setOrderError("Fresh preview ready — review the updated execution preview above, then approve to submit. Nothing has been executed.");
       } else {
-        const brokerLabel = BROKER_OPTIONS.find((o) => o.id === readTenantProvidersState().brokerId)?.label ?? "E*TRADE";
-        setOrderError(freshDraft.error || `Failed to generate fresh preview on ${brokerLabel}`);
+        const previewBrokerLabel = BROKER_OPTIONS.find((o) => o.id === readTenantProvidersState().brokerId)?.label ?? presentation.label;
+        setOrderError(freshDraft.error || `Failed to generate fresh preview on ${previewBrokerLabel}`);
       }
     } catch (err: any) {
       setOrderError(err.message || "Failed to refresh preview");
@@ -1695,7 +1695,7 @@ export function ETradeTradingHub({
                 : "danger"
           }
           variant="strip"
-          title="E*TRADE connection"
+          title={`${presentation.label} connection`}
           onDismiss={() => {
             setOauthMsg("");
             setBlockedAuthUrl(null);
@@ -1856,7 +1856,7 @@ export function ETradeTradingHub({
 
             {activeDraft.optionLegs?.length ? (
               <div className="options-order-context" aria-label="Exact broker order legs">
-                <strong>Legs sent to E*TRADE</strong>
+                <strong>Legs sent to {presentation.label}</strong>
                 <ul>{activeDraft.optionLegs.map((leg, index) => (
                   <li key={`${leg.securityType}-${leg.optionType || "stock"}-${leg.strike || 0}-${leg.expirationDate || "equity"}-${index}`}>
                     {leg.side} {leg.quantity} {leg.securityType === "EQ" ? `${leg.underlyingSymbol} shares` : `${leg.underlyingSymbol} ${leg.optionType} $${leg.strike} ${leg.expirationDate}`}
@@ -1868,7 +1868,7 @@ export function ETradeTradingHub({
             <div className="hitl-attestation-box">
               {activeDraft.previewId && (
                 <div className="attest-item">
-                  <span className="attest-label">E*TRADE Upstream Session:</span>
+                  <span className="attest-label">{presentation.label} Upstream Session:</span>
                   <code style={{ color: "var(--color-success)", fontWeight: "bold" }}>Preview #{activeDraft.previewId} (Verified)</code>
                 </div>
               )}
@@ -1888,7 +1888,7 @@ export function ETradeTradingHub({
               </div>
               <div className="attest-item">
                 <span className="attest-label">Commission:</span>
-                <span className="zero-comm">{activeDraft.estimatedCommission > 0 ? `$${activeDraft.estimatedCommission.toFixed(2)} broker estimate` : activeDraft.optionLegs?.length ? "See E*TRADE account disclosure" : "$0.00 (E*TRADE Online)"}</span>
+                <span className="zero-comm">{activeDraft.estimatedCommission > 0 ? `$${activeDraft.estimatedCommission.toFixed(2)} broker estimate` : activeDraft.optionLegs?.length ? `See ${presentation.label} account disclosure` : `$0.00 (${presentation.label} online)`}</span>
               </div>
             </div>
 
@@ -1919,7 +1919,7 @@ export function ETradeTradingHub({
                   disabled={executingDraft}
                   onClick={() => handleExecuteDraft(activeDraft.orderId, "approved")}
                  loading={executingDraft}>
-                  {"✅ Approve & Submit Trade to E*TRADE"}
+                  {`✅ Approve & Submit Trade to ${presentation.label}`}
                 </Button>
               )}
               <Button variant="primary"
