@@ -21,8 +21,8 @@
  * - Fan-out: the admin's instance forwards to each target instance's
  *   EXISTING own-instance routes (GET /schedules, POST
  *   /schedules/cancel-all, POST /maintenance/clear-table) via
- *   SEARCH_AGENT stub fetch (#2516): the per-login instances live in
- *   the SEARCH_AGENT namespace — the same addressing src/server.ts
+ *   ORCHESTRATOR_AGENT stub fetch (#2516): the per-login instances live in
+ *   the ORCHESTRATOR_AGENT namespace — the same addressing src/server.ts
  *   and the chat client use — and that is where the target handlers'
  *   state (schedules, maintenance tables) lives. Target handlers
  *   operate on instance-local state, so scope is the instance, not
@@ -67,7 +67,7 @@ import {
 } from "../../security/tenantQueueMapping";
 
 export interface AdminTenantQueueContext {
-  /** Worker env (carries the SESSION_STORE + SEARCH_AGENT bindings). */
+  /** Worker env (carries the SESSION_STORE + ORCHESTRATOR_AGENT bindings). */
   env: Env;
   /** Audit funnel (owner: OrchestratorAgent.audit). */
   audit(
@@ -160,12 +160,12 @@ function instanceStub(
   if (ctx.fetchInstance) return ctx.fetchInstance(login);
   const ns = (
     ctx.env as unknown as {
-      SEARCH_AGENT?: {
+      ORCHESTRATOR_AGENT?: {
         idFromName(name: string): unknown;
         get(id: unknown): InstanceStub;
       };
     }
-  ).SEARCH_AGENT;
+  ).ORCHESTRATOR_AGENT;
   if (!ns || typeof ns.idFromName !== "function" || typeof ns.get !== "function") {
     return null;
   }
