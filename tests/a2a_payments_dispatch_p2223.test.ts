@@ -346,7 +346,7 @@ describe("A2A entrypoint reaches PaymentsAgent (#2223 payments)", () => {
 // Money path: the REAL PaymentsAgent through its real handleA2A.
 // Harness mirrors tests/payments_guard.test.ts (#896): a real ledger
 // owner (DatabaseORM over MockSqlStorage) served through the REAL
-// agentic-payments routes, bound as SEARCH_AGENT. Only the
+// agentic-payments routes, bound as ORCHESTRATOR_AGENT. Only the
 // facilitator's HTTP transport is stubbed — the class's own
 // verification logic (proof parsing, simulated-proof rejection,
 // isValid check) runs for real.
@@ -372,7 +372,7 @@ function makeLedgerEnv(): any {
   return {
     CF_WALLET_FACILITATOR: "https://facilitator.test",
     SERVICE_USER_LOGIN: "default_trader",
-    SEARCH_AGENT: {
+    ORCHESTRATOR_AGENT: {
       idFromName: (name: string) => name,
       get: (_id: unknown) => ({
         fetch: async (req: Request) => {
