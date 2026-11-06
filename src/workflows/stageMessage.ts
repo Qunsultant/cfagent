@@ -72,7 +72,7 @@
  */
 
 import {
-  OPTIONS_SCREEN_PHASES,
+  OPTIONS_PIPELINE_STAGES,
   PAYMENT_STEP_IDS,
   SAGA_STEP_IDS,
   TRADE_APPROVAL_STEP_IDS,
@@ -89,7 +89,7 @@ import {
  * from the same module (`stageRuntimeIds`), so a family cannot publish a
  * stage the catalog does not know about, or vice versa.
  */
-export const STAGE_FAMILIES = ["stock", "options", "trading", "payment", "saga"] as const;
+export const STAGE_FAMILIES = ["stock", "options", "trading", "payment", "saga", "strategy", "goal"] as const;
 
 export type StageFamily = (typeof STAGE_FAMILIES)[number];
 
@@ -110,10 +110,19 @@ export const STAGE_IDS_BY_FAMILY: Record<StageFamily, readonly string[]> = {
     "shapeReport",
     "deliver",
   ],
-  options: OPTIONS_SCREEN_PHASES,
+  // #3186 step 3d: the legacy #3191 phases are RETIRED. Their only
+  // publisher was the #3072 end-of-run emitter, called only by the
+  // manual handler - which now runs the pipeline (per-stage messages).
+  // A phase id is now rejected by stageMessage() validation.
+  options: [...OPTIONS_PIPELINE_STAGES],
   trading: TRADE_APPROVAL_STEP_IDS,
   payment: PAYMENT_STEP_IDS,
   saga: SAGA_STEP_IDS,
+  // #3186: the catalog's declared runtime steps (workflowCatalog.ts).
+  strategy: ["feed", "analysis", "generation", "delivery"],
+  // #3186: the composer's stages (catalog GOAL_SCREEN stage names).
+  // Declared now, emitted by the goal-leg migration (step 3), not yet live.
+  goal: ["feed", "analysis", "store", "deliver"],
 };
 
 /**
@@ -232,7 +241,8 @@ export async function publishStageOutput<T>(args: {
   persist: (output: T) => Promise<string[]>;
   publish: (message: StageMessage) => Promise<void>;
   runId: string;
-  stageId: StockStageId;
+  family?: StageFamily;
+  stageId: string;
   output: T;
   userLogin: string;
   traceId?: string;
@@ -240,6 +250,7 @@ export async function publishStageOutput<T>(args: {
   const artifactKeys = await args.persist(args.output);
   const message = stageMessage({
     runId: args.runId,
+    family: args.family,
     stageId: args.stageId,
     artifactKeys,
     userLogin: args.userLogin,

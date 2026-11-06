@@ -876,7 +876,7 @@ export async function handleSchedulesRoutes(
         const environment = rawEnvironment === "TEST" || rawEnvironment === "PROD"
           ? rawEnvironment
           : context?.environment;
-        const service = new ScheduledTasksService(ctx.env, ctx.getOrm(), userLogin, createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).scanRuns, undefined, undefined, undefined, ctx.scheduleScreenerFollowups, { sql: ctx.agentCtx.storage.sql, blobStorage: ctx.agentCtx.storage, env: ctx.env }, ctx.submitShardJob);
+        const service = new ScheduledTasksService(ctx.env, ctx.getOrm(), userLogin, createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).scanRuns, undefined, undefined, undefined, ctx.scheduleScreenerFollowups, { sql: ctx.agentCtx.storage.sql, blobStorage: ctx.agentCtx.storage, env: ctx.env }, ctx.submitShardJob, undefined, ctx.env.SCREENER_EVENTS ?? null);
         // Issue #959: validate through the shared schedule builder.
         const { userLogin: _bodyLogin, environment: _bodyEnv, ...triggerCriteria } = body ?? {};
         const built = buildSchedulePayload("autonomousOptionsAnalysis", triggerCriteria, { userLogin: userLogin || undefined, environment, trigger: "manual" }, { applyCreationDefaults: false });
@@ -1164,7 +1164,7 @@ export async function handleSchedulesRoutes(
           (await buildOptionsDiscoveryPorts(ctx.env, { sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage })).ivHistory,
           undefined,
           undefined,
-          ctx.scheduleScreenerFollowups
+          ctx.scheduleScreenerFollowups, undefined, undefined, undefined, ctx.env.SCREENER_EVENTS ?? null
         );
         const result = await service.collectDailyIvHistory({ ...body, userLogin, environment });
         return Response.json(result);
@@ -1209,7 +1209,7 @@ export async function handleSchedulesRoutes(
           ctx.scheduleScreenerFollowups,
           { sql: ctx.agentCtx.storage.sql, blobStorage: ctx.agentCtx.storage, env: ctx.env },
           undefined,
-          createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).feedSnapshots
+          createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).feedSnapshots, ctx.env.SCREENER_EVENTS ?? null
         );
         // Issue #959: validate through the shared schedule builder
         // (the service's own derivation validation still runs inside).

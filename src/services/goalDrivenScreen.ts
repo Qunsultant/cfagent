@@ -24,6 +24,11 @@
  * the ledger's deterministic outcome evaluation, and total failure
  * ending ESCALATED, visible to a human.
  *
+ * Issue #3186 (step 3c): the options leg migrates onto the one
+ * options pipeline - goal dispatch becomes a CALLER on it (#2038 Q1),
+ * not a parallel executor. The registry path stays until every entry
+ * migrates; it is the legacy entry, not a second implementation.
+ *
  * READ-ONLY: screening never places, modifies, or cancels orders.
  */
 
@@ -38,6 +43,7 @@ import {
   type ScenarioDefinition,
 } from "./goalScenarioEngine";
 import type {
+  DynamicOptionsScreener,
   ScreeningProviderAssetClass,
   ScreeningProviderRegistry,
   ScreeningResult,
@@ -49,6 +55,133 @@ import {
 } from "./screenerTaskLedger";
 import { goalStockSpecFromPlan } from "../workflows/goalStockScreenSpec";
 import type { StockScreenRunSpec } from "../workflows/stockScreenRunSpec";
+import type { OptionsCanonicalStore } from "./optionsServeRecord";
+import {
+  createOptionsScreenPorts,
+  optionsArtifactKey,
+  type OptionsDeliverFn,
+  type OptionsShapeReportFn,
+  type OptionsStageStorage,
+} from "../workflows/optionsScreenPorts";
+import { runOptionsScreenWorkflow } from "../workflows/optionsScreenWorkflow";
+import type { StageClaimStore } from "../workflows/stageReportConsumer";
+import type { StageQueueSend } from "../workflows/stageQueueTransport";
+
+/**
+ * Issue #3186 (step 3c) - the options pipeline's deps for a goal leg.
+ * The screener is the same DynamicOptionsScreener the registry path
+ * used; storage is the caller's DO storage (checkpoint artifacts);
+ * canonical is the ORM's canonical store (the leg's mas_reports row);
+ * shapeReport/deliver are the goal leg's (createGoalOptionsLegDelivery)
+ * - the leg's report section + the handoff to the goal run's delivery.
+ * Claims default to an in-memory store (a retried leg re-runs its
+ * stages); production threads the durable mas_stage_claims store.
+ */
+export interface OptionsWorkflowDeps {
+  screener: DynamicOptionsScreener;
+  storage: OptionsStageStorage;
+  /** Optional: a leg inside a composed run omits it (see
+   * OptionsScreenPortDeps.canonical) — the leg writes no
+   * mas_reports row; the composing run's row is the single home. */
+  canonical?: OptionsCanonicalStore;
+  shapeReport: OptionsShapeReportFn;
+  deliver: OptionsDeliverFn;
+  claims?: StageClaimStore;
+  queue?: StageQueueSend | null;
+}
+
+function memoryStageClaimStore(): StageClaimStore {
+  const claimed = new Set<string>();
+  return {
+    has: (key) => claimed.has(key),
+    add: (key) => {
+      claimed.add(key);
+    },
+    delete: (key) => {
+      claimed.delete(key);
+    },
+  };
+}
+
+/**
+ * The goal options leg as a CALLER on the one pipeline: build the
+ * PlannerInput from the goal plan, run the eight stages, and map the
+ * outcome back onto the ScreeningResult the leg's downstream code
+ * already consumes. A failed pipeline run throws (the leg's catch
+ * records it as a failed class, exactly like a registry throw); a
+ * completed run returns the screen artifact's result, so the #1963
+ * error-status check downstream still sees the real result status
+ * (the pipeline's screen stage throws on the error case, so a
+ * completed result is never an error result). The provider id is the
+ * registry's options provider id when one is registered, so hits
+ * keep their provenance across the migration.
+ */
+async function runGoalOptionsLegViaWorkflow(args: {
+  workflow: OptionsWorkflowDeps;
+  registry: ScreeningProviderRegistry;
+  plan: GoalScreenPlan;
+  userLogin?: string;
+  trigger: "manual" | "scheduled";
+  idempotencyKey?: string;
+}): Promise<ScreeningResult> {
+  const { workflow } = args;
+  if (!args.userLogin) {
+    throw new Error(
+      "options workflow: no userLogin - refusing to run the options leg without an identity",
+    );
+  }
+  const legRunId = `goal-screen:${args.idempotencyKey ?? crypto.randomUUID()}:options`;
+  const ports = createOptionsScreenPorts({
+    screener: workflow.screener,
+    storage: workflow.storage,
+    canonical: workflow.canonical,
+    shapeReport: workflow.shapeReport,
+    deliver: workflow.deliver,
+  });
+  const outcome = await runOptionsScreenWorkflow(
+    {
+      runId: legRunId,
+      userLogin: args.userLogin,
+      request: {
+        assetClass: "options",
+        runIdentity: { runId: legRunId },
+        trigger: args.trigger,
+        provenanceTrigger: "goal",
+        classInput: {
+          goalPlan: {
+            optionsFilter: args.plan.optionsFilter,
+            structures: args.plan.structures,
+          },
+        },
+      },
+    },
+    {
+      stages: ports,
+      claims: workflow.claims ?? memoryStageClaimStore(),
+      queue: workflow.queue ?? null,
+    },
+  );
+  if (outcome.outcome === "failed") {
+    throw new Error(
+      `options leg failed at ${outcome.failedStage}: ${outcome.reason ?? "unknown reason"}`,
+    );
+  }
+  const screened = await workflow.storage.get<{ result: unknown }>(
+    optionsArtifactKey(legRunId, "screen"),
+  );
+  if (!screened || screened.result === undefined) {
+    throw new Error(
+      `options leg completed but its screen artifact is missing for run ${legRunId}`,
+    );
+  }
+  let providerId = "options-screen-workflow";
+  try {
+    providerId = args.registry.resolve("options").id;
+  } catch {
+    // No options provider registered - the workflow is the provider.
+  }
+  return { assetClass: "options", providerId, result: screened.result as never };
+}
 
 /* ------------------------------------------------------------------ */
 /* Screen plan                                                         */
@@ -210,6 +343,16 @@ export async function runGoalDrivenScreen(input: {
   baseStockFilter?: StockScreenerFilter;
   baseOptionsFilter?: OptionScreenerFilter;
   now?: Date;
+  /** Issue #3186 (step 3c): goal dispatch as a CALLER on the one
+   *  options pipeline (#2038 Q1). Present -> the options leg runs
+   *  the pipeline; absent -> the registry path, unchanged. The
+   *  trigger + idempotencyKey + userLogin ride the pipeline's
+   *  PlannerInput + stage messages; absent an identity the leg
+   *  fails closed rather than publishing under a fabricated login. */
+  userLogin?: string;
+  trigger?: "manual" | "scheduled";
+  idempotencyKey?: string;
+  optionsWorkflow?: OptionsWorkflowDeps;
 }): Promise<GoalDrivenScreenResult> {
   const plan = buildGoalScreenPlan(input.scenario, {
     symbols: input.symbols,
@@ -240,7 +383,16 @@ export async function runGoalDrivenScreen(input: {
               filter: plan.stockFilter,
               ...(input.stockProviderId ? { providerId: input.stockProviderId } : {}),
             })
-          : await input.registry.screen({ assetClass: "options", filter: plan.optionsFilter });
+          : input.optionsWorkflow
+            ? await runGoalOptionsLegViaWorkflow({
+                workflow: input.optionsWorkflow,
+                registry: input.registry,
+                plan,
+                userLogin: input.userLogin,
+                trigger: input.trigger ?? "manual",
+                idempotencyKey: input.idempotencyKey,
+              })
+            : await input.registry.screen({ assetClass: "options", filter: plan.optionsFilter });
       // Issue #1963: a leg is failed by its RESULT STATUS, not only
       // by throwing. The options screener returns error-status
       // results without throwing (no-symbols validation error; all
@@ -382,6 +534,8 @@ export async function runGoalDrivenScreenWithLedger(input: {
   baseStockFilter?: StockScreenerFilter;
   baseOptionsFilter?: OptionScreenerFilter;
   now?: Date;
+  /** Issue #3186 (step 3c): threaded to runGoalDrivenScreen - the options leg runs the pipeline when present. */
+  optionsWorkflow?: OptionsWorkflowDeps;
 }): Promise<{ task: ScreenerTask; executed: boolean; result?: GoalDrivenScreenResult }> {
   const existing = (await input.ledger.list(200)).find(
     (t) => t.idempotencyKey === input.idempotencyKey
@@ -412,6 +566,10 @@ export async function runGoalDrivenScreenWithLedger(input: {
       baseStockFilter: input.baseStockFilter,
       baseOptionsFilter: input.baseOptionsFilter,
       now: input.now,
+      userLogin: input.userLogin,
+      trigger: input.trigger,
+      idempotencyKey: input.idempotencyKey,
+      ...(input.optionsWorkflow ? { optionsWorkflow: input.optionsWorkflow } : {}),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

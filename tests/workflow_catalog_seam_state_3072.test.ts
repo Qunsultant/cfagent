@@ -86,11 +86,19 @@ describe("the flows behind the declarations still emit (#3072/#3073)", () => {
     expect(source).toMatch(/emitBoundary\(env, params, "settle-trade"\)/);
   });
 
-  it("options publishes once, at the end, through the seam module", () => {
-    const source = read("src/agents/routes/etradeOptionsScreen.ts");
-    expect(source).toMatch(/await emitOptionsStageBoundaries\(/);
-    const call = source.slice(source.indexOf("await emitOptionsStageBoundaries("));
-    const returnIndex = call.indexOf("return Response.json(");
-    expect(returnIndex).toBeGreaterThan(0);
+  it("options publishes per stage, after persist, through the pipeline composer", () => {
+    // Old pin asserted the manual handler published once, at the end,
+    // through emitOptionsStageBoundaries; #3186 step 3d retired that
+    // end-of-run emitter in favour of per-stage messages published by the
+    // pipeline composer after each stage persists. This pin proves the
+    // route runs the pipeline and the composer publishes after persist.
+    const route = read("src/agents/routes/etradeOptionsScreen.ts");
+    expect(route).toContain("runOptionsScreenWorkflow");
+    const composer = read("src/workflows/optionsScreenWorkflow.ts");
+    expect(composer).toContain("publishStageBoundaryMessage");
+    expect(composer.indexOf("await port.persist(")).toBeGreaterThan(0);
+    expect(composer.indexOf("publishStageBoundaryMessage({")).toBeGreaterThan(
+      composer.indexOf("await port.persist("),
+    );
   });
 });

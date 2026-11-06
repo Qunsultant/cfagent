@@ -130,6 +130,15 @@ export interface UnifiedOptionsRunRecord {
   csvStatus?: "generated" | "failed";
   csvError?: string;
   reportUrl?: string;
+  /** Issue #3186 (step 3d): the manual route's row carries the
+   *  filter + result + provider provenance in its body (the Docs /
+   *  Reports read surface renders the result from there). The
+   *  artifact-key backfill (#2602) fills ONLY key/status/error
+   *  fields, so these must ride the FIRST write - they cannot be
+   *  backfilled by a later re-record. */
+  filter?: unknown;
+  result?: Record<string, unknown>;
+  provenance?: Record<string, unknown>;
 }
 
 export function recordUnifiedOptionsRun(
@@ -157,6 +166,9 @@ export function recordUnifiedOptionsRun(
         scheduleId: input.scheduleId,
         goalId: input.goalId,
         scanRunId: input.scanRunId,
+        ...(input.filter !== undefined ? { filter: input.filter } : {}),
+        ...(input.result !== undefined ? { result: input.result } : {}),
+        ...(input.provenance !== undefined ? { provenance: input.provenance } : {}),
         ...(input.pdfKey ? { pdfKey: input.pdfKey } : {}),
         ...(input.pdfStatus ? { pdfStatus: input.pdfStatus } : {}),
         ...(input.pdfError ? { pdfError: input.pdfError } : {}),

@@ -4,7 +4,7 @@
  * screening) stays on the existing `options_screen` NLQ action.
  */
 
-import { UnifiedOptionsService } from "../trading";
+import { UnifiedOptionsService, type OpportunityScanResult } from "../trading";
 import { defaultRegistry } from "../trading";
 import { MAX_SCAN_SYMBOLS, type OpportunityRow, type ScanMatrixRow, type ScanMode, type ScanRequestTemplate, type ScanTypeRollup } from "../trading";
 import type { ScanRunStore } from "../trading";
@@ -33,6 +33,23 @@ import type { Outlook } from "../services/researchGates";
 import type { GoalKind } from "../services/goalScenarioStore";
 import { validateStrategyRequest, type StrategyScreenFilter } from "../trading";
 import { parseScanRequestTemplate } from "../trading";
+import {
+  createScannerScreenPorts,
+  createStrategyScreenAgents,
+  createStrategyScreenPorts,
+  panelResultToPipelineResult,
+} from "../workflows/strategyScreenPorts";
+import {
+  memoryStageClaims,
+  memoryStageStorage,
+  runOptionsScreenWorkflow,
+} from "../workflows/optionsScreenWorkflow";
+import {
+  optionsArtifactKey,
+  type OptionsStageStorage,
+} from "../workflows/optionsScreenPorts";
+import type { StageQueueSend } from "../workflows/stageQueueTransport";
+import type { PanelDiscoveryResult } from "../services/recommendationKernel";
 
 export { buildTypeRollup } from "../trading";
 export type { StrategyTypeRollup } from "../trading";
@@ -626,6 +643,18 @@ export interface OptionsStrategyDeps {
   profileStore?: StrategyProfileStore;
   userLogin?: string;
   /**
+   * Issue #3186: the one pipeline's stage storage + queue for the
+   * panel leg. The NLQ execution host threads its blob handle +
+   * SCREENER_EVENTS binding; absent (the mesh door), the leg runs on
+   * in-memory stage storage with no queue - the same no-persistence
+   * behavior as the direct run it replaces, not a regression.
+   * Durable stage claims need sql, which the NLQ runtime does not
+   * thread; claims here are in-memory (follow-up, not a blocker -
+   * today's direct run has no checkpoint at all).
+   */
+  pipelineStorage?: OptionsStageStorage;
+  pipelineQueue?: StageQueueSend | null;
+  /**
    * Issue #3327: the broker whose chains this run reads. Stamped on the saved
    * run so history is that broker's evidence; absent, the run records E*TRADE
    * (the only broker wired before provenance existed), never a guess.
@@ -827,11 +856,61 @@ export async function runOptionsStrategyAction(
   // layer (which owns engine construction); this module keeps the
   // NLQ-specific assembly around it — profile layering, the assumed
   // target derivation, validation, and the envelope below.
-  const result = await UnifiedOptionsService.runStrategyPipeline(etrade.client, request as StrategyRequest, {
-    strategyFilter: filters.strategyFilter,
-    riskProfile: filters.riskProfile,
-    alternatives: 3,
-  });
+  //
+  // Issue #3186: the single-name panel run goes through the one
+  // strategy pipeline instead (same engine, staged). The envelope
+  // below reads the mapped PipelineResult unchanged - only the
+  // execution path changes.
+  //
+  // CORRECTION (2026-11-05, #26 tests): the panel leg does NOT fail
+  // closed without an identity. The fail-closed was added with the
+  // swap and contradicts the pre-existing #26 pins, which call this
+  // action with no deps and expect a panel result. The composer
+  // never invents an identity (it skips publishing, stages still
+  // run, artifacts are the record), and the panel leg writes no
+  // owner-scoped canonical record - persist is a pass-through,
+  // delivery is deferred to the caller - so there is nothing here
+  // that needs an identity to be safe. Both production hosts (NLQ
+  // execution, mesh door) always thread a login, so the unscoped
+  // path is a test/context fallback, exactly as on the scanner leg.
+  const panelUserLogin = deps?.userLogin;
+  const panelRunId = `nlq-panel:${crypto.randomUUID()}`;
+  const panelStorage = deps?.pipelineStorage ?? memoryStageStorage();
+  const panelOutcome = await runOptionsScreenWorkflow(
+    {
+      runId: panelRunId,
+      userLogin: panelUserLogin,
+      request: {
+        assetClass: "options",
+        runIdentity: { runId: panelRunId },
+        trigger: "manual",
+        classInput: {
+          strategyRequest: request as StrategyRequest,
+          strategyFilter: filters.strategyFilter,
+          riskProfile: filters.riskProfile,
+          alternatives: 3,
+        },
+      },
+    },
+    {
+      stages: createStrategyScreenPorts({
+        agents: createStrategyScreenAgents(etrade.client),
+        storage: panelStorage,
+      }),
+      claims: memoryStageClaims(),
+      queue: deps?.pipelineQueue ?? null,
+    },
+  );
+  if (panelOutcome.outcome !== "completed") {
+    return fail(`Options strategy screen failed at ${panelOutcome.failedStage}: ${panelOutcome.reason}`);
+  }
+  const panelResult = await panelStorage.get<PanelDiscoveryResult>(
+    optionsArtifactKey(panelRunId, "shapeReport"),
+  );
+  if (!panelResult) {
+    return fail("Options strategy screen completed without a report artifact; refusing to answer from nothing.");
+  }
+  const result = panelResultToPipelineResult(panelResult);
 
   const assumptions = [
     assumedTarget ? `target price assumed at $${request.targetPrice} (${request.thesis})` : "",
@@ -1158,34 +1237,15 @@ async function runOpportunityScan(
   // run judges event risk per name and reports coverage (the service
   // never throws; uncovered names stay unverified).
   const calendarCoverage = await getEventCalendarCoverage(symbols);
-  const result = await UnifiedOptionsService.scanOpportunities(etrade.client, symbols, template, {
-    riskProfile: filters.riskProfile,
-    strategyFilter: filters.strategyFilter,
-    mode: filters.mode,
-    eventCalendarBySymbol: Object.fromEntries(calendarCoverage.bySymbol),
-    // Issue #28: the profile layers under the question's own inputs.
-    // The question's thesis is explicit when the user stated it (not
-    // inferred from strategy names / defaults); the mode is ALWAYS
-    // explicit — NLQ derives it from the question's fit phrasing (issue
-    // #23), so a profile never flips which question is being answered.
-    // The parser's riskProfile is NOT declared: its default yields to
-    // the profile's posture. (statedTarget / perSymbol are not profile
-    // fields and survive by construction.)
-    ...(strategyProfile
-      ? {
-          profile: strategyProfile,
-          explicitFields: [...(filters.thesisInferred ? [] : ["thesis"]), "mode"],
-        }
-      : {}),
-  });
-
-  // Issue #103: record the request this scan answered, in the same
-  // replayable vocabulary the unified path records — the resolved
-  // symbol batch, the template as asked (pre-profile-merge), the
-  // posture/mode, and the profile selection BY NAME (NLQ resolves
-  // profiles by name; the unified replay resolves it the same way).
-  // Fields the question never expressed stay absent.
-  result.requestSnapshot.request = {
+  // Issue #103: the replayable request record, built BEFORE the run
+  // so the pipeline attaches it to the result before persisting it
+  // (the unified execute() order: record, then save). The record
+  // carries the resolved symbol batch, the template as asked
+  // (pre-profile-merge), the posture/mode, and the profile selection
+  // BY NAME (NLQ resolves profiles by name; the unified replay
+  // resolves it the same way). Fields the question never expressed
+  // stay absent.
+  const requestRecord = {
     symbols,
     ...(template.thesis !== undefined ? { thesis: template.thesis } : {}),
     ...(template.targetDate !== undefined ? { targetDate: template.targetDate } : {}),
@@ -1202,27 +1262,88 @@ async function runOpportunityScan(
     ...(filters.profileName !== undefined ? { profileName: filters.profileName } : {}),
   };
 
-  // Issue #27: persist the run when the caller supplied a store (the
-  // orchestrator threads one over the Durable Object's storage). The
-  // result's provenance (generatedAt, modelVersion, requestSnapshot,
-  // configSnapshot, coverage, gateParams) is what makes the stored run
-  // auditable and diffable later. Persistence must NEVER fail a scan:
-  // a store error leaves the scan result intact, flagged persisted:
-  // false, with the failure logged and swallowed. Issue #103: the save
-  // is stamped with deps.userLogin when the caller threaded one (the
-  // orchestrator does, through nlq.ts); contexts without an identity
-  // save unscoped — the login is never invented here.
-  let scanRunId: string | undefined;
-  let persisted = false;
-  if (scanRunStore) {
-    try {
-      const saved = await scanRunStore.save(result, { userLogin: deps?.userLogin, broker: deps?.broker });
-      scanRunId = saved.id;
-      persisted = true;
-    } catch (err) {
-      console.error("Failed to persist opportunity scan run", err);
-    }
+  // Issue #3186: the opportunity scan goes through the one strategy
+  // pipeline instead of the direct scanOpportunities call (same
+  // engine, staged). The envelope below reads the shaped result
+  // unchanged - only the execution path changes. Identity is NOT
+  // failed closed here (unlike the panel leg): the scanner's pinned
+  // discipline (#27/#103) is that a run without an identity saves
+  // unscoped - the login is never invented - and the composer
+  // publishes no stage messages for such a run. Both production
+  // hosts (NLQ execution, mesh door) always thread a login, so the
+  // unscoped path is a test/context fallback, not a live behavior.
+  const scanUserLogin = deps?.userLogin;
+  const scanPipelineRunId = `nlq-scan:${crypto.randomUUID()}`;
+  const scanStorage = deps?.pipelineStorage ?? memoryStageStorage();
+  const scanOutcome = await runOptionsScreenWorkflow(
+    {
+      runId: scanPipelineRunId,
+      userLogin: scanUserLogin,
+      request: {
+        assetClass: "options",
+        runIdentity: { runId: scanPipelineRunId },
+        trigger: "manual",
+        classInput: {
+          scan: {
+            symbols,
+            template: template as ScanRequestTemplate,
+            options: {
+              riskProfile: filters.riskProfile,
+              strategyFilter: filters.strategyFilter,
+              mode: filters.mode,
+              eventCalendarBySymbol: Object.fromEntries(calendarCoverage.bySymbol),
+              // Issue #28: the profile layers under the question's own
+              // inputs. The question's thesis is explicit when the user
+              // stated it (not inferred from strategy names /
+              // defaults); the mode is ALWAYS explicit — NLQ derives it
+              // from the question's fit phrasing (issue #23), so a
+              // profile never flips which question is being answered.
+              // The parser's riskProfile is NOT declared: its default
+              // yields to the profile's posture. (statedTarget /
+              // perSymbol are not profile fields and survive by
+              // construction.)
+              ...(strategyProfile
+                ? {
+                    profile: strategyProfile,
+                    explicitFields: [...(filters.thesisInferred ? [] : ["thesis"]), "mode"],
+                  }
+                : {}),
+            },
+          },
+          requestRecord,
+          // Issue #3327 (carried from main's runOpportunityScan persist
+          // block by the #3186 splice): the broker whose chains this run
+          // reads, stamped on the saved run by the pipeline's persist
+          // stage. Absent, the run records E*TRADE (the pre-provenance
+          // default) — never a guess.
+          broker: deps?.broker,
+        },
+      },
+    },
+    {
+      stages: createScannerScreenPorts({
+        agents: createStrategyScreenAgents(etrade.client),
+        storage: scanStorage,
+        scanRunStore,
+      }),
+      claims: memoryStageClaims(),
+      queue: deps?.pipelineQueue ?? null,
+    },
+  );
+  if (scanOutcome.outcome !== "completed") {
+    return fail(`Options opportunity scan failed at ${scanOutcome.failedStage}: ${scanOutcome.reason}`);
   }
+  const result = await scanStorage.get<OpportunityScanResult & { scanRunId?: string; persisted?: boolean }>(
+    optionsArtifactKey(scanPipelineRunId, "shapeReport"),
+  );
+  if (!result) {
+    return fail("Options opportunity scan completed without a report artifact; refusing to answer from nothing.");
+  }
+  // Issue #27: the shaped result already carries its save receipt
+  // (scanRunId / persisted) from the persist stage; a store error
+  // leaves the result intact, flagged persisted: false.
+  const scanRunId = result.scanRunId;
+  const persisted = result.persisted ?? false;
 
   // Issue #25: rows show the target in absolute dollars AND in
   // expected-move units when the chain yielded an estimate — the EM

@@ -79,7 +79,7 @@ import {
   type StageMessage,
   type StockStageId,
 } from "./stageMessage";
-import { stageAnalysisKey } from "./stageReportProduction";
+import { stageAnalysisKey } from "./stageRuntimeIds";
 import { STAGE_IDS_BY_FAMILY, type StageFamily } from "./stageMessage";
 import { maxAttemptsForStage, resolveStageConfig } from "./stageConfig";
 

@@ -47,21 +47,28 @@ vi.mock("@cloudflare/ai-chat", () => {
 // Capturing fakes for the options screen route: the REAL
 // DynamicOptionsScreener would try to reach E*TRADE; the parity question
 // is which FILTER object crosses the route boundary, so capture it.
-const capturedScreenFilters: any[] = [];
-vi.mock("../src/trading/optionsScreener", () => {
+//
+// #3186: the capture seam moved from screenOptions(filter) to
+// fetchChains(filter) — the pipeline's chainFetch stage calls the
+// latter, never the former. The mock keeps the REAL module's other
+// exports (evaluateContracts / aggregateScreenResult, which the
+// pipeline's enrich/screen stages call) and fakes only the engine
+// class itself.
+const capturedFetchChainsFilters: any[] = [];
+vi.mock("../src/trading/optionsScreener", async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
   return {
+    ...actual,
     DynamicOptionsScreener: class FakeDynamicOptionsScreener {
       constructor(_client: unknown) {}
-      async screenOptions(filter: any) {
-        capturedScreenFilters.push(filter);
+      async fetchChains(filter: any) {
+        capturedFetchChainsFilters.push(filter);
         return {
-          contracts: [],
-          totalUnderlyingsScanned: 0,
-          totalContractsEvaluated: 0,
-          matchedCount: 0,
-          filterSummary: "fake screen",
-          screenedAt: new Date().toISOString(),
+          chains: [],
+          filter,
           fetchErrors: [],
+          deferredSymbols: [],
+          symbols: filter.underlyingSymbols ?? [],
           warnings: [],
         };
       }
@@ -834,7 +841,7 @@ describe("#959 REST interactive screen routes share the schemas", () => {
 
   beforeEach(() => {
     runScreenCalls.length = 0;
-    capturedScreenFilters.length = 0;
+    capturedFetchChainsFilters.length = 0;
   });
 
   it("POST /api/etrade/screen rejects a mis-typed filter with a 400 naming the field; engine never runs", async () => {
@@ -884,10 +891,23 @@ describe("#959 REST interactive screen routes share the schemas", () => {
 
   function optionsCtx() {
     const sql = new MockSqlStorage();
+    // #3186: the pipeline persists all 8 stage artifacts via
+    // storage.put/get, so the ctx storage is Map-backed (the
+    // tests/manual_options_screen_workflow_3186.test.ts pattern);
+    // sql-only storage dies at plan.persist.
+    const store = new Map<string, unknown>();
     return {
       env: {} as any,
       getOrm: () => ({ storeCanonicalReport: () => {} }) as any,
-      agentCtx: { storage: { sql } },
+      agentCtx: {
+        storage: {
+          sql,
+          get: async (key: string) => store.get(key),
+          put: async (key: string, value: unknown) => {
+            store.set(key, value);
+          },
+        },
+      },
       ensureTables: () => sql,
       audit: () => {},
       getScreenerAgent: () => fakeScreenerAgent,
@@ -906,10 +926,15 @@ describe("#959 REST interactive screen routes share the schemas", () => {
     expect(res!.status).toBe(400);
     const body = (await res!.json()) as any;
     expect(body.error).toContain("sortBy");
-    expect(capturedScreenFilters).toHaveLength(0);
+    expect(capturedFetchChainsFilters).toHaveLength(0);
   });
 
   it("POST /api/trading/options/screen hands the screener exactly the shared schema's validated filter", async () => {
+    // Old pin captured the filter at the retired screenOptions(filter)
+    // seam; #3186 step 3d moved the capture to fetchChains(filter) —
+    // the pipeline's chainFetch stage calls it after re-validating the
+    // route-parsed filter. This pin proves the validated filter still
+    // reaches the screener exactly.
     const req = new Request("https://agent.test/api/trading/options/screen", {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-user-login": authenticatedLogin },
@@ -918,11 +943,11 @@ describe("#959 REST interactive screen routes share the schemas", () => {
     const res = await handleEtradeOptionsRoutes(req, new URL(req.url), "/api/trading/options/screen", "sess-1", optionsCtx());
     expect(res).not.toBeNull();
     expect(res!.status).toBe(200);
-    expect(capturedScreenFilters).toHaveLength(1);
+    expect(capturedFetchChainsFilters).toHaveLength(1);
     const parsed = parseOptionsScreenRequest(RAW_CONTRACTS_BODY);
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
-    expect(capturedScreenFilters[0]).toEqual(parsed.value.filter);
+    expect(capturedFetchChainsFilters[0]).toEqual(parsed.value.filter);
   });
 });
 

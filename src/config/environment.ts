@@ -108,7 +108,9 @@ export function resolveEnvironmentConfig(env?: Partial<Env>, overrideEnv?: strin
     processEnv.ENVIRONMENT ||
     "PROD";
 
-  const activeName = envNameCandidate.toUpperCase();
+  let activeName = envNameCandidate.toUpperCase().trim();
+  if (activeName === "LIVE") activeName = "PROD";
+  if (activeName === "PAPER" || activeName === "SANDBOX") activeName = "TEST";
 
   const envsMap = defaultConfig.environments as Record<string, any>;
   const baseDef = envsMap[activeName] || envsMap["PROD"] || envsMap["TEST"];

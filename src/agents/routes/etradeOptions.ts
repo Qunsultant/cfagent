@@ -43,11 +43,11 @@ import {
   validateStrategyRequest,
   validateStrategyProfile,
   describeLlmInput,
-  runPanelPipeline,
   OptionsDataAgent,
   RecommendationAgent,
   StrategyRiskAgent,
   TradingPlatformRegistry,
+  platformChainSource,
   type RiskProfile,
   type StrategyScreenFilter,
   defaultRegistry,
@@ -71,7 +71,12 @@ import type { DatabaseORM, SqlStorage } from "../../orm";
 import type { ScreenerAgent } from "../screener-agent";
 import { deliverGatedSlack } from "../../services/gatedSlackDelivery";
 import { screenerOutcomeFromRunResult } from "../../services/screenerFollowups";
-import { RecommendationService, type KernelSnapshot } from "../../services/recommendationKernel";
+import { type KernelSnapshot, type PanelDiscoveryResult } from "../../services/recommendationKernel";
+import {
+  runComparePanelViaPipeline,
+  runManualPanelViaPipeline,
+} from "../../workflows/manualPanelScreen";
+import type { OptionsStageStorage } from "../../workflows/optionsScreenPorts";
 import { listComparisonOutcomes, runProductionComparison } from "../../services/comparisonRunner";
 import { getSymbolEventCalendar, toEventCalendarInfo } from "../../services/eventCalendar";
 import {
@@ -103,6 +108,7 @@ import {
 import { runNoViewStrategies } from "./etradeOptionsNoView";
 import { serveDiscoveryReport } from "./etradeOptionsDiscoveryReport";
 import { recordStrategyScreenRun } from "../../services/optionsServeRecord";
+import { resolveTenantBroker } from "../../services/tenantProviders";
 import { panelAuthResponse } from "../../services/optionsAuthFreshness";
 import { resolveTenantProviders } from "../../services/tenantProviders";
 
@@ -270,7 +276,8 @@ export async function handleEtradeOptionsRoutes(
         // #291 T5c: resolved through the platform registry (the chains
         // read is a verbatim client passthrough on the platform contract);
         // one instance serves the call and its #155 error read.
-        const etrade = TradingPlatformRegistry.getPlatform("etrade", ctx.env, ctx.getOrm(), userLogin, ctx.requestedEnv);
+        const broker = await resolveTenantBroker(ctx.env);
+        const etrade = TradingPlatformRegistry.getPlatform(broker, ctx.env, ctx.getOrm(), userLogin, ctx.requestedEnv);
         const chain = await etrade.getOptionChains?.({
           symbol,
           expiryYear,
@@ -320,7 +327,8 @@ export async function handleEtradeOptionsRoutes(
         if (!userLogin) return unauthenticatedResponse();
         // #291 T5c: registry-resolved platform (verbatim passthrough
         // reads); the #155 error read stays on this same instance.
-        const etrade = TradingPlatformRegistry.getPlatform("etrade", ctx.env, ctx.getOrm(), userLogin, ctx.requestedEnv);
+        const broker = await resolveTenantBroker(ctx.env);
+        const etrade = TradingPlatformRegistry.getPlatform(broker, ctx.env, ctx.getOrm(), userLogin, ctx.requestedEnv);
         const dates = (await etrade.getOptionExpireDates?.(symbol, expiryType)) ?? [];
         if (dates.length === 0) {
           // Issue #155: distinguish an upstream failure (client error
@@ -511,9 +519,16 @@ export async function handleEtradeOptionsRoutes(
         const userLogin = request.headers.get("x-user-login");
         if (!userLogin) return unauthenticatedResponse();
         const etrade = new ETradeService(ctx.getOrm(), ctx.env, userLogin, ctx.requestedEnv);
-        const result = await runPanelPipeline(new DynamicOptionsScreener(etrade.client, undefined, await etrade.getUniverseDeps?.(ctx.agentCtx?.storage)), strategyRequest, {
+        // Issue #3186 step 3e: the compare route runs through the one panel pipeline.
+        const result = await runComparePanelViaPipeline({
+          userLogin,
+          strategyRequest,
           riskProfile: body.riskProfile,
           alternatives: body.alternatives,
+          dataAgent: new OptionsDataAgent(new DynamicOptionsScreener(etrade.client, undefined, await etrade.getUniverseDeps?.(ctx.agentCtx?.storage))),
+          storage: ctx.agentCtx?.storage as unknown as OptionsStageStorage | undefined,
+          getSql: ctx.agentCtx?.storage?.sql ? () => ctx.agentCtx.storage.sql : undefined,
+          queue: ctx.env.SCREENER_EVENTS ?? null,
         });
         const poolByType = new Map<string, { type: string; label: string; generated: number; bestScore: number }>();
         for (const c of result.strategies.candidates) {
@@ -727,26 +742,19 @@ export async function handleEtradeOptionsRoutes(
         const dataAgent = new OptionsDataAgent(new DynamicOptionsScreener(etrade.client, undefined, await etrade.getUniverseDeps?.(ctx.agentCtx?.storage)));
         const banded = resolvePanelFetchBands(parsedDiscovery.value.request, parsedDiscovery.value.farDated);
         const t0 = Date.now();
-        const result = await new RecommendationService().discoverPanel({
-          dataAgent: {
-            loadSnapshot: async (params: unknown) => {
-              const s = await dataAgent.loadSnapshot(params as StrategyRequest);
-              return {
-                symbol: s.symbol,
-                contracts: s.contracts,
-                dataSource: s.dataSource,
-                screen: s.screen,
-                rejections: s.rejections,
-                validationError: s.validationError,
-              };
-            },
-          },
-          riskAgent: new StrategyRiskAgent(),
-          recommender: new RecommendationAgent(),
-          request: banded.request,
+        // Issue #3186 step 3e: the manual panel route runs through the
+        // one panel pipeline (manualPanelScreen.ts); the shaped artifact
+        // is the discoverPanel result, so downstream reads it unchanged.
+        const result = await runManualPanelViaPipeline({
+          userLogin,
+          strategyRequest: banded.request,
           strategyFilter: parsedDiscovery.value.strategyFilter,
           riskProfile: parsedDiscovery.value.riskProfile,
           alternatives: parsedDiscovery.value.alternatives,
+          dataAgent,
+          storage: ctx.agentCtx?.storage as unknown as OptionsStageStorage | undefined,
+          getSql: ctx.agentCtx?.storage?.sql ? () => ctx.agentCtx.storage.sql : undefined,
+          queue: ctx.env.SCREENER_EVENTS ?? null,
         });
         const discoverPanelDurationMs = Date.now() - t0;
         const common = {
@@ -868,8 +876,15 @@ export async function handleEtradeOptionsRoutes(
         const screenUniverseLabel = parsedScreen.value.universe;
         const screenEmailTo = parsedScreen.value.emailTo;
 
+        const broker = await resolveTenantBroker(ctx.env);
+        const brokerPlatform = broker !== "etrade"
+          ? TradingPlatformRegistry.getPlatform(broker, ctx.env, ctx.getOrm(), userLogin, ctx.requestedEnv)
+          : null;
+        const chainSource = brokerPlatform ? platformChainSource(brokerPlatform) : null;
         const etrade = new ETradeService(ctx.getOrm(), ctx.env, userLogin, ctx.requestedEnv);
-        const screener = new DynamicOptionsScreener(etrade.client, undefined, await etrade.getUniverseDeps?.(ctx.agentCtx?.storage));
+        const screener = chainSource
+          ? new DynamicOptionsScreener(chainSource, undefined, await etrade.getUniverseDeps?.(ctx.agentCtx?.storage))
+          : new DynamicOptionsScreener(etrade.client, undefined, await etrade.getUniverseDeps?.(ctx.agentCtx?.storage));
         return await executeOptionsScreen({ ctx, userLogin, screener, screenFilter, screenPushToSlack, screenSlackChannel, screenUniverseLabel, screenEmailTo, deferDelivery: Boolean(ctx.asyncJobId) });
       } catch (err) {
         const error = err instanceof Error ? err.message : "Options screening failed";

@@ -47,6 +47,10 @@ const hoisted = vi.hoisted(() => ({
   unifiedRequests: [] as any[],
   storeOptionsPdfCalls: [] as any[],
   canonicalReports: [] as any[],
+  // #3186 (optional 500 pin): when true the fake fetchChains throws,
+  // so the pipeline fails at chainFetch and the route surfaces a 500
+  // naming the failed stage.
+  failFetchChains: false,
 }));
 
 vi.mock("agents", () => ({ Agent: class {} }));
@@ -68,9 +72,65 @@ vi.mock("../src/services/etrade", () => ({
 // Rich screen result (the shape generateOptionsPdf renders — so the OLD
 // fallback path, if it still existed, would succeed and produce a key;
 // the pins below then discriminate).
-vi.mock("../src/trading/optionsScreener", () => ({
-  DynamicOptionsScreener: class FakeDynamicOptionsScreener {
+//
+// #3186: the manual screen no longer calls screenOptions — the one
+// options pipeline's chainFetch stage calls fetchChains(filter), and
+// enrich runs the REAL evaluateContracts/aggregateScreenResult over the
+// returned chains (the mock spreads the real module via importOriginal
+// so those stay real; a factory returning only the fake class would
+// leave them undefined and the enrich stage would throw). The fake
+// chain below carries exactly ONE passing leg (NVDA CALL, strike =
+// spot, bid 12.5 / ask 13.0, delta 0.45), so the engine aggregates to
+// matchedCount 1 — the same count the old canned screenOptions result
+// carried. screenOptions is KEPT: the scanner path (#23, unified
+// opportunities) reaches the engine through OptionsDataAgent.loadSnapshot
+// -> screener.screenOptions, and returns the same single contract.
+vi.mock("../src/trading/optionsScreener", async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  class FakeDynamicOptionsScreener {
     constructor(_client: unknown) {}
+    async fetchChains(filter: any) {
+      if (hoisted.failFetchChains) throw new Error("chain fetch boom");
+      const symbols: string[] = filter?.underlyingSymbols ?? ["NVDA"];
+      const expiry = new Date(Date.now() + 30 * 86400000);
+      const chainFor = (symbol: string) => ({
+        symbol,
+        underlyingPrice: 200,
+        selectedExpiry: {
+          year: expiry.getUTCFullYear(),
+          month: expiry.getUTCMonth() + 1,
+          day: expiry.getUTCDate(),
+        },
+        pairs: [
+          {
+            call: {
+              timeStamp: Date.now(),
+              adjustedFlag: false,
+              optionType: "CALL",
+              strikePrice: 200,
+              symbol: `${symbol}200C`,
+              bid: 12.5,
+              ask: 13.0,
+              lastPrice: 12.75,
+              volume: 1000,
+              openInterest: 2000,
+              delta: 0.45,
+              gamma: 0.02,
+              theta: -0.03,
+              impliedVolatility: 0.35,
+            },
+          },
+        ],
+      });
+      return {
+        chains: symbols.map((symbol) => ({ symbol, chain: chainFor(symbol) })),
+        filter,
+        fetchErrors: [],
+        deferredSymbols: [],
+        symbols,
+        warnings: [],
+      };
+    }
     async screenOptions(_filter: any) {
       return {
         contracts: [
@@ -98,8 +158,9 @@ vi.mock("../src/trading/optionsScreener", () => ({
     evaluateChains() {
       throw new Error("not used in these tests");
     }
-  },
-}));
+  }
+  return { ...actual, DynamicOptionsScreener: FakeDynamicOptionsScreener };
+});
 
 vi.mock("../src/services/eventCalendar", () => ({
   getEventCalendarCoverage: async () => ({ bySymbol: new Map() }),
@@ -111,6 +172,31 @@ vi.mock("../src/trading", async (importActual) => {
   const actual = (await importActual()) as Record<string, unknown>;
   class FakeUnifiedOptionsService {
     constructor(..._args: unknown[]) {}
+    // #3186: the unified opportunities handler no longer calls execute()
+    // for opportunities — it calls these three seams, then runs the one
+    // options pipeline. The canned formatResponse shape is the one the
+    // old execute() fake returned, so the downstream PDF/XLSX/CSV +
+    // Slack + canonical code runs on the same shape as before.
+    async resolveStrategyProfile(_req: any) {
+      return { profile: undefined, error: undefined };
+    }
+    async resolveEngineClient() {
+      return { engineClient: {} };
+    }
+    formatResponse(_req: any, _data: any, _summary: any, _cached: boolean) {
+      return {
+        success: true,
+        data: { scanned: 3, withTrades: 1, opportunities: [{ symbol: "NVDA" }], matchedCount: 1 },
+        summary: "fake unified summary",
+        toSlack: () => "fake slack text",
+        toWebhook: () => ({ fake: "webhook" }),
+        toUi: () => ({ mode: "fake-ui" }),
+        toEmailHtml: () => "",
+        toEmailText: () => "",
+        toVoice: () => ({}),
+        toMcp: () => ({}),
+      };
+    }
     async execute(req: any) {
       hoisted.unifiedRequests.push(req);
       return {
@@ -153,6 +239,11 @@ function fakeScreenerAgent() {
 
 function optionsCtx() {
   const sql = new MockSqlStorage();
+  // #3186: the pipeline persists all 8 stage artifacts via
+  // storage.put/get, so the ctx storage is Map-backed (the
+  // tests/manual_options_screen_workflow_3186.test.ts pattern);
+  // sql-only storage dies at plan.persist.
+  const store = new Map<string, unknown>();
   return {
     env: {} as any,
     getOrm: () =>
@@ -161,7 +252,15 @@ function optionsCtx() {
           hoisted.canonicalReports.push(report);
         },
       }) as any,
-    agentCtx: { storage: { sql } },
+    agentCtx: {
+      storage: {
+        sql,
+        get: async (key: string) => store.get(key),
+        put: async (key: string, value: unknown) => {
+          store.set(key, value);
+        },
+      },
+    },
     ensureTables: () => sql,
     audit: () => {},
     getScreenerAgent: () => fakeScreenerAgent(),
@@ -181,6 +280,7 @@ beforeEach(() => {
   hoisted.unifiedRequests.length = 0;
   hoisted.storeOptionsPdfCalls.length = 0;
   hoisted.canonicalReports.length = 0;
+  hoisted.failFetchChains = false;
   hoisted.pipelineResult = {
     pdfKey: PIPELINE_KEY,
     generationId: "options:manual:2026-10-22T00:00:00.000Z",
@@ -208,9 +308,17 @@ describe("#1023 manual options routes generate through the unified pipeline", ()
     expect(body.reportUrl).toBe(`/api/options/report.pdf?key=${encodeURIComponent(PIPELINE_KEY)}`);
     expect(hoisted.storeOptionsPdfCalls).toHaveLength(0);
 
-    expect(hoisted.canonicalReports).toHaveLength(1);
-    expect(hoisted.canonicalReports[0].body.pdfKey).toBe(PIPELINE_KEY);
-    expect(hoisted.canonicalReports[0].body.reportUrl).toBe(body.reportUrl);
+    // #3186: the canonical row is written TWICE under one generationId —
+    // the persist stage records the run (no artifact keys yet), then the
+    // shapeReport stage re-records the same generationId with the
+    // pipeline's pdfKey/reportUrl (#2602 backfill). The old pin asserted
+    // a single write carrying the key; the new pin proves one row, two
+    // writes, and that the LAST write carries the key.
+    expect(hoisted.canonicalReports).toHaveLength(2);
+    expect(hoisted.canonicalReports[0].generationId).toBe(hoisted.canonicalReports[1].generationId);
+    expect(hoisted.canonicalReports[0].body.pdfKey).toBeUndefined();
+    expect(hoisted.canonicalReports[1].body.pdfKey).toBe(PIPELINE_KEY);
+    expect(hoisted.canonicalReports[1].body.reportUrl).toBe(body.reportUrl);
   });
 
   it("POST /trading/options/unified (opportunities): pipeline invoked, reportUrl + canonical carry its key", async () => {
@@ -226,7 +334,12 @@ describe("#1023 manual options routes generate through the unified pipeline", ()
     expect(res!.status).toBe(200);
     const body = (await res!.json()) as any;
 
-    expect(hoisted.unifiedRequests).toHaveLength(1);
+    // #3186: the retired execute() seam is gone for opportunities — the
+    // handler runs the one options pipeline instead, so no execute() call
+    // is recorded. The pipeline run itself is pinned by pipelineCalls
+    // below; this test proves the unified opportunities path still
+    // generates through the pipeline and carries its key.
+    expect(hoisted.unifiedRequests).toHaveLength(0);
     expect(hoisted.pipelineCalls).toHaveLength(1);
     expect(hoisted.pipelineCalls[0]).toMatchObject({ type: "options", trigger: "manual", userLogin: "alice" });
 
@@ -248,6 +361,22 @@ describe("#1023 manual options routes generate through the unified pipeline", ()
     expect(body.matchedCount).toBe(1);
     expect(body.pdfKey).toBeUndefined();
     expect(body.reportUrl).toBeUndefined();
+    expect(hoisted.storeOptionsPdfCalls).toHaveLength(0);
+  });
+
+  it("pipeline-stage failure surfaces as a 500 naming the failed stage", async () => {
+    // #3186: a stage that throws fails the run with its stage name; the
+    // route throws (no fallback generation from a partial run) and the
+    // handler shapes it as a 500 carrying "options screen failed at
+    // <stage>".
+    hoisted.failFetchChains = true;
+    const req = post("/api/trading/options/screen", { underlyingSymbols: ["NVDA"], pushToSlack: false });
+    const res = await handleEtradeOptionsRoutes(req, new URL(req.url), "/api/trading/options/screen", "sess-1", optionsCtx());
+    expect(res).not.toBeNull();
+    expect(res!.status).toBe(500);
+    const body = (await res!.json()) as any;
+    expect(body.error).toContain("options screen failed at chainFetch");
+    expect(body.pdfKey).toBeUndefined();
     expect(hoisted.storeOptionsPdfCalls).toHaveLength(0);
   });
 
