@@ -165,6 +165,14 @@ export interface ShardScreenRequest {
   portfolioContext?: boolean;
   maxItems?: number;
   maxSymbols?: number;
+  /**
+   * Issue #2860 (Factor 14): the workflow run's W3C traceparent,
+   * carried from the WorkflowJobCommand so the funnel trace_id is
+   * the workflow trace-id (funnelTraceIdForRun). Absent on runs
+   * that did not arrive through the workflow (manual/scheduled
+   * direct runs keep a fresh UUID funnel id).
+   */
+  traceparent?: string;
 }
 
 /**
@@ -687,6 +695,7 @@ export function shardScreenRequest(
       : {}),
     ...(command.maxItems !== undefined ? { maxItems: command.maxItems } : {}),
     ...(command.maxSymbols !== undefined ? { maxSymbols: command.maxSymbols } : {}),
+    ...(command.traceparent ? { traceparent: command.traceparent } : {}),
   };
 }
 

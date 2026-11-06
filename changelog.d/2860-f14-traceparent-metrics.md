@@ -1,0 +1,3 @@
+### Added
+
+- **Workflow traceparent carried into the screen funnel + run metrics aggregation (#2860, Factor 14):** the funnel `trace_id` is now the workflow traceparent's trace-id when a run carries one (`funnelTraceIdForRun`, threaded `WorkflowJobCommand` → `shardScreenRequest` → adapter → `ScreenerRunRequest` → `runScreen`, one id for the whole run including the lock refusal; fresh UUID otherwise), and funnel events fold into a per-isolate screen-run metrics accumulator (`src/telemetry/screenRunStats.ts`: started/completed/failed counts + durations by trigger/universe, failures by classification, retrieval-stats loss semantics, durable home #1743's Analytics Engine pipeline). #clo-arsi
