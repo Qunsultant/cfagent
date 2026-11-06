@@ -59,7 +59,8 @@ function mapActivity(row: Record<string, unknown>): CopilotCycleActivityRecord {
       outcome === "traded" ||
       outcome === "refused" ||
       outcome === "inactive" ||
-      outcome === "outside_sessions"
+      outcome === "outside_sessions" ||
+      outcome === "selection_changed"
         ? outcome
         : "no_trade",
     session: strOrNull(row.session),

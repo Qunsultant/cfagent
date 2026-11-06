@@ -71,6 +71,7 @@ const OUTCOME_VIEW: Record<StockCopilotActivityRecord["outcome"], { label: strin
   refused: { label: "Refused", tone: "danger" },
   inactive: { label: "Inactive", tone: "neutral" },
   outside_sessions: { label: "Outside sessions", tone: "info" },
+  selection_changed: { label: "Selection changed", tone: "info" },
 };
 
 const POSITION_COLUMNS: Array<TableColumn<StockCopilotOpenPosition>> = [
@@ -90,6 +91,9 @@ function activitySummary(record: StockCopilotActivityRecord): string {
     parts.push(`Sold ${exit.symbol} (${exitReasonLabel(exit.reason).toLowerCase()})`);
   }
   if (parts.length > 0) return parts.join(" · ");
+  if (record.outcome === "selection_changed") {
+    return record.detail ?? "Trading selection changed";
+  }
   if (record.outcome === "outside_sessions") {
     return record.session
       ? `The ${copilotSessionLabel(record.session).toLowerCase()} session opened — it is not one of your enabled sessions, so the loop is waiting`
