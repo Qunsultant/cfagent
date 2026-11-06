@@ -41,8 +41,8 @@ Two distinct root causes were identified and permanently resolved:
 
 ```mermaid
 flowchart LR
-    S1["Sub-Issue 1 (#3557)<br/>Uniform Chat UX &<br/>Alpaca Paper Default<br/>[MERGED]"] --> S2["Sub-Issue 2 (#3513)<br/>Chat Door & Dynamic<br/>Registry Quick-Chips<br/>[IN PROGRESS]"]
-    S2 --> S3["Sub-Issue 3 (#3452)<br/>Dynamic Loop Config<br/>(Cadence, Universe, Sessions)<br/>via Chat"]
+    S1["Sub-Issue 1 (#3557)<br/>Uniform Chat UX &<br/>Alpaca Paper Default<br/>[MERGED]"] --> S2["Sub-Issue 2 (#3513)<br/>Chat Door & Dynamic<br/>Registry Quick-Chips<br/>[MERGED]"]
+    S2 --> S3["Sub-Issue 3 (#3452)<br/>Dynamic Loop Config<br/>(Cadence, Universe, Sessions)<br/>via Chat<br/>[MERGED]"]
     S3 --> S4["Sub-Issue 4 (#3450)<br/>Multi-Pattern Catalog &<br/>Multi-Format Reports<br/>(PDF, HTML, JSON, MD)"]
     S4 --> S5["Sub-Issue 5 (#3453)<br/>Platform Capability Reuse<br/>(ThinkWorkflow, Scheduler,<br/>5-Stage Pub/Sub Pipeline)"]
     S5 --> S6["Sub-Issue 6<br/>Tool-Driven Reflection &<br/>Self-Explanation Introspection"]
@@ -52,8 +52,8 @@ flowchart LR
 | # | Issue ID | Component | Description | Status |
 |---|---|---|---|---|
 | 1 | [#3557](https://github.com/Qunsultant/cfagent/issues/3557) | Uniform Chat UX & Mode Guarantee | Make Stock Copilot 100% full-width chat with bottom composer; enforce Alpaca Paper default. | **Merged** |
-| 2 | [#3513](https://github.com/Qunsultant/cfagent/issues/3513) | Chat Door & Dynamic Quick-Chips | MCP tools `stock_copilot_status` & `stock_copilot_control`; dynamic registry quick-chips. | **In Progress** |
-| 3 | [#3452](https://github.com/Qunsultant/cfagent/issues/3452) | Dynamic Loop Configuration via Chat | Real-time chat commands to adjust scan intervals, session patterns, and universe filters. | Ready for Dev |
+| 2 | [#3513](https://github.com/Qunsultant/cfagent/issues/3513) | Chat Door & Dynamic Quick-Chips | MCP tools `stock_copilot_status` & `stock_copilot_control`; dynamic registry quick-chips. | **Merged** |
+| 3 | [#3452](https://github.com/Qunsultant/cfagent/issues/3452) | Dynamic Loop Configuration via Chat | Real-time chat commands to adjust scan intervals, session patterns, and universe filters; quick chips. | **Merged** |
 | 4 | [#3450](https://github.com/Qunsultant/cfagent/issues/3450) | Multi-Format Reporting & Patterns | Generate executive summaries, PDF, HTML, JSON, and Markdown reports on demand. | Planned |
 | 5 | [#3453](https://github.com/Qunsultant/cfagent/issues/3453) | Pipeline & Workflow Reuse | Connect loop stages to `thinkWorkflow`, `thinkAdapter`, scheduler alarms, and audit ledgers. | Planned |
 | 6 | Epic #3514 | Tool-Driven Reflection & Introspection | Dynamic capability synthesis, pipeline self-explanation, and adaptive learning via tool metadata. | Planned |
@@ -207,12 +207,25 @@ flowchart TD
   - *"What is the loop doing right now?"* -> Calls `stock_copilot_status`, returns current session, latest scan count, and open positions.
   - *"Show open positions and bracket exit plans"* -> Lists tickers, entry prices, take-profit prices, stop-loss prices, and unrealized PnL.
 - **Execution Control:**
+  - *"Set loop interval to 1 hour"* -> Calls `stock_copilot_control(cadence: "1 hour")`, sets Think scheduled interval and persists to settings.
+  - *"Pause trading until 9:30 AM"* -> Calls `stock_copilot_control(pauseUntil: "09:30 AM")`, defers order entry until target time.
   - *"Pause the Stock Copilot loop"* -> Calls `stock_copilot_control(paused: true)`, halts new entries while leaving bracket exits active.
   - *"Resume the trading loop"* -> Calls `stock_copilot_control(paused: false)`, resumes automatic cycle execution.
-  - *"Enable overnight EXTO and pre-market sessions"* -> Updates session list in `mas_settings` via `stock_copilot_control(sessions: [...])`.
+  - *"Enable pre-market and overnight sessions"* -> Updates session list in `mas_settings` via `stock_copilot_control(sessions: ["pre_market", "regular", "after_hours", "exto"])`.
 - **Introspection & Capabilities:**
   - *"What tools do you have available?"* -> Introspects tool catalog and returns grouped capabilities.
   - *"Explain the 5-stage pipeline you use"* -> Synthesizes pipeline stages and tool mappings.
+
+### 5.1 Contextual Quick-Chips in Chat Surface
+To provide immediate context on how to interact with and control the Copilot, `copilotRegistry.ts` surfaces 8 interactive prompt chips:
+1. `⏱️ Set loop interval to 1 hour`: Prompt to adjust the loop interval dynamically.
+2. `🌙 Enable pre-market and overnight sessions`: Enables full 24-hour cycle coverage across extended hours.
+3. `⏸️ Pause trading until 9:30 AM`: Pauses cycle order execution until the regular market bell opens.
+4. `🔍 What are you doing?`: Real-time query to inspect current loop cycle state, scan results, and guards.
+5. `🧠 Explain workflow & tools`: Triggers tool introspection to explain the 5 pipeline stages and available tools.
+6. `📊 Open Positions & Exits`: Surfaces current inventory, bracket take-profit, stop-loss, and PnL.
+7. `⏸️ Pause Loop`: Immediately halts autonomous order generation.
+8. `▶️ Resume Loop`: Resumes autonomous order generation.
 
 ---
 
