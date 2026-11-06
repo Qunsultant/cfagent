@@ -67,7 +67,7 @@ function ctx(env: Partial<Env> = {}) {
   const orm = new DatabaseORM(new MockSqlStorage());
   orm.initializeSchema("test_session_user");
   return {
-    env: { AI: {} as any, SEARCH_AGENT: {} as any, AGENT_SESSIONS: {} as any, ...env } as Env,
+    env: { AI: {} as any, ORCHESTRATOR_AGENT: {} as any, AGENT_SESSIONS: {} as any, ...env } as Env,
     orm,
     sessionId: "session_1",
     audit: () => {},
