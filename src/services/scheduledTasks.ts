@@ -939,16 +939,26 @@ export class ScheduledTasksService {
     // active in this instance's mas_async_jobs rows (platformDeps.sql
     // is that same storage; absent, only the lock probe applies). A
     // refused submission returns the skipped shape the caller already
-    // honors — no new run, no duplicate Slack partial. The probe is
-    // best-effort: if the stub cannot answer (test doubles, missing
-    // binding), the run proceeds ungated rather than failing on gate
-    // machinery — the pre-#1993 behavior, never a new failure mode.
+    // honors — no new run, no duplicate Slack partial.
+    // Issue #2860 (Factor 8): both probes are
+    // FAIL-CLOSED. A probe that cannot answer refuses the submission
+    // (skippedReason "gate-unavailable", audited so the refusal is
+    // visible) instead of proceeding ungated — the pre-#2860
+    // availability choice is gone; the risk-accepted alternative
+    // was not taken (user decision 2026-11-06).
     let lockHeld = false;
     try {
       const running = await this.getScreenerAgent(userLogin).isScreenRunning(universe, userLogin);
       lockHeld = running.running;
-    } catch {
-      console.warn("[ScheduledTasksService] Screen-run lock probe unavailable; proceeding without the gate (#1993).");
+    } catch (err) {
+      this.audit("screener.sharded_chain_gate_unavailable", {
+        sector: sector || "ALL",
+        universe,
+        probe: "screen-run-lock",
+        error: err instanceof Error ? err.message : String(err),
+      });
+      console.warn("[ScheduledTasksService] Screen-run lock probe unavailable; refusing sharded submission (fail-closed, #2860).");
+      return { success: true, taskType: "market_screen", skipped: true, skippedReason: "gate-unavailable", sharded: true, timestamp } as any;
     }
     if (lockHeld) {
       return { success: true, taskType: "market_screen", skipped: true, skippedReason: "already-running", sharded: true, timestamp } as any;
@@ -961,9 +971,18 @@ export class ScheduledTasksService {
         // src/data/asyncJobPorts.ts executes the same statement).
         const rows = createAsyncJobPorts(this.platformDeps.sql as never).read.activeJobPayloads() as unknown as Array<Record<string, unknown>>;
         activeChain = hasActiveChain(rows, userLogin, universe);
-      } catch {
-        // A gate read failure must not wedge submissions: proceed, and
-        // the lock probe above remains the primary guard.
+      } catch (err) {
+        // Fail-closed (#2860 Factor 8): a gate read failure
+        // refuses the submission — it must not wedge open a
+        // second chain for the same user + universe.
+        this.audit("screener.sharded_chain_gate_unavailable", {
+          sector: sector || "ALL",
+          universe,
+          probe: "active-chain",
+          error: err instanceof Error ? err.message : String(err),
+        });
+        console.warn("[ScheduledTasksService] Active-chain probe unavailable; refusing sharded submission (fail-closed, #2860).");
+        return { success: true, taskType: "market_screen", skipped: true, skippedReason: "gate-unavailable", sharded: true, timestamp } as any;
       }
       if (activeChain) {
         return { success: true, taskType: "market_screen", skipped: true, skippedReason: "already-running", sharded: true, timestamp } as any;
