@@ -272,6 +272,12 @@ export interface Env {
   // Copilot cycle; absence uses the service's default universe
   // (src/services/stockCopilot.ts).
   STOCK_COPILOT_UNIVERSE?: string;
+  // #3398 — optional deployment-default trading sessions for the
+  // Stock Copilot (comma-separated session ids: pre_market, regular,
+  // after_hours, exto; "none" = no sessions). The per-login stored
+  // setting (stock_copilot:sessions) wins over this; absence of both
+  // means regular only (src/services/stockCopilotSessions.ts).
+  STOCK_COPILOT_SESSIONS?: string;
   // Comma-separated provider ids. Default when wiring is on: "github".
   // An id with no registered adapter is ignored, never a fallback.
   IAAA_ENABLED_PROVIDERS?: string;

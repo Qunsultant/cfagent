@@ -42,6 +42,12 @@ export interface CopilotPositionRecord {
   entryPrice: number;
   stopPrice: number;
   targetPrice: number;
+  /** #3398: the trading session the entry was placed in (the
+   *  copilot's session vocabulary), and the order type it was
+   *  placed with — recorded per decision so measurement can slice
+   *  by them. Null on rows opened before sessions were recorded. */
+  entrySession?: string | null;
+  entryOrderType?: string | null;
   brokerOrderRef: string;
   status: "open" | "closed";
   openedAt: string;
@@ -114,8 +120,10 @@ export interface CopilotActivityExit {
 
 /**
  * One recorded cycle: a firing that actually evaluated the market
- * (or was refused by the paper guard before it could). Paused and
- * outside-hours firings are NOT recorded — they evaluated nothing.
+ * (or was refused by the paper guard before it could). Paused
+ * firings are NOT recorded — they evaluated nothing. #3398:
+ * outside-enabled-sessions firings record ONE transition record
+ * per state change (outcome outside_sessions), not one per firing.
  */
 export interface CopilotCycleActivityRecord {
   id: string;
@@ -127,8 +135,14 @@ export interface CopilotCycleActivityRecord {
    *  why); refused = a mode gate refused the cycle (detail names
    *  the refusal); inactive = the cycle did not run because the
    *  active broker is not the copilot's (detail names the state,
-   *  #3451). */
-  outcome: "traded" | "no_trade" | "refused" | "inactive";
+   *  #3451); outside_sessions = a #3398 session-state transition:
+   *  the cycle fired outside the user's enabled sessions (detail
+   *  names the state and the current session). */
+  outcome: "traded" | "no_trade" | "refused" | "inactive" | "outside_sessions";
+  /** #3398: the trading session the cycle fired in (the copilot's
+   *  session vocabulary), or null when no session was open. Absent
+   *  on records written before sessions were recorded. */
+  session?: string | null;
   /** Symbols entered this cycle. */
   entries: string[];
   /** Exits placed this cycle, each with its exit reason. */

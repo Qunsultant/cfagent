@@ -31,6 +31,16 @@
  *   refuses with stock_copilot_mode_mismatch, never a silent trade
  *   in the wrong mode.
  * - Flag OFF (STOCK_COPILOT_PAPER_ENABLED) = no cycles, no orders.
+ * - Sessions (#3398): the cycle trades only inside the user's
+ *   ENABLED sessions (src/services/stockCopilotSessions.ts —
+ *   externalized per-user settings; regular-only until the user
+ *   chooses otherwise). Outside them the cycle is the named
+ *   outside_enabled_sessions state: no platform contact, one
+ *   activity record per state transition. Orders are shaped per
+ *   session (market in regular hours, limit-only elsewhere) and a
+ *   session whose terms the platform cannot carry on the wire is
+ *   refused by name — never silently re-shaped into a
+ *   regular-session order.
  * - Deterministic money path: orders come only from this
  *   signal → sizing → optimizer path. No LLM judgment places orders.
  *
@@ -79,6 +89,14 @@ import {
   StockCopilotPositionStore,
   type CopilotPositionRecord,
 } from "./stockCopilotStore";
+import {
+  copilotSessionAt,
+  resolveCopilotSessions,
+  shapeCopilotSessionOrder,
+  STOCK_COPILOT_OUTSIDE_ENABLED_SESSIONS,
+  STOCK_COPILOT_SESSION_WIRE_UNSUPPORTED,
+  type CopilotSessionId,
+} from "./stockCopilotSessions";
 
 /** Named refusal when the active broker/mode selection cannot be
  *  resolved — the cycle never guesses a mode for a money path. */
@@ -152,6 +170,11 @@ export function copilotUniverseFromEnv(
  * venue simply leaves orders unfilled, and the cycle's tracked state
  * stays consistent because positions are recorded only on accepted
  * submissions.
+ *
+ * #3398: the cycle's gate no longer reads this directly — it reads
+ * the user's enabled sessions (stockCopilotSessions.ts), of which
+ * the regular session is one. This read remains for surfaces that
+ * report the regular-session state itself (the status route).
  */
 export function isUsMarketOpen(now: Date): boolean {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -197,6 +220,13 @@ export interface StockCopilotDeps {
   now?: () => Date;
   universe?: string[];
   strategies?: readonly SandboxStrategyId[];
+  /** #3398: the user's enabled trading sessions, resolved by the
+   *  host from the externalized settings (the production host reads
+   *  the per-login setting via resolveCopilotSessions). Optional so
+   *  the cycle stays runnable in hosts that do not compose it: the
+   *  cycle then resolves from the deployment env alone, which with
+   *  no env value is the regular-only default. */
+  enabledSessions?: readonly CopilotSessionId[];
 }
 
 export interface StockCopilotRejection {
@@ -217,12 +247,18 @@ export interface StockCopilotCycleResult {
     | "mode_unresolved"
     | "inactive_broker"
     | "refused_mode_mismatch"
-    | "skipped_outside_market_hours"
+    | "outside_enabled_sessions"
     | "paused"
     | "ok";
   /** Named refusal code when a mode gate refused the cycle
    *  (status mode_unresolved or refused_mode_mismatch). */
   refusal?: string;
+  /** #3398: the trading session this cycle fired in, or null when
+   *  no session was open (or the flag gate stopped the cycle before
+   *  the session was read). */
+  session: CopilotSessionId | null;
+  /** #3398: the user's enabled sessions in effect for this cycle. */
+  enabledSessions: CopilotSessionId[];
   entriesPlaced: number;
   exitsPlaced: number;
   /** #3422: the entries that landed, by symbol + strategy (the
@@ -298,11 +334,28 @@ export function signalConditionedForwardReturns(
   return returns;
 }
 
+/**
+ * #3398: whether the composed platform can carry a session's terms
+ * on the wire (its optional supportsSessionOrders capability —
+ * absent means it cannot, and session orders must refuse by name
+ * rather than degrade into regular-session orders).
+ */
+function platformSupportsSessionOrders(
+  platform: ITradingPlatform,
+  session: CopilotSessionId,
+): boolean {
+  return (
+    typeof platform.supportsSessionOrders === "function" &&
+    platform.supportsSessionOrders(session) === true
+  );
+}
+
 async function evaluateExit(
   deps: StockCopilotDeps,
   store: StockCopilotPositionStore,
   position: CopilotPositionRecord,
   nowIso: string,
+  session: CopilotSessionId,
   result: StockCopilotCycleResult,
 ): Promise<void> {
   const closes = await deps.loadBars(position.symbol);
@@ -325,12 +378,27 @@ async function evaluateExit(
   else if (last >= position.targetPrice) exitReason = "take_profit";
   if (exitReason === null) return;
 
+  // #3398: the exit is shaped for the session it fires in; a
+  // session whose terms the platform cannot carry refuses by
+  // name and the position stays open — it is never sold as a
+  // regular-session order by accident.
+  const shape = shapeCopilotSessionOrder(session, last);
+  if (shape.requiresSessionTerms && !platformSupportsSessionOrders(deps.platform, session)) {
+    result.errors.push({
+      symbol: position.symbol,
+      stage: "exit_order",
+      message: `${STOCK_COPILOT_SESSION_WIRE_UNSUPPORTED}: ${session}`,
+    });
+    return;
+  }
+
   const placed = await deps.platform.placeOrderRemote!({
     orderId: `copilot-${crypto.randomUUID()}`,
     symbol: position.symbol,
     action: "SELL",
     quantity: position.quantity,
-    orderType: "MARKET",
+    orderType: shape.orderType,
+    ...(shape.orderType === "LIMIT" ? { limitPrice: shape.limitPrice } : {}),
     userLogin: deps.userLogin,
   });
   if (!placed.success) {
@@ -362,6 +430,7 @@ async function attemptEntry(
     strategy: SandboxStrategyId;
     closes: readonly number[];
     nowIso: string;
+    session: CopilotSessionId;
   },
   result: StockCopilotCycleResult,
 ): Promise<void> {
@@ -427,12 +496,24 @@ async function attemptEntry(
     return;
   }
 
+  // #3398: the entry is shaped for the session it fires in
+  // (market in regular hours; limit-only elsewhere, priced at the
+  // decision price). A session whose terms the platform cannot
+  // carry on the wire refuses by name — the order is never sent
+  // as a regular-session order in its place.
+  const shape = shapeCopilotSessionOrder(args.session, entry);
+  if (shape.requiresSessionTerms && !platformSupportsSessionOrders(deps.platform, args.session)) {
+    reject(`${STOCK_COPILOT_SESSION_WIRE_UNSUPPORTED}: ${args.session}`);
+    return;
+  }
+
   const placed = await deps.platform.placeOrderRemote!({
     orderId: `copilot-${crypto.randomUUID()}`,
     symbol,
     action: "BUY",
     quantity: qty,
-    orderType: "MARKET",
+    orderType: shape.orderType,
+    ...(shape.orderType === "LIMIT" ? { limitPrice: shape.limitPrice } : {}),
     userLogin: deps.userLogin,
   });
   if (!placed.success) {
@@ -450,6 +531,8 @@ async function attemptEntry(
     stopPrice,
     targetPrice,
     brokerOrderRef: entryRef,
+    entrySession: args.session,
+    entryOrderType: shape.orderType,
     openedAt: nowIso,
   });
   result.entriesPlaced += 1;
@@ -466,8 +549,9 @@ function appendCycleActivity(
   deps: StockCopilotDeps,
   result: StockCopilotCycleResult,
   cycleAt: string,
-  outcome: "traded" | "no_trade" | "refused" | "inactive",
+  outcome: "traded" | "no_trade" | "refused" | "inactive" | "outside_sessions",
   detail: string | null,
+  session: CopilotSessionId | null,
 ): void {
   if (!deps.activity) return;
   try {
@@ -477,6 +561,7 @@ function appendCycleActivity(
       userLogin: deps.userLogin,
       cycleAt,
       outcome,
+      session,
       entries: result.entries.map((e) => e.symbol),
       exits: result.exits.map((e) => ({ symbol: e.symbol, reason: e.reason })),
       detail,
@@ -491,10 +576,43 @@ function appendCycleActivity(
 }
 
 /**
+ * #3398: record the outside-enabled-sessions state ONCE per
+ * transition. The cycle fires every 30 minutes around the clock;
+ * a persistent state must be visible (the status route computes it
+ * live, and this record marks when it began) without spamming the
+ * activity feed — a firing whose state matches the latest record's
+ * outside state writes nothing.
+ */
+function recordOutsideSessionsTransition(
+  deps: StockCopilotDeps,
+  result: StockCopilotCycleResult,
+  cycleAt: string,
+  session: CopilotSessionId | null,
+): void {
+  if (!deps.activity) return;
+  const detail = `${STOCK_COPILOT_OUTSIDE_ENABLED_SESSIONS}:${session ?? "none"}`;
+  try {
+    deps.activity.ensureSchema();
+    const last = deps.activity.listActivity(deps.userLogin, 1)[0];
+    if (last && last.outcome === "outside_sessions" && last.detail === detail) {
+      return;
+    }
+  } catch (err) {
+    result.errors.push({
+      symbol: "",
+      stage: "activity",
+      message: err instanceof Error ? err.message : String(err),
+    });
+    return;
+  }
+  appendCycleActivity(deps, result, cycleAt, "outside_sessions", detail, session);
+}
+
+/**
  * One copilot cycle. Gate order is deliberate: flag → selection
  * gates (#3451: unresolved, then inactive broker, then the
- * mode/base agreement guard) → market hours → work. The selection
- * gates make zero platform calls; per-symbol failures are
+ * mode/base agreement guard) → session gate (#3398) → work. The
+ * selection gates make zero platform calls; per-symbol failures are
  * collected, never thrown — one bad symbol must not stop the
  * loop's other positions from being managed.
  *
@@ -504,14 +622,20 @@ function appendCycleActivity(
  * is not recorded as a cycle. Unpaused cycles that evaluated the
  * market write one activity record (traded / no-trade); a refused
  * cycle writes one refused record and an inactive cycle one
- * inactive record. Flag-off and outside-hours firings record
- * nothing.
+ * inactive record. Flag-off firings record nothing.
+ *
+ * #3398: an outside-enabled-sessions firing records one
+ * outside_sessions transition record (see
+ * recordOutsideSessionsTransition) — the state is visible in the
+ * feed from the moment it begins, without a record per firing.
  */
 export async function runStockCopilotCycle(
   deps: StockCopilotDeps,
 ): Promise<StockCopilotCycleResult> {
   const result: StockCopilotCycleResult = {
     status: "ok",
+    session: null,
+    enabledSessions: [],
     entriesPlaced: 0,
     exitsPlaced: 0,
     entries: [],
@@ -528,6 +652,16 @@ export async function runStockCopilotCycle(
   const now = (deps.now ?? (() => new Date()))();
   const nowIso = now.toISOString();
 
+  // SESSION STATE (#3398) — resolved before the gates so every
+  // record this cycle writes can name the session it fired in.
+  // The enabled set is the user's externalized choice (host-resolved
+  // from the settings; env-only resolution when no host composed it).
+  const enabledSessions =
+    deps.enabledSessions ?? resolveCopilotSessions({ env: deps.env });
+  const session = copilotSessionAt(now);
+  result.session = session;
+  result.enabledSessions = [...enabledSessions];
+
   // MODE GATES (#3451) — evaluated before the platform is touched
   // at all. The selection is the panel menu's active broker + mode
   // for this login, resolved by the host; the screener context's
@@ -535,7 +669,7 @@ export async function runStockCopilotCycle(
   if (!deps.selection.resolved) {
     result.status = "mode_unresolved";
     result.refusal = STOCK_COPILOT_MODE_UNRESOLVED;
-    appendCycleActivity(deps, result, nowIso, "refused", STOCK_COPILOT_MODE_UNRESOLVED);
+    appendCycleActivity(deps, result, nowIso, "refused", STOCK_COPILOT_MODE_UNRESOLVED, session);
     return result;
   }
   const selection = deps.selection.selection;
@@ -543,7 +677,7 @@ export async function runStockCopilotCycle(
     // One active broker, and it is not the copilot's: the cycle is
     // inactive — named, recorded, and zero platform calls.
     result.status = "inactive_broker";
-    appendCycleActivity(deps, result, nowIso, "inactive", STOCK_COPILOT_INACTIVE_BROKER);
+    appendCycleActivity(deps, result, nowIso, "inactive", STOCK_COPILOT_INACTIVE_BROKER, session);
     return result;
   }
 
@@ -556,12 +690,18 @@ export async function runStockCopilotCycle(
   if (resolvedBase.isLive !== (selection.mode === "live")) {
     result.status = "refused_mode_mismatch";
     result.refusal = STOCK_COPILOT_MODE_MISMATCH;
-    appendCycleActivity(deps, result, nowIso, "refused", STOCK_COPILOT_MODE_MISMATCH);
+    appendCycleActivity(deps, result, nowIso, "refused", STOCK_COPILOT_MODE_MISMATCH, session);
     return result;
   }
 
-  if (!isUsMarketOpen(now)) {
-    result.status = "skipped_outside_market_hours";
+  // SESSION GATE (#3398) — the cycle trades only inside the user's
+  // enabled sessions. Outside them it is a named, visible state
+  // (the status route computes the same state live), recorded once
+  // per transition — never an invisible skip, never a per-firing
+  // record for a persistent state.
+  if (session === null || !enabledSessions.includes(session)) {
+    result.status = "outside_enabled_sessions";
+    recordOutsideSessionsTransition(deps, result, nowIso, session);
     return result;
   }
 
@@ -587,7 +727,7 @@ export async function runStockCopilotCycle(
     const openBefore = await store.listOpenPositions(deps.userLogin);
     for (const position of openBefore) {
       try {
-        await evaluateExit(deps, store, position, nowIso, result);
+        await evaluateExit(deps, store, position, nowIso, session, result);
       } catch (err) {
         result.errors.push({
           symbol: position.symbol,
@@ -641,7 +781,7 @@ export async function runStockCopilotCycle(
           deps,
           store,
           getReport,
-          { symbol, strategy, closes, nowIso },
+          { symbol, strategy, closes, nowIso, session },
           result,
         );
         break; // One decision per symbol per cycle, whichever way it lands.
@@ -660,13 +800,13 @@ export async function runStockCopilotCycle(
   // reasons, or the plain no-signal outcome when nothing was
   // even attempted).
   if (result.entriesPlaced + result.exitsPlaced > 0) {
-    appendCycleActivity(deps, result, nowIso, "traded", null);
+    appendCycleActivity(deps, result, nowIso, "traded", null, session);
   } else {
     const detail =
       result.rejections.length > 0
         ? [...new Set(result.rejections.map((r) => r.reason))].join("; ")
         : "no_entry_signals";
-    appendCycleActivity(deps, result, nowIso, "no_trade", detail);
+    appendCycleActivity(deps, result, nowIso, "no_trade", detail, session);
   }
 
   return result;
