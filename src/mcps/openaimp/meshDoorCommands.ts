@@ -157,9 +157,11 @@ import {
   type TransactionSnapDoorInput,
   type PreTradeApprovalDraftDoorInput,
   type PreTradeApprovalTicketDoorResult,
+  MeshDoorError,
 } from "../../agents/orchestrator/meshDoors";
 import { recordTraceHopBestEffort } from "../../data/createMeshTracePorts";
 import { childContextOfTraceparent } from "../../observability/meshTrace";
+import { createSettingsPort } from "../../data/createSettingsPorts";
 import {
   meshScreenDoorContextFromMcp,
   runStockScreenViaDoor,
@@ -172,6 +174,15 @@ import {
   type MeshOptionsStrategyDoorInput,
   type MeshOptionsStrategyScreenResult,
 } from "../../agents/orchestrator/meshOptionsStrategyDoor";
+import {
+  getStockCopilotStatusViaDoor,
+  controlStockCopilotViaDoor,
+  type StockCopilotDoorContext,
+  type StockCopilotStatusResult,
+  type StockCopilotControlInput,
+  type StockCopilotControlResult,
+} from "../../agents/orchestrator/meshStockCopilotDoor";
+import { COPILOT_SESSIONS } from "../../services/stockCopilotSessions";
 import { UNIVERSES, type UniverseId } from "../../trading";
 
 /**
@@ -1293,6 +1304,124 @@ export class RunOptionsStrategyScreenCommand implements IMcpToolCommand<MeshOpti
       status: result.status,
       count: result.count,
       strategyTypes: result.constraints.strategyTypes,
+    });
+    return result;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* stock_copilot_status & stock_copilot_control (#3513)               */
+/* ------------------------------------------------------------------ */
+
+export function meshStockCopilotDoorContextFromMcp(context: McpToolContext): StockCopilotDoorContext {
+  const storage = context.storage as unknown as
+    | { sql?: any }
+    | undefined;
+  const sql = storage?.sql;
+  if (!sql) {
+    throw new MeshDoorError(
+      "door_unavailable",
+      "Stock Copilot door cannot access SQLite: executing context carries no instance SQL storage.",
+    );
+  }
+  const settings = createSettingsPort(sql);
+  return {
+    env: context.env,
+    sql: sql,
+    readSettingRaw: (key: string) => {
+      try {
+        return settings.get(key);
+      } catch {
+        return null;
+      }
+    },
+    writeSetting: (key: string, value: string) => {
+      try {
+        settings.set(key, value);
+      } catch (e) {
+        console.error("Failed to write setting via MCP door:", e);
+      }
+    },
+    audit: (type, agent, payload) => {
+      try {
+        context.audit(type, agent, payload);
+      } catch {}
+    },
+  };
+}
+
+export class StockCopilotStatusCommand implements IMcpToolCommand<Record<string, never>> {
+  readonly name = "stock_copilot_status";
+  readonly description =
+    "Inspect the real-time status of the autonomous Stock Copilot trading loop: active broker and mode (Alpaca Paper), current trading session, enabled sessions, open positions with bracket exit targets (take-profit, stop-loss), recently closed trades, and recent cycle activity/refusal telemetry.";
+  readonly jsonSchema = {
+    type: "object" as const,
+    properties: {},
+  };
+  readonly zodSchema = z.object({});
+
+  async execute(
+    _input: Record<string, never>,
+    context: McpToolContext,
+  ): Promise<StockCopilotStatusResult> {
+    const actingLogin = context.actingLogin?.();
+    await recordDoorHop(context, this.name, "OrchestratorAgent");
+    const result = await getStockCopilotStatusViaDoor(
+      meshStockCopilotDoorContextFromMcp(context),
+      actingLogin,
+    );
+    context.audit("stock_copilot_status", "mcp", {
+      actingLogin: actingLogin ?? null,
+      status: result.status,
+      activeBroker: result.activeBroker,
+      activeMode: result.activeMode,
+      openCount: result.openPositions.length,
+    });
+    return result;
+  }
+}
+
+export class StockCopilotControlCommand implements IMcpToolCommand<StockCopilotControlInput> {
+  readonly name = "stock_copilot_control";
+  readonly description =
+    "Pause or resume the autonomous Stock Copilot trading loop or update its enabled trading sessions. Pausing halts new entries while continuing to manage existing bracket exits.";
+  readonly jsonSchema = {
+    type: "object" as const,
+    properties: {
+      paused: {
+        type: "boolean",
+        description: "Set to true to pause the loop, or false to resume execution.",
+      },
+      sessions: {
+        type: "array",
+        items: {
+          type: "string",
+          enum: [...COPILOT_SESSIONS],
+        },
+        description: "Enabled trading session IDs (pre_market, regular, after_hours, exto).",
+      },
+    },
+  };
+  readonly zodSchema = z.object({
+    paused: z.boolean().optional().describe("Pause or resume the loop"),
+    sessions: z.array(z.enum(COPILOT_SESSIONS as unknown as [string, ...string[]])).optional().describe("Enabled session IDs"),
+  });
+
+  async execute(
+    input: StockCopilotControlInput,
+    context: McpToolContext,
+  ): Promise<StockCopilotControlResult> {
+    const actingLogin = context.actingLogin?.();
+    await recordDoorHop(context, this.name, "OrchestratorAgent");
+    const result = await controlStockCopilotViaDoor(
+      meshStockCopilotDoorContextFromMcp(context),
+      actingLogin,
+      input,
+    );
+    context.audit("stock_copilot_control", "mcp", {
+      actingLogin: actingLogin ?? null,
+      paused: result.paused,
+      enabledSessions: result.enabledSessions,
     });
     return result;
   }

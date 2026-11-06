@@ -214,6 +214,8 @@ export const MCP_TOOL_SCOPES: Record<string, McpScope> = {
   // a rendered page through the agent (its snap/capture siblings
   // deliver to Slack, so they sit in write).
   browser_scrape_tables: "mcp:read",
+  // #3513: Stock Copilot loop telemetry and status read
+  stock_copilot_status: "mcp:read",
   // write (10)
   manage_categories: "mcp:write",
   manage_referrals: "mcp:write",
@@ -239,6 +241,8 @@ export const MCP_TOOL_SCOPES: Record<string, McpScope> = {
   // scan that persists nothing itself and moves no money; the
   // write scope matches its sibling screen door).
   run_options_strategy_screen: "mcp:write",
+  // #3513: Stock Copilot loop control (pause/resume & sessions)
+  stock_copilot_control: "mcp:write",
   // execute (7)
   execute_nlq: "mcp:execute",
   "chain.run": "mcp:execute",

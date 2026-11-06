@@ -360,7 +360,8 @@ export function AgentChatTabContentInner({
 
       {/* Action Bar */}
       <div className="chat-action-bar">
-        <span className="chat-subtitle">Stateful Distributed Ledger Session</span>
+        <span className="chat-subtitle">Stateful Distributed Ledger Session · neural strategy intelligence</span>
+        {/* Default quick chips references for #2563: Bull Put Spread, Iron Condor */}
         {messages.length > 0 && (
           <Button
             appearance="subtle"
@@ -390,181 +391,33 @@ export function AgentChatTabContentInner({
       {/* Messages Stream */}
       <div className="messages-stream">
         {messages.length === 0 ? (
-          activeView === "options" ? (
-            <div className="hero-welcome">
-              <div className="hero-icon">🎯</div>
-              <h3>Options Strategy &amp; Intelligence Copilot</h3>
-              <p>
-                Screen, construct, and evaluate structured multi-leg options strategies with real-time Greeks, risk-reward ratios, and 1-click execution. Responses produce interactive structured strategy cards and payoff curves.
-              </p>
+          <div className="hero-welcome">
+            <div className="hero-icon">{currentCopilot?.hero?.icon || currentCopilot?.icon || "⚡"}</div>
+            <h3>{currentCopilot?.hero?.title || currentCopilot?.label}</h3>
+            <p>
+              {currentCopilot?.hero?.description || currentCopilot?.tooltip?.description}
+            </p>
+            {currentCopilot?.quickChips && currentCopilot.quickChips.length > 0 && (
               <div className="quick-chips">
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  disabled={isBusy || isResetting}
-                  onClick={() => handleChipClick("Screen for Bull Put credit spreads with max loss <= $30 and max profit > 0", "Options Strategy Guide")}
-                >
-                  🎯 Bull Put Spread (&le; $30 Max Loss)
-                </Button>
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  disabled={isBusy || isResetting}
-                  onClick={() => handleChipClick("Find delta-neutral Iron Condors on SPY with 30-45 DTE and probability of profit > 70%", "Options Strategy Guide")}
-                >
-                  🦅 SPY Iron Condor (High POP)
-                </Button>
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  disabled={isBusy || isResetting}
-                  onClick={() => handleChipClick("Find covered call setups on AAPL targeting 15-20 delta with 30 DTE", "Options Strategy Guide")}
-                >
-                  📈 AAPL Covered Call (Income)
-                </Button>
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  disabled={isBusy || isResetting}
-                  onClick={() => handleChipClick("Show recent aggressive institutional options sweeps and unusual volume alerts", "Options Flow Guide")}
-                >
-                  🌊 Unusual Options Flow Sweeps
-                </Button>
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  disabled={isBusy || isResetting}
-                  onClick={() => handleChipClick("Evaluate straddle pricing, implied move, and volatility skew for upcoming earnings on NVDA", "Options Strategy Guide")}
-                >
-                  ⚡ NVDA Straddle / Volatility
-                </Button>
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  disabled={isBusy || isResetting}
-                  onClick={() => handleChipClick("Calculate a delta-neutral portfolio hedge using index put options", "Trading Safety Guide")}
-                >
-                  🛡️ Portfolio Delta Hedge
-                </Button>
+                {currentCopilot.quickChips.map((chip, idx) => (
+                  <Button
+                    key={idx}
+                    appearance="subtle"
+                    size="small"
+                    disabled={isBusy || isResetting}
+                    onClick={() =>
+                      handleChipClick(
+                        chip.prompt,
+                        chip.category || currentCopilot?.sourceTab || currentCopilot?.label || "Copilot Guide",
+                      )
+                    }
+                  >
+                    {chip.label}
+                  </Button>
+                ))}
               </div>
-            </div>
-          ) : activeView === "stock" ? (
-            <div className="hero-welcome">
-              <div className="hero-icon">📈</div>
-              <h3>Stock Copilot &amp; Autonomous Loop</h3>
-              <p>
-                Continuous autonomous trading loop operating across all 4 sessions (Pre-market, Regular, After-hours, and Overnight EXTO) with pattern scoring, CVaR risk optimization, and automatic bracket exits. Ask questions about open positions, cycle telemetry, or adjust the loop directly.
-              </p>
-              <div className="quick-chips">
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  disabled={isBusy || isResetting}
-                  onClick={() => handleChipClick("Show all open positions and their take-profit / stop-loss exit plans", "Stock Copilot Guide")}
-                >
-                  📊 Open Positions &amp; Exits
-                </Button>
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  disabled={isBusy || isResetting}
-                  onClick={() => handleChipClick("What is the current status of the Stock Copilot loop and what happened in the latest cycle?", "Stock Copilot Guide")}
-                >
-                  🔄 Latest Cycle Telemetry
-                </Button>
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  disabled={isBusy || isResetting}
-                  onClick={() => handleChipClick("How does the Stock Copilot CVaR optimizer and risk management work?", "Stock Copilot Guide")}
-                >
-                  🛡️ CVaR Risk Management
-                </Button>
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  disabled={isBusy || isResetting}
-                  onClick={() => handleChipClick("Explain the 4 trading sessions and their active execution hours", "Stock Copilot Guide")}
-                >
-                  ⏰ 24/7 Trading Sessions
-                </Button>
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  disabled={isBusy || isResetting}
-                  onClick={() => handleChipClick("Pause the Stock Copilot trading loop", "Stock Copilot Guide")}
-                >
-                  ⏸️ Pause Loop
-                </Button>
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  disabled={isBusy || isResetting}
-                  onClick={() => handleChipClick("Resume the Stock Copilot trading loop", "Stock Copilot Guide")}
-                >
-                  ▶️ Resume Loop
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <div className="hero-welcome">
-              <div className="hero-icon">⚡</div>
-              <h3>Enterprise Multi-Agent Studio</h3>
-              <p>
-                Ask any question about platform capabilities, workflows, algorithmic decisioning, or command tools directly through chat. Your prompt is routed by an <strong>LLM Judge</strong> and orchestrated across specialized sub-agents with neural strategy intelligence and transactional ledger persistence.
-              </p>
-              <div className="quick-chips">
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  disabled={isBusy || isResetting}
-                  onClick={() => handleChipClick("What are the capabilities of this platform and how do I use the 8 core workflows?", "Platform Capabilities")}
-                >
-                  ⚡ Platform Capabilities
-                </Button>
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  disabled={isBusy || isResetting}
-                  onClick={() => handleChipClick("Screen for top momentum and breakout stocks using the Technical Screener", "Screening Guide")}
-                >
-                  📈 Technical Screener
-                </Button>
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  disabled={isBusy || isResetting}
-                  onClick={() => handleChipClick("Show recent aggressive institutional options sweeps and unusual volume alerts", "Options Flow Guide")}
-                >
-                  🌊 Options Sweeps
-                </Button>
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  disabled={isBusy || isResetting}
-                  onClick={() => handleChipClick("Evaluate straddle pricing, implied move, and volatility skew for upcoming earnings on NVDA", "Options Strategy Guide")}
-                >
-                  ⚡ NVDA Earnings Moves
-                </Button>
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  disabled={isBusy || isResetting}
-                  onClick={() => handleChipClick("How do I build an algorithmic mean reversion trading rule?", "Algorithmic Rules")}
-                >
-                  🤖 Build Trading Rules
-                </Button>
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  disabled={isBusy || isResetting}
-                  onClick={() => handleChipClick("Audit system state, latency, and Durable Object ledgers across all workers", "System Operations")}
-                >
-                  🛡️ Audit &amp; Performance
-                </Button>
-              </div>
-            </div>
-          )
+            )}
+          </div>
         ) : (
           messages.map((msg: any) => {
             const isUser = msg.role === "user";

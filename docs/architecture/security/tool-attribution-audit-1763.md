@@ -115,6 +115,7 @@ other doors. Scope column is #1843's declaration, consumed here.
 | `get_report_asset` | mcp:read | L via door 2 only — acting identity required (#2349); refused on doors 1/3 (no acting-identity carrier there) |
 | `browser_scrape_tables` | mcp:read | L via door 2 only — acting identity required (#2351); refused on doors 1/3 (no acting-identity carrier there) |
 | `get_trade_approval_status` | mcp:read | L via door 2 only — acting identity required (#2375); refused on doors 1/3 (no acting-identity carrier there). Read-only: the TradingTradeWorkflow binding's own status surface |
+| `stock_copilot_status` | mcp:read | L via door 2 only — acting identity required (#3513); refused on doors 1/3 (no acting-identity carrier there). Reads autonomous Stock Copilot loop state, open positions, exit plans and cycle activity |
 
 ### mcp:write (11)
 
@@ -132,6 +133,7 @@ other doors. Scope column is #1843's declaration, consumed here.
 | `slack_dispatch_transaction_snap` | mcp:write | L via door 2 only — acting identity required (#2351); refused on doors 1/3 (no acting-identity carrier there) |
 | `run_stock_screen` | mcp:write | L via door 2 only — acting identity required (#2488); refused on doors 1/3 (no acting-identity carrier there) |
 | `run_options_strategy_screen` | mcp:write | L via door 2 only — acting identity required (#2581); refused on doors 1/3 (no acting-identity carrier there) |
+| `stock_copilot_control` | mcp:write | L via door 2 only — acting identity required (#3513); refused on doors 1/3 (no acting-identity carrier there). Updates loop pause/resume and enabled sessions |
 
 ### mcp:execute (7)
 

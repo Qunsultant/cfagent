@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { MCP_TOOL_SCOPES } from "../src/mcps/openaimp/mcpPermissionPorts";
 
 describe("Tool-attribution audit coverage (#1763)", () => {
-  it("audit doc names all 85 factory tools and the 4 scanner tools", () => {
+  it("audit doc names all 87 factory tools and the 4 scanner tools", () => {
     const doc = readFileSync(
       join(__dirname, "../docs/architecture/security/tool-attribution-audit-1763.md"),
       "utf8",
@@ -33,7 +33,8 @@ describe("Tool-attribution audit coverage (#1763)", () => {
     // #2581: +1 canonical mesh-door tool (run_options_strategy_screen) = 74 canonical.
     // #2731: +1 canonical tool (web_search) = 75 canonical.
     // #2760: +1 canonical tool (web_fetch) = 76 canonical.
-    expect(tools).toHaveLength(85);
+    // #3513: +2 canonical mesh-door tools (stock_copilot_status, stock_copilot_control) = 78 canonical.
+    expect(tools).toHaveLength(87);
     for (const tool of tools) {
       expect(doc).toContain(`\`${tool}\``);
     }

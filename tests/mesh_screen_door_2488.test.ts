@@ -398,7 +398,7 @@ describe("issue #2488 — run_stock_screen catalog registration", () => {
     expect(McpToolFactory.getTool("run_stock_screen")).toBeDefined();
     expect(MCP_TOOL_SCOPES.run_stock_screen).toBe("mcp:write");
     // 83 through #2581; 84 since #2731 (web_search); 85 since #2760 (web_fetch).
-    expect(McpToolFactory.getAllTools()).toHaveLength(85);
+    expect(McpToolFactory.getAllTools()).toHaveLength(87);
   });
 });
 
