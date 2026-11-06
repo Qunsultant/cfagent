@@ -19,9 +19,13 @@ export default defineConfig({
     },
   },
   resolve: {
-    alias: {
-      "@": "/src",
-    },
+    alias: [
+      { find: /^(\.\/|\.\.\/.*\/)TradeExecutionPreview$/, replacement: new URL("./src/client/TradeExecutionPreview.tsx", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1") },
+      { find: /^(\.\/|\.\.\/.*\/)tradeExecutionPreview$/, replacement: new URL("./src/client/tradeExecutionPreview.ts", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1") },
+      { find: /^(\.\/|\.\.\/.*\/)SchedulesHome$/, replacement: new URL("./src/client/SchedulesHome.tsx", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1") },
+      { find: /^(\.\/|\.\.\/.*\/)schedulesHome$/, replacement: new URL("./src/client/schedulesHome.ts", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1") },
+      { find: "@", replacement: "/src" },
+    ],
   },
   // @ts-expect-error vitest configuration options
   test: {
