@@ -466,7 +466,7 @@ export async function handleAgenticPaymentsRoutes(
 
   // Issue #2019: cfpay ledger write-through. mas_transactions in THIS
   // instance's store is the single payment ledger of record; the
-  // PaymentWorkflow (via the SEARCH_AGENT channel) records cfpay
+  // PaymentWorkflow (via the ORCHESTRATOR_AGENT channel) records cfpay
   // charge and credit rows here. Deliberately separate from the #896
   // record endpoint: that endpoint builds PaymentsAgent-origin x402
   // rows only, and reusing it for cfpay would mislabel gateway and
