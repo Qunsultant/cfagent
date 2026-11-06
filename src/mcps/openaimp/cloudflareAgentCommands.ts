@@ -27,9 +27,9 @@ import type {
   SandboxExecutionResult,
 } from "../../types";
 import { ETradeThinkHarness } from "../../services/thinkHarness";
-import { AiSearchInstanceService } from "../../services/aiSearch";
 import { ETradeDurableFiberService } from "../../services/durableFibers";
 import { ETradeService } from "../../services/etrade";
+import { aiSearchAgentResultToQueryResponse } from "../../agents/aiSearchPaths";
 import type {
   AiSearchAgentErrorToken,
   AiSearchAgentResultItem,
@@ -311,7 +311,7 @@ export class ThinkTradeValidationCommand implements IMcpToolCommand<{
  */
 export class AISearchFinancialDocsCommand implements IMcpToolCommand<{ query: string; limit?: number }> {
   readonly name = "ai_search_financial_docs";
-  readonly description = "Perform semantic search across SEC 10-K/10-Q filings, broker rules, and options disclosures. Answers come from the live AI Search instance only: when the instance does not serve, the result carries zero documents and a `degraded` reason (the built-in fallback corpus was removed by #1169 S3) — never substitute documents.";
+  readonly description = "Perform semantic search across SEC 10-K/10-Q filings, broker rules, and options disclosures. Answers come from the live AI Search instance only, reached through the AiSearchAgent (the namespace binding) since #3342 retired the public-endpoint REST transport: when the instance does not serve, the result carries zero documents and a `degraded` reason (the built-in fallback corpus was removed by #1169 S3) — never substitute documents. Generated-report results, when indexed, are served only to the report owner's login: the caller's session login is threaded through and other logins' reports are withheld.";
   readonly jsonSchema = {
     type: "object" as const,
     properties: {
@@ -326,8 +326,50 @@ export class AISearchFinancialDocsCommand implements IMcpToolCommand<{ query: st
   });
 
   async execute(input: { query: string; limit?: number }, context: McpToolContext) {
-    const aiSearch = new AiSearchInstanceService(context.env);
-    const result = await aiSearch.searchFinancialDocs(input.query, input.limit || 5);
+    // Issue #3342: this command called AiSearchInstanceService
+    // (the public-endpoint REST transport) directly. It now
+    // dispatches through the AiSearchAgent's Durable Object door —
+    // the same door the ai_search_agent_search command below uses
+    // (fixed service instance; the caller's session login threaded
+    // as callerLogin, which GIVES this command the #2246 per-login
+    // report discipline the REST path never had) — and shapes the
+    // typed result into the AISearchQueryResponse contract this
+    // command has always returned, via the one mapping the Search
+    // Hub /search/agent route shares. An absent binding answers
+    // the degraded contract (endpoint_not_configured, zero
+    // documents), exactly the answer the retired service gave when
+    // its endpoint was unset — never a throw, never fabricated rows.
+    const namespace = (context.env as any)?.AI_SEARCH_AGENT as
+      | DurableObjectNamespace
+      | undefined;
+    let result;
+    if (
+      !namespace ||
+      typeof namespace.get !== "function" ||
+      typeof namespace.idFromName !== "function"
+    ) {
+      result = aiSearchAgentResultToQueryResponse(input.query, {
+        ok: false,
+        code: "not_configured",
+        errorToken: AgentErrorCode.UNKNOWN_AGENT_ERROR,
+        error:
+          "the AI_SEARCH_AGENT Durable Object binding is not configured in this environment, so the AiSearchAgent cannot be reached",
+        correlationId: crypto.randomUUID(),
+      });
+    } else {
+      const stub = namespace.get(
+        namespace.idFromName(AI_SEARCH_AGENT_SERVICE_INSTANCE),
+      ) as unknown as AiSearchAgentStubLike;
+      const callerLogin =
+        typeof context.sessionId === "string" && context.sessionId.trim()
+          ? context.sessionId
+          : undefined;
+      const agentResult = await stub.search(input.query, {
+        callerLogin,
+        limit: input.limit || 5,
+      });
+      result = aiSearchAgentResultToQueryResponse(input.query, agentResult);
+    }
     context.audit("ai_search.query", "search", {
       query: input.query,
       matches: result.totalMatches,
