@@ -8,11 +8,13 @@
  * returns null) and the tab is absent. The 401/400 pins fail too —
  * no handler means no gate at all. Pins are node-env, no DOM; the
  * tool itself is invoked (not reimplemented), with a stubbed sql
- * store and a stubbed global fetch standing in for the AI Search
- * endpoint. The shared isolate cache is reset between tests so no
- * pin reads another pin's cached result.
+ * store and a fake AI_SEARCH namespace binding standing in for the
+ * AI Search instance (adapted by #3342: the tool's index leg reads
+ * the binding since the public-endpoint REST transport retired;
+ * formerly a stubbed global fetch). The shared isolate cache is
+ * reset between tests so no pin reads another pin's cached result.
  */
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { handleSearchHubRoutes } from "../src/agents/routes/searchHub";
 import { __resetAiSearchCacheForTests } from "../src/services/aiSearchCache";
 
@@ -48,28 +50,28 @@ function stubSql(rows: unknown[]) {
   };
 }
 
-function stubFetch(chunks: unknown[] | null, status = 200) {
-  return async (_url: unknown, _init: unknown) => {
-    if (chunks === null) {
-      return { ok: false, status, json: async () => ({}) };
-    }
-    return {
-      ok: true,
-      status: 200,
-      json: async () => ({ result: { chunks } }),
-    };
+/**
+ * #3342: a fake ai_search_namespaces binding whose instance serves
+ * the given chunks (already-REST-shaped chunks pass the binding
+ * adaptation unchanged), or throws the way an unavailable instance
+ * surfaces through the binding RPC.
+ */
+function bindingEnv(chunks: unknown[] | "throw") {
+  return {
+    AI_SEARCH_INSTANCE: "screener-search",
+    AI_SEARCH: {
+      get: (_name: string) => ({
+        search: async () => {
+          if (chunks === "throw") throw new Error("503 from the instance");
+          return { chunks };
+        },
+      }),
+    },
   };
 }
 
-let originalFetch: typeof fetch;
-
 beforeEach(() => {
   __resetAiSearchCacheForTests();
-  originalFetch = globalThis.fetch;
-});
-
-afterEach(() => {
-  globalThis.fetch = originalFetch;
 });
 
 const callMas = (
@@ -77,7 +79,6 @@ const callMas = (
   opts: { login?: string | null; sql?: unknown; env?: Record<string, unknown>; sessionId?: string } = {}
 ) => {
   const login = opts.login === undefined ? "tester" : opts.login;
-  globalThis.fetch = stubFetch([{ title: "Doc A", snippet: "Alpha." }]) as any;
   return handleSearchHubRoutes(
     new Request("https://agent.internal/api/search/mas", {
       method: "POST",
@@ -91,7 +92,7 @@ const callMas = (
     "/api/search/mas",
     opts.sessionId ?? "sess-mas-1",
     {
-      env: (opts.env ?? {}) as any,
+      env: (opts.env ?? bindingEnv([{ title: "Doc A", snippet: "Alpha." }])) as any,
       userLogin: login ?? "",
       sql: opts.sql as any,
       audit: () => {},
@@ -125,12 +126,6 @@ describe("#1169 S4-2 MAS search hub route", () => {
   });
 
   it("merged shape: report chunks first, then index chunks, capped at 5", async () => {
-    globalThis.fetch = stubFetch([
-      { title: "Index 1", snippet: "One." },
-      { title: "Index 2", snippet: "Two." },
-      { title: "Index 3", snippet: "Three." },
-      { title: "Index 4", snippet: "Four." },
-    ]) as any;
     const res = await handleSearchHubRoutes(
       new Request("https://agent.internal/api/search/mas", {
         method: "POST",
@@ -140,7 +135,17 @@ describe("#1169 S4-2 MAS search hub route", () => {
       new URL("https://agent.internal/api/search/mas"),
       "/api/search/mas",
       "sess-mas-merged",
-      { env: {} as any, userLogin: "tester", sql: stubSql(REPORT_ROWS) as any, audit: () => {} } as any
+      {
+        env: bindingEnv([
+          { title: "Index 1", snippet: "One." },
+          { title: "Index 2", snippet: "Two." },
+          { title: "Index 3", snippet: "Three." },
+          { title: "Index 4", snippet: "Four." },
+        ]) as any,
+        userLogin: "tester",
+        sql: stubSql(REPORT_ROWS) as any,
+        audit: () => {},
+      } as any
     );
     expect(res).not.toBeNull();
     expect(res!.status).toBe(200);
@@ -156,7 +161,6 @@ describe("#1169 S4-2 MAS search hub route", () => {
   });
 
   it("upstream failure surfaces local reports honestly, resultsFound true", async () => {
-    globalThis.fetch = stubFetch(null, 503) as any;
     const res = await handleSearchHubRoutes(
       new Request("https://agent.internal/api/search/mas", {
         method: "POST",
@@ -166,7 +170,7 @@ describe("#1169 S4-2 MAS search hub route", () => {
       new URL("https://agent.internal/api/search/mas"),
       "/api/search/mas",
       "sess-mas-local",
-      { env: {} as any, userLogin: "tester", sql: stubSql(REPORT_ROWS) as any, audit: () => {} } as any
+      { env: bindingEnv("throw") as any, userLogin: "tester", sql: stubSql(REPORT_ROWS) as any, audit: () => {} } as any
     );
     expect(res).not.toBeNull();
     expect(res!.status).toBe(200);
@@ -176,12 +180,13 @@ describe("#1169 S4-2 MAS search hub route", () => {
     expect(body.reportCount).toBe(2);
     expect(body.chunks).toHaveLength(2);
     expect(body.message).toMatch(/locally/);
-    expect(body.message).toMatch(/unavailable \(503\)/);
+    // #3342: the binding failure detail stands where the HTTP
+    // status used to stand in this message.
+    expect(body.message).toMatch(/unavailable \(503 from the instance\)/);
     expect(body.source).toBe("Scheduled reports");
   });
 
   it("total failure returns the error shape with no stub content", async () => {
-    globalThis.fetch = stubFetch(null, 503) as any;
     const res = await handleSearchHubRoutes(
       new Request("https://agent.internal/api/search/mas", {
         method: "POST",
@@ -191,18 +196,19 @@ describe("#1169 S4-2 MAS search hub route", () => {
       new URL("https://agent.internal/api/search/mas"),
       "/api/search/mas",
       "sess-mas-total",
-      { env: {} as any, userLogin: "tester", sql: stubSql([]) as any, audit: () => {} } as any
+      { env: bindingEnv("throw") as any, userLogin: "tester", sql: stubSql([]) as any, audit: () => {} } as any
     );
     expect(res).not.toBeNull();
     expect(res!.status).toBe(200);
     const body = await res!.json();
-    expect(body.error).toBe("Knowledge search upstream returned 503");
+    // #3342: the binding-era error string (was "Knowledge search
+    // upstream returned 503" in the HTTP era).
+    expect(body.error).toBe("Knowledge search upstream unavailable (503 from the instance)");
     expect(body.query).toBe("options risk");
     expect(body.chunks ?? []).toHaveLength(0);
   });
 
   it("flag-off passthrough: the route adds no provenance fields itself", async () => {
-    globalThis.fetch = stubFetch([{ title: "Plain doc", snippet: "No provenance." }]) as any;
     const res = await handleSearchHubRoutes(
       new Request("https://agent.internal/api/search/mas", {
         method: "POST",
@@ -212,7 +218,12 @@ describe("#1169 S4-2 MAS search hub route", () => {
       new URL("https://agent.internal/api/search/mas"),
       "/api/search/mas",
       "sess-mas-flagoff",
-      { env: {} as any, userLogin: "tester", sql: stubSql([]) as any, audit: () => {} } as any
+      {
+        env: bindingEnv([{ title: "Plain doc", snippet: "No provenance." }]) as any,
+        userLogin: "tester",
+        sql: stubSql([]) as any,
+        audit: () => {},
+      } as any
     );
     expect(res).not.toBeNull();
     expect(res!.status).toBe(200);
