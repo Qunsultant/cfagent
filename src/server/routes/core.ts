@@ -119,7 +119,7 @@ export async function handleCoreHealthRoutes(request: Request, env: Env, url: UR
  * Slice 2 of Qunsultant/cfagent#2902 (Core dispatcher) — moves only.
  * The late Core tail of handleFetch, verbatim and in original order:
  * /openapi.json + /api/docs, the /api/* fallthrough to the Orchestrator
- * (SEARCH_AGENT) — which stays after every explicit /api/* branch exactly
+ * (ORCHESTRATOR_AGENT) — which stays after every explicit /api/* branch exactly
  * as today — /checkout/sandbox (KEEP PUBLIC, #2052), the / + /index.html
  * branch, and the static-asset fallback. The authenticateRequest call that
  * preceded the root branch stays inside this handler, at the same point.
@@ -225,7 +225,7 @@ export async function handleCoreLateRoutes(request: Request, env: Env, url: URL,
       if (deliveryOverride !== "sync" && (deliveryOverride === "queued" || !isImmediateSync)) {
         forwardReq.headers.set("x-async-eligible", "1");
       }
-      return actorGateway.dispatch(env.SEARCH_AGENT, userLogin, forwardReq);
+      return actorGateway.dispatch(env.ORCHESTRATOR_AGENT, userLogin, forwardReq);
     }
 
     // --- Simulated Sandbox Terminal for Payment Gateways ---
