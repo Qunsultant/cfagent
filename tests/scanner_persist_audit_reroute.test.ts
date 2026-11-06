@@ -10,7 +10,7 @@
  * and nothing could have read one (the event name appeared nowhere else).
  *
  * The reroute sends the event through the channel the scanner already uses
- * for scan jobs — forwardToOrchestrator over the SEARCH_AGENT binding — to
+ * for scan jobs — forwardToOrchestrator over the ORCHESTRATOR_AGENT binding — to
  * POST /api/audit/event, which funnels into recordAudit(), the single owner
  * of mas_events inserts (issue #270). That store is the one GET /api/audit
  * reads (Chat audit log, AutopilotControlCenter, MarketDataResearchHub,
@@ -147,7 +147,7 @@ function paidRows(sql: MockSqlStorage): AuditRow[] {
 }
 
 /**
- * Builds a scanner instance whose SEARCH_AGENT binding answers the
+ * Builds a scanner instance whose ORCHESTRATOR_AGENT binding answers the
  * scan-job forward with a canned queued-job response and routes every
  * other forward (the audit write) into the real orchestrator instance —
  * unless failAudit is set, in which case the audit forward fails.
@@ -167,7 +167,7 @@ function makeScanner(
   };
   scanner.env = {
     CF_WALLET_NETWORK: "base-sepolia",
-    SEARCH_AGENT: {
+    ORCHESTRATOR_AGENT: {
       idFromName: (name: string) => name,
       get: (_id: string) => ({
         fetch: async (req: Request) => {
