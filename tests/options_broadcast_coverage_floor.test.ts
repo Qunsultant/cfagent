@@ -306,7 +306,7 @@ describe("direct Slack delivery in autonomousOptionsAnalysis", () => {
       ET_BASE_URL: "https://apisb.etrade.com/v1",
       ETRADE_KV: mockKv as any,
       SESSION_STORE: sessionStoreNs,
-      SEARCH_AGENT: {} as any,
+      ORCHESTRATOR_AGENT: {} as any,
       SCREENER_AGENT: {
         idFromName: () => "mock-screener-id",
         get: () => ({
