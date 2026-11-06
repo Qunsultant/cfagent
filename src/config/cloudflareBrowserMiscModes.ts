@@ -67,11 +67,13 @@
  * - N-aisearch: ai_search_financial_docs vs knowledge_search
  *   (appendix (c) M01) is divergent-by-design, cross-referenced
  *   here, not double-counted. ai_search searches the SEC-filings /
- *   broker-rules corpus via AI_SEARCH_ENDPOINT with a local
- *   semantic-cache fallback, returning {results, totalMatches,
- *   provider}; knowledge_search runs the AI-Search + platform
- *   fallback contract returning {count, chunks, message} (or the
- *   platform {count, results, answer}). #1723's KNOWLEDGE_MODE
+ *   broker-rules corpus via the AiSearchAgent over the namespace
+ *   binding (#3342; formerly the public endpoint), returning
+ *   {results, totalMatches, provider} plus a degraded reason when
+ *   the instance does not serve; knowledge_search runs the
+ *   AI-Search + platform fallback contract returning {count,
+ *   chunks, message} (or the platform {count, results, answer}).
+ *   #1723's KNOWLEDGE_MODE
  *   governs knowledge_search / query_platform_knowledge ONLY — it
  *   does not govern ai_search, and no switch value routes ai_search
  *   through knowledge_search (that would change corpus + envelope).

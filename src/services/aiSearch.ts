@@ -1,23 +1,31 @@
 /**
- * Cloudflare AI Search & Vectorize Service for Financial Documentation
- * Repurposed from Cloudflare Agents AI Search standard:
- * https://developers.cloudflare.com/agents/tools/ai-search/
+ * Cloudflare AI Search shared mapping + response contract for
+ * financial documentation, plus the RETIRED REST service class.
  *
- * Implements:
- * - Semantic vector search over SEC filings, 10-K/10-Q disclosures, and broker rules
- * - Cloudflare AI Search endpoint and Vectorize binding integration
- * - Retrieval from the live AI Search instance only: when the
- *   instance does not serve, searchFinancialDocs returns an explicit
- *   degraded response (zero results + a degraded reason) — there is
- *   no built-in fallback corpus (removed by issue #1169 S3; the
- *   constant is superseded by this degraded contract).
+ * This module's live surface is the mapping layer:
+ * mapAiSearchChunks (the one chunk -> result mapping every serving
+ * path uses), the AISearchResultItem / AISearchQueryResponse
+ * contract types, and the AiSearchDegradedReason vocabulary.
+ * Retrieval itself lives behind the private ai_search_namespaces
+ * binding: the AiSearchAgent runner (src/agents/aiSearchPaths.ts)
+ * and its consumers.
+ *
+ * Issue #3342 retired the public-endpoint REST transport this
+ * module used to own: the endpoint was unauthenticated by design,
+ * so every production consumer migrated onto the binding (or the
+ * AiSearchAgent door), AI_SEARCH_ENDPOINT was deleted from the
+ * worker configuration, and AiSearchInstanceService below remains
+ * only as a deprecated shim answering the degraded contract. The
+ * S3 honesty contract is unchanged: an unserved answer is zero
+ * results plus a stable degraded reason — there is no built-in
+ * fallback corpus (removed by issue #1169 S3; the constant is
+ * superseded by this degraded contract).
  */
 
 import type { Env } from "../types";
 import {
   KNOWLEDGE_CATEGORIES,
   corpusBucketKeyFromIndexKey,
-  isKnowledgeServingEnabled,
   servedFileLinkFor,
 } from "./knowledgeCorpus";
 // Issue #1169 (S2, cross-cutting: typed errors + externalized
@@ -177,7 +185,12 @@ export type AiSearchDegradedReason =
   | "endpoint_not_configured"
   | "upstream_unreachable"
   | "upstream_http_error"
-  | "upstream_invalid_response";
+  | "upstream_invalid_response"
+  // Issue #3342: added when the consumers moved behind the
+  // AiSearchAgent runner — the runner rejected the query itself
+  // (blank) before any access path was attempted, so no upstream
+  // reason honestly applies.
+  | "invalid_query";
 
 export interface AISearchQueryResponse {
   query: string;
@@ -199,159 +212,70 @@ export interface AISearchQueryResponse {
   degraded?: AiSearchDegradedReason;
 }
 
+/**
+ * @deprecated superseded by the AI Search namespace binding path —
+ * the AiSearchAgent runner (runAiSearchPaths and
+ * searchAiSearchNamespaceChunks in src/agents/aiSearchPaths.ts) and
+ * the AiSearchAgent door (ai_search_agent_search, #2250) — since
+ * issue #3342 retired this class's public-endpoint REST transport.
+ *
+ * Retirement shape (issue #3342, gitops §22 — deprecated in place,
+ * never silently deleted): the class name stays importable so no
+ * straggler breaks at load, but the transport is GONE:
+ * AI_SEARCH_ENDPOINT is deleted from wrangler.jsonc and from the
+ * Env type, so nothing can configure the REST leg anymore, and no
+ * method here performs a fetch. searchFinancialDocs answers the
+ * module's degraded contract (zero results +
+ * endpoint_not_configured) — honest, because for this retired path
+ * nothing IS configured — and searchRaw throws, since its raw
+ * Response contract has no honest post-retirement answer. Every
+ * former caller (Search Hub /search/agent, MAS searchKnowledge,
+ * the ai_search_financial_docs MCP command, the agent runner's
+ * third path) migrated onto the binding in #3342; do not add new
+ * callers.
+ */
 export class AiSearchInstanceService {
-  constructor(private env?: Env) {}
+  constructor(private env?: Env) {
+    void this.env;
+  }
 
   /**
-   * Qunsultant/cfagent#1775 (Adapter S1): the MAS searchKnowledge
-   * tool's raw `/search` call, owned here so this module is the
-   * single home for AI Search HTTP calls. It returns the upstream
-   * Response untouched — status handling, chunk extraction, the
-   * abort timeout, the TTL cache, and the audit calls all stay
-   * with the MAS caller, verbatim. This is deliberately NOT
-   * searchFinancialDocs: that path posts to the instance's /search
-   * path with ai_search_options, maps chunks, and — since #1169 S3
-   * removed its built-in fallback corpus — returns an explicit
-   * degraded response (zero results + a degraded reason) when the
-   * instance does not serve, never stub docs. A different contract
-   * the MAS tool must not inherit (it surfaces upstream failure,
-   * never stub docs).
+   * @deprecated superseded by searchAiSearchNamespaceChunks in
+   * src/agents/aiSearchPaths.ts (issue #3342). The raw-Response
+   * contract this method served (MAS searchKnowledge's leg, owned
+   * here since #1775) has no post-retirement equivalent: the method
+   * throws rather than fabricate an HTTP response.
    */
   async searchRaw(
     query: string,
     opts?: { signal?: AbortSignal }
   ): Promise<Response> {
-    return fetch(`${this.env?.AI_SEARCH_ENDPOINT}/search`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: [{ role: "user", content: query }] }),
-      ...(opts?.signal ? { signal: opts.signal } : {}),
-    });
+    void query;
+    void opts;
+    throw new Error(
+      "AiSearchInstanceService.searchRaw is retired (#3342): the public-endpoint REST transport was removed and AI_SEARCH_ENDPOINT no longer exists in the worker configuration. Use searchAiSearchNamespaceChunks (src/agents/aiSearchPaths.ts) for binding-backed chunks."
+    );
   }
 
   /**
-   * Search financial documentation and SEC filings using AI Search.
-   *
-   * Issue #1169 (S3): answers come from the live AI Search instance
-   * or not at all. The built-in fallback corpus this method used to
-   * serve on any failure is REMOVED — it is
-   * superseded by the degraded contract on AISearchQueryResponse:
-   * when the instance does not serve (endpoint unconfigured, fetch
-   * failure, non-OK status, or an unusable response body), the
-   * answer is zero results plus a stable `degraded` reason, logged
-   * via the repo's console-stream idiom (bracket prefix; reason and
-   * status only — never query text, chunk content, or logins). A
-   * served answer — including an empty one (chunks: []) — carries
-   * no `degraded` field. AiSearchMappingError still propagates:
-   * a malformed chunk fails visibly, it does not degrade.
+   * @deprecated superseded by the AiSearchAgent runner
+   * (runAiSearchPaths in src/agents/aiSearchPaths.ts) and the
+   * AiSearchAgent door (issue #3342). The REST transport is
+   * retired, so this method can only answer the module's degraded
+   * contract: zero results plus the endpoint_not_configured
+   * reason — the honest answer for a path whose configuration was
+   * deleted. It never fetches and never fabricates results.
    */
   async searchFinancialDocs(query: string, limit: number = 5): Promise<AISearchQueryResponse> {
-    const timestamp = new Date().toISOString();
-    const cleanQuery = query.trim().toLowerCase();
-
-    const degradedResponse = (reason: AiSearchDegradedReason): AISearchQueryResponse => ({
+    void limit;
+    console.warn(`[knowledgeSearch] aiSearch degraded reason=endpoint_not_configured`);
+    return {
       query,
       results: [],
       totalMatches: 0,
       provider: "cloudflare_ai_search",
-      timestamp,
-      degraded: reason,
-    });
-
-    if (!this.env?.AI_SEARCH_ENDPOINT) {
-      console.warn(`[knowledgeSearch] aiSearch degraded reason=endpoint_not_configured`);
-      return degradedResponse("endpoint_not_configured");
-    }
-
-    let json: any;
-    try {
-      const searchUrl = `${this.env.AI_SEARCH_ENDPOINT.replace(/\/+$/, "")}/search`;
-      const resp = await fetch(searchUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: [{ role: "user", content: cleanQuery }],
-          ai_search_options: {
-            retrieval: {
-              max_num_results: Math.min(limit, 10),
-            },
-          },
-        }),
-      });
-
-      if (!resp.ok) {
-        console.warn(
-          `[knowledgeSearch] aiSearch degraded reason=upstream_http_error status=${resp.status}`
-        );
-        return degradedResponse("upstream_http_error");
-      }
-
-      try {
-        json = await resp.json();
-      } catch {
-        // A non-JSON body — e.g. the HTML web UI a redirect to the
-        // bare endpoint lands on (the 2026-11-04 probe finding) —
-        // is an invalid response, not search data.
-        console.warn(
-          `[knowledgeSearch] aiSearch degraded reason=upstream_invalid_response detail=non_json_body`
-        );
-        return degradedResponse("upstream_invalid_response");
-      }
-    } catch (err) {
-      console.warn(
-        `[knowledgeSearch] aiSearch degraded reason=upstream_unreachable error=${err instanceof Error ? err.name : "unknown"}`
-      );
-      return degradedResponse("upstream_unreachable");
-    }
-
-    if (!json?.success || !Array.isArray(json?.result?.chunks)) {
-      console.warn(
-        `[knowledgeSearch] aiSearch degraded reason=upstream_invalid_response detail=missing_success_or_chunks`
-      );
-      return degradedResponse("upstream_invalid_response");
-    }
-
-    // Issue #1169 (S2, flag-gated): the primary-path mapping lives
-    // in mapAiSearchChunks above. Flag-OFF reproduces the pre-S2
-    // mapping verbatim; flag-ON preserves true scores/categories +
-    // provenance. Cross-cutting (S2): mapping application is logged
-    // via the repo's console-stream idiom (see loggingAspect.ts:
-    // standard console streams, bracket prefix, no sensitive fields
-    // — counts and flag state only, never chunk content, keys, or
-    // logins). A mapping failure is VISIBLE, never a silent
-    // degradation — it is rethrown, as before.
-    const flagOn = isKnowledgeServingEnabled(this.env);
-    let results: AISearchResultItem[];
-    try {
-      results = mapAiSearchChunks(json.result.chunks, flagOn);
-    } catch (err) {
-      if (err instanceof AiSearchMappingError) {
-        console.warn(
-          `[knowledgeMapping] aiSearch mapping failed chunkIndex=${err.chunkIndex} field=${err.field} code=${err.code}`
-        );
-      }
-      throw err;
-    }
-    console.info(
-      `[knowledgeMapping] aiSearch mapped chunks=${json.result.chunks.length} results=${results.length} flag=${flagOn ? "on" : "off"}`
-    );
-
-    return {
-      query,
-      results,
-      totalMatches: results.length,
-      provider: "cloudflare_ai_search",
-      timestamp,
+      timestamp: new Date().toISOString(),
+      degraded: "endpoint_not_configured",
     };
   }
 }
-
-/**
- * @deprecated superseded by AiSearchInstanceService (issue #3322:
- * the platform is multi-broker and broker-neutral, and this service
- * — a generic Cloudflare AI Search instance client with no broker
- * coupling — must not carry a broker's brand). Retained as a
- * compatibility alias for one step; the alias is removed in a later
- * slice. Do not add new callers under this name.
- */
-export { AiSearchInstanceService as ETradeAISearchService };

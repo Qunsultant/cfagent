@@ -1,19 +1,20 @@
 /**
- * Issue #2223 (AiSearchAgent slice) — the agent's three-path search
+ * Issue #2223 (AiSearchAgent slice) — the agent's two-path search
  * runner. Kept OUT of the class module on purpose: the Think/Agents
  * module graph cannot load under Node vitest, so the behavior that
  * needs pins lives here, free of the class graph (the same split
  * slice 1 used: standalone dispatch module + thin class).
  *
  * The agent reaches the SAME Cloudflare AI Search instance the
- * SearchHub knowledge surface serves (src/agents/routes/searchHub.ts:
- * POST /search/agent -> AiSearchInstanceService over the shared
- * AI_SEARCH_ENDPOINT var — the instance configuration is NOT
- * re-vocabularied here; AI_SEARCH_INSTANCE and AI_SEARCH_MCP_ENDPOINT
- * are additive config for the other two doors onto that instance).
+ * SearchHub knowledge surface serves — since issue #3342 every
+ * surface reaches it through the private ai_search_namespaces
+ * binding (directly here, or through the agent's DO door in the
+ * hub route / MCP commands); the instance configuration is NOT
+ * re-vocabularied here (AI_SEARCH_INSTANCE names the instance;
+ * AI_SEARCH_MCP_ENDPOINT is additive config for the second door).
  *
  * Access paths, in the priority order set by the user directive of
- * 2026-10-29 (tool first, MCP second, API last-resort):
+ * 2026-10-29 (tool first, MCP second):
  *
  * 1. namespace (PRIMARY) — the ai_search_namespaces binding:
  *    env.AI_SEARCH.get(AI_SEARCH_INSTANCE).search({ messages }).
@@ -23,18 +24,23 @@
  *    "search", consumed through the repo's RemoteMcpClient exactly
  *    as any MCP client would. Gated on AI_SEARCH_MCP_ENDPOINT; the
  *    endpoint itself exists only when the owner enables the
- *    instance's Public Endpoint in the dashboard.
- * 3. rest (LAST RESORT) — AiSearchInstanceService (src/services/
- *    aiSearch.ts) reused exactly as-is: its S2 mapping, provenance
- *    and KNOWLEDGE_SERVING_ENABLED behaviour come along untouched.
+ *    instance's Public Endpoint in the dashboard (deliberately
+ *    unset in production — owner decision, #1169).
+ *
+ * The runner's former third path — REST through
+ * AiSearchInstanceService over the public endpoint — was RETIRED
+ * by issue #3342: the endpoint is unauthenticated by design, the
+ * service class is a deprecated shim, and AI_SEARCH_ENDPOINT is
+ * deleted from the worker configuration. An endpoint-only
+ * environment now configures nothing and answers not_configured.
  *
  * Result items are hub-consistent: the S2 fields of
  * AISearchResultItem (title / snippet / source / score, plus
- * bucket-key provenance where the serving path provides it). The
- * namespace and MCP paths return the binding's chunk shape, so
- * their chunks are adapted (documented field renames only) and then
- * mapped by the SAME mapAiSearchChunks the REST leg's service uses
- * — one mapping, one story, whichever door served the answer. The
+ * bucket-key provenance where the serving path provides it). Both
+ * paths return the binding's chunk shape, so their chunks are
+ * adapted (documented field renames only) and then mapped by the
+ * SAME mapAiSearchChunks the retired REST leg's service used —
+ * one mapping, one story, whichever door served the answer. The
  * serving path is always labelled via `path`.
  *
  * Honesty (hard rules):
@@ -43,24 +49,27 @@
  * - A configured path that throws (or returns an unrecognized
  *   shape) falls through to the next configured path, and the
  *   failure is recorded in the result's `degraded` note.
- * - If the REST leg's service reports a degraded answer (its
- *   in-band `degraded` reason — endpoint unconfigured or the
- *   instance did not serve; since #1169 S3 the service has no
- *   fallback corpus to answer from), the outcome is DEGRADED
- *   (code degraded_fallback) with zero results: an unavailable
- *   index is never presented as an empty success. A genuinely
- *   empty OK answer (the instance served, nothing matched) stays
- *   ok with zero items — the two are distinguishable.
+ * - A genuinely empty OK answer (the instance served, nothing
+ *   matched) stays ok with zero items — an empty index is never
+ *   confused with an unavailable one.
  * - Report-type results (issue #2246: items this fleet uploads with
  *   document ids `report:<reportId>` and metadata kind "report")
  *   are served ONLY to their owner's login: the search must carry
  *   a callerLogin equal to the item's ownerLogin metadata, or the
  *   item is withheld and the withholding is recorded in the
  *   result's `degraded` note. No login context, a mismatched
- *   login, or an unproven owner (the REST mapping drops chunk
- *   metadata, so only the key survives there) all withhold — the
- *   safe default wins over recall.
+ *   login, or an unproven owner (chunk metadata is the only owner
+ *   proof; a report-type key without it proves nothing) all
+ *   withhold — the safe default wins over recall.
  * - This module never throws.
+ *
+ * This module also hosts the shared binding helpers the #3342
+ * migration put on the namespace path: searchAiSearchNamespaceChunks
+ * (raw adapted chunks + the report discipline, for the MAS tool and
+ * the legacy knowledge_search contract) and
+ * aiSearchAgentResultToQueryResponse (the AISearchQueryResponse
+ * shaping the Search Hub /search/agent route and the
+ * ai_search_financial_docs MCP command share).
  *
  * Issue #2246 adds the module's ONE write: an indexing executor
  * (runAiSearchIndexUpload) that pushes a document to the instance
@@ -69,7 +78,7 @@
  * indexed into the instance at store time (the pipeline hook lives
  * in src/services/reportAiSearchIndex.ts, flag-gated by
  * AI_SEARCH_REPORT_INDEXING_ENABLED, default OFF). The executor is
- * namespace-only (uploads have no MCP/REST equivalent here),
+ * namespace-only (uploads have no MCP equivalent here),
  * config-gated exactly like the search paths, and returns typed
  * outcomes — never a fabricated success.
  *
@@ -79,8 +88,8 @@
  * and reuses this module's executor — it is not a second uploader.
  */
 import {
-  AiSearchInstanceService,
   mapAiSearchChunks,
+  type AiSearchDegradedReason,
   type AISearchQueryResponse,
   type AISearchResultItem,
 } from "../services/aiSearch";
@@ -90,7 +99,7 @@ import { AGENT_ERROR_CATALOG, AgentErrorCode } from "../aspects/errorCodes";
 import type { Env } from "../types";
 
 /** The access path that served (or last attempted) a search. */
-export type AiSearchPath = "namespace" | "mcp" | "rest";
+export type AiSearchPath = "namespace" | "mcp";
 
 /**
  * One search result, hub-consistent with the SearchHub knowledge
@@ -115,7 +124,6 @@ export interface AiSearchAgentResultItem {
 export type AiSearchAgentErrorToken =
   | "invalid_input"
   | "not_configured"
-  | "degraded_fallback"
   | "all_paths_failed";
 
 /**
@@ -123,14 +131,16 @@ export type AiSearchAgentErrorToken =
  * slice-1 pattern): invalid input and not-configured are "the
  * request/environment names something the agent cannot serve"
  * (ERR_UNKNOWN_AGENT_ERROR — the catalog has no validation or
- * configuration class); a degraded fallback answer and an
- * all-paths failure are execution failures
- * (ERR_TOOL_EXECUTION_FAILED). No catalog keys are invented here.
+ * configuration class); an all-paths failure is an execution
+ * failure (ERR_TOOL_EXECUTION_FAILED). No catalog keys are
+ * invented here. (The pre-#3342 degraded_fallback token existed
+ * only for the retired REST path's in-band degraded answers; with
+ * that path gone, nothing produces it, so it is removed rather
+ * than kept as a dead outcome.)
  */
 const AISEARCH_CATALOG_CODES: Record<AiSearchAgentErrorToken, AgentErrorCode> = {
   invalid_input: AgentErrorCode.UNKNOWN_AGENT_ERROR,
   not_configured: AgentErrorCode.UNKNOWN_AGENT_ERROR,
-  degraded_fallback: AgentErrorCode.TOOL_EXECUTION_FAILED,
   all_paths_failed: AgentErrorCode.TOOL_EXECUTION_FAILED,
 };
 
@@ -182,8 +192,7 @@ export interface AiSearchAgentSearchOptions {
 /**
  * Injectable path executors. The defaults are the real doors; tests
  * substitute fakes per path. namespaceSearch receives the resolved
- * binding instance; mcpSearch the endpoint URL; restSearch returns
- * the service's native response so its degraded signal stays visible.
+ * binding instance; mcpSearch the endpoint URL.
  */
 export interface AiSearchAgentDeps {
   namespaceSearch?: (
@@ -191,11 +200,6 @@ export interface AiSearchAgentDeps {
     query: string,
   ) => Promise<unknown>;
   mcpSearch?: (endpoint: string, query: string) => Promise<unknown>;
-  restSearch?: (
-    env: Env,
-    query: string,
-    limit: number,
-  ) => Promise<AISearchQueryResponse>;
 }
 
 /** Structural minimum of the binding's instance handle this runner uses. */
@@ -216,9 +220,6 @@ const defaultMcpSearch: NonNullable<AiSearchAgentDeps["mcpSearch"]> = (endpoint,
     toolName: "search",
     arguments: { query },
   });
-
-const defaultRestSearch: NonNullable<AiSearchAgentDeps["restSearch"]> = (env, query, limit) =>
-  new AiSearchInstanceService(env).searchFinancialDocs(query, limit);
 
 function nonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
@@ -302,7 +303,7 @@ function toAgentItems(items: readonly AISearchResultItem[]): AiSearchAgentResult
  * path's chunk mapping (as bucketKey, or as the item url when the
  * chunk carries no url), so the login discipline keys off it, with
  * chunk metadata as the owner-carrying refinement where it
- * survives (namespace/MCP chunks; the REST mapping drops it).
+ * survives (both surviving paths carry chunk metadata).
  */
 export const AI_SEARCH_REPORT_DOCUMENT_PREFIX = "report:";
 
@@ -349,12 +350,26 @@ function reportChunkVerdict(chunk: unknown): { report: boolean; ownerLogin?: str
 }
 
 /**
+ * The discipline's keep/withhold decision for ONE verdict: a
+ * non-report item always passes; a report-type item is served ONLY
+ * when a callerLogin is present AND equals its proven ownerLogin.
+ * Shared by the mapped-item discipline below and the raw-chunk
+ * discipline in searchAiSearchNamespaceChunks (#3342) so every
+ * binding consumer enforces the identical rule.
+ */
+function reportChunkServed(
+  verdict: { report: boolean; ownerLogin?: string } | undefined,
+  callerLogin: string | undefined,
+): boolean {
+  if (!verdict?.report) return true;
+  return Boolean(callerLogin && verdict.ownerLogin && verdict.ownerLogin === callerLogin);
+}
+
+/**
  * Issue #2246: apply the report login discipline to mapped items.
- * `verdicts` is parallel to `items` (one per source chunk/item). A
- * report-type item is kept ONLY when a callerLogin is present AND
- * equals the item's proven ownerLogin; every other report-type
- * item is withheld and counted (the caller surfaces the count in
- * the result's degraded note). Non-report items always pass.
+ * `verdicts` is parallel to `items` (one per source chunk/item).
+ * Every withheld report-type item is counted (the caller surfaces
+ * the count in the result's degraded note).
  */
 function applyReportDiscipline(
   items: AiSearchAgentResultItem[],
@@ -363,9 +378,7 @@ function applyReportDiscipline(
 ): MappedWithDiscipline {
   let withheld = 0;
   const kept = items.filter((_, idx) => {
-    const v = verdicts[idx];
-    if (!v?.report) return true;
-    if (callerLogin && v.ownerLogin && v.ownerLogin === callerLogin) return true;
+    if (reportChunkServed(verdicts[idx], callerLogin)) return true;
     withheld += 1;
     return false;
   });
@@ -402,8 +415,8 @@ interface PathAttempt {
 
 /**
  * Run one search across the configured paths in priority order
- * (namespace -> mcp -> rest). Never throws; every outcome is a
- * typed result.
+ * (namespace -> mcp). Never throws; every outcome is a typed
+ * result.
  */
 export async function runAiSearchPaths(
   env: Env,
@@ -459,40 +472,9 @@ export async function runAiSearchPaths(
     });
   }
 
-  // 3. rest (LAST RESORT): the hub's own service, reused as-is. Its
-  // degraded signal is checked by the runner below, not in the
-  // attempt, because a degraded answer is a DEGRADED outcome, not a
-  // path failure — there is no further path to fall through to.
-  const restEndpoint = nonEmptyString(env.AI_SEARCH_ENDPOINT);
-  let restResponse: AISearchQueryResponse | null = null;
-  if (restEndpoint) {
-    const restSearch = deps.restSearch ?? defaultRestSearch;
-    attempts.push({
-      path: "rest",
-      run: async () => {
-        restResponse = await restSearch(env, cleanQuery, limit);
-        const items = toAgentItems(restResponse.results);
-        // #2246 discipline on the REST path: chunk metadata does
-        // not survive the service's mapping, so a report-type item
-        // is identifiable only by its key and its owner is
-        // unprovable here — report-type items are withheld on this
-        // path even when a callerLogin is present (safe default).
-        const verdicts = items.map((item) => {
-          const key = item.bucketKey ?? item.source;
-          return {
-            report:
-              typeof key === "string" &&
-              key.startsWith(AI_SEARCH_REPORT_DOCUMENT_PREFIX),
-          };
-        });
-        return applyReportDiscipline(items, verdicts, callerLogin);
-      },
-    });
-  }
-
   if (attempts.length === 0) {
     const degraded =
-      "No AI Search access path is configured: the namespace path needs the ai_search_namespaces binding (env.AI_SEARCH) plus AI_SEARCH_INSTANCE, the MCP path needs AI_SEARCH_MCP_ENDPOINT (the instance's dashboard-enabled public endpoint), and the REST path needs AI_SEARCH_ENDPOINT.";
+      "No AI Search access path is configured: the namespace path needs the ai_search_namespaces binding (env.AI_SEARCH) plus AI_SEARCH_INSTANCE, and the MCP path needs AI_SEARCH_MCP_ENDPOINT (the instance's dashboard-enabled public endpoint).";
     return {
       ok: false,
       code: "not_configured",
@@ -507,24 +489,6 @@ export async function runAiSearchPaths(
   for (const attempt of attempts) {
     try {
       const { items, withheld } = await attempt.run();
-      if (attempt.path === "rest" && restResponse !== null) {
-        const degradedReason = (restResponse as AISearchQueryResponse).degraded;
-        if (degradedReason) {
-          // The service reports the instance did not serve (#1169
-          // S3 degraded contract: zero results + a stable reason).
-          // Surface as degraded — never as an ok empty answer.
-          const degraded = `The REST path is degraded (${degradedReason}): the AI Search instance did not serve the query. The degraded answer is withheld here rather than presented as results.`;
-          return {
-            ok: false,
-            path: "rest",
-            code: "degraded_fallback",
-            errorToken: aiSearchCatalogCode("degraded_fallback"),
-            correlationId,
-            degraded,
-            error: degraded,
-          };
-        }
-      }
       const sliced = items.slice(0, limit);
       const notes: string[] = [];
       if (failures.length > 0) {
@@ -558,6 +522,155 @@ export async function runAiSearchPaths(
     errorToken: aiSearchCatalogCode("all_paths_failed"),
     correlationId,
     error: `Every configured AI Search path failed: ${failures.join("; ")}.`,
+  };
+}
+
+// =====================================================================
+// Issue #3342 — shared binding helpers for the migrated consumers.
+// =====================================================================
+
+/** The typed outcome of one namespace-chunks search. Never throws. */
+export interface AiSearchNamespaceChunksOutcome {
+  ok: boolean;
+  /** Adapted chunks (REST layout) after the report discipline. */
+  chunks?: unknown[];
+  /** Report-type chunks withheld under the #2246 discipline. */
+  withheld?: number;
+  /** Stable local outcome token when ok is false. */
+  code?: "not_configured" | "search_failed";
+  /** Human-readable failure detail when ok is false. */
+  error?: string;
+}
+
+/**
+ * Issue #3342: the binding-backed raw-chunks leg for the consumers
+ * whose contracts are chunk-shaped rather than agent-shaped — the
+ * MAS searchKnowledge tool and the legacy knowledge_search
+ * "search" contract (src/mcps/openaimp/commands.ts). Both used to
+ * read the public endpoint directly (the service's searchRaw, and
+ * a bare fetch); both now read the SAME namespace binding the
+ * runner's primary path uses, through this one helper.
+ *
+ * The returned chunks are adapted into the REST layout
+ * (adaptAiSearchChunks: chunk text as `snippet`, item key as
+ * top-level `key`, the native chunk object otherwise untouched) so
+ * the consumers' downstream handling — MAS's corpus-provenance
+ * attach, the legacy contract's slicing — sees the shape it always
+ * saw. The #2246 report discipline applies with the identical rule
+ * the runner enforces (reportChunkServed): a caller with no proven
+ * owner login (MAS carries none) has report-type chunks withheld;
+ * a caller carrying the session login (the MCP contract) is served
+ * only its own reports.
+ *
+ * Never throws: an unconfigured binding is a typed not_configured
+ * outcome and a failed search a typed search_failed outcome, so
+ * each caller keeps its own honest failure shape.
+ */
+export async function searchAiSearchNamespaceChunks(
+  env: Env,
+  query: string,
+  opts: AiSearchAgentSearchOptions = {},
+): Promise<AiSearchNamespaceChunksOutcome> {
+  const instanceName = nonEmptyString(env?.AI_SEARCH_INSTANCE);
+  if (!env?.AI_SEARCH || !instanceName) {
+    return {
+      ok: false,
+      code: "not_configured",
+      error:
+        "AI Search is not configured: the namespace path needs the ai_search_namespaces binding (env.AI_SEARCH) plus AI_SEARCH_INSTANCE.",
+    };
+  }
+  const callerLogin = nonEmptyString(opts.callerLogin) ?? undefined;
+  try {
+    const instance = env.AI_SEARCH.get(instanceName);
+    if (!instance || typeof instance.search !== "function") {
+      throw new Error(
+        `AI Search namespace binding resolved no searchable instance for "${instanceName}".`,
+      );
+    }
+    const payload = await instance.search({
+      messages: [{ role: "user", content: query }],
+    });
+    const chunks = adaptAiSearchChunks(payload);
+    if (chunks === null) {
+      return {
+        ok: false,
+        code: "search_failed",
+        error: "AI Search response carried no recognizable chunks array.",
+      };
+    }
+    let withheld = 0;
+    const kept = chunks.filter((chunk) => {
+      if (reportChunkServed(reportChunkVerdict(chunk), callerLogin)) return true;
+      withheld += 1;
+      return false;
+    });
+    return { ok: true, chunks: kept, withheld };
+  } catch (err) {
+    return {
+      ok: false,
+      code: "search_failed",
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/**
+ * Issue #3342: shape one AiSearchAgent typed result into the
+ * AISearchQueryResponse contract the pre-migration REST consumers
+ * served — shared by the Search Hub POST /search/agent route and
+ * the ai_search_financial_docs MCP command so the two surfaces can
+ * never drift apart. Served answers map item-for-item (the agent
+ * item's `source` becomes the result `url`; the item id the agent
+ * shape does not carry is re-derived from the bucket key / source,
+ * falling back to the mapping's own doc_<n> convention). Failed
+ * answers become the degraded contract: zero results plus the
+ * stable reason the runner's outcome honestly maps to
+ * (not_configured -> endpoint_not_configured, invalid_input ->
+ * invalid_query, all_paths_failed -> upstream_unreachable). An
+ * ok-but-degraded agent answer (paths fell through, report rows
+ * withheld) DID serve, so it carries no `degraded` reason here —
+ * the note itself stays visible on the agent-native surfaces
+ * (AiSearchAgent tab, ai_search_agent_search).
+ */
+export function aiSearchAgentResultToQueryResponse(
+  query: string,
+  result: AiSearchAgentSearchResult,
+): AISearchQueryResponse {
+  const timestamp = new Date().toISOString();
+  if (!result.ok) {
+    const degraded: AiSearchDegradedReason =
+      result.code === "not_configured"
+        ? "endpoint_not_configured"
+        : result.code === "invalid_input"
+          ? "invalid_query"
+          : "upstream_unreachable";
+    return {
+      query,
+      results: [],
+      totalMatches: 0,
+      provider: "cloudflare_ai_search",
+      timestamp,
+      degraded,
+    };
+  }
+  const results: AISearchResultItem[] = (result.results ?? []).map((item, idx) => ({
+    id: item.bucketKey ?? item.source ?? `doc_${idx}`,
+    title: item.title ?? "Financial Document",
+    snippet: item.snippet ?? "",
+    ...(item.source ? { url: item.source } : {}),
+    ...(item.score !== undefined ? { score: item.score } : {}),
+    ...(item.category ? { category: item.category } : {}),
+    ...(item.bucketKey ? { bucketKey: item.bucketKey } : {}),
+    ...(item.servedFileLink ? { servedFileLink: item.servedFileLink } : {}),
+    ...(item.indexingState ? { indexingState: item.indexingState } : {}),
+  }));
+  return {
+    query,
+    results,
+    totalMatches: results.length,
+    provider: "cloudflare_ai_search",
+    timestamp,
   };
 }
 

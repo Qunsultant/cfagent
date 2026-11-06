@@ -194,7 +194,9 @@ describe("POST /search/ai-agent — the Search hub's AiSearchAgent door (#3323)"
   it("passes a failed agent answer through with its code, errorToken and error (results default to zero rows)", async () => {
     const { namespace } = fakeNamespace(async () => ({
       ok: false,
-      path: "rest" as const,
+      // #3342: the fake previously labelled this failure with the
+      // retired "rest" path; the surviving paths are namespace/mcp.
+      path: "mcp" as const,
       code: "all_paths_failed" as const,
       errorToken: "ERR_TOOL_EXECUTION_FAILED" as any,
       error: "every configured path failed",
@@ -207,7 +209,7 @@ describe("POST /search/ai-agent — the Search hub's AiSearchAgent door (#3323)"
     expect(res!.status).toBe(200);
     expect(await res!.json()).toEqual({
       ok: false,
-      path: "rest",
+      path: "mcp",
       results: [],
       code: "all_paths_failed",
       errorToken: "ERR_TOOL_EXECUTION_FAILED",

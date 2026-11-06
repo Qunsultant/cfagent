@@ -5,8 +5,9 @@
  *
  * Switch 1 — KNOWLEDGE_MODE ("search" | "platform", Worker env var,
  * non-secret, owner-set; this slice sets NO production value):
- *   "search"   = KnowledgeSearchCommand legacy: try AI_SEARCH_ENDPOINT
- *                (10 s abort) → Vectorize/AI-Search chunks; if zero
+ *   "search"   = KnowledgeSearchCommand legacy: try the AI Search
+ *                namespace binding (#3342; formerly the public
+ *                endpoint, 10 s abort) → AI-Search chunks; if zero
  *                chunks OR the query matches the platform-keyword regex,
  *                fall back to searchPlatformKnowledge (max 3). Returns
  *                {query, count, chunks (≤5), answer?, message}; on error
