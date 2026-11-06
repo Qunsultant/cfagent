@@ -72,6 +72,8 @@ export { PaymentWorkflow } from "../workflows/paymentWorkflow";
 
 export { CrossDomainSagaWorkflow } from "../workflows/sagaWorkflow";
 
+export { JobPipelineWorkflow } from "../workflows/jobPipelineWorkflow";
+
 export { ReportAssetAgent } from "../agents/report-asset-agent";
 
 export { SessionStore } from "../security/sessionStore";

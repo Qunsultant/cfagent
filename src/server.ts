@@ -71,6 +71,7 @@ export { TradingTradeWorkflow } from "./server/exports";
 export { ScreenerScreenWorkflow } from "./server/exports";
 export { PaymentWorkflow } from "./server/exports";
 export { CrossDomainSagaWorkflow } from "./server/exports";
+export { JobPipelineWorkflow } from "./server/exports";
 export { ReportAssetAgent } from "./server/exports";
 export { SessionStore } from "./server/exports";
 // Slice 8 (#2902): ensureBreakerDurability moved to src/server/routes/core.ts
