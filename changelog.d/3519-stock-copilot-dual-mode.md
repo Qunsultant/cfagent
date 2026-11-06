@@ -8,3 +8,4 @@
   - Extended `CopilotCycleActivityRecord` with `mode` and `criticVerdict`.
   - Added `getLearningsViaDoor` and route support to query learnings and answer "What did you learn from recent cycles?".
   - Added interactive quick-chips "💡 What have you learned?" and "🧠 Switch to Agentic Dual-Mode" to `copilotRegistry.ts`. #ceo-aimp
+

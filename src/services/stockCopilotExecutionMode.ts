@@ -41,10 +41,11 @@ export function resolveCopilotExecutionMode(opts?: {
     }
   }
 
-  const envValue = (opts?.env as Record<string, string | undefined>)?.STOCK_COPILOT_EXECUTION_MODE;
+  const envValue = (opts?.env as unknown as Record<string, string | undefined>)?.STOCK_COPILOT_EXECUTION_MODE;
   if (envValue && envValue.trim().length > 0) {
     return parseCopilotExecutionMode(envValue);
   }
 
   return DEFAULT_COPILOT_EXECUTION_MODE;
 }
+
