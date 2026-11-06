@@ -41,7 +41,7 @@ describe("SOLID Principles, GoF Patterns & Agent Dogfooding Suite", () => {
   const mockEnv: Env = {
     AI: {} as any,
     AI_SEARCH_ENDPOINT: "https://mock.search",
-    SEARCH_AGENT: {} as any,
+    ORCHESTRATOR_AGENT: {} as any,
     AGENT_SESSIONS: {} as any,
     STRIPE_SECRET_KEY: "sk_test_mock123",
     PAYPAL_CLIENT_ID: "client_mock",
