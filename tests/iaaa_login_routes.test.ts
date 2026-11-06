@@ -44,7 +44,7 @@ function makeEnv(overrides: Record<string, unknown> = {}) {
   const { namespace, store } = makeFakeSessionStore();
   const env: Record<string, unknown> = {
     SESSION_STORE: namespace,
-    SEARCH_AGENT: {
+    ORCHESTRATOR_AGENT: {
       idFromName: (name: string) => name,
       get: () => ({ fetch: async () => Response.json({ ok: true }) }),
     },
