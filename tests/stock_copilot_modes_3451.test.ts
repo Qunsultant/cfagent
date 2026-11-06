@@ -598,4 +598,48 @@ describe("stock copilot host — mode conformance (#3451)", () => {
     expect(fake.calls.placeOrderRemote).toBe(0);
     expect(fake.calls.getPositions).toBe(0);
   });
+
+  it("externalized mode guard (#3541): permissive mode auto-aligns without refusing", async () => {
+    const fake = createFakePlatform();
+    const result = await runStockCopilotCycle(
+      modeDeps({
+        platform: fake.platform,
+        selection: { ...LIVE_SELECTION },
+        env: {
+          STOCK_COPILOT_PAPER_ENABLED: "1",
+          ALPACA_TRADING_TYPE: "paper",
+          STOCK_COPILOT_STRICT_MODE_GUARD: "false",
+        } as any,
+      }),
+    );
+    expect(result.status).toBe("ok");
+  });
+
+  it("externalized mode (#3541): resolveCopilotTradingSelection respects deployment ALPACA_TRADING_TYPE=live when unset", async () => {
+    const res = await resolveCopilotTradingSelection({
+      env: { ALPACA_TRADING_TYPE: "live" },
+      readSettingRaw: () => null,
+      commercial: new InMemoryCommercialAdapter(),
+    });
+    expect(res.resolved).toBe(true);
+    if (res.resolved) {
+      expect(res.selection.environment).toBe("PROD");
+      expect(res.selection.mode).toBe("live");
+    }
+  });
+
+  it("externalized broker (#3541): STOCK_COPILOT_BROKER_NEUTRAL allows non-alpaca broker", async () => {
+    const fake = createFakePlatform();
+    const result = await runStockCopilotCycle(
+      modeDeps({
+        platform: fake.platform,
+        selection: { resolved: true, selection: { brokerId: "etrade", environment: "TEST", mode: "paper" } },
+        env: {
+          STOCK_COPILOT_PAPER_ENABLED: "1",
+          STOCK_COPILOT_BROKER_NEUTRAL: "true",
+        } as any,
+      }),
+    );
+    expect(result.status).toBe("ok");
+  });
 });
