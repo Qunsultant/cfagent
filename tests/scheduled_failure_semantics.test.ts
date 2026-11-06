@@ -99,7 +99,7 @@ describe("Scheduled job failure semantics (#112)", () => {
       ET_BASE_URL: "https://apisb.etrade.com/v1",
       ETRADE_KV: {} as any,
       SESSIONS: {} as any,
-      SEARCH_AGENT: {} as any,
+      ORCHESTRATOR_AGENT: {} as any,
       // Issue #261: ScreenerAgent mock — service delegates screening to it.
       SCREENER_AGENT: {
         idFromName: () => "mock-screener",
