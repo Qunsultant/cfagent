@@ -28,6 +28,7 @@ import {
 } from "./adBannerConfig";
 import { useAutoRefresh } from "./autoRefresh";
 import { useTenantProviders, DATA_PROVIDER_OPTIONS, BROKER_OPTIONS } from "./tenantProviders";
+import { brokerPresentation } from "../trading/brokerPresentation";
 import { getPollingConfig } from "./pollingConfig";
 import {
   FONT_SCALE_PRESETS,
@@ -440,8 +441,9 @@ export function SettingsMenu({
   const accountValue = account?.netAccountValue;
 
   const selectedBrokerId = tenantProviders.brokerId ?? "etrade";
-  const selectedBroker = BROKER_OPTIONS.find((b) => b.id === selectedBrokerId);
-  const selectedBrokerLabel = selectedBroker ? selectedBroker.label : (selectedBrokerId === "alpaca" ? "Alpaca" : "E*TRADE");
+  // Issue #3419: the menu names the broker from the ONE presentation module.
+  // A local label ternary is how "E*TRADE" survived a broker switch before.
+  const selectedBrokerLabel = brokerPresentation(selectedBrokerId).label;
   const brokerIcon = selectedBrokerId === "alpaca" ? "🦙" : "⚡";
 
   const handleMouseEnter = () => {
@@ -756,7 +758,7 @@ export function SettingsMenu({
           <div className="etrade-panel-section">
             <div className="section-label-row">
               <span>Environment &amp; Connection</span>
-              <small>{isLive ? "Live execution" : "Paper sandbox"}</small>
+              <small>{brokerPresentation(selectedBrokerId).modeWord[isLive ? "live" : "paper"]}</small>
             </div>
             <div className="etrade-controls-single-line">
               <Button
