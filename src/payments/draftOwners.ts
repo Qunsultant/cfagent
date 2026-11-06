@@ -19,7 +19,7 @@
  * written under — literally the value stored in the row's own session_id
  * column (OrchestratorAgent.sessionKey()). The webhook handler resolves
  * the owner from this entry and forwards the verified webhook to that
- * instance over the SEARCH_AGENT stub channel (the persistAudit / #896
+ * instance over the ORCHESTRATOR_AGENT stub channel (the persistAudit / #896
  * ledger pattern); routing is derived ONLY from this server-written
  * entry — the webhook payload contributes nothing but the draftId, so a
  * caller cannot steer a settlement across tenants.
