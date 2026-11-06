@@ -88,7 +88,7 @@ const makeEnv = (overrides: Record<string, unknown> = {}): Env =>
   ({
     AI: {} as any,
     AI_SEARCH_ENDPOINT: "https://mock.search",
-    SEARCH_AGENT: {} as any,
+    ORCHESTRATOR_AGENT: {} as any,
     AGENT_SESSIONS: {} as any,
     APP_ENV: "TEST",
     OUTBOUND_WEBHOOK_URL: "https://webhook.example.com/hook",
