@@ -858,11 +858,19 @@ If the PR cannot merge, the issue is blocked—not finished.
 
 When the same change lands on `main` through another PR first (parallel lanes, §6 claim rule notwithstanding):
 
-1. Verify the landed change actually covers your PR's scope — compare content or markers on `main`, do not assume equivalence from the title.
-2. Close your PR as superseded with a comment carrying that verification evidence and linking the landed PR.
-3. Reconcile the issue from the landed PR (completion report, checklist state).
+1. **Verify the landed change actually covers your PR's scope** — run the verification guardrail:
+   ```bash
+   python3 scripts/ci/verify_pr_closure.py <branch>
+   # or: scripts/verify-superseded.sh <branch>
+   ```
+   Do not assume equivalence from the title or issue association alone.
+2. **Diff-before-close enforcement (§24)**: If `verify_pr_closure.py` reports unmerged functional files against `origin/main`, **you cannot close the PR**. You must either:
+   - Rebase the branch onto latest `origin/main` to preserve and merge the remaining delta, or
+   - Carve out the unique changes into a distinct follow-up issue and branch before closing.
+3. Only close your PR as superseded once `verify_pr_closure.py` confirms zero unmerged functional diff, carrying that verification evidence and linking the landed PR in the closure comment.
+4. Reconcile the issue from the landed PR (completion report, checklist state).
 
-Never force-merge a colliding duplicate, and never leave a PR open and unexplained once its change is on `main`. A dangling PR misstates the state of the work to every other lane.
+Never force-merge a colliding duplicate, and never leave a PR open and unexplained once its change is on `main`. Conversely, never blindly close a PR with unmerged code. A dangling PR misstates the state of the work, but a lost delta discards engineering value.
 
 ***
 
@@ -1630,6 +1638,28 @@ with the decision still only in chat or in an agent's notes.
   that already exist in the repository may ride ScheduledAgent;
   origination from chat cannot, and this section does not claim
   it.
+
+***
+## 24. Anti-work-loss policy: diff-before-close and single-lease claiming (#3437)
+
+Multi-developer and multi-agent execution environments face a structural risk of premature closure and work loss when multiple lanes interact with the same issue or epic:
+
+1. **Diff-Before-Close Rule**:
+   - An open PR or branch must NEVER be closed as "superseded", "duplicate", or "redundant" based purely on issue number, PR title, or verbal intent.
+   - Before any closure command is run, the operator must execute `python3 scripts/ci/verify_pr_closure.py <branch>` (or `scripts/verify-superseded.sh <branch>`).
+   - If the script outputs exit code 1 (indicating non-empty unmerged changes in `src/`, `tests/`, `scripts/`, or `docs/`), closing the PR is strictly prohibited.
+   - The unmerged work must be harvested: either rebase the branch onto `origin/main` to merge the residual contribution, or file a dedicated follow-up issue with the unique commit references before closing the original PR.
+
+2. **Single-Lease Issue Claiming**:
+   - Before an agent cuts a branch or begins work on an issue, it must search for existing branches or pull requests targeting that issue:
+     ```bash
+     gh pr list --search "<issue-number> in:title"
+     ```
+   - If an active branch or PR already exists, the agent must inspect it rather than dispatching a duplicative implementation.
+   - An agent starting work should record an issue claim comment (`## Agent Claim: #<agent>-<id>`) to provide explicit visibility across lanes.
+
+3. **Delta Harvest Protocol**:
+   - When two PRs land overlapping changes for an issue, the second PR is never simply abandoned. The second branch is rebased on `origin/main`, tested against the merged base, and evaluated for its additive delta.
 
 ***
 ## Instruction to add to `AGENTS.md`

@@ -103,6 +103,11 @@ rebase merge creates a commit CI has never tested. Before merging any PR:
   25543527 (`Load Active Environment`, `Test & Build (Node 22) [PROD]`, `Policy Gate`,
   `Gitleaks secret scan`, `Analyze (javascript-typescript)`) are present and running on the
   PR branch head before waiting for queue admission.
+- **Diff-before-close rule (anti-work-loss, gitops §11, §24):** Never close a PR or branch
+  as "superseded" or "duplicate" without running `python3 scripts/ci/verify_pr_closure.py <branch>`
+  (or `scripts/verify-superseded.sh <branch>`). If the diff against `main` contains unmerged
+  functional code, closing without rebasing or carving out the delta into a follow-up issue is
+  strictly prohibited.
 
 Repository settings (human owner, not agents): branch protection on
 `main` should require a PR, require the typecheck/test/build checks,
