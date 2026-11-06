@@ -2,8 +2,9 @@
  * Issue #3530 (one-of-everything, S1) — feed jobs: the contract,
  * the registry, and the run/read/status service.
  *
- * A feed job pulls ONE source's declared dataset (S1: Yahoo
- * quotes for the Nasdaq-100 universe) through the provider PORT,
+ * A feed job pulls ONE source's declared dataset (quotes for
+ * the Nasdaq-100 universe — Yahoo in S1; E*TRADE + Alpaca in S2)
+ * through the provider PORT,
  * persists it as the platform's local copy (the feed-dataset
  * store, feedDatasetPorts.ts — with the fetch's captures landing
  * in the capture log through the capture-wired adapter, exactly
@@ -155,35 +156,70 @@ export function resolveFeedJobStaleMinutes(
 }
 
 export const YAHOO_NASDAQ100_QUOTES_JOB_ID = "yahoo-nasdaq100-quotes";
+export const ETRADE_NASDAQ100_QUOTES_JOB_ID = "etrade-nasdaq100-quotes";
+export const ALPACA_NASDAQ100_QUOTES_JOB_ID = "alpaca-nasdaq100-quotes";
 export const FEED_JOB_DEFAULTS = {
   cadenceMinutes: 60,
   staleAfterMinutes: 180,
 } as const;
 
-/** The built-in registry. S1 registers exactly one job — Yahoo
- *  quotes over the stored Nasdaq-100 list; later source slices
- *  register theirs here against the same contract. */
-export function buildFeedJobRegistry(
+/**
+ * One built-in quotes job: the source's quotes for the stored
+ * Nasdaq-100 universe — the shape every quotes source registers
+ * (S1: Yahoo; S2: E*TRADE + Alpaca). The definition is data; the
+ * run/read/status machinery is shared, never forked per source.
+ */
+function nasdaq100QuotesJob(
   env: Record<string, string | undefined>,
-): FeedJobRegistry {
-  const registry = new FeedJobRegistry();
-  registry.register({
-    id: YAHOO_NASDAQ100_QUOTES_JOB_ID,
-    sourceId: "yahoo",
+  id: string,
+  sourceId: DataProviderId,
+): FeedJobDefinition {
+  return {
+    id,
+    sourceId,
     dataset: "quotes",
     elements: ["quotes"],
     universe: { kind: "index", index: "nasdaq100", label: "Nasdaq-100" },
     cadenceMinutes: resolveFeedJobCadenceMinutes(
       env,
-      YAHOO_NASDAQ100_QUOTES_JOB_ID,
+      id,
       FEED_JOB_DEFAULTS.cadenceMinutes,
     ),
     staleAfterMinutes: resolveFeedJobStaleMinutes(
       env,
-      YAHOO_NASDAQ100_QUOTES_JOB_ID,
+      id,
       FEED_JOB_DEFAULTS.staleAfterMinutes,
     ),
-  });
+  };
+}
+
+/** The built-in registry. S1 registered Yahoo quotes over the
+ *  stored Nasdaq-100 list; S2 registers E*TRADE and Alpaca quotes
+ *  over the same universe against the same contract.
+ *
+ *  Nasdaq has NO job, deliberately (S2 finding, #3530): its
+ *  adapter declares only screenUniverse — its dataset is the US
+ *  listed-securities universe (NasdaqStockListing[]), not quotes,
+ *  and this contract's artifact payload + universe shape
+ *  ({kind:"index", index: IndexId}) cannot express it without
+ *  fabricating quote-shaped rows or inventing an index id. A
+ *  contract extension for universe-shaped datasets is a separate
+ *  decision; until then the surface honestly shows no Nasdaq feed
+ *  job (null feed block, typed FEED_JOB_NOT_FOUND). Public.com is
+ *  out of scope for the feed programme's unconditional set. */
+export function buildFeedJobRegistry(
+  env: Record<string, string | undefined>,
+): FeedJobRegistry {
+  const registry = new FeedJobRegistry();
+  registry.register(
+    nasdaq100QuotesJob(env, YAHOO_NASDAQ100_QUOTES_JOB_ID, "yahoo"),
+  );
+  registry.register(
+    nasdaq100QuotesJob(env, ETRADE_NASDAQ100_QUOTES_JOB_ID, "etrade"),
+  );
+  registry.register(
+    nasdaq100QuotesJob(env, ALPACA_NASDAQ100_QUOTES_JOB_ID, "alpaca"),
+  );
   return registry;
 }
 

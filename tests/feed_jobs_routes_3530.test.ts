@@ -5,7 +5,9 @@
  * feed job:
  * - a `feed` block on the provider view (never-run before the first
  *   run; last run + snapshot age after one; null for providers with
- *   no job — S1 registers Yahoo only);
+ *   no job — S1 registered Yahoo only; S2 adds E*TRADE + Alpaca, so
+ *   the no-job pins below use nasdaq, which remains jobless — see
+ *   the S2 adaptation notes on those pins);
  * - POST /data-providers/:id/feed-run — an admin run under the same
  *   session gate as every other mutation here (#1156 mechanism:
  *   no verified login → 401 before any state is read or written);
@@ -126,8 +128,19 @@ describe("feed routes (#3530 S1)", () => {
       lastRun: null,
       snapshot: null,
     });
+    // S2 adaptation (#3530 S2, disclosed): the null exemplar was
+    // etrade in S1; S2 registers an E*TRADE feed job, so etrade now
+    // carries its own never-run block, and the "no job ⇒ null"
+    // invariant is asserted on nasdaq, which remains jobless.
     const etrade = body.providers.find((p: any) => p.id === "etrade");
-    expect(etrade.feed).toBeNull();
+    expect(etrade.feed).toMatchObject({
+      jobId: "etrade-nasdaq100-quotes",
+      state: "never-run",
+      lastRun: null,
+      snapshot: null,
+    });
+    const nasdaq = body.providers.find((p: any) => p.id === "nasdaq");
+    expect(nasdaq.feed).toBeNull();
   });
 
   it("POST feed-run without a verified login is refused 401 before anything runs", async () => {
@@ -156,8 +169,12 @@ describe("feed routes (#3530 S1)", () => {
   });
 
   it("POST feed-run for a provider with no registered job is a typed 404", async () => {
+    // S2 adaptation (#3530 S2, disclosed): the no-job exemplar was
+    // etrade in S1; etrade has a job since S2, so the invariant
+    // (jobless provider ⇒ typed FEED_JOB_NOT_FOUND 404) is asserted
+    // on nasdaq, which remains jobless.
     const { ctx } = await makeCtx();
-    const res = await callRoute(ctx, "POST", "/data-providers/etrade/feed-run", {});
+    const res = await callRoute(ctx, "POST", "/data-providers/nasdaq/feed-run", {});
     expect(res.status).toBe(404);
     const body = (await res.json()) as any;
     expect(body.code).toBe("FEED_JOB_NOT_FOUND");
@@ -182,8 +199,11 @@ describe("feed routes (#3530 S1)", () => {
   });
 
   it("GET /data-providers/:id/feed for a provider without a job is a typed 404", async () => {
+    // S2 adaptation (#3530 S2, disclosed): exemplar swapped from
+    // etrade (jobless in S1, registered in S2) to nasdaq (still
+    // jobless); the invariant asserted is unchanged.
     const { ctx } = await makeCtx();
-    const res = await callRoute(ctx, "GET", "/data-providers/etrade/feed");
+    const res = await callRoute(ctx, "GET", "/data-providers/nasdaq/feed");
     expect(res.status).toBe(404);
     const body = (await res.json()) as any;
     expect(body.code).toBe("FEED_JOB_NOT_FOUND");

@@ -2307,6 +2307,81 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
     throw marketDataResearchLiveUnavailableError(symbol, "quote", "alpaca");
   }
 
+  /**
+   * Issue #3530 S2: batch quotes via the multi-symbol snapshots
+   * endpoint — ONE request for the whole symbol list (the
+   * multi-symbol form of the snapshot surface getMarketSnapshot
+   * maps), instead of one request per symbol. This is the batch
+   * leg the platform's market-data adapter factory picks up as
+   * getQuotesBatch (the #1317 Yahoo precedent: the factory exposes
+   * batch only when the wrapped provider offers getQuotes).
+   *
+   * Contract mirrors YahooFinanceProvider.getQuotes: returns only
+   * genuinely live quotes, in request order; symbols Alpaca omits
+   * (or whose snapshot carries no positive trade price) are absent
+   * and the caller diffs. Field mapping is this class's own
+   * snapshot semantics: price from latestTrade, previousClose from
+   * prevDailyBar, OHLC/volume/vwap from dailyBar, bid/ask from
+   * latestQuote.
+   *
+   * Honesty (#923, this class's idiom): unconfigured → the
+   * no-substitute error BEFORE any fetch; HTTP failure → throws;
+   * a payload with zero usable rows → throws rather than dressing
+   * an empty result up as a successful batch.
+   */
+  async getQuotes(symbols: string[]): Promise<MarketDataResearchQuote[]> {
+    const wanted = [...new Set(symbols.map((s) => s.toUpperCase().trim()).filter(Boolean))];
+    if (wanted.length === 0) return [];
+    if (!this.isConfigured()) {
+      throw marketDataResearchLiveUnavailableError(wanted.join(","), "quotes", "alpaca");
+    }
+    const url = `${this.getDataUrl()}/v2/stocks/snapshots?symbols=${encodeURIComponent(wanted.join(","))}`;
+    const res = await this.throttledFetch(url, { headers: this.getHeaders() });
+    if (!res.ok) {
+      throw new Error(`Alpaca batch quotes HTTP ${res.status}`);
+    }
+    const data = (await res.json().catch(() => ({}))) as any;
+    const snaps: Record<string, any> = data?.snapshots ?? {};
+    const out: MarketDataResearchQuote[] = [];
+    for (const symbol of wanted) {
+      const s = snaps[symbol];
+      if (!s) continue;
+      const price = Number(s.latestTrade?.p || s.dailyBar?.c || 0);
+      if (!(price > 0)) continue;
+      const prevCloseRaw = Number(s.prevDailyBar?.c || 0);
+      const previousClose = prevCloseRaw > 0 ? prevCloseRaw : price;
+      const change = Number((price - previousClose).toFixed(2));
+      const changePercent =
+        previousClose > 0 ? Number(((change / previousClose) * 100).toFixed(2)) : 0;
+      out.push({
+        symbol,
+        provider: "alpaca",
+        provenance: "live",
+        companyName: `${symbol} Asset`,
+        price,
+        lastPrice: price,
+        change,
+        changePercent,
+        bid: Number(s.latestQuote?.bp || 0) || undefined,
+        ask: Number(s.latestQuote?.ap || 0) || undefined,
+        bidSize: Number(s.latestQuote?.bs || 0) || undefined,
+        askSize: Number(s.latestQuote?.as || 0) || undefined,
+        volume: Number(s.dailyBar?.v || 0),
+        open: Number(s.dailyBar?.o || price),
+        high: Number(s.dailyBar?.h || price),
+        low: Number(s.dailyBar?.l || price),
+        previousClose,
+        vwap: Number(s.dailyBar?.vw || price),
+        timestamp: s.latestTrade?.t || s.dailyBar?.t || new Date().toISOString(),
+        currency: "USD",
+      });
+    }
+    if (out.length === 0) {
+      throw new Error("Alpaca batch quotes returned no results");
+    }
+    return out;
+  }
+
   getFundamentalsSync(symbol: string): MarketDataResearchCompanyFundamentals {
     // #923: no live fetch is possible synchronously — fail explicit.
     return marketDataResearchSyncUnavailable(symbol, "fundamentals", "alpaca");

@@ -16,9 +16,11 @@
  *
  * Pins:
  *  - adapter shape: id/name/capabilities, tagged quote envelope
- *    field-for-field, NO getQuotesBatch (the wrapped provider
- *    offers no getQuotes), isConfigured delegating to the real
- *    provider (key AND secret required);
+ *    field-for-field, getQuotesBatch present exactly when the
+ *    wrapped provider offers getQuotes (absent for the fixture;
+ *    present for the real provider since #3530 S2 added its batch
+ *    leg — see the adapted pin), isConfigured delegating to the
+ *    real provider (key AND secret required);
  *  - capture (E1/E7 semantics, inherited from the shared factory):
  *    capture-wired constructions write one row per capability,
  *    run-linked, rawKind "provider-result"; blob failure writes a
@@ -207,7 +209,7 @@ function callRoute(
   return handleDataProviderRoutes(request, url, path, "session-1", ctx) as Promise<Response>;
 }
 
-describe("adapter: alpaca declares quotes/bars/fundamentals, single-symbol only", () => {
+describe("adapter: alpaca declares quotes/bars/fundamentals; batch rides the wrapped provider's getQuotes", () => {
   it("id/name/capabilities match the seed; getQuote returns the tagged envelope field-for-field", async () => {
     const adapter = createAlpacaDataProvider(fixtureMarketData());
     expect(adapter.id).toBe("alpaca");
@@ -219,11 +221,19 @@ describe("adapter: alpaca declares quotes/bars/fundamentals, single-symbol only"
     expect(out.result).toEqual(liveQuote("AAPL"));
   });
 
-  it("no getQuotesBatch: the wrapped provider offers no getQuotes, and neither does the real one", () => {
+  it("getQuotesBatch exists exactly when the wrapped provider offers getQuotes — the fixture does not; the real one does since #3530 S2", () => {
+    // S2 adaptation (#3530 S2, disclosed): this pin originally
+    // asserted the REAL AlpacaMarketDataProvider also had no
+    // batch method. S2 deliberately adds getQuotes to it (the
+    // multi-symbol snapshots leg, the #1317 Yahoo precedent) so
+    // the feed job can run end-to-end; by the factory's standing
+    // rule the adapter then exposes getQuotesBatch. The fixture
+    // half of the original pin — a wrapped provider WITHOUT
+    // getQuotes yields no batch method — stands unchanged.
     const noBatch = createAlpacaDataProvider(fixtureMarketData());
     expect(noBatch.getQuotesBatch).toBeUndefined();
     const real = createAlpacaDataProvider(new AlpacaMarketDataProvider({} as Env), {} as Env);
-    expect(real.getQuotesBatch).toBeUndefined();
+    expect(typeof real.getQuotesBatch).toBe("function");
   });
 
   it("isConfigured delegates to the real provider: key AND secret required", () => {
