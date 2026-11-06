@@ -1,12 +1,14 @@
 /**
  * Issue #3422 — Stock Copilot panel for the chat tab (?tab=chat).
  *
- * Surfaces the signed-in user's own paper-trading loop (#3391):
- * its live status, open positions with their exit plans, recently
- * closed positions, and the recent cycle activity feed — plus the
- * pause/resume control. Pause stops new entries from the next
- * cycle; exit management for open positions keeps running while
- * paused (the panel says so, because that is the safety contract).
+ * Surfaces the signed-in user's own copilot loop (#3391): its live
+ * status, the effective broker + mode selection it runs under
+ * (#3451 — selected in the dynamic panel menu, only reported here),
+ * open positions with their exit plans, recently closed positions,
+ * and the recent cycle activity feed — plus the pause/resume
+ * control. Pause stops new entries from the next cycle; exit
+ * management for open positions keeps running while paused (the
+ * panel says so, because that is the safety contract).
  *
  * Built only from src/client/components/ui/ primitives with
  * token-only styling (ux-architecture §20); data loads through
@@ -26,6 +28,7 @@ import {
   type TableColumn,
 } from "./components/ui";
 import {
+  copilotSelectionLabel,
   exitReasonLabel,
   fetchStockCopilotStatus,
   fmtCopilotMoney,
@@ -46,12 +49,15 @@ const STATUS_VIEW: Record<StockCopilotStatusKind, { label: string; tone: BadgeTo
   paused: { label: "Paused", tone: "warning" },
   outside_market_hours: { label: "Outside market hours", tone: "info" },
   off: { label: "Off", tone: "neutral" },
+  mode_unresolved: { label: "Mode unresolved", tone: "danger" },
+  inactive_broker: { label: "Inactive broker", tone: "neutral" },
 };
 
 const OUTCOME_VIEW: Record<StockCopilotActivityRecord["outcome"], { label: string; tone: BadgeTone }> = {
   traded: { label: "Traded", tone: "success" },
   no_trade: { label: "No trade", tone: "neutral" },
   refused: { label: "Refused", tone: "danger" },
+  inactive: { label: "Inactive", tone: "neutral" },
 };
 
 const POSITION_COLUMNS: Array<TableColumn<StockCopilotOpenPosition>> = [
@@ -72,7 +78,18 @@ function activitySummary(record: StockCopilotActivityRecord): string {
   }
   if (parts.length > 0) return parts.join(" · ");
   if (record.outcome === "no_trade") return record.detail ?? "No trades this cycle";
-  if (record.outcome === "refused") return "The paper-trading guard refused this cycle";
+  if (record.outcome === "inactive") {
+    return "Inactive — a different broker is active in the panel menu";
+  }
+  if (record.outcome === "refused") {
+    if (record.detail === "stock_copilot_mode_unresolved") {
+      return "Trading mode could not be resolved — cycle refused";
+    }
+    if (record.detail === "stock_copilot_mode_mismatch") {
+      return "The selected mode disagreed with the broker environment — cycle refused";
+    }
+    return "The mode guard refused this cycle";
+  }
   return "Cycle completed";
 }
 
@@ -136,6 +153,7 @@ export function StockCopilotPanel() {
   }
 
   const statusView = STATUS_VIEW[status.status];
+  const selectionLabel = copilotSelectionLabel(status);
 
   return (
     <Card className="scp-panel">
@@ -145,6 +163,11 @@ export function StockCopilotPanel() {
           <Badge size="sm" tone={statusView.tone} dot>
             {statusView.label}
           </Badge>
+          {selectionLabel && (
+            <Badge size="sm" tone="info">
+              {selectionLabel}
+            </Badge>
+          )}
         </div>
         <div className="scp-actions">
           <Button
@@ -185,16 +208,31 @@ export function StockCopilotPanel() {
       </div>
 
       <p className="scp-desc">
-        Pattern-driven paper trading on your Alpaca paper account — a cycle runs
-        every 30 minutes during market hours (9:30–16:00 ET, Mon–Fri) over SPY,
-        QQQ, AAPL, MSFT and NVDA. Every position opens with its exit plan (stop
-        and target) attached.
+        Pattern-driven trading on the broker and mode selected in the panel
+        menu (shown above) — a cycle runs every 30 minutes during market hours
+        (9:30–16:00 ET, Mon–Fri) over SPY, QQQ, AAPL, MSFT and NVDA. Every
+        position opens with its exit plan (stop and target) attached.
       </p>
 
       {status.status === "off" && (
         <Notice tone="info">
           The master switch is off in the production configuration, so the loop
           is not running. The pause control applies once it is switched on.
+        </Notice>
+      )}
+      {status.status === "mode_unresolved" && (
+        <Notice tone="danger">
+          The trading-mode selection could not be read, so the copilot refuses
+          every cycle rather than guess a mode. Check the broker selection in
+          the panel menu.
+        </Notice>
+      )}
+      {status.status === "inactive_broker" && (
+        <Notice tone="info">
+          {selectionLabel
+            ? `The active selection is ${selectionLabel} — the Stock Copilot trades on Alpaca only, so it stays inactive while another broker is active.`
+            : "A different broker is active in the panel menu — the Stock Copilot trades on Alpaca only, so it stays inactive."}{" "}
+          Select Alpaca in the panel menu to activate it.
         </Notice>
       )}
       {status.paused && (
