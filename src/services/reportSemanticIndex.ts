@@ -253,9 +253,11 @@ export async function indexCanonicalReport(
  * Issue #1169 S4-4: one page of the S4-1 canonical-index backfill,
  * extracted VERBATIM from the reports route handler
  * (POST /trading/reports/index-backfill) so the route and the
- * corpus sync share one implementation. The route calls this with
- * its parsed limit/offset and returns the result as-is — response
- * shape and counting are identical to the inline version.
+ * sweep below share one implementation. (Until #3527 S4 the sweep
+ * rode the corpus sync; it is reports machinery and lives here
+ * now.) The route calls this with its parsed limit/offset and
+ * returns the result as-is — response shape and counting are
+ * identical to the inline version.
  */
 export interface CanonicalIndexBackfillPage {
   upserted: number;
@@ -297,6 +299,80 @@ export async function runCanonicalIndexBackfillPage(
     rows: rows.length,
     nextOffset: rows.length < limit ? null : offset + rows.length,
   };
+}
+
+/** Durable marker key for the last completed reports index-backfill
+ * sweep, in mas_settings (issue #3527 S4 — the sweep's own marker,
+ * split from the corpus sync's `corpus_sync_last_run`). */
+export const REPORTS_INDEX_BACKFILL_LAST_RUN_KEY =
+  "reports_index_backfill_last_run";
+
+/** Weekly cadence: fire when >= 7 days since the last completed sweep. */
+export const REPORTS_INDEX_BACKFILL_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
+
+export type ReportsIndexBackfillDecision =
+  | { fire: true }
+  | { fire: false; reason: "too-soon"; lastFiredAt: string };
+
+/**
+ * Pure weekly fire/no-fire decision for the reports sweep (no SDK
+ * imports, unit-testable) — the same semantics the corpus guard has
+ * always had, owned here since #3527 S4 unbundled the sweep from the
+ * corpus sync: never fired -> fire; unparseable marker -> fire (the
+ * sweep is idempotent, so firing is harmless); otherwise fire only
+ * when the elapsed time reaches the full 7-day interval.
+ */
+export function shouldFireReportsIndexBackfillTick(
+  now: Date,
+  lastFiredAtIso: string | null
+): ReportsIndexBackfillDecision {
+  if (lastFiredAtIso === null) return { fire: true };
+  const last = Date.parse(lastFiredAtIso);
+  if (Number.isNaN(last)) return { fire: true };
+  if (now.getTime() - last >= REPORTS_INDEX_BACKFILL_INTERVAL_MS) {
+    return { fire: true };
+  }
+  return { fire: false, reason: "too-soon", lastFiredAt: lastFiredAtIso };
+}
+
+export interface CanonicalIndexBackfillOutcome {
+  upserted: number;
+  skippedRetention: number;
+  rows: number;
+  pages: number;
+  complete: boolean;
+}
+
+/**
+ * Issue #3527 S4: sweep the whole canonical-report table through the
+ * shared backfill page fn, 100 rows per page, until nextOffset is
+ * null. This is the reports workflow's own repair sweep — until S4
+ * it lived in corpusSync.ts and rode the corpus sync's weekly guard;
+ * it now runs from its own route + tick rider under its own guard
+ * (above). Idempotent (re-upserts the same `report:<id>` vector ids).
+ */
+export async function runCanonicalIndexBackfillAll(
+  env: IndexEnv | undefined,
+  sql: SqlStorage
+): Promise<CanonicalIndexBackfillOutcome> {
+  let upserted = 0;
+  let skippedRetention = 0;
+  let rows = 0;
+  let pages = 0;
+  let offset = 0;
+  for (;;) {
+    const page = await runCanonicalIndexBackfillPage(env, sql, {
+      limit: 100,
+      offset,
+    });
+    upserted += page.upserted;
+    skippedRetention += page.skippedRetention;
+    rows += page.rows;
+    pages += 1;
+    if (page.nextOffset === null) break;
+    offset = page.nextOffset;
+  }
+  return { upserted, skippedRetention, rows, pages, complete: true };
 }
 
 export interface SemanticHit {
