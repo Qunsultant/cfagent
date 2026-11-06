@@ -184,7 +184,7 @@ export async function handleScheduledEvent(event: any, env: Env, ctx?: any): Pro
           Date.now(),
         )
       : false;
-    const agent = actorGateway.stub<DoStubLike>(env.SEARCH_AGENT, SHARED_ORCHESTRATOR_INSTANCE);
+    const agent = actorGateway.stub<DoStubLike>(env.ORCHESTRATOR_AGENT, SHARED_ORCHESTRATOR_INSTANCE);
 
     // PR #4 — ScheduledAgent tick: evaluate due goals, budget-check,
     // create Orchestrator jobs (issue #166).
@@ -325,27 +325,6 @@ export async function handleScheduledEvent(event: any, env: Env, ctx?: any): Pro
       );
       if (ctx?.waitUntil) ctx.waitUntil(corpusSyncPromise);
       else await corpusSyncPromise;
-      // Issue #3527 (S4) — the weekly reports canonical-index
-      // sweep rides this tick on its OWN rider (same Workers Free
-      // ceiling constraint as #354/#705/#754/#1169). Until S4 the
-      // sweep was a leg inside the corpus sync, gated by the
-      // corpus marker; it is reports machinery, so it now
-      // dispatches to its own route, which decides fire/no-fire
-      // from its own weekly guard + durable marker
-      // (reports_index_backfill_last_run in mas_settings). The
-      // dispatch is unconditional; skips are cheap and explicit
-      // in the route result.
-      const reportsBackfillPromise = agent.fetch(
-        new Request("https://agent.internal/trading/reports/index-backfill-sweep", {
-          method: "POST",
-          headers: backgroundDispatchHeadersWithTrace(
-            userLogin,
-            formatTraceparent(childSpan(tickTrace)),
-          ),
-        })
-      );
-      if (ctx?.waitUntil) ctx.waitUntil(reportsBackfillPromise);
-      else await reportsBackfillPromise;
       // Issue #2659 (monetization Phase 2.4) — the scheduled
       // digest pass rides this tick (same Workers Free ceiling
       // constraint as #354/#705/#754/#1169: no new cron trigger).
@@ -509,7 +488,7 @@ export async function handleQueueBatch(batch: any, env: Env, ctx?: any): Promise
     // + logged, never retried (a poison-loop guard).
     if (batch?.queue === "screener-events") {
       const serviceUserLogin = getServiceUserLogin(env);
-      const agent = actorGateway.stub<DoStubLike>(env.SEARCH_AGENT, SHARED_ORCHESTRATOR_INSTANCE);
+      const agent = actorGateway.stub<DoStubLike>(env.ORCHESTRATOR_AGENT, SHARED_ORCHESTRATOR_INSTANCE);
       let serviceProvisioned: boolean | null = null;
       const getServiceProvisioned = async (): Promise<boolean> => {
         if (serviceProvisioned === null) {
@@ -618,13 +597,13 @@ export async function handleQueueBatch(batch: any, env: Env, ctx?: any): Promise
                     ) => Promise<{ status: string; reportId?: string }>;
                   };
                   const perUser = actorGateway.stub<RefreshOrchestrator>(
-                    env.SEARCH_AGENT,
+                    env.ORCHESTRATOR_AGENT,
                     stageMsg.userLogin,
                   );
                   const first = await perUser.refreshCanonicalPdfFields(refreshInput);
                   if (first.status === "missing-row") {
                     const shared = actorGateway.stub<RefreshOrchestrator>(
-                      env.SEARCH_AGENT,
+                      env.ORCHESTRATOR_AGENT,
                       SHARED_ORCHESTRATOR_INSTANCE,
                     );
                     const second = await shared.refreshCanonicalPdfFields(refreshInput);
@@ -762,7 +741,7 @@ export async function handleQueueBatch(batch: any, env: Env, ctx?: any): Promise
     // (dropped, not retried: a re-dispatch would deny again, and
     // options analysis is time-sensitive).
     const serviceUserLogin = getServiceUserLogin(env);
-    const agent = actorGateway.stub<DoStubLike>(env.SEARCH_AGENT, SHARED_ORCHESTRATOR_INSTANCE);
+    const agent = actorGateway.stub<DoStubLike>(env.ORCHESTRATOR_AGENT, SHARED_ORCHESTRATOR_INSTANCE);
     let serviceProvisioned: boolean | null = null;
 
     if (batch?.messages && Array.isArray(batch.messages)) {
