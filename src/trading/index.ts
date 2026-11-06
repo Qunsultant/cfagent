@@ -40,6 +40,9 @@ export * from "./registry";
 // Issue #3232: the broker catalog is part of the public trading surface.
 export * from "./brokerCatalog";
 export * from "./brokerPanels";
+// Issue #3417: what a broker is CALLED, beside what it can do. The worker and
+// the client both read it, so no surface has to invent a name.
+export * from "./brokerPresentation";
 export * from "./optionChainSource";
 export * from "./stockQuoteSource";
 export * from "./neutralMarketScreener";

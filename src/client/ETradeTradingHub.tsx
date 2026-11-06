@@ -22,11 +22,20 @@ import type { TradeAssetClass, TradeOrderContext } from "./trading/tradeOrderCon
 import { PortfolioRiskPanel } from "./PortfolioRiskPanel";
 import { brokerSectionNav } from "./brokerSectionNav";
 import type { RiskBroker } from "./portfolioRiskApi";
-import { brokerSupports, isBrokerId } from "../trading/brokerCatalog";
+import { brokerSupports, isBrokerId } from "../trading";
+import { brokerModeBadge, brokerPresentation } from "../trading/brokerPresentation";
+import {
+  accountsFromPayload,
+  formatMoney,
+  formatSignedMoney,
+  portfolioFromPayload,
+  portfolioSummary,
+} from "./brokerPortfolio";
 import { TradingApprovalsQueue } from "./TradingApprovalsQueue";
 import { AccountPanels } from "./AccountPanels";
 import { AlpacaBrokerPanel } from "./AlpacaBrokerPanel";
 import {
+  accountsEndpoint,
   diagnosticsEndpoint,
   positionsEndpoint,
   quoteEndpoint,
@@ -186,6 +195,11 @@ export function ETradeTradingHub({
   // Issue #3411: subscribe to useTenantProviders() so broker switches reactively update.
   const [tenantProviders] = useTenantProviders();
   const selectedBroker = tenantProviders.brokerId;
+  // Issue #3417: the broker's NAME is the presentation module's, not a local
+  // ternary. One lookup renames every surface at once, and an unrecognised id
+  // is described as a selection instead of silently becoming "E*TRADE".
+  const presentation = brokerPresentation(selectedBroker);
+  const brokerLabel = presentation.label;
   // Issue #3356: an unrecognised stored id is refused rather than becoming an
   // E*TRADE read by default - the same fail-closed rule the catalog applies.
   const riskBroker: RiskBroker | null = isBrokerId(selectedBroker) ? selectedBroker : null;
@@ -970,7 +984,8 @@ export function ETradeTradingHub({
       if (resp.ok) {
         const data = (await resp.json()) as any;
         setBrokerStatus(data.status || data);
-        if (data.account) setAccount(data.account);
+        const acct = portfolioFromPayload(data).account;
+        if (acct) setAccount(acct);
         // Issue #2386: oauth/status is the SOLE writer of
         // oauthStatus. This broker read used to overwrite it from
         // its own oauthAuthenticated flag, so the two reads raced
@@ -990,11 +1005,32 @@ export function ETradeTradingHub({
         headers: { "x-environment": envToUse },
       });
       if (resp.ok) {
-        const data = await resp.json() as { account: ETradeAccount; positions: ETradePosition[]; error?: string };
-        if (data.account) setAccount(data.account);
-        if (data.positions) setPositions(data.positions);
-        if (data.error && (!data.account || data.account.accountId === "unconnected")) {
-          setOauthMsg(data.error);
+        const body = (await resp.json()) as unknown;
+        const read = portfolioFromPayload(body);
+        let acct = read.account;
+        // A payload without a positions array did not answer the question, so it
+        // must not clear the table; an empty array is a real "you hold nothing".
+        if (read.reported) setPositions(read.positions);
+        if (!acct) {
+          // The neutral positions route nests the platform result, and a broker
+          // that omits the account leaves the hero at zero. The accounts read is
+          // the fallback; a failure keeps the account unknown rather than zero.
+          try {
+            const acctResp = await fetch(accountsEndpoint(), {
+              headers: { "x-environment": envToUse },
+            });
+            if (acctResp.ok) {
+              const accounts = accountsFromPayload(await acctResp.json());
+              if (accounts.length > 0) acct = accounts[0];
+            }
+          } catch {
+            // Ignore
+          }
+        }
+        if (acct) setAccount(acct);
+        const errorText = (body as { error?: unknown })?.error;
+        if (typeof errorText === "string" && errorText && (!acct || acct.accountId === "unconnected")) {
+          setOauthMsg(errorText);
         }
       }
     } catch {
@@ -2053,14 +2089,15 @@ export function ETradeTradingHub({
             <div className="hero-text-block">
               <div className="hero-badge-row">
                 <span className="hero-badge">💼 PORTFOLIO &amp; HOLDINGS</span>
+                <span className="hero-badge" data-broker={selectedBroker}>{presentation.label}</span>
                 <span className={`hero-badge ${isLive ? "badge-live" : "badge-paper"}`}>
-                  {isLive ? "LIVE BROKERAGE" : "PAPER TRADING SANDBOX"}
+                  {brokerModeBadge(selectedBroker, isLive ? "live" : "paper")}
                 </span>
                 <span className="hero-badge badge-pro">HITL ATTESTED</span>
               </div>
-              <h3>Portfolio Holdings &amp; Open Positions</h3>
+              <h3>{brokerLabel} Portfolio Holdings &amp; Open Positions</h3>
               <p>
-                Inspect real-time equity &amp; options holdings, cost basis, unrealized gain/loss, asset allocations, and portfolio Greeks across your connected brokerage desk.
+                Inspect real-time equity &amp; options holdings, cost basis, unrealized gain/loss, asset allocations, and portfolio Greeks across your connected {brokerLabel} brokerage desk.
               </p>
             </div>
             <div className="hero-actions-row">
@@ -2070,7 +2107,7 @@ export function ETradeTradingHub({
                 size="sm"
                 onClick={() => fetchPositions()}
                 disabled={positionsLoading}
-                title="Refresh live portfolio positions from broker"
+                title={`Refresh live portfolio positions from ${brokerLabel}`}
                loading={positionsLoading}>
                 <span className={positionsLoading ? "strat-spin" : ""}>↻</span>
                 <span>{"Refresh Positions"}</span>
@@ -2083,52 +2120,70 @@ export function ETradeTradingHub({
                 ⚡ Fast Order Ticket
               </Button>
               {!isLive && (
-                <Button variant="secondary"
-                  type="button"
-                  onClick={handleSeedDemoPortfolio}
-                  title="Load curated paper trading positions (NVDA, AAPL, MSFT, SPY) to explore"
-                >
-                  🌱 {positions.length === 0 ? "Load Demo Holdings" : "Reset Demo Holdings"}
-                </Button>
+                selectedBroker === "etrade" ? (
+                  <Button variant="secondary"
+                    type="button"
+                    onClick={handleSeedDemoPortfolio}
+                    title="Load curated paper trading positions (NVDA, AAPL, MSFT, SPY) to explore"
+                  >
+                    🌱 {positions.length === 0 ? "Load Demo Holdings" : "Reset Demo Holdings"}
+                  </Button>
+                ) : null
               )}
             </div>
           </div>
 
           <div className="portfolio-summary-row">
             {(() => {
-              const totalUnrealizedGain = positions.reduce((sum, p) => sum + (Number(p.unrealizedGainLoss ?? p.totalGain ?? 0)), 0);
-              const totalVal = account?.totalAccountValue || positions.reduce((sum, p) => sum + Number(p.marketValue ?? 0), 0);
-              const cashVal = account?.cashAvailableForInvestment ?? 0;
-              const isGain = totalUnrealizedGain >= 0;
-
+              const summary = portfolioSummary(account, positions);
+              const hasDayGain = summary.dayGain !== null;
+              const isGain = (summary.dayGain ?? 0) >= 0;
+              // Issue #3417: every figure comes from the SELECTED broker's own
+              // read, and an unreported figure prints an em dash. "$0.00" for a
+              // funded account was the defect — a zero is a claim.
               return (
                 <>
                   <div className="port-summary-card">
                     <span className="summary-title">Portfolio Equity</span>
-                    <span className="summary-amount">
-                      ${Number(totalVal || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </span>
-                    <span className={`summary-change ${isGain ? "positive" : "negative"}`}>
-                      {isGain ? "+" : ""}${Math.abs(totalUnrealizedGain).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (Unrealized {isGain ? "Gains" : "Losses"})
+                    <span className="summary-amount">{formatMoney(summary.equity)}</span>
+                    <span className={`summary-change ${hasDayGain ? (isGain ? "positive" : "negative") : ""}`}>
+                      {hasDayGain
+                        ? `${formatSignedMoney(summary.dayGain)} today`
+                        : `${brokerLabel} did not report a day P&L for this account`}
                     </span>
                   </div>
                   <div className="port-summary-card">
                     <span className="summary-title">Available Cash</span>
-                    <span className="summary-amount">
-                      ${Number(cashVal || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    <span className="summary-amount">{formatMoney(summary.cash)}</span>
+                    <span className="summary-change">
+                      {summary.cash === null
+                        ? `Not reported by ${brokerLabel}`
+                        : isLive
+                          ? `${brokerLabel} purchasing power`
+                          : "Paper capital ready"}
                     </span>
-                    <span className="summary-change">{isLive ? "Broker Purchasing Power" : "Paper Capital Ready"}</span>
+                  </div>
+                  <div className="port-summary-card">
+                    <span className="summary-title">Buying Power</span>
+                    <span className="summary-amount">{formatMoney(summary.buyingPower)}</span>
+                    <span className="summary-change">
+                      {summary.buyingPower === null
+                        ? `Not reported by ${brokerLabel}`
+                        : account?.marginBuyingPower
+                          ? "Margin buying power"
+                          : "Cash buying power"}
+                    </span>
+                  </div>
+                  <div className="port-summary-card">
+                    <span className="summary-title">Active Positions</span>
+                    <span className="summary-amount">{summary.positionCount}</span>
+                    <span className="summary-change">
+                      {summary.optionCount} options · {summary.equityCount} equities &amp; ETFs
+                    </span>
                   </div>
                 </>
               );
             })()}
-            <div className="port-summary-card">
-              <span className="summary-title">Active Positions</span>
-              <span className="summary-amount">{positions.length}</span>
-              <span className="summary-change">
-                {positions.filter((position) => position.securityType === "OPTN").length} options · {positions.filter((position) => position.securityType !== "OPTN").length} equities &amp; ETFs
-              </span>
-            </div>
           </div>
 
           <div className="portfolio-table-wrap" id="section-positions" style={{ scrollMarginTop: 80 }}>
@@ -2153,8 +2208,10 @@ export function ETradeTradingHub({
                           title="No Active Holdings Found"
                           description={
                             isLive
-                              ? "No active positions found in your connected live brokerage account. Use the Fast Order Ticket to build and preview an order."
-                              : "Your paper trading sandbox has no open positions. Place a paper trade or load curated demo holdings (NVDA, AAPL, MSFT, SPY) to explore portfolio analytics, charts, and Greeks."
+                              ? `No active positions found in your connected live ${brokerLabel} brokerage account. Use the Fast Order Ticket to build and preview an order.`
+                              : (selectedBroker === "etrade"
+                                ? "Your paper trading sandbox has no open positions. Place a paper trade or load curated demo holdings (NVDA, AAPL, MSFT, SPY) to explore portfolio analytics, charts, and Greeks."
+                                : `Your ${brokerLabel} paper trading sandbox has no open positions. Place a paper trade to explore portfolio analytics, charts, and Greeks.`)
                           }
                           action={
                             <div style={{ display: "flex", gap: "var(--space-3)", justifyContent: "center", flexWrap: "wrap" }}>
@@ -2162,9 +2219,11 @@ export function ETradeTradingHub({
                                 ⚡ Build Order Ticket
                               </Button>
                               {!isLive && (
-                                <Button variant="secondary" onClick={handleSeedDemoPortfolio}>
-                                  🌱 Load Curated Demo Positions
-                                </Button>
+                                selectedBroker === "etrade" ? (
+                                  <Button variant="secondary" onClick={handleSeedDemoPortfolio}>
+                                    🌱 Load Curated Demo Positions
+                                  </Button>
+                                ) : null
                               )}
                             </div>
                           }

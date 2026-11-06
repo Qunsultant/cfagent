@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useState } from "react";
-import { Badge, Button, Card, Flex, Notice, Spinner, Stack, TextInput } from "./components/ui";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { Badge, Button, Card, Flex, Notice, Spinner, Stack, TextInput, useToast } from "./components/ui";
 import { csrfHeaders } from "./apiFetch";
 import { useBrokerEnvironment } from "./brokerEnvironment";
 
@@ -56,9 +56,17 @@ function sideLabel(side: "paper" | "live"): string {
 export interface AlpacaSignInCardProps {
   /** Passed by the panel for parity; the server resolves the trading type. */
   activeEnv?: string;
+  /** When true and deployment keys are active, collapses the sign-in form so pages don't re-ask for credentials. */
+  collapsedWhenConfigured?: boolean;
 }
 
-export function AlpacaSignInCard({ activeEnv }: AlpacaSignInCardProps) {
+export function AlpacaSignInCard({ activeEnv, collapsedWhenConfigured = false }: AlpacaSignInCardProps) {
+  let toast: ReturnType<typeof useToast> | null = null;
+  try {
+    toast = useToast();
+  } catch {
+    // Optional in test harnesses without ToastProvider
+  }
   const brokerEnv = useBrokerEnvironment();
   const effectiveEnv = activeEnv ?? brokerEnv;
   const [load, setLoad] = useState<LoadState>({ state: "loading" });
@@ -66,6 +74,18 @@ export function AlpacaSignInCard({ activeEnv }: AlpacaSignInCardProps) {
   const [secretKey, setSecretKey] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [showCustomForm, setShowCustomForm] = useState(false);
+  const notifiedRef = useRef(false);
+
+  useEffect(() => {
+    if (load.state === "ready" && !load.status.configured && !load.status.signedIn && !notifiedRef.current) {
+      notifiedRef.current = true;
+      toast?.warning(
+        `Sign in required for ${load.status.side === "live" ? "live" : "paper"} trading. Enter your Alpaca API keys.`,
+        "Alpaca Sign-in Required",
+      );
+    }
+  }, [load]);
 
   const readStatus = useCallback(async () => {
     try {
@@ -205,6 +225,22 @@ export function AlpacaSignInCard({ activeEnv }: AlpacaSignInCardProps) {
             Sign out of Alpaca
           </Button>
         </Stack>
+      ) : collapsedWhenConfigured && status.configured && !showCustomForm ? (
+        <Stack gap="2">
+          <p data-alpaca-signin-source={status.source}>
+            The deployment's Alpaca keys are serving this account. Sign in with your own key pair to trade your own Alpaca account.
+          </p>
+          <div>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => setShowCustomForm(true)}
+            >
+              Sign in with your own key pair
+            </Button>
+          </div>
+        </Stack>
       ) : (
         <Stack gap="2">
           <p data-alpaca-signin-source={status.source}>
@@ -236,6 +272,11 @@ export function AlpacaSignInCard({ activeEnv }: AlpacaSignInCardProps) {
                 <Button type="submit" size="sm" disabled={submitting} loading={submitting}>
                   Sign in to Alpaca
                 </Button>
+                {status.configured && (
+                  <Button type="button" variant="secondary" size="sm" onClick={() => setShowCustomForm(false)}>
+                    Cancel
+                  </Button>
+                )}
                 <span className="ui-field-msg">
                   Verified against Alpaca for {sideLabel(status.side)} before anything is stored.
                 </span>
