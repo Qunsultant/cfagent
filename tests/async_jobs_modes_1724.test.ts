@@ -301,7 +301,7 @@ describe("MCP tools/call delivery mode", () => {
   const mockEnv: Env = {
     AI: {} as any,
     AI_SEARCH_ENDPOINT: "https://mock.search",
-    SEARCH_AGENT: {} as any,
+    ORCHESTRATOR_AGENT: {} as any,
     AGENT_SESSIONS: {} as any,
   } as Env;
   const auditLogs: any[] = [];
@@ -927,7 +927,7 @@ function makeWorkerEnv() {
   seedSession("sessions", W_SESSION_ID, { githubLogin: W_LOGIN, userLogin: W_LOGIN });
   const env: any = {
     SESSION_STORE: sessionStoreNs,
-    SEARCH_AGENT: {
+    ORCHESTRATOR_AGENT: {
       idFromName: (name: string) => name,
       get: (id: string) => ({
         fetch: async (req: Request) => {
