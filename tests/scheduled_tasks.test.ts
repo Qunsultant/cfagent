@@ -57,7 +57,7 @@ describe("Cloudflare Agents: Task Scheduling & Durable Timers", () => {
       ET_BASE_URL: "https://apisb.etrade.com/v1",
       ETRADE_KV: mockKv as any,
       SESSION_STORE: sessionStoreNs,
-      SEARCH_AGENT: {} as any,
+      ORCHESTRATOR_AGENT: {} as any,
       // Issue #261: mock ScreenerAgent — the service delegates screening to it.
       SCREENER_AGENT: {
         idFromName: () => "mock-screener-id",
