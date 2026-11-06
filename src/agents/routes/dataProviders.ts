@@ -357,28 +357,49 @@ function feedUniverseStoreFor(
 }
 
 /**
- * The default capture-wired provider for a feed job — S1: Yahoo,
- * built with the same capture deps screening's fetches use, so
- * the job's captures land in the capture log through the very
- * same write path. Undefined when the source has no default
- * wiring (later slices register theirs) or the blob store the
- * capture machinery needs is absent — a run then refuses
+ * The default capture-wired provider for a feed job — built with
+ * the same capture deps screening's fetches use, so the job's
+ * captures land in the capture log through the very same write
+ * path. S1 wired Yahoo; S2 adds E*TRADE (constructed from env +
+ * the verified session login — the service resolves THAT login's
+ * stored token, so an absent/expired token is the run's honest
+ * failure, never a borrowed identity) and Alpaca (the same
+ * construction buildPlatformRegistry uses). Undefined when the
+ * source has no default wiring or the blob store the capture
+ * machinery needs is absent — a run then refuses
  * FEED_JOB_NOT_CONFIGURED rather than fetching uncaptured.
  */
 function defaultFeedProvider(
   ctx: DataProviderRoutesContext,
   def: FeedJobDefinition,
 ): DataProvider | undefined {
-  if (def.sourceId !== "yahoo") return undefined;
   if (!ctx.blobStorage) return undefined;
-  return createYahooDataProvider(new YahooFinanceProvider(ctx.env), ctx.env, {
-    capture: {
-      sql: ctx.sql,
-      blobStorage: ctx.blobStorage,
-      env: ctx.env,
-      capturePort: ctx.capturePort,
-    },
-  });
+  const capture = {
+    sql: ctx.sql,
+    blobStorage: ctx.blobStorage,
+    env: ctx.env,
+    capturePort: ctx.capturePort,
+  };
+  switch (def.sourceId) {
+    case "yahoo":
+      return createYahooDataProvider(
+        new YahooFinanceProvider(ctx.env),
+        ctx.env,
+        { capture },
+      );
+    case "etrade":
+      return createETradeDataProviderFromEnv(ctx.env, ctx.userLogin, {
+        capture,
+      });
+    case "alpaca":
+      return createAlpacaDataProvider(
+        new AlpacaMarketDataProvider(ctx.env),
+        ctx.env,
+        { capture },
+      );
+    default:
+      return undefined;
+  }
 }
 
 /**

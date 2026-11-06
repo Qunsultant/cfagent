@@ -345,11 +345,17 @@ describe("feed dataset store conformance (#3530 S1)", () => {
 // ---------------------------------------------------------------------------
 
 describe("feed job contract + registry (#3530 S1)", () => {
-  it("the built-in registry carries exactly the Yahoo Nasdaq-100 quotes job in S1", () => {
+  it("the built-in registry carries the Yahoo Nasdaq-100 quotes job with its S1 contract intact", () => {
+    // S2 adaptation (#3530 S2, disclosed): this pin originally
+    // asserted the registry carried EXACTLY ONE job and that
+    // forSource("etrade") was undefined — the pre-S2 world by
+    // construction. S2 registers the E*TRADE and Alpaca jobs on
+    // the same contract, so the count/exclusivity assertions are
+    // replaced by the S2 registry pin (feed_jobs_s2_3530.test.ts);
+    // every assertion about the YAHOO job's own contract below is
+    // the original S1 pin, unchanged.
     const registry = buildFeedJobRegistry({});
-    const jobs = registry.list();
-    expect(jobs).toHaveLength(1);
-    const job = jobs[0];
+    const job = registry.get("yahoo-nasdaq100-quotes")!;
     expect(job.id).toBe("yahoo-nasdaq100-quotes");
     expect(job.sourceId).toBe("yahoo");
     expect(job.dataset).toBe("quotes");
@@ -358,7 +364,6 @@ describe("feed job contract + registry (#3530 S1)", () => {
     expect(job.cadenceMinutes).toBeGreaterThan(0);
     expect(job.staleAfterMinutes).toBeGreaterThan(job.cadenceMinutes);
     expect(registry.forSource("yahoo")?.id).toBe("yahoo-nasdaq100-quotes");
-    expect(registry.forSource("etrade")).toBeUndefined();
   });
 
   it("duplicate registration refuses (registry idiom: provenance ids stay unambiguous)", () => {
