@@ -34,7 +34,8 @@ describe("Tool-attribution audit coverage (#1763)", () => {
     // #2731: +1 canonical tool (web_search) = 75 canonical.
     // #2760: +1 canonical tool (web_fetch) = 76 canonical.
     // #3513: +2 canonical mesh-door tools (stock_copilot_status, stock_copilot_control) = 78 canonical.
-    expect(tools).toHaveLength(87);
+    // #3588: +1 canonical mesh-door tool (stock_copilot_introspect) = 79 canonical.
+    expect(tools).toHaveLength(88);
     for (const tool of tools) {
       expect(doc).toContain(`\`${tool}\``);
     }

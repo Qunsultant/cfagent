@@ -245,7 +245,7 @@ To provide immediate context on how to interact with, control, and execute tradi
 
 All changes in the Stock Copilot evolution adhere to the core repository standards:
 - **Policy Gate §22:** Zero file deletions; deprecations in place with explicit successor annotations.
-- **TDD Red-Green Discipline:** Comprehensive unit test suites (`tests/stock_copilot_chat_door_3513.test.ts`, `tests/chat_copilots_subtabs_3449.test.tsx`, `tests/stock_copilot_modes_3451.test.ts`).
+- **TDD Red-Green Discipline:** Comprehensive unit test suites (`tests/stock_copilot_chat_door_3513.test.ts`, `tests/chat_copilots_subtabs_3449.test.tsx`, `tests/stock_copilot_modes_3451.test.ts`, `tests/stock_copilot_introspection_3588.test.ts`).
 - **Identity Discipline:** All mesh door tools require `actingLogin` and fail closed with `MeshDoorError("missing_acting_login")` if omitted.
 - **Traceability:** Every commit, PR, and report is attributed with the `#ceo-aimp` agent identifier and tracked against parent Epic [#3514](https://github.com/Qunsultant/cfagent/issues/3514).
 

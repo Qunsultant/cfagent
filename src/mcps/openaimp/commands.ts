@@ -115,6 +115,7 @@ import {
   RunOptionsStrategyScreenCommand,
   StockCopilotStatusCommand,
   StockCopilotControlCommand,
+  StockCopilotIntrospectCommand,
 } from "./meshDoorCommands";
 
 import { searchPlatformKnowledge } from "../../services/platformKnowledge";
@@ -1842,6 +1843,7 @@ export class McpToolFactory {
     // open positions with exit plans, cycle activity, and execution controls.
     this.registerTool(new StockCopilotStatusCommand());
     this.registerTool(new StockCopilotControlCommand());
+    this.registerTool(new StockCopilotIntrospectCommand());
 
     // Tracker #2708 A3 (#2760): the standalone web fetch — the
     // web-fetch family's first tool (recorded absent at S14,

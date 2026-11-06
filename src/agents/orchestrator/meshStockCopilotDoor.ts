@@ -43,6 +43,10 @@ import {
   parseCadenceMinutes,
   formatCadenceString,
 } from "../../services/stockCopilotCadence";
+import {
+  introspectStockCopilot,
+  type StockCopilotIntrospectionResult,
+} from "../../services/stockCopilotIntrospection";
 import { MeshDoorError, requireActingLogin } from "./meshDoors";
 
 export interface StockCopilotDoorContext {
@@ -353,3 +357,33 @@ export async function controlStockCopilotViaDoor(
     updatedAt: updatedControl?.updatedAt ?? nowIso,
   };
 }
+
+export async function introspectStockCopilotViaDoor(
+  ctx: StockCopilotDoorContext,
+  actingLogin?: string | null,
+): Promise<StockCopilotIntrospectionResult> {
+  const login = requireActingLogin(actingLogin);
+  const positions = createStockCopilotPositionPort(ctx.sql);
+  const activity = createStockCopilotActivityPort(ctx.sql);
+  const control = createStockCopilotControlPort(ctx.sql);
+
+  const result = await introspectStockCopilot({
+    env: ctx.env,
+    userLogin: login,
+    readSettingRaw: ctx.readSettingRaw,
+    positionPort: positions,
+    activityPort: activity,
+    controlPort: control,
+    commercial: ctx.commercial,
+  });
+
+  ctx.audit?.("stock_copilot.introspect_via_door", "orchestrator", {
+    userLogin: login,
+    broker: result.configuration.broker,
+    mode: result.configuration.mode,
+    openPositionsCount: result.telemetry.openPositionsCount,
+  });
+
+  return result;
+}
+

@@ -70,6 +70,7 @@ import {
   parseCadenceMinutes,
   formatCadenceString,
 } from "../../services/stockCopilotCadence";
+import { introspectStockCopilot } from "../../services/stockCopilotIntrospection";
 
 /** Structural mirror of OrchestratorAgent's ScreenerExecutionContext
  *  (the schedules.ts idiom — routes do not import the orchestrator). */
@@ -153,8 +154,9 @@ export async function handleStockCopilotRoutes(
   ctx: StockCopilotRouteContext
 ): Promise<Response | null> {
   const isStatusRead = path.endsWith("/stock-copilot/status") && request.method === "GET";
+  const isIntrospectRead = path.endsWith("/stock-copilot/introspect") && request.method === "GET";
   const isControlWrite = path.endsWith("/stock-copilot/control") && request.method === "POST";
-  if (!isStatusRead && !isControlWrite) return null;
+  if (!isStatusRead && !isControlWrite && !isIntrospectRead) return null;
 
   // Fail closed: without the instance's verified login context
   // there is no "own instance" to read or control.
@@ -236,6 +238,28 @@ export async function handleStockCopilotRoutes(
     } catch (err) {
       return Response.json(
         { error: err instanceof Error ? err.message : "Failed to load copilot status" },
+        { status: 500 },
+      );
+    }
+  }
+
+  if (isIntrospectRead) {
+    try {
+      positions.ensureSchema();
+      activity.ensureSchema();
+      control.ensureSchema();
+      const introspection = await introspectStockCopilot({
+        env: ctx.env,
+        userLogin,
+        readSettingRaw: ctx.readSettingRaw,
+        positionPort: positions,
+        activityPort: activity,
+        controlPort: control,
+      });
+      return Response.json(introspection);
+    } catch (err) {
+      return Response.json(
+        { error: err instanceof Error ? err.message : "Failed to load copilot introspection" },
         { status: 500 },
       );
     }
