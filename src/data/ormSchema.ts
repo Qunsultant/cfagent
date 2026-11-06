@@ -21,7 +21,7 @@
  * src/services/scheduledReports.ts for the same reason.
  *
  * Per-DO schema-initialization coverage (verified on main @ bf1534c0):
- *  - OrchestratorAgent (wrangler SEARCH_AGENT binding, exported as
+ *  - OrchestratorAgent (wrangler ORCHESTRATOR_AGENT binding, exported as
  *    SearchAgent): getOrm() runs ensureTables() AND
  *    DatabaseORM.initializeSchema() — the ONLY production call site of
  *    initializeSchema. Its instances are guaranteed all seven shared
