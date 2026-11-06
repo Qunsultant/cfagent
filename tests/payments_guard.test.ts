@@ -57,7 +57,7 @@ function makeCtx() {
 // therefore gives each test a real ledger owner: a DatabaseORM over
 // MockSqlStorage served through the REAL agentic-payments route
 // handler (the exact surface PaymentsAgent now calls), bound as
-// SEARCH_AGENT. Assertions below are unchanged; only the state home
+// ORCHESTRATOR_AGENT. Assertions below are unchanged; only the state home
 // behind them moved.
 function makeLedgerEnv(): any {
   const sql = new MockSqlStorage();
@@ -69,7 +69,7 @@ function makeLedgerEnv(): any {
     // Issue #1185: the fixture's configured service identity — the
     // ledger owner login the fake namespace serves.
     SERVICE_USER_LOGIN: "default_trader",
-    SEARCH_AGENT: {
+    ORCHESTRATOR_AGENT: {
       idFromName: (name: string) => name,
       get: (_id: unknown) => ({
         fetch: async (req: Request) => {
