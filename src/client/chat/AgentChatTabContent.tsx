@@ -12,7 +12,7 @@ import { MarkdownContent } from "./MarkdownContent";
 import { ReasoningView } from "./ReasoningView";
 import { ToolResultView } from "./ToolResultView";
 import { StockCopilotPanel } from "../StockCopilotPanel";
-import { findCopilot, getRegisteredCopilots, isRegisteredCopilotId } from "./copilotRegistry";
+import { findCopilot, getRegisteredCopilots, hasCustomSurface, isRegisteredCopilotId } from "./copilotRegistry";
 // Fluent v9 replaces our primitives on this page only (#3146 experiment).
 // Measured gaps vs our primitives: no danger button (secondary used),
 // no tone system (chips collapse to subtle), no strip/box Notice variant.
@@ -76,12 +76,18 @@ const useProviderStyles = makeStyles({
   },
 });
 
+// #3454 (uniform copilot shell): a copilot's custom surface composes
+// ABOVE the shared conversation instead of replacing it, so the
+// surface region sizes to its content and caps at half the chat view
+// (scrolling internally past that) — the messages stream keeps the
+// remaining height and the composer stays reachable at every size.
 const useSurfaceStyles = makeStyles({
   customSurface: {
     display: "flex",
     flexDirection: "column",
-    flexGrow: 1,
+    flexShrink: 1,
     minHeight: 0,
+    maxHeight: "50%",
     overflowY: "auto",
   },
 });
@@ -309,7 +315,13 @@ export function AgentChatTabContentInner({
           </DialogBody>
         </DialogSurface>
       </Dialog>
-      {currentCopilot?.mode === "custom" ? (
+      {/* #3454 — uniform copilot shell: EVERY copilot renders the same
+          composition — banner (above, when configured), its custom
+          surface when it declares one (here, above the conversation),
+          and ALWAYS the shared conversation below. No mode replaces or
+          suppresses the chat surface; the exclusive custom/chat branch
+          from #3449 is gone. */}
+      {currentCopilot && hasCustomSurface(currentCopilot) && (
         <div className={surfaceStyles.customSurface}>
           {currentCopilot.renderCustom ? (
             currentCopilot.renderCustom({ user, onChipClick: handleChipClick, onNavigateTab })
@@ -317,8 +329,8 @@ export function AgentChatTabContentInner({
             <StockCopilotPanel />
           )}
         </div>
-      ) : (
-        <>
+      )}
+      <>
       {/* Top Sponsor Spotlight Bar (Configurable via Settings) */}
       {showSponsorSpotlight && ads.length > 0 && (
         <div
@@ -813,8 +825,7 @@ export function AgentChatTabContentInner({
 {isBusy ? (<><Spinner size="tiny" />{"Send ➔"}</>) : ("Send ➔")}
         </Button>
       </form>
-        </>
-      )}
+      </>
     </div>
   );
 }
