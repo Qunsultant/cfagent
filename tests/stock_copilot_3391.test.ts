@@ -25,6 +25,7 @@ import {
   type StockCopilotDeps,
 } from "../src/services/stockCopilot";
 import { StockCopilotPositionStore } from "../src/services/stockCopilotStore";
+import { COPILOT_SESSIONS } from "../src/services/stockCopilotSessions";
 import { declareStockCopilotTasks } from "../src/agents/orchestrator/scheduledTasksCopilot";
 
 // ---------------------------------------------------------------------------
@@ -289,7 +290,7 @@ describe("stock copilot cycle", () => {
     );
     expect(result.status).toBe("outside_enabled_sessions");
     expect(result.session).toBeNull();
-    expect(result.enabledSessions).toEqual(["regular"]);
+    expect(result.enabledSessions).toEqual(COPILOT_SESSIONS);
     expect(fake.calls.placeOrderRemote).toBe(0);
     expect(fake.calls.getPositions).toBe(0);
   });

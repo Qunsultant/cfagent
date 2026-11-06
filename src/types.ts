@@ -293,6 +293,15 @@ export interface Env {
   // setting (stock_copilot:sessions) wins over this; absence of both
   // means regular only (src/services/stockCopilotSessions.ts).
   STOCK_COPILOT_SESSIONS?: string;
+  // #3541 — externalized Stock Copilot execution controls: mode override,
+  // broker neutrality, strict mode guard switch, and session bypass.
+  STOCK_COPILOT_MODE?: string;
+  STOCK_COPILOT_BROKER_NEUTRAL?: string;
+  STOCK_COPILOT_BROKER_ID?: string;
+  STOCK_COPILOT_STRICT_MODE_GUARD?: string;
+  STOCK_COPILOT_AUTO_ALIGN_MODE?: string;
+  STOCK_COPILOT_IGNORE_SESSIONS?: string;
+  STOCK_COPILOT_FORCE_ALL_SESSIONS?: string;
   // Comma-separated provider ids. Default when wiring is on: "github".
   // An id with no registered adapter is ignored, never a fallback.
   IAAA_ENABLED_PROVIDERS?: string;

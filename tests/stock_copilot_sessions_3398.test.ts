@@ -201,12 +201,32 @@ describe("session setting — parse and resolve (AOP precedence)", () => {
     expect(parseCopilotSessionList(undefined)).toBeNull();
   });
 
-  it("defaults to regular only — today's behavior until the user chooses", () => {
-    expect(resolveCopilotSessions({})).toEqual(["regular"]);
-    expect(resolveCopilotSessions({ env: {} })).toEqual(["regular"]);
-    expect(resolveCopilotSessions({ readSettingRaw: () => null, env: {} })).toEqual([
-      "regular",
-    ]);
+  it("defaults to all four sessions (#3541): 24/7 autonomous trading", () => {
+    expect(resolveCopilotSessions({})).toEqual(ALL_SESSIONS);
+    expect(resolveCopilotSessions({ env: {} })).toEqual(ALL_SESSIONS);
+    expect(resolveCopilotSessions({ readSettingRaw: () => null, env: {} })).toEqual(
+      ALL_SESSIONS,
+    );
+  });
+
+  it("supports 'all' or '*' session aliases", () => {
+    expect(parseCopilotSessionList("all")).toEqual(ALL_SESSIONS);
+    expect(parseCopilotSessionList("*")).toEqual(ALL_SESSIONS);
+  });
+
+  it("supports STOCK_COPILOT_IGNORE_SESSIONS and STOCK_COPILOT_FORCE_ALL_SESSIONS", () => {
+    expect(
+      resolveCopilotSessions({
+        env: { STOCK_COPILOT_IGNORE_SESSIONS: "true" },
+        readSettingRaw: () => "none",
+      }),
+    ).toEqual(ALL_SESSIONS);
+    expect(
+      resolveCopilotSessions({
+        env: { STOCK_COPILOT_FORCE_ALL_SESSIONS: "true" },
+        readSettingRaw: () => "none",
+      }),
+    ).toEqual(ALL_SESSIONS);
   });
 
   it("env is the deployment default; the stored per-login setting wins over it", () => {
@@ -578,7 +598,7 @@ describe("stock copilot routes — sessions surface", () => {
     const res = await callRoute(ctx, routeReq("GET", "/api/stock-copilot/status"));
     expect(res?.status).toBe(200);
     const body = (await res!.json()) as any;
-    expect(body.enabledSessions).toEqual(["regular"]);
+    expect(body.enabledSessions).toEqual(ALL_SESSIONS);
     expect(
       body.currentSession === null ||
         ALL_SESSIONS.includes(body.currentSession),
