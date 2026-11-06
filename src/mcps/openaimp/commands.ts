@@ -113,6 +113,8 @@ import {
   SlackDispatchTransactionSnapCommand,
   RunStockScreenCommand,
   RunOptionsStrategyScreenCommand,
+  StockCopilotStatusCommand,
+  StockCopilotControlCommand,
 } from "./meshDoorCommands";
 
 import { searchPlatformKnowledge } from "../../services/platformKnowledge";
@@ -1803,6 +1805,11 @@ export class McpToolFactory {
     // engine's carriage has no workflow behind it). Same
     // identity discipline as batches A–E.
     this.registerTool(new RunOptionsStrategyScreenCommand());
+
+    // Issue #3513: Stock Copilot chat doors — inspect loop status,
+    // open positions with exit plans, cycle activity, and execution controls.
+    this.registerTool(new StockCopilotStatusCommand());
+    this.registerTool(new StockCopilotControlCommand());
 
     // Tracker #2708 A3 (#2760): the standalone web fetch — the
     // web-fetch family's first tool (recorded absent at S14,

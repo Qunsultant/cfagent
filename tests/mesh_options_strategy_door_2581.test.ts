@@ -126,7 +126,7 @@ describe("issue #2581 — run_options_strategy_screen catalog registration", () 
     expect(McpToolFactory.getTool("run_options_strategy_screen")).toBeDefined();
     expect(MCP_TOOL_SCOPES.run_options_strategy_screen).toBe("mcp:write");
     // 83 through #2581; 84 since #2731 (web_search); 85 since #2760 (web_fetch).
-    expect(McpToolFactory.getAllTools()).toHaveLength(85);
+    expect(McpToolFactory.getAllTools()).toHaveLength(87);
   });
 
   it("the prompt steers options strategy screens at the discovered tool", () => {
