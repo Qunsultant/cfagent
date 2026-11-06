@@ -12,6 +12,7 @@ import { MarkdownContent } from "./MarkdownContent";
 import { ReasoningView } from "./ReasoningView";
 import { ToolResultView } from "./ToolResultView";
 import { StockCopilotPanel } from "../StockCopilotPanel";
+import { findCopilot, getRegisteredCopilots, isRegisteredCopilotId } from "./copilotRegistry";
 // Fluent v9 replaces our primitives on this page only (#3146 experiment).
 // Measured gaps vs our primitives: no danger button (secondary used),
 // no tone system (chips collapse to subtle), no strip/box Notice variant.
@@ -37,7 +38,7 @@ import {
   webDarkTheme,
   webLightTheme,
 } from "@fluentui/react-components";
-export type ChatSubView = "general" | "options";
+export type ChatSubView = "general" | "options" | "stock" | (string & {});
 
 // #3230: Fluent v9 Input renders a wrapper root around the inner
 // <input>, so the old `.chat-input-bar input { flex: 1 }` rule no
@@ -75,8 +76,18 @@ const useProviderStyles = makeStyles({
   },
 });
 
+const useSurfaceStyles = makeStyles({
+  customSurface: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    minHeight: 0,
+    overflowY: "auto",
+  },
+});
+
 export function isValidChatSubView(view: unknown): view is ChatSubView {
-  return typeof view === "string" && (view === "general" || view === "options");
+  return typeof view === "string" && (view === "general" || view === "options" || view === "stock" || isRegisteredCopilotId(view));
 }
 
 interface AgentChatTabContentProps {
@@ -112,40 +123,32 @@ export function AgentChatTabContentInner({
 }: AgentChatTabContentProps) {
   const [input, setInput] = useState("");
   const composerStyles = useComposerStyles();
+  const surfaceStyles = useSurfaceStyles();
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
   const { dispatchToast } = useToastController();
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const { activeTab: activeView, handleTabChange: handleViewChange } = useUrlSyncedTabs<ChatSubView>({
     param: "view",
+    aliases: ["copilot", "subtab", "subview"],
     isValid: isValidChatSubView,
     defaultTab: "general",
   });
 
-  const chatCapabilityTabs: CapabilityTabItem[] = useMemo(() => [
-    {
-      id: "general",
-      label: "General Copilot",
-      icon: "⚡",
-      tooltip: {
-        eyebrow: "AI Intelligence",
-        title: "Multi-Agent Orchestrator",
-        description: "Conversational multi-agent copilot for platform capabilities, market queries, and general workflows.",
-      },
-    },
-    {
-      id: "options",
-      label: "Options Copilot",
-      icon: "🎯",
-      badge: "AI",
-      badgeType: "cyan",
-      tooltip: {
-        eyebrow: "Options Intelligence",
-        title: "Options Strategy & Structured Outputs",
-        description: "Specialized copilot for options screening, multi-leg spreads, Greeks analysis, and interactive payoff visualizers.",
-      },
-    },
-  ], []);
+  const chatCapabilityTabs: CapabilityTabItem[] = useMemo(() => {
+    return getRegisteredCopilots().map((copilot) => ({
+      id: copilot.id,
+      label: copilot.label,
+      icon: copilot.icon,
+      badge: copilot.badge,
+      badgeType: copilot.badgeType,
+      tooltip: copilot.tooltip,
+    }));
+  }, []);
+
+  const currentCopilot = useMemo(() => {
+    return findCopilot(activeView) || findCopilot("general");
+  }, [activeView]);
 
   // Issue #2568: Agents SDK routeAgentRequest routes by BINDING name
   // kebabbed, not class name. The binding is SEARCH_AGENT (class
@@ -198,7 +201,7 @@ export function AgentChatTabContentInner({
   }, [pendingPrompt, status, isResetting, sendMessage, user.login, onClearPendingPrompt]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    messagesEndRef.current?.scrollIntoView?.({ behavior: "smooth" });
   }, [messages, status]);
 
   const isBusy = status === "streaming" || status === "submitted";
@@ -215,7 +218,7 @@ export function AgentChatTabContentInner({
       }
     }
 
-    const sourceTab = activeView === "options" ? "E*TRADE · Auto Options Research" : "Chat & Agents";
+    const sourceTab = activeView === "options" ? "E*TRADE · Auto Options Research" : (currentCopilot?.sourceTab || "Chat & Agents");
     try {
       sendMessage({
         text: input.trim(),
@@ -231,7 +234,7 @@ export function AgentChatTabContentInner({
   };
 
   const handleChipClick = (prompt: string, sourceTab?: string) => {
-    const effectiveSource = sourceTab || (activeView === "options" ? "E*TRADE · Auto Options Research" : "Chat & Agents");
+    const effectiveSource = sourceTab || (activeView === "options" ? "E*TRADE · Auto Options Research" : (currentCopilot?.sourceTab || "Chat & Agents"));
     if (isBusy || isResetting) return;
     try {
       sendMessage({
@@ -259,20 +262,21 @@ export function AgentChatTabContentInner({
         onTabChange={handleViewChange}
         className="chat-capability-subnav"
       />
-      {/* Issue #3422: the Stock Copilot panel — the paper-trading
-          loop's status, positions, activity, and pause/resume
-          control, at the top of the chat view in both sub-views. */}
-      <StockCopilotPanel />
-      {activeView === "options" && (
+      {/* Copilot Mode Banner (Options Copilot, Stock Copilot, or registered custom copilot) */}
+      {currentCopilot?.banner && (
         <div className="options-copilot-banner">
           <div className="options-copilot-info">
-            <span style={{ fontSize: "var(--font-size-title-sm)" }}>🎯</span>
+            <span style={{ fontSize: "var(--font-size-title-sm)" }}>{currentCopilot.banner.icon}</span>
             <div>
-              <strong style={{ color: "var(--color-text-primary)" }}>Options Copilot Active:</strong>{" "}
-              <span>Queries generate structured strategy cards with multi-leg execution plans, Greeks, and interactive payoff visualizers.</span>
+              <strong style={{ color: "var(--color-text-primary)" }}>{currentCopilot.banner.headline}</strong>{" "}
+              <span>{currentCopilot.banner.description}</span>
             </div>
           </div>
-          <Badge size="extra-small" style={{ textTransform: "uppercase" }} color="brand" appearance="tint">Structured Outputs</Badge>
+          {currentCopilot.banner.badgeText && (
+            <Badge size="extra-small" style={{ textTransform: "uppercase" }} color={currentCopilot.banner.badgeColor || "brand"} appearance="tint">
+              {currentCopilot.banner.badgeText}
+            </Badge>
+          )}
         </div>
       )}
       <Dialog
@@ -305,6 +309,16 @@ export function AgentChatTabContentInner({
           </DialogBody>
         </DialogSurface>
       </Dialog>
+      {currentCopilot?.mode === "custom" ? (
+        <div className={surfaceStyles.customSurface}>
+          {currentCopilot.renderCustom ? (
+            currentCopilot.renderCustom({ user, onChipClick: handleChipClick, onNavigateTab })
+          ) : (
+            <StockCopilotPanel />
+          )}
+        </div>
+      ) : (
+        <>
       {/* Top Sponsor Spotlight Bar (Configurable via Settings) */}
       {showSponsorSpotlight && ads.length > 0 && (
         <div
@@ -782,6 +796,8 @@ export function AgentChatTabContentInner({
               ? "Resetting session…"
               : isBusy
               ? "Agent is processing response…"
+              : currentCopilot?.composerPlaceholder
+              ? currentCopilot.composerPlaceholder
               : activeView === "options"
               ? "Ask Options Copilot (e.g. 'Screen for Bull Put spreads on NVDA with max loss <= $30', 'Best SPY Iron Condor')..."
               : "Ask about platform capabilities, workflows, how to screen, draft orders, or query data…"
@@ -797,6 +813,8 @@ export function AgentChatTabContentInner({
 {isBusy ? (<><Spinner size="tiny" />{"Send ➔"}</>) : ("Send ➔")}
         </Button>
       </form>
+        </>
+      )}
     </div>
   );
 }
