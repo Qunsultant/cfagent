@@ -179,7 +179,7 @@ describe("Sub-Issue 1 (#3417): Portfolio Tab Broker Neutrality", () => {
         )
       );
 
-      const text = html.replace(/<!--.*?-->/g, "");
+      const text = html.replaceAll("<!-- -->", "");
       expect(text).toContain("Alpaca Portfolio Holdings &amp; Open Positions");
       expect(text).toContain("across your connected Alpaca brokerage desk");
     });
@@ -197,7 +197,7 @@ describe("Sub-Issue 1 (#3417): Portfolio Tab Broker Neutrality", () => {
         )
       );
 
-      const text = html.replace(/<!--.*?-->/g, "");
+      const text = html.replaceAll("<!-- -->", "");
       expect(text).toContain("E*TRADE Portfolio Holdings &amp; Open Positions");
       expect(text).toContain("across your connected E*TRADE brokerage desk");
     });
