@@ -1,11 +1,10 @@
 /**
- * Issue #2223 (AiSearchAgent slice) — AiSearchAgent: three-path
+ * Issue #2223 (AiSearchAgent slice) — AiSearchAgent: two-path
  * search runner + A2A dispatch.
  *
  * The agent reaches the SAME Cloudflare AI Search instance the
- * SearchHub knowledge surface serves (POST /search/agent ->
- * AiSearchInstanceService over AI_SEARCH_ENDPOINT), through three
- * access paths in user-set priority order (directive 2026-10-29):
+ * SearchHub knowledge surface serves, through two access paths in
+ * user-set priority order (directive 2026-10-29):
  *
  * 1. namespace (PRIMARY) — the ai_search_namespaces binding
  *    (env.AI_SEARCH.get(instance).search), gated on the binding plus
@@ -13,21 +12,27 @@
  * 2. mcp (SECOND) — the instance's public /mcp endpoint, tool
  *    "search", via the repo's RemoteMcpClient, gated on
  *    AI_SEARCH_MCP_ENDPOINT (dashboard Public Endpoint = owner gate).
- * 3. rest (LAST RESORT) — AiSearchInstanceService reused exactly
- *    as-is, gated on AI_SEARCH_ENDPOINT (the hub's own var).
+ *
+ * A third path existed until issue #3342: rest (LAST RESORT) —
+ * AiSearchInstanceService over the public endpoint
+ * (AI_SEARCH_ENDPOINT). #3342 retired it (the endpoint is
+ * unauthenticated by design): the service is a deprecated shim,
+ * the var is deleted, and an endpoint-only environment now
+ * configures nothing. The REST-era tests below were adapted or
+ * retired with the path; each change is marked inline, and the
+ * retirement contract itself is pinned in
+ * tests/ai_search_rest_migration_p3342.test.ts.
  *
  * Honesty: no path configured -> typed degraded result, zero
  * fabricated results; a path that throws falls through with the
- * failure recorded; a REST answer carrying the service's in-band
- * `degraded` reason is surfaced as DEGRADED (code degraded_fallback),
- * never as results and never as an ok empty answer — since #1169 S3
- * removed the service's fabricated FINANCIAL_KNOWLEDGE_BASE fallback,
- * an unserved REST answer is zero results plus that reason.
+ * failure recorded; since #1169 S3 removed the fabricated
+ * FINANCIAL_KNOWLEDGE_BASE fallback, an unserved answer is zero
+ * results plus a typed reason, never substitute content.
  *
  * Result items are hub-consistent: the S2 fields of
  * AISearchResultItem (title/snippet/source/score + bucket-key
- * provenance), produced for the namespace/MCP paths by the SAME
- * mapAiSearchChunks the REST leg's service uses.
+ * provenance), produced by the SAME mapAiSearchChunks every
+ * serving path uses.
  */
 import { describe, it, expect } from "vitest";
 
@@ -43,7 +48,6 @@ import {
   dispatchAiSearchA2A,
   aiSearchA2AOutcome,
 } from "../src/agents/aiSearchDispatch";
-import type { AISearchQueryResponse } from "../src/services/aiSearch";
 import { getAgentCard } from "../src/a2a/agent-cards";
 import { resolveA2AAgent, resolveA2AInstanceName } from "../src/a2a/resolution";
 import { RemoteMcpClient } from "../src/mcps/client/mcpClient";
@@ -84,50 +88,18 @@ const MCP_CHUNK = {
   },
 };
 
-const LIVE_REST = {
-  query: "q",
-  results: [
-    {
-      id: "doc-1",
-      title: "NVIDIA 10-K",
-      url: "https://www.sec.gov/example",
-      snippet: "Data Center revenue grew.",
-      score: 0.93,
-      category: "sec_filing" as const,
-    },
-  ],
-  totalMatches: 1,
-  provider: "cloudflare_ai_search" as const,
-  timestamp: "2026-10-29T00:00:00Z",
-};
-
-// Post-#1169 S3 the REST service has no fallback corpus to answer
-// from: an unserved answer is zero results + an in-band degraded
-// reason (provider stays "cloudflare_ai_search"; no served result
-// can carry "semantic_cache" anymore).
-const DEGRADED_REST_FIXTURE = {
-  query: "q",
-  results: [],
-  totalMatches: 0,
-  provider: "cloudflare_ai_search" as const,
-  timestamp: "2026-11-04T00:00:00Z",
-  degraded: "upstream_http_error" as const,
-};
-
 describe("AiSearchAgent path priority (#2223)", () => {
-  it("namespace wins when all three paths are configured (PRIMARY)", async () => {
+  it("namespace wins when both paths are configured (PRIMARY)", async () => {
     const inst = fakeInstance([NS_CHUNK]);
     let mcpCalls = 0;
-    let restCalls = 0;
     const env = {
       AI_SEARCH: { get: (name: string) => (name === "kb" ? inst : undefined) },
       AI_SEARCH_INSTANCE: "kb",
       AI_SEARCH_MCP_ENDPOINT: "https://example.search.ai.cloudflare.com/mcp",
-      AI_SEARCH_ENDPOINT: "https://example.search.ai.cloudflare.com",
       // KNOWLEDGE_SERVING_ENABLED on: the S2 mapping preserves true
       // scores/categories and stamps bucket-key provenance. (Flag
       // off reproduces the pre-S2 mapping — defaulted 0.9 score,
-      // forced category, no provenance — that is the service's own
+      // forced category, no provenance — that is the mapping's own
       // flag contract, pinned by the #1169 S2 suites, not re-pinned
       // here.)
       KNOWLEDGE_SERVING_ENABLED: "1",
@@ -137,16 +109,11 @@ describe("AiSearchAgent path priority (#2223)", () => {
         mcpCalls++;
         return [MCP_CHUNK];
       },
-      restSearch: async () => {
-        restCalls++;
-        return LIVE_REST;
-      },
     };
     const result = await runAiSearchPaths(env, "pattern day trader", {}, deps);
     expect(result.ok).toBe(true);
     expect(result.path).toBe("namespace");
     expect(mcpCalls).toBe(0);
-    expect(restCalls).toBe(0);
     // The doc-pattern call: messages array with one user message.
     expect(inst.calls).toEqual([{ messages: [{ role: "user", content: "pattern day trader" }] }]);
     // Hub-consistent mapped item: S2 fields + bucket-key provenance,
@@ -162,23 +129,16 @@ describe("AiSearchAgent path priority (#2223)", () => {
     });
   });
 
-  it("MCP wins over REST when the namespace path is absent (SECOND beats LAST RESORT)", async () => {
-    let restCalls = 0;
+  it("MCP serves when the namespace path is absent (SECOND)", async () => {
     const env = {
       AI_SEARCH_MCP_ENDPOINT: "https://example.search.ai.cloudflare.com/mcp",
-      AI_SEARCH_ENDPOINT: "https://example.search.ai.cloudflare.com",
     } as unknown as EnvLike;
     const deps: AiSearchAgentDeps = {
       mcpSearch: async (_endpoint, _query) => [MCP_CHUNK],
-      restSearch: async () => {
-        restCalls++;
-        return LIVE_REST;
-      },
     };
     const result = await runAiSearchPaths(env, "options risk", {}, deps);
     expect(result.ok).toBe(true);
     expect(result.path).toBe("mcp");
-    expect(restCalls).toBe(0);
     expect(result.results![0]).toMatchObject({
       title: "ODD",
       snippet: "Options involve risk and are not suitable for all investors.",
@@ -187,21 +147,19 @@ describe("AiSearchAgent path priority (#2223)", () => {
     });
   });
 
-  it("REST serves when it is the only configured path, mapping service items hub-consistently", async () => {
+  it("an endpoint-only environment configures NOTHING (the REST path is retired, #3342)", async () => {
+    // Replaces "REST serves when it is the only configured path":
+    // the retired path must not silently come back — the legacy
+    // var alone yields the typed not_configured outcome, with no
+    // path label and zero fabricated results. (The full retirement
+    // contract is pinned in
+    // tests/ai_search_rest_migration_p3342.test.ts.)
     const env = { AI_SEARCH_ENDPOINT: "https://example.search.ai.cloudflare.com" } as unknown as EnvLike;
-    const deps: AiSearchAgentDeps = { restSearch: async () => LIVE_REST };
-    const result = await runAiSearchPaths(env, "nvidia", {}, deps);
-    expect(result.ok).toBe(true);
-    expect(result.path).toBe("rest");
-    expect(result.results).toEqual([
-      {
-        title: "NVIDIA 10-K",
-        snippet: "Data Center revenue grew.",
-        source: "https://www.sec.gov/example",
-        score: 0.93,
-        category: "sec_filing",
-      },
-    ]);
+    const result = await runAiSearchPaths(env, "nvidia", {}, {});
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe("not_configured");
+    expect(result.path).toBeUndefined();
+    expect(result.results).toBeUndefined();
   });
 
   it("no path configured -> typed degraded result, zero fabricated results", async () => {
@@ -236,33 +194,34 @@ describe("AiSearchAgent path priority (#2223)", () => {
 
   it("all configured paths failing -> honest all_paths_failed error, never a fabricated success", async () => {
     const env = {
+      AI_SEARCH: { get: (name: string) => (name === "kb" ? fakeInstance([]) : undefined) },
+      AI_SEARCH_INSTANCE: "kb",
       AI_SEARCH_MCP_ENDPOINT: "https://example.search.ai.cloudflare.com/mcp",
-      AI_SEARCH_ENDPOINT: "https://example.search.ai.cloudflare.com",
     } as unknown as EnvLike;
     const deps: AiSearchAgentDeps = {
+      namespaceSearch: async () => {
+        throw new Error("namespace down");
+      },
       mcpSearch: async () => {
         throw new Error("mcp down");
-      },
-      restSearch: async () => {
-        throw new Error("rest down");
       },
     };
     const result = await runAiSearchPaths(env, "q", {}, deps);
     expect(result.ok).toBe(false);
     expect(result.code).toBe("all_paths_failed");
     expect(result.errorToken).toBe("ERR_TOOL_EXECUTION_FAILED");
+    expect(result.error).toMatch(/namespace/);
     expect(result.error).toMatch(/mcp/);
-    expect(result.error).toMatch(/rest/);
     expect(result.results).toBeUndefined();
   });
 
   it("empty or missing query -> invalid_input, no path attempted", async () => {
-    let restCalls = 0;
-    const env = { AI_SEARCH_ENDPOINT: "https://example.search.ai.cloudflare.com" } as unknown as EnvLike;
+    let mcpCalls = 0;
+    const env = { AI_SEARCH_MCP_ENDPOINT: "https://example.search.ai.cloudflare.com/mcp" } as unknown as EnvLike;
     const deps: AiSearchAgentDeps = {
-      restSearch: async () => {
-        restCalls++;
-        return LIVE_REST;
+      mcpSearch: async () => {
+        mcpCalls++;
+        return [MCP_CHUNK];
       },
     };
     for (const q of ["", "   ", undefined as unknown as string]) {
@@ -271,43 +230,23 @@ describe("AiSearchAgent path priority (#2223)", () => {
       expect(result.code).toBe("invalid_input");
       expect(result.errorToken).toBe("ERR_UNKNOWN_AGENT_ERROR");
     }
-    expect(restCalls).toBe(0);
+    expect(mcpCalls).toBe(0);
   });
 });
 
-describe("AiSearchAgent REST honesty (#2223)", () => {
-  it("degraded REST output (in-band degraded reason) is surfaced as DEGRADED, never as results", async () => {
-    // Adapted by #1169 S3 (user directive 2026-11-04): was
-    // "fallback-labelled REST output (semantic_cache)…". The service
-    // no longer has a fallback to label; the runner now keys off the
-    // response's `degraded` reason. Assertions kept at equal or
-    // greater strength (reason surfaced, withholding stated, no rows).
-    const env = { AI_SEARCH_ENDPOINT: "https://example.search.ai.cloudflare.com" } as unknown as EnvLike;
-    const deps: AiSearchAgentDeps = { restSearch: async () => DEGRADED_REST_FIXTURE };
-    const result = await runAiSearchPaths(env, "pattern day trader", {}, deps);
-    expect(result.ok).toBe(false);
-    expect(result.path).toBe("rest");
-    expect(result.code).toBe("degraded_fallback");
-    expect(result.degraded).toMatch(/upstream_http_error/);
-    expect(result.degraded).toMatch(/did not serve the query/i);
-    expect(result.degraded).toMatch(/withheld/);
-    // The degraded answer is withheld, not laundered into results.
-    expect(result.results).toBeUndefined();
-  });
-
-  it("DEFAULT rest executor constructs the real AiSearchInstanceService (reuse, not reimplementation)", async () => {
-    // No deps override: the runner builds the service over env.
-    // With the endpoint configured but unreachable (test netblock /
-    // hermetic fetch), the service returns its degraded contract
-    // (#1169 S3) — and the agent must surface exactly that as
-    // degraded, never as an ok empty answer.
-    const env = { AI_SEARCH_ENDPOINT: "https://unreachable.invalid/ai-search" } as unknown as EnvLike;
-    const result = await runAiSearchPaths(env, "pattern day trader", {}, {});
-    expect(result.ok).toBe(false);
-    expect(result.path).toBe("rest");
-    expect(result.code).toBe("degraded_fallback");
-    expect(result.results).toBeUndefined();
-  });
+describe("AiSearchAgent default executors (#2223)", () => {
+  // Retired by #3342 with the REST path: the "REST honesty"
+  // describe that lived here pinned (a) that a degraded REST answer
+  // (in-band degraded reason) surfaces as DEGRADED
+  // (code degraded_fallback), never as results, and (b) that the
+  // DEFAULT rest executor constructs the real
+  // AiSearchInstanceService. Both pins asserted the retired path's
+  // contract; the surviving honesty contract — an unserved answer
+  // is a typed failure with zero results, an empty served answer
+  // stays ok — is pinned by the path-priority tests above, the
+  // empty-answer test below, and
+  // tests/ai_search_rest_migration_p3342.test.ts (endpoint-only
+  // env -> not_configured; the shim never fetches).
 
   it("DEFAULT mcp executor goes through RemoteMcpClient.callTool with tool 'search'", async () => {
     const original = RemoteMcpClient.callTool;
@@ -354,7 +293,7 @@ describe("AiSearchAgent chunk adaptation (#2223)", () => {
     expect((adapted![0] as { item: unknown }).item).toBe(NS_CHUNK.item);
   });
 
-  it("REST-shaped chunks pass through unchanged; unrecognizable payloads return null", () => {
+  it("already-adapted (REST-layout) chunks pass through unchanged; unrecognizable payloads return null", () => {
     const restChunk = { snippet: "s", key: "knowledge/sec_filing/x", score: 0.5, item: { id: "d1" } };
     const adapted = adaptAiSearchChunks({ result: { chunks: [restChunk] } });
     expect(adapted![0]).toBe(restChunk);
@@ -415,19 +354,25 @@ describe("AiSearchAgent A2A dispatch (#2223)", () => {
     expect(calls).toEqual([{ query: "margin" }]);
   });
 
-  it("a degraded search result stays degraded through the dispatch — ok:false, honest text", async () => {
+  it("a failed search result stays failed through the dispatch — ok:false, honest text", async () => {
+    // Adapted by #3342: the fake previously modelled the retired
+    // REST path's degraded_fallback outcome (and the dispatch's
+    // dedicated text branch for it, also removed). The surviving
+    // failure shape is all_paths_failed; the dispatch must carry it
+    // through unlaundered, with the runner's error in the text.
     const { search } = fakeSearch({
       ok: false,
       results: undefined,
-      path: "rest",
-      code: "degraded_fallback",
-      degraded: "REST path degraded (upstream_unreachable); answer withheld",
+      path: "mcp",
+      code: "all_paths_failed",
+      error: "All configured AI Search paths failed: mcp: mcp down",
     });
     const data = await dispatchAiSearchA2A(ENV, { operation: "aisearch.search", query: "x" }, { search });
     expect(data.ok).toBe(false);
-    expect(data.code).toBe("degraded_fallback");
+    expect(data.code).toBe("all_paths_failed");
     expect(data.result).toBeUndefined();
-    expect(aiSearchA2AOutcome(data).text).toMatch(/degraded/i);
+    expect(aiSearchA2AOutcome(data).text).toContain("failed:");
+    expect(aiSearchA2AOutcome(data).text).toContain("mcp down");
   });
 
   it("unknown operation -> classified unknown_operation with a catalog errorToken", async () => {
@@ -484,7 +429,9 @@ describe("AiSearchAgent A2A dispatch (#2223)", () => {
     expect(card!.endpoint).toBe("/a2a/aisearch");
     expect(card!.description).toMatch(/namespace/i);
     expect(card!.description).toMatch(/MCP/);
-    expect(card!.description).toMatch(/REST/);
+    // #3342: the card no longer advertises a REST door — the third
+    // path was retired and the description is two-path now.
+    expect(card!.description).not.toMatch(/REST/);
     const resolution = resolveA2AAgent("aisearch");
     expect(resolution).toBeDefined();
     expect(resolution!.binding).toBe("AI_SEARCH_AGENT");
@@ -493,28 +440,25 @@ describe("AiSearchAgent A2A dispatch (#2223)", () => {
   });
 });
 
-describe("AiSearchAgent REST degraded contract (#1169 S3)", () => {
-  const ENV = { AI_SEARCH_ENDPOINT: "https://example.search.ai.cloudflare.com" } as unknown as EnvLike;
-
-  // The degraded-answer half of this contract is pinned by the
-  // adapted "REST honesty" test above (degraded reason ->
-  // degraded_fallback). This pin covers the other half: the rewire
-  // must not over-block a served answer.
-  const EMPTY_OK_REST: AISearchQueryResponse = {
-    query: "unindexed topic",
-    results: [],
-    totalMatches: 0,
-    provider: "cloudflare_ai_search",
-    timestamp: "2026-11-04T00:00:00.000Z",
-  };
-
-  it("REST-leg ok-but-empty answer (empty index) -> ok with zero items, NOT degraded", async () => {
-    const deps: AiSearchAgentDeps = { restSearch: async () => EMPTY_OK_REST };
-    const result = await runAiSearchPaths(ENV, "unindexed topic", {}, deps);
+describe("AiSearchAgent served-empty contract (#1169 S3)", () => {
+  // Retargeted by #3342 from the REST leg to the namespace leg:
+  // the contract under pin is path-independent — a served-but-empty
+  // answer (the index genuinely has nothing) is an ok answer with
+  // zero items, NOT a degraded outcome; an empty index must never
+  // be confused with an unavailable one. The degraded half of the
+  // S3 contract (unserved -> typed failure, zero results) is
+  // pinned by the path-priority tests above.
+  it("namespace-leg ok-but-empty answer (empty index) -> ok with zero items, NOT degraded", async () => {
+    const env = {
+      AI_SEARCH: { get: (name: string) => (name === "kb" ? fakeInstance([]) : undefined) },
+      AI_SEARCH_INSTANCE: "kb",
+    } as unknown as EnvLike;
+    const result = await runAiSearchPaths(env, "unindexed topic", {}, {});
     expect(result.ok).toBe(true);
-    expect(result.path).toBe("rest");
+    expect(result.path).toBe("namespace");
     expect(result.results).toEqual([]);
     expect(result.code).toBeUndefined();
+    expect(result.degraded).toBeUndefined();
   });
 });
 
