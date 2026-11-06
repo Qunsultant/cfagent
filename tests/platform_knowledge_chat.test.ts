@@ -15,7 +15,7 @@ describe("Platform Capabilities & Chat Knowledge Retrieval Suite", () => {
   const mockEnv: Env = {
     AI: {} as any,
     AI_SEARCH_ENDPOINT: "", // Empty endpoint to test resilient internal platform knowledge fallback
-    SEARCH_AGENT: {} as any,
+    ORCHESTRATOR_AGENT: {} as any,
     AGENT_SESSIONS: {} as any,
   };
   const auditLogs: any[] = [];
