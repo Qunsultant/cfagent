@@ -12,7 +12,7 @@
  *   instance, #1185).
  * - The orchestrator's five surface names (orchestrator, search,
  *   tasks, memory, nlq) all resolve to ONE instance of
- *   OrchestratorAgent (SEARCH_AGENT binding): the shared
+ *   OrchestratorAgent (ORCHESTRATOR_AGENT binding): the shared
  *   orchestrator address. Five names on five instances would
  *   fragment the mas_memory / mas_transactions / mas_reports
  *   stores those operations share (SURVEY §6.4).
@@ -67,11 +67,11 @@ export interface A2AResolution {
 
 export const A2A_RESOLUTIONS: Readonly<Record<string, A2AResolution>> = {
   trading: { binding: "TRADING_AGENT", instanceName: "trading" },
-  orchestrator: { binding: "SEARCH_AGENT", instanceName: SHARED_ORCHESTRATOR_INSTANCE },
-  search: { binding: "SEARCH_AGENT", instanceName: SHARED_ORCHESTRATOR_INSTANCE },
-  tasks: { binding: "SEARCH_AGENT", instanceName: SHARED_ORCHESTRATOR_INSTANCE },
-  memory: { binding: "SEARCH_AGENT", instanceName: SHARED_ORCHESTRATOR_INSTANCE },
-  nlq: { binding: "SEARCH_AGENT", instanceName: SHARED_ORCHESTRATOR_INSTANCE },
+  orchestrator: { binding: "ORCHESTRATOR_AGENT", instanceName: SHARED_ORCHESTRATOR_INSTANCE },
+  search: { binding: "ORCHESTRATOR_AGENT", instanceName: SHARED_ORCHESTRATOR_INSTANCE },
+  tasks: { binding: "ORCHESTRATOR_AGENT", instanceName: SHARED_ORCHESTRATOR_INSTANCE },
+  memory: { binding: "ORCHESTRATOR_AGENT", instanceName: SHARED_ORCHESTRATOR_INSTANCE },
+  nlq: { binding: "ORCHESTRATOR_AGENT", instanceName: SHARED_ORCHESTRATOR_INSTANCE },
   payments: { binding: "PAYMENTS_AGENT" },
   scheduled: { binding: "SCHEDULED_AGENT", instanceName: "default" },
   aisearch: { binding: "AI_SEARCH_AGENT" },
