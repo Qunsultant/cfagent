@@ -695,7 +695,7 @@ export async function handleAuthMeRoutes(request: Request, env: Env, url: URL, p
           setBy: string,
           tenantId: string,
         ): Promise<{ seeded: boolean; state: GovernedHaltState }>;
-      }>(env.SEARCH_AGENT, SHARED_ORCHESTRATOR_INSTANCE);
+      }>(env.ORCHESTRATOR_AGENT, SHARED_ORCHESTRATOR_INSTANCE);
       return handleSeedGovernanceRoute({
         session,
         method: request.method,
