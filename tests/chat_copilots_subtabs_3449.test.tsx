@@ -211,21 +211,20 @@ describe("AgentChatTabContent Multi-Copilot Sub-Tabs & View Isolation (#3449)", 
     expect(container!.querySelector(".messages-stream")).not.toBeNull();
   });
 
-  it("in stock view: StockCopilotPanel IS rendered exclusively, composer and stream are NOT rendered (#3449, #3521)", async () => {
+  it("in stock view: renders side-by-side StockCopilotPanel AND conversation chatbox (#3541)", async () => {
     window.history.replaceState({}, "", "/?tab=chat&view=stock");
 
     await renderChat();
 
-    // StockCopilotPanel MUST be rendered
+    // StockCopilotPanel MUST be rendered in dashboard pane
     const panel = container!.querySelector("[data-testid='stock-copilot-panel']");
     expect(panel).not.toBeNull();
     // Stock Copilot banner is present
     expect(container!.textContent).toContain("Stock Copilot Active:");
-    // Dedicated custom surface exclusivity (#3449, #3521):
-    // Chat composer and stream MUST NOT be rendered underneath the panel,
-    // eliminating UI overlap and dual-scrollbar conflicts.
-    expect(container!.querySelector(".chat-input-bar")).toBeNull();
-    expect(container!.querySelector(".messages-stream")).toBeNull();
+    // Side-by-side workspace (#3541):
+    // Chat composer and stream ARE rendered alongside the dashboard pane
+    expect(container!.querySelector(".chat-input-bar")).not.toBeNull();
+    expect(container!.querySelector(".messages-stream")).not.toBeNull();
   });
 
   it("in conversational view: a message typed in the composer flows through the shared sendMessage", async () => {
@@ -256,17 +255,17 @@ describe("AgentChatTabContent Multi-Copilot Sub-Tabs & View Isolation (#3449)", 
     expect(sent.metadata?.userLogin).toBe("test-user");
   });
 
-  it("supports URL alias ?copilot=stock with exclusive custom surface (#3521)", async () => {
+  it("supports URL alias ?copilot=stock with side-by-side workspace (#3541)", async () => {
     window.history.replaceState({}, "", "/?tab=chat&copilot=stock");
 
     await renderChat();
 
     expect(container!.querySelector("[data-testid='stock-copilot-panel']")).not.toBeNull();
-    // Exclusively renders StockCopilotPanel, chat composer is hidden to avoid overlap
-    expect(container!.querySelector(".chat-input-bar")).toBeNull();
+    expect(container!.querySelector(".chat-input-bar")).not.toBeNull();
+    expect(container!.querySelector(".messages-stream")).not.toBeNull();
   });
 
-  it("a registered copilot with renderCustom renders its surface exclusively without conversation overlap (#3521)", async () => {
+  it("a registered copilot with renderCustom renders its surface alongside the chatbox (#3541)", async () => {
     const unregister = registerCopilot({
       id: "lab",
       label: "Lab Copilot",
@@ -275,7 +274,7 @@ describe("AgentChatTabContent Multi-Copilot Sub-Tabs & View Isolation (#3449)", 
       tooltip: {
         eyebrow: "Test",
         title: "Lab Copilot",
-        description: "Synthetic copilot for the custom surface exclusivity contract",
+        description: "Synthetic copilot for custom surface side-by-side contract",
       },
       renderCustom: () => <div data-testid="lab-surface">Lab Surface</div>,
     });
@@ -288,9 +287,9 @@ describe("AgentChatTabContent Multi-Copilot Sub-Tabs & View Isolation (#3449)", 
       // Its own custom surface renders…
       const surface = container!.querySelector("[data-testid='lab-surface']");
       expect(surface).not.toBeNull();
-      // …and the general conversation is excluded to prevent overlap
-      expect(container!.querySelector(".chat-input-bar")).toBeNull();
-      expect(container!.querySelector(".messages-stream")).toBeNull();
+      // …and the conversational chatbox is rendered alongside it
+      expect(container!.querySelector(".chat-input-bar")).not.toBeNull();
+      expect(container!.querySelector(".messages-stream")).not.toBeNull();
       // A copilot with its own renderCustom does NOT pull in the stock panel
       expect(container!.querySelector("[data-testid='stock-copilot-panel']")).toBeNull();
     } finally {
