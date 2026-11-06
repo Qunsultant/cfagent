@@ -55,8 +55,9 @@ describe("writeScreenerEventTelemetry (#1770 slice C)", () => {
     expect(ok).toBe(true);
     expect(captured).toHaveLength(1);
     // blobs per eventToDataPoint: [type, level, operation, runId,
-    // sessionRef, traceId, errorCode, fieldsJson]. The fold keeps
-    // the envelope type and puts "screener.delivery" in operation.
+    // sessionRef, traceId, errorCode, actorId, agentId, component,
+    // timestampIso, fieldsJson]. The fold keeps the envelope type
+    // and puts "screener.delivery" in operation.
     expect(captured[0].blobs[0]).toBe("screener.completed");
     expect(captured[0].blobs[1]).toBe("info");
     expect(captured[0].blobs[2]).toBe("screener.delivery");

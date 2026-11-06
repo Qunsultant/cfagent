@@ -119,22 +119,49 @@ export function envelopeWithTraceparent(
 export type ObservabilityLevel = "info" | "warn" | "error";
 
 /**
+ * One ISO-8601 timestamp for one epoch-ms timestamp. The stream
+ * carries ONE clock: timestampIso is always the derivation of
+ * timestampMs, never a second Date.now(). A non-finite input
+ * falls back to now (documented; construction sites pass real
+ * timestamps — the fold path already falls back to Date.now()
+ * for unparseable envelope times).
+ */
+export function timestampIsoFor(timestampMs: number): string {
+  if (Number.isFinite(timestampMs)) return new Date(timestampMs).toISOString();
+  return new Date().toISOString();
+}
+
+/**
  * One stream event. Scope fields are present on EVERY event
  * (null when the boundary has no scope). `fields` carries
  * whitelisted scalars only — adapters redact defensively, but
  * builders must never put secrets, user material, or error
  * messages here in the first place.
+ *
+ * Standards.md §2.2 — the 7 mandatory attributes, as this
+ * schema spells them (camelCase, per the existing traceId /
+ * tenantId convention): trace_id → traceId, tenant_id →
+ * tenantId, actor_id → actorId, agent_id → agentId,
+ * timestamp_iso8601 → timestampIso, severity → level,
+ * component → component. actorId / agentId / component are
+ * the acting system actor / agent / emitting component — user
+ * logins and decision-maker identities stay out of the stream
+ * (the #1743 discipline) and read as null here.
  */
 export interface ObservabilityEvent {
   type: string;
   level: ObservabilityLevel;
   operation: string;
   tenantId: string | null;
+  actorId: string | null;
+  agentId: string | null;
+  component: string | null;
   runId: string | null;
   sessionRef: string | null;
   traceId: string;
   spanId?: string;
   timestampMs: number;
+  timestampIso: string;
   durationMs?: number;
   count?: number;
   errorCode?: string;
@@ -285,21 +312,43 @@ function timestampOf(envelope: MessageEnvelope): number {
   return Number.isNaN(parsed) ? Date.now() : parsed;
 }
 
+/**
+ * Emitting component for a folded envelope, from its type
+ * prefix. The fold cases below are the only callers, so every
+ * value here is a known family; anything else reads null
+ * (never fabricated).
+ */
+function componentOf(type: string): string | null {
+  if (type.startsWith("telemetry.")) return "telemetry";
+  if (type.startsWith("breaker.")) return "breaker";
+  if (type.startsWith("gateway.")) return "gateway";
+  if (type.startsWith("retrieval.")) return "retrieval";
+  if (type.startsWith("screener.")) return "screener";
+  if (type.startsWith("resource.")) return "resource";
+  if (type.startsWith("goal.")) return "goal";
+  return null;
+}
+
 function baseEvent(
   envelope: MessageEnvelope,
   operation: string,
   level: ObservabilityLevel,
   tenantId: string | null,
 ): ObservabilityEvent {
+  const timestampMs = timestampOf(envelope);
   return {
     type: envelope.type,
     level,
     operation,
     tenantId,
+    actorId: null,
+    agentId: null,
+    component: componentOf(envelope.type),
     runId: null,
     sessionRef: null,
     traceId: traceOf(envelope),
-    timestampMs: timestampOf(envelope),
+    timestampMs,
+    timestampIso: timestampIsoFor(timestampMs),
     fields: {},
   };
 }
@@ -343,6 +392,10 @@ export function foldEnvelopeToEvent(
         const parts = outcomeId.split(":");
         const event = baseEvent(envelope, "telemetry.realization", "info", tenantId);
         event.runId = parts.length >= 3 ? parts.slice(0, -2).join(":") : null;
+        // Promotion, not new ingestion: agentKey is already
+        // whitelisted into fields below; the §2.2 agent_id
+        // attribute carries the same system-agent key.
+        event.agentId = agentKey;
         event.fields = { agentKey, structure, regime, directionCorrect, falsified };
         return event;
       }
@@ -358,6 +411,12 @@ export function foldEnvelopeToEvent(
         }
         const falsificationRate = num(data, "falsificationRate");
         const event = baseEvent(envelope, "telemetry.calibration", "info", tenantId);
+        // Promotion, not new ingestion: actorKey is already
+        // whitelisted into fields below; the §2.2 actor_id
+        // attribute carries the same system-actor key. The
+        // dropped identities (appliedBy/decidedBy humans,
+        // prompt/thesis text) stay dropped.
+        event.actorId = actorKey;
         event.fields = {
           decisionId,
           ...(actorKey ? { actorKey } : {}),
@@ -373,6 +432,9 @@ export function foldEnvelopeToEvent(
         const decisionId = str(data, "decisionId");
         if (!tenantId || !decisionId) return null;
         const event = baseEvent(envelope, "telemetry.calibration", "info", tenantId);
+        // Promotion (see calibration_proposed above): the
+        // whitelisted actorKey becomes the actor_id attribute.
+        event.actorId = optStr(data, "actorKey") ?? null;
         event.fields = {
           decisionId,
           ...(optStr(data, "actorKey") ? { actorKey: optStr(data, "actorKey") } : {}),

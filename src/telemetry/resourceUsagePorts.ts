@@ -28,7 +28,10 @@
  *   Cloudflare dashboard reports, so instrumented totals line up against
  *   dashboard hourly curves.
  */
-import type { ObservabilityEvent } from "../observability/observabilityPorts";
+import {
+  timestampIsoFor,
+  type ObservabilityEvent,
+} from "../observability/observabilityPorts";
 
 /** Where the op was triggered from. Absent = unknown (never inferred). */
 export type ResourceTrigger = "user" | "scheduled" | "tick" | "manual";
@@ -92,10 +95,14 @@ export function toObservabilityEvent(event: ResourceUsageEvent): ObservabilityEv
     level: "info",
     operation: "resource.sql_op",
     tenantId: event.tenantId ?? null,
+    actorId: null,
+    agentId: null,
+    component: "resource-usage",
     runId: event.runId ?? null,
     sessionRef: event.sessionRef ?? null,
     traceId: "",
     timestampMs: event.timestampMs,
+    timestampIso: timestampIsoFor(event.timestampMs),
     ...(event.durationMs !== undefined ? { durationMs: event.durationMs } : {}),
     fields,
   };
