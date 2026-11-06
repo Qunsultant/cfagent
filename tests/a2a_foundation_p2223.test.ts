@@ -85,7 +85,7 @@ describe("A2A resolution map (#2223 slice 1)", () => {
     }
   });
 
-  it("orchestrator-family names all resolve to SEARCH_AGENT on the shared instance", () => {
+  it("orchestrator-family names all resolve to ORCHESTRATOR_AGENT on the shared instance", () => {
     // SURVEY §6.4: five names on five instances would fragment
     // mas_memory / mas_transactions / mas_reports. One instance —
     // the shared orchestrator address — serves every orchestrator op.
@@ -93,7 +93,7 @@ describe("A2A resolution map (#2223 slice 1)", () => {
     for (const name of ORCHESTRATOR_FAMILY) {
       const resolution = resolveA2AAgent(name);
       expect(resolution, name).toBeDefined();
-      expect(resolution!.binding).toBe("SEARCH_AGENT");
+      expect(resolution!.binding).toBe("ORCHESTRATOR_AGENT");
       expect(resolveA2AInstanceName(resolution!, name, {} as never)).toBe(
         SHARED_ORCHESTRATOR_INSTANCE,
       );
@@ -154,7 +154,7 @@ function makeA2aEnv() {
           : {},
     });
   const ns: Record<string, () => unknown> = {
-    SEARCH_AGENT: namespace("SEARCH_AGENT"),
+    ORCHESTRATOR_AGENT: namespace("ORCHESTRATOR_AGENT"),
     SCHEDULED_AGENT: namespace("SCHEDULED_AGENT"),
     TRADING_AGENT: namespace("TRADING_AGENT"),
     REPORT_ASSET_AGENT: namespace("REPORT_ASSET_AGENT"),
@@ -183,11 +183,11 @@ const postA2a = (path: string, token?: string) =>
   });
 
 describe("A2A dispatcher resolves through the map (#2223 slice 1)", () => {
-  it("orchestrator lands on SEARCH_AGENT's shared instance and reaches the stub", async () => {
+  it("orchestrator lands on ORCHESTRATOR_AGENT's shared instance and reaches the stub", async () => {
     const { env, idFromNameCalls, stubCalls } = makeA2aEnv();
     const res = await handleA2A(postA2a("/a2a/orchestrator", "test-token"), env);
     expect(res.status).toBe(200);
-    expect(idFromNameCalls).toEqual([{ binding: "SEARCH_AGENT", name: "shared_orchestrator" }]);
+    expect(idFromNameCalls).toEqual([{ binding: "ORCHESTRATOR_AGENT", name: "shared_orchestrator" }]);
     expect(stubCalls).toHaveLength(1);
   });
 
@@ -196,8 +196,8 @@ describe("A2A dispatcher resolves through the map (#2223 slice 1)", () => {
     expect((await handleA2A(postA2a("/a2a/search", "test-token"), env)).status).toBe(200);
     expect((await handleA2A(postA2a("/a2a/memory", "test-token"), env)).status).toBe(200);
     expect(idFromNameCalls).toEqual([
-      { binding: "SEARCH_AGENT", name: "shared_orchestrator" },
-      { binding: "SEARCH_AGENT", name: "shared_orchestrator" },
+      { binding: "ORCHESTRATOR_AGENT", name: "shared_orchestrator" },
+      { binding: "ORCHESTRATOR_AGENT", name: "shared_orchestrator" },
     ]);
   });
 
