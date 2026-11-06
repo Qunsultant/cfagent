@@ -177,6 +177,67 @@ export function normalizeLedgerLinkage(
   };
 }
 
+/**
+ * Issue #3121 S4 — restamp a follow-up submission's §4 linkage with
+ * the minted job's own id (inventory §4 Q(c): asyncJobId is the
+ * row's OWN job_id).
+ *
+ * The planners stamp `ledgerLinkage` with the chain-parent main job
+ * id — the only id that exists at plan time (see
+ * `followupLedgerLinkage` in `src/services/screenerFollowups.ts`).
+ * The minter knows the row's own id, so the id is restamped here,
+ * at submit time, before the payload is serialized. The other three
+ * fields pass through verbatim — this restamps the id only, it never
+ * re-derives linkage — and the parent link is untouched: it rides
+ * `parent_job_id`, not the linkage. A payload without a
+ * `ledgerLinkage` object is returned unchanged (never coerced); the
+ * input is never mutated (a new object is returned when restamping).
+ */
+export function restampLedgerLinkageAsyncJobId(payload: unknown, jobId: string): unknown {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
+  const record = payload as Record<string, unknown>;
+  const linkage = record.ledgerLinkage;
+  if (!linkage || typeof linkage !== "object" || Array.isArray(linkage)) return payload;
+  return { ...record, ledgerLinkage: { ...(linkage as Record<string, unknown>), asyncJobId: jobId } };
+}
+
+/**
+ * Issue #3121 S4 — stamp a completed chain step's §4 linkage onto
+ * its run record (the completed row's `result_json`).
+ *
+ * The linkage rides the stored payload (stamped by the planners,
+ * restamped with the row's own id at submit time); the result
+ * carries the same four fields flat, matching the bridged main
+ * job's result shape, so a reader of any chain row's result finds
+ * `trigger` / `scheduleId` / `asyncJobId` / `workflowId` without
+ * joining the payload. `asyncJobId` is forced to the executing
+ * row's own id, so pre-S4 rows — whose payload stamps the parent
+ * id (S1-era) — still read correctly. A result that is not a plain
+ * object, a payload without linkage, or a malformed linkage (an
+ * invalid trigger, `unknown` — legacy-rows-only, never stamped onto
+ * a new record — or a non-string / empty id) leaves the result
+ * untouched: never coerced, never invented.
+ */
+export function stampLedgerLinkageIntoResult(payload: unknown, result: unknown, jobId: string): unknown {
+  if (!result || typeof result !== "object" || Array.isArray(result)) return result;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return result;
+  const linkage = (payload as Record<string, unknown>).ledgerLinkage;
+  if (!linkage || typeof linkage !== "object" || Array.isArray(linkage)) return result;
+  const link = linkage as Record<string, unknown>;
+  if (!isLedgerTrigger(link.trigger) || link.trigger === "unknown") return result;
+  for (const key of ["scheduleId", "workflowId"] as const) {
+    const value = link[key];
+    if (value !== null && (typeof value !== "string" || !value.trim())) return result;
+  }
+  return {
+    ...(result as Record<string, unknown>),
+    trigger: link.trigger,
+    scheduleId: typeof link.scheduleId === "string" ? link.scheduleId : null,
+    asyncJobId: jobId,
+    workflowId: typeof link.workflowId === "string" ? link.workflowId : null,
+  };
+}
+
 /** The three Worker cron expressions, in wrangler.jsonc order. */
 export const WORKER_CRONS: readonly string[] = [...WORKER_CRON_TRIGGERS_INVENTORY];
 
