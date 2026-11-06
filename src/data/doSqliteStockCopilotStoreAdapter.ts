@@ -33,6 +33,8 @@ function mapPosition(row: Record<string, unknown>): CopilotPositionRecord {
     stopPrice: num(row.stop_price),
     targetPrice: num(row.target_price),
     brokerOrderRef: str(row.broker_order_ref),
+    entrySession: strOrNull(row.entry_session),
+    entryOrderType: strOrNull(row.entry_order_type),
     status: str(row.status) === "closed" ? "closed" : "open",
     openedAt: str(row.opened_at),
     closedAt: strOrNull(row.closed_at),
@@ -64,14 +66,28 @@ export class DoSqliteStockCopilotPositionStore
         closed_at TEXT,
         exit_broker_order_ref TEXT,
         exit_price REAL,
-        exit_reason TEXT
+        exit_reason TEXT,
+        entry_session TEXT,
+        entry_order_type TEXT
       )`,
     );
+    // #3398: tables created before session recording gain the
+    // columns in place (the data layer's PRAGMA/ALTER idiom).
+    const cols = Array.from(
+      this.sql.exec(`PRAGMA table_info(${COPILOT_POSITIONS_TABLE})`),
+    ) as Array<{ name?: unknown }>;
+    const names = new Set(cols.map((c) => String(c.name ?? "")));
+    if (!names.has("entry_session")) {
+      this.sql.exec(`ALTER TABLE ${COPILOT_POSITIONS_TABLE} ADD COLUMN entry_session TEXT`);
+    }
+    if (!names.has("entry_order_type")) {
+      this.sql.exec(`ALTER TABLE ${COPILOT_POSITIONS_TABLE} ADD COLUMN entry_order_type TEXT`);
+    }
   }
 
   insertPosition(record: CopilotPositionRecord): void {
     this.sql.exec(
-      `INSERT INTO ${COPILOT_POSITIONS_TABLE} (id, user_login, symbol, strategy, quantity, entry_price, stop_price, target_price, broker_order_ref, status, opened_at, closed_at, exit_broker_order_ref, exit_price, exit_reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO ${COPILOT_POSITIONS_TABLE} (id, user_login, symbol, strategy, quantity, entry_price, stop_price, target_price, broker_order_ref, status, opened_at, closed_at, exit_broker_order_ref, exit_price, exit_reason, entry_session, entry_order_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       record.id,
       record.userLogin,
       record.symbol,
@@ -87,6 +103,8 @@ export class DoSqliteStockCopilotPositionStore
       record.exitBrokerOrderRef,
       record.exitPrice,
       record.exitReason,
+      record.entrySession ?? null,
+      record.entryOrderType ?? null,
     );
   }
 

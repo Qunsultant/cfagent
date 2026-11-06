@@ -8,6 +8,12 @@
  * derivation display, positions/activity rendering, and the
  * pause/resume interaction — runs for real against the mocked
  * status payloads.
+ *
+ * #3398 extends the pins: the trading-sessions section renders the
+ * user's enabled set with the current session marked, toggling a
+ * session writes the full set through the control API, and the
+ * outside-enabled-sessions state is named on the badge, in a
+ * notice, and in the activity feed.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React, { act } from "react";
@@ -39,16 +45,27 @@ vi.mock("../src/client/stockCopilotApi", async (importOriginal) => {
       }
       return { ok: true, paused };
     }),
+    setStockCopilotSessions: vi.fn(async (sessions: string[]) => {
+      if (apiState.status) {
+        apiState.status = { ...apiState.status, enabledSessions: sessions as never };
+      }
+      return { ok: true, sessions };
+    }),
   };
 });
 
 import { StockCopilotPanel } from "../src/client/StockCopilotPanel";
-import { setStockCopilotPaused } from "../src/client/stockCopilotApi";
+import {
+  setStockCopilotPaused,
+  setStockCopilotSessions,
+} from "../src/client/stockCopilotApi";
 
 const liveStatus: StockCopilotStatus = {
   flagEnabled: true,
   paused: false,
   marketOpen: true,
+  currentSession: "regular",
+  enabledSessions: ["regular"],
   status: "live",
   selectionResolved: true,
   activeBroker: "alpaca",
@@ -65,6 +82,8 @@ const liveStatus: StockCopilotStatus = {
       stopPrice: 93.1,
       targetPrice: 107.8,
       brokerOrderRef: "alpaca-1",
+      entrySession: "regular",
+      entryOrderType: "MARKET",
       openedAt: "2026-11-04T15:00:00.000Z",
     },
   ],
@@ -86,6 +105,7 @@ const liveStatus: StockCopilotStatus = {
       id: "a1",
       cycleAt: "2026-11-04T15:00:00.000Z",
       outcome: "traded",
+      session: "regular",
       entries: ["TEST"],
       exits: [],
       detail: null,
@@ -94,6 +114,7 @@ const liveStatus: StockCopilotStatus = {
       id: "a2",
       cycleAt: "2026-11-04T14:30:00.000Z",
       outcome: "no_trade",
+      session: "regular",
       entries: [],
       exits: [],
       detail: "no_entry_signals",
@@ -126,6 +147,15 @@ function buttonByText(container: HTMLElement, text: string): HTMLButtonElement {
   );
   if (!btn) throw new Error(`button not found: ${text}`);
   return btn as HTMLButtonElement;
+}
+
+function checkboxByLabel(container: HTMLElement, label: string): HTMLInputElement {
+  const el = [...container.querySelectorAll("label")].find((l) =>
+    (l.textContent ?? "").includes(label),
+  );
+  const input = el?.querySelector("input[type='checkbox']");
+  if (!input) throw new Error(`checkbox not found: ${label}`);
+  return input as HTMLInputElement;
 }
 
 beforeEach(() => {
@@ -249,6 +279,82 @@ describe("StockCopilotPanel (#3422)", () => {
       expect(text).toContain("could not be loaded");
       expect(text).not.toContain("Live");
       expect(buttonByText(container, "Try again")).toBeTruthy();
+    } finally {
+      root.unmount();
+    }
+  });
+
+  it("sessions section: all four sessions render, only the enabled ones checked, the current one marked Now (#3398)", async () => {
+    const { container, root } = await renderPanel();
+    try {
+      const text = container.textContent ?? "";
+      expect(text).toContain("Trading sessions");
+      expect(text).toContain("Overnight (EXTO)");
+      expect(checkboxByLabel(container, "Regular").checked).toBe(true);
+      expect(checkboxByLabel(container, "Pre-market").checked).toBe(false);
+      expect(checkboxByLabel(container, "After-hours").checked).toBe(false);
+      expect(checkboxByLabel(container, "Overnight (EXTO)").checked).toBe(false);
+      // The current session (regular, in the fixture) carries the marker.
+      const regularRow = checkboxByLabel(container, "Regular").closest(".scp-feed-row");
+      expect(regularRow?.textContent ?? "").toContain("Now");
+    } finally {
+      root.unmount();
+    }
+  });
+
+  it("toggling a session writes the full enabled set through the control API (#3398)", async () => {
+    const { container, root } = await renderPanel();
+    try {
+      const box = checkboxByLabel(container, "Overnight (EXTO)");
+      await act(async () => {
+        box.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+      await flush();
+      expect(setStockCopilotSessions).toHaveBeenCalledWith(["regular", "exto"]);
+      expect(checkboxByLabel(container, "Overnight (EXTO)").checked).toBe(true);
+    } finally {
+      root.unmount();
+    }
+  });
+
+  it("outside enabled sessions: the badge and notice name the waiting state, not off (#3398)", async () => {
+    apiState.status = {
+      ...liveStatus,
+      status: "outside_enabled_sessions",
+      currentSession: "after_hours",
+      marketOpen: false,
+    };
+    const { container, root } = await renderPanel();
+    try {
+      const text = container.textContent ?? "";
+      expect(text).toContain("Outside enabled sessions");
+      expect(text).toContain("after-hours session is open");
+      expect(text).toContain("waiting, not off");
+    } finally {
+      root.unmount();
+    }
+  });
+
+  it("an outside_sessions activity record renders as the named waiting state (#3398)", async () => {
+    apiState.status = {
+      ...liveStatus,
+      activity: [
+        {
+          id: "a9",
+          cycleAt: "2026-11-04T21:30:00.000Z",
+          outcome: "outside_sessions",
+          session: "after_hours",
+          entries: [],
+          exits: [],
+          detail: "stock_copilot_outside_enabled_sessions:after_hours",
+        },
+      ],
+    };
+    const { container, root } = await renderPanel();
+    try {
+      const text = container.textContent ?? "";
+      expect(text).toContain("Outside sessions");
+      expect(text).toContain("not one of your enabled sessions");
     } finally {
       root.unmount();
     }

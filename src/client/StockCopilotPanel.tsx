@@ -10,6 +10,12 @@
  * management for open positions keeps running while paused (the
  * panel says so, because that is the safety contract).
  *
+ * #3398 adds the trading-sessions section: the sessions the user
+ * has enabled for around-the-clock operation (their choice,
+ * persisted to their own settings), which session is open now,
+ * and the named outside-enabled-sessions state when the loop is
+ * waiting for an enabled session — visible, never a silent skip.
+ *
  * Built only from src/client/components/ui/ primitives with
  * token-only styling (ux-architecture §20); data loads through
  * stockCopilotApi.ts (apiFetch), mirroring the ApiKeysPanel /
@@ -20,6 +26,7 @@ import {
   Badge,
   Button,
   Card,
+  Checkbox,
   EmptyState,
   Notice,
   Spinner,
@@ -29,13 +36,18 @@ import {
 } from "./components/ui";
 import {
   copilotSelectionLabel,
+  copilotSessionLabel,
+  COPILOT_SESSION_IDS,
+  COPILOT_SESSION_VIEWS,
   exitReasonLabel,
   fetchStockCopilotStatus,
   fmtCopilotMoney,
   fmtCopilotTime,
   setStockCopilotPaused,
+  setStockCopilotSessions,
   type StockCopilotActivityRecord,
   type StockCopilotOpenPosition,
+  type StockCopilotSessionId,
   type StockCopilotStatus,
   type StockCopilotStatusKind,
 } from "./stockCopilotApi";
@@ -47,7 +59,7 @@ const REFRESH_MS = 60_000;
 const STATUS_VIEW: Record<StockCopilotStatusKind, { label: string; tone: BadgeTone }> = {
   live: { label: "Live", tone: "success" },
   paused: { label: "Paused", tone: "warning" },
-  outside_market_hours: { label: "Outside market hours", tone: "info" },
+  outside_enabled_sessions: { label: "Outside enabled sessions", tone: "info" },
   off: { label: "Off", tone: "neutral" },
   mode_unresolved: { label: "Mode unresolved", tone: "danger" },
   inactive_broker: { label: "Inactive broker", tone: "neutral" },
@@ -58,6 +70,7 @@ const OUTCOME_VIEW: Record<StockCopilotActivityRecord["outcome"], { label: strin
   no_trade: { label: "No trade", tone: "neutral" },
   refused: { label: "Refused", tone: "danger" },
   inactive: { label: "Inactive", tone: "neutral" },
+  outside_sessions: { label: "Outside sessions", tone: "info" },
 };
 
 const POSITION_COLUMNS: Array<TableColumn<StockCopilotOpenPosition>> = [
@@ -77,6 +90,17 @@ function activitySummary(record: StockCopilotActivityRecord): string {
     parts.push(`Sold ${exit.symbol} (${exitReasonLabel(exit.reason).toLowerCase()})`);
   }
   if (parts.length > 0) return parts.join(" · ");
+  if (record.outcome === "outside_sessions") {
+    return record.session
+      ? `The ${copilotSessionLabel(record.session).toLowerCase()} session opened — it is not one of your enabled sessions, so the loop is waiting`
+      : "No trading session is open — the loop is waiting for one of your enabled sessions";
+  }
+  if (
+    record.outcome === "no_trade" &&
+    record.detail?.includes("stock_copilot_session_wire_unsupported")
+  ) {
+    return `Orders for the ${copilotSessionLabel(record.session).toLowerCase()} session were refused — the broker platform cannot place session orders yet, so nothing was sent`;
+  }
   if (record.outcome === "no_trade") return record.detail ?? "No trades this cycle";
   if (record.outcome === "inactive") {
     return "Inactive — a different broker is active in the panel menu";
@@ -99,6 +123,8 @@ export function StockCopilotPanel() {
   const [loadError, setLoadError] = useState(false);
   const [toggling, setToggling] = useState(false);
   const [toggleError, setToggleError] = useState(false);
+  const [savingSessions, setSavingSessions] = useState(false);
+  const [sessionsError, setSessionsError] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -128,6 +154,29 @@ export function StockCopilotPanel() {
       setToggleError(true);
     } finally {
       setToggling(false);
+    }
+  };
+
+  // #3398: the sessions choice is the user's own — toggling writes
+  // the full enabled set (canonical order) to their settings, and
+  // the panel re-reads the status so what it shows is what the
+  // cycle will resolve.
+  const toggleSession = async (sessionId: StockCopilotSessionId) => {
+    if (!status) return;
+    const next = COPILOT_SESSION_IDS.filter((id) =>
+      id === sessionId
+        ? !status.enabledSessions.includes(id)
+        : status.enabledSessions.includes(id),
+    );
+    setSavingSessions(true);
+    setSessionsError(false);
+    try {
+      await setStockCopilotSessions(next);
+      await load();
+    } catch {
+      setSessionsError(true);
+    } finally {
+      setSavingSessions(false);
     }
   };
 
@@ -209,8 +258,8 @@ export function StockCopilotPanel() {
 
       <p className="scp-desc">
         Pattern-driven trading on the broker and mode selected in the panel
-        menu (shown above) — a cycle runs every 30 minutes during market hours
-        (9:30–16:00 ET, Mon–Fri) over SPY, QQQ, AAPL, MSFT and NVDA. Every
+        menu (shown above) — a cycle runs every 30 minutes, in the trading
+        sessions you enable below, over SPY, QQQ, AAPL, MSFT and NVDA. Every
         position opens with its exit plan (stop and target) attached.
       </p>
 
@@ -241,11 +290,46 @@ export function StockCopilotPanel() {
           managed: stops, targets and strategy exits keep running.
         </Notice>
       )}
+      {status.status === "outside_enabled_sessions" && (
+        <Notice tone="info">
+          {status.currentSession
+            ? `The ${copilotSessionLabel(status.currentSession).toLowerCase()} session is open, but it is not one of your enabled sessions — the loop is waiting, not off. Enable it below to let the copilot trade now.`
+            : "No trading session is open right now — the loop is waiting, not off. It resumes on its own when one of your enabled sessions opens."}
+        </Notice>
+      )}
       {toggleError && (
         <Notice tone="danger">
           The pause control could not be updated. Try again.
         </Notice>
       )}
+      {sessionsError && (
+        <Notice tone="danger">
+          The session settings could not be saved. Try again.
+        </Notice>
+      )}
+
+      <div className="scp-section-title">Trading sessions</div>
+      <div className="scp-feed">
+        {COPILOT_SESSION_IDS.map((sessionId) => {
+          const view = COPILOT_SESSION_VIEWS[sessionId];
+          return (
+            <div className="scp-feed-row" key={sessionId}>
+              <Checkbox
+                checked={status.enabledSessions.includes(sessionId)}
+                disabled={!status.flagEnabled || savingSessions}
+                onChange={() => void toggleSession(sessionId)}
+                label={view.label}
+              />
+              <span className="scp-feed-main">{view.hours}</span>
+              {status.currentSession === sessionId && (
+                <Badge size="xs" tone="info">
+                  Now
+                </Badge>
+              )}
+            </div>
+          );
+        })}
+      </div>
 
       <div className="scp-section-title">Open positions</div>
       <Table

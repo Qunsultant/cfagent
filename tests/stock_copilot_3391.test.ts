@@ -282,12 +282,14 @@ describe("stock copilot cycle", () => {
     expect(fake.calls.getPositions).toBe(0);
   });
 
-  it("outside market hours: the cycle skips without touching the platform", async () => {
+  it("outside the enabled sessions (default: regular only, #3398): the named outside state, platform untouched", async () => {
     const fake = createFakePlatform();
     const result = await runStockCopilotCycle(
       baseDeps({ platform: fake.platform, now: MARKET_CLOSED_NOW }),
     );
-    expect(result.status).toBe("skipped_outside_market_hours");
+    expect(result.status).toBe("outside_enabled_sessions");
+    expect(result.session).toBeNull();
+    expect(result.enabledSessions).toEqual(["regular"]);
     expect(fake.calls.placeOrderRemote).toBe(0);
     expect(fake.calls.getPositions).toBe(0);
   });

@@ -863,6 +863,9 @@ export async function routeRequest(deps: RouteRequestDeps, request: Request): Pr
     sql: deps.ctx.storage.sql,
     getScreenerExecutionContext: () => deps.getScreenerExecutionContext(),
     readSettingRaw: (key) => deps.readSettingRaw(key),
+    // #3398: the session-choice write lands in the same settings
+    // store the cycle and the status read resolve from.
+    writeSetting: (key, value) => deps.writeSetting(key, value),
     audit: (type, agent, payload) => deps.audit(type, agent, payload),
   });
   if (stockCopilotResponse) return stockCopilotResponse;
