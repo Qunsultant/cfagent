@@ -358,6 +358,17 @@ export class D1CommercialAdapter implements CommercialStore {
     };
   }
 
+  async getTenantBrokerSelection(tenantId: string): Promise<string | null> {
+    const rows = await this.db
+      .select()
+      .from(agentTenantSettings)
+      .where(eq(agentTenantSettings.tenantId, tenantId))
+      .limit(1);
+    if (rows.length === 0) return null;
+    const row = rows[0] as typeof rows[0] & { brokerId?: string | null };
+    return typeof row.brokerId === "string" && row.brokerId !== "" ? row.brokerId : null;
+  }
+
   async setTenantProviders(
     tenantId: string,
     providers: TenantProviders,

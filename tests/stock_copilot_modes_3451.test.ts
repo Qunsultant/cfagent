@@ -26,6 +26,16 @@
  *   menu selection on TEST/paper and Alpaca active builds the
  *   platform for TEST and the cycle trades — the context's
  *   environment no longer influences the copilot's mode at all.
+ * - Follow-up (owner clarification on #3451, after PR #3455): by
+ *   default — no broker selection stored — the copilot is Alpaca in
+ *   Paper mode. The broker half of that default is COPILOT-scoped:
+ *   the resolver reads the tenant's STORED broker selection through
+ *   a presence-aware port read (null when nothing is stored) and
+ *   defaults an absent selection to alpaca; the shared tenant-store
+ *   default (etrade, via getTenantProviders) is unchanged and still
+ *   governs the manual broker routes. An explicitly stored etrade
+ *   selection still resolves the copilot inactive, and a FAILED
+ *   broker read is not an absent selection — it stays unresolved.
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { DatabaseSync } from "node:sqlite";
@@ -204,7 +214,11 @@ describe("copilot trading-mode selection resolver (#3451)", () => {
     });
   });
 
-  it("no tenant row ⇒ the tenant default broker resolves (etrade); the mode still follows the setting", async () => {
+  it("no tenant row ⇒ the COPILOT default broker (alpaca); the mode still follows the setting (PROD ⇒ live)", async () => {
+    // Owner clarification on #3451: the shared tenant-store default
+    // (etrade) does NOT apply to the copilot — with no broker
+    // selection stored, the copilot defaults to Alpaca. The mode
+    // half is untouched: a stored PROD still means live.
     const res = await resolveCopilotTradingSelection({
       env: {},
       readSettingRaw: readerWith("PROD"),
@@ -212,7 +226,31 @@ describe("copilot trading-mode selection resolver (#3451)", () => {
     });
     expect(res).toEqual({
       resolved: true,
-      selection: { brokerId: "etrade", environment: "PROD", mode: "live" },
+      selection: { brokerId: "alpaca", environment: "PROD", mode: "live" },
+    });
+  });
+
+  it("no tenant row + no stored setting ⇒ the owner's default: Alpaca in Paper mode", async () => {
+    const res = await resolveCopilotTradingSelection({
+      env: {},
+      readSettingRaw: readerWith(null),
+      commercial: new InMemoryCommercialAdapter(),
+    });
+    expect(res).toEqual({
+      resolved: true,
+      selection: { brokerId: "alpaca", environment: "TEST", mode: "paper" },
+    });
+  });
+
+  it("explicit etrade selection ⇒ resolves with brokerId etrade (the cycle's inactive input, NOT defaulted over)", async () => {
+    const res = await resolveCopilotTradingSelection({
+      env: {},
+      readSettingRaw: readerWith("TEST"),
+      commercial: await commercialWithBroker("etrade"),
+    });
+    expect(res).toEqual({
+      resolved: true,
+      selection: { brokerId: "etrade", environment: "TEST", mode: "paper" },
     });
   });
 
@@ -225,8 +263,11 @@ describe("copilot trading-mode selection resolver (#3451)", () => {
     expect(res).toEqual({ resolved: false });
   });
 
-  it("broker store throws ⇒ unresolved — fail closed", async () => {
+  it("broker store throws ⇒ unresolved — fail closed (a failed read is NOT an absent selection; no default applies)", async () => {
     const broken = {
+      getTenantBrokerSelection: async () => {
+        throw new Error("d1 unavailable");
+      },
       getTenantProviders: async () => {
         throw new Error("d1 unavailable");
       },
@@ -255,6 +296,28 @@ describe("stock copilot cycle — mode matrix (#3451)", () => {
     expect(result.entriesPlaced).toBe(1);
     expect(fake.placed).toHaveLength(1);
     expect(fake.placed[0]).toMatchObject({ action: "BUY", symbol: "TEST" });
+  });
+
+  it("no broker selection stored ⇒ the resolved default (alpaca/paper) reaches evaluation — zero inactive records", async () => {
+    const selection = await resolveCopilotTradingSelection({
+      env: {},
+      readSettingRaw: readerWith(null),
+      commercial: new InMemoryCommercialAdapter(),
+    });
+    expect(selection).toEqual({
+      resolved: true,
+      selection: { brokerId: "alpaca", environment: "TEST", mode: "paper" },
+    });
+    const fake = createFakePlatform();
+    const activity = createInMemoryStockCopilotActivityPort();
+    const result = await runStockCopilotCycle(
+      modeDeps({ platform: fake.platform, selection, activity }),
+    );
+    expect(result.status).toBe("ok");
+    expect(result.entriesPlaced).toBe(1);
+    const records = activity.listActivity("owner", 10);
+    expect(records.filter((r) => r.outcome === "inactive")).toHaveLength(0);
+    expect(records[0]).toMatchObject({ outcome: "traded" });
   });
 
   it("live selection + live-resolved env ⇒ the cycle evaluates and trades live", async () => {
@@ -489,6 +552,24 @@ describe("stock copilot host — mode conformance (#3451)", () => {
       undefined,
       "owner",
       "PROD",
+    );
+    expect(payload.status).toBe("ok");
+    expect(fake.calls.placeOrderRemote).toBeGreaterThanOrEqual(1);
+  });
+
+  it("no broker row + nothing stored ⇒ the owner's default end-to-end: platform built for TEST (alpaca paper) and the cycle trades", async () => {
+    const fake = createFakePlatform();
+    const { payload, getPlatformSpy } = await runDeclaredCycle({
+      storedEnvironment: null,
+      commercial: new InMemoryCommercialAdapter(),
+      fake,
+    });
+    expect(getPlatformSpy).toHaveBeenCalledWith(
+      "alpaca",
+      expect.anything(),
+      undefined,
+      "owner",
+      "TEST",
     );
     expect(payload.status).toBe("ok");
     expect(fake.calls.placeOrderRemote).toBeGreaterThanOrEqual(1);

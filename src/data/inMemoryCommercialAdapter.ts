@@ -159,6 +159,11 @@ export class InMemoryCommercialAdapter implements CommercialStore {
     };
   }
 
+  async getTenantBrokerSelection(tenantId: string): Promise<string | null> {
+    const existing = this.tenantSettings.get(tenantId);
+    return existing?.brokerId ? existing.brokerId : null;
+  }
+
   async setTenantProviders(
     tenantId: string,
     providers: TenantProviders,
