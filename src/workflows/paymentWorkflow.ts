@@ -555,7 +555,7 @@ export class PaymentWorkflow extends ThinkWorkflow<
         priceUSD: number;
       }) => {
         // #2041 G-METERING: endpoint-mediated meter write, same
-        // SEARCH_AGENT channel as the audit forwarder above
+        // ORCHESTRATOR_AGENT channel as the audit forwarder above
         // (workflows run in the Worker with no DO sql accessor).
         // THROWS on any failure (fail-closed) — unlike the
         // best-effort audit write, a meter failure must fail the
