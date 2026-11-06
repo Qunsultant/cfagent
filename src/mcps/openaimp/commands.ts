@@ -118,6 +118,10 @@ import {
 } from "./meshDoorCommands";
 
 import { searchPlatformKnowledge } from "../../services/platformKnowledge";
+// Issue #3342: the "search" contract's AI-search attempt reads the
+// namespace binding through this helper (the public-endpoint fetch
+// it replaced is retired).
+import { searchAiSearchNamespaceChunks } from "../../agents/aiSearchPaths";
 import {
   KNOWLEDGE_MODE_SWITCH,
   MEMORY_READ_MODE_SWITCH,
@@ -363,25 +367,29 @@ function platformResultToChunks(result: ReturnType<typeof searchPlatformKnowledg
 async function runSearchContract(query: string, context: McpToolContext, toolName: string) {
   const isPlatformQuery = /\b(platform|capability|capabilities|workflow|workflows|screener|screening|options\s*flow|builder|payoff|hitl|guardrail|etrade|did|schedule|cron|nlq|how\s+to|pickbesttrades|faq)\b/i.test(query);
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10_000);
   try {
-    const endpoint = (context.env as any)?.AI_SEARCH_ENDPOINT;
-    let chunks: any[] = [];
-    if (endpoint) {
-      const response = await fetch(`${endpoint}/search`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: [{ role: "user", content: query }] }),
-        signal: controller.signal,
-      });
-      if (response.ok) {
-        const data = (await response.json()) as any;
-        const rawChunks = data?.result?.chunks ?? (Array.isArray(data) ? data : []);
-        chunks = Array.isArray(rawChunks) ? rawChunks : [];
-      }
+    // Issue #3342: the AI-search attempt used to POST to the public
+    // endpoint (AI_SEARCH_ENDPOINT) directly. The transport is
+    // retired; the attempt now reads the private namespace binding
+    // through the shared helper, with the caller's session login
+    // threaded so the #2246 report discipline applies (report
+    // chunks are served only to their owner — the REST attempt
+    // served them to anyone with the endpoint URL). Control flow
+    // is preserved: an unconfigured binding behaves exactly like
+    // the unset endpoint did (no chunks -> the platform fallback
+    // below), and a failed search throws into the same catch
+    // branch a failed fetch used to reach. The 10s AbortController
+    // disappears with the fetch — the binding RPC has no abort
+    // knob.
+    const callerLogin =
+      typeof context.sessionId === "string" && context.sessionId.trim()
+        ? context.sessionId
+        : undefined;
+    const outcome = await searchAiSearchNamespaceChunks(context.env, query, { callerLogin });
+    if (!outcome.ok && outcome.code === "search_failed") {
+      throw new Error(outcome.error ?? "AI Search namespace search failed");
     }
-    clearTimeout(timeout);
+    const chunks: any[] = outcome.ok ? (outcome.chunks ?? []) : [];
 
     // If no chunks from external AI search or if this is a platform query, ground with platform knowledge
     if (chunks.length === 0 || isPlatformQuery) {
@@ -408,7 +416,6 @@ async function runSearchContract(query: string, context: McpToolContext, toolNam
         : "No custom indexed documents found in the Cloudflare AI Search knowledge base. Synthesize a helpful, authoritative response from general knowledge, clearly informing the user that no specific internal documents were indexed.",
     };
   } catch (err: any) {
-    clearTimeout(timeout);
     const platformResult = searchPlatformKnowledge(query, { maxResults: 3 });
     if (platformResult.count > 0) {
       return {
