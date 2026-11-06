@@ -38,7 +38,8 @@
  * "immediate" truncates it at the cancel instant.
  */
 import type { BillingPolicy, BillingPolicyStore } from "../data/billingPolicyPorts";
-import { MS_PER_DAY, type SubscriptionRecord, type SubscriptionStore } from "../data/subscriptionPorts";
+import { isPlanPriceApproved, MS_PER_DAY, type SubscriptionRecord, type SubscriptionStore } from "../data/subscriptionPorts";
+import { BusinessError } from "../outcomes/outcomeAspects";
 import type { BillingPort, ProviderSubscription } from "./billingPorts";
 
 export type BillingAccess = "full" | "grace" | "none";
@@ -319,6 +320,13 @@ export async function changeBillingPlanPrice(input: {
   const plan = await input.subs.getPlan(input.planId);
   if (!plan) throw new Error(`No plan ${input.planId}.`);
   if (!plan.active) throw new Error(`Plan ${input.planId} is not active.`);
+  // Issue #3357: only an APPROVED plan price may be charged — the
+  // check runs before any provider call, so an unapproved target
+  // never reaches Stripe. Catalog-coded, never a raw error: the
+  // route maps BusinessError to the catalog response (402).
+  if (!isPlanPriceApproved(plan)) {
+    throw new BusinessError("FAILURE_PLAN_PRICE_NOT_APPROVED", { planId: input.planId });
+  }
   const priceId = input.policy.stripePriceByPlan[input.planId];
   if (!priceId) {
     throw new Error(`Plan ${input.planId} has no operator-mapped Stripe price id: refusing to invent one.`);

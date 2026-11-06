@@ -333,6 +333,9 @@ describe("subscription tenant derivation (#2219, native card checkout)", () => {
         }),
       )
     ).plan;
+    // Issue #3357: new plans land PROPOSED — approve before charging (the gate working as designed).
+    const approved = await call(ctx, "POST", "/payments/agentic/commercial/plans/approve", "op1", { planId: plan.id });
+    expect(approved?.status).toBe(200);
     const checkout = await call(ctx, "POST", "/payments/agentic/commercial/subscription/checkout", "u1", {
       planId: plan.id,
       tenantId: "t2",
@@ -360,6 +363,9 @@ describe("subscription tenant derivation (#2219, native card checkout)", () => {
         }),
       )
     ).plan;
+    // Issue #3357: new plans land PROPOSED — approve before charging (the gate working as designed).
+    const approved = await call(ctx, "POST", "/payments/agentic/commercial/plans/approve", "op1", { planId: plan.id });
+    expect(approved?.status).toBe(200);
     const checkout = await call(ctx, "POST", "/payments/agentic/commercial/subscription/checkout", "u1", {
       planId: plan.id,
       tenantId: "attacker-tenant",
@@ -389,6 +395,9 @@ describe("subscription tenant derivation (#2219, native card checkout)", () => {
         }),
       )
     ).plan;
+    // Issue #3357: new plans land PROPOSED — approve before charging (the gate working as designed).
+    const approved = await call(ctx, "POST", "/payments/agentic/commercial/plans/approve", "op1", { planId: plan.id });
+    expect(approved?.status).toBe(200);
     const checkout = await bodyOf(
       await call(ctx, "POST", "/payments/agentic/commercial/subscription/checkout", "u1", {
         planId: plan.id,

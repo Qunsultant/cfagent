@@ -169,7 +169,7 @@ import {
   ensureBillingCustomerSchema,
 } from "../../data/createBillingCustomerPorts";
 import type { D1BillingCustomerAdapter } from "../../data/d1BillingCustomerAdapter";
-import { assertBillingPolicyPartial } from "../../data/billingPolicyPorts";
+import { annualPriceUSD, assertBillingPolicyPartial } from "../../data/billingPolicyPorts";
 import {
   applyBillingWebhookEvent,
   cancelBillingAtPeriodEnd,
@@ -219,7 +219,7 @@ import {
 } from "../../data/createCfpayChannelPorts";
 import type { ChannelDraft } from "../../data/cfpayChannelPorts";
 import type { D1SubscriptionAdapter } from "../../data/d1SubscriptionAdapter";
-import { resolveEffectiveTier, resolveTierTransition } from "../../data/subscriptionPorts";
+import { isPlanPriceApproved, resolveEffectiveTier, resolveTierTransition } from "../../data/subscriptionPorts";
 import {
   NO_ACCOUNT_PAID_MESSAGE,
   resolvePlatformIdentity,
@@ -316,6 +316,21 @@ const AGENTIC_ROUTE_SWITCH_NAMES: Record<keyof PaymentsModeValues, string> = {
   screener: "PREMIUM_SCREENER_MODE",
   research: "PREMIUM_RESEARCH_MODE",
 };
+
+/**
+ * Issue #3357: the one coded-outcome response shape for plan / annual /
+ * discount outcomes — {code, message, retryable} with the catalog
+ * httpStatus. The message is resolved from the outcome catalog, never
+ * hand-written per call site; unknown codes pass through unresolved
+ * (the resolver never invents a code).
+ */
+function codedOutcomeResponse(code: string): Response {
+  const resolved = resolveOutcome(code);
+  return Response.json(
+    { code: resolved.code, message: resolved.businessMessage, retryable: resolved.entry?.retryable ?? false },
+    { status: resolved.entry?.httpStatus ?? 500 },
+  );
+}
 
 /**
  * Handles the Cloudflare Agentic Payments routes. Returns a Response on
@@ -1675,6 +1690,11 @@ export async function handleAgenticPaymentsRoutes(
   }
 
   // POST /payments/agentic/commercial/plans (operator only) — plans are data, never code: no price is hardcoded anywhere.
+  // Issue #3357: a plan may also be created by DERIVATION from a monthly plan — pass monthlyPlanId
+  // with no priceUSD and periodDays 365, and the price is derived from the monthly plan price and
+  // the operator-managed annual discount (monthly x 12 x (1 - discount)). An explicit priceUSD
+  // overrides the derivation. Every new plan lands PROPOSED until an operator approves it
+  // through POST /plans/approve; only an APPROVED plan price may be charged.
   if (path.endsWith("/payments/agentic/commercial/plans") && request.method === "POST") {
     try {
       const login = commercialLogin();
@@ -1682,7 +1702,7 @@ export async function handleAgenticPaymentsRoutes(
         return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
       }
       const body = (await request.json().catch(() => ({}))) as {
-        id?: unknown; name?: unknown; priceUSD?: unknown; periodDays?: unknown; includedRuns?: unknown; trialDays?: unknown;
+        id?: unknown; name?: unknown; priceUSD?: unknown; periodDays?: unknown; includedRuns?: unknown; trialDays?: unknown; monthlyPlanId?: unknown;
       };
       const subs = requireSubs();
       if (subs instanceof Response) return subs;
@@ -1690,19 +1710,102 @@ export async function handleAgenticPaymentsRoutes(
       if (store instanceof Response) return store;
       const ensured = await ensureStores(store, subs);
       if (ensured) return ensured;
+      const monthlyPlanId = typeof body.monthlyPlanId === "string" && body.monthlyPlanId.trim() ? body.monthlyPlanId.trim() : "";
+      const hasExplicitPrice = body.priceUSD !== undefined && body.priceUSD !== null;
+      let priceUSD = body.priceUSD;
+      let annualDiscountPct: number | null = null;
+      let derivedPriceUSD: number | null = null;
+      if (monthlyPlanId && !hasExplicitPrice) {
+        // Derive the annual price: the derived plan must be an annual plan (365 days).
+        // Failure classification is structural (#2573): the kind is recorded
+        // here and mapped to a catalog code, never a hand-written string.
+        const periodDays = Number(body.periodDays);
+        if (periodDays !== 365) {
+          return codedOutcomeResponse("FAILURE_ANNUAL_PLAN_PERIOD_INVALID");
+        }
+        const monthly = await subs.getPlan(monthlyPlanId);
+        if (!monthly) return codedOutcomeResponse("FAILURE_PLAN_NOT_FOUND");
+        const billingPolicyAdapter = requireBillingPolicy();
+        if (billingPolicyAdapter instanceof Response) return billingPolicyAdapter;
+        await ensureBillingPolicySchema(billingPolicyAdapter.db);
+        const policy = await billingPolicyAdapter.getPolicy();
+        annualDiscountPct = policy.annualDiscountPct;
+        derivedPriceUSD = annualPriceUSD(monthly.priceUSD, annualDiscountPct);
+        priceUSD = derivedPriceUSD;
+      }
       const plan = await subs.createPlan({
         id: body.id,
         name: body.name,
-        priceUSD: body.priceUSD,
+        priceUSD,
         periodDays: body.periodDays,
         includedRuns: body.includedRuns,
         trialDays: body.trialDays,
       });
-      ctx.audit("commercial.plan.created", "payments", { planId: plan.id, priceUSD: plan.priceUSD, periodDays: plan.periodDays, includedRuns: plan.includedRuns, trialDays: plan.trialDays ?? null });
-      return Response.json({ plan });
+      // Audit (#1969 acceptance): the record alone answers which code, what
+      // happened, for which login — code + message + login + structured fields.
+      const created = resolveOutcome("SUCCESS_PLAN_CREATED");
+      ctx.audit("commercial.plan.created", "payments", {
+        code: created.code,
+        message: created.businessMessage,
+        login,
+        planId: plan.id,
+        priceUSD: plan.priceUSD,
+        periodDays: plan.periodDays,
+        includedRuns: plan.includedRuns,
+        trialDays: plan.trialDays ?? null,
+        ...(monthlyPlanId ? { monthlyPlanId } : {}),
+        ...(derivedPriceUSD !== null ? { annualDiscountPct, derivedPriceUSD } : {}),
+      });
+      return Response.json({ plan, code: created.code, message: created.businessMessage, retryable: created.entry?.retryable ?? false });
     } catch (err: any) {
+      // A catalog-coded failure renders from the catalog; pre-existing
+      // assertPlan failures keep their regex-mapped raw shape (out of
+      // scope for #3357 — the route existed before this slice).
+      if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
       const message = err.message || "Failed to create plan";
-      return Response.json({ error: message }, { status: /required|must be|already exists/.test(message) ? 400 : 500 });
+      return Response.json(
+        { error: message },
+        // Idempotent Receiver (tech-standards §7): a replay of a create
+        // (same plan id) is a 409, not a 400 — the id is the unique key.
+        { status: /No plan/.test(message) ? 404 : /already exists/.test(message) ? 409 : /required|must be/.test(message) ? 400 : 500 },
+      );
+    }
+  }
+
+  // POST /payments/agentic/commercial/plans/approve (operator only) — Issue #3357: approve a
+  // plan's price, recording the approving operator. New plans land PROPOSED; only an APPROVED
+  // plan price may be charged. Approving a deactivated plan is allowed (approval is about the
+  // price, not about whether the plan is sold); deactivation never un-approves.
+  if (path.endsWith("/payments/agentic/commercial/plans/approve") && request.method === "POST") {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!isStoreOperator(login)) {
+        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+      }
+      const body = (await request.json().catch(() => ({}))) as { planId?: unknown };
+      const planId = typeof body.planId === "string" ? body.planId : "";
+      if (!planId) return Response.json({ error: "planId is required." }, { status: 400 });
+      const subs = requireSubs();
+      if (subs instanceof Response) return subs;
+      const store = requireStore();
+      if (store instanceof Response) return store;
+      const ensured = await ensureStores(store, subs);
+      if (ensured) return ensured;
+      const plan = await subs.approvePlan(planId, login);
+      const approved = resolveOutcome("SUCCESS_PLAN_APPROVED");
+      ctx.audit("commercial.plan.approved", "payments", {
+        code: approved.code,
+        message: approved.businessMessage,
+        login,
+        planId: plan.id,
+        approvedBy: login,
+      });
+      return Response.json({ plan, code: approved.code, message: approved.businessMessage, retryable: approved.entry?.retryable ?? false });
+    } catch (err: any) {
+      if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
+      const message = err.message || "Failed to approve plan";
+      return Response.json({ error: message }, { status: /No plan/.test(message) ? 404 : 500 });
     }
   }
 
@@ -1760,6 +1863,11 @@ export async function handleAgenticPaymentsRoutes(
       const plan = await subs.getPlan(planId);
       if (!plan) return Response.json({ error: `No plan ${planId}.` }, { status: 404 });
       if (!plan.active) return Response.json({ error: `Plan ${planId} is not active.` }, { status: 409 });
+      // Issue #3357: only an APPROVED plan price may be charged — refuse before any provider call.
+      // Fail-closed with a catalog-coded message, never a raw error string.
+      if (!isPlanPriceApproved(plan)) {
+        return codedOutcomeResponse("FAILURE_PLAN_PRICE_NOT_APPROVED");
+      }
       // #2219 fix: the checkout tenant is the resolved identity's
       // tenant when an account exists, else the verified session
       // login itself (personal scope label). A client-supplied
@@ -1850,6 +1958,11 @@ export async function handleAgenticPaymentsRoutes(
       const plan = await subs.getPlan(planId);
       if (!plan) return Response.json({ error: `No plan ${planId}.` }, { status: 404 });
       if (!plan.active) return Response.json({ error: `Plan ${planId} is not active.` }, { status: 409 });
+      // Issue #3357: only an APPROVED plan price may be charged — refuse before any provider call.
+      // Fail-closed with a catalog-coded message, never a raw error string.
+      if (!isPlanPriceApproved(plan)) {
+        return codedOutcomeResponse("FAILURE_PLAN_PRICE_NOT_APPROVED");
+      }
       // #2219 fix: same derivation as checkout — resolved identity
       // wins, client tenantId ignored. A missing account does NOT
       // fail closed here: after payment verification,
@@ -2515,6 +2628,11 @@ export async function handleAgenticPaymentsRoutes(
       const plan = await subs.getPlan(planId);
       if (!plan) return Response.json({ error: `No plan ${planId}.` }, { status: 404 });
       if (!plan.active) return Response.json({ error: `Plan ${planId} is not active.` }, { status: 409 });
+      // Issue #3357: only an APPROVED plan price may be charged — refuse before any provider call.
+      // Fail-closed with a catalog-coded message, never a raw error string.
+      if (!isPlanPriceApproved(plan)) {
+        return codedOutcomeResponse("FAILURE_PLAN_PRICE_NOT_APPROVED");
+      }
       const policyValue = await policy.getPolicy();
       const priceId = policyValue.stripePriceByPlan[plan.id];
       if (!priceId) {
@@ -2615,6 +2733,11 @@ export async function handleAgenticPaymentsRoutes(
       const plan = await subs.getPlan(planId);
       if (!plan) return Response.json({ error: `No plan ${planId}.` }, { status: 404 });
       if (!plan.active) return Response.json({ error: `Plan ${planId} is not active.` }, { status: 409 });
+      // Issue #3357: only an APPROVED plan price may be charged — refuse before any provider call.
+      // Fail-closed with a catalog-coded message, never a raw error string.
+      if (!isPlanPriceApproved(plan)) {
+        return codedOutcomeResponse("FAILURE_PLAN_PRICE_NOT_APPROVED");
+      }
       const policyValue = await policy.getPolicy();
       const priceId = policyValue.stripePriceByPlan[plan.id];
       if (!priceId) {
@@ -2883,10 +3006,26 @@ export async function handleAgenticPaymentsRoutes(
       try {
         partial = assertBillingPolicyPartial(body);
       } catch (err: any) {
+        // Issue #3357: a catalog-coded discount failure renders from the catalog.
+        if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
         return Response.json({ error: err.message || "Invalid billing policy update." }, { status: 400 });
       }
       const updated = await policy.updatePolicy(partial);
-      ctx.audit("commercial.billing.policy_set", "payments", { userId: login, policy: updated });
+      // Issue #3357: the discount change is audited with code + message + login
+      // (#1969 acceptance). Other policy fields keep the pre-existing audit shape.
+      if (partial.annualDiscountPct !== undefined) {
+        const discountUpdated = resolveOutcome("SUCCESS_ANNUAL_DISCOUNT_UPDATED");
+        ctx.audit("commercial.billing.policy_set", "payments", {
+          code: discountUpdated.code,
+          message: discountUpdated.businessMessage,
+          login,
+          userId: login,
+          annualDiscountPct: updated.annualDiscountPct,
+          policy: updated,
+        });
+      } else {
+        ctx.audit("commercial.billing.policy_set", "payments", { userId: login, policy: updated });
+      }
       return Response.json({ policy: updated });
     } catch (err: any) {
       return Response.json({ error: err.message || "Failed to handle billing policy" }, { status: 500 });
@@ -3479,6 +3618,9 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       try {
         changed = await changeBillingPlanPrice({ billing, subs, policy: billingPolicy, subscriptionId, planId });
       } catch (err: any) {
+        // Issue #3357: a catalog-coded refusal (unapproved target plan)
+        // renders from the catalog with its catalog status (402).
+        if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
         const message = err.message || "Failed to change plan";
         const status = /No subscription|No plan/.test(message)
           ? 404

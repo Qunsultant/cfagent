@@ -190,7 +190,12 @@ afterEach(() => {
 async function createPlan(ctx: AgenticPaymentsRouteContext, plan: Record<string, unknown>) {
   const res = await call(ctx, "POST", "/payments/agentic/commercial/plans", "op1", plan);
   expect(res?.status).toBe(200);
-  return (await bodyOf(res)).plan;
+  const created = (await bodyOf(res)).plan;
+  // Issue #3357: plans land PROPOSED; the charging tests below need an
+  // approved plan, so approve it here — the gate working as designed.
+  const approved = await call(ctx, "POST", "/payments/agentic/commercial/plans/approve", "op1", { planId: created.id });
+  expect(approved?.status).toBe(200);
+  return (await bodyOf(approved)).plan;
 }
 
 describe("subscription plans", () => {
