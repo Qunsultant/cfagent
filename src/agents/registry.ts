@@ -1118,7 +1118,7 @@ export function doorCostBudget(
 }
 
 // ---------------------------------------------------------------------------
-// Workflows — the four ThinkWorkflow classes and their starters.
+// Workflows — the five ThinkWorkflow classes and their starters.
 // ---------------------------------------------------------------------------
 
 export const MESH_WORKFLOWS: MeshWorkflowEntry[] = [
@@ -1147,6 +1147,15 @@ export const MESH_WORKFLOWS: MeshWorkflowEntry[] = [
       "src/services/paymentWorkflowSubmission.ts seam (paid screen submissions from routes; scheduled runs via src/services/scheduledTasks.ts)",
     ],
     role: "Per-run-request payment gate for paid screens: testnet, feature-flagged, default OFF; one charge per run-request; automatic failure compensation is a replacement-run credit; cash refunds are operator-initiated only (#2549).",
+  },
+  {
+    className: "JobPipelineWorkflow",
+    binding: "JOB_PIPELINE_WORKFLOW",
+    sourceFile: "src/workflows/jobPipelineWorkflow.ts",
+    starters: [
+      "JobPipelineControl dispatch (src/services/jobPipelineEngine.ts) from the copilot doors and the pipeline's schedule registration; the ScheduledAgent host declaration is #3543",
+    ],
+    role: "Generic configured job pipeline (#3534): recursive producer/consumer job trees (feed -> enrich -> analyze -> generate -> deliver) executed on the stage-runner contract (#2869/#2601), with the uniform stage control plane (#3549).",
   },
   {
     className: "CrossDomainSagaWorkflow",

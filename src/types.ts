@@ -28,6 +28,11 @@ export interface Env {
   // exist so DLQ inspection tooling can bind the queues).
   SCREENER_EVENTS_DLQ?: Queue<unknown>;
   SCREENER_DELIVERY_DLQ?: Queue<unknown>;
+  // Issue #3534 (Pipeline J1): the job-pipeline pub/sub queue.
+  // Optional so code is safe before the binding propagates;
+  // absence is the named state job_pipeline_queue_not_configured
+  // (see src/messaging/createJobPipelineMessaging.ts).
+  JOB_PIPELINE_EVENTS?: Queue<unknown>;
   // Issue #329/#604: session + credential store — the SessionStore Durable
   // Object. Sessions, tokens and API keys live here, not in Workers KV
   // (legacy KV fallback removed in #604; the leftover KV bindings in
@@ -846,6 +851,8 @@ export interface Env {
   PAYMENT_WORKFLOW?: Workflow;
   /** Cross-domain saga workflow binding (#2041 S1). */
   SAGA_WORKFLOW?: Workflow;
+  /** Job pipeline workflow binding (#3534 Pipeline J1). */
+  JOB_PIPELINE_WORKFLOW?: Workflow;
 }
 
 export interface TransactionRecord {

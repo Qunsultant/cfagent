@@ -623,16 +623,19 @@ describe("server route inventory pin (#2902)", () => {
     expect(serverSrc).toContain('from "./server/auth"');
   });
 
-  it("server.ts stays at the Slice 9 achieved size (291 lines, contract §2)", () => {
+  it("server.ts stays at the Slice 9 achieved size (292 lines, contract §2)", () => {
     // Slice 9 (#2902 Cleanup) sets the pin the slice actually achieves:
     // server.ts 669 lines → 291 lines (dead imports pruned per
     // tsc --noUnusedLocals, exports moved to src/server/exports.ts).
     // The <800 proposal was never a final number. A pin is never
     // loosened to fit: if the dispatcher legitimately grows, update
     // this number deliberately with the reason recorded here.
+    // #3534 records one deliberate growth: +1 line re-exporting
+    // JobPipelineWorkflow, the fifth ThinkWorkflow class, alongside
+    // the other four workflow re-exports (291 → 292).
     const src = readFileSync("src/server.ts", "utf8");
     const lines = src.split("\n").length - (src.endsWith("\n") ? 1 : 0);
-    expect(lines).toBeLessThanOrEqual(291);
+    expect(lines).toBeLessThanOrEqual(292);
   });
 });
 
