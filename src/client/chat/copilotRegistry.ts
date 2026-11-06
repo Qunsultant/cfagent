@@ -17,7 +17,7 @@ import type { BadgeTone } from "../components/ui";
  * - "chat": conversation only (no custom surface).
  * - "custom": a custom surface above the conversation.
  * The type and values are retained so existing registrations keep
- * their meaning (deprecated-compatible reading); a registration may
+ * their meaning unchanged, for compatibility with registrations written
  * also supply renderCustom directly, which declares a surface
  * regardless of mode. Use hasCustomSurface() to read the composition.
  */
