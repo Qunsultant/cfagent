@@ -8,7 +8,7 @@
  *
  * Pinned here with the same harness as
  * tests/browser_snapshot_auth.test.ts (real worker fetch dispatch,
- * recording SEARCH_AGENT stub, Map-backed SESSIONS KV):
+ * recording ORCHESTRATOR_AGENT stub, Map-backed SESSIONS KV):
  * - unauthenticated → 401 and the downstream work never runs;
  * - valid session → the route behaves exactly as before;
  * - qa/investigate additionally accepts the dedicated service token
