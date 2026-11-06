@@ -4,7 +4,7 @@
  *
  * Handler-level tests (no server, no session middleware): the
  * caller passes sessionLogin, mirroring the extracted-route
- * pattern. The audit stub is a fake SEARCH_AGENT binding; the
+ * pattern. The audit stub is a fake ORCHESTRATOR_AGENT binding; the
  * saga binding is a fake SAGA_WORKFLOW binding.
  *
  * Invariants pinned here:
@@ -57,7 +57,7 @@ function envFor(opts: {
   const sentEvents: Array<{ type: string; payload: unknown }> = [];
   const gotIds: string[] = [];
   const env = {
-    SEARCH_AGENT:
+    ORCHESTRATOR_AGENT:
       opts.stub === null
         ? undefined
         : {
@@ -117,7 +117,7 @@ describe("GET /api/saga/journey-gates (S2, #2041)", () => {
     expect(body.gates[0].copy.title).toBe("Enter the trading leg?");
   });
 
-  it("returns 503 when SEARCH_AGENT is unbound", async () => {
+  it("returns 503 when ORCHESTRATOR_AGENT is unbound", async () => {
     const { env } = envFor({ stub: null });
     const req = new Request("https://agent.internal/api/saga/journey-gates");
     const res = await handleSagaJourneyRoutes(req, new URL(req.url), "/api/saga/journey-gates", env, "u1login");
@@ -156,7 +156,7 @@ describe("POST /api/saga/journey-decision (S2, #2041)", () => {
     const sentEvents: Array<{ type: string; payload: unknown }> = [];
     const gotIds: string[] = [];
     const env = {
-      SEARCH_AGENT: { idFromName: () => "stub-id", get: () => auditStub([promptedEvent("saga-1", "u1login")], []) },
+      ORCHESTRATOR_AGENT: { idFromName: () => "stub-id", get: () => auditStub([promptedEvent("saga-1", "u1login")], []) },
       SAGA_WORKFLOW: {
         get: async (id: string) => {
           gotIds.push(id);
@@ -178,7 +178,7 @@ describe("POST /api/saga/journey-decision (S2, #2041)", () => {
   it("honors an explicit chat surface", async () => {
     const sentEvents: Array<{ type: string; payload: unknown }> = [];
     const env = {
-      SEARCH_AGENT: { idFromName: () => "stub-id", get: () => auditStub([promptedEvent("saga-1", "u1login")], []) },
+      ORCHESTRATOR_AGENT: { idFromName: () => "stub-id", get: () => auditStub([promptedEvent("saga-1", "u1login")], []) },
       SAGA_WORKFLOW: {
         get: async () => runningSagaInstance(sentEvents),
       },
