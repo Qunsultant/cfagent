@@ -52,7 +52,7 @@ function makeEnv() {
   });
   const env: any = {
     SESSION_STORE: namespace,
-    SEARCH_AGENT: {
+    ORCHESTRATOR_AGENT: {
       idFromName: (name: string) => name,
       get: () => ({ fetch: async () => Response.json({ ok: true }) }),
     },
