@@ -33,6 +33,13 @@ import {
   type EnrichmentSymbolResult,
 } from "./enrichmentPorts";
 import type { MessageEnvelope } from "../messaging/messagingPorts";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "enrichment/enrichmentService",
+});
 
 /**
  * Neutral market-data port: the boundary adapter in the route
@@ -255,6 +262,9 @@ async function emitBestEffort(
   try {
     await emit(envelope);
   } catch (err) {
-    console.warn("[Enrichment] Event emission failed (ignored):", err);
+    structuredLog.warn("enrichment.event_emission_failed", {
+      message: "[Enrichment] Event emission failed (ignored)",
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 }

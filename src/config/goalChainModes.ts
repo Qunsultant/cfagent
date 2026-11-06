@@ -107,6 +107,14 @@
  * production caller yet.
  */
 
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "config/goalChainModes",
+});
+
 export type GoalCompileMode = "auto" | "fresh";
 
 /** One switch's value, as carried at session/user level. */
@@ -170,9 +178,12 @@ function resolveSwitch<T extends string>(
     const normalized = normalizeSwitchValue(value, valid);
     if (normalized === null) continue;
     if (normalized === "invalid") {
-      console.warn(
-        `[${goalConfigErrorEvent()}] ${switchName} unrecognized value at ${level}; failing closed to surface legacy`,
-      );
+      structuredLog.warn(goalConfigErrorEvent(), {
+        message: `[${goalConfigErrorEvent()}] ${switchName} unrecognized value at ${level}; failing closed to surface legacy`,
+        switch: switchName,
+        level,
+        raw: typeof value === "string" ? value : undefined,
+      });
       return {
         mode: legacy,
         invalid: true,

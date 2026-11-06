@@ -51,6 +51,13 @@ import { handleTradingScheduleRoutes, handleTradingOmniRoutes, handleTradingQuot
 import { handleMessagingSagaRoutes, handleMessagingSocialRoutes, handleMessagingSlackRoutes } from "./server/routes/messaging";
 import { handlePlatformTelemetryRoutes, handlePlatformRetrievalRoutes, handlePlatformMcpRoutes, handlePlatformPaymentsRoutes, handlePlatformBrowserRoutes } from "./server/routes/platform";
 import { handleScheduledEvent, handleQueueBatch } from "./server/routes/queue";
+import { createStructuredLogger } from "./observability/structuredLogger";
+import { createObservabilitySink } from "./observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "server",
+});
 // Slice 9 (#2902): the agent/DO/workflow exports live in
 // src/server/exports.ts (per-class justifications there); server.ts
 // re-exports them because wrangler requires every bound DO class to
@@ -221,7 +228,12 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
         // sets the identity header from, the verified session login above
         // — never from caller input.
         const forwardVoiceTurn = createOrchestratorVoiceTurnForwarder(env, userLogin);
-        handleVoiceWebSocketConnection(serverWs, env, undefined, userLogin, forwardVoiceTurn).catch(console.warn);
+        handleVoiceWebSocketConnection(serverWs, env, undefined, userLogin, forwardVoiceTurn).catch((err: unknown) =>
+          structuredLog.warn("voice.connection_failed", {
+            message: "Voice WebSocket connection failed",
+            error: err instanceof Error ? err.message : String(err),
+          }),
+        );
 
         return new Response(null, { status: 101, webSocket: clientWs });
       },

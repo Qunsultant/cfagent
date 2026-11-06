@@ -172,6 +172,13 @@ import {
   thinkWebhookSourceFromPath,
   verifyThinkWebhookSignature,
 } from "./thinkPortMapping";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "actors/thinkAdapter",
+});
 
 /**
  * Think base for port-backed agents. A migrating agent class extends
@@ -280,10 +287,12 @@ export class PortThink extends Think<any> {
     }
     const secret = resolveThinkWebhookSecret(this.env);
     if (!secret) {
-      console.warn(
-        `[PortThink] webhook refused for ${this.constructor.name} (source "${source}"): ` +
-          "no webhook secret is configured (THINK_WEBHOOK_SECRET) — the channel fails closed"
-      );
+      structuredLog.warn("portthink.webhook_refused_no_secret", {
+        message:
+          `[PortThink] webhook refused for ${this.constructor.name} (source "${source}"): ` +
+          "no webhook secret is configured (THINK_WEBHOOK_SECRET) — the channel fails closed",
+        source,
+      });
       return new Response("Webhook secret not configured", { status: 503 });
     }
     const rawBody = await request.text();
@@ -303,10 +312,12 @@ export class PortThink extends Think<any> {
     }
     const hooks = this.portHooks;
     if (!hooks?.onWebhook) {
-      console.warn(
-        `[PortThink] webhook refused for ${this.constructor.name} (source "${source}"): ` +
-          "the agent has not opted in (no onWebhook port hook)"
-      );
+      structuredLog.warn("portthink.webhook_refused_no_hook", {
+        message:
+          `[PortThink] webhook refused for ${this.constructor.name} (source "${source}"): ` +
+          "the agent has not opted in (no onWebhook port hook)",
+        source,
+      });
       return new Response("Webhooks not accepted by this agent", { status: 405 });
     }
     // Lifecycle boot (the adapter's standing precondition, see the
@@ -329,10 +340,12 @@ export class PortThink extends Think<any> {
       const out = await hooks.onWebhook(event);
       return out instanceof Response ? out : new Response("OK");
     } catch (err) {
-      console.error(
-        `[PortThink] webhook hook failed for ${this.constructor.name} (source "${source}")`,
-        err
-      );
+      structuredLog.error("portthink.webhook_hook_failed", {
+        message: `[PortThink] webhook hook failed for ${this.constructor.name} (source "${source}")`,
+        error: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack?.slice(0, 1000) : undefined,
+        source,
+      });
       return new Response("Webhook handler failed", { status: 500 });
     }
   }

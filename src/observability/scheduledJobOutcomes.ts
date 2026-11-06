@@ -46,6 +46,12 @@ import {
   normalizeLedgerLinkage,
   type LedgerLinkage,
 } from "../services/consolidatedScheduling";
+import { createStructuredLogger } from "./structuredLogger";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "observability/scheduledJobOutcomes",
+});
 
 /** The single outcome sink type in mas_events. */
 export const SCHEDULED_JOB_OUTCOME_TYPE = "scheduled_job.outcome";
@@ -368,20 +374,22 @@ export async function recordScheduledJobOutcome(
       }
       streak = 1 + leading;
     } catch (err) {
-      console.warn(
-        `[scheduled-job-outcome] streak read failed for ${input.job} (recording stands):`,
-        err,
-      );
+      structuredLog.warn("scheduled_job_outcome.streak_read_failed", {
+        message: `[scheduled-job-outcome] streak read failed for ${input.job} (recording stands)`,
+        job: input.job,
+        error: err instanceof Error ? err.message : String(err),
+      });
       streak = 1;
     }
   }
   try {
     await deps.store.writeOutcome(input);
   } catch (err) {
-    console.warn(
-      `[scheduled-job-outcome] outcome write failed for ${input.job}:`,
-      err,
-    );
+    structuredLog.warn("scheduled_job_outcome.outcome_write_failed", {
+      message: `[scheduled-job-outcome] outcome write failed for ${input.job}`,
+      job: input.job,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return { recorded: false, streak, alerted: false };
   }
   if (
@@ -401,10 +409,11 @@ export async function recordScheduledJobOutcome(
     await deps.alert(text);
     return { recorded: true, streak, alerted: true };
   } catch (err) {
-    console.warn(
-      `[scheduled-job-outcome] alert delivery failed for ${input.job}:`,
-      err,
-    );
+    structuredLog.warn("scheduled_job_outcome.alert_delivery_failed", {
+      message: `[scheduled-job-outcome] alert delivery failed for ${input.job}`,
+      job: input.job,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return { recorded: true, streak, alerted: false };
   }
 }
@@ -495,10 +504,11 @@ export async function observeInternalDispatch(
       try {
         await deps.alertUnreachable(deps.job, deps.trace);
       } catch (alertErr) {
-        console.warn(
-          `[scheduled-job-outcome] fail-loud alert failed for ${deps.job}:`,
-          alertErr,
-        );
+        structuredLog.warn("scheduled_job_outcome.fail_loud_alert_failed", {
+          message: `[scheduled-job-outcome] fail-loud alert failed for ${deps.job}`,
+          job: deps.job,
+          error: alertErr instanceof Error ? alertErr.message : String(alertErr),
+        });
       }
     }
   }

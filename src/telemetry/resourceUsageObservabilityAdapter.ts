@@ -15,6 +15,13 @@ import {
   type ResourceUsageEvent,
   type ResourceUsagePort,
 } from "./resourceUsagePorts";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "telemetry/resourceUsageObservabilityAdapter",
+});
 
 export class ObservabilityResourceUsageAdapter implements ResourceUsagePort {
   constructor(private readonly sink: ObservabilitySink) {}
@@ -23,10 +30,10 @@ export class ObservabilityResourceUsageAdapter implements ResourceUsagePort {
     try {
       await this.sink.write(toObservabilityEvent(event));
     } catch (error) {
-      console.warn(
-        "[resource-usage] observability sink failed:",
-        error instanceof Error ? error.message : String(error)
-      );
+      structuredLog.warn("resource_usage.observability_sink_failed", {
+        message: "[resource-usage] observability sink failed",
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 }

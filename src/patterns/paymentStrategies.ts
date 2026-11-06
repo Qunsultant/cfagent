@@ -33,6 +33,13 @@ import type {
 import { RemoteMcpClient } from "../mcps/client/mcpClient";
 import { computeHmacSha256Hex } from "../services/cryptoUtils";
 import { resolveEnvironmentConfig } from "../config/environment";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "patterns/paymentStrategies",
+});
 
 /** Stripe id-or-expanded-object field → bare id, or undefined when absent/malformed. Never invented. */
 function idOf(value: unknown): string | undefined {
@@ -148,7 +155,10 @@ export class StripePaymentStrategy implements IPaymentGatewayStrategy {
           };
         }
       } catch (err: any) {
-        console.warn("Stripe Remote MCP invocation error:", err);
+        structuredLog.warn("payments.stripe_mcp_invocation_failed", {
+          message: "Stripe Remote MCP invocation error",
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
 
@@ -614,7 +624,10 @@ export class StripePaymentStrategy implements IPaymentGatewayStrategy {
           };
         }
       } catch (err) {
-        console.warn("Stripe Remote MCP refund failed:", err);
+        structuredLog.warn("payments.stripe_mcp_refund_failed", {
+          message: "Stripe Remote MCP refund failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
 
@@ -813,7 +826,10 @@ export class PayPalPaymentStrategy implements IPaymentGatewayStrategy {
           };
         }
       } catch (err) {
-        console.warn("PayPal Remote MCP invocation failed:", err);
+        structuredLog.warn("payments.paypal_mcp_invocation_failed", {
+          message: "PayPal Remote MCP invocation failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
 
@@ -1104,7 +1120,10 @@ export class LemonSqueezyPaymentStrategy implements IPaymentGatewayStrategy {
           };
         }
       } catch (err) {
-        console.warn("Lemon Squeezy Remote MCP invocation failed:", err);
+        structuredLog.warn("payments.lemonsqueezy_mcp_invocation_failed", {
+          message: "Lemon Squeezy Remote MCP invocation failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
 

@@ -37,6 +37,13 @@ import type {
   MarketRelation,
   VectorSearchPort,
 } from "./retrievalPorts";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "retrieval/hybridRetrieval",
+});
 
 /** Default graph rows per retrieval. */
 export const DEFAULT_GRAPH_TOP_K = 12;
@@ -122,7 +129,7 @@ export async function expandGraphContext(
   opts: ExpandGraphContextOptions = {},
 ): Promise<ExpandGraphContextResult> {
   const graphTopK = opts.graphTopK ?? DEFAULT_GRAPH_TOP_K;
-  const log = opts.log ?? ((message: string) => console.warn(message));
+  const log = opts.log ?? ((message: string) => structuredLog.warn("retrieval.log", { message }));
   try {
     const candidates = extractSymbolCandidates(
       [query, ...denseTexts].join(" "),
@@ -221,7 +228,7 @@ export async function hybridRetrieve(
         }),
       );
     } catch (err) {
-      const log = deps.log ?? ((message: string) => console.warn(message));
+      const log = deps.log ?? ((message: string) => structuredLog.warn("retrieval.log", { message }));
       log(
         `[retrieval] retrieval.completed emission failed (ignored): ${err instanceof Error ? err.message : String(err)}`,
       );

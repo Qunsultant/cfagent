@@ -8,6 +8,13 @@
  * best-effort contract as the observability adapter.
  */
 import type { ResourceUsageEvent, ResourceUsagePort } from "./resourceUsagePorts";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "telemetry/fanOutResourceUsageAdapter",
+});
 
 export class FanOutResourceUsageAdapter implements ResourceUsagePort {
   constructor(private readonly sinks: ResourceUsagePort[]) {}
@@ -17,10 +24,10 @@ export class FanOutResourceUsageAdapter implements ResourceUsagePort {
       try {
         await sink.record(event);
       } catch (error) {
-        console.warn(
-          "[resource-usage] fan-out sink failed:",
-          error instanceof Error ? error.message : String(error)
-        );
+        structuredLog.warn("resource_usage.fan_out_sink_failed", {
+          message: "[resource-usage] fan-out sink failed",
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     }
   }

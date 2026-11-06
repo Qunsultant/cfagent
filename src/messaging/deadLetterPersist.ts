@@ -15,6 +15,13 @@
 import type { DeadLetterRecord } from "./deadLetter";
 import type { DeadLetterStore } from "./deadLetterStorePorts";
 import { maybeAlertDlqDepth } from "./dlqDepthAlert";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "messaging/deadLetterPersist",
+});
 
 export interface DeadLetterPersistDeps {
   store: DeadLetterStore | null;
@@ -63,6 +70,9 @@ export async function persistDeadLetterLanding(
   } catch (err) {
     // The console record already stands; persistence is
     // best-effort and must never break the drop path.
-    console.warn("[dead-letter] store persist failed (console record stands):", err);
+    structuredLog.warn("dead_letter.store_persist_failed", {
+      message: "[dead-letter] store persist failed (console record stands)",
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 }

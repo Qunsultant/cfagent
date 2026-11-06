@@ -19,6 +19,13 @@
  * (persist helper) never lets alerting break the drop path.
  */
 import type { DeadLetterStore } from "./deadLetterStorePorts";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "messaging/dlqDepthAlert",
+});
 
 export interface DlqDepthAlertDeps {
   store: DeadLetterStore;
@@ -50,7 +57,10 @@ export async function maybeAlertDlqDepth(deps: DlqDepthAlertDeps): Promise<boole
     // Claim-first trade-off (stuck-alert pattern): the incident
     // stays open, so no second alert fires; the runbook covers
     // the delivery-failure case.
-    console.warn("[dlq-depth] alert delivery failed (incident stays open):", err);
+    structuredLog.warn("dlq.alert_delivery_failed", {
+      message: "[dlq-depth] alert delivery failed (incident stays open)",
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
   return true;
 }

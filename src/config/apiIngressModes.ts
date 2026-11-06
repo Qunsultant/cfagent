@@ -11,7 +11,7 @@
  * Resolution order (owner directive 2026-10-26):
  *   run > session > user > global env > built-in (surface legacy).
  * First non-blank level wins; an unrecognized winning value FAILS
- * CLOSED to the surface legacy, logged via console.warn, with NO
+ * CLOSED to the surface legacy, logged via the structured logger, with NO
  * fall-through.
  *
  * SECURITY GUARD (mandatory): this switch is admin/platform-controlled
@@ -27,6 +27,14 @@
  *
  * Production value: an owner action. This slice never sets it.
  */
+
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "config/apiIngressModes",
+});
 
 export type ApiIngressMode = "legacy" | "unified";
 
@@ -85,9 +93,12 @@ export function resolveApiIngressMode(
     const normalized = normalizeSwitchValue(value);
     if (normalized === null) continue;
     if (normalized === "invalid") {
-      console.warn(
-        `[api.config_error] API_INGRESS_MODE unrecognized value at ${level}; failing closed to surface legacy`,
-      );
+      structuredLog.warn("api.config_error", {
+        message: `[api.config_error] API_INGRESS_MODE unrecognized value at ${level}; failing closed to surface legacy`,
+        switch: "API_INGRESS_MODE",
+        level,
+        raw: typeof value === "string" ? value : undefined,
+      });
       return { mode: legacy, invalid: true, raw: typeof value === "string" ? value : undefined, level };
     }
     return { mode: normalized, invalid: false, raw: typeof value === "string" ? value : undefined, level };

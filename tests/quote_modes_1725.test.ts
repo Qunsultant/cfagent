@@ -189,13 +189,26 @@ describe("quote switch resolvers (run > session > user > env > builtin)", () => 
   });
 
   it("fails closed to the surface legacy with NO fall-through on an invalid winner", () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // #3515 S3: the invalid-value warning now travels as a structured
+    // quotes.config_error event on the console-info JSON fallback.
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
     const r = resolveQuoteExpiryMode({ run: "bogus", env: "continuity" }, "honour");
     expect(r.mode).toBe("honour");
     expect(r.invalid).toBe(true);
     expect(r.raw).toBe("bogus");
     expect(r.level).toBe("run");
-    expect(warn).toHaveBeenCalled();
+    const events = info.mock.calls
+      .map((c) => {
+        try {
+          return JSON.parse(String(c[0]));
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+    expect(
+      events.some((e) => e.operation === "quotes.config_error" && e.fields?.raw === "bogus"),
+    ).toBe(true);
     const nonString = resolveQuoteEtradeUnknownMode({ run: 42 as any }, "throw");
     expect(nonString.mode).toBe("throw");
     expect(nonString.invalid).toBe(true);

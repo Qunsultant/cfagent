@@ -33,6 +33,13 @@ import {
   type ExportPayload,
   type PrivacyPreferences,
 } from "./privacyDsar";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "privacy/privacyRoutes",
+});
 
 export interface PrivacySession {
   internalUserId?: unknown;
@@ -156,10 +163,11 @@ export async function handlePrivacyExportRoute(input: PrivacyExportInput): Promi
     const payload = await input.loadExport(gated.subject);
     return json(payload, 200);
   } catch (err) {
-    console.error(
-      "[privacy] Export failed:",
-      err instanceof Error ? err.message : String(err),
-    );
+    structuredLog.error("privacy.export_failed", {
+      message: "[privacy] Export failed",
+      error: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack?.slice(0, 1000) : undefined,
+    });
     return json({ error: "privacy_export_failed" }, 500);
   }
 }
@@ -184,10 +192,11 @@ export async function handlePrivacyErasureRoute(input: PrivacyErasureInput): Pro
     const report: ErasureReport = await eraseSubject(gated.subject, input.legs);
     return json(report, 200);
   } catch (err) {
-    console.error(
-      "[privacy] Erasure cascade failed:",
-      err instanceof Error ? err.message : String(err),
-    );
+    structuredLog.error("privacy.erasure_failed", {
+      message: "[privacy] Erasure cascade failed",
+      error: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack?.slice(0, 1000) : undefined,
+    });
     return json({ error: "privacy_erasure_failed" }, 500);
   }
 }

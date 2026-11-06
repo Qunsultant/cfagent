@@ -78,6 +78,13 @@ import {
   resolveGoalCompileMode,
   type GoalCompileMode,
 } from "../../config/goalChainModes";
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "mcps/openaimp/goalChainCommands",
+});
 
 function validBudgetCents(value: unknown): value is number {
   return (
@@ -502,10 +509,11 @@ export async function runChain(
     try {
       await opts.onLegOutcome(leg);
     } catch (err) {
-      console.error(
-        "[chain.run] Leg outcome callback failed (run unaffected):",
-        err instanceof Error ? err.message : String(err),
-      );
+      structuredLog.error("chain.leg_outcome_callback_failed", {
+        message: "[chain.run] Leg outcome callback failed (run unaffected)",
+        error: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack?.slice(0, 1000) : undefined,
+      });
     }
   };
   for (const step of validated.steps) {

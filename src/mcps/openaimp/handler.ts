@@ -81,6 +81,12 @@ import {
   type MCPRequest,
   type MCPResponse,
 } from "./index";
+import { createStructuredLogger } from "../../observability/structuredLogger";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "mcps/openaimp/handler",
+});
 
 /** The per-request context the route shell builds for one /mcp call. */
 export interface OpenaimpMcpHandlerContext {
@@ -188,9 +194,12 @@ export function createOpenaimpMcpServer(context: OpenaimpMcpHandlerContext): Ser
       deliveryLegacy as "sync" | "queued"
     );
     if (resolvedDelivery.invalid) {
-      console.error(
-        `[jobs] invalid ${HTTP_DELIVERY_MODE_SWITCH} value ${JSON.stringify(resolvedDelivery.raw)} — failing closed to "${deliveryLegacy}"`
-      );
+      structuredLog.error(jobsConfigErrorEvent(), {
+        message: `[jobs] invalid ${HTTP_DELIVERY_MODE_SWITCH} value ${JSON.stringify(resolvedDelivery.raw)} — failing closed to "${deliveryLegacy}"`,
+        switch: HTTP_DELIVERY_MODE_SWITCH,
+        raw: resolvedDelivery.raw ?? null,
+        resolved: deliveryLegacy,
+      });
       context.audit(jobsConfigErrorEvent(), "orchestrator", {
         setting: HTTP_DELIVERY_MODE_SWITCH,
         value: resolvedDelivery.raw ?? "",

@@ -37,6 +37,13 @@ import {
 import type { MessageEnvelope } from "../messaging/messagingPorts";
 import type { BreakerStateStore } from "./breakerStateStorePorts";
 import { DurableCircuitBreaker } from "./durableBreakerAdapter";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "breakers/createBreakerPorts",
+});
 
 let shared: BreakerRegistry | undefined;
 
@@ -64,9 +71,11 @@ export function createDurableBreakerRegistry(
     try {
       opts.onStateChange?.(event);
     } catch (err) {
-      console.warn(
-        `[breaker] onStateChange failed for ${event.providerId}: ${err instanceof Error ? err.message : String(err)}`
-      );
+      structuredLog.warn("breaker.on_state_change_failed", {
+        message: `[breaker] onStateChange failed for ${event.providerId}: ${err instanceof Error ? err.message : String(err)}`,
+        providerId: event.providerId,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
     const envelope = toBreakerStateChangeEnvelope(event);
     if (opts.emit) {
@@ -74,15 +83,19 @@ export function createDurableBreakerRegistry(
         const result = opts.emit(envelope);
         if (result && typeof (result as Promise<void>).catch === "function") {
           (result as Promise<void>).catch((err) => {
-            console.warn(
-              `[breaker] state-change emission failed for ${event.providerId}: ${err instanceof Error ? err.message : String(err)}`
-            );
+            structuredLog.warn("breaker.state_change_emission_failed", {
+              message: `[breaker] state-change emission failed for ${event.providerId}: ${err instanceof Error ? err.message : String(err)}`,
+              providerId: event.providerId,
+              error: err instanceof Error ? err.message : String(err),
+            });
           });
         }
       } catch (err) {
-        console.warn(
-          `[breaker] state-change emission failed for ${event.providerId}: ${err instanceof Error ? err.message : String(err)}`
-        );
+        structuredLog.warn("breaker.state_change_emission_failed", {
+          message: `[breaker] state-change emission failed for ${event.providerId}: ${err instanceof Error ? err.message : String(err)}`,
+          providerId: event.providerId,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
     if (opts.tripAlert) {
@@ -90,15 +103,19 @@ export function createDurableBreakerRegistry(
         const result = opts.tripAlert(envelope);
         if (result && typeof (result as Promise<void>).catch === "function") {
           (result as Promise<void>).catch((err) => {
-            console.warn(
-              `[breaker] trip alert failed for ${event.providerId}: ${err instanceof Error ? err.message : String(err)}`
-            );
+            structuredLog.warn("breaker.trip_alert_failed", {
+              message: `[breaker] trip alert failed for ${event.providerId}: ${err instanceof Error ? err.message : String(err)}`,
+              providerId: event.providerId,
+              error: err instanceof Error ? err.message : String(err),
+            });
           });
         }
       } catch (err) {
-        console.warn(
-          `[breaker] trip alert failed for ${event.providerId}: ${err instanceof Error ? err.message : String(err)}`
-        );
+        structuredLog.warn("breaker.trip_alert_failed", {
+          message: `[breaker] trip alert failed for ${event.providerId}: ${err instanceof Error ? err.message : String(err)}`,
+          providerId: event.providerId,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
   };
@@ -145,9 +162,10 @@ export function configureDefaultBreakerDurability(deps: ConfiguredDurability): v
   if (configured) return;
   configured = deps;
   if (shared) {
-    console.warn(
-      "[breaker] durability configured after the shared registry already exists; keeping the in-memory registry (configure before first use)"
-    );
+    structuredLog.warn("breaker.durability_configured_late", {
+      message:
+        "[breaker] durability configured after the shared registry already exists; keeping the in-memory registry (configure before first use)",
+    });
   }
 }
 

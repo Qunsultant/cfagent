@@ -13,6 +13,14 @@
  * can never fail a chat turn. An absent note is a no-op:
  * instructions pass through byte-identical.
  */
+
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "telemetry/calibratedPromptPlug",
+});
 export async function applyCalibratedPromptToInstructions(
   resolve: (actorKey: string, promptKey: string) => Promise<string | null>,
   actorKey: string,
@@ -24,9 +32,10 @@ export async function applyCalibratedPromptToInstructions(
     if (!note) return baseInstructions;
     return `${baseInstructions}\n\n${note}`;
   } catch (err) {
-    console.warn(
-      `[telemetry] calibrated-prompt resolution failed, using base instructions (ignored): ${err instanceof Error ? err.message : String(err)}`,
-    );
+    structuredLog.warn("telemetry.calibrated_prompt_resolution_failed", {
+      message: `[telemetry] calibrated-prompt resolution failed, using base instructions (ignored): ${err instanceof Error ? err.message : String(err)}`,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return baseInstructions;
   }
 }

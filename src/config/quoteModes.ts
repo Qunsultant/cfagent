@@ -73,7 +73,7 @@
  * Resolution order (owner directive 2026-10-26):
  *   run > session > user > global env > built-in (surface legacy).
  * First non-blank level wins; an unrecognized winning value FAILS
- * CLOSED to the surface legacy, logged via console.warn, with NO
+ * CLOSED to the surface legacy, logged via the structured logger, with NO
  * fall-through. Audit note, stated honestly: the quote surfaces
  * are unaudited today (M10: market HTTP/WS no audit, Market-data REST
  * quote no audit; MCP audits live at the command layer, which
@@ -136,6 +136,13 @@
  */
 
 import type { Env } from "../types";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "config/quoteModes",
+});
 
 /** Audit event name for quote-switch fail-closed (see header note). */
 export function quotesConfigErrorEvent(): string {
@@ -223,9 +230,12 @@ function resolveSwitch<T extends string>(
     const normalized = normalizeSwitchValue(value, valid);
     if (normalized === null) continue;
     if (normalized === "invalid") {
-      console.warn(
-        `[${quotesConfigErrorEvent()}] ${switchName} unrecognized value at ${level}; failing closed to surface legacy`
-      );
+      structuredLog.warn(quotesConfigErrorEvent(), {
+        message: `[${quotesConfigErrorEvent()}] ${switchName} unrecognized value at ${level}; failing closed to surface legacy`,
+        switch: switchName,
+        level,
+        raw: typeof value === "string" ? value : undefined,
+      });
       return {
         mode: legacy,
         invalid: true,

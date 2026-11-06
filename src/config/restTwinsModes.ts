@@ -94,6 +94,14 @@
  * no production caller yet.
  */
 
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "config/restTwinsModes",
+});
+
 export type AuditWriteMode = "legacy" | "strict";
 
 /** One switch's value, as carried at session/user level. */
@@ -155,9 +163,12 @@ export function resolveAuditWriteMode(
     const normalized = normalizeSwitchValue(value, ["legacy", "strict"]);
     if (normalized === null) continue;
     if (normalized === "invalid") {
-      console.warn(
-        `[${auditConfigErrorEvent()}] ${AUDIT_WRITE_MODE_SWITCH} unrecognized value at ${level}; failing closed to legacy`
-      );
+      structuredLog.warn(auditConfigErrorEvent(), {
+        message: `[${auditConfigErrorEvent()}] ${AUDIT_WRITE_MODE_SWITCH} unrecognized value at ${level}; failing closed to legacy`,
+        switch: AUDIT_WRITE_MODE_SWITCH,
+        level,
+        raw: typeof value === "string" ? value : undefined,
+      });
       return {
         mode: legacy,
         invalid: true,

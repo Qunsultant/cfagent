@@ -36,6 +36,13 @@
 import type { MessageEnvelope } from "../messaging/messagingPorts";
 import type { RetryPolicy } from "../services/pipelinePolicy";
 import { InMemoryCircuitBreaker } from "./inMemoryBreakerAdapter";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "breakers/breakerPorts",
+});
 
 /** Provider ids in the dataProviders registry. */
 export const BREAKER_PROVIDER_IDS = [
@@ -198,7 +205,11 @@ function parseIntClamped(
   if (raw === undefined || raw === null || String(raw).trim() === "") return undefined;
   const n = Number(String(raw).trim());
   if (!Number.isFinite(n)) {
-    console.warn(`[breakerPolicy] ignoring non-numeric ${label}: ${String(raw).slice(0, 40)}`);
+    structuredLog.warn("breaker.policy_non_numeric", {
+      message: `[breakerPolicy] ignoring non-numeric ${label}: ${String(raw).slice(0, 40)}`,
+      label,
+      raw: String(raw).slice(0, 40),
+    });
     return undefined;
   }
   return Math.min(max, Math.max(min, Math.trunc(n)));
@@ -284,24 +295,30 @@ export function createBreakerRegistry(
     try {
       opts.onStateChange?.(event);
     } catch (err) {
-      console.warn(
-        `[breaker] onStateChange failed for ${event.providerId}: ${err instanceof Error ? err.message : String(err)}`
-      );
+      structuredLog.warn("breaker.on_state_change_failed", {
+        message: `[breaker] onStateChange failed for ${event.providerId}: ${err instanceof Error ? err.message : String(err)}`,
+        providerId: event.providerId,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
     if (opts.emit) {
       try {
         const result = opts.emit(toBreakerStateChangeEnvelope(event));
         if (result && typeof (result as Promise<void>).catch === "function") {
           (result as Promise<void>).catch((err) => {
-            console.warn(
-              `[breaker] state-change emission failed for ${event.providerId}: ${err instanceof Error ? err.message : String(err)}`
-            );
+            structuredLog.warn("breaker.state_change_emission_failed", {
+              message: `[breaker] state-change emission failed for ${event.providerId}: ${err instanceof Error ? err.message : String(err)}`,
+              providerId: event.providerId,
+              error: err instanceof Error ? err.message : String(err),
+            });
           });
         }
       } catch (err) {
-        console.warn(
-          `[breaker] state-change emission failed for ${event.providerId}: ${err instanceof Error ? err.message : String(err)}`
-        );
+        structuredLog.warn("breaker.state_change_emission_failed", {
+          message: `[breaker] state-change emission failed for ${event.providerId}: ${err instanceof Error ? err.message : String(err)}`,
+          providerId: event.providerId,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
   };

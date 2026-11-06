@@ -1,6 +1,13 @@
 import defaultConfig from "../../environment.config.json";
 import { RISK_MATH } from "../shared/riskMath";
 import type { Env } from "../types";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "config/etapiConfig",
+});
 
 /** Issue #1545: leave headroom under the Workers Free 50 external-subrequest cap. */
 export const DEFAULT_SUBREQUEST_BUDGET = 35;
@@ -629,7 +636,11 @@ export function getEtapiConfig(env?: Partial<Env>, overrideEnv?: string): EtapiC
       const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
       config = deepMerge(config, parsed);
     } catch (e) {
-      console.warn("[etapiConfig] Failed to parse env.ETAPI_CONFIG:", e);
+      structuredLog.warn("etapi.config_parse_failed", {
+        message: "[etapiConfig] Failed to parse env.ETAPI_CONFIG",
+        source: "env.ETAPI_CONFIG",
+        error: e instanceof Error ? e.message : String(e),
+      });
     }
   }
 
@@ -641,7 +652,11 @@ export function getEtapiConfig(env?: Partial<Env>, overrideEnv?: string): EtapiC
         const parsed = JSON.parse(proc.ETAPI_CONFIG);
         config = deepMerge(config, parsed);
       } catch (e) {
-        console.warn("[etapiConfig] Failed to parse process.env.ETAPI_CONFIG:", e);
+        structuredLog.warn("etapi.config_parse_failed", {
+          message: "[etapiConfig] Failed to parse process.env.ETAPI_CONFIG",
+          source: "process.env.ETAPI_CONFIG",
+          error: e instanceof Error ? e.message : String(e),
+        });
       }
     }
     if (proc.ETAPI_MAX_SCAN_SYMBOLS) config.screener.maxScanSymbols = Number(proc.ETAPI_MAX_SCAN_SYMBOLS);

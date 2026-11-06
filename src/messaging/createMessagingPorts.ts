@@ -29,6 +29,13 @@ import {
   type QueueSendBinding,
 } from "./cfQueueMessagingAdapter";
 import type { MessagingPorts } from "./messagingPorts";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "messaging/createMessagingPorts",
+});
 
 export interface MessagingEnv {
   SCREENER_EVENTS?: unknown;
@@ -60,9 +67,10 @@ export function createMessagingPorts(
   const workQueue = asSendBinding(env.SCREENER_EVENTS);
   if (!workQueue) {
     if (env.SCREENER_EVENTS) {
-      console.warn(
-        "[messaging] SCREENER_EVENTS binding is present but has no send capability — messaging ports unavailable."
-      );
+      structuredLog.warn("messaging.ports_unavailable", {
+        message:
+          "[messaging] SCREENER_EVENTS binding is present but has no send capability — messaging ports unavailable.",
+      });
     }
     return null;
   }
@@ -71,9 +79,10 @@ export function createMessagingPorts(
   if (delivery) {
     subscribers.delivery = delivery;
   } else if (env.SCREENER_EVENTS_DELIVERY) {
-    console.warn(
-      "[messaging] SCREENER_EVENTS_DELIVERY binding is present but has no send capability — delivery subscriber not fanned out."
-    );
+    structuredLog.warn("messaging.delivery_subscriber_not_fanned_out", {
+      message:
+        "[messaging] SCREENER_EVENTS_DELIVERY binding is present but has no send capability — delivery subscriber not fanned out.",
+    });
   }
   const adapter = new CfQueueMessagingAdapter(workQueue, {
     subscribers,

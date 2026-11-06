@@ -16,6 +16,13 @@ import {
   getFeatureFlagParent,
   isKnownFeatureFlag,
 } from "./featureFlagPorts";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "features/cfFlagshipAdapter",
+});
 
 export interface FlagshipBindingLike {
   getBooleanValue(
@@ -69,10 +76,11 @@ export class CfFlagshipAdapter implements FeatureFlagPort {
         return result;
       }
     } catch (flagshipError) {
-      console.warn(
-        `[CfFlagshipAdapter] Evaluation failed for flag '${flag}', failing closed to false:`,
-        flagshipError
-      );
+      structuredLog.warn("feature_flag.evaluation_failed", {
+        message: `[CfFlagshipAdapter] Evaluation failed for flag '${flag}', failing closed to false`,
+        flag,
+        error: flagshipError instanceof Error ? flagshipError.message : String(flagshipError),
+      });
       return false;
     }
 

@@ -325,7 +325,10 @@ describe("step 1 (c)+(d): worker.queue() screener-events branch", () => {
   });
 
   it("undecodable message is acked + logged, never retried", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // #3515 S3: the dead-letter record now travels as a structured event
+    // (dead_letter.recorded) on the console-info JSON fallback, not a
+    // console.warn line.
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
     const fetchCalls: FetchCall[] = [];
     const env = makeEnv(fetchCalls);
     const msg = mkMsg({ nope: true });
@@ -333,7 +336,17 @@ describe("step 1 (c)+(d): worker.queue() screener-events branch", () => {
     expect(fetchCalls).toHaveLength(0);
     expect(msg.acked).toBe(true);
     expect(msg.retried).toBe(false);
-    expect(warn.mock.calls.some((c) => String(c[0]).includes("undecodable"))).toBe(true);
+    const deadLetterLines = info.mock.calls
+      .map((c) => {
+        try {
+          return JSON.parse(String(c[0]));
+        } catch {
+          return null;
+        }
+      })
+      .filter((e) => e !== null && e.operation === "dead_letter.recorded")
+      .map((e) => String(e.fields?.line ?? ""));
+    expect(deadLetterLines.some((l) => l.includes("undecodable"))).toBe(true);
   });
 
   it("unknown envelope type is dropped + acked, never dispatched", async () => {
