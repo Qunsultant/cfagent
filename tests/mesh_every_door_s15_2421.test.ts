@@ -396,7 +396,7 @@ describe("OrchestratorAgent.handleA2A restored wiring (#2421)", () => {
     const env = {
       AI: {},
       APP_ENV: "TEST",
-      SEARCH_AGENT: {},
+      ORCHESTRATOR_AGENT: {},
     } as unknown as Env;
     return new OrchestratorAgent(ctx as never, env);
   }
