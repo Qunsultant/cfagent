@@ -1,0 +1,3 @@
+### Added
+
+- **DO-SQLite-backed test fixtures for the claims/suppression stores (#2860, Factor 10):** new `tests/do-sqlite-fixture.ts` runs the G6 delivery-suppression and G8 stage-claim stores' exact SQL against real SQLite (`node:sqlite`, the slice0 pattern) instead of the SQL-shaped `MockSqlStorage`, with a file-backed variant whose `reopen()` proves a claim survives close + reopen (the DO instance-eviction stand-in). New `tests/factor10_do_sqlite_claims_2860.test.ts` (7 tests) pins claim/already-claimed/release, per-destination/per-stage scoping, the real `PRIMARY KEY` constraint, and cross-instance suppression after reopen. #clo-arsi
