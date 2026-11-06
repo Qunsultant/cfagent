@@ -373,7 +373,7 @@ describe("#686 R1 — identity stability under the cutover", () => {
       "OrchestratorAgent as SearchAgent"
     );
     const wrangler = read("wrangler.jsonc");
-    expect(wrangler).toContain('{ "name": "SEARCH_AGENT", "class_name": "OrchestratorAgent" }');
+    expect(wrangler).toContain('{ "name": "ORCHESTRATOR_AGENT", "class_name": "OrchestratorAgent" }');
     expect(wrangler).toContain('{ "tag": "v1", "new_sqlite_classes": ["SearchAgent"] }');
     // Scoped to the cutover's own facts (#714): later migrations for
     // OTHER classes are legitimate and must not trip this pin — the
