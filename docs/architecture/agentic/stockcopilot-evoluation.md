@@ -217,7 +217,9 @@ flowchart TD
   - *"Explain the 5-stage pipeline you use"* -> Synthesizes pipeline stages and tool mappings.
 
 ### 5.1 Contextual Quick-Chips in Chat Surface
-To provide immediate context on how to interact with and control the Copilot, `copilotRegistry.ts` surfaces 8 interactive prompt chips:
+To provide immediate context on how to interact with, control, and execute trading workflows through the Copilot, `copilotRegistry.ts` surfaces two unified tiers of interactive prompt chips:
+
+#### Tier 1: Autonomous Loop Cadence & Control Chips (#3452)
 1. `⏱️ Set loop interval to 1 hour`: Prompt to adjust the loop interval dynamically.
 2. `🌙 Enable pre-market and overnight sessions`: Enables full 24-hour cycle coverage across extended hours.
 3. `⏸️ Pause trading until 9:30 AM`: Pauses cycle order execution until the regular market bell opens.
@@ -226,6 +228,16 @@ To provide immediate context on how to interact with and control the Copilot, `c
 6. `📊 Open Positions & Exits`: Surfaces current inventory, bracket take-profit, stop-loss, and PnL.
 7. `⏸️ Pause Loop`: Immediately halts autonomous order generation.
 8. `▶️ Resume Loop`: Resumes autonomous order generation.
+
+#### Tier 2: Trading Execution & Core Capability Chips (#3583)
+9. `🎯 Buy AAPL Bracket (TP +4% / SL -2%)`: Drafts an order with +4% take-profit and -2% stop-loss bracket exits.
+10. `🌙 Extended-Hours Limit Order`: Places an extended-hours limit order with session-specific bracket exits.
+11. `📈 Screen Momentum Breakouts`: Scans active stock universe for Momentum Breakout and Gap & Go setups.
+12. `🧪 Evaluate NVDA vs Strategies`: Evaluates a ticker against active strategies without placing orders.
+13. `🛡️ Portfolio CVaR & Sizing`: Analyzes portfolio risk and calculates CVaR position sizing for available capital.
+14. `🌐 Universe: S&P 500 & Movers`: Sets the trading universe to S&P 500 and top pre-market volume movers.
+15. `📄 Generate Trade Performance Report`: Generates comprehensive trading and cycle audit report in Markdown format.
+16. `🔍 Audit Refusals & Skipped Trades`: Queries recent cycle refusal telemetry to explain why trades were skipped.
 
 ---
 
