@@ -40,7 +40,7 @@ function makeEnv() {
     APP_NAME: "Test Agent",
     APP_BASE_URL: "https://agent.test",
     ASSETS: { fetch: async () => new Response(INDEX_HTML, { headers: { "Content-Type": "text/html" } }) },
-    SEARCH_AGENT: { idFromName: (name: string) => name, get: () => ({ fetch: async () => Response.json({}) }) },
+    ORCHESTRATOR_AGENT: { idFromName: (name: string) => name, get: () => ({ fetch: async () => Response.json({}) }) },
   } as unknown as Env;
   return { env, seed, store };
 }
