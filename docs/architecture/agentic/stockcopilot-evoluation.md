@@ -45,7 +45,7 @@ flowchart LR
     S2 --> S3["Sub-Issue 3 (#3452)<br/>Dynamic Loop Config<br/>(Cadence, Universe, Sessions)<br/>via Chat<br/>[MERGED]"]
     S3 --> S4["Sub-Issue 4 (#3450)<br/>Multi-Pattern Catalog &<br/>Multi-Format Reports<br/>(PDF, HTML, JSON, MD)"]
     S4 --> S5["Sub-Issue 5 (#3453)<br/>Platform Capability Reuse<br/>(ThinkWorkflow, Scheduler,<br/>5-Stage Pub/Sub Pipeline)"]
-    S5 --> S6["Sub-Issue 6<br/>Tool-Driven Reflection &<br/>Self-Explanation Introspection"]
+    S5 --> S6["Sub-Issue 6 (#3588)<br/>Tool-Driven Reflection &<br/>Self-Explanation Introspection<br/>[MERGED]"]
 ```
 
 ### Sub-Issue Overview
@@ -56,7 +56,7 @@ flowchart LR
 | 3 | [#3452](https://github.com/Qunsultant/cfagent/issues/3452) | Dynamic Loop Configuration via Chat | Real-time chat commands to adjust scan intervals, session patterns, and universe filters; quick chips. | **Merged** |
 | 4 | [#3450](https://github.com/Qunsultant/cfagent/issues/3450) | Multi-Format Reporting & Patterns | Generate executive summaries, PDF, HTML, JSON, and Markdown reports on demand. | Planned |
 | 5 | [#3453](https://github.com/Qunsultant/cfagent/issues/3453) | Pipeline & Workflow Reuse | Connect loop stages to `thinkWorkflow`, `thinkAdapter`, scheduler alarms, and audit ledgers. | Planned |
-| 6 | Epic #3514 | Tool-Driven Reflection & Introspection | Dynamic capability synthesis, pipeline self-explanation, and adaptive learning via tool metadata. | Planned |
+| 6 | [#3588](https://github.com/Qunsultant/cfagent/issues/3588) | Tool-Driven Reflection & Introspection | Dynamic capability synthesis, pipeline self-explanation, and adaptive learning via tool metadata. | **Merged** |
 
 ---
 
