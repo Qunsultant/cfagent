@@ -103,7 +103,7 @@ function makeEnvWithStore(): { env: Env; store: Map<string, string> } {
     ET_BASE_URL: "https://apisb.etrade.com/v1",
     SESSION_STORE: namespace,
     ETRADE_KV: kv,
-    SEARCH_AGENT: {} as any,
+    ORCHESTRATOR_AGENT: {} as any,
     AGENT_SESSIONS: {} as any,
     ASSETS: {} as any,
     AI: {} as any,
