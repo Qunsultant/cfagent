@@ -7,11 +7,16 @@ import { registerDraftOwner } from "../payments/draftOwners";
 // Issue #278: single-owner TTL cache for AI Search queries + durable
 // scheduled-run reports searchable through this same path.
 import { getAiSearchCache, aiSearchCacheKey } from "../services/aiSearchCache";
-// Qunsultant/cfagent#1775 (Adapter S1): the AI Search HTTP call
-// lives in the aiSearch client — this tool no longer fetches the
-// endpoint directly. Only the fetch moved; URL, body, timeout,
-// status/chunk handling, cache, and audits below are verbatim.
-import { AiSearchInstanceService } from "../services/aiSearch";
+// Qunsultant/cfagent#1775 (Adapter S1) moved the AI Search HTTP
+// call out of this tool into the aiSearch client; issue #3342 then
+// retired that client's public-endpoint REST transport, so the
+// index leg below now reads the private namespace binding through
+// the shared helper (which also applies the #2246 report
+// discipline — this tool carries no caller login, so report-type
+// index chunks are withheld here; the tool's own report answers
+// come from its local store below). Cache, audits, and the
+// result/failure shapes are unchanged from the REST era.
+import { searchAiSearchNamespaceChunks } from "./aiSearchPaths";
 import { searchScheduledReports } from "../services/scheduledReports";
 // Issue #1169 (S2, flag-gated): corpus provenance on index chunks.
 import {
@@ -60,16 +65,19 @@ export function createMAS({ env, sessionId, requestId, sql, audit }: MASOptions)
         reportId: r.id,
         createdAt: r.createdAt,
       }));
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 10_000);
       try {
-        const response = await new AiSearchInstanceService(env).searchRaw(query, {
-          signal: controller.signal,
-        });
+        // Issue #3342: the index leg reads the namespace binding
+        // (helper above), not the retired REST endpoint. The old
+        // 10s AbortController disappears with the fetch — the
+        // binding RPC has no abort knob; the helper's typed
+        // outcomes replace the HTTP status handling: !ok takes the
+        // old !response.ok branch below, with the helper's failure
+        // detail standing where the status used to stand.
+        const outcome = await searchAiSearchNamespaceChunks(env, query);
 
-        if (!response.ok) {
-          const errMsg = `Knowledge search upstream returned ${response.status}`;
-          audit("search.failed", "search", { query, status: response.status });
+        if (!outcome.ok) {
+          const errMsg = `Knowledge search upstream unavailable (${outcome.error})`;
+          audit("search.failed", "search", { query, error: outcome.error });
           // Upstream failed: still surface any local reports honestly;
           // the error result itself is NOT cached.
           if (reports.length > 0) {
@@ -79,16 +87,14 @@ export function createMAS({ env, sessionId, requestId, sql, audit }: MASOptions)
               count: 0,
               reportCount: reports.length,
               chunks: reportChunks,
-              message: `Retrieved ${reports.length} scheduled-run report(s) locally; the AI Search upstream was unavailable (${response.status}).`,
+              message: `Retrieved ${reports.length} scheduled-run report(s) locally; the AI Search upstream was unavailable (${outcome.error}).`,
               source: "Scheduled reports",
             };
           }
           return { error: errMsg, query };
         }
 
-        const data = (await response.json()) as any;
-        const rawChunks = data?.result?.chunks ?? (Array.isArray(data) ? data : []);
-        const chunks = Array.isArray(rawChunks) ? rawChunks : [];
+        const chunks = outcome.chunks ?? [];
         const resultsFound = chunks.length > 0 || reports.length > 0;
 
         // Issue #1169 (S2, flag-gated): when the serving flag is on,
@@ -149,8 +155,6 @@ export function createMAS({ env, sessionId, requestId, sql, audit }: MASOptions)
           };
         }
         return { error: message, query, resultsFound: false, count: 0, chunks: [] };
-      } finally {
-        clearTimeout(timeout);
       }
     },
   });
