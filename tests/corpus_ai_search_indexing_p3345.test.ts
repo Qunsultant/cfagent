@@ -437,11 +437,14 @@ describe("D. sync backfill leg (#3345)", () => {
 });
 
 describe("E. sync wiring (#3345)", () => {
+  // Issue #3527 S4: baseDeps used to carry a stub `backfill` dep
+  // (the reports sweep that rode the sync). The leg was unbundled
+  // to the reports workflow, so the dep no longer exists; these
+  // tests were always about the corpusIndex leg only.
   const baseDeps = {
     manifest: [],
     recordStore: stubRecordStore({}),
     bucket: stubBlobStore([]) as any,
-    backfill: async () => ({ upserted: 0, skippedRetention: 0, rows: 0, pages: 0, complete: true }),
   };
 
   it("an injected corpusIndex leg's outcome is surfaced on the sync result", async () => {
