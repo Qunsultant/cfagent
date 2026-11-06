@@ -9,7 +9,7 @@
  * PaymentWorkflowAssurance prices/pricing fetches.
  *
  * Same harness as tests/browser_snapshot_auth_aliases.test.ts (real
- * worker fetch dispatch, recording SEARCH_AGENT stub, Map-backed
+ * worker fetch dispatch, recording ORCHESTRATOR_AGENT stub, Map-backed
  * SESSIONS KV). These tests pin every spelling:
  * - unauthenticated → 401, nothing forwarded (the handler is
  *   reached; a 404 would mean the dispatcher missed it);
@@ -61,7 +61,7 @@ function makeEnv() {
   seedSession("sessions", SESSION_ID, { githubLogin: LOGIN, userLogin: LOGIN });
   const env: any = {
     SESSION_STORE: sessionStoreNs,
-    SEARCH_AGENT: {
+    ORCHESTRATOR_AGENT: {
       idFromName: (name: string) => name,
       get: (id: string) => ({
         fetch: async (req: Request) => {
