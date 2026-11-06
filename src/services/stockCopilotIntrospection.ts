@@ -25,6 +25,7 @@ import {
 } from "../agents/copilotTradingMode";
 import type { CommercialStore } from "../data/commercialPorts";
 import type {
+  CopilotExecutionMode,
   StockCopilotActivityPort,
   StockCopilotControlPort,
   StockCopilotPositionPort,
@@ -39,6 +40,7 @@ import {
   type CopilotSessionId,
 } from "./stockCopilotSessions";
 import { resolveCopilotCadence } from "./stockCopilotCadence";
+import { resolveCopilotExecutionMode } from "./stockCopilotExecutionMode";
 
 export interface PipelineToolItem {
   name: string;
@@ -329,7 +331,7 @@ export async function introspectStockCopilot(
     ok: true,
     userLogin,
     timestamp: nowIso,
-    mode: "deterministic",
+    mode: resolveCopilotExecutionMode({ readSettingRaw, env }),
     configuration: {
       broker: activeBroker,
       mode: activeMode,

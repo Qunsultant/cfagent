@@ -10,11 +10,17 @@ import {
   COPILOT_ACTIVITY_RETENTION,
   COPILOT_ACTIVITY_TABLE,
   COPILOT_CONTROL_TABLE,
+  COPILOT_LEARNINGS_RETENTION,
+  COPILOT_LEARNINGS_TABLE,
   type CopilotActivityExit,
   type CopilotControlRecord,
+  type CopilotCriticVerdict,
   type CopilotCycleActivityRecord,
+  type CopilotExecutionMode,
+  type CopilotLearningRecord,
   type StockCopilotActivityPort,
   type StockCopilotControlPort,
+  type StockCopilotMemoryPort,
   type StockCopilotStoreSqlExecutor,
 } from "./stockCopilotStorePorts";
 
@@ -49,8 +55,31 @@ function parseExits(raw: unknown): CopilotActivityExit[] {
   }
 }
 
+function parseCriticVerdict(raw: unknown): CopilotCriticVerdict | null {
+  if (!raw) return null;
+  try {
+    const parsed: unknown = JSON.parse(str(raw));
+    if (parsed && typeof parsed === "object" && typeof (parsed as any).verdict === "string") {
+      const v = parsed as any;
+      return {
+        verdict: v.verdict,
+        reason: typeof v.reason === "string" ? v.reason : "",
+        recommendations: Array.isArray(v.recommendations)
+          ? v.recommendations.filter((r: unknown): r is string => typeof r === "string")
+          : undefined,
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 function mapActivity(row: Record<string, unknown>): CopilotCycleActivityRecord {
   const outcome = str(row.outcome);
+  const rawMode = strOrNull(row.mode);
+  const mode: CopilotExecutionMode | undefined =
+    rawMode === "agentic" || rawMode === "deterministic" ? rawMode : undefined;
   return {
     id: str(row.id),
     userLogin: str(row.user_login),
@@ -68,6 +97,8 @@ function mapActivity(row: Record<string, unknown>): CopilotCycleActivityRecord {
     exits: parseExits(row.exits_json),
     detail:
       row.detail === null || row.detail === undefined ? null : str(row.detail),
+    mode,
+    criticVerdict: parseCriticVerdict(row.critic_verdict_json),
   };
 }
 
@@ -97,11 +128,18 @@ export class DoSqliteStockCopilotActivityStore
     if (!cols.some((c) => String(c.name ?? "") === "session")) {
       this.sql.exec(`ALTER TABLE ${COPILOT_ACTIVITY_TABLE} ADD COLUMN session TEXT`);
     }
+    // #3519: execution mode & critic verdict columns
+    if (!cols.some((c) => String(c.name ?? "") === "mode")) {
+      this.sql.exec(`ALTER TABLE ${COPILOT_ACTIVITY_TABLE} ADD COLUMN mode TEXT`);
+    }
+    if (!cols.some((c) => String(c.name ?? "") === "critic_verdict_json")) {
+      this.sql.exec(`ALTER TABLE ${COPILOT_ACTIVITY_TABLE} ADD COLUMN critic_verdict_json TEXT`);
+    }
   }
 
   appendActivity(record: CopilotCycleActivityRecord): void {
     this.sql.exec(
-      `INSERT INTO ${COPILOT_ACTIVITY_TABLE} (id, user_login, cycle_at, outcome, entries_json, exits_json, detail, session) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO ${COPILOT_ACTIVITY_TABLE} (id, user_login, cycle_at, outcome, entries_json, exits_json, detail, session, mode, critic_verdict_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       record.id,
       record.userLogin,
       record.cycleAt,
@@ -110,6 +148,8 @@ export class DoSqliteStockCopilotActivityStore
       JSON.stringify(record.exits),
       record.detail,
       record.session ?? null,
+      record.mode ?? null,
+      record.criticVerdict ? JSON.stringify(record.criticVerdict) : null,
     );
     // Bounded retention: keep the login's newest records only
     // (cycle_at order, rowid breaking same-timestamp ties by
@@ -178,5 +218,93 @@ export class DoSqliteStockCopilotControlStore
       record.updatedAt,
       record.updatedBy,
     );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Issue #3519 — DO-SQLite Learning Memory Store
+// ---------------------------------------------------------------------------
+
+function mapLearning(row: Record<string, unknown>): CopilotLearningRecord {
+  const cat = str(row.category);
+  const category =
+    cat === "execution" ||
+    cat === "risk" ||
+    cat === "pattern" ||
+    cat === "session" ||
+    cat === "refusal"
+      ? cat
+      : "execution";
+  const rawVerdict = strOrNull(row.source_verdict);
+  const sourceVerdict =
+    rawVerdict === "accept" || rawVerdict === "revise" || rawVerdict === "reject"
+      ? rawVerdict
+      : null;
+
+  return {
+    id: str(row.id),
+    userLogin: str(row.user_login),
+    cycleId: strOrNull(row.cycle_id),
+    timestamp: str(row.timestamp),
+    category,
+    insight: str(row.insight),
+    sourceVerdict,
+    suggestedAction: strOrNull(row.suggested_action),
+  };
+}
+
+export class DoSqliteStockCopilotMemoryStore implements StockCopilotMemoryPort {
+  constructor(private readonly sql: StockCopilotStoreSqlExecutor) {}
+
+  ensureSchema(): void {
+    this.sql.exec(
+      `CREATE TABLE IF NOT EXISTS ${COPILOT_LEARNINGS_TABLE} (
+        id TEXT PRIMARY KEY,
+        user_login TEXT NOT NULL,
+        cycle_id TEXT,
+        timestamp TEXT NOT NULL,
+        category TEXT NOT NULL,
+        insight TEXT NOT NULL,
+        source_verdict TEXT,
+        suggested_action TEXT
+      )`,
+    );
+  }
+
+  recordLearning(learning: CopilotLearningRecord): void {
+    this.ensureSchema();
+    this.sql.exec(
+      `INSERT INTO ${COPILOT_LEARNINGS_TABLE} (id, user_login, cycle_id, timestamp, category, insight, source_verdict, suggested_action) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      learning.id,
+      learning.userLogin,
+      learning.cycleId ?? null,
+      learning.timestamp,
+      learning.category,
+      learning.insight,
+      learning.sourceVerdict ?? null,
+      learning.suggestedAction ?? null,
+    );
+    // Bounded retention
+    this.sql.exec(
+      `DELETE FROM ${COPILOT_LEARNINGS_TABLE} WHERE user_login = ? AND id NOT IN (SELECT id FROM ${COPILOT_LEARNINGS_TABLE} WHERE user_login = ? ORDER BY timestamp DESC, rowid DESC LIMIT ?)`,
+      learning.userLogin,
+      learning.userLogin,
+      COPILOT_LEARNINGS_RETENTION,
+    );
+  }
+
+  listLearnings(
+    userLogin: string,
+    limit = COPILOT_LEARNINGS_RETENTION,
+  ): CopilotLearningRecord[] {
+    this.ensureSchema();
+    const rows = [
+      ...this.sql.exec(
+        `SELECT * FROM ${COPILOT_LEARNINGS_TABLE} WHERE user_login = ? ORDER BY timestamp DESC, rowid DESC LIMIT ?`,
+        userLogin,
+        limit,
+      ),
+    ] as Array<Record<string, unknown>>;
+    return rows.map(mapLearning);
   }
 }
