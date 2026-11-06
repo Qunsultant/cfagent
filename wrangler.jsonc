@@ -76,7 +76,7 @@
   },
   "durable_objects": {
     "bindings": [
-      { "name": "SEARCH_AGENT", "class_name": "OrchestratorAgent" },
+      { "name": "ORCHESTRATOR_AGENT", "class_name": "OrchestratorAgent" },
       {
         "name": "OPTIONS_SCANNER_MCP",
         "class_name": "OptionsScannerMCP"
@@ -169,7 +169,12 @@
     // tombstoned the colliding v9 registration in Deploy A (#2330).
     // Instance names (logins) and stored state carry over per
     // renamed_classes semantics; the SEARCH_AGENT binding name does
-    // not change — only its class_name does (above).
+    // not change — only its class_name does (above). Issue #2570
+    // later finished the rename on the binding side: the binding is
+    // now named ORCHESTRATOR_AGENT (same class_name). Binding names
+    // are not namespace keys — namespaces are per class — so no
+    // migration accompanies the binding rename and the per-login
+    // instances and their stored state are untouched by it.
     { "tag": "v15", "renamed_classes": [{ "from": "SearchAgent", "to": "OrchestratorAgent" }] }
   ],
   // Issue #606 (phase 4 of #415): no KV namespaces remain — sessions and
