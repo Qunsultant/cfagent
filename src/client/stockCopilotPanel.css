@@ -1,0 +1,74 @@
+/* Stock Copilot panel (issue #3422) — scp- prefixed, token-only. */
+
+.scp-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin: 0.75rem 1rem 0;
+  max-height: 45vh;
+  overflow-y: auto;
+}
+
+.scp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.scp-title-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.scp-title {
+  font-size: var(--font-size-body);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.scp-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.scp-desc {
+  margin: 0;
+  font-size: var(--font-size-body-sm);
+  color: var(--color-text-muted);
+}
+
+.scp-section-title {
+  font-size: var(--font-size-body-sm);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin-top: 0.25rem;
+}
+
+.scp-feed {
+  display: flex;
+  flex-direction: column;
+}
+
+.scp-feed-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0;
+  border-top: 1px solid var(--color-border-medium);
+  font-size: var(--font-size-body-sm);
+}
+
+.scp-feed-main {
+  flex: 1;
+  color: var(--color-text-primary);
+}
+
+.scp-feed-time {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+  white-space: nowrap;
+}

@@ -330,6 +330,12 @@
  * source order) — bringing the pinned inventory to 367 entries
  * (measured: 365 + 2); the delegation sequence is unchanged (same
  * handler, same position).
+ *
+ * Issue #3422 added two — GET /stock-copilot/status and POST
+ * /stock-copilot/control (in handleStockCopilotRoutes, delegated
+ * last, after the schedules handler, before the Not-found
+ * fallthrough) — bringing the pinned inventory to 369 entries
+ * (measured: 367 + 2) and the delegation sequence to 51 calls.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -387,7 +393,9 @@ const HANDLER_FILE: Record<string, string> = {
   "handleKvWipeRoutes": "kvWipe.ts",
   "handleDataLifecycleRoutes": "dataLifecycle.ts",
   "handleOrchestratorMigrationRoutes": "orchestratorMigration.ts",
-  "handleSchedulesRoutes": "schedules.ts"
+  "handleSchedulesRoutes": "schedules.ts",
+  // Issue #3422: Stock Copilot status + pause/resume control.
+  "handleStockCopilotRoutes": "stockCopilot.ts"
 };
 
 const EXPECTED_DELEGATIONS = [
@@ -440,7 +448,8 @@ const EXPECTED_DELEGATIONS = [
   "handleKvWipeRoutes",
   "handleDataLifecycleRoutes",
   "handleOrchestratorMigrationRoutes",
-  "handleSchedulesRoutes"
+  "handleSchedulesRoutes",
+  "handleStockCopilotRoutes"
 ];
 
 const EXPECTED_INVENTORY = [
@@ -857,7 +866,11 @@ const EXPECTED_INVENTORY = [
   "handleSchedulesRoutes :: endsWith(\"/schedules/trigger-retention\")",
   "handleSchedulesRoutes :: endsWith(\"/schedules/trigger-iv-collection\")",
   "handleSchedulesRoutes :: endsWith(\"/schedules/trigger-discovery\")",
-  "handleSchedulesRoutes :: endsWith(\"/schedules/feed-snapshot\")"
+  "handleSchedulesRoutes :: endsWith(\"/schedules/feed-snapshot\")",
+  // Issue #3422: Stock Copilot status read + pause/resume write
+  // (in handleStockCopilotRoutes, delegated last).
+  "handleStockCopilotRoutes :: endsWith(\"/stock-copilot/status\")",
+  "handleStockCopilotRoutes :: endsWith(\"/stock-copilot/control\")"
 ];
 
 function routeRequestBody(orchSrc: string): string {
