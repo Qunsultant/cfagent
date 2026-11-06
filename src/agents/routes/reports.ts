@@ -31,7 +31,16 @@ import {
 import { createCanonicalReportStorePorts } from "../../data/createCanonicalReportStorePorts";
 import type { SettingsChangeNotifier } from "../settingsWebhookNotify";
 import { createOrchestratorTablePorts } from "../../data/createOrchestratorTablePorts";
-import { runCanonicalIndexBackfillPage } from "../../services/reportSemanticIndex";
+import {
+  runCanonicalIndexBackfillAll,
+  runCanonicalIndexBackfillPage,
+  shouldFireReportsIndexBackfillTick,
+  REPORTS_INDEX_BACKFILL_LAST_RUN_KEY,
+} from "../../services/reportSemanticIndex";
+import {
+  settingReadFromSql,
+  settingWriteFromSql,
+} from "../../services/screeningFlags";
 import { unauthenticatedResponse } from "./routeIdentity";
 import {
   POLLING_CONFIG_DEFAULTS,
@@ -791,7 +800,7 @@ export async function handleReportsRoutes(
     try {
       // Issue #1169 S4-4: the page logic lives in
       // runCanonicalIndexBackfillPage (reportSemanticIndex.ts),
-      // shared with the corpus sync — this handler only parses
+      // shared with the sweep below — this handler only parses
       // limit/offset and returns the page result as-is.
       const page = await runCanonicalIndexBackfillPage(
         ctx.env,
@@ -802,6 +811,51 @@ export async function handleReportsRoutes(
     } catch (err) {
       return Response.json(
         { error: `Index backfill failed: ${err instanceof Error ? err.message : String(err)}` },
+        { status: 500 }
+      );
+    }
+  }
+
+  // Issue #3527 S4: the weekly canonical-index sweep — the full
+  // backfill (runCanonicalIndexBackfillAll) as the reports
+  // workflow's own scheduled job. Until S4 this sweep rode the
+  // corpus sync (injected into runCorpusSync, gated by the corpus
+  // marker); it is reports machinery, so it now has its own route,
+  // its own tick rider (queue.ts, beside the corpus rider), and
+  // its own weekly guard + durable marker
+  // (reports_index_backfill_last_run in mas_settings, via the
+  // screeningFlags settingRead/WriteFromSql idiom — the same
+  // store the corpus marker uses). Fire/no-fire is decided here;
+  // the dispatch is unconditional and skips are cheap and explicit.
+  // The marker is written ONLY on a completed sweep: a throwing
+  // sweep answers 500 (the paged route's shape) with no marker
+  // write, so the next tick retries instead of waiting a week.
+  // Session-gated exactly like the paged route above (the tick
+  // dispatch carries the service identity via x-user-login).
+  if (path.endsWith("/trading/reports/index-backfill-sweep") && request.method === "POST") {
+    const login = request.headers.get("x-user-login") || "";
+    if (!login) return unauthenticatedResponse();
+    const sql = ctx.ensureTables();
+    const decision = shouldFireReportsIndexBackfillTick(
+      new Date(),
+      settingReadFromSql(sql)(REPORTS_INDEX_BACKFILL_LAST_RUN_KEY)
+    );
+    if (!decision.fire) {
+      return Response.json({
+        success: true,
+        skipped: true,
+        reason: decision.reason,
+        lastFiredAt: decision.lastFiredAt,
+      });
+    }
+    const ranAt = new Date().toISOString();
+    try {
+      const outcome = await runCanonicalIndexBackfillAll(ctx.env, sql);
+      settingWriteFromSql(sql)(REPORTS_INDEX_BACKFILL_LAST_RUN_KEY, ranAt);
+      return Response.json({ success: true, ...outcome, ranAt });
+    } catch (err) {
+      return Response.json(
+        { error: `Index backfill sweep failed: ${err instanceof Error ? err.message : String(err)}` },
         { status: 500 }
       );
     }
