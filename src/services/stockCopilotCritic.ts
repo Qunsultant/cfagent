@@ -7,7 +7,7 @@
  */
 import type { CopilotCriticVerdict, CopilotPositionRecord } from "../data/stockCopilotStorePorts";
 import type { CopilotSessionId } from "./stockCopilotSessions";
-import type { ITradingPlatform } from "../trading/interfaces";
+import type { ITradingPlatform } from "../trading";
 import { COPILOT_STOP_LOSS_PCT, COPILOT_TAKE_PROFIT_PCT } from "./stockCopilot";
 
 export interface ProposedTradeIntent {
@@ -168,3 +168,4 @@ export function evaluateCriticRules(input: CriticEvaluationInput): CriticEvaluat
     distilledLearnings,
   };
 }
+

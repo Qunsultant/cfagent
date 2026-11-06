@@ -155,7 +155,7 @@ export async function runStockCopilotAgenticCycle(
             action: "SELL",
             quantity: pos.quantity,
             orderType: shape.orderType,
-            limitPrice: shape.limitPrice,
+            limitPrice: shape.orderType === "LIMIT" ? shape.limitPrice : undefined,
             stopPrice: pos.stopPrice,
             targetPrice: pos.targetPrice,
             strategy: pos.strategy,
@@ -179,7 +179,7 @@ export async function runStockCopilotAgenticCycle(
         const closes = await deps.loadBars(sym);
         if (closes.length < 5) continue;
         const last = closes[closes.length - 1];
-        const signal = evaluateLatestPatternSignal(strat, closes, { holding: false });
+        const signal = evaluateLatestPatternSignal(strat, closes, { holding: false, entryPrice: 0 });
         if (signal.action === "enter_long" && last > 0) {
           const stopPrice = round2(last * (1 - COPILOT_STOP_LOSS_PCT / 100));
           const targetPrice = round2(last * (1 + COPILOT_TAKE_PROFIT_PCT / 100));
@@ -190,7 +190,7 @@ export async function runStockCopilotAgenticCycle(
             action: "BUY",
             quantity: 10, // Sizing constraint
             orderType: shape.orderType,
-            limitPrice: shape.limitPrice ?? last,
+            limitPrice: (shape.orderType === "LIMIT" ? shape.limitPrice : last) ?? last,
             stopPrice,
             targetPrice,
             strategy: strat,
