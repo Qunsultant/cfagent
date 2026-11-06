@@ -6,7 +6,7 @@
  * aspect is moved or duplicated. This module does two things:
  *
  * 1. THE MAP — SCREEN_RUN_ASPECTS names, for each of the
- *    eight cross-cutting concerns, the ONE join point that
+ *    nine cross-cutting concerns, the ONE join point that
  *    implements it. A future path must reuse the named join
  *    point, not re-implement the concern.
  * 2. THE TWO MISSING PIECES — failure classification and
@@ -32,7 +32,19 @@
  *                        Slice 7 (runId, destination) suppressor.
  *   provenance           manualWorkflowJobId / workflow traceparent
  *                        + canonical report generation
- *                        (screener:<timestamp>).
+ *                        (screener:<timestamp>). Issue #2860
+ *                        (Factor 14): the funnel trace_id IS the
+ *                        workflow traceparent's trace-id when the
+ *                        run carries one (funnelTraceIdForRun).
+ *   telemetry            NEW (#2860 Factor 14): the funnel's events
+ *                        fold into the screen-run metrics accumulator
+ *                        (src/telemetry/screenRunStats.ts) at the
+ *                        logScreenRunEvent join point — one fold per
+ *                        logged event, never throwing, same loss
+ *                        semantics as the retrieval-stats accumulator
+ *                        (per-isolate; durable home is #1743's
+ *                        Analytics Engine pipeline, a named
+ *                        follow-up).
  *
  * The scheduled sharded chain bypasses runScreen (it runs
  * through shard jobs), so its aspects live at the chain's own
@@ -49,6 +61,9 @@
  * execution changes in this slice.
  */
 
+import { parseTraceparent } from "../observability/observabilityPorts";
+import { ingestScreenRunEvent } from "../telemetry/screenRunStats";
+
 export const SCREEN_RUN_ASPECTS = {
   logging: { joinPoint: "ScreenerAgent.runScreen via logScreenRunEvent (this module); chain submission via the same fn (scheduledTasks autonomousMarketScreenSharded)" },
   authScoping: { joinPoint: "ScreenerAgent.recordOwner + screenRunLock (#1185, #828, #1993)" },
@@ -57,8 +72,26 @@ export const SCREEN_RUN_ASPECTS = {
   failureClassification: { joinPoint: "classifyScreenFailure (this module), wired in runScreen + chain submission (scheduledTasks autonomousMarketScreenSharded)" },
   partialResultMarking: { joinPoint: "collateShards qualified rule + ScreenerRunResult.partial (#462)" },
   delivery: { joinPoint: "persistThenDeliverAll + deliverySuppressor (Slices 3 and 7)" },
-  provenance: { joinPoint: "manualWorkflowJobId + workflow traceparent + canonical generation screener:<timestamp>" },
+  provenance: { joinPoint: "manualWorkflowJobId + workflow traceparent + canonical generation screener:<timestamp>; funnel trace_id is the workflow traceparent's trace-id (funnelTraceIdForRun, #2860 Factor 14)" },
+  telemetry: { joinPoint: "screenRunStats accumulator, folded at logScreenRunEvent (this module, #2860 Factor 14)" },
 } as const;
+
+/**
+ * Issue #2860 (Factor 14): the funnel's trace_id for a run. When
+ * the run carries a workflow traceparent (W3C `00-<trace-id>-...`,
+ * stamped on the WorkflowJobCommand by the mesh screen door and
+ * threaded through shardScreenRequest → toAgentRequest →
+ * ScreenerRunRequest), the funnel trace_id IS that trace-id — so a
+ * run's started/completed/failed lines correlate with the
+ * workflow's own hops by trace_id, with no separate correlation
+ * map. An invalid or absent traceparent keeps the old behavior: a
+ * fresh UUID per run (manual/scheduled runs have no workflow
+ * traceparent). Never throws; never invents an id.
+ */
+export function funnelTraceIdForRun(traceparent?: string): string {
+  const parsed = traceparent === undefined ? null : parseTraceparent(traceparent);
+  return parsed?.traceId ?? crypto.randomUUID();
+}
 
 export type ScreenFailureClassification =
   | "retryable"
@@ -156,6 +189,18 @@ export function logScreenRunEvent(input: {
     if (input.durationMs !== undefined) line.duration_ms = input.durationMs;
     if (input.classification) line.classification = input.classification;
     if (input.error) line.error = input.error;
+    // Issue #2860 (Factor 14): the same event folds into the
+    // screen-run metrics accumulator at this one join point, so
+    // every funnel emission (runScreen + chain submission) is
+    // aggregated exactly once. Inside the logging try: a fold
+    // failure must not fail a screen, and logging still emits.
+    ingestScreenRunEvent({
+      event: input.event,
+      trigger: input.trigger,
+      universe: input.universe,
+      ...(input.durationMs !== undefined ? { durationMs: input.durationMs } : {}),
+      ...(input.classification ? { classification: input.classification } : {}),
+    });
     console.log(JSON.stringify(line));
   } catch {
     // Logging never fails a screen.

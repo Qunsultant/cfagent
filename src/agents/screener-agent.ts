@@ -53,6 +53,7 @@ import { planStockScreenRun } from "../workflows/stockScreenPlanner";
 import { paretoFrontierForScreen } from "../workflows/paretoFrontier";
 import {
   classifyScreenFailure,
+  funnelTraceIdForRun,
   logScreenRunEvent,
 } from "../workflows/screenRunAspects";
 import {
@@ -172,6 +173,14 @@ export interface ScreenerRunRequest {
    * (#1317); it never touches E*TRADE and never falls back to it.
    */
   provider?: StockScreenProvider;
+  /**
+   * Issue #2860 (Factor 14): the workflow run's W3C traceparent,
+   * threaded from the WorkflowJobCommand through the shard request
+   * and the adapter. runScreen derives the funnel trace_id from it
+   * (funnelTraceIdForRun) so the run's log lines correlate with the
+   * workflow's hops; absent, the funnel mints a fresh UUID.
+   */
+  traceparent?: string;
   /**
    * Issue #1527: explicit whole-run fallback marker — set by the
    * scheduled layer when it falls back to Yahoo because the
@@ -852,6 +861,12 @@ export class ScreenerAgent extends PortThink {
     if (req.userLogin) await this.recordOwner(req.userLogin);
     const lockLogin = await this.userLogin();
     const lockUniverse = req.universe || "nasdaq100";
+    // Issue #2860 (Factor 14): ONE trace_id for the whole run,
+    // derived once from the workflow traceparent when the run
+    // carries one — the lock refusal, started, completed, and
+    // failed lines all share it, so the run correlates with the
+    // workflow's hops by trace_id.
+    const traceId = funnelTraceIdForRun(req.traceparent);
     const lock = this.screenRunLock().acquire(lockLogin, lockUniverse);
     if (!lock.acquired) {
       // #2840: the refusal now names the in-flight run (id +
@@ -865,7 +880,7 @@ export class ScreenerAgent extends PortThink {
         trigger: req.trigger,
         universe: lockUniverse,
         userLogin: lockLogin,
-        traceId: crypto.randomUUID(),
+        traceId,
         classification: classifyScreenFailure(err),
         error: err.message,
       });
@@ -899,7 +914,6 @@ export class ScreenerAgent extends PortThink {
     // throws are identical, and the lock still releases in
     // the finally below, failure or not.
     const startedMs = Date.now();
-    const traceId = crypto.randomUUID();
     logScreenRunEvent({
       event: "screen.started",
       trigger: req.trigger,

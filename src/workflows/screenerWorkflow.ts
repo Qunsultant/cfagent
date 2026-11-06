@@ -81,6 +81,7 @@ function toAgentRequest(req: ShardScreenRequest): ScreenerRunRequest {
     ...(req.portfolioContext !== undefined ? { portfolioContext: req.portfolioContext } : {}),
     ...(req.maxItems !== undefined ? { maxItems: req.maxItems } : {}),
     ...(req.maxSymbols !== undefined ? { maxSymbols: req.maxSymbols } : {}),
+    ...(req.traceparent ? { traceparent: req.traceparent } : {}),
   };
 }
 
