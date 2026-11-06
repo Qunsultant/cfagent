@@ -152,14 +152,14 @@ export const MESH_AGENTS: MeshAgentEntry[] = [
     className: "OrchestratorAgent",
     kind: "agent",
     base: "PortThink",
-    bindings: ["SEARCH_AGENT"],
+    bindings: ["ORCHESTRATOR_AGENT"],
     sourceFile: "src/agents/orchestrator.ts",
     role: "Primary conversational agent: chat turns, the MAS tool surface, NLQ and goal/chain execution; owns the mas_* SQL ledger the fleet reads from.",
     status: "live",
     statusReason:
-      "Bound on SEARCH_AGENT (class OrchestratorAgent since migration v15, #2523) and routed for every chat turn; no recorded degradation.",
+      "Bound on ORCHESTRATOR_AGENT (class OrchestratorAgent since migration v15, #2523) and routed for every chat turn; no recorded degradation.",
     notes:
-      "Exported from src/server.ts under its own name, OrchestratorAgent (the SEARCH_AGENT binding's class_name since migration v15). Service and A2A addressing uses the shared orchestrator instance. The G0 rename (Agent Mesh S2 two-deploy rename, gate record #2326) is complete: migration v14 (#2330, Deploy A) tombstoned the colliding v9 own-name namespace — the registration created for #1387 sub-agent root resolution — and migration v15 (#2523, Deploy B) renamed this SEARCH_AGENT namespace onto OrchestratorAgent via renamed_classes, so the class's own-name namespace is the renamed namespace, instance names (logins) and stored state carried over, the SearchAgent export alias is retired, and ctx.exports[\"OrchestratorAgent\"] root resolution is restored.",
+      "Exported from src/server.ts under its own name, OrchestratorAgent (the ORCHESTRATOR_AGENT binding's class_name since migration v15). Service and A2A addressing uses the shared orchestrator instance. The G0 rename (Agent Mesh S2 two-deploy rename, gate record #2326) is complete: migration v14 (#2330, Deploy A) tombstoned the colliding v9 own-name namespace — the registration created for #1387 sub-agent root resolution — and migration v15 (#2523, Deploy B) renamed this namespace (then bound as SEARCH_AGENT) onto OrchestratorAgent via renamed_classes, so the class's own-name namespace is the renamed namespace, instance names (logins) and stored state carried over, the SearchAgent export alias is retired, and ctx.exports[\"OrchestratorAgent\"] root resolution is restored. Issue #2570 finished the rename on the binding side: the binding itself is now named ORCHESTRATOR_AGENT (namespaces are per class, not per binding name, so no migration accompanied the binding rename).",
   },
   {
     className: "ResearchAgent",
@@ -389,7 +389,7 @@ export const MESH_IDENTITIES: MeshIdentityRecord[] = [
     className: "OrchestratorAgent",
     did: "did:agent:openaimp:orchestrator",
     identitySource:
-      "Per-login instances: server.ts resolves SEARCH_AGENT.idFromName(userLogin); unattended work acts under getServiceUserLogin, fail-closed when unconfigured. Its five A2A surfaces act under the role DIDs did:agent:openaimp:{orchestrator, search, tasks, memory, nlq} (AGENT_DIDS).",
+      "Per-login instances: server.ts resolves ORCHESTRATOR_AGENT.idFromName(userLogin); unattended work acts under getServiceUserLogin, fail-closed when unconfigured. Its five A2A surfaces act under the role DIDs did:agent:openaimp:{orchestrator, search, tasks, memory, nlq} (AGENT_DIDS).",
     a2aSurfaces: ["orchestrator", "search", "tasks", "memory", "nlq"],
     meshCredentials: [
       "A2A_TOKEN_ORCHESTRATOR",
