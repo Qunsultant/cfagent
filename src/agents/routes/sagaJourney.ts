@@ -3,7 +3,7 @@
  * surfaces, first answer wins).
  *
  * Two routes, registered in src/server.ts (Worker entry, where
- * the SAGA_WORKFLOW + SEARCH_AGENT bindings and the session
+ * the SAGA_WORKFLOW + ORCHESTRATOR_AGENT bindings and the session
  * auth live; the caller passes the requireAuth login, mirroring
  * the extracted-route pattern — this module never imports the
  * entry point):
@@ -23,7 +23,7 @@
  *
  * Auth follows the extracted-route pattern: absent login → 401,
  * never a synthetic identity (#1185). Pending-gate reads go
- * through the SEARCH_AGENT shared-instance stub (same path S1's
+ * through the ORCHESTRATOR_AGENT shared-instance stub (same path S1's
  * audit forwarder writes through), so they share S1's live-proof
  * caveat: unit-pinned here, live proof owner-side.
  */
