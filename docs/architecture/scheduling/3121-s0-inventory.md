@@ -67,6 +67,30 @@
   the Options Runs tab (`?tab=options&view=options-runs`,
   `ResearchRunsPanel`) — lossless + additive (#3121 comment
   6669238775). See §8 U-03.
+- **S4 amendment (Slice S4, #3121):** follow-up chains are ledger-stamped onto
+  the S1 primitives as the async-job kind (§3 Q(c)):
+  `scheduleScreenerFollowups` stays the chain minter; every follow-up row
+  and every run record the chain produces carries the §4 linkage. The
+  planners already stamped it in S1 (`followupLedgerLinkage`: trigger
+  `async-chain`, the run's schedule/workflow ids, the chain-parent main
+  job id — S1-P13 still holds at plan time); S4 restamps `asyncJobId` to
+  the row's OWN `job_id` at the minter (`submitAsyncJob` — the only place
+  that knows the minted id; the parent link rides `parent_job_id`,
+  unchanged), stamps the main job's payload linkage through
+  `buildLedgerLinkage` (the run's own trigger, never `async-chain` — the
+  main job is the chain root, not a chain step), and stamps each completed
+  step's result flat (the same four fields as the bridged main job's
+  result). Retry resubmits the recorded payload verbatim + `retryOf` and
+  restamps only the id; recovery re-arms at the remaining delay and leaves
+  the stored payload untouched. `mas_async_jobs` gains no columns (B-L-02
+  holds — payload/result stamping). `recordJobOutcome` checked: the
+  bridged-run path stamps `trigger`; the sink contract carries `trigger`
+  only and no chain path in `executeAsyncJob` calls it, so the chain's
+  linkage rides the async-job rows, not the outcome sink. `executeAsyncJob`
+  writes no `job_run_records` rows — a chain step's run record IS its
+  `mas_async_jobs` row (payload + result). S4 stamps from what the outcome
+  ALREADY carries — threading originating ids into the outcome stays #3313
+  (open). No file is deleted in S4.
 - **S3 amendment (Slice S3, #3121):** goal schedules are migrated onto
   the S1 primitives as the tick-evaluated kind (§3 Q(a)): `onCron`
   evaluates through the S1 re-exported `isDue` / `isValidCron` /
@@ -938,8 +962,8 @@ no home and no filed issue is a defect in the map.
 | `*/30` tick fan-out: ScheduledAgent tick + 5 piggyback dispatches, guards preserved | §1.2, D1 | `src/server.ts` `scheduled()` + `src/agents/scheduled-agent.ts` `onCron` | S3 (tick kind landed); S5 (named entry points) |
 | Agent SDK alarm schedules (4 timing forms) | T2, B-T2-01 | `resolveTimingForm` (`src/services/consolidatedScheduling.ts`) + `/api/schedules` routes | S1 (classifier); S2 (surfaces) |
 | Tick-polled goal schedules | T3, Q(a) | Tick-evaluated kind: `ScheduledAgent.onCron` via the S1 re-exports | S3 — landed |
-| Async-job follow-up chains | T4, Q(c) | `scheduleScreenerFollowups` behind the same ledger | S4 (planned) |
-| Cloudflare Workflows as execution (not scheduling) | §1.1 | One durable execution path; `workflowId` linkage on ledger rows | S1 (linkage); S4 (chain stamping) |
+| Async-job follow-up chains | T4, Q(c) | `scheduleScreenerFollowups` behind the same ledger | S4 — landed |
+| Cloudflare Workflows as execution (not scheduling) | §1.1 | One durable execution path; `workflowId` linkage on ledger rows | S1 (linkage); S4 (chain stamping) — landed |
 
 ### 9.2 Surfaces (§1.3)
 
@@ -992,13 +1016,13 @@ no home and no filed issue is a defect in the map.
 
 | Capability | S0 id | Consolidated home | Status |
 |------------|-------|-------------------|--------|
-| `scheduleScreenerFollowups` bridge (record + notify + report) | B-T4-01 | Async-job chain minter | S4 (planned) |
-| Chain graph (`parent_job_id`, `chain_id`, `not_before`, recovery re-arm) | B-T4-02 | `mas_async_jobs` + `recoverQueuedAsyncJobs` | S4 (planned) |
-| Retry (`retryOf`, refusal, `async_job.retried` audit) | B-T4-03 | Async-job retry | S4 (planned) |
-| Recovery bounds + stuck detection + audit | B-T4-04 | Recovery/stuck machinery | S4 (planned) |
+| `scheduleScreenerFollowups` bridge (record + notify + report) | B-T4-01 | Async-job chain minter | S4 — landed |
+| Chain graph (`parent_job_id`, `chain_id`, `not_before`, recovery re-arm) | B-T4-02 | `mas_async_jobs` + `recoverQueuedAsyncJobs` | S4 — landed |
+| Retry (`retryOf`, refusal, `async_job.retried` audit) | B-T4-03 | Async-job retry | S4 — landed |
+| Recovery bounds + stuck detection + audit | B-T4-04 | Recovery/stuck machinery | S4 — landed (preserved verbatim) |
 | Keyless options runs recorded (never silently absent) | B-T4-05 | `recordKeylessOptionsServe` | S1 — landed |
 | `job_run_records` carries the §4 columns on every new row | B-L-01 | `buildJobRunRecord` + `normalizeJobRunRecord` | S1 — landed |
-| `mas_async_jobs` linkage (no §4 columns; payload stamping) | B-L-02 | Follow-up payload linkage | S4 (planned); #3313 (outcome stamping, open) |
+| `mas_async_jobs` linkage (no §4 columns; payload stamping) | B-L-02 | Follow-up payload linkage | S4 — landed (payload/result stamping); #3313 (outcome stamping, open) |
 | `mas_opportunity_scans` joinability | B-L-03 | — join key undecided — | **Filed #3314 (open)** |
 | Provenance on schedule payloads | B-L-04 | `buildScheduleProvenance` et al. | S1/S3 — landed |
 

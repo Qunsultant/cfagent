@@ -36,7 +36,10 @@ import type {
 import { recordScreeningActivity } from "../../services/screeningActivity";
 import { recordJobOutcome } from "../../services/jobOutcomes";
 import {
+  buildLedgerLinkage,
   recoveryProvenance,
+  restampLedgerLinkageAsyncJobId,
+  stampLedgerLinkageIntoResult,
   systemProvenance,
 } from "../../services/consolidatedScheduling";
 import type { NLQSchedulingPort, NLQStockScreenPort } from "../nlq";
@@ -283,14 +286,23 @@ export async function submitAsyncJob(ctx: AsyncJobsContext,
 ): Promise<{ jobId: string; status: "queued"; statusUrl: string }> {
   ctx.ensureTables();
   const queue = ports(ctx).queue;
-  const payloadJson = JSON.stringify(job.payload);
+  const jobId = crypto.randomUUID();
+  // Issue #3121 S4 — the follow-up row's own id: a submission whose
+  // payload carries ledgerLinkage (stamped by the follow-up planners
+  // with the chain-parent main job id — the only id that exists at
+  // plan time) is restamped here with the minted row's own id before
+  // serializing. The §4 rule is asyncJobId IS the row's own job_id;
+  // the parent link rides parent_job_id, unchanged. A payload
+  // without ledgerLinkage is untouched (never coerced) — and a retry
+  // resubmission keeps its original trigger/schedule/workflow
+  // linkage, restamping only the id to the retry's own job.
+  const payloadJson = JSON.stringify(restampLedgerLinkageAsyncJobId(job.payload, jobId));
   if (new TextEncoder().encode(payloadJson).byteLength > 17_000_000) {
     throw new Error("Async job payload exceeds the 17 MB serialized storage limit.");
   }
   const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
   queue.pruneTerminalBefore(ctx.sessionKey(), cutoff);
   queue.pruneTerminalToCap(ctx.sessionKey(), 500);
-  const jobId = crypto.randomUUID();
   const now = new Date().toISOString();
   // Consolidation C4 (#1329): a generic http.request job whose payload
   // carries stageChain is submitted as its chain's generate stage —
@@ -582,13 +594,30 @@ export async function recordScreenerRunMainJob(
   // run's main job IS the chain's generate stage — stamped with the
   // stage + a fresh chain id the serve/deliver stages link back to.
   const chainId = outcome.stageChain ? crypto.randomUUID() : undefined;
+  // Issue #3121 S4 — the main job's payload carries the same §4
+  // linkage its result does (S1), resolved through the shared
+  // builder: the run's trigger (the main job is the chain root, not
+  // a chain step, so its trigger is the run's own scheduled/manual,
+  // never async-chain), the originating schedule/workflow ids when
+  // the run names them (explicit nulls otherwise — never a missing
+  // column), and this row's own id. Follow-ups minted from this
+  // main job stamp async-chain + these same run ids (see
+  // followupLedgerLinkage), restamped with their own ids at submit.
+  const ledgerLinkage = buildLedgerLinkage({
+    payload: {
+      trigger: outcome.trigger,
+      scheduleId: outcome.scheduleId ?? null,
+      asyncJobId: jobId,
+      workflowId: outcome.workflowId ?? null,
+    },
+  });
   ports(ctx).queue.insertTerminal({
     jobId,
     sessionId: ctx.sessionKey(),
     capability: "screener.run",
     displayName,
     status: outcome.success ? "completed" : "failed",
-    payloadJson: JSON.stringify({ outcome, userLogin }),
+    payloadJson: JSON.stringify({ outcome, userLogin, ledgerLinkage }),
     resultJson: JSON.stringify({
       status: outcome.success ? "completed" : "failed",
       kind: outcome.kind,
@@ -1406,7 +1435,15 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
       throw new Error(`Unsupported async capability: ${job.capability}`);
     }
 
-    const serializedResult = JSON.stringify(result);
+    const serializedResult = JSON.stringify(
+      // Issue #3121 S4 — the completed step's run record carries its
+      // §4 linkage flat (trigger / scheduleId / asyncJobId /
+      // workflowId), matching the bridged main job's result shape.
+      // The linkage rides the stored payload; a payload without one
+      // (any non-chain job) leaves the result untouched, and a failed
+      // step's row stays joinable through its payload linkage.
+      stampLedgerLinkageIntoResult(payload, result, jobId),
+    );
     if (new TextEncoder().encode(serializedResult).byteLength > 12_000_000) {
       throw new Error("Async job result exceeds the 12 MB serialized result limit.");
     }
