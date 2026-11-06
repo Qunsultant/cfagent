@@ -7,7 +7,9 @@
  * at all, and so route tests can run without a D1 binding. No
  * migration concept applies here (there is no SQL to migrate).
  */
+import { BusinessError } from "../outcomes/outcomeAspects";
 import {
+  assertApproverId,
   assertPlan,
   type ProviderBillingPatch,
   type SubscriptionPlanRecord,
@@ -31,9 +33,36 @@ export class InMemorySubscriptionAdapter implements SubscriptionStore {
     const id = plan.id || `plan-${crypto.randomUUID().slice(0, 8)}`;
     if (this.plans.has(id)) throw new Error(`Plan ${id} already exists.`);
     const now = Date.now();
-    const record: SubscriptionPlanRecord = { ...plan, id, active: true, createdAtMs: now, updatedAtMs: now };
+    // Issue #3357: a plan is created PROPOSED — only an operator
+    // approval through approvePlan makes its price chargeable.
+    const record: SubscriptionPlanRecord = {
+      ...plan,
+      id,
+      approvalStatus: "proposed",
+      approvedBy: null,
+      approvedAtMs: null,
+      active: true,
+      createdAtMs: now,
+      updatedAtMs: now,
+    };
     this.plans.set(id, record);
     return record;
+  }
+
+  async approvePlan(planId: string, approverId: string): Promise<SubscriptionPlanRecord> {
+    const approver = assertApproverId(approverId);
+    const plan = this.plans.get(planId);
+    if (!plan) throw new BusinessError("FAILURE_PLAN_NOT_FOUND", { planId });
+    const now = Date.now();
+    const updated: SubscriptionPlanRecord = {
+      ...plan,
+      approvalStatus: "approved",
+      approvedBy: approver,
+      approvedAtMs: now,
+      updatedAtMs: now,
+    };
+    this.plans.set(planId, updated);
+    return updated;
   }
 
   async getPlan(planId: string): Promise<SubscriptionPlanRecord | null> {

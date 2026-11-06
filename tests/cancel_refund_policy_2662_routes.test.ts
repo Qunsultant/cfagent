@@ -203,6 +203,9 @@ function stubBillingStripe(overrides: { provider?: Record<string, unknown> } = {
 async function seedBillingRow(s: Awaited<ReturnType<typeof setup>>, extra: Record<string, unknown> = {}) {
   await s.subs.createPlan({ id: "plan-pro", name: "Pro", priceUSD: 20, periodDays: 30, includedRuns: 0 });
   await s.subs.createPlan({ id: "plan-pro-annual", name: "Pro Annual", priceUSD: 200, periodDays: 365, includedRuns: 0 });
+  // Issue #3357: plans land PROPOSED; the plan-change tests charge the target plan, so approve both.
+  await s.subs.approvePlan("plan-pro", "op1");
+  await s.subs.approvePlan("plan-pro-annual", "op1");
   await s.policy.updatePolicy({
     stripePriceByPlan: { "plan-pro": "price_pro_monthly", "plan-pro-annual": "price_pro_annual" },
   });

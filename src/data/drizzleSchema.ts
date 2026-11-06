@@ -789,6 +789,14 @@ export const agentSubscriptionPlans = sqliteTable("agent_subscription_plans", {
   // not create it — DDL authority lives in migration 0041
   // (src/data/migrationRunner.ts).
   trialDays: integer("trial_days"),
+  // Price approval (#3357, migration 0049): mirrors the #2547
+  // catalogue columns. Pre-0049 rows are grandfathered as
+  // approved with a NULL approver (see the migration comment).
+  // This schema MAPS the table; it does not create it — DDL
+  // authority lives in migration 0049 (src/data/migrationRunner.ts).
+  approvalStatus: text("approval_status").notNull().default("proposed"),
+  approvedBy: text("approved_by"),
+  approvedAtMs: integer("approved_at_ms"),
   active: integer("active").notNull(),
   createdAtMs: integer("created_at_ms").notNull(),
   updatedAtMs: integer("updated_at_ms").notNull(),

@@ -28,7 +28,13 @@
 import type { StoreTier, TierSource } from "./commercialPorts";
 export type { TierSource };
 
+// Issue #3357: the outcome catalog resolver (static JSON, no I/O) so the
+// approval asserts below throw typed, catalog-coded outcomes, never raw.
+import { BusinessError } from "../outcomes/outcomeAspects";
+
 export type SubscriptionStatus = "active" | "canceled";
+
+export type PlanPriceApprovalStatus = "proposed" | "approved";
 
 export interface SubscriptionPlanRecord {
   id: string;
@@ -42,9 +48,38 @@ export interface SubscriptionPlanRecord {
    * trial. No trial length is hardcoded in code.
    */
   trialDays: number | null;
+  /**
+   * Issue #3357 — price approval, mirroring the #2547 catalogue
+   * discipline (the catalogue gate never covered plan prices).
+   * A plan is PROPOSED from the moment it is created until an
+   * operator approves it through POST /plans/approve. Only an
+   * APPROVED plan may be charged: every charging path refuses an
+   * unapproved plan. Pre-0046 rows are grandfathered as approved
+   * (the owner states today's monthly prices are approved), with
+   * approvedBy/approvedAtMs null — no approval was recorded for
+   * them, and none is invented.
+   */
+  approvalStatus: PlanPriceApprovalStatus;
+  /** Login of the approving operator; null while proposed (or on grandfathered rows). */
+  approvedBy: string | null;
+  /** Epoch ms of the approval; null while proposed (or on grandfathered rows). */
+  approvedAtMs: number | null;
   active: boolean;
   createdAtMs: number;
   updatedAtMs: number;
+}
+
+/** The approver is an audit identity: a blank approver approves nothing. */
+export function assertApproverId(approverId: unknown): string {
+  if (typeof approverId !== "string" || approverId.trim().length === 0) {
+    throw new BusinessError("FAILURE_PLAN_APPROVAL_INVALID");
+  }
+  return approverId.trim();
+}
+
+/** Issue #3357: only an APPROVED plan price may be charged. */
+export function isPlanPriceApproved(plan: { approvalStatus: PlanPriceApprovalStatus }): boolean {
+  return plan.approvalStatus === "approved";
 }
 
 export interface SubscriptionRecord {
@@ -254,6 +289,14 @@ export interface SubscriptionStore {
   getPlan(planId: string): Promise<SubscriptionPlanRecord | null>;
   listPlans(activeOnly: boolean): Promise<SubscriptionPlanRecord[]>;
   deactivatePlan(planId: string): Promise<SubscriptionPlanRecord>;
+  /**
+   * Issue #3357 — approve a plan's price, recording the approver
+   * and the approval time. Approving a missing plan throws; a blank
+   * approver approves nothing. Re-approval updates the record
+   * (the operator re-affirms). Deactivation does not un-approve:
+   * approval is about the price, not about whether the plan is sold.
+   */
+  approvePlan(planId: string, approverId: string): Promise<SubscriptionPlanRecord>;
   createSubscription(input: {
     id: string;
     userId: string;
