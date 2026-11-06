@@ -4,22 +4,15 @@ import type { User } from "./types";
 import type { BadgeTone } from "../components/ui";
 
 /**
- * How a copilot's surface composes (#3454 — uniform shell).
+ * How a copilot's surface renders (#3449, #3521).
  *
- * Historically this selected between two exclusive renders: "chat"
- * showed the conversation, "custom" replaced it with the custom
- * surface — which is how the stock sub-tab lost its composer. The
- * shell is now uniform for every copilot: banner (when configured),
- * the custom surface (when the copilot declares one) composed ABOVE
- * the conversation, and ALWAYS the shared conversation. The mode no
- * longer selects a render; it only declares whether the copilot has
- * a custom surface:
- * - "chat": conversation only (no custom surface).
- * - "custom": a custom surface above the conversation.
- * The type and values are retained so existing registrations keep
- * their meaning unchanged, for compatibility with registrations written
- * also supply renderCustom directly, which declares a surface
- * regardless of mode. Use hasCustomSurface() to read the composition.
+ * - "chat": conversational interface with stream, quick chips, and composer.
+ * - "custom": dedicated copilot dashboard rendered exclusively across full
+ *   viewport height (e.g. Stock Copilot autonomous loop telemetry & controls),
+ *   preventing UI overlap or dual scrollbars with the conversation stream.
+ *
+ * Registrations can also supply `renderCustom` directly to provide custom UI.
+ * Use `hasCustomSurface()` to test whether a copilot provides a custom surface.
  */
 export type CopilotMode = "chat" | "custom";
 
@@ -148,10 +141,9 @@ export function findCopilot(id: string): CopilotConfig | undefined {
 }
 
 /**
- * Whether the copilot declares a custom surface (#3454). The chat
- * shell composes that surface above the shared conversation, which
- * renders for every copilot either way — a custom surface never
- * replaces the conversation.
+ * Whether the copilot declares a custom surface (#3449, #3521). When true,
+ * the chat tab renders that dedicated surface exclusively across the
+ * viewport without overlapping the general conversation stream or sticky composer.
  */
 export function hasCustomSurface(config: CopilotConfig): boolean {
   return typeof config.renderCustom === "function" || config.mode === "custom";
