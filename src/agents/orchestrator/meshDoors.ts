@@ -181,7 +181,7 @@ export function requireActingLogin(
 
 export interface ScheduledAgentDoorStub {
   listGoals(): Promise<ScheduledGoal[]>;
-  triggerGoal(id: string): Promise<ScheduleTick>;
+  triggerGoal(id: string, env?: unknown, actor?: string | null): Promise<ScheduleTick>;
 }
 
 export interface PaymentsAgentDoorStub {
@@ -290,7 +290,11 @@ export async function triggerScheduledGoalViaDoor(
 ): Promise<ScheduledGoalTriggerDoorResult> {
   requireActingLogin(actingLogin);
   const door = getScheduledAgentDoor(env);
-  const tick = await door.triggerGoal(goalId);
+  // Issue #3121 S3 (#3312) — the mesh door is a third entry path
+  // into the DO mutation methods, so it threads the identified chat
+  // user as the lifecycle-audit actor (the DO funnel emits
+  // `schedule.goal.triggered` with it when the goal fires).
+  const tick = await door.triggerGoal(goalId, undefined, actingLogin);
   return { goalId, tick };
 }
 

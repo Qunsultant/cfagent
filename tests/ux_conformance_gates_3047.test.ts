@@ -19,6 +19,11 @@
  *     Issue #3146 raises AgentChatTabContent 7 -> 9: Fluent's Badge
  *     has no uppercase prop, so the two migrated badges use a
  *     style={{ textTransform }} instead; no other inline styles added.
+ *     Issue #3121 S3 raises ScheduledGoalsPanel 21 -> 28: the new
+ *     "Recent goal runs" section follows the panel's existing
+ *     inline-style idiom (section container, error/empty states, run
+ *     rows); converting the whole panel to primitives is S5 surface
+ *     work, not S3; no other inline styles added.
  *
  * Scanner discipline copied from the #2283 no-native-alert pin:
  * comments stripped (line comments guarded so https:// survives),
