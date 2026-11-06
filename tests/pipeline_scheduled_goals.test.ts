@@ -25,7 +25,7 @@ vi.mock("agents", () => ({
 
 vi.mock("../src/orchestrate", () => ({
   OPERATION_CATALOG: [
-    { agent: "search", binding: "SEARCH_AGENT", operations: ["search.query"], blurb: "" },
+    { agent: "search", binding: "ORCHESTRATOR_AGENT", operations: ["search.query"], blurb: "" },
     {
       agent: "social",
       binding: "SCHEDULED_AGENT",
