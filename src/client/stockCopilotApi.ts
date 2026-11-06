@@ -79,7 +79,7 @@ export interface StockCopilotActivityExit {
 export interface StockCopilotActivityRecord {
   id: string;
   cycleAt: string;
-  outcome: "traded" | "no_trade" | "refused" | "inactive" | "outside_sessions";
+  outcome: "traded" | "no_trade" | "refused" | "inactive" | "outside_sessions" | "selection_changed";
   /** #3398: the session the cycle fired in; null when none was open. */
   session: string | null;
   entries: string[];

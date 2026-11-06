@@ -26,6 +26,7 @@
 
 import { resolveEnvironmentConfig } from "../../config/environment";
 import type { Env } from "../../types";
+import type { SettingsChangeNotifier } from "../settingsWebhookNotify";
 
 export const BROKER_ENVIRONMENT_SETTING_KEY = "etrade:environment";
 
@@ -111,6 +112,16 @@ export interface BrokerEnvironmentSwitchContext {
   readSettingRaw(key: string): string | null;
   writeSetting?(key: string, value: string): void;
   env: Partial<Env>;
+  /**
+   * Issue #3471: after a switch persists, notify the caller's own
+   * orchestrator instance through the webhook channel (the push
+   * leg — the Stock Copilot learns the new mode immediately
+   * instead of at its next firing). Optional: hosts without the
+   * notifier keep the pre-#3471 behavior (the observe floor
+   * bounds the staleness). The notifier is fire-and-forget and
+   * never throws; the switch's response never depends on it.
+   */
+  notifySettingsChanged?: SettingsChangeNotifier;
 }
 
 /** Issue #2482: read the current selection (GET on either spelling). */
@@ -145,6 +156,23 @@ export async function handleEnvironmentSwitch(
         );
       }
       ctx.writeSetting(BROKER_ENVIRONMENT_SETTING_KEY, requested);
+      // Issue #3471: the write has committed — notify the caller's
+      // own instance (the session login server.ts stamps on the
+      // request). No login, no instance to notify: the write still
+      // stands and the observe floor owns convergence.
+      const login = request.headers.get("x-user-login")?.trim();
+      if (ctx.notifySettingsChanged && login) {
+        try {
+          ctx.notifySettingsChanged({
+            kind: "mode_changed",
+            login,
+            changedAt: new Date().toISOString(),
+          });
+        } catch {
+          // Notification is best-effort by contract; a notifier
+          // that throws anyway must never fail the switch.
+        }
+      }
       return Response.json({ success: true, environment: requested });
     }
     return Response.json({ error: "Invalid environment. Expected TEST or PROD." }, { status: 400 });
