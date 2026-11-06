@@ -17,7 +17,7 @@ describe("Market Data Research & Quoting (Yahoo Finance & Alpaca APIs)", () => {
   const mockEnv: Env = {
     APP_BASE_URL: "https://agent.openaimp.com",
     AI_SEARCH_ENDPOINT: "https://ai-search.internal",
-    SEARCH_AGENT: {} as any,
+    ORCHESTRATOR_AGENT: {} as any,
     ALPACA_BASE_URL: "https://paper-api.alpaca.markets",
     ALPACA_DATA_URL: "https://data.alpaca.markets",
     MARKET_DATA_PROVIDER: "hybrid",
