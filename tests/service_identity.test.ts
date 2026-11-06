@@ -128,6 +128,10 @@ describe("worker scheduled() (#1185)", () => {
       "/adaptation/weights/run",
       // Issue #1169 (S4-4): the weekly corpus sync rides this tick.
       "/knowledge/corpus-sync",
+      // Issue #3527 (S4): the weekly reports index-backfill sweep
+      // rides this tick on its own rider (unbundled from the
+      // corpus sync, which it used to ride as a leg).
+      "/trading/reports/index-backfill-sweep",
       // Issue #2659 (Phase 2.4): the scheduled digest pass rides this tick.
       "/payments/agentic/commercial/lifecycle/digest/run-due",
     ]);
