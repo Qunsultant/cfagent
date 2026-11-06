@@ -368,10 +368,15 @@ describe("live status evidence — non-command families (#2417)", () => {
     expect(notes).toContain("degraded");
     expect(notes).toContain("endpoint_not_configured");
     expect(notes).toContain("REMOVED by #1169 S3");
-    // The instance endpoint the primary path runs against is
-    // configured in wrangler vars.
+    // Adapted by #3342: the REST path is retired — the endpoint var
+    // the primary path used to run against is DELETED from wrangler
+    // vars, and the instance name the surviving namespace path runs
+    // against is what stays configured.
     expect(
       (wrangler["vars"] as Record<string, unknown>)["AI_SEARCH_ENDPOINT"],
+    ).toBeUndefined();
+    expect(
+      (wrangler["vars"] as Record<string, unknown>)["AI_SEARCH_INSTANCE"],
     ).toBeDefined();
   });
 
