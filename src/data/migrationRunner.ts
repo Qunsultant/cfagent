@@ -1804,6 +1804,32 @@ CREATE INDEX IF NOT EXISTS idx_top_up_user ON agent_top_up_drafts (user_login);
 `,
 };
 
+/**
+ * Migration 0050 — user profiles (#3261, sub-issue of #3256).
+ * One row per verified login: the display name and phone number
+ * the user sets from the account flow. Additive only (new table,
+ * no backfill): users with no row have no profile, and callers
+ * fall back to the login as the display name (PROPOSED default,
+ * display-only). Phone is an UNVERIFIED contact field. No email
+ * column: email change needs CISO review first (#3261 comment
+ * 6681436382, refs #945).
+ */
+export const MIGRATION_0050_USER_PROFILES: DataMigration = {
+  version: 50,
+  name: "0050_user_profiles",
+  sql: `CREATE TABLE IF NOT EXISTS agent_user_profiles (
+  user_login TEXT PRIMARY KEY,
+  display_name TEXT,
+  phone TEXT,
+  updated_at_ms INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS agent_profile_idempotency_keys (
+  idempotency_key TEXT PRIMARY KEY,
+  user_login TEXT NOT NULL,
+  created_at_ms INTEGER NOT NULL
+);`,
+};
+
 export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANCE,
   MIGRATION_0002_AGENT_CHAINS_SCHEDULES,
   MIGRATION_0003_AGENT_SHARD_JOBS,
@@ -1853,6 +1879,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0047_JOB_RUN_RECORDS,
   MIGRATION_0048_TOP_UP_DRAFTS,
   MIGRATION_0049_PLAN_PRICE_APPROVAL,
+  MIGRATION_0050_USER_PROFILES,
 ];
 
 function splitStatements(sqlText: string): string[] {
