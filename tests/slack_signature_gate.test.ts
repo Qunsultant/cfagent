@@ -199,7 +199,7 @@ describe("worker /slack/* routes — mandatory gate (#147)", () => {
   function makeServerEnv(secret?: string) {
     const forwarded: ForwardedCall[] = [];
     const env: any = {
-      SEARCH_AGENT: {
+      ORCHESTRATOR_AGENT: {
         idFromName: (name: string) => name,
         get: (id: string) => ({
           fetch: async (req: Request) => {
@@ -410,7 +410,7 @@ describe("SlackAgent.onRequest — mandatory gate (#147)", () => {
   const baseEnv = {
     APP_BASE_URL: "https://agent.openaimp.com",
     AI_SEARCH_ENDPOINT: "https://ai-search.internal",
-    SEARCH_AGENT: {} as any,
+    ORCHESTRATOR_AGENT: {} as any,
     ETRADE_ENVIRONMENT: "sandbox",
     SLACK_BOT_TOKEN: "xoxb-test-bot-token-147",
     SLACK_WEBHOOK_URL: "https://hooks.slack.com/services/T00/B00/X00",
