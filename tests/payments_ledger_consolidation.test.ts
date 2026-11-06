@@ -95,7 +95,7 @@ function makeEnv(ledger?: ReturnType<typeof makeLedger>) {
     CF_WALLET_FACILITATOR: "https://facilitator.test",
     SERVICE_USER_LOGIN: "default_trader",
   };
-  if (ledger) env.SEARCH_AGENT = ledger.namespace;
+  if (ledger) env.ORCHESTRATOR_AGENT = ledger.namespace;
   return env;
 }
 
