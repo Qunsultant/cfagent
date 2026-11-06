@@ -40,7 +40,7 @@
  * fetch stubbed at the gateways' real endpoints. The SessionStore fake
  * implements the durableKv JSON wire protocol (get/put/delete/consume)
  * with the same semantics as src/security/sessionStore.ts, and the
- * SEARCH_AGENT fake dispatches stub fetches to the addressed agent —
+ * ORCHESTRATOR_AGENT fake dispatches stub fetches to the addressed agent —
  * together they model the two Durable Object channels the fix uses.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
@@ -163,7 +163,7 @@ class FakeSessionStore {
   }
 }
 
-/** SEARCH_AGENT fake: stub fetches dispatch to the addressed agent. */
+/** ORCHESTRATOR_AGENT fake: stub fetches dispatch to the addressed agent. */
 class FakeAgentNamespace {
   agents = new Map<string, OrchestratorAgent>();
 
@@ -200,7 +200,7 @@ function makeWorld(): World {
   const env = {
     AI: {} as any,
     AI_SEARCH_ENDPOINT: "https://mock.search",
-    SEARCH_AGENT: ns as any,
+    ORCHESTRATOR_AGENT: ns as any,
     SESSION_STORE: store as any,
     AGENT_SESSIONS: {} as any,
     STRIPE_SECRET_KEY: "sk_test_mock",
