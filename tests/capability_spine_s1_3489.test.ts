@@ -283,8 +283,8 @@ describe("capability resolution: AGENT_CAPABILITIES_DISABLED (#3489)", () => {
 
   it("a binding-scoped entry matches through the class's bindings", () => {
     const m = resolveAgentCapabilityManifest("OrchestratorAgent", {
-      bindings: ["SEARCH_AGENT"],
-      disabledRaw: "SEARCH_AGENT:chat",
+      bindings: ["ORCHESTRATOR_AGENT"],
+      disabledRaw: "ORCHESTRATOR_AGENT:chat",
     });
     expect(m.channels.chat.state).toBe("disabled-by-config");
   });
@@ -410,7 +410,7 @@ describe("registry surfacing (#3489)", () => {
     const m = capabilitiesForClass("OrchestratorAgent");
     expect(m).not.toBeNull();
     expect(m!.className).toBe("OrchestratorAgent");
-    expect(m!.bindings).toEqual(["SEARCH_AGENT"]);
+    expect(m!.bindings).toEqual(["ORCHESTRATOR_AGENT"]);
     expect(capabilitiesForClass("SessionStore")).toBeNull();
     expect(capabilitiesForClass("OptionsScannerMCP")).toBeNull();
     expect(capabilitiesForClass("NoSuchAgent")).toBeNull();
