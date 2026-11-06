@@ -86,11 +86,14 @@ import {
   type CanonicalReportStorePorts,
 } from "../data/createCanonicalReportStorePorts";
 import {
-  indexCanonicalReport,
-  INDEX_EXCLUDED_SOURCES,
+  type CanonicalReportForIndex,
   type IndexEnv,
 } from "./reportSemanticIndex";
-import { indexCanonicalReportInAiSearch } from "./reportAiSearchIndex";
+import { type CanonicalReportForAiSearchIndex } from "./reportAiSearchIndex";
+import {
+  publishDocument,
+  vectorizeTargetAttempted,
+} from "./documentPublish";
 import { createBlobStore } from "./blobStoreR2Adapter";
 import { blobText } from "./blobStorePorts";
 
@@ -320,50 +323,61 @@ export function getCanonicalReportFanoutOutcome(
  * leg's settled outcome on the report record (#2347). This
  * replaces the bare `void` calls: the legs stay fire-and-
  * forget for the caller, but their results are no longer
- * discarded. The Vectorize leg distinguishes attempted from
- * not-attempted by its own preconditions (bindings present +
- * source not excluded) because its boolean result conflates
- * the two; the AI Search leg's outcome code distinguishes
- * them itself ("disabled" = not attempted, per #2246).
+ * discarded. Issue #3527 S1: the legs now run inside the
+ * publish stage (src/services/documentPublish.ts) — the stage
+ * composes the existing executors and carries the
+ * distinctions this wrapper used to compute inline (the
+ * Vectorize leg's attempted vs not-attempted, which its
+ * boolean result conflates, and the AI Search leg's outcome
+ * code, where "disabled" means not attempted per #2246).
+ * The seam keeps owning the record: each stage outcome is
+ * mapped back onto the row's fan-out vocabulary exactly as
+ * the inline version recorded it.
  */
 function fireFanoutIndexLegs(
   sql: SqlStorage,
   env: IndexEnv | undefined,
-  vecReport: Parameters<typeof indexCanonicalReport>[1],
-  aiReport: Parameters<typeof indexCanonicalReportInAiSearch>[1]
+  vecReport: CanonicalReportForIndex,
+  aiReport: CanonicalReportForAiSearchIndex
 ): void {
-  const vectorizeAttempted =
-    !!env?.AI &&
-    !!env?.VECTOR_MEMORY &&
-    !(INDEX_EXCLUDED_SOURCES as readonly string[]).includes(vecReport.source);
-  if (!vectorizeAttempted) {
-    recordFanoutLegOutcome(sql, vecReport.reportId, { vectorize: "not_attempted" });
-  } else {
-    void indexCanonicalReport(env, vecReport).then(
-      (ok) =>
+  const publication = publishDocument(env, {
+    kind: "report",
+    documentId: vecReport.reportId,
+    title: vecReport.title,
+    source: vecReport.source,
+    summary: vecReport.summary,
+    body: vecReport.body,
+    bodyR2Key: vecReport.bodyR2Key ?? null,
+    runId: aiReport.runId,
+    ownerLogin: aiReport.ownerLogin,
+    storedAt: aiReport.storedAt,
+  });
+  for (const target of publication.targets) {
+    void target.settled.then((outcome) => {
+      if (outcome.target === "vectorize") {
         recordFanoutLegOutcome(sql, vecReport.reportId, {
-          vectorize: ok ? "indexed" : "failed",
-        }),
-      () =>
-        recordFanoutLegOutcome(sql, vecReport.reportId, { vectorize: "failed" })
-    );
+          vectorize:
+            outcome.status === "published"
+              ? "indexed"
+              : outcome.status === "failed"
+                ? "failed"
+                : "not_attempted",
+        });
+      } else if (outcome.target === "ai-search") {
+        recordFanoutLegOutcome(sql, aiReport.reportId, {
+          aiSearch:
+            outcome.status === "published"
+              ? "indexed"
+              : outcome.status === "failed"
+                ? "failed"
+                : "not_attempted",
+          ...(outcome.status === "published"
+            ? {}
+            : { aiSearchCode: outcome.code ?? "upload_failed" }),
+        });
+      }
+    });
   }
-  void indexCanonicalReportInAiSearch(env as never, aiReport).then(
-    (outcome) =>
-      recordFanoutLegOutcome(sql, aiReport.reportId, {
-        aiSearch: outcome.ok
-          ? "indexed"
-          : outcome.code === "disabled"
-            ? "not_attempted"
-            : "failed",
-        ...(outcome.ok ? {} : { aiSearchCode: outcome.code }),
-      }),
-    () =>
-      recordFanoutLegOutcome(sql, aiReport.reportId, {
-        aiSearch: "failed",
-        aiSearchCode: "upload_failed",
-      })
-  );
 }
 
 /** Initial index-leg statuses for a fresh/deduped store (#2347). */
@@ -371,12 +385,8 @@ function initialIndexStatuses(
   env: IndexEnv | undefined,
   source: string
 ): { vectorize: FanoutIndexStatus; aiSearch: FanoutIndexStatus } {
-  const vectorizeAttempted =
-    !!env?.AI &&
-    !!env?.VECTOR_MEMORY &&
-    !(INDEX_EXCLUDED_SOURCES as readonly string[]).includes(source);
   return {
-    vectorize: vectorizeAttempted ? "pending" : "not_attempted",
+    vectorize: vectorizeTargetAttempted(env, source) ? "pending" : "not_attempted",
     aiSearch: "pending",
   };
 }
