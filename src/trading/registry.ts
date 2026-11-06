@@ -35,9 +35,9 @@ export class TradingPlatformRegistry {
     }
     const factory = this.platforms.get(id);
     if (!factory) {
-      // Fallback to etrade or first registered
-      const fallback = this.platforms.get("etrade");
-      if (fallback) return fallback(env, orm, userLogin, overrideEnv, storage);
+      // Issue #3460: no fallback to E*TRADE. An unregistered broker id
+      // is a named refusal, never a silent E*TRADE resolution — the
+      // registry is the only resolution path, so it must fail closed.
       throw new Error(`Trading platform [${id}] is not registered.`);
     }
     return factory(env, orm, userLogin, overrideEnv, storage);

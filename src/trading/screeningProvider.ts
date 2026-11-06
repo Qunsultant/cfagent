@@ -10,9 +10,10 @@
  *
  * Semantics that differ deliberately from TradingPlatformRegistry:
  *  - Resolution fails EXPLICITLY (ScreeningProviderNotFoundError) when no
- *    provider serves an asset class. TradingPlatformRegistry falls back
- *    to E*TRADE; for screening that would silently mislabel provenance —
- *    a stock result must never be returned for an options request.
+ *    provider serves an asset class. (TradingPlatformRegistry likewise
+ *    throws for an unregistered id since #3460; for screening a silent
+ *    fallback would mislabel provenance — a stock result must never be
+ *    returned for an options request.)
  *  - Provider ids are unique in a registry: re-registering an id throws,
  *    so provenance ids stay unambiguous.
  *
@@ -223,6 +224,35 @@ export function createOptionsScreeningProvider(
       const filter = request.assetClass === "options" ? request.filter : undefined;
       const result = await screener.screenOptions(filter);
       return { assetClass: "options", providerId: id, result };
+    },
+  };
+}
+
+/**
+ * Issue #3460: the fail-closed options screener for a tenant whose
+ * selected broker's platform has no options chain source. Both entry
+ * points throw `provider_unsupported` naming the broker — never a
+ * result, never another broker's data. The throw is deliberate: the
+ * options leg has no chain source at all, so there is nothing to
+ * evaluate, and the failure must surface visibly (a failed leg/run,
+ * not a silent wrong result). Stocks-only goals never touch this
+ * screener, so they proceed untouched.
+ */
+export function createRefusingOptionsScreener(
+  brokerId: string,
+): Pick<DynamicOptionsScreener, "screenOptions" | "fetchChains"> {
+  const refusal = (): Error =>
+    new Error(
+      `provider_unsupported: broker "${brokerId}" does not provide an options chain source (no getOptionChains/getOptionExpireDates); no other broker's data is used in its place.`,
+    );
+  return {
+    async screenOptions(): Promise<OptionScreenResult> {
+      throw refusal();
+    },
+    async fetchChains(): Promise<
+      Awaited<ReturnType<DynamicOptionsScreener["fetchChains"]>>
+    > {
+      throw refusal();
     },
   };
 }
