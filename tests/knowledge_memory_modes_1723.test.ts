@@ -63,16 +63,36 @@ const toolCtx = (overrides: Record<string, unknown> = {}) =>
     ...overrides,
   }) as any;
 
+// #3342: the search contract's AI attempt reads the namespace
+// binding, not the public endpoint — the fakes are binding envs.
+// Chunks are native-shaped (text + item.key) so the binding
+// adaptation keeps them; the pins below assert only
+// length/count/message, as they did in the fetch era.
 const aiChunks = (n: number) =>
-  Array.from({ length: n }, (_, i) => ({ id: `doc-${i}`, text: `chunk ${i}` }));
+  Array.from({ length: n }, (_, i) => ({
+    id: `doc-${i}`,
+    type: "text",
+    score: 0.9,
+    text: `chunk ${i}`,
+    item: { key: `knowledge/doc-${i}` },
+  }));
 
-const stubFetchChunks = (n: number) =>
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async () => ({ ok: true, json: async () => ({ result: { chunks: aiChunks(n) } }) }))
-  );
-const stubFetchThrow = () =>
-  vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("boom"); }));
+const bindingEnvChunks = (n: number) => ({
+  AI_SEARCH_INSTANCE: "screener-search",
+  AI_SEARCH: {
+    get: (_name: string) => ({ search: async () => ({ chunks: aiChunks(n) }) }),
+  },
+});
+const bindingEnvThrow = () => ({
+  AI_SEARCH_INSTANCE: "screener-search",
+  AI_SEARCH: {
+    get: (_name: string) => ({
+      search: async () => {
+        throw new Error("boom");
+      },
+    }),
+  },
+});
 
 describe("knowledge mode resolver", () => {
   it("blank levels fall back to the calling tool's legacy mode", () => {
@@ -121,10 +141,9 @@ describe("knowledge mode resolver", () => {
 
 describe("knowledge_search / query_platform_knowledge under KNOWLEDGE_MODE", () => {
   it("knowledge_search default (search): AI chunks sliced to 5, count is pre-slice", async () => {
-    stubFetchChunks(7);
     const out = await new KnowledgeSearchCommand().execute(
       { query: "quantum lattice energy" },
-      toolCtx({ env: { AI_SEARCH_ENDPOINT: "https://mock.search" } })
+      toolCtx({ env: bindingEnvChunks(7) })
     );
     expect(out.chunks).toHaveLength(5);
     expect(out.count).toBe(7);
@@ -133,10 +152,9 @@ describe("knowledge_search / query_platform_knowledge under KNOWLEDGE_MODE", () 
   });
 
   it("knowledge_search default (search): empty AI result falls back to platform, max 3, score 1.0", async () => {
-    stubFetchChunks(0);
     const out = await new KnowledgeSearchCommand().execute(
       { query: "how to use the screener" },
-      toolCtx()
+      toolCtx({ env: bindingEnvChunks(0) })
     );
     expect(out.count).toBeLessThanOrEqual(3);
     expect(out.chunks).toHaveLength(out.count);
@@ -182,10 +200,9 @@ describe("knowledge_search / query_platform_knowledge under KNOWLEDGE_MODE", () 
   });
 
   it("query_platform_knowledge mode=search: AI-first chunks shape + message", async () => {
-    stubFetchChunks(7);
     const out = await new QueryPlatformKnowledgeCommand().execute(
       { query: "quantum lattice energy", mode: "search" },
-      toolCtx({ env: { AI_SEARCH_ENDPOINT: "https://mock.search" } })
+      toolCtx({ env: bindingEnvChunks(7) })
     );
     expect(out.chunks).toHaveLength(5);
     expect(out.message).toMatch(/Cloudflare AI Search/);
@@ -193,10 +210,9 @@ describe("knowledge_search / query_platform_knowledge under KNOWLEDGE_MODE", () 
   });
 
   it("search mode keeps the no-throw error shape when AI fails and platform is empty", async () => {
-    stubFetchThrow();
     const out = await new QueryPlatformKnowledgeCommand().execute(
       { query: "zxqv wjbk plumbus", mode: "search" },
-      toolCtx({ env: { AI_SEARCH_ENDPOINT: "https://mock.search" } })
+      toolCtx({ env: bindingEnvThrow() })
     );
     expect(out).toMatchObject({ query: "zxqv wjbk plumbus", count: 0, chunks: [] });
     expect(out.error).toBeTruthy();
