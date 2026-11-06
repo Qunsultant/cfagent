@@ -90,6 +90,12 @@ interface ActivityPayload {
   }>;
 }
 
+interface WatchlistsPayload {
+  broker: string;
+  environment: TradingEnvironment;
+  watchlists: Array<{ watchlistId: string | number; name: string; symbols: string[] }>;
+}
+
 function fmtWhen(value: number | undefined): string {
   if (!value || !Number.isFinite(value)) return "-";
   return new Date(value).toLocaleString();
@@ -234,6 +240,9 @@ export function AlpacaBrokerPanel({ activeEnv }: AlpacaBrokerPanelProps) {
   // reconciliation view needs closed orders as much as open ones.
   const orderHistory = useBrokerRead<OrderHistoryPayload>("/broker/orders/history?status=all", orderHistoryNonce);
   const activity = useBrokerRead<ActivityPayload>("/broker/activities");
+  // Issue #3434: the account's own saved lists — a real Alpaca read, so the
+  // surface is data rather than a catalogued refusal.
+  const watchlists = useBrokerRead<WatchlistsPayload>("/broker/watchlists");
 
   /**
    * Issue #3390: cancel through the neutral route. The server resolves the
@@ -448,11 +457,37 @@ export function AlpacaBrokerPanel({ activeEnv }: AlpacaBrokerPanelProps) {
         </Card>
       </BrokerSurfaceGate>
 
-      <BrokerSurfaceGate broker="alpaca" surface="watchlists">
-        <Card>
+      <Card id="section-watchlists" className="ui-anchor">
+        <Flex align="center" gap="2">
           <h4>Watchlists</h4>
-        </Card>
-      </BrokerSurfaceGate>
+        </Flex>
+        <BrokerSurfaceGate broker="alpaca" surface="watchlists">
+          {watchlists.state === "loading" && <Spinner size="sm" label="Loading Alpaca watchlists" />}
+          {watchlists.state === "error" && <ReadFailure code={watchlists.code} message={watchlists.message} />}
+          {watchlists.state === "ready" && (
+            <Table
+              caption="Alpaca watchlists"
+              columns={[
+                { key: "name", header: "Name", render: (row) => <span>{row.name}</span> },
+                {
+                  key: "symbols",
+                  header: "Symbols",
+                  render: (row) => <span>{row.symbols.length > 0 ? row.symbols.join(", ") : "None"}</span>,
+                },
+              ]}
+              rows={watchlists.data.watchlists ?? []}
+              rowKey={(row) => String(row.watchlistId)}
+              empty={
+                <EmptyState
+                  title="No Alpaca watchlists"
+                  description="Alpaca returned no saved lists for this account."
+                  framed
+                />
+              }
+            />
+          )}
+        </BrokerSurfaceGate>
+      </Card>
     </Stack>
   );
 }

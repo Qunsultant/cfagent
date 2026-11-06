@@ -102,11 +102,13 @@ describe("the catalogue declares the account-history surfaces (#3359)", () => {
     }
   });
 
-  it("Alpaca serves history and activity, and declares the two it does not", () => {
+  it("Alpaca serves history, activity and its own watchlists, and declares the one it does not", () => {
     expect(brokerSupports("alpaca", "orderHistory")).toBe(true);
     expect(brokerSupports("alpaca", "accountActivity")).toBe(true);
     expect(brokerSupports("alpaca", "alerts")).toBe(false);
-    expect(brokerSupports("alpaca", "watchlists")).toBe(false);
+    // Issue #3434: Alpaca serves GET /v2/watchlists, so the declared absence
+    // this test used to pin is no longer true.
+    expect(brokerSupports("alpaca", "watchlists")).toBe(true);
   });
 
   it("the panel contract turns those declarations into availability, not a second list", () => {
@@ -116,6 +118,7 @@ describe("the catalogue declares the account-history surfaces (#3359)", () => {
       "orders",
       "orderHistory",
       "activity",
+      "watchlists",
       "options",
     ]);
     expect(availablePanels("etrade")).toEqual([...BROKER_PANEL_SURFACES]);

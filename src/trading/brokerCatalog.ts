@@ -233,7 +233,10 @@ export const BROKER_CATALOG = {
       orderHistory: true,
       accountActivity: true,
       alerts: false,
-      watchlists: false,
+      // Issue #3434: Alpaca serves GET /v2/watchlists, so the declared absence is
+      // no longer true. The panel now renders the tenant's own lists; create and
+      // delete stay on E*TRADE's routes until a write seam exists.
+      watchlists: true,
       // Issue #3390: both brokers cancel through the neutral order seam.
       orderCancel: true,
       // Issue #3388: the engine composes on the selected broker's chains

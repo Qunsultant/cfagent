@@ -1476,7 +1476,7 @@ export interface BrokerWatchlist {
   items?: ETradeWatchlistItem[];
   createdTimestamp?: number;
   updatedTimestamp?: number;
-  source?: "etrade_api" | "local_durable_sqlite";
+  source?: "etrade_api" | "alpaca_api" | "local_durable_sqlite";
 }
 
 export interface SaveWatchlistResult {

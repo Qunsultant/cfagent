@@ -42,6 +42,7 @@ const STATUS_FAILED_CODE = "BROKER_STATUS_FAILED";
 const QUOTE_FAILED_CODE = "BROKER_QUOTE_FAILED";
 const HISTORY_FAILED_CODE = "BROKER_ORDER_HISTORY_FAILED";
 const ACTIVITY_FAILED_CODE = "BROKER_ACTIVITY_FAILED";
+const WATCHLISTS_FAILED_CODE = "BROKER_WATCHLISTS_FAILED";
 const FEATURE_DISABLED_CODE = "FEATURE_DISABLED";
 
 function unsupportedResponse(broker: string, capability: string): Response {
@@ -85,7 +86,10 @@ export async function handleBrokerReadsRoutes(
   // at the venue.
   const wantsOrderHistory = path.endsWith("/broker/orders/history");
   const wantsActivity = path.endsWith("/broker/activities");
-  if (!wantsAccounts && !wantsPositions && !wantsStatus && !wantsQuote && !wantsOrderHistory && !wantsActivity)
+  // Issue #3434: the broker's own saved lists. Declared per broker, like every
+  // other read, so a broker without them answers by name instead of an empty table.
+  const wantsWatchlists = path.endsWith("/broker/watchlists");
+  if (!wantsAccounts && !wantsPositions && !wantsStatus && !wantsQuote && !wantsOrderHistory && !wantsActivity && !wantsWatchlists)
     return null;
   if (request.method !== "GET") return null;
 
@@ -113,6 +117,9 @@ export async function handleBrokerReadsRoutes(
   }
   if (wantsActivity && !brokerSupports(broker, "accountActivity")) {
     return unsupportedResponse(broker, "Account activity");
+  }
+  if (wantsWatchlists && !brokerSupports(broker, "watchlists")) {
+    return unsupportedResponse(broker, "Watchlists");
   }
 
   // Issue #3293: validate the quote request before constructing the broker,
@@ -188,6 +195,29 @@ export async function handleBrokerReadsRoutes(
           code: ACTIVITY_FAILED_CODE,
           broker,
           message: `The selected broker (${broker}) could not list account activity: ${reason}.`,
+          retryable: true,
+        },
+        { status: 502 },
+      );
+    }
+  }
+
+  // Issue #3434: the broker's own watchlists. A failed read is a named failure;
+  // an empty array would read as "you saved nothing", which is a different fact.
+  if (wantsWatchlists) {
+    if (typeof platform.getWatchlists !== "function") {
+      return unsupportedResponse(broker, "Watchlists");
+    }
+    try {
+      const watchlists = await platform.getWatchlists();
+      return Response.json({ broker, environment, watchlists });
+    } catch (error) {
+      const reason = (error as Error)?.message || "the watchlist read failed";
+      return Response.json(
+        {
+          code: WATCHLISTS_FAILED_CODE,
+          broker,
+          message: `The selected broker (${broker}) could not list its watchlists: ${reason}.`,
           retryable: true,
         },
         { status: 502 },
