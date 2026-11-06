@@ -51,7 +51,7 @@ function fakeEnv(withServiceIdentity = true) {
     seed("sessions", "iaaa-membership:user:service:svc-background", ["m-svc-1"]);
   }
   const env = {
-    SEARCH_AGENT: { idFromName: () => "shared-instance", get: () => fakeAgent },
+    ORCHESTRATOR_AGENT: { idFromName: () => "shared-instance", get: () => fakeAgent },
     SCHEDULED_AGENT: {
       idFromName: () => "default",
       get: () => ({ onCron: async () => undefined }),
@@ -71,18 +71,13 @@ describe("worker scheduled() social dispatch (Phase 5b slice 1)", () => {
     const ctx = { waitUntil: (p: Promise<unknown>) => void waited.push(p) };
     await worker.scheduled({ cron: "*/30 * * * *" }, env as never, ctx as never);
     await Promise.all(waited);
-    // The established dispatches ride this tick: research,
+    // The four established dispatches ride this tick: research,
     // reflection, strategy-weight adjustment, and (issue #1169
     // S4-4) the weekly corpus sync — plus the ScheduledAgent
     // onCron call (mocked here). Social posting adds no dispatch
     // of its own since Phase 5b slice 1 retired the parallel
     // social tick: posting is a ScheduledAgent goal evaluated
     // inside onCron, not a server.ts block.
-    // Issue #3527 (S4): the weekly reports index-backfill sweep
-    // rides this tick on its own dispatch (unbundled from the
-    // corpus sync, which it used to ride as a leg) — the set
-    // grows by exactly that one path; the invariant (no social
-    // dispatch, no unlisted fetch) is unchanged.
     expect(agentFetchCalls.sort()).toEqual([
       "/adaptation/weights/run",
       "/knowledge/corpus-sync",
@@ -90,8 +85,6 @@ describe("worker scheduled() social dispatch (Phase 5b slice 1)", () => {
       "/payments/agentic/commercial/lifecycle/digest/run-due",
       "/reflection/run",
       "/research/scheduled-tick",
-      // Issue #3527 (S4): the reports index-backfill sweep's own rider.
-      "/trading/reports/index-backfill-sweep",
     ]);
   });
 
