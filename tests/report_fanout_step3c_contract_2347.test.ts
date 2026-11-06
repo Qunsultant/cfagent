@@ -451,16 +451,30 @@ describe("3c contract: seam-parity source pins", () => {
   });
 
   it("no index leg is fired with a discarded (bare void) result anymore", () => {
-    // Every leg invocation lives in fireFanoutIndexLegs with a
-    // .then(...) recording its settled outcome — count the
-    // invocations and the recording handlers: they must match.
-    const legCalls = scheduledSrc.match(/void indexCanonicalReport/g) ?? [];
-    const recordingHandlers =
-      scheduledSrc.match(/void indexCanonicalReport\w*\([^)]*\)\.then\(/g) ?? [];
-    expect(legCalls.length).toBeGreaterThan(0);
-    expect(recordingHandlers.length).toBe(legCalls.length);
+    // ADAPTED for #3527 S1 (§7 — in-file justification): the
+    // leg invocations moved out of the seam into the publish
+    // stage (src/services/documentPublish.ts); the seam's
+    // fireFanoutIndexLegs now delegates to publishDocument and
+    // records from the stage's per-target settled outcomes.
+    // The invariant this pin exists for is unchanged — every
+    // leg invocation's result is consumed by a recording path
+    // and none is discarded — asserted at its new homes: the
+    // seam holds NO leg invocation at all, the stage turns
+    // every invocation into a settled outcome, and the seam
+    // records those outcomes via recordFanoutLegOutcome.
+    const stageSrc = readFileSync("src/services/documentPublish.ts", "utf8");
+    expect(scheduledSrc).not.toMatch(/void indexCanonicalReport/);
+    expect(scheduledSrc).not.toContain("indexCanonicalReport(");
+    expect(scheduledSrc).not.toContain("indexCanonicalReportInAiSearch(");
+    expect(scheduledSrc).toContain("publishDocument(");
     expect(scheduledSrc).toContain("fireFanoutIndexLegs(");
     expect(scheduledSrc).toContain("recordFanoutLegOutcome(");
+    // The stage discards nothing either: no bare-void call
+    // expression exists in it, and both default executors are
+    // wired as the stage's legs.
+    expect(stageSrc).not.toMatch(/void\s+\w+\(/);
+    expect(stageSrc).toContain("indexCanonicalReport");
+    expect(stageSrc).toContain("indexCanonicalReportInAiSearch");
   });
 
   it("the outcome codes live in the catalog, not as inline strings in the seam", () => {
