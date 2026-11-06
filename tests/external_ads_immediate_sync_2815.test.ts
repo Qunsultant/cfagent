@@ -48,7 +48,7 @@ function makeEnv() {
 
   const env: any = {
     SESSION_STORE: sessionStoreNs,
-    SEARCH_AGENT: {
+    ORCHESTRATOR_AGENT: {
       idFromName: (name: string) => ({ toString: () => `id-${name}` }),
       get: (_id: unknown) => ({
         fetch: async (req: Request) => {
