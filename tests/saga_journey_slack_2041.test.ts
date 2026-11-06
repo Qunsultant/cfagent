@@ -5,7 +5,7 @@
  * Direct-call tests (same shape as the approve_trade cases in
  * browser_and_slack_agents.test.ts): principal undefined, so no
  * tier gate; the decider login is the session id. The audit stub
- * is a fake SEARCH_AGENT binding; the saga binding is a fake
+ * is a fake ORCHESTRATOR_AGENT binding; the saga binding is a fake
  * SAGA_WORKFLOW binding; response_url edits go through a stubbed
  * fetch.
  *
@@ -72,7 +72,7 @@ function serviceFor(opts: {
 }): { service: ETradeSlackTradingService; sentEvents: Array<{ type: string; payload: unknown }> } {
   const sentEvents: Array<{ type: string; payload: unknown }> = [];
   const env = {
-    SEARCH_AGENT: { idFromName: () => "stub-id", get: () => opts.stub },
+    ORCHESTRATOR_AGENT: { idFromName: () => "stub-id", get: () => opts.stub },
     SAGA_WORKFLOW: opts.sagaGet
       ? {
           get: async (id: string) => opts.sagaGet!(id),
