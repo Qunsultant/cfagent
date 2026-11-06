@@ -24,7 +24,7 @@
  *   The payer is `customer` (the verified user id).
  *
  * Transport mirrors src/payments/ledger.ts: the workflow reaches the
- * ledger owner over the SEARCH_AGENT Durable Object channel, forwarding
+ * ledger owner over the ORCHESTRATOR_AGENT Durable Object channel, forwarding
  * under the configured service identity (#1185). Ledger writes FAIL
  * LOUD — a payment must never be recorded into the void — and are
  * deduped server-side (one charge row and one credit row per run), so
@@ -187,7 +187,7 @@ export function reconcileCfpayRun(
 }
 
 // ---------------------------------------------------------------------------
-// Client: PaymentWorkflow -> ledger owner (OrchestratorAgent) over SEARCH_AGENT
+// Client: PaymentWorkflow -> ledger owner (OrchestratorAgent) over ORCHESTRATOR_AGENT
 // ---------------------------------------------------------------------------
 
 interface LedgerStub {
@@ -195,12 +195,12 @@ interface LedgerStub {
 }
 
 function cfpayLedgerStub(env: Env): LedgerStub {
-  const ns = (env as unknown as Record<string, unknown>)?.SEARCH_AGENT as
+  const ns = (env as unknown as Record<string, unknown>)?.ORCHESTRATOR_AGENT as
     | { idFromName: (name: string) => unknown; get: (id: unknown) => LedgerStub }
     | undefined;
   if (!ns || typeof ns.idFromName !== "function" || typeof ns.get !== "function") {
     throw new Error(
-      "cfpay ledger unavailable: SEARCH_AGENT (the mas_transactions ledger owner) is not bound",
+      "cfpay ledger unavailable: ORCHESTRATOR_AGENT (the mas_transactions ledger owner) is not bound",
     );
   }
   return ns.get(ns.idFromName(SHARED_ORCHESTRATOR_INSTANCE));
@@ -354,7 +354,7 @@ export interface MeterUsageInput {
 
 /**
  * #2041 G-METERING: record one usage_event for a saga paid run
- * via the meter route (same SEARCH_AGENT stub channel as the
+ * via the meter route (same ORCHESTRATOR_AGENT stub channel as the
  * audit forwarder above). THROWS on any failure (fail-closed):
  * the flow's record-usage step fails and retries durably rather
  * than completing unmetered — the deliberate opposite of the
