@@ -1,0 +1,116 @@
+# PR Closure Watchdog — issue #3437, #3444 (anti-work-loss backstop).
+#
+# WHAT: When any pull request is closed without being merged, this workflow
+# runs `scripts/ci/verify_pr_closure.py` against origin/main.
+#
+# WHY: An agent or developer might close a PR as "superseded" without running
+# the pre-closure diff check. This watchdog mechanically detects discarded
+# functional changes, alerts on the PR, and reopens it to prevent work loss.
+# If the head branch has already been deleted, it files an incident issue
+# with the commit SHA so the unmerged work can be salvaged before GC.
+
+name: PR Closure Watchdog
+
+on:
+  pull_request_target:
+    types: [closed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: pr-closure-watchdog-${{ github.event.pull_request.number || 'manual' }}
+  cancel-in-progress: false
+
+jobs:
+  watch-unmerged-closure:
+    name: Check for unmerged work on closed PR
+    if: github.event.pull_request.merged == false
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify unmerged diff and remediate
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          set -euo pipefail
+
+          echo "Evaluating closed PR #$PR_NUMBER ($HEAD_SHA)..."
+          git fetch origin "$HEAD_SHA" || git fetch origin "+refs/pull/$PR_NUMBER/head:pr-$PR_NUMBER" || true
+
+          set +e
+          JSON_OUT=$(python3 scripts/ci/verify_pr_closure.py "$HEAD_SHA" --base origin/main --ignore-changelog --json 2>&1)
+          STATUS=$?
+          set -e
+
+          echo "$JSON_OUT"
+
+          if [ $STATUS -eq 0 ]; then
+            echo "PR closure verified: zero unmerged functional diff relative to origin/main."
+            exit 0
+          fi
+
+          echo "⚠️ Unmerged functional differences detected in closed PR #$PR_NUMBER!"
+
+          FILES_LIST=$(echo "$JSON_OUT" | jq -r '.changed_files[]? | "- `\(.status)` `\(.path)`"' || echo "See commit diff")
+
+          COMMENT_BODY=$(cat <<EOF
+          ## ⚠️ Anti-Work-Loss Guardrail Alert (gitops §11, §24, #3437)
+
+          This pull request was closed without being merged, but **contains unmerged functional changes relative to \`main\`**:
+
+          ${FILES_LIST}
+
+          Closing without integrating this delta results in lost engineering effort.
+
+          ### Required action
+          1. **Rebase and merge**: Rebase this branch onto latest \`main\` to merge the additive changes, OR
+          2. **Harvest the delta**: Carve out the unmerged files into a follow-up issue before closure.
+
+          *Automated check performed by PR Closure Watchdog (#3444).*
+          EOF
+          )
+
+          # Attempt to reopen the PR
+          if gh pr reopen "$PR_NUMBER" --comment "$COMMENT_BODY"; then
+            echo "Successfully reopened PR #$PR_NUMBER."
+            gh pr edit "$PR_NUMBER" --add-label "unmerged-work-detected" || true
+          else
+            echo "Could not reopen PR #$PR_NUMBER (head branch may have been deleted). Filing an incident issue..."
+            ISSUE_BODY=$(cat <<EOF
+          ## Anti-Work-Loss Watchdog Incident (#3444)
+
+          Pull request [PR #$PR_NUMBER: $PR_TITLE]($PR_URL) was closed unmerged at commit \`$HEAD_SHA\`, and could not be automatically reopened.
+
+          ### Unmerged functional files:
+          ${FILES_LIST}
+
+          ### Salvage command:
+          \`\`\`bash
+          git fetch origin $HEAD_SHA
+          git checkout -b rescue/$PR_NUMBER $HEAD_SHA
+          \`\`\`
+          EOF
+            )
+            gh api "repos/$GITHUB_REPOSITORY/issues" \
+              -f title="[watchdog] PR #$PR_NUMBER closed with unmerged work: $PR_TITLE" \
+              -f body="$ISSUE_BODY" \
+              -f labels="anomaly,unmerged-work-detected" \
+              --jq '.html_url'
+          fi
