@@ -266,6 +266,9 @@
     // SPY/QQQ/AAPL/MSFT/NVDA unless STOCK_COPILOT_UNIVERSE is
     // set. Rollback is unsetting this var and redeploying.
     "STOCK_COPILOT_PAPER_ENABLED": "1",
+    // Issue #3452 — Stock Copilot cycle cadence (AOP). Optional;
+    // absence uses "every 30 minutes". Floor is 30m (Worker cron limit).
+    // "STOCK_COPILOT_CADENCE": "every 30 minutes",
     "APP_NAME": "NextGenTP",
     // Issue #2419 — externalized polling cadences (AOP). All optional;
     // absence means the pollingConfig defaults apply. Milliseconds,

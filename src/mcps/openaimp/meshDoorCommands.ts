@@ -1384,13 +1384,21 @@ export class StockCopilotStatusCommand implements IMcpToolCommand<Record<string,
 export class StockCopilotControlCommand implements IMcpToolCommand<StockCopilotControlInput> {
   readonly name = "stock_copilot_control";
   readonly description =
-    "Pause or resume the autonomous Stock Copilot trading loop or update its enabled trading sessions. Pausing halts new entries while continuing to manage existing bracket exits.";
+    "Pause or resume the autonomous Stock Copilot trading loop, set cycle cadence/interval, or update its enabled trading sessions. Pausing halts new entries while continuing to manage existing bracket exits.";
   readonly jsonSchema = {
     type: "object" as const,
     properties: {
       paused: {
         type: "boolean",
         description: "Set to true to pause the loop, or false to resume execution.",
+      },
+      pauseUntil: {
+        type: "string",
+        description: "Pause loop until a specific time (e.g. '9:30 AM ET' or ISO timestamp).",
+      },
+      cadence: {
+        type: "string",
+        description: "Set cycle interval cadence, e.g. 'every 1 hour', 'every 30 minutes', '1h', '60m'.",
       },
       sessions: {
         type: "array",
@@ -1404,6 +1412,8 @@ export class StockCopilotControlCommand implements IMcpToolCommand<StockCopilotC
   };
   readonly zodSchema = z.object({
     paused: z.boolean().optional().describe("Pause or resume the loop"),
+    pauseUntil: z.string().optional().describe("Pause trading until specific time (e.g. '9:30 AM')"),
+    cadence: z.string().optional().describe("Cycle interval cadence (e.g. 'every 1 hour', 'every 30 minutes')"),
     sessions: z.array(z.enum(COPILOT_SESSIONS as unknown as [string, ...string[]])).optional().describe("Enabled session IDs"),
   });
 
