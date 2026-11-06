@@ -400,6 +400,8 @@ async function evaluateExit(
     orderType: shape.orderType,
     ...(shape.orderType === "LIMIT" ? { limitPrice: shape.limitPrice } : {}),
     userLogin: deps.userLogin,
+    session,
+    extendedHours: shape.requiresSessionTerms,
   });
   if (!placed.success) {
     result.errors.push({
@@ -515,6 +517,8 @@ async function attemptEntry(
     orderType: shape.orderType,
     ...(shape.orderType === "LIMIT" ? { limitPrice: shape.limitPrice } : {}),
     userLogin: deps.userLogin,
+    session: args.session,
+    extendedHours: shape.requiresSessionTerms,
   });
   if (!placed.success) {
     reject(`order refused: ${placed.message || "not accepted"}`);

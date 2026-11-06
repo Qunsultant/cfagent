@@ -2555,6 +2555,7 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
     type?: "market" | "limit" | "stop" | "stop_limit";
     limit_price?: number;
     time_in_force?: "day" | "gtc" | "ioc" | "fok";
+    extended_hours?: boolean;
   }): Promise<{ success: boolean; orderId?: string; status?: string; symbol?: string; qty?: number; side?: string; message: string; httpStatus?: number }> {
     if (!this.isConfigured()) {
       return {
@@ -2564,13 +2565,14 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
     }
 
     try {
-      const body = {
+      const body: Record<string, unknown> = {
         symbol: params.symbol.toUpperCase(),
         qty: params.qty,
         side: params.side.toLowerCase(),
         type: params.type || "market",
         time_in_force: params.time_in_force || "day",
         ...(params.limit_price ? { limit_price: params.limit_price } : {}),
+        ...(params.extended_hours !== undefined ? { extended_hours: params.extended_hours } : {}),
       };
 
       const res = await this.throttledFetch(`${this.getTradingUrl()}/v2/orders`, {
@@ -3350,6 +3352,7 @@ export class MarketDataResearchService {
     type?: "market" | "limit" | "stop" | "stop_limit";
     limit_price?: number;
     time_in_force?: "day" | "gtc" | "ioc" | "fok";
+    extended_hours?: boolean;
   }): Promise<{ success: boolean; orderId?: string; status?: string; symbol?: string; qty?: number; side?: string; message: string }> {
     return this.alpacaTrading.placeOrder(params);
   }
