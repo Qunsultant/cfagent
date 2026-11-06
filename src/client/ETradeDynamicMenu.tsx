@@ -10,6 +10,7 @@ import { PillGroup, Button, TextInput, Select } from "./components/ui";
 import { AlpacaSignInCard } from "./AlpacaSignInCard";
 import { apiFetch } from "./apiFetch";
 import { syncTarget } from "./brokerEndpoints";
+import { brokerPresentation } from "../trading/brokerPresentation";
 import { fetchWatchlists, type ETradeWatchlist } from "./accountApi";
 import {
   loadTapeSelection,
@@ -28,7 +29,6 @@ import {
 } from "./adBannerConfig";
 import { useAutoRefresh } from "./autoRefresh";
 import { useTenantProviders, DATA_PROVIDER_OPTIONS, BROKER_OPTIONS } from "./tenantProviders";
-import { brokerPresentation } from "../trading/brokerPresentation";
 import { getPollingConfig } from "./pollingConfig";
 import {
   FONT_SCALE_PRESETS,
@@ -112,11 +112,14 @@ export interface SettingsMenuProps {
   adBannerConfig?: AdBannerConfig;
   onUpdateAdBannerConfig?: (config: AdBannerConfig) => void;
   onOpenPartnerDeals?: () => void;
+  /** Force the dropdown panel open on initial render (e.g. tests). */
+  initialOpen?: boolean;
 }
 
 export type ETradeDynamicMenuProps = SettingsMenuProps;
 
 export function SettingsMenu({
+  activeEnv,
   oauthStatus,
   account,
   brokerStatus,
@@ -157,9 +160,10 @@ export function SettingsMenu({
   adBannerConfig,
   onUpdateAdBannerConfig,
   onOpenPartnerDeals,
+  initialOpen = false,
 }: SettingsMenuProps) {
   const [isHovered, setIsHovered] = useState(false);
-  const [isPinned, setIsPinned] = useState(false);
+  const [isPinned, setIsPinned] = useState(initialOpen);
   const [downloadSymbol, setDownloadSymbol] = useState(defaultSymbol);
   const menuRef = useRef<HTMLDivElement>(null);
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -395,7 +399,8 @@ export function SettingsMenu({
   // Issue #2482: the single environment value. The old localEnv state
   // (backed by the etrade_active_env key, which could disagree with
   // the hub's cfagent_env key) is gone.
-  const effectiveEnv = useBrokerEnvironment();
+  const brokerEnv = useBrokerEnvironment();
+  const effectiveEnv = activeEnv ?? brokerEnv;
   // Issue #2689 — watchlist options for the panel Tape set dropdown.
   // (Placed here, after effectiveEnv, so the effect deps never read
   // a not-yet-declared binding.)
@@ -437,14 +442,43 @@ export function SettingsMenu({
     brokerStatus?.environment === "live" ||
     brokerStatus?.activeEnvironment === "PROD";
 
-  const isConnected = !!oauthStatus?.authenticated;
-  const accountValue = account?.netAccountValue;
-
   const selectedBrokerId = tenantProviders.brokerId ?? "etrade";
   // Issue #3419: the menu names the broker from the ONE presentation module.
   // A local label ternary is how "E*TRADE" survived a broker switch before.
   const selectedBrokerLabel = brokerPresentation(selectedBrokerId).label;
   const brokerIcon = selectedBrokerId === "alpaca" ? "🦙" : "⚡";
+
+  // Issue #3419: query Alpaca connection status against its neutral connect endpoint
+  const [alpacaStatus, setAlpacaStatus] = useState<{ configured?: boolean; signedIn?: boolean } | null>(null);
+
+  useEffect(() => {
+    if (selectedBrokerId !== "alpaca") return;
+    let cancelled = false;
+    const url = `/api/broker/connect/alpaca?environment=${encodeURIComponent(effectiveEnv)}`;
+    apiFetch(url)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!cancelled && data && typeof data === "object") {
+          const body = data as Record<string, unknown>;
+          setAlpacaStatus({
+            configured: Boolean(body.configured),
+            signedIn: Boolean(body.signedIn),
+          });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setAlpacaStatus(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedBrokerId, effectiveEnv]);
+
+  const isConnected =
+    selectedBrokerId === "alpaca"
+      ? Boolean(alpacaStatus?.configured || alpacaStatus?.signedIn)
+      : !!oauthStatus?.authenticated;
+  const accountValue = account?.netAccountValue;
 
   const handleMouseEnter = () => {
     if (hoverTimerRef.current) {
@@ -635,7 +669,7 @@ export function SettingsMenu({
         title={
           isPinned
             ? "Settings pinned open (click to unpin)"
-            : `Settings (${isLive ? "Live" : "Paper"}) — Broker, preferences, layout & themes`
+            : `Settings (${selectedBrokerLabel} · ${isLive ? "Live" : (selectedBrokerId === "alpaca" ? "Paper" : "Sandbox")}) — Broker, preferences, layout & themes`
         }
         aria-label="Settings"
       >
@@ -657,7 +691,11 @@ export function SettingsMenu({
               <div className="etrade-brand-text-row">
                 <h5>{`${selectedBrokerLabel} Brokerage API`}</h5>
                 <span className={`brand-status-text ${isConnected ? "connected" : "disconnected"}`}>
-                  {isConnected ? "● OAuth Session Active" : "○ Offline / Not Connected"}
+                  {isConnected
+                    ? (selectedBrokerId === "alpaca"
+                        ? (alpacaStatus?.signedIn ? "● User Key Connected" : "● Deployment Key Active")
+                        : "● OAuth Session Active")
+                    : "○ Offline / Not Connected"}
                 </span>
               </div>
             </div>
@@ -669,7 +707,7 @@ export function SettingsMenu({
               >
                 {!isConnected
                   ? `${selectedBrokerLabel} · OFFLINE`
-                  : `${selectedBrokerLabel} · ${isLive ? "Live" : "Paper"}`}
+                  : `${selectedBrokerLabel} · ${isLive ? "Live" : (selectedBrokerId === "alpaca" ? "Paper" : "Sandbox")}`}
               </span>
             </div>
           </div>
@@ -719,6 +757,8 @@ export function SettingsMenu({
                   ? effectiveMask
                     ? `••••${account.accountId.slice(-4)}`
                     : account.accountId
+                  : selectedBrokerId === "alpaca"
+                  ? "Unavailable"
                   : "••••4748"}
               </span>
             </div>
@@ -766,9 +806,9 @@ export function SettingsMenu({
                 size="sm"
                 className={`btn-env-mini ${!isLive ? "active" : ""}`}
                 onClick={() => onSwitchEnv("TEST")}
-                title="Switch to paper sandbox environment"
+                title={`Switch to ${selectedBrokerId === "alpaca" ? "paper trading" : "paper sandbox"} environment`}
               >
-                🧪 Paper
+                {selectedBrokerId === "alpaca" ? "🧪 Paper" : "🧪 Sandbox"}
               </Button>
               <Button
                 type="button"
@@ -797,9 +837,13 @@ export function SettingsMenu({
                   className="btn-action-mini connect"
                   onClick={toggleAlpacaSignIn}
                   aria-expanded={showAlpacaSignIn}
-                  title="Sign in to Alpaca"
+                  title={isConnected ? "Manage Alpaca API keys" : "Sign in to Alpaca"}
                 >
-                  {showAlpacaSignIn ? "\u{1F999} Close sign-in" : "\u{1F999} Connect Alpaca"}
+                  {showAlpacaSignIn
+                    ? "🦙 Close sign-in"
+                    : isConnected
+                    ? "🦙 Manage keys"
+                    : "🦙 Connect Alpaca"}
                 </Button>
               ) : isConnected ? (
                 <>
@@ -855,7 +899,7 @@ export function SettingsMenu({
             )}
             {selectedBrokerId === "alpaca" && showAlpacaSignIn && (
               <div className="etrade-panel-section">
-                <AlpacaSignInCard />
+                <AlpacaSignInCard activeEnv={effectiveEnv} collapsedWhenConfigured={false} />
               </div>
             )}
           </div>
