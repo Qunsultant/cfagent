@@ -70,6 +70,11 @@ import {
   parseCadenceMinutes,
   formatCadenceString,
 } from "../../services/stockCopilotCadence";
+import {
+  COPILOT_EXECUTION_MODE_SETTING_KEY,
+  resolveCopilotExecutionMode,
+  isCopilotExecutionMode,
+} from "../../services/stockCopilotExecutionMode";
 import { introspectStockCopilot } from "../../services/stockCopilotIntrospection";
 
 /** Structural mirror of OrchestratorAgent's ScreenerExecutionContext
@@ -223,6 +228,10 @@ export async function handleStockCopilotRoutes(
           configured: cadence.configured,
           effective: cadence.effective,
         },
+        executionMode: resolveCopilotExecutionMode({
+          readSettingRaw: ctx.readSettingRaw,
+          env: ctx.env,
+        }),
         status,
         selectionResolved: selection.resolved,
         activeBroker: selection.resolved ? selection.selection.brokerId : null,
@@ -275,13 +284,16 @@ export async function handleStockCopilotRoutes(
       paused?: unknown;
       sessions?: unknown;
       cadence?: unknown;
+      executionMode?: unknown;
     } | null;
     const hasPaused = body !== null && "paused" in body;
     const hasSessions = body !== null && "sessions" in body;
     const hasCadence = body !== null && "cadence" in body;
-    if (!body || (!hasPaused && !hasSessions && !hasCadence)) {
+    const hasExecutionMode =
+      body !== null && typeof body.executionMode === "string" && isCopilotExecutionMode(body.executionMode);
+    if (!body || (!hasPaused && !hasSessions && !hasCadence && !hasExecutionMode)) {
       return Response.json(
-        { error: "Must supply paused, sessions, or cadence to update" },
+        { error: "Must supply paused, sessions, cadence, or executionMode to update" },
         { status: 400 },
       );
     }
@@ -352,7 +364,17 @@ export async function handleStockCopilotRoutes(
         validatedCadence,
       );
     }
+    if (hasExecutionMode) {
+      ctx.writeSetting!(
+        COPILOT_EXECUTION_MODE_SETTING_KEY,
+        body.executionMode as string,
+      );
+    }
     const resolvedCadence = resolveCopilotCadence({
+      env: ctx.env,
+      readSettingRaw: ctx.readSettingRaw,
+    });
+    const resolvedExecutionMode = resolveCopilotExecutionMode({
       env: ctx.env,
       readSettingRaw: ctx.readSettingRaw,
     });
@@ -361,12 +383,14 @@ export async function handleStockCopilotRoutes(
       ...(hasPaused ? { paused: body.paused } : {}),
       ...(sessions !== null ? { sessions } : {}),
       ...(validatedCadence !== null ? { cadence: validatedCadence } : {}),
+      ...(hasExecutionMode ? { executionMode: body.executionMode } : {}),
     });
     return Response.json({
       ok: true,
       ...(hasPaused ? { paused: body.paused } : {}),
       ...(sessions !== null ? { sessions } : {}),
       ...(validatedCadence !== null ? { cadence: resolvedCadence } : {}),
+      ...(hasExecutionMode ? { executionMode: resolvedExecutionMode } : {}),
     });
   } catch (err) {
     return Response.json(

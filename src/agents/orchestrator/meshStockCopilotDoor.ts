@@ -18,9 +18,12 @@ import type { CommercialStore } from "../../data/commercialPorts";
 import {
   createStockCopilotActivityPort,
   createStockCopilotControlPort,
+  createStockCopilotMemoryPort,
   createStockCopilotPositionPort,
 } from "../../data/createStockCopilotStorePorts";
 import type {
+  CopilotExecutionMode,
+  CopilotLearningRecord,
   CopilotPositionRecord,
   StockCopilotStoreSqlExecutor,
 } from "../../data/stockCopilotStorePorts";
@@ -43,6 +46,12 @@ import {
   parseCadenceMinutes,
   formatCadenceString,
 } from "../../services/stockCopilotCadence";
+import {
+  COPILOT_EXECUTION_MODE_SETTING_KEY,
+  resolveCopilotExecutionMode,
+  isCopilotExecutionMode,
+} from "../../services/stockCopilotExecutionMode";
+import { summarizeLearnings } from "../../services/stockCopilotAgenticLoop";
 import {
   introspectStockCopilot,
   type StockCopilotIntrospectionResult,
@@ -98,6 +107,7 @@ export interface StockCopilotStatusResult {
     configured: string;
     effective: string;
   };
+  executionMode: CopilotExecutionMode;
   status: string;
   selectionResolved: boolean;
   activeBroker: string | null;
@@ -115,6 +125,7 @@ export interface StockCopilotControlInput {
   sessions?: string[];
   cadence?: string;
   pauseUntil?: string;
+  executionMode?: CopilotExecutionMode;
 }
 
 export interface StockCopilotControlResult {
@@ -126,7 +137,13 @@ export interface StockCopilotControlResult {
     effective: string;
   };
   pauseUntil?: string | null;
+  executionMode: CopilotExecutionMode;
   updatedAt: string;
+}
+
+export interface StockCopilotLearningsResult {
+  learnings: CopilotLearningRecord[];
+  summary: string;
 }
 
 function projectOpenPosition(p: CopilotPositionRecord): StockCopilotOpenPositionView {
@@ -222,6 +239,11 @@ export async function getStockCopilotStatusViaDoor(
     readSettingRaw: ctx.readSettingRaw,
   });
 
+  const executionMode = resolveCopilotExecutionMode({
+    readSettingRaw: ctx.readSettingRaw,
+    env: ctx.env,
+  });
+
   return {
     flagEnabled,
     paused,
@@ -232,6 +254,7 @@ export async function getStockCopilotStatusViaDoor(
       configured: cadence.configured,
       effective: cadence.effective,
     },
+    executionMode,
     status,
     selectionResolved: selection.resolved,
     activeBroker: selection.resolved ? selection.selection.brokerId : null,
@@ -334,6 +357,20 @@ export async function controlStockCopilotViaDoor(
     });
   }
 
+  if (typeof input.executionMode === "string" && isCopilotExecutionMode(input.executionMode)) {
+    if (!ctx.writeSetting) {
+      throw new MeshDoorError(
+        "door_unavailable",
+        "Cannot update execution mode: writeSetting is not configured on this door context.",
+      );
+    }
+    ctx.writeSetting(COPILOT_EXECUTION_MODE_SETTING_KEY, input.executionMode);
+    ctx.audit?.("stock_copilot.control_execution_mode_via_door", "orchestrator", {
+      userLogin: login,
+      executionMode: input.executionMode,
+    });
+  }
+
   const updatedControl = control.getControl(login);
   const enabledSessions = resolveCopilotSessions({
     readSettingRaw: ctx.readSettingRaw,
@@ -342,6 +379,10 @@ export async function controlStockCopilotViaDoor(
   const cadence = resolveCopilotCadence({
     env: ctx.env,
     readSettingRaw: ctx.readSettingRaw,
+  });
+  const executionMode = resolveCopilotExecutionMode({
+    readSettingRaw: ctx.readSettingRaw,
+    env: ctx.env,
   });
   const pauseUntil = ctx.readSettingRaw?.("stock_copilot:pause_until") ?? null;
 
@@ -354,7 +395,31 @@ export async function controlStockCopilotViaDoor(
       effective: cadence.effective,
     },
     pauseUntil,
+    executionMode,
     updatedAt: updatedControl?.updatedAt ?? nowIso,
+  };
+}
+
+export async function getLearningsViaDoor(
+  ctx: StockCopilotDoorContext,
+  actingLogin?: string | null,
+  limit?: number,
+): Promise<StockCopilotLearningsResult> {
+  const login = requireActingLogin(actingLogin);
+  const memory = createStockCopilotMemoryPort(ctx.sql);
+  memory.ensureSchema();
+
+  const learnings = memory.listLearnings(login, limit ?? 20);
+  const summary = summarizeLearnings(learnings);
+
+  ctx.audit?.("stock_copilot.learnings_via_door", "orchestrator", {
+    userLogin: login,
+    count: learnings.length,
+  });
+
+  return {
+    learnings,
+    summary,
   };
 }
 

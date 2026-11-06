@@ -15,15 +15,18 @@ import { DoSqliteStockCopilotPositionStore } from "./doSqliteStockCopilotStoreAd
 import {
   DoSqliteStockCopilotActivityStore,
   DoSqliteStockCopilotControlStore,
+  DoSqliteStockCopilotMemoryStore,
 } from "./doSqliteStockCopilotSurfaceAdapter";
 import { InMemoryStockCopilotPositionStore } from "./inMemoryStockCopilotStoreAdapter";
 import {
   InMemoryStockCopilotActivityStore,
   InMemoryStockCopilotControlStore,
+  InMemoryStockCopilotMemoryStore,
 } from "./inMemoryStockCopilotSurfaceAdapter";
 import type {
   StockCopilotActivityPort,
   StockCopilotControlPort,
+  StockCopilotMemoryPort,
   StockCopilotPositionPort,
   StockCopilotStoreSqlExecutor,
 } from "./stockCopilotStorePorts";
@@ -62,4 +65,16 @@ export function createStockCopilotControlPort(
 /** #3422: compose the control port over the in-memory adapter (tests). */
 export function createInMemoryStockCopilotControlPort(): StockCopilotControlPort {
   return new InMemoryStockCopilotControlStore();
+}
+
+/** #3519: compose the learning-memory port over a host's DO storage. */
+export function createStockCopilotMemoryPort(
+  sql: StockCopilotStoreSqlExecutor,
+): StockCopilotMemoryPort {
+  return new DoSqliteStockCopilotMemoryStore(sql);
+}
+
+/** #3519: compose the learning-memory port over the in-memory adapter (tests). */
+export function createInMemoryStockCopilotMemoryPort(): StockCopilotMemoryPort {
+  return new InMemoryStockCopilotMemoryStore();
 }
