@@ -5,7 +5,7 @@
  *
  * Pinned here, using the same harness as
  * tests/fallback_identity_session_gate.test.ts (real worker fetch dispatch,
- * recording SEARCH_AGENT stub, Map-backed SESSIONS KV):
+ * recording ORCHESTRATOR_AGENT stub, Map-backed SESSIONS KV):
  * - unauthenticated (or unknown session) → 401, no capture attempted,
  *   nothing forwarded;
  * - valid session → the route behaves exactly as before (snapshot captured
@@ -80,7 +80,7 @@ function makeEnv() {
   seedSession("sessions", SESSION_ID, { githubLogin: LOGIN, userLogin: LOGIN });
   const env: any = {
     SESSION_STORE: sessionStoreNs,
-    SEARCH_AGENT: {
+    ORCHESTRATOR_AGENT: {
       idFromName: (name: string) => name,
       get: (id: string) => ({
         fetch: async (req: Request) => {
