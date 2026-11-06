@@ -30,20 +30,26 @@
  *    produce ok:false + a reason and EMPTY lists — never
  *    fabricated findings.
  *
- * 2. REPORT BACKFILL: the S4-1 backfill (runCanonicalIndexBackfillPage,
- *    extracted verbatim from the reports route into
- *    reportSemanticIndex.ts) swept page by page until nextOffset is
- *    null. Idempotent (re-upserts the same `report:<id>` vector ids).
- *
- * 3. CORPUS INDEX BRIDGE (#3345; the S4-5 bridge backfill, pulled
+ * 2. CORPUS INDEX BRIDGE (#3345; the S4-5 bridge backfill, pulled
  *    forward): the corpus items-API backfill
  *    (runCorpusAiSearchIndexBackfill in corpusAiSearchIndex.ts),
- *    injected exactly like leg 2 — the sync comes to mean "bucket
- *    bytes AND index items both reflect the canonical corpus",
- *    with per-item indexing state reported on the result. The leg
- *    uploads through the #2246 executor under `corpus:<key>` ids,
- *    flag-gated by AI_SEARCH_CORPUS_INDEXING_ENABLED; without the
- *    injected leg the result reports it skipped, never fabricated.
+ *    injected exactly like the former reports leg — the sync comes
+ *    to mean "bucket bytes AND index items both reflect the
+ *    canonical corpus", with per-item indexing state reported on
+ *    the result. The leg uploads through the #2246 executor under
+ *    `corpus:<key>` ids, flag-gated by
+ *    AI_SEARCH_CORPUS_INDEXING_ENABLED; without the injected leg
+ *    the result reports it skipped, never fabricated.
+ *
+ * Issue #3527 S4 (unbundle): the REPORT BACKFILL leg that rode
+ * this sync until S4 (the S4-1 canonical-index sweep of
+ * mas_reports) is reports machinery, not corpus machinery — it
+ * left the bundle. The sweep now lives in reportSemanticIndex.ts
+ * (runCanonicalIndexBackfillAll) and runs from its own route
+ * (POST /trading/reports/index-backfill-sweep) + tick rider under
+ * its own weekly guard and marker
+ * (reports_index_backfill_last_run). This sync keeps exactly the
+ * two corpus legs above.
  *
  * SCHEDULE: rides the existing every-30-minutes tick (server.ts
  * scheduled(), same Workers Free ceiling constraint as
@@ -71,12 +77,7 @@ import {
 } from "./knowledgeCorpus";
 import { r2KeyForStorageKey } from "./reportBlobStore";
 import type { BlobStore } from "./blobStorePorts";
-import {
-  runCanonicalIndexBackfillPage,
-  type IndexEnv,
-} from "./reportSemanticIndex";
 import type { CorpusIndexBackfillOutcome } from "./corpusAiSearchIndex";
-import type { SqlStorage } from "../orm";
 
 /** Durable marker key for the last completed corpus sync, in mas_settings. */
 export const CORPUS_SYNC_LAST_RUN_KEY = "corpus_sync_last_run";
@@ -284,20 +285,7 @@ export async function runCorpusIntegrityCheck(
   }
 }
 
-export interface CorpusBackfillOutcome {
-  upserted: number;
-  skippedRetention: number;
-  rows: number;
-  pages: number;
-  complete: boolean;
-  /** Present when the leg did not run (no store, or a throw). */
-  skipped?: boolean;
-  reason?: string;
-}
-
 export interface CorpusSyncDeps extends CorpusIntegrityDeps {
-  /** Production passes () => runCanonicalIndexBackfillAll(env, sql). */
-  backfill?: () => Promise<CorpusBackfillOutcome>;
   /** Issue #3345: production passes
    * () => runCorpusAiSearchIndexBackfill(env, {...}). */
   corpusIndex?: () => Promise<CorpusIndexBackfillOutcome>;
@@ -313,7 +301,6 @@ export interface CorpusSyncIndexOutcome extends CorpusIndexBackfillOutcome {
 
 export interface CorpusSyncResult {
   integrity: CorpusIntegrityReport;
-  backfill: CorpusBackfillOutcome;
   corpusIndex: CorpusSyncIndexOutcome;
   /** True only when the integrity leg actually executed. */
   completed: boolean;
@@ -321,41 +308,16 @@ export interface CorpusSyncResult {
 }
 
 /**
- * Run both sync legs. Never throws: a leg that cannot run reports
- * honestly (integrity reason / backfill skipped-or-failed outcome)
- * instead of failing the tick.
+ * Run the two corpus sync legs (integrity + corpus index bridge).
+ * Never throws: a leg that cannot run reports honestly (integrity
+ * reason / corpus-index skipped-or-failed outcome) instead of
+ * failing the tick.
  */
 export async function runCorpusSync(
   deps: CorpusSyncDeps
 ): Promise<CorpusSyncResult> {
   const ranAt = new Date().toISOString();
   const integrity = await runCorpusIntegrityCheck(deps);
-  let backfill: CorpusBackfillOutcome;
-  if (!deps.backfill) {
-    backfill = {
-      upserted: 0,
-      skippedRetention: 0,
-      rows: 0,
-      pages: 0,
-      complete: false,
-      skipped: true,
-      reason: "No report store supplied; backfill skipped.",
-    };
-  } else {
-    try {
-      backfill = await deps.backfill();
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      backfill = {
-        upserted: 0,
-        skippedRetention: 0,
-        rows: 0,
-        pages: 0,
-        complete: false,
-        reason: `Backfill failed: ${message}`,
-      };
-    }
-  }
   let corpusIndex: CorpusSyncIndexOutcome;
   if (!deps.corpusIndex) {
     corpusIndex = {
@@ -382,38 +344,8 @@ export async function runCorpusSync(
   }
   return {
     integrity,
-    backfill,
     corpusIndex,
     completed: integrity.reason === undefined,
     ranAt,
   };
-}
-
-/**
- * Issue #1169 S4-4: sweep the whole canonical-report table through
- * the shared backfill page fn (S4-1's route logic, extracted
- * verbatim), 100 rows per page, until nextOffset is null.
- */
-export async function runCanonicalIndexBackfillAll(
-  env: IndexEnv | undefined,
-  sql: SqlStorage
-): Promise<CorpusBackfillOutcome> {
-  let upserted = 0;
-  let skippedRetention = 0;
-  let rows = 0;
-  let pages = 0;
-  let offset = 0;
-  for (;;) {
-    const page = await runCanonicalIndexBackfillPage(env, sql, {
-      limit: 100,
-      offset,
-    });
-    upserted += page.upserted;
-    skippedRetention += page.skippedRetention;
-    rows += page.rows;
-    pages += 1;
-    if (page.nextOffset === null) break;
-    offset = page.nextOffset;
-  }
-  return { upserted, skippedRetention, rows, pages, complete: true };
 }
