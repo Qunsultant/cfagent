@@ -1,6 +1,8 @@
 /**
  * Issue #2137: user-facing checkout UI — pay for a run, or buy, view,
- * and cancel a subscription.
+ * and cancel a subscription. Issue #3262 adds a Top up tab: add money
+ * to the account (credits fund pay-per-run screens), crediting only
+ * on verified payment through the native checkout pattern.
  *
  * Identity rule: the session cookie is the identity. This panel never
  * sends an identity header and never reads tier or tenant from a
@@ -46,6 +48,7 @@ import {
   Card,
   Checkbox,
   EmptyState,
+  Modal,
   Notice,
   PageShell,
   Select,
@@ -74,6 +77,8 @@ import {
   subscriptionCancel,
   subscriptionCheckout,
   subscriptionPurchase,
+  topUpCheckout,
+  topUpConfirm,
   type ChallengeFlow,
   type CommercialAccountView,
   type PlatformIdentityView,
@@ -82,6 +87,8 @@ import {
   type ScreenerFamily,
   type SubmitResult,
   type SubscriptionStatusView,
+  type SubscriptionView,
+  type TopUpCheckoutView,
 } from "./commercialApi";
 
 const GOAL_KINDS = [
@@ -103,6 +110,16 @@ function errText(err: unknown): string {
   return "Something went wrong. Try again later.";
 }
 
+/**
+ * Issue #2669 (2.14): which rail manages a subscription row. A row
+ * carrying a provider subscription id is Billing-managed — the cancel
+ * route provider-cancels it first (Stripe stops charging). A row
+ * without one is a native repurchase row, canceled locally.
+ */
+function managedByLabel(row: SubscriptionView): string {
+  return row.providerSubscriptionId ? "Billing (Stripe)" : "Native";
+}
+
 function newJobId(): string {
   return `ui-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -112,10 +129,11 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
   // the shared hook (aliased to the old tab/setTab names, so the panel
   // below is untouched).
   const { activeTab: tab, handleTabChange: setTab } = useUrlSyncedTabs<
-    "pay" | "subscriptions"
+    "pay" | "subscriptions" | "topup"
   >({
     param: "checkoutTab",
-    isValid: (v): v is "pay" | "subscriptions" => v === "pay" || v === "subscriptions",
+    isValid: (v): v is "pay" | "subscriptions" | "topup" =>
+      v === "pay" || v === "subscriptions" || v === "topup",
     defaultTab: "pay",
   });
   const [loading, setLoading] = React.useState(true);
@@ -158,6 +176,27 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
   const [buyDone, setBuyDone] = React.useState<string | null>(null);
   const [canceling, setCanceling] = React.useState(false);
   const [cancelDone, setCancelDone] = React.useState<string | null>(null);
+  const [cancelDetail, setCancelDetail] = React.useState<string | null>(null);
+  // Issue #2669 (2.14): cancel is a confirmed action — the dialog lists
+  // what will be canceled and nothing is posted until confirmed.
+  const [cancelConfirmOpen, setCancelConfirmOpen] = React.useState(false);
+
+  // Rows the cancel route would cancel: active, uncanceled, unexpired.
+  // The server decides the same set from the session identity; this is
+  // display only — the client never selects rows to cancel.
+  const cancelableSubs = (subStatus?.subscriptions ?? []).filter(
+    (s) => s.status === "active" && !s.canceledAtMs && s.periodEndMs > Date.now(),
+  );
+
+  // Top-up form (#3262): add money, crediting only on verified payment.
+  const [topUpAmount, setTopUpAmount] = React.useState("");
+  const [topUpRail, setTopUpRail] = React.useState<"card" | "x402">("card");
+  const [topUpMint, setTopUpMint] = React.useState<TopUpCheckoutView | null>(null);
+  const [topUpMinting, setTopUpMinting] = React.useState(false);
+  const [topUpConfirming, setTopUpConfirming] = React.useState(false);
+  const [topUpError, setTopUpError] = React.useState<string | null>(null);
+  const [topUpDone, setTopUpDone] = React.useState<string | null>(null);
+  const [topUpProof, setTopUpProof] = React.useState("");
 
   const refreshSubscription = React.useCallback(async () => {
     try {
@@ -381,21 +420,105 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
   };
 
   const handleCancel = async () => {
+    setCancelConfirmOpen(false);
     setCanceling(true);
     setCancelDone(null);
+    setCancelDetail(null);
     setBuyError(null);
     try {
+      // Issue #1069 §8: the request carries no identifiers — no userId,
+      // no tenantId. The server resolves (user, tenant) from the session
+      // identity, so the cancel cannot be steered at another tenant.
+      // Issue #3523: the success message is the response's catalog businessMessage
+      // (verbatim from the outcome catalog via the route); the detail line names what
+      // was cancelled and the access-through date, so the UI explains what was cancelled
+      // vs what remains (the refreshed table below shows the remaining rows). A replay
+      // now rejects 409 with the coded none-active message (rendered via errText).
       const res = await subscriptionCancel();
-      setCancelDone(
-        res.accessThroughMs
-          ? `Canceled. Your access continues through ${formatPeriodEnd(res.accessThroughMs)}. No cash refund is issued.`
-          : "No active subscription was found to cancel."
+      setCancelDone(res.message);
+      const plans = [...new Set(res.canceled.map((r) => r.planId))].join(", ");
+      setCancelDetail(
+        res.downgradeTiming === "immediate"
+          ? `Canceled: ${plans} — access ended now.`
+          : res.accessThroughMs
+            ? `Canceled: ${plans} — access through ${formatPeriodEnd(res.accessThroughMs)}.`
+            : `Canceled: ${plans}.`,
       );
-      await refreshSubscription();
     } catch (err) {
       setBuyError(errText(err));
     } finally {
+      // Issue #3523: refresh on every path (including failures) so what remains is always
+      // the verified server state — a partial cancel shows its remaining rows, never a claim.
+      await refreshSubscription();
       setCanceling(false);
+    }
+  };
+
+  // #3262: x402 is offered only when the browser scope allows it AND
+  // the pricing network carries an x402 network; card is always offered.
+  const topUpX402Offered =
+    pricing?.browserPaymentScope === "card-and-x402" && pricing.network.x402Network !== null;
+
+  const handleTopUpMint = async () => {
+    setTopUpError(null);
+    setTopUpDone(null);
+    setTopUpMint(null);
+    if (!email.trim()) {
+      setTopUpError("Enter the checkout contact email.");
+      return;
+    }
+    const amount = Number(topUpAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setTopUpError("Enter an amount greater than zero.");
+      return;
+    }
+    const limits = pricing?.topUpLimits ?? null;
+    if (limits && (amount < limits.minUSD || amount > limits.maxUSD)) {
+      setTopUpError(`Amount must be between ${formatUSD(limits.minUSD)} and ${formatUSD(limits.maxUSD)}.`);
+      return;
+    }
+    setTopUpMinting(true);
+    try {
+      const res = await topUpCheckout({ amountUSD: amount, rail: topUpRail, email: email.trim() });
+      setTopUpMint(res);
+    } catch (err) {
+      setTopUpError(errText(err));
+    } finally {
+      setTopUpMinting(false);
+    }
+  };
+
+  const handleTopUpConfirm = async () => {
+    if (!topUpMint) return;
+    if (topUpMint.rail === "x402" && !topUpProof.trim()) {
+      setTopUpError("Paste the payment proof from your wallet or agent, then verify.");
+      return;
+    }
+    setTopUpConfirming(true);
+    setTopUpError(null);
+    try {
+      const res = await topUpConfirm({
+        topUpRequestId: topUpMint.topUpRequestId,
+        ...(topUpMint.rail === "card"
+          ? { checkoutSessionId: topUpMint.checkoutSessionId ?? undefined }
+          : { paymentProof: topUpProof.trim() }),
+      });
+      setTopUpDone(
+        `Top-up credited: ${formatUSD(res.creditedUSD)}. New credit balance: ${formatUSD(res.account.creditsUSD ?? 0)}.`
+      );
+      setTopUpMint(null);
+      setTopUpProof("");
+      // Refresh the read-only identity display so the header credits
+      // match; the confirm response is the authority, this is display-only.
+      try {
+        setIdentity(await getIdentity());
+      } catch {
+        // Identity refresh failure leaves the confirmed balance shown above.
+      }
+    } catch (err) {
+      setTopUpError(errText(err));
+    } finally {
+      setTopUpConfirming(false);
     }
   };
 
@@ -414,13 +537,14 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
         tabs={[
           { id: "pay", label: "Pay per run" },
           { id: "subscriptions", label: "Subscriptions" },
+          { id: "topup", label: "Top up" },
         ]}
         value={tab}
         onChange={setTab}
         idBase="checkout-tabs"
         ariaLabel="Checkout sections"
       />
-      {/* #2219: read-only identity display, shared by both tabs.
+      {/* #2219: read-only identity display, shared by all tabs.
           Never an input: loading shows a neutral loading line,
           and a resolution failure shows the failure message. */}
       {identityError ? (
@@ -577,8 +701,15 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
           {subsDeployed && (
             <>
               <Notice tone="info">
-                Subscriptions do not auto-renew: renewal is repurchase before expiry. Canceling keeps your access
-                through the end of the current period; canceling does not itself issue a cash refund.
+                Subscriptions do not auto-renew: renewal is repurchase before expiry. Canceling stops future
+                charges and does not itself issue a cash refund. Whether access runs to the end of the current
+                period depends on the store&apos;s billing policy — the result shown after you confirm states the
+                actual end date.
+              </Notice>
+              <Notice tone="info">
+                Provider-managed (Billing) subscriptions are purchased from the{" "}
+                <a href="?tab=products">Products catalog</a>. This panel buys native subscriptions — and cancels
+                subscriptions of either kind.
               </Notice>
               {subStatus && (
                 <p>
@@ -659,16 +790,67 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
                 </Notice>
               )}
               {buyDone && <Notice tone="success">{buyDone}</Notice>}
-              {subStatus?.current && (
-                <Button variant="danger" loading={canceling} onClick={handleCancel}>
-                  Cancel subscription (access continues to period end)
+              {cancelableSubs.length > 0 && (
+                <Button
+                  variant="danger"
+                  loading={canceling}
+                  onClick={() => {
+                    setCancelDone(null);
+                    setCancelDetail(null);
+                    setCancelConfirmOpen(true);
+                  }}
+                >
+                  Cancel subscription…
                 </Button>
               )}
-              {cancelDone && <Notice tone="info">{cancelDone}</Notice>}
+              <Modal
+                open={cancelConfirmOpen}
+                onClose={() => setCancelConfirmOpen(false)}
+                title="Cancel subscription"
+                footer={
+                  <>
+                    <Button onClick={() => setCancelConfirmOpen(false)} disabled={canceling}>
+                      Keep subscriptions
+                    </Button>
+                    <Button variant="danger" loading={canceling} onClick={handleCancel}>
+                      Yes, cancel subscriptions
+                    </Button>
+                  </>
+                }
+              >
+                <p>
+                  This cancels{" "}
+                  {cancelableSubs.length === 1
+                    ? "this subscription"
+                    : `all ${cancelableSubs.length} active subscriptions`}
+                  . Billing-managed rows are provider-canceled first (Stripe stops charging); native rows are
+                  canceled locally. Canceling does not itself issue a cash refund.
+                </p>
+                <Table
+                  columns={[
+                    { key: "plan", header: "Plan", render: (row: SubscriptionView) => row.planId },
+                    { key: "managedBy", header: "Managed by", render: (row: SubscriptionView) => managedByLabel(row) },
+                    { key: "end", header: "Period end", render: (row: SubscriptionView) => formatPeriodEnd(row.periodEndMs) },
+                  ]}
+                  rows={cancelableSubs}
+                  rowKey={(row) => row.id}
+                  caption="Subscriptions to cancel"
+                  empty={
+                    <EmptyState title="No active subscription" description="No active subscription was found to cancel." />
+                  }
+                />
+              </Modal>
+              {cancelDone && (
+                <Notice tone="info">
+                  {cancelDone}
+                  {cancelDetail && <p>{cancelDetail}</p>}
+                </Notice>
+              )}
               {subStatus && subStatus.subscriptions.length > 0 && (
                 <Table
                   columns={[
                     { key: "plan", header: "Plan", render: (row) => row.planId },
+                    { key: "managedBy", header: "Managed by", render: (row) => managedByLabel(row) },
                     { key: "status", header: "Status", render: (row) => row.status },
                     { key: "end", header: "Period end", render: (row) => formatPeriodEnd(row.periodEndMs) },
                   ]}
@@ -688,6 +870,81 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
               </p>
             </>
           )}
+        </Card>
+      )}
+      {tab === "topup" && (
+        <Card>
+          <Notice tone="info">
+            Add money to your account: credits fund pay-per-run screens. Credit lands only after verified
+            payment — never on an unconfirmed checkout.
+          </Notice>
+          {pricing?.topUpLimits ? (
+            <p>
+              Top-up limits: {formatUSD(pricing.topUpLimits.minUSD)} – {formatUSD(pricing.topUpLimits.maxUSD)}{" "}
+              per top-up (operator-set).
+            </p>
+          ) : (
+            <p>Top-up limits are currently unavailable — the server still validates the amount.</p>
+          )}
+          <TextInput
+            label="Amount (USD)"
+            hint="Credits added to your account after verified payment."
+            type="number"
+            value={topUpAmount}
+            onChange={(e) => setTopUpAmount(e.target.value)}
+          />
+          <Select label="Payment rail" value={topUpRail} onChange={(e) => setTopUpRail(e.target.value as "card" | "x402")}>
+            <option value="card">Card (Stripe)</option>
+            {topUpX402Offered && <option value="x402">Crypto (x402)</option>}
+          </Select>
+          <TextInput
+            label="Checkout contact email"
+            hint="Used only as the checkout contact. Identity comes from your signed-in session."
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+          {topUpError && <Notice tone="danger">{topUpError}</Notice>}
+          <Button variant="primary" loading={topUpMinting} onClick={handleTopUpMint}>
+            Create top-up checkout
+          </Button>
+          {topUpMint && (
+            <Notice tone="info">
+              Checkout created for {formatUSD(topUpMint.amountUSD)} ({topUpMint.topUpRequestId}). Complete the
+              payment, then confirm below.
+              {topUpMint.rail === "card" && topUpMint.checkoutUrl && (
+                <p>
+                  <a href={topUpMint.checkoutUrl} target="_blank" rel="noreferrer">
+                    Complete payment
+                  </a>{" "}
+                  (native checkout link for this top-up)
+                </p>
+              )}
+              {topUpMint.rail === "x402" && topUpMint.challenge && (
+                <>
+                  <p>
+                    Crypto (x402) payment — no payment link exists for crypto. Complete the 402 payment with your
+                    wallet or agent, then paste the payment proof below.
+                  </p>
+                  <p>
+                    Network: {topUpMint.challenge.network} — amount: {formatUSD(topUpMint.challenge.amountUSD)}{" "}
+                    USDC — recipient: {topUpMint.challenge.recipient}
+                  </p>
+                  <TextInput
+                    label="Payment proof"
+                    hint="The proof your wallet or agent returned for this 402 payment."
+                    value={topUpProof}
+                    onChange={(e) => setTopUpProof(e.target.value)}
+                  />
+                </>
+              )}
+              <div>
+                <Button variant="primary" loading={topUpConfirming} onClick={handleTopUpConfirm}>
+                  I have paid — verify
+                </Button>
+              </div>
+            </Notice>
+          )}
+          {topUpDone && <Notice tone="success">{topUpDone}</Notice>}
         </Card>
       )}
     </PageShell>

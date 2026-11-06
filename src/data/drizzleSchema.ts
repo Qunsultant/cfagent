@@ -550,6 +550,26 @@ export const agentCfpayChannelPurchases = sqliteTable("agent_cfpay_channel_purch
 });
 
 /**
+ * Self-service top-up drafts (#3262). This schema MAPS the table;
+ * it does not create it — DDL authority lives in migration 0048
+ * (src/data/migrationRunner.ts).
+ */
+export const agentTopUpDrafts = sqliteTable("agent_top_up_drafts", {
+  id: text("id").primaryKey(),
+  userLogin: text("user_login").notNull(),
+  tenantId: text("tenant_id").notNull(),
+  email: text("email").notNull(),
+  amountUSD: real("amount_usd").notNull(),
+  rail: text("rail").notNull(),
+  status: text("status").notNull(),
+  createdAtMs: integer("created_at_ms").notNull(),
+  creditedAtMs: integer("credited_at_ms"),
+  paymentIntentId: text("payment_intent_id"),
+  checkoutSessionId: text("checkout_session_id"),
+  challengeNonce: text("challenge_nonce"),
+});
+
+/**
  * Billing customer mapping (#2656, Phase 2.1 of #2405) on D1.
  * One row per user: the provider customer id for that user's
  * Billing checkouts (first-wins — see billingCustomerPorts.ts).
@@ -1253,4 +1273,85 @@ export const breakerTripAlerts = sqliteTable("breaker_trip_alerts", {
   transitionId: text("transition_id").primaryKey(),
   alertedAtMs: integer("alerted_at_ms"),
   claimToken: text("claim_token"),
+});
+
+/**
+ * Pipeline J1 (#3534, ORM conformance #3548) — the job pipeline's
+ * contribution to the foundation: job definitions, one row per
+ * job id. The definition persists as whole JSON (it is a
+ * configuration value, resolved by the config layer); name and
+ * version ride as columns for listing. DDL authority:
+ * migration 0046. Timestamps are ISO text — residency parity
+ * with the authoritative DO table (the pipeline's records are
+ * ISO-timestamped end to end), not the epoch-ms projection
+ * convention.
+ */
+export const jobPipelineDefinitions = sqliteTable("job_pipeline_definitions", {
+  jobId: text("job_id").primaryKey(),
+  name: text("name").notNull(),
+  definitionJson: text("definition_json").notNull(),
+  version: integer("version").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+/**
+ * Pipeline J1 (#3534, #3548) — live job instance state, one row
+ * per job id: management state, the resume-cursor view, and the
+ * stage-runner checkpoint ledger (#3549). DDL: migration 0046.
+ */
+export const jobPipelineInstances = sqliteTable("job_pipeline_instances", {
+  jobId: text("job_id").primaryKey(),
+  state: text("state").notNull(),
+  desiredState: text("desired_state").notNull(),
+  currentRunId: text("current_run_id"),
+  runStartedAt: text("run_started_at"),
+  runTrigger: text("run_trigger"),
+  checkpointJson: text("checkpoint_json"),
+  stageCheckpointJson: text("stage_checkpoint_json"),
+  stageDesiredJson: text("stage_desired_json"),
+  lastError: text("last_error"),
+  updatedAt: text("updated_at").notNull(),
+});
+
+/**
+ * Pipeline J1 (#3534, #3548) — persisted step hand-off artifacts,
+ * one row per (run, artifact key); the `id` column is the
+ * surrogate composite key the ORM Repository core addresses
+ * (run id + separator + artifact key). The migration's DDL also
+ * carries the (run_id, artifact_key) index. DDL: migration 0046.
+ */
+export const jobPipelineArtifacts = sqliteTable("job_pipeline_artifacts", {
+  id: text("id").primaryKey(),
+  runId: text("run_id").notNull(),
+  artifactKey: text("artifact_key").notNull(),
+  valueJson: text("value_json").notNull(),
+});
+
+/**
+ * Pipeline J1 (#3534, #3548) — terminal job run records, the
+ * #2964/#3121 run-record family's table (system column carries
+ * "job-pipeline" for pipeline runs). Until this mapping the
+ * family lived only in its DO adapter's DDL; the D1 residency
+ * the workflow substrate needs is declared here, with the
+ * (job_id, started DESC, id DESC) history index in the DDL.
+ * Timestamps are ISO text — the record family's own shape.
+ * DDL: migration 0047.
+ */
+export const jobRunRecords = sqliteTable("job_run_records", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  system: text("system").notNull(),
+  jobId: text("job_id").notNull(),
+  operation: text("operation").notNull(),
+  started: text("started").notNull(),
+  finished: text("finished").notNull(),
+  outcome: text("outcome").notNull(),
+  triggeredBy: text("triggered_by").notNull(),
+  triggerText: text("trigger_text"),
+  scheduleId: text("schedule_id"),
+  asyncJobId: text("async_job_id"),
+  workflowId: text("workflow_id"),
+  errorText: text("error_text"),
+  detail: text("detail"),
+  descriptor: text("descriptor"),
+  artifactRefsJson: text("artifact_refs_json"),
 });

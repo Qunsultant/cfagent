@@ -2,15 +2,18 @@
  * Issue #2740 (Platform Phase 6, program #2468) — servicing.
  *
  * Read-only Billing servicing view, except the operator refund-policy
- * approval section (2.19, #2985) and the refund flow section (2.20,
- * #3045): both CALL existing routes only and create none: identity
+ * approval section (2.19, #2985), the refund flow section (2.20,
+ * #3045), and the operator top-up limits section (#3262): all CALL
+ * existing routes only and create none: identity
  * (#2219, session-derived, self-only),
  * subscription read + plans list (2.1 Billing API), paid-call receipts
  * (slice 4), referral balance (2.2 — this panel is its first client
  * caller), refund policy read + per-kind approve/withdraw (2.7 routes
  * via RefundPolicySection — policy configuration only, never a refund
  * request, approval, or execution), and refund request / record
- * approve-deny / execute / verify (2.7 routes via RefundFlowSection).
+ * approve-deny / execute / verify (2.7 routes via RefundFlowSection),
+ * and top-up limits read + min/max edit (billing-policy route via
+ * TopUpLimitsSection — configuration only, never a top-up).
  * It never purchases (Selling owns
  * purchase), never cancels (rescoped 2.14 owns cancel-action UI), never
  * deactivates (2.5), never invents a price,
@@ -27,6 +30,7 @@ import { fetchPlatformIdentity } from "./firstRunApi";
 import { receiptKindLabel } from "./agenticWalletApi";
 import { RefundPolicySection } from "./RefundPolicySection";
 import { RefundFlowSection } from "./RefundFlowSection";
+import { TopUpLimitsSection } from "./TopUpLimitsSection";
 import {
   buildBillingView,
   type BillingPlanInput,
@@ -130,6 +134,11 @@ export function BillingServicingPanel() {
             <p>Subscription: {view.subscriptionStatus}</p>
             {view.periodEndISO && <p>Current period ends: {view.periodEndISO}</p>}
             <p>Subscriptions on file: {view.subscriptionCount}</p>
+            <p>
+              To cancel a subscription, go to{" "}
+              <a href="?tab=checkout&checkoutTab=subscriptions">Checkout → Subscriptions</a>. This view never
+              cancels — cancellation lives in Checkout (2.14).
+            </p>
           </Card>
           <Card>
             <p>Paid-call receipts ({view.receipts.length})</p>
@@ -160,6 +169,7 @@ export function BillingServicingPanel() {
           </Card>
           <RefundPolicySection />
           <RefundFlowSection />
+          <TopUpLimitsSection />
           <Card>
             <p>Support snapshot</p>
             <p>Account: {view.supportSnapshot.login}</p>

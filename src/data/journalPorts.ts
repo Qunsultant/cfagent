@@ -342,6 +342,57 @@ export function mapSubscriptionPurchaseToJournalEntries(
   ];
 }
 
+/**
+ * Self-service top-up journal input (#3262). A top-up is prepaid
+ * credit — a liability until consumed, exactly like a subscription
+ * purchase. transactionRef is the top-up draft id (the confirm's
+ * idempotency key), and the draft id is also the entry row's
+ * reference (runRequestId), so a replayed confirm can never
+ * double-post — the adapter returns the existing entries for that ref.
+ */
+export interface TopUpJournalInput {
+  /** Idempotency key: the top-up draft id (`topup-<uuid>`). */
+  transactionRef: string;
+  tenantId: string;
+  /** The credited top-up amount, in USD (single currency only, #1069 §9). */
+  amountUSD: number;
+  currency?: string;
+}
+
+/** top-up → Dr 1000 / Cr 2100. NOT immediate revenue. */
+export function mapTopUpToJournalEntries(input: TopUpJournalInput): JournalEntryInput[] {
+  const amount = round2(input.amountUSD);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error("Journal mapping requires a positive finite amountUSD.");
+  }
+  if (!input.transactionRef || !input.tenantId) {
+    throw new Error("Journal mapping requires transactionRef and tenantId.");
+  }
+  const currency = input.currency ?? "USD";
+  return [
+    {
+      transactionRef: input.transactionRef,
+      accountCode: "1000",
+      debitUSD: amount,
+      creditUSD: 0,
+      currency,
+      tenantId: input.tenantId,
+      runRequestId: input.transactionRef,
+      family: "top_up",
+    },
+    {
+      transactionRef: input.transactionRef,
+      accountCode: "2100",
+      debitUSD: 0,
+      creditUSD: amount,
+      currency,
+      tenantId: input.tenantId,
+      runRequestId: input.transactionRef,
+      family: "top_up",
+    },
+  ];
+}
+
 /** redemption (replacement run delivered) → Dr 2000 / Cr 4000. */
 export function mapRedemptionToJournalEntries(input: JournalMappingInput): JournalEntryInput[] {
   const amount = assertMappingAmount(input);

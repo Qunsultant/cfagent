@@ -81,6 +81,16 @@ export interface BillingPolicy {
    * the billing-policy route, and only an operator changes it.
    */
   cfpayChannelFixedPriceUSD: number | null;
+  /**
+   * Issue #3262: self-service top-up amount bounds, in USD. A top-up
+   * mint refuses an amount outside [topUpMinUSD, topUpMaxUSD].
+   * Operator data, never code constants: an operator sets them
+   * through the billing-policy route (and the Billing servicing
+   * surface), and only an operator changes them.
+   */
+  topUpMinUSD: number;
+  /** Issue #3262: see topUpMinUSD. */
+  topUpMaxUSD: number;
 }
 
 /**
@@ -100,6 +110,11 @@ export const PROPOSED_SEED_BILLING_POLICY: BillingPolicy = {
   repurchaseMigration: "grandfather",
   stripePriceByPlan: {},
   cfpayChannelFixedPriceUSD: null,
+  // Issue #3262: owner-decided 2026-11-06 (min $1, max $500).
+  // PROPOSED defaults, operator-editable via the Billing servicing
+  // surface — never hardcoded, never silently an owner decision.
+  topUpMinUSD: 1,
+  topUpMaxUSD: 500,
 };
 
 /** Storage keys for the policy table (one row per key). */
@@ -113,6 +128,8 @@ export const BILLING_POLICY_KEYS = {
   repurchaseMigration: "repurchase_migration",
   stripePriceByPlan: "stripe_price_by_plan",
   cfpayChannelFixedPriceUSD: "cfpay_channel_fixed_price_usd",
+  topUpMinUSD: "top_up_min_usd",
+  topUpMaxUSD: "top_up_max_usd",
 } as const;
 
 export function assertBillingPeriod(value: unknown, field: string): BillingPeriod {
@@ -180,6 +197,24 @@ export function assertCfpayChannelFixedPriceUSD(value: unknown): number | null {
   return n;
 }
 
+/** Issue #3262: a finite positive USD bound. */
+export function assertTopUpMinUSD(value: unknown): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) {
+    throw new Error("topUpMinUSD must be a finite positive number.");
+  }
+  return n;
+}
+
+/** Issue #3262: a finite positive USD bound. */
+export function assertTopUpMaxUSD(value: unknown): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) {
+    throw new Error("topUpMaxUSD must be a finite positive number.");
+  }
+  return n;
+}
+
 export function assertStripePriceByPlan(value: unknown): Record<string, string> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error("stripePriceByPlan must be an object mapping plan id to Stripe Price id.");
@@ -198,7 +233,7 @@ export function assertStripePriceByPlan(value: unknown): Record<string, string> 
 export function assertBillingPolicy(value: unknown): BillingPolicy {
   const v = value as Record<string, unknown>;
   if (typeof v !== "object" || v === null) throw new Error("Billing policy must be an object.");
-  return {
+  const policy: BillingPolicy = {
     billingPeriodDefault: assertBillingPeriod(v.billingPeriodDefault, "billingPeriodDefault"),
     billingPeriodsAllowed: assertBillingPeriodsAllowed(v.billingPeriodsAllowed),
     dunningRetryDelayDays: assertDunningRetryDelayDays(v.dunningRetryDelayDays),
@@ -208,7 +243,14 @@ export function assertBillingPolicy(value: unknown): BillingPolicy {
     repurchaseMigration: assertRepurchaseMigration(v.repurchaseMigration),
     stripePriceByPlan: assertStripePriceByPlan(v.stripePriceByPlan),
     cfpayChannelFixedPriceUSD: assertCfpayChannelFixedPriceUSD(v.cfpayChannelFixedPriceUSD),
+    topUpMinUSD: assertTopUpMinUSD(v.topUpMinUSD),
+    topUpMaxUSD: assertTopUpMaxUSD(v.topUpMaxUSD),
   };
+  // Issue #3262: the bounds must order — a min above the max is not a policy.
+  if (policy.topUpMinUSD > policy.topUpMaxUSD) {
+    throw new Error("topUpMinUSD must not exceed topUpMaxUSD.");
+  }
+  return policy;
 }
 
 /** Validate a partial policy update; unknown keys are rejected. */
@@ -225,6 +267,8 @@ export function assertBillingPolicyPartial(value: unknown): Partial<BillingPolic
     "repurchaseMigration",
     "stripePriceByPlan",
     "cfpayChannelFixedPriceUSD",
+    "topUpMinUSD",
+    "topUpMaxUSD",
   ]);
   for (const k of Object.keys(v)) {
     if (!allowed.has(k)) throw new Error(`Unknown billing policy field: ${k}.`);
@@ -239,6 +283,8 @@ export function assertBillingPolicyPartial(value: unknown): Partial<BillingPolic
   if (v.repurchaseMigration !== undefined) out.repurchaseMigration = assertRepurchaseMigration(v.repurchaseMigration);
   if (v.stripePriceByPlan !== undefined) out.stripePriceByPlan = assertStripePriceByPlan(v.stripePriceByPlan);
   if (v.cfpayChannelFixedPriceUSD !== undefined) out.cfpayChannelFixedPriceUSD = assertCfpayChannelFixedPriceUSD(v.cfpayChannelFixedPriceUSD);
+  if (v.topUpMinUSD !== undefined) out.topUpMinUSD = assertTopUpMinUSD(v.topUpMinUSD);
+  if (v.topUpMaxUSD !== undefined) out.topUpMaxUSD = assertTopUpMaxUSD(v.topUpMaxUSD);
   return out;
 }
 

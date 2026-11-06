@@ -561,6 +561,8 @@ const EXPECTED_INVENTORY = [
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/plans/deactivate\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/subscription/checkout\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/subscription/purchase\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/top-up/checkout\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/top-up/confirm\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/subscription/grant\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/subscription/trial\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/subscription/billing-checkout\")",

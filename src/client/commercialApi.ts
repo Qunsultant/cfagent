@@ -15,14 +15,23 @@
  * rendered — they can carry internal detail.
  */
 import { withCsrfInit } from "./apiFetch";
+import { codedMessage, resolveOutcome } from "../outcomes/outcomeAspects";
 
 const BASE = "/api/payments/agentic/commercial";
 
 export class CommercialApiError extends Error {
   readonly status: number;
-  constructor(status: number) {
-    super(errorMessageForStatus(status));
+  /**
+   * Issue #3523: the outcome-catalog code the server returned for this failure, when the
+   * error body carried one that resolves in the catalog. The message is then the coded
+   * message (`[CODE] businessMessage`, the #2573 pattern); otherwise it is the fixed
+   * per-status string and no server detail is ever rendered.
+   */
+  readonly code?: string;
+  constructor(status: number, code?: string) {
+    super(code && resolveOutcome(code).entry ? codedMessage(code) : errorMessageForStatus(status));
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -60,7 +69,19 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   } catch {
     throw new CommercialApiError(0);
   }
-  if (!res.ok) throw new CommercialApiError(res.status);
+  if (!res.ok) {
+    // Issue #3523: a coded error body carries its catalog code through (the #2573 pattern);
+    // a legacy raw body falls back to the fixed per-status message — server detail is never
+    // rendered, and an unknown code never invents a message.
+    let code: string | undefined;
+    try {
+      const body = (await res.json()) as { code?: unknown };
+      if (typeof body?.code === "string" && resolveOutcome(body.code).entry) code = body.code;
+    } catch {
+      code = undefined;
+    }
+    throw new CommercialApiError(res.status, code);
+  }
   return (await res.json()) as T;
 }
 
@@ -89,6 +110,8 @@ export type BrowserPaymentScope = "card-only" | "card-and-x402";
 export interface Pricing {
   monetizationEnabled: boolean;
   prices: Record<ScreenerFamily, number>;
+  /** Issue #3262: operator-set top-up bounds from the billing policy (PROPOSED seeds $1–$500); null when the policy store is unavailable — the UI shows the limits as unavailable and mint still validates server-side. */
+  topUpLimits: { minUSD: number; maxUSD: number } | null;
   network: NetworkMarker;
   browserPaymentScope: BrowserPaymentScope;
   failurePolicy: string;
@@ -120,6 +143,13 @@ export interface SubscriptionView {
   periodStartMs: number;
   periodEndMs: number;
   canceledAtMs?: number | null;
+  /**
+   * Issue #2669 (2.14): present when the row is Billing-managed
+   * (provider-canceled by Stripe); absent/null for native repurchase
+   * rows. The GET /subscription route already returns it; the client
+   * type just declares it so the UI can distinguish the two kinds.
+   */
+  providerSubscriptionId?: string | null;
 }
 
 export interface SubscriptionStatusView {
@@ -248,8 +278,26 @@ export const subscriptionPurchase = (body: {
   checkoutSessionId: string;
 }): Promise<{ subscription: SubscriptionView; account: CommercialAccountView; effectiveTier: string }> =>
   post("/subscription/purchase", body);
-export const subscriptionCancel = (): Promise<{ userId: string; canceled: SubscriptionView[]; accessThroughMs: number | null }> =>
-  post("/subscription/cancel", {});
+export const subscriptionCancel = (): Promise<{
+  userId: string;
+  /**
+   * Issue #3523: the outcome-catalog code + verbatim catalog businessMessage for this cancel
+   * (SUCCESS_SUBSCRIPTION_CANCELED_PERIOD_END / _IMMEDIATE). `remaining` lists the still-active
+   * rows this cancel did not cancel (out-of-scope tenant rows, rows failing the recheck).
+   */
+  code: string;
+  message: string;
+  canceled: SubscriptionView[];
+  remaining: SubscriptionView[];
+  accessThroughMs: number | null;
+  /**
+   * Issue #2669 (2.14): the timing the server applied, from the 2.7
+   * operator billing policy — period_end keeps access to period end,
+   * immediate truncates it now. The UI reports the outcome per this
+   * value instead of asserting one timing unconditionally.
+   */
+  downgradeTiming: "period_end" | "immediate";
+}> => post("/subscription/cancel", {});
 /**
  * Issue #3243 — start a $0 trial subscription (no payment taken).
  * The server creates a trialing row and grants the plan's
@@ -265,6 +313,56 @@ export const subscriptionTrial = (body: {
   trialEndsAtMs: number;
   message: string;
 }> => post("/subscription/trial", body);
+
+/**
+ * Issue #3262 — self-service top-up: mint + confirm through the
+ * native verified-payment pattern. The mint response carries the
+ * provider join key per rail: card → checkoutUrl + checkoutSessionId
+ * (Stripe session id); x402 → checkoutId + challenge (the 402
+ * challenge the payer's wallet/agent completes — no URL exists for
+ * crypto). The confirm response carries the credited account, so the
+ * panel shows the new credit balance from the fresh server read.
+ */
+export interface TopUpChallenge {
+  version: string;
+  network: string;
+  recipient: string;
+  amountUSD: number;
+  currency: "USDC";
+  facilitator: string;
+  resource: string;
+  nonce: string;
+  expiresAtMs: number;
+}
+
+export interface TopUpCheckoutView {
+  topUpRequestId: string;
+  rail: "card" | "x402";
+  amountUSD: number;
+  checkoutUrl?: string | null;
+  checkoutSessionId?: string | null;
+  checkoutId?: string | null;
+  challenge?: TopUpChallenge | null;
+}
+
+export interface TopUpConfirmView {
+  account: CommercialAccountView;
+  topUpRequestId: string;
+  creditedUSD: number;
+  rail: "card" | "x402";
+}
+
+export const topUpCheckout = (body: {
+  amountUSD: number;
+  rail?: "card" | "x402";
+  email: string;
+}): Promise<TopUpCheckoutView> => post<TopUpCheckoutView>("/top-up/checkout", body);
+export const topUpConfirm = (body: {
+  topUpRequestId: string;
+  checkoutSessionId?: string;
+  paymentProof?: string;
+  payer?: string;
+}): Promise<TopUpConfirmView> => post<TopUpConfirmView>("/top-up/confirm", body);
 
 /** Split a comma-separated symbols field into a clean list. */
 export function parseSymbols(input: string): string[] {
