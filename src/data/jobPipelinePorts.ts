@@ -27,12 +27,33 @@
  * in-memory processing option exists in configuration
  * (`processing.inMemory`) and defaults OFF; it is the engine's
  * explicit, configured choice, never an accident of wiring.
+ *
+ * The adapters are the CDO data foundation's ORM families
+ * (#3548): the pipeline tables are declared in the foundation's
+ * Drizzle schema (src/data/drizzleSchema.ts) with versioned
+ * migrations, the DO adapter rides the foundation's Repository
+ * core, the D1 adapter the foundation's drizzle D1 pattern, and
+ * the in-memory adapter the foundation's InMemoryRepository.
  */
+
+import type { StageRunnerCheckpoint } from "../workflows/stageRunnerPorts";
 
 /** DO-SQLite / D1 table names for the pipeline job stores. */
 export const JOB_PIPELINE_DEFINITIONS_TABLE = "job_pipeline_definitions";
 export const JOB_PIPELINE_INSTANCES_TABLE = "job_pipeline_instances";
 export const JOB_PIPELINE_ARTIFACTS_TABLE = "job_pipeline_artifacts";
+
+/**
+ * The artifacts table's surrogate primary key for one (run,
+ * artifact key) pair — the single-column id the foundation's
+ * Repository core addresses, shared by every residency's
+ * adapter so the row shape is identical everywhere. The
+ * separator is a control character that cannot appear in run
+ * ids or artifact keys the engine composes.
+ */
+export function jobPipelineArtifactId(runId: string, artifactKey: string): string {
+  return `${runId}\u0001${artifactKey}`;
+}
 
 /** How a node's children and shards fan out. */
 export type JobConcurrencyMode = "sequential" | "parallel";
@@ -66,6 +87,16 @@ export interface JobScheduleConfig {
   cron?: string;
   /** Interval grammar string (e.g. "every 30 minutes"). */
   interval?: string;
+  /**
+   * The schedule mechanism's registration identity, recorded when
+   * the stage is scheduled through the control plane (#3069
+   * schedule: identity + reason are recorded at creation and
+   * surfaced on the run). Absent = declared in configuration but
+   * not registered through the control plane.
+   */
+  registrationId?: string;
+  /** Why the stage was scheduled (operator/agent-supplied, recorded at creation). */
+  reason?: string;
 }
 
 export interface JobInputsConfig {
@@ -181,6 +212,24 @@ export interface JobInstanceRecord {
   /** How the live/last run was triggered (stamped onto its terminal run record). */
   runTrigger: "scheduled" | "manual" | null;
   checkpoint: JobCheckpoint | null;
+  /**
+   * The run's stage-runner checkpoint (#3549): one entry per
+   * (stage, unit) the current run has planned, in the stage
+   * contract's own shape — the ledger the runner's plan decisions
+   * (planNext / resumeUnits / fan-out) read, persisted through
+   * the StageCheckpointStore adapter
+   * (src/data/jobPipelineStageCheckpoint.ts). Survives terminal
+   * run states so stage control can address the last run's
+   * stages; a new dispatch replaces it with the new run's ledger.
+   */
+  stageCheckpoint: StageRunnerCheckpoint | null;
+  /**
+   * Per-stage control requests the engine honors at that stage's
+   * next boundary (#3069 stop/cancel, addressed by stage id):
+   * stage id → requested action. Cleared when honored or when a
+   * new run dispatches.
+   */
+  stageDesired: Record<string, "pause" | "cancel"> | null;
   lastError: string | null;
   updatedAt: string;
 }

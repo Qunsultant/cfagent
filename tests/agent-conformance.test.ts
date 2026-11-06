@@ -155,14 +155,17 @@ describe("Agent conformance (issue #1738)", () => {
       "src/actors/thinkPortMapping.ts",
     ]);
     // The workflows subpath is a different specifier and stays:
-    // the four workflow classes are ThinkWorkflow by ADR 0004 W13.
+    // the five workflow classes are ThinkWorkflow by ADR 0004 W13.
     // Saga (#2041 S1) is the fourth foundation adapter, same
     // pattern as the other three — its addition here is deliberate.
+    // JobPipeline (#3534) is the fifth, same pattern — its addition
+    // here is deliberate.
     const workflowFiles = listTsFiles(path.join(ROOT, "src")).filter((f) =>
       read(path.relative(ROOT, f)).includes('from "@cloudflare/think/workflows"')
     );
     expect(workflowFiles.map((f) => path.relative(ROOT, f)).sort()).toEqual([
       "src/agents/trading-trade-workflow.ts",
+      "src/workflows/jobPipelineWorkflow.ts",
       "src/workflows/paymentWorkflow.ts",
       "src/workflows/sagaWorkflow.ts",
       "src/workflows/screenerWorkflow.ts",

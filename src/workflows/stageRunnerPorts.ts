@@ -118,6 +118,45 @@ export function runnerStageForPipelineStage(stage: PipelineStage): StageName {
   return RUNNER_STAGE_FOR_PIPELINE_STAGE[stage];
 }
 
+/**
+ * Pipeline job stages (#3549, absorbing #3069 — one engine): a
+ * configured job tree's nodes execute as stages of this same
+ * contract. A job stage id names one node of one job definition:
+ * `job:<nodePath>`, where the node path is the child-index path
+ * ("" = the root, carried as `job:root`; "0/2" = `job:0/2`). Job
+ * stage ids are configuration-dynamic — no static catalog can
+ * declare them — so a plan is single-family: either vocabulary
+ * stages (canonical order, below) or job stages (the definition's
+ * declared order IS the plan's canonical order; the assertion
+ * never reorders either family). The default retry bucket for a
+ * job stage is "report" (the generic compute budget — analysis
+ * and store already retry under it); a plan compiler whose job
+ * stages are provider- or delivery-shaped declares the bucket
+ * explicitly per stage.
+ */
+export type JobStageId = `job:${string}`;
+
+/** The stage id of one node of a configured job tree ("" is the root node). */
+export function jobStageId(nodePath: string): JobStageId {
+  return nodePath === "" ? "job:root" : `job:${nodePath}`;
+}
+
+/** The node path a job stage id names (the inverse of jobStageId). */
+export function jobStageNodePath(stage: JobStageId): string {
+  return stage === "job:root" ? "" : stage.slice("job:".length);
+}
+
+/** True when a stage id belongs to the configured-job family. */
+export function isJobStageId(stage: string): stage is JobStageId {
+  return stage.startsWith("job:");
+}
+
+/** A stage identity: the messaging vocabulary, or one configured job node. */
+export type StageRunnerStageId = StageName | JobStageId;
+
+/** The default retry bucket for a job stage that declares none (see the note above). */
+export const JOB_STAGE_DEFAULT_RETRY_BUCKET: StageRetryBucket = "report";
+
 /** A unit of work inside a stage: a shard, a symbol, a strategy group, a channel. */
 export interface StageRunnerUnit {
   unitId: string;
@@ -127,7 +166,7 @@ export interface StageRunnerUnit {
 
 /** One stage in a run plan. */
 export interface StageRunnerStage {
-  stage: StageName;
+  stage: StageRunnerStageId;
   execution: StageExecution;
   /**
    * Cap on concurrently started units for a parallel stage. Defaults to
@@ -137,10 +176,18 @@ export interface StageRunnerStage {
   maxParallel?: number;
   /** Per-unit deadline; a unit past it is timed_out, and the run proceeds as a qualified partial. */
   timeoutMs: number;
-  /** Retry bucket; defaults to STAGE_RETRY_BUCKET[stage]. */
+  /** Retry bucket; defaults to STAGE_RETRY_BUCKET[stage] (job stages: JOB_STAGE_DEFAULT_RETRY_BUCKET). */
   retryBucket?: StageRetryBucket;
   /** Pacing tier for the stage's units; defaults to DEFAULT_STAGE_PACING_TIER. */
   pacingTier?: StagePacingTier;
+  /**
+   * How a unit consumes its items (#3549: the contract's fourth
+   * mode axis, declared on the stage so a plan carries it):
+   * "batch" = the whole item list in one pass (the default);
+   * "online" = item by item, each item's output chaining to the
+   * same item of the next step.
+   */
+  pacing?: "batch" | "online";
 }
 
 /** How the runner was invoked. Same plan, same checkpoints; only the driver differs. */
@@ -171,12 +218,16 @@ export interface StageRunnerPlan {
  * A stage's unit state: the stage-chain vocabulary, plus "timed_out" (a unit
  * past its deadline — the shard-deadline outcome the workflow flow already
  * records) and "never-attempted" for a planned pair with no row at all.
+ * Plus the uniform stage-control states (#3069, folded into #3549):
+ * "stopped" — halted by a stop action, non-terminal and resumable,
+ * never recorded as failed; "cancelled" — terminal by a cancel
+ * action, surfaced as cancelled, never silently resumed past.
  */
-export type StageUnitStatus = StageStatus | "timed_out" | "never-attempted";
+export type StageUnitStatus = StageStatus | "timed_out" | "never-attempted" | "stopped" | "cancelled";
 
 /** One (stage, unit) checkpoint entry. */
 export interface StageUnitCheckpoint {
-  stage: StageName;
+  stage: StageRunnerStageId;
   unitId: string;
   status: StageUnitStatus;
   /** Rows recorded for this (stage, unit): the attempt count, never an invented retry count. */
@@ -184,6 +235,14 @@ export interface StageUnitCheckpoint {
   error?: string;
   /** When the newest row for this (stage, unit) was written; absent on never-attempted. */
   updatedAt?: string;
+  /**
+   * Intra-unit resume position, for units whose execution is
+   * itself stepped (#3549): the step/item indices a resume
+   * continues from. Absent = the unit is atomic from the
+   * runner's view (the screen families' units). Written when a
+   * unit is stopped mid-execution; cleared on completion.
+   */
+  progress?: { stepIndex: number; itemIndex: number };
 }
 
 /** A run's checkpoint: one entry per planned (stage, unit) pair. */
@@ -196,6 +255,10 @@ export interface StageRunnerCheckpoint {
  * The checkpoint store the runner reads and writes. The production
  * adapter projects mas_async_jobs stage rows (one unit store, ADR D-0 /
  * #2621: no second unit table); the in-memory adapter is tests-only.
+ * The pipeline's adapter (#3549, src/data/jobPipelineStageCheckpoint.ts)
+ * persists the checkpoint on the job instance record — that substrate
+ * has no mas_async_jobs rows; its instance record is its unit store,
+ * so the store is writable there.
  */
 export interface StageCheckpointStore {
   read(runId: string): Promise<StageRunnerCheckpoint | null>;
@@ -212,7 +275,9 @@ export function resolveStageRetryBudget(
 
 /** The bucket a stage retries under: its own declaration, else the per-stage default. */
 export function stageRetryBucket(stage: StageRunnerStage): StageRetryBucket {
-  return stage.retryBucket ?? STAGE_RETRY_BUCKET[stage.stage];
+  if (stage.retryBucket) return stage.retryBucket;
+  if (isJobStageId(stage.stage)) return JOB_STAGE_DEFAULT_RETRY_BUCKET;
+  return STAGE_RETRY_BUCKET[stage.stage as StageName];
 }
 
 /** The pacing tier a stage's units are queued at. */
@@ -232,9 +297,10 @@ export const DEFAULT_STAGE_TIMEOUT_MS = DEFAULT_SHARD_TIMEOUT_MS;
 /**
  * Assert a plan is dispatchable. Refuses loudly instead of repairing:
  * an empty stage list, a duplicate stage, a stage out of canonical
- * order (no silent reorder), a non-positive cap or deadline, a
- * duplicate unit, or a missing run id. A plan that cannot be executed
- * as declared is a caller bug, not something the runner guesses around.
+ * order (no silent reorder), a mixed-family plan, a malformed job
+ * stage id, a non-positive cap or deadline, a duplicate unit, or a
+ * missing run id. A plan that cannot be executed as declared is a
+ * caller bug, not something the runner guesses around.
  */
 export function assertStageRunnerPlan(plan: StageRunnerPlan): void {
   if (!plan || typeof plan.runId !== "string" || plan.runId.trim().length === 0) {
@@ -248,8 +314,9 @@ export function assertStageRunnerPlan(plan: StageRunnerPlan): void {
   if (!Array.isArray(plan.stages) || plan.stages.length === 0) {
     throw new Error("Stage-runner plan refused: a plan needs at least one stage.");
   }
-  const seen = new Set<StageName>();
+  const seen = new Set<StageRunnerStageId>();
   let lastIndex = -1;
+  let family: "vocabulary" | "job" | null = null;
   for (const stage of plan.stages) {
     if (seen.has(stage.stage)) {
       throw new Error(
@@ -257,18 +324,43 @@ export function assertStageRunnerPlan(plan: StageRunnerPlan): void {
       );
     }
     seen.add(stage.stage);
-    const index = RUNNER_STAGE_ORDER.indexOf(stage.stage);
-    if (index < 0) {
+    // One plan, one stage family (#3549): vocabulary stages keep
+    // canonical order; job stages follow the definition's declared
+    // order, which is their canonical order. Mixing families would
+    // leave the order between them undefined — refused, never guessed.
+    const stageFamily = isJobStageId(stage.stage) ? "job" : "vocabulary";
+    if (family === null) family = stageFamily;
+    if (stageFamily !== family) {
       throw new Error(
-        `Stage-runner plan refused: stage ${JSON.stringify(stage.stage)} is not a runner stage.`,
+        `Stage-runner plan refused: stage ${stage.stage} mixes stage families in one plan (vocabulary stages and job stages never share a plan).`,
       );
     }
-    if (index <= lastIndex) {
+    if (stageFamily === "job") {
+      const path = jobStageNodePath(stage.stage as JobStageId);
+      if (path !== "" && !/^\d+(\/\d+)*$/.test(path)) {
+        throw new Error(
+          `Stage-runner plan refused: job stage ${JSON.stringify(stage.stage)} does not name a node path ("job:root" or "job:<child indices>", e.g. "job:0/2").`,
+        );
+      }
+    } else {
+      const index = RUNNER_STAGE_ORDER.indexOf(stage.stage as StageName);
+      if (index < 0) {
+        throw new Error(
+          `Stage-runner plan refused: stage ${JSON.stringify(stage.stage)} is not a runner stage.`,
+        );
+      }
+      if (index <= lastIndex) {
+        throw new Error(
+          `Stage-runner plan refused: stage ${stage.stage} is out of order — stages must follow ${RUNNER_STAGE_ORDER.join(" → ")} (the flow never reorders a declared plan).`,
+        );
+      }
+      lastIndex = index;
+    }
+    if (stage.pacing !== undefined && stage.pacing !== "batch" && stage.pacing !== "online") {
       throw new Error(
-        `Stage-runner plan refused: stage ${stage.stage} is out of order — stages must follow ${RUNNER_STAGE_ORDER.join(" → ")} (the flow never reorders a declared plan).`,
+        `Stage-runner plan refused: stage ${stage.stage} declares pacing ${JSON.stringify(stage.pacing)} — a stage paces "batch" or "online".`,
       );
     }
-    lastIndex = index;
     if (!Number.isFinite(stage.timeoutMs) || stage.timeoutMs <= 0) {
       throw new Error(
         `Stage-runner plan refused: stage ${stage.stage} has no positive timeoutMs (a unit must have a deadline).`,

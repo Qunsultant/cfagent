@@ -11,19 +11,28 @@
  * inMemoryJobPipelineAdapter.
  */
 import type { SqlStorage } from "../orm";
-import { D1JobPipelineStores, type JobPipelineD1Db } from "./d1JobPipelineAdapter";
-import { DoSqliteJobPipelineStores } from "./doSqliteJobPipelineAdapter";
+import {
+  createD1JobPipelineDb,
+  D1JobPipelineStores,
+} from "./d1JobPipelineAdapter";
+import {
+  DoSqliteJobPipelineStores,
+  type DoSqliteJobPipelineOptions,
+} from "./doSqliteJobPipelineAdapter";
 import type { JobPipelineStores } from "./jobPipelinePorts";
 
 /** Build the pipeline stores over a host Durable Object's SQLite. */
-export function createJobPipelineStoresFromSql(sql: SqlStorage): JobPipelineStores {
-  return new DoSqliteJobPipelineStores(sql);
+export function createJobPipelineStoresFromSql(
+  sql: SqlStorage,
+  options?: DoSqliteJobPipelineOptions,
+): JobPipelineStores {
+  return new DoSqliteJobPipelineStores(sql, options);
 }
 
 /** Build the pipeline stores over the shared D1 AgentDB binding. */
-export function createJobPipelineStoresFromD1(db: JobPipelineD1Db): JobPipelineStores {
-  return new D1JobPipelineStores(db);
+export function createJobPipelineStoresFromD1(d1: D1Database): JobPipelineStores {
+  return new D1JobPipelineStores(createD1JobPipelineDb(d1));
 }
 
 export type { JobPipelineStores } from "./jobPipelinePorts";
-export type { JobPipelineD1Db } from "./d1JobPipelineAdapter";
+export type { JobPipelineDb } from "./d1JobPipelineAdapter";
