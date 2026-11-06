@@ -24,6 +24,18 @@ export interface CopilotBannerConfig {
   badgeColor?: "brand" | "danger" | "important" | "informative" | "severe" | "subtle" | "success" | "warning";
 }
 
+export interface CopilotHeroConfig {
+  icon?: string;
+  title: string;
+  description: string;
+}
+
+export interface QuickChipConfig {
+  label: string;
+  prompt: string;
+  category?: string;
+}
+
 export interface CopilotCustomRenderProps {
   user: User;
   onChipClick?: (prompt: string, sourceTab?: string) => void;
@@ -46,6 +58,8 @@ export interface CopilotConfig {
   composerPlaceholder?: string;
   sourceTab?: string;
   banner?: CopilotBannerConfig;
+  hero?: CopilotHeroConfig;
+  quickChips?: QuickChipConfig[];
   /**
    * Custom surface renderer, composed above the shared conversation
    * (#3454). Supplying one declares a custom surface regardless of
@@ -67,6 +81,43 @@ export const DEFAULT_COPILOTS: CopilotConfig[] = [
       title: "Multi-Agent Orchestrator",
       description: "Conversational multi-agent copilot for platform capabilities, market queries, and general workflows.",
     },
+    hero: {
+      icon: "⚡",
+      title: "Enterprise Multi-Agent Studio",
+      description: "Ask any question about platform capabilities, workflows, algorithmic decisioning, or command tools directly through chat. Your prompt is routed by an LLM Judge and orchestrated across specialized sub-agents with neural strategy intelligence and transactional ledger persistence.",
+    },
+    quickChips: [
+      {
+        label: "⚡ Platform Capabilities",
+        prompt: "What are the capabilities of this platform and how do I use the 8 core workflows?",
+        category: "Platform Capabilities",
+      },
+      {
+        label: "📈 Technical Screener",
+        prompt: "Screen for top momentum and breakout stocks using the Technical Screener",
+        category: "Screening Guide",
+      },
+      {
+        label: "🌊 Options Sweeps",
+        prompt: "Show recent aggressive institutional options sweeps and unusual volume alerts",
+        category: "Options Flow Guide",
+      },
+      {
+        label: "⚡ NVDA Earnings Moves",
+        prompt: "Evaluate straddle pricing, implied move, and volatility skew for upcoming earnings on NVDA",
+        category: "Options Strategy Guide",
+      },
+      {
+        label: "🤖 Build Trading Rules",
+        prompt: "How do I build an algorithmic mean reversion trading rule?",
+        category: "Algorithmic Rules",
+      },
+      {
+        label: "🛡️ Audit & Performance",
+        prompt: "Audit system state, latency, and Durable Object ledgers across all workers",
+        category: "System Operations",
+      },
+    ],
     composerPlaceholder: "Ask about platform capabilities, workflows, how to screen, draft orders, or query data…",
     sourceTab: "Chat & Agents",
   },
@@ -82,6 +133,43 @@ export const DEFAULT_COPILOTS: CopilotConfig[] = [
       title: "Options Strategy & Structured Outputs",
       description: "Specialized copilot for options screening, multi-leg spreads, Greeks analysis, and interactive payoff visualizers.",
     },
+    hero: {
+      icon: "🎯",
+      title: "Options Strategy & Intelligence Copilot",
+      description: "Screen, construct, and evaluate structured multi-leg options strategies with real-time Greeks, risk-reward ratios, and 1-click execution. Responses produce interactive structured strategy cards and payoff curves.",
+    },
+    quickChips: [
+      {
+        label: "🎯 Bull Put Spread (≤ $30 Max Loss)",
+        prompt: "Screen for Bull Put credit spreads with max loss <= $30 and max profit > 0",
+        category: "Options Strategy Guide",
+      },
+      {
+        label: "🦅 SPY Iron Condor (High POP)",
+        prompt: "Find delta-neutral Iron Condors on SPY with 30-45 DTE and probability of profit > 70%",
+        category: "Options Strategy Guide",
+      },
+      {
+        label: "📈 AAPL Covered Call (Income)",
+        prompt: "Find covered call setups on AAPL targeting 15-20 delta with 30 DTE",
+        category: "Options Strategy Guide",
+      },
+      {
+        label: "🌊 Unusual Options Flow Sweeps",
+        prompt: "Show recent aggressive institutional options sweeps and unusual volume alerts",
+        category: "Options Flow Guide",
+      },
+      {
+        label: "⚡ NVDA Straddle / Volatility",
+        prompt: "Evaluate straddle pricing, implied move, and volatility skew for upcoming earnings on NVDA",
+        category: "Options Strategy Guide",
+      },
+      {
+        label: "🛡️ Portfolio Delta Hedge",
+        prompt: "Calculate a delta-neutral portfolio hedge using index put options",
+        category: "Trading Safety Guide",
+      },
+    ],
     composerPlaceholder: "Ask Options Copilot (e.g. 'Screen for Bull Put spreads on NVDA with max loss <= $30', 'Best SPY Iron Condor')...",
     sourceTab: "E*TRADE · Auto Options Research",
     banner: {
@@ -104,6 +192,43 @@ export const DEFAULT_COPILOTS: CopilotConfig[] = [
       title: "Stock Copilot & Paper-Trading Loop",
       description: "Real-time telemetry, open positions with exit plans, cycle activity feed, and pause/resume execution controls.",
     },
+    hero: {
+      icon: "📈",
+      title: "Stock Copilot & Autonomous Loop",
+      description: "Continuous autonomous trading loop operating across all 4 sessions (Pre-market, Regular, After-hours, and Overnight EXTO) with pattern scoring, CVaR risk optimization, and automatic bracket exits. Ask questions about open positions, cycle telemetry, or adjust the loop directly.",
+    },
+    quickChips: [
+      {
+        label: "📊 Open Positions & Exits",
+        prompt: "Show all open positions and their take-profit / stop-loss exit plans",
+        category: "Stock Copilot Guide",
+      },
+      {
+        label: "🔄 Latest Cycle Telemetry",
+        prompt: "What is the current status of the Stock Copilot loop and what happened in the latest cycle?",
+        category: "Stock Copilot Guide",
+      },
+      {
+        label: "🛡️ CVaR Risk Management",
+        prompt: "How does the Stock Copilot CVaR optimizer and risk management work?",
+        category: "Stock Copilot Guide",
+      },
+      {
+        label: "⏰ 24/7 Trading Sessions",
+        prompt: "Explain the 4 trading sessions and their active execution hours",
+        category: "Stock Copilot Guide",
+      },
+      {
+        label: "⏸️ Pause Loop",
+        prompt: "Pause the Stock Copilot trading loop",
+        category: "Stock Copilot Guide",
+      },
+      {
+        label: "▶️ Resume Loop",
+        prompt: "Resume the Stock Copilot trading loop",
+        category: "Stock Copilot Guide",
+      },
+    ],
     composerPlaceholder: "Ask Stock Copilot (e.g. 'What is the loop doing?', 'Show open positions', 'Pause loop')…",
     sourceTab: "Stock Copilot",
     banner: {
