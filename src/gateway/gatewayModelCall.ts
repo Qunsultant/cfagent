@@ -9,12 +9,19 @@
  * the Prompt union requires exactly one defined member.
  */
 import { generateObject, generateText, stepCountIs } from "ai";
+import { getSharedOutboundLimiter } from "../security/outboundRateLimiter";
 import type { ModelExecutorInput } from "./gatewayPorts";
 
 export async function executeModelCall(
   model: unknown,
   input: ModelExecutorInput,
 ): Promise<{ text: string; object?: unknown }> {
+  // Issue #3515 S1: one shared LLM token per model call, bounded wait,
+  // else a typed OutboundRateLimitError. Gateway-port callers already
+  // passed the port's own opt-in limiter (which throws first when its
+  // budget is spent); direct callers (e.g. the verifier) had no limiter
+  // at all, and this is their throttle.
+  await getSharedOutboundLimiter("llm").acquire();
   const shared = {
     ...(input.system !== undefined ? { system: input.system } : {}),
     ...(input.temperature !== undefined ? { temperature: input.temperature } : {}),
