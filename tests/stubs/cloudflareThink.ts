@@ -37,7 +37,18 @@
  *   against `ctx.storage` / `env`;
  * - a `lifecycle.start()` no-op, so the adapter's guarded boot call
  *   in thinkAdapter.ts passes through instead of failing on a
- *   missing lifecycle object.
+ *   missing lifecycle object;
+ * - the base Agent's request/state seams, mirrored minimally
+ *   (issue #3474, for the PortThink webhook channel): `fetch`
+ *   dispatching to the instance's `onRequest` — the funnel the
+ *   real Agent's fetch performs before its lifecycle dispatch —
+ *   a default `onRequest` answering 404 (the base Agent default),
+ *   and `setState` storing the state while recording, in
+ *   `stateBroadcasts`, the broadcast the real Agent sends to its
+ *   connected clients. Only the seams are mirrored: no lifecycle
+ *   machinery, no connections, no persistence — a test asserting
+ *   on these pins the port's behavior at the seam, and live
+ *   broadcast/lifecycle proof stays workerd, like turns.
  *
  * What it REFUSES — deliberately, so it can never mask a real
  * failure: `runTurn()` and `submitMessages()` throw a loud stub
@@ -61,6 +72,35 @@ export class Think<Env = unknown> {
   constructor(ctx: unknown, env: Env) {
     this.ctx = ctx;
     this.env = env;
+  }
+
+  /** Current agent state, as the base Agent exposes it. */
+  state: unknown;
+
+  /**
+   * Every state a setState call has broadcast, in order — the
+   * test-visible record of the base Agent's broadcast seam.
+   */
+  readonly stateBroadcasts: unknown[] = [];
+
+  /** Base Agent seam: store the state and broadcast it (recorded above). */
+  setState(next: unknown): void {
+    this.state = next;
+    this.stateBroadcasts.push(next);
+  }
+
+  /**
+   * Base Agent seam: the Durable Object entry. The real Agent
+   * fetch runs its lifecycle dispatch and lands HTTP requests on
+   * onRequest; the stub mirrors the landing, nothing more.
+   */
+  async fetch(request: Request): Promise<Response> {
+    return this.onRequest(request);
+  }
+
+  /** Base Agent default: an agent that routes nothing answers 404. */
+  async onRequest(_request: Request): Promise<Response> {
+    return new Response("Not found", { status: 404 });
   }
 
   async runTurn(_input: unknown): Promise<never> {

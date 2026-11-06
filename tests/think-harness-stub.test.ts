@@ -59,3 +59,45 @@ describe("think harness stub (issue #2003)", () => {
     expect(typeof ThinkWorkflow).toBe("function");
   });
 });
+
+describe("think harness stub — request/state seams (issue #3474)", () => {
+  // The PortThink webhook channel (#3474) is wired at fetch — the
+  // Durable Object entry — and its hooks end in setState. To keep
+  // that port behavior testable under Node, the stub mirrors the
+  // base Agent's three seams faithfully but minimally: fetch
+  // dispatches to onRequest (the SDK funnel), the default onRequest
+  // answers 404 (the base Agent default), and setState stores the
+  // state and records the broadcast the real Agent sends to its
+  // connected clients. Turns still throw (see the suite above).
+  it("fetch dispatches to the instance's onRequest, most-derived first", async () => {
+    class Router extends PortThink {
+      async onRequest(_request: Request): Promise<Response> {
+        return new Response("routed", { status: 200 });
+      }
+    }
+    const agent = new Router({} as never, {} as never);
+    const res = await agent.fetch(new Request("https://agent.internal/anything"));
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("routed");
+  });
+
+  it("the default onRequest answers 404, like the base Agent", async () => {
+    const probe = new ProbeThink({} as never, {} as never);
+    const res = await probe.fetch(new Request("https://agent.internal/anything"));
+    expect(res.status).toBe(404);
+  });
+
+  it("setState stores the state and records the broadcast", () => {
+    const probe = new ProbeThink({} as never, {} as never) as unknown as {
+      state: unknown;
+      setState(next: unknown): void;
+      stateBroadcasts: unknown[];
+    };
+    probe.setState({ ready: true });
+    expect(probe.state).toEqual({ ready: true });
+    expect(probe.stateBroadcasts).toEqual([{ ready: true }]);
+    probe.setState({ ready: false });
+    expect(probe.state).toEqual({ ready: false });
+    expect(probe.stateBroadcasts).toEqual([{ ready: true }, { ready: false }]);
+  });
+});
