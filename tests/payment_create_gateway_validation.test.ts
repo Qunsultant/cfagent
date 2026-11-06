@@ -100,7 +100,7 @@ const makeEnv = (overrides: Record<string, unknown> = {}): Env =>
   ({
     AI: {} as any,
     AI_SEARCH_ENDPOINT: "https://mock.search",
-    SEARCH_AGENT: {} as any,
+    ORCHESTRATOR_AGENT: {} as any,
     AGENT_SESSIONS: {} as any,
     STRIPE_SECRET_KEY: "sk_test_mock",
     PAYPAL_CLIENT_ID: "paypal-client-id-156",
