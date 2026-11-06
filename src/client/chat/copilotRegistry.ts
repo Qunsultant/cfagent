@@ -238,6 +238,46 @@ export const DEFAULT_COPILOTS: CopilotConfig[] = [
         prompt: "Resume the Stock Copilot trading loop",
         category: "Stock Copilot Guide",
       },
+      {
+        label: "🎯 Buy AAPL Bracket (TP +4% / SL -2%)",
+        prompt: "Draft a limit buy order for 10 AAPL with +4% take-profit and -2% stop-loss bracket exits",
+        category: "Order Execution",
+      },
+      {
+        label: "🌙 Extended-Hours Limit Order",
+        prompt: "Place an extended-hours limit order for TSLA with session-specific bracket exits",
+        category: "Extended-Hours Trading",
+      },
+      {
+        label: "📈 Screen Momentum Breakouts",
+        prompt: "Scan the active stock universe for Momentum Breakout and Gap & Go setups",
+        category: "Pattern Screening",
+      },
+      {
+        label: "🧪 Evaluate NVDA vs Strategies",
+        prompt: "Evaluate NVDA against all active trading strategies without placing orders",
+        category: "Strategy Evaluation",
+      },
+      {
+        label: "🛡️ Portfolio CVaR & Sizing",
+        prompt: "Analyze portfolio risk and calculate CVaR position sizing for $10,000 buying power",
+        category: "Risk Management",
+      },
+      {
+        label: "🌐 Universe: S&P 500 & Movers",
+        prompt: "Set the trading universe to S&P 500 and top pre-market volume movers",
+        category: "Universe Selection",
+      },
+      {
+        label: "📄 Generate Trade Performance Report",
+        prompt: "Generate a comprehensive trading and cycle audit report in Markdown format",
+        category: "Performance Reports",
+      },
+      {
+        label: "🔍 Audit Refusals & Skipped Trades",
+        prompt: "Show recent cycle refusal reasons and explain why trades were skipped",
+        category: "Cycle Audit",
+      },
     ],
     composerPlaceholder: "Ask Stock Copilot (e.g. 'What is the loop doing?', 'Show open positions', 'Pause loop')…",
     sourceTab: "Stock Copilot",
