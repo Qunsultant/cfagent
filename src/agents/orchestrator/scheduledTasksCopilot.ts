@@ -189,7 +189,7 @@ export async function declareStockCopilotTasks(
   });
   return {
     [STOCK_COPILOT_TASK_ID]: {
-      schedule: cadence.effective,
+      schedule: cadence.effective as any,
       handler: async (taskCtx: ThinkScheduledTaskContext): Promise<void> => {
         await runStockCopilotCycleForInstance(ctx, executionContext, taskCtx).catch(
           () => {
