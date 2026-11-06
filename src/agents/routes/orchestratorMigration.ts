@@ -88,7 +88,7 @@ export interface OrchestratorMigrationContext {
     callback: string,
     payload?: unknown,
   ): Promise<unknown>;
-  /** Test seam: address another instance. Defaults to the SEARCH_AGENT binding. */
+  /** Test seam: address another instance. Defaults to the ORCHESTRATOR_AGENT binding. */
   fetchInstance?(address: string): { fetch(req: Request): Promise<Response> };
 }
 
@@ -330,7 +330,7 @@ async function handleMigrate(
   const fetchInstance =
     ctx.fetchInstance ??
     ((address: string) => {
-      const ns = (ctx.env as unknown as { SEARCH_AGENT: { get(id: unknown): { fetch(r: Request): Promise<Response> }; idFromName(name: string): unknown } }).SEARCH_AGENT;
+      const ns = (ctx.env as unknown as { ORCHESTRATOR_AGENT: { get(id: unknown): { fetch(r: Request): Promise<Response> }; idFromName(name: string): unknown } }).ORCHESTRATOR_AGENT;
       return ns.get(ns.idFromName(address));
     });
   const callerLogin = request.headers.get("x-user-login") || "";
