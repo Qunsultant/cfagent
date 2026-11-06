@@ -19,7 +19,7 @@
  * - apiKeys unit tests drive src/security/apiKeys.ts against
  *   tests/fake-session-store.ts (#604's fake store protocol).
  * - Worker tests follow tests/fallback_identity_session_gate.test.ts
- *   (#154): the REAL worker fetch dispatch with a recording SEARCH_AGENT
+ *   (#154): the REAL worker fetch dispatch with a recording ORCHESTRATOR_AGENT
  *   stub, so instance selection (the idFromName argument) is asserted,
  *   not inferred.
  */
@@ -188,7 +188,7 @@ function workerEnv(fake: FakeSessionStore) {
   const forwarded: ForwardedCall[] = [];
   const env: any = {
     SESSION_STORE: fake.namespace,
-    SEARCH_AGENT: {
+    ORCHESTRATOR_AGENT: {
       idFromName: (name: string) => name,
       get: (id: string) => ({
         fetch: async (req: Request) => {
