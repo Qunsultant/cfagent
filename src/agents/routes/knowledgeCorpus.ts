@@ -51,6 +51,12 @@
  * fields — no existing field changes meaning. The hook and the
  * leg are flag-gated (AI_SEARCH_CORPUS_INDEXING_ENABLED) and
  * best-effort: neither can fail the write or the sync.
+ *
+ * #3527 S3: both firings now go through the publish stage
+ * (publishDocument, kind "corpus") — the upload branch directly,
+ * the backfill leg inside corpusAiSearchIndex.ts — with the
+ * stage composing the #3345 hook as its corpus executor. The
+ * response shapes above are unchanged.
  */
 
 import { unauthenticatedResponse } from "./routeIdentity";
@@ -64,9 +70,10 @@ import {
   CORPUS_SYNC_LAST_RUN_KEY,
 } from "../../services/corpusSync";
 import {
-  indexCorpusDocInAiSearch,
+  corpusIndexingStateForPublishOutcome,
   runCorpusAiSearchIndexBackfill,
 } from "../../services/corpusAiSearchIndex";
+import { publishDocument } from "../../services/documentPublish";
 import {
   settingReadFromSql,
   settingWriteFromSql,
@@ -309,16 +316,29 @@ export async function handleKnowledgeCorpusRoutes(
       // index that missed the first write). Best-effort by
       // contract: the hook never throws, and its honest state
       // (indexed / not-configured / failed) rides the response.
-      const indexing = await indexCorpusDocInAiSearch(ctx.env, {
+      // Issue #3527 S3: the route now fires the leg through the
+      // publish stage (publishDocument, kind "corpus") — the
+      // stage composes the same hook as its corpus executor,
+      // and the response renders the stage outcome in the
+      // corpus state vocabulary, unchanged.
+      const publish = publishDocument(ctx.env, {
+        kind: "corpus",
+        documentId: result.meta.r2Key,
         meta: result.meta,
         bytes,
       });
+      const aiSearchHandle = publish.targets.find((t) => t.target === "ai-search");
+      const aiSearchOutcome = aiSearchHandle ? await aiSearchHandle.settled : undefined;
       return Response.json(
         {
           success: true,
           ...result.meta,
           idempotent: result.idempotent,
-          indexing: { state: indexing.state },
+          indexing: {
+            state: aiSearchOutcome
+              ? corpusIndexingStateForPublishOutcome(aiSearchOutcome)
+              : "failed",
+          },
         },
         { status: result.idempotent ? 200 : 201 }
       );
