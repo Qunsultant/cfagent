@@ -263,7 +263,7 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
     if (tradingApproveResponse) return tradingApproveResponse;
     // Slice 2 (#2902): Core late tail moved to src/server/routes/core.ts —
     // /openapi.json + /api/docs, the /api/* fallthrough to the Orchestrator
-    // (SEARCH_AGENT), /checkout/sandbox, / + /index.html, static fallback.
+    // (ORCHESTRATOR_AGENT), /checkout/sandbox, / + /index.html, static fallback.
     // The late handler is the dispatcher terminus: it always returns (its
     // last statement is the original static-asset fallback), so its result
     // is returned directly, exactly as the inline tail did.
