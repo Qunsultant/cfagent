@@ -15,6 +15,7 @@
  */
 import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
 import { and, asc, eq, gt } from "drizzle-orm";
+import { BusinessError } from "../outcomes/outcomeAspects";
 import { agentSubscriptionPlans, agentSubscriptions } from "./drizzleSchema";
 import {
   applyMigrations,
@@ -22,9 +23,11 @@ import {
   MIGRATION_0013_SUBSCRIPTION_STRIPE_IDS,
   MIGRATION_0014_BILLING,
   MIGRATION_0041_PLAN_TRIAL_DAYS,
+  MIGRATION_0049_PLAN_PRICE_APPROVAL,
   type MigrationDb,
 } from "./migrationRunner";
 import {
+  assertApproverId,
   assertPlan,
   assertSubscriptionStatus,
   type ProviderBillingPatch,
@@ -49,9 +52,9 @@ export function createD1SubscriptionDb(d1: D1Database): SubscriptionDb {
   });
 }
 
-/** Idempotent schema-ensure: applies migrations 0008 + 0013 + 0014 + 0041 if unapplied (0013 adds the native Stripe id columns; 0014 adds the Billing provider columns + policy table; 0041 adds the plan trial-days column). */
+/** Idempotent schema-ensure: applies migrations 0008 + 0013 + 0014 + 0041 + 0049 if unapplied (0013 adds the native Stripe id columns; 0014 adds the Billing provider columns + policy table; 0041 adds the plan trial-days column; 0049 adds the plan price-approval columns). */
 export async function ensureSubscriptionSchema(db: SubscriptionDb): Promise<number[]> {
-  return applyMigrations(db as unknown as MigrationDb, [MIGRATION_0008_SUBSCRIPTIONS, MIGRATION_0013_SUBSCRIPTION_STRIPE_IDS, MIGRATION_0014_BILLING, MIGRATION_0041_PLAN_TRIAL_DAYS]);
+  return applyMigrations(db as unknown as MigrationDb, [MIGRATION_0008_SUBSCRIPTIONS, MIGRATION_0013_SUBSCRIPTION_STRIPE_IDS, MIGRATION_0014_BILLING, MIGRATION_0041_PLAN_TRIAL_DAYS, MIGRATION_0049_PLAN_PRICE_APPROVAL]);
 }
 
 function toPlan(raw: typeof agentSubscriptionPlans.$inferSelect): SubscriptionPlanRecord {
@@ -62,6 +65,13 @@ function toPlan(raw: typeof agentSubscriptionPlans.$inferSelect): SubscriptionPl
     periodDays: raw.periodDays,
     includedRuns: raw.includedRuns,
     trialDays: raw.trialDays ?? null,
+    // Issue #3357: pre-0049 rows carry no approval columns in the
+    // mapping sense — the migration backfills them to 'approved',
+    // so a null here can only mean a row written before the
+    // migration ran; treat it as the grandfathered approved state.
+    approvalStatus: raw.approvalStatus === "approved" ? "approved" : raw.approvalStatus === "proposed" ? "proposed" : "approved",
+    approvedBy: raw.approvedBy ?? null,
+    approvedAtMs: raw.approvedAtMs ?? null,
     active: raw.active === 1,
     createdAtMs: raw.createdAtMs,
     updatedAtMs: raw.updatedAtMs,
@@ -104,7 +114,18 @@ export class D1SubscriptionAdapter implements SubscriptionStore {
     const plan = assertPlan(input);
     const id = plan.id || `plan-${crypto.randomUUID().slice(0, 8)}`;
     const now = Date.now();
-    const record: SubscriptionPlanRecord = { ...plan, id, active: true, createdAtMs: now, updatedAtMs: now };
+    // Issue #3357: a plan is created PROPOSED — only an operator
+    // approval through POST /plans/approve makes its price chargeable.
+    const record: SubscriptionPlanRecord = {
+      ...plan,
+      id,
+      approvalStatus: "proposed",
+      approvedBy: null,
+      approvedAtMs: null,
+      active: true,
+      createdAtMs: now,
+      updatedAtMs: now,
+    };
     try {
       await this.db.insert(agentSubscriptionPlans).values({
         id: record.id,
@@ -113,6 +134,9 @@ export class D1SubscriptionAdapter implements SubscriptionStore {
         periodDays: record.periodDays,
         includedRuns: record.includedRuns,
         trialDays: record.trialDays,
+        approvalStatus: "proposed",
+        approvedBy: null,
+        approvedAtMs: null,
         active: 1,
         createdAtMs: record.createdAtMs,
         updatedAtMs: record.updatedAtMs,
@@ -123,6 +147,18 @@ export class D1SubscriptionAdapter implements SubscriptionStore {
       throw new Error(`Failed to create plan ${id}.`);
     }
     return record;
+  }
+
+  async approvePlan(planId: string, approverId: string): Promise<SubscriptionPlanRecord> {
+    const approver = assertApproverId(approverId);
+    const plan = await this.getPlan(planId);
+    if (!plan) throw new BusinessError("FAILURE_PLAN_NOT_FOUND", { planId });
+    const now = Date.now();
+    await this.db
+      .update(agentSubscriptionPlans)
+      .set({ approvalStatus: "approved", approvedBy: approver, approvedAtMs: now, updatedAtMs: now })
+      .where(eq(agentSubscriptionPlans.id, planId));
+    return { ...plan, approvalStatus: "approved", approvedBy: approver, approvedAtMs: now, updatedAtMs: now };
   }
 
   async getPlan(planId: string): Promise<SubscriptionPlanRecord | null> {

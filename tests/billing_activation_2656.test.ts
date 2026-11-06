@@ -466,6 +466,8 @@ function stubBillingStripe(overrides: {
 
 async function seedPlanAndPrice(s: Awaited<ReturnType<typeof setup>>) {
   await s.subs.createPlan({ id: "plan-pro", name: "Pro", priceUSD: 20, periodDays: 30, includedRuns: 0 });
+  // Issue #3357: plans land PROPOSED; these tests charge the plan, so approve it — the gate working as designed.
+  await s.subs.approvePlan("plan-pro", "op1");
   await s.policy.updatePolicy({ stripePriceByPlan: { "plan-pro": "price_pro_monthly" } });
 }
 
@@ -514,6 +516,8 @@ describe("billing-checkout route", () => {
     const noMap = await setup({ monetization: true, stripe: true });
     stubBillingStripe();
     await noMap.subs.createPlan({ id: "plan-pro", name: "Pro", priceUSD: 20, periodDays: 30, includedRuns: 0 });
+    // Issue #3357: the missing-mapping check runs after the approval gate, so approve first.
+    await noMap.subs.approvePlan("plan-pro", "op1");
     await noMap.policy.updatePolicy({ stripePriceByPlan: {} });
     expect(
       (await call(noMap.ctx, "POST", "/payments/agentic/commercial/subscription/billing-checkout", "u1", {

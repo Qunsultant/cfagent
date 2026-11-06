@@ -49,6 +49,12 @@ export type DowngradeTiming = "period_end" | "immediate";
 /** Stripe proration behaviours (verified against the Stripe API reference: none / create_prorations / always_invoice). */
 export type ProrationBehavior = "none" | "create_prorations" | "always_invoice";
 
+// Issue #3357: the ONLY import this pure port module takes — the outcome
+// catalog resolver, which reads a static JSON catalog (no store client,
+// no env binding, no SQL), so assert failures surface as typed,
+// catalog-coded outcomes instead of raw throws.
+import { BusinessError } from "../outcomes/outcomeAspects";
+
 /** What happens to existing repurchase-based subscriptions when Billing activates. */
 export type RepurchaseMigration = "grandfather" | "expire" | "migrate";
 
@@ -91,6 +97,14 @@ export interface BillingPolicy {
   topUpMinUSD: number;
   /** Issue #3262: see topUpMinUSD. */
   topUpMaxUSD: number;
+  /**
+   * Issue #3357: annual discount, in whole percent, applied when an
+   * annual plan price is derived from its monthly plan (monthly x 12
+   * x (1 - discount)). PROPOSED seed 15. Operator-managed data, never
+   * a hardcoded constant: an operator changes it through the
+   * billing-policy route, and the next derivation uses the new value.
+   */
+  annualDiscountPct: number;
 }
 
 /**
@@ -115,6 +129,7 @@ export const PROPOSED_SEED_BILLING_POLICY: BillingPolicy = {
   // surface — never hardcoded, never silently an owner decision.
   topUpMinUSD: 1,
   topUpMaxUSD: 500,
+  annualDiscountPct: 15,
 };
 
 /** Storage keys for the policy table (one row per key). */
@@ -130,6 +145,7 @@ export const BILLING_POLICY_KEYS = {
   cfpayChannelFixedPriceUSD: "cfpay_channel_fixed_price_usd",
   topUpMinUSD: "top_up_min_usd",
   topUpMaxUSD: "top_up_max_usd",
+  annualDiscountPct: "annual_discount_pct",
 } as const;
 
 export function assertBillingPeriod(value: unknown, field: string): BillingPeriod {
@@ -185,6 +201,43 @@ export function assertRepurchaseMigration(value: unknown): RepurchaseMigration {
     throw new Error('repurchaseMigration must be "grandfather", "expire", or "migrate".');
   }
   return value;
+}
+
+/**
+ * Issue #3357: the annual discount, in whole percent. 0 means no discount;
+ * 100 would price an annual plan at $0, which no plan may carry (assertPlan
+ * requires a positive priceUSD) — the bound is still 0..100 here so the
+ * policy itself never invents a price rule; derivation validates its result.
+ * A rejected value throws a catalog-coded BusinessError, never a raw Error.
+ */
+export function assertAnnualDiscountPct(value: unknown): number {
+  // A discount is a number, not a numeric-looking string and never
+  // null/undefined: Number(null) is 0 and Number("15") is 15, so a
+  // bare Number() coercion would silently accept both.
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 100) {
+    throw new BusinessError("FAILURE_ANNUAL_DISCOUNT_INVALID");
+  }
+  return value;
+}
+
+/**
+ * Issue #3357: derive an annual plan price from its monthly plan price and
+ * the operator-managed annual discount: monthly x 12 x (1 - discount).
+ * Pinned by test: 49.99 at 15% -> 509.90; 59.99 at 15% -> 611.90.
+ *
+ * Money rule (tech-standards §8, corrected 2026-11-06): money is decimal
+ * USD, rounded to cents at defined points — never accumulate unrounded
+ * float results. The derivation is the defined rounding point: it runs
+ * the multiplication in integer cents (monthly cents x 12 x (100 -
+ * discount) / 100, rounded once to the nearest cent) and returns a
+ * decimal USD value that is already exact to the cent. The monthly input
+ * is a stored 2-decimal price, so Math.round(price * 100) is exact.
+ */
+export function annualPriceUSD(monthlyPriceUSD: number, discountPct: number): number {
+  const discount = assertAnnualDiscountPct(discountPct);
+  const monthlyCents = Math.round(monthlyPriceUSD * 100);
+  const annualCents = Math.round((monthlyCents * 12 * (100 - discount)) / 100);
+  return annualCents / 100;
 }
 
 /** Issue #2945: null (channel unconfigured) or a finite positive USD amount. */
@@ -245,6 +298,7 @@ export function assertBillingPolicy(value: unknown): BillingPolicy {
     cfpayChannelFixedPriceUSD: assertCfpayChannelFixedPriceUSD(v.cfpayChannelFixedPriceUSD),
     topUpMinUSD: assertTopUpMinUSD(v.topUpMinUSD),
     topUpMaxUSD: assertTopUpMaxUSD(v.topUpMaxUSD),
+    annualDiscountPct: assertAnnualDiscountPct(v.annualDiscountPct),
   };
   // Issue #3262: the bounds must order — a min above the max is not a policy.
   if (policy.topUpMinUSD > policy.topUpMaxUSD) {
@@ -269,6 +323,7 @@ export function assertBillingPolicyPartial(value: unknown): Partial<BillingPolic
     "cfpayChannelFixedPriceUSD",
     "topUpMinUSD",
     "topUpMaxUSD",
+    "annualDiscountPct",
   ]);
   for (const k of Object.keys(v)) {
     if (!allowed.has(k)) throw new Error(`Unknown billing policy field: ${k}.`);
@@ -285,6 +340,7 @@ export function assertBillingPolicyPartial(value: unknown): Partial<BillingPolic
   if (v.cfpayChannelFixedPriceUSD !== undefined) out.cfpayChannelFixedPriceUSD = assertCfpayChannelFixedPriceUSD(v.cfpayChannelFixedPriceUSD);
   if (v.topUpMinUSD !== undefined) out.topUpMinUSD = assertTopUpMinUSD(v.topUpMinUSD);
   if (v.topUpMaxUSD !== undefined) out.topUpMaxUSD = assertTopUpMaxUSD(v.topUpMaxUSD);
+  if (v.annualDiscountPct !== undefined) out.annualDiscountPct = assertAnnualDiscountPct(v.annualDiscountPct);
   return out;
 }
 

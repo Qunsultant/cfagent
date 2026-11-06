@@ -92,8 +92,18 @@ import {
 import { type CanonicalReportForAiSearchIndex } from "./reportAiSearchIndex";
 import {
   publishDocument,
+  reportBodyR2Key,
   vectorizeTargetAttempted,
 } from "./documentPublish";
+
+/**
+ * Issue #3527 S2: reportBodyR2Key's definition moved to the
+ * publish stage (src/services/documentPublish.ts — the key
+ * is the published body's address, and the stage's r2-body
+ * target derives it); re-exported here so this module's
+ * existing importers keep their import path.
+ */
+export { reportBodyR2Key } from "./documentPublish";
 import { createBlobStore } from "./blobStoreR2Adapter";
 import { blobText } from "./blobStorePorts";
 
@@ -964,27 +974,49 @@ export async function storeReportAtGenerationWithR2(
       }
     }
     const rec = toScheduledReportRecord(input);
+    // Issue #3527 S2: the body put is the publish stage's
+    // r2-body target now (src/services/documentPublish.ts).
+    // The seam requests that target alone and AWAITS its
+    // settle pre-insert — the row's shape depends on the
+    // outcome (the #2347 contract: the put precedes the
+    // insert and a row never claims a body it does not
+    // have), while the index legs keep firing post-insert
+    // through fireFanoutIndexLegs. The outcome maps back
+    // onto the body statuses exactly as the inline put did:
+    // published -> the pointer row; not_configured (no
+    // REPORTS_BUCKET bound) -> the plain inline row;
+    // failed -> the recorded inline fallback.
+    const bodyPublication = publishDocument(
+      env,
+      {
+        kind: "report",
+        documentId: rec.id,
+        title: rec.title,
+        source: rec.source,
+        summary: rec.summary,
+        body: rec.body,
+        bodyR2Key: null,
+      },
+      {},
+      { targets: ["r2-body"] }
+    );
+    const bodyOutcome = (await bodyPublication.settled).targets[0];
     let bodyR2Key: string | null = null;
     let bodyStatus: FanoutBodyStatus = "inline";
-    const store = createBlobStore(env);
-    if (store) {
-      const key = reportBodyR2Key(rec.id);
-      try {
-        await store.put(key, rec.body, {
-          contentType: "application/json",
-        });
-        bodyR2Key = key;
-        bodyStatus = "r2";
-      } catch (err) {
-        // Issue #2347: the fallback is now a RECORDED outcome
-        // (body: "inline_fallback", code REPORT_FANOUT_DEGRADED
-        // on the row), not only this log line.
-        bodyStatus = "inline_fallback";
-        console.error(
-          `[scheduledReports] storeReportAtGenerationWithR2: R2 body put failed for report ${rec.id}; storing inline instead: ${err instanceof Error ? err.message : String(err)}`,
-          err
-        );
-      }
+    if (bodyOutcome?.status === "published") {
+      bodyR2Key = reportBodyR2Key(rec.id);
+      bodyStatus = "r2";
+    } else if (bodyOutcome?.status === "failed") {
+      // Issue #2347: the fallback is a RECORDED outcome
+      // (body: "inline_fallback", code REPORT_FANOUT_DEGRADED
+      // on the row), not only this log line. The stage
+      // carries the put error's message on the outcome; the
+      // line quotes it exactly as the inline catch did.
+      bodyStatus = "inline_fallback";
+      console.error(
+        `[scheduledReports] storeReportAtGenerationWithR2: R2 body put failed for report ${rec.id}; storing inline instead: ${bodyOutcome.error ?? "unknown error"}`,
+        bodyOutcome.error
+      );
     }
     const statuses = initialIndexStatuses(env, rec.source);
     const fanout = makeFanoutOutcome(
@@ -1317,16 +1349,6 @@ export interface ScheduledReportHit {
    * rows carry no outcome — never a fabricated one).
    */
   fanoutOutcome: CanonicalReportFanoutOutcome | null;
-}
-
-/**
- * Issue #338: the R2 object key for a report's canonical body, per the
- * accepted design — `reports/<reportId>.json` in the REPORTS_BUCKET
- * bucket (the `screener` bucket provisioned for #605). Content-addressed
- * by report id; bodies are immutable (regeneration = a new report id).
- */
-export function reportBodyR2Key(reportId: string): string {
-  return `reports/${reportId}.json`;
 }
 
 /** Map one mas_reports row to a hit, tolerating pre-#338 rows (no key). */

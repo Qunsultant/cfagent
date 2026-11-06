@@ -1748,6 +1748,29 @@ export const MIGRATION_0047_JOB_RUN_RECORDS: DataMigration = {
 };
 
 /**
+ * Migration 0049 — plan price approval (#3357, sub-issue of
+ * #2012). Extends the #2547 approval discipline (which covers
+ * the per-run price catalogue only) to subscription plan prices:
+ * new columns on agent_subscription_plans, mirroring the
+ * catalogue's approval_status / approved_by / approved_at_ms.
+ * Pre-existing rows are grandfathered as approved: the owner
+ * states today's monthly prices (Basic $49.99, Premium $59.99)
+ * are approved, so a legacy row must stay chargeable — with
+ * approved_by / approved_at_ms NULL, because no approval was
+ * recorded for it and none is invented. Any plan created after
+ * this migration lands as PROPOSED (the adapter inserts it
+ * explicitly) until an operator approves it.
+ */
+export const MIGRATION_0049_PLAN_PRICE_APPROVAL: DataMigration = {
+  version: 49,
+  name: "0049_plan_price_approval",
+  sql: `ALTER TABLE agent_subscription_plans ADD COLUMN approval_status TEXT NOT NULL DEFAULT 'proposed';
+ALTER TABLE agent_subscription_plans ADD COLUMN approved_by TEXT;
+ALTER TABLE agent_subscription_plans ADD COLUMN approved_at_ms INTEGER;
+UPDATE agent_subscription_plans SET approval_status = 'approved' WHERE approval_status = 'proposed';`,
+};
+
+/**
  * Migration 0048 — self-service top-up drafts (#3262).
  *
  * One row per minted top-up: the amount bound at mint, the rail, and
@@ -1829,6 +1852,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0046_JOB_PIPELINE,
   MIGRATION_0047_JOB_RUN_RECORDS,
   MIGRATION_0048_TOP_UP_DRAFTS,
+  MIGRATION_0049_PLAN_PRICE_APPROVAL,
 ];
 
 function splitStatements(sqlText: string): string[] {

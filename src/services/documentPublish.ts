@@ -14,11 +14,21 @@
  * Callers keep owning their records: the store seams keep
  * writing `fanout_outcome`, now from the stage's outcomes.
  *
- * S1 scope is the two index targets for kind "report" only.
- * The `r2-body` target lands in S2; the corpus document kind
- * lands in S3 (the union below gains its second member there).
- * discoveryReportPublish is out of scope (it generates its
- * artifacts; it does not publish a stored document).
+ * S1 scope was the two index targets for kind "report" only.
+ * S2 adds the third target, `r2-body`: the canonical body put
+ * the WithR2 store seam used to perform inline
+ * (storeReportAtGenerationWithR2: put reports/<reportId>.json
+ * through the BlobStore port BEFORE the row insert, a failed
+ * put falling back to the exact inline row shape, recorded).
+ * The seam now requests that target from the stage and awaits
+ * its settle handle pre-insert — the row's shape depends on
+ * the outcome, so this leg is NOT fire-and-forget at the seam
+ * (the #2347 contract: the put precedes the insert and a row
+ * never claims a body it does not have). The corpus document
+ * kind lands in S3 (the union below gains its second member
+ * there). discoveryReportPublish is out of scope (it
+ * generates its artifacts; it does not publish a stored
+ * document).
  *
  * Contract (survey §3.2, with one refinement the code forces):
  * the survey proposed `publishDocument(env, doc) ->
@@ -52,6 +62,30 @@
  *   binding is absent); a rejecting hook -> `failed` with
  *   code "upload_failed" (the token the seam's rejection
  *   handler has always recorded).
+ * - r2-body (S2): the stage precomputes configured-ness via
+ *   the BlobStore port factory (createBlobStore) — no bucket
+ *   bound -> `not_configured`, the put executor never invoked
+ *   (an unbound bucket was never a failure at the seam: the
+ *   row simply stores inline, code STORED). Attempted put ok
+ *   -> `published`; put throw/rejection -> `failed` carrying
+ *   the error's message in `error` (the BlobStore put
+ *   produces no stable code; the seam's recorded-fallback
+ *   log line quotes the message, exactly as its inline catch
+ *   did). The put itself is the seam's exact pre-stage put:
+ *   key reportBodyR2Key(documentId) (defined below — its one
+ *   home, moved here from the seam, which re-exports it),
+ *   the document's body string verbatim, contentType
+ *   "application/json", through the ONE BlobStore port.
+ *
+ * Target selection: publishDocument runs the two index
+ * targets by default (the S1 behaviour every existing caller
+ * relies on). A caller requests a different set via
+ * PublishOptions.targets — the WithR2 seam requests
+ * ["r2-body"] alone for its pre-insert phase, because the
+ * index legs must not fire before the row exists (their
+ * outcomes record onto the row) and the body leg must not
+ * wait for them. Handles always come back in canonical
+ * order: r2-body, vectorize, ai-search.
  */
 
 import {
@@ -65,6 +99,8 @@ import {
   type CanonicalReportForAiSearchIndex,
   type ReportAiSearchIndexEnv,
 } from "./reportAiSearchIndex";
+import { createBlobStore } from "./blobStoreR2Adapter";
+import type { BlobStore } from "./blobStorePorts";
 
 /** The env the stage reads: the union of both legs' env subsets. */
 export type PublishEnv = IndexEnv & ReportAiSearchIndexEnv;
@@ -82,7 +118,12 @@ export interface ReportPublishDocument {
   title: string;
   source: string;
   summary: string;
-  /** The stored body string (JSON for most sources; may be "" for R2 rows). */
+  /**
+   * The body string (JSON for most sources; may be "" for
+   * R2 rows on the index legs). For the r2-body target the
+   * seam passes it pre-insert: it is the put payload, i.e.
+   * the exact string the row would otherwise store inline.
+   */
   body: string;
   /** R2 object key when the body lives in REPORTS_BUCKET. */
   bodyR2Key?: string | null;
@@ -110,6 +151,13 @@ export interface PublishTargetOutcome {
   target: PublishTargetId;
   status: PublishTargetStatus;
   code?: string;
+  /**
+   * The caught error's message, when a failed executor
+   * produced no stable code (the r2-body leg: the BlobStore
+   * put's rejection). The caller's fallback log line quotes
+   * it — the same text the seam's inline catch logged.
+   */
+  error?: string;
 }
 
 /** One target's settle handle: resolves with its outcome, never rejects. */
@@ -136,6 +184,51 @@ export interface PublishHandle {
 export interface PublishDeps {
   indexCanonicalReport?: typeof indexCanonicalReport;
   indexCanonicalReportInAiSearch?: typeof indexCanonicalReportInAiSearch;
+  /**
+   * The r2-body put, against the stage-resolved BlobStore.
+   * The default performs the seam's exact pre-stage put
+   * (contentType "application/json"); injectable so pins can
+   * observe the (store, key, body) triple and inject faults
+   * without a bucket double.
+   */
+  putReportBody?: (
+    store: BlobStore,
+    key: string,
+    body: string,
+  ) => Promise<void>;
+}
+
+/** Options for one publishDocument call. */
+export interface PublishOptions {
+  /**
+   * The targets to run, in any order (handles come back in
+   * canonical order). Default: the two index targets
+   * (["vectorize", "ai-search"]) — the S1 behaviour.
+   */
+  targets?: readonly PublishTargetId[];
+}
+
+/**
+ * Issue #338: the R2 object key for a report's canonical
+ * body, per the accepted design — `reports/<reportId>.json`
+ * in the REPORTS_BUCKET bucket (the `screener` bucket
+ * provisioned for #605). Content-addressed by report id;
+ * bodies are immutable (regeneration = a new report id).
+ * Issue #3527 S2: the definition's one home is the publish
+ * stage (the key is the published body's address);
+ * scheduledReports.ts re-exports it for its existing
+ * importers.
+ */
+export function reportBodyR2Key(reportId: string): string {
+  return `reports/${reportId}.json`;
+}
+
+async function putReportBodyViaStore(
+  store: BlobStore,
+  key: string,
+  body: string,
+): Promise<void> {
+  await store.put(key, body, { contentType: "application/json" });
 }
 
 /**
@@ -226,9 +319,41 @@ function settleAiSearchTarget(
   })();
 }
 
+function settleR2BodyTarget(
+  env: PublishEnv | undefined,
+  doc: ReportPublishDocument,
+  run: NonNullable<PublishDeps["putReportBody"]>,
+): Promise<PublishTargetOutcome> {
+  // Configured-ness is precomputed exactly as the seam did:
+  // createBlobStore returns null when REPORTS_BUCKET is
+  // unbound, and the seam's unbound path was a plain inline
+  // store, never a failure — so the put executor is never
+  // invoked and the outcome is not_configured.
+  const store = createBlobStore(env);
+  if (!store) {
+    return Promise.resolve({ target: "r2-body", status: "not_configured" });
+  }
+  const key = reportBodyR2Key(doc.documentId);
+  return (async (): Promise<PublishTargetOutcome> => {
+    try {
+      await run(store, key, doc.body);
+      return { target: "r2-body", status: "published" };
+    } catch (err) {
+      // The put produces no stable code; the outcome carries
+      // the error's message so the seam's recorded-fallback
+      // log line quotes it verbatim, as its inline catch did.
+      return {
+        target: "r2-body",
+        status: "failed",
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  })();
+}
+
 /**
- * Publish one stored document to the stage's targets. S1:
- * the two report index legs (vectorize, ai-search). Returns
+ * Publish one stored document to the requested targets
+ * (default: the two report index legs). Returns
  * synchronously; every promise it hands out resolves (never
  * rejects) with the target's declared outcome.
  */
@@ -236,20 +361,35 @@ export function publishDocument(
   env: PublishEnv | undefined,
   doc: PublishDocumentInput,
   deps: PublishDeps = {},
+  options: PublishOptions = {},
 ): PublishHandle {
   const runVectorize = deps.indexCanonicalReport ?? indexCanonicalReport;
   const runAiSearch =
     deps.indexCanonicalReportInAiSearch ?? indexCanonicalReportInAiSearch;
-  const targets: PublishTargetHandle[] = [
-    {
+  const runPutBody = deps.putReportBody ?? putReportBodyViaStore;
+  const requested: readonly PublishTargetId[] = options.targets ?? [
+    "vectorize",
+    "ai-search",
+  ];
+  const targets: PublishTargetHandle[] = [];
+  if (requested.includes("r2-body")) {
+    targets.push({
+      target: "r2-body",
+      settled: settleR2BodyTarget(env, doc, runPutBody),
+    });
+  }
+  if (requested.includes("vectorize")) {
+    targets.push({
       target: "vectorize",
       settled: settleVectorizeTarget(env, doc, runVectorize),
-    },
-    {
+    });
+  }
+  if (requested.includes("ai-search")) {
+    targets.push({
       target: "ai-search",
       settled: settleAiSearchTarget(env, doc, runAiSearch),
-    },
-  ];
+    });
+  }
   const settled: Promise<PublishOutcome> = Promise.all(
     targets.map((t) => t.settled),
   ).then((outcomes) => ({

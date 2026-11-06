@@ -1,0 +1,2 @@
+### Changed
+- Publish stage S2 (#3527): the canonical report body put to R2 is now the publish stage's `r2-body` target — `publishDocument` in `src/services/documentPublish.ts` performs the `reports/<reportId>.json` BlobStore put (same key, bytes, and content type), and `storeReportAtGenerationWithR2` requests that target and awaits its outcome pre-insert instead of putting inline. Recorded `fanout_outcome`, the inline fallback on put failure, and dedupe behaviour are unchanged; `reportBodyR2Key` now lives in the stage module and is re-exported from `scheduledReports.ts`.
