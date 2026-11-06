@@ -217,7 +217,11 @@ export async function recordBillingSubscription(input: {
   });
 }
 
-/** Cancel a Billing-managed row at period end, on the provider and locally (local status canceled, period end kept). */
+/** Cancel a Billing-managed row at period end, on the provider and locally (local status canceled, period end kept).
+ * Issue #3523: the provider subscription is retrieved first; when the provider already reports
+ * canceled, the provider cancel call is skipped and only the local write runs from the provider's
+ * verified state — so a retry after a partial failure converges instead of re-canceling (recovery
+ * truthfulness, tech-standards §13). */
 export async function cancelBillingAtPeriodEnd(input: {
   billing: BillingPort;
   subs: SubscriptionStore;
@@ -228,11 +232,19 @@ export async function cancelBillingAtPeriodEnd(input: {
   if (!record.providerSubscriptionId) {
     throw new Error("Refusing to Billing-cancel a repurchase subscription: use the repurchase cancel path instead.");
   }
-  const provider = await input.billing.cancelProviderAtPeriodEnd(record.providerSubscriptionId);
+  const provider = await input.billing.retrieveProviderSubscription(record.providerSubscriptionId);
+  if (provider.status === "canceled") {
+    return input.subs.updateProviderBilling(record.id, {
+      providerStatus: provider.status,
+      status: "canceled",
+      canceledAtMs: provider.canceledAtMs ?? Date.now(),
+    });
+  }
+  const canceled = await input.billing.cancelProviderAtPeriodEnd(record.providerSubscriptionId);
   return input.subs.updateProviderBilling(record.id, {
-    providerStatus: provider.status,
+    providerStatus: canceled.status,
     status: "canceled",
-    canceledAtMs: provider.canceledAtMs ?? Date.now(),
+    canceledAtMs: canceled.canceledAtMs ?? Date.now(),
   });
 }
 
@@ -241,7 +253,10 @@ export async function cancelBillingAtPeriodEnd(input: {
  * never the provider's reported current_period_end (Stripe keeps the
  * billing-period boundary on a DELETE response, and resolveEffectiveTier
  * confers Subscribed on periodEndMs alone — trusting the provider
- * period would leave access live after an "immediate" cancel). */
+ * period would leave access live after an "immediate" cancel).
+ * Issue #3523: the provider subscription is retrieved first; when the provider already reports
+ * canceled, the provider cancel call is skipped and only the local write runs from the provider's
+ * verified state (recovery truthfulness, tech-standards §13). */
 export async function cancelBillingImmediately(input: {
   billing: BillingPort;
   subs: SubscriptionStore;
@@ -254,11 +269,20 @@ export async function cancelBillingImmediately(input: {
   if (!record.providerSubscriptionId) {
     throw new Error("Refusing to Billing-cancel a repurchase subscription: use the repurchase cancel path instead.");
   }
-  const provider = await input.billing.cancelProviderImmediately(record.providerSubscriptionId);
+  const provider = await input.billing.retrieveProviderSubscription(record.providerSubscriptionId);
+  if (provider.status === "canceled") {
+    return input.subs.updateProviderBilling(record.id, {
+      providerStatus: provider.status,
+      status: "canceled",
+      canceledAtMs: provider.canceledAtMs ?? nowMs,
+      periodEndMs: nowMs,
+    });
+  }
+  const canceled = await input.billing.cancelProviderImmediately(record.providerSubscriptionId);
   return input.subs.updateProviderBilling(record.id, {
-    providerStatus: provider.status,
+    providerStatus: canceled.status,
     status: "canceled",
-    canceledAtMs: provider.canceledAtMs ?? nowMs,
+    canceledAtMs: canceled.canceledAtMs ?? nowMs,
     periodEndMs: nowMs,
   });
 }

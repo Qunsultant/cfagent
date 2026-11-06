@@ -15,6 +15,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { CheckoutPanel } from "../src/client/CheckoutPanel";
+import { codedMessage, resolveOutcome } from "../src/outcomes/outcomeAspects";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -93,6 +94,7 @@ function mockFetch(opts: {
   subscriptionCheckout?: Record<string, unknown>;
   subscriptionStatus?: Record<string, unknown>;
   subscriptionCancel?: Record<string, unknown>;
+  subscriptionCancelError?: { status: number; body: unknown };
 }) {
   const pricing = opts.pricing ?? pricingVariant();
   const fetchMock = vi.fn(async (input: any, init?: any) => {
@@ -131,6 +133,13 @@ function mockFetch(opts: {
       } as any;
     }
     if (url === "/api/payments/agentic/commercial/subscription/cancel" && method === "POST") {
+      if (opts.subscriptionCancelError) {
+        return {
+          ok: false,
+          status: opts.subscriptionCancelError.status,
+          json: async () => opts.subscriptionCancelError.body,
+        } as any;
+      }
       return {
         ok: true,
         status: 200,
@@ -391,7 +400,10 @@ describe("checkout panel cancel-action UI (#2669)", () => {
       subscriptionStatus: fixture,
       subscriptionCancel: {
         userId: "u1",
+        code: "SUCCESS_SUBSCRIPTION_CANCELED_PERIOD_END",
+        message: resolveOutcome("SUCCESS_SUBSCRIPTION_CANCELED_PERIOD_END").entry!.businessMessage,
         canceled: fixture.subscriptions,
+        remaining: [],
         accessThroughMs: SUB_END_MS,
         downgradeTiming: "period_end",
       },
@@ -415,7 +427,10 @@ describe("checkout panel cancel-action UI (#2669)", () => {
       subscriptionStatus: fixture,
       subscriptionCancel: {
         userId: "u1",
+        code: "SUCCESS_SUBSCRIPTION_CANCELED_PERIOD_END",
+        message: resolveOutcome("SUCCESS_SUBSCRIPTION_CANCELED_PERIOD_END").entry!.businessMessage,
         canceled: fixture.subscriptions,
+        remaining: [],
         accessThroughMs: SUB_END_MS,
         downgradeTiming: "period_end",
       },
@@ -446,7 +461,10 @@ describe("checkout panel cancel-action UI (#2669)", () => {
       subscriptionStatus: fixture,
       subscriptionCancel: {
         userId: "u1",
+        code: "SUCCESS_SUBSCRIPTION_CANCELED_IMMEDIATE",
+        message: resolveOutcome("SUCCESS_SUBSCRIPTION_CANCELED_IMMEDIATE").entry!.businessMessage,
         canceled: fixture.subscriptions,
+        remaining: [],
         accessThroughMs: Date.now(),
         downgradeTiming: "immediate",
       },
@@ -468,9 +486,20 @@ describe("checkout panel cancel-action UI (#2669)", () => {
 
   it("reports when no active subscription was found to cancel", async () => {
     const fixture = subscriptionStatusFixture();
+    // Issue #3523: a replay / nothing-active cancel now rejects 409 with the coded
+    // none-active outcome — the panel renders the coded message, never a hand-written one.
     mockFetch({
       subscriptionStatus: fixture,
-      subscriptionCancel: { userId: "u1", canceled: [], accessThroughMs: null, downgradeTiming: "period_end" },
+      subscriptionCancelError: {
+        status: 409,
+        body: {
+          code: "FAILURE_SUBSCRIPTION_CANCEL_NONE_ACTIVE",
+          message: resolveOutcome("FAILURE_SUBSCRIPTION_CANCEL_NONE_ACTIVE").entry!.businessMessage,
+          retryable: false,
+          canceled: [],
+          remaining: [],
+        },
+      },
     });
     await openSubscriptionsTab();
     await act(async () => {
@@ -481,6 +510,8 @@ describe("checkout panel cancel-action UI (#2669)", () => {
       clickBodyButton("Yes, cancel subscriptions");
     });
     await flush();
-    expect(container.textContent || "").toContain("No active subscription was found to cancel.");
+    expect(container.textContent || "").toContain(
+      codedMessage("FAILURE_SUBSCRIPTION_CANCEL_NONE_ACTIVE"),
+    );
   });
 });
