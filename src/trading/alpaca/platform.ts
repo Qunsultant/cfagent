@@ -4,7 +4,7 @@
  * Implements ITradingPlatform for Alpaca Trading API v2
  */
 
-import type { Env, BrokerQuote, BrokerAccount, BrokerPosition, BrokerPositionLot, BrokerOrderDraft, BrokerOrderExecutionResult, BrokerStatus, BrokerOptionChain, BrokerOptionContract, BrokerOptionExpireDate, StockScreenerFilter, StockScreenResult, BrokerRemoteOrder, BrokerActivity, BrokerCancelOrderResult } from "../../types";
+import type { Env, BrokerQuote, BrokerAccount, BrokerPosition, BrokerPositionLot, BrokerOrderDraft, BrokerOrderExecutionResult, BrokerStatus, BrokerOptionChain, BrokerOptionContract, BrokerOptionExpireDate, StockScreenerFilter, StockScreenResult, BrokerRemoteOrder, BrokerActivity, BrokerWatchlist, BrokerCancelOrderResult } from "../../types";
 import type { DatabaseORM } from "../../orm";
 import type { ITradingPlatform, OrderPreviewParams, PlaceOrderParams } from "../interfaces";
 import { BROKER_CATALOG, type TradingType } from "../brokerCatalog";
@@ -169,6 +169,37 @@ export function mapAlpacaOrderHistoryRow(raw: any): BrokerRemoteOrder {
  * Alpaca's words (FILL, DIV, FEE, ...); the surface shows them as they are.
  * Dates arrive as `transaction_time` for trades and `date` for everything else.
  */
+/**
+ * Issue #3434: one Alpaca watchlist onto the neutral row.
+ *
+ * `symbols` is the platform's currency (a list of tickers), so a row without
+ * one is a failure rather than an empty list — "the broker returned no symbols"
+ * and "this list is empty" are different facts. Timestamps are parsed to epoch
+ * ms when present and omitted when not.
+ */
+export function mapAlpacaWatchlist(raw: any): BrokerWatchlist {
+  const id = raw?.id;
+  const watchlistId = typeof id === "string" && id ? id : "";
+  if (!watchlistId) throw new Error("Alpaca returned a watchlist without an id.");
+  const name = typeof raw?.name === "string" && raw.name ? raw.name : watchlistId;
+  if (!Array.isArray(raw?.symbols)) {
+    throw new Error(`Alpaca returned watchlist ${watchlistId} without a symbols array.`);
+  }
+  const symbols = raw.symbols
+    .filter((symbol: unknown): symbol is string => typeof symbol === "string" && symbol.trim() !== "")
+    .map((symbol: string) => symbol.trim().toUpperCase());
+  const createdAt = Date.parse(String(raw?.created_at ?? ""));
+  const updatedAt = Date.parse(String(raw?.updated_at ?? ""));
+  return {
+    watchlistId,
+    name,
+    symbols,
+    source: "alpaca_api",
+    ...(Number.isFinite(createdAt) ? { createdTimestamp: createdAt } : {}),
+    ...(Number.isFinite(updatedAt) ? { updatedTimestamp: updatedAt } : {}),
+  };
+}
+
 export function mapAlpacaActivityRow(raw: any): BrokerActivity {
   const activityId = typeof raw?.id === "string" && raw.id ? raw.id : "";
   if (!activityId) throw new Error("Alpaca returned an activity without an id.");
@@ -665,6 +696,25 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
       throw new Error(mapAlpacaFailureToBusiness(res.httpStatus, "account"));
     }
     return res.activities.map(mapAlpacaActivityRow);
+  }
+
+  /**
+   * Issue #3434: the account's own watchlists, mapped onto the neutral row.
+   *
+   * Alpaca returns `{ id, name, symbols[], created_at, updated_at }`. The id is
+   * a UUID string, which is exactly what `watchlistId` is for; nothing is
+   * invented when a field is missing — created/updated are epoch ms or absent.
+   */
+  async getWatchlists(): Promise<BrokerWatchlist[]> {
+    await this.ready();
+    if (!this.alpacaData.isConfigured()) {
+      throw new Error("Alpaca credentials are not configured; watchlists are unavailable.");
+    }
+    const res = await this.alpacaData.getWatchlists();
+    if (!res.success || !Array.isArray(res.watchlists)) {
+      throw new Error(mapAlpacaFailureToBusiness(res.httpStatus, "account"));
+    }
+    return res.watchlists.map(mapAlpacaWatchlist);
   }
 
   async derivePositionLots(positionId: string | number): Promise<DerivedLots> {

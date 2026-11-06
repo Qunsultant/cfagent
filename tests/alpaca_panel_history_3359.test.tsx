@@ -152,21 +152,29 @@ describe("the Alpaca panel shows what Alpaca serves (#3359)", () => {
       "/broker/status": STATUS,
       "/broker/orders/history": HISTORY,
       "/broker/activities": ACTIVITY,
+      "/broker/watchlists": {
+        broker: "alpaca",
+        environment: "TEST",
+        watchlists: [{ watchlistId: "wl-1", name: "Momentum", symbols: ["NVDA", "AAPL"] }],
+      },
     });
 
     act(() => root.render(<AlpacaBrokerPanel activeEnv="TEST" />));
     await flush();
 
-    for (const surface of ["alerts", "watchlists"] as const) {
-      const absence = container.querySelector(`[data-broker-surface="${surface}"]`);
-      expect(absence, surface).not.toBeNull();
-      expect(absence!.getAttribute("data-code")).toBe("FAILURE_BROKER_UNAVAILABLE");
-      expect(absence!.textContent).toContain("Alpaca");
-    }
+    // Issue #3434: alerts stay a coded absence; watchlists are now data.
+    const absence = container.querySelector('[data-broker-surface="alerts"]');
+    expect(absence).not.toBeNull();
+    expect(absence!.getAttribute("data-code")).toBe("FAILURE_BROKER_UNAVAILABLE");
+    expect(absence!.textContent).toContain("Alpaca");
 
-    // Neither absence is an empty table pretending to be data.
+    const watchlistSection = container.querySelector('[id="section-watchlists"]');
+    expect(watchlistSection).not.toBeNull();
+    expect(watchlistSection!.textContent).toContain("Momentum");
+    expect(watchlistSection!.textContent).toContain("NVDA, AAPL");
+
+    // The absence is not an empty table pretending to be data.
     expect(container.textContent).not.toContain("No Alpaca alerts");
-    expect(container.textContent).not.toContain("No Alpaca watchlists");
   });
 
   it("states a failed history read with its code instead of an empty table", async () => {

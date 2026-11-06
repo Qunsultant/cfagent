@@ -2736,6 +2736,39 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
   }
 
   /**
+   * Issue #3434: the account's own watchlists (GET /v2/watchlists).
+   *
+   * Alpaca has the capability the platform declared absent, so the panel can
+   * show the tenant's real lists instead of a refusal. A body that is not an
+   * array is a failure, not "no watchlists".
+   */
+  async getWatchlists(): Promise<{ success: boolean; watchlists?: any[]; message?: string; httpStatus?: number }> {
+    if (!this.isConfigured()) {
+      return {
+        success: false,
+        message: "Alpaca Trading error: ALPACA_API_KEY_ID and ALPACA_API_SECRET_KEY are required.",
+      };
+    }
+
+    try {
+      const res = await fetch(`${this.getTradingUrl()}/v2/watchlists`, {
+        headers: this.getHeaders(),
+      });
+      const data = (await res.json().catch(() => ([]))) as any;
+      if (res.ok && Array.isArray(data)) {
+        return { success: true, watchlists: data };
+      }
+      return {
+        success: false,
+        httpStatus: res.status,
+        message: data?.message || "Failed to fetch Alpaca watchlists",
+      };
+    } catch (err: any) {
+      return { success: false, message: err?.message || "Network error" };
+    }
+  }
+
+  /**
    * Real Alpaca Trading v2: Get Orders
    */
   async getOrders(status: "open" | "closed" | "all" = "open"): Promise<{ success: boolean; orders?: any[]; message?: string }> {

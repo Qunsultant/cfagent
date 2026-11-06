@@ -18,6 +18,7 @@ import type {
   BrokerPositionLot,
   BrokerAccount,
   BrokerActivity,
+  BrokerWatchlist,
   BrokerRemoteOrder,
   BrokerStatus,
   BrokerOptionChain,
@@ -159,6 +160,8 @@ export interface ITradingPlatform {
    */
   getOrderHistory?(status: "open" | "closed" | "all"): Promise<BrokerRemoteOrder[]>;
   getAccountActivity?(activityType?: string): Promise<BrokerActivity[]>;
+  /** Issue #3434: the account's own saved lists, in the broker's vocabulary. */
+  getWatchlists?(): Promise<BrokerWatchlist[]>;
 }
 
 export interface IMarketScreener {
