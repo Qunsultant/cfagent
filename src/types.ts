@@ -346,6 +346,17 @@ export interface Env {
   AI_GATEWAY_ID?: string;
   AI_GATEWAY_CACHE_TTL?: string;
   AI_GATEWAY_RATE_LIMIT_RPM?: string;
+  // #3515 S1 — outgoing rate limiting (plain vars, owner-set, non-secret).
+  // ETRADE_OUTBOUND_RPM / ALPACA_OUTBOUND_RPM / LLM_OUTBOUND_RPM:
+  // outbound requests per minute per connector (optional; default 120
+  // each — see src/security/outboundRateLimiter.ts for the grounding).
+  // OUTBOUND_RATE_LIMIT_MAX_WAIT_MS: bounded wait for a token per
+  // acquire in ms (optional; default 10000; 0 = fail fast with a typed
+  // OutboundRateLimitError instead of waiting).
+  ETRADE_OUTBOUND_RPM?: string;
+  ALPACA_OUTBOUND_RPM?: string;
+  LLM_OUTBOUND_RPM?: string;
+  OUTBOUND_RATE_LIMIT_MAX_WAIT_MS?: string;
   // #1711 — payments flow switch (ONE switch, non-secret, owner-set).
   // PAYMENTS_FLOW_MODE: "hitl" | "immediate" (case-insensitive, padded
   // values accepted). Default when unset or blank: "hitl" — the #1690

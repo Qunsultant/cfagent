@@ -32,6 +32,14 @@ export interface AlpacaOptionsConfig {
   headers: Record<string, string>;
   /** Options feed; `indicative` works without an OPRA subscription. */
   feed?: string;
+  /**
+   * Issue #3515 S1: the shared Alpaca outbound limiter (the platform
+   * adapter passes its provider's `outboundLimiter`). When supplied,
+   * each options fetch awaits one token from the same Alpaca budget as
+   * the trading/market-data calls; when absent, the calls are
+   * unthrottled (direct callers without a provider instance).
+   */
+  rateLimiter?: import("../../security/outboundRateLimiter").OutboundRateLimiter;
 }
 
 export interface AlpacaOptionContractRow {
@@ -116,6 +124,8 @@ export async function fetchAlpacaOptionContracts(
     if (pageToken) query.set("page_token", pageToken);
 
     const url = `${cfg.tradingUrl.replace(/\/$/, "")}/v2/options/contracts?${query.toString()}`;
+    // Issue #3515 S1: one Alpaca token per page fetch, shared with the provider.
+    await cfg.rateLimiter?.acquire();
     const res = await fetch(url, { headers: cfg.headers });
     if (!res.ok) {
       throw new Error(`Alpaca option contracts unavailable [HTTP ${res.status}].`);
@@ -179,6 +189,8 @@ export async function fetchAlpacaOptionSnapshots(
   const url = `${cfg.dataUrl.replace(/\/$/, "")}/v1beta1/options/snapshots/${encodeURIComponent(
     underlying.toUpperCase(),
   )}?${query.toString()}`;
+  // Issue #3515 S1: one Alpaca token per snapshot fetch, shared with the provider.
+  await cfg.rateLimiter?.acquire();
   const res = await fetch(url, { headers: cfg.headers });
   if (!res.ok) {
     throw new Error(`Alpaca option snapshots unavailable [HTTP ${res.status}].`);

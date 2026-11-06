@@ -31,6 +31,7 @@ import { getClientConfig, type EtapiClientConfig } from "../../config/etapiConfi
 import { generateOAuth1Header } from "../../services/cryptoUtils";
 import { getValidTokens, revokeStoredTokens, revokeRemoteAccessToken, type ETradeTokenIdentity } from "../../security/etradeOAuth";
 import { propagateBrokerTokenRejection } from "../../security/brokerTokenRejection";
+import { createOutboundRateLimiter, type OutboundRateLimiter } from "../../security/outboundRateLimiter";
 import { assertSandboxUrlSafety } from "../../aspects/loggingAspect";
 import { ETradeError, ETradeErrorCode } from "../../aspects/errorCodes";
 import { AGENT_DIDS, getUserDid } from "../../agents/did";
@@ -38,16 +39,6 @@ import { RemoteMcpClient } from "../../mcps/client/mcpClient";
 import { etradeOrderKind, etradePriceType, toETradeInstruments, validateTradingOrderLegs } from "./optionOrders";
 import type { OptionRequestBudget, TradingOrderLeg } from "../interfaces";
 
-function fetchOptionRequest(
-  requestUrl: string,
-  init: RequestInit,
-  requestBudget?: OptionRequestBudget
-): Promise<Response> {
-  if (requestBudget && !requestBudget.tryConsume()) {
-    throw new Error("Subrequest budget exhausted before E*TRADE option fetch.");
-  }
-  return fetch(requestUrl, init);
-}
 export type ETradeMarketMoverCategory = "gainers" | "losers" | "active";
 
 function firstQuoteData(data: any): any {
@@ -90,6 +81,14 @@ export class ETradeRestClient {
   /** Marks that option methods charge the supplied limiter per actual fetch attempt. */
   readonly supportsOptionRequestBudget = true;
 
+  /**
+   * Issue #3515 S1: this client's outbound token bucket (120 req/min
+   * by default, env-overridable). One bucket per client instance, so a
+   * run reusing one client is throttled as a whole; see
+   * src/security/outboundRateLimiter.ts for the scope note.
+   */
+  private readonly outboundLimiter: OutboundRateLimiter;
+
   // Issue #155/#168: lastError is the failure signal for read calls.
   // Read methods clear it on entry, set it on EVERY failure return
   // (missing credentials/params, HTTP error, exception, payload-less
@@ -127,6 +126,30 @@ export class ETradeRestClient {
     if (!userLogin) {
       throw new Error("ETradeRestClient requires an explicit userLogin (issue #1185: no default identity).");
     }
+    // Issue #3515 S1: outbound token bucket for this client instance.
+    this.outboundLimiter = createOutboundRateLimiter(env, "etrade");
+  }
+
+  /**
+   * Issue #3515 S1: the single outbound choke point for this client.
+   * Every E*TRADE HTTP request in this class goes through here. The
+   * option-request budget is charged first (same error as the old
+   * module-level fetchOptionRequest helper this method replaces), then
+   * one token is awaited from this client's outbound bucket (bounded
+   * wait, else a typed OutboundRateLimitError). Callers that catch per
+   * call (e.g. fetchQuoteDetailed) surface that error as the call's
+   * error; callers without a catch let it propagate.
+   */
+  private async throttledFetch(
+    url: string,
+    init: RequestInit,
+    requestBudget?: OptionRequestBudget,
+  ): Promise<Response> {
+    if (requestBudget && !requestBudget.tryConsume()) {
+      throw new Error("Subrequest budget exhausted before E*TRADE option fetch.");
+    }
+    await this.outboundLimiter.acquire();
+    return fetch(url, init);
   }
 
   private async handleUpstreamAuthError(status: number, endpoint: string, errorBody: string): Promise<void> {
@@ -296,7 +319,7 @@ export class ETradeRestClient {
     let authHeader = await this.generateOAuthHeader("GET", url);
 
     try {
-      let res = await fetch(url, {
+      let res = await this.throttledFetch(url, {
         method: "GET",
         headers: {
           Authorization: authHeader,
@@ -308,7 +331,7 @@ export class ETradeRestClient {
         url = fallbackUrl;
         assertSandboxUrlSafety(url, envConfig.isLive);
         authHeader = await this.generateOAuthHeader("GET", url);
-        res = await fetch(url, {
+        res = await this.throttledFetch(url, {
           method: "GET",
           headers: {
             Authorization: authHeader,
@@ -336,7 +359,7 @@ export class ETradeRestClient {
         url = fallbackUrl;
         assertSandboxUrlSafety(url, envConfig.isLive);
         authHeader = await this.generateOAuthHeader("GET", url);
-        res = await fetch(url, {
+        res = await this.throttledFetch(url, {
           method: "GET",
           headers: { Authorization: authHeader, Accept: "application/json" },
         });
@@ -495,7 +518,7 @@ export class ETradeRestClient {
       let authHeader = await this.generateOAuthHeader("GET", url);
 
       try {
-        let res = await fetch(url, {
+        let res = await this.throttledFetch(url, {
           method: "GET",
           headers: {
             Authorization: authHeader,
@@ -507,7 +530,7 @@ export class ETradeRestClient {
           url = fallbackUrl;
           assertSandboxUrlSafety(url, envConfig.isLive);
           authHeader = await this.generateOAuthHeader("GET", url);
-          res = await fetch(url, {
+          res = await this.throttledFetch(url, {
             method: "GET",
             headers: {
               Authorization: authHeader,
@@ -701,7 +724,7 @@ export class ETradeRestClient {
     let authHeader = await this.generateOAuthHeader("GET", url);
 
     try {
-      let res = await fetch(url, {
+      let res = await this.throttledFetch(url, {
         method: "GET",
         headers: { Authorization: authHeader, Accept: "application/json" },
       });
@@ -709,7 +732,7 @@ export class ETradeRestClient {
         url = fallbackUrl;
         assertSandboxUrlSafety(url, envConfig.isLive);
         authHeader = await this.generateOAuthHeader("GET", url);
-        res = await fetch(url, {
+        res = await this.throttledFetch(url, {
           method: "GET",
           headers: { Authorization: authHeader, Accept: "application/json" },
         });
@@ -825,7 +848,7 @@ export class ETradeRestClient {
     };
 
     try {
-      let res = await fetch(url, {
+      let res = await this.throttledFetch(url, {
         method: "POST",
         headers: {
           Authorization: authHeader,
@@ -839,7 +862,7 @@ export class ETradeRestClient {
         url = fallbackUrl;
         assertSandboxUrlSafety(url, envConfig.isLive);
         authHeader = await this.generateOAuthHeader("POST", url);
-        res = await fetch(url, {
+        res = await this.throttledFetch(url, {
           method: "POST",
           headers: {
             Authorization: authHeader,
@@ -1174,7 +1197,7 @@ export class ETradeRestClient {
           },
         };
 
-        let res = await fetch(url, {
+        let res = await this.throttledFetch(url, {
           method: "POST",
           headers: {
             Authorization: authHeader,
@@ -1188,7 +1211,7 @@ export class ETradeRestClient {
           url = fallbackUrl;
           assertSandboxUrlSafety(url, envConfig.isLive);
           authHeader = await this.generateOAuthHeader("POST", url);
-          res = await fetch(url, {
+          res = await this.throttledFetch(url, {
             method: "POST",
             headers: {
               Authorization: authHeader,
@@ -1311,7 +1334,7 @@ export class ETradeRestClient {
               };
               let retryUrl = primaryUrl;
               let retryAuthHeader = await this.generateOAuthHeader("POST", retryUrl);
-              let retryRes = await fetch(retryUrl, {
+              let retryRes = await this.throttledFetch(retryUrl, {
                 method: "POST",
                 headers: {
                   Authorization: retryAuthHeader,
@@ -1324,7 +1347,7 @@ export class ETradeRestClient {
                 retryUrl = fallbackUrl;
                 assertSandboxUrlSafety(retryUrl, envConfig.isLive);
                 retryAuthHeader = await this.generateOAuthHeader("POST", retryUrl);
-                retryRes = await fetch(retryUrl, {
+                retryRes = await this.throttledFetch(retryUrl, {
                   method: "POST",
                   headers: {
                     Authorization: retryAuthHeader,
@@ -1484,7 +1507,7 @@ export class ETradeRestClient {
     let authHeader = await this.generateOAuthHeader("GET", url);
 
     try {
-      let res = await fetch(url, {
+      let res = await this.throttledFetch(url, {
         method: "GET",
         headers: {
           Authorization: authHeader,
@@ -1496,7 +1519,7 @@ export class ETradeRestClient {
         url = fallbackUrl;
         assertSandboxUrlSafety(url, envConfig.isLive);
         authHeader = await this.generateOAuthHeader("GET", url);
-        res = await fetch(url, {
+        res = await this.throttledFetch(url, {
           method: "GET",
           headers: {
             Authorization: authHeader,
@@ -1602,7 +1625,7 @@ export class ETradeRestClient {
     let authHeader = await this.generateOAuthHeader("GET", url);
 
     try {
-      let res = await fetch(url, {
+      let res = await this.throttledFetch(url, {
         method: "GET",
         headers: {
           Authorization: authHeader,
@@ -1614,7 +1637,7 @@ export class ETradeRestClient {
         url = fallbackUrl;
         assertSandboxUrlSafety(url, envConfig.isLive);
         authHeader = await this.generateOAuthHeader("GET", url);
-        res = await fetch(url, {
+        res = await this.throttledFetch(url, {
           method: "GET",
           headers: {
             Authorization: authHeader,
@@ -1625,7 +1648,7 @@ export class ETradeRestClient {
         if (!res.ok && res.status === 404) {
           const plainUrl = `${envConfig.etrade.baseUrl}/accounts/${encodeURIComponent(key)}/portfolio`;
           const plainAuth = await this.generateOAuthHeader("GET", plainUrl);
-          res = await fetch(plainUrl, {
+          res = await this.throttledFetch(plainUrl, {
             method: "GET",
             headers: {
               Authorization: plainAuth,
@@ -1766,7 +1789,7 @@ export class ETradeRestClient {
     let authHeader = await this.generateOAuthHeader("GET", url);
 
     try {
-      let res = await fetch(url, {
+      let res = await this.throttledFetch(url, {
         method: "GET",
         headers: {
           Authorization: authHeader,
@@ -1778,7 +1801,7 @@ export class ETradeRestClient {
         url = fallbackUrl;
         assertSandboxUrlSafety(url, envConfig.isLive);
         authHeader = await this.generateOAuthHeader("GET", url);
-        res = await fetch(url, {
+        res = await this.throttledFetch(url, {
           method: "GET",
           headers: {
             Authorization: authHeader,
@@ -1865,7 +1888,7 @@ export class ETradeRestClient {
     let authHeader = await this.generateOAuthHeader("GET", url);
 
     try {
-      let res = await fetch(url, {
+      let res = await this.throttledFetch(url, {
         method: "GET",
         headers: {
           Authorization: authHeader,
@@ -1877,7 +1900,7 @@ export class ETradeRestClient {
         url = fallbackUrl;
         assertSandboxUrlSafety(url, envConfig.isLive);
         authHeader = await this.generateOAuthHeader("GET", url);
-        res = await fetch(url, {
+        res = await this.throttledFetch(url, {
           method: "GET",
           headers: {
             Authorization: authHeader,
@@ -1888,7 +1911,7 @@ export class ETradeRestClient {
         if (!res.ok && (res.status === 400 || res.status === 404)) {
           const plainUrl = `${envConfig.etrade.baseUrl}/accounts/${encodeURIComponent(accountKey)}/balance`;
           const plainAuth = await this.generateOAuthHeader("GET", plainUrl);
-          res = await fetch(plainUrl, {
+          res = await this.throttledFetch(plainUrl, {
             method: "GET",
             headers: {
               Authorization: plainAuth,
@@ -2008,7 +2031,7 @@ export class ETradeRestClient {
     let authHeader = await this.generateOAuthHeader("GET", url);
 
     try {
-      let res = await fetch(url, {
+      let res = await this.throttledFetch(url, {
         method: "GET",
         headers: {
           Authorization: authHeader,
@@ -2020,7 +2043,7 @@ export class ETradeRestClient {
         url = fallbackUrl;
         assertSandboxUrlSafety(url, envConfig.isLive);
         authHeader = await this.generateOAuthHeader("GET", url);
-        res = await fetch(url, {
+        res = await this.throttledFetch(url, {
           method: "GET",
           headers: {
             Authorization: authHeader,
@@ -2097,7 +2120,7 @@ export class ETradeRestClient {
     let authHeader = await this.generateOAuthHeader("GET", url);
 
     try {
-      let res = await fetch(url, {
+      let res = await this.throttledFetch(url, {
         method: "GET",
         headers: {
           Authorization: authHeader,
@@ -2109,7 +2132,7 @@ export class ETradeRestClient {
         url = fallbackUrl;
         assertSandboxUrlSafety(url, envConfig.isLive);
         authHeader = await this.generateOAuthHeader("GET", url);
-        res = await fetch(url, {
+        res = await this.throttledFetch(url, {
           method: "GET",
           headers: {
             Authorization: authHeader,
@@ -2201,7 +2224,7 @@ export class ETradeRestClient {
     let authHeader = await this.generateOAuthHeader("GET", url);
 
     try {
-      let res = await fetch(url, {
+      let res = await this.throttledFetch(url, {
         method: "GET",
         headers: {
           Authorization: authHeader,
@@ -2213,7 +2236,7 @@ export class ETradeRestClient {
         url = fallbackUrl;
         assertSandboxUrlSafety(url, envConfig.isLive);
         authHeader = await this.generateOAuthHeader("GET", url);
-        res = await fetch(url, {
+        res = await this.throttledFetch(url, {
           method: "GET",
           headers: {
             Authorization: authHeader,
@@ -2281,7 +2304,7 @@ export class ETradeRestClient {
     let authHeader = await this.generateOAuthHeader("GET", url);
 
     try {
-      let res = await fetch(url, {
+      let res = await this.throttledFetch(url, {
         method: "GET",
         headers: {
           Authorization: authHeader,
@@ -2293,7 +2316,7 @@ export class ETradeRestClient {
         url = fallbackUrl;
         assertSandboxUrlSafety(url, envConfig.isLive);
         authHeader = await this.generateOAuthHeader("GET", url);
-        res = await fetch(url, {
+        res = await this.throttledFetch(url, {
           method: "GET",
           headers: {
             Authorization: authHeader,
@@ -2356,7 +2379,7 @@ export class ETradeRestClient {
     let authHeader = await this.generateOAuthHeader("DELETE", url);
 
     try {
-      let res = await fetch(url, {
+      let res = await this.throttledFetch(url, {
         method: "DELETE",
         headers: {
           Authorization: authHeader,
@@ -2368,7 +2391,7 @@ export class ETradeRestClient {
         url = fallbackUrl;
         assertSandboxUrlSafety(url, envConfig.isLive);
         authHeader = await this.generateOAuthHeader("DELETE", url);
-        res = await fetch(url, {
+        res = await this.throttledFetch(url, {
           method: "DELETE",
           headers: {
             Authorization: authHeader,
@@ -2414,7 +2437,7 @@ export class ETradeRestClient {
     let authHeader = await this.generateOAuthHeader("GET", url);
 
     try {
-      let res = await fetch(url, {
+      let res = await this.throttledFetch(url, {
         method: "GET",
         headers: {
           Authorization: authHeader,
@@ -2426,7 +2449,7 @@ export class ETradeRestClient {
         url = fallbackUrl;
         assertSandboxUrlSafety(url, envConfig.isLive);
         authHeader = await this.generateOAuthHeader("GET", url);
-        res = await fetch(url, {
+        res = await this.throttledFetch(url, {
           method: "GET",
           headers: {
             Authorization: authHeader,
@@ -2514,7 +2537,7 @@ export class ETradeRestClient {
     let authHeader = await this.generateOAuthHeader("GET", url);
 
     try {
-      let res = await fetchOptionRequest(url, {
+      let res = await this.throttledFetch(url, {
         method: "GET",
         headers: {
           Authorization: authHeader,
@@ -2526,7 +2549,7 @@ export class ETradeRestClient {
         url = fallbackUrl;
         assertSandboxUrlSafety(url, envConfig.isLive);
         authHeader = await this.generateOAuthHeader("GET", url);
-        res = await fetchOptionRequest(url, {
+        res = await this.throttledFetch(url, {
           method: "GET",
           headers: {
             Authorization: authHeader,
@@ -2649,7 +2672,7 @@ export class ETradeRestClient {
     let authHeader = await this.generateOAuthHeader("GET", url);
 
     try {
-      let res = await fetchOptionRequest(url, {
+      let res = await this.throttledFetch(url, {
         method: "GET",
         headers: {
           Authorization: authHeader,
@@ -2661,7 +2684,7 @@ export class ETradeRestClient {
         url = fallbackUrl;
         assertSandboxUrlSafety(url, envConfig.isLive);
         authHeader = await this.generateOAuthHeader("GET", url);
-        res = await fetchOptionRequest(url, {
+        res = await this.throttledFetch(url, {
           method: "GET",
           headers: {
             Authorization: authHeader,
@@ -2748,7 +2771,7 @@ export class ETradeRestClient {
     let authHeader = await this.generateOAuthHeader("GET", url);
 
     try {
-      let res = await fetch(url, {
+      let res = await this.throttledFetch(url, {
         method: "GET",
         headers: {
           Authorization: authHeader,
@@ -2760,7 +2783,7 @@ export class ETradeRestClient {
         url = fallbackUrl;
         assertSandboxUrlSafety(url, envConfig.isLive);
         authHeader = await this.generateOAuthHeader("GET", url);
-        res = await fetch(url, {
+        res = await this.throttledFetch(url, {
           method: "GET",
           headers: {
             Authorization: authHeader,
@@ -2854,7 +2877,7 @@ export class ETradeRestClient {
     let authHeader = await this.generateOAuthHeader("GET", url);
 
     try {
-      let res = await fetch(url, {
+      let res = await this.throttledFetch(url, {
         method: "GET",
         headers: {
           Authorization: authHeader,
@@ -2866,7 +2889,7 @@ export class ETradeRestClient {
         url = fallbackUrl;
         assertSandboxUrlSafety(url, envConfig.isLive);
         authHeader = await this.generateOAuthHeader("GET", url);
-        res = await fetch(url, {
+        res = await this.throttledFetch(url, {
           method: "GET",
           headers: {
             Authorization: authHeader,
@@ -2950,7 +2973,7 @@ export class ETradeRestClient {
     };
 
     try {
-      const res = await fetch(url, {
+      const res = await this.throttledFetch(url, {
         method: "PUT",
         headers: {
           Authorization: authHeader,
@@ -3044,7 +3067,7 @@ export class ETradeRestClient {
       },
     };
 
-    const res = await fetch(url, {
+    const res = await this.throttledFetch(url, {
       method: "POST",
       headers: {
         Authorization: authHeader,
@@ -3115,7 +3138,7 @@ export class ETradeRestClient {
       },
     };
 
-    const res = await fetch(url, {
+    const res = await this.throttledFetch(url, {
       method: "POST",
       headers: {
         Authorization: authHeader,
@@ -3153,7 +3176,7 @@ export class ETradeRestClient {
     let authHeader = await this.generateOAuthHeader("GET", url);
 
     try {
-      let res = await fetch(url, {
+      let res = await this.throttledFetch(url, {
         method: "GET",
         headers: {
           Authorization: authHeader,
@@ -3165,7 +3188,7 @@ export class ETradeRestClient {
         url = fallbackUrl;
         assertSandboxUrlSafety(url, envConfig.isLive);
         authHeader = await this.generateOAuthHeader("GET", url);
-        res = await fetch(url, {
+        res = await this.throttledFetch(url, {
           method: "GET",
           headers: {
             Authorization: authHeader,
@@ -3249,7 +3272,7 @@ export class ETradeRestClient {
     let authHeader = await this.generateOAuthHeader("GET", url);
 
     try {
-      let res = await fetch(url, {
+      let res = await this.throttledFetch(url, {
         method: "GET",
         headers: {
           Authorization: authHeader,
@@ -3261,7 +3284,7 @@ export class ETradeRestClient {
         url = fallbackUrl;
         assertSandboxUrlSafety(url, envConfig.isLive);
         authHeader = await this.generateOAuthHeader("GET", url);
-        res = await fetch(url, {
+        res = await this.throttledFetch(url, {
           method: "GET",
           headers: {
             Authorization: authHeader,
@@ -3355,7 +3378,7 @@ export class ETradeRestClient {
     };
 
     try {
-      let res = await fetch(url, {
+      let res = await this.throttledFetch(url, {
         method: "POST",
         headers: {
           Authorization: authHeader,
@@ -3369,7 +3392,7 @@ export class ETradeRestClient {
         url = fallbackUrl;
         assertSandboxUrlSafety(url, envConfig.isLive);
         authHeader = await this.generateOAuthHeader("POST", url);
-        res = await fetch(url, {
+        res = await this.throttledFetch(url, {
           method: "POST",
           headers: {
             Authorization: authHeader,
@@ -3445,7 +3468,7 @@ export class ETradeRestClient {
     };
 
     try {
-      let res = await fetch(url, {
+      let res = await this.throttledFetch(url, {
         method: "PUT",
         headers: {
           Authorization: authHeader,
@@ -3459,7 +3482,7 @@ export class ETradeRestClient {
         url = fallbackUrl;
         assertSandboxUrlSafety(url, envConfig.isLive);
         authHeader = await this.generateOAuthHeader("PUT", url);
-        res = await fetch(url, {
+        res = await this.throttledFetch(url, {
           method: "PUT",
           headers: {
             Authorization: authHeader,
@@ -3516,7 +3539,7 @@ export class ETradeRestClient {
     let authHeader = await this.generateOAuthHeader("DELETE", url);
 
     try {
-      let res = await fetch(url, {
+      let res = await this.throttledFetch(url, {
         method: "DELETE",
         headers: {
           Authorization: authHeader,
@@ -3528,7 +3551,7 @@ export class ETradeRestClient {
         url = fallbackUrl;
         assertSandboxUrlSafety(url, envConfig.isLive);
         authHeader = await this.generateOAuthHeader("DELETE", url);
-        res = await fetch(url, {
+        res = await this.throttledFetch(url, {
           method: "DELETE",
           headers: {
             Authorization: authHeader,

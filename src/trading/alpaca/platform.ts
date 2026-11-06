@@ -500,6 +500,8 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
         "APCA-API-SECRET-KEY": this.env.ALPACA_SECRET_KEY || this.env.ALPACA_API_SECRET_KEY || "",
       },
       feed: this.env.ALPACA_OPTIONS_FEED,
+      // Issue #3515 S1: options fetches share the provider's Alpaca budget.
+      rateLimiter: this.alpacaData.outboundLimiter,
     };
   }
 
