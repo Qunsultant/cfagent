@@ -7,10 +7,13 @@
  */
 import {
   COPILOT_ACTIVITY_RETENTION,
+  COPILOT_LEARNINGS_RETENTION,
   type CopilotControlRecord,
   type CopilotCycleActivityRecord,
+  type CopilotLearningRecord,
   type StockCopilotActivityPort,
   type StockCopilotControlPort,
+  type StockCopilotMemoryPort,
 } from "./stockCopilotStorePorts";
 
 interface StoredActivity {
@@ -32,6 +35,8 @@ export class InMemoryStockCopilotActivityStore
         ...record,
         entries: [...record.entries],
         exits: record.exits.map((e) => ({ ...e })),
+        mode: record.mode,
+        criticVerdict: record.criticVerdict ? { ...record.criticVerdict } : null,
       },
       seq: this.seq++,
     });
@@ -89,5 +94,32 @@ export class InMemoryStockCopilotControlStore
 
   setControl(record: CopilotControlRecord): void {
     this.rows.set(record.userLogin, { ...record });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Issue #3519 — In-Memory Learning Memory Store (Test Double)
+// ---------------------------------------------------------------------------
+
+export class InMemoryStockCopilotMemoryStore implements StockCopilotMemoryPort {
+  private readonly rows: CopilotLearningRecord[] = [];
+
+  ensureSchema(): void {}
+
+  recordLearning(learning: CopilotLearningRecord): void {
+    this.rows.unshift({ ...learning });
+    if (this.rows.length > COPILOT_LEARNINGS_RETENTION * 2) {
+      this.rows.splice(COPILOT_LEARNINGS_RETENTION * 2);
+    }
+  }
+
+  listLearnings(
+    userLogin: string,
+    limit = COPILOT_LEARNINGS_RETENTION,
+  ): CopilotLearningRecord[] {
+    return this.rows
+      .filter((r) => r.userLogin === userLogin)
+      .slice(0, Math.max(0, limit))
+      .map((r) => ({ ...r }));
   }
 }

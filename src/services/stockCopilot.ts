@@ -59,8 +59,10 @@
 import type { CopilotSelectionResolution } from "../agents/copilotTradingMode";
 import { COPILOT_BROKER_ID } from "../agents/copilotTradingMode";
 import type {
+  CopilotExecutionMode,
   StockCopilotActivityPort,
   StockCopilotControlPort,
+  StockCopilotMemoryPort,
   StockCopilotPositionPort,
 } from "../data/stockCopilotStorePorts";
 import type { Env } from "../types";
@@ -89,6 +91,7 @@ import {
   StockCopilotPositionStore,
   type CopilotPositionRecord,
 } from "./stockCopilotStore";
+import { runStockCopilotAgenticCycle } from "./stockCopilotAgenticLoop";
 import {
   copilotSessionAt,
   resolveCopilotSessions,
@@ -227,6 +230,11 @@ export interface StockCopilotDeps {
    *  cycle then resolves from the deployment env alone, which with
    *  no env value is the regular-only default. */
   enabledSessions?: readonly CopilotSessionId[];
+  /** #3519: execution mode: "deterministic" (default fixed pattern loop)
+   *  or "agentic" (non-deterministic perceive-plan-critic-execute-learn loop). */
+  executionMode?: CopilotExecutionMode;
+  /** #3519: tenancy memory port for distilled learnings. */
+  memory?: StockCopilotMemoryPort;
 }
 
 export interface StockCopilotRejection {
@@ -268,6 +276,8 @@ export interface StockCopilotCycleResult {
   exits: Array<{ symbol: string; reason: string }>;
   rejections: StockCopilotRejection[];
   errors: StockCopilotCycleError[];
+  /** #3519: execution mode of the cycle (deterministic vs agentic). */
+  mode?: CopilotExecutionMode;
 }
 
 /** The Alpaca book as a #34 PortfolioRiskSource (the bundle route's
@@ -569,6 +579,7 @@ function appendCycleActivity(
       entries: result.entries.map((e) => e.symbol),
       exits: result.exits.map((e) => ({ symbol: e.symbol, reason: e.reason })),
       detail,
+      mode: deps.executionMode ?? "deterministic",
     });
   } catch (err) {
     result.errors.push({
@@ -636,6 +647,11 @@ function recordOutsideSessionsTransition(
 export async function runStockCopilotCycle(
   deps: StockCopilotDeps,
 ): Promise<StockCopilotCycleResult> {
+  // #3519: Non-deterministic agentic mode dispatch
+  if (deps.executionMode === "agentic") {
+    return runStockCopilotAgenticCycle(deps);
+  }
+
   const result: StockCopilotCycleResult = {
     status: "ok",
     session: null,
@@ -646,6 +662,7 @@ export async function runStockCopilotCycle(
     exits: [],
     rejections: [],
     errors: [],
+    mode: "deterministic",
   };
 
   if (!isStockCopilotPaperEnabled(deps.env)) {

@@ -112,6 +112,14 @@ export const COPILOT_CONTROL_TABLE = "stock_copilot_control";
  *  per login are kept; appends prune the rest. */
 export const COPILOT_ACTIVITY_RETENTION = 100;
 
+export type CopilotExecutionMode = "deterministic" | "agentic";
+
+export interface CopilotCriticVerdict {
+  verdict: "accept" | "revise" | "reject";
+  reason: string;
+  recommendations?: string[];
+}
+
 /** One exit inside a cycle activity record. */
 export interface CopilotActivityExit {
   symbol: string;
@@ -158,6 +166,10 @@ export interface CopilotCycleActivityRecord {
   /** The no-trade reason summary, a refusal code, or the inactive
    *  state's name; null for traded cycles. */
   detail: string | null;
+  /** #3519: execution mode of the cycle (deterministic vs agentic). */
+  mode?: CopilotExecutionMode;
+  /** #3519: Critic reflection verdict for agentic cycles. */
+  criticVerdict?: CopilotCriticVerdict | null;
 }
 
 export interface StockCopilotActivityPort {
@@ -191,4 +203,28 @@ export interface StockCopilotControlPort {
   getControl(userLogin: string): CopilotControlRecord | null;
   /** Upsert the login's control record. */
   setControl(record: CopilotControlRecord): void;
+}
+
+// ---------------------------------------------------------------------------
+// Issue #3519 — Tenancy-Scoped Learning Memory Port
+// ---------------------------------------------------------------------------
+
+export const COPILOT_LEARNINGS_TABLE = "stock_copilot_learnings";
+export const COPILOT_LEARNINGS_RETENTION = 50;
+
+export interface CopilotLearningRecord {
+  id: string;
+  userLogin: string;
+  cycleId?: string | null;
+  timestamp: string;
+  category: "execution" | "risk" | "pattern" | "session" | "refusal";
+  insight: string;
+  sourceVerdict?: "accept" | "revise" | "reject" | null;
+  suggestedAction?: string | null;
+}
+
+export interface StockCopilotMemoryPort {
+  ensureSchema(): void;
+  recordLearning(learning: CopilotLearningRecord): void;
+  listLearnings(userLogin: string, limit?: number): CopilotLearningRecord[];
 }

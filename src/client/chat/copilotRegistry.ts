@@ -278,6 +278,16 @@ export const DEFAULT_COPILOTS: CopilotConfig[] = [
         prompt: "Show recent cycle refusal reasons and explain why trades were skipped",
         category: "Cycle Audit",
       },
+      {
+        label: "💡 What have you learned?",
+        prompt: "What have you learned from recent cycles and critic reflection?",
+        category: "Learning Retrospective",
+      },
+      {
+        label: "🧠 Switch to Agentic Dual-Mode",
+        prompt: "Switch Stock Copilot to agentic dual-mode with critic reflection and self-correction",
+        category: "Dual-Mode Execution",
+      },
     ],
     composerPlaceholder: "Ask Stock Copilot (e.g. 'What is the loop doing?', 'Show open positions', 'Pause loop')…",
     sourceTab: "Stock Copilot",
