@@ -218,7 +218,7 @@ describe("worker.queue() screener-events branch (slice 1 glue)", () => {
     const calls: Array<{ message: unknown; attempt?: number }> = [];
     const env = {
       SCREENER_EVENTS: { send: async () => {} },
-      SEARCH_AGENT: {
+      ORCHESTRATOR_AGENT: {
         idFromName: () => "stub-id",
         get: () => ({ fetch: async () => new Response("ok") }),
       },
