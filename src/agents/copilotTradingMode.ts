@@ -7,8 +7,18 @@
  * - ACTIVE BROKER: the tenant's provider selection in the commercial
  *   store (data layer, #3233) — one `brokerId` per tenant, the same
  *   row the tenant settings surface reads and writes. Read through
- *   the composition root (createCommercialAdapter); an unbound store
- *   (no AGENT_DB) or a failed read makes the selection UNRESOLVED.
+ *   the composition root (createCommercialAdapter) via the port's
+ *   presence-aware read (getTenantBrokerSelection): a stored value
+ *   is the selection, exactly as stored. NO stored selection ⇒ the
+ *   COPILOT's default broker, alpaca (owner rule on #3451: "by
+ *   default — no selection made — it must be Alpaca in Paper mode";
+ *   the paper half comes from the mode default below). That default
+ *   lives HERE, in the copilot's resolver, only: the shared store
+ *   default (etrade, applied by getTenantProviders) is unchanged
+ *   and still governs the manual broker routes. An unbound store
+ *   (no AGENT_DB) or a FAILED read makes the selection UNRESOLVED —
+ *   a failure is never mistaken for an absent selection, so the
+ *   default never covers a store outage on a money path.
  * - ACTIVE MODE: the per-login stored trade environment (#2482's
  *   `etrade:environment` setting in the instance's own settings),
  *   read with trade semantics (#3382, resolveTradeEnvironmentFromSettings):
@@ -40,7 +50,8 @@ export const COPILOT_BROKER_ID = "alpaca";
 
 /** One resolved selection: exactly one broker, exactly one mode. */
 export interface CopilotTradingSelection {
-  /** The tenant's active broker (raw stored id, e.g. "alpaca"). */
+  /** The tenant's active broker: the raw stored id (e.g. "alpaca"),
+   *  or the copilot default (alpaca) when no selection is stored. */
   brokerId: string;
   /** The selected environment the mode was derived from. The host
    *  constructs the trading platform with this selection, so the
@@ -70,7 +81,12 @@ export interface CopilotSelectionReaders {
  * Resolve the active broker + mode. Fail-closed by construction:
  * any inability to read the broker selection returns
  * `{ resolved: false }` — the caller must refuse, never default a
- * money path to a guessed broker or mode.
+ * money path to a guessed broker or mode. The one default that DOES
+ * apply is the owner's stated rule for a successfully-read ABSENT
+ * selection: no broker selection stored ⇒ the copilot's broker is
+ * alpaca (COPILOT_BROKER_ID), with the mode default (TEST/paper)
+ * coming from the trade-environment semantics below — together,
+ * "Alpaca in Paper mode" for a tenant who has selected nothing.
  */
 export async function resolveCopilotTradingSelection(
   readers: CopilotSelectionReaders,
@@ -82,10 +98,10 @@ export async function resolveCopilotTradingSelection(
   if (!commercial) return { resolved: false };
   let brokerId: string;
   try {
-    const providers = await commercial.getTenantProviders(
+    const storedBrokerId = await commercial.getTenantBrokerSelection(
       resolveIaaaTenant(readers.env),
     );
-    brokerId = providers.brokerId;
+    brokerId = storedBrokerId ?? COPILOT_BROKER_ID;
   } catch {
     return { resolved: false };
   }
