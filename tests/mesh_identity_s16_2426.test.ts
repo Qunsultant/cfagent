@@ -466,7 +466,7 @@ describe("two-part attribution — payments A2A records (#2426)", () => {
   it("a payments.process call records BOTH parts in the audit record it already writes", async () => {
     // The S3 harness pattern: a real ledger owner (DatabaseORM over
     // MockSqlStorage) behind the real agentic-payments route
-    // handler, bound as SEARCH_AGENT; the audit port captures.
+    // handler, bound as ORCHESTRATOR_AGENT; the audit port captures.
     const auditCalls: any[] = [];
     const sql = new MockSqlStorage();
     const orm = new DatabaseORM(sql);
@@ -480,7 +480,7 @@ describe("two-part attribution — payments A2A records (#2426)", () => {
     const env: any = {
       CF_WALLET_FACILITATOR: "https://facilitator.test",
       SERVICE_USER_LOGIN: "default_trader",
-      SEARCH_AGENT: {
+      ORCHESTRATOR_AGENT: {
         idFromName: (name: string) => name,
         get: (_id: unknown) => ({
           fetch: async (req: Request) => {
