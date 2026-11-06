@@ -118,5 +118,10 @@
     "path": "src/client/agentsPanel.css",
     "lines": 59,
     "reason": "Agents view layout (#2469, Agent Mesh S20/G9) — page-specific fleet/detail layout in the Workflow Runs page's pattern, token values only"
+  },
+  {
+    "path": "src/client/stockCopilotPanel.css",
+    "lines": 75,
+    "reason": "Stock Copilot panel (issue #3422; tokens only)"
   }
 ]
