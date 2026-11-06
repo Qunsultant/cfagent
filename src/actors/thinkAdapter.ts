@@ -74,6 +74,36 @@
  * the flat transcript only. Exposing tree sessions through the port
  * would be a port change (new session operations), not an adapter
  * detail; this spike does not make it.
+ *
+ * Webhook channel (issue #3474): webhooks are a built-in Agent
+ * channel (Agents docs, agent-class/communication-channels/
+ * webhooks) — an HTTP POST routed to one instance, HMAC-verified
+ * over the raw body, handled in the agent, conventionally ending in
+ * setState (which broadcasts to connected websocket clients). Think
+ * extends Agent, so every PortThink agent HAS the channel by
+ * construction; PortThink exposes it by default: fetch intercepts
+ * the reserved `/webhooks/<source>` path tail, verifies, parses,
+ * and dispatches to the port hooks' onWebhook. The wiring sits at
+ * fetch, not onRequest, for three verified reasons: four fleet
+ * classes override onRequest as their whole HTTP router and never
+ * delegate to super (Orchestrator, Browser, Slack, Sandbox), so an
+ * onRequest interceptor would silently miss exactly them; Think
+ * wraps onRequest in its constructor but never touches fetch; and
+ * every production dispatch (actorGateway.dispatch ->
+ * stub.fetch, routeAgentRequest -> stub.fetch) terminates at the
+ * instance's fetch, which nothing in the fleet overrides. Fail-
+ * closed pipeline order: non-POST -> 405; no configured secret ->
+ * 503 (the channel is enabled in code by default, but refuses
+ * traffic until the deployment credential THINK_WEBHOOK_SECRET
+ * exists — the repo's fail-loud posture for unconfigured doors);
+ * bad/missing signature -> 401, with the body never parsed before
+ * verification; unparseable body -> 400; no onWebhook hook -> 405
+ * (an agent that has not opted in cannot be driven by a webhook).
+ * Interception runs before the base fetch's lifecycle dispatch, so
+ * the handler boots the lifecycle explicitly before invoking the
+ * hook — the same precondition the turn path documents above for
+ * RPC. setState is never wrapped or mediated: a hook calling it
+ * uses the base Agent's own method and broadcast, untouched.
  */
 import { Think } from "@cloudflare/think";
 import type {
@@ -125,17 +155,22 @@ import type {
   ActorSessionPort,
   ActorTurnHooks,
   ActorTurnPort,
+  ActorWebhookEvent,
   ChatResponseResult,
   TurnConfig,
   TurnInput,
   UiChatMessage,
 } from "./actorPorts";
 import {
+  THINK_WEBHOOK_SIGNATURE_HEADER,
   portMessagesToThink,
   portTurnConfigToThink,
+  resolveThinkWebhookSecret,
   thinkChatResponseToPort,
   thinkTurnContextToPort,
   thinkTurnResultToPort,
+  thinkWebhookSourceFromPath,
+  verifyThinkWebhookSignature,
 } from "./thinkPortMapping";
 
 /**
@@ -210,6 +245,96 @@ export class PortThink extends Think<any> {
       return error instanceof Error ? error.message : String(error);
     }
     return error;
+  }
+
+  /**
+   * Issue #3474: the webhook channel's single interception point.
+   * Only the reserved `/webhooks/<source>` tail is diverted (and
+   * never for a sub-agent/facet address — the SDK reserves the
+   * literal `sub` segment, and a facet's webhook tail is the
+   * facet's, forwarded by the base fetch); every other request
+   * goes to the base Agent fetch exactly as before. See the file
+   * header for why the channel is wired here and not at onRequest.
+   */
+  override async fetch(request: Request): Promise<Response> {
+    const { pathname } = new URL(request.url);
+    const source = thinkWebhookSourceFromPath(pathname);
+    // A `sub` segment in the routing PREFIX (before the reserved
+    // tail) is facet addressing; the tail alone never is.
+    const targetsSubAgent = pathname.split("/").filter(Boolean).slice(0, -2).includes("sub");
+    if (source !== null && !targetsSubAgent) {
+      return this.handlePortWebhook(request, source);
+    }
+    return super.fetch(request);
+  }
+
+  /**
+   * The webhook pipeline (fail-closed, in order): method, secret
+   * presence, HMAC verification over the raw body, parse, opt-in,
+   * dispatch. The body is never parsed before verification, and a
+   * request that fails any gate never reaches the hook.
+   */
+  private async handlePortWebhook(request: Request, source: string): Promise<Response> {
+    if (request.method !== "POST") {
+      return new Response("Method not allowed", { status: 405 });
+    }
+    const secret = resolveThinkWebhookSecret(this.env);
+    if (!secret) {
+      console.warn(
+        `[PortThink] webhook refused for ${this.constructor.name} (source "${source}"): ` +
+          "no webhook secret is configured (THINK_WEBHOOK_SECRET) — the channel fails closed"
+      );
+      return new Response("Webhook secret not configured", { status: 503 });
+    }
+    const rawBody = await request.text();
+    const verified = await verifyThinkWebhookSignature(
+      rawBody,
+      request.headers.get(THINK_WEBHOOK_SIGNATURE_HEADER),
+      secret
+    );
+    if (!verified) {
+      return new Response("Invalid signature", { status: 401 });
+    }
+    let payload: unknown;
+    try {
+      payload = JSON.parse(rawBody);
+    } catch {
+      return new Response("Invalid payload", { status: 400 });
+    }
+    const hooks = this.portHooks;
+    if (!hooks?.onWebhook) {
+      console.warn(
+        `[PortThink] webhook refused for ${this.constructor.name} (source "${source}"): ` +
+          "the agent has not opted in (no onWebhook port hook)"
+      );
+      return new Response("Webhooks not accepted by this agent", { status: 405 });
+    }
+    // Lifecycle boot (the adapter's standing precondition, see the
+    // file header): fetch interception runs BEFORE the base fetch's
+    // lifecycle dispatch, so boot explicitly — idempotent — before
+    // the hook can touch Think state. Guarded exactly like the turn
+    // path's call: a Think-like object without a lifecycle still
+    // dispatches (its session is then the caller's responsibility).
+    await (
+      this as unknown as { lifecycle?: { start?: () => Promise<unknown> } }
+    ).lifecycle?.start?.();
+    const event: ActorWebhookEvent = {
+      source,
+      payload,
+      rawBody,
+      headers: request.headers,
+      url: new URL(request.url),
+    };
+    try {
+      const out = await hooks.onWebhook(event);
+      return out instanceof Response ? out : new Response("OK");
+    } catch (err) {
+      console.error(
+        `[PortThink] webhook hook failed for ${this.constructor.name} (source "${source}")`,
+        err
+      );
+      return new Response("Webhook handler failed", { status: 500 });
+    }
   }
 }
 

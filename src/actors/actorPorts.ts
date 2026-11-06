@@ -111,6 +111,27 @@ export interface TurnConfig {
   maxSteps?: number;
 }
 
+/**
+ * A verified webhook delivery handed to an actor's onWebhook hook
+ * (issue #3474). The Think port verifies the HMAC-SHA256 signature
+ * over `rawBody` BEFORE parsing, so `payload` is only ever the
+ * parsed form of a body that passed verification. `source` is the
+ * reserved-path segment the delivery arrived on
+ * (`.../webhooks/<source>`).
+ */
+export interface ActorWebhookEvent {
+  /** Reserved-path source segment (the segment after `/webhooks/`). */
+  source: string;
+  /** The verified, parsed JSON body. */
+  payload: unknown;
+  /** The raw body text exactly as received — what the signature covered. */
+  rawBody: string;
+  /** The delivery's headers (provider event-type headers live here). */
+  headers: Headers;
+  /** The URL the webhook was delivered to. */
+  url: URL;
+}
+
 /** Turn result handed to onChatResponse. */
 export interface ChatResponseResult {
   status: "completed" | "error";
@@ -172,6 +193,19 @@ export interface ActorTurnHooks {
   beforeTurn(ctx: TurnContext): Promise<TurnConfig | void>;
   onChatResponse(result: ChatResponseResult): Promise<void>;
   onChatError?(error: unknown): string | Promise<string>;
+  /**
+   * Webhook deliveries (issue #3474): the Think port verifies and
+   * dispatches them to this hook. Absent hook = the port refuses
+   * safely, so an actor is never driven by a webhook it did not opt
+   * into. The hook is invoked exactly like the other port hooks
+   * (a method call on this object), so the fleet's closure idiom
+   * applies: a hook defined in the actor's constructor closes over
+   * the actor and may end in `this.setState(...)`, reaching the
+   * base Agent's state broadcast untouched. Returning a Response
+   * answers with it; returning void answers 200 "OK" (the Agents
+   * docs idiom).
+   */
+  onWebhook?(event: ActorWebhookEvent): Promise<Response | void> | Response | void;
   maxSteps?: number;
 }
 
