@@ -632,6 +632,7 @@ const EXPECTED_INVENTORY = [
   // stored-draft route).
   "handleBrokerReadsRoutes :: endsWith(\"/broker/orders/history\")",
   "handleBrokerReadsRoutes :: endsWith(\"/broker/activities\")",
+  "handleBrokerReadsRoutes :: endsWith(\"/broker/watchlists\")",
   // Issue #3324: the risk model runs on the selected broker's book.
   "handleBrokerRiskRoutes :: endsWith(\"/broker/portfolio-risk\")",
   "handleBrokerRiskRoutes :: endsWith(\"/broker/portfolio-risk/evaluate\")",
