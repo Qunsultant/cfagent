@@ -170,6 +170,7 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
   const [buyDone, setBuyDone] = React.useState<string | null>(null);
   const [canceling, setCanceling] = React.useState(false);
   const [cancelDone, setCancelDone] = React.useState<string | null>(null);
+  const [cancelDetail, setCancelDetail] = React.useState<string | null>(null);
   // Issue #2669 (2.14): cancel is a confirmed action — the dialog lists
   // what will be canceled and nothing is posted until confirmed.
   const [cancelConfirmOpen, setCancelConfirmOpen] = React.useState(false);
@@ -406,29 +407,33 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
     setCancelConfirmOpen(false);
     setCanceling(true);
     setCancelDone(null);
+    setCancelDetail(null);
     setBuyError(null);
     try {
       // Issue #1069 §8: the request carries no identifiers — no userId,
       // no tenantId. The server resolves (user, tenant) from the session
       // identity, so the cancel cannot be steered at another tenant.
+      // Issue #3523: the success message is the response's catalog businessMessage
+      // (verbatim from the outcome catalog via the route); the detail line names what
+      // was cancelled and the access-through date, so the UI explains what was cancelled
+      // vs what remains (the refreshed table below shows the remaining rows). A replay
+      // now rejects 409 with the coded none-active message (rendered via errText).
       const res = await subscriptionCancel();
-      if (res.canceled.length === 0) {
-        setCancelDone("No active subscription was found to cancel.");
-      } else if (res.downgradeTiming === "immediate") {
-        // Issue #2669: under the 2.7 immediate policy the server
-        // truncates access now — report that, never the period-end claim.
-        setCancelDone("Canceled immediately. Your access ended now. No cash refund is issued.");
-      } else {
-        setCancelDone(
-          res.accessThroughMs
-            ? `Canceled. Your access continues through ${formatPeriodEnd(res.accessThroughMs)}. No cash refund is issued.`
-            : "Canceled. No cash refund is issued.",
-        );
-      }
-      await refreshSubscription();
+      setCancelDone(res.message);
+      const plans = [...new Set(res.canceled.map((r) => r.planId))].join(", ");
+      setCancelDetail(
+        res.downgradeTiming === "immediate"
+          ? `Canceled: ${plans} — access ended now.`
+          : res.accessThroughMs
+            ? `Canceled: ${plans} — access through ${formatPeriodEnd(res.accessThroughMs)}.`
+            : `Canceled: ${plans}.`,
+      );
     } catch (err) {
       setBuyError(errText(err));
     } finally {
+      // Issue #3523: refresh on every path (including failures) so what remains is always
+      // the verified server state — a partial cancel shows its remaining rows, never a claim.
+      await refreshSubscription();
       setCanceling(false);
     }
   };
@@ -706,6 +711,7 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
                   loading={canceling}
                   onClick={() => {
                     setCancelDone(null);
+                    setCancelDetail(null);
                     setCancelConfirmOpen(true);
                   }}
                 >
@@ -749,7 +755,12 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
                   }
                 />
               </Modal>
-              {cancelDone && <Notice tone="info">{cancelDone}</Notice>}
+              {cancelDone && (
+                <Notice tone="info">
+                  {cancelDone}
+                  {cancelDetail && <p>{cancelDetail}</p>}
+                </Notice>
+              )}
               {subStatus && subStatus.subscriptions.length > 0 && (
                 <Table
                   columns={[
