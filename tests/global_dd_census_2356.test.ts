@@ -934,20 +934,18 @@ const STEP5B_PORT_SITES: Array<[string, string, number]> = [
   // wiredMembershipStore sites to auth.ts; 6 membership-store
   // sites remain in server.ts (privacy/trading/messaging/
   // platform/queue branches), so the family total is unchanged.
-  // Slice 4 of Qunsultant/cfagent#2902 (2026-11-05): 4 of those
-  // 6 membership-store sites move verbatim from src/server.ts to
-  // src/server/routes/privacy.ts (chains/reconcile,
-  // jobs/reconcile, retention/purge, reports/seed-canonical);
-  // 2 remain in server.ts (telemetry decisions, retrieval
-  // populate-market-graph — both Slice 7), so the family total
-  // is unchanged.
-  // (Order is the scanner's sort: "src/server.ts" sorts before
-  // "src/server/routes/auth.ts" sorts before
+  // Slice 7 of Qunsultant/cfagent#2902 (2026-11-05): those last 2
+  // membership-store sites move verbatim from src/server.ts to
+  // src/server/routes/platform.ts (telemetry decisions, retrieval
+  // populate-market-graph); the count is unchanged, only the file,
+  // so the family total is unchanged.
+  // (Order is the scanner's sort: "src/server/routes/auth.ts" sorts
+  // before "src/server/routes/platform.ts" sorts before
   // "src/server/routes/privacy.ts".)
-  ["src/server.ts", "wiredMembershipStore", 2],
   ["src/server/routes/auth.ts", "listSessionFamilyEntries", 20],
   ["src/server/routes/auth.ts", "wiredAccessRequestStore", 1],
   ["src/server/routes/auth.ts", "wiredMembershipStore", 4],
+  ["src/server/routes/platform.ts", "wiredMembershipStore", 2],
   ["src/server/routes/privacy.ts", "wiredMembershipStore", 4],
 ];
 

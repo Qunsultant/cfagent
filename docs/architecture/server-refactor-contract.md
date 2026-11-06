@@ -623,3 +623,63 @@ conflict on Qunsultant/cfagent#2902.
   SESSION_STORE casts need).
 - Q3 stays open for Slice 9; Q4 stays open for Slice 8. No new open
   question is raised by Slice 6.
+
+## 14. Slice 7 note (2026-11-05, PR for #2902 Slice 7)
+
+- Baseline at Slice 7: `origin/main` `c5de0aaa` (Slice 6 merged),
+  `src/server.ts` 1,866 lines / 88,828 bytes. Platform & commerce move
+  to `src/server/routes/platform.ts` (596 lines) as five handlers in
+  dispatch order: `handlePlatformTelemetryRoutes` (`/api/telemetry/*`),
+  `handlePlatformRetrievalRoutes`
+  (`POST /api/retrieval/populate-market-graph`),
+  `handlePlatformMcpRoutes` (`/mcp`, `/api/mcp`, `/mcp/scanner`,
+  `/mcp/scanner/*`), `handlePlatformPaymentsRoutes` (the OPTIONS
+  preflight, `/api/payments/agentic/*` +
+  `/payments/agentic/commercial/*`, `/api/premium/*`,
+  `/api/payments/webhook` + `/payments/webhook`),
+  `handlePlatformBrowserRoutes` (POST `/api/browser/snapshot`,
+  `/browser/snapshot`, `/api/browser/transaction-snap`,
+  `/browser/transaction-snap`, `/api/browser/snap/transaction`).
+  The browser snapshot block is placed in Platform per the Q2 answer
+  (contract §3 Slice 7 note; browser-agent platform surface, moved as
+  a whole, never split). `src/server.ts` after Slice 7: 1,404 lines.
+- The 148-descriptor pin is unchanged (the scanner reconstructs the
+  identical ordered list before and after); the pin test's
+  delegation-order assertion grows to the nineteen delegations in
+  dispatch order, and its dispatch smoke gains a Slice 7 check that
+  every moved route answers exactly as on clean main before the move
+  (telemetry reads 401; telemetry reconcile/decide and retrieval
+  populate 503 on the unbound AgentDB; MCP OPTIONS preflights 200;
+  `/mcp` and `/api/mcp` 401; scanner and premium/webhook forwards 500
+  on the unbound DO stub in the harness; browser snapshots 401).
+- `PREMIUM_GATEWAY_INSTANCE` moves with the payments handler (its only
+  use in the entry): defined in `routes/platform.ts`, re-exported from
+  `src/server.ts` at its old position so the existing
+  `import { PREMIUM_GATEWAY_INSTANCE } from "../src/server"` keeps
+  working. The pin test's handleFetch end marker now matches that
+  re-export line as well as the original definition.
+- One comment annotation in the moved scanner block (not a code
+  change): the DEPRECATED `x-user-id` alias line now names
+  `x-scanner-session` as its successor — policy gate check (j)
+  requires a deprecation marker to name what superseded it, and the
+  comment already named `x-scanner-session` the honest header.
+- Pin updates in the same PR (repo pin rule): the source-presence pins
+  in `tests/mcp_api_key_transport.test.ts` (#180: MCP transport block),
+  `tests/paid_screen_premium_2373.test.ts` (#2373: premium forward),
+  and `tests/scanner_session_affinity.test.ts` (#700: CORS surfaces)
+  read the entry surface as `server.ts` + `routes/platform.ts` instead
+  of `server.ts` alone (assertions unchanged, only the files scanned);
+  the same entry-surface change applies to the #2339 pins in
+  `tests/mesh_conformance_s4_2339.test.ts` (per-login orchestrator
+  dispatch; OptionsScannerMCP binding) and the #1733 R06 pin in
+  `tests/rest_twins_modes_1733.test.ts` (transaction-snap identity
+  fallback). The D-D census step 5b moves the last two
+  `wiredMembershipStore` sites from `src/server.ts` to
+  `src/server/routes/platform.ts` (telemetry decisions, retrieval
+  populate-market-graph); the family total is unchanged.
+  No durableKv census change: `routes/platform.ts` imports no durableKv
+  symbol.
+- Q2 is answered (browser snapshot is Platform, Slice 7, moved as a
+  whole — recorded in §3 and in the Slice 7 progress comment on
+  #2902). Q3 stays open for Slice 9; Q4 stays open for Slice 8. No new
+  open question is raised by Slice 7.

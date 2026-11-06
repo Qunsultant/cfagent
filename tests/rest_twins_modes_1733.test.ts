@@ -286,7 +286,11 @@ describe("transaction-snap identity fallback (#1733 R06)", () => {
   });
 
   it("the Worker route delegates to the port helper and carries no inline fallback chain", () => {
-    const serverSrc = src("server.ts");
+    // Slice 7 of Qunsultant/cfagent#2902 (2026-11-05): the
+    // transaction-snap route moved from src/server.ts to
+    // src/server/routes/platform.ts; the entry surface is server.ts +
+    // routes/*.ts, so the pin reads both files (assertions unchanged).
+    const serverSrc = src("server.ts") + src("server/routes/platform.ts");
     expect(serverSrc).toContain("resolveSnapIdentity(request.headers.get(");
     // The old inline chain is gone (the literal still appears in the
     // explanatory comment above the call — that is documentation,

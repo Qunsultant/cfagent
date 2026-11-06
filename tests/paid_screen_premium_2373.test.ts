@@ -287,7 +287,11 @@ describe("stock-signals paid shape on current main (#2373 Slice B)", () => {
     // #2942: the delegation moved with routeRequest into orchestrator/routeRequest.ts.
     const orchSrc = readFileSync("src/agents/orchestrator/routeRequest.ts", "utf8");
     expect(orchSrc.match(/handlePremiumRoutes\(request, url, path, sessionId,/g)).toHaveLength(1);
-    const serverSrc = readFileSync("src/server.ts", "utf8");
+    // Slice 7 of Qunsultant/cfagent#2902 (2026-11-05): the /api/premium/*
+    // forward moved from src/server.ts to src/server/routes/platform.ts;
+    // the entry surface is server.ts + routes/*.ts, so the pin reads
+    // both files (assertions unchanged).
+    const serverSrc = readFileSync("src/server.ts", "utf8") + readFileSync("src/server/routes/platform.ts", "utf8");
     expect(serverSrc).toContain('path.startsWith("/api/premium/")');
     expect(serverSrc).toContain('forwardReq.headers.delete("x-user-login")');
   });
