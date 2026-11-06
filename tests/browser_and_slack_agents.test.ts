@@ -87,7 +87,7 @@ describe("Cloudflare Browser Agent & Independent Slack Agent", () => {
   const mockEnv: Env = {
     APP_BASE_URL: "https://agent.openaimp.com",
     AI_SEARCH_ENDPOINT: "https://ai-search.internal",
-    SEARCH_AGENT: {} as any,
+    ORCHESTRATOR_AGENT: {} as any,
     ETRADE_ENVIRONMENT: "sandbox",
     SLACK_SIGNING_SECRET: "test_slack_signing_secret_999",
     SLACK_BOT_TOKEN: "xoxb-test-bot-token-999",
