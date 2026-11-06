@@ -1108,11 +1108,11 @@ export class ScheduledAgent extends PortThink {
    * with the same shape S1 pins.
    *
    * The sink is the same `mas_events` funnel S1 used — the
-   * orchestrator's `POST /api/audit/event` via the SEARCH_AGENT
+   * orchestrator's `POST /api/audit/event` via the ORCHESTRATOR_AGENT
    * stub (the DO-side precedent is the wallet scanner's
    * `persistAudit`, same channel, same instance). The stub is
    * built lazily inside the call, so a caller whose env binds no
-   * SEARCH_AGENT never touches the binding; the poster never
+   * ORCHESTRATOR_AGENT never touches the binding; the poster never
    * throws and the whole call is swallowed — the `this.audit`
    * swallow rule — so an audit failure can never fail the mutation
    * it records.
@@ -1126,7 +1126,7 @@ export class ScheduledAgent extends PortThink {
     if (!goalId) return;
     try {
       const auditAgent = actorGateway.stub<DoStubLike>(
-        this.env.SEARCH_AGENT,
+        this.env.ORCHESTRATOR_AGENT,
         SHARED_ORCHESTRATOR_INSTANCE,
       );
       await postGoalScheduleAuditEvent(
