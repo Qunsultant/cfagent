@@ -22,6 +22,7 @@ import { DatabaseORM } from "../../orm";
 import type { DataProviderPorts } from "../../data/buildDataProviderPorts";
 import { TradingPlatformRegistry } from "../registry";
 import { resolveTenantBroker } from "../../services/tenantProviders";
+import { platformChainSource } from "../optionChainSource";
 import { ETradeService } from "../../services/etrade";
 import type { ETradeRestClient } from "../etrade/client";
 import {
@@ -39,7 +40,9 @@ import {
 import { DEFAULT_MAX_DTE, DynamicOptionsScreener } from "../optionsScreener";
 import type { OptionChainSource } from "../optionChainSource";
 import {
-  runPanelPipeline,
+  OptionsDataAgent,
+  RecommendationAgent,
+  StrategyRiskAgent,
   type PipelineOptions,
   type PipelineResult,
   recommendOptionStrategies,
@@ -51,6 +54,17 @@ import {
   type OptionStrategyType,
   type StrategyCandidate,
 } from "./index";
+import {
+  memoryStageClaims,
+  memoryStageStorage,
+  runOptionsScreenWorkflow,
+} from "../../workflows/optionsScreenWorkflow";
+import {
+  createStrategyScreenPorts,
+  panelResultToPipelineResult,
+} from "../../workflows/strategyScreenPorts";
+import { optionsArtifactKey } from "../../workflows/optionsScreenPorts";
+import type { PanelDiscoveryResult } from "../../services/recommendationKernel";
 import { OpportunityScanner, type OpportunityScanResult, type ScanMode, type ScanRequestRecord, type ScanRequestTemplate, type ScanSymbolOverride } from "./opportunityScanner";
 import type { ScanRunStore } from "./scanRunStore";
 import { applyProfileFields, toProfileRef, type StrategyProfile } from "./strategyProfile";
@@ -222,6 +236,27 @@ interface CacheEntry {
   summary: string;
 }
 const MEMORY_CACHE = new Map<string, CacheEntry>();
+/**
+ * Issue #3186 step 3e - the opportunities-case summary, extracted so
+ * the scheduled pipeline call renders the identical summary (mode
+ * label + fit-gate segment + #1290 partial segment) instead of
+ * re-deriving it. Issue #23: the summary labels the mode;
+ * strategy-fit reports the fit accounting instead of the best-trade
+ * count. Issue #24: both modes append the fit-gate bucket counts; in
+ * strategy-fit mode fitsTotal is already the GATED fit count.
+ * Issue #1290 (#1173 R6): a partial scan says so in the summary
+ * every surface renders (Slack/email/canonical).
+ */
+export function buildOpportunityScanSummary(scanResult: OpportunityScanResult): string {
+  const gateSegment = ` Gate: ${scanResult.gate.fit} fit, ${scanResult.gate.borderline} borderline, ${scanResult.gate.noFit} no fit.`;
+  const partialSegment = scanResult.partial
+    ? ` Partial coverage — qualified partial results: evaluated ${scanResult.partial.evaluatedCount} of ${scanResult.partial.consideredCount} underlyings (${scanResult.partial.coverageErrors} failures, ${scanResult.partial.truncatedCount} truncated).`
+    : "";
+  return scanResult.mode === "strategy_fit"
+    ? `Opportunity scan across ${scanResult.scanned} symbols (mode: strategy fit): ${scanResult.fitsTotal} of ${scanResult.scanned} names fit.${gateSegment}${partialSegment}`
+    : `Opportunity scan across ${scanResult.scanned} symbols: found ${scanResult.withTrades} actionable trade setups. (mode: per-name best)${gateSegment}${partialSegment}`;
+}
+
 
 /** Request-body fields a caller expressed (issue #28): a field counts
  *  as expressed when it is present (not undefined) in the body. These
@@ -276,7 +311,7 @@ function stableCacheStringify(value: unknown): string {
 }
 
 const PROFILE_BODY_FIELDS = ["thesis", "expectedIvDirection", "maxPlannedLoss", "minRewardRisk", "allowedStrategies", "optimizationBias", "minDte", "maxDte"] as const;
-function bodyPresentFields(req: UnifiedOptionsRequest, includePosture: boolean): string[] {
+export function bodyPresentFields(req: UnifiedOptionsRequest, includePosture: boolean): string[] {
   const present: string[] = PROFILE_BODY_FIELDS.filter((field) => req[field] !== undefined);
   if (includePosture) {
     if (req.riskProfile !== undefined) present.push("riskProfile");
@@ -471,7 +506,7 @@ export class UnifiedOptionsService {
    * `client` is the E*TRADE REST data plane (ETradeService's `.client`).
    */
   static async screenContracts(
-    client: ETradeRestClient | undefined,
+    client: OptionChainSource | undefined,
     filter: OptionScreenerFilter
   ): Promise<OptionScreenResult> {
     return new DynamicOptionsScreener(client).screenOptions(filter);
@@ -480,9 +515,69 @@ export class UnifiedOptionsService {
   static async runStrategyPipeline(
     source: OptionChainSource | undefined,
     request: StrategyRequest,
-    options: PipelineOptions = {}
+    options: PipelineOptions = {},
+    userLogin?: string,
   ): Promise<PipelineResult> {
-    return runPanelPipeline(new DynamicOptionsScreener(source), request, options);
+    // Issue #3186 step 3e: the service's panel runs go through the one
+    // panel pipeline instead of runPanelPipeline directly - this static
+    // is the seam all three execute() panel cases (strategies /
+    // best_trade, compare, llm_ideas) ride, so one change migrates
+    // them all for every caller (unified handler, NLQ screen path).
+    // The agents are constructed exactly as runPanelPipeline built
+    // them (data agent over the given screener - no universeDeps -
+    // fresh risk + recommender). All four PipelineOptions fields ride
+    // the classInput (the feed seam's snapshotOverride included), so
+    // the static's contract is preserved for callers that pass a
+    // stored snapshot. The service holds no DO storage/queue handle,
+    // so stage storage/claims are the shared in-memory helpers and
+    // publishing is skipped (queue null); the durable record for
+    // these runs is the caller's downstream record, unchanged.
+    const runId = `options-panel:service:${request.symbol}:${new Date().toISOString()}`;
+    const storage = memoryStageStorage();
+    const outcome = await runOptionsScreenWorkflow(
+      {
+        runId,
+        userLogin,
+        request: {
+          assetClass: "options",
+          runIdentity: { runId },
+          trigger: "manual",
+          classInput: {
+            strategyRequest: request,
+            strategyFilter: options.strategyFilter,
+            riskProfile: options.riskProfile,
+            alternatives: options.alternatives,
+            snapshotOverride: options.snapshotOverride,
+          },
+        },
+      },
+      {
+        stages: createStrategyScreenPorts({
+          agents: {
+            data: new OptionsDataAgent(new DynamicOptionsScreener(source)),
+            risk: new StrategyRiskAgent(),
+            recommender: new RecommendationAgent(),
+          },
+          storage,
+        }),
+        claims: memoryStageClaims(),
+        queue: null,
+      },
+    );
+    if (outcome.outcome !== "completed") {
+      throw new Error(
+        `Options strategy screen failed at ${outcome.failedStage}: ${outcome.reason}`,
+      );
+    }
+    const panelResult = await storage.get<PanelDiscoveryResult>(
+      optionsArtifactKey(runId, "shapeReport"),
+    );
+    if (!panelResult) {
+      throw new Error(
+        "Options strategy screen completed without a report artifact; refusing to answer from nothing.",
+      );
+    }
+    return panelResultToPipelineResult(panelResult);
   }
 
   static async scanOpportunities(
@@ -582,6 +677,122 @@ export class UnifiedOptionsService {
     return `${req.action}:${sym}:${req.thesis || ""}:${req.riskProfile || ""}:${req.targetPrice || ""}:${req.mode || ""}:${perSymbol}:${profileSegment}:${req.limit ?? ""}:${statedTargetSegment}:${req.minDte ?? ""}:${req.maxDte ?? ""}:${req.offset ?? ""}:${this.userLogin}:${envSegment}:${filterSegment}:${req.maxSymbols ?? ""}:${effectiveTargetDate}:${req.expectedIvDirection || ""}:${allowedSegment}:${req.maxPlannedLoss ?? ""}:${req.minRewardRisk ?? ""}:${req.optimizationBias ?? ""}:${calendarSegment}:${req.question ?? ""}:${this.scanRunStore ? "store" : "nostore"}:${discoverySegment}:${req.evaluateAllStrategies === true ? "allstrat" : ""}:${req.strategyMode ?? ""}:${req.farDated === true ? "fardated" : req.farDated === false ? "neardated" : ""}:${req.candidateLimit ?? ""}`;
   }
 
+  /**
+   * Issue #3186 step 3e - the engine client execute() runs on,
+   * extracted so the scheduled pipeline call can run the SAME
+   * client instead of silently bypassing the data-provider
+   * platform path with the raw client. When platform deps are
+   * wired the client is the platform-routed facade (captures
+   * land through the capture port) and a platform run id is
+   * minted BEFORE any fetch, so fetch-time captures share one
+   * identity with the persisted scan row (#1157 E2). Without
+   * deps the client is the raw E*TRADE client and the run id
+   * stays undefined, exactly as execute() behaved before.
+   * A resolution failure throws and surfaces as an error;
+   * there is NO silent fallback to the direct client.
+   */
+  async resolveEngineClient(): Promise<{ engineClient: ETradeRestClient | OptionChainSource; platformRunId?: string }> {
+    const broker = await resolveTenantBroker(this.env);
+    if (broker !== "etrade") {
+      const platform = TradingPlatformRegistry.getPlatform(
+        broker,
+        this.env,
+        this.orm,
+        this.userLogin,
+        this.overrideEnv,
+      );
+      const chainSource = platformChainSource(platform);
+      if (chainSource) {
+        return { engineClient: chainSource };
+      }
+    }
+    // Issue #781: forward the injected ORM as-is. This service only
+    // uses ETradeService's REST client; the ORM reaches only its
+    // trading platform, whose contract is explicitly optional with
+    // every access guarded — so without an ORM, platform persistence
+    // is honestly absent. The former stub fallback made the platform
+    // believe persistence existed while discarding every write. When
+    // no ORM is present, construct env-first: ETradeService's
+    // orm-first overload would otherwise drop the env argument.
+    const etrade = this.orm
+      ? new ETradeService(this.orm, this.env, this.userLogin, this.overrideEnv)
+      : new ETradeService(this.env, undefined, this.userLogin, this.overrideEnv);
+    // Issue #1157 (E2): when platform deps are wired, the engines
+    // run through the data-provider platform: bootstrap this
+    // storage (seed + enable etrade), resolve the optionsChains
+    // route — a resolution failure throws and surfaces as an
+    // error; there is NO silent fallback to the direct client —
+    // mint the run id BEFORE any fetch, and hand the engines a
+    // facade over the adapter built on THIS execute() call's
+    // ETradeService instance. Without deps, engineClient is the
+    // raw client and platformRunId stays undefined: every path
+    // below is exactly as before.
+    let engineClient: ETradeRestClient = etrade.client;
+    let platformRunId: string | undefined;
+    if (this.platformDeps) {
+      // #2303: ports win when bound (production) — the config
+      // reads/writes run on D1 and captures land through the
+      // capture port; the deps' own capturePort, when a host
+      // threaded one explicitly, is respected first.
+      const ports = await this.dataProviderPorts();
+      const configPort = ports.config;
+      if (configPort) await configPort.bootstrapDataProviders();
+      else bootstrapDataProviders(this.platformDeps.sql);
+      platformRunId = crypto.randomUUID();
+      const captureDeps: ETradeCaptureDeps =
+        ports.captures && !this.platformDeps.capturePort
+          ? { ...this.platformDeps, capturePort: ports.captures }
+          : this.platformDeps;
+      const provider = createETradeDataProvider(etrade, {
+        capture: captureDeps,
+      });
+      const registry = new DataProviderRegistry();
+      registry.register(provider);
+      const assignment = registry.resolveRoute(
+        "optionsChains",
+        configPort
+          ? await configPort.listProviderConfigs()
+          : listProviderConfigs(this.platformDeps.sql),
+        configPort
+          ? await configPort.listCapabilityRoutes()
+          : listCapabilityRoutes(this.platformDeps.sql),
+        this.callerTier
+      );
+      engineClient = createPlatformOptionsClient(etrade.client, assignment.primary, {
+        runId: platformRunId,
+        userLogin: this.userLogin,
+      });
+    }
+    return { engineClient, platformRunId };
+  }
+
+
+  /**
+   * Issue #3186 step 3e - the saved-profile resolution execute()
+   * runs first, extracted so the unified handler's opportunities
+   * path can resolve the caller's profile exactly as execute()
+   * does. An unknown id/name, or no store wired, is an error in
+   * the service's existing style - the action does NOT silently
+   * run without the profile.
+   */
+  async resolveStrategyProfile(
+    req: UnifiedOptionsRequest,
+  ): Promise<{ profile?: StrategyProfile; error?: string }> {
+    if (!req.profileId && !req.profileName) return {};
+    if (!this.profileStore) {
+      return { error: "Saved profiles aren't available in this context." };
+    }
+    const found = req.profileId
+      ? await this.profileStore.get(this.userLogin, req.profileId)
+      : await this.profileStore.getByName(this.userLogin, req.profileName!);
+    if (found) return { profile: found };
+    return {
+      error: req.profileId
+        ? `No saved profile with id "${req.profileId}".`
+        : `No saved profile named "${req.profileName}".`,
+    };
+  }
+
   async execute(req: UnifiedOptionsRequest): Promise<FormattedOmnichannelResponse> {
     const channel = req.channel || "ui";
     const cacheTtlMs = this.config.cache.chainTtlSeconds * 1000;
@@ -593,24 +804,7 @@ export class UnifiedOptionsService {
     // profile-less result (nor cached itself). An unknown id/name, or
     // no store wired, is an error result in the service's existing
     // style; the action does NOT silently run without the profile.
-    let strategyProfile: StrategyProfile | undefined;
-    let profileError: string | undefined;
-    if (req.profileId || req.profileName) {
-      if (!this.profileStore) {
-        profileError = "Saved profiles aren't available in this context.";
-      } else {
-        const found = req.profileId
-          ? await this.profileStore.get(this.userLogin, req.profileId)
-          : await this.profileStore.getByName(this.userLogin, req.profileName!);
-        if (found) {
-          strategyProfile = found;
-        } else {
-          profileError = req.profileId
-            ? `No saved profile with id "${req.profileId}".`
-            : `No saved profile named "${req.profileName}".`;
-        }
-      }
-    }
+    const { profile: strategyProfile, error: profileError } = await this.resolveStrategyProfile(req);
     const cacheKey = this.getCacheKey(req, strategyProfile);
 
     const cached = MEMORY_CACHE.get(cacheKey);
@@ -626,63 +820,7 @@ export class UnifiedOptionsService {
       executionData = { error: profileError };
       summary = profileError;
     } else {
-      // Issue #781: forward the injected ORM as-is. This service only
-      // uses ETradeService's REST client; the ORM reaches only its
-      // trading platform, whose contract is explicitly optional with
-      // every access guarded — so without an ORM, platform persistence
-      // is honestly absent. The former stub fallback made the platform
-      // believe persistence existed while discarding every write. When
-      // no ORM is present, construct env-first: ETradeService's
-      // orm-first overload would otherwise drop the env argument.
-      const etrade = this.orm
-        ? new ETradeService(this.orm, this.env, this.userLogin, this.overrideEnv)
-        : new ETradeService(this.env, undefined, this.userLogin, this.overrideEnv);
-      // Issue #1157 (E2): when platform deps are wired, the engines
-      // run through the data-provider platform: bootstrap this
-      // storage (seed + enable etrade), resolve the optionsChains
-      // route — a resolution failure throws and surfaces as an
-      // error; there is NO silent fallback to the direct client —
-      // mint the run id BEFORE any fetch, and hand the engines a
-      // facade over the adapter built on THIS execute() call's
-      // ETradeService instance. Without deps, engineClient is the
-      // raw client and platformRunId stays undefined: every path
-      // below is exactly as before.
-      let engineClient: ETradeRestClient = etrade.client;
-      let platformRunId: string | undefined;
-      if (this.platformDeps) {
-        // #2303: ports win when bound (production) — the config
-        // reads/writes run on D1 and captures land through the
-        // capture port; the deps' own capturePort, when a host
-        // threaded one explicitly, is respected first.
-        const ports = await this.dataProviderPorts();
-        const configPort = ports.config;
-        if (configPort) await configPort.bootstrapDataProviders();
-        else bootstrapDataProviders(this.platformDeps.sql);
-        platformRunId = crypto.randomUUID();
-        const captureDeps: ETradeCaptureDeps =
-          ports.captures && !this.platformDeps.capturePort
-            ? { ...this.platformDeps, capturePort: ports.captures }
-            : this.platformDeps;
-        const provider = createETradeDataProvider(etrade, {
-          capture: captureDeps,
-        });
-        const registry = new DataProviderRegistry();
-        registry.register(provider);
-        const assignment = registry.resolveRoute(
-          "optionsChains",
-          configPort
-            ? await configPort.listProviderConfigs()
-            : listProviderConfigs(this.platformDeps.sql),
-          configPort
-            ? await configPort.listCapabilityRoutes()
-            : listCapabilityRoutes(this.platformDeps.sql),
-          this.callerTier
-        );
-        engineClient = createPlatformOptionsClient(etrade.client, assignment.primary, {
-          runId: platformRunId,
-          userLogin: this.userLogin,
-        });
-      }
+      const { engineClient, platformRunId } = await this.resolveEngineClient();
       switch (req.action) {
         case "screen": {
           const filter: OptionScreenerFilter = {
@@ -808,9 +946,14 @@ export class UnifiedOptionsService {
             ? applyProfileFields(strategyRequest, strategyProfile, new Set(bodyPresentFields(req, false))).merged
             : strategyRequest;
 
-          const pipelineResult = await UnifiedOptionsService.runStrategyPipeline(engineClient, effectiveRequest, {
-            riskProfile: req.riskProfile || "balanced",
-          });
+          const pipelineResult = await UnifiedOptionsService.runStrategyPipeline(
+            engineClient,
+            effectiveRequest,
+            {
+              riskProfile: req.riskProfile || "balanced",
+            },
+            this.userLogin,
+          );
 
           // Issue #26: every single-name pipeline result carries the
           // per-strategy-type roll-up (best-per-type + ledger counts),
@@ -965,21 +1108,7 @@ export class UnifiedOptionsService {
               executionData = { ...scanResult, persisted: false };
             }
           }
-          // Issue #23: the summary labels the mode; strategy-fit reports
-          // the fit accounting instead of the best-trade count.
-          // Issue #24: both modes append the fit-gate bucket counts; in
-          // strategy-fit mode fitsTotal is already the GATED fit count.
-          const gateSegment = ` Gate: ${scanResult.gate.fit} fit, ${scanResult.gate.borderline} borderline, ${scanResult.gate.noFit} no fit.`;
-          // Issue #1290 (#1173 R6): a partial scan says so in the
-          // summary every surface renders (Slack/email/canonical) —
-          // pre-R6 the qualification existed only as a console warning
-          // in the scheduled flow.
-          const partialSegment = scanResult.partial
-            ? ` Partial coverage — qualified partial results: evaluated ${scanResult.partial.evaluatedCount} of ${scanResult.partial.consideredCount} underlyings (${scanResult.partial.coverageErrors} failures, ${scanResult.partial.truncatedCount} truncated).`
-            : "";
-          summary = scanResult.mode === "strategy_fit"
-            ? `Opportunity scan across ${scanResult.scanned} symbols (mode: strategy fit): ${scanResult.fitsTotal} of ${scanResult.scanned} names fit.${gateSegment}${partialSegment}`
-            : `Opportunity scan across ${scanResult.scanned} symbols: found ${scanResult.withTrades} actionable trade setups. (mode: per-name best)${gateSegment}${partialSegment}`;
+          summary = buildOpportunityScanSummary(scanResult);
           break;
         }
 
@@ -1028,9 +1157,14 @@ export class UnifiedOptionsService {
           const effectiveRequest = strategyProfile
             ? applyProfileFields(strategyRequest, strategyProfile, new Set(bodyPresentFields(req, false))).merged
             : strategyRequest;
-          const pipelineResult = await UnifiedOptionsService.runStrategyPipeline(engineClient, effectiveRequest, {
-            riskProfile: req.riskProfile || "balanced",
-          });
+          const pipelineResult = await UnifiedOptionsService.runStrategyPipeline(
+            engineClient,
+            effectiveRequest,
+            {
+              riskProfile: req.riskProfile || "balanced",
+            },
+            this.userLogin,
+          );
           const candidates = pipelineResult.ranked.slice(0, 10).map((r) => r.candidate);
           let llmJudgment: any = null;
           try {
@@ -1094,9 +1228,14 @@ export class UnifiedOptionsService {
           const effectiveRequest = strategyProfile
             ? applyProfileFields(strategyRequest, strategyProfile, new Set(bodyPresentFields(req, false))).merged
             : strategyRequest;
-          const pipelineResult = await UnifiedOptionsService.runStrategyPipeline(engineClient, effectiveRequest, {
-            riskProfile: req.riskProfile || "balanced",
-          });
+          const pipelineResult = await UnifiedOptionsService.runStrategyPipeline(
+            engineClient,
+            effectiveRequest,
+            {
+              riskProfile: req.riskProfile || "balanced",
+            },
+            this.userLogin,
+          );
           const candidates = pipelineResult.ranked.slice(0, 10).map((r) => r.candidate);
           let llmJudgment: any = null;
           try {
@@ -1143,6 +1282,32 @@ export class UnifiedOptionsService {
       MEMORY_CACHE.set(cacheKey, { timestamp: now, data: executionData, summary });
     }
 
+    return this.formatResponse(req, executionData, summary, isFromCache);
+  }
+
+
+  /**
+   * Issue #3186 step 3e - the FormattedOmnichannelResponse assembly,
+   * extracted from execute() so the scheduled pipeline call returns
+   * a REAL formatted response (same meta, same toUi/toSlack/
+   * toEmailHtml/toEmailText/toVoice/toWebhook/toMcp closures) instead
+   * of a plain {success, summary, data} - the scheduled downstream
+   * code calls response.toEmailHtml() and response.toWebhook(), so a
+   * plain object would silently break email + webhook delivery.
+   * execute() remains the only MEMORY_CACHE reader/writer; a
+   * pipeline caller passes isFromCache false (its run is always
+   * fresh - the 60s chain TTL makes a cache serve moot on the
+   * 30-minute scheduled cadence, and a rapid re-trigger re-scans
+   * instead of re-serving, which is the honest behavior for a
+   * trigger-now).
+   */
+  formatResponse(
+    req: UnifiedOptionsRequest,
+    executionData: any,
+    summary: string,
+    isFromCache: boolean,
+  ): FormattedOmnichannelResponse {
+    const channel = req.channel || "ui";
     const meta = {
       symbol: req.symbol?.toUpperCase(),
       underlyingsCount: req.symbols?.length || (req.symbol ? 1 : 0),

@@ -52,10 +52,10 @@ export function resolveAlpacaTradingBase(
   // switch now means the same thing on both brokers instead of being an
   // E*TRADE-only control that Alpaca silently ignored.
   const selection = String(overrideEnv ?? "").trim().toUpperCase();
-  if (selection === "TEST") {
+  if (selection === "TEST" || selection === "PAPER" || selection === "SANDBOX") {
     return { baseUrl: "https://paper-api.alpaca.markets", isLive: false, source: "selection" };
   }
-  if (selection === "PROD") {
+  if (selection === "PROD" || selection === "LIVE") {
     const configured = env.ALPACA_BASE_URL;
     const liveUrl = configured && !configured.includes("paper-api") ? configured : "https://api.alpaca.markets";
     return { baseUrl: liveUrl, isLive: true, source: "selection" };

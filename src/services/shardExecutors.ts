@@ -35,6 +35,24 @@ import {
 } from "../data/buildDataProviderPorts";
 import { defaultBreakerRegistry } from "../breakers/createBreakerPorts";
 import { withRetry } from "./resilience";
+import {
+  DynamicOptionsScreener,
+  OptionsDataAgent,
+  RecommendationAgent,
+  StrategyRiskAgent,
+  type OpportunityScanResult,
+} from "../trading";
+import {
+  createScannerScreenPorts,
+  type ScannerPipelineRequest,
+} from "../workflows/strategyScreenPorts";
+import {
+  memoryStageClaims,
+  memoryStageStorage,
+  runOptionsScreenWorkflow,
+} from "../workflows/optionsScreenWorkflow";
+import { optionsArtifactKey } from "../workflows/optionsScreenPorts";
+import type { StageQueueSend } from "../workflows/stageQueueTransport";
 
 export interface ShardExecutorDeps {
   sql: {
@@ -340,42 +358,89 @@ async function executeOptionsSymbol(
   const request = chain.options;
   if (!request) throw new Error("Options shard is missing its scan request.");
   const service = deps.createETradeService(chain.userLogin, chain.environment);
-  const { UnifiedOptionsService } = await import("../trading");
   const eventCalendar = inputs.eventCalendar ?? await (await import("./eventCalendar")).getSymbolEventCalendar(symbol);
   const policy = resolvePipelinePolicy(deps.env).retry[SHARD_RETRY_BUCKET.feed];
   return withRetry(async () => {
-    const result = await UnifiedOptionsService.scanOpportunities(
-      service.client as any,
-      [symbol],
+    // Issue #3186 step 3e - the per-symbol shard scan goes through
+    // the one scanner pipeline instead of the direct
+    // scanOpportunities call (same engine, staged). The template,
+    // scan options (incl. the chain-timestamp `now` override for
+    // deterministic provenance) and the skipped-verdict retry
+    // contract are unchanged; the shard result is read from the
+    // shapeReport artifact. No requestRecord: the chain options ARE
+    // the request - the assembled result's snapshot comes from the
+    // scanner's own snapshot, exactly as the direct call produced
+    // it. No scanRunStore: per-symbol shard results are stored as
+    // chain rows and the ASSEMBLED result is recorded by
+    // generateAssembleOptions - the direct path never saved
+    // per-symbol rows to mas_opportunity_scans either.
+    const shardRunId = `shard-scan:${chain.chainId}:${symbol}`;
+    const shardStorage = memoryStageStorage();
+    const shardOutcome = await runOptionsScreenWorkflow(
       {
-        thesis: request.thesis as any,
-        targetDate: request.targetDate,
-        expectedIvDirection: "unchanged",
-        maxPlannedLoss: request.maxPlannedLoss ?? 1000,
-        minRewardRisk: request.minRewardRisk ?? 1.5,
-        // Issue #2577: the scope's DTE band rides into the shard instead of
-        // being dropped here (the per-symbol runner previously ignored it).
-        ...(request.minDte !== undefined ? { minDte: request.minDte } : {}),
-        ...(request.maxDte !== undefined ? { maxDte: request.maxDte } : {}),
-        allowedStrategies: request.allowedStrategies?.length ? request.allowedStrategies as any : ["all"],
-        // Issue #2091: the chain's scheduled scope rides into the
-        // per-symbol template; manual chains omit it (thesis default).
-        ...(request.evaluateAllStrategies === true ? { evaluateAllStrategies: true } : {}),
-        // Issue #2600: the chain's canonical mode + far-dated toggle
-        // ride the same template (the scanner resolves the mode once;
-        // a conflicting alias pair throws there, never silently).
-        ...(request.strategyMode !== undefined ? { strategyMode: request.strategyMode } : {}),
-        ...(request.farDated !== undefined ? { farDated: request.farDated } : {}),
+        runId: shardRunId,
+        userLogin: chain.userLogin,
+        request: {
+          assetClass: "options",
+          runIdentity: { runId: shardRunId },
+          trigger: chain.trigger ?? "scheduled",
+          classInput: {
+            scan: {
+              symbols: [symbol],
+              template: {
+                thesis: request.thesis as any,
+                targetDate: request.targetDate,
+                expectedIvDirection: "unchanged",
+                maxPlannedLoss: request.maxPlannedLoss ?? 1000,
+                minRewardRisk: request.minRewardRisk ?? 1.5,
+                // Issue #2577: the scope's DTE band rides into the shard instead of
+                // being dropped here (the per-symbol runner previously ignored it).
+                ...(request.minDte !== undefined ? { minDte: request.minDte } : {}),
+                ...(request.maxDte !== undefined ? { maxDte: request.maxDte } : {}),
+                allowedStrategies: request.allowedStrategies?.length ? request.allowedStrategies as any : ["all"],
+                // Issue #2091: the chain's scheduled scope rides into the
+                // per-symbol template; manual chains omit it (thesis default).
+                ...(request.evaluateAllStrategies === true ? { evaluateAllStrategies: true } : {}),
+                // Issue #2600: the chain's canonical mode + far-dated toggle
+                // ride the same template (the scanner resolves the mode once;
+                // a conflicting alias pair throws there, never silently).
+                ...(request.strategyMode !== undefined ? { strategyMode: request.strategyMode } : {}),
+                ...(request.farDated !== undefined ? { farDated: request.farDated } : {}),
+              },
+              options: {
+                riskProfile: request.riskProfile,
+                maxSymbols: 1,
+                eventCalendarBySymbol: eventCalendar
+                  ? { [symbol]: eventCalendar as any }
+                  : undefined,
+                now: new Date(chain.timestamp),
+              },
+            },
+          },
+        } as ScannerPipelineRequest,
       },
       {
-        riskProfile: request.riskProfile,
-        maxSymbols: 1,
-        eventCalendarBySymbol: eventCalendar
-          ? { [symbol]: eventCalendar as any }
-          : undefined,
-        now: new Date(chain.timestamp),
-      }
+        stages: createScannerScreenPorts({
+          agents: {
+            data: new OptionsDataAgent(new DynamicOptionsScreener(service.client)),
+            risk: new StrategyRiskAgent(),
+            recommender: new RecommendationAgent(),
+          },
+          storage: shardStorage,
+        }),
+        claims: memoryStageClaims(),
+        queue: (deps.env.SCREENER_EVENTS as unknown as StageQueueSend | null) ?? null,
+      },
     );
+    if (shardOutcome.outcome !== "completed") {
+      throw new Error(`Options shard scan failed at ${shardOutcome.failedStage}: ${shardOutcome.reason}`);
+    }
+    const result = await shardStorage.get<OpportunityScanResult>(
+      optionsArtifactKey(shardRunId, "shapeReport"),
+    );
+    if (!result) {
+      throw new Error(`Options shard scan completed without a report artifact for ${symbol}; refusing to assemble from nothing.`);
+    }
     // The scanner converts chain-fetch exceptions into skipped rows.
     // Re-throw those here so the shard's acquisition retry bucket can
     // retry this one underlying independently.

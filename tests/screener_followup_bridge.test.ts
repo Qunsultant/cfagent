@@ -224,7 +224,17 @@ describe("route bridge wiring pins", () => {
     expect(src).toContain("screenerOutcomeFromRunResult");
   });
   it("the options screen bridges instead of delivering inline when the port is present", () => {
-    const src = readFileSync("src/agents/routes/etradeOptionsScreen.ts", "utf8");
-    expect(src).toContain("scheduleScreenerFollowups");
+    // Old pin asserted the bridge call lived in etradeOptionsScreen.ts;
+    // #3186 step 3d moved delivery into the pipeline's deliver stage in
+    // manualOptionsScreen.ts, with the route forwarding its ctx (which
+    // carries scheduleScreenerFollowups) into the delivery builder. This
+    // pin proves the bridge lives in the deliver stage and the route
+    // forwards the ctx that carries it.
+    const deliver = readFileSync("src/workflows/manualOptionsScreen.ts", "utf8");
+    expect(deliver).toContain("scheduleScreenerFollowups");
+    expect(deliver).toContain("screenerOutcomeFromRunResult");
+    const route = readFileSync("src/agents/routes/etradeOptionsScreen.ts", "utf8");
+    expect(route).toContain("createManualOptionsScreenDelivery");
+    expect(route).toMatch(/createManualOptionsScreenDelivery\(\{\s*\n?\s*ctx: ctx/);
   });
 });

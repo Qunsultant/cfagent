@@ -11,7 +11,7 @@
  * RED first: the floor helpers, the lifecycle gate, the outcome
  * plumbing, and the direct-Slack branch do not exist yet.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { makeFakeSessionStore } from "./fake-session-store";
 import { DatabaseORM } from "../src/orm";
 import { MockSqlStorage } from "./mock-sql";
@@ -27,32 +27,75 @@ import {
   type ScreenerRunOutcome,
 } from "../src/services/screenerFollowups";
 import type { OptionsPartialQualification } from "../src/trading/options/opportunityScanner";
-import { UnifiedOptionsService } from "../src/trading";
 import { deliverGatedSlack } from "../src/services/gatedSlackDelivery";
 import type { Env } from "../src/types";
+import { ETradeRestClient } from "../src/trading/etrade/client";
+import type { ETradeOptionChain } from "../src/trading/etrade/client";
+import { DynamicOptionsScreener } from "../src/trading/optionsScreener";
+import { OptionsDataAgent } from "../src/trading/options/optionsDataAgent";
+import { StrategyRiskAgent } from "../src/trading/options/strategyRiskAgent";
+import { RecommendationAgent } from "../src/trading/options/recommendationAgent";
+import {
+  runOptionsScreenWorkflow,
+  memoryStageStorage,
+  memoryStageClaims,
+} from "../src/workflows/optionsScreenWorkflow";
+import { createScannerScreenPorts } from "../src/workflows/strategyScreenPorts";
+import { optionsArtifactKey } from "../src/workflows/optionsScreenPorts";
 
 const mockDeliverGatedSlack = vi.mocked(deliverGatedSlack);
 
-// The stubbed UnifiedOptionsService returns whatever scan its static
-// `scan` field holds; tests set it per case through the mocked binding
-// below (factories may not reference top-level test variables).
-vi.mock("../src/trading", async (importOriginal) => {
-  const actual = (await importOriginal()) as Record<string, unknown>;
-  return {
-    ...actual,
-    UnifiedOptionsService: class FakeUnifiedOptionsService {
-      static scan: any = null;
-      constructor(..._args: unknown[]) {}
-      async execute() {
-        return FakeUnifiedOptionsService.scan;
-      }
-    },
-  };
-});
+// #3186 step 3e: the scheduled monolithic scan runs the one scanner
+// pipeline over the real UnifiedOptionsService — the old
+// FakeUnifiedOptionsService (execute()-only) is deleted, and chain
+// data is stubbed at the ETradeRestClient prototype instead (the
+// tests/scheduled_options_pipeline_3186.test.ts pattern). Chain
+// fixtures are the pin test's chainFor shape, which the scanner
+// pipeline parses (selectedExpiry as a string, legs with `strike`).
 
 vi.mock("../src/services/gatedSlackDelivery", () => ({
   deliverGatedSlack: vi.fn(async () => ({ ok: true as const })),
 }));
+
+const NOW = Date.now();
+const expiryDateObj = new Date(NOW + 30 * 86_400_000);
+const expiryObj = {
+  year: expiryDateObj.getUTCFullYear(),
+  month: expiryDateObj.getUTCMonth() + 1,
+  day: expiryDateObj.getUTCDate(),
+};
+
+function chainFor(symbol: string, spot: number) {
+  const expiry = `${expiryObj.year}-${String(expiryObj.month).padStart(2, "0")}-${String(expiryObj.day).padStart(2, "0")}`;
+  const leg = (type: "CALL" | "PUT", strike: number) => {
+    const deltaMag = 0.5;
+    const mid = 5;
+    return {
+      symbol,
+      optionType: type,
+      strike,
+      expirationDate: expiry,
+      bid: Math.max(0.05, mid - 0.1),
+      ask: mid + 0.1,
+      lastPrice: mid,
+      volume: 1_000,
+      openInterest: 2_000,
+      delta: type === "CALL" ? deltaMag : -deltaMag,
+      gamma: 0.02,
+      theta: -0.03,
+      impliedVolatility: 0.3,
+    };
+  };
+  return {
+    symbol,
+    underlyingPrice: spot,
+    selectedExpiry: expiry,
+    pairs: [0.9, 0.95, 1, 1.05, 1.1].map((mult) => {
+      const strike = Math.round(spot * mult * 100) / 100;
+      return { call: leg("CALL", strike), put: leg("PUT", strike) };
+    }),
+  } as unknown as ETradeOptionChain;
+}
 
 class MockKVNamespace {
   private store = new Map<string, string>();
@@ -93,31 +136,6 @@ const optionsOutcome = (
   summary: "Opportunity scan across 100 symbols: found 3 actionable trade setups. Partial coverage — qualified partial results: evaluated 3 of 100 underlyings (97 failures, 0 truncated).",
   ...over,
 });
-
-function scanResult(p: OptionsPartialQualification, evaluated: number) {
-  return {
-    success: true,
-    summary: `Opportunity scan across 100 symbols. Partial coverage — qualified partial results: evaluated ${p.evaluatedCount} of ${p.consideredCount} underlyings (${p.coverageErrors} failures, ${p.truncatedCount} truncated).`,
-    data: {
-      scanned: evaluated,
-      coverage: {
-        evaluated,
-        considered: p.consideredCount,
-        errors: p.coverageErrors,
-        truncated: p.truncatedCount,
-      },
-      partial: p,
-      opportunities: [],
-      withTrades: 0,
-      scanRunId: "test-run-1718",
-    },
-    toSlack: () =>
-      "✅ Screen completed\n📊 Options screen — bullish\n3 matched · 100 scanned\nOpportunity scan summary.",
-    toEmailText: () => "email text",
-    toEmailHtml: () => "<p>email</p>",
-    toWebhook: () => ({}),
-  };
-}
 
 describe("broadcast coverage floor", () => {
   it("is a single named constant at 0.5", () => {
@@ -273,7 +291,6 @@ describe("direct Slack delivery in autonomousOptionsAnalysis", () => {
 
   beforeEach(() => {
     mockDeliverGatedSlack.mockClear();
-    (UnifiedOptionsService as any).scan = null;
     sql = new MockSqlStorage();
     orm = new DatabaseORM(sql);
     orm.initializeSchema(sessionId);
@@ -300,15 +317,32 @@ describe("direct Slack delivery in autonomousOptionsAnalysis", () => {
     } as unknown as Env;
   });
 
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   // Issue #1785 routes scheduled runs with more than floor(35/12) = 2
   // symbols to the sharded branch, so these direct-Slack tests exercise
-  // the monolithic branch with 2 symbols. Coverage assertions below
-  // come from the stubbed partial (evaluated/considered), not from the
-  // length of this list, so the floor semantics are unchanged.
+  // the monolithic branch with 2 symbols.
+  //
+  // #3186 re-pin: the old tests injected arbitrary partials (3/100,
+  // 50/100, 75/100) through a fake execute() seam. Through the real
+  // pipeline only three coverage shapes are reachable with 2 symbols —
+  // 0/2 (takes the FAILURE gate before any delivery), 1/2 (exactly at
+  // the 0.5 floor), 2/2 (above it) — and the success delivery text is
+  // the real shared summary ("Opportunity scan across 2 symbols..."),
+  // not the fake's "✅ Screen completed" string. A below-floor partial
+  // is unreachable through this entry point (the sharded branch returns
+  // before delivery), so the below-floor shape is pinned at the
+  // pipeline level in the next describe, and the degraded-notice
+  // rendering stays pinned at the formatter level above.
   const symbolsMonolithic = ["SYM000", "SYM001"];
 
-  async function runScheduled(p: OptionsPartialQualification, evaluated: number) {
-    (UnifiedOptionsService as any).scan = scanResult(p, evaluated);
+  async function runScheduled(spots: Record<string, number>) {
+    vi.spyOn(ETradeRestClient.prototype, "getOptionExpireDates").mockImplementation(async () => [expiryObj] as never);
+    vi.spyOn(ETradeRestClient.prototype, "getOptionChains").mockImplementation(async (args: { symbol: string }) =>
+      spots[args.symbol] !== undefined ? chainFor(args.symbol, spots[args.symbol]) : null,
+    );
     const service = new ScheduledTasksService(env, orm, sessionId);
     return service.autonomousOptionsAnalysis({
       symbols: symbolsMonolithic,
@@ -319,70 +353,47 @@ describe("direct Slack delivery in autonomousOptionsAnalysis", () => {
     });
   }
 
-  it("below floor sends the degraded notice only — no success text, no report link, no attachments", async () => {
-    const res = await runScheduled(partial(), 3);
+  it("at the floor (1 of 2 evaluated) sends today's success delivery unchanged", async () => {
+    // Old pin asserted a hand-built 50/100 partial via the fake
+    // execute() seam; the reachable at-floor shape through the real
+    // pipeline is 1-of-2 evaluated (1/2 = the 0.5 floor exactly).
+    // This pin proves the at-floor run takes the success delivery
+    // (the shared summary text), not the degraded notice.
+    const res = await runScheduled({ SYM000: 150 });
     expect(res.success).toBe(true);
     expect(mockDeliverGatedSlack).toHaveBeenCalledTimes(1);
     const call = mockDeliverGatedSlack.mock.calls[0][1] as Record<string, unknown>;
     // #3177: the tick gates on the run owner's login.
     expect(call.userLogin).toBe("coverage_floor_test_trader");
     const text = String(call.text ?? "");
-    expect(text).toContain("3 of 100");
-    expect(text).toContain("97");
-    expect(text).toContain("OAuth Token Missing");
-    expect(text).not.toContain("✅");
-    expect(text).not.toContain("Screen completed");
-    expect(text).not.toContain("completed");
-    expect(text).not.toContain("Report:");
-    expect(text).not.toContain("report.pdf");
+    expect(text).toContain("Opportunity scan across 2 symbols");
+    expect(text).not.toContain("degraded coverage");
+    expect(text).not.toContain("No report broadcast");
     expect(call).not.toHaveProperty("pdf");
     expect(call).not.toHaveProperty("files");
     // Persistence is untouched: the run record + audit still exist.
     expect(orm.events.findMany({ where: { type: "options.scheduled_analysis_completed" } })).toHaveLength(1);
   });
 
-  it("at the floor sends today's success delivery unchanged", async () => {
-    const atFloor = partial({ evaluatedCount: 50, consideredCount: 100, coverageErrors: 50, topSkipCount: 50 });
-    const res = await runScheduled(atFloor, 50);
+  it("above the floor (2 of 2 evaluated) sends today's success delivery unchanged", async () => {
+    // Old pin asserted a hand-built 75/100 partial via the fake
+    // execute() seam; the reachable above-floor shape is 2/2
+    // evaluated (complete coverage, no partial stamped).
+    const res = await runScheduled({ SYM000: 150, SYM001: 250 });
     expect(res.success).toBe(true);
     expect(mockDeliverGatedSlack).toHaveBeenCalledTimes(1);
     const call = mockDeliverGatedSlack.mock.calls[0][1] as Record<string, unknown>;
-    expect(String(call.text ?? "")).toContain("✅ Screen completed");
-  });
-
-  it("above the floor a qualified partial sends today's success delivery unchanged", async () => {
-    const above = partial({ evaluatedCount: 75, consideredCount: 100, coverageErrors: 25, topSkipCount: 25 });
-    const res = await runScheduled(above, 75);
-    expect(res.success).toBe(true);
-    expect(mockDeliverGatedSlack).toHaveBeenCalledTimes(1);
-    const call = mockDeliverGatedSlack.mock.calls[0][1] as Record<string, unknown>;
-    expect(String(call.text ?? "")).toContain("✅ Screen completed");
+    const text = String(call.text ?? "");
+    expect(text).toContain("Opportunity scan across 2 symbols");
+    expect(text).not.toContain("degraded coverage");
+    expect(text).not.toContain("No report broadcast");
   });
 
   it("zero evaluated still takes the FAILURE_SCREEN_NO_CONTRACTS_EVALUATED gate, not the degraded notice", async () => {
-    (UnifiedOptionsService as any).scan = {
-      success: true,
-      summary: "scan",
-      data: {
-        scanned: 0,
-        coverage: { evaluated: 0, considered: 100, errors: 100, truncated: 0 },
-        partial: partial({ evaluatedCount: 0, consideredCount: 100, coverageErrors: 100, topSkipCount: 100 }),
-        opportunities: [],
-        withTrades: 0,
-      },
-      toSlack: () => "success text",
-      toEmailText: () => "",
-      toEmailHtml: () => "",
-      toWebhook: () => ({}),
-    };
-    const service = new ScheduledTasksService(env, orm, sessionId);
-    const res = await service.autonomousOptionsAnalysis({
-      symbols: symbolsMonolithic,
-      thesis: "bullish",
-      trigger: "scheduled",
-      pushToSlack: true,
-      slackChannel: "stock_screener_channel",
-    });
+    // Old pin injected a hand-built 0/100 scan via the fake; the
+    // reachable shape is both chains failing, so the pipeline yields
+    // evaluated 0 and the :2777 gate fires with the coded message.
+    const res = await runScheduled({});
     expect(res.success).toBe(false);
     expect(res.error).toContain("FAILURE_SCREEN_NO_CONTRACTS_EVALUATED");
     // The only Slack send is the failure notice, never a degraded or success notice.
@@ -391,5 +402,98 @@ describe("direct Slack delivery in autonomousOptionsAnalysis", () => {
     expect(text).toContain("FAILED");
     expect(text).toContain("FAILURE_SCREEN_NO_CONTRACTS_EVALUATED");
     expect(text).not.toContain("degraded");
+  });
+});
+
+describe("below-floor partial through the pipeline (#3186)", () => {
+  let env: Env;
+  const sessionId = "coverage_floor_test_trader";
+
+  beforeEach(() => {
+    const mockKv = new MockKVNamespace();
+    const { namespace: sessionStoreNs } = makeFakeSessionStore();
+    env = {
+      APP_ENV: "TEST",
+      APP_BASE_URL: "https://agent.openaimp.com",
+      ETRADE_ENVIRONMENT: "sandbox",
+      ET_API_KEY: "sandbox_consumer_key_123",
+      ET_API_SECRET: "sandbox_consumer_secret_456",
+      ET_BASE_URL: "https://apisb.etrade.com/v1",
+      ETRADE_KV: mockKv as any,
+      SESSION_STORE: sessionStoreNs,
+    } as unknown as Env;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("a 1-of-4 run stamps a below-floor partial and the degraded notice is what would be sent", async () => {
+    // Old pin asserted the degraded notice was sent by
+    // autonomousOptionsAnalysis for a hand-built 3/100 partial; that
+    // shape is unreachable through the scheduled entry (2-symbol
+    // monolithic cap, sharded returns before delivery). This pin
+    // proves the same behavior at the deepest reachable level: the
+    // real pipeline stamps a below-floor partial from real chains,
+    // and the degraded notice renders from it with no success text
+    // or report link.
+    const symbols = ["SYM000", "SYM001", "SYM002", "SYM003"];
+    vi.spyOn(ETradeRestClient.prototype, "getOptionExpireDates").mockImplementation(async () => [expiryObj] as never);
+    vi.spyOn(ETradeRestClient.prototype, "getOptionChains").mockImplementation(async (args: { symbol: string }) =>
+      args.symbol === "SYM000" ? chainFor("SYM000", 150) : null,
+    );
+
+    const storage = memoryStageStorage();
+    const runId = "coverage-floor-below-1-of-4";
+    const outcome = await runOptionsScreenWorkflow(
+      {
+        runId,
+        userLogin: sessionId,
+        request: {
+          assetClass: "options",
+          trigger: "scheduled",
+          classInput: {
+            scan: {
+              symbols,
+              template: {
+                thesis: "bullish",
+                targetDate: new Date(NOW + 30 * 86_400_000).toISOString().slice(0, 10),
+                expectedIvDirection: "unchanged",
+                maxPlannedLoss: 5000,
+                minRewardRisk: 0.1,
+                allowedStrategies: ["long_call"],
+                minDte: 14,
+                maxDte: 60,
+              },
+              options: { riskProfile: "balanced", maxSymbols: 4, eventCalendarBySymbol: {} },
+            },
+          },
+        } as never,
+      },
+      {
+        stages: createScannerScreenPorts({
+          agents: {
+            data: new OptionsDataAgent(new DynamicOptionsScreener(new ETradeRestClient(env, sessionId))),
+            risk: new StrategyRiskAgent(),
+            recommender: new RecommendationAgent(),
+          },
+          storage,
+        }),
+        claims: memoryStageClaims(),
+        queue: null,
+      },
+    );
+    expect(outcome.outcome).toBe("completed");
+    const shaped = await storage.get(optionsArtifactKey(runId, "shapeReport")) as any;
+    expect(shaped.partial).toMatchObject({ evaluatedCount: 1, consideredCount: 4 });
+    expect(optionsCoverageBelowBroadcastFloor(shaped.partial)).toBe(true);
+    const notice = formatDegradedCoverageNotice(shaped.partial, "Options screen", "bullish");
+    expect(notice).toContain("1 of 4");
+    expect(notice).toContain("Top skip reason");
+    expect(notice).not.toContain("✅");
+    expect(notice).not.toContain("Screen completed");
+    expect(notice).not.toContain("completed");
+    expect(notice).not.toContain("Report:");
+    expect(notice).not.toContain("http");
   });
 });

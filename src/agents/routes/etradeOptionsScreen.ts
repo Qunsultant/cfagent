@@ -17,47 +17,39 @@ import {
   DynamicOptionsScreener,
   UnifiedOptionsService,
   adaptOpportunityScanToOptionScreenResult,
-  buildCalibratedOptionChains,
-  createOptionsScreeningProvider,
-  OPTIONS_SCREENING_PROVIDER_ID,
   parseOptionsScreenRequest,
   buildStrategyReportInput,
   strategyReportArtifactLinks,
+  buildOpportunityScanSummary,
+  bodyPresentFields,
+  OptionsDataAgent,
+  RecommendationAgent,
+  StrategyRiskAgent,
+  resolveStrategyMode,
+  type OpportunityScanResult,
 } from "../../trading";
+import {
+  createScannerScreenPorts,
+  type ScannerPipelineRequest,
+} from "../../workflows/strategyScreenPorts";
 import { createOptionsDiscoveryPorts } from "../../data/createOptionsDiscoveryPorts";
 import { isDemoCalibratedChainsEnabled } from "../../config/demoMode";
 import { buildDataProviderPorts } from "../../data/buildDataProviderPorts";
 import { deliverGatedSlack } from "../../services/gatedSlackDelivery";
-import { screenerOutcomeFromRunResult } from "../../services/screenerFollowups";
-import { recordJobOutcome } from "../../services/jobOutcomes";
 import { recordOptionsRunOutcome, storeOptionsCanonicalReport } from "../../services/optionsServeRecord";
 import { resolveTenantProviders } from "../../services/tenantProviders";
 import { resolveTenantProviderContext, withProviderProvenance } from "../../services/optionsProviderContext";
-import {
-  cfpaySendEmail,
-  cfpaySendEmailWithAttachments,
-  getCfpayConfig,
-} from "../../services/cfpayA2A";
-import {
-  resolveOptionsRunEmailRecipient,
-  sendOptionsRunEmail,
-} from "../../services/optionsRunEmail";
-import { ETradeEmailTradingService } from "../../trading";
 import { getEventCalendarCoverage, toEventCalendarInfo } from "../../services/eventCalendar";
 import type { EtradeOptionsRouteContext } from "./etradeOptions";
-import { emitOptionsStageBoundaries } from "../../workflows/optionsStageSeam";
+import { createOptionsScreenPorts, optionsArtifactKey } from "../../workflows/optionsScreenPorts";
+import { runOptionsScreenWorkflow } from "../../workflows/optionsScreenWorkflow";
+import {
+  createManualOptionsRecordBuilder,
+  createManualOptionsScreenDelivery,
+} from "../../workflows/manualOptionsScreen";
+import { createSqlStageClaimStore } from "../../data/stageClaimsStore";
 
 type OptionsScreenValue = Extract<ReturnType<typeof parseOptionsScreenRequest>, { ok: true }>["value"];
-
-/**
- * Issue #3191 - options screens are NOT a durable workflow: this request
- * handler is the runtime, so its phases are named in the shared
- * `stageRuntimeIds` module rather than given invented `step.do` ids. The pin
- * in tests/options_trading_stage_ids_3191.test.ts proves each phase still
- * corresponds to a real call in this file.
- */
-export { OPTIONS_SCREEN_PHASES } from "../../workflows/stageRuntimeIds";
-export type { OptionsScreenPhase } from "../../workflows/stageRuntimeIds";
 
 export async function executeOptionsScreen(args: {
   ctx: EtradeOptionsRouteContext;
@@ -73,306 +65,231 @@ export async function executeOptionsScreen(args: {
   deferDelivery?: boolean;
 }): Promise<Response> {
   const { ctx, userLogin, screener, screenFilter, screenPushToSlack, screenSlackChannel, screenUniverseLabel, screenEmailTo, deferDelivery } = args;
-  // Consolidation C1 (issue #1201, epic #1151 R1): the manual options
-  // screen executes through the Phase 0 ScreeningProvider (the
-  // registry's options provider wrapping this same screener) — the
-  // unified stack is the production path here, not a parallel one.
-  // Same engine, same result object; the provider only stamps its
-  // provenance id. The demo-fallback logic below is untouched.
-  const provider = createOptionsScreeningProvider(OPTIONS_SCREENING_PROVIDER_ID, screener);
-  const screened = await provider.screen({ assetClass: "options", filter: screenFilter });
-  if (screened.assetClass !== "options") {
-    throw new Error("Options screening provider returned a non-options result.");
-  }
-  let result = screened.result;
-
-  // Demo-mode fallback (issue #65): generated chains may substitute for an
-  // empty live screen ONLY in dev/demo deployments with the gate enabled,
-  // and the result is stamped dataSource "calibrated-demo". Production is
-  // live-only: an empty live screen returns empty, with its fetch errors.
-  if (result.contracts.length === 0 && isDemoCalibratedChainsEnabled() && screenFilter.underlyingSymbols && screenFilter.underlyingSymbols.length > 0 && screenFilter.underlyingSymbols[0] !== "BROKEN") {
-    const fallbackChains = buildCalibratedOptionChains(screenFilter.underlyingSymbols, screenFilter.minDte ?? 0, screenFilter.maxDte ?? 90);
-    if (fallbackChains.length > 0) {
-      const chainItems = fallbackChains.map((c) => ({ symbol: c.symbol, chain: c }));
-      const fallbackResult = screener.evaluateChains(chainItems, screenFilter, screenFilter.underlyingSymbols.length, {
-        warnings: ["Calibrated demo chains — generated data for development/demo, not live market data."],
-      });
-      if (fallbackResult.contracts.length > 0) {
-        fallbackResult.dataSource = "calibrated-demo";
-        result = fallbackResult;
-      }
-    }
-  }
-  if (result.dataSource === undefined) result.dataSource = "live";
-
-  // Issue #294/#421/#423/#424 (PR #432): manual screens honor pushToSlack
-  // — PDF generated, stored per-run, delivered via the Slack A2A path
-  // with a reportUrl; failures notify too.
-  // Issue #1023 (S4): generation goes through the ONE unified report
-  // pipeline (delegates to ReportAssetAgent per #680/#914) — the same
-  // idiom as the scheduled path in ScheduledTasksService. There is no
-  // direct-generator fallback: on pipeline failure the run continues
-  // with no pdfKey/reportUrl, exactly as a scheduled failure surfaces.
-  let optionsReportUrl: string | undefined;
-  let optionsPdfKey: string | undefined;
-  let pdfBytes: Uint8Array | undefined;
-  let fileName: string | undefined;
-
-  try {
-    const { runReportPipeline } = await import("../../services/unifiedReportPipeline");
-    const pipelineResult = await runReportPipeline(
-      ctx.env as any,
-      null as any, // Storage handled by ReportAssetAgent internally
-      {
-        type: "options",
-        trigger: "manual",
-        result,
-        userLogin,
-        title: `Options contract screen — ${(screenFilter.underlyingSymbols || []).join(", ") || screenUniverseLabel || "selected underlyings"}`,
-        summary: `${result.totalUnderlyingsScanned} underlyings scanned, ${result.totalContractsEvaluated} contracts evaluated, ${result.matchedCount} matched.`,
-        timestamp: new Date().toISOString(),
-      }
-    );
-    if (pipelineResult.pdfStatus === "generated") {
-      optionsPdfKey = pipelineResult.pdfKey;
-      // Fetch the bytes for Slack delivery (same seam the scheduled
-      // path uses: ScreenerAgent storage first, ReportAssetAgent
-      // fallback inside getPdfByKey).
-      const screenerAgent = ctx.getScreenerAgent(userLogin);
-      const pdfData = await screenerAgent.getPdfByKey(optionsPdfKey);
-      if (pdfData) {
-        pdfBytes = pdfData.bytes;
-        fileName = pdfData.fileName;
-      }
-      optionsReportUrl = `/api/options/report.pdf?key=${encodeURIComponent(optionsPdfKey)}`;
-    } else {
-      console.warn("[Orchestrator] Manual options contract PDF generation failed:", pipelineResult.pdfError);
-    }
-  } catch (pdfErr) {
-    console.warn("[Orchestrator] Manual options contract PDF generation failed:", pdfErr instanceof Error ? pdfErr.message : String(pdfErr));
-  }
-
-  // Issue #1195 (#1173 R3b): options XLSX — its own failure domain,
-  // mirroring the stock persistRun convention (failures recorded,
-  // never fatal, never silent).
-  let optionsXlsxKey: string | undefined;
-  let optionsXlsxStatus: "generated" | "failed" | undefined;
-  let optionsXlsxError: string | undefined;
-  let optionsXlsxBytes: Uint8Array | undefined;
-  let optionsXlsxFileName: string | undefined;
-  try {
-    const agent = ctx.getScreenerAgent(userLogin);
-    const stored = await agent.generateAndStoreOptionsXlsx(result);
-    optionsXlsxKey = stored.key;
-    optionsXlsxFileName = stored.fileName;
-    optionsXlsxStatus = "generated";
-    const data = await agent.getOptionsXlsxByKey(stored.key);
-    if (data) optionsXlsxBytes = data.bytes;
-  } catch (xlsxErr) {
-    optionsXlsxStatus = "failed";
-    optionsXlsxError = xlsxErr instanceof Error ? xlsxErr.message : String(xlsxErr);
-    console.warn("[Orchestrator] Manual options XLSX generation failed:", optionsXlsxError);
-  }
-  const optionsXlsxUrl = optionsXlsxKey
-    ? `/api/options/report.xlsx?key=${encodeURIComponent(optionsXlsxKey)}`
-    : undefined;
-
-  // Issue #1346: options CSV — its own failure domain, mirroring
-  // the XLSX block (failures recorded, never fatal, never silent).
-  let optionsCsvKey: string | undefined;
-  let optionsCsvStatus: "generated" | "failed" | undefined;
-  let optionsCsvError: string | undefined;
-  let optionsCsvBytes: Uint8Array | undefined;
-  let optionsCsvFileName: string | undefined;
-  try {
-    const agent = ctx.getScreenerAgent(userLogin);
-    const stored = await agent.generateAndStoreOptionsCsv(result);
-    optionsCsvKey = stored.key;
-    optionsCsvFileName = stored.fileName;
-    optionsCsvStatus = "generated";
-    const data = await agent.getOptionsCsvByKey(stored.key);
-    if (data) optionsCsvBytes = data.bytes;
-  } catch (csvErr) {
-    optionsCsvStatus = "failed";
-    optionsCsvError = csvErr instanceof Error ? csvErr.message : String(csvErr);
-    console.warn("[Orchestrator] Manual options CSV generation failed:", optionsCsvError);
-  }
-  const optionsCsvUrl = optionsCsvKey
-    ? `/api/options/report.csv?key=${encodeURIComponent(optionsCsvKey)}`
-    : undefined;
-
-  // Deliver over gated Slack (#3177) unless caller explicitly opted out
-  // (or the tracked follow-up pipeline owns delivery — issue #1123).
-  // S5a: when the host provides the follow-up bridge, the run is
-  // recorded + chained through the pipeline instead of delivering
-  // inline; the gated dispatch remains the fallback for hosts without it.
-  const shouldNotifySlack = screenPushToSlack !== false && !deferDelivery;
-  // Issue #1333: delivery states for the inline outcome record below
-  // (the bridged path records through the job-tree hook instead).
-  let slackState: string | undefined;
-  let emailState: string | undefined;
-  if (shouldNotifySlack && ctx.scheduleScreenerFollowups) {
-    await ctx.scheduleScreenerFollowups(
-      screenerOutcomeFromRunResult("options", {
-        success: true,
-        thesis: screenUniverseLabel,
-        totalScanned: result.totalUnderlyingsScanned,
-        matchedCount: result.matchedCount,
-        pdfKey: optionsPdfKey,
-        pdfStatus: optionsPdfKey ? "generated" : undefined,
-        xlsxKey: optionsXlsxKey,
-        xlsxStatus: optionsXlsxStatus,
-        xlsxError: optionsXlsxError,
-        csvKey: optionsCsvKey,
-        csvStatus: optionsCsvStatus,
-        csvError: optionsCsvError,
-        summary: `${result.totalUnderlyingsScanned} underlyings scanned · ${result.totalContractsEvaluated} contracts evaluated · ${result.matchedCount} matched.`,
-      }, ctx.env.APP_BASE_URL),
-      userLogin,
-    );
-  } else if (shouldNotifySlack) {
-    const summary = `📊 Options Contract Screen — ${(screenFilter.underlyingSymbols || []).join(", ") || screenUniverseLabel || "selected underlyings"}\n${result.totalUnderlyingsScanned} underlyings scanned · ${result.totalContractsEvaluated} contracts evaluated · ${result.matchedCount} matched.\n${result.filterSummary || ""}`;
-    try {
-      const sent = await deliverGatedSlack(ctx.env, {
-        userLogin,
-        text: summary,
-        channel: screenSlackChannel,
-        ...(pdfBytes && fileName ? {
-          pdf: {
-            bytes: pdfBytes,
-            fileName,
-            title: `Options Contract Screen — ${new Date().toISOString().slice(0, 10)}`,
-            comment: `📄 Options contract screener PDF\n\n${summary}`,
-          },
-        } : {}),
-        ...(optionsXlsxBytes && optionsXlsxFileName ? {
-          files: [{ bytes: optionsXlsxBytes, fileName: optionsXlsxFileName, title: optionsXlsxFileName }],
-        } : {}),
-        ...(optionsCsvBytes && optionsCsvFileName ? {
-          files: [{ bytes: optionsCsvBytes, fileName: optionsCsvFileName, title: optionsCsvFileName }],
-        } : {}),
-      });
-      slackState = sent.ok ? "sent" : "failed";
-      if (!sent.ok) console.warn("[Orchestrator] Slack options contract PDF delivery failed:", sent.error);
-    } catch (slackErr) {
-      console.warn("[Orchestrator] Slack options delivery error:", slackErr instanceof Error ? slackErr.message : String(slackErr));
-    }
-  }
-
-  // Issue #1336: manual options email — the one delivery cell the
-  // manual route lacked. Only the inline path sends here: when the
-  // follow-up pipeline owns delivery (bridge present, or a tracked
-  // job context via deferDelivery), the bridge plans the email
-  // instead — sending here too would double-deliver. Best-effort:
-  // failures warn, never fail the run (same idiom as inline Slack).
-  if (!deferDelivery && !ctx.scheduleScreenerFollowups) {
-    const emailTo = resolveOptionsRunEmailRecipient(screenEmailTo, ctx.env as unknown as Record<string, unknown>);
-    if (emailTo) {
-      const symbolsLabel = (screenFilter.underlyingSymbols || []).join(", ") || screenUniverseLabel || "selected underlyings";
-      const emailSummary = `📊 Options Contract Screen — ${symbolsLabel}\n${result.totalUnderlyingsScanned} underlyings scanned · ${result.totalContractsEvaluated} contracts evaluated · ${result.matchedCount} matched.\n${result.filterSummary || ""}`;
-      try {
-        const emailService = new ETradeEmailTradingService(ctx.env as any, ctx.getOrm(), userLogin);
-        const sent = await sendOptionsRunEmail(
-          {
-            cfpay: getCfpayConfig(ctx.env),
-            sendCfpay: (config, a) => cfpaySendEmail(config, a.to, a.subject, a.body),
-            sendCfpayWithAttachments: (config, a) => cfpaySendEmailWithAttachments(config, a),
-            sendLocal: (to, subject, html, text, attachments) => emailService.sendOutboundEmail(to, subject, html, text, attachments),
-          },
-          {
-            to: emailTo,
-            subject: `📊 Options Contract Screen — ${symbolsLabel} — ${new Date().toISOString().slice(0, 10)}`,
-            textBody: `${emailSummary}${optionsReportUrl ? `\n\nPDF report: ${optionsReportUrl}` : ""}`,
-            htmlBody: `${emailSummary.replace(/\n/g, "<br/>")}${optionsReportUrl ? `<br/><br/>PDF report: ${optionsReportUrl}` : ""}`,
-            ...(pdfBytes && fileName ? { pdf: { bytes: pdfBytes, fileName } } : {}),
-            ...(optionsXlsxBytes && optionsXlsxFileName ? { xlsx: { bytes: optionsXlsxBytes, fileName: optionsXlsxFileName } } : {}),
-          },
-        );
-        emailState = sent.sent ? "sent" : "failed";
-        if (!sent.sent) console.warn("[Orchestrator] Manual options email delivery failed for", emailTo);
-      } catch (emailErr) {
-        console.warn("[Orchestrator] Manual options email error:", emailErr instanceof Error ? emailErr.message : String(emailErr));
-      }
-    }
-  }
-
-  const generatedAt = new Date().toISOString();
-  const generationId = `options_scanner:manual:${generatedAt}`;
-  // Provider/broker slice 2 (#2598): stamp the tenant's selections into
-  // body.provenance — the same two fields the unified record carries,
-  // resolved fail-open (etrade/etrade) like every other slice-2 read.
-  // This runs only after the feed gate passed, so the stamped provider
-  // is a chain provider (or the fail-open default).
-  const screenProviderProvenance = withProviderProvenance(
-    {},
-    resolveTenantProviderContext(await resolveTenantProviders(ctx.env)),
-  );
-  storeOptionsCanonicalReport(ctx.getOrm(), {
-    runId: generationId,
-    generationId,
-    title: `Options contract screen — ${(screenFilter.underlyingSymbols || []).join(", ") || screenUniverseLabel || "selected underlyings"}`,
-    source: "options_scanner",
-    summary: `${result.totalUnderlyingsScanned} underlyings scanned, ${result.totalContractsEvaluated} contracts evaluated, ${result.matchedCount} matched.`,
-    body: { generatedAt, provenance: screenProviderProvenance, filter: screenFilter, result, pdfKey: optionsPdfKey, pdfStatus: optionsPdfKey ? "generated" : "failed", reportUrl: optionsReportUrl, xlsxKey: optionsXlsxKey, xlsxStatus: optionsXlsxStatus, xlsxError: optionsXlsxError, xlsxUrl: optionsXlsxUrl, csvKey: optionsCsvKey, csvStatus: optionsCsvStatus, csvError: optionsCsvError, csvUrl: optionsCsvUrl },
-    createdAt: generatedAt,
-    // Options run-record fix: owner-scope the row — an ownerless write is invisible
-    // to the owner-scoped Reports read.
-    userLogin,
-  },
-  // Issue #1169 S4-1: thread ctx.env so the seam indexes this
-  // options_scanner row at write time.
-  ctx.env);
-
-  // Issue #1333: the inline manual-options outcome — recorded here
-  // ONLY when the bridge did not take the run (bridged runs record
-  // through the job-tree hook; recording both would double the feed).
-  // Never throws: a sink failure must not fail the run.
-  if (!(shouldNotifySlack && ctx.scheduleScreenerFollowups)) {
-    try {
-      recordJobOutcome(ctx.ensureTables(), {
-        id: `options-manual:${generationId}`,
-        kind: "options",
-        trigger: "manual",
-        status: "completed",
-        scanned: result.totalUnderlyingsScanned,
-        matched: result.matchedCount,
-        reportUrl: optionsReportUrl,
-        pdfKey: optionsPdfKey,
-        xlsxKey: optionsXlsxKey,
-        csvKey: optionsCsvKey,
-        deliveryStates: {
-          ...(slackState ? { slack: slackState } : {}),
-          ...(emailState ? { email: emailState } : {}),
-        },
-        origin: "manual-options-inline",
-        createdAt: generatedAt,
-      });
-    } catch (outcomeErr) {
-      console.warn("[Orchestrator] Manual options outcome record failed:", outcomeErr instanceof Error ? outcomeErr.message : String(outcomeErr));
-    }
-  }
-
-  // Issue #3072 - the options stage seam. Published here, at the end of a
-  // successful run, because that is when every phase's artifact exists: the
-  // canonical report row (generationId), the report keys, and the recorded
-  // delivery states. A run that failed earlier published nothing - a boundary
-  // is evidence, not a progress bar. Never throws; a seam gap is not a failed
-  // screen.
-  await emitOptionsStageBoundaries({
-    artifacts: {
+  // Issue #3186 (step 3d): the manual screen runs the one options
+  // pipeline instead of the registry provider. The run id IS the
+  // route's generation id (options_scanner:manual:<iso>), so the
+  // pipeline's canonical row is the route's row - no duplicate.
+  // The report + delivery blocks live in the manual delivery module
+  // (workflows/manualOptionsScreen.ts) as the pipeline's shapeReport
+  // / deliver stages; the #3072 end-of-run emitter retires for this
+  // entry (the pipeline publishes per-stage messages instead - and
+  // this was its only caller, so the legacy phases retire with it).
+  const generationId = `options_scanner:manual:${new Date().toISOString()}`;
+  const claims = createSqlStageClaimStore(() => ctx.agentCtx.storage.sql);
+  const ports = createOptionsScreenPorts({
+    screener,
+    storage: ctx.agentCtx.storage,
+    canonical: {
+      storeCanonicalReport: (input, env) => ctx.getOrm().storeCanonicalReport(input, env),
+    },
+    ...createManualOptionsScreenDelivery({
+      ctx: ctx as never,
+      screenFilter,
+      screenPushToSlack,
+      screenSlackChannel,
+      screenUniverseLabel,
+      screenEmailTo,
+      deferDelivery,
+    }),
+    record: createManualOptionsRecordBuilder(ctx as never),
+    demoFallback: isDemoCalibratedChainsEnabled(),
+  });
+  const outcome = await runOptionsScreenWorkflow(
+    {
       runId: generationId,
       userLogin,
-      ...(optionsPdfKey || optionsXlsxKey || optionsCsvKey
-        ? { reportKey: optionsPdfKey ?? optionsXlsxKey ?? optionsCsvKey }
-        : {}),
-      ...(slackState || emailState
-        ? { deliveryState: `options:delivery:${generationId}:${[slackState, emailState].filter(Boolean).join("+")}` }
-        : {}),
+      request: {
+        assetClass: "options",
+        runIdentity: { runId: generationId },
+        trigger: "manual",
+        classInput: {
+          request: {
+            filter: screenFilter,
+            pushToSlack: screenPushToSlack,
+            slackChannel: screenSlackChannel,
+            universe: screenUniverseLabel,
+            emailTo: screenEmailTo,
+          },
+        },
+      },
     },
-    queue: (ctx.env as { SCREENER_EVENTS?: { send: (body: unknown) => Promise<unknown> } }).SCREENER_EVENTS,
+    {
+      stages: ports,
+      claims,
+      queue: (ctx.env as { SCREENER_EVENTS?: { send: (body: unknown) => Promise<unknown> } }).SCREENER_EVENTS ?? null,
+    },
+  );
+  if (outcome.outcome === "failed") {
+    throw new Error(
+      `options screen failed at ${outcome.failedStage}: ${outcome.reason ?? "unknown reason"}`,
+    );
+  }
+  const screened = await ctx.agentCtx.storage.get<{ result: Record<string, unknown> }>(
+    optionsArtifactKey(generationId, "screen"),
+  );
+  const shaped = await ctx.agentCtx.storage.get<{ report: Record<string, unknown> }>(
+    optionsArtifactKey(generationId, "shapeReport"),
+  );
+  if (!screened || screened.result === undefined || !shaped || shaped.report === undefined) {
+    throw new Error(`options screen completed but its artifacts are missing for run ${generationId}`);
+  }
+  const result = screened.result;
+  const report = shaped.report;
+  return Response.json({
+    ...result,
+    pdfKey: report["pdfKey"],
+    reportUrl: report["reportUrl"],
+    xlsxKey: report["xlsxKey"],
+    xlsxUrl: report["xlsxUrl"],
+    csvKey: report["csvKey"],
+    csvUrl: report["csvUrl"],
   });
+}
 
-  return Response.json({ ...result, pdfKey: optionsPdfKey, reportUrl: optionsReportUrl, xlsxKey: optionsXlsxKey, xlsxUrl: optionsXlsxUrl, csvKey: optionsCsvKey, csvUrl: optionsCsvUrl });
+
+/**
+ * Issue #3186 step 3e - the unified handler's opportunities action
+ * through the one scanner pipeline. Mirrors
+ * UnifiedOptionsService.execute()'s opportunities case field for
+ * field: template, scan options (profile merge included), request
+ * record (caller-sent fields only, targetDate resolved), platform
+ * run id via classInput. A failed profile resolution returns the
+ * same error RESPONSE execute() returns (never a throw, never a
+ * profile-less run). A failed pipeline outcome throws, exactly as
+ * an execute() throw surfaces on this route. Deliberate difference:
+ * MEMORY_CACHE is bypassed (60s chain TTL; a rapid re-click
+ * re-scans instead of re-serving - the honest behavior for a manual
+ * trigger-now).
+ */
+async function runUnifiedOpportunitiesViaPipeline(args: {
+  ctx: EtradeOptionsRouteContext;
+  service: UnifiedOptionsService;
+  reqData: any;
+  userLogin: string;
+  discoveryPorts: ReturnType<typeof createOptionsDiscoveryPorts>;
+}) {
+  const { ctx, service, reqData, userLogin, discoveryPorts } = args;
+  const symbols =
+    reqData.symbols && reqData.symbols.length > 0
+      ? reqData.symbols
+      : reqData.symbol
+        ? [reqData.symbol.toUpperCase()]
+        : [];
+  if (symbols.length === 0) {
+    throw new Error("Provide explicit symbols or a live universe for options screening; no static symbols are substituted.");
+  }
+  const targetDate =
+    reqData.targetDate || new Date(Date.now() + 30 * 86400000).toISOString().split("T")[0];
+  const { profile: strategyProfile, error: profileError } =
+    await service.resolveStrategyProfile(reqData);
+  if (profileError) {
+    return service.formatResponse(reqData, { error: profileError }, profileError, false);
+  }
+  const { engineClient, platformRunId } = await service.resolveEngineClient();
+  const runId = `options_scanner:unified:${new Date().toISOString()}:${reqData.thesis || "mixed"}`;
+  const outcome = await runOptionsScreenWorkflow(
+    {
+      runId,
+      userLogin,
+      request: {
+        assetClass: "options",
+        runIdentity: { runId },
+        trigger: "manual",
+        classInput: {
+          scan: {
+            symbols,
+            template: {
+              thesis: reqData.thesis || "bullish",
+              targetDate,
+              expectedIvDirection: reqData.expectedIvDirection || "unchanged",
+              maxPlannedLoss: reqData.maxPlannedLoss || 1000,
+              minRewardRisk: reqData.minRewardRisk || 1.5,
+              allowedStrategies:
+                reqData.allowedStrategies && reqData.allowedStrategies.length > 0
+                  ? reqData.allowedStrategies
+                  : ["all"],
+              optimizationBias: reqData.optimizationBias,
+              ...(reqData.perSymbol ? { perSymbol: reqData.perSymbol } : {}),
+              ...(reqData.statedTarget ? { statedTarget: reqData.statedTarget } : {}),
+              ...(reqData.minDte !== undefined ? { minDte: reqData.minDte } : {}),
+              ...(reqData.maxDte !== undefined ? { maxDte: reqData.maxDte } : {}),
+              strategyMode: resolveStrategyMode(reqData),
+              ...(resolveStrategyMode(reqData) === "all" ? { evaluateAllStrategies: true } : {}),
+              ...(reqData.farDated !== undefined ? { farDated: reqData.farDated } : {}),
+            },
+            options: {
+              riskProfile: reqData.riskProfile || "balanced",
+              ...(reqData.mode ? { mode: reqData.mode } : {}),
+              ...(reqData.limit !== undefined ? { limit: reqData.limit } : {}),
+              ...(reqData.candidateLimit !== undefined ? { candidateLimit: reqData.candidateLimit } : {}),
+              ...(reqData.maxSymbols !== undefined ? { maxSymbols: reqData.maxSymbols } : {}),
+              ...(reqData.eventCalendarBySymbol ? { eventCalendarBySymbol: reqData.eventCalendarBySymbol } : {}),
+              ...(reqData.offset !== undefined ? { offset: reqData.offset } : {}),
+              ...(strategyProfile
+                ? { profile: strategyProfile, explicitFields: bodyPresentFields(reqData, true) }
+                : {}),
+            },
+          },
+          // Issue #103: the caller's original request, recorded
+          // BEFORE the save - only fields the caller sent, with
+          // symbols/targetDate the resolved values the scan ran
+          // under - exactly as execute() built it.
+          requestRecord: {
+            symbols,
+            targetDate,
+            ...(reqData.thesis !== undefined ? { thesis: reqData.thesis } : {}),
+            ...(reqData.riskProfile !== undefined ? { riskProfile: reqData.riskProfile } : {}),
+            ...(reqData.mode !== undefined ? { mode: reqData.mode } : {}),
+            ...(reqData.profileId !== undefined ? { profileId: reqData.profileId } : {}),
+            ...(reqData.profileName !== undefined ? { profileName: reqData.profileName } : {}),
+            ...(reqData.limit !== undefined ? { limit: reqData.limit } : {}),
+            ...(reqData.offset !== undefined ? { offset: reqData.offset } : {}),
+            ...(reqData.expectedIvDirection !== undefined ? { expectedIvDirection: reqData.expectedIvDirection } : {}),
+            ...(reqData.optimizationBias !== undefined ? { optimizationBias: reqData.optimizationBias } : {}),
+            ...(reqData.maxPlannedLoss !== undefined ? { maxPlannedLoss: reqData.maxPlannedLoss } : {}),
+            ...(reqData.minRewardRisk !== undefined ? { minRewardRisk: reqData.minRewardRisk } : {}),
+            ...(reqData.allowedStrategies !== undefined ? { allowedStrategies: reqData.allowedStrategies } : {}),
+            ...(reqData.perSymbol !== undefined ? { perSymbol: reqData.perSymbol } : {}),
+            ...(reqData.statedTarget !== undefined ? { statedTarget: reqData.statedTarget } : {}),
+            ...(reqData.minDte !== undefined ? { minDte: reqData.minDte } : {}),
+            ...(reqData.maxDte !== undefined ? { maxDte: reqData.maxDte } : {}),
+            ...(reqData.strategyMode !== undefined || reqData.evaluateAllStrategies !== undefined
+              ? { strategyMode: resolveStrategyMode(reqData) }
+              : {}),
+            ...(reqData.farDated !== undefined ? { farDated: reqData.farDated } : {}),
+            ...(reqData.candidateLimit !== undefined ? { candidateLimit: reqData.candidateLimit } : {}),
+          },
+          ...(platformRunId ? { platformRunId } : {}),
+        },
+      } as ScannerPipelineRequest,
+    },
+    {
+      stages: createScannerScreenPorts({
+        agents: {
+          data: new OptionsDataAgent(new DynamicOptionsScreener(engineClient)),
+          risk: new StrategyRiskAgent(),
+          recommender: new RecommendationAgent(),
+        },
+        storage: ctx.agentCtx.storage,
+        scanRunStore: discoveryPorts.scanRuns,
+      }),
+      claims: createSqlStageClaimStore(() => ctx.agentCtx.storage.sql),
+      queue: (ctx.env as { SCREENER_EVENTS?: { send: (body: unknown) => Promise<unknown> } }).SCREENER_EVENTS ?? null,
+    },
+  );
+  if (outcome.outcome !== "completed") {
+    throw new Error(`Unified options scan failed at ${outcome.failedStage}: ${outcome.reason}`);
+  }
+  const shaped = await ctx.agentCtx.storage.get<OpportunityScanResult & { scanRunId?: string; persisted?: boolean }>(
+    optionsArtifactKey(runId, "shapeReport"),
+  );
+  if (!shaped) {
+    throw new Error("Unified options scan completed without a report artifact; refusing to answer from nothing.");
+  }
+  // The shaped result already carries its save receipt (scanRunId /
+  // persisted) from the persist stage; the summary is the shared
+  // opportunities-case summary.
+  return service.formatResponse(reqData, shaped, buildOpportunityScanSummary(shaped), false);
 }
 
 export async function executeUnifiedOptions(args: {
@@ -395,7 +312,8 @@ export async function executeUnifiedOptions(args: {
   // #2303: the platform ports for the service's platform block
   // (built from env; nulls when AGENT_DB is unbound).
   const dpPorts = await buildDataProviderPorts(ctx.env);
-  const service = new UnifiedOptionsService(ctx.env, userLogin, ctx.requestedEnv, ctx.getOrm(), createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).scanRuns, createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).strategyProfiles, ctx.agentCtx.storage.sql, { sql: ctx.agentCtx.storage.sql, blobStorage: ctx.agentCtx.storage, env: ctx.env }, undefined, dpPorts);
+  const discoveryPorts = createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage });
+  const service = new UnifiedOptionsService(ctx.env, userLogin, ctx.requestedEnv, ctx.getOrm(), discoveryPorts.scanRuns, discoveryPorts.strategyProfiles, ctx.agentCtx.storage.sql, { sql: ctx.agentCtx.storage.sql, blobStorage: ctx.agentCtx.storage, env: ctx.env }, undefined, dpPorts);
   // Issue #16: event calendars are server-side facts — strip any
   // client-supplied calendar, then fetch coverage for the
   // actions that run the strategy engine. The calendar service
@@ -420,7 +338,16 @@ export async function executeUnifiedOptions(args: {
       );
     }
   }
-  const result = await service.execute(reqData);
+  // Issue #3186 step 3e - the unified opportunities action runs
+  // the one scanner pipeline instead of service.execute() (same
+  // engine, staged). Every other action keeps execute() exactly as
+  // before; the pipeline's formatted response is the same shape
+  // execute() returns, so the report/delivery/response code below
+  // reads it unchanged.
+  const result =
+    reqData.action === "opportunities"
+      ? await runUnifiedOpportunitiesViaPipeline({ ctx, service, reqData, userLogin, discoveryPorts })
+      : await service.execute(reqData);
 
   let reportUrl: string | undefined;
   let pdfKey: string | undefined;

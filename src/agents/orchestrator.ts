@@ -1242,7 +1242,7 @@ export class OrchestratorAgent extends PortThink {
         }
         await this.ctx.storage.put(key, { slot });
       }
-      const service = new ScheduledTasksService(this.env, this.getOrm(), userLogin, createOptionsDiscoveryPorts({ sql: this.ctx.storage.sql, storage: this.ctx.storage }).scanRuns, undefined, undefined, undefined, (outcome, schedulerUserLogin, chainReport) => scheduleScreenerFollowups(this.asyncJobsContext(), outcome, schedulerUserLogin, chainReport), {sql:this.ctx.storage.sql,blobStorage:this.ctx.storage,env:this.env}, (spec) => (this as any).submitAsyncJob(spec));
+      const service = new ScheduledTasksService(this.env, this.getOrm(), userLogin, createOptionsDiscoveryPorts({ sql: this.ctx.storage.sql, storage: this.ctx.storage }).scanRuns, undefined, undefined, undefined, (outcome, schedulerUserLogin, chainReport) => scheduleScreenerFollowups(this.asyncJobsContext(), outcome, schedulerUserLogin, chainReport), {sql:this.ctx.storage.sql,blobStorage:this.ctx.storage,env:this.env}, (spec) => (this as any).submitAsyncJob(spec), undefined, this.env.SCREENER_EVENTS ?? null);
       const res = await service.autonomousOptionsAnalysis({ ...payload, userLogin, environment, sharded: payload?.sharded });
       if ((res as any).skipped) {
         return (outcome = { outcome: "skipped", detail: "service skipped" });
