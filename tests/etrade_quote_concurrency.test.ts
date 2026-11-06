@@ -40,7 +40,7 @@ describe("ETradeRestClient.fetchQuoteDetailed — per-call errors under concurre
       AI_SEARCH_ENDPOINT: "https://ai.example.com",
       SESSION_STORE: sessionStoreNs,
       ETRADE_KV: mockKv,
-      SEARCH_AGENT: {} as any,
+      ORCHESTRATOR_AGENT: {} as any,
       ASSETS: {} as any,
       AI: {} as any,
       APP_ENV: "TEST",
