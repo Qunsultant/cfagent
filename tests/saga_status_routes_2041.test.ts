@@ -39,7 +39,7 @@ function auditRow(
 }
 
 /**
- * Fake SEARCH_AGENT stub: serves audit rows for the agent=saga
+ * Fake ORCHESTRATOR_AGENT stub: serves audit rows for the agent=saga
  * read (the audit API accepts agent without type, so the status
  * route does ONE read and filters by sagaId + session user).
  */
