@@ -710,7 +710,7 @@ describe("M7 E*TRADE unknown-symbol tail + stub unification", () => {
   });
 });
 
-describe("M8 caches stay separate, M9 adapter batch asymmetry, M11 Public partial", () => {
+describe("M8 caches stay separate, M9 adapter batch asymmetry (closed by #3530 S2), M11 Public partial", () => {
   it("a symbol can be fresh in quoteCache and stale/missing in liveMarketCache (and vice versa)", () => {
     const now = Date.now();
     const marketDataQuote = { symbol: "M8A", price: 111 } as any;
@@ -725,11 +725,18 @@ describe("M8 caches stay separate, M9 adapter batch asymmetry, M11 Public partia
     expect(getBatchMarketQuotes(["M8A"]).map((t) => t.price)).toEqual([222]);
   });
 
-  it("adapter getQuotesBatch exists for Yahoo only, not Alpaca", () => {
+  it("adapter getQuotesBatch exists for Yahoo and — since #3530 S2 closed the M9 asymmetry — for Alpaca too", () => {
+    // S2 adaptation (#3530 S2, disclosed): the M9 "adapter batch
+    // asymmetry" characterized Alpaca's missing batch leg.
+    // #3530 S2 deliberately adds AlpacaMarketDataProvider.getQuotes
+    // (multi-symbol snapshots) so the Alpaca feed job runs
+    // end-to-end; by the adapter factory's standing rule the
+    // adapter now exposes getQuotesBatch. The Yahoo half of the
+    // original pin is unchanged.
     const yahoo = createYahooDataProvider(new YahooFinanceProvider({} as unknown as Env), {} as unknown as Env);
     const alpaca = createAlpacaDataProvider(new AlpacaMarketDataProvider({} as unknown as Env), {} as unknown as Env);
     expect("getQuotesBatch" in yahoo).toBe(true);
-    expect("getQuotesBatch" in alpaca).toBe(false);
+    expect("getQuotesBatch" in alpaca).toBe(true);
   });
 
   it("Public row mapping stays partial: absent fields omitted, never zero-filled, no quoteStatus", () => {
