@@ -34,7 +34,7 @@ import type { Env } from "../src/types";
 const mockEnv: Env = {
   APP_BASE_URL: "https://agent.openaimp.com",
   AI_SEARCH_ENDPOINT: "https://ai-search.internal",
-  SEARCH_AGENT: {} as any,
+  ORCHESTRATOR_AGENT: {} as any,
   ETRADE_ENVIRONMENT: "sandbox",
 } as any;
 
