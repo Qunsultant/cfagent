@@ -79,16 +79,16 @@ export interface Env {
   // 2026-11-05): binding "AI_SEARCH", namespace "default" (the
   // owner-provided dashboard value), remote true. The field stays
   // optional in this type: absence = the namespace path is
-  // unconfigured and the agent degrades honestly to the MCP / REST
-  // paths. The instance name is in AI_SEARCH_INSTANCE below; the
-  // MCP path's endpoint var (AI_SEARCH_MCP_ENDPOINT) is
-  // deliberately unset in production (owner decision — the
-  // instance's public endpoint is not used).
+  // unconfigured and the agent degrades honestly to the MCP path
+  // (the former REST path over the public endpoint was retired by
+  // issue #3342, which also deleted the AI_SEARCH_ENDPOINT var
+  // this interface used to declare). The instance name is in
+  // AI_SEARCH_INSTANCE below; the MCP path's endpoint var
+  // (AI_SEARCH_MCP_ENDPOINT) is deliberately unset in production
+  // (owner decision — the instance's public endpoint is not used).
   AI_SEARCH?: AiSearchNamespace;
   // Issue #2223 (AiSearchAgent): the instance name the namespace
-  // path searches (env.AI_SEARCH.get(AI_SEARCH_INSTANCE)). Additive
-  // config — the REST leg keeps using AI_SEARCH_ENDPOINT below,
-  // the same var the SearchHub knowledge surface uses.
+  // path searches (env.AI_SEARCH.get(AI_SEARCH_INSTANCE)).
   AI_SEARCH_INSTANCE?: string;
   // Issue #2223 (AiSearchAgent): the instance's public MCP endpoint
   // URL (…search.ai.cloudflare.com/mcp) for the MCP path. Additive
@@ -123,7 +123,6 @@ export interface Env {
   // deliberately NOT in wrangler.jsonc: the fleet ships with
   // nothing disabled.
   AGENT_CAPABILITIES_DISABLED?: string;
-  AI_SEARCH_ENDPOINT: string;
   APP_NAME: string;
   GITHUB_CLIENT_ID: string;
   GITHUB_CLIENT_SECRET: string;
