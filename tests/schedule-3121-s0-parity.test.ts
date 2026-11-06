@@ -577,18 +577,19 @@ describe("U-P02 URL inventory (§8 U-01/U-02): navConfig.ts #2974 synthesizes th
 });
 
 describe("U-P03 URL inventory (§8 U-03/U-04/U-05): deep links and deep-link surfaces for schedules", () => {
-  it("pins the options scheduled-screening deep link and the platform-admin view values", () => {
+  it("pins the retired options deep link as gone and the platform-admin view values", () => {
     const config = JSON.parse(read("src/client/nav-config.json")) as {
       deepLinks: Record<string, unknown>;
       deepLinkSurfaces: Array<{ page: string; values: string[] }>;
     };
-    expect(config.deepLinks["options-screener:scheduled-screening"]).toEqual({
-      tab: "options",
-      view: "scheduled-screening",
-    });
+    // U-03 (owner decision, #3121 comment 6669207975): the
+    // scheduled-screening deep link is gone with the mode — the
+    // address redirects to the schedules home and the content it
+    // carried lives on the Options Runs tab.
+    expect(config.deepLinks["options-screener:scheduled-screening"]).toBeUndefined();
     const optionsHub = config.deepLinkSurfaces.find((s) => s.page === "options");
     expect(optionsHub).toBeDefined();
-    expect(optionsHub!.values).toContain("scheduled-screening");
+    expect(optionsHub!.values).not.toContain("scheduled-screening");
     const platformAdmin = config.deepLinkSurfaces.find((s) => s.page === "platform-admin");
     expect(platformAdmin).toBeDefined();
     expect(platformAdmin!.values).toContain("scheduled-goals");

@@ -321,15 +321,16 @@ describe("S7 one surface / one builder (source pins)", () => {
     expect(panelSrc).toContain("<ScheduledOptionsManager");
   });
 
-  it("the options hub schedules mode is a pointer, not a second surface", () => {
+  it("the options hub schedules mode is gone (U-03 #3121): no pointer, no second surface", () => {
     const orp = read("src/client/options/OptionsResearchPanel.tsx");
     expect(orp).not.toContain("ScheduledOptionsManager");
-    // C2 (#1246) supersedes the S7 "moved" wording: Schedules is now
-    // a tab of the same hub, so the note offers an in-hub switch to
-    // it — still a pointer, never a second schedule surface.
-    expect(orp).toContain("Schedule Management Lives in the Schedules Tab");
-    expect(orp).toContain("Open the Schedules tab");
-    expect(orp).toContain("<AutonomousOptionsRuns />");
+    // U-03 (#3121): the schedules mode is retired, not a pointer.
+    // ?tab=options&view=scheduled-screening redirects to ?tab=schedules;
+    // the runs content lives in ResearchRunsPanel at options-runs.
+    expect(orp).not.toContain("Schedule Management Lives in the Schedules Tab");
+    expect(orp).not.toContain("Open the Schedules tab");
+    expect(orp).not.toContain("<AutonomousOptionsRuns />");
+    expect(orp).not.toContain("ScheduledOptionsRunForm");
   });
 
   it("the retired paths are gone", () => {

@@ -86,6 +86,13 @@ import {
   findNavItemConfig,
   isNavItemOrSubItemActive,
 } from "../src/client/navConfig";
+import {
+  OPTIONS_HUB_TABS,
+  isValidOptionsHubTab,
+  optionsHubTabForResearch,
+} from "../src/client/OptionsHub";
+import { researchSurfaceForParam } from "../src/client/options/researchSurface";
+import { ResearchRunsPanel } from "../src/client/options/ResearchRunsPanel";
 import type { JobRunRecord } from "../src/services/jobRunRecords";
 
 describe("S2-P01 sub-route parsing — view ids, ledger alias, deep links (#3121)", () => {
@@ -129,8 +136,8 @@ describe("S2-P01 sub-route parsing — view ids, ledger alias, deep links (#3121
   });
 });
 
-describe("S2-P02 retired addresses — four redirects, and U-03 is not one (#3121)", () => {
-  it("redirects the duplicate and the three admin outposts to the home", () => {
+describe("S2-P02 retired addresses — five redirects, including U-03 (#3121)", () => {
+  it("redirects the duplicate, the three admin outposts, and U-03 to the home", () => {
     expect(legacySchedulesRedirect("?tab=screeners&view=schedules")).toEqual({
       tab: "schedules",
     });
@@ -145,9 +152,16 @@ describe("S2-P02 retired addresses — four redirects, and U-03 is not one (#312
     expect(
       legacySchedulesRedirect("?tab=platform-admin&view=iaaa-admin&iaaaTab=queue"),
     ).toEqual({ tab: "schedules", view: "queue" });
+    // U-03 (owner decision, #3121 comment 6669207975): the OptionsHub
+    // scheduled-screening address redirects to the home, reversing
+    // S2's keep-as-is. Its options-research content relocated to the
+    // Options Runs tab (see U-03 relocation pins below).
+    expect(legacySchedulesRedirect("?tab=options&view=scheduled-screening")).toEqual({
+      tab: "schedules",
+    });
   });
 
-  it("leaves every other address alone — including U-03 and iaaa-admin without queue", () => {
+  it("leaves every other address alone — including iaaa-admin without queue", () => {
     expect(legacySchedulesRedirect("?tab=schedules")).toBeNull();
     expect(legacySchedulesRedirect("?tab=schedules&view=runs")).toBeNull();
     expect(legacySchedulesRedirect("?tab=platform-admin&view=ads")).toBeNull();
@@ -156,12 +170,61 @@ describe("S2-P02 retired addresses — four redirects, and U-03 is not one (#312
       legacySchedulesRedirect("?tab=platform-admin&view=iaaa-admin&iaaaTab=members"),
     ).toBeNull();
     expect(legacySchedulesRedirect("?tab=screeners&view=forex")).toBeNull();
-    // U-03: the OptionsHub schedules mode is options-research state
-    // (one-shot form, autonomous-runs record, activity log), not a
-    // schedules listing — it is retired as a schedules address by
-    // having no schedule CRUD, not by a redirect (in-hub tab clicks
-    // write the same ?view= URL a redirect would match).
-    expect(legacySchedulesRedirect("?tab=options&view=scheduled-screening")).toBeNull();
+    expect(legacySchedulesRedirect("?tab=options&view=options-runs")).toBeNull();
+  });
+});
+
+describe("U-03 redirect — the scheduled-screening mode is gone; its content lives on Options Runs (#3121)", () => {
+  it("the hub has no scheduled-screening tab and the legacy research surface is gone", () => {
+    expect(OPTIONS_HUB_TABS).not.toContain("scheduled-screening");
+    expect(isValidOptionsHubTab("scheduled-screening")).toBe(false);
+    expect(optionsHubTabForResearch("schedules")).toBeNull();
+    expect(researchSurfaceForParam("schedules")).toBeNull();
+    const hub = read("src/client/OptionsHub.tsx");
+    expect(hub).not.toContain("scheduled-screening");
+    const panel = read("src/client/options/OptionsResearchPanel.tsx");
+    expect(panel).not.toContain('researchMode === "schedules"');
+    expect(panel).not.toContain('id: "schedules"');
+    expect(panel).not.toContain("onOpenSchedules");
+    const config = JSON.parse(read("src/client/nav-config.json")) as {
+      deepLinkSurfaces: Array<{ page: string; values: string[] }>;
+    };
+    const optionsHub = config.deepLinkSurfaces.find((s) => s.page === "options");
+    expect(optionsHub).toBeDefined();
+    expect(optionsHub!.values).not.toContain("scheduled-screening");
+  });
+
+  it("the three relocated sections render on the Options Runs tab", async () => {
+    const panel = read("src/client/options/ResearchRunsPanel.tsx");
+    expect(panel).toContain("ScheduledOptionsRunForm");
+    expect(panel).toContain("AutonomousOptionsRuns");
+    expect(panel).toContain("ScreeningActivityPanel");
+    fetchStub((url) => {
+      if (url.includes("/api/research/settings")) return { status: 200, body: { config: {} } };
+      if (url.includes("/api/research/latest")) return { status: 200, body: { latest: null } };
+      if (url.includes("/api/research/history")) return { status: 200, body: { history: [] } };
+      if (url.includes("/api/options/latest")) return { status: 200, body: { runs: [] } };
+      if (url.includes("/api/screening/activity")) return { status: 200, body: { feed: [] } };
+      if (url.includes("/api/screening/controls")) {
+        return {
+          status: 200,
+          body: {
+            rolloutStage: "internal",
+            channelsEnabled: false,
+            nlqFitDiscovery: false,
+            weightsV2Ranking: false,
+            scheduledPaused: false,
+          },
+        };
+      }
+      return null;
+    });
+    await render(<ResearchRunsPanel activeEnv="TEST" userLogin="tester" />);
+    await settle();
+    const text = container.textContent ?? "";
+    expect(text).toContain("Run the Options Market Screen now");
+    expect(text).toContain("Autonomous Options Runs");
+    expect(text).toContain("Autonomous Screening Activity");
   });
 });
 
@@ -342,12 +405,10 @@ describe("S2-P08 wiring pins — the home, the gate, the focus, the redirect (#3
       tab: "schedules",
       view: "runs",
     });
-    // U-03's deep link still points at the options mode — that mode
-    // is options research, not a schedules surface.
-    expect(config.deepLinks["options-screener:scheduled-screening"]).toEqual({
-      tab: "options",
-      view: "scheduled-screening",
-    });
+    // U-03's deep link is gone with the mode it pointed at — the
+    // address redirects to the home, and the content it carried now
+    // lives on the Options Runs tab.
+    expect(config.deepLinks["options-screener:scheduled-screening"]).toBeUndefined();
   });
 
   it("the list panel accepts a focus schedule id", () => {

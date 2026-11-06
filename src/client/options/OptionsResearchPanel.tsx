@@ -21,13 +21,10 @@ import { defaultRegistry } from "../../trading/options/strategies/catalog";
 import { StrategyDiscoveryPanel } from "./StrategyDiscoveryPanel";
 import { ConfidenceMethodBreakdown } from "./ConfidenceMethodBreakdown";
 import { DiscoveryRunsPanel } from "./DiscoveryRunsPanel";
-import { ScreeningActivityPanel } from "./ScreeningActivityPanel";
 import { UniversalChart } from "../components/UniversalChart";
 import { LlmStrategyEvalModal, type StrategyToEvaluate } from "./LlmStrategyEvalModal";
 import { LlmOptionsIdeasPanel } from "./LlmOptionsIdeasPanel";
 import { EtapiConfigModal } from "./EtapiConfigModal";
-import { AutonomousOptionsRuns } from "./AutonomousOptionsRuns";
-import { ScheduledOptionsRunForm } from "./ScheduledOptionsRunForm";
 import { RawContractsScreener } from "./RawContractsScreener";
 import { RiskAnalysisModal } from "./RiskAnalysisModal";
 import { ThreeWayComparison, type ThreeWayComparisonData } from "./ThreeWayComparison";
@@ -46,10 +43,6 @@ interface OptionsResearchPanelProps {
   onPreviewTrade?: (ctx: TradeOrderContext) => void;
   onJobStateChange?: (state: "idle" | "running" | "ready") => void;
   onSendPrompt?: (prompt: string, sourceTab?: string) => void;
-  /** C2 (consolidation #1151, issue #1246): switch to the hub's
-   *  Schedules tab — the in-hub successor to this panel's schedules
-   *  mode "moved" note. Absent when the panel is hosted elsewhere. */
-  onOpenSchedules?: () => void;
   /** Issue #2954: controlled mode. When provided, the host owns the
    *  mode (the Options copy hub's tab row) and the panel neither
    *  adopts nor writes the ?research= param. Absent = legacy
@@ -768,9 +761,9 @@ type NlqResultView = {
   };
 };
 
-export type ResearchMode = "discovery" | "contracts" | "custom" | "nlq" | "llm-ideas" | "schedules";
+export type ResearchMode = "discovery" | "contracts" | "custom" | "nlq" | "llm-ideas";
 
-export function OptionsResearchPanel({ activeEnv, userLogin, onPreviewTrade, onJobStateChange, onSendPrompt, onOpenSchedules, mode, onModeChange, hideModeNav, initialDiscoveryView }: OptionsResearchPanelProps) {
+export function OptionsResearchPanel({ activeEnv, userLogin, onPreviewTrade, onJobStateChange, onSendPrompt, mode, onModeChange, hideModeNav, initialDiscoveryView }: OptionsResearchPanelProps) {
   const [internalMode, setInternalMode] = useState<ResearchMode>("discovery");
   // Issue #2954: controlled when the host passes mode, uncontrolled
   // otherwise — existing hosts keep their exact behavior.
@@ -1226,18 +1219,6 @@ export function OptionsResearchPanel({ activeEnv, userLogin, onPreviewTrade, onJ
               description: "Divides chains into near/mid/long-term expiration cohorts for multi-stage AI evaluation against raw market data.",
             },
           },
-          {
-            id: "schedules",
-            label: "Scheduled Screening & Schedulers",
-            icon: "⏰",
-            badge: "DURABLE",
-            badgeType: "emerald",
-            tooltip: {
-              eyebrow: "DURABLE TIMERS & AUTONOMOUS DISPATCH",
-              title: "Scheduled Screening & Schedulers",
-              description: "Create and monitor autonomous scheduled options scans with persistent background timers and Slack & Email notifications.",
-            },
-          },
         ]}
         rightContent={
           <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2-5)" }}>
@@ -1250,44 +1231,6 @@ export function OptionsResearchPanel({ activeEnv, userLogin, onPreviewTrade, onJ
           </div>
         }
       />
-      )}
-
-      {researchMode === "schedules" && (
-        <>
-          {/* S7 (consolidation #958) made schedule management live in
-              the one schedule UI; C2 (consolidation #1151, #1246)
-              hosts it as this hub's own Schedules tab, so the note is
-              now an in-hub switch, not a pointer elsewhere. This mode
-              keeps the autonomous-runs record below it. */}
-          <div className="options-comparison-note" style={{ margin: "1.5rem 0", padding: "var(--space-6)", background: "var(--color-surface-sunken)", border: "1px solid var(--color-border-subtle)", borderRadius: "8px" }}>
-            <h4 style={{ margin: "0 0 0.5rem", color: "var(--color-accent)", fontSize: "var(--font-size-title-sm)" }}>⏰ Schedule Management Lives in the Schedules Tab</h4>
-            <p style={{ margin: "0 0 0.75rem", color: "var(--color-text-secondary)", fontSize: "var(--font-size-body)", lineHeight: 1.5 }}>
-              Every screening schedule — stock screens, options analysis, and strategy discovery in all three input models (saved views, profile-derived, no-view) — is created and managed in one place: this hub's <strong>Schedules</strong> tab, alongside the system and queued jobs that share the same schedule store.
-            </p>
-            <p style={{ margin: "0 0 0.75rem", color: "var(--color-text-muted)", fontSize: "var(--font-size-body)" }}>
-              Nothing was retired: the create/edit forms, run-now triggers, latest runs, and audit trail all live on that tab.
-            </p>
-            {onOpenSchedules && (
-              <Button type="button" onClick={onOpenSchedules} style={{ padding: "var(--space-2) var(--space-4)", fontWeight: 600 }}>
-                Open the Schedules tab
-              </Button>
-            )}
-          </div>
-          {/* Issue #2545: the scheduled job's full parameter set as a
-              one-shot run, hosted here in the schedules mode — the
-              Options Research one-shot surfaces could not reproduce
-              the scheduled "Options Market Screen" run before. */}
-          <ScheduledOptionsRunForm activeEnv={activeEnv} userLogin={userLogin} />
-          {/* Issue #223: the persisted autonomous runs (hourly scheduled
-              scans + manual runs) — the record of what the scheduler
-              actually produced. */}
-          <AutonomousOptionsRuns />
-          {/* Issue #1162 (epic #1096 Phase 6): the autonomous screening
-              system's activity log + pause control — discovery runs,
-              re-selections, promotions, and deliveries from the
-              screening activity feed, next to the other run records. */}
-          <ScreeningActivityPanel userLogin={userLogin} />
-        </>
       )}
 
       {researchMode === "discovery" && (

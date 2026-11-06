@@ -2,7 +2,7 @@
  * Options copy hub (issue #2954) — the page behind ?tab=options, linked
  * from the Options Screener sub-menus.
  *
- * One single row of tabs; no top-level "options" container tab. The six
+ * One single row of tabs; no top-level "options" container tab. The five
  * options-research modes render through ONE OptionsResearchPanel
  * instance driven in controlled mode (its own mode bar hidden), so the
  * shared symbol state survives tab switches the way the old in-panel
@@ -38,7 +38,6 @@ export type OptionsHubTab =
   | "custom-thesis"
   | "nlq-options"
   | "ai-strategy-ideas"
-  | "scheduled-screening"
   | "iv-history"
   | "options-flows";
 
@@ -50,7 +49,6 @@ export const OPTIONS_HUB_TABS: readonly OptionsHubTab[] = [
   "custom-thesis",
   "nlq-options",
   "ai-strategy-ideas",
-  "scheduled-screening",
   "iv-history",
   "options-flows",
 ] as const;
@@ -62,14 +60,13 @@ export function isValidOptionsHubTab(tab: unknown): tab is OptionsHubTab {
   );
 }
 
-/** The six research modes, as copy-hub tabs. */
+/** The five research modes, as copy-hub tabs. */
 const MODE_TABS: readonly OptionsHubTab[] = [
   "strategy-discovery",
   "contracts-screener",
   "custom-thesis",
   "nlq-options",
   "ai-strategy-ideas",
-  "scheduled-screening",
 ];
 
 const TAB_TO_MODE: Record<string, ResearchMode> = {
@@ -78,7 +75,6 @@ const TAB_TO_MODE: Record<string, ResearchMode> = {
   "custom-thesis": "custom",
   "nlq-options": "nlq",
   "ai-strategy-ideas": "llm-ideas",
-  "scheduled-screening": "schedules",
 };
 
 const MODE_TO_TAB: Record<ResearchMode, OptionsHubTab> = {
@@ -87,7 +83,6 @@ const MODE_TO_TAB: Record<ResearchMode, OptionsHubTab> = {
   custom: "custom-thesis",
   nlq: "nlq-options",
   "llm-ideas": "ai-strategy-ideas",
-  schedules: "scheduled-screening",
 };
 
 /**
@@ -256,19 +251,6 @@ export function OptionsHub({
       },
     },
     {
-      id: "scheduled-screening",
-      label: "Scheduled Screening & Schedulers",
-      icon: "⏰",
-      badge: "DURABLE",
-      badgeType: "emerald",
-      tooltip: {
-        eyebrow: "DURABLE TIMERS & AUTONOMOUS DISPATCH",
-        title: "Scheduled Screening & Schedulers",
-        description:
-          "Create and monitor autonomous scheduled options scans with persistent background timers and Slack & Email notifications.",
-      },
-    },
-    {
       id: "iv-history",
       label: "IV History",
       icon: "📈",
@@ -340,12 +322,16 @@ export function OptionsHub({
           active={hubTab === "options-runs"}
           retain
         >
-          <ResearchRunsPanel userLogin={userLogin} onSendPrompt={onSendPrompt} />
+          <ResearchRunsPanel
+            activeEnv={activeEnv}
+            userLogin={userLogin}
+            onSendPrompt={onSendPrompt}
+          />
         </TabPanel>
       )}
 
-      {/* The six research modes share one panel instance. It stays a
-          hand-rolled div: one panel spans six mode tabs, so its
+      {/* The five research modes share one panel instance. It stays a
+          hand-rolled div: one panel spans five mode tabs, so its
           aria-labelledby tracks the active mode tab — a fixed TabPanel
           tabId cannot express that. The single-tab panels above and
           below use the ui TabPanel primitive. */}
@@ -364,7 +350,6 @@ export function OptionsHub({
             onPreviewTrade={onPreviewTrade}
             onJobStateChange={onJobStateChange}
             onSendPrompt={onSendPrompt}
-            onOpenSchedules={() => handleTabChange("scheduled-screening")}
             mode={lastMode}
             onModeChange={(m) => handleTabChange(MODE_TO_TAB[m])}
             hideModeNav

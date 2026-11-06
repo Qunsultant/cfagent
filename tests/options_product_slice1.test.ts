@@ -199,7 +199,6 @@ describe("options screener navigation (issue #2596)", () => {
       "custom-thesis",
       "nlq-options",
       "ai-strategy-ideas",
-      "scheduled-screening",
       "iv-history",
       "options-flows",
     ]);

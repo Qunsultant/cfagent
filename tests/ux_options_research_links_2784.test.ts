@@ -135,16 +135,15 @@ describe("research param scheme (#2784)", () => {
       mode: "discovery",
       sectionId: "options-research-strategy",
     });
-    expect(researchSurfaceForParam("schedules")).toEqual({
-      surface: "schedules",
-      mode: "schedules",
-      sectionId: null,
-    });
     expect(researchSurfaceForParam("custom")).toEqual({
       surface: "custom",
       mode: "custom",
       sectionId: null,
     });
+  });
+
+  it("the schedules surface is retired (U-03 #3121): it resolves to no mode", () => {
+    expect(researchSurfaceForParam("schedules")).toBeNull();
   });
 
   it("rejects unknown values instead of landing on a wrong surface", () => {
