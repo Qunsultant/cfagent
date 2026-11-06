@@ -12,7 +12,7 @@
  * - valid session → behaves exactly like the canonical route.
  *
  * Same harness as tests/browser_snapshot_auth.test.ts (real worker fetch
- * dispatch, recording SEARCH_AGENT stub, Map-backed SESSIONS KV, mocked
+ * dispatch, recording ORCHESTRATOR_AGENT stub, Map-backed SESSIONS KV, mocked
  * ETradeBrowserService so captures and their Slack dispatch are counted,
  * never performed).
  */
@@ -77,7 +77,7 @@ function makeEnv() {
   seedSession("sessions", SESSION_ID, { githubLogin: LOGIN, userLogin: LOGIN });
   const env: any = {
     SESSION_STORE: sessionStoreNs,
-    SEARCH_AGENT: {
+    ORCHESTRATOR_AGENT: {
       idFromName: (name: string) => name,
       get: (id: string) => ({
         fetch: async (req: Request) => {
