@@ -14,6 +14,14 @@
  *   the G0 rename (#2330) can retire the ORCHESTRATOR_AGENT binding.
  *   That binding's remaining guard is the #1387 root-namespace pin
  *   (tests/orchestrator_root_namespace_1387.test.ts), not this file.
+ *
+ * Issue #2570 update: the SEARCH_AGENT binding itself has since been
+ * renamed ORCHESTRATOR_AGENT — the same string the retired v9 binding
+ * once used, now naming the one live binding (the v9 namespace stays
+ * tombstoned by migration v14; namespaces are per class). The test
+ * below pins the fan-out to the binding under its current name, and
+ * the drift guard inverts accordingly: the fan-out must not drift
+ * back to the retired SEARCH_AGENT name.
  * - SANDBOX_AGENT: the A2A edge resolves it DYNAMICALLY
  *   (a2a/index.ts reads env[resolution.binding], and resolution.ts
  *   maps the sandbox surface to SANDBOX_AGENT) — a grep for a
@@ -30,17 +38,18 @@ import { readFileSync } from "node:fs";
 const wrangler = readFileSync("wrangler.jsonc", "utf8");
 
 describe("DO bindings verification (#2470 S3)", () => {
-  it("SEARCH_AGENT is bound and used by the merged cross-tenant fan-out (#2465, repointed by #2516)", () => {
-    expect(wrangler).toMatch(/"name":\s*"SEARCH_AGENT",\s*"class_name":\s*"OrchestratorAgent"/);
+  it("ORCHESTRATOR_AGENT is bound and used by the merged cross-tenant fan-out (#2465, repointed by #2516; binding renamed by #2570)", () => {
+    expect(wrangler).toMatch(/"name":\s*"ORCHESTRATOR_AGENT",\s*"class_name":\s*"OrchestratorAgent"/);
     const queues = readFileSync("src/agents/routes/adminTenantQueues.ts", "utf8");
-    expect(queues).toContain("SEARCH_AGENT");
+    expect(queues).toContain("ORCHESTRATOR_AGENT");
     expect(queues).toContain("idFromName");
     // instanceStub resolves the target instance through the binding.
-    expect(queues).toMatch(/SEARCH_AGENT[\s\S]*?idFromName[\s\S]*?\.get\(/);
-    // The fan-out must not drift back to ORCHESTRATOR_AGENT: the
-    // per-login instances live in the SEARCH_AGENT namespace, and
-    // Deploy A of the rename (#2330) removes that binding.
-    expect(queues).not.toContain("ORCHESTRATOR_AGENT");
+    expect(queues).toMatch(/ORCHESTRATOR_AGENT[\s\S]*?idFromName[\s\S]*?\.get\(/);
+    // The fan-out must not drift back to the retired SEARCH_AGENT
+    // binding name (#2570): the per-login instances live in the
+    // OrchestratorAgent namespace, reached through the one binding
+    // now named ORCHESTRATOR_AGENT.
+    expect(queues).not.toContain("SEARCH_AGENT");
   });
 
   it("SANDBOX_AGENT is bound and reached through the A2A dynamic binding lookup", () => {
