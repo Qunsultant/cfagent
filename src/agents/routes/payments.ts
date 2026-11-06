@@ -1215,7 +1215,7 @@ export async function handlePaymentsRoutes(
           headers.delete("content-length");
           const targetUrl = new URL("/payments/webhook" + url.search, "https://agent.internal");
           return await actorGateway.dispatchFromId(
-            ctx.env.SEARCH_AGENT,
+            ctx.env.ORCHESTRATOR_AGENT,
             owner,
             new Request(targetUrl, { method: "POST", headers, body: rawBody })
           );
