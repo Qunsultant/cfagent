@@ -41,7 +41,7 @@ describe("Cloudflare Agentic Payments (x402 & MPP Standards)", () => {
     mockEnv = {
       AI: {} as any,
       AI_SEARCH_ENDPOINT: "https://mock.search",
-      SEARCH_AGENT: {} as any,
+      ORCHESTRATOR_AGENT: {} as any,
       AGENT_SESSIONS: {} as any,
       X402_NETWORK: "base-sepolia",
       X402_RECIPIENT_ADDRESS: "0x71C8363837918a211797E3c76A8B3C4258759550",
