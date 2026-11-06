@@ -411,7 +411,7 @@ describe("return-target routes end to end", () => {
     const { namespace } = makeFakeSessionStore();
     const env: Record<string, unknown> = {
       SESSION_STORE: namespace,
-      SEARCH_AGENT: {
+      ORCHESTRATOR_AGENT: {
         idFromName: (name: string) => name,
         get: () => ({ fetch: async () => Response.json({ ok: true }) }),
       },
