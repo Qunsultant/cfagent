@@ -745,7 +745,11 @@ describe("identity pins — round 1 (#2339)", () => {
 
   it("OrchestratorAgent is resolved per login and the service identity helper exists", () => {
     // #1779: per-login resolution now rides the ActorGateway.
-    expect(read("src/server.ts")).toContain("actorGateway.dispatch(env.SEARCH_AGENT, userLogin");
+    // Slice 7 of Qunsultant/cfagent#2902 (2026-11-05): the dispatch
+    // moved from src/server.ts to src/server/routes/platform.ts (MCP,
+    // agentic wallet, browser transaction-snap forwards); the entry
+    // surface is server.ts + routes/*.ts, so the pin reads both files.
+    expect(read("src/server.ts") + read("src/server/routes/platform.ts")).toContain("actorGateway.dispatch(env.SEARCH_AGENT, userLogin");
     expect(read("src/security/serviceIdentity.ts")).toContain(
       "export function getServiceUserLogin",
     );
@@ -843,8 +847,12 @@ describe("routing pins — round 1 (#2339)", () => {
     expect(read("src/server.ts") + read("src/server/routes/messaging.ts")).toContain("routeAgentRequest(request, env");
   });
 
-  it("the OptionsScannerMCP surface is addressed from server.ts by its binding", () => {
-    expect(read("src/server.ts")).toContain("OPTIONS_SCANNER_MCP");
+  it("the OptionsScannerMCP surface is addressed from the server entry by its binding", () => {
+    // Slice 7 of Qunsultant/cfagent#2902 (2026-11-05): the scanner
+    // block moved from src/server.ts to src/server/routes/platform.ts;
+    // the entry surface is server.ts + routes/*.ts, so the pin reads
+    // both files (assertion unchanged).
+    expect(read("src/server.ts") + read("src/server/routes/platform.ts")).toContain("OPTIONS_SCANNER_MCP");
   });
 
   it("every registry agent's source file exists (routing cells cite real classes)", () => {

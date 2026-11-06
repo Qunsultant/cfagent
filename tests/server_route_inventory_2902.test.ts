@@ -78,6 +78,28 @@
  *   src/server/routes/* (e.g. the saga agent-route handlers) are
  *   implementations, not route branches, and are ignored.
  *
+ * Slice 7 decisions recorded here:
+ * - Platform & commerce live in src/server/routes/platform.ts as five
+ *   handlers in dispatch order: handlePlatformTelemetryRoutes
+ *   (/api/telemetry/*), handlePlatformRetrievalRoutes
+ *   (/api/retrieval/populate-market-graph), handlePlatformMcpRoutes
+ *   (/mcp, /api/mcp, /mcp/scanner, /mcp/scanner/*),
+ *   handlePlatformPaymentsRoutes (the OPTIONS preflight,
+ *   /api/payments/agentic/* + /payments/agentic/commercial/*,
+ *   /api/premium/*, /api/payments/webhook + /payments/webhook),
+ *   handlePlatformBrowserRoutes (POST /api/browser/snapshot,
+ *   /browser/snapshot, /api/browser/transaction-snap,
+ *   /browser/transaction-snap, /api/browser/snap/transaction). The
+ *   delegation-order assertion below grows to the nineteen delegations
+ *   in dispatch order; the 148-descriptor EXPECTED list is unchanged
+ *   (verified identical by the scanner before and after).
+ * - PREMIUM_GATEWAY_INSTANCE moves with the payments handler (its only
+ *   use in the entry); it is defined in routes/platform.ts and
+ *   re-exported from src/server.ts at its old position, so the pin's
+ *   handleFetch end marker now matches that re-export line and the
+ *   existing `import { PREMIUM_GATEWAY_INSTANCE } from "../src/server"`
+ *   keeps working.
+ *
  * Slice 5 decisions recorded here:
  * - Trading & market live in src/server/routes/trading.ts as four
  *   handlers in dispatch order: handleTradingScheduleRoutes
@@ -273,7 +295,10 @@ function reconstruct(): string[] {
   const serverSrc = readFileSync("src/server.ts", "utf8");
   const serverLines = serverSrc.split("\n");
   const start = serverLines.findIndex((l) => l.includes("async function handleFetch("));
-  let end = serverLines.findIndex((l) => l.startsWith("export const PREMIUM_GATEWAY_INSTANCE"));
+  // Slice 7 (#2902): PREMIUM_GATEWAY_INSTANCE is defined in
+  // routes/platform.ts and re-exported from server.ts at its old
+  // position, so the handleFetch end marker matches either spelling.
+  let end = serverLines.findIndex((l) => l.startsWith("export const PREMIUM_GATEWAY_INSTANCE") || l.startsWith('export { PREMIUM_GATEWAY_INSTANCE }'));
   if (end < 0) end = serverLines.length;
   const regionLines = serverLines.slice(start, end);
   const modules: Record<string, string> = {};
@@ -506,7 +531,7 @@ describe("server route inventory pin (#2902)", () => {
     expect(reconstruct()).toEqual(EXPECTED_ROUTES);
   });
 
-  it("delegates Core + Privacy + Messaging + Trading branches in handleFetch in the original order", () => {
+  it("delegates Core + Privacy + Messaging + Trading + Platform branches in handleFetch in the original order", () => {
     const serverSrc = readFileSync("src/server.ts", "utf8");
     const calls = [...serverSrc.matchAll(/(?:await )?(handle\w+Routes)\(request, env, url, path/g)].map((m) => m[1]);
     // Slice 2 landed the three Core delegations; Slice 3 (#2902) adds the
@@ -521,7 +546,11 @@ describe("server route inventory pin (#2902)", () => {
     // between the NLQ and QA branches inside the moved saga region, so
     // they now run nested inside handleMessagingSagaRoutes and no longer
     // appear in this server.ts list; the scanner follows them there.
-    // Later slices extend this list in dispatch order.
+    // Slice 7 (#2902) adds the five Platform delegations in their
+    // original dispatch positions: telemetry after the chains
+    // delegation, retrieval after the reports delegation, MCP and
+    // payments after the IAAA delegation, browser snapshots after the
+    // quotes delegation. Later slices extend this list in dispatch order.
     expect(calls).toEqual([
       "handleCoreEarlyRoutes",
       "handlePrivacyRoutes",
@@ -530,10 +559,15 @@ describe("server route inventory pin (#2902)", () => {
       "handleMessagingSocialRoutes",
       "handleAuthMeRoutes",
       "handlePrivacyChainsRoutes",
+      "handlePlatformTelemetryRoutes",
       "handlePrivacyReportsRoutes",
+      "handlePlatformRetrievalRoutes",
       "handleAuthIaaaRoutes",
+      "handlePlatformMcpRoutes",
+      "handlePlatformPaymentsRoutes",
       "handleTradingOmniRoutes",
       "handleTradingQuotesRoutes",
+      "handlePlatformBrowserRoutes",
       "handleMessagingSlackRoutes",
       "handleTradingApproveRoutes",
       "handleCoreLateRoutes",
@@ -722,6 +756,50 @@ describe("core dispatch smoke (#2902 Slice 2)", () => {
       ["POST", "/slack/interactions", 503],
       ["GET", "/slack/install", 500],
       ["GET", "/slack/oauth_callback", 500],
+    ];
+    for (const [method, p, status] of expected) {
+      expect((await fetchWorker(p, method)).status).toBe(status);
+    }
+  });
+
+  it("moved Slice 7 routes answer exactly as before the move without a session", async () => {
+    // Statuses measured on clean main c5de0aaa before the move. The
+    // session-gated families 401 via requireAuth; the telemetry
+    // reconcile/decide writes and the retrieval populate reach the
+    // unbound-AgentDB 503 before any auth check (their handlers check
+    // the store first), while the telemetry reads 401 through their
+    // handlers; the MCP and scanner OPTIONS preflights answer 200
+    // with CORS and no auth; /mcp and /api/mcp 401 without a session
+    // or API key; the scanner and the premium/webhook forwards hit
+    // the unbound DO stub in this harness (500). A dropped route
+    // would 401 at the /api/* fallthrough (or 404 at the Core late
+    // tail for the non-/api/ paths), so these values pin the dispatch,
+    // not just the auth.
+    const expected: Array<[string, string, number]> = [
+      ["GET", "/api/telemetry/summary", 401],
+      ["GET", "/api/telemetry/decisions", 401],
+      ["POST", "/api/telemetry/reconcile", 503],
+      ["POST", "/api/telemetry/decisions/abc/decide", 503],
+      ["POST", "/api/retrieval/populate-market-graph", 503],
+      ["GET", "/mcp", 401],
+      ["GET", "/api/mcp", 401],
+      ["OPTIONS", "/mcp", 200],
+      ["GET", "/mcp/scanner", 500],
+      ["OPTIONS", "/mcp/scanner", 200],
+      ["POST", "/mcp/scanner", 500],
+      ["OPTIONS", "/api/premium/foo", 200],
+      ["OPTIONS", "/api/payments/agentic/foo", 200],
+      ["OPTIONS", "/payments/agentic/commercial/foo", 200],
+      ["GET", "/api/payments/agentic/balance", 401],
+      ["GET", "/payments/agentic/commercial/balance", 401],
+      ["GET", "/api/premium/foo", 500],
+      ["POST", "/api/payments/webhook", 500],
+      ["POST", "/payments/webhook", 500],
+      ["POST", "/api/browser/snapshot", 401],
+      ["POST", "/browser/snapshot", 401],
+      ["POST", "/api/browser/transaction-snap", 401],
+      ["POST", "/browser/transaction-snap", 401],
+      ["POST", "/api/browser/snap/transaction", 401],
     ];
     for (const [method, p, status] of expected) {
       expect((await fetchWorker(p, method)).status).toBe(status);

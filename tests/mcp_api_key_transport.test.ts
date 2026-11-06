@@ -445,7 +445,11 @@ describe("worker /api/api-keys routes — session's own keys only (#180)", () =>
 
 describe("source pins (#180)", () => {
   it("the MCP transport block contains no x-user-id identity and no mcp_client fallback", () => {
-    const server = readFileSync("src/server.ts", "utf8");
+    // Slice 7 of Qunsultant/cfagent#2902 (2026-11-05): the MCP block
+    // moved from src/server.ts to src/server/routes/platform.ts; the
+    // entry surface is server.ts + routes/*.ts, so the pin reads the
+    // moved block there (assertions unchanged).
+    const server = readFileSync("src/server/routes/platform.ts", "utf8");
     const start = server.indexOf("Model Context Protocol (MCP)");
     const end = server.indexOf("Cloudflare Wallets / x402 Pay-Per-Use Options Scanner");
     expect(start).toBeGreaterThan(-1);

@@ -183,9 +183,14 @@ describe("worker premium/wallet CORS preflight — no identity headers advertise
   });
 });
 
-describe("src/server.ts — no CORS surface advertises x-user-id (#700)", () => {
-  it("no Access-Control-Allow-Headers value in server.ts mentions x-user-id", () => {
-    const src = readFileSync(new URL("../src/server.ts", import.meta.url), "utf8");
+describe("the server entry — no CORS surface advertises x-user-id (#700)", () => {
+  it("no Access-Control-Allow-Headers value in the server entry mentions x-user-id", () => {
+    // Slice 7 of Qunsultant/cfagent#2902 (2026-11-05): the scanner CORS
+    // block moved from src/server.ts to src/server/routes/platform.ts;
+    // the entry surface is server.ts + routes/*.ts, so the pin reads
+    // both files (assertions unchanged).
+    const src = readFileSync(new URL("../src/server.ts", import.meta.url), "utf8")
+      + readFileSync(new URL("../src/server/routes/platform.ts", import.meta.url), "utf8");
     const values = [...src.matchAll(/Access-Control-Allow-Headers"?\s*[:,]\s*"?([^"\n]+)"?/g)].map((m) => m[1]);
     expect(values.length).toBeGreaterThan(0);
     for (const v of values) expect(v).not.toContain("x-user-id");
