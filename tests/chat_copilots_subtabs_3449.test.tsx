@@ -211,7 +211,7 @@ describe("AgentChatTabContent Multi-Copilot Sub-Tabs & View Isolation (#3449)", 
     expect(container!.querySelector(".messages-stream")).not.toBeNull();
   });
 
-  it("in stock view: StockCopilotPanel IS rendered above the conversation, composer IS present (#3454)", async () => {
+  it("in stock view: StockCopilotPanel IS rendered exclusively, composer and stream are NOT rendered (#3449, #3521)", async () => {
     window.history.replaceState({}, "", "/?tab=chat&view=stock");
 
     await renderChat();
@@ -221,19 +221,15 @@ describe("AgentChatTabContent Multi-Copilot Sub-Tabs & View Isolation (#3449)", 
     expect(panel).not.toBeNull();
     // Stock Copilot banner is present
     expect(container!.textContent).toContain("Stock Copilot Active:");
-    // Uniform shell (#3454): the shared conversation renders too —
-    // composer and messages stream are NOT suppressed by the panel.
-    expect(container!.querySelector(".chat-input-bar")).not.toBeNull();
-    const stream = container!.querySelector(".messages-stream");
-    expect(stream).not.toBeNull();
-    // The panel composes ABOVE the conversation in document order.
-    expect(
-      panel!.compareDocumentPosition(stream!) & Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy();
+    // Dedicated custom surface exclusivity (#3449, #3521):
+    // Chat composer and stream MUST NOT be rendered underneath the panel,
+    // eliminating UI overlap and dual-scrollbar conflicts.
+    expect(container!.querySelector(".chat-input-bar")).toBeNull();
+    expect(container!.querySelector(".messages-stream")).toBeNull();
   });
 
-  it("in stock view: a message typed in the composer flows through the shared sendMessage (#3454)", async () => {
-    window.history.replaceState({}, "", "/?tab=chat&view=stock");
+  it("in conversational view: a message typed in the composer flows through the shared sendMessage", async () => {
+    window.history.replaceState({}, "", "/?tab=chat&view=options");
 
     await renderChat();
 
@@ -244,7 +240,7 @@ describe("AgentChatTabContent Multi-Copilot Sub-Tabs & View Isolation (#3449)", 
       "value"
     )!.set!;
     await act(async () => {
-      setValue.call(input, "What positions does the Stock Copilot hold?");
+      setValue.call(input, "What is the best SPY Iron Condor?");
       input!.dispatchEvent(new Event("input", { bubbles: true }));
     });
 
@@ -256,30 +252,30 @@ describe("AgentChatTabContent Multi-Copilot Sub-Tabs & View Isolation (#3449)", 
 
     expect(mockSendMessage).toHaveBeenCalledTimes(1);
     const sent = mockSendMessage.mock.calls[0][0] as any;
-    expect(sent.text).toBe("What positions does the Stock Copilot hold?");
+    expect(sent.text).toBe("What is the best SPY Iron Condor?");
     expect(sent.metadata?.userLogin).toBe("test-user");
   });
 
-  it("supports URL alias ?copilot=stock", async () => {
+  it("supports URL alias ?copilot=stock with exclusive custom surface (#3521)", async () => {
     window.history.replaceState({}, "", "/?tab=chat&copilot=stock");
 
     await renderChat();
 
     expect(container!.querySelector("[data-testid='stock-copilot-panel']")).not.toBeNull();
-    // The alias view gets the uniform shell too (#3454)
-    expect(container!.querySelector(".chat-input-bar")).not.toBeNull();
+    // Exclusively renders StockCopilotPanel, chat composer is hidden to avoid overlap
+    expect(container!.querySelector(".chat-input-bar")).toBeNull();
   });
 
-  it("a registered copilot with renderCustom composes its surface above the conversation (#3454)", async () => {
+  it("a registered copilot with renderCustom renders its surface exclusively without conversation overlap (#3521)", async () => {
     const unregister = registerCopilot({
       id: "lab",
       label: "Lab Copilot",
       icon: "🧪",
-      mode: "chat",
+      mode: "custom",
       tooltip: {
         eyebrow: "Test",
         title: "Lab Copilot",
-        description: "Synthetic copilot for the uniform-shell contract",
+        description: "Synthetic copilot for the custom surface exclusivity contract",
       },
       renderCustom: () => <div data-testid="lab-surface">Lab Surface</div>,
     });
@@ -292,13 +288,9 @@ describe("AgentChatTabContent Multi-Copilot Sub-Tabs & View Isolation (#3449)", 
       // Its own custom surface renders…
       const surface = container!.querySelector("[data-testid='lab-surface']");
       expect(surface).not.toBeNull();
-      // …above the shared conversation, which is present by construction
-      expect(container!.querySelector(".chat-input-bar")).not.toBeNull();
-      const stream = container!.querySelector(".messages-stream");
-      expect(stream).not.toBeNull();
-      expect(
-        surface!.compareDocumentPosition(stream!) & Node.DOCUMENT_POSITION_FOLLOWING
-      ).toBeTruthy();
+      // …and the general conversation is excluded to prevent overlap
+      expect(container!.querySelector(".chat-input-bar")).toBeNull();
+      expect(container!.querySelector(".messages-stream")).toBeNull();
       // A copilot with its own renderCustom does NOT pull in the stock panel
       expect(container!.querySelector("[data-testid='stock-copilot-panel']")).toBeNull();
     } finally {

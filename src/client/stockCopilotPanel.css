@@ -1,12 +1,12 @@
-/* Stock Copilot panel (issue #3422) — scp- prefixed, token-only. */
+/* Stock Copilot panel (issue #3422, #3521) — scp- prefixed, token-only. */
 
 .scp-panel {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
   margin: 0.75rem 1rem 0;
-  max-height: 45vh;
-  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
 }
 
 .scp-header {
