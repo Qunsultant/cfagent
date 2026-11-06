@@ -24,7 +24,7 @@
  * REQUIRED (401 otherwise, the /clear pattern) and the fallback
  * identity is deleted. These tests drive the REAL worker fetch
  * dispatch (harness pattern from tests/slack_signature_gate.test.ts)
- * with a recording SEARCH_AGENT stub and a Map-backed SESSIONS KV.
+ * with a recording ORCHESTRATOR_AGENT stub and a Map-backed SESSIONS KV.
  *
  * Note on Response.redirect: the route redirects to a relative URL,
  * which workerd resolves against the request; Node's undici requires
@@ -88,7 +88,7 @@ function makeEnv(agentResponse: any) {
   seedSession("sessions", SESSION_ID, { githubLogin: LOGIN, userId: "149", login: LOGIN });
   const env: any = {
     SESSION_STORE: sessionStoreNs,
-    SEARCH_AGENT: {
+    ORCHESTRATOR_AGENT: {
       idFromName: (name: string) => name,
       get: (id: string) => ({
         fetch: async (req: Request) => {
