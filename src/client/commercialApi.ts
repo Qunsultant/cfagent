@@ -134,6 +134,12 @@ export interface PlanView {
   active?: boolean;
   /** Issue #3243: trial length in days, operator data; null = no trial offered. */
   trialDays?: number | null;
+  /** Issue #3357: plan price approval — "proposed" until an operator approves it; only an APPROVED plan price may be charged. */
+  approvalStatus?: "proposed" | "approved";
+  /** Login of the approving operator; null while proposed (or on grandfathered rows). */
+  approvedBy?: string | null;
+  /** Epoch ms of the approval; null while proposed (or on grandfathered rows). */
+  approvedAtMs?: number | null;
 }
 
 export interface SubscriptionView {

@@ -63,6 +63,7 @@ export async function ensureBillingPolicySchema(db: BillingPolicyDb): Promise<nu
     [BILLING_POLICY_KEYS.cfpayChannelFixedPriceUSD, PROPOSED_SEED_BILLING_POLICY.cfpayChannelFixedPriceUSD],
     [BILLING_POLICY_KEYS.topUpMinUSD, PROPOSED_SEED_BILLING_POLICY.topUpMinUSD],
     [BILLING_POLICY_KEYS.topUpMaxUSD, PROPOSED_SEED_BILLING_POLICY.topUpMaxUSD],
+    [BILLING_POLICY_KEYS.annualDiscountPct, PROPOSED_SEED_BILLING_POLICY.annualDiscountPct],
   ];
   for (const [key, value] of seedRows) {
     await db
@@ -98,6 +99,7 @@ export class D1BillingPolicyAdapter implements BillingPolicyStore {
       [BILLING_POLICY_KEYS.cfpayChannelFixedPriceUSD]: "cfpayChannelFixedPriceUSD",
       [BILLING_POLICY_KEYS.topUpMinUSD]: "topUpMinUSD",
       [BILLING_POLICY_KEYS.topUpMaxUSD]: "topUpMaxUSD",
+      [BILLING_POLICY_KEYS.annualDiscountPct]: "annualDiscountPct",
     };
     for (const [key, field] of Object.entries(fieldByKey)) {
       const raw = byKey[key];
