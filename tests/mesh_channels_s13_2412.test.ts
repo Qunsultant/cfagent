@@ -133,7 +133,7 @@ describe("Agent Mesh S13 (#2412) — channel registry completeness", () => {
     const server = read("src/server.ts") + read("src/server/routes/messaging.ts");
     // #1779: the per-team forward now rides the ActorGateway; the
     // pin tracks the gateway spelling, the instance still per-team.
-    expect(server).toContain("actorGateway.dispatch(env.SEARCH_AGENT, `slack_${teamId}`");
+    expect(server).toContain("actorGateway.dispatch(env.ORCHESTRATOR_AGENT, `slack_${teamId}`");
     expect(server).toContain('"/trading/slack/command"');
     expect(server).toContain('"/trading/slack/event"');
     expect(server).toContain('"/trading/slack/interaction"');
@@ -169,7 +169,7 @@ describe("Agent Mesh S13 (#2412) — converged Slack ingress through SlackAgent"
   const baseEnv: Env = {
     APP_BASE_URL: "https://agent.openaimp.com",
     AI_SEARCH_ENDPOINT: "https://ai-search.internal",
-    SEARCH_AGENT: {} as any,
+    ORCHESTRATOR_AGENT: {} as any,
     ETRADE_ENVIRONMENT: "sandbox",
     SLACK_SIGNING_SECRET: ["unit", "test", "slack", "signing", "secret"].join("-"),
     SLACK_BOT_TOKEN: ["xoxb", "unit", "test"].join("-"),
