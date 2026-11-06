@@ -292,6 +292,9 @@ export interface Env {
   // Copilot cycle; absence uses the service's default universe
   // (src/services/stockCopilot.ts).
   STOCK_COPILOT_UNIVERSE?: string;
+  // #3452 — optional externalized cycle cadence for Stock Copilot (AOP).
+  // Default "every 30 minutes". Floor is 30m (Worker cron limit).
+  STOCK_COPILOT_CADENCE?: string;
   // #3398 — optional deployment-default trading sessions for the
   // Stock Copilot (comma-separated session ids: pre_market, regular,
   // after_hours, exto; "none" = no sessions). The per-login stored

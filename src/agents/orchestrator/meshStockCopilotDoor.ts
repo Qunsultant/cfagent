@@ -37,6 +37,12 @@ import {
   type CopilotSessionId,
   COPILOT_SESSION_SETTING_KEY,
 } from "../../services/stockCopilotSessions";
+import {
+  COPILOT_CADENCE_SETTING_KEY,
+  resolveCopilotCadence,
+  parseCadenceMinutes,
+  formatCadenceString,
+} from "../../services/stockCopilotCadence";
 import { MeshDoorError, requireActingLogin } from "./meshDoors";
 
 export interface StockCopilotDoorContext {
@@ -84,6 +90,10 @@ export interface StockCopilotStatusResult {
   marketOpen: boolean;
   currentSession: CopilotSessionId | null;
   enabledSessions: readonly CopilotSessionId[];
+  cadence: {
+    configured: string;
+    effective: string;
+  };
   status: string;
   selectionResolved: boolean;
   activeBroker: string | null;
@@ -99,12 +109,19 @@ export interface StockCopilotStatusResult {
 export interface StockCopilotControlInput {
   paused?: boolean;
   sessions?: string[];
+  cadence?: string;
+  pauseUntil?: string;
 }
 
 export interface StockCopilotControlResult {
   success: boolean;
   paused: boolean;
   enabledSessions: readonly CopilotSessionId[];
+  cadence: {
+    configured: string;
+    effective: string;
+  };
+  pauseUntil?: string | null;
   updatedAt: string;
 }
 
@@ -196,12 +213,21 @@ export async function getStockCopilotStatusViaDoor(
       ? (rawActivity[0] as unknown as Record<string, unknown>)
       : null;
 
+  const cadence = resolveCopilotCadence({
+    env: ctx.env,
+    readSettingRaw: ctx.readSettingRaw,
+  });
+
   return {
     flagEnabled,
     paused,
     marketOpen,
     currentSession,
     enabledSessions,
+    cadence: {
+      configured: cadence.configured,
+      effective: cadence.effective,
+    },
     status,
     selectionResolved: selection.resolved,
     activeBroker: selection.resolved ? selection.selection.brokerId : null,
@@ -243,6 +269,44 @@ export async function controlStockCopilotViaDoor(
     });
   }
 
+  if (typeof input.pauseUntil === "string") {
+    control.setControl({
+      userLogin: login,
+      paused: true,
+      updatedAt: nowIso,
+      updatedBy: login,
+    });
+    if (ctx.writeSetting) {
+      ctx.writeSetting("stock_copilot:pause_until", input.pauseUntil);
+    }
+    ctx.audit?.("stock_copilot.control_pause_until_via_door", "orchestrator", {
+      userLogin: login,
+      pauseUntil: input.pauseUntil,
+    });
+  }
+
+  if (typeof input.cadence === "string") {
+    if (!ctx.writeSetting) {
+      throw new MeshDoorError(
+        "door_unavailable",
+        "Cannot update loop cadence: writeSetting is not configured on this door context.",
+      );
+    }
+    const mins = parseCadenceMinutes(input.cadence);
+    if (mins === null) {
+      throw new MeshDoorError(
+        "invalid_input",
+        `Invalid cadence "${input.cadence}". Format must be e.g. 'every 1 hour', 'every 30 minutes', '1h', '60m'.`,
+      );
+    }
+    const formatted = formatCadenceString(mins);
+    ctx.writeSetting(COPILOT_CADENCE_SETTING_KEY, formatted);
+    ctx.audit?.("stock_copilot.control_cadence_via_door", "orchestrator", {
+      userLogin: login,
+      cadence: formatted,
+    });
+  }
+
   if (Array.isArray(input.sessions)) {
     if (!ctx.writeSetting) {
       throw new MeshDoorError(
@@ -271,11 +335,21 @@ export async function controlStockCopilotViaDoor(
     readSettingRaw: ctx.readSettingRaw,
     env: ctx.env,
   });
+  const cadence = resolveCopilotCadence({
+    env: ctx.env,
+    readSettingRaw: ctx.readSettingRaw,
+  });
+  const pauseUntil = ctx.readSettingRaw?.("stock_copilot:pause_until") ?? null;
 
   return {
     success: true,
     paused: updatedControl?.paused === true,
     enabledSessions,
+    cadence: {
+      configured: cadence.configured,
+      effective: cadence.effective,
+    },
+    pauseUntil,
     updatedAt: updatedControl?.updatedAt ?? nowIso,
   };
 }
