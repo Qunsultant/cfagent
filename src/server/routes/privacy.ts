@@ -458,7 +458,7 @@ export async function handlePrivacyChainsRoutes(request: Request, env: Env, url:
         reconcileShardJobProjection(
           tenantId: string,
         ): Promise<ReconcileShardJobsReport>;
-      }>(env.SEARCH_AGENT, SHARED_ORCHESTRATOR_INSTANCE);
+      }>(env.ORCHESTRATOR_AGENT, SHARED_ORCHESTRATOR_INSTANCE);
       return handleReconcileJobsRoute({
         session,
         method: request.method,
@@ -691,7 +691,7 @@ export async function handlePrivacyReportsRoutes(request: Request, env: Env, url
           setBy: string,
           tenantId: string,
         ): Promise<SeedCanonicalReportsResult>;
-      }>(env.SEARCH_AGENT, SHARED_ORCHESTRATOR_INSTANCE);
+      }>(env.ORCHESTRATOR_AGENT, SHARED_ORCHESTRATOR_INSTANCE);
       return handleSeedReportsRoute({
         session,
         method: request.method,
