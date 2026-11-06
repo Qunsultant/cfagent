@@ -57,14 +57,15 @@ export interface Env {
   FEATURE_PAYMENTS?: string;
   FEATURE_SCHEDULES?: string;
   FEATURE_FLAGS?: string;
-  SEARCH_AGENT: DurableObjectNamespace;
+  // The OrchestratorAgent Durable Object binding. Issue #2570
+  // finished the G0 rename on the binding side: this is the one
+  // binding every orchestrator dispatch reads (env.ORCHESTRATOR_AGENT).
+  // Sub-agent root resolution (issue #1387) goes through ctx.exports
+  // by constructor.name, not through env; the stale optional
+  // declaration for the never-rebound v9 root namespace is removed.
+  ORCHESTRATOR_AGENT: DurableObjectNamespace;
   // Issue #2230 — TickerAgent DO (market quotes WebSocket, PortThink)
   TICKER_AGENT: DurableObjectNamespace;
-  // Issue #1387 — OrchestratorAgent root namespace for sub-agent
-  // bootstrap (agents SDK resolves ctx.exports by constructor.name).
-  // Optional: the SDK resolves via ctx.exports, not env, so no code
-  // reads this binding yet.
-  ORCHESTRATOR_AGENT?: DurableObjectNamespace;
   // PR #3 — x402 PaymentsAgent DO (issue #161)
   PAYMENTS_AGENT: DurableObjectNamespace;
   // PR #4 — ScheduledAgent DO (issue #166)
