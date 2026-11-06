@@ -30,7 +30,7 @@ export interface CatalogEntry {
 export const OPERATION_CATALOG: CatalogEntry[] = [
   {
     agent: "search",
-    binding: "SEARCH_AGENT",
+    binding: "ORCHESTRATOR_AGENT",
     operations: ["search.query"],
     blurb: "Web and data search.",
   },
@@ -60,7 +60,7 @@ export const OPERATION_CATALOG: CatalogEntry[] = [
   },
   {
     agent: "qa",
-    binding: "SEARCH_AGENT",
+    binding: "ORCHESTRATOR_AGENT",
     // #1655: qa.run_sweep is the DEFAULT_SCHEDULES daily-qa-sweep
     // operation (src/schedule.ts). It was missing from this catalog,
     // so every due tick threw "Unknown operation: qa.run_sweep" in
