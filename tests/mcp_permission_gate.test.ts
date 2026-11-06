@@ -113,7 +113,7 @@ describe("permission gate helper (#1744)", () => {
 describe("factory choke point (#1744)", () => {
   let sql: MockSqlStorage;
   let orm: DatabaseORM;
-  const mockEnv: Env = { AI: {} as any, SEARCH_AGENT: {} as any, AGENT_SESSIONS: {} as any };
+  const mockEnv: Env = { AI: {} as any, ORCHESTRATOR_AGENT: {} as any, AGENT_SESSIONS: {} as any };
   const auditLogs: Array<{ type: string; payload: Record<string, unknown> }> = [];
   const auditMock = (type: string, _agent: unknown, payload: Record<string, unknown>) => {
     auditLogs.push({ type, payload });
@@ -168,7 +168,7 @@ describe("factory choke point (#1744)", () => {
 describe("agent-turn adapter choke point (#1744)", () => {
   let sql: MockSqlStorage;
   let orm: DatabaseORM;
-  const mockEnv: Env = { AI: {} as any, SEARCH_AGENT: {} as any, AGENT_SESSIONS: {} as any };
+  const mockEnv: Env = { AI: {} as any, ORCHESTRATOR_AGENT: {} as any, AGENT_SESSIONS: {} as any };
   const auditLogs: Array<{ type: string; payload: Record<string, unknown> }> = [];
   const auditMock = (type: string, _agent: unknown, payload: Record<string, unknown>) => {
     auditLogs.push({ type, payload });
@@ -245,7 +245,7 @@ describe("agent-turn adapter choke point (#1744)", () => {
 describe("JSON-RPC choke point (#1744)", () => {
   let sql: MockSqlStorage;
   let orm: DatabaseORM;
-  const mockEnv: Env = { AI: {} as any, SEARCH_AGENT: {} as any, AGENT_SESSIONS: {} as any };
+  const mockEnv: Env = { AI: {} as any, ORCHESTRATOR_AGENT: {} as any, AGENT_SESSIONS: {} as any };
   const auditLogs: Array<{ type: string; payload: Record<string, unknown> }> = [];
   const auditMock = (type: string, _agent: unknown, payload: Record<string, unknown>) => {
     auditLogs.push({ type, payload });
