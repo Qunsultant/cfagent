@@ -125,7 +125,7 @@ export async function handlePlatformTelemetryRoutes(request: Request, env: Env, 
               headers: { "x-user-login": doLogin },
               signal: AbortSignal.timeout(3000),
             });
-            const fres = await actorGateway.dispatch(env.SEARCH_AGENT, doLogin, freq);
+            const fres = await actorGateway.dispatch(env.ORCHESTRATOR_AGENT, doLogin, freq);
             if (fres.ok) {
               const data = (await fres.json().catch(() => null)) as {
                 quality?: import("../../enrichment/enrichmentPorts").EnrichmentQualitySummary;
@@ -357,7 +357,7 @@ export async function handlePlatformMcpRoutes(request: Request, env: Env, url: U
       // cannot tell session from API-key auth from the login alone.
       forwardReq.headers.set("x-principal-kind", session ? "session" : "api-key");
 
-      const resp = await actorGateway.dispatch(env.SEARCH_AGENT, userLogin, forwardReq);
+      const resp = await actorGateway.dispatch(env.ORCHESTRATOR_AGENT, userLogin, forwardReq);
       const headers = new Headers(resp.headers);
       headers.set("Access-Control-Allow-Origin", "*");
       headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -477,7 +477,7 @@ export async function handlePlatformPaymentsRoutes(request: Request, env: Env, u
       const forwardReq = new Request(targetUrl, request);
       forwardReq.headers.set("x-user-login", userLogin);
 
-      const resp = await actorGateway.dispatch(env.SEARCH_AGENT, userLogin, forwardReq);
+      const resp = await actorGateway.dispatch(env.ORCHESTRATOR_AGENT, userLogin, forwardReq);
       const headers = new Headers(resp.headers);
       headers.set("Access-Control-Allow-Origin", "*");
       headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -513,7 +513,7 @@ export async function handlePlatformPaymentsRoutes(request: Request, env: Env, u
         instanceName = PREMIUM_GATEWAY_INSTANCE;
       }
 
-      const resp = await actorGateway.dispatch(env.SEARCH_AGENT, instanceName, forwardReq);
+      const resp = await actorGateway.dispatch(env.ORCHESTRATOR_AGENT, instanceName, forwardReq);
       const headers = new Headers(resp.headers);
       headers.set("Access-Control-Allow-Origin", "*");
       headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -525,7 +525,7 @@ export async function handlePlatformPaymentsRoutes(request: Request, env: Env, u
     // --- External Payment Webhook Listeners (Stripe, PayPal, Lemon Squeezy) ---
     if (path.startsWith("/api/payments/webhook") || path === "/payments/webhook") {
       const targetUrl = new URL("/payments/webhook" + url.search, "https://agent.internal");
-      return actorGateway.dispatch(env.SEARCH_AGENT, "system_webhook_receiver", new Request(targetUrl, request));
+      return actorGateway.dispatch(env.ORCHESTRATOR_AGENT, "system_webhook_receiver", new Request(targetUrl, request));
     }
   return null;
 }
@@ -587,7 +587,7 @@ export async function handlePlatformBrowserRoutes(request: Request, env: Env, ur
           headers: { "Content-Type": "application/json", "x-user-login": userLogin },
           body: JSON.stringify(body),
         });
-        return actorGateway.dispatch(env.SEARCH_AGENT, userLogin, forwardReq);
+        return actorGateway.dispatch(env.ORCHESTRATOR_AGENT, userLogin, forwardReq);
       } catch (err: any) {
         return Response.json({ success: false, error: err.message }, { status: 500 });
       }
