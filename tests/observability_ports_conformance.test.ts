@@ -30,10 +30,14 @@ function baseEvent(over: Partial<ObservabilityEvent> = {}): ObservabilityEvent {
     level: "info",
     operation: "http.request",
     tenantId: null,
+    actorId: null,
+    agentId: null,
+    component: null,
     runId: null,
     sessionRef: null,
     traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
     timestampMs: 1700000000000,
+    timestampIso: "2023-11-14T22:13:20.000Z",
     durationMs: 42,
     fields: { method: "GET", status: 200 },
     ...over,
@@ -77,7 +81,9 @@ function makeAdapter(name: "in-memory" | "analytics-engine"): {
     read: () =>
       ae.points.map((p) => {
         const blobs = (p.blobs ?? []) as string[];
-        const fields = blobs[7] ? JSON.parse(blobs[7]) : {};
+        // Blobs 7–10 are the §2.2 attributes (actorId, agentId,
+        // component, timestampIso); the fields JSON is last.
+        const fields = blobs[11] ? JSON.parse(blobs[11]) : {};
         return {
           type: blobs[0] ?? "",
           level: blobs[1] as ObservabilityEvent["level"],
@@ -86,10 +92,14 @@ function makeAdapter(name: "in-memory" | "analytics-engine"): {
             (p.indexes?.[0] as string) === "none"
               ? null
               : (p.indexes?.[0] as string),
+          actorId: blobs[7] ? blobs[7] : null,
+          agentId: blobs[8] ? blobs[8] : null,
+          component: blobs[9] ? blobs[9] : null,
           runId: blobs[3] ? blobs[3] : null,
           sessionRef: blobs[4] ? blobs[4] : null,
           traceId: blobs[5] ?? "",
           timestampMs: 0,
+          timestampIso: blobs[10] ?? "",
           durationMs: p.doubles?.[0],
           count: p.doubles?.[1],
           errorCode: blobs[6] ? blobs[6] : undefined,
@@ -108,6 +118,10 @@ describe("observability port conformance", () => {
         const [e] = read();
         expect(e.type).toBe("http.request");
         expect(e.tenantId).toBeNull();
+        expect(e.actorId).toBeNull();
+        expect(e.agentId).toBeNull();
+        expect(e.component).toBeNull();
+        expect(e.timestampIso).toBe("2023-11-14T22:13:20.000Z");
         expect(e.runId).toBeNull();
         expect(e.sessionRef).toBeNull();
         expect(e.traceId).toBe("4bf92f3577b34da6a3ce929d0e0e4736");
@@ -161,7 +175,13 @@ describe("eventToDataPoint mapping", () => {
     expect(point.blobs?.[4]).toBe("abc123def456");
     expect(point.blobs?.[5]).toBe("4bf92f3577b34da6a3ce929d0e0e4736");
     expect(point.blobs?.[6]).toBe("http.500");
-    expect(JSON.parse(point.blobs?.[7] as string)).toEqual({
+    // The §2.2 attributes ride as blobs 7–10 (empty scope reads
+    // "" here); the fields JSON stays last at 11.
+    expect(point.blobs?.[7]).toBe("");
+    expect(point.blobs?.[8]).toBe("");
+    expect(point.blobs?.[9]).toBe("");
+    expect(point.blobs?.[10]).toBe("2023-11-14T22:13:20.000Z");
+    expect(JSON.parse(point.blobs?.[11] as string)).toEqual({
       method: "GET",
       status: 200,
     });

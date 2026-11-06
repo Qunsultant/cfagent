@@ -181,3 +181,15 @@ gate — production stream content lands with traffic).
 Revert the PR: the fetch wrapper, queue tap, and emit
 wirings disappear, and behavior falls back to the pre-change
 path (console logging, no stream). No data migration to undo.
+
+## Amendments
+
+### 2026-11-06 — #3515 S2: §2.2 mandatory attributes on the datapoint
+
+The blob order gains the four §2.2 attributes: blobs are now
+`[type, level, operation, runId, sessionRef, traceId, errorCode,
+actorId, agentId, component, timestampIso, fieldsJson]` (12 blobs,
+under the 20-blob cap). Positions 1–7 are unchanged; the fields
+JSON moves from blob 8 to blob 12. The event schema gains the same
+four fields (`actorId` / `agentId` / `component` nullable,
+`timestampIso` derived from `timestampMs`).

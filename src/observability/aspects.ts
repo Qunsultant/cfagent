@@ -29,6 +29,7 @@ import { createObservabilitySink } from "./createObservabilityPorts";
 import {
   newTraceContext,
   sessionRefFor,
+  timestampIsoFor,
   traceContextFromHeaders,
   type ObservabilityEvent,
   type ObservabilitySink,
@@ -42,6 +43,8 @@ export interface ObservabilityAspectContext {
   runId?: string | null;
   /** Raw session id — hashed to sessionRef, never logged raw. */
   sessionId?: string | null;
+  /** Emitting component (§2.2); null when the caller names none — never fabricated. */
+  component?: string | null;
   trace?: TraceContext;
   nowMs?: () => number;
   /**
@@ -88,6 +91,9 @@ export async function withObservability<T>(
   const scope = {
     operation: ctx.operation,
     tenantId: ctx.tenantId ?? null,
+    actorId: null,
+    agentId: null,
+    component: ctx.component ?? null,
     runId: ctx.runId ?? null,
     sessionRef: ctx.sessionId ? sessionRefFor(ctx.sessionId) : null,
     traceId: trace.traceId,
@@ -101,6 +107,7 @@ export async function withObservability<T>(
       type: ctx.operation,
       level: "info",
       timestampMs: end,
+      timestampIso: timestampIsoFor(end),
       durationMs: end - start,
       fields: ctx.fields ?? {},
     });
@@ -112,6 +119,7 @@ export async function withObservability<T>(
       type: ctx.operation,
       level: "error",
       timestampMs: end,
+      timestampIso: timestampIsoFor(end),
       durationMs: end - start,
       errorCode: errorCodeOf(err),
       fields: ctx.fields ?? {},
@@ -154,11 +162,15 @@ export function withRequestObservability(
           level: response.status >= 500 ? "error" : "info",
           operation: "http.request",
           tenantId: null,
+          actorId: null,
+          agentId: null,
+          component: "http",
           runId: null,
           sessionRef: null,
           traceId: trace.traceId,
           spanId: trace.spanId,
           timestampMs: end,
+          timestampIso: timestampIsoFor(end),
           durationMs: end - start,
           fields: { method: request.method, status: response.status },
         });
@@ -172,11 +184,15 @@ export function withRequestObservability(
           level: "error",
           operation: "http.request",
           tenantId: null,
+          actorId: null,
+          agentId: null,
+          component: "http",
           runId: null,
           sessionRef: null,
           traceId: trace.traceId,
           spanId: trace.spanId,
           timestampMs: end,
+          timestampIso: timestampIsoFor(end),
           durationMs: end - start,
           errorCode: errorCodeOf(err),
           fields: { method: request.method },

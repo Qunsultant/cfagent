@@ -65,6 +65,7 @@ import { BusinessError } from "../../outcomes/outcomeAspects";
 import {
   newTraceContext,
   sessionRefFor,
+  timestampIsoFor,
   type ObservabilityEvent,
   type ObservabilitySink,
 } from "../../observability/observabilityPorts";
@@ -465,15 +466,22 @@ function denialStreamEvent(
   principal: McpPrincipal,
   sessionId: string | undefined
 ): ObservabilityEvent {
+  const now = Date.now();
   return {
     type: MCP_PERMISSION_DENIED_STREAM,
     level: "warn",
     operation: toolName,
     tenantId: null,
+    // The principal identity stays in the audit trail, not the
+    // stream: actor/agent are null on the denial event.
+    actorId: null,
+    agentId: null,
+    component: "mcp-permissions",
     runId: null,
     sessionRef: sessionId ? sessionRefFor(sessionId) : null,
     traceId: newTraceContext().traceId,
-    timestampMs: Date.now(),
+    timestampMs: now,
+    timestampIso: timestampIsoFor(now),
     count: 1,
     errorCode: MCP_PERMISSION_DENIED_CODE,
     // Counts/outcomes only: tool, scope, kind. Never arguments,
