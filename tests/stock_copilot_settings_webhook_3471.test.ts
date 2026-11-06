@@ -203,7 +203,7 @@ describe("settings-change webhook delivery (#3471)", () => {
 
   it("delivers a signed POST to the login's own instance at /webhooks/settings, fact-of-change payload only", async () => {
     const { ns, received } = fakeNamespace();
-    const env = { [THINK_WEBHOOK_SECRET_ENV]: SECRET, SEARCH_AGENT: ns };
+    const env = { [THINK_WEBHOOK_SECRET_ENV]: SECRET, ORCHESTRATOR_AGENT: ns };
     const out = await deliverSettingsChangeWebhook(env as never, change);
     expect(out).toEqual({ delivered: true });
     expect(received).toHaveLength(1);
@@ -221,7 +221,7 @@ describe("settings-change webhook delivery (#3471)", () => {
   it("skips with a loud log when THINK_WEBHOOK_SECRET is unset — never sends unsigned, never throws", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { ns, received } = fakeNamespace();
-    const out = await deliverSettingsChangeWebhook({ SEARCH_AGENT: ns } as never, change);
+    const out = await deliverSettingsChangeWebhook({ ORCHESTRATOR_AGENT: ns } as never, change);
     expect(out.delivered).toBe(false);
     expect(out.reason).toContain("secret");
     expect(received).toHaveLength(0);
@@ -231,7 +231,7 @@ describe("settings-change webhook delivery (#3471)", () => {
   it("reports a refused delivery (the instance's 503) without throwing", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     const { ns } = fakeNamespace(() => new Response("Webhook secret not configured", { status: 503 }));
-    const env = { [THINK_WEBHOOK_SECRET_ENV]: SECRET, SEARCH_AGENT: ns };
+    const env = { [THINK_WEBHOOK_SECRET_ENV]: SECRET, ORCHESTRATOR_AGENT: ns };
     const out = await deliverSettingsChangeWebhook(env as never, change);
     expect(out.delivered).toBe(false);
     expect(out.reason).toContain("503");
@@ -247,7 +247,7 @@ describe("settings-change webhook delivery (#3471)", () => {
     const { ns, received } = fakeNamespace();
     const deferred: Array<Promise<unknown>> = [];
     const notify = createSettingsChangeNotifier(
-      { [THINK_WEBHOOK_SECRET_ENV]: SECRET, SEARCH_AGENT: ns } as never,
+      { [THINK_WEBHOOK_SECRET_ENV]: SECRET, ORCHESTRATOR_AGENT: ns } as never,
       (p) => {
         deferred.push(p);
       },
@@ -570,7 +570,7 @@ describe("end to end through the real PortThink channel (#3471 on #3474)", () =>
       { [THINK_WEBHOOK_SECRET_ENV]: SECRET },
     );
     const { ns } = fakeNamespace((req) => receiver.fetch(req));
-    const env = { [THINK_WEBHOOK_SECRET_ENV]: SECRET, SEARCH_AGENT: ns };
+    const env = { [THINK_WEBHOOK_SECRET_ENV]: SECRET, ORCHESTRATOR_AGENT: ns };
     const deferred: Array<Promise<unknown>> = [];
     const notify = createSettingsChangeNotifier(env as never, (p) => {
       deferred.push(p);
@@ -607,7 +607,7 @@ describe("end to end through the real PortThink channel (#3471 on #3474)", () =>
   it("with the secret unset the switch still succeeds and nothing is delivered (the #3473 floor owns convergence)", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     const { ns, received } = fakeNamespace();
-    const notify = createSettingsChangeNotifier({ SEARCH_AGENT: ns } as never);
+    const notify = createSettingsChangeNotifier({ ORCHESTRATOR_AGENT: ns } as never);
     const { store, ctx } = switchCtx({ notifySettingsChanged: notify });
     const res = await handleEnvironmentSwitch(apiPost("/api/environment/switch", { environment: "PROD" }, LOGIN), ctx);
     expect(res.status).toBe(200);
