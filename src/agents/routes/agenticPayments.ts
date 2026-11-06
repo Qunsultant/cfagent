@@ -2861,6 +2861,13 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // STOPS money, never starts it, so the monetization flag (which
   // gates money-starting actions) must never block a user from
   // stopping charges.
+  // Issue #3523 (2.14 follow-up): outcomes are outcome-catalog coded (SUCCESS_SUBSCRIPTION_
+  // CANCELED_PERIOD_END / _IMMEDIATE on success; FAILURE_SUBSCRIPTION_CANCEL_NONE_ACTIVE 409 on
+  // replay; FAILURE_SUBSCRIPTION_CANCEL_NOT_CONFIGURED / _FAILED 503 on provider failure — no raw
+  // provider text in any body). The cancel is tenant-scoped to the server-resolved account tenant
+  // (resolvePlatformIdentity, #2219 mechanism), rechecked by id before execution, and the audit
+  // carries code + message + login + tenant. Repurchase rows cancel per-row over the verified set
+  // (not the bulk user-keyed call), so out-of-scope tenant rows are never touched.
   if (path.endsWith("/payments/agentic/commercial/subscription/cancel") && request.method === "POST") {
     try {
       const login = commercialLogin();
@@ -2877,9 +2884,21 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       const ensured = await ensureStores(store, subs);
       if (ensured) return ensured;
       const nowMs = Date.now();
+      // Issue #3523: resolve the target user's platform identity first (#2219 mechanism).
+      // The cancel is tenant-scoped to the resolved account tenant; a client-supplied tenantId
+      // is never read (the body carries no identifiers — POST {}). When no account row resolves,
+      // the cancel stays user-scoped: cancel stops money and must never be blocked by a missing
+      // account row; the audit records the unresolved scope.
+      const identity = await resolvePlatformIdentity(
+        { commercial: store, subscriptions: subs },
+        { userId: targetUser, nowMs },
+      );
+      const tenantId = identity.tenantId;
+      const tenantScope = identity.hasAccount ? "resolved" : "unresolved";
       const unexpired = (await subs.listSubscriptions(targetUser)).filter(
         (s) => s.status === "active" && s.periodEndMs > nowMs,
       );
+      const inScope = tenantScope === "resolved" ? unexpired.filter((s) => s.tenantId === tenantId) : unexpired;
       // Issue #2662: read-only policy read; any failure falls back to
       // period_end (fail-safe toward preserving access).
       let downgradeTiming: "period_end" | "immediate" = "period_end";
@@ -2892,24 +2911,76 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       } catch {
         downgradeTiming = "period_end";
       }
-      const billingRows = unexpired.filter((s) => isBillingManaged(s));
-      let canceled;
+      // Issue #3523 (tech-standards §6): recheck authorization before the consequential
+      // execution — re-read each in-scope row by id and verify it still belongs to the target
+      // user, is still active + unexpired, and is still in the resolved tenant scope.
+      const verified = [];
+      for (const row of inScope) {
+        const fresh = await subs.getSubscription(row.id);
+        if (
+          fresh &&
+          fresh.userId === targetUser &&
+          fresh.status === "active" &&
+          fresh.periodEndMs > nowMs &&
+          (tenantScope === "unresolved" || fresh.tenantId === tenantId)
+        ) {
+          verified.push(fresh);
+        }
+      }
+      // Remaining = still-active rows this request did not cancel (out-of-scope tenant rows,
+      // rows failing the recheck, rows not yet attempted on failure). Computed from a fresh
+      // re-list so the response always reports the verified state, never a claimed one.
+      const remainingAfter = async (canceledIds: string[]) => {
+        const current = await subs.listSubscriptions(targetUser);
+        return current.filter(
+          (s) => s.status === "active" && s.periodEndMs > nowMs && !canceledIds.includes(s.id),
+        );
+      };
+      if (verified.length === 0) {
+        // Issue #3523 (standards §7.2 Idempotent Receiver): the dedup key is the set of
+        // unexpired in-scope rows — a replay finds none and returns 409, never a 200 that
+        // claims a cancel happened.
+        const remaining = await remainingAfter([]);
+        return Response.json(
+          {
+            code: "FAILURE_SUBSCRIPTION_CANCEL_NONE_ACTIVE",
+            message: resolveOutcome("FAILURE_SUBSCRIPTION_CANCEL_NONE_ACTIVE").entry!.businessMessage,
+            retryable: false,
+            canceled: [],
+            remaining,
+          },
+          { status: 409 },
+        );
+      }
+      const billingRows = verified.filter((s) => isBillingManaged(s));
+      const repurchaseRows = verified.filter((s) => !isBillingManaged(s));
+      let canceled: Array<{ id: string; periodEndMs: number; createdAtMs: number }> = [];
       let billingCanceledIds: string[] = [];
       if (billingRows.length === 0) {
-        if (downgradeTiming === "immediate") {
-          canceled = [];
-          for (const row of unexpired) {
-            const one = await subs.revokeSubscription(row.id, nowMs);
-            if (one) canceled.push(one);
-          }
-          canceled.sort((a, b) => a.createdAtMs - b.createdAtMs || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-        } else {
-          canceled = await subs.cancelUnexpiredSubscriptions(targetUser, nowMs);
+        // Issue #3523: repurchase rows cancel per-row over the verified set (not the bulk
+        // user-keyed call), so out-of-scope tenant rows are never touched.
+        for (const row of repurchaseRows) {
+          const one =
+            downgradeTiming === "immediate"
+              ? await subs.revokeSubscription(row.id, nowMs)
+              : await subs.cancelSubscription(row.id, nowMs);
+          if (one) canceled.push(one);
         }
+        canceled.sort((a, b) => a.createdAtMs - b.createdAtMs || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
       } else {
         const billing = createBillingPorts(ctx.env as unknown as BillingEnv, true);
         if (!billing) {
-          return Response.json({ error: "Billing cancel is not configured (Stripe): no subscriptions canceled." }, { status: 503 });
+          const remaining = await remainingAfter([]);
+          return Response.json(
+            {
+              code: "FAILURE_SUBSCRIPTION_CANCEL_NOT_CONFIGURED",
+              message: resolveOutcome("FAILURE_SUBSCRIPTION_CANCEL_NOT_CONFIGURED").entry!.businessMessage,
+              retryable: false,
+              canceled: [],
+              remaining,
+            },
+            { status: 503 },
+          );
         }
         const billingCanceled = [];
         try {
@@ -2920,12 +2991,35 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
                 : await cancelBillingAtPeriodEnd({ billing, subs, subscriptionId: row.id }),
             );
           }
-        } catch (err: any) {
-          return Response.json({ error: `Billing cancel failed, no repurchase subscriptions canceled: ${err.message || "unknown error"}` }, { status: 503 });
+        } catch {
+          // Issue #3523: fail closed with the coded failure — no raw provider text in the
+          // body. Rows canceled before the failure stay canceled; the response + audit report
+          // the verified partial state (canceled vs remaining), never an all-or-nothing claim.
+          const partialIds = billingCanceled.map((s) => s.id);
+          const remaining = await remainingAfter(partialIds);
+          ctx.audit("commercial.subscription.cancel_failed", "payments", {
+            userId: targetUser,
+            tenantId,
+            tenantScope,
+            code: "FAILURE_SUBSCRIPTION_CANCEL_FAILED",
+            message: resolveOutcome("FAILURE_SUBSCRIPTION_CANCEL_FAILED").entry!.businessMessage,
+            subscriptionIds: billingRows.map((s) => s.id),
+            canceledIds: partialIds,
+          });
+          return Response.json(
+            {
+              code: "FAILURE_SUBSCRIPTION_CANCEL_FAILED",
+              message: resolveOutcome("FAILURE_SUBSCRIPTION_CANCEL_FAILED").entry!.businessMessage,
+              retryable: true,
+              canceled: billingCanceled,
+              remaining,
+            },
+            { status: 503 },
+          );
         }
         billingCanceledIds = billingCanceled.map((s) => s.id);
         const repurchaseCanceled = [];
-        for (const row of unexpired.filter((s) => !isBillingManaged(s))) {
+        for (const row of repurchaseRows) {
           const one =
             downgradeTiming === "immediate"
               ? await subs.revokeSubscription(row.id, nowMs)
@@ -2937,24 +3031,48 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
         );
       }
       const accessThroughMs = canceled.length > 0 ? Math.max(...canceled.map((s) => s.periodEndMs)) : null;
+      const cancelCode =
+        downgradeTiming === "immediate"
+          ? "SUCCESS_SUBSCRIPTION_CANCELED_IMMEDIATE"
+          : "SUCCESS_SUBSCRIPTION_CANCELED_PERIOD_END";
+      const cancelMessage = resolveOutcome(cancelCode).entry!.businessMessage;
+      const remaining = await remainingAfter(canceled.map((s) => s.id));
       // Issue #2522: cancel-at-period-end changes no periodEndMs,
       // so the effective tier is unchanged — the audit states the
       // tier at cancel time (access continues to periodEnd),
       // never a claimed change. Immediate cancel truncates access,
       // so the after rows state the truncated tier.
-      const cancelAccount = await store.getAccount(targetUser);
       const cancelSubscriptions = await subs.listSubscriptions(targetUser);
       ctx.audit("commercial.subscription.canceled", "payments", {
         userId: targetUser,
+        tenantId,
+        tenantScope,
+        code: cancelCode,
+        message: cancelMessage,
         subscriptionIds: canceled.map((s) => s.id),
         billingCanceledIds,
+        remainingIds: remaining.map((s) => s.id),
         accessThroughMs,
         downgradeTiming,
-        effectiveTier: resolveEffectiveTier(cancelAccount, cancelSubscriptions, Date.now()),
+        effectiveTier: resolveEffectiveTier(identity.stored, cancelSubscriptions, Date.now()),
       });
-      return Response.json({ userId: targetUser, canceled, accessThroughMs, downgradeTiming });
-    } catch (err: any) {
-      return Response.json({ error: err.message || "Failed to cancel subscription" }, { status: 500 });
+      return Response.json({
+        userId: targetUser,
+        code: cancelCode,
+        message: cancelMessage,
+        canceled,
+        remaining,
+        accessThroughMs,
+        downgradeTiming,
+      });
+    } catch {
+      return Response.json(
+        {
+          code: "FAILURE_UNEXPECTED_ERROR",
+          message: codedMessage("FAILURE_UNEXPECTED_ERROR"),
+        },
+        { status: 500 },
+      );
     }
   }
 

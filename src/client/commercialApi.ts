@@ -15,14 +15,23 @@
  * rendered — they can carry internal detail.
  */
 import { withCsrfInit } from "./apiFetch";
+import { codedMessage, resolveOutcome } from "../outcomes/outcomeAspects";
 
 const BASE = "/api/payments/agentic/commercial";
 
 export class CommercialApiError extends Error {
   readonly status: number;
-  constructor(status: number) {
-    super(errorMessageForStatus(status));
+  /**
+   * Issue #3523: the outcome-catalog code the server returned for this failure, when the
+   * error body carried one that resolves in the catalog. The message is then the coded
+   * message (`[CODE] businessMessage`, the #2573 pattern); otherwise it is the fixed
+   * per-status string and no server detail is ever rendered.
+   */
+  readonly code?: string;
+  constructor(status: number, code?: string) {
+    super(code && resolveOutcome(code).entry ? codedMessage(code) : errorMessageForStatus(status));
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -60,7 +69,19 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   } catch {
     throw new CommercialApiError(0);
   }
-  if (!res.ok) throw new CommercialApiError(res.status);
+  if (!res.ok) {
+    // Issue #3523: a coded error body carries its catalog code through (the #2573 pattern);
+    // a legacy raw body falls back to the fixed per-status message — server detail is never
+    // rendered, and an unknown code never invents a message.
+    let code: string | undefined;
+    try {
+      const body = (await res.json()) as { code?: unknown };
+      if (typeof body?.code === "string" && resolveOutcome(body.code).entry) code = body.code;
+    } catch {
+      code = undefined;
+    }
+    throw new CommercialApiError(res.status, code);
+  }
   return (await res.json()) as T;
 }
 
@@ -257,7 +278,15 @@ export const subscriptionPurchase = (body: {
   post("/subscription/purchase", body);
 export const subscriptionCancel = (): Promise<{
   userId: string;
+  /**
+   * Issue #3523: the outcome-catalog code + verbatim catalog businessMessage for this cancel
+   * (SUCCESS_SUBSCRIPTION_CANCELED_PERIOD_END / _IMMEDIATE). `remaining` lists the still-active
+   * rows this cancel did not cancel (out-of-scope tenant rows, rows failing the recheck).
+   */
+  code: string;
+  message: string;
   canceled: SubscriptionView[];
+  remaining: SubscriptionView[];
   accessThroughMs: number | null;
   /**
    * Issue #2669 (2.14): the timing the server applied, from the 2.7
