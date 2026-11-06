@@ -34,7 +34,7 @@ const EXPECTED_MODEL = "@cf/zai-org/glm-4.7-flash";
 const mockEnv = {
   AI: { run: vi.fn() },
   AI_SEARCH_ENDPOINT: "https://mock.search",
-  SEARCH_AGENT: {},
+  ORCHESTRATOR_AGENT: {},
   AGENT_SESSIONS: {},
 } as unknown as Env;
 
