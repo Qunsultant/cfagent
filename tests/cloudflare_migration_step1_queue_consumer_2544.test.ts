@@ -122,7 +122,7 @@ interface FetchCall {
 function makeEnv(fetchCalls: FetchCall[], fetchImpl?: (req: Request) => Promise<unknown>) {
   return {
     SCREENER_EVENTS: { send: async () => {} },
-    SEARCH_AGENT: {
+    ORCHESTRATOR_AGENT: {
       idFromName: (_name: string) => "stub-id",
       get: (_id: string) => ({
         fetch: async (req: Request) => {
