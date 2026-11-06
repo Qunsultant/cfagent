@@ -195,7 +195,7 @@ export async function handleTradingOmniRoutes(request: Request, env: Env, url: U
       const targetUrl = new URL("/trading/email/inbound", "https://agent.internal");
       const forwardReq = new Request(targetUrl, request);
       forwardReq.headers.set("x-user-login", userLogin);
-      return actorGateway.dispatch(env.SEARCH_AGENT, userLogin, forwardReq);
+      return actorGateway.dispatch(env.ORCHESTRATOR_AGENT, userLogin, forwardReq);
     }
 
     // --- Omnichannel Trading Agent: Signed Email Approval Link Click ---
@@ -225,7 +225,7 @@ export async function handleTradingOmniRoutes(request: Request, env: Env, url: U
         return renderPage("Approval link invalid", fastCheck.error);
       }
       const targetUrl = new URL("/trading/email/approve-link", "https://agent.internal");
-      const forwardRes = await actorGateway.dispatch(env.SEARCH_AGENT, INBOUND_EMAIL_ORCHESTRATOR_INSTANCE,
+      const forwardRes = await actorGateway.dispatch(env.ORCHESTRATOR_AGENT, INBOUND_EMAIL_ORCHESTRATOR_INSTANCE,
         new Request(targetUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -253,7 +253,7 @@ export async function handleTradingOmniRoutes(request: Request, env: Env, url: U
       const targetUrl = new URL("/trading/slack/event", "https://agent.internal");
       const forwardReq = new Request(targetUrl, request);
       forwardReq.headers.set("x-user-login", userLogin);
-      return actorGateway.dispatch(env.SEARCH_AGENT, userLogin, forwardReq);
+      return actorGateway.dispatch(env.ORCHESTRATOR_AGENT, userLogin, forwardReq);
     }
 
     // --- Omnichannel Trading Agent: Slack Principal Link Confirm ---
@@ -291,7 +291,7 @@ export async function handleTradingOmniRoutes(request: Request, env: Env, url: U
       const targetUrl = new URL("/trading/voice/turn", "https://agent.internal");
       const forwardReq = new Request(targetUrl, request);
       forwardReq.headers.set("x-user-login", userLogin);
-      return actorGateway.dispatch(env.SEARCH_AGENT, userLogin, forwardReq);
+      return actorGateway.dispatch(env.ORCHESTRATOR_AGENT, userLogin, forwardReq);
     }
 
     // --- Omnichannel Trading Agent: Voice Welcome Greeting ---
@@ -302,7 +302,7 @@ export async function handleTradingOmniRoutes(request: Request, env: Env, url: U
       const targetUrl = new URL("/trading/voice/greeting", "https://agent.internal");
       const forwardReq = new Request(targetUrl, request);
       forwardReq.headers.set("x-user-login", userLogin);
-      return actorGateway.dispatch(env.SEARCH_AGENT, userLogin, forwardReq);
+      return actorGateway.dispatch(env.ORCHESTRATOR_AGENT, userLogin, forwardReq);
     }
 
     // --- Omnichannel Options Intelligence: Forwarder for Options Endpoints (Catalog, Strategies, Screen, Unified, Config) ---
@@ -320,7 +320,7 @@ export async function handleTradingOmniRoutes(request: Request, env: Env, url: U
       const targetUrl = new URL(subPath + url.search, "https://agent.internal");
       const forwardReq = new Request(targetUrl, request);
       forwardReq.headers.set("x-user-login", userLogin);
-      return actorGateway.dispatch(env.SEARCH_AGENT, userLogin, forwardReq);
+      return actorGateway.dispatch(env.ORCHESTRATOR_AGENT, userLogin, forwardReq);
     }
 
     // --- Cloudflare Agents Task Scheduling Management APIs ---
@@ -336,7 +336,7 @@ export async function handleTradingOmniRoutes(request: Request, env: Env, url: U
       const targetUrl = new URL(subPath + url.search, "https://agent.internal");
       const forwardReq = new Request(targetUrl, request);
       forwardReq.headers.set("x-user-login", userLogin);
-      return actorGateway.dispatch(env.SEARCH_AGENT, userLogin, forwardReq);
+      return actorGateway.dispatch(env.ORCHESTRATOR_AGENT, userLogin, forwardReq);
     }
   return null;
 }
@@ -456,7 +456,7 @@ export async function handleTradingApproveRoutes(request: Request, env: Env, url
         headers: { "Content-Type": "application/json", "x-user-login": userLogin },
         body: JSON.stringify({ orderId, decision: "approved" }),
       });
-      const res = await actorGateway.dispatch(env.SEARCH_AGENT, userLogin, forwardReq);
+      const res = await actorGateway.dispatch(env.ORCHESTRATOR_AGENT, userLogin, forwardReq);
       const json = (await res.json().catch(() => ({}))) as any;
 
       if (json.success) {
@@ -475,7 +475,7 @@ export async function handleTradingApproveRoutes(request: Request, env: Env, url
 
       const forwardReq = new Request(targetUrl, request);
       forwardReq.headers.set("x-user-login", session.githubLogin);
-      return actorGateway.dispatch(env.SEARCH_AGENT, session.githubLogin, forwardReq);
+      return actorGateway.dispatch(env.ORCHESTRATOR_AGENT, session.githubLogin, forwardReq);
     }
 
     // --- Options Flows Endpoints (Live, Historical, News, Insider, Congress, Summary, Presets) ---
