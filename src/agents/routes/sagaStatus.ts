@@ -283,7 +283,7 @@ async function readSagaProjectionFallback(
   };
 }
 
-/** Read all saga audit rows through the SEARCH_AGENT stub (agent-scoped, one read). */
+/** Read all saga audit rows through the ORCHESTRATOR_AGENT stub (agent-scoped, one read). */
 export async function readSagaAuditRows(
   stub: AuditOwnerStub,
 ): Promise<Array<Record<string, unknown>>> {
@@ -336,7 +336,7 @@ export async function handleSagaStatusRoutes(
     stub = overrides?.auditStub ?? sagaAuditOwnerStub(env);
   } catch {
     return Response.json(
-      { error: "Saga status audit read unavailable: SEARCH_AGENT is not bound." },
+      { error: "Saga status audit read unavailable: ORCHESTRATOR_AGENT is not bound." },
       { status: 503 },
     );
   }
