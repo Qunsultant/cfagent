@@ -705,6 +705,12 @@ export class UnifiedOptionsService {
       if (chainSource) {
         return { engineClient: chainSource };
       }
+      // Issue #3460: the selected broker's platform has no options
+      // chain source — refuse with a named error. Falling through
+      // here used to screen E*TRADE data under another broker's name.
+      throw new Error(
+        `provider_unsupported: broker "${broker}" does not provide an options chain source (no getOptionChains/getOptionExpireDates); no other broker's data is used in its place.`,
+      );
     }
     // Issue #781: forward the injected ORM as-is. This service only
     // uses ETradeService's REST client; the ORM reaches only its
