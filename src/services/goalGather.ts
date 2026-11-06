@@ -52,6 +52,7 @@ import {
   type YahooHistoryDeps,
 } from "../trading";
 import type { ObservabilitySink } from "../observability/observabilityPorts";
+import { timestampIsoFor } from "../observability/observabilityPorts";
 import { gatherMissText } from "../observability/alertingList";
 import type { ProviderConfigStore } from "../data/providerConfigPorts";
 import type { ProviderCaptureStore } from "../data/providerCapturePorts";
@@ -339,15 +340,20 @@ export function createGoalGatherEnrichment(input: GoalGatherInput): ScreenLiveEn
       // 6. #1743 stage event, best-effort (never fails the run).
       if (input.sink) {
         try {
+          const now = Date.now();
           await input.sink.write({
             type: "goal.gather.stored",
             level: "info",
             operation: "goal.gather.stored",
             tenantId: input.tenantId,
+            actorId: null,
+            agentId: null,
+            component: "goal-gather",
             runId: input.runId,
             sessionRef: null,
             traceId: crypto.randomUUID(),
-            timestampMs: Date.now(),
+            timestampMs: now,
+            timestampIso: timestampIsoFor(now),
             count: enrichedQuotes.length,
             fields: {
               stored: enrichedQuotes.length,
@@ -374,15 +380,20 @@ export function createGoalGatherEnrichment(input: GoalGatherInput): ScreenLiveEn
       // (requested 0) is neither event nor alert.
       if (missingSymbols.length > 0 && input.sink) {
         try {
+          const now = Date.now();
           await input.sink.write({
             type: "goal.gather.missed",
             level: "warn",
             operation: "goal.gather",
             tenantId: input.tenantId,
+            actorId: null,
+            agentId: null,
+            component: "goal-gather",
             runId: input.runId,
             sessionRef: null,
             traceId: crypto.randomUUID(),
-            timestampMs: Date.now(),
+            timestampMs: now,
+            timestampIso: timestampIsoFor(now),
             count: missingSymbols.length,
             fields: {
               requested: symbols.length,

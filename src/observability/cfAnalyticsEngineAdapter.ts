@@ -15,8 +15,11 @@
  *    count (1 when absent)]
  *  - blobs (filterable dimensions): [type, level, operation,
  *    runId ("" when absent), sessionRef ("" when absent),
- *    traceId, errorCode ("" when absent), fields JSON
- *    (redacted)]
+ *    traceId, errorCode ("" when absent), actorId ("" when
+ *    absent), agentId ("" when absent), component ("" when
+ *    absent), timestampIso, fields JSON (redacted)] — the §2.2
+ *    mandatory attributes ride as blobs so the stream stays
+ *    queryable on actor / agent / component / time.
  * writeDataPoint is synchronous and buffered by the runtime —
  * the sink never awaits a network round-trip, so a slow or
  * unavailable Analytics Engine cannot stall the request (and
@@ -54,6 +57,10 @@ export function eventToDataPoint(event: ObservabilityEvent): {
       event.sessionRef ?? "",
       event.traceId,
       event.errorCode ?? "",
+      event.actorId ?? "",
+      event.agentId ?? "",
+      event.component ?? "",
+      event.timestampIso,
       JSON.stringify(redactForStream(event.fields)),
     ],
   };

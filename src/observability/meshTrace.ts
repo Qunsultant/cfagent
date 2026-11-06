@@ -30,6 +30,7 @@ import type { ShardJobRow } from "../data/shardJobPorts";
 import {
   childSpan,
   parseTraceparent,
+  timestampIsoFor,
   type ObservabilitySink,
   type TraceContext,
 } from "./observabilityPorts";
@@ -84,11 +85,20 @@ export class SinkForwardingTraceStore implements MeshTraceStore {
       level: "info",
       operation: hop.operation,
       tenantId: hop.tenantId ?? null,
+      // The hop caller is a user login: it stays out of the
+      // stream (the #1743 discipline), so actorId is null.
+      actorId: null,
+      // Promotion, not new ingestion: hop.agent is the
+      // agent/surface serving the hop, already carried in
+      // fields below; the §2.2 agent_id attribute carries it.
+      agentId: hop.agent ?? null,
+      component: "mesh-trace",
       runId: hop.jobId ?? null,
       sessionRef: null,
       traceId: hop.traceId,
       spanId: hop.spanId,
       timestampMs: hop.timestampMs,
+      timestampIso: timestampIsoFor(hop.timestampMs),
       fields: {
         hopKind: hop.kind,
         ...(hop.caller ? { caller: hop.caller } : {}),
