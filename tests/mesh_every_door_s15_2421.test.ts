@@ -585,7 +585,15 @@ describe("census chat column vs the mesh-door command registry (#2421)", () => {
     // chat cell also records the NLQ surface's nlq.execute
     // capability, which is not a mesh-door command. #2581 added
     // run_options_strategy_screen to the same cell and family.
-    expect([...union, "run_stock_screen", "run_options_strategy_screen"].sort()).toEqual([...family.commands].sort());
+    // #3513: Stock Copilot chat door added stock_copilot_status and
+    // stock_copilot_control to the mesh-door family.
+    expect([
+      ...union,
+      "run_stock_screen",
+      "run_options_strategy_screen",
+      "stock_copilot_status",
+      "stock_copilot_control",
+    ].sort()).toEqual([...family.commands].sort());
     expect(new Set(union).size).toBe(union.length);
     // AiSearchAgent's chat reach is a catalog command, not a mesh-door
     // command — recorded on its own census entry, outside this family.
@@ -641,7 +649,7 @@ describe("census agent-as-a-tool column vs runAgentTool call sites (#2421)", () 
     for (const rel of srcFiles) {
       const src = read(`src/agents/${rel}`);
       for (const match of src.matchAll(/runAgentTool\(\s*([A-Z]\w*)/g)) {
-        callSites.push(`${rel}:${match[1]}`);
+        callSites.push(`${rel.replace(/\\/g, "/")}:${match[1]}`);
       }
     }
     expect(callSites).toEqual(["orchestrator/researchPublish.ts:ResearchAgent"]);
