@@ -34,7 +34,7 @@
  * (tests/agentic_payments_identity_binding.test.ts) — module mocks for
  * the agent graph the node loader cannot resolve, a recording
  * OPTIONS_SCANNER_MCP stub whose idFromName calls are observable, and a
- * recording SEARCH_AGENT stub for the preflight's never-forwards check.
+ * recording ORCHESTRATOR_AGENT stub for the preflight's never-forwards check.
  */
 import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
@@ -98,7 +98,7 @@ function makeScannerEnv() {
         },
       }),
     },
-    SEARCH_AGENT: {
+    ORCHESTRATOR_AGENT: {
       idFromName: (name: string) => name,
       get: (id: string) => ({
         fetch: async (_req: Request) => {
