@@ -23,8 +23,8 @@
   it); O1 located (§7: the hung-timeout mechanism is the Agents SDK's
   `cf_agents_jobs.hung_timeout_seconds`, SDK default 30s — the #2366
   seed claim stands, corrected to SDK 0.32.0); O2 enumerated + wired
-  (§7: the four `schedule.goal.*` lifecycle audit events). O3 stays
-  open for S3. The §4 ledger columns are implemented in S1 on the
+  (§7: the four `schedule.goal.*` lifecycle audit events). O3 resolved
+  in S3 (§7: per-tick budget accounting matches `onCron` exactly). The §4 ledger columns are implemented in S1 on the
   `job_run_records` shape (extended, not rewritten); `mas_async_jobs`
   gains no columns in S1 — follow-up minting stamps linkage into the
   job payload/result instead, and the workflow-run record's existing
@@ -59,6 +59,34 @@
   order state); filed as sub-issue #3361. No file is deleted in S2;
   the two retired admin tabs and the IAAA Queue tab are removed from
   their panels (their mount sites move to the home), not renamed.
+- **S3 amendment (Slice S3, #3121):** goal schedules are migrated onto
+  the S1 primitives as the tick-evaluated kind (§3 Q(a)): `onCron`
+  evaluates through the S1 re-exported `isDue` / `isValidCron` /
+  `zonedDateParts` (one implementation, never reimplemented); the tick
+  write site resolves its §4 linkage through `buildLedgerLinkage`
+  (schedule id IS the goal id, trigger derives from `triggeredBy`,
+  async job id rides the job-creating branches, workflow id null);
+  materialized goals carry system provenance (`synthesized-
+  materialization`); the lifecycle audit moves into the
+  `ScheduledAgent` mutation methods — the one DO-side sink (#3312
+  fixed: route, A2A, and mesh-door entry paths all emit through it,
+  the route threads the session actor instead of posting); the goals
+  view renders provenance per goal and its run history from the one
+  consolidated ledger read (`listGoalRuns`, the runs view's read —
+  no second read path). Tick semantics preserved verbatim (23h guard,
+  `"0 */6 * * *"` never-due quirk, one budget check per goal per
+  firing, in-flight claim, governed halt, materialization before
+  firing, `pipeline:` in ONE firing, one tick entry per `onCron`
+  call). O3 resolved in §7 (per-tick budget accounting matches
+  `onCron` exactly — tenant scopes the halt read only, never the
+  budget bucket). Lossless+additive (owner directive, #3121 comment
+  6669238775): §9 seeds the running capability-coverage map from this
+  inventory; two capabilities with no home were found in the S3 comb
+  and filed, not dropped — #3393 (direct one-shot synthesized firing
+  leaves no ledger row) and #3394 (B-T2-07 named gap: SDK firings of
+  internal-only callbacks leave no per-run record). No file is deleted
+  in S3; the store stays the DO `goals` key until #3123 unifies it
+  (Phase 2).
 
 ## 1. Re-verified inventory (fresh main)
 
@@ -698,10 +726,38 @@ audited in the consolidated ledger).
   the server.ts funnel, so agent-driven goal mutations leave no
   lifecycle audit event — filed as sub-issue #3312 (DO-side sink;
   natural home S3).
-- **O3 (S3):** confirm the consolidated tick's per-tick budget accounting
-  matches `onCron` exactly when a tick evaluates goals across tenants
-  (#2457 owns cross-tenant rules; the consolidated surface enforces the
-  same gates).
+- **O2 — RESOLVED in S3 (#3312 fixed, see the S3 amendment):** the
+  sink moved INTO the `ScheduledAgent` mutation methods
+  (`addGoal` / `removeGoal` / `setGoalEnabled` / `triggerGoal` in
+  `src/agents/scheduled-agent.ts`) — the one funnel every entry
+  path flows through. The route funnel is retired: the route
+  threads the session actor into the methods instead of posting,
+  so each mutation still emits exactly one event with the same
+  shape S1 pins; the A2A path threads the edge-authenticated
+  caller (`a2a-credential:<surface>`) as actor; the mesh door
+  threads its identified chat user. Same `mas_events` funnel, same
+  best-effort swallow rule — no second audit system. #3312 stays
+  open until live proof (an A2A-path event visible via GET
+  /api/audit alongside the route-path events).
+- **O3 (S3) — RESOLVED in S3 (confirmed, not papered over):** the
+  consolidated tick's per-tick budget accounting matches `onCron`
+  exactly, because the consolidated tick IS `onCron` — there is no
+  second budget pass to diverge. One tick over N due goals issues
+  exactly N budget checks, one per goal per firing (operation +
+  the goal's `budgetCents` + bucket `AGENTIC_SPEND_AGENT_ID`),
+  including exactly one check for a whole `pipeline:` firing; a
+  rejection skips only its own goal. Tenant never changes the
+  accounting: the tick's `tenantId` scopes the governed-halt read
+  and the chain-leg projection only — two ticks over identical
+  goals with different tenants issue identical budget-check calls
+  (pinned in `tests/schedule-3121-s3-parity.test.ts`, S3-P02).
+  The premise's limit is recorded honestly: goals carry no tenant
+  field and live in one DO instance's `goals` key, so a tick
+  evaluates one instance's goals; cross-tenant management is
+  #2457's scope (instances are per login, the tenant-to-login
+  mapping is still undesigned there) — the consolidated surface
+  enforces the same gates #2457 sets, it does not invent a
+  mapping.
 - **O4 (S1) — RESOLVED in S1 (decision pinned in §4 above):** `trigger`
   sits ALONGSIDE `triggeredBy`; it does not supersede it. Derivation
   rule and rationale are in §4 ("O4 decision (S1)"); the implementation
@@ -732,7 +788,7 @@ Two verified facts about the shell, which the table relies on:
 
 | # | URL | Renders | Backend | Addressability | Review note (the problem it has as a home) |
 |---|-----|---------|---------|----------------|--------------------------------------------|
-| U-01 | `https://agent.openaimp.com/?tab=schedules` | `SchedulesHome` — the consolidated home: list (`SchedulesPanel` + embedded `ScheduledOptionsManager`), runs/ledger (`ScheduleRunLedgerPanel`), goals (`ScheduledGoalsPanel`), queue (`ScheduleQueueView`) | `/api/schedules` + `/api/schedule/goals` (goals until S3) | URL-driven (top-level tab + `?view=` sub-routes) | S2: de-hubbed — renders directly from the shell (`Chat.tsx` `TAB_CONTENT`), no longer through the retained `ETradeTradingHub` (route no longer `retain`; `mapTabToTradingSubTab` has no `schedules` case; the hub has no schedules branch). Sub-routes `view=list\|runs\|ledger\|goals\|queue` + `schedule=<id>` / `run=<id>` deep links. |
+| U-01 | `https://agent.openaimp.com/?tab=schedules` | `SchedulesHome` — the consolidated home: list (`SchedulesPanel` + embedded `ScheduledOptionsManager`), runs/ledger (`ScheduleRunLedgerPanel`), goals (`ScheduledGoalsPanel`), queue (`ScheduleQueueView`) | `/api/schedules` + `/api/schedule/goals` (goals on the S1 primitives since S3; the store unifies in #3123) | URL-driven (top-level tab + `?view=` sub-routes) | S2: de-hubbed — renders directly from the shell (`Chat.tsx` `TAB_CONTENT`), no longer through the retained `ETradeTradingHub` (route no longer `retain`; `mapTabToTradingSubTab` has no `schedules` case; the hub has no schedules branch). Sub-routes `view=list\|runs\|ledger\|goals\|queue` + `schedule=<id>` / `run=<id>` deep links. S3: the goals view renders provenance per goal and its run history from the one consolidated ledger read. |
 | U-02 | `https://agent.openaimp.com/?tab=screeners&view=schedules` | (retired) | `/api/schedules` | URL-driven (tab + view) | S2: RETIRED — redirects to `?tab=schedules` (`legacySchedulesRedirect`, replace not push). The nav active logic no longer activates the Schedules item for any screeners address. |
 | U-03 | `https://agent.openaimp.com/?tab=options&view=scheduled-screening` | `OptionsHub` schedules mode — options-research state, NOT a schedules listing: one-shot run form (#2545), autonomous-runs record (#223), screening activity log (#1162); no schedule CRUD (the mode's own note points schedule management at the Schedules tab) | `/api/schedules` (runs record reads) | URL-driven (deep link) | S2: retired AS A SCHEDULES ADDRESS, address preserved for its options-research content — NOT redirected, because in-hub tab clicks write the same `?view=` URL a redirect would match, and the mode carries real options-family state. Schedule management itself already lives only in the consolidated home (S7/C2). |
 | U-04 | `https://agent.openaimp.com/?tab=platform-admin&view=scheduled-goals` | (retired as an address) | `/api/schedule/goals` (separate family) | URL-driven (tab + view) | S2: RETIRED — redirects to `?tab=schedules&view=goals` (`legacySchedulesRedirect`, replace not push). The Platform Admin tab and panel are gone; the left-nav entry links straight to the home (nav-config.json deep-link override). |
@@ -800,7 +856,11 @@ behind it and what is missing around it.
   schedules home uses the same mechanism, not a new one.
 - **(iii) Fold the outposts in as views of the one home.** Goal
   schedules become `view=goals`, backed by `/api/schedule/goals`
-  until S3 merges them onto the consolidated backend; the run ledger
+  until S3 merges them onto the consolidated backend (S3 MERGED:
+  the goals view now runs on the S1 primitives — tick evaluation
+  through the re-exported `isDue`, linkage through
+  `buildLedgerLinkage`, provenance, the DO-side audit sink, one
+  ledger read; the store itself unifies in #3123, Phase 2); the run ledger
   becomes `view=runs` / `view=ledger`, backed by the consolidated
   ledger (§4); the admin queue becomes `view=queue`, role-gated at
   the route (it stays a privileged operation even when it gains a
@@ -833,3 +893,108 @@ can retire them without losing one. **S2 implemented the scheme**
 view ids `list | runs (= ledger) | goals | queue`, the four redirects,
 and the route-level queue gate — the U-rows above are the as-built
 record.
+## 9. Capability-coverage map (running, seeded in S3)
+
+**Rule (owner directive, #3121 comment 6669238775 — program law from
+S3 onward): the consolidation is LOSSLESS AND ADDITIVE.** The
+consolidated engine carries the UNION of all existing capabilities —
+every firing contract, schedule kind, and surface behavior,
+front-end and back-end. Not a minimal subset, not an intersection.
+Any existing capability with no home in the consolidated engine is
+a defect, not a quiet drop: it is filed as its own sub-issue under
+#3121 at identification time and stays open until it lands or the
+owner explicitly retires it.
+
+**How this map works:** one row per S0 inventory item (§1). The
+"home" names where the capability lives in the consolidated engine
+(module / route / view) or the slice that will home it; "status" is
+the slice that landed it, the slice that owns it next, or the filed
+sub-issue. Each slice extends this map for the capabilities it
+touches and files what it finds homeless; S6 final parity proves
+the map complete against §1 before the program closes. A row whose
+home is a later slice is scheduled work, not a defect; a row with
+no home and no filed issue is a defect in the map.
+
+### 9.1 Implementation types (§1.1) and the tick fan-out (§1.2)
+
+| Capability | S0 id | Consolidated home | Status |
+|------------|-------|-------------------|--------|
+| Worker cron triggers (3), dispatched into named scheduler entry points | T1, Q(b) | `wrangler.jsonc` crons → `scheduled()` dispatch → named entry points | S5 (planned) |
+| `*/30` tick fan-out: ScheduledAgent tick + 5 piggyback dispatches, guards preserved | §1.2, D1 | `src/server.ts` `scheduled()` + `src/agents/scheduled-agent.ts` `onCron` | S3 (tick kind landed); S5 (named entry points) |
+| Agent SDK alarm schedules (4 timing forms) | T2, B-T2-01 | `resolveTimingForm` (`src/services/consolidatedScheduling.ts`) + `/api/schedules` routes | S1 (classifier); S2 (surfaces) |
+| Tick-polled goal schedules | T3, Q(a) | Tick-evaluated kind: `ScheduledAgent.onCron` via the S1 re-exports | S3 — landed |
+| Async-job follow-up chains | T4, Q(c) | `scheduleScreenerFollowups` behind the same ledger | S4 (planned) |
+| Cloudflare Workflows as execution (not scheduling) | §1.1 | One durable execution path; `workflowId` linkage on ledger rows | S1 (linkage); S4 (chain stamping) |
+
+### 9.2 Surfaces (§1.3)
+
+| Capability | S0 id | Consolidated home | Status |
+|------------|-------|-------------------|--------|
+| `SchedulesPanel` (list/trigger/pause/resume/delete/detail/edit) | S1 (§1.3) | `?tab=schedules&view=list` (`SchedulesHome`) | S2 — landed |
+| `ScheduledOptionsManager` (own form, system-job triggers, audit read) | S2 (§1.3) | Embedded in `view=list` | S2 — landed |
+| `ScheduledGoalsPanel` (list/ticks/add/toggle/trigger/remove/preset) | S3 (§1.3) | `?tab=schedules&view=goals` on the S1 primitives | S3 — landed |
+| Admin Queue tab (dump/cancel-all/wipe/export/Track 1 recreate) | S4 (§1.3) | `?tab=schedules&view=queue` (`ScheduleQueueView`) | S2 — landed |
+| Unified Jobs UI (goals + schedules + crons, read-only merge) | §1.3 | `JobsPanel` over `listGoals` + `listGoalRuns` + `listScheduleRuns` | S0 — preserved (reads the S1 ledger) |
+| Read-only run history (`JobsPanel`, Autopilot, `WorkflowRunsPanel`) | §1.3 | Consolidated ledger reads | S1/S2 — landed |
+
+### 9.3 Tick-polled goal behaviors (B-T3)
+
+| Capability | S0 id | Consolidated home | Status |
+|------------|-------|-------------------|--------|
+| Tick evaluation: every stored goal, disabled skipped unless forced, `isDue` gates firing | B-T3-01 | `onCron` via S1 re-exported `isDue` | S3 — landed |
+| `isDue` semantics + preserved `"0 */6 * * *"` never-due quirk + 23h guard | B-T3-02 | `src/schedule.ts` (source of truth), re-exported by `consolidatedScheduling.ts` | S1 (re-export); S3 (tick wired through it) |
+| Budget gate: one PaymentsAgent check per due goal per firing, bucket `AGENTIC_SPEND_AGENT_ID` | B-T3-03 | `onCron` budget check (O3 pinned S3-P02) | S3 — landed |
+| In-flight firing claim, shared by cron and manual firings | B-T3-04 | `src/services/goalFiringClaims.ts` + `onCron` claim/release | S3 — landed (preserved verbatim) |
+| `pipeline:` goals run ordered stages in ONE firing, single budget check | B-T3-05 | `onCron` pipeline branch | S3 — landed (preserved verbatim) |
+| Synthesized schedules materialize first, fire via `onCron`; direct firing refused for recurring | B-T3-06 | `materializeSynthesizedSchedule` + governed `onCron` branch | S3 — landed (+ system provenance on materialization) |
+| Direct one-shot synthesized firing | B-T3-06 | `fireSynthesizedSchedule` (firing preserved) — but NO ledger row | **Filed #3393 (open)** — firing has a home, its ledger visibility does not |
+| Goal store: DO `goals` key, seeded from `DEFAULT_SCHEDULES` only when empty; 8 shipped ids | B-T3-07 | `ScheduledAgent` DO storage (unchanged) | Phase 2 #3123 (one schedule store) |
+| Per-run records for every goal firing terminal point | B-T3-08 | `recordGoalRun` → `buildJobRunRecord` via `buildLedgerLinkage` | S1 (columns); S3 (resolver) — landed |
+| Goal lifecycle audit events (`schedule.goal.*`) on every entry path | O2 | DO-side sink in the mutation methods | S1 (enumerated + route funnel); S3 (DO sink, #3312 fixed) — landed |
+| Goal creation provenance (user/system, creator, reason, time) | B-L-04 / S1-P09 | Route stamp (user) + `addGoal` validation + materialization stamp (system) | S1 (route/addGoal); S3 (materialization) — landed |
+| A2A scheduled operations (list/ticks/add/remove/enable/trigger) | #2223 | `dispatchScheduledA2A` + `handleA2A` (actor threaded) | S3 — landed (audited) |
+| Mesh-door goal list/trigger | #2331 door | `triggerScheduledGoalViaDoor` (actor threaded) | S3 — landed (audited) |
+| Resource goals, index-refresh goals, social publish + pipeline, delivery pass | #1819/#1980/#1077/#1224 | `onCron` branches (unchanged) | S3 — landed (preserved verbatim) |
+| SessionStore resource-goals preset + delegation-contract preview | #1922/#1773 | `ScheduledGoalsPanel` (unchanged) | S3 — landed (preserved) |
+
+### 9.4 SDK alarm behaviors (B-T2) and Worker cron duties (B-T1)
+
+| Capability | S0 id | Consolidated home | Status |
+|------------|-------|-------------------|--------|
+| Four timing forms resolve (cron/interval/date/delay) | B-T2-01 | `resolveTimingForm` | S1 — landed |
+| Creatable-callback allow-list (4 callbacks) | B-T2-02 | `CREATABLE_SCHEDULE_CALLBACKS` + create route | S2 — landed |
+| Idempotent creates + duplicate suppression + audit | B-T2-03 | `findDuplicateSchedule` + `schedule.duplicate_suppressed` | S1 (dedupe fix); S2 — landed |
+| Pause/resume/trigger/delete/detail/update | B-T2-04 | `scheduleManagement.ts` + routes | S2 — landed |
+| System-job trigger routes (7) | B-T2-05 | Trigger routes | S2 — landed |
+| Per-schedule audit events (8, B-T2-06 funnel) | B-T2-06 | `SCHEDULE_LIFECYCLE_AUDIT_EVENTS` + `ctx.audit` | S1 (map); S2 — landed |
+| Per-run records for creatable callbacks + manual triggers | B-T2-07 | `recordScheduleCallbackRun` → `job_run_records` | S1 — landed |
+| Per-run records for SDK firings of internal-only callbacks | B-T2-07 (named gap) | — no home — | **Filed #3394 (open)** |
+| Baseline reconciliation on agent start | B-T2-08 | `removeUnownedBaselineSchedules` | S2 — landed |
+| Renewal (`0 3`), tick (`*/30`), retention (`0 4`) incl. #2331 gate + #2037 trace | B-T1-01..03 | `scheduled()` dispatch | S5 (planned) |
+| Piggyback research guard (#354) + retention constants | B-T1-04..05 | `researchScheduleGuard.ts` + `storageRetention.ts` | S5 (planned) |
+
+### 9.5 Follow-up chain (B-T4) and ledger state (B-L)
+
+| Capability | S0 id | Consolidated home | Status |
+|------------|-------|-------------------|--------|
+| `scheduleScreenerFollowups` bridge (record + notify + report) | B-T4-01 | Async-job chain minter | S4 (planned) |
+| Chain graph (`parent_job_id`, `chain_id`, `not_before`, recovery re-arm) | B-T4-02 | `mas_async_jobs` + `recoverQueuedAsyncJobs` | S4 (planned) |
+| Retry (`retryOf`, refusal, `async_job.retried` audit) | B-T4-03 | Async-job retry | S4 (planned) |
+| Recovery bounds + stuck detection + audit | B-T4-04 | Recovery/stuck machinery | S4 (planned) |
+| Keyless options runs recorded (never silently absent) | B-T4-05 | `recordKeylessOptionsServe` | S1 — landed |
+| `job_run_records` carries the §4 columns on every new row | B-L-01 | `buildJobRunRecord` + `normalizeJobRunRecord` | S1 — landed |
+| `mas_async_jobs` linkage (no §4 columns; payload stamping) | B-L-02 | Follow-up payload linkage | S4 (planned); #3313 (outcome stamping, open) |
+| `mas_opportunity_scans` joinability | B-L-03 | — join key undecided — | **Filed #3314 (open)** |
+| Provenance on schedule payloads | B-L-04 | `buildScheduleProvenance` et al. | S1/S3 — landed |
+
+### 9.6 URL inventory (§8)
+
+| Capability | S0 id | Consolidated home | Status |
+|------------|-------|-------------------|--------|
+| `?tab=schedules` home + sub-routes (`list/runs/goals/queue`, `schedule=`/`run=` deep links) | U-01 | `SchedulesHome` | S2 (home); S3 (goals on primitives) — landed |
+| Retired duplicate addresses → home redirects | U-02/U-04/U-05/U-06 | `legacySchedulesRedirect` | S2 — landed |
+| `?tab=options&view=scheduled-screening` (U-03) | U-03 | Redirect to the home (owner-decided 2026-11-05) | U-03 redirect slice (parallel, not S3) |
+| Queues tab (async jobs, DLQ, approvals) | U-07 | `?tab=queues` (T4 lives here until S4) | S4 (planned) |
+| Workflow-runs deep link | U-08 | `WorkflowRunsPanel` (no schedule linkage — #3264 gap on the read path) | S4/S6 (planned) |
+| Per-run records API (`/api/schedules/runs?scheduleId=`) | U-09 | Joined by home deep links in S2 | S2 — landed |
+| Chat Scheduler sub-view (#3122, planned) | U-10 | Third `ChatSubView` | Phase 3 #3122 (planned) |

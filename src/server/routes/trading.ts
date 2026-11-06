@@ -20,13 +20,8 @@ import type { Env } from "../../types";
 import { OPERATION_CATALOG } from "../../orchestrate";
 import { SCHEDULE_SYSTEMS, WORKER_CRON_TRIGGERS_INVENTORY } from "../../services/scheduleSystems";
 import { actorGateway } from "../../services/cloudflareActorGateway";
-import { type DoStubLike } from "../../data/durableKv";
-import { SHARED_ORCHESTRATOR_INSTANCE } from "../../security/serviceIdentity";
 import {
-  buildGoalScheduleAuditEvent,
   buildScheduleProvenance,
-  postGoalScheduleAuditEvent,
-  type GoalScheduleAuditEvent,
 } from "../../services/consolidatedScheduling";
 import { requireAuth } from "../auth";
 import { confirmSlackLink, INBOUND_EMAIL_ORCHESTRATOR_INSTANCE, verifyApprovalLinkForPrincipal, DEFAULT_SAVED_PRESETS, getDynamicLiveFlowItems, getDynamicFlowSummary, summarizeFlowProvenance, fetchRealMarketNews, fetchRealSecInsiderFilings, fetchRealCongressDisclosures, MarketCapCategory, AssetClassCategory } from "../../trading";
@@ -56,48 +51,23 @@ export async function handleTradingScheduleRoutes(request: Request, env: Env, ur
         listGoals(): Promise<unknown[]>;
         getTickHistory(limit?: number): Promise<unknown[]>;
         addGoal(goal: Record<string, unknown>): Promise<unknown>;
-        removeGoal(id: string): Promise<boolean>;
-        setGoalEnabled(id: string, enabled: boolean): Promise<boolean>;
-        triggerGoal(id: string): Promise<unknown>;
+        removeGoal(id: string, actor?: string | null): Promise<boolean>;
+        setGoalEnabled(id: string, enabled: boolean, actor?: string | null): Promise<boolean>;
+        triggerGoal(id: string, env?: unknown, actor?: string | null): Promise<unknown>;
         listJobRuns(jobId?: string, limit?: number): Promise<unknown[]>;
       }>((env as any).SCHEDULED_AGENT, "default");
 
-      // Issue #3121 S1 (O2) — goal lifecycle audit: each mutation
-      // below best-effort POSTs its `schedule.goal.*` event to the
-      // orchestrator audit route (the same mas_events funnel the T2
-      // events use via ctx.audit). Awaited inline — handleFetch has
-      // no waitUntil — but never failing the mutation: the poster
-      // resolves false on any audit failure and never throws. The
-      // orchestrator stub is built lazily inside the poster call, so
-      // a route that never audits (every read, and any env without
-      // the SEARCH_AGENT binding) never touches the binding — an
-      // eager stub here 500d every /api/schedule/* route in tests
-      // whose env binds only SCHEDULED_AGENT.
-      const auditGoalLifecycle = async (
-        event: GoalScheduleAuditEvent,
-        goalId: string,
-        extra?: { operation?: string; enabled?: boolean },
-      ): Promise<void> => {
-        if (!goalId) return;
-        try {
-          const auditAgent = actorGateway.stub<DoStubLike>(
-            env.SEARCH_AGENT,
-            SHARED_ORCHESTRATOR_INSTANCE,
-          );
-          await postGoalScheduleAuditEvent(
-            (req) => auditAgent.fetch(req),
-            buildGoalScheduleAuditEvent({
-              event,
-              goalId,
-              actor: session.githubLogin,
-              ...extra,
-            }),
-          );
-        } catch {
-          // Best-effort audit: a missing binding or a failed post
-          // must never fail the mutation it records.
-        }
-      };
+      // Issue #3121 S3 (#3312) — goal lifecycle audit: the four
+      // `schedule.goal.*` events are emitted by the ScheduledAgent
+      // mutation methods themselves (the DO-side sink, the one
+      // funnel every entry path flows through). The S1 route funnel
+      // that posted them here is retired: this route threads the
+      // session actor into the methods instead, so each mutation
+      // still emits exactly one event — same event, same payload,
+      // same actor — and the A2A path (which bypassed this funnel)
+      // is audited too. Best-effort inside the methods: an audit
+      // failure never fails the mutation (the `this.audit` swallow
+      // rule).
 
       if (path === "/api/schedule/goals" && request.method === "GET") {
         return Response.json({ ok: true, goals: await sched.listGoals() });
@@ -130,12 +100,11 @@ export async function handleTradingScheduleRoutes(request: Request, env: Env, ur
               origin: "user",
               createdBy: session.githubLogin,
             }),
+            // Issue #3121 S3 (#3312) — the session login is the
+            // lifecycle-audit actor; the DO method emits the
+            // `schedule.goal.added` event with it.
+            actor: session.githubLogin,
           })) as { id?: unknown; operation?: unknown };
-          await auditGoalLifecycle(
-            "schedule.goal.added",
-            typeof goal.id === "string" ? goal.id : "",
-            typeof goal.operation === "string" ? { operation: goal.operation } : undefined,
-          );
           return Response.json({ ok: true, goal });
         } catch (err) {
           return Response.json(
@@ -175,25 +144,17 @@ export async function handleTradingScheduleRoutes(request: Request, env: Env, ur
         if (action === "enabled") {
           const body = (await request.json().catch(() => null)) as { enabled?: unknown } | null;
           const enabled = body?.enabled === true;
-          const updated = await sched.setGoalEnabled(id, enabled);
+          const updated = await sched.setGoalEnabled(id, enabled, session.githubLogin);
           if (!updated) return Response.json({ error: "Goal not found." }, { status: 404 });
-          await auditGoalLifecycle("schedule.goal.enabled", id, { enabled });
           return Response.json({ ok: true });
         }
-        const tick = (await sched.triggerGoal(id)) as { goalsEvaluated?: unknown };
-        // Issue #3121 S1 (O2) — a trigger of a missing goal is no
-        // lifecycle event (no goal changed state); a found goal's
-        // manual firing is.
-        if (typeof tick.goalsEvaluated === "number" && tick.goalsEvaluated > 0) {
-          await auditGoalLifecycle("schedule.goal.triggered", id);
-        }
+        const tick = (await sched.triggerGoal(id, undefined, session.githubLogin)) as { goalsEvaluated?: unknown };
         return Response.json({ ok: true, tick });
       }
       const deleteMatch = path.match(/^\/api\/schedule\/goals\/([^/]+)$/);
       if (deleteMatch && request.method === "DELETE") {
-        const removed = await sched.removeGoal(deleteMatch[1]);
+        const removed = await sched.removeGoal(deleteMatch[1], session.githubLogin);
         if (!removed) return Response.json({ error: "Goal not found." }, { status: 404 });
-        await auditGoalLifecycle("schedule.goal.removed", deleteMatch[1]);
         return Response.json({ ok: true });
       }
       return Response.json({ error: "Unknown schedule endpoint." }, { status: 404 });

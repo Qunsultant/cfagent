@@ -15,7 +15,7 @@
   "src/client/PortfolioRiskPanel.tsx": 3,
   "src/client/ProviderConnectivityDashboard.tsx": 12,
   "src/client/RunDetailView.tsx": 25,
-  "src/client/ScheduledGoalsPanel.tsx": 21,
+  "src/client/ScheduledGoalsPanel.tsx": 28,
   "src/client/ScreenerPresetManager.tsx": 6,
   "src/client/ScreenerResultsView.tsx": 35,
   "src/client/ScreenersHub.tsx": 4,

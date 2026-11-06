@@ -1271,11 +1271,7 @@ describe("global D-D census: step 5e — residual bucket family port composition
       ["src/security/publicOAuth.ts", "../data/durableKv"],
       ["src/security/serviceTokens.ts", "../data/durableKv"],
       ["src/security/session.ts", "../data/durableKv"],
-      // Slice 9 of Qunsultant/cfagent#2902 (2026-11-06): the
-      // ["src/server.ts", "./data/durableKv"] pair is REMOVED — the
-      // dead DoStubLike/DoNamespaceLike import is pruned from the
-      // entrypoint (its only use had already moved to queue.ts),
-      // so server.ts is no longer a durableKv importer at all.
+      ["src/server.ts", "./data/durableKv"],
       // Slice 6 of Qunsultant/cfagent#2902 (2026-11-05): the moved
       // social/slack handlers' SESSION_STORE casts import
       // DoNamespaceLike from the data layer, as server.ts did inline.
@@ -1287,7 +1283,10 @@ describe("global D-D census: step 5e — residual bucket family port composition
       // Slice 5 of Qunsultant/cfagent#2902 (2026-11-05): the moved
       // schedule handler's #3121 S1 audit wiring imports DoStubLike
       // from the data layer, as server.ts did inline.
-      ["src/server/routes/trading.ts", "../../data/durableKv"],
+      // REMOVED in #3121 S3: the route funnel is retired — the audit
+      // sink moved into the ScheduledAgent mutation methods, so the
+      // route no longer imports DoStubLike (it threads the session
+      // actor into the methods instead).
       ["src/services/actorGatewayPorts.ts", "../data/durableKv"],
       ["src/services/agenticPayments.ts", "../data/durableKv"],
       ["src/trading/alpaca/credentialStore.ts", "../../data/durableKv"],

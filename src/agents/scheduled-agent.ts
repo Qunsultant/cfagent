@@ -7,6 +7,7 @@ import {
   type ScheduledA2AOutcome,
 } from "./scheduledA2aDispatch";
 import type { Env } from "../types";
+import type { DoStubLike } from "../data/durableKv";
 import type { CompiledChain, CompiledChainStep } from "../orchestrate";
 import type { ChainRunResult } from "../mcps/openaimp/goalChainCommands";
 import {
@@ -29,9 +30,6 @@ import {
 } from "../agentic/chainFiring";
 import {
   DEFAULT_SCHEDULES,
-  isDue,
-  isValidCron,
-  zonedDateParts,
   type ScheduledGoal,
   type ScheduleTick,
 } from "../schedule";
@@ -41,7 +39,24 @@ import {
   SCHEDULED_AGENT_JOB_RUN_CAP,
   type JobRunRecord,
 } from "../services/jobRunRecords";
-import { provenanceFromPayload } from "../services/consolidatedScheduling";
+// Issue #3121 S3 — the tick-evaluated kind evaluates through the S1
+// shared primitives: `isDue` / `isValidCron` / `zonedDateParts` are
+// the S1 module's verbatim re-exports of src/schedule.ts (one
+// implementation, never reimplemented); the ledger linkage, the goal
+// lifecycle audit events, and the provenance helpers are the same
+// module's. src/schedule.ts stays the source of truth.
+import {
+  buildGoalScheduleAuditEvent,
+  buildLedgerLinkage,
+  isDue,
+  isValidCron,
+  postGoalScheduleAuditEvent,
+  provenanceFromPayload,
+  systemProvenance,
+  zonedDateParts,
+  type GoalScheduleAuditEvent,
+} from "../services/consolidatedScheduling";
+import { SHARED_ORCHESTRATOR_INSTANCE } from "../security/serviceIdentity";
 import { createSocialStoresFromNamespace } from "./social/durableStores";
 import { createSocialBriefStoreFromNamespace } from "./social/briefStore";
 import {
@@ -419,25 +434,52 @@ export class ScheduledAgent extends PortThink {
           asyncJobId?: string | null;
           workflowId?: string | null;
         },
-      ): Promise<void> =>
-        this.recordJobRun({
+      ): Promise<void> => {
+        // Issue #3121 S3 — the §4 consolidated-ledger linkage is
+        // resolved through the S1 resolver (`buildLedgerLinkage`),
+        // not hand-built at this write site: the schedule id IS the
+        // goal id; the trigger derives from `triggeredBy` (forced →
+        // manual, tick → scheduled); the async job id rides the
+        // success branches that create an Orchestrator job (null
+        // elsewhere — social/resource/index/pipeline firings create
+        // no Orchestrator job); no goal firing runs through a
+        // workflow, so workflowId is null. The values are identical
+        // to the S1 hand-built ones; the resolver is now the one
+        // place that derives them, so the write site cannot drift
+        // from it.
+        const linkage = buildLedgerLinkage({
+          payload: {
+            scheduleId: goal.id,
+            ...(extra.asyncJobId
+              ? { asyncJobId: extra.asyncJobId }
+              : {}),
+            ...(extra.workflowId
+              ? { workflowId: extra.workflowId }
+              : {}),
+          },
+          triggeredBy,
+        });
+        return this.recordJobRun({
           jobId: goal.id,
           operation: goal.operation,
           started: runStarted,
           finished: new Date().toISOString(),
           outcome,
           triggeredBy,
-          // Issue #3121 S1 — the §4 consolidated-ledger linkage for
-          // a tick-evaluated firing: the schedule id IS the goal id;
-          // the trigger derives from `triggeredBy` in the builder
-          // (forced → manual, tick → scheduled); the async job id
-          // rides the success branches that create an Orchestrator
-          // job (null elsewhere — social/resource/index/pipeline
-          // firings create no Orchestrator job); no goal firing runs
-          // through a workflow, so workflowId is null.
-          scheduleId: goal.id,
-          ...extra,
+          trigger: linkage.trigger,
+          scheduleId: linkage.scheduleId,
+          asyncJobId: linkage.asyncJobId,
+          workflowId: linkage.workflowId,
+          ...(extra.error !== undefined ? { error: extra.error } : {}),
+          ...(extra.detail !== undefined ? { detail: extra.detail } : {}),
+          ...(extra.descriptor !== undefined
+            ? { descriptor: extra.descriptor }
+            : {}),
+          ...(extra.artifactRefs !== undefined
+            ? { artifactRefs: extra.artifactRefs }
+            : {}),
         });
+      };
 
       // #2840: in-flight firing guard (the screen-lock pattern,
       // extended to goals). A second submission — manual trigger
@@ -1050,6 +1092,59 @@ export class ScheduledAgent extends PortThink {
   }
 
   /**
+   * Issue #3121 S3 (#3312) — the DO-side goal-lifecycle audit sink.
+   *
+   * S1 wired the four `schedule.goal.*` events at the
+   * `/api/schedule/goals` route funnel in `src/server/routes/
+   * trading.ts`; the A2A dispatch path (`handleA2A` → these methods
+   * directly) bypassed it, so agent-driven goal mutations left no
+   * lifecycle audit event. The sink moves INTO the mutation methods
+   * (`addGoal` / `removeGoal` / `setGoalEnabled` / `triggerGoal`
+   * below) — the one funnel every entry path flows through, so a
+   * future entry path is audited by construction and no call site
+   * can forget it. The route funnel is retired (S3): the route
+   * threads the session actor into the methods instead of posting
+   * its own event, so each mutation still emits exactly one event
+   * with the same shape S1 pins.
+   *
+   * The sink is the same `mas_events` funnel S1 used — the
+   * orchestrator's `POST /api/audit/event` via the SEARCH_AGENT
+   * stub (the DO-side precedent is the wallet scanner's
+   * `persistAudit`, same channel, same instance). The stub is
+   * built lazily inside the call, so a caller whose env binds no
+   * SEARCH_AGENT never touches the binding; the poster never
+   * throws and the whole call is swallowed — the `this.audit`
+   * swallow rule — so an audit failure can never fail the mutation
+   * it records.
+   */
+  private async auditGoalLifecycle(
+    event: GoalScheduleAuditEvent,
+    goalId: string,
+    extra?: { operation?: string; enabled?: boolean },
+    actor?: string | null,
+  ): Promise<void> {
+    if (!goalId) return;
+    try {
+      const auditAgent = actorGateway.stub<DoStubLike>(
+        this.env.SEARCH_AGENT,
+        SHARED_ORCHESTRATOR_INSTANCE,
+      );
+      await postGoalScheduleAuditEvent(
+        (req) => auditAgent.fetch(req),
+        buildGoalScheduleAuditEvent({
+          event,
+          goalId,
+          actor: actor ?? undefined,
+          ...extra,
+        }),
+      );
+    } catch {
+      // Best-effort audit: a missing binding or a failed post
+      // must never fail the mutation it records.
+    }
+  }
+
+  /**
    * Add a new scheduled goal. The operation must exist in the
    * orchestrate.ts catalog; the cron expression uses five fields with
    * lists, ranges, and steps in every field ("0 9 * * 1-5"). An
@@ -1065,6 +1160,14 @@ export class ScheduledAgent extends PortThink {
     enabled?: boolean;
     timeZone?: string;
     provenance?: unknown;
+    /**
+     * Issue #3121 S3 (#3312) — the acting principal for the
+     * lifecycle audit event, threaded by the entry path (the
+     * session login on the route path, the edge-authenticated
+     * caller on the A2A path). Validated, never trusted raw: a
+     * non-string actor is dropped, never recorded.
+     */
+    actor?: unknown;
   }): Promise<ScheduledGoal> {
     const id = goal.id.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-");
     if (!id) throw new Error("Goal id is required.");
@@ -1094,6 +1197,10 @@ export class ScheduledAgent extends PortThink {
     // and a goal created without one simply has none ("not
     // recorded", never backfilled).
     const provenance = provenanceFromPayload(goal);
+    const actor =
+      typeof goal.actor === "string" && goal.actor.trim()
+        ? goal.actor
+        : undefined;
     const created: ScheduledGoal = {
       id,
       name: goal.name.trim(),
@@ -1106,26 +1213,51 @@ export class ScheduledAgent extends PortThink {
     };
     goals.push(created);
     await this.saveGoals(goals);
+    // Issue #3121 S3 (#3312) — the lifecycle event is emitted by
+    // the mutation, not the route: every entry path (route, A2A,
+    // mesh door) flows through here. Best-effort; a failed audit
+    // never fails the add (the goal is already saved).
+    await this.auditGoalLifecycle(
+      "schedule.goal.added",
+      created.id,
+      { operation: created.operation },
+      actor,
+    );
     return created;
   }
 
   /** Remove a scheduled goal by ID. */
-  async removeGoal(id: string): Promise<boolean> {
+  async removeGoal(id: string, actor?: string | null): Promise<boolean> {
     const goals = await this.getGoals();
     const idx = goals.findIndex((g: ScheduledGoal) => g.id === id);
     if (idx < 0) return false;
     goals.splice(idx, 1);
     await this.saveGoals(goals);
+    // Issue #3121 S3 (#3312) — only an actual removal is a
+    // lifecycle event; a miss is a state answer, not an event.
+    await this.auditGoalLifecycle("schedule.goal.removed", id, undefined, actor);
     return true;
   }
 
   /** Enable or disable a goal by ID. */
-  async setGoalEnabled(id: string, enabled: boolean): Promise<boolean> {
+  async setGoalEnabled(
+    id: string,
+    enabled: boolean,
+    actor?: string | null,
+  ): Promise<boolean> {
     const goals = await this.getGoals();
     const goal = goals.find((g: ScheduledGoal) => g.id === id);
     if (!goal) return false;
     goal.enabled = enabled;
     await this.saveGoals(goals);
+    // Issue #3121 S3 (#3312) — only an actual state change is a
+    // lifecycle event; a miss is a state answer, not an event.
+    await this.auditGoalLifecycle(
+      "schedule.goal.enabled",
+      id,
+      { enabled },
+      actor,
+    );
     return true;
   }
 
@@ -1140,16 +1272,30 @@ export class ScheduledAgent extends PortThink {
    * the bound methods are injected here because they are
    * class-bound. Returns the collected { text, data } outcome.
    */
-  async handleA2A(body: unknown, origin: string): Promise<ScheduledA2AOutcome> {
+  async handleA2A(
+    body: unknown,
+    origin: string,
+    attribution?: { caller?: string } | null,
+  ): Promise<ScheduledA2AOutcome> {
     void origin; // reserved for per-origin policy (cfpay parity); unused in v1
+    // Issue #3121 S3 (#3312) — the A2A actor for the lifecycle audit
+    // events the mutation methods emit: the edge-authenticated
+    // caller identity (`a2a-credential:<surface>`, two-part
+    // attribution, #2426 S16), threaded into the bound methods.
+    // Reads carry no actor. A missing/blank caller records no actor
+    // — never an invented one.
+    const actor =
+      typeof attribution?.caller === "string" && attribution.caller.trim()
+        ? attribution.caller
+        : undefined;
     const data = await dispatchScheduledA2A(this.env, body, {
       executor: {
         listGoals: () => this.listGoals(),
         getTickHistory: (limit) => this.getTickHistory(limit),
-        addGoal: (goal) => this.addGoal(goal),
-        removeGoal: (id) => this.removeGoal(id),
-        setGoalEnabled: (id, enabled) => this.setGoalEnabled(id, enabled),
-        triggerGoal: (id) => this.triggerGoal(id),
+        addGoal: (goal) => this.addGoal({ ...goal, actor }),
+        removeGoal: (id) => this.removeGoal(id, actor),
+        setGoalEnabled: (id, enabled) => this.setGoalEnabled(id, enabled, actor),
+        triggerGoal: (id) => this.triggerGoal(id, undefined, actor),
       },
     });
     return scheduledA2AOutcome(data);
@@ -1348,6 +1494,15 @@ export class ScheduledAgent extends PortThink {
       return existing;
     }
     const goal = materializeSynthesizedRecord(record);
+    // Issue #3121 S3 — a materialized goal is a goal-schedule
+    // creation, so it carries creation provenance like every other
+    // creation path: framework machinery acting on an approved
+    // record, origin system, reason naming the cause. No actor is
+    // threaded here (no route calls this method today); the
+    // creation record names the cause, never an invented creator.
+    // Idempotent re-materialization returns the stored goal
+    // unchanged below — creation-only stamping, never rewritten.
+    goal.provenance = systemProvenance("synthesized-materialization");
     goals.push(goal);
     await this.saveGoals(goals);
     return goal;
@@ -1544,7 +1699,11 @@ export class ScheduledAgent extends PortThink {
    *    for this firing, and restores its original enabled state afterwards so
    *    that the daily recurring schedule remains disabled.
    */
-  async triggerGoal(id: string, env?: Env): Promise<ScheduleTick> {
+  async triggerGoal(
+    id: string,
+    env?: Env,
+    actor?: string | null,
+  ): Promise<ScheduleTick> {
     const goals = await this.getGoals();
     const goal = goals.find((g: ScheduledGoal) => g.id === id);
     if (!goal) {
@@ -1563,6 +1722,18 @@ export class ScheduledAgent extends PortThink {
         : this.env;
 
     const tick = await this.onCron(targetEnv, { forceGoalId: id });
+    // Issue #3121 S3 (#3312) — a trigger of a missing goal is no
+    // lifecycle event (no goal changed state); a found goal's manual
+    // firing is. The condition is the route's S1 condition, moved
+    // into the method with the sink.
+    if (tick.goalsEvaluated > 0) {
+      await this.auditGoalLifecycle(
+        "schedule.goal.triggered",
+        id,
+        undefined,
+        actor,
+      );
+    }
     if (tick.jobsCreated === 0 && tick.errors.length === 0) {
       const currentGoals = await this.getGoals();
       const currentGoal = currentGoals.find((g: ScheduledGoal) => g.id === id);
