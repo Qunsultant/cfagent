@@ -38,7 +38,7 @@ vi.mock("agents", () => ({
 
 vi.mock("../src/orchestrate", () => ({
   OPERATION_CATALOG: [
-    { agent: "search", binding: "SEARCH_AGENT", operations: ["search.query"], blurb: "" },
+    { agent: "search", binding: "ORCHESTRATOR_AGENT", operations: ["search.query"], blurb: "" },
   ],
   createJob: vi.fn(async (_env: any, req: any) => ({ jobId: "job_1", ...req, status: "pending" })),
 }));
