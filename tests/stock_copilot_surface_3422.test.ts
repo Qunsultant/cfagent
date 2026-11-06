@@ -32,7 +32,7 @@ import {
 } from "../src/data/stockCopilotStorePorts";
 import {
   runStockCopilotCycle,
-  STOCK_COPILOT_LIVE_REFUSAL,
+  STOCK_COPILOT_MODE_MISMATCH,
   type StockCopilotDeps,
 } from "../src/services/stockCopilot";
 import { StockCopilotPositionStore } from "../src/services/stockCopilotStore";
@@ -281,6 +281,11 @@ function surfaceDeps(overrides: Partial<StockCopilotDeps>): StockCopilotDeps {
     control: family.control,
     userLogin: "owner",
     platform: createFakePlatform().platform,
+    // #3451: the resolved selection (Alpaca active, paper mode).
+    selection: {
+      resolved: true,
+      selection: { brokerId: "alpaca", environment: "TEST", mode: "paper" },
+    },
     loadBars: async () => sawtoothCloses(),
     now: MARKET_OPEN_NOW,
     ...overrides,
@@ -450,17 +455,17 @@ describe("stock copilot cycle — pause + activity (#3422)", () => {
       surfaceDeps({
         env: {
           STOCK_COPILOT_PAPER_ENABLED: "1",
-          ALPACA_BASE_URL: "https://api.alpaca.markets",
+          ALPACA_TRADING_TYPE: "live",
         } as any,
         positions: family.positions,
         activity: family.activity,
         control: family.control,
       }),
     );
-    expect(result.status).toBe("refused_live_environment");
+    expect(result.status).toBe("refused_mode_mismatch");
     const records = family.activity.listActivity("owner", 10);
     expect(records).toHaveLength(1);
-    expect(records[0]).toMatchObject({ outcome: "refused", detail: STOCK_COPILOT_LIVE_REFUSAL });
+    expect(records[0]).toMatchObject({ outcome: "refused", detail: STOCK_COPILOT_MODE_MISMATCH });
   });
 
   it("outside-hours and flag-off firings write no activity record", async () => {

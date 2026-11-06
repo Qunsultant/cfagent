@@ -53,7 +53,10 @@ function mapActivity(row: Record<string, unknown>): CopilotCycleActivityRecord {
     id: str(row.id),
     userLogin: str(row.user_login),
     cycleAt: str(row.cycle_at),
-    outcome: outcome === "traded" || outcome === "refused" ? outcome : "no_trade",
+    outcome:
+      outcome === "traded" || outcome === "refused" || outcome === "inactive"
+        ? outcome
+        : "no_trade",
     entries: parseEntries(row.entries_json),
     exits: parseExits(row.exits_json),
     detail:

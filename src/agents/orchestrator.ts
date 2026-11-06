@@ -523,6 +523,7 @@ export class OrchestratorAgent extends PortThink {
       agentCtx: this.ctx,
       getScreenerExecutionContext: () => this.getScreenerExecutionContext(),
       getOrm: () => this.getOrm(),
+      readSettingRaw: (key) => this.readSettingRaw(key),
       audit: (type, agent, payload) => this.audit(type, agent, payload),
     };
   }

@@ -5,7 +5,8 @@
  * - patternSignals reproduces the sandbox strategy set's rules exactly
  *   (the sandbox backtest's own outputs are the parity baseline,
  *   captured from the pre-extraction implementation).
- * - The copilot cycle: paper-only guard, flag-off no-op, entry ⇒
+ * - The copilot cycle: mode guard (#3451 — the resolved selection
+ *   governs; a contradicting pin refuses), flag-off no-op, entry ⇒
  *   tracked position WITH exit plan, exit evaluation, sizing refusal,
  *   no-signal ⇒ no orders.
  * - The scheduled-task declaration gates on the flag + instance login.
@@ -20,7 +21,7 @@ import { ETradeSandboxService } from "../src/services/sandboxAgent";
 import {
   isStockCopilotPaperEnabled,
   runStockCopilotCycle,
-  STOCK_COPILOT_LIVE_REFUSAL,
+  STOCK_COPILOT_MODE_MISMATCH,
   type StockCopilotDeps,
 } from "../src/services/stockCopilot";
 import { StockCopilotPositionStore } from "../src/services/stockCopilotStore";
@@ -96,6 +97,12 @@ function baseDeps(overrides: Partial<StockCopilotDeps>): StockCopilotDeps {
     positions: createInMemoryStockCopilotPositionPort(),
     userLogin: "owner",
     platform: createFakePlatform().platform,
+    // #3451: the resolved selection (Alpaca active, paper mode) —
+    // the full mode matrix lives in stock_copilot_modes_3451.test.ts.
+    selection: {
+      resolved: true,
+      selection: { brokerId: "alpaca", environment: "TEST", mode: "paper" },
+    },
     loadBars: async () => sawtoothCloses(),
     now: MARKET_OPEN_NOW,
     ...overrides,
@@ -246,7 +253,7 @@ describe("stock copilot cycle", () => {
     expect(fake.calls.getPositions).toBe(0);
   });
 
-  it("paper guard: a live Alpaca base URL refuses the cycle with zero orders", async () => {
+  it("mode guard: a live base URL does NOT refuse a paper selection — the selection outranks inference (#3451/#3272)", async () => {
     const fake = createFakePlatform();
     const result = await runStockCopilotCycle(
       baseDeps({
@@ -257,13 +264,11 @@ describe("stock copilot cycle", () => {
         platform: fake.platform,
       }),
     );
-    expect(result.status).toBe("refused_live_environment");
-    expect(result.refusal).toBe(STOCK_COPILOT_LIVE_REFUSAL);
-    expect(fake.calls.placeOrderRemote).toBe(0);
-    expect(fake.calls.getPositions).toBe(0);
+    expect(result.status).toBe("ok");
+    expect(result.refusal).toBeUndefined();
   });
 
-  it("paper guard: an explicit live trading type is refused even on the paper host default", async () => {
+  it("mode guard: an explicit live pin contradicts the paper selection and refuses with zero orders", async () => {
     const fake = createFakePlatform();
     const result = await runStockCopilotCycle(
       baseDeps({
@@ -271,8 +276,10 @@ describe("stock copilot cycle", () => {
         platform: fake.platform,
       }),
     );
-    expect(result.status).toBe("refused_live_environment");
+    expect(result.status).toBe("refused_mode_mismatch");
+    expect(result.refusal).toBe(STOCK_COPILOT_MODE_MISMATCH);
     expect(fake.calls.placeOrderRemote).toBe(0);
+    expect(fake.calls.getPositions).toBe(0);
   });
 
   it("outside market hours: the cycle skips without touching the platform", async () => {
@@ -431,6 +438,7 @@ describe("stock copilot scheduled-task declaration", () => {
     env: { STOCK_COPILOT_PAPER_ENABLED: "1" } as any,
     agentCtx: {} as any,
     getOrm: () => undefined,
+    readSettingRaw: () => null,
     audit: () => {},
   };
 
