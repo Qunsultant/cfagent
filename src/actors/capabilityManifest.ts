@@ -306,7 +306,7 @@ export const PORT_THINK_CAPABILITY_BASE: Record<
   OrchestratorAgent: {
     chat: entry(
       "enabled",
-      "The fleet's chat terminus: the chat tab and websocket turns run on per-login instances of this class (SEARCH_AGENT binding).",
+      "The fleet's chat terminus: the chat tab and websocket turns run on per-login instances of this class (ORCHESTRATOR_AGENT binding).",
     ),
     slack: entry(
       "enabled",
