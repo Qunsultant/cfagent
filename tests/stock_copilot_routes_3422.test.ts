@@ -10,7 +10,10 @@
  *   recently closed positions, and recent cycle activity.
  * - #3451: the status also reports the effective trading selection
  *   (active broker + mode) and the named mode_unresolved /
- *   inactive_broker states.
+ *   inactive_broker states. Follow-up (owner clarification): with
+ *   no broker selection stored, the reported selection is the
+ *   copilot default — alpaca/paper — from the same resolver the
+ *   cycle consumes.
  * - POST /stock-copilot/control writes the caller's OWN instance
  *   control record through the data-layer port (per-login scoped),
  *   validates the body, and audits the change.
@@ -259,6 +262,19 @@ describe("stock copilot routes (#3422)", () => {
     expect(body.selectionResolved).toBe(true);
     expect(body.activeBroker).toBe("etrade");
     expect(body.activeMode).toBe("paper");
+  });
+
+  it("status reports the copilot default (alpaca/paper) when the tenant has stored no broker selection (#3451 follow-up)", async () => {
+    // No tenant row at all: the route consumes the same resolver as
+    // the cycle, so the copilot-scoped default surfaces identically
+    // here — alpaca/paper, never the shared store's etrade default.
+    const { ctx } = await makeCtx({ commercial: new InMemoryCommercialAdapter() });
+    const res = await call(ctx, req("GET", STATUS_PATH));
+    const body = (await res!.json()) as any;
+    expect(body.selectionResolved).toBe(true);
+    expect(body.activeBroker).toBe("alpaca");
+    expect(body.activeMode).toBe("paper");
+    expect(body.status).not.toBe("inactive_broker");
   });
 
   it("status reports mode_unresolved when the broker selection cannot be read (#3451)", async () => {

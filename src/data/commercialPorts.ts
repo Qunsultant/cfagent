@@ -287,6 +287,17 @@ export interface CommercialStore {
     autoRefresh: TenantAutoRefresh,
   ): Promise<TenantSettingsRecord>;
   getTenantProviders(tenantId: string): Promise<TenantProviders>;
+  /**
+   * The tenant's STORED broker selection, or null when no broker
+   * selection is stored (no settings row, or a row whose brokerId
+   * is empty). Unlike getTenantProviders this applies NO default:
+   * the etrade absent-row default is a getTenantProviders behavior
+   * for its existing consumers, and callers whose absent-selection
+   * default differs (the Stock Copilot, #3451: no selection ⇒
+   * alpaca) must be able to tell "no selection stored" apart from
+   * an explicitly stored etrade selection.
+   */
+  getTenantBrokerSelection(tenantId: string): Promise<string | null>;
   setTenantProviders(
     tenantId: string,
     providers: TenantProviders,
