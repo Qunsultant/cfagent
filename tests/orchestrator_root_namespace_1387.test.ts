@@ -12,15 +12,22 @@
  * G0 rename is complete. Migration v14 (#2330, Deploy A) tombstoned the
  * colliding v9 OrchestratorAgent namespace (deleted_classes), and
  * migration v15 renames the SEARCH_AGENT namespace onto OrchestratorAgent
- * (renamed_classes) — the binding name is unchanged, its class_name is
- * now OrchestratorAgent, the SearchAgent export alias is retired, and
- * the own-name export is restored, so root resolution works against the
- * renamed namespace (whose instance names — logins — and stored state
- * carried over). The ORCHESTRATOR_AGENT binding is NOT re-added: the
- * rename itself gives the class its namespace back. This suite pins the
- * final shape, reading the entrypoint and wrangler.jsonc as text (same
- * idiom as tests/kv_bindings_removed.test.ts). The v9 and v14 migration
- * entries stay in the append-only migrations array as history.
+ * (renamed_classes) — at that step the binding name was left unchanged,
+ * its class_name became OrchestratorAgent, the SearchAgent export alias
+ * was retired, and the own-name export was restored, so root resolution
+ * works against the renamed namespace (whose instance names — logins —
+ * and stored state carried over). The G0 rename did NOT re-add an
+ * ORCHESTRATOR_AGENT binding: the class rename itself gave the class
+ * its namespace back under the existing binding.
+ *
+ * Issue #2570 then finished the rename on the binding side: the ONE
+ * binding was renamed SEARCH_AGENT → ORCHESTRATOR_AGENT (not a second
+ * binding re-added). Namespaces are per class, not per binding name,
+ * so no migration accompanies it and the pins below assert the
+ * finished shape. This suite reads the entrypoint and wrangler.jsonc
+ * as text (same idiom as tests/kv_bindings_removed.test.ts). The v9
+ * and v14 migration entries stay in the append-only migrations array
+ * as history.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -82,16 +89,20 @@ describe("OrchestratorAgent root namespace (issue #1387)", () => {
     );
   });
 
-  it("the SearchAgent alias is retired and SEARCH_AGENT now binds class_name OrchestratorAgent (#2523)", () => {
+  it("the SearchAgent alias is retired and the binding (renamed by #2570) binds class_name OrchestratorAgent (#2523)", () => {
     expect(serverTs).not.toContain(
       "export { OrchestratorAgent as SearchAgent }"
     );
     expect(
       wrangler.durable_objects.bindings.some(
         (b) =>
-          b.name === "SEARCH_AGENT" && b.class_name === "OrchestratorAgent"
+          b.name === "ORCHESTRATOR_AGENT" &&
+          b.class_name === "OrchestratorAgent"
       )
     ).toBe(true);
+    expect(
+      wrangler.durable_objects.bindings.some((b) => b.name === "SEARCH_AGENT")
+    ).toBe(false);
   });
 
   it("migration v15 renames SearchAgent → OrchestratorAgent and is the last migration", () => {
@@ -105,14 +116,16 @@ describe("OrchestratorAgent root namespace (issue #1387)", () => {
     );
   });
 
-  it("wrangler.jsonc does not re-add ORCHESTRATOR_AGENT, and migration v14 still tombstones the v9 class (#2330 history)", () => {
-    // Deploy B does not re-add this binding — the rename gives the
-    // class its namespace back under the SEARCH_AGENT binding instead.
+  it("exactly one binding names the OrchestratorAgent class (the #2570 rename, not a re-added second binding), and migration v14 still tombstones the v9 class (#2330 history)", () => {
+    // Deploy B did not re-add a second binding — the class rename gave
+    // the class its namespace back under the existing binding. #2570
+    // later renamed that one binding itself, so exactly one binding
+    // carries class_name OrchestratorAgent and it is ORCHESTRATOR_AGENT.
     expect(
-      wrangler.durable_objects.bindings.some(
-        (b) => b.name === "ORCHESTRATOR_AGENT"
+      wrangler.durable_objects.bindings.filter(
+        (b) => b.class_name === "OrchestratorAgent"
       )
-    ).toBe(false);
+    ).toEqual([{ name: "ORCHESTRATOR_AGENT", class_name: "OrchestratorAgent" }]);
     expect(
       wrangler.migrations.some(
         (m) =>
