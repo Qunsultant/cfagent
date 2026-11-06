@@ -49,9 +49,14 @@ function renderHub(activeSubTab: "voice" | "omnichannel"): string {
   );
 }
 
-/** React inserts `<!-- -->` between adjacent text nodes; strip it to read prose. */
+/**
+ * React separates adjacent text nodes with exactly a comment marker, so the
+ * prose is readable once that literal is removed. No regular expression is
+ * used: a regex over HTML is the shape CodeQL correctly flags as broken
+ * sanitisation, and this is not sanitisation.
+ */
 function textOf(html: string): string {
-  return html.replace(/<!--.*?-->/g, "");
+  return html.split("<!-- -->").join("");
 }
 
 afterEach(() => {
