@@ -41,6 +41,7 @@ import { resolveIaaaTenant } from "../security/iaaaGithubEndToEnd";
 import { isBrokerId, tradingTypeFor, type TradingType } from "../trading";
 import type { Env } from "../types";
 import {
+  BROKER_ENVIRONMENT_SETTING_KEY,
   resolveTradeEnvironmentFromSettings,
   type BrokerEnvironment,
 } from "./routes/brokerEnvironment";
@@ -105,10 +106,34 @@ export async function resolveCopilotTradingSelection(
   } catch {
     return { resolved: false };
   }
-  const environment = resolveTradeEnvironmentFromSettings(
-    readers.readSettingRaw,
-    readers.env,
-  );
+  let environment: BrokerEnvironment;
+  const storedEnv =
+    typeof readers.readSettingRaw === "function"
+      ? readers.readSettingRaw(BROKER_ENVIRONMENT_SETTING_KEY)
+      : null;
+  if (storedEnv === "TEST" || storedEnv === "PROD") {
+    environment = storedEnv;
+  } else {
+    // #3541/#3557: When no tenant environment is stored, align with externalized
+    // copilot mode or deployment pin. An explicit STOCK_COPILOT_MODE ("paper" | "live")
+    // takes precedence. Unset defaults to Alpaca Paper (TEST).
+    const explicitCopilotMode = String(readers.env?.STOCK_COPILOT_MODE ?? "").trim().toLowerCase();
+    if (explicitCopilotMode === "paper" || explicitCopilotMode === "test") {
+      environment = "TEST";
+    } else if (explicitCopilotMode === "live" || explicitCopilotMode === "prod") {
+      environment = "PROD";
+    } else {
+      const explicitMode = String(readers.env?.ALPACA_TRADING_TYPE ?? "").trim().toLowerCase();
+      if (explicitMode === "live" || explicitMode === "prod") {
+        environment = "PROD";
+      } else {
+        environment = resolveTradeEnvironmentFromSettings(
+          readers.readSettingRaw,
+          readers.env,
+        );
+      }
+    }
+  }
   const mode = isBrokerId(brokerId)
     ? tradingTypeFor(brokerId, environment)
     : environment === "TEST"

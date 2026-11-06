@@ -33,6 +33,7 @@ import {
   createStockCopilotPositionPort,
 } from "../src/data/createStockCopilotStorePorts";
 import { StockCopilotPositionStore } from "../src/services/stockCopilotStore";
+import { COPILOT_SESSIONS } from "../src/services/stockCopilotSessions";
 
 /** Minimal SqlStorage shim over node:sqlite (same shape as #2528's harness). */
 class SqliteTestStorage {
@@ -173,8 +174,14 @@ describe("stock copilot routes (#3422)", () => {
     expect(body.activeBroker).toBe("alpaca");
     expect(body.activeMode).toBe("paper");
     expect(typeof body.marketOpen).toBe("boolean");
-    // Status derivation is consistent with the market state it reports.
-    expect(body.status).toBe(body.marketOpen ? "live" : "outside_market_hours");
+    // #3398: the status derivation follows the session state it
+    // reports — live only inside one of the user's enabled
+    // sessions (default: regular only), the named outside state
+    // otherwise.
+    expect(body.enabledSessions).toEqual(COPILOT_SESSIONS);
+    const inEnabledSession =
+      body.currentSession !== null && body.enabledSessions.includes(body.currentSession);
+    expect(body.status).toBe(inEnabledSession ? "live" : "outside_enabled_sessions");
 
     expect(body.openPositions).toHaveLength(1);
     expect(body.openPositions[0]).toMatchObject({

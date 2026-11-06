@@ -34,8 +34,13 @@ export const JOB_RUN_RECORDS_TABLE = "job_run_records";
 export const JOB_RUN_RECORDS_PER_JOB_CAP = 100;
 
 /** Which schedule system ran. Worker cron triggers never run as jobs,
- *  so they have no records and no value here. */
-export type JobRunSystem = "scheduled-agent-goal" | "orchestrator-schedule";
+ *  so they have no records and no value here. "job-pipeline" is the
+ *  Pipeline J1 job system (issue #3534): pipeline jobs record their
+ *  terminal runs through this same machinery — no second run store. */
+export type JobRunSystem =
+  | "scheduled-agent-goal"
+  | "orchestrator-schedule"
+  | "job-pipeline";
 
 /** success | failure | skipped — see the header note on skipped. */
 export type JobRunOutcome = "success" | "failure" | "skipped";

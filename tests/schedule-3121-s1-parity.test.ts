@@ -26,7 +26,9 @@
  * - S1-P07 O1: the hung-timeout mechanism is located (Agents SDK
  *   default 30s), not dropped.
  * - S1-P08 O2: the four goal lifecycle audit events + the
- *   best-effort poster, wired at the server.ts goal funnel.
+ *   best-effort poster, wired at the server.ts goal funnel in S1
+ *   (S3 moves the funnel into the DO mutation methods, #3312;
+ *   the S1-P08 pin below tracks the move).
  * - S1-P09 provenance: creation record travels in the payload,
  *   updates carry it forward, recovery re-arms are system/recovery.
  * - S1-P10 shared timing classifier (four forms, identical to the
@@ -608,18 +610,23 @@ describe("S1-P08 O2 — goal lifecycle audit events (#3121)", () => {
     expect(await postGoalScheduleAuditEvent(throwingFetch as never, event)).toBe(false);
   });
 
-  it("the server entry goal funnel wires all four mutations through the poster", () => {
-    // Slice 5 of Qunsultant/cfagent#2902 (2026-11-05): the goal funnel
-    // moved verbatim from src/server.ts to src/server/routes/trading.ts
-    // (rebased onto main 5d0db98c, which carries the #3121 S1 audit
-    // wiring); the entry surface is server.ts + routes/*.ts, so the
-    // pin reads both files.
-    const server = source("src/server.ts") + source("src/server/routes/trading.ts");
+  it("the DO mutation methods wire all four mutations through the poster (S3, #3312)", () => {
+    // Slice S3 moves the funnel into the ScheduledAgent mutation
+    // methods: the route funnel S1 pinned here posted the same
+    // events, but the A2A path bypassed it (filed as #3312). The
+    // route now threads the session actor into the methods; the
+    // methods emit. The behavioral proof is S3-P05 (both paths emit
+    // through the DO sink); this pin keeps the wiring visible.
+    const agent = source("src/agents/scheduled-agent.ts");
     for (const event of GOAL_SCHEDULE_AUDIT_EVENTS) {
-      expect(server).toContain(`"${event}"`);
+      expect(agent).toContain(`"${event}"`);
     }
-    expect(server).toContain("postGoalScheduleAuditEvent");
-    expect(server).toContain("auditGoalLifecycle");
+    expect(agent).toContain("postGoalScheduleAuditEvent");
+    expect(agent).toContain("private async auditGoalLifecycle");
+    const trading = source("src/server/routes/trading.ts");
+    expect(trading).toContain("actor: session.githubLogin");
+    expect(trading).not.toContain("postGoalScheduleAuditEvent");
+    expect(trading).not.toContain("auditGoalLifecycle");
   });
 });
 

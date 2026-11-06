@@ -39,6 +39,7 @@ import {
 import { defaultBreakerRegistry } from "../breakers/createBreakerPorts";
 import type { BreakerRegistry } from "../breakers/breakerPorts";
 import { AGENT_DIDS, createDidAttestationSync } from "../agents/did";
+import { createOutboundRateLimiter, type OutboundRateLimiter } from "../security/outboundRateLimiter";
 import { getCachedQuoteWithAge, setCachedQuote } from "./quoteCache";
 import {
   isAlpacaConfigured,
@@ -2184,7 +2185,31 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
   readonly providerId = "alpaca" as const;
   readonly name = "Alpaca Market Data v2 (Paper & Live API)";
 
-  constructor(private readonly env?: Env) {}
+  /**
+   * Issue #3515 S1: this provider's outbound token bucket (120 req/min
+   * by default, env-overridable). Public so the Alpaca options data
+   * plane (src/trading/alpaca/optionsData.ts, which has no provider
+   * instance) can share this one budget instead of minting its own.
+   */
+  readonly outboundLimiter: OutboundRateLimiter;
+
+  constructor(private readonly env?: Env) {
+    // Issue #3515 S1: outbound token bucket for this provider instance.
+    this.outboundLimiter = createOutboundRateLimiter(env, "alpaca");
+  }
+
+  /**
+   * Issue #3515 S1: the single outbound choke point for this provider.
+   * Every Alpaca HTTP request in this class goes through here (one
+   * token awaited, bounded wait, else a typed OutboundRateLimitError).
+   * Callers that catch per call surface that error as the call's
+   * failure (e.g. getAccount returns { success: false, message });
+   * callers without a catch let it propagate.
+   */
+  private async throttledFetch(url: string, init: RequestInit): Promise<Response> {
+    await this.outboundLimiter.acquire();
+    return fetch(url, init);
+  }
 
   getApiKey(env?: Env): string {
     const activeEnv = env || this.env;
@@ -2241,7 +2266,7 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
           ? `${this.getDataUrl()}/v1beta3/crypto/us/latest/quotes?symbols=${encodeURIComponent(symbol)}`
           : `${this.getDataUrl()}/v2/stocks/${encodeURIComponent(symbol)}/quotes/latest`;
 
-        const res = await fetch(url, { headers: this.getHeaders() });
+        const res = await this.throttledFetch(url, { headers: this.getHeaders() });
         if (res.ok) {
           const data = (await res.json().catch(() => ({}))) as any;
           const q = isCrypto ? data?.quotes?.[symbol] : data?.quote;
@@ -2337,7 +2362,7 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
           ? `${this.getDataUrl()}/v1beta3/crypto/us/bars?symbols=${encodeURIComponent(symbol)}&timeframe=${alpacaTf}&limit=${limit}`
           : `${this.getDataUrl()}/v2/stocks/${encodeURIComponent(symbol)}/bars?timeframe=${alpacaTf}&limit=${limit}`;
 
-        const res = await fetch(url, { headers: this.getHeaders() });
+        const res = await this.throttledFetch(url, { headers: this.getHeaders() });
         if (res.ok) {
           const data = (await res.json().catch(() => ({}))) as any;
           const rawBars = isCrypto ? data?.bars?.[symbol] : data?.bars;
@@ -2380,7 +2405,7 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
           ? `${this.getDataUrl()}/v1beta3/crypto/us/snapshots?symbols=${encodeURIComponent(symbol)}`
           : `${this.getDataUrl()}/v2/stocks/${encodeURIComponent(symbol)}/snapshot`;
 
-        const res = await fetch(url, { headers: this.getHeaders() });
+        const res = await this.throttledFetch(url, { headers: this.getHeaders() });
         if (res.ok) {
           const data = (await res.json().catch(() => ({}))) as any;
           const s = isCrypto ? data?.snapshots?.[symbol] : data;
@@ -2473,7 +2498,7 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
         ...(params.limit_price ? { limit_price: params.limit_price } : {}),
       };
 
-      const res = await fetch(`${this.getTradingUrl()}/v2/orders`, {
+      const res = await this.throttledFetch(`${this.getTradingUrl()}/v2/orders`, {
         method: "POST",
         headers: {
           ...this.getHeaders(),
@@ -2541,7 +2566,7 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
         legs: payload.legs,
       };
 
-      const res = await fetch(`${this.getTradingUrl()}/v2/orders`, {
+      const res = await this.throttledFetch(`${this.getTradingUrl()}/v2/orders`, {
         method: "POST",
         headers: {
           ...this.getHeaders(),
@@ -2591,7 +2616,7 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
     }
 
     try {
-      const res = await fetch(`${this.getTradingUrl()}/v2/orders/${encodeURIComponent(id)}`, {
+      const res = await this.throttledFetch(`${this.getTradingUrl()}/v2/orders/${encodeURIComponent(id)}`, {
         method: "DELETE",
         headers: { ...this.getHeaders(), Accept: "application/json" },
       });
@@ -2618,7 +2643,7 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
     }
 
     try {
-      const res = await fetch(`${this.getTradingUrl()}/v2/account`, {
+      const res = await this.throttledFetch(`${this.getTradingUrl()}/v2/account`, {
         headers: this.getHeaders(),
       });
       const data = (await res.json().catch(() => ({}))) as any;
@@ -2643,7 +2668,7 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
     }
 
     try {
-      const res = await fetch(`${this.getTradingUrl()}/v2/positions`, {
+      const res = await this.throttledFetch(`${this.getTradingUrl()}/v2/positions`, {
         headers: this.getHeaders(),
       });
       const data = (await res.json().catch(() => ({}))) as any;
@@ -2679,7 +2704,7 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
 
     try {
       const query = new URLSearchParams({ page_size: "100" });
-      const res = await fetch(`${this.getTradingUrl()}/v2/account/activities/FILL?${query.toString()}`, {
+      const res = await this.throttledFetch(`${this.getTradingUrl()}/v2/account/activities/FILL?${query.toString()}`, {
         headers: this.getHeaders(),
       });
       const data = (await res.json().catch(() => ([]))) as any;
@@ -2718,7 +2743,7 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
       const type = typeof activityType === "string" ? activityType.trim().toUpperCase() : "";
       const path = type ? `/v2/account/activities/${encodeURIComponent(type)}` : "/v2/account/activities";
       const query = new URLSearchParams({ page_size: "100" });
-      const res = await fetch(`${this.getTradingUrl()}${path}?${query.toString()}`, {
+      const res = await this.throttledFetch(`${this.getTradingUrl()}${path}?${query.toString()}`, {
         headers: this.getHeaders(),
       });
       const data = (await res.json().catch(() => ([]))) as any;
@@ -2751,7 +2776,7 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
     }
 
     try {
-      const res = await fetch(`${this.getTradingUrl()}/v2/watchlists`, {
+      const res = await this.throttledFetch(`${this.getTradingUrl()}/v2/watchlists`, {
         headers: this.getHeaders(),
       });
       const data = (await res.json().catch(() => ([]))) as any;
@@ -2780,7 +2805,7 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
     }
 
     try {
-      const res = await fetch(`${this.getTradingUrl()}/v2/orders?status=${status}`, {
+      const res = await this.throttledFetch(`${this.getTradingUrl()}/v2/orders?status=${status}`, {
         headers: this.getHeaders(),
       });
       const data = (await res.json().catch(() => ({}))) as any;

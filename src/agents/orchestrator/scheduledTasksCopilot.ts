@@ -27,6 +27,12 @@
  * the acting login: its environment snapshot is not a trading mode
  * and no longer reaches the platform or the cycle (that conflation
  * refused every cycle in a PROD context, whatever the menu said).
+ *
+ * Issue #3398: the cycle's enabled trading sessions are likewise
+ * resolved here at firing time (../../services/stockCopilotSessions.ts)
+ * from the login's stored session setting over the deployment env —
+ * the cycle itself re-checks them on every firing, so a settings
+ * change takes effect at the next cycle without any redeclaration.
  */
 
 import type { AgentContext } from "agents";
@@ -50,6 +56,7 @@ import {
   isStockCopilotPaperEnabled,
   runStockCopilotCycle,
 } from "../../services/stockCopilot";
+import { resolveCopilotSessions } from "../../services/stockCopilotSessions";
 import { TradingPlatformRegistry } from "../../trading";
 
 /** The one code-declared task this slice arms. */
@@ -113,6 +120,14 @@ export async function runStockCopilotCycleForInstance(
     selection.resolved ? selection.selection.environment : undefined,
   );
   const marketData = new MarketDataResearchService(ctx.env);
+  // #3398: the user's enabled trading sessions, resolved at firing
+  // time from the same settings the status route reports — the
+  // per-login stored choice wins, the deployment env is the
+  // default, regular-only when neither speaks.
+  const enabledSessions = resolveCopilotSessions({
+    readSettingRaw: ctx.readSettingRaw,
+    env: ctx.env,
+  });
   const result = await runStockCopilotCycle({
     env: ctx.env,
     positions: createStockCopilotPositionPort(sql),
@@ -124,6 +139,7 @@ export async function runStockCopilotCycleForInstance(
     userLogin,
     platform,
     selection,
+    enabledSessions,
     universe: copilotUniverseFromEnv(ctx.env),
     loadBars: async (symbol: string) => {
       // The facade's alpaca-first order with explicit-unavailable
@@ -140,6 +156,8 @@ export async function runStockCopilotCycleForInstance(
     taskId: taskCtx.taskId,
     userLogin,
     status: result.status,
+    session: result.session,
+    enabledSessions: result.enabledSessions,
     entriesPlaced: result.entriesPlaced,
     exitsPlaced: result.exitsPlaced,
     rejections: result.rejections.length,

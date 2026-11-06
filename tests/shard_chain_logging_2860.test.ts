@@ -57,7 +57,12 @@ describe("sharded-chain logging / classification (#2860)", () => {
     const publish = vi.fn(async () => {});
     (service as any).publishScreenerEvent = publish;
     (service as any).guardScheduledAuth = async () => ({ blocked: false });
-    (service as any).getScreenerAgent = vi.fn();
+    // Issue #2860 (Factor 8): the lock probe is fail-closed — an
+    // unanswering probe refuses the submission. This harness tests
+    // logging of wired submissions, so the probe answers not-running.
+    (service as any).getScreenerAgent = vi.fn(() => ({
+      isScreenRunning: async () => ({ running: false, startedAt: null }),
+    }));
     return { service, publish };
   }
 

@@ -42,6 +42,11 @@ pending with its owning issue. Delivery rules live in
   [agent-as-a-service](./agentic/agent-as-a-service.md),
   [social-delivery-and-scheduled-pipelines](./agentic/social-delivery-and-scheduled-pipelines.md)
   (social posting #1077 and staged scheduling).
+- [agent-capabilities](./agentic/agent-capabilities.md) — the single
+  account of agent capabilities: invocation channels, runtime
+  capabilities, tools, workflows, the dual-mode agentic loop
+  (deterministic and non-deterministic), and the copilot capability
+  list, each with its status and tracking issue (#3520).
 - Open program: Agentic UX (#3082, CPO lane) — the UI surface layer
   (AG-UI, A2UI, A2A, UCP, ACP-commerce), evaluated under #3142. A
   consolidated agentic-UX doc lands under #3082.
@@ -127,6 +132,9 @@ pending with its owning issue. Delivery rules live in
 Every change to this container or to any doc it links gets a changelog
 entry here, newest first:
 
+- 2026-11-06 — Agentic architecture: agent capabilities account
+  added — [agent-capabilities](./agentic/agent-capabilities.md)
+  (issue #3520).
 - 2026-11-05 — Agentic architecture section added: links the Agentic
   Target Architecture (#576, tracked by #571) and the six docs under
   agentic/, and records the open Agentic UX program (#3082, evaluated

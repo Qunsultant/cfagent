@@ -213,6 +213,32 @@ export function resolveThinkWebhookSecret(env: unknown): string | undefined {
 }
 
 /**
+ * Issue #3471 — the signing side of the same seam: produce the
+ * `sha256=<hex>` header value for a raw body under the deployment
+ * secret. In-Worker senders (the settings-change delivery) sign
+ * with this so the scheme lives in exactly one place: whatever
+ * this produces, the verifier below accepts, and nothing else.
+ */
+export async function signThinkWebhookSignature(
+  rawBody: string,
+  secret: string
+): Promise<string> {
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(rawBody));
+  const hex = [...new Uint8Array(signature)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+  return `sha256=${hex}`;
+}
+
+/**
  * HMAC-SHA256 verification over the raw body, the docs'
  * verifyGitHubWebhook pattern: the `sha256=<hex>` header format is
  * checked first, then crypto.subtle.verify decides. Callers verify

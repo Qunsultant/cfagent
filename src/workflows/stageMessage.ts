@@ -176,8 +176,20 @@ export interface StageMessage {
  * Stock keys keep their historical shape (`run::stage`) because claims written
  * by running instances must still match after this change; every other family
  * is namespaced by family, so two families cannot collide on a shared id.
+ *
+ * "jobs" (#3549) is a claim namespace ahead of a message family:
+ * configured job trees claim under it today (their stage ids are
+ * `job:<nodePath>`), but the family is not declared in
+ * STAGE_FAMILIES — a message family's stage ids are a static
+ * catalog, and a job tree's stage ids are configuration-dynamic.
+ * Declaring the message family is the host-wiring step (#3543),
+ * when a userLogin is in scope for stageMessage().
  */
-export function stageIdempotencyKey(runId: string, stageId: string, family: StageFamily = "stock"): string {
+export function stageIdempotencyKey(
+  runId: string,
+  stageId: string,
+  family: StageFamily | "jobs" = "stock",
+): string {
   return family === "stock" ? `${runId}::${stageId}` : `${runId}::${family}::${stageId}`;
 }
 

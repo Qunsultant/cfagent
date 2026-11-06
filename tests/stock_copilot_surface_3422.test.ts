@@ -11,7 +11,8 @@
  * - Cycles that evaluate the market write exactly one activity
  *   record — traded (entries/exits with symbols + exit reasons),
  *   no-trade (with its reason), and guard-refusal outcomes.
- *   Outside-hours and flag-off firings write none.
+ *   Flag-off firings write none; outside-enabled-sessions firings
+ *   write one transition record per state change (#3398).
  */
 import { describe, it, expect } from "vitest";
 import { DatabaseSync } from "node:sqlite";
@@ -35,6 +36,7 @@ import {
   STOCK_COPILOT_MODE_MISMATCH,
   type StockCopilotDeps,
 } from "../src/services/stockCopilot";
+import { STOCK_COPILOT_OUTSIDE_ENABLED_SESSIONS } from "../src/services/stockCopilotSessions";
 import { StockCopilotPositionStore } from "../src/services/stockCopilotStore";
 
 /** Minimal SqlStorage shim over node:sqlite (same shape as #2528's harness). */
@@ -468,7 +470,7 @@ describe("stock copilot cycle — pause + activity (#3422)", () => {
     expect(records[0]).toMatchObject({ outcome: "refused", detail: STOCK_COPILOT_MODE_MISMATCH });
   });
 
-  it("outside-hours and flag-off firings write no activity record", async () => {
+  it("outside-enabled-sessions firings write ONE transition record; flag-off writes none (#3398)", async () => {
     const family = memoryFamily();
     const closed = await runStockCopilotCycle(
       surfaceDeps({
@@ -478,7 +480,18 @@ describe("stock copilot cycle — pause + activity (#3422)", () => {
         now: MARKET_CLOSED_NOW,
       }),
     );
-    expect(closed.status).toBe("skipped_outside_market_hours");
+    expect(closed.status).toBe("outside_enabled_sessions");
+    // A second firing in the same state is not a new transition —
+    // the persistent state must not spam the feed.
+    const again = await runStockCopilotCycle(
+      surfaceDeps({
+        positions: family.positions,
+        activity: family.activity,
+        control: family.control,
+        now: MARKET_CLOSED_NOW,
+      }),
+    );
+    expect(again.status).toBe("outside_enabled_sessions");
     const disabled = await runStockCopilotCycle(
       surfaceDeps({
         env: {} as any,
@@ -488,7 +501,13 @@ describe("stock copilot cycle — pause + activity (#3422)", () => {
       }),
     );
     expect(disabled.status).toBe("disabled");
-    expect(family.activity.listActivity("owner", 10)).toEqual([]);
+    const records = family.activity.listActivity("owner", 10);
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      outcome: "outside_sessions",
+      detail: `${STOCK_COPILOT_OUTSIDE_ENABLED_SESSIONS}:none`,
+      session: null,
+    });
   });
 
   it("the host composition (DO ports over one sql handle) carries a full cycle", async () => {

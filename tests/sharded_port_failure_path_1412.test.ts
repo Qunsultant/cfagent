@@ -36,7 +36,12 @@ describe("autonomousMarketScreen sharded missing-port failure path (#1412)", () 
     const publish = vi.fn(async () => {});
     (service as any).publishScreenerEvent = publish;
     (service as any).guardScheduledAuth = async () => ({ blocked: false });
-    const getScreenerAgent = vi.fn();
+    // Issue #2860 (Factor 8): the lock probe is fail-closed — an
+    // unanswering probe refuses the submission. This harness tests
+    // the port/failure paths, so the probe answers not-running.
+    const getScreenerAgent = vi.fn(() => ({
+      isScreenRunning: async () => ({ running: false, startedAt: null }),
+    }));
     (service as any).getScreenerAgent = getScreenerAgent;
     return { service, publish, getScreenerAgent };
   }

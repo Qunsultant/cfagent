@@ -117,14 +117,12 @@ describe("Copilot Registry & Extensibility (#3449)", () => {
     expect(isValidChatSubView("crypto")).toBe(false);
   });
 
-  it("declares custom surfaces in the registry (#3454): stock has one, general/options do not", () => {
-    // Deprecated-compatible reading: existing registrations keep their
-    // mode values; "custom" now declares a surface composed above the
-    // conversation instead of replacing it.
-    expect(findCopilot("stock")?.mode).toBe("custom");
+  it("declares uniform chat mode across all copilots (#3454, #3557)", () => {
+    // Issue #3557: all 3 core copilots share the uniform 'chat' mode
+    expect(findCopilot("stock")?.mode).toBe("chat");
     expect(findCopilot("general")?.mode).toBe("chat");
     expect(findCopilot("options")?.mode).toBe("chat");
-    expect(hasCustomSurface(findCopilot("stock")!)).toBe(true);
+    expect(hasCustomSurface(findCopilot("stock")!)).toBe(false);
     expect(hasCustomSurface(findCopilot("general")!)).toBe(false);
     expect(hasCustomSurface(findCopilot("options")!)).toBe(false);
   });
@@ -211,29 +209,26 @@ describe("AgentChatTabContent Multi-Copilot Sub-Tabs & View Isolation (#3449)", 
     expect(container!.querySelector(".messages-stream")).not.toBeNull();
   });
 
-  it("in stock view: StockCopilotPanel IS rendered above the conversation, composer IS present (#3454)", async () => {
+  it("in stock view: renders uniform copilot chat surface with banner, welcome hero, and bottom chatbox (#3541, #3557)", async () => {
     window.history.replaceState({}, "", "/?tab=chat&view=stock");
 
     await renderChat();
 
-    // StockCopilotPanel MUST be rendered
+    // Uniform shell: fullChatArea rendered, no side-by-side dashboard pane
     const panel = container!.querySelector("[data-testid='stock-copilot-panel']");
-    expect(panel).not.toBeNull();
+    expect(panel).toBeNull();
     // Stock Copilot banner is present
     expect(container!.textContent).toContain("Stock Copilot Active:");
-    // Uniform shell (#3454): the shared conversation renders too —
-    // composer and messages stream are NOT suppressed by the panel.
+    // Stock Copilot welcome hero and quick chips are present
+    expect(container!.textContent).toContain("Stock Copilot & Autonomous Loop");
+    expect(container!.textContent).toContain("Open Positions & Exits");
+    // Chat composer and stream ARE rendered uniformly with sticky bottom composer
     expect(container!.querySelector(".chat-input-bar")).not.toBeNull();
-    const stream = container!.querySelector(".messages-stream");
-    expect(stream).not.toBeNull();
-    // The panel composes ABOVE the conversation in document order.
-    expect(
-      panel!.compareDocumentPosition(stream!) & Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy();
+    expect(container!.querySelector(".messages-stream")).not.toBeNull();
   });
 
-  it("in stock view: a message typed in the composer flows through the shared sendMessage (#3454)", async () => {
-    window.history.replaceState({}, "", "/?tab=chat&view=stock");
+  it("in conversational view: a message typed in the composer flows through the shared sendMessage", async () => {
+    window.history.replaceState({}, "", "/?tab=chat&view=options");
 
     await renderChat();
 
@@ -244,7 +239,7 @@ describe("AgentChatTabContent Multi-Copilot Sub-Tabs & View Isolation (#3449)", 
       "value"
     )!.set!;
     await act(async () => {
-      setValue.call(input, "What positions does the Stock Copilot hold?");
+      setValue.call(input, "What is the best SPY Iron Condor?");
       input!.dispatchEvent(new Event("input", { bubbles: true }));
     });
 
@@ -256,30 +251,31 @@ describe("AgentChatTabContent Multi-Copilot Sub-Tabs & View Isolation (#3449)", 
 
     expect(mockSendMessage).toHaveBeenCalledTimes(1);
     const sent = mockSendMessage.mock.calls[0][0] as any;
-    expect(sent.text).toBe("What positions does the Stock Copilot hold?");
+    expect(sent.text).toBe("What is the best SPY Iron Condor?");
     expect(sent.metadata?.userLogin).toBe("test-user");
   });
 
-  it("supports URL alias ?copilot=stock", async () => {
+  it("supports URL alias ?copilot=stock with uniform copilot workspace (#3541, #3557)", async () => {
     window.history.replaceState({}, "", "/?tab=chat&copilot=stock");
 
     await renderChat();
 
-    expect(container!.querySelector("[data-testid='stock-copilot-panel']")).not.toBeNull();
-    // The alias view gets the uniform shell too (#3454)
+    expect(container!.querySelector("[data-testid='stock-copilot-panel']")).toBeNull();
+    expect(container!.textContent).toContain("Stock Copilot Active:");
     expect(container!.querySelector(".chat-input-bar")).not.toBeNull();
+    expect(container!.querySelector(".messages-stream")).not.toBeNull();
   });
 
-  it("a registered copilot with renderCustom composes its surface above the conversation (#3454)", async () => {
+  it("a registered copilot with renderCustom renders its surface alongside the chatbox (#3541)", async () => {
     const unregister = registerCopilot({
       id: "lab",
       label: "Lab Copilot",
       icon: "🧪",
-      mode: "chat",
+      mode: "custom",
       tooltip: {
         eyebrow: "Test",
         title: "Lab Copilot",
-        description: "Synthetic copilot for the uniform-shell contract",
+        description: "Synthetic copilot for custom surface side-by-side contract",
       },
       renderCustom: () => <div data-testid="lab-surface">Lab Surface</div>,
     });
@@ -292,13 +288,9 @@ describe("AgentChatTabContent Multi-Copilot Sub-Tabs & View Isolation (#3449)", 
       // Its own custom surface renders…
       const surface = container!.querySelector("[data-testid='lab-surface']");
       expect(surface).not.toBeNull();
-      // …above the shared conversation, which is present by construction
+      // …and the conversational chatbox is rendered alongside it
       expect(container!.querySelector(".chat-input-bar")).not.toBeNull();
-      const stream = container!.querySelector(".messages-stream");
-      expect(stream).not.toBeNull();
-      expect(
-        surface!.compareDocumentPosition(stream!) & Node.DOCUMENT_POSITION_FOLLOWING
-      ).toBeTruthy();
+      expect(container!.querySelector(".messages-stream")).not.toBeNull();
       // A copilot with its own renderCustom does NOT pull in the stock panel
       expect(container!.querySelector("[data-testid='stock-copilot-panel']")).toBeNull();
     } finally {

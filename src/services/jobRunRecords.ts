@@ -44,7 +44,12 @@ export type JobRunRecordInput = Omit<JobRunRecord, "system"> & {
   system: JobRunSystem;
 };
 
-const SYSTEMS: readonly string[] = ["scheduled-agent-goal", "orchestrator-schedule"];
+const SYSTEMS: readonly string[] = [
+  "scheduled-agent-goal",
+  "orchestrator-schedule",
+  // Issue #3534 (Pipeline J1) — pipeline jobs record through this machinery.
+  "job-pipeline",
+];
 const OUTCOMES: readonly string[] = ["success", "failure", "skipped"];
 const TRIGGERS: readonly string[] = ["scheduled", "manual"];
 

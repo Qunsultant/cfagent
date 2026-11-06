@@ -32,6 +32,10 @@ import type { AutopilotRouteContext } from "../routes/autopilot";
 import type { SchedulesRouteContext } from "../routes/schedules";
 import type { EtradeBrokerRouteContext } from "../routes/etradeBroker";
 import { handleReportsRoutes, makeSubmitFollowupDelivery } from "../routes/reports";
+import {
+  createSettingsChangeNotifier,
+  type SettingsChangeNotifier,
+} from "../settingsWebhookNotify";
 import { handleScreenerPresetRoutes } from "../routes/screenerPresets";
 import { handleMcpChatNlqRoutes } from "../routes/mcpChatNlq";
 import { handleSchemaRoutes } from "../routes/schema";
@@ -138,6 +142,11 @@ export interface RouteRequestDeps {
   }>;
   readSettingRaw(key: string): string | null;
   writeSetting(key: string, value: string): void;
+  /** Issue #3471: settings-change notifier for the selection write
+   *  routes (test seam). When omitted, routeRequest builds the
+   *  production notifier from env, deferred through the DO
+   *  context's waitUntil (see below). */
+  notifySettingsChanged?: SettingsChangeNotifier;
   getAutopilotState: AutopilotRouteContext["getAutopilotState"];
   writeAutopilotState: AutopilotRouteContext["writeAutopilotState"];
   incrementAutopilotOrdersToday: EtradeBrokerRouteContext["incrementAutopilotOrdersToday"];
@@ -170,11 +179,23 @@ export async function routeRequest(deps: RouteRequestDeps, request: Request): Pr
   const sql = deps.ensureTables();
   const sessionId = deps.sessionKey();
 
+  // Issue #3471: the settings-change notifier the selection write
+  // routes (environment switch, tenant providers) fire after their
+  // writes commit. The production notifier delivers through the
+  // instance's own webhook channel, deferred through waitUntil so
+  // a self-delivery is dispatched after this request completes
+  // rather than contending with it; the delivery itself is
+  // best-effort and logged (settingsWebhookNotify.ts).
+  const notifySettingsChanged =
+    deps.notifySettingsChanged ??
+    createSettingsChangeNotifier(deps.env, (promise) => deps.ctx.waitUntil(promise));
+
   // Issue #359-01: reports + HITL routes are handled by
   // src/agents/routes/reports.ts. Invoked at this exact position in the
   // sequential path.endsWith matching sequence; a non-null return matched.
   const reportsResponse = await handleReportsRoutes(request, url, path, sessionId, {
     env: deps.env,
+    notifySettingsChanged,
     ensureTables: () => deps.ensureTables(),
     getScreenerAgent: (userLogin?: string) => deps.getScreenerAgent(userLogin),
     getScreenerExecutionContext: () => deps.getScreenerExecutionContext(),
@@ -286,6 +307,10 @@ export async function routeRequest(deps: RouteRequestDeps, request: Request): Pr
     sql: deps.ctx.storage.sql,
     configPort: dataProviderPorts.config,
     capturePort: dataProviderPorts.captures,
+    // #3530 S1: feed runs fetch through the capture-wired Yahoo
+    // adapter — the blob store is this DO's storage, the same
+    // wiring screening's capture-wired fetches use.
+    blobStorage: deps.ctx.storage,
     userLogin: request.headers.get("x-user-login") || "",
     recordAudit: (type, agent, payload) => deps.recordAudit(type, agent, payload),
   });
@@ -554,6 +579,7 @@ export async function routeRequest(deps: RouteRequestDeps, request: Request): Pr
   // a non-null return matched.
   const etradeBrokerResponse = await handleEtradeBrokerRoutes(request, url, path, sessionId, {
     env: deps.env,
+    notifySettingsChanged,
     traceId: parseTraceparent(request.headers.get("traceparent"))?.traceId ?? null,
     asyncJobId: request.headers.get("x-async-job-id") || undefined,
     scheduleScreenerFollowups: (outcome: ScreenerRunOutcome, userLogin: string) =>
@@ -863,6 +889,9 @@ export async function routeRequest(deps: RouteRequestDeps, request: Request): Pr
     sql: deps.ctx.storage.sql,
     getScreenerExecutionContext: () => deps.getScreenerExecutionContext(),
     readSettingRaw: (key) => deps.readSettingRaw(key),
+    // #3398: the session-choice write lands in the same settings
+    // store the cycle and the status read resolve from.
+    writeSetting: (key, value) => deps.writeSetting(key, value),
     audit: (type, agent, payload) => deps.audit(type, agent, payload),
   });
   if (stockCopilotResponse) return stockCopilotResponse;

@@ -7,8 +7,9 @@
  *
  * The registry is the single source of truth for the fleet. This
  * builder COMPOSES its exports at call time — each class joined
- * with its S15 census cells (capabilityDoorsForClass) and its S16
- * identity record (getIdentityRecord), each door joined with its
+ * with its S15 census cells (capabilityDoorsForClass), its S16
+ * identity record (getIdentityRecord), and its capability manifest
+ * (capabilitiesForClass, Uniform Copilot Standard S1 #3489), each door joined with its
  * S19 cost-budget record — and copies nothing into a second
  * hand-maintained list. tests/mesh_agents_view_s20_2469.test.ts
  * drift-pins the payload against the registry module, so the
@@ -29,9 +30,11 @@ import {
   MESH_TOOL_FAMILIES,
   MESH_TRACE_SPINE,
   MESH_WORKFLOWS,
+  capabilitiesForClass,
   capabilityDoorsForClass,
   doorCostBudget,
   getIdentityRecord,
+  type AgentCapabilityManifest,
   type MeshAgentEntry,
   type MeshCapabilityDoorEntry,
   type MeshChannelEntry,
@@ -49,6 +52,15 @@ import {
 export interface MeshAgentView extends MeshAgentEntry {
   doors: MeshCapabilityDoorEntry[];
   identity: MeshIdentityRecord | null;
+  /**
+   * The class's capability manifest (Uniform Copilot Standard S1,
+   * #3489): channels × runtime capabilities × tools with truthful
+   * states, resolved from externalized config at the code posture
+   * (this payload is env-free by design — prerequisites are
+   * recorded on the entries, not evaluated here). Non-null exactly
+   * for PortThink entries; the manifest covers the Think fleet.
+   */
+  capabilities: AgentCapabilityManifest | null;
 }
 
 /** One door with its S19 cost-budget record attached. */
@@ -124,6 +136,7 @@ export function buildMeshRegistryView(): MeshRegistryView {
       ...entry,
       doors: capabilityDoorsForClass(entry.className),
       identity: getIdentityRecord(entry.className) ?? null,
+      capabilities: capabilitiesForClass(entry.className),
     })),
     surfaces: [...MESH_SURFACES],
     doors: MESH_DOORS.map((door) => ({ ...door, budget: doorCostBudget(door.id) })),

@@ -12,6 +12,7 @@ import { MarkdownContent } from "./MarkdownContent";
 import { ReasoningView } from "./ReasoningView";
 import { ToolResultView } from "./ToolResultView";
 import { StockCopilotPanel } from "../StockCopilotPanel";
+import { setStockCopilotPaused } from "../stockCopilotApi";
 import { findCopilot, getRegisteredCopilots, hasCustomSurface, isRegisteredCopilotId } from "./copilotRegistry";
 // Fluent v9 replaces our primitives on this page only (#3146 experiment).
 // Measured gaps vs our primitives: no danger button (secondary used),
@@ -76,19 +77,60 @@ const useProviderStyles = makeStyles({
   },
 });
 
-// #3454 (uniform copilot shell): a copilot's custom surface composes
-// ABOVE the shared conversation instead of replacing it, so the
-// surface region sizes to its content and caps at half the chat view
-// (scrolling internally past that) — the messages stream keeps the
-// remaining height and the composer stays reachable at every size.
+// #3449, #3521, #3541: copilots with custom surfaces (e.g. Stock Copilot)
+// render a side-by-side workspace on desktop:
+// - Left pane: dedicated copilot dashboard (StockCopilotPanel) with its own scrolling
+// - Right pane: conversational chat stream and composer with its own scrolling
+// Eliminates the vertical 50% squishing and dual scrollbars on the same axis,
+// while enabling direct interactive chat and autonomous loop adjustments.
 const useSurfaceStyles = makeStyles({
-  customSurface: {
+  splitLayout: {
     display: "flex",
-    flexDirection: "column",
+    flexDirection: "row",
+    flexGrow: 1,
     flexShrink: 1,
     minHeight: 0,
-    maxHeight: "50%",
+    overflow: "hidden",
+    "@media (max-width: 900px)": {
+      flexDirection: "column",
+    },
+  },
+  dashboardPane: {
+    display: "flex",
+    flexDirection: "column",
+    flexBasis: "50%",
+    flexGrow: 1,
+    flexShrink: 1,
+    minHeight: 0,
+    minWidth: 0,
+    borderRight: "1px solid var(--color-border-subtle)",
     overflowY: "auto",
+    "@media (max-width: 900px)": {
+      flexBasis: "45%",
+      borderRight: "none",
+      borderBottom: "1px solid var(--color-border-subtle)",
+    },
+  },
+  chatPane: {
+    display: "flex",
+    flexDirection: "column",
+    flexBasis: "50%",
+    flexGrow: 1,
+    flexShrink: 1,
+    minHeight: 0,
+    minWidth: 0,
+    overflow: "hidden",
+    "@media (max-width: 900px)": {
+      flexBasis: "55%",
+    },
+  },
+  fullChatArea: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    flexShrink: 1,
+    minHeight: 0,
+    overflow: "hidden",
   },
 });
 
@@ -225,6 +267,14 @@ export function AgentChatTabContentInner({
     }
 
     const sourceTab = activeView === "options" ? "E*TRADE · Auto Options Research" : (currentCopilot?.sourceTab || "Chat & Agents");
+    const lower = input.trim().toLowerCase();
+    if (activeView === "stock") {
+      if (lower === "pause" || lower === "pause loop" || lower === "pause stock copilot" || lower.includes("pause the loop") || lower.includes("pause stock copilot")) {
+        setStockCopilotPaused(true).catch(() => {});
+      } else if (lower === "resume" || lower === "resume loop" || lower === "resume stock copilot" || lower.includes("resume the loop") || lower.includes("resume stock copilot")) {
+        setStockCopilotPaused(false).catch(() => {});
+      }
+    }
     try {
       sendMessage({
         text: input.trim(),
@@ -242,6 +292,14 @@ export function AgentChatTabContentInner({
   const handleChipClick = (prompt: string, sourceTab?: string) => {
     const effectiveSource = sourceTab || (activeView === "options" ? "E*TRADE · Auto Options Research" : (currentCopilot?.sourceTab || "Chat & Agents"));
     if (isBusy || isResetting) return;
+    const lower = prompt.trim().toLowerCase();
+    if (activeView === "stock") {
+      if (lower.includes("pause the stock copilot") || lower.includes("pause loop")) {
+        setStockCopilotPaused(true).catch(() => {});
+      } else if (lower.includes("resume the stock copilot") || lower.includes("resume loop")) {
+        setStockCopilotPaused(false).catch(() => {});
+      }
+    }
     try {
       sendMessage({
         text: prompt,
@@ -259,78 +317,8 @@ export function AgentChatTabContentInner({
     setClearConfirmOpen(true);
   };
 
-  return (
-    <div className="chat-view">
-      <CapabilityNavBar
-        ariaLabel="Copilot modes"
-        tabs={chatCapabilityTabs}
-        activeTabId={activeView}
-        onTabChange={handleViewChange}
-        className="chat-capability-subnav"
-      />
-      {/* Copilot Mode Banner (Options Copilot, Stock Copilot, or registered custom copilot) */}
-      {currentCopilot?.banner && (
-        <div className="options-copilot-banner">
-          <div className="options-copilot-info">
-            <span style={{ fontSize: "var(--font-size-title-sm)" }}>{currentCopilot.banner.icon}</span>
-            <div>
-              <strong style={{ color: "var(--color-text-primary)" }}>{currentCopilot.banner.headline}</strong>{" "}
-              <span>{currentCopilot.banner.description}</span>
-            </div>
-          </div>
-          {currentCopilot.banner.badgeText && (
-            <Badge size="extra-small" style={{ textTransform: "uppercase" }} color={currentCopilot.banner.badgeColor || "brand"} appearance="tint">
-              {currentCopilot.banner.badgeText}
-            </Badge>
-          )}
-        </div>
-      )}
-      <Dialog
-        open={clearConfirmOpen}
-        onOpenChange={(_e, data) => {
-          if (!data.open) setClearConfirmOpen(false);
-        }}
-      >
-        <DialogSurface>
-          <DialogBody>
-            <DialogTitle>Clear conversation history?</DialogTitle>
-            <DialogContent>
-              <p>Clear this conversation history? This cannot be undone.</p>
-            </DialogContent>
-            <DialogActions>
-              <Button
-                type="button"
-                appearance="secondary"
-                onClick={() => {
-                  setClearConfirmOpen(false);
-                  onResetSession(true);
-                }}
-              >
-                Clear history
-              </Button>
-              <Button type="button" appearance="secondary" onClick={() => setClearConfirmOpen(false)}>
-                Cancel
-              </Button>
-            </DialogActions>
-          </DialogBody>
-        </DialogSurface>
-      </Dialog>
-      {/* #3454 — uniform copilot shell: EVERY copilot renders the same
-          composition — banner (above, when configured), its custom
-          surface when it declares one (here, above the conversation),
-          and ALWAYS the shared conversation below. No mode replaces or
-          suppresses the chat surface; the exclusive custom/chat branch
-          from #3449 is gone. */}
-      {currentCopilot && hasCustomSurface(currentCopilot) && (
-        <div className={surfaceStyles.customSurface}>
-          {currentCopilot.renderCustom ? (
-            currentCopilot.renderCustom({ user, onChipClick: handleChipClick, onNavigateTab })
-          ) : (
-            <StockCopilotPanel />
-          )}
-        </div>
-      )}
-      <>
+  const renderChatConversation = () => (
+    <>
       {/* Top Sponsor Spotlight Bar (Configurable via Settings) */}
       {showSponsorSpotlight && ads.length > 0 && (
         <div
@@ -460,88 +448,122 @@ export function AgentChatTabContentInner({
                 </Button>
               </div>
             </div>
-          ) : (
-          <div className="hero-welcome">
-            <div className="hero-icon">⚡</div>
-            <h3>Enterprise Multi-Agent Studio</h3>
-            <p>
-              Ask any question about platform capabilities, workflows, algorithmic decisioning, or command tools directly through chat. Your prompt is routed by an <strong>LLM Judge</strong> and orchestrated across specialized sub-agents with neural strategy intelligence and transactional ledger persistence.
-            </p>
-            <div className="quick-chips">
-              <Button
-                appearance="subtle"
-                size="small"
-                disabled={isBusy || isResetting}
-                onClick={() => handleChipClick("What are the capabilities of this platform and how do I use the 8 core workflows?", "Platform Capabilities")}
-              >
-                ⚡ What can this platform do?
-              </Button>
-              <Button
-                appearance="subtle"
-                size="small"
-                disabled={isBusy || isResetting}
-                onClick={() => handleChipClick("How do I use the Stock Screener to find oversold tech stocks with RSI < 35?", "Stock Screener Guide")}
-              >
-                📈 How do I screen stocks?
-              </Button>
-              <Button
-                appearance="subtle"
-                size="small"
-                disabled={isBusy || isResetting}
-                onClick={() => handleChipClick("How do I screen for options strategies with max profit > 0 and max loss <= $30?", "Options Strategy Guide")}
-              >
-                🎯 Options: Max Profit &amp; Loss &le; $30
-              </Button>
-              <Button
-                appearance="subtle"
-                size="small"
-                disabled={isBusy || isResetting}
-                onClick={() => handleChipClick("Explain how the PickBestTrades algorithm evaluates and scores setups.", "PickBestTrades Engine")}
-              >
-                🧠 How does PickBestTrades work?
-              </Button>
-              <Button
-                appearance="subtle"
-                size="small"
-                disabled={isBusy || isResetting}
-                onClick={() => handleChipClick("How does Human-in-the-Loop (HITL) order execution and DID attestation work?", "Trading Safety Guide")}
-              >
-                🛡️ How does HITL order execution work?
-              </Button>
-              <Button
-                appearance="subtle"
-                size="small"
-                disabled={isBusy || isResetting}
-                onClick={() => handleChipClick("How does the real-time Options Flow tracker identify institutional sweeps and sentiment?", "Options Flow Guide")}
-              >
-                🌊 How do options flow alerts work?
-              </Button>
-              <Button
-                appearance="subtle"
-                size="small"
-                disabled={isBusy || isResetting}
-                onClick={() => handleChipClick("Perform market-data equity research on NVDA using yfinance and Alpaca", "Equity Research")}
-              >
-                🔬 Research NVDA (Market Data)
-              </Button>
-              <Button
-                appearance="subtle"
-                size="small"
-                disabled={isBusy || isResetting}
-                onClick={() => handleChipClick("Draft a high-priority task: Complete SOC2 compliance review by next Monday", "Task Management")}
-              >
-                📋 Draft High-Priority Task
-              </Button>
-              <Button
-                appearance="subtle"
-                size="small"
-                disabled={isBusy || isResetting}
-                onClick={() => handleChipClick("Remember that our enterprise team prefers TypeScript and dark-mode designs", "Memory Management")}
-              >
-                🧠 Store Session Fact
-              </Button>
+          ) : activeView === "stock" ? (
+            <div className="hero-welcome">
+              <div className="hero-icon">📈</div>
+              <h3>Stock Copilot &amp; Autonomous Loop</h3>
+              <p>
+                Continuous autonomous trading loop operating across all 4 sessions (Pre-market, Regular, After-hours, and Overnight EXTO) with pattern scoring, CVaR risk optimization, and automatic bracket exits. Ask questions about open positions, cycle telemetry, or adjust the loop directly.
+              </p>
+              <div className="quick-chips">
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  disabled={isBusy || isResetting}
+                  onClick={() => handleChipClick("Show all open positions and their take-profit / stop-loss exit plans", "Stock Copilot Guide")}
+                >
+                  📊 Open Positions &amp; Exits
+                </Button>
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  disabled={isBusy || isResetting}
+                  onClick={() => handleChipClick("What is the current status of the Stock Copilot loop and what happened in the latest cycle?", "Stock Copilot Guide")}
+                >
+                  🔄 Latest Cycle Telemetry
+                </Button>
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  disabled={isBusy || isResetting}
+                  onClick={() => handleChipClick("How does the Stock Copilot CVaR optimizer and risk management work?", "Stock Copilot Guide")}
+                >
+                  🛡️ CVaR Risk Management
+                </Button>
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  disabled={isBusy || isResetting}
+                  onClick={() => handleChipClick("Explain the 4 trading sessions and their active execution hours", "Stock Copilot Guide")}
+                >
+                  ⏰ 24/7 Trading Sessions
+                </Button>
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  disabled={isBusy || isResetting}
+                  onClick={() => handleChipClick("Pause the Stock Copilot trading loop", "Stock Copilot Guide")}
+                >
+                  ⏸️ Pause Loop
+                </Button>
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  disabled={isBusy || isResetting}
+                  onClick={() => handleChipClick("Resume the Stock Copilot trading loop", "Stock Copilot Guide")}
+                >
+                  ▶️ Resume Loop
+                </Button>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="hero-welcome">
+              <div className="hero-icon">⚡</div>
+              <h3>Enterprise Multi-Agent Studio</h3>
+              <p>
+                Ask any question about platform capabilities, workflows, algorithmic decisioning, or command tools directly through chat. Your prompt is routed by an <strong>LLM Judge</strong> and orchestrated across specialized sub-agents with neural strategy intelligence and transactional ledger persistence.
+              </p>
+              <div className="quick-chips">
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  disabled={isBusy || isResetting}
+                  onClick={() => handleChipClick("What are the capabilities of this platform and how do I use the 8 core workflows?", "Platform Capabilities")}
+                >
+                  ⚡ Platform Capabilities
+                </Button>
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  disabled={isBusy || isResetting}
+                  onClick={() => handleChipClick("Screen for top momentum and breakout stocks using the Technical Screener", "Screening Guide")}
+                >
+                  📈 Technical Screener
+                </Button>
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  disabled={isBusy || isResetting}
+                  onClick={() => handleChipClick("Show recent aggressive institutional options sweeps and unusual volume alerts", "Options Flow Guide")}
+                >
+                  🌊 Options Sweeps
+                </Button>
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  disabled={isBusy || isResetting}
+                  onClick={() => handleChipClick("Evaluate straddle pricing, implied move, and volatility skew for upcoming earnings on NVDA", "Options Strategy Guide")}
+                >
+                  ⚡ NVDA Earnings Moves
+                </Button>
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  disabled={isBusy || isResetting}
+                  onClick={() => handleChipClick("How do I build an algorithmic mean reversion trading rule?", "Algorithmic Rules")}
+                >
+                  🤖 Build Trading Rules
+                </Button>
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  disabled={isBusy || isResetting}
+                  onClick={() => handleChipClick("Audit system state, latency, and Durable Object ledgers across all workers", "System Operations")}
+                >
+                  🛡️ Audit &amp; Performance
+                </Button>
+              </div>
+            </div>
           )
         ) : (
           messages.map((msg: any) => {
@@ -658,69 +680,14 @@ export function AgentChatTabContentInner({
           <div className="error-resolution-box">
             <div className="resolution-box-title">🛠️ What needs to be done to resolve this:</div>
             <ol className="resolution-steps-list">
-              {errorAspect.resolutionSteps.map((step, idx) => (
-                <li key={idx}>{step}</li>
+              {errorAspect.resolutionSteps.map((step: string, sIdx: number) => (
+                <li key={sIdx}>{step}</li>
               ))}
             </ol>
           </div>
-
-          <div className="error-card-actions">
-            {errorAspect.suggestedTab && onNavigateTab && (
-              <Button
-                appearance="primary"
-                onClick={() => onNavigateTab(errorAspect.suggestedTab as any)}
-                title={`Navigate directly to ${errorAspect.suggestedTabLabel || errorAspect.suggestedTab}`}
-              >
-                🔍 {errorAspect.suggestedTabLabel || `Open ${errorAspect.suggestedTab.toUpperCase()} Tab`}
-              </Button>
-            )}
-            <Button
-              appearance="subtle"
-              disabled={isResetting}
-              onClick={() => {
-                if (typeof (agent as any).reconnect === "function") {
-                  try {
-                    (agent as any).reconnect();
-                  } catch {
-                    // ignore
-                  }
-                }
-                onResetSession(false);
-              }}
-              title="Reconnect agent WebSocket without clearing history"
-            >
-              🔄 Reconnect
-            </Button>
-            <Button
-              appearance="secondary"
-              disabled={isResetting}
-              onClick={() => handleClearWithConfirm()}
-              title="Reset conversation state and clear history"
-            >
-{isResetting ? (<><Spinner size="tiny" />{"Reset & Clear History"}</>) : ("Reset & Clear History")}
-            </Button>
-            <Button
-              className="error-action-btn copy"
-              appearance="subtle"
-              onClick={() => {
-                const info = `Error Code: ${errorAspect.code}\nTitle: ${errorAspect.title}\nDetails: ${errorAspect.message}\nRemediation:\n${errorAspect.resolutionSteps.map((s, i) => `${i + 1}. ${s}`).join("\n")}`;
-                navigator.clipboard.writeText(info);
-                dispatchToast(
-                  <Toast>
-                    <ToastTitle>Diagnostic error information copied to clipboard.</ToastTitle>
-                  </Toast>,
-                  { intent: "success" },
-                );
-              }}
-              title="Copy error code and diagnostic information"
-            >
-              📋 Copy Diagnostics
-            </Button>
-            </div>
           </MessageBarBody>
         </MessageBar>
       )}
-
 
       {/* Persistent Capabilities & How-To Guide Strip */}
       <div
@@ -825,7 +792,90 @@ export function AgentChatTabContentInner({
 {isBusy ? (<><Spinner size="tiny" />{"Send ➔"}</>) : ("Send ➔")}
         </Button>
       </form>
-      </>
+    </>
+  );
+
+  return (
+    <div className="chat-view">
+      <CapabilityNavBar
+        ariaLabel="Copilot modes"
+        tabs={chatCapabilityTabs}
+        activeTabId={activeView}
+        onTabChange={handleViewChange}
+        className="chat-capability-subnav"
+      />
+      {/* Copilot Mode Banner (Options Copilot, Stock Copilot, or registered custom copilot) */}
+      {currentCopilot?.banner && (
+        <div className="options-copilot-banner">
+          <div className="options-copilot-info">
+            <span style={{ fontSize: "var(--font-size-title-sm)" }}>{currentCopilot.banner.icon}</span>
+            <div>
+              <strong style={{ color: "var(--color-text-primary)" }}>{currentCopilot.banner.headline}</strong>{" "}
+              <span>{currentCopilot.banner.description}</span>
+            </div>
+          </div>
+          {currentCopilot.banner.badgeText && (
+            <Badge size="extra-small" style={{ textTransform: "uppercase" }} color={currentCopilot.banner.badgeColor || "brand"} appearance="tint">
+              {currentCopilot.banner.badgeText}
+            </Badge>
+          )}
+        </div>
+      )}
+      <Dialog
+        open={clearConfirmOpen}
+        onOpenChange={(_e, data) => {
+          if (!data.open) setClearConfirmOpen(false);
+        }}
+      >
+        <DialogSurface>
+          <DialogBody>
+            <DialogTitle>Clear conversation history?</DialogTitle>
+            <DialogContent>
+              <p>Clear this conversation history? This cannot be undone.</p>
+            </DialogContent>
+            <DialogActions>
+              <Button
+                type="button"
+                appearance="secondary"
+                onClick={() => {
+                  setClearConfirmOpen(false);
+                  onResetSession(true);
+                }}
+              >
+                Clear history
+              </Button>
+              <Button type="button" appearance="secondary" onClick={() => setClearConfirmOpen(false)}>
+                Cancel
+              </Button>
+            </DialogActions>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
+      {/* #3449, #3521, #3541 — side-by-side copilot workspace:
+          When a copilot declares a custom surface (e.g. Stock Copilot),
+          render its telemetry/controls in a dedicated dashboard pane alongside
+          the conversational chatbox (messages stream and sticky composer).
+          Both panes have independent scrolling contexts, eliminating vertical
+          squishing and nested scrollbar conflicts while allowing users to chat
+          interactively with Stock Copilot. */}
+      {currentCopilot && hasCustomSurface(currentCopilot) ? (
+        <div className={surfaceStyles.splitLayout}>
+          <div className={surfaceStyles.dashboardPane}>
+            {currentCopilot.renderCustom ? (
+              currentCopilot.renderCustom({ user, onChipClick: handleChipClick, onNavigateTab })
+            ) : (
+              <StockCopilotPanel />
+            )}
+          </div>
+          <div className={surfaceStyles.chatPane}>
+            {renderChatConversation()}
+          </div>
+        </div>
+      ) : (
+        <div className={surfaceStyles.fullChatArea}>
+          {renderChatConversation()}
+        </div>
+      )}
     </div>
   );
 }

@@ -19,6 +19,8 @@ import {
 } from "./stockCopilotStorePorts";
 
 const str = (v: unknown): string => (typeof v === "string" ? v : String(v ?? ""));
+const strOrNull = (v: unknown): string | null =>
+  v === null || v === undefined ? null : String(v);
 
 function parseEntries(raw: unknown): string[] {
   try {
@@ -54,9 +56,14 @@ function mapActivity(row: Record<string, unknown>): CopilotCycleActivityRecord {
     userLogin: str(row.user_login),
     cycleAt: str(row.cycle_at),
     outcome:
-      outcome === "traded" || outcome === "refused" || outcome === "inactive"
+      outcome === "traded" ||
+      outcome === "refused" ||
+      outcome === "inactive" ||
+      outcome === "outside_sessions" ||
+      outcome === "selection_changed"
         ? outcome
         : "no_trade",
+    session: strOrNull(row.session),
     entries: parseEntries(row.entries_json),
     exits: parseExits(row.exits_json),
     detail:
@@ -78,14 +85,23 @@ export class DoSqliteStockCopilotActivityStore
         outcome TEXT NOT NULL,
         entries_json TEXT NOT NULL,
         exits_json TEXT NOT NULL,
-        detail TEXT
+        detail TEXT,
+        session TEXT
       )`,
     );
+    // #3398: tables created before session recording gain the
+    // column in place (the data layer's PRAGMA/ALTER idiom).
+    const cols = Array.from(
+      this.sql.exec(`PRAGMA table_info(${COPILOT_ACTIVITY_TABLE})`),
+    ) as Array<{ name?: unknown }>;
+    if (!cols.some((c) => String(c.name ?? "") === "session")) {
+      this.sql.exec(`ALTER TABLE ${COPILOT_ACTIVITY_TABLE} ADD COLUMN session TEXT`);
+    }
   }
 
   appendActivity(record: CopilotCycleActivityRecord): void {
     this.sql.exec(
-      `INSERT INTO ${COPILOT_ACTIVITY_TABLE} (id, user_login, cycle_at, outcome, entries_json, exits_json, detail) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO ${COPILOT_ACTIVITY_TABLE} (id, user_login, cycle_at, outcome, entries_json, exits_json, detail, session) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       record.id,
       record.userLogin,
       record.cycleAt,
@@ -93,6 +109,7 @@ export class DoSqliteStockCopilotActivityStore
       JSON.stringify(record.entries),
       JSON.stringify(record.exits),
       record.detail,
+      record.session ?? null,
     );
     // Bounded retention: keep the login's newest records only
     // (cycle_at order, rowid breaking same-timestamp ties by

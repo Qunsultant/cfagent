@@ -415,13 +415,19 @@ describe("subscription cancel + status", () => {
     expect(canceled.canceled).toHaveLength(1);
     expect(canceled.canceled[0].status).toBe("canceled");
     expect(canceled.accessThroughMs).toBe(canceled.canceled[0].periodEndMs);
-    const again = await bodyOf(await call(ctx, "POST", "/payments/agentic/commercial/subscription/cancel", "u1", {}));
+    const againRes = await call(ctx, "POST", "/payments/agentic/commercial/subscription/cancel", "u1", {});
+    expect(againRes?.status).toBe(409);
+    const again = await bodyOf(againRes);
+    expect(again.code).toBe("FAILURE_SUBSCRIPTION_CANCEL_NONE_ACTIVE");
     expect(again.canceled).toEqual([]);
     const status = await bodyOf(await call(ctx, "GET", "/payments/agentic/commercial/subscription?userId=u1", "u1"));
     expect(status.effectiveTier).toBe("Subscribed");
     expect(status.current.status).toBe("canceled");
     expect((ctx.audit as any).mock.calls.some(([t]: [string]) => t === "commercial.subscription.canceled")).toBe(true);
-    const opCancel = await bodyOf(await call(ctx, "POST", "/payments/agentic/commercial/subscription/cancel", "op1", { userId: "u1" }));
+    const opCancelRes = await call(ctx, "POST", "/payments/agentic/commercial/subscription/cancel", "op1", { userId: "u1" });
+    expect(opCancelRes?.status).toBe(409);
+    const opCancel = await bodyOf(opCancelRes);
+    expect(opCancel.code).toBe("FAILURE_SUBSCRIPTION_CANCEL_NONE_ACTIVE");
     expect(opCancel.canceled).toEqual([]);
   });
 

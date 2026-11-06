@@ -15,6 +15,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { CheckoutPanel } from "../src/client/CheckoutPanel";
+import { codedMessage, resolveOutcome } from "../src/outcomes/outcomeAspects";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -91,6 +92,9 @@ function mockFetch(opts: {
   submit?: Record<string, unknown>;
   checkPayment?: Record<string, unknown>;
   subscriptionCheckout?: Record<string, unknown>;
+  subscriptionStatus?: Record<string, unknown>;
+  subscriptionCancel?: Record<string, unknown>;
+  subscriptionCancelError?: { status: number; body: unknown };
 }) {
   const pricing = opts.pricing ?? pricingVariant();
   const fetchMock = vi.fn(async (input: any, init?: any) => {
@@ -124,7 +128,23 @@ function mockFetch(opts: {
       return {
         ok: true,
         status: 200,
-        json: async () => ({ userId: "u1", effectiveTier: "Free", current: null, subscriptions: [] }),
+        json: async () =>
+          opts.subscriptionStatus ?? { userId: "u1", effectiveTier: "Free", current: null, subscriptions: [] },
+      } as any;
+    }
+    if (url === "/api/payments/agentic/commercial/subscription/cancel" && method === "POST") {
+      if (opts.subscriptionCancelError) {
+        return {
+          ok: false,
+          status: opts.subscriptionCancelError.status,
+          json: async () => opts.subscriptionCancelError.body,
+        } as any;
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () =>
+          opts.subscriptionCancel ?? { userId: "u1", canceled: [], accessThroughMs: null, downgradeTiming: "period_end" },
       } as any;
     }
     if (url === "/api/payments/agentic/commercial/plans") {
@@ -165,6 +185,7 @@ function mockFetch(opts: {
     return { ok: true, status: 200, json: async () => ({}) } as any;
   });
   vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
 }
 
 async function drivePayFlow() {
@@ -284,5 +305,213 @@ describe("checkout panel native payment presentation (#2196)", () => {
     const link = container.querySelector('a[href="https://checkout.stripe.com/pay/sub_cs_1"]');
     expect(link).not.toBeNull();
     expect(container.textContent || "").toContain("native checkout link for this subscription checkout");
+  });
+});
+
+describe("checkout panel cancel-action UI (#2669)", () => {
+  const SUB_END_MS = Date.now() + 30 * 24 * 3600 * 1000;
+
+  function subscriptionStatusFixture() {
+    const row = (id: string, providerSubscriptionId: string | null) => ({
+      id,
+      planId: "p1",
+      status: "active",
+      periodStartMs: Date.now() - 86_400_000,
+      periodEndMs: SUB_END_MS,
+      providerSubscriptionId,
+      canceledAtMs: null,
+    });
+    return {
+      userId: "u1",
+      effectiveTier: "Subscribed",
+      current: row("s1", "sub_stripe_1"),
+      subscriptions: [row("s1", "sub_stripe_1"), row("s2", null)],
+    };
+  }
+
+  function clickBodyButton(text: string) {
+    const button = Array.from(document.body.querySelectorAll("button")).find(
+      (b) => (b.textContent || "").trim() === text,
+    );
+    if (!button) throw new Error(`No body button found with text: ${text}`);
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  }
+
+  function cancelPostCalls(fetchMock: any): number {
+    return fetchMock.mock.calls.filter(
+      ([input, init]: [any, any]) =>
+        String(input) === "/api/payments/agentic/commercial/subscription/cancel" && init?.method === "POST",
+    ).length;
+  }
+
+  async function openSubscriptionsTab() {
+    await render(<CheckoutPanel userLogin="u1" />);
+    await act(async () => {
+      clickButton("Subscriptions");
+    });
+    await flush();
+  }
+
+  it("shows Managed-by per row and the separation notice with a Products catalog link", async () => {
+    mockFetch({ subscriptionStatus: subscriptionStatusFixture() });
+    await openSubscriptionsTab();
+    const text = container.textContent || "";
+    expect(text).toContain("Managed by");
+    expect(text).toContain("Billing (Stripe)");
+    expect(text).toContain("Native");
+    expect(text).toContain("Provider-managed (Billing) subscriptions are purchased from the Products catalog");
+    const link = container.querySelector('a[href="?tab=products"]');
+    expect(link).not.toBeNull();
+    expect(link?.textContent).toContain("Products catalog");
+  });
+
+  it("cancel opens a confirmation dialog listing the rows and calls nothing until confirmed", async () => {
+    const fetchMock = mockFetch({ subscriptionStatus: subscriptionStatusFixture() });
+    await openSubscriptionsTab();
+    await act(async () => {
+      clickButton("Cancel subscription…");
+    });
+    await flush();
+    const dialogText = document.body.textContent || "";
+    expect(dialogText).toContain("Cancel subscription");
+    expect(dialogText).toContain("Billing (Stripe)");
+    expect(dialogText).toContain("Native");
+    expect(cancelPostCalls(fetchMock)).toBe(0);
+  });
+
+  it("dismissing the confirmation calls nothing", async () => {
+    const fetchMock = mockFetch({ subscriptionStatus: subscriptionStatusFixture() });
+    await openSubscriptionsTab();
+    await act(async () => {
+      clickButton("Cancel subscription…");
+    });
+    await flush();
+    await act(async () => {
+      clickBodyButton("Keep subscriptions");
+    });
+    await flush();
+    expect(document.body.textContent || "").not.toContain("Yes, cancel subscriptions");
+    expect(cancelPostCalls(fetchMock)).toBe(0);
+  });
+
+  it("confirming cancels once and reports period-end continuation", async () => {
+    const fixture = subscriptionStatusFixture();
+    const fetchMock = mockFetch({
+      subscriptionStatus: fixture,
+      subscriptionCancel: {
+        userId: "u1",
+        code: "SUCCESS_SUBSCRIPTION_CANCELED_PERIOD_END",
+        message: resolveOutcome("SUCCESS_SUBSCRIPTION_CANCELED_PERIOD_END").entry!.businessMessage,
+        canceled: fixture.subscriptions,
+        remaining: [],
+        accessThroughMs: SUB_END_MS,
+        downgradeTiming: "period_end",
+      },
+    });
+    await openSubscriptionsTab();
+    await act(async () => {
+      clickButton("Cancel subscription…");
+    });
+    await flush();
+    await act(async () => {
+      clickBodyButton("Yes, cancel subscriptions");
+    });
+    await flush();
+    expect(cancelPostCalls(fetchMock)).toBe(1);
+    expect(container.textContent || "").toContain("access continues through");
+  });
+
+  it("cancel posts no identifiers — the server resolves (user, tenant) from the session (#1069 §8)", async () => {
+    const fixture = subscriptionStatusFixture();
+    const fetchMock = mockFetch({
+      subscriptionStatus: fixture,
+      subscriptionCancel: {
+        userId: "u1",
+        code: "SUCCESS_SUBSCRIPTION_CANCELED_PERIOD_END",
+        message: resolveOutcome("SUCCESS_SUBSCRIPTION_CANCELED_PERIOD_END").entry!.businessMessage,
+        canceled: fixture.subscriptions,
+        remaining: [],
+        accessThroughMs: SUB_END_MS,
+        downgradeTiming: "period_end",
+      },
+    });
+    await openSubscriptionsTab();
+    await act(async () => {
+      clickButton("Cancel subscription…");
+    });
+    await flush();
+    await act(async () => {
+      clickBodyButton("Yes, cancel subscriptions");
+    });
+    await flush();
+    const cancelCalls = fetchMock.mock.calls.filter(
+      ([input, init]: [any, any]) =>
+        String(input) === "/api/payments/agentic/commercial/subscription/cancel" && init?.method === "POST",
+    );
+    expect(cancelCalls).toHaveLength(1);
+    // #1069 §8: the client never supplies an identity — no userId, no
+    // tenantId. The server resolves (user, tenant) from the session, so
+    // the request cannot be steered at another tenant's subscription.
+    expect(cancelCalls[0][1]?.body).toBe("{}");
+  });
+
+  it("confirming under immediate policy reports access ended now", async () => {
+    const fixture = subscriptionStatusFixture();
+    const fetchMock = mockFetch({
+      subscriptionStatus: fixture,
+      subscriptionCancel: {
+        userId: "u1",
+        code: "SUCCESS_SUBSCRIPTION_CANCELED_IMMEDIATE",
+        message: resolveOutcome("SUCCESS_SUBSCRIPTION_CANCELED_IMMEDIATE").entry!.businessMessage,
+        canceled: fixture.subscriptions,
+        remaining: [],
+        accessThroughMs: Date.now(),
+        downgradeTiming: "immediate",
+      },
+    });
+    await openSubscriptionsTab();
+    await act(async () => {
+      clickButton("Cancel subscription…");
+    });
+    await flush();
+    await act(async () => {
+      clickBodyButton("Yes, cancel subscriptions");
+    });
+    await flush();
+    expect(cancelPostCalls(fetchMock)).toBe(1);
+    const text = container.textContent || "";
+    expect(text).toContain("access ended now");
+    expect(text).not.toContain("access continues through");
+  });
+
+  it("reports when no active subscription was found to cancel", async () => {
+    const fixture = subscriptionStatusFixture();
+    // Issue #3523: a replay / nothing-active cancel now rejects 409 with the coded
+    // none-active outcome — the panel renders the coded message, never a hand-written one.
+    mockFetch({
+      subscriptionStatus: fixture,
+      subscriptionCancelError: {
+        status: 409,
+        body: {
+          code: "FAILURE_SUBSCRIPTION_CANCEL_NONE_ACTIVE",
+          message: resolveOutcome("FAILURE_SUBSCRIPTION_CANCEL_NONE_ACTIVE").entry!.businessMessage,
+          retryable: false,
+          canceled: [],
+          remaining: [],
+        },
+      },
+    });
+    await openSubscriptionsTab();
+    await act(async () => {
+      clickButton("Cancel subscription…");
+    });
+    await flush();
+    await act(async () => {
+      clickBodyButton("Yes, cancel subscriptions");
+    });
+    await flush();
+    expect(container.textContent || "").toContain(
+      codedMessage("FAILURE_SUBSCRIPTION_CANCEL_NONE_ACTIVE"),
+    );
   });
 });

@@ -3,12 +3,46 @@
  * GET /api/stock-copilot/status and POST /api/stock-copilot/control.
  *
  * The status read composes the signed-in user's own copilot loop
- * state (flag, pause control, market hours, positions, activity);
- * the control write is the panel's pause/resume — the only write
- * this surface makes. Shapes mirror src/agents/routes/stockCopilot.ts.
+ * state (flag, pause control, sessions, positions, activity); the
+ * control writes are the panel's pause/resume (#3422) and its
+ * enabled-sessions choice (#3398). Shapes mirror
+ * src/agents/routes/stockCopilot.ts.
  */
 
 import { apiFetch } from "./apiFetch";
+
+/** #3398: the copilot's trading sessions, in canonical order. */
+export type StockCopilotSessionId =
+  | "pre_market"
+  | "regular"
+  | "after_hours"
+  | "exto";
+
+export const COPILOT_SESSION_IDS: readonly StockCopilotSessionId[] = [
+  "pre_market",
+  "regular",
+  "after_hours",
+  "exto",
+];
+
+/** Display facts per session (label + ET hours, Mon–Fri unless noted). */
+export const COPILOT_SESSION_VIEWS: Record<
+  StockCopilotSessionId,
+  { label: string; hours: string }
+> = {
+  pre_market: { label: "Pre-market", hours: "4:00–9:30 AM ET" },
+  regular: { label: "Regular", hours: "9:30 AM–4:00 PM ET" },
+  after_hours: { label: "After-hours", hours: "4:00–8:00 PM ET" },
+  exto: { label: "Overnight (EXTO)", hours: "8:00 PM–4:00 AM ET, Sun–Thu nights" },
+};
+
+/** Business label for a session id; the raw id for unknown values. */
+export function copilotSessionLabel(session: string | null): string {
+  if (!session) return "No session";
+  return (
+    COPILOT_SESSION_VIEWS[session as StockCopilotSessionId]?.label ?? session
+  );
+}
 
 export interface StockCopilotOpenPosition {
   id: string;
@@ -19,6 +53,9 @@ export interface StockCopilotOpenPosition {
   stopPrice: number;
   targetPrice: number;
   brokerOrderRef: string;
+  /** #3398: the session + order type the entry was placed under. */
+  entrySession: string | null;
+  entryOrderType: string | null;
   openedAt: string;
 }
 
@@ -42,7 +79,9 @@ export interface StockCopilotActivityExit {
 export interface StockCopilotActivityRecord {
   id: string;
   cycleAt: string;
-  outcome: "traded" | "no_trade" | "refused" | "inactive";
+  outcome: "traded" | "no_trade" | "refused" | "inactive" | "outside_sessions" | "selection_changed";
+  /** #3398: the session the cycle fired in; null when none was open. */
+  session: string | null;
   entries: string[];
   exits: StockCopilotActivityExit[];
   detail: string | null;
@@ -51,7 +90,7 @@ export interface StockCopilotActivityRecord {
 export type StockCopilotStatusKind =
   | "off"
   | "paused"
-  | "outside_market_hours"
+  | "outside_enabled_sessions"
   | "live"
   | "mode_unresolved"
   | "inactive_broker";
@@ -60,6 +99,10 @@ export interface StockCopilotStatus {
   flagEnabled: boolean;
   paused: boolean;
   marketOpen: boolean;
+  /** #3398: the session open right now, or null when none is. */
+  currentSession: StockCopilotSessionId | null;
+  /** #3398: the sessions the user has enabled for the copilot. */
+  enabledSessions: StockCopilotSessionId[];
   status: StockCopilotStatusKind;
   /** #3451: the effective trading selection the next cycle runs
    *  under (from the panel menu's selection model). */
@@ -85,6 +128,7 @@ export async function fetchStockCopilotStatus(): Promise<StockCopilotStatus> {
   // Shape guard (issue #71): never hand the renderer a non-array.
   return {
     ...data,
+    enabledSessions: Array.isArray(data?.enabledSessions) ? data.enabledSessions : [],
     openPositions: Array.isArray(data?.openPositions) ? data.openPositions : [],
     closedPositions: Array.isArray(data?.closedPositions) ? data.closedPositions : [],
     activity: Array.isArray(data?.activity) ? data.activity : [],
@@ -99,6 +143,24 @@ export async function setStockCopilotPaused(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ paused }),
   });
+}
+
+/**
+ * #3398: persist the user's enabled-sessions choice (the control
+ * route writes it to the user's own settings store; the cycle
+ * resolves it at its next firing).
+ */
+export async function setStockCopilotSessions(
+  sessions: StockCopilotSessionId[],
+): Promise<{ ok: boolean; sessions: StockCopilotSessionId[] }> {
+  return send<{ ok: boolean; sessions: StockCopilotSessionId[] }>(
+    "/api/stock-copilot/control",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessions }),
+    },
+  );
 }
 
 const BROKER_DISPLAY_NAMES: Record<string, string> = {

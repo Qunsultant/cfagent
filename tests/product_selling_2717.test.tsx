@@ -511,4 +511,32 @@ describe("selling panel section (#2717)", () => {
     expect(after).toContain("Pro");
     expect(seen.map((s) => s.url)).toContain("/api/payments/agentic/commercial/identity");
   });
+
+  it("points a current subscription at Checkout to manage or cancel it (#2669)", async () => {
+    const activeSub = {
+      userId: "owner",
+      effectiveTier: "Subscribed",
+      current: billingRow({}),
+      subscriptions: [billingRow({})],
+    };
+    const { impl } = sellingFetch({ subscription: activeSub });
+    await renderPanel(impl);
+    await act(async () => {
+      buttonByText("Show selling options").click();
+    });
+    await flush();
+    const link = container.querySelector('a[href="?tab=checkout&checkoutTab=subscriptions"]');
+    expect(link).not.toBeNull();
+    expect(link?.textContent).toContain("Manage or cancel");
+  });
+
+  it("shows no manage-or-cancel link without a current subscription (#2669)", async () => {
+    const { impl } = sellingFetch();
+    await renderPanel(impl);
+    await act(async () => {
+      buttonByText("Show selling options").click();
+    });
+    await flush();
+    expect(container.querySelector('a[href="?tab=checkout&checkoutTab=subscriptions"]')).toBeNull();
+  });
 });

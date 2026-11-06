@@ -28,6 +28,11 @@ export interface Env {
   // exist so DLQ inspection tooling can bind the queues).
   SCREENER_EVENTS_DLQ?: Queue<unknown>;
   SCREENER_DELIVERY_DLQ?: Queue<unknown>;
+  // Issue #3534 (Pipeline J1): the job-pipeline pub/sub queue.
+  // Optional so code is safe before the binding propagates;
+  // absence is the named state job_pipeline_queue_not_configured
+  // (see src/messaging/createJobPipelineMessaging.ts).
+  JOB_PIPELINE_EVENTS?: Queue<unknown>;
   // Issue #329/#604: session + credential store — the SessionStore Durable
   // Object. Sessions, tokens and API keys live here, not in Workers KV
   // (legacy KV fallback removed in #604; the leftover KV bindings in
@@ -103,6 +108,21 @@ export interface Env {
   // BRAVE_SEARCH_API_KEY (+ optionally WEB_SEARCH_PROVIDER).
   WEB_SEARCH_PROVIDER?: string;
   BRAVE_SEARCH_API_KEY?: string;
+  // Issue #3489 (Uniform Copilot Standard S1) — externalized copilot
+  // capability overrides (AOP, same idiom as the #2419 vars below).
+  // Comma-separated "<scope>:<capability>" entries naming
+  // capabilities DISABLED by deployment config; scope is an agent
+  // class name, one of its wrangler binding names, or "*". Absence
+  // means the doctrine defaults apply (every capability the code
+  // implements is enabled). The list can only disable — it never
+  // enables a capability the code does not implement, and it never
+  // masks an unavailable capability's missing prerequisite.
+  // Resolved by src/actors/capabilityManifest.ts; the resolved
+  // record surfaces in the Agents view (registry). Rollback is
+  // unsetting the var and redeploying — no code change. The var is
+  // deliberately NOT in wrangler.jsonc: the fleet ships with
+  // nothing disabled.
+  AGENT_CAPABILITIES_DISABLED?: string;
   AI_SEARCH_ENDPOINT: string;
   APP_NAME: string;
   GITHUB_CLIENT_ID: string;
@@ -272,6 +292,21 @@ export interface Env {
   // Copilot cycle; absence uses the service's default universe
   // (src/services/stockCopilot.ts).
   STOCK_COPILOT_UNIVERSE?: string;
+  // #3398 — optional deployment-default trading sessions for the
+  // Stock Copilot (comma-separated session ids: pre_market, regular,
+  // after_hours, exto; "none" = no sessions). The per-login stored
+  // setting (stock_copilot:sessions) wins over this; absence of both
+  // means regular only (src/services/stockCopilotSessions.ts).
+  STOCK_COPILOT_SESSIONS?: string;
+  // #3541 — externalized Stock Copilot execution controls: mode override,
+  // broker neutrality, strict mode guard switch, and session bypass.
+  STOCK_COPILOT_MODE?: string;
+  STOCK_COPILOT_BROKER_NEUTRAL?: string;
+  STOCK_COPILOT_BROKER_ID?: string;
+  STOCK_COPILOT_STRICT_MODE_GUARD?: string;
+  STOCK_COPILOT_AUTO_ALIGN_MODE?: string;
+  STOCK_COPILOT_IGNORE_SESSIONS?: string;
+  STOCK_COPILOT_FORCE_ALL_SESSIONS?: string;
   // Comma-separated provider ids. Default when wiring is on: "github".
   // An id with no registered adapter is ignored, never a fallback.
   IAAA_ENABLED_PROVIDERS?: string;
@@ -325,6 +360,17 @@ export interface Env {
   AI_GATEWAY_ID?: string;
   AI_GATEWAY_CACHE_TTL?: string;
   AI_GATEWAY_RATE_LIMIT_RPM?: string;
+  // #3515 S1 — outgoing rate limiting (plain vars, owner-set, non-secret).
+  // ETRADE_OUTBOUND_RPM / ALPACA_OUTBOUND_RPM / LLM_OUTBOUND_RPM:
+  // outbound requests per minute per connector (optional; default 120
+  // each — see src/security/outboundRateLimiter.ts for the grounding).
+  // OUTBOUND_RATE_LIMIT_MAX_WAIT_MS: bounded wait for a token per
+  // acquire in ms (optional; default 10000; 0 = fail fast with a typed
+  // OutboundRateLimitError instead of waiting).
+  ETRADE_OUTBOUND_RPM?: string;
+  ALPACA_OUTBOUND_RPM?: string;
+  LLM_OUTBOUND_RPM?: string;
+  OUTBOUND_RATE_LIMIT_MAX_WAIT_MS?: string;
   // #1711 — payments flow switch (ONE switch, non-secret, owner-set).
   // PAYMENTS_FLOW_MODE: "hitl" | "immediate" (case-insensitive, padded
   // values accepted). Default when unset or blank: "hitl" — the #1690
@@ -805,6 +851,8 @@ export interface Env {
   PAYMENT_WORKFLOW?: Workflow;
   /** Cross-domain saga workflow binding (#2041 S1). */
   SAGA_WORKFLOW?: Workflow;
+  /** Job pipeline workflow binding (#3534 Pipeline J1). */
+  JOB_PIPELINE_WORKFLOW?: Workflow;
 }
 
 export interface TransactionRecord {
