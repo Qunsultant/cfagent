@@ -36,6 +36,13 @@ import { renderLandingPage } from "../../landing";
 import { resolvePollingConfigFromEnv } from "../../pollingConfig";
 import { SERVER_PALETTE } from "../../theme/serverPalette";
 
+// Slice 8 (#2902): ensureBreakerDurability imports (moved from src/server.ts).
+import { createBreakerStateStoreAdapter, ensureBreakerStateSchema } from "../../data/createBreakerStateStorePorts";
+import { configureDefaultBreakerDurability } from "../../breakers/createBreakerPorts";
+import { createBreakerTripSubscriber } from "../../breakers/breakerTripAlert";
+import { postSlackText, resourceSlackPost } from "../../agents/resourceGoals";
+import type { SlackDeliveryEnv } from "../../agents/social/delivery";
+
 /**
  * Slice 2 of Qunsultant/cfagent#2902 (Core dispatcher) — moves only.
  * The early Core branches of handleFetch, verbatim and in original order:
@@ -428,4 +435,46 @@ export async function handleCoreLateRoutes(request: Request, env: Env, url: URL,
     // Qunsultant/cfagent#1775 (Adapter S1): fallthrough serve via
     // the static-asset port, not the binding directly.
     return fetchStaticAsset(request, env);
+}
+
+/**
+ * Slice 8 of Qunsultant/cfagent#2902 (Queue / scheduled) — moves only.
+ * ensureBreakerDurability moves here from src/server.ts (contract
+ * section 2.5: Core prelude) so the entry's fetch handler and the
+ * queue/scheduled handlers in ./queue can both call it without a
+ * server.ts cycle. Verbatim below.
+ */
+/**
+ * Phase 5 Slice 2 (issue #2000) — one-time per-isolate breaker
+ * durability configuration. Idempotent: the first call wins;
+ * later calls are no-ops (bindings do not change within an
+ * isolate's lifetime, so a null store at first call stays
+ * null). The schema ensure runs fire-and-forget once: a load
+ * that races it degrades to in-memory (logged) and the next
+ * load succeeds — the durable adapter never fails a provider
+ * call over store state. Called at the top of fetch, scheduled,
+ * and queue entry points, before any breaker use.
+ */
+let breakerDurabilityConfigured = false;
+export function ensureBreakerDurability(env: Env): void {
+  if (breakerDurabilityConfigured) return;
+  breakerDurabilityConfigured = true;
+  const adapter = createBreakerStateStoreAdapter(env);
+  if (!adapter) return;
+  const subscriber = createBreakerTripSubscriber({
+    postText: (text) =>
+      postSlackText({ post: resourceSlackPost, env: env as unknown as SlackDeliveryEnv, text }),
+    claimTripAlert: (transitionId, atMs, token) => adapter.claimTripAlert(transitionId, atMs, token),
+  });
+  configureDefaultBreakerDurability({
+    store: adapter,
+    tripAlert: (envelope) => {
+      void subscriber.handleEnvelope(envelope);
+    },
+  });
+  void ensureBreakerStateSchema(adapter.db).catch((err: unknown) => {
+    console.warn(
+      `[breaker] schema ensure failed, loads degrade to in-memory until it succeeds: ${err instanceof Error ? err.message : String(err)}`
+    );
+  });
 }

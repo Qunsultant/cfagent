@@ -683,3 +683,51 @@ conflict on Qunsultant/cfagent#2902.
   whole — recorded in §3 and in the Slice 7 progress comment on
   #2902). Q3 stays open for Slice 9; Q4 stays open for Slice 8. No new
   open question is raised by Slice 7.
+
+## 15. Slice 8 note (2026-11-06, PR for #2902 Slice 8)
+
+- Baseline at Slice 8: `origin/main` `452ae996` (Slice 7 merged),
+  `src/server.ts` 1,404 lines / 67,183 bytes. Queue/scheduled
+  consumers move to `src/server/routes/queue.ts` (793 lines): the
+  module-level dedup sets (`screenerDeliverySeen`,
+  `screenerEventsSeen`), the shared `dispatchOptionsAnalysisQueueWork`
+  helper, and the default export's `scheduled`
+  (`handleScheduledEvent`: every-30-minutes tick, 03:00 UTC token
+  renewal, 04:00 UTC retention) and `queue` (`handleQueueBatch`:
+  screener-events-delivery, screener-events, options_analysis
+  fallthrough) handlers, verbatim. The default export keeps one-line
+  delegations for `scheduled`/`queue`; `email` stays its one-line
+  delegation. `src/server.ts` after Slice 8: 669 lines / 32,317 bytes.
+- `ensureBreakerDurability` moves to `src/server/routes/core.ts`
+  (contract §2.5 Core prelude) with its module state, so the entry's
+  fetch handler and the queue/scheduled handlers can both call it
+  without a server.ts cycle. No behaviour change: it is still called
+  at the top of fetch, scheduled, and queue.
+- The 148-descriptor pin is unchanged (queue/scheduled are not HTTP
+  routes; the scanner does not see them); the pin test's
+  delegation-order assertion is unchanged (nineteen delegations —
+  scheduled/queue are default-export members, not handleFetch
+  delegations). The pin test header records Slice 8 and the Q4 answer.
+- Pin updates in the same PR (repo pin rule): the source-presence pins
+  in `tests/kill_switch_verification.test.ts` (#756: weight-job
+  callers), `tests/schedule-3121-s0-parity.test.ts` (S0-P01 cron
+  dispatch, S0-P17 renewal / tick fan-out / provisioning gate), and
+  `tests/stage_boundary_messages_2869.test.ts` (#2869: server queue
+  routing) read the entry surface as `server.ts` +
+  `routes/queue.ts` instead of `server.ts` alone (assertions
+  unchanged, only the files scanned); the D-D census step 5e adds
+  the `["src/server/routes/queue.ts", "../../data/durableKv"]`
+  importer pair (the moved handlers' `DoStubLike` casts), so the
+  family total grows by exactly that one pair.
+- Q4 is answered (recorded here and in the Slice 8 start comment on
+  #2902): the consumer wiring moves as one module `routes/queue.ts`,
+  not split across messaging/trading route modules; ownership stays
+  with the domain ports the wiring already calls — screener-events +
+  screener-events-delivery → Messaging (QueuePort consumer, broadcast
+  core), options_analysis dispatch → Trading's schedule surface,
+  analysis-done / stage-boundary executors → owning ScreenerAgent DO,
+  scheduled tick cross-domain by design. No lane acknowledgement was
+  awaited (owner direction 2026-11-05 00:31 EST); the slice stops if
+  a lane objects on the PR.
+- Q3 stays open for Slice 9. No new open question is raised by
+  Slice 8.
