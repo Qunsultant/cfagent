@@ -40,7 +40,7 @@
   "src/client/options/LlmOptionsIdeasPanel.tsx": 8,
   "src/client/options/LlmStrategyEvalModal.tsx": 2,
   "src/client/options/OptionsResearchHost.tsx": 3,
-  "src/client/options/OptionsResearchPanel.tsx": 7,
+  "src/client/options/OptionsResearchPanel.tsx": 9,
   "src/client/options/RawContractsScreener.tsx": 40,
   "src/client/options/ResearchRunsPanel.tsx": 31,
   "src/client/options/RiskAnalysisModal.tsx": 37,

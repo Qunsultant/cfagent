@@ -47,10 +47,10 @@ function sidebarVisibleSubs(itemId: string): string[] {
 }
 
 describe("top-strip sub-menu data (issue #2996)", () => {
-  it("exposes the options-screener subs (10 visible after #2994)", () => {
+  it("exposes the options-screener subs (9 visible after #2994)", () => {
     // options-flows is feature-gated (options_flows flag) and filtered
     // out here, exactly as the sidebar filters it — see the parity
-    // test below. The raw config still lists 11 entries.
+    // test below. The raw config still lists 10 entries.
     expect(topStripSubItems("options-screener").map((s) => s.id)).toEqual([
       "strategy-scanner",
       "options-runs",
@@ -60,7 +60,6 @@ describe("top-strip sub-menu data (issue #2996)", () => {
       "custom-thesis",
       "nlq-options",
       "ai-strategy-ideas",
-      "scheduled-screening",
       "iv-history",
     ]);
   });

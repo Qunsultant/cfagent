@@ -16,8 +16,12 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Button, Checkbox, Table, TextInput, type TableColumn } from "../components/ui";
 import { csrfHeaders } from "../apiFetch";
+import { ScheduledOptionsRunForm } from "./ScheduledOptionsRunForm";
+import { AutonomousOptionsRuns } from "./AutonomousOptionsRuns";
+import { ScreeningActivityPanel } from "./ScreeningActivityPanel";
 
 interface ResearchRunsPanelProps {
+  activeEnv: "TEST" | "PROD";
   userLogin?: string;
   onSendPrompt?: (prompt: string) => void;
 }
@@ -222,7 +226,7 @@ function TradeCardDetail({ card }: { card: TradeCardView }) {
   );
 }
 
-export function ResearchRunsPanel({ userLogin, onSendPrompt }: ResearchRunsPanelProps) {
+export function ResearchRunsPanel({ activeEnv, userLogin, onSendPrompt }: ResearchRunsPanelProps) {
   const [config, setConfig] = useState<Record<string, unknown> | null>(null);
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
@@ -458,6 +462,16 @@ export function ResearchRunsPanel({ userLogin, onSendPrompt }: ResearchRunsPanel
           No research run yet. Run one manually, or wait for the scheduled after-close run (21:00 UTC weekdays).
         </div>
       )}
+
+      {/* Issue #3121 U-03 (lossless + additive): the retired OptionsHub
+          schedules mode's options-research content lives here now —
+          the one-shot run form (#2545), the autonomous runs record
+          (#223), and the screening activity log (#1162). The
+          schedules themselves live only in the consolidated home
+          (?tab=schedules). */}
+      <ScheduledOptionsRunForm activeEnv={activeEnv} userLogin={userLogin} />
+      <AutonomousOptionsRuns />
+      <ScreeningActivityPanel userLogin={userLogin} />
     </div>
   );
 }

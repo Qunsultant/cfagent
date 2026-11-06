@@ -380,9 +380,13 @@ describe("panel wiring pins (#2545)", () => {
     expect(hub).toContain("PDF report");
   });
 
-  it("Options Research hosts the one-shot scheduled-parameter form in its schedules mode", () => {
+  it("ResearchRunsPanel hosts the one-shot scheduled-parameter form (U-03 relocation #3121)", () => {
+    // U-03 (#3121): the form moved out of Options Research's retired
+    // schedules mode into ResearchRunsPanel at ?tab=options&view=options-runs.
+    const runs = read("src/client/options/ResearchRunsPanel.tsx");
+    expect(runs).toContain("ScheduledOptionsRunForm");
     const panel = read("src/client/options/OptionsResearchPanel.tsx");
-    expect(panel).toContain("ScheduledOptionsRunForm");
+    expect(panel).not.toContain("ScheduledOptionsRunForm");
   });
 
   it("the Schedules Trigger path is untouched: trigger routes still build via buildSchedulePayload", () => {

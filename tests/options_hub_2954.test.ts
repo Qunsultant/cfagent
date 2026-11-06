@@ -18,7 +18,7 @@ import { SUB_MENU_CONFIGS } from "../src/client/navConfig";
 import { deepLinkHrefForNavNode } from "../src/client/deepLinks";
 
 describe("options copy hub tabs (#2954)", () => {
-  it("has exactly the 10 tabs in order, one row, no options container tab", () => {
+  it("has exactly the 9 tabs in order, one row, no options container tab", () => {
     expect(OPTIONS_HUB_TABS).toEqual([
       "strategy-scanner",
       "options-runs",
@@ -27,7 +27,6 @@ describe("options copy hub tabs (#2954)", () => {
       "custom-thesis",
       "nlq-options",
       "ai-strategy-ideas",
-      "scheduled-screening",
       "iv-history",
       "options-flows",
     ]);
@@ -46,7 +45,6 @@ describe("options copy hub tabs (#2954)", () => {
       ["nlq", "nlq-options"],
       ["llm-ideas", "ai-strategy-ideas"],
       ["llm-evaluate", "strategy-discovery"],
-      ["schedules", "scheduled-screening"],
     ];
     for (const [surface, tab] of cases) {
       expect(optionsHubTabForResearch(surface)).toBe(tab);
@@ -91,7 +89,6 @@ describe("sub-menu mapping (#2954)", () => {
       "custom-thesis",
       "nlq-options",
       "ai-strategy-ideas",
-      "scheduled-screening",
       "iv-history",
       "options-flows",
       "discovery",

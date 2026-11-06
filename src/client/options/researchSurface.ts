@@ -37,7 +37,6 @@ export const OPTIONS_RESEARCH_SURFACES: readonly OptionsResearchSurface[] = [
   { surface: "compare", mode: "custom", sectionId: "options-research-custom-actions" },
   { surface: "llm-ideas", mode: "llm-ideas", sectionId: null },
   { surface: "llm-evaluate", mode: "discovery", sectionId: "options-research-strategy" },
-  { surface: "schedules", mode: "schedules", sectionId: null },
   { surface: "custom", mode: "custom", sectionId: null },
   { surface: "nlq", mode: "nlq", sectionId: null },
 ];
