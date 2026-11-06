@@ -31,9 +31,16 @@ describe("removed standalone agent classes (F5)", () => {
   });
 
   it("the live export surface in src/server.ts is unchanged", () => {
-    const server = fs.readFileSync(path.join(root, "src/server.ts"), "utf8");
+    // Slice 9 of #2902 moves the exports to src/server/exports.ts;
+    // server.ts re-exports them. The live export surface is both files.
+    const server =
+      fs.readFileSync(path.join(root, "src/server.ts"), "utf8") +
+      fs.readFileSync(path.join(root, "src/server/exports.ts"), "utf8");
     for (const name of [
-      'export { OrchestratorAgent } from "./agents/orchestrator"',
+      // Slice 9 of #2902: the export moved one directory deeper
+      // (src/server/exports.ts), so the relative path is now ../ —
+      // the module is the same; the pattern accepts either spelling.
+      /export \{ OrchestratorAgent \} from "\.{1,2}\/agents\/orchestrator"/,
       "OptionsScannerMCP",
       "BrowserAgent",
       "SlackAgent",
@@ -43,7 +50,7 @@ describe("removed standalone agent classes (F5)", () => {
       "ResearchAgent",
       "SessionStore",
     ]) {
-      expect(server).toContain(name);
+      expect(server).toMatch(name);
     }
   });
 

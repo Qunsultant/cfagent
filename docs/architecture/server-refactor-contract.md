@@ -731,3 +731,67 @@ conflict on Qunsultant/cfagent#2902.
   a lane objects on the PR.
 - Q3 stays open for Slice 9. No new open question is raised by
   Slice 8.
+
+## 16. Slice 9 note (2026-11-06, PR for #2902 Slice 9)
+
+- Baseline at Slice 9: `origin/main` `f76c9c6e` (Slice 8 merged),
+  `src/server.ts` 669 lines / 32,317 bytes. Cleanup, moves + pin
+  updates only, no behaviour change.
+- Q3 is answered (recorded here and in the Slice 9 start comment on
+  #2902): YES — wrangler requires every bound DO class to be exported
+  from the entrypoint itself, otherwise `wrangler deploy` fails
+  (in-code notes #2230, #2253, #197, #319; `wrangler.jsonc` binds
+  SEARCH_AGENT→OrchestratorAgent, PAYMENTS_AGENT, SCHEDULED_AGENT,
+  SCREENER_AGENT, RESEARCH_AGENT, SESSION_STORE, REPORT_ASSET_AGENT,
+  TRADING_AGENT, BROWSER_AGENT, SLACK_AGENT, TICKER_AGENT,
+  AI_SEARCH_AGENT, OptionsScannerMCP; the agents SDK also resolves
+  sub-agent roots through `ctx.exports` by constructor name, #1387).
+  The agent/DO/workflow exports move to the dedicated module
+  `src/server/exports.ts` (83 lines) with their per-class
+  justification comments, and `server.ts` re-exports them per line
+  from `"./server/exports"` (same names, same order, same live
+  bindings — runtime surface unchanged). `PREMIUM_GATEWAY_INSTANCE`
+  keeps its own re-export line after `handleFetch`, so the inventory
+  test's end marker still matches. The default export (`fetch`,
+  `email`, `scheduled`, `queue`) and the `handleFetch` router table
+  are untouched.
+- Dead imports pruned (contract §2.3: the dispatcher imports only
+  what it still needs): 309 bindings in 128 import declarations
+  removed, exactly the set `tsc --noUnusedLocals` flags (66 whole
+  declarations TS6192 + 2 unused type imports TS6196 + 71 unused
+  bindings TS6133), left over from Slices 2–8; re-verified after the
+  prune to zero unused-import errors in `server.ts` and
+  `exports.ts`. `src/server.ts` after Slice 9: **291 lines /
+  17,464 bytes**.
+- The size pin is set to the number this slice actually achieves
+  (contract §2): `tests/server_route_inventory_2902.test.ts` fails
+  above 291 lines. The <800 proposal was never a final number; a
+  pin is never loosened to fit.
+- §3 reconciliation 1:1: the 148-descriptor EXPECTED list is
+  unchanged and the delegation-order assertion is unchanged
+  (nineteen delegations); the thin-router pin stays green.
+- Pin updates in the same PR (repo pin rule): the export-surface
+  pins in `tests/agent-conformance.test.ts` (ResearchAgent,
+  TradingAgent, AiSearchAgent, SandboxAgent literals),
+  `tests/dead-agent-classes.test.ts` (OrchestratorAgent literal),
+  `tests/do_bindings_verification_2470.test.ts` (SandboxAgent
+  literal), `tests/orchestrator-actor-cutover.test.ts`
+  (OrchestratorAgent literal), and
+  `tests/trading_trade_workflow.test.ts` (TradingTradeWorkflow
+  literal) read the entry surface as `server.ts` +
+  `server/exports.ts` instead of `server.ts` alone (assertions
+  unchanged, only the files scanned); the relative-path patterns
+  accept `./` or `../` since the module moved one directory deeper
+  (the cutover test's retired-alias check stays on `server.ts`
+  alone — `exports.ts` quotes the alias in its #2523 comment); the
+  D-D census step 5e DROPS
+  the `["src/server.ts", "./data/durableKv"]` pair (the dead
+  `DoStubLike`/`DoNamespaceLike` import is pruned; the queue.ts
+  pair from Slice 8 stays). The `tests/orchestrator_root_namespace_1387.test.ts`
+  pin needs no change: `export { OrchestratorAgent }` is still its
+  own line in `server.ts`.
+- No new open question is raised by Slice 9. With Slices 2–9 merged,
+  #2902 is complete: `server.ts` holds only the default export, the
+  ordered router table, the entrypoint registrations, and the
+  re-exports — no domain business logic, no inline route body, no
+  per-domain import sprawl.

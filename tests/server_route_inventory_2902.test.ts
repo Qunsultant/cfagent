@@ -121,6 +121,22 @@
  *   handlers can all call it without a server.ts cycle; it is still
  *   called at the top of fetch, scheduled, and queue.
  *
+ * Slice 9 decisions recorded here:
+ * - Cleanup: the agent/DO/workflow exports move to
+ *   src/server/exports.ts (per-class justifications travel with
+ *   them); server.ts re-exports them per line from
+ *   "./server/exports" (same names, same order; Q3 answered YES —
+ *   wrangler requires the entrypoint exports, contract §8.3).
+ *   PREMIUM_GATEWAY_INSTANCE keeps its own re-export line after
+ *   handleFetch, so the handleFetch end marker above still matches.
+ *   The 148-descriptor EXPECTED list and the nineteen-delegation
+ *   order below are unchanged.
+ * - Dead imports pruned (contract §2.3): 309 bindings in 128 import
+ *   declarations removed per tsc --noUnusedLocals; server.ts 669
+ *   lines / 32,317 B → 291 lines / 17,464 B. The size pin below is
+ *   set to 291, the number this slice actually achieves; a pin is
+ *   never loosened to fit.
+ *
  * Slice 5 decisions recorded here:
  * - Trading & market live in src/server/routes/trading.ts as four
  *   handlers in dispatch order: handleTradingScheduleRoutes
@@ -607,9 +623,16 @@ describe("server route inventory pin (#2902)", () => {
     expect(serverSrc).toContain('from "./server/auth"');
   });
 
-  it("server.ts shrank versus the Slice 2 baseline (7,431 lines)", () => {
-    const lines = readFileSync("src/server.ts", "utf8").split("\n").length;
-    expect(lines).toBeLessThan(7431);
+  it("server.ts stays at the Slice 9 achieved size (291 lines, contract §2)", () => {
+    // Slice 9 (#2902 Cleanup) sets the pin the slice actually achieves:
+    // server.ts 669 lines → 291 lines (dead imports pruned per
+    // tsc --noUnusedLocals, exports moved to src/server/exports.ts).
+    // The <800 proposal was never a final number. A pin is never
+    // loosened to fit: if the dispatcher legitimately grows, update
+    // this number deliberately with the reason recorded here.
+    const src = readFileSync("src/server.ts", "utf8");
+    const lines = src.split("\n").length - (src.endsWith("\n") ? 1 : 0);
+    expect(lines).toBeLessThanOrEqual(291);
   });
 });
 

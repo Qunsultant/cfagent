@@ -170,9 +170,11 @@ describe("Agent conformance (issue #1738)", () => {
   });
 
   it("the Worker exports ResearchAgent as a Durable Object class", () => {
-    const server = read("src/server.ts");
+    // Slice 9 of #2902 moves the exports to src/server/exports.ts;
+    // server.ts re-exports them. The live export surface is both files.
+    const server = read("src/server.ts") + read("src/server/exports.ts");
     expect(server).toMatch(
-      /export\s*\{\s*ResearchAgent\s*\}\s*from\s*"\.\/agents\/research-agent"/
+      /export\s*\{\s*ResearchAgent\s*\}\s*from\s*"\.{1,2}\/agents\/research-agent"/
     );
   });
 
@@ -190,9 +192,11 @@ describe("Agent conformance (issue #1738)", () => {
   });
 
   it("the Worker exports TradingAgent as a Durable Object class (issue #291)", () => {
-    const server = read("src/server.ts");
+    // Slice 9 of #2902 moves the exports to src/server/exports.ts;
+    // server.ts re-exports them. The live export surface is both files.
+    const server = read("src/server.ts") + read("src/server/exports.ts");
     expect(server).toMatch(
-      /export\s*\{\s*TradingAgent\s*\}\s*from\s*"\.\/agents\/trading-agent"/
+      /export\s*\{\s*TradingAgent\s*\}\s*from\s*"\.{1,2}\/agents\/trading-agent"/
     );
   });
 
@@ -259,9 +263,11 @@ describe("Agent conformance (issue #1738)", () => {
   });
 
   it("the Worker exports AiSearchAgent as a Durable Object class (issue #2223)", () => {
-    const server = read("src/server.ts");
+    // Slice 9 of #2902 moves the exports to src/server/exports.ts;
+    // server.ts re-exports them. The live export surface is both files.
+    const server = read("src/server.ts") + read("src/server/exports.ts");
     expect(server).toMatch(
-      /export\s*\{\s*AiSearchAgent\s*\}\s*from\s*"\.\/agents\/aiSearchAgent"/
+      /export\s*\{\s*AiSearchAgent\s*\}\s*from\s*"\.{1,2}\/agents\/aiSearchAgent"/
     );
   });
 
@@ -325,9 +331,11 @@ describe("Agent conformance (issue #1738)", () => {
   });
 
   it("the Worker exports SandboxAgent as a Durable Object class (issue #2253)", () => {
-    const server = read("src/server.ts");
+    // Slice 9 of #2902 moves the exports to src/server/exports.ts;
+    // server.ts re-exports them. The live export surface is both files.
+    const server = read("src/server.ts") + read("src/server/exports.ts");
     expect(server).toMatch(
-      /export\s*\{\s*SandboxAgent\s*\}\s*from\s*"\.\/agents\/sandbox-agent"/
+      /export\s*\{\s*SandboxAgent\s*\}\s*from\s*"\.{1,2}\/agents\/sandbox-agent"/
     );
   });
 
