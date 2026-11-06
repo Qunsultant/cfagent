@@ -11,7 +11,7 @@
  * instantiates under Node; run() only touches this.env) through
  * payment → completed screen → journey gate, queues one refused
  * answer of each kind, and asserts the FORWARDED payloads — the
- * JSON bodies the SEARCH_AGENT stub received — carry the reason.
+ * JSON bodies the ORCHESTRATOR_AGENT stub received — carry the reason.
  *
  * The distinct `reason` field keeps its own mapping: a refused
  * row must not gain a spurious `reason` from the refusalReason.
@@ -76,7 +76,7 @@ function runRefusedGate(): Promise<{ outcomeStatus: string; bodies: CapturedBody
   };
   const env = {
     SERVICE_USER_LOGIN: "svclogin",
-    SEARCH_AGENT: {
+    ORCHESTRATOR_AGENT: {
       idFromName: () => "shared",
       get: () => auditStub,
     },
