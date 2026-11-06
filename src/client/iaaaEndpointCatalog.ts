@@ -38,7 +38,7 @@ export type ApiEndpointAuth =
   | "slack-signature"
   | "payment-gated"
   // #2041 G-METERING: internal service-identity channel (the
-  // SEARCH_AGENT stub), not a user session — the meter route is
+  // ORCHESTRATOR_AGENT stub), not a user session — the meter route is
   // reachable only that way, never publicly.
   | "service";
 
@@ -1019,7 +1019,7 @@ export const API_ENDPOINT_CATALOG: ApiEndpointEntry[] = [
     aliases: [],
     kind: "http",
     auth: "session",
-    authNote: "401 unauthenticated. Lists the session user's pending saga journey gates (issue #2041 S2) from the SEARCH_AGENT shared-instance audit stub; a decided gate drops out of the list, which IS the panel/chat dismissal. Unbound SEARCH_AGENT or a failed audit read answers 503.",
+    authNote: "401 unauthenticated. Lists the session user's pending saga journey gates (issue #2041 S2) from the ORCHESTRATOR_AGENT shared-instance audit stub; a decided gate drops out of the list, which IS the panel/chat dismissal. Unbound ORCHESTRATOR_AGENT or a failed audit read answers 503.",
     source: "src/server.ts branch: path === /api/saga/journey-gates",
   },
   {
@@ -1029,7 +1029,7 @@ export const API_ENDPOINT_CATALOG: ApiEndpointEntry[] = [
     aliases: [],
     kind: "http",
     auth: "session",
-    authNote: "401 unauthenticated; 400 for a missing sagaId, a decision other than approved/denied, or a surface other than panel/chat (panel default). 404 for a foreign or never-prompted gate; 409 superseded with the deciding surface for an already-decided gate; 503 when SEARCH_AGENT or SAGA_WORKFLOW is unbound or delivery fails. Delivers via the single deliverJourneyDecision helper; the flow re-validates owner and saga id.",
+    authNote: "401 unauthenticated; 400 for a missing sagaId, a decision other than approved/denied, or a surface other than panel/chat (panel default). 404 for a foreign or never-prompted gate; 409 superseded with the deciding surface for an already-decided gate; 503 when ORCHESTRATOR_AGENT or SAGA_WORKFLOW is unbound or delivery fails. Delivers via the single deliverJourneyDecision helper; the flow re-validates owner and saga id.",
     source: "src/server.ts branch: path === /api/saga/journey-decision",
   },
   {
@@ -1049,7 +1049,7 @@ export const API_ENDPOINT_CATALOG: ApiEndpointEntry[] = [
     aliases: [],
     kind: "http",
     auth: "session",
-    authNote: "401 unauthenticated; 404 when no saga audit rows exist for the session user AND no projection row exists for the session tenant (owner-scoped audit read; tenant-scoped projection fallback, issue #2777); 503 when SEARCH_AGENT is unbound or the audit read fails. Returns the panel's {jobs} shape (stage rows from saga audit rows, or the submitted stage from the projection row before audit rows exist, + live instance status/output, issue #2041 S4). Deliberately NOT flag-gated: a read path for one's own sagas survives a flag flip.",
+    authNote: "401 unauthenticated; 404 when no saga audit rows exist for the session user AND no projection row exists for the session tenant (owner-scoped audit read; tenant-scoped projection fallback, issue #2777); 503 when ORCHESTRATOR_AGENT is unbound or the audit read fails. Returns the panel's {jobs} shape (stage rows from saga audit rows, or the submitted stage from the projection row before audit rows exist, + live instance status/output, issue #2041 S4). Deliberately NOT flag-gated: a read path for one's own sagas survives a flag flip.",
     source: "src/server.ts branch: path matches /api/saga/:sagaId/status",
   },
   {
@@ -1059,8 +1059,8 @@ export const API_ENDPOINT_CATALOG: ApiEndpointEntry[] = [
     aliases: [],
     kind: "http",
     auth: "service",
-    authNote: "Internal SEARCH_AGENT stub channel only (service identity); not publicly routed — server.ts has no branch for this path. 400 for a missing/invalid receiptId, protocol other than stripe/x402, missing userLogin, non-positive priceUSD, or category other than saga; 500 on store failure (fail-closed, never served unmetered). Writes one usage_events row (category saga) via the DO usage port; a retried step re-inserts the same receipt-scoped id and reports duplicate, never a second row (issue #2041 G-METERING).",
-    source: "src/agents/routes/meter.ts via OrchestratorAgent dispatch (SEARCH_AGENT channel)",
+    authNote: "Internal ORCHESTRATOR_AGENT stub channel only (service identity); not publicly routed — server.ts has no branch for this path. 400 for a missing/invalid receiptId, protocol other than stripe/x402, missing userLogin, non-positive priceUSD, or category other than saga; 500 on store failure (fail-closed, never served unmetered). Writes one usage_events row (category saga) via the DO usage port; a retried step re-inserts the same receipt-scoped id and reports duplicate, never a second row (issue #2041 G-METERING).",
+    source: "src/agents/routes/meter.ts via OrchestratorAgent dispatch (ORCHESTRATOR_AGENT channel)",
   },
   {
     id: "reports-list",
@@ -1150,7 +1150,7 @@ export const API_ENDPOINT_CATALOG: ApiEndpointEntry[] = [
     aliases: ["/api/mcp"],
     kind: "http",
     auth: "session-or-apikey",
-    authNote: "Session or valid API key (Bearer); forwards to the caller's SEARCH_AGENT DO. GET, POST, and OPTIONS; the OPTIONS preflight is unauthenticated CORS.",
+    authNote: "Session or valid API key (Bearer); forwards to the caller's ORCHESTRATOR_AGENT DO. GET, POST, and OPTIONS; the OPTIONS preflight is unauthenticated CORS.",
     source: "src/server.ts branch: path === /mcp",
   },
   {
@@ -1277,7 +1277,7 @@ export const API_ENDPOINT_CATALOG: ApiEndpointEntry[] = [
     aliases: [],
     kind: "http",
     auth: "session",
-    authNote: "requireAuth; forwards to the caller's SEARCH_AGENT DO with the /api prefix stripped.",
+    authNote: "requireAuth; forwards to the caller's ORCHESTRATOR_AGENT DO with the /api prefix stripped.",
     source: "src/server.ts branch: path.startsWith /api/schedules",
   },
   {
@@ -1428,7 +1428,7 @@ export const API_ENDPOINT_CATALOG: ApiEndpointEntry[] = [
     aliases: [],
     kind: "catchall",
     auth: "session",
-    authNote: "Catch-all forwarder to the caller's SEARCH_AGENT DO — NOT an endpoint. Anything under /api not matched above lands here; immediate-sync sub-paths (clear, reset, memory, audit, chat) are served inline.",
+    authNote: "Catch-all forwarder to the caller's ORCHESTRATOR_AGENT DO — NOT an endpoint. Anything under /api not matched above lands here; immediate-sync sub-paths (clear, reset, memory, audit, chat) are served inline.",
     source: "src/server.ts branch: path.startsWith /api/",
     prefixes: ["/api/"],
   },
@@ -1662,7 +1662,7 @@ export interface CorrelationRow {
 }
 
 const MCP_TRANSPORT_SOURCE =
-  "src/server.ts /mcp branch forwards to the SEARCH_AGENT DO; src/client/mcpEndpointsData.ts MCP_TOOLS_CATALOG";
+  "src/server.ts /mcp branch forwards to the ORCHESTRATOR_AGENT DO; src/client/mcpEndpointsData.ts MCP_TOOLS_CATALOG";
 
 const MCP_UNMAPPED_NOTE =
   "No worker HTTP route in the API catalog is this tool's handler; the tool executes inside the agent behind the MCP transport.";
