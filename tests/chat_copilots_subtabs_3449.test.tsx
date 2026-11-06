@@ -117,14 +117,12 @@ describe("Copilot Registry & Extensibility (#3449)", () => {
     expect(isValidChatSubView("crypto")).toBe(false);
   });
 
-  it("declares custom surfaces in the registry (#3454): stock has one, general/options do not", () => {
-    // Deprecated-compatible reading: existing registrations keep their
-    // mode values; "custom" now declares a surface composed above the
-    // conversation instead of replacing it.
-    expect(findCopilot("stock")?.mode).toBe("custom");
+  it("declares uniform chat mode across all copilots (#3454, #3557)", () => {
+    // Issue #3557: all 3 core copilots share the uniform 'chat' mode
+    expect(findCopilot("stock")?.mode).toBe("chat");
     expect(findCopilot("general")?.mode).toBe("chat");
     expect(findCopilot("options")?.mode).toBe("chat");
-    expect(hasCustomSurface(findCopilot("stock")!)).toBe(true);
+    expect(hasCustomSurface(findCopilot("stock")!)).toBe(false);
     expect(hasCustomSurface(findCopilot("general")!)).toBe(false);
     expect(hasCustomSurface(findCopilot("options")!)).toBe(false);
   });
@@ -211,18 +209,20 @@ describe("AgentChatTabContent Multi-Copilot Sub-Tabs & View Isolation (#3449)", 
     expect(container!.querySelector(".messages-stream")).not.toBeNull();
   });
 
-  it("in stock view: renders side-by-side StockCopilotPanel AND conversation chatbox (#3541)", async () => {
+  it("in stock view: renders uniform copilot chat surface with banner, welcome hero, and bottom chatbox (#3541, #3557)", async () => {
     window.history.replaceState({}, "", "/?tab=chat&view=stock");
 
     await renderChat();
 
-    // StockCopilotPanel MUST be rendered in dashboard pane
+    // Uniform shell: fullChatArea rendered, no side-by-side dashboard pane
     const panel = container!.querySelector("[data-testid='stock-copilot-panel']");
-    expect(panel).not.toBeNull();
+    expect(panel).toBeNull();
     // Stock Copilot banner is present
     expect(container!.textContent).toContain("Stock Copilot Active:");
-    // Side-by-side workspace (#3541):
-    // Chat composer and stream ARE rendered alongside the dashboard pane
+    // Stock Copilot welcome hero and quick chips are present
+    expect(container!.textContent).toContain("Stock Copilot & Autonomous Loop");
+    expect(container!.textContent).toContain("Open Positions & Exits");
+    // Chat composer and stream ARE rendered uniformly with sticky bottom composer
     expect(container!.querySelector(".chat-input-bar")).not.toBeNull();
     expect(container!.querySelector(".messages-stream")).not.toBeNull();
   });
@@ -255,12 +255,13 @@ describe("AgentChatTabContent Multi-Copilot Sub-Tabs & View Isolation (#3449)", 
     expect(sent.metadata?.userLogin).toBe("test-user");
   });
 
-  it("supports URL alias ?copilot=stock with side-by-side workspace (#3541)", async () => {
+  it("supports URL alias ?copilot=stock with uniform copilot workspace (#3541, #3557)", async () => {
     window.history.replaceState({}, "", "/?tab=chat&copilot=stock");
 
     await renderChat();
 
-    expect(container!.querySelector("[data-testid='stock-copilot-panel']")).not.toBeNull();
+    expect(container!.querySelector("[data-testid='stock-copilot-panel']")).toBeNull();
+    expect(container!.textContent).toContain("Stock Copilot Active:");
     expect(container!.querySelector(".chat-input-bar")).not.toBeNull();
     expect(container!.querySelector(".messages-stream")).not.toBeNull();
   });
