@@ -28,7 +28,6 @@ interface SyncResult {
   lastFiredAt?: string;
   completed?: boolean;
   integrity?: { ok: boolean };
-  backfill?: { upserted: number; skippedRetention: number; rows: number; pages: number; complete: boolean };
   corpusIndex?: CorpusIndexOutcome;
   error?: string;
 }
@@ -312,9 +311,6 @@ export function CorpusTab({ onHealth }: SearchTabProps) {
             <div>
               <p>
                 Sync completed: integrity {syncResult.integrity?.ok ? "ok" : "has findings"}
-                {syncResult.backfill
-                  ? ` · backfill ${syncResult.backfill.upserted} upserted, ${syncResult.backfill.skippedRetention} skipped (retention), ${syncResult.backfill.rows} rows in ${syncResult.backfill.pages} page(s)`
-                  : ""}
               </p>
               {syncResult.corpusIndex &&
                 (syncResult.corpusIndex.skipped ? (
