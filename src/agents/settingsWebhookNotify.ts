@@ -77,7 +77,7 @@ export type SettingsWebhookDelivery =
 
 /** Resolve the orchestrator namespace from env, structurally. */
 function orchestratorNamespace(env: Partial<Env>): SettingsWebhookNamespace | null {
-  const ns = (env as { SEARCH_AGENT?: unknown }).SEARCH_AGENT;
+  const ns = (env as { ORCHESTRATOR_AGENT?: unknown }).ORCHESTRATOR_AGENT;
   if (
     !ns ||
     typeof (ns as SettingsWebhookNamespace).idFromName !== "function" ||
@@ -116,7 +116,7 @@ export async function deliverSettingsChangeWebhook(
   }
   const namespace = orchestratorNamespace(env);
   if (!namespace) {
-    return fail("the SEARCH_AGENT namespace is not bound in this deployment");
+    return fail("the ORCHESTRATOR_AGENT namespace is not bound in this deployment");
   }
   try {
     const rawBody = JSON.stringify({
