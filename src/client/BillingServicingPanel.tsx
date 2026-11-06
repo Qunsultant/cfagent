@@ -130,6 +130,11 @@ export function BillingServicingPanel() {
             <p>Subscription: {view.subscriptionStatus}</p>
             {view.periodEndISO && <p>Current period ends: {view.periodEndISO}</p>}
             <p>Subscriptions on file: {view.subscriptionCount}</p>
+            <p>
+              To cancel a subscription, go to{" "}
+              <a href="?tab=checkout&checkoutTab=subscriptions">Checkout → Subscriptions</a>. This view never
+              cancels — cancellation lives in Checkout (2.14).
+            </p>
           </Card>
           <Card>
             <p>Paid-call receipts ({view.receipts.length})</p>

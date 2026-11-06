@@ -46,6 +46,7 @@ import {
   Card,
   Checkbox,
   EmptyState,
+  Modal,
   Notice,
   PageShell,
   Select,
@@ -103,6 +104,16 @@ function errText(err: unknown): string {
   return "Something went wrong. Try again later.";
 }
 
+/**
+ * Issue #2669 (2.14): which rail manages a subscription row. A row
+ * carrying a provider subscription id is Billing-managed — the cancel
+ * route provider-cancels it first (Stripe stops charging). A row
+ * without one is a native repurchase row, canceled locally.
+ */
+function managedByLabel(row: SubscriptionView): string {
+  return row.providerSubscriptionId ? "Billing (Stripe)" : "Native";
+}
+
 function newJobId(): string {
   return `ui-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -158,6 +169,16 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
   const [buyDone, setBuyDone] = React.useState<string | null>(null);
   const [canceling, setCanceling] = React.useState(false);
   const [cancelDone, setCancelDone] = React.useState<string | null>(null);
+  // Issue #2669 (2.14): cancel is a confirmed action — the dialog lists
+  // what will be canceled and nothing is posted until confirmed.
+  const [cancelConfirmOpen, setCancelConfirmOpen] = React.useState(false);
+
+  // Rows the cancel route would cancel: active, uncanceled, unexpired.
+  // The server decides the same set from the session identity; this is
+  // display only — the client never selects rows to cancel.
+  const cancelableSubs = (subStatus?.subscriptions ?? []).filter(
+    (s) => s.status === "active" && !s.canceledAtMs && s.periodEndMs > Date.now(),
+  );
 
   const refreshSubscription = React.useCallback(async () => {
     try {
@@ -381,16 +402,28 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
   };
 
   const handleCancel = async () => {
+    setCancelConfirmOpen(false);
     setCanceling(true);
     setCancelDone(null);
     setBuyError(null);
     try {
+      // Issue #1069 §8: the request carries no identifiers — no userId,
+      // no tenantId. The server resolves (user, tenant) from the session
+      // identity, so the cancel cannot be steered at another tenant.
       const res = await subscriptionCancel();
-      setCancelDone(
-        res.accessThroughMs
-          ? `Canceled. Your access continues through ${formatPeriodEnd(res.accessThroughMs)}. No cash refund is issued.`
-          : "No active subscription was found to cancel."
-      );
+      if (res.canceled.length === 0) {
+        setCancelDone("No active subscription was found to cancel.");
+      } else if (res.downgradeTiming === "immediate") {
+        // Issue #2669: under the 2.7 immediate policy the server
+        // truncates access now — report that, never the period-end claim.
+        setCancelDone("Canceled immediately. Your access ended now. No cash refund is issued.");
+      } else {
+        setCancelDone(
+          res.accessThroughMs
+            ? `Canceled. Your access continues through ${formatPeriodEnd(res.accessThroughMs)}. No cash refund is issued.`
+            : "Canceled. No cash refund is issued.",
+        );
+      }
       await refreshSubscription();
     } catch (err) {
       setBuyError(errText(err));
@@ -577,8 +610,15 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
           {subsDeployed && (
             <>
               <Notice tone="info">
-                Subscriptions do not auto-renew: renewal is repurchase before expiry. Canceling keeps your access
-                through the end of the current period; canceling does not itself issue a cash refund.
+                Subscriptions do not auto-renew: renewal is repurchase before expiry. Canceling stops future
+                charges and does not itself issue a cash refund. Whether access runs to the end of the current
+                period depends on the store&apos;s billing policy — the result shown after you confirm states the
+                actual end date.
+              </Notice>
+              <Notice tone="info">
+                Provider-managed (Billing) subscriptions are purchased from the{" "}
+                <a href="?tab=products">Products catalog</a>. This panel buys native subscriptions — and cancels
+                subscriptions of either kind.
               </Notice>
               {subStatus && (
                 <p>
@@ -659,16 +699,61 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
                 </Notice>
               )}
               {buyDone && <Notice tone="success">{buyDone}</Notice>}
-              {subStatus?.current && (
-                <Button variant="danger" loading={canceling} onClick={handleCancel}>
-                  Cancel subscription (access continues to period end)
+              {cancelableSubs.length > 0 && (
+                <Button
+                  variant="danger"
+                  loading={canceling}
+                  onClick={() => {
+                    setCancelDone(null);
+                    setCancelConfirmOpen(true);
+                  }}
+                >
+                  Cancel subscription…
                 </Button>
               )}
+              <Modal
+                open={cancelConfirmOpen}
+                onClose={() => setCancelConfirmOpen(false)}
+                title="Cancel subscription"
+                footer={
+                  <>
+                    <Button onClick={() => setCancelConfirmOpen(false)} disabled={canceling}>
+                      Keep subscriptions
+                    </Button>
+                    <Button variant="danger" loading={canceling} onClick={handleCancel}>
+                      Yes, cancel subscriptions
+                    </Button>
+                  </>
+                }
+              >
+                <p>
+                  This cancels{" "}
+                  {cancelableSubs.length === 1
+                    ? "this subscription"
+                    : `all ${cancelableSubs.length} active subscriptions`}
+                  . Billing-managed rows are provider-canceled first (Stripe stops charging); native rows are
+                  canceled locally. Canceling does not itself issue a cash refund.
+                </p>
+                <Table
+                  columns={[
+                    { key: "plan", header: "Plan", render: (row: SubscriptionView) => row.planId },
+                    { key: "managedBy", header: "Managed by", render: (row: SubscriptionView) => managedByLabel(row) },
+                    { key: "end", header: "Period end", render: (row: SubscriptionView) => formatPeriodEnd(row.periodEndMs) },
+                  ]}
+                  rows={cancelableSubs}
+                  rowKey={(row) => row.id}
+                  caption="Subscriptions to cancel"
+                  empty={
+                    <EmptyState title="No active subscription" description="No active subscription was found to cancel." />
+                  }
+                />
+              </Modal>
               {cancelDone && <Notice tone="info">{cancelDone}</Notice>}
               {subStatus && subStatus.subscriptions.length > 0 && (
                 <Table
                   columns={[
                     { key: "plan", header: "Plan", render: (row) => row.planId },
+                    { key: "managedBy", header: "Managed by", render: (row) => managedByLabel(row) },
                     { key: "status", header: "Status", render: (row) => row.status },
                     { key: "end", header: "Period end", render: (row) => formatPeriodEnd(row.periodEndMs) },
                   ]}

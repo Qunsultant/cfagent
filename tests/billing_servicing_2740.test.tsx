@@ -208,4 +208,17 @@ describe("billing servicing panel", () => {
       restore();
     }
   });
+
+  it("points at Checkout for cancellation, with no cancel button (#2669)", async () => {
+    const restore = await renderPanel(billingFetch());
+    try {
+      const link = container!.querySelector('a[href="?tab=checkout&checkoutTab=subscriptions"]');
+      expect(link).not.toBeNull();
+      expect(link?.textContent).toContain("Checkout");
+      const buttons = Array.from(container!.querySelectorAll("button")).map((b) => b.textContent ?? "");
+      expect(buttons.join(" ")).not.toMatch(/Cancel subscription/i);
+    } finally {
+      restore();
+    }
+  });
 });

@@ -550,6 +550,14 @@ function SellingSection({
                 Current period ends: {new Date(selling.subscription.current.periodEndMs).toISOString()}
               </p>
             )}
+            {selling.subscription.current && (
+              <p style={detailMutedTextStyle}>
+                <a href="?tab=checkout&checkoutTab=subscriptions">
+                  Manage or cancel this subscription in Checkout → Subscriptions
+                </a>
+                . This panel never cancels — cancellation lives in Checkout (2.14).
+              </p>
+            )}
             <p style={detailMutedTextStyle}>{selling.subscription.creditsRedemption.reason}</p>
           </Card>
 
