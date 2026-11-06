@@ -1,0 +1,6 @@
+### Removed
+- AI Search REST path retired (#3342): the AiSearchAgent runner's third access path (AiSearchInstanceService over the public endpoint) is removed — path order is now namespace binding → MCP if configured → honest typed degraded outcome. `AI_SEARCH_ENDPOINT` is deleted from wrangler.jsonc vars and from the Env type in src/types.ts, so the instance's public endpoint carries no app traffic and can be disabled by the owner.
+- `AiSearchInstanceService` is retired by deprecation: it remains importable as a deprecated shim (superseded by the namespace binding path in src/agents/aiSearchPaths.ts) whose searchFinancialDocs answers the degraded contract (endpoint_not_configured) without fetching and whose searchRaw throws the retirement error. The #3322 deprecated alias `ETradeAISearchService` is removed with it.
+
+### Changed
+- Search Hub `POST /search/agent`, MAS `searchKnowledge`, the `ai_search_financial_docs` MCP command, and the legacy `knowledge_search` "search" contract now read the AI Search instance through the private `ai_search_namespaces` binding (directly, or through the AiSearchAgent Durable Object door) instead of the public endpoint, with the #2246 per-login report discipline applied on every surface: report-type results are served only to their owner's login — a discipline the REST-backed MCP surfaces previously lacked.

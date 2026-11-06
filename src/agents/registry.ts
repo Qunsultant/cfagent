@@ -267,12 +267,12 @@ export const MESH_AGENTS: MeshAgentEntry[] = [
     base: "PortThink",
     bindings: ["AI_SEARCH_AGENT"],
     sourceFile: "src/agents/aiSearchAgent.ts",
-    role: "AI Search agent (#2223): three-path search — Cloudflare AI Search namespace binding, the shared instance's MCP endpoint, REST fallback (src/agents/aiSearchPaths.ts).",
+    role: "AI Search agent (#2223): two-path search — Cloudflare AI Search namespace binding (primary), the shared instance's MCP endpoint (second) (src/agents/aiSearchPaths.ts). The former REST fallback was retired by #3342.",
     status: "degraded",
     statusReason:
-      "Degraded: the ai_search_namespaces binding is declared in wrangler.jsonc (namespace \"default\", owner-provided 2026-11-05 under #1169) and AI_SEARCH_INSTANCE is set, so the namespace path is the live primary; the record stays degraded until the #1169 seed+probe step verifies that path end-to-end, and the class degrades honestly to its REST path when the primary is unavailable; the MCP path is deliberately left unconfigured (owner decision: the instance's public endpoint is unauthenticated, so it is not used) (see notes).",
+      "Degraded: the ai_search_namespaces binding is declared in wrangler.jsonc (namespace \"default\", owner-provided 2026-11-05 under #1169) and AI_SEARCH_INSTANCE is set, so the namespace path is the live primary; the record stays degraded until the #1169 seed+probe step verifies that path end-to-end; the MCP path is deliberately left unconfigured (owner decision: the instance's public endpoint is unauthenticated, so it is not used) (see notes).",
     notes:
-      "Landed after the mesh survey base (migration v12). The ai_search_namespaces binding is declared in wrangler.jsonc (namespace \"default\", owner-provided 2026-11-05 under #1169; see src/types.ts) and AI_SEARCH_INSTANCE is set, so the namespace path is the live primary; REST is the configured fallback and the class degrades honestly to it when the primary is unavailable, while the MCP path is deliberately left unconfigured (owner decision: the instance's public endpoint is unauthenticated, so AI_SEARCH_MCP_ENDPOINT is unset in production). Chat reach (G1, verified in #2351): the chat turn already reaches this agent through the ai_search_agent_search command (#2250, src/mcps/openaimp/cloudflareAgentCommands.ts) — a typed stub over the AI_SEARCH_AGENT binding on the fixed service instance \"aisearch\", threading the turn's session login as callerLogin so report-type results are served only to their owner. No mesh-door command is added for it: a second door to the same agent would be a parallel implementation.",
+      "Landed after the mesh survey base (migration v12). The ai_search_namespaces binding is declared in wrangler.jsonc (namespace \"default\", owner-provided 2026-11-05 under #1169; see src/types.ts) and AI_SEARCH_INSTANCE is set, so the namespace path is the live primary, while the MCP path is deliberately left unconfigured (owner decision: the instance's public endpoint is unauthenticated, so AI_SEARCH_MCP_ENDPOINT is unset in production). The former REST fallback path (AiSearchInstanceService over AI_SEARCH_ENDPOINT) was retired by #3342: the service is a deprecated shim and the var is deleted from wrangler.jsonc and src/types.ts. Chat reach (G1, verified in #2351): the chat turn already reaches this agent through the ai_search_agent_search command (#2250, src/mcps/openaimp/cloudflareAgentCommands.ts) — a typed stub over the AI_SEARCH_AGENT binding on the fixed service instance \"aisearch\", threading the turn's session login as callerLogin so report-type results are served only to their owner. No mesh-door command is added for it: a second door to the same agent would be a parallel implementation.",
   },
   {
     className: "TickerAgent",
@@ -883,12 +883,12 @@ export const MESH_TOOL_FAMILIES: MeshToolFamilyEntry[] = [
   },
   {
     id: "ai-search-service",
-    name: "AI Search service (REST path)",
-    source: "src/services/aiSearch.ts (AiSearchInstanceService)",
+    name: "AI Search service (shared mapping; REST path retired)",
+    source: "src/services/aiSearch.ts (mapAiSearchChunks + the retired AiSearchInstanceService shim)",
     status: "live",
     commands: [],
     notes:
-      "Direct REST search over the AI Search instance (AI_SEARCH_ENDPOINT, declared in wrangler.jsonc vars); backs the ai_search_financial_docs MCP command and AiSearchAgent's REST path. Failure honesty: the built-in fallback corpus (FINANCIAL_KNOWLEDGE_BASE) that survey §8 row 12 recorded as a fabricated-fallback caveat was REMOVED by #1169 S3 — it is superseded by the service's degraded contract: when the endpoint is unconfigured or the instance does not serve (unreachable, non-OK status, or an unusable response body), searchFinancialDocs returns zero results with an in-band degraded reason (endpoint_not_configured / upstream_unreachable / upstream_http_error / upstream_invalid_response), and no served result can carry provider \"semantic_cache\". AiSearchAgent's runner surfaces a degraded REST answer as its degraded_fallback outcome; a served empty answer (chunks: []) stays ok with zero items and no degraded field, so an empty index is never confused with an unavailable one.",
+      "The module's live surface is the shared chunk mapping (mapAiSearchChunks) and the AISearchQueryResponse / degraded-reason contract every serving path uses. Its former direct REST search over the AI Search instance (AI_SEARCH_ENDPOINT) was retired by #3342: every consumer (the ai_search_financial_docs MCP command, the Search Hub routes, MAS searchKnowledge, AiSearchAgent's runner) migrated onto the ai_search_namespaces binding, the var was deleted from wrangler.jsonc and src/types.ts, and AiSearchInstanceService remains only as a deprecated shim answering the degraded contract. Failure honesty: the built-in fallback corpus (FINANCIAL_KNOWLEDGE_BASE) that survey §8 row 12 recorded as a fabricated-fallback caveat was REMOVED by #1169 S3 — it is superseded by the service's degraded contract: when the instance does not serve, consumers return zero results with an in-band degraded reason (endpoint_not_configured / upstream_unreachable), and no served result can carry provider \"semantic_cache\". A served empty answer (chunks: []) stays ok with zero items and no degraded field, so an empty index is never confused with an unavailable one.",
   },
   {
     id: "payments-tools",
@@ -943,7 +943,7 @@ export const MESH_TOOL_FAMILIES: MeshToolFamilyEntry[] = [
     status: "degraded",
     commands: [],
     notes:
-      "Cloudflare AI Search through the ai_search_namespaces binding: the binding is declared in wrangler.jsonc (binding \"AI_SEARCH\", namespace \"default\", remote true; owner-provided 2026-11-05) and AI_SEARCH_INSTANCE is set, so the namespace path is the live primary, with REST as the configured fallback; the MCP path is deliberately left unconfigured (owner decision: the instance's public endpoint is unauthenticated, so AI_SEARCH_MCP_ENDPOINT is unset in production). The owner enablement recorded in src/types.ts landed under #1169, after being owner-gated in this programme; the registry slices record it and do not make it (S14, #2417).",
+      "Cloudflare AI Search through the ai_search_namespaces binding: the binding is declared in wrangler.jsonc (binding \"AI_SEARCH\", namespace \"default\", remote true; owner-provided 2026-11-05) and AI_SEARCH_INSTANCE is set, so the namespace path is the live primary; the MCP path is deliberately left unconfigured (owner decision: the instance's public endpoint is unauthenticated, so AI_SEARCH_MCP_ENDPOINT is unset in production), and the former REST fallback was retired by #3342. The owner enablement recorded in src/types.ts landed under #1169, after being owner-gated in this programme; the registry slices record it and do not make it (S14, #2417).",
   },
   {
     id: "agent-skills",
@@ -1678,7 +1678,7 @@ export const MESH_CAPABILITY_DOORS: MeshCapabilityDoorEntry[] = [
     status: "not-exposed",
     operations: [],
     reason:
-      "Search HTTP routes drive the MAS/service paths (POST /search/mas, AiSearchInstanceService); the class is reached via the catalog command (chat + MCP) and A2A.",
+      "Search HTTP routes drive the MAS path (POST /search/mas) and, since #3342, this class itself (POST /search/agent and /search/ai-agent dispatch through the AI_SEARCH_AGENT binding); the class is also reached via the catalog command (chat + MCP) and A2A.",
   },
   {
     className: "AiSearchAgent",
@@ -1694,7 +1694,7 @@ export const MESH_CAPABILITY_DOORS: MeshCapabilityDoorEntry[] = [
     status: "exposed",
     operations: ["aisearch.search"],
     gate: A2A_EDGE_GATE,
-    notes: "Three-path search (namespace binding / instance MCP / REST) with honest degradation labels (src/agents/aiSearchPaths.ts).",
+    notes: "Two-path search (namespace binding / instance MCP) with honest degradation labels (src/agents/aiSearchPaths.ts); the REST path was retired by #3342.",
   },
   {
     className: "AiSearchAgent",
@@ -2005,7 +2005,7 @@ export const MESH_NON_RENAMES: MeshNonRenameEntry[] = [
   {
     names: ["SearchAgent", "SearchHub", "SearchAgentTab"],
     decision:
-      "Recorded non-rename: SearchHub and SearchAgentTab (src/client/search/) are UI names for the /search/agent REST surface — a different thing from the orchestrator Durable Object class (OrchestratorAgent since the #2523 rename; SearchAgent before it). Neither side is renamed for the other.",
+      "Recorded non-rename: SearchHub and SearchAgentTab (src/client/search/) are UI names for the /search/agent HTTP surface — a different thing from the orchestrator Durable Object class (OrchestratorAgent since the #2523 rename; SearchAgent before it). Neither side is renamed for the other.",
     source: "mesh survey §5",
   },
 ];

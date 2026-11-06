@@ -10,24 +10,26 @@
  *
  * Design (one paragraph): this agent gives the fleet one agent door
  * onto the SAME Cloudflare AI Search instance the SearchHub
- * knowledge surface serves, and it reaches that instance three
- * ways, in the priority order set by the user directive of
- * 2026-10-29 — tool first, MCP second, API last-resort. PRIMARY is
- * the agent-tool door: the ai_search_namespaces binding's search,
- * which powers BOTH the turn tool below (getTools) and the direct
- * search() method, so a model turn and a programmatic caller get
- * the same answer from the same door. SECOND is the instance's
- * public MCP endpoint, consumed through the repo's RemoteMcpClient
- * exactly as any MCP client would. LAST RESORT is the standalone
- * REST API, via AiSearchInstanceService reused exactly as-is. Every
- * answer is labelled with the path that served it, and degradation
- * is honest: an unconfigured agent and a degraded REST answer are
- * reported as degraded, never dressed up as live results.
- * Result and config conventions are aligned with the SearchHub
- * knowledge surface (shared AI_SEARCH_ENDPOINT instance config; S2
- * result fields and bucket-key provenance via the shared mapping).
+ * knowledge surface serves, and it reaches that instance two ways,
+ * in the priority order set by the user directive of 2026-10-29 —
+ * tool first, MCP second. PRIMARY is the agent-tool door: the
+ * ai_search_namespaces binding's search, which powers BOTH the
+ * turn tool below (getTools) and the direct search() method, so a
+ * model turn and a programmatic caller get the same answer from
+ * the same door. SECOND is the instance's public MCP endpoint,
+ * consumed through the repo's RemoteMcpClient exactly as any MCP
+ * client would. A third door — the standalone REST API over the
+ * public endpoint — existed as last resort until issue #3342
+ * retired it (the endpoint is unauthenticated by design; every
+ * consumer migrated onto the binding and AI_SEARCH_ENDPOINT was
+ * deleted). Every answer is labelled with the path that served it,
+ * and degradation is honest: an unconfigured agent is reported as
+ * degraded, never dressed up as live results. Result and config
+ * conventions are aligned with the SearchHub knowledge surface
+ * (shared AI_SEARCH_INSTANCE instance config; S2 result fields and
+ * bucket-key provenance via the shared mapping).
  *
- * The behavior lives in src/agents/aiSearchPaths.ts (the three-path
+ * The behavior lives in src/agents/aiSearchPaths.ts (the two-path
  * runner) and src/agents/aiSearchDispatch.ts (the A2A door); this
  * class is the thin PortThink shell over them, mirroring how slice 1
  * split OrchestratorAgent from its dispatch module.
@@ -108,7 +110,7 @@ export class AiSearchAgent extends PortThink {
     return {
       search: tool({
         description:
-          "Search the Cloudflare AI Search knowledge instance (namespace binding first, the instance MCP endpoint second, the REST API as last resort). Returns hub-consistent results labelled with the serving path; a degraded result means no live index answer was served.",
+          "Search the Cloudflare AI Search knowledge instance (namespace binding first, the instance MCP endpoint second). Returns hub-consistent results labelled with the serving path; a degraded result means no live index answer was served.",
         inputSchema: z.object({
           query: z.string(),
           limit: z.number().int().positive().optional(),
@@ -123,10 +125,10 @@ export class AiSearchAgent extends PortThink {
 
   /**
    * Door 1 (direct/RPC): search the AI Search instance through the
-   * three-path runner (namespace -> MCP -> REST). The same runner
-   * backs the turn tool above and the A2A door below, so every door
-   * returns the same typed, path-labelled, honestly-degraded
-   * result. Never throws.
+   * two-path runner (namespace -> MCP). The same runner backs the
+   * turn tool above and the A2A door below, so every door returns
+   * the same typed, path-labelled, honestly-degraded result.
+   * Never throws.
    */
   async search(
     query: string,

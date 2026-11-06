@@ -78,7 +78,7 @@ export const AGENT_CARDS: AgentCard[] = [
   {
     name: "aisearch",
     description:
-      "Searches the Cloudflare AI Search knowledge instance three ways, in priority order: the namespace binding (agent tool, primary), the instance's public MCP endpoint (second), and the REST API via AiSearchInstanceService (last resort). Answers are labelled with the serving path and degrade honestly — an unconfigured path is skipped and fallback-labelled content is never served as live results.",
+      "Searches the Cloudflare AI Search knowledge instance two ways, in priority order: the namespace binding (agent tool, primary) and the instance's public MCP endpoint (second). Answers are labelled with the serving path and degrade honestly — an unconfigured path is skipped and fallback-labelled content is never served as live results.",
     version: "1.0.0",
     endpoint: "/a2a/aisearch",
     cardPath: "/a2a/aisearch/agent-card.json",
