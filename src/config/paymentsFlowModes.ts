@@ -68,6 +68,14 @@
  * silent. String semantics are byte-identical to #1711.
  */
 
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "config/paymentsFlowModes",
+});
+
 export type PaymentsFlowMode = "hitl" | "immediate";
 
 /** One switch value, as carried at session/user level. */
@@ -134,9 +142,12 @@ export function resolvePaymentsFlowModeScoped(
     const normalized = normalizeFlowValue(value);
     if (normalized === null) continue;
     if (normalized === "invalid") {
-      console.warn(
-        `[${paymentsFlowConfigErrorEvent()}] ${PAYMENTS_FLOW_MODE_SWITCH} unrecognized value at ${level}; failing closed to "hitl"`
-      );
+      structuredLog.warn(paymentsFlowConfigErrorEvent(), {
+        message: `[${paymentsFlowConfigErrorEvent()}] ${PAYMENTS_FLOW_MODE_SWITCH} unrecognized value at ${level}; failing closed to "hitl"`,
+        switch: PAYMENTS_FLOW_MODE_SWITCH,
+        level,
+        raw: typeof value === "string" ? value : undefined,
+      });
       return {
         mode: "hitl",
         invalid: true,

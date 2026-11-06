@@ -21,6 +21,13 @@
  */
 
 import catalog from "./outcomeCatalog.json";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "outcomes/outcomeAspects",
+});
 
 export interface OutcomeCatalogEntry {
   code: string;
@@ -182,27 +189,31 @@ export function withLogging<TArgs extends unknown[], TReturn>(
   return async (...args: TArgs): Promise<TReturn> => {
     const start = Date.now();
     const traceId = context.traceId || `ax_${Date.now().toString(36)}`;
-    console.log(JSON.stringify({
-      traceId, component: context.component, event: "aspect_enter",
-      operation: context.operation, timestamp: new Date().toISOString(),
-    }));
+    structuredLog.info(
+      "aspect_enter",
+      { operation: context.operation },
+      { component: context.component, traceId },
+    );
     try {
       const result = await fn(...args);
-      console.log(JSON.stringify({
-        traceId, component: context.component, event: "aspect_exit",
-        operation: context.operation, durationMs: Date.now() - start,
-        timestamp: new Date().toISOString(),
-      }));
+      structuredLog.info(
+        "aspect_exit",
+        { operation: context.operation, durationMs: Date.now() - start },
+        { component: context.component, traceId },
+      );
       return result;
     } catch (err) {
       // Log technical detail, rethrow for the exception aspect to handle.
-      console.error(JSON.stringify({
-        traceId, component: context.component, event: "aspect_exception",
-        operation: context.operation, durationMs: Date.now() - start,
-        error: err instanceof Error ? err.message : String(err),
-        stack: err instanceof Error ? err.stack?.slice(0, 1000) : undefined,
-        timestamp: new Date().toISOString(),
-      }));
+      structuredLog.error(
+        "aspect_exception",
+        {
+          operation: context.operation,
+          durationMs: Date.now() - start,
+          error: err instanceof Error ? err.message : String(err),
+          stack: err instanceof Error ? err.stack?.slice(0, 1000) : undefined,
+        },
+        { component: context.component, traceId },
+      );
       throw err;
     }
   };
@@ -229,14 +240,17 @@ export function withExceptionHandling<TArgs extends unknown[], TReturn>(
       const resolved = resolveOutcome(code);
 
       // Log technical detail (never shown to user).
-      console.error(JSON.stringify({
-        component: context.component, event: "business_error",
-        operation: context.operation, code,
-        technicalDetail: resolved.entry?.technicalDetail,
-        originalError: err instanceof Error ? err.message : String(err),
-        stack: err instanceof Error ? err.stack?.slice(0, 1000) : undefined,
-        timestamp: new Date().toISOString(),
-      }));
+      structuredLog.error(
+        "business_error",
+        {
+          operation: context.operation,
+          code,
+          technicalDetail: resolved.entry?.technicalDetail,
+          originalError: err instanceof Error ? err.message : String(err),
+          stack: err instanceof Error ? err.stack?.slice(0, 1000) : undefined,
+        },
+        { component: context.component },
+      );
 
       throw new BusinessError(code, { operation: context.operation }, err);
     }
@@ -257,10 +271,11 @@ export function withSecurity<TArgs extends unknown[], TReturn>(
       const failedCode = check(args);
       if (failedCode) {
         const resolved = resolveOutcome(failedCode);
-        console.warn(JSON.stringify({
-          component: context.component, event: "security_check_failed",
-          code: resolved.code, timestamp: new Date().toISOString(),
-        }));
+        structuredLog.warn(
+          "security_check_failed",
+          { code: resolved.code },
+          { component: context.component },
+        );
         throw new BusinessError(failedCode);
       }
     }

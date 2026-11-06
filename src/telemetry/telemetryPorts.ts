@@ -70,6 +70,13 @@
  * makes no availability promise to callers.
  */
 import type { MessageEnvelope } from "../messaging/messagingPorts";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "telemetry/telemetryPorts",
+});
 
 /** Predicted/realized thesis direction (dashboard vocabulary). */
 export type ThesisDirection = "up" | "down" | "flat";
@@ -330,15 +337,17 @@ export class TelemetryCalibrationEngine {
       const result = this.emit(envelope);
       if (result && typeof (result as Promise<void>).catch === "function") {
         (result as Promise<void>).catch((err) => {
-          console.warn(
-            `[telemetry] stream emission failed (ignored): ${err instanceof Error ? err.message : String(err)}`,
-          );
+          structuredLog.warn("telemetry.stream_emission_failed", {
+            message: `[telemetry] stream emission failed (ignored): ${err instanceof Error ? err.message : String(err)}`,
+            error: err instanceof Error ? err.message : String(err),
+          });
         });
       }
     } catch (err) {
-      console.warn(
-        `[telemetry] stream emission failed (ignored): ${err instanceof Error ? err.message : String(err)}`,
-      );
+      structuredLog.warn("telemetry.stream_emission_failed", {
+        message: `[telemetry] stream emission failed (ignored): ${err instanceof Error ? err.message : String(err)}`,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 

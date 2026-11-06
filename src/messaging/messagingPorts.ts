@@ -134,6 +134,14 @@
  * stored first and referenced instead.
  */
 
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "messaging/messagingPorts",
+});
+
 /** Pipeline stage identity (owner stage-architecture spec). */
 export type StageName =
   | "feed"
@@ -477,9 +485,11 @@ export async function dispatchEnvelope(
 ): Promise<ConsumeOutcome> {
   const handler = handlers.get(subscriber)?.get(envelope.type);
   if (!handler) {
-    console.warn(
-      `[messaging] No handler for subscriber "${subscriber}" and event type "${envelope.type}" — dropping.`
-    );
+    structuredLog.warn("messaging.no_handler_drop", {
+      message: `[messaging] No handler for subscriber "${subscriber}" and event type "${envelope.type}" — dropping.`,
+      subscriber,
+      eventType: envelope.type,
+    });
     return "drop";
   }
   const key = `${subscriber}:${envelope.id}`;

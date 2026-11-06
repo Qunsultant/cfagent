@@ -46,6 +46,13 @@ import {
   type DoNamespaceLike,
 } from "../data/durableKv";
 import type { Env } from "../types";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "payments/draftOwners",
+});
 
 /** SessionStore bucket shared with the x402 replay guard. */
 export const DRAFT_OWNER_NAMESPACE = "payments";
@@ -107,10 +114,12 @@ export async function registerDraftOwner(
         value: ownerSessionId,
       });
   if (outcome === "unavailable") {
-    console.error(
-      `[payments] draft owner registration unavailable for ${draftId}: SessionStore unreachable; ` +
-        "a gateway webhook for this draft will be unable to route and will fail loud as unmatched"
-    );
+    structuredLog.error("payments.draft_owner_registration_unavailable", {
+      message:
+        `[payments] draft owner registration unavailable for ${draftId}: SessionStore unreachable; ` +
+        "a gateway webhook for this draft will be unable to route and will fail loud as unmatched",
+      draftId,
+    });
     return "unavailable";
   }
   return outcome === "consumed" ? "registered" : "duplicate";

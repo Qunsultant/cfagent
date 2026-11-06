@@ -116,6 +116,14 @@
  * production caller yet.
  */
 
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "config/agenticPaymentsModes",
+});
+
 export type PaymentsSurfaceMode = "mcp" | "rest";
 
 /** One switch's value per surface key, as carried at session/user level. */
@@ -185,9 +193,12 @@ function resolveSwitch(
     const normalized = normalizeSwitchValue(value);
     if (normalized === null) continue;
     if (normalized === "invalid") {
-      console.warn(
-        `[${paymentsConfigErrorEvent()}] ${switchName} unrecognized value at ${level}; failing closed to surface legacy "${legacy}"`,
-      );
+      structuredLog.warn(paymentsConfigErrorEvent(), {
+        message: `[${paymentsConfigErrorEvent()}] ${switchName} unrecognized value at ${level}; failing closed to surface legacy "${legacy}"`,
+        switch: switchName,
+        level,
+        raw: typeof value === "string" ? value : undefined,
+      });
       return {
         mode: legacy,
         invalid: true,

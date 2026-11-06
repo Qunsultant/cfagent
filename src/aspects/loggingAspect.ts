@@ -10,6 +10,13 @@
 import { ETradeError, ETradeErrorCode, AgentError, AgentErrorCode, resolveErrorAspect } from "./errorCodes";
 import { BusinessError } from "../outcomes/outcomeAspects";
 import { isETradeHost } from "../config/environment";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "aspects/loggingAspect",
+});
 
 export interface AspectContext {
   operationName: string;
@@ -82,7 +89,11 @@ export async function withAspects<T>(
     const durationMs = Math.round(performance.now() - start);
 
     // 2. Logging Aspect (Success)
-    console.info(`[Aspect][${operationName}] Completed in ${durationMs}ms`);
+    structuredLog.info("aspect.completed", {
+      message: `[Aspect][${operationName}] Completed in ${durationMs}ms`,
+      operationName,
+      durationMs,
+    });
 
     // 3. Audit Aspect
     if (audit) {
@@ -103,7 +114,13 @@ export async function withAspects<T>(
     // alone cannot identify the outcome. Genuinely unhandled errors
     // still take the INTERNAL_ERROR path below.
     if (err instanceof ETradeError || err instanceof BusinessError) {
-      console.warn(`[Aspect][${operationName}] Handled error [${err.code}]: ${err.message} (${durationMs}ms)`);
+      structuredLog.warn("aspect.handled_error", {
+        message: `[Aspect][${operationName}] Handled error [${err.code}]: ${err.message} (${durationMs}ms)`,
+        operationName,
+        code: err.code,
+        error: err.message,
+        durationMs,
+      });
       if (audit) {
         audit(`etrade.${operationName}.failed`, "trading", {
           code: err.code,
@@ -115,7 +132,12 @@ export async function withAspects<T>(
     }
 
     const rawMessage = err instanceof Error ? err.message : String(err);
-    console.error(`[Aspect][${operationName}] Unhandled exception (${durationMs}ms):`, rawMessage);
+    structuredLog.error("aspect.unhandled_exception", {
+      message: `[Aspect][${operationName}] Unhandled exception (${durationMs}ms): ${rawMessage}`,
+      operationName,
+      error: rawMessage,
+      durationMs,
+    });
 
     if (audit) {
       audit(`etrade.${operationName}.error`, "trading", {
@@ -151,11 +173,29 @@ export function logAspectEvent(event: AspectEvent): void {
   const details = event.message || event.error || "";
 
   if (level === "error") {
-    console.error(`${logPrefix}${durationTag} ERROR:`, details, event.metadata || "");
+    structuredLog.error("aspect.event", {
+      message: `${logPrefix}${durationTag} ERROR: ${details}`,
+      aspect: event.aspect,
+      operationName: event.operationName,
+      details,
+      metadata: event.metadata ?? {},
+    });
   } else if (level === "warn") {
-    console.warn(`${logPrefix}${durationTag} WARN:`, details, event.metadata || "");
+    structuredLog.warn("aspect.event", {
+      message: `${logPrefix}${durationTag} WARN: ${details}`,
+      aspect: event.aspect,
+      operationName: event.operationName,
+      details,
+      metadata: event.metadata ?? {},
+    });
   } else {
-    console.info(`${logPrefix}${durationTag}`, details, event.metadata || "");
+    structuredLog.info("aspect.event", {
+      message: `${logPrefix}${durationTag} ${details}`,
+      aspect: event.aspect,
+      operationName: event.operationName,
+      details,
+      metadata: event.metadata ?? {},
+    });
   }
 
   if (event.audit) {

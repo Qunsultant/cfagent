@@ -623,7 +623,7 @@ describe("server route inventory pin (#2902)", () => {
     expect(serverSrc).toContain('from "./server/auth"');
   });
 
-  it("server.ts stays at the Slice 9 achieved size (292 lines, contract §2)", () => {
+  it("server.ts stays at the Slice 9 achieved size (304 lines, contract §2)", () => {
     // Slice 9 (#2902 Cleanup) sets the pin the slice actually achieves:
     // server.ts 669 lines → 291 lines (dead imports pruned per
     // tsc --noUnusedLocals, exports moved to src/server/exports.ts).
@@ -633,9 +633,15 @@ describe("server route inventory pin (#2902)", () => {
     // #3534 records one deliberate growth: +1 line re-exporting
     // JobPipelineWorkflow, the fifth ThinkWorkflow class, alongside
     // the other four workflow re-exports (291 → 292).
+    // #3515 S3 batch 1 records a second deliberate growth: +12 lines
+    // for the structured-logger seam (7-line module logger boilerplate
+    // + the .catch(console.warn) voice-connection handler rewritten as
+    // a structuredLog.warn call, 5 lines) (292 → 304). The dispatcher
+    // gains no new route or responsibility — the growth is the logger
+    // the S3 console.* migration adopts in every migrated file.
     const src = readFileSync("src/server.ts", "utf8");
     const lines = src.split("\n").length - (src.endsWith("\n") ? 1 : 0);
-    expect(lines).toBeLessThanOrEqual(292);
+    expect(lines).toBeLessThanOrEqual(304);
   });
 });
 

@@ -27,6 +27,13 @@ import {
   type QueueSendBinding,
 } from "./cfQueueMessagingAdapter";
 import type { MessagingPorts } from "./messagingPorts";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "messaging/createJobPipelineMessaging",
+});
 
 export const JOB_PIPELINE_QUEUE_NOT_CONFIGURED = "job_pipeline_queue_not_configured";
 
@@ -61,9 +68,10 @@ export function createJobPipelineMessaging(
   const queue = asSendBinding(env.JOB_PIPELINE_EVENTS);
   if (!queue) {
     if (env.JOB_PIPELINE_EVENTS) {
-      console.warn(
-        "[job-pipeline] JOB_PIPELINE_EVENTS binding is present but has no send capability — pipeline messaging unavailable (job_pipeline_queue_not_configured).",
-      );
+      structuredLog.warn("job_pipeline.queue_not_configured", {
+        message:
+          "[job-pipeline] JOB_PIPELINE_EVENTS binding is present but has no send capability — pipeline messaging unavailable (job_pipeline_queue_not_configured).",
+      });
     }
     return { state: JOB_PIPELINE_QUEUE_NOT_CONFIGURED, ports: null };
   }

@@ -24,6 +24,13 @@ import { registerScreenerPublishers } from "../events/screenerPublishers";
 import type { Env } from "../types";
 import { fromScreenerEnvelope } from "./screenerEventEnvelope";
 import type { ConsumeOutcome, MessageHandler } from "./messagingPorts";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "messaging/screenerQueueConsumer",
+});
 
 export interface ScreenerQueueHandlerDeps {
   env: Env;
@@ -51,26 +58,27 @@ export function createScreenerQueueHandler(
   return async (envelope): Promise<ConsumeOutcome> => {
     const parsed = fromScreenerEnvelope(envelope);
     if (!parsed) {
-      console.warn(
-        "[messaging] Dropping queue message: payload is not a screener event."
-      );
+      structuredLog.warn("messaging.queue_message_not_screener_event", {
+        message: "[messaging] Dropping queue message: payload is not a screener event.",
+      });
       return "drop";
     }
     const userLogin = parsed.ownerLogin ?? resolveUserLogin(deps.env);
     if (!userLogin) {
-      console.warn(
-        "[messaging] Screener queue message has no data owner and no service identity — refusing to dispatch under a fabricated identity."
-      );
+      structuredLog.warn("messaging.queue_message_no_owner", {
+        message:
+          "[messaging] Screener queue message has no data owner and no service identity — refusing to dispatch under a fabricated identity.",
+      });
       return "retry";
     }
     try {
       await deliver(parsed.event, userLogin);
       return "processed";
     } catch (err) {
-      console.warn(
-        "[messaging] Screener queue delivery failed, will retry:",
-        err instanceof Error ? err.message : String(err)
-      );
+      structuredLog.warn("messaging.queue_delivery_failed", {
+        message: "[messaging] Screener queue delivery failed, will retry",
+        error: err instanceof Error ? err.message : String(err),
+      });
       return "retry";
     }
   };

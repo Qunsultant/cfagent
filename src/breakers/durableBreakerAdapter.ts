@@ -46,6 +46,13 @@ import type {
   BreakerPersistedState,
   BreakerStateStore,
 } from "./breakerStateStorePorts";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "breakers/durableBreakerAdapter",
+});
 
 export interface DurableBreakerDeps {
   nowMs?: () => number;
@@ -127,9 +134,11 @@ export class DurableCircuitBreaker implements CircuitBreaker {
         }
       }
     } catch (err) {
-      console.warn(
-        `[breaker] durable load failed for ${this.providerId}, degrading to in-memory: ${err instanceof Error ? err.message : String(err)}`
-      );
+      structuredLog.warn("breaker.durable_load_failed", {
+        message: `[breaker] durable load failed for ${this.providerId}, degrading to in-memory: ${err instanceof Error ? err.message : String(err)}`,
+        providerId: this.providerId,
+        error: err instanceof Error ? err.message : String(err),
+      });
     } finally {
       this.hydrationSettled = true;
       this.resetPending = false;
@@ -167,9 +176,11 @@ export class DurableCircuitBreaker implements CircuitBreaker {
     this.persistQueue = this.persistQueue.then(() => this.store.save(row)).then(
       () => undefined,
       (err: unknown) => {
-        console.warn(
-          `[breaker] durable save failed for ${this.providerId}: ${err instanceof Error ? err.message : String(err)}`
-        );
+        structuredLog.warn("breaker.durable_save_failed", {
+          message: `[breaker] durable save failed for ${this.providerId}: ${err instanceof Error ? err.message : String(err)}`,
+          providerId: this.providerId,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     );
   }

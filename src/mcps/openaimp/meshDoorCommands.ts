@@ -184,6 +184,13 @@ import {
 } from "../../agents/orchestrator/meshStockCopilotDoor";
 import { COPILOT_SESSIONS } from "../../services/stockCopilotSessions";
 import { UNIVERSES, type UniverseId } from "../../trading";
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "mcps/openaimp/meshDoorCommands",
+});
 
 /**
  * Issue #2428 (Agent Mesh S17): record this door call's hop on
@@ -1339,7 +1346,11 @@ export function meshStockCopilotDoorContextFromMcp(context: McpToolContext): Sto
       try {
         settings.set(key, value);
       } catch (e) {
-        console.error("Failed to write setting via MCP door:", e);
+        structuredLog.error("stock_copilot.setting_write_failed", {
+          message: "Failed to write setting via MCP door",
+          key,
+          error: e instanceof Error ? e.message : String(e),
+        });
       }
     },
     audit: (type, agent, payload) => {

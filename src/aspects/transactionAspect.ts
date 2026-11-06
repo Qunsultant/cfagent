@@ -67,6 +67,13 @@ import {
   DataFoundationCode,
   DataFoundationError,
 } from "./errorCodes";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "aspects/transactionAspect",
+});
 
 /** Context for one wrapped call (mirrors loggingAspect's AspectContext shape). */
 export interface TransactionContext {
@@ -139,16 +146,20 @@ function emitOutcome(
       context.emit(outcome);
     } catch (err) {
       // Emission must never break the unit it describes.
-      console.error(
-        "[Aspect][tx] outcome emission failed:",
-        err instanceof Error ? err.message : String(err),
-      );
+      structuredLog.error("aspect.tx_outcome_emission_failed", {
+        message: "[Aspect][tx] outcome emission failed",
+        error: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack?.slice(0, 1000) : undefined,
+      });
     }
     return;
   }
-  console.info(
-    `[Aspect][tx:${context.operationName}] ${code} in ${outcome.durationMs}ms`,
-  );
+  structuredLog.info("aspect.tx_outcome", {
+    message: `[Aspect][tx:${context.operationName}] ${code} in ${outcome.durationMs}ms`,
+    operationName: context.operationName,
+    code,
+    durationMs: outcome.durationMs,
+  });
 }
 
 /**

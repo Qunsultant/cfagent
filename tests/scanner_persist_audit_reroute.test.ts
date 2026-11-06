@@ -88,6 +88,37 @@ const JOB_ID = "3f6b0f3a-5d2c-4c1e-9a8b-7d6e5f4a3b2c";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const UUID_SUBSTRING_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/;
 
+/** #3515 S3: parse spied console.info lines into structured-log events. */
+function structuredLogEvents(infoSpy: { mock: { calls: unknown[][] } }): Array<{
+  operation: string;
+  level: string;
+  fields: Record<string, unknown>;
+}> {
+  const events: Array<{ operation: string; level: string; fields: Record<string, unknown> }> = [];
+  for (const call of infoSpy.mock.calls) {
+    try {
+      const parsed = JSON.parse(String(call[0])) as {
+        operation?: unknown;
+        level?: unknown;
+        fields?: unknown;
+      };
+      if (parsed && typeof parsed.operation === "string") {
+        events.push({
+          operation: parsed.operation,
+          level: typeof parsed.level === "string" ? parsed.level : "",
+          fields:
+            parsed.fields && typeof parsed.fields === "object"
+              ? (parsed.fields as Record<string, unknown>)
+              : {},
+        });
+      }
+    } catch {
+      // Non-JSON console.info lines are not structured events.
+    }
+  }
+  return events;
+}
+
 function makeOrchestrator() {
   const sql = new MockSqlStorage();
   const agent: any = Object.create(OrchestratorAgent.prototype);
@@ -252,27 +283,33 @@ describe("OptionsScannerMCP persistAudit reroute (#700 point 2)", () => {
   });
 
   it("a failing audit write is logged with the event id and never fails the paid scan (transport throw)", async () => {
-    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    // #3515 S3: the audit failure now travels as a structured
+    // options_scanner.audit_persist_failed event on the console-info JSON
+    // fallback, not a console.error line.
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     const { orchestrator, result } = await runPaidScan({ failAudit: "throw" });
     const body = JSON.parse(result.content[0].text);
     expect(body.success).toBe(true);
     expect(body.jobId).toBe(JOB_ID);
     expect(auditRows(orchestrator.sql)).toHaveLength(0);
-    expect(errSpy).toHaveBeenCalled();
-    const logged = errSpy.mock.calls.map((c) => c.map(String).join(" ")).join("\n");
+    const events = structuredLogEvents(infoSpy);
+    expect(events.some((e) => e.operation === "options_scanner.audit_persist_failed")).toBe(true);
+    const logged = events.map((e) => String(e.fields?.message ?? "")).join("\n");
     expect(logged).toContain("CF_WALLET_SCANNER_PAID");
     expect(logged).toMatch(UUID_SUBSTRING_RE);
   });
 
   it("a failing audit write is logged with the event id and never fails the paid scan (orchestrator HTTP 500)", async () => {
-    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    // #3515 S3: see the transport-throw test above — same structured event.
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     const { orchestrator, result } = await runPaidScan({ failAudit: "http500" });
     const body = JSON.parse(result.content[0].text);
     expect(body.success).toBe(true);
     expect(body.jobId).toBe(JOB_ID);
     expect(auditRows(orchestrator.sql)).toHaveLength(0);
-    expect(errSpy).toHaveBeenCalled();
-    const logged = errSpy.mock.calls.map((c) => c.map(String).join(" ")).join("\n");
+    const events = structuredLogEvents(infoSpy);
+    expect(events.some((e) => e.operation === "options_scanner.audit_persist_failed")).toBe(true);
+    const logged = events.map((e) => String(e.fields?.message ?? "")).join("\n");
     expect(logged).toContain("CF_WALLET_SCANNER_PAID");
     expect(logged).toMatch(UUID_SUBSTRING_RE);
   });

@@ -32,6 +32,13 @@
  * a future DLQ consumer: the platform already moved it to the DLQ).
  */
 import type { ActorKind } from "../security/backgroundAttribution";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "messaging/deadLetter",
+});
 
 export type DeadLetterReason =
   | "denied"
@@ -94,15 +101,15 @@ export function deadLetterLogLine(record: DeadLetterRecord): string {
   return `[dead-letter] ${JSON.stringify(record)}`;
 }
 
-/** A sink for dead-letter records; the production sink is the console. */
+/** A sink for dead-letter records; the production sink is the structured logger (console fallback). */
 export interface DeadLetterSink {
   record(record: DeadLetterRecord): void;
 }
 
-/** The production sink: the structured line on the console warn channel. */
+/** The production sink: the structured line via the S2 logger (console fallback). */
 export const consoleDeadLetterSink: DeadLetterSink = {
   record(record: DeadLetterRecord): void {
-    console.warn(deadLetterLogLine(record));
+    structuredLog.warn("dead_letter.recorded", { line: deadLetterLogLine(record) });
   },
 };
 

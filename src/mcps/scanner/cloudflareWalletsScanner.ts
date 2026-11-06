@@ -28,6 +28,13 @@ import type { Env } from "../../types";
 import { getServiceUserLogin } from "../../security/serviceIdentity";
 import { AGENT_DIDS } from "../../agents/did";
 import { actorGateway } from "../../services/cloudflareActorGateway";
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "mcps/scanner/cloudflareWalletsScanner",
+});
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -292,10 +299,13 @@ export class OptionsScannerMCP extends McpAgent<Env> {
         }
       );
     } catch (err) {
-      console.error(
-        `[OptionsScannerMCP] Failed to persist CF_WALLET_SCANNER_PAID audit event ${eventId} (jobId: ${jobId ?? "unknown"}):`,
-        err,
-      );
+      structuredLog.error("options_scanner.audit_persist_failed", {
+        message: `[OptionsScannerMCP] Failed to persist CF_WALLET_SCANNER_PAID audit event ${eventId} (jobId: ${jobId ?? "unknown"})`,
+        eventId,
+        jobId: jobId ?? "unknown",
+        error: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack?.slice(0, 1000) : undefined,
+      });
     }
   }
 }

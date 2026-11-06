@@ -36,6 +36,13 @@ import type { FlexibleSchema, ToolSet } from "ai";
 import { BreakerBudgetExhaustedError, BreakerOpenError, type CircuitBreaker } from "../breakers/breakerPorts";
 import type { MessageEnvelope } from "../messaging/messagingPorts";
 import { isRetryable } from "../models/router";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "gateway/gatewayPorts",
+});
 
 /** Business error: the caller hit the gateway rate limit. No failover. */
 export class GatewayRateLimitedError extends Error {
@@ -347,7 +354,7 @@ export class CoreLlmGatewayPort implements LlmGatewayPort {
   constructor(private readonly deps: CoreGatewayDeps) {
     this.stats = deps.stats ?? new GatewayStatsAccumulator();
     this.nowMs = deps.nowMs ?? Date.now;
-    this.log = deps.log ?? ((message: string) => console.warn(message));
+    this.log = deps.log ?? ((message: string) => structuredLog.warn("gateway.log", { message }));
     this.defaultCacheTtlMs = deps.defaultCacheTtlMs ?? 3_600_000;
   }
 

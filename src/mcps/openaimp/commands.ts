@@ -170,6 +170,13 @@ import {
   type AdsRevenueDomain,
   type AdsRevenueMode,
 } from "../../config/adsRevenueModes";
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "mcps/openaimp/commands",
+});
 
 /**
  * #1721: resolves one ads/revenue switch for an MCP execution in
@@ -188,9 +195,12 @@ function resolveCommandMode(
     levelsForDomain(context.scopedModes, domain, run, (context.env as unknown as Record<string, unknown> | undefined)?.[switchName])
   );
   if (resolved.invalid) {
-    console.error(
-      `[ads-revenue] invalid ${switchName} value ${JSON.stringify(resolved.raw)} — failing closed to "route"`
-    );
+    structuredLog.error(adsRevenueConfigErrorEvent(domain), {
+      message: `[ads-revenue] invalid ${switchName} value ${JSON.stringify(resolved.raw)} — failing closed to "route"`,
+      switch: switchName,
+      raw: resolved.raw ?? null,
+      resolved: "route",
+    });
     context.audit(adsRevenueConfigErrorEvent(domain), "orchestrator", {
       setting: switchName,
       value: resolved.raw ?? "",
@@ -223,9 +233,12 @@ function resolvePaymentsCommandMode(
     legacy
   );
   if (resolved.invalid) {
-    console.error(
-      `[payments] invalid ${switchName} value ${JSON.stringify(resolved.raw)} — failing closed to "${legacy}"`
-    );
+    structuredLog.error(paymentsConfigErrorEvent(), {
+      message: `[payments] invalid ${switchName} value ${JSON.stringify(resolved.raw)} — failing closed to "${legacy}"`,
+      switch: switchName,
+      raw: resolved.raw ?? null,
+      resolved: legacy,
+    });
     context.audit(paymentsConfigErrorEvent(), "orchestrator", {
       setting: switchName,
       value: resolved.raw ?? "",
@@ -267,9 +280,12 @@ function resolveKnowledgeForTool(
     legacy
   );
   if (resolved.invalid) {
-    console.error(
-      `[knowledge] invalid ${KNOWLEDGE_MODE_SWITCH} value ${JSON.stringify(resolved.raw)} — failing closed to "${legacy}"`
-    );
+    structuredLog.error(knowledgeConfigErrorEvent(), {
+      message: `[knowledge] invalid ${KNOWLEDGE_MODE_SWITCH} value ${JSON.stringify(resolved.raw)} — failing closed to "${legacy}"`,
+      switch: KNOWLEDGE_MODE_SWITCH,
+      raw: resolved.raw ?? null,
+      resolved: legacy,
+    });
     context.audit(knowledgeConfigErrorEvent(), "orchestrator", {
       setting: KNOWLEDGE_MODE_SWITCH,
       value: resolved.raw ?? "",
@@ -300,9 +316,12 @@ function resolveMemoryReadForList(
     legacy
   );
   if (resolved.invalid) {
-    console.error(
-      `[memory] invalid ${MEMORY_READ_MODE_SWITCH} value ${JSON.stringify(resolved.raw)} — failing closed to "${legacy}"`
-    );
+    structuredLog.error(memoryConfigErrorEvent(), {
+      message: `[memory] invalid ${MEMORY_READ_MODE_SWITCH} value ${JSON.stringify(resolved.raw)} — failing closed to "${legacy}"`,
+      switch: MEMORY_READ_MODE_SWITCH,
+      raw: resolved.raw ?? null,
+      resolved: legacy,
+    });
     context.audit(memoryConfigErrorEvent(), "orchestrator", {
       setting: MEMORY_READ_MODE_SWITCH,
       value: resolved.raw ?? "",
@@ -334,9 +353,12 @@ function resolveJobListEnvelopeForTool(
     legacy
   );
   if (resolved.invalid) {
-    console.error(
-      `[jobs] invalid ${JOB_LIST_ENVELOPE_SWITCH} value ${JSON.stringify(resolved.raw)} — failing closed to "${legacy}"`
-    );
+    structuredLog.error(jobsConfigErrorEvent(), {
+      message: `[jobs] invalid ${JOB_LIST_ENVELOPE_SWITCH} value ${JSON.stringify(resolved.raw)} — failing closed to "${legacy}"`,
+      switch: JOB_LIST_ENVELOPE_SWITCH,
+      raw: resolved.raw ?? null,
+      resolved: legacy,
+    });
     context.audit(jobsConfigErrorEvent(), "orchestrator", {
       setting: JOB_LIST_ENVELOPE_SWITCH,
       value: resolved.raw ?? "",
@@ -929,9 +951,12 @@ function resolveNlqCommandMode(
     levelsForNlq(context.scopedNlqModes, run, (context.env as unknown as Record<string, unknown> | undefined)?.[NLQ_MODE_SWITCH])
   );
   if (resolved.invalid) {
-    console.error(
-      `[nlq] invalid ${NLQ_MODE_SWITCH} value ${JSON.stringify(resolved.raw)} — failing closed to "rest"`
-    );
+    structuredLog.error(nlqConfigErrorEvent(), {
+      message: `[nlq] invalid ${NLQ_MODE_SWITCH} value ${JSON.stringify(resolved.raw)} — failing closed to "rest"`,
+      switch: NLQ_MODE_SWITCH,
+      raw: resolved.raw ?? null,
+      resolved: "rest",
+    });
     context.audit(nlqConfigErrorEvent(), "orchestrator", {
       setting: NLQ_MODE_SWITCH,
       value: resolved.raw ?? "",

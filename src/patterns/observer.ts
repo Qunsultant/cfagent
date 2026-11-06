@@ -10,6 +10,13 @@
 
 import type { IAuditObserver, IAuditPublisher, AuditEvent } from "./interfaces";
 import type { DatabaseORM } from "../orm";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "patterns/observer",
+});
 
 export class AuditEventPublisher implements IAuditPublisher {
   private observers: Set<IAuditObserver> = new Set();
@@ -37,7 +44,11 @@ export class AuditEventPublisher implements IAuditPublisher {
       try {
         observer.onAuditEvent(event);
       } catch (err) {
-        console.error("AuditObserver error during notification:", err);
+        structuredLog.error("audit.observer_notification_failed", {
+          message: "AuditObserver error during notification",
+          error: err instanceof Error ? err.message : String(err),
+          stack: err instanceof Error ? err.stack?.slice(0, 1000) : undefined,
+        });
       }
     }
   }
@@ -64,7 +75,10 @@ export class SqliteAuditObserver implements IAuditObserver {
         createdAt: event.timestamp,
       });
     } catch (err) {
-      console.warn("SqliteAuditObserver failed to record event:", err);
+      structuredLog.warn("audit.sqlite_record_failed", {
+        message: "SqliteAuditObserver failed to record event",
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 }

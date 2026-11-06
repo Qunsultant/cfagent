@@ -27,6 +27,12 @@ import {
   memoryConfigErrorEvent,
   resolveMemoryReadMode,
 } from "../../config/knowledgeMemoryModes";
+import { createStructuredLogger } from "../../observability/structuredLogger";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "mcps/openaimp/index",
+});
 
 export interface MCPRequest {
   jsonrpc: "2.0";
@@ -351,9 +357,12 @@ export async function readMCPResource(
         "uncapped"
       );
       if (resolved.invalid) {
-        console.error(
-          `[memory] invalid ${MEMORY_READ_MODE_SWITCH} value ${JSON.stringify(resolved.raw)} — failing closed to "uncapped"`
-        );
+        structuredLog.error(memoryConfigErrorEvent(), {
+          message: `[memory] invalid ${MEMORY_READ_MODE_SWITCH} value ${JSON.stringify(resolved.raw)} — failing closed to "uncapped"`,
+          switch: MEMORY_READ_MODE_SWITCH,
+          raw: resolved.raw ?? null,
+          resolved: "uncapped",
+        });
         context.audit?.(memoryConfigErrorEvent(), "orchestrator", {
           setting: MEMORY_READ_MODE_SWITCH,
           value: resolved.raw ?? "",

@@ -115,7 +115,10 @@ describe("Cloudflare Feature Flags (Issue #1806)", () => {
     });
 
     it("fails closed when Flagship evaluation throws an error (service unavailable)", async () => {
-      const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      // #3515 S3: the evaluation failure now travels as a structured
+      // feature_flag.evaluation_failed event (level warn) on the
+      // console-info JSON fallback, not a console.warn line.
+      const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
       const getBooleanValue = vi.fn().mockRejectedValue(new Error("Cloudflare Edge KV timeout"));
 
       const env = {
@@ -126,8 +129,34 @@ describe("Cloudflare Feature Flags (Issue #1806)", () => {
 
       const result = await isFeatureEnabled(env as any, "screener");
       expect(result).toBe(false);
-      expect(consoleWarnSpy).toHaveBeenCalled();
-      consoleWarnSpy.mockRestore();
+      const events: Array<{ operation: string; level: string; fields: Record<string, unknown> }> = [];
+      for (const call of infoSpy.mock.calls) {
+        try {
+          const parsed = JSON.parse(String(call[0])) as {
+            operation?: unknown;
+            level?: unknown;
+            fields?: unknown;
+          };
+          if (parsed && typeof parsed.operation === "string") {
+            events.push({
+              operation: parsed.operation,
+              level: typeof parsed.level === "string" ? parsed.level : "",
+              fields:
+                parsed.fields && typeof parsed.fields === "object"
+                  ? (parsed.fields as Record<string, unknown>)
+                  : {},
+            });
+          }
+        } catch {
+          // Non-JSON console.info lines are not structured events.
+        }
+      }
+      const failed = events.find((e) => e.operation === "feature_flag.evaluation_failed");
+      expect(failed).toBeDefined();
+      expect(failed?.level).toBe("warn");
+      expect(failed?.fields.flag).toBe("screener");
+      expect(String(failed?.fields.error ?? "")).toContain("Cloudflare Edge KV timeout");
+      infoSpy.mockRestore();
     });
 
     it("falls back to named environment variables when Flagship binding is absent", async () => {

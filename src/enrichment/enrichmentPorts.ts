@@ -15,6 +15,13 @@
  */
 
 import type { MessageEnvelope } from "../messaging/messagingPorts";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "enrichment/enrichmentPorts",
+});
 
 /** Existing feature-flag port name for Alpaca enrichment. */
 export const ENRICHMENT_ALPACA_FLAG = "enrichment_alpaca";
@@ -175,10 +182,11 @@ export function isEnrichmentKillswitchThrown(
   try {
     return parseKillswitchValue(reader.getValue(ENRICHMENT_KILLSWITCH_KEY)) === "halted";
   } catch (err) {
-    console.error(
-      "[Enrichment] Killswitch read failed; halting enrichment (fail-closed):",
-      err,
-    );
+    structuredLog.error("enrichment.killswitch_read_failed", {
+      message: "[Enrichment] Killswitch read failed; halting enrichment (fail-closed)",
+      error: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack?.slice(0, 1000) : undefined,
+    });
     return true;
   }
 }

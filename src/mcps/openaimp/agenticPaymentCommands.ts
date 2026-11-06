@@ -19,6 +19,13 @@ import {
   type PaymentsModeValues,
   type PaymentsSurfaceMode,
 } from "../../config/agenticPaymentsModes";
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "mcps/openaimp/agenticPaymentCommands",
+});
 
 /**
  * #1728: resolves one agentic-payments switch for an MCP execution in
@@ -41,9 +48,12 @@ function resolveAgenticPaymentsCommandMode(
     legacy
   );
   if (resolved.invalid) {
-    console.error(
-      `[payments] invalid ${switchName} value ${JSON.stringify(resolved.raw)} — failing closed to "${legacy}"`
-    );
+    structuredLog.error(paymentsConfigErrorEvent(), {
+      message: `[payments] invalid ${switchName} value ${JSON.stringify(resolved.raw)} — failing closed to "${legacy}"`,
+      switch: switchName,
+      raw: resolved.raw ?? null,
+      resolved: legacy,
+    });
     context.audit(paymentsConfigErrorEvent(), "orchestrator", {
       setting: switchName,
       value: resolved.raw ?? "",

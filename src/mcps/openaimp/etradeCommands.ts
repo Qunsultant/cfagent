@@ -35,6 +35,13 @@ import {
 } from "../../services/etradeExecutionGate";
 import { orderPayloadHash, parseStrategyOrder } from "../../agents/routes/orderPayloadHash";
 import { ETradeBrowserService } from "../../services/browserAgent";
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "mcps/openaimp/etradeCommands",
+});
 
 /**
  * #1726 helpers: resolve one switch for this call and, on an invalid
@@ -460,7 +467,10 @@ export class ETradeExecuteOrderCommand implements IMcpToolCommand<{
           humanApproved: decision === "approved",
         });
       } catch (snapErr) {
-        console.warn("[ETradeExecuteOrderCommand] Note: could not send transaction snap to Slack:", snapErr);
+        structuredLog.warn("etrade.execute_order_slack_snap_failed", {
+          message: "[ETradeExecuteOrderCommand] Note: could not send transaction snap to Slack",
+          error: snapErr instanceof Error ? snapErr.message : String(snapErr),
+        });
       }
     }
 

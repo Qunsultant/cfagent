@@ -95,6 +95,14 @@
  * The route ctx carrier is populated by no production caller yet.
  */
 
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "config/etradeModes",
+});
+
 export type EtradeScanMode = "listings" | "screened";
 export type EtradeQuoteMode = "mcp" | "rest";
 export type EtradePreviewMode = "local" | "broker";
@@ -170,9 +178,12 @@ function resolveSwitch<T extends string>(
     const normalized = normalizeSwitchValue(value, valid);
     if (normalized === null) continue;
     if (normalized === "invalid") {
-      console.warn(
-        `[${etradeConfigErrorEvent()}] ${switchName} unrecognized value at ${level}; failing closed to surface legacy`,
-      );
+      structuredLog.warn(etradeConfigErrorEvent(), {
+        message: `[${etradeConfigErrorEvent()}] ${switchName} unrecognized value at ${level}; failing closed to surface legacy`,
+        switch: switchName,
+        level,
+        raw: typeof value === "string" ? value : undefined,
+      });
       return {
         mode: legacy,
         invalid: true,
