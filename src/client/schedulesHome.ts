@@ -33,19 +33,21 @@
  * - `?tab=platform-admin&view=jobs` (U-05) → `?tab=schedules&view=runs`.
  * - `?tab=platform-admin&view=iaaa-admin&iaaaTab=queue` (U-06) →
  *   `?tab=schedules&view=queue`.
- * - `?tab=options&view=scheduled-screening` (U-03) → NO redirect, by
- *   the S2 decision rule (preserve real options-family context): the
- *   address renders the OptionsHub schedules *mode*, which is options
- *   research state, not a schedules listing — the one-shot run form
+ * - `?tab=options&view=scheduled-screening` (U-03) → `?tab=schedules`,
+ *   per the owner decision (#3121 comment 6669207975, 2026-11-05),
+ *   reversing S2's keep-as-is. The address redirects (replace, so
+ *   back/forward never re-lands on it); in-hub tab clicks write the
+ *   same `?view=` URL the redirect matches, so the OptionsHub
+ *   schedules mode is unreachable at any address after this slice.
+ *   Its options-research content is NOT lost: the one-shot run form
  *   (#2545 `ScheduledOptionsRunForm`), the autonomous-runs record
  *   (#223 `AutonomousOptionsRuns`), and the screening activity log
- *   (#1162 `ScreeningActivityPanel`). It carries no schedule CRUD: the
- *   mode's own note says schedule management lives in the Schedules
- *   tab (S7/C2 moved it there). Redirecting would also break the mode
- *   itself, because in-hub tab clicks write the same `?view=` URL the
- *   redirect would match. U-03 is therefore retired *as a schedules
- *   address* (nothing schedules-listing lives there anymore) while the
- *   address is preserved as the options-research schedules mode.
+ *   (#1162 `ScreeningActivityPanel`) now render on the Options Runs
+ *   tab (`?tab=options&view=options-runs`, `ResearchRunsPanel`) —
+ *   the one surface for manual + scheduled options runs (#319).
+ *   Lossless + additive directive (#3121 comment 6669238775): the
+ *   content keeps a live home at an existing address, no new
+ *   surface, nothing retired silently.
  *
  * This module is pure: URLSearchParams in, values out. No window, no
  * fetch, no Cloudflare — the same hexagonal shape as the S1 primitives
@@ -131,8 +133,7 @@ export interface LegacySchedulesRedirect {
 
 /**
  * The redirect for a retired schedules address, or null when the URL is
- * not one (including U-03, which is deliberately NOT redirected — see
- * the module header). The caller replaces the URL with the target; a
+ * not one. The caller replaces the URL with the target; a
  * null means "leave the URL alone".
  */
 export function legacySchedulesRedirect(search: string): LegacySchedulesRedirect | null {
@@ -140,6 +141,9 @@ export function legacySchedulesRedirect(search: string): LegacySchedulesRedirect
   const tab = params.get("tab") ?? "";
   const view = params.get("view") ?? "";
   if (tab === "screeners" && view === "schedules") {
+    return { tab: SCHEDULES_HOME_TAB };
+  }
+  if (tab === "options" && view === "scheduled-screening") {
     return { tab: SCHEDULES_HOME_TAB };
   }
   if (tab === "platform-admin" && view === "scheduled-goals") {

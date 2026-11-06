@@ -59,6 +59,14 @@
   order state); filed as sub-issue #3361. No file is deleted in S2;
   the two retired admin tabs and the IAAA Queue tab are removed from
   their panels (their mount sites move to the home), not renamed.
+- **U-03 amendment (redirect slice, #3121):** the U-03 address now
+  redirects to the home (owner decision, #3121 comment 6669207975,
+  2026-11-05), reversing S2's keep-as-is. The OptionsHub schedules
+  mode is gone (tab, mode, deep link, legacy `?research=schedules`
+  surface all removed); its options-research content relocated to
+  the Options Runs tab (`?tab=options&view=options-runs`,
+  `ResearchRunsPanel`) — lossless + additive (#3121 comment
+  6669238775). See §8 U-03.
 - **S3 amendment (Slice S3, #3121):** goal schedules are migrated onto
   the S1 primitives as the tick-evaluated kind (§3 Q(a)): `onCron`
   evaluates through the S1 re-exported `isDue` / `isValidCron` /
@@ -790,7 +798,7 @@ Two verified facts about the shell, which the table relies on:
 |---|-----|---------|---------|----------------|--------------------------------------------|
 | U-01 | `https://agent.openaimp.com/?tab=schedules` | `SchedulesHome` — the consolidated home: list (`SchedulesPanel` + embedded `ScheduledOptionsManager`), runs/ledger (`ScheduleRunLedgerPanel`), goals (`ScheduledGoalsPanel`), queue (`ScheduleQueueView`) | `/api/schedules` + `/api/schedule/goals` (goals on the S1 primitives since S3; the store unifies in #3123) | URL-driven (top-level tab + `?view=` sub-routes) | S2: de-hubbed — renders directly from the shell (`Chat.tsx` `TAB_CONTENT`), no longer through the retained `ETradeTradingHub` (route no longer `retain`; `mapTabToTradingSubTab` has no `schedules` case; the hub has no schedules branch). Sub-routes `view=list\|runs\|ledger\|goals\|queue` + `schedule=<id>` / `run=<id>` deep links. S3: the goals view renders provenance per goal and its run history from the one consolidated ledger read. |
 | U-02 | `https://agent.openaimp.com/?tab=screeners&view=schedules` | (retired) | `/api/schedules` | URL-driven (tab + view) | S2: RETIRED — redirects to `?tab=schedules` (`legacySchedulesRedirect`, replace not push). The nav active logic no longer activates the Schedules item for any screeners address. |
-| U-03 | `https://agent.openaimp.com/?tab=options&view=scheduled-screening` | `OptionsHub` schedules mode — options-research state, NOT a schedules listing: one-shot run form (#2545), autonomous-runs record (#223), screening activity log (#1162); no schedule CRUD (the mode's own note points schedule management at the Schedules tab) | `/api/schedules` (runs record reads) | URL-driven (deep link) | S2: retired AS A SCHEDULES ADDRESS, address preserved for its options-research content — NOT redirected, because in-hub tab clicks write the same `?view=` URL a redirect would match, and the mode carries real options-family state. Schedule management itself already lives only in the consolidated home (S7/C2). |
+| U-03 | `https://agent.openaimp.com/?tab=options&view=scheduled-screening` | (retired) | `/api/schedules` (runs record reads) | URL-driven (deep link) | U-03 redirect slice: REDIRECTED to `?tab=schedules` (owner decision, #3121 comment 6669207975, 2026-11-05), reversing S2's keep-as-is — the address no longer renders anything. Lossless + additive (comment 6669238775): the options-research content relocated to `?tab=options&view=options-runs` (`ResearchRunsPanel`): one-shot run form (#2545), autonomous-runs record (#223), screening activity log (#1162). The OptionsHub schedules mode is gone (tab, mode, deep link, legacy `?research=schedules` surface all removed). What the address was: the `OptionsHub` schedules mode — options-research state, NOT a schedules listing; no schedule CRUD (the mode's own note pointed schedule management at the Schedules tab). |
 | U-04 | `https://agent.openaimp.com/?tab=platform-admin&view=scheduled-goals` | (retired as an address) | `/api/schedule/goals` (separate family) | URL-driven (tab + view) | S2: RETIRED — redirects to `?tab=schedules&view=goals` (`legacySchedulesRedirect`, replace not push). The Platform Admin tab and panel are gone; the left-nav entry links straight to the home (nav-config.json deep-link override). |
 | U-05 | `https://agent.openaimp.com/?tab=platform-admin&view=jobs` | (retired as an address) | Run-ledger reads (`job_run_records`) | URL-driven (tab + view) | S2: RETIRED — redirects to `?tab=schedules&view=runs` (`legacySchedulesRedirect`, replace not push). The Platform Admin tab and panel are gone; the left-nav entry links straight to the home (nav-config.json deep-link override). |
 | U-06 | `https://agent.openaimp.com/?tab=platform-admin&view=iaaa-admin&iaaaTab=queue` | (retired as an address) | `/api/schedules` (dump, cancel-all) + `/api/maintenance/*` | URL-driven via a nested third-level param `?iaaaTab=` (deep links #2776) | S2: RETIRED — redirects to `?tab=schedules&view=queue` (`legacySchedulesRedirect`, replace not push), gated at the route by the same platform-admin overview probe (`ScheduleQueueView`). The IAAA Queue tab and its mount are gone; the queue's only mount site is the home. |
@@ -882,6 +890,13 @@ does not change either way; only what renders behind it does.
 **S2 outcome: the fallback was NOT needed — de-hubbing landed in S2**
 (the home renders from the shell; see the S2 amendment at the top of
 this document and the U-01 row above).
+
+**U-03 outcome: the redirect landed after S2** (owner decision,
+#3121 comment 6669207975): `?tab=options&view=scheduled-screening`
+redirects to the home, and the mode's options-research content
+relocated to `?tab=options&view=options-runs` (lossless + additive,
+comment 6669238775) — see the U-03 row above and the U-03 amendment
+at the top of this document.
 
 **Scope note:** the home URL and the three conditions above are DECIDED
 (owner-approved 2026-11-05). The sub-route scheme in (ii) is the S2
