@@ -13,13 +13,23 @@
  *   decision history for performance measurement is MVP2 (#3397),
  *   deliberately not built here.
  *
- * Hard boundaries (#3391):
- * - PAPER ONLY. Before any order, the cycle resolves the Alpaca
- *   environment through the adapter's own resolver (#3158,
+ * Hard boundaries (#3391, mode conformance #3451):
+ * - The cycle trades in the ACTIVE trading mode selected in the
+ *   panel menu — PAPER or LIVE, exactly one broker and one mode in
+ *   effect — resolved by the host from the platform's selection
+ *   model (src/agents/copilotTradingMode.ts) and passed in as
+ *   `selection`. The screener context's ENVIRONMENT is not a
+ *   trading mode and never reaches this cycle. Fail-closed gates,
+ *   in order: an unresolved selection refuses with
+ *   stock_copilot_mode_unresolved; an active broker other than
+ *   Alpaca makes the cycle inactive (stock_copilot_inactive_broker);
+ *   and before any order the guard re-resolves the Alpaca base
+ *   through the adapter's own resolver (#3158,
  *   resolveAlpacaTradingBase — the same function the platform uses
- *   internally, so the guard and the platform can never disagree).
- *   A live resolution refuses the whole cycle with a named error and
- *   zero orders, whatever the source (pin, selection, inference).
+ *   internally) under the SELECTED environment and requires it to
+ *   agree with the selected mode — a disagreement (pin, base URL)
+ *   refuses with stock_copilot_mode_mismatch, never a silent trade
+ *   in the wrong mode.
  * - Flag OFF (STOCK_COPILOT_PAPER_ENABLED) = no cycles, no orders.
  * - Deterministic money path: orders come only from this
  *   signal → sizing → optimizer path. No LLM judgment places orders.
@@ -36,6 +46,8 @@
  * signal-conditioned forward returns on its real bars.
  */
 
+import type { CopilotSelectionResolution } from "../agents/copilotTradingMode";
+import { COPILOT_BROKER_ID } from "../agents/copilotTradingMode";
 import type {
   StockCopilotActivityPort,
   StockCopilotControlPort,
@@ -68,8 +80,17 @@ import {
   type CopilotPositionRecord,
 } from "./stockCopilotStore";
 
-/** Named refusal when the resolved Alpaca environment is not paper. */
-export const STOCK_COPILOT_LIVE_REFUSAL = "stock_copilot_live_environment_refused";
+/** Named refusal when the active broker/mode selection cannot be
+ *  resolved — the cycle never guesses a mode for a money path. */
+export const STOCK_COPILOT_MODE_UNRESOLVED = "stock_copilot_mode_unresolved";
+
+/** Named refusal when the platform resolver's base (pin, base URL,
+ *  selection) disagrees with the selected trading mode. */
+export const STOCK_COPILOT_MODE_MISMATCH = "stock_copilot_mode_mismatch";
+
+/** Named state when the tenant's active broker is not the copilot's
+ *  broker: the cycle is inactive, places nothing, and says so. */
+export const STOCK_COPILOT_INACTIVE_BROKER = "stock_copilot_inactive_broker";
 
 /**
  * Copilot exit-plan policy (v1 constants, one home): every entry is
@@ -161,14 +182,19 @@ export interface StockCopilotDeps {
   activity?: StockCopilotActivityPort;
   /** The instance's acting login (order attribution + store scope). */
   userLogin: string;
-  /** The Alpaca platform, obtained through the TradingPlatform seam. */
+  /** The Alpaca platform, obtained through the TradingPlatform seam.
+   *  The host constructs it under the SELECTED environment, so its
+   *  own credential/base resolution follows the selected mode. */
   platform: ITradingPlatform;
+  /** #3451: the active broker + mode selection for this login,
+   *  resolved by the host from the panel menu's selection model
+   *  (src/agents/copilotTradingMode.ts). Required: a host that
+   *  cannot resolve it passes { resolved: false } and the cycle
+   *  refuses — there is no default mode. */
+  selection: CopilotSelectionResolution;
   /** Recent daily closes for a symbol, oldest → newest. */
   loadBars: (symbol: string) => Promise<number[]>;
   now?: () => Date;
-  /** Broker environment selection forwarded to the paper resolver
-   *  (the instance's TEST/PROD selection, when one exists). */
-  overrideEnv?: string;
   universe?: string[];
   strategies?: readonly SandboxStrategyId[];
 }
@@ -188,11 +214,14 @@ export interface StockCopilotCycleError {
 export interface StockCopilotCycleResult {
   status:
     | "disabled"
-    | "refused_live_environment"
+    | "mode_unresolved"
+    | "inactive_broker"
+    | "refused_mode_mismatch"
     | "skipped_outside_market_hours"
     | "paused"
     | "ok";
-  /** Named refusal code when status is refused_live_environment. */
+  /** Named refusal code when a mode gate refused the cycle
+   *  (status mode_unresolved or refused_mode_mismatch). */
   refusal?: string;
   entriesPlaced: number;
   exitsPlaced: number;
@@ -437,7 +466,7 @@ function appendCycleActivity(
   deps: StockCopilotDeps,
   result: StockCopilotCycleResult,
   cycleAt: string,
-  outcome: "traded" | "no_trade" | "refused",
+  outcome: "traded" | "no_trade" | "refused" | "inactive",
   detail: string | null,
 ): void {
   if (!deps.activity) return;
@@ -462,18 +491,21 @@ function appendCycleActivity(
 }
 
 /**
- * One copilot cycle. Gate order is deliberate: flag → paper guard →
- * market hours → work. The first two gates make zero platform calls;
- * per-symbol failures are collected, never thrown — one bad symbol
- * must not stop the loop's other positions from being managed.
+ * One copilot cycle. Gate order is deliberate: flag → selection
+ * gates (#3451: unresolved, then inactive broker, then the
+ * mode/base agreement guard) → market hours → work. The selection
+ * gates make zero platform calls; per-symbol failures are
+ * collected, never thrown — one bad symbol must not stop the
+ * loop's other positions from being managed.
  *
- * #3422: after the platform gate, the per-instance pause control
+ * #3422: after the selection gates, the per-instance pause control
  * is read. Paused ⇒ exits are still evaluated (open positions are
  * never left unmanaged) but no entries are placed, and the firing
  * is not recorded as a cycle. Unpaused cycles that evaluated the
- * market write one activity record (traded / no-trade); a guard
- * refusal writes one refused record. Flag-off and outside-hours
- * firings record nothing.
+ * market write one activity record (traded / no-trade); a refused
+ * cycle writes one refused record and an inactive cycle one
+ * inactive record. Flag-off and outside-hours firings record
+ * nothing.
  */
 export async function runStockCopilotCycle(
   deps: StockCopilotDeps,
@@ -496,13 +528,35 @@ export async function runStockCopilotCycle(
   const now = (deps.now ?? (() => new Date()))();
   const nowIso = now.toISOString();
 
-  // PAPER-ONLY GUARD — the adapter's own resolver (#3158), evaluated
-  // before the platform is touched at all.
-  const resolved = resolveAlpacaTradingBase(deps.env, deps.overrideEnv);
-  if (resolved.isLive) {
-    result.status = "refused_live_environment";
-    result.refusal = STOCK_COPILOT_LIVE_REFUSAL;
-    appendCycleActivity(deps, result, nowIso, "refused", STOCK_COPILOT_LIVE_REFUSAL);
+  // MODE GATES (#3451) — evaluated before the platform is touched
+  // at all. The selection is the panel menu's active broker + mode
+  // for this login, resolved by the host; the screener context's
+  // environment plays no part here.
+  if (!deps.selection.resolved) {
+    result.status = "mode_unresolved";
+    result.refusal = STOCK_COPILOT_MODE_UNRESOLVED;
+    appendCycleActivity(deps, result, nowIso, "refused", STOCK_COPILOT_MODE_UNRESOLVED);
+    return result;
+  }
+  const selection = deps.selection.selection;
+  if (selection.brokerId !== COPILOT_BROKER_ID) {
+    // One active broker, and it is not the copilot's: the cycle is
+    // inactive — named, recorded, and zero platform calls.
+    result.status = "inactive_broker";
+    appendCycleActivity(deps, result, nowIso, "inactive", STOCK_COPILOT_INACTIVE_BROKER);
+    return result;
+  }
+
+  // MODE GUARD — the adapter's own resolver (#3158), evaluated
+  // under the SELECTED environment: the base the constructed
+  // platform will trade against must agree with the selected mode.
+  // A pin or base URL that contradicts the selection refuses the
+  // cycle — never a silent trade in the wrong mode.
+  const resolvedBase = resolveAlpacaTradingBase(deps.env, selection.environment);
+  if (resolvedBase.isLive !== (selection.mode === "live")) {
+    result.status = "refused_mode_mismatch";
+    result.refusal = STOCK_COPILOT_MODE_MISMATCH;
+    appendCycleActivity(deps, result, nowIso, "refused", STOCK_COPILOT_MODE_MISMATCH);
     return result;
   }
 

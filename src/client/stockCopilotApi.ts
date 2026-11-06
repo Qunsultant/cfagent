@@ -42,7 +42,7 @@ export interface StockCopilotActivityExit {
 export interface StockCopilotActivityRecord {
   id: string;
   cycleAt: string;
-  outcome: "traded" | "no_trade" | "refused";
+  outcome: "traded" | "no_trade" | "refused" | "inactive";
   entries: string[];
   exits: StockCopilotActivityExit[];
   detail: string | null;
@@ -52,13 +52,20 @@ export type StockCopilotStatusKind =
   | "off"
   | "paused"
   | "outside_market_hours"
-  | "live";
+  | "live"
+  | "mode_unresolved"
+  | "inactive_broker";
 
 export interface StockCopilotStatus {
   flagEnabled: boolean;
   paused: boolean;
   marketOpen: boolean;
   status: StockCopilotStatusKind;
+  /** #3451: the effective trading selection the next cycle runs
+   *  under (from the panel menu's selection model). */
+  selectionResolved: boolean;
+  activeBroker: string | null;
+  activeMode: "paper" | "live" | null;
   userLogin: string;
   controlUpdatedAt: string | null;
   openPositions: StockCopilotOpenPosition[];
@@ -92,6 +99,27 @@ export async function setStockCopilotPaused(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ paused }),
   });
+}
+
+const BROKER_DISPLAY_NAMES: Record<string, string> = {
+  alpaca: "Alpaca",
+  etrade: "E*TRADE",
+};
+
+/**
+ * #3451: the effective selection as the panel shows it — e.g.
+ * "Alpaca · Paper" / "Alpaca · Live". Null when the selection did
+ * not resolve (the status kind carries that state instead).
+ * Display-only: selection itself lives in the dynamic panel menu.
+ */
+export function copilotSelectionLabel(status: StockCopilotStatus): string | null {
+  if (!status.selectionResolved || !status.activeBroker || !status.activeMode) {
+    return null;
+  }
+  const broker =
+    BROKER_DISPLAY_NAMES[status.activeBroker] ?? status.activeBroker;
+  const mode = status.activeMode === "paper" ? "Paper" : "Live";
+  return `${broker} · ${mode}`;
 }
 
 /** "Nov 4, 2026, 10:00 AM" style timestamp; "—" for missing/invalid. */

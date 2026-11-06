@@ -16,9 +16,17 @@
  * already runs (the Workers cron set's finest trigger is the `*\/30`
  * tick; no new cron can be added, the account is at its trigger
  * ceiling — see wrangler.jsonc). The cycle
- * itself re-checks the flag, the Alpaca paper guard, and market hours
- * on every firing, so a declaration that outlives a config change
- * still cannot trade.
+ * itself re-checks the flag, the trading-mode selection, and market
+ * hours on every firing, so a declaration that outlives a config
+ * change still cannot trade.
+ *
+ * Issue #3451: the cycle's trading mode comes from the panel menu's
+ * selection model (../copilotTradingMode.ts) — the tenant's active
+ * broker and this login's stored trade environment — resolved here
+ * at firing time. The screener execution context contributes ONLY
+ * the acting login: its environment snapshot is not a trading mode
+ * and no longer reaches the platform or the cycle (that conflation
+ * refused every cycle in a PROD context, whatever the menu said).
  */
 
 import type { AgentContext } from "agents";
@@ -29,6 +37,8 @@ import type {
 } from "../../actors/thinkAdapter";
 import type { Env } from "../../types";
 import type { ScreenerExecutionContext } from "./scheduleMaintenance";
+import { resolveCopilotTradingSelection } from "../copilotTradingMode";
+import type { CommercialStore } from "../../data/commercialPorts";
 import {
   createStockCopilotActivityPort,
   createStockCopilotControlPort,
@@ -57,6 +67,13 @@ export interface ScheduledTasksCopilotContext {
   agentCtx: AgentContext;
   getScreenerExecutionContext: () => Promise<ScreenerExecutionContext | undefined>;
   getOrm: () => DatabaseORM | undefined;
+  /** The instance's settings reader (#3451: the stored trade
+   *  environment the mode selection reads, #2482/#3382). */
+  readSettingRaw: (key: string) => string | null;
+  /** #3451 composition seam for the broker-selection read: when
+   *  omitted, the resolver composes the commercial store from env;
+   *  tests inject the store directly. */
+  commercial?: CommercialStore | null;
   audit: (
     type: string,
     agent: "orchestrator",
@@ -78,12 +95,22 @@ export async function runStockCopilotCycleForInstance(
   const sql = (ctx.agentCtx?.storage as unknown as { sql?: SqlStorage } | undefined)?.sql;
   if (!sql) return;
   const userLogin = executionContext.userLogin;
+  // #3451: resolve the active broker + mode for this login from the
+  // panel menu's selection model. The platform is constructed under
+  // the SELECTED environment, so its own credential pair and base
+  // URL follow the mode; an unresolved selection constructs it
+  // unselected and the cycle refuses before touching it.
+  const selection = await resolveCopilotTradingSelection({
+    env: ctx.env,
+    readSettingRaw: ctx.readSettingRaw,
+    commercial: ctx.commercial,
+  });
   const platform = TradingPlatformRegistry.getPlatform(
     "alpaca",
     ctx.env,
     ctx.getOrm(),
     userLogin,
-    executionContext.environment,
+    selection.resolved ? selection.selection.environment : undefined,
   );
   const marketData = new MarketDataResearchService(ctx.env);
   const result = await runStockCopilotCycle({
@@ -96,7 +123,7 @@ export async function runStockCopilotCycleForInstance(
     activity: createStockCopilotActivityPort(sql),
     userLogin,
     platform,
-    overrideEnv: executionContext.environment,
+    selection,
     universe: copilotUniverseFromEnv(ctx.env),
     loadBars: async (symbol: string) => {
       // The facade's alpaca-first order with explicit-unavailable

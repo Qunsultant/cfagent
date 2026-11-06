@@ -862,6 +862,7 @@ export async function routeRequest(deps: RouteRequestDeps, request: Request): Pr
     env: deps.env,
     sql: deps.ctx.storage.sql,
     getScreenerExecutionContext: () => deps.getScreenerExecutionContext(),
+    readSettingRaw: (key) => deps.readSettingRaw(key),
     audit: (type, agent, payload) => deps.audit(type, agent, payload),
   });
   if (stockCopilotResponse) return stockCopilotResponse;

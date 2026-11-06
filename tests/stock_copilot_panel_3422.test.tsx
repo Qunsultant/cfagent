@@ -50,6 +50,9 @@ const liveStatus: StockCopilotStatus = {
   paused: false,
   marketOpen: true,
   status: "live",
+  selectionResolved: true,
+  activeBroker: "alpaca",
+  activeMode: "paper",
   userLogin: "owner",
   controlUpdatedAt: null,
   openPositions: [
@@ -156,6 +159,51 @@ describe("StockCopilotPanel (#3422)", () => {
       expect(text).toContain("no_entry_signals");
       // The pause control is offered.
       expect(buttonByText(container, "Pause entries")).toBeTruthy();
+    } finally {
+      root.unmount();
+    }
+  });
+
+  it("shows the effective broker + mode selection from the panel menu (#3451)", async () => {
+    const { container, root } = await renderPanel();
+    try {
+      expect(container.textContent ?? "").toContain("Alpaca · Paper");
+    } finally {
+      root.unmount();
+    }
+  });
+
+  it("inactive broker: the panel names the state and the active selection (#3451)", async () => {
+    apiState.status = {
+      ...liveStatus,
+      status: "inactive_broker",
+      activeBroker: "etrade",
+      activeMode: "paper",
+    };
+    const { container, root } = await renderPanel();
+    try {
+      const text = container.textContent ?? "";
+      expect(text).toContain("Inactive broker");
+      expect(text).toContain("E*TRADE · Paper");
+      expect(text).toContain("stays inactive");
+    } finally {
+      root.unmount();
+    }
+  });
+
+  it("mode unresolved: the panel says the selection could not be read (#3451)", async () => {
+    apiState.status = {
+      ...liveStatus,
+      status: "mode_unresolved",
+      selectionResolved: false,
+      activeBroker: null,
+      activeMode: null,
+    };
+    const { container, root } = await renderPanel();
+    try {
+      const text = container.textContent ?? "";
+      expect(text).toContain("Mode unresolved");
+      expect(text).toContain("could not be read");
     } finally {
       root.unmount();
     }

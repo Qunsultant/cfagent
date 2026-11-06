@@ -6,7 +6,12 @@
  *   GET  /stock-copilot/status  — the chat-tab panel's read: global
  *        flag state, per-instance pause state, market-open state,
  *        open positions WITH their exit plans, recently closed
- *        positions, and recent cycle activity.
+ *        positions, and recent cycle activity. #3451 adds the
+ *        effective trading selection (active broker + mode, from
+ *        the panel menu's selection model) and the named
+ *        mode_unresolved / inactive_broker states, so the panel
+ *        reports the mode the cycle will actually run — selection
+ *        itself stays in the dynamic panel menu.
  *   POST /stock-copilot/control — the panel's only write: set the
  *        caller's own pause control ({ paused: boolean }). Paused
  *        ⇒ the cycle keeps managing exits but places no entries;
@@ -23,6 +28,11 @@
  * instance's storage handle; this module holds no statements.
  */
 
+import {
+  COPILOT_BROKER_ID,
+  resolveCopilotTradingSelection,
+} from "../copilotTradingMode";
+import type { CommercialStore } from "../../data/commercialPorts";
 import {
   createStockCopilotActivityPort,
   createStockCopilotControlPort,
@@ -52,6 +62,13 @@ export interface StockCopilotRouteContext {
   sql: StockCopilotStoreSqlExecutor;
   /** The instance's acting identity (the cycle's own login source). */
   getScreenerExecutionContext: () => Promise<ScreenerExecutionContext | undefined>;
+  /** The instance's settings reader (#3451: the stored trade
+   *  environment half of the mode selection). */
+  readSettingRaw: (key: string) => string | null;
+  /** #3451 composition seam for the broker-selection read: when
+   *  omitted, the resolver composes the commercial store from env;
+   *  tests inject the store directly. */
+  commercial?: CommercialStore | null;
   /** Control changes are audited (optional: read-only hosts omit it). */
   audit?: (
     type: string,
@@ -131,18 +148,33 @@ export async function handleStockCopilotRoutes(
       const controlRecord = control.getControl(userLogin);
       const paused = controlRecord?.paused === true;
       const marketOpen = isUsMarketOpen(new Date());
+      // #3451: the effective selection, resolved exactly as the
+      // cycle resolves it — the panel reports the broker + mode the
+      // next cycle will run under, or the named state that stops it.
+      const selection = await resolveCopilotTradingSelection({
+        env: ctx.env,
+        readSettingRaw: ctx.readSettingRaw,
+        commercial: ctx.commercial,
+      });
       const status = !flagEnabled
         ? "off"
-        : paused
-          ? "paused"
-          : !marketOpen
-            ? "outside_market_hours"
-            : "live";
+        : !selection.resolved
+          ? "mode_unresolved"
+          : selection.selection.brokerId !== COPILOT_BROKER_ID
+            ? "inactive_broker"
+            : paused
+              ? "paused"
+              : !marketOpen
+                ? "outside_market_hours"
+                : "live";
       return Response.json({
         flagEnabled,
         paused,
         marketOpen,
         status,
+        selectionResolved: selection.resolved,
+        activeBroker: selection.resolved ? selection.selection.brokerId : null,
+        activeMode: selection.resolved ? selection.selection.mode : null,
         userLogin,
         controlUpdatedAt: controlRecord?.updatedAt ?? null,
         openPositions: positions.listOpenPositions(userLogin).map(projectOpenPosition),

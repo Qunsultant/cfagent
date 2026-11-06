@@ -124,15 +124,17 @@ export interface CopilotCycleActivityRecord {
   cycleAt: string;
   /** traded = at least one entry or exit landed; no_trade = the
    *  cycle evaluated and deliberately placed nothing (detail says
-   *  why); refused = the paper guard refused the cycle (detail
-   *  names the refusal). */
-  outcome: "traded" | "no_trade" | "refused";
+   *  why); refused = a mode gate refused the cycle (detail names
+   *  the refusal); inactive = the cycle did not run because the
+   *  active broker is not the copilot's (detail names the state,
+   *  #3451). */
+  outcome: "traded" | "no_trade" | "refused" | "inactive";
   /** Symbols entered this cycle. */
   entries: string[];
   /** Exits placed this cycle, each with its exit reason. */
   exits: CopilotActivityExit[];
-  /** The no-trade reason summary, or the guard's refusal code;
-   *  null for traded cycles. */
+  /** The no-trade reason summary, a refusal code, or the inactive
+   *  state's name; null for traded cycles. */
   detail: string | null;
 }
 
