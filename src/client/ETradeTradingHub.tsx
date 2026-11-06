@@ -2119,14 +2119,16 @@ export function ETradeTradingHub({
               >
                 ⚡ Fast Order Ticket
               </Button>
-              {!isLive && selectedBroker === "etrade" && (
-                <Button variant="secondary"
-                  type="button"
-                  onClick={handleSeedDemoPortfolio}
-                  title="Load curated paper trading positions (NVDA, AAPL, MSFT, SPY) to explore"
-                >
-                  🌱 {positions.length === 0 ? "Load Demo Holdings" : "Reset Demo Holdings"}
-                </Button>
+              {!isLive && (
+                selectedBroker === "etrade" ? (
+                  <Button variant="secondary"
+                    type="button"
+                    onClick={handleSeedDemoPortfolio}
+                    title="Load curated paper trading positions (NVDA, AAPL, MSFT, SPY) to explore"
+                  >
+                    🌱 {positions.length === 0 ? "Load Demo Holdings" : "Reset Demo Holdings"}
+                  </Button>
+                ) : null
               )}
             </div>
           </div>
@@ -2216,10 +2218,12 @@ export function ETradeTradingHub({
                               <Button variant="trade" onClick={() => handleNavigateSubTab("order")}>
                                 ⚡ Build Order Ticket
                               </Button>
-                              {!isLive && selectedBroker === "etrade" && (
-                                <Button variant="secondary" onClick={handleSeedDemoPortfolio}>
-                                  🌱 Load Curated Demo Positions
-                                </Button>
+                              {!isLive && (
+                                selectedBroker === "etrade" ? (
+                                  <Button variant="secondary" onClick={handleSeedDemoPortfolio}>
+                                    🌱 Load Curated Demo Positions
+                                  </Button>
+                                ) : null
                               )}
                             </div>
                           }
