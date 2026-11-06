@@ -5,7 +5,7 @@
  * port (createCanonicalReportStorePorts(ctx.sql).usage) — the same
  * port the premium route meters through. The workflow reaches this
  * route endpoint-mediated (recordMeterUsageEvent in
- * src/services/cfpayLedger.ts posts through the SEARCH_AGENT
+ * src/services/cfpayLedger.ts posts through the ORCHESTRATOR_AGENT
  * stub), because workflow steps run in the Worker with no DO sql
  * accessor — the same reachability shape as the saga audit
  * forwarder posting to /api/audit/event.
