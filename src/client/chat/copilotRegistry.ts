@@ -199,23 +199,33 @@ export const DEFAULT_COPILOTS: CopilotConfig[] = [
     },
     quickChips: [
       {
+        label: "⏱️ Set loop interval to 1 hour",
+        prompt: "Set loop interval to 1 hour",
+        category: "Loop Cadence",
+      },
+      {
+        label: "🌙 Enable pre-market and overnight sessions",
+        prompt: "Enable pre-market and overnight sessions",
+        category: "Trading Sessions",
+      },
+      {
+        label: "⏸️ Pause trading until 9:30 AM",
+        prompt: "Pause trading until 9:30 AM",
+        category: "Loop Control",
+      },
+      {
+        label: "🔍 What are you doing?",
+        prompt: "What is the Stock Copilot doing right now and what happened in the latest cycle?",
+        category: "Loop Telemetry",
+      },
+      {
+        label: "🧠 Explain workflow & tools",
+        prompt: "Explain your autonomous trading workflow, 5-stage pipeline, and active tools",
+        category: "Tool Introspection",
+      },
+      {
         label: "📊 Open Positions & Exits",
         prompt: "Show all open positions and their take-profit / stop-loss exit plans",
-        category: "Stock Copilot Guide",
-      },
-      {
-        label: "🔄 Latest Cycle Telemetry",
-        prompt: "What is the current status of the Stock Copilot loop and what happened in the latest cycle?",
-        category: "Stock Copilot Guide",
-      },
-      {
-        label: "🛡️ CVaR Risk Management",
-        prompt: "How does the Stock Copilot CVaR optimizer and risk management work?",
-        category: "Stock Copilot Guide",
-      },
-      {
-        label: "⏰ 24/7 Trading Sessions",
-        prompt: "Explain the 4 trading sessions and their active execution hours",
         category: "Stock Copilot Guide",
       },
       {
