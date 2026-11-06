@@ -68,6 +68,8 @@ import { firstRunBrokerStep } from "./firstRunBrokerStep";
 import { BROKER_CATALOG, brokerCredentialGuidance, isBrokerId } from "../trading/brokerCatalog";
 import { listPlans, subscriptionTrial, type PlanView } from "./commercialApi";
 import { NotificationPreferencesPanel } from "./NotificationPreferencesPanel";
+import { ProfileSection } from "./ProfileSection";
+import { fetchProfile, type UserProfileView } from "./profileApi";
 
 export interface FirstRunScreenProps {
   /** Session login, used only as the completion-store key. */
@@ -148,6 +150,7 @@ export function FirstRunScreen({ userLogin, initialStep, onComplete, onDismiss, 
     accountSelf: AccountSelfView;
     etrade: ETradeStatusView | null;
     plans: PlanView[];
+    profile: UserProfileView | null;
   } | null>(null);
   const [setupAttempt, setSetupAttempt] = useState(0);
   const [plansAttempt, setPlansAttempt] = useState(0);
@@ -254,14 +257,24 @@ export function FirstRunScreen({ userLogin, initialStep, onComplete, onDismiss, 
     setSummaryError(false);
     (async () => {
       try {
-        const [freshIdentity, accountSelf, liveEtrade, { plans: freshPlans }] = await Promise.all([
-          fetchPlatformIdentity(),
-          fetchAccountSelf(),
-          fetchETradeStatus().catch(() => null),
-          listPlans().catch(() => ({ plans: [] as PlanView[] })),
-        ]);
+        const [freshIdentity, accountSelf, liveEtrade, { plans: freshPlans }, liveProfile] =
+          await Promise.all([
+            fetchPlatformIdentity(),
+            fetchAccountSelf(),
+            fetchETradeStatus().catch(() => null),
+            listPlans().catch(() => ({ plans: [] as PlanView[] })),
+            // Profile is ancillary to the summary: a failed read
+            // shows as unset, never fails the summary itself.
+            fetchProfile().catch(() => null),
+          ]);
         if (!cancelled) {
-          setSummary({ identity: freshIdentity, accountSelf, etrade: liveEtrade, plans: freshPlans });
+          setSummary({
+            identity: freshIdentity,
+            accountSelf,
+            etrade: liveEtrade,
+            plans: freshPlans,
+            profile: liveProfile,
+          });
         }
       } catch {
         if (!cancelled) setSummaryError(true);
@@ -350,10 +363,11 @@ export function FirstRunScreen({ userLogin, initialStep, onComplete, onDismiss, 
             )}
           </Card>
         ) : step === 1 ? (
-          <Card>
-            <p>
-              Signed in as: <strong>{identity.userLogin}</strong>
-            </p>
+          <>
+            <Card>
+              <p>
+                Signed in as: <strong>{identity.userLogin}</strong>
+              </p>
             <p>
               Tier: <Badge tone="neutral">{identity.tier}</Badge>
             </p>
@@ -398,7 +412,9 @@ export function FirstRunScreen({ userLogin, initialStep, onComplete, onDismiss, 
                 Continue to hub
               </Button>
             )}
-          </Card>
+            </Card>
+            <ProfileSection userLogin={userLogin} />
+          </>
         ) : step === 2 ? (
           <Card>
             <p>
@@ -566,6 +582,10 @@ export function FirstRunScreen({ userLogin, initialStep, onComplete, onDismiss, 
                 </p>
                 <p>Credits: ${summary.identity.creditsUSD.toFixed(2)}</p>
                 <p>Included runs remaining: {summary.identity.includedRunsRemaining}</p>
+                <p>
+                  Display name: {summary.profile?.displayName ?? summary.identity.userLogin}
+                </p>
+                <p>Phone: {summary.profile?.phone ?? "Not provided"}</p>
                 {(() => {
                   const trialRow = summary.accountSelf.subscriptions
                     .filter((s) => s.provider === "trial")
