@@ -10,6 +10,15 @@
  *   GET  /platform/accounts/lookup      operator lookup by userId
  *   GET  /platform/onboarding/state     self-only onboarding state
  *   POST /platform/onboarding/state     self-only onboarding state save
+ *   GET  /platform/accounts/profile     self-only profile read (#3261)
+ *   POST /platform/accounts/profile     self-only profile save (#3261)
+ *
+ * (#3261, sub-issue of #3256: profile view + edit — display name
+ * and phone only. Email is NOT a field here: email change touches
+ * IAAA / session / auth and needs CISO review first (#3261 comment
+ * 6681436382, refs #945); until that review lands, email is
+ * explicitly deferred and no email route exists. Phone is an
+ * UNVERIFIED contact field, never used for auth or recovery.)
  *
  * (#3256, sub-issue of #3241: the onboarding state routes live here
  * because they are self-service platform-account state, keyed by the
@@ -71,10 +80,12 @@
 import { createCommercialAdapter } from "../../data/createCommercialPorts";
 import { createOnboardingAdapter } from "../../data/createOnboardingPorts";
 import { createPriceCatalogueAdapter } from "../../data/createPriceCataloguePorts";
+import { createProfileAdapter } from "../../data/createProfilePorts";
 import { createStoreOperatorsAdapter } from "../../data/createStoreOperatorsPorts";
 import { createSubscriptionAdapter } from "../../data/createSubscriptionPorts";
 import type { CommercialStore } from "../../data/commercialPorts";
 import type { OnboardingStateStore } from "../../data/onboardingPorts";
+import type { UserProfileStore } from "../../data/profilePorts";
 import type { PriceCatalogue, PriceEntry } from "../../data/priceCataloguePorts";
 import type { StoreOperators } from "../../data/storeOperatorsPorts";
 import type { SubscriptionStore } from "../../data/subscriptionPorts";
@@ -83,7 +94,34 @@ import {
   toPlatformIdentityView,
   type PlatformIdentity,
 } from "../../services/platformIdentity";
+import {
+  extractIdempotencyKey,
+  toUserProfileView,
+  validateProfileInput,
+} from "../../services/userProfile";
+import { BusinessError, getOutcome } from "../../outcomes/outcomeAspects";
+import { logAspectEvent } from "../../aspects/loggingAspect";
 import type { AgentName, Env } from "../../types";
+
+/**
+ * Issue #3261 — coded profile response bodies (AOP, #1969 program).
+ *
+ * Every profile response carries {code, message} resolved through
+ * the single outcome resolver — the businessMessage is the one
+ * rendering in every channel, never a hand-written variant. An
+ * unknown code is a programming error and fails closed as a coded
+ * 500 (BusinessError), never an uncoded message. Only the profile
+ * paths use this helper; the other account routes keep their
+ * existing fixed strings, untouched.
+ */
+function profileCodedBody(
+  code: string,
+  extra?: Record<string, unknown>,
+): Record<string, unknown> {
+  const entry = getOutcome(code);
+  if (!entry) throw new BusinessError("FAILURE_UNEXPECTED_ERROR");
+  return { code: entry.code, message: entry.businessMessage, ...(extra ?? {}) };
+}
 
 /** Port inputs for the account routes (adapters satisfy these structurally). */
 export interface PlatformAccountPorts {
@@ -93,6 +131,8 @@ export interface PlatformAccountPorts {
   operators: StoreOperators | null;
   /** Onboarding state store (#3256); null when unbound — the state routes fail closed with 503. */
   onboarding: OnboardingStateStore | null;
+  /** User profile store (#3261); null when unbound — the profile routes fail closed with 503. */
+  profile: UserProfileStore | null;
 }
 
 export interface PlatformAccountRouteContext {
@@ -150,6 +190,7 @@ function resolvePorts(ctx: PlatformAccountRouteContext): PlatformAccountPorts {
     prices: createPriceCatalogueAdapter(env),
     operators: createStoreOperatorsAdapter(env),
     onboarding: createOnboardingAdapter(env),
+    profile: createProfileAdapter(env),
   };
 }
 
@@ -235,11 +276,18 @@ export async function handlePlatformAccountRoutes(
   const isLookup = path.endsWith("/platform/accounts/lookup") && request.method === "GET";
   const isOnboardingGet = path.endsWith("/platform/onboarding/state") && request.method === "GET";
   const isOnboardingSave = path.endsWith("/platform/onboarding/state") && request.method === "POST";
-  if (!isSelf && !isSetup && !isLookup && !isOnboardingGet && !isOnboardingSave) return null;
+  const isProfileGet = path.endsWith("/platform/accounts/profile") && request.method === "GET";
+  const isProfileSave = path.endsWith("/platform/accounts/profile") && request.method === "POST";
+  if (!isSelf && !isSetup && !isLookup && !isOnboardingGet && !isOnboardingSave && !isProfileGet && !isProfileSave) return null;
 
   const login = request.headers.get("x-user-login");
   const verifiedLogin = login && login.trim() ? login.trim() : null;
   if (!verifiedLogin) {
+    // Profile paths get the coded 401; the other account routes
+    // keep their existing fixed string, untouched.
+    if (isProfileGet || isProfileSave) {
+      return Response.json(profileCodedBody("FAILURE_PROFILE_NOT_SIGNED_IN"), { status: 401 });
+    }
     return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
   }
   const ports = resolvePorts(ctx);
@@ -333,6 +381,166 @@ export async function handlePlatformAccountRoutes(
         });
       }
       return Response.json({ state });
+    }
+
+    // User profile (#3261) — self only, keyed by the verified
+    // session login. The body is never trusted for identity: a
+    // client-supplied userLogin/tenantId/email is not read here at
+    // all, in any path. Display name and phone only — email change
+    // needs CISO review first (#3261 comment 6681436382, refs
+    // #945) and has no route until that review lands. Every
+    // response carries {code, message} from the outcome catalog
+    // (AOP); validation failures are structural (field + kind at
+    // the point of failure, kind to logs only, never values).
+    // Idempotent Receiver (standards §7.2): the POST requires an
+    // idempotencyKey and replays it with 409. A POST with no
+    // profile fields is a no-op read: it writes nothing and audits
+    // nothing. Writes audit code + message + login + changed-flags
+    // only, never the profile values themselves (phone is PII).
+    // A store throw fails closed as a coded 503, never a raw error.
+    if (isProfileGet || isProfileSave) {
+      if (!ports.profile) {
+        logAspectEvent({
+          aspect: "Profile",
+          operationName: "profile",
+          code: "FAILURE_PROFILE_STORE_UNAVAILABLE",
+          level: "error",
+          message: "profile store unbound",
+          metadata: { userLogin: verifiedLogin },
+        });
+        return Response.json(profileCodedBody("FAILURE_PROFILE_STORE_UNAVAILABLE"), { status: 503 });
+      }
+      const store = ports.profile;
+      const readProfile = async (): Promise<
+        { ok: true; profile: Awaited<ReturnType<typeof store.getProfile>> } | { ok: false }
+      > => {
+        try {
+          return { ok: true, profile: await store.getProfile(verifiedLogin) };
+        } catch {
+          logAspectEvent({
+            aspect: "Profile",
+            operationName: "profile.read",
+            code: "FAILURE_PROFILE_STORE_UNAVAILABLE",
+            level: "error",
+            message: "profile store read failed",
+            metadata: { userLogin: verifiedLogin },
+          });
+          return { ok: false };
+        }
+      };
+      if (isProfileGet) {
+        const read = await readProfile();
+        if (!read.ok) {
+          return Response.json(profileCodedBody("FAILURE_PROFILE_STORE_UNAVAILABLE"), { status: 503 });
+        }
+        return Response.json({
+          ...profileCodedBody("SUCCESS_PROFILE_READ"),
+          ...toUserProfileView(verifiedLogin, read.profile),
+        });
+      }
+      const body = (await request.json().catch(() => ({}))) as {
+        displayName?: unknown;
+        phone?: unknown;
+        idempotencyKey?: unknown;
+      };
+      const key = extractIdempotencyKey(body);
+      if (!key.ok) {
+        logAspectEvent({
+          aspect: "Profile",
+          operationName: "profile.save",
+          code: "FAILURE_PROFILE_VALIDATION",
+          level: "warn",
+          message: "idempotency key missing or wrong type",
+          metadata: { userLogin: verifiedLogin, field: "idempotencyKey", kind: key.kind },
+        });
+        return Response.json(
+          profileCodedBody("FAILURE_PROFILE_VALIDATION", { field: "idempotencyKey" }),
+          { status: 400 },
+        );
+      }
+      const validated = validateProfileInput(body);
+      if (!validated.ok) {
+        logAspectEvent({
+          aspect: "Profile",
+          operationName: "profile.save",
+          code: "FAILURE_PROFILE_VALIDATION",
+          level: "warn",
+          message: "profile validation failed",
+          metadata: {
+            userLogin: verifiedLogin,
+            field: validated.failure.field,
+            kind: validated.failure.kind,
+          },
+        });
+        return Response.json(
+          profileCodedBody("FAILURE_PROFILE_VALIDATION", { field: validated.failure.field }),
+          { status: 400 },
+        );
+      }
+      const previous = await readProfile();
+      if (!previous.ok) {
+        return Response.json(profileCodedBody("FAILURE_PROFILE_STORE_UNAVAILABLE"), { status: 503 });
+      }
+      const input = validated.value;
+      if (!("displayName" in input) && !("phone" in input)) {
+        return Response.json({
+          ...profileCodedBody("SUCCESS_PROFILE_READ"),
+          ...toUserProfileView(verifiedLogin, previous.profile),
+        });
+      }
+      const nowMs = Date.now();
+      let saved: Awaited<ReturnType<typeof store.saveProfileOnce>>;
+      try {
+        saved = await store.saveProfileOnce(
+          {
+            userLogin: verifiedLogin,
+            displayName:
+              "displayName" in input ? (input.displayName ?? null) : (previous.profile?.displayName ?? null),
+            phone: "phone" in input ? (input.phone ?? null) : (previous.profile?.phone ?? null),
+            updatedAtMs: nowMs,
+          },
+          key.key,
+          nowMs,
+        );
+      } catch {
+        logAspectEvent({
+          aspect: "Profile",
+          operationName: "profile.save",
+          code: "FAILURE_PROFILE_STORE_UNAVAILABLE",
+          level: "error",
+          message: "profile store write failed",
+          metadata: { userLogin: verifiedLogin },
+        });
+        return Response.json(profileCodedBody("FAILURE_PROFILE_STORE_UNAVAILABLE"), { status: 503 });
+      }
+      if (saved.duplicate) {
+        logAspectEvent({
+          aspect: "Profile",
+          operationName: "profile.save",
+          code: "FAILURE_PROFILE_DUPLICATE",
+          level: "warn",
+          message: "idempotency key replayed",
+          metadata: { userLogin: verifiedLogin },
+        });
+        return Response.json(
+          profileCodedBody("FAILURE_PROFILE_DUPLICATE", { duplicate: true }),
+          { status: 409 },
+        );
+      }
+      const next = saved.profile!;
+      const updatedEntry = getOutcome("SUCCESS_PROFILE_UPDATED")!;
+      ctx.audit("platform.profile.updated", "payments", {
+        code: "SUCCESS_PROFILE_UPDATED",
+        message: updatedEntry.businessMessage,
+        userLogin: verifiedLogin,
+        displayNameChanged: (previous.profile?.displayName ?? null) !== next.displayName,
+        phoneChanged: (previous.profile?.phone ?? null) !== next.phone,
+        updatedAtMs: nowMs,
+      });
+      return Response.json({
+        ...profileCodedBody("SUCCESS_PROFILE_UPDATED"),
+        ...toUserProfileView(verifiedLogin, next),
+      });
     }
 
     // POST /platform/accounts/setup — self-service, idempotent.
