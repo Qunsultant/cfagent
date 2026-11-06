@@ -38,7 +38,7 @@
  * (#147/#140). These tests therefore pin the FIXED routes only.
  *
  * Harness: same pattern as tests/trade_approve_session_gate.test.ts —
- * the REAL worker fetch dispatch with a recording SEARCH_AGENT stub
+ * the REAL worker fetch dispatch with a recording ORCHESTRATOR_AGENT stub
  * and a Map-backed SESSIONS KV. The voice-WS unauthenticated test also
  * proves the session check runs BEFORE WebSocketPair construction
  * (which does not exist in Node: reaching it would throw).
@@ -124,7 +124,7 @@ function makeEnv() {
         },
       }),
     },
-    SEARCH_AGENT: {
+    ORCHESTRATOR_AGENT: {
       idFromName: (name: string) => name,
       get: (id: string) => ({
         fetch: async (req: Request) => {
