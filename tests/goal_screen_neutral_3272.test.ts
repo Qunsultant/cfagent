@@ -107,6 +107,10 @@ describe("the goal path is wired to the neutral engines (#3272 S3)", () => {
   it("passes the neutral provider id so the report cannot claim etrade-yahoo-stocks", () => {
     expect(source).toContain("stockProviderId: NEUTRAL_STOCK_SCREENING_PROVIDER_ID");
   });
+
+  it("refuses instead of falling back to E*TRADE when the broker has no chain source (#3460)", () => {
+    expect(source).toContain("createRefusingOptionsScreener(selectedBroker)");
+  });
 });
 
 describe("the neutral engines are real, not placeholders (#3272 S3)", () => {

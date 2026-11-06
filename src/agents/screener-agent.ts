@@ -1821,6 +1821,7 @@ export class ScreenerAgent extends PortThink {
       platformQuoteSource,
       NeutralMarketScreener,
       NEUTRAL_STOCK_SCREENING_PROVIDER_ID,
+      createRefusingOptionsScreener,
     } = await import("../trading");
     const selectedBroker = await resolveTenantBroker(this.env);
     const goalPlatform =
@@ -1833,10 +1834,16 @@ export class ScreenerAgent extends PortThink {
     // screener (runProductionGoalScreen hands it to the leg as the
     // workflow screener), so the neutral chain source reaches the
     // leg too — not just the registry path.
+    // Issue #3460: a non-E*TRADE tenant whose platform has no
+    // options chain source gets a refusing screener, never an
+    // E*TRADE one. Stocks-only goals never call it, so they proceed;
+    // any options leg throws provider_unsupported naming the broker.
     const optionsScreener =
-      neutralChainSource && selectedBroker !== "etrade"
-        ? new DynamicOptionsScreener(neutralChainSource, undefined, goalUniverseDeps)
-        : new DynamicOptionsScreener(etrade.client, undefined, goalUniverseDeps);
+      selectedBroker === "etrade"
+        ? new DynamicOptionsScreener(etrade.client, undefined, goalUniverseDeps)
+        : neutralChainSource
+          ? new DynamicOptionsScreener(neutralChainSource, undefined, goalUniverseDeps)
+          : createRefusingOptionsScreener(selectedBroker);
     const out = await runProductionGoalScreen({
       ledger: this.taskLedger(),
       ...(neutralQuoteSource
