@@ -250,6 +250,15 @@
     // the sync), and the Corpus tab reports per-item indexing state
     // as indexed. Rollback is unsetting this var and redeploying.
     "AI_SEARCH_CORPUS_INDEXING_ENABLED": "1",
+    // Issue #3413 — Stock Copilot enablement (owner direction
+    // 2026-11-05): the pattern-driven paper-trading loop from
+    // #3391 is ON in production. Paper-only by construction —
+    // its guard refuses any live Alpaca configuration — and it
+    // declares itself only on instances holding a screener
+    // execution context. The universe defaults to
+    // SPY/QQQ/AAPL/MSFT/NVDA unless STOCK_COPILOT_UNIVERSE is
+    // set. Rollback is unsetting this var and redeploying.
+    "STOCK_COPILOT_PAPER_ENABLED": "1",
     "APP_NAME": "NextGenTP",
     // Issue #2419 — externalized polling cadences (AOP). All optional;
     // absence means the pollingConfig defaults apply. Milliseconds,
