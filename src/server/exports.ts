@@ -23,11 +23,14 @@ export { OrchestratorAgent } from "../agents/orchestrator";
 // export); migration v15 now renames the SEARCH_AGENT namespace
 // onto OrchestratorAgent (renamed_classes), so the SearchAgent
 // export alias is retired and this own-name export is restored. The
-// SEARCH_AGENT binding name is unchanged — only its class_name is
-// now OrchestratorAgent — so instance names (logins) and their
-// stored state carry over, the class's own-name namespace is the
-// renamed namespace, and sub-agent root resolution through
-// ctx.exports works again.
+// SEARCH_AGENT binding name was left unchanged by that rename —
+// only its class_name became OrchestratorAgent — so instance names
+// (logins) and their stored state carry over, the class's own-name
+// namespace is the renamed namespace, and sub-agent root resolution
+// through ctx.exports works again. Issue #2570 finished the rename
+// on the binding side: the binding is now named ORCHESTRATOR_AGENT
+// (namespaces are per class, not per binding name, so no migration
+// was needed and the same instances and state are reached).
 // Issue #2230 — wrangler requires every bound DO class to be exported from
 // the entrypoint, otherwise `wrangler deploy` fails.
 
