@@ -24,9 +24,40 @@
  * its settle handle pre-insert — the row's shape depends on
  * the outcome, so this leg is NOT fire-and-forget at the seam
  * (the #2347 contract: the put precedes the insert and a row
- * never claims a body it does not have). The corpus document
- * kind lands in S3 (the union below gains its second member
- * there). discoveryReportPublish is out of scope (it
+ * never claims a body it does not have).
+ *
+ * S3 adds the union's second member, kind "corpus": the
+ * knowledge corpus's AI Search items leg (#3345) publishes
+ * through the same stage. The stage's corpus executor is the
+ * EXISTING hook indexCorpusDocInAiSearch — composed, never
+ * reimplemented — so the flag gate
+ * (AI_SEARCH_CORPUS_INDEXING_ENABLED) and the never-throws
+ * discipline stay inside the hook, exactly where they are
+ * observably. The corpus call sites (the upload route in
+ * routes/knowledgeCorpus.ts, the sync backfill leg in
+ * corpusAiSearchIndex.ts) now consume a stage outcome and
+ * render it in the corpus state vocabulary
+ * (indexed | not-configured | failed). A corpus document's
+ * only publish leg is ai-search; its default target set is
+ * ["ai-search"], and the report-only targets settle
+ * `not_attempted` for a corpus document (no corpus executor
+ * exists for them, and none is invoked).
+ *
+ * The corpus's R2 write is deliberately NOT a stage target.
+ * putKnowledgeDoc (src/services/knowledgeCorpus.ts) is the
+ * corpus document STORE's own put: it computes the document's
+ * content-hash identity from the bytes being written, stores
+ * them under knowledge/<category>/<sha256>, and records the
+ * metadata — the document does not exist before the write,
+ * and the write may fail its caller (KnowledgeCorpusError,
+ * mapped to an honest 400 by the route). That is the store
+ * operation the stage's contract ("publish an ALREADY-STORED
+ * document") starts after — the corpus analogue of the
+ * mas_reports INSERT, not of the r2-body leg, which publishes
+ * a stored report's body bytes to a second home. No second
+ * publish-style write exists in the corpus flow (the sync's
+ * integrity and backfill legs read only), so nothing else
+ * migrates. discoveryReportPublish remains out of scope (it
  * generates its artifacts; it does not publish a stored
  * document).
  *
@@ -76,15 +107,28 @@
  *   home, moved here from the seam, which re-exports it),
  *   the document's body string verbatim, contentType
  *   "application/json", through the ONE BlobStore port.
+ * - ai-search for kind "corpus" (S3): the hook owns its
+ *   enablement gate AND its rendered state vocabulary, so the
+ *   mapping runs off the hook's own `state`, 1:1 without
+ *   loss — hook ok ("indexed") -> `published`; hook state
+ *   "not-configured" -> `not_configured`, carrying the code
+ *   verbatim ("disabled" when the flag is off,
+ *   "not_configured" when the namespace binding is absent);
+ *   hook state "failed" -> `failed`, carrying the executor's
+ *   stable code AND its error message verbatim
+ *   ("invalid_input", "upload_failed", ...); a rejecting
+ *   hook -> `failed` with code "upload_failed" (defensive:
+ *   the hook never throws by contract).
  *
  * Target selection: publishDocument runs the two index
- * targets by default (the S1 behaviour every existing caller
- * relies on). A caller requests a different set via
- * PublishOptions.targets — the WithR2 seam requests
- * ["r2-body"] alone for its pre-insert phase, because the
- * index legs must not fire before the row exists (their
- * outcomes record onto the row) and the body leg must not
- * wait for them. Handles always come back in canonical
+ * targets by default for a report (the S1 behaviour every
+ * existing caller relies on); for a corpus document the
+ * default is ["ai-search"], its only leg. A caller requests
+ * a different set via PublishOptions.targets — the WithR2
+ * seam requests ["r2-body"] alone for its pre-insert phase,
+ * because the index legs must not fire before the row exists
+ * (their outcomes record onto the row) and the body leg must
+ * not wait for them. Handles always come back in canonical
  * order: r2-body, vectorize, ai-search.
  */
 
@@ -99,11 +143,18 @@ import {
   type CanonicalReportForAiSearchIndex,
   type ReportAiSearchIndexEnv,
 } from "./reportAiSearchIndex";
+import {
+  indexCorpusDocInAiSearch,
+  type CorpusAiSearchIndexEnv,
+} from "./corpusAiSearchIndex";
+import type { KnowledgeDocMeta } from "./knowledgeCorpus";
 import { createBlobStore } from "./blobStoreR2Adapter";
 import type { BlobStore } from "./blobStorePorts";
 
-/** The env the stage reads: the union of both legs' env subsets. */
-export type PublishEnv = IndexEnv & ReportAiSearchIndexEnv;
+/** The env the stage reads: the union of every leg's env subset. */
+export type PublishEnv = IndexEnv &
+  ReportAiSearchIndexEnv &
+  CorpusAiSearchIndexEnv;
 
 /**
  * A stored report to publish, in the stage's own shape. The
@@ -135,8 +186,27 @@ export interface ReportPublishDocument {
   storedAt?: string;
 }
 
-/** S1: reports only. S3 adds the corpus member to this union. */
-export type PublishDocumentInput = ReportPublishDocument;
+/**
+ * A stored corpus document to publish, in the stage's own
+ * shape. The document's identity is its bucket key
+ * (knowledge/<category>/<sha256>) — the manifest key whose
+ * tail is the content hash — carried as `documentId` and as
+ * meta.r2Key. `meta` + `bytes` are exactly the inputs the
+ * corpus hook has always taken: the hook derives the index
+ * text and provenance metadata from them.
+ */
+export interface CorpusPublishDocument {
+  kind: "corpus";
+  /** The corpus bucket key (knowledge/<category>/<sha256>). */
+  documentId: string;
+  /** The stored document's metadata record. */
+  meta: KnowledgeDocMeta;
+  /** The served bytes the index text is derived from. */
+  bytes: Uint8Array;
+}
+
+/** The stage's document union: reports (S1/S2) and corpus documents (S3). */
+export type PublishDocumentInput = ReportPublishDocument | CorpusPublishDocument;
 
 export type PublishTargetId = "r2-body" | "vectorize" | "ai-search";
 
@@ -185,6 +255,14 @@ export interface PublishDeps {
   indexCanonicalReport?: typeof indexCanonicalReport;
   indexCanonicalReportInAiSearch?: typeof indexCanonicalReportInAiSearch;
   /**
+   * The corpus ai-search executor: the EXISTING #3345 hook,
+   * composed as-is (flag gate, text derivation, never-throws
+   * all stay inside it). Injectable so pins can observe the
+   * (meta, bytes) inputs and the outcome mapping without a
+   * namespace double.
+   */
+  indexCorpusDocInAiSearch?: typeof indexCorpusDocInAiSearch;
+  /**
    * The r2-body put, against the stage-resolved BlobStore.
    * The default performs the seam's exact pre-stage put
    * (contentType "application/json"); injectable so pins can
@@ -202,8 +280,9 @@ export interface PublishDeps {
 export interface PublishOptions {
   /**
    * The targets to run, in any order (handles come back in
-   * canonical order). Default: the two index targets
-   * (["vectorize", "ai-search"]) — the S1 behaviour.
+   * canonical order). Default: for a report, the two index
+   * targets (["vectorize", "ai-search"]) — the S1 behaviour;
+   * for a corpus document, ["ai-search"] — its only leg.
    */
   targets?: readonly PublishTargetId[];
 }
@@ -319,6 +398,44 @@ function settleAiSearchTarget(
   })();
 }
 
+function settleCorpusAiSearchTarget(
+  env: PublishEnv | undefined,
+  doc: CorpusPublishDocument,
+  run: NonNullable<PublishDeps["indexCorpusDocInAiSearch"]>,
+): Promise<PublishTargetOutcome> {
+  return (async (): Promise<PublishTargetOutcome> => {
+    try {
+      const outcome = await run(env, { meta: doc.meta, bytes: doc.bytes });
+      if (outcome.ok) return { target: "ai-search", status: "published" };
+      if (outcome.state === "not-configured") {
+        // The hook's not-configured state arises exactly when
+        // it produced a code ("disabled" flag-off or the
+        // executor's "not_configured"); carry it verbatim.
+        return {
+          target: "ai-search",
+          status: "not_configured",
+          code: outcome.code,
+        };
+      }
+      return {
+        target: "ai-search",
+        status: "failed",
+        // The hook sets a stable code on every failed outcome;
+        // the fallback names the same token its own catch
+        // records, so a code-less failure can never reach a
+        // caller as a bare failure.
+        code: outcome.code ?? "upload_failed",
+        ...(outcome.error ? { error: outcome.error } : {}),
+      };
+    } catch {
+      // The hook never throws by contract; a throwing double
+      // or a future regression lands here as the same
+      // `failed` the hook's own catch would have recorded.
+      return { target: "ai-search", status: "failed", code: "upload_failed" };
+    }
+  })();
+}
+
 function settleR2BodyTarget(
   env: PublishEnv | undefined,
   doc: ReportPublishDocument,
@@ -353,9 +470,10 @@ function settleR2BodyTarget(
 
 /**
  * Publish one stored document to the requested targets
- * (default: the two report index legs). Returns
- * synchronously; every promise it hands out resolves (never
- * rejects) with the target's declared outcome.
+ * (default: the two report index legs, or the corpus
+ * document's ai-search leg). Returns synchronously; every
+ * promise it hands out resolves (never rejects) with the
+ * target's declared outcome.
  */
 export function publishDocument(
   env: PublishEnv | undefined,
@@ -366,28 +484,44 @@ export function publishDocument(
   const runVectorize = deps.indexCanonicalReport ?? indexCanonicalReport;
   const runAiSearch =
     deps.indexCanonicalReportInAiSearch ?? indexCanonicalReportInAiSearch;
+  const runCorpusIndex =
+    deps.indexCorpusDocInAiSearch ?? indexCorpusDocInAiSearch;
   const runPutBody = deps.putReportBody ?? putReportBodyViaStore;
-  const requested: readonly PublishTargetId[] = options.targets ?? [
-    "vectorize",
-    "ai-search",
-  ];
+  const requested: readonly PublishTargetId[] =
+    options.targets ??
+    (doc.kind === "corpus" ? ["ai-search"] : ["vectorize", "ai-search"]);
   const targets: PublishTargetHandle[] = [];
   if (requested.includes("r2-body")) {
     targets.push({
       target: "r2-body",
-      settled: settleR2BodyTarget(env, doc, runPutBody),
+      // A corpus document has no r2-body leg (its R2 write is
+      // the store's own put — see the module header): the
+      // target is honestly not attempted, never invoked.
+      settled:
+        doc.kind === "report"
+          ? settleR2BodyTarget(env, doc, runPutBody)
+          : Promise.resolve({ target: "r2-body", status: "not_attempted" }),
     });
   }
   if (requested.includes("vectorize")) {
     targets.push({
       target: "vectorize",
-      settled: settleVectorizeTarget(env, doc, runVectorize),
+      // Corpus documents are not Vectorize-indexed (their
+      // discovery path is the AI Search items leg): not
+      // attempted, executor never invoked.
+      settled:
+        doc.kind === "report"
+          ? settleVectorizeTarget(env, doc, runVectorize)
+          : Promise.resolve({ target: "vectorize", status: "not_attempted" }),
     });
   }
   if (requested.includes("ai-search")) {
     targets.push({
       target: "ai-search",
-      settled: settleAiSearchTarget(env, doc, runAiSearch),
+      settled:
+        doc.kind === "corpus"
+          ? settleCorpusAiSearchTarget(env, doc, runCorpusIndex)
+          : settleAiSearchTarget(env, doc, runAiSearch),
     });
   }
   const settled: Promise<PublishOutcome> = Promise.all(
