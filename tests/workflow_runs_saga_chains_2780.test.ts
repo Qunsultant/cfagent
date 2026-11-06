@@ -328,11 +328,11 @@ describe("handleWorkflowRunsRoutes saga merge", () => {
     expect(body.runs.map((r) => r.id)).not.toContain("saga-A");
   });
 
-  it("names an unbound SEARCH_AGENT in storeErrors without hiding other runs", async () => {
+  it("names an unbound ORCHESTRATOR_AGENT in storeErrors without hiding other runs", async () => {
     const { ctx } = handlerCtx({ env: {} });
     const res = await handleWorkflowRunsRoutes(getRequest(), new URL("https://agent.internal/api/workflow-runs"), "/api/workflow-runs", "session-1", ctx);
     const body = (await res!.json()) as { storeErrors?: Record<string, string> };
-    expect(body.storeErrors?.saga).toContain("SEARCH_AGENT is not bound");
+    expect(body.storeErrors?.saga).toContain("ORCHESTRATOR_AGENT is not bound");
   });
 
   it("keeps a saga chain listed from audit when its projection read fails", async () => {
