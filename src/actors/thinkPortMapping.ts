@@ -162,6 +162,83 @@ export function thinkTurnResultToPort(
   };
 }
 
+/**
+ * Issue #3474 — the PortThink webhook channel's pure seams.
+ *
+ * Webhooks are a built-in communication channel of every Agent
+ * (Agents docs, agent-class/communication-channels/webhooks): an
+ * HTTP POST routed to a specific instance, verified by HMAC-SHA256
+ * over the RAW body before any parsing, then processed in the
+ * agent. PortThink intercepts the reserved path tail
+ * `/webhooks/<source>` at fetch (see thinkAdapter.ts) and uses
+ * these three seams — kept here, in the node-testable mapping
+ * module, so the verification rules are pinned without workerd.
+ */
+
+/** Env var carrying the deployment webhook secret (the docs' WEBHOOK_SECRET, port-scoped). */
+export const THINK_WEBHOOK_SECRET_ENV = "THINK_WEBHOOK_SECRET";
+
+/** Signature header, GitHub-style per the docs pattern: `sha256=<hex>`. */
+export const THINK_WEBHOOK_SIGNATURE_HEADER = "x-hub-signature-256";
+
+const THINK_WEBHOOK_PATH_TAIL = /\/webhooks\/([^/]+)$/;
+
+/**
+ * The reserved webhook path: any pathname whose tail is
+ * `/webhooks/<source>` (a single non-empty segment). Suffix
+ * matching — the fleet's onRequest idiom ("/health", Think's own
+ * "/get-messages") — so the channel survives every production
+ * prefix (routeAgentRequest's /agents/<class>/<name>, gateway
+ * internal URLs). Returns the source segment, or null when the
+ * path is not a webhook delivery.
+ */
+export function thinkWebhookSourceFromPath(pathname: string): string | null {
+  const match = THINK_WEBHOOK_PATH_TAIL.exec(pathname);
+  return match ? match[1] : null;
+}
+
+/**
+ * The verification seam's secret resolution: the deployment
+ * credential from env, named by THINK_WEBHOOK_SECRET_ENV. A
+ * missing, blank, or non-string value is UNCONFIGURED (undefined)
+ * — the port fails closed on it, never treats it as "no
+ * verification needed".
+ */
+export function resolveThinkWebhookSecret(env: unknown): string | undefined {
+  if (!env || typeof env !== "object") return undefined;
+  const value = (env as Record<string, unknown>)[THINK_WEBHOOK_SECRET_ENV];
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+/**
+ * HMAC-SHA256 verification over the raw body, the docs'
+ * verifyGitHubWebhook pattern: the `sha256=<hex>` header format is
+ * checked first, then crypto.subtle.verify decides. Callers verify
+ * BEFORE parsing — an unverified body is never JSON-parsed.
+ */
+export async function verifyThinkWebhookSignature(
+  rawBody: string,
+  signature: string | null,
+  secret: string
+): Promise<boolean> {
+  if (!signature || !/^sha256=[0-9a-f]{64}$/i.test(signature)) return false;
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["verify"]
+  );
+  const signatureBytes = Uint8Array.from(
+    signature.slice("sha256=".length).match(/.{2}/g) ?? [],
+    (byte) => Number.parseInt(byte, 16)
+  );
+  return crypto.subtle.verify("HMAC", key, signatureBytes, encoder.encode(rawBody));
+}
+
 /** Think chat-response hook result -> port result (direct-turn delegation path). */
 export function thinkChatResponseToPort(
   result: ThinkChatResponseResult,
