@@ -168,7 +168,7 @@ async function handleNlqWebhookRequest(
     },
     body: JSON.stringify({ query: sanitizedQuery }),
   });
-  const response = await actorGateway.dispatch(env.SEARCH_AGENT, userLogin, forwarded);
+  const response = await actorGateway.dispatch(env.ORCHESTRATOR_AGENT, userLogin, forwarded);
   if (!response.ok) return response;
   const result = await response.json() as Record<string, unknown>;
 
@@ -748,7 +748,7 @@ export async function handleMessagingSlackRoutes(request: Request, env: Env, url
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: rawBody,
       });
-      return actorGateway.dispatch(env.SEARCH_AGENT, `slack_${teamId}`, forwardReq);
+      return actorGateway.dispatch(env.ORCHESTRATOR_AGENT, `slack_${teamId}`, forwardReq);
     }
 
     // --- Omnichannel Trading Agent: Slack Events Webhook ---
@@ -778,7 +778,7 @@ export async function handleMessagingSlackRoutes(request: Request, env: Env, url
         headers: { "Content-Type": "application/json" },
         body: rawBody,
       });
-      return actorGateway.dispatch(env.SEARCH_AGENT, `slack_${teamId}`, forwardReq);
+      return actorGateway.dispatch(env.ORCHESTRATOR_AGENT, `slack_${teamId}`, forwardReq);
     }
 
     // --- Omnichannel Trading Agent: Slack Interactive Component Actions ---
@@ -877,7 +877,7 @@ export async function handleMessagingSlackRoutes(request: Request, env: Env, url
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      return actorGateway.dispatch(env.SEARCH_AGENT, `slack_${teamId}`, forwardReq);
+      return actorGateway.dispatch(env.ORCHESTRATOR_AGENT, `slack_${teamId}`, forwardReq);
     }
 
     // --- Omnichannel Trading Agent: Slack OAuth Install & Callback ---
