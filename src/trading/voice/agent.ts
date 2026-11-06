@@ -1053,19 +1053,19 @@ export type VoiceTurnForwarder = (
  * Builds the orchestrator voice-turn forwarder for one session user.
  * The DO instance is keyed by, and the x-user-login header set from,
  * the worker-verified session identity the caller passes in — never
- * from caller-asserted input. Throws when the SEARCH_AGENT binding is
+ * from caller-asserted input. Throws when the ORCHESTRATOR_AGENT binding is
  * unavailable or the DO rejects the turn, so a missing orchestrator
  * path fails loud instead of falling back to an ORM-less local turn
  * (the #781 contract).
  */
 export function createOrchestratorVoiceTurnForwarder(env: Env, userLogin: string): VoiceTurnForwarder {
   return async (request: VoiceTradingTurnRequest): Promise<VoiceTradingTurnResponse> => {
-    // Issue #815 (via ActorGateway, #1779): an unbound SEARCH_AGENT
+    // Issue #815 (via ActorGateway, #1779): an unbound ORCHESTRATOR_AGENT
     // binding now throws the gateway's named error at the dispatch
     // below (the #781 fail-loud contract, unchanged) instead of
     // falling back to an ORM-less local turn.
     const response = await actorGateway.dispatch(
-      env.SEARCH_AGENT,
+      env.ORCHESTRATOR_AGENT,
       userLogin,
       new Request("https://agent.internal/trading/voice/turn", {
         method: "POST",
