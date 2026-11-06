@@ -287,7 +287,7 @@ export function AlpacaBrokerPanel({ activeEnv }: AlpacaBrokerPanelProps) {
     <Stack gap="3" data-broker="alpaca" data-broker-panel="alpaca" data-active-env={activeEnv ?? ""}>
       {/* Issue #3351: sign-in comes first on a broker panel — whose account is
           connected is the question every number below depends on. */}
-      <AlpacaSignInCard activeEnv={activeEnv} />
+      <AlpacaSignInCard activeEnv={activeEnv} collapsedWhenConfigured={true} />
 
       <Card>
         <Flex align="center" gap="2">

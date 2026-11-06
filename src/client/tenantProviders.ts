@@ -169,3 +169,25 @@ export function brokerUnavailableNotice(brokerId: string, brokerLabel: string): 
     ? `${base} Alpaca account, positions and orders remain available via the direct Alpaca API paths.`
     : base;
 }
+
+export function setTenantProvidersStateForTest(partial: Partial<TenantProvidersState>): void {
+  applyState({
+    ...DEFAULT_TENANT_PROVIDERS_STATE,
+    ...(memoryState ?? readMirrorState()),
+    ...partial,
+  });
+}
+
+export function resetTenantProvidersStateForTest(): void {
+  memoryState = null;
+  serverLoaded = false;
+  loadPromise = null;
+  if (typeof window !== "undefined") {
+    try {
+      window.localStorage.removeItem(DATA_PROVIDER_KEY);
+      window.localStorage.removeItem(BROKER_KEY);
+    } catch {
+      // ignore
+    }
+  }
+}

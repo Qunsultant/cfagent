@@ -24,6 +24,8 @@ export const LEGACY_QUOTE_ENDPOINT = "/api/etrade/quote";
 export const NEUTRAL_QUOTE_ENDPOINT = "/api/broker/quote";
 export const LEGACY_POSITIONS_ENDPOINT = "/api/etrade/positions";
 export const NEUTRAL_POSITIONS_ENDPOINT = "/api/broker/positions";
+export const LEGACY_ACCOUNTS_ENDPOINT = "/api/etrade/accounts";
+export const NEUTRAL_ACCOUNTS_ENDPOINT = "/api/broker/accounts";
 
 /** The options-screen endpoint for a broker selection (defaults to the live one). */
 export function optionScreenEndpoint(brokerId: string = readTenantProvidersState().brokerId): string {
@@ -46,6 +48,10 @@ export function quoteEndpoint(brokerId: string = readTenantProvidersState().brok
 
 export function positionsEndpoint(brokerId: string = readTenantProvidersState().brokerId): string {
   return brokerId === "etrade" ? LEGACY_POSITIONS_ENDPOINT : NEUTRAL_POSITIONS_ENDPOINT;
+}
+
+export function accountsEndpoint(brokerId: string = readTenantProvidersState().brokerId): string {
+  return brokerId === "etrade" ? LEGACY_ACCOUNTS_ENDPOINT : NEUTRAL_ACCOUNTS_ENDPOINT;
 }
 
 /**
