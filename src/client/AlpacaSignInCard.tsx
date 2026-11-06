@@ -80,10 +80,10 @@ export function AlpacaSignInCard({ activeEnv, collapsedWhenConfigured = false }:
   useEffect(() => {
     if (load.state === "ready" && !load.status.configured && !load.status.signedIn && !notifiedRef.current) {
       notifiedRef.current = true;
-      toast?.warning({
-        title: "Alpaca Sign-in Required",
-        message: `Sign in required for ${load.status.side === "live" ? "live" : "paper"} trading. Enter your Alpaca API keys.`,
-      });
+      toast?.warning(
+        `Sign in required for ${load.status.side === "live" ? "live" : "paper"} trading. Enter your Alpaca API keys.`,
+        "Alpaca Sign-in Required",
+      );
     }
   }, [load]);
 
