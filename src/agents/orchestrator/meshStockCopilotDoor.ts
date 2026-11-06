@@ -295,7 +295,7 @@ export async function controlStockCopilotViaDoor(
     const mins = parseCadenceMinutes(input.cadence);
     if (mins === null) {
       throw new MeshDoorError(
-        "invalid_input",
+        "door_unavailable",
         `Invalid cadence "${input.cadence}". Format must be e.g. 'every 1 hour', 'every 30 minutes', '1h', '60m'.`,
       );
     }
