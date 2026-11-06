@@ -76,18 +76,17 @@ const useProviderStyles = makeStyles({
   },
 });
 
-// #3454 (uniform copilot shell): a copilot's custom surface composes
-// ABOVE the shared conversation instead of replacing it, so the
-// surface region sizes to its content and caps at half the chat view
-// (scrolling internally past that) — the messages stream keeps the
-// remaining height and the composer stays reachable at every size.
+// #3449, #3521: dedicated custom surfaces (e.g. Stock Copilot) render
+// exclusively across the tab viewport, taking full height without the
+// conversation stream or sticky composer underneath, eliminating UI overlap
+// and double scrollbars.
 const useSurfaceStyles = makeStyles({
   customSurface: {
     display: "flex",
     flexDirection: "column",
+    flexGrow: 1,
     flexShrink: 1,
     minHeight: 0,
-    maxHeight: "50%",
     overflowY: "auto",
   },
 });
@@ -315,13 +314,14 @@ export function AgentChatTabContentInner({
           </DialogBody>
         </DialogSurface>
       </Dialog>
-      {/* #3454 — uniform copilot shell: EVERY copilot renders the same
-          composition — banner (above, when configured), its custom
-          surface when it declares one (here, above the conversation),
-          and ALWAYS the shared conversation below. No mode replaces or
-          suppresses the chat surface; the exclusive custom/chat branch
-          from #3449 is gone. */}
-      {currentCopilot && hasCustomSurface(currentCopilot) && (
+      {/* #3449, #3521 — dedicated custom copilot surface exclusivity:
+          When a copilot declares a custom surface (e.g. Stock Copilot),
+          render its surface exclusively without rendering the general chat
+          welcome hero, action bar, messages stream, or input bar underneath.
+          This prevents crushing the dashboard into half height and eliminates
+          nested scrollbar / input overlap conflicts. Conversational copilots
+          render the shared conversation below. */}
+      {currentCopilot && hasCustomSurface(currentCopilot) ? (
         <div className={surfaceStyles.customSurface}>
           {currentCopilot.renderCustom ? (
             currentCopilot.renderCustom({ user, onChipClick: handleChipClick, onNavigateTab })
@@ -329,8 +329,8 @@ export function AgentChatTabContentInner({
             <StockCopilotPanel />
           )}
         </div>
-      )}
-      <>
+      ) : (
+        <>
       {/* Top Sponsor Spotlight Bar (Configurable via Settings) */}
       {showSponsorSpotlight && ads.length > 0 && (
         <div
@@ -826,6 +826,7 @@ export function AgentChatTabContentInner({
         </Button>
       </form>
       </>
+      )}
     </div>
   );
 }
