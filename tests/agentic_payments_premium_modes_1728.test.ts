@@ -86,7 +86,7 @@ import type { Env } from "../src/types";
 const mockEnv: any = {
   APP_BASE_URL: "https://agent.openaimp.com",
   AI_SEARCH_ENDPOINT: "https://mock.search",
-  SEARCH_AGENT: {},
+  ORCHESTRATOR_AGENT: {},
   X402_NETWORK: "base-sepolia",
   X402_RECIPIENT_ADDRESS: "0x71C8363837918a211797E3c76A8B3C4258759550",
   X402_FACILITATOR_URL: "https://x402.org/facilitator",
