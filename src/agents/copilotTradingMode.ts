@@ -114,18 +114,24 @@ export async function resolveCopilotTradingSelection(
   if (storedEnv === "TEST" || storedEnv === "PROD") {
     environment = storedEnv;
   } else {
-    // #3541: When no tenant environment is stored, align with externalized
-    // copilot mode or deployment pin before falling back to TEST.
-    const explicitMode = String(
-      readers.env?.STOCK_COPILOT_MODE ?? readers.env?.ALPACA_TRADING_TYPE ?? ""
-    ).trim().toLowerCase();
-    if (explicitMode === "live" || explicitMode === "prod") {
+    // #3541/#3557: When no tenant environment is stored, align with externalized
+    // copilot mode or deployment pin. An explicit STOCK_COPILOT_MODE ("paper" | "live")
+    // takes precedence. Unset defaults to Alpaca Paper (TEST).
+    const explicitCopilotMode = String(readers.env?.STOCK_COPILOT_MODE ?? "").trim().toLowerCase();
+    if (explicitCopilotMode === "paper" || explicitCopilotMode === "test") {
+      environment = "TEST";
+    } else if (explicitCopilotMode === "live" || explicitCopilotMode === "prod") {
       environment = "PROD";
     } else {
-      environment = resolveTradeEnvironmentFromSettings(
-        readers.readSettingRaw,
-        readers.env,
-      );
+      const explicitMode = String(readers.env?.ALPACA_TRADING_TYPE ?? "").trim().toLowerCase();
+      if (explicitMode === "live" || explicitMode === "prod") {
+        environment = "PROD";
+      } else {
+        environment = resolveTradeEnvironmentFromSettings(
+          readers.readSettingRaw,
+          readers.env,
+        );
+      }
     }
   }
   const mode = isBrokerId(brokerId)
