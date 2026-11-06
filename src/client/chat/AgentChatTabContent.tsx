@@ -199,16 +199,19 @@ export function AgentChatTabContentInner({
   }, [activeView]);
 
   // Issue #2568: Agents SDK routeAgentRequest routes by BINDING name
-  // kebabbed, not class name. The binding is SEARCH_AGENT (class
-  // OrchestratorAgent since migration v15, #2523); "OrchestratorAgent"
-  // kebabs to /agents/orchestrator-agent/, for which no binding exists
-  // ("does not match any Durable Object binding" in production).
-  // "SearchAgent" kebabs to /agents/search-agent/, the existing binding.
-  // Instance name (login) and DO state are unchanged: same SEARCH_AGENT
-  // namespace, same idFromName(login). Do NOT re-add an
-  // ORCHESTRATOR_AGENT binding (pinned against in
-  // tests/orchestrator_root_namespace_1387.test.ts).
-  const agent = useAgent({ agent: "SearchAgent", name: user.login });
+  // kebabbed, not class name. The binding was SEARCH_AGENT (class
+  // OrchestratorAgent since migration v15, #2523), so this tab passed
+  // "SearchAgent" — /agents/search-agent/ — as the interim fix.
+  // Issue #2570 finished the rename on the binding side: the binding
+  // is now ORCHESTRATOR_AGENT, "OrchestratorAgent" kebabs to
+  // /agents/orchestrator-agent/, a real binding route, and the class
+  // name is the correct address again. Instance name (login) and DO
+  // state are unchanged by the binding rename: namespaces are per
+  // class, not per binding name — same namespace, same
+  // idFromName(login). (Pinned in
+  // tests/orchestrator_binding_rename_2570.test.ts and
+  // tests/agent_chat_routing_2568.test.ts.)
+  const agent = useAgent({ agent: "OrchestratorAgent", name: user.login });
   const { messages, sendMessage, status, error, connectionError } = useAgentChat({ agent });
 
   const activeError = error || connectionError;
