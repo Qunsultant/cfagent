@@ -221,7 +221,7 @@ export interface DataLifecycleRouteContext {
   stores?: DataLifecycleKvStores;
   /** Test seam: AuditLog store (default: createWiredAuditStore(env)). */
   auditStore?: AuditStore;
-  /** Test seam: per-login instance stub (default: SEARCH_AGENT addressing). */
+  /** Test seam: per-login instance stub (default: ORCHESTRATOR_AGENT addressing). */
   fetchInstance?: (
     login: string,
   ) => { fetch(req: Request): Promise<Response> } | null;
@@ -662,12 +662,12 @@ function defaultInstanceStub(
   if (ctx.fetchInstance) return ctx.fetchInstance(login);
   const ns = (
     ctx.env as unknown as {
-      SEARCH_AGENT?: {
+      ORCHESTRATOR_AGENT?: {
         idFromName(name: string): unknown;
         get(id: unknown): InstanceStub;
       };
     }
-  ).SEARCH_AGENT;
+  ).ORCHESTRATOR_AGENT;
   if (!ns || typeof ns.idFromName !== "function" || typeof ns.get !== "function") {
     return null;
   }
