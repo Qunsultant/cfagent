@@ -191,7 +191,7 @@ function orchestratorPathQueries(): string[] {
   const env = {
     AI: {} as any,
     AI_SEARCH_ENDPOINT: "https://mock.search",
-    SEARCH_AGENT: {} as any,
+    ORCHESTRATOR_AGENT: {} as any,
     AGENT_SESSIONS: {} as any,
   } as Env;
   const agent = new OrchestratorAgent(ctx as any, env);
