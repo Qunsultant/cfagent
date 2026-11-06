@@ -8,10 +8,16 @@
  * - Weekly guard: fires at/after 7 days (or never fired), never
  *   before; an unparseable marker self-heals by firing.
  * - Backfill: the shared page fn (extracted from the route) counts
- *   and paginates; the sync leg surfaces an injected backfill
- *   outcome; the route handler still calls the shared fn (source
- *   pin — the existing backfill route pins in
- *   report_index_coverage_p1169 stay green beside it).
+ *   and paginates; the route handler still calls the shared fn
+ *   (source pin — the existing backfill route pins in
+ *   report_index_coverage_p1169 stay green beside it). (Issue
+ *   #3527 S4 update: the full sweep used to also ride this sync
+ *   as an injected leg; it was unbundled to the reports workflow —
+ *   the sweep test below now imports it from reportSemanticIndex
+ *   and the sync-shape assertions pin its ABSENCE here. The
+ *   invariant — every leg's outcome is surfaced honestly — is
+ *   preserved for the two corpus legs that remain and for the
+ *   sweep at its new home, tests/publish_stage_s4_3527.test.ts.)
  * - Route: GET /knowledge/integrity 401s without login (shared
  *   unauthenticatedResponse) and 200s with the integrity JSON shape
  *   when logged in — with NO flag check (flag-off env still 200s).
@@ -33,11 +39,13 @@ import {
   shouldFireCorpusSyncTick,
   runCorpusIntegrityCheck,
   runCorpusSync,
-  runCanonicalIndexBackfillAll,
 } from "../src/services/corpusSync";
 import { sha256Hex } from "../src/services/knowledgeCorpus";
 import { handleKnowledgeCorpusRoutes } from "../src/agents/routes/knowledgeCorpus";
-import { runCanonicalIndexBackfillPage } from "../src/services/reportSemanticIndex";
+import {
+  runCanonicalIndexBackfillAll,
+  runCanonicalIndexBackfillPage,
+} from "../src/services/reportSemanticIndex";
 import { SearchAgentTab } from "../src/client/search/tabs/SearchAgentTab";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
@@ -273,29 +281,26 @@ describe("shared index backfill (S4-4 extraction)", () => {
     expect(src).toContain("/trading/reports/index-backfill");
   });
 
-  it("the sync leg surfaces an injected backfill outcome, and skips honestly without one", async () => {
-    const withBackfill = await runCorpusSync({
-      manifest: [],
-      recordStore: stubStore({}),
-      bucket: stubBlobStore([[]]),
-      backfill: async () => ({ upserted: 3, skippedRetention: 1, rows: 4, pages: 1, complete: true }),
-    });
-    expect(withBackfill.backfill).toEqual({ upserted: 3, skippedRetention: 1, rows: 4, pages: 1, complete: true });
-    expect(withBackfill.completed).toBe(true);
-    const withoutBackfill = await runCorpusSync({
+  it("the sync result carries no reports-backfill leg after the #3527 S4 unbundle; completed semantics unchanged", async () => {
+    // Disclosed §7 adaptation (#3527 S4): this pin used to assert
+    // the injected reports-backfill leg's outcome surfaced on the
+    // sync result. The leg left the bundle (its outcome now
+    // surfaces from the sweep's own route — pinned in
+    // publish_stage_s4_3527.test.ts); what remains invariant here
+    // is the absence of the leg and the `completed` semantics.
+    const result = await runCorpusSync({
       manifest: [],
       recordStore: stubStore({}),
       bucket: stubBlobStore([[]]),
     });
-    expect(withoutBackfill.backfill.skipped).toBe(true);
-    expect(typeof withoutBackfill.backfill.reason).toBe("string");
-    expect(withoutBackfill.completed).toBe(true);
+    expect("backfill" in result).toBe(false);
+    expect(result.completed).toBe(true);
     const bucketMissing = await runCorpusSync({
       manifest: [],
       recordStore: stubStore({}),
       bucket: null,
-      backfill: async () => ({ upserted: 0, skippedRetention: 0, rows: 0, pages: 0, complete: true }),
     });
+    expect("backfill" in bucketMissing).toBe(false);
     expect(bucketMissing.completed).toBe(false);
     expect(bucketMissing.integrity.ok).toBe(false);
   });
@@ -399,7 +404,10 @@ describe("POST /knowledge/corpus-sync branch (S4-4)", () => {
     expect(firstBody.completed).toBe(true);
     expect(firstBody.integrity.ok).toBe(false);
     expect(firstBody.integrity.missing).toHaveLength(3);
-    expect(firstBody.backfill.complete).toBe(true);
+    // Issue #3527 S4: no reports-backfill accounting rides the
+    // corpus-sync response anymore (the sweep answers from its
+    // own route); the field is absent, not zeroed.
+    expect("backfill" in firstBody).toBe(false);
     expect(sql.getMarker()).not.toBeNull();
     const second = await callSync(ctx);
     const secondBody = (await second!.json()) as Record<string, any>;
