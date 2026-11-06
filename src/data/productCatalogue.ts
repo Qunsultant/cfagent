@@ -78,6 +78,7 @@ import {
 import { VALID_TIERS, type StoreTier } from "./commercialPorts";
 import { AGENT_CARDS } from "../a2a/agent-cards";
 import { getAgentByClass } from "../agents/registry";
+import { isKnownFeatureFlag, type FeatureFlag } from "../features/featureFlagPorts";
 
 export type ProductTier = StoreTier;
 export type ProductAvailability =
@@ -295,4 +296,88 @@ export function getProduct(
   id: string,
 ): ProductEntry | undefined {
   return catalog.find((p) => p.id === id);
+}
+
+/**
+ * Issue #2620 (slice 7) — product bundle configuration.
+ *
+ * Bundles are CONFIGURATION, never code forks: a bundle lists the
+ * feature flags it shows under, states when it is shown, and
+ * records who approved it and when. A bundle is not a product
+ * family and never carries a price — pricing changes are out of
+ * scope for the product-mix loop, and a bundle must never be used
+ * to smuggle one in. No bundles exist yet: this is the type and
+ * the validator only. The first bundle is approved per change
+ * (naming product, change, and evidence) and lands as its own
+ * issue/PR through the Merge Queue with its own §15.
+ *
+ * `showWhen` states the display condition in flag terms
+ * (allFlagsOn / anyFlagOn, plus a human-readable note). An
+ * explicitly OFF flag always wins over a bundle listing it —
+ * the slice-1 inheritance rule (featureFlagPorts.ts) is not
+ * overridden here.
+ */
+export interface ProductBundleShowWhen {
+  /** Every one of these flags must be ON for the bundle to show. */
+  allFlagsOn?: FeatureFlag[];
+  /** At least one of these flags must be ON for the bundle to show. */
+  anyFlagOn?: FeatureFlag[];
+  /** Human-readable statement of when the bundle is shown. */
+  note?: string;
+}
+
+export interface ProductBundleConfig {
+  id: string;
+  name: string;
+  /** Feature flags listed in this bundle. */
+  flags: FeatureFlag[];
+  showWhen: ProductBundleShowWhen;
+  /** Approver login/name; null until approved. */
+  approvedBy: string | null;
+  /** Approval timestamp (ISO); null until approved. */
+  approvedAt: string | null;
+  status: "proposed" | "approved" | "deprecated";
+}
+
+/** Validate a bundle config; [] means valid. */
+export function validateProductBundleConfig(config: ProductBundleConfig): string[] {
+  const errors: string[] = [];
+  if (config.id.trim() === "") errors.push("bundle id must not be empty");
+  if (config.name.trim() === "") errors.push("bundle name must not be empty");
+  if (config.flags.length === 0) errors.push("bundle must list at least one flag");
+  const seen = new Set<string>();
+  for (const flag of config.flags) {
+    if (!isKnownFeatureFlag(flag)) errors.push(`unknown flag: ${flag}`);
+    if (seen.has(flag)) errors.push(`duplicate flag: ${flag}`);
+    seen.add(flag);
+  }
+  const showWhen = config.showWhen;
+  for (const flag of [...(showWhen.allFlagsOn ?? []), ...(showWhen.anyFlagOn ?? [])]) {
+    if (!isKnownFeatureFlag(flag)) errors.push(`unknown flag in showWhen: ${flag}`);
+  }
+  const hasCondition =
+    (showWhen.allFlagsOn?.length ?? 0) > 0 ||
+    (showWhen.anyFlagOn?.length ?? 0) > 0 ||
+    (showWhen.note?.trim() ?? "") !== "";
+  if (!hasCondition) errors.push("showWhen must state a condition");
+  if (config.approvedAt !== null && config.approvedBy === null) {
+    errors.push("approvedAt is set but approvedBy is missing");
+  }
+  if (config.approvedBy !== null && config.approvedAt === null) {
+    errors.push("approvedBy is set but approvedAt is missing");
+  }
+  if (config.status === "approved" && (config.approvedBy === null || config.approvedAt === null)) {
+    errors.push("approved bundle requires approvedBy and approvedAt");
+  }
+  return errors;
+}
+
+/** True only for an approved bundle with approver and timestamp recorded. */
+export function isBundleApproved(config: ProductBundleConfig): boolean {
+  return (
+    config.status === "approved" &&
+    config.approvedBy !== null &&
+    config.approvedAt !== null &&
+    validateProductBundleConfig(config).length === 0
+  );
 }
