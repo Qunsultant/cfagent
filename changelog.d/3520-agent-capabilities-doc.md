@@ -1,1 +1,2 @@
 ### Docs: agent capabilities — the single account (channels, tools, workflows, dual-mode agentic loop, copilot capability list) under docs/architecture/agentic, linked from ADD.md (#3520)
+- Added `docs/architecture/agentic/agent-capabilities.md` — the single account of agent capabilities (channels, runtime capabilities, tools, workflows, the dual-mode agentic loop, and the Stock Copilot capability list), linked from `docs/architecture/ADD.md`. (#3520)
