@@ -34,7 +34,7 @@ import type { Env } from "../src/types";
 /**
  * Issue #312 — POST /api/chat inherits the sibling /api route posture:
  * requireAuth at the Worker edge (401 without a session), then forwarding
- * to the per-user SEARCH_AGENT instance with the /api prefix stripped and
+ * to the per-user ORCHESTRATOR_AGENT instance with the /api prefix stripped and
  * x-user-login set. It must not be queued as an async job (immediate sync).
  */
 const LOGIN = "octocat-312";
@@ -54,7 +54,7 @@ function makeEnv() {
   seedSession("sessions", SESSION_ID, { githubLogin: LOGIN, userLogin: LOGIN });
   const env: any = {
     SESSION_STORE: sessionStoreNs,
-    SEARCH_AGENT: {
+    ORCHESTRATOR_AGENT: {
       idFromName: (name: string) => name,
       get: (id: string) => ({
         fetch: async (req: Request) => {
