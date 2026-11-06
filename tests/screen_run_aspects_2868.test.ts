@@ -106,6 +106,8 @@ describe("logScreenRunEvent", () => {
       "partialResultMarking",
       "provenance",
       "retry",
+      // Issue #2860 (Factor 14): the metrics accumulator join point.
+      "telemetry",
     ]);
     for (const aspect of Object.values(SCREEN_RUN_ASPECTS)) {
       expect(aspect.joinPoint.length).toBeGreaterThan(0);
