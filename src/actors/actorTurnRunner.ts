@@ -41,6 +41,7 @@
  *    degraded-fallback handling sees them exactly as before.
  */
 import { generateText, stepCountIs } from "ai";
+import { getSharedOutboundLimiter } from "../security/outboundRateLimiter";
 import type {
   ActorSessionPort,
   ActorTurnHooks,
@@ -70,6 +71,11 @@ export type ModelTurnFn = (opts: ModelTurnOptions) => Promise<{ text: string }>;
  * the step bound Think enforced.
  */
 export const generateTextModelTurn: ModelTurnFn = async (opts) => {
+  // Issue #3515 S1: the direct actor-turn path had no outbound limiter
+  // (the gateway port's opt-in limiter only covers turns routed through
+  // the port). One shared LLM token per turn, bounded wait, else a typed
+  // OutboundRateLimitError via onChatError upstream.
+  await getSharedOutboundLimiter("llm").acquire();
   const { text } = await generateText({
     model: opts.model as never,
     system: opts.system,
