@@ -1,0 +1,3 @@
+### Added
+
+- **Hand-written OpenAPI schemas for the stock routes (#2860, Factor 13):** `src/security/openapiSpec.ts` now specifies the stock set beyond the pilot set — POST/GET `/api/market-data/screen`, GET `/api/reports`, GET `/api/reports/{id}`, POST `/api/reports/replay`, `/api/screener/presets` CRUD, GET `/api/screener/report.pdf|xlsx|csv`, POST `/api/screener/report/regenerate` — with shapes read from the handlers (request/response schemas, 202 accepted, 429 already-running/quota, 404/422 replay failures). The AgentDB projection read (`/api/reports/list`) and operator seed (`/api/reports/seed-canonical`) stay marked not-yet-specified, and the goal spec remains a record, not an executable API path (G7). #clo-arsi
