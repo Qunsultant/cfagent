@@ -1059,7 +1059,7 @@ export async function handleCloudflareEmailMessage(
   // storage.sql, which the worker isolate does not have. Forward the
   // parsed payload to the owning user's OrchestratorAgent DO, whose
   // POST /trading/email/inbound route runs ETradeEmailTradingService
-  // against the DO's real ORM, over the same SEARCH_AGENT channel every
+  // against the DO's real ORM, over the same ORCHESTRATOR_AGENT channel every
   // /api route uses. If the orchestrator path is unavailable this
   // throws (the #781 fail-loud contract) instead of processing the
   // email against an ORM-less local service.
@@ -1067,15 +1067,15 @@ export async function handleCloudflareEmailMessage(
   // tests/worker_entry_points_orchestrator_wiring.test.ts): the
   // binding must exist with addressing methods BEFORE the
   // service-identity check below, so a missing orchestrator path
-  // throws the SEARCH_AGENT error (the #781 fail-loud contract)
+  // throws the ORCHESTRATOR_AGENT error (the #781 fail-loud contract)
   // instead of processing the email against an ORM-less local
   // service. This is a capability check only — the addressing and
   // fetch below ride the ActorGateway (#1779), which is the only
   // module that invokes idFromName/get for dispatch.
-  const namespace = env.SEARCH_AGENT;
+  const namespace = env.ORCHESTRATOR_AGENT;
   if (!namespace || typeof namespace.idFromName !== "function" || typeof namespace.get !== "function") {
     throw new Error(
-      "Inbound email trading requires the SEARCH_AGENT (orchestrator) binding to reach the user's Durable Object ORM; refusing to process the email without it (issue #815)."
+      "Inbound email trading requires the ORCHESTRATOR_AGENT (orchestrator) binding to reach the user's Durable Object ORM; refusing to process the email without it (issue #815)."
     );
   }
   // Issue #1185: the instance constant is the ADDRESS, not an identity.
@@ -1090,7 +1090,7 @@ export async function handleCloudflareEmailMessage(
     );
   }
   const response = await actorGateway.dispatch(
-    env.SEARCH_AGENT,
+    env.ORCHESTRATOR_AGENT,
     INBOUND_EMAIL_ORCHESTRATOR_INSTANCE,
     new Request("https://agent.internal/trading/email/inbound", {
       method: "POST",
