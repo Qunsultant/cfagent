@@ -29,7 +29,11 @@ import type {
 } from "../../actors/thinkAdapter";
 import type { Env } from "../../types";
 import type { ScreenerExecutionContext } from "./scheduleMaintenance";
-import { createStockCopilotPositionPort } from "../../data/createStockCopilotStorePorts";
+import {
+  createStockCopilotActivityPort,
+  createStockCopilotControlPort,
+  createStockCopilotPositionPort,
+} from "../../data/createStockCopilotStorePorts";
 import { MarketDataResearchService } from "../../services/marketDataResearch";
 import {
   copilotUniverseFromEnv,
@@ -85,6 +89,11 @@ export async function runStockCopilotCycleForInstance(
   const result = await runStockCopilotCycle({
     env: ctx.env,
     positions: createStockCopilotPositionPort(sql),
+    // #3422: the chat-tab surface's ports over the same storage —
+    // the pause control the cycle reads at firing, and the
+    // activity log the panel reads back.
+    control: createStockCopilotControlPort(sql),
+    activity: createStockCopilotActivityPort(sql),
     userLogin,
     platform,
     overrideEnv: executionContext.environment,

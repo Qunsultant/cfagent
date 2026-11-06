@@ -69,6 +69,7 @@ import { handleAlpacaMarketDataRoutes, handleAlpacaTradingRoutes } from "../rout
 import { handleMarketDataQuoteResearchRoutes, handleMarketDataCompareScreenRoutes } from "../routes/marketDataResearch";
 import { handleScreenerResearchRoutes } from "../routes/screenerResearch";
 import { handleSchedulesRoutes, makeRunScheduleCallback } from "../routes/schedules";
+import { handleStockCopilotRoutes } from "../routes/stockCopilot";
 import { handleMaintenanceRoutes } from "../routes/maintenance";
 import { handleServiceUserRoutes } from "../routes/serviceUser";
 import { handleDelegationRoutes } from "../routes/delegations";
@@ -850,6 +851,20 @@ export async function routeRequest(deps: RouteRequestDeps, request: Request): Pr
     runScheduleCallback: makeRunScheduleCallback(deps),
   });
   if (schedulesResponse) return schedulesResponse;
+
+  // Issue #3422: Stock Copilot status + pause/resume control
+  // routes (routes/stockCopilot.ts) run after schedules, before
+  // the Not-found fallthrough; a non-null return matched. The
+  // context is the instance's own storage handle + acting
+  // identity, so the panel reads and controls only the signed-in
+  // user's own copilot loop.
+  const stockCopilotResponse = await handleStockCopilotRoutes(request, url, path, sessionId, {
+    env: deps.env,
+    sql: deps.ctx.storage.sql,
+    getScreenerExecutionContext: () => deps.getScreenerExecutionContext(),
+    audit: (type, agent, payload) => deps.audit(type, agent, payload),
+  });
+  if (stockCopilotResponse) return stockCopilotResponse;
 
   return new Response("Not found", { status: 404 });
 }

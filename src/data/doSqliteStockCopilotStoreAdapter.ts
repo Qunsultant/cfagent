@@ -111,4 +111,18 @@ export class DoSqliteStockCopilotPositionStore
       id,
     );
   }
+
+  listClosedPositions(
+    userLogin: string,
+    limit: number,
+  ): CopilotPositionRecord[] {
+    const rows = [
+      ...this.sql.exec(
+        `SELECT * FROM ${COPILOT_POSITIONS_TABLE} WHERE user_login = ? AND status = 'closed' ORDER BY closed_at DESC, rowid DESC LIMIT ?`,
+        userLogin,
+        limit,
+      ),
+    ] as Array<Record<string, unknown>>;
+    return rows.map(mapPosition);
+  }
 }

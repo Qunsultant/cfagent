@@ -36,7 +36,11 @@
  * signal-conditioned forward returns on its real bars.
  */
 
-import type { StockCopilotPositionPort } from "../data/stockCopilotStorePorts";
+import type {
+  StockCopilotActivityPort,
+  StockCopilotControlPort,
+  StockCopilotPositionPort,
+} from "../data/stockCopilotStorePorts";
 import type { Env } from "../types";
 import {
   resolveAlpacaTradingBase,
@@ -148,6 +152,13 @@ export interface StockCopilotDeps {
   /** The copilot's position store, through the data layer's
    *  port (composed by the host via createStockCopilotStorePorts). */
   positions: StockCopilotPositionPort;
+  /** #3422: the per-instance pause control, read at firing —
+   *  optional so the cycle stays runnable in hosts that do not
+   *  compose it (the production host always does). */
+  control?: StockCopilotControlPort;
+  /** #3422: the cycle activity log sink — one record per cycle
+   *  that evaluated the market (or was guard-refused). */
+  activity?: StockCopilotActivityPort;
   /** The instance's acting login (order attribution + store scope). */
   userLogin: string;
   /** The Alpaca platform, obtained through the TradingPlatform seam. */
@@ -179,11 +190,17 @@ export interface StockCopilotCycleResult {
     | "disabled"
     | "refused_live_environment"
     | "skipped_outside_market_hours"
+    | "paused"
     | "ok";
   /** Named refusal code when status is refused_live_environment. */
   refusal?: string;
   entriesPlaced: number;
   exitsPlaced: number;
+  /** #3422: the entries that landed, by symbol + strategy (the
+   *  activity record's payload; entriesPlaced counts these). */
+  entries: Array<{ symbol: string; strategy: string }>;
+  /** #3422: the exits that landed, by symbol + exit reason. */
+  exits: Array<{ symbol: string; reason: string }>;
   rejections: StockCopilotRejection[];
   errors: StockCopilotCycleError[];
 }
@@ -304,6 +321,7 @@ async function evaluateExit(
     closedAt: nowIso,
   });
   result.exitsPlaced += 1;
+  result.exits.push({ symbol: position.symbol, reason: exitReason });
 }
 
 async function attemptEntry(
@@ -406,6 +424,41 @@ async function attemptEntry(
     openedAt: nowIso,
   });
   result.entriesPlaced += 1;
+  result.entries.push({ symbol, strategy });
+}
+
+/**
+ * #3422: write the cycle's activity record through the port, when
+ * the host composed one. Display-grade data: a failed append is
+ * collected into the result's errors, never thrown — the cycle's
+ * contract is that per-item failures surface in the result.
+ */
+function appendCycleActivity(
+  deps: StockCopilotDeps,
+  result: StockCopilotCycleResult,
+  cycleAt: string,
+  outcome: "traded" | "no_trade" | "refused",
+  detail: string | null,
+): void {
+  if (!deps.activity) return;
+  try {
+    deps.activity.ensureSchema();
+    deps.activity.appendActivity({
+      id: crypto.randomUUID(),
+      userLogin: deps.userLogin,
+      cycleAt,
+      outcome,
+      entries: result.entries.map((e) => e.symbol),
+      exits: result.exits.map((e) => ({ symbol: e.symbol, reason: e.reason })),
+      detail,
+    });
+  } catch (err) {
+    result.errors.push({
+      symbol: "",
+      stage: "activity",
+      message: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 /**
@@ -413,6 +466,14 @@ async function attemptEntry(
  * market hours → work. The first two gates make zero platform calls;
  * per-symbol failures are collected, never thrown — one bad symbol
  * must not stop the loop's other positions from being managed.
+ *
+ * #3422: after the platform gate, the per-instance pause control
+ * is read. Paused ⇒ exits are still evaluated (open positions are
+ * never left unmanaged) but no entries are placed, and the firing
+ * is not recorded as a cycle. Unpaused cycles that evaluated the
+ * market write one activity record (traded / no-trade); a guard
+ * refusal writes one refused record. Flag-off and outside-hours
+ * firings record nothing.
  */
 export async function runStockCopilotCycle(
   deps: StockCopilotDeps,
@@ -421,6 +482,8 @@ export async function runStockCopilotCycle(
     status: "ok",
     entriesPlaced: 0,
     exitsPlaced: 0,
+    entries: [],
+    exits: [],
     rejections: [],
     errors: [],
   };
@@ -430,16 +493,19 @@ export async function runStockCopilotCycle(
     return result;
   }
 
+  const now = (deps.now ?? (() => new Date()))();
+  const nowIso = now.toISOString();
+
   // PAPER-ONLY GUARD — the adapter's own resolver (#3158), evaluated
   // before the platform is touched at all.
   const resolved = resolveAlpacaTradingBase(deps.env, deps.overrideEnv);
   if (resolved.isLive) {
     result.status = "refused_live_environment";
     result.refusal = STOCK_COPILOT_LIVE_REFUSAL;
+    appendCycleActivity(deps, result, nowIso, "refused", STOCK_COPILOT_LIVE_REFUSAL);
     return result;
   }
 
-  const now = (deps.now ?? (() => new Date()))();
   if (!isUsMarketOpen(now)) {
     result.status = "skipped_outside_market_hours";
     return result;
@@ -454,26 +520,43 @@ export async function runStockCopilotCycle(
     return result;
   }
 
-  const nowIso = now.toISOString();
   const store = new StockCopilotPositionStore(deps.positions);
   const universe = (deps.universe ?? copilotUniverseFromEnv(deps.env)).map((s) =>
     s.toUpperCase(),
   );
   const strategies = deps.strategies ?? DEFAULT_COPILOT_STRATEGIES;
 
-  // 1. Exits first: capital protection precedes new risk.
-  const openBefore = await store.listOpenPositions(deps.userLogin);
-  for (const position of openBefore) {
-    try {
-      await evaluateExit(deps, store, position, nowIso, result);
-    } catch (err) {
-      result.errors.push({
-        symbol: position.symbol,
-        stage: "exit",
-        message: err instanceof Error ? err.message : String(err),
-      });
+  // Exits first: capital protection precedes new risk. Shared by
+  // the normal and paused paths — a pause never suspends exit
+  // management.
+  const evaluateAllExits = async (): Promise<void> => {
+    const openBefore = await store.listOpenPositions(deps.userLogin);
+    for (const position of openBefore) {
+      try {
+        await evaluateExit(deps, store, position, nowIso, result);
+      } catch (err) {
+        result.errors.push({
+          symbol: position.symbol,
+          stage: "exit",
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
+  };
+
+  // #3422: the per-instance pause control, read at firing time.
+  let paused = false;
+  if (deps.control) {
+    deps.control.ensureSchema();
+    paused = deps.control.getControl(deps.userLogin)?.paused === true;
   }
+  if (paused) {
+    await evaluateAllExits();
+    result.status = "paused";
+    return result;
+  }
+
+  await evaluateAllExits();
 
   // 2. Entries for symbols the copilot does not already hold.
   const stillOpen = await store.listOpenPositions(deps.userLogin);
@@ -516,6 +599,20 @@ export async function runStockCopilotCycle(
         message: err instanceof Error ? err.message : String(err),
       });
     }
+  }
+
+  // #3422: record the evaluated cycle — traded when anything
+  // landed, otherwise no-trade with the reason (the rejection
+  // reasons, or the plain no-signal outcome when nothing was
+  // even attempted).
+  if (result.entriesPlaced + result.exitsPlaced > 0) {
+    appendCycleActivity(deps, result, nowIso, "traded", null);
+  } else {
+    const detail =
+      result.rejections.length > 0
+        ? [...new Set(result.rejections.map((r) => r.reason))].join("; ")
+        : "no_entry_signals";
+    appendCycleActivity(deps, result, nowIso, "no_trade", detail);
   }
 
   return result;

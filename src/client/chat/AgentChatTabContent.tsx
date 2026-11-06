@@ -11,6 +11,7 @@ import type { AdItem, User } from "./types";
 import { MarkdownContent } from "./MarkdownContent";
 import { ReasoningView } from "./ReasoningView";
 import { ToolResultView } from "./ToolResultView";
+import { StockCopilotPanel } from "../StockCopilotPanel";
 // Fluent v9 replaces our primitives on this page only (#3146 experiment).
 // Measured gaps vs our primitives: no danger button (secondary used),
 // no tone system (chips collapse to subtle), no strip/box Notice variant.
@@ -258,6 +259,10 @@ export function AgentChatTabContentInner({
         onTabChange={handleViewChange}
         className="chat-capability-subnav"
       />
+      {/* Issue #3422: the Stock Copilot panel — the paper-trading
+          loop's status, positions, activity, and pause/resume
+          control, at the top of the chat view in both sub-views. */}
+      <StockCopilotPanel />
       {activeView === "options" && (
         <div className="options-copilot-banner">
           <div className="options-copilot-info">

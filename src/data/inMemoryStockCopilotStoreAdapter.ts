@@ -61,4 +61,21 @@ export class InMemoryStockCopilotPositionStore
       closedAt: patch.closedAt,
     };
   }
+
+  listClosedPositions(
+    userLogin: string,
+    limit: number,
+  ): CopilotPositionRecord[] {
+    return [...this.rows.values()]
+      .filter(
+        (s) => s.record.userLogin === userLogin && s.record.status === "closed"
+      )
+      .sort((a, b) => {
+        const ac = a.record.closedAt ?? "";
+        const bc = b.record.closedAt ?? "";
+        return ac === bc ? b.seq - a.seq : ac < bc ? 1 : -1;
+      })
+      .slice(0, Math.max(0, limit))
+      .map((s) => ({ ...s.record }));
+  }
 }
