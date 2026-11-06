@@ -158,7 +158,7 @@ const MATRIX: MatrixRow[] = [
     className: "OrchestratorAgent",
     cells: {
       identity: IMPL(
-        "Per-login instances: server.ts resolves SEARCH_AGENT.idFromName(userLogin) (src/server.ts:364). Fixed names (shared_orchestrator, system_webhook_receiver) are addresses, never identities (src/security/serviceIdentity.ts); the legacy address default_trader survives only as the migration source + deny guard (#2681); unattended work acts under getServiceUserLogin (serviceIdentity.ts:45), fail-closed when unconfigured. S3 (#2327) retired the research-stub default; behavioral pins in tests/mesh_identity_sweep_s3_2327.test.ts.",
+        "Per-login instances: server.ts resolves ORCHESTRATOR_AGENT.idFromName(userLogin) (src/server.ts:364). Fixed names (shared_orchestrator, system_webhook_receiver) are addresses, never identities (src/security/serviceIdentity.ts); the legacy address default_trader survives only as the migration source + deny guard (#2681); unattended work acts under getServiceUserLogin (serviceIdentity.ts:45), fail-closed when unconfigured. S3 (#2327) retired the research-stub default; behavioral pins in tests/mesh_identity_sweep_s3_2327.test.ts.",
         "Chat-turn mas_* rows still partition by sessionKey() (the opaque DO id string) — an address doing partition duty. S16 (#2426) landed two-part attribution on the A2A door: the edge-authenticated caller rides into handleA2A and is recorded on the payments path, and mas payment rows carry proposer/agent + authorizer/principal DIDs, so sessionKey is no longer the sole attribution on any mesh door. Reworking chat-turn row attribution itself is a session-scoping change, not an identity gap.",
       ),
       state: IMPL(
@@ -179,7 +179,7 @@ const MATRIX: MatrixRow[] = [
         "Dual store (src/actors/thinkAdapter.ts:69-75): the port's flat ActorSessionStore transcript and Think's tree session are separate stores in the same DO, and a turn writes to both; mas_messages is the durable SQL message log on top.",
       ),
       routing: IMPL(
-        "Bindings SEARCH_AGENT + ORCHESTRATOR_AGENT (registry-pinned against wrangler.jsonc); routeAgentRequest name search-agent (the class rename is S2, owner-sequenced behind #2326); A2A surfaces orchestrator/search/tasks/memory plus dispatch-only nlq (registry MESH_SURFACES).",
+        "Binding ORCHESTRATOR_AGENT (registry-pinned against wrangler.jsonc; the class was renamed by S2 — migration v15, #2523 — and the binding itself was renamed from SEARCH_AGENT by #2570); routeAgentRequest name orchestrator-agent; A2A surfaces orchestrator/search/tasks/memory plus dispatch-only nlq (registry MESH_SURFACES).",
       ),
       websockets: IMPL(
         "The SDK base WebSocket lifecycle behind routeAgentRequest, with onBeforeConnect/onBeforeRequest session gates in server.ts; the class defines no onConnect override (fleet pin below) — the SDK's hibernation-aware handling is the conformance posture.",
@@ -749,7 +749,7 @@ describe("identity pins — round 1 (#2339)", () => {
     // moved from src/server.ts to src/server/routes/platform.ts (MCP,
     // agentic wallet, browser transaction-snap forwards); the entry
     // surface is server.ts + routes/*.ts, so the pin reads both files.
-    expect(read("src/server.ts") + read("src/server/routes/platform.ts")).toContain("actorGateway.dispatch(env.SEARCH_AGENT, userLogin");
+    expect(read("src/server.ts") + read("src/server/routes/platform.ts")).toContain("actorGateway.dispatch(env.ORCHESTRATOR_AGENT, userLogin");
     expect(read("src/security/serviceIdentity.ts")).toContain(
       "export function getServiceUserLogin",
     );
