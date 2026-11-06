@@ -1,13 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { buildOpenApiSpec } from "../src/security/openapiSpec";
+import { buildOpenApiSpec, STOCK_SPEC_PATHS } from "../src/security/openapiSpec";
 import { API_ENDPOINT_CATALOG } from "../src/client/iaaaEndpointCatalog";
 
 /**
  * #1024 Phase 1 — OpenAPI + Swagger spike (no framework change).
  * The spec is generated from the IAAA-UI API catalog, not hand-written
- * per route. Hand-written schemas exist for the pilot set only; every
- * other path carries an explicit not-yet-specified marker — never an
- * invented schema.
+ * per route. Hand-written schemas exist for the pilot set and, since
+ * #2860 Factor 13, for the stock set; every other path carries an
+ * explicit not-yet-specified marker — never an invented schema.
  */
 const NOT_SPECIFIED = "schema: not yet specified (spike pilot coverage)";
 
@@ -116,14 +116,14 @@ describe("OpenAPI spec document", () => {
     expect(auditView.required).toContain("action");
   });
 
-  it("marks every non-pilot path as not yet specified, and no pilot path as such", () => {
+  it("marks every non-pilot, non-stock path as not yet specified, and no pilot or stock path as such", () => {
     const spec = buildOpenApiSpec();
     const paths = spec.paths as Record<string, Record<string, any>>;
     const pilot = new Set(["/api/me", "/health", "/api/health", "/api/iaaa/overview"]);
     const spikeMeta = new Set(["/openapi.json", "/api/docs"]);
     for (const [p, item] of Object.entries(paths)) {
       const text = (item.description as string) || "";
-      if (pilot.has(p) || spikeMeta.has(p)) {
+      if (pilot.has(p) || spikeMeta.has(p) || STOCK_SPEC_PATHS.has(p)) {
         expect(text).not.toContain(NOT_SPECIFIED);
       } else {
         expect(text, `missing marker on ${p}`).toContain(NOT_SPECIFIED);
@@ -143,5 +143,90 @@ describe("OpenAPI spec document", () => {
     }
     expect(paths["/openapi.json"].get.responses["200"].content["application/json"]).toBeDefined();
     expect(paths["/api/docs"].get.responses["200"].content["text/html"]).toBeDefined();
+  });
+
+  it("carries hand-written schemas for the stock set (#2860 Factor 13)", () => {
+    const spec = buildOpenApiSpec();
+    const paths = spec.paths as Record<string, Record<string, any>>;
+    const components = spec.components as Record<string, Record<string, any>>;
+    const schemas = components.schemas as Record<string, any>;
+    // Every stock path is present, carries no not-yet-specified marker,
+    // and every $ref its operations use resolves to a component schema.
+    const refs = new Set<string>();
+    const collect = (node: unknown): void => {
+      if (Array.isArray(node)) {
+        for (const v of node) collect(v);
+      } else if (node && typeof node === "object") {
+        for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+          if (k === "$ref" && typeof v === "string") refs.add(v);
+          else collect(v);
+        }
+      }
+    };
+    const expectedOps: Record<string, string[]> = {
+      "/api/market-data/screen": ["get", "post"],
+      "/api/reports": ["get"],
+      "/api/reports/{id}": ["get"],
+      "/api/reports/replay": ["post"],
+      "/api/screener/presets": ["get", "post"],
+      "/api/screener/presets/{id}": ["delete"],
+      "/api/screener/report.pdf": ["get"],
+      "/api/screener/report.xlsx": ["get"],
+      "/api/screener/report.csv": ["get"],
+      "/api/screener/report/regenerate": ["post"],
+    };
+    expect([...STOCK_SPEC_PATHS].sort()).toEqual(Object.keys(expectedOps).sort());
+    for (const [p, methods] of Object.entries(expectedOps)) {
+      const item = paths[p];
+      expect(item, `missing stock path ${p}`).toBeDefined();
+      expect(item.description as string).not.toContain(NOT_SPECIFIED);
+      for (const m of methods) {
+        const op = item[m];
+        expect(op, `${p} missing ${m}`).toBeDefined();
+        expect(JSON.stringify(op)).not.toContain(NOT_SPECIFIED);
+        expect(op.responses["200"] ?? op.responses["201"] ?? op.responses["202"]).toBeDefined();
+        collect(op);
+      }
+    }
+    for (const ref of refs) {
+      const name = ref.replace("#/components/schemas/", "");
+      expect(schemas[name], `unresolved $ref ${ref}`).toBeDefined();
+    }
+    // Spot-checks against the handlers the schemas were read from.
+    const screen = paths["/api/market-data/screen"];
+    expect(screen.post.requestBody.content["application/json"].schema.$ref).toBe(
+      "#/components/schemas/StockScreenRequest",
+    );
+    expect(screen.post.responses["202"].content["application/json"].schema.$ref).toBe(
+      "#/components/schemas/WorkflowAcceptedResponse",
+    );
+    expect(screen.post.responses["429"].content["application/json"].schema.$ref).toBe(
+      "#/components/schemas/AlreadyRunningResponse",
+    );
+    const replay = paths["/api/reports/replay"].post;
+    expect(replay.requestBody.content["application/json"].schema.$ref).toBe(
+      "#/components/schemas/ReplayRequest",
+    );
+    expect(replay.responses["404"]).toBeDefined();
+    expect(replay.responses["422"]).toBeDefined();
+    expect(schemas.StockReplayEnvelope.required).toContain("originalRunId");
+    expect(schemas.StockReplayEnvelope.properties.charged.example).toBe(false);
+    expect(schemas.StockReplayEnvelope.properties.liveFetch.example).toBe(false);
+    expect(schemas.ResearchReplayEnvelope.required).toContain("body");
+    const presets = paths["/api/screener/presets"];
+    expect(presets.post.responses["201"].content["application/json"].schema.$ref).toBe(
+      "#/components/schemas/PresetCreateResponse",
+    );
+    expect(schemas.ScreenerPreset.properties.assetClass.enum).toEqual(["stocks", "options"]);
+    expect(schemas.ScreenerPreset.properties.name.maxLength).toBe(100);
+    for (const p of ["/api/screener/report.pdf", "/api/screener/report.xlsx", "/api/screener/report.csv"]) {
+      expect(paths[p].get.responses["200"].content).toBeDefined();
+      expect(paths[p].get.responses["404"]).toBeDefined();
+    }
+    expect(paths["/api/screener/report/regenerate"].post.responses["502"]).toBeDefined();
+    // The stock set does not leak into the catalog-driven marker rule:
+    // the projection read and the operator seed stay not-yet-specified.
+    expect(paths["/api/reports/list"].get.description).toContain(NOT_SPECIFIED);
+    expect(paths["/api/reports/seed-canonical"].post.description).toContain(NOT_SPECIFIED);
   });
 });
