@@ -146,8 +146,8 @@ function screenerAgentRunner(env: Env, userLogin: string): ScreenRunner {
 
 /** The shared OrchestratorAgent stub (same addressing server.ts uses). */
 function orchestratorStub(env: Env): OrchestratorAgent {
-  const id = env.SEARCH_AGENT.idFromName(SHARED_ORCHESTRATOR_INSTANCE);
-  return env.SEARCH_AGENT.get(id) as unknown as OrchestratorAgent;
+  const id = env.ORCHESTRATOR_AGENT.idFromName(SHARED_ORCHESTRATOR_INSTANCE);
+  return env.ORCHESTRATOR_AGENT.get(id) as unknown as OrchestratorAgent;
 }
 
 /** Child operations against this workflow's own binding (parent â†’ child fan-out). */
