@@ -2,11 +2,12 @@
  * Issue #278 (Assessment P2, part of #143): bounded in-isolate TTL cache
  * for Cloudflare AI Search queries.
  *
- * The AI_SEARCH_ENDPOINT (wrangler.jsonc) was fetched per query with
- * zero caching — every identical query paid a full network round trip.
- * This module is the single cache owner; its reader is src/agents/mas.ts
- * `searchKnowledge`, invoked by the SearchHub MAS Search tab via
- * POST /search/mas (#1169 S4-2).
+ * The AI Search instance was queried per search with zero caching —
+ * every identical query paid a full round trip (historically a fetch
+ * of the public endpoint; since #3342 the namespace binding, through
+ * src/agents/mas.ts). This module is the single cache owner; its
+ * reader is src/agents/mas.ts `searchKnowledge`, invoked by the
+ * SearchHub MAS Search tab via POST /search/mas (#1169 S4-2).
  *
  * Honesty note (same class as the rate limiter's per-isolate state):
  * the cache lives in isolate memory — it is NOT shared across isolates,
