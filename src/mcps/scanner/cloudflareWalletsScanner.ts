@@ -235,7 +235,7 @@ export class OptionsScannerMCP extends McpAgent<Env> {
     if (serviceLogin) headers.set("x-user-login", serviceLogin);
     if (body) headers.set("Content-Type", "application/json");
     const response = await actorGateway.dispatch(
-      this.env.SEARCH_AGENT,
+      this.env.ORCHESTRATOR_AGENT,
       this.ctx.id.toString(),
       new Request(new URL(path, "https://agent.internal"), {
         method,
@@ -254,7 +254,7 @@ export class OptionsScannerMCP extends McpAgent<Env> {
    * Persists the paid-scan audit event in the ORCHESTRATOR's mas_events —
    * the store GET /api/audit reads — via POST /api/audit/event, which
    * funnels into recordAudit(), the single owner of mas_events inserts
-   * (issue #270). The write travels the same SEARCH_AGENT channel (and to
+   * (issue #270). The write travels the same ORCHESTRATOR_AGENT channel (and to
    * the same orchestrator instance) as the scan job it belongs to.
    *
    * Issue #700 (point 2): the previous implementation wrote to this DO's
