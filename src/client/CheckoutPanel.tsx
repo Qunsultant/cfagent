@@ -83,6 +83,7 @@ import {
   type ScreenerFamily,
   type SubmitResult,
   type SubscriptionStatusView,
+  type SubscriptionView,
 } from "./commercialApi";
 
 const GOAL_KINDS = [
