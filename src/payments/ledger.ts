@@ -8,7 +8,7 @@
  * - Pure mapping/derivation helpers (used by the ledger owner's route
  *   handlers in src/agents/routes/agenticPayments.ts, and unit-pinned
  *   in tests/payments_ledger_state.test.ts).
- * - A client that reaches the ledger owner over the same SEARCH_AGENT
+ * - A client that reaches the ledger owner over the same ORCHESTRATOR_AGENT
  *   Durable Object channel other cross-agent writes use (the
  *   persistAudit pattern, issue #700): stub fetch to the canonical
  *   orchestrator instance. Every client function fails LOUD when the
@@ -205,7 +205,7 @@ export function deriveBudgetGuardState(
 }
 
 // ---------------------------------------------------------------------------
-// Client: PaymentsAgent -> ledger owner (OrchestratorAgent) over SEARCH_AGENT
+// Client: PaymentsAgent -> ledger owner (OrchestratorAgent) over ORCHESTRATOR_AGENT
 // ---------------------------------------------------------------------------
 
 interface LedgerStub {
@@ -213,12 +213,12 @@ interface LedgerStub {
 }
 
 function ledgerStub(env: Env): LedgerStub {
-  const ns = (env as any)?.SEARCH_AGENT as
+  const ns = (env as any)?.ORCHESTRATOR_AGENT as
     | { idFromName: (name: string) => unknown; get: (id: unknown) => LedgerStub }
     | undefined;
   if (!ns || typeof ns.idFromName !== "function" || typeof ns.get !== "function") {
     throw new Error(
-      "payment ledger unavailable: SEARCH_AGENT (the mas_transactions ledger owner) is not bound"
+      "payment ledger unavailable: ORCHESTRATOR_AGENT (the mas_transactions ledger owner) is not bound"
     );
   }
   return ns.get(ns.idFromName(PAYMENTS_LEDGER_ORCHESTRATOR_INSTANCE));
