@@ -42,6 +42,13 @@ export interface BrokerPresentation {
    */
   readonly modeBadge: Readonly<Record<TradingType, string>>;
   /**
+   * The mode as a lowercase phrase for inline copy ("Paper sandbox",
+   * "Live execution"). E*TRADE calls its test environment a sandbox; Alpaca
+   * calls the same thing paper trading, and borrowing the wrong noun is the
+   * same defect as borrowing the wrong broker's name.
+   */
+  readonly modeWord: Readonly<Record<TradingType, string>>;
+  /**
    * How a connected session is described. E*TRADE's OAuth token dies at
    * midnight Eastern; Alpaca's key pair has no expiry, so it must not borrow
    * that sentence.
@@ -58,6 +65,7 @@ const PRESENTATIONS: Readonly<Record<BrokerId, BrokerPresentation>> = {
     deskAgentName: "E*TRADE Voice Desk",
     botName: "ETradeAgent",
     modeBadge: { paper: "PAPER TRADING SANDBOX", live: "LIVE BROKERAGE" },
+    modeWord: { paper: "Paper sandbox", live: "Live execution" },
     sessionCopy: {
       paper: "Access token active until midnight Eastern Time.",
       live: "Access token active until midnight Eastern Time.",
@@ -70,6 +78,7 @@ const PRESENTATIONS: Readonly<Record<BrokerId, BrokerPresentation>> = {
     deskAgentName: "Alpaca Voice Desk",
     botName: "AlpacaAgent",
     modeBadge: { paper: "PAPER TRADING", live: "LIVE TRADING" },
+    modeWord: { paper: "Paper trading", live: "Live trading" },
     sessionCopy: {
       paper: "API key pair verified for paper trading.",
       live: "API key pair verified for live trading.",
@@ -89,6 +98,7 @@ const UNKNOWN_PRESENTATION: BrokerPresentation = {
   deskAgentName: "Voice Desk",
   botName: "TradingAgent",
   modeBadge: { paper: "PAPER TRADING", live: "LIVE TRADING" },
+    modeWord: { paper: "Paper trading", live: "Live trading" },
   sessionCopy: { paper: "Session active.", live: "Session active." },
 };
 
