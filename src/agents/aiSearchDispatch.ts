@@ -8,7 +8,7 @@
  * human-readable text part.
  *
  * The one operation, aisearch.search, delegates to the agent's
- * three-path search runner (src/agents/aiSearchPaths.ts) — the same
+ * two-path search runner (src/agents/aiSearchPaths.ts) — the same
  * runner the class's search() method and its turn tool use, so the
  * A2A door can never tell a different story from the agent's other
  * doors. A degraded runner result stays degraded through this
@@ -49,16 +49,16 @@ type AiSearchA2AErrorToken =
  * operation, invalid input and not-configured are "the request or
  * environment named something the agent does not know / cannot
  * serve" (ERR_UNKNOWN_AGENT_ERROR — the catalog has no validation
- * or configuration class); degraded fallback answers,
- * all-paths-failed and executor failures are
- * ERR_TOOL_EXECUTION_FAILED. No catalog keys are invented here.
+ * or configuration class); all-paths-failed and executor failures
+ * are ERR_TOOL_EXECUTION_FAILED. No catalog keys are invented
+ * here. (The pre-#3342 degraded_fallback entry existed only for
+ * the retired REST path's runner outcome and is removed with it.)
  */
 const AISEARCH_A2A_CATALOG_CODES: Record<AiSearchA2AErrorToken, AgentErrorCode> = {
   missing_operation: AgentErrorCode.UNKNOWN_AGENT_ERROR,
   unknown_operation: AgentErrorCode.UNKNOWN_AGENT_ERROR,
   invalid_input: AgentErrorCode.UNKNOWN_AGENT_ERROR,
   not_configured: AgentErrorCode.UNKNOWN_AGENT_ERROR,
-  degraded_fallback: AgentErrorCode.TOOL_EXECUTION_FAILED,
   all_paths_failed: AgentErrorCode.TOOL_EXECUTION_FAILED,
   internal_error: AgentErrorCode.TOOL_EXECUTION_FAILED,
 };
@@ -85,7 +85,7 @@ export interface AiSearchA2ADataResult {
 
 export interface AiSearchA2ADeps {
   /**
-   * The search executor. Defaults to the real three-path runner
+   * The search executor. Defaults to the real two-path runner
    * (src/agents/aiSearchPaths.ts); the class injects nothing — the
    * runner IS the agent's search, shared by every door.
    */
@@ -230,12 +230,6 @@ function successText(data: AiSearchA2ADataResult): string {
 /** Wrap a dispatch result in the collected { text, data } outcome. */
 export function aiSearchA2AOutcome(data: AiSearchA2ADataResult): AiSearchA2AOutcome {
   if (!data.ok) {
-    if (data.code === "degraded_fallback") {
-      return {
-        text: `aisearch.search degraded: the REST path could not be served by the live AI Search instance; the degraded answer was withheld, not served as results.`,
-        data,
-      };
-    }
     return {
       text: `${data.operation ?? "aisearch operation"} failed: ${data.error ?? "unknown error"}`,
       data,
