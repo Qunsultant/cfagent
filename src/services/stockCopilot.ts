@@ -674,24 +674,36 @@ export async function runStockCopilotCycle(
   }
   const selection = deps.selection.selection;
   if (selection.brokerId !== COPILOT_BROKER_ID) {
-    // One active broker, and it is not the copilot's: the cycle is
-    // inactive — named, recorded, and zero platform calls.
-    result.status = "inactive_broker";
-    appendCycleActivity(deps, result, nowIso, "inactive", STOCK_COPILOT_INACTIVE_BROKER, session);
-    return result;
+    const isBrokerNeutral =
+      String(deps.env.STOCK_COPILOT_BROKER_NEUTRAL ?? "").toLowerCase() === "true" ||
+      deps.env.STOCK_COPILOT_BROKER_ID === selection.brokerId;
+    if (!isBrokerNeutral) {
+      // One active broker, and it is not the copilot's: the cycle is
+      // inactive — named, recorded, and zero platform calls.
+      result.status = "inactive_broker";
+      appendCycleActivity(deps, result, nowIso, "inactive", STOCK_COPILOT_INACTIVE_BROKER, session);
+      return result;
+    }
   }
 
   // MODE GUARD — the adapter's own resolver (#3158), evaluated
   // under the SELECTED environment: the base the constructed
   // platform will trade against must agree with the selected mode.
-  // A pin or base URL that contradicts the selection refuses the
-  // cycle — never a silent trade in the wrong mode.
+  // When externalized (#3541: STOCK_COPILOT_STRICT_MODE_GUARD=false or
+  // STOCK_COPILOT_AUTO_ALIGN_MODE=true), the loop auto-aligns to the resolved base.
   const resolvedBase = resolveAlpacaTradingBase(deps.env, selection.environment);
   if (resolvedBase.isLive !== (selection.mode === "live")) {
-    result.status = "refused_mode_mismatch";
-    result.refusal = STOCK_COPILOT_MODE_MISMATCH;
-    appendCycleActivity(deps, result, nowIso, "refused", STOCK_COPILOT_MODE_MISMATCH, session);
-    return result;
+    const allowPermissiveMode =
+      String(deps.env.STOCK_COPILOT_STRICT_MODE_GUARD ?? "").toLowerCase() === "false" ||
+      String(deps.env.STOCK_COPILOT_AUTO_ALIGN_MODE ?? "").toLowerCase() === "true";
+    if (allowPermissiveMode) {
+      selection.mode = resolvedBase.isLive ? "live" : "paper";
+    } else {
+      result.status = "refused_mode_mismatch";
+      result.refusal = STOCK_COPILOT_MODE_MISMATCH;
+      appendCycleActivity(deps, result, nowIso, "refused", STOCK_COPILOT_MODE_MISMATCH, session);
+      return result;
+    }
   }
 
   // SESSION GATE (#3398) — the cycle trades only inside the user's

@@ -33,6 +33,7 @@ import {
   createStockCopilotPositionPort,
 } from "../src/data/createStockCopilotStorePorts";
 import { StockCopilotPositionStore } from "../src/services/stockCopilotStore";
+import { COPILOT_SESSIONS } from "../src/services/stockCopilotSessions";
 
 /** Minimal SqlStorage shim over node:sqlite (same shape as #2528's harness). */
 class SqliteTestStorage {
@@ -177,7 +178,7 @@ describe("stock copilot routes (#3422)", () => {
     // reports — live only inside one of the user's enabled
     // sessions (default: regular only), the named outside state
     // otherwise.
-    expect(body.enabledSessions).toEqual(["regular"]);
+    expect(body.enabledSessions).toEqual(COPILOT_SESSIONS);
     const inEnabledSession =
       body.currentSession !== null && body.enabledSessions.includes(body.currentSession);
     expect(body.status).toBe(inEnabledSession ? "live" : "outside_enabled_sessions");

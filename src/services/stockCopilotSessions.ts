@@ -53,9 +53,14 @@ export const COPILOT_SESSIONS = [
 
 export type CopilotSessionId = (typeof COPILOT_SESSIONS)[number];
 
-/** The truthful default: regular hours only, matching the copilot's
- *  behavior before sessions were externalized. */
-export const DEFAULT_COPILOT_SESSIONS: readonly CopilotSessionId[] = ["regular"];
+/** The truthful default (#3541): all four trading sessions enabled by default
+ *  for 24-hour continuous autonomous operation. */
+export const DEFAULT_COPILOT_SESSIONS: readonly CopilotSessionId[] = [
+  "pre_market",
+  "regular",
+  "after_hours",
+  "exto",
+];
 
 /** The per-login settings key (the #2482 mas_settings store). */
 export const COPILOT_SESSION_SETTING_KEY = "stock_copilot:sessions";
@@ -96,9 +101,15 @@ export function parseCopilotSessionList(
     .map((t) => t.trim().toLowerCase())
     .filter((t) => t.length > 0);
   if (tokens.length === 0) return null;
+  if (tokens.length === 1 && (tokens[0] === "all" || tokens[0] === "*")) {
+    return [...COPILOT_SESSIONS];
+  }
   if (tokens.length === 1 && tokens[0] === "none") return [];
   const found = new Set<CopilotSessionId>();
   for (const token of tokens) {
+    if (token === "all" || token === "*") {
+      return [...COPILOT_SESSIONS];
+    }
     if (isCopilotSessionId(token)) found.add(token);
   }
   if (found.size === 0) return null;
@@ -119,18 +130,28 @@ export interface CopilotSessionReaders {
   /** The instance's settings reader (the #2482 store). */
   readSettingRaw?: ((key: string) => string | null) | undefined;
   /** Deployment env carrying the optional STOCK_COPILOT_SESSIONS default. */
-  env?: { STOCK_COPILOT_SESSIONS?: string } | null;
+  env?: {
+    STOCK_COPILOT_SESSIONS?: string;
+    STOCK_COPILOT_IGNORE_SESSIONS?: string;
+    STOCK_COPILOT_FORCE_ALL_SESSIONS?: string;
+  } | null;
 }
 
 /**
  * Resolve the user's enabled sessions: stored per-login setting
- * first, deployment env second, regular-only default last. This
- * function adds no store of its own — it reads the stores that
- * already exist, exactly as the mode selection does (#3451).
+ * first, deployment env second, all-sessions default last (#3541).
+ * When STOCK_COPILOT_IGNORE_SESSIONS or STOCK_COPILOT_FORCE_ALL_SESSIONS is
+ * true, returns all 4 sessions immediately.
  */
 export function resolveCopilotSessions(
   readers: CopilotSessionReaders,
 ): CopilotSessionId[] {
+  if (
+    readers.env?.STOCK_COPILOT_IGNORE_SESSIONS === "true" ||
+    readers.env?.STOCK_COPILOT_FORCE_ALL_SESSIONS === "true"
+  ) {
+    return [...COPILOT_SESSIONS];
+  }
   const stored =
     typeof readers.readSettingRaw === "function"
       ? parseCopilotSessionList(readers.readSettingRaw(COPILOT_SESSION_SETTING_KEY))
