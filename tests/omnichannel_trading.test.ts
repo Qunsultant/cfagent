@@ -51,7 +51,7 @@ describe("Cloudflare Email & Slack Trading Agents (Omnichannel E*TRADE)", () => 
   const mockEnv: Env = {
     APP_BASE_URL: "https://agent.openaimp.com",
     AI_SEARCH_ENDPOINT: "https://ai-search.internal",
-    SEARCH_AGENT: {} as any,
+    ORCHESTRATOR_AGENT: {} as any,
     ETRADE_ENVIRONMENT: "sandbox",
     EMAIL_AGENT_ADDRESS: "trade@agent.openaimp.com",
     SLACK_SIGNING_SECRET: "test_slack_signing_secret_12345",
