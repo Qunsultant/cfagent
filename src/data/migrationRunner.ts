@@ -1747,6 +1747,40 @@ export const MIGRATION_0047_JOB_RUN_RECORDS: DataMigration = {
       ON job_run_records (job_id, started DESC, id DESC)`,
 };
 
+/**
+ * Migration 0048 — self-service top-up drafts (#3262).
+ *
+ * One row per minted top-up: the amount bound at mint, the rail, and
+ * the provider evidence needed to verify the payment. The draft id
+ * (`topup-<uuid>`) is the replay guard: a draft credits exactly once.
+ *
+ * Renumbered 0046 → 0048 on the rebase onto main 651d1a9a: #3534
+ * landed migrations 0046 (job pipeline) and 0047 (job run records)
+ * first. This migration never shipped, so no store has applied
+ * the old number.
+ */
+export const MIGRATION_0048_TOP_UP_DRAFTS: DataMigration = {
+  version: 48,
+  name: "0048_top_up_drafts",
+  sql: `
+CREATE TABLE IF NOT EXISTS agent_top_up_drafts (
+  id TEXT PRIMARY KEY,
+  user_login TEXT NOT NULL,
+  tenant_id TEXT NOT NULL,
+  email TEXT NOT NULL,
+  amount_usd REAL NOT NULL,
+  rail TEXT NOT NULL,
+  status TEXT NOT NULL,
+  created_at_ms INTEGER NOT NULL,
+  credited_at_ms INTEGER,
+  payment_intent_id TEXT,
+  checkout_session_id TEXT,
+  challenge_nonce TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_top_up_user ON agent_top_up_drafts (user_login);
+`,
+};
+
 export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANCE,
   MIGRATION_0002_AGENT_CHAINS_SCHEDULES,
   MIGRATION_0003_AGENT_SHARD_JOBS,
@@ -1794,6 +1828,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0045_IV_HISTORY_BROKER,
   MIGRATION_0046_JOB_PIPELINE,
   MIGRATION_0047_JOB_RUN_RECORDS,
+  MIGRATION_0048_TOP_UP_DRAFTS,
 ];
 
 function splitStatements(sqlText: string): string[] {

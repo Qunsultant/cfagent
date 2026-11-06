@@ -46,6 +46,7 @@ import {
   mapFailureCreditToJournalEntries,
   mapRedemptionToJournalEntries,
   mapSubscriptionPurchaseToJournalEntries,
+  mapTopUpToJournalEntries,
   reconcileJournal,
   trialBalance,
   type JournalPort,
@@ -376,6 +377,46 @@ describe("journal subscription purchase mapping (#2155 follow-up)", () => {
       postJournalBestEffort(async () => throwingPort, mapSubscriptionPurchaseToJournalEntries(input)),
     ).resolves.toBeUndefined();
     expect(purchase.status).toBe("active");
+  });
+});
+
+describe("journal top-up mapping (#3262)", () => {
+  const input = {
+    transactionRef: "topup-draft-1",
+    tenantId: "tenant-a",
+    amountUSD: 25,
+  };
+
+  it("maps a top-up to Dr 1000 / Cr 2100, never to revenue", () => {
+    const entries = mapTopUpToJournalEntries(input);
+    expect(entries.map((e) => [e.accountCode, e.debitUSD, e.creditUSD])).toEqual([
+      ["1000", 25, 0],
+      ["2100", 0, 25],
+    ]);
+    for (const e of entries) {
+      expect(e.transactionRef).toBe("topup-draft-1");
+      expect(e.tenantId).toBe("tenant-a");
+      expect(e.runRequestId).toBe("topup-draft-1");
+      expect(e.family).toBe("top_up");
+      expect(e.currency).toBe("USD");
+    }
+    expect(() => mapTopUpToJournalEntries({ ...input, amountUSD: 0 })).toThrow(/positive finite/);
+    expect(() => mapTopUpToJournalEntries({ ...input, transactionRef: "" })).toThrow(/transactionRef/);
+  });
+
+  it("posts the pair on both adapters; replay of the same top-up ref is a no-op", async () => {
+    for (const make of makers) {
+      const store = await make.make();
+      const posted = await store.postEntries(mapTopUpToJournalEntries(input));
+      expect(posted).toHaveLength(2);
+      const replayed = await store.postEntries(mapTopUpToJournalEntries(input));
+      expect(replayed).toHaveLength(2);
+      expect(await store.listEntries("tenant-a")).toHaveLength(2);
+      const balance = await trialBalance(store, "tenant-a");
+      expect(balance.balanced).toBe(true);
+      expect(balance.totalDebits).toBe(25);
+      expect(balance.totalCredits).toBe(25);
+    }
   });
 });
 

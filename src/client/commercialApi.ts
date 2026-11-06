@@ -110,6 +110,8 @@ export type BrowserPaymentScope = "card-only" | "card-and-x402";
 export interface Pricing {
   monetizationEnabled: boolean;
   prices: Record<ScreenerFamily, number>;
+  /** Issue #3262: operator-set top-up bounds from the billing policy (PROPOSED seeds $1–$500); null when the policy store is unavailable — the UI shows the limits as unavailable and mint still validates server-side. */
+  topUpLimits: { minUSD: number; maxUSD: number } | null;
   network: NetworkMarker;
   browserPaymentScope: BrowserPaymentScope;
   failurePolicy: string;
@@ -311,6 +313,56 @@ export const subscriptionTrial = (body: {
   trialEndsAtMs: number;
   message: string;
 }> => post("/subscription/trial", body);
+
+/**
+ * Issue #3262 — self-service top-up: mint + confirm through the
+ * native verified-payment pattern. The mint response carries the
+ * provider join key per rail: card → checkoutUrl + checkoutSessionId
+ * (Stripe session id); x402 → checkoutId + challenge (the 402
+ * challenge the payer's wallet/agent completes — no URL exists for
+ * crypto). The confirm response carries the credited account, so the
+ * panel shows the new credit balance from the fresh server read.
+ */
+export interface TopUpChallenge {
+  version: string;
+  network: string;
+  recipient: string;
+  amountUSD: number;
+  currency: "USDC";
+  facilitator: string;
+  resource: string;
+  nonce: string;
+  expiresAtMs: number;
+}
+
+export interface TopUpCheckoutView {
+  topUpRequestId: string;
+  rail: "card" | "x402";
+  amountUSD: number;
+  checkoutUrl?: string | null;
+  checkoutSessionId?: string | null;
+  checkoutId?: string | null;
+  challenge?: TopUpChallenge | null;
+}
+
+export interface TopUpConfirmView {
+  account: CommercialAccountView;
+  topUpRequestId: string;
+  creditedUSD: number;
+  rail: "card" | "x402";
+}
+
+export const topUpCheckout = (body: {
+  amountUSD: number;
+  rail?: "card" | "x402";
+  email: string;
+}): Promise<TopUpCheckoutView> => post<TopUpCheckoutView>("/top-up/checkout", body);
+export const topUpConfirm = (body: {
+  topUpRequestId: string;
+  checkoutSessionId?: string;
+  paymentProof?: string;
+  payer?: string;
+}): Promise<TopUpConfirmView> => post<TopUpConfirmView>("/top-up/confirm", body);
 
 /** Split a comma-separated symbols field into a clean list. */
 export function parseSymbols(input: string): string[] {

@@ -146,6 +146,7 @@ import { parseNativeRail } from "../../data/nativeLedgerPorts";
 import {
   mapRedemptionToJournalEntries,
   mapSubscriptionPurchaseToJournalEntries,
+  mapTopUpToJournalEntries,
 } from "../../data/journalPorts";
 import { postJournalBestEffort } from "../../services/journalPosting";
 import type { D1CommercialAdapter } from "../../data/d1CommercialAdapter";
@@ -203,6 +204,15 @@ import {
   reconcileChannel,
   type CfpayChannelClient,
 } from "../../services/cfpayChannel";
+import {
+  createTopUpDraftAdapter,
+  ensureTopUpSchema,
+} from "../../data/createTopUpPorts";
+import type { D1TopUpAdapter } from "../../data/d1TopUpAdapter";
+import {
+  assertTopUpAmountUSD,
+  assertTopUpRail,
+} from "../../data/topUpPorts";
 import {
   createChannelDraftAdapter,
   ensureChannelSchema,
@@ -1969,6 +1979,343 @@ export async function handleAgenticPaymentsRoutes(
     }
   }
 
+  // ================================================================
+  // Self-service top-up (#3262): a user funds their own credit
+  // balance ahead of time — mint a native checkout for a chosen
+  // amount, pay, then confirm. The confirm re-reads provider
+  // evidence and judges it, exactly like the subscription purchase
+  // (#2198): credit lands ONLY on verified payment, never on an
+  // unconfirmed checkout. The draft (bound at mint) is the replay
+  // guard and the amount binding; the server-resolved (user,
+  // tenant) from the session identity is the credit target (#1069
+  // §8) — a client-supplied tenantId is ignored, and no
+  // client-supplied account is ever credited. Single currency
+  // (USD) only, native Stripe/x402 rails only (#1069 §9).
+  // ================================================================
+
+  const requireTopUpDrafts = (): D1TopUpAdapter | Response => {
+    const adapter = createTopUpDraftAdapter(ctx.env as { AGENT_DB?: unknown });
+    if (!adapter) {
+      return Response.json({ error: "Top-up store unavailable: AGENT_DB is not bound." }, { status: 503 });
+    }
+    return adapter;
+  };
+
+  const topUpErrorResponse = (err: unknown): Response => {
+    if (err instanceof BusinessError) {
+      const outcome = resolveOutcome(err.code);
+      return new Response(JSON.stringify({ error: codedMessage(err.code), code: err.code }), {
+        status: outcome.entry?.httpStatus ?? 500,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    const message = err instanceof Error ? err.message : "Top-up failed.";
+    const status = /already credited/.test(message)
+      ? 409
+      : /required|must be|Unknown top-up draft/.test(message)
+        ? 400
+        : 500;
+    return new Response(JSON.stringify({ error: message }), {
+      status,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  // POST /payments/agentic/commercial/top-up/checkout — mint a native checkout for a chosen amount.
+  // The amount is validated against the operator-set billing-policy bounds (PROPOSED seeds
+  // $1–$500, owner-decided 2026-11-06) before any checkout is minted. The draft id
+  // (`topup-<uuid>`) is the Stripe client_reference_id / x402 checkout id, so the confirm
+  // can bind the payment back to this draft and this amount. No credit is created here —
+  // mint only mints; the account is credited at confirm, after verified payment.
+  if (path.endsWith("/payments/agentic/commercial/top-up/checkout") && request.method === "POST") {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      const flag = await requireMonetization();
+      if (flag) return flag;
+      const body = (await request.json().catch(() => ({}))) as {
+        amountUSD?: unknown;
+        rail?: unknown;
+        email?: unknown;
+      };
+      const email = typeof body.email === "string" ? body.email.trim() : "";
+      if (!email) return Response.json({ error: "email (checkout contact) is required." }, { status: 400 });
+      let rail: "card" | "x402" = "card";
+      if (body.rail !== undefined) {
+        try {
+          rail = assertTopUpRail(body.rail);
+        } catch {
+          return Response.json({ error: "rail must be \"card\" or \"x402\"." }, { status: 400 });
+        }
+      }
+      let amountUSD: number;
+      try {
+        amountUSD = assertTopUpAmountUSD(body.amountUSD);
+      } catch {
+        throw new BusinessError("FAILURE_TOP_UP_AMOUNT_INVALID");
+      }
+      const store = requireStore();
+      if (store instanceof Response) return store;
+      const subs = requireSubs();
+      if (subs instanceof Response) return subs;
+      const ensured = await ensureStores(store, subs);
+      if (ensured) return ensured;
+      const policy = requireBillingPolicy();
+      if (policy instanceof Response) return policy;
+      let policyValue;
+      try {
+        await ensureBillingPolicySchema(policy.db);
+        policyValue = await policy.getPolicy();
+      } catch (err: any) {
+        return Response.json({ error: `Billing policy unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+      }
+      if (amountUSD < policyValue.topUpMinUSD || amountUSD > policyValue.topUpMaxUSD) {
+        throw new BusinessError("FAILURE_TOP_UP_AMOUNT_INVALID");
+      }
+      let identity;
+      try {
+        identity = await resolvePlatformIdentity(
+          { commercial: store, subscriptions: subs },
+          { userId: login, nowMs: Date.now() },
+        );
+      } catch (err: any) {
+        return Response.json({ error: err.message || "Failed to resolve platform identity" }, { status: 503 });
+      }
+      // #2219: the tenant comes from the resolved identity, never the request body.
+      const tenantId = identity.tenantId ?? login;
+      const drafts = requireTopUpDrafts();
+      if (drafts instanceof Response) return drafts;
+      try {
+        await ensureTopUpSchema(drafts.db);
+      } catch (err: any) {
+        return Response.json({ error: `Top-up store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+      }
+      const ports = createCheckoutPorts(ctx.env as unknown as CheckoutEnv);
+      const port = ports?.[rail] ?? null;
+      if (!port) {
+        throw new BusinessError("FAILURE_TOP_UP_CHECKOUT_UNAVAILABLE");
+      }
+      const topUpRequestId = `topup-${crypto.randomUUID()}`;
+      let created;
+      try {
+        created = await port.createCheckout({
+          runRequestId: topUpRequestId,
+          priceUSD: amountUSD,
+          email,
+          userId: login,
+        });
+      } catch {
+        throw new BusinessError("FAILURE_TOP_UP_CHECKOUT_UNAVAILABLE");
+      }
+      try {
+        await drafts.createDraft({
+          id: topUpRequestId,
+          userLogin: login,
+          tenantId,
+          email,
+          amountUSD,
+          rail,
+          status: "minted",
+          createdAtMs: Date.now(),
+          creditedAtMs: null,
+          paymentIntentId: null,
+          checkoutSessionId: rail === "card" ? created.checkoutId : null,
+          challengeNonce: rail === "x402" ? (created.challenge?.nonce ?? null) : null,
+        });
+      } catch (err: any) {
+        return Response.json({ error: "Failed to record the top-up draft." }, { status: 500 });
+      }
+      ctx.audit("commercial.top_up.checkout_created", "payments", {
+        userId: login,
+        tenantId,
+        topUpRequestId,
+        rail,
+        amountUSD,
+      });
+      if (rail === "card") {
+        return Response.json({
+          topUpRequestId,
+          rail,
+          amountUSD,
+          checkoutUrl: created.checkoutUrl ?? null,
+          checkoutSessionId: created.checkoutId,
+        });
+      }
+      return Response.json({
+        topUpRequestId,
+        rail,
+        amountUSD,
+        checkoutId: created.checkoutId,
+        challenge: created.challenge ?? null,
+      });
+    } catch (err: any) {
+      if (err instanceof BusinessError) return topUpErrorResponse(err);
+      const message = err.message || "Failed to create top-up checkout";
+      return Response.json({ error: message }, { status: 500 });
+    }
+  }
+
+  // POST /payments/agentic/commercial/top-up/confirm — credit on VERIFIED payment only.
+  // Fulfillment is re-read from the provider, never a return page, exactly like the
+  // subscription purchase. Card requires ALL of: session status complete, payment_status
+  // paid, amount_total == draft amount x 100 (the MANDATORY amount re-check), client_reference_id
+  // == the draft id, and a payment-intent id present. x402 requires: facilitator verdict
+  // verified for the draft amount, payer match when the caller names one, and the
+  // challenge-nonce binding to the nonce minted for this draft. Any failure refuses
+  // with 402 and credits nothing. A credited draft refuses a second confirm with 409.
+  // The account row is created on verified payment when missing (purchase-activation
+  // precedent), so a first top-up needs no operator step; the credit target is always
+  // the server-resolved (user, tenant), never a client-supplied account (#1069 §8).
+  if (path.endsWith("/payments/agentic/commercial/top-up/confirm") && request.method === "POST") {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      const flag = await requireMonetization();
+      if (flag) return flag;
+      const body = (await request.json().catch(() => ({}))) as {
+        topUpRequestId?: unknown;
+        checkoutSessionId?: unknown;
+        paymentProof?: unknown;
+        payer?: unknown;
+      };
+      const topUpRequestId = typeof body.topUpRequestId === "string" ? body.topUpRequestId : "";
+      if (!topUpRequestId) return Response.json({ error: "topUpRequestId is required." }, { status: 400 });
+      const store = requireStore();
+      if (store instanceof Response) return store;
+      const subs = requireSubs();
+      if (subs instanceof Response) return subs;
+      const ensured = await ensureStores(store, subs);
+      if (ensured) return ensured;
+      const drafts = requireTopUpDrafts();
+      if (drafts instanceof Response) return drafts;
+      try {
+        await ensureTopUpSchema(drafts.db);
+      } catch (err: any) {
+        return Response.json({ error: `Top-up store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+      }
+      const draft = await drafts.getDraft(topUpRequestId);
+      if (!draft) return Response.json({ error: "Unknown top-up." }, { status: 404 });
+      if (draft.userLogin !== login) {
+        return Response.json({ error: "Forbidden: only the top-up owner may confirm it." }, { status: 403 });
+      }
+      if (draft.status !== "minted") {
+        throw new BusinessError("FAILURE_TOP_UP_REPLAY");
+      }
+      const ports = createCheckoutPorts(ctx.env as unknown as CheckoutEnv);
+      const port = ports?.[draft.rail] ?? null;
+      if (!port) {
+        throw new BusinessError("FAILURE_TOP_UP_CHECKOUT_UNAVAILABLE");
+      }
+      let paymentIntentId: string | null = null;
+      let checkoutSessionId: string | null = null;
+      if (draft.rail === "card") {
+        const sessionId =
+          typeof body.checkoutSessionId === "string" && body.checkoutSessionId
+            ? body.checkoutSessionId
+            : draft.checkoutSessionId;
+        if (!sessionId) return Response.json({ error: "checkoutSessionId is required." }, { status: 400 });
+        checkoutSessionId = sessionId;
+        let evidence;
+        try {
+          evidence = await port.retrieveCardSession({ sessionId });
+        } catch {
+          throw new BusinessError("FAILURE_TOP_UP_CHECKOUT_UNAVAILABLE");
+        }
+        const expectedCents = Math.round(draft.amountUSD * 100);
+        if (
+          evidence.status !== "complete" ||
+          evidence.paymentStatus !== "paid" ||
+          evidence.amountTotalCents !== expectedCents ||
+          evidence.clientReferenceId !== draft.id
+        ) {
+          throw new BusinessError("FAILURE_TOP_UP_NOT_PAID");
+        }
+        if (!evidence.paymentIntentId) {
+          throw new BusinessError("FAILURE_TOP_UP_NOT_PAID");
+        }
+        paymentIntentId = evidence.paymentIntentId;
+      } else {
+        const paymentProof = typeof body.paymentProof === "string" ? body.paymentProof : "";
+        if (!paymentProof) return Response.json({ error: "paymentProof is required." }, { status: 400 });
+        let verdict;
+        try {
+          verdict = await port.verifyCryptoPayment({ paymentProof, expectedAmountUSD: draft.amountUSD });
+        } catch {
+          throw new BusinessError("FAILURE_TOP_UP_CHECKOUT_UNAVAILABLE");
+        }
+        if (!verdict.verified || !verdict.payer) {
+          throw new BusinessError("FAILURE_TOP_UP_NOT_PAID");
+        }
+        const claimedPayer = typeof body.payer === "string" ? body.payer : "";
+        if (claimedPayer && claimedPayer.toLowerCase() !== verdict.payer.toLowerCase()) {
+          throw new BusinessError("FAILURE_TOP_UP_NOT_PAID");
+        }
+        if (draft.challengeNonce && verdict.nonce && draft.challengeNonce !== verdict.nonce) {
+          throw new BusinessError("FAILURE_TOP_UP_NOT_PAID");
+        }
+      }
+      // Verified: ensure the account row exists (created on verified payment when
+      // missing), then credit exactly the draft amount — never the evidence amount,
+      // never a client-supplied amount.
+      let account = await store.getAccount(login);
+      if (!account) {
+        account = await store.upsertAccount({ userId: login, tenantId: draft.tenantId, tier: "Free" });
+      }
+      const credited = await store.adjustCredits(login, draft.amountUSD);
+      let marked;
+      try {
+        marked = await drafts.markCredited(draft.id, {
+          creditedAtMs: Date.now(),
+          paymentIntentId,
+          checkoutSessionId,
+        });
+      } catch (err: any) {
+        // The credit landed but the draft could not be marked: a loud
+        // 500 with the draft id, so an operator can reconcile from the
+        // Stripe evidence. A retry confirm sees the credited... no —
+        // the draft is still minted, so a retry re-verifies and would
+        // credit again; the operator reconcile path is the guard (see
+        // the #3262 PR known limitations). Never silently swallow this.
+        return Response.json({ error: `Top-up credited but the draft could not be marked: ${draft.id}.` }, { status: 500 });
+      }
+      void marked;
+      ctx.audit("commercial.top_up.credited", "payments", {
+        userId: login,
+        tenantId: draft.tenantId,
+        topUpRequestId: draft.id,
+        amountUSD: draft.amountUSD,
+        rail: draft.rail,
+        creditsUSD: credited.creditsUSD,
+        paymentIntentId,
+      });
+      // Issue #2155 follow-up: project the top-up into the D1 journal
+      // (Dr 1000 / Cr 2100 — prepaid credit is deferred revenue, NOT
+      // immediate revenue). BEST-EFFORT, never thrown: the credit already
+      // landed, so a journal failure is a loud log + a reconcile flag,
+      // never a failed top-up. Posted only after crediting success, never
+      // on any refusal path above (402/403/404/409/503 all return before
+      // this point).
+      await postJournalBestEffort(async () => {
+        const adapter = createJournalAdapter(ctx.env as { AGENT_DB?: unknown });
+        if (!adapter) return null;
+        await ensureJournalSchema(adapter.db);
+        return adapter;
+      }, mapTopUpToJournalEntries({
+        transactionRef: draft.id,
+        tenantId: draft.tenantId,
+        amountUSD: draft.amountUSD,
+      }));
+      return Response.json({
+        account: credited,
+        topUpRequestId: draft.id,
+        creditedUSD: draft.amountUSD,
+        rail: draft.rail,
+      });
+    } catch (err: any) {
+      return topUpErrorResponse(err);
+    }
+  }
+
   // POST /payments/agentic/commercial/subscription/grant (issue
   // #3244, slice 2 of #3241) — operator grants a plan to a user.
   // No checkout is involved and no Stripe record is created: the
@@ -3260,9 +3607,24 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
           ? (envRecord.X402_NETWORK as string)
           : "base-sepolia"
         : null;
+      // Issue #3262: top-up bounds for the Top up tab — read-only
+      // policy read, no ensure on a read path; null when the policy
+      // store is unavailable (the UI then shows the limits as
+      // unavailable; mint still validates server-side).
+      let topUpLimits: { minUSD: number; maxUSD: number } | null = null;
+      try {
+        const policy = requireBillingPolicy();
+        if (!(policy instanceof Response)) {
+          const policyValue = await policy.getPolicy();
+          topUpLimits = { minUSD: policyValue.topUpMinUSD, maxUSD: policyValue.topUpMaxUSD };
+        }
+      } catch {
+        // Unavailable: keep null (see above).
+      }
       return Response.json({
         monetizationEnabled,
         prices,
+        topUpLimits,
         network: deriveNetworkMarker({ stripeMode, x402Network }),
         browserPaymentScope: resolveBrowserPaymentScope(envRecord.COMMERCIAL_BROWSER_PAYMENT_SCOPE),
         failurePolicy: NATIVE_PAYMENT_DISCLOSURE,
