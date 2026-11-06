@@ -2,6 +2,7 @@
  * Issue #159: client API for the ScheduledAgent dashboard.
  */
 import { withCsrfInit } from "./apiFetch";
+import type { ScheduleProvenance } from "../schedule";
 
 export interface ScheduledGoal {
   id: string;
@@ -12,6 +13,12 @@ export interface ScheduledGoal {
   enabled: boolean;
   lastRun?: string;
   timeZone?: string;
+  /**
+   * Issue #3121 S3 — creation provenance (S1), carried with the
+   * goal. Absent on legacy goals whose creation predates stamping
+   * ("not recorded", never backfilled).
+   */
+  provenance?: ScheduleProvenance;
 }
 
 export interface CatalogOperation {

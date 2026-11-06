@@ -8,7 +8,8 @@
  * sub-route scheme in `schedulesHome.ts`:
  * list (SchedulesPanel incl. ScheduledOptionsManager), runs/ledger
  * (ScheduleRunLedgerPanel over the S1 ledger), goals
- * (ScheduledGoalsPanel over `/api/schedule/goals` until S3), queue
+ * (ScheduledGoalsPanel — S3: goal schedules on the S1 primitives,
+ * provenance + consolidated-ledger runs, no second read path), queue
  * (ScheduleQueueView — platform-admin gated at the route).
  *
  * View state follows the URL (`?view=`, plus `?schedule=` / `?run=`
