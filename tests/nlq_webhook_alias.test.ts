@@ -50,7 +50,7 @@ function makeEnv(secret: string | undefined) {
   const forwarded: { id: string; pathname: string; body: any }[] = [];
   const env: any = {
     INBOUND_NLQ_WEBHOOK_SECRET: secret,
-    SEARCH_AGENT: {
+    ORCHESTRATOR_AGENT: {
       idFromName: (name: string) => name,
       get: (id: string) => ({
         fetch: async (req: Request) => {
@@ -109,7 +109,7 @@ describe("POST /api/nlq/webhook alias equivalence (#313)", () => {
     // Identical bodies across spellings.
     expect(results[1].json).toEqual(results[0].json);
     expect(results[2].json).toEqual(results[0].json);
-    // All three forwarded to the SEARCH_AGENT instance.
+    // All three forwarded to the ORCHESTRATOR_AGENT instance.
     expect(forwarded).toHaveLength(3);
     for (const f of forwarded) {
       expect(f.pathname).toBe("/nlq");
