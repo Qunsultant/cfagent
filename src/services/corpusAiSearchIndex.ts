@@ -47,6 +47,19 @@
  *   carries no ownerLogin, and the agent's report discipline
  *   (aiSearchPaths.ts) never withholds them — they are visible to
  *   every login, unlike kind "report" items.
+ *
+ * Issue #3527 S3: this hook is now the publish stage's corpus
+ * executor. publishDocument (src/services/documentPublish.ts)
+ * composes it for kind "corpus" documents, and the two call
+ * sites that used to invoke the hook directly — the upload
+ * route and this module's backfill leg below — consume the
+ * stage's outcome, rendered back into this module's state
+ * vocabulary via corpusIndexingStateForPublishOutcome. The
+ * hook itself is unchanged: the flag gate, the text
+ * derivation, and the never-throws discipline stay here. The
+ * corpus R2 write stays in the document store (putKnowledgeDoc
+ * IS the store's put — it creates the document); the stage
+ * publishes the already-stored document, which is this leg.
  */
 
 import {
@@ -64,6 +77,10 @@ import {
   type AiSearchIndexDeps,
   type AiSearchIndexErrorToken,
 } from "../agents/aiSearchPaths";
+import {
+  publishDocument,
+  type PublishTargetOutcome,
+} from "./documentPublish";
 import { AgentErrorCode } from "../aspects/errorCodes";
 
 /** Stable log event code for a failed/degraded corpus indexing leg. */
@@ -98,6 +115,32 @@ function stateForOutcome(ok: boolean, code?: string): CorpusIndexingState {
   if (ok) return "indexed";
   if (code === "not_configured" || code === "disabled") return "not-configured";
   return "failed";
+}
+
+/**
+ * Issue #3527 S3: render a publish-stage ai-search outcome in
+ * this module's state vocabulary — the mapping the corpus
+ * call sites (upload route, backfill leg) apply to the stage
+ * outcome they now consume. It is the exact inverse of the
+ * stage's corpus mapping (which runs off the hook's own
+ * state): published is the hook's "indexed", not_configured
+ * its "not-configured", and failed its "failed". A
+ * not_attempted stage outcome cannot arise for the corpus
+ * ai-search target (requesting the target IS the attempt —
+ * the hook owns the gate); it renders "failed" defensively,
+ * never a fabricated success.
+ */
+export function corpusIndexingStateForPublishOutcome(
+  outcome: PublishTargetOutcome
+): CorpusIndexingState {
+  switch (outcome.status) {
+    case "published":
+      return "indexed";
+    case "not_configured":
+      return "not-configured";
+    default:
+      return "failed";
+  }
 }
 
 /**
@@ -358,12 +401,29 @@ export async function runCorpusAiSearchIndexBackfill(
       items.push({ ...base, state: "failed", reason: "mismatched" });
       continue;
     }
-    const outcome = await indexCorpusDocInAiSearch(env, { meta: record, bytes });
+    // Issue #3527 S3: the per-item upload goes through the
+    // publish stage (kind "corpus"); the stage composes the
+    // hook above, and the item renders the stage outcome in
+    // this module's vocabulary — the same state, the same
+    // failure reason (the executor's code, verbatim), the
+    // same counts the direct hook call produced.
+    const publish = publishDocument(env, {
+      kind: "corpus",
+      documentId: record.r2Key,
+      meta: record,
+      bytes,
+    });
+    const aiSearchHandle = publish.targets.find((t) => t.target === "ai-search");
+    const targetOutcome = aiSearchHandle ? await aiSearchHandle.settled : undefined;
     items.push({
       ...base,
       title: record.title,
-      state: outcome.state,
-      ...(outcome.ok ? {} : outcome.state === "failed" ? { reason: outcome.code ?? "upload_failed" } : {}),
+      state: targetOutcome
+        ? corpusIndexingStateForPublishOutcome(targetOutcome)
+        : "failed",
+      ...(targetOutcome?.status === "failed"
+        ? { reason: targetOutcome.code ?? "upload_failed" }
+        : {}),
     });
   }
   return {
