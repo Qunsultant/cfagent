@@ -307,6 +307,10 @@ export async function routeRequest(deps: RouteRequestDeps, request: Request): Pr
     sql: deps.ctx.storage.sql,
     configPort: dataProviderPorts.config,
     capturePort: dataProviderPorts.captures,
+    // #3530 S1: feed runs fetch through the capture-wired Yahoo
+    // adapter — the blob store is this DO's storage, the same
+    // wiring screening's capture-wired fetches use.
+    blobStorage: deps.ctx.storage,
     userLogin: request.headers.get("x-user-login") || "",
     recordAudit: (type, agent, payload) => deps.recordAudit(type, agent, payload),
   });
