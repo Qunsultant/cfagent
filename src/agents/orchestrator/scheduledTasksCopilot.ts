@@ -57,12 +57,16 @@ import {
   runStockCopilotCycle,
 } from "../../services/stockCopilot";
 import { resolveCopilotSessions } from "../../services/stockCopilotSessions";
+import {
+  DEFAULT_STOCK_COPILOT_SCHEDULE,
+  resolveCopilotCadence,
+} from "../../services/stockCopilotCadence";
 import { TradingPlatformRegistry } from "../../trading";
 
 /** The one code-declared task this slice arms. */
 export const STOCK_COPILOT_TASK_ID = "stock-copilot-paper-cycle";
-/** 30 minutes — the platform's fastest existing scheduling cadence. */
-export const STOCK_COPILOT_SCHEDULE = "every 30 minutes" as const;
+/** 30 minutes — the platform's fastest existing scheduling cadence (default). */
+export const STOCK_COPILOT_SCHEDULE = DEFAULT_STOCK_COPILOT_SCHEDULE;
 
 /**
  * Ports the copilot declaration receives from the class. Storage, ORM
@@ -179,9 +183,13 @@ export async function declareStockCopilotTasks(
     .getScreenerExecutionContext()
     .catch(() => undefined);
   if (!executionContext?.userLogin) return {};
+  const cadence = resolveCopilotCadence({
+    env: ctx.env,
+    readSettingRaw: ctx.readSettingRaw,
+  });
   return {
     [STOCK_COPILOT_TASK_ID]: {
-      schedule: STOCK_COPILOT_SCHEDULE,
+      schedule: cadence.effective as any,
       handler: async (taskCtx: ThinkScheduledTaskContext): Promise<void> => {
         await runStockCopilotCycleForInstance(ctx, executionContext, taskCtx).catch(
           () => {

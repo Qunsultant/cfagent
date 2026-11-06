@@ -64,6 +64,12 @@ import {
   COPILOT_SESSION_SETTING_KEY,
   type CopilotSessionId,
 } from "../../services/stockCopilotSessions";
+import {
+  COPILOT_CADENCE_SETTING_KEY,
+  resolveCopilotCadence,
+  parseCadenceMinutes,
+  formatCadenceString,
+} from "../../services/stockCopilotCadence";
 
 /** Structural mirror of OrchestratorAgent's ScreenerExecutionContext
  *  (the schedules.ts idiom — routes do not import the orchestrator). */
@@ -201,12 +207,20 @@ export async function handleStockCopilotRoutes(
               : currentSession === null || !enabledSessions.includes(currentSession)
                 ? "outside_enabled_sessions"
                 : "live";
+      const cadence = resolveCopilotCadence({
+        env: ctx.env,
+        readSettingRaw: ctx.readSettingRaw,
+      });
       return Response.json({
         flagEnabled,
         paused,
         marketOpen,
         currentSession,
         enabledSessions,
+        cadence: {
+          configured: cadence.configured,
+          effective: cadence.effective,
+        },
         status,
         selectionResolved: selection.resolved,
         activeBroker: selection.resolved ? selection.selection.brokerId : null,
@@ -236,12 +250,14 @@ export async function handleStockCopilotRoutes(
     const body = (await request.json().catch(() => null)) as {
       paused?: unknown;
       sessions?: unknown;
+      cadence?: unknown;
     } | null;
     const hasPaused = body !== null && "paused" in body;
     const hasSessions = body !== null && "sessions" in body;
-    if (!body || (!hasPaused && !hasSessions)) {
+    const hasCadence = body !== null && "cadence" in body;
+    if (!body || (!hasPaused && !hasSessions && !hasCadence)) {
       return Response.json(
-        { error: "paused must be true or false" },
+        { error: "Must supply paused, sessions, or cadence to update" },
         { status: 400 },
       );
     }
@@ -250,6 +266,22 @@ export async function handleStockCopilotRoutes(
         { error: "paused must be true or false" },
         { status: 400 },
       );
+    }
+    let validatedCadence: string | null = null;
+    if (hasCadence) {
+      if (typeof body.cadence !== "string" || parseCadenceMinutes(body.cadence) === null) {
+        return Response.json(
+          { error: "cadence must be a valid interval string (e.g. 'every 30 minutes', 'every 1 hour', '1h', '60m')" },
+          { status: 400 },
+        );
+      }
+      if (typeof ctx.writeSetting !== "function") {
+        return Response.json(
+          { error: "Cadence settings are unavailable on this host" },
+          { status: 500 },
+        );
+      }
+      validatedCadence = formatCadenceString(parseCadenceMinutes(body.cadence)!);
     }
     let sessions: CopilotSessionId[] | null = null;
     if (hasSessions) {
@@ -290,15 +322,27 @@ export async function handleStockCopilotRoutes(
         serializeCopilotSessionList(sessions),
       );
     }
+    if (validatedCadence !== null) {
+      ctx.writeSetting!(
+        COPILOT_CADENCE_SETTING_KEY,
+        validatedCadence,
+      );
+    }
+    const resolvedCadence = resolveCopilotCadence({
+      env: ctx.env,
+      readSettingRaw: ctx.readSettingRaw,
+    });
     ctx.audit?.("stock_copilot.control", "orchestrator", {
       userLogin,
       ...(hasPaused ? { paused: body.paused } : {}),
       ...(sessions !== null ? { sessions } : {}),
+      ...(validatedCadence !== null ? { cadence: validatedCadence } : {}),
     });
     return Response.json({
       ok: true,
       ...(hasPaused ? { paused: body.paused } : {}),
       ...(sessions !== null ? { sessions } : {}),
+      ...(validatedCadence !== null ? { cadence: resolvedCadence } : {}),
     });
   } catch (err) {
     return Response.json(
