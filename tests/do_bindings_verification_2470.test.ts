@@ -51,7 +51,12 @@ describe("DO bindings verification (#2470 S3)", () => {
     // Dynamic access: no literal env.SANDBOX_AGENT exists, which is
     // why the doc's static call-site search missed this path.
     expect(edge).toMatch(/\(env as any\)\[resolution\.binding\]/);
-    const server = readFileSync("src/server.ts", "utf8");
-    expect(server).toContain('export { SandboxAgent } from "./agents/sandbox-agent"');
+    // Slice 9 of #2902 moves the exports to src/server/exports.ts;
+    // server.ts re-exports them. The live export surface is both files.
+    const server = readFileSync("src/server.ts", "utf8") + readFileSync("src/server/exports.ts", "utf8");
+    // Slice 9 of #2902: the export moved one directory deeper
+    // (src/server/exports.ts), so the relative path is now ../ —
+    // the module is the same; the pattern accepts either spelling.
+    expect(server).toMatch(/export \{ SandboxAgent \} from "\.{1,2}\/agents\/sandbox-agent"/);
   });
 });

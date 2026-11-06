@@ -1,365 +1,30 @@
-import type { Env, SessionData, TransactionSnapData } from "./types";
-import {
-  clearSessionCookie,
-  getSessionIdCandidates,
-  renewSession,
-  setSessionCookie,
-} from "./session";
-import { getServiceUserLogin, isLoginShaped, isSharedOrchestratorAddress, SHARED_ORCHESTRATOR_INSTANCE } from "./security/serviceIdentity";
-import { backgroundDispatchHeaders, backgroundDispatchHeadersWithTrace } from "./security/backgroundAttribution";
-import {
-  createDeadLetterRecord,
-  logDeadLetter,
-  type DeadLetterRecord,
-} from "./messaging/deadLetter";
-import { getSessionCached, getSessionCachedFetchedAt, invalidateSessionCache } from "./security/sessionCache";
-import { resolveIdleTimeoutMs } from "./security/sessionPolicy";
-import { csrfGateResult, ensureCsrfCookie } from "./security/csrf";
-import { rotateUserSessionsForEnv, sessionRotationCookie } from "./security/sessionRotation";
-import { resolveScreenerAgentName } from "./agents/screenerAgentName";
-import { isAnalysisDoneStageMessage, isStageBoundaryMessage } from "./workflows/stageQueueTransport";
-import {
-  quotaWindowKey,
-  type QuotaUsageView,
-} from "./security/userRequestQuota";
-import type { UserRequestQuotaOverride } from "./data/userRequestQuotaPorts";
-import {
-  buildLoggedInUserRows,
-  parseLoggedInSessionEntry,
-} from "./security/iaaaLoggedInUsers";
-import { SESSION_REVOCATION_CROSS_ISOLATE_BOUND_MS } from "./security/revocationTargets";
-import { deleteSession, getSession, listSessionFamilyEntries, sessionStore, updateSession, wiredAccessRequestStore, wiredMembershipStore } from "./security/session";
-import {
-  isAdminRoleGrant,
-  listGrantsForReview,
-  resolveGrantDefaultExpiryDays,
-  runGranterRevocationPass,
-  type GranterRevocationPassResult,
-} from "./security/grantRules";
-import { createGrantProposalStore, resolveAdminGrantProposal } from "./security/grantProposals";
-import { type DoNamespaceLike, type DoStubLike } from "./data/durableKv";
-import type { ActorNamespaceLike } from "./services/actorGatewayPorts";
-import { zonedDateParts } from "./schedule";
-import { OPERATION_CATALOG } from "./orchestrate";
-import { SCHEDULE_SYSTEMS, WORKER_CRON_TRIGGERS_INVENTORY } from "./services/scheduleSystems";
-import {
-  SOCIAL_BRIEF_MAX_CHARS,
-  createSocialBriefStoreFromNamespace,
-  isBriefDate,
-} from "./agents/social/briefStore";
-import { createSocialStoresFromNamespace } from "./agents/social/durableStores";
-import {
-  KNOWN_SOCIAL_CHANNELS,
-  parseSocialConfig,
-} from "./agents/social/config";
-import {
-  createMemoryDryRunSink,
-  resolvePostUrl,
-  resolveSubmissionEndpoint,
-} from "./agents/social/publisher";
-import { createFetchSocialTransport } from "./agents/social/liveTransport";
-import { approveAndPublish, rejectSocialDraft } from "./agents/social/approvalActions";
-import {
-  handleSocialSlackInteraction,
-  parseSocialAction,
-} from "./agents/social/interactions";
-import { checkAllTokenHealth } from "./agents/social/tokenHealth";
-import {
-  resolveWiredFreshnessMs,
-  validateAndTouchWiredSession,
-} from "./security/iaaaEnforcement";
-import { isPlatformServiceProvisioned } from "./security/serviceDispatch";
-import { requiresStepUpForAction, requiresStepUpForMint } from "./security/iaaaGates";
-import { createWiredAuditStore } from "./security/iaaaAuditStore";
-import {
-  createKvMembershipStore,
-  grantMembership,
-  listMembershipsFromEntries,
-  readMembershipById,
-} from "./security/iaaaMembershipStore";
-import { createKvPermissionDenialStore } from "./security/iaaaPermissionDenialStore";
-import {
-  MANAGEABLE_DENIED_PERMISSIONS,
-  canManagePermissionDenial,
-} from "./security/permissionDenials";
-import {
-  ALL_ROLES,
-  canGrantRole,
-  PERMISSIONS,
-  type AuthorizationScope,
-  type Role,
-} from "./security/authorization";
-import {
-  approveBootstrapProposal,
-  bootstrapProposalAuditInput,
-  confirmBootstrapApplied,
-  createBootstrapProposal,
-  createKvBootstrapProposalStore,
-  currentBootstrapEntries,
-  findBootstrapDivergence,
-  parseStoredBootstrapProposal,
-  rejectBootstrapProposal,
-  BOOTSTRAP_PROPOSAL_KEY_PREFIX,
-  type BootstrapProposal,
-  type BootstrapProposalAuditAction,
-} from "./security/bootstrapProposals";
-import {
-  parseBootstrapAdmins,
-  resolveBootstrapEntries,
-} from "./security/iaaaBootstrap";
-import { createWiredBindingStore } from "./security/iaaaLogin";
-import {
-  approveProposal,
-  createKvPolicyProposalStore,
-  createProposal,
-  diffPolicySnapshots,
-  parseStoredProposal,
-  policyProposalAuditInput,
-  previewDecisions,
-  promoteProposal,
-  rejectProposal,
-  POLICY_PROPOSAL_ACTIVE_KEY,
-  POLICY_PROPOSAL_KEY_PREFIX,
-  type PolicyProposal,
-  type PolicyProposalAuditAction,
-} from "./security/policyProposals";
-import {
-  canRevokeRoleGrant,
-  flattenRoleGrants,
-  removeRoleBinding,
-  toRoleGrantView,
-  validateRoleGrantRequest,
-} from "./security/roleGrants";
-import { buildAdminOverview, computeAdminCounts, isPlatformAdmin } from "./security/iaaaAdminOverview";
-import {
-  evaluateWithObligations,
-  type ObligationAuditWriter,
-} from "./security/obligations";
-import {
-  IAAA_AUDIT_POLICY_VERSION,
-  recordAuditEvent,
-} from "./security/iaaaAudit";
-import { parseSessionRegistryEntries } from "./security/iaaaSessionRegistry";
-import {
-  isMailSuppressed,
-  resolveOffboardSessions,
-  runOffboard,
-  setMailSuppression,
-} from "./security/iaaaLifecycleWiring";
-import { createSubscriptionAdapter } from "./data/createSubscriptionPorts";
-import { hasUnexpiredSubscription } from "./data/subscriptionPorts";
-import { createLifecycleAdapter } from "./data/createLifecyclePorts";
-import { handleSeedGovernanceRoute } from "./data/seedGovernanceRoute";
-import {
-  handleChainStatusRoute,
-  handleReconcileChainsRoute,
-} from "./data/chainStatusRoute";
-import { readChainStatus } from "./data/createChainSchedulePorts";
-import type { ReconcileReport } from "./data/chainScheduleProjection";
-import {
-  handleJobHistoryRoute,
-  handleReconcileJobsRoute,
-} from "./data/shardJobRoute";
-import {
-  createTraceReader,
-  handleMeshTraceRoute,
-} from "./data/meshTraceRoute";
-import {
-  createShardJobAdapter,
-  readJobHistory,
-} from "./data/createShardJobPorts";
-import { handleMeshRegistryRoute } from "./agents/meshRegistryRoute";
-import { handleProductCatalogRoute } from "./agents/productCatalogRoute";
-import { createPriceCatalogueAdapter } from "./data/createPriceCataloguePorts";
-import { handleRetentionPurgeRoute } from "./data/retentionRoute";
-import { buildPurgeAuditEventInput } from "./data/retention1766";
-import {
-  handlePrivacyErasureRoute,
-  handlePrivacyExportRoute,
-  handlePrivacyPreferencesRoute,
-  handlePrivacyStatusRoute,
-} from "./privacy/privacyRoutes";
-import {
-  buildExportPayload,
-  type ErasureLeg,
-  type PrivacyPreferences,
-} from "./privacy/privacyDsar";
-import {
-  consumeCfBatch,
-  dispatchSubscriberBatch,
-} from "./messaging/cfQueueMessagingAdapter";
-import { createMessagingPorts } from "./messaging/createMessagingPorts";
-import { createScreenerEventsWorkHandler } from "./messaging/screenerEventsConsumer";
-import { createDeadLetterStoreAdapter, ensureDeadLetterStoreSchema } from "./data/createDeadLetterStorePorts";
-import { createBreakerStateStoreAdapter, ensureBreakerStateSchema } from "./data/createBreakerStateStorePorts";
-import { configureDefaultBreakerDurability } from "./breakers/createBreakerPorts";
-import { createBreakerTripSubscriber } from "./breakers/breakerTripAlert";
-import { resolveDlqDepthAlertThreshold } from "./config/dlqDepthAlert";
-import { persistDeadLetterLanding } from "./messaging/deadLetterPersist";
-import { postSlackText, resourceSlackPost } from "./agents/resourceGoals";
-import type { SlackDeliveryEnv } from "./agents/social/delivery";
-import {
-  isMessageEnvelope,
-  type MessageEnvelope,
-  type SubscriberHandlers,
-} from "./messaging/messagingPorts";
+import type { Env } from "./types";
+
+import { csrfGateResult } from "./security/csrf";
+
 import { actorGateway } from "./services/cloudflareActorGateway";
 import { withRequestObservability } from "./observability/aspects";
-import { createObservabilitySink } from "./observability/createObservabilityPorts";
-import { writeEnvelopeToSink, childSpan, formatTraceparent, newTraceContext } from "./observability/observabilityPorts";
-import { observeInternalDispatch } from "./observability/scheduledJobOutcomes";
-import { createScreenerQueueHandler } from "./messaging/screenerQueueConsumer";
-import {
-  createRetentionPurgeStore,
-  runRetentionPurgeForTenant,
-} from "./data/createRetentionPorts";
-import type { ReconcileShardJobsReport } from "./data/shardJobProjection";
-import {
-  handleAuditHistoryRoute,
-  handleReportsRoute,
-  handleSeedReportsRoute,
-} from "./data/auditReportRoute";
-import {
-  handleTelemetryDecisionActionRoute,
-  handleTelemetryDecisionsRoute,
-  handleTelemetryReconcileRoute,
-  handleTelemetrySummaryRoute,
-} from "./telemetry/telemetryRoute";
-import type { TrackRecordIdeaInput } from "./telemetry/telemetryProjection";
-import {
-  createTelemetryAdapter,
-  ensureTelemetryTables,
-} from "./telemetry/createTelemetryPorts";
-import { createResourceUsagePort } from "./telemetry/createResourceUsagePorts";
-import type { ResourceAttribution } from "./telemetry/resourceUsagePorts";
-import { defaultBreakerRegistry } from "./breakers/createBreakerPorts";
-import { gatewayStatsSnapshot } from "./gateway/createGatewayPorts";
-import { retrievalStatsSnapshot } from "./telemetry/retrievalStats";
-import {
-  createAuditReportAdapter,
-  readAuditHistory,
-  readReports,
-} from "./data/createAuditReportPorts";
-import type { SeedCanonicalReportsResult } from "./data/auditReportProjection";
-import type { GovernedHaltState } from "./data/governedHalt";
-import { buildOpenApiSpec, SWAGGER_UI_HTML } from "./security/openapiSpec";
-import { resolveIaaaTenant } from "./security/iaaaGithubEndToEnd";
-import { resolveDoNameForUser } from "./security/iaaaMigration";
-import { evaluateRoutePep } from "./security/pepGateway";
-import {
-  bearerKeyFromRequest,
-  listApiKeys,
-  mintApiKey,
-  revokeApiKey,
-  verifyApiKey,
-} from "./security/apiKeys";
-import {
-  bearerTokenFromRequest,
-  serviceTokenStore,
-  verifyServiceToken,
-} from "./security/serviceTokens";
-import { serveStaticAsset, fetchStaticAsset } from "./security/staticAssets";
+
+import { serveStaticAsset } from "./security/staticAssets";
 import { withErrorBoundary } from "./security/workerErrorBoundary";
-import { handleLogout, renderLoginPage } from "./oauth";
-import {
-  AUTH_OUTCOME_PARAM,
-  authOutcomeLoginUrl,
-  parseAuthOutcome,
-} from "./security/authOutcome";
-import { validateReturnTarget } from "./security/returnTarget";
-import {
-  disabledLoginResponse,
-  enabledProviders,
-  getProvider,
-  getProviderByIssuer,
-  isWiringEnabled,
-  resolveLoginProvider,
-} from "./security/providers";
-import { renderLandingPage } from "./landing";
-import { resolvePollingConfigFromEnv } from "./pollingConfig";
+
 import { TICKER_INSTANCE_NAME } from "./agents/ticker-agent";
-import { SERVER_PALETTE } from "./theme/serverPalette";
-import { routeAgentRequest } from "agents";
-import {
-  getETradeRequestToken,
-  exchangeETradeVerifier,
-  renewETradeAccessToken,
-  revokeStoredTokens,
-  revokeRemoteAccessToken,
-  getETradeAuthStatus,
-  getStoredTokens,
-  getValidTokens,
-  renewAllStoredETradeTokens,
-  renewFailureDetail,
-  etradeIdentityFromSession,
-  isTokenExpiredEt,
-  listTokenFamilyEntries,
-} from "./services/etradeOAuth";
-import {
-  PublicClientRejectedError,
-  completePublicOAuth,
-  connectPublicPersonalToken,
-  disconnectPublic,
-  getPublicConnectionStatus,
-  publicClientMetadataDocument,
-  startPublicOAuth,
-} from "./security/publicOAuth";
-import { ETradeRestClient } from "./trading";
-import { resolveEnvironmentConfig } from "./config/environment";
-import {
-  isFeatureEnabled,
-  getAllFeatureFlags,
-  createFeatureDisabledResponse,
-  matchFeatureForRoute,
-} from "./config/featureFlags";
-import { handleCloudflareEmailMessage, ETradeEmailTradingService } from "./trading";
-import { ETradeSlackTradingService, confirmSlackLink } from "./trading";
-import {
-  INBOUND_EMAIL_ORCHESTRATOR_INSTANCE,
-  resolvePrincipal,
-  slackPrincipalLinkStoreFromEnv,
-  verifyApprovalLinkForPrincipal,
-} from "./trading";
-import { gateSlackRequest, timingSafeEqual } from "./security/webhookSecurity";
-import { sanitizeInboundText } from "./security/promptInjectionSanitize";
+
+import { handleCloudflareEmailMessage } from "./trading";
+
 import {
   checkPublicRestThrottle,
-  createIngressThrottle,
-  pickWebhookSignature,
+  createIngressThrottle
 } from "./api/ingress";
-import { nlqWebhookBodySchema } from "./api/ingressSchemas";
+
 import { dispatchWsUpgrade } from "./api/wsRoutes";
 import {
   levelsForApiIngressMode,
   resolveApiIngressMode,
 } from "./config/apiIngressModes";
-import {
-  deriveNlqNonce,
-  sharedMemoryReplayStore,
-  validateEmailRecipient,
-} from "./security/webhookReplay";
-import { handleVoiceWebSocketConnection, ETradeVoiceTradingService, createOrchestratorVoiceTurnForwarder } from "./trading";
-import { ETradeWebhookService } from "./services/tradingWebhooks";
-import { ETradeBrowserService } from "./services/browserAgent";
-import { handleMarketQuotesHttp } from "./services/marketStream";
-import { sendProvisioningWelcome } from "./services/provisioningWelcome";
-import {
-  createUserEmailDestinationStore,
-  normalizeEmailDestination,
-} from "./services/userEmailDestination";
-import {
-  getQuoteSource,
-  setQuoteSource,
-  normalizeQuoteSource,
-  type QuoteSourceStore,
-} from "./services/quoteSourceSetting";
-import {
-  levelsForQuoteSwitch,
-  resolveQuoteExpiryMode,
-  resolveQuoteHttpProviderMode,
-  resolveQuoteStreamProvenance,
-} from "./config/quoteModes";
-import { resolveSnapIdentity } from "./config/restTwinsModes";
+
+import { handleVoiceWebSocketConnection, createOrchestratorVoiceTurnForwarder } from "./trading";
+
 import { buildDataProviderPorts } from "./data/buildDataProviderPorts";
 import { registerDataProviderPortsBuilder } from "./data/dataProviderPortsProvider";
 import { aspectTransactionRunner } from "./data/transactionRunner";
@@ -377,77 +42,37 @@ registerDataProviderPortsBuilder(buildDataProviderPorts);
 // because their module graph is client-bundle-reachable and
 // the aspect (node:async_hooks) is server-only.
 registerTransactionRunner(aspectTransactionRunner);
-import {
-  filterLiveFlowItems,
-  filterNewsFlowItems,
-  filterInsiderFlowItems,
-  filterCongressFlowItems,
-  calculateFlowSummary,
-  DEFAULT_SAVED_PRESETS,
-  getDynamicLiveFlowItems,
-  getDynamicFlowSummary,
-  summarizeFlowProvenance,
-  fetchRealMarketNews,
-  fetchRealSecInsiderFilings,
-  fetchRealCongressDisclosures,
-  MarketCapCategory,
-  AssetClassCategory,
-} from "./trading";
-import { isAllowedOrigin, requireAuth, authenticateRequest } from "./server/auth";
-import { handleCoreEarlyRoutes, handleCoreHealthRoutes, handleCoreLateRoutes, ensureBreakerDurability } from "./server/routes/core";
-import { handleAuthLoginRoutes, handleAuthMeRoutes, handleAuthIaaaRoutes } from "./server/routes/auth";
+
+import { requireAuth } from "./server/auth";
+import { handleCoreEarlyRoutes, handleCoreLateRoutes, ensureBreakerDurability } from "./server/routes/core";
+import { handleAuthMeRoutes, handleAuthIaaaRoutes } from "./server/routes/auth";
 import { handlePrivacyRoutes, handlePrivacyChainsRoutes, handlePrivacyReportsRoutes } from "./server/routes/privacy";
 import { handleTradingScheduleRoutes, handleTradingOmniRoutes, handleTradingQuotesRoutes, handleTradingApproveRoutes } from "./server/routes/trading";
 import { handleMessagingSagaRoutes, handleMessagingSocialRoutes, handleMessagingSlackRoutes } from "./server/routes/messaging";
 import { handlePlatformTelemetryRoutes, handlePlatformRetrievalRoutes, handlePlatformMcpRoutes, handlePlatformPaymentsRoutes, handlePlatformBrowserRoutes } from "./server/routes/platform";
 import { handleScheduledEvent, handleQueueBatch } from "./server/routes/queue";
-export { OrchestratorAgent } from "./agents/orchestrator";
-// Issue #1387 — the agents SDK resolves sub-agent roots through
-// ctx.exports by constructor.name, so OrchestratorAgent is exported
-// under its own name: the root-namespace lookup requires
-// ctx.exports["OrchestratorAgent"] to expose idFromName.
-// Issue #2523 (Agent Mesh S2-B, gate record #2326) — the two-deploy
-// G0 rename is complete. Migration v14 (#2330, Deploy A) tombstoned
-// the colliding v9 OrchestratorAgent namespace (and, per the legacy
-// Delete-migration procedure, temporarily removed this own-name
-// export); migration v15 now renames the SEARCH_AGENT namespace
-// onto OrchestratorAgent (renamed_classes), so the SearchAgent
-// export alias is retired and this own-name export is restored. The
-// SEARCH_AGENT binding name is unchanged — only its class_name is
-// now OrchestratorAgent — so instance names (logins) and their
-// stored state carry over, the class's own-name namespace is the
-// renamed namespace, and sub-agent root resolution through
-// ctx.exports works again.
-// Issue #2230 — wrangler requires every bound DO class to be exported from
-// the entrypoint, otherwise `wrangler deploy` fails.
-export { TickerAgent, TICKER_INSTANCE_NAME } from "./agents/ticker-agent";
-export { OptionsScannerMCP } from "./mcps/scanner/cloudflareWalletsScanner";
-export { BrowserAgent } from "./agents/browserAgent";
-export { SlackAgent } from "./agents/slackAgent";
-export { AiSearchAgent } from "./agents/aiSearchAgent";
-// Issue #2253 — SandboxAgent DO: wrangler binds SANDBOX_AGENT to this
-// class, so it must be exported from the entrypoint (same rule as the
-// #2230 note above).
-export { SandboxAgent } from "./agents/sandbox-agent";
-// Issue #197: wrangler.jsonc binds PAYMENTS_AGENT/SCHEDULED_AGENT as Durable
-// Objects — wrangler requires every bound DO class to be exported from the
-// entrypoint, otherwise `wrangler deploy` fails.
-export { PaymentsAgent } from "./agents/payments-agent";
-export { ScheduledAgent } from "./agents/scheduled-agent";
-export { ScreenerAgent } from "./agents/screener-agent";
-// Issue #319 — wrangler requires every bound DO class to be exported from
-// the entrypoint, otherwise `wrangler deploy` fails.
-export { ResearchAgent } from "./agents/research-agent";
-export { TradingAgent } from "./agents/trading-agent";
-export { TradingTradeWorkflow } from "./agents/trading-trade-workflow";
-export { ScreenerScreenWorkflow } from "./workflows/screenerWorkflow";
-export { PaymentWorkflow } from "./workflows/paymentWorkflow";
-export { CrossDomainSagaWorkflow } from "./workflows/sagaWorkflow";
-export { ReportAssetAgent } from "./agents/report-asset-agent";
-export { SessionStore } from "./security/sessionStore";
-
-
-
+// Slice 9 (#2902): the agent/DO/workflow exports live in
+// src/server/exports.ts (per-class justifications there); server.ts
+// re-exports them because wrangler requires every bound DO class to
+// be exported from the entrypoint (Q3, contract §8.3).
+export { OrchestratorAgent } from "./server/exports";
+export { TickerAgent, TICKER_INSTANCE_NAME } from "./server/exports";
+export { OptionsScannerMCP } from "./server/exports";
+export { BrowserAgent } from "./server/exports";
+export { SlackAgent } from "./server/exports";
+export { AiSearchAgent } from "./server/exports";
+export { SandboxAgent } from "./server/exports";
+export { PaymentsAgent } from "./server/exports";
+export { ScheduledAgent } from "./server/exports";
+export { ScreenerAgent } from "./server/exports";
+export { ResearchAgent } from "./server/exports";
+export { TradingAgent } from "./server/exports";
+export { TradingTradeWorkflow } from "./server/exports";
+export { ScreenerScreenWorkflow } from "./server/exports";
+export { PaymentWorkflow } from "./server/exports";
+export { CrossDomainSagaWorkflow } from "./server/exports";
+export { ReportAssetAgent } from "./server/exports";
+export { SessionStore } from "./server/exports";
 // Slice 8 (#2902): ensureBreakerDurability moved to src/server/routes/core.ts
 // (contract §2.5 Core prelude); imported below and called by handleFetch.
 
@@ -632,10 +257,7 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
     return handleCoreLateRoutes(request, env, url, path);
 }
 
-// Slice 7 (#2902): PREMIUM_GATEWAY_INSTANCE moved to src/server/routes/platform.ts;
-// re-exported here so existing imports from the entry keep working.
-export { PREMIUM_GATEWAY_INSTANCE } from "./server/routes/platform";
-
+export { PREMIUM_GATEWAY_INSTANCE } from "./server/exports";
 // Slice 8 (#2902): queue/scheduled consumer wiring moved to src/server/routes/queue.ts —
 // the screenerDeliverySeen / screenerEventsSeen dedup sets and the shared
 // dispatchOptionsAnalysisQueueWork helper. The default export below delegates.

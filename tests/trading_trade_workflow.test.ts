@@ -165,8 +165,14 @@ describe("trade approval flow (#291 T3b)", () => {
 describe("trade workflow wiring (#291 T3b)", () => {
   it("the workflow class extends ThinkWorkflow and is exported from the entrypoint", () => {
     expect(TradingTradeWorkflow.prototype).toBeInstanceOf(ThinkWorkflow);
-    const server = fs.readFileSync(path.join(__dirname, "../src/server.ts"), "utf8");
-    expect(server).toContain('export { TradingTradeWorkflow } from "./agents/trading-trade-workflow"');
+    // Slice 9 of #2902 moves the exports to src/server/exports.ts;
+    // server.ts re-exports them. The live export surface is both files;
+    // the export moved one directory deeper, so the relative path is
+    // now ../ — the module is the same; the pattern accepts either spelling.
+    const server =
+      fs.readFileSync(path.join(__dirname, "../src/server.ts"), "utf8") +
+      fs.readFileSync(path.join(__dirname, "../src/server/exports.ts"), "utf8");
+    expect(server).toMatch(/export \{ TradingTradeWorkflow \} from "\.{1,2}\/agents\/trading-trade-workflow"/);
   });
 
   it("wrangler binds TRADE_WORKFLOW to the workflow class", () => {

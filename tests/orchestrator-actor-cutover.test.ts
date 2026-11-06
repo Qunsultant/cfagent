@@ -358,8 +358,16 @@ describe("#686 R1 — identity stability under the cutover", () => {
   });
 
   it("server export and wrangler binding/migrations carry the #2523 rename", () => {
-    expect(read("src/server.ts")).toContain(
-      'export { OrchestratorAgent } from "./agents/orchestrator"'
+    // Slice 9 of #2902 moves the exports to src/server/exports.ts;
+    // server.ts re-exports them. The live export surface is both files;
+    // the export moved one directory deeper, so the relative path is
+    // now ../ — the module is the same; the pattern accepts either
+    // spelling. The retired-alias check stays on server.ts alone:
+    // exports.ts quotes the alias in its #2523 comment (documentation,
+    // not an export), so the combined text would trip a bare
+    // not.toContain.
+    expect(read("src/server.ts") + read("src/server/exports.ts")).toMatch(
+      /export \{ OrchestratorAgent \} from "\.{1,2}\/agents\/orchestrator"/
     );
     expect(read("src/server.ts")).not.toContain(
       "OrchestratorAgent as SearchAgent"
