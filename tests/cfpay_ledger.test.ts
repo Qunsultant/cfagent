@@ -1,7 +1,7 @@
 /**
  * Issue #2019 — unit tests for the durable cfpay ledger module.
  *
- * Builders, row predicates, reconciliation, and the SEARCH_AGENT client
+ * Builders, row predicates, reconciliation, and the ORCHESTRATOR_AGENT client
  * against a fake stub. No worker runtime, no D1, no network, no key.
  * The orchestrator endpoint handler itself (agenticPayments.ts) is
  * covered by repo CI; its row construction is exactly these builders.
@@ -152,7 +152,7 @@ describe("cfpay ledger client (#2019)", () => {
     };
     return {
       SERVICE_USER_LOGIN: "svc-test",
-      SEARCH_AGENT: {
+      ORCHESTRATOR_AGENT: {
         idFromName: (name: string) => name,
         get: () => stub,
       },
