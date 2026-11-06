@@ -337,7 +337,7 @@ describe("POST /payments/webhook native branch (#2192)", () => {
     mockD1 = new MockD1Database();
     const env = {
       AI: {} as any,
-      SEARCH_AGENT: ns as any,
+      ORCHESTRATOR_AGENT: ns as any,
       SESSION_STORE: store as any,
       AGENT_SESSIONS: {} as any,
       AGENT_DB: mockD1 as any,
