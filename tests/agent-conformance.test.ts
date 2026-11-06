@@ -393,7 +393,7 @@ describe("Agent conformance (issue #1738)", () => {
     // The transitional alias exception that lived here is retired:
     // during the two-deploy G0 rename's A→B window (#2330, gate record
     // #2326), OrchestratorAgent was bound only under its export alias
-    // (SEARCH_AGENT → class_name "SearchAgent"); Deploy B (#2523)
+    // (ORCHESTRATOR_AGENT → class_name "SearchAgent"); Deploy B (#2523)
     // renamed the alias namespace onto the class name (migration v15),
     // so every agent class is now bound under its own name and the
     // exception is empty. The exact-membership assertion keeps the
