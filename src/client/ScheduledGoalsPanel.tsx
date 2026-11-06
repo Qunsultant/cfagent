@@ -17,6 +17,14 @@ import {
   type CatalogOperation,
   type PresetGoalResult,
 } from "./scheduleApi";
+// Issue #3121 S3 — the goals view reads run history from the one
+// consolidated ledger (`listGoalRuns`, the same read the runs view
+// uses), normalized with the S1 normalizer — no second read path.
+// The linkage cells are the ledger view's own rule (null renders
+// as "— / not applicable"), reused, not re-implemented.
+import { listGoalRuns, type JobRunRecord } from "./jobsApi";
+import { normalizeJobRunRecord } from "../services/jobRunRecords";
+import { ledgerLinkageCell, ledgerLinkageTitle } from "./ScheduleRunLedgerPanel";
 import { TextInput, Select, Button, Modal } from "./components/ui";
 import { DelegationContractPreview } from "./DelegationContractPreview";
 import { buildDelegationContract } from "./delegationContract";
@@ -31,6 +39,8 @@ export function ScheduledGoalsPanel({ embedded = false }: ScheduledGoalsPanelPro
   const [goals, setGoals] = useState<ScheduledGoal[]>([]);
   const [ticks, setTicks] = useState<ScheduleTick[]>([]);
   const [operations, setOperations] = useState<CatalogOperation[]>([]);
+  const [runs, setRuns] = useState<JobRunRecord[]>([]);
+  const [runsError, setRunsError] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [form, setForm] = useState({
@@ -60,9 +70,24 @@ export function ScheduledGoalsPanel({ embedded = false }: ScheduledGoalsPanelPro
     }
   }, []);
 
+  // Issue #3121 S3 — the runs read is separate from the goals read
+  // on purpose: the ledger read must never fail the goals list (a
+  // runs-read failure shows in the runs section only), and a
+  // mutation refreshes both.
+  const refreshRuns = useCallback(async () => {
+    try {
+      const goalRuns = await listGoalRuns(undefined, 20);
+      setRuns(goalRuns.map(normalizeJobRunRecord));
+      setRunsError("");
+    } catch (cause) {
+      setRunsError(cause instanceof Error ? cause.message : "Could not load goal runs.");
+    }
+  }, []);
+
   useEffect(() => {
     void refresh();
-  }, [refresh]);
+    void refreshRuns();
+  }, [refresh, refreshRuns]);
 
   const withBusy = async (key: string, fn: () => Promise<void>) => {
     setBusy(key);
@@ -70,6 +95,7 @@ export function ScheduledGoalsPanel({ embedded = false }: ScheduledGoalsPanelPro
     try {
       await fn();
       await refresh();
+      await refreshRuns();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Action failed.");
     } finally {
@@ -180,6 +206,15 @@ export function ScheduledGoalsPanel({ embedded = false }: ScheduledGoalsPanelPro
             operation <code>{g.operation}</code> · budget ${(g.budgetCents / 100).toFixed(2)} · last
             run {g.lastRun ? new Date(g.lastRun).toLocaleString() : "never"}
             {g.timeZone ? ` · timeZone ${g.timeZone}` : ""}
+          </div>
+          <div style={{ fontSize: 13, opacity: 0.8, marginTop: 4 }}>
+            {/* Issue #3121 S3 — creation provenance (S1) travels with
+                the goal: origin, creator, creation time. A legacy
+                goal without one reads "not recorded", never
+                backfilled. */}
+            {g.provenance
+              ? `provenance ${g.provenance.origin} · ${g.provenance.createdBy ?? "no creator recorded"} · ${new Date(g.provenance.createdAt).toLocaleString()}${g.provenance.reason ? ` · ${g.provenance.reason}` : ""}`
+              : "provenance not recorded"}
           </div>
           <div style={{ display: "flex", gap: "var(--space-2)", marginTop: 8 }}>
             <Button
@@ -316,6 +351,39 @@ export function ScheduledGoalsPanel({ embedded = false }: ScheduledGoalsPanelPro
               ))}
             </div>
           )}
+        </div>
+      ))}
+
+      {/* Issue #3121 S3 — recent goal runs from the one consolidated
+          ledger (the same `listGoalRuns` read the runs view uses),
+          not a second run-history path. The ticks above stay the
+          aggregate per-tick view; these rows are the per-run view,
+          with the §4 linkage (trigger, schedule, async job,
+          workflow) rendered the same way the ledger renders it — a
+          null id is "— / not applicable", never a dropped row. */}
+      <h3 style={{ margin: "20px 0 12px" }}>Recent goal runs</h3>
+      {runsError && <div style={{ color: "var(--color-danger)", marginBottom: 8 }}>{runsError}</div>}
+      {runs.length === 0 && !runsError && <div style={{ opacity: 0.7 }}>No goal runs recorded yet.</div>}
+      {runs.map((r, i) => (
+        <div key={`${r.jobId}:${r.started}:${i}`} style={{ fontSize: 13, marginBottom: 8, borderBottom: "1px solid var(--color-border-subtle)", paddingBottom: "var(--space-2)" }}>
+          <div>
+            <strong>{r.jobId}</strong> · {r.operation} · {new Date(r.started).toLocaleString()} — {r.outcome}
+          </div>
+          <div style={{ opacity: 0.8, marginTop: 2 }}>
+            trigger {r.trigger ?? "unknown"} · schedule{" "}
+            <span title={ledgerLinkageTitle(r.scheduleId)}>{ledgerLinkageCell(r.scheduleId)}</span>
+            {" · "}async job{" "}
+            <span title={ledgerLinkageTitle(r.asyncJobId)}>{ledgerLinkageCell(r.asyncJobId)}</span>
+            {" · "}workflow{" "}
+            <span title={ledgerLinkageTitle(r.workflowId)}>{ledgerLinkageCell(r.workflowId)}</span>
+          </div>
+          <div style={{ opacity: 0.8, marginTop: 2 }}>
+            {r.outcome === "failure"
+              ? r.error ?? "failed"
+              : r.outcome === "skipped"
+                ? r.detail ?? "skipped"
+                : r.descriptor ?? "ok"}
+          </div>
         </div>
       ))}
     </div>

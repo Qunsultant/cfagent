@@ -14,8 +14,13 @@
  *   `scheduleId`, `asyncJobId`, `workflowId`). `runs` and `ledger` are
  *   the same view; `runs` is canonical. `run=<id>` deep-links one job's
  *   run history; `schedule=<id>` filters the ledger to that schedule.
- * - `view=goals`: goal schedules (`ScheduledGoalsPanel`, still backed by
- *   `/api/schedule/goals` until S3 merges them — S3's job, not S2's).
+ * - `view=goals`: goal schedules (`ScheduledGoalsPanel`, S3: on the
+ *   S1 primitives — tick evaluation through the S1 re-exported
+ *   `isDue`, ledger linkage through `buildLedgerLinkage`,
+ *   provenance on every goal, lifecycle audit through the DO-side
+ *   sink, and run history from the one consolidated ledger read.
+ *   The routes stay `/api/schedule/goals` until #3123 unifies the
+ *   schedule store; the store is not S3's to move.)
  * - `view=queue`: the admin queue (`AdminQueueWipePanel`), role-gated at
  *   the route — the same platform-admin overview probe that gated it
  *   inside IAAA Admin (see `ScheduleQueueView`); the server is the gate.
