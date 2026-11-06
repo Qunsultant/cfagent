@@ -956,6 +956,20 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
     };
   }
 
+  /**
+   * Issue #3398 / #3508: truthful session-orders capability for Alpaca.
+   * Alpaca supports pre_market (04:00–09:30 ET), regular (09:30–16:00 ET),
+   * after_hours (16:00–20:00 ET), and exto (20:00–04:00 ET 24/5 overnight via BOATS ATS).
+   */
+  supportsSessionOrders(session: string): boolean {
+    return (
+      session === "pre_market" ||
+      session === "regular" ||
+      session === "after_hours" ||
+      session === "exto"
+    );
+  }
+
   async placeOrderRemote(params: PlaceOrderParams): Promise<BrokerOrderExecutionResult> {
     await this.ready();
     const liveRefusal = this.liveTradingRefusal();
@@ -1051,8 +1065,23 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
     if (!Number.isFinite(params.quantity) || params.quantity <= 0) {
       return failed("Alpaca order rejected: quantity must be positive. The order was not placed.");
     }
+    const session = params.session;
+    const isExtendedSession =
+      params.extendedHours === true ||
+      session === "pre_market" ||
+      session === "after_hours" ||
+      session === "exto";
+
     const side = params.action === "SELL" || params.action === "SELL_SHORT" ? "sell" : "buy";
     const orderType = (params.orderType || "MARKET").toUpperCase();
+
+    // Issue #3508: Venue rule — extended-hours and overnight sessions require limit orders
+    if (isExtendedSession && orderType !== "LIMIT") {
+      return failed(
+        "Alpaca extended-hours and overnight orders require a limit order type. Market orders are not accepted outside regular hours. The order was not placed."
+      );
+    }
+
     let type: "market" | "limit";
     let limitPrice: number | undefined;
     if (orderType === "MARKET") {
@@ -1078,7 +1107,8 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
       side,
       type,
       ...(limitPrice !== undefined ? { limit_price: limitPrice } : {}),
-      time_in_force: "day",
+      time_in_force: (params.timeInForce as any) || "day",
+      ...(isExtendedSession ? { extended_hours: true } : {}),
     });
     if (!placed.success || !placed.orderId) {
       if (placed.success) {
