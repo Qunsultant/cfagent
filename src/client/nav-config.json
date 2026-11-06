@@ -772,15 +772,6 @@
         "description": "Multi-stage AI evaluation of option chains against raw market data, with export"
       },
       {
-        "id": "scheduled-screening",
-        "label": "Scheduled Screening & Schedulers",
-        "shortLabel": "Schedules",
-        "icon": "Runs",
-        "badge": "Durable",
-        "badgeType": "pro",
-        "description": "Create and monitor autonomous scheduled options scans with persistent background timers"
-      },
-      {
         "id": "iv-history",
         "label": "IV History",
         "shortLabel": "IV",
@@ -1188,10 +1179,6 @@
       "tab": "options",
       "view": "ai-strategy-ideas"
     },
-    "options-screener:scheduled-screening": {
-      "tab": "options",
-      "view": "scheduled-screening"
-    },
     "platform-admin:scheduled-goals": {
       "tab": "schedules",
       "view": "goals"
@@ -1300,7 +1287,6 @@
         "custom-thesis",
         "nlq-options",
         "ai-strategy-ideas",
-        "scheduled-screening",
         "iv-history",
         "options-flows"
       ]

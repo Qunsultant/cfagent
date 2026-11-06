@@ -198,7 +198,6 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
       "custom-thesis",
       "nlq-options",
       "ai-strategy-ideas",
-      "scheduled-screening",
       "iv-history",
       "options-flows",
     ]);
