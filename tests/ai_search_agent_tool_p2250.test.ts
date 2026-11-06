@@ -203,15 +203,17 @@ describe("ai_search_agent_search — the orchestrator's door onto AiSearchAgent 
   });
 
   it("a degraded agent failure stays degraded in the tool answer — stated, with zero fabricated rows", async () => {
-    // Mirrors the runner's post-#1169 S3 degraded wording verbatim
-    // (src/agents/aiSearchPaths.ts): the fake stands in for the
-    // agent, so its note is what the runner would produce.
+    // Adapted by #3342: the fake previously modelled the retired
+    // REST path's degraded_fallback outcome. The surviving failure
+    // shape for an unserved search is all_paths_failed; the fake
+    // stands in for the agent, so its note is what the runner
+    // would produce.
     const degradedNote =
-      "The REST path is degraded (upstream_unreachable): the AI Search instance did not serve the query. The degraded answer is withheld here rather than presented as results.";
+      "All configured AI Search paths failed: mcp: the instance did not serve the query; the degraded answer was withheld rather than presented as results.";
     const { namespace } = fakeNamespace(async () => ({
       ok: false,
-      path: "rest" as const,
-      code: "degraded_fallback" as const,
+      path: "mcp" as const,
+      code: "all_paths_failed" as const,
       correlationId: "corr-2",
       degraded: degradedNote,
       error: degradedNote,
@@ -222,15 +224,17 @@ describe("ai_search_agent_search — the orchestrator's door onto AiSearchAgent 
       stubContext({ AI_SEARCH_AGENT: namespace }, SESSION_LOGIN, []),
     );
     expect(answer.data.ok).toBe(false);
-    expect(answer.data.code).toBe("degraded_fallback");
+    expect(answer.data.code).toBe("all_paths_failed");
     expect(answer.data.results ?? []).toHaveLength(0);
     expect(answer.text).toMatch(/degraded/i);
     expect(answer.text).toContain("withheld");
   });
 
   it("a not-configured agent answer is stated as such, never dressed up as results", async () => {
+    // #3342: the runner's not_configured note names only the two
+    // surviving paths (the REST clause is gone with the path).
     const note =
-      "No AI Search access path is configured: the namespace path needs the ai_search_namespaces binding (env.AI_SEARCH) plus AI_SEARCH_INSTANCE, the MCP path needs AI_SEARCH_MCP_ENDPOINT (the instance's dashboard-enabled public endpoint), and the REST path needs AI_SEARCH_ENDPOINT.";
+      "No AI Search access path is configured: the namespace path needs the ai_search_namespaces binding (env.AI_SEARCH) plus AI_SEARCH_INSTANCE, and the MCP path needs AI_SEARCH_MCP_ENDPOINT (the instance's dashboard-enabled public endpoint).";
     const { namespace } = fakeNamespace(async () => ({
       ok: false,
       code: "not_configured" as const,
