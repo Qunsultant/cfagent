@@ -182,12 +182,24 @@ describe("billing policy store contract (in-memory + Drizzle)", () => {
       expect(seeded.prorationBehavior).toBe("create_prorations");
       expect(seeded.repurchaseMigration).toBe("grandfather");
       expect(seeded.stripePriceByPlan).toEqual({});
+      // Issue #3262: top-up limits are operator data with PROPOSED
+      // seeds (owner-decided 2026-11-06: min $1, max $500).
+      expect(seeded.topUpMinUSD).toBe(1);
+      expect(seeded.topUpMaxUSD).toBe(500);
       const updated = await store.updatePolicy({ gracePeriodDays: 3, downgradeTiming: "immediate" });
       expect(updated.gracePeriodDays).toBe(3);
       expect(updated.downgradeTiming).toBe("immediate");
       expect((await store.getPolicy()).gracePeriodDays).toBe(3);
       await expect(store.updatePolicy({ gracePeriodDays: -1 } as never)).rejects.toThrow(/gracePeriodDays/);
       await expect(store.updatePolicy({ downgradeTiming: "someday" } as never)).rejects.toThrow(/downgradeTiming/);
+      const limits = await store.updatePolicy({ topUpMinUSD: 5, topUpMaxUSD: 100 });
+      expect(limits.topUpMinUSD).toBe(5);
+      expect(limits.topUpMaxUSD).toBe(100);
+      await expect(store.updatePolicy({ topUpMinUSD: 0 } as never)).rejects.toThrow(/topUpMinUSD/);
+      await expect(store.updatePolicy({ topUpMaxUSD: -1 } as never)).rejects.toThrow(/topUpMaxUSD/);
+      await expect(store.updatePolicy({ topUpMinUSD: 200, topUpMaxUSD: 100 } as never)).rejects.toThrow(
+        /topUpMinUSD.*topUpMaxUSD|min.*max/,
+      );
     }
     // D1-only: re-ensure after an operator edit keeps the edit (INSERT OR IGNORE seeding).
     const mock = new MockD1Database();

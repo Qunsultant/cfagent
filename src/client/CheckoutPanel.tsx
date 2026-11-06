@@ -1,6 +1,8 @@
 /**
  * Issue #2137: user-facing checkout UI — pay for a run, or buy, view,
- * and cancel a subscription.
+ * and cancel a subscription. Issue #3262 adds a Top up tab: add money
+ * to the account (credits fund pay-per-run screens), crediting only
+ * on verified payment through the native checkout pattern.
  *
  * Identity rule: the session cookie is the identity. This panel never
  * sends an identity header and never reads tier or tenant from a
@@ -75,6 +77,8 @@ import {
   subscriptionCancel,
   subscriptionCheckout,
   subscriptionPurchase,
+  topUpCheckout,
+  topUpConfirm,
   type ChallengeFlow,
   type CommercialAccountView,
   type PlatformIdentityView,
@@ -84,6 +88,7 @@ import {
   type SubmitResult,
   type SubscriptionStatusView,
   type SubscriptionView,
+  type TopUpCheckoutView,
 } from "./commercialApi";
 
 const GOAL_KINDS = [
@@ -124,10 +129,11 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
   // the shared hook (aliased to the old tab/setTab names, so the panel
   // below is untouched).
   const { activeTab: tab, handleTabChange: setTab } = useUrlSyncedTabs<
-    "pay" | "subscriptions"
+    "pay" | "subscriptions" | "topup"
   >({
     param: "checkoutTab",
-    isValid: (v): v is "pay" | "subscriptions" => v === "pay" || v === "subscriptions",
+    isValid: (v): v is "pay" | "subscriptions" | "topup" =>
+      v === "pay" || v === "subscriptions" || v === "topup",
     defaultTab: "pay",
   });
   const [loading, setLoading] = React.useState(true);
@@ -181,6 +187,16 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
   const cancelableSubs = (subStatus?.subscriptions ?? []).filter(
     (s) => s.status === "active" && !s.canceledAtMs && s.periodEndMs > Date.now(),
   );
+
+  // Top-up form (#3262): add money, crediting only on verified payment.
+  const [topUpAmount, setTopUpAmount] = React.useState("");
+  const [topUpRail, setTopUpRail] = React.useState<"card" | "x402">("card");
+  const [topUpMint, setTopUpMint] = React.useState<TopUpCheckoutView | null>(null);
+  const [topUpMinting, setTopUpMinting] = React.useState(false);
+  const [topUpConfirming, setTopUpConfirming] = React.useState(false);
+  const [topUpError, setTopUpError] = React.useState<string | null>(null);
+  const [topUpDone, setTopUpDone] = React.useState<string | null>(null);
+  const [topUpProof, setTopUpProof] = React.useState("");
 
   const refreshSubscription = React.useCallback(async () => {
     try {
@@ -438,6 +454,74 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
     }
   };
 
+  // #3262: x402 is offered only when the browser scope allows it AND
+  // the pricing network carries an x402 network; card is always offered.
+  const topUpX402Offered =
+    pricing?.browserPaymentScope === "card-and-x402" && pricing.network.x402Network !== null;
+
+  const handleTopUpMint = async () => {
+    setTopUpError(null);
+    setTopUpDone(null);
+    setTopUpMint(null);
+    if (!email.trim()) {
+      setTopUpError("Enter the checkout contact email.");
+      return;
+    }
+    const amount = Number(topUpAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setTopUpError("Enter an amount greater than zero.");
+      return;
+    }
+    const limits = pricing?.topUpLimits ?? null;
+    if (limits && (amount < limits.minUSD || amount > limits.maxUSD)) {
+      setTopUpError(`Amount must be between ${formatUSD(limits.minUSD)} and ${formatUSD(limits.maxUSD)}.`);
+      return;
+    }
+    setTopUpMinting(true);
+    try {
+      const res = await topUpCheckout({ amountUSD: amount, rail: topUpRail, email: email.trim() });
+      setTopUpMint(res);
+    } catch (err) {
+      setTopUpError(errText(err));
+    } finally {
+      setTopUpMinting(false);
+    }
+  };
+
+  const handleTopUpConfirm = async () => {
+    if (!topUpMint) return;
+    if (topUpMint.rail === "x402" && !topUpProof.trim()) {
+      setTopUpError("Paste the payment proof from your wallet or agent, then verify.");
+      return;
+    }
+    setTopUpConfirming(true);
+    setTopUpError(null);
+    try {
+      const res = await topUpConfirm({
+        topUpRequestId: topUpMint.topUpRequestId,
+        ...(topUpMint.rail === "card"
+          ? { checkoutSessionId: topUpMint.checkoutSessionId ?? undefined }
+          : { paymentProof: topUpProof.trim() }),
+      });
+      setTopUpDone(
+        `Top-up credited: ${formatUSD(res.creditedUSD)}. New credit balance: ${formatUSD(res.account.creditsUSD ?? 0)}.`
+      );
+      setTopUpMint(null);
+      setTopUpProof("");
+      // Refresh the read-only identity display so the header credits
+      // match; the confirm response is the authority, this is display-only.
+      try {
+        setIdentity(await getIdentity());
+      } catch {
+        // Identity refresh failure leaves the confirmed balance shown above.
+      }
+    } catch (err) {
+      setTopUpError(errText(err));
+    } finally {
+      setTopUpConfirming(false);
+    }
+  };
+
   return (
     <PageShell
       title="Checkout"
@@ -453,13 +537,14 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
         tabs={[
           { id: "pay", label: "Pay per run" },
           { id: "subscriptions", label: "Subscriptions" },
+          { id: "topup", label: "Top up" },
         ]}
         value={tab}
         onChange={setTab}
         idBase="checkout-tabs"
         ariaLabel="Checkout sections"
       />
-      {/* #2219: read-only identity display, shared by both tabs.
+      {/* #2219: read-only identity display, shared by all tabs.
           Never an input: loading shows a neutral loading line,
           and a resolution failure shows the failure message. */}
       {identityError ? (
@@ -785,6 +870,81 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
               </p>
             </>
           )}
+        </Card>
+      )}
+      {tab === "topup" && (
+        <Card>
+          <Notice tone="info">
+            Add money to your account: credits fund pay-per-run screens. Credit lands only after verified
+            payment — never on an unconfirmed checkout.
+          </Notice>
+          {pricing?.topUpLimits ? (
+            <p>
+              Top-up limits: {formatUSD(pricing.topUpLimits.minUSD)} – {formatUSD(pricing.topUpLimits.maxUSD)}{" "}
+              per top-up (operator-set).
+            </p>
+          ) : (
+            <p>Top-up limits are currently unavailable — the server still validates the amount.</p>
+          )}
+          <TextInput
+            label="Amount (USD)"
+            hint="Credits added to your account after verified payment."
+            type="number"
+            value={topUpAmount}
+            onChange={(e) => setTopUpAmount(e.target.value)}
+          />
+          <Select label="Payment rail" value={topUpRail} onChange={(e) => setTopUpRail(e.target.value as "card" | "x402")}>
+            <option value="card">Card (Stripe)</option>
+            {topUpX402Offered && <option value="x402">Crypto (x402)</option>}
+          </Select>
+          <TextInput
+            label="Checkout contact email"
+            hint="Used only as the checkout contact. Identity comes from your signed-in session."
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+          {topUpError && <Notice tone="danger">{topUpError}</Notice>}
+          <Button variant="primary" loading={topUpMinting} onClick={handleTopUpMint}>
+            Create top-up checkout
+          </Button>
+          {topUpMint && (
+            <Notice tone="info">
+              Checkout created for {formatUSD(topUpMint.amountUSD)} ({topUpMint.topUpRequestId}). Complete the
+              payment, then confirm below.
+              {topUpMint.rail === "card" && topUpMint.checkoutUrl && (
+                <p>
+                  <a href={topUpMint.checkoutUrl} target="_blank" rel="noreferrer">
+                    Complete payment
+                  </a>{" "}
+                  (native checkout link for this top-up)
+                </p>
+              )}
+              {topUpMint.rail === "x402" && topUpMint.challenge && (
+                <>
+                  <p>
+                    Crypto (x402) payment — no payment link exists for crypto. Complete the 402 payment with your
+                    wallet or agent, then paste the payment proof below.
+                  </p>
+                  <p>
+                    Network: {topUpMint.challenge.network} — amount: {formatUSD(topUpMint.challenge.amountUSD)}{" "}
+                    USDC — recipient: {topUpMint.challenge.recipient}
+                  </p>
+                  <TextInput
+                    label="Payment proof"
+                    hint="The proof your wallet or agent returned for this 402 payment."
+                    value={topUpProof}
+                    onChange={(e) => setTopUpProof(e.target.value)}
+                  />
+                </>
+              )}
+              <div>
+                <Button variant="primary" loading={topUpConfirming} onClick={handleTopUpConfirm}>
+                  I have paid — verify
+                </Button>
+              </div>
+            </Notice>
+          )}
+          {topUpDone && <Notice tone="success">{topUpDone}</Notice>}
         </Card>
       )}
     </PageShell>

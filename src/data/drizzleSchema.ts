@@ -550,6 +550,26 @@ export const agentCfpayChannelPurchases = sqliteTable("agent_cfpay_channel_purch
 });
 
 /**
+ * Self-service top-up drafts (#3262). This schema MAPS the table;
+ * it does not create it — DDL authority lives in migration 0048
+ * (src/data/migrationRunner.ts).
+ */
+export const agentTopUpDrafts = sqliteTable("agent_top_up_drafts", {
+  id: text("id").primaryKey(),
+  userLogin: text("user_login").notNull(),
+  tenantId: text("tenant_id").notNull(),
+  email: text("email").notNull(),
+  amountUSD: real("amount_usd").notNull(),
+  rail: text("rail").notNull(),
+  status: text("status").notNull(),
+  createdAtMs: integer("created_at_ms").notNull(),
+  creditedAtMs: integer("credited_at_ms"),
+  paymentIntentId: text("payment_intent_id"),
+  checkoutSessionId: text("checkout_session_id"),
+  challengeNonce: text("challenge_nonce"),
+});
+
+/**
  * Billing customer mapping (#2656, Phase 2.1 of #2405) on D1.
  * One row per user: the provider customer id for that user's
  * Billing checkouts (first-wins — see billingCustomerPorts.ts).
