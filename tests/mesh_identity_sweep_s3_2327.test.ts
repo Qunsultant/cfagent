@@ -378,7 +378,7 @@ function makePaymentsCtx() {
 
 // The payments_guard.test.ts harness: a real ledger owner (DatabaseORM
 // over MockSqlStorage) served through the real agentic-payments route
-// handler, bound as SEARCH_AGENT.
+// handler, bound as ORCHESTRATOR_AGENT.
 function makeLedgerEnv(): any {
   const sql = new MockSqlStorage();
   const orm = new DatabaseORM(sql);
@@ -387,7 +387,7 @@ function makeLedgerEnv(): any {
   return {
     CF_WALLET_FACILITATOR: "https://facilitator.test",
     SERVICE_USER_LOGIN: "default_trader",
-    SEARCH_AGENT: {
+    ORCHESTRATOR_AGENT: {
       idFromName: (name: string) => name,
       get: (_id: unknown) => ({
         fetch: async (req: Request) => {
