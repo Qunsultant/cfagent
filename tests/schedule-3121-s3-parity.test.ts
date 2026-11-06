@@ -141,7 +141,7 @@ function makeEnv(
     },
     SESSION_STORE: null,
   };
-  if (opts.audit) env.SEARCH_AGENT = opts.audit.namespace;
+  if (opts.audit) env.ORCHESTRATOR_AGENT = opts.audit.namespace;
   return { env, budgetCheck };
 }
 
@@ -677,7 +677,7 @@ describe("S3-P05 #3312 — the DO-side audit sink covers every entry path (#3121
     });
     expect(created2.id).toBe("g-throwing");
 
-    // No SEARCH_AGENT binding at all: the stub build throws inside
+    // No ORCHESTRATOR_AGENT binding at all: the stub build throws inside
     // the sink and is swallowed — the mutation still lands.
     const { env: envBare } = makeEnv();
     const agentBare = new ScheduledAgent(makeCtx() as never, envBare as never);
