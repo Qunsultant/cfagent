@@ -177,11 +177,13 @@ import {
 import {
   getStockCopilotStatusViaDoor,
   controlStockCopilotViaDoor,
+  introspectStockCopilotViaDoor,
   type StockCopilotDoorContext,
   type StockCopilotStatusResult,
   type StockCopilotControlInput,
   type StockCopilotControlResult,
 } from "../../agents/orchestrator/meshStockCopilotDoor";
+import type { StockCopilotIntrospectionResult } from "../../services/stockCopilotIntrospection";
 import { COPILOT_SESSIONS } from "../../services/stockCopilotSessions";
 import { UNIVERSES, type UniverseId } from "../../trading";
 import { createStructuredLogger } from "../../observability/structuredLogger";
@@ -1447,3 +1449,34 @@ export class StockCopilotControlCommand implements IMcpToolCommand<StockCopilotC
     return result;
   }
 }
+
+export class StockCopilotIntrospectCommand implements IMcpToolCommand<Record<string, never>> {
+  readonly name = "stock_copilot_introspect";
+  readonly description =
+    "Perform runtime tool-driven reflection and self-explanation of the Stock Copilot: inspects active tools mapped across the 5-stage execution pipeline (Feed, Enrich, Analyze, Generate, Deliver), live configuration state from DO SQLite (cadence, sessions, broker/mode, universe, pause), and distilled learnings from recent cycle executions.";
+  readonly jsonSchema = {
+    type: "object" as const,
+    properties: {},
+  };
+  readonly zodSchema = z.object({});
+
+  async execute(
+    _input: Record<string, never>,
+    context: McpToolContext,
+  ): Promise<StockCopilotIntrospectionResult> {
+    const actingLogin = context.actingLogin?.();
+    await recordDoorHop(context, this.name, "OrchestratorAgent");
+    const result = await introspectStockCopilotViaDoor(
+      meshStockCopilotDoorContextFromMcp(context),
+      actingLogin,
+    );
+    context.audit("stock_copilot_introspect", "mcp", {
+      actingLogin: actingLogin ?? null,
+      broker: result.configuration.broker,
+      mode: result.configuration.mode,
+      stagesCount: result.pipeline.length,
+    });
+    return result;
+  }
+}
+

@@ -586,13 +586,14 @@ describe("census chat column vs the mesh-door command registry (#2421)", () => {
     // capability, which is not a mesh-door command. #2581 added
     // run_options_strategy_screen to the same cell and family.
     // #3513: Stock Copilot chat door added stock_copilot_status and
-    // stock_copilot_control to the mesh-door family.
+    // stock_copilot_control to the mesh-door family. #3588 added stock_copilot_introspect.
     expect([
       ...union,
       "run_stock_screen",
       "run_options_strategy_screen",
       "stock_copilot_status",
       "stock_copilot_control",
+      "stock_copilot_introspect",
     ].sort()).toEqual([...family.commands].sort());
     expect(new Set(union).size).toBe(union.length);
     // AiSearchAgent's chat reach is a catalog command, not a mesh-door
