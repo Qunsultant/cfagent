@@ -2317,6 +2317,12 @@ export function ETradeTradingHub({
       {/* Omnichannel Trading Desks (Autonomous Email & Slack Desks) */}
       {effectiveSubTab === "omnichannel" && (
         <div className="tab-pane active omnichannel-pane">
+          {/* Issue #3429: the desks execute against E*TRADE, so another broker is told\n              before it types a command — the backend refuses the same request. */}
+          {selectedBroker !== "etrade" && (
+            <Notice tone="warning" title={`${presentation.label} does not run these desks`}>
+              The email, Slack and voice desks execute against E*TRADE. Nothing here is previewed or\n              routed for {presentation.label}; use the Trading Hub order ticket or the neutral order API.
+            </Notice>
+          )}
           {/* Header Card */}
           <div className="omnichannel-header-card">
             <div className="omnichannel-header-top">
@@ -2628,6 +2634,12 @@ export function ETradeTradingHub({
       {/* Autonomous Voice Trading Desk */}
       {effectiveSubTab === "voice" && (
         <div className="tab-pane active voice-pane">
+          {/* Issue #3429: the voice desk is E*TRADE\x27s service; say so for another broker. */}
+          {selectedBroker !== "etrade" && (
+            <Notice tone="warning" title={`${presentation.label} does not run the voice desk`}>
+              The voice desk executes against E*TRADE. Nothing spoken here is previewed or routed for\n              {presentation.label}; use the Trading Hub order ticket or the neutral order API.
+            </Notice>
+          )}
           {/* Header Card */}
           <div className="voice-header-card">
             <div className="voice-header-top">

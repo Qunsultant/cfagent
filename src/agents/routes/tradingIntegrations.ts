@@ -29,6 +29,7 @@ import type { AgentContext } from "agents";
 import { BrowserAgent } from "../browserAgent";
 import { TradingPlatformRegistry } from "../../trading";
 import { resolveTenantBroker } from "../../services/tenantProviders";
+import { brokerPresentation } from "../../trading";
 import {
   ETradeEmailTradingService,
   ETradeSlackTradingService,
@@ -74,6 +75,55 @@ export interface TradingIntegrationsRouteContext {
 }
 
 /**
+ * Issue #3429: the channel desks are E*TRADE-shaped services.
+ *
+ * `src/trading/email/agent.ts`, `src/trading/slack/agent.ts` and
+ * `src/trading/voice/agent.ts` each construct an ETradeService and use it
+ * for preview, quotes, screening AND execution. There is no neutral equivalent
+ * to hand them: a partial swap would let an E*TRADE-priced preview execute at
+ * another venue, which is a worse defect than an honest refusal.
+ *
+ * So the gate runs FIRST, before any service is constructed. A tenant whose
+ * selected broker is not E*TRADE gets a coded refusal naming the selection and
+ * the surface to use instead. Nothing is previewed, quoted from another
+ * broker, or routed.
+ */
+export const CHANNEL_BROKER_UNAVAILABLE = "BROKER_CHANNEL_UNAVAILABLE";
+
+/** The paths that reach an ETradeService instance. */
+export const CHANNEL_DESK_PATHS = [
+  "/trading/email/inbound",
+  "/trading/email/approve-link",
+  "/trading/slack/event",
+  "/trading/slack/interaction",
+  "/trading/slack/command",
+  "/trading/voice/turn",
+  "/trading/voice/greeting",
+] as const;
+
+/** True when this path would construct an E*TRADE-shaped channel service. */
+export function isChannelDeskPath(path: string): boolean {
+  return CHANNEL_DESK_PATHS.some((candidate) => path.endsWith(candidate));
+}
+
+/** The coded refusal. Names the broker; never renders another broker's data. */
+export function channelBrokerRefusal(broker: string): Response {
+  const label = brokerPresentation(broker).label;
+  return Response.json(
+    {
+      code: CHANNEL_BROKER_UNAVAILABLE,
+      broker,
+      message:
+        `The email, Slack and voice trading desks execute against E*TRADE; your selected broker is ${label}. ` +
+        `Nothing was previewed and no order was routed. Use the Trading Hub or the neutral order API ` +
+        `(/api/broker/order/execute) for ${label}.`,
+      retryable: false,
+    },
+    { status: 501 },
+  );
+}
+
+/**
  * Issue #1262 Phase 4: the NLQ dependency set for channel services —
  * the web-chat set (scan + profile stores, scheduling port, discovery
  * runners) minus the social-brief port, which web chat withholds from
@@ -111,6 +161,12 @@ export async function handleTradingIntegrationsRoutes(
   sessionId: string,
   ctx: TradingIntegrationsRouteContext
 ): Promise<Response | null> {
+  // Issue #3429: refuse a non-E*TRADE tenant BEFORE any channel service is
+  // constructed, so no preview, quote or order can reach another venue.
+  if (isChannelDeskPath(path)) {
+    const selectedBroker = await resolveTenantBroker(ctx.env);
+    if (selectedBroker !== "etrade") return channelBrokerRefusal(selectedBroker);
+  }
   // Omnichannel Trading Channel: Inbound Email Trading Agent
   if (path.endsWith("/trading/email/inbound") && request.method === "POST") {
     try {
