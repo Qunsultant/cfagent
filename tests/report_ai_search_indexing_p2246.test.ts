@@ -492,35 +492,15 @@ describe("E. search-side login discipline (#2246)", () => {
     expect(result.degraded ?? "").toContain("withheld");
   });
 
-  it("REST path: report-type items are withheld (owner does not survive REST mapping)", async () => {
-    const deps: AiSearchAgentDeps = {
-      restSearch: async () => ({
-        query: "screens",
-        provider: "cloudflare_ai_search",
-        totalMatches: 1,
-        results: [
-          {
-            id: "x1",
-            title: "Market screen — ALL",
-            snippet: "Screen results.",
-            url: "report:rpt-9",
-            bucketKey: "report:rpt-9",
-            score: 0.5,
-          } as any,
-        ],
-      }),
-    };
-    const result = await runAiSearchPaths(
-      { AI_SEARCH_ENDPOINT: "https://example.invalid" } as any,
-      "screens",
-      { callerLogin: "alice" },
-      deps
-    );
-    expect(result.ok).toBe(true);
-    expect(result.path).toBe("rest");
-    expect(result.results).toHaveLength(0);
-    expect(result.degraded ?? "").toContain("withheld");
-  });
+  // Retired by #3342 with the REST path itself: this test pinned
+  // that a report-type item identified only by its key (owner
+  // unprovable through the REST mapping) is withheld even for its
+  // owner. The identical safe default on the surviving paths is
+  // pinned by the test directly above ("key-only report
+  // identification (no owner metadata) -> withheld even for a
+  // callerLogin"), and the endpoint-only environment now
+  // configuring nothing is pinned in
+  // tests/ai_search_rest_migration_p3342.test.ts.
 
   it("clean knowledge-only answer carries no withholding note", async () => {
     const result = await runAiSearchPaths(namespaceEnv([KNOWLEDGE_CHUNK]), "margin");
