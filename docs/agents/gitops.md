@@ -1642,6 +1642,8 @@ with the decision still only in chat or in an agent's notes.
 ***
 ## 24. Anti-work-loss policy: diff-before-close and single-lease claiming (#3437)
 
+Full architecture specification and lifecycle diagrams: [`docs/agents/anti-work-loss.md`](anti-work-loss.md).
+
 Multi-developer and multi-agent execution environments face a structural risk of premature closure and work loss when multiple lanes interact with the same issue or epic:
 
 1. **Diff-Before-Close Rule**:
