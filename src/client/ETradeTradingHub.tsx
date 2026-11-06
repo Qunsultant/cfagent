@@ -435,12 +435,12 @@ export function ETradeTradingHub({
 
   // Omnichannel Email & Slack Simulator states
   const [emailFrom, setEmailFrom] = useState("trader@example.com");
-  const [emailSubject, setEmailSubject] = useState("E*TRADE market update");
+  const [emailSubject, setEmailSubject] = useState(`${presentation.label} market update`);
   const [emailBody, setEmailBody] = useState("What is the current market price and technical signal?");
   const [emailLoading, setEmailLoading] = useState(false);
   const [emailResult, setEmailResult] = useState<any>(null);
 
-  const [slackPrompt, setSlackPrompt] = useState("@ETradeAgent preview buy <quantity> <symbol> limit <price>");
+  const [slackPrompt, setSlackPrompt] = useState(`@${presentation.botName} preview buy <quantity> <symbol> limit <price>`);
   const [slackLoading, setSlackLoading] = useState(false);
   const [slackResult, setSlackResult] = useState<any>(null);
   const [slackActionLoading, setSlackActionLoading] = useState(false);
@@ -550,7 +550,7 @@ export function ETradeTradingHub({
   }>>([
     {
       role: "assistant",
-      text: "Welcome to the E*TRADE Voice Trading Desk. You can ask for real-time market quotes, technical screening, portfolio status, or draft order tickets. How can I assist your portfolio today?",
+      text: `Welcome to the ${presentation.deskName}. You can ask for real-time market quotes, technical screening, portfolio status, or draft order tickets. How can I assist your portfolio today?`,
       timestamp: new Date().toLocaleTimeString(),
     },
   ]);
@@ -1634,7 +1634,7 @@ export function ETradeTradingHub({
       omnichannel: "Email & Slack Agents",
       voice: "Voice Trading Desk",
     };
-    onSendPrompt?.(cleanPrompt, `E*TRADE · ${tabLabels[effectiveSubTab]}`);
+    onSendPrompt?.(cleanPrompt, `${presentation.label} · ${tabLabels[effectiveSubTab]}`);
   };
 
   const accountValue = account?.netAccountValue;
@@ -2328,12 +2328,12 @@ export function ETradeTradingHub({
                   💬 Omnichannel Trading Desks (Email &amp; Slack)
                 </h3>
                 <p className="omnichannel-header-desc">
-                  Autonomous market research, quoting, and Human-in-the-Loop order drafting via Inbound Email and Slack Bot communication channels. All orders require explicit human authorization before live E*TRADE execution.
+                  Autonomous market research, quoting, and Human-in-the-Loop order drafting via Inbound Email and Slack Bot communication channels. All orders require explicit human authorization before live {presentation.label} execution.
                 </p>
               </div>
               <div className="omnichannel-header-status">
                 <span className="omnichannel-live-badge">
-                  ✓ Direct REST API Live
+                  ✓ {presentation.label} REST API · {isLive ? "LIVE" : "PAPER"}
                 </span>
               </div>
             </div>
@@ -2506,7 +2506,7 @@ export function ETradeTradingHub({
                   {/* Preset Quick Chips */}
                   <div className="omnichannel-chip-row">
                     <Button
-                      onClick={() => handleSimulateSlack("@ETradeAgent quote NVDA")}
+                      onClick={() => handleSimulateSlack("@${presentation.botName} quote NVDA")}
                       variant="secondary"
                       tone="subtle"
                       size="sm"
@@ -2514,7 +2514,7 @@ export function ETradeTradingHub({
                       📈 Quote NVDA
                     </Button>
                     <Button
-                      onClick={() => handleSimulateSlack("@ETradeAgent screen stocks priced between $20 and $200")}
+                      onClick={() => handleSimulateSlack("@${presentation.botName} screen stocks priced between $20 and $200")}
                       variant="secondary"
                       tone="subtle"
                       size="sm"
@@ -2522,7 +2522,7 @@ export function ETradeTradingHub({
                       🔍 Screen Price Range
                     </Button>
                     <Button
-                      onClick={() => handleSimulateSlack("@ETradeAgent preview buy 10 NVDA limit 125.00")}
+                      onClick={() => handleSimulateSlack("@${presentation.botName} preview buy 10 NVDA limit 125.00")}
                       variant="secondary"
                       tone="subtle"
                       size="sm"
@@ -2530,7 +2530,7 @@ export function ETradeTradingHub({
                       ⚡ Buy 10 NVDA Ticket
                     </Button>
                     <Button
-                      onClick={() => handleSimulateSlack("@ETradeAgent show my portfolio positions")}
+                      onClick={() => handleSimulateSlack("@${presentation.botName} show my portfolio positions")}
                       variant="secondary"
                       tone="subtle"
                       size="sm"
@@ -2555,7 +2555,7 @@ export function ETradeTradingHub({
                   <div className="omnichannel-slack-user-header">
                     <span style={{ fontSize: "var(--font-size-title)" }}>🤖</span>
                     <div>
-                      <strong className="slack-bot-name">ETradeAgent</strong>{" "}
+                      <strong className="slack-bot-name">{presentation.botName}</strong>{" "}
                       <span className="slack-app-tag">APP</span>
                       <span className="slack-time">Just now</span>
                     </div>
@@ -2636,7 +2636,7 @@ export function ETradeTradingHub({
                   Real-Time Voice Architecture
                 </span>
                 <h3 className="voice-header-title">
-                  <span>🎙️</span> E*TRADE Voice Trading Desk
+                  <span>🎙️</span> {presentation.deskName}
                 </h3>
                 <p className="voice-header-desc">
                   Real-time conversational voice trading with speech synthesis and recognition. Verbal quote inquiries, technical screening, and strict two-stage verbal Human-in-the-Loop order drafting.
@@ -2784,7 +2784,7 @@ export function ETradeTradingHub({
                     className={`voice-turn ${msg.role === "user" ? "user-turn" : "bot-turn"}`}
                   >
                     <div className="voice-turn-meta">
-                      <span>{msg.role === "user" ? "👤 Trader (Voice)" : "🤖 E*TRADE Voice Desk"}</span>
+                      <span>{msg.role === "user" ? "👤 Trader (Voice)" : `🤖 ${presentation.deskAgentName}`}</span>
                       <span>• {msg.timestamp}</span>
                     </div>
 
