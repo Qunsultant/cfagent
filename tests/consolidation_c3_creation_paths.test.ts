@@ -93,6 +93,10 @@ const ARMING_SITES: Record<string, { count: number; role: string }> = {
     count: 1,
     role: "ticker tick-push arm (pushTicks every 5s — quote streaming, not a screening schedule; no builder payload — #2230)",
   },
+  "src/services/jobPipelineEngine.ts": {
+    count: 3,
+    role: "job pipeline schedule arming through the JobScheduleHost port (#3534): the definition registration at defineJob + the stage control plane's schedule / re-schedule operations (#3549); payloads are validated job configs and arming is host-mediated, never an inline SDK call",
+  },
 };
 
 describe("screen-schedule creation paths — enumeration pin", () => {

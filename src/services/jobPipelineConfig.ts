@@ -39,7 +39,24 @@ export type JobPipelineErrorCode =
   | "job_not_retirable"
   | "job_step_unknown"
   | "job_step_failed"
-  | "job_stores_unavailable";
+  | "job_stores_unavailable"
+  | "job_stage_timed_out"
+  | "stage_run_mismatch"
+  | "stage_no_run"
+  | "stage_action_conflict"
+  | "stage_action_in_flight"
+  | "stage_already_completed"
+  | "stage_not_runnable"
+  | "stage_not_rerunnable"
+  | "stage_not_stoppable"
+  | "stage_not_resumable"
+  | "stage_not_cancellable"
+  | "stage_input_missing"
+  | "stage_already_scheduled"
+  | "stage_not_scheduled"
+  | "stage_schedule_host_unconfigured"
+  | "stage_reschedule_unsupported"
+  | "stage_reschedule_failed";
 
 export class JobPipelineError extends Error {
   readonly code: JobPipelineErrorCode;
@@ -131,6 +148,18 @@ function resolveSchedule(raw: unknown): JobScheduleConfig {
       throw invalid('Schedule field "interval" must be a non-empty string.');
     }
     schedule.interval = raw.interval;
+  }
+  if (raw.registrationId !== undefined) {
+    if (typeof raw.registrationId !== "string" || !raw.registrationId.trim()) {
+      throw invalid('Schedule field "registrationId" must be a non-empty string.');
+    }
+    schedule.registrationId = raw.registrationId;
+  }
+  if (raw.reason !== undefined) {
+    if (typeof raw.reason !== "string" || !raw.reason.trim()) {
+      throw invalid('Schedule field "reason" must be a non-empty string.');
+    }
+    schedule.reason = raw.reason;
   }
   if (enabled && !schedule.cron && !schedule.interval) {
     throw invalid("An enabled schedule requires a cron expression or an interval.");

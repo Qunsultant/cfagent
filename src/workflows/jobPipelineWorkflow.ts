@@ -25,8 +25,10 @@ import type { WorkflowEvent, WorkflowStep } from "cloudflare:workers";
 import type { DefaultProgress } from "agents/workflows";
 import type { Env } from "../types";
 import { createJobPipelineStoresFromD1 } from "../data/createJobPipelinePorts";
-import type { JobPipelineD1Db } from "../data/d1JobPipelineAdapter";
-import { D1JobRunRecordStore, type JobRunRecordD1Db } from "../data/d1JobRunRecordAdapter";
+import {
+  createD1JobRunRecordDb,
+  D1JobRunRecordStore,
+} from "../data/d1JobRunRecordAdapter";
 import { createJobPipelineMessaging } from "../messaging/createJobPipelineMessaging";
 import { createBuiltinStepRegistry } from "../services/jobPipelineSteps";
 import type { JobPipelineDeps } from "../services/jobPipelineEngine";
@@ -47,8 +49,8 @@ export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
       "Job pipeline workflow cannot build its stores: the AGENT_DB (D1 AgentDB) binding is not configured.",
     );
   }
-  const db = env.AGENT_DB as unknown as JobPipelineD1Db & JobRunRecordD1Db;
-  const runRecords = new D1JobRunRecordStore(db);
+  const db = env.AGENT_DB;
+  const runRecords = new D1JobRunRecordStore(createD1JobRunRecordDb(db));
   const messaging = createJobPipelineMessaging(env);
   return {
     stores: createJobPipelineStoresFromD1(db),
@@ -59,6 +61,7 @@ export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
     },
     publisher: messaging.ports?.publisher ?? null,
     steps: createBuiltinStepRegistry(),
+    invocation: "workflow-shard",
   };
 }
 

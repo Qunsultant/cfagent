@@ -16,6 +16,7 @@ import {
   type MessageEnvelope,
   type MessagePublisher,
 } from "../messaging/messagingPorts";
+import { stageIdempotencyKey } from "../workflows/stageMessage";
 import type { JobRunState } from "../data/jobPipelinePorts";
 
 /** The published transition vocabulary (the management states a run passes through). */
@@ -78,6 +79,91 @@ export async function publishJobStatus(
   } catch (error) {
     console.warn(
       `[job-pipeline] status publish for job "${input.jobId}" run "${input.runId}" state "${input.state}" threw: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+/**
+ * A stage action or stage transition, published on the same
+ * envelope (#3549, absorbing #3069): the seven control
+ * operations (run / rerun / stop / resume / cancel / schedule /
+ * reschedule) and the unit transitions the driver records
+ * (completed / failed / timed_out / stopped / cancelled). The
+ * event is ADDRESSED by (runId, stageId) and carries the #2869
+ * claim key for the stage (stageIdempotencyKey under the "jobs"
+ * namespace), so a downstream consumer claims on exactly the
+ * key the stage contract names. Stage publication happens
+ * after the stage's output and checkpoint are persisted —
+ * persist → checkpoint → publish, the stage contract's order.
+ */
+export type JobStageAction =
+  | "run"
+  | "rerun"
+  | "stop"
+  | "resume"
+  | "cancel"
+  | "schedule"
+  | "reschedule"
+  | "completed"
+  | "failed"
+  | "timed_out"
+  | "stopped"
+  | "cancelled";
+
+export interface JobStageActionInput {
+  jobId: string;
+  runId: string;
+  /** The stage id (job:<nodePath>) the action or transition addresses. */
+  stageId: string;
+  /** The unit the transition belongs to, for unit transitions. */
+  unitId?: string;
+  action: JobStageAction;
+  at: string;
+  detail?: string;
+}
+
+/** Build (and validate) the CloudEvents envelope for one stage action/transition. */
+export function jobStageActionEvent(input: JobStageActionInput): MessageEnvelope {
+  const suffix =
+    typeof globalThis.crypto?.randomUUID === "function"
+      ? globalThis.crypto.randomUUID()
+      : Math.random().toString(36).slice(2);
+  return assertMessageEnvelope({
+    specversion: "1.0",
+    id: `job-stage:${input.runId}:${input.stageId}:${input.unitId ?? "-"}:${input.action}:${input.at}:${suffix}`,
+    source: "job-pipeline",
+    type: `job.stage.${input.action}`,
+    time: input.at,
+    subject: input.jobId,
+    jobid: input.jobId,
+    data: {
+      jobId: input.jobId,
+      runId: input.runId,
+      stageId: input.stageId,
+      ...(input.unitId !== undefined ? { unitId: input.unitId } : {}),
+      action: input.action,
+      idempotencyKey: stageIdempotencyKey(input.runId, input.stageId, "jobs"),
+      ...(input.detail !== undefined ? { detail: input.detail } : {}),
+    },
+  });
+}
+
+/** Publish one stage action/transition. Best-effort, never silent — same discipline as publishJobStatus. */
+export async function publishStageAction(
+  publisher: MessagePublisher | null,
+  input: JobStageActionInput,
+): Promise<void> {
+  if (!publisher) return;
+  try {
+    const report = await publisher.publish(jobStageActionEvent(input));
+    if (report.failedTo.length > 0) {
+      console.warn(
+        `[job-pipeline] stage publish for job "${input.jobId}" run "${input.runId}" stage "${input.stageId}" action "${input.action}" failed to: ${report.failedTo.join(", ")}`,
+      );
+    }
+  } catch (error) {
+    console.warn(
+      `[job-pipeline] stage publish for job "${input.jobId}" run "${input.runId}" stage "${input.stageId}" action "${input.action}" threw: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 }

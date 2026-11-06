@@ -1674,6 +1674,79 @@ export const MIGRATION_0045_IV_HISTORY_BROKER: DataMigration = {
   sql: `ALTER TABLE agent_iv_history ADD COLUMN broker TEXT NOT NULL DEFAULT 'etrade'`,
 };
 
+/**
+ * #3534/#3548 — the job pipeline's tables, added to the
+ * foundation (the pipeline's contribution to it, not a parallel
+ * track): definitions, live instances (management state, the
+ * resume cursor, and the #3549 stage-runner checkpoint ledger),
+ * and persisted step hand-off artifacts. The same DDL is the DO
+ * residency's declared v1 schema migration — one table shape in
+ * every residency.
+ */
+export const MIGRATION_0046_JOB_PIPELINE: DataMigration = {
+  version: 46,
+  name: "0046_job_pipeline",
+  sql: `CREATE TABLE IF NOT EXISTS job_pipeline_definitions (
+      job_id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      definition_json TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS job_pipeline_instances (
+      job_id TEXT PRIMARY KEY,
+      state TEXT NOT NULL,
+      desired_state TEXT NOT NULL,
+      current_run_id TEXT,
+      run_started_at TEXT,
+      run_trigger TEXT,
+      checkpoint_json TEXT,
+      stage_checkpoint_json TEXT,
+      stage_desired_json TEXT,
+      last_error TEXT,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS job_pipeline_artifacts (
+      id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL,
+      artifact_key TEXT NOT NULL,
+      value_json TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_job_pipeline_artifacts_run
+      ON job_pipeline_artifacts (run_id, artifact_key)`,
+};
+
+/**
+ * #3534/#3548 — the run-record family's table (job_run_records),
+ * declared for the D1 residency: until now the family lived only
+ * in its DO adapter's DDL, and workflow-hosted runs had no D1
+ * residency to record into. Same columns, same history index.
+ */
+export const MIGRATION_0047_JOB_RUN_RECORDS: DataMigration = {
+  version: 47,
+  name: "0047_job_run_records",
+  sql: `CREATE TABLE IF NOT EXISTS job_run_records (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      system TEXT NOT NULL,
+      job_id TEXT NOT NULL,
+      operation TEXT NOT NULL,
+      started TEXT NOT NULL,
+      finished TEXT NOT NULL,
+      outcome TEXT NOT NULL,
+      triggered_by TEXT NOT NULL,
+      trigger_text TEXT,
+      schedule_id TEXT,
+      async_job_id TEXT,
+      workflow_id TEXT,
+      error_text TEXT,
+      detail TEXT,
+      descriptor TEXT,
+      artifact_refs_json TEXT
+    );
+    CREATE INDEX IF NOT EXISTS job_run_records_job_idx
+      ON job_run_records (job_id, started DESC, id DESC)`,
+};
+
 export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANCE,
   MIGRATION_0002_AGENT_CHAINS_SCHEDULES,
   MIGRATION_0003_AGENT_SHARD_JOBS,
@@ -1719,6 +1792,8 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0043_FREE_RUN_COUNTER,
   MIGRATION_0044_FREE_RUN_ALLOWANCE_SEED,
   MIGRATION_0045_IV_HISTORY_BROKER,
+  MIGRATION_0046_JOB_PIPELINE,
+  MIGRATION_0047_JOB_RUN_RECORDS,
 ];
 
 function splitStatements(sqlText: string): string[] {

@@ -40,10 +40,15 @@ import {
 export const FANOUT_CAP_EXCEEDED = "fanout_cap_exceeded";
 
 /** Statuses that end a unit for planning purposes: never re-run, never waited on. */
-const TERMINAL_STATUSES: readonly StageUnitStatus[] = ["completed", "skipped"];
+const TERMINAL_STATUSES: readonly StageUnitStatus[] = ["completed", "skipped", "cancelled"];
 
-/** Statuses a resume must re-run: the unit did not complete. */
-const RESUME_STATUSES: readonly StageUnitStatus[] = ["failed", "timed_out", "queued"];
+/**
+ * Statuses a resume must re-run: the unit did not complete.
+ * "stopped" is the #3069 stop state (folded into #3549): a stopped
+ * unit is exactly what a resume continues — from its checkpoint,
+ * never re-executing a completed effect.
+ */
+const RESUME_STATUSES: readonly StageUnitStatus[] = ["failed", "timed_out", "queued", "stopped"];
 
 function isTerminal(status: StageUnitStatus): boolean {
   return TERMINAL_STATUSES.includes(status);
