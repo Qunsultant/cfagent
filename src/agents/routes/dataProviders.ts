@@ -6,8 +6,10 @@
  * handler). Returns a Response on match, null when no data-provider
  * path matches.
  *
- *   GET  /data-providers                              configs + routes + servability (+ per-provider capture health, E6 #1235)
+ *   GET  /data-providers                              configs + routes + servability (+ per-provider capture health, E6 #1235; + feed-job status, #3530 S1)
  *   GET  /data-providers/:id                          one config + its routes
+ *   GET  /data-providers/:id/feed                     feed-job status + the local-copy read (#3530 S1)
+ *   POST /data-providers/:id/feed-run                 run the provider's feed job now (#3530 S1)
  *   POST /data-providers/:id/register|configure|verify|enable|disable|deprovision
  *
  * (Paths are the DO-internal spellings: src/server.ts strips the
@@ -84,7 +86,24 @@ import {
   type FetchOutcomeRecorder,
 } from "../../trading";
 import type { ProviderConfigStore } from "../../data/providerConfigPorts";
-import type { ProviderCaptureStore } from "../../data/providerCapturePorts";
+import type {
+  CaptureBlobStorage,
+  ProviderCaptureStore,
+} from "../../data/providerCapturePorts";
+import type { FeedDatasetStore } from "../../data/feedDatasetPorts";
+import { createFeedDatasetAdapter } from "../../data/createFeedDatasetPorts";
+import type { IndexListStore } from "../../data/indexListPorts";
+import { D1IndexListStore } from "../../data/d1IndexListAdapter";
+import {
+  buildFeedJobRegistry,
+  buildFeedStatus,
+  readFeedQuotes,
+  runFeedJob,
+  FEED_JOB_CODES,
+  type FeedJobDefinition,
+  type FeedJobRegistry,
+} from "../../services/feedJobs";
+import type { DataProvider } from "../../trading";
 
 
 export interface DataProviderRoutesContext {
@@ -120,6 +139,19 @@ export interface DataProviderRoutesContext {
    * provider) applies.
    */
   buildVerifier?(providerId: string): ProviderVerifier | undefined;
+  /**
+   * #3530 S1 — the local-copy blob store for the default
+   * capture-wired feed providers (the orchestrator's storage; the
+   * same wiring screening's fetches use). Absent ⇒ feed runs
+   * report FEED_JOB_NOT_CONFIGURED rather than fetching uncaptured.
+   */
+  blobStorage?: CaptureBlobStorage;
+  /** #3530 S1 — feed-dataset store override (tests); undefined ⇒ built from the request env (AGENT_DB); explicit null ⇒ none. */
+  feedDatasetStore?: FeedDatasetStore | null;
+  /** #3530 S1 — index-list store override for feed universes (tests); undefined ⇒ built from AGENT_DB; null ⇒ none. */
+  feedUniverseStore?: IndexListStore | null;
+  /** #3530 S1 — feed provider override (tests); undefined ⇒ the default capture-wired adapter for the job's source. */
+  feedProviderFor?(def: FeedJobDefinition): DataProvider | undefined;
 }
 
 const LIFECYCLE_ACTIONS: readonly ProviderLifecycleAction[] = [
@@ -242,7 +274,8 @@ async function providerView(
   record: ProviderConfigRecord,
   routeViews: ReturnType<typeof routeServability>,
   sql: SqlStorage,
-  capturePort?: ProviderCaptureStore | null
+  capturePort?: ProviderCaptureStore | null,
+  feed?: unknown
 ) {
   const adapter = registry.get(record.id);
   const serving = routeViews.some(
@@ -276,6 +309,11 @@ async function providerView(
     health: capturePort
       ? await aggregateProviderHealthViaPort(capturePort, CAPTURE_TENANT_ID, record.id)
       : aggregateProviderHealth(sql, CAPTURE_TENANT_ID, record.id),
+    // #3530 (S1): feed-job status for this provider's dataset —
+    // the job's last run outcome, rows persisted, snapshot age,
+    // and the never-run state before the first run. Null when no
+    // feed job is registered for the provider.
+    feed: feed ?? null,
   };
 }
 
@@ -286,6 +324,94 @@ async function providerView(
  */
 const CAPTURE_TENANT_ID = "default";
 
+/* ------------------------------------------------------------------ */
+/* #3530 S1 — feed jobs: registry/wiring resolution + status view      */
+/* ------------------------------------------------------------------ */
+
+function feedRegistryFor(ctx: DataProviderRoutesContext): FeedJobRegistry {
+  const knobs: Record<string, string | undefined> = {};
+  for (const [key, value] of Object.entries(
+    ctx.env as unknown as Record<string, unknown>,
+  )) {
+    if (typeof value === "string") knobs[key] = value;
+  }
+  return buildFeedJobRegistry(knobs);
+}
+
+function feedDatasetStoreFor(
+  ctx: DataProviderRoutesContext,
+): FeedDatasetStore | null {
+  if (ctx.feedDatasetStore !== undefined) return ctx.feedDatasetStore;
+  return createFeedDatasetAdapter(ctx.env);
+}
+
+function feedUniverseStoreFor(
+  ctx: DataProviderRoutesContext,
+): IndexListStore | null {
+  if (ctx.feedUniverseStore !== undefined) return ctx.feedUniverseStore;
+  return ctx.env.AGENT_DB
+    ? new D1IndexListStore(
+        ctx.env.AGENT_DB as ConstructorParameters<typeof D1IndexListStore>[0],
+      )
+    : null;
+}
+
+/**
+ * The default capture-wired provider for a feed job — S1: Yahoo,
+ * built with the same capture deps screening's fetches use, so
+ * the job's captures land in the capture log through the very
+ * same write path. Undefined when the source has no default
+ * wiring (later slices register theirs) or the blob store the
+ * capture machinery needs is absent — a run then refuses
+ * FEED_JOB_NOT_CONFIGURED rather than fetching uncaptured.
+ */
+function defaultFeedProvider(
+  ctx: DataProviderRoutesContext,
+  def: FeedJobDefinition,
+): DataProvider | undefined {
+  if (def.sourceId !== "yahoo") return undefined;
+  if (!ctx.blobStorage) return undefined;
+  return createYahooDataProvider(new YahooFinanceProvider(ctx.env), ctx.env, {
+    capture: {
+      sql: ctx.sql,
+      blobStorage: ctx.blobStorage,
+      env: ctx.env,
+      capturePort: ctx.capturePort,
+    },
+  });
+}
+
+/**
+ * The provider's feed block for the list/detail views: null when
+ * no job is registered for the provider; a "not-configured"
+ * state when no dataset store is wired; otherwise the live
+ * status view (last run, rows persisted, snapshot age, the
+ * never-run state before the first run).
+ */
+async function feedViewFor(
+  ctx: DataProviderRoutesContext,
+  providerId: DataProviderId,
+): Promise<unknown> {
+  const def = feedRegistryFor(ctx).forSource(providerId);
+  if (!def) return null;
+  const store = feedDatasetStoreFor(ctx);
+  if (!store) {
+    return {
+      jobId: def.id,
+      sourceId: def.sourceId,
+      dataset: def.dataset,
+      elements: [...def.elements],
+      universeLabel: def.universe.label,
+      cadenceMinutes: def.cadenceMinutes,
+      staleAfterMinutes: def.staleAfterMinutes,
+      state: "not-configured",
+      lastRun: null,
+      snapshot: null,
+    };
+  }
+  return buildFeedStatus(store, def, Date.now());
+}
+
 export async function handleDataProviderRoutes(
   request: Request,
   url: URL,
@@ -293,12 +419,14 @@ export async function handleDataProviderRoutes(
   sessionId: string,
   ctx: DataProviderRoutesContext
 ): Promise<Response | null> {
-  void url;
   void sessionId;
   const isList = path === "/data-providers" || path === "/data-providers/";
   const oneMatch = path.match(/^\/data-providers\/([^/]+)$/);
   const actionMatch = path.match(/^\/data-providers\/([^/]+)\/([a-z]+)$/);
-  if (!isList && !oneMatch && !actionMatch) return null;
+  // #3530 S1: the feed-run action carries a hyphen, so it needs
+  // its own match (the lifecycle action regex is [a-z]+ only).
+  const feedRunMatch = path.match(/^\/data-providers\/([^/]+)\/feed-run$/);
+  if (!isList && !oneMatch && !actionMatch && !feedRunMatch) return null;
 
   try {
     // ---- reads ----
@@ -323,8 +451,15 @@ export async function handleDataProviderRoutes(
       const routeViews = routeServability(registry, configs, routes);
       return Response.json({
         providers: await Promise.all(
-          configs.map((c) =>
-            providerView(registry, c, routeViews, ctx.sql, ctx.capturePort)
+          configs.map(async (c) =>
+            providerView(
+              registry,
+              c,
+              routeViews,
+              ctx.sql,
+              ctx.capturePort,
+              await feedViewFor(ctx, c.id),
+            )
           )
         ),
         routes: routeViews,
@@ -341,11 +476,113 @@ export async function handleDataProviderRoutes(
       const registry = buildPlatformRegistry(ctx);
       const routeViews = routeServability(registry, configs, routes);
       return Response.json({
-        provider: await providerView(registry, record, routeViews, ctx.sql, ctx.capturePort),
+        provider: await providerView(
+          registry,
+          record,
+          routeViews,
+          ctx.sql,
+          ctx.capturePort,
+          await feedViewFor(ctx, record.id),
+        ),
         routes: routeViews.filter(
           (r) => r.primaryProviderId === id || r.gapFillProviderId === id
         ),
       });
+    }
+
+    // #3530 S1 — the local-copy read: the persisted dataset, with
+    // age + provenance. Served ONLY from the store; a read never
+    // fetches (the read path has no provider in its inputs).
+    if (request.method === "GET" && actionMatch && actionMatch[2] === "feed") {
+      const id = decodeURIComponent(actionMatch[1]) as DataProviderId;
+      const def = feedRegistryFor(ctx).forSource(id);
+      if (!def) {
+        return Response.json(
+          {
+            error: `No feed job is registered for provider "${id}".`,
+            code: FEED_JOB_CODES.jobNotFound,
+          },
+          { status: 404 },
+        );
+      }
+      const feed = await feedViewFor(ctx, id);
+      const store = feedDatasetStoreFor(ctx);
+      const symbolsParam = url.searchParams.get("symbols");
+      let quotes: unknown = null;
+      if (store && symbolsParam !== null) {
+        const maxAgeRaw = url.searchParams.get("maxAgeSeconds");
+        const maxAgeSeconds =
+          maxAgeRaw !== null && Number.isFinite(Number(maxAgeRaw))
+            ? Number(maxAgeRaw)
+            : undefined;
+        quotes = await readFeedQuotes(store, {
+          sourceId: def.sourceId,
+          dataset: def.dataset,
+          symbols: symbolsParam
+            .split(",")
+            .map((s) => s.trim())
+            .filter((s) => s.length > 0),
+          ...(maxAgeSeconds !== undefined ? { maxAgeSeconds } : {}),
+          nowMs: Date.now(),
+        });
+      }
+      return Response.json({ feed, quotes });
+    }
+
+    // #3530 S1 — run the provider's feed job now. A mutation:
+    // same session gate as the lifecycle actions below.
+    if (request.method === "POST" && feedRunMatch) {
+      if (!ctx.userLogin) {
+        return Response.json(
+          { error: "A verified session is required to run a feed job." },
+          { status: 401 },
+        );
+      }
+      const id = decodeURIComponent(feedRunMatch[1]) as DataProviderId;
+      const registry = feedRegistryFor(ctx);
+      const def = registry.forSource(id);
+      if (!def) {
+        return Response.json(
+          {
+            error: `No feed job is registered for provider "${id}".`,
+            code: FEED_JOB_CODES.jobNotFound,
+          },
+          { status: 404 },
+        );
+      }
+      const store = feedDatasetStoreFor(ctx);
+      const universeStore = feedUniverseStoreFor(ctx);
+      const provider = ctx.feedProviderFor
+        ? ctx.feedProviderFor(def)
+        : defaultFeedProvider(ctx, def);
+      if (!store || !universeStore || !provider) {
+        return Response.json(
+          {
+            error:
+              "Feed-job wiring is incomplete on this host (dataset store, universe store, or provider missing); the run was refused rather than fetching through an unwired path.",
+            code: "FEED_JOB_NOT_CONFIGURED",
+          },
+          { status: 500 },
+        );
+      }
+      const run = await runFeedJob(
+        registry,
+        { provider, universeStore, datasetStore: store },
+        def.id,
+        { trigger: "manual", userLogin: ctx.userLogin },
+      );
+      ctx.recordAudit("data_provider.feed_run", "orchestrator", {
+        actor: ctx.userLogin,
+        providerId: id,
+        jobId: def.id,
+        runId: run.runId,
+        status: run.status,
+        requested: run.requested,
+        received: run.received,
+        failed: run.failed,
+        codedError: run.codedError,
+      });
+      return Response.json({ run, feed: await buildFeedStatus(store, def, Date.now()) });
     }
 
     // ---- mutations ----
