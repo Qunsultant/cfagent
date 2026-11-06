@@ -120,6 +120,13 @@ export interface SubscriptionView {
   periodStartMs: number;
   periodEndMs: number;
   canceledAtMs?: number | null;
+  /**
+   * Issue #2669 (2.14): present when the row is Billing-managed
+   * (provider-canceled by Stripe); absent/null for native repurchase
+   * rows. The GET /subscription route already returns it; the client
+   * type just declares it so the UI can distinguish the two kinds.
+   */
+  providerSubscriptionId?: string | null;
 }
 
 export interface SubscriptionStatusView {
@@ -248,8 +255,18 @@ export const subscriptionPurchase = (body: {
   checkoutSessionId: string;
 }): Promise<{ subscription: SubscriptionView; account: CommercialAccountView; effectiveTier: string }> =>
   post("/subscription/purchase", body);
-export const subscriptionCancel = (): Promise<{ userId: string; canceled: SubscriptionView[]; accessThroughMs: number | null }> =>
-  post("/subscription/cancel", {});
+export const subscriptionCancel = (): Promise<{
+  userId: string;
+  canceled: SubscriptionView[];
+  accessThroughMs: number | null;
+  /**
+   * Issue #2669 (2.14): the timing the server applied, from the 2.7
+   * operator billing policy — period_end keeps access to period end,
+   * immediate truncates it now. The UI reports the outcome per this
+   * value instead of asserting one timing unconditionally.
+   */
+  downgradeTiming: "period_end" | "immediate";
+}> => post("/subscription/cancel", {});
 /**
  * Issue #3243 — start a $0 trial subscription (no payment taken).
  * The server creates a trialing row and grants the plan's
