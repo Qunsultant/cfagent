@@ -262,7 +262,7 @@ describe("Issue #120: Browser Agent honesty", () => {
         APP_BASE_URL: "https://agent.openaimp.com",
         ETRADE_ENVIRONMENT: "sandbox",
         SLACK_SIGNING_SECRET: "test_secret",
-        SEARCH_AGENT: {} as any,
+        ORCHESTRATOR_AGENT: {} as any,
       } as any;
 
       // Issue #1262 Phase 2: the retired SlackAgent.handleSlashCommand
