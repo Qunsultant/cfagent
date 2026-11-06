@@ -81,7 +81,9 @@ describe("S0-P01 worker crons (B-T1-01/02/03): exactly three triggers in wrangle
   });
 
   it("dispatches on event.cron for exactly those three expressions in scheduled()", () => {
-    const server = read("src/server.ts");
+    // Slice 8 of #2902 moves scheduled() from server.ts to
+    // src/server/routes/queue.ts; the entry surface is both files.
+    const server = read("src/server.ts") + read("src/server/routes/queue.ts");
     for (const cron of ["0 3 * * *", "*/30 * * * *", "0 4 * * *"]) {
       expect(server).toContain(`event?.cron === "${cron}"`);
     }
@@ -385,7 +387,9 @@ describe("S0-P16 goal store (B-T3-07): eight shipped goals, social post disabled
 
 describe("S0-P17 worker cron duties (B-T1-01/02): renewal runs either way, tick fans out", () => {
   it("pins renewal, the tick fan-out, and the provisioning gate", () => {
-    const server = read("src/server.ts");
+    // Slice 8 of #2902 moves scheduled() from server.ts to
+    // src/server/routes/queue.ts; the entry surface is both files.
+    const server = read("src/server.ts") + read("src/server/routes/queue.ts");
     expect(server).toContain("renewAllStoredETradeTokens");
     expect(server).toContain("schedAgent.onCron()");
     for (const route of [

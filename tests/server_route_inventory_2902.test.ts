@@ -100,6 +100,27 @@
  *   existing `import { PREMIUM_GATEWAY_INSTANCE } from "../src/server"`
  *   keeps working.
  *
+ * Slice 8 decisions recorded here:
+ * - Queue / scheduled consumers live in src/server/routes/queue.ts as
+ *   two handlers: handleScheduledEvent (the every-30-minutes tick,
+ *   03:00 UTC token renewal, 04:00 UTC retention) and
+ *   handleQueueBatch (screener-events-delivery, screener-events,
+ *   options_analysis fallthrough), plus the module-level dedup sets
+ *   and the shared dispatchOptionsAnalysisQueueWork helper. They are
+ *   NOT HTTP routes: the 148-descriptor EXPECTED list is unchanged,
+ *   and the delegation-order assertion below stays at the nineteen
+ *   handleFetch delegations (scheduled/queue are default-export
+ *   members, not handleFetch delegations). Q4 is answered here:
+ *   the consumer wiring moves as one queue module, not split across
+ *   messaging/trading route modules; ownership stays with the domain
+ *   ports it calls (screener-events → Messaging, options_analysis
+ *   dispatch → Trading schedule surface, stage executors → owning
+ *   ScreenerAgent DO, scheduled tick cross-domain by design).
+ * - ensureBreakerDurability moves to src/server/routes/core.ts
+ *   (contract §2.5 Core prelude) so fetch and the queue/scheduled
+ *   handlers can all call it without a server.ts cycle; it is still
+ *   called at the top of fetch, scheduled, and queue.
+ *
  * Slice 5 decisions recorded here:
  * - Trading & market live in src/server/routes/trading.ts as four
  *   handlers in dispatch order: handleTradingScheduleRoutes
@@ -600,6 +621,15 @@ const fetchWorker = async (path: string, method = "GET") => {
 };
 
 describe("core dispatch smoke (#2902 Slice 2)", () => {
+  it("default export still exposes the email/scheduled/queue entry points (Slice 8)", () => {
+    // Slice 8 moves the scheduled/queue bodies to routes/queue.ts; the
+    // entry keeps one-line delegations, so the shape wrangler invokes
+    // (fetch + email + scheduled + queue) is unchanged.
+    expect(typeof (worker as unknown as { email: unknown }).email).toBe("function");
+    expect(typeof (worker as unknown as { scheduled: unknown }).scheduled).toBe("function");
+    expect(typeof (worker as unknown as { queue: unknown }).queue).toBe("function");
+  });
+
   it("GET /health and /api/health are public and healthy", async () => {
     for (const p of ["/health", "/api/health"]) {
       const res = await fetchWorker(p);

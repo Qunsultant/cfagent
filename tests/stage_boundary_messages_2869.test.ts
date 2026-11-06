@@ -168,7 +168,9 @@ describe("runScreenInner wiring", () => {
 
 describe("server queue routing", () => {
   it("routes boundary messages to the owning agent recorder, not the undecodable drop", () => {
-    const src = readFileSync("src/server.ts", "utf8");
+    // Slice 8 of #2902 moves the queue handler from server.ts to
+    // src/server/routes/queue.ts; the entry surface is both files.
+    const src = readFileSync("src/server.ts", "utf8") + readFileSync("src/server/routes/queue.ts", "utf8");
     expect(src).toContain("isStageBoundaryMessage(msg.body)");
     expect(src).toContain("recordQueuedStageBoundary(");
   });

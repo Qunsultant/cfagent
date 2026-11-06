@@ -70,9 +70,15 @@ describe("entry-point enumeration (#756)", () => {
       .map((f) => f.rel)
       .sort();
     expect(v2Callers).toEqual(["agents/routes/screenerResearch.ts"]);
-    // server.ts dispatches the route over HTTP; it names the path, not the function.
-    const server = prodFiles.find((f) => f.rel === "server.ts");
-    expect(server?.text).toContain("/adaptation/weights/run");
+    // The entry dispatches the route over HTTP; it names the path, not
+    // the function. Slice 8 of #2902 moves the scheduled tick from
+    // server.ts to src/server/routes/queue.ts, so the entry surface is
+    // both files.
+    const entry = prodFiles
+      .filter((f) => f.rel === "server.ts" || f.rel === "server/routes/queue.ts")
+      .map((f) => f.text)
+      .join("\n");
+    expect(entry).toContain("/adaptation/weights/run");
   });
 
   it("no production code writes the kill-switch key (resume is operator-only)", () => {
