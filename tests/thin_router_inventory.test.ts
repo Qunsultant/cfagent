@@ -336,6 +336,12 @@
  * last, after the schedules handler, before the Not-found
  * fallthrough) — bringing the pinned inventory to 369 entries
  * (measured: 367 + 2) and the delegation sequence to 51 calls.
+ *
+ * Issue #3261 added two — GET/POST /platform/accounts/profile (in
+ * handlePlatformAccountRoutes, after the onboarding-state conditions
+ * in source order) — bringing the pinned inventory to 403 entries
+ * (measured: 401 + 2); the delegation sequence is unchanged (same
+ * handler, same position).
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -616,6 +622,11 @@ const EXPECTED_INVENTORY = [
   // handlePlatformAccountRoutes, after lookup in source order).
   "handlePlatformAccountRoutes :: endsWith(\"/platform/onboarding/state\")",
   "handlePlatformAccountRoutes :: endsWith(\"/platform/onboarding/state\")",
+  // Issue #3261 added two — GET/POST /platform/accounts/profile (in
+  // handlePlatformAccountRoutes, after the onboarding-state conditions
+  // in source order).
+  "handlePlatformAccountRoutes :: endsWith(\"/platform/accounts/profile\")",
+  "handlePlatformAccountRoutes :: endsWith(\"/platform/accounts/profile\")",
   "handlePlatformChannelRoutes :: includes(\"/platform-channels/\")",
   "handlePremiumRoutes :: includes(\"/premium/options-scan\")",
   "handlePremiumRoutes :: includes(\"/premium/market-research\")",
