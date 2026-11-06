@@ -25,7 +25,7 @@ vi.mock("agents", () => ({
 
 vi.mock("../src/orchestrate", () => ({
   OPERATION_CATALOG: [
-    { agent: "search", binding: "SEARCH_AGENT", operations: ["search.query"], blurb: "" },
+    { agent: "search", binding: "ORCHESTRATOR_AGENT", operations: ["search.query"], blurb: "" },
     {
       agent: "social",
       binding: "SCHEDULED_AGENT",
@@ -191,7 +191,7 @@ describe("ScheduledAgent DO RPC boundary (#1391)", () => {
       // configured service identity; without it the check fails closed
       // and the goal never fires.
       SERVICE_USER_LOGIN: "test_service",
-      SEARCH_AGENT: {
+      ORCHESTRATOR_AGENT: {
         idFromName: () => "search",
         get: () => ({
           fetch: async () => Response.json({ state: { dailySpend: [], seenKeys: [] } }),
