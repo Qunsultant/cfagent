@@ -2,13 +2,18 @@
  * Issue #2120 (slice 1): thin REST routes for the Search hub.
  *
  * Two POST routes, no new envelope, no new store, no new binding:
- * - POST /search/agent -> AiSearchInstanceService.searchFinancialDocs
- *   (service-native AISearchQueryResponse: query/results/totalMatches/
- *   provider/timestamp, plus `degraded` when the live index did not
- *   serve). Since #1169 S3 the service has no fallback corpus: an
- *   unserved query returns zero results with an in-band `degraded`
- *   reason, and the tab renders that degraded state as a visible
- *   notice — never as silent emptiness or substitute rows.
+ * - POST /search/agent -> the AiSearchAgent through its Durable
+ *   Object door since #3342 (formerly AiSearchInstanceService over
+ *   the public endpoint — the REST transport was retired and
+ *   AI_SEARCH_ENDPOINT deleted). The response keeps the
+ *   service-native AISearchQueryResponse shape (query/results/
+ *   totalMatches/provider/timestamp, plus `degraded` when the live
+ *   index did not serve), shaped by the one mapping the MCP command
+ *   shares (aiSearchAgentResultToQueryResponse). Since #1169 S3
+ *   there is no fallback corpus anywhere: an unserved query returns
+ *   zero results with an in-band `degraded` reason, and the tab
+ *   renders that degraded state as a visible notice — never as
+ *   silent emptiness or substitute rows.
  * - POST /search/knowledge -> searchPlatformKnowledge, PLATFORM MODE
  *   ONLY: the catalog function is called directly, with no AI-endpoint
  *   attempt and no blend, so agent chunks and catalog entries never
@@ -53,7 +58,8 @@
  * route shapes from the same typed runner result
  * (AiSearchAgentSearchResult) the command shapes from.
  */
-import { AiSearchInstanceService } from "../../services/aiSearch";
+import type { AISearchQueryResponse } from "../../services/aiSearch";
+import { aiSearchAgentResultToQueryResponse } from "../aiSearchPaths";
 import { searchPlatformKnowledge } from "../../services/platformKnowledge";
 import { unauthenticatedResponse } from "./routeIdentity";
 import { createMAS, type MASOptions } from "../mas";
@@ -136,9 +142,40 @@ export async function handleSearchHubRoutes(
       return Response.json({ error: "Query parameter is required" }, { status: 400 });
     }
     const limit = typeof body.limit === "number" && body.limit > 0 ? body.limit : 5;
-    const service = new AiSearchInstanceService(ctx.env);
-    const result = await service.searchFinancialDocs(query, limit);
-    return Response.json(result);
+    // Issue #3342: this route served the public endpoint through
+    // AiSearchInstanceService; with the REST transport retired it
+    // dispatches through the AiSearchAgent's Durable Object door
+    // (the same door /search/ai-agent uses: fixed service instance,
+    // the ROUTE's session login threaded as callerLogin — a body
+    // login is never read) and shapes the typed result into the
+    // service-native AISearchQueryResponse contract the
+    // SearchAgentTab renders, via the one mapping the MCP command
+    // shares. An absent binding answers the degraded contract
+    // in-band (endpoint_not_configured, zero results), exactly the
+    // answer the unconfigured service used to give.
+    const namespace = (ctx.env as any)?.AI_SEARCH_AGENT as
+      | DurableObjectNamespace
+      | undefined;
+    if (
+      !namespace ||
+      typeof namespace.get !== "function" ||
+      typeof namespace.idFromName !== "function"
+    ) {
+      const answer: AISearchQueryResponse = {
+        query,
+        results: [],
+        totalMatches: 0,
+        provider: "cloudflare_ai_search",
+        timestamp: new Date().toISOString(),
+        degraded: "endpoint_not_configured",
+      };
+      return Response.json(answer);
+    }
+    const stub = namespace.get(
+      namespace.idFromName(AI_SEARCH_AGENT_SERVICE_INSTANCE),
+    ) as unknown as AiSearchAgentStubLike;
+    const result = await stub.search(query, { callerLogin: login, limit });
+    return Response.json(aiSearchAgentResultToQueryResponse(query, result));
   }
 
   if (path.endsWith("/search/knowledge") && request.method === "POST") {
