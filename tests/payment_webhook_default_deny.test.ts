@@ -99,7 +99,7 @@ const makeEnv = (overrides: Record<string, unknown> = {}): Env =>
   ({
     AI: {} as any,
     AI_SEARCH_ENDPOINT: "https://mock.search",
-    SEARCH_AGENT: {} as any,
+    ORCHESTRATOR_AGENT: {} as any,
     AGENT_SESSIONS: {} as any,
     STRIPE_SECRET_KEY: "sk_test_mock",
     STRIPE_WEBHOOK_SECRET: STRIPE_WH_SECRET,
