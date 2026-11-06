@@ -370,6 +370,38 @@ export const agentOnboardingState = sqliteTable("agent_onboarding_state", {
 });
 
 /**
+ * Issue #3261 — user profile: display name + phone, one row per
+ * verified login. A dedicated table, not columns on the commercial
+ * accounts row, so billing upserts can never clobber profile
+ * fields. Phone is an UNVERIFIED contact field, never used for
+ * auth or recovery. No email column: email change touches IAAA /
+ * session / auth and needs CISO review first (#3261 comment
+ * 6681436382, refs #945). This schema MAPS the table; DDL
+ * authority lives in migration 0050 (src/data/migrationRunner.ts).
+ */
+export const agentUserProfiles = sqliteTable("agent_user_profiles", {
+  userLogin: text("user_login").primaryKey(),
+  displayName: text("display_name"),
+  phone: text("phone"),
+  updatedAtMs: integer("updated_at_ms").notNull(),
+});
+
+/**
+ * Profile idempotency keys (#3261, standards §7.2 Idempotent
+ * Receiver). One row per save attempt, keyed globally by the
+ * client-supplied key: a replayed key is a duplicate, for any
+ * login. This schema MAPS the table; DDL authority lives in
+ * migration 0050 (src/data/migrationRunner.ts). Keys carry
+ * createdAtMs but have no expiry/cleanup in this slice — a
+ * cleanup window is a follow-up on #3261.
+ */
+export const agentProfileIdempotencyKeys = sqliteTable("agent_profile_idempotency_keys", {
+  idempotencyKey: text("idempotency_key").primaryKey(),
+  userLogin: text("user_login").notNull(),
+  createdAtMs: integer("created_at_ms").notNull(),
+});
+
+/**
  * Free-run allowance per family (#3305, sub-issue of #3241). One
  * row per screener family with the current allowance (runs per
  * UTC calendar month), operator data seeded at 10. This schema
