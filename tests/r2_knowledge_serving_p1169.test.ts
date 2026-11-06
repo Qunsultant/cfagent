@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { readFileSync } from "node:fs";
 import {
   AiSearchInstanceService,
-  ETradeAISearchService,
   mapAiSearchChunks,
   AiSearchMappingError,
 } from "../src/services/aiSearch";
@@ -50,6 +50,17 @@ import { createMAS } from "../src/agents/mas";
  * full failure matrix. G1 (two hardcoded score: 1.0 in
  * src/mcps/openaimp/commands.ts:120 and :150) is
  * untouched by S2 and named for S3.
+ *
+ * #3342 UPDATE (2026-11-06): the service's REST transport is
+ * retired — AiSearchInstanceService is a deprecated shim that
+ * never fetches, AI_SEARCH_ENDPOINT is deleted, and every consumer
+ * reads the namespace binding. The pins that asserted the
+ * transport (fetch URL/mechanics, fetch-through-service goldens,
+ * the fetch failure matrix, the #3322 alias identity) were adapted
+ * or retired in place, each marked inline; the mapping pins
+ * (pure mapAiSearchChunks) and the corpus serving/seed pins are
+ * untouched, and the migration contract is pinned in
+ * tests/ai_search_rest_migration_p3342.test.ts.
  *
  * CROSS-CUTTING (user directive 2026-10-25, agentic-SaaS aspects):
  * - Typed errors: AiSearchMappingError (extends the aspects
@@ -153,13 +164,22 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("#3322 broker-neutral service name", () => {
-  it("the deprecated ETradeAISearchService alias resolves to the same class as AiSearchInstanceService", () => {
-    // Pure rename (issue #3322): the old name survives one step as a
-    // compatibility alias and must BE the renamed class — identical
-    // reference, not a subclass or wrapper — so every pre-rename
-    // caller keeps the exact same behaviour.
-    expect(ETradeAISearchService).toBe(AiSearchInstanceService);
+describe("#3322 broker-neutral service name (alias retired by #3342)", () => {
+  it("the ETradeAISearchService alias is gone; AiSearchInstanceService remains as the deprecated shim", () => {
+    // #3322 renamed the class and kept the old name one step as a
+    // compatibility alias; #3342 retires the alias with the REST
+    // transport it served (the issue's own sequencing). The class
+    // itself stays importable as the deprecated shim whose
+    // deprecation names its successor (gitops §22 / Policy Gate
+    // check (j) are phrase-mechanical, so the pin reads the source).
+    const source = readFileSync(
+      new URL("../src/services/aiSearch.ts", import.meta.url),
+      "utf8"
+    );
+    expect(source).not.toContain("ETradeAISearchService");
+    expect(source).toContain("AiSearchInstanceService");
+    expect(source).toContain("@deprecated");
+    expect(source).toContain("superseded by");
   });
 });
 
@@ -261,45 +281,23 @@ function stubUpstreamFetch(chunks: unknown[], ok = true, status = 200) {
   }));
 }
 
-describe("#1169 S2 service mapping (flag-gated, endpoint stubbed)", () => {
-  it("flag-OFF service response deep-equals today's mapping (golden)", async () => {
-    vi.stubGlobal("fetch", stubUpstreamFetch([SCORED_CAT, SCORELESS]));
-    const svc = new AiSearchInstanceService({ AI_SEARCH_ENDPOINT: "https://search.example.test" } as any);
-    const res = await svc.searchFinancialDocs("broker rules", 5);
-    expect(res.provider).toBe("cloudflare_ai_search");
-    expect(res.results).toEqual([
-      { id: "doc-1", title: "Doc One", snippet: "snip", url: "https://example.com/doc", score: 0.73, category: "sec_filing" },
-      { id: "doc-2", title: "Doc Two", snippet: "snip", url: CORPUS_KEY, score: 0.9, category: "sec_filing" },
-    ]);
-  });
-
-  it("flag-ON service response carries true score/category + provenance", async () => {
-    vi.stubGlobal("fetch", stubUpstreamFetch([SCORED_CAT]));
-    const svc = new AiSearchInstanceService({
-      AI_SEARCH_ENDPOINT: "https://search.example.test",
-      KNOWLEDGE_SERVING_ENABLED: "1",
-    } as any);
-    const res = await svc.searchFinancialDocs("broker rules", 5);
-    expect(res.results).toEqual([
-      {
-        id: "doc-1",
-        title: "Doc One",
-        snippet: "snip",
-        url: "https://example.com/doc",
-        score: 0.73,
-        category: "broker_rules",
-        bucketKey: CORPUS_KEY,
-        servedFileLink: `/api/knowledge/file?key=${encodeURIComponent(CORPUS_KEY)}`,
-        indexingState: "indexed",
-      },
-    ]);
-  });
+describe("#1169 S2 service mapping (retired transport — #3342)", () => {
+  // Retired by #3342: the two fetch-through-service golden tests
+  // that lived here (flag-OFF deep-equals, flag-ON provenance)
+  // pinned the service's REST transport end-to-end. The transport
+  // is gone; the MAPPING they verified is pinned unchanged by the
+  // pure mapAiSearchChunks describes above (flag-OFF golden,
+  // flag-ON score/category/provenance), which never needed the
+  // fetch. What remains of the service contract is the shim's
+  // degraded answer, pinned by the two tests below and by
+  // tests/ai_search_rest_migration_p3342.test.ts.
 
   it("flag-ON with no endpoint returns the degraded contract (S3: fallback removed)", async () => {
     // Adapted by #1169 S3 (user directive 2026-11-04): this pin
     // asserted the fallback verbatim; the fallback is removed, so
     // the pin now asserts the honest degraded contract at greater
-    // strength (reason + zero results + honest provider).
+    // strength (reason + zero results + honest provider). Against
+    // the #3342 shim this is also the ONLY answer the class gives.
     const svc = new AiSearchInstanceService({ KNOWLEDGE_SERVING_ENABLED: "1" } as any);
     const res = await svc.searchFinancialDocs("nvidia 10k", 5);
     expect(res.provider).toBe("cloudflare_ai_search");
@@ -308,85 +306,34 @@ describe("#1169 S2 service mapping (flag-gated, endpoint stubbed)", () => {
     expect(res.totalMatches).toBe(0);
   });
 
-  it("flag-ON with a failed endpoint returns the degraded contract (S3: fallback removed)", async () => {
-    // Adapted by #1169 S3: was "still returns the fallback verbatim"
-    // (provider semantic_cache on a 502). Now the degraded contract.
-    vi.stubGlobal("fetch", stubUpstreamFetch([], false, 502));
+  it("endpoint configured + fetch stubbed: still endpoint_not_configured, fetch never called (transport retired)", async () => {
+    // Adapted by #3342 (was: "flag-ON with a failed endpoint
+    // returns upstream_http_error"). There is no endpoint leg left
+    // to fail: the shim ignores the legacy var entirely, so even a
+    // stubbed 502 upstream is never consulted.
+    const fetchMock = stubUpstreamFetch([], false, 502);
+    vi.stubGlobal("fetch", fetchMock);
     const svc = new AiSearchInstanceService({
       AI_SEARCH_ENDPOINT: "https://search.example.test",
       KNOWLEDGE_SERVING_ENABLED: "1",
     } as any);
     const res = await svc.searchFinancialDocs("nvidia 10k", 5);
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(res.provider).toBe("cloudflare_ai_search");
-    expect(res.degraded).toBe("upstream_http_error");
+    expect(res.degraded).toBe("endpoint_not_configured");
     expect(res.results).toEqual([]);
     expect(res.totalMatches).toBe(0);
   });
 });
 
-describe("#1169 searchFinancialDocs primary search path", () => {
-  it("calls the primary fetch with a URL ending in /search", async () => {
-    const fetchMock = vi.fn(async (_url: string) => ({
-      ok: true,
-      status: 200,
-      json: async () => ({ success: true, result: { chunks: [SCORED_CAT] } }),
-    }));
-    vi.stubGlobal("fetch", fetchMock);
-    const svc = new AiSearchInstanceService({ AI_SEARCH_ENDPOINT: "https://search.example.test" } as any);
-
-    await svc.searchFinancialDocs("broker rules", 5);
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0][0]).toBe("https://search.example.test/search");
-    expect(fetchMock.mock.calls[0][0]).toMatch(/\/search$/);
-  });
-
-  it("uses cloudflare_ai_search and mapped results when /search succeeds, not the fallback", async () => {
-    const fetchMock = vi.fn(async (url: string) => {
-      if (!url.endsWith("/search")) {
-        return {
-          ok: false,
-          status: 302,
-          json: async () => {
-            throw new SyntaxError("Unexpected end of JSON input");
-          },
-        };
-      }
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({ success: true, result: { chunks: [SCORED_CAT] } }),
-      };
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    const svc = new AiSearchInstanceService({ AI_SEARCH_ENDPOINT: "https://search.example.test" } as any);
-
-    const res = await svc.searchFinancialDocs("broker rules", 5);
-
-    expect(res.provider).toBe("cloudflare_ai_search");
-    expect(res.provider).not.toBe("semantic_cache");
-    expect(res.totalMatches).toBe(1);
-    expect(res.results).toEqual([
-      { id: "doc-1", title: "Doc One", snippet: "snip", url: "https://example.com/doc", score: 0.73, category: "sec_filing" },
-    ]);
-  });
-
-  it("normalizes a trailing slash so the URL has exactly one /search suffix", async () => {
-    const fetchMock = vi.fn(async (_url: string) => ({
-      ok: true,
-      status: 200,
-      json: async () => ({ success: true, result: { chunks: [SCORED_CAT] } }),
-    }));
-    vi.stubGlobal("fetch", fetchMock);
-    const svc = new AiSearchInstanceService({ AI_SEARCH_ENDPOINT: "https://search.example.test/" } as any);
-
-    await svc.searchFinancialDocs("broker rules", 5);
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0][0]).toBe("https://search.example.test/search");
-    expect(fetchMock.mock.calls[0][0]).not.toContain(".test//search");
-  });
-});
+// Retired by #3342: the "#1169 searchFinancialDocs primary search
+// path" describe pinned the retired transport's fetch mechanics
+// (URL ends in /search, trailing-slash normalization, success
+// mapping through the fetch). The URL pins have no post-retirement
+// equivalent — there is no fetch — and the success mapping is
+// pinned by the pure mapAiSearchChunks describes above. The
+// fetch-never-called half of the contract is pinned by the
+// retired-transport test directly above.
 
 describe("#1169 S2 serving route GET /knowledge/file", () => {
   let storage: ReturnType<typeof makeStorage>;
@@ -494,12 +441,28 @@ describe("#1169 S2 serving route GET /knowledge/file", () => {
 });
 
 describe("#1169 S2 MAS provenance (flag-gated)", () => {
-  const masEnv = (flag?: string) => ({
-    AI_SEARCH_ENDPOINT: "https://search.example.test",
+  // #3342: the tool's index leg reads the namespace binding. The
+  // fake binding serves REST-shaped chunks (the binding adaptation
+  // passes them through unchanged) or throws the way an unavailable
+  // instance surfaces through the binding RPC. The provenance and
+  // failure-shape assertions below are unchanged from the fetch era.
+  const masEnv = (
+    flag: string | undefined,
+    behaviour: { chunks: unknown[] } | { throwMessage: string }
+  ) => ({
+    AI_SEARCH_INSTANCE: "screener-search",
+    AI_SEARCH: {
+      get: (_name: string) => ({
+        search: async () => {
+          if ("throwMessage" in behaviour) throw new Error(behaviour.throwMessage);
+          return { chunks: behaviour.chunks };
+        },
+      }),
+    },
     ...(flag !== undefined ? { KNOWLEDGE_SERVING_ENABLED: flag } : {}),
   });
-  const masOpts = (flag: string | undefined, sessionId: string) => ({
-    env: masEnv(flag) as any,
+  const masOpts = (env: unknown, sessionId: string) => ({
+    env: env as any,
     sessionId,
     requestId: "req-1",
     sql: { exec: () => [] as unknown as Iterable<unknown> },
@@ -507,8 +470,7 @@ describe("#1169 S2 MAS provenance (flag-gated)", () => {
   });
 
   it("flag-OFF passes upstream chunks through verbatim (today's shape)", async () => {
-    vi.stubGlobal("fetch", stubUpstreamFetch([SCORED_CAT]));
-    const mas: any = createMAS(masOpts(undefined, "sess-off-1"));
+    const mas: any = createMAS(masOpts(masEnv(undefined, { chunks: [SCORED_CAT] }), "sess-off-1"));
     const res = await mas.searchKnowledge.execute({ query: "broker rules" });
     expect(res.chunks).toHaveLength(1);
     expect(res.chunks[0]).toEqual(SCORED_CAT);
@@ -517,8 +479,7 @@ describe("#1169 S2 MAS provenance (flag-gated)", () => {
   });
 
   it("flag-ON attaches provenance to corpus-keyed chunks, leaves report chunks alone", async () => {
-    vi.stubGlobal("fetch", stubUpstreamFetch([SCORED_CAT, NON_CORPUS]));
-    const mas: any = createMAS(masOpts("1", "sess-on-1"));
+    const mas: any = createMAS(masOpts(masEnv("1", { chunks: [SCORED_CAT, NON_CORPUS] }), "sess-on-1"));
     const res = await mas.searchKnowledge.execute({ query: "broker rules" });
     expect(res.chunks).toHaveLength(2);
     const [corpus, other] = res.chunks;
@@ -532,11 +493,14 @@ describe("#1169 S2 MAS provenance (flag-gated)", () => {
   });
 
   it("flag-ON keeps honest failure paths unchanged", async () => {
-    vi.stubGlobal("fetch", stubUpstreamFetch([], false, 502));
-    const mas: any = createMAS(masOpts("1", "sess-on-2"));
+    const mas: any = createMAS(masOpts(masEnv("1", { throwMessage: "upstream 502" }), "sess-on-2"));
     const res = await mas.searchKnowledge.execute({ query: "broker rules" });
-    // Today's shape for non-ok + zero reports is { error, query } with no
-    // chunks field at all — the pin asserts that shape, not a chunks: [].
+    // Today's shape for upstream-failure + zero reports is
+    // { error, query } with no chunks field at all — the pin
+    // asserts that shape, not a chunks: []. (#3342: the binding
+    // failure detail stands where the HTTP status stood; the
+    // fixture message carries the 502 so the assertion is the
+    // fetch-era one verbatim.)
     expect(res.error).toMatch(/502/);
     expect(res).not.toHaveProperty("resultsFound");
   });
@@ -623,28 +587,23 @@ describe("#1169 S2 cross-cutting: mapping validation fails visibly (never defaul
     expect((r as any).score).toBe("high");
   });
 
-  it("flag-ON service rethrows instead of degrading (no silent substitution)", async () => {
-    vi.stubGlobal("fetch", stubUpstreamFetch([
-      { key: "knowledge/broker_rules/" + "a".repeat(64), score: "high", item: { id: "d1", metadata: { title: "T", category: "broker_rules" } } },
-    ] as any));
-    const svc = new AiSearchInstanceService({ AI_SEARCH_ENDPOINT: "https://x.test", KNOWLEDGE_SERVING_ENABLED: "1" } as any);
-    await expect(svc.searchFinancialDocs("broker rules", 5)).rejects.toThrowError(AiSearchMappingError);
-    // The rejection is the proof: had the error been swallowed, the
-    // promise would have RESOLVED — as stub results before S3, or as
-    // a degraded response after it — instead of rejecting.
-  });
-
-  it("flag-OFF service returns the degraded contract on endpoint failure (S3: fallback removed for both flag states)", async () => {
-    // Adapted by #1169 S3: was "still falls back on endpoint failure
-    // (behavior unchanged)". The flag gates MAPPING only; the
-    // failure contract is flag-independent after S3.
-    vi.stubGlobal("fetch", stubUpstreamFetch([], false, 502));
-    const svc = new AiSearchInstanceService({ AI_SEARCH_ENDPOINT: "https://x.test" } as any);
-    const res = await svc.searchFinancialDocs("broker rules", 5);
-    expect(res.provider).toBe("cloudflare_ai_search");
-    expect(res.degraded).toBe("upstream_http_error");
-    expect(res.results).toEqual([]);
-  });
+  // Retired by #3342: "flag-ON service rethrows instead of
+  // degrading" pinned that a mapping error on the fetch path
+  // rejects rather than resolving as stub/degraded output. The
+  // fetch path is gone; the no-silent-substitution property now
+  // lives in the mapping itself (the two pure pins directly above:
+  // flag-ON throws AiSearchMappingError naming index + field) and
+  // in the binding consumers' typed outcomes (a failed binding
+  // search surfaces as search_failed / all_paths_failed, never as
+  // fabricated rows — pinned in
+  // tests/ai_search_rest_migration_p3342.test.ts).
+  //
+  // Retired by #3342: "flag-OFF service returns the degraded
+  // contract on endpoint failure" — the endpoint-failure case has
+  // no post-retirement equivalent; the shim's flag-independent
+  // degraded answer (endpoint configured or not, fetch never
+  // consulted) is pinned by the retired-transport test in the
+  // service-mapping describe above.
 });
 
 describe("#1169 S2 cross-cutting: externalized catalog + route logs", () => {
@@ -750,18 +709,6 @@ describe("#1169 S3: honest degraded contract — the built-in fallback corpus is
   afterEach(() => vi.unstubAllGlobals());
 
   const ENDPOINT = "https://search.example.test";
-  const flagOn = () => ({ AI_SEARCH_ENDPOINT: ENDPOINT, KNOWLEDGE_SERVING_ENABLED: "1" });
-
-  const liveChunk = (over: Record<string, unknown> = {}) => ({
-    key: "knowledge/sec_filing/live-1",
-    score: 0.9,
-    snippet: "snippet from the live index",
-    item: {
-      id: "live-1",
-      metadata: { title: "Live index doc", description: "desc", category: "sec_filing" },
-    },
-    ...over,
-  });
 
   it("endpoint unset -> degraded endpoint_not_configured, zero results, no stub rows", async () => {
     const svc = new AiSearchInstanceService({} as any);
@@ -773,91 +720,40 @@ describe("#1169 S3: honest degraded contract — the built-in fallback corpus is
     expect(res.provider).not.toBe("semantic_cache");
   });
 
-  it("upstream fetch throws -> degraded upstream_unreachable, zero results", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => {
-        throw new Error("network down");
-      }),
-    );
+  it("endpoint set + fetch stubbed to throw -> STILL endpoint_not_configured, fetch never called (#3342 transport retired)", async () => {
+    // Replaces the five fetch-failure cases that lived here
+    // (fetch throws -> upstream_unreachable; HTTP 500 ->
+    // upstream_http_error; non-JSON body / JSON without success /
+    // JSON with no chunks array -> upstream_invalid_response):
+    // those degraded reasons classified failures of a transport
+    // that no longer exists. The shim never fetches, so every one
+    // of those worlds now yields the single honest answer for a
+    // retired path — endpoint_not_configured — and the fetch spy
+    // proves the transport is really gone. The reason vocabulary
+    // itself survives on the agent-shaped surfaces
+    // (aiSearchAgentResultToQueryResponse maps runner outcomes
+    // onto it; pinned in
+    // tests/ai_search_rest_migration_p3342.test.ts).
+    const fetchMock = vi.fn(async () => {
+      throw new Error("network down");
+    });
+    vi.stubGlobal("fetch", fetchMock);
     const svc = new AiSearchInstanceService({ AI_SEARCH_ENDPOINT: ENDPOINT } as any);
     const res = await svc.searchFinancialDocs("margin rules");
-    expect(res.degraded).toBe("upstream_unreachable");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(res.degraded).toBe("endpoint_not_configured");
     expect(res.results).toEqual([]);
     expect(res.totalMatches).toBe(0);
     expect(res.provider).not.toBe("semantic_cache");
   });
 
-  it("upstream HTTP 500 -> degraded upstream_http_error, zero results", async () => {
-    vi.stubGlobal("fetch", stubUpstreamFetch([], false, 500));
-    const svc = new AiSearchInstanceService({ AI_SEARCH_ENDPOINT: ENDPOINT } as any);
-    const res = await svc.searchFinancialDocs("margin rules");
-    expect(res.degraded).toBe("upstream_http_error");
-    expect(res.results).toEqual([]);
-    expect(res.totalMatches).toBe(0);
-  });
-
-  it("upstream answers a non-JSON body (redirect to the web UI / HTML) -> degraded upstream_invalid_response", async () => {
-    // The failure mode the 2026-11-04 probe found on the bare
-    // endpoint: an HTTP 302 to the AI Search web UI. fetch follows
-    // redirects, so the service sees an HTML page whose .json()
-    // throws — an invalid response, never data.
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => ({
-        ok: true,
-        status: 200,
-        json: async () => {
-          throw new SyntaxError("Unexpected token '<', \"<html>\" is not valid JSON");
-        },
-      })),
-    );
-    const svc = new AiSearchInstanceService({ AI_SEARCH_ENDPOINT: ENDPOINT } as any);
-    const res = await svc.searchFinancialDocs("margin rules");
-    expect(res.degraded).toBe("upstream_invalid_response");
-    expect(res.results).toEqual([]);
-    expect(res.totalMatches).toBe(0);
-  });
-
-  it("upstream JSON without success -> degraded upstream_invalid_response", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ success: false }) })),
-    );
-    const svc = new AiSearchInstanceService({ AI_SEARCH_ENDPOINT: ENDPOINT } as any);
-    const res = await svc.searchFinancialDocs("margin rules");
-    expect(res.degraded).toBe("upstream_invalid_response");
-    expect(res.results).toEqual([]);
-  });
-
-  it("upstream JSON with success but no chunks array -> degraded upstream_invalid_response", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ success: true, result: {} }) })),
-    );
-    const svc = new AiSearchInstanceService({ AI_SEARCH_ENDPOINT: ENDPOINT } as any);
-    const res = await svc.searchFinancialDocs("margin rules");
-    expect(res.degraded).toBe("upstream_invalid_response");
-    expect(res.results).toEqual([]);
-  });
-
-  it("/search success with chunks: [] -> ok, zero results, NOT degraded (an empty index is not a failure)", async () => {
-    vi.stubGlobal("fetch", stubUpstreamFetch([]));
-    const svc = new AiSearchInstanceService(flagOn() as any);
-    const res = await svc.searchFinancialDocs("unindexed topic");
-    expect(res.degraded).toBeUndefined();
-    expect(res.results).toEqual([]);
-    expect(res.totalMatches).toBe(0);
-    expect(res.provider).toBe("cloudflare_ai_search");
-  });
-
-  it("/search success with chunks -> mapped live results only, NOT degraded", async () => {
-    vi.stubGlobal("fetch", stubUpstreamFetch([liveChunk()]));
-    const svc = new AiSearchInstanceService(flagOn() as any);
-    const res = await svc.searchFinancialDocs("risk disclosure");
-    expect(res.degraded).toBeUndefined();
-    expect(res.results).toHaveLength(1);
-    expect((res.results[0] as { id?: string }).id).toBe("live-1");
-    expect(res.provider).toBe("cloudflare_ai_search");
-  });
+  // Retired by #3342: the two success-path cases that lived here
+  // ("/search success with chunks: [] -> ok, NOT degraded" and
+  // "/search success with chunks -> mapped live results") pinned
+  // the retired transport's served answers. Their contracts live
+  // on at the surviving surfaces: served-empty stays ok (pinned
+  // for the namespace leg in
+  // tests/a2a_aisearch_dispatch_p2223.test.ts) and the chunk
+  // mapping is pinned by the pure mapAiSearchChunks describes
+  // above.
 });
