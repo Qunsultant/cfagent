@@ -7,14 +7,14 @@
  *  - the voice WebSocket route (voice NLQ turns).
  * #815 restores both features honestly: each entry point forwards its
  * persistence-backed work to the owning user's OrchestratorAgent DO —
- * the same SEARCH_AGENT channel every /api route uses — where the
+ * the same ORCHESTRATOR_AGENT channel every /api route uses — where the
  * email/voice services run against the DO's real ORM. The DO-side
  * handlers already exist (POST /trading/email/inbound and
  * POST /trading/voice/turn in src/agents/routes/tradingIntegrations.ts);
  * these pins hold the worker-side wiring:
  *
  *  - An emailed APPROVE acts on the real pending preview: the full chain
- *    worker email export → SEARCH_AGENT forward → DO route → service
+ *    worker email export → ORCHESTRATOR_AGENT forward → DO route → service
  *    transitions the seeded ledger row to "executed".
  *  - The forward is addressed to the worker's established owner
  *    instance — never an instance derived from the (caller-controlled)
@@ -201,7 +201,7 @@ interface ForwardedCall {
 }
 
 /**
- * A SEARCH_AGENT namespace stub whose stub fetch delegates to the REAL
+ * An ORCHESTRATOR_AGENT namespace stub whose stub fetch delegates to the REAL
  * orchestrator trading-integrations route handler, backed by the seeded
  * ORM — the test double for the DO itself. This is what makes the pins
  * integration-level: the worker wiring, the forward, the DO route, the
@@ -309,7 +309,7 @@ describe("issue #815: worker email export routes through the orchestrator DO", (
         }),
       },
     } as unknown as Env;
-    (env as any).SEARCH_AGENT = makeOrchestratorNamespace(orm, env, forwarded);
+    (env as any).ORCHESTRATOR_AGENT = makeOrchestratorNamespace(orm, env, forwarded);
 
     // Phase 5: a bare APPROVE no longer executes — the approval reply
     // quotes the signed link issued for this draft (the preview email
@@ -331,7 +331,7 @@ describe("issue #815: worker email export routes through the orchestrator DO", (
     );
     await (worker as any).email(message, env, {});
 
-    // The persistence work travelled the SEARCH_AGENT channel to the
+    // The persistence work travelled the ORCHESTRATOR_AGENT channel to the
     // DO-side inbound-email route, addressed to the worker's established
     // owner instance — the instance is NOT derived from the
     // caller-controlled sender address. #1262 Phase 1: the forward
@@ -362,11 +362,11 @@ describe("issue #815: worker email export routes through the orchestrator DO", (
       AI_SEARCH_ENDPOINT: "https://ai-search.internal",
       ETRADE_ENVIRONMENT: "sandbox",
       EMAIL_AGENT_ADDRESS: "trade@agent.openaimp.com",
-      // No SEARCH_AGENT binding at all.
+      // No ORCHESTRATOR_AGENT binding at all.
     } as unknown as Env;
 
     const message = rawEmailMessage("human.trader@example.com", "Approval", "APPROVE ord_815_email_2");
-    await expect((worker as any).email(message, env, {})).rejects.toThrow(/SEARCH_AGENT/);
+    await expect((worker as any).email(message, env, {})).rejects.toThrow(/ORCHESTRATOR_AGENT/);
 
     // Nothing fabricated an answer and the row is untouched.
     expect(orm.trades.findById("ord_815_email_2")?.status).toBe("previewed");
@@ -382,7 +382,7 @@ describe("issue #815: worker email export routes through the orchestrator DO", (
       ETRADE_ENVIRONMENT: "sandbox",
       EMAIL_AGENT_ADDRESS: "trade@agent.openaimp.com",
       SERVICE_USER_LOGIN: OWNER_INSTANCE,
-      SEARCH_AGENT: {
+      ORCHESTRATOR_AGENT: {
         idFromName: (name: string) => name,
         get: () => ({ fetch: async () => Response.json({ error: "do unavailable" }, { status: 503 }) }),
       },
@@ -425,7 +425,7 @@ describe("issue #815: voice WebSocket turns route through the orchestrator DO", 
       AI_SEARCH_ENDPOINT: "https://ai-search.internal",
       ETRADE_ENVIRONMENT: "sandbox",
     } as unknown as Env;
-    (env as any).SEARCH_AGENT = makeOrchestratorNamespace(orm, env, forwarded);
+    (env as any).ORCHESTRATOR_AGENT = makeOrchestratorNamespace(orm, env, forwarded);
 
     const ws = new MockDuplexWebSocket();
     const forwardTurn = createOrchestratorVoiceTurnForwarder(env, VOICE_LOGIN);
@@ -458,7 +458,7 @@ describe("issue #815: voice WebSocket turns route through the orchestrator DO", 
       AI_SEARCH_ENDPOINT: "https://ai-search.internal",
       ETRADE_ENVIRONMENT: "sandbox",
     } as unknown as Env;
-    (env as any).SEARCH_AGENT = makeOrchestratorNamespace(orm, env, forwarded);
+    (env as any).ORCHESTRATOR_AGENT = makeOrchestratorNamespace(orm, env, forwarded);
 
     const ws = new MockDuplexWebSocket();
     const forwardTurn = createOrchestratorVoiceTurnForwarder(env, VOICE_LOGIN);
@@ -479,7 +479,7 @@ describe("issue #815: voice WebSocket turns route through the orchestrator DO", 
       APP_BASE_URL: "https://agent.openaimp.com",
       AI_SEARCH_ENDPOINT: "https://ai-search.internal",
       ETRADE_ENVIRONMENT: "sandbox",
-      SEARCH_AGENT: {} as any,
+      ORCHESTRATOR_AGENT: {} as any,
     } as unknown as Env;
 
     const ws = new MockDuplexWebSocket();
@@ -511,7 +511,7 @@ describe("issue #815: source pins — no ORM-less persistence at worker entry po
   it("the worker email handler forwards inbound mail to the orchestrator route instead of processing it ORM-less", () => {
     const emailAgent = readSrc("trading/email/agent.ts");
     expect(emailAgent).toContain("/trading/email/inbound");
-    expect(emailAgent).toContain("SEARCH_AGENT");
+    expect(emailAgent).toContain("ORCHESTRATOR_AGENT");
     // processInboundEmail is DEFINED in this module (the DO-side service
     // method) but never INVOKED here — invocation happens inside the
     // orchestrator via POST /trading/email/inbound.
