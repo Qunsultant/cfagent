@@ -224,12 +224,12 @@
     }
   ],
   "vars": {
-    "AI_SEARCH_ENDPOINT": "https://ebca6b8b-596d-4a06-94f2-aaa0a3eb1323.search.ai.cloudflare.com",
     // Issue #1169 (owner enablement, 2026-11-05): the instance the
-    // namespace path searches. AI_SEARCH_ENDPOINT was re-pointed in
-    // the same change: it previously named a different (web-crawler)
-    // instance, so the REST leg now hits the same screener-search
-    // instance as the namespace path. AI_SEARCH_MCP_ENDPOINT is
+    // namespace path searches. Issue #3342 deleted the former
+    // AI_SEARCH_ENDPOINT var: every consumer migrated onto the
+    // private ai_search_namespaces binding, so the instance's
+    // public endpoint carries no app traffic and the owner can
+    // disable it in the dashboard. AI_SEARCH_MCP_ENDPOINT is
     // deliberately NOT set (owner decision, 2026-11-05): the
     // instance's Public Endpoint is an unauthenticated, shareable
     // URL, so the MCP path stays unconfigured and no traffic uses
