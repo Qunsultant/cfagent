@@ -342,6 +342,12 @@
  * in source order) — bringing the pinned inventory to 403 entries
  * (measured: 401 + 2); the delegation sequence is unchanged (same
  * handler, same position).
+ *
+ * Issue #3527 (S4) added one more — POST
+ * /trading/reports/index-backfill-sweep (in handleReportsRoutes,
+ * after the index-backfill page route) — bringing the pinned
+ * inventory to 404 entries; the delegation sequence is unchanged
+ * (same handler, same position).
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -469,6 +475,7 @@ const EXPECTED_INVENTORY = [
   "handleReportsRoutes :: endsWith(\"/trading/reports/email\")",
   "handleReportsRoutes :: endsWith(\"/trading/reports/webhook\")",
   "handleReportsRoutes :: endsWith(\"/trading/reports/index-backfill\")",
+  "handleReportsRoutes :: endsWith(\"/trading/reports/index-backfill-sweep\")",
   "handleReportsRoutes :: endsWith(\"/reports/research/browse\")",
   // Issue #2534: GET /api/runs/details (in handleReportsRoutes,
   // before /runs so the details path is not swallowed by /runs).
