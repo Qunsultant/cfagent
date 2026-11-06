@@ -65,7 +65,6 @@ import { createBlobStore } from "../../services/blobStoreR2Adapter";
 import {
   runCorpusIntegrityCheck,
   runCorpusSync,
-  runCanonicalIndexBackfillAll,
   shouldFireCorpusSyncTick,
   CORPUS_SYNC_LAST_RUN_KEY,
 } from "../../services/corpusSync";
@@ -112,10 +111,12 @@ export interface KnowledgeCorpusRouteContext {
   env: {
     REPORTS_BUCKET?: R2Bucket;
     KNOWLEDGE_SERVING_ENABLED?: string;
-    // Issue #1169 S4-4: AI + Vectorize join the env (type-only
-    // widening, cf. the reports route's S4-1 widening) so the
-    // corpus-sync branch can run the index backfill; the
-    // orchestrator mount already passes the full env.
+    // Issue #1169 S4-4: AI + Vectorize joined the env (type-only
+    // widening) so the corpus-sync branch could run the reports
+    // index backfill. Issue #3527 S4 unbundled that leg (the sweep
+    // runs from the reports route under its own guard now), so
+    // nothing here reads them; the fields stay because the
+    // orchestrator mount passes the full env.
     AI?: any;
     VECTOR_MEMORY?: any;
     // Issue #3345: the AI Search namespace door + the corpus
@@ -389,10 +390,13 @@ export async function handleKnowledgeCorpusRoutes(
       manifest: SEED_MANIFEST_ENTRIES,
       recordStore: ctx.storage,
       bucket: createBlobStore(ctx.env),
-      backfill: () => runCanonicalIndexBackfillAll(ctx.env, sql),
       // Issue #3345: sync also backfills the corpus items-API
       // bridge — per-item indexing state rides the sync result
       // (and therefore the Corpus tab, which renders sync results).
+      // Issue #3527 S4: the reports canonical-index backfill no
+      // longer rides this sync — it runs from the reports route
+      // (POST /trading/reports/index-backfill-sweep) under its own
+      // weekly guard + marker.
       corpusIndex: () =>
         runCorpusAiSearchIndexBackfill(ctx.env, {
           manifest: SEED_MANIFEST_ENTRIES,
