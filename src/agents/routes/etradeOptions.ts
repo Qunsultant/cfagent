@@ -43,11 +43,11 @@ import {
   validateStrategyRequest,
   validateStrategyProfile,
   describeLlmInput,
-  runPanelPipeline,
   OptionsDataAgent,
   RecommendationAgent,
   StrategyRiskAgent,
   TradingPlatformRegistry,
+  platformChainSource,
   type RiskProfile,
   type StrategyScreenFilter,
   defaultRegistry,
@@ -71,7 +71,12 @@ import type { DatabaseORM, SqlStorage } from "../../orm";
 import type { ScreenerAgent } from "../screener-agent";
 import { deliverGatedSlack } from "../../services/gatedSlackDelivery";
 import { screenerOutcomeFromRunResult } from "../../services/screenerFollowups";
-import { RecommendationService, type KernelSnapshot } from "../../services/recommendationKernel";
+import { type KernelSnapshot, type PanelDiscoveryResult } from "../../services/recommendationKernel";
+import {
+  runComparePanelViaPipeline,
+  runManualPanelViaPipeline,
+} from "../../workflows/manualPanelScreen";
+import type { OptionsStageStorage } from "../../workflows/optionsScreenPorts";
 import { listComparisonOutcomes, runProductionComparison } from "../../services/comparisonRunner";
 import { getSymbolEventCalendar, toEventCalendarInfo } from "../../services/eventCalendar";
 import {
@@ -103,6 +108,7 @@ import {
 import { runNoViewStrategies } from "./etradeOptionsNoView";
 import { serveDiscoveryReport } from "./etradeOptionsDiscoveryReport";
 import { recordStrategyScreenRun } from "../../services/optionsServeRecord";
+import { resolveTenantBroker } from "../../services/tenantProviders";
 import { panelAuthResponse } from "../../services/optionsAuthFreshness";
 import { resolveTenantProviders } from "../../services/tenantProviders";
 
@@ -270,7 +276,8 @@ export async function handleEtradeOptionsRoutes(
         // #291 T5c: resolved through the platform registry (the chains
         // read is a verbatim client passthrough on the platform contract);
         // one instance serves the call and its #155 error read.
-        const etrade = TradingPlatformRegistry.getPlatform("etrade", ctx.env, ctx.getOrm(), userLogin, ctx.requestedEnv);
+        const broker = await resolveTenantBroker(ctx.env);
+        const etrade = TradingPlatformRegistry.getPlatform(broker, ctx.env, ctx.getOrm(), userLogin, ctx.requestedEnv);
         const chain = await etrade.getOptionChains?.({
           symbol,
           expiryYear,
@@ -320,7 +327,8 @@ export async function handleEtradeOptionsRoutes(
         if (!userLogin) return unauthenticatedResponse();
         // #291 T5c: registry-resolved platform (verbatim passthrough
         // reads); the #155 error read stays on this same instance.
-        const etrade = TradingPlatformRegistry.getPlatform("etrade", ctx.env, ctx.getOrm(), userLogin, ctx.requestedEnv);
+        const broker = await resolveTenantBroker(ctx.env);
+        const etrade = TradingPlatformRegistry.getPlatform(broker, ctx.env, ctx.getOrm(), userLogin, ctx.requestedEnv);
         const dates = (await etrade.getOptionExpireDates?.(symbol, expiryType)) ?? [];
         if (dates.length === 0) {
           // Issue #155: distinguish an upstream failure (client error
@@ -337,11 +345,7 @@ export async function handleEtradeOptionsRoutes(
       }
     }
 
-    // Persisted opportunity scan runs (issue #27): scans executed with a
-    // store attached (NLQ path + unified opportunities route) are
-    // retrievable here with their full provenance, and two runs can be
-    // diffed run-over-run. Declared in list → diff → by-id order: the
-    // diff route must win over the by-id pattern below.
+    // Persisted opportunity scan runs (issue #27): list -> diff -> by-id
     if (path.endsWith("/etrade/options/scans") && request.method === "GET") {
       return handleOptionsScansList(request, url, sessionId, sql, ctx);
     }
@@ -367,11 +371,7 @@ export async function handleEtradeOptionsRoutes(
       return serveDiscoveryReport(request, ctx, "csv");
     }
 
-    // Persisted scheduled-discovery runs (issue #126, PR-E): executions
-    // of autonomousStrategyDiscovery (scheduled fires and manual
-    // triggers) are retrievable here with their provenance, saved
-    // requests, and per-symbol outcomes. Scoped per user exactly like
-    // the scan runs above (issue #103 rule, enforced by the store).
+    // Persisted scheduled-discovery runs (issue #126, PR-E)
     if (path.endsWith("/etrade/options/discovery-runs") && request.method === "GET") {
       return handleOptionsDiscoveryRunsList(request, url, sessionId, sql, ctx);
     }
@@ -381,24 +381,12 @@ export async function handleEtradeOptionsRoutes(
       return handleOptionsDiscoveryRunById(request, sessionId, sql, discoveryRunIdMatch, ctx);
     }
 
-    // IV history (issue #15): the daily collector's stored series,
-    // read back as IV rank / percentile with honest coverage. A name
-    // with no records is a state (observations 0, warmingUp true,
-    // latest null), never a 404 — absence of history is exactly what
-    // a warming-up system is supposed to report. Without ?symbol=,
-    // returns the per-name coverage summary for every tracked name
-    // (curated ∪ watchlists) plus any name that has records.
+    // IV history (issue #15)
     if (path.endsWith("/etrade/options/iv-history") && request.method === "GET") {
       return handleOptionsIvHistory(url, ctx, sql);
     }
 
-    // Saved strategy profiles (issue #28): named, versioned "my
-    // strategy" objects, scoped per user. Scans and single-name actions
-    // resolve them by name (NLQ) or id/name (unified body) and stamp
-    // the applied profile into scan provenance. Validation is the
-    // route's job (validateStrategyProfile); the store enforces only
-    // per-user name uniqueness. The profiles UI panel is issue #84's
-    // surface — these routes are the API it will consume.
+    // Saved strategy profiles (issue #28)
     if (path.endsWith("/etrade/options/profiles") && request.method === "GET") {
       return handleOptionsProfilesList(request, sessionId, sql);
     }
@@ -511,9 +499,16 @@ export async function handleEtradeOptionsRoutes(
         const userLogin = request.headers.get("x-user-login");
         if (!userLogin) return unauthenticatedResponse();
         const etrade = new ETradeService(ctx.getOrm(), ctx.env, userLogin, ctx.requestedEnv);
-        const result = await runPanelPipeline(new DynamicOptionsScreener(etrade.client, undefined, await etrade.getUniverseDeps?.(ctx.agentCtx?.storage)), strategyRequest, {
+        // Issue #3186 step 3e: the compare route runs through the one panel pipeline.
+        const result = await runComparePanelViaPipeline({
+          userLogin,
+          strategyRequest,
           riskProfile: body.riskProfile,
           alternatives: body.alternatives,
+          dataAgent: new OptionsDataAgent(new DynamicOptionsScreener(etrade.client, undefined, await etrade.getUniverseDeps?.(ctx.agentCtx?.storage))),
+          storage: ctx.agentCtx?.storage as unknown as OptionsStageStorage | undefined,
+          getSql: ctx.agentCtx?.storage?.sql ? () => ctx.agentCtx.storage.sql : undefined,
+          queue: ctx.env.SCREENER_EVENTS ?? null,
         });
         const poolByType = new Map<string, { type: string; label: string; generated: number; bestScore: number }>();
         for (const c of result.strategies.candidates) {
@@ -539,13 +534,7 @@ export async function handleEtradeOptionsRoutes(
       }
     }
 
-    // Consolidation C5 (#1361): the 3-way comparison surface — the
-    // caller + surface C4 left missing. POST runs llm/quant/hybrid
-    // over one snapshot through the kernel (no winner field by
-    // design; the hybrid LLM order lives only in the hybrid arm).
-    // GET reads the per-arm ledger back by run id. The outcomes
-    // handler sits first because its path ends with the comparison
-    // path; method checks on both handlers prevent suffix collision.
+    // Consolidation C5 (#1361): 3-way comparison outcomes
     if (path.endsWith("/trading/options/comparison/outcomes") && request.method === "GET") {
       const runId = url.searchParams.get("runId");
       if (!runId) {
@@ -581,12 +570,7 @@ export async function handleEtradeOptionsRoutes(
         const dataAgent = new OptionsDataAgent(new DynamicOptionsScreener(etrade.client, undefined, await etrade.getUniverseDeps?.(ctx.agentCtx?.storage)));
         const banded = resolvePanelFetchBands(parsedDiscovery.value.request, parsedDiscovery.value.farDated);
         const s = await dataAgent.loadSnapshot(banded.request);
-        // Same KernelSnapshot mapping the panel route builds (see
-        // RecommendationService.discoverPanel) — replicated here
-        // rather than calling discoverPanel, which would waste a full
-        // kernel run just for the snapshot — plus snapshot quotes,
-        // so the LLM builder's price source is the snapshot even
-        // where a detail carries its own bid/ask.
+        // KernelSnapshot mapping replicated without calling discoverPanel
         const snapshot: KernelSnapshot = {
           symbol: s.symbol,
           contracts: s.contracts,
@@ -716,37 +700,23 @@ export async function handleEtradeOptionsRoutes(
         const blocked = await panelAuthResponse(ctx.env, userLogin, ctx.requestedEnv);
         if (blocked) return blocked;
         const etrade = new ETradeService(ctx.getOrm(), ctx.env, userLogin, ctx.requestedEnv);
-        // Consolidation C4 (#1329): the panel route runs through the
-        // Recommendation Kernel facade (panel configuration: D1 fit
-        // + research gates, same ranking agents). The response shape
-        // is unchanged — ranked / riskReports / bestTrade are computed
-        // via the same StrategyRiskAgent / RecommendationAgent over
-        // the kernel-passed candidates, and evaluations / nameLedger
-        // / excluded ride the facade's legacy mapping. /compare and
-        // /llm-ideas below are untouched.
+        // Consolidation C4 (#1329): Recommendation Kernel facade
         const dataAgent = new OptionsDataAgent(new DynamicOptionsScreener(etrade.client, undefined, await etrade.getUniverseDeps?.(ctx.agentCtx?.storage)));
         const banded = resolvePanelFetchBands(parsedDiscovery.value.request, parsedDiscovery.value.farDated);
         const t0 = Date.now();
-        const result = await new RecommendationService().discoverPanel({
-          dataAgent: {
-            loadSnapshot: async (params: unknown) => {
-              const s = await dataAgent.loadSnapshot(params as StrategyRequest);
-              return {
-                symbol: s.symbol,
-                contracts: s.contracts,
-                dataSource: s.dataSource,
-                screen: s.screen,
-                rejections: s.rejections,
-                validationError: s.validationError,
-              };
-            },
-          },
-          riskAgent: new StrategyRiskAgent(),
-          recommender: new RecommendationAgent(),
-          request: banded.request,
+        // Issue #3186 step 3e: the manual panel route runs through the
+        // one panel pipeline (manualPanelScreen.ts); the shaped artifact
+        // is the discoverPanel result, so downstream reads it unchanged.
+        const result = await runManualPanelViaPipeline({
+          userLogin,
+          strategyRequest: banded.request,
           strategyFilter: parsedDiscovery.value.strategyFilter,
           riskProfile: parsedDiscovery.value.riskProfile,
           alternatives: parsedDiscovery.value.alternatives,
+          dataAgent,
+          storage: ctx.agentCtx?.storage as unknown as OptionsStageStorage | undefined,
+          getSql: ctx.agentCtx?.storage?.sql ? () => ctx.agentCtx.storage.sql : undefined,
+          queue: ctx.env.SCREENER_EVENTS ?? null,
         });
         const discoverPanelDurationMs = Date.now() - t0;
         const common = {
@@ -868,8 +838,14 @@ export async function handleEtradeOptionsRoutes(
         const screenUniverseLabel = parsedScreen.value.universe;
         const screenEmailTo = parsedScreen.value.emailTo;
 
+        const broker = await resolveTenantBroker(ctx.env);
+        const brokerPlatform = broker !== "etrade"
+          ? TradingPlatformRegistry.getPlatform(broker, ctx.env, ctx.getOrm(), userLogin, ctx.requestedEnv)
+          : null;
+        const chainSource = brokerPlatform ? platformChainSource(brokerPlatform) : null;
         const etrade = new ETradeService(ctx.getOrm(), ctx.env, userLogin, ctx.requestedEnv);
-        const screener = new DynamicOptionsScreener(etrade.client, undefined, await etrade.getUniverseDeps?.(ctx.agentCtx?.storage));
+        const universeDeps = await etrade.getUniverseDeps?.(ctx.agentCtx?.storage);
+        const screener = new DynamicOptionsScreener(chainSource ?? etrade.client, undefined, universeDeps);
         return await executeOptionsScreen({ ctx, userLogin, screener, screenFilter, screenPushToSlack, screenSlackChannel, screenUniverseLabel, screenEmailTo, deferDelivery: Boolean(ctx.asyncJobId) });
       } catch (err) {
         const error = err instanceof Error ? err.message : "Options screening failed";
@@ -919,12 +895,7 @@ export async function handleEtradeOptionsRoutes(
           };
         }
 
-        // Issue #959: the unified request validates through the ONE
-        // shared schema before the service sees it — a mis-shaped body
-        // is a 400 naming the field instead of a service-level surprise.
-        // The delivery envelope (pushToSlack / slackChannel, read below)
-        // is split out by the schema and re-attached for the route's
-        // own delivery logic; the service receives the request fields.
+        // Issue #959: unified request validation
         const parsedUnified = parseUnifiedOptionsRequest(reqData);
         if (!parsedUnified.ok) {
           return Response.json({ error: parsedUnified.error }, { status: 400 });

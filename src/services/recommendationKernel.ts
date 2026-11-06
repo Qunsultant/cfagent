@@ -1286,6 +1286,111 @@ export interface PanelDiscoveryResult extends KernelDiscoveryResult {
  * quote or falsification evidence, so their kernel status lands
  * Unverified; the route-facing ranked / bestTrade output is unaffected.
  */
+/**
+ * Issue #3186 (step 3e): discoverPanel's post-snapshot block, extracted
+ * into stage functions WITHOUT behavior change - same calls, same
+ * order. discoverPanel itself becomes their composition, and the one
+ * strategy pipeline's ports map one stage function per pipeline stage.
+ * The kernel's own internals (build -> gate -> price -> rank ->
+ * falsify) stay inside the screen stage; they are not pipeline stages.
+ */
+
+/** The enrich stage: KernelSnapshot construction from the loaded data (pure). */
+export function buildPanelKernelSnapshot(data: PanelSnapshotData): KernelSnapshot {
+  return {
+    symbol: data.symbol,
+    dataSource: data.dataSource,
+    chainProvenance: data.dataSource === "calibrated-demo" ? "calibrated" : "live",
+    contracts: data.contracts,
+    underlyingPrice: data.contracts[0]?.underlyingPrice,
+    screen: data.screen,
+    rejections: data.rejections,
+    validationError: data.validationError,
+  };
+}
+
+/** The screen stage's artifact: kernel result + ranking, before risk. */
+export interface PanelScreenArtifact {
+  kernelResult: KernelDiscoveryResult;
+  wrapped: StrategyCandidate[];
+  ranked: RankedStrategy[];
+  legacy: unknown;
+  profile: RiskProfile;
+}
+
+/** The screen stage: kernel run + rank (same construction discoverPanel used). */
+export async function runPanelScreen(
+  snapshot: KernelSnapshot,
+  input: PanelDiscoveryInput,
+): Promise<PanelScreenArtifact> {
+  const viewBuilder = new ViewStructureBuilder({
+    buildFn: (contracts, request) => input.riskAgent.buildStrategies(contracts, request as StrategyRequest),
+  });
+  const kernel = new RecommendationKernel({
+    builders: [viewBuilder],
+    gateHandlers: createPanelGateHandlers({
+      screenFn: (candidates, filter) => input.riskAgent.screenStrategies(candidates, filter),
+      strategyFilter: input.strategyFilter,
+    }),
+    rankingPolicy: new RiskProfileComposite({
+      rankFn: (candidates, request, profile) => input.recommender.rank(candidates, request, profile),
+    }),
+  });
+  const profile = input.riskProfile ?? "balanced";
+  const kernelResult = await kernel.run({
+    snapshot,
+    request: input.request,
+    rankingContext: { request: input.request, riskProfile: profile },
+  });
+  const wrapped = kernelResult.candidates
+    .map((c) => c.source)
+    .filter((s): s is StrategyCandidate => isWrappedEngineCandidate(s));
+  const rankedAll = input.recommender.rank(wrapped, input.request, profile);
+  const limit = input.request.candidateLimit ?? rankedAll.length;
+  const ranked = rankedAll.slice(0, limit);
+  const last = viewBuilder.lastResult;
+  return {
+    kernelResult,
+    wrapped,
+    ranked,
+    legacy: last
+      ? { evaluations: last.evaluations, nameLedger: last.nameLedger, excluded: last.excluded, buildResult: last }
+      : undefined,
+    profile,
+  };
+}
+
+/** The risk stage: one risk report per ranked candidate. */
+export function panelRiskReports(
+  ranked: RankedStrategy[],
+  input: PanelDiscoveryInput,
+): unknown[] {
+  return ranked.map((r) => input.riskAgent.riskReport(r.candidate, input.request));
+}
+
+/** The shapeReport stage: best trade + PipelineResult assembly. */
+export function assemblePanelResult(input: {
+  screen: PanelScreenArtifact;
+  riskReports: unknown[];
+  panelInput: PanelDiscoveryInput;
+}): PanelDiscoveryResult {
+  const { screen, riskReports, panelInput } = input;
+  const bestTrade = panelInput.recommender.pickBestTrade(
+    screen.wrapped,
+    panelInput.request,
+    screen.profile,
+    panelInput.alternatives ?? 3,
+  );
+  return {
+    ...screen.kernelResult,
+    ranked: screen.ranked,
+    riskReports,
+    bestTrade,
+    screenedOut: screen.kernelResult.rejected.map((r) => ({ id: r.id, reason: r.reason })),
+    legacy: screen.legacy as PanelDiscoveryResult["legacy"],
+  };
+}
+
 export class RecommendationService {
   async discoverPanel(input: PanelDiscoveryInput): Promise<PanelDiscoveryResult> {
     // Issue #2599 (F7): the panel snapshot fetches the scanner's
@@ -1307,54 +1412,10 @@ export class RecommendationService {
         maxDte: input.request.maxDte,
       }),
     });
-    const snapshot: KernelSnapshot = {
-      symbol: data.symbol,
-      dataSource: data.dataSource,
-      chainProvenance: data.dataSource === "calibrated-demo" ? "calibrated" : "live",
-      contracts: data.contracts,
-      underlyingPrice: data.contracts[0]?.underlyingPrice,
-      screen: data.screen,
-      rejections: data.rejections,
-      validationError: data.validationError,
-    };
-    const viewBuilder = new ViewStructureBuilder({
-      buildFn: (contracts, request) => input.riskAgent.buildStrategies(contracts, request as StrategyRequest),
-    });
-    const kernel = new RecommendationKernel({
-      builders: [viewBuilder],
-      gateHandlers: createPanelGateHandlers({
-        screenFn: (candidates, filter) => input.riskAgent.screenStrategies(candidates, filter),
-        strategyFilter: input.strategyFilter,
-      }),
-      rankingPolicy: new RiskProfileComposite({
-        rankFn: (candidates, request, profile) => input.recommender.rank(candidates, request, profile),
-      }),
-    });
-    const profile = input.riskProfile ?? "balanced";
-    const kernelResult = await kernel.run({
-      snapshot,
-      request: input.request,
-      rankingContext: { request: input.request, riskProfile: profile },
-    });
-    const wrapped = kernelResult.candidates
-      .map((c) => c.source)
-      .filter((s): s is StrategyCandidate => isWrappedEngineCandidate(s));
-    const rankedAll = input.recommender.rank(wrapped, input.request, profile);
-    const limit = input.request.candidateLimit ?? rankedAll.length;
-    const ranked = rankedAll.slice(0, limit);
-    const riskReports = ranked.map((r) => input.riskAgent.riskReport(r.candidate, input.request));
-    const bestTrade = input.recommender.pickBestTrade(wrapped, input.request, profile, input.alternatives ?? 3);
-    const last = viewBuilder.lastResult;
-    return {
-      ...kernelResult,
-      ranked,
-      riskReports,
-      bestTrade,
-      screenedOut: kernelResult.rejected.map((r) => ({ id: r.id, reason: r.reason })),
-      legacy: last
-        ? { evaluations: last.evaluations, nameLedger: last.nameLedger, excluded: last.excluded, buildResult: last }
-        : undefined,
-    };
+    const snapshot = buildPanelKernelSnapshot(data);
+    const screen = await runPanelScreen(snapshot, input);
+    const riskReports = panelRiskReports(screen.ranked, input);
+    return assemblePanelResult({ screen, riskReports, panelInput: input });
   }
 
   /**

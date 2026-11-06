@@ -10,8 +10,8 @@ import { describe, expect, it, vi } from "vitest";
 import { emitOptionsStageBoundaries } from "../src/workflows/optionsStageSeam";
 import { OPTIONS_SCREEN_PHASES } from "../src/workflows/stageRuntimeIds";
 
-describe("options stage boundaries (#3072)", () => {
-  it("publishes every phase when every artifact exists, in phase order", async () => {
+describe("options stage boundaries (#3072, retired by #3186 step 3d)", () => {
+  it("rejects the retired phases: the contract no longer knows them, so only deliver (a pipeline stage id) publishes", async () => {
     const sent: string[] = [];
     const result = await emitOptionsStageBoundaries({
       artifacts: {
@@ -23,9 +23,12 @@ describe("options stage boundaries (#3072)", () => {
       queue: { send: async (body: unknown) => sent.push((body as { stageId: string }).stageId) },
       warn: () => undefined,
     });
-    expect(sent).toEqual([...OPTIONS_SCREEN_PHASES]);
-    expect(result.published).toEqual([...OPTIONS_SCREEN_PHASES]);
-    expect(result.skipped).toEqual([]);
+    expect(sent).toEqual(["deliver"]);
+    expect(result.published).toEqual(["deliver"]);
+    expect(result.skipped.map((entry) => entry.stageId)).toEqual([
+      "provider-screen",
+      "report-pipeline",
+    ]);
   });
 
   it("publishes nothing when the run produced no artifact", async () => {
@@ -42,15 +45,23 @@ describe("options stage boundaries (#3072)", () => {
     expect(warn).toHaveBeenCalledTimes(OPTIONS_SCREEN_PHASES.length);
   });
 
-  it("skips only the phases whose artifact is missing", async () => {
+  it("skips the retired phases even when their artifacts exist, and the artifact-less phase for lack of evidence", async () => {
     const sent: string[] = [];
     const result = await emitOptionsStageBoundaries({
       artifacts: { runId: "gen-1", userLogin: "owner@example.com", reportKey: "options:pdf:gen-1" },
       queue: { send: async (body: unknown) => sent.push((body as { stageId: string }).stageId) },
       warn: () => undefined,
     });
-    expect(sent).toEqual(["provider-screen", "report-pipeline"]);
-    expect(result.skipped.map((entry) => entry.stageId)).toEqual(["deliver"]);
+    expect(sent).toEqual([]);
+    expect(result.published).toEqual([]);
+    expect(result.skipped.map((entry) => entry.stageId)).toEqual([
+      "provider-screen",
+      "report-pipeline",
+      "deliver",
+    ]);
+    // The retired phases are skipped by contract validation, the
+    // artifact-less phase by the no-artifact rule - different reasons.
+    expect(result.skipped[2]?.reason).toMatch(/no persisted artifact/);
   });
 
   it("degrades to skips when no queue is bound, without throwing", async () => {

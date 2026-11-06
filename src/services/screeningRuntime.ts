@@ -60,6 +60,7 @@ import {
 import {
   runGoalDrivenScreenWithLedger,
   type GoalDrivenScreenResult,
+  type OptionsWorkflowDeps,
 } from "./goalDrivenScreen";
 import type { ScreenerTask, ScreenerTaskLedger } from "./screenerTaskLedger";
 import {
@@ -214,12 +215,29 @@ export async function runProductionGoalScreen(input: {
   baseStockFilter?: StockScreenerFilter;
   baseOptionsFilter?: OptionScreenerFilter;
   now?: Date;
+  /** Issue #3186 (step 3c): the goal options leg's pipeline deps
+   *  (storage, canonical, goal-leg shapeReport/deliver, claims,
+   *  queue) - WITHOUT the screener. The pipeline runs on
+   *  input.optionsScreener when it is a full DynamicOptionsScreener
+   *  (production always is); a Pick-only fake fails closed, never
+   *  silently. Absent -> the registry path, unchanged. */
+  optionsWorkflow?: Omit<OptionsWorkflowDeps, "screener">;
 }): Promise<{ task: ScreenerTask; executed: boolean; result?: GoalDrivenScreenResult }> {
   const registry = createProductionScreeningRegistry({
     stockScreener: input.stockScreener,
     optionsScreener: input.optionsScreener,
     ...(input.neutralStockScreener ? { neutralStockScreener: input.neutralStockScreener } : {}),
   });
+  let optionsWorkflow: OptionsWorkflowDeps | undefined;
+  if (input.optionsWorkflow) {
+    const screener = input.optionsScreener as DynamicOptionsScreener;
+    if (typeof screener.fetchChains !== "function") {
+      throw new Error(
+        "options workflow: the goal options leg needs a full DynamicOptionsScreener, not a screenOptions-only pick",
+      );
+    }
+    optionsWorkflow = { screener, ...input.optionsWorkflow };
+  }
   return runGoalDrivenScreenWithLedger({
     ledger: input.ledger,
     registry,
@@ -233,6 +251,7 @@ export async function runProductionGoalScreen(input: {
     baseStockFilter: input.baseStockFilter,
     baseOptionsFilter: input.baseOptionsFilter,
     now: input.now,
+    ...(optionsWorkflow ? { optionsWorkflow } : {}),
   });
 }
 

@@ -26,6 +26,21 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import * as XLSX from "@e965/xlsx";
 import { executeUnifiedOptions } from "../src/agents/routes/etradeOptionsScreen";
+
+// Issue #3186 step 3e - the opportunities action no longer calls
+// service.execute(); it runs the one scanner pipeline. This seam
+// test pins the downstream CSV adaptation, not the engine, so the
+// pipeline composer is stubbed to a completed outcome and the
+// storage stub serves the fixture scan as the shapeReport artifact.
+// The real pipeline-through-handler path is pinned in
+// tests/unified_options_pipeline_3186.test.ts.
+const mockRunWorkflow = vi.hoisted(() =>
+  vi.fn(async () => ({ outcome: "completed", runId: "mock-run", stages: [], published: [] })),
+);
+vi.mock("../src/workflows/optionsScreenWorkflow", async (importOriginal) => ({
+  ...(await importOriginal()),
+  runOptionsScreenWorkflow: mockRunWorkflow,
+}));
 import { UnifiedOptionsService } from "../src/trading";
 import {
   adaptOpportunityScanToOptionScreenResult,
@@ -277,11 +292,19 @@ describe("unified-route CSV seam (#1587)", () => {
         : undefined,
   };
 
+  let currentScan: OpportunityScanResult | undefined;
   const ctxStub = (over: Record<string, unknown> = {}) => ({
     env: {},
     requestedEnv: undefined,
     getOrm: () => ({ storeCanonicalReport: () => {} }),
-    agentCtx: { storage: { sql: {} } },
+    agentCtx: {
+      storage: {
+        sql: {},
+        put: async () => {},
+        get: async (key: string) =>
+          key.endsWith(":shapeReport") ? (currentScan as never) : undefined,
+      },
+    },
     getScreenerAgent: () => fakeAgent,
     ...over,
   });
@@ -297,14 +320,11 @@ describe("unified-route CSV seam (#1587)", () => {
   });
 
   async function runUnified(scan: OpportunityScanResult) {
-    vi.spyOn(UnifiedOptionsService.prototype, "execute").mockResolvedValue({
-      success: true,
-      data: scan,
-      summary: "2 opportunities",
-      toSlack: () => "slack",
-      toUi: () => ({ ok: true }),
-      toWebhook: () => ({ ok: true }),
-    } as any);
+    currentScan = scan;
+    vi.spyOn(UnifiedOptionsService.prototype, "resolveEngineClient").mockResolvedValue({
+      engineClient: {} as never,
+      platformRunId: undefined,
+    });
     const request = new Request("http://localhost/api/options/unified", {
       headers: { "x-user-login": "tester" },
     });
@@ -312,13 +332,14 @@ describe("unified-route CSV seam (#1587)", () => {
       request,
       sessionId: "sess-1587",
       ctx: ctxStub() as any,
-      reqData: { action: "opportunities", pushToSlack: false, thesis: "BULLISH" },
+      reqData: { action: "opportunities", symbols: ["AAPL"], pushToSlack: false, thesis: "BULLISH" },
     });
     return response;
   }
 
   it("adapts opportunities-shaped input to a populated CSV", async () => {
     const response = await runUnified(unifiedScan());
+    expect(mockRunWorkflow).toHaveBeenCalled();
     expect(response.status).toBe(200);
     // NOTE: the default (toUi) response carries xlsxUrl but no csvUrl —
     // csvUrl only appears on the webhook path (route line 499). That gap

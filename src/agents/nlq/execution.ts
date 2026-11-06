@@ -14,6 +14,7 @@ import { getPlatformCapabilitiesDeskSummary } from "../../services/platformKnowl
 import { UnifiedOptionsService, ETradeSlackTradingService, describeFlowProvenance, getDynamicLiveFlowItems, isNonLivePricingQuoteStatus, nonLivePricingNotice } from "../../trading";
 import { runOptionsStrategyAction, type OptionsStrategyIntent } from "../nlqOptionsStrategy";
 import type { DatabaseORM } from "../../orm";
+import type { OptionsStageStorage } from "../../workflows/optionsScreenPorts";
 import type { ScanRunStore, StrategyProfileStore } from "../../trading";
 import type { AgentScheduleItem, Env, OptionScreenResult } from "../../types";
 import { formatMarketCap, formatTradingQuoteBidAsk, formatTradingQuoteHeadline } from "./formatting";
@@ -1929,6 +1930,13 @@ async function executeNLQQueryAsyncCore(
         profileStore: deps?.profileStore,
         discoveryRunner: deps?.discoveryRunner,
         fitDiscoveryRunner: deps?.fitDiscoveryRunner,
+        // Issue #3186: the panel leg's stage storage + queue - the
+        // NLQ host's blob handle and the SCREENER_EVENTS binding, so
+        // NLQ panel runs persist + publish like the other legs. The
+        // blob get is untyped (Promise<unknown>); the cast is safe -
+        // the stored value is the stage artifact the pipeline wrote.
+        pipelineStorage: deps?.storage as unknown as OptionsStageStorage | undefined,
+        pipelineQueue: (env as { SCREENER_EVENTS?: { send: (body: unknown) => Promise<unknown> } }).SCREENER_EVENTS ?? null,
         // #1257 comparison surfacing: the runner is built from the
         // session's E*TRADE client + environment + orm ledger sink.
         // The runner itself refuses without env, and reports

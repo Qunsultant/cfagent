@@ -61,13 +61,11 @@ import {
   type StageClaimStore,
 } from "./stageReportConsumer";
 import { stageIdempotencyKey, stageMessage } from "./stageMessage";
-
-/** The per-run persisted-analysis key family. */
-export const STAGE_ANALYSIS_KEY_PREFIX = "screener:analysis:";
-
-export function stageAnalysisKey(timestamp: string): string {
-  return `${STAGE_ANALYSIS_KEY_PREFIX}${timestamp}`;
-}
+// Re-exported from the pure-data runtime ids (see the note there):
+// stageQueueTransport needs only the key, not this module. The
+// local import serves this file's own internal use.
+import { stageAnalysisKey } from "./stageRuntimeIds";
+export { STAGE_ANALYSIS_KEY_PREFIX, stageAnalysisKey } from "./stageRuntimeIds";
 
 /**
  * The run shape the PDF leg needs. Structural on purpose:

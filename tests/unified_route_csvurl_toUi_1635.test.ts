@@ -25,6 +25,21 @@
  */
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { executeUnifiedOptions } from "../src/agents/routes/etradeOptionsScreen";
+
+// Issue #3186 step 3e - the opportunities action no longer calls
+// service.execute(); it runs the one scanner pipeline. These seam
+// tests pin the response shape, not the engine, so the pipeline
+// composer is stubbed to a completed outcome and the storage stub
+// serves the fixture scan as the shapeReport artifact. The real
+// pipeline-through-handler path is pinned in
+// tests/unified_options_pipeline_3186.test.ts.
+const mockRunWorkflow = vi.hoisted(() =>
+  vi.fn(async () => ({ outcome: "completed", runId: "mock-run", stages: [], published: [] })),
+);
+vi.mock("../src/workflows/optionsScreenWorkflow", async (importOriginal) => ({
+  ...(await importOriginal()),
+  runOptionsScreenWorkflow: mockRunWorkflow,
+}));
 import { UnifiedOptionsService } from "../src/trading";
 import type { OpportunityScanResult } from "../src/trading/options/opportunityScanner";
 import { generateOptionsCsv } from "../src/trading/screenerReportCsv";
@@ -86,6 +101,13 @@ function miniScan(): OpportunityScanResult {
     ],
     coverage: { considered: 2, scanned: 2, evaluated: 2, withTrades: 2 },
     generatedAt: "2026-10-24T09:05:29Z",
+    // Issue #3186 step 3e - the handler now builds the summary from
+    // the scan via the shared builder, so the fixture carries the
+    // fields it reads (mode + gate); previously the mocked execute()
+    // returned a canned summary and these were never read.
+    mode: "per_name_best",
+    fitsTotal: 0,
+    gate: { fit: 2, borderline: 0, noFit: 0 },
   } as unknown as OpportunityScanResult;
 }
 
@@ -105,11 +127,19 @@ describe("unified-route default UI response csvUrl (#1635)", () => {
         : undefined,
   };
 
+  let currentScan: ReturnType<typeof miniScan> | undefined;
   const ctxStub = () => ({
     env: {},
     requestedEnv: undefined,
     getOrm: () => ({ storeCanonicalReport: () => {} }),
-    agentCtx: { storage: { sql: {} } },
+    agentCtx: {
+      storage: {
+        sql: {},
+        put: async () => {},
+        get: async (key: string) =>
+          key.endsWith(":shapeReport") ? (currentScan as never) : undefined,
+      },
+    },
     getScreenerAgent: () => fakeAgent,
   });
 
@@ -119,14 +149,11 @@ describe("unified-route default UI response csvUrl (#1635)", () => {
   });
 
   async function runUnified(reqData: Record<string, unknown>) {
-    vi.spyOn(UnifiedOptionsService.prototype, "execute").mockResolvedValue({
-      success: true,
-      data: miniScan(),
-      summary: "2 opportunities",
-      toSlack: () => "slack",
-      toUi: () => ({ ok: true }),
-      toWebhook: () => ({ ok: true }),
-    } as any);
+    currentScan = miniScan();
+    vi.spyOn(UnifiedOptionsService.prototype, "resolveEngineClient").mockResolvedValue({
+      engineClient: {} as never,
+      platformRunId: undefined,
+    });
     const request = new Request("http://localhost/api/options/unified", {
       headers: { "x-user-login": "tester" },
     });
@@ -134,12 +161,13 @@ describe("unified-route default UI response csvUrl (#1635)", () => {
       request,
       sessionId: "sess-1635",
       ctx: ctxStub() as any,
-      reqData: { action: "opportunities", pushToSlack: false, thesis: "BULLISH", ...reqData },
+      reqData: { action: "opportunities", symbols: ["AAPL"], pushToSlack: false, thesis: "BULLISH", ...reqData },
     });
   }
 
   it("default (toUi) path carries csvUrl + csvKey for the generated CSV", async () => {
     const response = await runUnified({});
+    expect(mockRunWorkflow).toHaveBeenCalled();
     expect(response.status).toBe(200);
     const body: any = await response.json();
     // xlsxUrl was already present on the default path; it must stay.

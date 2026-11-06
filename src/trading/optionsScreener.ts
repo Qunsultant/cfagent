@@ -276,6 +276,195 @@ export function sanitizeOptionScreenerFilter(raw: OptionScreenerFilter = {}, con
   return { filter, warnings };
 }
 
+/**
+ * Issue #3186 - validation failure from fetchChains: carries the
+ * sanitized filter + warnings so screenOptions can build the exact
+ * error result it built before the split (same messages, same shape).
+ */
+export class OptionsValidationError extends Error {
+  readonly filter: OptionScreenerFilter;
+  readonly warnings: string[];
+  constructor(message: string, filter: OptionScreenerFilter, warnings: string[]) {
+    super(message);
+    this.name = "OptionsValidationError";
+    this.filter = filter;
+    this.warnings = warnings;
+  }
+}
+
+
+/**
+ * Issue #3186 - the per-contract filter + enrich pass of
+ * evaluateChains, split out so the options pipeline's enrich stage
+ * wraps the same function. Maps every candidate contract through
+ * evaluateContract (rejection-priority filters + signal enrichment);
+ * never mutates its inputs.
+ */
+export interface EvaluatedContracts {
+  passedContracts: ScreenedOptionContractItem[];
+  rejections: OptionScreenRejection[];
+  rejectionCount: number;
+  totalContractsEvaluated: number;
+}
+
+export function evaluateContracts(
+  chains: Array<{ symbol: string; chain: ETradeOptionChain }>,
+  filter: OptionScreenerFilter = {},
+  config: EtapiScreenerConfig = getScreenerConfig(),
+): EvaluatedContracts {
+  const rejections: OptionScreenRejection[] = [];
+  const rejectionCounter = { total: 0 };
+  const passedContracts: ScreenedOptionContractItem[] = [];
+  let totalContractsEvaluated = 0;
+
+  for (const item of chains) {
+    const sym = item.symbol;
+    const chain = item.chain;
+    if (!chain || !chain.pairs || chain.pairs.length === 0) continue;
+
+    const underlyingPrice = chain.underlyingPrice;
+    const expiry = chain.selectedExpiry;
+    if (!underlyingPrice || underlyingPrice <= 0 || !expiry) continue;
+
+    const expDateStr = `${expiry.year}-${String(expiry.month).padStart(2, "0")}-${String(expiry.day).padStart(2, "0")}`;
+    const expiryDateObj = new Date(Date.UTC(expiry.year, expiry.month - 1, expiry.day));
+    const nowObj = new Date();
+    const diffMs = expiryDateObj.getTime() - nowObj.getTime();
+    const daysToExpiration = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+    if (daysToExpiration < 0) continue;
+    const context: ContractScreenContext = {
+      symbol: sym,
+      expiry,
+      expirationDate: expDateStr,
+      daysToExpiration,
+      underlyingPrice,
+    };
+
+    for (const pair of chain.pairs) {
+      const candidates: ETradeOptionChainContract[] = [];
+      if (filter.contractType === "PUT") {
+        if (pair.put) candidates.push(pair.put);
+      } else if (filter.contractType === "CALL") {
+        if (pair.call) candidates.push(pair.call);
+      } else {
+        if (pair.call) candidates.push(pair.call);
+        if (pair.put) candidates.push(pair.put);
+      }
+
+      for (const c of candidates) {
+        totalContractsEvaluated++;
+
+        const outcome = evaluateContract(c, context, filter, config);
+        if (outcome.rejection) {
+          rejectionCounter.total++;
+          if (rejections.length < config.maxRejectionsReturned) rejections.push(outcome.rejection);
+        } else if (outcome.item) {
+          passedContracts.push(outcome.item);
+        }
+      }
+    }
+  }
+
+  return {
+    passedContracts,
+    rejections,
+    rejectionCount: rejectionCounter.total,
+    totalContractsEvaluated,
+  };
+}
+
+/**
+ * Issue #3186 - the aggregation tail of evaluateChains, split out so
+ * the options pipeline's screen stage wraps the same function: filter
+ * summary, sort, limit, quote quality, status. evaluateChains is the
+ * composition of evaluateContracts + this function.
+ */
+export function aggregateScreenResult(
+  evaluated: EvaluatedContracts,
+  chains: Array<{ symbol: string; chain: ETradeOptionChain }>,
+  filter: OptionScreenerFilter = {},
+  totalUnderlyingsScanned = new Set(chains.map((chain) => chain.symbol)).size,
+  diagnostics: { fetchErrors?: OptionScreenFetchError[]; warnings?: string[] } = {},
+  config: EtapiScreenerConfig = getScreenerConfig(),
+): OptionScreenResult {
+  const symbols = Array.from(new Set(chains.map((c) => c.symbol)));
+  const summaryParts: string[] = [];
+
+  if (symbols.length <= 5) {
+    summaryParts.push(`Symbols: [${symbols.join(", ")}]`);
+  } else {
+    summaryParts.push(`${symbols.length} Symbols`);
+  }
+
+  if (filter.maxUnderlyings !== undefined) summaryParts.push(`Max underlyings: ${filter.maxUnderlyings}`);
+  if (filter.sector && !["all", "any"].includes(filter.sector.toLowerCase())) summaryParts.push(`Sector: ${filter.sector}`);
+  if (filter.contractType && filter.contractType !== "BOTH") summaryParts.push(`Type: ${filter.contractType}`);
+  if (filter.minDelta !== undefined) summaryParts.push(`Delta >= ${filter.minDelta}`);
+  if (filter.maxDelta !== undefined) summaryParts.push(`Delta <= ${filter.maxDelta}`);
+  if (filter.minGamma !== undefined) summaryParts.push(`Gamma >= ${filter.minGamma}`);
+  if (filter.maxGamma !== undefined) summaryParts.push(`Gamma <= ${filter.maxGamma}`);
+  if (filter.minTheta !== undefined) summaryParts.push(`Theta >= ${filter.minTheta}`);
+  if (filter.maxTheta !== undefined) summaryParts.push(`Theta <= ${filter.maxTheta}`);
+  if (filter.minVega !== undefined) summaryParts.push(`Vega >= ${filter.minVega}`);
+  if (filter.maxVega !== undefined) summaryParts.push(`Vega <= ${filter.maxVega}`);
+  if (filter.minRho !== undefined) summaryParts.push(`Rho >= ${filter.minRho}`);
+  if (filter.maxRho !== undefined) summaryParts.push(`Rho <= ${filter.maxRho}`);
+  if (filter.minImpliedVolatility !== undefined) summaryParts.push(`IV >= ${(filter.minImpliedVolatility * 100).toFixed(0)}%`);
+  if (filter.maxImpliedVolatility !== undefined) summaryParts.push(`IV <= ${(filter.maxImpliedVolatility * 100).toFixed(0)}%`);
+  if (filter.minVolume !== undefined) summaryParts.push(`Min Vol >= ${filter.minVolume}`);
+  if (filter.minOpenInterest !== undefined) summaryParts.push(`Min OI >= ${filter.minOpenInterest}`);
+  if (filter.maxSpreadPct !== undefined) summaryParts.push(`Max spread <= ${filter.maxSpreadPct}%`);
+  if (filter.maxQuoteAgeSeconds !== undefined) summaryParts.push(`Quote age <= ${filter.maxQuoteAgeSeconds}s`);
+  if (filter.minPrice !== undefined) summaryParts.push(`Premium >= $${filter.minPrice}`);
+  if (filter.maxPrice !== undefined) summaryParts.push(`Premium <= $${filter.maxPrice}`);
+  if (filter.minDte !== undefined || filter.maxDte !== undefined) {
+    summaryParts.push(`DTE: ${filter.minDte ?? 0}d - ${filter.maxDte ?? 365}d`);
+  }
+  if (filter.moneyness && filter.moneyness !== "ALL") summaryParts.push(`Moneyness: ${filter.moneyness}`);
+  if (filter.sortBy && filter.sortBy !== "volume") summaryParts.push(`Sort: ${filter.sortBy}`);
+
+  const { passedContracts, rejections, rejectionCount, totalContractsEvaluated } = evaluated;
+  sortScreenedContracts(passedContracts, filter.sortBy);
+
+  const totalMatches = passedContracts.length;
+  const effectiveLimit = filter.limit && filter.limit > 0 ? filter.limit : config.maxReturnedContracts;
+  const finalContracts = passedContracts.slice(0, effectiveLimit);
+  const warnings = [...(diagnostics.warnings ?? [])];
+  if (totalMatches > finalContracts.length) {
+    warnings.push(`Returned ${finalContracts.length} of ${totalMatches} matching contracts (limit ${effectiveLimit}).`);
+  }
+
+  const staleReturned = finalContracts.filter((contract) => contract.quoteFreshness === "STALE");
+  const unknownFreshness = finalContracts.filter((contract) => contract.quoteFreshness === "UNKNOWN");
+  const staleQuoteAges = staleReturned
+    .map((contract) => contract.quoteAgeSeconds)
+    .filter((age): age is number => age !== undefined && Number.isFinite(age));
+  const fetchErrors = diagnostics.fetchErrors ?? [];
+
+  return {
+    totalUnderlyingsScanned,
+    totalContractsEvaluated,
+    matchedCount: finalContracts.length,
+    totalMatches,
+    rejectionCount,
+    filterApplied: { ...filter },
+    filterSummary: summaryParts.join(", ") || "Live E*TRADE option chains",
+    contracts: finalContracts,
+    scannedAt: new Date().toISOString(),
+    quoteQuality: {
+      maxAgeSeconds: filter.maxQuoteAgeSeconds,
+      referenceAgeSeconds: filter.maxQuoteAgeSeconds ?? config.defaultQuoteAgeSeconds,
+      staleContractsReturned: staleReturned.length,
+      unknownFreshnessContracts: unknownFreshness.length,
+      ...(staleQuoteAges.length > 0 ? { freshestStaleQuoteAgeSeconds: Math.min(...staleQuoteAges) } : {}),
+    },
+    status: finalContracts.length > 0 ? "matches_found" : "no_matches",
+    rejections: rejections.slice(0, config.maxRejectionsReturned),
+    ...(fetchErrors.length > 0 ? { fetchErrors } : {}),
+    ...(warnings.length > 0 ? { warnings } : {}),
+  };
+}
+
 export class DynamicOptionsScreener {
   private source?: OptionChainSource;
   public config: EtapiScreenerConfig;
@@ -568,25 +757,42 @@ export class DynamicOptionsScreener {
    * symbols are fetched through a bounded concurrency pool, and upstream failures are reported
    * via `fetchErrors` with `status: "error"` when nothing could be fetched.
    */
-  async screenOptions(
+  /**
+   * Issue #3186 - the fetch half of screenOptions, split out so the
+   * options pipeline's chainFetch stage wraps the same function.
+   * Sanitizes, validates, resolves underlyings, fetches chains per
+   * symbol (with the #915 retry pass and the #1204 deferral
+   * accounting), and flattens + reports diagnostics. Validation
+   * failures throw OptionsValidationError (never an error result -
+   * the caller decides the result shape).
+   */
+  async fetchChains(
     rawFilter: OptionScreenerFilter = {},
     budget: SubrequestBudget = createSubrequestBudget(this.config.subrequestBudget)
-  ): Promise<OptionScreenResult> {
+  ): Promise<{
+    filter: OptionScreenerFilter;
+    warnings: string[];
+    symbols: string[];
+    chains: Array<{ symbol: string; chain: ETradeOptionChain }>;
+    fetchErrors: OptionScreenFetchError[];
+    expirationsTruncated: number;
+    deferredSymbols: string[];
+  }> {
     const { filter, warnings } = sanitizeOptionScreenerFilter(rawFilter, this.config);
 
     if (filter.sector && !["all", "any"].includes(filter.sector.toLowerCase())) {
-      return {
-        ...this.evaluateChains([], filter, 0, { warnings }),
-        status: "error",
-        validationError: "The dynamic all-listings feed does not include sector classifications; remove the sector filter or specify underlying symbols.",
-      };
+      throw new OptionsValidationError(
+        "The dynamic all-listings feed does not include sector classifications; remove the sector filter or specify underlying symbols.",
+        filter,
+        warnings,
+      );
     }
     if ((!filter.underlyingSymbols || filter.underlyingSymbols.length === 0) && filter.maxUnderlyings === undefined) {
-      return {
-        ...this.evaluateChains([], filter, 0, { warnings }),
-        status: "error",
-        validationError: "Specify underlying symbols or set the visible maximum-underlyings limit before scanning option chains.",
-      };
+      throw new OptionsValidationError(
+        "Specify underlying symbols or set the visible maximum-underlyings limit before scanning option chains.",
+        filter,
+        warnings,
+      );
     }
 
     const symbols = await this.resolveUnderlyings(filter);
@@ -640,8 +846,29 @@ export class DynamicOptionsScreener {
       );
     }
 
-    const result = this.evaluateChains(chains, filter, symbols.length, { fetchErrors, warnings });
-    if (fetchErrors.length > 0 && chains.length === 0) {
+    return { filter, warnings, symbols, chains, fetchErrors, expirationsTruncated, deferredSymbols };
+  }
+
+  async screenOptions(
+    rawFilter: OptionScreenerFilter = {},
+    budget: SubrequestBudget = createSubrequestBudget(this.config.subrequestBudget)
+  ): Promise<OptionScreenResult> {
+    let fetched: Awaited<ReturnType<DynamicOptionsScreener["fetchChains"]>>;
+    try {
+      fetched = await this.fetchChains(rawFilter, budget);
+    } catch (err) {
+      if (err instanceof OptionsValidationError) {
+        return {
+          ...this.evaluateChains([], err.filter, 0, { warnings: err.warnings }),
+          status: "error",
+          validationError: err.message,
+        };
+      }
+      throw err;
+    }
+
+    const result = this.evaluateChains(fetched.chains, fetched.filter, fetched.symbols.length, { fetchErrors: fetched.fetchErrors, warnings: fetched.warnings });
+    if (fetched.fetchErrors.length > 0 && fetched.chains.length === 0) {
       result.status = "error";
     }
     return result;
@@ -653,134 +880,18 @@ export class DynamicOptionsScreener {
     totalUnderlyingsScanned = new Set(chains.map((chain) => chain.symbol)).size,
     diagnostics: { fetchErrors?: OptionScreenFetchError[]; warnings?: string[] } = {}
   ): OptionScreenResult {
-    const symbols = Array.from(new Set(chains.map((c) => c.symbol)));
-    const summaryParts: string[] = [];
-
-    if (symbols.length <= 5) {
-      summaryParts.push(`Symbols: [${symbols.join(", ")}]`);
-    } else {
-      summaryParts.push(`${symbols.length} Symbols`);
-    }
-
-    if (filter.maxUnderlyings !== undefined) summaryParts.push(`Max underlyings: ${filter.maxUnderlyings}`);
-    if (filter.sector && !["all", "any"].includes(filter.sector.toLowerCase())) summaryParts.push(`Sector: ${filter.sector}`);
-    if (filter.contractType && filter.contractType !== "BOTH") summaryParts.push(`Type: ${filter.contractType}`);
-    if (filter.minDelta !== undefined) summaryParts.push(`Delta >= ${filter.minDelta}`);
-    if (filter.maxDelta !== undefined) summaryParts.push(`Delta <= ${filter.maxDelta}`);
-    if (filter.minGamma !== undefined) summaryParts.push(`Gamma >= ${filter.minGamma}`);
-    if (filter.maxGamma !== undefined) summaryParts.push(`Gamma <= ${filter.maxGamma}`);
-    if (filter.minTheta !== undefined) summaryParts.push(`Theta >= ${filter.minTheta}`);
-    if (filter.maxTheta !== undefined) summaryParts.push(`Theta <= ${filter.maxTheta}`);
-    if (filter.minVega !== undefined) summaryParts.push(`Vega >= ${filter.minVega}`);
-    if (filter.maxVega !== undefined) summaryParts.push(`Vega <= ${filter.maxVega}`);
-    if (filter.minRho !== undefined) summaryParts.push(`Rho >= ${filter.minRho}`);
-    if (filter.maxRho !== undefined) summaryParts.push(`Rho <= ${filter.maxRho}`);
-    if (filter.minImpliedVolatility !== undefined) summaryParts.push(`IV >= ${(filter.minImpliedVolatility * 100).toFixed(0)}%`);
-    if (filter.maxImpliedVolatility !== undefined) summaryParts.push(`IV <= ${(filter.maxImpliedVolatility * 100).toFixed(0)}%`);
-    if (filter.minVolume !== undefined) summaryParts.push(`Min Vol >= ${filter.minVolume}`);
-    if (filter.minOpenInterest !== undefined) summaryParts.push(`Min OI >= ${filter.minOpenInterest}`);
-    if (filter.maxSpreadPct !== undefined) summaryParts.push(`Max spread <= ${filter.maxSpreadPct}%`);
-    if (filter.maxQuoteAgeSeconds !== undefined) summaryParts.push(`Quote age <= ${filter.maxQuoteAgeSeconds}s`);
-    if (filter.minPrice !== undefined) summaryParts.push(`Premium >= $${filter.minPrice}`);
-    if (filter.maxPrice !== undefined) summaryParts.push(`Premium <= $${filter.maxPrice}`);
-    if (filter.minDte !== undefined || filter.maxDte !== undefined) {
-      summaryParts.push(`DTE: ${filter.minDte ?? 0}d - ${filter.maxDte ?? 365}d`);
-    }
-    if (filter.moneyness && filter.moneyness !== "ALL") summaryParts.push(`Moneyness: ${filter.moneyness}`);
-    if (filter.sortBy && filter.sortBy !== "volume") summaryParts.push(`Sort: ${filter.sortBy}`);
-
-    const rejections: OptionScreenRejection[] = [];
-    const rejectionCounter = { total: 0 };
-    const passedContracts: ScreenedOptionContractItem[] = [];
-    let totalContractsEvaluated = 0;
-
-    for (const item of chains) {
-      const sym = item.symbol;
-      const chain = item.chain;
-      if (!chain || !chain.pairs || chain.pairs.length === 0) continue;
-
-      const underlyingPrice = chain.underlyingPrice;
-      const expiry = chain.selectedExpiry;
-      if (!underlyingPrice || underlyingPrice <= 0 || !expiry) continue;
-
-      const expDateStr = `${expiry.year}-${String(expiry.month).padStart(2, "0")}-${String(expiry.day).padStart(2, "0")}`;
-      const expiryDateObj = new Date(Date.UTC(expiry.year, expiry.month - 1, expiry.day));
-      const nowObj = new Date();
-      const diffMs = expiryDateObj.getTime() - nowObj.getTime();
-      const daysToExpiration = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-      if (daysToExpiration < 0) continue;
-      const context: ContractScreenContext = {
-        symbol: sym,
-        expiry,
-        expirationDate: expDateStr,
-        daysToExpiration,
-        underlyingPrice,
-      };
-
-      for (const pair of chain.pairs) {
-        const candidates: ETradeOptionChainContract[] = [];
-        if (filter.contractType === "PUT") {
-          if (pair.put) candidates.push(pair.put);
-        } else if (filter.contractType === "CALL") {
-          if (pair.call) candidates.push(pair.call);
-        } else {
-          if (pair.call) candidates.push(pair.call);
-          if (pair.put) candidates.push(pair.put);
-        }
-
-        for (const c of candidates) {
-          totalContractsEvaluated++;
-
-          const outcome = evaluateContract(c, context, filter, this.config);
-          if (outcome.rejection) {
-            rejectionCounter.total++;
-            if (rejections.length < this.config.maxRejectionsReturned) rejections.push(outcome.rejection);
-          } else if (outcome.item) {
-            passedContracts.push(outcome.item);
-          }
-        }
-      }
-    }
-
-    sortScreenedContracts(passedContracts, filter.sortBy);
-
-    const totalMatches = passedContracts.length;
-    const effectiveLimit = filter.limit && filter.limit > 0 ? filter.limit : this.config.maxReturnedContracts;
-    const finalContracts = passedContracts.slice(0, effectiveLimit);
-    const warnings = [...(diagnostics.warnings ?? [])];
-    if (totalMatches > finalContracts.length) {
-      warnings.push(`Returned ${finalContracts.length} of ${totalMatches} matching contracts (limit ${effectiveLimit}).`);
-    }
-
-    const staleReturned = finalContracts.filter((contract) => contract.quoteFreshness === "STALE");
-    const unknownFreshness = finalContracts.filter((contract) => contract.quoteFreshness === "UNKNOWN");
-    const staleQuoteAges = staleReturned
-      .map((contract) => contract.quoteAgeSeconds)
-      .filter((age): age is number => age !== undefined && Number.isFinite(age));
-    const fetchErrors = diagnostics.fetchErrors ?? [];
-
-    return {
+    // Issue #3186: the composition of evaluateContracts (enrich) +
+    // aggregateScreenResult (screen). Same signature, same results -
+    // the two callers (etradeOptionsScreen.ts fallback, OptionsDataAgent
+    // snapshot) and every existing test keep passing unchanged.
+    return aggregateScreenResult(
+      evaluateContracts(chains, filter, this.config),
+      chains,
+      filter,
       totalUnderlyingsScanned,
-      totalContractsEvaluated,
-      matchedCount: finalContracts.length,
-      totalMatches,
-      rejectionCount: rejectionCounter.total,
-      filterApplied: { ...filter },
-      filterSummary: summaryParts.join(", ") || "Live E*TRADE option chains",
-      contracts: finalContracts,
-      scannedAt: new Date().toISOString(),
-      quoteQuality: {
-        maxAgeSeconds: filter.maxQuoteAgeSeconds,
-        referenceAgeSeconds: filter.maxQuoteAgeSeconds ?? this.config.defaultQuoteAgeSeconds,
-        staleContractsReturned: staleReturned.length,
-        unknownFreshnessContracts: unknownFreshness.length,
-        ...(staleQuoteAges.length > 0 ? { freshestStaleQuoteAgeSeconds: Math.min(...staleQuoteAges) } : {}),
-      },
-      status: finalContracts.length > 0 ? "matches_found" : "no_matches",
-      rejections: rejections.slice(0, this.config.maxRejectionsReturned),
-      ...(fetchErrors.length > 0 ? { fetchErrors } : {}),
-      ...(warnings.length > 0 ? { warnings } : {}),
-    };
+      diagnostics,
+      this.config,
+    );
   }
 }
 

@@ -68,3 +68,49 @@ export type TradeApprovalStepId = (typeof TRADE_APPROVAL_STEP_IDS)[number];
 export const OPTIONS_SCREEN_PHASES = ["provider-screen", "report-pipeline", "deliver"] as const;
 
 export type OptionsScreenPhase = (typeof OPTIONS_SCREEN_PHASES)[number];
+
+/**
+ * Issue #3186 - the options pipeline's stage ids. The staged
+ * producer/consumer pipeline supersedes the request handler as the
+ * execution path, so its stages are the family's pipeline ids (the
+ * #3191 phases above stay valid until step 3 retires them, when the
+ * pipeline replaces the #3072 seam emitter entry by entry). Each id
+ * pins to a real call (see tests/stage_families_3186.test.ts):
+ * plan -> parseOptionsScreenRequest / optionsPlanBlock; chainFetch ->
+ * fetchChainsForSymbol; enrich -> signal computation + enrichment
+ * inside the screen path; screen -> screenOptions / evaluateChains;
+ * risk -> assessSagaTradeRisk; persistCanonicalResults -> canonical
+ * mas_opportunity_scans write; shapeReport -> runPanelPipeline;
+ * deliver -> deliverScreenerToSlackA2A.
+ */
+export const OPTIONS_PIPELINE_STAGES = [
+  "plan",
+  "chainFetch",
+  "enrich",
+  "screen",
+  "risk",
+  "persistCanonicalResults",
+  "shapeReport",
+  "deliver",
+] as const;
+
+export type OptionsPipelineStage = (typeof OPTIONS_PIPELINE_STAGES)[number];
+
+/**
+ * The per-run persisted-analysis key family (moved here from
+ * stageReportProduction.ts by #3186 step 3e). stageQueueTransport
+ * needs only this key helper, and importing the whole report
+ * production module from the transport dragged the server-only
+ * report chain (stockReportArtifacts -> unifiedReportPipeline ->
+ * ReportAssetAgent -> the agents SDK, `cloudflare:workers`) into
+ * the browser bundle and broke the client build - the same failure
+ * class #3191's header documents for the catalog. This file is
+ * pure data with zero imports, so the transport can use the key
+ * without the chain. stageReportProduction re-exports it, so
+ * existing import paths keep working.
+ */
+export const STAGE_ANALYSIS_KEY_PREFIX = "screener:analysis:";
+
+export function stageAnalysisKey(timestamp: string): string {
+  return `${STAGE_ANALYSIS_KEY_PREFIX}${timestamp}`;
+}

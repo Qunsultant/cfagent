@@ -17,7 +17,7 @@
 
 import { STAGE_NAMES, type StageName } from "../messaging/messagingPorts";
 import {
-  OPTIONS_SCREEN_PHASES,
+  OPTIONS_PIPELINE_STAGES,
   PAYMENT_STEP_IDS,
   SAGA_STEP_IDS,
   TRADE_APPROVAL_STEP_IDS,
@@ -198,33 +198,45 @@ const STOCK_SCREENER: WorkflowDeclaration = {
   ],
 };
 
-/** The options screener: second family, same seam, per-format store legs. */
+/** The options screener: second family, same seam, per-format store legs.
+ * Issue #3186 (step 3d): the runtime is the one options pipeline - the
+ * catalog's display stages partition its eight execution stages (feed
+ * covers plan/chainFetch/enrich/screen/risk; store covers
+ * persistCanonicalResults; serve covers shapeReport; deliver covers
+ * deliver). The legacy #3191 phases are retired (their only publisher
+ * was the #3072 emitter, called only by the manual handler). */
 const OPTIONS_SCREENER: WorkflowDeclaration = {
   id: "options-screener",
   family: "options",
   labelKey: "workflow.options-screener",
   label: "Options screener",
   stageSeam: true,
-  runtimeSteps: OPTIONS_SCREEN_PHASES,
+  runtimeSteps: OPTIONS_PIPELINE_STAGES,
   runnable: true,
   runPath: "?tab=options-screener",
   stages: [
     stage("feed", {
       persists: "options-chains",
-      publishes: ["provider-screen"],
+      publishes: ["plan", "chainFetch", "enrich", "screen", "risk"],
       consumes: null,
-      runtimeStageIds: ["provider-screen"],
+      runtimeStageIds: ["plan", "chainFetch", "enrich", "screen", "risk"],
     }),
     stage("store", {
-      persists: "per-format-artifacts",
-      publishes: ["report-pipeline"],
+      persists: "canonical-report",
+      publishes: ["persistCanonicalResults"],
       consumes: "options-chains",
-      runtimeStageIds: ["report-pipeline"],
+      runtimeStageIds: ["persistCanonicalResults"],
+    }),
+    stage("serve", {
+      persists: "served-report",
+      publishes: ["shapeReport"],
+      consumes: "canonical-report",
+      runtimeStageIds: ["shapeReport"],
     }),
     stage("deliver", {
       persists: "delivery-state",
       publishes: ["deliver"],
-      consumes: "per-format-artifacts",
+      consumes: "served-report",
       runtimeStageIds: ["deliver"],
     }),
   ],

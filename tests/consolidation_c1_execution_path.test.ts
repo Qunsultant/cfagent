@@ -832,8 +832,19 @@ describe("C1: production callers exist (source pins)", () => {
     expect(src).toContain("runProductionGoalScreen");
   });
 
-  it("the options screen route executes through the Phase 0 options provider", () => {
+  it("the options screen route executes through the one options pipeline (#3186)", () => {
+    // Old pin asserted the manual screen route ran through the Phase 0
+    // ScreeningProvider; #3186 step 3d moved the route onto the one options
+    // pipeline, and the provider now lives only on the
+    // strategy-recommendation path (next test). This pin proves the route
+    // runs the pipeline via its ports.
     const src = readSrc("agents/routes/etradeOptionsScreen.ts");
+    expect(src).toContain("runOptionsScreenWorkflow");
+    expect(src).toContain("createOptionsScreenPorts");
+  });
+
+  it("the strategy-recommendation path still executes through the Phase 0 options provider", () => {
+    const src = readSrc("agents/routes/etradeOptions.ts");
     expect(src).toContain("createOptionsScreeningProvider");
     expect(src).toContain("OPTIONS_SCREENING_PROVIDER_ID");
   });

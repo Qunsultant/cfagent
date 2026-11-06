@@ -11,10 +11,9 @@
  * IS a composition of stock-leg + options-leg Blocks; a broker
  * single-asset screen IS one leg Block — same legs, same stages,
  * same contracts. The stock leg's stages are the #2869 named
- * stages; the options leg's stages are PROPOSED here, aligned to
- * the stock names (options stage ids are not yet a #2869
- * contract — generalizing #2869 is a named follow-up, not a
- * parallel contract). Structure selection (taxonomy structures)
+ * stages; the options leg's stages are the #3186 pipeline stages
+ * (step 1 generalized the #2869 contract onto them, pinned to real
+ * calls). Structure selection (taxonomy structures)
  * is plan-time input to the options leg, not an execution leg:
  * no strategy execution leg exists today, so the goal
  * composition refs exactly the two screen legs.
@@ -283,15 +282,16 @@ export const SAGA_BLOCKS: BlockDefinition[] = [
       { name: "outcome", type: "string", required: true },
     ],
     stageContract: {
-      // PROPOSED here, aligned to the stock names: options stage
-      // ids are not yet a #2869 contract (generalizing #2869 is
-      // a named follow-up, not a parallel contract).
+      // #3186 step 1: the options stage ids are the #2869 contract
+      // now (generalized by step 1), pinned to real calls in
+      // tests/stage_families_3186.test.ts - no longer the Phase A
+      // stock-aligned proposal.
       stageIds: [
         "plan",
-        "fetchChains",
+        "chainFetch",
         "enrich",
-        "applyFilters",
-        "rankAndGrade",
+        "screen",
+        "risk",
         "persistCanonicalResults",
         "shapeReport",
         "deliver",

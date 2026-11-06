@@ -1,6 +1,13 @@
 /**
  * Issue #3072 (S2 under #3069) - the options seam.
  *
+ * RETIRED (#3186 step 3d): no live caller remains. The manual handler
+ * was the seam's only caller and now runs the one options pipeline,
+ * which publishes per-stage messages instead. The module stays (no
+ * deletion) with its contract tests, as the seam's record - its
+ * successor is the pipeline's per-stage publishing
+ * (optionsScreenWorkflow + stageQueueTransport).
+ *
  * Options is the awkward family and it is worth being explicit about why:
  * an options screen is a **request handler**, not a durable workflow. There
  * is no `step.do`, so there is no platform-persisted step record to point a

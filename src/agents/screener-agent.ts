@@ -1588,6 +1588,19 @@ export class ScreenerAgent extends PortThink {
       req.environment
     );
     const { runProductionGoalScreen, createYahooStockScreener, createLiveStockScreener } = await import("../services/screeningRuntime");
+    // Issue #3186 (step 3c): the goal options leg runs the one
+    // options pipeline. The agent supplies the pipeline's deps: the
+    // same screener instance, this DO's storage (checkpoint
+    // artifacts), the goal leg's shapeReport/deliver (report section +
+    // handoff to the goal run's delivery), the durable stage claims,
+    // and the shared screener-events queue. NO canonical store: the
+    // leg builds its canonical record in-memory and writes no
+    // canonical row — the goal run's row (written by the caller via
+    // its own ORM) is the single canonical home (#783); this DO's
+    // store is a different SQLite, so writing there would be a
+    // second home.
+    const { createGoalOptionsLegDelivery } = await import("../workflows/goalOptionsLeg");
+    const { createSqlStageClaimStore } = await import("../data/stageClaimsStore");
     // Issue #1571: a Yahoo goal run binds the platform Yahoo provider
     // exactly like runScreen's #1317 block — bootstrap, verify→enable,
     // and bind the pipeline deps over the quotes route. The options
@@ -1816,6 +1829,14 @@ export class ScreenerAgent extends PortThink {
         : TradingPlatformRegistry.getPlatform(selectedBroker, this.env, this.getOrm?.(), userLogin, req.environment);
     const neutralChainSource = goalPlatform ? platformChainSource(goalPlatform) : null;
     const neutralQuoteSource = goalPlatform ? platformQuoteSource(goalPlatform) : null;
+    // Issue #3186 step 3c: this same instance is the goal leg's
+    // screener (runProductionGoalScreen hands it to the leg as the
+    // workflow screener), so the neutral chain source reaches the
+    // leg too — not just the registry path.
+    const optionsScreener =
+      neutralChainSource && selectedBroker !== "etrade"
+        ? new DynamicOptionsScreener(neutralChainSource, undefined, goalUniverseDeps)
+        : new DynamicOptionsScreener(etrade.client, undefined, goalUniverseDeps);
     const out = await runProductionGoalScreen({
       ledger: this.taskLedger(),
       ...(neutralQuoteSource
@@ -1826,10 +1847,7 @@ export class ScreenerAgent extends PortThink {
         : stockScreener
           ? { stockScreener }
           : {}),
-      optionsScreener:
-        neutralChainSource && selectedBroker !== "etrade"
-          ? new DynamicOptionsScreener(neutralChainSource, undefined, goalUniverseDeps)
-          : new DynamicOptionsScreener(etrade.client, undefined, goalUniverseDeps),
+      optionsScreener,
       scenario: req.scenario,
       trigger: req.trigger,
       idempotencyKey: req.idempotencyKey,
@@ -1838,6 +1856,12 @@ export class ScreenerAgent extends PortThink {
       symbols: req.symbols,
       baseStockFilter: req.baseStockFilter,
       baseOptionsFilter: req.baseOptionsFilter,
+      optionsWorkflow: {
+        storage: this.ctx.storage,
+        ...createGoalOptionsLegDelivery({ goalRunId: `goal-screen:${req.idempotencyKey}` }),
+        claims: createSqlStageClaimStore(() => this.ctx.storage.sql),
+        queue: (this.env as { SCREENER_EVENTS?: { send: (body: unknown) => Promise<unknown> } }).SCREENER_EVENTS ?? null,
+      },
     });
     // Issue #1335: every completed goal-screen run — 0 hits included —
     // leaves PDF + XLSX + CSV artifacts in the blob store, mirroring

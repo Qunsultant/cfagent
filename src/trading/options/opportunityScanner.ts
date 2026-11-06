@@ -5,6 +5,7 @@
  */
 
 import { OptionsDataAgent } from "./optionsDataAgent";
+import type { OptionsDataSnapshot } from "./optionsDataAgent";
 import { StrategyRiskAgent, type StrategyScreenFilter } from "./strategyRiskAgent";
 import { RecommendationAgent, type BestTradePick, type RankedStrategy, type RiskProfile } from "./recommendationAgent";
 import type { EventCalendarInfo, StrategyCandidate, StrategyRequest } from "./strategyEngine";
@@ -1032,6 +1033,574 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promis
   return out;
 }
 
+export type OpportunityScanOptions = {
+  riskProfile?: RiskProfile;
+  strategyFilter?: StrategyScreenFilter;
+  limit?: number;
+  /**
+   * Issue #2600: ranked-candidate cap for the headline
+   * per_name_best list, kept separate from `limit` (fit
+   * pagination / row cap in strategy_fit mode). A number caps
+   * the headline list; "all" returns every opportunity (the
+   * explicit "all ranked" choice, never a large number).
+   * Absent = the historical top-10 headline cap.
+   */
+  candidateLimit?: number | "all";
+  /** Which strategy question to answer (issue #23); default
+   *  "per_name_best". In strategy_fit mode `limit` paginates `fits`
+   *  instead of `opportunities`. */
+  mode?: ScanMode;
+  /** Strategy-fit pagination offset into the fit rows; default 0. */
+  offset?: number;
+  /** Fit-gate overrides for this call (issue #24), merged over the
+   *  config defaults from getOpportunityScannerConfig(). */
+  fitGate?: Partial<FitGateParams>;
+  /** Issue #738: max symbols to scan. Defaults to MAX_SCAN_SYMBOLS (20)
+   *  — the schedule passes its maxItems (100) to scan the full universe. */
+  maxSymbols?: number;
+  /** Saved strategy profile to run under (issue #28): its
+   *  StrategyRequest-level fields fill the template wherever the
+   *  caller did not declare the field explicit (see
+   *  `explicitFields`), its fitGate layers between the config
+   *  defaults and `fitGate`, and its riskProfile / mode apply
+   *  unless declared explicit. The applied profile is disclosed in
+   *  `assumptions` and stamped into `profileRef` +
+   *  `requestSnapshot.profile`. */
+  profile?: StrategyProfile;
+  /** Field names the caller declares as request-expressed for the
+   *  profile merge (issue #28): template-level StrategyRequest
+   *  fields (thesis, maxPlannedLoss, ...) plus the option-level
+   *  declarations "riskProfile" and "mode". Declared fields keep
+   *  the caller's values; the profile supplies the rest. */
+  explicitFields?: string[];
+  /** Clock override for deterministic provenance (issue #27): the
+   *  result's `generatedAt` is stamped from this instant instead of
+   *  the wall clock. */
+  now?: Date;
+  /** Per-name earnings/dividend calendar facts (issue #16),
+   *  pre-fetched by the caller from the calendar service
+   *  (src/services/eventCalendar.ts). The scanner never fetches.
+   *  Names absent from the map — or present with covered: false —
+   *  are treated as unverified by the engine, and every scanned
+   *  name counts toward coverage.eventCalendar either way. */
+  eventCalendarBySymbol?: Record<string, EventCalendarInfo>;
+};
+
+
+/**
+ * Issue #3186 step 3e - the opportunity scanner's stages, extracted
+ * from OpportunityScanner.scan so the one options pipeline can run
+ * them as pipeline stages (plan -> chainFetch -> enrich -> screen ->
+ * risk -> persistCanonicalResults -> shapeReport -> deliver). scan()
+ * is the composition of these functions, in order; the existing
+ * scanner suites pin the behavior, and the pipeline equivalence pin
+ * (tests/scanner_screen_workflow_3186.test.ts) proves the pipeline
+ * reproduces scan() exactly.
+ *
+ * Two notes on the split. (1) Skipped order: scan() pushed skips in
+ * fetch-completion order under concurrency; the stages return skips
+ * per stage, and collation re-sorts them by batch index, so the
+ * result's skipped list is now deterministic batch order. The
+ * existing suites already compare skips as a map for this reason
+ * (tests/options_scanner.test.ts:316). (2) The fit gate runs as its
+ * own risk stage: the screen stage builds the matrix row and the
+ * pick; the risk stage fills gateBucket/gateReasons on the row and
+ * builds the opportunity row (which the type requires to carry a
+ * gate verdict, so it cannot exist before the gate runs).
+ */
+
+export interface ScanPlan {
+  unique: string[];
+  batch: string[];
+  effectiveTemplate: ScanRequestTemplate;
+  requestTemplate: ScanRequestTemplate;
+  strategyProfile?: StrategyProfile;
+  appliedProfileFields: string[];
+  profile: RiskProfile;
+  mode: ScanMode;
+  gate: FitGateParams;
+  assumptions: string[];
+  eventCalendarCoverage: { covered: number; total: number; coveragePct: number };
+  // Narrowed by normalizeScanPlan's no-view throw: a plan never carries "no-view".
+  scanMode: Exclude<ReturnType<typeof resolveStrategyMode>, "no-view">;
+  dataMaxDte: number;
+  expirationDteBands: ReturnType<typeof deriveFetchBands>["bands"];
+}
+
+export interface ScanSkipped {
+  symbol: string;
+  reason: string;
+  matrix: ScanMatrixRow;
+}
+
+export interface ScanSnapshotRow {
+  symbol: string;
+  snapshot: OptionsDataSnapshot;
+}
+
+export interface ScanEnrichedRow {
+  symbol: string;
+  snapshot: OptionsDataSnapshot;
+  price: number;
+  targetPrice: number;
+  targetSource: ScanTargetSource;
+  targetEmUnits: number | null;
+  request: StrategyRequest;
+}
+
+export interface ScanScreenedRow {
+  symbol: string;
+  request: StrategyRequest;
+  pick: BestTradePick;
+  cells: ScanMatrixCell[];
+  matrix: ScanMatrixRow;
+  price: number;
+  targetPrice: number;
+  targetSource: ScanTargetSource;
+  targetEmUnits: number | null;
+}
+
+export interface ScanAssessedRow extends ScanScreenedRow {
+  opportunity: OpportunityRow | null;
+}
+
+/** A skipped symbol's matrix row: never evaluated, never gate-judged. */
+export function skippedScanMatrixRow(symbol: string, reason: string): ScanMatrixRow {
+  return {
+    symbol,
+    verdict: "skipped",
+    skipReason: reason,
+    targetPrice: null,
+    targetSource: null,
+    targetEmUnits: null,
+    cells: [],
+    gateBucket: null,
+    gateReasons: [],
+  };
+}
+
+export function normalizeScanPlan(
+  symbols: string[],
+  template: ScanRequestTemplate,
+  options: OpportunityScanOptions = {},
+): ScanPlan {
+  const unique = [...new Set(symbols.map((s) => s.trim().toUpperCase()).filter(Boolean))];
+  // Issue #738: respect the caller's maxSymbols instead of the hardcoded
+  // 20-symbol cap. The schedule asks for 100; truncating to 20 then failing
+  // the run for "incomplete universe" is self-inflicted.
+  const maxSymbols = options.maxSymbols ?? MAX_SCAN_SYMBOLS;
+  const batch = unique.slice(0, maxSymbols);
+  // Issue #16: per-run event-calendar coverage over the scanned batch,
+  // reported in the result's coverage (and disclosed in assumptions
+  // when the caller supplied calendars at all).
+  const eventCalendarCovered = batch.filter((s) => options.eventCalendarBySymbol?.[s]?.covered).length;
+  const eventCalendarCoverage = {
+    covered: eventCalendarCovered,
+    total: batch.length,
+    coveragePct: batch.length ? Math.round((eventCalendarCovered / batch.length) * 1000) / 10 : 0,
+  };
+  // Saved strategy profile (issue #28): the profile is the BASE layer
+  // of this scan — everything downstream (request building, target
+  // resolution, the fit gate, the provenance snapshot) runs on the
+  // EFFECTIVE values computed here, never on the raw inputs.
+  const strategyProfile = options.profile;
+  const explicitSet = new Set(options.explicitFields ?? []);
+  let effectiveTemplate = template;
+  let appliedProfileFields: string[] = [];
+  if (strategyProfile) {
+    const applied = applyProfileFields(template, strategyProfile, explicitSet);
+    effectiveTemplate = applied.merged;
+    appliedProfileFields = applied.appliedFields;
+  }
+  // An omitted ceiling follows the screener's default near-leg horizon.
+  // Strategy-specific catalog requirements extend only the acquired data
+  // window; the engine keeps those long expiries isolated to strategies
+  // that declare the corresponding DTE floor.
+  effectiveTemplate = {
+    ...effectiveTemplate,
+    maxDte: effectiveTemplate.maxDte ?? DEFAULT_MAX_DTE,
+  };
+  const profileGateApplied = strategyProfile?.fitGate !== undefined;
+  const profile = explicitSet.has("riskProfile")
+    ? options.riskProfile ?? "balanced"
+    : strategyProfile?.riskProfile ?? options.riskProfile ?? "balanced";
+  const mode = explicitSet.has("mode")
+    ? options.mode ?? "per_name_best"
+    : strategyProfile?.mode ?? options.mode ?? "per_name_best";
+  const gate: FitGateParams = { ...baseOppConfig.fitGate, ...(strategyProfile?.fitGate ?? {}), ...options.fitGate };
+  const overrideAssumption = scanOverrideAssumption(effectiveTemplate, batch);
+  const assumptions = [
+    ...scanTargetAssumptions(effectiveTemplate),
+    ...(overrideAssumption ? [overrideAssumption] : []),
+    ...(strategyProfile ? [profileDisclosure(strategyProfile, appliedProfileFields, profileGateApplied)] : []),
+    ...(options.eventCalendarBySymbol
+      ? [`Earnings/dividend calendar coverage: ${eventCalendarCoverage.covered} of ${eventCalendarCoverage.total} names (${eventCalendarCoverage.coveragePct}%). Names without coverage were judged with event risk unverified.`]
+      : []),
+  ];
+  // The stated target and the per-name overrides are scan-level scoping
+  // metadata, not request fields: strip them so per-symbol
+  // StrategyRequests stay exactly StrategyRequest-shaped. A
+  // template-level eventCalendar is stripped for a different reason
+  // (issue #16): calendar facts belong to one name and must never
+  // leak across the batch — per-symbol calendars arrive only via
+  // options.eventCalendarBySymbol.
+  const { statedTarget: _statedTarget, perSymbol: _perSymbol, eventCalendar: _templateEventCalendar, ...requestTemplate } = effectiveTemplate;
+  const resolvedStrategies = new Set(defaultRegistry.resolveMany(requestTemplate.allowedStrategies).ids);
+  const scanTheses = new Set([
+    requestTemplate.thesis,
+    ...Object.values(effectiveTemplate.perSymbol ?? {}).flatMap((override) => override.thesis ? [override.thesis] : []),
+  ]);
+  // Issue #2600 (slice-2 fix (c), carried over): fetch selection
+  // applies the SAME mode resolution as the engine. Previously it
+  // was always thesis-filtered, so in mode "all" a long-horizon
+  // contra-thesis strategy was judged by the engine but never
+  // fetched — it could never build. Thesis mode is unchanged: the
+  // per-symbol override theses still widen the thesis set, exactly
+  // as before. farDated === false suppresses horizon bands (the
+  // far templates are then horizon-limited, named in the scan's
+  // strategyCoverage via dataMaxDte); absent/true keeps the legacy
+  // horizon bands, so existing scheduled scans are unaffected.
+  const scanMode = resolveStrategyMode(requestTemplate);
+  if (scanMode === "no-view") {
+    throw new Error("strategyMode \"no-view\" cannot run a viewed opportunity scan; use the no-view path (recommendNoViewStrategies)");
+  }
+  const selectedDefinitions = defaultRegistry.list()
+    .filter((def) => resolvedStrategies.has(def.id) && (scanMode === "all" || def.theses.some((thesis) => scanTheses.has(thesis))));
+  const nearMaxDte = requestTemplate.maxDte ?? DEFAULT_MAX_DTE;
+  const { bands: expirationDteBands, dataMaxDte } = deriveFetchBands({
+    selected: selectedDefinitions,
+    nearMinDte: requestTemplate.minDte ?? 0,
+    nearMaxDte,
+    farDated: requestTemplate.farDated,
+    nearMaxExpirations: MAX_EXPIRATIONS_PER_SYMBOL,
+  });
+  return {
+    unique,
+    batch,
+    effectiveTemplate,
+    requestTemplate,
+    strategyProfile,
+    appliedProfileFields,
+    profile,
+    mode,
+    gate,
+    assumptions,
+    eventCalendarCoverage,
+    scanMode,
+    dataMaxDte,
+    expirationDteBands,
+  };
+}
+
+export async function fetchScanSnapshots(
+  data: OptionsDataAgent,
+  plan: ScanPlan,
+): Promise<{ snapshots: ScanSnapshotRow[]; skipped: ScanSkipped[] }> {
+  // Issue #1204: ONE subrequest budget for the whole scan. Snapshots
+  // are fetched per symbol over a shared screener, so without a
+  // shared ledger each symbol would re-fan-out up to
+  // maxExpirationsPerSymbol chain fetches and the batch as a whole
+  // would trip the Worker per-invocation subrequest cap — the
+  // 100-of-100 failure mode. Symbols past the budget are deferred:
+  // their snapshot carries the named budget reason, which surfaces
+  // below as the skip reason.
+  const fetchBudget = data.createFetchBudget();
+  const fetched = await mapLimit(plan.batch, CONCURRENCY, async (symbol) => {
+    try {
+      const snapshot = await data.loadSnapshot({
+        ...plan.requestTemplate,
+        maxDte: plan.dataMaxDte,
+        expirationDteBands: plan.expirationDteBands,
+        symbol,
+        fetchBudget,
+      });
+      return { symbol, snapshot };
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : "Scan failed";
+      return { symbol, reason };
+    }
+  });
+  const snapshots: ScanSnapshotRow[] = [];
+  const skipped: ScanSkipped[] = [];
+  for (const entry of fetched) {
+    if (entry.snapshot) snapshots.push({ symbol: entry.symbol, snapshot: entry.snapshot });
+    else skipped.push({ symbol: entry.symbol, reason: entry.reason!, matrix: skippedScanMatrixRow(entry.symbol, entry.reason!) });
+  }
+  return { snapshots, skipped };
+}
+
+export function enrichScanSnapshots(
+  snapshots: ScanSnapshotRow[],
+  plan: ScanPlan,
+  options: OpportunityScanOptions = {},
+): { enriched: ScanEnrichedRow[]; skipped: ScanSkipped[] } {
+  const enriched: ScanEnrichedRow[] = [];
+  const skipped: ScanSkipped[] = [];
+  for (const { symbol, snapshot } of snapshots) {
+    try {
+      const price = snapshot.contracts[0]?.underlyingPrice;
+      if (!price) {
+        const reason = snapshot.validationError || snapshot.screen.fetchErrors?.[0]?.reason || "No eligible option contracts";
+        skipped.push({ symbol, reason, matrix: skippedScanMatrixRow(symbol, reason) });
+        continue;
+      }
+      // Per-name parameters (issue #23): this symbol's override steers
+      // its target resolution and, when it carries a thesis, the thesis
+      // its build/screen/pick run under. The snapshot load above stays
+      // on the shared template, as before.
+      const override = plan.effectiveTemplate.perSymbol?.[symbol];
+      // Expected-move estimate (issue #25): the 1-sigma move to expiry
+      // implied by this symbol's own chain, from the scan's clock so
+      // provenance-stamped runs stay reproducible. Null when the chain
+      // carries no usable IV — the symbol then resolves its thesis
+      // target from the legacy percentage factor and is named in the
+      // fallback disclosure below.
+      const emPct = estimateExpectedMovePct(snapshot.contracts, price, options.now ?? new Date());
+      const { targetPrice, source: targetSource, targetEmUnits } = resolveScanTarget(
+        plan.effectiveTemplate,
+        symbol,
+        price,
+        override,
+        emPct === null ? null : { pct: emPct },
+      );
+      const request: StrategyRequest = {
+        ...plan.requestTemplate,
+        symbol,
+        targetPrice,
+        thesis: override?.thesis ?? plan.requestTemplate.thesis,
+        eventCalendar: options.eventCalendarBySymbol?.[symbol],
+      };
+      enriched.push({ symbol, snapshot, price, targetPrice, targetSource, targetEmUnits, request });
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : "Scan failed";
+      skipped.push({ symbol, reason, matrix: skippedScanMatrixRow(symbol, reason) });
+    }
+  }
+  return { enriched, skipped };
+}
+
+export function screenScanCandidates(
+  enriched: ScanEnrichedRow[],
+  // The concrete agent: the scanner's engine-typed rank/pick calls
+  // need the tight StrategyCandidate / BestTradePick types, which the
+  // panel's looser structural agent types do not prove. The ports pass
+  // the real agent (see ScannerScreenAgents).
+  risk: StrategyRiskAgent,
+  // The concrete agent: the panel's PanelRecommender return types
+  // are too loose for the engine-typed rank/pick calls here (they
+  // admit MinimalEngineCandidate rows and a status-union pick). The
+  // ports cast the shared structural agent back to this concrete
+  // type at the call site; production always passes the real agent.
+  recommender: RecommendationAgent,
+  plan: ScanPlan,
+  options: OpportunityScanOptions = {},
+): { screened: ScanScreenedRow[]; skipped: ScanSkipped[] } {
+  const screened: ScanScreenedRow[] = [];
+  const skipped: ScanSkipped[] = [];
+  for (const row of enriched) {
+    try {
+      const built = risk.buildStrategies(row.snapshot.contracts, row.request);
+      const { matched, rejected } = risk.screenStrategies(built.candidates, options.strategyFilter);
+      // The fit matrix is additive: it reports every built/screened
+      // candidate per strategy type, ranked once via the recommender.
+      // The pick path below is unchanged and still uses pickBestTrade.
+      const cells = buildMatrixCells(
+        built.candidates,
+        rejected,
+        rankScannerCandidates(
+          (c, r, p) => recommender.rank(c, r, p),
+          matched,
+          row.request,
+          plan.profile,
+        ),
+      );
+      const pick = recommender.pickBestTrade(matched, row.request, plan.profile, 2);
+      const matrix: ScanMatrixRow = {
+        symbol: row.symbol,
+        verdict: cells.some((c) => c.passedCount > 0) ? "pass" : "no_pass",
+        targetPrice: row.targetPrice,
+        targetSource: row.targetSource,
+        targetEmUnits: row.targetEmUnits,
+        cells,
+        gateBucket: null,
+        gateReasons: [],
+      };
+      screened.push({ ...row, pick, cells, matrix });
+      if (!pick.best) {
+        skipped.push({ symbol: row.symbol, reason: pick.rationale[0] || "No qualifying strategy", matrix });
+      }
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : "Scan failed";
+      skipped.push({ symbol: row.symbol, reason, matrix: skippedScanMatrixRow(row.symbol, reason) });
+    }
+  }
+  return { screened, skipped };
+}
+
+export function assessScanRisk(
+  screened: ScanScreenedRow[],
+  plan: ScanPlan,
+): { assessed: ScanAssessedRow[]; gate: { fit: number; borderline: number; noFit: number } } {
+  const gate = { fit: 0, borderline: 0, noFit: 0 };
+  const assessed: ScanAssessedRow[] = [];
+  for (const row of screened) {
+    // The fit gate (issue #24) qualifies the pick: it rides on the
+    // matrix row (fit / borderline / no_fit) and on the opportunity
+    // row when a pick exists. The #22 verdict stays screen-pass.
+    const gateEval = evaluateFitGate(row.pick, plan.gate);
+    row.matrix.gateBucket = gateEval.bucket;
+    row.matrix.gateReasons = gateEval.reasons;
+    const opportunity: OpportunityRow | null = row.pick.best
+      ? {
+          symbol: row.symbol,
+          underlyingPrice: row.price,
+          targetPrice: row.targetPrice,
+          targetSource: row.targetSource,
+          targetEmUnits: row.targetEmUnits,
+          pick: row.pick,
+          score: row.pick.best.compositeScore,
+          gateBucket: gateEval.bucket,
+          gateReasons: gateEval.reasons,
+        }
+      : null;
+    assessed.push({ ...row, opportunity });
+    if (gateEval.bucket === "fit") gate.fit++;
+    else if (gateEval.bucket === "borderline") gate.borderline++;
+    else if (gateEval.bucket === "no_fit") gate.noFit++;
+  }
+  return { assessed, gate };
+}
+
+export function collateScanResult(
+  plan: ScanPlan,
+  assessed: ScanAssessedRow[],
+  skipped: ScanSkipped[],
+  options: OpportunityScanOptions = {},
+  gateCounts: { fit: number; borderline: number; noFit: number } = { fit: 0, borderline: 0, noFit: 0 },
+): OpportunityScanResult {
+  const opportunities = assessed
+    .map((a) => a.opportunity)
+    .filter((r): r is OpportunityRow => r !== null)
+    .sort((a, b) => b.score - a.score || a.symbol.localeCompare(b.symbol));
+  // Matrix rows in batch order: every symbol lands exactly once, from
+  // its assessed row or its skip entry.
+  const rowBySymbol = new Map<string, ScanMatrixRow>();
+  for (const entry of skipped) rowBySymbol.set(entry.symbol, entry.matrix);
+  for (const row of assessed) rowBySymbol.set(row.symbol, row.matrix);
+  const matrix = plan.batch.map((symbol) => rowBySymbol.get(symbol)!);
+  // Skips in deterministic batch order (see the header note).
+  const batchIndex = new Map(plan.batch.map((symbol, i) => [symbol, i]));
+  const orderedSkipped = [...skipped].sort(
+    (a, b) => (batchIndex.get(a.symbol) ?? 0) - (batchIndex.get(b.symbol) ?? 0),
+  );
+  const skippedList = orderedSkipped.map(({ symbol, reason }) => ({ symbol, reason }));
+  const fitRows = plan.mode === "strategy_fit" ? matrix.filter((m) => m.gateBucket === "fit") : [];
+  const offset = options.offset ?? 0;
+  const borderline = matrix.filter((m) => m.gateBucket === "borderline");
+  const assumptions = [...plan.assumptions];
+  // Target-basis disclosures (issue #25), assembled post-scan from the
+  // matrix rows so they are never asserted falsely: the EM line appears
+  // only when at least one evaluated symbol's target was actually
+  // EM-derived (a thesis derivation with an estimate, or an em
+  // override); the fallback line names every evaluated symbol whose
+  // chain yielded no estimate — its thesis target came from the legacy
+  // percentage factor (and an em override on it could not resolve).
+  // On an evaluated row, targetEmUnits is null exactly when no estimate
+  // existed for the symbol.
+  const evaluatedRows = matrix.filter((m) => m.verdict !== "skipped");
+  if (evaluatedRows.some((m) => m.targetSource === "em" || (m.targetSource === "thesis" && m.targetEmUnits !== null))) {
+    const mult = baseOppConfig.targetEmMultiples;
+    assumptions.push(
+      `Thesis-derived targets are expressed in expected-move units (bullish ${formatEmMultiple(mult.bullish)} EM, bearish ${formatEmMultiple(mult.bearish)} EM, large_move ${formatEmMultiple(mult.large_move)} EM, range_bound ${formatEmMultiple(mult.range_bound)} EM; 1 EM = the 1-sigma move to expiry implied by each name's own chain).`,
+    );
+  }
+  const emFallbackSymbols = evaluatedRows.filter((m) => m.targetEmUnits === null).map((m) => m.symbol);
+  if (emFallbackSymbols.length) {
+    assumptions.push(
+      `Expected-move estimate unavailable for ${emFallbackSymbols.join(", ")}; legacy percentage targets were used for those names.`,
+    );
+  }
+  // Provenance (issue #27): when the scan ran, which model produced
+  // it, exactly what was asked, the config it ran under, and how much
+  // of the requested universe was actually judged. Pure data — the
+  // scanner performs no I/O; persistence lives behind the
+  // ScanRunStore seam (src/trading/options/scanRunStore.ts).
+  const skippedRows = matrix.filter((m) => m.verdict === "skipped").length;
+  const coverage: ScanCoverage = {
+    considered: plan.unique.length,
+    scanned: plan.batch.length,
+    truncated: Math.max(0, plan.unique.length - plan.batch.length),
+    evaluated: matrix.length - skippedRows,
+    errors: skippedRows,
+    withTrades: opportunities.length,
+    eventCalendar: plan.eventCalendarCoverage,
+  };
+  // Issue #1290: stamp the qualified-partial marker at the single
+  // assembly point so every surface downstream inherits it.
+  const partial = optionsPartialQualification(coverage, skippedList);
+  return {
+    scanned: plan.batch.length,
+    withTrades: opportunities.length,
+    opportunities: opportunities.slice(0, plan.mode === "per_name_best"
+      ? (options.candidateLimit === "all" ? opportunities.length : (options.candidateLimit ?? options.limit ?? 10))
+      : 10),
+    skipped: skippedList,
+    truncatedSymbols: Math.max(0, plan.unique.length - plan.batch.length),
+    assumptions,
+    matrix,
+    typeRollup: rollupScanTypes(matrix),
+    mode: plan.mode,
+    fits: fitRows.slice(offset, options.limit === undefined ? undefined : offset + options.limit),
+    fitsTotal: fitRows.length,
+    gate: gateCounts,
+    borderline,
+    gateParams: plan.gate,
+    profileRef: plan.strategyProfile ? toProfileRef(plan.strategyProfile) : null,
+    generatedAt: (options.now ?? new Date()).toISOString(),
+    modelVersion: SCAN_MODEL_VERSION,
+    requestSnapshot: {
+      template: {
+        thesis: plan.effectiveTemplate.thesis,
+        targetDate: plan.effectiveTemplate.targetDate,
+        minDte: plan.effectiveTemplate.minDte,
+        maxDte: plan.effectiveTemplate.maxDte,
+        maxPlannedLoss: plan.effectiveTemplate.maxPlannedLoss,
+        minRewardRisk: plan.effectiveTemplate.minRewardRisk,
+        allowedStrategies: plan.effectiveTemplate.allowedStrategies,
+        evaluateAllStrategies: plan.effectiveTemplate.evaluateAllStrategies,
+        // Issue #2600: canonical mode + far-dated toggle as run, so
+        // a later reader need not re-derive them from the alias.
+        strategyMode: plan.scanMode,
+        farDated: plan.effectiveTemplate.farDated,
+        statedTarget: plan.effectiveTemplate.statedTarget,
+        perSymbol: plan.effectiveTemplate.perSymbol,
+      },
+      mode: plan.mode,
+      riskProfile: plan.profile,
+      strategyFilter: options.strategyFilter,
+      profile: plan.strategyProfile ?? null,
+    },
+    configSnapshot: {
+      maxScanSymbols: baseOppConfig.maxScanSymbols,
+      targetFactors: { ...baseOppConfig.targetFactors },
+      targetEmMultiples: { ...baseOppConfig.targetEmMultiples },
+    },
+    coverage,
+    ...(partial ? { partial } : {}),
+    // Issue #2091: the fetched horizon + which wanted strategies the
+    // fetched chain evaluated, so reports can name not-evaluated
+    // strategies with their reason instead of dropping them silently.
+    fetchedMaxDte: plan.dataMaxDte,
+    strategyCoverage: buildStrategyCoverage(
+      matrix,
+      plan.requestTemplate.allowedStrategies,
+      plan.dataMaxDte,
+      plan.scanMode,
+    ),
+  };
+}
+
+
 export class OpportunityScanner {
   private readonly data: OptionsDataAgent;
   private readonly risk = new StrategyRiskAgent();
@@ -1044,384 +1613,13 @@ export class OpportunityScanner {
   async scan(
     symbols: string[],
     template: ScanRequestTemplate,
-    options: {
-      riskProfile?: RiskProfile;
-      strategyFilter?: StrategyScreenFilter;
-      limit?: number;
-      /**
-       * Issue #2600: ranked-candidate cap for the headline
-       * per_name_best list, kept separate from `limit` (fit
-       * pagination / row cap in strategy_fit mode). A number caps
-       * the headline list; "all" returns every opportunity (the
-       * explicit "all ranked" choice, never a large number).
-       * Absent = the historical top-10 headline cap.
-       */
-      candidateLimit?: number | "all";
-      /** Which strategy question to answer (issue #23); default
-       *  "per_name_best". In strategy_fit mode `limit` paginates `fits`
-       *  instead of `opportunities`. */
-      mode?: ScanMode;
-      /** Strategy-fit pagination offset into the fit rows; default 0. */
-      offset?: number;
-      /** Fit-gate overrides for this call (issue #24), merged over the
-       *  config defaults from getOpportunityScannerConfig(). */
-      fitGate?: Partial<FitGateParams>;
-      /** Issue #738: max symbols to scan. Defaults to MAX_SCAN_SYMBOLS (20)
-       *  — the schedule passes its maxItems (100) to scan the full universe. */
-      maxSymbols?: number;
-      /** Saved strategy profile to run under (issue #28): its
-       *  StrategyRequest-level fields fill the template wherever the
-       *  caller did not declare the field explicit (see
-       *  `explicitFields`), its fitGate layers between the config
-       *  defaults and `fitGate`, and its riskProfile / mode apply
-       *  unless declared explicit. The applied profile is disclosed in
-       *  `assumptions` and stamped into `profileRef` +
-       *  `requestSnapshot.profile`. */
-      profile?: StrategyProfile;
-      /** Field names the caller declares as request-expressed for the
-       *  profile merge (issue #28): template-level StrategyRequest
-       *  fields (thesis, maxPlannedLoss, ...) plus the option-level
-       *  declarations "riskProfile" and "mode". Declared fields keep
-       *  the caller's values; the profile supplies the rest. */
-      explicitFields?: string[];
-      /** Clock override for deterministic provenance (issue #27): the
-       *  result's `generatedAt` is stamped from this instant instead of
-       *  the wall clock. */
-      now?: Date;
-      /** Per-name earnings/dividend calendar facts (issue #16),
-       *  pre-fetched by the caller from the calendar service
-       *  (src/services/eventCalendar.ts). The scanner never fetches.
-       *  Names absent from the map — or present with covered: false —
-       *  are treated as unverified by the engine, and every scanned
-       *  name counts toward coverage.eventCalendar either way. */
-      eventCalendarBySymbol?: Record<string, EventCalendarInfo>;
-    } = {}
+    options: OpportunityScanOptions = {},
   ): Promise<OpportunityScanResult> {
-    const unique = [...new Set(symbols.map((s) => s.trim().toUpperCase()).filter(Boolean))];
-    // Issue #738: respect the caller's maxSymbols instead of the hardcoded
-    // 20-symbol cap. The schedule asks for 100; truncating to 20 then failing
-    // the run for "incomplete universe" is self-inflicted.
-    const maxSymbols = options.maxSymbols ?? MAX_SCAN_SYMBOLS;
-    const batch = unique.slice(0, maxSymbols);
-    // Issue #16: per-run event-calendar coverage over the scanned batch,
-    // reported in the result's coverage (and disclosed in assumptions
-    // when the caller supplied calendars at all).
-    const eventCalendarCovered = batch.filter((s) => options.eventCalendarBySymbol?.[s]?.covered).length;
-    const eventCalendarCoverage = {
-      covered: eventCalendarCovered,
-      total: batch.length,
-      coveragePct: batch.length ? Math.round((eventCalendarCovered / batch.length) * 1000) / 10 : 0,
-    };
-    // Saved strategy profile (issue #28): the profile is the BASE layer
-    // of this scan — everything downstream (request building, target
-    // resolution, the fit gate, the provenance snapshot) runs on the
-    // EFFECTIVE values computed here, never on the raw inputs.
-    const strategyProfile = options.profile;
-    const explicitSet = new Set(options.explicitFields ?? []);
-    let effectiveTemplate = template;
-    let appliedProfileFields: string[] = [];
-    if (strategyProfile) {
-      const applied = applyProfileFields(template, strategyProfile, explicitSet);
-      effectiveTemplate = applied.merged;
-      appliedProfileFields = applied.appliedFields;
-    }
-    // An omitted ceiling follows the screener's default near-leg horizon.
-    // Strategy-specific catalog requirements extend only the acquired data
-    // window; the engine keeps those long expiries isolated to strategies
-    // that declare the corresponding DTE floor.
-    effectiveTemplate = {
-      ...effectiveTemplate,
-      maxDte: effectiveTemplate.maxDte ?? DEFAULT_MAX_DTE,
-    };
-    const profileGateApplied = strategyProfile?.fitGate !== undefined;
-    const profile = explicitSet.has("riskProfile")
-      ? options.riskProfile ?? "balanced"
-      : strategyProfile?.riskProfile ?? options.riskProfile ?? "balanced";
-    const mode = explicitSet.has("mode")
-      ? options.mode ?? "per_name_best"
-      : strategyProfile?.mode ?? options.mode ?? "per_name_best";
-    const gate: FitGateParams = { ...baseOppConfig.fitGate, ...(strategyProfile?.fitGate ?? {}), ...options.fitGate };
-    const skipped: OpportunityScanResult["skipped"] = [];
-    const overrideAssumption = scanOverrideAssumption(effectiveTemplate, batch);
-    const assumptions = [
-      ...scanTargetAssumptions(effectiveTemplate),
-      ...(overrideAssumption ? [overrideAssumption] : []),
-      ...(strategyProfile ? [profileDisclosure(strategyProfile, appliedProfileFields, profileGateApplied)] : []),
-      ...(options.eventCalendarBySymbol
-        ? [`Earnings/dividend calendar coverage: ${eventCalendarCoverage.covered} of ${eventCalendarCoverage.total} names (${eventCalendarCoverage.coveragePct}%). Names without coverage were judged with event risk unverified.`]
-        : []),
-    ];
-    // The stated target and the per-name overrides are scan-level scoping
-    // metadata, not request fields: strip them so per-symbol
-    // StrategyRequests stay exactly StrategyRequest-shaped. A
-    // template-level eventCalendar is stripped for a different reason
-    // (issue #16): calendar facts belong to one name and must never
-    // leak across the batch — per-symbol calendars arrive only via
-    // options.eventCalendarBySymbol.
-    const { statedTarget: _statedTarget, perSymbol: _perSymbol, eventCalendar: _templateEventCalendar, ...requestTemplate } = effectiveTemplate;
-    const resolvedStrategies = new Set(defaultRegistry.resolveMany(requestTemplate.allowedStrategies).ids);
-    const scanTheses = new Set([
-      requestTemplate.thesis,
-      ...Object.values(effectiveTemplate.perSymbol ?? {}).flatMap((override) => override.thesis ? [override.thesis] : []),
-    ]);
-    // Issue #2600 (slice-2 fix (c), carried over): fetch selection
-    // applies the SAME mode resolution as the engine. Previously it
-    // was always thesis-filtered, so in mode "all" a long-horizon
-    // contra-thesis strategy was judged by the engine but never
-    // fetched — it could never build. Thesis mode is unchanged: the
-    // per-symbol override theses still widen the thesis set, exactly
-    // as before. farDated === false suppresses horizon bands (the
-    // far templates are then horizon-limited, named in the scan's
-    // strategyCoverage via dataMaxDte); absent/true keeps the legacy
-    // horizon bands, so existing scheduled scans are unaffected.
-    const scanMode = resolveStrategyMode(requestTemplate);
-    if (scanMode === "no-view") {
-      throw new Error("strategyMode \"no-view\" cannot run a viewed opportunity scan; use the no-view path (recommendNoViewStrategies)");
-    }
-    const selectedDefinitions = defaultRegistry.list()
-      .filter((def) => resolvedStrategies.has(def.id) && (scanMode === "all" || def.theses.some((thesis) => scanTheses.has(thesis))));
-    const nearMaxDte = requestTemplate.maxDte ?? DEFAULT_MAX_DTE;
-    const { bands: expirationDteBands, dataMaxDte } = deriveFetchBands({
-      selected: selectedDefinitions,
-      nearMinDte: requestTemplate.minDte ?? 0,
-      nearMaxDte,
-      farDated: requestTemplate.farDated,
-      nearMaxExpirations: MAX_EXPIRATIONS_PER_SYMBOL,
-    });
-
-    // Issue #1204: ONE subrequest budget for the whole scan. Snapshots
-    // are fetched per symbol over a shared screener, so without a
-    // shared ledger each symbol would re-fan-out up to
-    // maxExpirationsPerSymbol chain fetches and the batch as a whole
-    // would trip the Worker per-invocation subrequest cap — the
-    // 100-of-100 failure mode. Symbols past the budget are deferred:
-    // their snapshot carries the named budget reason, which surfaces
-    // below as the skip reason.
-    const fetchBudget = this.data.createFetchBudget();
-    const outcomes = await mapLimit(batch, CONCURRENCY, async (symbol): Promise<{ opportunity: OpportunityRow | null; matrix: ScanMatrixRow }> => {
-      const skippedMatrixRow = (reason: string): ScanMatrixRow => ({
-        symbol,
-        verdict: "skipped",
-        skipReason: reason,
-        targetPrice: null,
-        targetSource: null,
-        targetEmUnits: null,
-        cells: [],
-        // Skipped symbols were never evaluated, so the gate never judged
-        // them: null bucket, no reasons — they are not "no_fit".
-        gateBucket: null,
-        gateReasons: [],
-      });
-      try {
-        const snapshot = await this.data.loadSnapshot({ ...requestTemplate, maxDte: dataMaxDte, expirationDteBands, symbol, fetchBudget });
-        const price = snapshot.contracts[0]?.underlyingPrice;
-        if (!price) {
-          const reason = snapshot.validationError || snapshot.screen.fetchErrors?.[0]?.reason || "No eligible option contracts";
-          skipped.push({ symbol, reason });
-          return { opportunity: null, matrix: skippedMatrixRow(reason) };
-        }
-        // Per-name parameters (issue #23): this symbol's override steers
-        // its target resolution and, when it carries a thesis, the thesis
-        // its build/screen/pick run under. The snapshot load above stays
-        // on the shared template, as before.
-        const override = effectiveTemplate.perSymbol?.[symbol];
-        // Expected-move estimate (issue #25): the 1-sigma move to expiry
-        // implied by this symbol's own chain, from the scan's clock so
-        // provenance-stamped runs stay reproducible. Null when the chain
-        // carries no usable IV — the symbol then resolves its thesis
-        // target from the legacy percentage factor and is named in the
-        // fallback disclosure below.
-        const emPct = estimateExpectedMovePct(snapshot.contracts, price, options.now ?? new Date());
-        const { targetPrice, source: targetSource, targetEmUnits } = resolveScanTarget(
-          effectiveTemplate,
-          symbol,
-          price,
-          override,
-          emPct === null ? null : { pct: emPct },
-        );
-        const request: StrategyRequest = {
-          ...requestTemplate,
-          symbol,
-          targetPrice,
-          thesis: override?.thesis ?? requestTemplate.thesis,
-          eventCalendar: options.eventCalendarBySymbol?.[symbol],
-        };
-        const built = this.risk.buildStrategies(snapshot.contracts, request);
-        const { matched, rejected } = this.risk.screenStrategies(built.candidates, options.strategyFilter);
-        // The fit matrix is additive: it reports every built/screened
-        // candidate per strategy type, ranked once via the recommender.
-        // The pick path below is unchanged and still uses pickBestTrade.
-        const cells = buildMatrixCells(
-          built.candidates,
-          rejected,
-          rankScannerCandidates(
-            (c, r, p) => this.recommender.rank(c, r, p),
-            matched,
-            request,
-            profile,
-          ),
-        );
-        const pick = this.recommender.pickBestTrade(matched, request, profile, 2);
-        // The fit gate (issue #24) qualifies the pick: it rides on the
-        // matrix row (fit / borderline / no_fit) and on the opportunity
-        // row when a pick exists. The #22 verdict stays screen-pass.
-        const gateEval = evaluateFitGate(pick, gate);
-        const matrix: ScanMatrixRow = {
-          symbol,
-          verdict: cells.some((c) => c.passedCount > 0) ? "pass" : "no_pass",
-          targetPrice,
-          targetSource,
-          targetEmUnits,
-          cells,
-          gateBucket: gateEval.bucket,
-          gateReasons: gateEval.reasons,
-        };
-        if (!pick.best) {
-          skipped.push({ symbol, reason: pick.rationale[0] || "No qualifying strategy" });
-          return { opportunity: null, matrix };
-        }
-        return {
-          opportunity: {
-            symbol,
-            underlyingPrice: price,
-            targetPrice,
-            targetSource,
-            targetEmUnits,
-            pick,
-            score: pick.best.compositeScore,
-            gateBucket: gateEval.bucket,
-            gateReasons: gateEval.reasons,
-          },
-          matrix,
-        };
-      } catch (err) {
-        const reason = err instanceof Error ? err.message : "Scan failed";
-        skipped.push({ symbol, reason });
-        return { opportunity: null, matrix: skippedMatrixRow(reason) };
-      }
-    });
-
-    const opportunities = outcomes
-      .map((o) => o.opportunity)
-      .filter((r): r is OpportunityRow => r !== null)
-      .sort((a, b) => b.score - a.score || a.symbol.localeCompare(b.symbol));
-    const matrix = outcomes.map((o) => o.matrix);
-    // Fit-gate accounting (issue #24): buckets count EVALUATED symbols
-    // only — skipped rows carry a null bucket and are never judged.
-    const gateCounts = { fit: 0, borderline: 0, noFit: 0 };
-    for (const row of matrix) {
-      if (row.gateBucket === "fit") gateCounts.fit++;
-      else if (row.gateBucket === "borderline") gateCounts.borderline++;
-      else if (row.gateBucket === "no_fit") gateCounts.noFit++;
-    }
-    const borderline = matrix.filter((m) => m.gateBucket === "borderline");
-    // Strategy-fit accounting (issues #23 + #24): a "fit" is a matrix row
-    // whose gate bucket is "fit" — since #24 this replaces the #23
-    // screen-pass definition; a gated fit implies a pick, hence a pass.
-    // `limit` paginates this list in strategy_fit mode, so
-    // `opportunities` keeps its default top-10 cap there; in
-    // per_name_best mode `limit` slices `opportunities` as it always has.
-    const fitRows = mode === "strategy_fit" ? matrix.filter((m) => m.gateBucket === "fit") : [];
-    const offset = options.offset ?? 0;
-    // Target-basis disclosures (issue #25), assembled post-scan from the
-    // matrix rows so they are never asserted falsely: the EM line appears
-    // only when at least one evaluated symbol's target was actually
-    // EM-derived (a thesis derivation with an estimate, or an em
-    // override); the fallback line names every evaluated symbol whose
-    // chain yielded no estimate — its thesis target came from the legacy
-    // percentage factor (and an em override on it could not resolve).
-    // On an evaluated row, targetEmUnits is null exactly when no estimate
-    // existed for the symbol.
-    const evaluatedRows = matrix.filter((m) => m.verdict !== "skipped");
-    if (evaluatedRows.some((m) => m.targetSource === "em" || (m.targetSource === "thesis" && m.targetEmUnits !== null))) {
-      const mult = baseOppConfig.targetEmMultiples;
-      assumptions.push(
-        `Thesis-derived targets are expressed in expected-move units (bullish ${formatEmMultiple(mult.bullish)} EM, bearish ${formatEmMultiple(mult.bearish)} EM, large_move ${formatEmMultiple(mult.large_move)} EM, range_bound ${formatEmMultiple(mult.range_bound)} EM; 1 EM = the 1-sigma move to expiry implied by each name's own chain).`,
-      );
-    }
-    const emFallbackSymbols = evaluatedRows.filter((m) => m.targetEmUnits === null).map((m) => m.symbol);
-    if (emFallbackSymbols.length) {
-      assumptions.push(
-        `Expected-move estimate unavailable for ${emFallbackSymbols.join(", ")}; legacy percentage targets were used for those names.`,
-      );
-    }
-    // Provenance (issue #27): when the scan ran, which model produced
-    // it, exactly what was asked, the config it ran under, and how much
-    // of the requested universe was actually judged. Pure data — the
-    // scanner performs no I/O; persistence lives behind the
-    // ScanRunStore seam (src/trading/options/scanRunStore.ts).
-    const skippedRows = matrix.filter((m) => m.verdict === "skipped").length;
-    const coverage: ScanCoverage = {
-      considered: unique.length,
-      scanned: batch.length,
-      truncated: Math.max(0, unique.length - batch.length),
-      evaluated: matrix.length - skippedRows,
-      errors: skippedRows,
-      withTrades: opportunities.length,
-      eventCalendar: eventCalendarCoverage,
-    };
-    // Issue #1290: stamp the qualified-partial marker at the single
-    // assembly point so every surface downstream inherits it.
-    const partial = optionsPartialQualification(coverage, skipped);
-    return {
-      scanned: batch.length,
-      withTrades: opportunities.length,
-      opportunities: opportunities.slice(0, mode === "per_name_best"
-        ? (options.candidateLimit === "all" ? opportunities.length : (options.candidateLimit ?? options.limit ?? 10))
-        : 10),
-      skipped,
-      truncatedSymbols: Math.max(0, unique.length - batch.length),
-      assumptions,
-      matrix,
-      typeRollup: rollupScanTypes(matrix),
-      mode,
-      fits: fitRows.slice(offset, options.limit === undefined ? undefined : offset + options.limit),
-      fitsTotal: fitRows.length,
-      gate: gateCounts,
-      borderline,
-      gateParams: gate,
-      profileRef: strategyProfile ? toProfileRef(strategyProfile) : null,
-      generatedAt: (options.now ?? new Date()).toISOString(),
-      modelVersion: SCAN_MODEL_VERSION,
-      requestSnapshot: {
-        template: {
-          thesis: effectiveTemplate.thesis,
-          targetDate: effectiveTemplate.targetDate,
-          minDte: effectiveTemplate.minDte,
-          maxDte: effectiveTemplate.maxDte,
-          maxPlannedLoss: effectiveTemplate.maxPlannedLoss,
-          minRewardRisk: effectiveTemplate.minRewardRisk,
-          allowedStrategies: effectiveTemplate.allowedStrategies,
-          evaluateAllStrategies: effectiveTemplate.evaluateAllStrategies,
-          // Issue #2600: canonical mode + far-dated toggle as run, so
-          // a later reader need not re-derive them from the alias.
-          strategyMode: scanMode,
-          farDated: effectiveTemplate.farDated,
-          statedTarget: effectiveTemplate.statedTarget,
-          perSymbol: effectiveTemplate.perSymbol,
-        },
-        mode,
-        riskProfile: profile,
-        strategyFilter: options.strategyFilter,
-        profile: strategyProfile ?? null,
-      },
-      configSnapshot: {
-        maxScanSymbols: baseOppConfig.maxScanSymbols,
-        targetFactors: { ...baseOppConfig.targetFactors },
-        targetEmMultiples: { ...baseOppConfig.targetEmMultiples },
-      },
-      coverage,
-      ...(partial ? { partial } : {}),
-      // Issue #2091: the fetched horizon + which wanted strategies the
-      // fetched chain evaluated, so reports can name not-evaluated
-      // strategies with their reason instead of dropping them silently.
-      fetchedMaxDte: dataMaxDte,
-      strategyCoverage: buildStrategyCoverage(
-        matrix,
-        requestTemplate.allowedStrategies,
-        dataMaxDte,
-        scanMode,
-      ),
-    };
+    const plan = normalizeScanPlan(symbols, template, options);
+    const { snapshots, skipped: fetchSkipped } = await fetchScanSnapshots(this.data, plan);
+    const { enriched, skipped: enrichSkipped } = enrichScanSnapshots(snapshots, plan, options);
+    const { screened, skipped: screenSkipped } = screenScanCandidates(enriched, this.risk, this.recommender, plan, options);
+    const { assessed, gate } = assessScanRisk(screened, plan);
+    return collateScanResult(plan, assessed, [...fetchSkipped, ...enrichSkipped, ...screenSkipped], options, gate);
   }
 }

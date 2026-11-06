@@ -74,6 +74,21 @@ import {
 import { DEFAULT_SUBREQUEST_BUDGET, getOpportunityScannerConfig } from "../config/etapiConfig";
 import { tagOpportunitiesWithDirection } from "../trading";
 import { resolveTenantBroker } from "./tenantProviders";
+import {
+  buildOpportunityScanSummary,
+  type OpportunityScanResult,
+  type UnifiedOptionsRequest,
+} from "../trading";
+import {
+  createScannerScreenPorts,
+  type ScannerPipelineRequest,
+} from "../workflows/strategyScreenPorts";
+import {
+  memoryStageClaims,
+  memoryStageStorage,
+  runOptionsScreenWorkflow,
+} from "../workflows/optionsScreenWorkflow";
+import { optionsArtifactKey } from "../workflows/optionsScreenPorts";
 // Issue #1291: the scheduled path's unified scan result is an
 // OpportunityScanResult, not the OptionScreenResult the workbook
 // generator reads — adapt at this seam (XLSX; #1569 applies the
@@ -427,6 +442,13 @@ export class ScheduledTasksService {
      *  honestly ("feed snapshot store not configured") instead of
      *  silently live-loading. */
     private feedSnapshotStore?: FeedSnapshotReader,
+    /** Issue #3186 (battery fix): the stage-message queue the
+     *  scheduled options pipeline publishes to. Threaded in from
+     *  the hosts that own `env` (they pass their queue binding, or
+     *  null when unbound) — the service itself must never name the
+     *  binding (messaging_ports pin). Absent, the pipeline runs
+     *  unpublished, exactly as before. */
+    private stageQueue?: import("../workflows/stageQueueTransport").StageQueueSend | null,
   ) {}
 
   /**
@@ -2590,7 +2612,35 @@ export class ScheduledTasksService {
 
       const scanCalendarCoverage = await getEventCalendarCoverage(symbols);
 
-      const response = await unifiedService.execute({
+      // Issue #3186 step 3e - the scheduled monolithic scan goes
+      // through the one scanner pipeline instead of
+      // UnifiedOptionsService.execute() (same engine, staged). The
+      // request below mirrors execute()'s opportunities case field
+      // for field - template, scan options, request record, and the
+      // platform run id - and the response is assembled with the
+      // service's own formatResponse, so the downstream coverage
+      // gates, report pipeline and delivery formatters see the exact
+      // response shape execute() used to return. Deliberate
+      // differences from execute(), all named here: MEMORY_CACHE is
+      // bypassed (60s chain TTL; the 30-minute cadence never hits
+      // it, and a rapid re-trigger re-scans instead of re-serving -
+      // the honest behavior for a trigger-now); stage storage and
+      // claims are in-memory (this service holds no DO storage
+      // handle - the durable record is the persist stage's
+      // scanRunStore save plus the downstream canonical report);
+      // the engine client comes from resolveEngineClient(), so the
+      // platform-routed client (captures + platform run id) is
+      // preserved exactly as execute() built it - the pipeline must
+      // never silently fall back to the raw client.
+      const { engineClient, platformRunId } = await unifiedService.resolveEngineClient();
+      // The targetDate execute() resolves inside the opportunities
+      // case (req.targetDate || +30d); the template and the request
+      // record both carry the RESOLVED value, while the formatted
+      // request below keeps the caller's original (possibly
+      // undefined) field, exactly as execute() received it.
+      const scanTargetDate =
+        options.targetDate || new Date(Date.now() + 30 * 86400000).toISOString().split("T")[0];
+      const scanRequest: UnifiedOptionsRequest = {
         action: "opportunities",
         symbols,
         thesis: targetThesis,
@@ -2600,9 +2650,9 @@ export class ScheduledTasksService {
         ...scopeDte,
         maxPlannedLoss: reportScope.gates.maxPlannedLoss,
         minRewardRisk: reportScope.gates.minRewardRisk,
-        // Issue #2600: the schedule's four controls ride the unified
-        // call (mode, far-dated toggle, ranked cap). The alias is
-        // kept for the unified snapshot's legacy stamp; the mode is
+        // Issue #2600: the schedule's four controls ride the call
+        // (mode, far-dated toggle, ranked cap). The alias is kept
+        // for the unified snapshot's legacy stamp; the mode is
         // canonical. Issue #2091's always-all is superseded by the
         // stored/scope-derived mode above.
         strategyMode: scheduledMode,
@@ -2619,7 +2669,92 @@ export class ScheduledTasksService {
         // Issue #738: pass the symbol count so the scanner doesn't truncate to 20.
         maxSymbols: symbols.length,
         eventCalendarBySymbol: Object.fromEntries(scanCalendarCoverage.bySymbol),
-      });
+      };
+      const scanStorage = memoryStageStorage();
+      const scanOutcome = await runOptionsScreenWorkflow(
+        {
+          runId: reportRunId,
+          userLogin,
+          request: {
+            assetClass: "options",
+            runIdentity: { runId: reportRunId },
+            trigger: options.trigger === "manual" ? "manual" : "scheduled",
+            classInput: {
+              scan: {
+                symbols,
+                template: {
+                  thesis: targetThesis,
+                  targetDate: scanTargetDate,
+                  expectedIvDirection: "unchanged",
+                  maxPlannedLoss: reportScope.gates.maxPlannedLoss,
+                  minRewardRisk: reportScope.gates.minRewardRisk,
+                  allowedStrategies: scopeStrategies,
+                  ...scopeDte,
+                  strategyMode: scheduledMode,
+                  ...(scheduledMode === "all" ? { evaluateAllStrategies: true } : {}),
+                  ...(options.farDated !== undefined ? { farDated: options.farDated } : {}),
+                },
+                options: {
+                  riskProfile: options.riskProfile || "balanced",
+                  ...(options.candidateLimit !== undefined ? { candidateLimit: options.candidateLimit } : {}),
+                  maxSymbols: symbols.length,
+                  eventCalendarBySymbol: Object.fromEntries(scanCalendarCoverage.bySymbol),
+                },
+              },
+              // Issue #103: the caller's original request, recorded
+              // BEFORE the save - only fields the caller sent, with
+              // symbols/targetDate the resolved values the scan ran
+              // under - exactly as execute() built it.
+              requestRecord: {
+                symbols,
+                targetDate: scanTargetDate,
+                thesis: targetThesis,
+                riskProfile: options.riskProfile || "balanced",
+                allowedStrategies: scopeStrategies,
+                ...scopeDte,
+                maxPlannedLoss: reportScope.gates.maxPlannedLoss,
+                minRewardRisk: reportScope.gates.minRewardRisk,
+                strategyMode: scheduledMode,
+                ...(options.farDated !== undefined ? { farDated: options.farDated } : {}),
+                ...(options.candidateLimit !== undefined ? { candidateLimit: options.candidateLimit } : {}),
+              },
+              ...(platformRunId ? { platformRunId } : {}),
+            },
+          } as ScannerPipelineRequest,
+        },
+        {
+          stages: createScannerScreenPorts({
+            agents: {
+              data: new OptionsDataAgent(new DynamicOptionsScreener(engineClient)),
+              risk: new StrategyRiskAgent(),
+              recommender: new RecommendationAgent(),
+            },
+            storage: scanStorage,
+            scanRunStore: this.scanRunStore,
+          }),
+          claims: memoryStageClaims(),
+          queue: this.stageQueue ?? null,
+        },
+      );
+      if (scanOutcome.outcome !== "completed") {
+        throw new Error(`Scheduled options scan failed at ${scanOutcome.failedStage}: ${scanOutcome.reason}`);
+      }
+      const shaped = await scanStorage.get<OpportunityScanResult & { scanRunId?: string; persisted?: boolean }>(
+        optionsArtifactKey(reportRunId, "shapeReport"),
+      );
+      if (!shaped) {
+        throw new Error("Scheduled options scan completed without a report artifact; refusing to publish from nothing.");
+      }
+      // The shaped result already carries its save receipt
+      // (scanRunId / persisted) from the persist stage; the summary
+      // is the shared opportunities-case summary, so every surface
+      // renders the same words execute() rendered.
+      const response = unifiedService.formatResponse(
+        scanRequest,
+        shaped,
+        buildOpportunityScanSummary(shaped),
+        false,
+      );
       const scanData = response.data as any;
       auditRunId = scanData?.scanRunId || reportRunId;
       if (!response.success) throw new Error(response.summary || "Scheduled options scan failed");
