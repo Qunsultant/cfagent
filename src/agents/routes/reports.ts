@@ -29,6 +29,7 @@ import {
   type ScheduledReportHit,
 } from "../../services/scheduledReports";
 import { createCanonicalReportStorePorts } from "../../data/createCanonicalReportStorePorts";
+import type { SettingsChangeNotifier } from "../settingsWebhookNotify";
 import { createOrchestratorTablePorts } from "../../data/createOrchestratorTablePorts";
 import { runCanonicalIndexBackfillPage } from "../../services/reportSemanticIndex";
 import { unauthenticatedResponse } from "./routeIdentity";
@@ -58,6 +59,15 @@ export interface ReportsRouteContext {
     /** Issue #2481: server-resolved tenant id (see resolveIaaaTenant). */
     IAAA_TENANT_ID?: string;
   };
+  /**
+   * Issue #3471: after a tenant provider (broker) selection write
+   * commits, notify the caller's own orchestrator instance through
+   * the webhook channel (the push leg). Optional: hosts without
+   * the notifier keep the pre-#3471 behavior (the observe floor
+   * bounds the staleness). Fire-and-forget; never throws; the
+   * write's response never depends on it.
+   */
+  notifySettingsChanged?: SettingsChangeNotifier;
   /** ScreenerAgent accessor (owner: OrchestratorAgent.getScreenerAgent) —
    *  the #1057 Runs merge reads the agent's latest/history feed via it. */
   getScreenerAgent(userLogin?: string): ScreenerAgent;
@@ -427,6 +437,25 @@ export async function handleReportsRoutes(
           dataProviderId: record.dataProviderId,
           brokerId: record.brokerId,
         });
+        // Issue #3471: the write has committed — notify the
+        // caller's own instance (the session login server.ts
+        // stamps on the request), whose copilot resolves this
+        // tenant's broker row. No login, no instance to notify:
+        // the write still stands and the observe floor owns
+        // convergence.
+        const login = request.headers.get("x-user-login")?.trim();
+        if (ctx.notifySettingsChanged && login) {
+          try {
+            ctx.notifySettingsChanged({
+              kind: "broker_selection_changed",
+              login,
+              changedAt: new Date().toISOString(),
+            });
+          } catch {
+            // Notification is best-effort by contract; a notifier
+            // that throws anyway must never fail the write.
+          }
+        }
         return Response.json({
           tenantId: record.tenantId,
           dataProviderId: record.dataProviderId,

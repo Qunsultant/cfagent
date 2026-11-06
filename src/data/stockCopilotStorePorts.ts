@@ -124,11 +124,17 @@ export interface CopilotActivityExit {
  * firings are NOT recorded — they evaluated nothing. #3398:
  * outside-enabled-sessions firings record ONE transition record
  * per state change (outcome outside_sessions), not one per firing.
+ *
+ * Issue #3471 adds one non-cycle entry kind to the same feed: a
+ * `selection_changed` record, written when the instance is
+ * notified (or, per #3473, observes) that the effective broker /
+ * mode selection changed — `cycleAt` is then the change's
+ * timestamp and `detail` names old → new and the source.
  */
 export interface CopilotCycleActivityRecord {
   id: string;
   userLogin: string;
-  /** ISO timestamp of the cycle. */
+  /** ISO timestamp of the cycle (of the change, for selection_changed). */
   cycleAt: string;
   /** traded = at least one entry or exit landed; no_trade = the
    *  cycle evaluated and deliberately placed nothing (detail says
@@ -137,8 +143,10 @@ export interface CopilotCycleActivityRecord {
    *  active broker is not the copilot's (detail names the state,
    *  #3451); outside_sessions = a #3398 session-state transition:
    *  the cycle fired outside the user's enabled sessions (detail
-   *  names the state and the current session). */
-  outcome: "traded" | "no_trade" | "refused" | "inactive" | "outside_sessions";
+   *  names the state and the current session); selection_changed =
+   *  the effective trading selection changed (detail names old → new
+   *  and the source, #3471). */
+  outcome: "traded" | "no_trade" | "refused" | "inactive" | "outside_sessions" | "selection_changed";
   /** #3398: the trading session the cycle fired in (the copilot's
    *  session vocabulary), or null when no session was open. Absent
    *  on records written before sessions were recorded. */

@@ -117,6 +117,8 @@ export interface EtradeBrokerRouteContext {
   readSettingRaw(key: string): string | null;
   /** Issue #2482: settings writer for the persisted environment selection (optional; the switch fails closed without it). */
   writeSetting?(key: string, value: string): void;
+  /** #3471: settings-change notifier (see brokerEnvironment.ts). */
+  notifySettingsChanged?: import("../settingsWebhookNotify").SettingsChangeNotifier;
   /** Audit writer (owner: OrchestratorAgent - was `this.audit`). */
   audit(
     type: string,

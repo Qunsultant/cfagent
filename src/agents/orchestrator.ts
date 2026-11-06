@@ -7,7 +7,7 @@ import type {
 } from "../actors/actorPorts";
 import { createCfActorSession } from "../actors/cfAgentsAdapter";
 import { PortThink, createThinkActorTurn, type SkillSource, type ThinkScheduledTasks } from "../actors/thinkAdapter";
-import type { ActorSessionPort, ActorTurnHooks, ActorTurnPort } from "../actors/actorPorts";
+import type { ActorSessionPort, ActorTurnHooks, ActorTurnPort, ActorWebhookEvent } from "../actors/actorPorts";
 import type { ToolSet } from "ai";
 import { getWorkersAIModel } from "./model";
 import { resolveScreenerAgentName } from "./screenerAgentName";
@@ -64,6 +64,8 @@ import { createMAS } from "./mas";
 import { dispatchOrchestratorA2A, orchestratorA2AOutcome, type OrchestratorA2AOutcome } from "./orchestrator/a2aDispatch";
 import { buildChatErrorFallback, type ChatErrorFallbackContext } from "./chatErrorFallback";
 import { getScreenerExecutionContext, migrateLegacyScreenSchedules, removeUnownedBaselineSchedules, ensureStrategyScanSchedule, resolveScheduledLogin, type ScheduleMaintenanceContext } from "./orchestrator/scheduleMaintenance";
+import { handleSettingsWebhook } from "./orchestrator/settingsWebhook";
+import { createStockCopilotActivityPort } from "../data/createStockCopilotStorePorts";
 import { declareStrategyScanObserveTasks, type ScheduledTasksObserveContext } from "./orchestrator/scheduledTasksObserve";
 import { declareStockCopilotTasks, type ScheduledTasksCopilotContext } from "./orchestrator/scheduledTasksCopilot";
 import { buildOrchestratorSkillSources } from "./orchestrator/skillPacks";
@@ -349,8 +351,39 @@ export class OrchestratorAgent extends PortThink {
           ? this.portOnChatResponse(result)
           : Promise.resolve(),
       onChatError: (error) => this.portOnChatError(error),
+      // Issue #3471: the settings-change webhook (the port verifies
+      // and dispatches it, #3474) — the Stock Copilot push leg.
+      onWebhook: (event) => this.portOnSettingsWebhook(event),
       maxSteps: this.maxSteps,
     };
+  }
+
+  /**
+   * Issue #3471: a verified settings-change delivery (broker/mode
+   * selection writes notify this instance through the built-in
+   * webhook channel). The handler re-resolves the selection,
+   * records a real change in the copilot activity feed, and
+   * setStates the held selection — the base Agent broadcast,
+   * unwrapped, is what pushes it to connected clients (#3472).
+   * Extracted to ./orchestrator/settingsWebhook.ts (#992 pattern);
+   * this method only binds the class's own members.
+   */
+  private async portOnSettingsWebhook(event: ActorWebhookEvent): Promise<void> {
+    await handleSettingsWebhook(
+      {
+        env: this.env,
+        activity: createStockCopilotActivityPort(this.ctx.storage.sql),
+        readSettingRaw: (key) => this.readSettingRaw(key),
+        getScreenerExecutionContext: () => this.getScreenerExecutionContext(),
+        getState: () => this.state,
+        setState: (next) => {
+          const self = this as { setState?: (s: unknown) => void };
+          self.setState?.(next);
+        },
+        audit: (type, agent, payload) => this.audit(type, agent, payload),
+      },
+      event,
+    );
   }
 
   private createActorTurnRunner(): ActorTurnPort {
