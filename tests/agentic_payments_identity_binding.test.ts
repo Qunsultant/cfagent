@@ -33,7 +33,7 @@
  *    construct one per request — round-trips.
  *
  * Harnesses: transport tests reuse the tests/fallback_identity_session_gate
- * pattern (real worker fetch + recording SEARCH_AGENT stub + fake
+ * pattern (real worker fetch + recording ORCHESTRATOR_AGENT stub + fake
  * SessionStore); service/route tests reuse the
  * tests/agentic_payments.test.ts pattern (MockSqlStorage ORM + stubbed
  * on-chain claim verifier).
@@ -174,7 +174,7 @@ function makeTransportEnv() {
         },
       }),
     },
-    SEARCH_AGENT: {
+    ORCHESTRATOR_AGENT: {
       idFromName: (name: string) => name,
       get: (id: string) => ({
         fetch: async (req: Request) => {
@@ -319,7 +319,7 @@ function makeOrm() {
 const mockEnv = {
   AI: {} as any,
   AI_SEARCH_ENDPOINT: "https://mock.search",
-  SEARCH_AGENT: {} as any,
+  ORCHESTRATOR_AGENT: {} as any,
   AGENT_SESSIONS: {} as any,
   X402_NETWORK: "base-sepolia",
   X402_RECIPIENT_ADDRESS: "0x71C8363837918a211797E3c76A8B3C4258759550",
