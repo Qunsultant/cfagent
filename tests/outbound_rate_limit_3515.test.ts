@@ -189,7 +189,7 @@ describe("outgoing throttle at the E*TRADE client seam (#3515 S1)", () => {
       SESSION_SECRET: "test_session_secret_123",
       SESSION_STORE: sessionStoreNs,
       ETRADE_KV: mockKv,
-      SEARCH_AGENT: {} as any,
+      ORCHESTRATOR_AGENT: {} as any,
       ASSETS: {} as any,
       AI: {} as any,
       APP_ENV: "TEST",
