@@ -603,7 +603,15 @@ def evaluate_policy(
             errors="replace",
             check=True,
         ).stdout
-        deprecation_re = re.compile(r"@deprecated|\bdeprecated\b", re.IGNORECASE)
+        # Issue #1894, refined in #3504: match deliberate deprecation markers
+        # (JSDoc deprecation tag, uppercase directive, or comment-leading directive tags),
+        # distinguishing them from casual conversational prose; superseded by Issue #3504 scoped regex.
+        deprecation_re = re.compile(
+            r"@[dD]eprecated\b"
+            r"|\bDEPRECATED\s*[:—\-]"
+            r"|/\*\s*DEPRECATED\s*\*/"
+            r"|^\s*(?://|/\*|\*|#)\s*(?:deprecated|Deprecated|DEPRECATED)\b"
+        )
         negation_re = re.compile(
             r"\b(not|never|isn'?t)\s+deprecated\b|not-deprecated", re.IGNORECASE
         )

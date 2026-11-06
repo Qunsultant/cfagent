@@ -1497,7 +1497,12 @@ implement.
   deletion, so coverage is preserved. The earlier in-place form (keep the
   file, mark it `@deprecated`, remove it from exports/indexes) remains
   valid for marks already in the codebase until those files are renamed
-  under this rule. Genuine exceptions (removing an accidentally
+  under this rule. Deprecation completeness (check j, #1894; refined #3504)
+  verifies deliberate deprecation markers in code files (`src/`, `scripts/`) —
+  specifically `@deprecated` JSDoc/decorator tags, all-caps `DEPRECATED`
+  directives, or comment-leading `Deprecated:` tags. Conversational prose and
+  comments casually mentioning the word "deprecated" (e.g. "fallback for
+  deprecated format") are not markers and are excluded. Genuine exceptions (removing an accidentally
   committed secret, legal takedown) are owner emergency exceptions:
   the gate stays red and only an owner admin bypass with an exception
   record merges. Deletion itself needs zero consumers plus an owner

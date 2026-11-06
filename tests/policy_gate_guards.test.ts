@@ -242,6 +242,22 @@ describe("REST foss routes", () => {
     runGit(tempRepoDir, ["add", "-A"]);
     runGit(tempRepoDir, ["commit", "-m", "refactor: deprecate without successor"]);
 
+    // Branch 10b (#3504): conversational prose mentioning the word "deprecated"
+    // in comments/code without being a formal deprecation marker.
+    runGit(tempRepoDir, ["checkout", "main"]);
+    runGit(tempRepoDir, ["checkout", "-b", "branch-deprecation-prose"]);
+    fs.appendFileSync(
+      path.join(tempRepoDir, "src", "index.ts"),
+      "// Fallback handler for deprecated endpoints from legacy callers.\nexport const handleLegacy = 2;\n"
+    );
+    fs.mkdirSync(path.join(tempRepoDir, "changelog.d"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tempRepoDir, "changelog.d", "3504-dep-prose.md"),
+      "### Added\n\n- **Deprecation prose fixture (#3504):** conversational prose test\n"
+    );
+    runGit(tempRepoDir, ["add", "-A"]);
+    runGit(tempRepoDir, ["commit", "-m", "feat: fallback for deprecated endpoint"]);
+
     // Branch 11: attribution lives ONLY in the commit message (must fail
     // under body-only attribution: body carries no ref, no hashtag).
     runGit(tempRepoDir, ["checkout", "main"]);
@@ -700,6 +716,20 @@ describe("rewritten wrapper", () => {
     );
     expect(res.status).toBe(1);
     expect(res.stdout).toContain("(j) deprecation");
+  });
+
+  it("passes conversational prose mentioning the word 'deprecated' without a successor (#3504)", () => {
+    runGit(tempRepoDir, ["checkout", "branch-deprecation-prose"]);
+    const res = runPolicyGate(
+      {
+        PR_TITLE: "feat: fallback for deprecated endpoint (#3504) #ceo-aimp",
+        PR_BODY: "Fixes #3504\n\n## Agent\n#ceo-aimp\n\n- [ ] Process documentation impact: none",
+        PR_LABELS: "lane:ceo-aimp",
+      },
+      ["--base", "main", "--head", "branch-deprecation-prose"]
+    );
+    expect(res.status).toBe(0);
+    expect(res.stdout).toContain("Policy gate passed");
   });
 
   it("rejects attribution that lives only in commit messages (body-only rule)", () => {

@@ -54,9 +54,10 @@ In brief:
   (accidentally committed secret, legal takedown) are owner
   emergency exceptions with the gate staying red.
 - **Deprecations must name a successor.** A new deprecation marker
-  in code files (`src/`, `scripts/`) must name what superseded it
+  in code files (`src/`, `scripts/`) — specifically `@deprecated`, all-caps `DEPRECATED`,
+  or comment-leading `Deprecated:` (#3504) — must name what superseded it
   (e.g. "superseded by src/new_module.ts"); a marker without a
-  successor fails gate check (j). Docs/prose are excluded.
+  successor fails gate check (j). Casual prose mentioning the word is excluded.
 - **Zero-touch documentation merges (#2555).** PRs whose touched files
   are strictly confined to `docs/` and root documentation markdown files
   (excluding `changelog.d/`, `src/`, `tests/`, `scripts/`, `.github/`)
