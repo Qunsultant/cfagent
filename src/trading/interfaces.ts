@@ -113,6 +113,19 @@ export interface ITradingPlatform {
   executeOrder(orderId: string, authorizerDid: string, decision: "approved" | "rejected", expectedTerms?: ExpectedTradeTerms): BrokerOrderExecutionResult | Promise<BrokerOrderExecutionResult>;
   placeOrderRemote?(params: PlaceOrderParams): Promise<BrokerOrderExecutionResult>;
   /**
+   * Issue #3398: session-order support — true when this platform's
+   * order path carries a named trading session's terms on the wire
+   * (extended-hours eligibility for pre-market / after-hours,
+   * overnight terms for EXTO), so an order placed in that session
+   * actually trades in it. Optional: a platform that cannot omits
+   * it, and session-gated callers (the Stock Copilot) refuse with a
+   * named reason instead of silently sending a regular-session
+   * order in the session's place. The session id is the caller's
+   * session vocabulary (the copilot's: pre_market / regular /
+   * after_hours / exto).
+   */
+  supportsSessionOrders?(session: string): boolean;
+  /**
    * Issue #3390: cancel a live order at the broker. Optional: a platform that
    * cannot cancel omits it, and the neutral route answers `provider_unsupported`
    * naming the broker instead of offering a control that does nothing.

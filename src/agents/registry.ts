@@ -21,6 +21,10 @@
  * Nothing at runtime depends on this module in this slice; it makes
  * no decisions and changes no behavior.
  */
+import {
+  resolveAgentCapabilityManifest,
+  type AgentCapabilityManifest,
+} from "../actors/capabilityManifest";
 
 export type MeshAgentKind = "agent" | "durable-object" | "mcp-agent";
 
@@ -1994,6 +1998,42 @@ export const MESH_NON_RENAMES: MeshNonRenameEntry[] = [
     source: "mesh survey §5",
   },
 ];
+
+// ---------------------------------------------------------------------------
+// Capability manifests (Uniform Copilot Standard S1, #3489) — the
+// per-class capability record of epic #3488: channels × runtime
+// capabilities × tools, each entry enabled / disabled-by-config /
+// unavailable / not-implemented, resolved from externalized config
+// in src/actors/capabilityManifest.ts (the port's own module — the
+// states are claims about the port and the class, so they live
+// with the port, and this registry re-exports the resolver as the
+// fleet's single read surface). The S20 view joins the manifest
+// onto each entry; the conformance suite
+// (tests/capability_spine_s1_3489.test.ts) pins completeness and
+// truthfulness against the class inventory.
+// ---------------------------------------------------------------------------
+
+export type {
+  AgentCapabilityManifest,
+  CapabilityEntry,
+  CapabilityState,
+} from "../actors/capabilityManifest";
+
+/**
+ * The capability manifest for a registered PortThink class,
+ * resolved with the class's recorded bindings and NO deployment
+ * env — the code posture (prerequisites recorded, not evaluated;
+ * call resolveAgentCapabilityManifest with an env where deployment
+ * truth is needed). Null for non-PortThink entries and unknown
+ * classes: the manifest covers the Think fleet only.
+ */
+export function capabilitiesForClass(className: string): AgentCapabilityManifest | null {
+  const agent = getAgentByClass(className);
+  if (!agent || agent.base !== "PortThink") return null;
+  return resolveAgentCapabilityManifest(agent.className, {
+    bindings: agent.bindings,
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Typed accessors — the queryable shape later slices consume.

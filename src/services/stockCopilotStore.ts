@@ -45,6 +45,10 @@ export class StockCopilotPositionStore {
     stopPrice: number;
     targetPrice: number;
     brokerOrderRef: string;
+    /** #3398: the session + order type the entry was placed
+     *  under, recorded with the position. */
+    entrySession?: string | null;
+    entryOrderType?: string | null;
     openedAt?: string;
   }): Promise<CopilotPositionRecord> {
     this.ensureTables();
@@ -58,6 +62,8 @@ export class StockCopilotPositionStore {
       stopPrice: input.stopPrice,
       targetPrice: input.targetPrice,
       brokerOrderRef: input.brokerOrderRef,
+      entrySession: input.entrySession ?? null,
+      entryOrderType: input.entryOrderType ?? null,
       status: "open",
       openedAt: input.openedAt ?? new Date().toISOString(),
       closedAt: null,

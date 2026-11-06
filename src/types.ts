@@ -103,6 +103,21 @@ export interface Env {
   // BRAVE_SEARCH_API_KEY (+ optionally WEB_SEARCH_PROVIDER).
   WEB_SEARCH_PROVIDER?: string;
   BRAVE_SEARCH_API_KEY?: string;
+  // Issue #3489 (Uniform Copilot Standard S1) — externalized copilot
+  // capability overrides (AOP, same idiom as the #2419 vars below).
+  // Comma-separated "<scope>:<capability>" entries naming
+  // capabilities DISABLED by deployment config; scope is an agent
+  // class name, one of its wrangler binding names, or "*". Absence
+  // means the doctrine defaults apply (every capability the code
+  // implements is enabled). The list can only disable — it never
+  // enables a capability the code does not implement, and it never
+  // masks an unavailable capability's missing prerequisite.
+  // Resolved by src/actors/capabilityManifest.ts; the resolved
+  // record surfaces in the Agents view (registry). Rollback is
+  // unsetting the var and redeploying — no code change. The var is
+  // deliberately NOT in wrangler.jsonc: the fleet ships with
+  // nothing disabled.
+  AGENT_CAPABILITIES_DISABLED?: string;
   AI_SEARCH_ENDPOINT: string;
   APP_NAME: string;
   GITHUB_CLIENT_ID: string;
@@ -272,6 +287,12 @@ export interface Env {
   // Copilot cycle; absence uses the service's default universe
   // (src/services/stockCopilot.ts).
   STOCK_COPILOT_UNIVERSE?: string;
+  // #3398 — optional deployment-default trading sessions for the
+  // Stock Copilot (comma-separated session ids: pre_market, regular,
+  // after_hours, exto; "none" = no sessions). The per-login stored
+  // setting (stock_copilot:sessions) wins over this; absence of both
+  // means regular only (src/services/stockCopilotSessions.ts).
+  STOCK_COPILOT_SESSIONS?: string;
   // Comma-separated provider ids. Default when wiring is on: "github".
   // An id with no registered adapter is ignored, never a fallback.
   IAAA_ENABLED_PROVIDERS?: string;
