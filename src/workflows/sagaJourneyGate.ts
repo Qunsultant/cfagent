@@ -24,7 +24,7 @@
  *   channel the payment workflow's approval delivery uses).
  * - The pending-gate query: pending gates are derived from the
  *   saga audit rows (journey_prompted minus journey_decided),
- *   read through the SEARCH_AGENT stub's audit read path — the
+ *   read through the ORCHESTRATOR_AGENT stub's audit read path — the
  *   same stub-mediated path S1's audit forwarder uses, so it
  *   shares S1's live-proof caveat (unit-pinned; live proof is
  *   owner-side). No new store is introduced for gate state.
@@ -346,7 +346,7 @@ async function readAuditEvents(
  * rows minus decided rows (by saga id). When userLogin is given,
  * only that user's gates are returned (the route/handler passes
  * the session login; never list another user's gates). The stub
- * is the SEARCH_AGENT shared instance (same path S1's forwarder
+ * is the ORCHESTRATOR_AGENT shared instance (same path S1's forwarder
  * writes through), so the session filter on the read path passes
  * for these rows.
  */
@@ -400,17 +400,17 @@ export async function findDecidedJourneyGate(
   return null;
 }
 
-/** Resolve the SEARCH_AGENT shared-instance stub from env. */
+/** Resolve the ORCHESTRATOR_AGENT shared-instance stub from env. */
 export function sagaAuditOwnerStub(env: unknown): AuditOwnerStub {
   // Structural read, mirroring S1's audit forwarder in
-  // sagaWorkflow.ts: Env's SEARCH_AGENT namespace types its get
+  // sagaWorkflow.ts: Env's ORCHESTRATOR_AGENT namespace types its get
   // by DurableObjectId, so the helper reads it structurally
   // instead of demanding Env's exact namespace type.
-  const ns = (env as Record<string, unknown> | null)?.SEARCH_AGENT as
+  const ns = (env as Record<string, unknown> | null)?.ORCHESTRATOR_AGENT as
     | { idFromName: (name: string) => unknown; get: (id: unknown) => AuditOwnerStub }
     | undefined;
   if (!ns || typeof ns.idFromName !== "function" || typeof ns.get !== "function") {
-    throw new Error("Journey-gate audit read unavailable: SEARCH_AGENT is not bound.");
+    throw new Error("Journey-gate audit read unavailable: ORCHESTRATOR_AGENT is not bound.");
   }
   return ns.get(ns.idFromName(SHARED_ORCHESTRATOR_INSTANCE));
 }
