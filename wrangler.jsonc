@@ -281,6 +281,21 @@
     "STOCK_COPILOT_PAPER_ENABLED": "1",
     // Issue #3728: Unconstrained continuous Stock Copilot trading around the clock (24/7).
     "STOCK_COPILOT_AROUND_THE_CLOCK": "true",
+    // Issue #3727 — copilot capability enablement (owner direction
+    // 2026-11-07): every capability-gating switch is externalized
+    // here and set so the copilots are fully functional/enabled —
+    // no constraints. AGENT_CAPABILITIES_DISABLED is explicitly
+    // EMPTY (nothing disabled; the capability-manifest resolver's
+    // override list parses to zero entries). CHAT_NLQ_MODE "on"
+    // keeps the discovered execute_nlq tool in chat/copilot
+    // turns' usable set, and SCREENER_ND_MODE "on" admits
+    // non-deterministic screen runs at the mesh doors (each run
+    // still requires its own explicit screenMode + screenIntent).
+    // Rollback is removing these vars (or setting a mode to
+    // "off") and redeploying.
+    "AGENT_CAPABILITIES_DISABLED": "",
+    "CHAT_NLQ_MODE": "on",
+    "SCREENER_ND_MODE": "on",
     // Issue #3452 — Stock Copilot cycle cadence (AOP). Optional;
     // absence uses "every 30 minutes". Floor is 30m (Worker cron limit).
     // "STOCK_COPILOT_CADENCE": "every 30 minutes",
