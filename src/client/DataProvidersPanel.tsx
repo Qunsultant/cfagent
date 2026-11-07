@@ -20,9 +20,11 @@ import {
   fetchDataProviders,
   fmtCaptureBytes,
   fmtDataProviderTime,
+  fmtFeedAge,
   postDataProviderAction,
   postEnrichJobAction,
   postFeedJobAction,
+  postFeedRun,
   providerDisplayName,
   type CapabilityRouteView,
   type DataProviderActionName,
@@ -30,6 +32,7 @@ import {
   type DataProviderView,
   type EnrichJobActionName,
   type EnrichJobView,
+  type FeedDatasetStatusView,
   type FeedJobActionName,
   type FeedJobView,
 } from "./dataProvidersApi";
@@ -75,6 +78,108 @@ const HEALTH_STATUS_LABELS: Record<DataProviderHealthStatus, string> = {
   down: "Down",
   "no-data": "No data yet",
 };
+
+/**
+ * The display state of the #3530 feed-status block, derived ONLY
+ * from the served block (never recomputed): not-configured,
+ * never-run, last-run-failed, stale, and ready are five distinct
+ * states and render five distinct chips.
+ */
+function feedStatusChip(feed: FeedDatasetStatusView): { text: string; tone: string } {
+  if (feed.state === "not-configured") return { text: "Not configured", tone: "not-configured" };
+  if (feed.state === "never-run") return { text: "Never run", tone: "never-run" };
+  if (feed.lastRun?.status === "failed") return { text: "Last run failed", tone: "failed" };
+  if (feed.snapshot?.stale) return { text: "Stale", tone: "stale" };
+  return { text: "Ready", tone: "ready" };
+}
+
+/**
+ * One provider's direct feed-job status (#3530): the job's last
+ * run (time, trigger, outcome — a failed run shows its stable
+ * code and message, never a success dressing), the persisted
+ * local copy's state (rows, age, as-of provenance, STALE marker;
+ * "none usable" when runs exist but no good copy does), and the
+ * dataset facts the API exposes (universe, cadence, stale-after).
+ * This is a different fact from the capture-derived health column
+ * and from the #3535 pipeline blocks below it: it is the dataset
+ * store's own record, and it still renders when the pipeline host
+ * is unreachable (its list is best-effort and may be empty).
+ */
+function FeedStatusBlock({
+  feed,
+  busy,
+  onRunNow,
+}: {
+  feed: FeedDatasetStatusView;
+  busy: boolean;
+  onRunNow: () => void;
+}) {
+  const chip = feedStatusChip(feed);
+  const lastRun = feed.lastRun;
+  const snapshot = feed.snapshot;
+  return (
+    <div className="dpp-feed-status" data-feed-job={feed.jobId}>
+      <div className="dpp-feed-head">
+        <span className="dpp-feed-label">{feed.jobId}</span>
+        <span className={`dpp-feed-status-chip dpp-feed-status-chip-${chip.tone}`}>{chip.text}</span>
+      </div>
+      <div className="dpp-feed-meta">
+        <span>{`Universe: ${feed.universeLabel}`}</span>
+        <span>{`Cadence: every ${feed.cadenceMinutes}m · stale after ${feed.staleAfterMinutes}m`}</span>
+        {feed.state === "not-configured" && (
+          <span>Feed status unavailable: no dataset store is wired on this host.</span>
+        )}
+        {feed.state === "never-run" && <span>Never run — no local copy yet.</span>}
+        {feed.state === "ready" && lastRun && (
+          <span>
+            {`Last run: ${lastRun.status} · ${lastRun.trigger} · ${fmtDataProviderTime(lastRun.finishedAt)} · ${lastRun.received}/${lastRun.requested} rows`}
+          </span>
+        )}
+        {feed.state === "ready" && lastRun?.codedError && (
+          <span className="dpp-feed-error">{lastRun.codedError}</span>
+        )}
+        {feed.state === "ready" && lastRun?.errorMessage && <span>{lastRun.errorMessage}</span>}
+        {feed.state === "ready" &&
+          (snapshot ? (
+            <span>
+              {`Local copy: ${snapshot.rowsPersisted} rows · ${fmtFeedAge(snapshot.ageSeconds)} · as of ${fmtDataProviderTime(snapshot.asOf)}${snapshot.stale ? " · STALE" : ""}`}
+            </span>
+          ) : (
+            <span>Local copy: none usable</span>
+          ))}
+      </div>
+      {feed.state !== "not-configured" && (
+        <div className="dpp-feed-actions">
+          <Button size="sm" variant="ghost" disabled={busy} onClick={onRunNow}>
+            Run now
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The honest no-job state (#3530): the provider has no registered
+ * feed job. Nasdaq's carries the recorded reason — its adapter
+ * serves the US listed-securities universe, not quotes, so the
+ * quotes-shaped feed contract cannot express its dataset; no job
+ * is registered rather than a fabricated one.
+ */
+function FeedNoJobBlock({ providerId }: { providerId: string }) {
+  return (
+    <div className="dpp-feed-nojob">
+      <span className="dpp-feed-none">No feed job for this source</span>
+      {providerId === "nasdaq" && (
+        <span className="dpp-feed-nojob-note">
+          Its adapter serves the US listed-securities universe, not quotes, so it does not fit the
+          quotes feed-job contract — no feed job is registered for it rather than a fabricated one
+          (issue 3530).
+        </span>
+      )}
+    </div>
+  );
+}
 
 export function DataProvidersPanel() {
   const toast = useToast();
@@ -187,6 +292,39 @@ export function DataProvidersPanel() {
       await load();
     } catch (err: any) {
       setError(err?.message || `Failed to ${action} enrich job "${job.jobId}".`);
+    } finally {
+      setActingId(null);
+    }
+  };
+
+  // #3530 (status UX): run the provider's feed job now through the
+  // direct S1 feed-run route, then reload so the status block
+  // re-renders from the server's fresh status (one source of
+  // truth). The run's outcome is surfaced as it came back: the
+  // route answers 200 even for a failed run, so a failed outcome
+  // lands in the persistent error Notice with its stable code —
+  // never as a success toast; a partial run is a warning. HTTP
+  // refusals (session / not-configured) surface the server's own
+  // error verbatim, like every other panel action.
+  const runFeedNow = async (view: DataProviderView) => {
+    setActingId(view.id);
+    setError("");
+    try {
+      const { run } = await postFeedRun(view.id);
+      if (run.status === "failed") {
+        setError(
+          `Feed job "${run.jobId}" run failed${run.codedError ? ` (${run.codedError})` : ""}: ${run.received}/${run.requested} rows received.`
+        );
+      } else if (run.status === "partial") {
+        toast.warning(
+          `Feed job "${run.jobId}" run partially completed (${run.received}/${run.requested} rows).`
+        );
+      } else {
+        toast.success(`Feed job "${run.jobId}" run completed (${run.received}/${run.requested} rows).`);
+      }
+      await load();
+    } catch (err: any) {
+      setError(err?.message || `Failed to run the feed job for "${view.id}".`);
     } finally {
       setActingId(null);
     }
@@ -363,13 +501,21 @@ export function DataProvidersPanel() {
               header: "Feed Jobs",
               cellClassName: "dpp-col-feed-cell",
               render: (view) => {
+                const feed = view.feed ?? null;
                 const jobs = view.feedJobs ?? [];
-                if (jobs.length === 0) {
-                  return <span className="dpp-feed-none">No feed jobs</span>;
+                if (!feed && jobs.length === 0) {
+                  return <FeedNoJobBlock providerId={view.id} />;
                 }
                 const busy = actingId === view.id;
                 return (
                   <div className="dpp-feed-jobs">
+                    {feed && (
+                      <FeedStatusBlock
+                        feed={feed}
+                        busy={busy}
+                        onRunNow={() => void runFeedNow(view)}
+                      />
+                    )}
                     {jobs.map((job) => {
                       const state = job.pipeline?.state ?? "unknown";
                       const lastRun = job.feed?.lastRun ?? null;

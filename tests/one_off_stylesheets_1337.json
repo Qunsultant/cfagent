@@ -21,8 +21,8 @@
   },
   {
     "path": "src/client/dataProvidersPanel.css",
-    "lines": 334,
-    "reason": "Tabular presentation and consolidated provider connectivity (#2723; tokens only); feed-jobs column growth (#3535; tokens only)"
+    "lines": 373,
+    "reason": "Tabular presentation and consolidated provider connectivity (#2723; tokens only); feed-jobs column growth (#3535; tokens only); feed status block growth (issue #3530; tokens only)"
   },
   {
     "path": "src/client/docsAndReports.css",

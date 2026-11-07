@@ -101,6 +101,13 @@ export interface DataProviderView {
   feedJobs?: FeedJobView[];
   /** #3536: this provider's enrich jobs as pipeline surface views. */
   enrichJobs?: EnrichJobView[];
+  /**
+   * #3530: this provider's direct feed-job status (the S1 block) —
+   * null when no feed job is registered for the provider. Optional
+   * here because an older API response omits it; the panel treats
+   * absent as null.
+   */
+  feed?: FeedDatasetStatusView | null;
 }
 
 /** One feed run's record, as the status surface serves it (#3530). */
@@ -157,6 +164,67 @@ export interface FeedJobView {
     lastRunAt: string | null;
   } | null;
   nextScheduledRun: string | null;
+}
+
+/**
+ * The provider view's direct feed block (issue #3530): the mirror
+ * of feedViewFor's union on the server — a FeedStatusView
+ * ("never-run" | "ready") from buildFeedStatus, OR the
+ * "not-configured" shape served when no dataset store is wired
+ * (which omits `history`, hence optional here). Distinct from
+ * FeedJobDatasetView above: the pipeline-merged shape is never
+ * "not-configured".
+ */
+export interface FeedDatasetStatusView {
+  jobId: string;
+  sourceId: string;
+  dataset: string;
+  elements: string[];
+  universeLabel: string;
+  cadenceMinutes: number;
+  staleAfterMinutes: number;
+  state: "never-run" | "ready" | "not-configured";
+  lastRun: FeedJobRunRecordView | null;
+  history?: FeedJobRunRecordView[];
+  snapshot: {
+    artifactId: string;
+    asOf: string;
+    ageSeconds: number;
+    rowsPersisted: number;
+    stale: boolean;
+  } | null;
+}
+
+/** One direct feed run's result, as POST …/feed-run returns it (issue #3530). */
+export interface FeedRunResultView {
+  jobId: string;
+  runId: string;
+  status: "completed" | "partial" | "failed";
+  artifactId: string;
+  requested: number;
+  received: number;
+  failed: number;
+  missingSymbols: string[];
+  codedError: string | null;
+  startedAt: string;
+  finishedAt: string;
+}
+
+/**
+ * Run one provider's feed job now through the direct S1 route
+ * (issue #3530) and return the run outcome + the fresh status
+ * block. A run that fails at the provider still resolves (the
+ * route answers 200 with run.status "failed" + codedError);
+ * wiring/session refusals reject with the server's message and
+ * its stable code preserved (see send()).
+ */
+export async function postFeedRun(
+  id: string
+): Promise<{ run: FeedRunResultView; feed: FeedDatasetStatusView }> {
+  return send<{ run: FeedRunResultView; feed: FeedDatasetStatusView }>(
+    `/api/data-providers/${encodeURIComponent(id)}/feed-run`,
+    { method: "POST" }
+  );
 }
 
 export type FeedJobActionName = "run" | "pause" | "resume" | "cancel" | "retry";
@@ -376,6 +444,14 @@ export function fmtDataProviderTime(iso: string | null): string {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+/** Age rendering for a persisted feed copy (formatting only; the server computes the age). */
+export function fmtFeedAge(ageSeconds: number): string {
+  if (!Number.isFinite(ageSeconds) || ageSeconds < 0) return "—";
+  if (ageSeconds < 90) return `${Math.floor(ageSeconds)}s old`;
+  if (ageSeconds < 5400) return `${Math.round(ageSeconds / 60)}m old`;
+  return `${(ageSeconds / 3600).toFixed(1)}h old`;
 }
 
 /** Plain byte-count rendering for the E6 captured-data total (formatting only). */
