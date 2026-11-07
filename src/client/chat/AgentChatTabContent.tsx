@@ -292,7 +292,7 @@ export function AgentChatTabContentInner({
       }
     }
 
-    const sourceTab = activeView === "options" ? "E*TRADE · Auto Options Research" : (currentCopilot?.sourceTab || "Chat & Agents");
+    const sourceTab = activeView === "options" ? "Broker · Auto Options Research" : (currentCopilot?.sourceTab || "Chat & Agents");
     const lower = input.trim().toLowerCase();
     if (activeView === "stock") {
       if (lower === "pause" || lower === "pause loop" || lower === "pause stock copilot" || lower.includes("pause the loop") || lower.includes("pause stock copilot")) {
@@ -316,7 +316,7 @@ export function AgentChatTabContentInner({
   };
 
   const handleChipClick = (prompt: string, sourceTab?: string) => {
-    const effectiveSource = sourceTab || (activeView === "options" ? "E*TRADE · Auto Options Research" : (currentCopilot?.sourceTab || "Chat & Agents"));
+    const effectiveSource = sourceTab || (activeView === "options" ? "Broker · Auto Options Research" : (currentCopilot?.sourceTab || "Chat & Agents"));
     if (isBusy || isResetting) return;
     const lower = prompt.trim().toLowerCase();
     if (activeView === "stock") {
