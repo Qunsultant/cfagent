@@ -71,14 +71,14 @@ describe("OptionsStrategyCard structured output (#2563)", () => {
     await renderComponent(<OptionsStrategyCard data={sampleStrategy} onAction={onAction} />);
 
     const buttons = Array.from(container.querySelectorAll("button"));
-    const previewBtn = buttons.find((b) => b.textContent?.includes("Preview in E*TRADE"));
+    const previewBtn = buttons.find((b) => b.textContent?.includes("Preview with your broker"));
     expect(previewBtn).toBeDefined();
 
     act(() => {
       previewBtn?.click();
     });
 
-    expect(onAction).toHaveBeenCalledWith(expect.stringContaining("Preview trade Bull Put Spread on NVDA in E*TRADE"));
+    expect(onAction).toHaveBeenCalledWith(expect.stringContaining("Preview trade Bull Put Spread on NVDA with your broker"));
   });
 
   it("ToolResultView renders OptionsStrategyCard for screen_options tool", async () => {
