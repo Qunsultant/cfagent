@@ -184,13 +184,15 @@ other doors. Scope column is #1843's declaration, consumed here.
 | `check_payment_budget` | mcp:payments | L via door 2 only — acting identity required (#2341); refused on doors 1/3 (no acting-identity carrier there) |
 | `get_payments_overview` | mcp:payments | L via door 2 only — acting identity required (#2341); refused on doors 1/3 (no acting-identity carrier there) |
 
-### mcp:trade (10)
+### mcp:trade (12)
 
 | Tool | Scope | /mcp verdict |
 |---|---|---|
 | `etrade_preview_order` | mcp:trade | L (I / R on other doors) |
 | `etrade_execute_order` | mcp:trade | L (I / R on other doors) |
 | `alpaca_place_order` | mcp:trade | L (I / R on other doors) |
+| `alpaca_place_bracket_ladder` | mcp:trade | L (I / R on other doors) |
+| `alpaca_cancel_bracket_ladder` | mcp:trade | L (I / R on other doors) |
 | `foss_alpaca_place_order` (deprecated #1906 alias of `alpaca_place_order`, same scope) | mcp:trade | L (I / R on other doors) |
 | `execute_durable_twap` | mcp:trade | L (I / R on other doors) |
 | `propose_stock_trade` | mcp:trade | L via door 2 only — acting identity required (#2349); refused on doors 1/3 (no acting-identity carrier there). Preview only: the result is a pending-approval proposal; no order is placed |
