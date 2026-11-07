@@ -125,6 +125,15 @@ import {
   ensureFreeRunCounterSchema,
 } from "../../data/createFreeRunCounterPorts";
 import { FREE_RUN_FAMILIES } from "../../data/freeRunCounterPorts";
+import { createApprovedFreeQuotaAdapter } from "../../data/createApprovedFreeQuotaPorts";
+import {
+  APPROVED_FREE_QUOTA_FAMILIES,
+  ApprovedFreeQuotaError,
+  approvedFreeQuotaPeriodKey,
+} from "../../data/approvedFreeQuotaPorts";
+// logAspectEvent is imported once below (main's #3572 claim-before-credit
+// block) — the slice's duplicate import here was removed in the rebase
+// onto 33f741a4 to avoid TS2300.
 import {
   assertOperatorLogin,
   type EffectiveOperatorEntry,
@@ -153,6 +162,7 @@ import { postJournalBestEffort } from "../../services/journalPosting";
 import type { D1CommercialAdapter } from "../../data/d1CommercialAdapter";
 import {
   assertUnlimitedFreeGrant,
+  isUnlimitedFreeGrantActive,
   toCommercialAccount,
   type StoreTier,
 } from "../../data/commercialPorts";
@@ -1207,6 +1217,179 @@ export async function handleAgenticPaymentsRoutes(
     }
   }
 
+  // Issue #3263 (sub-issue of #3256) — approved-free per-service
+  // quota routes. The quota bounds the operator-granted
+  // unlimited-free entitlement (#3245) with a per-service cap per
+  // period plus the grant's limited-time window. All values are
+  // operator data in D1 (migrations 0054 tables + 0055 seeds: 10
+  // runs per service per month, monthly window, upgrade-or-buy-
+  // credits at the limit — PROPOSED defaults); no quota number,
+  // window, or at-limit action lives in code. Reads and writes go
+  // ONLY through the quota port — no second quota source. The
+  // tenant is server-resolved from the account row; no
+  // client-supplied tenantId parameter exists. Unbound AGENT_DB
+  // fails closed with 503, like the other money paths. The ensure
+  // applies migrations 0054+0055 idempotently (INSERT OR IGNORE
+  // seeding, so an operator edit survives).
+  //
+  // AOP (#2381): every quota failure is a catalog-coded body
+  // {error: businessMessage, code, retryable} — the failure kind
+  // is recorded structurally at the point of failure (the port
+  // assert / adapter read throws ApprovedFreeQuotaError with its
+  // kind), the route maps kind to code, the panel renders the
+  // catalog businessMessage (#2573 precedent). No raw error text
+  // reaches a client from these routes. The 401/403 plain bodies
+  // keep the file-wide convention shared by all commercial routes
+  // (not quota-specific outcomes; coding them is a file-wide
+  // change, out of this slice's scope).
+  const quotaErrorBody = (code: string): Response => {
+    const outcome = resolveOutcome(code);
+    return Response.json(
+      {
+        error: outcome.businessMessage ?? code,
+        code: outcome.code,
+        retryable: outcome.entry?.retryable ?? false,
+      },
+      { status: outcome.entry?.httpStatus ?? 500 },
+    );
+  };
+
+  const requireApprovedFreeQuota = async () => {
+    const quota = createApprovedFreeQuotaAdapter(ctx.env as { AGENT_DB?: unknown });
+    if (!quota) {
+      return quotaErrorBody("FAILURE_APPROVED_FREE_QUOTA_UNAVAILABLE");
+    }
+    // Port method, not a store handle: the adapter ensures its own
+    // schema (Hexagonal, standards §7.1).
+    await quota.ensureSchema();
+    return quota;
+  };
+
+  // GET /payments/agentic/commercial/approved-free-quota?userId= — own or operator.
+  if (path.endsWith("/payments/agentic/commercial/approved-free-quota") && request.method === "GET") {
+    // Issue #3263 (CI fix): userId is declared outside the try so the
+    // catch block can name it in the aspect log — a const declared
+    // inside try is out of scope in catch (tsc: no value in scope).
+    let userId = "";
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      userId = url.searchParams.get("userId") || login;
+      if (!canAccessAccount(login, userId)) {
+        return Response.json({ error: "Forbidden: only the account owner or a store operator may read the approved-free quota." }, { status: 403 });
+      }
+      const quota = await requireApprovedFreeQuota();
+      if (quota instanceof Response) return quota;
+      const store = requireStore();
+      if (store instanceof Response) return store;
+      // The account read selects tier_source, which migration 0008
+      // adds — that migration rides with the subscription schema,
+      // so ensure both stores like GET /subscription does. Without
+      // the subscription ensure, a never-provisioned account reads
+      // 500 ("no such column: tier_source").
+      const subs = requireSubs();
+      if (subs instanceof Response) return subs;
+      const ensured = await ensureStores(store, subs);
+      if (ensured) return ensured;
+      const account = await store.getAccount(userId);
+      const settings = await quota.getSettings();
+      const grant = account?.unlimitedFreeGrant ?? null;
+      const grantActive = isUnlimitedFreeGrantActive(grant, Date.now());
+      const tenantId = account?.tenantId ?? null;
+      const period = settings ? approvedFreeQuotaPeriodKey(Date.now(), settings.windowKind) : null;
+      const families = [];
+      for (const family of APPROVED_FREE_QUOTA_FAMILIES) {
+        const cap = await quota.getCap(family);
+        const used = tenantId && period ? await quota.getUsed({ tenantId, login: userId, family, period }) : 0;
+        families.push({ family, cap, used, remaining: cap === null ? null : Math.max(0, cap - used), period });
+      }
+      return Response.json({
+        userId,
+        tenantId,
+        settings,
+        period,
+        families,
+        grant: { active: grantActive, expiresAtMs: grant?.expiresAtMs ?? null },
+      });
+    } catch (err: any) {
+      if (err instanceof ApprovedFreeQuotaError) return quotaErrorBody(err.code);
+      logAspectEvent({
+        aspect: "ApprovedFreeQuota",
+        operationName: "read-quota",
+        code: "FAILURE_UNEXPECTED_ERROR",
+        level: "error",
+        message: "Approved-free quota read failed.",
+        error: err instanceof Error ? err.message : String(err),
+        metadata: { userId },
+      });
+      return quotaErrorBody("FAILURE_UNEXPECTED_ERROR");
+    }
+  }
+
+  // POST /payments/agentic/commercial/approved-free-quota (operator only)
+  if (path.endsWith("/payments/agentic/commercial/approved-free-quota") && request.method === "POST") {
+    // Issue #3263 (CI fix): login is declared outside the try so the
+    // catch block can name it in the aspect log — a const declared
+    // inside try is out of scope in catch (tsc: cannot find name).
+    let login: string | null = null;
+    try {
+      login = commercialLogin();
+      if (!isStoreOperator(login)) {
+        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+      }
+      const body = (await request.json().catch(() => ({}))) as { family?: unknown; capRuns?: unknown; windowKind?: unknown; atLimitAction?: unknown };
+      const quota = await requireApprovedFreeQuota();
+      if (quota instanceof Response) return quota;
+      // One thing per call: a cap, the window, or the at-limit action.
+      // Both writes are idempotent upserts keyed by family / the
+      // single settings row: a replay with identical values returns
+      // the same 200 with the same state (safe retry); a replay
+      // with different values is a new operator intent and wins
+      // (last-write-wins, with updatedAtMs/updatedBy on the row and
+      // an audit record). The POST never claims exactly-once from
+      // an id — the upsert itself is the dedup (tech-standards §7.2).
+      if (body.family !== undefined || body.capRuns !== undefined) {
+        const capRuns = await quota.setCap({ family: body.family, capRuns: body.capRuns, updatedBy: login });
+        const family = typeof body.family === "string" ? body.family : "";
+        const code = "SUCCESS_APPROVED_FREE_QUOTA_UPDATED";
+        const message = resolveOutcome(code).businessMessage ?? code;
+        ctx.audit("commercial.approved_free_quota.set", "payments", {
+          family,
+          capRuns,
+          operator: login,
+          outcomeCode: code,
+          message,
+        });
+        return Response.json({ family, capRuns, code, message });
+      }
+      if (body.windowKind !== undefined || body.atLimitAction !== undefined) {
+        const settings = await quota.setSettings({ windowKind: body.windowKind, atLimitAction: body.atLimitAction, updatedBy: login });
+        const code = "SUCCESS_APPROVED_FREE_QUOTA_UPDATED";
+        const message = resolveOutcome(code).businessMessage ?? code;
+        ctx.audit("commercial.approved_free_quota_settings.set", "payments", {
+          ...settings,
+          operator: login,
+          outcomeCode: code,
+          message,
+        });
+        return Response.json({ settings, code, message });
+      }
+      return quotaErrorBody("FAILURE_APPROVED_FREE_QUOTA_MISSING_UPDATE");
+    } catch (err: any) {
+      if (err instanceof ApprovedFreeQuotaError) return quotaErrorBody(err.code);
+      logAspectEvent({
+        aspect: "ApprovedFreeQuota",
+        operationName: "set-quota",
+        code: "FAILURE_UNEXPECTED_ERROR",
+        level: "error",
+        message: "Approved-free quota write failed.",
+        error: err instanceof Error ? err.message : String(err),
+        metadata: { operator: login ?? "" },
+      });
+      return quotaErrorBody("FAILURE_UNEXPECTED_ERROR");
+    }
+  }
+
   // GET /payments/agentic/commercial/tenant-settings?tenantId= (operator only)
   if (path.endsWith("/payments/agentic/commercial/tenant-settings") && request.method === "GET") {
     try {
@@ -1642,22 +1825,39 @@ export async function handleAgenticPaymentsRoutes(
         return Response.json({ error: "Payment workflow binding is not configured." }, { status: 503 });
       }
       let status = "unknown";
+      let outcome: string | undefined;
+      let outcomeCode: string | undefined;
       try {
         const instance = await binding.get(workflowId);
         const statusFn = (instance as { status?: unknown }).status;
         if (typeof statusFn === "function") {
-          const result = (await (statusFn as () => Promise<unknown>).call(instance)) as { status?: unknown } | string | null;
+          const result = (await (statusFn as () => Promise<unknown>).call(instance)) as { status?: unknown; output?: unknown } | string | null;
           status =
             typeof result === "string"
               ? result
               : result && typeof result === "object" && typeof result.status === "string"
                 ? result.status
                 : "unknown";
+          // Issue #3263: surface the completed workflow output when
+          // the binding status carries one (same output-object
+          // convention as sagaStatus.ts) — the poller maps
+          // outcome === "quota_exhausted" to the catalog message.
+          // Existing {workflowId, status} is unchanged otherwise.
+          if (result && typeof result === "object" && result.output && typeof result.output === "object") {
+            const output = result.output as Record<string, unknown>;
+            if (typeof output.status === "string") outcome = output.status;
+            if (typeof output.outcomeCode === "string") outcomeCode = output.outcomeCode;
+          }
         }
       } catch {
         status = "unknown";
       }
-      return Response.json({ workflowId, status });
+      return Response.json({
+        workflowId,
+        status,
+        ...(outcome ? { outcome } : {}),
+        ...(outcomeCode ? { outcomeCode } : {}),
+      });
     } catch (err: any) {
       return Response.json({ error: err.message || "Failed to read submission status" }, { status: 500 });
     }

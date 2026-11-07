@@ -236,8 +236,21 @@ export const getIdentity = (): Promise<PlatformIdentityView> => get<PlatformIden
 export const listPlans = (): Promise<{ plans: PlanView[] }> => get<{ plans: PlanView[] }>("/plans");
 export const getSubscriptionStatus = (userId: string): Promise<SubscriptionStatusView> =>
   get<SubscriptionStatusView>(`/subscription?userId=${encodeURIComponent(userId)}`);
-export const getSubmissionStatus = (workflowId: string): Promise<{ workflowId: string; status: string }> =>
-  get<{ workflowId: string; status: string }>(`/submission-status?workflowId=${encodeURIComponent(workflowId)}`);
+/**
+ * Issue #3263: a completed workflow may also carry its output —
+ * outcome (e.g. "quota_exhausted") plus the outcome-catalog code
+ * (e.g. FAILURE_APPROVED_FREE_QUOTA_EXHAUSTED) — so the poller
+ * can render the catalog message instead of a raw status.
+ */
+export interface SubmissionStatusView {
+  workflowId: string;
+  status: string;
+  outcome?: string;
+  outcomeCode?: string;
+}
+
+export const getSubmissionStatus = (workflowId: string): Promise<SubmissionStatusView> =>
+  get<SubmissionStatusView>(`/submission-status?workflowId=${encodeURIComponent(workflowId)}`);
 
 export interface SubmitBody {
   family: ScreenerFamily;

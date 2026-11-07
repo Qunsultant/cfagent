@@ -434,6 +434,55 @@ export const agentFreeRunCounts = sqliteTable(
 );
 
 /**
+ * Approved-free per-service quota caps (#3263). One row per family
+ * with the current cap (runs per period); operator data seeded at 10
+ * by migration 0055. This schema MAPS the table; DDL authority lives
+ * in migration 0054 (src/data/migrationRunner.ts).
+ */
+export const agentApprovedFreeQuotas = sqliteTable("agent_approved_free_quotas", {
+  family: text("family").primaryKey(),
+  capRuns: integer("cap_runs").notNull(),
+  updatedAtMs: integer("updated_at_ms").notNull(),
+  updatedBy: text("updated_by"),
+});
+
+/**
+ * Approved-free quota runs consumed (#3263). One row per (tenant,
+ * login, family, period); a missing row reads as 0 consumed. The
+ * tenant_id is part of the key (#1069 §10): usage in Tenant A never
+ * leaks to Tenant B. This schema MAPS the table; DDL authority lives
+ * in migration 0054 (src/data/migrationRunner.ts).
+ */
+export const agentApprovedFreeQuotaCounts = sqliteTable(
+  "agent_approved_free_quota_counts",
+  {
+    tenantId: text("tenant_id").notNull(),
+    userLogin: text("user_login").notNull(),
+    family: text("family").notNull(),
+    period: text("period").notNull(),
+    used: integer("used").notNull().default(0),
+    updatedAtMs: integer("updated_at_ms").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.userLogin, t.family, t.period] })],
+);
+
+/**
+ * Approved-free quota settings (#3263). One row (id 'default') with
+ * the window kind ('month' | 'week') and the at-limit action
+ * ('upgrade_or_buy_credits' | 'stop'); operator data seeded by
+ * migration 0055 (month + upgrade_or_buy_credits, i.e. #3241
+ * decision 4). This schema MAPS the table; DDL authority lives in
+ * migration 0054 (src/data/migrationRunner.ts).
+ */
+export const agentApprovedFreeQuotaSettings = sqliteTable("agent_approved_free_quota_settings", {
+  id: text("id").primaryKey(),
+  windowKind: text("window_kind").notNull(),
+  atLimitAction: text("at_limit_action").notNull(),
+  updatedAtMs: integer("updated_at_ms").notNull(),
+  updatedBy: text("updated_by"),
+});
+
+/**
  * Redeemable failure-credit claims (#2019). One row per failed paid
  * run, written by the payment adapter alongside the DO ledger
  * credit row (the ledger row is the financial audit record; this

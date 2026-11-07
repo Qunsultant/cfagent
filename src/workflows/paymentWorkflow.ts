@@ -117,6 +117,7 @@ import {
   type PaymentWorkflowStep,
 } from "./paymentWorkflowFlow";
 import { recordWorkflowTraceHop } from "../observability/meshTrace";
+import { logAspectEvent } from "../aspects/loggingAspect";
 import { meshTraceStoreForEnv } from "../data/createMeshTracePorts";
 import {
   listCfpayLedgerRows,
@@ -149,6 +150,7 @@ import {
   createFreeRunCounterAdapter,
   ensureFreeRunCounterSchema,
 } from "../data/createFreeRunCounterPorts";
+import { createApprovedFreeQuotaAdapter } from "../data/createApprovedFreeQuotaPorts";
 import {
   mapChargeToJournalEntries,
   mapFailureCreditToJournalEntries,
@@ -322,6 +324,38 @@ export class PaymentWorkflow extends ThinkWorkflow<
       );
       freeRunCounter = null;
     }
+    // Issue #3263: the approved-free per-service quota, wired from
+    // the same AGENT_DB binding. Best-effort like the free-run
+    // counter (not fatal like the catalogue): a quota adapter that
+    // cannot be ensured leaves the gate exactly as today — a grant
+    // account falls through to the normal gate (fail-closed: the
+    // Free allowance at most, never an unverified unlimited run) —
+    // so a wiring failure never fails a payment and never gives
+    // away uncapped free runs.
+    let approvedFreeQuota: Awaited<ReturnType<typeof createApprovedFreeQuotaAdapter>> = null;
+    try {
+      const quota = createApprovedFreeQuotaAdapter(this.env as { AGENT_DB?: unknown });
+      if (quota) {
+        // Port method, not a store handle: the adapter ensures its
+        // own schema (Hexagonal, standards §7.1).
+        await quota.ensureSchema();
+        approvedFreeQuota = quota;
+      }
+    } catch (err) {
+      // Issue #3263 (CI fix): structured aspect log, not a console call —
+      // the #3515 ratchet pins this file's ceiling at 9 and the
+      // slice's console call pushed it to 10.
+      logAspectEvent({
+        aspect: "ApprovedFreeQuota",
+        operationName: "wire-quota",
+        code: "FAILURE_APPROVED_FREE_QUOTA_UNAVAILABLE",
+        level: "warn",
+        message: `Approved-free quota unavailable for run ${p.runRequestId} — gate keeps today's behavior for grant accounts.`,
+        error: err instanceof Error ? err.message : String(err),
+        metadata: { runRequestId: p.runRequestId },
+      });
+      approvedFreeQuota = null;
+    }
     const gate = new NativeMonetizationGate(
       {
         // Flagship feature flag "monetization" (#2043): OFF = free
@@ -335,6 +369,7 @@ export class PaymentWorkflow extends ThinkWorkflow<
         priceCatalogue,
         proofRedemptions,
         freeRunCounter,
+        approvedFreeQuota,
         checkout: checkoutPorts,
       },
     );

@@ -154,7 +154,7 @@ export function resolvePaidScreenAction(input: {
       action: "start_payment",
       reason:
         input.coverage === "unlimited_free_grant"
-          ? "Scheduled run covered by an active unlimited-free grant (#3245); the payment workflow re-checks the grant and starts the screener with no charge and no deduction."
+          ? "Scheduled run covered by an active unlimited-free grant (#3245); the payment workflow re-checks the grant against its per-service quota (#3263) and starts the screener with no charge and no deduction within the quota — at the cap the workflow returns quota_exhausted instead of starting."
           : `Scheduled run covered by ${input.coverage}; the payment workflow re-checks, consumes coverage, and starts the screener.`,
     };
   }

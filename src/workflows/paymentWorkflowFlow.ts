@@ -202,6 +202,17 @@ export interface PaymentWorkflowEvent {
    * the per-coverage-type revenue view (#2022).
    */
   paidVia?: string;
+  /**
+   * Issue #3263 (AOP, #1969 acceptance): the outcome-catalog code
+   * for the event's decision, so the audit record alone answers
+   * "which code, what happened, for which login". Set on the
+   * quota-exhausted refusal and on a quota-covered run.
+   */
+  outcomeCode?: string;
+  /** The login the event's decision was made for (server-resolved). */
+  login?: string;
+  /** Structured detail for the audit record (never a client message). */
+  detail?: string;
 }
 
 /**
@@ -417,8 +428,9 @@ async function traceStep(
 }
 
 export type PaymentWorkflowOutcome =
-  | { status: "started"; runRequestId: string; paidVia: string; screenerWorkflowId: string; priceUSD: number }
+  | { status: "started"; runRequestId: string; paidVia: string; screenerWorkflowId: string; priceUSD: number; outcomeCode?: string }
   | { status: "payment_required"; runRequestId: string; priceUSD: number; checkout?: unknown }
+  | { status: "quota_exhausted"; runRequestId: string; priceUSD: number; family: string; outcomeCode?: string; nextStep?: string }
   | { status: "coverage_required"; runRequestId: string; priceUSD: number }
   | { status: "approval_rejected"; runRequestId: string }
   | { status: "expired"; runRequestId: string }
@@ -483,6 +495,36 @@ export async function runPaymentWorkflowFlow(
   await traceStep(deps, "gate-check");
 
   if (!gateDecision.allowed) {
+    if (gateDecision.status === "approved_free_quota_exhausted") {
+      // Issue #3263: at the approved-free quota cap nothing runs
+      // over allowance (#3241 decision 4). No approval wait, no
+      // screener start, no checkout — the refusal is audited and
+      // returned with the outcome-coded at-limit decision.
+      await doStep("record-quota-exhausted", () =>
+        deps.recordEvent({
+          runRequestId: params.runRequestId,
+          tenantId: params.tenantId,
+          type: "payment.approved_free_quota_exhausted",
+          priceUSD: gateDecision.priceUSD,
+          // AOP (#1969): the audit record alone answers which code,
+          // what happened, for which login. `detail` carries the
+          // gate's server-side reason (counts + decision reference)
+          // for the audit trail — it is never a client message.
+          ...(gateDecision.outcomeCode ? { outcomeCode: gateDecision.outcomeCode } : {}),
+          login: params.userId,
+          ...(gateDecision.reason ? { detail: gateDecision.reason } : {}),
+        }),
+      );
+      await traceStep(deps, "record-quota-exhausted");
+      return {
+        status: "quota_exhausted",
+        runRequestId: params.runRequestId,
+        priceUSD: gateDecision.priceUSD,
+        family: gateDecision.family,
+        ...(gateDecision.outcomeCode ? { outcomeCode: gateDecision.outcomeCode } : {}),
+        ...(gateDecision.nextStep ? { nextStep: gateDecision.nextStep } : {}),
+      };
+    }
     if (gateDecision.status === "coverage_required") {
       // #2019: a skip is audited, not silent — the gate's in-memory
       // skip note would otherwise be lost with the workflow instance.
@@ -697,6 +739,7 @@ export async function runPaymentWorkflowFlow(
       step,
       confirmed.paidVia ?? "cfpay_checkout",
       gateDecision.priceUSD,
+      gateDecision.outcomeCode,
     );
   }
 
@@ -708,6 +751,10 @@ export async function runPaymentWorkflowFlow(
       type: "payment.covered",
       priceUSD: gateDecision.priceUSD,
       paidVia: gateDecision.paidVia ?? gateDecision.status,
+      // AOP (#1969): a quota-covered run carries its success code
+      // and login on the audit event. Other covered paths carry no
+      // outcome code — the gate sets one only on the quota branch.
+      ...(gateDecision.outcomeCode ? { outcomeCode: gateDecision.outcomeCode, login: params.userId } : {}),
     }),
   );
   await traceStep(deps, "record-payment");
@@ -731,6 +778,7 @@ export async function runPaymentWorkflowFlow(
     step,
     gateDecision.paidVia ?? gateDecision.status,
     gateDecision.priceUSD,
+    gateDecision.outcomeCode,
   );
 }
 
@@ -740,6 +788,7 @@ async function startScreenerOrCredit(
   step: PaymentWorkflowStep,
   paidVia: string,
   priceUSD: number,
+  outcomeCode?: string,
 ): Promise<PaymentWorkflowOutcome> {
   // Issue #3073: same durable step, same boundary - declared here because this
   // helper owns its own `step` handle (the flow's wrapper is out of scope).
@@ -765,6 +814,10 @@ async function startScreenerOrCredit(
       // price). Plumbing the existing gateDecision.priceUSD — not
       // new pricing, never the unapproved catalogue defaults.
       priceUSD,
+      // Issue #3263 (AOP): a quota-covered start carries its
+      // success code so the submission-status poll can render the
+      // catalog message. Other starts carry no outcome code.
+      ...(outcomeCode ? { outcomeCode } : {}),
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

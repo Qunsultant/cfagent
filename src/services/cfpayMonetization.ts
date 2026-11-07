@@ -123,8 +123,12 @@ export interface MonetizationConfig {
 }
 
 export type GateDecision =
-  | { allowed: true; status: string; runRequestId: string; priceUSD: number; paidVia?: string }
-  | { allowed: false; status: string; httpStatus: 402; runRequestId: string; priceUSD: number; family: ScreenerFamily; checkout?: unknown; disclosure?: string; reason?: string };
+  // Issue #3263: the native gate sets outcomeCode on the quota-covered
+  // branch (SUCCESS_APPROVED_FREE_QUOTA_COVERED); the workflow reads it
+  // off the shared decision type, so the field lives here. The cfpay
+  // gate never sets it (stays undefined); readers guard with a ternary.
+  | { allowed: true; status: string; runRequestId: string; priceUSD: number; paidVia?: string; outcomeCode?: string }
+  | { allowed: false; status: string; httpStatus: 402; runRequestId: string; priceUSD: number; family: ScreenerFamily; checkout?: unknown; disclosure?: string; reason?: string; outcomeCode?: string; nextStep?: string };
 
 interface LedgerRow {
   runRequestId: string;

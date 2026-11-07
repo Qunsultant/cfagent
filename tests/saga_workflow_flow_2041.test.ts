@@ -585,7 +585,7 @@ describe("saga flow Leg 0/1 (S1, #2041) and gate entry (S2)", () => {
     expect(paymentParams["meterContext"]).toEqual({ category: "saga", userLogin: "u1login" });
   });
 
-  it.each(["payment_required", "coverage_required", "approval_rejected", "expired"])(
+  it.each(["payment_required", "coverage_required", "approval_rejected", "expired", "quota_exhausted"])(
     "payment outcome %s ends payment_not_completed without touching the screen",
     async (paymentStatus) => {
       const legPort = new FakeLegPort();
@@ -607,6 +607,20 @@ describe("saga flow Leg 0/1 (S1, #2041) and gate entry (S2)", () => {
       expect(notCompleted?.paymentWorkflowId).toBe("pay-wf-1");
     },
   );
+
+  it("quota_exhausted keeps its exact reason (never payment_output_unrecognized)", async () => {
+    // Issue #3263: the approved-free quota cap is a terminal refusal
+    // the saga recognizes — the reason stays quota_exhausted while
+    // the status stays payment_not_completed.
+    const legPort = new FakeLegPort();
+    legPort.statuses["payment:pay-wf-1"] = [paymentOutcome("quota_exhausted")];
+    const { deps, clock } = depsFor(legPort);
+    const outcome = await runSagaWorkflowFlow(baseParams(), deps, fakeStep(clock));
+    expect(outcome.status).toBe("payment_not_completed");
+    if (outcome.status === "payment_not_completed") {
+      expect(outcome.reason).toBe("quota_exhausted");
+    }
+  });
 
   it("payment start-failure credit passes through without re-issue by the saga", async () => {
     const legPort = new FakeLegPort();
