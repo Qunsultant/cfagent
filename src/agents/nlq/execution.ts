@@ -24,6 +24,13 @@ import { NLQPlan, isNlqTableAllowed } from "./schema";
 import { NLQExecutionDeps, NLQQueryResult, NLQSchedulingPort, type NLQSocialBriefPort, type NLQStockScreenPort, type NLQStockScreenRunResult } from "./types";
 import { SOCIAL_BRIEF_MAX_CHARS, resolveBriefDate } from "../social/briefStore";
 import { getUserDid } from "../did";
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/nlq/execution",
+});
 function auditNlqExecution(
   orm: DatabaseORM,
   sessionId: string,
@@ -780,7 +787,11 @@ function executeNLQQueryCore(
             commission: draft.estimatedCommission,
             proposerDid: draft.proposerDid,
             expiresAt: draft.expiresAt,
-          }).catch(console.warn);
+          }).catch((e) => structuredLog.warn("execution.pre_trade_approval_ticket_dispatch_failed", {
+            message: "Pre-trade approval ticket dispatch to Slack failed",
+            orderId: draft.orderId,
+            error: e instanceof Error ? e.message : String(e),
+          }));
         } catch {
           // Non-blocking dispatch
         }
@@ -1702,7 +1713,11 @@ async function executeNLQQueryAsyncCore(
               environment: (env?.ETRADE_ENVIRONMENT || "sandbox").toLowerCase(),
               timestamp: executedAt,
               humanApproved: true,
-            }).catch(console.warn);
+            }).catch((e) => structuredLog.warn("execution.transaction_snap_dispatch_failed", {
+              message: "Transaction snap dispatch to Slack failed",
+              transactionId: existingTrade.id,
+              error: e instanceof Error ? e.message : String(e),
+            }));
           } catch {
             // Non-blocking snap dispatch
           }

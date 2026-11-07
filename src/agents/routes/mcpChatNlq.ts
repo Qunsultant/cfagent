@@ -49,6 +49,7 @@ import {
 } from "../../mcps/openaimp";
 import { handleOpenaimpMcpHttpRequest } from "../../mcps/openaimp/handler";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+import { createStructuredLogger } from "../../observability/structuredLogger";
 import { resolveMcpPrincipalFromHeaders } from "../../mcps/openaimp/mcpPermissionPorts";
 import { executeNaturalLanguageQuery, type NLQSchedulingPort, type NLQSocialBriefPort } from "../nlq";
 import {
@@ -68,6 +69,11 @@ import { createOptionsDiscoveryPorts } from "../../data/createOptionsDiscoveryPo
 import { createDiscoveryService } from "../../services/discoveryService";
 import { buildDataProviderPorts } from "../../data/buildDataProviderPorts";
 import { createFitDiscoveryRunner } from "../../services/fitDiscoveryRunner";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/routes/mcpChatNlq",
+});
 
 /** The subset of OrchestratorAgent surface the MCP/chat/NLQ handlers need. */
 export interface McpChatNlqRouteContext {
@@ -355,9 +361,12 @@ export async function handleMcpChatNlqRoutes(
         levelsForNlq(ctx.scopedNlqModes, body.mode, (ctx.env as unknown as Record<string, unknown> | undefined)?.[NLQ_MODE_SWITCH])
       );
       if (resolvedNlqMode.invalid) {
-        console.error(
-          `[nlq] invalid ${NLQ_MODE_SWITCH} value ${JSON.stringify(resolvedNlqMode.raw)} — failing closed to "rest"`
-        );
+        structuredLog.error("mcpChatNlq.nlq_mode_config_invalid", {
+          message: `[nlq] invalid ${NLQ_MODE_SWITCH} value ${JSON.stringify(resolvedNlqMode.raw)} — failing closed to "rest"`,
+          setting: NLQ_MODE_SWITCH,
+          value: resolvedNlqMode.raw ?? "",
+          resolved: "rest",
+        });
         ctx.audit(nlqConfigErrorEvent(), "nlq", {
           setting: NLQ_MODE_SWITCH,
           value: resolvedNlqMode.raw ?? "",

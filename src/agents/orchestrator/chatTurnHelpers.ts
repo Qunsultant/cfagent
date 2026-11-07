@@ -19,8 +19,14 @@ import type {
 import { createOrmPorts } from "../../data/createOrmPorts";
 import { VectorMemory } from "../../memory/vector-memory";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+import { createStructuredLogger } from "../../observability/structuredLogger";
 import { McpSystemFacade } from "../../patterns/facade";
 import { createAgentMcpTools } from "../mcpAdapter";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/orchestrator/chatTurnHelpers",
+});
 
 /**
  * Ports the chat-turn helper functions receive from the class. The
@@ -194,7 +200,10 @@ export async function assembleGrounding(ctx: ChatTurnHelpersContext, userText: s
         vectorContext = `\nRelevant past outcomes (vector memory, most similar first):\n${VectorMemory.brief(chunks)}`;
       }
     } catch (err) {
-      console.warn("[VectorMemory] recall failed:", err instanceof Error ? err.message : String(err));
+      structuredLog.warn("chatTurnHelpers.vector_recall_failed", {
+        message: "[VectorMemory] recall failed:",
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
   // Issue #1740 (Hybrid RAG): append graph-adjacent market
@@ -226,10 +235,10 @@ export async function assembleGrounding(ctx: ChatTurnHelpersContext, userText: s
         vectorContext += formatGraphContext(expanded.rows);
       }
     } catch (err) {
-      console.warn(
-        "[retrieval] turn graph expansion failed, dense-only:",
-        err instanceof Error ? err.message : String(err),
-      );
+      structuredLog.warn("chatTurnHelpers.turn_graph_expansion_failed", {
+        message: "[retrieval] turn graph expansion failed, dense-only:",
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
   return { memoryContext, vectorContext };

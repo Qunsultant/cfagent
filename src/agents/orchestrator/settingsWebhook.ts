@@ -49,6 +49,13 @@ import {
   type SettingsChangeKind,
 } from "../settingsWebhookNotify";
 import type { ScreenerExecutionContext } from "./scheduleMaintenance";
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/orchestrator/settingsWebhook",
+});
 
 /** The Agent-state key under which the held selection lives. */
 export const COPILOT_SELECTION_STATE_KEY = "copilotSelection";
@@ -157,10 +164,11 @@ export async function handleSettingsWebhook(
     typeof payload.login !== "string" ||
     !payload.login.trim()
   ) {
-    console.warn(
-      "[SettingsWebhook] ignoring a settings delivery with a malformed payload " +
+    structuredLog.warn("settingsWebhook.malformed_payload_ignored", {
+      message:
+        "[SettingsWebhook] ignoring a settings delivery with a malformed payload " +
         "(expected { kind, login, changedAt })",
-    );
+    });
     return;
   }
   const kind = payload.kind;
@@ -175,17 +183,21 @@ export async function handleSettingsWebhook(
     .catch(() => undefined);
   const ownLogin = executionContext?.userLogin;
   if (!ownLogin) {
-    console.warn(
-      "[SettingsWebhook] ignoring a settings delivery: this instance holds no " +
+    structuredLog.warn("settingsWebhook.no_execution_context_ignored", {
+      message:
+        "[SettingsWebhook] ignoring a settings delivery: this instance holds no " +
         "execution context, so it cannot verify the event is its own",
-    );
+    });
     return;
   }
   if (payload.login !== ownLogin) {
-    console.warn(
-      `[SettingsWebhook] ignoring a settings delivery for login "${payload.login}" ` +
+    structuredLog.warn("settingsWebhook.foreign_login_ignored", {
+      message:
+        `[SettingsWebhook] ignoring a settings delivery for login "${payload.login}" ` +
         `on the instance for "${ownLogin}" — an agent acts only on its own selection`,
-    );
+      login: payload.login,
+      ownLogin,
+    });
     return;
   }
 
@@ -195,11 +207,13 @@ export async function handleSettingsWebhook(
     commercial: ctx.commercial,
   });
   if (!resolution.resolved) {
-    console.warn(
-      `[SettingsWebhook] settings change for "${ownLogin}" could not be re-resolved ` +
+    structuredLog.warn("settingsWebhook.selection_reresolve_failed", {
+      message:
+        `[SettingsWebhook] settings change for "${ownLogin}" could not be re-resolved ` +
         "(the broker store is unreadable) — nothing held, nothing recorded; " +
         "the status route and the next cycle name the unresolved state",
-    );
+      login: ownLogin,
+    });
     return;
   }
   const selection = resolution.selection;
@@ -224,10 +238,10 @@ export async function handleSettingsWebhook(
           "(source: notified)",
       });
     } catch (err) {
-      console.warn(
-        "[SettingsWebhook] the selection-changed activity entry could not be written",
-        err,
-      );
+      structuredLog.warn("settingsWebhook.selection_changed_activity_write_failed", {
+        message: "[SettingsWebhook] the selection-changed activity entry could not be written",
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
     try {
       ctx.audit?.("stock_copilot.selection_changed", "orchestrator", {

@@ -25,6 +25,13 @@ import {
   type PolicyVerdict,
   type PolicyVerdictAttestation,
 } from "../../services/riskPolicyEngine";
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/orchestrator/autopilot",
+});
 
 /**
  * Ports the autopilot functions receive from the class. The state key
@@ -86,7 +93,10 @@ export function writeAutopilotState(ctx: AutopilotContext, patch: Record<string,
       next.updatedAt
     );
   } catch (err) {
-    console.warn("[OrchestratorAgent] Autopilot: failed to persist state:", err);
+    structuredLog.warn("autopilot.persist_state_failed", {
+      message: "[OrchestratorAgent] Autopilot: failed to persist state:",
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
   return next;
 }
@@ -113,7 +123,10 @@ export async function fetchBrokerBalanceSnapshot(ctx: AutopilotContext, userLogi
     if (!key) return null;
     return await client.fetchBalance(key);
   } catch (err) {
-    console.warn("[OrchestratorAgent] Autopilot: balance snapshot unavailable:", err);
+    structuredLog.warn("autopilot.balance_snapshot_unavailable", {
+      message: "[OrchestratorAgent] Autopilot: balance snapshot unavailable:",
+      error: err instanceof Error ? err.message : String(err),
+    });
     return null;
   }
 }
@@ -207,7 +220,10 @@ export async function evaluateAndRecordAutopilotVerdict(ctx: AutopilotContext, p
       createdAt: verdict.evaluatedAt,
     });
   } catch (err) {
-    console.warn("[OrchestratorAgent] Autopilot: failed to persist verdict:", err);
+    structuredLog.warn("autopilot.persist_verdict_failed", {
+      message: "[OrchestratorAgent] Autopilot: failed to persist verdict:",
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 
   // Ledger event the control center already knows how to render.

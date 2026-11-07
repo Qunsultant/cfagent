@@ -26,6 +26,14 @@ import type { DatabaseORM } from "../../orm";
 import type { ETradeOptionChain, ETradeOptionExpireDate } from "../../types";
 import type { EtradeOptionsRouteContext } from "./etradeOptions";
 
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/routes/etradeOptionsEvaluate",
+});
+
 /** Mutable llm-ideas retrieval state shared with the dispatcher's catch. */
 export interface LlmIdeasRetrievalState {
   retrievedExpirations: ETradeOptionExpireDate[];
@@ -194,11 +202,17 @@ export async function executeLlmIdeasEvaluation(args: {
             humanFeedback = humanFeedback
               ? `${humanFeedback}\n\n${reflectionCtx}`
               : reflectionCtx;
-            console.log(`[Options] Ranking with reflection adjustments (${learnings.length} learnings)`);
+            structuredLog.info("etradeOptionsEvaluate.ranking_reflection_adjustments_applied", {
+              message: `[Options] Ranking with reflection adjustments (${learnings.length} learnings)`,
+              learnings: learnings.length,
+            });
           }
         } catch {}
         if (humanFeedback) {
-          console.log(`[Options] Ranking with human feedback context (${recent.length} recent decisions)`);
+          structuredLog.info("etradeOptionsEvaluate.ranking_human_feedback_context_applied", {
+            message: `[Options] Ranking with human feedback context (${recent.length} recent decisions)`,
+            recentDecisions: recent.length,
+          });
         }
       } catch {}
       llmJudgment = await rankCandidatesWithLlm(ctx.env, strategyRequest, "balanced", pipelineResult.snapshot.contracts, candidates, humanFeedback);

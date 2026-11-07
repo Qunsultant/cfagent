@@ -168,12 +168,24 @@ describe("TickerAgent idle-cancel (Issue #2443)", () => {
     agent.cancelSchedule = async () => {
       throw new Error("cancel exploded");
     };
-    const err = vi.spyOn(console, "error").mockImplementation(() => {});
-    await expect(
-      agent.onClose(new FakeConnection("conn-1"), 1000, "", true),
-    ).resolves.toBeUndefined();
-    expect(err).toHaveBeenCalled();
-    expect(String(err.mock.calls[0]?.[0])).toContain("TickerAgent");
+    // Issue #3515 S3: the failure surfaces through the S2 structured
+    // logger — one JSON event line via console.info. Assert on the
+    // parsed event, not console.error.
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    try {
+      await expect(
+        agent.onClose(new FakeConnection("conn-1"), 1000, "", true),
+      ).resolves.toBeUndefined();
+      const events = info.mock.calls
+        .flatMap((args) => args.map(String))
+        .map((line) => { try { return JSON.parse(line); } catch { return null; } })
+        .filter(Boolean);
+      const failed = events.find((e) => e.type === "tickerAgent.ticker_schedule_failed" && e.level === "error");
+      expect(failed).toBeDefined();
+      expect(String(failed.fields?.message)).toContain("TickerAgent");
+    } finally {
+      info.mockRestore();
+    }
   });
 
   it("listSchedules failure during cancel surfaces and does not throw", async () => {
@@ -183,11 +195,24 @@ describe("TickerAgent idle-cancel (Issue #2443)", () => {
       throw new Error("list exploded");
     };
     agent.cancelSchedule = async () => true;
-    const err = vi.spyOn(console, "error").mockImplementation(() => {});
-    await expect(
-      agent.onClose(new FakeConnection("conn-1"), 1000, "", true),
-    ).resolves.toBeUndefined();
-    expect(err).toHaveBeenCalled();
+    // Issue #3515 S3: the failure surfaces through the S2 structured
+    // logger — one JSON event line via console.info. Assert on the
+    // parsed event, not console.error.
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    try {
+      await expect(
+        agent.onClose(new FakeConnection("conn-1"), 1000, "", true),
+      ).resolves.toBeUndefined();
+      const events = info.mock.calls
+        .flatMap((args) => args.map(String))
+        .map((line) => { try { return JSON.parse(line); } catch { return null; } })
+        .filter(Boolean);
+      const failed = events.find((e) => e.type === "tickerAgent.ticker_schedule_failed" && e.level === "error");
+      expect(failed).toBeDefined();
+      expect(String(failed.fields?.error)).toContain("list exploded");
+    } finally {
+      info.mockRestore();
+    }
   });
 
   it("pushTicks with zero connections cancels the schedule and sends nothing", async () => {

@@ -161,6 +161,13 @@ import type {
   IndexListJobResult,
   IndexRefreshOperation,
 } from "../services/indexListJob";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/scheduled-agent",
+});
 
 /**
  * Resolve a halt read for the firing path, failing closed: any
@@ -175,10 +182,11 @@ async function resolveReaderHalt(
   try {
     return await reader.isHalted(tenantId);
   } catch (err) {
-    console.error(
-      "[ScheduledAgent] Halt read failed; failing closed:",
-      err,
-    );
+    structuredLog.error("scheduledAgent.halt_read_failed", {
+      message: "[ScheduledAgent] Halt read failed; failing closed:",
+      tenantId,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return true;
   }
 }

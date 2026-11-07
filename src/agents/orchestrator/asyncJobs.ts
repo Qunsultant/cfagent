@@ -98,6 +98,13 @@ import {
   type ScreenerRunOutcome,
 } from "../../services/screenerFollowups";
 import { resolvePipelinePolicy, shouldNotify } from "../../services/pipelinePolicy";
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/orchestrator/asyncJobs",
+});
 
 /**
  * Ports the async-job functions receive from the class. Table/state
@@ -389,7 +396,11 @@ export async function recoverQueuedAsyncJobs(ctx: AsyncJobsContext): Promise<voi
         },
       );
     } catch (error) {
-      console.error(`[OrchestratorAgent] Could not reschedule queued async job ${jobId}:`, error);
+      structuredLog.error("asyncJobs.recover_queued_async_job_reschedule_failed", {
+        message: `[OrchestratorAgent] Could not reschedule queued async job ${jobId}:`,
+        jobId,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 }
@@ -669,7 +680,10 @@ export async function recordScreenerRunMainJob(
       createdAt: now,
     });
   } catch (err) {
-    console.warn("[AsyncJobs] job outcome record failed:", err instanceof Error ? err.message : String(err));
+    structuredLog.warn("asyncJobs.job_outcome_record_failed", {
+      message: "[AsyncJobs] job outcome record failed:",
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
   if (chainId) {
     recordStageTransition(ctx, {
@@ -982,7 +996,11 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
             startUserLogin,
           );
         } catch (notifyError) {
-          console.error(`[OrchestratorAgent] Start notification scheduling failed for job ${jobId}:`, notifyError);
+          structuredLog.error("asyncJobs.start_notification_schedule_failed", {
+            message: `[OrchestratorAgent] Start notification scheduling failed for job ${jobId}:`,
+            jobId,
+            error: notifyError instanceof Error ? notifyError.message : String(notifyError),
+          });
         }
       }
     }
@@ -1231,7 +1249,10 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
             });
             noticeSent = notice.ok;
           } catch (noticeError) {
-            console.warn("[asyncJobs] undeliverable-notice failed:", noticeError instanceof Error ? noticeError.message : String(noticeError));
+            structuredLog.warn("asyncJobs.undeliverable_notice_failed", {
+              message: "[asyncJobs] undeliverable-notice failed:",
+              error: noticeError instanceof Error ? noticeError.message : String(noticeError),
+            });
           }
         }
         result = { status: "skipped", reason: payload.skipReason, channel, noticeSent };
@@ -1407,9 +1428,11 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
         )
       );
       if (resolvedNlqMode.invalid) {
-        console.error(
-          `[nlq] invalid ${NLQ_MODE_SWITCH} value ${JSON.stringify(resolvedNlqMode.raw)} — failing closed to "rest"`
-        );
+        structuredLog.error("asyncJobs.nlq_mode_invalid", {
+          message: `[nlq] invalid ${NLQ_MODE_SWITCH} value ${JSON.stringify(resolvedNlqMode.raw)} — failing closed to "rest"`,
+          setting: NLQ_MODE_SWITCH,
+          rawValue: resolvedNlqMode.raw,
+        });
         ctx.audit(nlqConfigErrorEvent(), "orchestrator", {
           setting: NLQ_MODE_SWITCH,
           value: resolvedNlqMode.raw ?? "",
@@ -1508,7 +1531,11 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
           chainId: jobChainId,
           error: hookError instanceof Error ? hookError.message : String(hookError),
         });
-        console.error(`[OrchestratorAgent] Shard advance failed for job ${jobId}:`, hookError);
+        structuredLog.error("asyncJobs.shard_advance_failed", {
+          message: `[OrchestratorAgent] Shard advance failed for job ${jobId}:`,
+          jobId,
+          error: hookError instanceof Error ? hookError.message : String(hookError),
+        });
       }
     }
 
@@ -1545,7 +1572,11 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
           chainId: jobChainId,
           error: hookError instanceof Error ? hookError.message : String(hookError),
         });
-        console.error(`[OrchestratorAgent] Feed generate scheduling failed for job ${jobId}:`, hookError);
+        structuredLog.error("asyncJobs.feed_generate_schedule_failed", {
+          message: `[OrchestratorAgent] Feed generate scheduling failed for job ${jobId}:`,
+          jobId,
+          error: hookError instanceof Error ? hookError.message : String(hookError),
+        });
       }
     }
 
@@ -1605,7 +1636,11 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
           jobId,
           error: followupError instanceof Error ? followupError.message : String(followupError),
         });
-        console.error(`[OrchestratorAgent] Follow-up scheduling failed for job ${jobId}:`, followupError);
+        structuredLog.error("asyncJobs.followup_schedule_failed", {
+          message: `[OrchestratorAgent] Follow-up scheduling failed for job ${jobId}:`,
+          jobId,
+          error: followupError instanceof Error ? followupError.message : String(followupError),
+        });
       }
     }
 
@@ -1646,7 +1681,11 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
           jobId,
           error: followupError instanceof Error ? followupError.message : String(followupError),
         });
-        console.error(`[OrchestratorAgent] Delivery scheduling failed for job ${jobId}:`, followupError);
+        structuredLog.error("asyncJobs.delivery_schedule_failed", {
+          message: `[OrchestratorAgent] Delivery scheduling failed for job ${jobId}:`,
+          jobId,
+          error: followupError instanceof Error ? followupError.message : String(followupError),
+        });
       }
     }
 
@@ -1673,7 +1712,11 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
           jobId,
           error: followupError instanceof Error ? followupError.message : String(followupError),
         });
-        console.error(`[OrchestratorAgent] Delivered-notification scheduling failed for job ${jobId}:`, followupError);
+        structuredLog.error("asyncJobs.delivered_notification_schedule_failed", {
+          message: `[OrchestratorAgent] Delivered-notification scheduling failed for job ${jobId}:`,
+          jobId,
+          error: followupError instanceof Error ? followupError.message : String(followupError),
+        });
       }
     }
   } catch (error) {
@@ -1780,12 +1823,19 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
           ctx.audit("shard.advance_failed", "orchestrator", { jobId, chainId: jobChainId, error: hookError instanceof Error ? hookError.message : String(hookError) });
         }
       } else {
-        console.error(
-          `[OrchestratorAgent] Sharded chain ${jobChainId} blocked: feed shard ${shardKey} failed (${message}) — assembly refused, no partial report.`
-        );
+        structuredLog.error("asyncJobs.sharded_chain_blocked", {
+          message: `[OrchestratorAgent] Sharded chain ${jobChainId} blocked: feed shard ${shardKey} failed (${message}) — assembly refused, no partial report.`,
+          chainId: jobChainId,
+          shardKey,
+          error: message,
+        });
       }
     }
-    console.error(`[OrchestratorAgent] Async job ${jobId} failed:`, error);
+    structuredLog.error("asyncJobs.async_job_failed", {
+      message: `[OrchestratorAgent] Async job ${jobId} failed:`,
+      jobId,
+      error: error instanceof Error ? error.message : String(error),
+    });
     // Issue #1123 S4: a screener main job that fails hard (the route
     // threw before any response) still emits its failed notifications
     // — the run-level failures that DO produce a response are covered
@@ -1810,7 +1860,11 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
             userLogin,
           );
         } catch (notifyError) {
-          console.error(`[OrchestratorAgent] Failure notification scheduling failed for job ${jobId}:`, notifyError);
+          structuredLog.error("asyncJobs.failure_notification_schedule_failed", {
+            message: `[OrchestratorAgent] Failure notification scheduling failed for job ${jobId}:`,
+            jobId,
+            error: notifyError instanceof Error ? notifyError.message : String(notifyError),
+          });
         }
       }
     }

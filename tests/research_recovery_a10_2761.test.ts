@@ -279,11 +279,39 @@ describe("ResearchAgent start-up recovery (#2761)", () => {
         return sql.exec(query, ...args);
       },
     };
-    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    // #3515 S3: the onStart recovery failure now travels as a structured
+    // researchAgent.on_start_recovery_failed event (level error) on the
+    // console-info JSON fallback, not a console.error line.
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     const b = new ResearchAgent(makeCtx(failingSql), {} as any);
     await expect(b.onStart()).resolves.toBeUndefined();
-    expect(errSpy).toHaveBeenCalled();
-    errSpy.mockRestore();
+    const events: Array<{ operation: string; level: string; fields: Record<string, unknown> }> = [];
+    for (const call of infoSpy.mock.calls) {
+      try {
+        const parsed = JSON.parse(String(call[0])) as {
+          operation?: unknown;
+          level?: unknown;
+          fields?: unknown;
+        };
+        if (parsed && typeof parsed.operation === "string") {
+          events.push({
+            operation: parsed.operation,
+            level: typeof parsed.level === "string" ? parsed.level : "",
+            fields:
+              parsed.fields && typeof parsed.fields === "object"
+                ? (parsed.fields as Record<string, unknown>)
+                : {},
+          });
+        }
+      } catch {
+        // Non-JSON console.info lines are not structured events.
+      }
+    }
+    const failed = events.find((e) => e.operation === "researchAgent.on_start_recovery_failed");
+    expect(failed).toBeDefined();
+    expect(failed?.level).toBe("error");
+    expect(String(failed?.fields.message ?? "")).toContain("[ResearchAgent][onStart] Interrupted-run recovery failed:");
+    infoSpy.mockRestore();
   });
 
   it("onStart on an empty ledger is a no-op", async () => {

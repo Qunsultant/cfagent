@@ -24,8 +24,10 @@
  *   which re-verifies and settles in its own store, so the audit lands in
  *   the owning instance too;
  * - a settlement that matches no draft is LOUD: HTTP 404 with
- *   { received: false, settled: false, unmatched: true }, a console.error,
- *   and a payment.settled_webhook_unmatched audit in the instance that
+ *   { received: false, settled: false, unmatched: true }, a structured
+ *   `payments.webhook_settlement_unmatched` error event (level error, on
+ *   the console-info JSON fallback — #3515 S3), and a
+ *   payment.settled_webhook_unmatched audit in the instance that
  *   determined the miss — never a silent { received: true }.
  *
  * Tenant isolation: routing derives ONLY from the registry entry written
@@ -315,17 +317,17 @@ async function registeredOwner(world: World, draftId: string): Promise<string | 
 
 describe("gateway webhook settlement routes to the draft-owning instance (#932)", () => {
   let world: World;
-  let errorSpy: ReturnType<typeof vi.spyOn>;
+  let infoSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     world = makeWorld();
     stubGatewayFetch();
-    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
-    errorSpy.mockRestore();
+    infoSpy.mockRestore();
   });
 
   it("end to end: a draft created in a per-user instance settles from a webhook delivered to the receiver instance", async () => {
@@ -358,14 +360,43 @@ describe("gateway webhook settlement routes to the draft-owning instance (#932)"
     expect(auditsOf(world.agents.get(BOB)!.sql, "payment.settled_webhook")).toHaveLength(0);
   });
 
-  it("an unmatched settlement is loud: 404, unmatched audit in the receiver, console error, nothing settled", async () => {
+  it("an unmatched settlement is loud: 404, unmatched audit in the receiver, structured error event, nothing settled", async () => {
     const res = await postStripeWebhook(world, RECEIVER, "pay_no_such_draft");
     expect(res.status).toBe(404);
     const json = (await res.json()) as any;
     expect(json.received).toBe(false);
     expect(json.settled).toBe(false);
     expect(json.unmatched).toBe(true);
-    expect(errorSpy).toHaveBeenCalled();
+    // #3515 S3: the unmatched settlement now travels as a structured
+    // payments.webhook_settlement_unmatched event (level error) on the
+    // console-info JSON fallback, not a console.error line.
+    const events: Array<{ operation: string; level: string; fields: Record<string, unknown> }> = [];
+    for (const call of infoSpy.mock.calls) {
+      try {
+        const parsed = JSON.parse(String(call[0])) as {
+          operation?: unknown;
+          level?: unknown;
+          fields?: unknown;
+        };
+        if (parsed && typeof parsed.operation === "string") {
+          events.push({
+            operation: parsed.operation,
+            level: typeof parsed.level === "string" ? parsed.level : "",
+            fields:
+              parsed.fields && typeof parsed.fields === "object"
+                ? (parsed.fields as Record<string, unknown>)
+                : {},
+          });
+        }
+      } catch {
+        // Non-JSON console.info lines are not structured events.
+      }
+    }
+    const unmatchedEvent = events.find((e) => e.operation === "payments.webhook_settlement_unmatched");
+    expect(unmatchedEvent).toBeDefined();
+    expect(unmatchedEvent?.level).toBe("error");
+    expect(unmatchedEvent?.fields.draftId).toBe("pay_no_such_draft");
+    expect(String(unmatchedEvent?.fields.message ?? "")).toContain("webhook settlement unmatched");
 
     const unmatched = auditsOf(world.agents.get(RECEIVER)!.sql, "payment.settled_webhook_unmatched");
     expect(unmatched).toHaveLength(1);

@@ -655,7 +655,9 @@ describe("#1169 S2 cross-cutting: externalized catalog + route logs", () => {
   });
 
   it("serving logs carry status + code, never the login or the full key", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // #3515 S3: the serving denial now travels as a structured
+    // knowledgeCorpus.knowledge_file_denied_* event (level warn) on the
+    // console-info JSON fallback, not a console.warn text line.
     const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     try {
       const bucket = makeBucket();
@@ -665,12 +667,40 @@ describe("#1169 S2 cross-cutting: externalized catalog + route logs", () => {
         new Request(u.toString(), { method: "GET" }), u, "/api/knowledge/file", "sess-log",
         { env: { REPORTS_BUCKET: bucket, KNOWLEDGE_SERVING_ENABLED: "1" } as any, storage, userLogin: "some-login-value" }
       );
-      const lines = warnSpy.mock.calls.map((c) => String(c[0]));
-      expect(lines.some((l) => l.includes("[knowledgeServing]") && l.includes("status=400"))).toBe(true);
-      expect(lines.some((l) => l.includes("some-login-value") || l.includes("reports/abc123"))).toBe(false);
+      const events: Array<{ operation: string; level: string; fields: Record<string, unknown> }> = [];
+      for (const call of infoSpy.mock.calls) {
+        try {
+          const parsed = JSON.parse(String(call[0])) as {
+            operation?: unknown;
+            level?: unknown;
+            fields?: unknown;
+          };
+          if (parsed && typeof parsed.operation === "string") {
+            events.push({
+              operation: parsed.operation,
+              level: typeof parsed.level === "string" ? parsed.level : "",
+              fields:
+                parsed.fields && typeof parsed.fields === "object"
+                  ? (parsed.fields as Record<string, unknown>)
+                  : {},
+            });
+          }
+        } catch {
+          // Non-JSON console.info lines are not structured events.
+        }
+      }
+      const denied = events.find((e) => e.operation === "knowledgeCorpus.knowledge_file_denied_malformed_key");
+      expect(denied).toBeDefined();
+      expect(denied?.level).toBe("warn");
+      expect(String(denied?.fields.message ?? "")).toContain("[knowledgeServing]");
+      expect(String(denied?.fields.message ?? "")).toContain("status=400");
+      expect(denied?.fields.status).toBe(400);
+      for (const e of events) {
+        expect(JSON.stringify(e)).not.toContain("some-login-value");
+        expect(JSON.stringify(e)).not.toContain("reports/abc123");
+      }
       expect(infoSpy).not.toHaveBeenCalledWith(expect.stringContaining("some-login-value"));
     } finally {
-      warnSpy.mockRestore();
       infoSpy.mockRestore();
     }
   });

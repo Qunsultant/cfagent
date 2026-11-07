@@ -82,6 +82,14 @@ import {
 import type { DatabaseORM } from "../../orm";
 import type { AgentName, Env } from "../../types";
 
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/routes/schedules",
+});
+
 /** Structural mirror of OrchestratorAgent's private ETradeEnvironment
  * (src/agents/orchestrator.ts). */
 type ETradeEnvironment = "TEST" | "PROD";
@@ -927,10 +935,10 @@ export async function handleSchedulesRoutes(
         try {
           auditChainVerification = verifyStoredAuditChainAndAlert(ctx.getOrm());
         } catch (err) {
-          console.error(
-            "[retention] tamper alert write failed; retention aborted:",
-            err instanceof Error ? err.message : String(err),
-          );
+          structuredLog.error("schedules.retention_tamper_alert_write_failed", {
+            message: "[retention] tamper alert write failed; retention aborted:",
+            error: err instanceof Error ? err.message : String(err),
+          });
           return Response.json(
             { error: "Audit chain verification alert could not be recorded; retention aborted." },
             { status: 503 },
@@ -938,9 +946,11 @@ export async function handleSchedulesRoutes(
         }
         const auditChainPruneSkipped = !auditChainVerification.valid;
         if (auditChainPruneSkipped) {
-          console.error(
-            `[retention] audit chain verification FAILED brokenIndex=${auditChainVerification.brokenIndex} reason=${auditChainVerification.reason}; storage-retention prune skipped, evidence preserved.`,
-          );
+          structuredLog.error("schedules.retention_audit_chain_verification_failed", {
+            message: `[retention] audit chain verification FAILED brokenIndex=${auditChainVerification.brokenIndex} reason=${auditChainVerification.reason}; storage-retention prune skipped, evidence preserved.`,
+            brokenIndex: auditChainVerification.brokenIndex,
+            reason: auditChainVerification.reason,
+          });
         }
         const result = auditChainPruneSkipped
           ? { skipped: true, pruned: 0 }
@@ -962,7 +972,10 @@ export async function handleSchedulesRoutes(
           jobOutcomes = { ...pruned, error: null };
         } catch (err) {
           jobOutcomes.error = err instanceof Error ? err.message : String(err);
-          console.warn("[retention] job outcomes prune failed:", jobOutcomes.error);
+          structuredLog.warn("schedules.retention_job_outcomes_prune_failed", {
+            message: "[retention] job outcomes prune failed:",
+            error: jobOutcomes.error,
+          });
         }
         const auditEvent = (type: string, payload: Record<string, unknown>) => {
           try {
@@ -1063,7 +1076,10 @@ export async function handleSchedulesRoutes(
           }
         } catch (err) {
           orphanSweep.error = err instanceof Error ? err.message : String(err);
-          console.warn("[retention] orphan sweep failed:", orphanSweep.error);
+          structuredLog.warn("schedules.retention_orphan_sweep_failed", {
+            message: "[retention] orphan sweep failed:",
+            error: orphanSweep.error,
+          });
         }
         // #1766 leg 2 — R2 snapshot export of this instance's tables.
         const snapshot = {
@@ -1122,7 +1138,10 @@ export async function handleSchedulesRoutes(
           }
         } catch (err) {
           snapshot.error = err instanceof Error ? err.message : String(err);
-          console.warn("[retention] snapshot export failed:", snapshot.error);
+          structuredLog.warn("schedules.retention_snapshot_export_failed", {
+            message: "[retention] snapshot export failed:",
+            error: snapshot.error,
+          });
         }
         return Response.json({
           success: true,

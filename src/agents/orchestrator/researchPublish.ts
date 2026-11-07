@@ -21,6 +21,13 @@ import {
 import type { ResearchAgent } from "../research-agent";
 import type { ResearchReport } from "../../services/researchPipeline";
 import type { ResearchReportArtifactOutcome, ResearchWorkbookOutcome } from "../../trading";
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/orchestrator/researchPublish",
+});
 
 /**
  * Ports the research-publish functions receive from the class.
@@ -89,11 +96,17 @@ export async function generateAndStoreResearchReport(
       artifacts.pdfStatus = "generated";
     } else {
       artifacts.pdfError = staged.pdfError ?? codedMessage("FAILURE_REPORT_PDF_GENERATION");
-      console.warn("[OrchestratorAgent] Research PDF generation failed:", artifacts.pdfError);
+      structuredLog.warn("researchPublish.research_pdf_stage_failed", {
+        message: "[OrchestratorAgent] Research PDF generation failed:",
+        error: artifacts.pdfError,
+      });
     }
   } catch (err) {
     artifacts.pdfError = codedMessage("FAILURE_REPORT_PDF_GENERATION", err instanceof Error ? err.message : String(err));
-    console.warn("[OrchestratorAgent] Research PDF generation failed:", err);
+    structuredLog.warn("researchPublish.research_pdf_generation_failed", {
+      message: "[OrchestratorAgent] Research PDF generation failed:",
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 
   try {
@@ -104,7 +117,10 @@ export async function generateAndStoreResearchReport(
     artifacts.xlsxError = codedMessage("FAILURE_REPORT_XLSX_GENERATION", message);
     artifacts.csvStatus = "failed";
     artifacts.csvError = codedMessage("FAILURE_REPORT_CSV_GENERATION", message);
-    console.warn("[OrchestratorAgent] Research workbook generation failed:", message);
+    structuredLog.warn("researchPublish.research_workbook_generation_failed", {
+      message: "[OrchestratorAgent] Research workbook generation failed:",
+      error: message,
+    });
   }
 
   const stored = storeReportAtGeneration(
@@ -194,9 +210,10 @@ export async function runResearchAndPublish(ctx: ResearchPublishContext,
       await agent.beginResearchTask(taskId);
     }
   } catch (err) {
-    console.warn(
-      `[OrchestratorAgent] Research task ledger unavailable (create/begin): ${err instanceof Error ? err.message : String(err)}`
-    );
+    structuredLog.warn("researchPublish.research_task_ledger_create_failed", {
+      message: `[OrchestratorAgent] Research task ledger unavailable (create/begin): ${err instanceof Error ? err.message : String(err)}`,
+      error: err instanceof Error ? err.message : String(err),
+    });
     taskId = null;
   }
   // Issue #624: heartbeat the task while dispatch is in flight —
@@ -240,9 +257,15 @@ export async function runResearchAndPublish(ctx: ResearchPublishContext,
       // Issue #543: the fallback must not silently mask which execution
       // path ran — emit a structured warning carrying the identifiers an
       // operator needs to correlate the bypass in Workers Logs.
-      console.warn(
-        `[OrchestratorAgent] Agent research turn bypassed — falling back to direct pipeline: trigger=${trigger} userLogin=${login} childStatus=${child.status} childError=${child.error ?? "none"} previousRunId=${previousRunId ?? "none"} latestRunId=${report?.runId ?? "none"}`
-      );
+      structuredLog.warn("researchPublish.research_agent_turn_bypassed", {
+        message: `[OrchestratorAgent] Agent research turn bypassed — falling back to direct pipeline: trigger=${trigger} userLogin=${login} childStatus=${child.status} childError=${child.error ?? "none"} previousRunId=${previousRunId ?? "none"} latestRunId=${report?.runId ?? "none"}`,
+        trigger,
+        userLogin: login,
+        childStatus: child.status,
+        childError: child.error ?? "none",
+        previousRunId: previousRunId ?? "none",
+        latestRunId: report?.runId ?? "none",
+      });
       const fallback = await agent.runResearch({ trigger, userLogin: login });
       if (!fallback.success || !fallback.report) {
         const failure = fallback.error || child.error || `Research agent finished with status ${child.status}.`;
@@ -285,7 +308,10 @@ export async function runResearchAndPublish(ctx: ResearchPublishContext,
       );
       emailed = delivery.emailed;
     } catch (err) {
-      console.warn("[OrchestratorAgent] Research delivery failed:", err);
+      structuredLog.warn("researchPublish.research_delivery_failed", {
+        message: "[OrchestratorAgent] Research delivery failed:",
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
     // Issue #577: complete the task with the path actually taken and a
     // deterministic evaluation of the outcome (never a model grading
@@ -313,9 +339,10 @@ export async function runResearchAndPublish(ctx: ResearchPublishContext,
           evaluation,
         });
       } catch (err) {
-        console.warn(
-          `[OrchestratorAgent] Research task ledger unavailable (complete): ${err instanceof Error ? err.message : String(err)}`
-        );
+        structuredLog.warn("researchPublish.research_task_ledger_complete_failed", {
+          message: `[OrchestratorAgent] Research task ledger unavailable (complete): ${err instanceof Error ? err.message : String(err)}`,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
     // #584 EP-009: meter the research run — attribute compute to tenant + task.
@@ -409,7 +436,10 @@ export async function deliverResearchReport(ctx: ResearchPublishContext,
       );
       result.held = true;
     } catch (err) {
-      console.warn("[OrchestratorAgent] HITL hold failed:", err);
+      structuredLog.warn("researchPublish.research_hitl_hold_failed", {
+        message: "[OrchestratorAgent] HITL hold failed:",
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
     return result;
   }
@@ -438,9 +468,15 @@ export async function deliverResearchReport(ctx: ResearchPublishContext,
         : {}),
     });
     result.slack = delivery.ok;
-    if (!delivery.ok) console.warn("[OrchestratorAgent] Research Slack delivery failed:", delivery.error);
+    if (!delivery.ok) structuredLog.warn("researchPublish.research_slack_delivery_failed", {
+      message: "[OrchestratorAgent] Research Slack delivery failed:",
+      error: delivery.error,
+    });
   } catch (err) {
-    console.warn("[OrchestratorAgent] Research Slack delivery failed:", err);
+    structuredLog.warn("researchPublish.research_slack_delivery_failed", {
+      message: "[OrchestratorAgent] Research Slack delivery failed:",
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 
   // 2. Email (opt-in via research config), with PDF attachment.
@@ -492,7 +528,10 @@ export async function deliverResearchReport(ctx: ResearchPublishContext,
       }
     }
   } catch (err) {
-    console.warn("[OrchestratorAgent] Research email delivery failed:", err);
+    structuredLog.warn("researchPublish.research_email_delivery_failed", {
+      message: "[OrchestratorAgent] Research email delivery failed:",
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 
   // 3. Webhook.
@@ -514,7 +553,10 @@ export async function deliverResearchReport(ctx: ResearchPublishContext,
       result.webhook = true;
     }
   } catch (err) {
-    console.warn("[OrchestratorAgent] Research webhook delivery failed:", err);
+    structuredLog.warn("researchPublish.research_webhook_delivery_failed", {
+      message: "[OrchestratorAgent] Research webhook delivery failed:",
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 
   return result;

@@ -24,6 +24,13 @@ import type { ScreenerPdfOptions } from "../trading";
 import type { Env } from "../types";
 import { getServiceUserLogin } from "../security/serviceIdentity";
 import { putReportPdf } from "../services/reportBlobStore";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/report-asset-agent",
+});
 
 export type AssetType = "research" | "screener" | "options";
 
@@ -100,7 +107,11 @@ export class ReportAssetAgent extends PortThink {
       await putReportPdf(this.env, storage as any, key, fileName, bytes);
       return { key, fileName };
     } catch (err) {
-      console.warn(`[ReportAssetAgent] generateAsset(${request.type}) failed:`, err);
+      structuredLog.warn("reportAssetAgent.generate_asset_failed", {
+        message: `[ReportAssetAgent] generateAsset(${request.type}) failed:`,
+        type: request.type,
+        error: err instanceof Error ? err.message : String(err),
+      });
       return null;
     }
   }
@@ -143,7 +154,11 @@ export class ReportAssetAgent extends PortThink {
       };
       return await getReportPdf(this.env, storage as any, key);
     } catch (err) {
-      console.warn(`[ReportAssetAgent] getAsset(${key}) failed:`, err);
+      structuredLog.warn("reportAssetAgent.get_asset_failed", {
+        message: `[ReportAssetAgent] getAsset(${key}) failed:`,
+        key,
+        error: err instanceof Error ? err.message : String(err),
+      });
       return null;
     }
   }
@@ -200,13 +215,20 @@ export async function generatePdfAsset(
     const ns = (env as any).REPORT_ASSET_AGENT;
     if (!ns) {
       // Issue #912: was silent — log why PDF generation is skipped.
-      console.error(`[ReportAssetAgent] generatePdfAsset(${type}) skipped: REPORT_ASSET_AGENT binding not configured in worker env. PDF will not be generated.`);
+      structuredLog.error("reportAssetAgent.generate_pdf_asset_skipped_no_binding", {
+        message: `[ReportAssetAgent] generatePdfAsset(${type}) skipped: REPORT_ASSET_AGENT binding not configured in worker env. PDF will not be generated.`,
+        type,
+      });
       return null;
     }
     const agent = ns.get(ns.idFromName(reportAssetAgentName(userLogin, getServiceUserLogin(env as Env)))) as unknown as ReportAssetAgent;
     return await agent.generateAsset({ type, data, userLogin, pdfOptions });
   } catch (err) {
-    console.warn(`[ReportAssetAgent] generatePdfAsset(${type}) failed:`, err);
+    structuredLog.warn("reportAssetAgent.generate_pdf_asset_failed", {
+      message: `[ReportAssetAgent] generatePdfAsset(${type}) failed:`,
+      type,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return null;
   }
 }
@@ -249,7 +271,11 @@ export async function getPdfAsset(
     const agent = ns.get(ns.idFromName(reportAssetAgentName(userLogin, getServiceUserLogin(env as Env)))) as unknown as ReportAssetAgent;
     return await agent.getAsset(key);
   } catch (err) {
-    console.warn(`[ReportAssetAgent] getPdfAsset(${key}) failed:`, err);
+    structuredLog.warn("reportAssetAgent.get_pdf_asset_failed", {
+      message: `[ReportAssetAgent] getPdfAsset(${key}) failed:`,
+      key,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return null;
   }
 }

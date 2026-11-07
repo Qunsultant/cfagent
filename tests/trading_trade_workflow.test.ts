@@ -216,13 +216,24 @@ describe("trade workflow wiring (#291 T3b)", () => {
     agent.runWorkflow = async () => "trade-wf-1";
     agent.instanceUserLogin = () => "alice";
     agent.getOrm = () => { throw new Error("orm down"); };
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // Issue #3515 S3: the audit failure logs through the S2 structured
+    // logger — one JSON event line via console.info. Assert on the
+    // parsed event, not console.warn.
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
     try {
       const res = await agent.startTradeApproval({ orderId: "draft-1", provider: "fake", userLogin: "alice" });
       expect(res.workflowId).toBe("trade-wf-1");
-      expect(warn).toHaveBeenCalled();
+      const events = info.mock.calls
+        .flatMap((args) => args.map(String))
+        .map((line) => { try { return JSON.parse(line); } catch { return null; } })
+        .filter(Boolean);
+      const auditFailed = events.find(
+        (e) => e.type === "tradingAgent.trade_approval_started_audit_failed" && e.level === "warn",
+      );
+      expect(auditFailed).toBeDefined();
+      expect(auditFailed.fields?.orderId).toBe("draft-1");
     } finally {
-      warn.mockRestore();
+      info.mockRestore();
     }
   });
 });

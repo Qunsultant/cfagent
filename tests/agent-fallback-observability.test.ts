@@ -50,7 +50,12 @@ describe("Agent research fallback observability (issue #543)", () => {
     expect(section).toContain(
       "Agent research turn bypassed — falling back to direct pipeline"
     );
-    expect(section).toContain("console.warn(");
+    // #3515 S3: the warning travels as a structuredLog.warn event
+    // (operation researchPublish.research_agent_turn_bypassed), not a
+    // console.warn line — the pin keeps the same strength.
+    expect(section).toContain(
+      'structuredLog.warn("researchPublish.research_agent_turn_bypassed"'
+    );
   });
 
   it("the warning is emitted before the fallback call, inside the branch", () => {

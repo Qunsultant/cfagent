@@ -270,6 +270,14 @@ import { createWorkflowPorts, type WorkflowEnv } from "../../workflows/createWor
 import { tryStartScreenerWorkflow } from "../../workflows/screenerWorkflowRoutes";
 import type { WorkflowJobCommand } from "../../workflows/workflowPorts";
 
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/routes/agenticPayments",
+});
+
 /** The subset of OrchestratorAgent surface the agentic-payments handlers need. */
 export interface AgenticPaymentsRouteContext {
   /** Worker environment (owner: OrchestratorAgent - was `this.env`). */
@@ -313,9 +321,12 @@ function resolveAgenticRouteMode(
     legacy
   );
   if (resolved.invalid) {
-    console.error(
-      `[payments] invalid ${switchName} value ${JSON.stringify(resolved.raw)} — failing closed to "${legacy}"`
-    );
+    structuredLog.error("agenticPayments.payments_mode_config_invalid", {
+      message: `[payments] invalid ${switchName} value ${JSON.stringify(resolved.raw)} — failing closed to "${legacy}"`,
+      setting: switchName,
+      value: resolved.raw ?? "",
+      resolved: legacy,
+    });
     ctx.audit(paymentsConfigErrorEvent(), "payments", {
       setting: switchName,
       value: resolved.raw ?? "",
@@ -1689,7 +1700,12 @@ export async function handleAgenticPaymentsRoutes(
           try {
             await store.recordPaidSubmission({ workflowId: handle.workflowId, userId: login, runRequestId });
           } catch (err: any) {
-            console.error(`[payments] paid-submission record failed for ${handle.workflowId}: ${err?.message || "unknown error"}`);
+            structuredLog.error("agenticPayments.paid_submission_record_failed", {
+              message: `[payments] paid-submission record failed for ${handle.workflowId}: ${err?.message || "unknown error"}`,
+              workflowId: handle.workflowId,
+              runRequestId,
+              error: err?.message || "unknown error",
+            });
             ctx.audit("commercial.submission.record_failed", "payments", { runRequestId, workflowId: handle.workflowId, userId: login });
           }
           // Issue #2155: project the redemption into the D1 journal
@@ -1829,7 +1845,12 @@ export async function handleAgenticPaymentsRoutes(
           try {
             await store.recordPaidSubmission({ workflowId: started.workflowId, userId: login, runRequestId });
           } catch (recordErr: any) {
-            console.error(`[payments] paid-submission record failed for ${started.workflowId}: ${recordErr?.message || "unknown error"}`);
+            structuredLog.error("agenticPayments.paid_submission_record_failed", {
+              message: `[payments] paid-submission record failed for ${started.workflowId}: ${recordErr?.message || "unknown error"}`,
+              workflowId: started.workflowId,
+              runRequestId,
+              error: recordErr?.message || "unknown error",
+            });
             ctx.audit("commercial.submission.record_failed", "payments", { runRequestId, workflowId: started.workflowId, userId: login });
           }
         }
@@ -1882,7 +1903,12 @@ export async function handleAgenticPaymentsRoutes(
               }
             }
           } catch (err: any) {
-            console.error(`[payments] referral auto-earn failed for ${login}: ${err?.message ?? "unknown error"}`);
+            structuredLog.error("agenticPayments.referral_auto_earn_failed", {
+              message: `[payments] referral auto-earn failed for ${login}: ${err?.message ?? "unknown error"}`,
+              referredUserId: login,
+              runRequestId,
+              error: err?.message ?? "unknown error",
+            });
             ctx.audit("commercial.referral.earn_failed", "payments", {
               runRequestId,
               referredUserId: login,

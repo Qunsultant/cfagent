@@ -88,6 +88,7 @@ import {
   handleLearningsCreate,
   handleReflectionRun,
 } from "./etradeBrokerLearning";
+import { evaluateAutopilotExecutionVerdict } from "./etradeBrokerAutopilot";
 import type {
   OrderIntent,
   PolicyVerdict,
@@ -516,48 +517,26 @@ export async function handleEtradeBrokerRoutes(
 
       // Autopilot policy envelope gate (autopilot Phase 1). Re-evaluated at
       // execution time because orders/day, drawdown, and exposure may have
-      // moved since the draft was previewed.
-      let executionVerdict: PolicyVerdict | null = null;
-      try {
-        const evaluated = await ctx.evaluateAndRecordAutopilotVerdict({
-          userLogin,
-          requestedEnv,
-          sessionId,
-          draftId: orderId,
-          intent: {
-            symbol,
-            action,
-            quantity,
-            orderType,
-            estimatedPrice: typeof existingRecord.price === "number" ? existingRecord.price : null,
-            estimatedTotal: typeof existingRecord.totalValue === "number" ? existingRecord.totalValue : null,
-          },
-        });
-        executionVerdict = evaluated.verdict;
-        if (!evaluated.verdict.executionAllowed) {
-          return Response.json(
-            {
-              error: `Autopilot policy blocked execution: ${evaluated.verdict.detail}`,
-              bindingRule: evaluated.verdict.bindingRule,
-              policyVerdict: evaluated.verdict,
-            },
-            { status: 409 }
-          );
-        }
-      } catch (policyErr) {
-        console.warn("[OrchestratorAgent] Autopilot policy evaluation failed at execute:", policyErr);
-        ctx.audit("autopilot.policy_check_failed", "trading", {
-          stage: "execute",
-          orderId,
-          error: policyErr instanceof Error ? policyErr.message : String(policyErr),
-        });
-        if (ctx.getAutopilotState().running) {
-          return Response.json(
-            { error: "Autopilot policy check could not be completed; refusing to execute while autopilot is running." },
-            { status: 503 }
-          );
-        }
-      }
+      // moved since the draft was previewed. Extracted to
+      // ./etradeBrokerAutopilot.ts under #3515 S3 (the #359 50,000 B
+      // dispatcher ceiling); behavior unchanged.
+      const autopilot = await evaluateAutopilotExecutionVerdict({
+        ctx,
+        userLogin,
+        requestedEnv,
+        sessionId,
+        orderId,
+        intent: {
+          symbol,
+          action,
+          quantity,
+          orderType,
+          estimatedPrice: typeof existingRecord.price === "number" ? existingRecord.price : null,
+          estimatedTotal: typeof existingRecord.totalValue === "number" ? existingRecord.totalValue : null,
+        },
+      });
+      if (autopilot.response) return autopilot.response;
+      const executionVerdict = autopilot.verdict;
 
       const etrade = new ETradeService(ctx.getOrm(), ctx.env, userLogin, requestedEnv);
       return await completeEtradeOrderExecution({ ctx, sessionId, body, orderId, decision, userLogin, userDid, existingRecord, symbol, action, quantity, orderType, limitPrice, strategyOrder, executionVerdict, executor: etrade });

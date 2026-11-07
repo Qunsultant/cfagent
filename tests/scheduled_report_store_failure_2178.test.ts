@@ -81,7 +81,10 @@ describe("scheduled report store failure (#2178 S2)", () => {
       storeCanonicalReport: () => null,
       events: { create: () => { throw new Error("audit store unavailable"); } },
     };
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    // Issue #3515 S3: the callback logs through the S2 structured
+    // logger, whose sink writes one JSON line per event via
+    // console.info — assert on the parsed event, not console.error.
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
     try {
       // Issue #2964: the extracted callback now returns its outcome
       // object instead of void (the recording wrapper's truth source).
@@ -90,9 +93,17 @@ describe("scheduled report store failure (#2178 S2)", () => {
       // error path rather than a throw.
       const outcome = await autonomousMarketScreen(makeCtx(orm), { trigger: "manual", userLogin: "alice", universe: "NASDAQ100" });
       expect(outcome.outcome).toBe("success");
-      expect(errorSpy).toHaveBeenCalled();
+      const events = info.mock.calls
+        .flatMap((args) => args.map(String))
+        .map((line) => { try { return JSON.parse(line); } catch { return null; } })
+        .filter(Boolean);
+      const auditFailed = events.find(
+        (e) => e.type === "scheduledCallbacks.report_store_failure_audit_failed" && e.level === "error",
+      );
+      expect(auditFailed).toBeDefined();
+      expect(auditFailed.fields.runId).toBe("screener:2026-10-30T12:00:00.000Z");
     } finally {
-      errorSpy.mockRestore();
+      info.mockRestore();
     }
   });
 });

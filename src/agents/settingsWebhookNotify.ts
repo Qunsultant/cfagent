@@ -34,6 +34,13 @@ import {
   signThinkWebhookSignature,
 } from "../actors/thinkPortMapping";
 import type { Env } from "../types";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/settingsWebhookNotify",
+});
 
 /** The reserved webhook source segment for selection-change events. */
 export const SETTINGS_WEBHOOK_SOURCE = "settings";
@@ -100,11 +107,15 @@ export async function deliverSettingsChangeWebhook(
   change: SettingsChange,
 ): Promise<SettingsWebhookDelivery> {
   const fail = (reason: string): SettingsWebhookDelivery => {
-    console.warn(
-      `[SettingsWebhook] delivery skipped for login "${change.login}" ` +
+    structuredLog.warn("settingsWebhookNotify.settings_change_delivery_skipped", {
+      message:
+        `[SettingsWebhook] delivery skipped for login "${change.login}" ` +
         `(kind "${change.kind}"): ${reason} — the write stands; ` +
         "the observe floor bounds the copilot's staleness",
-    );
+      login: change.login,
+      kind: change.kind,
+      reason,
+    });
     return { delivered: false, reason };
   };
   const secret = resolveThinkWebhookSecret(env);

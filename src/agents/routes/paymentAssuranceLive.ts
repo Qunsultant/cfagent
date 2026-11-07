@@ -65,6 +65,14 @@ import {
   type PaymentWorkflowHost,
 } from "../../services/paymentWorkflowSubmission";
 
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/routes/paymentAssuranceLive",
+});
+
 export interface PaymentAssuranceLiveContext {
   env: unknown;
   getUserLogin?: () => string | undefined;
@@ -96,7 +104,10 @@ function envRecord(ctx: PaymentAssuranceLiveContext): EnvRecord {
 // reach the caller. The real error is logged server-side (Workers
 // Logs); responses carry a generic message only.
 function logError(err: unknown): void {
-  console.log("[payment-assurance-live] error", err instanceof Error ? err.message : String(err));
+  structuredLog.error("paymentAssuranceLive.error", {
+    message: "[payment-assurance-live] error",
+    error: err instanceof Error ? err.message : String(err),
+  });
 }
 
 function callerLogin(request: Request, ctx: PaymentAssuranceLiveContext): string | null {
@@ -276,7 +287,13 @@ async function handleStart(request: Request, ctx: PaymentAssuranceLiveContext, l
   }
   try {
     const started = await startPaymentWorkflowViaBinding(binding, params);
-    console.log(`[payment-assurance-live] started run=${runRequestId} workflow=${started.workflowId} mode=${mode} login=${login}`);
+    structuredLog.info("paymentAssuranceLive.live_test_run_started", {
+      message: `[payment-assurance-live] started run=${runRequestId} workflow=${started.workflowId} mode=${mode} login=${login}`,
+      runRequestId,
+      workflowId: started.workflowId,
+      mode,
+      login,
+    });
     return json({
       workflowId: started.workflowId,
       runRequestId,
@@ -321,7 +338,12 @@ async function handleEvent(request: Request, ctx: PaymentAssuranceLiveContext, l
     } else {
       return json({ error: "type must be \"approval\" or \"payment_verified\"." }, 400);
     }
-    console.log(`[payment-assurance-live] event type=${body.type} workflow=${body.workflowId} login=${login}`);
+    structuredLog.info("paymentAssuranceLive.event_delivered", {
+      message: `[payment-assurance-live] event type=${body.type} workflow=${body.workflowId} login=${login}`,
+      type: body.type,
+      workflowId: body.workflowId,
+      login,
+    });
     return json({ delivered: true, workflowId: body.workflowId, type: body.type });
   } catch (err) {
     logError(err);

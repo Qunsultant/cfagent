@@ -130,6 +130,13 @@ import {
 import type { OptionScreenerFilter } from "../types";
 import type { ScenarioDefinition } from "../services/goalScenarioEngine";
 import type { GoalDrivenScreenResult } from "../services/goalDrivenScreen";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/screener-agent",
+});
 
 export interface ScreenerRunRequest {
   /** Who triggered the screen. */
@@ -551,15 +558,16 @@ export class ScreenerAgent extends PortThink {
     try {
       const recovered = await this.recoverInterruptedScreenerTasks();
       if (recovered.length > 0) {
-        console.warn(
-          `[ScreenerAgent] Start-up recovery marked ${recovered.length} interrupted screener task(s) as failed → escalated.`
-        );
+        structuredLog.warn("screenerAgent.on_start_recovery_interrupted", {
+          message: `[ScreenerAgent] Start-up recovery marked ${recovered.length} interrupted screener task(s) as failed → escalated.`,
+          recoveredCount: recovered.length,
+        });
       }
     } catch (error) {
-      console.error(
-        "[ScreenerAgent][onStart] Interrupted-run recovery failed:",
-        error
-      );
+      structuredLog.error("screenerAgent.on_start_recovery_failed", {
+        message: "[ScreenerAgent][onStart] Interrupted-run recovery failed:",
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
@@ -721,9 +729,10 @@ export class ScreenerAgent extends PortThink {
   private userRequestQuotaPolicy() {
     const resolved = resolveUserRequestQuota(this.env);
     if (resolved.invalid.length > 0) {
-      console.warn(
-        `[ScreenerAgent] user request quota config error: ${resolved.invalid.join(", ")} — falling back to defaults`,
-      );
+      structuredLog.warn("screenerAgent.user_request_quota_policy_invalid", {
+        message: `[ScreenerAgent] user request quota config error: ${resolved.invalid.join(", ")} — falling back to defaults`,
+        invalid: resolved.invalid,
+      });
     }
     return resolved;
   }
@@ -887,7 +896,9 @@ export class ScreenerAgent extends PortThink {
       throw err;
     }
     if (lock.tookOverStale) {
-      console.warn(`[ScreenerAgent] Stale lock detected, taking over.`);
+      structuredLog.warn("screenerAgent.run_screen_stale_lock_takeover", {
+        message: "[ScreenerAgent] Stale lock detected, taking over.",
+      });
     }
     // Issue #2842: the run-submission gate — checked BEFORE the
     // run starts, AFTER the lock (an already-running refusal
@@ -960,7 +971,11 @@ export class ScreenerAgent extends PortThink {
       const learnings = getActiveLearnings(this.sql, "screener");
       appliedLearnings = learnings.map((l) => `${l.id}: ${l.observation.slice(0, 80)}`);
       if (learnings.length > 0) {
-        console.log(`[ScreenerAgent] Applied ${learnings.length} learnings:`, appliedLearnings);
+        structuredLog.info("screenerAgent.run_screen_inner_learnings_applied", {
+          message: `[ScreenerAgent] Applied ${learnings.length} learnings:`,
+          learningsCount: learnings.length,
+          appliedLearnings,
+        });
       }
     } catch {}
     // Issue #2864: the run's execution plan comes from the one
@@ -1014,9 +1029,10 @@ export class ScreenerAgent extends PortThink {
         await this.beginScreenerTask(taskId);
       }
     } catch (err) {
-      console.warn(
-        `[ScreenerAgent] Screener task ledger unavailable (create/begin): ${err instanceof Error ? err.message : String(err)}`
-      );
+      structuredLog.warn("screenerAgent.run_screen_inner_task_ledger_create_unavailable", {
+        message: `[ScreenerAgent] Screener task ledger unavailable (create/begin): ${err instanceof Error ? err.message : String(err)}`,
+        error: err instanceof Error ? err.message : String(err),
+      });
       taskId = null;
     }
 
@@ -1486,9 +1502,10 @@ export class ScreenerAgent extends PortThink {
             evaluation,
           });
         } catch (err) {
-          console.warn(
-            `[ScreenerAgent] Screener task ledger unavailable (complete): ${err instanceof Error ? err.message : String(err)}`
-          );
+          structuredLog.warn("screenerAgent.run_screen_inner_task_ledger_complete_unavailable", {
+            message: `[ScreenerAgent] Screener task ledger unavailable (complete): ${err instanceof Error ? err.message : String(err)}`,
+            error: err instanceof Error ? err.message : String(err),
+          });
         }
       }
       return result;
@@ -1678,9 +1695,10 @@ export class ScreenerAgent extends PortThink {
       );
       goalUniverseDeps = bindNasdaqUniverseDeps(goalNasdaqProvider, goalBundle.runContext);
     } catch (err) {
-      console.warn(
-        `[screener-agent] universe deps unavailable for goal screen, discovery degrades to the missing-seam throw: ${err instanceof Error ? err.message : String(err)}`
-      );
+      structuredLog.warn("screenerAgent.run_goal_screen_universe_deps_unavailable", {
+        message: `[screener-agent] universe deps unavailable for goal screen, discovery degrades to the missing-seam throw: ${err instanceof Error ? err.message : String(err)}`,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
     // Issue #1998 (Phase 3): persisted gather for the goal stock
     // leg. The agent resolves the flag itself from its env, so both
@@ -1795,9 +1813,10 @@ export class ScreenerAgent extends PortThink {
         }
       } catch (err) {
         const attachError = err instanceof Error ? err.message : String(err);
-        console.warn(
-          `[screener-agent] goal gather unavailable, technical filters refuse as before: ${attachError}`
-        );
+        structuredLog.warn("screenerAgent.run_goal_screen_goal_gather_unavailable", {
+          message: `[screener-agent] goal gather unavailable, technical filters refuse as before: ${attachError}`,
+          error: attachError,
+        });
         // Issue #1999: an attach failure is a gather failure, not
         // a silent no-hook. The stub throws into screenLive's
         // failed-gather path when a technical filter needs it;
@@ -2167,7 +2186,10 @@ export class ScreenerAgent extends PortThink {
       outcome.pdfStatus = "generated";
     } catch (err) {
       outcome.pdfError = err instanceof Error ? err.message : String(err);
-      console.error("[ScreenerAgent] Strategy PDF generation failed:", outcome.pdfError);
+      structuredLog.error("screenerAgent.generate_and_store_strategy_report_pdf_generation_failed", {
+        message: "[ScreenerAgent] Strategy PDF generation failed:",
+        error: outcome.pdfError,
+      });
     }
 
     try {
@@ -2190,7 +2212,10 @@ export class ScreenerAgent extends PortThink {
       outcome.xlsxStatus = "generated";
     } catch (err) {
       outcome.xlsxError = codedMessage("FAILURE_REPORT_XLSX_GENERATION", err instanceof Error ? err.message : String(err));
-      console.error("[ScreenerAgent] Strategy XLSX generation failed:", outcome.xlsxError);
+      structuredLog.error("screenerAgent.generate_and_store_strategy_report_xlsx_generation_failed", {
+        message: "[ScreenerAgent] Strategy XLSX generation failed:",
+        error: outcome.xlsxError,
+      });
     }
 
     try {
@@ -2213,7 +2238,10 @@ export class ScreenerAgent extends PortThink {
       outcome.csvStatus = "generated";
     } catch (err) {
       outcome.csvError = codedMessage("FAILURE_REPORT_CSV_GENERATION", err instanceof Error ? err.message : String(err));
-      console.error("[ScreenerAgent] Strategy CSV generation failed:", outcome.csvError);
+      structuredLog.error("screenerAgent.generate_and_store_strategy_report_csv_generation_failed", {
+        message: "[ScreenerAgent] Strategy CSV generation failed:",
+        error: outcome.csvError,
+      });
     }
 
     return outcome;
@@ -2312,7 +2340,9 @@ export class ScreenerAgent extends PortThink {
     const { consumeAnalysisDoneMessage } = await import("../workflows/stageReportProduction");
     const { isAnalysisDoneStageMessage } = await import("../workflows/stageQueueTransport");
     if (!isAnalysisDoneStageMessage(message)) {
-      console.warn("[screener-agent] queued stage message dead-lettered: not a well-shaped analysis-done message.");
+      structuredLog.warn("screenerAgent.consume_queued_analysis_done_dead_lettered", {
+        message: "[screener-agent] queued stage message dead-lettered: not a well-shaped analysis-done message.",
+      });
       return { status: "dead-lettered", reason: "poison message: not a well-shaped analysis-done stage message." };
     }
     let generatedPersisted: unknown;
@@ -2396,10 +2426,11 @@ export class ScreenerAgent extends PortThink {
         message: buildStageBoundaryMessage({ timestamp, userLogin, stageId, artifactKeys: [key] }),
       });
     } catch (err) {
-      console.warn(
-        `[ScreenerAgent] Stage-boundary publish skipped for ${stageId} (run stands):`,
-        err instanceof Error ? err.message : String(err),
-      );
+      structuredLog.warn("screenerAgent.emit_stage_boundary_publish_skipped", {
+        message: `[ScreenerAgent] Stage-boundary publish skipped for ${stageId} (run stands):`,
+        stageId,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 
@@ -2436,7 +2467,9 @@ export class ScreenerAgent extends PortThink {
   ): Promise<{ status: "recorded" | "duplicate-suppressed" | "dead-lettered"; reason?: string }> {
     const { isStageBoundaryMessage } = await import("../workflows/stageQueueTransport");
     if (!isStageBoundaryMessage(message)) {
-      console.warn("[screener-agent] queued stage message dead-lettered: not a well-shaped non-analysis-done stage message.");
+      structuredLog.warn("screenerAgent.record_queued_stage_boundary_dead_lettered", {
+        message: "[screener-agent] queued stage message dead-lettered: not a well-shaped non-analysis-done stage message.",
+      });
       return { status: "dead-lettered", reason: "poison message: not a well-shaped non-analysis-done stage message." };
     }
     const sql = (this.ctx.storage as { sql?: unknown }).sql as import("../orm").SqlStorage | undefined;

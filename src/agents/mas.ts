@@ -29,6 +29,13 @@ import {
 // mas_transactions / mas_memory statements that used to live
 // in this file (audit V-2/V-3 bypass writers) are retired.
 import { createOrmPorts } from "../data/createOrmPorts";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/mas",
+});
 
 export interface MASOptions {
   env: Env;
@@ -114,9 +121,10 @@ export function createMAS({ env, sessionId, requestId, sql, audit }: MASOptions)
         // the repo's console-stream idiom — counts and flag state
         // only, never chunk content, keys, or logins.
         if (servingOn) {
-          console.info(
-            `[knowledgeMapping] MAS provenance attached chunks=${chunks.length}`
-          );
+          structuredLog.info("mas.knowledge_provenance_attached", {
+            message: `[knowledgeMapping] MAS provenance attached chunks=${chunks.length}`,
+            chunks: chunks.length,
+          });
         }
 
         const result = {
@@ -210,7 +218,11 @@ export function createMAS({ env, sessionId, requestId, sql, audit }: MASOptions)
         });
         inserted = true;
       } catch (err) {
-        console.error("Failed to insert transaction draft into SQLite:", err);
+        structuredLog.error("mas.transaction_draft_insert_failed", {
+          message: "Failed to insert transaction draft into SQLite:",
+          draftId,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
 
       if (inserted) {

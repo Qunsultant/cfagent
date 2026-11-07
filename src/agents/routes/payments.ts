@@ -115,6 +115,14 @@ import { readReceipts, type ReceiptKind } from "../../services/receiptSurface";
 import { ensureUsageEventsTable } from "../../services/scheduledReports";
 import { actorGateway } from "../../services/cloudflareActorGateway";
 
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/routes/payments",
+});
+
 /** The subset of OrchestratorAgent surface the payments handlers need. */
 export interface PaymentsRouteContext {
   /** Worker environment (owner: OrchestratorAgent — was `this.env`). */
@@ -190,9 +198,12 @@ function resolvePaymentsRouteMode(
     legacy
   );
   if (resolved.invalid) {
-    console.error(
-      `[payments] invalid ${switchName} value ${JSON.stringify(resolved.raw)} — failing closed to "${legacy}"`
-    );
+    structuredLog.error("payments.payments_mode_config_invalid", {
+      message: `[payments] invalid ${switchName} value ${JSON.stringify(resolved.raw)} — failing closed to "${legacy}"`,
+      setting: switchName,
+      value: resolved.raw ?? "",
+      resolved: legacy,
+    });
     ctx.audit(paymentsConfigErrorEvent(), "payments", {
       setting: switchName,
       value: resolved.raw ?? "",
@@ -264,9 +275,13 @@ function flowModeForRequest(ctx: PaymentsRouteContext): PaymentsFlowMode {
     )
   );
   if (resolved.invalid) {
-    console.error(
-      `[payments] invalid PAYMENTS_FLOW_MODE value ${JSON.stringify(resolved.raw)} at ${resolved.level} — failing closed to "hitl"`
-    );
+    structuredLog.error("payments.payments_flow_mode_config_invalid", {
+      message: `[payments] invalid PAYMENTS_FLOW_MODE value ${JSON.stringify(resolved.raw)} at ${resolved.level} — failing closed to "hitl"`,
+      setting: "PAYMENTS_FLOW_MODE",
+      value: resolved.raw ?? "",
+      level: resolved.level,
+      resolved: "hitl",
+    });
     ctx.audit("payment.config_error", "payments", {
       setting: "PAYMENTS_FLOW_MODE",
       value: resolved.raw ?? "",
@@ -315,9 +330,11 @@ async function gatePaymentExecution(
     : async () => null;
   const decision = await checkAuditGate(setup, action, true);
   if (!decision.blocked) return null;
-  console.error(
-    `[audit-gate] money execution BLOCKED action=${action} reference=${JSON.stringify(reference)}: audit gate denied.`,
-  );
+  structuredLog.error("payments.audit_gate_blocked", {
+    message: `[audit-gate] money execution BLOCKED action=${action} reference=${JSON.stringify(reference)}: audit gate denied.`,
+    action,
+    reference,
+  });
   ctx.audit("payment.gate_blocked", "payments", { action, ...reference, reason: "audit gate blocked" });
   return Response.json(
     { error: `Payment execution blocked by the audit gate: audit could not be verified for ${action}.` },
@@ -529,10 +546,10 @@ export async function handlePaymentsRoutes(
     } catch (err) {
       // #2779: typed error, never raw store text (the production 500
       // leaked "no such table: usage_events: SQLITE_ERROR" verbatim).
-      console.error(
-        `[payments] receipts read failed: ${err instanceof Error ? err.message : String(err)}`,
-        err,
-      );
+      structuredLog.error("payments.receipts_read_failed", {
+        message: `[payments] receipts read failed: ${err instanceof Error ? err.message : String(err)}`,
+        error: err instanceof Error ? err.message : String(err),
+      });
       return Response.json(
         {
           error: "ReceiptsUnavailable",
@@ -1072,9 +1089,12 @@ export async function handlePaymentsRoutes(
         // payment.settled_webhook_unmatched audit + console.error),
         // never a silent { received: true }.
         const auditUnmatched = (reason: string, status: number): Response => {
-          console.error(
-            `[payments] webhook settlement unmatched: draft=${draftId} provider=${provider} reason=${reason}`
-          );
+          structuredLog.error("payments.webhook_settlement_unmatched", {
+            message: `[payments] webhook settlement unmatched: draft=${draftId} provider=${provider} reason=${reason}`,
+            draftId,
+            provider,
+            reason,
+          });
           ctx.audit("payment.settled_webhook_unmatched", "payments", {
             draftId,
             provider,
@@ -1141,9 +1161,13 @@ export async function handlePaymentsRoutes(
             });
           }
           const auditNativeUnrecorded = (reason: string): Response => {
-            console.error(
-              `[payments] native webhook settlement unrecorded: draft=${draftId} reason=${reason}`
-            );
+            structuredLog.error("payments.webhook_settlement_unrecorded", {
+              message: `[payments] native webhook settlement unrecorded: draft=${draftId} reason=${reason}`,
+              draftId,
+              provider,
+              reason,
+              native: true,
+            });
             ctx.audit("payment.settled_webhook_native_unrecorded", "payments", {
               draftId,
               provider,
@@ -1220,10 +1244,12 @@ export async function handlePaymentsRoutes(
             new Request(targetUrl, { method: "POST", headers, body: rawBody })
           );
         } catch (err) {
-          console.error(
-            `[payments] webhook settlement routing failed: draft=${draftId} owner=${owner}:`,
-            err instanceof Error ? err.message : String(err)
-          );
+          structuredLog.error("payments.webhook_settlement_routing_failed", {
+            message: `[payments] webhook settlement routing failed: draft=${draftId} owner=${owner}:`,
+            draftId,
+            owner,
+            error: err instanceof Error ? err.message : String(err),
+          });
           return auditUnmatched("routing_unavailable", 502);
         }
       }

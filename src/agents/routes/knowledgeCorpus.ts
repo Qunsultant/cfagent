@@ -324,23 +324,31 @@ export async function handleKnowledgeCorpusRoutes(
       if (!ctx.userLogin) {
         // No catalog code here: the 401 body is the SHARED
         // unauthenticatedResponse(), not an S2 catalog entry.
-        console.warn(
-          `[knowledgeServing] denied GET /knowledge/file status=401 reason=unauthenticated`
-        );
+        structuredLog.warn("knowledgeCorpus.knowledge_file_denied_unauthenticated", {
+          message: "[knowledgeServing] denied GET /knowledge/file status=401 reason=unauthenticated",
+          status: 401,
+          reason: "unauthenticated",
+        });
         return unauthenticatedResponse();
       }
       const key = url.searchParams.get("key");
       if (!key) {
-        console.warn(
-          `[knowledgeServing] denied GET /knowledge/file status=400 code=${KnowledgeErrorCode.SERVING_KEY_REQUIRED} reason=missing`
-        );
+        structuredLog.warn("knowledgeCorpus.knowledge_file_denied_missing_key", {
+          message: `[knowledgeServing] denied GET /knowledge/file status=400 code=${KnowledgeErrorCode.SERVING_KEY_REQUIRED} reason=missing`,
+          status: 400,
+          code: KnowledgeErrorCode.SERVING_KEY_REQUIRED,
+          reason: "missing",
+        });
         return badRequest(KNOWLEDGE_ERROR_CATALOG[KnowledgeErrorCode.SERVING_KEY_REQUIRED].defaultMessage);
       }
       const parsed = parseKnowledgeBucketKey(key);
       if (!parsed) {
-        console.warn(
-          `[knowledgeServing] denied GET /knowledge/file status=400 code=${KnowledgeErrorCode.SERVING_KEY_INVALID} reason=malformed`
-        );
+        structuredLog.warn("knowledgeCorpus.knowledge_file_denied_malformed_key", {
+          message: `[knowledgeServing] denied GET /knowledge/file status=400 code=${KnowledgeErrorCode.SERVING_KEY_INVALID} reason=malformed`,
+          status: 400,
+          code: KnowledgeErrorCode.SERVING_KEY_INVALID,
+          reason: "malformed",
+        });
         return badRequest(KNOWLEDGE_ERROR_CATALOG[KnowledgeErrorCode.SERVING_KEY_INVALID].defaultMessage);
       }
       const doc = await getKnowledgeDoc(
@@ -350,17 +358,25 @@ export async function handleKnowledgeCorpusRoutes(
         `knowledge:${parsed.category}:${parsed.sha256}`
       );
       if (!doc) {
-        console.warn(
-          `[knowledgeServing] denied GET /knowledge/file status=404 code=${KnowledgeErrorCode.SERVING_NOT_FOUND} category=${parsed.category} shaPrefix=${parsed.sha256.slice(0, 12)}`
-        );
+        structuredLog.warn("knowledgeCorpus.knowledge_file_denied_not_found", {
+          message: `[knowledgeServing] denied GET /knowledge/file status=404 code=${KnowledgeErrorCode.SERVING_NOT_FOUND} category=${parsed.category} shaPrefix=${parsed.sha256.slice(0, 12)}`,
+          status: 404,
+          code: KnowledgeErrorCode.SERVING_NOT_FOUND,
+          category: parsed.category,
+          shaPrefix: parsed.sha256.slice(0, 12),
+        });
         return Response.json(
           { success: false, error: KNOWLEDGE_ERROR_CATALOG[KnowledgeErrorCode.SERVING_NOT_FOUND].defaultMessage },
           { status: 404 }
         );
       }
-      console.info(
-        `[knowledgeServing] served GET /knowledge/file status=200 category=${parsed.category} shaPrefix=${parsed.sha256.slice(0, 12)} bytes=${doc.bytes.length}`
-      );
+      structuredLog.info("knowledgeCorpus.knowledge_file_served", {
+        message: `[knowledgeServing] served GET /knowledge/file status=200 category=${parsed.category} shaPrefix=${parsed.sha256.slice(0, 12)} bytes=${doc.bytes.length}`,
+        status: 200,
+        category: parsed.category,
+        shaPrefix: parsed.sha256.slice(0, 12),
+        bytes: doc.bytes.length,
+      });
       return new Response(doc.bytes as unknown as BodyInit, {
         headers: {
           "Content-Type": doc.meta.contentType,
@@ -377,9 +393,12 @@ export async function handleKnowledgeCorpusRoutes(
       // KnowledgeCorpusError reaching THIS catch is therefore a
       // server error, and 400 would mislabel it: exact 500 semantics.
       const message = err instanceof Error ? err.message : String(err);
-      console.error(
-        `[knowledgeServing] failed GET /knowledge/file status=500 code=${KnowledgeErrorCode.SERVING_FAILED}: ${message}`
-      );
+      structuredLog.error("knowledgeCorpus.knowledge_file_failed", {
+        message: `[knowledgeServing] failed GET /knowledge/file status=500 code=${KnowledgeErrorCode.SERVING_FAILED}: ${message}`,
+        status: 500,
+        code: KnowledgeErrorCode.SERVING_FAILED,
+        error: message,
+      });
       return Response.json(
         { success: false, error: KNOWLEDGE_ERROR_CATALOG[KnowledgeErrorCode.SERVING_FAILED].defaultMessage },
         { status: 500 }
@@ -400,12 +419,19 @@ export async function handleKnowledgeCorpusRoutes(
         recordStore: ctx.storage,
         bucket: createBlobStore(ctx.env),
       });
-      console.info(
-        `[knowledgeCorpus] integrity GET ok=${report.ok} missing=${report.missing.length} mismatched=${report.mismatched.length} extra=${report.extra.length}`
-      );
+      structuredLog.info("knowledgeCorpus.integrity_get_completed", {
+        message: `[knowledgeCorpus] integrity GET ok=${report.ok} missing=${report.missing.length} mismatched=${report.mismatched.length} extra=${report.extra.length}`,
+        ok: report.ok,
+        missing: report.missing.length,
+        mismatched: report.mismatched.length,
+        extra: report.extra.length,
+      });
       return Response.json(report);
     } catch (err) {
-      console.error("[knowledgeCorpus] integrity GET failed:", err);
+      structuredLog.error("knowledgeCorpus.integrity_get_failed", {
+        message: "[knowledgeCorpus] integrity GET failed:",
+        error: err instanceof Error ? err.message : String(err),
+      });
       return Response.json(
         { success: false, error: "Failed to run corpus integrity check." },
         { status: 500 }
@@ -493,7 +519,10 @@ export async function handleKnowledgeCorpusRoutes(
       if (err instanceof KnowledgeCorpusError) {
         return badRequest(err.message);
       }
-      console.error("[knowledgeCorpus] Upload failed:", err);
+      structuredLog.error("knowledgeCorpus.upload_failed", {
+        message: "[knowledgeCorpus] Upload failed:",
+        error: err instanceof Error ? err.message : String(err),
+      });
       return Response.json(
         { success: false, error: "Failed to ingest knowledge document." },
         { status: 500 }

@@ -41,6 +41,14 @@ import {
 import { getUserDid } from "../../agents/did";
 import { parseStrategyOrder, orderPayloadHash } from "./orderPayloadHash";
 
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/routes/brokerOrders",
+});
+
 export type BrokerOrderRouteContext = EtradeBrokerRouteContext;
 
 /**
@@ -263,7 +271,12 @@ export async function handleBrokerOrderRoutes(
           );
         }
       } catch (policyErr) {
-        console.warn("[OrchestratorAgent] Autopilot policy evaluation failed at execute:", policyErr);
+        structuredLog.warn("brokerOrders.autopilot_policy_evaluation_failed", {
+          message: "[OrchestratorAgent] Autopilot policy evaluation failed at execute:",
+          stage: "execute",
+          orderId,
+          error: policyErr instanceof Error ? policyErr.message : String(policyErr),
+        });
         ctx.audit("autopilot.policy_check_failed", "trading", {
           stage: "execute",
           orderId,

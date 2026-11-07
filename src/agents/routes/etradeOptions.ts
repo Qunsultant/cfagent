@@ -112,6 +112,14 @@ import { resolveTenantBroker } from "../../services/tenantProviders";
 import { panelAuthResponse } from "../../services/optionsAuthFreshness";
 import { resolveTenantProviders } from "../../services/tenantProviders";
 
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/routes/etradeOptions",
+});
+
 /** The subset of OrchestratorAgent surface the E*TRADE options handlers need. */
 export interface EtradeOptionsRouteContext {
   /** Worker environment (owner: OrchestratorAgent - was `this.env`). */
@@ -863,7 +871,11 @@ export async function handleEtradeOptionsRoutes(
               channel: filter.slackChannel,
               text: `⚠️ Options Contract Screen FAILED — ${(filter.underlyingSymbols || []).join(", ") || filter.universe || "selected underlyings"}\nError: ${error}`,
             });
-            if (!sent.ok) console.warn("[Orchestrator] Slack options contract failure notification failed:", sent.error);
+            if (!sent.ok)
+              structuredLog.warn("etradeOptions.slack_failure_notification_failed", {
+                message: "[Orchestrator] Slack options contract failure notification failed:",
+                error: sent.error ?? "unknown error",
+              });
           }
         }
         return Response.json({ error }, { status: 500 });
