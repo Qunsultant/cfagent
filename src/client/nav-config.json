@@ -435,7 +435,7 @@
       "crumb": "Research",
       "category": "Intelligence",
       "icon": "Research",
-      "description": "Zero-credential Yahoo Finance and Alpaca dual feed, fundamental peer comparison"
+      "description": "Zero-credential dual market-data feed, fundamental peer comparison"
     },
     {
       "id": "revenue",
@@ -677,7 +677,7 @@
         "icon": "Research",
         "badge": "Feed",
         "badgeType": "new",
-        "description": "Zero-credential Yahoo Finance and Alpaca dual feed, fundamental peer comparison"
+        "description": "Zero-credential dual market-data feed, fundamental peer comparison"
       },
       {
         "id": "patterns",
