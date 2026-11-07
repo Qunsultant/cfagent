@@ -129,6 +129,7 @@ export function SettingsMenu({
   oauthLoading = false,
   oauthMsg = "",
   setOauthMsg,
+  handleSwitchEnvironment,
   handleSwitchAndConnect,
   runDiagnostics,
   handleRenewOAuth,
@@ -400,7 +401,7 @@ export function SettingsMenu({
   // (backed by the etrade_active_env key, which could disagree with
   // the hub's cfagent_env key) is gone.
   const brokerEnv = useBrokerEnvironment();
-  const effectiveEnv = activeEnv ?? brokerEnv;
+  const effectiveEnv = activeEnv ?? (accountMode ? (accountMode === "live" ? "PROD" : "TEST") : brokerEnv);
   // Issue #2689 — watchlist options for the panel Tape set dropdown.
   // (Placed here, after effectiveEnv, so the effect deps never read
   // a not-yet-declared binding.)
@@ -544,7 +545,7 @@ export function SettingsMenu({
   const onSwitchEnv = (target: "TEST" | "PROD") => {
     // Issue #2482: write-through path. Persists server-side and broadcasts
     // etrade-env-changed, also notifying parent handler if supplied.
-    handleSwitchAndConnect?.(target);
+    handleSwitchEnvironment?.(target);
     void switchBrokerEnvironment(target);
   };
 
@@ -911,7 +912,7 @@ export function SettingsMenu({
                 type="button"
                 className="btn-menu-tuning"
                 onClick={handleOpenTuning}
-                title="Configure trade engine and safety controls"
+                title="Configure trade engine and safety controls in Platform Admin"
               >
                 ⚙️ Engine Tuning
               </Button>
@@ -1019,8 +1020,13 @@ export function SettingsMenu({
                       { id: "paper", label: "Paper", icon: "🧪", tooltip: "Simulated paper money" },
                       { id: "live", label: "Live Real", icon: "🔴", tooltip: "Live brokerage execution" },
                     ]}
-                    value={accountMode ?? "paper"}
-                    onChange={(mode) => { if (mode !== accountMode) onToggleAccountMode?.(); }}
+                    value={isLive ? "live" : "paper"}
+                    onChange={(mode) => {
+                      if (mode !== (isLive ? "live" : "paper")) {
+                        onSwitchEnv(mode === "live" ? "PROD" : "TEST");
+                      }
+                      onToggleAccountMode?.();
+                    }}
                   />
                 </div>
               )}

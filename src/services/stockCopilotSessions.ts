@@ -101,13 +101,13 @@ export function parseCopilotSessionList(
     .map((t) => t.trim().toLowerCase())
     .filter((t) => t.length > 0);
   if (tokens.length === 0) return null;
-  if (tokens.length === 1 && (tokens[0] === "all" || tokens[0] === "*")) {
+  if (tokens.length === 1 && (tokens[0] === "all" || tokens[0] === "*" || tokens[0] === "around_the_clock" || tokens[0] === "24/7" || tokens[0] === "continuous")) {
     return [...COPILOT_SESSIONS];
   }
   if (tokens.length === 1 && tokens[0] === "none") return [];
   const found = new Set<CopilotSessionId>();
   for (const token of tokens) {
-    if (token === "all" || token === "*") {
+    if (token === "all" || token === "*" || token === "around_the_clock" || token === "24/7" || token === "continuous") {
       return [...COPILOT_SESSIONS];
     }
     if (isCopilotSessionId(token)) found.add(token);
@@ -134,21 +134,23 @@ export interface CopilotSessionReaders {
     STOCK_COPILOT_SESSIONS?: string;
     STOCK_COPILOT_IGNORE_SESSIONS?: string;
     STOCK_COPILOT_FORCE_ALL_SESSIONS?: string;
+    STOCK_COPILOT_AROUND_THE_CLOCK?: string;
   } | null;
 }
 
 /**
  * Resolve the user's enabled sessions: stored per-login setting
  * first, deployment env second, all-sessions default last (#3541).
- * When STOCK_COPILOT_IGNORE_SESSIONS or STOCK_COPILOT_FORCE_ALL_SESSIONS is
- * true, returns all 4 sessions immediately.
+ * When STOCK_COPILOT_IGNORE_SESSIONS, STOCK_COPILOT_FORCE_ALL_SESSIONS, or
+ * STOCK_COPILOT_AROUND_THE_CLOCK is true, returns all 4 sessions immediately.
  */
 export function resolveCopilotSessions(
   readers: CopilotSessionReaders,
 ): CopilotSessionId[] {
   if (
     readers.env?.STOCK_COPILOT_IGNORE_SESSIONS === "true" ||
-    readers.env?.STOCK_COPILOT_FORCE_ALL_SESSIONS === "true"
+    readers.env?.STOCK_COPILOT_FORCE_ALL_SESSIONS === "true" ||
+    readers.env?.STOCK_COPILOT_AROUND_THE_CLOCK === "true"
   ) {
     return [...COPILOT_SESSIONS];
   }
@@ -191,8 +193,15 @@ const OVERNIGHT_START = 20 * 60;
  * Sunday–Thursday, its morning half (00:00–04:00) to the session
  * that opened the previous evening, so early hours count Monday–
  * Friday and never Saturday.
+ *
+ * When aroundTheClock is true (or when forced via env), weekend and
+ * off-hours are mapped to "exto", allowing continuous limit-order
+ * evaluation and queueing 24/7 without stalling on weekends.
  */
-export function copilotSessionAt(now: Date): CopilotSessionId | null {
+export function copilotSessionAt(
+  now: Date,
+  aroundTheClock = false,
+): CopilotSessionId | null {
   const { weekday, minutes } = etWeekdayMinutes(now);
   const weekdaySessionDay =
     weekday === "Mon" ||
@@ -202,16 +211,18 @@ export function copilotSessionAt(now: Date): CopilotSessionId | null {
     weekday === "Fri";
   if (minutes >= OVERNIGHT_START) {
     // Evening half of the overnight session: Sun–Thu nights only.
-    return weekday === "Sun" || (weekdaySessionDay && weekday !== "Fri")
-      ? "exto"
-      : null;
+    if (weekday === "Sun" || (weekdaySessionDay && weekday !== "Fri")) {
+      return "exto";
+    }
+    return aroundTheClock ? "exto" : null;
   }
   if (minutes < PRE_MARKET_START) {
     // Morning tail of last night's overnight session (opened
     // Sun–Thu evening ⇒ tail lands Mon–Fri morning).
-    return weekdaySessionDay ? "exto" : null;
+    if (weekdaySessionDay) return "exto";
+    return aroundTheClock ? "exto" : null;
   }
-  if (!weekdaySessionDay) return null;
+  if (!weekdaySessionDay) return aroundTheClock ? "exto" : null;
   if (minutes < REGULAR_START) return "pre_market";
   if (minutes < AFTER_HOURS_START) return "regular";
   return "after_hours";

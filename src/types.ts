@@ -310,6 +310,7 @@ export interface Env {
   STOCK_COPILOT_AUTO_ALIGN_MODE?: string;
   STOCK_COPILOT_IGNORE_SESSIONS?: string;
   STOCK_COPILOT_FORCE_ALL_SESSIONS?: string;
+  STOCK_COPILOT_AROUND_THE_CLOCK?: string;
   // Comma-separated provider ids. Default when wiring is on: "github".
   // An id with no registered adapter is ignored, never a fallback.
   IAAA_ENABLED_PROVIDERS?: string;

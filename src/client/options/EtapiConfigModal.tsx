@@ -1,22 +1,24 @@
 import React, { useState, useEffect } from "react";
 import { apiFetch as fetch } from "../apiFetch";
-import { Modal, TextInput, Select, Notice, Button } from "../components/ui";
+import { Modal, TextInput, Select, Notice, Button, Flex, Stack, Card } from "../components/ui";
 import type { EtapiConfig, AiModelDefinition } from "../../config/etapiConfig";
 
-interface EtapiConfigModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  activeEnv: "TEST" | "PROD";
+export interface EtapiConfigModalProps {
+  isOpen?: boolean;
+  onClose?: () => void;
+  activeEnv?: "TEST" | "PROD";
   userLogin?: string;
   onConfigChanged?: (newConfig: EtapiConfig) => void;
+  embedded?: boolean;
 }
 
 export function EtapiConfigModal({
-  isOpen,
-  onClose,
-  activeEnv,
+  isOpen = true,
+  onClose = () => {},
+  activeEnv = "PROD",
   userLogin,
   onConfigChanged,
+  embedded = false,
 }: EtapiConfigModalProps) {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -318,54 +320,13 @@ export function EtapiConfigModal({
     }
   };
 
-  return (
-    <Modal
-      open={isOpen}
-      onClose={onClose}
-      size="lg"
-      title={
-        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
-          <span style={{ fontSize: "var(--font-size-title)" }}>⚙️</span>
-          <div>
-            <h3 style={{ margin: 0, fontSize: "var(--font-size-title-sm)", fontWeight: 700, color: "var(--color-text-primary)" }}>
-              ETAPI Engine Configuration &amp; Tuning
-            </h3>
-            <p style={{ margin: 0, fontSize: "var(--font-size-body-sm)", color: "var(--color-text-muted)" }}>
-              Externalized defaults • Zero hardcoding • Cascading overrides for active env [{activeEnv}]
-            </p>
-          </div>
-        </div>
-      }
-      footer={
-        <div
-          style={{
-            padding: "var(--space-4) var(--space-6)",
-            background: "var(--color-surface-sunken)",
-            borderTop: "1px solid var(--color-border-subtle)",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-          }}
-        >
-          <Button variant="secondary" onClick={handleResetDefaults} disabled={saving || loading}>
-            Reset Defaults
-          </Button>
-          <div style={{ display: "flex", gap: "var(--space-3)" }}>
-            <Button variant="secondary" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button variant="accent" onClick={handleApplyOverrides} disabled={saving || loading}>
-              {saving ? "Applying..." : "Apply Runtime Config"}
-            </Button>
-          </div>
-        </div>
-      }
-    >
-        {/* Tab Switcher */}
-        <div
-          style={{
-            display: "flex",
-            gap: "var(--space-2)",
+  const bodyContent = (
+    <>
+      {/* Tab Switcher */}
+      <div
+        style={{
+          display: "flex",
+          gap: "var(--space-2)",
             padding: "var(--space-3) var(--space-6)",
             background: "var(--color-surface-sunken)",
             borderBottom: "1px solid var(--color-border-subtle)",
@@ -779,7 +740,104 @@ export function EtapiConfigModal({
             </div>
           )}
         </div>
+    </>
+  );
 
-            </Modal>
+  if (embedded) {
+    return (
+      <div className="etapi-config-embedded">
+        <Flex justify="between" align="center" wrap gap="3" className="mb-4">
+          <Flex align="center" gap="3">
+            <span className="text-xl">⚙️</span>
+            <div>
+              <h3 className="m-0 font-bold">
+                ETAPI Engine Configuration &amp; Tuning
+              </h3>
+              <p className="m-0 text-muted">
+                Externalized defaults • Zero hardcoding • Cascading overrides for active env [{activeEnv}]
+              </p>
+            </div>
+          </Flex>
+          <Flex gap="2">
+            <Button variant="secondary" size="sm" onClick={handleResetDefaults} disabled={saving || loading}>
+              Reset Defaults
+            </Button>
+            <Button variant="accent" size="sm" onClick={handleApplyOverrides} disabled={saving || loading}>
+              {saving ? "Applying..." : "Apply Runtime Config"}
+            </Button>
+          </Flex>
+        </Flex>
+        <div className="etapi-config-embedded-body">
+          {bodyContent}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <Modal
+      open={isOpen}
+      onClose={onClose}
+      size="lg"
+      title={
+        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
+          <span style={{ fontSize: "var(--font-size-title)" }}>⚙️</span>
+          <div>
+            <h3 style={{ margin: 0, fontSize: "var(--font-size-title-sm)", fontWeight: 700, color: "var(--color-text-primary)" }}>
+              ETAPI Engine Configuration &amp; Tuning
+            </h3>
+            <p style={{ margin: 0, fontSize: "var(--font-size-body-sm)", color: "var(--color-text-muted)" }}>
+              Externalized defaults • Zero hardcoding • Cascading overrides for active env [{activeEnv}]
+            </p>
+          </div>
+        </div>
+      }
+      footer={
+        <div
+          style={{
+            padding: "var(--space-4) var(--space-6)",
+            background: "var(--color-surface-sunken)",
+            borderTop: "1px solid var(--color-border-subtle)",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          <Button variant="secondary" onClick={handleResetDefaults} disabled={saving || loading}>
+            Reset Defaults
+          </Button>
+          <div style={{ display: "flex", gap: "var(--space-3)" }}>
+            <Button variant="secondary" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button variant="accent" onClick={handleApplyOverrides} disabled={saving || loading}>
+              {saving ? "Applying..." : "Apply Runtime Config"}
+            </Button>
+          </div>
+        </div>
+      }
+    >
+      {bodyContent}
+    </Modal>
+  );
+}
+
+export function EngineTuningPanel({
+  activeEnv = "PROD",
+  userLogin,
+  onConfigChanged,
+}: {
+  activeEnv?: "TEST" | "PROD";
+  userLogin?: string;
+  onConfigChanged?: (newConfig: EtapiConfig) => void;
+}) {
+  return (
+    <EtapiConfigModal
+      isOpen={true}
+      embedded={true}
+      activeEnv={activeEnv}
+      userLogin={userLogin}
+      onConfigChanged={onConfigChanged}
+    />
   );
 }

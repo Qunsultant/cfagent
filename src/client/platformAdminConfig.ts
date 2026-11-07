@@ -30,6 +30,8 @@ export type PlatformAdminSectionId =
   | "iaaa-admin"
   | "users"
   | "data-lifecycle"
+  | "engine-tuning"
+  | "downloads"
   | "admin-access";
 
 export interface PlatformAdminMenuItemConfig {

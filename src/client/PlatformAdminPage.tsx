@@ -64,6 +64,8 @@ import { AccountAdminPanel } from "./AccountAdminPanel";
 import { FreeRunAllowanceSection } from "./FreeRunAllowanceSection";
 import { IaaaAdminPanel } from "./IaaaAdminPanel";
 import { UserAdminPanel } from "./UserAdminPanel";
+import { EngineTuningPanel } from "./options/EtapiConfigModal";
+import { DownloadsPanel } from "./DownloadsPanel";
 import {
   AdsSection,
   ProvenanceSection,
@@ -101,6 +103,8 @@ export const PLATFORM_ADMIN_TABS: TabOption<PlatformAdminSectionId>[] = [
   { id: "iaaa-admin", label: "IAAA Admin", icon: <NavIcons.IaaaAdmin /> },
   { id: "users", label: "Users", icon: <NavIcons.Agents /> },
   { id: "data-lifecycle", label: "Data Lifecycle", icon: <NavIcons.Database /> },
+  { id: "engine-tuning", label: "Engine Tuning", icon: <NavIcons.Settings /> },
+  { id: "downloads", label: "Parameters & Export", icon: <NavIcons.Database /> },
   { id: "admin-access", label: "Admin Access", icon: <NavIcons.AdminAccess /> },
 ];
 
@@ -337,6 +341,18 @@ export function PlatformAdminPage({
             <small>Clean state, platform bootstrap &amp; tenant bootstrap</small>
           </div>
           <DataLifecyclePanel />
+        </Card>
+      </TabPanel>
+
+      <TabPanel idBase="platform-admin" tabId="engine-tuning" active={active === "engine-tuning"}>
+        <Card padding="md">
+          <EngineTuningPanel userLogin={user?.login} />
+        </Card>
+      </TabPanel>
+
+      <TabPanel idBase="platform-admin" tabId="downloads" active={active === "downloads"}>
+        <Card padding="md">
+          <DownloadsPanel userLogin={user?.login} />
         </Card>
       </TabPanel>
 

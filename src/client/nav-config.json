@@ -1527,6 +1527,18 @@
           "icon": "Database"
         },
         {
+          "id": "engine-tuning",
+          "label": "Engine Tuning",
+          "description": "Configure trade engine, parameters, and safety controls",
+          "icon": "Settings"
+        },
+        {
+          "id": "downloads",
+          "label": "Parameters & Export",
+          "description": "Export options datasets, greek chains, and parameters",
+          "icon": "Docs"
+        },
+        {
           "id": "admin-access",
           "label": "Request admin access",
           "description": "Ask the platform owner for admin rights",

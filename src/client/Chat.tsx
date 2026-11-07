@@ -12,6 +12,7 @@ import { ETradeTradingHub } from "./ETradeTradingHub";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { FirstRunGate } from "./FirstRunGate";
 import { SettingsMenu, type ETradeDynamicMenuProps } from "./ETradeDynamicMenu";
+import { useBrokerEnvironment, switchBrokerEnvironment, fetchBrokerEnvironment } from "./brokerEnvironment";
 import { MarketDataResearchHub } from "./MarketDataResearchHub";
 import { OptionsFlowsHub } from "./options/flows";
 import { OptionsScreenerPage } from "./OptionsScreenerPage";
@@ -122,7 +123,16 @@ export function Chat({ user }: { user: User }) {
     }
     return false;
   });
-  const [accountMode, setAccountMode] = useState<"paper" | "live">("paper");
+  const brokerEnv = useBrokerEnvironment();
+  const accountMode: "paper" | "live" = brokerEnv === "PROD" ? "live" : "paper";
+  const handleToggleAccountMode = () => {
+    const next = accountMode === "paper" ? "PROD" : "TEST";
+    void switchBrokerEnvironment(next);
+  };
+
+  useEffect(() => {
+    void fetchBrokerEnvironment();
+  }, []);
 
   // Theme state: light | dark | system
   const [theme, setTheme] = useState<ThemeMode>(() => getStoredTheme());
@@ -1652,7 +1662,7 @@ export function Chat({ user }: { user: User }) {
           user={user}
           agentStatus={{ dotClass: statusDotClass, label: statusLabel }}
           accountMode={accountMode}
-          onToggleAccountMode={() => setAccountMode((m) => (m === "paper" ? "live" : "paper"))}
+          onToggleAccountMode={handleToggleAccountMode}
           theme={theme}
           onCycleTheme={handleCycleTheme}
           onAskAgent={handleAskAgent}
@@ -1724,7 +1734,7 @@ export function Chat({ user }: { user: User }) {
                 currentLayout={navLayout}
                 onToggleLayout={handleToggleNavLayout}
                 accountMode={accountMode}
-                onToggleAccountMode={() => setAccountMode((m) => (m === "paper" ? "live" : "paper"))}
+                onToggleAccountMode={handleToggleAccountMode}
                 visibleTabs={visibleTabs}
                 onToggleTabVisibility={handleToggleTabVisibility}
                 onSetVisibleTabs={handleSetVisibleTabs}
@@ -1769,7 +1779,7 @@ export function Chat({ user }: { user: User }) {
               user={user}
               agentStatus={{ dotClass: statusDotClass, label: statusLabel }}
               accountMode={accountMode}
-              onToggleAccountMode={() => setAccountMode((m) => (m === "paper" ? "live" : "paper"))}
+              onToggleAccountMode={handleToggleAccountMode}
               onRefresh={handleGlobalRefresh}
               isRefreshing={isRefreshing}
               lastRefreshedAt={lastRefreshedAt}
@@ -1784,7 +1794,7 @@ export function Chat({ user }: { user: User }) {
                   currentLayout={navLayout}
                   onToggleLayout={handleToggleNavLayout}
                   accountMode={accountMode}
-                  onToggleAccountMode={() => setAccountMode((m) => (m === "paper" ? "live" : "paper"))}
+                  onToggleAccountMode={handleToggleAccountMode}
                   visibleTabs={visibleTabs}
                   onToggleTabVisibility={handleToggleTabVisibility}
                   onSetVisibleTabs={handleSetVisibleTabs}

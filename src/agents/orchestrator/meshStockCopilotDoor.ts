@@ -221,7 +221,11 @@ export async function getStockCopilotStatusViaDoor(
     readSettingRaw: ctx.readSettingRaw,
     env: ctx.env,
   });
-  const currentSession = copilotSessionAt(now);
+  const aroundTheClock =
+    String(ctx.env?.STOCK_COPILOT_AROUND_THE_CLOCK ?? "").toLowerCase() === "true" ||
+    String(ctx.env?.STOCK_COPILOT_FORCE_ALL_SESSIONS ?? "").toLowerCase() === "true" ||
+    String(ctx.env?.STOCK_COPILOT_IGNORE_SESSIONS ?? "").toLowerCase() === "true";
+  const currentSession = copilotSessionAt(now, aroundTheClock);
   const commercial =
     ctx.commercial !== undefined
       ? ctx.commercial

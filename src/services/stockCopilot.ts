@@ -679,7 +679,11 @@ export async function runStockCopilotCycle(
   // from the settings; env-only resolution when no host composed it).
   const enabledSessions =
     deps.enabledSessions ?? resolveCopilotSessions({ env: deps.env });
-  const session = copilotSessionAt(now);
+  const aroundTheClock =
+    String(deps.env?.STOCK_COPILOT_AROUND_THE_CLOCK ?? "").toLowerCase() === "true" ||
+    String(deps.env?.STOCK_COPILOT_FORCE_ALL_SESSIONS ?? "").toLowerCase() === "true" ||
+    String(deps.env?.STOCK_COPILOT_IGNORE_SESSIONS ?? "").toLowerCase() === "true";
+  const session = copilotSessionAt(now, aroundTheClock);
   result.session = session;
   result.enabledSessions = [...enabledSessions];
 
