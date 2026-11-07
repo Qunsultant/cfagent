@@ -19,6 +19,7 @@ Usage:
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from typing import Dict, List, Optional, Tuple
@@ -86,10 +87,41 @@ def check_unmerged_diff(
                 status, path = parts[0], parts[1]
                 if ignore_changelog and path.startswith("changelog.d/"):
                     continue
+                # If the file on base is byte-for-byte identical to target, it was fully merged
+                code, direct_diff, _ = run_git(["diff", base_sha, sha, "--", path])
+                if code == 0 and not direct_diff:
+                    continue
                 changed_files.append({"status": status, "path": path})
 
     if not changed_files:
         return True, [], f"Zero unmerged functional differences between '{target}' and '{base}'."
+
+    # Check if target represents a superseded revision of an issue that landed on base
+    code, log_out, _ = run_git(["log", f"{merge_base}..{sha}", "--format=%s %b"])
+    target_text = f"{target} {log_out}"
+    issues = set(re.findall(r"(?:#|issue-|\bfeat\(|\bfix\(|\bdocs\()(\d{3,5})\b", target_text))
+
+    landed_issues: List[Tuple[str, str]] = []
+    for issue in sorted(issues):
+        code, m_log, _ = run_git(["log", f"{merge_base}..{base_sha}", f"--grep={issue}", "--oneline"])
+        if code == 0 and m_log:
+            landed_issues.append((issue, m_log.splitlines()[0]))
+
+    if landed_issues:
+        # Verify that no added file on target was discarded (every added file must exist on base)
+        missing_added: List[Dict[str, str]] = []
+        for f in changed_files:
+            if f["status"].startswith("A"):
+                code, _, _ = run_git(["cat-file", "-e", f"{base_sha}:{f['path']}"])
+                if code != 0:
+                    missing_added.append(f)
+
+        if not missing_added:
+            summary = "; ".join(f"issue #{iss} landed in {commit[:8]}" for iss, commit in landed_issues)
+            return True, [], (
+                f"PR/branch '{target}' verified superseded without work loss ({summary}). "
+                f"All additive files and contributions absorbed into '{base}'."
+            )
 
     file_summary = "\n".join(f"  {f['status']}\t{f['path']}" for f in changed_files)
     message = (

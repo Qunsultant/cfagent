@@ -49,6 +49,37 @@ describe("Anti-Work-Loss Guardrail (scripts/ci/verify_pr_closure.py)", () => {
     runGit(["add", "."]);
     runGit(["commit", "-m", "add changelog fragment"]);
 
+    // 4. Superseded branch whose issue landed via a re-cut commit on main
+    runGit(["checkout", "main"]);
+    runGit(["checkout", "-b", "feat/9999-superseded-r1"]);
+    fs.writeFileSync(path.join(tempRepoDir, "src", "superseded_feature.ts"), "export const code = 9999;\n");
+    runGit(["add", "."]);
+    runGit(["commit", "-m", "feat(9999): work on superseded r1"]);
+
+    // Advance main with an unrelated commit
+    runGit(["checkout", "main"]);
+    fs.writeFileSync(path.join(tempRepoDir, "src", "unrelated.ts"), "export const unrelated = true;\n");
+    runGit(["add", "."]);
+    runGit(["commit", "-m", "chore: unrelated commit on main"]);
+
+    // Land issue 9999 on main via re-cut (simulating squash / MQ landing) with evolved content
+    fs.writeFileSync(
+      path.join(tempRepoDir, "src", "superseded_feature.ts"),
+      "export const code = 9999;\nexport const evolved = true;\n"
+    );
+    runGit(["add", "."]);
+    runGit(["commit", "-m", "feat(9999): superseded feature landed via r2 with additions"]);
+
+    // 5. Superseded branch with a lost file that was not in the landed commit
+    runGit(["checkout", "-b", "feat/8888-with-lost-file"]);
+    fs.writeFileSync(path.join(tempRepoDir, "src", "lost.ts"), "export const lost = true;\n");
+    runGit(["add", "."]);
+    runGit(["commit", "-m", "feat(8888): work with lost file"]);
+    runGit(["checkout", "main"]);
+    fs.writeFileSync(path.join(tempRepoDir, "src", "other8888.ts"), "export const other = 8888;\n");
+    runGit(["add", "."]);
+    runGit(["commit", "-m", "feat(8888): issue 8888 landed without lost.ts"]);
+
     runGit(["checkout", "main"]);
   });
 
@@ -141,5 +172,49 @@ describe("Anti-Work-Loss Guardrail (scripts/ci/verify_pr_closure.py)", () => {
     const parsed = JSON.parse(stdout);
     expect(parsed.safe_to_close).toBe(true);
     expect(parsed.changed_files_count).toBe(0);
+  });
+
+  it("passes when evaluating a superseded branch whose issue landed on main and additive files are present", () => {
+    const stdout = execFileSync(
+      "python3",
+      [
+        scriptPath,
+        "feat/9999-superseded-r1",
+        "--base",
+        "main",
+        "--json",
+      ],
+      { cwd: tempRepoDir, encoding: "utf-8" }
+    );
+    const parsed = JSON.parse(stdout);
+    expect(parsed.safe_to_close).toBe(true);
+    expect(parsed.changed_files_count).toBe(0);
+    expect(parsed.message).toContain("verified superseded without work loss");
+  });
+
+  it("fails when evaluating a superseded branch that has unique added files not absorbed into main", () => {
+    let error: any = null;
+    try {
+      execFileSync(
+        "python3",
+        [
+          scriptPath,
+          "feat/8888-with-lost-file",
+          "--base",
+          "main",
+          "--json",
+        ],
+        { cwd: tempRepoDir, encoding: "utf-8" }
+      );
+    } catch (e) {
+      error = e;
+    }
+
+    expect(error).not.toBeNull();
+    expect(error.status).toBe(1);
+    const parsed = JSON.parse(error.stdout);
+    expect(parsed.safe_to_close).toBe(false);
+    expect(parsed.changed_files_count).toBe(1);
+    expect(parsed.changed_files[0].path).toBe("src/lost.ts");
   });
 });
