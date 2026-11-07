@@ -9,7 +9,7 @@
  *   GET  /data-providers                              configs + routes + servability (+ per-provider capture health, E6 #1235; + feed-job status, #3530 S1)
  *   GET  /data-providers/:id                          one config + its routes
  *   GET  /data-providers/:id/feed                     feed-job status + the local-copy read (#3530 S1)
- *   POST /data-providers/:id/feed-run                 run the provider's feed job now (#3530 S1)
+ *   POST /data-providers/:id/feed-run                 run the provider's feed job now (#3530 S1; dispatched through the pipeline host door since #3578)
  *   GET  /data-providers/:id/feed-jobs                the provider's feed jobs as pipeline jobs (#3535)
  *   POST /data-providers/:id/feed-jobs/:jobId/:action run|pause|resume|cancel|retry a feed job (#3535)
  *   GET  /data-providers/:id/enrich-jobs              the provider's enrich jobs as pipeline jobs (#3536)
@@ -98,24 +98,20 @@ import {
   type FetchOutcomeRecorder,
 } from "../../trading";
 import type { ProviderConfigStore } from "../../data/providerConfigPorts";
+import type { ProviderCaptureStore } from "../../data/providerCapturePorts";
 import type {
-  CaptureBlobStorage,
-  ProviderCaptureStore,
-} from "../../data/providerCapturePorts";
-import type { FeedDatasetStore } from "../../data/feedDatasetPorts";
+  FeedDatasetArtifact,
+  FeedDatasetStore,
+} from "../../data/feedDatasetPorts";
 import { createFeedDatasetAdapter } from "../../data/createFeedDatasetPorts";
-import type { IndexListStore } from "../../data/indexListPorts";
-import { D1IndexListStore } from "../../data/d1IndexListAdapter";
 import {
   buildFeedJobRegistry,
   buildFeedStatus,
   readFeedQuotes,
-  runFeedJob,
   FEED_JOB_CODES,
-  type FeedJobDefinition,
   type FeedJobRegistry,
+  type FeedRunResult,
 } from "../../services/feedJobs";
-import type { DataProvider } from "../../trading";
 import {
   FEED_PIPELINE_CATALOG,
   type FeedJobSurfaceView,
@@ -187,19 +183,8 @@ export interface DataProviderRoutesContext {
    * provider) applies.
    */
   buildVerifier?(providerId: string): ProviderVerifier | undefined;
-  /**
-   * #3530 S1 — the local-copy blob store for the default
-   * capture-wired feed providers (the orchestrator's storage; the
-   * same wiring screening's fetches use). Absent ⇒ feed runs
-   * report FEED_JOB_NOT_CONFIGURED rather than fetching uncaptured.
-   */
-  blobStorage?: CaptureBlobStorage;
-  /** #3530 S1 — feed-dataset store override (tests); undefined ⇒ built from the request env (AGENT_DB); explicit null ⇒ none. */
+  /** #3530 S1 — feed-dataset store override (tests); undefined ⇒ built from the request env (AGENT_DB); explicit null ⇒ none. Since #3578 the store is this surface's READ side (status + the feed-run outcome read); execution wiring lives on the pipeline host. */
   feedDatasetStore?: FeedDatasetStore | null;
-  /** #3530 S1 — index-list store override for feed universes (tests); undefined ⇒ built from AGENT_DB; null ⇒ none. */
-  feedUniverseStore?: IndexListStore | null;
-  /** #3530 S1 — feed provider override (tests); undefined ⇒ the default capture-wired adapter for the job's source. */
-  feedProviderFor?(def: FeedJobDefinition): DataProvider | undefined;
   /** #3535 — the pipeline host door override (tests); undefined ⇒ the ScheduledAgent stub from env; explicit null ⇒ no pipeline surface. */
   feedPipelineDoor?: FeedPipelineDoorLike | null;
 }
@@ -487,63 +472,6 @@ function feedDatasetStoreFor(
   return createFeedDatasetAdapter(ctx.env);
 }
 
-function feedUniverseStoreFor(
-  ctx: DataProviderRoutesContext,
-): IndexListStore | null {
-  if (ctx.feedUniverseStore !== undefined) return ctx.feedUniverseStore;
-  return ctx.env.AGENT_DB
-    ? new D1IndexListStore(
-        ctx.env.AGENT_DB as ConstructorParameters<typeof D1IndexListStore>[0],
-      )
-    : null;
-}
-
-/**
- * The default capture-wired provider for a feed job — built with
- * the same capture deps screening's fetches use, so the job's
- * captures land in the capture log through the very same write
- * path. S1 wired Yahoo; S2 adds E*TRADE (constructed from env +
- * the verified session login — the service resolves THAT login's
- * stored token, so an absent/expired token is the run's honest
- * failure, never a borrowed identity) and Alpaca (the same
- * construction buildPlatformRegistry uses). Undefined when the
- * source has no default wiring or the blob store the capture
- * machinery needs is absent — a run then refuses
- * FEED_JOB_NOT_CONFIGURED rather than fetching uncaptured.
- */
-function defaultFeedProvider(
-  ctx: DataProviderRoutesContext,
-  def: FeedJobDefinition,
-): DataProvider | undefined {
-  if (!ctx.blobStorage) return undefined;
-  const capture = {
-    sql: ctx.sql,
-    blobStorage: ctx.blobStorage,
-    env: ctx.env,
-    capturePort: ctx.capturePort,
-  };
-  switch (def.sourceId) {
-    case "yahoo":
-      return createYahooDataProvider(
-        new YahooFinanceProvider(ctx.env),
-        ctx.env,
-        { capture },
-      );
-    case "etrade":
-      return createETradeDataProviderFromEnv(ctx.env, ctx.userLogin, {
-        capture,
-      });
-    case "alpaca":
-      return createAlpacaDataProvider(
-        new AlpacaMarketDataProvider(ctx.env),
-        ctx.env,
-        { capture },
-      );
-    default:
-      return undefined;
-  }
-}
-
 /**
  * The provider's feed block for the list/detail views: null when
  * no job is registered for the provider; a "not-configured"
@@ -586,6 +514,109 @@ function feedPipelineDoorFor(
   const ns = ctx.env.SCHEDULED_AGENT;
   if (!ns) return null;
   return ns.get(ns.idFromName("default")) as unknown as FeedPipelineDoorLike;
+}
+
+/* ------------------------------------------------------------------ */
+/* #3578 — the feed-run route's convergence onto the door above:      */
+/* the outcome read + the refusal mapping onto S1's shapes            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The stable code a door-side failure carries, read off either
+ * the error's own `code` property (JobPipelineError / FeedJobError
+ * in-process) or the leading "CODE:" prefix of its message (the
+ * plain coded Errors the host door throws, and the only part an
+ * RPC-crossed error guarantees). Null when the failure is uncoded.
+ */
+function codedErrorOf(error: unknown): string | null {
+  if (error !== null && typeof error === "object") {
+    const code = (error as { code?: unknown }).code;
+    if (typeof code === "string" && code.length > 0) return code;
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  const match = message.match(/^([A-Za-z][A-Za-z0-9_]*):/);
+  return match ? match[1] : null;
+}
+
+/**
+ * The refusal code a SETTLED outcome's error carries. The stage
+ * runner wraps a step's thrown error ("Step "feed.pull" of node
+ * "root" (kind "feed") failed: <the step's coded error>"), so the
+ * code is the first of this route's mapped codes appearing in the
+ * message — not a prefix. Only the codes feedRunRefusalResponse
+ * maps specially are extracted; anything else stays uncoded and
+ * lands in the 409 shape.
+ */
+function outcomeRefusalCode(error: string | undefined): string | null {
+  if (!error) return null;
+  for (const code of ["FEED_JOB_NOT_CONFIGURED", FEED_JOB_CODES.jobNotFound]) {
+    if (new RegExp(`\\b${code}\\b`).test(error)) return code;
+  }
+  return null;
+}
+
+/**
+ * Map a door-side refusal onto the feed-run route's existing
+ * refusal shapes (the S1 contract — no new shape, no new code for
+ * an old condition): not-configured ⇒ the 500 FEED_JOB_NOT_CONFIGURED
+ * refusal; job-not-found ⇒ the 404 FEED_JOB_NOT_FOUND; anything
+ * else ⇒ the 409 FEED_JOB_ACTION_REFUSED the sibling feed-job
+ * action route already answers control-plane refusals with.
+ */
+function feedRunRefusalResponse(code: string | null, message: string): Response {
+  if (code === "FEED_JOB_NOT_CONFIGURED") {
+    return Response.json(
+      { error: message, code: "FEED_JOB_NOT_CONFIGURED" },
+      { status: 500 },
+    );
+  }
+  if (code === FEED_JOB_CODES.jobNotFound || code === "job_not_found") {
+    return Response.json(
+      { error: message, code: FEED_JOB_CODES.jobNotFound },
+      { status: 404 },
+    );
+  }
+  return Response.json(
+    { error: message, code: "FEED_JOB_ACTION_REFUSED" },
+    { status: 409 },
+  );
+}
+
+/**
+ * Rebuild the S1 run view (FeedRunResult) from the dataset
+ * artifacts ONE pipeline run stored (newest first). The feed
+ * step runs the #3530 service under the pipeline run id, so the
+ * run's artifacts ARE its records — the route performs one read
+ * of them after the door settles, never a second fetch. The
+ * run's recorded outcome is its NEWEST artifact: a step retry
+ * re-runs the pull under the same run id and stores a fresh
+ * artifact, so earlier artifacts under the id are superseded
+ * attempts, and the newest is the attempt the run settled on —
+ * the same record buildFeedStatus renders as the job's lastRun.
+ * Null when the run stored nothing — it settled before the pull
+ * recorded an outcome, and the caller maps its coded refusal
+ * instead.
+ */
+function feedRunViewFromArtifacts(
+  runId: string,
+  artifacts: FeedDatasetArtifact[],
+): FeedRunResult | null {
+  const newest = artifacts[0];
+  if (!newest) return null;
+  const run = newest.run;
+  return {
+    jobId: newest.jobId,
+    runId,
+    status: run.status,
+    artifactId: newest.id,
+    requested: run.requested,
+    received: run.received,
+    failed: run.failed,
+    missingSymbols: [...run.missingSymbols],
+    codedError: run.codedError,
+    startedAt: run.startedAt,
+    finishedAt: run.finishedAt,
+  };
 }
 
 /**
@@ -898,7 +929,17 @@ export async function handleDataProviderRoutes(
       return Response.json({ feed, quotes });
     }
 
-    // #3530 S1 — run the provider's feed job now. A mutation:
+    // #3530 S1 — run the provider's feed job now. #3578: the run
+    // is dispatched through the pipeline host door (the same
+    // control-plane dispatch the feed-job action route below and
+    // the copilot tools make), NOT run directly from this
+    // residency — a run started here is a pipeline run (pipeline
+    // run id end to end, stage addressing, checkpoint, uniform
+    // stage control, the standard completion → enrich chaining).
+    // The door settles the run; the response's run view is then
+    // rebuilt from the run's own dataset artifact(s) and the
+    // feed block from the same store read as before, so the S1
+    // response contract ({ run, feed }) is unchanged. A mutation:
     // same session gate as the lifecycle actions below.
     if (request.method === "POST" && feedRunMatch) {
       if (!ctx.userLogin) {
@@ -919,27 +960,57 @@ export async function handleDataProviderRoutes(
           { status: 404 },
         );
       }
-      const store = feedDatasetStoreFor(ctx);
-      const universeStore = feedUniverseStoreFor(ctx);
-      const provider = ctx.feedProviderFor
-        ? ctx.feedProviderFor(def)
-        : defaultFeedProvider(ctx, def);
-      if (!store || !universeStore || !provider) {
+      const door = feedPipelineDoorFor(ctx);
+      if (!door) {
         return Response.json(
           {
             error:
-              "Feed-job wiring is incomplete on this host (dataset store, universe store, or provider missing); the run was refused rather than fetching through an unwired path.",
+              "The pipeline host is not bound on this deployment; the run was refused rather than dispatched through an unwired path.",
             code: "FEED_JOB_NOT_CONFIGURED",
           },
           { status: 500 },
         );
       }
-      const run = await runFeedJob(
-        registry,
-        { provider, universeStore, datasetStore: store },
-        def.id,
-        { trigger: "manual", userLogin: ctx.userLogin },
-      );
+      const store = feedDatasetStoreFor(ctx);
+      if (!store) {
+        return Response.json(
+          {
+            error:
+              "Feed-job wiring is incomplete on this host (the dataset store the run's outcome is read from is missing); the run was refused rather than dispatching a run this surface cannot report.",
+            code: "FEED_JOB_NOT_CONFIGURED",
+          },
+          { status: 500 },
+        );
+      }
+      let outcome: { jobId: string; runId: string; state: string; error?: string };
+      try {
+        outcome = await door.runPipelineJob(def.id, {
+          userLogin: ctx.userLogin,
+        });
+      } catch (error) {
+        // The control plane refuses by name (already running, not
+        // defined on the host, an unsupported execution mode) —
+        // mapped onto this route's refusal shapes, never a
+        // success shape.
+        return feedRunRefusalResponse(
+          codedErrorOf(error),
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+      const artifacts = (await store.listRuns(def.sourceId, def.dataset, 50))
+        .filter((artifact) => artifact.run.runId === outcome.runId);
+      const run = feedRunViewFromArtifacts(outcome.runId, artifacts);
+      if (!run) {
+        // The run settled without the feed service recording an
+        // artifact — it failed (or was stopped) before the pull
+        // recorded an outcome. Map its coded refusal onto this
+        // route's shapes.
+        return feedRunRefusalResponse(
+          outcomeRefusalCode(outcome.error),
+          outcome.error ??
+            `Pipeline run ${outcome.runId} for feed job "${def.id}" settled as "${outcome.state}" before the feed pull recorded an outcome.`,
+        );
+      }
       ctx.recordAudit("data_provider.feed_run", "orchestrator", {
         actor: ctx.userLogin,
         providerId: id,

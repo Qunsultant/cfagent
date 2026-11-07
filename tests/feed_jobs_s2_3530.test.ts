@@ -35,6 +35,12 @@
  *
  * No secret-shaped literals: credential fixture values are
  * assembled from string fragments at runtime.
+ *
+ * #3578: the routes describe at the bottom injects the pipeline
+ * host door (the feed-run route's converged dispatch) instead of
+ * the route-ctx provider/store seams — see the adaptation note
+ * on that describe. The service-level describes above are
+ * untouched: the #3530 run service itself did not change.
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { MockSqlStorage } from "./mock-sql";
@@ -64,7 +70,29 @@ import { seedProviderConfigs } from "../src/trading/dataProviders/providerConfig
 import {
   handleDataProviderRoutes,
   type DataProviderRoutesContext,
+  type FeedPipelineDoorLike,
 } from "../src/agents/routes/dataProviders";
+import {
+  JobPipelineControl,
+  jobRunRecorderFromStore,
+  type JobDispatchResult,
+} from "../src/services/jobPipelineEngine";
+import { createInMemoryJobPipelineStores } from "../src/data/inMemoryJobPipelineAdapter";
+import { InMemoryJobRunRecordStore } from "../src/data/inMemoryJobRunRecordAdapter";
+import type { FeedJobDefinition } from "../src/services/feedJobs";
+import {
+  createFeedStepRegistry,
+  ensureFeedPipelineJobs,
+  buildFeedJobSurfaceView,
+  FEED_PIPELINE_CATALOG,
+} from "../src/services/feedPipelineJobs";
+import { createCaptureWiredFeedProvider } from "../src/services/feedProviderWiring";
+import { InMemoryEnrichedDatasetStore } from "../src/data/inMemoryEnrichedDatasetAdapter";
+import { buildEnrichJobRegistry } from "../src/services/enrichJobs";
+import {
+  ENRICH_PIPELINE_CATALOG,
+  buildEnrichJobSurfaceView,
+} from "../src/services/enrichPipelineJobs";
 import type { ETradeBrokerStatus, ETradeQuote, MarketDataResearchQuote } from "../src/types";
 import type { Env } from "../src/types";
 
@@ -578,9 +606,29 @@ describe("runFeedJob — alpaca (#3530 S2)", () => {
 // ---------------------------------------------------------------------------
 // Routes — the new sources on the surface; nasdaq stays jobless
 // ---------------------------------------------------------------------------
+//
+// #3578 adaptation (disclosed): the feed-run route dispatches
+// through the pipeline host door now (no direct service run from
+// the route's residency), so this suite injects the door — a fake
+// over a real JobPipelineControl + the real feed step registry
+// sharing the in-memory stores (the feed_jobs_routes_3530 idiom).
+// The step's provider wiring is the host's own composition: by
+// default the capture-wired factory (createCaptureWiredFeedProvider
+// over this suite's env/sql/blob double, the acting login threaded
+// as a session dispatch threads it) — the DEFAULT-wiring pins
+// below therefore exercise the same adapter construction the host
+// runs; an injected provider replaces the factory for its test, as
+// the route-ctx injection did before. Route-contract assertions
+// are unchanged; the etrade run additionally pins that the
+// response's run id is the pipeline run id.
 
 describe("feed routes (#3530 S2)", () => {
-  async function makeCtx(overrides?: Partial<DataProviderRoutesContext>) {
+  async function makeCtx(
+    opts?: {
+      env?: Env;
+      providerFor?: (def: FeedJobDefinition) => DataProvider | undefined;
+    },
+  ) {
     const sql = new MockSqlStorage();
     seedProviderConfigs(sql);
     ensureCaptureTable(sql);
@@ -594,9 +642,101 @@ describe("feed routes (#3530 S2)", () => {
       sourceLabel: "Wikipedia (Nasdaq-100 table)",
       derivedFromHoldings: false,
     });
+    const env = opts?.env ?? ({} as Env);
+    const registry = buildFeedJobRegistry({});
+    const stores = createInMemoryJobPipelineStores();
+    const control = new JobPipelineControl({
+      stores,
+      runRecorder: jobRunRecorderFromStore(new InMemoryJobRunRecordStore()),
+      steps: createFeedStepRegistry({
+        registry,
+        providerFor:
+          opts?.providerFor ??
+          ((def: FeedJobDefinition) =>
+            createCaptureWiredFeedProvider(def, {
+              env,
+              sql: sql as never,
+              blobStorage: blobStorageDouble() as never,
+              userLogin: "octocat",
+            })),
+        universeStore,
+        datasetStore,
+      }),
+      now: () => new Date(T0),
+    });
+    await ensureFeedPipelineJobs(control, stores, {});
+    const settle = async (
+      jobId: string,
+      dispatch: JobDispatchResult,
+    ): Promise<{ jobId: string; runId: string; state: string; error?: string }> => {
+      if (!dispatch.completion) {
+        return { jobId, runId: dispatch.runId, state: dispatch.state };
+      }
+      const outcome = await dispatch.completion;
+      return {
+        jobId,
+        runId: outcome.runId,
+        state: outcome.state,
+        ...(outcome.error ? { error: outcome.error } : {}),
+      };
+    };
+    const door: FeedPipelineDoorLike = {
+      listFeedJobSurfaceStatuses: async () =>
+        Promise.all(
+          FEED_PIPELINE_CATALOG.map(async (entry) =>
+            buildFeedJobSurfaceView({
+              entry,
+              datasetStore,
+              registry,
+              pipeline: await control.getJob(entry.jobId).catch(() => null),
+              nowMs: T0,
+            }),
+          ),
+        ),
+      getFeedJobSurfaceStatus: async (jobId: string) => {
+        const entry = FEED_PIPELINE_CATALOG.find((e) => e.jobId === jobId)!;
+        return buildFeedJobSurfaceView({
+          entry,
+          datasetStore,
+          registry,
+          pipeline: await control.getJob(entry.jobId).catch(() => null),
+          nowMs: T0,
+        });
+      },
+      runPipelineJob: async (jobId: string) =>
+        settle(jobId, await control.runJob(jobId, { trigger: "manual" })),
+      pausePipelineJob: async (jobId: string) => control.pauseJob(jobId),
+      resumePipelineJob: async (jobId: string) =>
+        settle(jobId, await control.resumeJob(jobId)),
+      cancelPipelineJob: async (jobId: string) => control.cancelJob(jobId),
+      retryPipelineJob: async (jobId: string) =>
+        settle(jobId, await control.retryJob(jobId)),
+      listEnrichJobSurfaceStatuses: async () =>
+        Promise.all(
+          ENRICH_PIPELINE_CATALOG.map(async (entry) =>
+            buildEnrichJobSurfaceView({
+              entry,
+              enrichedStore: new InMemoryEnrichedDatasetStore(),
+              registry: buildEnrichJobRegistry({}),
+              pipeline: await control.getJob(entry.jobId).catch(() => null),
+              nowMs: T0,
+            }),
+          ),
+        ),
+      getEnrichJobSurfaceStatus: async (jobId: string) => {
+        const entry = ENRICH_PIPELINE_CATALOG.find((e) => e.jobId === jobId)!;
+        return buildEnrichJobSurfaceView({
+          entry,
+          enrichedStore: new InMemoryEnrichedDatasetStore(),
+          registry: buildEnrichJobRegistry({}),
+          pipeline: await control.getJob(entry.jobId).catch(() => null),
+          nowMs: T0,
+        });
+      },
+    };
     const auditRows: Array<{ type: string; payload: Record<string, unknown> }> = [];
     const ctx: DataProviderRoutesContext = {
-      env: {} as Env,
+      env,
       sql,
       userLogin: "octocat",
       recordAudit: (type, _agent, payload) => {
@@ -604,11 +744,9 @@ describe("feed routes (#3530 S2)", () => {
         return { id: "audit-1" };
       },
       feedDatasetStore: datasetStore,
-      feedUniverseStore: universeStore,
-      blobStorage: blobStorageDouble(),
-      ...overrides,
+      feedPipelineDoor: door,
     };
-    return { ctx, datasetStore, auditRows };
+    return { ctx, datasetStore, auditRows, control };
   }
 
   function callRoute(
@@ -651,7 +789,7 @@ describe("feed routes (#3530 S2)", () => {
 
   it("POST etrade feed-run through an injected provider runs end-to-end and audits", async () => {
     const provider = createETradeDataProvider(etradeSurfaceDouble("quotes"), {});
-    const { ctx, auditRows } = await makeCtx({ feedProviderFor: () => provider });
+    const { ctx, auditRows, control } = await makeCtx({ providerFor: () => provider });
     const res = await callRoute(ctx, "POST", "/data-providers/etrade/feed-run", {});
     expect(res.status).toBe(200);
     const body = (await res.json()) as any;
@@ -662,6 +800,11 @@ describe("feed routes (#3530 S2)", () => {
         (r) => r.type === "data_provider.feed_run" && r.payload.providerId === "etrade",
       ),
     ).toBe(true);
+    // #3578: the audited run is the pipeline run the door settled.
+    const view = await control.getJob("etrade-nasdaq100-quotes");
+    expect(view.instance?.currentRunId).toBe(body.run.runId);
+    const audit = auditRows.find((r) => r.type === "data_provider.feed_run");
+    expect(audit?.payload.runId).toBe(body.run.runId);
   });
 
   it("POST etrade feed-run through the DEFAULT wiring (no provider injection): the sandbox/no-token reality surfaces as a recorded failed run, not an error or a fake success", async () => {

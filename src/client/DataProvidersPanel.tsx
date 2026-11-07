@@ -310,7 +310,8 @@ export function DataProvidersPanel() {
   };
 
   // #3530 (status UX): run the provider's feed job now through the
-  // direct S1 feed-run route, then reload so the status block
+  // S1 feed-run route (a pipeline-door dispatch since #3578), then
+  // reload so the status block
   // re-renders from the server's fresh status (one source of
   // truth). The run's outcome is surfaced as it came back: the
   // route answers 200 even for a failed run, so a failed outcome
