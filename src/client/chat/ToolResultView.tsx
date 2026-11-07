@@ -439,13 +439,12 @@ export function ToolResultView({
           </Badge>
           <span className="toggle-arrow">{open ? "▲" : "▼"}</span>
         </div>
-        <div style={{ padding: "var(--space-2) var(--space-3)", display: "flex", gap: "var(--space-2)", alignItems: "center", borderTop: "1px solid var(--color-border, #e5e7eb)" }}>
+        <div className="hitl-actions">
           <a
             href={statusUrl}
             target="_blank"
             rel="noopener noreferrer"
             className="job-link-btn"
-            style={{ fontSize: "var(--font-size-xs)", textDecoration: "underline" }}
           >
             Review Job Details ({statusUrl})
           </a>
