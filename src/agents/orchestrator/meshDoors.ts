@@ -119,6 +119,10 @@ import {
   resolveFeedJob,
   type FeedJobSurfaceView,
 } from "../../services/feedPipelineJobs";
+import {
+  resolveEnrichJob,
+  type EnrichJobSurfaceView,
+} from "../../services/enrichPipelineJobs";
 
 // ---------------------------------------------------------------------------
 // Errors — honest, typed, coded (doors-and-layers §11.1)
@@ -131,6 +135,8 @@ export type MeshDoorErrorCode =
   | "asset_not_found"
   // Issue #3535: the feed-job door's unknown/ambiguous job name.
   | "feed_job_not_found"
+  // Issue #3536: the enrich-job door's unknown/ambiguous job name.
+  | "enrich_job_not_found"
   // Issue #2488: the mesh screen door's (meshScreenDoor.ts)
   // fail-closed refusal codes — budget_denied (the S5 budget
   // door refused the paid path), price_unavailable (no stored
@@ -207,6 +213,12 @@ export interface ScheduledAgentDoorStub {
   ): Promise<{ jobId: string; runId: string; state: string; error?: string }>;
   getFeedJobSurfaceStatus(jobId: string): Promise<FeedJobSurfaceView>;
   listFeedJobSurfaceStatuses(): Promise<FeedJobSurfaceView[]>;
+  // Issue #3536 (Pipeline J3): the enrich jobs' surface on the
+  // same host — the run/manage operations above are the generic
+  // pipeline RPCs (every job on the plane, enrich included);
+  // these two are the enrich merged-status reads.
+  getEnrichJobSurfaceStatus(jobId: string): Promise<EnrichJobSurfaceView>;
+  listEnrichJobSurfaceStatuses(): Promise<EnrichJobSurfaceView[]>;
 }
 
 export interface PaymentsAgentDoorStub {
@@ -448,6 +460,130 @@ export async function manageFeedJobViaDoor(
     case "retry": {
       const run = await door.retryPipelineJob(entry.jobId, { userLogin: login });
       return { ...base, run, status: await door.getFeedJobSurfaceStatus(entry.jobId) };
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// ScheduledAgent door — the job pipeline's enrich jobs (#3536)
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve a caller's enrich-job name ("yahoo enrich",
+ * "enrich alpaca", "sp100 enrich", an exact job id) to its
+ * catalog entry. An ambiguous or unknown name is an honest
+ * enrich_job_not_found error — the door never guesses a job.
+ */
+function resolveEnrichJobOrThrow(source: string) {
+  const entry = resolveEnrichJob(source);
+  if (!entry) {
+    throw new MeshDoorError(
+      "enrich_job_not_found",
+      `No enrich job matches "${source}". Name a source with its universe ("yahoo nasdaq100 enrich", "sp100 enrich", "enrich alpaca", "enrich etrade", "enrich public") or an exact enrich job id.`,
+    );
+  }
+  return entry;
+}
+
+export interface EnrichJobRunDoorResult {
+  jobId: string;
+  label: string;
+  runId: string;
+  state: string;
+  error?: string;
+  status: EnrichJobSurfaceView;
+}
+
+/**
+ * Run one enrich job now through the pipeline host's control
+ * plane (the same generic runPipelineJob RPC every job on the
+ * plane dispatches through) and report its settled outcome +
+ * the merged status view (the same view the UX renders).
+ */
+export async function runEnrichJobViaDoor(
+  env: Env,
+  actingLogin: string | undefined | null,
+  source: string,
+): Promise<EnrichJobRunDoorResult> {
+  const login = requireActingLogin(actingLogin);
+  const entry = resolveEnrichJobOrThrow(source);
+  const door = getScheduledAgentDoor(env);
+  const run = await door.runPipelineJob(entry.jobId, { userLogin: login });
+  const status = await door.getEnrichJobSurfaceStatus(entry.jobId);
+  return {
+    jobId: entry.jobId,
+    label: entry.label,
+    runId: run.runId,
+    state: run.state,
+    ...(run.error ? { error: run.error } : {}),
+    status,
+  };
+}
+
+/** One enrich job's merged status (enriched copy + pipeline state). */
+export async function getEnrichJobStatusViaDoor(
+  env: Env,
+  actingLogin: string | undefined | null,
+  source: string,
+): Promise<EnrichJobSurfaceView> {
+  requireActingLogin(actingLogin);
+  const entry = resolveEnrichJobOrThrow(source);
+  const door = getScheduledAgentDoor(env);
+  return door.getEnrichJobSurfaceStatus(entry.jobId);
+}
+
+/** Every enrich job's merged status, in catalog order. */
+export async function listEnrichJobsViaDoor(
+  env: Env,
+  actingLogin: string | undefined | null,
+): Promise<{ jobs: EnrichJobSurfaceView[] }> {
+  requireActingLogin(actingLogin);
+  const door = getScheduledAgentDoor(env);
+  return { jobs: await door.listEnrichJobSurfaceStatuses() };
+}
+
+export type EnrichJobManagementAction = "pause" | "resume" | "cancel" | "retry";
+
+export interface EnrichJobManageDoorResult {
+  jobId: string;
+  label: string;
+  action: EnrichJobManagementAction;
+  instance?: JobInstanceRecord;
+  run?: { runId: string; state: string; error?: string };
+  status: EnrichJobSurfaceView;
+}
+
+/**
+ * Apply one management operation to an enrich job through the
+ * same control plane (the feed door's manage, transposed). The
+ * control plane's own refusals propagate unchanged.
+ */
+export async function manageEnrichJobViaDoor(
+  env: Env,
+  actingLogin: string | undefined | null,
+  source: string,
+  action: EnrichJobManagementAction,
+): Promise<EnrichJobManageDoorResult> {
+  const login = requireActingLogin(actingLogin);
+  const entry = resolveEnrichJobOrThrow(source);
+  const door = getScheduledAgentDoor(env);
+  const base = { jobId: entry.jobId, label: entry.label, action };
+  switch (action) {
+    case "pause": {
+      const instance = await door.pausePipelineJob(entry.jobId);
+      return { ...base, instance, status: await door.getEnrichJobSurfaceStatus(entry.jobId) };
+    }
+    case "cancel": {
+      const instance = await door.cancelPipelineJob(entry.jobId);
+      return { ...base, instance, status: await door.getEnrichJobSurfaceStatus(entry.jobId) };
+    }
+    case "resume": {
+      const run = await door.resumePipelineJob(entry.jobId, { userLogin: login });
+      return { ...base, run, status: await door.getEnrichJobSurfaceStatus(entry.jobId) };
+    }
+    case "retry": {
+      const run = await door.retryPipelineJob(entry.jobId, { userLogin: login });
+      return { ...base, run, status: await door.getEnrichJobSurfaceStatus(entry.jobId) };
     }
   }
 }

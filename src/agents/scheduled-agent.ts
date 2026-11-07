@@ -66,8 +66,10 @@ import { createSocialStoresFromNamespace } from "./social/durableStores";
 import {
   createScheduledAgentPipelineControl,
   declarePipelineTasks,
-  ensureScheduledAgentFeedJobs,
+  dispatchEnrichAfterFeedCompletion,
+  ensureScheduledAgentPipelineJobs,
   listPipelineCompletions,
+  pipelineEnrichJobIds,
   pipelineJobIds,
   recordPipelineCompletion,
   startPipelineJobWorkflow,
@@ -87,6 +89,17 @@ import {
   type FeedJobSurfaceView,
 } from "../services/feedPipelineJobs";
 import { createFeedDatasetAdapter } from "../data/createFeedDatasetPorts";
+// Issue #3536 (Pipeline J3): the enrich jobs' surface on this
+// host — the merged status view's composition pieces (the RPCs
+// below delegate to the same ONE control plane; no second
+// implementation of any pipeline operation exists here).
+import { buildEnrichJobRegistry } from "../services/enrichJobs";
+import {
+  buildEnrichJobSurfaceView,
+  ENRICH_PIPELINE_CATALOG,
+  type EnrichJobSurfaceView,
+} from "../services/enrichPipelineJobs";
+import { createEnrichedDatasetAdapter } from "../data/createEnrichedDatasetPorts";
 import { createSocialBriefStoreFromNamespace } from "./social/briefStore";
 import {
   createSocialPipelineStoresFromNamespace,
@@ -413,7 +426,7 @@ export class ScheduledAgent extends PortThink {
   ): Promise<{ jobId: string; runId: string; state: string; error?: string }> {
     const ctx = this.pipelineContext();
     const control = createScheduledAgentPipelineControl(ctx, opts?.userLogin);
-    await ensureScheduledAgentFeedJobs(ctx, control);
+    await ensureScheduledAgentPipelineJobs(ctx, control);
     const dispatch = await control.runJob(jobId, { trigger: "manual" });
     if (!dispatch.completion) {
       return { jobId, runId: dispatch.runId, state: dispatch.state };
@@ -431,7 +444,7 @@ export class ScheduledAgent extends PortThink {
   async pausePipelineJob(jobId: string): Promise<JobInstanceRecord> {
     const ctx = this.pipelineContext();
     const control = createScheduledAgentPipelineControl(ctx);
-    await ensureScheduledAgentFeedJobs(ctx, control);
+    await ensureScheduledAgentPipelineJobs(ctx, control);
     return control.pauseJob(jobId);
   }
 
@@ -442,7 +455,7 @@ export class ScheduledAgent extends PortThink {
   ): Promise<{ jobId: string; runId: string; state: string; error?: string }> {
     const ctx = this.pipelineContext();
     const control = createScheduledAgentPipelineControl(ctx, opts?.userLogin);
-    await ensureScheduledAgentFeedJobs(ctx, control);
+    await ensureScheduledAgentPipelineJobs(ctx, control);
     const dispatch = await control.resumeJob(jobId);
     if (!dispatch.completion) {
       return { jobId, runId: dispatch.runId, state: dispatch.state };
@@ -460,7 +473,7 @@ export class ScheduledAgent extends PortThink {
   async cancelPipelineJob(jobId: string): Promise<JobInstanceRecord> {
     const ctx = this.pipelineContext();
     const control = createScheduledAgentPipelineControl(ctx);
-    await ensureScheduledAgentFeedJobs(ctx, control);
+    await ensureScheduledAgentPipelineJobs(ctx, control);
     return control.cancelJob(jobId);
   }
 
@@ -471,7 +484,7 @@ export class ScheduledAgent extends PortThink {
   ): Promise<{ jobId: string; runId: string; state: string; error?: string }> {
     const ctx = this.pipelineContext();
     const control = createScheduledAgentPipelineControl(ctx, opts?.userLogin);
-    await ensureScheduledAgentFeedJobs(ctx, control);
+    await ensureScheduledAgentPipelineJobs(ctx, control);
     const dispatch = await control.retryJob(jobId);
     if (!dispatch.completion) {
       return { jobId, runId: dispatch.runId, state: dispatch.state };
@@ -489,7 +502,7 @@ export class ScheduledAgent extends PortThink {
   async getPipelineJobStatus(jobId: string): Promise<JobStatusView> {
     const ctx = this.pipelineContext();
     const control = createScheduledAgentPipelineControl(ctx);
-    await ensureScheduledAgentFeedJobs(ctx, control);
+    await ensureScheduledAgentPipelineJobs(ctx, control);
     return control.getJob(jobId);
   }
 
@@ -497,7 +510,7 @@ export class ScheduledAgent extends PortThink {
   async listPipelineJobs(): Promise<JobDefinition[]> {
     const ctx = this.pipelineContext();
     const control = createScheduledAgentPipelineControl(ctx);
-    await ensureScheduledAgentFeedJobs(ctx, control);
+    await ensureScheduledAgentPipelineJobs(ctx, control);
     return control.listJobs();
   }
 
@@ -505,7 +518,7 @@ export class ScheduledAgent extends PortThink {
   async getFeedJobSurfaceStatus(jobId: string): Promise<FeedJobSurfaceView> {
     const ctx = this.pipelineContext();
     const control = createScheduledAgentPipelineControl(ctx);
-    await ensureScheduledAgentFeedJobs(ctx, control);
+    await ensureScheduledAgentPipelineJobs(ctx, control);
     const entry = FEED_PIPELINE_CATALOG.find((e) => e.jobId === jobId);
     if (!entry) {
       throw new Error(
@@ -536,9 +549,51 @@ export class ScheduledAgent extends PortThink {
     return views;
   }
 
-  /** The queue consumer's intake: record one routed completion. */
+  /** One enrich job's merged surface status (dataset + pipeline, #3536). */
+  async getEnrichJobSurfaceStatus(jobId: string): Promise<EnrichJobSurfaceView> {
+    const ctx = this.pipelineContext();
+    const control = createScheduledAgentPipelineControl(ctx);
+    await ensureScheduledAgentPipelineJobs(ctx, control);
+    const entry = ENRICH_PIPELINE_CATALOG.find((e) => e.jobId === jobId);
+    if (!entry) {
+      throw new Error(
+        `ENRICH_JOB_NOT_FOUND: no enrich job with id "${jobId}" exists in the enrich catalog.`,
+      );
+    }
+    const envStrings: Record<string, string | undefined> = {};
+    for (const [key, value] of Object.entries(
+      this.env as unknown as Record<string, unknown>,
+    )) {
+      if (typeof value === "string") envStrings[key] = value;
+    }
+    return buildEnrichJobSurfaceView({
+      entry,
+      enrichedStore: createEnrichedDatasetAdapter(this.env),
+      registry: buildEnrichJobRegistry(envStrings),
+      pipeline: await control.getJob(jobId),
+      nowMs: Date.now(),
+    });
+  }
+
+  /** Every enrich job's merged surface status, in catalog order (#3536). */
+  async listEnrichJobSurfaceStatuses(): Promise<EnrichJobSurfaceView[]> {
+    const views: EnrichJobSurfaceView[] = [];
+    for (const jobId of pipelineEnrichJobIds()) {
+      views.push(await this.getEnrichJobSurfaceStatus(jobId));
+    }
+    return views;
+  }
+
+  /**
+   * The queue consumer's intake: record one routed completion —
+   * then the feed → enrich hand-off (#3536): a completed feed
+   * job dispatches the enrich job consuming it (best-effort;
+   * the recording never depends on the dispatch).
+   */
   async recordPipelineCompletion(note: PipelineCompletionNote): Promise<void> {
-    return recordPipelineCompletion(this.pipelineContext(), note);
+    const ctx = this.pipelineContext();
+    await recordPipelineCompletion(ctx, note);
+    await dispatchEnrichAfterFeedCompletion(ctx, note);
   }
 
   /** Recorded pipeline completions, newest first. */

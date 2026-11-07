@@ -38,6 +38,15 @@ import {
   FEED_PIPELINE_CATALOG,
   type FeedJobSurfaceView,
 } from "../src/services/feedPipelineJobs";
+// #3536: FeedPipelineDoorLike grew the enrich surface reads;
+// this suite's door implements them over an (empty) enriched
+// store — the enrich routes have their own suite.
+import { InMemoryEnrichedDatasetStore } from "../src/data/inMemoryEnrichedDatasetAdapter";
+import { buildEnrichJobRegistry } from "../src/services/enrichJobs";
+import {
+  ENRICH_PIPELINE_CATALOG,
+  buildEnrichJobSurfaceView,
+} from "../src/services/enrichPipelineJobs";
 import type { DataProvider, DataResult, QuoteResult } from "../src/trading/dataProviders/contract";
 import type { MarketDataResearchQuote } from "../src/types";
 import type { Env } from "../src/types";
@@ -140,6 +149,30 @@ async function makeHarness() {
       const dispatch = await control.retryJob(jobId, { trigger: "manual" });
       const outcome = await dispatch.completion;
       return { jobId, runId: dispatch.runId, state: outcome.state, error: outcome.error };
+    },
+    // #3536: the enrich surface reads the grown door interface
+    // requires (empty store ⇒ honest never-run views).
+    listEnrichJobSurfaceStatuses: async () =>
+      Promise.all(
+        ENRICH_PIPELINE_CATALOG.map(async (entry) =>
+          buildEnrichJobSurfaceView({
+            entry,
+            enrichedStore: new InMemoryEnrichedDatasetStore(),
+            registry: buildEnrichJobRegistry({}),
+            pipeline: await control.getJob(entry.jobId).catch(() => null),
+            nowMs: T0,
+          }),
+        ),
+      ),
+    getEnrichJobSurfaceStatus: async (jobId: string) => {
+      const entry = ENRICH_PIPELINE_CATALOG.find((e) => e.jobId === jobId)!;
+      return buildEnrichJobSurfaceView({
+        entry,
+        enrichedStore: new InMemoryEnrichedDatasetStore(),
+        registry: buildEnrichJobRegistry({}),
+        pipeline: await control.getJob(entry.jobId).catch(() => null),
+        nowMs: T0,
+      });
     },
   };
   return { door, datasetStore };
