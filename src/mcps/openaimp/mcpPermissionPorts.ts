@@ -218,6 +218,9 @@ export const MCP_TOOL_SCOPES: Record<string, McpScope> = {
   stock_copilot_status: "mcp:read",
   // #3588: Stock Copilot runtime tool introspection & self-explanation
   stock_copilot_introspect: "mcp:read",
+  // #3514: Stock Copilot reflection learnings & strategy evaluation
+  stock_copilot_learnings: "mcp:read",
+  stock_copilot_evaluate: "mcp:read",
   // write (10)
   manage_categories: "mcp:write",
   manage_referrals: "mcp:write",

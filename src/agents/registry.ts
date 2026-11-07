@@ -833,6 +833,8 @@ export const MESH_TOOL_FAMILIES: MeshToolFamilyEntry[] = [
       "stock_copilot_status",
       "stock_copilot_control",
       "stock_copilot_introspect",
+      "stock_copilot_learnings",
+      "stock_copilot_evaluate",
     ],
     commandSources: [{ file: "src/mcps/openaimp/meshDoorCommands.ts", kind: "readonly-name" }],
     notes:
