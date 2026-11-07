@@ -171,7 +171,7 @@ export const DEFAULT_COPILOTS: CopilotConfig[] = [
       },
     ],
     composerPlaceholder: "Ask Options Copilot (e.g. 'Screen for Bull Put spreads on NVDA with max loss <= $30', 'Best SPY Iron Condor')...",
-    sourceTab: "E*TRADE · Auto Options Research",
+    sourceTab: "Broker · Auto Options Research",
     banner: {
       icon: "🎯",
       headline: "Options Copilot Active:",
