@@ -1861,6 +1861,74 @@ export const MIGRATION_0051_JOB_ENRICHED_DATASETS: DataMigration = {
       ON job_enriched_datasets (job_id, created_at DESC, id DESC)`,
 };
 
+/**
+ * Migration 0054 — approved-free per-service quota (#3263, sub-issue
+ * of #3256; ownership COO-spr9).
+ *
+ * The #3245 unlimited-free grant needs a bound: a per-service cap per
+ * period, counted per account. agent_approved_free_quota_counts holds
+ * one row per (tenant, login, family, period) with the runs consumed
+ * in that period (a missing row reads as 0); the tenant_id is part of
+ * the key (#1069 §10 — usage in Tenant A never leaks to Tenant B).
+ * agent_approved_free_quotas holds one row per family with the current
+ * cap (seeded by migration 0055, INSERT OR IGNORE, so an operator edit
+ * survives re-ensure). agent_approved_free_quota_settings holds the
+ * single settings row (window kind + at-limit action). Additive only
+ * (new tables, no backfill): accounts with no rows have consumed
+ * nothing, and a family with no cap row reads as unconfigured.
+ */
+export const MIGRATION_0054_APPROVED_FREE_QUOTA: DataMigration = {
+  version: 54,
+  name: "0054_approved_free_quota",
+  sql: `CREATE TABLE IF NOT EXISTS agent_approved_free_quotas (
+  family TEXT PRIMARY KEY,
+  cap_runs INTEGER NOT NULL,
+  updated_at_ms INTEGER NOT NULL,
+  updated_by TEXT
+);
+CREATE TABLE IF NOT EXISTS agent_approved_free_quota_counts (
+  tenant_id TEXT NOT NULL,
+  user_login TEXT NOT NULL,
+  family TEXT NOT NULL,
+  period TEXT NOT NULL,
+  used INTEGER NOT NULL DEFAULT 0,
+  updated_at_ms INTEGER NOT NULL,
+  PRIMARY KEY (tenant_id, user_login, family, period)
+);
+CREATE TABLE IF NOT EXISTS agent_approved_free_quota_settings (
+  id TEXT PRIMARY KEY,
+  window_kind TEXT NOT NULL,
+  at_limit_action TEXT NOT NULL,
+  updated_at_ms INTEGER NOT NULL,
+  updated_by TEXT
+);`,
+};
+
+/**
+ * Migration 0055 — approved-free quota seed rows (#3263).
+ *
+ * The seed values are operator-managed seeded DATA, never a code
+ * constant: these INSERT OR IGNORE rows are the only place the
+ * decided defaults are written for a fresh store — 10 runs per
+ * service per period (owner direction 2026-11-06, matching the live
+ * #3308 free-run allowance), monthly window, at-limit per #3241
+ * decision 4 (upgrade or buy credits). An operator edit survives
+ * (INSERT OR IGNORE never overwrites), and a family with no row
+ * stays fail-closed — the gate reads the store only and treats a
+ * missing row as "no quota configured". updated_at_ms 0 marks a
+ * seed row no operator has touched yet.
+ */
+export const MIGRATION_0055_APPROVED_FREE_QUOTA_SEED: DataMigration = {
+  version: 55,
+  name: "0055_approved_free_quota_seed",
+  sql: `INSERT OR IGNORE INTO agent_approved_free_quotas (family, cap_runs, updated_at_ms, updated_by) VALUES
+  ('stock', 10, 0, NULL),
+  ('goal', 10, 0, NULL),
+  ('options', 10, 0, NULL),
+  ('strategy', 10, 0, NULL);
+INSERT OR IGNORE INTO agent_approved_free_quota_settings (id, window_kind, at_limit_action, updated_at_ms, updated_by) VALUES
+  ('default', 'month', 'upgrade_or_buy_credits', 0, NULL);`,};
+
 export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANCE,
   MIGRATION_0002_AGENT_CHAINS_SCHEDULES,
   MIGRATION_0003_AGENT_SHARD_JOBS,
@@ -1912,6 +1980,8 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0049_PLAN_PRICE_APPROVAL,
   MIGRATION_0050_USER_PROFILES,
   MIGRATION_0051_JOB_ENRICHED_DATASETS,
+  MIGRATION_0054_APPROVED_FREE_QUOTA,
+  MIGRATION_0055_APPROVED_FREE_QUOTA_SEED,
 ];
 
 function splitStatements(sqlText: string): string[] {

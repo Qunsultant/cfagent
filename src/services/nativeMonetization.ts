@@ -20,6 +20,18 @@
  *   before price resolution and before the scheduled coverage-only
  *   rule: price 0, no checkout, no coverage consumed, including
  *   recurring runs. An expired grant lapses to the normal gate.
+ * - Per-service quota for approved-free accounts (#3263): the grant
+ *   is BOUNDED — an active grant covers a run only within its
+ *   per-service quota for the family in the current period (default
+ *   10 runs per service per month, operator-managed data, seeded by
+ *   migration 0055). At the cap nothing runs over allowance (#3241
+ *   decision 4): the run is refused with an outcome-coded
+ *   at-limit decision (upgrade or buy credits, or stop when the
+ *   operator set that action) and no checkout is minted. Counts are
+ *   keyed (tenant, login, family, period) — Tenant A usage never
+ *   leaks to Tenant B. No quota port wired, or no settings row,
+ *   falls through to the normal gate (fail-closed: the Free
+ *   allowance at most, never an unverified unlimited run).
  * - Free-tier allowance (#3305): a Free account may run up to
  *   the operator-managed allowance (10 runs per product per UTC
  *   calendar month, seeded) without payment, before price
@@ -79,6 +91,12 @@ import type { PriceCatalogue, PriceFamily } from "../data/priceCataloguePorts";
 import { isUnlimitedFreeGrantActive, type UnlimitedFreeGrant } from "../data/commercialPorts";
 import { freeRunMonthKey, type FreeRunCounter } from "../data/freeRunCounterPorts";
 import {
+  approvedFreeQuotaPeriodKey,
+  type ApprovedFreeQuota,
+  type ApprovedFreeQuotaAtLimitAction,
+} from "../data/approvedFreeQuotaPorts";
+import { logAspectEvent } from "../aspects/loggingAspect";
+import {
   claimRedemptionKey,
   x402NonceRedemptionKey,
   x402ProofRedemptionKey,
@@ -136,6 +154,19 @@ export interface NativeMonetizationConfig {
    */
   freeRunCounter?: FreeRunCounter | null;
   /**
+   * The approved-free per-service quota (#3263). When wired, an
+   * active unlimited-free grant covers a run only within its
+   * per-service quota for the family in the current period
+   * (default 10 runs per service per month, operator-managed
+   * data, seeded by migration 0055); at the cap the run is
+   * refused with the outcome-coded at-limit decision. When
+   * absent, or when no settings row is stored, the grant falls
+   * through to the normal gate (fail-closed: the Free allowance
+   * at most, never an unverified unlimited run). The quota is
+   * operator data; absence is never a reason to guess a bound.
+   */
+  approvedFreeQuota?: ApprovedFreeQuota | null;
+  /**
    * The checkout ports bundle, or null when nothing is configured.
    * Null means: no checkout can be minted and no payment can be
    * confirmed — coverage and flag-OFF paths still work, and a
@@ -156,8 +187,8 @@ export const NATIVE_PAYMENT_DISCLOSURE =
   "One charge per run-request. Shards, stages, retries and re-serves are free. If a paid run fails, its automatic compensation is a one-time replacement-run credit — a cash refund is never issued automatically. Cash refunds exist only as an operator-initiated action, granted only with operator approval. A payment success page is never proof of payment; payment is confirmed only by re-reading provider state.";
 
 export type NativeGateDecision =
-  | { allowed: true; status: string; runRequestId: string; priceUSD: number; paidVia?: string }
-  | { allowed: false; status: string; httpStatus: 402; runRequestId: string; priceUSD: number; family: NativeScreenerFamily; checkout?: unknown; disclosure?: string; reason?: string };
+  | { allowed: true; status: string; runRequestId: string; priceUSD: number; paidVia?: string; outcomeCode?: string }
+  | { allowed: false; status: string; httpStatus: 402; runRequestId: string; priceUSD: number; family: NativeScreenerFamily; checkout?: unknown; disclosure?: string; reason?: string; outcomeCode?: string; nextStep?: ApprovedFreeQuotaAtLimitAction };
 
 interface NativeLedgerRow {
   runRequestId: string;
@@ -268,9 +299,74 @@ export class NativeMonetizationGate {
     // unlimited_free_grant) and consumeCoverage no-ops on it.
     // The paid row makes a later confirmPaid return already_paid
     // through the existing path.
+    //
+    // Issue #3263: the grant is BOUNDED by the per-service quota.
+    // An active grant covers the run only within its quota for the
+    // family in the current period (default 10 runs per service per
+    // month, operator-managed data). At the cap nothing runs over
+    // allowance (#3241 decision 4): the run is refused with the
+    // outcome-coded at-limit decision and no checkout is minted.
+    // The quota is keyed (tenant, login, family, period) — the
+    // tenant is the server-resolved account tenant, never a
+    // client-supplied value. No quota port wired, no settings row,
+    // or no resolvable tenant falls through to the normal gate
+    // (fail-closed: the Free allowance at most, never an
+    // unverified unlimited run). A quota STORE error degrades the
+    // same way — the failure is logged as a structured aspect
+    // event and the run falls through to the normal gate, so a
+    // store blip never fails a run and never grants an unverified
+    // free run (tech-standards §13 safe degradation). Grant-covered
+    // runs never touch the free-run counter, and at the cap there
+    // is no fall-through to it either — the quota is the bound
+    // for the grant.
     if (isUnlimitedFreeGrantActive(account.unlimitedFreeGrant, run.nowMs ?? Date.now())) {
-      this.byRun.set(run.id, { runRequestId: run.id, userId: account.userId, tenantId: run.tenantId ?? account.tenantId, family: run.family, trigger: run.trigger, priceUSD: 0, status: "paid", paidVia: "unlimited_free_grant" });
-      return { allowed: true, status: "paid", runRequestId: run.id, priceUSD: 0, paidVia: "unlimited_free_grant" };
+      const quota = this.config.approvedFreeQuota ?? null;
+      try {
+        const settings = quota ? await quota.getSettings() : null;
+        const tenantId = account.tenantId ?? run.tenantId ?? "";
+        if (quota && settings && tenantId !== "") {
+          const period = approvedFreeQuotaPeriodKey(run.nowMs ?? Date.now(), settings.windowKind);
+          const consumed = await quota.consumeQuotaRun({
+            tenantId,
+            login: account.userId,
+            family: run.family,
+            period,
+          });
+          if (consumed.allowed) {
+            this.byRun.set(run.id, { runRequestId: run.id, userId: account.userId, tenantId: run.tenantId ?? account.tenantId, family: run.family, trigger: run.trigger, priceUSD: 0, status: "paid", paidVia: "approved_free_quota" });
+            return { allowed: true, status: "paid", runRequestId: run.id, priceUSD: 0, paidVia: "approved_free_quota", outcomeCode: "SUCCESS_APPROVED_FREE_QUOTA_COVERED" };
+          }
+          const outcomeCode =
+            settings.atLimitAction === "stop"
+              ? "FAILURE_APPROVED_FREE_QUOTA_EXHAUSTED_STOP"
+              : "FAILURE_APPROVED_FREE_QUOTA_EXHAUSTED";
+          return {
+            allowed: false,
+            status: "approved_free_quota_exhausted",
+            httpStatus: 402,
+            runRequestId: run.id,
+            priceUSD: 0,
+            family: run.family,
+            outcomeCode,
+            nextStep: settings.atLimitAction,
+            reason: `Approved-free quota for ${run.family} exhausted in the current ${settings.windowKind} period (${consumed.used}/${consumed.cap}). Nothing runs over allowance (#3241 decision 4).`,
+          };
+        }
+      } catch (err) {
+        // Safe degradation (tech-standards §13): the quota store
+        // could not be read — log the failure structurally and fall
+        // through to the normal gate. No free run is granted on a
+        // store error, and the run itself is not failed by it.
+        logAspectEvent({
+          aspect: "ApprovedFreeQuota",
+          operationName: "gate-quota-check",
+          code: "FAILURE_APPROVED_FREE_QUOTA_UNAVAILABLE",
+          level: "warn",
+          message: "Approved-free quota store read failed; falling through to the normal gate (fail-closed).",
+          error: err instanceof Error ? err.message : String(err),
+          metadata: { tenantId: account.tenantId ?? run.tenantId ?? "", login: account.userId, family: run.family },
+        });
+      }
     }
     // Issue #3305: the Free-tier allowance — 10 runs per product
     // per UTC calendar month, operator-managed and changeable.
@@ -297,6 +393,25 @@ export class NativeMonetizationGate {
         this.byRun.set(run.id, { runRequestId: run.id, userId: account.userId, tenantId: run.tenantId ?? account.tenantId, family: run.family, trigger: run.trigger, priceUSD: 0, status: "paid", paidVia: "free_run_allowance" });
         return { allowed: true, status: "paid", runRequestId: run.id, priceUSD: 0, paidVia: "free_run_allowance" };
       }
+    }
+    // Issue #3263 (CI fix): the operator-issued grant as the LAST
+    // free fall-through. The quota branch above bounds the grant when
+    // the quota system can enforce the bound; the Free allowance
+    // covers next when it can. Only when neither can cover the run
+    // does the grant itself cover it at price 0 — before price
+    // resolution, consuming nothing, exactly as #3245 pinned. This
+    // restores the grant runs that fell through to priceFor (which
+    // throws with no catalogue) and to the checkout mint (which
+    // throws with no ports). Ordering note: this SUPERSEDES the
+    // #3245 grant-first order — the grant no longer precedes the
+    // Free allowance, so a grant run spends the allowance first when
+    // the quota is unavailable (see the updated bypass test in
+    // tests/native_monetization_gate.test.ts). The grant is still
+    // verified operator data (stored grant + expiry check); the
+    // quota is its bound, not its verification.
+    if (isUnlimitedFreeGrantActive(account.unlimitedFreeGrant, run.nowMs ?? Date.now())) {
+      this.byRun.set(run.id, { runRequestId: run.id, userId: account.userId, tenantId: run.tenantId ?? account.tenantId, family: run.family, trigger: run.trigger, priceUSD: 0, status: "paid", paidVia: "unlimited_free_grant" });
+      return { allowed: true, status: "paid", runRequestId: run.id, priceUSD: 0, paidVia: "unlimited_free_grant" };
     }
     const priceUSD = await this.priceFor(run.family);
 

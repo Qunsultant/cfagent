@@ -22,6 +22,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { resolveOutcome } from "../src/outcomes/outcomeAspects";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -43,6 +44,14 @@ const apiState = vi.hoisted(() => ({
   etradeAuthenticated: false,
   oauthStarted: 0,
   plans: [] as { id: string; name: string; priceUSD: number; periodDays: number; includedRuns: number; trialDays: number | null }[],
+  quota: null as null | {
+    userId: string;
+    tenantId: string | null;
+    settings: { windowKind: "month" | "week"; atLimitAction: string; updatedAtMs: number; updatedBy: string | null } | null;
+    period: string | null;
+    families: { family: string; cap: number | null; used: number; remaining: number | null; period: string | null }[];
+    grant: { active: boolean; expiresAtMs: number | null };
+  },
 }));
 
 vi.mock("../src/client/firstRunApi", async (importOriginal) => {
@@ -107,6 +116,17 @@ vi.mock("../src/client/commercialApi", async (importOriginal) => {
     subscriptionTrial: vi.fn(async () => {
       throw new Error("trial not exercised in the #2471 walk");
     }),
+  };
+});
+
+// Issue #3263: the step-5 summary fetches the caller's own
+// approved-free quota; the mock serves the quota state so the
+// summary block renders for real (a null quota reads as no grant).
+vi.mock("../src/client/approvedFreeQuotaApi", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/client/approvedFreeQuotaApi")>();
+  return {
+    ...actual,
+    getApprovedFreeQuota: vi.fn(async () => apiState.quota),
   };
 });
 
@@ -183,6 +203,19 @@ beforeEach(() => {
   apiState.plans = [
     { id: "plan-starter", name: "Starter", priceUSD: 10, periodDays: 30, includedRuns: 5, trialDays: 7 },
   ];
+  apiState.quota = {
+    userId: "second-user",
+    tenantId: "tenant-1",
+    settings: { windowKind: "month", atLimitAction: "upgrade_or_buy_credits", updatedAtMs: 1700000000000, updatedBy: "op1" },
+    period: "2026-11",
+    families: [
+      { family: "stock", cap: 10, used: 3, remaining: 7, period: "2026-11" },
+      { family: "goal", cap: 10, used: 0, remaining: 10, period: "2026-11" },
+      { family: "options", cap: 10, used: 10, remaining: 0, period: "2026-11" },
+      { family: "strategy", cap: null, used: 0, remaining: null, period: "2026-11" },
+    ],
+    grant: { active: true, expiresAtMs: null },
+  };
 });
 
 afterEach(async () => {
@@ -262,6 +295,76 @@ describe("FirstRunScreen (#2471)", () => {
       expect(completed()).toBe(1);
       expect(isFirstRunComplete("screen-user-2")).toBe(true);
       expect(apiState.stateCalls.some((c) => c.completed === true)).toBe(true);
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+    }
+  });
+
+  // Issue #3263: the step-5 summary carries the caller's own
+  // approved-free quota block (per-family remaining, windowed).
+  it("step 5 summary shows the approved-free quota block for an active grant", async () => {
+    const { container, root } = await renderScreen({ userLogin: "screen-user-2q" });
+    try {
+      click(container, "Continue");
+      await flush();
+      click(container, "Skip trial for now");
+      await flush();
+      click(container, "Continue without connecting");
+      await flush();
+      click(container, "Save");
+      await flush();
+      expect(container.textContent ?? "").toContain("Step 5 of 5");
+      expect(container.textContent ?? "").toContain(
+        "Approved-free runs remaining: stock 7, goal 10, options 0, strategy — (per month)",
+      );
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+    }
+  });
+
+  it("step 5 summary reads no grant, never zero, when the quota read is null", async () => {
+    apiState.quota = null;
+    const { container, root } = await renderScreen({ userLogin: "screen-user-2n" });
+    try {
+      click(container, "Continue");
+      await flush();
+      click(container, "Skip trial for now");
+      await flush();
+      click(container, "Continue without connecting");
+      await flush();
+      click(container, "Save");
+      await flush();
+      expect(container.textContent ?? "").toContain("Step 5 of 5");
+      expect(container.textContent ?? "").toContain("Approved-free grant: No approved-free grant.");
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+    }
+  });
+
+  it("step 5 summary renders the catalog-coded expired message for an expired grant (#3263, AOP)", async () => {
+    apiState.quota = { ...apiState.quota, grant: { active: false, expiresAtMs: 1_700_000_000_000 } };
+    const { container, root } = await renderScreen({ userLogin: "screen-user-2e" });
+    try {
+      click(container, "Continue");
+      await flush();
+      click(container, "Skip trial for now");
+      await flush();
+      click(container, "Continue without connecting");
+      await flush();
+      click(container, "Save");
+      await flush();
+      expect(container.textContent ?? "").toContain("Step 5 of 5");
+      // AOP: the message comes FROM the catalog, never hardcoded.
+      expect(container.textContent ?? "").toContain(
+        resolveOutcome("FAILURE_APPROVED_FREE_QUOTA_EXPIRED").businessMessage,
+      );
+      expect(container.textContent ?? "").not.toContain("No approved-free grant.");
     } finally {
       await act(async () => {
         root.unmount();
