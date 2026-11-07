@@ -20,8 +20,8 @@ describe("AgentChatTabContent options view wiring (#2563)", () => {
     expect(chatSrc).toContain("Options Copilot");
   });
 
-  it("binds sourceTab to E*TRADE · Auto Options Research in options view for backend execution", () => {
-    expect(chatSrc).toContain("E*TRADE · Auto Options Research");
+  it("binds sourceTab to Broker · Auto Options Research in options view for backend execution", () => {
+    expect(chatSrc).toContain("Broker · Auto Options Research");
   });
 
   it("provides tailored options quick-action chips in options view", () => {
