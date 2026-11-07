@@ -459,13 +459,96 @@ J1–J7 is the **single converged workflow engine** across all platform activiti
 | **Deliver (J6)** | Deliver candidate lists to Chat UI, Slack alerts, or email digest. | Emit interactive payoff cards to Chat UI and options research desks. | Route orders to Alpaca Paper; broadcast telemetry to chat stream and activity ledger. | Dispatch reports to Chat, Slack, Webhooks, or cloud object stores. |
 
 ### 10.3 Sub-Issue Roadmap Alignment (Epic #3533)
-- **J1 ([#3534](https://github.com/Qunsultant/cfagent/issues/3534)) [MERGED]:** Core job model, checkpoint cursors, execution modes, CloudEvents status stream, queue pub/sub substrate.
-- **J2 ([#3535](https://github.com/Qunsultant/cfagent/issues/3535)) [IN PROGRESS]:** Feed jobs through Stock Copilot (`yahoo-nasdaq100-quotes`, `alpaca-nasdaq100-quotes`, etc.) over persisted local datasets.
-- **J3 ([#3536](https://github.com/Qunsultant/cfagent/issues/3536)):** Standalone Enrich job consuming persisted feed output.
-- **J4 ([#3537](https://github.com/Qunsultant/cfagent/issues/3537)):** Standalone Analyze job consuming enriched vectors.
-- **J5 ([#3538](https://github.com/Qunsultant/cfagent/issues/3538)):** Standalone Generate job producing multi-format reports and order intents.
-- **J6 ([#3539](https://github.com/Qunsultant/cfagent/issues/3539)):** Standalone Deliver job routing to omnichannel endpoints.
-- **J7 ([#3540](https://github.com/Qunsultant/cfagent/issues/3540)):** Full chain composition executing the 5 stages as one unified, schedulable, checkpointed pipeline.
+All 7 sub-issues of Epic #3533 have been implemented, verified, and merged into `main`:
+- **J1 ([#3534](https://github.com/Qunsultant/cfagent/issues/3534)) [MERGED - PR #3545]:** Core job model, checkpoint cursors, execution modes, CloudEvents status stream, queue pub/sub substrate.
+- **J2 ([#3535](https://github.com/Qunsultant/cfagent/issues/3535)) [MERGED - PR #3576]:** Feed jobs through Stock Copilot (`yahoo-nasdaq100-quotes`, `alpaca-nasdaq100-quotes`, etc.) over persisted local datasets.
+- **J3 ([#3536](https://github.com/Qunsultant/cfagent/issues/3536)) [MERGED - PR #3598]:** Standalone Enrich jobs consuming persisted feed output, computing multi-factor technical indicators.
+- **J4 ([#3537](https://github.com/Qunsultant/cfagent/issues/3537)) [MERGED - PR #3615]:** Standalone Analyze jobs consuming enriched vectors, evaluating strategy patterns and portfolio CVaR risk sizing.
+- **J5 ([#3538](https://github.com/Qunsultant/cfagent/issues/3538)) [MERGED - PR #3623]:** Standalone Generate jobs producing multi-format analytical reports and candidate order proposals.
+- **J6 ([#3539](https://github.com/Qunsultant/cfagent/issues/3539)) [MERGED - PR #3650]:** Standalone Deliver jobs routing artifacts to omnichannel endpoints (Chat, Slack, Webhooks) and trade proposals.
+- **J7 ([#3540](https://github.com/Qunsultant/cfagent/issues/3540)) [MERGED - PR #3680]:** Full chain composition (`feed → enrich → analyze → generate → deliver`) executed as a single schedulable, nested, checkpointed pipeline per lineage with frontier roll-up and stage controls.
+
+---
+
+### 10.4 Current State Analysis: Stock Copilot Usage of J1–J7
+
+#### 10.4.1 The Two-Layer Architectural Reality
+Stock Copilot interacts with the J1–J7 ecosystem on two distinct operational layers:
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│ Layer 1: Copilot Tool / Chat Surface (YES — 100% Accessible)           │
+│                                                                        │
+│ • Stock Copilot has all 24 J1–J7 MCP tools registered in its catalog   │
+│ • Inspects, triggers, pauses, resumes, and manages pipeline chains    │
+│ • Dynamically categorizes and explains the 5 stages via introspection  │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+┌───────────────────────────────────▼────────────────────────────────────┐
+│ Layer 2: Autonomous Scheduled Trading Loop (NO — In-Process Monolith)  │
+│                                                                        │
+│ • runStockCopilotCycle() executes as an in-process Think scheduled task│
+│ • Direct in-memory data hand-offs (loadBars → signals → sizing → wire) │
+│ • Bypasses J1–J7 checkpointed queue-backed persisted datasets          │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+1. **Layer 1: Conversational & MCP Tool Surface (Active & Operational):**
+   - Stock Copilot’s runtime tool catalog carries all 24 J1–J7 tools (`run_feed_job`, `get_feed_job_status`, `list_feed_jobs`, `manage_feed_job`, `run_enrich_job`, `run_analyze_job`, `run_generate_job`, `run_deliver_job`, `run_pipeline_chain`, `get_pipeline_chain_status`, `list_pipeline_chains`, `manage_pipeline_chain`, etc.) through the ScheduledAgent mesh door (`src/agents/orchestrator/meshDoors.ts`).
+   - When a user in chat asks the Copilot to run, inspect, or manage data pipelines, it resolves and executes these MCP commands directly.
+   - Its introspection engine (`stock_copilot_introspect`) inspects the runtime catalog and dynamically maps available tools to the 5 pipeline stages.
+
+2. **Layer 2: Autonomous Scheduled Trading Loop (In-Process Legacy):**
+   - When the Stock Copilot runs its background scheduled trading cadence (via `ScheduledAgent`'s Think alarm in `scheduledTasksCopilot.ts`), it executes `runStockCopilotCycle` from `src/services/stockCopilot.ts`.
+   - This autonomous loop is currently a self-contained in-process monolith that does **not** invoke the J1–J7 pipeline chain engine.
+
+#### 10.4.2 Stage-by-Stage Implementation Matrix
+
+| Pipeline Stage | J1–J7 Distributed Substrate Capability | Is Scheduled Copilot Loop Using It? | Current Stock Copilot Implementation |
+|---|---|:---:|---|
+| **J1: Job & Checkpoint Model** ([#3534](https://github.com/Qunsultant/cfagent/issues/3534)) | Durable cursors, checkpoint records, CloudEvents status streams, coded failure classification. | **No** | Operational state stored directly in Durable Object SQLite tables (`copilot_positions`, `stock_copilot_activity`, `copilot_learnings`). |
+| **J2: Feed Jobs** ([#3535](https://github.com/Qunsultant/cfagent/issues/3535)) | Lineage-based feed jobs (`alpaca-nasdaq100-quotes`, `alpaca-sp100-quotes`) with persisted raw datasets and hash deduplication. | **No** | Fetches live bars directly on every tick via `deps.loadBars(symbol)` against Alpaca REST, bypassing the persisted feed dataset store. |
+| **J3: Enrich Jobs** ([#3536](https://github.com/Qunsultant/cfagent/issues/3536)) | Consumes persisted raw feed, computes technical indicators (RSI, SMA, MACD, ATR), and saves enriched datasets. | **No** | Computes pattern indicator series in-memory during the tick via `src/services/patternSignals.ts`. |
+| **J4: Analyze Jobs** ([#3537](https://github.com/Qunsultant/cfagent/issues/3537)) | Consumes enriched dataset, evaluates trading strategies and portfolio risk, writes analyzed dataset. | **No** | Evaluates rules in-memory via `evaluateLatestPatternSignal()` and sizes positions in-process via `cvarOptimizer.ts`. |
+| **J5: Generate Jobs** ([#3538](https://github.com/Qunsultant/cfagent/issues/3538)) | Consumes analyzed dataset, generates multi-format analytical reports and candidate order proposals. | **No** | Constructs order payloads in-process via `buildBracketOrderShape()` and `shapeCopilotSessionOrder()`. |
+| **J6: Deliver Jobs** ([#3539](https://github.com/Qunsultant/cfagent/issues/3539)) | Consumes generated artifacts, delivers to omnichannel destinations (Chat, Slack, Webhooks) and trade proposals. | **No** | Directly calls `deps.platform.placeOrderRemote!` (Alpaca API) from inside the loop tick. |
+| **J7: Pipeline Chains** ([#3540](https://github.com/Qunsultant/cfagent/issues/3540) / PR #3680) | Nested end-to-end chain composition (`feed → enrich → analyze → generate → deliver`) as a single schedulable lineage with frontier roll-up. | **No** | The loop is scheduled via `ScheduledAgent`'s in-process Think interval timer, not as a `PipelineChain`. |
+
+#### 10.4.3 Why the Scheduled Loop Is Not Yet Using J1–J7
+
+1. **Two-Phase Architecture Plan (Epic #3533 Sequencing):**
+   - The roadmap explicitly phased the work: **Phase 1** built and stabilized the J1–J7 engine and tools across the 5 landing stages; **Phase 2** (the follow-up migration) transitions existing application workloads (Stock Screening and Stock Copilot) onto that substrate. J7 was only just finalized in PR #3680.
+2. **In-Memory Speed vs. Persisted Data Handoffs:**
+   - Stock Copilot’s current loop evaluates in-memory arrays in milliseconds (`loadBars` $\rightarrow$ `evaluateSignal` $\rightarrow$ `sizePosition` $\rightarrow$ `placeOrder`).
+   - J1–J7 enforces strict persistent hand-offs: every stage writes its dataset to storage, and downstream stages refuse with explicit codes (`ENRICH_INPUT_MISSING`, `ANALYZE_INPUT_MISSING`, `GENERATE_INPUT_MISSING`, `DELIVER_INPUT_MISSING`) if upstream persisted data does not exist. Migrating Stock Copilot requires wiring its inputs and outputs to these durable datasets.
+3. **High-Frequency Cadence vs. Batch Orchestration:**
+   - The Copilot loop is configured to run at fast cadences (1-minute or 3-minute intervals during active market hours). J1–J7 was initially proven on batch quote lineages. Transitioning the autonomous loop requires running the J7 pipeline chain on high-frequency interval triggers without intermediate I/O bottlenecking.
+
+#### 10.4.4 Convergence Roadmap (Phase 2)
+To complete convergence, the autonomous trading loop will be refactored to execute via the J7 chain engine:
+1. Re-wire `runStockCopilotCycleForInstance` to invoke `runPipelineChain("alpaca-nasdaq100-quotes-pipeline")` (or the tenant's configured universe pipeline).
+2. Utilize the persisted `analyze` stage dataset for pattern signals and CVaR portfolio risk allocations.
+3. Allow the `deliver` stage to handle order submission through the broker seam, giving every trading cycle full auditability, checkpoint restartability, and frontier pause/resume/cancel controls.
+
+---
+
+## 11. Advanced Algorithmic Execution Extensions
+
+### 11.1 ThinkorSwim (TOS)-Style Multi-Bracket Ladder & Grid Orders (Issue #3673, PR #3674)
+To support advanced scaling and grid trading across detected technical ranges, Stock Copilot and algorithmic agents gained TOS-style multi-bracket ladder order capabilities:
+- **`generateBracketLadderRungs` (`src/services/bracketLadder.ts`):** Computes tiered limit entry rungs supporting:
+  - **Ascending ladders:** Breakout/momentum scaling as price moves up by fixed dollar steps (e.g. $1.00 increments).
+  - **Descending ladders:** Pullback accumulation within support zones.
+  - **Independent Bracket Exits:** Automatically attaches dedicated take-profit (+$X or +Y%) and stop-loss (-$X or -Y%) brackets to each individual rung.
+- **`buildLadderFromPatternRange`:** Anchors ladder bounds and protective stops directly to technical pattern levels (support/resistance channels).
+- **MCP Tool Suite:** Exposes `alpaca_place_bracket_ladder` and `alpaca_cancel_bracket_ladder` with fail-closed validation, unique batch client order IDs (`${ladderId}-r${rung}`), and single-call batch cancellation.
+
+### 11.2 Broker Neutrality, Session Switching & PlatformAdmin BYOK (Issue #3668, PR #3670)
+- **Live/Paper Mode Switching:** Fixed mode evaluation to dynamically inspect `effectiveEnv === 'PROD'` and trigger instant reconnection across Alpaca and E*TRADE without page reloads.
+- **Platform Key Auto-Connect:** Allows users to connect directly using pre-configured platform/deployment credentials without manual key input dialogs.
+- **BYOK Provider Credentials in PlatformAdmin:** Moved Bring-Your-Own-Key management to PlatformAdmin (`/?tab=platform-admin&view=data-providers`), isolating tenant-level credential administration.
+- **Broker-Neutral Proposal Presentation:** Dynamically resolves and stamps active tenant broker IDs (`alpaca` / `etrade`) on all drafted trade proposals.
+
 
 
 
