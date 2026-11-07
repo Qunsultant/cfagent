@@ -28,6 +28,7 @@ import {
   postFeedJobAction,
   postFeedRun,
   postGenerateJobAction,
+  postPipelineChainAction,
   providerDisplayName,
   type AnalyzeJobActionName,
   type AnalyzeJobView,
@@ -37,6 +38,8 @@ import {
   type DataProviderView,
   type DeliverJobActionName,
   type DeliverJobView,
+  type PipelineChainActionName,
+  type PipelineChainView,
   type EnrichJobActionName,
   type EnrichJobView,
   type FeedDatasetStatusView,
@@ -397,6 +400,31 @@ export function DataProvidersPanel() {
       await load();
     } catch (err: any) {
       setError(err?.message || `Failed to ${action} deliver job "${job.jobId}".`);
+    } finally {
+      setActingId(null);
+    }
+  };
+
+  // #3540: run / manage one of the provider's composed pipeline
+  // chains (or one stage inside its run) through the pipeline
+  // host — the deliver action's shape, transposed to the
+  // composition.
+  const runChainAction = async (
+    view: DataProviderView,
+    chain: PipelineChainView,
+    action: PipelineChainActionName,
+    stage?: string
+  ) => {
+    setActingId(view.id);
+    setError("");
+    try {
+      await postPipelineChainAction(view.id, chain.jobId, action, stage);
+      toast.success(
+        `Pipeline chain "${chain.jobId}" ${action}${stage ? ` (${stage})` : ""} dispatched.`
+      );
+      await load();
+    } catch (err: any) {
+      setError(err?.message || `Failed to ${action} pipeline chain "${chain.jobId}".`);
     } finally {
       setActingId(null);
     }
@@ -1197,6 +1225,158 @@ export function DataProvidersPanel() {
                                 Retry
                               </Button>
                             )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              },
+            },
+            {
+              // #3540: the provider's composed pipeline chains —
+              // the end-to-end roll-up (per-stage states + the
+              // current frontier) with chain-level and
+              // frontier-stage management, reusing the feed-job
+              // cell classes (no new stylesheet).
+              key: "pipelineChains",
+              header: "Pipeline",
+              cellClassName: "dpp-col-feed-cell",
+              render: (view) => {
+                const chains = view.pipelineChains ?? [];
+                if (chains.length === 0) {
+                  return <span className="dpp-feed-none">No pipeline</span>;
+                }
+                const busy = actingId === view.id;
+                return (
+                  <div className="dpp-feed-jobs">
+                    {chains.map((chain) => {
+                      const state = chain.pipeline?.state ?? "unknown";
+                      const frontierStage = chain.frontier
+                        ? chain.stages.find((s) => s.stage === chain.frontier)
+                        : undefined;
+                      return (
+                        <div key={chain.jobId} className="dpp-feed-job">
+                          <div className="dpp-feed-head">
+                            <span className="dpp-feed-label">{chain.label}</span>
+                            <span className={`dpp-feed-state dpp-feed-state-${state}`}>
+                              {state}
+                            </span>
+                          </div>
+                          <div className="dpp-feed-meta">
+                            {chain.pipeline?.lastRunStatus ? (
+                              <span>
+                                {`Last run: ${chain.pipeline.lastRunStatus} ${fmtDataProviderTime(chain.pipeline.lastRunAt)}`}
+                              </span>
+                            ) : (
+                              <span>Never run</span>
+                            )}
+                            <span>
+                              {chain.stages
+                                .map((s) => `${s.stage}: ${s.status}`)
+                                .join(" · ")}
+                            </span>
+                            {chain.frontier && (
+                              <span>{`Frontier: ${chain.frontier}`}</span>
+                            )}
+                            {frontierStage?.error && (
+                              <span className="dpp-feed-error">{frontierStage.error}</span>
+                            )}
+                            {chain.pipeline?.lastError && (
+                              <span className="dpp-feed-error">{chain.pipeline.lastError}</span>
+                            )}
+                            {chain.nextScheduledRun && (
+                              <span>{`Next run: ${fmtDataProviderTime(chain.nextScheduledRun)}`}</span>
+                            )}
+                          </div>
+                          <div className="dpp-feed-actions">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              disabled={busy}
+                              onClick={() => void runChainAction(view, chain, "run")}
+                            >
+                              Run
+                            </Button>
+                            {(state === "running" || state === "queued") && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                disabled={busy}
+                                onClick={() => void runChainAction(view, chain, "pause")}
+                              >
+                                Pause
+                              </Button>
+                            )}
+                            {state === "paused" && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                disabled={busy}
+                                onClick={() => void runChainAction(view, chain, "resume")}
+                              >
+                                Resume
+                              </Button>
+                            )}
+                            {(state === "running" || state === "queued" || state === "paused") && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                disabled={busy}
+                                onClick={() => void runChainAction(view, chain, "cancel")}
+                              >
+                                Cancel
+                              </Button>
+                            )}
+                            {(state === "completed" || state === "failed" || state === "cancelled") && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                disabled={busy}
+                                onClick={() => void runChainAction(view, chain, "retry")}
+                              >
+                                Retry
+                              </Button>
+                            )}
+                            {frontierStage && frontierStage.status === "running" && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                disabled={busy}
+                                onClick={() =>
+                                  void runChainAction(view, chain, "stage_pause", frontierStage.stage)
+                                }
+                              >
+                                {`Pause ${frontierStage.stage}`}
+                              </Button>
+                            )}
+                            {frontierStage && frontierStage.status === "stopped" && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                disabled={busy}
+                                onClick={() =>
+                                  void runChainAction(view, chain, "stage_resume", frontierStage.stage)
+                                }
+                              >
+                                {`Resume ${frontierStage.stage}`}
+                              </Button>
+                            )}
+                            {frontierStage &&
+                              frontierStage.status !== "completed" &&
+                              frontierStage.status !== "cancelled" &&
+                              frontierStage.status !== "not-run" && (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  disabled={busy}
+                                  onClick={() =>
+                                    void runChainAction(view, chain, "stage_cancel", frontierStage.stage)
+                                  }
+                                >
+                                  {`Cancel ${frontierStage.stage}`}
+                                </Button>
+                              )}
                           </div>
                         </div>
                       );

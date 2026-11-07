@@ -218,6 +218,10 @@ export const MCP_TOOL_SCOPES: Record<string, McpScope> = {
   // merged surface views, like the generate reads above.
   get_deliver_job_status: "mcp:read",
   list_deliver_jobs: "mcp:read",
+  // #3540: the pipeline-chain reads — pure inspect of the host's
+  // end-to-end roll-up views, like the deliver reads above.
+  get_pipeline_chain_status: "mcp:read",
+  list_pipeline_chains: "mcp:read",
   // #2349 (mesh S6): the TradingAgent door's reads (accounts,
   // positions, quote) and the ReportAssetAgent door's list/get —
   // pure reads of the acting user's own data through their agents.
@@ -273,6 +277,13 @@ export const MCP_TOOL_SCOPES: Record<string, McpScope> = {
   // the job's run state (pause/resume/cancel/retry).
   run_deliver_job: "mcp:write",
   manage_deliver_job: "mcp:write",
+  // #3540: the pipeline-chain writes — running a chain executes
+  // the lineage's five stages end-to-end (pulls, derives, and
+  // delivers); managing one changes the chain's run state or
+  // one of its stages' states (pause/resume/cancel/retry,
+  // stage_pause/stage_resume/stage_cancel).
+  run_pipeline_chain: "mcp:write",
+  manage_pipeline_chain: "mcp:write",
   // #2351 (mesh S7): the BrowserAgent/SlackAgent doors' deliveries —
   // each posts a snap to the configured Slack destination (an
   // outbound side effect; no caller-supplied webhook is accepted).

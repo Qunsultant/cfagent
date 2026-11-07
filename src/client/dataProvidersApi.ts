@@ -107,6 +107,8 @@ export interface DataProviderView {
   generateJobs?: GenerateJobView[];
   /** #3539: this provider's deliver jobs as pipeline surface views. */
   deliverJobs?: DeliverJobView[];
+  /** #3540: this provider's composed pipeline chains as end-to-end roll-up views. */
+  pipelineChains?: PipelineChainView[];
   /**
    * #3530: this provider's direct feed-job status (the S1 block) —
    * null when no feed job is registered for the provider. Optional
@@ -586,6 +588,82 @@ export async function postDeliverJobAction(
   await send<unknown>(
     `/api/data-providers/${encodeURIComponent(id)}/deliver-jobs/${encodeURIComponent(jobId)}/${action}`,
     { method: "POST" }
+  );
+}
+
+/** One stage of a pipeline chain's end-to-end roll-up (#3540). */
+export interface PipelineChainStageView {
+  stage: "feed" | "enrich" | "analyze" | "generate" | "deliver";
+  jobId: string;
+  nodePath: string;
+  status:
+    | "completed"
+    | "running"
+    | "failed"
+    | "stopped"
+    | "cancelled"
+    | "pending"
+    | "not-run";
+  units: number;
+  completedUnits: number;
+  error: string | null;
+  jobState: string | null;
+  jobLastRunStatus: string | null;
+  jobLastRunAt: string | null;
+}
+
+/**
+ * One composed pipeline chain's end-to-end surface status
+ * (#3540): per-stage states + the current frontier + the chain
+ * run's state — the same view the copilot tools return (one
+ * source of truth).
+ */
+export interface PipelineChainView {
+  jobId: string;
+  feedJobId: string;
+  enrichJobId: string;
+  analyzeJobId: string;
+  generateJobId: string;
+  deliverJobId: string;
+  sourceId: string;
+  dataset: string;
+  label: string;
+  stages: PipelineChainStageView[];
+  frontier: "feed" | "enrich" | "analyze" | "generate" | "deliver" | null;
+  pipeline: {
+    state: string;
+    currentRunId: string | null;
+    lastRunStatus: string | null;
+    lastRunAt: string | null;
+    lastError: string | null;
+  } | null;
+  nextScheduledRun: string | null;
+}
+
+export type PipelineChainActionName =
+  | FeedJobActionName
+  | "stage_pause"
+  | "stage_resume"
+  | "stage_cancel";
+
+/** Run / manage one pipeline chain (or one of its stages) through the pipeline host (#3540). */
+export async function postPipelineChainAction(
+  id: string,
+  jobId: string,
+  action: PipelineChainActionName,
+  stage?: string
+): Promise<void> {
+  await send<unknown>(
+    `/api/data-providers/${encodeURIComponent(id)}/pipeline-chains/${encodeURIComponent(jobId)}/${action}`,
+    {
+      method: "POST",
+      ...(stage
+        ? {
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ stage }),
+          }
+        : {}),
+    }
   );
 }
 

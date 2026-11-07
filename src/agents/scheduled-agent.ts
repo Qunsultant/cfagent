@@ -64,6 +64,7 @@ import { createSocialStoresFromNamespace } from "./social/durableStores";
 // ./scheduledTasksPipeline.ts (the scheduledTasksCopilot.ts
 // pattern transposed); the RPC surface below delegates to it.
 import {
+  buildScheduledAgentChainSurfaceView,
   createScheduledAgentPipelineControl,
   declarePipelineTasks,
   dispatchAnalyzeAfterEnrichCompletion,
@@ -73,12 +74,16 @@ import {
   ensureScheduledAgentPipelineJobs,
   listPipelineCompletions,
   pipelineAnalyzeJobIds,
+  pipelineChainJobIds,
+  pipelineChainStageNodePath,
   pipelineDeliverJobIds,
   pipelineEnrichJobIds,
   pipelineGenerateJobIds,
   pipelineJobIds,
   recordPipelineCompletion,
+  refreshScheduledAgentChainDefinition,
   startPipelineJobWorkflow,
+  type PipelineChainSurfaceView,
   type PipelineCompletionNote,
   type ScheduledTasksPipelineContext,
 } from "./scheduledTasksPipeline";
@@ -731,6 +736,143 @@ export class ScheduledAgent extends PortThink {
       views.push(await this.getDeliverJobSurfaceStatus(jobId));
     }
     return views;
+  }
+
+  /** One pipeline chain's end-to-end surface status (#3540): per-stage states + the frontier, one query. */
+  async getPipelineChainSurfaceStatus(
+    jobId: string,
+  ): Promise<PipelineChainSurfaceView> {
+    const ctx = this.pipelineContext();
+    const control = createScheduledAgentPipelineControl(ctx);
+    await ensureScheduledAgentPipelineJobs(ctx, control);
+    return buildScheduledAgentChainSurfaceView(ctx, control, jobId);
+  }
+
+  /** Every pipeline chain's end-to-end surface status, in catalog order (#3540). */
+  async listPipelineChainSurfaceStatuses(): Promise<PipelineChainSurfaceView[]> {
+    const views: PipelineChainSurfaceView[] = [];
+    for (const jobId of pipelineChainJobIds()) {
+      views.push(await this.getPipelineChainSurfaceStatus(jobId));
+    }
+    return views;
+  }
+
+  /**
+   * Run one pipeline chain end-to-end (#3540). The chain's
+   * definition is refreshed from the stage jobs' stored
+   * definitions first, so a stage reconfigured through the
+   * control plane is what the chain runs.
+   */
+  async runPipelineChain(
+    jobId: string,
+    opts?: { userLogin?: string },
+  ): Promise<{ jobId: string; runId: string; state: string; error?: string }> {
+    const ctx = this.pipelineContext();
+    const control = createScheduledAgentPipelineControl(ctx, opts?.userLogin);
+    await ensureScheduledAgentPipelineJobs(ctx, control);
+    await refreshScheduledAgentChainDefinition(ctx, control, jobId);
+    const dispatch = await control.runJob(jobId, { trigger: "manual" });
+    if (!dispatch.completion) {
+      return { jobId, runId: dispatch.runId, state: dispatch.state };
+    }
+    const outcome = await dispatch.completion;
+    return {
+      jobId,
+      runId: outcome.runId,
+      state: outcome.state,
+      ...(outcome.error ? { error: outcome.error } : {}),
+    };
+  }
+
+  /** Resume a paused pipeline chain from its persisted checkpoint (#3540). */
+  async resumePipelineChain(
+    jobId: string,
+    opts?: { userLogin?: string },
+  ): Promise<{ jobId: string; runId: string; state: string; error?: string }> {
+    const ctx = this.pipelineContext();
+    const control = createScheduledAgentPipelineControl(ctx, opts?.userLogin);
+    await ensureScheduledAgentPipelineJobs(ctx, control);
+    await refreshScheduledAgentChainDefinition(ctx, control, jobId);
+    const dispatch = await control.resumeJob(jobId);
+    if (!dispatch.completion) {
+      return { jobId, runId: dispatch.runId, state: dispatch.state };
+    }
+    const outcome = await dispatch.completion;
+    return {
+      jobId,
+      runId: outcome.runId,
+      state: outcome.state,
+      ...(outcome.error ? { error: outcome.error } : {}),
+    };
+  }
+
+  /** Retry a pipeline chain's last run as a new run (#3540). */
+  async retryPipelineChain(
+    jobId: string,
+    opts?: { userLogin?: string },
+  ): Promise<{ jobId: string; runId: string; state: string; error?: string }> {
+    const ctx = this.pipelineContext();
+    const control = createScheduledAgentPipelineControl(ctx, opts?.userLogin);
+    await ensureScheduledAgentPipelineJobs(ctx, control);
+    await refreshScheduledAgentChainDefinition(ctx, control, jobId);
+    const dispatch = await control.retryJob(jobId);
+    if (!dispatch.completion) {
+      return { jobId, runId: dispatch.runId, state: dispatch.state };
+    }
+    const outcome = await dispatch.completion;
+    return {
+      jobId,
+      runId: outcome.runId,
+      state: outcome.state,
+      ...(outcome.error ? { error: outcome.error } : {}),
+    };
+  }
+
+  /** Stop (pause) one stage of a pipeline chain's run — resumable, never a failure (#3540). */
+  async stopPipelineChainStage(
+    jobId: string,
+    stage: string,
+  ): Promise<JobInstanceRecord> {
+    const ctx = this.pipelineContext();
+    const control = createScheduledAgentPipelineControl(ctx);
+    await ensureScheduledAgentPipelineJobs(ctx, control);
+    return control.stopStage(jobId, pipelineChainStageNodePath(ctx, jobId, stage));
+  }
+
+  /** Resume the stopped stage of a pipeline chain's run from its checkpoint (#3540). */
+  async resumePipelineChainStage(
+    jobId: string,
+    stage: string,
+    opts?: { userLogin?: string },
+  ): Promise<{ jobId: string; runId: string; state: string; error?: string }> {
+    const ctx = this.pipelineContext();
+    const control = createScheduledAgentPipelineControl(ctx, opts?.userLogin);
+    await ensureScheduledAgentPipelineJobs(ctx, control);
+    const dispatch = await control.resumeStage(
+      jobId,
+      pipelineChainStageNodePath(ctx, jobId, stage),
+    );
+    if (!dispatch.completion) {
+      return { jobId, runId: dispatch.runId, state: dispatch.state };
+    }
+    const outcome = await dispatch.completion;
+    return {
+      jobId,
+      runId: outcome.runId,
+      state: outcome.state,
+      ...(outcome.error ? { error: outcome.error } : {}),
+    };
+  }
+
+  /** Cancel one stage of a pipeline chain's run — terminal for that stage; its downstream never proceeds (#3540). */
+  async cancelPipelineChainStage(
+    jobId: string,
+    stage: string,
+  ): Promise<JobInstanceRecord> {
+    const ctx = this.pipelineContext();
+    const control = createScheduledAgentPipelineControl(ctx);
+    await ensureScheduledAgentPipelineJobs(ctx, control);
+    return control.cancelStage(jobId, pipelineChainStageNodePath(ctx, jobId, stage));
   }
 
   /**

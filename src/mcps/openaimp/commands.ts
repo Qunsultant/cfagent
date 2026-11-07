@@ -151,6 +151,12 @@ import {
   ListDeliverJobsCommand,
   ManageDeliverJobCommand,
 } from "./deliverJobCommands";
+import {
+  RunPipelineChainCommand,
+  GetPipelineChainStatusCommand,
+  ListPipelineChainsCommand,
+  ManagePipelineChainCommand,
+} from "./chainJobCommands";
 
 import { searchPlatformKnowledge } from "../../services/platformKnowledge";
 // Issue #3342: the "search" contract's AI-search attempt reads the
@@ -1850,6 +1856,16 @@ export class McpToolFactory {
     this.registerTool(new GetDeliverJobStatusCommand());
     this.registerTool(new ListDeliverJobsCommand());
     this.registerTool(new ManageDeliverJobCommand());
+    // Issue #3540: the pipeline-chain doors — run / status /
+    // list / manage the composed pipeline chains (feed →
+    // enrich → analyze → generate → deliver as one job) through
+    // the same ScheduledAgent host control plane, including
+    // per-stage pause/resume/cancel inside a chain run. Same
+    // identity discipline as the deliver-job doors.
+    this.registerTool(new RunPipelineChainCommand());
+    this.registerTool(new GetPipelineChainStatusCommand());
+    this.registerTool(new ListPipelineChainsCommand());
+    this.registerTool(new ManagePipelineChainCommand());
     this.registerTool(new CheckPaymentBudgetCommand());
     this.registerTool(new GetPaymentsOverviewCommand());
 
