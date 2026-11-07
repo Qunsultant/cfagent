@@ -1830,6 +1830,37 @@ CREATE TABLE IF NOT EXISTS agent_profile_idempotency_keys (
 );`,
 };
 
+/**
+ * Migration 0051 — enriched datasets (#3536, Pipeline J3).
+ *
+ * The enrich stage's persisted output: one row per enrich run,
+ * keyed by enrich job id, the full artifact in artifact_json
+ * (the feed-dataset family's pattern) with status and row count
+ * denormalized for the latestUsable filter. Declared in the
+ * foundation's Drizzle schema (jobEnrichedDatasets) — the same
+ * shape in every residency (the DO residency's declared v1
+ * schema migration carries the identical DDL).
+ */
+export const MIGRATION_0051_JOB_ENRICHED_DATASETS: DataMigration = {
+  version: 51,
+  name: "0051_job_enriched_datasets",
+  sql: `CREATE TABLE IF NOT EXISTS job_enriched_datasets (
+      id TEXT PRIMARY KEY,
+      created_at TEXT NOT NULL,
+      job_id TEXT NOT NULL,
+      feed_job_id TEXT NOT NULL,
+      source_id TEXT NOT NULL,
+      dataset TEXT NOT NULL,
+      run_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      as_of TEXT NOT NULL,
+      rows_persisted INTEGER NOT NULL,
+      artifact_json TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_job_enriched_datasets_job
+      ON job_enriched_datasets (job_id, created_at DESC, id DESC)`,
+};
+
 export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANCE,
   MIGRATION_0002_AGENT_CHAINS_SCHEDULES,
   MIGRATION_0003_AGENT_SHARD_JOBS,
@@ -1880,6 +1911,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0048_TOP_UP_DRAFTS,
   MIGRATION_0049_PLAN_PRICE_APPROVAL,
   MIGRATION_0050_USER_PROFILES,
+  MIGRATION_0051_JOB_ENRICHED_DATASETS,
 ];
 
 function splitStatements(sqlText: string): string[] {

@@ -1395,3 +1395,29 @@ export const jobRunRecords = sqliteTable("job_run_records", {
   descriptor: text("descriptor"),
   artifactRefsJson: text("artifact_refs_json"),
 });
+
+/**
+ * Pipeline J3 (#3536) — the enriched-dataset store's table: one
+ * row per enrich run, keyed by enrich job id (the derived
+ * product's precise identity — no (source, dataset) bucket
+ * sharing). The full artifact rides in artifact_json (the
+ * feed-dataset family's pattern); status and row count are
+ * denormalized columns so latestUsable can filter without
+ * parsing every row. The migration's DDL also carries the
+ * (job_id, created_at DESC, id DESC) history index.
+ * Timestamps are ISO text — residency parity with the feed
+ * family's records. DDL authority: migration 0051.
+ */
+export const jobEnrichedDatasets = sqliteTable("job_enriched_datasets", {
+  id: text("id").primaryKey(),
+  createdAt: text("created_at").notNull(),
+  jobId: text("job_id").notNull(),
+  feedJobId: text("feed_job_id").notNull(),
+  sourceId: text("source_id").notNull(),
+  dataset: text("dataset").notNull(),
+  runId: text("run_id").notNull(),
+  status: text("status").notNull(),
+  asOf: text("as_of").notNull(),
+  rowsPersisted: integer("rows_persisted").notNull(),
+  artifactJson: text("artifact_json").notNull(),
+});
