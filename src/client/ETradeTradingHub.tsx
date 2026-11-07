@@ -1141,7 +1141,7 @@ export function ETradeTradingHub({
         ]);
         return;
       }
-      const diagnosticsUrl = diagnosticsEndpoint(brokerToUse);
+      const diagnosticsUrl = brokerToUse && brokerToUse !== selectedBroker ? diagnosticsEndpoint(brokerToUse) : diagnosticsEndpoint();
       if (!diagnosticsUrl) {
         setDiagnostics({
           broker: brokerToUse,
