@@ -10,6 +10,10 @@
  *   GET  /data-providers/:id                          one config + its routes
  *   GET  /data-providers/:id/feed                     feed-job status + the local-copy read (#3530 S1)
  *   POST /data-providers/:id/feed-run                 run the provider's feed job now (#3530 S1)
+ *   GET  /data-providers/:id/feed-jobs                the provider's feed jobs as pipeline jobs (#3535)
+ *   POST /data-providers/:id/feed-jobs/:jobId/:action run|pause|resume|cancel|retry a feed job (#3535)
+ *   GET  /data-providers/:id/enrich-jobs              the provider's enrich jobs as pipeline jobs (#3536)
+ *   POST /data-providers/:id/enrich-jobs/:jobId/:action run|pause|resume|cancel|retry an enrich job (#3536)
  *   POST /data-providers/:id/register|configure|verify|enable|disable|deprovision
  *
  * (Paths are the DO-internal spellings: src/server.ts strips the
@@ -108,6 +112,11 @@ import {
   FEED_PIPELINE_CATALOG,
   type FeedJobSurfaceView,
 } from "../../services/feedPipelineJobs";
+import { ENRICH_JOB_CODES } from "../../services/enrichJobs";
+import {
+  ENRICH_PIPELINE_CATALOG,
+  type EnrichJobSurfaceView,
+} from "../../services/enrichPipelineJobs";
 import type { JobInstanceRecord } from "../../data/jobPipelinePorts";
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
@@ -176,6 +185,9 @@ export interface DataProviderRoutesContext {
 export interface FeedPipelineDoorLike {
   listFeedJobSurfaceStatuses(): Promise<FeedJobSurfaceView[]>;
   getFeedJobSurfaceStatus(jobId: string): Promise<FeedJobSurfaceView>;
+  // #3536: the enrich jobs' surface reads on the same host door.
+  listEnrichJobSurfaceStatuses(): Promise<EnrichJobSurfaceView[]>;
+  getEnrichJobSurfaceStatus(jobId: string): Promise<EnrichJobSurfaceView>;
   runPipelineJob(
     jobId: string,
     opts?: { userLogin?: string },
@@ -314,7 +326,8 @@ async function providerView(
   sql: SqlStorage,
   capturePort?: ProviderCaptureStore | null,
   feed?: unknown,
-  feedJobs?: unknown
+  feedJobs?: unknown,
+  enrichJobs?: unknown
 ) {
   const adapter = registry.get(record.id);
   const serving = routeViews.some(
@@ -358,6 +371,11 @@ async function providerView(
     // next scheduled run) the panel renders. Empty when the
     // provider has no feed jobs or the pipeline host is unbound.
     feedJobs: feedJobs ?? [],
+    // #3536: every enrich job for this provider as a pipeline
+    // job — the merged surface views (enriched copy + pipeline
+    // state + lineage + next scheduled run). Same rule as
+    // feedJobs: empty when none or the host is unbound.
+    enrichJobs: enrichJobs ?? [],
   };
 }
 
@@ -515,6 +533,31 @@ async function feedJobsViewFor(
   }
 }
 
+/**
+ * Every enrich job for one provider, as merged surface views
+ * from the pipeline host (#3536). Same best-effort read rule as
+ * feedJobsViewFor: an unreachable host yields an empty list —
+ * never a fabricated status.
+ */
+async function enrichJobsViewFor(
+  ctx: DataProviderRoutesContext,
+  providerId: DataProviderId,
+): Promise<EnrichJobSurfaceView[]> {
+  const door = feedPipelineDoorFor(ctx);
+  if (!door) return [];
+  try {
+    const all = await door.listEnrichJobSurfaceStatuses();
+    return all.filter((v) => v.sourceId === providerId);
+  } catch (error) {
+    structuredLog.warn("data_providers.enrich_jobs_status_read_failed", {
+      message: `[data-providers] enrich-jobs status read for "${providerId}" failed: ${error instanceof Error ? error.message : String(error)}`,
+      providerId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return [];
+  }
+}
+
 export async function handleDataProviderRoutes(
   request: Request,
   url: URL,
@@ -534,7 +577,12 @@ export async function handleDataProviderRoutes(
   const feedJobActionMatch = path.match(
     /^\/data-providers\/([^/]+)\/feed-jobs\/([^/]+)\/([a-z]+)$/,
   );
-  if (!isList && !oneMatch && !actionMatch && !feedRunMatch && !feedJobsMatch && !feedJobActionMatch) return null;
+  // #3536: the pipeline enrich-jobs surface (list + per-job actions).
+  const enrichJobsMatch = path.match(/^\/data-providers\/([^/]+)\/enrich-jobs$/);
+  const enrichJobActionMatch = path.match(
+    /^\/data-providers\/([^/]+)\/enrich-jobs\/([^/]+)\/([a-z]+)$/,
+  );
+  if (!isList && !oneMatch && !actionMatch && !feedRunMatch && !feedJobsMatch && !feedJobActionMatch && !enrichJobsMatch && !enrichJobActionMatch) return null;
 
   try {
     // ---- reads ----
@@ -568,6 +616,7 @@ export async function handleDataProviderRoutes(
               ctx.capturePort,
               await feedViewFor(ctx, c.id),
               await feedJobsViewFor(ctx, c.id),
+              await enrichJobsViewFor(ctx, c.id),
             )
           )
         ),
@@ -593,6 +642,7 @@ export async function handleDataProviderRoutes(
           ctx.capturePort,
           await feedViewFor(ctx, record.id),
           await feedJobsViewFor(ctx, record.id),
+          await enrichJobsViewFor(ctx, record.id),
         ),
         routes: routeViews.filter(
           (r) => r.primaryProviderId === id || r.gapFillProviderId === id
@@ -772,6 +822,87 @@ export async function handleDataProviderRoutes(
           {
             error: error instanceof Error ? error.message : String(error),
             code: "FEED_JOB_ACTION_REFUSED",
+          },
+          { status: 409 },
+        );
+      }
+    }
+
+    // #3536 — the provider's enrich jobs as pipeline surface
+    // views (the same merged views the copilot tools return).
+    if (request.method === "GET" && enrichJobsMatch) {
+      const id = decodeURIComponent(enrichJobsMatch[1]) as DataProviderId;
+      return Response.json({ jobs: await enrichJobsViewFor(ctx, id) });
+    }
+
+    // #3536 — run / pause / resume / cancel / retry one enrich
+    // job through the pipeline host's control plane (the same
+    // door + gates as the feed-job actions above, transposed).
+    if (request.method === "POST" && enrichJobActionMatch) {
+      if (!ctx.userLogin) {
+        return Response.json(
+          { error: "A verified session is required to manage an enrich job." },
+          { status: 401 },
+        );
+      }
+      const id = decodeURIComponent(enrichJobActionMatch[1]) as DataProviderId;
+      const jobId = decodeURIComponent(enrichJobActionMatch[2]);
+      const action = enrichJobActionMatch[3];
+      const entry = ENRICH_PIPELINE_CATALOG.find((e) => e.jobId === jobId);
+      if (!entry || entry.sourceId !== id) {
+        return Response.json(
+          {
+            error: `No enrich job "${jobId}" is registered for provider "${id}".`,
+            code: ENRICH_JOB_CODES.jobNotFound,
+          },
+          { status: 404 },
+        );
+      }
+      if (!["run", "pause", "resume", "cancel", "retry"].includes(action)) {
+        return Response.json(
+          { error: `Unknown enrich-job action "${action}".` },
+          { status: 404 },
+        );
+      }
+      const door = feedPipelineDoorFor(ctx);
+      if (!door) {
+        return Response.json(
+          {
+            error:
+              "The pipeline host is not bound on this deployment; the action was refused rather than dispatched through an unwired path.",
+            code: "ENRICH_JOB_NOT_CONFIGURED",
+          },
+          { status: 500 },
+        );
+      }
+      try {
+        const result =
+          action === "run"
+            ? await door.runPipelineJob(jobId, { userLogin: ctx.userLogin })
+            : action === "pause"
+              ? await door.pausePipelineJob(jobId)
+              : action === "resume"
+                ? await door.resumePipelineJob(jobId, { userLogin: ctx.userLogin })
+                : action === "cancel"
+                  ? await door.cancelPipelineJob(jobId)
+                  : await door.retryPipelineJob(jobId, { userLogin: ctx.userLogin });
+        ctx.recordAudit("data_provider.enrich_job_action", "orchestrator", {
+          actor: ctx.userLogin,
+          providerId: id,
+          jobId,
+          action,
+        });
+        return Response.json({
+          jobId,
+          action,
+          result,
+          status: await door.getEnrichJobSurfaceStatus(jobId),
+        });
+      } catch (error) {
+        return Response.json(
+          {
+            error: error instanceof Error ? error.message : String(error),
+            code: "ENRICH_JOB_ACTION_REFUSED",
           },
           { status: 409 },
         );

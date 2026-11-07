@@ -30,9 +30,11 @@ import {
   D1JobRunRecordStore,
 } from "../data/d1JobRunRecordAdapter";
 import { createJobPipelineMessaging } from "../messaging/createJobPipelineMessaging";
-import { createFeedStepRegistry } from "../services/feedPipelineJobs";
+import { createPipelineStepRegistry } from "../services/enrichPipelineJobs";
 import { buildFeedJobRegistry } from "../services/feedJobs";
+import { buildEnrichJobRegistry } from "../services/enrichJobs";
 import { createFeedDatasetAdapter } from "../data/createFeedDatasetPorts";
+import { createEnrichedDatasetAdapter } from "../data/createEnrichedDatasetPorts";
 import { D1IndexListStore } from "../data/d1IndexListAdapter";
 import {
   createIndexMembershipService,
@@ -82,39 +84,52 @@ export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
       latestRun: (jobId) => runRecords.latestByJob(jobId),
     },
     publisher: messaging.ports?.publisher ?? null,
-    // #3535: the workflow residency composes the same feed step
+    // #3535/#3536: the workflow residency composes THE same step
     // registry as the ScheduledAgent host (one registry, every
-    // residency — createFeedStepRegistry includes the J1
-    // built-ins). Residency rule: the dataset and index-list
-    // stores are D1 here, and the universe step runs (its service
-    // is a network fetch), but capture-wired PROVIDERS need a DO
-    // host's storage (the capture deps' blob + SQL handles), so
-    // providerFor is unwired in this residency and a feed pull
-    // dispatched here refuses FEED_JOB_NOT_CONFIGURED by name
-    // rather than fetching uncaptured. Feed pulls execute on the
+    // residency — the composed registry includes the J1
+    // built-ins, the feed steps, and enrich.apply). Residency
+    // rule: the dataset and index-list stores are D1 here, and
+    // the universe step runs (its service is a network fetch),
+    // but capture-wired PROVIDERS need a DO host's storage (the
+    // capture deps' blob + SQL handles), so providerFor is
+    // unwired in this residency and a feed pull dispatched here
+    // refuses FEED_JOB_NOT_CONFIGURED by name rather than
+    // fetching uncaptured. Feed pulls execute on the
     // ScheduledAgent host residency, which owns that wiring.
-    steps: createFeedStepRegistry({
-      registry: buildFeedJobRegistry(envStrings),
-      providerFor: () => undefined,
-      universeStore,
-      datasetStore: createFeedDatasetAdapter(env),
-      indexRefresh: {
-        store: universeStore,
-        service: createIndexMembershipService({
-          wikipedia: createWikipediaIndexMembershipAdapter(fetchHtml),
-          holdings: {
-            getMembers: async () => {
-              throw new Error(
-                "holdings fetcher not bound — the Wikipedia refresh path never calls it",
-              );
+    // The enrich step's stores are both D1, so an enrich run
+    // dispatched here executes fully in this residency.
+    steps: createPipelineStepRegistry(
+      {
+        registry: buildFeedJobRegistry(envStrings),
+        providerFor: () => undefined,
+        universeStore,
+        datasetStore: createFeedDatasetAdapter(env),
+        indexRefresh: {
+          store: universeStore,
+          service: createIndexMembershipService({
+            wikipedia: createWikipediaIndexMembershipAdapter(fetchHtml),
+            holdings: {
+              getMembers: async () => {
+                throw new Error(
+                  "holdings fetcher not bound — the Wikipedia refresh path never calls it",
+                );
+              },
             },
-          },
-        }),
+          }),
+        },
+        shardsFor: async (jobId) =>
+          (await stores.definitions.getDefinition(jobId))?.config.processing
+            .shards ?? [],
       },
-      shardsFor: async (jobId) =>
-        (await stores.definitions.getDefinition(jobId))?.config.processing
-          .shards ?? [],
-    }),
+      {
+        registry: buildEnrichJobRegistry(envStrings),
+        datasetStore: createFeedDatasetAdapter(env),
+        enrichedStore: createEnrichedDatasetAdapter(env),
+        shardsFor: async (jobId) =>
+          (await stores.definitions.getDefinition(jobId))?.config.processing
+            .shards ?? [],
+      },
+    ),
     invocation: "workflow-shard",
   };
 }
