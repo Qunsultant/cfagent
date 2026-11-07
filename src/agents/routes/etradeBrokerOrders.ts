@@ -18,6 +18,14 @@ import { orderPayloadHash } from "./orderPayloadHash";
 import type { EtradeBrokerRouteContext } from "./etradeBroker";
 import type { PolicyVerdict } from "../../services/riskPolicyEngine";
 
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/routes/etradeBrokerOrders",
+});
+
 /**
  * #1726: the execute route's rejection tail, moved here from the
  * dispatcher (the #995 family home for execute completion tails).
@@ -116,7 +124,12 @@ export async function completeEtradeOrderPreview(args: {
       );
     }
   } catch (policyErr) {
-    console.warn("[OrchestratorAgent] Autopilot policy evaluation failed at preview:", policyErr);
+    structuredLog.warn("etradeBrokerOrders.autopilot_policy_evaluation_failed", {
+      message: "[OrchestratorAgent] Autopilot policy evaluation failed at preview:",
+      stage: "preview",
+      orderId: preview.orderId,
+      error: policyErr instanceof Error ? policyErr.message : String(policyErr),
+    });
     ctx.audit("autopilot.policy_check_failed", "trading", {
       stage: "preview",
       orderId: preview.orderId,
@@ -142,7 +155,11 @@ export async function completeEtradeOrderPreview(args: {
       });
     }
   } catch (schedErr) {
-    console.warn("[OrchestratorAgent] Note: could not schedule expiration timer:", schedErr);
+    structuredLog.warn("etradeBrokerOrders.expiration_timer_schedule_failed", {
+      message: "[OrchestratorAgent] Note: could not schedule expiration timer:",
+      orderId: preview.orderId,
+      error: schedErr instanceof Error ? schedErr.message : String(schedErr),
+    });
   }
 
   // Dispatch Pre-Trade Approval Ticket Block Kit card to Slack (Strict HITL Gate)
@@ -161,7 +178,11 @@ export async function completeEtradeOrderPreview(args: {
       expiresAt: preview.expiresAt,
     });
   } catch (slackErr) {
-    console.warn("[OrchestratorAgent] Note: could not dispatch Slack pre-trade ticket:", slackErr);
+    structuredLog.warn("etradeBrokerOrders.slack_pre_trade_ticket_dispatch_failed", {
+      message: "[OrchestratorAgent] Note: could not dispatch Slack pre-trade ticket:",
+      orderId: preview.orderId,
+      error: slackErr instanceof Error ? slackErr.message : String(slackErr),
+    });
   }
 
   return Response.json(preview);
@@ -293,7 +314,11 @@ export async function completeEtradeOrderExecution(args: {
         humanApproved: decision === "approved",
       });
     } catch (snapErr) {
-      console.warn("[OrchestratorAgent] Note: could not send transaction snap to Slack:", snapErr);
+      structuredLog.warn("etradeBrokerOrders.slack_transaction_snap_failed", {
+        message: "[OrchestratorAgent] Note: could not send transaction snap to Slack:",
+        orderId,
+        error: snapErr instanceof Error ? snapErr.message : String(snapErr),
+      });
     }
   }
 

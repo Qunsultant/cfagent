@@ -70,6 +70,13 @@ import {
   type ResearchExecutionPath,
   type ResearchTaskStore,
 } from "../services/researchTaskLedger";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/research-agent",
+});
 
 /**
  * Issue #2327 (Agent Mesh S3, programme #2225 G8/G14): the retired
@@ -304,15 +311,16 @@ export class ResearchAgent extends PortThink {
     try {
       const recovered = await this.recoverInterruptedResearchTasks();
       if (recovered.length > 0) {
-        console.warn(
-          `[ResearchAgent] Start-up recovery marked ${recovered.length} interrupted research task(s) as failed → escalated.`
-        );
+        structuredLog.warn("researchAgent.on_start_recovery_interrupted", {
+          message: `[ResearchAgent] Start-up recovery marked ${recovered.length} interrupted research task(s) as failed → escalated.`,
+          recoveredCount: recovered.length,
+        });
       }
     } catch (error) {
-      console.error(
-        "[ResearchAgent][onStart] Interrupted-run recovery failed:",
-        error
-      );
+      structuredLog.error("researchAgent.on_start_recovery_failed", {
+        message: "[ResearchAgent][onStart] Interrupted-run recovery failed:",
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
@@ -512,9 +520,10 @@ export class ResearchAgent extends PortThink {
         );
         universeDeps = bindNasdaqUniverseDeps(universeProvider, universeBundle.runContext);
       } catch (err) {
-        console.warn(
-          `[research-agent] universe deps unavailable, listings degrade to empty: ${err instanceof Error ? err.message : String(err)}`
-        );
+        structuredLog.warn("researchAgent.run_research_universe_deps_unavailable", {
+          message: `[research-agent] universe deps unavailable, listings degrade to empty: ${err instanceof Error ? err.message : String(err)}`,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
       const provider = new EtradeResearchDataProvider(
         this.env,
@@ -603,9 +612,10 @@ export class ResearchAgent extends PortThink {
         );
         universeDeps = bindNasdaqUniverseDeps(universeProvider, universeBundle.runContext);
       } catch (err) {
-        console.warn(
-          `[research-agent] universe deps unavailable, listings degrade to empty: ${err instanceof Error ? err.message : String(err)}`
-        );
+        structuredLog.warn("researchAgent.run_discovery_universe_deps_unavailable", {
+          message: `[research-agent] universe deps unavailable, listings degrade to empty: ${err instanceof Error ? err.message : String(err)}`,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
       const provider = new EtradeResearchDataProvider(
         this.env,
@@ -694,7 +704,10 @@ export class ResearchAgent extends PortThink {
       await putReportPdf(this.env, this.ctx.storage, RESEARCH_PDF_LATEST_KEY, fileName, bytes);
       return perRunKey;
     } catch (err) {
-      console.warn("[ResearchAgent] PDF store failed:", err);
+      structuredLog.warn("researchAgent.store_research_pdf_failed", {
+        message: "[ResearchAgent] PDF store failed:",
+        error: err instanceof Error ? err.message : String(err),
+      });
       return null;
     }
   }
@@ -759,7 +772,10 @@ export class ResearchAgent extends PortThink {
       outcome.xlsxStatus = "generated";
     } catch (err) {
       outcome.xlsxError = codedMessage("FAILURE_REPORT_XLSX_GENERATION", err instanceof Error ? err.message : String(err));
-      console.error("[ResearchAgent] Research XLSX generation failed:", outcome.xlsxError);
+      structuredLog.error("researchAgent.generate_and_store_research_artifacts_xlsx_generation_failed", {
+        message: "[ResearchAgent] Research XLSX generation failed:",
+        error: outcome.xlsxError,
+      });
     }
 
     try {
@@ -782,7 +798,10 @@ export class ResearchAgent extends PortThink {
       outcome.csvStatus = "generated";
     } catch (err) {
       outcome.csvError = codedMessage("FAILURE_REPORT_CSV_GENERATION", err instanceof Error ? err.message : String(err));
-      console.error("[ResearchAgent] Research CSV generation failed:", outcome.csvError);
+      structuredLog.error("researchAgent.generate_and_store_research_artifacts_csv_generation_failed", {
+        message: "[ResearchAgent] Research CSV generation failed:",
+        error: outcome.csvError,
+      });
     }
 
     return outcome;
@@ -836,9 +855,9 @@ export class ResearchAgent extends PortThink {
     const login =
       explicitResearchLogin(userLogin) ?? explicitResearchLogin(report.userLogin);
     if (!login) {
-      console.warn(
-        "[ResearchAgent] Pre-entry refresh skipped: no explicit userLogin and the report records no owner."
-      );
+      structuredLog.warn("researchAgent.refresh_idea_quotes_pre_entry_refresh_skipped", {
+        message: "[ResearchAgent] Pre-entry refresh skipped: no explicit userLogin and the report records no owner.",
+      });
       return flags;
     }
     try {
@@ -876,9 +895,10 @@ export class ResearchAgent extends PortThink {
         );
         universeDeps = bindNasdaqUniverseDeps(universeProvider, universeBundle.runContext);
       } catch (err) {
-        console.warn(
-          `[research-agent] universe deps unavailable, listings degrade to empty: ${err instanceof Error ? err.message : String(err)}`
-        );
+        structuredLog.warn("researchAgent.refresh_idea_quotes_universe_deps_unavailable", {
+          message: `[research-agent] universe deps unavailable, listings degrade to empty: ${err instanceof Error ? err.message : String(err)}`,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
       const provider = new EtradeResearchDataProvider(
         this.env,
@@ -914,7 +934,10 @@ export class ResearchAgent extends PortThink {
         }
       }
     } catch (err) {
-      console.warn("[ResearchAgent] Pre-entry refresh failed:", err);
+      structuredLog.warn("researchAgent.refresh_idea_quotes_pre_entry_refresh_failed", {
+        message: "[ResearchAgent] Pre-entry refresh failed:",
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
     return flags;
   }
@@ -1018,9 +1041,10 @@ export class ResearchAgent extends PortThink {
         );
         universeDeps = bindNasdaqUniverseDeps(universeProvider, universeBundle.runContext);
       } catch (err) {
-        console.warn(
-          `[research-agent] universe deps unavailable, listings degrade to empty: ${err instanceof Error ? err.message : String(err)}`
-        );
+        structuredLog.warn("researchAgent.evaluate_run_universe_deps_unavailable", {
+          message: `[research-agent] universe deps unavailable, listings degrade to empty: ${err instanceof Error ? err.message : String(err)}`,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
       const provider = new EtradeResearchDataProvider(
         this.env,
@@ -1111,9 +1135,10 @@ export class ResearchAgent extends PortThink {
           }
         }
       } catch (err) {
-        console.warn(
-          `[telemetry] realization projection failed (ignored): ${err instanceof Error ? err.message : String(err)}`,
-        );
+        structuredLog.warn("researchAgent.evaluate_due_runs_telemetry_projection_failed", {
+          message: `[telemetry] realization projection failed (ignored): ${err instanceof Error ? err.message : String(err)}`,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
       return evaluation;
     } catch {

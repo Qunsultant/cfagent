@@ -142,6 +142,13 @@ import {
   ensureSubscriptionSchema,
 } from "../../data/createSubscriptionPorts";
 import type { McpToolContext } from "../../patterns/interfaces";
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/orchestrator/meshScreenDoor",
+});
 
 /* ------------------------------------------------------------------ */
 /* Result shape                                                        */
@@ -367,9 +374,10 @@ export async function runStockScreenViaDoor(
   if (ndRequested) {
     const gate = resolveScreenerNdGateFromEnv(ctx.env);
     if (gate.invalid) {
-      console.warn(
-        `[mesh-screen-door] ${screenerNdConfigErrorEvent()}: SCREENER_ND_MODE value ${JSON.stringify(gate.raw)} is not "on"/"off" — failing closed to off.`,
-      );
+      structuredLog.warn("meshScreenDoor.nd_mode_invalid_value", {
+        message: `[mesh-screen-door] ${screenerNdConfigErrorEvent()}: SCREENER_ND_MODE value ${JSON.stringify(gate.raw)} is not "on"/"off" — failing closed to off.`,
+        rawValue: gate.raw,
+      });
     }
     if (!gate.enabled) {
       throw new MeshDoorError(

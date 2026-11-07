@@ -291,14 +291,42 @@ describe("ScreenerAgent start-up recovery (#2733)", () => {
     });
     await a.beginScreenerTask(task.id);
 
-    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    // #3515 S3: the onStart recovery failure now travels as a structured
+    // screenerAgent.on_start_recovery_failed event (level error) on the
+    // console-info JSON fallback, not a console.error line.
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     storage.put = async () => {
       throw new Error("storage down");
     };
     const b = makeAgent(storage);
     await expect(b.onStart()).resolves.toBeUndefined();
-    expect(errSpy).toHaveBeenCalled();
-    errSpy.mockRestore();
+    const events: Array<{ operation: string; level: string; fields: Record<string, unknown> }> = [];
+    for (const call of infoSpy.mock.calls) {
+      try {
+        const parsed = JSON.parse(String(call[0])) as {
+          operation?: unknown;
+          level?: unknown;
+          fields?: unknown;
+        };
+        if (parsed && typeof parsed.operation === "string") {
+          events.push({
+            operation: parsed.operation,
+            level: typeof parsed.level === "string" ? parsed.level : "",
+            fields:
+              parsed.fields && typeof parsed.fields === "object"
+                ? (parsed.fields as Record<string, unknown>)
+                : {},
+          });
+        }
+      } catch {
+        // Non-JSON console.info lines are not structured events.
+      }
+    }
+    const failed = events.find((e) => e.operation === "screenerAgent.on_start_recovery_failed");
+    expect(failed).toBeDefined();
+    expect(failed?.level).toBe("error");
+    expect(String(failed?.fields.message ?? "")).toContain("[ScreenerAgent][onStart] Interrupted-run recovery failed:");
+    infoSpy.mockRestore();
   });
 
   it("onStart on an empty ledger is a no-op", async () => {

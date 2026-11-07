@@ -76,6 +76,13 @@ import {
 import type { Env } from "../types";
 import { PortThink } from "../actors/thinkAdapter";
 import { createResourceUsagePort } from "../telemetry/createResourceUsagePorts";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/ticker-agent",
+});
 
 /** Per-connection ticker state, restored by the SDK across hibernation. */
 export interface TickerConnectionState {
@@ -118,7 +125,11 @@ export class TickerAgent extends PortThink {
    */
   private reportTickerScheduleFailure(op: string, err: unknown): void {
     const message = err instanceof Error ? err.message : String(err);
-    console.error(`[TickerAgent] ticker schedule ${op} failed: ${message}`);
+    structuredLog.error("tickerAgent.ticker_schedule_failed", {
+      message: `[TickerAgent] ticker schedule ${op} failed: ${message}`,
+      op,
+      error: message,
+    });
     try {
       const sink = createResourceUsagePort(this.env as Env);
       if (sink) {

@@ -72,6 +72,14 @@ import type { MeteredGateOptions } from "../../services/meteredPaymentGate";
 import { screenAlreadyRunningDetails } from "../../services/screenInFlight";
 import { quotaExceededDetails } from "../../security/userRequestQuota";
 
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/routes/premium",
+});
+
 /** The subset of OrchestratorAgent surface the premium handlers need. */
 export interface PremiumRouteContext {
   /** Worker environment (owner: OrchestratorAgent - was `this.env`). */
@@ -141,9 +149,12 @@ function resolvePremiumRouteMode(
     legacy
   );
   if (resolved.invalid) {
-    console.error(
-      `[payments] invalid ${switchName} value ${JSON.stringify(resolved.raw)} — failing closed to "${legacy}"`
-    );
+    structuredLog.error("premium.payments_mode_config_invalid", {
+      message: `[payments] invalid ${switchName} value ${JSON.stringify(resolved.raw)} — failing closed to "${legacy}"`,
+      setting: switchName,
+      value: resolved.raw ?? "",
+      resolved: legacy,
+    });
   }
   return resolved.mode;
 }

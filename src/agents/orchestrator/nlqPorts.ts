@@ -59,6 +59,13 @@ import {
   createSubscriptionAdapter,
   ensureSubscriptionSchema,
 } from "../../data/createSubscriptionPorts";
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/orchestrator/nlqPorts",
+});
 
 /**
  * Ports the NLQ-port constructors receive from the class. The schedule
@@ -452,10 +459,10 @@ async function runChatScreenViaWorkflow(
   try {
     handle = await ports.start(assertWorkflowJobCommand(command));
   } catch (err) {
-    console.warn(
-      "[nlq-stock-screen] Workflow start failed; falling back to the direct screen:",
-      err instanceof Error ? err.message : String(err),
-    );
+    structuredLog.warn("nlqPorts.chat_screen_workflow_start_failed", {
+      message: "[nlq-stock-screen] Workflow start failed; falling back to the direct screen:",
+      error: err instanceof Error ? err.message : String(err),
+    });
     return null;
   }
 

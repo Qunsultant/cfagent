@@ -48,6 +48,13 @@ import {
   createManualOptionsScreenDelivery,
 } from "../../workflows/manualOptionsScreen";
 import { createSqlStageClaimStore } from "../../data/stageClaimsStore";
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/routes/etradeOptionsScreen",
+});
 
 type OptionsScreenValue = Extract<ReturnType<typeof parseOptionsScreenRequest>, { ok: true }>["value"];
 
@@ -394,10 +401,16 @@ export async function executeUnifiedOptions(args: {
         }
         reportUrl = `/api/options/report.pdf?key=${encodeURIComponent(pdfKey)}`;
       } else {
-        console.warn("[Orchestrator] Manual options PDF generation failed:", pipelineResult.pdfError);
+        structuredLog.warn("etradeOptionsScreen.execute_unified_options_pdf_generation_failed", {
+          message: "[Orchestrator] Manual options PDF generation failed:",
+          error: pipelineResult.pdfError,
+        });
       }
     } catch (pdfErr) {
-      console.warn("[Orchestrator] Manual options PDF generation failed:", pdfErr instanceof Error ? pdfErr.message : String(pdfErr));
+      structuredLog.warn("etradeOptionsScreen.execute_unified_options_pdf_generation_failed", {
+        message: "[Orchestrator] Manual options PDF generation failed:",
+        error: pdfErr instanceof Error ? pdfErr.message : String(pdfErr),
+      });
     }
 
     // Issue #1209 (F3 follow-up): the scan row was saved BEFORE this
@@ -414,7 +427,10 @@ export async function executeUnifiedOptions(args: {
           await scanStore.updatePdfKey(scanRunId, pdfKey, { userLogin });
         }
       } catch (stampErr) {
-        console.warn("[Orchestrator] Failed to stamp PDF key on scan run:", stampErr instanceof Error ? stampErr.message : String(stampErr));
+        structuredLog.warn("etradeOptionsScreen.execute_unified_options_stamp_pdf_key_failed", {
+          message: "[Orchestrator] Failed to stamp PDF key on scan run:",
+          error: stampErr instanceof Error ? stampErr.message : String(stampErr),
+        });
       }
     }
 
@@ -432,7 +448,10 @@ export async function executeUnifiedOptions(args: {
       const data = await agent.getOptionsXlsxByKey(stored.key);
       if (data) scannerXlsxBytes = data.bytes;
     } catch (xlsxErr) {
-      console.warn("[Orchestrator] Manual options XLSX generation failed:", xlsxErr instanceof Error ? xlsxErr.message : String(xlsxErr));
+      structuredLog.warn("etradeOptionsScreen.execute_unified_options_xlsx_generation_failed", {
+        message: "[Orchestrator] Manual options XLSX generation failed:",
+        error: xlsxErr instanceof Error ? xlsxErr.message : String(xlsxErr),
+      });
     }
 
     // Issue #1346: CSV from the same result payload (own failure
@@ -450,7 +469,10 @@ export async function executeUnifiedOptions(args: {
       const data = await agent.getOptionsCsvByKey(stored.key);
       if (data) scannerCsvBytes = data.bytes;
     } catch (csvErr) {
-      console.warn("[Orchestrator] Manual options CSV generation failed:", csvErr instanceof Error ? csvErr.message : String(csvErr));
+      structuredLog.warn("etradeOptionsScreen.execute_unified_options_csv_generation_failed", {
+        message: "[Orchestrator] Manual options CSV generation failed:",
+        error: csvErr instanceof Error ? csvErr.message : String(csvErr),
+      });
     }
 
     // XLSX/CSV twin of the PDF backfill above: the scan row was
@@ -466,7 +488,10 @@ export async function executeUnifiedOptions(args: {
           if (scannerCsvKey) await scanStore.updateCsvKey(scanRunId, scannerCsvKey, { userLogin });
         }
       } catch (stampErr) {
-        console.warn("[Orchestrator] Failed to stamp XLSX/CSV keys on scan run:", stampErr instanceof Error ? stampErr.message : String(stampErr));
+        structuredLog.warn("etradeOptionsScreen.execute_unified_options_stamp_xlsx_csv_keys_failed", {
+          message: "[Orchestrator] Failed to stamp XLSX/CSV keys on scan run:",
+          error: stampErr instanceof Error ? stampErr.message : String(stampErr),
+        });
       }
     }
 
@@ -495,9 +520,15 @@ export async function executeUnifiedOptions(args: {
             files: [{ bytes: scannerCsvBytes, fileName: scannerCsvFileName, title: scannerCsvFileName }],
           } : {}),
         });
-        if (!sent.ok) console.warn("[Orchestrator] Slack PDF delivery (manual options) failed:", sent.error);
+        if (!sent.ok) structuredLog.warn("etradeOptionsScreen.execute_unified_options_slack_pdf_delivery_failed", {
+          message: "[Orchestrator] Slack PDF delivery (manual options) failed:",
+          error: sent.error,
+        });
       } catch (slackErr) {
-        console.warn("[Orchestrator] Slack notification (manual options) error:", slackErr instanceof Error ? slackErr.message : String(slackErr));
+        structuredLog.warn("etradeOptionsScreen.execute_unified_options_slack_notification_failed", {
+          message: "[Orchestrator] Slack notification (manual options) error:",
+          error: slackErr instanceof Error ? slackErr.message : String(slackErr),
+        });
       }
     }
 
@@ -624,7 +655,10 @@ export async function executeUnifiedOptions(args: {
     const slackPayload = result.toSlack();
     const text = typeof slackPayload === "string" ? slackPayload : slackPayload.text || JSON.stringify(slackPayload);
     const sent = await deliverGatedSlack(ctx.env, { userLogin, text, channel: reqData.slackChannel });
-    if (!sent.ok) console.warn("[Orchestrator] Slack notification (manual options failed) error:", sent.error);
+    if (!sent.ok) structuredLog.warn("etradeOptionsScreen.execute_unified_options_failed_run_slack_notification_failed", {
+      message: "[Orchestrator] Slack notification (manual options failed) error:",
+      error: sent.error,
+    });
   }
 
   const channel = reqData.channel || "ui";

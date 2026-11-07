@@ -69,6 +69,13 @@ import {
   AGENT_ERROR_CATALOG,
   AgentErrorCode,
 } from "../aspects/errorCodes";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/trading-agent",
+});
 
 // ---------------------------------------------------------------------------
 // Stable error tokens (cfpay convention, #291 A3): failures on the A2A and
@@ -164,7 +171,10 @@ export function logTradingDispatch(entry: {
   code?: string;
   durationMs: number;
 }): void {
-  console.info("[TradingAgent]", JSON.stringify(entry));
+  structuredLog.info("tradingAgent.dispatch", {
+    message: "[TradingAgent]",
+    ...entry,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -572,7 +582,11 @@ export async function executeTradingService(
     const { code, message } = classifyTradingError(err);
     if (code === "internal_error" && !(err instanceof TradingServiceError)) {
       // The real failure stays server-side; the wire gets the token only.
-      console.error("[TradingAgent] unclassified service failure:", err);
+      structuredLog.error("tradingAgent.unclassified_service_failure", {
+        message: "[TradingAgent] unclassified service failure:",
+        serviceId: service?.id ?? call.serviceId,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
     log(false, code);
     throw new TradingServiceError(code, message);
@@ -1315,9 +1329,11 @@ export class TradingAgent extends PortThink {
         createdAt: new Date().toISOString(),
       });
     } catch (auditErr) {
-      console.warn(
-        `[trading] trade.approval_started audit failed for order ${input.orderId}: ${auditErr instanceof Error ? auditErr.message : String(auditErr)}`,
-      );
+      structuredLog.warn("tradingAgent.trade_approval_started_audit_failed", {
+        message: `[trading] trade.approval_started audit failed for order ${input.orderId}: ${auditErr instanceof Error ? auditErr.message : String(auditErr)}`,
+        orderId: input.orderId,
+        error: auditErr instanceof Error ? auditErr.message : String(auditErr),
+      });
     }
     return { workflowId, orderId: input.orderId, status: "awaiting_approval" };
   }

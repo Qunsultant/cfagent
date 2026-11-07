@@ -178,6 +178,13 @@ import type {
   TransactionSnapData,
   RouteDecision,
 } from "../types";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/orchestrator",
+});
 
 /**
  * Issue #686: message normalization for the model call now lives
@@ -493,7 +500,10 @@ export class OrchestratorAgent extends PortThink {
       ).lifecycle?.start?.();
       await super.clearMessages();
     } catch (err) {
-      console.warn("[OrchestratorAgent] Think session clear failed; port transcript is cleared:", err);
+      structuredLog.warn("orchestrator.think_session_clear_failed", {
+        message: "[OrchestratorAgent] Think session clear failed; port transcript is cleared:",
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 
@@ -963,7 +973,10 @@ export class OrchestratorAgent extends PortThink {
     try {
       await this.recoverQueuedAsyncJobs();
     } catch (error) {
-      console.error("[OrchestratorAgent][onStart] Could not reschedule queued async jobs:", error);
+      structuredLog.error("orchestrator.on_start_queued_async_jobs_reschedule_failed", {
+        message: "[OrchestratorAgent][onStart] Could not reschedule queued async jobs:",
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
 
     try {
@@ -974,7 +987,10 @@ export class OrchestratorAgent extends PortThink {
       // mesh_mcp.discovery_failed; retried at the next turn).
       await this.ensureMeshMcpDiscovery();
     } catch (meshErr) {
-      console.warn("[OrchestratorAgent][onStart] Mesh MCP discovery setup failed:", meshErr);
+      structuredLog.warn("orchestrator.on_start_mesh_mcp_discovery_failed", {
+        message: "[OrchestratorAgent][onStart] Mesh MCP discovery setup failed:",
+        error: meshErr instanceof Error ? meshErr.message : String(meshErr),
+      });
     }
 
     try {
@@ -989,7 +1005,10 @@ export class OrchestratorAgent extends PortThink {
         await this.ensureStrategyScanSchedule(context);
       } else await this.removeUnownedBaselineSchedules();
     } catch (schedErr) {
-      console.warn("[OrchestratorAgent][onStart] Legacy maintenance schedule reconciliation failed:", schedErr);
+      structuredLog.warn("orchestrator.on_start_legacy_schedule_reconciliation_failed", {
+        message: "[OrchestratorAgent][onStart] Legacy maintenance schedule reconciliation failed:",
+        error: schedErr instanceof Error ? schedErr.message : String(schedErr),
+      });
     }
 
     try {
@@ -1002,7 +1021,10 @@ export class OrchestratorAgent extends PortThink {
         await this.ensureStaleSweepSchedule(context.userLogin);
       }
     } catch (sweepErr) {
-      console.warn("[OrchestratorAgent][onStart] Stale-task sweep setup failed:", sweepErr);
+      structuredLog.warn("orchestrator.on_start_stale_task_sweep_failed", {
+        message: "[OrchestratorAgent][onStart] Stale-task sweep setup failed:",
+        error: sweepErr instanceof Error ? sweepErr.message : String(sweepErr),
+      });
     }
 
     try {
@@ -1010,7 +1032,10 @@ export class OrchestratorAgent extends PortThink {
       // liftLegacyChatMessages). Best-effort: never blocks startup.
       await this.liftLegacyChatMessages();
     } catch (liftErr) {
-      console.warn("[OrchestratorAgent][onStart] Legacy session lift failed:", liftErr);
+      structuredLog.warn("orchestrator.on_start_legacy_session_lift_failed", {
+        message: "[OrchestratorAgent][onStart] Legacy session lift failed:",
+        error: liftErr instanceof Error ? liftErr.message : String(liftErr),
+      });
     }
 
     try {
@@ -1021,7 +1046,10 @@ export class OrchestratorAgent extends PortThink {
       // Best-effort: a failure never blocks startup; the next start retries.
       ensureFrameworkQueueIndexes(this.ctx.storage.sql);
     } catch (idxErr) {
-      console.warn("[OrchestratorAgent][onStart] Framework queue index setup failed:", idxErr);
+      structuredLog.warn("orchestrator.on_start_framework_queue_index_failed", {
+        message: "[OrchestratorAgent][onStart] Framework queue index setup failed:",
+        error: idxErr instanceof Error ? idxErr.message : String(idxErr),
+      });
     }
   }
 
@@ -1069,9 +1097,12 @@ export class OrchestratorAgent extends PortThink {
       store.dropTable();
       return;
     }
-    console.error(
-      `[OrchestratorAgent] Legacy lift imported ${valid.length} of ${rows.length} rows (${skipped} skipped); leaving cf_ai_chat_agent_messages in place so they remain recoverable.`
-    );
+    structuredLog.error("orchestrator.legacy_lift_partial_import", {
+      message: `[OrchestratorAgent] Legacy lift imported ${valid.length} of ${rows.length} rows (${skipped} skipped); leaving cf_ai_chat_agent_messages in place so they remain recoverable.`,
+      imported: valid.length,
+      total: rows.length,
+      skipped,
+    });
   }
 
   /**
@@ -1085,7 +1116,9 @@ export class OrchestratorAgent extends PortThink {
     const context = await this.getScreenerExecutionContext();
     const userLogin = context?.userLogin || payload?.userLogin;
     if (!userLogin) {
-      console.warn("[OrchestratorAgent] Skipping stale-task sweep without an authenticated account owner.");
+      structuredLog.warn("orchestrator.stale_task_sweep_skipped_no_owner", {
+        message: "[OrchestratorAgent] Skipping stale-task sweep without an authenticated account owner.",
+      });
       return { userLogin: null, researchSwept: 0, screenerSwept: 0, researchPruned: 0, screenerPruned: 0 };
     }
     let researchSwept = 0;
@@ -1093,13 +1126,21 @@ export class OrchestratorAgent extends PortThink {
       const research = this.getResearchAgent(userLogin);
       if (research) researchSwept = (await research.sweepStaleResearchTasks()).length;
     } catch (error) {
-      console.warn(`[OrchestratorAgent] Stale research sweep failed for ${userLogin}:`, error);
+      structuredLog.warn("orchestrator.stale_research_sweep_failed", {
+        message: `[OrchestratorAgent] Stale research sweep failed for ${userLogin}:`,
+        userLogin,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
     let screenerSwept = 0;
     try {
       screenerSwept = (await this.getScreenerAgent(userLogin).sweepStaleScreenerTasks()).length;
     } catch (error) {
-      console.warn(`[OrchestratorAgent] Stale screener sweep failed for ${userLogin}:`, error);
+      structuredLog.warn("orchestrator.stale_screener_sweep_failed", {
+        message: `[OrchestratorAgent] Stale screener sweep failed for ${userLogin}:`,
+        userLogin,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
     // Issue #635: retention pruning rides the same maintenance path,
     // in its own isolated legs — a prune failure never affects sweeps.
@@ -1108,16 +1149,31 @@ export class OrchestratorAgent extends PortThink {
       const research = this.getResearchAgent(userLogin);
       if (research) researchPruned = (await research.pruneExpiredResearchTasks()).length;
     } catch (error) {
-      console.warn(`[OrchestratorAgent] Research retention prune failed for ${userLogin}:`, error);
+      structuredLog.warn("orchestrator.research_retention_prune_failed", {
+        message: `[OrchestratorAgent] Research retention prune failed for ${userLogin}:`,
+        userLogin,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
     let screenerPruned = 0;
     try {
       screenerPruned = (await this.getScreenerAgent(userLogin).pruneExpiredScreenerTasks()).length;
     } catch (error) {
-      console.warn(`[OrchestratorAgent] Screener retention prune failed for ${userLogin}:`, error);
+      structuredLog.warn("orchestrator.screener_retention_prune_failed", {
+        message: `[OrchestratorAgent] Screener retention prune failed for ${userLogin}:`,
+        userLogin,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
     if (researchSwept > 0 || screenerSwept > 0 || researchPruned > 0 || screenerPruned > 0) {
-      console.info(`[OrchestratorAgent] Task maintenance for ${userLogin}: research swept=${researchSwept} pruned=${researchPruned}; screener swept=${screenerSwept} pruned=${screenerPruned}.`);
+      structuredLog.info("orchestrator.task_maintenance_summary", {
+        message: `[OrchestratorAgent] Task maintenance for ${userLogin}: research swept=${researchSwept} pruned=${researchPruned}; screener swept=${screenerSwept} pruned=${screenerPruned}.`,
+        userLogin,
+        researchSwept,
+        researchPruned,
+        screenerSwept,
+        screenerPruned,
+      });
     }
     return { userLogin, researchSwept, screenerSwept, researchPruned, screenerPruned };
   }
@@ -1254,7 +1310,9 @@ export class OrchestratorAgent extends PortThink {
       const environment = payload?.environment || savedContext?.environment;
       if (payload?.trigger !== "manual" && !userLogin) {
         await this.removeUnownedBaselineSchedules();
-        console.warn("[OrchestratorAgent] Skipping unowned scheduled options screen.");
+        structuredLog.warn("orchestrator.unowned_scheduled_options_screen_skipped", {
+          message: "[OrchestratorAgent] Skipping unowned scheduled options screen.",
+        });
         return (outcome = { outcome: "skipped", detail: "unowned scheduled options screen" });
       }
       if (payload?.trigger !== "manual") {
@@ -1270,7 +1328,11 @@ export class OrchestratorAgent extends PortThink {
         const key = `options:scheduled:last-slot:${thesis}`;
         const last = await this.ctx.storage.get<{ slot: string }>(key);
         if (last?.slot === slot) {
-          console.warn(`[OrchestratorAgent] Suppressing duplicate scheduled options scan (${thesis}) in ${slot}Z`);
+          structuredLog.warn("orchestrator.duplicate_scheduled_options_scan_suppressed", {
+            message: `[OrchestratorAgent] Suppressing duplicate scheduled options scan (${thesis}) in ${slot}Z`,
+            thesis,
+            slot,
+          });
           return (outcome = { outcome: "skipped", detail: "duplicate minute slot (persistent)" });
         }
         await this.ctx.storage.put(key, { slot });
@@ -2188,7 +2250,10 @@ export class OrchestratorAgent extends PortThink {
         });
       }
     } catch (err) {
-      console.warn("[VectorMemory] remember failed:", err instanceof Error ? err.message : String(err));
+      structuredLog.warn("orchestrator.vector_remember_failed", {
+        message: "[VectorMemory] remember failed:",
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 
@@ -2364,7 +2429,10 @@ export class OrchestratorAgent extends PortThink {
       } catch (scheduleError) {
         // Authentication-context persistence must not make unrelated API
         // routes fail if Durable Object schedule registration is unavailable.
-        console.warn("[OrchestratorAgent] Could not reconcile authenticated baseline schedules:", scheduleError);
+        structuredLog.warn("orchestrator.authenticated_baseline_schedule_reconcile_failed", {
+          message: "[OrchestratorAgent] Could not reconcile authenticated baseline schedules:",
+          error: scheduleError instanceof Error ? scheduleError.message : String(scheduleError),
+        });
       }
     }
 
@@ -2388,9 +2456,11 @@ export class OrchestratorAgent extends PortThink {
         "nocount"
       );
       if (resolvedEnvelope.invalid) {
-        console.error(
-          `[jobs] invalid ${JOB_LIST_ENVELOPE_SWITCH} value ${JSON.stringify(resolvedEnvelope.raw)} — failing closed to "nocount"`
-        );
+        structuredLog.error("orchestrator.jobs_list_envelope_invalid", {
+          message: `[jobs] invalid ${JOB_LIST_ENVELOPE_SWITCH} value ${JSON.stringify(resolvedEnvelope.raw)} — failing closed to "nocount"`,
+          setting: JOB_LIST_ENVELOPE_SWITCH,
+          rawValue: resolvedEnvelope.raw,
+        });
         this.audit(jobsConfigErrorEvent(), "orchestrator", {
           setting: JOB_LIST_ENVELOPE_SWITCH,
           value: resolvedEnvelope.raw ?? "",
@@ -2495,9 +2565,11 @@ export class OrchestratorAgent extends PortThink {
       deliveryLegacy
     );
     if (resolvedDelivery.invalid) {
-      console.error(
-        `[jobs] invalid ${HTTP_DELIVERY_MODE_SWITCH} value ${JSON.stringify(resolvedDelivery.raw)} — failing closed to "${deliveryLegacy}"`
-      );
+      structuredLog.error("orchestrator.http_delivery_mode_invalid", {
+        message: `[jobs] invalid ${HTTP_DELIVERY_MODE_SWITCH} value ${JSON.stringify(resolvedDelivery.raw)} — failing closed to "${deliveryLegacy}"`,
+        setting: HTTP_DELIVERY_MODE_SWITCH,
+        rawValue: resolvedDelivery.raw,
+      });
       this.audit(jobsConfigErrorEvent(), "orchestrator", {
         setting: HTTP_DELIVERY_MODE_SWITCH,
         value: resolvedDelivery.raw ?? "",

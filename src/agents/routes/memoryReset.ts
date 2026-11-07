@@ -36,6 +36,14 @@ import {
   type MemoryScopedModes,
 } from "../../config/knowledgeMemoryModes";
 
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/routes/memoryReset",
+});
+
 /** The subset of OrchestratorAgent surface the memory/reset handlers need. */
 export interface MemoryResetRouteContext {
   ensureTables(): SqlStorage;
@@ -118,9 +126,12 @@ export async function handleMemoryResetRoutes(
           "capped"
         );
         if (resolved.invalid) {
-          console.error(
-            `[memory] invalid ${MEMORY_READ_MODE_SWITCH} value ${JSON.stringify(resolved.raw)} — failing closed to "capped"`
-          );
+          structuredLog.error("memoryReset.memory_read_mode_config_invalid", {
+            message: `[memory] invalid ${MEMORY_READ_MODE_SWITCH} value ${JSON.stringify(resolved.raw)} — failing closed to "capped"`,
+            setting: MEMORY_READ_MODE_SWITCH,
+            value: resolved.raw ?? "",
+            resolved: "capped",
+          });
           ctx.audit(memoryConfigErrorEvent(), "orchestrator", {
             setting: MEMORY_READ_MODE_SWITCH,
             value: resolved.raw ?? "",

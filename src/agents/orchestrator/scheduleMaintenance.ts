@@ -11,6 +11,13 @@ import type { AgentContext, Schedule, ScheduleOptions } from "agents";
 import type { AgentName } from "../../types";
 import { createOptionsDiscoveryPorts } from "../../data/createOptionsDiscoveryPorts";
 import { buildSchedulePayload } from "../../trading";
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/orchestrator/scheduleMaintenance",
+});
 
 /** The screener identity a scheduled run executes as (stored per DO). */
 export type ScreenerExecutionContext = { userLogin: string; environment?: "TEST" | "PROD" };
@@ -76,12 +83,20 @@ export async function migrateLegacyScreenSchedules(ctx: ScheduleMaintenanceConte
     const isLegacyIvCollection =
       callback === "collectIvHistory" && payload.userLogin === context.userLogin && item.cron === "15 22 * * 1-5";
     if (isLegacyTokenRenewal || isLegacyIvCollection) {
-      console.warn(`[OrchestratorAgent] Removing app-created legacy schedule ${item.id} (${callback})`);
+      structuredLog.warn("scheduleMaintenance.legacy_schedule_remove", {
+        message: `[OrchestratorAgent] Removing app-created legacy schedule ${item.id} (${callback})`,
+        scheduleId: item.id,
+        callback,
+      });
       try {
         await ctx.cancelSchedule(item.id);
       } catch (error) {
         cleanupComplete = false;
-        console.warn(`[OrchestratorAgent] Could not remove legacy schedule ${item.id}:`, error);
+        structuredLog.warn("scheduleMaintenance.legacy_schedule_remove_failed", {
+          message: `[OrchestratorAgent] Could not remove legacy schedule ${item.id}:`,
+          scheduleId: item.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     }
   }
@@ -99,7 +114,11 @@ export async function removeUnownedBaselineSchedules(ctx: ScheduleMaintenanceCon
     const orphanedBaseline =
       (["autonomousMarketScreen", "autonomousOptionsAnalysis", "autonomousStrategyDiscovery", "autonomousGoalScreen", "autoRenewETradeTokens", "collectIvHistory"].includes(callback) && !payload.userLogin);
     if (orphanedBaseline) {
-      console.warn(`[OrchestratorAgent] Removing unowned baseline schedule ${item.id} (${callback})`);
+      structuredLog.warn("scheduleMaintenance.unowned_baseline_schedule_remove", {
+        message: `[OrchestratorAgent] Removing unowned baseline schedule ${item.id} (${callback})`,
+        scheduleId: item.id,
+        callback,
+      });
       await ctx.cancelSchedule(item.id).catch(() => undefined);
     }
   }

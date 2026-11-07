@@ -28,6 +28,14 @@ import type { DeadLetterStore } from "../../messaging/deadLetterStorePorts";
 import { postSlackText, resourceSlackPost } from "../resourceGoals";
 import type { SlackDeliveryEnv } from "../social/delivery";
 
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/routes/dlq",
+});
+
 export interface DlqRouteContext {
   env: unknown;
   /** Test seam: production builds the store from env.AGENT_DB. */
@@ -143,7 +151,10 @@ export async function handleDlqRoutes(
         nowMs: Date.now(),
       });
     } catch (err) {
-      console.warn("[dlq] post-replay depth check failed (replay stands):", err);
+      structuredLog.warn("dlq.post_replay_depth_check_failed", {
+        message: "[dlq] post-replay depth check failed (replay stands):",
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
     return json({ record: result.record }, 200);
   }

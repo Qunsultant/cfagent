@@ -444,14 +444,18 @@ describe("TradingAgent stable error tokens + dispatch logging (#291 A3/A6)", () 
     } finally {
       console.info = original;
     }
+    // Issue #3515 S3: the dispatch log goes through the S2 structured
+    // logger — one bare JSON event line via console.info, no
+    // "[TradingAgent] " prefix. Parse the JSON lines and assert on
+    // the event's fields.
     const entry = lines
-      .filter((l) => l.includes("[TradingAgent]"))
-      .map((l) => JSON.parse(l.replace("[TradingAgent] ", "")))
-      .find((e) => e.correlationId === "trace-test-1");
+      .map((l) => { try { return JSON.parse(l); } catch { return null; } })
+      .filter(Boolean)
+      .find((e) => e.type === "tradingAgent.dispatch" && e.fields?.correlationId === "trace-test-1");
     expect(entry).toBeDefined();
-    expect(entry.ok).toBe(true);
-    expect(entry.service).toBe("stock_screening");
-    expect(entry.access).toBe("read");
+    expect(entry.fields.ok).toBe(true);
+    expect(entry.fields.service).toBe("stock_screening");
+    expect(entry.fields.access).toBe("read");
   });
 });
 

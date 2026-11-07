@@ -33,6 +33,13 @@ import { enforceOwnerDispatch } from "../../security/runRevocationGate";
 import { sessionStore } from "../../security/session";
 import { lookupInternalUserIdByLogin } from "../../security/iaaaMigration";
 import type { JobRunOutcome } from "../../data/jobRunRecordPorts";
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/orchestrator/scheduledCallbacks",
+});
 
 type ETradeEnvironment = "TEST" | "PROD";
 
@@ -205,10 +212,11 @@ export function recordReportStoreFailure(
       createdAt: new Date().toISOString(),
     });
   } catch (err) {
-    console.error(
-      `[scheduledCallbacks] report store failure for run ${input.runId} could not be audited:`,
-      err instanceof Error ? err.message : String(err),
-    );
+    structuredLog.error("scheduledCallbacks.report_store_failure_audit_failed", {
+      message: `[scheduledCallbacks] report store failure for run ${input.runId} could not be audited:`,
+      runId: input.runId,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 
@@ -231,7 +239,9 @@ export async function autoRenewETradeTokens(ctx: ScheduledCallbacksContext, payl
     auditCallbackDenial(ctx, "autoRenewETradeTokens", dispatch);
     if (dispatch.reason === "NO_IDENTITY") {
       await ctx.removeUnownedBaselineSchedules();
-      console.warn("[OrchestratorAgent] Skipping token renewal without an authenticated account owner.");
+      structuredLog.warn("scheduledCallbacks.token_renewal_skipped_no_owner", {
+        message: "[OrchestratorAgent] Skipping token renewal without an authenticated account owner.",
+      });
     }
     return;
   }
@@ -240,7 +250,10 @@ export async function autoRenewETradeTokens(ctx: ScheduledCallbacksContext, payl
   const service = new ScheduledTasksService(ctx.env, ctx.getOrm(), userLogin, createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).scanRuns, undefined, undefined, undefined, ctx.scheduleScreenerFollowups, undefined, undefined, undefined, ctx.env.SCREENER_EVENTS ?? null);
   const res = await service.autoRenewETradeTokens(userLogin, environment);
   if (!res.success) {
-    console.warn("[OrchestratorAgent] autoRenewETradeTokens error:", res.error);
+    structuredLog.warn("scheduledCallbacks.token_renewal_failed", {
+      message: "[OrchestratorAgent] autoRenewETradeTokens error:",
+      error: res.error,
+    });
     // Issue #1174 (#1173 S1): a failed renewal is tonight's outage
     // warning — raise the deduplicated reconnect alert NOW (shared
     // episode flag with the run-time guard) instead of leaving it as
@@ -351,7 +364,9 @@ export async function autonomousMarketScreen(ctx: ScheduledCallbacksContext, pay
         // A pre-auth startup schedule has no safe account mapping.
         // Remove it before it can emit the same Slack failure every hour.
         await ctx.removeUnownedBaselineSchedules();
-        console.warn("[OrchestratorAgent] Skipping unowned scheduled market screen.");
+        structuredLog.warn("scheduledCallbacks.market_screen_skipped_no_owner", {
+          message: "[OrchestratorAgent] Skipping unowned scheduled market screen.",
+        });
       }
       return (outcome = { outcome: "skipped", detail: `dispatch denied (${dispatch.reason})` });
     }
@@ -371,7 +386,11 @@ export async function autonomousMarketScreen(ctx: ScheduledCallbacksContext, pay
       const key = `screener:scheduled:last-slot:${universe}`;
       const last = await ctx.agentCtx.storage.get<{ slot: string }>(key);
       if (last?.slot === slot) {
-        console.warn(`[OrchestratorAgent] Suppressing duplicate scheduled screen for ${universe} in ${slot}Z`);
+        structuredLog.warn("scheduledCallbacks.market_screen_duplicate_suppressed", {
+          message: `[OrchestratorAgent] Suppressing duplicate scheduled screen for ${universe} in ${slot}Z`,
+          universe,
+          slot,
+        });
         return (outcome = { outcome: "skipped", detail: `duplicate minute slot for ${universe} (persistent)` });
       }
       await ctx.agentCtx.storage.put(key, { slot });
@@ -590,7 +609,9 @@ export async function autonomousGoalScreen(ctx: ScheduledCallbacksContext, paylo
       auditCallbackDenial(ctx, "autonomousGoalScreen", dispatch);
       if (trigger === "scheduled" && dispatch.reason === "NO_IDENTITY") {
         await ctx.removeUnownedBaselineSchedules();
-        console.warn("[OrchestratorAgent] Skipping unowned scheduled goal screen.");
+        structuredLog.warn("scheduledCallbacks.goal_screen_skipped_no_owner", {
+          message: "[OrchestratorAgent] Skipping unowned scheduled goal screen.",
+        });
       }
       return (outcome = { outcome: "skipped", detail: `dispatch denied (${dispatch.reason})` });
     }
@@ -681,7 +702,9 @@ export async function autonomousStrategyDiscovery(ctx: ScheduledCallbacksContext
       auditCallbackDenial(ctx, "autonomousStrategyDiscovery", dispatch);
       if (payload?.trigger !== "manual" && dispatch.reason === "NO_IDENTITY") {
         await ctx.removeUnownedBaselineSchedules();
-        console.warn("[OrchestratorAgent] Skipping unowned scheduled strategy discovery.");
+        structuredLog.warn("scheduledCallbacks.strategy_discovery_skipped_no_owner", {
+          message: "[OrchestratorAgent] Skipping unowned scheduled strategy discovery.",
+        });
       }
       return (outcome = { outcome: "skipped", detail: `dispatch denied (${dispatch.reason})` });
     }
@@ -724,7 +747,10 @@ export async function autonomousStrategyDiscovery(ctx: ScheduledCallbacksContext
       const key = `discovery:scheduled:last-slot:${(hash >>> 0).toString(36)}`;
       const last = await ctx.agentCtx.storage.get<{ slot: string; userLogin: string }>(key);
       if (last?.slot === slot && last?.userLogin === resolvedLogin) {
-        console.warn(`[OrchestratorAgent] Suppressing duplicate scheduled strategy discovery in ${slot}Z`);
+        structuredLog.warn("scheduledCallbacks.strategy_discovery_duplicate_suppressed", {
+          message: `[OrchestratorAgent] Suppressing duplicate scheduled strategy discovery in ${slot}Z`,
+          slot,
+        });
         return (outcome = { outcome: "skipped", detail: "duplicate minute slot (persistent)" });
       }
       await ctx.agentCtx.storage.put(key, { slot, userLogin: resolvedLogin });
@@ -825,7 +851,9 @@ export async function collectIvHistory(ctx: ScheduledCallbacksContext, payload?:
       auditCallbackDenial(ctx, "collectIvHistory", dispatch);
       if (dispatch.reason === "NO_IDENTITY") {
         await ctx.removeUnownedBaselineSchedules();
-        console.warn("[OrchestratorAgent] Skipping IV collection without an authenticated account owner.");
+        structuredLog.warn("scheduledCallbacks.iv_collection_skipped_no_owner", {
+          message: "[OrchestratorAgent] Skipping IV collection without an authenticated account owner.",
+        });
       }
       return;
     }
@@ -847,7 +875,10 @@ export async function collectIvHistory(ctx: ScheduledCallbacksContext, payload?:
     );
     const res = await service.collectDailyIvHistory({ symbols: payload?.symbols, environment });
     if (!res.success) {
-      console.warn("[OrchestratorAgent] collectIvHistory error:", res.error);
+      structuredLog.warn("scheduledCallbacks.iv_collection_failed", {
+        message: "[OrchestratorAgent] collectIvHistory error:",
+        error: res.error,
+      });
     } else if (typeof (ctx.self as any).broadcast === "function") {
       try {
         (ctx.self as any).broadcast(

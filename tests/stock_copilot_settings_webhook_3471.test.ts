@@ -219,13 +219,26 @@ describe("settings-change webhook delivery (#3471)", () => {
   });
 
   it("skips with a loud log when THINK_WEBHOOK_SECRET is unset — never sends unsigned, never throws", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const { ns, received } = fakeNamespace();
-    const out = await deliverSettingsChangeWebhook({ ORCHESTRATOR_AGENT: ns } as never, change);
-    expect(out.delivered).toBe(false);
-    expect(out.reason).toContain("secret");
-    expect(received).toHaveLength(0);
-    expect(warn.mock.calls.flat().join(" ")).toContain("THINK_WEBHOOK_SECRET");
+    // Issue #3515 S3: the skip logs through the S2 structured logger —
+    // one JSON event line via console.info. Assert on the parsed event.
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    try {
+      const { ns, received } = fakeNamespace();
+      const out = await deliverSettingsChangeWebhook({ ORCHESTRATOR_AGENT: ns } as never, change);
+      expect(out.delivered).toBe(false);
+      expect(out.reason).toContain("secret");
+      expect(received).toHaveLength(0);
+      const events = info.mock.calls
+        .flatMap((args) => args.map(String))
+        .map((line) => { try { return JSON.parse(line); } catch { return null; } })
+        .filter(Boolean);
+      const skipped = events.find((e) => e.type === "settingsWebhookNotify.settings_change_delivery_skipped");
+      expect(skipped).toBeDefined();
+      expect(skipped.level).toBe("warn");
+      expect(String(skipped.fields?.reason)).toContain("THINK_WEBHOOK_SECRET");
+    } finally {
+      info.mockRestore();
+    }
   });
 
   it("reports a refused delivery (the instance's 503) without throwing", async () => {
@@ -339,15 +352,28 @@ describe("orchestrator settings webhook hook (#3471)", () => {
   });
 
   it("an event naming a different login is ignored — the hook acts only for its own instance", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const rig = await hookRig({ storedEnvironment: "PROD", brokerId: "alpaca" });
-    await handleSettingsWebhook(
-      rig.ctx,
-      settingsEvent({ kind: "mode_changed", login: "bob", changedAt: CHANGED_AT }),
-    );
-    expect(rig.activity.listActivity(LOGIN, 10)).toHaveLength(0);
-    expect(rig.cell.broadcasts).toHaveLength(0);
-    expect(warn).toHaveBeenCalled();
+    // Issue #3515 S3: the ignore logs through the S2 structured logger —
+    // one JSON event line via console.info. Assert on the parsed event.
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    try {
+      const rig = await hookRig({ storedEnvironment: "PROD", brokerId: "alpaca" });
+      await handleSettingsWebhook(
+        rig.ctx,
+        settingsEvent({ kind: "mode_changed", login: "bob", changedAt: CHANGED_AT }),
+      );
+      expect(rig.activity.listActivity(LOGIN, 10)).toHaveLength(0);
+      expect(rig.cell.broadcasts).toHaveLength(0);
+      const events = info.mock.calls
+        .flatMap((args) => args.map(String))
+        .map((line) => { try { return JSON.parse(line); } catch { return null; } })
+        .filter(Boolean);
+      const ignored = events.find((e) => e.type === "settingsWebhook.foreign_login_ignored");
+      expect(ignored).toBeDefined();
+      expect(ignored.level).toBe("warn");
+      expect(ignored.fields?.login).toBe("bob");
+    } finally {
+      info.mockRestore();
+    }
   });
 
   it("a context-less instance cannot verify ownership and ignores the event", async () => {

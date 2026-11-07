@@ -22,6 +22,23 @@
  * true remaining total before batch 2 was 589, not 595; after batch 2
  * the remaining total is 414.
  *
+ * Batch 3 (this slice) migrated `src/agents` — all 42 files, 180
+ * real sites — to the same logger, and moved them from REMAINING_PIN
+ * to MIGRATED_ZERO; after batch 3 the remaining total is 234. One
+ * judgment call: `src/agents/routes/paymentAssuranceLive.ts` `logError`
+ * was `console.log` in a catch handler — re-pinned to error severity,
+ * since the call's purpose is error logging. One follow-up: the
+ * migration pushed `src/agents/routes/etradeBroker.ts` to 50,533 B,
+ * over the #359 50,000 B dispatcher ceiling (pinned by
+ * tests/etrade_broker_portfolio_risk_split_2943.test.ts), so the
+ * autopilot execution-verdict gate moved to the new
+ * `src/agents/routes/etradeBrokerAutopilot.ts` (no route condition,
+ * no ETradeService construction — the #2943 pins are untouched);
+ * the new file is at zero and listed in MIGRATED_ZERO below.
+ * Seven tests asserted on raw `console.*` spies and were updated to
+ * the structured form (spy console.info, parse the JSON event lines,
+ * assert on operation + level + fields) — no behavior change.
+ *
  * The pin is a ratchet, not a ban: files the migration has not reached
  * yet keep their counted uses as a ceiling (REMAINING_PIN — a file may
  * only go DOWN, never up, and a file absent from the table must be at
@@ -194,6 +211,49 @@ function countConsoleUses(src: string): number {
 /** Batch-1 migrated files: zero unstructured `console.*` allowed. */
 const MIGRATED_ZERO: readonly string[] = [
   "src/actors/thinkAdapter.ts",
+  "src/agents/chatErrorFallback.ts",
+  "src/agents/mas.ts",
+  "src/agents/nlq/execution.ts",
+  "src/agents/orchestrator.ts",
+  "src/agents/orchestrator/asyncJobs.ts",
+  "src/agents/orchestrator/autopilot.ts",
+  "src/agents/orchestrator/chatTurnHelpers.ts",
+  "src/agents/orchestrator/meshMcpClient.ts",
+  "src/agents/orchestrator/meshScreenDoor.ts",
+  "src/agents/orchestrator/nlqPorts.ts",
+  "src/agents/orchestrator/reportDispatch.ts",
+  "src/agents/orchestrator/researchPublish.ts",
+  "src/agents/orchestrator/scheduleMaintenance.ts",
+  "src/agents/orchestrator/scheduledCallbacks.ts",
+  "src/agents/orchestrator/settingsWebhook.ts",
+  "src/agents/report-asset-agent.ts",
+  "src/agents/research-agent.ts",
+  "src/agents/routes/adsRevenueReferrals.ts",
+  "src/agents/routes/agenticPayments.ts",
+  "src/agents/routes/brokerConnect.ts",
+  "src/agents/routes/brokerOrders.ts",
+  "src/agents/routes/dlq.ts",
+  "src/agents/routes/etradeBroker.ts",
+  "src/agents/routes/etradeBrokerAutopilot.ts",
+  "src/agents/routes/etradeBrokerOrders.ts",
+  "src/agents/routes/etradeOptions.ts",
+  "src/agents/routes/etradeOptionsEvaluate.ts",
+  "src/agents/routes/etradeOptionsScreen.ts",
+  "src/agents/routes/knowledgeCorpus.ts",
+  "src/agents/routes/mcpChatNlq.ts",
+  "src/agents/routes/memoryReset.ts",
+  "src/agents/routes/paidStockScreenSeam.ts",
+  "src/agents/routes/paymentAssuranceLive.ts",
+  "src/agents/routes/payments.ts",
+  "src/agents/routes/premium.ts",
+  "src/agents/routes/sagaEntry.ts",
+  "src/agents/routes/schedules.ts",
+  "src/agents/routes/screenerResearch.ts",
+  "src/agents/scheduled-agent.ts",
+  "src/agents/screener-agent.ts",
+  "src/agents/settingsWebhookNotify.ts",
+  "src/agents/ticker-agent.ts",
+  "src/agents/trading-agent.ts",
   "src/aspects/loggingAspect.ts",
   "src/aspects/transactionAspect.ts",
   "src/breakers/breakerPorts.ts",
@@ -296,48 +356,6 @@ const MIGRATED_ZERO: readonly string[] = [
  * never exceed it; a file absent here must be at zero.
  */
 const REMAINING_PIN: Readonly<Record<string, number>> = {
-  "src/agents/chatErrorFallback.ts": 1,
-  "src/agents/mas.ts": 2,
-  "src/agents/nlq/execution.ts": 2,
-  "src/agents/orchestrator.ts": 20,
-  "src/agents/orchestrator/asyncJobs.ts": 13,
-  "src/agents/orchestrator/autopilot.ts": 3,
-  "src/agents/orchestrator/chatTurnHelpers.ts": 2,
-  "src/agents/orchestrator/meshMcpClient.ts": 2,
-  "src/agents/orchestrator/meshScreenDoor.ts": 1,
-  "src/agents/orchestrator/nlqPorts.ts": 1,
-  "src/agents/orchestrator/reportDispatch.ts": 4,
-  "src/agents/orchestrator/researchPublish.ts": 12,
-  "src/agents/orchestrator/scheduleMaintenance.ts": 3,
-  "src/agents/orchestrator/scheduledCallbacks.ts": 10,
-  "src/agents/orchestrator/settingsWebhook.ts": 5,
-  "src/agents/report-asset-agent.ts": 5,
-  "src/agents/research-agent.ts": 12,
-  "src/agents/routes/adsRevenueReferrals.ts": 1,
-  "src/agents/routes/agenticPayments.ts": 4,
-  "src/agents/routes/brokerConnect.ts": 3,
-  "src/agents/routes/brokerOrders.ts": 1,
-  "src/agents/routes/dlq.ts": 1,
-  "src/agents/routes/etradeBroker.ts": 1,
-  "src/agents/routes/etradeBrokerOrders.ts": 4,
-  "src/agents/routes/etradeOptions.ts": 1,
-  "src/agents/routes/etradeOptionsEvaluate.ts": 2,
-  "src/agents/routes/etradeOptionsScreen.ts": 9,
-  "src/agents/routes/knowledgeCorpus.ts": 9,
-  "src/agents/routes/mcpChatNlq.ts": 1,
-  "src/agents/routes/memoryReset.ts": 1,
-  "src/agents/routes/paidStockScreenSeam.ts": 1,
-  "src/agents/routes/paymentAssuranceLive.ts": 3,
-  "src/agents/routes/payments.ts": 7,
-  "src/agents/routes/premium.ts": 1,
-  "src/agents/routes/sagaEntry.ts": 1,
-  "src/agents/routes/schedules.ts": 5,
-  "src/agents/routes/screenerResearch.ts": 5,
-  "src/agents/scheduled-agent.ts": 1,
-  "src/agents/screener-agent.ts": 15,
-  "src/agents/settingsWebhookNotify.ts": 1,
-  "src/agents/ticker-agent.ts": 1,
-  "src/agents/trading-agent.ts": 3,
   "src/client/Chat.tsx": 1,
   "src/client/ETradeTradingHub.tsx": 2,
   "src/client/ErrorBoundary.tsx": 1,

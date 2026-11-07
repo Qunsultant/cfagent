@@ -44,6 +44,14 @@ import {
   type SagaStatusStore,
 } from "./sagaStatus";
 
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/routes/sagaEntry",
+});
+
 /** Minimal structural surface of the SAGA_WORKFLOW binding. */
 export interface SagaEntryBinding {
   create: (opts: { id: string; params: unknown }) => Promise<{ id: string }>;
@@ -358,9 +366,11 @@ export async function handleSagaEntryRoutes(
         workflowRunId: started.workflowId,
       });
     } catch (err) {
-      console.warn(
-        `Saga projection row failed for ${params.sagaId}: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      structuredLog.warn("sagaEntry.saga_projection_row_failed", {
+        message: `Saga projection row failed for ${params.sagaId}: ${err instanceof Error ? err.message : String(err)}`,
+        sagaId: params.sagaId,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
   return json(202, {

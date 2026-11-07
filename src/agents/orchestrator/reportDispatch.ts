@@ -27,6 +27,13 @@ import {
   storeReportAtGenerationWithR2,
   type RefreshCanonicalPdfFieldsResult,
 } from "../../services/scheduledReports";
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/orchestrator/reportDispatch",
+});
 
 /**
  * Ports the report-dispatch functions receive from the class. The
@@ -144,7 +151,10 @@ export function decideReportConfirmation(ctx: ReportDispatchContext, id: string,
       decidedBy
     );
   } catch (err) {
-    console.warn("[OrchestratorAgent] Failed to decide report confirmation:", err);
+    structuredLog.warn("reportDispatch.report_confirmation_decide_failed", {
+      message: "[OrchestratorAgent] Failed to decide report confirmation:",
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 
@@ -160,7 +170,10 @@ export async function storeResearchReportCanonicalAsync(ctx: ReportDispatchConte
   meta: { title: string; summary: string; userLogin?: string }
 ): Promise<{ reportId: string; generationId: string } | null> {
   if (!meta.userLogin) {
-    console.error(`[reportDispatch] Research report store refused: no owning userLogin (title: ${meta.title}).`);
+    structuredLog.error("reportDispatch.research_report_store_refused", {
+      message: `[reportDispatch] Research report store refused: no owning userLogin (title: ${meta.title}).`,
+      title: meta.title,
+    });
     return null;
   }
   const generationId = await sha256Hex(bodyJson);
@@ -318,7 +331,10 @@ export async function persistScreenerReportCanonical(ctx: ReportDispatchContext,
   pareto?: unknown;
 }): Promise<void> {
   if (!result.userLogin) {
-    console.error(`[reportDispatch] Screen report store refused: no owning userLogin (run: ${result.timestamp}).`);
+    structuredLog.error("reportDispatch.screen_report_store_refused", {
+      message: `[reportDispatch] Screen report store refused: no owning userLogin (run: ${result.timestamp}).`,
+      runTimestamp: result.timestamp,
+    });
     return;
   }
   try {
@@ -480,7 +496,10 @@ export async function persistParentScreenReportCanonical(
   input: ParentScreenReportInput,
 ): Promise<{ reportId: string } | null> {
   if (!input.userLogin) {
-    console.error(`[reportDispatch] Parent screen report store refused: no owning userLogin (job: ${input.jobId}).`);
+    structuredLog.error("reportDispatch.parent_screen_report_store_refused", {
+      message: `[reportDispatch] Parent screen report store refused: no owning userLogin (job: ${input.jobId}).`,
+      jobId: input.jobId,
+    });
     return null;
   }
   const c = input.collation;

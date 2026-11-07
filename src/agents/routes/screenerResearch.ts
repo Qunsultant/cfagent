@@ -56,6 +56,14 @@ import type { ScreenerAgent } from "../screener-agent";
 import type { ResearchAgent } from "../research-agent";
 import type { DatabaseORM } from "../../orm";
 
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/routes/screenerResearch",
+});
+
 /** Structural mirror of OrchestratorAgent's private ScreenerExecutionContext
  * (src/agents/orchestrator.ts) - the module reads only `userLogin` from it. */
 type ScreenerExecutionContext = { userLogin: string; environment?: "TEST" | "PROD" };
@@ -1702,9 +1710,12 @@ export async function handleScreenerResearchRoutes(
                 createdAt: new Date().toISOString(),
               });
             } catch (auditErr) {
-              console.warn(
-                `[goal-screen-workflow] Audit insertion failed (type=goal_screen.payment_started, login=${userLogin}): ${auditErr instanceof Error ? auditErr.message : String(auditErr)}`,
-              );
+              structuredLog.warn("screenerResearch.goal_screen_audit_insertion_failed", {
+                message: `[goal-screen-workflow] Audit insertion failed (type=goal_screen.payment_started, login=${userLogin}): ${auditErr instanceof Error ? auditErr.message : String(auditErr)}`,
+                type: "goal_screen.payment_started",
+                login: userLogin,
+                error: auditErr instanceof Error ? auditErr.message : String(auditErr),
+              });
             }
             return Response.json(
               { runRequestId: idempotencyKey, workflowId: started.workflowId, status: "payment_started" },
@@ -1715,9 +1726,11 @@ export async function handleScreenerResearchRoutes(
             if (/Tenant mismatch/.test(message)) {
               return Response.json({ error: message }, { status: 403 });
             }
-            console.warn(
-              `[goal-screen-workflow] Paid start failed for job ${idempotencyKey}: ${message}`,
-            );
+            structuredLog.warn("screenerResearch.goal_screen_paid_start_failed", {
+              message: `[goal-screen-workflow] Paid start failed for job ${idempotencyKey}: ${message}`,
+              jobId: idempotencyKey,
+              error: message,
+            });
             return Response.json(
               { error: "Payment workflow could not start; no screener started.", jobId: idempotencyKey },
               { status: 503 },
@@ -1767,9 +1780,12 @@ export async function handleScreenerResearchRoutes(
               createdAt: new Date().toISOString(),
             });
           } catch (auditErr) {
-            console.warn(
-              `[goal-screen-workflow] Audit insertion failed (type=goal_screen.workflow_submitted, login=${userLogin}): ${auditErr instanceof Error ? auditErr.message : String(auditErr)}`,
-            );
+            structuredLog.warn("screenerResearch.goal_screen_audit_insertion_failed", {
+              message: `[goal-screen-workflow] Audit insertion failed (type=goal_screen.workflow_submitted, login=${userLogin}): ${auditErr instanceof Error ? auditErr.message : String(auditErr)}`,
+              type: "goal_screen.workflow_submitted",
+              login: userLogin,
+              error: auditErr instanceof Error ? auditErr.message : String(auditErr),
+            });
           }
           return workflowAcceptedResponse(handle);
         } catch (err) {
@@ -1783,9 +1799,12 @@ export async function handleScreenerResearchRoutes(
           );
           const reason = workflowPortsUnavailableReason(ctx.env) ?? "start_failed";
           const code = err instanceof WorkflowError ? err.code : "start_failed";
-          console.warn(
-            `[goal-screen-workflow] Async start failed (${code}) for job ${idempotencyKey}: ${err instanceof Error ? err.message : String(err)}`,
-          );
+          structuredLog.warn("screenerResearch.goal_screen_async_start_failed", {
+            message: `[goal-screen-workflow] Async start failed (${code}) for job ${idempotencyKey}: ${err instanceof Error ? err.message : String(err)}`,
+            jobId: idempotencyKey,
+            code,
+            error: err instanceof Error ? err.message : String(err),
+          });
           // Issue #1999 (D7): the start failure leaves a
           // session-principal audit row, like the scheduled path's
           // run_failed rows. A lost row warns and never changes
@@ -1806,9 +1825,12 @@ export async function handleScreenerResearchRoutes(
               createdAt: new Date().toISOString(),
             });
           } catch (auditErr) {
-            console.warn(
-              `[goal-screen-workflow] Audit insertion failed (type=goal_screen.run_failed, login=${userLogin}): ${auditErr instanceof Error ? auditErr.message : String(auditErr)}`,
-            );
+            structuredLog.warn("screenerResearch.goal_screen_audit_insertion_failed", {
+              message: `[goal-screen-workflow] Audit insertion failed (type=goal_screen.run_failed, login=${userLogin}): ${auditErr instanceof Error ? auditErr.message : String(auditErr)}`,
+              type: "goal_screen.run_failed",
+              login: userLogin,
+              error: auditErr instanceof Error ? auditErr.message : String(auditErr),
+            });
           }
           return Response.json(
             {

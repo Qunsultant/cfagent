@@ -53,6 +53,14 @@ import {
   type AdsRevenueScopedModes,
 } from "../../config/adsRevenueModes";
 
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/routes/adsRevenueReferrals",
+});
+
 /** The subset of OrchestratorAgent surface the ads/revenue/referrals handlers need. */
 export interface AdsRevenueReferralsRouteContext {
   getOrm(): DatabaseORM;
@@ -105,9 +113,12 @@ function resolveRouteMode(
     levelsForDomain(ctx.scopedModes, domain, run, ctx.env?.[switchName])
   );
   if (resolved.invalid) {
-    console.error(
-      `[ads-revenue] invalid ${switchName} value ${JSON.stringify(resolved.raw)} — failing closed to "route"`
-    );
+    structuredLog.error("adsRevenueReferrals.ads_revenue_mode_config_invalid", {
+      message: `[ads-revenue] invalid ${switchName} value ${JSON.stringify(resolved.raw)} — failing closed to "route"`,
+      setting: switchName,
+      value: resolved.raw ?? "",
+      resolved: "route",
+    });
     ctx.audit(adsRevenueConfigErrorEvent(domain), "orchestrator", {
       setting: switchName,
       value: resolved.raw ?? "",

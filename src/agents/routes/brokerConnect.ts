@@ -37,6 +37,14 @@ import {
 } from "../../trading";
 import { resolveTradeEnvironmentFromSettings } from "./brokerEnvironment";
 
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/routes/brokerConnect",
+});
+
 export interface BrokerConnectRouteContext {
   env: Env;
   getOrm: () => DatabaseORM | undefined;
@@ -183,19 +191,22 @@ export async function handleBrokerConnectRoutes(
     } catch (error) {
       // A verified pair that cannot be stored is not a sign-in: say so instead of
       // reporting success and dropping the credential.
-      console.error(
-        JSON.stringify({
+      structuredLog.error("brokerConnect.alpaca_signin_store_failed", {
+        message: JSON.stringify({
           component: "brokerConnect",
           event: "alpaca_signin_store_failed",
           reason: error instanceof Error ? error.message : String(error),
           timestamp: new Date().toISOString(),
         }),
-      );
+        broker: "alpaca",
+        side: targetSide,
+        error: error instanceof Error ? error.message : String(error),
+      });
       return codedResponse(UNAVAILABLE_CODE, 502, { broker: "alpaca", side: targetSide });
     }
 
-    console.log(
-      JSON.stringify({
+    structuredLog.info("brokerConnect.alpaca_signed_in", {
+      message: JSON.stringify({
         component: "brokerConnect",
         event: "alpaca_signed_in",
         broker: "alpaca",
@@ -204,7 +215,11 @@ export async function handleBrokerConnectRoutes(
         account: verified.accountId,
         timestamp: new Date().toISOString(),
       }),
-    );
+      broker: "alpaca",
+      side: targetSide,
+      keyIdLast4: parsed.keyId.slice(-4),
+      accountId: verified.accountId,
+    });
 
     return Response.json({
       broker: "alpaca",
@@ -223,8 +238,8 @@ export async function handleBrokerConnectRoutes(
   await revokeAlpacaCredentials(ctx.env, userLogin);
   const after = await resolveAlpacaPair(ctx.env, userLogin, side);
 
-  console.log(
-    JSON.stringify({
+  structuredLog.info("brokerConnect.alpaca_signed_out", {
+    message: JSON.stringify({
       component: "brokerConnect",
       event: "alpaca_signed_out",
       broker: "alpaca",
@@ -232,7 +247,10 @@ export async function handleBrokerConnectRoutes(
       remainingSource: after.source,
       timestamp: new Date().toISOString(),
     }),
-  );
+    broker: "alpaca",
+    side,
+    remainingSource: after.source,
+  });
 
   return Response.json({
     broker: "alpaca",

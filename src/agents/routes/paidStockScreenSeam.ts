@@ -31,6 +31,14 @@
 import type { Env } from "../../types";
 import type { StockScreenRunSpec } from "../../workflows/stockScreenRunSpec";
 
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/routes/paidStockScreenSeam",
+});
+
 /**
  * The checkout contact for the paid path only. POST bodies carry
  * it as `email`; it is stripped here — like `async` — so the
@@ -177,7 +185,10 @@ export async function submitPaidStockScreenOrNull(
     if (/Tenant mismatch/.test(message)) {
       return Response.json({ error: message }, { status: 403 });
     }
-    console.warn(`[paid-stock-screen-seam] Paid start failed: ${message}`);
+    structuredLog.warn("paidStockScreenSeam.paid_start_failed", {
+      message: `[paid-stock-screen-seam] Paid start failed: ${message}`,
+      error: message,
+    });
     return Response.json(
       { error: "Payment workflow could not start; no screener started." },
       { status: 503 },

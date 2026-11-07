@@ -16,6 +16,13 @@ import type { DatabaseORM } from "../orm";
 import type { ScanRunStore } from "../data/scanRunPorts";
 import type { StrategyProfileStore } from "../data/strategyProfilePorts";
 import type { Env } from "../types";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/chatErrorFallback",
+});
 
 export interface ChatErrorFallbackContext {
   env: Env;
@@ -87,7 +94,10 @@ export async function buildChatErrorFallback(
         }
       }
     } catch (fallbackQueryErr) {
-      console.warn("[OrchestratorAgent] Deterministic fallback query error:", fallbackQueryErr);
+      structuredLog.warn("chatErrorFallback.deterministic_fallback_query_failed", {
+        message: "[OrchestratorAgent] Deterministic fallback query error:",
+        error: fallbackQueryErr instanceof Error ? fallbackQueryErr.message : String(fallbackQueryErr),
+      });
     }
   }
 

@@ -117,6 +117,13 @@ import {
   resolveChatNlqTurnMode,
   type ChatNlqScopedModes,
 } from "../../config/chatNlqModes";
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/orchestrator/meshMcpClient",
+});
 
 /** The platform's own MCP server, as registered on the turn's SDK MCP client. */
 export const OPENAIMP_MCP_SERVER_ID = "openaimp";
@@ -285,7 +292,11 @@ export async function ensureOpenaimpMcpConnection(deps: {
       serverId: OPENAIMP_MCP_SERVER_ID,
       error: message,
     });
-    console.error(`[mesh-mcp] openaimp MCP discovery failed: ${message}`);
+    structuredLog.error("meshMcpClient.mcp_discovery_failed", {
+      message: `[mesh-mcp] openaimp MCP discovery failed: ${message}`,
+      error: message,
+      reason: "connect_failed",
+    });
     return { ready: false, toolCount: 0, reused: false, error: message };
   }
 
@@ -298,7 +309,11 @@ export async function ensureOpenaimpMcpConnection(deps: {
       serverId: OPENAIMP_MCP_SERVER_ID,
       error: message,
     });
-    console.error(`[mesh-mcp] openaimp MCP discovery failed: ${message}`);
+    structuredLog.error("meshMcpClient.mcp_discovery_failed", {
+      message: `[mesh-mcp] openaimp MCP discovery failed: ${message}`,
+      error: message,
+      reason: "empty_catalog",
+    });
     return { ready: false, toolCount: 0, reused: false, error: message };
   }
   deps.audit("mesh_mcp.discovery_ready", {
