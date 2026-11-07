@@ -149,8 +149,8 @@ describe("Issue #3605 & #3624: renderInlineFormatted clickable links", () => {
   });
 });
 
-describe("Issue #3605: ScheduleRunLedgerPanel clickable links", () => {
-  it("renders Job and Async job IDs as links with href to /api/jobs/<id>", async () => {
+describe("Issue #3605 & #3624: ScheduleRunLedgerPanel and ToolResultView clickable links", () => {
+  it("renders Job and Async job IDs as interactive controls in ScheduleRunLedgerPanel", async () => {
     const { ScheduleRunLedgerPanel } = await import("../src/client/ScheduleRunLedgerPanel");
     const { createRoot } = await import("react-dom/client");
     const { act } = await import("react");
@@ -190,16 +190,50 @@ describe("Issue #3605: ScheduleRunLedgerPanel clickable links", () => {
         await new Promise((r) => setTimeout(r, 50));
       });
 
-      const links = Array.from(container.querySelectorAll("a"));
-      const jobLink = links.find((a) => a.getAttribute("href") === "/api/jobs/job-12345");
-      const asyncJobLink = links.find((a) => a.getAttribute("href") === "/api/jobs/async-abc-777");
+      const buttons = Array.from(container.querySelectorAll("button"));
+      const jobBtn = buttons.find((b) => b.textContent?.includes("job-12345"));
+      const asyncJobBtn = buttons.find((b) => b.textContent?.includes("async-abc-777"));
 
-      expect(jobLink).toBeDefined();
-      expect(jobLink?.textContent).toContain("job-12345");
-      expect(asyncJobLink).toBeDefined();
-      expect(asyncJobLink?.textContent).toContain("async-abc-777");
+      expect(jobBtn).toBeDefined();
+      expect(jobBtn?.getAttribute("title")).toContain("job-12345");
+      expect(asyncJobBtn).toBeDefined();
+      expect(asyncJobBtn?.getAttribute("title")).toContain("async-abc-777");
     } finally {
       globalThis.fetch = originalFetch;
+      root.unmount();
+      container.remove();
+    }
+  });
+
+  it("renders clickable review job link in ToolResultView for async jobs", async () => {
+    const { ToolResultView } = await import("../src/client/chat/ToolResultView");
+    const { createRoot } = await import("react-dom/client");
+    const { act } = await import("react");
+
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    try {
+      await act(async () => {
+        root.render(
+          React.createElement(ToolResultView, {
+            toolType: "async_job_runner",
+            data: {
+              jobId: "job-xyz-888",
+              status: "queued",
+              statusUrl: "/api/jobs/job-xyz-888",
+            },
+          })
+        );
+      });
+
+      const link = container.querySelector("a.job-link-btn");
+      expect(link).toBeDefined();
+      expect(link?.getAttribute("href")).toBe("/api/jobs/job-xyz-888");
+      expect(link?.textContent).toContain("job-xyz-888");
+    } finally {
       root.unmount();
       container.remove();
     }
