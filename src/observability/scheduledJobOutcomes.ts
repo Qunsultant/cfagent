@@ -1,7 +1,9 @@
 /**
  * Issue Qunsultant/cfagent#2037 — internal-dispatch observability for
  * the scheduled jobs that ride the 30-minute tick (research, reflection,
- * adaptation).
+ * adaptation; corpus-sync and reports-index-backfill joined in
+ * #3527 S5, when the corpus sync and the reports sweep were
+ * registered into this same machinery).
  *
  * The 2026-10-27 reflection-dispatch exception was invisible to our
  * own systems: the Worker fetch wrapper (#1743) never sees a DO stub
@@ -56,13 +58,20 @@ const structuredLog = createStructuredLogger(createObservabilitySink({}), {
 /** The single outcome sink type in mas_events. */
 export const SCHEDULED_JOB_OUTCOME_TYPE = "scheduled_job.outcome";
 
-export type ScheduledJobId = "reflection" | "research" | "adaptation";
+export type ScheduledJobId =
+  | "reflection"
+  | "research"
+  | "adaptation"
+  | "corpus-sync"
+  | "reports-index-backfill";
 export type ScheduledJobOutcomeValue = "ran" | "skipped" | "failed";
 
 const SCHEDULED_JOB_IDS: readonly ScheduledJobId[] = [
   "reflection",
   "research",
   "adaptation",
+  "corpus-sync",
+  "reports-index-backfill",
 ];
 
 const SCHEDULED_JOB_OUTCOMES: readonly ScheduledJobOutcomeValue[] = [
@@ -88,9 +97,11 @@ function isScheduledJobOutcome(
 }
 
 /**
- * The three scheduled-job dispatches, by DO route path. Only these
+ * The five scheduled-job dispatches, by DO route path. Only these
  * ride the onRequest-tail observability wrap: wrapping every DO
- * route would multiply AE volume for all API traffic.
+ * route would multiply AE volume for all API traffic. The corpus
+ * sync and the reports sweep joined the set in #3527 S5; the
+ * paged manual backfill route is deliberately NOT a dispatch.
  */
 export function isScheduledJobDispatchPath(
   path: string,
@@ -100,7 +111,9 @@ export function isScheduledJobDispatchPath(
   return (
     path.endsWith("/reflection/run") ||
     path.endsWith("/research/scheduled-tick") ||
-    path.endsWith("/adaptation/weights/run")
+    path.endsWith("/adaptation/weights/run") ||
+    path.endsWith("/knowledge/corpus-sync") ||
+    path.endsWith("/trading/reports/index-backfill-sweep")
   );
 }
 
@@ -128,8 +141,8 @@ export interface ScheduledJobOutcomeInput {
   reason?: string;
   /**
    * Issue #3121 S1 — the §4 consolidated-ledger linkage for this
-   * dispatch. Absent on every current caller (all three jobs ride
-   * the 30-minute tick), so the builder defaults it to the tick
+   * dispatch. Absent on every current caller (all registered jobs
+   * ride the 30-minute tick), so the builder defaults it to the tick
    * linkage (worker-cron / the tick cron expression); a caller that
    * knows a more specific linkage passes it and the builder
    * normalizes it.
@@ -208,9 +221,9 @@ export interface ScheduledJobOutcomeStore {
   /**
    * Newest-first outcome rows, bounded: the caller asks for at most
    * maxRows because a streak decision never needs more than the
-   * threshold's worth of one job's rows among the three jobs'
-   * interleaved rows. Unbounded reads over a growing mas_events
-   * table would turn every tick into a full-table scan.
+   * threshold's worth of one job's rows among the registered
+   * jobs' interleaved rows. Unbounded reads over a growing
+   * mas_events table would turn every tick into a full-table scan.
    */
   recentOutcomes(maxRows: number): Array<ScheduledJobOutcomeRow> | Promise<
     Array<ScheduledJobOutcomeRow>
@@ -356,12 +369,13 @@ export async function recordScheduledJobOutcome(
   const payload = buildScheduledJobOutcomePayload(input);
   let streak = 0;
   if (input.outcome === "failed") {
-    // Bound: three jobs interleave one row per tick, so a job's
-    // threshold-th newest row sits within 3*threshold rows (+4
-    // margin); the store orders newest-first, so the leading
-    // failures in that window decide the streak.
+    // Bound: the registered jobs interleave one row per tick, so a
+    // job's threshold-th newest row sits within
+    // threshold * SCHEDULED_JOB_IDS.length rows (+4 margin); the
+    // store orders newest-first, so the leading failures in that
+    // window decide the streak.
     const maxRows =
-      deps.threshold > 0 ? deps.threshold * 3 + 4 : 4;
+      deps.threshold > 0 ? deps.threshold * SCHEDULED_JOB_IDS.length + 4 : 4;
     try {
       const recent = (await deps.store.recentOutcomes(maxRows)) ?? [];
       const mine = recent
