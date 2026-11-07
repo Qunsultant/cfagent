@@ -322,6 +322,14 @@ export async function autonomousMarketScreen(ctx: ScheduledCallbacksContext, pay
   scheduleId?: string;
   /** Issue #1007: data provider for the scheduled run (default "etrade"). */
   provider?: import("../../trading").StockScreenProvider;
+  /** Issue #3655: broker + data provider + mode recorded on the schedule
+   *  at creation (server-stamped). Read for the run record only — the
+   *  service re-resolves the live selections at run time. */
+  brokerId?: string;
+  dataProviderId?: string;
+  mode?: "live" | "paper";
+  /** Issue #3655 (effective mode): which resolver leg produced the mode — pin | selection | inference. */
+  modeSource?: "pin" | "selection" | "inference";
   /** Consolidation C3 (#1277): stage-chain config from the schedule
    *  payload, forwarded to the service so the run's stage jobs are
    *  stamped at the follow-up bridge. */
@@ -425,6 +433,31 @@ export async function autonomousMarketScreen(ctx: ScheduledCallbacksContext, pay
         // Issue #1007: provider provenance rides into the stored run
         // and the canonical report body below.
         provider: res.data?.provider || payload?.provider || "etrade",
+        // Issue #3655: broker + data-provider + mode provenance rides
+        // the stored run too (result first, stored payload second —
+        // never a fresh ambient read at record time).
+        ...(typeof res.data?.brokerId === "string"
+          ? { brokerId: res.data.brokerId }
+          : typeof payload?.brokerId === "string"
+            ? { brokerId: payload.brokerId }
+            : {}),
+        ...(typeof res.data?.dataProviderId === "string"
+          ? { dataProviderId: res.data.dataProviderId }
+          : typeof payload?.dataProviderId === "string"
+            ? { dataProviderId: payload.dataProviderId }
+            : {}),
+        ...(typeof res.data?.mode === "string"
+          ? { mode: res.data.mode }
+          : typeof payload?.mode === "string"
+            ? { mode: payload.mode }
+            : {}),
+        // Issue #3655 (effective mode): the resolver source rides the
+        // stored run with the mode (result first, payload second).
+        ...(typeof res.data?.modeSource === "string"
+          ? { modeSource: res.data.modeSource }
+          : typeof payload?.modeSource === "string"
+            ? { modeSource: payload.modeSource }
+            : {}),
         success: res.success,
         totalScanned: res.data?.totalScanned ?? 0,
         matchedCount: res.data?.matchedCount ?? 0,

@@ -139,6 +139,17 @@ export interface WorkflowRun {
   startedAt: string;
   finishedAt: string | null;
   durationMs: number | null;
+  /**
+   * Issue #3655: broker + data-provider + mode provenance for a
+   * scheduled run, recorded at creation/fire time. Absent on runs
+   * recorded before provenance existed — never backfilled from the
+   * currently selected broker.
+   */
+  brokerId?: string | null;
+  dataProviderId?: string | null;
+  mode?: "live" | "paper" | null;
+  /** Issue #3655 (effective mode): which resolver leg produced the mode — pin | selection | inference. */
+  modeSource?: "pin" | "selection" | "inference" | null;
   stageCount: number;
   completedStages: number;
   failedStages: number;
@@ -255,6 +266,15 @@ export interface UnifiedWorkflowRunRecord {
   title?: string | null;
   trigger?: string | null;
   triggerDetail?: string | null;
+  /**
+   * Issue #3655: broker + data-provider provenance from the canonical
+   * body's provenance object (withProviderProvenance). Absent when
+   * the canonical row predates provenance — never backfilled.
+   */
+  brokerId?: string | null;
+  dataProviderId?: string | null;
+  /** Issue #3655 (effective mode): which resolver leg produced the mode — pin | selection | inference. */
+  modeSource?: "pin" | "selection" | "inference" | null;
   stages: Array<{
     stage: string;
     status: string;
@@ -1188,6 +1208,13 @@ export function runFromOutcome(
     startedAt: outcome.createdAt,
     finishedAt: outcome.createdAt,
     durationMs: null,
+    // Issue #3655: broker + data-provider provenance from the unified
+    // canonical record when it carries them.
+    ...(unified?.brokerId ? { brokerId: unified.brokerId } : {}),
+    ...(unified?.dataProviderId ? { dataProviderId: unified.dataProviderId } : {}),
+    // Issue #3655 (effective mode): the resolver source rides the
+    // Workflow Run with the mode when the unified record carries it.
+    ...(unified?.modeSource ? { modeSource: unified.modeSource } : {}),
     stageCount: stages.length,
     completedStages: stages.filter((s) => s.status === "completed").length,
     failedStages: stages.filter((s) => s.status === "failed").length,

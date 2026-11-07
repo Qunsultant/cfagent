@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Select, TextInput, Modal, Button } from "../components/ui";
+import { useTenantProviders } from "../tenantProviders";
+import { useBrokerEnvironment } from "../brokerEnvironment";
 import { listPresets, type ScreenerPreset } from "../ScreenerPresetManager";
 import type { CreatableJob } from "./types";
 import {
@@ -85,6 +87,16 @@ export function ScheduleFormModal(props: ScheduleFormModalProps) {
   // a schedule without one.
   const [stockPresets, setStockPresets] = useState<ScreenerPreset[]>([]);
   const [presetsError, setPresetsError] = useState("");
+  // Issue #3655: the dialog shows the broker and the live/paper mode
+  // as visible fields at creation time. They are display-only here:
+  // the values come from the tenant's server-resolved selections
+  // (Settings), and the create route stamps them server-side — the
+  // form never submits a broker/mode value of its own. Mode derives
+  // from the broker environment (TEST → paper, PROD → live).
+  const [tenantProviders] = useTenantProviders();
+  const brokerEnvironment = useBrokerEnvironment();
+  const dialogBrokerId = tenantProviders.brokerId;
+  const dialogMode = brokerEnvironment === "TEST" ? "paper" : "live";
   useEffect(() => {
     if (props.jobType !== "marketScreen") return;
     let cancelled = false;
@@ -135,6 +147,33 @@ export function ScheduleFormModal(props: ScheduleFormModalProps) {
                   </Select>
                 </div>
               )}
+
+              {/* Broker & mode (Issue #3655) — visible at creation time,
+                  display-only: resolved from the tenant's broker
+                  selection in Settings and recorded on the schedule by
+                  the server. The data provider feeding the run is the
+                  tenant's data-provider selection. */}
+              <div className="sched-form-group">
+                <Select label="Broker" hint={`Runs under your broker selection from Settings (${tenantProviders.dataProviderId} feeds the data). Recorded on the schedule at creation.`} id="sched-broker"
+                  value={dialogBrokerId}
+                  disabled
+                >
+                  <option value="etrade">E*TRADE</option>
+                  <option value="alpaca">Alpaca</option>
+                  {!["etrade", "alpaca"].includes(dialogBrokerId) && (
+                    <option value={dialogBrokerId}>{dialogBrokerId}</option>
+                  )}
+                </Select>
+              </div>
+              <div className="sched-form-group">
+                <Select label="Mode" hint={`Live/paper from the broker environment (${brokerEnvironment}). Recorded on the schedule at creation.`} id="sched-mode"
+                  value={dialogMode}
+                  disabled
+                >
+                  <option value="live">Live</option>
+                  <option value="paper">Paper</option>
+                </Select>
+              </div>
 
               {/* Target Universe or Symbols */}
               {jobType !== "strategyDiscovery" && (editingScheduleId || jobType === "optionsAnalysis" || jobType === "marketScreen") && (

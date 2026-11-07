@@ -766,6 +766,16 @@ export interface ScheduleIdentity {
   environment?: string;
   /** "scheduled" for armed schedules, "manual" for trigger-route runs. */
   trigger: "manual" | "scheduled";
+  /**
+   * Issue #3655: tenant broker stamped server-side from the tenant
+   * selection at creation — never a form value. Absent on payloads
+   * built before this field existed.
+   */
+  brokerId?: string;
+  /** Issue #3655: tenant data provider stamped likewise. */
+  dataProviderId?: string;
+  /** Issue #3655: live/paper mode derived from (broker, environment). */
+  mode?: "live" | "paper";
 }
 
 const deliveryFields = {
@@ -773,6 +783,21 @@ const deliveryFields = {
   slackChannel: z.string().optional(),
   emailTo: z.string().optional(),
   webhookUrl: z.string().optional(),
+};
+
+/**
+ * Issue #3655: broker + mode provenance on schedule criteria. The
+ * fields are optional (legacy payloads carry neither) and are
+ * validated, never trusted: buildSchedulePayload strips them from
+ * caller-supplied criteria and re-stamps the server-resolved
+ * identity values; a stored payload's values survive only when the
+ * builder is called without identity values (trigger routes replay
+ * the stored, server-stamped payload).
+ */
+const brokerModeFields = {
+  brokerId: z.enum(["etrade", "alpaca"]).optional(),
+  dataProviderId: z.enum(["etrade", "public", "yahoo", "nasdaq", "alpaca"]).optional(),
+  mode: z.enum(["live", "paper"]).optional(),
 };
 
 /**
@@ -833,7 +858,11 @@ export const marketScreenScheduleCriteriaSchema = z.strictObject({
   // Issue #1007: a scheduled stock screen may name its data provider
   // (the Yahoo data-source adapter inside the one pipeline). Absent =
   // the E*TRADE default every existing schedule already runs under.
-  provider: z.enum(["etrade", "yahoo"]).optional(),
+  // Issue #3655: "alpaca" names the Alpaca quotes adapter; the
+  // scheduled path resolves it from the tenant dataProviderId at
+  // run time when the payload names none.
+  provider: z.enum(["etrade", "yahoo", "alpaca"]).optional(),
+  ...brokerModeFields,
   // Issue #1355: a scheduled stock screen may opt into sharded
   // execution (feed → generate → store → serve → deliver as
   // async-job shards). Absent/false keeps the monolithic path.
@@ -862,6 +891,7 @@ export const optionsAnalysisScheduleCriteriaSchema = z.strictObject({
   // Issue #1574: opt into durable per-symbol option-chain shards.
   // Absent/false preserves the established monolithic path.
   sharded: z.boolean().optional(),
+  ...brokerModeFields,
   ...deliveryFields,
   ...stageChainFields,
   ...triggerField,
@@ -903,6 +933,7 @@ export const strategyDiscoveryScheduleCriteriaSchema = z.strictObject({
   }).refine((v) => v.artifacts !== undefined || v.latest === true, {
     message: "snapshotInput needs artifacts or latest.",
   }).optional(),
+  ...brokerModeFields,
   ...stageChainFields,
   ...triggerField,
 });
@@ -938,6 +969,7 @@ export const goalScreenScheduleCriteriaSchema = z.strictObject({
   scenarioId: z.string().optional(),
   symbols: z.array(z.string()).optional(),
   assetClasses: z.array(z.enum(["stocks", "options"])).optional(),
+  ...brokerModeFields,
   ...deliveryFields,
   ...stageChainFields,
   ...triggerField,
@@ -1181,6 +1213,23 @@ export function buildSchedulePayload(
     ...(maxItems !== undefined ? { maxItems } : {}),
     ...(identity.userLogin ? { userLogin: identity.userLogin } : {}),
     ...(identity.environment ? { environment: identity.environment } : {}),
+    // Issue #3655: broker + data provider + mode provenance. The
+    // identity values (server-resolved at creation) win; a stored
+    // payload's values survive when the builder is called without
+    // identity values (trigger routes replay the stored, already
+    // server-stamped payload). A caller-supplied value is never
+    // trusted on its own — the create route strips these fields
+    // from the request before building, so they only arrive here
+    // from identity or from a stored payload.
+    ...((identity.brokerId ?? (validated.brokerId as string | undefined))
+      ? { brokerId: identity.brokerId ?? (validated.brokerId as string) }
+      : {}),
+    ...((identity.dataProviderId ?? (validated.dataProviderId as string | undefined))
+      ? { dataProviderId: identity.dataProviderId ?? (validated.dataProviderId as string) }
+      : {}),
+    ...((identity.mode ?? (validated.mode as string | undefined))
+      ? { mode: identity.mode ?? (validated.mode as string) }
+      : {}),
     trigger: identity.trigger,
   };
   return { ok: true, value: payload };

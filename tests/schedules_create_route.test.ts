@@ -216,6 +216,12 @@ describe("POST /api/schedules/create (#111)", () => {
       userLogin: authenticatedLogin,
       environment: "TEST",
       trigger: "scheduled",
+      // Issue #3655 — the create route stamps broker + data provider
+      // + mode server-side (TEST → paper for the etrade fallback
+      // selection in this fixture's unbound store).
+      brokerId: "etrade",
+      dataProviderId: "etrade",
+      mode: "paper",
       // Issue #3121 S1 — creation provenance travels in the armed
       // payload; createdAt is minted at create time, pinned by shape.
       provenance: expect.objectContaining({
@@ -265,6 +271,11 @@ describe("POST /api/schedules/create (#111)", () => {
     expect(scheduleEveryCalls[0]).toEqual([300, "autonomousMarketScreen", {
       sector: "Technology", universe: "LEV_ETF", maxItems: 29,
       userLogin: authenticatedLogin, environment: "TEST", trigger: "scheduled",
+      // Issue #3655 — broker + data provider + mode stamped
+      // server-side at creation (see the interval test above).
+      brokerId: "etrade",
+      dataProviderId: "etrade",
+      mode: "paper",
       // Issue #3121 S1 — creation provenance travels in the armed
       // payload; createdAt is minted at create time, pinned by shape.
       provenance: expect.objectContaining({
