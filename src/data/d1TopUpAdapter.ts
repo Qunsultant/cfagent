@@ -7,7 +7,7 @@
  * adapters; see migrationRunner.ts).
  */
 import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { agentTopUpDrafts } from "./drizzleSchema";
 import {
   applyMigrations,
@@ -17,6 +17,7 @@ import {
 import {
   assertTopUpDraftStatus,
   assertTopUpRail,
+  TopUpClaimRefusedError,
   type TopUpDraft,
   type TopUpDraftStore,
 } from "./topUpPorts";
@@ -92,14 +93,47 @@ export class D1TopUpAdapter implements TopUpDraftStore {
     return rows.length > 0 ? toDraft(rows[0]) : null;
   }
 
+  /**
+   * Claim-before-credit (#3572): a single conditional UPDATE
+   * (minted → crediting) with RETURNING, so the transition is atomic
+   * on the store — an empty result means another confirmer already
+   * claimed it (or it was never minted), and the caller refuses 409
+   * instead of crediting again.
+   */
+  async claimForCredit(id: string): Promise<TopUpDraft> {
+    const rows = await this.db
+      .update(agentTopUpDrafts)
+      .set({ status: "crediting" })
+      .where(and(eq(agentTopUpDrafts.id, id), eq(agentTopUpDrafts.status, "minted")))
+      .returning();
+    if (rows.length === 0) {
+      const existing = await this.getDraft(id);
+      if (!existing) throw new Error(`Unknown top-up draft ${id}.`);
+      throw new TopUpClaimRefusedError(id, existing.status, "claim");
+    }
+    return toDraft(rows[0]);
+  }
+
+  /** Release a claim (crediting → minted); same conditional mechanism. */
+  async releaseClaim(id: string): Promise<TopUpDraft> {
+    const rows = await this.db
+      .update(agentTopUpDrafts)
+      .set({ status: "minted" })
+      .where(and(eq(agentTopUpDrafts.id, id), eq(agentTopUpDrafts.status, "crediting")))
+      .returning();
+    if (rows.length === 0) {
+      const existing = await this.getDraft(id);
+      if (!existing) throw new Error(`Unknown top-up draft ${id}.`);
+      throw new TopUpClaimRefusedError(id, existing.status, "release");
+    }
+    return toDraft(rows[0]);
+  }
+
   async markCredited(
     id: string,
     update: { creditedAtMs: number; paymentIntentId: string | null; checkoutSessionId: string | null },
   ): Promise<TopUpDraft> {
-    const existing = await this.getDraft(id);
-    if (!existing) throw new Error(`Unknown top-up draft ${id}.`);
-    if (existing.status !== "minted") throw new Error(`Top-up ${id} is already credited.`);
-    await this.db
+    const rows = await this.db
       .update(agentTopUpDrafts)
       .set({
         status: "credited",
@@ -107,10 +141,15 @@ export class D1TopUpAdapter implements TopUpDraftStore {
         paymentIntentId: update.paymentIntentId,
         checkoutSessionId: update.checkoutSessionId,
       })
-      .where(eq(agentTopUpDrafts.id, id));
-    const next = await this.getDraft(id);
-    if (!next) throw new Error(`Unknown top-up draft ${id}.`);
-    return next;
+      .where(and(eq(agentTopUpDrafts.id, id), eq(agentTopUpDrafts.status, "crediting")))
+      .returning();
+    if (rows.length === 0) {
+      const existing = await this.getDraft(id);
+      if (!existing) throw new Error(`Unknown top-up draft ${id}.`);
+      if (existing.status === "credited") throw new Error(`Top-up ${id} is already credited.`);
+      throw new Error(`Top-up ${id} is not crediting.`);
+    }
+    return toDraft(rows[0]);
   }
 
   async listByUser(userLogin: string): Promise<TopUpDraft[]> {
