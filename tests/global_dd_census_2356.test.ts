@@ -119,6 +119,7 @@ const STORAGE_ALLOW_LIST: Array<[string, number, string]> = [
   ["src/services/receiptSurface.ts", 2, "issue #2543 receipt read-back: meter + tier reads over the sql seam (usage port drops detail_json; no port path exists)"],
   ["src/agents/routes/orchestratorMigration.ts", 3, "issue #2681 orchestrator migration: DO-internal table export/import — sqlite_master discovery, SELECT *, INSERT OR REPLACE; the migration driver must read the source instance's own storage, no port path exists for cross-instance table copy"],
   ["src/agents/routes/schedules.ts", 3, "issue #1766 nightly retention legs: DO-internal orphan-sweep read (body_r2_key), sqlite_master discovery, and per-table SELECT * for the R2 snapshot; the pass runs inside the DO and reads its own storage, no port path exists for own-instance table dump"],
+  ["src/agents/routes/screenerResearch.ts", 2, "issue #1257 live-check route: DO-internal SELECT-only read of the route's own instance mas_promotions table (in-flight stages + per-stage counts); no port path exists (the table has no adapter or D1 migration, and the stagedPromotion module that owned it was deleted); owner-directed landing, left in place until the owner directs removal"],
 ];
 
 /** The step-4c families: zero above-layer sites remain. */
@@ -310,8 +311,10 @@ describe("global D-D census: surface 1 — storage-shaped sites above the layer"
     // Adapter S2) retires orchestrator.ts's 3 (ai-chat lift →
     // SqlLegacyChatStore) → 18; step 5e (#2436) retires
     // sessionStore's 2 (the SessionStore DO's statements move
-    // to its data-layer adapter) → 16.
-    expect(total).toBe(16);
+    // to its data-layer adapter) → 16; issue #1257 adds the
+    // live-check route's 2 (DO-internal SELECT-only read, same
+    // class) → 18.
+    expect(total).toBe(18);
   });
 
   for (const file of STEP4C_SERVICE_FILES) {

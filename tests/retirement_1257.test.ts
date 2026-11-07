@@ -54,8 +54,12 @@ describe("#1257 retirement: v1 modules are gone", () => {
 
   it("the drain endpoints are gone from the route table", () => {
     const routes = readFileSync(path.join(ROOT, "src/agents/routes/screenerResearch.ts"), "utf8");
+    // Exact-match (closing quote): the #1257 live-check route
+    // /adaptation/promotions/active-check shares the "active" prefix, so
+    // a bare substring check would trip on it. The deleted drain
+    // endpoint's exact condition string is what is guarded here.
     for (const endpoint of ["/adaptation/promotions/start", "/adaptation/promotions/advance", "/adaptation/promotions/active"]) {
-      expect(routes, `drain endpoint ${endpoint} must be deleted`).not.toContain(endpoint);
+      expect(routes, `drain endpoint ${endpoint} must be deleted`).not.toContain(`${endpoint}"`);
     }
   });
 
