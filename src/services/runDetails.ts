@@ -14,225 +14,67 @@
  * field, or `unknown`.
  *
  * Messages are externalized with codes (AOP): every user-facing
- * reason/error string in a Run Details view comes from
- * RUN_DETAIL_MESSAGE_CATALOG via resolveRunDetailMessage — the
- * single message aspect. Components, routes, agents, and renderers
- * must not hardcode Run Details wording; changing wording is a
- * catalog change, never a code change. Codes are stable and the
- * catalog is versioned (RUN_DETAIL_MESSAGE_CATALOG_VERSION).
+ * reason/error string in a Run Details view comes from the single
+ * outcome catalog (src/outcomes/outcomeCatalog.json, top-level
+ * "runDetailMessages" section) via resolveRunDetailMessage in
+ * src/outcomes/outcomeAspects.ts — the single message aspect.
+ * Components, routes, agents, and renderers must not hardcode Run
+ * Details wording; changing wording is a catalog change, never a
+ * code change. Codes are stable and the catalog is versioned
+ * (RUN_DETAIL_MESSAGE_CATALOG_VERSION; v1 was the standalone
+ * catalog this file carried, v2 is the fold into the outcome
+ * catalog — issue #2608). The RUN_DETAIL_MESSAGE_CATALOG const
+ * below is a deprecated alias of the catalog-file section, kept so
+ * existing callers and tests keep resolving; new code imports the
+ * resolver from outcomeAspects.
  */
 
 import type { RunSummary } from "./runSummaries";
+import {
+  classifyRunDetailError,
+  getRunDetailMessageCatalog,
+  resolveRunDetailMessage as resolveRunDetailMessageFromCatalog,
+  RUN_DETAIL_MESSAGE_CATALOG_VERSION as OUTCOME_CATALOG_RUN_DETAIL_VERSION,
+  type RunDetailMessageCatalog as OutcomeRunDetailMessageCatalog,
+  type RunDetailMessageEntry as OutcomeRunDetailMessageEntry,
+  type ResolvedRunDetailMessage as OutcomeResolvedRunDetailMessage,
+} from "../outcomes/outcomeAspects";
 
-export const RUN_DETAIL_MESSAGE_CATALOG_VERSION = "1";
+/** @deprecated Superseded by src/outcomes/outcomeCatalog.json ("runDetailMessages"), resolved via src/outcomes/outcomeAspects.ts resolveRunDetailMessage. Kept as the catalog-file section so existing callers keep resolving; do not add codes here — extend the catalog file. */
+export const RUN_DETAIL_MESSAGE_CATALOG_VERSION = OUTCOME_CATALOG_RUN_DETAIL_VERSION;
 
 export type RunDetailLevel = "info" | "debugging" | "error";
 
-export interface RunDetailMessageDef {
-  /** Stable code, rendered verbatim in the modal (debugging level). */
-  code: string;
-  severity: "info" | "warning" | "error";
-  level: RunDetailLevel;
-  /** Template with {param} placeholders filled from the run's evidence. */
-  template: string;
-  action: string;
-  params: string[];
-}
+/** @deprecated Superseded by src/outcomes/outcomeAspects.ts RunDetailMessageEntry. */
+export type RunDetailMessageDef = OutcomeRunDetailMessageEntry;
 
-export type RunDetailMessageCatalog = Record<string, RunDetailMessageDef>;
+/** @deprecated Superseded by src/outcomes/outcomeAspects.ts RunDetailMessageCatalog. */
+export type RunDetailMessageCatalog = OutcomeRunDetailMessageCatalog;
 
-export const RUN_DETAIL_MESSAGE_CATALOG: RunDetailMessageCatalog = {
-  RUN_NO_ARTIFACT_RECORDED: {
-    code: "RUN_NO_ARTIFACT_RECORDED",
-    severity: "warning",
-    level: "error",
-    template:
-      "No {format} artifact was recorded for this run. The run record carries no {format} key, so Docs cannot link a file that was never recorded — this does not by itself prove the file was never generated.",
-    action: "Re-run the screen, or use a regenerate path for this run once one exists for its family.",
-    params: ["format"],
-  },
-  RUN_PDF_FAILED: {
-    code: "RUN_PDF_FAILED",
-    severity: "error",
-    level: "error",
-    template: "PDF generation failed for this run{error}. The PDF leg failed while the other legs were attempted independently.",
-    action: "Re-run the screen, or regenerate the PDF for this run once a regenerate path exists for its family.",
-    params: ["error"],
-  },
-  RUN_XLSX_FAILED: {
-    code: "RUN_XLSX_FAILED",
-    severity: "error",
-    level: "error",
-    template: "XLSX generation failed for this run{error}. The XLSX leg failed while the other legs were attempted independently.",
-    action: "Re-run the screen, or regenerate the XLSX for this run once a regenerate path exists for its family.",
-    params: ["error"],
-  },
-  RUN_CSV_FAILED: {
-    code: "RUN_CSV_FAILED",
-    severity: "error",
-    level: "error",
-    template: "CSV generation failed for this run{error}. The CSV leg failed while the other legs were attempted independently.",
-    action: "Re-run the screen, or regenerate the CSV for this run once a regenerate path exists for its family.",
-    params: ["error"],
-  },
-  RUN_EMPTY_RESULT: {
-    code: "RUN_EMPTY_RESULT",
-    severity: "warning",
-    level: "error",
-    template:
-      "This run completed with no results: the analysis ran, but nothing passed its gates, so there was no result set to report on.",
-    action: "Widen the filters (universe, DTE window, or fit gates) and re-run, or inspect the stage trace for which gate excluded everything.",
-    params: [],
-  },
-  RUN_PARTIAL_COVERAGE: {
-    code: "RUN_PARTIAL_COVERAGE",
-    severity: "warning",
-    level: "info",
-    template:
-      "This run has partial coverage: it evaluated only part of the requested universe. The result set covers the evaluated subset, not the full request.",
-    action: "Check the stage trace for the failed or truncated underlyings, then re-run for the missing subset.",
-    params: [],
-  },
-  RUN_CAPTURE_MISSING: {
-    code: "RUN_CAPTURE_MISSING",
-    severity: "error",
-    level: "error",
-    template:
-      "No stored data capture was recorded for this run{capture}. Analysis reads stored captures only; without one, the analysis stage cannot be evidenced.",
-    action: "Re-run the screen so feed/gather captures are recorded before analysis.",
-    params: ["capture"],
-  },
-  RUN_CONNECTOR_UNAVAILABLE: {
-    code: "RUN_CONNECTOR_UNAVAILABLE",
-    severity: "error",
-    level: "error",
-    template:
-      "A connector was unavailable for enriching data during this run{connector}. The stage that needed it could not complete its enrichment.",
-    action: "Check the connector's availability and re-run; the stage trace names the connector and capability.",
-    params: ["connector"],
-  },
-  RUN_PROVIDER_FETCH_FAILED: {
-    code: "RUN_PROVIDER_FETCH_FAILED",
-    severity: "error",
-    level: "error",
-    template: "A provider data fetch failed during this run{provider}. The stage that needed that data could not complete.",
-    action: "Check the provider's availability and re-run; the stage trace names the provider.",
-    params: ["provider"],
-  },
-  RUN_FIT_GATE_ALL_REJECTED: {
-    code: "RUN_FIT_GATE_ALL_REJECTED",
-    severity: "warning",
-    level: "error",
-    template:
-      "The fit gate rejected every candidate for this run: candidates were evaluated, but none met the composite score, probability-of-profit, freshness, or confidence thresholds in force.",
-    action: "Loosen the fit gates or widen the universe/DTE window and re-run.",
-    params: [],
-  },
-  RUN_DTE_EXCLUDED_ALL: {
-    code: "RUN_DTE_EXCLUDED_ALL",
-    severity: "warning",
-    level: "error",
-    template:
-      "The DTE window excluded every contract for this run: no contract in the fetched chain fell inside the requested days-to-expiry window.",
-    action: "Widen the DTE window and re-run.",
-    params: [],
-  },
-  RUN_DUPLICATE_SUPPRESSED: {
-    code: "RUN_DUPLICATE_SUPPRESSED",
-    severity: "info",
-    level: "info",
-    template:
-      "This run was suppressed as a duplicate: an equivalent run for the same slot was already recorded, so this attempt recorded no new artifacts.",
-    action: "Find the original run for the same slot; do not re-run for the same slot.",
-    params: [],
-  },
-  RUN_SERVICE_USER_NOT_PROVISIONED: {
-    code: "RUN_SERVICE_USER_NOT_PROVISIONED",
-    severity: "error",
-    level: "error",
-    template:
-      "The service user was not provisioned for this platform tier, so the scheduled tick that would have run this job was skipped before any stage ran.",
-    action: "Provision the service user for the platform tier, then trigger the run again.",
-    params: [],
-  },
-  RUN_QUEUE_DROPPED: {
-    code: "RUN_QUEUE_DROPPED",
-    severity: "error",
-    level: "error",
-    template:
-      "A queue message for this run was dropped without retry: the queue path that would have delivered it has no consumer, or the message was refused under its owner identity.",
-    action: "Trigger the run directly (Trigger-Now) and check the queue consumer wiring.",
-    params: [],
-  },
-  RUN_BRIDGE_SERVE_SKIPPED: {
-    code: "RUN_BRIDGE_SERVE_SKIPPED",
-    severity: "error",
-    level: "error",
-    template:
-      "The async-job bridge serve stage was skipped for this run because no PDF key was available (or the PDF leg had failed), so no serve record was written and no delivery was planned.",
-    action: "Fix the PDF leg first, then re-run; serve cannot deliver a report with no PDF key.",
-    params: [],
-  },
-  RUN_STAGE_FAILED: {
-    code: "RUN_STAGE_FAILED",
-    severity: "error",
-    level: "error",
-    template: "The {stage} stage failed for this run{error}. Later stages were not planned after this failure.",
-    action: "Check the stage trace for the failing stage's error, then resume from the last completed stage or re-run.",
-    params: ["stage", "error"],
-  },
-  RUN_NEVER_ATTEMPTED: {
-    code: "RUN_NEVER_ATTEMPTED",
-    severity: "info",
-    level: "info",
-    template:
-      "The {format} leg was never attempted for this run: it is not part of this run type's path, so its absence is by construction, not a failure.",
-    action: "No action: this run type does not produce this format.",
-    params: ["format"],
-  },
-  RUN_LEGACY_UNKNOWN: {
-    code: "RUN_LEGACY_UNKNOWN",
-    severity: "info",
-    level: "info",
-    template:
-      "This field predates provenance/lineage recording for this run's store ({store}), so its value is unknown — it was not recorded, and it is not guessed here.",
-    action: "No action: newer runs for the same family record this field.",
-    params: ["store"],
-  },
-};
+/**
+ * @deprecated Superseded by src/outcomes/outcomeCatalog.json
+ * ("runDetailMessages"), read via
+ * src/outcomes/outcomeAspects.ts getRunDetailMessageCatalog. This
+ * const is that section, not a second catalog: do not add codes
+ * here — extend the catalog file.
+ */
+export const RUN_DETAIL_MESSAGE_CATALOG: RunDetailMessageCatalog = getRunDetailMessageCatalog();
 
-export interface ResolvedRunDetailMessage {
-  code: string;
-  text: string;
-  severity: "info" | "warning" | "error";
-  level: RunDetailLevel;
-  action: string;
-}
+/** @deprecated Superseded by src/outcomes/outcomeAspects.ts ResolvedRunDetailMessage. */
+export type ResolvedRunDetailMessage = OutcomeResolvedRunDetailMessage;
 
-/** The single message aspect: every Run Details string resolves here. */
+/**
+ * @deprecated Superseded by src/outcomes/outcomeAspects.ts
+ * resolveRunDetailMessage (the single resolver). Thin wrapper kept
+ * for existing callers and tests; it delegates verbatim, including
+ * the optional catalog override.
+ */
 export function resolveRunDetailMessage(
   code: string,
   params: Record<string, string> = {},
   catalog: RunDetailMessageCatalog = RUN_DETAIL_MESSAGE_CATALOG,
 ): ResolvedRunDetailMessage {
-  const def = catalog[code];
-  if (!def) {
-    return {
-      code,
-      text: `Reason code ${code} has no catalog entry in message catalog version ${RUN_DETAIL_MESSAGE_CATALOG_VERSION}.`,
-      severity: "info",
-      level: "info",
-      action: "No action recorded for this code.",
-    };
-  }
-  let text = def.template;
-  for (const [key, value] of Object.entries(params)) {
-    text = text.replaceAll(`{${key}}`, value);
-  }
-  // Unfilled optional evidence slots render as an empty string, never
-  // as a raw "{param}" placeholder in the modal.
-  text = text.replace(/\{[a-zA-Z]+\}/g, "");
-  return { code: def.code, text, severity: def.severity, level: def.level, action: def.action };
+  return resolveRunDetailMessageFromCatalog(code, params, catalog);
 }
 
 export type RunDetailStageStatus =
@@ -379,17 +221,15 @@ function errorSuffix(error: string | null): string {
   return error ? `: ${error}` : "";
 }
 
+/**
+ * Recorded-error classifier, re-homed on the single resolver module
+ * (issue #2608): the substring-to-code table now lives in
+ * src/outcomes/outcomeAspects.ts classifyRunDetailError. This
+ * private helper is the call-site alias; the wording for any code
+ * it returns always comes from resolveRunDetailMessage.
+ */
 function classifyRecordedError(error: string | null): string | null {
-  if (!error) return null;
-  const lower = error.toLowerCase();
-  if (lower.includes("connector") || lower.includes("enrich")) return "RUN_CONNECTOR_UNAVAILABLE";
-  if (lower.includes("provider") || lower.includes("fetch") || lower.includes("etrade"))
-    return "RUN_PROVIDER_FETCH_FAILED";
-  if (lower.includes("service user") || lower.includes("not provisioned"))
-    return "RUN_SERVICE_USER_NOT_PROVISIONED";
-  if (lower.includes("queue") || lower.includes("dropped")) return "RUN_QUEUE_DROPPED";
-  if (lower.includes("duplicate")) return "RUN_DUPLICATE_SUPPRESSED";
-  return null;
+  return classifyRunDetailError(error);
 }
 
 export interface BuildRunDetailOptions {
@@ -641,6 +481,9 @@ export function buildRunDetail(
   ];
 
   const reasons: RunDetailReason[] = [];
+  // Issue #2608: every reason resolves through the single resolver
+  // (outcomeAspects.resolveRunDetailMessage, backed by the catalog
+  // file) — never the deprecated local catalog.
   const pushReason = (
     code: string,
     format: RunDetailReason["format"],
@@ -648,7 +491,7 @@ export function buildRunDetail(
     params: Record<string, string>,
     evidence: Record<string, string | number | null>,
   ) => {
-    const resolved = resolveRunDetailMessage(code, params, catalog);
+    const resolved = resolveRunDetailMessageFromCatalog(code, params, catalog);
     reasons.push({ ...resolved, format, stage, evidence });
   };
 
