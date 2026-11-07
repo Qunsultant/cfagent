@@ -210,6 +210,10 @@ export const MCP_TOOL_SCOPES: Record<string, McpScope> = {
   // merged surface views, like the feed/enrich reads above.
   get_analyze_job_status: "mcp:read",
   list_analyze_jobs: "mcp:read",
+  // #3538: the generate-job reads — pure inspect of the host's
+  // merged surface views, like the analyze reads above.
+  get_generate_job_status: "mcp:read",
+  list_generate_jobs: "mcp:read",
   // #2349 (mesh S6): the TradingAgent door's reads (accounts,
   // positions, quote) and the ReportAssetAgent door's list/get —
   // pure reads of the acting user's own data through their agents.
@@ -254,6 +258,11 @@ export const MCP_TOOL_SCOPES: Record<string, McpScope> = {
   // job's run state (pause/resume/cancel/retry).
   run_analyze_job: "mcp:write",
   manage_analyze_job: "mcp:write",
+  // #3538: the generate-job writes — running a generate job
+  // renders + persists the generated results; managing one
+  // changes the job's run state (pause/resume/cancel/retry).
+  run_generate_job: "mcp:write",
+  manage_generate_job: "mcp:write",
   // #2351 (mesh S7): the BrowserAgent/SlackAgent doors' deliveries —
   // each posts a snap to the configured Slack destination (an
   // outbound side effect; no caller-supplied webhook is accepted).

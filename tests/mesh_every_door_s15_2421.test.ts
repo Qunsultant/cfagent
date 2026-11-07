@@ -567,6 +567,11 @@ describe("census chat column vs the mesh-door command registry (#2421)", () => {
       "get_analyze_job_status",
       "list_analyze_jobs",
       "manage_analyze_job",
+      // #3538 (§7 pin update): the generate-job commands join the door.
+      "run_generate_job",
+      "get_generate_job_status",
+      "list_generate_jobs",
+      "manage_generate_job",
     ],
     PaymentsAgent: ["check_payment_budget", "get_payments_overview"],
     TradingAgent: [

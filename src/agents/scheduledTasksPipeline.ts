@@ -54,6 +54,7 @@ import type { CaptureBlobStorage } from "../data/providerCapturePorts";
 import { createFeedDatasetAdapter } from "../data/createFeedDatasetPorts";
 import { createEnrichedDatasetAdapter } from "../data/createEnrichedDatasetPorts";
 import { createAnalyzedDatasetPorts } from "../data/createAnalyzedDatasetPorts";
+import { createGeneratedDatasetPorts } from "../data/createGeneratedDatasetPorts";
 import { D1IndexListStore } from "../data/d1IndexListAdapter";
 import { createJobPipelineMessaging } from "../messaging/createJobPipelineMessaging";
 import {
@@ -82,6 +83,12 @@ import {
   ANALYZE_PIPELINE_CATALOG,
   type AnalyzeStepDeps,
 } from "../services/analyzePipelineJobs";
+import { buildGenerateJobRegistry } from "../services/generateJobs";
+import {
+  ensureGeneratePipelineJobs,
+  GENERATE_PIPELINE_CATALOG,
+  type GenerateStepDeps,
+} from "../services/generatePipelineJobs";
 import { createCaptureWiredFeedProvider } from "../services/feedProviderWiring";
 import {
   createIndexMembershipService,
@@ -242,12 +249,52 @@ export function analyzeStepDepsForScheduledAgent(
 }
 
 /**
+ * The generate-step wiring for this host residency (#3538):
+ * both of the generate step's dataset stores are D1-resident
+ * (the analyze stage's persisted copies and this stage's
+ * generated copies — the deliver stage's readers run in other
+ * instances), so the wiring needs no DO-storage seam and the
+ * step executes fully in every residency, like analyze.apply.
+ *
+ * The canonical report-store seam (mas_reports) is NOT wired
+ * in this residency — deliberately, on evidence: the canonical
+ * seam writes into a report-owning tenant's Orchestrator DO
+ * (its reads all resolve there, per-login), while this host's
+ * DO is the pipeline host's own storage and pipeline runs
+ * carry no report-owning tenant (scheduled/chained runs act
+ * under the service identity; a copilot dispatch's login owns
+ * the dispatch, not a report in this DO). Writing canonical
+ * rows here would strand them where no Reports view reads.
+ * Each report's canonical leg is therefore recorded not_wired
+ * with its coded reason on the generated artifact — named,
+ * never silent (generateJobs.ts carries the full rule).
+ */
+export function generateStepDepsForScheduledAgent(
+  ctx: ScheduledTasksPipelineContext,
+): GenerateStepDeps {
+  const sql = pipelineSql(ctx);
+  return {
+    registry: buildGenerateJobRegistry(envStrings(ctx.env)),
+    analyzedStore: createAnalyzedDatasetPorts(ctx.env),
+    generatedStore: createGeneratedDatasetPorts(ctx.env),
+    canonicalReportStore: null,
+    shardsFor: async (jobId) => {
+      const stores = createJobPipelineStoresFromSql(sql);
+      return (
+        (await stores.definitions.getDefinition(jobId))?.config.processing
+          .shards ?? []
+      );
+    },
+  };
+}
+
+/**
  * Build the pipeline control plane over this host. The acting
  * login (when a dispatch carries one) threads into the per-login
  * provider wiring; scheduled firings pass the service login.
- * The step registry is THE composed registry (#3536, #3537):
- * the feed steps plus enrich.apply plus analyze.apply — one
- * registry, every residency.
+ * The step registry is THE composed registry (#3536, #3537,
+ * #3538): the feed steps plus enrich.apply plus analyze.apply
+ * plus generate.apply — one registry, every residency.
  */
 export function createScheduledAgentPipelineControl(
   ctx: ScheduledTasksPipelineContext,
@@ -265,6 +312,7 @@ export function createScheduledAgentPipelineControl(
       feedStepDepsForScheduledAgent(ctx, userLogin),
       enrichStepDepsForScheduledAgent(ctx),
       analyzeStepDepsForScheduledAgent(ctx),
+      generateStepDepsForScheduledAgent(ctx),
     ),
     invocation: "sync",
   });
@@ -297,11 +345,20 @@ export async function ensureScheduledAgentAnalyzeJobs(
   return ensureAnalyzePipelineJobs(control, stores, envStrings(ctx.env));
 }
 
+/** Ensure the generate job definitions exist on this host's control plane (#3538). */
+export async function ensureScheduledAgentGenerateJobs(
+  ctx: ScheduledTasksPipelineContext,
+  control: JobPipelineControl,
+): Promise<string[]> {
+  const stores = createJobPipelineStoresFromSql(pipelineSql(ctx));
+  return ensureGeneratePipelineJobs(control, stores, envStrings(ctx.env));
+}
+
 /**
  * Ensure EVERY pipeline job definition this host manages
- * (feed + enrich + analyze) — the ensure every host entry point
- * runs, so a job family's definitions exist whichever door
- * arrives first.
+ * (feed + enrich + analyze + generate) — the ensure every host
+ * entry point runs, so a job family's definitions exist
+ * whichever door arrives first.
  */
 export async function ensureScheduledAgentPipelineJobs(
   ctx: ScheduledTasksPipelineContext,
@@ -310,7 +367,8 @@ export async function ensureScheduledAgentPipelineJobs(
   const feed = await ensureScheduledAgentFeedJobs(ctx, control);
   const enrich = await ensureScheduledAgentEnrichJobs(ctx, control);
   const analyze = await ensureScheduledAgentAnalyzeJobs(ctx, control);
-  return [...feed, ...enrich, ...analyze];
+  const generate = await ensureScheduledAgentGenerateJobs(ctx, control);
+  return [...feed, ...enrich, ...analyze, ...generate];
 }
 
 /**
@@ -397,6 +455,7 @@ export async function startPipelineJobWorkflow(
       feedStepDepsForScheduledAgent(ctx),
       enrichStepDepsForScheduledAgent(ctx),
       analyzeStepDepsForScheduledAgent(ctx),
+      generateStepDepsForScheduledAgent(ctx),
     ),
     invocation: "workflow-shard",
   });
@@ -547,6 +606,11 @@ export function pipelineAnalyzeJobIds(): string[] {
   return ANALYZE_PIPELINE_CATALOG.map((e) => e.jobId);
 }
 
+/** The generate job ids this host manages (the catalog order, #3538). */
+export function pipelineGenerateJobIds(): string[] {
+  return GENERATE_PIPELINE_CATALOG.map((e) => e.jobId);
+}
+
 /**
  * The feed → enrich hand-off (#3536): the enrich stage is the
  * CONSUMER of the feed stage — when a feed job's completion is
@@ -606,9 +670,9 @@ export async function dispatchEnrichAfterFeedCompletion(
  * Best-effort at this boundary, exactly like the feed hand-off:
  * the note is already recorded, a failure is logged with its
  * code, and the analyze run's own records are its failure
- * surface. An analyze job's own completion maps to no consumer
- * here (the generate stage's hand-off is J5's), and a
- * non-completed enrich state dispatches nothing.
+ * surface. An analyze job's own completion maps to the generate
+ * hand-off below (dispatchGenerateAfterAnalyzeCompletion), and
+ * a non-completed enrich state dispatches nothing.
  */
 export async function dispatchAnalyzeAfterEnrichCompletion(
   ctx: ScheduledTasksPipelineContext,
@@ -634,6 +698,52 @@ export async function dispatchAnalyzeAfterEnrichCompletion(
       message: `[job-pipeline] analyze dispatch after enrich completion failed for "${analyzeDef.id}" (enrich job "${note.jobId}"): ${err instanceof Error ? err.message : String(err)}`,
       enrichJobId: note.jobId,
       analyzeJobId: analyzeDef.id,
+    });
+  }
+}
+
+/**
+ * The analyze → generate hand-off (#3538): the generate stage
+ * is the CONSUMER of the analyze stage — when an analyze job's
+ * completion is recorded (its queue publication, routed here
+ * by the JOB_PIPELINE_EVENTS consumer alongside the earlier
+ * hand-offs), the generate job consuming that analyze job is
+ * dispatched on the same control plane, with the service
+ * identity. The generate job reads the analyze run's PERSISTED
+ * dataset — the completion note is the trigger, never the
+ * data channel.
+ *
+ * Best-effort at this boundary, exactly like the earlier
+ * hand-offs: the note is already recorded, a failure is logged
+ * with its code, and the generate run's own records are its
+ * failure surface. A generate job's own completion maps to no
+ * consumer here (the deliver stage's hand-off is J6's), and a
+ * non-completed analyze state dispatches nothing.
+ */
+export async function dispatchGenerateAfterAnalyzeCompletion(
+  ctx: ScheduledTasksPipelineContext,
+  note: PipelineCompletionNote,
+): Promise<void> {
+  if (note.state !== "completed") return;
+  const generateDef = buildGenerateJobRegistry(envStrings(ctx.env)).forAnalyzeJob(
+    note.jobId,
+  );
+  if (!generateDef) return;
+  try {
+    const serviceLogin = getServiceUserLogin(ctx.env) ?? undefined;
+    const control = createScheduledAgentPipelineControl(ctx, serviceLogin);
+    await ensureScheduledAgentPipelineJobs(ctx, control);
+    const dispatch = await control.runJob(generateDef.id, {
+      trigger: "scheduled",
+    });
+    if (dispatch.completion) {
+      void dispatch.completion.catch(() => undefined);
+    }
+  } catch (err) {
+    structuredLog.warn("generate_dispatch_after_analyze_completion_failed", {
+      message: `[job-pipeline] generate dispatch after analyze completion failed for "${generateDef.id}" (analyze job "${note.jobId}"): ${err instanceof Error ? err.message : String(err)}`,
+      analyzeJobId: note.jobId,
+      generateJobId: generateDef.id,
     });
   }
 }

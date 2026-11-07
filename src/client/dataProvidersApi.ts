@@ -103,6 +103,8 @@ export interface DataProviderView {
   enrichJobs?: EnrichJobView[];
   /** #3537: this provider's analyze jobs as pipeline surface views. */
   analyzeJobs?: AnalyzeJobView[];
+  /** #3538: this provider's generate jobs as pipeline surface views. */
+  generateJobs?: GenerateJobView[];
   /**
    * #3530: this provider's direct feed-job status (the S1 block) —
    * null when no feed job is registered for the provider. Optional
@@ -392,6 +394,98 @@ export async function postAnalyzeJobAction(
 ): Promise<void> {
   await send<unknown>(
     `/api/data-providers/${encodeURIComponent(id)}/analyze-jobs/${encodeURIComponent(jobId)}/${action}`,
+    { method: "POST" }
+  );
+}
+
+/** One generate run's record, as the status surface serves it (#3538). */
+export interface GenerateJobRunRecordView {
+  runId: string;
+  trigger: string;
+  startedAt: string;
+  finishedAt: string;
+  status: "completed" | "partial" | "failed";
+  requested: number;
+  received: number;
+  failed: number;
+  codedError: string | null;
+  errorMessage: string | null;
+}
+
+/** One generated report's outcome, as served (#3538). */
+export interface GenerateJobReportView {
+  kind: string;
+  title: string;
+  formatsGenerated: string[];
+  formatsFailed: string[];
+  canonicalStatus: "stored" | "deduped" | "not_wired" | "failed";
+  canonicalReportId: string | null;
+}
+
+/** The generated-dataset half of a generate job's status (#3538). */
+export interface GenerateJobDatasetView {
+  jobId: string;
+  analyzeJobId: string;
+  enrichJobId: string;
+  feedJobId: string;
+  sourceId: string;
+  dataset: string;
+  reports: string[];
+  formats: string[];
+  universeLabel: string;
+  cadenceMinutes: number;
+  staleAfterMinutes: number;
+  state: "never-run" | "ready";
+  lastRun: GenerateJobRunRecordView | null;
+  history: GenerateJobRunRecordView[];
+  snapshot: {
+    artifactId: string;
+    asOf: string;
+    ageSeconds: number;
+    reportsPersisted: number;
+    formatsPersisted: number;
+    stale: boolean;
+    /** Lineage: the analyzed artifact + run this copy derives from. */
+    inputArtifactId: string;
+    inputRunId: string;
+    inputAsOf: string;
+    reports: GenerateJobReportView[];
+  } | null;
+}
+
+/**
+ * One generate job's merged surface status (#3538): the generated
+ * copy plus the job pipeline's state for the same job — the
+ * same view the copilot tools return (one source of truth).
+ */
+export interface GenerateJobView {
+  jobId: string;
+  analyzeJobId: string;
+  enrichJobId: string;
+  feedJobId: string;
+  sourceId: string;
+  dataset: string;
+  label: string;
+  generate: GenerateJobDatasetView | null;
+  pipeline: {
+    state: string;
+    currentRunId: string | null;
+    lastRunStatus: string | null;
+    lastRunAt: string | null;
+  } | null;
+  nextScheduledRun: string | null;
+}
+
+export type GenerateJobActionName = FeedJobActionName;
+
+/** Run / manage one generate job through the pipeline host (#3538). */
+export async function postGenerateJobAction(
+  id: string,
+  jobId: string,
+  action: GenerateJobActionName
+): Promise<void> {
+  await send<unknown>(
+    `/api/data-providers/${encodeURIComponent(id)}/generate-jobs/${encodeURIComponent(jobId)}/${action}`,
     { method: "POST" }
   );
 }

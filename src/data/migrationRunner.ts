@@ -1967,6 +1967,43 @@ export const MIGRATION_0055_APPROVED_FREE_QUOTA_SEED: DataMigration = {
   ('strategy', 10, 0, NULL);
 INSERT OR IGNORE INTO agent_approved_free_quota_settings (id, window_kind, at_limit_action, updated_at_ms, updated_by) VALUES
   ('default', 'month', 'upgrade_or_buy_credits', 0, NULL);`,};
+
+/**
+ * Migration 0056 — generated datasets (#3538, Pipeline J5).
+ *
+ * The generate stage's persisted output: one row per generate
+ * run, keyed by generate job id, the full artifact in
+ * artifact_json (the feed-dataset family's pattern) with status
+ * and the generated-format count denormalized for the
+ * latestUsable filter. Declared in the foundation's Drizzle
+ * schema (jobGeneratedDatasets) — the same shape in every
+ * residency (the DO residency's declared v1 schema migration
+ * carries the identical DDL).
+ *
+ * Version note: 0053 was skipped by the #3263 line before J4
+ * landed (its migrations are 0054/0055), so this family takes
+ * the next version above the current maximum rather than
+ * backfilling a number another lane may have reserved.
+ */
+export const MIGRATION_0056_JOB_GENERATED_DATASETS: DataMigration = {
+  version: 56,
+  name: "0056_job_generated_datasets",
+  sql: `CREATE TABLE IF NOT EXISTS job_generated_datasets (
+      id TEXT PRIMARY KEY,
+      created_at TEXT NOT NULL,
+      job_id TEXT NOT NULL,
+      analyze_job_id TEXT NOT NULL,
+      source_id TEXT NOT NULL,
+      dataset TEXT NOT NULL,
+      run_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      as_of TEXT NOT NULL,
+      rows_persisted INTEGER NOT NULL,
+      artifact_json TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_job_generated_datasets_job
+      ON job_generated_datasets (job_id, created_at DESC, id DESC)`,
+};
 export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANCE,
   MIGRATION_0002_AGENT_CHAINS_SCHEDULES,
   MIGRATION_0003_AGENT_SHARD_JOBS,
@@ -2021,6 +2058,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0052_JOB_ANALYZED_DATASETS,
   MIGRATION_0054_APPROVED_FREE_QUOTA,
   MIGRATION_0055_APPROVED_FREE_QUOTA_SEED,
+  MIGRATION_0056_JOB_GENERATED_DATASETS,
 ];
 
 function splitStatements(sqlText: string): string[] {
