@@ -67,11 +67,13 @@ import {
   createScheduledAgentPipelineControl,
   declarePipelineTasks,
   dispatchAnalyzeAfterEnrichCompletion,
+  dispatchDeliverAfterGenerateCompletion,
   dispatchEnrichAfterFeedCompletion,
   dispatchGenerateAfterAnalyzeCompletion,
   ensureScheduledAgentPipelineJobs,
   listPipelineCompletions,
   pipelineAnalyzeJobIds,
+  pipelineDeliverJobIds,
   pipelineEnrichJobIds,
   pipelineGenerateJobIds,
   pipelineJobIds,
@@ -124,6 +126,16 @@ import {
   type GenerateJobSurfaceView,
 } from "../services/generatePipelineJobs";
 import { createGeneratedDatasetPorts } from "../data/createGeneratedDatasetPorts";
+// Issue #3539 (Pipeline J6): the deliver jobs' surface on this
+// host — the merged status view's composition pieces (the RPCs
+// below delegate to the same ONE control plane).
+import { buildDeliverJobRegistry } from "../services/deliverJobs";
+import {
+  buildDeliverJobSurfaceView,
+  DELIVER_PIPELINE_CATALOG,
+  type DeliverJobSurfaceView,
+} from "../services/deliverPipelineJobs";
+import { createDeliveryDatasetPorts } from "../data/createDeliveryDatasetPorts";
 import { createSocialBriefStoreFromNamespace } from "./social/briefStore";
 import {
   createSocialPipelineStoresFromNamespace,
@@ -686,14 +698,51 @@ export class ScheduledAgent extends PortThink {
     return views;
   }
 
+  /** One deliver job's merged surface status (dataset + pipeline, #3539). */
+  async getDeliverJobSurfaceStatus(jobId: string): Promise<DeliverJobSurfaceView> {
+    const ctx = this.pipelineContext();
+    const control = createScheduledAgentPipelineControl(ctx);
+    await ensureScheduledAgentPipelineJobs(ctx, control);
+    const entry = DELIVER_PIPELINE_CATALOG.find((e) => e.jobId === jobId);
+    if (!entry) {
+      throw new Error(
+        `DELIVER_JOB_NOT_FOUND: no deliver job with id "${jobId}" exists in the deliver catalog.`,
+      );
+    }
+    const envStrings: Record<string, string | undefined> = {};
+    for (const [key, value] of Object.entries(
+      this.env as unknown as Record<string, unknown>,
+    )) {
+      if (typeof value === "string") envStrings[key] = value;
+    }
+    return buildDeliverJobSurfaceView({
+      entry,
+      deliveryStore: createDeliveryDatasetPorts(this.env),
+      registry: buildDeliverJobRegistry(envStrings),
+      pipeline: await control.getJob(jobId),
+      nowMs: Date.now(),
+    });
+  }
+
+  /** Every deliver job's merged surface status, in catalog order (#3539). */
+  async listDeliverJobSurfaceStatuses(): Promise<DeliverJobSurfaceView[]> {
+    const views: DeliverJobSurfaceView[] = [];
+    for (const jobId of pipelineDeliverJobIds()) {
+      views.push(await this.getDeliverJobSurfaceStatus(jobId));
+    }
+    return views;
+  }
+
   /**
    * The queue consumer's intake: record one routed completion —
    * then the stage hand-offs: a completed feed job dispatches
    * the enrich job consuming it (#3536), a completed enrich
-   * job dispatches the analyze job consuming it (#3537), and a
+   * job dispatches the analyze job consuming it (#3537), a
    * completed analyze job dispatches the generate job consuming
-   * it (#3538) (best-effort; the recording never depends on a
-   * dispatch).
+   * it (#3538), and a completed generate job dispatches the
+   * deliver job consuming it (#3539) (best-effort; the
+   * recording never depends on a dispatch). Deliver is the end
+   * of the chain: its completions dispatch nothing.
    */
   async recordPipelineCompletion(note: PipelineCompletionNote): Promise<void> {
     const ctx = this.pipelineContext();
@@ -701,6 +750,7 @@ export class ScheduledAgent extends PortThink {
     await dispatchEnrichAfterFeedCompletion(ctx, note);
     await dispatchAnalyzeAfterEnrichCompletion(ctx, note);
     await dispatchGenerateAfterAnalyzeCompletion(ctx, note);
+    await dispatchDeliverAfterGenerateCompletion(ctx, note);
   }
 
   /** Recorded pipeline completions, newest first. */

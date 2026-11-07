@@ -35,10 +35,12 @@ import { buildFeedJobRegistry } from "../services/feedJobs";
 import { buildEnrichJobRegistry } from "../services/enrichJobs";
 import { buildAnalyzeJobRegistry } from "../services/analyzeJobs";
 import { buildGenerateJobRegistry } from "../services/generateJobs";
+import { buildDeliverJobRegistry, createDeliverChannelSenders } from "../services/deliverJobs";
 import { createFeedDatasetAdapter } from "../data/createFeedDatasetPorts";
 import { createEnrichedDatasetAdapter } from "../data/createEnrichedDatasetPorts";
 import { createAnalyzedDatasetPorts } from "../data/createAnalyzedDatasetPorts";
 import { createGeneratedDatasetPorts } from "../data/createGeneratedDatasetPorts";
+import { createDeliveryDatasetPorts } from "../data/createDeliveryDatasetPorts";
 import { D1IndexListStore } from "../data/d1IndexListAdapter";
 import {
   createIndexMembershipService,
@@ -88,11 +90,11 @@ export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
       latestRun: (jobId) => runRecords.latestByJob(jobId),
     },
     publisher: messaging.ports?.publisher ?? null,
-    // #3535/#3536/#3537/#3538: the workflow residency composes THE same step
+    // #3535/#3536/#3537/#3538/#3539: the workflow residency composes THE same step
     // registry as the ScheduledAgent host (one registry, every
     // residency — the composed registry includes the J1
-    // built-ins, the feed steps, enrich.apply, analyze.apply, and
-    // generate.apply). Residency
+    // built-ins, the feed steps, enrich.apply, analyze.apply,
+    // generate.apply, and deliver.apply). Residency
     // rule: the dataset and index-list stores are D1 here, and
     // the universe step runs (its service is a network fetch),
     // but capture-wired PROVIDERS need a DO host's storage (the
@@ -112,6 +114,12 @@ export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
     // DO to write the canonical copy into — so each report's
     // canonical leg is recorded not_wired with its coded reason
     // on the generated artifact (generateJobs.ts carries the rule).
+    // The deliver step's dataset stores are both D1 too (#3539),
+    // and its channel senders are env-built in this residency
+    // exactly as on the host, so a deliver run dispatched here
+    // also executes fully; a transport this deployment does not
+    // configure records its channel not_configured per report
+    // (deliverJobs.ts carries the rule).
     steps: createPipelineStepRegistry(
       {
         registry: buildFeedJobRegistry(envStrings),
@@ -156,6 +164,15 @@ export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
         analyzedStore: createAnalyzedDatasetPorts(env),
         generatedStore: createGeneratedDatasetPorts(env),
         canonicalReportStore: null,
+        shardsFor: async (jobId) =>
+          (await stores.definitions.getDefinition(jobId))?.config.processing
+            .shards ?? [],
+      },
+      {
+        registry: buildDeliverJobRegistry(envStrings),
+        generatedStore: createGeneratedDatasetPorts(env),
+        deliveryStore: createDeliveryDatasetPorts(env),
+        ...createDeliverChannelSenders(env as unknown as Record<string, unknown>),
         shardsFor: async (jobId) =>
           (await stores.definitions.getDefinition(jobId))?.config.processing
             .shards ?? [],
