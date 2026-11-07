@@ -422,7 +422,54 @@ export function ToolResultView({
     );
   }
 
-  // 6. Generic Fallback Tool (only for unrecognized custom tools)
+  // 6. Async Background Job Receipt Card (#3605, #3624)
+  if (data?.jobId || data?.statusUrl) {
+    const jobId = String(data?.jobId || data?.statusUrl?.split("/").pop() || "job");
+    const statusUrl = String(data?.statusUrl || `/api/jobs/${jobId}`);
+    const statusTone = data?.status === "completed" ? "success" : data?.status === "failed" ? "danger" : "info";
+    return (
+      <Card padding="none" className="tool-card async-job-card">
+        <div className="tool-card-header" onClick={() => setOpen(!open)}>
+          <span className="tool-icon">⏱️</span>
+          <div className="tool-summary">
+            <strong>Background Job:</strong> <code>{jobId}</code>
+          </div>
+          <Badge size="xs" uppercase tone={statusTone}>
+            {data?.status || "queued"}
+          </Badge>
+          <span className="toggle-arrow">{open ? "▲" : "▼"}</span>
+        </div>
+        <div style={{ padding: "var(--space-2) var(--space-3)", display: "flex", gap: "var(--space-2)", alignItems: "center", borderTop: "1px solid var(--color-border, #e5e7eb)" }}>
+          <a
+            href={statusUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="job-link-btn"
+            style={{ fontSize: "var(--font-size-xs)", textDecoration: "underline" }}
+          >
+            Review Job Details ({statusUrl})
+          </a>
+          {onAction && jobId && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onAction(`Check status of job ${jobId}`)}
+              title="Poll the status of this background job"
+            >
+              Check Status
+            </Button>
+          )}
+        </div>
+        {open && (
+          <div className="tool-card-body">
+            <pre>{JSON.stringify(data, null, 2)}</pre>
+          </div>
+        )}
+      </Card>
+    );
+  }
+
+  // 7. Generic Fallback Tool (only for unrecognized custom tools)
   return (
     <details className="tool-call generic-tool">
       <summary>🔧 Tool Call: {toolType}</summary>

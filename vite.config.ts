@@ -31,6 +31,7 @@ export default defineConfig({
   test: {
     testTimeout: 25000,
     hookTimeout: 25000,
+    exclude: ["**/node_modules/**", "**/.git/**", "**/.worktrees/**", "dist/**"],
     // #411: hermetic suite — block outbound fetch in tests by default;
     // suites stub the exact responses they need.
     setupFiles: ["./tests/netblock.setup.ts"],

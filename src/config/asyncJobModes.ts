@@ -291,3 +291,24 @@ export function shouldQueueApiRequest(opts: {
   if (opts.isJobsEndpoint || opts.isMcpEndpoint || opts.isScheduleEndpoint) return false;
   return opts.deliveryMode === "queued";
 }
+
+/**
+ * #3624 (#3605): MCP tools that are strictly synchronous and NEVER wrapped into async jobs.
+ * These tools run sub-millisecond local reads/writes (status queries, job
+ * retrieval, and immediate Stock Copilot runtime telemetry/controls) and must
+ * return inline responses without being queued into background jobs.
+ */
+export const SYNCHRONOUS_MCP_TOOLS = new Set<string>([
+  "get_async_job",
+  "list_async_jobs",
+  "stock_copilot_status",
+  "stock_copilot_control",
+  "stock_copilot_introspect",
+  "stock_copilot_learnings",
+  "stock_copilot_evaluate",
+]);
+
+export function isSynchronousMcpTool(name: string): boolean {
+  return SYNCHRONOUS_MCP_TOOLS.has(name);
+}
+
