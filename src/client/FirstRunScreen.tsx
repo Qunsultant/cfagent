@@ -525,8 +525,8 @@ export function FirstRunScreen({ userLogin, initialStep, onComplete, onDismiss, 
               <>
                 <p>
                   Brokerage status: Connected
-                  {etrade.environment ? ` (${etrade.environment})` : ""}. Your
-                  E*TRADE account is connected.
+                  {etrade.environment ? ` (${etrade.environment})` : ""}. Your{" "}
+                  {brokerStep.label} account is connected.
                 </p>
                 <Button type="button" variant="primary" onClick={() => goTo(4)}>
                   Continue
@@ -535,12 +535,12 @@ export function FirstRunScreen({ userLogin, initialStep, onComplete, onDismiss, 
             ) : (
               <>
                 <p>
-                  Brokerage status: Not connected. Connect E*TRADE to trade
-                  from the hub, or continue without connecting — you can
-                  connect later from the trading view.
+                  Brokerage status: Not connected. Connect {brokerStep.label}{" "}
+                  to trade from the hub, or continue without connecting — you
+                  can connect later from the trading view.
                 </p>
                 <Button type="button" variant="primary" onClick={connectBrokerage}>
-                  Connect E*TRADE
+                  Connect {brokerStep.label}
                 </Button>{" "}
                 <Button type="button" variant="secondary" onClick={() => goTo(4)}>
                   Continue without connecting
