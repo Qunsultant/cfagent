@@ -75,6 +75,31 @@ export function getScreeningProviders(assetClass: ScreeningAssetClass): Screenin
   return SCREENING_PROVIDERS.filter((provider) => provider.assetClasses.includes(assetClass));
 }
 
+/**
+ * Issue #3525 S3 — the Stock Hub's initial screening-provider selection
+ * follows the tenant's configured data provider instead of assuming one
+ * brand. Tenant data-provider ids are registry ids (`yahoo`), while the
+ * hub's selector variants carry their own ids (`yahoo-finance`); this
+ * table is the only place that translation lives. A tenant provider with
+ * no hub variant (public, nasdaq, alpaca today) falls back to the first
+ * available variant, exactly as an unknown selection did before.
+ */
+const TENANT_PROVIDER_TO_VARIANT_ID: Readonly<Record<string, string>> = {
+  etrade: "etrade",
+  yahoo: "yahoo-finance",
+};
+
+export function resolveInitialScreeningProviderId(
+  tenantDataProviderId: string,
+  providers: readonly ScreeningProviderAdapter[],
+): string {
+  if (providers.length === 0) return "";
+  const mapped = TENANT_PROVIDER_TO_VARIANT_ID[tenantDataProviderId];
+  if (mapped && providers.some((provider) => provider.id === mapped)) return mapped;
+  if (providers.some((provider) => provider.id === tenantDataProviderId)) return tenantDataProviderId;
+  return providers[0].id;
+}
+
 export function providerSupportsFilter(
   provider: ScreeningProviderAdapter | undefined,
   assetClass: ScreeningAssetClass,
