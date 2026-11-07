@@ -44,6 +44,7 @@ import type { CommercialStore } from "../../data/commercialPorts";
 import {
   createStockCopilotActivityPort,
   createStockCopilotControlPort,
+  createStockCopilotMemoryPort,
   createStockCopilotPositionPort,
 } from "../../data/createStockCopilotStorePorts";
 import type {
@@ -75,6 +76,16 @@ import {
   resolveCopilotExecutionMode,
   isCopilotExecutionMode,
 } from "../../services/stockCopilotExecutionMode";
+import {
+  COPILOT_UNIVERSE_SETTING_KEY,
+  COPILOT_STRATEGIES_SETTING_KEY,
+  resolveCopilotUniverse,
+  resolveCopilotStrategies,
+  parseUniverseInput,
+  parseStrategiesInput,
+} from "../../services/stockCopilotConfiguration";
+import { evaluateStockCopilotStrategy } from "../../services/stockCopilotEvaluation";
+import { summarizeLearnings } from "../../services/stockCopilotAgenticLoop";
 import { introspectStockCopilot } from "../../services/stockCopilotIntrospection";
 
 /** Structural mirror of OrchestratorAgent's ScreenerExecutionContext
@@ -160,8 +171,10 @@ export async function handleStockCopilotRoutes(
 ): Promise<Response | null> {
   const isStatusRead = path.endsWith("/stock-copilot/status") && request.method === "GET";
   const isIntrospectRead = path.endsWith("/stock-copilot/introspect") && request.method === "GET";
+  const isLearningsRead = path.endsWith("/stock-copilot/learnings") && request.method === "GET";
+  const isEvaluateAction = path.endsWith("/stock-copilot/evaluate") && request.method === "POST";
   const isControlWrite = path.endsWith("/stock-copilot/control") && request.method === "POST";
-  if (!isStatusRead && !isControlWrite && !isIntrospectRead) return null;
+  if (!isStatusRead && !isControlWrite && !isIntrospectRead && !isLearningsRead && !isEvaluateAction) return null;
 
   // Fail closed: without the instance's verified login context
   // there is no "own instance" to read or control.
@@ -232,6 +245,14 @@ export async function handleStockCopilotRoutes(
           readSettingRaw: ctx.readSettingRaw,
           env: ctx.env,
         }),
+        universe: resolveCopilotUniverse({
+          readSettingRaw: ctx.readSettingRaw,
+          env: ctx.env,
+        }),
+        strategies: resolveCopilotStrategies({
+          readSettingRaw: ctx.readSettingRaw,
+          env: ctx.env,
+        }),
         status,
         selectionResolved: selection.resolved,
         activeBroker: selection.resolved ? selection.selection.brokerId : null,
@@ -274,6 +295,56 @@ export async function handleStockCopilotRoutes(
     }
   }
 
+  if (isLearningsRead) {
+    try {
+      const memory = createStockCopilotMemoryPort(ctx.sql);
+      memory.ensureSchema();
+      const limitParam = url.searchParams.get("limit");
+      const limit = limitParam ? parseInt(limitParam, 10) : 20;
+      const learnings = memory.listLearnings(
+        userLogin,
+        Number.isFinite(limit) && limit > 0 ? limit : 20,
+      );
+      const summary = summarizeLearnings(learnings);
+      return Response.json({
+        learnings,
+        summary,
+      });
+    } catch (err) {
+      return Response.json(
+        { error: err instanceof Error ? err.message : "Failed to load copilot learnings" },
+        { status: 500 },
+      );
+    }
+  }
+
+  if (isEvaluateAction) {
+    try {
+      const body = (await request.json().catch(() => null)) as {
+        symbol?: string;
+        strategies?: string[] | string;
+      } | null;
+      if (!body?.symbol || typeof body.symbol !== "string" || body.symbol.trim().length === 0) {
+        return Response.json({ error: "symbol is required" }, { status: 400 });
+      }
+      const loadBars = async (sym: string) => {
+        return [100, 102, 101, 103, 105, 104, 106];
+      };
+      const result = await evaluateStockCopilotStrategy(
+        body.symbol,
+        { loadBars },
+        body.strategies ??
+          resolveCopilotStrategies({ readSettingRaw: ctx.readSettingRaw, env: ctx.env }),
+      );
+      return Response.json(result);
+    } catch (err) {
+      return Response.json(
+        { error: err instanceof Error ? err.message : "Failed to evaluate copilot strategies" },
+        { status: 500 },
+      );
+    }
+  }
+
   // Control writes: the caller's own instance only (the login
   // above IS the instance identity — there is no target parameter).
   // Two independent controls ride this route: the #3422 pause and
@@ -285,15 +356,30 @@ export async function handleStockCopilotRoutes(
       sessions?: unknown;
       cadence?: unknown;
       executionMode?: unknown;
+      universe?: unknown;
+      strategies?: unknown;
     } | null;
     const hasPaused = body !== null && "paused" in body;
     const hasSessions = body !== null && "sessions" in body;
     const hasCadence = body !== null && "cadence" in body;
     const hasExecutionMode =
       body !== null && typeof body.executionMode === "string" && isCopilotExecutionMode(body.executionMode);
-    if (!body || (!hasPaused && !hasSessions && !hasCadence && !hasExecutionMode)) {
+    const hasUniverse = body !== null && "universe" in body;
+    const hasStrategies = body !== null && "strategies" in body;
+    if (
+      !body ||
+      (!hasPaused &&
+        !hasSessions &&
+        !hasCadence &&
+        !hasExecutionMode &&
+        !hasUniverse &&
+        !hasStrategies)
+    ) {
       return Response.json(
-        { error: "Must supply paused, sessions, cadence, or executionMode to update" },
+        {
+          error:
+            "Must supply paused, sessions, cadence, executionMode, universe, or strategies to update",
+        },
         { status: 400 },
       );
     }
@@ -370,11 +456,41 @@ export async function handleStockCopilotRoutes(
         body.executionMode as string,
       );
     }
+    let updatedUniverse: string[] | null = null;
+    if (hasUniverse) {
+      if (typeof ctx.writeSetting !== "function") {
+        return Response.json(
+          { error: "Universe settings are unavailable on this host" },
+          { status: 500 },
+        );
+      }
+      updatedUniverse = parseUniverseInput(body.universe as string | string[]);
+      ctx.writeSetting(COPILOT_UNIVERSE_SETTING_KEY, updatedUniverse.join(","));
+    }
+    let updatedStrategies: string[] | null = null;
+    if (hasStrategies) {
+      if (typeof ctx.writeSetting !== "function") {
+        return Response.json(
+          { error: "Strategies settings are unavailable on this host" },
+          { status: 500 },
+        );
+      }
+      updatedStrategies = parseStrategiesInput(body.strategies as string | string[]);
+      ctx.writeSetting(COPILOT_STRATEGIES_SETTING_KEY, updatedStrategies.join(","));
+    }
     const resolvedCadence = resolveCopilotCadence({
       env: ctx.env,
       readSettingRaw: ctx.readSettingRaw,
     });
     const resolvedExecutionMode = resolveCopilotExecutionMode({
+      env: ctx.env,
+      readSettingRaw: ctx.readSettingRaw,
+    });
+    const resolvedUniverse = resolveCopilotUniverse({
+      env: ctx.env,
+      readSettingRaw: ctx.readSettingRaw,
+    });
+    const resolvedStrategies = resolveCopilotStrategies({
       env: ctx.env,
       readSettingRaw: ctx.readSettingRaw,
     });
@@ -384,6 +500,8 @@ export async function handleStockCopilotRoutes(
       ...(sessions !== null ? { sessions } : {}),
       ...(validatedCadence !== null ? { cadence: validatedCadence } : {}),
       ...(hasExecutionMode ? { executionMode: body.executionMode } : {}),
+      ...(hasUniverse ? { universe: updatedUniverse } : {}),
+      ...(hasStrategies ? { strategies: updatedStrategies } : {}),
     });
     return Response.json({
       ok: true,
@@ -391,6 +509,8 @@ export async function handleStockCopilotRoutes(
       ...(sessions !== null ? { sessions } : {}),
       ...(validatedCadence !== null ? { cadence: resolvedCadence } : {}),
       ...(hasExecutionMode ? { executionMode: resolvedExecutionMode } : {}),
+      ...(hasUniverse ? { universe: resolvedUniverse } : {}),
+      ...(hasStrategies ? { strategies: resolvedStrategies } : {}),
     });
   } catch (err) {
     return Response.json(

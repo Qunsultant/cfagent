@@ -306,4 +306,47 @@ flowchart TD
 3. **Channel-Uniform Execution:**
    - The agentic loop and deterministic trajectory are identically accessible through Chat, MCP tools, Webhooks, and Schedules.
 
+---
+
+## 8. Omnichannel Capabilities & Platform MCP Tools (#3514)
+
+```mermaid
+flowchart LR
+    subgraph CHANNELS ["Every Channel Surface"]
+        C_CHAT["Chat (UI)"]
+        C_MCP["MCP Server Tools"]
+        C_SCHED["Scheduled Runner"]
+        C_REST["REST API Routes"]
+    end
+
+    subgraph DOOR ["Stock Copilot Mesh Door"]
+        D_STATUS["stock_copilot_status"]
+        D_CONTROL["stock_copilot_control<br/>(Universe, Strategies, Cadence, Sessions, Mode)"]
+        D_INTRO["stock_copilot_introspect<br/>(5-Stage Pipeline)"]
+        D_LEARN["stock_copilot_learnings<br/>(Distilled Memory)"]
+        D_EVAL["stock_copilot_evaluate<br/>(On-Demand Pattern Testing)"]
+    end
+
+    subgraph ENGINE ["Autonomous Trading Engine"]
+        E_DUAL["Dual-Mode Execution<br/>(Deterministic / Agentic)"]
+        E_PRESET["Presets: NASDAQ-100, S&P-100,<br/>Mega-Tech, Semis"]
+        E_RULES["4-Strategy Catalog:<br/>SMA, Mean Reversion, Breakout, RSI"]
+    end
+
+    C_CHAT --> DOOR
+    C_MCP --> DOOR
+    C_SCHED --> DOOR
+    C_REST --> DOOR
+
+    DOOR --> ENGINE
+```
+
+### 8.1 Expanded Channel Toolset
+1. **Dynamic Universe Selection:** Presets (`NASDAQ100`, `SP100`, `MEGA_TECH`, `SEMIS`) or custom symbol arrays externalized in `mas_settings` (`stock_copilot:universe`).
+2. **Strategy Catalog Control:** Run all 4 strategies (`all`) or custom subsets externalized in `mas_settings` (`stock_copilot:strategies`).
+3. **On-Demand Evaluation (`stock_copilot_evaluate`):** Tests symbols against strategies over live bars without order risk.
+4. **Distilled Learning Queries (`stock_copilot_learnings`):** Invocable across MCP and chat to review critic memory and reflections.
+5. **Unified Control (`stock_copilot_control`):** Adjust cadence, sessions, mode, universe, and strategies with fail-closed identity verification.
+
+
 

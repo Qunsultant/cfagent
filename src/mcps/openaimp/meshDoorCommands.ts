@@ -178,12 +178,16 @@ import {
   getStockCopilotStatusViaDoor,
   controlStockCopilotViaDoor,
   introspectStockCopilotViaDoor,
+  getLearningsViaDoor,
+  evaluateStockCopilotViaDoor,
   type StockCopilotDoorContext,
   type StockCopilotStatusResult,
   type StockCopilotControlInput,
   type StockCopilotControlResult,
+  type StockCopilotLearningsResult,
 } from "../../agents/orchestrator/meshStockCopilotDoor";
 import type { StockCopilotIntrospectionResult } from "../../services/stockCopilotIntrospection";
+import type { StockCopilotEvaluationResult } from "../../services/stockCopilotEvaluation";
 import { COPILOT_SESSIONS } from "../../services/stockCopilotSessions";
 import { UNIVERSES, type UniverseId } from "../../trading";
 import { createStructuredLogger } from "../../observability/structuredLogger";
@@ -1397,7 +1401,7 @@ export class StockCopilotStatusCommand implements IMcpToolCommand<Record<string,
 export class StockCopilotControlCommand implements IMcpToolCommand<StockCopilotControlInput> {
   readonly name = "stock_copilot_control";
   readonly description =
-    "Pause or resume the autonomous Stock Copilot trading loop, set cycle cadence/interval, or update its enabled trading sessions. Pausing halts new entries while continuing to manage existing bracket exits.";
+    "Pause or resume the autonomous Stock Copilot trading loop, set cycle cadence/interval, update enabled trading sessions, configure watch universe, or switch execution mode (deterministic vs agentic).";
   readonly jsonSchema = {
     type: "object" as const,
     properties: {
@@ -1421,6 +1425,17 @@ export class StockCopilotControlCommand implements IMcpToolCommand<StockCopilotC
         },
         description: "Enabled trading session IDs (pre_market, regular, after_hours, exto).",
       },
+      universe: {
+        description: "Universe symbols array or preset name (e.g. 'NASDAQ100', 'SP100', 'MEGA_TECH', 'SEMIS').",
+      },
+      strategies: {
+        description: "Strategy names array (e.g. ['sma_crossover', 'mean_reversion']) or 'all'.",
+      },
+      executionMode: {
+        type: "string",
+        enum: ["deterministic", "agentic"],
+        description: "Active execution mode: 'deterministic' (rule-based) or 'agentic' (perceive-plan-critic-learn).",
+      },
     },
   };
   readonly zodSchema = z.object({
@@ -1428,6 +1443,9 @@ export class StockCopilotControlCommand implements IMcpToolCommand<StockCopilotC
     pauseUntil: z.string().optional().describe("Pause trading until specific time (e.g. '9:30 AM')"),
     cadence: z.string().optional().describe("Cycle interval cadence (e.g. 'every 1 hour', 'every 30 minutes')"),
     sessions: z.array(z.enum(COPILOT_SESSIONS as unknown as [string, ...string[]])).optional().describe("Enabled session IDs"),
+    universe: z.union([z.string(), z.array(z.string())]).optional().describe("Universe preset or ticker array"),
+    strategies: z.union([z.string(), z.array(z.string())]).optional().describe("Strategy array or 'all'"),
+    executionMode: z.enum(["deterministic", "agentic"]).optional().describe("Execution mode"),
   });
 
   async execute(
@@ -1445,6 +1463,90 @@ export class StockCopilotControlCommand implements IMcpToolCommand<StockCopilotC
       actingLogin: actingLogin ?? null,
       paused: result.paused,
       enabledSessions: result.enabledSessions,
+      executionMode: result.executionMode,
+    });
+    return result;
+  }
+}
+
+export class StockCopilotLearningsCommand implements IMcpToolCommand<{ limit?: number }> {
+  readonly name = "stock_copilot_learnings";
+  readonly description =
+    "Retrieve distilled learnings, critic verdicts, and self-corrections from recent autonomous Stock Copilot cycles. Explains past adaptation recommendations and trade rejections.";
+  readonly jsonSchema = {
+    type: "object" as const,
+    properties: {
+      limit: {
+        type: "number",
+        description: "Maximum number of learning records to retrieve (default: 20).",
+      },
+    },
+  };
+  readonly zodSchema = z.object({
+    limit: z.number().int().positive().max(100).optional().describe("Maximum learning records to return"),
+  });
+
+  async execute(
+    input: { limit?: number },
+    context: McpToolContext,
+  ): Promise<StockCopilotLearningsResult> {
+    const actingLogin = context.actingLogin?.();
+    await recordDoorHop(context, this.name, "OrchestratorAgent");
+    const result = await getLearningsViaDoor(
+      meshStockCopilotDoorContextFromMcp(context),
+      actingLogin,
+      input.limit,
+    );
+    context.audit("stock_copilot_learnings", "mcp", {
+      actingLogin: actingLogin ?? null,
+      count: result.learnings.length,
+    });
+    return result;
+  }
+}
+
+export class StockCopilotEvaluateCommand implements IMcpToolCommand<{ symbol: string; strategies?: string[] }> {
+  readonly name = "stock_copilot_evaluate";
+  readonly description =
+    "Evaluate a single stock symbol against the Copilot's active pattern and quantitative strategies on demand without placing orders or modifying portfolio positions.";
+  readonly jsonSchema = {
+    type: "object" as const,
+    properties: {
+      symbol: {
+        type: "string",
+        description: "Stock ticker symbol (e.g. AAPL, NVDA, TSLA).",
+      },
+      strategies: {
+        type: "array",
+        items: {
+          type: "string",
+        },
+        description: "Optional list of strategy IDs to evaluate against (default: active strategies).",
+      },
+    },
+    required: ["symbol"],
+  };
+  readonly zodSchema = z.object({
+    symbol: z.string().min(1).describe("Stock ticker symbol"),
+    strategies: z.array(z.string()).optional().describe("Optional strategy IDs"),
+  });
+
+  async execute(
+    input: { symbol: string; strategies?: string[] },
+    context: McpToolContext,
+  ): Promise<StockCopilotEvaluationResult> {
+    const actingLogin = context.actingLogin?.();
+    await recordDoorHop(context, this.name, "OrchestratorAgent");
+    const result = await evaluateStockCopilotViaDoor(
+      meshStockCopilotDoorContextFromMcp(context),
+      actingLogin,
+      input.symbol,
+      input.strategies,
+    );
+    context.audit("stock_copilot_evaluate", "mcp", {
+      actingLogin: actingLogin ?? null,
+      symbol: result.symbol,
+      barsCount: result.barsCount,
     });
     return result;
   }

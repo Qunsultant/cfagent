@@ -48,6 +48,7 @@ import type { CommercialStore } from "../../data/commercialPorts";
 import {
   createStockCopilotActivityPort,
   createStockCopilotControlPort,
+  createStockCopilotMemoryPort,
   createStockCopilotPositionPort,
 } from "../../data/createStockCopilotStorePorts";
 import { MarketDataResearchService } from "../../services/marketDataResearch";
@@ -61,6 +62,11 @@ import {
   DEFAULT_STOCK_COPILOT_SCHEDULE,
   resolveCopilotCadence,
 } from "../../services/stockCopilotCadence";
+import { resolveCopilotExecutionMode } from "../../services/stockCopilotExecutionMode";
+import {
+  resolveCopilotUniverse,
+  resolveCopilotStrategies,
+} from "../../services/stockCopilotConfiguration";
 import { TradingPlatformRegistry } from "../../trading";
 
 /** The one code-declared task this slice arms. */
@@ -144,7 +150,19 @@ export async function runStockCopilotCycleForInstance(
     platform,
     selection,
     enabledSessions,
-    universe: copilotUniverseFromEnv(ctx.env),
+    universe: resolveCopilotUniverse({
+      readSettingRaw: ctx.readSettingRaw,
+      env: ctx.env,
+    }),
+    strategies: resolveCopilotStrategies({
+      readSettingRaw: ctx.readSettingRaw,
+      env: ctx.env,
+    }),
+    executionMode: resolveCopilotExecutionMode({
+      readSettingRaw: ctx.readSettingRaw,
+      env: ctx.env,
+    }),
+    memory: createStockCopilotMemoryPort(sql),
     loadBars: async (symbol: string) => {
       // The facade's alpaca-first order with explicit-unavailable
       // failure (#923): no synthetic bars are ever substituted, so a

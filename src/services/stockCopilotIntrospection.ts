@@ -36,6 +36,10 @@ import {
   copilotUniverseFromEnv,
 } from "./stockCopilot";
 import {
+  resolveCopilotUniverse,
+  resolveCopilotStrategies,
+} from "./stockCopilotConfiguration";
+import {
   resolveCopilotSessions,
   type CopilotSessionId,
 } from "./stockCopilotSessions";
@@ -232,8 +236,8 @@ export async function introspectStockCopilot(
   const activeMode = selection.resolved ? selection.selection.mode : "paper";
   const cadence = resolveCopilotCadence({ env, readSettingRaw });
   const enabledSessions = resolveCopilotSessions({ readSettingRaw, env });
-  const universe = copilotUniverseFromEnv(env);
-  const strategies = DEFAULT_COPILOT_STRATEGIES;
+  const universe = resolveCopilotUniverse({ readSettingRaw, env });
+  const strategies = resolveCopilotStrategies({ readSettingRaw, env });
 
   const control = controlPort.getControl(userLogin);
   const paused = control?.paused === true;
