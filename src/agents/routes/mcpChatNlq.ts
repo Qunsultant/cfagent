@@ -193,6 +193,12 @@ export async function handleMcpChatNlqRoutes(
           env: ctx.env,
           orm,
           sessionId,
+          // #3635: the owning instance's SQL storage handle — the /mcp
+          // surface never carried it, so every storage-needing door
+          // (stock_copilot_*, run_stock_screen sync path) refused with
+          // door_unavailable. Optional (getStorage?.()) so mock ctxs
+          // without it degrade to today's honest refusal.
+          storage: ctx.getStorage?.(),
           // #1744: the calling principal, resolved from the
           // Worker-forwarded identity headers (x-user-login always,
           // x-principal-kind session|api-key). No login resolves to
