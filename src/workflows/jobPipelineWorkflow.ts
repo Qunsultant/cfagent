@@ -30,7 +30,14 @@ import {
   D1JobRunRecordStore,
 } from "../data/d1JobRunRecordAdapter";
 import { createJobPipelineMessaging } from "../messaging/createJobPipelineMessaging";
-import { createBuiltinStepRegistry } from "../services/jobPipelineSteps";
+import { createFeedStepRegistry } from "../services/feedPipelineJobs";
+import { buildFeedJobRegistry } from "../services/feedJobs";
+import { createFeedDatasetAdapter } from "../data/createFeedDatasetPorts";
+import { D1IndexListStore } from "../data/d1IndexListAdapter";
+import {
+  createIndexMembershipService,
+  createWikipediaIndexMembershipAdapter,
+} from "../trading";
 import type { JobPipelineDeps } from "../services/jobPipelineEngine";
 import { JobPipelineError } from "../services/jobPipelineConfig";
 import {
@@ -50,17 +57,64 @@ export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
     );
   }
   const db = env.AGENT_DB;
+  const stores = createJobPipelineStoresFromD1(db);
   const runRecords = new D1JobRunRecordStore(createD1JobRunRecordDb(db));
   const messaging = createJobPipelineMessaging(env);
+  const envStrings: Record<string, string | undefined> = {};
+  for (const [key, value] of Object.entries(env as unknown as Record<string, unknown>)) {
+    if (typeof value === "string") envStrings[key] = value;
+  }
+  const universeStore = new D1IndexListStore(
+    db as ConstructorParameters<typeof D1IndexListStore>[0],
+  );
+  const fetchHtml = async (url: string): Promise<string> => {
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(`Wikipedia fetch failed for ${url}: HTTP ${res.status}`);
+    }
+    return res.text();
+  };
   return {
-    stores: createJobPipelineStoresFromD1(db),
+    stores,
     runRecorder: {
       recordRun: (record) => runRecords.record(record),
       listRuns: (jobId, limit) => runRecords.listByJob(jobId, limit),
       latestRun: (jobId) => runRecords.latestByJob(jobId),
     },
     publisher: messaging.ports?.publisher ?? null,
-    steps: createBuiltinStepRegistry(),
+    // #3535: the workflow residency composes the same feed step
+    // registry as the ScheduledAgent host (one registry, every
+    // residency — createFeedStepRegistry includes the J1
+    // built-ins). Residency rule: the dataset and index-list
+    // stores are D1 here, and the universe step runs (its service
+    // is a network fetch), but capture-wired PROVIDERS need a DO
+    // host's storage (the capture deps' blob + SQL handles), so
+    // providerFor is unwired in this residency and a feed pull
+    // dispatched here refuses FEED_JOB_NOT_CONFIGURED by name
+    // rather than fetching uncaptured. Feed pulls execute on the
+    // ScheduledAgent host residency, which owns that wiring.
+    steps: createFeedStepRegistry({
+      registry: buildFeedJobRegistry(envStrings),
+      providerFor: () => undefined,
+      universeStore,
+      datasetStore: createFeedDatasetAdapter(env),
+      indexRefresh: {
+        store: universeStore,
+        service: createIndexMembershipService({
+          wikipedia: createWikipediaIndexMembershipAdapter(fetchHtml),
+          holdings: {
+            getMembers: async () => {
+              throw new Error(
+                "holdings fetcher not bound — the Wikipedia refresh path never calls it",
+              );
+            },
+          },
+        }),
+      },
+      shardsFor: async (jobId) =>
+        (await stores.definitions.getDefinition(jobId))?.config.processing
+          .shards ?? [],
+    }),
     invocation: "workflow-shard",
   };
 }

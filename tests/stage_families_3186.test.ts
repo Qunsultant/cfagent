@@ -67,6 +67,10 @@ describe("one workflow, four families (#3186 step 1: contract)", () => {
       "saga",
       "strategy",
       "goal",
+      // #3543: the jobs family joins with the pipeline's stage
+      // kinds (feed/enrich/analyze/generate/deliver) — pinned in
+      // tests/feed_pipeline_host_3543.test.ts.
+      "jobs",
     ]);
   });
 

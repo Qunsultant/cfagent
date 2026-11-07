@@ -114,6 +114,11 @@ import {
   type ReportAssetMeta,
 } from "../report-asset-agent";
 import { getServiceUserLogin } from "../../security/serviceIdentity";
+import type { JobInstanceRecord } from "../../data/jobPipelinePorts";
+import {
+  resolveFeedJob,
+  type FeedJobSurfaceView,
+} from "../../services/feedPipelineJobs";
 
 // ---------------------------------------------------------------------------
 // Errors — honest, typed, coded (doors-and-layers §11.1)
@@ -124,6 +129,8 @@ export type MeshDoorErrorCode =
   | "door_unavailable"
   | "goal_not_found"
   | "asset_not_found"
+  // Issue #3535: the feed-job door's unknown/ambiguous job name.
+  | "feed_job_not_found"
   // Issue #2488: the mesh screen door's (meshScreenDoor.ts)
   // fail-closed refusal codes — budget_denied (the S5 budget
   // door refused the paid path), price_unavailable (no stored
@@ -182,6 +189,24 @@ export function requireActingLogin(
 export interface ScheduledAgentDoorStub {
   listGoals(): Promise<ScheduledGoal[]>;
   triggerGoal(id: string, env?: unknown, actor?: string | null): Promise<ScheduleTick>;
+  // Issue #3535 (Pipeline J2): the job-pipeline door — the
+  // ScheduledAgent host's control-plane RPC surface (#3543).
+  runPipelineJob(
+    jobId: string,
+    opts?: { userLogin?: string },
+  ): Promise<{ jobId: string; runId: string; state: string; error?: string }>;
+  pausePipelineJob(jobId: string): Promise<JobInstanceRecord>;
+  resumePipelineJob(
+    jobId: string,
+    opts?: { userLogin?: string },
+  ): Promise<{ jobId: string; runId: string; state: string; error?: string }>;
+  cancelPipelineJob(jobId: string): Promise<JobInstanceRecord>;
+  retryPipelineJob(
+    jobId: string,
+    opts?: { userLogin?: string },
+  ): Promise<{ jobId: string; runId: string; state: string; error?: string }>;
+  getFeedJobSurfaceStatus(jobId: string): Promise<FeedJobSurfaceView>;
+  listFeedJobSurfaceStatuses(): Promise<FeedJobSurfaceView[]>;
 }
 
 export interface PaymentsAgentDoorStub {
@@ -296,6 +321,135 @@ export async function triggerScheduledGoalViaDoor(
   // `schedule.goal.triggered` with it when the goal fires).
   const tick = await door.triggerGoal(goalId, undefined, actingLogin);
   return { goalId, tick };
+}
+
+// ---------------------------------------------------------------------------
+// ScheduledAgent door — the job pipeline's feed jobs (#3535)
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve a caller's feed-job name ("Yahoo", "Alpaca",
+ * "Nasdaq-100", "SP100", "fundamentals", an exact job id) to its
+ * catalog entry. An ambiguous or unknown name is an honest
+ * feed_job_not_found error — the door never guesses a job.
+ */
+function resolveFeedJobOrThrow(source: string) {
+  const entry = resolveFeedJob(source);
+  if (!entry) {
+    throw new MeshDoorError(
+      "feed_job_not_found",
+      `No feed job matches "${source}". Name a source (yahoo, alpaca, etrade, public), a universe (nasdaq100, sp100), "fundamentals", or an exact feed job id.`,
+    );
+  }
+  return entry;
+}
+
+export interface FeedJobRunDoorResult {
+  jobId: string;
+  label: string;
+  runId: string;
+  state: string;
+  error?: string;
+  status: FeedJobSurfaceView;
+}
+
+/**
+ * Run one feed job now through the pipeline host's control plane
+ * and report its settled outcome + the merged status view (the
+ * same view the UX surface renders — one source of truth). The
+ * acting login threads into the per-login provider wiring
+ * (E*TRADE / Public) exactly as a session dispatch would.
+ */
+export async function runFeedJobViaDoor(
+  env: Env,
+  actingLogin: string | undefined | null,
+  source: string,
+): Promise<FeedJobRunDoorResult> {
+  const login = requireActingLogin(actingLogin);
+  const entry = resolveFeedJobOrThrow(source);
+  const door = getScheduledAgentDoor(env);
+  const run = await door.runPipelineJob(entry.jobId, { userLogin: login });
+  const status = await door.getFeedJobSurfaceStatus(entry.jobId);
+  return {
+    jobId: entry.jobId,
+    label: entry.label,
+    runId: run.runId,
+    state: run.state,
+    ...(run.error ? { error: run.error } : {}),
+    status,
+  };
+}
+
+/** One feed job's merged status (dataset copy + pipeline state). */
+export async function getFeedJobStatusViaDoor(
+  env: Env,
+  actingLogin: string | undefined | null,
+  source: string,
+): Promise<FeedJobSurfaceView> {
+  requireActingLogin(actingLogin);
+  const entry = resolveFeedJobOrThrow(source);
+  const door = getScheduledAgentDoor(env);
+  return door.getFeedJobSurfaceStatus(entry.jobId);
+}
+
+/** Every feed job's merged status, in catalog order. */
+export async function listFeedJobsViaDoor(
+  env: Env,
+  actingLogin: string | undefined | null,
+): Promise<{ jobs: FeedJobSurfaceView[] }> {
+  requireActingLogin(actingLogin);
+  const door = getScheduledAgentDoor(env);
+  return { jobs: await door.listFeedJobSurfaceStatuses() };
+}
+
+export type FeedJobManagementAction = "pause" | "resume" | "cancel" | "retry";
+
+export interface FeedJobManageDoorResult {
+  jobId: string;
+  label: string;
+  action: FeedJobManagementAction;
+  /** The instance record for pause/cancel; the settled outcome for resume/retry. */
+  instance?: JobInstanceRecord;
+  run?: { runId: string; state: string; error?: string };
+  status: FeedJobSurfaceView;
+}
+
+/**
+ * Apply one management operation to a feed job through the same
+ * control plane (pause at the next step boundary, resume from
+ * the persisted checkpoint, cancel terminally, retry as a new
+ * run). The control plane's own refusals (e.g. pausing a job
+ * that is not running) propagate — the door never converts them
+ * into a success shape.
+ */
+export async function manageFeedJobViaDoor(
+  env: Env,
+  actingLogin: string | undefined | null,
+  source: string,
+  action: FeedJobManagementAction,
+): Promise<FeedJobManageDoorResult> {
+  const login = requireActingLogin(actingLogin);
+  const entry = resolveFeedJobOrThrow(source);
+  const door = getScheduledAgentDoor(env);
+  const base = { jobId: entry.jobId, label: entry.label, action };
+  switch (action) {
+    case "pause": {
+      const instance = await door.pausePipelineJob(entry.jobId);
+      return { ...base, instance, status: await door.getFeedJobSurfaceStatus(entry.jobId) };
+    }
+    case "cancel": {
+      const instance = await door.cancelPipelineJob(entry.jobId);
+      return { ...base, instance, status: await door.getFeedJobSurfaceStatus(entry.jobId) };
+    }
+    case "resume": {
+      const run = await door.resumePipelineJob(entry.jobId, { userLogin: login });
+      return { ...base, run, status: await door.getFeedJobSurfaceStatus(entry.jobId) };
+    }
+    case "retry": {
+      const run = await door.retryPipelineJob(entry.jobId, { userLogin: login });
+      return { ...base, run, status: await door.getFeedJobSurfaceStatus(entry.jobId) };
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------

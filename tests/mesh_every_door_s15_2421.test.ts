@@ -548,7 +548,16 @@ describe("report_asset.list A2A operation (#2421)", () => {
 
 describe("census chat column vs the mesh-door command registry (#2421)", () => {
   const EXPECTED_CHAT_OPS: Record<string, string[]> = {
-    ScheduledAgent: ["list_scheduled_goals", "trigger_scheduled_goal"],
+    // #3535: the feed-job door commands joined ScheduledAgent's
+    // chat operations (the pipeline host's door, #3543).
+    ScheduledAgent: [
+      "list_scheduled_goals",
+      "trigger_scheduled_goal",
+      "run_feed_job",
+      "get_feed_job_status",
+      "list_feed_jobs",
+      "manage_feed_job",
+    ],
     PaymentsAgent: ["check_payment_budget", "get_payments_overview"],
     TradingAgent: [
       "propose_stock_trade",

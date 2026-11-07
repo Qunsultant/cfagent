@@ -39,13 +39,22 @@ import {
   type QuoteResult,
 } from "../trading";
 import {
+  feedDatasetRowCount,
   resolveFeedQuotesFromArtifact,
   type FeedDatasetArtifact,
   type FeedDatasetRunRecord,
   type FeedDatasetStore,
+  type FeedFundamentalsRow,
   type FeedQuotesResolution,
 } from "../data/feedDatasetPorts";
 import type { IndexListStore } from "../data/indexListPorts";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Module logger on the S2 structured-logging seam (#3515 S3 ratchet). */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/feedJobs",
+});
 
 /** Stable coded errors for feed-job outcomes (externalized vocabulary). */
 export const FEED_JOB_CODES = {
@@ -55,6 +64,8 @@ export const FEED_JOB_CODES = {
   providerMismatch: "FEED_PROVIDER_MISMATCH",
   noQuotesReturned: "FEED_NO_QUOTES_RETURNED",
   fetchFailed: "FEED_FETCH_FAILED",
+  fundamentalsUnsupported: "FEED_PROVIDER_FUNDAMENTALS_UNSUPPORTED",
+  noFundamentalsReturned: "FEED_NO_FUNDAMENTALS_RETURNED",
 } as const;
 export type FeedJobCode = (typeof FEED_JOB_CODES)[keyof typeof FEED_JOB_CODES];
 
@@ -156,8 +167,11 @@ export function resolveFeedJobStaleMinutes(
 }
 
 export const YAHOO_NASDAQ100_QUOTES_JOB_ID = "yahoo-nasdaq100-quotes";
-export const ETRADE_NASDAQ100_QUOTES_JOB_ID = "etrade-nasdaq100-quotes";
+export const YAHOO_NASDAQ100_FUNDAMENTALS_JOB_ID = "yahoo-nasdaq100-fundamentals";
+export const YAHOO_SP100_QUOTES_JOB_ID = "yahoo-sp100-quotes";
 export const ALPACA_NASDAQ100_QUOTES_JOB_ID = "alpaca-nasdaq100-quotes";
+export const ETRADE_NASDAQ100_QUOTES_JOB_ID = "etrade-nasdaq100-quotes";
+export const PUBLIC_NASDAQ100_QUOTES_JOB_ID = "public-nasdaq100-quotes";
 export const FEED_JOB_DEFAULTS = {
   cadenceMinutes: 60,
   staleAfterMinutes: 180,
@@ -166,8 +180,9 @@ export const FEED_JOB_DEFAULTS = {
 /**
  * One built-in quotes job: the source's quotes for the stored
  * Nasdaq-100 universe — the shape every quotes source registers
- * (S1: Yahoo; S2: E*TRADE + Alpaca). The definition is data; the
- * run/read/status machinery is shared, never forked per source.
+ * (S1: Yahoo; S2: E*TRADE + Alpaca; #3535: Public). The definition
+ * is data; the run/read/status machinery is shared, never forked
+ * per source.
  */
 function nasdaq100QuotesJob(
   env: Record<string, string | undefined>,
@@ -193,20 +208,26 @@ function nasdaq100QuotesJob(
   };
 }
 
-/** The built-in registry. S1 registered Yahoo quotes over the
- *  stored Nasdaq-100 list; S2 registers E*TRADE and Alpaca quotes
- *  over the same universe against the same contract.
+/**
+ * The built-in registry. S1 registered exactly one job — Yahoo
+ * quotes over the stored Nasdaq-100 list. S2 (#3530) registers
+ * E*TRADE and Alpaca quotes over the same universe against the
+ * same contract. #3535 (Pipeline J2) registers the full per-source
+ * set against the same contract: Yahoo fundamentals and the
+ * S&P 100 quotes universe, plus the Public quotes job (each
+ * provider adapter declares quotes + a batch form — the dataset
+ * contract this family runs against; Public's legs allow quotes +
+ * optionsChains per its adapter, so its quotes job is in scope
+ * per #3530/#3533).
  *
- *  Nasdaq has NO job, deliberately (S2 finding, #3530): its
- *  adapter declares only screenUniverse — its dataset is the US
- *  listed-securities universe (NasdaqStockListing[]), not quotes,
- *  and this contract's artifact payload + universe shape
- *  ({kind:"index", index: IndexId}) cannot express it without
- *  fabricating quote-shaped rows or inventing an index id. A
- *  contract extension for universe-shaped datasets is a separate
- *  decision; until then the surface honestly shows no Nasdaq feed
- *  job (null feed block, typed FEED_JOB_NOT_FOUND). Public.com is
- *  out of scope for the feed programme's unconditional set. */
+ * The Nasdaq provider declares screenUniverse only — it has NO
+ * quotes job here (S2 finding, #3530: its dataset is the US
+ * listed-securities universe, not quotes, and this contract's
+ * artifact payload + universe shape cannot express it). Its
+ * Nasdaq-100 universe copy is the stored index list, maintained
+ * by the index-refresh machinery (#1980) and exposed to the
+ * pipeline as the nasdaq-nasdaq100-universe job (feedPipelineJobs).
+ */
 export function buildFeedJobRegistry(
   env: Record<string, string | undefined>,
 ): FeedJobRegistry {
@@ -214,11 +235,48 @@ export function buildFeedJobRegistry(
   registry.register(
     nasdaq100QuotesJob(env, YAHOO_NASDAQ100_QUOTES_JOB_ID, "yahoo"),
   );
+  registry.register({
+    id: YAHOO_NASDAQ100_FUNDAMENTALS_JOB_ID,
+    sourceId: "yahoo",
+    dataset: "fundamentals",
+    elements: ["fundamentals"],
+    universe: { kind: "index", index: "nasdaq100", label: "Nasdaq-100" },
+    cadenceMinutes: resolveFeedJobCadenceMinutes(
+      env,
+      YAHOO_NASDAQ100_FUNDAMENTALS_JOB_ID,
+      FEED_JOB_DEFAULTS.cadenceMinutes,
+    ),
+    staleAfterMinutes: resolveFeedJobStaleMinutes(
+      env,
+      YAHOO_NASDAQ100_FUNDAMENTALS_JOB_ID,
+      FEED_JOB_DEFAULTS.staleAfterMinutes,
+    ),
+  });
+  registry.register({
+    id: YAHOO_SP100_QUOTES_JOB_ID,
+    sourceId: "yahoo",
+    dataset: "quotes",
+    elements: ["quotes"],
+    universe: { kind: "index", index: "sp100", label: "S&P 100" },
+    cadenceMinutes: resolveFeedJobCadenceMinutes(
+      env,
+      YAHOO_SP100_QUOTES_JOB_ID,
+      FEED_JOB_DEFAULTS.cadenceMinutes,
+    ),
+    staleAfterMinutes: resolveFeedJobStaleMinutes(
+      env,
+      YAHOO_SP100_QUOTES_JOB_ID,
+      FEED_JOB_DEFAULTS.staleAfterMinutes,
+    ),
+  });
+  registry.register(
+    nasdaq100QuotesJob(env, ALPACA_NASDAQ100_QUOTES_JOB_ID, "alpaca"),
+  );
   registry.register(
     nasdaq100QuotesJob(env, ETRADE_NASDAQ100_QUOTES_JOB_ID, "etrade"),
   );
   registry.register(
-    nasdaq100QuotesJob(env, ALPACA_NASDAQ100_QUOTES_JOB_ID, "alpaca"),
+    nasdaq100QuotesJob(env, PUBLIC_NASDAQ100_QUOTES_JOB_ID, "public"),
   );
   return registry;
 }
@@ -241,6 +299,12 @@ export interface RunFeedJobOptions {
   userLogin?: string;
   tenantId?: string;
   runId?: string;
+  /**
+   * #3535: pull only this subset of the universe (a sharded
+   * pipeline run's partition). Provenance still names the stored
+   * index list; the artifact's universe size is the subset's.
+   */
+  symbols?: string[];
   /** Injectable clock (tests). */
   now?: () => Date;
 }
@@ -346,7 +410,7 @@ export async function runFeedJob(
 
   // 1. Universe — the stored index list, never an invented one.
   const list = await deps.universeStore.latest(def.universe.index);
-  const symbols = list
+  let symbols = list
     ? Array.from(
         new Set(
           list.symbols
@@ -355,6 +419,15 @@ export async function runFeedJob(
         ),
       )
     : [];
+  // #3535: a sharded partition pulls only its subset of the
+  // universe (universe order preserved; unknown symbols ignored —
+  // a partition is a filter on the universe, never an addition).
+  if (opts.symbols && list) {
+    const wanted = new Set(
+      opts.symbols.map((s) => s.toUpperCase().trim()).filter((s) => s.length > 0),
+    );
+    symbols = symbols.filter((s) => wanted.has(s));
+  }
   const universe: FeedDatasetArtifact["universe"] = {
     kind: "index",
     index: def.universe.index,
@@ -462,6 +535,203 @@ export async function runFeedJob(
   });
 }
 
+/**
+ * #3535 (Pipeline J2) — the fundamentals feed run: the same
+ * contract as runFeedJob, over the provider's per-symbol
+ * fundamentals capability. Fundamentals have no batch form in
+ * the #1116 contract, so the run walks the universe symbol by
+ * symbol through the capture-wired provider (each fetch lands in
+ * the capture log under this run's id, exactly as quotes do).
+ * Honesty rules are the quotes run's, unchanged: the universe is
+ * the stored index list; provenance is verified per envelope; a
+ * run that fetched nothing is a FAILED run; per-symbol failures
+ * are named in missingSymbols, never silently dropped.
+ */
+export async function runFeedFundamentalsJob(
+  registry: FeedJobRegistry,
+  deps: FeedJobDeps,
+  jobId: string,
+  opts: RunFeedJobOptions = {},
+): Promise<FeedRunResult> {
+  const def = registry.get(jobId);
+  if (!def) {
+    throw new FeedJobError(
+      FEED_JOB_CODES.jobNotFound,
+      `No feed job is registered with id "${jobId}".`,
+    );
+  }
+  const now = opts.now ?? (() => new Date());
+  const startedAt = now();
+  const runId = opts.runId ?? `feed-${crypto.randomUUID()}`;
+  const trigger = opts.trigger ?? "manual";
+
+  const record = async (args: {
+    status: FeedDatasetRunRecord["status"];
+    rows: FeedFundamentalsRow[];
+    requested: number;
+    missingSymbols: string[];
+    codedError: string | null;
+    errorMessage: string | null;
+    universe: FeedDatasetArtifact["universe"];
+  }): Promise<FeedRunResult> => {
+    const finishedAt = now();
+    const run: FeedDatasetRunRecord = {
+      runId,
+      trigger,
+      startedAt: startedAt.toISOString(),
+      finishedAt: finishedAt.toISOString(),
+      status: args.status,
+      requested: args.requested,
+      received: args.rows.length,
+      failed: args.requested - args.rows.length,
+      missingSymbols: args.missingSymbols,
+      codedError: args.codedError,
+      errorMessage: args.errorMessage,
+    };
+    const artifact = await deps.datasetStore.store({
+      jobId: def.id,
+      sourceId: def.sourceId,
+      dataset: def.dataset,
+      elements: [...def.elements],
+      universe: args.universe,
+      providerId: def.sourceId,
+      asOf: finishedAt.toISOString(),
+      quotes: [],
+      fundamentals: args.rows,
+      run,
+      nowIso: finishedAt.toISOString(),
+    });
+    if (args.status === "failed") {
+      structuredLog.warn(FEED_JOB_RUN_FAILED, {
+        message: `[feedJobs] ${FEED_JOB_RUN_FAILED}`,
+        jobId: def.id,
+        runId,
+        code: args.codedError,
+        requested: args.requested,
+      });
+    }
+    return {
+      jobId: def.id,
+      runId,
+      status: args.status,
+      artifactId: artifact.id,
+      requested: run.requested,
+      received: run.received,
+      failed: run.failed,
+      missingSymbols: run.missingSymbols,
+      codedError: run.codedError,
+      startedAt: run.startedAt,
+      finishedAt: run.finishedAt,
+    };
+  };
+
+  // 1. Universe — the stored index list, never an invented one
+  //    (a configured subset partitions it, as in the quotes run).
+  const list = await deps.universeStore.latest(def.universe.index);
+  let symbols = list
+    ? Array.from(
+        new Set(
+          list.symbols
+            .map((m) => m.symbol.toUpperCase().trim())
+            .filter((s) => s.length > 0),
+        ),
+      )
+    : [];
+  if (opts.symbols && list) {
+    const wanted = new Set(
+      opts.symbols.map((s) => s.toUpperCase().trim()).filter((s) => s.length > 0),
+    );
+    symbols = symbols.filter((s) => wanted.has(s));
+  }
+  const universe: FeedDatasetArtifact["universe"] = {
+    kind: "index",
+    index: def.universe.index,
+    label: def.universe.label,
+    snapshotDate: list?.snapshotDate ?? null,
+    sourceLabel: list?.sourceLabel ?? null,
+    size: symbols.length,
+  };
+  if (!list || symbols.length === 0) {
+    return record({
+      status: "failed",
+      rows: [],
+      requested: 0,
+      missingSymbols: [],
+      codedError: FEED_JOB_CODES.universeMissing,
+      errorMessage: `No stored ${def.universe.label} index list exists; the feed job has no universe to pull. Refresh the index list first.`,
+      universe,
+    });
+  }
+
+  // 2. The capability contract: no fundamentals method ⇒ a named
+  //    refusal recorded as the run, never a fabricated dataset.
+  if (typeof deps.provider.getFundamentals !== "function") {
+    return record({
+      status: "failed",
+      rows: [],
+      requested: symbols.length,
+      missingSymbols: symbols,
+      codedError: FEED_JOB_CODES.fundamentalsUnsupported,
+      errorMessage: `Provider "${def.sourceId}" does not implement fundamentals; the feed job cannot pull its dataset.`,
+      universe,
+    });
+  }
+
+  // 3. Fetch per symbol through the port. A symbol whose fetch
+  //    throws or whose envelope names another provider is a
+  //    missing symbol with the failure counted — one bad symbol
+  //    never poisons the rows already pulled.
+  const rows: FeedFundamentalsRow[] = [];
+  const missingSymbols: string[] = [];
+  let firstError: string | null = null;
+  for (const symbol of symbols) {
+    try {
+      const envelope = await deps.provider.getFundamentals(symbol, {
+        runId,
+        tenantId: opts.tenantId ?? "default",
+        ...(opts.userLogin ? { userLogin: opts.userLogin } : {}),
+      });
+      if (envelope.providerId !== def.sourceId) {
+        missingSymbols.push(symbol);
+        firstError ??= `Provider envelope named "${envelope.providerId}" for a "${def.sourceId}" feed job; the result was refused, not relabelled.`;
+        continue;
+      }
+      if (envelope.result == null) {
+        missingSymbols.push(symbol);
+        continue;
+      }
+      rows.push({ symbol, fundamentals: envelope.result });
+    } catch (err) {
+      missingSymbols.push(symbol);
+      firstError ??= scrubFailureMessage(
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  }
+  if (rows.length === 0) {
+    return record({
+      status: "failed",
+      rows: [],
+      requested: symbols.length,
+      missingSymbols,
+      codedError: FEED_JOB_CODES.noFundamentalsReturned,
+      errorMessage:
+        firstError ??
+        `Provider "${def.sourceId}" returned no fundamentals for the ${def.universe.label} universe; nothing was persisted as data.`,
+      universe,
+    });
+  }
+  return record({
+    status: missingSymbols.length > 0 ? "partial" : "completed",
+    rows,
+    requested: symbols.length,
+    missingSymbols,
+    codedError: null,
+    errorMessage: null,
+    universe,
+  });
+}
+
 /* ------------------------------------------------------------------ */
 /* The read path — the persisted copy only. NO provider exists here.   */
 /* ------------------------------------------------------------------ */
@@ -501,6 +771,9 @@ export interface FeedStatusView {
   staleAfterMinutes: number;
   state: "never-run" | "ready";
   lastRun: FeedDatasetRunRecord | null;
+  /** #3535: recent run history, newest first (the status
+   *  surface's history block; the store's listRuns is the truth). */
+  history: FeedDatasetRunRecord[];
   snapshot: {
     artifactId: string;
     asOf: string;
@@ -515,9 +788,10 @@ export async function buildFeedStatus(
   def: FeedJobDefinition,
   nowMs: number,
 ): Promise<FeedStatusView> {
-  const [latest, usable] = await Promise.all([
+  const [latest, usable, runArtifacts] = await Promise.all([
     store.latest(def.sourceId, def.dataset),
     store.latestUsable(def.sourceId, def.dataset),
+    store.listRuns(def.sourceId, def.dataset, 5),
   ]);
   const base: FeedStatusView = {
     jobId: def.id,
@@ -529,6 +803,7 @@ export async function buildFeedStatus(
     staleAfterMinutes: def.staleAfterMinutes,
     state: latest ? "ready" : "never-run",
     lastRun: latest?.run ?? null,
+    history: runArtifacts.map((a) => a.run),
     snapshot: null,
   };
   if (!usable) return base;
@@ -542,7 +817,7 @@ export async function buildFeedStatus(
       artifactId: usable.id,
       asOf: usable.asOf,
       ageSeconds,
-      rowsPersisted: usable.quotes.length,
+      rowsPersisted: feedDatasetRowCount(usable),
       stale: ageSeconds > def.staleAfterMinutes * 60,
     },
   };

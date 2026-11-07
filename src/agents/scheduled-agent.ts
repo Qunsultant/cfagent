@@ -58,6 +58,35 @@ import {
 } from "../services/consolidatedScheduling";
 import { SHARED_ORCHESTRATOR_INSTANCE } from "../security/serviceIdentity";
 import { createSocialStoresFromNamespace } from "./social/durableStores";
+// Issue #3543 (Pipeline J1 host wiring, consumed by J2 #3535): the
+// job pipeline's host wiring — declarations, control-plane
+// construction, dispatch, and the workflow start path live in
+// ./scheduledTasksPipeline.ts (the scheduledTasksCopilot.ts
+// pattern transposed); the RPC surface below delegates to it.
+import {
+  createScheduledAgentPipelineControl,
+  declarePipelineTasks,
+  ensureScheduledAgentFeedJobs,
+  listPipelineCompletions,
+  pipelineJobIds,
+  recordPipelineCompletion,
+  startPipelineJobWorkflow,
+  type PipelineCompletionNote,
+  type ScheduledTasksPipelineContext,
+} from "./scheduledTasksPipeline";
+import type { ThinkScheduledTasks } from "../actors/thinkAdapter";
+import type {
+  JobInstanceRecord,
+  JobDefinition,
+} from "../data/jobPipelinePorts";
+import type { JobStatusView } from "../services/jobPipelineEngine";
+import { buildFeedJobRegistry } from "../services/feedJobs";
+import {
+  buildFeedJobSurfaceView,
+  FEED_PIPELINE_CATALOG,
+  type FeedJobSurfaceView,
+} from "../services/feedPipelineJobs";
+import { createFeedDatasetAdapter } from "../data/createFeedDatasetPorts";
 import { createSocialBriefStoreFromNamespace } from "./social/briefStore";
 import {
   createSocialPipelineStoresFromNamespace,
@@ -349,6 +378,182 @@ export class ScheduledAgent extends PortThink {
   async getLatestJobRun(jobId: string): Promise<JobRunRecord | undefined> {
     const runs = await this.getJobRuns();
     return runs.find((r) => r.jobId === jobId);
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Job pipeline host (#3543, consumed by #3535)                      */
+  /*                                                                    */
+  /* This agent manages/controls the pipeline (host decision on       */
+  /* #3543). The methods below are the RPC door the invoking          */
+  /* surfaces (Orchestrator doors, UX routes, the queue consumer)     */
+  /* call; every one delegates to the ONE control plane built by      */
+  /* ./scheduledTasksPipeline.ts over this agent's storage — no       */
+  /* second implementation of any J1 operation exists here.           */
+  /* ---------------------------------------------------------------- */
+
+  private pipelineContext(): ScheduledTasksPipelineContext {
+    return {
+      env: this.env,
+      // The AgentContext type itself is named in
+      // ./scheduledTasksPipeline.ts — this class file never
+      // imports the agents package directly (conformance #1738).
+      agentCtx: this.ctx as unknown as ScheduledTasksPipelineContext["agentCtx"],
+    };
+  }
+
+  /** Think scheduled-task declarations for the pipeline's jobs. */
+  override async getScheduledTasks(): Promise<ThinkScheduledTasks> {
+    return declarePipelineTasks(this.pipelineContext());
+  }
+
+  /** Run one pipeline job now and settle it; returns the outcome view. */
+  async runPipelineJob(
+    jobId: string,
+    opts?: { userLogin?: string },
+  ): Promise<{ jobId: string; runId: string; state: string; error?: string }> {
+    const ctx = this.pipelineContext();
+    const control = createScheduledAgentPipelineControl(ctx, opts?.userLogin);
+    await ensureScheduledAgentFeedJobs(ctx, control);
+    const dispatch = await control.runJob(jobId, { trigger: "manual" });
+    if (!dispatch.completion) {
+      return { jobId, runId: dispatch.runId, state: dispatch.state };
+    }
+    const outcome = await dispatch.completion;
+    return {
+      jobId,
+      runId: outcome.runId,
+      state: outcome.state,
+      ...(outcome.error ? { error: outcome.error } : {}),
+    };
+  }
+
+  /** Pause a running pipeline job (honored at the next step boundary). */
+  async pausePipelineJob(jobId: string): Promise<JobInstanceRecord> {
+    const ctx = this.pipelineContext();
+    const control = createScheduledAgentPipelineControl(ctx);
+    await ensureScheduledAgentFeedJobs(ctx, control);
+    return control.pauseJob(jobId);
+  }
+
+  /** Resume a paused pipeline job from its persisted checkpoint. */
+  async resumePipelineJob(
+    jobId: string,
+    opts?: { userLogin?: string },
+  ): Promise<{ jobId: string; runId: string; state: string; error?: string }> {
+    const ctx = this.pipelineContext();
+    const control = createScheduledAgentPipelineControl(ctx, opts?.userLogin);
+    await ensureScheduledAgentFeedJobs(ctx, control);
+    const dispatch = await control.resumeJob(jobId);
+    if (!dispatch.completion) {
+      return { jobId, runId: dispatch.runId, state: dispatch.state };
+    }
+    const outcome = await dispatch.completion;
+    return {
+      jobId,
+      runId: outcome.runId,
+      state: outcome.state,
+      ...(outcome.error ? { error: outcome.error } : {}),
+    };
+  }
+
+  /** Cancel a pipeline job (terminal). */
+  async cancelPipelineJob(jobId: string): Promise<JobInstanceRecord> {
+    const ctx = this.pipelineContext();
+    const control = createScheduledAgentPipelineControl(ctx);
+    await ensureScheduledAgentFeedJobs(ctx, control);
+    return control.cancelJob(jobId);
+  }
+
+  /** Retry a pipeline job's last run as a new run. */
+  async retryPipelineJob(
+    jobId: string,
+    opts?: { userLogin?: string },
+  ): Promise<{ jobId: string; runId: string; state: string; error?: string }> {
+    const ctx = this.pipelineContext();
+    const control = createScheduledAgentPipelineControl(ctx, opts?.userLogin);
+    await ensureScheduledAgentFeedJobs(ctx, control);
+    const dispatch = await control.retryJob(jobId);
+    if (!dispatch.completion) {
+      return { jobId, runId: dispatch.runId, state: dispatch.state };
+    }
+    const outcome = await dispatch.completion;
+    return {
+      jobId,
+      runId: outcome.runId,
+      state: outcome.state,
+      ...(outcome.error ? { error: outcome.error } : {}),
+    };
+  }
+
+  /** The control plane's status view for one job. */
+  async getPipelineJobStatus(jobId: string): Promise<JobStatusView> {
+    const ctx = this.pipelineContext();
+    const control = createScheduledAgentPipelineControl(ctx);
+    await ensureScheduledAgentFeedJobs(ctx, control);
+    return control.getJob(jobId);
+  }
+
+  /** Every pipeline job definition this host manages. */
+  async listPipelineJobs(): Promise<JobDefinition[]> {
+    const ctx = this.pipelineContext();
+    const control = createScheduledAgentPipelineControl(ctx);
+    await ensureScheduledAgentFeedJobs(ctx, control);
+    return control.listJobs();
+  }
+
+  /** One feed job's merged surface status (dataset + pipeline). */
+  async getFeedJobSurfaceStatus(jobId: string): Promise<FeedJobSurfaceView> {
+    const ctx = this.pipelineContext();
+    const control = createScheduledAgentPipelineControl(ctx);
+    await ensureScheduledAgentFeedJobs(ctx, control);
+    const entry = FEED_PIPELINE_CATALOG.find((e) => e.jobId === jobId);
+    if (!entry) {
+      throw new Error(
+        `FEED_JOB_NOT_FOUND: no feed job with id "${jobId}" exists in the feed catalog.`,
+      );
+    }
+    const envStrings: Record<string, string | undefined> = {};
+    for (const [key, value] of Object.entries(
+      this.env as unknown as Record<string, unknown>,
+    )) {
+      if (typeof value === "string") envStrings[key] = value;
+    }
+    return buildFeedJobSurfaceView({
+      entry,
+      datasetStore: createFeedDatasetAdapter(this.env),
+      registry: buildFeedJobRegistry(envStrings),
+      pipeline: await control.getJob(jobId),
+      nowMs: Date.now(),
+    });
+  }
+
+  /** Every feed job's merged surface status, in catalog order. */
+  async listFeedJobSurfaceStatuses(): Promise<FeedJobSurfaceView[]> {
+    const views: FeedJobSurfaceView[] = [];
+    for (const jobId of pipelineJobIds()) {
+      views.push(await this.getFeedJobSurfaceStatus(jobId));
+    }
+    return views;
+  }
+
+  /** The queue consumer's intake: record one routed completion. */
+  async recordPipelineCompletion(note: PipelineCompletionNote): Promise<void> {
+    return recordPipelineCompletion(this.pipelineContext(), note);
+  }
+
+  /** Recorded pipeline completions, newest first. */
+  async listPipelineCompletions(
+    jobId?: string,
+  ): Promise<PipelineCompletionNote[]> {
+    return listPipelineCompletions(this.pipelineContext(), jobId);
+  }
+
+  /** Dispatch a run as a JobPipelineWorkflow instance (ids-only payload). */
+  async startPipelineJobWorkflow(
+    jobId: string,
+    opts?: { trigger?: "manual" | "scheduled"; scopePath?: string },
+  ): Promise<{ instanceId: string }> {
+    return startPipelineJobWorkflow(this.pipelineContext(), jobId, opts ?? {});
   }
 
   /**

@@ -104,7 +104,18 @@ import {
   type FeedJobRegistry,
 } from "../../services/feedJobs";
 import type { DataProvider } from "../../trading";
+import {
+  FEED_PIPELINE_CATALOG,
+  type FeedJobSurfaceView,
+} from "../../services/feedPipelineJobs";
+import type { JobInstanceRecord } from "../../data/jobPipelinePorts";
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
 
+/** Module logger on the S2 structured-logging seam (#3515 S3 ratchet). */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/routes/dataProviders",
+});
 
 export interface DataProviderRoutesContext {
   env: Env;
@@ -152,6 +163,33 @@ export interface DataProviderRoutesContext {
   feedUniverseStore?: IndexListStore | null;
   /** #3530 S1 — feed provider override (tests); undefined ⇒ the default capture-wired adapter for the job's source. */
   feedProviderFor?(def: FeedJobDefinition): DataProvider | undefined;
+  /** #3535 — the pipeline host door override (tests); undefined ⇒ the ScheduledAgent stub from env; explicit null ⇒ no pipeline surface. */
+  feedPipelineDoor?: FeedPipelineDoorLike | null;
+}
+
+/**
+ * #3535 — the pipeline host's RPC surface as the routes consume
+ * it (the ScheduledAgent's control-plane door, #3543). The
+ * default construction resolves the stub from the env binding,
+ * exactly as the mesh doors do.
+ */
+export interface FeedPipelineDoorLike {
+  listFeedJobSurfaceStatuses(): Promise<FeedJobSurfaceView[]>;
+  getFeedJobSurfaceStatus(jobId: string): Promise<FeedJobSurfaceView>;
+  runPipelineJob(
+    jobId: string,
+    opts?: { userLogin?: string },
+  ): Promise<{ jobId: string; runId: string; state: string; error?: string }>;
+  pausePipelineJob(jobId: string): Promise<JobInstanceRecord>;
+  resumePipelineJob(
+    jobId: string,
+    opts?: { userLogin?: string },
+  ): Promise<{ jobId: string; runId: string; state: string; error?: string }>;
+  cancelPipelineJob(jobId: string): Promise<JobInstanceRecord>;
+  retryPipelineJob(
+    jobId: string,
+    opts?: { userLogin?: string },
+  ): Promise<{ jobId: string; runId: string; state: string; error?: string }>;
 }
 
 const LIFECYCLE_ACTIONS: readonly ProviderLifecycleAction[] = [
@@ -275,7 +313,8 @@ async function providerView(
   routeViews: ReturnType<typeof routeServability>,
   sql: SqlStorage,
   capturePort?: ProviderCaptureStore | null,
-  feed?: unknown
+  feed?: unknown,
+  feedJobs?: unknown
 ) {
   const adapter = registry.get(record.id);
   const serving = routeViews.some(
@@ -314,6 +353,11 @@ async function providerView(
     // and the never-run state before the first run. Null when no
     // feed job is registered for the provider.
     feed: feed ?? null,
+    // #3535: every feed job for this provider as a pipeline job —
+    // the merged surface views (dataset copy + pipeline state +
+    // next scheduled run) the panel renders. Empty when the
+    // provider has no feed jobs or the pipeline host is unbound.
+    feedJobs: feedJobs ?? [],
   };
 }
 
@@ -433,6 +477,44 @@ async function feedViewFor(
   return buildFeedStatus(store, def, Date.now());
 }
 
+/* ------------------------------------------------------------------ */
+/* #3535 — the pipeline host door + the per-provider feed-jobs view    */
+/* ------------------------------------------------------------------ */
+
+function feedPipelineDoorFor(
+  ctx: DataProviderRoutesContext,
+): FeedPipelineDoorLike | null {
+  if (ctx.feedPipelineDoor !== undefined) return ctx.feedPipelineDoor;
+  const ns = ctx.env.SCHEDULED_AGENT;
+  if (!ns) return null;
+  return ns.get(ns.idFromName("default")) as unknown as FeedPipelineDoorLike;
+}
+
+/**
+ * Every feed job for one provider, as merged surface views from
+ * the pipeline host. The door is best-effort for READS: an
+ * unreachable host yields an empty list (the S1 `feed` block
+ * still reports the dataset state) — never a fabricated status.
+ */
+async function feedJobsViewFor(
+  ctx: DataProviderRoutesContext,
+  providerId: DataProviderId,
+): Promise<FeedJobSurfaceView[]> {
+  const door = feedPipelineDoorFor(ctx);
+  if (!door) return [];
+  try {
+    const all = await door.listFeedJobSurfaceStatuses();
+    return all.filter((v) => v.sourceId === providerId);
+  } catch (error) {
+    structuredLog.warn("data_providers.feed_jobs_status_read_failed", {
+      message: `[data-providers] feed-jobs status read for "${providerId}" failed: ${error instanceof Error ? error.message : String(error)}`,
+      providerId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return [];
+  }
+}
+
 export async function handleDataProviderRoutes(
   request: Request,
   url: URL,
@@ -447,7 +529,12 @@ export async function handleDataProviderRoutes(
   // #3530 S1: the feed-run action carries a hyphen, so it needs
   // its own match (the lifecycle action regex is [a-z]+ only).
   const feedRunMatch = path.match(/^\/data-providers\/([^/]+)\/feed-run$/);
-  if (!isList && !oneMatch && !actionMatch && !feedRunMatch) return null;
+  // #3535: the pipeline feed-jobs surface (list + per-job actions).
+  const feedJobsMatch = path.match(/^\/data-providers\/([^/]+)\/feed-jobs$/);
+  const feedJobActionMatch = path.match(
+    /^\/data-providers\/([^/]+)\/feed-jobs\/([^/]+)\/([a-z]+)$/,
+  );
+  if (!isList && !oneMatch && !actionMatch && !feedRunMatch && !feedJobsMatch && !feedJobActionMatch) return null;
 
   try {
     // ---- reads ----
@@ -480,6 +567,7 @@ export async function handleDataProviderRoutes(
               ctx.sql,
               ctx.capturePort,
               await feedViewFor(ctx, c.id),
+              await feedJobsViewFor(ctx, c.id),
             )
           )
         ),
@@ -504,6 +592,7 @@ export async function handleDataProviderRoutes(
           ctx.sql,
           ctx.capturePort,
           await feedViewFor(ctx, record.id),
+          await feedJobsViewFor(ctx, record.id),
         ),
         routes: routeViews.filter(
           (r) => r.primaryProviderId === id || r.gapFillProviderId === id
@@ -604,6 +693,89 @@ export async function handleDataProviderRoutes(
         codedError: run.codedError,
       });
       return Response.json({ run, feed: await buildFeedStatus(store, def, Date.now()) });
+    }
+
+    // #3535 — the provider's feed jobs as pipeline surface views
+    // (the same merged views the copilot tools return).
+    if (request.method === "GET" && feedJobsMatch) {
+      const id = decodeURIComponent(feedJobsMatch[1]) as DataProviderId;
+      return Response.json({ jobs: await feedJobsViewFor(ctx, id) });
+    }
+
+    // #3535 — run / pause / resume / cancel / retry one feed job
+    // through the pipeline host's control plane (the ScheduledAgent
+    // door). A mutation: same session gate as the other actions.
+    // The control plane's own refusals surface as 409 with their
+    // message — never converted into a success shape.
+    if (request.method === "POST" && feedJobActionMatch) {
+      if (!ctx.userLogin) {
+        return Response.json(
+          { error: "A verified session is required to manage a feed job." },
+          { status: 401 },
+        );
+      }
+      const id = decodeURIComponent(feedJobActionMatch[1]) as DataProviderId;
+      const jobId = decodeURIComponent(feedJobActionMatch[2]);
+      const action = feedJobActionMatch[3];
+      const entry = FEED_PIPELINE_CATALOG.find((e) => e.jobId === jobId);
+      if (!entry || entry.sourceId !== id) {
+        return Response.json(
+          {
+            error: `No feed job "${jobId}" is registered for provider "${id}".`,
+            code: FEED_JOB_CODES.jobNotFound,
+          },
+          { status: 404 },
+        );
+      }
+      if (!["run", "pause", "resume", "cancel", "retry"].includes(action)) {
+        return Response.json(
+          { error: `Unknown feed-job action "${action}".` },
+          { status: 404 },
+        );
+      }
+      const door = feedPipelineDoorFor(ctx);
+      if (!door) {
+        return Response.json(
+          {
+            error:
+              "The pipeline host is not bound on this deployment; the action was refused rather than dispatched through an unwired path.",
+            code: "FEED_JOB_NOT_CONFIGURED",
+          },
+          { status: 500 },
+        );
+      }
+      try {
+        const result =
+          action === "run"
+            ? await door.runPipelineJob(jobId, { userLogin: ctx.userLogin })
+            : action === "pause"
+              ? await door.pausePipelineJob(jobId)
+              : action === "resume"
+                ? await door.resumePipelineJob(jobId, { userLogin: ctx.userLogin })
+                : action === "cancel"
+                  ? await door.cancelPipelineJob(jobId)
+                  : await door.retryPipelineJob(jobId, { userLogin: ctx.userLogin });
+        ctx.recordAudit("data_provider.feed_job_action", "orchestrator", {
+          actor: ctx.userLogin,
+          providerId: id,
+          jobId,
+          action,
+        });
+        return Response.json({
+          jobId,
+          action,
+          result,
+          status: await door.getFeedJobSurfaceStatus(jobId),
+        });
+      } catch (error) {
+        return Response.json(
+          {
+            error: error instanceof Error ? error.message : String(error),
+            code: "FEED_JOB_ACTION_REFUSED",
+          },
+          { status: 409 },
+        );
+      }
     }
 
     // ---- mutations ----

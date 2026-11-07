@@ -142,6 +142,7 @@ describe("Data Providers consolidation & tabular presentation (#2723)", () => {
       "Provider",
       "Lifecycle & State",
       "Health & Telemetry",
+      "Feed Jobs",
       "Capabilities & Routes",
       "Connectivity & Session",
       "Actions",
