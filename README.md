@@ -13,7 +13,7 @@ An enterprise multi-agent assistant built with the Cloudflare Agents SDK, Worker
 | **Task Management** | Proposes and organizes actionable tasks with priorities and deadlines |
 | **Durable SQLite Memory** | Key-value fact vault persisted natively inside Durable Object SQLite storage across sessions |
 | **Read-Only NLQ Engine** | Converts natural language analytics queries into parameter-bound SQLite queries over conversation transcripts |
-| **Cross-Channel Trading Research** | Export loaded E*TRADE, Yahoo Finance, and options research data, screen evaluations, strategy evaluations, and recommendations as `.xlsx`; email workbooks, submit NLQ through Slack or voice, and publish signed recommendation reports to the configured webhook |
+| **Cross-Channel Trading Research** | Export loaded market data and options research, screen evaluations, strategy evaluations, and recommendations as `.xlsx`; email workbooks, submit NLQ through Slack or voice, and publish signed recommendation reports to the configured webhook |
 | **Enterprise Security** | Constant-time HMAC OAuth state verification with replay protection, Cross-Site WebSocket Hijacking (CSWSH) origin validation, and XSS-safe user script injection |
 
 ## Architecture
