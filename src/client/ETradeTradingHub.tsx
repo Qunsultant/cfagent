@@ -3078,7 +3078,7 @@ export function ETradeTradingHub({
       )}
       {/* Live REST Diagnostics Modal */}
       {showDiagnosticsModal && (
-        <Modal open size="none" panelClassName="etrade-pin-modal diagnostics-modal" title={`${(diagnostics?.broker || selectedBroker) === "alpaca" ? "🦙" : "⚡"} ${brokerPresentation(diagnostics?.broker || selectedBroker).label} Diagnostics [${diagnostics?.environment || activeEnv}]`} onClose={() => setShowDiagnosticsModal(false)}>
+        <Modal open size="none" panelClassName="etrade-pin-modal diagnostics-modal" title={(diagnostics?.broker || selectedBroker) === "alpaca" ? `🦙 Alpaca Diagnostics [${diagnostics?.environment || activeEnv}]` : `⚡ E*TRADE Live REST Diagnostics [${diagnostics?.environment || activeEnv}]`} onClose={() => setShowDiagnosticsModal(false)}>
               {diagnostics ? (
                 <>
                   <div className="diag-header-row">

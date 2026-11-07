@@ -380,10 +380,15 @@ export function BrokerDynamicMenu({
     applyTypography(newScale);
   };
 
+
+  const selectedBrokerId = tenantProviders.brokerId ?? "etrade";
+  const selectedBrokerLabel = brokerPresentation(selectedBrokerId).label;
+  const brokerIcon = selectedBrokerId === "alpaca" ? "🦙" : "⚡";
+
   // Single environment value with immediate local reactivity
   const [localEnv, setLocalEnv] = useState<BrokerEnvironment | null>(null);
   const brokerEnv = useBrokerEnvironment();
-  const effectiveEnv = localEnv ?? (accountMode ? (accountMode === "live" ? "PROD" : "TEST") : (activeEnv ?? brokerEnv));
+  const effectiveEnv = localEnv ?? activeEnv ?? (accountMode ? (accountMode === "live" ? "PROD" : "TEST") : "TEST");
 
   useEffect(() => {
     const handleEnvChanged = (e: Event) => {
@@ -422,9 +427,6 @@ export function BrokerDynamicMenu({
   const isOpen = isHovered || isPinned;
   const isLive = effectiveEnv === "PROD";
 
-  const selectedBrokerId = tenantProviders.brokerId ?? "etrade";
-  const selectedBrokerLabel = brokerPresentation(selectedBrokerId).label;
-  const brokerIcon = selectedBrokerId === "alpaca" ? "🦙" : "⚡";
 
   const [alpacaStatus, setAlpacaStatus] = useState<{ configured?: boolean; signedIn?: boolean } | null>(null);
 
@@ -628,7 +630,7 @@ export function BrokerDynamicMenu({
       {isOpen && (
         <div className="etrade-dynamic-dropdown-panel settings-dropdown-panel broker-dynamic-dropdown-panel" role="menu">
           {/* Header: User Info (Top-Left) & Broker Info / Connection (Top-Right) */}
-          <div className="etrade-panel-header unified-menu-header broker-panel-header">
+          <div className="etrade-panel-header unified-menu-header">
             {/* Top-Left: User Info */}
             <div className="settings-user-card compact">
               <div className="settings-user-meta">
@@ -652,7 +654,7 @@ export function BrokerDynamicMenu({
             {/* Top-Right: Broker Info / Connection */}
             <div className="etrade-panel-brand broker-header-right">
               <div className="etrade-brand-text-row">
-                <div className="broker-title-line">
+                <div className="etrade-brand-title">
                   <span className="brand-icon">{brokerIcon}</span>
                   <h5>{`${selectedBrokerLabel} Brokerage API`}</h5>
                 </div>
