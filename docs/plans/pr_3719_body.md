@@ -40,3 +40,4 @@ Harmonizes the dynamic menu into a broker-agnostic component (`BrokerDynamicMenu
 
 ## Process documentation impact
 Process documentation impact: None - no changes to governance or operational policies required.
+
