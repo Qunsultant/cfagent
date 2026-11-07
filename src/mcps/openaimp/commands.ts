@@ -119,6 +119,12 @@ import {
   StockCopilotLearningsCommand,
   StockCopilotEvaluateCommand,
 } from "./meshDoorCommands";
+import {
+  RunFeedJobCommand,
+  GetFeedJobStatusCommand,
+  ListFeedJobsCommand,
+  ManageFeedJobCommand,
+} from "./feedJobCommands";
 
 import { searchPlatformKnowledge } from "../../services/platformKnowledge";
 // Issue #3342: the "search" contract's AI-search attempt reads the
@@ -1780,6 +1786,14 @@ export class McpToolFactory {
     // MCP_TOOL_SCOPES like every other tool (#1744).
     this.registerTool(new ListScheduledGoalsCommand());
     this.registerTool(new TriggerScheduledGoalCommand());
+    // Issue #3535: the feed-job doors — run / status / list /
+    // manage the job pipeline's per-source feed jobs through the
+    // ScheduledAgent host's control plane (#3543). Same identity
+    // discipline as batch A.
+    this.registerTool(new RunFeedJobCommand());
+    this.registerTool(new GetFeedJobStatusCommand());
+    this.registerTool(new ListFeedJobsCommand());
+    this.registerTool(new ManageFeedJobCommand());
     this.registerTool(new CheckPaymentBudgetCommand());
     this.registerTool(new GetPaymentsOverviewCommand());
 

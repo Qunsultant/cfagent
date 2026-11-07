@@ -199,6 +199,11 @@ export const MCP_TOOL_SCOPES: Record<string, McpScope> = {
   "agentdb.trace.get": "mcp:read",
   // #2341 (mesh S5): the ScheduledAgent door's read — a pure list/inspect.
   list_scheduled_goals: "mcp:read",
+  // #3535: the ScheduledAgent pipeline door's reads — feed-job
+  // status and the feed-job list (pure inspect of the host's
+  // merged surface views).
+  get_feed_job_status: "mcp:read",
+  list_feed_jobs: "mcp:read",
   // #2349 (mesh S6): the TradingAgent door's reads (accounts,
   // positions, quote) and the ReportAssetAgent door's list/get —
   // pure reads of the acting user's own data through their agents.
@@ -231,6 +236,11 @@ export const MCP_TOOL_SCOPES: Record<string, McpScope> = {
   // #2341 (mesh S5): firing a goal changes state (and is budget-gated
   // inside ScheduledAgent/PaymentsAgent); the trigger itself moves no money.
   trigger_scheduled_goal: "mcp:write",
+  // #3535: the ScheduledAgent pipeline door's writes — running a
+  // feed job pulls + persists a dataset; managing one changes
+  // the job's run state (pause/resume/cancel/retry).
+  run_feed_job: "mcp:write",
+  manage_feed_job: "mcp:write",
   // #2351 (mesh S7): the BrowserAgent/SlackAgent doors' deliveries —
   // each posts a snap to the configured Slack destination (an
   // outbound side effect; no caller-supplied webhook is accepted).

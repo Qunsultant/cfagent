@@ -22,6 +22,7 @@ import type {
   FeedDatasetStoreInput,
   FeedDatasetStoreOptions,
 } from "./feedDatasetPorts";
+import { feedDatasetRowCount } from "./feedDatasetPorts";
 
 /** Minimal structural shape of the D1 binding this family needs. */
 export interface FeedDatasetD1Db {
@@ -92,7 +93,7 @@ export class D1FeedDatasetStore implements FeedDatasetStore {
         artifact.run.runId,
         artifact.run.status,
         artifact.asOf,
-        artifact.quotes.length,
+        feedDatasetRowCount(artifact),
         JSON.stringify(artifact),
       )
       .run();

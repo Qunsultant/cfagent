@@ -97,6 +97,78 @@ export interface DataProviderView {
   serving: boolean;
   /** Capture-derived health + usage metering (E6, issue #1235). */
   health: DataProviderHealth;
+  /** #3535: this provider's feed jobs as pipeline surface views. */
+  feedJobs?: FeedJobView[];
+}
+
+/** One feed run's record, as the status surface serves it (#3530). */
+export interface FeedJobRunRecordView {
+  runId: string;
+  trigger: string;
+  startedAt: string;
+  finishedAt: string;
+  status: "completed" | "partial" | "failed";
+  requested: number;
+  received: number;
+  failed: number;
+  missingSymbols: string[];
+  codedError: string | null;
+  errorMessage: string | null;
+}
+
+/** The dataset half of a feed job's status (the local copy). */
+export interface FeedJobDatasetView {
+  jobId: string;
+  sourceId: string;
+  dataset: string;
+  elements: string[];
+  universeLabel: string;
+  cadenceMinutes: number;
+  staleAfterMinutes: number;
+  state: "never-run" | "ready";
+  lastRun: FeedJobRunRecordView | null;
+  history: FeedJobRunRecordView[];
+  snapshot: {
+    artifactId: string;
+    asOf: string;
+    ageSeconds: number;
+    rowsPersisted: number;
+    stale: boolean;
+  } | null;
+}
+
+/**
+ * One feed job's merged surface status (#3535): the dataset copy
+ * plus the job pipeline's state for the same job — the same view
+ * the copilot tools return (one source of truth).
+ */
+export interface FeedJobView {
+  jobId: string;
+  sourceId: string;
+  dataset: string;
+  label: string;
+  feed: FeedJobDatasetView | null;
+  pipeline: {
+    state: string;
+    currentRunId: string | null;
+    lastRunStatus: string | null;
+    lastRunAt: string | null;
+  } | null;
+  nextScheduledRun: string | null;
+}
+
+export type FeedJobActionName = "run" | "pause" | "resume" | "cancel" | "retry";
+
+/** Run / manage one feed job through the pipeline host (#3535). */
+export async function postFeedJobAction(
+  id: string,
+  jobId: string,
+  action: FeedJobActionName
+): Promise<void> {
+  await send<unknown>(
+    `/api/data-providers/${encodeURIComponent(id)}/feed-jobs/${encodeURIComponent(jobId)}/${action}`,
+    { method: "POST" }
+  );
 }
 
 /** One capability route as the E3 GET surface serves it (routeServability). */

@@ -34,6 +34,7 @@
  */
 import type {
   DataProviderId,
+  FundamentalsResult,
   IndexId,
   QuoteResult,
 } from "../trading";
@@ -89,8 +90,29 @@ export interface FeedDatasetArtifact {
   asOf: string;
   /** The normalized quotes, verbatim as the provider returned them. */
   quotes: QuoteResult[];
+  /**
+   * #3535 (Pipeline J2): the fundamentals dataset's rows — one per
+   * symbol, verbatim as the provider returned them. Present only
+   * on fundamentals-dataset artifacts; quotes artifacts omit it.
+   * The store's row count (rows_persisted / latestUsable) counts
+   * quotes + fundamentals rows, so a fundamentals copy is usable
+   * exactly the way a quotes copy is.
+   */
+  fundamentals?: FeedFundamentalsRow[];
   run: FeedDatasetRunRecord;
   createdAt: string;
+}
+
+/** One symbol's fundamentals row in a fundamentals-dataset artifact. */
+export interface FeedFundamentalsRow {
+  symbol: string;
+  fundamentals: FundamentalsResult;
+}
+
+/** Rows a stored artifact carries (quotes + fundamentals) — the
+ *  count every adapter persists and every status surface shows. */
+export function feedDatasetRowCount(artifact: FeedDatasetArtifact): number {
+  return artifact.quotes.length + (artifact.fundamentals?.length ?? 0);
 }
 
 export interface FeedDatasetStoreOptions {

@@ -247,10 +247,16 @@ afterEach(() => {
 describe("feed job registry (#3530 S2)", () => {
   it("carries the Yahoo job unchanged plus the E*TRADE and Alpaca Nasdaq-100 quotes jobs", () => {
     const registry = buildFeedJobRegistry({});
+    // Composed with #3535 (pipeline J2): the registry also carries the J2 jobs
+    // (yahoo fundamentals, yahoo SP100, public quotes) on the same contract —
+    // the S2 jobs below are asserted unchanged within the composed list.
     expect(registry.list().map((j) => j.id).sort()).toEqual([
       "alpaca-nasdaq100-quotes",
       "etrade-nasdaq100-quotes",
+      "public-nasdaq100-quotes",
+      "yahoo-nasdaq100-fundamentals",
       "yahoo-nasdaq100-quotes",
+      "yahoo-sp100-quotes",
     ]);
     for (const [id, sourceId] of [
       ["etrade-nasdaq100-quotes", "etrade"],
@@ -267,10 +273,11 @@ describe("feed job registry (#3530 S2)", () => {
     }
   });
 
-  it("nasdaq and public still have no feed job (nasdaq = the S2 contract misfit; public = out of scope)", () => {
+  it("nasdaq still has no feed job (the S2 contract misfit); public gained one in #3535", () => {
     const registry = buildFeedJobRegistry({});
     expect(registry.forSource("nasdaq")).toBeUndefined();
-    expect(registry.forSource("public")).toBeUndefined();
+    // #3535 (pipeline J2, epic #3533) scopes Public in: its quotes legs allow it.
+    expect(registry.forSource("public")?.id).toBe("public-nasdaq100-quotes");
   });
 
   it("the new jobs' cadence/staleness knobs resolve through the same env scheme", () => {

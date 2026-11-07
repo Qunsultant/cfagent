@@ -60,12 +60,20 @@
       // composition root is src/messaging/createJobPipelineMessaging.ts
       // and absence is the named state job_pipeline_queue_not_configured.
       { "binding": "JOB_PIPELINE_EVENTS", "queue": "job-pipeline-events" },
+      { "binding": "JOB_PIPELINE_EVENTS_DLQ", "queue": "job-pipeline-events-dlq" },
       { "binding": "SCREENER_EVENTS", "queue": "screener-events" },
       { "binding": "SCREENER_EVENTS_DELIVERY", "queue": "screener-events-delivery" },
       { "binding": "SCREENER_EVENTS_DLQ", "queue": "screener-events-dlq" },
       { "binding": "SCREENER_DELIVERY_DLQ", "queue": "screener-events-delivery-dlq" }
     ],
     "consumers": [
+      // Issue #3543 (Pipeline J1 host wiring, consumed by J2 #3535):
+      // the job-pipeline-events consumer arrives with its first
+      // handler (the #1739 sequencing) — completions route to the
+      // ScheduledAgent host. Its settings are the
+      // JOB_PIPELINE_EVENTS_CONSUMER_CONFIG pin in
+      // src/messaging/jobPipelineEventsConsumer.ts.
+      { "queue": "job-pipeline-events", "max_batch_size": 10, "max_batch_timeout": 30, "max_retries": 3, "dead_letter_queue": "job-pipeline-events-dlq", "max_concurrency": 2 },
       // Issue #2544 (Cloudflare migration step 1, report §3.2): the
       // work queue finally has a consumer, and both consumers have
       // dead-letter queues. The delivery consumer keeps its

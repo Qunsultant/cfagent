@@ -89,7 +89,7 @@ import {
  * from the same module (`stageRuntimeIds`), so a family cannot publish a
  * stage the catalog does not know about, or vice versa.
  */
-export const STAGE_FAMILIES = ["stock", "options", "trading", "payment", "saga", "strategy", "goal"] as const;
+export const STAGE_FAMILIES = ["stock", "options", "trading", "payment", "saga", "strategy", "goal", "jobs"] as const;
 
 export type StageFamily = (typeof STAGE_FAMILIES)[number];
 
@@ -123,6 +123,13 @@ export const STAGE_IDS_BY_FAMILY: Record<StageFamily, readonly string[]> = {
   // #3186: the composer's stages (catalog GOAL_SCREEN stage names).
   // Declared now, emitted by the goal-leg migration (step 3), not yet live.
   goal: ["feed", "analysis", "store", "deliver"],
+  // #3543 (Pipeline J1 host wiring, consumed by J2 #3535): the job
+  // pipeline's stage kinds — the epic's five producer/consumer
+  // stages (#3533). A job tree's (runId, stageId) claim addressing
+  // stays `job:<nodePath>` under this family's namespace (see
+  // stageIdempotencyKey); the declared ids here are the stage
+  // KINDS a login-scoped host may publish stage messages for.
+  jobs: ["feed", "enrich", "analyze", "generate", "deliver"],
 };
 
 /**
@@ -177,18 +184,19 @@ export interface StageMessage {
  * by running instances must still match after this change; every other family
  * is namespaced by family, so two families cannot collide on a shared id.
  *
- * "jobs" (#3549) is a claim namespace ahead of a message family:
- * configured job trees claim under it today (their stage ids are
- * `job:<nodePath>`), but the family is not declared in
- * STAGE_FAMILIES — a message family's stage ids are a static
- * catalog, and a job tree's stage ids are configuration-dynamic.
- * Declaring the message family is the host-wiring step (#3543),
- * when a userLogin is in scope for stageMessage().
+ * "jobs" (#3549) began as a claim namespace ahead of a message
+ * family: configured job trees claim under it (their stage ids
+ * are `job:<nodePath>`). The message family is declared as of
+ * #3543 (Pipeline J1 host wiring, consumed by J2 #3535): its
+ * declared ids are the pipeline's stage kinds (feed / enrich /
+ * analyze / generate / deliver), the static catalog a
+ * login-scoped host publishes against, while the configuration-
+ * dynamic `job:<nodePath>` ids remain the claim addressing.
  */
 export function stageIdempotencyKey(
   runId: string,
   stageId: string,
-  family: StageFamily | "jobs" = "stock",
+  family: StageFamily = "stock",
 ): string {
   return family === "stock" ? `${runId}::${stageId}` : `${runId}::${family}::${stageId}`;
 }

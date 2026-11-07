@@ -68,7 +68,7 @@ the verdict of the door used; the table lists the strongest
 attribution available (door 1) and the gaps that apply on the
 other doors. Scope column is #1843's declaration, consumed here.
 
-### mcp:read (40)
+### mcp:read (43)
 
 | Tool | Scope | /mcp verdict |
 |---|---|---|
@@ -100,6 +100,8 @@ other doors. Scope column is #1843's declaration, consumed here.
 | `foss_alpaca_orders` (deprecated #1906 alias of `alpaca_orders`, same scope) | mcp:read | L (I / R on other doors) |
 | `browser_inspect_page` | mcp:read | L (I / R on other doors) |
 | `web_fetch` | mcp:read | L (I / R on other doors) — the standalone unrendered page fetch (#2760, tracker #2708 A3): acting login carried in the tool audit from context only (no identity argument); failures propagate as named `web_fetch_*` errors, never fabricated content |
+| `get_feed_job_status` | mcp:read | L via door 2 only — acting identity required (#3535); refused on doors 1/3 (no acting-identity carrier there) |
+| `list_feed_jobs` | mcp:read | L via door 2 only — acting identity required (#3535); refused on doors 1/3 (no acting-identity carrier there) |
 | `ai_search_financial_docs` | mcp:read | L (I / R on other doors) |
 | `ai_search_agent_search` | mcp:read | L (I / R on other doors) |
 | `agentdb.chain.status` | mcp:read | L (I / R on other doors) |
@@ -120,7 +122,7 @@ other doors. Scope column is #1843's declaration, consumed here.
 | `stock_copilot_learnings` | mcp:read | L via door 2 only — acting identity required (#3514); refused on doors 1/3 (no acting-identity carrier there). Reads reflection learnings and trade critiques from persistent storage |
 | `stock_copilot_evaluate` | mcp:read | L via door 2 only — acting identity required (#3514); refused on doors 1/3 (no acting-identity carrier there). On-demand evaluation of pattern strategies over symbol market bars |
 
-### mcp:write (11)
+### mcp:write (14)
 
 | Tool | Scope | /mcp verdict |
 |---|---|---|
@@ -137,6 +139,8 @@ other doors. Scope column is #1843's declaration, consumed here.
 | `run_stock_screen` | mcp:write | L via door 2 only — acting identity required (#2488); refused on doors 1/3 (no acting-identity carrier there) |
 | `run_options_strategy_screen` | mcp:write | L via door 2 only — acting identity required (#2581); refused on doors 1/3 (no acting-identity carrier there) |
 | `stock_copilot_control` | mcp:write | L via door 2 only — acting identity required (#3513); refused on doors 1/3 (no acting-identity carrier there). Updates loop pause/resume and enabled sessions |
+| `run_feed_job` | mcp:write | L via door 2 only — acting identity required (#3535); refused on doors 1/3 (no acting-identity carrier there) |
+| `manage_feed_job` | mcp:write | L via door 2 only — acting identity required (#3535); refused on doors 1/3 (no acting-identity carrier there) |
 
 ### mcp:execute (7)
 
