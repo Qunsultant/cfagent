@@ -31,7 +31,7 @@ export interface AutonomousActionItem {
 /** Issue #1333: one job-outcome row from GET /autopilot/jobs. */
 export interface JobOutcomeFeedItem {
   id: string;
-  kind: "stock" | "options" | "goal" | "discovery";
+  kind: "stock" | "options" | "goal" | "discovery" | "corpus" | "reports";
   trigger: "manual" | "scheduled";
   status: "completed" | "failed" | "partial";
   scanned: number | null;
@@ -51,6 +51,9 @@ export const JOB_OUTCOME_KIND_LABELS: Record<JobOutcomeFeedItem["kind"], string>
   options: "Options",
   goal: "Goal Screen",
   discovery: "Discovery",
+  // Issue #3527 S5 — the two registered tick jobs' run rows.
+  corpus: "Corpus Sync",
+  reports: "Reports Index",
 };
 
 export const JOB_OUTCOME_STATUS_TONES: Record<JobOutcomeFeedItem["status"], BadgeTone> = {
@@ -1026,7 +1029,7 @@ export function AutopilotControlCenter({
             <span className="actions-count-badge">{jobOutcomes.length}</span>
             <span
               className="live-feed-badge cached"
-              title="One outcome sink (mas_job_outcomes): stock, options, goal-screen, and discovery runs, manual and scheduled"
+              title="One outcome sink (mas_job_outcomes): stock, options, goal-screen, discovery, corpus-sync, and reports-index runs, manual and scheduled"
             >
               {isLoadingJobs ? "🔄 Syncing…" : "Job-truth feed"}
             </span>
@@ -1117,7 +1120,7 @@ export function AutopilotControlCenter({
               framed
               icon="📋"
               title="No job outcomes recorded"
-              description="As screens, goal screens, and discovery runs complete or fail, their coded outcomes will appear here — one row per job, labeled by origin."
+              description="As screens, goal screens, discovery runs, corpus syncs, and reports-index sweeps complete or fail, their coded outcomes will appear here — one row per job, labeled by origin."
             />
           )}
         />

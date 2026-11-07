@@ -25,7 +25,15 @@
  */
 import type { SqlStorage } from "../orm";
 
-export type JobOutcomeKind = "stock" | "options" | "goal" | "discovery";
+export type JobOutcomeKind =
+  | "stock"
+  | "options"
+  | "goal"
+  | "discovery"
+  // Issue #3527 S5 — the corpus sync and the reports
+  // canonical-index sweep record their actual runs here too.
+  | "corpus"
+  | "reports";
 export type JobOutcomeTrigger = "manual" | "scheduled";
 export type JobOutcomeStatus = "completed" | "failed" | "partial";
 

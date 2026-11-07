@@ -67,7 +67,34 @@ import {
   runCorpusSync,
   shouldFireCorpusSyncTick,
   CORPUS_SYNC_LAST_RUN_KEY,
+  type CorpusSyncResult,
 } from "../../services/corpusSync";
+// Issue #3527 S5 — the corpus sync is a registered scheduled job
+// now: its outcomes record into the same #2037 sink + #1333 run
+// store as the other tick jobs. Helpers live below the context
+// type; recording never changes a response.
+import {
+  recordScheduledJobOutcome,
+  scheduledJobOutcomeStoreFromOrmEvents,
+  type ScheduledJobOutcomeInput,
+} from "../../observability/scheduledJobOutcomes";
+import { parseTraceparent } from "../../observability/observabilityPorts";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+import { createStructuredLogger } from "../../observability/structuredLogger";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/routes/knowledgeCorpus",
+});
+import { resolveScheduledJobAlertThreshold } from "../../config/scheduledJobAlert";
+import { postSlackText, resourceSlackPost } from "../resourceGoals";
+import type { SlackDeliveryEnv } from "../social/delivery";
+import {
+  recordJobOutcome,
+  type JobOutcomeTrigger,
+} from "../../services/jobOutcomes";
+import { resolveActorAttribution } from "../../security/backgroundAttribution";
+import { getServiceUserLogin } from "../../security/serviceIdentity";
 import {
   corpusIndexingStateForPublishOutcome,
   runCorpusAiSearchIndexBackfill,
@@ -126,6 +153,10 @@ export interface KnowledgeCorpusRouteContext {
     AI_SEARCH?: AiSearchNamespace;
     AI_SEARCH_INSTANCE?: string;
     AI_SEARCH_CORPUS_INDEXING_ENABLED?: string;
+    // Issue #3527 S5: the service identity joins the narrow env so
+    // the sync's run records can attribute a background dispatch
+    // vs a manual invocation (the mount passes the full env).
+    SERVICE_USER_LOGIN?: string;
   };
   storage: BlobStorage;
   userLogin: string;
@@ -135,6 +166,15 @@ export interface KnowledgeCorpusRouteContext {
    * the corpus-sync branch skips honestly when it is absent.
    */
   sql?: SqlStorage;
+  /**
+   * Issue #3527 S5 — ORM accessor (owner: OrchestratorAgent.getOrm)
+   * for the sync's scheduled-job outcome recording (#2037 sink).
+   * Optional so older callers keep working; without it the
+   * recording degrades to a no-op, never to a changed response.
+   */
+  getOrm?: () => {
+    events?: { create?: unknown; findMany?: unknown };
+  } | null | undefined;
 }
 
 /** Seed-manifest entries, mapped to the corpus module's entry shape. */
@@ -151,6 +191,112 @@ const SEED_MANIFEST_ENTRIES = (
 
 function badRequest(message: string): Response {
   return Response.json({ success: false, error: message }, { status: 400 });
+}
+
+/**
+ * Issue #3527 S5 — record one corpus-sync outcome in the single
+ * mas_events sink (the #2037 idiom: streak + Slack alert through
+ * the existing routes). Recording is observation, never the job:
+ * every failure degrades to a no-op so the response the caller is
+ * owed (the Corpus tab's manual result, the tick's fire-and-forget
+ * dispatch) is never changed by it.
+ */
+async function recordCorpusSyncOutcome(
+  ctx: KnowledgeCorpusRouteContext,
+  sessionId: string,
+  input: Omit<ScheduledJobOutcomeInput, "job">
+): Promise<void> {
+  try {
+    await recordScheduledJobOutcome(
+      {
+        store: scheduledJobOutcomeStoreFromOrmEvents(() => {
+          const orm = ctx.getOrm?.();
+          return orm?.events ?? null;
+        }, sessionId),
+        alert: async (text: string) => {
+          await postSlackText({
+            post: resourceSlackPost,
+            env: ctx.env as unknown as SlackDeliveryEnv,
+            text,
+          });
+        },
+        threshold: resolveScheduledJobAlertThreshold(
+          ctx.env as unknown as Record<string, unknown>
+        ),
+      },
+      { job: "corpus-sync", ...input }
+    );
+  } catch {
+    // Observation never fails the response.
+  }
+}
+
+/** Background dispatch vs manual invocation, by actor attribution. */
+function corpusSyncTrigger(ctx: KnowledgeCorpusRouteContext, request: Request): JobOutcomeTrigger {
+  const attribution = resolveActorAttribution(
+    request.headers,
+    getServiceUserLogin(ctx.env as unknown as Parameters<typeof getServiceUserLogin>[0])
+  );
+  return attribution.actorKind === "background" ? "scheduled" : "manual";
+}
+
+const CORPUS_SYNC_INCOMPLETE_CODE = "corpus_sync_incomplete";
+
+/**
+ * Issue #3527 S5 — record one ACTUAL sync run in the #1333
+ * per-instance run store, the row the Autopilot "Job outcomes"
+ * feed renders. Per-item detail carries document KEYS and outcome
+ * codes only — never document content. Status is the run's own
+ * vocabulary projected onto the store's: a run whose integrity
+ * leg could not execute failed; integrity findings or per-item
+ * index failures make it partial; only a clean run completes.
+ * A guard-skipped tick records NO run row — the dispatch record
+ * above is its whole trace, exactly as the job idiom draws it.
+ */
+function recordCorpusSyncRun(
+  ctx: KnowledgeCorpusRouteContext,
+  request: Request,
+  result: CorpusSyncResult
+): void {
+  const sql = ctx.sql;
+  if (!sql) return;
+  try {
+    const deliveryStates: Record<string, string> = {};
+    let present = 0;
+    for (const entry of result.integrity.entries) {
+      if (entry.status === "present") present += 1;
+      const key =
+        entry.bucketKey ?? `manifest:${entry.category}:${entry.title}`;
+      deliveryStates[`integrity:${key}`] = entry.status;
+    }
+    for (const item of result.corpusIndex.items) {
+      deliveryStates[`index:${item.bucketKey}`] =
+        item.state === "failed" && item.reason
+          ? `failed:${item.reason}`
+          : item.state;
+    }
+    const failed = !result.completed;
+    const partial =
+      !failed && (!result.integrity.ok || result.corpusIndex.failed > 0);
+    recordJobOutcome(sql, {
+      id: `corpus-sync:${result.ranAt}`,
+      kind: "corpus",
+      trigger: corpusSyncTrigger(ctx, request),
+      status: failed ? "failed" : partial ? "partial" : "completed",
+      scanned: result.integrity.entries.length,
+      matched: present,
+      codedError: failed ? CORPUS_SYNC_INCOMPLETE_CODE : undefined,
+      deliveryStates,
+      origin: "corpus-sync",
+      createdAt: result.ranAt,
+    });
+  } catch (err) {
+    structuredLog.warn("scheduled_job_outcome.run_record_failed", {
+      message: "[knowledgeCorpus] corpus-sync run record failed",
+      job: "corpus-sync",
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 export async function handleKnowledgeCorpusRoutes(
@@ -365,8 +511,19 @@ export async function handleKnowledgeCorpusRoutes(
   // the next tick instead of advancing the marker.
   if (path.endsWith("/knowledge/corpus-sync") && request.method === "POST") {
     if (!ctx.userLogin) return unauthenticatedResponse();
+    // Issue #3527 S5: every dispatch of this registered job —
+    // fired, guard-skipped, or honestly unable to run — records
+    // its outcome in the system sink; only an actual run adds a
+    // #1333 run row. Recording never changes the responses below.
+    const traceId =
+      parseTraceparent(request.headers.get("traceparent"))?.traceId ?? null;
     const sql = ctx.sql;
     if (!sql) {
+      await recordCorpusSyncOutcome(ctx, sessionId, {
+        outcome: "skipped",
+        traceId,
+        reason: "report-store-unavailable",
+      });
       return Response.json({
         success: true,
         skipped: true,
@@ -379,6 +536,11 @@ export async function handleKnowledgeCorpusRoutes(
       readSetting(CORPUS_SYNC_LAST_RUN_KEY)
     );
     if (!decision.fire) {
+      await recordCorpusSyncOutcome(ctx, sessionId, {
+        outcome: "skipped",
+        traceId,
+        reason: decision.reason,
+      });
       return Response.json({
         success: true,
         skipped: true,
@@ -407,6 +569,18 @@ export async function handleKnowledgeCorpusRoutes(
     if (result.completed) {
       settingWriteFromSql(sql)(CORPUS_SYNC_LAST_RUN_KEY, result.ranAt);
     }
+    await recordCorpusSyncOutcome(
+      ctx,
+      sessionId,
+      result.completed
+        ? { outcome: "ran", traceId }
+        : {
+            outcome: "failed",
+            traceId,
+            errorCode: CORPUS_SYNC_INCOMPLETE_CODE,
+          }
+    );
+    recordCorpusSyncRun(ctx, request, result);
     return Response.json({ success: true, ...result });
   }
   return null;

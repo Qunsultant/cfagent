@@ -1,0 +1,2 @@
+### Added
+- Publish stage S5 (#3527): the corpus sync and the reports canonical-index sweep are registered scheduled jobs — their tick dispatches are observed like the sibling platform jobs, every fired/skipped/failed outcome records into the system job surface (mas_events scheduled_job.outcome, visible via the audit surface), and each actual run records a per-item detail row in the Autopilot Control "Job outcomes" feed (per-document integrity/index states for the corpus sync; page totals for the reports sweep), with manual and scheduled invocations distinguished.

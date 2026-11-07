@@ -197,6 +197,9 @@ export async function routeRequest(deps: RouteRequestDeps, request: Request): Pr
     env: deps.env,
     notifySettingsChanged,
     ensureTables: () => deps.ensureTables(),
+    // Issue #3527 S5: the sweep's outcome recording reads the ORM
+    // events port through this accessor (the #2037 idiom).
+    getOrm: () => deps.getOrm(),
     getScreenerAgent: (userLogin?: string) => deps.getScreenerAgent(userLogin),
     getScreenerExecutionContext: () => deps.getScreenerExecutionContext(),
     getReportDispatchHitl: () => deps.getReportDispatchHitl(),
@@ -348,6 +351,9 @@ export async function routeRequest(deps: RouteRequestDeps, request: Request): Pr
     storage: deps.ctx.storage,
     userLogin: request.headers.get("x-user-login") || "",
     sql: deps.ctx.storage.sql,
+    // Issue #3527 S5: the sync's outcome recording reads the ORM
+    // events port through this accessor (the #2037 idiom).
+    getOrm: () => deps.getOrm(),
   });
   if (knowledgeCorpusResponse) return knowledgeCorpusResponse;
 

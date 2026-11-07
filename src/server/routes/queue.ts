@@ -39,8 +39,6 @@ import { createKvMembershipStore } from "../../security/iaaaMembershipStore";
 import { consumeCfBatch, dispatchSubscriberBatch } from "../../messaging/cfQueueMessagingAdapter";
 import { createMessagingPorts } from "../../messaging/createMessagingPorts";
 import { createScreenerEventsWorkHandler } from "../../messaging/screenerEventsConsumer";
-import { createJobPipelineMessaging } from "../../messaging/createJobPipelineMessaging";
-import { createJobPipelineEventsHandler } from "../../messaging/jobPipelineEventsConsumer";
 import { createDeadLetterStoreAdapter, ensureDeadLetterStoreSchema } from "../../data/createDeadLetterStorePorts";
 import { resolveDlqDepthAlertThreshold } from "../../config/dlqDepthAlert";
 import { persistDeadLetterLanding } from "../../messaging/deadLetterPersist";
@@ -49,17 +47,14 @@ import type { SlackDeliveryEnv } from "../../agents/social/delivery";
 import { isMessageEnvelope, type MessageEnvelope, type SubscriberHandlers } from "../../messaging/messagingPorts";
 import { actorGateway } from "../../services/cloudflareActorGateway";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
-import { createStructuredLogger } from "../../observability/structuredLogger";
 import { writeEnvelopeToSink, childSpan, formatTraceparent, newTraceContext } from "../../observability/observabilityPorts";
-import { observeInternalDispatch } from "../../observability/scheduledJobOutcomes";
+import {
+  observeInternalDispatch,
+  type ScheduledJobId,
+} from "../../observability/scheduledJobOutcomes";
 import { createScreenerQueueHandler } from "../../messaging/screenerQueueConsumer";
 import { renewAllStoredETradeTokens } from "../../services/etradeOAuth";
 import { ensureBreakerDurability } from "./core";
-
-/** Module logger on the S2 structured-logging seam (#3515 S3 ratchet). */
-const structuredLog = createStructuredLogger(createObservabilitySink({}), {
-  component: "server/routes/queue",
-});
 
 // Issue #1739 — per-subscriber dedup for screener-event delivery
 // batches. Module-level so it survives across batches in one
@@ -74,12 +69,6 @@ const screenerDeliverySeen = new Set<string>();
 // processed/drop envelope ids seen, so an at-least-once redelivery
 // never re-invokes the work handler.
 const screenerEventsSeen = new Set<string>();
-
-// Issue #3543 — per-envelope dedup for job-pipeline-events
-// batches, same isolate-scoped shape: the QueuePort consumer core
-// marks processed/drop envelope ids seen, so an at-least-once
-// redelivery never re-routes a completion into the host.
-const jobPipelineEventsSeen = new Set<string>();
 
 /**
  * Issue #2544 — the single options_analysis queue dispatch, shared
@@ -221,12 +210,13 @@ export async function handleScheduledEvent(event: any, env: Env, ctx?: any): Pro
       // alert all correlate to the tick that sent them. The
       // traceparent rides every tick dispatch (corpus/digest
       // included — their routes ignore it today, at no cost);
-      // only the three named jobs get the failure observer, per
-      // the issue's scope. The observer never rejects, so
+      // five named jobs get the failure observer — the #2037
+      // three plus the corpus sync and reports sweep registered
+      // in #3527 S5. The observer never rejects, so
       // waitUntil/await below keep today's fire-and-forget shape.
       const tickTrace = newTraceContext();
       const observeTickDispatch = (
-        job: "research" | "reflection" | "adaptation",
+        job: ScheduledJobId,
         promise: Promise<unknown>,
       ): Promise<void> =>
         observeInternalDispatch(promise, {
@@ -328,14 +318,17 @@ export async function handleScheduledEvent(event: any, env: Env, ctx?: any): Pro
       // durable marker in mas_settings), so this dispatch is
       // unconditional; skips are cheap and explicit in the route
       // result.
-      const corpusSyncPromise = agent.fetch(
-        new Request("https://agent.internal/knowledge/corpus-sync", {
-          method: "POST",
-          headers: backgroundDispatchHeadersWithTrace(
-            userLogin,
-            formatTraceparent(childSpan(tickTrace)),
-          ),
-        })
+      const corpusSyncPromise = observeTickDispatch(
+        "corpus-sync",
+        agent.fetch(
+          new Request("https://agent.internal/knowledge/corpus-sync", {
+            method: "POST",
+            headers: backgroundDispatchHeadersWithTrace(
+              userLogin,
+              formatTraceparent(childSpan(tickTrace)),
+            ),
+          }),
+        ),
       );
       if (ctx?.waitUntil) ctx.waitUntil(corpusSyncPromise);
       else await corpusSyncPromise;
@@ -349,14 +342,17 @@ export async function handleScheduledEvent(event: any, env: Env, ctx?: any): Pro
       // (reports_index_backfill_last_run in mas_settings). The
       // dispatch is unconditional; skips are cheap and explicit
       // in the route result.
-      const reportsBackfillPromise = agent.fetch(
-        new Request("https://agent.internal/trading/reports/index-backfill-sweep", {
-          method: "POST",
-          headers: backgroundDispatchHeadersWithTrace(
-            userLogin,
-            formatTraceparent(childSpan(tickTrace)),
-          ),
-        })
+      const reportsBackfillPromise = observeTickDispatch(
+        "reports-index-backfill",
+        agent.fetch(
+          new Request("https://agent.internal/trading/reports/index-backfill-sweep", {
+            method: "POST",
+            headers: backgroundDispatchHeadersWithTrace(
+              userLogin,
+              formatTraceparent(childSpan(tickTrace)),
+            ),
+          }),
+        ),
       );
       if (ctx?.waitUntil) ctx.waitUntil(reportsBackfillPromise);
       else await reportsBackfillPromise;
@@ -471,55 +467,6 @@ export async function handleQueueBatch(batch: any, env: Env, ctx?: any): Promise
           );
         }
       : undefined;
-    // Issue #3543 (Pipeline J1 host wiring, consumed by J2 #3535)
-    // — the job-pipeline-events consumer: terminal job events
-    // route into the ScheduledAgent host's control dispatch (its
-    // recordPipelineCompletion intake); every other job.* status
-    // publication is acked as the live stream passing through.
-    if (batch?.queue === "job-pipeline-events") {
-      const messaging = createJobPipelineMessaging(env, {
-        seenIds: jobPipelineEventsSeen,
-      });
-      if (messaging.ports) {
-        const completionHandler = createJobPipelineEventsHandler({
-          routeCompletion: async (completion) => {
-            const agentId = env.SCHEDULED_AGENT.idFromName("default");
-            const agent = env.SCHEDULED_AGENT.get(agentId) as unknown as {
-              recordPipelineCompletion: (note: {
-                jobId: string;
-                runId: string;
-                state: string;
-                artifactKeys: string[];
-                at: string;
-              }) => Promise<void>;
-            };
-            await agent.recordPipelineCompletion(completion);
-          },
-          persistDeadLetter,
-        });
-        await consumeCfBatch(
-          batch,
-          messaging.ports.consumer,
-          completionHandler,
-          persistDeadLetter
-        );
-      } else {
-        // No messaging ports (no JOB_PIPELINE_EVENTS binding): the
-        // worker cannot honestly claim QueuePort routing, so the
-        // messages are retried into the DLQ path visibly rather
-        // than acked into silence (the screener-events rule).
-        structuredLog.warn("messaging.job_pipeline_events_no_messaging_ports", {
-          message:
-            "[messaging] job-pipeline-events batch has no messaging ports — retrying messages into the DLQ path.",
-        });
-        if (batch?.messages && Array.isArray(batch.messages)) {
-          for (const msg of batch.messages) {
-            if (typeof msg.retry === "function") msg.retry();
-          }
-        }
-      }
-      return;
-    }
     if (batch?.queue === "screener-events-delivery") {
       const deliveryHandler = createScreenerQueueHandler({ env });
       const handlers: SubscriberHandlers = new Map([
