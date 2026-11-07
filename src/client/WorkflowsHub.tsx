@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from "react";
 import "./workflowsHub.css";
-import { Button, PillGroup, Table, TextInput, PageShell, Tabs, Stack, Flex, Grid } from "./components/ui";
+import { Button, Card, PillGroup, Table, TextInput, PageShell, Tabs, Stack, Flex, Grid } from "./components/ui";
 import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
 import { STRATEGY_LIBRARY } from "./options/strategyLibrary";
 import {
@@ -1334,6 +1334,33 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
       {/* VIEW 2: PLATFORM WORKFLOWS (ALL 14 ANALYSIS & EXECUTION WORKFLOWS) */}
       {activeTab === "workflows" && (
         <Stack gap="5" role="tabpanel" id="workflows-panel-workflows" aria-labelledby="workflows-tab-workflows">
+          {/* Operational process guides (#3464): taxonomy + index. */}
+          <Card id="operational-process-guides">
+            <Stack gap="3">
+              <h3 className="workflow-title">Operational process guides</h3>
+              <p className="workflow-subtitle">
+                The taxonomy and index are the single entry point for operational processes — how each
+                process is classified, who owns it, and where its guide lives. Future answers link
+                here instead of re-explaining a process.
+              </p>
+              <Flex gap="4">
+                <a
+                  href="https://github.com/Qunsultant/cfagent/blob/main/docs/operations/process-index.md"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Process index
+                </a>
+                <a
+                  href="https://github.com/Qunsultant/cfagent/blob/main/docs/operations/process-taxonomy.md"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Taxonomy
+                </a>
+              </Flex>
+            </Stack>
+          </Card>
           {/* Track Filter Tabs */}
           <div className="workflow-track-tabs">
             <span style={{ fontSize: "var(--font-size-body-sm)", color: "var(--color-text-muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", marginRight: "0.3rem" }}>
