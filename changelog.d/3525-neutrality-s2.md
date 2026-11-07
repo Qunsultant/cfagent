@@ -1,0 +1,2 @@
+### Changed
+- Neutrality S2 (issue 3525): generic client copy and labels now name the capability instead of a provider — WorkflowsHub badges/overviews/FAQ, StockHub and nav feature descriptions, screener failure and methodology copy, the options copilot source-tab label ("Broker · Auto Options Research", kept in sync with the server-side matcher), strategy-card preview wording, Ask Agent examples, and tenant/IAAA admin hints. Data-bearing names (routes, storage keys, provider ids) are unchanged.
