@@ -196,7 +196,7 @@ The rules specified in this document align directly with `cfagent`'s trading and
 | Technical Screener & Indicators | `src/trading/screener.ts`, `src/trading/technicals.ts`, `src/trading/screeningIndicators.ts` | Equity scanning, TA computation (RSI, MA cross, pivots) |
 | Options Spread Screener | `src/trading/optionsScreener.ts`, `src/trading/options/` | Chain retrieval, spread pricing, friction checks |
 | Strategy Registry & Composition | `src/trading/registry.ts`, `src/trading/setupCatalog.ts` | Strategy definitions, multi-leg structure algebra |
-| Screening Provider Abstraction | `src/trading/screeningProvider.ts`, `src/trading/screenerPipeline.ts` | Unified multi-broker (E*TRADE/Yahoo) screening |
+| Screening Provider Abstraction | `src/trading/screeningProvider.ts`, `src/trading/screenerPipeline.ts` | Unified multi-broker screening over the routed providers |
 | Recommendation Bundles & Risk | `src/trading/options/bundleEngine.ts`, `src/trading/quotePolicies.ts` | Decision-grade recommendation bundles, risk gates |
 | Autopilot Policy Guardrails | `src/agentic/autopilot/` | Bounded execution rules, preflight checks, audit logging |
 
