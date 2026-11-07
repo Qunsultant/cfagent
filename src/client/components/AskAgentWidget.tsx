@@ -75,7 +75,7 @@ export const TAB_QUICK_PROMPTS: Record<string, Array<{ label: string; prompt: st
   research: [
     { label: "🔬 NVDA Valuation", prompt: "Generate an autonomous Market Data valuation and analyst consensus report for NVDA." },
     { label: "📊 Peer Comparison", prompt: "Compare valuation multiples (P/E, EV/EBITDA, margins) across NVDA, AMD, and INTC." },
-    { label: "⚡ Alpaca Snapshot", prompt: "Fetch Level 1/2 real-time NBBO bid/ask snapshot for AAPL via Alpaca." },
+    { label: "⚡ Market Snapshot", prompt: "Fetch Level 1/2 real-time NBBO bid/ask snapshot for AAPL." },
     { label: "📈 Historical Bars", prompt: "Show historical daily price bars and RSI-14 momentum for TSLA." },
   ],
   options: [
@@ -262,7 +262,7 @@ export function AskAgentWidget({
       } else if (q.includes("option") || q.includes("flow") || q.includes("sweep")) {
         reply = "📊 **Options Flow**: Scanning institutional block trades and 0DTE sweeps. You can view real-time call/put volume ratios under the Hedging & Options Flows tab.";
       } else if (q.includes("research") || q.includes("nvda") || q.includes("valuation")) {
-        reply = "🔬 **Market Data Research**: Zero-credential equity valuation active. Yahoo Finance multiples + Alpaca NBBO quotes available. Opening comprehensive report.";
+        reply = "🔬 **Market Data Research**: Zero-credential equity valuation active. Market-data multiples + NBBO quotes available. Opening comprehensive report.";
       } else {
         reply = `⚡ I received your query: "${query}". I am routing this through the LLM Judge to activate the specialized agent for "${activeTab}". Click "Open in Chat Tab" for full multi-turn analysis.`;
       }
