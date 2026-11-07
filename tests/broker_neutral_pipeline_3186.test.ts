@@ -20,6 +20,20 @@ import { createOptionsScreenPorts, optionsArtifactKey, type OptionsStageStorage 
 import type { StageClaimStore } from "../src/workflows/stageReportConsumer";
 import type { BrokerOptionChain } from "../src/types";
 
+// Issue #3460 slice 3: resolveEngineClient reads the broker through the
+// presence-aware seam (no default). This file's tenant broker is alpaca.
+vi.mock("../src/services/providerConnections", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../src/services/providerConnections")>();
+  return {
+    ...actual,
+    readTenantBrokerSelection: async () => ({
+      status: "ok",
+      brokerId: "alpaca",
+    }),
+  };
+});
+
 function memoryClaims(preclaimed: string[] = []): StageClaimStore {
   const claimed = new Set(preclaimed);
   return {

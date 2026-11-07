@@ -14,6 +14,21 @@
  * No test below asserts the buggy completed-marking as correct.
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
+// Issue #3460 slice 3: the unified service reads the broker through the
+// presence-aware seam (no default). These tests drive the E*TRADE path,
+// so the selection is explicit here instead of relying on the default.
+vi.mock("../src/services/providerConnections", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../src/services/providerConnections")>();
+  return {
+    ...actual,
+    readTenantBrokerSelection: async () => ({
+      status: "ok",
+      brokerId: "etrade",
+    }),
+  };
+});
+
 
 // On-chain verification is covered in x402_verifier.test.ts; here the
 // verifier accepts any claim except from a known-bad payer (the

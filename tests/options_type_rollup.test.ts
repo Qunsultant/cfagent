@@ -29,7 +29,22 @@
  * from tests/options_scanner.test.ts and
  * tests/options_scan_persistence.test.ts). No live market data.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi} from "vitest";
+// Issue #3460 slice 3: the unified service reads the broker through the
+// presence-aware seam (no default). These tests drive the E*TRADE path,
+// so the selection is explicit here instead of relying on the default.
+vi.mock("../src/services/providerConnections", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../src/services/providerConnections")>();
+  return {
+    ...actual,
+    readTenantBrokerSelection: async () => ({
+      status: "ok",
+      brokerId: "etrade",
+    }),
+  };
+});
+
 import {
   parseOptionsStrategyIntent,
   runOptionsStrategyAction,
