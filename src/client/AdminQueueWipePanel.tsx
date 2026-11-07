@@ -675,8 +675,8 @@ export function AdminQueueWipePanel() {
         A separate explicit action, never automatic after a wipe. Review the four schedules
         below; creating them is the recreate half of the wipe decision, and leaving schedules
         off is the alternative — do not press this button unless recreating is intended.
-        Creating an account-scoped schedule requires a connected E*TRADE account for this
-        environment; a 409 for one leg is reported per schedule and does not hide the others.
+        Creating an account-scoped schedule requires a connected broker account for this
+        environment (the tenant's selected broker — E*TRADE or Alpaca); a 409 for one leg is reported per schedule and does not hide the others.
       </p>
       {track1Plan.error ? (
         <Notice tone="danger" title="Track 1 plan failed">

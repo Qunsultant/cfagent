@@ -1372,17 +1372,35 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
       // Issue #1355: one shard of a sharded scheduled screen. The
       // executor owns policy + job state; the handler owns the
       // shard's work (providers, pipeline, store seams).
-      const { executeShardJob } = await import("../../services/shardExecutors");
+      const { executeShardJob, resolveShardChainSource } = await import("../../services/shardExecutors");
       const { ETradeService } = await import("../../services/etrade");
       const shardPayload = payload as unknown as import("../../services/shardJobs").ShardPayload;
+      // Issue #3655: one E*TRADE factory closure, shared by the legacy
+      // executor seam and the broker-aware chain-source resolver
+      // below — a second inline construction would trip the #291
+      // extraction ledger (one site per file).
+      const createETradeService = (userLogin: string, environment: string | undefined) =>
+        new ETradeService(ctx.getOrm(), ctx.env, userLogin, environment);
       result = await executeShardJob(
         {
           sql: ctx.agentCtx.storage.sql,
           env: ctx.env as unknown as Record<string, unknown>,
           orm: ctx.getOrm(),
           storage: ctx.agentCtx.storage,
-          createETradeService: (userLogin, environment) =>
-            new ETradeService(ctx.getOrm(), ctx.env, userLogin, environment),
+          createETradeService,
+          // Issue #3655: broker-aware chain source (tenant broker →
+          // Alpaca platform chain source / etrade client /
+          // provider_unsupported). Without this the sharded options
+          // executor would fetch E*TRADE chains for every tenant.
+          resolveChainSource: (chain) =>
+            resolveShardChainSource(
+              {
+                env: ctx.env as unknown as Record<string, unknown>,
+                orm: ctx.getOrm(),
+                createETradeService,
+              },
+              chain
+            ),
           sessionId: ctx.sessionKey(),
         },
         shardPayload

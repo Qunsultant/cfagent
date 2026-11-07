@@ -122,11 +122,32 @@ export function buildScheduleRowColumns(
           (typeof payload.environment === "string" && payload.environment) ||
           (typeof payload.env === "string" && payload.env) ||
           ctx.activeEnv;
+        // Issue #3655: broker + mode from the stored payload (recorded
+        // at creation); legacy payloads without them read as the
+        // environment-derived mode with no broker claim.
+        const brokerLabel =
+          typeof payload.brokerId === "string" && payload.brokerId
+            ? payload.brokerId === "etrade"
+              ? "E*TRADE"
+              : payload.brokerId === "alpaca"
+                ? "Alpaca"
+                : payload.brokerId
+            : "";
+        const modeLabel =
+          typeof payload.mode === "string" && payload.mode
+            ? payload.mode
+            : environment === "TEST"
+              ? "paper"
+              : environment === "PROD"
+                ? "live"
+                : "";
         return (
           <div className="schedule-row-stack">
             <span className="schedule-row-value">{model.scope}</span>
             <span className="schedule-row-muted">
               {owner} · {environment}
+              {brokerLabel ? ` · ${brokerLabel}` : ""}
+              {modeLabel ? ` · ${modeLabel}` : ""}
             </span>
           </div>
         );

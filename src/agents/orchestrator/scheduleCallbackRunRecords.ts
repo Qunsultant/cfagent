@@ -78,6 +78,34 @@ export function recordCronDispatchRun(
   store.record(buildCronDispatchRecord(parsed));
 }
 
+/**
+ * Issue #3655: broker + data-provider + mode provenance for the ledger
+ * row, read from the firing schedule payload (recorded at creation).
+ * A payload without them records no provenance — never a fresh ambient
+ * read at fire time, never a guessed broker.
+ */
+function payloadProvenance(payload: unknown): {
+  brokerId?: string;
+  dataProviderId?: string;
+  mode?: "live" | "paper";
+  modeSource?: "pin" | "selection" | "inference";
+} {
+  if (!payload || typeof payload !== "object") return {};
+  const p = payload as Record<string, unknown>;
+  return {
+    ...(typeof p.brokerId === "string" && p.brokerId ? { brokerId: p.brokerId } : {}),
+    ...(typeof p.dataProviderId === "string" && p.dataProviderId
+      ? { dataProviderId: p.dataProviderId }
+      : {}),
+    ...(p.mode === "live" || p.mode === "paper" ? { mode: p.mode } : {}),
+    // Issue #3655 (effective mode): the resolver source rides the
+    // ledger row with the mode (creation-stamped, never re-derived).
+    ...(p.modeSource === "pin" || p.modeSource === "selection" || p.modeSource === "inference"
+      ? { modeSource: p.modeSource }
+      : {}),
+  };
+}
+
 export async function recordScheduleCallbackRun(
   sql: SqlStorage,
   callback: string,
@@ -109,6 +137,7 @@ export async function recordScheduleCallbackRun(
       finished: new Date().toISOString(),
       outcome: outcome.outcome,
       triggeredBy: resolveScheduleRunTrigger(payload),
+      ...payloadProvenance(payload),
       ...linkage,
       ...(outcome.error ? { error: outcome.error } : {}),
       ...(outcome.detail ? { detail: outcome.detail } : {}),
@@ -123,6 +152,7 @@ export async function recordScheduleCallbackRun(
       finished: new Date().toISOString(),
       outcome: "failure",
       triggeredBy: resolveScheduleRunTrigger(payload),
+      ...payloadProvenance(payload),
       ...linkage,
       error: err instanceof Error ? err.message : String(err),
     });

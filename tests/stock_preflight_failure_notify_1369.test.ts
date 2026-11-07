@@ -15,6 +15,15 @@
  * path that must notify. The fallback-success case (no failure
  * notice; the marker is the signal) is pinned in
  * tests/scheduled_stock_yahoo_fallback_1527.test.ts.
+ *
+ * SUPERSEDED IN PART by #3655 (2026-11-07): the silent Yahoo
+ * fallback is removed from the scheduled stock path. A blocked run
+ * now fails loud with the guard error — no Yahoo attempt, no screen
+ * attempt — and the failure path below (audit + session message +
+ * screener.failed) is the guard block itself, not a fallback
+ * failure. The pins were re-pinned in the same PR; the notify
+ * contract (every blocked run notifies, sharded runs never submit
+ * a shard chain) is unchanged.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ScheduledTasksService } from "../src/services/scheduledTasks";
@@ -44,26 +53,26 @@ describe("autonomousMarketScreen preflight-blocked failure path (#1369)", () => 
       blocked: true,
       error: "⚠️ [FAILURE_AUTH_NO_SESSION] E*TRADE connection missing — scheduled stock screen is blocked.",
     });
-    // Issue #1527: a blocked run attempts the Yahoo fallback first,
-    // so the failure path here is the fallback failing — not the
-    // guard block itself. The fallback failure must notify.
-    (service as any).getScreenerAgent = () => ({
-      runScreen: async () => {
-        throw new Error("Yahoo quotes unavailable");
-      },
+    // Issue #3655: no Yahoo fallback on the scheduled stock path —
+    // a blocked run must never attempt a screen at all. The spy
+    // proves it: any runScreen call is a regression.
+    const runScreen = vi.fn(async () => {
+      throw new Error("runScreen must not be called on a guard-blocked run (#3655)");
     });
-    return { service, publish };
+    (service as any).getScreenerAgent = () => ({ runScreen });
+    return { service, publish, runScreen };
   }
 
-  it("a blocked run whose Yahoo fallback fails publishes screener.failed instead of returning silently", async () => {
-    const { service, publish } = blockedService();
+  it("a blocked run fails loud with the guard error and publishes screener.failed instead of returning silently", async () => {
+    const { service, publish, runScreen } = blockedService();
     const result = await service.autonomousMarketScreen({});
     expect(result.success).toBe(false);
-    expect(String((result as any).error)).toContain("Yahoo quotes unavailable");
+    expect(String((result as any).error)).toContain("FAILURE_AUTH_NO_SESSION");
+    expect(runScreen).not.toHaveBeenCalled();
     const events = publish.mock.calls.map((c) => c[0]);
     const failed = events.find((e: any) => e.type === "screener.failed");
     expect(failed).toBeDefined();
-    expect(failed.error).toContain("Yahoo quotes unavailable");
+    expect(failed.error).toContain("FAILURE_AUTH_NO_SESSION");
     expect(failed.trigger).toBe("scheduled");
     expect(events.find((e: any) => e.type === "screener.completed")).toBeUndefined();
   });
@@ -77,12 +86,13 @@ describe("autonomousMarketScreen preflight-blocked failure path (#1369)", () => 
   });
 
   it("a blocked sharded run notifies through the same catch and never submits a shard chain", async () => {
-    const { service, publish } = blockedService();
+    const { service, publish, runScreen } = blockedService();
     const shardSubmit = vi.fn(async () => ({ jobId: "never" }));
     (service as any).shardSubmit = shardSubmit;
     const result = await service.autonomousMarketScreen({ sharded: true });
     expect(result.success).toBe(false);
-    expect(String((result as any).error)).toContain("Yahoo quotes unavailable");
+    expect(String((result as any).error)).toContain("FAILURE_AUTH_NO_SESSION");
+    expect(runScreen).not.toHaveBeenCalled();
     const failed = publish.mock.calls.map((c) => c[0]).filter((e: any) => e.type === "screener.failed");
     expect(failed).toHaveLength(1);
     expect(shardSubmit).not.toHaveBeenCalled();

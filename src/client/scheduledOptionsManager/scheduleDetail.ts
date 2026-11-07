@@ -289,6 +289,26 @@ export function buildScheduleDetail(
         ctx.activeEnv ||
         "—",
     },
+    // Issue #3655: broker + mode recorded on the schedule at creation.
+    // Legacy payloads without them show "—" rather than a guessed value.
+    {
+      label: "Broker",
+      value:
+        typeof payload.brokerId === "string" && payload.brokerId
+          ? payload.brokerId === "etrade"
+            ? "E*TRADE"
+            : payload.brokerId === "alpaca"
+              ? "Alpaca"
+              : payload.brokerId
+          : "—",
+    },
+    {
+      label: "Mode",
+      value:
+        typeof payload.mode === "string" && payload.mode
+          ? payload.mode
+          : "—",
+    },
     { label: "Trigger", value: typeof payload.trigger === "string" ? payload.trigger : "scheduled" },
   ];
 

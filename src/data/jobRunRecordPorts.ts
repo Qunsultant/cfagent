@@ -126,6 +126,19 @@ export interface JobRunRecord {
   descriptor?: string;
   /** Artifact references on success (report keys, chain ids). */
   artifactRefs?: string[];
+  /**
+   * Issue #3655: broker + data-provider + mode provenance for the run,
+   * stamped from the firing schedule payload (recorded at creation).
+   * Absent on rows recorded before provenance existed — never
+   * backfilled from the currently selected broker. D1-backed rows do
+   * not carry these fields yet (no migration adds the columns there);
+   * the DO-SQLite ledger is the surface that stores them.
+   */
+  brokerId?: string | null;
+  dataProviderId?: string | null;
+  mode?: "live" | "paper" | null;
+  /** Issue #3655 (effective mode): which resolver leg produced the mode — pin | selection | inference. */
+  modeSource?: "pin" | "selection" | "inference" | null;
 }
 
 /** The per-run record store surface (synchronous: DO SQLite is sync). */

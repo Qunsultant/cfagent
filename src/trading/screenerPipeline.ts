@@ -156,7 +156,7 @@ export interface OpportunityStock {
 // Universe acquisition — the ONLY stage that varies by trigger.
 // ---------------------------------------------------------------------------
 
-export type UniverseMode = "all-listings" | "live-quotes" | "etrade-only" | "yahoo";
+export type UniverseMode = "all-listings" | "live-quotes" | "etrade-only" | "yahoo" | "alpaca";
 
 /**
  * Issue #1007: which data provider feeds a run. A provider changes
@@ -164,7 +164,7 @@ export type UniverseMode = "all-listings" | "live-quotes" | "etrade-only" | "yah
  * persistence. Recorded on ScreenerRunResult and in the canonical
  * report body so every run states which provider produced it.
  */
-export type StockScreenProvider = "etrade" | "yahoo";
+export type StockScreenProvider = "etrade" | "yahoo" | "alpaca";
 
 export interface AcquireUniverseOptions {
   mode: UniverseMode;
@@ -668,7 +668,7 @@ async function resolveAllListings(
  */
 async function resolveUniverseListings(
   opts: AcquireUniverseOptions,
-  mode: "live-quotes" | "etrade-only"
+  mode: "live-quotes" | "etrade-only" | "alpaca"
 ): Promise<NasdaqStockListing[]> {
   if (opts.symbols) return opts.symbols;
   if (opts.universeDeps) {
@@ -830,6 +830,56 @@ export function bindEtradeQuoteDeps(
         }
       : {}),
   };
+}
+
+/**
+ * Issue #3655: bind one platform quotes provider to the pipeline
+ * seam — the Alpaca binding. The binding itself is provider-generic
+ * (the same getQuote/getQuotesBatch shape as the etrade-only
+ * binding); only the name differs, so an Alpaca run's deps are
+ * visibly Alpaca-bound at the call site and never pass through an
+ * E*TRADE-named binding. This binding takes NO gap-fill parameter:
+ * alpaca means Alpaca or nothing, by construction.
+ */
+export function bindAlpacaQuoteDeps(
+  provider: DataProvider,
+  runContext: DataRunContext
+): QuoteScreenerDeps {
+  return bindEtradeQuoteDeps(provider, runContext);
+}
+
+/**
+ * Issue #3655: resolve the alpaca-mode quote provider from the
+ * platform route table, mirroring yahooQuoteProviderFromRoute. The
+ * quotes route must exist, alpaca's config must be enabled (state
+ * and flag), and the registry must hold a quotes-capable alpaca
+ * adapter. Anything else throws — no silent substitution, no
+ * fallback to another provider.
+ */
+export function alpacaQuoteProviderFromRoute(
+  registry: DataProviderRegistry,
+  configs: readonly ProviderConfigRecord[],
+  routes: readonly CapabilityRouteRecord[]
+): DataProvider {
+  const route = routes.find((r) => r.capability === "quotes");
+  if (!route) {
+    throw new Error(
+      "Alpaca-mode quote resolution failed: no quotes route exists."
+    );
+  }
+  const config = configs.find((c) => c.id === "alpaca");
+  if (!config || config.lifecycleState !== "enabled" || !config.enabled) {
+    throw new Error(
+      "Alpaca-mode quote resolution failed: the alpaca provider is not enabled (lifecycle state and flag)."
+    );
+  }
+  const provider = registry.get("alpaca");
+  if (!provider || !provider.capabilities.includes("quotes")) {
+    throw new Error(
+      "Alpaca-mode quote resolution failed: no quotes-capable alpaca adapter is registered."
+    );
+  }
+  return provider;
 }
 
 /**
@@ -1636,10 +1686,19 @@ export async function acquireUniverse(
 
   // E*TRADE cannot quote a symbol it is skipped; if it cannot quote
   // any, the screen fails honestly instead of presenting fake data.
-  if (opts.mode === "etrade-only") {
+  // Issue #3655: "alpaca" mode shares this live-quotes branch with
+  // "etrade-only": the branch is generic over the bound quoteDeps
+  // (the caller binds the Alpaca adapter for alpaca, the E*TRADE
+  // adapter for etrade-only). Labels, provenance, and the auth
+  // failure code are parameterized on the mode below, so an Alpaca
+  // run never reports E*TRADE provenance or an E*TRADE OAuth code.
+  if (opts.mode === "etrade-only" || opts.mode === "alpaca") {
     if (!opts.quoteDeps) {
-      throw new Error("etrade-only mode requires quoteDeps.fetchQuote");
+      throw new Error(`${opts.mode} mode requires quoteDeps.fetchQuote`);
     }
+    const isAlpacaQuotes = opts.mode === "alpaca";
+    const quoteProviderName = isAlpacaQuotes ? "Alpaca" : "E*TRADE";
+    const quoteProviderId: StockScreenProvider = isAlpacaQuotes ? "alpaca" : "etrade";
     const cfg = opts.config ?? DEFAULT_SCREENER_CONFIG;
     // Issue #1770: the run's subrequest budget, shared by the batch
     // and per-symbol passes below. Symbols deferred by the budget are
@@ -1651,7 +1710,7 @@ export async function acquireUniverse(
     );
     const budgetDeferred = new Set<string>();
     const symbols =
-      opts.symbols ?? filterTechnologySymbols(await resolveUniverseListings(opts, "etrade-only"));
+      opts.symbols ?? filterTechnologySymbols(await resolveUniverseListings(opts, isAlpacaQuotes ? "alpaca" : "etrade-only"));
     const maxSymbols = opts.maxSymbols ?? cfg.acquisition.defaultMaxSymbols;
     const limited = maxSymbols > 0 ? symbols.slice(0, maxSymbols) : symbols;
     if (limited.length === 0) {
@@ -1669,7 +1728,7 @@ export async function acquireUniverse(
     const listingsBySymbol = new Map(
       limited.map((listing) => [listing.symbol.toUpperCase(), listing])
     );
-    // Lower concurrency + pacing: E*TRADE rate-limits rapid quote bursts.
+    // Lower concurrency + pacing: the provider rate-limits rapid quote bursts.
     const CONCURRENCY = Math.min(cfg.acquisition.quoteConcurrency, 5);
     const BATCH_PAUSE_MS = 500;
 
@@ -1683,20 +1742,20 @@ export async function acquireUniverse(
         ...live,
         symbol: listing.symbol,
         companyName: live.companyName || listing.companyName,
-        // E*TRADE quote payloads do not reliably include sector. The
+        // This provider's quote payloads do not reliably include sector. The
         // dynamically fetched Nasdaq listing row does, and resolveStockSector
         // provides curated/inferred enrichment.
         sector: resolveStockSector(listing.symbol, live.companyName || listing.companyName, live.sector || listing.sector),
-        source: "E*TRADE live",
+        source: isAlpacaQuotes ? "Alpaca live" : "E*TRADE live",
         quoteStatus: "LIVE",
       } as ETradeQuote);
       quotedSymbols.add(listing.symbol.toUpperCase());
       return true;
     };
 
-    // Issue #495: ask E*TRADE for the universe in batches. One request per
+    // Issue #495: ask the provider for the universe in batches. One request per
     // symbol (100 calls for NASDAQ100, each retried) exhausted the Worker
-    // subrequest budget and E*TRADE's quote rate limit, so 53 of 100 symbols
+    // subrequest budget and the provider's quote rate limit, so 53 of 100 symbols
     // failed with a generic "no live quote" and the run died with 47 quotes.
     // The quote endpoint takes a symbol list: a 100-symbol screen is two
     // requests, and per-symbol calls are kept for the stragglers only.
@@ -1724,7 +1783,7 @@ export async function acquireUniverse(
               }
               return opts.quoteDeps!.fetchQuotes!(chunk);
             },
-            "E*TRADE batch quote"
+            `${quoteProviderName} batch quote`
           );
           const bySymbol = new Map(
             batchQuotes.map((quote) => [
@@ -1739,12 +1798,12 @@ export async function acquireUniverse(
             if (!live) {
               quoteErrors.set(
                 symbol,
-                new Error(`E*TRADE batch quote omitted ${symbol}`)
+                new Error(`${quoteProviderName} batch quote omitted ${symbol}`)
               );
             } else if (!acceptQuote(listing, live)) {
               quoteErrors.set(
                 symbol,
-                new Error(`E*TRADE returned zero-price quote for ${symbol}`)
+                new Error(`${quoteProviderName} returned zero-price quote for ${symbol}`)
               );
             }
           }
@@ -1753,7 +1812,7 @@ export async function acquireUniverse(
           // per-symbol pass produce the specific error where affordable.
           for (const symbol of chunk) quoteErrors.set(symbol, err);
         }
-        // Pace batches to stay under E*TRADE rate limits.
+        // Pace batches to stay under the provider rate limits.
         if (i + batchSize < requestedSymbols.length) {
           await new Promise((resolve) => setTimeout(resolve, BATCH_PAUSE_MS));
         }
@@ -1802,14 +1861,14 @@ export async function acquireUniverse(
               }
               return opts.quoteDeps!.fetchQuote(symbol);
             },
-            "E*TRADE",
+            quoteProviderName,
             symbol
           );
           if (!live || !(live.lastPrice > 0)) {
             // Preserve the underlying state for diagnostics: distinguish
             // null (API returned nothing) from zero-price (empty quote).
             const detail = !live ? "null-response" : `zero-price(lastPrice=${live.lastPrice})`;
-            throw new Error(`E*TRADE returned no quote for ${symbol} [${detail}]`);
+            throw new Error(`${quoteProviderName} returned no quote for ${symbol} [${detail}]`);
           }
           return { symbol, live, deferred: false as const };
         })
@@ -1825,7 +1884,7 @@ export async function acquireUniverse(
         // Fulfilled + deferred: the budget error is already recorded
         // in quoteErrors above; nothing further to do for the symbol.
       }
-      // Pace batches to stay under E*TRADE rate limits.
+      // Pace batches to stay under the provider rate limits.
       if (i + CONCURRENCY < retrySymbols.length) {
         await new Promise((resolve) => setTimeout(resolve, BATCH_PAUSE_MS));
       }
@@ -1836,7 +1895,7 @@ export async function acquireUniverse(
       failed.push(symbol);
       const reason =
         quoteErrors.get(symbol) ??
-        new Error(`E*TRADE returned no quote for ${symbol} [null-response]`);
+        new Error(`${quoteProviderName} returned no quote for ${symbol} [null-response]`);
       const category = categorizeQuoteFailure(reason);
       failureReasons[category] = (failureReasons[category] ?? 0) + 1;
       if (failureSamples.length < 3) {
@@ -1845,7 +1904,7 @@ export async function acquireUniverse(
     }
     if (failed.length > 0) {
       console.warn(
-        `[screenerPipeline] E*TRADE quote failures: ${failed.length}/${limited.length}. ` +
+        `[screenerPipeline] ${quoteProviderName} quote failures: ${failed.length}/${limited.length}. ` +
           `Reasons: ${JSON.stringify(failureReasons)}. Samples: ${failureSamples.join("; ")}`
       );
     }
@@ -1861,12 +1920,15 @@ export async function acquireUniverse(
       // auth failure). Throw BusinessError with FAILURE_AUTH_TOKEN_EXPIRED instead of the
       // technical "OAuth access token is missing".
       const authFailures = failureReasons["auth"] ?? 0;
-      if (authFailures > 0) {
+      // Issue #3655: FAILURE_AUTH_TOKEN_EXPIRED is the E*TRADE OAuth
+      // code — an Alpaca run with auth failures falls through to the
+      // generic provider-unavailable error below, which names Alpaca.
+      if (authFailures > 0 && !isAlpacaQuotes) {
         const { BusinessError } = await import("../outcomes/outcomeAspects");
         throw new BusinessError("FAILURE_AUTH_TOKEN_EXPIRED", { failedCount: failed.length, authFailures });
       }
       throw new Error(
-        `E*TRADE unavailable: no live quotes returned (${quotes.length} of ${limited.length} symbols quoted` +
+        `${quoteProviderName} unavailable: no live quotes returned (${quotes.length} of ${limited.length} symbols quoted` +
           (failed.length > 0 ? ` (failed: ${failed.slice(0, 5).join(", ")}${failed.length > 5 ? "…" : ""})` : "") +
           (reasonSummary ? ` (failure reasons: ${reasonSummary})` : "") +
           (failureSamples.length > 0 ? ` (diagnostics: ${failureSamples.join("; ")})` : "") +
@@ -1885,18 +1947,18 @@ export async function acquireUniverse(
         : undefined;
     return {
       quotes,
-      provider: "etrade",
+      provider: quoteProviderId,
       ...(partial ? { partial } : {}),
       discovery: {
         mode: "live_quotes",
         candidateCount: symbols.length,
         listingCount: quotes.length,
         message: partial
-          ? `Partial screen — qualified results: E*TRADE quoted ${quotes.length} of ${limited.length} symbols ` +
+          ? `Partial screen — qualified results: ${quoteProviderName} quoted ${quotes.length} of ${limited.length} symbols ` +
             `(${failed.length} unavailable: ${failed.slice(0, 5).join(", ")}${failed.length > 5 ? "…" : ""}` +
             (reasonSummary ? `; failure reasons: ${reasonSummary}` : "") +
             `). Screen ran on the quoted subset only; no fallback data substituted.`
-          : `E*TRADE-only live quotes; ${quotes.length} of ${limited.length} symbols quoted.`,
+          : `${quoteProviderName}-only live quotes; ${quotes.length} of ${limited.length} symbols quoted.`,
       },
     };
   }

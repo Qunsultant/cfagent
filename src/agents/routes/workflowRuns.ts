@@ -211,6 +211,20 @@ export function unifiedRecordsFromCanonicalReports(
       title: hit.title,
       trigger: typeof body.trigger === "string" ? body.trigger : null,
       triggerDetail: typeof body.provenance?.submittedVia === "string" ? body.provenance.submittedVia : null,
+      // Issue #3655: broker + data-provider provenance from the
+      // canonical body's provenance object.
+      brokerId: typeof body.provenance?.brokerId === "string" ? body.provenance.brokerId : null,
+      dataProviderId: typeof body.provenance?.dataProviderId === "string" ? body.provenance.dataProviderId : null,
+      // Issue #3655 (effective mode): the resolver source, from the
+      // canonical provenance when present, else the top-level body
+      // (the scheduled stock callback writes it there). Absent on
+      // rows recorded before effective-mode provenance existed.
+      modeSource:
+        body.provenance?.modeSource === "pin" || body.provenance?.modeSource === "selection" || body.provenance?.modeSource === "inference"
+          ? body.provenance.modeSource
+          : body.modeSource === "pin" || body.modeSource === "selection" || body.modeSource === "inference"
+            ? body.modeSource
+            : null,
       stages,
       inputs: {
         kind: "options",
