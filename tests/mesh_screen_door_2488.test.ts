@@ -401,8 +401,8 @@ describe("issue #2488 — run_stock_screen catalog registration", () => {
     // 87 since #3513; 88 since #3588 (stock_copilot_introspect); 90 since #3514
     // (stock_copilot_learnings, stock_copilot_evaluate); 94 since #3535 (+4 feed-job tools);
     // 98 since #3536 (+4 enrich-job tools).
-    // 106 since #3538 (+4 generate-job tools).
-    expect(McpToolFactory.getAllTools()).toHaveLength(110);
+    // 106 since #3538 (+4 generate-job tools); 110 since #3539 (+4 deliver-job tools); 112 since #3673 (+2 bracket ladder tools).
+    expect(McpToolFactory.getAllTools()).toHaveLength(112);
   });
 });
 
