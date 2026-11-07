@@ -34,6 +34,7 @@
  */
 
 import { unauthenticatedResponse } from "./routeIdentity";
+import { codedMessage, resolveOutcome } from "../../outcomes/outcomeAspects";
 import {
   triggerManualResearch,
   triggerScheduledResearch,
@@ -1151,6 +1152,50 @@ export async function handleScreenerResearchRoutes(
       });
     }
 
+    // #1257 post-hoc live check (owner go-ahead 2026-11-03). Landed AND
+    // LEFT IN PLACE per the owner's 2026-11-03 direction ("don't remove
+    // it"), which supersedes the draft's "never ship permanently" line:
+    // the route stays until the owner directs removal. Read-only by
+    // construction: SELECT only, no drain, no advance, no rollback, no
+    // mutation of any kind. Same session auth as the surrounding
+    // adaptation routes (x-user-login header or sessionId) — a standing
+    // read path into the DO mas_promotions store for any authenticated
+    // session, not operator-only.
+    if (path.endsWith("/adaptation/promotions/active-check") && request.method === "GET") {
+      const userLogin = request.headers.get("x-user-login") || sessionId;
+      if (!userLogin) return unauthenticatedResponse();
+      try {
+        const sql = ctx.getOrm().getSql();
+        const inFlight = Array.from(
+          sql.exec(
+            `SELECT id, candidate_id, stage, stage_started_at, created_at
+             FROM mas_promotions
+             WHERE stage IN ('shadow', 'partial', 'full')
+             ORDER BY created_at ASC`
+          )
+        ) as any[];
+        const byStage = Array.from(
+          sql.exec(`SELECT stage, COUNT(*) AS count FROM mas_promotions GROUP BY stage`)
+        ) as any[];
+        return Response.json({
+          inFlight,
+          inFlightCount: inFlight.length,
+          byStage,
+          timestamp: new Date().toISOString(),
+        });
+      } catch {
+        // AOP: the query failure is a coded outcome, never raw store
+        // text to the client (outcome catalog + single resolver, #2381).
+        const outcome = resolveOutcome("FAILURE_PROMOTIONS_ACTIVE_CHECK_QUERY");
+        return Response.json(
+          {
+            code: outcome.code,
+            error: codedMessage("FAILURE_PROMOTIONS_ACTIVE_CHECK_QUERY"),
+          },
+          { status: outcome.entry?.httpStatus ?? 500 }
+        );
+      }
+    }
     if (path.endsWith("/adaptation/promotions") && request.method === "GET") {
       const candidateId = url.searchParams.get("candidateId") || "";
       if (!candidateId) {
