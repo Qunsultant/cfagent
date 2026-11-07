@@ -1116,7 +1116,7 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
           )}
           <ResearchReportActions
             title={`${activeSymbol} stock research`}
-            query={nlqQuery || `Run full market-data research on ${activeSymbol} using yfinance and Alpaca`}
+            query={nlqQuery || `Run full market-data research on ${activeSymbol} using connected market-data providers`}
             userLogin={user?.login}
             sheets={[
               { name: "Stock screen data", rows: screenerStocks as Array<Record<string, unknown>> },
