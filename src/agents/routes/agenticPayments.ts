@@ -238,6 +238,11 @@ import {
   resolvePlatformIdentity,
   toPlatformIdentityView,
 } from "../../services/platformIdentity";
+import {
+  readUsageBilling,
+  USAGE_BILLING_DEFAULT_LIMIT,
+} from "../../services/usageBillingSurface";
+import { ensureUsageEventsTable } from "../../services/scheduledReports";
 import { activateSubscription, grantSubscription } from "../../services/subscriptionActivation";
 import { activateTrialSubscription, trialStartedMessage } from "../../services/trialSubscriptionActivation";
 import {
@@ -341,6 +346,20 @@ function codedOutcomeResponse(code: string): Response {
   const resolved = resolveOutcome(code);
   return Response.json(
     { code: resolved.code, message: resolved.businessMessage, retryable: resolved.entry?.retryable ?? false },
+    { status: resolved.entry?.httpStatus ?? 500 },
+  );
+}
+
+/**
+ * Issue #2667: the coded-error body for the usage/billing reader —
+ * {code, message} with the catalog httpStatus. The message is the
+ * catalog business message via codedMessage ([CODE] message), never
+ * raw store text.
+ */
+function usageBillingCoded(code: string): Response {
+  const resolved = resolveOutcome(code);
+  return Response.json(
+    { code, message: codedMessage(code) },
     { status: resolved.entry?.httpStatus ?? 500 },
   );
 }
@@ -1029,6 +1048,97 @@ export async function handleAgenticPaymentsRoutes(
       return Response.json(toPlatformIdentityView(identity));
     } catch (err: any) {
       return Response.json({ error: err.message || "Failed to read platform identity" }, { status: 503 });
+    }
+  }
+
+  // GET /payments/agentic/commercial/usage-billing (issue #2667,
+  // Phase 2.12) — ONE read-only, session-bound usage/billing reader:
+  // the caller's metered calls (readReceipts, slice 4), included-run
+  // + credit balances (platform identity, #2219), subscriptions
+  // (2.1), refunds (2.7), and referral balance (2.2) together.
+  // Self-only: the subject is always commercialLogin(); there is no
+  // userId parameter. No new tables, no new writes; per-row
+  // provenance is derived by the service, never asserted. No money
+  // totals across mixed provenance. Failures are coded catalog
+  // bodies, never raw store text; reads are aspect-logged, not
+  // audit-trailed (a read is not a state change).
+  if (path.endsWith("/payments/agentic/commercial/usage-billing") && request.method === "GET") {
+    const login = commercialLogin();
+    if (!login) {
+      logAspectEvent({
+        aspect: "UsageBilling",
+        operationName: "usage-billing.read",
+        code: "FAILURE_USAGE_BILLING_NOT_SIGNED_IN",
+        level: "warn",
+        message: "usage/billing read without a signed-in session",
+      });
+      return usageBillingCoded("FAILURE_USAGE_BILLING_NOT_SIGNED_IN");
+    }
+    const rawLimit = url.searchParams.get("limit");
+    let limit = USAGE_BILLING_DEFAULT_LIMIT;
+    if (rawLimit !== null) {
+      const parsed = Number(rawLimit);
+      if (!Number.isInteger(parsed) || parsed < 1) {
+        logAspectEvent({
+          aspect: "UsageBilling",
+          operationName: "usage-billing.read",
+          code: "FAILURE_USAGE_BILLING_INVALID_LIMIT",
+          level: "warn",
+          message: "usage/billing read with an invalid limit",
+          metadata: { userLogin: login, limit: rawLimit },
+        });
+        return usageBillingCoded("FAILURE_USAGE_BILLING_INVALID_LIMIT");
+      }
+      limit = parsed;
+    }
+    try {
+      const store = requireStore();
+      if (store instanceof Response) return usageBillingCoded("FAILURE_USAGE_BILLING_STORE_UNAVAILABLE");
+      const subs = requireSubs();
+      if (subs instanceof Response) return usageBillingCoded("FAILURE_USAGE_BILLING_STORE_UNAVAILABLE");
+      const refunds = requireRefunds();
+      if (refunds instanceof Response) return usageBillingCoded("FAILURE_USAGE_BILLING_STORE_UNAVAILABLE");
+      const lifecycle = requireLifecycle();
+      if (lifecycle instanceof Response) return usageBillingCoded("FAILURE_USAGE_BILLING_STORE_UNAVAILABLE");
+      const ensured = await ensureStores(store, subs);
+      if (ensured) return usageBillingCoded("FAILURE_USAGE_BILLING_STORE_UNAVAILABLE");
+      const ensuredLifecycle = await ensureLifecycle(lifecycle);
+      if (ensuredLifecycle) return usageBillingCoded("FAILURE_USAGE_BILLING_STORE_UNAVAILABLE");
+      await ensureRefundSchema(refunds.store.db);
+      const orm = ctx.getOrm();
+      // #2779: ensure usage_events before the read — a zero-receipt
+      // account must read empty, never 500 on a missing table.
+      ensureUsageEventsTable(orm.getSql());
+      const view = await readUsageBilling(
+        { sql: orm.getSql(), orm, store, subs, refunds, lifecycle },
+        login,
+        { limit },
+      );
+      logAspectEvent({
+        aspect: "UsageBilling",
+        operationName: "usage-billing.read",
+        code: "SUCCESS_USAGE_BILLING_READ",
+        level: "info",
+        message: "usage/billing read",
+        metadata: {
+          userLogin: login,
+          receipts: view.usage.receipts.length,
+          subscriptions: view.billing.subscriptions.length,
+          refunds: view.billing.refunds.length,
+        },
+      });
+      return Response.json(view);
+    } catch (err: any) {
+      logAspectEvent({
+        aspect: "UsageBilling",
+        operationName: "usage-billing.read",
+        code: "FAILURE_USAGE_BILLING_STORE_UNAVAILABLE",
+        level: "error",
+        message: "usage/billing read failed",
+        error: err instanceof Error ? err.message : String(err),
+        metadata: { userLogin: login },
+      });
+      return usageBillingCoded("FAILURE_USAGE_BILLING_STORE_UNAVAILABLE");
     }
   }
 

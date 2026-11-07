@@ -31,6 +31,7 @@ import { receiptKindLabel } from "./agenticWalletApi";
 import { RefundPolicySection } from "./RefundPolicySection";
 import { RefundFlowSection } from "./RefundFlowSection";
 import { ApprovedFreeQuotaSection } from "./ApprovedFreeQuotaSection";
+import { UsageBillingSection } from "./UsageBillingSection";
 import { TopUpLimitsSection } from "./TopUpLimitsSection";
 import {
   buildBillingView,
@@ -170,6 +171,7 @@ export function BillingServicingPanel() {
           </Card>
           <RefundPolicySection />
           <RefundFlowSection />
+          <UsageBillingSection />
           <ApprovedFreeQuotaSection />
           <TopUpLimitsSection />
           <Card>

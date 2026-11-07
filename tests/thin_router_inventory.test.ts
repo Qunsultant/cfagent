@@ -301,6 +301,11 @@
  * immediately before GET /adaptation/promotions) — bringing the pinned
  * array to 408 entries (measured); the delegation sequence is unchanged (same
  * handler, same position).
+ * Issue #2667 (Phase 2.12) added one — GET
+ * /payments/agentic/commercial/usage-billing — in
+ * handleAgenticPaymentsRoutes, after the commercial identity GET —
+ * bringing the pinned array to 409 entries (measured); the delegation
+ * sequence is unchanged (same handler, same position).
  *
  * LANDMARK RULE (#405): all position assertions anchor to DELEGATION
  * CALLS - the only landmarks a thin router has.
@@ -566,6 +571,7 @@ const EXPECTED_INVENTORY = [
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/ledger/cfpay-revenue\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/account\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/identity\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/usage-billing\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/account\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/account/credits\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/free-run-allowance\")",
