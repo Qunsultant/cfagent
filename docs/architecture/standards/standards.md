@@ -227,7 +227,7 @@ Agentic SaaS platforms must maintain full compliance with international regulato
 ### 10.2 Ethical AI & Regulatory Standards (EU AI Act & NIST AI RMF)
 * **EU AI Act Categorization:** Maintain risk classification documentation for AI agents (e.g., financial trading/screening agents classified under specific risk tiers requiring transparency and human oversight).
 * **NIST AI Risk Management Framework (AI RMF):** Continually assess agents across four functions: **Govern, Map, Measure, and Manage**.
-* **Financial & Third-Party API Standards:** Full compliance with partner platform terms of service (e.g., E*TRADE OAuth2 workflow policies, SEC market data usage guidelines, x402 web standard micropayments).
+* **Financial & Third-Party API Standards:** Full compliance with partner platform terms of service (e.g., broker OAuth workflow policies, SEC market data usage guidelines, x402 web standard micropayments).
 
 ---
 
