@@ -577,6 +577,11 @@ describe("census chat column vs the mesh-door command registry (#2421)", () => {
       "get_deliver_job_status",
       "list_deliver_jobs",
       "manage_deliver_job",
+      // #3540 (§7 pin update): the pipeline-chain commands join the door.
+      "run_pipeline_chain",
+      "get_pipeline_chain_status",
+      "list_pipeline_chains",
+      "manage_pipeline_chain",
     ],
     PaymentsAgent: ["check_payment_budget", "get_payments_overview"],
     TradingAgent: [

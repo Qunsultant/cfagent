@@ -20,6 +20,8 @@
  *   POST /data-providers/:id/generate-jobs/:jobId/:action run|pause|resume|cancel|retry a generate job (#3538)
  *   GET  /data-providers/:id/deliver-jobs             the provider's deliver jobs as pipeline jobs (#3539)
  *   POST /data-providers/:id/deliver-jobs/:jobId/:action run|pause|resume|cancel|retry a deliver job (#3539)
+ *   GET  /data-providers/:id/pipeline-chains          the provider's composed pipeline chains with their end-to-end roll-ups (#3540)
+ *   POST /data-providers/:id/pipeline-chains/:jobId/:action run|pause|resume|cancel|retry a chain, or stage_pause|stage_resume|stage_cancel one of its stages (stage in the JSON body) (#3540)
  *   POST /data-providers/:id/register|configure|verify|enable|disable|deprovision
  *
  * (Paths are the DO-internal spellings: src/server.ts strips the
@@ -138,6 +140,11 @@ import {
   DELIVER_PIPELINE_CATALOG,
   type DeliverJobSurfaceView,
 } from "../../services/deliverPipelineJobs";
+import { PIPELINE_CHAIN_CODES } from "../../services/pipelineChains";
+import {
+  CHAIN_PIPELINE_CATALOG,
+  type PipelineChainSurfaceView,
+} from "../../services/chainPipelineJobs";
 import type { JobInstanceRecord } from "../../data/jobPipelinePorts";
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
@@ -218,6 +225,29 @@ export interface FeedPipelineDoorLike {
   // #3539: the deliver jobs' surface reads on the same host door.
   listDeliverJobSurfaceStatuses(): Promise<DeliverJobSurfaceView[]>;
   getDeliverJobSurfaceStatus(jobId: string): Promise<DeliverJobSurfaceView>;
+  // #3540: the composed chains' surface reads + dispatches +
+  // per-stage operations on the same host door.
+  listPipelineChainSurfaceStatuses(): Promise<PipelineChainSurfaceView[]>;
+  getPipelineChainSurfaceStatus(jobId: string): Promise<PipelineChainSurfaceView>;
+  runPipelineChain(
+    jobId: string,
+    opts?: { userLogin?: string },
+  ): Promise<{ jobId: string; runId: string; state: string; error?: string }>;
+  resumePipelineChain(
+    jobId: string,
+    opts?: { userLogin?: string },
+  ): Promise<{ jobId: string; runId: string; state: string; error?: string }>;
+  retryPipelineChain(
+    jobId: string,
+    opts?: { userLogin?: string },
+  ): Promise<{ jobId: string; runId: string; state: string; error?: string }>;
+  stopPipelineChainStage(jobId: string, stage: string): Promise<JobInstanceRecord>;
+  resumePipelineChainStage(
+    jobId: string,
+    stage: string,
+    opts?: { userLogin?: string },
+  ): Promise<{ jobId: string; runId: string; state: string; error?: string }>;
+  cancelPipelineChainStage(jobId: string, stage: string): Promise<JobInstanceRecord>;
   runPipelineJob(
     jobId: string,
     opts?: { userLogin?: string },
@@ -360,7 +390,8 @@ async function providerView(
   enrichJobs?: unknown,
   analyzeJobs?: unknown,
   generateJobs?: unknown,
-  deliverJobs?: unknown
+  deliverJobs?: unknown,
+  pipelineChains?: unknown
 ) {
   const adapter = registry.get(record.id);
   const serving = routeViews.some(
@@ -421,6 +452,10 @@ async function providerView(
     // job — the merged surface views (delivery copy + pipeline
     // state + lineage + next scheduled run). Same rule.
     deliverJobs: deliverJobs ?? [],
+    // #3540: every composed pipeline chain for this provider —
+    // the end-to-end roll-ups (per-stage states + frontier +
+    // chain run state + next scheduled run). Same rule.
+    pipelineChains: pipelineChains ?? [],
   };
 }
 
@@ -678,6 +713,31 @@ async function deliverJobsViewFor(
   }
 }
 
+/**
+ * Every composed pipeline chain for one provider, as end-to-end
+ * roll-up views from the pipeline host (#3540). Same best-effort
+ * read rule as deliverJobsViewFor: an unreachable host yields
+ * an empty list — never a fabricated status.
+ */
+async function pipelineChainsViewFor(
+  ctx: DataProviderRoutesContext,
+  providerId: DataProviderId,
+): Promise<PipelineChainSurfaceView[]> {
+  const door = feedPipelineDoorFor(ctx);
+  if (!door) return [];
+  try {
+    const all = await door.listPipelineChainSurfaceStatuses();
+    return all.filter((v) => v.sourceId === providerId);
+  } catch (error) {
+    structuredLog.warn("data_providers.pipeline_chains_status_read_failed", {
+      message: `[data-providers] pipeline-chains status read for "${providerId}" failed: ${error instanceof Error ? error.message : String(error)}`,
+      providerId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return [];
+  }
+}
+
 export async function handleDataProviderRoutes(
   request: Request,
   url: URL,
@@ -717,7 +777,13 @@ export async function handleDataProviderRoutes(
   const deliverJobActionMatch = path.match(
     /^\/data-providers\/([^/]+)\/deliver-jobs\/([^/]+)\/([a-z]+)$/,
   );
-  if (!isList && !oneMatch && !actionMatch && !feedRunMatch && !feedJobsMatch && !feedJobActionMatch && !enrichJobsMatch && !enrichJobActionMatch && !analyzeJobsMatch && !analyzeJobActionMatch && !generateJobsMatch && !generateJobActionMatch && !deliverJobsMatch && !deliverJobActionMatch) return null;
+  // #3540: the composed pipeline-chains surface (list + per-chain
+  // actions; the stage actions carry an underscore, hence [a-z_]+).
+  const pipelineChainsMatch = path.match(/^\/data-providers\/([^/]+)\/pipeline-chains$/);
+  const pipelineChainActionMatch = path.match(
+    /^\/data-providers\/([^/]+)\/pipeline-chains\/([^/]+)\/([a-z_]+)$/,
+  );
+  if (!isList && !oneMatch && !actionMatch && !feedRunMatch && !feedJobsMatch && !feedJobActionMatch && !enrichJobsMatch && !enrichJobActionMatch && !analyzeJobsMatch && !analyzeJobActionMatch && !generateJobsMatch && !generateJobActionMatch && !deliverJobsMatch && !deliverJobActionMatch && !pipelineChainsMatch && !pipelineChainActionMatch) return null;
 
   try {
     // ---- reads ----
@@ -755,6 +821,7 @@ export async function handleDataProviderRoutes(
               await analyzeJobsViewFor(ctx, c.id),
               await generateJobsViewFor(ctx, c.id),
               await deliverJobsViewFor(ctx, c.id),
+              await pipelineChainsViewFor(ctx, c.id),
             )
           )
         ),
@@ -784,6 +851,7 @@ export async function handleDataProviderRoutes(
           await analyzeJobsViewFor(ctx, record.id),
           await generateJobsViewFor(ctx, record.id),
           await deliverJobsViewFor(ctx, record.id),
+          await pipelineChainsViewFor(ctx, record.id),
         ),
         routes: routeViews.filter(
           (r) => r.primaryProviderId === id || r.gapFillProviderId === id
@@ -1287,6 +1355,130 @@ export async function handleDataProviderRoutes(
           {
             error: error instanceof Error ? error.message : String(error),
             code: "DELIVER_JOB_ACTION_REFUSED",
+          },
+          { status: 409 },
+        );
+      }
+    }
+
+    // #3540 — the provider's composed pipeline chains as
+    // end-to-end roll-up views (the same views the copilot
+    // tools return).
+    if (request.method === "GET" && pipelineChainsMatch) {
+      const id = decodeURIComponent(pipelineChainsMatch[1]) as DataProviderId;
+      return Response.json({ jobs: await pipelineChainsViewFor(ctx, id) });
+    }
+
+    // #3540 — run / pause / resume / cancel / retry one composed
+    // chain, or stop / resume / cancel one of its stages,
+    // through the pipeline host's control plane (the same door
+    // + gates as the deliver-job actions above, transposed to
+    // the composition). The stage actions name their stage in
+    // the JSON body ({ "stage": "deliver" }).
+    if (request.method === "POST" && pipelineChainActionMatch) {
+      if (!ctx.userLogin) {
+        return Response.json(
+          { error: "A verified session is required to manage a pipeline chain." },
+          { status: 401 },
+        );
+      }
+      const id = decodeURIComponent(pipelineChainActionMatch[1]) as DataProviderId;
+      const jobId = decodeURIComponent(pipelineChainActionMatch[2]);
+      const action = pipelineChainActionMatch[3];
+      const entry = CHAIN_PIPELINE_CATALOG.find((e) => e.jobId === jobId);
+      if (!entry || entry.sourceId !== id) {
+        return Response.json(
+          {
+            error: `No pipeline chain "${jobId}" is registered for provider "${id}".`,
+            code: PIPELINE_CHAIN_CODES.chainNotFound,
+          },
+          { status: 404 },
+        );
+      }
+      const CHAIN_ACTIONS = [
+        "run",
+        "pause",
+        "resume",
+        "cancel",
+        "retry",
+        "stage_pause",
+        "stage_resume",
+        "stage_cancel",
+      ];
+      if (!CHAIN_ACTIONS.includes(action)) {
+        return Response.json(
+          { error: `Unknown pipeline-chain action "${action}".` },
+          { status: 404 },
+        );
+      }
+      const door = feedPipelineDoorFor(ctx);
+      if (!door) {
+        return Response.json(
+          {
+            error:
+              "The pipeline host is not bound on this deployment; the action was refused rather than dispatched through an unwired path.",
+            code: PIPELINE_CHAIN_CODES.chainNotConfigured,
+          },
+          { status: 500 },
+        );
+      }
+      try {
+        let stage: string | undefined;
+        if (action.startsWith("stage_")) {
+          const body = (await request.json().catch(() => null)) as
+            | Record<string, unknown>
+            | null;
+          stage =
+            typeof body?.stage === "string" && body.stage.trim()
+              ? body.stage.trim().toLowerCase()
+              : undefined;
+          if (!stage) {
+            return Response.json(
+              {
+                error: `The ${action} action on pipeline chain "${jobId}" requires a stage in the request body (feed, enrich, analyze, generate, or deliver).`,
+                code: "PIPELINE_CHAIN_STAGE_REQUIRED",
+              },
+              { status: 400 },
+            );
+          }
+        }
+        const result =
+          action === "run"
+            ? await door.runPipelineChain(jobId, { userLogin: ctx.userLogin })
+            : action === "pause"
+              ? await door.pausePipelineJob(jobId)
+              : action === "resume"
+                ? await door.resumePipelineChain(jobId, { userLogin: ctx.userLogin })
+                : action === "cancel"
+                  ? await door.cancelPipelineJob(jobId)
+                  : action === "retry"
+                    ? await door.retryPipelineChain(jobId, { userLogin: ctx.userLogin })
+                    : action === "stage_pause"
+                      ? await door.stopPipelineChainStage(jobId, stage!)
+                      : action === "stage_resume"
+                        ? await door.resumePipelineChainStage(jobId, stage!, {
+                            userLogin: ctx.userLogin,
+                          })
+                        : await door.cancelPipelineChainStage(jobId, stage!);
+        ctx.recordAudit("data_provider.pipeline_chain_action", "orchestrator", {
+          actor: ctx.userLogin,
+          providerId: id,
+          jobId,
+          action,
+          ...(stage ? { stage } : {}),
+        });
+        return Response.json({
+          jobId,
+          action,
+          ...(stage ? { stage } : {}),
+          result,
+          status: await door.getPipelineChainSurfaceStatus(jobId),
+        });
+      } catch (error) {
+        return Response.json(
+          {
+            error: error instanceof Error ? error.message : String(error),
+            code: "PIPELINE_CHAIN_ACTION_REFUSED",
           },
           { status: 409 },
         );

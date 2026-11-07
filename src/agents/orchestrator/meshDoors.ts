@@ -135,6 +135,10 @@ import {
   resolveDeliverJob,
   type DeliverJobSurfaceView,
 } from "../../services/deliverPipelineJobs";
+import {
+  resolvePipelineChain,
+  type PipelineChainSurfaceView,
+} from "../../services/chainPipelineJobs";
 
 // ---------------------------------------------------------------------------
 // Errors — honest, typed, coded (doors-and-layers §11.1)
@@ -155,6 +159,10 @@ export type MeshDoorErrorCode =
   | "generate_job_not_found"
   // Issue #3539: the deliver-job door's unknown/ambiguous job name.
   | "deliver_job_not_found"
+  // Issue #3540: the pipeline-chain door's unknown/ambiguous
+  // chain name, and a stage action that names no stage.
+  | "pipeline_chain_not_found"
+  | "pipeline_chain_stage_required"
   // Issue #2488: the mesh screen door's (meshScreenDoor.ts)
   // fail-closed refusal codes — budget_denied (the S5 budget
   // door refused the paid path), price_unavailable (no stored
@@ -252,6 +260,33 @@ export interface ScheduledAgentDoorStub {
   // merged-status reads.
   getDeliverJobSurfaceStatus(jobId: string): Promise<DeliverJobSurfaceView>;
   listDeliverJobSurfaceStatuses(): Promise<DeliverJobSurfaceView[]>;
+  // Issue #3540 (Pipeline J7): the composed chains' surface on
+  // the same host — the end-to-end roll-up reads, the chain
+  // dispatches (which refresh the chain definition from the
+  // stored stage definitions first), and the per-stage control
+  // operations inside a chain run. Chain pause/cancel ride the
+  // generic pipeline RPCs above, like every job on the plane.
+  runPipelineChain(
+    jobId: string,
+    opts?: { userLogin?: string },
+  ): Promise<{ jobId: string; runId: string; state: string; error?: string }>;
+  resumePipelineChain(
+    jobId: string,
+    opts?: { userLogin?: string },
+  ): Promise<{ jobId: string; runId: string; state: string; error?: string }>;
+  retryPipelineChain(
+    jobId: string,
+    opts?: { userLogin?: string },
+  ): Promise<{ jobId: string; runId: string; state: string; error?: string }>;
+  getPipelineChainSurfaceStatus(jobId: string): Promise<PipelineChainSurfaceView>;
+  listPipelineChainSurfaceStatuses(): Promise<PipelineChainSurfaceView[]>;
+  stopPipelineChainStage(jobId: string, stage: string): Promise<JobInstanceRecord>;
+  resumePipelineChainStage(
+    jobId: string,
+    stage: string,
+    opts?: { userLogin?: string },
+  ): Promise<{ jobId: string; runId: string; state: string; error?: string }>;
+  cancelPipelineChainStage(jobId: string, stage: string): Promise<JobInstanceRecord>;
 }
 
 export interface PaymentsAgentDoorStub {
@@ -989,6 +1024,166 @@ export async function manageDeliverJobViaDoor(
     case "retry": {
       const run = await door.retryPipelineJob(entry.jobId, { userLogin: login });
       return { ...base, run, status: await door.getDeliverJobSurfaceStatus(entry.jobId) };
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// ScheduledAgent door — the composed pipeline chains (#3540)
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve a caller's chain name ("yahoo nasdaq100 pipeline",
+ * "alpaca pipeline", an exact chain job id) to its catalog
+ * entry. An ambiguous or unknown name is an honest
+ * pipeline_chain_not_found error — the door never guesses.
+ */
+function resolvePipelineChainOrThrow(source: string) {
+  const entry = resolvePipelineChain(source);
+  if (!entry) {
+    throw new MeshDoorError(
+      "pipeline_chain_not_found",
+      `No pipeline chain matches "${source}". Name a source with its universe ("yahoo nasdaq100 pipeline", "sp100 pipeline", "alpaca pipeline", "etrade pipeline", "public pipeline") or an exact pipeline chain job id.`,
+    );
+  }
+  return entry;
+}
+
+export interface PipelineChainRunDoorResult {
+  jobId: string;
+  label: string;
+  runId: string;
+  state: string;
+  error?: string;
+  status: PipelineChainSurfaceView;
+}
+
+/**
+ * Run one composed chain end-to-end through the pipeline
+ * host's control plane (the chain dispatch refreshes the
+ * chain definition from the stored stage definitions first)
+ * and report its settled outcome + the end-to-end status view
+ * (the same view the UX renders).
+ */
+export async function runPipelineChainViaDoor(
+  env: Env,
+  actingLogin: string | undefined | null,
+  source: string,
+): Promise<PipelineChainRunDoorResult> {
+  const login = requireActingLogin(actingLogin);
+  const entry = resolvePipelineChainOrThrow(source);
+  const door = getScheduledAgentDoor(env);
+  const run = await door.runPipelineChain(entry.jobId, { userLogin: login });
+  const status = await door.getPipelineChainSurfaceStatus(entry.jobId);
+  return {
+    jobId: entry.jobId,
+    label: entry.label,
+    runId: run.runId,
+    state: run.state,
+    ...(run.error ? { error: run.error } : {}),
+    status,
+  };
+}
+
+/** One chain's end-to-end status (per-stage states + frontier). */
+export async function getPipelineChainStatusViaDoor(
+  env: Env,
+  actingLogin: string | undefined | null,
+  source: string,
+): Promise<PipelineChainSurfaceView> {
+  requireActingLogin(actingLogin);
+  const entry = resolvePipelineChainOrThrow(source);
+  const door = getScheduledAgentDoor(env);
+  return door.getPipelineChainSurfaceStatus(entry.jobId);
+}
+
+/** Every chain's end-to-end status, in catalog order. */
+export async function listPipelineChainsViaDoor(
+  env: Env,
+  actingLogin: string | undefined | null,
+): Promise<{ jobs: PipelineChainSurfaceView[] }> {
+  requireActingLogin(actingLogin);
+  const door = getScheduledAgentDoor(env);
+  return { jobs: await door.listPipelineChainSurfaceStatuses() };
+}
+
+export type PipelineChainManagementAction =
+  | "pause"
+  | "resume"
+  | "cancel"
+  | "retry"
+  | "stage_pause"
+  | "stage_resume"
+  | "stage_cancel";
+
+export interface PipelineChainManageDoorResult {
+  jobId: string;
+  label: string;
+  action: PipelineChainManagementAction;
+  stage?: string;
+  instance?: JobInstanceRecord;
+  run?: { runId: string; state: string; error?: string };
+  status: PipelineChainSurfaceView;
+}
+
+/**
+ * Apply one management operation to a pipeline chain through
+ * the same control plane: pause / resume / cancel / retry of
+ * the chain itself, and stop / resume / cancel of any single
+ * stage inside its run (the #3549 stage operations, addressed
+ * by stage kind through the chain's own definition). The
+ * control plane's own refusals propagate unchanged.
+ */
+export async function managePipelineChainViaDoor(
+  env: Env,
+  actingLogin: string | undefined | null,
+  source: string,
+  action: PipelineChainManagementAction,
+  stage?: string,
+): Promise<PipelineChainManageDoorResult> {
+  const login = requireActingLogin(actingLogin);
+  const entry = resolvePipelineChainOrThrow(source);
+  const door = getScheduledAgentDoor(env);
+  const base = { jobId: entry.jobId, label: entry.label, action };
+  switch (action) {
+    case "pause": {
+      const instance = await door.pausePipelineJob(entry.jobId);
+      return { ...base, instance, status: await door.getPipelineChainSurfaceStatus(entry.jobId) };
+    }
+    case "cancel": {
+      const instance = await door.cancelPipelineJob(entry.jobId);
+      return { ...base, instance, status: await door.getPipelineChainSurfaceStatus(entry.jobId) };
+    }
+    case "resume": {
+      const run = await door.resumePipelineChain(entry.jobId, { userLogin: login });
+      return { ...base, run, status: await door.getPipelineChainSurfaceStatus(entry.jobId) };
+    }
+    case "retry": {
+      const run = await door.retryPipelineChain(entry.jobId, { userLogin: login });
+      return { ...base, run, status: await door.getPipelineChainSurfaceStatus(entry.jobId) };
+    }
+    case "stage_pause":
+    case "stage_resume":
+    case "stage_cancel": {
+      if (!stage || !stage.trim()) {
+        throw new MeshDoorError(
+          "pipeline_chain_stage_required",
+          `The ${action} operation on pipeline chain "${entry.jobId}" requires a stage (feed, enrich, analyze, generate, or deliver).`,
+        );
+      }
+      const stageName = stage.trim().toLowerCase();
+      if (action === "stage_pause") {
+        const instance = await door.stopPipelineChainStage(entry.jobId, stageName);
+        return { ...base, stage: stageName, instance, status: await door.getPipelineChainSurfaceStatus(entry.jobId) };
+      }
+      if (action === "stage_cancel") {
+        const instance = await door.cancelPipelineChainStage(entry.jobId, stageName);
+        return { ...base, stage: stageName, instance, status: await door.getPipelineChainSurfaceStatus(entry.jobId) };
+      }
+      const run = await door.resumePipelineChainStage(entry.jobId, stageName, {
+        userLogin: login,
+      });
+      return { ...base, stage: stageName, run, status: await door.getPipelineChainSurfaceStatus(entry.jobId) };
     }
   }
 }

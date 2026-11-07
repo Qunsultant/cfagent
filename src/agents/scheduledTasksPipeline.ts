@@ -96,6 +96,20 @@ import {
   type DeliverStepDeps,
 } from "../services/deliverPipelineJobs";
 import { createDeliveryDatasetPorts } from "../data/createDeliveryDatasetPorts";
+import {
+  buildPipelineChainRegistry,
+  chainStageNodePath,
+  PIPELINE_CHAIN_CODES,
+  PIPELINE_CHAIN_STAGE_ORDER,
+  type PipelineChainStageKind,
+} from "../services/pipelineChains";
+import {
+  buildChainSurfaceView,
+  ensureChainPipelineJobs,
+  refreshChainDefinitionFromStoredStages,
+  CHAIN_PIPELINE_CATALOG,
+  type PipelineChainSurfaceView,
+} from "../services/chainPipelineJobs";
 import { createCaptureWiredFeedProvider } from "../services/feedProviderWiring";
 import {
   createIndexMembershipService,
@@ -414,11 +428,22 @@ export async function ensureScheduledAgentDeliverJobs(
   return ensureDeliverPipelineJobs(control, stores, envStrings(ctx.env));
 }
 
+/** Ensure the composed pipeline chain definitions exist on this host's control plane (#3540). */
+export async function ensureScheduledAgentChainJobs(
+  ctx: ScheduledTasksPipelineContext,
+  control: JobPipelineControl,
+): Promise<string[]> {
+  const stores = createJobPipelineStoresFromSql(pipelineSql(ctx));
+  return ensureChainPipelineJobs(control, stores, envStrings(ctx.env));
+}
+
 /**
  * Ensure EVERY pipeline job definition this host manages
- * (feed + enrich + analyze + generate + deliver) — the ensure
- * every host entry point runs, so a job family's definitions
- * exist whichever door arrives first.
+ * (feed + enrich + analyze + generate + deliver + the composed
+ * chains, #3540) — the ensure every host entry point runs, so
+ * a job family's definitions exist whichever door arrives
+ * first. Chains ensure LAST: their definitions derive from
+ * the stage jobs' definitions.
  */
 export async function ensureScheduledAgentPipelineJobs(
   ctx: ScheduledTasksPipelineContext,
@@ -429,7 +454,88 @@ export async function ensureScheduledAgentPipelineJobs(
   const analyze = await ensureScheduledAgentAnalyzeJobs(ctx, control);
   const generate = await ensureScheduledAgentGenerateJobs(ctx, control);
   const deliver = await ensureScheduledAgentDeliverJobs(ctx, control);
-  return [...feed, ...enrich, ...analyze, ...generate, ...deliver];
+  const chains = await ensureScheduledAgentChainJobs(ctx, control);
+  return [...feed, ...enrich, ...analyze, ...generate, ...deliver, ...chains];
+}
+
+/**
+ * Re-derive one chain's definition from the stage jobs'
+ * definitions AS STORED on this host (a stage job reconfigured
+ * through the control plane flows into its chain), refusing by
+ * name for an unknown chain (#3540). Callers ensure first.
+ */
+export async function refreshScheduledAgentChainDefinition(
+  ctx: ScheduledTasksPipelineContext,
+  control: JobPipelineControl,
+  jobId: string,
+): Promise<void> {
+  const chain = buildPipelineChainRegistry(envStrings(ctx.env)).forId(jobId);
+  if (!chain) {
+    throw new Error(
+      `${PIPELINE_CHAIN_CODES.chainNotFound}: no pipeline chain with id "${jobId}" exists in the chain catalog.`,
+    );
+  }
+  const stores = createJobPipelineStoresFromSql(pipelineSql(ctx));
+  await refreshChainDefinitionFromStoredStages(control, stores, chain);
+}
+
+/**
+ * One chain's end-to-end surface view on this host (#3540):
+ * the chain definition is refreshed from the stored stage
+ * definitions first, then the roll-up composes the chain job's
+ * status view with every stage job's own status view — the
+ * one query behind both surfaces' "where is the pipeline?".
+ */
+export async function buildScheduledAgentChainSurfaceView(
+  ctx: ScheduledTasksPipelineContext,
+  control: JobPipelineControl,
+  jobId: string,
+): Promise<PipelineChainSurfaceView> {
+  const registry = buildPipelineChainRegistry(envStrings(ctx.env));
+  const chain = registry.forId(jobId);
+  const entry = CHAIN_PIPELINE_CATALOG.find((e) => e.jobId === jobId);
+  if (!chain || !entry) {
+    throw new Error(
+      `${PIPELINE_CHAIN_CODES.chainNotFound}: no pipeline chain with id "${jobId}" exists in the chain catalog.`,
+    );
+  }
+  await refreshScheduledAgentChainDefinition(ctx, control, jobId);
+  const stagePipelines: Record<string, JobStatusView> = {};
+  for (const node of chain.nodes) {
+    stagePipelines[node.jobId] = await control.getJob(node.jobId);
+  }
+  return buildChainSurfaceView({
+    entry,
+    chain,
+    pipeline: await control.getJob(jobId),
+    stagePipelines,
+    nowMs: Date.now(),
+  });
+}
+
+/**
+ * The node path addressing one stage of one chain on this
+ * host (#3540) — the address the uniform stage operations
+ * consume. Unknown chains and unknown stage names refuse BY
+ * NAME (the chain surface's coded refusals).
+ */
+export function pipelineChainStageNodePath(
+  ctx: ScheduledTasksPipelineContext,
+  jobId: string,
+  stage: string,
+): string {
+  const chain = buildPipelineChainRegistry(envStrings(ctx.env)).forId(jobId);
+  if (!chain) {
+    throw new Error(
+      `${PIPELINE_CHAIN_CODES.chainNotFound}: no pipeline chain with id "${jobId}" exists in the chain catalog.`,
+    );
+  }
+  if (!(PIPELINE_CHAIN_STAGE_ORDER as readonly string[]).includes(stage)) {
+    throw new Error(
+      `${PIPELINE_CHAIN_CODES.stageUnknown}: pipeline chain "${jobId}" has no stage "${stage}" — its stages are ${PIPELINE_CHAIN_STAGE_ORDER.join(", ")}.`,
+    );
+  }
+  return chainStageNodePath(chain, stage as PipelineChainStageKind);
 }
 
 /**
@@ -678,6 +784,11 @@ export function pipelineDeliverJobIds(): string[] {
   return DELIVER_PIPELINE_CATALOG.map((e) => e.jobId);
 }
 
+/** The composed pipeline chain ids this host manages (the catalog order, #3540). */
+export function pipelineChainJobIds(): string[] {
+  return CHAIN_PIPELINE_CATALOG.map((e) => e.jobId);
+}
+
 /**
  * The feed → enrich hand-off (#3536): the enrich stage is the
  * CONSUMER of the feed stage — when a feed job's completion is
@@ -861,4 +972,4 @@ export async function dispatchDeliverAfterGenerateCompletion(
   }
 }
 
-export type { JobStatusView, JobInstanceRecord };
+export type { JobStatusView, JobInstanceRecord, PipelineChainSurfaceView };
