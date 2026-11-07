@@ -77,6 +77,27 @@ const useProviderStyles = makeStyles({
   },
 });
 
+// #3656: Persistent collapsible copilot prompt chips bar above composer
+const useQuickChipsStyles = makeStyles({
+  chipsBar: {
+    display: "flex",
+    gap: "var(--space-1-5)",
+    paddingTop: "var(--space-1)",
+    paddingBottom: "var(--space-1)",
+    paddingLeft: "var(--space-3)",
+    paddingRight: "var(--space-3)",
+    overflowX: "auto",
+    borderTop: "1px solid var(--color-border-subtle)",
+    background: "var(--color-surface-sunken)",
+    whiteSpace: "nowrap",
+    alignItems: "center",
+  },
+  toggleButton: {
+    fontWeight: 600,
+    fontSize: "var(--font-size-micro)",
+  },
+});
+
 // #3449, #3521, #3541: copilots with custom surfaces (e.g. Stock Copilot)
 // render a side-by-side workspace on desktop:
 // - Left pane: dedicated copilot dashboard (StockCopilotPanel) with its own scrolling
@@ -172,6 +193,8 @@ export function AgentChatTabContentInner({
   const [input, setInput] = useState("");
   const composerStyles = useComposerStyles();
   const surfaceStyles = useSurfaceStyles();
+  const quickChipsStyles = useQuickChipsStyles();
+  const [isPromptChipsExpanded, setIsPromptChipsExpanded] = useState(true);
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
   const { dispatchToast } = useToastController();
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -543,6 +566,42 @@ export function AgentChatTabContentInner({
           </div>
           </MessageBarBody>
         </MessageBar>
+      )}
+
+      {/* Persistent Copilot Quick Prompt Chips Strip during ongoing conversation (#3656) */}
+      {currentCopilot?.quickChips && currentCopilot.quickChips.length > 0 && messages.length > 0 && (
+        <div
+          className={quickChipsStyles.chipsBar}
+          data-testid="copilot-quick-chips-bar"
+        >
+          <Button
+            appearance="subtle"
+            size="small"
+            className={quickChipsStyles.toggleButton}
+            data-testid="toggle-copilot-chips"
+            onClick={() => setIsPromptChipsExpanded((prev) => !prev)}
+            title={isPromptChipsExpanded ? "Collapse quick prompt chips" : "Expand quick prompt chips"}
+          >
+            {isPromptChipsExpanded ? "▼ Prompts" : `▶ Prompts (${currentCopilot.quickChips.length})`}
+          </Button>
+          {isPromptChipsExpanded &&
+            currentCopilot.quickChips.map((chip, idx) => (
+              <Button
+                key={idx}
+                appearance="subtle"
+                size="small"
+                disabled={isBusy || isResetting}
+                onClick={() =>
+                  handleChipClick(
+                    chip.prompt,
+                    chip.category || currentCopilot?.sourceTab || currentCopilot?.label || "Copilot Guide",
+                  )
+                }
+              >
+                {chip.label}
+              </Button>
+            ))}
+        </div>
       )}
 
       {/* Persistent Capabilities & How-To Guide Strip */}
