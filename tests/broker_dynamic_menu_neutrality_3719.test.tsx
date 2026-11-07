@@ -117,3 +117,4 @@ describe("BrokerDynamicMenu harmonization and neutrality (#3719)", () => {
     expect(SettingsMenu).toBe(BrokerDynamicMenu);
   });
 });
+

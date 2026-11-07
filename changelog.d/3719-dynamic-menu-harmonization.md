@@ -6,3 +6,4 @@
   - **Single Toggle Button**: Replaced dual environment buttons with a single toggle button switching cleanly between Paper and Live, with default client environment initialized to Paper (`TEST`) for unconstrained safe paper trading.
   - **Alpaca & E*TRADE Sync Isolation**: Added broker ID parameter to `runDiagnostics`, ensuring Alpaca diagnostics ping Alpaca endpoints and render API Key / Secret credentials with an Alpaca connection action rather than hardcoded E*TRADE OAuth modal copy. Unconfigured credentials display a yellow status pill rather than an upstream gateway error.
   - **Menu Extraction**: Completely removed redundant Account Details card (`Account Value`, `Account #`, mask toggle) and tuning/downloads clusters from the dynamic menu following their extraction to Platform Admin.
+
