@@ -59,6 +59,8 @@ import {
   AlpacaPositionsCommand,
   AlpacaOrdersCommand,
   AlpacaPlaceOrderCommand,
+  AlpacaPlaceBracketLadderCommand,
+  AlpacaCancelBracketLadderCommand,
   DeprecatedToolAlias,
 } from "./marketDataCommands";
 import {
@@ -1742,6 +1744,8 @@ export class McpToolFactory {
     this.registerTool(new AlpacaPositionsCommand());
     this.registerTool(new AlpacaOrdersCommand());
     this.registerTool(new AlpacaPlaceOrderCommand());
+    this.registerTool(new AlpacaPlaceBracketLadderCommand());
+    this.registerTool(new AlpacaCancelBracketLadderCommand());
 
     // #1906: deprecated aliases for the renamed market-data tools above.
     // Same commands, legacy names; use canonical tool names instead.
