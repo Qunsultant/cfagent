@@ -72,6 +72,15 @@ export * from "./optionsScreener";
 // platformHistory.ts.
 export * from "./technicals";
 export * from "./platformHistory";
+// Issue #3536: the pipeline enrich stage computes the snapshot
+// screening indicators over persisted feed datasets — the
+// capability joins the boundary surface by name (a star export
+// would collide on this module's generic type names).
+export {
+  computeScreeningIndicators,
+  type QuoteSnapshot,
+  type ScreeningIndicators,
+} from "./screeningIndicators";
 export * from "./universes";
 export * from "./screenerConfig";
 export * from "./screenerPipeline";
