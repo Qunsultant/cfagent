@@ -24,6 +24,10 @@
 import { SqlJobRunRecordStore } from "../../data/doSqliteJobRunRecordAdapter";
 import type { SqlStorage } from "../../orm";
 import {
+  buildCronDispatchRecord,
+  type CronDispatchRecordInput,
+} from "../../services/consolidatedCronEntries";
+import {
   buildJobRunRecord,
   resolveScheduleRunJobId,
   resolveScheduleRunTrigger,
@@ -54,6 +58,24 @@ function storeRecord(sql: SqlStorage, record: Omit<JobRunRecord, "system">): voi
   } catch {
     // Recording never breaks the callback.
   }
+}
+
+/**
+ * Issue #3121 S5 — record one Worker cron dispatch. The entry
+ * points report their dispatch (success / failure / skipped) back
+ * through the background-gated record route; this helper builds the
+ * row via `buildCronDispatchRecord` and stores it with the same
+ * `SqlJobRunRecordStore` the callback recorder uses. A build or
+ * store failure throws so the route can answer 500 — the
+ * Worker-side poster logs that and moves on; a failed record must
+ * never silently read as a stored one.
+ */
+export function recordCronDispatchRun(
+  sql: SqlStorage,
+  parsed: CronDispatchRecordInput,
+): void {
+  const store = new SqlJobRunRecordStore(sql);
+  store.record(buildCronDispatchRecord(parsed));
 }
 
 export async function recordScheduleCallbackRun(

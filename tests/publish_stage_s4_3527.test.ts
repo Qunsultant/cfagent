@@ -310,9 +310,15 @@ describe("B. reports sweep home + weekly guard (#3527 S4)", () => {
     expect(corpusSyncSrc).not.toContain("backfill:");
     const routeSrc = readFileSync("src/agents/routes/knowledgeCorpus.ts", "utf8");
     expect(routeSrc).not.toContain("runCanonicalIndexBackfillAll");
-    const queueSrc = readFileSync("src/server/routes/queue.ts", "utf8");
-    const sweepAt = queueSrc.indexOf("/trading/reports/index-backfill-sweep");
-    const corpusAt = queueSrc.indexOf("/knowledge/corpus-sync");
+    // Issue #3121 S5 moved the tick dispatch out of queue.ts into
+    // the named entry points module — the sweep/corpus rider order
+    // now lives there (corpus-sync before reports-index-backfill).
+    const tickSrc = readFileSync(
+      "src/services/consolidatedCronEntries.ts",
+      "utf8",
+    );
+    const sweepAt = tickSrc.indexOf("/trading/reports/index-backfill-sweep");
+    const corpusAt = tickSrc.indexOf("/knowledge/corpus-sync");
     expect(corpusAt).toBeGreaterThan(-1);
     expect(sweepAt).toBeGreaterThan(corpusAt);
     const reportsSrc = readFileSync("src/agents/routes/reports.ts", "utf8");

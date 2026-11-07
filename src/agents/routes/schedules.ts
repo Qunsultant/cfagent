@@ -17,6 +17,7 @@
  *   POST        /schedules/trigger-renew
  *   POST        /schedules/trigger-options-analysis
  *   POST        /schedules/trigger-retention      (issue #255)
+ *   POST        /schedules/record-cron-dispatch    (issue #3121 S5 — Worker cron dispatch ledger row)
  *   POST        /schedules/trigger-iv-collection  (issue #15)
  *   POST        /schedules/trigger-discovery      (issue #126)
  *   POST        /schedules/:id/pause               (issue #273)
@@ -84,6 +85,7 @@ import type { AgentName, Env } from "../../types";
 
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+import { handleCronDispatchRecordRoute } from "./cronDispatchRecord";
 
 /** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
 const structuredLog = createStructuredLogger(createObservabilitySink({}), {
@@ -896,6 +898,23 @@ export async function handleSchedulesRoutes(
       } catch (err: any) {
         return Response.json({ error: err.message || "Failed to trigger options analysis" }, { status: 500 });
       }
+    }
+
+    // Issue #3121 S5 — Worker cron dispatch ledger row. The named
+    // entry points report their dispatch through this background-
+    // gated route (see `handleCronDispatchRecordRoute`). Placed
+    // adjacent to the trigger-retention branch: no earlier branch
+    // can swallow it — the earlier POST branches match only
+    // `/schedules/cancel`, `/schedules/cancel-all`, the
+    // `/:id/pause|resume|trigger` suffixes, `/schedules/create`,
+    // `/schedules` exactly, or the other `trigger-*` suffixes —
+    // and the generic `/schedules/` branches above are GET, DELETE,
+    // or PUT, never POST.
+    if (path.endsWith("/schedules/record-cron-dispatch") && request.method === "POST") {
+      return handleCronDispatchRecordRoute(request, {
+        env: ctx.env,
+        sql: ctx.agentCtx.storage.sql,
+      });
     }
 
     // Nightly retention pass (issue #255, part of #143; extended to

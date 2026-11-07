@@ -144,8 +144,8 @@ work can run through, not a scheduler.
 
 ### 1.2 The `*/30` tick fan-out (T1 detail — see §2 drift item D1)
 
-One tick dispatches, in order: the ScheduledAgent `onCron()` RPC, then five
-piggyback dispatches, all unconditional from `scheduled()` — fire/no-fire is
+One tick dispatches, in order: the ScheduledAgent `onCron()` RPC, then six
+piggyback dispatches — seven dispatches in total — all unconditional from `scheduled()` — fire/no-fire is
 decided inside each route/job by its own durable guard:
 
 | Dispatch | Route / job | Guard (decides fire/no-fire) |
@@ -155,15 +155,20 @@ decided inside each route/job by its own durable guard:
 | Reflection | `POST /reflection/run` (#705) | Sunday + not already fired this week (durable guard in `mas_settings`) |
 | Adaptation | `POST /adaptation/weights/run` (#754) | ISO-week guard + adaptation kill switch in `mas_settings` |
 | Corpus sync | `POST /knowledge/corpus-sync` (#1169 S4-4) | Weekly guard + durable marker in `mas_settings` |
+| Reports-index backfill | `POST /trading/reports/index-backfill-sweep` (#3527 S4) | Weekly guard + durable marker (`reports_index_backfill_last_run` in `mas_settings`) in its own route |
 | Digest pass | `POST /payments/agentic/commercial/lifecycle/digest/run-due` (#2659) | Once per UTC day (durable marker in `agent_digest_pass_days`) |
 
-Per-tick trace (#2037): one trace per tick; research/reflection/adaptation
-dispatches carry a child span and a failure observer that records a
-`scheduled_job.outcome` row in `mas_events` (`src/observability/
-scheduledJobOutcomes.ts`, `SCHEDULED_JOB_OUTCOME_TYPE =
-"scheduled_job.outcome"`, outcomes `ran | skipped | failed`) and alerts on
-streak threshold. Corpus sync and the digest pass ride the same tick with
-no failure observer — their outcomes are visible only in their own routes.
+Per-tick trace (#2037): one trace per tick; research/reflection/adaptation/
+corpus-sync/reports-index-backfill dispatches each carry a child span and
+a failure observer that records a `scheduled_job.outcome` row in
+`mas_events` (`src/observability/scheduledJobOutcomes.ts`,
+`SCHEDULED_JOB_OUTCOME_TYPE = "scheduled_job.outcome"`, outcomes
+`ran | skipped | failed`) and alerts on streak threshold. CORRECTION
+(S5, 2026-11-07): the pre-S5 text said corpus sync rode the tick with
+no failure observer — it IS observed, as is the reports-index-backfill
+sweep, which #3527 S4 added as its own dispatch and this table omitted
+until S5. The digest pass rides the same tick with no failure observer
+— its outcome is visible only in its own route.
 
 Identity gate (#2331 slice 2, fail-closed): the `*/30` tick and the `0 4`
 retention dispatch run only while a service user is configured
@@ -458,7 +463,7 @@ Evidence:
    The `0 21 * * 1-5` research trigger was already refused on exactly
    this ground (#354).
 2. The duties are Worker-level fan-out, not single-schedule callbacks:
-   the `*/30` tick fans out to six dispatches (§1.2); renewal
+   the `*/30` tick fans out to seven dispatches (§1.2); renewal
    enumerates tokens across ALL account DOs (a cross-DO sweep no
    single DO's alarm store can express); retention is a cross-DO POST
    into the orchestrator.
@@ -477,6 +482,19 @@ entry point) with the gate and trace preserved. Each dispatch writes a
 ledger row (see §4; a cron run's `scheduleId` is its cron expression).
 Parity: same cron strings, same dispatch order, same guards, same
 skip-when-unprovisioned behavior.
+
+**Decision CONFIRMED (Option A, decided 2026-11-07,
+Qunsultant/cfagent#3592 comment 6708544001):** the three Worker crons
+STAY as Worker triggers — Options B/C (moving crons to Workflow
+Schedules) were not chosen, and the #3021 Workflow-Schedule
+follow-up stays as-is. S5 builds the named entry points above;
+`scheduled()` becomes a thin dispatch and each dispatch writes a
+ledger row recording the dispatch (see §4). The S5 move also
+CORRECTS §1.2: the tick fans out to SEVEN dispatches, not six —
+the reports-index-backfill sweep (`POST
+/trading/reports/index-backfill-sweep`, #3527 S4) is its own
+dispatch, and corpus-sync AND reports-index-backfill ARE observed
+via the #2037 failure observer; only the digest pass is unobserved.
 
 ### Q(c) — Follow-up chain: stays an async-job mechanism behind the same ledger
 
@@ -958,8 +976,8 @@ no home and no filed issue is a defect in the map.
 
 | Capability | S0 id | Consolidated home | Status |
 |------------|-------|-------------------|--------|
-| Worker cron triggers (3), dispatched into named scheduler entry points | T1, Q(b) | `wrangler.jsonc` crons → `scheduled()` dispatch → named entry points | S5 (planned) |
-| `*/30` tick fan-out: ScheduledAgent tick + 5 piggyback dispatches, guards preserved | §1.2, D1 | `src/server.ts` `scheduled()` + `src/agents/scheduled-agent.ts` `onCron` | S3 (tick kind landed); S5 (named entry points) |
+| Worker cron triggers (3), dispatched into named scheduler entry points | T1, Q(b) | `wrangler.jsonc` crons → `scheduled()` dispatch → named entry points | S5 — landed |
+| `*/30` tick fan-out: ScheduledAgent tick + 6 piggyback dispatches (7 total), guards preserved | §1.2, D1 | `src/server.ts` `scheduled()` + `src/agents/scheduled-agent.ts` `onCron` | S3 (tick kind landed); S5 — landed (named entry points) |
 | Agent SDK alarm schedules (4 timing forms) | T2, B-T2-01 | `resolveTimingForm` (`src/services/consolidatedScheduling.ts`) + `/api/schedules` routes | S1 (classifier); S2 (surfaces) |
 | Tick-polled goal schedules | T3, Q(a) | Tick-evaluated kind: `ScheduledAgent.onCron` via the S1 re-exports | S3 — landed |
 | Async-job follow-up chains | T4, Q(c) | `scheduleScreenerFollowups` behind the same ledger | S4 — landed |
@@ -1009,8 +1027,8 @@ no home and no filed issue is a defect in the map.
 | Per-run records for creatable callbacks + manual triggers | B-T2-07 | `recordScheduleCallbackRun` → `job_run_records` | S1 — landed |
 | Per-run records for SDK firings of internal-only callbacks | B-T2-07 (named gap) | — no home — | **Filed #3394 (open)** |
 | Baseline reconciliation on agent start | B-T2-08 | `removeUnownedBaselineSchedules` | S2 — landed |
-| Renewal (`0 3`), tick (`*/30`), retention (`0 4`) incl. #2331 gate + #2037 trace | B-T1-01..03 | `scheduled()` dispatch | S5 (planned) |
-| Piggyback research guard (#354) + retention constants | B-T1-04..05 | `researchScheduleGuard.ts` + `storageRetention.ts` | S5 (planned) |
+| Renewal (`0 3`), tick (`*/30`), retention (`0 4`) incl. #2331 gate + #2037 trace | B-T1-01..03 | `scheduled()` dispatch → named entry points (`src/services/consolidatedCronEntries.ts`) | S5 — landed |
+| Piggyback research guard (#354) + retention constants | B-T1-04..05 | `researchScheduleGuard.ts` + `storageRetention.ts` | S5 — landed (preserved verbatim, guards unchanged) |
 
 ### 9.5 Follow-up chain (B-T4) and ledger state (B-L)
 

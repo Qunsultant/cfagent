@@ -246,12 +246,17 @@ describe("A. registration (#3527 S5)", () => {
     expect(String(alert.mock.calls[0][0])).toContain("reports-index-backfill");
   });
 
-  it("queue.ts wraps BOTH riders in observeTickDispatch under the new ids, corpus before sweep", () => {
-    const queueSrc = readFileSync("src/server/routes/queue.ts", "utf8");
-    expect(queueSrc).toMatch(/observeTickDispatch\(\s*"corpus-sync",/);
-    expect(queueSrc).toMatch(/observeTickDispatch\(\s*"reports-index-backfill",/);
-    expect(queueSrc.indexOf('"corpus-sync"')).toBeLessThan(
-      queueSrc.indexOf('"reports-index-backfill"')
+  it("the tick entry point wraps BOTH riders in observeTickDispatch under the new ids, corpus before sweep", () => {
+    // Issue #3121 S5 moved the tick dispatch out of queue.ts into
+    // the named entry points module — the observer wiring lives there.
+    const tickSrc = readFileSync(
+      "src/services/consolidatedCronEntries.ts",
+      "utf8",
+    );
+    expect(tickSrc).toMatch(/observeTickDispatch\(\s*"corpus-sync",/);
+    expect(tickSrc).toMatch(/observeTickDispatch\(\s*"reports-index-backfill",/);
+    expect(tickSrc.indexOf('"corpus-sync"')).toBeLessThan(
+      tickSrc.indexOf('"reports-index-backfill"')
     );
   });
 });

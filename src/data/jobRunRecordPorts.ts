@@ -33,14 +33,19 @@ export const JOB_RUN_RECORDS_TABLE = "job_run_records";
 /** Newest-first runs kept per orchestrator schedule. */
 export const JOB_RUN_RECORDS_PER_JOB_CAP = 100;
 
-/** Which schedule system ran. Worker cron triggers never run as jobs,
- *  so they have no records and no value here. "job-pipeline" is the
- *  Pipeline J1 job system (issue #3534): pipeline jobs record their
- *  terminal runs through this same machinery — no second run store. */
+/** Which schedule system ran. Issue #3121 S5: Worker cron
+ *  dispatches now record their own rows (system `"worker-cron"`),
+ *  so the pre-S5 note — "Worker cron triggers never run as jobs,
+ *  so they have no records and no value here" — no longer holds.
+ *  A dispatch row's `jobId`/`scheduleId` is its cron expression.
+ *  "job-pipeline" is the Pipeline J1 job system (issue #3534):
+ *  pipeline jobs record their terminal runs through this same
+ *  machinery — no second run store. */
 export type JobRunSystem =
   | "scheduled-agent-goal"
   | "orchestrator-schedule"
-  | "job-pipeline";
+  | "job-pipeline"
+  | "worker-cron";
 
 /** success | failure | skipped — see the header note on skipped. */
 export type JobRunOutcome = "success" | "failure" | "skipped";

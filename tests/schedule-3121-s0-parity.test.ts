@@ -82,11 +82,19 @@ describe("S0-P01 worker crons (B-T1-01/02/03): exactly three triggers in wrangle
 
   it("dispatches on event.cron for exactly those three expressions in scheduled()", () => {
     // Slice 8 of #2902 moves scheduled() from server.ts to
-    // src/server/routes/queue.ts; the entry surface is both files.
+    // src/server/routes/queue.ts; S5 (#3121) moves the cron match
+    // into resolveCronEntryPoint in consolidatedCronEntries.ts — the
+    // dispatcher resolves, the module matches. The entry surface is
+    // all three files; the pin tracks the move (gitops §7).
     const server = read("src/server.ts") + read("src/server/routes/queue.ts");
-    for (const cron of ["0 3 * * *", "*/30 * * * *", "0 4 * * *"]) {
-      expect(server).toContain(`event?.cron === "${cron}"`);
+    expect(server).toContain("resolveCronEntryPoint(event?.cron)");
+    const entries = read("src/services/consolidatedCronEntries.ts");
+    for (const cron of ["0 3 * * *", "0 4 * * *"]) {
+      expect(entries).toContain(`"${cron}"`);
     }
+    // The tick matches through the S1 constant, not a re-typed
+    // literal (single-sourced: the expression lives in WORKER_CRONS).
+    expect(entries).toContain("WORKER_TICK_CRON");
   });
 });
 
@@ -388,20 +396,30 @@ describe("S0-P16 goal store (B-T3-07): eight shipped goals, social post disabled
 describe("S0-P17 worker cron duties (B-T1-01/02): renewal runs either way, tick fans out", () => {
   it("pins renewal, the tick fan-out, and the provisioning gate", () => {
     // Slice 8 of #2902 moves scheduled() from server.ts to
-    // src/server/routes/queue.ts; the entry surface is both files.
+    // src/server/routes/queue.ts; S5 (#3121) moves the branch bodies
+    // into the named entry points in consolidatedCronEntries.ts —
+    // the dispatcher keeps the gate evaluation + stub creation, the
+    // module keeps the dispatches. The entry surface is all three
+    // files; the pin tracks the move (gitops §7). The route list is
+    // SIX, not five: the pre-S5 list omitted the
+    // reports-index-backfill sweep, the same six-vs-seven error S5
+    // corrects in §1.2.
     const server = read("src/server.ts") + read("src/server/routes/queue.ts");
+    const entries = read("src/services/consolidatedCronEntries.ts");
     expect(server).toContain("renewAllStoredETradeTokens");
-    expect(server).toContain("schedAgent.onCron()");
+    expect(server).toContain("SCHEDULED_AGENT");
+    expect(entries).toContain("scheduledAgent.onCron()");
     for (const route of [
       "/research/scheduled-tick",
       "/reflection/run",
       "/adaptation/weights/run",
       "/knowledge/corpus-sync",
+      "/trading/reports/index-backfill-sweep",
       "/payments/agentic/commercial/lifecycle/digest/run-due",
     ]) {
-      expect(server).toContain(route);
+      expect(entries).toContain(route);
     }
-    expect(server).toContain("is not provisioned for the platform tier");
+    expect(entries).toContain("is not provisioned for the platform tier");
     expect(SCHEDULED_JOB_OUTCOME_TYPE).toBe("scheduled_job.outcome");
   });
 });
