@@ -29,19 +29,29 @@ import {
 } from "./components/ui";
 import { listGoalRuns, listScheduleRuns } from "./jobsApi";
 import {
+  isMissingIdLiteral,
   normalizeJobRunRecord,
   type JobRunRecord,
 } from "../services/jobRunRecords";
 import { navigateToTab } from "./router";
 import { AsyncJobResultViewer } from "./AsyncJobResultViewer";
 
-/** A null linkage id is a recorded fact: rendered, never dropped. */
+/**
+ * A null linkage id is a recorded fact: rendered, never dropped.
+ * Issue #3650 — the literal "undefined"/"null" is a missing id
+ * stringified upstream, so it reads as missing here too, never as
+ * an id. One definition for every layer: `isMissingIdLiteral`.
+ */
 export function ledgerLinkageCell(value: string | null | undefined): string {
-  return typeof value === "string" && value ? value : "—";
+  if (typeof value !== "string" || !value.trim() || isMissingIdLiteral(value)) return "—";
+  return value;
 }
 
 export function ledgerLinkageTitle(value: string | null | undefined): string {
-  return typeof value === "string" && value ? value : "not applicable";
+  if (typeof value !== "string" || !value.trim() || isMissingIdLiteral(value)) {
+    return "not applicable";
+  }
+  return value;
 }
 
 function outcomeTone(outcome: JobRunRecord["outcome"]): "success" | "danger" | "warning" {
@@ -103,6 +113,12 @@ export interface ScheduleRunLedgerPanelProps {
  * The visible label is the id itself. A null async-job id renders as
  * "—" with no control — never a dead link. Schedule / Workflow ids
  * stay plain text (out of scope for #3605).
+ *
+ * Issue #3650 — the Job cell has the same guard the Async-job cell
+ * already had: a missing jobId, or the literal "undefined"/"null" a
+ * missing id stringifies to, renders as "—" with no control — never
+ * a clickable "undefined" button, and the `run=<id>` deep link can
+ * never navigate to `run=undefined`.
  */
 function ledgerColumns(
   onJobClick: (jobId: string) => void,
@@ -110,15 +126,19 @@ function ledgerColumns(
 ): TableColumn<JobRunRecord>[] {
   return [
   { key: "jobId", header: "Job", render: (r) => (
-    <Button
-      type="button"
-      variant="ghost"
-      size="sm"
-      onClick={() => onJobClick(r.jobId)}
-      title={`Show run history for ${r.jobId}`}
-    >
-      {r.jobId}
-    </Button>
+    typeof r.jobId === "string" && r.jobId.trim() && !isMissingIdLiteral(r.jobId) ? (
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        onClick={() => onJobClick(r.jobId)}
+        title={`Show run history for ${r.jobId}`}
+      >
+        {r.jobId}
+      </Button>
+    ) : (
+      <span title={ledgerLinkageTitle(r.jobId)}>{ledgerLinkageCell(r.jobId)}</span>
+    )
   ) },
   { key: "operation", header: "Operation", render: (r) => <>{r.operation}</> },
   { key: "system", header: "System", render: (r) => <>{r.system}</> },

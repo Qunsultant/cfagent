@@ -20,6 +20,7 @@ import {
 } from "../data/jobRunRecordPorts";
 import {
   isLedgerTrigger,
+  isMissingIdLiteral,
   normalizeLedgerLinkage,
   resolveLedgerTrigger,
 } from "./consolidatedScheduling";
@@ -31,6 +32,10 @@ export type {
   JobRunSystem,
   JobRunTrigger,
 } from "../data/jobRunRecordPorts";
+
+// Issue #3650 — the one missing-id-literal definition, re-exported
+// for the ledger cell (the panel's only import surface for it).
+export { isMissingIdLiteral } from "./consolidatedScheduling";
 
 export { JOB_RUN_RECORDS_PER_JOB_CAP } from "../data/jobRunRecordPorts";
 
@@ -73,8 +78,10 @@ export function buildJobRunRecord(input: JobRunRecordInput): JobRunRecord {
   if (!SYSTEMS.includes(input.system)) {
     throw new Error(`Unknown job run system: ${String(input.system)}`);
   }
-  if (!input.jobId || !input.jobId.trim()) {
-    throw new Error("Job run jobId is required.");
+  if (!input.jobId || !input.jobId.trim() || isMissingIdLiteral(input.jobId)) {
+    throw new Error(
+      'Job run jobId is required: a literal "undefined"/"null" id is a missing id, never a real one (#3650).',
+    );
   }
   if (!input.operation || !input.operation.trim()) {
     throw new Error("Job run operation is required.");
@@ -106,6 +113,14 @@ export function buildJobRunRecord(input: JobRunRecordInput): JobRunRecord {
     }
     if (typeof value === "string" && !value.trim()) {
       throw new Error(`Job run ${key} must be a non-empty string or null.`);
+    }
+    // Issue #3650 — a poisoned literal is a missing id stringified
+    // upstream, never a real linkage id; the honesty gate rejects it
+    // rather than stamping it onto a new row.
+    if (typeof value === "string" && isMissingIdLiteral(value)) {
+      throw new Error(
+        `Job run ${key} must be a real id or null: a literal "undefined"/"null" id is a missing id (#3650).`,
+      );
     }
   }
   const startedMs = Date.parse(input.started);
@@ -153,6 +168,13 @@ export function buildJobRunRecord(input: JobRunRecordInput): JobRunRecord {
  * backfill: this normalizes the READ value only and never writes
  * anything back. A record that already carries the fields passes
  * through unchanged.
+ *
+ * Issue #3650 — the jobId is sanitized the same way: a stored row
+ * whose jobId is the literal "undefined"/"null" (a missing id
+ * stringified at write or read time — the DO-SQLite adapter's
+ * `String(row.job_id)` is the one String() coercion on the read
+ * path) reads as jobless (""), never as an id, so the ledger renders
+ * it as "—". A missing jobId key reads as jobless too.
  */
 export function normalizeJobRunRecord(record: JobRunRecord): JobRunRecord {
   const linkage = normalizeLedgerLinkage({
@@ -161,7 +183,13 @@ export function normalizeJobRunRecord(record: JobRunRecord): JobRunRecord {
     asyncJobId: record.asyncJobId,
     workflowId: record.workflowId,
   });
-  return { ...record, ...linkage };
+  const jobId =
+    typeof record.jobId === "string" &&
+    record.jobId.trim() &&
+    !isMissingIdLiteral(record.jobId)
+      ? record.jobId
+      : "";
+  return { ...record, jobId, ...linkage };
 }
 
 /** Keep the newest `cap` records of a newest-first list. */
@@ -183,12 +211,20 @@ export function resolveScheduleRunJobId(
   payload: unknown,
   schedule: { id?: unknown } | undefined,
 ): string {
-  if (schedule && typeof schedule.id === "string" && schedule.id) {
+  // Issue #3650 — a poisoned literal is absent, never an id: a
+  // schedule/payload id of "undefined" falls through to the
+  // `callback:<name>` fallback instead of becoming the row's jobId.
+  if (
+    schedule &&
+    typeof schedule.id === "string" &&
+    schedule.id &&
+    !isMissingIdLiteral(schedule.id)
+  ) {
     return schedule.id;
   }
   if (payload && typeof payload === "object") {
     const stamped = (payload as Record<string, unknown>).scheduleId;
-    if (typeof stamped === "string" && stamped) {
+    if (typeof stamped === "string" && stamped && !isMissingIdLiteral(stamped)) {
       return stamped;
     }
   }

@@ -1,0 +1,3 @@
+### Fixed
+
+- **Run ledger Job "undefined" buttons (Qunsultant/cfagent#3650):** a ledger row whose jobId is missing — or the literal string "undefined"/"null" a missing id stringifies to — now renders "—" (not applicable) in the Job cell, never a clickable button, so the `run=<id>` deep link can no longer navigate to `run=undefined`. The read normalizer maps a poisoned jobId to missing on read (legacy stored rows included), the record builder rejects a literal "undefined"/"null" jobId or linkage id at write time, and the schedule-run job-id resolver falls through a poisoned schedule/payload id to the `callback:<name>` fallback instead of returning the literal. Pins in `tests/schedule-3121-3650-ledger-undefined-jobid.test.tsx` (3650-P01–P06). No file deletions. #3121

@@ -107,11 +107,28 @@ export function resolveLedgerTrigger(
   return triggeredBy === "manual" ? "manual" : "scheduled";
 }
 
+/**
+ * Issue #3650 — a missing id stringified upstream ("undefined" /
+ * "null") is a missing id, never a real one. Any layer that reads an
+ * id off untrusted input (a stored payload, a schedule object, a
+ * stored row) treats these two literals as absent, so the literal
+ * can never be stamped, linked, or rendered as an id. One definition
+ * for every layer (#1069): the builder, the resolver, the read
+ * normalizer, and the ledger cell all call this.
+ */
+export function isMissingIdLiteral(value: unknown): boolean {
+  return (
+    typeof value === "string" &&
+    (value.trim() === "undefined" || value.trim() === "null")
+  );
+}
+
 /** Read one linkage id off a firing payload: a non-empty string, else null. */
 function linkageId(payload: unknown, key: string): string | null {
   if (payload && typeof payload === "object") {
     const value = (payload as Record<string, unknown>)[key];
-    if (typeof value === "string" && value.trim()) return value;
+    // Issue #3650 — a poisoned literal is absent, never an id.
+    if (typeof value === "string" && value.trim() && !isMissingIdLiteral(value)) return value;
   }
   return null;
 }
@@ -163,15 +180,24 @@ export function normalizeLedgerLinkage(
     trigger:
       value && isLedgerTrigger(value.trigger) ? value.trigger : "unknown",
     scheduleId:
-      value && typeof value.scheduleId === "string" && value.scheduleId
+      value &&
+      typeof value.scheduleId === "string" &&
+      value.scheduleId &&
+      !isMissingIdLiteral(value.scheduleId)
         ? value.scheduleId
         : null,
     asyncJobId:
-      value && typeof value.asyncJobId === "string" && value.asyncJobId
+      value &&
+      typeof value.asyncJobId === "string" &&
+      value.asyncJobId &&
+      !isMissingIdLiteral(value.asyncJobId)
         ? value.asyncJobId
         : null,
     workflowId:
-      value && typeof value.workflowId === "string" && value.workflowId
+      value &&
+      typeof value.workflowId === "string" &&
+      value.workflowId &&
+      !isMissingIdLiteral(value.workflowId)
         ? value.workflowId
         : null,
   };
