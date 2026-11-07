@@ -54,6 +54,7 @@ import {
   Select,
   Spinner,
   Table,
+  TabPanel,
   Tabs,
   TextInput,
 } from "./components/ui";
@@ -197,6 +198,34 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
   const [topUpError, setTopUpError] = React.useState<string | null>(null);
   const [topUpDone, setTopUpDone] = React.useState<string | null>(null);
   const [topUpProof, setTopUpProof] = React.useState("");
+
+  // Top-up field errors (#3574): client-side validation errors are
+  // field-associated (TextInput `error` → aria-invalid + aria-describedby
+  // to the field error span, ux-architecture §13). The form-level
+  // `topUpError` Notice stays for server failures, which no field owns.
+  const [topUpAmountError, setTopUpAmountError] = React.useState<string | null>(null);
+  const [topUpEmailError, setTopUpEmailError] = React.useState<string | null>(null);
+  const [topUpProofError, setTopUpProofError] = React.useState<string | null>(null);
+  const topUpAmountRef = React.useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
+  const topUpEmailRef = React.useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
+  const topUpProofRef = React.useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
+  // Focus target for the first invalid field (#3574). Set alongside the
+  // field error; the effect below focuses after render, so the
+  // aria-describedby error is in the DOM when the screen reader lands on
+  // the field. Focus moves only on the user's own submit (a validation
+  // failure), never on an agent-produced message.
+  const [topUpErrorFocus, setTopUpErrorFocus] = React.useState<"amount" | "email" | "proof" | null>(null);
+  React.useEffect(() => {
+    if (!topUpErrorFocus) return;
+    const target =
+      topUpErrorFocus === "amount"
+        ? topUpAmountRef.current
+        : topUpErrorFocus === "email"
+          ? topUpEmailRef.current
+          : topUpProofRef.current;
+    target?.focus();
+    setTopUpErrorFocus(null);
+  }, [topUpErrorFocus]);
 
   const refreshSubscription = React.useCallback(async () => {
     try {
@@ -461,20 +490,26 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
 
   const handleTopUpMint = async () => {
     setTopUpError(null);
+    setTopUpAmountError(null);
+    setTopUpEmailError(null);
+    setTopUpProofError(null);
     setTopUpDone(null);
     setTopUpMint(null);
     if (!email.trim()) {
-      setTopUpError("Enter the checkout contact email.");
+      setTopUpEmailError("Enter the checkout contact email.");
+      setTopUpErrorFocus("email");
       return;
     }
     const amount = Number(topUpAmount);
     if (!Number.isFinite(amount) || amount <= 0) {
-      setTopUpError("Enter an amount greater than zero.");
+      setTopUpAmountError("Enter an amount greater than zero.");
+      setTopUpErrorFocus("amount");
       return;
     }
     const limits = pricing?.topUpLimits ?? null;
     if (limits && (amount < limits.minUSD || amount > limits.maxUSD)) {
-      setTopUpError(`Amount must be between ${formatUSD(limits.minUSD)} and ${formatUSD(limits.maxUSD)}.`);
+      setTopUpAmountError(`Amount must be between ${formatUSD(limits.minUSD)} and ${formatUSD(limits.maxUSD)}.`);
+      setTopUpErrorFocus("amount");
       return;
     }
     setTopUpMinting(true);
@@ -491,11 +526,13 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
   const handleTopUpConfirm = async () => {
     if (!topUpMint) return;
     if (topUpMint.rail === "x402" && !topUpProof.trim()) {
-      setTopUpError("Paste the payment proof from your wallet or agent, then verify.");
+      setTopUpProofError("Paste the payment proof from your wallet or agent, then verify.");
+      setTopUpErrorFocus("proof");
       return;
     }
     setTopUpConfirming(true);
     setTopUpError(null);
+    setTopUpProofError(null);
     try {
       const res = await topUpConfirm({
         topUpRequestId: topUpMint.topUpRequestId,
@@ -872,7 +909,7 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
           )}
         </Card>
       )}
-      {tab === "topup" && (
+      <TabPanel idBase="checkout-tabs" tabId="topup" active={tab === "topup"}>
         <Card>
           <Notice tone="info">
             Add money to your account: credits fund pay-per-run screens. Credit lands only after verified
@@ -891,7 +928,12 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
             hint="Credits added to your account after verified payment."
             type="number"
             value={topUpAmount}
-            onChange={(e) => setTopUpAmount(e.target.value)}
+            onChange={(e) => {
+              setTopUpAmount(e.target.value);
+              setTopUpAmountError(null);
+            }}
+            ref={topUpAmountRef}
+            error={topUpAmountError ?? undefined}
           />
           <Select label="Payment rail" value={topUpRail} onChange={(e) => setTopUpRail(e.target.value as "card" | "x402")}>
             <option value="card">Card (Stripe)</option>
@@ -901,7 +943,12 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
             label="Checkout contact email"
             hint="Used only as the checkout contact. Identity comes from your signed-in session."
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(e) => {
+              setEmail(e.target.value);
+              setTopUpEmailError(null);
+            }}
+            ref={topUpEmailRef}
+            error={topUpEmailError ?? undefined}
           />
           {topUpError && <Notice tone="danger">{topUpError}</Notice>}
           <Button variant="primary" loading={topUpMinting} onClick={handleTopUpMint}>
@@ -913,8 +960,8 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
               payment, then confirm below.
               {topUpMint.rail === "card" && topUpMint.checkoutUrl && (
                 <p>
-                  <a href={topUpMint.checkoutUrl} target="_blank" rel="noreferrer">
-                    Complete payment
+                  <a className="ui-link" href={topUpMint.checkoutUrl} target="_blank" rel="noreferrer">
+                    Complete payment (opens in a new tab)
                   </a>{" "}
                   (native checkout link for this top-up)
                 </p>
@@ -933,7 +980,12 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
                     label="Payment proof"
                     hint="The proof your wallet or agent returned for this 402 payment."
                     value={topUpProof}
-                    onChange={(e) => setTopUpProof(e.target.value)}
+                    onChange={(e) => {
+                      setTopUpProof(e.target.value);
+                      setTopUpProofError(null);
+                    }}
+                    ref={topUpProofRef}
+                    error={topUpProofError ?? undefined}
                   />
                 </>
               )}
@@ -946,7 +998,7 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
           )}
           {topUpDone && <Notice tone="success">{topUpDone}</Notice>}
         </Card>
-      )}
+      </TabPanel>
     </PageShell>
   );
 }

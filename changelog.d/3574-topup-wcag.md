@@ -1,0 +1,3 @@
+### Fixed
+
+- Top up journey WCAG 2.2 AA evidence pass (#3574): client-side validation errors are now field-associated (amount / email / payment-proof inputs carry `aria-invalid` + `aria-describedby` to their field error, and focus moves to the first invalid field); the Top up tab renders through `TabPanel` so the tablist's `aria-controls` resolves; the checkout link is a token link (`ui-link`) that names the new tab. Journey evidence (keyboard, focus, contrast, target sizes, announcements, reduced-motion) is recorded in the PR body. Known 1.4.11 token gaps (unfocused input border, light-theme focus indicator) are pinned in tests and filed as a follow-up — no token values change here.
