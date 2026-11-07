@@ -245,7 +245,13 @@ describe("C. corpus indexing hook (#3345)", () => {
   });
 
   it("flag ON + upload throws -> failed state, logged with the stable code, content never logged", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // #3515 S3: the failure now travels as a structured
+    // indexCorpusDocInAiSearch.upload_failed event (level warn) on the
+    // console-info JSON fallback, not a console.warn line. (The throw is
+    // caught inside runAiSearchIndexUpload, which returns
+    // { ok: false, code: "upload_failed" }, so the upload_failed branch
+    // fires — not upload_threw.)
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     const { binding } = fakeNamespace({ failUpload: true });
     const meta = await finraMeta();
     const outcome = await indexCorpusDocInAiSearch(
@@ -255,10 +261,37 @@ describe("C. corpus indexing hook (#3345)", () => {
     expect(outcome.ok).toBe(false);
     expect(outcome.code).toBe("upload_failed");
     expect(outcome.state).toBe("failed");
-    const logged = warn.mock.calls.map((c) => c.map(String).join(" ")).join("\n");
-    expect(logged).toContain(AI_SEARCH_CORPUS_INDEX_FAILED);
-    expect(logged).toContain("upload_failed");
-    expect(logged).not.toContain("margin account");
+    const events: Array<{ operation: string; level: string; fields: Record<string, unknown> }> = [];
+    for (const call of infoSpy.mock.calls) {
+      try {
+        const parsed = JSON.parse(String(call[0])) as {
+          operation?: unknown;
+          level?: unknown;
+          fields?: unknown;
+        };
+        if (parsed && typeof parsed.operation === "string") {
+          events.push({
+            operation: parsed.operation,
+            level: typeof parsed.level === "string" ? parsed.level : "",
+            fields:
+              parsed.fields && typeof parsed.fields === "object"
+                ? (parsed.fields as Record<string, unknown>)
+                : {},
+          });
+        }
+      } catch {
+        // Non-JSON console.info lines are not structured events.
+      }
+    }
+    const failed = events.find((e) => e.operation === "indexCorpusDocInAiSearch.upload_failed");
+    expect(failed).toBeDefined();
+    expect(failed?.level).toBe("warn");
+    expect(failed?.fields.eventCode).toBe(AI_SEARCH_CORPUS_INDEX_FAILED);
+    expect(failed?.fields.code).toBe("upload_failed");
+    expect(String(failed?.fields.message ?? "")).toContain(AI_SEARCH_CORPUS_INDEX_FAILED);
+    expect(String(failed?.fields.message ?? "")).toContain("upload_failed");
+    expect(String(failed?.fields.message ?? "")).not.toContain("margin account");
+    expect(String(failed?.fields.error ?? "")).not.toContain("margin account");
   });
 
   it("re-indexing the same document re-uploads the SAME document id (upsert semantics)", async () => {

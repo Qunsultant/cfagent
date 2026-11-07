@@ -676,8 +676,11 @@ describe("#1169 S2 cross-cutting: externalized catalog + route logs", () => {
   });
 
   it("seed hash-check logs pass and fail lines (no bytes, no full hashes)", () => {
+    // #3515 S3: the seed hash-check lines now travel as structured
+    // knowledgeCorpus.seed_hash_check_* events (match/mismatch at their
+    // own levels, summary at info) on the console-info JSON fallback,
+    // not console.info/console.warn text lines.
     const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const stored = new Map([
         [`knowledge:broker_rules:${"a".repeat(64)}`, { contentHash: "a".repeat(64) }],
@@ -690,17 +693,47 @@ describe("#1169 S2 cross-cutting: externalized catalog + route logs", () => {
         ] as any,
         stored as any
       );
-      const infoLines = infoSpy.mock.calls.map((c) => String(c[0]));
-      const warnLines = warnSpy.mock.calls.map((c) => String(c[0]));
-      expect(infoLines.some((l) => l.includes("[knowledgeSeed]") && l.includes("status=match"))).toBe(true);
-      expect(infoLines.some((l) => l.includes("summary") && l.includes("allMatch=false"))).toBe(true);
-      expect(warnLines.some((l) => l.includes("[knowledgeSeed]") && l.includes("status=mismatch"))).toBe(true);
-      const all = [...infoLines, ...warnLines].join("\n");
+      const events: Array<{ operation: string; level: string; fields: Record<string, unknown> }> = [];
+      for (const call of infoSpy.mock.calls) {
+        try {
+          const parsed = JSON.parse(String(call[0])) as {
+            operation?: unknown;
+            level?: unknown;
+            fields?: unknown;
+          };
+          if (parsed && typeof parsed.operation === "string") {
+            events.push({
+              operation: parsed.operation,
+              level: typeof parsed.level === "string" ? parsed.level : "",
+              fields:
+                parsed.fields && typeof parsed.fields === "object"
+                  ? (parsed.fields as Record<string, unknown>)
+                  : {},
+            });
+          }
+        } catch {
+          // Non-JSON console.info lines are not structured events.
+        }
+      }
+      const match = events.find((e) => e.operation === "knowledgeCorpus.seed_hash_check_match");
+      expect(match).toBeDefined();
+      expect(match?.level).toBe("info");
+      expect(match?.fields.status).toBe("match");
+      expect(String(match?.fields.message ?? "")).toContain("[knowledgeSeed]");
+      const summary = events.find((e) => e.operation === "knowledgeCorpus.seed_hash_check_summary");
+      expect(summary).toBeDefined();
+      expect(summary?.level).toBe("info");
+      expect(summary?.fields.allMatch).toBe(false);
+      const mismatch = events.find((e) => e.operation === "knowledgeCorpus.seed_hash_check_mismatch");
+      expect(mismatch).toBeDefined();
+      expect(mismatch?.level).toBe("warn");
+      expect(mismatch?.fields.status).toBe("mismatch");
+      expect(String(mismatch?.fields.message ?? "")).toContain("[knowledgeSeed]");
+      const all = infoSpy.mock.calls.map((c) => String(c[0])).join("\n");
       expect(all).not.toContain("a".repeat(64));
       expect(all).not.toContain("b".repeat(64));
     } finally {
       infoSpy.mockRestore();
-      warnSpy.mockRestore();
     }
   });
 });

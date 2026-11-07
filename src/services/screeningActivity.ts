@@ -34,6 +34,13 @@ import type {
 } from "../data/screeningActivityPorts";
 import { listReselectionProposals } from "./strategyBankReselection";
 import { ensureChallengerTables } from "./championChallenger";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/screeningActivity",
+});
 
 export {
   SCREENING_ACTIVITY_TABLE,
@@ -114,10 +121,11 @@ export function buildScreeningActivityFeed(
       });
     }
   } catch (err) {
-    console.error(
-      `[screeningActivity] reselection source failed for ${userLogin}: ${err instanceof Error ? err.message : String(err)}`,
-      err
-    );
+    structuredLog.error("screening_activity.reselection_source_failed", {
+      message: `[screeningActivity] reselection source failed for ${userLogin}: ${err instanceof Error ? err.message : String(err)}`,
+      userLogin,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 
   try {
@@ -137,10 +145,11 @@ export function buildScreeningActivityFeed(
       });
     }
   } catch (err) {
-    console.error(
-      `[screeningActivity] promotion source failed for ${userLogin}: ${err instanceof Error ? err.message : String(err)}`,
-      err
-    );
+    structuredLog.error("screening_activity.promotion_source_failed", {
+      message: `[screeningActivity] promotion source failed for ${userLogin}: ${err instanceof Error ? err.message : String(err)}`,
+      userLogin,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 
   items.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));

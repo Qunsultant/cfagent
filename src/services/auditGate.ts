@@ -35,6 +35,13 @@ import {
   type AuditGateDecision,
   type AuditPolicyPort,
 } from "../data/auditPolicyPorts";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/auditGate",
+});
 
 /**
  * Fail-closed fallback for an unreachable policy store. Seeded
@@ -46,9 +53,10 @@ import {
  */
 function failClosedFallback(action: string): AuditGateDecision {
   if ((AUDIT_POLICY_NON_BLOCKING_ACTIONS as readonly string[]).includes(action)) {
-    console.error(
-      `[audit-gate] fail-closed fallback allows non-blocking action ${action} despite an unreachable store.`,
-    );
+    structuredLog.error("auditGate.fail_closed_fallback_allows_non_blocking", {
+      message: `[audit-gate] fail-closed fallback allows non-blocking action ${action} despite an unreachable store.`,
+      action,
+    });
     return {
       action,
       mode: "enforcing",
@@ -58,7 +66,10 @@ function failClosedFallback(action: string): AuditGateDecision {
       allowed: true,
     };
   }
-  console.error(`[audit-gate] fail-closed fallback BLOCKS action ${action}: store unreachable.`);
+  structuredLog.error("auditGate.fail_closed_fallback_blocks", {
+    message: `[audit-gate] fail-closed fallback BLOCKS action ${action}: store unreachable.`,
+    action,
+  });
   return {
     action,
     mode: "enforcing",
@@ -88,16 +99,18 @@ export async function checkAuditGate(
   try {
     port = await setup();
   } catch (err) {
-    console.error(
-      `[audit-gate] policy store setup failed for action ${action} — fail-closed fallback:`,
-      err instanceof Error ? err.message : String(err),
-    );
+    structuredLog.error("auditGate.policy_store_setup_failed", {
+      message: `[audit-gate] policy store setup failed for action ${action} — fail-closed fallback: ${err instanceof Error ? err.message : String(err)}`,
+      action,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return failClosedFallback(action);
   }
   if (!port) {
-    console.error(
-      `[audit-gate] no audit-policy adapter (AGENT_DB unbound) for action ${action} — fail-closed fallback.`,
-    );
+    structuredLog.error("auditGate.no_audit_policy_adapter", {
+      message: `[audit-gate] no audit-policy adapter (AGENT_DB unbound) for action ${action} — fail-closed fallback.`,
+      action,
+    });
     return failClosedFallback(action);
   }
   try {
@@ -105,16 +118,18 @@ export async function checkAuditGate(
     // #3156: audit-only mode is OFF — enforce regardless of the stored setting.
     const decision = evaluateAuditGate({ ...policy, mode: "enforcing" }, action, auditWriteSucceeded);
     if (decision.blocked) {
-      console.error(
-        `[audit-gate] BLOCKED action ${action}: audit write failed for a blocking action under enforcement.`,
-      );
+      structuredLog.error("auditGate.action_blocked", {
+        message: `[audit-gate] BLOCKED action ${action}: audit write failed for a blocking action under enforcement.`,
+        action,
+      });
     }
     return decision;
   } catch (err) {
-    console.error(
-      `[audit-gate] policy load failed for action ${action} — fail-closed fallback:`,
-      err instanceof Error ? err.message : String(err),
-    );
+    structuredLog.error("auditGate.policy_load_failed", {
+      message: `[audit-gate] policy load failed for action ${action} — fail-closed fallback: ${err instanceof Error ? err.message : String(err)}`,
+      action,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return failClosedFallback(action);
   }
 }
@@ -132,14 +147,16 @@ export async function appendAuditChainBestEffort(
   try {
     const port = await setup();
     if (!port) {
-      console.error("[audit-gate] chain append skipped (AGENT_DB unbound); audit row unaffected.");
+      structuredLog.error("auditGate.chain_append_skipped", {
+        message: "[audit-gate] chain append skipped (AGENT_DB unbound); audit row unaffected.",
+      });
       return;
     }
     await port.appendChainEntry(input);
   } catch (err) {
-    console.error(
-      "[audit-gate] chain append failed — audit row unaffected:",
-      err instanceof Error ? err.message : String(err),
-    );
+    structuredLog.error("auditGate.chain_append_failed", {
+      message: `[audit-gate] chain append failed — audit row unaffected: ${err instanceof Error ? err.message : String(err)}`,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 }

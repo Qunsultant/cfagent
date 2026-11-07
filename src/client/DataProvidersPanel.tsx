@@ -21,12 +21,15 @@ import {
   fmtCaptureBytes,
   fmtDataProviderTime,
   postDataProviderAction,
+  postEnrichJobAction,
   postFeedJobAction,
   providerDisplayName,
   type CapabilityRouteView,
   type DataProviderActionName,
   type DataProviderHealthStatus,
   type DataProviderView,
+  type EnrichJobActionName,
+  type EnrichJobView,
   type FeedJobActionName,
   type FeedJobView,
 } from "./dataProvidersApi";
@@ -163,6 +166,27 @@ export function DataProvidersPanel() {
       await load();
     } catch (err: any) {
       setError(err?.message || `Failed to ${action} feed job "${job.jobId}".`);
+    } finally {
+      setActingId(null);
+    }
+  };
+
+  // #3536: run / manage one of the provider's enrich jobs
+  // through the pipeline host — the feed action's shape, one
+  // stage later (the run consumes the persisted feed copy).
+  const runEnrichAction = async (
+    view: DataProviderView,
+    job: EnrichJobView,
+    action: EnrichJobActionName
+  ) => {
+    setActingId(view.id);
+    setError("");
+    try {
+      await postEnrichJobAction(view.id, job.jobId, action);
+      toast.success(`Enrich job "${job.jobId}" ${action} dispatched.`);
+      await load();
+    } catch (err: any) {
+      setError(err?.message || `Failed to ${action} enrich job "${job.jobId}".`);
     } finally {
       setActingId(null);
     }
@@ -439,6 +463,130 @@ export function DataProvidersPanel() {
                                 variant="ghost"
                                 disabled={busy}
                                 onClick={() => void runFeedAction(view, job, "retry")}
+                              >
+                                Retry
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              },
+            },
+            {
+              // #3536: the enrich jobs column — the feed-jobs
+              // column's shape transposed (same dpp-feed-*
+              // classes; no new stylesheet), plus the lineage
+              // line naming the feed run each copy derives from.
+              key: "enrichJobs",
+              header: "Enrich Jobs",
+              cellClassName: "dpp-col-feed-cell",
+              render: (view) => {
+                const jobs = view.enrichJobs ?? [];
+                if (jobs.length === 0) {
+                  return <span className="dpp-feed-none">No enrich jobs</span>;
+                }
+                const busy = actingId === view.id;
+                return (
+                  <div className="dpp-feed-jobs">
+                    {jobs.map((job) => {
+                      const state = job.pipeline?.state ?? "unknown";
+                      const lastRun = job.enrich?.lastRun ?? null;
+                      const snapshot = job.enrich?.snapshot ?? null;
+                      const ageLabel = snapshot
+                        ? snapshot.ageSeconds < 90
+                          ? `${snapshot.ageSeconds}s old`
+                          : snapshot.ageSeconds < 5400
+                            ? `${Math.round(snapshot.ageSeconds / 60)}m old`
+                            : `${(snapshot.ageSeconds / 3600).toFixed(1)}h old`
+                        : null;
+                      return (
+                        <div key={job.jobId} className="dpp-feed-job">
+                          <div className="dpp-feed-head">
+                            <span className="dpp-feed-label">{job.label}</span>
+                            <span className={`dpp-feed-state dpp-feed-state-${state}`}>
+                              {state}
+                            </span>
+                          </div>
+                          <div className="dpp-feed-meta">
+                            {job.enrich?.state === "never-run" || !lastRun ? (
+                              <span>Never run</span>
+                            ) : (
+                              <span>
+                                {`Last run: ${lastRun.status} ${fmtDataProviderTime(lastRun.finishedAt)} (${lastRun.received}/${lastRun.requested} rows)`}
+                              </span>
+                            )}
+                            {snapshot && (
+                              <span>
+                                {`Enriched: ${snapshot.rowsPersisted} rows · ${ageLabel}${snapshot.stale ? " · STALE" : ""}`}
+                              </span>
+                            )}
+                            {snapshot?.inputRunId && (
+                              <span>{`Derived from feed run: ${snapshot.inputRunId}`}</span>
+                            )}
+                            {job.nextScheduledRun && (
+                              <span>{`Next run: ${fmtDataProviderTime(job.nextScheduledRun)}`}</span>
+                            )}
+                            {lastRun?.codedError && (
+                              <span className="dpp-feed-error">{lastRun.codedError}</span>
+                            )}
+                          </div>
+                          {(job.enrich?.history?.length ?? 0) > 1 && (
+                            <ul className="dpp-feed-history">
+                              {job.enrich!.history.slice(1, 4).map((run) => (
+                                <li key={run.runId}>
+                                  {`${run.status} · ${fmtDataProviderTime(run.finishedAt)} · ${run.received}/${run.requested} rows`}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                          <div className="dpp-feed-actions">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              disabled={busy}
+                              onClick={() => void runEnrichAction(view, job, "run")}
+                            >
+                              Run
+                            </Button>
+                            {(state === "running" || state === "queued") && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                disabled={busy}
+                                onClick={() => void runEnrichAction(view, job, "pause")}
+                              >
+                                Pause
+                              </Button>
+                            )}
+                            {state === "paused" && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                disabled={busy}
+                                onClick={() => void runEnrichAction(view, job, "resume")}
+                              >
+                                Resume
+                              </Button>
+                            )}
+                            {(state === "running" || state === "queued" || state === "paused") && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                disabled={busy}
+                                onClick={() => void runEnrichAction(view, job, "cancel")}
+                              >
+                                Cancel
+                              </Button>
+                            )}
+                            {(state === "completed" || state === "failed" || state === "cancelled") && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                disabled={busy}
+                                onClick={() => void runEnrichAction(view, job, "retry")}
                               >
                                 Retry
                               </Button>

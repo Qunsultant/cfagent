@@ -17,6 +17,13 @@
  * Invalid values are ignored with a log line — policy resolution
  * never throws and never blocks a run.
  */
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/pipelinePolicy",
+});
 
 export interface RetryPolicy {
   /** Total attempts including the first try (>= 1). */
@@ -99,7 +106,11 @@ function parseIntClamped(
   if (raw === undefined || raw === null || String(raw).trim() === "") return undefined;
   const n = Number(String(raw).trim());
   if (!Number.isFinite(n)) {
-    console.warn(`[pipelinePolicy] ignoring non-numeric ${label}: ${String(raw).slice(0, 40)}`);
+    structuredLog.warn("pipeline_policy.ignoring_non_numeric", {
+      message: `[pipelinePolicy] ignoring non-numeric ${label}: ${String(raw).slice(0, 40)}`,
+      label,
+      raw: String(raw).slice(0, 40),
+    });
     return undefined;
   }
   return Math.min(max, Math.max(min, Math.trunc(n)));
@@ -110,7 +121,11 @@ function parseBool(raw: string | undefined, label: string): boolean | undefined 
   const v = String(raw).trim().toLowerCase();
   if (["1", "true", "on", "yes"].includes(v)) return true;
   if (["0", "false", "off", "no"].includes(v)) return false;
-  console.warn(`[pipelinePolicy] ignoring unrecognized boolean ${label}: ${String(raw).slice(0, 40)}`);
+  structuredLog.warn("pipeline_policy.ignoring_unrecognized_boolean", {
+    message: `[pipelinePolicy] ignoring unrecognized boolean ${label}: ${String(raw).slice(0, 40)}`,
+    label,
+    raw: String(raw).slice(0, 40),
+  });
   return undefined;
 }
 
@@ -130,7 +145,10 @@ function parseEvents(
     const off = t.startsWith("-");
     const name = (off ? t.slice(1) : t) as NotificationEvent;
     if (!known.includes(name)) {
-      console.warn(`[pipelinePolicy] ignoring unknown notification event: ${t.slice(0, 40)}`);
+      structuredLog.warn("pipeline_policy.ignoring_unknown_event", {
+        message: `[pipelinePolicy] ignoring unknown notification event: ${t.slice(0, 40)}`,
+        event: t.slice(0, 40),
+      });
       continue;
     }
     out[name] = !off;

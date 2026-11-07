@@ -23,6 +23,13 @@ import type {
   EmailSender,
 } from "./emailSenderPorts";
 import { AGENT_DIDS } from "../agents/did";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/cloudflareEmailSender",
+});
 
 /** The env half the adapter needs — the EMAIL binding, nothing else. */
 export interface EmailSenderEnv {
@@ -96,7 +103,10 @@ class CloudflareEmailSender implements EmailSender {
       await this.binding.send(new Response(rawMime).body);
       return true;
     } catch (err) {
-      console.warn("[ETradeEmailService] Failed to send email via env.EMAIL binding:", err);
+      structuredLog.warn("email.send_failed", {
+        message: "[ETradeEmailService] Failed to send email via env.EMAIL binding",
+        error: err instanceof Error ? err.message : String(err),
+      });
       return false;
     }
   }

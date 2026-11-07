@@ -45,6 +45,13 @@
 import type { Env, TransactionRecord } from "../types";
 import { AGENT_DIDS } from "../agents/did";
 import { getServiceUserLogin, SHARED_ORCHESTRATOR_INSTANCE } from "../security/serviceIdentity";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/cfpayLedger",
+});
 
 /** session_id prefix marking a mas_transactions row as cfpay-origin. */
 export const CFPAY_LEDGER_SESSION_PREFIX = "screener-payment:";
@@ -330,16 +337,22 @@ export async function recordCfpayAuditEvent(
       }),
     });
     if (!res.ok) {
-      console.error(
-        `[payment-workflow] audit write failed: HTTP ${res.status} for ${event.type} run=${event.runRequestId}`,
-      );
+      structuredLog.error("cfpay.audit_write_failed", {
+        message: `[payment-workflow] audit write failed: HTTP ${res.status} for ${event.type} run=${event.runRequestId}`,
+        status: res.status,
+        eventType: event.type,
+        runRequestId: event.runRequestId,
+      });
       return false;
     }
     return true;
   } catch (err) {
-    console.error(
-      `[payment-workflow] audit write failed for ${event.type} run=${event.runRequestId}: ${err instanceof Error ? err.message : String(err)}`,
-    );
+    structuredLog.error("cfpay.audit_write_failed", {
+      message: `[payment-workflow] audit write failed for ${event.type} run=${event.runRequestId}: ${err instanceof Error ? err.message : String(err)}`,
+      eventType: event.type,
+      runRequestId: event.runRequestId,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return false;
   }
 }

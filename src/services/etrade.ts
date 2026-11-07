@@ -62,6 +62,13 @@ import {
   resolveQuoteEtradeUnknownMode,
   type QuoteScopedModes,
 } from "../config/quoteModes";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/etrade",
+});
 
 export class ETradeService {
   private platform: ETradeTradingPlatform;
@@ -250,9 +257,10 @@ export class ETradeService {
       );
       return bindNasdaqUniverseDeps(provider, seam.universeRoute.runContext);
     } catch (err) {
-      console.warn(
-        `[etrade] universe deps unavailable, options discovery degrades to the missing-seam throw: ${err instanceof Error ? err.message : String(err)}`
-      );
+      structuredLog.warn("etrade.universe_deps_unavailable", {
+        message: `[etrade] universe deps unavailable, options discovery degrades to the missing-seam throw: ${err instanceof Error ? err.message : String(err)}`,
+        error: err instanceof Error ? err.message : String(err),
+      });
       return undefined;
     }
   }
@@ -436,7 +444,11 @@ export class ETradeService {
           updatedAt: new Date().toISOString(),
         });
       } catch (err) {
-        console.warn("Failed to persist trade draft to ORM:", err);
+        structuredLog.warn("etrade.trade_draft_persist_failed", {
+          message: "Failed to persist trade draft to ORM",
+          orderId,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
 

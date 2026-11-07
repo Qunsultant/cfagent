@@ -17,6 +17,14 @@
  */
 
 import type { RetryPolicy } from "./pipelinePolicy";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/resilience",
+});
+
 
 /**
  * Delay before retry number `retryIndex` (1 = first retry):
@@ -163,9 +171,14 @@ export async function withRetry<T>(
       if (opts.onRetry) {
         opts.onRetry(event);
       } else {
-        console.warn(
-          `[resilience] retry ${attempt}/${maxAttempts - 1}${opts.label ? ` ${opts.label}` : ""} in ${delayMs}ms after: ${event.error}`
-        );
+        structuredLog.warn("resilience.retry", {
+          message: `[resilience] retry ${attempt}/${maxAttempts - 1}${opts.label ? ` ${opts.label}` : ""} in ${delayMs}ms after: ${event.error}`,
+          label: opts.label,
+          attempt,
+          maxAttempts,
+          delayMs,
+          error: event.error,
+        });
       }
       await sleep(delayMs);
     }

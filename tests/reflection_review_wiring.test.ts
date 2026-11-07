@@ -167,10 +167,45 @@ describe("runReflection wiring (#753)", () => {
       (text) => /INSERT OR REPLACE INTO mas_strategy_reviews/i.test(text)
     );
     seedApprovedReviews(reviews, 5);
+    // #3515 S3: the wiring failure now travels as a structured
+    // reflection.review_candidate_create_failed event (level error) on
+    // the console-info JSON fallback, not a console.error line. The
+    // failure is per-finding: createReflectionReviewCandidates catches
+    // the failed candidate insert itself and returns 0, so the
+    // wiring-level event never fires on this path — the per-finding
+    // event is the log the run produces.
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     const result = runReflection(sql, SUNDAY);
     expect(result.findings).toHaveLength(1);
     expect(result.learningsRecorded).toBe(1);
     expect("reviewCandidatesCreated" in result).toBe(false);
-    expect(errSpy.mock.calls.length).toBeGreaterThanOrEqual(1);
+    const events: Array<{ operation: string; level: string; fields: Record<string, unknown> }> = [];
+    for (const call of infoSpy.mock.calls) {
+      try {
+        const parsed = JSON.parse(String(call[0])) as {
+          operation?: unknown;
+          level?: unknown;
+          fields?: unknown;
+        };
+        if (parsed && typeof parsed.operation === "string") {
+          events.push({
+            operation: parsed.operation,
+            level: typeof parsed.level === "string" ? parsed.level : "",
+            fields:
+              parsed.fields && typeof parsed.fields === "object"
+                ? (parsed.fields as Record<string, unknown>)
+                : {},
+          });
+        }
+      } catch {
+        // Non-JSON console.info lines are not structured events.
+      }
+    }
+    const failed = events.find((e) => e.operation === "reflection.review_candidate_create_failed");
+    expect(failed).toBeDefined();
+    expect(failed?.level).toBe("error");
+    expect(failed?.fields.family).toBe("Momentum");
+    expect(String(failed?.fields.message ?? "")).toContain("Failed to create review candidate");
+    infoSpy.mockRestore();
   });
 });

@@ -35,6 +35,14 @@
  */
 
 import { createSettingsPort } from "../data/createSettingsPorts";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/screeningFlags",
+});
+
 
 export const SCREENING_FLAG_KEYS = {
   rolloutStage: "screening.rolloutStage",
@@ -133,10 +141,11 @@ function readSafe(
   try {
     return read(key);
   } catch (err) {
-    console.error(
-      `[screeningFlags] read of ${key} failed; applying the fail-safe value:`,
-      err
-    );
+    structuredLog.error("screeningFlags.read_failed", {
+      message: `[screeningFlags] read of ${key} failed; applying the fail-safe value`,
+      key,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return READ_FAILED;
   }
 }

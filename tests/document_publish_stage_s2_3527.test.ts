@@ -463,7 +463,12 @@ describe("3527 S2 seam equivalence: the WithR2 body leg", () => {
   it("put failure: recorded inline fallback + the seam's exact log line + the row complete inline", async () => {
     const sql = new SqliteTestStorage();
     const { objects, bucket } = makeRecordingBucket({ failPut: true });
-    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    // #3515 S3: the seam's log line now travels as a structured
+    // storeReportAtGenerationWithR2.r2_body_put_failed event (level error)
+    // on the console-info JSON fallback, not a console.error line. The pin
+    // is unchanged in substance: the event's message field must carry the
+    // exact same line, verbatim.
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     try {
       const stored = await storeReportAtGenerationWithR2(
         sql as unknown as SqlStorage,
@@ -478,12 +483,38 @@ describe("3527 S2 seam equivalence: the WithR2 body leg", () => {
         vectorize: "not_attempted",
         aiSearch: "pending",
       });
-      const logged = errSpy.mock.calls
-        .map((c) => c.map(String).join(" "))
-        .join("\n");
-      expect(logged).toContain(
+      const events: Array<{ operation: string; level: string; fields: Record<string, unknown> }> = [];
+      for (const call of infoSpy.mock.calls) {
+        try {
+          const parsed = JSON.parse(String(call[0])) as {
+            operation?: unknown;
+            level?: unknown;
+            fields?: unknown;
+          };
+          if (parsed && typeof parsed.operation === "string") {
+            events.push({
+              operation: parsed.operation,
+              level: typeof parsed.level === "string" ? parsed.level : "",
+              fields:
+                parsed.fields && typeof parsed.fields === "object"
+                  ? (parsed.fields as Record<string, unknown>)
+                  : {},
+            });
+          }
+        } catch {
+          // Non-JSON console.info lines are not structured events.
+        }
+      }
+      const putFailed = events.find(
+        (e) => e.operation === "storeReportAtGenerationWithR2.r2_body_put_failed",
+      );
+      expect(putFailed).toBeDefined();
+      expect(putFailed?.level).toBe("error");
+      expect(putFailed?.fields.message).toBe(
         `[scheduledReports] storeReportAtGenerationWithR2: R2 body put failed for report ${stored!.reportId}; storing inline instead: r2 put boom`,
       );
+      expect(putFailed?.fields.reportId).toBe(stored!.reportId);
+      expect(putFailed?.fields.error).toBe("r2 put boom");
       await flush();
       const recorded = getCanonicalReportFanoutOutcome(
         sql as unknown as SqlStorage,
@@ -500,7 +531,7 @@ describe("3527 S2 seam equivalence: the WithR2 body leg", () => {
       expect(hit?.body).toContain("NVDA");
       expect(objects.size).toBe(0);
     } finally {
-      errSpy.mockRestore();
+      infoSpy.mockRestore();
     }
   });
 
@@ -564,7 +595,10 @@ describe("3527 S2 seam equivalence: the WithR2 body leg", () => {
     const sql = new SqliteTestStorage();
     sql.failInserts = true;
     const { objects, bucket } = makeRecordingBucket();
-    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    // #3515 S3: the failure now travels as a structured
+    // storeReportAtGenerationWithR2.failed event (level error) on the
+    // console-info JSON fallback, not a console.error line.
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     try {
       const stored = await storeReportAtGenerationWithR2(
         sql as unknown as SqlStorage,
@@ -574,12 +608,35 @@ describe("3527 S2 seam equivalence: the WithR2 body leg", () => {
       expect(stored).toBeNull();
       expect(rowCount(sql)).toBe(0);
       expect(objects.size).toBe(1);
-      const logged = errSpy.mock.calls
-        .map((c) => c.map(String).join(" "))
-        .join("\n");
-      expect(logged).toContain(DataFoundationCode.REPORT_FANOUT_FAILED);
+      const events: Array<{ operation: string; level: string; fields: Record<string, unknown> }> = [];
+      for (const call of infoSpy.mock.calls) {
+        try {
+          const parsed = JSON.parse(String(call[0])) as {
+            operation?: unknown;
+            level?: unknown;
+            fields?: unknown;
+          };
+          if (parsed && typeof parsed.operation === "string") {
+            events.push({
+              operation: parsed.operation,
+              level: typeof parsed.level === "string" ? parsed.level : "",
+              fields:
+                parsed.fields && typeof parsed.fields === "object"
+                  ? (parsed.fields as Record<string, unknown>)
+                  : {},
+            });
+          }
+        } catch {
+          // Non-JSON console.info lines are not structured events.
+        }
+      }
+      const failed = events.find((e) => e.operation === "storeReportAtGenerationWithR2.failed");
+      expect(failed).toBeDefined();
+      expect(failed?.level).toBe("error");
+      expect(failed?.fields.code).toBe(DataFoundationCode.REPORT_FANOUT_FAILED);
+      expect(String(failed?.fields.message ?? "")).toContain(DataFoundationCode.REPORT_FANOUT_FAILED);
     } finally {
-      errSpy.mockRestore();
+      infoSpy.mockRestore();
     }
   });
 
