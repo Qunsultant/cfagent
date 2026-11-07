@@ -296,6 +296,11 @@
  * POST /api/ops/dlq/replay (in handleDlqRoutes, after the meter
  * delegation) — bringing the pinned array to 341 entries; the
  * delegation sequence gains handleDlqRoutes after handleMeterRoutes.
+ * Issue #1257 (live-check route) added one — GET
+ * /adaptation/promotions/active-check (in handleScreenerResearchRoutes,
+ * immediately before GET /adaptation/promotions) — bringing the pinned
+ * array to 408 entries (measured); the delegation sequence is unchanged (same
+ * handler, same position).
  *
  * LANDMARK RULE (#405): all position assertions anchor to DELEGATION
  * CALLS - the only landmarks a thin router has.
@@ -820,6 +825,7 @@ const EXPECTED_INVENTORY = [
   "handleScreenerResearchRoutes :: endsWith(\"/adaptation/candidates/verdicts\")",
   "handleScreenerResearchRoutes :: endsWith(\"/adaptation/candidates/approve\")",
   "handleScreenerResearchRoutes :: endsWith(\"/adaptation/candidates/gate\")",
+  "handleScreenerResearchRoutes :: endsWith(\"/adaptation/promotions/active-check\")",
   "handleScreenerResearchRoutes :: endsWith(\"/adaptation/promotions\")",
   "handleScreenerResearchRoutes :: endsWith(\"/adaptation/promotions/promote\")",
   "handleScreenerResearchRoutes :: endsWith(\"/adaptation/promotions/rollback\")",
