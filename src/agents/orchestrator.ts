@@ -92,7 +92,7 @@ import type { ScreenerRunOutcome } from "../services/screenerFollowups";
 import { marketDateKey, readAutopilotStateRaw, getAutopilotState, writeAutopilotState, incrementAutopilotOrdersToday, fetchBrokerBalanceSnapshot, openNotionalForSymbol, evaluateAndRecordAutopilotVerdict, type AutopilotContext } from "./orchestrator/autopilot";
 import { readSettingRaw, writeSetting, getReportDispatchHitl, setReportDispatchHitl, createReportConfirmation, getReportConfirmation, decideReportConfirmation, storeResearchReportCanonicalAsync, confirmationDeliveryMeta, deliverStoredReportEmail, deliverStoredReportWebhook, persistScreenerReportCanonical, persistParentScreenReportCanonical, refreshCanonicalPdfFields, sendReportEmail, sendReportWebhook, type ReportDispatchContext } from "./orchestrator/reportDispatch";
 import { extractMessageText, createTurnTools, deriveTurn, assembleGrounding, type ChatTurnHelpersContext } from "./orchestrator/chatTurnHelpers";
-import { createOpenaimpMcpFetch, ensureOpenaimpMcpConnection, chatNlqTurnGate, type EnsureOpenaimpMcpResult } from "./orchestrator/meshMcpClient";
+import { createOpenaimpMcpFetch, ensureOpenaimpMcpConnection, chatNlqTurnGate, resolveStockCopilotMcpActivation, STOCK_COPILOT_SOURCE_TAB, type EnsureOpenaimpMcpResult } from "./orchestrator/meshMcpClient";
 import { logChatActivity, enqueueHttpRequest, type HttpEntryContext } from "./orchestrator/httpEntry";
 import { runResearchAndPublish, deliverResearchReport, sendResearchSummaryEmail, type ResearchPublishContext } from "./orchestrator/researchPublish";
 import { ETradeEmailTradingService } from "../trading";
@@ -2193,6 +2193,24 @@ export class OrchestratorAgent extends PortThink {
           context: { env: this.env },
           audit: (type, payload) => this.audit(type, "orchestrator", payload),
         });
+    // Issue #3721 (Capability S4): the Stock Copilot's mcp-client
+    // activation. The discovered set is in the turn by #2496's
+    // merge (nothing to include or exclude here); the activation —
+    // the stock registration's declaration, read through the #3489
+    // class manifest against this deployment's env — is what
+    // steers a stock turn to the copilot's own discovered
+    // commands. A stock turn whose activation is withdrawn (the
+    // manifest's externalized override) is audited, never
+    // silently unsteered.
+    const stockMcpActivation = resolveStockCopilotMcpActivation({
+      sourceTab,
+      env: this.env as unknown as Record<string, unknown>,
+    });
+    if (sourceTab === STOCK_COPILOT_SOURCE_TAB && !stockMcpActivation.active) {
+      this.audit("stock_copilot.mcp_client_inactive", "orchestrator", {
+        state: stockMcpActivation.state,
+      });
+    }
     return {
       instructions: buildOrchestratorSystemPrompt({
         route,
@@ -2200,6 +2218,7 @@ export class OrchestratorAgent extends PortThink {
         vectorContext,
         optionsResearchContext,
         isAutoOptionsResearchRequest,
+        stockCopilotMcpActive: stockMcpActivation.active,
       }),
       maxSteps: this.maxSteps,
       ...(isAutoOptionsResearchRequest

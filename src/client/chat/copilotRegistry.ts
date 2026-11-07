@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import type { CapabilityTabItem } from "../components/CapabilityNavBar";
 import type { User } from "./types";
 import type { BadgeTone } from "../components/ui";
+import type { CapabilityId } from "../../actors/capabilityManifest";
 
 /**
  * How a copilot's surface renders (#3449, #3521).
@@ -55,6 +56,15 @@ export interface CopilotConfig {
   };
   /** Declares whether the copilot has a custom surface — see CopilotMode (#3454). Never suppresses the conversation. */
   mode: CopilotMode;
+  /**
+   * Capability activations declared for this copilot, in the
+   * #3489 manifest vocabulary (CapabilityId, src/actors/
+   * capabilityManifest.ts). Declarative — the runtime wiring is
+   * server-side; this is the registration's own record of what
+   * the capability standard (epic #3488) has activated for it.
+   * S4 (#3721) activated mcpClient for the Stock Copilot.
+   */
+  capabilities?: readonly CapabilityId[];
   composerPlaceholder?: string;
   sourceTab?: string;
   banner?: CopilotBannerConfig;
@@ -291,6 +301,11 @@ export const DEFAULT_COPILOTS: CopilotConfig[] = [
     ],
     composerPlaceholder: "Ask Stock Copilot (e.g. 'What is the loop doing?', 'Show open positions', 'Pause loop')…",
     sourceTab: "Stock Copilot",
+    // S4 (#3721): the platform MCP client (#2496) is activated for
+    // this copilot — its turns are steered to the copilot's own
+    // discovered commands while the OrchestratorAgent manifest's
+    // mcpClient entry resolves enabled.
+    capabilities: ["mcpClient"],
     banner: {
       icon: "📈",
       headline: "Stock Copilot Active:",

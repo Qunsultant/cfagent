@@ -54,6 +54,15 @@
  * descriptions live in the discovered MCP catalog. Behavior rules
  * 1–8 are unchanged. Fixtures re-pointed in the same PR; pins in
  * tests/prompt_bulk_knowledge_2719.test.ts.
+ *
+ * Issue #3721 (Capability S4, epic #3488): an mcp-client-activated
+ * Stock Copilot turn (the caller resolves the activation through
+ * the #3489 class manifest — resolveStockCopilotMcpActivation in
+ * src/agents/orchestrator/meshMcpClient.ts) appends the
+ * stock-copilot steering block naming the copilot's own
+ * discovered commands. Every other turn — and a stock turn whose
+ * activation is withdrawn — stays byte-identical to the pre-#3721
+ * prompt, so the fixtures stand untouched.
  */
 import type { Env } from "../types";
 
@@ -69,7 +78,32 @@ export interface OrchestratorPromptInput {
   vectorContext: string;
   optionsResearchContext: string;
   isAutoOptionsResearchRequest: boolean;
+  /**
+   * Issue #3721 (Capability S4): the Stock Copilot's mcp-client
+   * activation, resolved by the caller through the #3489 class
+   * manifest (resolveStockCopilotMcpActivation in
+   * src/agents/orchestrator/meshMcpClient.ts). When true the
+   * prompt carries the stock-copilot steering block naming the
+   * copilot's own discovered commands. Absent/false keeps the
+   * prompt byte-identical (the fixtures' contract).
+   */
+  stockCopilotMcpActive?: boolean;
 }
+
+/**
+ * Issue #3721 — steering for an mcp-client-activated Stock
+ * Copilot turn: the copilot's own catalog commands (mesh door
+ * commands, #3513/#3624) named by their discovered keys, exactly
+ * as the shared steering above names the screen/payment keys.
+ * Appended only on activated stock turns; every other turn's
+ * prompt is byte-identical without it.
+ */
+export const STOCK_COPILOT_MCP_STEERING = `Stock Copilot — this conversation is the Stock Copilot surface, and the copilot's own commands are in your discovered MCP set:
+- 'tool_openaimp_stock_copilot_status': The autonomous loop's live status — active broker/mode, current and enabled sessions, open positions with bracket exit plans, recently closed trades, and recent cycle activity/refusal telemetry. Use it for any question about what the loop is doing, holding, or has done.
+- 'tool_openaimp_stock_copilot_control': Pause or resume the loop, or change its cadence, enabled sessions, watch universe, strategies, or execution mode. Change loop state ONLY when the user explicitly asks for that change.
+- 'tool_openaimp_stock_copilot_introspect': How the loop's workflow, stages, and active tools fit together.
+- 'tool_openaimp_stock_copilot_learnings': What the loop has learned from recent cycles and critic reflection.
+- 'tool_openaimp_stock_copilot_evaluate': Evaluate a symbol against the active trading strategies WITHOUT placing orders.`;
 
 /**
  * #879/#767 — retrieved-content separation for the orchestrator chat
@@ -134,7 +168,7 @@ Agentic Best Practices & Workflow Rules:
 5. Multi-Turn Context & Session Memory: Respect the active session memory facts shown above. When the user asks to remember a preference, call 'tool_openaimp_manage_session_memory' with action: 'remember'.
 6. E*TRADE Trading & Market Screening: When the user asks to run a stock screen over a universe (e.g. NASDAQ100, SP500, or ALL universes), invoke 'tool_openaimp_run_stock_screen' with that universe. When the user asks to screen options strategies over a universe (e.g. bull put credit spreads in NASDAQ100 with max loss <= $30 and max profit > $0), invoke 'tool_openaimp_run_options_strategy_screen' with the structured constraints (strategyType, maxLoss, minProfit) — never deflect that request to a UI workflow. When the user asks for a listings-style filter scan (by RSI, market cap, sector, price, gainers/losers across listings), invoke 'tool_openaimp_etrade_market_scan'. For quotes invoke 'tool_openaimp_etrade_get_quote'. For trade orders (buy/sell), ALWAYS use 'tool_openaimp_etrade_preview_order' to draft a proposal. Only execute via 'tool_openaimp_etrade_execute_order' when the user explicitly confirms approval.
 7. Be structured, transparent, accurate, and professional. Avoid repeating internal tool call boilerplate.
-8. Background execution: MCP capabilities return queued job IDs instead of final results. Tell the user the job ID, and use 'tool_openaimp_get_async_job' or 'tool_openaimp_list_async_jobs' only when they ask for status or results. Never imply queued work is already complete.`;
+8. Background execution: MCP capabilities return queued job IDs instead of final results. Tell the user the job ID, and use 'tool_openaimp_get_async_job' or 'tool_openaimp_list_async_jobs' only when they ask for status or results. Never imply queued work is already complete.${input.stockCopilotMcpActive ? `\n\n${STOCK_COPILOT_MCP_STEERING}` : ""}`;
   return withRetrievedContentRule(prompt, Boolean(memoryContext || vectorContext || optionsResearchContext));
 }
 

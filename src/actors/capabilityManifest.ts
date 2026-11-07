@@ -314,7 +314,7 @@ export const PORT_THINK_CAPABILITY_BASE: Record<
     ),
     mcpClient: entry(
       "enabled",
-      "Wired: servers are registered on the SDK client manager (this.mcp) through src/agents/orchestrator/meshMcpClient.ts (#2496), and this.mcp.getAITools() merges into every turn's tool set.",
+      "Wired: servers are registered on the SDK client manager (this.mcp) through src/agents/orchestrator/meshMcpClient.ts (#2496), and this.mcp.getAITools() merges into every turn's tool set. Activated for the Stock Copilot as S4 (#3721): the stock registration declares mcpClient (src/client/chat/copilotRegistry.ts), and while this entry resolves enabled a stock turn is steered to the copilot's own discovered commands (tool_openaimp_stock_copilot_*); the externalized override withdraws that activation.",
     ),
     webFetch: entry(
       "enabled",

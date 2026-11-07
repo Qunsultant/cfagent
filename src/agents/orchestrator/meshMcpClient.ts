@@ -117,6 +117,10 @@ import {
   resolveChatNlqTurnMode,
   type ChatNlqScopedModes,
 } from "../../config/chatNlqModes";
+import {
+  resolveAgentCapabilityManifest,
+  type CapabilityState,
+} from "../../actors/capabilityManifest";
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
 
@@ -359,5 +363,61 @@ export function chatNlqTurnGate(deps: {
   if (!deps.toolNames.includes(OPENAIMP_NLQ_TOOL_KEY)) return {};
   return {
     activeTools: deps.toolNames.filter((name) => name !== OPENAIMP_NLQ_TOOL_KEY),
+  };
+}
+
+/**
+ * The stock registration's declared sourceTab — the per-turn
+ * copilot carrier the client stamps into message metadata and
+ * chatTurnHelpers.deriveTurn surfaces on the turn stash (the same
+ * idiom as the "Broker · Auto Options Research" auto-research
+ * flag). The registration declares it in src/client/chat/
+ * copilotRegistry.ts; the two are pinned together by the #3721
+ * activation suite.
+ */
+export const STOCK_COPILOT_SOURCE_TAB = "Stock Copilot";
+
+export interface StockCopilotMcpActivation {
+  /**
+   * True exactly when the turn is a stock-copilot turn AND the
+   * class manifest's mcpClient entry resolves "enabled".
+   */
+  active: boolean;
+  /** The resolved mcpClient state for OrchestratorAgent under the given env. */
+  state: CapabilityState;
+}
+
+/**
+ * Issue #3721 (Capability S4, epic #3488) — the Stock Copilot's
+ * mcp-client ACTIVATION, resolved per turn. The client itself is
+ * #2496's (this module, above): the connection is ensured per
+ * instance and Think auto-merges the discovered set into every
+ * turn of the class, so no tool-inclusion work happens here.
+ * What S4 adds is the per-copilot activation the capability
+ * standard declares: the Stock Copilot registration declares
+ * mcpClient (src/client/chat/copilotRegistry.ts, in the #3489
+ * manifest vocabulary), and while the class manifest's mcpClient
+ * entry resolves "enabled" through the existing resolver
+ * (src/actors/capabilityManifest.ts — evaluated against the
+ * turn's env, so the machinery's externalized override
+ * AGENT_CAPABILITIES_DISABLED withdraws the activation with no
+ * code change), a stock turn's steering names the copilot's own
+ * discovered commands (src/agents/chatPrompt.ts). Other
+ * registrations gain nothing from this slice: the resolver is
+ * inactive for their turns and their tool sets are untouched.
+ */
+export function resolveStockCopilotMcpActivation(deps: {
+  /** The turn's copilot carrier (turn stash sourceTab). */
+  sourceTab?: string;
+  /** The deployment env the manifest resolution evaluates against. */
+  env?: Record<string, unknown> | null;
+}): StockCopilotMcpActivation {
+  const manifest = resolveAgentCapabilityManifest("OrchestratorAgent", {
+    env: deps.env ?? undefined,
+  });
+  const state = manifest.capabilities.mcpClient.state;
+  return {
+    active: deps.sourceTab === STOCK_COPILOT_SOURCE_TAB && state === "enabled",
+    state,
   };
 }
