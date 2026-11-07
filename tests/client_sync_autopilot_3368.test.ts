@@ -38,7 +38,7 @@ describe("no surface calls an E*TRADE route by habit (#3368)", () => {
   });
 
   it("the Sync control routes through the helper and invents no latency", () => {
-    const source = readFileSync("src/client/ETradeDynamicMenu.tsx", "utf8");
+    const source = readFileSync("src/client/BrokerDynamicMenu.tsx", "utf8");
     expect(source).toContain("syncTarget(selectedBrokerId)");
     // The defect this replaced: a hardcoded diagnostics route and `?? 42`.
     expect(source).not.toContain("`/api/etrade/diagnostics`");

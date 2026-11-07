@@ -11,7 +11,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { BROKER_ENVIRONMENT_STORAGE_KEY } from "../src/client/brokerEnvironment";
 
-const menu = readFileSync("src/client/ETradeDynamicMenu.tsx", "utf8");
+const menu = readFileSync("src/client/BrokerDynamicMenu.tsx", "utf8");
 
 describe("the switch speaks trading type (#3297)", () => {
   it("labels the two choices Paper and Live", () => {
@@ -25,9 +25,9 @@ describe("the switch speaks trading type (#3297)", () => {
     expect(menu).not.toContain('isLive ? "PROD" : "TEST"');
   });
 
-  it("keeps sending TEST/PROD on the wire", () => {
-    expect(menu).toContain('onSwitchEnv("TEST")');
-    expect(menu).toContain('onSwitchEnv("PROD")');
+  it("keeps sending TEST/PROD on the wire (#3719 single toggle)", () => {
+    expect(menu).toContain('onSwitchEnv(isLive ? "TEST" : "PROD")');
+    expect(menu).toContain('const target = mode === "live" ? "PROD" : "TEST"');
   });
 });
 

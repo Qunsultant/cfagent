@@ -14,7 +14,7 @@ const tapeSrc = readFileSync(
   "utf8",
 );
 const panelSrc = readFileSync(
-  join(here, "..", "src", "client", "ETradeDynamicMenu.tsx"),
+  join(here, "..", "src", "client", "BrokerDynamicMenu.tsx"),
   "utf8",
 );
 

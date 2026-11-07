@@ -25,7 +25,7 @@ describe("auto-refresh config externalization (#2513)", () => {
   });
 
   it("reads menu pill options from getPollingConfig, not a literal array", () => {
-    const menu = readFileSync("src/client/ETradeDynamicMenu.tsx", "utf8");
+    const menu = readFileSync("src/client/BrokerDynamicMenu.tsx", "utf8");
     expect(menu).toContain("getPollingConfig().autoRefreshIntervalOptionsS");
     expect(menu).not.toContain("[10, 15, 30, 60, 120, 300]");
   });

@@ -11,7 +11,7 @@ import { GoogleAdUnit } from "./GoogleAdUnit";
 import { ETradeTradingHub } from "./ETradeTradingHub";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { FirstRunGate } from "./FirstRunGate";
-import { SettingsMenu, type ETradeDynamicMenuProps } from "./ETradeDynamicMenu";
+import { BrokerDynamicMenu, SettingsMenu, type BrokerDynamicMenuProps, type ETradeDynamicMenuProps } from "./BrokerDynamicMenu";
 import { useBrokerEnvironment, switchBrokerEnvironment, fetchBrokerEnvironment } from "./brokerEnvironment";
 import { MarketDataResearchHub } from "./MarketDataResearchHub";
 import { OptionsFlowsHub } from "./options/flows";
