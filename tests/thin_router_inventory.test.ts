@@ -889,10 +889,12 @@ const EXPECTED_INVENTORY = [
   "handleSchedulesRoutes :: endsWith(\"/schedules/trigger-iv-collection\")",
   "handleSchedulesRoutes :: endsWith(\"/schedules/trigger-discovery\")",
   "handleSchedulesRoutes :: endsWith(\"/schedules/feed-snapshot\")",
-  // Issue #3422 / #3588: Stock Copilot status/introspect read + pause/resume write
+  // Issue #3422 / #3588 / #3514: Stock Copilot status/introspect read + learnings/evaluate + pause/resume write
   // (in handleStockCopilotRoutes, delegated last).
   "handleStockCopilotRoutes :: endsWith(\"/stock-copilot/status\")",
   "handleStockCopilotRoutes :: endsWith(\"/stock-copilot/introspect\")",
+  "handleStockCopilotRoutes :: endsWith(\"/stock-copilot/learnings\")",
+  "handleStockCopilotRoutes :: endsWith(\"/stock-copilot/evaluate\")",
   "handleStockCopilotRoutes :: endsWith(\"/stock-copilot/control\")"
 ];
 
