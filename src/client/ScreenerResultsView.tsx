@@ -5,9 +5,9 @@
  * one frontend. Leads with what screening found (opportunities), not raw
  * listings. All columns sortable (click header to toggle asc/desc).
  *
- * Indicator methodology is E*TRADE-honest: computed from snapshot quotes
+ * Indicator methodology is broker-honest: computed from snapshot quotes
  * only. Range-based overbought/oversold is labeled as such — never as RSI.
- * RSI(14)/MACD need price history E*TRADE does not provide; shown as "—"
+ * RSI(14)/MACD need price history the broker feed does not provide; shown as "—"
  * when unavailable rather than faked.
  */
 
@@ -513,7 +513,7 @@ export function ScreenerResultsView({ result }: { result: ScreenerResultData }) 
         </span>
         {!result.success && (
           <span style={{ color: "var(--color-danger)", marginLeft: "0.5rem" }}>
-            ⚠️ Failed: {result.error || "E*TRADE unavailable"}
+            ⚠️ Failed: {result.error || "Broker unavailable"}
           </span>
         )}
       </div>
@@ -591,7 +591,7 @@ export function ScreenerResultsView({ result }: { result: ScreenerResultData }) 
             borderRadius: "4px",
           }}
         >
-          {result.error || "E*TRADE unavailable — no market data. No fallback data substituted."}
+          {result.error || "Broker unavailable — no market data. No fallback data substituted."}
         </div>
       ) : (
         <>
