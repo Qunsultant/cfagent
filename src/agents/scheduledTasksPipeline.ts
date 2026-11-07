@@ -53,6 +53,7 @@ import { createProviderCaptureAdapter } from "../data/createProviderCapturePorts
 import type { CaptureBlobStorage } from "../data/providerCapturePorts";
 import { createFeedDatasetAdapter } from "../data/createFeedDatasetPorts";
 import { createEnrichedDatasetAdapter } from "../data/createEnrichedDatasetPorts";
+import { createAnalyzedDatasetPorts } from "../data/createAnalyzedDatasetPorts";
 import { D1IndexListStore } from "../data/d1IndexListAdapter";
 import { createJobPipelineMessaging } from "../messaging/createJobPipelineMessaging";
 import {
@@ -75,6 +76,12 @@ import {
   ENRICH_PIPELINE_CATALOG,
   type EnrichStepDeps,
 } from "../services/enrichPipelineJobs";
+import { buildAnalyzeJobRegistry } from "../services/analyzeJobs";
+import {
+  ensureAnalyzePipelineJobs,
+  ANALYZE_PIPELINE_CATALOG,
+  type AnalyzeStepDeps,
+} from "../services/analyzePipelineJobs";
 import { createCaptureWiredFeedProvider } from "../services/feedProviderWiring";
 import {
   createIndexMembershipService,
@@ -209,11 +216,38 @@ export function enrichStepDepsForScheduledAgent(
 }
 
 /**
+ * The analyze-step wiring for this host residency (#3537): both
+ * of the analyze step's stores are D1-resident (the enrich
+ * stage's persisted copies and this stage's analyzed copies —
+ * the generate stage's readers run in other instances), so the
+ * wiring needs no DO-storage seam and the step executes fully
+ * in every residency, like enrich.apply.
+ */
+export function analyzeStepDepsForScheduledAgent(
+  ctx: ScheduledTasksPipelineContext,
+): AnalyzeStepDeps {
+  const sql = pipelineSql(ctx);
+  return {
+    registry: buildAnalyzeJobRegistry(envStrings(ctx.env)),
+    enrichedStore: createEnrichedDatasetAdapter(ctx.env),
+    analyzedStore: createAnalyzedDatasetPorts(ctx.env),
+    shardsFor: async (jobId) => {
+      const stores = createJobPipelineStoresFromSql(sql);
+      return (
+        (await stores.definitions.getDefinition(jobId))?.config.processing
+          .shards ?? []
+      );
+    },
+  };
+}
+
+/**
  * Build the pipeline control plane over this host. The acting
  * login (when a dispatch carries one) threads into the per-login
  * provider wiring; scheduled firings pass the service login.
- * The step registry is THE composed registry (#3536): the feed
- * steps plus enrich.apply — one registry, every residency.
+ * The step registry is THE composed registry (#3536, #3537):
+ * the feed steps plus enrich.apply plus analyze.apply — one
+ * registry, every residency.
  */
 export function createScheduledAgentPipelineControl(
   ctx: ScheduledTasksPipelineContext,
@@ -230,6 +264,7 @@ export function createScheduledAgentPipelineControl(
     steps: createPipelineStepRegistry(
       feedStepDepsForScheduledAgent(ctx, userLogin),
       enrichStepDepsForScheduledAgent(ctx),
+      analyzeStepDepsForScheduledAgent(ctx),
     ),
     invocation: "sync",
   });
@@ -253,10 +288,20 @@ export async function ensureScheduledAgentEnrichJobs(
   return ensureEnrichPipelineJobs(control, stores, envStrings(ctx.env));
 }
 
+/** Ensure the analyze job definitions exist on this host's control plane (#3537). */
+export async function ensureScheduledAgentAnalyzeJobs(
+  ctx: ScheduledTasksPipelineContext,
+  control: JobPipelineControl,
+): Promise<string[]> {
+  const stores = createJobPipelineStoresFromSql(pipelineSql(ctx));
+  return ensureAnalyzePipelineJobs(control, stores, envStrings(ctx.env));
+}
+
 /**
  * Ensure EVERY pipeline job definition this host manages
- * (feed + enrich) — the ensure every host entry point runs, so
- * a job family's definitions exist whichever door arrives first.
+ * (feed + enrich + analyze) — the ensure every host entry point
+ * runs, so a job family's definitions exist whichever door
+ * arrives first.
  */
 export async function ensureScheduledAgentPipelineJobs(
   ctx: ScheduledTasksPipelineContext,
@@ -264,7 +309,8 @@ export async function ensureScheduledAgentPipelineJobs(
 ): Promise<string[]> {
   const feed = await ensureScheduledAgentFeedJobs(ctx, control);
   const enrich = await ensureScheduledAgentEnrichJobs(ctx, control);
-  return [...feed, ...enrich];
+  const analyze = await ensureScheduledAgentAnalyzeJobs(ctx, control);
+  return [...feed, ...enrich, ...analyze];
 }
 
 /**
@@ -350,6 +396,7 @@ export async function startPipelineJobWorkflow(
     steps: createPipelineStepRegistry(
       feedStepDepsForScheduledAgent(ctx),
       enrichStepDepsForScheduledAgent(ctx),
+      analyzeStepDepsForScheduledAgent(ctx),
     ),
     invocation: "workflow-shard",
   });
@@ -495,6 +542,11 @@ export function pipelineEnrichJobIds(): string[] {
   return ENRICH_PIPELINE_CATALOG.map((e) => e.jobId);
 }
 
+/** The analyze job ids this host manages (the catalog order, #3537). */
+export function pipelineAnalyzeJobIds(): string[] {
+  return ANALYZE_PIPELINE_CATALOG.map((e) => e.jobId);
+}
+
 /**
  * The feed → enrich hand-off (#3536): the enrich stage is the
  * CONSUMER of the feed stage — when a feed job's completion is
@@ -536,6 +588,52 @@ export async function dispatchEnrichAfterFeedCompletion(
       message: `[job-pipeline] enrich dispatch after feed completion failed for "${enrichDef.id}" (feed job "${note.jobId}"): ${err instanceof Error ? err.message : String(err)}`,
       feedJobId: note.jobId,
       enrichJobId: enrichDef.id,
+    });
+  }
+}
+
+/**
+ * The enrich → analyze hand-off (#3537): the analyze stage is
+ * the CONSUMER of the enrich stage — when an enrich job's
+ * completion is recorded (its queue publication, routed here
+ * by the JOB_PIPELINE_EVENTS consumer alongside the feed
+ * hand-off), the analyze job consuming that enrich job is
+ * dispatched on the same control plane, with the service
+ * identity. The analyze job reads the enrich run's PERSISTED
+ * dataset — the completion note is the trigger, never the
+ * data channel.
+ *
+ * Best-effort at this boundary, exactly like the feed hand-off:
+ * the note is already recorded, a failure is logged with its
+ * code, and the analyze run's own records are its failure
+ * surface. An analyze job's own completion maps to no consumer
+ * here (the generate stage's hand-off is J5's), and a
+ * non-completed enrich state dispatches nothing.
+ */
+export async function dispatchAnalyzeAfterEnrichCompletion(
+  ctx: ScheduledTasksPipelineContext,
+  note: PipelineCompletionNote,
+): Promise<void> {
+  if (note.state !== "completed") return;
+  const analyzeDef = buildAnalyzeJobRegistry(envStrings(ctx.env)).forEnrichJob(
+    note.jobId,
+  );
+  if (!analyzeDef) return;
+  try {
+    const serviceLogin = getServiceUserLogin(ctx.env) ?? undefined;
+    const control = createScheduledAgentPipelineControl(ctx, serviceLogin);
+    await ensureScheduledAgentPipelineJobs(ctx, control);
+    const dispatch = await control.runJob(analyzeDef.id, {
+      trigger: "scheduled",
+    });
+    if (dispatch.completion) {
+      void dispatch.completion.catch(() => undefined);
+    }
+  } catch (err) {
+    structuredLog.warn("analyze_dispatch_after_enrich_completion_failed", {
+      message: `[job-pipeline] analyze dispatch after enrich completion failed for "${analyzeDef.id}" (enrich job "${note.jobId}"): ${err instanceof Error ? err.message : String(err)}`,
+      enrichJobId: note.jobId,
+      analyzeJobId: analyzeDef.id,
     });
   }
 }

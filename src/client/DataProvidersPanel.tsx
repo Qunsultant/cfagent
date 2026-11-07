@@ -22,10 +22,13 @@ import {
   fmtDataProviderTime,
   fmtFeedAge,
   postDataProviderAction,
+  postAnalyzeJobAction,
   postEnrichJobAction,
   postFeedJobAction,
   postFeedRun,
   providerDisplayName,
+  type AnalyzeJobActionName,
+  type AnalyzeJobView,
   type CapabilityRouteView,
   type DataProviderActionName,
   type DataProviderHealthStatus,
@@ -325,6 +328,27 @@ export function DataProvidersPanel() {
       await load();
     } catch (err: any) {
       setError(err?.message || `Failed to run the feed job for "${view.id}".`);
+    } finally {
+      setActingId(null);
+    }
+  };
+
+  // #3537: run / manage one of the provider's analyze jobs
+  // through the pipeline host — the enrich action's shape, one
+  // stage later (the run consumes the persisted enriched copy).
+  const runAnalyzeAction = async (
+    view: DataProviderView,
+    job: AnalyzeJobView,
+    action: AnalyzeJobActionName
+  ) => {
+    setActingId(view.id);
+    setError("");
+    try {
+      await postAnalyzeJobAction(view.id, job.jobId, action);
+      toast.success(`Analyze job "${job.jobId}" ${action} dispatched.`);
+      await load();
+    } catch (err: any) {
+      setError(err?.message || `Failed to ${action} analyze job "${job.jobId}".`);
     } finally {
       setActingId(null);
     }
@@ -733,6 +757,136 @@ export function DataProvidersPanel() {
                                 variant="ghost"
                                 disabled={busy}
                                 onClick={() => void runEnrichAction(view, job, "retry")}
+                              >
+                                Retry
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              },
+            },
+            {
+              // #3537: the analyze jobs column — the enrich-jobs
+              // column's shape transposed (same dpp-feed-*
+              // classes; no new stylesheet), plus the lineage
+              // line naming the enrich run each copy derives from
+              // and the breadth line from the analyzed summary.
+              key: "analyzeJobs",
+              header: "Analyze Jobs",
+              cellClassName: "dpp-col-feed-cell",
+              render: (view) => {
+                const jobs = view.analyzeJobs ?? [];
+                if (jobs.length === 0) {
+                  return <span className="dpp-feed-none">No analyze jobs</span>;
+                }
+                const busy = actingId === view.id;
+                return (
+                  <div className="dpp-feed-jobs">
+                    {jobs.map((job) => {
+                      const state = job.pipeline?.state ?? "unknown";
+                      const lastRun = job.analyze?.lastRun ?? null;
+                      const snapshot = job.analyze?.snapshot ?? null;
+                      const ageLabel = snapshot
+                        ? snapshot.ageSeconds < 90
+                          ? `${snapshot.ageSeconds}s old`
+                          : snapshot.ageSeconds < 5400
+                            ? `${Math.round(snapshot.ageSeconds / 60)}m old`
+                            : `${(snapshot.ageSeconds / 3600).toFixed(1)}h old`
+                        : null;
+                      return (
+                        <div key={job.jobId} className="dpp-feed-job">
+                          <div className="dpp-feed-head">
+                            <span className="dpp-feed-label">{job.label}</span>
+                            <span className={`dpp-feed-state dpp-feed-state-${state}`}>
+                              {state}
+                            </span>
+                          </div>
+                          <div className="dpp-feed-meta">
+                            {job.analyze?.state === "never-run" || !lastRun ? (
+                              <span>Never run</span>
+                            ) : (
+                              <span>
+                                {`Last run: ${lastRun.status} ${fmtDataProviderTime(lastRun.finishedAt)} (${lastRun.received}/${lastRun.requested} rows)`}
+                              </span>
+                            )}
+                            {snapshot && (
+                              <span>
+                                {`Analyzed: ${snapshot.rowsPersisted} rows · ${ageLabel}${snapshot.stale ? " · STALE" : ""}`}
+                              </span>
+                            )}
+                            {snapshot && (
+                              <span>
+                                {`Breadth: ${snapshot.summary.advancers} up / ${snapshot.summary.decliners} down${snapshot.summary.meanCompositeScore !== null ? ` · mean composite ${snapshot.summary.meanCompositeScore}` : ""}`}
+                              </span>
+                            )}
+                            {snapshot?.inputRunId && (
+                              <span>{`Derived from enrich run: ${snapshot.inputRunId}`}</span>
+                            )}
+                            {job.nextScheduledRun && (
+                              <span>{`Next run: ${fmtDataProviderTime(job.nextScheduledRun)}`}</span>
+                            )}
+                            {lastRun?.codedError && (
+                              <span className="dpp-feed-error">{lastRun.codedError}</span>
+                            )}
+                          </div>
+                          {(job.analyze?.history?.length ?? 0) > 1 && (
+                            <ul className="dpp-feed-history">
+                              {job.analyze!.history.slice(1, 4).map((run) => (
+                                <li key={run.runId}>
+                                  {`${run.status} · ${fmtDataProviderTime(run.finishedAt)} · ${run.received}/${run.requested} rows`}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                          <div className="dpp-feed-actions">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              disabled={busy}
+                              onClick={() => void runAnalyzeAction(view, job, "run")}
+                            >
+                              Run
+                            </Button>
+                            {(state === "running" || state === "queued") && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                disabled={busy}
+                                onClick={() => void runAnalyzeAction(view, job, "pause")}
+                              >
+                                Pause
+                              </Button>
+                            )}
+                            {state === "paused" && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                disabled={busy}
+                                onClick={() => void runAnalyzeAction(view, job, "resume")}
+                              >
+                                Resume
+                              </Button>
+                            )}
+                            {(state === "running" || state === "queued" || state === "paused") && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                disabled={busy}
+                                onClick={() => void runAnalyzeAction(view, job, "cancel")}
+                              >
+                                Cancel
+                              </Button>
+                            )}
+                            {(state === "completed" || state === "failed" || state === "cancelled") && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                disabled={busy}
+                                onClick={() => void runAnalyzeAction(view, job, "retry")}
                               >
                                 Retry
                               </Button>

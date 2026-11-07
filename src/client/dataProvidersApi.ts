@@ -101,6 +101,8 @@ export interface DataProviderView {
   feedJobs?: FeedJobView[];
   /** #3536: this provider's enrich jobs as pipeline surface views. */
   enrichJobs?: EnrichJobView[];
+  /** #3537: this provider's analyze jobs as pipeline surface views. */
+  analyzeJobs?: AnalyzeJobView[];
   /**
    * #3530: this provider's direct feed-job status (the S1 block) —
    * null when no feed job is registered for the provider. Optional
@@ -299,6 +301,97 @@ export async function postEnrichJobAction(
 ): Promise<void> {
   await send<unknown>(
     `/api/data-providers/${encodeURIComponent(id)}/enrich-jobs/${encodeURIComponent(jobId)}/${action}`,
+    { method: "POST" }
+  );
+}
+
+/** One analyze run's record, as the status surface serves it (#3537). */
+export interface AnalyzeJobRunRecordView {
+  runId: string;
+  trigger: string;
+  startedAt: string;
+  finishedAt: string;
+  status: "completed" | "partial" | "failed";
+  requested: number;
+  received: number;
+  failed: number;
+  codedError: string | null;
+  errorMessage: string | null;
+}
+
+/** The analyzed copy's universe summary, as served (#3537). */
+export interface AnalyzeJobSummaryView {
+  symbols: number;
+  advancers: number;
+  decliners: number;
+  flat: number;
+  meanMomentum: number | null;
+  meanCompositeScore: number | null;
+  topByComposite: Array<{ symbol: string; score: number }>;
+  bottomByComposite: Array<{ symbol: string; score: number }>;
+}
+
+/** The analyzed-dataset half of an analyze job's status (#3537). */
+export interface AnalyzeJobDatasetView {
+  jobId: string;
+  enrichJobId: string;
+  feedJobId: string;
+  sourceId: string;
+  dataset: string;
+  ruleSets: string[];
+  universeLabel: string;
+  cadenceMinutes: number;
+  staleAfterMinutes: number;
+  state: "never-run" | "ready";
+  lastRun: AnalyzeJobRunRecordView | null;
+  history: AnalyzeJobRunRecordView[];
+  snapshot: {
+    artifactId: string;
+    asOf: string;
+    ageSeconds: number;
+    rowsPersisted: number;
+    stale: boolean;
+    /** Lineage: the enriched artifact + run this copy derives from. */
+    inputArtifactId: string;
+    inputRunId: string;
+    inputAsOf: string;
+    ruleSets: string[];
+    summary: AnalyzeJobSummaryView;
+  } | null;
+}
+
+/**
+ * One analyze job's merged surface status (#3537): the analyzed
+ * copy plus the job pipeline's state for the same job — the
+ * same view the copilot tools return (one source of truth).
+ */
+export interface AnalyzeJobView {
+  jobId: string;
+  enrichJobId: string;
+  feedJobId: string;
+  sourceId: string;
+  dataset: string;
+  label: string;
+  analyze: AnalyzeJobDatasetView | null;
+  pipeline: {
+    state: string;
+    currentRunId: string | null;
+    lastRunStatus: string | null;
+    lastRunAt: string | null;
+  } | null;
+  nextScheduledRun: string | null;
+}
+
+export type AnalyzeJobActionName = FeedJobActionName;
+
+/** Run / manage one analyze job through the pipeline host (#3537). */
+export async function postAnalyzeJobAction(
+  id: string,
+  jobId: string,
+  action: AnalyzeJobActionName
+): Promise<void> {
+  await send<unknown>(
+    `/api/data-providers/${encodeURIComponent(id)}/analyze-jobs/${encodeURIComponent(jobId)}/${action}`,
     { method: "POST" }
   );
 }

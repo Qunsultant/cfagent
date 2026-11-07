@@ -34,6 +34,7 @@ import {
   startPipelineJobWorkflow,
   recordPipelineCompletion,
   listPipelineCompletions,
+  pipelineAnalyzeJobIds,
   pipelineEnrichJobIds,
   pipelineJobIds,
   PIPELINE_TASK_ID_PREFIX,
@@ -131,9 +132,15 @@ describe("pipeline host wiring (#3543)", () => {
     // #3536 pin update (§7): the declaration set is the whole
     // plane — pipelineJobIds() stays the 7 feed jobs, and the
     // enrich jobs declare alongside them under the same prefix.
+    // #3537 pin update (§7): the analyze jobs join the set too.
     expect(pipelineJobIds()).toHaveLength(7);
     expect(pipelineEnrichJobIds()).toHaveLength(5);
-    const ids = [...pipelineJobIds(), ...pipelineEnrichJobIds()];
+    expect(pipelineAnalyzeJobIds()).toHaveLength(5);
+    const ids = [
+      ...pipelineJobIds(),
+      ...pipelineEnrichJobIds(),
+      ...pipelineAnalyzeJobIds(),
+    ];
     expect(Object.keys(tasks).sort()).toEqual(
       ids.map((id) => `${PIPELINE_TASK_ID_PREFIX}${id}`).sort(),
     );

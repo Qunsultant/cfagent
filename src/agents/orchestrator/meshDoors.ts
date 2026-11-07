@@ -123,6 +123,10 @@ import {
   resolveEnrichJob,
   type EnrichJobSurfaceView,
 } from "../../services/enrichPipelineJobs";
+import {
+  resolveAnalyzeJob,
+  type AnalyzeJobSurfaceView,
+} from "../../services/analyzePipelineJobs";
 
 // ---------------------------------------------------------------------------
 // Errors — honest, typed, coded (doors-and-layers §11.1)
@@ -137,6 +141,8 @@ export type MeshDoorErrorCode =
   | "feed_job_not_found"
   // Issue #3536: the enrich-job door's unknown/ambiguous job name.
   | "enrich_job_not_found"
+  // Issue #3537: the analyze-job door's unknown/ambiguous job name.
+  | "analyze_job_not_found"
   // Issue #2488: the mesh screen door's (meshScreenDoor.ts)
   // fail-closed refusal codes — budget_denied (the S5 budget
   // door refused the paid path), price_unavailable (no stored
@@ -219,6 +225,11 @@ export interface ScheduledAgentDoorStub {
   // these two are the enrich merged-status reads.
   getEnrichJobSurfaceStatus(jobId: string): Promise<EnrichJobSurfaceView>;
   listEnrichJobSurfaceStatuses(): Promise<EnrichJobSurfaceView[]>;
+  // Issue #3537 (Pipeline J4): the analyze jobs' surface on the
+  // same host — same rule: the generic pipeline RPCs above run
+  // and manage them; these two are the analyze merged-status reads.
+  getAnalyzeJobSurfaceStatus(jobId: string): Promise<AnalyzeJobSurfaceView>;
+  listAnalyzeJobSurfaceStatuses(): Promise<AnalyzeJobSurfaceView[]>;
 }
 
 export interface PaymentsAgentDoorStub {
@@ -584,6 +595,130 @@ export async function manageEnrichJobViaDoor(
     case "retry": {
       const run = await door.retryPipelineJob(entry.jobId, { userLogin: login });
       return { ...base, run, status: await door.getEnrichJobSurfaceStatus(entry.jobId) };
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// ScheduledAgent door — the job pipeline's analyze jobs (#3537)
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve a caller's analyze-job name ("yahoo analyze",
+ * "analyze alpaca", "sp100 analyze", an exact job id) to its
+ * catalog entry. An ambiguous or unknown name is an honest
+ * analyze_job_not_found error — the door never guesses a job.
+ */
+function resolveAnalyzeJobOrThrow(source: string) {
+  const entry = resolveAnalyzeJob(source);
+  if (!entry) {
+    throw new MeshDoorError(
+      "analyze_job_not_found",
+      `No analyze job matches "${source}". Name a source with its universe ("yahoo nasdaq100 analyze", "sp100 analyze", "analyze alpaca", "analyze etrade", "analyze public") or an exact analyze job id.`,
+    );
+  }
+  return entry;
+}
+
+export interface AnalyzeJobRunDoorResult {
+  jobId: string;
+  label: string;
+  runId: string;
+  state: string;
+  error?: string;
+  status: AnalyzeJobSurfaceView;
+}
+
+/**
+ * Run one analyze job now through the pipeline host's control
+ * plane (the same generic runPipelineJob RPC every job on the
+ * plane dispatches through) and report its settled outcome +
+ * the merged status view (the same view the UX renders).
+ */
+export async function runAnalyzeJobViaDoor(
+  env: Env,
+  actingLogin: string | undefined | null,
+  source: string,
+): Promise<AnalyzeJobRunDoorResult> {
+  const login = requireActingLogin(actingLogin);
+  const entry = resolveAnalyzeJobOrThrow(source);
+  const door = getScheduledAgentDoor(env);
+  const run = await door.runPipelineJob(entry.jobId, { userLogin: login });
+  const status = await door.getAnalyzeJobSurfaceStatus(entry.jobId);
+  return {
+    jobId: entry.jobId,
+    label: entry.label,
+    runId: run.runId,
+    state: run.state,
+    ...(run.error ? { error: run.error } : {}),
+    status,
+  };
+}
+
+/** One analyze job's merged status (analyzed copy + pipeline state). */
+export async function getAnalyzeJobStatusViaDoor(
+  env: Env,
+  actingLogin: string | undefined | null,
+  source: string,
+): Promise<AnalyzeJobSurfaceView> {
+  requireActingLogin(actingLogin);
+  const entry = resolveAnalyzeJobOrThrow(source);
+  const door = getScheduledAgentDoor(env);
+  return door.getAnalyzeJobSurfaceStatus(entry.jobId);
+}
+
+/** Every analyze job's merged status, in catalog order. */
+export async function listAnalyzeJobsViaDoor(
+  env: Env,
+  actingLogin: string | undefined | null,
+): Promise<{ jobs: AnalyzeJobSurfaceView[] }> {
+  requireActingLogin(actingLogin);
+  const door = getScheduledAgentDoor(env);
+  return { jobs: await door.listAnalyzeJobSurfaceStatuses() };
+}
+
+export type AnalyzeJobManagementAction = "pause" | "resume" | "cancel" | "retry";
+
+export interface AnalyzeJobManageDoorResult {
+  jobId: string;
+  label: string;
+  action: AnalyzeJobManagementAction;
+  instance?: JobInstanceRecord;
+  run?: { runId: string; state: string; error?: string };
+  status: AnalyzeJobSurfaceView;
+}
+
+/**
+ * Apply one management operation to an analyze job through the
+ * same control plane (the enrich door's manage, transposed).
+ * The control plane's own refusals propagate unchanged.
+ */
+export async function manageAnalyzeJobViaDoor(
+  env: Env,
+  actingLogin: string | undefined | null,
+  source: string,
+  action: AnalyzeJobManagementAction,
+): Promise<AnalyzeJobManageDoorResult> {
+  const login = requireActingLogin(actingLogin);
+  const entry = resolveAnalyzeJobOrThrow(source);
+  const door = getScheduledAgentDoor(env);
+  const base = { jobId: entry.jobId, label: entry.label, action };
+  switch (action) {
+    case "pause": {
+      const instance = await door.pausePipelineJob(entry.jobId);
+      return { ...base, instance, status: await door.getAnalyzeJobSurfaceStatus(entry.jobId) };
+    }
+    case "cancel": {
+      const instance = await door.cancelPipelineJob(entry.jobId);
+      return { ...base, instance, status: await door.getAnalyzeJobSurfaceStatus(entry.jobId) };
+    }
+    case "resume": {
+      const run = await door.resumePipelineJob(entry.jobId, { userLogin: login });
+      return { ...base, run, status: await door.getAnalyzeJobSurfaceStatus(entry.jobId) };
+    }
+    case "retry": {
+      const run = await door.retryPipelineJob(entry.jobId, { userLogin: login });
+      return { ...base, run, status: await door.getAnalyzeJobSurfaceStatus(entry.jobId) };
     }
   }
 }

@@ -1862,6 +1862,39 @@ export const MIGRATION_0051_JOB_ENRICHED_DATASETS: DataMigration = {
 };
 
 /**
+/**
+ * Migration 0052 — analyzed datasets (#3537, Pipeline J4).
+ *
+ * The analyze stage's persisted output: one row per analyze
+ * run, keyed by analyze job id, the full artifact in
+ * artifact_json (the feed/enriched families' pattern) with
+ * status and row count denormalized for the latestUsable
+ * filter. Declared in the foundation's Drizzle schema
+ * (jobAnalyzedDatasets) — the same shape in every residency
+ * (the DO residency's declared v1 schema migration carries
+ * the identical DDL).
+ */
+export const MIGRATION_0052_JOB_ANALYZED_DATASETS: DataMigration = {
+  version: 52,
+  name: "0052_job_analyzed_datasets",
+  sql: `CREATE TABLE IF NOT EXISTS job_analyzed_datasets (
+      id TEXT PRIMARY KEY,
+      created_at TEXT NOT NULL,
+      job_id TEXT NOT NULL,
+      enrich_job_id TEXT NOT NULL,
+      source_id TEXT NOT NULL,
+      dataset TEXT NOT NULL,
+      run_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      as_of TEXT NOT NULL,
+      rows_persisted INTEGER NOT NULL,
+      artifact_json TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_job_analyzed_datasets_job
+      ON job_analyzed_datasets (job_id, created_at DESC, id DESC)`,
+};
+
+/**
  * Migration 0054 — approved-free per-service quota (#3263, sub-issue
  * of #3256; ownership COO-spr9).
  *
@@ -1928,7 +1961,6 @@ export const MIGRATION_0055_APPROVED_FREE_QUOTA_SEED: DataMigration = {
   ('strategy', 10, 0, NULL);
 INSERT OR IGNORE INTO agent_approved_free_quota_settings (id, window_kind, at_limit_action, updated_at_ms, updated_by) VALUES
   ('default', 'month', 'upgrade_or_buy_credits', 0, NULL);`,};
-
 export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANCE,
   MIGRATION_0002_AGENT_CHAINS_SCHEDULES,
   MIGRATION_0003_AGENT_SHARD_JOBS,
@@ -1980,6 +2012,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0049_PLAN_PRICE_APPROVAL,
   MIGRATION_0050_USER_PROFILES,
   MIGRATION_0051_JOB_ENRICHED_DATASETS,
+  MIGRATION_0052_JOB_ANALYZED_DATASETS,
   MIGRATION_0054_APPROVED_FREE_QUOTA,
   MIGRATION_0055_APPROVED_FREE_QUOTA_SEED,
 ];
