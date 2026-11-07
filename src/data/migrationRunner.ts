@@ -15,6 +15,12 @@
  *  - The `_migrations` row is written LAST for each migration, so
  *    the row is the commit marker: no row means "not applied",
  *    regardless of how many statements already landed.
+ *  - Concurrent ensures can both observe a version as unrecorded
+ *    before either writes that marker. The marker's PRIMARY KEY is
+ *    the race arbiter: the caller whose insert loses re-reads the
+ *    row, and only a row matching the migration's version and name
+ *    reads as already applied by the winner; every other outcome
+ *    (no row, or a row under a different name) still fails.
  *  - Deliberately NOT wrapped in a multi-statement transaction:
  *    drizzle-orm/d1 implements `db.transaction()` as sequential
  *    BEGIN/COMMIT statements, which is not Postgres-equivalent
@@ -2024,6 +2030,30 @@ function splitStatements(sqlText: string): string[] {
     .filter((s) => s.length > 0);
 }
 
+interface MigrationMarkerRow {
+  version: number;
+  name: string;
+}
+
+function migrationMarkerMismatchError(
+  migration: DataMigration,
+  recordedName: string,
+): Error {
+  return new Error(
+    `Migration ${migration.version} is recorded in _migrations with a different name ("${recordedName}") than expected ("${migration.name}").`,
+  );
+}
+
+async function readMigrationMarker(
+  db: MigrationDb,
+  migration: DataMigration,
+): Promise<MigrationMarkerRow | undefined> {
+  const rows = await db.all<MigrationMarkerRow>(sql`
+    SELECT version, name FROM _migrations WHERE version = ${migration.version}
+  `);
+  return rows[0];
+}
+
 /** Apply every unapplied migration in version order. Idempotent. */
 export async function applyMigrations(
   db: MigrationDb,
@@ -2039,18 +2069,41 @@ export async function applyMigrations(
   `);
   const applied: number[] = [];
   for (const migration of [...migrations].sort((a, b) => a.version - b.version)) {
-    const existing = await db.all<{ version: number }>(sql`
-      SELECT version FROM _migrations WHERE version = ${migration.version}
-    `);
-    if (existing.length > 0) continue;
+    const existing = await readMigrationMarker(db, migration);
+    if (existing) {
+      if (existing.name !== migration.name) {
+        throw migrationMarkerMismatchError(migration, existing.name);
+      }
+      continue;
+    }
     for (const statement of splitStatements(migration.sql)) {
       await db.run(sql.raw(statement));
     }
     // Commit marker LAST (see header): no row means not applied.
-    await db.run(sql`
-      INSERT INTO _migrations (version, name, applied_at_ms)
-      VALUES (${migration.version}, ${migration.name}, ${nowMs})
-    `);
+    let markerError: unknown;
+    let markerInserted = true;
+    try {
+      await db.run(sql`
+        INSERT INTO _migrations (version, name, applied_at_ms)
+        VALUES (${migration.version}, ${migration.name}, ${nowMs})
+      `);
+    } catch (err) {
+      markerInserted = false;
+      markerError = err;
+    }
+    if (!markerInserted) {
+      // A concurrent ensure may have won the PRIMARY KEY race after
+      // this caller's initial read. Verify the winning row before
+      // treating that loss as "already applied": no row means this
+      // insert failed for another reason, and a row under another
+      // name is bookkeeping drift, not this migration.
+      const recorded = await readMigrationMarker(db, migration);
+      if (!recorded) throw markerError;
+      if (recorded.name !== migration.name) {
+        throw migrationMarkerMismatchError(migration, recorded.name);
+      }
+      continue;
+    }
     applied.push(migration.version);
   }
   return applied;
