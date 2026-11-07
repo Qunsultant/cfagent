@@ -114,6 +114,16 @@ export interface OpenaimpMcpHandlerContext {
    * the source of the queue-time trace hop recorded below.
    */
   traceparent?: () => string | undefined;
+  /**
+   * #3635: optional DO SQL storage handle, spread into the tool
+   * context on the sync path by executeMCPTool (see
+   * McpToolContext.storage, #1686). The route shell supplies the
+   * owning instance's storage (ctx.getStorage); unset → tools that
+   * need instance SQL fail loud with door_unavailable, exactly as
+   * before — this field only lets the surface carry what the
+   * instance already has, never a fallback store.
+   */
+  storage?: import("../../trading").NasdaqUniverseRouteBundleInput["storage"];
   permissionPort?: ToolPermissionPort;
   permissionDecisionSink?: ObservabilitySink;
   /** #1722: NLQ_MODE session/user carriers, forwarded to tool execution. */

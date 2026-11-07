@@ -163,6 +163,82 @@ describe("handleMcpChatNlqRoutes behavior", () => {
     expect(body.error.code).toBe(-32601);
   });
 
+  it("POST /mcp stock_copilot_status refuses door_unavailable when the route context carries no storage (#3635)", async () => {
+    const ctx = baseCtx({
+      env: { STOCK_COPILOT_PAPER_ENABLED: "1" } as any,
+    });
+    const url = new URL("https://agent.internal/mcp");
+    const res = await handleMcpChatNlqRoutes(
+      req(
+        "POST",
+        "/mcp",
+        {
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: { name: "stock_copilot_status", arguments: {} },
+        },
+        { "x-user-login": "alice" },
+      ),
+      url,
+      "/mcp",
+      "sess",
+      ctx,
+    );
+    expect(res).not.toBeNull();
+    const body = (await res!.json()) as any;
+    expect(String(body.error?.message ?? "")).toMatch(/cannot access SQLite/);
+  });
+
+  it("POST /mcp stock_copilot_status returns live status when the route context supplies storage (#3635)", async () => {
+    const mockSql = {
+      exec: vi.fn().mockImplementation((query: string) => {
+        const q = query.trim().toUpperCase();
+        if (q.startsWith("SELECT") && q.includes("COPILOT_POSITIONS")) return [];
+        if (q.startsWith("SELECT") && q.includes("STOCK_COPILOT_ACTIVITY")) return [];
+        if (q.startsWith("SELECT") && q.includes("STOCK_COPILOT_CONTROL")) return [];
+        return [];
+      }),
+    };
+    const submitAsyncJob = vi.fn(async () => ({
+      jobId: "j1",
+      status: "queued" as const,
+      statusUrl: "/jobs/j1",
+    }));
+    const ctx = baseCtx({
+      env: { STOCK_COPILOT_PAPER_ENABLED: "1", HTTP_DELIVERY_MODE: "queued" } as any,
+      getStorage: () => ({ sql: mockSql }),
+      submitAsyncJob,
+    });
+    const url = new URL("https://agent.internal/mcp");
+    const res = await handleMcpChatNlqRoutes(
+      req(
+        "POST",
+        "/mcp",
+        {
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: { name: "stock_copilot_status", arguments: {} },
+        },
+        { "x-user-login": "alice" },
+      ),
+      url,
+      "/mcp",
+      "sess",
+      ctx,
+    );
+    expect(res).not.toBeNull();
+    expect(res!.status).toBe(200);
+    // Synchronous despite HTTP_DELIVERY_MODE=queued: stock_copilot_*
+    // are in SYNCHRONOUS_MCP_TOOLS and must never be queued.
+    expect(submitAsyncJob).not.toHaveBeenCalled();
+    const body = (await res!.json()) as any;
+    expect(body.error).toBeUndefined();
+    expect(body.result).toBeDefined();
+    expect(body.result.content).toBeDefined();
+  });
+
   it("POST /api/chat 400s without a final user message", async () => {
     const ctx = baseCtx();
     const url = new URL("https://agent.internal/api/chat");
