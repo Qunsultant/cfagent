@@ -213,7 +213,9 @@ import type { D1TopUpAdapter } from "../../data/d1TopUpAdapter";
 import {
   assertTopUpAmountUSD,
   assertTopUpRail,
+  TopUpClaimRefusedError,
 } from "../../data/topUpPorts";
+import { logAspectEvent } from "../../aspects/loggingAspect";
 import {
   createChannelDraftAdapter,
   ensureChannelSchema,
@@ -2382,6 +2384,29 @@ export async function handleAgenticPaymentsRoutes(
           throw new BusinessError("FAILURE_TOP_UP_NOT_PAID");
         }
       }
+      // Verified: claim the draft for crediting BEFORE the credit lands
+      // (#3572). The claim is a single conditional transition
+      // (minted → crediting), so exactly one confirmer can own the
+      // credit: a retry or concurrent confirm sees a non-minted draft
+      // and refuses 409 instead of crediting again. A claim refusal
+      // here means another confirmer already claimed it (the status
+      // check above passed before the race) — map it to the replay
+      // outcome, never to a store failure.
+      try {
+        await drafts.claimForCredit(draft.id);
+      } catch (err: any) {
+        if (err instanceof TopUpClaimRefusedError) {
+          throw new BusinessError("FAILURE_TOP_UP_REPLAY");
+        }
+        throw err;
+      }
+      ctx.audit("commercial.top_up.claimed", "payments", {
+        userId: login,
+        tenantId: draft.tenantId,
+        topUpRequestId: draft.id,
+        amountUSD: draft.amountUSD,
+        rail: draft.rail,
+      });
       // Verified: ensure the account row exists (created on verified payment when
       // missing), then credit exactly the draft amount — never the evidence amount,
       // never a client-supplied amount.
@@ -2389,7 +2414,38 @@ export async function handleAgenticPaymentsRoutes(
       if (!account) {
         account = await store.upsertAccount({ userId: login, tenantId: draft.tenantId, tier: "Free" });
       }
-      const credited = await store.adjustCredits(login, draft.amountUSD);
+      let credited;
+      try {
+        credited = await store.adjustCredits(login, draft.amountUSD);
+      } catch (err: any) {
+        // The credit never landed, so release the claim and let a retry
+        // proceed. If the release itself fails the draft stays
+        // `crediting` with no credit landed: a loud catalog-coded 500
+        // with the draft id, so an operator can reconcile (the stuck
+        // claim is visible via the claim audit + the 409s, never
+        // silent). That path needs two consecutive store failures.
+        try {
+          await drafts.releaseClaim(draft.id);
+        } catch (releaseErr: any) {
+          ctx.audit("commercial.top_up.claim_stuck", "payments", {
+            userId: login,
+            tenantId: draft.tenantId,
+            topUpRequestId: draft.id,
+            amountUSD: draft.amountUSD,
+            rail: draft.rail,
+          });
+          logAspectEvent({
+            aspect: "TopUp",
+            operationName: "top-up.confirm.claim-release",
+            code: "FAILURE_TOP_UP_RECONCILE_REQUIRED",
+            level: "error",
+            message: "top-up claim release failed after credit failure; draft stuck crediting",
+            metadata: { userLogin: login, topUpRequestId: draft.id },
+          });
+          throw new BusinessError("FAILURE_TOP_UP_RECONCILE_REQUIRED");
+        }
+        throw err;
+      }
       let marked;
       try {
         marked = await drafts.markCredited(draft.id, {
@@ -2400,10 +2456,12 @@ export async function handleAgenticPaymentsRoutes(
       } catch (err: any) {
         // The credit landed but the draft could not be marked: a loud
         // 500 with the draft id, so an operator can reconcile from the
-        // Stripe evidence. A retry confirm sees the credited... no —
-        // the draft is still minted, so a retry re-verifies and would
-        // credit again; the operator reconcile path is the guard (see
-        // the #3262 PR known limitations). Never silently swallow this.
+        // Stripe evidence. The draft is `crediting` (claimed above), so
+        // a retry refuses 409 and cannot credit again — no double
+        // credit, but the draft never reaches `credited` and no
+        // `commercial.top_up.credited` audit fires for it; the operator
+        // reconciles from the claim audit + Stripe evidence. Never
+        // silently swallow this.
         return Response.json({ error: `Top-up credited but the draft could not be marked: ${draft.id}.` }, { status: 500 });
       }
       void marked;

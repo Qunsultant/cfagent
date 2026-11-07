@@ -1,0 +1,3 @@
+### Fixed
+
+- Top-up confirm (#3572): claim-before-credit — the confirm route now claims a minted draft (`minted` → `crediting`) after verified payment and before the credit lands, so a retry or concurrent confirm refuses 409 (`FAILURE_TOP_UP_REPLAY`) instead of crediting again; a credit failure releases the claim so a retry can proceed, and a release failure surfaces a loud catalog-coded 500 (`FAILURE_TOP_UP_RECONCILE_REQUIRED`) for operator reconcile. No exactly-once claim is made: a crash between the credit landing and the mark still leaves the draft `crediting` with the credit landed, visible via the claim audit and the 409s, never silent.

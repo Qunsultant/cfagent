@@ -72,8 +72,9 @@ const draft = (over: Partial<TopUpDraft> = {}): TopUpDraft => ({
 });
 
 describe("top-up draft validators", () => {
-  it("accepts minted/credited and card/x402; rejects anything else", () => {
+  it("accepts minted/crediting/credited and card/x402; rejects anything else", () => {
     expect(assertTopUpDraftStatus("minted")).toBe("minted");
+    expect(assertTopUpDraftStatus("crediting")).toBe("crediting");
     expect(assertTopUpDraftStatus("credited")).toBe("credited");
     expect(() => assertTopUpDraftStatus("fulfilled")).toThrow(/minted.*credited|status/);
     expect(() => assertTopUpDraftStatus("")).toThrow();
@@ -98,12 +99,23 @@ describe.each([
     },
   },
 ])("top-up draft store contract — $name", ({ make }) => {
-  it("creates, reads, credits once, and lists by user", async () => {
+  it("creates, reads, claims, credits once, and lists by user", async () => {
     const store = await make();
     expect(await store.getDraft("topup-missing")).toBeNull();
     const created = await store.createDraft(draft());
     expect(created.status).toBe("minted");
     expect((await store.getDraft("topup-draft-1"))?.amountUSD).toBe(25);
+    // Claim-before-credit (#3572): a draft must be claimed before it can be
+    // marked credited — marking a merely minted draft refuses.
+    await expect(
+      store.markCredited("topup-draft-1", {
+        creditedAtMs: 2_000,
+        paymentIntentId: "pi_test_1",
+        checkoutSessionId: "cs_test_1",
+      }),
+    ).rejects.toThrow(/not crediting/);
+    const claimed = await store.claimForCredit("topup-draft-1");
+    expect(claimed.status).toBe("crediting");
     const credited = await store.markCredited("topup-draft-1", {
       creditedAtMs: 2_000,
       paymentIntentId: "pi_test_1",
@@ -130,5 +142,29 @@ describe.each([
     await store.createDraft(draft({ id: "topup-draft-2", userLogin: "u2", amountUSD: 10, rail: "x402" }));
     expect((await store.listByUser("u1")).map((d) => d.id)).toEqual(["topup-draft-1"]);
     expect((await store.listByUser("u2")).map((d) => d.id)).toEqual(["topup-draft-2"]);
+  });
+
+  it("claim-before-credit (#3572): a claim is exclusive, releasable, and refuses a second claim", async () => {
+    const store = await make();
+    await store.createDraft(draft());
+    // First claim wins; the draft is crediting and a second claim refuses.
+    expect((await store.claimForCredit("topup-draft-1")).status).toBe("crediting");
+    await expect(store.claimForCredit("topup-draft-1")).rejects.toThrow(/not minted/);
+    await expect(store.claimForCredit("topup-missing")).rejects.toThrow(/Unknown top-up draft/);
+    // Release returns the draft to minted, so a retry can claim and proceed.
+    expect((await store.releaseClaim("topup-draft-1")).status).toBe("minted");
+    expect((await store.claimForCredit("topup-draft-1")).status).toBe("crediting");
+    // Releasing a draft that is not crediting refuses.
+    await store.releaseClaim("topup-draft-1");
+    await expect(store.releaseClaim("topup-draft-1")).rejects.toThrow(/not crediting/);
+    // A credited draft can neither be claimed nor released.
+    await store.claimForCredit("topup-draft-1");
+    await store.markCredited("topup-draft-1", {
+      creditedAtMs: 2_000,
+      paymentIntentId: "pi_test_1",
+      checkoutSessionId: "cs_test_1",
+    });
+    await expect(store.claimForCredit("topup-draft-1")).rejects.toThrow(/not minted/);
+    await expect(store.releaseClaim("topup-draft-1")).rejects.toThrow(/not crediting/);
   });
 });
