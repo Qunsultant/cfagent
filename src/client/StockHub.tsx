@@ -7,8 +7,10 @@ import { apiFetch as fetch } from "./apiFetch";
 import {
   getScreeningProviders,
   providerSupportsFilter,
+  resolveInitialScreeningProviderId,
   type ScreeningAssetClass,
 } from "./screeningAdapters";
+import { readTenantProvidersState } from "./tenantProviders";
 import {
   buildPaidScreenBody,
   isMonetizationWorkflowError,
@@ -235,7 +237,12 @@ export function StockHub({
   // Stock Hub serves stocks only; every tab here screens stocks.
   const assetClass: ScreeningAssetClass = "stocks";
   const providers = useMemo(() => getScreeningProviders(assetClass), [assetClass]);
-  const [providerId, setProviderId] = useState("etrade");
+  // Issue #3525 S3: the initial selection follows the tenant's configured
+  // data provider (registry id -> hub variant) rather than assuming one
+  // brand; the correction effect below still repairs an invalid selection.
+  const [providerId, setProviderId] = useState(() =>
+    resolveInitialScreeningProviderId(readTenantProvidersState().dataProviderId, providers),
+  );
   const [symbolSearch, setSymbolSearch] = useState("");
   const [stockLimit, setStockLimit] = useState("100");
   const [exchange, setExchange] = useState("ALL");
