@@ -125,8 +125,10 @@ describe("issue #2581 — run_options_strategy_screen catalog registration", () 
   it("is registered in the factory with the mcp:write scope", () => {
     expect(McpToolFactory.getTool("run_options_strategy_screen")).toBeDefined();
     expect(MCP_TOOL_SCOPES.run_options_strategy_screen).toBe("mcp:write");
-    // 83 through #2581; 84 since #2731 (web_search); 85 since #2760 (web_fetch); 88 since #3588 (stock_copilot_introspect).
-    expect(McpToolFactory.getAllTools()).toHaveLength(90);
+    // 83 through #2581; 84 since #2731 (web_search); 85 since #2760 (web_fetch);
+    // 87 since #3513; 88 since #3588 (stock_copilot_introspect); 90 since #3514
+    // (stock_copilot_learnings, stock_copilot_evaluate); 94 since #3535 (+4 feed-job tools).
+    expect(McpToolFactory.getAllTools()).toHaveLength(94);
   });
 
   it("the prompt steers options strategy screens at the discovered tool", () => {

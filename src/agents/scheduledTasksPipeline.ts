@@ -1,0 +1,429 @@
+/**
+ * Issue #3543 (Pipeline J1 host wiring, consumed by J2 #3535) —
+ * the job pipeline's host wiring on the ScheduledAgent, in the
+ * scheduledTasksCopilot.ts pattern transposed: this module owns
+ * the declaration, the control-plane construction, and the
+ * dispatch; the class owns storage.
+ *
+ * Host decision (recorded on #3543): the ScheduledAgent manages
+ * and controls the pipeline; the OrchestratorAgent's doors are
+ * invoking surfaces over the same control plane. Concretely:
+ *
+ * - The control plane is built over this agent's DO SQLite (the
+ *   pipeline stores' DO residency), its run records go through
+ *   the platform JobRunRecordStore (the DO adapter of the same
+ *   port the workflow residency serves from D1), and its status
+ *   publication rides the JOB_PIPELINE_EVENTS queue substrate.
+ * - getScheduledTasks() declarations are built from the control
+ *   plane's registerSchedules output over a recording
+ *   JobScheduleHost: each registered (job, node) becomes one
+ *   Think scheduled task whose handler dispatches
+ *   runJob(jobId, { trigger: "scheduled", scopePath }) — the
+ *   same dispatch the UX and copilot doors make (#3514).
+ * - The workflow start path dispatches a run as a
+ *   JobPipelineWorkflow instance (ids-only payload — the claim-
+ *   check discipline): the definition is mirrored into the
+ *   workflow residency through the control plane's own defineJob
+ *   first, because a workflow has no host DO to read it from.
+ *
+ * Identity: a scheduled firing threads the platform's named
+ * service login (SERVICE_USER_LOGIN, #1185) into the per-login
+ * provider wiring when configured; with none configured, the
+ * per-login providers (E*TRADE, Public) refuse by name on their
+ * jobs while the env-credentialed sources (Yahoo, Alpaca) fire
+ * unattended. A copilot/UX dispatch threads the acting user's
+ * login the same way. No identity is ever fabricated.
+ */
+import type { AgentContext } from "agents";
+import type { SqlStorage } from "../orm";
+import type {
+  ThinkScheduledTasks,
+  ThinkScheduledTaskContext,
+} from "../actors/thinkAdapter";
+import type { Env } from "../types";
+import { getServiceUserLogin } from "../security/serviceIdentity";
+import { createJobPipelineStoresFromSql } from "../data/createJobPipelinePorts";
+import { createJobPipelineStoresFromD1 } from "../data/createJobPipelinePorts";
+import { SqlJobRunRecordStore } from "../data/doSqliteJobRunRecordAdapter";
+import {
+  createD1JobRunRecordDb,
+  D1JobRunRecordStore,
+} from "../data/d1JobRunRecordAdapter";
+import { createProviderCaptureAdapter } from "../data/createProviderCapturePorts";
+import type { CaptureBlobStorage } from "../data/providerCapturePorts";
+import { createFeedDatasetAdapter } from "../data/createFeedDatasetPorts";
+import { D1IndexListStore } from "../data/d1IndexListAdapter";
+import { createJobPipelineMessaging } from "../messaging/createJobPipelineMessaging";
+import {
+  JobPipelineControl,
+  jobRunRecorderFromStore,
+  type JobDispatchResult,
+  type JobScheduleHost,
+  type JobStatusView,
+} from "../services/jobPipelineEngine";
+import { buildFeedJobRegistry } from "../services/feedJobs";
+import {
+  createFeedStepRegistry,
+  ensureFeedPipelineJobs,
+  FEED_PIPELINE_CATALOG,
+  type FeedStepDeps,
+} from "../services/feedPipelineJobs";
+import { createCaptureWiredFeedProvider } from "../services/feedProviderWiring";
+import {
+  createIndexMembershipService,
+  createWikipediaIndexMembershipAdapter,
+} from "../trading";
+import type { JobInstanceRecord } from "../data/jobPipelinePorts";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Module logger on the S2 structured-logging seam (#3515 S3 ratchet). */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/scheduledTasksPipeline",
+});
+
+/** The Think task-id prefix for pipeline schedule declarations. */
+export const PIPELINE_TASK_ID_PREFIX = "pipeline-job:";
+
+/** Ports the pipeline declaration receives from the class. */
+export interface ScheduledTasksPipelineContext {
+  env: Env;
+  agentCtx: AgentContext;
+  /** Composition seam (tests): a prebuilt control plane. */
+  control?: JobPipelineControl;
+  /** Composition seam (tests): the workflow starter. */
+  startWorkflow?: (
+    jobId: string,
+    opts: { trigger: "manual" | "scheduled"; scopePath?: string },
+  ) => Promise<{ instanceId: string }>;
+}
+
+function pipelineSql(ctx: ScheduledTasksPipelineContext): SqlStorage {
+  const sql = (
+    ctx.agentCtx?.storage as unknown as { sql?: SqlStorage } | undefined
+  )?.sql;
+  if (!sql) {
+    throw new Error(
+      "job_pipeline_host_unavailable: the ScheduledAgent host has no DO SQLite storage to build the pipeline stores over.",
+    );
+  }
+  return sql;
+}
+
+function envStrings(env: Env): Record<string, string | undefined> {
+  const out: Record<string, string | undefined> = {};
+  for (const [key, value] of Object.entries(env as unknown as Record<string, unknown>)) {
+    if (typeof value === "string") out[key] = value;
+  }
+  return out;
+}
+
+/** The feed-step wiring for this host residency (DO storage + D1 dataset/index stores). */
+export function feedStepDepsForScheduledAgent(
+  ctx: ScheduledTasksPipelineContext,
+  userLogin?: string,
+): FeedStepDeps {
+  const sql = pipelineSql(ctx);
+  const capturePort = createProviderCaptureAdapter(ctx.env);
+  const universeStore = ctx.env.AGENT_DB
+    ? new D1IndexListStore(
+        ctx.env.AGENT_DB as ConstructorParameters<typeof D1IndexListStore>[0],
+      )
+    : null;
+  const fetchHtml = async (url: string): Promise<string> => {
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(`Wikipedia fetch failed for ${url}: HTTP ${res.status}`);
+    }
+    return res.text();
+  };
+  return {
+    registry: buildFeedJobRegistry(envStrings(ctx.env)),
+    providerFor: (def) =>
+      createCaptureWiredFeedProvider(def, {
+        env: ctx.env,
+        sql,
+        blobStorage: ctx.agentCtx.storage as unknown as CaptureBlobStorage,
+        capturePort,
+        ...(userLogin ? { userLogin } : {}),
+      }),
+    universeStore,
+    datasetStore: createFeedDatasetAdapter(ctx.env),
+    indexRefresh: universeStore
+      ? {
+          store: universeStore,
+          service: createIndexMembershipService({
+            wikipedia: createWikipediaIndexMembershipAdapter(fetchHtml),
+            holdings: {
+              getMembers: async () => {
+                throw new Error(
+                  "holdings fetcher not bound — the Wikipedia refresh path never calls it",
+                );
+              },
+            },
+          }),
+        }
+      : null,
+    shardsFor: async (jobId) => {
+      const stores = createJobPipelineStoresFromSql(sql);
+      return (
+        (await stores.definitions.getDefinition(jobId))?.config.processing
+          .shards ?? []
+      );
+    },
+    ...(userLogin ? { userLogin } : {}),
+  };
+}
+
+/**
+ * Build the pipeline control plane over this host. The acting
+ * login (when a dispatch carries one) threads into the per-login
+ * provider wiring; scheduled firings pass the service login.
+ */
+export function createScheduledAgentPipelineControl(
+  ctx: ScheduledTasksPipelineContext,
+  userLogin?: string,
+): JobPipelineControl {
+  if (ctx.control) return ctx.control;
+  const sql = pipelineSql(ctx);
+  const stores = createJobPipelineStoresFromSql(sql);
+  const messaging = createJobPipelineMessaging(ctx.env);
+  return new JobPipelineControl({
+    stores,
+    runRecorder: jobRunRecorderFromStore(new SqlJobRunRecordStore(sql)),
+    publisher: messaging.ports?.publisher ?? null,
+    steps: createFeedStepRegistry(feedStepDepsForScheduledAgent(ctx, userLogin)),
+    invocation: "sync",
+  });
+}
+
+/** Ensure the feed job definitions exist on this host's control plane. */
+export async function ensureScheduledAgentFeedJobs(
+  ctx: ScheduledTasksPipelineContext,
+  control: JobPipelineControl,
+): Promise<string[]> {
+  const stores = createJobPipelineStoresFromSql(pipelineSql(ctx));
+  return ensureFeedPipelineJobs(control, stores, envStrings(ctx.env));
+}
+
+/**
+ * One scheduled firing: the same dispatch the doors make. The
+ * firing is best-effort at the declaration boundary (a throw
+ * would invite a scheduler retry double-fire); the run's own
+ * record is the failure's durable surface.
+ */
+export async function dispatchScheduledPipelineJob(
+  ctx: ScheduledTasksPipelineContext,
+  jobId: string,
+  scopePath: string,
+): Promise<JobDispatchResult | null> {
+  const serviceLogin = getServiceUserLogin(ctx.env) ?? undefined;
+  const control = createScheduledAgentPipelineControl(ctx, serviceLogin);
+  await ensureScheduledAgentFeedJobs(ctx, control);
+  const dispatch = await control.runJob(jobId, {
+    trigger: "scheduled",
+    ...(scopePath ? { scopePath } : {}),
+  });
+  // Async delivery is the feed jobs' default: the run proceeds on
+  // the host's behalf; settle it in the background of the firing
+  // so its records/events complete with the agent's lifetime.
+  if (dispatch.completion) {
+    void dispatch.completion.catch(() => undefined);
+  }
+  return dispatch;
+}
+
+/**
+ * The workflow start path: dispatch a run as a JobPipelineWorkflow
+ * instance. The payload is ids + trigger only (claim-check); the
+ * job's definition is mirrored into the workflow (D1) residency
+ * through defineJob first — configuration moves through the
+ * control plane's own operation, never through the payload.
+ * Refuses by name when the workflow binding is not configured.
+ */
+export async function startPipelineJobWorkflow(
+  ctx: ScheduledTasksPipelineContext,
+  jobId: string,
+  opts: { trigger?: "manual" | "scheduled"; scopePath?: string } = {},
+): Promise<{ instanceId: string }> {
+  if (ctx.startWorkflow) {
+    return ctx.startWorkflow(jobId, {
+      trigger: opts.trigger ?? "manual",
+      ...(opts.scopePath ? { scopePath: opts.scopePath } : {}),
+    });
+  }
+  const workflow = ctx.env.JOB_PIPELINE_WORKFLOW;
+  if (!workflow || typeof workflow.create !== "function") {
+    throw new Error(
+      "job_pipeline_workflow_not_configured: the JOB_PIPELINE_WORKFLOW binding is not configured in this deployment; the run was not dispatched.",
+    );
+  }
+  if (!ctx.env.AGENT_DB) {
+    throw new Error(
+      "job_pipeline_workflow_not_configured: the AGENT_DB binding the workflow residency reads is not configured in this deployment.",
+    );
+  }
+  // Mirror the definition into the workflow residency.
+  const hostControl = createScheduledAgentPipelineControl(ctx);
+  await ensureScheduledAgentFeedJobs(ctx, hostControl);
+  const hostStores = createJobPipelineStoresFromSql(pipelineSql(ctx));
+  const definition = await hostStores.definitions.getDefinition(jobId);
+  if (!definition) {
+    throw new Error(
+      `job_not_found: no pipeline job "${jobId}" is defined on the ScheduledAgent host; nothing was dispatched to the workflow.`,
+    );
+  }
+  const d1Stores = createJobPipelineStoresFromD1(ctx.env.AGENT_DB);
+  const d1Runs = new D1JobRunRecordStore(createD1JobRunRecordDb(ctx.env.AGENT_DB));
+  const messaging = createJobPipelineMessaging(ctx.env);
+  const workflowControl = new JobPipelineControl({
+    stores: d1Stores,
+    // The D1 run-record adapter is async; wrap it in the async
+    // recorder seam directly (the workflow adapter's own shape).
+    runRecorder: {
+      recordRun: (record) => d1Runs.record(record),
+      listRuns: (jobId, limit) => d1Runs.listByJob(jobId, limit),
+      latestRun: (jobId) => d1Runs.latestByJob(jobId),
+    },
+    publisher: messaging.ports?.publisher ?? null,
+    steps: createFeedStepRegistry(feedStepDepsForScheduledAgent(ctx)),
+    invocation: "workflow-shard",
+  });
+  const existing = await d1Stores.definitions.getDefinition(jobId);
+  if (
+    !existing ||
+    JSON.stringify(existing.rawConfig) !== JSON.stringify(definition.rawConfig)
+  ) {
+    await workflowControl.defineJob(definition.rawConfig);
+  }
+  const created = await workflow.create({
+    params: {
+      jobId,
+      trigger: opts.trigger ?? "manual",
+      ...(opts.scopePath ? { scopePath: opts.scopePath } : {}),
+    },
+  });
+  return { instanceId: created.id };
+}
+
+/**
+ * The getScheduledTasks() contribution for ScheduledAgent: one
+ * declaration per registered (job, node) schedule, built from
+ * the control plane's registerSchedules output. Re-declaring is
+ * a no-op shape-wise (Think reconciles by task id + schedule).
+ */
+export async function declarePipelineTasks(
+  ctx: ScheduledTasksPipelineContext,
+): Promise<ThinkScheduledTasks> {
+  // A host without DO SQLite has no pipeline stores and therefore
+  // nothing to declare — the declaration reconciles on every
+  // boot, so absence is a state, not a crash of the agent.
+  const sql = (
+    ctx.agentCtx?.storage as unknown as { sql?: SqlStorage } | undefined
+  )?.sql;
+  if (!sql) {
+    structuredLog.warn("job_pipeline.schedule_declarations_skipped_no_storage", {
+      message:
+        "[job-pipeline] host has no DO SQLite storage; no pipeline schedule declarations were made.",
+    });
+    return {};
+  }
+  const control = createScheduledAgentPipelineControl(
+    ctx,
+    getServiceUserLogin(ctx.env) ?? undefined,
+  );
+  await ensureScheduledAgentFeedJobs(ctx, control);
+  const specs: Array<{
+    jobId: string;
+    nodePath: string;
+    cron?: string;
+    interval?: string;
+  }> = [];
+  const recordingHost: JobScheduleHost = {
+    schedule: async (spec) => {
+      specs.push(spec);
+      return `think:${PIPELINE_TASK_ID_PREFIX}${spec.jobId}:${spec.nodePath || "root"}`;
+    },
+  };
+  await control.registerSchedules(recordingHost);
+  const tasks: ThinkScheduledTasks = {};
+  for (const spec of specs) {
+    const schedule = spec.cron ?? spec.interval;
+    if (!schedule) continue;
+    const taskId = `${PIPELINE_TASK_ID_PREFIX}${spec.jobId}${spec.nodePath ? `:${spec.nodePath}` : ""}`;
+    // The Think task type is a union discriminated by schedule
+    // literal form; the engine's schedule grammar produces
+    // exactly those forms (cron expressions, `every …`
+    // intervals) but carries them as plain strings, so the
+    // narrowing happens on the whole task value here — Think
+    // re-validates the schedule when it reconciles the task.
+    tasks[taskId] = {
+      schedule,
+      handler: async (_taskCtx: ThinkScheduledTaskContext): Promise<void> => {
+        await dispatchScheduledPipelineJob(ctx, spec.jobId, spec.nodePath).catch(
+          () => {
+            // Best-effort at the declaration boundary (see
+            // dispatchScheduledPipelineJob): the run's records
+            // are the failure surface; a throw here would only
+            // invite a retry double-fire.
+          },
+        );
+      },
+    } as ThinkScheduledTasks[string];
+  }
+  return tasks;
+}
+
+/* ------------------------------------------------------------------ */
+/* Queue-completion intake (the consumer's route into this host)       */
+/* ------------------------------------------------------------------ */
+
+export interface PipelineCompletionNote {
+  jobId: string;
+  runId: string;
+  state: string;
+  artifactKeys: string[];
+  at: string;
+}
+
+const COMPLETIONS_KEY = "pipelineCompletions";
+export const PIPELINE_COMPLETIONS_CAP = 100;
+
+/**
+ * Record one queue-routed completion on the host (the
+ * JOB_PIPELINE_EVENTS consumer's first handler lands here):
+ * the latest dataset references per job, capped, newest first —
+ * the subscription surface downstream stages (J3 enrich) read
+ * their upstream's persisted hand-off from.
+ */
+export async function recordPipelineCompletion(
+  ctx: ScheduledTasksPipelineContext,
+  note: PipelineCompletionNote,
+): Promise<void> {
+  const stored =
+    (await ctx.agentCtx.storage.get<PipelineCompletionNote[]>(COMPLETIONS_KEY)) ??
+    [];
+  stored.unshift(note);
+  await ctx.agentCtx.storage.put(
+    COMPLETIONS_KEY,
+    stored.slice(0, PIPELINE_COMPLETIONS_CAP),
+  );
+}
+
+/** The recorded completions, newest first (optionally per job). */
+export async function listPipelineCompletions(
+  ctx: ScheduledTasksPipelineContext,
+  jobId?: string,
+): Promise<PipelineCompletionNote[]> {
+  const stored =
+    (await ctx.agentCtx.storage.get<PipelineCompletionNote[]>(COMPLETIONS_KEY)) ??
+    [];
+  return jobId ? stored.filter((n) => n.jobId === jobId) : stored;
+}
+
+/** The pipeline job ids this host manages (the catalog order). */
+export function pipelineJobIds(): string[] {
+  return FEED_PIPELINE_CATALOG.map((e) => e.jobId);
+}
+
+export type { JobStatusView, JobInstanceRecord };

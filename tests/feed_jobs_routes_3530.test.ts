@@ -133,12 +133,16 @@ describe("feed routes (#3530 S1)", () => {
     // carries its own never-run block, and the "no job ⇒ null"
     // invariant is asserted on nasdaq, which remains jobless.
     const etrade = body.providers.find((p: any) => p.id === "etrade");
+    // #3535 registered an E*TRADE feed job too, so its feed block
+    // is a never-run view now, not null.
     expect(etrade.feed).toMatchObject({
       jobId: "etrade-nasdaq100-quotes",
       state: "never-run",
       lastRun: null,
       snapshot: null,
     });
+    // Nasdaq registers no quotes/fundamentals job (screenUniverse
+    // only) — its feed block stays null.
     const nasdaq = body.providers.find((p: any) => p.id === "nasdaq");
     expect(nasdaq.feed).toBeNull();
   });
@@ -174,6 +178,8 @@ describe("feed routes (#3530 S1)", () => {
     // (jobless provider ⇒ typed FEED_JOB_NOT_FOUND 404) is asserted
     // on nasdaq, which remains jobless.
     const { ctx } = await makeCtx();
+    // #3535: nasdaq is the provider with no quotes job (its job
+    // maintains the index list, not a quotes dataset).
     const res = await callRoute(ctx, "POST", "/data-providers/nasdaq/feed-run", {});
     expect(res.status).toBe(404);
     const body = (await res.json()) as any;

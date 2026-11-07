@@ -11,6 +11,7 @@ import type {
   FeedDatasetStoreInput,
   FeedDatasetStoreOptions,
 } from "./feedDatasetPorts";
+import { feedDatasetRowCount } from "./feedDatasetPorts";
 
 interface FeedDatasetRow {
   artifact: FeedDatasetArtifact;
@@ -26,7 +27,7 @@ function byNewestFirst(a: FeedDatasetRow, b: FeedDatasetRow): number {
 }
 
 function isUsable(artifact: FeedDatasetArtifact): boolean {
-  return artifact.run.status !== "failed" && artifact.quotes.length > 0;
+  return artifact.run.status !== "failed" && feedDatasetRowCount(artifact) > 0;
 }
 
 export class InMemoryFeedDatasetStore implements FeedDatasetStore {

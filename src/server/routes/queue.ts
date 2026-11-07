@@ -39,6 +39,8 @@ import { createKvMembershipStore } from "../../security/iaaaMembershipStore";
 import { consumeCfBatch, dispatchSubscriberBatch } from "../../messaging/cfQueueMessagingAdapter";
 import { createMessagingPorts } from "../../messaging/createMessagingPorts";
 import { createScreenerEventsWorkHandler } from "../../messaging/screenerEventsConsumer";
+import { createJobPipelineMessaging } from "../../messaging/createJobPipelineMessaging";
+import { createJobPipelineEventsHandler } from "../../messaging/jobPipelineEventsConsumer";
 import { createDeadLetterStoreAdapter, ensureDeadLetterStoreSchema } from "../../data/createDeadLetterStorePorts";
 import { resolveDlqDepthAlertThreshold } from "../../config/dlqDepthAlert";
 import { persistDeadLetterLanding } from "../../messaging/deadLetterPersist";
@@ -47,11 +49,17 @@ import type { SlackDeliveryEnv } from "../../agents/social/delivery";
 import { isMessageEnvelope, type MessageEnvelope, type SubscriberHandlers } from "../../messaging/messagingPorts";
 import { actorGateway } from "../../services/cloudflareActorGateway";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+import { createStructuredLogger } from "../../observability/structuredLogger";
 import { writeEnvelopeToSink, childSpan, formatTraceparent, newTraceContext } from "../../observability/observabilityPorts";
 import { observeInternalDispatch } from "../../observability/scheduledJobOutcomes";
 import { createScreenerQueueHandler } from "../../messaging/screenerQueueConsumer";
 import { renewAllStoredETradeTokens } from "../../services/etradeOAuth";
 import { ensureBreakerDurability } from "./core";
+
+/** Module logger on the S2 structured-logging seam (#3515 S3 ratchet). */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "server/routes/queue",
+});
 
 // Issue #1739 — per-subscriber dedup for screener-event delivery
 // batches. Module-level so it survives across batches in one
@@ -66,6 +74,12 @@ const screenerDeliverySeen = new Set<string>();
 // processed/drop envelope ids seen, so an at-least-once redelivery
 // never re-invokes the work handler.
 const screenerEventsSeen = new Set<string>();
+
+// Issue #3543 — per-envelope dedup for job-pipeline-events
+// batches, same isolate-scoped shape: the QueuePort consumer core
+// marks processed/drop envelope ids seen, so an at-least-once
+// redelivery never re-routes a completion into the host.
+const jobPipelineEventsSeen = new Set<string>();
 
 /**
  * Issue #2544 — the single options_analysis queue dispatch, shared
@@ -457,6 +471,55 @@ export async function handleQueueBatch(batch: any, env: Env, ctx?: any): Promise
           );
         }
       : undefined;
+    // Issue #3543 (Pipeline J1 host wiring, consumed by J2 #3535)
+    // — the job-pipeline-events consumer: terminal job events
+    // route into the ScheduledAgent host's control dispatch (its
+    // recordPipelineCompletion intake); every other job.* status
+    // publication is acked as the live stream passing through.
+    if (batch?.queue === "job-pipeline-events") {
+      const messaging = createJobPipelineMessaging(env, {
+        seenIds: jobPipelineEventsSeen,
+      });
+      if (messaging.ports) {
+        const completionHandler = createJobPipelineEventsHandler({
+          routeCompletion: async (completion) => {
+            const agentId = env.SCHEDULED_AGENT.idFromName("default");
+            const agent = env.SCHEDULED_AGENT.get(agentId) as unknown as {
+              recordPipelineCompletion: (note: {
+                jobId: string;
+                runId: string;
+                state: string;
+                artifactKeys: string[];
+                at: string;
+              }) => Promise<void>;
+            };
+            await agent.recordPipelineCompletion(completion);
+          },
+          persistDeadLetter,
+        });
+        await consumeCfBatch(
+          batch,
+          messaging.ports.consumer,
+          completionHandler,
+          persistDeadLetter
+        );
+      } else {
+        // No messaging ports (no JOB_PIPELINE_EVENTS binding): the
+        // worker cannot honestly claim QueuePort routing, so the
+        // messages are retried into the DLQ path visibly rather
+        // than acked into silence (the screener-events rule).
+        structuredLog.warn("messaging.job_pipeline_events_no_messaging_ports", {
+          message:
+            "[messaging] job-pipeline-events batch has no messaging ports — retrying messages into the DLQ path.",
+        });
+        if (batch?.messages && Array.isArray(batch.messages)) {
+          for (const msg of batch.messages) {
+            if (typeof msg.retry === "function") msg.retry();
+          }
+        }
+      }
+      return;
+    }
     if (batch?.queue === "screener-events-delivery") {
       const deliveryHandler = createScreenerQueueHandler({ env });
       const handlers: SubscriberHandlers = new Map([
