@@ -67,7 +67,7 @@ export async function evaluateStockCopilotStrategy(
     return {
       strategy,
       action: signal.action,
-      signalSuffix: signal.signalSuffix,
+      signalSuffix: signal.detail,
       triggered: signal.action !== "none",
     };
   });
