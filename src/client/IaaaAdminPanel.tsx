@@ -529,7 +529,7 @@ export function IaaaAdminPanel() {
 
         <h4>Deactivate my account</h4>
         <p className="iaaa-admin-note">
-          Deactivation revokes your sessions, memberships, API keys, and E*TRADE tokens,
+          Deactivation revokes your sessions, memberships, API keys, and broker tokens,
           suppresses mail, and verifies the result. It cannot be undone from this panel.
           Click once to arm, again to confirm.
         </p>
