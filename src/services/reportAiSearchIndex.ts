@@ -55,6 +55,13 @@ import {
 import { AgentErrorCode } from "../aspects/errorCodes";
 import { createBlobStore } from "./blobStoreR2Adapter";
 import { blobText } from "./blobStorePorts";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/reportAiSearchIndex",
+});
 
 /** Stable log event code for a failed/degraded instance indexing leg. */
 export const AI_SEARCH_REPORT_INDEX_FAILED = "ai_search_report_index_failed";
@@ -136,16 +143,22 @@ export async function indexCanonicalReportInAiSearch(
       metadata,
     });
     if (!outcome.ok) {
-      console.warn(
-        `[reportAiSearchIndex] ${AI_SEARCH_REPORT_INDEX_FAILED} reportId=${report.reportId} code=${outcome.code}: ${outcome.error ?? ""}`,
-      );
+      structuredLog.warn("report_ai_search.index_failed", {
+        message: `[reportAiSearchIndex] ${AI_SEARCH_REPORT_INDEX_FAILED} reportId=${report.reportId} code=${outcome.code}: ${outcome.error ?? ""}`,
+        reportId: report.reportId,
+        code: outcome.code,
+        error: outcome.error ?? "",
+      });
     }
     return outcome;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.warn(
-      `[reportAiSearchIndex] ${AI_SEARCH_REPORT_INDEX_FAILED} reportId=${report?.reportId ?? "?"} code=upload_failed: ${message}`,
-    );
+    structuredLog.warn("report_ai_search.index_failed", {
+      message: `[reportAiSearchIndex] ${AI_SEARCH_REPORT_INDEX_FAILED} reportId=${report?.reportId ?? "?"} code=upload_failed: ${message}`,
+      reportId: report?.reportId ?? "?",
+      code: "upload_failed",
+      error: message,
+    });
     return {
       ok: false,
       code: "upload_failed",

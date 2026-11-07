@@ -61,6 +61,13 @@ import {
   type RefundStore,
 } from "../data/refundPorts";
 import type { SubscriptionStore } from "../data/subscriptionPorts";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/refundService",
+});
 
 /**
  * Issue #2549: reads whether the automatic replacement-run
@@ -491,10 +498,11 @@ export async function executeRefund(
       nowMs,
     );
   } catch (err) {
-    console.error(
-      "[refund] entitlement application failed — refund already executed, consequence recorded:",
-      err instanceof Error ? err.message : String(err),
-    );
+    structuredLog.error("refund.entitlement_application_failed", {
+      message: "[refund] entitlement application failed — refund already executed, consequence recorded",
+      refundId: record.id,
+      error: err instanceof Error ? err.message : String(err),
+    });
     consequence = "entitlement_application_failed:see_operator_log;credits_unchanged";
   }
   if (deps.postJournal) {
@@ -503,10 +511,11 @@ export async function executeRefund(
     } catch (err) {
       // The journal is a projection, never the financial record:
       // a journal failure never fails an executed refund.
-      console.error(
-        "[refund] journal post failed — refund execution unaffected:",
-        err instanceof Error ? err.message : String(err),
-      );
+      structuredLog.error("refund.journal_post_failed", {
+        message: "[refund] journal post failed — refund execution unaffected",
+        refundId: record.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
   return deps.refundStore.updateRefund(record.id, {

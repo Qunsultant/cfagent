@@ -364,14 +364,42 @@ describe("(c1) research provider routing", () => {
   });
 
   it("no deps → degrade to [] / empty map with a warn naming the seam (D3 cache kept, never a throw)", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // #3515 S3: the warn now travels as a structured
+    // researchProviders.universe_deps_missing event (level warn) on the
+    // console-info JSON fallback, not a console.warn line.
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     try {
       const provider = new EtradeResearchDataProvider({} as Env, "tester");
       await expect(provider.getUniverseSymbols("TECH")).resolves.toEqual([]);
       await expect(provider.etfMap()).resolves.toEqual(new Map());
-      expect(warn.mock.calls.some((c) => String(c[0]).includes("universeDeps"))).toBe(true);
+      const events: Array<{ operation: string; level: string; fields: Record<string, unknown> }> = [];
+      for (const call of infoSpy.mock.calls) {
+        try {
+          const parsed = JSON.parse(String(call[0])) as {
+            operation?: unknown;
+            level?: unknown;
+            fields?: unknown;
+          };
+          if (parsed && typeof parsed.operation === "string") {
+            events.push({
+              operation: parsed.operation,
+              level: typeof parsed.level === "string" ? parsed.level : "",
+              fields:
+                parsed.fields && typeof parsed.fields === "object"
+                  ? (parsed.fields as Record<string, unknown>)
+                  : {},
+            });
+          }
+        } catch {
+          // Non-JSON console.info lines are not structured events.
+        }
+      }
+      const missing = events.find((e) => e.operation === "researchProviders.universe_deps_missing");
+      expect(missing).toBeDefined();
+      expect(missing?.level).toBe("warn");
+      expect(String(missing?.fields.message ?? "")).toContain("universeDeps");
     } finally {
-      warn.mockRestore();
+      infoSpy.mockRestore();
     }
   });
 });

@@ -82,6 +82,13 @@ import {
   type PublishTargetOutcome,
 } from "./documentPublish";
 import { AgentErrorCode } from "../aspects/errorCodes";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/corpusAiSearchIndex",
+});
 
 /** Stable log event code for a failed/degraded corpus indexing leg. */
 export const AI_SEARCH_CORPUS_INDEX_FAILED = "ai_search_corpus_index_failed";
@@ -216,9 +223,13 @@ export async function indexCorpusDocInAiSearch(
     const documentId = corpusIndexDocumentId(doc.meta.r2Key);
     if (!documentId) {
       const error = `Corpus document key "${doc.meta.r2Key}" is not a servable corpus key; no index identity can be derived.`;
-      console.warn(
-        `[corpusAiSearchIndex] ${AI_SEARCH_CORPUS_INDEX_FAILED} shaPrefix=${shaPrefix} code=invalid_input: ${error}`
-      );
+      structuredLog.warn("indexCorpusDocInAiSearch.invalid_input", {
+        message: `[corpusAiSearchIndex] ${AI_SEARCH_CORPUS_INDEX_FAILED} shaPrefix=${shaPrefix} code=invalid_input: ${error}`,
+        eventCode: AI_SEARCH_CORPUS_INDEX_FAILED,
+        shaPrefix,
+        code: "invalid_input",
+        error,
+      });
       return {
         ok: false,
         code: "invalid_input",
@@ -246,9 +257,13 @@ export async function indexCorpusDocInAiSearch(
       deps
     );
     if (!outcome.ok) {
-      console.warn(
-        `[corpusAiSearchIndex] ${AI_SEARCH_CORPUS_INDEX_FAILED} shaPrefix=${shaPrefix} code=${outcome.code}: ${outcome.error ?? ""}`
-      );
+      structuredLog.warn("indexCorpusDocInAiSearch.upload_failed", {
+        message: `[corpusAiSearchIndex] ${AI_SEARCH_CORPUS_INDEX_FAILED} shaPrefix=${shaPrefix} code=${outcome.code}: ${outcome.error ?? ""}`,
+        eventCode: AI_SEARCH_CORPUS_INDEX_FAILED,
+        shaPrefix,
+        code: outcome.code,
+        error: outcome.error ?? "",
+      });
     }
     return {
       ...outcome,
@@ -257,9 +272,13 @@ export async function indexCorpusDocInAiSearch(
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.warn(
-      `[corpusAiSearchIndex] ${AI_SEARCH_CORPUS_INDEX_FAILED} shaPrefix=${shaPrefix} code=upload_failed: ${message}`
-    );
+    structuredLog.warn("indexCorpusDocInAiSearch.upload_threw", {
+      message: `[corpusAiSearchIndex] ${AI_SEARCH_CORPUS_INDEX_FAILED} shaPrefix=${shaPrefix} code=upload_failed: ${message}`,
+      eventCode: AI_SEARCH_CORPUS_INDEX_FAILED,
+      shaPrefix,
+      code: "upload_failed",
+      error: message,
+    });
     return {
       ok: false,
       code: "upload_failed",
@@ -352,7 +371,13 @@ export async function runCorpusAiSearchIndexBackfill(
       } while (cursor !== undefined);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.warn(`[corpusAiSearchIndex] ${AI_SEARCH_CORPUS_INDEX_FAILED} leg=backfill stage=list: ${message}`);
+      structuredLog.warn("runCorpusAiSearchIndexBackfill.list_failed", {
+        message: `[corpusAiSearchIndex] ${AI_SEARCH_CORPUS_INDEX_FAILED} leg=backfill stage=list: ${message}`,
+        eventCode: AI_SEARCH_CORPUS_INDEX_FAILED,
+        leg: "backfill",
+        stage: "list",
+        error: message,
+      });
       return {
         items: [],
         indexed: 0,

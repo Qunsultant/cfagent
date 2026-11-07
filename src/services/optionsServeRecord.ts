@@ -30,6 +30,13 @@ import {
 } from "./optionsAuthFreshness";
 import type { SqlStorage } from "../orm";
 import type { ScreenerRunOutcome } from "./screenerFollowups";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/optionsServeRecord",
+});
 
 export interface OptionsServeRecordDeps {
   orm: {
@@ -81,9 +88,11 @@ export function storeOptionsCanonicalReport(
       env
     );
   } catch (err) {
-    console.warn(
-      `[optionsServeRecord] canonical write failed for run ${String((input as { runId?: unknown }).runId ?? "?")}: ${err instanceof Error ? err.message : String(err)}`,
-    );
+    structuredLog.warn("optionsServeRecord.canonical_write_failed", {
+      message: `[optionsServeRecord] canonical write failed for run ${String((input as { runId?: unknown }).runId ?? "?")}: ${err instanceof Error ? err.message : String(err)}`,
+      runId: String((input as { runId?: unknown }).runId ?? "?"),
+      error: err instanceof Error ? err.message : String(err),
+    });
     return null;
   }
 }
@@ -234,7 +243,11 @@ export function recordOptionsRunOutcome(
       createdAt: run.createdAt,
     });
   } catch (err) {
-    console.warn(`[optionsServeRecord] outcome write failed for run ${run.id}: ${err instanceof Error ? err.message : String(err)}`);
+    structuredLog.warn("optionsServeRecord.outcome_write_failed", {
+      message: `[optionsServeRecord] outcome write failed for run ${run.id}: ${err instanceof Error ? err.message : String(err)}`,
+      runId: run.id,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 
@@ -688,9 +701,16 @@ export async function recordOptionsServeReport(
       userLogin: outcome.userLogin,
     });
     canonicalOk = stored !== null;
-    if (!canonicalOk) console.warn(`[optionsServeRecord] canonical write returned null for run ${timestamp}`);
+    if (!canonicalOk) structuredLog.warn("optionsServeRecord.canonical_write_null", {
+      message: `[optionsServeRecord] canonical write returned null for run ${timestamp}`,
+      timestamp,
+    });
   } catch (err) {
-    console.warn(`[optionsServeRecord] canonical write failed for run ${timestamp}: ${err instanceof Error ? err.message : String(err)}`);
+    structuredLog.warn("optionsServeRecord.canonical_write_failed", {
+      message: `[optionsServeRecord] canonical write failed for run ${timestamp}: ${err instanceof Error ? err.message : String(err)}`,
+      timestamp,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
   let historyOk = false;
   try {
@@ -710,7 +730,11 @@ export async function recordOptionsServeReport(
     });
     historyOk = true;
   } catch (err) {
-    console.warn(`[optionsServeRecord] history write failed for run ${timestamp}: ${err instanceof Error ? err.message : String(err)}`);
+    structuredLog.warn("optionsServeRecord.history_write_failed", {
+      message: `[optionsServeRecord] history write failed for run ${timestamp}: ${err instanceof Error ? err.message : String(err)}`,
+      timestamp,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
   // Options run-record fix: the sharded serve path owns no job-tree outcome, so
   // without this row the run's artifacts exist but Workflow Runs has
@@ -786,7 +810,11 @@ export async function recordOptionsOrchestratorRun(
       ...(run.reportUrl ? { reportUrl: run.reportUrl } : {}),
     });
   } catch (err) {
-    console.warn("[OrchestratorAgent] Could not persist options run:", err);
+    structuredLog.warn("optionsServeRecord.orchestrator_persist_options_run_failed", {
+      message: `[OrchestratorAgent] Could not persist options run: ${err instanceof Error ? err.message : String(err)}`,
+      timestamp: run.timestamp,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
   if (run.canonicalReportId) return;
   try {
@@ -817,6 +845,10 @@ export async function recordOptionsOrchestratorRun(
       ...(run.userLogin ? { userLogin: run.userLogin } : {}),
     });
   } catch (err) {
-    console.warn("[OrchestratorAgent] Could not store options report canonical:", err);
+    structuredLog.warn("optionsServeRecord.orchestrator_store_canonical_failed", {
+      message: `[OrchestratorAgent] Could not store options report canonical: ${err instanceof Error ? err.message : String(err)}`,
+      timestamp: run.timestamp,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 }

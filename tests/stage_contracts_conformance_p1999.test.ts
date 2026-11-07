@@ -102,7 +102,10 @@ function scheduleFailedCalls(audit: ReturnType<typeof vi.fn>) {
 
 describe("D5 chain-bridge retry (#1999)", () => {
   it("goal bridge: an always-failing bridge is retried under the report policy, then audited", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // #3515 S3: the warn now travels as a structured
+    // scheduledTasks.goal_bridge_failed event (level warn) on the
+    // console-info JSON fallback, not a console.warn line.
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     const bridge = vi.fn(async () => {
       throw new Error("bridge boom");
     });
@@ -120,8 +123,32 @@ describe("D5 chain-bridge retry (#1999)", () => {
     expect(failed).toHaveLength(1);
     expect(failed[0][1]).toMatchObject({ error: "bridge boom" });
     expect(String(failed[0][1].taskId ?? "")).not.toBe("");
-    const warnText = warn.mock.calls.map((c) => c.map(String).join(" ")).join("\n");
-    expect(warnText).toMatch(/Goal bridge failed \(canonical row kept\)/);
+    const events: Array<{ operation: string; level: string; fields: Record<string, unknown> }> = [];
+    for (const call of infoSpy.mock.calls) {
+      try {
+        const parsed = JSON.parse(String(call[0])) as {
+          operation?: unknown;
+          level?: unknown;
+          fields?: unknown;
+        };
+        if (parsed && typeof parsed.operation === "string") {
+          events.push({
+            operation: parsed.operation,
+            level: typeof parsed.level === "string" ? parsed.level : "",
+            fields:
+              parsed.fields && typeof parsed.fields === "object"
+                ? (parsed.fields as Record<string, unknown>)
+                : {},
+          });
+        }
+      } catch {
+        // Non-JSON console.info lines are not structured events.
+      }
+    }
+    const bridgeFailed = events.find((e) => e.operation === "scheduledTasks.goal_bridge_failed");
+    expect(bridgeFailed).toBeDefined();
+    expect(bridgeFailed?.level).toBe("warn");
+    expect(String(bridgeFailed?.fields.message ?? "")).toMatch(/Goal bridge failed \(canonical row kept\)/);
   });
 
   it("goal bridge: a bridge that fails once then succeeds is retried and NOT audited as failed", async () => {
@@ -154,7 +181,10 @@ describe("D5 chain-bridge retry (#1999)", () => {
   });
 
   it("discovery bridge: an always-failing bridge is retried under the report policy, then audited", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // #3515 S3: the warn now travels as a structured
+    // scheduledTasks.discovery_bridge_failed event (level warn) on the
+    // console-info JSON fallback, not a console.warn line.
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     const bridge = vi.fn(async () => {
       throw new Error("bridge boom");
     });
@@ -188,8 +218,32 @@ describe("D5 chain-bridge retry (#1999)", () => {
     const failed = scheduleFailedCalls(audit);
     expect(failed).toHaveLength(1);
     expect(failed[0][1]).toMatchObject({ bridge: "discovery", error: "bridge boom" });
-    const warnText = warn.mock.calls.map((c) => c.map(String).join(" ")).join("\n");
-    expect(warnText).toMatch(/Discovery bridge failed \(canonical row kept\)/);
+    const events: Array<{ operation: string; level: string; fields: Record<string, unknown> }> = [];
+    for (const call of infoSpy.mock.calls) {
+      try {
+        const parsed = JSON.parse(String(call[0])) as {
+          operation?: unknown;
+          level?: unknown;
+          fields?: unknown;
+        };
+        if (parsed && typeof parsed.operation === "string") {
+          events.push({
+            operation: parsed.operation,
+            level: typeof parsed.level === "string" ? parsed.level : "",
+            fields:
+              parsed.fields && typeof parsed.fields === "object"
+                ? (parsed.fields as Record<string, unknown>)
+                : {},
+          });
+        }
+      } catch {
+        // Non-JSON console.info lines are not structured events.
+      }
+    }
+    const bridgeFailed = events.find((e) => e.operation === "scheduledTasks.discovery_bridge_failed");
+    expect(bridgeFailed).toBeDefined();
+    expect(bridgeFailed?.level).toBe("warn");
+    expect(String(bridgeFailed?.fields.message ?? "")).toMatch(/Discovery bridge failed \(canonical row kept\)/);
   });
 });
 

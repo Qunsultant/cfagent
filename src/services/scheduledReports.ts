@@ -106,6 +106,13 @@ import {
 export { reportBodyR2Key } from "./documentPublish";
 import { createBlobStore } from "./blobStoreR2Adapter";
 import { blobText } from "./blobStorePorts";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/scheduledReports",
+});
 
 export const SCHEDULED_REPORTS_TABLE = "mas_reports";
 /** Body payload cap — keeps every row far under the SQLite row limit. */
@@ -274,10 +281,10 @@ export function parseFanoutOutcome(
     if (!parsed || typeof parsed !== "object" || !parsed.outcome) return null;
     return parsed;
   } catch (err) {
-    console.error(
-      `[scheduledReports] parseFanoutOutcome: recorded outcome is malformed: ${err instanceof Error ? err.message : String(err)}`,
-      err
-    );
+    structuredLog.error("parseFanoutOutcome.malformed_outcome", {
+      message: `[scheduledReports] parseFanoutOutcome: recorded outcome is malformed: ${err instanceof Error ? err.message : String(err)}`,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return null;
   }
 }
@@ -303,10 +310,12 @@ function recordFanoutLegOutcome(
     next.code = fanoutCodeFor(next.body, next.vectorize, next.aiSearch);
     store.updateFanoutOutcome(reportId, JSON.stringify(next));
   } catch (err) {
-    console.error(
-      `[scheduledReports] recordFanoutLegOutcome failed for report ${reportId} (${DataFoundationCode.REPORT_FANOUT_DEGRADED}): ${err instanceof Error ? err.message : String(err)}`,
-      err
-    );
+    structuredLog.error("recordFanoutLegOutcome.failed", {
+      message: `[scheduledReports] recordFanoutLegOutcome failed for report ${reportId} (${DataFoundationCode.REPORT_FANOUT_DEGRADED}): ${err instanceof Error ? err.message : String(err)}`,
+      reportId,
+      code: DataFoundationCode.REPORT_FANOUT_DEGRADED,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 
@@ -320,10 +329,11 @@ export function getCanonicalReportFanoutOutcome(
     ensureScheduledReportsTable(sql);
     return parseFanoutOutcome(storePorts(sql).write.getFanoutOutcomeRaw(reportId));
   } catch (err) {
-    console.error(
-      `[scheduledReports] getCanonicalReportFanoutOutcome failed for report ${reportId}: ${err instanceof Error ? err.message : String(err)}`,
-      err
-    );
+    structuredLog.error("getCanonicalReportFanoutOutcome.failed", {
+      message: `[scheduledReports] getCanonicalReportFanoutOutcome failed for report ${reportId}: ${err instanceof Error ? err.message : String(err)}`,
+      reportId,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return null;
   }
 }
@@ -736,9 +746,11 @@ export async function refreshCanonicalReportPdfFields(
     }
     return { status: "refreshed", reportId: id, filled: outcome.filled };
   } catch (err) {
-    console.error(
-      `[scheduledReports] refreshCanonicalReportPdfFields failed for generation ${input?.generationId}: ${err instanceof Error ? err.message : String(err)}`,
-    );
+    structuredLog.error("refreshCanonicalReportPdfFields.failed", {
+      message: `[scheduledReports] refreshCanonicalReportPdfFields failed for generation ${input?.generationId}: ${err instanceof Error ? err.message : String(err)}`,
+      generationId: input?.generationId,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return { status: "failed", reason: err instanceof Error ? err.message : String(err) };
   }
 }
@@ -792,9 +804,10 @@ export function storeReportAtGeneration(
             // an inline merge would fork the record from its pointer. Skip
             // the merge and NAME the row; the pointer is never rewritten
             // by a redelivery.
-            console.warn(
-              `[scheduledReports] storeReportAtGeneration: artifact-key backfill skipped for report ${id}: body-in-r2 (first-write-win; the R2 body is the record).`,
-            );
+            structuredLog.warn("storeReportAtGeneration.backfill_skipped_body_in_r2", {
+              message: `[scheduledReports] storeReportAtGeneration: artifact-key backfill skipped for report ${id}: body-in-r2 (first-write-win; the R2 body is the record).`,
+              reportId: id,
+            });
           } else {
             try {
               const outcome = planArtifactBackfill(row.body, input.body, {
@@ -806,14 +819,18 @@ export function storeReportAtGeneration(
               } else if (outcome.status === "not-backfillable") {
                 // Never guessed: the row stays exactly as stored and the
                 // reason is on the record's log line.
-                console.warn(
-                  `[scheduledReports] storeReportAtGeneration: report ${id} cannot be backfilled (${outcome.reason}); stored body left untouched.`,
-                );
+                structuredLog.warn("storeReportAtGeneration.backfill_not_backfillable", {
+                  message: `[scheduledReports] storeReportAtGeneration: report ${id} cannot be backfilled (${outcome.reason}); stored body left untouched.`,
+                  reportId: id,
+                  reason: outcome.reason,
+                });
               }
             } catch (err) {
-              console.warn(
-                `[scheduledReports] storeReportAtGeneration: artifact-key backfill failed for report ${id}: ${err instanceof Error ? err.message : String(err)}`,
-              );
+              structuredLog.warn("storeReportAtGeneration.backfill_failed", {
+                message: `[scheduledReports] storeReportAtGeneration: artifact-key backfill failed for report ${id}: ${err instanceof Error ? err.message : String(err)}`,
+                reportId: id,
+                error: err instanceof Error ? err.message : String(err),
+              });
             }
           }
           // Record the deduped outcome before re-firing the legs,
@@ -822,10 +839,11 @@ export function storeReportAtGeneration(
           try {
             storePorts(sql).write.updateFanoutOutcome(id, JSON.stringify(dedupedFanout));
           } catch (err) {
-            console.error(
-              `[scheduledReports] storeReportAtGeneration: recording the deduped fan-out outcome failed for report ${id}: ${err instanceof Error ? err.message : String(err)}`,
-              err
-            );
+            structuredLog.error("storeReportAtGeneration.record_deduped_outcome_failed", {
+              message: `[scheduledReports] storeReportAtGeneration: recording the deduped fan-out outcome failed for report ${id}: ${err instanceof Error ? err.message : String(err)}`,
+              reportId: id,
+              error: err instanceof Error ? err.message : String(err),
+            });
           }
           fireFanoutIndexLegs(
             sql,
@@ -891,10 +909,12 @@ export function storeReportAtGeneration(
     // say THAT the store failed; the worker log must say WHY.
     // Issue #2347: this is the fan-out's REPORT_FANOUT_FAILED member —
     // no row was stored, so no record can carry the outcome.
-    console.error(
-      `[scheduledReports] storeReportAtGeneration failed for run ${typeof input?.runId === "string" ? input.runId : "?"} (${DataFoundationCode.REPORT_FANOUT_FAILED}): ${err instanceof Error ? err.message : String(err)}`,
-      err
-    );
+    structuredLog.error("storeReportAtGeneration.failed", {
+      message: `[scheduledReports] storeReportAtGeneration failed for run ${typeof input?.runId === "string" ? input.runId : "?"} (${DataFoundationCode.REPORT_FANOUT_FAILED}): ${err instanceof Error ? err.message : String(err)}`,
+      runId: typeof input?.runId === "string" ? input.runId : "?",
+      code: DataFoundationCode.REPORT_FANOUT_FAILED,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return null;
   }
 }
@@ -935,17 +955,19 @@ export async function storeReportAtGenerationWithR2(
             // Issue #2602 — the R2 path never merges a redelivery into the
             // body (the object is the record); name it rather than leaving
             // the skip implicit.
-            console.warn(
-              `[scheduledReports] storeReportAtGenerationWithR2: artifact-key backfill skipped for report ${id}: body-in-r2 (first-write-win; the R2 body is the record).`,
-            );
+            structuredLog.warn("storeReportAtGenerationWithR2.backfill_skipped_body_in_r2", {
+              message: `[scheduledReports] storeReportAtGenerationWithR2: artifact-key backfill skipped for report ${id}: body-in-r2 (first-write-win; the R2 body is the record).`,
+              reportId: id,
+            });
           }
           try {
             storePorts(sql).write.updateFanoutOutcome(id, JSON.stringify(dedupedFanout));
           } catch (err) {
-            console.error(
-              `[scheduledReports] storeReportAtGenerationWithR2: recording the deduped fan-out outcome failed for report ${id}: ${err instanceof Error ? err.message : String(err)}`,
-              err
-            );
+            structuredLog.error("storeReportAtGenerationWithR2.record_deduped_outcome_failed", {
+              message: `[scheduledReports] storeReportAtGenerationWithR2: recording the deduped fan-out outcome failed for report ${id}: ${err instanceof Error ? err.message : String(err)}`,
+              reportId: id,
+              error: err instanceof Error ? err.message : String(err),
+            });
           }
           fireFanoutIndexLegs(
             sql,
@@ -1013,10 +1035,11 @@ export async function storeReportAtGenerationWithR2(
       // carries the put error's message on the outcome; the
       // line quotes it exactly as the inline catch did.
       bodyStatus = "inline_fallback";
-      console.error(
-        `[scheduledReports] storeReportAtGenerationWithR2: R2 body put failed for report ${rec.id}; storing inline instead: ${bodyOutcome.error ?? "unknown error"}`,
-        bodyOutcome.error
-      );
+      structuredLog.error("storeReportAtGenerationWithR2.r2_body_put_failed", {
+        message: `[scheduledReports] storeReportAtGenerationWithR2: R2 body put failed for report ${rec.id}; storing inline instead: ${bodyOutcome.error ?? "unknown error"}`,
+        reportId: rec.id,
+        error: bodyOutcome.error ?? "unknown error",
+      });
     }
     const statuses = initialIndexStatuses(env, rec.source);
     const fanout = makeFanoutOutcome(
@@ -1055,10 +1078,12 @@ export async function storeReportAtGenerationWithR2(
     );
     return { reportId: rec.id, created: true, fanout };
   } catch (err) {
-    console.error(
-      `[scheduledReports] storeReportAtGenerationWithR2 failed for run ${typeof input?.runId === "string" ? input.runId : "?"} (${DataFoundationCode.REPORT_FANOUT_FAILED}): ${err instanceof Error ? err.message : String(err)}`,
-      err
-    );
+    structuredLog.error("storeReportAtGenerationWithR2.failed", {
+      message: `[scheduledReports] storeReportAtGenerationWithR2 failed for run ${typeof input?.runId === "string" ? input.runId : "?"} (${DataFoundationCode.REPORT_FANOUT_FAILED}): ${err instanceof Error ? err.message : String(err)}`,
+      runId: typeof input?.runId === "string" ? input.runId : "?",
+      code: DataFoundationCode.REPORT_FANOUT_FAILED,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return null;
   }
 }
@@ -1092,24 +1117,29 @@ export async function deleteCanonicalReport(
         try {
           await store.delete(hit.bodyR2Key);
         } catch (err) {
-          console.error(
-            `[scheduledReports] deleteCanonicalReport: R2 delete failed for report ${reportId} (key ${hit.bodyR2Key}); deleting the row anyway — the orphan sweep owns the stranded object: ${err instanceof Error ? err.message : String(err)}`,
-            err
-          );
+          structuredLog.error("deleteCanonicalReport.r2_delete_failed", {
+            message: `[scheduledReports] deleteCanonicalReport: R2 delete failed for report ${reportId} (key ${hit.bodyR2Key}); deleting the row anyway — the orphan sweep owns the stranded object: ${err instanceof Error ? err.message : String(err)}`,
+            reportId,
+            bodyR2Key: hit.bodyR2Key,
+            error: err instanceof Error ? err.message : String(err),
+          });
         }
       } else {
-        console.error(
-          `[scheduledReports] deleteCanonicalReport: no REPORTS_BUCKET bound; deleting row ${reportId} strands its R2 object (key ${hit.bodyR2Key}) for the orphan sweep`
-        );
+        structuredLog.error("deleteCanonicalReport.no_bucket_bound", {
+          message: `[scheduledReports] deleteCanonicalReport: no REPORTS_BUCKET bound; deleting row ${reportId} strands its R2 object (key ${hit.bodyR2Key}) for the orphan sweep`,
+          reportId,
+          bodyR2Key: hit.bodyR2Key,
+        });
       }
     }
     storePorts(sql).write.deleteRow(reportId);
     return true;
   } catch (err) {
-    console.error(
-      `[scheduledReports] deleteCanonicalReport failed for report ${reportId}: ${err instanceof Error ? err.message : String(err)}`,
-      err
-    );
+    structuredLog.error("deleteCanonicalReport.failed", {
+      message: `[scheduledReports] deleteCanonicalReport failed for report ${reportId}: ${err instanceof Error ? err.message : String(err)}`,
+      reportId,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return false;
   }
 }
@@ -1141,10 +1171,11 @@ export async function resolveCanonicalReportBodyWithBackfill(
     ensureScheduledReportsTable(sql);
     storePorts(sql).write.backfillBodyPointer(hit.id, key);
   } catch (err) {
-    console.error(
-      `[scheduledReports] resolveCanonicalReportBodyWithBackfill: backfill failed for report ${hit.id}; serving inline (retried on next read): ${err instanceof Error ? err.message : String(err)}`,
-      err
-    );
+    structuredLog.error("resolveCanonicalReportBodyWithBackfill.backfill_failed", {
+      message: `[scheduledReports] resolveCanonicalReportBodyWithBackfill: backfill failed for report ${hit.id}; serving inline (retried on next read): ${err instanceof Error ? err.message : String(err)}`,
+      reportId: hit.id,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
   return hit.body;
 }
@@ -1170,10 +1201,12 @@ export async function resolveCanonicalReportBody(
   } catch (err) {
     // Issue #876 doctrine: never silent — a failed body read is a
     // storage symptom the worker log must show.
-    console.error(
-      `[scheduledReports] resolveCanonicalReportBody failed for report ${hit.id} (key ${hit.bodyR2Key}): ${err instanceof Error ? err.message : String(err)}`,
-      err
-    );
+    structuredLog.error("resolveCanonicalReportBody.failed", {
+      message: `[scheduledReports] resolveCanonicalReportBody failed for report ${hit.id} (key ${hit.bodyR2Key}): ${err instanceof Error ? err.message : String(err)}`,
+      reportId: hit.id,
+      bodyR2Key: hit.bodyR2Key,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return null;
   }
 }
@@ -1314,17 +1347,19 @@ export function persistScheduledReportSql(
       // Issue #876: never silent — the seam has already logged
       // the underlying error; this line names THIS door so a
       // null from persistScheduledReportSql is attributable.
-      console.error(
-        `[scheduledReports] persistScheduledReportSql failed for run ${typeof input?.runId === "string" ? input.runId : "?"}: the canonical seam (storeReportAtGeneration) returned null; see its log line above for the underlying error`
-      );
+      structuredLog.error("persistScheduledReportSql.seam_returned_null", {
+        message: `[scheduledReports] persistScheduledReportSql failed for run ${typeof input?.runId === "string" ? input.runId : "?"}: the canonical seam (storeReportAtGeneration) returned null; see its log line above for the underlying error`,
+        runId: typeof input?.runId === "string" ? input.runId : "?",
+      });
       return null;
     }
     return stored.reportId;
   } catch (err) {
-    console.error(
-      `[scheduledReports] persistScheduledReportSql failed for run ${typeof input?.runId === "string" ? input.runId : "?"}: ${err instanceof Error ? err.message : String(err)}`,
-      err
-    );
+    structuredLog.error("persistScheduledReportSql.failed", {
+      message: `[scheduledReports] persistScheduledReportSql failed for run ${typeof input?.runId === "string" ? input.runId : "?"}: ${err instanceof Error ? err.message : String(err)}`,
+      runId: typeof input?.runId === "string" ? input.runId : "?",
+      error: err instanceof Error ? err.message : String(err),
+    });
     return null;
   }
 }
@@ -1555,10 +1590,10 @@ export function ensureUsageEventsTable(sql: SqlStorage): void {
   } catch (err) {
     // Fails closed; callers treat a missing table as no events. Issue
     // #876: logged, not silent (same persistence-seam rule as mas_reports).
-    console.error(
-      `[scheduledReports] ensureUsageEventsTable failed: ${err instanceof Error ? err.message : String(err)}`,
-      err
-    );
+    structuredLog.error("ensureUsageEventsTable.failed", {
+      message: `[scheduledReports] ensureUsageEventsTable failed: ${err instanceof Error ? err.message : String(err)}`,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 
@@ -1589,10 +1624,11 @@ export function recordUsageEvent(
   } catch (err) {
     // Issue #876: never silent at a persistence seam — metering failures
     // are logged before the never-throws null is returned.
-    console.error(
-      `[scheduledReports] recordUsageEvent failed for run ${typeof input?.runId === "string" ? input.runId : "?"}: ${err instanceof Error ? err.message : String(err)}`,
-      err
-    );
+    structuredLog.error("recordUsageEvent.failed", {
+      message: `[scheduledReports] recordUsageEvent failed for run ${typeof input?.runId === "string" ? input.runId : "?"}: ${err instanceof Error ? err.message : String(err)}`,
+      runId: typeof input?.runId === "string" ? input.runId : "?",
+      error: err instanceof Error ? err.message : String(err),
+    });
     return null;
   }
 }

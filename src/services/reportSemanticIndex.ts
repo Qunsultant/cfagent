@@ -18,6 +18,13 @@ import { createCanonicalReportStorePorts } from "../data/createCanonicalReportSt
 import { VectorMemory } from "../memory/vector-memory";
 import { createBlobStore } from "./blobStoreR2Adapter";
 import { blobText } from "./blobStorePorts";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/reportSemanticIndex",
+});
 
 /**
  * Qunsultant/cfagent#1775 (Adapter S1): the duplicate local embed()
@@ -34,7 +41,10 @@ async function embedViaMemory(vm: VectorMemory, text: string): Promise<number[] 
     const values = await vm.embedText(text.slice(0, 8000));
     return Array.isArray(values) ? values : null;
   } catch (err) {
-    console.warn("[reportSemanticIndex] embed failed:", err);
+    structuredLog.warn("embedViaMemory.embed_failed", {
+      message: "[reportSemanticIndex] embed failed",
+      error: err instanceof Error ? err.message : String(err),
+    });
     return null;
   }
 }
@@ -74,7 +84,10 @@ export async function indexReport(
     ]);
     return true;
   } catch (err) {
-    console.warn("[reportSemanticIndex] index failed:", err);
+    structuredLog.warn("indexReport.index_failed", {
+      message: "[reportSemanticIndex] index failed",
+      error: err instanceof Error ? err.message : String(err),
+    });
     return false;
   }
 }
@@ -244,7 +257,10 @@ export async function indexCanonicalReport(
       text,
     });
   } catch (err) {
-    console.warn("[reportSemanticIndex] indexCanonicalReport failed:", err);
+    structuredLog.warn("indexCanonicalReport.index_failed", {
+      message: "[reportSemanticIndex] indexCanonicalReport failed",
+      error: err instanceof Error ? err.message : String(err),
+    });
     return false;
   }
 }
@@ -443,7 +459,10 @@ export async function semanticSearchReports(
       }))
       .filter((h) => h.reportId);
   } catch (err) {
-    console.warn("[reportSemanticIndex] search failed:", err);
+    structuredLog.warn("semanticSearchReports.search_failed", {
+      message: "[reportSemanticIndex] search failed",
+      error: err instanceof Error ? err.message : String(err),
+    });
     return [];
   }
 }

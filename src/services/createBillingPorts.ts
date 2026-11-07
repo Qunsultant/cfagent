@@ -22,6 +22,13 @@ import { StripePaymentStrategy } from "../patterns/paymentStrategies";
 import { PaymentGatewayService } from "./payments";
 import type { BillingPort } from "./billingPorts";
 import { StripeBillingAdapter } from "./stripeBillingAdapter";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/createBillingPorts",
+});
 
 export type BillingEnv = {
   STRIPE_SECRET_KEY?: string;
@@ -39,9 +46,10 @@ export function createBillingPorts(env: BillingEnv, monetizationEnabled: boolean
     const service = new PaymentGatewayService(env as unknown as Env);
     return new StripeBillingAdapter(service);
   } catch (err) {
-    console.error(
-      `[billing-ports] Billing unconfigured (failing closed): ${err instanceof Error ? err.message : String(err)}`,
-    );
+    structuredLog.error("billing.unconfigured", {
+      message: `[billing-ports] Billing unconfigured (failing closed): ${err instanceof Error ? err.message : String(err)}`,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return null;
   }
 }

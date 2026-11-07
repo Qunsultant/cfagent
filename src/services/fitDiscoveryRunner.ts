@@ -73,6 +73,14 @@ import {
   type ScreeningSettingRead,
 } from "./screeningFlags";
 import { recordScreeningActivity } from "./screeningActivity";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/fitDiscoveryRunner",
+});
+
 
 /** Outlook (a view) → Phase 5 regime class (a market state label). Directional views map to the directional regimes; the mapping is fixed and total so a weight lookup never guesses. */
 export const OUTLOOK_TO_WEIGHTS_REGIME: Record<Outlook, WeightsV2Regime> = {
@@ -252,9 +260,10 @@ export function createFitDiscoveryRunner(deps: {
           );
           universeDeps = bindNasdaqUniverseDeps(universeProvider, universeBundle.runContext);
         } catch (err) {
-          console.warn(
-            `[fit] universe deps unavailable, listings degrade to empty: ${err instanceof Error ? err.message : String(err)}`
-          );
+          structuredLog.warn("fitDiscoveryRunner.universe_deps_unavailable", {
+            message: `[fit] universe deps unavailable, listings degrade to empty: ${err instanceof Error ? err.message : String(err)}`,
+            error: err instanceof Error ? err.message : String(err),
+          });
         }
       }
       const provider =
