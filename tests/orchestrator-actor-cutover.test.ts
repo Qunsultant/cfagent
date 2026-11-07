@@ -589,7 +589,7 @@ describe("#686 R2/R3/R4 — the production turn, through runAgenticChatTurn", ()
       recentTurns: [],
       userLogin: "cutover-tester",
       isAutoOptionsResearchRequest: true,
-      sourceTab: "E*TRADE · Auto Options Research",
+      sourceTab: "Broker · Auto Options Research",
     });
     expect(route).toEqual({
       agent: "trading",
