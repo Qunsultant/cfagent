@@ -79,9 +79,9 @@ describe("neutrality S3 — deferred defaults pinned unchanged", () => {
   it("tenant-providers fail-to-legacy fallback is unchanged (documented safety contract)", () => {
     expect(DEFAULT_TENANT_PROVIDERS_STATE).toEqual({ dataProviderId: "etrade", brokerId: "etrade" });
   });
-  it("order ticket copy still names the broker that actually previews (provenance)", () => {
+  it("order ticket copy names the selected broker (provenance, #3669)", () => {
     const src = read("src/client/OrderTicketPanel.tsx");
-    expect(src).toContain("Request E*TRADE’s preview");
+    expect(src).toContain("Request {brokerLabel}’s preview");
   });
   it("data-bearing saved-trades localStorage key is unchanged", () => {
     const src = read("src/client/options/StrategyDiscoveryPanel.tsx");
