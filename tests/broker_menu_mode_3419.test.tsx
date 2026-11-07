@@ -23,7 +23,7 @@ import { SettingsMenu } from "../src/client/ETradeDynamicMenu";
 import { brokerPresentation } from "../src/trading/brokerPresentation";
 import { saveTenantProviders } from "../src/client/tenantProviders";
 
-const MENU_SRC = readFileSync(join(__dirname, "../src/client/ETradeDynamicMenu.tsx"), "utf8");
+const MENU_SRC = readFileSync(join(__dirname, "../src/client/BrokerDynamicMenu.tsx"), "utf8");
 
 async function selectBroker(brokerId: string): Promise<void> {
   vi.stubGlobal(
@@ -81,12 +81,11 @@ describe("mode phrase is the broker's own word (#3419)", () => {
 });
 
 describe("one active mode per broker (#3419)", () => {
-  it("decides both environment buttons from the same single boolean", () => {
-    // Two `active` classes driven by one value cannot both be on. A second
-    // mode list (e.g. "paper is active when Alpaca and TEST") is what the
+  it("decides the environment toggle button from the same single boolean (#3719)", () => {
+    // A single toggle button driven by isLive toggles between paper and live (#3719).
+    // A second mode list (e.g. "paper is active when Alpaca and TEST") is what the
     // epic forbids; this pin makes the single source structural.
-    expect(MENU_SRC).toContain('${!isLive ? "active" : ""}');
-    expect(MENU_SRC).toContain('${isLive ? "active" : ""}');
+    expect(MENU_SRC).toContain('btn-env-mini active ${isLive ? "prod" : ""}');
     expect(MENU_SRC).not.toMatch(/const\s+isPaper\s*=/);
   });
 

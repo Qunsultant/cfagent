@@ -14,7 +14,7 @@ import { describe, expect, it } from "vitest";
 
 const stylesSrc = readFileSync(join(__dirname, "../src/client/styles.css"), "utf8");
 const dropdownSrc = readFileSync(join(__dirname, "../src/client/options/strategyDiscovery.css"), "utf8");
-const menuSrc = readFileSync(join(__dirname, "../src/client/ETradeDynamicMenu.tsx"), "utf8");
+const menuSrc = readFileSync(join(__dirname, "../src/client/BrokerDynamicMenu.tsx"), "utf8");
 
 // Flat top-level rule block for a selector: from the selector's
 // opening brace to its closing brace. These rules nest nothing.
@@ -29,12 +29,9 @@ function ruleBlock(src: string, selector: string): string {
 }
 
 describe("Settings panel tools-row fit contract (#2817)", () => {
-  it("renders the Tuning & Options Data single row with its three children", () => {
-    expect(menuSrc).toContain("etrade-tools-cluster single-row");
-    expect(menuSrc).toContain("btn-menu-tuning");
-    expect(menuSrc).toContain("menu-download-row");
-    expect(menuSrc).toContain("menu-symbol-input");
-    expect(menuSrc).toContain("menu-data-download-btn");
+  it("extracted Tuning & Options Data from dynamic menu to Platform Admin (#3719)", () => {
+    expect(menuSrc).not.toContain("btn-menu-tuning");
+    expect(menuSrc).not.toContain("menu-download-row");
   });
 
   it("the row itself is a clipped flex row that cannot exceed the panel", () => {

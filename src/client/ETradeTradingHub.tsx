@@ -1090,11 +1090,12 @@ export function ETradeTradingHub({
     }
   };
 
-  const runDiagnostics = async (override?: string) => {
+  const runDiagnostics = async (brokerIdOverride?: string, override?: string) => {
+    const brokerToUse = brokerIdOverride || selectedBroker || "etrade";
     const envToUse = override || activeEnv;
     setDiagnosticsLoading(true);
     try {
-      if (selectedBroker === "alpaca") {
+      if (brokerToUse === "alpaca") {
         const startedAt = Date.now();
         const [connectResp, accountResp] = await Promise.allSettled([
           fetch(`/api/broker/connect/alpaca?environment=${encodeURIComponent(envToUse)}`),
@@ -1138,11 +1139,12 @@ export function ETradeTradingHub({
         ]);
         return;
       }
-      const diagnosticsUrl = diagnosticsEndpoint();
+      const diagnosticsUrl = diagnosticsEndpoint(brokerToUse);
       if (!diagnosticsUrl) {
         setDiagnostics({
+          broker: brokerToUse,
           unavailable: true,
-          message: `Broker diagnostics are not available for the selected broker (${brokerLabel}).`,
+          message: `Broker diagnostics are not available for the selected broker (${brokerPresentation(brokerToUse).label}).`,
         });
         setShowDiagnosticsModal(true);
         return;
@@ -1151,7 +1153,10 @@ export function ETradeTradingHub({
         headers: { "x-environment": envToUse },
       });
       const data = (await resp.json()) as any;
-      setDiagnostics(data);
+      setDiagnostics({
+        broker: brokerToUse,
+        ...data,
+      });
       setShowDiagnosticsModal(true);
       // Unconditionally sync broker status, positions, and OAuth state on diagnostics run
       void Promise.allSettled([
@@ -1160,7 +1165,7 @@ export function ETradeTradingHub({
         fetchOAuthStatus(envToUse),
       ]);
     } catch (err: any) {
-      setDiagnostics({ error: err.message || "Failed to run diagnostics" });
+      setDiagnostics({ broker: brokerToUse, error: err.message || "Failed to run diagnostics" });
       setShowDiagnosticsModal(true);
     } finally {
       setDiagnosticsLoading(false);
@@ -3071,15 +3076,15 @@ export function ETradeTradingHub({
       )}
       {/* Live REST Diagnostics Modal */}
       {showDiagnosticsModal && (
-        <Modal open size="none" panelClassName="etrade-pin-modal diagnostics-modal" title={selectedBroker === "alpaca" ? `🦙 Alpaca Diagnostics [${diagnostics?.environment || activeEnv}]` : `⚡ E*TRADE Live REST Diagnostics [${diagnostics?.environment || activeEnv}]`} onClose={() => setShowDiagnosticsModal(false)}>
+        <Modal open size="none" panelClassName="etrade-pin-modal diagnostics-modal" title={`${brokerPresentation(diagnostics?.broker || selectedBroker).icon} ${brokerPresentation(diagnostics?.broker || selectedBroker).label} Diagnostics [${diagnostics?.environment || activeEnv}]`} onClose={() => setShowDiagnosticsModal(false)}>
               {diagnostics ? (
                 <>
                   <div className="diag-header-row">
                     <span className={`status-pill status-${diagnostics.status || "unknown"}`}>
-                      {diagnostics.status === "healthy" ? "🟢 Live REST Upstream Connected & Verified" : (diagnostics.status === "auth_required" ? "🟡 OAuth 1.0a Session Required" : "🔴 Upstream Gateway Error")}
+                      {diagnostics.status === "healthy" ? "🟢 Live REST Upstream Connected & Verified" : (diagnostics.status === "auth_required" ? "🟡 Authentication / Session Required" : (diagnostics.status === "not_configured" ? "🟡 Unconfigured / Sign-in Required" : "🔴 Upstream Gateway Error"))}
                     </span>
                     <span className="diag-gateway-text">
-                      Gateway: <code>{diagnostics.apiUrl}</code>
+                      Gateway: <code>{diagnostics.apiUrl || (diagnostics.broker === "alpaca" ? (diagnostics.environment === "PROD" ? "https://api.alpaca.markets" : "https://paper-api.alpaca.markets") : "Unknown")}</code>
                     </span>
                   </div>
 
@@ -3100,7 +3105,7 @@ export function ETradeTradingHub({
                             onClick={async () => {
                               setShowDiagnosticsModal(false);
                               await handleSwitchEnvironment("TEST");
-                              await runDiagnostics("TEST");
+                              await runDiagnostics(diagnostics?.broker, "TEST");
                             }}
                           >
                             🧪 Switch to TEST &amp; Re-run
@@ -3112,21 +3117,23 @@ export function ETradeTradingHub({
 
                   <div className="diag-grid">
                     <div className="diag-card">
-                      <div className="diag-label">Consumer Key</div>
+                      <div className="diag-label">{diagnostics.broker === "alpaca" ? "API Key ID" : "Consumer Key"}</div>
                       <div className="diag-val">
                         {diagnostics.credentials?.apiKeyMasked || (diagnostics.credentials?.apiKeyConfigured ? "✓ Configured" : "MISSING")}
                       </div>
                     </div>
                     <div className="diag-card">
-                      <div className="diag-label">Consumer Secret</div>
+                      <div className="diag-label">{diagnostics.broker === "alpaca" ? "API Secret Key" : "Consumer Secret"}</div>
                       <div className="diag-val">
                         {diagnostics.credentials?.apiSecretConfigured ? "✓ Securely Configured" : "MISSING"}
                       </div>
                     </div>
                     <div className="diag-card">
-                      <div className="diag-label">Session Token Vault</div>
+                      <div className="diag-label">{diagnostics.broker === "alpaca" ? "Key Source / Session" : "Session Token Vault"}</div>
                       <div className={`diag-val ${diagnostics.oauthToken?.present ? "token-active" : "token-inactive"}`}>
-                        {diagnostics.oauthToken?.present ? "✓ Present & Active" : "No Active Token"}
+                        {diagnostics.broker === "alpaca"
+                          ? (diagnostics.oauthToken?.present ? "✓ Configured & Active" : "No Active Key")
+                          : (diagnostics.oauthToken?.present ? "✓ Present & Active" : "No Active Token")}
                       </div>
                     </div>
                     <div className="diag-card">
@@ -3177,24 +3184,30 @@ export function ETradeTradingHub({
                   </details>
 
                   <div className="diag-modal-actions">
-                    {(!diagnostics.oauthToken?.present || diagnostics.status === "auth_required") && (
+                    {(!diagnostics.oauthToken?.present || diagnostics.status === "auth_required" || diagnostics.status === "not_configured") && (
                       <Button
                         className="btn-oauth-connect"
                         variant="primary"
                         onClick={() => {
                           setShowDiagnosticsModal(false);
-                          handleStartOAuth();
+                          if (diagnostics.broker === "alpaca") {
+                            setShowAlpacaSignIn(true);
+                          } else {
+                            handleStartOAuth();
+                          }
                         }}
                       >
-                        ⚡ Connect E*TRADE Account
+                        {diagnostics.broker === "alpaca" ? "🦙 Connect / Configure Alpaca Account" : "⚡ Connect E*TRADE Account"}
                       </Button>
                     )}
                     <Button
                       className="btn-sync-diagnostics"
                       variant="secondary"
                       disabled={diagnosticsLoading}
-                      onClick={() => runDiagnostics()}
+                      onClick={() => runDiagnostics(diagnostics?.broker, diagnostics?.environment || activeEnv)}
                     >
+                      {diagnosticsLoading ? "⏳ Testing..." : "🔄 Re-run Diagnostics"}
+                    </Button>
                       {diagnosticsLoading ? "⏳ Testing..." : "🔄 Re-run Diagnostics"}
                     </Button>
                     <Button

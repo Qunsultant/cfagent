@@ -16,7 +16,11 @@ import { SettingsMenu } from "../src/client/ETradeDynamicMenu";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const menuSrc = readFileSync(
-  join(here, "..", "src", "client", "ETradeDynamicMenu.tsx"),
+  join(here, "..", "src", "client", "BrokerDynamicMenu.tsx"),
+  "utf8",
+);
+const tuningSrc = readFileSync(
+  join(here, "..", "src", "client", "PlatformAdminPage.tsx"),
   "utf8",
 );
 const stylesSrc = readFileSync(
@@ -26,9 +30,9 @@ const stylesSrc = readFileSync(
 
 describe("multi-broker dynamic menu harmonization (#2720)", () => {
   it("source defines broker-neutral engine tuning and single-line classes", () => {
-    // Broker neutral button title
-    expect(menuSrc).toContain("⚙️ Engine Tuning");
-    expect(menuSrc).not.toContain("⚙️ ETAPI Engine Tuning");
+    // Broker neutral button title extracted to Platform Admin
+    expect(tuningSrc).toContain("Engine Tuning");
+    expect(tuningSrc).not.toContain("ETAPI Engine Tuning");
 
     // Single-line controls containers
     expect(menuSrc).toContain("etrade-controls-single-line");

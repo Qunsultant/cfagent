@@ -48,7 +48,7 @@ describe("single quotes feed through apiFetch (#2098, #2100)", () => {
   });
 
   it("the quote source setting lives in the panel, not the tape (#2689)", () => {
-    const panel = readFileSync(join(here, "..", "src/client/ETradeDynamicMenu.tsx"), "utf8");
+    const panel = readFileSync(join(here, "..", "src/client/BrokerDynamicMenu.tsx"), "utf8");
     expect(panel).toContain('"/api/market/quotes/source"');
     expect(panel).toContain('aria-label="Quote source"');
     const tape = readFileSync(join(here, "..", "src/client/components/MarketTickerTape.tsx"), "utf8");

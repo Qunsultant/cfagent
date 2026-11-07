@@ -215,7 +215,7 @@ describe("quotes one-shot load (#2481)", () => {
 
 describe("centralisation pins (#2481)", () => {
   it("Chat and the dynamic menu no longer write their own autorefresh keys", () => {
-    for (const path of ["src/client/Chat.tsx", "src/client/ETradeDynamicMenu.tsx"]) {
+    for (const path of ["src/client/Chat.tsx", "src/client/BrokerDynamicMenu.tsx"]) {
       const src = readFileSync(path, "utf8");
       expect(src).not.toContain("cfagent_options_autorefresh");
       expect(src).not.toContain("cfagent_global_autorefresh_enabled\", String");

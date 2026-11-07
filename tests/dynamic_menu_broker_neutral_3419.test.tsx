@@ -42,14 +42,14 @@ afterEach(() => {
 
 describe("Sub-Issue 3 (#3419): Single Active Mode & Dynamic Broker Menu", () => {
   describe("Single active mode per broker", () => {
-    it("renders Paper and Live for Alpaca, with only one active mode at a time", () => {
+    it("renders Paper and Live for Alpaca, with only one active mode at a time (#3719 single toggle)", () => {
       setTenantProvidersStateForTest({ brokerId: "alpaca" });
 
       // TEST mode (Paper)
       const testHtml = renderMenu({ activeEnv: "TEST" });
       const testText = textOf(testHtml);
       expect(testText).toContain("🧪 Paper");
-      expect(testText).toContain("🔴 Live");
+      expect(testText).not.toContain("🔴 Live");
       expect(testText).not.toContain("🧪 Sandbox");
       // Paper button has active class in TEST mode
       expect(testHtml).toMatch(/btn-env-mini\s+active[^>]*>[^<]*🧪\s*Paper/);
@@ -58,26 +58,29 @@ describe("Sub-Issue 3 (#3419): Single Active Mode & Dynamic Broker Menu", () => 
       // PROD mode (Live)
       const prodHtml = renderMenu({ activeEnv: "PROD" });
       const prodText = textOf(prodHtml);
-      expect(prodText).toContain("🧪 Paper");
+      expect(prodText).not.toContain("🧪 Paper");
       expect(prodText).toContain("🔴 Live");
       // Live button has active class in PROD mode
       expect(prodHtml).toMatch(/btn-env-mini\s+active[^>]*>[^<]*🔴\s*Live/);
       expect(prodHtml).not.toMatch(/btn-env-mini\s+active[^>]*>[^<]*🧪\s*Paper/);
     });
 
-    it("renders Sandbox and Live for E*TRADE, with only one active mode at a time", () => {
+    it("renders Sandbox and Live for E*TRADE, with only one active mode at a time (#3719 single toggle)", () => {
       setTenantProvidersStateForTest({ brokerId: "etrade" });
 
       // TEST mode (Sandbox)
       const testHtml = renderMenu({ activeEnv: "TEST" });
       const testText = textOf(testHtml);
       expect(testText).toContain("🧪 Sandbox");
-      expect(testText).toContain("🔴 Live");
+      expect(testText).not.toContain("🔴 Live");
       expect(testHtml).toMatch(/btn-env-mini\s+active[^>]*>[^<]*🧪\s*Sandbox/);
       expect(testHtml).not.toMatch(/btn-env-mini\s+active[^>]*>[^<]*🔴\s*Live/);
 
       // PROD mode (Live)
       const prodHtml = renderMenu({ activeEnv: "PROD" });
+      const prodText = textOf(prodHtml);
+      expect(prodText).not.toContain("🧪 Sandbox");
+      expect(prodText).toContain("🔴 Live");
       expect(prodHtml).toMatch(/btn-env-mini\s+active[^>]*>[^<]*🔴\s*Live/);
       expect(prodHtml).not.toMatch(/btn-env-mini\s+active[^>]*>[^<]*🧪\s*Sandbox/);
     });

@@ -305,7 +305,7 @@ describe("Issue #277 — source pins (no fabricated surfaces)", () => {
   });
 
   it("the Settings menu toggle writes through the real settings API", () => {
-    const menu = src("client/ETradeDynamicMenu.tsx");
+    const menu = src("client/BrokerDynamicMenu.tsx");
     expect(menu).toContain("onToggleReportDispatchHitl");
     const chat = src("client/Chat.tsx");
     expect(chat).toContain("/api/trading/settings/report-dispatch-hitl");

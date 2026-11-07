@@ -112,9 +112,9 @@ describe("Issue #3694 — Broker live/paper parity, Alpaca sync & mode buttons",
     });
 
     const envBadge = container.querySelector(".etrade-env-badge");
-    expect(envBadge?.textContent).toContain("Alpaca · Paper");
+    expect(envBadge?.textContent).toContain("PAPER");
 
-    // Paper button has active class, Live does not
+    // Paper toggle button has active class, not prod
     const testBtn = container.querySelector(".btn-env-mini:not(.prod)");
     expect(testBtn?.textContent).toContain("🧪 Paper");
     expect(testBtn?.classList.contains("active")).toBe(true);
@@ -149,7 +149,7 @@ describe("Issue #3694 — Broker live/paper parity, Alpaca sync & mode buttons",
     });
 
     const envBadge = container.querySelector(".etrade-env-badge");
-    expect(envBadge?.textContent).toContain("Alpaca · Live");
+    expect(envBadge?.textContent).toContain("LIVE");
 
     act(() => {
       root?.unmount();
@@ -174,20 +174,20 @@ describe("Issue #3694 — Broker live/paper parity, Alpaca sync & mode buttons",
 
     const singleLine = container.querySelector(".etrade-controls-single-line");
     const buttons = singleLine?.querySelectorAll(".btn-env-mini");
-    expect(buttons).toHaveLength(2);
+    expect(buttons).toHaveLength(1);
 
-    // Click Paper / Sandbox
+    // Click Paper / Live toggle button
+    await act(async () => {
+      (buttons![0] as HTMLButtonElement).click();
+    });
+    expect(handleSwitchEnvironment).toHaveBeenCalledWith("PROD");
+    expect(handleStartOAuth).not.toHaveBeenCalled();
+
+    // Click toggle button again to switch back
     await act(async () => {
       (buttons![0] as HTMLButtonElement).click();
     });
     expect(handleSwitchEnvironment).toHaveBeenCalledWith("TEST");
-    expect(handleStartOAuth).not.toHaveBeenCalled();
-
-    // Click Live
-    await act(async () => {
-      (buttons![1] as HTMLButtonElement).click();
-    });
-    expect(handleSwitchEnvironment).toHaveBeenCalledWith("PROD");
     expect(handleStartOAuth).not.toHaveBeenCalled();
 
     act(() => {

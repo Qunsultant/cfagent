@@ -50,7 +50,7 @@ export function clearStaleBrokerEnvironmentKeys(): void {
 
 clearStaleBrokerEnvironmentKeys();
 
-let current: BrokerEnvironment = "PROD";
+let current: BrokerEnvironment = "TEST";
 
 const listeners = new Set<() => void>();
 
@@ -104,6 +104,7 @@ export async function fetchBrokerEnvironment(): Promise<BrokerEnvironment> {
 export async function switchBrokerEnvironment(
   target: BrokerEnvironment,
 ): Promise<BrokerEnvironment> {
+  setCurrent(target, true);
   try {
     const resp = await apiFetch("/api/environment/switch", {
       method: "POST",
