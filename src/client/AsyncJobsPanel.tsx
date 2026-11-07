@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, TextInput } from "./components/ui";
+import { AsyncJobResultViewer } from "./AsyncJobResultViewer";
 import { usePolling } from "./usePolling";
 import { useAutoRefresh } from "./autoRefresh";
 import { csrfHeaders } from "./apiFetch";
@@ -61,9 +62,7 @@ export interface AsyncJobsPanelProps {
 export function AsyncJobsPanel({ embedded = false }: AsyncJobsPanelProps = {}) {
   const [jobs, setJobs] = useState<AsyncJob[]>([]);
   const [selectedJob, setSelectedJob] = useState<string>();
-  const [result, setResult] = useState<unknown>();
   const [error, setError] = useState("");
-  const resultJson = useMemo(() => result === undefined ? "" : JSON.stringify(result, null, 2), [result]);
   const tree = useMemo(() => buildJobTree(jobs), [jobs]);
 
   const refresh = useCallback(async () => {
@@ -97,19 +96,12 @@ export function AsyncJobsPanel({ embedded = false }: AsyncJobsPanelProps = {}) {
     enabled: autoRefresh.enabled,
   });
 
-  const openResult = async (jobId: string) => {
+  // Issue #3605 — the fetch lives in AsyncJobResultViewer now; selecting
+  // a job is all this panel does. The viewer fetches and renders the
+  // result; the queue panel keeps its own error slot for refresh/retry.
+  const openResult = (jobId: string) => {
     setSelectedJob(jobId);
-    setResult(undefined);
     setError("");
-    try {
-      const response = await globalThis.fetch(`/api/jobs/${jobId}`);
-      const job = await response.json() as AsyncJob & { result?: unknown };
-      if (!response.ok) throw new Error((job as { error?: string }).error || "Could not load job result.");
-      if (job.status === "failed") throw new Error(job.error || "Async job failed.");
-      setResult(job.result);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not load job result.");
-    }
   };
 
   // Consolidation C3 (#1277): per-stage retry — resubmits the failed
@@ -126,16 +118,6 @@ export function AsyncJobsPanel({ embedded = false }: AsyncJobsPanelProps = {}) {
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not retry the job.");
     }
-  };
-
-  const downloadResult = () => {
-    if (result === undefined || !selectedJob) return;
-    const blobUrl = URL.createObjectURL(new Blob([resultJson], { type: "application/json" }));
-    const anchor = document.createElement("a");
-    anchor.href = blobUrl;
-    anchor.download = `async-job-${selectedJob}.json`;
-    anchor.click();
-    URL.revokeObjectURL(blobUrl);
   };
 
   const activeCount = jobs.filter((job) => job.status === "queued" || job.status === "running").length;
@@ -207,20 +189,7 @@ export function AsyncJobsPanel({ embedded = false }: AsyncJobsPanelProps = {}) {
           </ul>
         )}
 
-        {selectedJob && result !== undefined && (
-          <div className="settings-async-result-container">
-            <div className="async-result-header">
-              <span className="result-job-id" title={selectedJob}>Task: {selectedJob.slice(0, 14)}…</span>
-              <Button type="button" className="btn-async-download" onClick={downloadResult} title="Export JSON result">
-                📥 Export JSON
-              </Button>
-            </div>
-            <pre className="settings-async-result-body">
-              {resultJson.slice(0, 10_000)}
-              {resultJson.length > 10_000 ? "\n… preview truncated; download full JSON." : ""}
-            </pre>
-          </div>
-        )}
+        <AsyncJobResultViewer jobId={selectedJob} variant="embedded" />
       </div>
     );
   }
@@ -294,15 +263,7 @@ export function AsyncJobsPanel({ embedded = false }: AsyncJobsPanelProps = {}) {
             ))}
           </ul>
         )}
-        {selectedJob && result !== undefined && (
-          <>
-            <Button type="button" onClick={downloadResult}>Download full result</Button>
-            <pre className="async-jobs-result">
-              {resultJson.slice(0, 100_000)}
-              {resultJson.length > 100_000 ? "\n… preview truncated; download the full result." : ""}
-            </pre>
-          </>
-        )}
+        <AsyncJobResultViewer jobId={selectedJob} variant="standalone" />
       </div>
     </details>
   );
