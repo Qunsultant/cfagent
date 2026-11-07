@@ -18,6 +18,16 @@
  *
  * Business messages go to UI and channels. Technical details go to
  * logs only.
+ *
+ * Issue #2608: the Run Details messages live in the same catalog
+ * file, as the top-level "runDetailMessages" section — the same
+ * precedent as the #2975 "channelTemplates" section. RUN_* codes
+ * are display templates with {param} placeholders, an action, a
+ * severity and a level, NOT SUCCESS/FAILURE outcomes, so they are
+ * never "outcomes" keys (the #2381 pin requires every outcomes key
+ * to match SUCCESS|FAILURE). They resolve through the same single
+ * resolver module, via the template-aware resolveRunDetailMessage
+ * below — never a second catalog, never a second resolver.
  */
 
 import catalog from "./outcomeCatalog.json";
@@ -39,8 +49,40 @@ export interface OutcomeCatalogEntry {
   httpStatus: number;
 }
 
+/**
+ * Issue #2608: one Run Details message, as stored in the catalog
+ * file's top-level "runDetailMessages" section. Same shape the
+ * standalone catalog in src/services/runDetails.ts carried at v1 —
+ * the fold moved the entries, not the meaning. `template` carries
+ * {param} placeholders filled from the run's evidence; `params`
+ * names exactly the placeholders the template uses.
+ */
+export interface RunDetailMessageEntry {
+  code: string;
+  severity: "info" | "warning" | "error";
+  level: "info" | "debugging" | "error";
+  template: string;
+  action: string;
+  params: string[];
+}
+
+export type RunDetailMessageCatalog = Record<string, RunDetailMessageEntry>;
+
+/** Catalog version after the #2608 fold (v1 was the standalone catalog in runDetails.ts). */
+export const RUN_DETAIL_MESSAGE_CATALOG_VERSION = "2";
+
 type Catalog = Record<string, OutcomeCatalogEntry>;
 const outcomeCatalog = (catalog as { outcomes: Catalog }).outcomes;
+
+/** The Run Details messages, read from the same catalog file. */
+const runDetailMessages = (
+  catalog as { runDetailMessages: RunDetailMessageCatalog }
+).runDetailMessages;
+
+/** The Run Details message catalog (the catalog file's section, by code). */
+export function getRunDetailMessageCatalog(): RunDetailMessageCatalog {
+  return runDetailMessages;
+}
 
 /** Read-time only: pre-rename string -> new outcome code. */
 export const LEGACY_OUTCOME_ALIASES: Record<string, string> = (
@@ -97,6 +139,72 @@ export function codedMessage(code: string, detail?: string): string {
     ? `[${resolved.entry.code}] ${resolved.entry.businessMessage}`
     : `[${code}]`;
   return detail ? `${base} — ${detail}` : base;
+}
+
+export interface ResolvedRunDetailMessage {
+  code: string;
+  text: string;
+  severity: "info" | "warning" | "error";
+  level: "info" | "debugging" | "error";
+  action: string;
+}
+
+/**
+ * Issue #2608: the template-aware extension of the single resolver.
+ * Every Run Details string resolves here, from the catalog file's
+ * runDetailMessages section — never a second catalog. A read never
+ * fails and never invents: an unknown code renders as a catalog-miss
+ * naming the code and the catalog version, and unfilled optional
+ * evidence slots render as an empty string, never as a raw
+ * "{param}" placeholder in the modal. `catalog` exists only so
+ * callers (and tests) can resolve against an overridden catalog;
+ * the default is the catalog file.
+ */
+export function resolveRunDetailMessage(
+  code: string,
+  params: Record<string, string> = {},
+  catalog: RunDetailMessageCatalog = runDetailMessages,
+): ResolvedRunDetailMessage {
+  const def = catalog[code];
+  if (!def) {
+    return {
+      code,
+      text: `Reason code ${code} has no catalog entry in message catalog version ${RUN_DETAIL_MESSAGE_CATALOG_VERSION}.`,
+      severity: "info",
+      level: "info",
+      action: "No action recorded for this code.",
+    };
+  }
+  let text = def.template;
+  for (const [key, value] of Object.entries(params)) {
+    text = text.replaceAll(`{${key}}`, value);
+  }
+  // Unfilled optional evidence slots render as an empty string, never
+  // as a raw "{param}" placeholder in the modal.
+  text = text.replace(/\{[a-zA-Z]+\}/g, "");
+  return { code: def.code, text, severity: def.severity, level: def.level, action: def.action };
+}
+
+/**
+ * Issue #2608: the recorded-error classifier, re-homed on the
+ * single resolver module (formerly a private helper in
+ * src/services/runDetails.ts). It maps a recorded error string to
+ * the RUN_* code that explains it — the code itself is only a key;
+ * the wording always comes from resolveRunDetailMessage, so a
+ * returned code that does not resolve is a catalog gap, never a
+ * message. Returns null when the error names no known cause.
+ */
+export function classifyRunDetailError(error: string | null): string | null {
+  if (!error) return null;
+  const lower = error.toLowerCase();
+  if (lower.includes("connector") || lower.includes("enrich")) return "RUN_CONNECTOR_UNAVAILABLE";
+  if (lower.includes("provider") || lower.includes("fetch") || lower.includes("etrade"))
+    return "RUN_PROVIDER_FETCH_FAILED";
+  if (lower.includes("service user") || lower.includes("not provisioned"))
+    return "RUN_SERVICE_USER_NOT_PROVISIONED";
+  if (lower.includes("queue") || lower.includes("dropped")) return "RUN_QUEUE_DROPPED";
+  if (lower.includes("duplicate")) return "RUN_DUPLICATE_SUPPRESSED";
+  return null;
 }
 
 /**
