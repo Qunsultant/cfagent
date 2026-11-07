@@ -23,7 +23,8 @@
  * - Email: no field, no call. Email change needs CISO review
  *   first (#3261 comment 6681436382, refs #945).
  */
-import { withCsrfInit } from "./apiFetch";
+import { apiFetch, asyncJobErrorCode } from "./apiFetch";
+import { codedMessage } from "../outcomes/outcomeAspects";
 
 /** One user profile, as the #3261 self-only routes return it. */
 export interface UserProfileView {
@@ -105,6 +106,11 @@ function parseCodedError(data: unknown): { code: string; message: string; field?
 function toProfileApiError(data: unknown, status: number, fallback: string): ProfileApiError {
   const coded = parseCodedError(data);
   if (coded) return new ProfileApiError(coded.message, coded.code, status, coded.field);
+  // #3309: a polled async-job outcome (408 still processing / 500 job
+  // failed) carries {error, jobId, ...} — the error string is transport
+  // detail, never rendered; the coded catalog message is.
+  const jobCode = asyncJobErrorCode(status, data);
+  if (jobCode) return new ProfileApiError(codedMessage(jobCode), jobCode, status);
   return new ProfileApiError(fallback, "", status);
 }
 
@@ -113,12 +119,15 @@ async function callRaw(
   init: RequestInit | undefined,
   fallback: string,
 ): Promise<{ status: number; data: unknown }> {
+  // #3309: via apiFetch, which honors the 202 async-job contract —
+  // the profile POST is queued by the HTTP-entry door, so a raw
+  // fetch that assumes a 200 body deterministically throws.
   let res: Response;
   try {
-    res = await globalThis.fetch(path, withCsrfInit({
+    res = await apiFetch(path, {
       ...init,
       headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
-    }));
+    });
   } catch {
     throw new ProfileApiError(fallback, "", 0);
   }

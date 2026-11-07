@@ -119,6 +119,10 @@ export function FirstRunScreen({ userLogin, initialStep, onComplete, onDismiss, 
   const [identityError, setIdentityError] = useState(false);
   const [loading, setLoading] = useState(true);
   const [setupState, setSetupState] = useState<"idle" | "setting-up" | "done" | "error">("idle");
+  // #3309: the setup failure itself, kept so the Notice can render
+  // its coded message (catalog businessMessage, or the fixed
+  // per-status string) instead of the hardcoded generic copy.
+  const [setupError, setSetupError] = useState<Error | null>(null);
   const [plans, setPlans] = useState<PlanView[] | null>(null);
   const [plansLoading, setPlansLoading] = useState(false);
   const [plansError, setPlansError] = useState(false);
@@ -184,15 +188,20 @@ export function FirstRunScreen({ userLogin, initialStep, onComplete, onDismiss, 
     if (loading || identityError || !identity || identity.hasAccount) return;
     let cancelled = false;
     setSetupState("setting-up");
+    setSetupError(null);
     (async () => {
       try {
         const result = await setupAccount();
         if (!cancelled) {
           setIdentity(result.identity);
+          setSetupError(null);
           setSetupState("done");
         }
-      } catch {
-        if (!cancelled) setSetupState("error");
+      } catch (error: unknown) {
+        if (!cancelled) {
+          setSetupError(error instanceof Error ? error : new Error("Setup failed"));
+          setSetupState("error");
+        }
       }
     })();
     return () => {
@@ -202,6 +211,7 @@ export function FirstRunScreen({ userLogin, initialStep, onComplete, onDismiss, 
 
   const retrySetup = () => {
     setSetupState("idle");
+    setSetupError(null);
     setSetupAttempt((a) => a + 1);
   };
 
@@ -376,8 +386,8 @@ export function FirstRunScreen({ userLogin, initialStep, onComplete, onDismiss, 
             ) : setupState === "error" ? (
               <>
                 <Notice tone="danger">
-                  Your account could not be created. Check your connection
-                  and try again — setup has not advanced.
+                  {setupError?.message ??
+                    "Your account could not be created. Check your connection and try again — setup has not advanced."}
                 </Notice>
                 <Button type="button" variant="primary" onClick={retrySetup}>
                   Try again
