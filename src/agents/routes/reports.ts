@@ -36,7 +36,35 @@ import {
   runCanonicalIndexBackfillPage,
   shouldFireReportsIndexBackfillTick,
   REPORTS_INDEX_BACKFILL_LAST_RUN_KEY,
+  type CanonicalIndexBackfillOutcome,
 } from "../../services/reportSemanticIndex";
+// Issue #3527 S5 — the reports canonical-index sweep is a
+// registered scheduled job now: its outcomes record into the same
+// #2037 sink + #1333 run store as the other tick jobs. Helpers
+// live below the context type; recording never changes a response.
+import {
+  recordScheduledJobOutcome,
+  sanitizeScheduledJobErrorCode,
+  scheduledJobOutcomeStoreFromOrmEvents,
+  type ScheduledJobOutcomeInput,
+} from "../../observability/scheduledJobOutcomes";
+import { parseTraceparent } from "../../observability/observabilityPorts";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+import { createStructuredLogger } from "../../observability/structuredLogger";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/routes/reports",
+});
+import { resolveScheduledJobAlertThreshold } from "../../config/scheduledJobAlert";
+import { postSlackText, resourceSlackPost } from "../resourceGoals";
+import type { SlackDeliveryEnv } from "../social/delivery";
+import {
+  recordJobOutcome,
+  type JobOutcomeTrigger,
+} from "../../services/jobOutcomes";
+import { resolveActorAttribution } from "../../security/backgroundAttribution";
+import { getServiceUserLogin } from "../../security/serviceIdentity";
 import {
   settingReadFromSql,
   settingWriteFromSql,
@@ -67,7 +95,20 @@ export interface ReportsRouteContext {
     AGENT_DB?: unknown;
     /** Issue #2481: server-resolved tenant id (see resolveIaaaTenant). */
     IAAA_TENANT_ID?: string;
+    /** Issue #3527 S5: the service identity joins the narrow env
+     *  so the sweep's run records can attribute a background
+     *  dispatch vs a manual invocation (mounts pass the full env). */
+    SERVICE_USER_LOGIN?: string;
   };
+  /**
+   * Issue #3527 S5 — ORM accessor (owner: OrchestratorAgent.getOrm)
+   * for the sweep's scheduled-job outcome recording (#2037 sink).
+   * Optional so older callers keep working; without it the
+   * recording degrades to a no-op, never to a changed response.
+   */
+  getOrm?: () => {
+    events?: { create?: unknown; findMany?: unknown };
+  } | null | undefined;
   /**
    * Issue #3471: after a tenant provider (broker) selection write
    * commits, notify the caller's own orchestrator instance through
@@ -187,6 +228,102 @@ export function makeSubmitFollowupDelivery(
  * Handles the reports + HITL routes. Returns a Response on match, null when no
  * reports path matches (the orchestrator then continues its sequential matching).
  */
+/**
+ * Issue #3527 S5 — record one reports-sweep outcome in the single
+ * mas_events sink (the #2037 idiom: streak + Slack alert through
+ * the existing routes). Recording is observation, never the job:
+ * every failure degrades to a no-op so the response the caller is
+ * owed (the tick's fire-and-forget dispatch) is never changed.
+ */
+async function recordReportsBackfillOutcome(
+  ctx: ReportsRouteContext,
+  sessionId: string,
+  input: Omit<ScheduledJobOutcomeInput, "job">
+): Promise<void> {
+  try {
+    await recordScheduledJobOutcome(
+      {
+        store: scheduledJobOutcomeStoreFromOrmEvents(() => {
+          const orm = ctx.getOrm?.();
+          return orm?.events ?? null;
+        }, sessionId),
+        alert: async (text: string) => {
+          await postSlackText({
+            post: resourceSlackPost,
+            env: (ctx.env ?? {}) as unknown as SlackDeliveryEnv,
+            text,
+          });
+        },
+        threshold: resolveScheduledJobAlertThreshold(
+          (ctx.env ?? {}) as Record<string, unknown>
+        ),
+      },
+      { job: "reports-index-backfill", ...input }
+    );
+  } catch {
+    // Observation never fails the response.
+  }
+}
+
+/** Background dispatch vs manual invocation, by actor attribution. */
+function reportsBackfillTrigger(ctx: ReportsRouteContext, request: Request): JobOutcomeTrigger {
+  const attribution = resolveActorAttribution(
+    request.headers,
+    getServiceUserLogin((ctx.env ?? {}) as unknown as Parameters<typeof getServiceUserLogin>[0])
+  );
+  return attribution.actorKind === "background" ? "scheduled" : "manual";
+}
+
+const REPORTS_BACKFILL_FAILED_CODE = "reports_index_backfill_failed";
+
+/**
+ * Issue #3527 S5 — record one ACTUAL sweep run in the #1333
+ * per-instance run store, the row the Autopilot "Job outcomes"
+ * feed renders. The sweep has no per-item documents to detail;
+ * its page totals ride deliveryStates as strings, the store's
+ * only detail channel. A guard-skipped tick records NO run row —
+ * the dispatch record above is its whole trace, exactly as the
+ * job idiom draws it.
+ */
+function recordReportsBackfillRun(
+  ctx: ReportsRouteContext,
+  request: Request,
+  sql: SqlStorage,
+  args: {
+    ranAt: string;
+    status: "completed" | "failed";
+    codedError?: string;
+    outcome?: CanonicalIndexBackfillOutcome;
+  }
+): void {
+  try {
+    recordJobOutcome(sql, {
+      id: `reports-index-backfill:${args.ranAt}`,
+      kind: "reports",
+      trigger: reportsBackfillTrigger(ctx, request),
+      status: args.status,
+      scanned: args.outcome?.rows,
+      matched: args.outcome?.upserted,
+      codedError: args.codedError,
+      deliveryStates: args.outcome
+        ? {
+            pages: String(args.outcome.pages),
+            upserted: String(args.outcome.upserted),
+            skippedRetention: String(args.outcome.skippedRetention),
+          }
+        : undefined,
+      origin: "reports-index-backfill",
+      createdAt: args.ranAt,
+    });
+  } catch (err) {
+    structuredLog.warn("scheduled_job_outcome.run_record_failed", {
+      message: "[reports] reports-index-backfill run record failed",
+      job: "reports-index-backfill",
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
 export async function handleReportsRoutes(
   request: Request,
   url: URL,
@@ -835,12 +972,23 @@ export async function handleReportsRoutes(
   if (path.endsWith("/trading/reports/index-backfill-sweep") && request.method === "POST") {
     const login = request.headers.get("x-user-login") || "";
     if (!login) return unauthenticatedResponse();
+    // Issue #3527 S5: every dispatch of this registered job —
+    // fired, guard-skipped, or failed — records its outcome in
+    // the system sink; only an actual run adds a #1333 run row.
+    // Recording never changes the responses below.
+    const traceId =
+      parseTraceparent(request.headers.get("traceparent"))?.traceId ?? null;
     const sql = ctx.ensureTables();
     const decision = shouldFireReportsIndexBackfillTick(
       new Date(),
       settingReadFromSql(sql)(REPORTS_INDEX_BACKFILL_LAST_RUN_KEY)
     );
     if (!decision.fire) {
+      await recordReportsBackfillOutcome(ctx, sessionId, {
+        outcome: "skipped",
+        traceId,
+        reason: decision.reason,
+      });
       return Response.json({
         success: true,
         skipped: true,
@@ -852,8 +1000,32 @@ export async function handleReportsRoutes(
     try {
       const outcome = await runCanonicalIndexBackfillAll(ctx.env, sql);
       settingWriteFromSql(sql)(REPORTS_INDEX_BACKFILL_LAST_RUN_KEY, ranAt);
+      await recordReportsBackfillOutcome(ctx, sessionId, {
+        outcome: "ran",
+        traceId,
+      });
+      recordReportsBackfillRun(ctx, request, sql, {
+        ranAt,
+        status: "completed",
+        outcome,
+      });
       return Response.json({ success: true, ...outcome, ranAt });
     } catch (err) {
+      const fromErr = sanitizeScheduledJobErrorCode(
+        (err as { code?: unknown } | null)?.code
+      );
+      const errorCode =
+        fromErr !== "unknown" ? fromErr : REPORTS_BACKFILL_FAILED_CODE;
+      await recordReportsBackfillOutcome(ctx, sessionId, {
+        outcome: "failed",
+        traceId,
+        errorCode,
+      });
+      recordReportsBackfillRun(ctx, request, sql, {
+        ranAt,
+        status: "failed",
+        codedError: errorCode,
+      });
       return Response.json(
         { error: `Index backfill sweep failed: ${err instanceof Error ? err.message : String(err)}` },
         { status: 500 }
