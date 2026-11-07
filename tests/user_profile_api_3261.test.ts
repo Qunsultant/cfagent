@@ -16,7 +16,7 @@ import {
   ProfileApiError,
   saveProfile,
 } from "../src/client/profileApi";
-import { getOutcome } from "../src/outcomes/outcomeAspects";
+import { getOutcome, codedMessage } from "../src/outcomes/outcomeAspects";
 
 const catalogMessage = (code: string): string => getOutcome(code)!.businessMessage;
 
@@ -173,6 +173,74 @@ describe("saveProfile (#3261)", () => {
     expect(err).toBeInstanceOf(ProfileApiError);
     expect(err.code).toBe("SOME_OTHER_CONFLICT");
     expect(fetchCalls).toHaveLength(1);
+  });
+
+  it("polls a 202 async-job receipt and returns the saved view once the job completes (#3309)", async () => {
+    stubFetch([
+      Response.json(
+        { jobId: "job-3309", status: "queued", statusUrl: "/api/jobs/job-3309" },
+        { status: 202 },
+      ),
+      Response.json({
+        jobId: "job-3309",
+        capability: "http.request",
+        status: "completed",
+        responseStatus: 200,
+        result: {
+          body: JSON.stringify({
+            code: "SUCCESS_PROFILE_UPDATED",
+            message: catalogMessage("SUCCESS_PROFILE_UPDATED"),
+            ...VIEW,
+          }),
+          headers: { "content-type": "application/json" },
+        },
+      }),
+    ]);
+    const result = await saveProfile({ displayName: "Ada" }, "key-3309");
+    expect(result.duplicate).toBe(false);
+    expect(result.message).toBe(catalogMessage("SUCCESS_PROFILE_UPDATED"));
+    expect(result.profile).toEqual(VIEW);
+    expect(fetchCalls).toHaveLength(2);
+    expect(fetchCalls[1].url).toBe("/api/jobs/job-3309");
+  });
+
+  it("a failed async job surfaces a coded error, never the raw job error text (#3309)", async () => {
+    stubFetch([
+      Response.json(
+        { jobId: "job-3309", status: "queued", statusUrl: "/api/jobs/job-3309" },
+        { status: 202 },
+      ),
+      Response.json({
+        jobId: "job-3309",
+        capability: "http.request",
+        status: "failed",
+        error: "D1 explode: raw store detail",
+      }),
+    ]);
+    const err = await saveProfile({ displayName: "Ada" }, "key-3309").catch((e) => e);
+    expect(err).toBeInstanceOf(ProfileApiError);
+    expect(err.code).toBe("FAILURE_ASYNC_JOB_FAILED");
+    expect(err.status).toBe(500);
+    expect(err.message).toBe(codedMessage("FAILURE_ASYNC_JOB_FAILED"));
+    expect(err.message).not.toContain("D1 explode");
+  });
+
+  it("a still-processing 408 surfaces the coded timeout message (#3309)", async () => {
+    stubFetch([
+      Response.json(
+        {
+          error: "The request is still processing. The job will continue in the background.",
+          jobId: "job-3309",
+          statusUrl: "/api/jobs/job-3309",
+        },
+        { status: 408 },
+      ),
+    ]);
+    const err = await saveProfile({ displayName: "Ada" }, "key-3309").catch((e) => e);
+    expect(err).toBeInstanceOf(ProfileApiError);
+    expect(err.code).toBe("FAILURE_ASYNC_JOB_STILL_PROCESSING");
+    expect(err.status).toBe(408);
+    expect(err.message).toBe(codedMessage("FAILURE_ASYNC_JOB_STILL_PROCESSING"));
   });
 });
 

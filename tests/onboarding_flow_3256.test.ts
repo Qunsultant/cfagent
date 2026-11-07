@@ -35,6 +35,7 @@ import {
   startETradeOAuth,
   fetchAccountSelf,
 } from "../src/client/firstRunApi";
+import { codedMessage } from "../src/outcomes/outcomeAspects";
 
 const realFetch = globalThis.fetch;
 
@@ -303,6 +304,125 @@ describe("setupAccount (#3256)", () => {
     expect(err).toBeInstanceOf(FirstRunApiError);
     expect((err as FirstRunApiError).status).toBe(401);
   });
+
+  it("polls a 202 async-job receipt and returns created + identity once the job completes (#3309)", async () => {
+    let calls = 0;
+    stubFetch((url) => {
+      calls += 1;
+      if (calls === 1) {
+        expect(url).toBe("/api/platform/accounts/setup");
+        return Response.json(
+          { jobId: "job-3309", status: "queued", statusUrl: "/api/jobs/job-3309" },
+          { status: 202 },
+        );
+      }
+      return Response.json({
+        jobId: "job-3309",
+        capability: "http.request",
+        status: "completed",
+        responseStatus: 200,
+        result: {
+          body: JSON.stringify({
+            created: true,
+            identity: {
+              userLogin: "onb-api-user",
+              tenantId: "onb-api-user",
+              hasAccount: true,
+              tier: "Free",
+              creditsUSD: 0,
+              includedRunsRemaining: 0,
+            },
+          }),
+          headers: { "content-type": "application/json" },
+        },
+      });
+    });
+    const result = await setupAccount();
+    expect(result.created).toBe(true);
+    expect(result.identity.hasAccount).toBe(true);
+    expect(result.identity.tenantId).toBe("onb-api-user");
+    expect(calls).toBe(2);
+  });
+
+  it("a 202 whose job completes with created:false returns the existing account (#3309)", async () => {
+    let calls = 0;
+    stubFetch(() => {
+      calls += 1;
+      if (calls === 1) {
+        return Response.json(
+          { jobId: "job-3309", status: "queued", statusUrl: "/api/jobs/job-3309" },
+          { status: 202 },
+        );
+      }
+      return Response.json({
+        jobId: "job-3309",
+        capability: "http.request",
+        status: "completed",
+        responseStatus: 200,
+        result: {
+          body: JSON.stringify({
+            created: false,
+            identity: {
+              userLogin: "onb-api-user",
+              tenantId: "onb-api-user",
+              hasAccount: true,
+              tier: "Free",
+              creditsUSD: 0,
+              includedRunsRemaining: 0,
+            },
+          }),
+          headers: { "content-type": "application/json" },
+        },
+      });
+    });
+    const result = await setupAccount();
+    expect(result.created).toBe(false);
+    expect(result.identity.hasAccount).toBe(true);
+    expect(calls).toBe(2);
+  });
+
+  it("a failed async job surfaces a coded error, never the raw job error text (#3309)", async () => {
+    let calls = 0;
+    stubFetch(() => {
+      calls += 1;
+      if (calls === 1) {
+        return Response.json(
+          { jobId: "job-3309", status: "queued", statusUrl: "/api/jobs/job-3309" },
+          { status: 202 },
+        );
+      }
+      return Response.json({
+        jobId: "job-3309",
+        capability: "http.request",
+        status: "failed",
+        error: "D1 explode: raw store detail",
+      });
+    });
+    const err = await setupAccount().catch((e) => e);
+    expect(err).toBeInstanceOf(FirstRunApiError);
+    expect((err as FirstRunApiError).status).toBe(500);
+    expect((err as FirstRunApiError).code).toBe("FAILURE_ASYNC_JOB_FAILED");
+    expect((err as Error).message).toBe(codedMessage("FAILURE_ASYNC_JOB_FAILED"));
+    expect((err as Error).message).not.toContain("D1 explode");
+  });
+
+  it("a still-processing 408 surfaces the coded timeout message (#3309)", async () => {
+    stubFetch(() =>
+      Response.json(
+        {
+          error: "The request is still processing. The job will continue in the background.",
+          jobId: "job-3309",
+          statusUrl: "/api/jobs/job-3309",
+        },
+        { status: 408 },
+      ),
+    );
+    const err = await setupAccount().catch((e) => e);
+    expect(err).toBeInstanceOf(FirstRunApiError);
+    expect((err as FirstRunApiError).status).toBe(408);
+    expect((err as FirstRunApiError).code).toBe("FAILURE_ASYNC_JOB_STILL_PROCESSING");
+    expect((err as Error).message).toBe(codedMessage("FAILURE_ASYNC_JOB_STILL_PROCESSING"));
+  });
 });
 
 describe("onboarding state client API (#3256)", () => {
@@ -347,6 +467,33 @@ describe("onboarding state client API (#3256)", () => {
   it("rejects a malformed state body instead of rendering garbage", async () => {
     stubFetch(() => Response.json({ state: { currentStep: 9 } }));
     await expect(fetchOnboardingState()).rejects.toBeInstanceOf(FirstRunApiError);
+  });
+
+  it("polls a 202 async-job receipt for the state save (#3309)", async () => {
+    let calls = 0;
+    stubFetch(() => {
+      calls += 1;
+      if (calls === 1) {
+        return Response.json(
+          { jobId: "job-3309", status: "queued", statusUrl: "/api/jobs/job-3309" },
+          { status: 202 },
+        );
+      }
+      return Response.json({
+        jobId: "job-3309",
+        capability: "http.request",
+        status: "completed",
+        responseStatus: 200,
+        result: {
+          // The server echoes the state it saved, not the fixture.
+          body: JSON.stringify({ state: { ...stateBody, currentStep: 5, completed: true } }),
+          headers: { "content-type": "application/json" },
+        },
+      });
+    });
+    const saved = await saveOnboardingState({ currentStep: 5, completed: true });
+    expect(saved?.currentStep).toBe(5);
+    expect(calls).toBe(2);
   });
 });
 

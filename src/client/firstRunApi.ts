@@ -26,9 +26,22 @@
  * completion never writes a preference, so it cannot corrupt one.
  *
  * Error contract: every failure surfaces as FirstRunApiError with the
- * HTTP status. errorMessageForStatus maps statuses to FIXED
- * caller-facing strings; server error bodies are never rendered — they
- * can carry internal detail.
+ * HTTP status and, when the outcome is coded, the outcome-catalog
+ * code. errorMessageForStatus maps statuses to FIXED caller-facing
+ * strings; server error bodies are never rendered — they can carry
+ * internal detail. A coded error's message is the catalog's
+ * businessMessage, resolved through the single resolver.
+ *
+ * Issue #3309 — the 202 async-job contract. All first-run calls go
+ * through `apiFetch`, which honors the 202 contract (see
+ * src/client/apiFetch.ts): a queued request answers 202 with a job
+ * receipt and apiFetch polls the job until it completes. The
+ * first-run POSTs (setup, onboarding state, notification
+ * preferences) are queued by the HTTP-entry door — they are NOT on
+ * the immediate/sync prefix list — so a raw fetch that assumes a 200
+ * body deterministically throws on every load. `call`/`callAbsolute`
+ * therefore never fetch directly, and a job-failed / job-timeout
+ * outcome surfaces as a coded error, never the generic dialog text.
  *
  * Issue #3256 (sub-issue of #3241) — Signup → Trial onboarding flow.
  * The same contract extends to the new calls: setupAccount (POST
@@ -40,7 +53,8 @@
  * None of these sends an identity header or a client-supplied
  * tenantId; the session cookie is the identity throughout.
  */
-import { withCsrfInit } from "./apiFetch";
+import { apiFetch, asyncJobErrorCode } from "./apiFetch";
+import { codedMessage, resolveOutcome } from "../outcomes/outcomeAspects";
 
 const BASE = "/api/payments/agentic/commercial";
 
@@ -114,9 +128,15 @@ export interface AccountSelfView {
 
 export class FirstRunApiError extends Error {
   readonly status: number;
-  constructor(status: number) {
-    super(errorMessageForStatus(status));
+  readonly code?: string;
+  constructor(status: number, code?: string) {
+    super(
+      code && resolveOutcome(code).entry
+        ? codedMessage(code)
+        : errorMessageForStatus(status),
+    );
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -143,14 +163,17 @@ export function errorMessageForStatus(status: number): string {
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
-    res = await globalThis.fetch(`${BASE}${path}`, withCsrfInit({
+    res = await apiFetch(`${BASE}${path}`, {
       ...init,
       headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
-    }));
+    });
   } catch {
     throw new FirstRunApiError(0);
   }
-  if (!res.ok) throw new FirstRunApiError(res.status);
+  if (!res.ok) {
+    const data: unknown = await res.clone().json().catch(() => null);
+    throw new FirstRunApiError(res.status, asyncJobErrorCode(res.status, data));
+  }
   return (await res.json()) as T;
 }
 
@@ -158,14 +181,17 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 async function callAbsolute<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
-    res = await globalThis.fetch(path, withCsrfInit({
+    res = await apiFetch(path, {
       ...init,
       headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
-    }));
+    });
   } catch {
     throw new FirstRunApiError(0);
   }
-  if (!res.ok) throw new FirstRunApiError(res.status);
+  if (!res.ok) {
+    const data: unknown = await res.clone().json().catch(() => null);
+    throw new FirstRunApiError(res.status, asyncJobErrorCode(res.status, data));
+  }
   return (await res.json()) as T;
 }
 

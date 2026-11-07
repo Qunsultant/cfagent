@@ -35,6 +35,7 @@ const apiState = vi.hoisted(() => ({
     includedRunsRemaining: number;
   },
   identityError: null as null | Error,
+  setupError: null as null | Error,
   preferences: { userId: "second-user", tenantId: "tenant-1", digestEnabled: false, welcomeEnabled: true, updatedAtMs: 1 },
   savedBody: null as null | Record<string, unknown>,
   setupCalls: 0,
@@ -55,6 +56,7 @@ vi.mock("../src/client/firstRunApi", async (importOriginal) => {
     }),
     setupAccount: vi.fn(async () => {
       apiState.setupCalls += 1;
+      if (apiState.setupError) throw apiState.setupError;
       apiState.identity = {
         userLogin: "second-user",
         tenantId: "second-user",
@@ -110,7 +112,7 @@ vi.mock("../src/client/commercialApi", async (importOriginal) => {
 
 import { FirstRunScreen } from "../src/client/FirstRunScreen";
 import { NotificationPreferencesPanel } from "../src/client/NotificationPreferencesPanel";
-import { isFirstRunComplete } from "../src/client/firstRunApi";
+import { FirstRunApiError, isFirstRunComplete } from "../src/client/firstRunApi";
 
 const flush = async (times = 5) => {
   for (let i = 0; i < times; i++) {
@@ -171,6 +173,7 @@ beforeEach(() => {
     includedRunsRemaining: 3,
   };
   apiState.identityError = null;
+  apiState.setupError = null;
   apiState.preferences = { userId: "second-user", tenantId: "tenant-1", digestEnabled: false, welcomeEnabled: true, updatedAtMs: 1 };
   apiState.savedBody = null;
   apiState.setupCalls = 0;
@@ -272,6 +275,31 @@ describe("FirstRunScreen (#2471)", () => {
     try {
       expect(container.textContent ?? "").toContain("couldn");
       expect(container.querySelectorAll("input").length).toBe(0);
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+    }
+  });
+
+  it("a coded setup timeout renders the catalog message, not the generic copy (#3309)", async () => {
+    apiState.identity = {
+      userLogin: "second-user",
+      tenantId: null,
+      hasAccount: false,
+      tier: "Free",
+      creditsUSD: 0,
+      includedRunsRemaining: 0,
+    };
+    apiState.setupError = new FirstRunApiError(408, "FAILURE_ASYNC_JOB_STILL_PROCESSING");
+    const { container, root } = await renderScreen({ userLogin: "screen-user-5" });
+    try {
+      expect(apiState.setupCalls).toBe(1);
+      expect(container.textContent ?? "").toContain(
+        "Your request is still being processed. It will continue in the background — try again shortly.",
+      );
+      expect(container.textContent ?? "").not.toContain("Your account could not be created.");
+      expect(container.textContent ?? "").toContain("Try again");
     } finally {
       await act(async () => {
         root.unmount();

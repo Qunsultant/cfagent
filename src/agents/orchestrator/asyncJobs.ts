@@ -861,6 +861,13 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
 
   const job = family.read.getClaimed(jobId, ctx.sessionKey());
   if (!job) throw new Error(`Async job ${jobId} disappeared after it was claimed.`);
+  // #3309 (15-factor F14 Telemetry): the claim is the point the live
+  // job's trail went dark — queued was audited at submit, completed /
+  // failed at the end, but nothing marked the start. Audit the start
+  // so a job stuck in "running" is observable from its own trail
+  // (queued → started → completed/failed), not only from the 30-min
+  // stuck-run threshold.
+  ctx.audit("async_job.started", "orchestrator", { jobId, capability: job.capability });
   // Consolidation C3 (#1277): stage identity for transition recording
   // (in scope for both the completion and failure paths below).
   const jobStage = PIPELINE_STAGES.find((s) => s === job.stage);

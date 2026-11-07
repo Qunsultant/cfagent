@@ -8,6 +8,51 @@ type AsyncJobStatusResponse = {
   error?: string;
 };
 
+/**
+ * The 202 async-job contract (issue #3309, 15-factor F2 API first).
+ *
+ * A queued API request answers 202 Accepted with `Location` +
+ * `Retry-After: 1` and a job receipt body `{jobId, status, statusUrl}`.
+ * The caller MUST NOT assume a 200 body: it polls `statusUrl` until
+ * the job reaches a terminal state. On completion the original
+ * response is reconstructed (for capability `http.request`, the job
+ * result carries the original body + headers + responseStatus); on
+ * failure the poll returns a 500 carrying the job's error; on the
+ * deadline it returns a 408 carrying the job receipt. The error
+ * strings in the 408/500 bodies are transport detail — callers
+ * classify the outcome structurally (status + jobId) and render a
+ * coded outcome-catalog message, never the raw error text.
+ *
+ * The polling client keeps the session as its only identity: the
+ * status poll is a same-origin GET, so the session cookie rides
+ * along and the server reads the job session-scoped. No identity
+ * header, no credential, and no session value is introduced here.
+ */
+export interface AsyncJobPollConfig {
+  /** Delay before the first status poll. */
+  initialDelayMs: number;
+  /** Upper bound on the delay between polls. */
+  maxDelayMs: number;
+  /** Multiplicative backoff applied to the delay after each poll. */
+  backoffFactor: number;
+  /** Total wall-clock budget for polling before the 408. */
+  deadlineMs: number;
+}
+
+/**
+ * Poll timing configuration (15-factor F5: configuration, never
+ * hardcoded literals). Values are the historical poll behavior,
+ * unchanged: first poll after 500ms, backoff ×1.5 capped at 5s,
+ * 10-minute deadline. Callers pass an override only to bound a
+ * shorter wait (tests); production uses these defaults.
+ */
+export const DEFAULT_ASYNC_JOB_POLL_CONFIG: AsyncJobPollConfig = {
+  initialDelayMs: 500,
+  maxDelayMs: 5000,
+  backoffFactor: 1.5,
+  deadlineMs: 10 * 60 * 1000,
+};
+
 const sleep = (milliseconds: number) =>
   new Promise((resolve) => setTimeout(resolve, milliseconds));
 
@@ -53,7 +98,37 @@ export function withCsrfInit(init: RequestInit | undefined): RequestInit | undef
   };
 }
 
-export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+import { resolveOutcome } from "../outcomes/outcomeAspects";
+
+/**
+ * Structural classification of a 202-poll outcome (#3309, the #2573
+ * precedent: classify by shape, never by error text). The 408/500
+ * bodies apiFetch returns for a polled job carry `{error, jobId,
+ * ...}` — the `error` string is transport detail and is NEVER
+ * rendered. What the caller renders is the catalog message for the
+ * code returned here:
+ * - a server `code` that resolves in the catalog wins (the caller
+ *   already renders coded server bodies);
+ * - 408 + jobId → the job is still running past the poll deadline;
+ * - 500 + jobId → the job reached the failed terminal state.
+ * Anything else returns undefined and the caller falls back to its
+ * fixed per-status message.
+ */
+export function asyncJobErrorCode(status: number, data: unknown): string | undefined {
+  if (typeof data !== "object" || data === null || Array.isArray(data)) return undefined;
+  const record = data as Record<string, unknown>;
+  if (typeof record.code === "string" && resolveOutcome(record.code).entry) return record.code;
+  if (typeof record.jobId !== "string" || record.jobId.length === 0) return undefined;
+  if (status === 408) return "FAILURE_ASYNC_JOB_STILL_PROCESSING";
+  if (status === 500) return "FAILURE_ASYNC_JOB_FAILED";
+  return undefined;
+}
+
+export async function apiFetch(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+  poll?: Partial<AsyncJobPollConfig>,
+): Promise<Response> {
   const initialResponse = await globalThis.fetch(input, withCsrfInit(init));
   if (initialResponse.status !== 202) return initialResponse;
 
@@ -65,8 +140,9 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
   }
   if (typeof accepted.jobId !== "string" || typeof accepted.statusUrl !== "string") return initialResponse;
 
-  let delayMs = 500;
-  const deadline = Date.now() + 10 * 60 * 1000;
+  const config: AsyncJobPollConfig = { ...DEFAULT_ASYNC_JOB_POLL_CONFIG, ...poll };
+  let delayMs = config.initialDelayMs;
+  const deadline = Date.now() + config.deadlineMs;
   while (Date.now() < deadline) {
     await sleep(delayMs);
     const response = await globalThis.fetch(accepted.statusUrl, { headers: { "Accept": "application/json" } });
@@ -89,7 +165,7 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
       }
       return Response.json(job.result, { status: job.responseStatus || 200 });
     }
-    delayMs = Math.min(Math.round(delayMs * 1.5), 5_000);
+    delayMs = Math.min(Math.round(delayMs * config.backoffFactor), config.maxDelayMs);
   }
 
   return Response.json(
