@@ -28,7 +28,7 @@
 
 import type { Env } from "../../types";
 import { getServiceUserLogin, isLoginShaped, isSharedOrchestratorAddress, SHARED_ORCHESTRATOR_INSTANCE } from "../../security/serviceIdentity";
-import { backgroundDispatchHeaders, backgroundDispatchHeadersWithTrace } from "../../security/backgroundAttribution";
+import { backgroundDispatchHeaders } from "../../security/backgroundAttribution";
 import { createDeadLetterRecord, logDeadLetter, type DeadLetterRecord } from "../../messaging/deadLetter";
 import { resolveScreenerAgentName } from "../../agents/screenerAgentName";
 import { isAnalysisDoneStageMessage, isStageBoundaryMessage } from "../../workflows/stageQueueTransport";
@@ -47,11 +47,14 @@ import type { SlackDeliveryEnv } from "../../agents/social/delivery";
 import { isMessageEnvelope, type MessageEnvelope, type SubscriberHandlers } from "../../messaging/messagingPorts";
 import { actorGateway } from "../../services/cloudflareActorGateway";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
-import { writeEnvelopeToSink, childSpan, formatTraceparent, newTraceContext } from "../../observability/observabilityPorts";
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { writeEnvelopeToSink } from "../../observability/observabilityPorts";
 import {
-  observeInternalDispatch,
-  type ScheduledJobId,
-} from "../../observability/scheduledJobOutcomes";
+  resolveCronEntryPoint,
+  runCronEntryPoint,
+  type CronDispatchRecordInput,
+  type CronEntryPointDeps,
+} from "../../services/consolidatedCronEntries";
 import { createScreenerQueueHandler } from "../../messaging/screenerQueueConsumer";
 import { renewAllStoredETradeTokens } from "../../services/etradeOAuth";
 import { ensureBreakerDurability } from "./core";
@@ -151,11 +154,43 @@ async function dispatchOptionsAnalysisQueueWork(opts: {
 }
 
 /**
+ * Issue #3121 S5 — adapt the entry points' variadic log args to the
+ * structured logger (#3515 S2 seam): the first arg is the message,
+ * the rest serialize as detail. The production log adapters below go
+ * through this logger so the slice adds zero NEW unstructured
+ * `console.*` uses to this file (ratchet #3515 S3: the ceiling is 16).
+ */
+function formatCronLogArgs(args: readonly unknown[]): Record<string, unknown> {
+  const [first, ...rest] = args;
+  const fields: Record<string, unknown> = {
+    message: typeof first === "string" ? first : String(first),
+  };
+  if (rest.length > 0) {
+    fields.detail = rest
+      .map((arg) => {
+        if (typeof arg === "string") return arg;
+        try {
+          return JSON.stringify(arg) ?? String(arg);
+        } catch {
+          return String(arg);
+        }
+      })
+      .join(" ");
+  }
+  return fields;
+}
+
+/**
  * Slice 8 of Qunsultant/cfagent#2902 (Queue / scheduled) — moves only.
- * The default export's `scheduled` handler, verbatim: the every-30-minutes
- * tick (ScheduledAgent onCron + research / reflection / adaptation /
- * corpus-sync / digest dispatches under one trace), the 03:00 UTC
- * E*TRADE token-renewal pass, and the 04:00 UTC retention pass.
+ * The default export's `scheduled` handler, now a thin dispatch
+ * (issue Qunsultant/cfagent#3121 Slice S5): the gate evaluation and
+ * the shared Orchestrator stub stay here, exactly as before, and
+ * the three cron branches moved — verbatim — into the named entry
+ * points in `src/services/consolidatedCronEntries.ts` (`tick`,
+ * `renewTokens`, `retention`). `event.cron` resolves through
+ * `resolveCronEntryPoint`; an unmatched cron logs and returns, with
+ * no ledger row and no dispatch. The entry points record one ledger
+ * row per dispatch through the background-gated record route.
  * Service identity (SERVICE_USER_LOGIN) + platform-tier provisioning
  * gate (#1185, #2331) — fail closed, never a fabricated identity.
  */
@@ -179,6 +214,10 @@ export async function handleScheduledEvent(event: any, env: Env, ctx?: any): Pro
     // provisions the platform tier via POST
     // /api/admin/service-user/provision (nothing is provisioned today).
     // That is the fail-closed intent, not a surprise outage.
+    // The gate is evaluated EAGERLY for every scheduled() invocation,
+    // including renewal — the renewal entry point ignores it by
+    // design, but the evaluation itself stays here, before any
+    // dispatch, exactly as before.
     const userLogin = getServiceUserLogin(env);
     const serviceProvisioned = userLogin
       ? await isPlatformServiceProvisioned(
@@ -188,230 +227,109 @@ export async function handleScheduledEvent(event: any, env: Env, ctx?: any): Pro
         )
       : false;
     const agent = actorGateway.stub<DoStubLike>(env.ORCHESTRATOR_AGENT, SHARED_ORCHESTRATOR_INSTANCE);
+    // Issue #3121 S5 — the structured logger for this dispatcher's
+    // own logs (unknown cron, record failures) and for the entry
+    // points' logError/logInfo adapters below (#3515 S2 seam; the
+    // sink is the same observability sink the tick observer uses).
+    // Construction is pure (no I/O); a failing sink degrades to
+    // local logging and never throws to the caller.
+    const structuredLog = createStructuredLogger(
+      createObservabilitySink(env),
+      { component: "server/routes/queue", actorId: userLogin ?? null },
+    );
 
-    // PR #4 — ScheduledAgent tick: evaluate due goals, budget-check,
-    // create Orchestrator jobs (issue #166).
-    if (event?.cron === "*/30 * * * *") {
-      if (!userLogin || !serviceProvisioned) {
-        console.error(
-          "[scheduled] Service user is not provisioned for the platform tier — skipping the ScheduledAgent tick and the research/reflection/adaptation dispatches rather than running unattended work without a verified identity (#2331 slice 2). Provision the platform tier via POST /api/admin/service-user/provision to resume scheduled goals."
-        );
-        return;
-      }
-      const schedAgent = actorGateway.stub<{
-        onCron(): Promise<unknown>;
-      }>(env.SCHEDULED_AGENT, "default");
-      const tickPromise = schedAgent.onCron();
-      if (ctx?.waitUntil) ctx.waitUntil(tickPromise);
-      else await tickPromise;
-      // Issue Qunsultant/cfagent#2037 — one trace per tick. Every
-      // dispatch below carries a child span of this trace, so a
-      // DO-side AE event, a mas_events outcome row, and a Slack
-      // alert all correlate to the tick that sent them. The
-      // traceparent rides every tick dispatch (corpus/digest
-      // included — their routes ignore it today, at no cost);
-      // five named jobs get the failure observer — the #2037
-      // three plus the corpus sync and reports sweep registered
-      // in #3527 S5. The observer never rejects, so
-      // waitUntil/await below keep today's fire-and-forget shape.
-      const tickTrace = newTraceContext();
-      const observeTickDispatch = (
-        job: ScheduledJobId,
-        promise: Promise<unknown>,
-      ): Promise<void> =>
-        observeInternalDispatch(promise, {
-          job,
-          sink: createObservabilitySink(env),
-          trace: tickTrace,
-          recordFailure: async (input) => {
-            const recorded = (await agent.fetch(
-              new Request("https://agent.internal/scheduled-job-outcome", {
-                method: "POST",
-                headers: backgroundDispatchHeadersWithTrace(
-                  userLogin,
-                  formatTraceparent(childSpan(tickTrace)),
-                ),
-                body: JSON.stringify(input),
-              }),
-            )) as unknown as { status?: unknown };
-            if (
-              !recorded ||
-              typeof recorded.status !== "number" ||
-              recorded.status >= 400
-            ) {
-              throw new Error("scheduled-job-outcome record failed");
-            }
-          },
-          alertUnreachable: async (failedJob, trace) => {
-            await postSlackText({
-              post: resourceSlackPost,
-              env: env as unknown as SlackDeliveryEnv,
-              text:
-                `Scheduled job ${failedJob} dispatch failed AND its outcome ` +
-                `record is unreachable (trace ${trace.traceId}). The DO did ` +
-                `not record this failure — investigate the dispatch layer; ` +
-                `see Cloudflare logs for the tick.`,
-            });
-          },
-        });
-      // Issue #354 — the daily options-research run (after market close)
-      // rides this tick: the dedicated 0 21 * * 1-5 trigger cannot exist
-      // (Workers Free ceiling of 5 cron triggers/account, error 10072; it
-      // was never in wrangler.jsonc, so the old branch below was dead code).
-      // Fire/no-fire is decided inside the tick route (weekday, >= 21:00
-      // UTC, not already fired today — durable guard in mas_settings), so
-      // this dispatch is unconditional; skips are cheap and explicit.
-      const researchPromise = observeTickDispatch(
-        "research",
-        agent.fetch(
-          new Request("https://agent.internal/research/scheduled-tick", {
-            method: "POST",
-            headers: backgroundDispatchHeadersWithTrace(
-              userLogin,
-              formatTraceparent(childSpan(tickTrace)),
-            ),
-          }),
-        ),
-      );
-      if (ctx?.waitUntil) ctx.waitUntil(researchPromise);
-      else await researchPromise;
-      // Issue #705 — the weekly reflection job rides this tick (same
-      // Workers Free ceiling constraint as #354). Fire/no-fire is decided
-      // inside the route (Sunday, not already fired this week — durable
-      // guard in mas_settings), so this dispatch is unconditional.
-      const reflectionPromise = observeTickDispatch(
-        "reflection",
-        agent.fetch(
-          new Request("https://agent.internal/reflection/run", {
-            method: "POST",
-            headers: backgroundDispatchHeadersWithTrace(
-              userLogin,
-              formatTraceparent(childSpan(tickTrace)),
-            ),
-          }),
-        ),
-      );
-      if (ctx?.waitUntil) ctx.waitUntil(reflectionPromise);
-      else await reflectionPromise;
-      // Issue #754 — the weekly strategy-weight adjustment rides this
-      // tick (same Workers Free ceiling constraint as #354/#705).
-      // Fire/no-fire is decided inside the job (ISO-week guard +
-      // adaptation kill switch in mas_settings), so this dispatch is
-      // unconditional; skips are cheap and explicit in the job result.
-      const weightsPromise = observeTickDispatch(
-        "adaptation",
-        agent.fetch(
-          new Request("https://agent.internal/adaptation/weights/run", {
-            method: "POST",
-            headers: backgroundDispatchHeadersWithTrace(
-              userLogin,
-              formatTraceparent(childSpan(tickTrace)),
-            ),
-          }),
-        ),
-      );
-      if (ctx?.waitUntil) ctx.waitUntil(weightsPromise);
-      else await weightsPromise;
-      // Issue #1169 (S4-4) — the weekly corpus sync rides this tick
-      // (same Workers Free ceiling constraint as #354/#705/#754).
-      // Fire/no-fire is decided inside the route (weekly guard +
-      // durable marker in mas_settings), so this dispatch is
-      // unconditional; skips are cheap and explicit in the route
-      // result.
-      const corpusSyncPromise = observeTickDispatch(
-        "corpus-sync",
-        agent.fetch(
-          new Request("https://agent.internal/knowledge/corpus-sync", {
-            method: "POST",
-            headers: backgroundDispatchHeadersWithTrace(
-              userLogin,
-              formatTraceparent(childSpan(tickTrace)),
-            ),
-          }),
-        ),
-      );
-      if (ctx?.waitUntil) ctx.waitUntil(corpusSyncPromise);
-      else await corpusSyncPromise;
-      // Issue #3527 (S4) — the weekly reports canonical-index
-      // sweep rides this tick on its OWN rider (same Workers Free
-      // ceiling constraint as #354/#705/#754/#1169). Until S4 the
-      // sweep was a leg inside the corpus sync, gated by the
-      // corpus marker; it is reports machinery, so it now
-      // dispatches to its own route, which decides fire/no-fire
-      // from its own weekly guard + durable marker
-      // (reports_index_backfill_last_run in mas_settings). The
-      // dispatch is unconditional; skips are cheap and explicit
-      // in the route result.
-      const reportsBackfillPromise = observeTickDispatch(
-        "reports-index-backfill",
-        agent.fetch(
-          new Request("https://agent.internal/trading/reports/index-backfill-sweep", {
-            method: "POST",
-            headers: backgroundDispatchHeadersWithTrace(
-              userLogin,
-              formatTraceparent(childSpan(tickTrace)),
-            ),
-          }),
-        ),
-      );
-      if (ctx?.waitUntil) ctx.waitUntil(reportsBackfillPromise);
-      else await reportsBackfillPromise;
-      // Issue #2659 (monetization Phase 2.4) — the scheduled
-      // digest pass rides this tick (same Workers Free ceiling
-      // constraint as #354/#705/#754/#1169: no new cron trigger).
-      // Fire/no-fire is decided inside the route (once per UTC
-      // day — durable marker in agent_digest_pass_days), so this
-      // dispatch is unconditional; the route returns fired:false
-      // on later ticks the same day, and the tick supplies no
-      // itemsByUser, so scheduled sends use the digest content
-      // provider (#2981: tenant projection highlights); a
-      // subscriber with no windowed reports honestly skips.
-      // Dispatches as the service user
-      // (backgroundDispatchHeaders), which is the only identity
-      // the run-due route accepts.
-      const digestPassPromise = agent.fetch(
-        new Request("https://agent.internal/payments/agentic/commercial/lifecycle/digest/run-due", {
-          method: "POST",
-          headers: backgroundDispatchHeadersWithTrace(
-            userLogin,
-            formatTraceparent(childSpan(tickTrace)),
-          ),
-        })
-      );
-      if (ctx?.waitUntil) ctx.waitUntil(digestPassPromise);
-      else await digestPassPromise;
-      // Issue #1077 Phase 5b slice 1: the parallel social tick is gone.
-      // Social posting is now a ScheduledAgent goal ("daily-social-post",
-      // disabled by default) evaluated by the onCron call at the top of
-      // this branch — no second scheduler, no second fire check.
+    const entryPoint = resolveCronEntryPoint(event?.cron);
+    if (!entryPoint) {
+      structuredLog.info("scheduled.unknown-cron", {
+        cron: String(event?.cron),
+        message: "no entry point; ignoring (no dispatch, no ledger row)",
+      });
       return;
     }
-    // Renew all account-scoped Durable Object tokens before midnight ET.
-    if (event?.cron === "0 3 * * *") {
-      const renewPromise = renewAllStoredETradeTokens(env).then((counts) => {
-        console.info("[scheduled] E*TRADE account-token renewal completed", counts);
-      });
-      if (ctx?.waitUntil) ctx.waitUntil(renewPromise);
-      else await renewPromise;
-      // Issue #255 — nightly mas_messages retention pass (0 4 * * * cron in
-      // wrangler.jsonc). Enforces the retention window and records one
-      // mas_events row per run.
-    } else if (event?.cron === "0 4 * * *") {
-      if (!userLogin || !serviceProvisioned) {
-        console.error(
-          "[scheduled] SERVICE_USER_LOGIN is not configured or the service user is not provisioned for the platform tier — skipping the retention dispatch rather than running unattended work without a verified identity (#2331 slice 2)."
-        );
-        return;
+    // Issue #3121 S5 — the ledger-row poster. Production wiring for
+    // the entry points' `recordDispatch` dep: POST the record route
+    // via the shared Orchestrator stub, under the background headers.
+    // NEVER throws — a record failure is logged and resolved, so it
+    // can never fail the dispatch it records. When no service user
+    // is configured the route answers 401 (nothing is background
+    // without one); that is expected for the renewal row in that
+    // state — the row is best-effort until the service user is
+    // configured, and lands normally once it is.
+    const recordDispatch = async (
+      input: CronDispatchRecordInput,
+    ): Promise<void> => {
+      try {
+        const response = (await agent.fetch(
+          new Request("https://agent.internal/schedules/record-cron-dispatch", {
+            method: "POST",
+            headers: backgroundDispatchHeaders(userLogin ?? ""),
+            body: JSON.stringify(input),
+          }),
+        )) as unknown as { status?: unknown };
+        if (
+          !response ||
+          typeof response.status !== "number" ||
+          response.status >= 400
+        ) {
+          structuredLog.error("scheduled.cron-dispatch-record-failed", {
+            entryPoint: input.entryPoint,
+            status:
+              typeof response?.status === "number"
+                ? response.status
+                : "unknown",
+            message: "the dispatch stands, the row is missing",
+          });
+        }
+      } catch (err) {
+        structuredLog.error("scheduled.cron-dispatch-record-failed", {
+          entryPoint: input.entryPoint,
+          error: err instanceof Error ? err.message : String(err),
+          message:
+            "record fetch failed; the dispatch stands, the row is missing",
+        });
       }
-      const retentionPromise = agent.fetch(
-        new Request("https://agent.internal/schedules/trigger-retention", {
-          method: "POST",
-          headers: { ...backgroundDispatchHeaders(userLogin) },
-        })
-      );
-      if (ctx?.waitUntil) ctx.waitUntil(retentionPromise);
-      else await retentionPromise;
-    }
+    };
+    const deps: CronEntryPointDeps = {
+      cron: event.cron,
+      entryPoint,
+      serviceUserLogin: userLogin,
+      serviceProvisioned,
+      orchestrator: agent,
+      scheduledAgent: actorGateway.stub<{
+        onCron(): Promise<unknown>;
+      }>(env.SCHEDULED_AGENT, "default"),
+      // The renewal call lives in the entry point; this only binds
+      // the environment (the S5-P08 thinness pin keeps the call
+      // itself out of this dispatcher).
+      renewTokens: renewAllStoredETradeTokens.bind(null, env),
+      createSink: () => createObservabilitySink(env),
+      slackPoster: async (text: string) => {
+        await postSlackText({
+          post: resourceSlackPost,
+          env: env as unknown as SlackDeliveryEnv,
+          text,
+        });
+      },
+      dispatchAndAwait: async (promise: Promise<unknown>) => {
+        if (ctx?.waitUntil) ctx.waitUntil(promise);
+        else await promise;
+      },
+      recordDispatch,
+      now: () => new Date(),
+      logError: (...args: unknown[]) => {
+        structuredLog.error(
+          "scheduled.cron-entry-point-error",
+          formatCronLogArgs(args),
+        );
+      },
+      logInfo: (...args: unknown[]) => {
+        structuredLog.info(
+          "scheduled.cron-entry-point-info",
+          formatCronLogArgs(args),
+        );
+      },
+    };
+    await runCronEntryPoint(entryPoint, deps);
 }
 
 /**

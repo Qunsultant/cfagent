@@ -83,6 +83,10 @@ describe("worker scheduled() social dispatch (Phase 5b slice 1)", () => {
     // corpus sync, which it used to ride as a leg) — the set
     // grows by exactly that one path; the invariant (no social
     // dispatch, no unlisted fetch) is unchanged.
+    // Issue #3121 S5: the tick records its own dispatch — one
+    // ledger-row POST to the record route joins the pinned set;
+    // the invariant (no social dispatch, no unlisted fetch) is
+    // unchanged.
     expect(agentFetchCalls.sort()).toEqual([
       "/adaptation/weights/run",
       "/knowledge/corpus-sync",
@@ -90,6 +94,7 @@ describe("worker scheduled() social dispatch (Phase 5b slice 1)", () => {
       "/payments/agentic/commercial/lifecycle/digest/run-due",
       "/reflection/run",
       "/research/scheduled-tick",
+      "/schedules/record-cron-dispatch",
       // Issue #3527 (S4): the reports index-backfill sweep's own rider.
       "/trading/reports/index-backfill-sweep",
     ]);
@@ -104,7 +109,9 @@ describe("worker scheduled() social dispatch (Phase 5b slice 1)", () => {
     // Fail closed: with no configured service identity, the tick and
     // the dispatches are skipped (#2331 slice 2 gates the tick too) —
     // no dispatch carries a fabricated identity, and nothing throws.
-    expect(agentFetchCalls).toEqual([]);
+    // Issue #3121 S5: the skip itself is recorded — exactly one
+    // ledger-row POST, and nothing else.
+    expect(agentFetchCalls).toEqual(["/schedules/record-cron-dispatch"]);
   });
 
   it("runs no social work on crons other than */30", async () => {

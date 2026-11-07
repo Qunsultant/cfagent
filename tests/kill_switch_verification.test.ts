@@ -73,9 +73,19 @@ describe("entry-point enumeration (#756)", () => {
     // The entry dispatches the route over HTTP; it names the path, not
     // the function. Slice 8 of #2902 moves the scheduled tick from
     // server.ts to src/server/routes/queue.ts, so the entry surface is
-    // both files.
+    // both files. Issue #3121 S5 moves the tick dispatch itself out
+    // of queue.ts into the named entry point module
+    // (src/services/consolidatedCronEntries.ts), so the surface is
+    // now all three files — the halt story is unchanged: the route
+    // self-checks the switch, and the entry point only dispatches
+    // over HTTP, never applying weights itself.
     const entry = prodFiles
-      .filter((f) => f.rel === "server.ts" || f.rel === "server/routes/queue.ts")
+      .filter(
+        (f) =>
+          f.rel === "server.ts" ||
+          f.rel === "server/routes/queue.ts" ||
+          f.rel === "services/consolidatedCronEntries.ts",
+      )
       .map((f) => f.text)
       .join("\n");
     expect(entry).toContain("/adaptation/weights/run");

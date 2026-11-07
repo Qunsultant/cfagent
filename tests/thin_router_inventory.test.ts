@@ -899,6 +899,9 @@ const EXPECTED_INVENTORY = [
   "handleSchedulesRoutes :: endsWith(\"/schedules/trigger-screen\")",
   "handleSchedulesRoutes :: endsWith(\"/schedules/trigger-renew\")",
   "handleSchedulesRoutes :: endsWith(\"/schedules/trigger-options-analysis\")",
+  // Issue #3121 S5: the cron-dispatch ledger record route, placed
+  // immediately before the trigger-retention branch it sits next to.
+  "handleSchedulesRoutes :: endsWith(\"/schedules/record-cron-dispatch\")",
   "handleSchedulesRoutes :: endsWith(\"/schedules/trigger-retention\")",
   "handleSchedulesRoutes :: endsWith(\"/schedules/trigger-iv-collection\")",
   "handleSchedulesRoutes :: endsWith(\"/schedules/trigger-discovery\")",

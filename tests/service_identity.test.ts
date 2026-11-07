@@ -134,6 +134,10 @@ describe("worker scheduled() (#1185)", () => {
       "/trading/reports/index-backfill-sweep",
       // Issue #2659 (Phase 2.4): the scheduled digest pass rides this tick.
       "/payments/agentic/commercial/lifecycle/digest/run-due",
+      // Issue #3121 S5: the tick records its own dispatch — one
+      // ledger-row POST to the record route, last, under the same
+      // service identity.
+      "/schedules/record-cron-dispatch",
     ]);
     for (const req of search.requests) {
       expect(req.headers.get("x-user-login")).toBe(SERVICE_LOGIN);
@@ -142,25 +146,69 @@ describe("worker scheduled() (#1185)", () => {
 
   it("skips the tick and the identity-bearing dispatches when the service user is unprovisioned (#2331 slice 2)", async () => {
     const { env, search } = fakeEnv(SERVICE_LOGIN, { provisioned: false });
-    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     try {
       await (worker as any).scheduled({ cron: "*/30 * * * *" }, env, undefined);
-      expect(search.requests).toHaveLength(0);
-      expect(errSpy).toHaveBeenCalled();
+      // Issue #3121 S5: the tick's six dispatches are skipped, but
+      // the skip itself is recorded — exactly one ledger-row POST,
+      // and nothing else.
+      expect(search.requests.map((r) => new URL(r.url).pathname)).toEqual([
+        "/schedules/record-cron-dispatch",
+      ]);
+      // The denial is logged LOUD through the structured logger
+      // (#3515 S2 seam): the unbound sink writes the event as one
+      // JSON line on console.info — assert on operation + level +
+      // fields, not on a raw console.error call.
+      const denial = infoSpy.mock.calls
+        .map((call) => {
+          try {
+            return JSON.parse(String(call[0]));
+          } catch {
+            return null;
+          }
+        })
+        .find(
+          (event) =>
+            event?.operation === "scheduled.cron-entry-point-error" &&
+            event?.level === "error",
+        );
+      expect(denial).toBeDefined();
+      expect(String(denial?.fields?.message)).toContain("not provisioned");
     } finally {
-      errSpy.mockRestore();
+      infoSpy.mockRestore();
     }
   });
 
   it("skips the identity-bearing dispatches when no service identity is configured", async () => {
     const { env, search } = fakeEnv(undefined);
-    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     try {
       await (worker as any).scheduled({ cron: "*/30 * * * *" }, env, undefined);
-      expect(search.requests).toHaveLength(0);
-      expect(errSpy).toHaveBeenCalled();
+      // Issue #3121 S5: the tick's six dispatches are skipped, but
+      // the skip itself is recorded — exactly one ledger-row POST,
+      // and nothing else.
+      expect(search.requests.map((r) => new URL(r.url).pathname)).toEqual([
+        "/schedules/record-cron-dispatch",
+      ]);
+      // The denial is logged LOUD through the structured logger
+      // (#3515 S2 seam) — see the unprovisioned test above.
+      const denial = infoSpy.mock.calls
+        .map((call) => {
+          try {
+            return JSON.parse(String(call[0]));
+          } catch {
+            return null;
+          }
+        })
+        .find(
+          (event) =>
+            event?.operation === "scheduled.cron-entry-point-error" &&
+            event?.level === "error",
+        );
+      expect(denial).toBeDefined();
+      expect(String(denial?.fields?.message)).toContain("not provisioned");
     } finally {
-      errSpy.mockRestore();
+      infoSpy.mockRestore();
     }
   });
 });
