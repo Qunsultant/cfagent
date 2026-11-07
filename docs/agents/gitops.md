@@ -150,6 +150,8 @@ Private security findings MUST use the approved private reporting process rather
 
 Every issue carries its creating agent's name as a hashtag in the `## Agent` field — attribution is how lanes establish ownership and answer "whose work is this?" without archaeology (owner direction, 2026-10-20).
 
+The issue templates live in `.github/ISSUE_TEMPLATE/` on the default branch — GitHub reads issue templates only from that directory, so a template anywhere else never surfaces in the New Issue chooser. Every template carries a per-doc conformance checklist (platforms.md, ADD.md, standards.md, gitops.md, tech-standards.md, anti-drift.md, ux-architecture.md) and a required before/after journey-impact statement; an issue with an unanswered checklist line or a missing journey-impact statement is incomplete.
+
 ```markdown
 ## Agent
 #<agent-hashtag>
@@ -164,6 +166,11 @@ What observable result is required?
 Journey (which user journey this change serves):
 User (who the user is):
 How value surfaces in UX (what the user sees/does differently):
+
+Journey impact — REQUIRED before/after statement (an issue without it is incomplete):
+- Journey today (how it works now, before this change):
+- Journey after this change (how it works once this lands):
+- What the user sees/does differently (be specific; where the change touches navigation, name the nav/preset states — which items appear/disappear, which preset is active, what an empty selection shows):
 
 ## Scope
 Included:
@@ -192,6 +199,16 @@ Architecture surfaces touched + patterns/boundaries/ADRs followed (or none):
 Reused surfaces (existing implementations reused):
 Rework justification (if rebuilding an existing capability, why — otherwise none):
 Regression risk + pins preserving existing behavior:
+
+### Per-doc conformance checklist (REQUIRED — answer every line; an unanswered line makes the issue incomplete)
+For each doc, write `applies (evidence: …)` or `N/A (reason: …)`:
+- [ ] `docs/agentic-org/platforms.md` — applies (evidence: ) / N/A (reason: )
+- [ ] `docs/architecture/ADD.md` — applies (evidence: ) / N/A (reason: )
+- [ ] `docs/architecture/standards/standards.md` — applies (evidence: ) / N/A (reason: )
+- [ ] `docs/agents/gitops.md` — applies (evidence: ) / N/A (reason: )
+- [ ] `docs/agents/tech-standards.md` — applies (evidence: ) / N/A (reason: )
+- [ ] `docs/compliance/anti-drift.md` — applies (evidence: ) / N/A (reason: )
+- [ ] `docs/agents/ux-architecture.md` — applies (evidence: ) / N/A (reason: )
 
 ## Agentic design (docs/agents)
 Allocation is a decision, not a default — do NOT turn every service into an agent.
