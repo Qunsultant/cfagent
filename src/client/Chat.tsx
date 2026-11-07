@@ -1433,7 +1433,7 @@ export function Chat({ user }: { user: User }) {
             <MarketDataResearchHub
               user={user}
               onSendPrompt={(prompt, sourceTab) => {
-                setPendingPrompt({ prompt, sourceTab: sourceTab || "Yahoo Finance Research" });
+                setPendingPrompt({ prompt, sourceTab: sourceTab || "Market Data Research" });
                 handleSelectTab("chat");
               }}
               onTradeSymbol={(symbol) => {
