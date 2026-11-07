@@ -31,12 +31,15 @@ import { fileURLToPath } from "node:url";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
-const { mockSendMessage } = vi.hoisted(() => ({ mockSendMessage: vi.fn() }));
+const { mockSendMessage, mockChatMessages } = vi.hoisted(() => ({
+  mockSendMessage: vi.fn(),
+  mockChatMessages: [] as any[],
+}));
 
 // Mock agent chat hooks
 vi.mock("@cloudflare/ai-chat/react", () => ({
   useAgentChat: () => ({
-    messages: [],
+    messages: mockChatMessages,
     sendMessage: mockSendMessage,
     status: "ready",
     error: null,
@@ -295,6 +298,56 @@ describe("AgentChatTabContent Multi-Copilot Sub-Tabs & View Isolation (#3449)", 
       expect(container!.querySelector("[data-testid='stock-copilot-panel']")).toBeNull();
     } finally {
       unregister();
+    }
+  });
+
+  it("in stock view with active conversation: renders persistent collapsible prompt chips bar above composer (#3656)", async () => {
+    mockChatMessages.push(
+      { id: "1", role: "user", parts: [{ type: "text", text: "Hello Stock Copilot" }] },
+      { id: "2", role: "assistant", parts: [{ type: "text", text: "Ready to assist." }] },
+    );
+
+    try {
+      window.history.replaceState({}, "", "/?tab=chat&view=stock");
+      await renderChat();
+
+      // Zero-state hero is hidden when messages exist
+      expect(container!.querySelector(".hero-welcome")).toBeNull();
+
+      // Persistent prompt chips bar IS rendered above composer
+      const chipsBar = container!.querySelector("[data-testid='copilot-quick-chips-bar']");
+      expect(chipsBar).not.toBeNull();
+      expect(chipsBar!.textContent).toContain("▼ Prompts");
+      expect(chipsBar!.textContent).toContain("Buy AAPL Bracket");
+
+      // Clicking a chip invokes sendMessage
+      const aaplChip = Array.from(chipsBar!.querySelectorAll("button")).find((b) =>
+        b.textContent?.includes("Buy AAPL Bracket")
+      );
+      expect(aaplChip).toBeDefined();
+
+      await act(async () => {
+        aaplChip!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+
+      expect(mockSendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          text: expect.stringContaining("Draft a limit buy order for 10 AAPL"),
+        })
+      );
+
+      // Collapsing the bar hides chips and shows expand toggle
+      const toggleBtn = container!.querySelector<HTMLButtonElement>("[data-testid='toggle-copilot-chips']");
+      expect(toggleBtn).not.toBeNull();
+
+      await act(async () => {
+        toggleBtn!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+
+      expect(container!.querySelector("[data-testid='toggle-copilot-chips']")?.textContent).toContain("▶ Prompts");
+      expect(chipsBar!.textContent).not.toContain("Buy AAPL Bracket");
+    } finally {
+      mockChatMessages.length = 0;
     }
   });
 });
