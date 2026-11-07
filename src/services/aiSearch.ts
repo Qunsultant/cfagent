@@ -33,6 +33,13 @@ import {
 // KnowledgeError — its code/message/remediation live in
 // src/aspects/errorCodes.ts, never inline here.
 import { KnowledgeError, KnowledgeErrorCode } from "../aspects/errorCodes";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/aiSearch",
+});
 
 /**
  * Issue #1169 (S2): a flag-ON mapping failure, typed and explicit.
@@ -268,7 +275,10 @@ export class AiSearchInstanceService {
    */
   async searchFinancialDocs(query: string, limit: number = 5): Promise<AISearchQueryResponse> {
     void limit;
-    console.warn(`[knowledgeSearch] aiSearch degraded reason=endpoint_not_configured`);
+    structuredLog.warn("aiSearch.search_financial_docs_degraded", {
+      message: "[knowledgeSearch] aiSearch degraded reason=endpoint_not_configured",
+      degraded: "endpoint_not_configured",
+    });
     return {
       query,
       results: [],

@@ -38,6 +38,13 @@ import type {
 } from "../data/adaptationAuditPorts";
 import type { SettingsReadPort } from "../data/settingsReadPorts";
 import type { SqlStorage } from "../data/repositoryPorts";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/adaptationAudit",
+});
 
 export { DEFAULT_ADAPTATION_BUDGET };
 export type {
@@ -145,10 +152,10 @@ export function isAdaptationHalted(sql: any): boolean {
     const v = String(value).trim().toLowerCase();
     return v === "on" || v === "1" || v === "true";
   } catch (err) {
-    console.error(
-      "[Adaptation] Kill-switch read failed; halting adaptation (fail-closed):",
-      err
-    );
+    structuredLog.error("adaptation.kill_switch_read_failed", {
+      message: "[Adaptation] Kill-switch read failed; halting adaptation (fail-closed)",
+      error: err instanceof Error ? err.message : String(err),
+    });
     return true;
   }
 }
@@ -216,7 +223,11 @@ export function applyAdaptation(
     const verdict = evaluateAdaptationBudget(sql, rec.subject, rec.delta, now);
     if (!verdict.allowed) {
       recordBlockedAdaptation(sql, rec, verdict.reason!, now);
-      console.error(`[Adaptation] Blocked adaptation for ${rec.subject}: ${verdict.reason}`);
+      structuredLog.error("adaptation.blocked", {
+        message: `[Adaptation] Blocked adaptation for ${rec.subject}: ${verdict.reason}`,
+        subject: rec.subject,
+        reason: verdict.reason,
+      });
       return { applied: false, reason: verdict.reason };
     }
   }

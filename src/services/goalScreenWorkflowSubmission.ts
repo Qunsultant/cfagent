@@ -32,6 +32,14 @@ import {
 } from "../observability/aspects";
 import type { ObservabilitySink } from "../observability/observabilityPorts";
 import type { ScenarioDefinition } from "./goalScenarioEngine";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/goalScreenWorkflowSubmission",
+});
+
 
 /** Inputs to a goal-screen workflow submission (both entries build the same shape). */
 export interface GoalScreenSubmissionInput {
@@ -165,12 +173,12 @@ export async function startGoalScreenWorkflow(
     // Operator surface only: the code + job id identify the
     // failure in dashboard logs; the message stays out of the
     // client body and the event stream.
-    console.warn(
-      "[goal-screen-workflow] Start failed:",
-      err instanceof WorkflowError ? err.code : "start_failed",
-      command.jobId,
-      err instanceof Error ? err.message : String(err),
-    );
+    structuredLog.warn("goalScreenWorkflowSubmission.start_failed", {
+      message: "[goal-screen-workflow] Start failed",
+      code: err instanceof WorkflowError ? err.code : "start_failed",
+      jobId: command.jobId,
+      error: err instanceof Error ? err.message : String(err),
+    });
     throw err;
   }
 }

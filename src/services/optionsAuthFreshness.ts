@@ -85,6 +85,14 @@ import {
   type ETradeAuthPreflightDeps,
 } from "./etradeAuthPreflight";
 import { codedMessage } from "../outcomes/outcomeAspects";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/optionsAuthFreshness",
+});
+
 
 /**
  * Slice-chosen default for the degraded-mode threshold, in minutes.
@@ -207,10 +215,10 @@ export async function guardManualOptionsAuth(
           );
     return { proceed: false, status: 401, error };
   } catch (err) {
-    console.warn(
-      "[optionsAuthFreshness] manual auth guard error (proceeding without it):",
-      err instanceof Error ? err.message : String(err),
-    );
+    structuredLog.warn("optionsAuthFreshness.manual_auth_guard_error", {
+      message: "[optionsAuthFreshness] manual auth guard error (proceeding without it)",
+      error: err instanceof Error ? err.message : String(err),
+    });
     return { proceed: true, renewed: false };
   }
 }

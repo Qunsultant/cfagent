@@ -30,6 +30,13 @@
  */
 
 import type { ScreenerPdfOptions } from "../trading";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/unifiedReportPipeline",
+});
 
 export interface UnifiedReportInput {
   /** "screener" for stock, "options" for options screener, "research" for research runs (#1641) */
@@ -168,11 +175,14 @@ export async function generateReportStage(
       {
         label: `report-pdf:${input.type}/${input.trigger}`,
         onRetry: (event) => {
-          console.warn(
-            `[UnifiedReport] PDF generation attempt ${event.attempt} failed (${input.type}/${input.trigger}):`,
-            event.error,
-            `— retrying in ${Math.round(event.delayMs)}ms`
-          );
+          structuredLog.warn("unified_report.pdf_retry", {
+            message: `[UnifiedReport] PDF generation attempt ${event.attempt} failed (${input.type}/${input.trigger}): ${event.error} — retrying in ${Math.round(event.delayMs)}ms`,
+            type: input.type,
+            trigger: input.trigger,
+            attempt: event.attempt,
+            error: event.error,
+            delayMs: Math.round(event.delayMs),
+          });
         },
       }
     );
@@ -184,7 +194,12 @@ export async function generateReportStage(
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error(`[UnifiedReport] PDF generation failed (${input.type}/${input.trigger}):`, message);
+    structuredLog.error("unified_report.pdf_generation_failed", {
+      message: `[UnifiedReport] PDF generation failed (${input.type}/${input.trigger}): ${message}`,
+      type: input.type,
+      trigger: input.trigger,
+      error: message,
+    });
     return {
       pdfKey: "",
       generationId,
