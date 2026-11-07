@@ -12,6 +12,21 @@
  * stubbed exactly as the sharding tests stub them.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
+// Issue #3460 slice 3: the unified service reads the broker through the
+// presence-aware seam (no default). These tests drive the E*TRADE path,
+// so the selection is explicit here instead of relying on the default.
+vi.mock("../src/services/providerConnections", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../src/services/providerConnections")>();
+  return {
+    ...actual,
+    readTenantBrokerSelection: async () => ({
+      status: "ok",
+      brokerId: "etrade",
+    }),
+  };
+});
+
 import { ScheduledTasksService } from "../src/services/scheduledTasks";
 import { DatabaseORM } from "../src/orm";
 import type { Env } from "../src/types";

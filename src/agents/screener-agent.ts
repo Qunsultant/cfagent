@@ -1828,7 +1828,7 @@ export class ScreenerAgent extends PortThink {
     // client regardless of the selection, so an Alpaca tenant's scheduled run
     // would have screened E*TRADE data and labelled it etrade-yahoo-stocks.
     // Non-E*TRADE selections run on the neutral engines and keep their own id.
-    const { resolveTenantBroker } = await import("../services/tenantProviders");
+    const { readTenantBrokerSelection } = await import("../services/providerConnections");
     const {
       TradingPlatformRegistry,
       platformChainSource,
@@ -1837,7 +1837,14 @@ export class ScreenerAgent extends PortThink {
       NEUTRAL_STOCK_SCREENING_PROVIDER_ID,
       createRefusingOptionsScreener,
     } = await import("../trading");
-    const selectedBroker = await resolveTenantBroker(this.env);
+    // Issue #3460 slice 3: the goal leg reads the broker through the
+    // presence-aware seam — no default. Unconfigured or store failure
+    // refuses with the named reason instead of screening E*TRADE data.
+    const brokerRead = await readTenantBrokerSelection(this.env);
+    if (brokerRead.status !== "ok") {
+      throw new Error(brokerRead.error);
+    }
+    const selectedBroker = brokerRead.brokerId;
     const goalPlatform =
       selectedBroker === "etrade"
         ? null

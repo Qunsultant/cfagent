@@ -16,13 +16,20 @@
  * slice 2. When the tenant broker is not etrade, gated paths
  * return the coded FAILURE_BROKER_UNAVAILABLE response (409),
  * never an E*TRADE error and never a silent fallback. A store
- * failure fails open to etrade (resolveTenantBroker), so a
- * store outage never takes down the broker surface that
- * worked before. Returns null for every non-gated path, and
- * the orchestrator continues its sequential matching.
+ * failure fails CLOSED with a named 503 (issue #3460 slice 3):
+ * the gate cannot verify the tenant's broker, so it serves
+ * nothing rather than failing open to etrade. An unconfigured
+ * tenant still passes through to the E*TRADE surface — the S7
+ * menu makes selection explicit and retires that default.
+ * Returns null for every non-gated path, and the orchestrator
+ * continues its sequential matching.
  */
 import type { Env } from "../../types";
-import { resolveTenantBroker, brokerUnavailableResponse } from "../../services/tenantProviders";
+import {
+  brokerUnavailableResponse,
+  brokerStoreUnavailableResponse,
+} from "../../services/tenantProviders";
+import { readTenantBrokerSelection } from "../../services/providerConnections";
 
 /** The subset of OrchestratorAgent surface the broker gate needs. */
 export interface BrokerGateRouteContext {
@@ -38,9 +45,19 @@ export async function handleBrokerGateRoutes(
   ctx: BrokerGateRouteContext,
 ): Promise<Response | null> {
   if (path.includes("/etrade/") && !path.includes("/etrade/options/")) {
-    const broker = await resolveTenantBroker(ctx.env);
-    if (broker !== "etrade") {
-      return brokerUnavailableResponse(broker);
+    const read = await readTenantBrokerSelection(ctx.env);
+    if (read.status === "store_unavailable") {
+      return brokerStoreUnavailableResponse();
+    }
+    if (read.status === "unconfigured") {
+      // Issue #3460 slice 3 boundary: no selection stored yet, so the
+      // E*TRADE surface serves as before. The S7 menu retires this
+      // default by making selection explicit; the gate never invents
+      // a broker, it only passes the request through.
+      return null;
+    }
+    if (read.brokerId !== "etrade") {
+      return brokerUnavailableResponse(read.brokerId);
     }
   }
   return null;
