@@ -6,6 +6,7 @@ import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { OptionsStrategyCard } from "./OptionsStrategyCard";
+import { brokerPresentation } from "../../trading/brokerPresentation";
 export function ToolResultView({
   toolType,
   data,
@@ -188,8 +189,8 @@ export function ToolResultView({
         )}
 
         <div className="hitl-actions">
-          <Button variant="primary" tone="subtle" disabled={isBusy} onClick={() => onAction?.(`Preview buy 10 shares of ${symbol} on ETrade`)}>
-            ⚡ Preview Buy 10 {symbol} (E*TRADE)
+          <Button variant="primary" tone="subtle" disabled={isBusy} onClick={() => onAction?.(`Preview buy 10 shares of ${symbol}`)}>
+            ⚡ Preview Buy 10 {symbol}
           </Button>
           {!isReport && (
             <Button variant="secondary" tone="subtle" disabled={isBusy} onClick={() => onAction?.(`Run full market-data research on ${symbol}`)}>
@@ -227,6 +228,18 @@ export function ToolResultView({
     const quantity = data?.quantity || data?.input?.quantity || 1;
     const status = data?.status || "previewed";
     const price = data?.limitPrice || data?.estimatedPrice || data?.executionPrice || data?.lastPrice;
+    const brokerId =
+      data?.broker ||
+      data?.proposal?.broker ||
+      data?.input?.provider ||
+      (normalizedType.includes("alpaca")
+        ? "alpaca"
+        : normalizedType.includes("etrade")
+        ? "etrade"
+        : typeof orderId === "string" && orderId.startsWith("alp_")
+        ? "alpaca"
+        : "etrade");
+    const brokerLabel = brokerPresentation(brokerId).label;
 
     if (isExecution) {
       // Issue #123 (F16): FILLED/EXECUTED only on an explicit success
@@ -238,7 +251,7 @@ export function ToolResultView({
           <div className="tool-card-header" onClick={() => setOpen(!open)}>
             <span className="tool-icon">📈</span>
             <div className="tool-summary">
-              <strong>E*TRADE Execution:</strong> {execCard.verdict} {quantity} {symbol} ({action})
+              <strong>{brokerLabel} Execution:</strong> {execCard.verdict} {quantity} {symbol} ({action})
             </div>
             <Badge size="xs" uppercase tone={execCard.pillClass === "priority-urgent" ? "danger" : execCard.pillClass}>
               {execCard.pillLabel}
@@ -263,7 +276,7 @@ export function ToolResultView({
           <div className="tool-card-header" onClick={() => setOpen(!open)}>
             <span className="tool-icon">📊</span>
             <div className="tool-summary">
-              <strong>E*TRADE Quote:</strong> {symbol} — ${(price || 0).toFixed(2)} ({data.change >= 0 ? "+" : ""}{data.change?.toFixed(2) || 0})
+              <strong>{brokerLabel} Quote:</strong> {symbol} — ${(price || 0).toFixed(2)} ({data.change >= 0 ? "+" : ""}{data.change?.toFixed(2) || 0})
             </div>
             <Badge size="xs" uppercase tone="info">Level 1 Live</Badge>
             <span className="toggle-arrow">{open ? "▲" : "▼"}</span>
@@ -293,7 +306,7 @@ export function ToolResultView({
         <div className="tool-card-header" onClick={() => setOpen(!open)}>
           <span className="tool-icon">📈</span>
           <div className="tool-summary">
-            <strong>E*TRADE Trade Intent:</strong> {action} {quantity} {symbol} {price ? `@ $${Number(price).toFixed(2)}` : ""}
+            <strong>{brokerLabel} Trade Intent:</strong> {action} {quantity} {symbol} {price ? `@ $${Number(price).toFixed(2)}` : ""}
           </div>
           <Badge size="xs" uppercase tone={previewPill.pillClass === "priority-urgent" ? "danger" : previewPill.pillClass}>
             {previewPill.pillLabel}
@@ -301,7 +314,7 @@ export function ToolResultView({
           <span className="toggle-arrow">{open ? "▲" : "▼"}</span>
         </div>
         <div className="payment-notice">
-          🛡️ <strong>Safety Guarantee:</strong> No trade will be executed without explicit authorization.{orderId && (<> E*TRADE Order ID <code>{orderId}</code> reserved.</>)}
+          🛡️ <strong>Safety Guarantee:</strong> No trade will be executed without explicit authorization.{orderId && (<> {brokerLabel} Order ID <code>{orderId}</code> reserved.</>)}
         </div>
         {orderId && status !== "executed" && status !== "rejected" && (
           <div className="hitl-actions">

@@ -1596,6 +1596,10 @@ export interface BrokerOrderDraft {
   previewMessage: string;
   previewNotes?: string;
   safetyNotice?: string;
+  broker?: string;
+  orderClass?: string;
+  takeProfit?: { limitPrice?: number };
+  stopLoss?: { stopPrice?: number; limitPrice?: number };
   expirationScheduleId?: string;
   expiresAt?: string;
   placedAt?: string;

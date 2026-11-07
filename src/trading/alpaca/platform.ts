@@ -884,6 +884,7 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
           `${legSummary} @ net ${Number(params.limitPrice).toFixed(2)} (limit). Estimated total: $${estimatedTotal.toLocaleString()} USD. ` +
           `Underlying reference: ${quote.lastPrice.toFixed(2)}. Priced locally — Alpaca has no mleg preview endpoint.`,
         safetyNotice: "SAFETY GUARANTEE: NO CAPITAL HAS BEEN MOVED. HUMAN APPROVAL REQUIRED BEFORE BROKER EXECUTION.",
+        broker: "alpaca",
         placedAt: new Date().toISOString(),
       };
     }
@@ -907,12 +908,17 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
       authorizerDid: userDid,
     });
 
+    const orderClass = params.orderClass || (params.takeProfit || params.stopLoss ? "bracket" : undefined);
     return {
       orderId,
       symbol: params.symbol.toUpperCase(),
       action,
       orderAction: action,
       orderType: params.orderType || "MARKET",
+      orderClass,
+      takeProfit: params.takeProfit,
+      stopLoss: params.stopLoss,
+      broker: "alpaca",
       quantity: params.quantity,
       estimatedPrice: quote.lastPrice,
       limitPrice: params.limitPrice,
@@ -924,7 +930,7 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
       proposerDid: didProof.proposerDid,
       authorizerDid: userDid,
       proofSignature: didProof.signature,
-      previewMessage: `Alpaca Order Preview: ${action} ${params.quantity} ${params.symbol} @ ~$${quote.lastPrice.toFixed(2)}. Estimated Total: $${estimatedTotal.toLocaleString()} USD.`,
+      previewMessage: `Alpaca Order Preview: ${action} ${params.quantity} ${params.symbol} @ ~$${quote.lastPrice.toFixed(2)}. Estimated Total: $${estimatedTotal.toLocaleString()} USD.${orderClass === "bracket" ? " (bracket: TP / SL exits)" : ""}`,
       safetyNotice: "SAFETY GUARANTEE: NO CAPITAL HAS BEEN MOVED. HUMAN APPROVAL REQUIRED BEFORE BROKER EXECUTION.",
       placedAt: new Date().toISOString(),
     };
@@ -1109,6 +1115,18 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
       ...(limitPrice !== undefined ? { limit_price: limitPrice } : {}),
       time_in_force: (params.timeInForce as any) || "day",
       ...(isExtendedSession ? { extended_hours: true } : {}),
+      ...(params.orderClass ? { order_class: params.orderClass } : {}),
+      ...(params.takeProfit?.limitPrice !== undefined
+        ? { take_profit: { limit_price: params.takeProfit.limitPrice } }
+        : {}),
+      ...(params.stopLoss?.stopPrice !== undefined
+        ? {
+            stop_loss: {
+              stop_price: params.stopLoss.stopPrice,
+              ...(params.stopLoss.limitPrice !== undefined ? { limit_price: params.stopLoss.limitPrice } : {}),
+            },
+          }
+        : {}),
     });
     if (!placed.success || !placed.orderId) {
       if (placed.success) {

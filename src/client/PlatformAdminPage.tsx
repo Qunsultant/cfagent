@@ -36,6 +36,7 @@ import { NavIcons } from "./components/NavigationMenu";
 import React, { useCallback, useEffect, useState } from "react";
 import {
   Card,
+  Grid,
   PageShell,
   Tabs,
   TabPanel,
@@ -55,6 +56,7 @@ import {
 import { AsyncJobsPanel } from "./AsyncJobsPanel";
 import { ApiKeysPanel } from "./ApiKeysPanel";
 import { DataProvidersPanel } from "./DataProvidersPanel";
+import { AlpacaSignInCard } from "./AlpacaSignInCard";
 import { TenantAdminPanel } from "./TenantAdminPanel";
 import { DataLifecyclePanel } from "./DataLifecyclePanel";
 import { ChannelsAdminPanel } from "./ChannelsAdminPanel";
@@ -275,6 +277,16 @@ export function PlatformAdminPage({
             <small>Provisioning lifecycle for market-data providers</small>
           </div>
           <DataProvidersPanel />
+        </Card>
+        <Card padding="md">
+          <div className="section-label-row">
+            <span>BYOK Provider Credentials</span>
+            <small>Bring Your Own Keys for broker execution and market data</small>
+          </div>
+          <Grid columns={2} gap="3">
+            <AlpacaSignInCard activeEnv="TEST" collapsedWhenConfigured={false} />
+            <AlpacaSignInCard activeEnv="PROD" collapsedWhenConfigured={false} />
+          </Grid>
         </Card>
       </TabPanel>
 
