@@ -231,13 +231,10 @@ describe("outcome catalog: run detail messages (#2608)", () => {
 
   it("carries the 18 RUN_* messages as a top-level section, never as outcome keys", () => {
     expect(Object.keys(runMessages).sort()).toEqual([...RUN_CODES].sort());
-    // 96 on main 57ddac0c: 93 at 5d86b892 + 3 checkout/promotions
-    // codes that landed on main meanwhile
-    // (FAILURE_CHECKOUT_PORT_BREAKER_OPEN,
-    // FAILURE_CHECKOUT_PORT_TIMEOUT,
-    // FAILURE_PROMOTIONS_ACTIVE_CHECK_QUERY). The count pins
+    // 97 on the #3572 rebased head: 96 on main 17ab0c5c + 1 slice
+    // code (FAILURE_TOP_UP_RECONCILE_REQUIRED). The count pins
     // that no RUN_* code leaked into "outcomes".
-    expect(Object.keys(outcomes)).toHaveLength(96);
+    expect(Object.keys(outcomes)).toHaveLength(97);
     expect(Object.keys(outcomes).some((k) => k.startsWith("RUN_"))).toBe(false);
     for (const code of RUN_CODES) {
       expect(code).toMatch(/^RUN_[A-Z_]+$/);

@@ -4,7 +4,7 @@
  * store: it exists so the draft contract is testable without any
  * store at all.
  */
-import type { TopUpDraft, TopUpDraftStore } from "./topUpPorts";
+import { TopUpClaimRefusedError, type TopUpDraft, type TopUpDraftStore } from "./topUpPorts";
 
 export class InMemoryTopUpAdapter implements TopUpDraftStore {
   private readonly rows = new Map<string, TopUpDraft>();
@@ -19,13 +19,38 @@ export class InMemoryTopUpAdapter implements TopUpDraftStore {
     return row ? { ...row } : null;
   }
 
+  /**
+   * Claim-before-credit (#3572): the check-and-set below is synchronous
+   * (no await between them), so it is atomic in the isolate — exactly
+   * one confirmer can move a minted draft to crediting.
+   */
+  async claimForCredit(id: string): Promise<TopUpDraft> {
+    const row = this.rows.get(id);
+    if (!row) throw new Error(`Unknown top-up draft ${id}.`);
+    if (row.status !== "minted") throw new TopUpClaimRefusedError(id, row.status, "claim");
+    const next: TopUpDraft = { ...row, status: "crediting" };
+    this.rows.set(id, next);
+    return { ...next };
+  }
+
+  /** Release a claim (crediting → minted); same synchronous mechanism. */
+  async releaseClaim(id: string): Promise<TopUpDraft> {
+    const row = this.rows.get(id);
+    if (!row) throw new Error(`Unknown top-up draft ${id}.`);
+    if (row.status !== "crediting") throw new TopUpClaimRefusedError(id, row.status, "release");
+    const next: TopUpDraft = { ...row, status: "minted" };
+    this.rows.set(id, next);
+    return { ...next };
+  }
+
   async markCredited(
     id: string,
     update: { creditedAtMs: number; paymentIntentId: string | null; checkoutSessionId: string | null },
   ): Promise<TopUpDraft> {
     const row = this.rows.get(id);
     if (!row) throw new Error(`Unknown top-up draft ${id}.`);
-    if (row.status !== "minted") throw new Error(`Top-up ${id} is already credited.`);
+    if (row.status === "credited") throw new Error(`Top-up ${id} is already credited.`);
+    if (row.status !== "crediting") throw new Error(`Top-up ${id} is not crediting.`);
     const next: TopUpDraft = { ...row, status: "credited", ...update };
     this.rows.set(id, next);
     return { ...next };
