@@ -35,6 +35,7 @@ import {
   recordPipelineCompletion,
   listPipelineCompletions,
   pipelineAnalyzeJobIds,
+  pipelineDeliverJobIds,
   pipelineGenerateJobIds,
   pipelineEnrichJobIds,
   pipelineJobIds,
@@ -135,15 +136,18 @@ describe("pipeline host wiring (#3543)", () => {
     // enrich jobs declare alongside them under the same prefix.
     // #3537 pin update (§7): the analyze jobs join the set too.
     // #3538 pin update (§7): the generate jobs join the set too.
+    // #3539 pin update (§7): the deliver jobs join the set too.
     expect(pipelineJobIds()).toHaveLength(7);
     expect(pipelineEnrichJobIds()).toHaveLength(5);
     expect(pipelineAnalyzeJobIds()).toHaveLength(5);
     expect(pipelineGenerateJobIds()).toHaveLength(5);
+    expect(pipelineDeliverJobIds()).toHaveLength(5);
     const ids = [
       ...pipelineJobIds(),
       ...pipelineEnrichJobIds(),
       ...pipelineAnalyzeJobIds(),
       ...pipelineGenerateJobIds(),
+      ...pipelineDeliverJobIds(),
     ];
     expect(Object.keys(tasks).sort()).toEqual(
       ids.map((id) => `${PIPELINE_TASK_ID_PREFIX}${id}`).sort(),

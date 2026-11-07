@@ -55,6 +55,10 @@ import {
   registerGenerateStep,
   type GenerateStepDeps,
 } from "./generatePipelineJobs";
+import {
+  registerDeliverStep,
+  type DeliverStepDeps,
+} from "./deliverPipelineJobs";
 import type { JobPipelineStores } from "../data/jobPipelinePorts";
 import type {
   JobPipelineControl,
@@ -372,26 +376,29 @@ export function registerEnrichStep(
 
 /**
  * THE composed step registry — the feed steps plus enrich.apply
- * plus analyze.apply (#3537) plus generate.apply (#3538), built
- * identically in every residency (the ScheduledAgent host, the
- * workflow start path, the workflow itself). One registry, one
- * engine, every stage family so far. The analyze deps are the
- * third argument and the generate deps the fourth: production
- * compositions always pass them; a stage-scoped test registry
- * may omit them (the registry then simply lacks those steps,
- * exactly as registerEnrichStep alone composes an enrich-only
- * registry).
+ * plus analyze.apply (#3537) plus generate.apply (#3538) plus
+ * deliver.apply (#3539), built identically in every residency
+ * (the ScheduledAgent host, the workflow start path, the
+ * workflow itself). One registry, one engine, every stage
+ * family. The analyze deps are the third argument, the
+ * generate deps the fourth, and the deliver deps the fifth:
+ * production compositions always pass them; a stage-scoped
+ * test registry may omit them (the registry then simply lacks
+ * those steps, exactly as registerEnrichStep alone composes
+ * an enrich-only registry).
  */
 export function createPipelineStepRegistry(
   feedDeps: FeedStepDeps,
   enrichDeps: EnrichStepDeps,
   analyzeDeps?: AnalyzeStepDeps,
   generateDeps?: GenerateStepDeps,
+  deliverDeps?: DeliverStepDeps,
 ): JobStepRegistry {
   const registry = createFeedStepRegistry(feedDeps);
   registerEnrichStep(registry, enrichDeps);
   if (analyzeDeps) registerAnalyzeStep(registry, analyzeDeps);
   if (generateDeps) registerGenerateStep(registry, generateDeps);
+  if (deliverDeps) registerDeliverStep(registry, deliverDeps);
   return registry;
 }
 

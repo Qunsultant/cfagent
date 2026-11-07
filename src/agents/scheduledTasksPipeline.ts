@@ -89,6 +89,13 @@ import {
   GENERATE_PIPELINE_CATALOG,
   type GenerateStepDeps,
 } from "../services/generatePipelineJobs";
+import { buildDeliverJobRegistry, createDeliverChannelSenders } from "../services/deliverJobs";
+import {
+  ensureDeliverPipelineJobs,
+  DELIVER_PIPELINE_CATALOG,
+  type DeliverStepDeps,
+} from "../services/deliverPipelineJobs";
+import { createDeliveryDatasetPorts } from "../data/createDeliveryDatasetPorts";
 import { createCaptureWiredFeedProvider } from "../services/feedProviderWiring";
 import {
   createIndexMembershipService,
@@ -289,12 +296,55 @@ export function generateStepDepsForScheduledAgent(
 }
 
 /**
+ * The deliver-step wiring for this host residency (#3539):
+ * both of the deliver step's dataset stores are D1-resident
+ * (the generate stage's persisted copies and this stage's
+ * delivery copies — the status surfaces' readers run in other
+ * instances), so the wiring needs no DO-storage seam and the
+ * step executes fully in every residency, like generate.apply.
+ *
+ * The channel senders are built from this host's env through
+ * the deliver service's own factory (deliverJobs.ts): the
+ * platform's transports behind their existing seams (Slack
+ * via the unified screener sender, email via cfpay / the
+ * EmailSender port, webhook via the signed outbound
+ * dispatch). A transport this deployment does not configure
+ * is absent from the senders and named in unconfiguredReasons
+ * — each affected channel records not_configured per report,
+ * never a fake delivery (the canonical seam's discipline,
+ * applied to channels).
+ */
+export function deliverStepDepsForScheduledAgent(
+  ctx: ScheduledTasksPipelineContext,
+): DeliverStepDeps {
+  const sql = pipelineSql(ctx);
+  const { senders, unconfiguredReasons } = createDeliverChannelSenders(
+    ctx.env as unknown as Record<string, unknown>,
+  );
+  return {
+    registry: buildDeliverJobRegistry(envStrings(ctx.env)),
+    generatedStore: createGeneratedDatasetPorts(ctx.env),
+    deliveryStore: createDeliveryDatasetPorts(ctx.env),
+    senders,
+    unconfiguredReasons,
+    shardsFor: async (jobId) => {
+      const stores = createJobPipelineStoresFromSql(sql);
+      return (
+        (await stores.definitions.getDefinition(jobId))?.config.processing
+          .shards ?? []
+      );
+    },
+  };
+}
+
+/**
  * Build the pipeline control plane over this host. The acting
  * login (when a dispatch carries one) threads into the per-login
  * provider wiring; scheduled firings pass the service login.
  * The step registry is THE composed registry (#3536, #3537,
- * #3538): the feed steps plus enrich.apply plus analyze.apply
- * plus generate.apply — one registry, every residency.
+ * #3538, #3539): the feed steps plus enrich.apply plus
+ * analyze.apply plus generate.apply plus deliver.apply — one
+ * registry, every residency.
  */
 export function createScheduledAgentPipelineControl(
   ctx: ScheduledTasksPipelineContext,
@@ -313,6 +363,7 @@ export function createScheduledAgentPipelineControl(
       enrichStepDepsForScheduledAgent(ctx),
       analyzeStepDepsForScheduledAgent(ctx),
       generateStepDepsForScheduledAgent(ctx),
+      deliverStepDepsForScheduledAgent(ctx),
     ),
     invocation: "sync",
   });
@@ -354,11 +405,20 @@ export async function ensureScheduledAgentGenerateJobs(
   return ensureGeneratePipelineJobs(control, stores, envStrings(ctx.env));
 }
 
+/** Ensure the deliver job definitions exist on this host's control plane (#3539). */
+export async function ensureScheduledAgentDeliverJobs(
+  ctx: ScheduledTasksPipelineContext,
+  control: JobPipelineControl,
+): Promise<string[]> {
+  const stores = createJobPipelineStoresFromSql(pipelineSql(ctx));
+  return ensureDeliverPipelineJobs(control, stores, envStrings(ctx.env));
+}
+
 /**
  * Ensure EVERY pipeline job definition this host manages
- * (feed + enrich + analyze + generate) — the ensure every host
- * entry point runs, so a job family's definitions exist
- * whichever door arrives first.
+ * (feed + enrich + analyze + generate + deliver) — the ensure
+ * every host entry point runs, so a job family's definitions
+ * exist whichever door arrives first.
  */
 export async function ensureScheduledAgentPipelineJobs(
   ctx: ScheduledTasksPipelineContext,
@@ -368,7 +428,8 @@ export async function ensureScheduledAgentPipelineJobs(
   const enrich = await ensureScheduledAgentEnrichJobs(ctx, control);
   const analyze = await ensureScheduledAgentAnalyzeJobs(ctx, control);
   const generate = await ensureScheduledAgentGenerateJobs(ctx, control);
-  return [...feed, ...enrich, ...analyze, ...generate];
+  const deliver = await ensureScheduledAgentDeliverJobs(ctx, control);
+  return [...feed, ...enrich, ...analyze, ...generate, ...deliver];
 }
 
 /**
@@ -456,6 +517,7 @@ export async function startPipelineJobWorkflow(
       enrichStepDepsForScheduledAgent(ctx),
       analyzeStepDepsForScheduledAgent(ctx),
       generateStepDepsForScheduledAgent(ctx),
+      deliverStepDepsForScheduledAgent(ctx),
     ),
     invocation: "workflow-shard",
   });
@@ -611,6 +673,11 @@ export function pipelineGenerateJobIds(): string[] {
   return GENERATE_PIPELINE_CATALOG.map((e) => e.jobId);
 }
 
+/** The deliver job ids this host manages (the catalog order, #3539). */
+export function pipelineDeliverJobIds(): string[] {
+  return DELIVER_PIPELINE_CATALOG.map((e) => e.jobId);
+}
+
 /**
  * The feed → enrich hand-off (#3536): the enrich stage is the
  * CONSUMER of the feed stage — when a feed job's completion is
@@ -716,9 +783,9 @@ export async function dispatchAnalyzeAfterEnrichCompletion(
  * Best-effort at this boundary, exactly like the earlier
  * hand-offs: the note is already recorded, a failure is logged
  * with its code, and the generate run's own records are its
- * failure surface. A generate job's own completion maps to no
- * consumer here (the deliver stage's hand-off is J6's), and a
- * non-completed analyze state dispatches nothing.
+ * failure surface. A generate job's own completion maps to
+ * the deliver hand-off below (dispatchDeliverAfterGenerateCompletion),
+ * and a non-completed analyze state dispatches nothing.
  */
 export async function dispatchGenerateAfterAnalyzeCompletion(
   ctx: ScheduledTasksPipelineContext,
@@ -744,6 +811,52 @@ export async function dispatchGenerateAfterAnalyzeCompletion(
       message: `[job-pipeline] generate dispatch after analyze completion failed for "${generateDef.id}" (analyze job "${note.jobId}"): ${err instanceof Error ? err.message : String(err)}`,
       analyzeJobId: note.jobId,
       generateJobId: generateDef.id,
+    });
+  }
+}
+
+/**
+ * The generate → deliver hand-off (#3539): the deliver stage
+ * is the CONSUMER of the generate stage — when a generate
+ * job's completion is recorded (its queue publication, routed
+ * here by the JOB_PIPELINE_EVENTS consumer alongside the
+ * earlier hand-offs), the deliver job consuming that generate
+ * job is dispatched on the same control plane, with the
+ * service identity. The deliver job reads the generate run's
+ * PERSISTED dataset — the completion note is the trigger,
+ * never the data channel.
+ *
+ * Best-effort at this boundary, exactly like the earlier
+ * hand-offs: the note is already recorded, a failure is logged
+ * with its code, and the deliver run's own records are its
+ * failure surface. Deliver is the END OF THE CHAIN: a deliver
+ * job's own completion maps to no consumer, and a
+ * non-completed generate state dispatches nothing.
+ */
+export async function dispatchDeliverAfterGenerateCompletion(
+  ctx: ScheduledTasksPipelineContext,
+  note: PipelineCompletionNote,
+): Promise<void> {
+  if (note.state !== "completed") return;
+  const deliverDef = buildDeliverJobRegistry(envStrings(ctx.env)).forGenerateJob(
+    note.jobId,
+  );
+  if (!deliverDef) return;
+  try {
+    const serviceLogin = getServiceUserLogin(ctx.env) ?? undefined;
+    const control = createScheduledAgentPipelineControl(ctx, serviceLogin);
+    await ensureScheduledAgentPipelineJobs(ctx, control);
+    const dispatch = await control.runJob(deliverDef.id, {
+      trigger: "scheduled",
+    });
+    if (dispatch.completion) {
+      void dispatch.completion.catch(() => undefined);
+    }
+  } catch (err) {
+    structuredLog.warn("deliver_dispatch_after_generate_completion_failed", {
+      message: `[job-pipeline] deliver dispatch after generate completion failed for "${deliverDef.id}" (generate job "${note.jobId}"): ${err instanceof Error ? err.message : String(err)}`,
+      generateJobId: note.jobId,
+      deliverJobId: deliverDef.id,
     });
   }
 }

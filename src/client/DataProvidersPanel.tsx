@@ -23,6 +23,7 @@ import {
   fmtFeedAge,
   postDataProviderAction,
   postAnalyzeJobAction,
+  postDeliverJobAction,
   postEnrichJobAction,
   postFeedJobAction,
   postFeedRun,
@@ -34,6 +35,8 @@ import {
   type DataProviderActionName,
   type DataProviderHealthStatus,
   type DataProviderView,
+  type DeliverJobActionName,
+  type DeliverJobView,
   type EnrichJobActionName,
   type EnrichJobView,
   type FeedDatasetStatusView,
@@ -373,6 +376,27 @@ export function DataProvidersPanel() {
       await load();
     } catch (err: any) {
       setError(err?.message || `Failed to ${action} generate job "${job.jobId}".`);
+    } finally {
+      setActingId(null);
+    }
+  };
+
+  // #3539: run / manage one of the provider's deliver jobs
+  // through the pipeline host — the generate action's shape, one
+  // stage later (the run consumes the persisted generated copy).
+  const runDeliverAction = async (
+    view: DataProviderView,
+    job: DeliverJobView,
+    action: DeliverJobActionName
+  ) => {
+    setActingId(view.id);
+    setError("");
+    try {
+      await postDeliverJobAction(view.id, job.jobId, action);
+      toast.success(`Deliver job "${job.jobId}" ${action} dispatched.`);
+      await load();
+    } catch (err: any) {
+      setError(err?.message || `Failed to ${action} deliver job "${job.jobId}".`);
     } finally {
       setActingId(null);
     }
@@ -1041,6 +1065,134 @@ export function DataProvidersPanel() {
                                 variant="ghost"
                                 disabled={busy}
                                 onClick={() => void runGenerateAction(view, job, "retry")}
+                              >
+                                Retry
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              },
+            },
+            {
+              // #3539: the provider's deliver jobs as pipeline jobs —
+              // the generate column's shape, one stage later (the
+              // delivery copy + per-channel outcomes).
+              key: "deliverJobs",
+              header: "Deliver Jobs",
+              cellClassName: "dpp-col-feed-cell",
+              render: (view) => {
+                const jobs = view.deliverJobs ?? [];
+                if (jobs.length === 0) {
+                  return <span className="dpp-feed-none">No deliver jobs</span>;
+                }
+                const busy = actingId === view.id;
+                return (
+                  <div className="dpp-feed-jobs">
+                    {jobs.map((job) => {
+                      const state = job.pipeline?.state ?? "unknown";
+                      const lastRun = job.deliver?.lastRun ?? null;
+                      const snapshot = job.deliver?.snapshot ?? null;
+                      const ageLabel = snapshot
+                        ? snapshot.ageSeconds < 90
+                          ? `${snapshot.ageSeconds}s old`
+                          : snapshot.ageSeconds < 5400
+                            ? `${Math.round(snapshot.ageSeconds / 60)}m old`
+                            : `${(snapshot.ageSeconds / 3600).toFixed(1)}h old`
+                        : null;
+                      return (
+                        <div key={job.jobId} className="dpp-feed-job">
+                          <div className="dpp-feed-head">
+                            <span className="dpp-feed-label">{job.label}</span>
+                            <span className={`dpp-feed-state dpp-feed-state-${state}`}>
+                              {state}
+                            </span>
+                          </div>
+                          <div className="dpp-feed-meta">
+                            {job.deliver?.state === "never-run" || !lastRun ? (
+                              <span>Never run</span>
+                            ) : (
+                              <span>
+                                {`Last run: ${lastRun.status} ${fmtDataProviderTime(lastRun.finishedAt)} (${lastRun.received}/${lastRun.requested} channels)`}
+                              </span>
+                            )}
+                            {snapshot && (
+                              <span>
+                                {`Delivered: ${snapshot.pairsDelivered} pairs · channels: ${snapshot.channelsDelivered.join(", ") || "none"} · ${ageLabel}${snapshot.stale ? " · STALE" : ""}`}
+                              </span>
+                            )}
+                            {snapshot?.reports.map((report) => (
+                              <span key={report.kind}>
+                                {`${report.kind}: ${report.channels.map((c) => `${c.channel}=${c.status}`).join(", ") || "none"}`}
+                              </span>
+                            ))}
+                            {snapshot?.inputRunId && (
+                              <span>{`Derived from generate run: ${snapshot.inputRunId}`}</span>
+                            )}
+                            {job.nextScheduledRun && (
+                              <span>{`Next run: ${fmtDataProviderTime(job.nextScheduledRun)}`}</span>
+                            )}
+                            {lastRun?.codedError && (
+                              <span className="dpp-feed-error">{lastRun.codedError}</span>
+                            )}
+                          </div>
+                          {(job.deliver?.history?.length ?? 0) > 1 && (
+                            <ul className="dpp-feed-history">
+                              {job.deliver!.history.slice(1, 4).map((run) => (
+                                <li key={run.runId}>
+                                  {`${run.status} · ${fmtDataProviderTime(run.finishedAt)} · ${run.received}/${run.requested} channels`}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                          <div className="dpp-feed-actions">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              disabled={busy}
+                              onClick={() => void runDeliverAction(view, job, "run")}
+                            >
+                              Run
+                            </Button>
+                            {(state === "running" || state === "queued") && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                disabled={busy}
+                                onClick={() => void runDeliverAction(view, job, "pause")}
+                              >
+                                Pause
+                              </Button>
+                            )}
+                            {state === "paused" && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                disabled={busy}
+                                onClick={() => void runDeliverAction(view, job, "resume")}
+                              >
+                                Resume
+                              </Button>
+                            )}
+                            {(state === "running" || state === "queued" || state === "paused") && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                disabled={busy}
+                                onClick={() => void runDeliverAction(view, job, "cancel")}
+                              >
+                                Cancel
+                              </Button>
+                            )}
+                            {(state === "completed" || state === "failed" || state === "cancelled") && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                disabled={busy}
+                                onClick={() => void runDeliverAction(view, job, "retry")}
                               >
                                 Retry
                               </Button>

@@ -105,6 +105,8 @@ export interface DataProviderView {
   analyzeJobs?: AnalyzeJobView[];
   /** #3538: this provider's generate jobs as pipeline surface views. */
   generateJobs?: GenerateJobView[];
+  /** #3539: this provider's deliver jobs as pipeline surface views. */
+  deliverJobs?: DeliverJobView[];
   /**
    * #3530: this provider's direct feed-job status (the S1 block) —
    * null when no feed job is registered for the provider. Optional
@@ -486,6 +488,103 @@ export async function postGenerateJobAction(
 ): Promise<void> {
   await send<unknown>(
     `/api/data-providers/${encodeURIComponent(id)}/generate-jobs/${encodeURIComponent(jobId)}/${action}`,
+    { method: "POST" }
+  );
+}
+
+/** One deliver run's record, as the status surface serves it (#3539). */
+export interface DeliverJobRunRecordView {
+  runId: string;
+  trigger: string;
+  startedAt: string;
+  finishedAt: string;
+  status: "completed" | "partial" | "failed";
+  requested: number;
+  received: number;
+  failed: number;
+  codedError: string | null;
+  errorMessage: string | null;
+}
+
+/** One report's per-channel delivery outcome, as served (#3539). */
+export interface DeliverJobChannelView {
+  channel: string;
+  status: "delivered" | "failed" | "not_configured" | "already_delivered";
+  target: string | null;
+}
+
+/** One delivered report's outcome, as served (#3539). */
+export interface DeliverJobReportView {
+  kind: string;
+  title: string;
+  channels: DeliverJobChannelView[];
+}
+
+/** The delivery-dataset half of a deliver job's status (#3539). */
+export interface DeliverJobDatasetView {
+  jobId: string;
+  generateJobId: string;
+  analyzeJobId: string;
+  enrichJobId: string;
+  feedJobId: string;
+  sourceId: string;
+  dataset: string;
+  channels: string[];
+  universeLabel: string;
+  cadenceMinutes: number;
+  staleAfterMinutes: number;
+  state: "never-run" | "ready";
+  lastRun: DeliverJobRunRecordView | null;
+  history: DeliverJobRunRecordView[];
+  snapshot: {
+    artifactId: string;
+    asOf: string;
+    ageSeconds: number;
+    pairsDelivered: number;
+    channelsDelivered: string[];
+    stale: boolean;
+    /** Lineage: the generated artifact + run this copy derives from. */
+    inputArtifactId: string;
+    inputRunId: string;
+    inputAsOf: string;
+    reports: DeliverJobReportView[];
+  } | null;
+}
+
+/**
+ * One deliver job's merged surface status (#3539): the delivery
+ * copy plus the job pipeline's state for the same job — the
+ * same view the copilot tools return (one source of truth).
+ */
+export interface DeliverJobView {
+  jobId: string;
+  generateJobId: string;
+  analyzeJobId: string;
+  enrichJobId: string;
+  feedJobId: string;
+  sourceId: string;
+  dataset: string;
+  label: string;
+  deliver: DeliverJobDatasetView | null;
+  pipeline: {
+    state: string;
+    currentRunId: string | null;
+    lastRunStatus: string | null;
+    lastRunAt: string | null;
+  } | null;
+  nextScheduledRun: string | null;
+}
+
+export type DeliverJobActionName = FeedJobActionName;
+
+/** Run / manage one deliver job through the pipeline host (#3539). */
+export async function postDeliverJobAction(
+  id: string,
+  jobId: string,
+  action: DeliverJobActionName
+): Promise<void> {
+  await send<unknown>(
+    `/api/data-providers/${encodeURIComponent(id)}/deliver-jobs/${encodeURIComponent(jobId)}/${action}`,
     { method: "POST" }
   );
 }

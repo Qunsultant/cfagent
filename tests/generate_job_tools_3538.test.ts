@@ -217,9 +217,9 @@ async function runChainToAnalyze(stub: { runPipelineJob: (jobId: string) => Prom
 }
 
 describe("generate-job copilot tools (#3538)", () => {
-  it("the catalog carries the four generate-job tools (106 total)", () => {
+  it("the catalog carries the four generate-job tools (110 total since #3539)", () => {
     const names = McpToolFactory.getToolDefinitions().map((d) => d.name);
-    expect(names).toHaveLength(106);
+    expect(names).toHaveLength(110);
     for (const name of ["run_generate_job", "get_generate_job_status", "list_generate_jobs", "manage_generate_job"]) {
       expect(names).toContain(name);
     }
