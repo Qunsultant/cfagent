@@ -4,7 +4,7 @@
  * Implements:
  * - Strategy Pattern (GoF): ITradingPlatform abstracts individual brokerage/exchange platforms.
  * - Single Responsibility Principle (SRP): Decouples platform communication from agent reasoning and screening.
- * - Open/Closed Principle (OCP): New platforms (E*TRADE, Alpaca, Interactive Brokers) plug in without modifying existing code.
+ * - Open/Closed Principle (OCP): New platforms (a brokerage or exchange integration) plug in without modifying existing code.
  */
 
 import type {
