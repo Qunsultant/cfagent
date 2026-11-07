@@ -17,7 +17,7 @@
  * no standalone run id, so `run=<id>` deep-links that job's run
  * history, newest first, and `schedule=<id>` filters to that schedule.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Badge,
   Button,
@@ -33,6 +33,7 @@ import {
   type JobRunRecord,
 } from "../services/jobRunRecords";
 import { navigateToTab } from "./router";
+import { AsyncJobResultViewer } from "./AsyncJobResultViewer";
 
 /** A null linkage id is a recorded fact: rendered, never dropped. */
 export function ledgerLinkageCell(value: string | null | undefined): string {
@@ -92,8 +93,33 @@ export interface ScheduleRunLedgerPanelProps {
   runId?: string | null;
 }
 
-const LEDGER_COLUMNS: TableColumn<JobRunRecord>[] = [
-  { key: "jobId", header: "Job", render: (r) => <code>{r.jobId}</code> },
+/**
+ * Issue #3605 — the Job and Async job ids are clickable links to the
+ * job's detail, so nobody types `/api/jobs/<id>` by hand:
+ * - Job: opens that job's run history via the existing `run=<id>`
+ *   deep link — the ledger's own detail view for a job.
+ * - Async job: opens the shared `AsyncJobResultViewer` (the one
+ *   detail view, also used by the queue panel) below the table.
+ * The visible label is the id itself. A null async-job id renders as
+ * "—" with no control — never a dead link. Schedule / Workflow ids
+ * stay plain text (out of scope for #3605).
+ */
+function ledgerColumns(
+  onJobClick: (jobId: string) => void,
+  onAsyncJobClick: (asyncJobId: string) => void,
+): TableColumn<JobRunRecord>[] {
+  return [
+  { key: "jobId", header: "Job", render: (r) => (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      onClick={() => onJobClick(r.jobId)}
+      title={`Show run history for ${r.jobId}`}
+    >
+      {r.jobId}
+    </Button>
+  ) },
   { key: "operation", header: "Operation", render: (r) => <>{r.operation}</> },
   { key: "system", header: "System", render: (r) => <>{r.system}</> },
   { key: "started", header: "Started", render: (r) => <>{fmtTime(r.started)}</> },
@@ -123,7 +149,19 @@ const LEDGER_COLUMNS: TableColumn<JobRunRecord>[] = [
     key: "asyncJobId",
     header: "Async job",
     render: (r) => (
-      <span title={ledgerLinkageTitle(r.asyncJobId)}>{ledgerLinkageCell(r.asyncJobId)}</span>
+      typeof r.asyncJobId === "string" && r.asyncJobId ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() => onAsyncJobClick(r.asyncJobId as string)}
+          title={`Open job detail for ${r.asyncJobId}`}
+        >
+          {r.asyncJobId}
+        </Button>
+      ) : (
+        <span title={ledgerLinkageTitle(r.asyncJobId)}>{ledgerLinkageCell(r.asyncJobId)}</span>
+      )
     ),
   },
   {
@@ -134,7 +172,8 @@ const LEDGER_COLUMNS: TableColumn<JobRunRecord>[] = [
     ),
   },
   { key: "summary", header: "Summary", render: (r) => <>{runSummary(r)}</> },
-];
+  ];
+}
 
 export function ScheduleRunLedgerPanel({
   scheduleId = null,
@@ -166,6 +205,16 @@ export function ScheduleRunLedgerPanel({
 
   const visible = filterLedgerRuns(runs, scheduleId, runId);
   const filterLabel = runId ?? scheduleId;
+  // Issue #3605 — the async job whose detail is open below the table.
+  const [selectedAsyncJobId, setSelectedAsyncJobId] = useState<string | null>(null);
+  const columns = useMemo(
+    () =>
+      ledgerColumns(
+        (jobId) => navigateToTab("schedules", "runs", { run: jobId }),
+        (asyncJobId) => setSelectedAsyncJobId(asyncJobId),
+      ),
+    [],
+  );
 
   return (
     <div className="schedule-run-ledger">
@@ -212,7 +261,7 @@ export function ScheduleRunLedgerPanel({
         <Spinner />
       ) : (
         <Table
-          columns={LEDGER_COLUMNS}
+          columns={columns}
           rows={visible}
           rowKey={(r, i) => `${r.jobId}:${r.started}:${i}`}
           rowTitle={(r) => `${r.jobId} · ${r.operation} · ${r.started}`}
@@ -228,6 +277,21 @@ export function ScheduleRunLedgerPanel({
             />
           }
         />
+      )}
+
+      {selectedAsyncJobId && (
+        <div>
+          <div className="schedules-toolbar">
+            <span className="ui-meta">
+              Job detail: <code>{selectedAsyncJobId}</code>
+            </span>
+          </div>
+          <AsyncJobResultViewer
+            jobId={selectedAsyncJobId}
+            variant="standalone"
+            onClose={() => setSelectedAsyncJobId(null)}
+          />
+        </div>
       )}
     </div>
   );

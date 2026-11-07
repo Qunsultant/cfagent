@@ -262,15 +262,17 @@ describe("one exporter (#1065 source pins)", () => {
 
   it("the shared module is the only exporter creating blob URLs", () => {
     // Pre-existing non-exporter downloads keep their own blob URLs:
-    // AsyncJobsPanel (a job's result JSON) and ResearchReportActions
-    // (a server-generated workbook). Every EXPORT blob URL — text or
-    // .xls — is created by runExport's download helpers only.
+    // AsyncJobResultViewer (a job's result JSON — #3605 extracted the
+    // download out of AsyncJobsPanel into the shared viewer) and
+    // ResearchReportActions (a server-generated workbook). Every EXPORT
+    // blob URL — text or .xls — is created by runExport's download
+    // helpers only.
     const creators = srcFiles
       .filter((f) => readFileSync(f, "utf8").includes("URL.createObjectURL"))
       .map((f) => relative(ROOT, f).replace(/\\/g, "/"))
       .sort();
     expect(creators).toEqual([
-      "src/client/AsyncJobsPanel.tsx",
+      "src/client/AsyncJobResultViewer.tsx",
       "src/client/ResearchReportActions.tsx",
       "src/client/runExport.ts",
     ]);
