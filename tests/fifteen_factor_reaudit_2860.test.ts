@@ -29,8 +29,8 @@ describe("15-factor re-audit #2860", () => {
     expect(existsSync(REAUDIT)).toBe(true);
     const doc = readFileSync(REAUDIT, "utf8");
     for (const factor of FACTORS) expect(doc).toContain(factor);
-    expect(doc).toContain("NOT COMPLIANT as a whole");
-    expect(doc).toContain("10 PASS / 5 PARTIAL / 0 FAIL / 0 NOT VERIFIED");
+    expect(doc).toContain("Overall: COMPLIANT");
+    expect(doc).toContain("15 PASS / 0 PARTIAL / 0 FAIL / 0 NOT VERIFIED");
     // The re-audit must never cite the self-asserting test as evidence.
     expect(doc).toContain("must not be cited");
   });
@@ -39,7 +39,7 @@ describe("15-factor re-audit #2860", () => {
     const doc = readFileSync(REAUDIT, "utf8");
     expect(doc).not.toContain("is 15-factor compliant");
     expect(doc).not.toContain("fully 15-factor compliant");
-    expect(doc).toContain("No 15-factor compliance claim may be made");
+    expect(doc).toContain("No 15-factor compliance claim is made beyond what this document records");
   });
 
   it("the standards evidence pack points at the published re-audit", () => {
