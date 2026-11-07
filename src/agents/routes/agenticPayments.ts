@@ -106,6 +106,7 @@ import {
   type StripeDisplayMode,
 } from "../../services/checkoutDisplay";
 import { createCheckoutPorts, type CheckoutEnv } from "../../services/createCheckoutPorts";
+import { isCheckoutPortGuardError } from "../../services/checkoutPortErrors";
 import { createBillingCheckoutPorts, type BillingCheckoutEnv } from "../../services/createBillingCheckoutPorts";
 import { createBillingPorts, type BillingEnv } from "../../services/createBillingPorts";
 import { StripePaymentStrategy } from "../../patterns/paymentStrategies";
@@ -1920,9 +1921,17 @@ export async function handleAgenticPaymentsRoutes(
         plan: { id: plan.id, name: plan.name, priceUSD: plan.priceUSD, periodDays: plan.periodDays, includedRuns: plan.includedRuns },
       });
     } catch (err: any) {
+      // #3573: a guard failure (timeout / breaker open) maps to its
+      // catalog-coded 503; any other mint failure keeps the legacy
+      // raw-error 500 behavior (unchanged).
+      if (isCheckoutPortGuardError(err)) {
+        return codedOutcomeResponse(err.outcomeCode);
+      }
       return Response.json({ error: err.message || "Failed to create subscription checkout" }, { status: 500 });
     }
   }
+
+  // POST /payments/agentic/commercial/subscription/purchase — fulfill a native subscription-mode Stripe
 
   // POST /payments/agentic/commercial/subscription/purchase — activate on VERIFIED payment only.
   // Fulfillment is re-read from Stripe (session retrieve), never a return page, exactly like the
@@ -2002,7 +2011,13 @@ export async function handleAgenticPaymentsRoutes(
       let evidence;
       try {
         evidence = await card.retrieveCardSession({ sessionId: checkoutSessionId });
-      } catch {
+      } catch (err) {
+        // #3573: a guard failure (timeout / breaker open) maps to its
+        // catalog-coded 503; any other retrieve failure keeps the
+        // fixed "Payment verification unavailable." 503 (unchanged).
+        if (isCheckoutPortGuardError(err)) {
+          return codedOutcomeResponse(err.outcomeCode);
+        }
         return Response.json({ error: "Payment verification unavailable." }, { status: 503 });
       }
       const expectedCents = Math.round(plan.priceUSD * 100);
@@ -4576,7 +4591,13 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
         let evidence;
         try {
           evidence = await ports.card.retrieveCardSession({ sessionId });
-        } catch {
+        } catch (err) {
+          // #3573: a guard failure (timeout / breaker open) maps to its
+          // catalog-coded 503; any other retrieve failure keeps the
+          // fixed 503 (unchanged).
+          if (isCheckoutPortGuardError(err)) {
+            return codedOutcomeResponse(err.outcomeCode);
+          }
           return Response.json({ error: "Payment verification is temporarily unavailable." }, { status: 503 });
         }
         const paid =
@@ -4607,7 +4628,13 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
         let verdict;
         try {
           verdict = await ports.x402.verifyCryptoPayment({ paymentProof, expectedAmountUSD: price });
-        } catch {
+        } catch (err) {
+          // #3573: a guard failure (timeout / breaker open) maps to its
+          // catalog-coded 503; any other verification failure keeps
+          // the fixed 503 (unchanged).
+          if (isCheckoutPortGuardError(err)) {
+            return codedOutcomeResponse(err.outcomeCode);
+          }
           return Response.json({ error: "Payment verification is temporarily unavailable." }, { status: 503 });
         }
         const payer = asString(body.payer);

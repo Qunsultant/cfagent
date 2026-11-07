@@ -20,6 +20,7 @@ import type {
   CreateCheckoutInput,
   CryptoVerification,
 } from "./checkoutPorts";
+import { CheckoutPortUsageError, CheckoutPortValidationError } from "./checkoutPortErrors";
 
 /** Minimal Stripe checkout surface the adapter needs. The production implementation is a thin wrapper over PaymentGatewayService (see createCheckoutPorts.ts); tests inject a fake. */
 export interface StripeCheckoutClient {
@@ -48,7 +49,9 @@ export class StripeCheckoutAdapter implements CheckoutPort {
 
   async createCheckout(input: CreateCheckoutInput): Promise<CheckoutCreation> {
     if (!Number.isFinite(input.priceUSD) || input.priceUSD <= 0) {
-      throw new Error("Refusing to mint a Stripe checkout without a positive per-run price.");
+      throw new CheckoutPortValidationError(
+        "Refusing to mint a Stripe checkout without a positive per-run price.",
+      );
     }
     const res = await this.client.createCheckout({
       draftId: input.runRequestId,
@@ -68,7 +71,9 @@ export class StripeCheckoutAdapter implements CheckoutPort {
   }
 
   async retrieveCardSession(input: { sessionId: string }): Promise<CardSessionEvidence> {
-    if (!input.sessionId) throw new Error("A Stripe session id is required to retrieve a session.");
+    if (!input.sessionId) {
+      throw new CheckoutPortValidationError("A Stripe session id is required to retrieve a session.");
+    }
     const s = await this.client.retrieveSession(input.sessionId);
     return {
       sessionId: s.id,
@@ -82,6 +87,6 @@ export class StripeCheckoutAdapter implements CheckoutPort {
   }
 
   async verifyCryptoPayment(_input: { paymentProof: string; expectedAmountUSD: number }): Promise<CryptoVerification> {
-    throw new Error("StripeCheckoutAdapter cannot verify x402 payments: use the x402 adapter.");
+    throw new CheckoutPortUsageError("StripeCheckoutAdapter cannot verify x402 payments: use the x402 adapter.");
   }
 }
