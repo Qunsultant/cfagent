@@ -1,0 +1,8 @@
+### Fixed
+
+- **Broker live/paper mode parity, 24/7 continuous trading around the clock, Alpaca sync, and Platform Admin extraction (#3694):**
+  - **24/7 Continuous Trading**: In `stockCopilotSessions.ts`, extended `copilotSessionAt` to map weekend and off-hours to `exto` when around-the-clock trading is enabled (`STOCK_COPILOT_AROUND_THE_CLOCK="true"`, `STOCK_COPILOT_FORCE_ALL_SESSIONS="true"`, or `around_the_clock` / `24/7` session setting), allowing autonomous perception, pattern signal evaluation, and LIMIT order placement to operate continuously without `outside_enabled_sessions` refusal.
+  - **Environment & Mode Switching Synchronization**: Harmonized `accountMode` in `Chat.tsx` with `useBrokerEnvironment()`. In `ETradeDynamicMenu.tsx`, decoupled environment switching from OAuth initialization so switching between Paper and Live executes cleanly without opening an OAuth popup; fixed `effectiveEnv` resolution so selecting Paper mode displays `Alpaca · Paper` rather than getting stuck on Live.
+  - **Alpaca Sync Parity**: Added full Alpaca diagnostic sync in `ETradeTradingHub.tsx` and `brokerEndpoints.ts`, pinging Alpaca credentials, account buying power, and latency instead of showing an OAuth unsupported error.
+  - **Platform Admin Engine Tuning & Downloads Extraction**: Extracted engine tuning and options parameters & export into first-class sub-tabs in `PlatformAdminPage.tsx` (`?tab=platform-admin&view=engine-tuning` with embedded `EngineTuningPanel`, and `?tab=platform-admin&view=downloads` with `DownloadsPanel`). Preserved quick links in `ETradeDynamicMenu.tsx` meeting existing responsive fit contracts.
+

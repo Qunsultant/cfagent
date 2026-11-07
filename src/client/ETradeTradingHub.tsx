@@ -1044,13 +1044,55 @@ export function ETradeTradingHub({
     const envToUse = override || activeEnv;
     setDiagnosticsLoading(true);
     try {
-      // Issue #3294: diagnostics read E*TRADE OAuth state; there is no neutral
-      // equivalent, so another broker gets a stated refusal, not E*TRADE data.
+      if (selectedBroker === "alpaca") {
+        const startedAt = Date.now();
+        const [connectResp, accountResp] = await Promise.allSettled([
+          fetch(`/api/broker/connect/alpaca?environment=${encodeURIComponent(envToUse)}`),
+          fetch(`/api/market-data/alpaca/account`, { headers: { "x-environment": envToUse } }),
+        ]);
+        const latency = Date.now() - startedAt;
+        const connectData = connectResp.status === "fulfilled" && connectResp.value.ok ? await connectResp.value.json().catch(() => ({})) : {};
+        const accountData = accountResp.status === "fulfilled" && accountResp.value.ok ? ((await accountResp.value.json().catch(() => ({}))) as Record<string, any>) : null;
+        const isConfigured = Boolean((connectData as any)?.configured || (connectData as any)?.signedIn);
+        setDiagnostics({
+          broker: "alpaca",
+          environment: envToUse,
+          status: isConfigured ? "healthy" : "not_configured",
+          apiUrl: envToUse === "PROD" ? "https://api.alpaca.markets" : "https://paper-api.alpaca.markets",
+          ping: `${latency}ms`,
+          roundTripMs: latency,
+          authenticated: isConfigured,
+          credentials: {
+            apiKeyConfigured: isConfigured,
+            apiSecretConfigured: isConfigured,
+          },
+          oauthToken: {
+            present: isConfigured,
+          },
+          upstreamAccounts: {
+            count: accountData ? 1 : 0,
+            accounts: accountData ? [{
+              accountId: accountData.account_number || accountData.id || "Alpaca-Account",
+              accountKey: accountData.status || "ACTIVE",
+              accountType: `${envToUse === "PROD" ? "Live" : "Paper"} (${accountData.currency || "USD"})`,
+              cash: accountData.cash,
+              buyingPower: accountData.buying_power,
+            }] : [],
+          },
+          lastError: !isConfigured ? "Alpaca API keys not yet configured or connected for this mode." : undefined,
+        });
+        setShowDiagnosticsModal(true);
+        void Promise.allSettled([
+          fetchBrokerStatus(envToUse),
+          fetchPositions(envToUse),
+        ]);
+        return;
+      }
       const diagnosticsUrl = diagnosticsEndpoint();
       if (!diagnosticsUrl) {
         setDiagnostics({
           unavailable: true,
-          message: "Broker diagnostics read E*TRADE OAuth state and are not available for the selected broker.",
+          message: `Broker diagnostics are not available for the selected broker (${brokerLabel}).`,
         });
         setShowDiagnosticsModal(true);
         return;
@@ -2952,9 +2994,9 @@ export function ETradeTradingHub({
             )}
       </Modal>
       )}
-      {/* E*TRADE Live REST Diagnostics Modal */}
+      {/* Live REST Diagnostics Modal */}
       {showDiagnosticsModal && (
-        <Modal open size="none" panelClassName="etrade-pin-modal diagnostics-modal" title={`⚡ E*TRADE Live REST Diagnostics [${diagnostics?.environment || activeEnv}]`} onClose={() => setShowDiagnosticsModal(false)}>
+        <Modal open size="none" panelClassName="etrade-pin-modal diagnostics-modal" title={selectedBroker === "alpaca" ? `🦙 Alpaca Diagnostics [${diagnostics?.environment || activeEnv}]` : `⚡ E*TRADE Live REST Diagnostics [${diagnostics?.environment || activeEnv}]`} onClose={() => setShowDiagnosticsModal(false)}>
               {diagnostics ? (
                 <>
                   <div className="diag-header-row">
