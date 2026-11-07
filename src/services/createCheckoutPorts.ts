@@ -25,6 +25,16 @@
  * and valid. There is no fallback here and none in the adapter:
  * the existing x402 service's hardcoded recipient is never read on
  * this path, in any environment.
+ *
+ * Issue #3573 — every adapter this root builds is wrapped in the
+ * checkout-port guard (src/services/checkoutPortGuard.ts): a bounded
+ * timeout plus a per-rail circuit breaker (the shared src/breakers/
+ * state machine), so the 2.1 Billing routes, the top-up confirm, the
+ * cfpay channel, and the native gate all inherit it. Timeouts and
+ * breaker thresholds resolve from Worker env (CHECKOUT_PORT_TIMEOUT_MS,
+ * BREAKER_CHECKOUT_<RAIL>_*) with code defaults, never hardcoded
+ * literals; a timeout is an unknown outcome, a tripped breaker fails
+ * fast — both fail closed with catalog-coded 503s at the consumers.
  */
 import type { Env } from "../types";
 import { StripePaymentStrategy } from "../patterns/paymentStrategies";
@@ -32,6 +42,11 @@ import { PaymentGatewayService } from "./payments";
 import type { CheckoutPorts } from "./checkoutPorts";
 import { StripeCheckoutAdapter } from "./stripeCheckoutAdapter";
 import { X402CheckoutAdapter } from "./x402CheckoutAdapter";
+import {
+  guardCheckoutPort,
+  resolveCheckoutPortTimeoutMs,
+  type CheckoutPortGuardOptions,
+} from "./checkoutPortGuard";
 
 export type CheckoutEnv = {
   STRIPE_SECRET_KEY?: string;
@@ -42,19 +57,39 @@ export type CheckoutEnv = {
   X402_RECIPIENT_ADDRESS?: string;
   X402_NETWORK?: string;
   X402_FACILITATOR_URL?: string;
+  /** #3573: per-call checkout-port timeout in ms (code default 10_000). */
+  CHECKOUT_PORT_TIMEOUT_MS?: string;
+  /** #3573: breaker policy overrides, per rail (code defaults 3 / 30_000 / 1). */
+  BREAKER_CHECKOUT_STRIPE_FAILURE_THRESHOLD?: string;
+  BREAKER_CHECKOUT_STRIPE_RESET_TIMEOUT_MS?: string;
+  BREAKER_CHECKOUT_STRIPE_HALF_OPEN_PROBES?: string;
+  BREAKER_CHECKOUT_X402_FAILURE_THRESHOLD?: string;
+  BREAKER_CHECKOUT_X402_RESET_TIMEOUT_MS?: string;
+  BREAKER_CHECKOUT_X402_HALF_OPEN_PROBES?: string;
 };
 
 /** Build the checkout ports from Worker env, or null when neither rail is configured. */
-export function createCheckoutPorts(env: CheckoutEnv): CheckoutPorts | null {
+export function createCheckoutPorts(
+  env: CheckoutEnv,
+  opts: CheckoutPortGuardOptions = {},
+): CheckoutPorts | null {
+  // One resolved timeout feeds both the guard's race and the x402
+  // adapter's fetch abort, so there is exactly one timeout authority.
+  const envRecord = env as unknown as Record<string, unknown>;
+  const timeoutMs = opts.timeoutMs ?? resolveCheckoutPortTimeoutMs(envRecord, opts.settings);
+  const guardOpts = { env: envRecord, ...opts, timeoutMs };
   let card: CheckoutPorts["card"] = null;
   try {
     const { apiKey } = new StripePaymentStrategy().resolveApiKey(env as unknown as Env);
     if (apiKey) {
       const service = new PaymentGatewayService(env as unknown as Env);
-      card = new StripeCheckoutAdapter({
-        createCheckout: (params) => service.createCheckout({ ...params, gateway: "stripe" }),
-        retrieveSession: (sessionId) => service.retrieveCheckoutSession(sessionId),
-      });
+      card = guardCheckoutPort(
+        new StripeCheckoutAdapter({
+          createCheckout: (params) => service.createCheckout({ ...params, gateway: "stripe" }),
+          retrieveSession: (sessionId) => service.retrieveCheckoutSession(sessionId),
+        }),
+        guardOpts,
+      );
     }
   } catch (err) {
     console.error(
@@ -67,11 +102,15 @@ export function createCheckoutPorts(env: CheckoutEnv): CheckoutPorts | null {
   const recipient = (env.X402_RECIPIENT_ADDRESS ?? "").trim();
   if (recipient) {
     try {
-      x402 = new X402CheckoutAdapter({
-        recipientAddress: recipient,
-        network: env.X402_NETWORK,
-        facilitatorUrl: env.X402_FACILITATOR_URL,
-      });
+      x402 = guardCheckoutPort(
+        new X402CheckoutAdapter({
+          recipientAddress: recipient,
+          network: env.X402_NETWORK,
+          facilitatorUrl: env.X402_FACILITATOR_URL,
+          timeoutMs,
+        }),
+        guardOpts,
+      );
     } catch (err) {
       console.error(
         `[checkout-ports] x402 rail unconfigured (bad recipient/network configuration, failing closed for x402): ${err instanceof Error ? err.message : String(err)}`,

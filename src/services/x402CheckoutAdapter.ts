@@ -37,6 +37,11 @@ import type {
   CryptoVerification,
 } from "./checkoutPorts";
 import { resolveX402Network, usdToAtomic } from "./x402Networks";
+import {
+  CheckoutPortTimeoutError,
+  CheckoutPortUsageError,
+  CheckoutPortValidationError,
+} from "./checkoutPortErrors";
 
 export interface X402AdapterConfig {
   /** Explicitly configured USDC recipient. No fallback, ever. */
@@ -45,6 +50,14 @@ export interface X402AdapterConfig {
   facilitatorUrl?: string;
   /** Injectable for tests; defaults to the global fetch. */
   fetchFn?: typeof fetch;
+  /**
+   * Facilitator verify timeout in ms (#3573: configuration, not a
+   * hardcoded literal — the composition root threads the resolved
+   * checkout-port timeout through; direct constructions keep the
+   * prior 10 s default). The guard's race enforces the same bound
+   * from outside; this signal frees the connection itself.
+   */
+  timeoutMs?: number;
 }
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
@@ -55,6 +68,7 @@ export class X402CheckoutAdapter implements CheckoutPort {
   private readonly network: string;
   private readonly facilitatorUrl: string;
   private readonly fetchFn: typeof fetch;
+  private readonly timeoutMs: number;
 
   constructor(config: X402AdapterConfig) {
     const recipient = (config.recipientAddress ?? "").trim();
@@ -71,11 +85,14 @@ export class X402CheckoutAdapter implements CheckoutPort {
     this.network = network;
     this.facilitatorUrl = (config.facilitatorUrl ?? "https://x402.org/facilitator").replace(/\/+$/, "");
     this.fetchFn = config.fetchFn ?? fetch;
+    this.timeoutMs = config.timeoutMs ?? 10_000;
   }
 
   async createCheckout(input: CreateCheckoutInput): Promise<CheckoutCreation> {
     if (!Number.isFinite(input.priceUSD) || input.priceUSD <= 0) {
-      throw new Error("Refusing to mint an x402 challenge without a positive per-run price.");
+      throw new CheckoutPortValidationError(
+        "Refusing to mint an x402 challenge without a positive per-run price.",
+      );
     }
     const challenge: CheckoutChallenge = {
       version: "1.0",
@@ -92,7 +109,7 @@ export class X402CheckoutAdapter implements CheckoutPort {
   }
 
   async retrieveCardSession(_input: { sessionId: string }): Promise<never> {
-    throw new Error("X402CheckoutAdapter cannot retrieve Stripe sessions: use the card adapter.");
+    throw new CheckoutPortUsageError("X402CheckoutAdapter cannot retrieve Stripe sessions: use the card adapter.");
   }
 
   async verifyCryptoPayment(input: { paymentProof: string; expectedAmountUSD: number }): Promise<CryptoVerification> {
@@ -131,7 +148,7 @@ export class X402CheckoutAdapter implements CheckoutPort {
             payTo: this.recipient,
           },
         }),
-        signal: AbortSignal.timeout(10_000),
+        signal: AbortSignal.timeout(this.timeoutMs),
       });
       if (!res.ok) return denied;
       const data = (await res.json().catch(() => null)) as { isValid?: boolean } | null;
@@ -141,7 +158,14 @@ export class X402CheckoutAdapter implements CheckoutPort {
         payer: parsed.payer,
         nonce: typeof parsed.nonce === "string" ? parsed.nonce : null,
       };
-    } catch {
+    } catch (err) {
+      // A fetch abort is a timeout: unknown outcome, not proof of
+      // non-payment — rethrow so the guard records it as such instead
+      // of letting the caller read `denied` as "not paid". Every other
+      // failure keeps returning denied (fail closed by value).
+      if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) {
+        throw new CheckoutPortTimeoutError("x402", "verifyCryptoPayment", this.timeoutMs);
+      }
       return denied;
     }
   }
