@@ -72,6 +72,10 @@ export async function resolveTenantProviders(env: unknown): Promise<TenantProvid
 }
 
 export async function resolveTenantBroker(env: unknown): Promise<BrokerId> {
+  const envOverride =
+    (env as Record<string, unknown> | null | undefined)?.TENANT_BROKER_ID ??
+    (env as Record<string, unknown> | null | undefined)?.BROKER_ID;
+  if (isBrokerId(envOverride)) return envOverride;
   const providers = await resolveTenantProviders(env);
   return isBrokerId(providers.brokerId) ? providers.brokerId : "etrade";
 }

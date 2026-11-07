@@ -437,10 +437,7 @@ export function SettingsMenu({
 
   const isOpen = isHovered || isPinned;
 
-  const isLive =
-    effectiveEnv === "PROD" ||
-    brokerStatus?.environment === "live" ||
-    brokerStatus?.activeEnvironment === "PROD";
+  const isLive = effectiveEnv === "PROD";
 
   const selectedBrokerId = tenantProviders.brokerId ?? "etrade";
   // Issue #3419: the menu names the broker from the ONE presentation module.
@@ -545,10 +542,9 @@ export function SettingsMenu({
   }, [isOpen]);
 
   const onSwitchEnv = (target: "TEST" | "PROD") => {
-    // Issue #2482: one write-through path. The module persists the
-    // selection server-side and broadcasts etrade-env-changed; the hub
-    // listener refetches and resets drafts from that event, so the menu
-    // no longer calls the parent handler or posts to a second spelling.
+    // Issue #2482: write-through path. Persists server-side and broadcasts
+    // etrade-env-changed, also notifying parent handler if supplied.
+    handleSwitchAndConnect?.(target);
     void switchBrokerEnvironment(target);
   };
 
@@ -837,12 +833,12 @@ export function SettingsMenu({
                   className="btn-action-mini connect"
                   onClick={toggleAlpacaSignIn}
                   aria-expanded={showAlpacaSignIn}
-                  title={isConnected ? "Manage Alpaca API keys" : "Sign in to Alpaca"}
+                  title={isConnected ? "Alpaca connection status & BYOK" : "Connect Alpaca"}
                 >
                   {showAlpacaSignIn
-                    ? "🦙 Close sign-in"
+                    ? "🦙 Close info"
                     : isConnected
-                    ? "🦙 Manage keys"
+                    ? "🦙 Connected"
                     : "🦙 Connect Alpaca"}
                 </Button>
               ) : isConnected ? (
@@ -899,7 +895,7 @@ export function SettingsMenu({
             )}
             {selectedBrokerId === "alpaca" && showAlpacaSignIn && (
               <div className="etrade-panel-section">
-                <AlpacaSignInCard activeEnv={effectiveEnv} collapsedWhenConfigured={false} />
+                <AlpacaSignInCard activeEnv={effectiveEnv} collapsedWhenConfigured={true} />
               </div>
             )}
           </div>

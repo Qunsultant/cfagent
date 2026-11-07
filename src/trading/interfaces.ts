@@ -53,6 +53,10 @@ export interface OrderPreviewParams {
   stopPrice?: number;
   sessionId?: string;
   notes?: string;
+  /** Optional bracket order parameters. */
+  orderClass?: "simple" | "bracket" | "oco" | "oto";
+  takeProfit?: { limitPrice?: number };
+  stopLoss?: { stopPrice?: number; limitPrice?: number };
   /** Opening legs for a native multi-leg options order. */
   optionLegs?: TradingOrderLeg[];
   /** Net strategy price: positive is debit, negative is credit. */
@@ -80,6 +84,10 @@ export interface PlaceOrderParams {
   userLogin: string;
   optionLegs?: TradingOrderLeg[];
   strategyNetDebit?: number;
+  /** Optional bracket order parameters. */
+  orderClass?: "simple" | "bracket" | "oco" | "oto";
+  takeProfit?: { limitPrice?: number };
+  stopLoss?: { stopPrice?: number; limitPrice?: number };
   /**
    * Issue #3508: trading session identifier ("pre_market", "regular",
    * "after_hours", "exto").

@@ -1638,7 +1638,7 @@ export function ETradeTradingHub({
   };
 
   const accountValue = account?.netAccountValue;
-  const isLive = activeEnv === "PROD" || brokerStatus?.environment === "live" || brokerStatus?.activeEnvironment === "PROD";
+  const isLive = activeEnv === "PROD";
 
   useEffect(() => {
     onBrokerPropsChange?.({

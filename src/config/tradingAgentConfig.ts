@@ -39,7 +39,7 @@ export interface TradingAgentConfig {
 }
 
 export const TRADING_AGENT_CONFIG_BASELINE: TradingAgentConfig = {
-  enabledProviders: ["etrade"],
+  enabledProviders: ["etrade", "alpaca"],
   defaultProvider: "etrade",
   enabledServices: [...TRADING_AGENT_SERVICE_IDS],
 };
