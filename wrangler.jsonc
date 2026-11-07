@@ -279,6 +279,8 @@
     // SPY/QQQ/AAPL/MSFT/NVDA unless STOCK_COPILOT_UNIVERSE is
     // set. Rollback is unsetting this var and redeploying.
     "STOCK_COPILOT_PAPER_ENABLED": "1",
+    // Issue #3728: Unconstrained continuous Stock Copilot trading around the clock (24/7).
+    "STOCK_COPILOT_AROUND_THE_CLOCK": "true",
     // Issue #3452 — Stock Copilot cycle cadence (AOP). Optional;
     // absence uses "every 30 minutes". Floor is 30m (Worker cron limit).
     // "STOCK_COPILOT_CADENCE": "every 30 minutes",

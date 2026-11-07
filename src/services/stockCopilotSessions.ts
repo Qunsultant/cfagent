@@ -164,6 +164,55 @@ export function resolveCopilotSessions(
   return [...DEFAULT_COPILOT_SESSIONS];
 }
 
+/**
+ * Issue #3728: Unconstrained around-the-clock trading resolver.
+ * When around-the-clock mode is active, off-hours and weekends map to
+ * "exto" for continuous limit-order evaluation, strategy signals,
+ * and autonomous learning without stalling at outside_enabled_sessions.
+ *
+ * Resolves true when:
+ * 1. Env STOCK_COPILOT_AROUND_THE_CLOCK, STOCK_COPILOT_FORCE_ALL_SESSIONS,
+ *    or STOCK_COPILOT_IGNORE_SESSIONS is true.
+ * 2. Stored settings specify "stock_copilot:around_the_clock" = "true",
+ *    or sessions contain "around_the_clock", "24/7", "continuous", "all", "*",
+ *    or explicitly contain all 4 supported sessions (pre_market, regular, after_hours, exto).
+ */
+export function isAroundTheClock(
+  readers?: CopilotSessionReaders | null,
+): boolean {
+  if (!readers) return false;
+  if (
+    String(readers.env?.STOCK_COPILOT_AROUND_THE_CLOCK ?? "").toLowerCase() === "true" ||
+    String(readers.env?.STOCK_COPILOT_FORCE_ALL_SESSIONS ?? "").toLowerCase() === "true" ||
+    String(readers.env?.STOCK_COPILOT_IGNORE_SESSIONS ?? "").toLowerCase() === "true"
+  ) {
+    return true;
+  }
+  if (typeof readers.readSettingRaw === "function") {
+    const rawAround = readers.readSettingRaw("stock_copilot:around_the_clock");
+    if (rawAround === "true" || rawAround === "1" || rawAround === "yes") {
+      return true;
+    }
+    const rawSessions = readers.readSettingRaw(COPILOT_SESSION_SETTING_KEY);
+    if (
+      rawSessions === "around_the_clock" ||
+      rawSessions === "24/7" ||
+      rawSessions === "continuous" ||
+      rawSessions === "all" ||
+      rawSessions === "*"
+    ) {
+      return true;
+    }
+    if (rawSessions) {
+      const parsed = parseCopilotSessionList(rawSessions);
+      if (parsed && parsed.length === COPILOT_SESSIONS.length) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 /** Weekday + minutes-into-day in America/New_York (the Intl-parts
  *  discipline of the legacy regular-hours gate). */
 function etWeekdayMinutes(now: Date): { weekday: string; minutes: number } {
