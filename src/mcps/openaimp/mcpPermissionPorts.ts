@@ -315,6 +315,8 @@ export const MCP_TOOL_SCOPES: Record<string, McpScope> = {
   etrade_preview_order: "mcp:trade",
   etrade_execute_order: "mcp:trade",
   alpaca_place_order: "mcp:trade",
+  alpaca_place_bracket_ladder: "mcp:trade",
+  alpaca_cancel_bracket_ladder: "mcp:trade",
   foss_alpaca_place_order: "mcp:trade", // #1906 deprecated alias, same scope as canonical
   execute_durable_twap: "mcp:trade",
   // #2349 (mesh S6): the TradingAgent door's proposal commands —

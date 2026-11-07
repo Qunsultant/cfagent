@@ -3395,5 +3395,12 @@ export class MarketDataResearchService {
   async getAlpacaOrders(status: "open" | "closed" | "all" = "open"): Promise<{ success: boolean; orders?: any[]; message?: string }> {
     return this.alpacaTrading.getOrders(status);
   }
+
+  /**
+   * Real Alpaca Trading v2: Cancel an order (#3390, #3673)
+   */
+  async cancelAlpacaOrder(orderId: string | number): Promise<{ success: boolean; orderId: string; message: string; httpStatus?: number }> {
+    return this.alpacaTrading.cancelOrder(orderId);
+  }
 }
 

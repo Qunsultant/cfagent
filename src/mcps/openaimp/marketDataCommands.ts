@@ -610,3 +610,164 @@ export class DeprecatedToolAlias implements IMcpToolCommand {
     return this.canonical.execute(input, context);
   }
 }
+
+/**
+ * 10. Alpaca Place Bracket Ladder Command (#3673)
+ * Places a TOS-style multi-tier bracket ladder (grid order) with step increments and paired TP/SL exits.
+ */
+export class AlpacaPlaceBracketLadderCommand implements IMcpToolCommand {
+  readonly name = "alpaca_place_bracket_ladder";
+  readonly description =
+    "Place a multi-tier bracket ladder (grid / scale-in / scale-out) on Alpaca with step increments and paired take-profit and stop-loss exits for each tier.";
+
+  readonly jsonSchema = {
+    type: "object" as const,
+    properties: {
+      symbol: { type: "string", description: "Ticker symbol (e.g. AAPL, NVDA)" },
+      side: { type: "string", enum: ["buy", "sell"], description: "Order side ('buy' or 'sell')" },
+      base_price: { type: "number", description: "Initial entry price level" },
+      basePrice: { type: "number", description: "CamelCase alias for base_price" },
+      step_increment: { type: "number", description: "Dollar price interval between tiers (e.g. 1.00)" },
+      stepIncrement: { type: "number", description: "CamelCase alias for step_increment" },
+      tiers: { type: "number", description: "Number of ladder tiers/rungs (1 to 20)" },
+      qty_per_tier: { type: "number", description: "Number of shares per tier" },
+      quantityPerTier: { type: "number", description: "CamelCase alias for qty_per_tier" },
+      quantities: {
+        type: "array",
+        items: { type: "number" },
+        description: "Optional array of quantities per tier (length must equal tiers)",
+      },
+      take_profit_delta: { type: "number", description: "Profit target distance from tier entry price" },
+      takeProfitDelta: { type: "number", description: "CamelCase alias for take_profit_delta" },
+      stop_loss_delta: { type: "number", description: "Protective stop distance from tier entry price" },
+      stopLossDelta: { type: "number", description: "CamelCase alias for stop_loss_delta" },
+      direction: {
+        type: "string",
+        enum: ["ascending", "descending"],
+        description: "Tier direction ('ascending' steps up, 'descending' steps down)",
+      },
+      time_in_force: { type: "string", enum: ["day", "gtc"], description: "Time in force ('day' or 'gtc')" },
+      extended_hours: { type: "boolean", description: "Allow extended-hours execution" },
+    },
+    required: ["symbol", "side", "tiers"],
+  };
+
+  readonly zodSchema = z.object({
+    symbol: z.string().min(1).max(20).describe("Ticker symbol"),
+    side: z.enum(["buy", "sell"]).describe("Order side"),
+    base_price: z.number().positive().optional().describe("Base price"),
+    basePrice: z.number().positive().optional().describe("Base price alias"),
+    step_increment: z.number().positive().optional().describe("Step increment"),
+    stepIncrement: z.number().positive().optional().describe("Step increment alias"),
+    tiers: z.number().int().min(1).max(20).describe("Number of tiers"),
+    qty_per_tier: z.number().positive().optional().describe("Quantity per tier"),
+    quantityPerTier: z.number().positive().optional().describe("Quantity per tier alias"),
+    quantities: z.array(z.number().positive()).optional().describe("Quantities per rung"),
+    take_profit_delta: z.number().positive().optional().describe("Take-profit offset"),
+    takeProfitDelta: z.number().positive().optional().describe("Take-profit offset alias"),
+    stop_loss_delta: z.number().positive().optional().describe("Stop-loss offset"),
+    stopLossDelta: z.number().positive().optional().describe("Stop-loss offset alias"),
+    direction: z.enum(["ascending", "descending"]).default("ascending").optional(),
+    time_in_force: z.enum(["day", "gtc"]).default("day").optional(),
+    extended_hours: z.boolean().optional(),
+  });
+
+  async execute(input: any, context: McpToolContext) {
+    const { executeBracketLadder } = await import("../../services/bracketLadder");
+    const basePrice = input.base_price ?? input.basePrice ?? 100.0;
+    const stepIncrement = input.step_increment ?? input.stepIncrement ?? 1.0;
+    const quantityPerTier = input.qty_per_tier ?? input.quantityPerTier ?? 1;
+    const takeProfitDelta = input.take_profit_delta ?? input.takeProfitDelta ?? 1.0;
+    const stopLossDelta = input.stop_loss_delta ?? input.stopLossDelta ?? 2.0;
+
+    const receipt = await executeBracketLadder(
+      {
+        symbol: String(input.symbol || "").toUpperCase(),
+        side: input.side,
+        basePrice,
+        stepIncrement,
+        tiers: Number(input.tiers),
+        quantityPerTier,
+        quantities: input.quantities,
+        takeProfitDelta,
+        stopLossDelta,
+        direction: input.direction || "ascending",
+        timeInForce: input.time_in_force || "day",
+        extendedHours: input.extended_hours,
+      },
+      context.env,
+    );
+
+    context.audit?.("alpaca.bracket_ladder_placed", "trading", {
+      symbol: receipt.symbol,
+      side: receipt.side,
+      ladderId: receipt.ladderId,
+      tiersPlaced: receipt.tiersPlaced,
+      tiersRequested: receipt.tiersRequested,
+      totalQuantity: receipt.totalQuantity,
+    });
+
+    return receipt;
+  }
+}
+
+/**
+ * 11. Alpaca Cancel Bracket Ladder Command (#3673)
+ * Cancels all open order rungs associated with a bracket ladder batch or target symbol.
+ */
+export class AlpacaCancelBracketLadderCommand implements IMcpToolCommand {
+  readonly name = "alpaca_cancel_bracket_ladder";
+  readonly description = "Cancel all unfilled orders in a bracket ladder batch by ladder ID or symbol.";
+
+  readonly jsonSchema = {
+    type: "object" as const,
+    properties: {
+      ladder_id: { type: "string", description: "Ladder ID prefix to cancel" },
+      ladderId: { type: "string", description: "CamelCase alias for ladder_id" },
+      symbol: { type: "string", description: "Symbol to cancel open orders for" },
+      order_ids: {
+        type: "array",
+        items: { type: "string" },
+        description: "Exact list of order IDs to cancel",
+      },
+      orderIds: {
+        type: "array",
+        items: { type: "string" },
+        description: "CamelCase alias for order_ids",
+      },
+    },
+  };
+
+  readonly zodSchema = z.object({
+    ladder_id: z.string().optional(),
+    ladderId: z.string().optional(),
+    symbol: z.string().optional(),
+    order_ids: z.array(z.string()).optional(),
+    orderIds: z.array(z.string()).optional(),
+  });
+
+  async execute(input: any, context: McpToolContext) {
+    const { cancelBracketLadder } = await import("../../services/bracketLadder");
+    const ladderId = input.ladder_id ?? input.ladderId;
+    const orderIds = input.order_ids ?? input.orderIds;
+
+    const receipt = await cancelBracketLadder(
+      {
+        ladderId,
+        symbol: input.symbol,
+        orderIds,
+      },
+      context.env,
+    );
+
+    context.audit?.("alpaca.bracket_ladder_cancelled", "trading", {
+      ladderId: receipt.ladderId,
+      symbol: receipt.symbol,
+      cancelledCount: receipt.cancelledCount,
+      orderIds: receipt.orderIds,
+    });
+
+    return receipt;
+  }
+}
+
