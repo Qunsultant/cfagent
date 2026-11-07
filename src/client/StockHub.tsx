@@ -689,7 +689,7 @@ export function StockHub({
       tooltip: {
         eyebrow: "MARKET RESEARCH",
         title: "Market Research",
-        description: "Zero-credential Yahoo Finance and Alpaca dual feed, fundamental peer comparison.",
+        description: "Zero-credential dual market-data feed, fundamental peer comparison.",
       },
     },
     {
