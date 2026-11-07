@@ -21,8 +21,13 @@ import {
 } from "../src/agents/routes/agenticPayments";
 import {
   createD1CommercialDb,
+  D1CommercialAdapter,
   ensureCommercialSchema,
 } from "../src/data/d1CommercialAdapter";
+import {
+  createD1TopUpDb,
+  D1TopUpAdapter,
+} from "../src/data/d1TopUpAdapter";
 import {
   createD1SubscriptionDb,
   ensureSubscriptionSchema,
@@ -558,5 +563,155 @@ describe("pricing top-up limits", () => {
     expect(second.topUpLimits).toEqual({ minUSD: 5, maxUSD: 100 });
     expect((await mintCard(ctx, 3)).res?.status).toBe(400);
     expect((await mintCard(ctx, 50)).res?.status).toBe(200);
+  });
+});
+
+describe("top-up claim-before-credit (#3572)", () => {
+  const confirmCard = (ctx: AgenticPaymentsRouteContext, topUpRequestId: string, checkoutSessionId: string) =>
+    call(ctx, "POST", "/payments/agentic/commercial/top-up/confirm", "u1", {
+      topUpRequestId,
+      checkoutSessionId,
+    });
+
+  it("crash window: credit landed but the mark never ran — a retry refuses 409 and adds nothing", async () => {
+    const { ctx, mock, audit } = await setup({ monetization: true, stripe: true });
+    stubPayments();
+    await createAccount(ctx, "u1");
+    const { body } = await mintCard(ctx, 25);
+    // Reproduce the post-crash state through the same port operations the
+    // route uses, with the mark step omitted (the crash): claim, then credit.
+    const drafts = new D1TopUpAdapter(createD1TopUpDb(mock as unknown as D1Database));
+    await drafts.claimForCredit(body.topUpRequestId);
+    const store = new D1CommercialAdapter(createD1CommercialDb(mock as unknown as D1Database));
+    await store.adjustCredits("u1", 25);
+    expect(await accountCredits(ctx, "u1")).toBe(25);
+    // The retry confirm re-verifies payment, then hits the claimed draft.
+    const res = await confirmCard(ctx, body.topUpRequestId, body.checkoutSessionId);
+    expect(res?.status).toBe(409);
+    expect((await bodyOf(res)).code).toBe("FAILURE_TOP_UP_REPLAY");
+    expect(await accountCredits(ctx, "u1")).toBe(25);
+    expect((await drafts.getDraft(body.topUpRequestId))?.status).toBe("crediting");
+    expect(audit).not.toHaveBeenCalledWith(
+      "commercial.top_up.credited",
+      "payments",
+      expect.objectContaining({ topUpRequestId: body.topUpRequestId }),
+    );
+  });
+
+  it("concurrent confirms credit exactly once: one 200, one 409", async () => {
+    const { ctx } = await setup({ monetization: true, stripe: true });
+    stubPayments();
+    await createAccount(ctx, "u1");
+    const { body } = await mintCard(ctx, 25);
+    const [first, second] = await Promise.all([
+      confirmCard(ctx, body.topUpRequestId, body.checkoutSessionId),
+      confirmCard(ctx, body.topUpRequestId, body.checkoutSessionId),
+    ]);
+    expect([first?.status, second?.status].sort()).toEqual([200, 409]);
+    expect(await accountCredits(ctx, "u1")).toBe(25);
+  });
+
+  it("credit failure releases the claim: the draft returns to minted and a retry succeeds", async () => {
+    const { ctx, mock } = await setup({ monetization: true, stripe: true });
+    stubPayments();
+    await createAccount(ctx, "u1");
+    const { body } = await mintCard(ctx, 25);
+    // Fail the next commercial-accounts UPDATE once (the confirm's
+    // adjustCredits): the credit never lands, so the route must release
+    // the claim instead of leaving the draft stuck crediting.
+    let failCreditsOnce = true;
+    const origPrepare = mock.prepare.bind(mock);
+    mock.prepare = (sql: string) => {
+      const stmt = origPrepare(sql);
+      const isCreditsUpdate =
+        sql.trimStart().toLowerCase().startsWith("update") && sql.includes("agent_commercial_accounts");
+      return {
+        bind(...params: unknown[]) {
+          const bound = stmt.bind(...params);
+          return {
+            ...bound,
+            async run() {
+              if (isCreditsUpdate && failCreditsOnce) {
+                failCreditsOnce = false;
+                throw new Error("store unavailable (test fault)");
+              }
+              return bound.run();
+            },
+          };
+        },
+      };
+    };
+    const failed = await confirmCard(ctx, body.topUpRequestId, body.checkoutSessionId);
+    expect(failed?.status).toBe(500);
+    expect(await accountCredits(ctx, "u1")).toBe(0);
+    const drafts = new D1TopUpAdapter(createD1TopUpDb(mock as unknown as D1Database));
+    expect((await drafts.getDraft(body.topUpRequestId))?.status).toBe("minted");
+    const ok = await confirmCard(ctx, body.topUpRequestId, body.checkoutSessionId);
+    expect(ok?.status).toBe(200);
+    expect(await accountCredits(ctx, "u1")).toBe(25);
+  });
+
+  it("revert failure leaves the draft crediting with a loud coded 500 for operator reconcile", async () => {
+    const { ctx, mock, audit } = await setup({ monetization: true, stripe: true });
+    stubPayments();
+    await createAccount(ctx, "u1");
+    const { body } = await mintCard(ctx, 25);
+    // Fail the credit UPDATE once AND the claim-release UPDATE once
+    // (Drizzle binds SET params first, so params[0] is the SET status):
+    // the draft stays `crediting` and the route must say so loudly.
+    let failCreditsOnce = true;
+    let failReleaseOnce = true;
+    const origPrepare = mock.prepare.bind(mock);
+    mock.prepare = (sql: string) => {
+      const stmt = origPrepare(sql);
+      const lower = sql.trimStart().toLowerCase();
+      const isCreditsUpdate = lower.startsWith("update") && sql.includes("agent_commercial_accounts");
+      const isDraftUpdate = lower.startsWith("update") && sql.includes("agent_top_up_drafts");
+      return {
+        bind(...params: unknown[]) {
+          const bound = stmt.bind(...params);
+          // Drizzle routes UPDATE ... RETURNING through raw() (the
+          // returning rows are mapped via values()), not run()/all(),
+          // so the fault must be injected on all three paths or the
+          // release fault never fires.
+          const maybeFault = () => {
+            if (isCreditsUpdate && failCreditsOnce) {
+              failCreditsOnce = false;
+              throw new Error("store unavailable (test fault: credit)");
+            }
+            if (isDraftUpdate && failReleaseOnce && params[0] === "minted") {
+              failReleaseOnce = false;
+              throw new Error("store unavailable (test fault: release)");
+            }
+          };
+          return {
+            ...bound,
+            async run() {
+              maybeFault();
+              return bound.run();
+            },
+            async all() {
+              maybeFault();
+              return bound.all();
+            },
+            async raw() {
+              maybeFault();
+              return bound.raw();
+            },
+          };
+        },
+      };
+    };
+    const failed = await confirmCard(ctx, body.topUpRequestId, body.checkoutSessionId);
+    expect(failed?.status).toBe(500);
+    expect((await bodyOf(failed)).code).toBe("FAILURE_TOP_UP_RECONCILE_REQUIRED");
+    expect(await accountCredits(ctx, "u1")).toBe(0);
+    const drafts = new D1TopUpAdapter(createD1TopUpDb(mock as unknown as D1Database));
+    expect((await drafts.getDraft(body.topUpRequestId))?.status).toBe("crediting");
+    expect(audit).toHaveBeenCalledWith(
+      "commercial.top_up.claim_stuck",
+      "payments",
+      expect.objectContaining({ topUpRequestId: body.topUpRequestId }),
+    );
   });
 });

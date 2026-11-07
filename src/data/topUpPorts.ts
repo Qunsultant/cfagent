@@ -26,7 +26,7 @@
  */
 export type TopUpRail = "card" | "x402";
 
-export type TopUpDraftStatus = "minted" | "credited";
+export type TopUpDraftStatus = "minted" | "crediting" | "credited";
 
 export interface TopUpDraft {
   /** Route-minted draft id: `topup-<uuid>`. Also the replay guard. */
@@ -54,11 +54,26 @@ export interface TopUpDraftStore {
   createDraft(draft: TopUpDraft): Promise<TopUpDraft>;
   getDraft(id: string): Promise<TopUpDraft | null>;
   /**
-   * Transition a minted draft to credited. Refuses when the draft is
-   * unknown or already credited — the replay guard. Callers credit
-   * the account only after this transition succeeds in their flow;
-   * see the confirm route for the ordering (verify → credit →
-   * mark), and the known crash-window limitation in the #3262 PR.
+   * Atomically claim a minted draft for crediting (minted → crediting).
+   * A single conditional transition: it refuses when the draft is
+   * unknown or not minted, so exactly one confirmer can own the credit
+   * — a retry or concurrent confirm sees a non-minted draft and refuses
+   * instead of crediting again (#3572). Throws TopUpClaimRefusedError
+   * on refusal.
+   */
+  claimForCredit(id: string): Promise<TopUpDraft>;
+  /**
+   * Release a claim (crediting → minted), restoring the draft so a retry
+   * can proceed. Used when the credit fails after a successful claim.
+   * Refuses when the draft is unknown or not crediting.
+   */
+  releaseClaim(id: string): Promise<TopUpDraft>;
+  /**
+   * Transition a crediting draft to credited. Refuses when the draft is
+   * unknown, not crediting, or already credited — the replay guard.
+   * Only ever called after a successful claimForCredit in the confirm
+   * route; see the confirm route for the ordering (verify → claim →
+   * credit → mark, #3572).
    */
   markCredited(
     id: string,
@@ -67,9 +82,29 @@ export interface TopUpDraftStore {
   listByUser(userLogin: string): Promise<TopUpDraft[]>;
 }
 
+/**
+ * A draft-state refusal for claim/release: the draft is not in the
+ * state the transition requires. Callers map this to the replay
+ * outcome (409 FAILURE_TOP_UP_REPLAY) — never to a store failure.
+ */
+export class TopUpClaimRefusedError extends Error {
+  constructor(
+    readonly draftId: string,
+    readonly status: TopUpDraftStatus,
+    readonly operation: "claim" | "release",
+  ) {
+    super(
+      operation === "claim"
+        ? `Top-up ${draftId} is not minted (status: ${status}).`
+        : `Top-up ${draftId} is not crediting (status: ${status}).`,
+    );
+    this.name = "TopUpClaimRefusedError";
+  }
+}
+
 export function assertTopUpDraftStatus(value: unknown): TopUpDraftStatus {
-  if (value !== "minted" && value !== "credited") {
-    throw new Error(`Top-up draft status must be "minted" or "credited".`);
+  if (value !== "minted" && value !== "crediting" && value !== "credited") {
+    throw new Error(`Top-up draft status must be "minted", "crediting", or "credited".`);
   }
   return value;
 }
