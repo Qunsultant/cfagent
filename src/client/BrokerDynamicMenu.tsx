@@ -698,9 +698,9 @@ export function BrokerDynamicMenu({
               variant="default"
               options={BROKER_OPTIONS.map((opt) => ({
                 id: opt.id,
-                label: opt.name,
-                icon: opt.icon,
-                tooltip: opt.description,
+                label: opt.label,
+                icon: opt.id === "alpaca" ? "🦙" : "⚡",
+                tooltip: `Select ${opt.label} as active broker`,
               }))}
               value={selectedBrokerId}
               onChange={(v) => handleSetTenantProviders({ ...tenantProviders, brokerId: v })}
@@ -791,11 +791,8 @@ export function BrokerDynamicMenu({
             {selectedBrokerId === "alpaca" && showAlpacaSignIn && (
               <div className="embedded-alpaca-signin">
                 <AlpacaSignInCard
-                  onDismiss={() => setShowAlpacaSignIn(false)}
-                  onSignedIn={() => {
-                    setShowAlpacaSignIn(false);
-                    setLocalMsg("Alpaca credentials verified and saved.");
-                  }}
+                  activeEnv={effectiveEnv}
+                  collapsedWhenConfigured={false}
                 />
               </div>
             )}
@@ -865,7 +862,7 @@ export function BrokerDynamicMenu({
                   options={FONT_SCALE_PRESETS.map((p) => ({
                     id: String(p.scale),
                     label: p.label,
-                    tooltip: p.description,
+                    tooltip: p.pct,
                   }))}
                   value={String(fontScale)}
                   onChange={(val) => handleFontScaleChange(Number(val))}

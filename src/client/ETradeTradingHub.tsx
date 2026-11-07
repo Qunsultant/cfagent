@@ -34,6 +34,7 @@ import {
 import { TradingApprovalsQueue } from "./TradingApprovalsQueue";
 import { AccountPanels } from "./AccountPanels";
 import { AlpacaBrokerPanel } from "./AlpacaBrokerPanel";
+import { AlpacaSignInCard } from "./AlpacaSignInCard";
 import {
   accountsEndpoint,
   connectStatusEndpoint,
@@ -424,6 +425,7 @@ export function ETradeTradingHub({
   const [diagnostics, setDiagnostics] = useState<any>(null);
   const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
   const [showDiagnosticsModal, setShowDiagnosticsModal] = useState(false);
+  const [showAlpacaSignInModal, setShowAlpacaSignInModal] = useState(false);
 
   // E*TRADE 3-Legged OAuth 1.0a state
   const [oauthStatus, setOauthStatus] = useState<{
@@ -3076,7 +3078,7 @@ export function ETradeTradingHub({
       )}
       {/* Live REST Diagnostics Modal */}
       {showDiagnosticsModal && (
-        <Modal open size="none" panelClassName="etrade-pin-modal diagnostics-modal" title={`${brokerPresentation(diagnostics?.broker || selectedBroker).icon} ${brokerPresentation(diagnostics?.broker || selectedBroker).label} Diagnostics [${diagnostics?.environment || activeEnv}]`} onClose={() => setShowDiagnosticsModal(false)}>
+        <Modal open size="none" panelClassName="etrade-pin-modal diagnostics-modal" title={`${(diagnostics?.broker || selectedBroker) === "alpaca" ? "🦙" : "⚡"} ${brokerPresentation(diagnostics?.broker || selectedBroker).label} Diagnostics [${diagnostics?.environment || activeEnv}]`} onClose={() => setShowDiagnosticsModal(false)}>
               {diagnostics ? (
                 <>
                   <div className="diag-header-row">
@@ -3191,7 +3193,7 @@ export function ETradeTradingHub({
                         onClick={() => {
                           setShowDiagnosticsModal(false);
                           if (diagnostics.broker === "alpaca") {
-                            setShowAlpacaSignIn(true);
+                            setShowAlpacaSignInModal(true);
                           } else {
                             handleStartOAuth();
                           }
@@ -3206,8 +3208,6 @@ export function ETradeTradingHub({
                       disabled={diagnosticsLoading}
                       onClick={() => runDiagnostics(diagnostics?.broker, diagnostics?.environment || activeEnv)}
                     >
-                      {diagnosticsLoading ? "⏳ Testing..." : "🔄 Re-run Diagnostics"}
-                    </Button>
                       {diagnosticsLoading ? "⏳ Testing..." : "🔄 Re-run Diagnostics"}
                     </Button>
                     <Button
@@ -3225,6 +3225,17 @@ export function ETradeTradingHub({
                 </div>
               )}
       </Modal>
+      )}
+
+      {showAlpacaSignInModal && (
+        <Modal
+          open
+          size="md"
+          title="🦙 Alpaca Broker Connection &amp; API Keys"
+          onClose={() => setShowAlpacaSignInModal(false)}
+        >
+          <AlpacaSignInCard activeEnv={activeEnv} collapsedWhenConfigured={false} />
+        </Modal>
       )}
 
       {/* Dynamic ETAPI Engine Tuning & Configuration Modal */}
