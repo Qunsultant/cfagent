@@ -20,3 +20,4 @@ Sub-issue tracking under #2764
 - Verified regression suites: `tests/alpaca_bracket_orders_3658.test.ts`, `tests/market_data_research.test.ts`, `tests/mesh_registry_s1_2322.test.ts`, `tests/mcp_permission_ports.test.ts`, `tests/orchestrator-actor-cutover.test.ts`. All 96 tests passed green.
 
 Process documentation impact: none
+
