@@ -3,9 +3,7 @@
  *
  * Owner directive (Venus, 2026-10-22): the trading competency is an
  * agent-as-a-service — an agent-as-a-tool, a Think agent, and an A2A
- * agent with its own Think workflow. It is provider-NEUTRAL: E*TRADE is
- * one provider behind the TradingPlatformRegistry seam; others (e.g.
- * Public.com) onboard by registering a platform, with no agent changes.
+ * agent with its own Think workflow. It is provider-NEUTRAL: each provider sits behind the TradingPlatformRegistry seam; new providers onboard by registering a platform, with no agent changes.
  * The architecture is configurable, pluggable, extensible, flexible:
  *
  * - PLUGGABLE providers — services resolve an ITradingPlatform from
