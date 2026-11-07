@@ -36,8 +36,8 @@ afterEach(() => {
   localStorage.clear();
 });
 
-describe("Broker indicator at search (#3089)", () => {
-  it("shows E*TRADE by default and follows the selection to Alpaca", async () => {
+describe("Search trigger UI cleanliness (#3089, updated #3728)", () => {
+  it("renders a clean search trigger with shortcut hint without redundant broker badges", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}) })) as any);
     container = document.createElement("div");
     document.body.appendChild(container);
@@ -46,7 +46,10 @@ describe("Broker indicator at search (#3089)", () => {
       root.render(<StockSearchBar onSelectTab={() => {}} onAskAgent={() => {}} />);
     });
     await flush();
-    expect(container.textContent || "").toContain("E*TRADE");
+    expect(container.textContent || "").toContain("Search stocks...");
+    expect(container.querySelector(".stock-search-kbd")).not.toBeNull();
+    // Issue #3728: redundant broker badge removed from search bar trigger for clean UI
+    expect(container.querySelectorAll(".stock-search-trigger-container .badge").length).toBe(0);
     await act(async () => {
       window.dispatchEvent(
         new CustomEvent(TENANT_PROVIDERS_CHANGED_EVENT, {
@@ -55,6 +58,6 @@ describe("Broker indicator at search (#3089)", () => {
       );
     });
     await flush();
-    expect(container.textContent || "").toContain("Alpaca");
+    expect(container.querySelectorAll(".stock-search-trigger-container .badge").length).toBe(0);
   });
 });

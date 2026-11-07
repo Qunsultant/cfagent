@@ -22,6 +22,7 @@ import {
 } from "./patternSignals";
 import {
   copilotSessionAt,
+  isAroundTheClock,
   resolveCopilotSessions,
   shapeCopilotSessionOrder,
   STOCK_COPILOT_OUTSIDE_ENABLED_SESSIONS,
@@ -105,9 +106,10 @@ export async function runStockCopilotAgenticCycle(
   const enabledSessions =
     deps.enabledSessions ?? resolveCopilotSessions({ env: deps.env });
   const aroundTheClock =
-    String(deps.env?.STOCK_COPILOT_AROUND_THE_CLOCK ?? "").toLowerCase() === "true" ||
-    String(deps.env?.STOCK_COPILOT_FORCE_ALL_SESSIONS ?? "").toLowerCase() === "true" ||
-    String(deps.env?.STOCK_COPILOT_IGNORE_SESSIONS ?? "").toLowerCase() === "true";
+    deps.aroundTheClock ??
+    isAroundTheClock({
+      env: deps.env,
+    });
   const session = copilotSessionAt(now, aroundTheClock);
   result.session = session;
   result.enabledSessions = [...enabledSessions];
