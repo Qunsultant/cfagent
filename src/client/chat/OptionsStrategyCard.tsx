@@ -441,10 +441,10 @@ export function OptionsStrategyCard({
           tone="subtle"
           size="sm"
           disabled={isBusy}
-          onClick={() => onAction?.(`Preview trade ${label} on ${symbol} in E*TRADE`)}
+          onClick={() => onAction?.(`Preview trade ${label} on ${symbol} with your broker`)}
           title="Reserve order draft and preview execution"
         >
-          ⚡ Preview in E*TRADE
+          ⚡ Preview with your broker
         </Button>
 
         <Button
