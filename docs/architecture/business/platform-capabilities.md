@@ -35,7 +35,7 @@ The platform's research architecture provides autonomous, multi-provider market 
 The discovery layer enables bidirectional opportunity hunting—answering both *"What options strategies fit this ticker/thesis?"* and *"Which tickers fit this options strategy across the market?"*—while supporting dynamic leg composition and strategy re-selection.
 
 ### 2.1 Server-Backed Strategy Discovery
-- **Live Chain Evaluation**: Server-backed discovery (`serverDiscovery.ts` $\to$ `OptionsAgentPipeline`) evaluates live E*TRADE contract chains against the 72-strategy catalog.
+- **Live Chain Evaluation**: Server-backed discovery (`serverDiscovery.ts` $\to$ `OptionsAgentPipeline`) evaluates live contract chains from the selected broker against the 72-strategy catalog.
 - **Deterministic Ranking**: Filters and ranks strategy candidates deterministically using multivariate factor criteria rather than speculative client-side heuristic loops.
 - **Interactive Modeling Engine**: Pure display layer in the UI connected to `strategyDiscoveryEngine.ts` for interactive leg edits, payoff matrix visualization, strike ladders, and Greeks sensitivity adjustments.
 
