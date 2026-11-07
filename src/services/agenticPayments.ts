@@ -77,6 +77,13 @@ import {
 } from "../data/createBucketPorts";
 import type { BucketFamilyPorts } from "../data/bucketPorts";
 import { consumeStoreKey, createStoreKv, type DoNamespaceLike } from "../data/durableKv";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/agenticPayments",
+});
 
 // Fallback replay guard used only when no SessionStore namespace is bound.
 const consumedTxHashes = new Set<string>();
@@ -582,7 +589,10 @@ export class ETradeAgenticPaymentService {
 
     // Issue #2408: the meter is a gate condition. No meter, no serve.
     if (!metered?.meter) {
-      console.error(`[payments] metered gate refused ${resource}: no usage meter configured — nothing served.`);
+      structuredLog.error("agenticPayments.metered_gate_no_meter", {
+        message: `[payments] metered gate refused ${resource}: no usage meter configured — nothing served.`,
+        resource,
+      });
       if (verification.receipt.txHash) await this.releaseTxHash(verification.receipt.txHash);
       return meteredGateRefusal(503, "MeteringUnavailable", "The usage meter is not configured for this paid endpoint; the paid result was not served.");
     }
@@ -597,7 +607,11 @@ export class ETradeAgenticPaymentService {
       tier = await resolveMeteredTier(metered.resolveTier, userLogin);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[payments] metered gate refused ${resource}: tier resolution failed: ${message}`);
+      structuredLog.error("agenticPayments.metered_gate_tier_resolution_failed", {
+        message: `[payments] metered gate refused ${resource}: tier resolution failed: ${message}`,
+        resource,
+        error: message,
+      });
       if (verification.receipt.txHash) await this.releaseTxHash(verification.receipt.txHash);
       // assertStoreTier's message is the only invalid-tier source
       // here; anything else is a tier-store failure.
@@ -630,7 +644,11 @@ export class ETradeAgenticPaymentService {
         tier,
       }));
     } catch (err) {
-      console.error(`[payments] metered gate refused ${resource}: usage meter failed: ${err instanceof Error ? err.message : String(err)}`);
+      structuredLog.error("agenticPayments.metered_gate_usage_meter_failed", {
+        message: `[payments] metered gate refused ${resource}: usage meter failed: ${err instanceof Error ? err.message : String(err)}`,
+        resource,
+        error: err instanceof Error ? err.message : String(err),
+      });
       if (verification.receipt.txHash) await this.releaseTxHash(verification.receipt.txHash);
       return meteredGateRefusal(503, "MeteringUnavailable", "The usage meter failed; the paid result was not served. Retry the payment.");
     }
@@ -659,7 +677,11 @@ export class ETradeAgenticPaymentService {
         });
       }
     } catch (err) {
-      console.warn(`[payments] tier-decision audit failed for ${resource}: ${err instanceof Error ? err.message : String(err)}`);
+      structuredLog.warn("agenticPayments.tier_decision_audit_failed", {
+        message: `[payments] tier-decision audit failed for ${resource}: ${err instanceof Error ? err.message : String(err)}`,
+        resource,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
 
     // Attach x402 and MPP receipt headers
@@ -789,7 +811,10 @@ export class ETradeAgenticPaymentService {
     // none, a pre-existing gap noted on the receipt itself. A
     // meter refusal here still serves nothing and stays typed.)
     if (!metered?.meter) {
-      console.error(`[payments] metered gate refused ${resource}: no usage meter configured — nothing served.`);
+      structuredLog.error("agenticPayments.mpp_metered_gate_no_meter", {
+        message: `[payments] metered gate refused ${resource}: no usage meter configured — nothing served.`,
+        resource,
+      });
       return meteredGateRefusal(503, "MeteringUnavailable", "The usage meter is not configured for this paid endpoint; the paid result was not served.");
     }
     const meter = metered.meter;
@@ -799,7 +824,11 @@ export class ETradeAgenticPaymentService {
       tier = await resolveMeteredTier(metered.resolveTier, userLogin);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[payments] metered gate refused ${resource}: tier resolution failed: ${message}`);
+      structuredLog.error("agenticPayments.mpp_metered_gate_tier_resolution_failed", {
+        message: `[payments] metered gate refused ${resource}: tier resolution failed: ${message}`,
+        resource,
+        error: message,
+      });
       if (message.startsWith("Invalid tier:")) {
         return meteredGateRefusal(500, "TierInvalid", `The stored tier for this caller is invalid; the paid result was not served. (${message})`);
       }
@@ -817,7 +846,11 @@ export class ETradeAgenticPaymentService {
         tier,
       }));
     } catch (err) {
-      console.error(`[payments] metered gate refused ${resource}: usage meter failed: ${err instanceof Error ? err.message : String(err)}`);
+      structuredLog.error("agenticPayments.mpp_metered_gate_usage_meter_failed", {
+        message: `[payments] metered gate refused ${resource}: usage meter failed: ${err instanceof Error ? err.message : String(err)}`,
+        resource,
+        error: err instanceof Error ? err.message : String(err),
+      });
       return meteredGateRefusal(503, "MeteringUnavailable", "The usage meter failed; the paid result was not served. Retry the payment.");
     }
 
@@ -842,7 +875,11 @@ export class ETradeAgenticPaymentService {
         });
       }
     } catch (err) {
-      console.warn(`[payments] tier-decision audit failed for ${resource}: ${err instanceof Error ? err.message : String(err)}`);
+      structuredLog.warn("agenticPayments.mpp_tier_decision_audit_failed", {
+        message: `[payments] tier-decision audit failed for ${resource}: ${err instanceof Error ? err.message : String(err)}`,
+        resource,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
 
     return result.withReceipt(

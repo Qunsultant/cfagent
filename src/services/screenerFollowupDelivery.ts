@@ -36,6 +36,13 @@ import {
   resolveTenantChannelGate,
   type TenantChannelGate,
 } from "./tenantChannelGate";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/screenerFollowupDelivery",
+});
 
 export interface FollowupDeliveryDeps {
   env: Env;
@@ -181,7 +188,10 @@ export function createFollowupDeliveryPort(deps: FollowupDeliveryDeps): {
             return { ok: true, ...(missingNote ? { detail: missingNote } : {}) };
           }
           a2aError = r.error || "cfpay A2A email send failed";
-          console.warn("[screenerFollowupDelivery] cfpay email failed, falling back to local:", a2aError);
+          structuredLog.warn("screener_followup.cfpay_email_failed", {
+            message: "[screenerFollowupDelivery] cfpay email failed, falling back to local",
+            error: a2aError,
+          });
         }
         let orm: DatabaseORM | undefined;
         try {
@@ -252,7 +262,10 @@ export function createFollowupDeliveryPort(deps: FollowupDeliveryDeps): {
           const r = await cfpaySendEmail(cfpay, to, subject, text);
           if (r.ok) return { ok: true };
           a2aError = r.error || "cfpay A2A email notification failed";
-          console.warn("[screenerFollowupDelivery] cfpay email notify failed, falling back to local:", a2aError);
+          structuredLog.warn("screener_followup.cfpay_email_notify_failed", {
+            message: "[screenerFollowupDelivery] cfpay email notify failed, falling back to local",
+            error: a2aError,
+          });
         }
         let orm: DatabaseORM | undefined;
         try {

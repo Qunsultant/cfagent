@@ -17,6 +17,13 @@ import * as XLSX from "@e965/xlsx";
 import type { GoalDrivenScreenResult } from "./goalDrivenScreen";
 import { recordJobOutcome } from "./jobOutcomes";
 import type { SqlStorage } from "../orm";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/goalScreenReports",
+});
 
 export type GoalScreenArtifactFormat = "pdf" | "xlsx" | "csv";
 
@@ -189,7 +196,11 @@ export function recordGoalRunOutcome(
       createdAt: run.createdAt,
     });
   } catch (err) {
-    console.warn(`[GoalScreenReports] outcome write failed for run ${run.id}: ${err instanceof Error ? err.message : String(err)}`);
+    structuredLog.warn("goal_screen.outcome_write_failed", {
+      message: `[GoalScreenReports] outcome write failed for run ${run.id}: ${err instanceof Error ? err.message : String(err)}`,
+      runId: run.id,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 
@@ -271,7 +282,11 @@ export async function generateAndStoreGoalScreenArtifacts(
       outcome[errorKey] = hasOutcomeCodePrefix(message)
         ? message
         : codedMessage("FAILURE_REPORT_PDF_GENERATION", message);
-      console.error(`[GoalScreenReports] ${format} artifact failed:`, outcome[errorKey]);
+      structuredLog.error("goal_screen.artifact_failed", {
+        message: `[GoalScreenReports] ${format} artifact failed: ${outcome[errorKey]}`,
+        format,
+        error: outcome[errorKey],
+      });
     }
   }
   return outcome;

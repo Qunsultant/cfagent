@@ -78,6 +78,13 @@ import {
 import { r2KeyForStorageKey } from "./reportBlobStore";
 import type { BlobStore } from "./blobStorePorts";
 import type { CorpusIndexBackfillOutcome } from "./corpusAiSearchIndex";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/corpusSync",
+});
 
 /** Durable marker key for the last completed corpus sync, in mas_settings. */
 export const CORPUS_SYNC_LAST_RUN_KEY = "corpus_sync_last_run";
@@ -263,16 +270,25 @@ export async function runCorpusIntegrityCheck(
       entries,
     };
     if (!report.ok) {
-      console.warn(
-        `[corpusSync] integrity ok=false missing=${report.missing.map(shaPrefix).join(",")} mismatched=${report.mismatched.map(shaPrefix).join(",")} extra=${report.extra.map(shaPrefix).join(",")}`
-      );
+      structuredLog.warn("corpus.integrity_failed", {
+        message: `[corpusSync] integrity ok=false missing=${report.missing.map(shaPrefix).join(",")} mismatched=${report.mismatched.map(shaPrefix).join(",")} extra=${report.extra.map(shaPrefix).join(",")}`,
+        missing: report.missing,
+        mismatched: report.mismatched,
+        extra: report.extra,
+      });
     } else {
-      console.info(`[corpusSync] integrity ok=true checked=${listed.size}`);
+      structuredLog.info("corpus.integrity_ok", {
+        message: `[corpusSync] integrity ok=true checked=${listed.size}`,
+        checked: listed.size,
+      });
     }
     return report;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.warn(`[corpusSync] integrity check failed: ${message}`);
+    structuredLog.warn("corpus.integrity_check_failed", {
+        message: `[corpusSync] integrity check failed: ${message}`,
+        error: message,
+      });
     return {
       ok: false,
       missing: [],

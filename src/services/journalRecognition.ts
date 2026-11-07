@@ -81,6 +81,13 @@ import {
   type JournalEntryInput,
   type JournalPort,
 } from "../data/journalPorts";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/journalRecognition",
+});
 
 /** One day in epoch-ms; subscription periods are whole days. */
 export const MS_PER_DAY = 86_400_000;
@@ -467,16 +474,16 @@ export async function postDueRecognitionBestEffort(
   try {
     const port = await setup();
     if (!port) {
-      console.error(
-        "[journal] recognition post skipped (AGENT_DB unbound); payment/ledger unaffected.",
-      );
+      structuredLog.error("journal.recognition_post_skipped", {
+        message: "[journal] recognition post skipped (AGENT_DB unbound); payment/ledger unaffected.",
+      });
       return;
     }
     await postDueRecognition(port, subscription, asOfMs);
   } catch (err) {
-    console.error(
-      "[journal] recognition post failed — payment/ledger unaffected:",
-      err instanceof Error ? err.message : String(err),
-    );
+    structuredLog.error("journal.recognition_post_failed", {
+      message: "[journal] recognition post failed — payment/ledger unaffected",
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 }

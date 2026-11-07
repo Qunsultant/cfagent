@@ -33,6 +33,14 @@ import {
   sharedMemoryReplayStore,
   type ReplayStore,
 } from "../security/webhookReplay";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/tradingWebhooks",
+});
+
 
 export class ETradeWebhookService {
   constructor(
@@ -58,10 +66,11 @@ export class ETradeWebhookService {
    */
   private replayStore(): ReplayStore {
     if (this.orm) return new OrmReplayStore(this.orm);
-    console.warn(
-      "[ETradeWebhookService] No ORM configured: inbound webhook replay protection " +
-        "uses an isolate-scoped memory fallback (not durable across isolates)."
-    );
+    structuredLog.warn("tradingWebhooks.replay_store_memory_fallback", {
+      message:
+        "[ETradeWebhookService] No ORM configured: inbound webhook replay protection " +
+        "uses an isolate-scoped memory fallback (not durable across isolates).",
+    });
     return sharedMemoryReplayStore();
   }
 

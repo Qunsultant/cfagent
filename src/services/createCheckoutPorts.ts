@@ -42,6 +42,13 @@ import { PaymentGatewayService } from "./payments";
 import type { CheckoutPorts } from "./checkoutPorts";
 import { StripeCheckoutAdapter } from "./stripeCheckoutAdapter";
 import { X402CheckoutAdapter } from "./x402CheckoutAdapter";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/createCheckoutPorts",
+});
 import {
   guardCheckoutPort,
   resolveCheckoutPortTimeoutMs,
@@ -92,9 +99,11 @@ export function createCheckoutPorts(
       );
     }
   } catch (err) {
-    console.error(
-      `[checkout-ports] card rail unconfigured (bad Stripe configuration, failing closed for card): ${err instanceof Error ? err.message : String(err)}`,
-    );
+    structuredLog.error("checkout.card_rail_unconfigured", {
+      message: `[checkout-ports] card rail unconfigured (bad Stripe configuration, failing closed for card): ${err instanceof Error ? err.message : String(err)}`,
+      rail: "card",
+      error: err instanceof Error ? err.message : String(err),
+    });
     card = null;
   }
 
@@ -112,9 +121,11 @@ export function createCheckoutPorts(
         guardOpts,
       );
     } catch (err) {
-      console.error(
-        `[checkout-ports] x402 rail unconfigured (bad recipient/network configuration, failing closed for x402): ${err instanceof Error ? err.message : String(err)}`,
-      );
+      structuredLog.error("checkout.x402_rail_unconfigured", {
+        message: `[checkout-ports] x402 rail unconfigured (bad recipient/network configuration, failing closed for x402): ${err instanceof Error ? err.message : String(err)}`,
+        rail: "x402",
+        error: err instanceof Error ? err.message : String(err),
+      });
       x402 = null;
     }
   }
