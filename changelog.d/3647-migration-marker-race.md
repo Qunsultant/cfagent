@@ -1,0 +1,2 @@
+### Fixed
+- Concurrent schema ensures can no longer fail a request on the migration runner's `_migrations` bookkeeping insert: when two ensures race the same unapplied migration, the PRIMARY KEY marker insert now has exactly one winner, and the loser verifies the recorded version and name before reading the migration as already applied. A missing marker rethrows the original insert failure, and a marker recorded under a different name raises an explicit mismatch error instead of being silently blessed.
