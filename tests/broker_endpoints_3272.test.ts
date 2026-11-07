@@ -17,6 +17,7 @@ import {
   LEGACY_STOCK_SCREEN_ENDPOINT,
   NEUTRAL_OPTION_SCREEN_ENDPOINT,
   NEUTRAL_STOCK_SCREEN_ENDPOINT,
+  connectStatusEndpoint,
   optionScreenEndpoint,
   stockScreenEndpoint,
 } from "../src/client/brokerEndpoints";
@@ -47,5 +48,20 @@ describe("the stock screen endpoint follows the selection (#3272)", () => {
   it("sends every other broker to the neutral route", () => {
     expect(stockScreenEndpoint("alpaca")).toBe(NEUTRAL_STOCK_SCREEN_ENDPOINT);
     expect(NEUTRAL_STOCK_SCREEN_ENDPOINT).toBe("/api/broker/screen");
+  });
+});
+
+describe("the connect-status endpoint follows the selection (#3669)", () => {
+  it("keeps E*TRADE on its OAuth status read", () => {
+    expect(connectStatusEndpoint("etrade")).toBe("/api/etrade/oauth/status");
+  });
+
+  it("sends Alpaca to its neutral connect read — the same one the menu uses", () => {
+    expect(connectStatusEndpoint("alpaca")).toBe("/api/broker/connect/alpaca");
+  });
+
+  it("returns null for a broker with no connect surface here — never another broker's status", () => {
+    expect(connectStatusEndpoint("interactive_brokers")).toBeNull();
+    expect(connectStatusEndpoint("")).toBeNull();
   });
 });

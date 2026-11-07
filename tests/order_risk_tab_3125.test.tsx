@@ -92,7 +92,9 @@ function makeModel(overrides: Partial<OrderTicketModel> = {}): OrderTicketModel 
     orderAssetClass: "equity",
     orderLegs: [],
     activeDraft: null,
-    oauthStatus: { authenticated: true, environment: "TEST" },
+    brokerId: "etrade",
+    tradingType: "paper",
+    brokerConnected: true,
     setOrderSymbol: noop,
     setOrderAction: noop,
     setOrderType: noop,
@@ -111,7 +113,7 @@ function makeModel(overrides: Partial<OrderTicketModel> = {}): OrderTicketModel 
     handlePreviewOrder: async (e: React.FormEvent) => {
       e.preventDefault();
     },
-    handleStartOAuth: noopAsync,
+    onConnectBroker: noopAsync,
     sendNlqToChat: noop,
     setRiskSubject: noop,
     seedManualOptions: noop,

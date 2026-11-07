@@ -23,7 +23,7 @@
  * stays on the legacy E*TRADE route); remote orders and cancel stay
  * E*TRADE-only. The legacy /api/etrade/* routes are untouched.
  */
-import { TradingPlatformRegistry, ROUTED_BROKER_IDS, brokerSupports } from "../../trading";
+import { TradingPlatformRegistry, ROUTED_BROKER_IDS, brokerSupports, BROKER_CATALOG, BROKER_UNAVAILABLE_CODE } from "../../trading";
 import { resolveTenantBroker } from "../../services/tenantProviders";
 import type { EtradeBrokerRouteContext } from "./etradeBroker";
 import { unauthenticatedResponse } from "./routeIdentity";
@@ -120,13 +120,15 @@ export async function handleBrokerOrderRoutes(
 
   // Broker-routed order preview
   if (path.endsWith("/broker/order/preview") && request.method === "POST") {
+    // Issue #3669: hoisted so the catch can name the broker it refused.
+    let broker: RoutedBroker | undefined;
     try {
       const body = (await request.json().catch(() => ({}))) as any;
       const brokerRaw = String(body.broker || "").toLowerCase();
       if (!isRoutedBroker(brokerRaw)) {
         return Response.json({ error: `Unsupported broker: ${brokerRaw || "(missing)"}. Routed brokers: ${ROUTED_BROKERS.join(", ")}.` }, { status: 400 });
       }
-      const broker = brokerRaw;
+      broker = brokerRaw;
       if (body.mode === "local") {
         return Response.json({ error: "Local preview is available only on the legacy E*TRADE route (/api/etrade/order/preview)." }, { status: 400 });
       }
@@ -180,7 +182,28 @@ export async function handleBrokerOrderRoutes(
         requestedEnv,
       });
     } catch (err) {
-      return Response.json({ error: err instanceof Error ? err.message : "Failed to preview trade order" }, { status: 500 });
+      // Issue #3669: an unconfigured broker fails loud and coded, never
+      // as a raw 500 string. The Alpaca platform throws "credentials are
+      // not configured" (platform.ts getAccounts/getOrderHistory/
+      // getActivity/getWatchlists, and the same wording surfaces from a
+      // preview whose quote read has no pair); the refusal names the
+      // selected broker and the shared FAILURE_BROKER_UNAVAILABLE code
+      // (catalog httpStatus 409, retryable false), so the client can
+      // show the broker's own connect flow instead of a generic error.
+      const message = err instanceof Error ? err.message : "Failed to preview trade order";
+      if (broker && /not configured/i.test(message)) {
+        const label = BROKER_CATALOG[broker].label;
+        return Response.json(
+          {
+            code: BROKER_UNAVAILABLE_CODE,
+            broker,
+            message: `${label} credentials are not configured, so the order preview was refused. Connect ${label} before previewing; no other broker was used.`,
+            retryable: false,
+          },
+          { status: 409 },
+        );
+      }
+      return Response.json({ error: message }, { status: 500 });
     }
   }
 
