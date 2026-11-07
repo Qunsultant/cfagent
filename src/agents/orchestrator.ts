@@ -92,7 +92,7 @@ import type { ScreenerRunOutcome } from "../services/screenerFollowups";
 import { marketDateKey, readAutopilotStateRaw, getAutopilotState, writeAutopilotState, incrementAutopilotOrdersToday, fetchBrokerBalanceSnapshot, openNotionalForSymbol, evaluateAndRecordAutopilotVerdict, type AutopilotContext } from "./orchestrator/autopilot";
 import { readSettingRaw, writeSetting, getReportDispatchHitl, setReportDispatchHitl, createReportConfirmation, getReportConfirmation, decideReportConfirmation, storeResearchReportCanonicalAsync, confirmationDeliveryMeta, deliverStoredReportEmail, deliverStoredReportWebhook, persistScreenerReportCanonical, persistParentScreenReportCanonical, refreshCanonicalPdfFields, sendReportEmail, sendReportWebhook, type ReportDispatchContext } from "./orchestrator/reportDispatch";
 import { extractMessageText, createTurnTools, deriveTurn, assembleGrounding, type ChatTurnHelpersContext } from "./orchestrator/chatTurnHelpers";
-import { createOpenaimpMcpFetch, ensureOpenaimpMcpConnection, chatNlqTurnGate, resolveStockCopilotMcpActivation, STOCK_COPILOT_SOURCE_TAB, type EnsureOpenaimpMcpResult } from "./orchestrator/meshMcpClient";
+import { createOpenaimpMcpFetch, ensureOpenaimpMcpConnection, chatNlqTurnGate, resolveStockCopilotMcpActivation, STOCK_COPILOT_SOURCE_TAB, type ChatNlqTurnGateResult, type EnsureOpenaimpMcpResult } from "./orchestrator/meshMcpClient";
 import { logChatActivity, enqueueHttpRequest, type HttpEntryContext } from "./orchestrator/httpEntry";
 import { runResearchAndPublish, deliverResearchReport, sendResearchSummaryEmail, type ResearchPublishContext } from "./orchestrator/researchPublish";
 import { ETradeEmailTradingService } from "../trading";
@@ -2186,7 +2186,7 @@ export class OrchestratorAgent extends PortThink {
     // resolves off the gate restricts the turn via activeTools
     // (every merged tool except tool_openaimp_execute_nlq). The
     // auto-research suppression below still wins outright.
-    const nlqGate = isAutoOptionsResearchRequest
+    const nlqGate: Partial<ChatNlqTurnGateResult> = isAutoOptionsResearchRequest
       ? {}
       : chatNlqTurnGate({
           toolNames: Object.keys(ctx.tools ?? {}),
@@ -2219,6 +2219,11 @@ export class OrchestratorAgent extends PortThink {
         optionsResearchContext,
         isAutoOptionsResearchRequest,
         stockCopilotMcpActive: stockMcpActivation.active,
+        // #3727: the steering follows the SAME value the gate
+        // resolved for this turn (nlqGate.mode) — no second read
+        // of CHAT_NLQ_MODE. The auto-research branch never runs
+        // the gate; its steering stays the flagged-off default.
+        chatNlqEnabled: nlqGate.mode === "on",
       }),
       maxSteps: this.maxSteps,
       ...(isAutoOptionsResearchRequest

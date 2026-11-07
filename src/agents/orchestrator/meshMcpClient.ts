@@ -115,6 +115,7 @@ import type { MCPClientManager } from "agents/mcp/client";
 import {
   chatNlqConfigErrorEvent,
   resolveChatNlqTurnMode,
+  type ChatNlqMode,
   type ChatNlqScopedModes,
 } from "../../config/chatNlqModes";
 import {
@@ -339,8 +340,20 @@ export async function ensureOpenaimpMcpConnection(deps: {
  * name EXCEPT the discovered NLQ key — the model cannot call a
  * tool outside activeTools. Mode "on", or a merged set that does
  * not (yet) contain the discovered NLQ tool, needs no restriction
- * and returns {}.
+ * and returns no activeTools.
+ *
+ * Issue #3727: the result also carries the resolved mode, so the
+ * caller passes the SAME resolved value to the prompt builder —
+ * the NLQ steering in src/agents/chatPrompt.ts follows the
+ * gate's resolution, never a second read of the switch.
  */
+export interface ChatNlqTurnGateResult {
+  /** Present only while the mode resolves "off" and the merged set carries the NLQ tool. */
+  activeTools?: string[];
+  /** Issue #3727: the gate's resolved mode, carried for the prompt steering. */
+  mode: ChatNlqMode;
+}
+
 export function chatNlqTurnGate(deps: {
   /** The merged turn tool set's keys (TurnContext.tools), post Think auto-merge. */
   toolNames: readonly string[];
@@ -349,7 +362,7 @@ export function chatNlqTurnGate(deps: {
     scopedChatNlqModes?: ChatNlqScopedModes;
   };
   audit: (type: string, payload: Record<string, unknown>) => void;
-}): { activeTools?: string[] } {
+}): ChatNlqTurnGateResult {
   const resolved = resolveChatNlqTurnMode(deps.context);
   if (resolved.invalid) {
     deps.audit(chatNlqConfigErrorEvent(), {
@@ -359,10 +372,11 @@ export function chatNlqTurnGate(deps: {
       resolvedMode: resolved.mode,
     });
   }
-  if (resolved.mode === "on") return {};
-  if (!deps.toolNames.includes(OPENAIMP_NLQ_TOOL_KEY)) return {};
+  if (resolved.mode === "on") return { mode: resolved.mode };
+  if (!deps.toolNames.includes(OPENAIMP_NLQ_TOOL_KEY)) return { mode: resolved.mode };
   return {
     activeTools: deps.toolNames.filter((name) => name !== OPENAIMP_NLQ_TOOL_KEY),
+    mode: resolved.mode,
   };
 }
 

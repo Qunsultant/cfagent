@@ -165,8 +165,10 @@ export interface AgentCapabilityManifest {
  * move an `enabled` capability to `disabled-by-config` — it never
  * enables, never re-enables, and never masks a deployment fact (an
  * `unavailable` capability stays unavailable). Declared on the Env
- * type in src/types.ts; deliberately not set in wrangler.jsonc (the
- * fleet ships with nothing disabled).
+ * type in src/types.ts; set explicitly EMPTY in wrangler.jsonc
+ * since #3727 — externalized, with nothing disabled (the fleet
+ * ships fully enabled; a deployment opts a capability out only by
+ * naming it here).
  */
 export const AGENT_CAPABILITIES_DISABLED_ENV = "AGENT_CAPABILITIES_DISABLED";
 
