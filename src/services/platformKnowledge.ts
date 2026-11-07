@@ -44,7 +44,7 @@ export const PLATFORM_WORKFLOWS_KNOWLEDGE: PlatformWorkflowSummary[] = [
     title: "Stock Screener & Multi-Exchange Equity Discovery",
     category: "stocks",
     categoryLabel: "Stocks",
-    badge: "Dual-Engine (Nasdaq & Yahoo)",
+    badge: "Dual-Engine (Listings & Quotes)",
     subtitle: "Screen 8,000+ US equities dynamically across NASDAQ, NYSE, and AMEX with technical indicators and auditable scan ledgers.",
     overview: "The Stock Screener allows filtering across all active US equities by price, market cap, exchange, 14-period daily RSI, MACD momentum, and daily gainers/losers. It queries official Nasdaq multi-exchange listings (api.nasdaq.com) across 8,000+ active tickers, with resilient automatic fallback to the externalized curated universe (src/config/curatedStockUniverse.json) or Yahoo Finance feeds if upstream APIs are rate-limited. Downstream workflows (including Options Flow) query this screener first as their primary dynamic market underlyings engine.",
     apiEndpoint: "POST /api/etrade/screen · POST /api/market-data/screen",
@@ -59,7 +59,7 @@ export const PLATFORM_WORKFLOWS_KNOWLEDGE: PlatformWorkflowSummary[] = [
       "Dynamic all-exchange discovery with live Nasdaq, NYSE, and AMEX support.",
       "Autonomous fallback decision tree: prioritizes remote Nasdaq/Yahoo listings before gracefully falling back to externalized curated universe.",
       "Single Source of Truth for Options Flow: Options Flow queries this screener first to resolve active, liquid market underlyings partitioned by market cap rather than defaulting to a static list.",
-      "Dual provider flexibility: E*TRADE broker mode or 100% zero-credential Yahoo Finance mode.",
+      "Dual provider flexibility: connected-broker mode or 100% zero-credential market-data mode.",
       "Auditable scan ledger detailing why each security matched or failed criteria.",
     ],
     dataSources: [
@@ -151,10 +151,10 @@ export const PLATFORM_WORKFLOWS_KNOWLEDGE: PlatformWorkflowSummary[] = [
       "Dynamic payoff diagram rendering at expiration and pre-expiration (T+0).",
       "Automatic calculation of exact breakeven points and maximum theoretical drawdown.",
       "Multi-leg Greeks aggregation: Net Delta, Net Gamma, Net Theta, Net Vega.",
-      "One-click transition from visual builder to E*TRADE order preview.",
+      "One-click transition from visual builder to broker order preview.",
     ],
     dataSources: [
-      "Live Option Chain Pricing (E*TRADE & Yahoo Finance)",
+      "Live Option Chain Pricing (connected broker & market-data providers)",
       "Black-Scholes Pricing & Payoff Math Models",
     ],
     sampleQueryOrAction: "Build an Iron Condor on SPY with 45 DTE and $5 wide wings",
@@ -263,7 +263,7 @@ export const PLATFORM_WORKFLOWS_KNOWLEDGE: PlatformWorkflowSummary[] = [
     ],
     keyFeatures: [
       "Natural language understanding for complex multi-leg options queries and equity screening.",
-      "Direct MCP tool dogfooding: search, database ORM, E*TRADE trading, market-data research, session memory.",
+      "Direct MCP tool dogfooding: search, database ORM, broker trading, market-data research, session memory.",
       "Grounded answers: cites internal platform capabilities, workflows, and exact UI navigation steps.",
       "Multi-turn conversational memory persisted in SQLite (`mas_memory`).",
     ],
@@ -777,7 +777,7 @@ export function getPlatformCapabilitiesDeskSummary(): PlatformCapabilitiesDeskSu
     },
     {
       id: "order-execution",
-      title: "E*TRADE Brokerage Order Drafts (Strict HITL)",
+      title: "Brokerage Order Drafts (Strict HITL)",
       category: "Orders",
       targetTab: "trading",
       samplePrompt: "Buy 10 shares of NVDA at market",
@@ -792,10 +792,10 @@ export function getPlatformCapabilitiesDeskSummary(): PlatformCapabilitiesDeskSu
   ];
 
   const spokenSummary =
-    "The E*TRADE Voice Trading Desk provides 14 integrated market capabilities across analysis and execution. You can ask for real-time market quotes, technical screening across 8,000 equities, top gainers and losers, options strategy discovery with Black-Scholes Greeks, modelled options flow estimates, portfolio risk and balances, scheduled alerts, or draft trade order tickets with Human-in-the-Loop protection. What would you like to explore today?";
+    "The Voice Trading Desk provides 14 integrated market capabilities across analysis and execution. You can ask for real-time market quotes, technical screening across 8,000 equities, top gainers and losers, options strategy discovery with Black-Scholes Greeks, modelled options flow estimates, portfolio risk and balances, scheduled alerts, or draft trade order tickets with Human-in-the-Loop protection. What would you like to explore today?";
 
   const markdownOverview = [
-    `### 🎙️ E*TRADE Voice Trading Desk: Platform Capabilities`,
+    `### 🎙️ Voice Trading Desk: Platform Capabilities`,
     ``,
     `Multi-Agent Studio connects you to **14 integrated market analysis & execution workflows**:`,
     ``,
