@@ -153,7 +153,7 @@ export function TenantAdminPanel() {
       <Stack gap="1">
         <TextInput
           label="New tenant id"
-          hint="Creates a tenant settings row with store defaults (ads on, auto-refresh off, etrade providers)."
+          hint="Creates a tenant settings row with store defaults (ads on, auto-refresh off, broker providers)."
           value={newTenantId}
           onChange={(e) => setNewTenantId(e.target.value)}
         />
