@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and discussion
+    url: https://github.com/Qunsultant/cfagent/discussions
+    about: Ask questions and discuss ideas in Discussions instead of opening an issue.
+  - name: Report a security vulnerability
+    url: https://github.com/Qunsultant/cfagent/security/advisories/new
+    about: Do not open a public issue for a suspected vulnerability — report it privately via a security advisory (see SECURITY.md).
