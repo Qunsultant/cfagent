@@ -91,14 +91,46 @@ describe("EmailSender port (S4)", () => {
   });
 
   it("returns false (warn, no throw) when the binding send throws", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // #3515 S3: the send failure now travels as a structured
+    // email.send_failed event (level warn) on the console-info JSON
+    // fallback, not a console.warn line.
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     const sender = createEmailSender({
       EMAIL: { async send() { throw new Error("binding down"); } },
     });
     await expect(
       sender!.send({ to: "a@example.com", subject: "s", html: "h", text: "t" }),
     ).resolves.toBe(false);
-    expect(warn).toHaveBeenCalled();
+    const events: Array<{ operation: string; level: string; fields: Record<string, unknown> }> = [];
+    for (const call of infoSpy.mock.calls) {
+      try {
+        const parsed = JSON.parse(String(call[0])) as {
+          operation?: unknown;
+          level?: unknown;
+          fields?: unknown;
+        };
+        if (parsed && typeof parsed.operation === "string") {
+          events.push({
+            operation: parsed.operation,
+            level: typeof parsed.level === "string" ? parsed.level : "",
+            fields:
+              parsed.fields && typeof parsed.fields === "object"
+                ? (parsed.fields as Record<string, unknown>)
+                : {},
+          });
+        }
+      } catch {
+        // Non-JSON console.info lines are not structured events.
+      }
+    }
+    const failed = events.find((e) => e.operation === "email.send_failed");
+    expect(failed).toBeDefined();
+    expect(failed?.level).toBe("warn");
+    expect(String(failed?.fields.message ?? "")).toContain(
+      "[ETradeEmailService] Failed to send email via env.EMAIL binding",
+    );
+    expect(String(failed?.fields.error ?? "")).toContain("binding down");
+    infoSpy.mockRestore();
   });
 });
 

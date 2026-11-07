@@ -262,22 +262,57 @@ describe("C. pipeline hook at the store seams (#2246)", () => {
 
   it("flag ON + unconfigured -> store succeeds, degraded outcome recorded with stable code", async () => {
     const sql = new MockSqlStorage();
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // #3515 S3: the failure now travels as a structured
+    // report_ai_search.index_failed event (level warn) on the console-info
+    // JSON fallback, not a console.warn line.
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     const env = { [FLAG]: "true" } as any; // no AI_SEARCH binding at all
     const stored = storeReportAtGeneration(sql, reportInput(), env);
     expect(stored?.reportId).toBeTruthy();
     await flush();
-    const logged = warn.mock.calls.map((c) => c.map(String).join(" ")).join("\n");
-    expect(logged).toContain("ai_search_report_index_failed");
-    expect(logged).toContain("not_configured");
-    expect(logged).toContain(stored!.reportId);
+    const events: Array<{ operation: string; level: string; fields: Record<string, unknown> }> = [];
+    for (const call of infoSpy.mock.calls) {
+      try {
+        const parsed = JSON.parse(String(call[0])) as {
+          operation?: unknown;
+          level?: unknown;
+          fields?: unknown;
+        };
+        if (parsed && typeof parsed.operation === "string") {
+          events.push({
+            operation: parsed.operation,
+            level: typeof parsed.level === "string" ? parsed.level : "",
+            fields:
+              parsed.fields && typeof parsed.fields === "object"
+                ? (parsed.fields as Record<string, unknown>)
+                : {},
+          });
+        }
+      } catch {
+        // Non-JSON console.info lines are not structured events.
+      }
+    }
+    const failed = events.find((e) => e.operation === "report_ai_search.index_failed");
+    expect(failed).toBeDefined();
+    expect(failed?.level).toBe("warn");
+    expect(failed?.fields.code).toBe("not_configured");
+    expect(failed?.fields.reportId).toBe(stored!.reportId);
+    expect(String(failed?.fields.message ?? "")).toContain("ai_search_report_index_failed");
+    expect(String(failed?.fields.message ?? "")).toContain("not_configured");
+    expect(String(failed?.fields.message ?? "")).toContain(stored!.reportId);
     // No report content in the log record.
-    expect(logged).not.toContain("Scanned 10 symbols");
+    expect(String(failed?.fields.message ?? "")).not.toContain("Scanned 10 symbols");
+    expect(String(failed?.fields.error ?? "")).not.toContain("Scanned 10 symbols");
   });
 
   it("flag ON + upload throws -> store succeeds, failure recorded as upload_failed", async () => {
     const sql = new MockSqlStorage();
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // #3515 S3: the failure now travels as a structured
+    // report_ai_search.index_failed event (level warn) on the console-info
+    // JSON fallback, not a console.warn line. (The throw is caught inside
+    // runAiSearchIndexUpload, which returns { ok: false, code:
+    // "upload_failed" }.)
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     const { binding } = fakeNamespace({ failUpload: true });
     const env = {
       AI_SEARCH: binding,
@@ -287,9 +322,35 @@ describe("C. pipeline hook at the store seams (#2246)", () => {
     const stored = storeReportAtGeneration(sql, reportInput(), env);
     expect(stored?.reportId).toBeTruthy();
     await flush();
-    const logged = warn.mock.calls.map((c) => c.map(String).join(" ")).join("\n");
-    expect(logged).toContain("ai_search_report_index_failed");
-    expect(logged).toContain("upload_failed");
+    const events: Array<{ operation: string; level: string; fields: Record<string, unknown> }> = [];
+    for (const call of infoSpy.mock.calls) {
+      try {
+        const parsed = JSON.parse(String(call[0])) as {
+          operation?: unknown;
+          level?: unknown;
+          fields?: unknown;
+        };
+        if (parsed && typeof parsed.operation === "string") {
+          events.push({
+            operation: parsed.operation,
+            level: typeof parsed.level === "string" ? parsed.level : "",
+            fields:
+              parsed.fields && typeof parsed.fields === "object"
+                ? (parsed.fields as Record<string, unknown>)
+                : {},
+          });
+        }
+      } catch {
+        // Non-JSON console.info lines are not structured events.
+      }
+    }
+    const failed = events.find((e) => e.operation === "report_ai_search.index_failed");
+    expect(failed).toBeDefined();
+    expect(failed?.level).toBe("warn");
+    expect(failed?.fields.code).toBe("upload_failed");
+    expect(failed?.fields.reportId).toBe(stored!.reportId);
+    expect(String(failed?.fields.message ?? "")).toContain("ai_search_report_index_failed");
+    expect(String(failed?.fields.message ?? "")).toContain("upload_failed");
   });
 
   it("WithR2 seam, flag ON -> exactly one upload", async () => {

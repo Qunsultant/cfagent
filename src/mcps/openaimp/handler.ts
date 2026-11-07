@@ -66,6 +66,7 @@ import {
 import { McpToolFactory } from "./commands";
 import {
   HTTP_DELIVERY_MODE_SWITCH,
+  isSynchronousMcpTool,
   jobsConfigErrorEvent,
   levelsForHttpDelivery,
   resolveHttpDeliveryMode,
@@ -216,7 +217,7 @@ export function createOpenaimpMcpServer(context: OpenaimpMcpHandlerContext): Ser
     try {
       if (
         resolvedDelivery.mode === "queued" && context.submitJob && McpToolFactory.getTool(name) &&
-        name !== "get_async_job" && name !== "list_async_jobs"
+        !isSynchronousMcpTool(name)
       ) {
         const port = context.permissionPort ?? createProductionMcpPermissionPort();
         const principal = context.principal ?? { kind: "system" as const, login: null };

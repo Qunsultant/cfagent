@@ -23,6 +23,21 @@
  * characterization pins that pass on both sides by design.
  */
 import { describe, it, expect, vi } from "vitest";
+// Issue #3460 slice 3: the unified service reads the broker through the
+// presence-aware seam (no default). These tests drive the E*TRADE path,
+// so the selection is explicit here instead of relying on the default.
+vi.mock("../src/services/providerConnections", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../src/services/providerConnections")>();
+  return {
+    ...actual,
+    readTenantBrokerSelection: async () => ({
+      status: "ok",
+      brokerId: "etrade",
+    }),
+  };
+});
+
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";

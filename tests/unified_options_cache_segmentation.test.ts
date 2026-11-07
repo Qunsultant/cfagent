@@ -22,7 +22,22 @@
  * Each test uses its own symbol so the module-level cache cannot leak
  * state between tests.
  */
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi} from "vitest";
+// Issue #3460 slice 3: the unified service reads the broker through the
+// presence-aware seam (no default). These tests drive the E*TRADE path,
+// so the selection is explicit here instead of relying on the default.
+vi.mock("../src/services/providerConnections", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../src/services/providerConnections")>();
+  return {
+    ...actual,
+    readTenantBrokerSelection: async () => ({
+      status: "ok",
+      brokerId: "etrade",
+    }),
+  };
+});
+
 import { UnifiedOptionsService } from "../src/trading/options/unifiedOptionsService";
 import { DynamicOptionsScreener } from "../src/trading/optionsScreener";
 import type { Env } from "../src/types";

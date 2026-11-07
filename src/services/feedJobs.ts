@@ -386,7 +386,8 @@ export async function runFeedJob(
       nowIso: finishedAt.toISOString(),
     });
     if (args.status === "failed") {
-      console.warn(`[feedJobs] ${FEED_JOB_RUN_FAILED}`, {
+      structuredLog.warn("feedJobs.run_failed", {
+        message: `[feedJobs] ${FEED_JOB_RUN_FAILED}`,
         jobId: def.id,
         runId,
         code: args.codedError,

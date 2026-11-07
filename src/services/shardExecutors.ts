@@ -53,6 +53,13 @@ import {
 } from "../workflows/optionsScreenWorkflow";
 import { optionsArtifactKey } from "../workflows/optionsScreenPorts";
 import type { StageQueueSend } from "../workflows/stageQueueTransport";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/shardExecutors",
+});
 
 export interface ShardExecutorDeps {
   sql: {
@@ -282,7 +289,10 @@ async function feedYahoo(
       userLogin: chain.userLogin,
     });
   } catch (err) {
-    console.warn("[feedYahoo] History binding failed — technicals degrade to null:", err);
+    structuredLog.warn("shard.feed_yahoo_history_binding_failed", {
+      message: "[feedYahoo] History binding failed — technicals degrade to null",
+      error: err instanceof Error ? err.message : String(err),
+    });
     historyDeps = { fetchBars: async () => null };
   }
   const technicalsMap = await fetchPlatformTechnicalsBatch(historyDeps, symbols);
@@ -622,7 +632,10 @@ async function generateTabular(
         await putReportPdf(deps.env as any, deps.storage as any, key, fileName, bytes, contentType);
       },
       deadLetter: async ({ reason }) => {
-        console.warn(`[shardExecutors] tabular generate dead-lettered: ${reason}`);
+        structuredLog.warn("shard.tabular_generate_dead_lettered", {
+          message: `[shardExecutors] tabular generate dead-lettered: ${reason}`,
+          reason,
+        });
       },
     });
   } catch (err) {

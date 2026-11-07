@@ -39,6 +39,13 @@ import {
   recordBlockingAudit,
   type BlockingAuditEvents,
 } from "../security/auditChain";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/auditTamperAlert",
+});
 
 /** What broke, carried in the alert payload for the runbook's affected-range step. */
 export interface TamperFinding {
@@ -85,11 +92,16 @@ export function recordTamperAlert(
   finding: TamperFinding,
 ): AuditEvent {
   const record = buildAlertRecord(finding);
-  console.error(
-    `[audit-tamper] chain verification FAILED chain=${finding.chain}` +
+  structuredLog.error("audit.tamper_detected", {
+    message:
+      `[audit-tamper] chain verification FAILED chain=${finding.chain}` +
       (finding.tenantId ? ` tenant=${finding.tenantId}` : "") +
       ` brokenIndex=${finding.brokenIndex} reason=${finding.reason}`,
-  );
+    chain: finding.chain,
+    ...(finding.tenantId ? { tenantId: finding.tenantId } : {}),
+    brokenIndex: finding.brokenIndex,
+    reason: finding.reason,
+  });
   return recordBlockingAudit(events, record);
 }
 

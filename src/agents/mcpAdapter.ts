@@ -37,6 +37,7 @@ import {
   createProductionMcpPermissionPort,
   executeWithPermissionGate,
 } from "../mcps/openaimp/mcpPermissionPorts";
+import { isSynchronousMcpTool } from "../config/asyncJobModes";
 
 export class McpAgentToolAdapter {
   /**
@@ -67,7 +68,7 @@ export class McpAgentToolAdapter {
           // unchanged (scope check only).
           agentAccess: context.agentAccess,
         };
-        if (context.submitJob && command.name !== "get_async_job" && command.name !== "list_async_jobs") {
+        if (context.submitJob && !isSynchronousMcpTool(command.name)) {
           await authorizeMcpToolCall(port, principal, command.name, gateOpts);
           // #2341 (Agent Mesh S5): stamp the turn's acting identity
           // into the job payload, resolved HERE — server-side, from

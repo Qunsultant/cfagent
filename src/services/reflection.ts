@@ -1,6 +1,13 @@
 import { getActiveLearnings, recordLearning } from "./learnings";
 import { createEvidenceSatellitePorts } from "../data/createEvidenceSatellitePorts";
 import type { StrategyCandidateReview } from "../data/strategyReviewPorts";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/reflection",
+});
 
 /** Step 4c (#2356): reflection's strategy-review reads/writes go
  *  through the evidence-satellite port (composition root), not
@@ -125,10 +132,11 @@ export function createReflectionReviewCandidates(
         createdAt: "",
       });
     } catch (err) {
-      console.error(
-        `[Reflection] Failed to create review candidate for family "${family}"; finding remains recorded as a learning:`,
-        err
-      );
+      structuredLog.error("reflection.review_candidate_create_failed", {
+        message: `[Reflection] Failed to create review candidate for family "${family}"; finding remains recorded as a learning: ${err instanceof Error ? err.message : String(err)}`,
+        family,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
   return created;
@@ -160,7 +168,10 @@ export function runReflection(
     }
   } catch (err) {
     // Deliberate fail-open (see header): proceed, but never silently.
-    console.error("[Reflection] Already-ran guard check failed; proceeding (fail-open by design, #784):", err);
+    structuredLog.error("reflection.already_ran_guard_check_failed", {
+      message: `[Reflection] Already-ran guard check failed; proceeding (fail-open by design, #784): ${err instanceof Error ? err.message : String(err)}`,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 
   const findings: ReflectionFinding[] = [];
@@ -217,7 +228,10 @@ export function runReflection(
     }
   } catch (err) {
     analysisFailures++;
-    console.error("[Reflection] Strategy-review analysis failed; continuing without review findings:", err);
+    structuredLog.error("reflection.strategy_review_analysis_failed", {
+      message: `[Reflection] Strategy-review analysis failed; continuing without review findings: ${err instanceof Error ? err.message : String(err)}`,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 
   // 2. Check for stale learnings that may need re-validation.
@@ -238,7 +252,10 @@ export function runReflection(
     }
   } catch (err) {
     analysisFailures++;
-    console.error("[Reflection] Stale-learning analysis failed; continuing without staleness findings:", err);
+    structuredLog.error("reflection.stale_learning_analysis_failed", {
+      message: `[Reflection] Stale-learning analysis failed; continuing without staleness findings: ${err instanceof Error ? err.message : String(err)}`,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 
   // 3. Record findings as learnings (source: reflection).
@@ -256,10 +273,12 @@ export function runReflection(
       learningsRecorded++;
     } catch (err) {
       learningsFailed++;
-      console.error(
-        `[Reflection] Failed to persist learning (domain "${f.domain}", evidence ${f.evidenceRefs.join(", ") || "none"}):`,
-        err
-      );
+      structuredLog.error("reflection.persist_learning_failed", {
+        message: `[Reflection] Failed to persist learning (domain "${f.domain}", evidence ${f.evidenceRefs.join(", ") || "none"}): ${err instanceof Error ? err.message : String(err)}`,
+        domain: f.domain,
+        evidenceRefs: f.evidenceRefs,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 
@@ -272,10 +291,10 @@ export function runReflection(
   try {
     reviewCandidatesCreated = createReflectionReviewCandidates(sql, findings);
   } catch (err) {
-    console.error(
-      "[Reflection] Review-candidate wiring failed; findings remain recorded as learnings:",
-      err
-    );
+    structuredLog.error("reflection.review_candidate_wiring_failed", {
+      message: `[Reflection] Review-candidate wiring failed; findings remain recorded as learnings: ${err instanceof Error ? err.message : String(err)}`,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 
   // 4. Record the run itself so next week's guard sees it. The persisted
@@ -297,10 +316,10 @@ export function runReflection(
     });
   } catch (err) {
     learningsFailed++;
-    console.error(
-      "[Reflection] Failed to persist the reflection run-meta learning; the already-ran guard will not see this run:",
-      err
-    );
+    structuredLog.error("reflection.persist_run_meta_failed", {
+      message: `[Reflection] Failed to persist the reflection run-meta learning; the already-ran guard will not see this run: ${err instanceof Error ? err.message : String(err)}`,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 
   return {

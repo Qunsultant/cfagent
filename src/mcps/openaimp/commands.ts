@@ -125,6 +125,12 @@ import {
   ListFeedJobsCommand,
   ManageFeedJobCommand,
 } from "./feedJobCommands";
+import {
+  RunEnrichJobCommand,
+  GetEnrichJobStatusCommand,
+  ListEnrichJobsCommand,
+  ManageEnrichJobCommand,
+} from "./enrichJobCommands";
 
 import { searchPlatformKnowledge } from "../../services/platformKnowledge";
 // Issue #3342: the "search" contract's AI-search attempt reads the
@@ -1794,6 +1800,14 @@ export class McpToolFactory {
     this.registerTool(new GetFeedJobStatusCommand());
     this.registerTool(new ListFeedJobsCommand());
     this.registerTool(new ManageFeedJobCommand());
+    // Issue #3536: the enrich-job doors — run / status / list /
+    // manage the job pipeline's per-source enrich jobs through
+    // the same ScheduledAgent host control plane. Same identity
+    // discipline as the feed-job doors.
+    this.registerTool(new RunEnrichJobCommand());
+    this.registerTool(new GetEnrichJobStatusCommand());
+    this.registerTool(new ListEnrichJobsCommand());
+    this.registerTool(new ManageEnrichJobCommand());
     this.registerTool(new CheckPaymentBudgetCommand());
     this.registerTool(new GetPaymentsOverviewCommand());
 

@@ -49,6 +49,13 @@
 
 import { r2KeyForStorageKey } from "./reportBlobStore";
 import { createBlobStore } from "./blobStoreR2Adapter";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/knowledgeCorpus",
+});
 
 export type KnowledgeCategory =
   | "sec_filing"
@@ -360,9 +367,13 @@ export function verifySeedManifest(
   const results: SeedVerificationResult[] = entries.map((entry) => {
     const shaPrefix = entry.sha256 ? entry.sha256.slice(0, 12) : "none";
     if (entry.sha256 === null || (entry.fetchStatus !== undefined && entry.fetchStatus !== "verified")) {
-      console.info(
-        `[knowledgeSeed] hash-check title="${entry.title}" category=${entry.category} status=skipped-not-seeded shaPrefix=${shaPrefix}`
-      );
+      structuredLog.info("knowledgeCorpus.seed_hash_check_skipped", {
+        message: `[knowledgeSeed] hash-check title="${entry.title}" category=${entry.category} status=skipped-not-seeded shaPrefix=${shaPrefix}`,
+        title: entry.title,
+        category: entry.category,
+        status: "skipped-not-seeded",
+        shaPrefix,
+      });
       return {
         title: entry.title,
         category: entry.category,
@@ -372,9 +383,13 @@ export function verifySeedManifest(
     }
     const record = stored.get(`knowledge:${entry.category}:${entry.sha256}`);
     if (!record) {
-      console.warn(
-        `[knowledgeSeed] hash-check title="${entry.title}" category=${entry.category} status=missing shaPrefix=${shaPrefix}`
-      );
+      structuredLog.warn("knowledgeCorpus.seed_hash_check_missing", {
+        message: `[knowledgeSeed] hash-check title="${entry.title}" category=${entry.category} status=missing shaPrefix=${shaPrefix}`,
+        title: entry.title,
+        category: entry.category,
+        status: "missing",
+        shaPrefix,
+      });
       return {
         title: entry.title,
         category: entry.category,
@@ -384,13 +399,21 @@ export function verifySeedManifest(
     }
     const status = record.contentHash === entry.sha256 ? "match" : "mismatch";
     if (status === "match") {
-      console.info(
-        `[knowledgeSeed] hash-check title="${entry.title}" category=${entry.category} status=match shaPrefix=${shaPrefix}`
-      );
+      structuredLog.info("knowledgeCorpus.seed_hash_check_match", {
+        message: `[knowledgeSeed] hash-check title="${entry.title}" category=${entry.category} status=match shaPrefix=${shaPrefix}`,
+        title: entry.title,
+        category: entry.category,
+        status: "match",
+        shaPrefix,
+      });
     } else {
-      console.warn(
-        `[knowledgeSeed] hash-check title="${entry.title}" category=${entry.category} status=mismatch shaPrefix=${shaPrefix}`
-      );
+      structuredLog.warn("knowledgeCorpus.seed_hash_check_mismatch", {
+        message: `[knowledgeSeed] hash-check title="${entry.title}" category=${entry.category} status=mismatch shaPrefix=${shaPrefix}`,
+        title: entry.title,
+        category: entry.category,
+        status: "mismatch",
+        shaPrefix,
+      });
     }
     return {
       title: entry.title,
@@ -410,9 +433,14 @@ export function verifySeedManifest(
   const allMatch = results
     .filter((r) => r.status !== "skipped-not-seeded")
     .every((r) => r.status === "match");
-  console.info(
-    `[knowledgeSeed] summary match=${counts.match ?? 0} mismatch=${counts.mismatch ?? 0} missing=${counts.missing ?? 0} skipped-not-seeded=${counts["skipped-not-seeded"] ?? 0} allMatch=${allMatch}`
-  );
+  structuredLog.info("knowledgeCorpus.seed_hash_check_summary", {
+    message: `[knowledgeSeed] summary match=${counts.match ?? 0} mismatch=${counts.mismatch ?? 0} missing=${counts.missing ?? 0} skipped-not-seeded=${counts["skipped-not-seeded"] ?? 0} allMatch=${allMatch}`,
+    match: counts.match ?? 0,
+    mismatch: counts.mismatch ?? 0,
+    missing: counts.missing ?? 0,
+    skippedNotSeeded: counts["skipped-not-seeded"] ?? 0,
+    allMatch,
+  });
   return {
     results,
     allMatch,
@@ -445,15 +473,19 @@ export async function getKnowledgeDoc(
   try {
     obj = await store.get(meta.r2Key);
   } catch (err) {
-    console.warn("[knowledgeCorpus] R2 read failed:", err);
+    structuredLog.warn("knowledgeCorpus.r2_read_failed", {
+      message: `[knowledgeCorpus] R2 read failed: ${err instanceof Error ? err.message : String(err)}`,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return null;
   }
   if (!obj) return null;
   const bytes = obj.bytes;
   if ((await sha256Hex(bytes)) !== meta.contentHash) {
-    console.warn(
-      `[knowledgeCorpus] Hash mismatch for ${meta.r2Key}: stored bytes do not match recorded contentHash; refusing to serve.`
-    );
+    structuredLog.warn("knowledgeCorpus.hash_mismatch_refused", {
+      message: `[knowledgeCorpus] Hash mismatch for ${meta.r2Key}: stored bytes do not match recorded contentHash; refusing to serve.`,
+      r2Key: meta.r2Key,
+    });
     return null;
   }
   return { bytes, meta };

@@ -16,6 +16,13 @@ import {
   getCfpayConfig,
 } from "./cfpayA2A";
 import { postFilesToSlack, type SlackFile, type SlackFilesEnv } from "./slackFiles";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/screenerSlackDelivery",
+});
 
 export interface ScreenerSlackPdf {
   bytes: Uint8Array;
@@ -98,7 +105,12 @@ export async function deliverScreenerToSlackDirect(
     if (uploadRes.posted >= filesToUpload.length) {
       return { ok: true };
     }
-    console.warn("[deliverScreenerToSlackDirect] Direct file upload incomplete:", uploadRes.error);
+    structuredLog.warn("deliverScreenerToSlackDirect.file_upload_incomplete", {
+      message: "[deliverScreenerToSlackDirect] Direct file upload incomplete",
+      error: uploadRes.error,
+      posted: uploadRes.posted,
+      fileCount: filesToUpload.length,
+    });
     return {
       ok: false,
       error: `Direct file upload incomplete: posted ${uploadRes.posted} of ${filesToUpload.length} file(s)${uploadRes.error ? ` — ${uploadRes.error}` : ""}`,
@@ -118,9 +130,15 @@ export async function deliverScreenerToSlackDirect(
       });
       const data = await res.json().catch(() => ({})) as { ok?: boolean; error?: string };
       if (data.ok) return { ok: true };
-      console.warn("[deliverScreenerToSlackDirect] chat.postMessage failed:", data.error);
+      structuredLog.warn("deliverScreenerToSlackDirect.chat_post_message_failed", {
+        message: "[deliverScreenerToSlackDirect] chat.postMessage failed",
+        error: data.error,
+      });
     } catch (err) {
-      console.warn("[deliverScreenerToSlackDirect] chat.postMessage error:", err);
+      structuredLog.warn("deliverScreenerToSlackDirect.chat_post_message_error", {
+        message: "[deliverScreenerToSlackDirect] chat.postMessage error",
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 
@@ -195,7 +213,11 @@ export async function deliverScreenerToSlackA2A(
         ...(i === 0 ? { initial_comment: f.comment ?? delivery.text } : {}),
       });
       if (!result.ok) {
-        console.warn(`[deliverScreenerToSlackA2A] A2A file delivery failed for ${f.fileName}:`, result.error);
+        structuredLog.warn("deliverScreenerToSlackA2A.file_delivery_failed", {
+          message: `[deliverScreenerToSlackA2A] A2A file delivery failed for ${f.fileName}`,
+          fileName: f.fileName,
+          error: result.error,
+        });
         return { ok: false, error: `A2A file delivery failed for ${f.fileName}: ${result.error ?? "unknown error"}` };
       }
     }
@@ -229,7 +251,10 @@ export async function deliverScreenerToSlack(
   if (cfpay) {
     const a2aRes = await deliverScreenerToSlackA2A(env, delivery);
     if (a2aRes.ok) return { ok: true, method: "a2a" };
-    console.warn("[deliverScreenerToSlack] A2A delivery failed, attempting direct Slack fallback:", a2aRes.error);
+    structuredLog.warn("deliverScreenerToSlack.a2a_delivery_failed_fallback", {
+      message: "[deliverScreenerToSlack] A2A delivery failed, attempting direct Slack fallback",
+      error: a2aRes.error,
+    });
   }
 
   const directRes = await deliverScreenerToSlackDirect(env, delivery);

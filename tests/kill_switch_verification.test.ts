@@ -213,7 +213,38 @@ describe("halt / resume drill (#756, v2 job)", () => {
         throw new Error("store unavailable");
       },
     };
+    // #3515 S3: the kill-switch read failure now travels as a structured
+    // adaptation.kill_switch_read_failed event (level error) on the
+    // console-info JSON fallback, not a console.error line.
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     expect(isAdaptationHalted(brokenSql)).toBe(true);
-    expect(errSpy.mock.calls.length).toBeGreaterThanOrEqual(1);
+    const events: Array<{ operation: string; level: string; fields: Record<string, unknown> }> = [];
+    for (const call of infoSpy.mock.calls) {
+      try {
+        const parsed = JSON.parse(String(call[0])) as {
+          operation?: unknown;
+          level?: unknown;
+          fields?: unknown;
+        };
+        if (parsed && typeof parsed.operation === "string") {
+          events.push({
+            operation: parsed.operation,
+            level: typeof parsed.level === "string" ? parsed.level : "",
+            fields:
+              parsed.fields && typeof parsed.fields === "object"
+                ? (parsed.fields as Record<string, unknown>)
+                : {},
+          });
+        }
+      } catch {
+        // Non-JSON console.info lines are not structured events.
+      }
+    }
+    const failed = events.find((e) => e.operation === "adaptation.kill_switch_read_failed");
+    expect(failed).toBeDefined();
+    expect(failed?.level).toBe("error");
+    expect(String(failed?.fields.error ?? "")).toContain("store unavailable");
+    expect(String(failed?.fields.message ?? "")).toContain("Kill-switch read failed");
+    infoSpy.mockRestore();
   });
 });

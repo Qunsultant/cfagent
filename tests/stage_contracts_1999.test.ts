@@ -103,7 +103,10 @@ describe("stage contracts (#1999)", () => {
   });
 
   it("a lost audit insert warns with type + login instead of vanishing", () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // #3515 S3: the lost audit insert now travels as a structured
+    // scheduledTasks.audit_insertion_failed event (level warn) on the
+    // console-info JSON fallback, not a console.warn line.
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     const svc = new ScheduledTasksService(
       {} as never,
       { events: { create: () => { throw new Error("db down"); } } } as never,
@@ -113,8 +116,34 @@ describe("stage contracts (#1999)", () => {
       "etrade.auth_blocked",
       { userLogin: "alice", kind: "stocks" },
     );
-    const text = warn.mock.calls.map((c) => String(c[0])).join(" ");
-    expect(text).toMatch(/etrade\.auth_blocked/);
-    expect(text).toMatch(/alice/);
+    const events: Array<{ operation: string; level: string; fields: Record<string, unknown> }> = [];
+    for (const call of infoSpy.mock.calls) {
+      try {
+        const parsed = JSON.parse(String(call[0])) as {
+          operation?: unknown;
+          level?: unknown;
+          fields?: unknown;
+        };
+        if (parsed && typeof parsed.operation === "string") {
+          events.push({
+            operation: parsed.operation,
+            level: typeof parsed.level === "string" ? parsed.level : "",
+            fields:
+              parsed.fields && typeof parsed.fields === "object"
+                ? (parsed.fields as Record<string, unknown>)
+                : {},
+          });
+        }
+      } catch {
+        // Non-JSON console.info lines are not structured events.
+      }
+    }
+    const failed = events.find((e) => e.operation === "scheduledTasks.audit_insertion_failed");
+    expect(failed).toBeDefined();
+    expect(failed?.level).toBe("warn");
+    expect(failed?.fields.type).toBe("etrade.auth_blocked");
+    expect(failed?.fields.userLogin).toBe("alice");
+    expect(String(failed?.fields.error ?? "")).toContain("db down");
+    infoSpy.mockRestore();
   });
 });

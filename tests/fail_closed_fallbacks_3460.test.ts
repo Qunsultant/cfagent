@@ -20,12 +20,16 @@ import { createProductionScreeningRegistry } from "../src/services/screeningRunt
  *     used to fall back to E*TRADE. Now it throws `not registered`.
  */
 
-const tenant = { broker: "test-noplane" };
+const tenant = {
+  broker: "test-noplane",
+  selection: () =>
+    ({ status: "ok", brokerId: "test-noplane" }) as const,
+};
 
-vi.mock("../src/services/tenantProviders", async (importOriginal) => {
+vi.mock("../src/services/providerConnections", async (importOriginal) => {
   const actual =
-    await importOriginal<typeof import("../src/services/tenantProviders")>();
-  return { ...actual, resolveTenantBroker: async () => tenant.broker };
+    await importOriginal<typeof import("../src/services/providerConnections")>();
+  return { ...actual, readTenantBrokerSelection: async () => tenant.selection() };
 });
 
 describe("TradingPlatformRegistry.getPlatform — no E*TRADE fallback", () => {
@@ -43,6 +47,8 @@ describe("TradingPlatformRegistry.getPlatform — no E*TRADE fallback", () => {
 
 describe("UnifiedOptionsService.resolveEngineClient — no options plane", () => {
   beforeEach(() => {
+    tenant.selection = () =>
+      ({ status: "ok", brokerId: "test-noplane" }) as const;
     // A registered platform that omits the options data plane: no
     // getOptionChains / getOptionExpireDates at all.
     TradingPlatformRegistry.register("test-noplane" as never, () => ({}) as never);
@@ -56,6 +62,22 @@ describe("UnifiedOptionsService.resolveEngineClient — no options plane", () =>
     );
     await expect(service.resolveEngineClient()).rejects.toThrow(
       /provider_unsupported: broker "test-noplane" does not provide an options chain source/,
+    );
+  });
+
+  it("refuses with a named error when the tenant has not configured a broker (#3460 S3)", async () => {
+    tenant.selection = () =>
+      ({
+        status: "unconfigured",
+        error: "no broker selection: the tenant has not configured a broker",
+      }) as const;
+    const service = new UnifiedOptionsService(
+      {} as never,
+      "test-user@example.com",
+      "PAPER",
+    );
+    await expect(service.resolveEngineClient()).rejects.toThrow(
+      /no broker selection: the tenant has not configured a broker/,
     );
   });
 });

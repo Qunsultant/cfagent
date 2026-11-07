@@ -18,6 +18,13 @@ import {
 } from "../messaging/messagingPorts";
 import { stageIdempotencyKey } from "../workflows/stageMessage";
 import type { JobRunState } from "../data/jobPipelinePorts";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/jobPipelineEvents",
+});
 
 /** The published transition vocabulary (the management states a run passes through). */
 export type JobStatusEventState = JobRunState | "checkpointed";
@@ -72,14 +79,22 @@ export async function publishJobStatus(
   try {
     const report = await publisher.publish(jobStatusEvent(input));
     if (report.failedTo.length > 0) {
-      console.warn(
-        `[job-pipeline] status publish for job "${input.jobId}" run "${input.runId}" state "${input.state}" failed to: ${report.failedTo.join(", ")}`,
-      );
+      structuredLog.warn("publishJobStatus.status_publish_failed", {
+        message: `[job-pipeline] status publish for job "${input.jobId}" run "${input.runId}" state "${input.state}" failed to: ${report.failedTo.join(", ")}`,
+        jobId: input.jobId,
+        runId: input.runId,
+        state: input.state,
+        failedTo: report.failedTo,
+      });
     }
   } catch (error) {
-    console.warn(
-      `[job-pipeline] status publish for job "${input.jobId}" run "${input.runId}" state "${input.state}" threw: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    structuredLog.warn("publishJobStatus.status_publish_threw", {
+      message: `[job-pipeline] status publish for job "${input.jobId}" run "${input.runId}" state "${input.state}" threw: ${error instanceof Error ? error.message : String(error)}`,
+      jobId: input.jobId,
+      runId: input.runId,
+      state: input.state,
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 }
 
@@ -157,13 +172,23 @@ export async function publishStageAction(
   try {
     const report = await publisher.publish(jobStageActionEvent(input));
     if (report.failedTo.length > 0) {
-      console.warn(
-        `[job-pipeline] stage publish for job "${input.jobId}" run "${input.runId}" stage "${input.stageId}" action "${input.action}" failed to: ${report.failedTo.join(", ")}`,
-      );
+      structuredLog.warn("publishStageAction.stage_publish_failed", {
+        message: `[job-pipeline] stage publish for job "${input.jobId}" run "${input.runId}" stage "${input.stageId}" action "${input.action}" failed to: ${report.failedTo.join(", ")}`,
+        jobId: input.jobId,
+        runId: input.runId,
+        stageId: input.stageId,
+        action: input.action,
+        failedTo: report.failedTo,
+      });
     }
   } catch (error) {
-    console.warn(
-      `[job-pipeline] stage publish for job "${input.jobId}" run "${input.runId}" stage "${input.stageId}" action "${input.action}" threw: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    structuredLog.warn("publishStageAction.stage_publish_threw", {
+      message: `[job-pipeline] stage publish for job "${input.jobId}" run "${input.runId}" stage "${input.stageId}" action "${input.action}" threw: ${error instanceof Error ? error.message : String(error)}`,
+      jobId: input.jobId,
+      runId: input.runId,
+      stageId: input.stageId,
+      action: input.action,
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 }

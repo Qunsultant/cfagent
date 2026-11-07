@@ -210,6 +210,55 @@ export async function listScreenConnectionAccounts(
 }
 
 /**
+ * Issue #3460 slice 3: the ONE presence-aware tenant broker read.
+ *
+ * Returns the stored broker id without ever defaulting: absent ⇒
+ * `unconfigured`, no store bound or a failed read ⇒ `store_unavailable`.
+ * Callers that need a broker decide their own refusal from the status;
+ * none of them falls back to E*TRADE. `resolveScreenSelection` reads
+ * through this helper, and so do the broker gate and the screen entries.
+ */
+export type TenantBrokerSelectionRead =
+  | { status: "ok"; brokerId: BrokerId }
+  | { status: "unconfigured"; error: string }
+  | { status: "store_unavailable"; error: string };
+
+export async function readTenantBrokerSelection(
+  env: Partial<Env>,
+  commercial?: Pick<CommercialStore, "getTenantBrokerSelection"> | null,
+): Promise<TenantBrokerSelectionRead> {
+  const store =
+    commercial !== undefined ? commercial : createCommercialAdapter(env);
+  if (!store) {
+    return {
+      status: "store_unavailable",
+      error: "broker selection could not be read: tenant store is not bound",
+    };
+  }
+  let storedBrokerId: string | null;
+  try {
+    storedBrokerId = await store.getTenantBrokerSelection(
+      resolveIaaaTenant(env),
+    );
+  } catch {
+    return {
+      status: "store_unavailable",
+      error: "broker selection could not be read: tenant store failed",
+    };
+  }
+  if (storedBrokerId === null || !isBrokerId(storedBrokerId)) {
+    return {
+      status: "unconfigured",
+      error:
+        storedBrokerId === null
+          ? "no broker selection: the tenant has not configured a broker"
+          : `no broker selection: stored broker "${storedBrokerId}" is not a registered broker`,
+    };
+  }
+  return { status: "ok", brokerId: storedBrokerId };
+}
+
+/**
  * Resolve the ONE screen selection for this run. Fail-closed by
  * construction: every failure mode returns a named refusal. There
  * is no default broker, no default account, and no fail-open — an
@@ -225,40 +274,17 @@ export async function resolveScreenSelection(
       error: "no broker selection: no login to resolve a selection for",
     };
   }
-  const commercial =
-    readers.commercial !== undefined
-      ? readers.commercial
-      : createCommercialAdapter(readers.env);
-  if (!commercial) {
-    return {
-      resolved: false,
-      code: "STORE_UNAVAILABLE",
-      error: "broker selection could not be read: tenant store is not bound",
-    };
+  const brokerRead = await readTenantBrokerSelection(
+    readers.env,
+    readers.commercial,
+  );
+  if (brokerRead.status === "store_unavailable") {
+    return { resolved: false, code: "STORE_UNAVAILABLE", error: brokerRead.error };
   }
-  let storedBrokerId: string | null;
-  try {
-    storedBrokerId = await commercial.getTenantBrokerSelection(
-      resolveIaaaTenant(readers.env),
-    );
-  } catch {
-    return {
-      resolved: false,
-      code: "STORE_UNAVAILABLE",
-      error: "broker selection could not be read: tenant store failed",
-    };
+  if (brokerRead.status === "unconfigured") {
+    return { resolved: false, code: "UNCONFIGURED", error: brokerRead.error };
   }
-  if (storedBrokerId === null || !isBrokerId(storedBrokerId)) {
-    return {
-      resolved: false,
-      code: "UNCONFIGURED",
-      error:
-        storedBrokerId === null
-          ? "no broker selection: the tenant has not configured a broker"
-          : `no broker selection: stored broker "${storedBrokerId}" is not a registered broker`,
-    };
-  }
-  const brokerId = storedBrokerId;
+  const brokerId = brokerRead.brokerId;
   const environment = resolveBrokerEnvironmentFromSettings(
     readers.readSettingRaw,
     readers.env,
