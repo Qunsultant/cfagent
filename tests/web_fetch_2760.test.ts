@@ -250,7 +250,7 @@ describe("issue #2760 — web_fetch command", () => {
     expect(McpToolFactory.getTool("web_fetch")).toBeInstanceOf(WebFetchCommand);
     expect(MCP_TOOL_SCOPES.web_fetch).toBe("mcp:read");
     // 83 through #2581; 84 since #2731 (web_search); 85 with this slice; 87 with #3513 (stock_copilot_status, stock_copilot_control); 88 with #3588 (stock_copilot_introspect); 90 with #3514 (stock_copilot_learnings, stock_copilot_evaluate); 94 with #3535 (+4 feed-job tools); 98 with #3536 (+4 enrich-job tools); 102 with #3537 (+4 analyze-job tools); 106 with #3538 (+4 generate-job tools).
-    expect(McpToolFactory.getAllTools()).toHaveLength(106);
+    expect(McpToolFactory.getAllTools()).toHaveLength(110);
   });
 
   it("its schema carries url and optional limits — and no identity field", () => {

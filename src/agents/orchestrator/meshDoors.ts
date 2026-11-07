@@ -131,6 +131,10 @@ import {
   resolveGenerateJob,
   type GenerateJobSurfaceView,
 } from "../../services/generatePipelineJobs";
+import {
+  resolveDeliverJob,
+  type DeliverJobSurfaceView,
+} from "../../services/deliverPipelineJobs";
 
 // ---------------------------------------------------------------------------
 // Errors — honest, typed, coded (doors-and-layers §11.1)
@@ -149,6 +153,8 @@ export type MeshDoorErrorCode =
   | "analyze_job_not_found"
   // Issue #3538: the generate-job door's unknown/ambiguous job name.
   | "generate_job_not_found"
+  // Issue #3539: the deliver-job door's unknown/ambiguous job name.
+  | "deliver_job_not_found"
   // Issue #2488: the mesh screen door's (meshScreenDoor.ts)
   // fail-closed refusal codes — budget_denied (the S5 budget
   // door refused the paid path), price_unavailable (no stored
@@ -241,6 +247,11 @@ export interface ScheduledAgentDoorStub {
   // merged-status reads.
   getGenerateJobSurfaceStatus(jobId: string): Promise<GenerateJobSurfaceView>;
   listGenerateJobSurfaceStatuses(): Promise<GenerateJobSurfaceView[]>;
+  // Issue #3539 (Pipeline J6): the deliver jobs' surface on the
+  // same host — same rule again; these two are the deliver
+  // merged-status reads.
+  getDeliverJobSurfaceStatus(jobId: string): Promise<DeliverJobSurfaceView>;
+  listDeliverJobSurfaceStatuses(): Promise<DeliverJobSurfaceView[]>;
 }
 
 export interface PaymentsAgentDoorStub {
@@ -854,6 +865,130 @@ export async function manageGenerateJobViaDoor(
     case "retry": {
       const run = await door.retryPipelineJob(entry.jobId, { userLogin: login });
       return { ...base, run, status: await door.getGenerateJobSurfaceStatus(entry.jobId) };
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// ScheduledAgent door — the job pipeline's deliver jobs (#3539)
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve a caller's deliver-job name ("yahoo deliver",
+ * "deliver alpaca", "sp100 deliver", an exact job id) to its
+ * catalog entry. An ambiguous or unknown name is an honest
+ * deliver_job_not_found error — the door never guesses a job.
+ */
+function resolveDeliverJobOrThrow(source: string) {
+  const entry = resolveDeliverJob(source);
+  if (!entry) {
+    throw new MeshDoorError(
+      "deliver_job_not_found",
+      `No deliver job matches "${source}". Name a source with its universe ("yahoo nasdaq100 deliver", "sp100 deliver", "deliver alpaca", "deliver etrade", "deliver public") or an exact deliver job id.`,
+    );
+  }
+  return entry;
+}
+
+export interface DeliverJobRunDoorResult {
+  jobId: string;
+  label: string;
+  runId: string;
+  state: string;
+  error?: string;
+  status: DeliverJobSurfaceView;
+}
+
+/**
+ * Run one deliver job now through the pipeline host's control
+ * plane (the same generic runPipelineJob RPC every job on the
+ * plane dispatches through) and report its settled outcome +
+ * the merged status view (the same view the UX renders).
+ */
+export async function runDeliverJobViaDoor(
+  env: Env,
+  actingLogin: string | undefined | null,
+  source: string,
+): Promise<DeliverJobRunDoorResult> {
+  const login = requireActingLogin(actingLogin);
+  const entry = resolveDeliverJobOrThrow(source);
+  const door = getScheduledAgentDoor(env);
+  const run = await door.runPipelineJob(entry.jobId, { userLogin: login });
+  const status = await door.getDeliverJobSurfaceStatus(entry.jobId);
+  return {
+    jobId: entry.jobId,
+    label: entry.label,
+    runId: run.runId,
+    state: run.state,
+    ...(run.error ? { error: run.error } : {}),
+    status,
+  };
+}
+
+/** One deliver job's merged status (delivery copy + pipeline state). */
+export async function getDeliverJobStatusViaDoor(
+  env: Env,
+  actingLogin: string | undefined | null,
+  source: string,
+): Promise<DeliverJobSurfaceView> {
+  requireActingLogin(actingLogin);
+  const entry = resolveDeliverJobOrThrow(source);
+  const door = getScheduledAgentDoor(env);
+  return door.getDeliverJobSurfaceStatus(entry.jobId);
+}
+
+/** Every deliver job's merged status, in catalog order. */
+export async function listDeliverJobsViaDoor(
+  env: Env,
+  actingLogin: string | undefined | null,
+): Promise<{ jobs: DeliverJobSurfaceView[] }> {
+  requireActingLogin(actingLogin);
+  const door = getScheduledAgentDoor(env);
+  return { jobs: await door.listDeliverJobSurfaceStatuses() };
+}
+
+export type DeliverJobManagementAction = "pause" | "resume" | "cancel" | "retry";
+
+export interface DeliverJobManageDoorResult {
+  jobId: string;
+  label: string;
+  action: DeliverJobManagementAction;
+  instance?: JobInstanceRecord;
+  run?: { runId: string; state: string; error?: string };
+  status: DeliverJobSurfaceView;
+}
+
+/**
+ * Apply one management operation to a deliver job through the
+ * same control plane (the generate door's manage, transposed).
+ * The control plane's own refusals propagate unchanged.
+ */
+export async function manageDeliverJobViaDoor(
+  env: Env,
+  actingLogin: string | undefined | null,
+  source: string,
+  action: DeliverJobManagementAction,
+): Promise<DeliverJobManageDoorResult> {
+  const login = requireActingLogin(actingLogin);
+  const entry = resolveDeliverJobOrThrow(source);
+  const door = getScheduledAgentDoor(env);
+  const base = { jobId: entry.jobId, label: entry.label, action };
+  switch (action) {
+    case "pause": {
+      const instance = await door.pausePipelineJob(entry.jobId);
+      return { ...base, instance, status: await door.getDeliverJobSurfaceStatus(entry.jobId) };
+    }
+    case "cancel": {
+      const instance = await door.cancelPipelineJob(entry.jobId);
+      return { ...base, instance, status: await door.getDeliverJobSurfaceStatus(entry.jobId) };
+    }
+    case "resume": {
+      const run = await door.resumePipelineJob(entry.jobId, { userLogin: login });
+      return { ...base, run, status: await door.getDeliverJobSurfaceStatus(entry.jobId) };
+    }
+    case "retry": {
+      const run = await door.retryPipelineJob(entry.jobId, { userLogin: login });
+      return { ...base, run, status: await door.getDeliverJobSurfaceStatus(entry.jobId) };
     }
   }
 }

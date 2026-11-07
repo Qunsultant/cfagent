@@ -2004,6 +2004,40 @@ export const MIGRATION_0056_JOB_GENERATED_DATASETS: DataMigration = {
     CREATE INDEX IF NOT EXISTS idx_job_generated_datasets_job
       ON job_generated_datasets (job_id, created_at DESC, id DESC)`,
 };
+
+/**
+ * Migration 0057 — delivery datasets (#3539, Pipeline J6).
+ *
+ * The deliver stage's persisted output: one row per deliver
+ * run, keyed by deliver job id, the full artifact in
+ * artifact_json (the sibling families' pattern) with status,
+ * the delivered-channel count, and the consumed generated
+ * artifact's id denormalized (the resume lookup is an exact
+ * query). Declared in the foundation's Drizzle schema
+ * (jobDeliveryDatasets) — the same shape in every residency
+ * (the DO residency's declared v1 schema migration carries
+ * the identical DDL).
+ */
+export const MIGRATION_0057_JOB_DELIVERY_DATASETS: DataMigration = {
+  version: 57,
+  name: "0057_job_delivery_datasets",
+  sql: `CREATE TABLE IF NOT EXISTS job_delivery_datasets (
+      id TEXT PRIMARY KEY,
+      created_at TEXT NOT NULL,
+      job_id TEXT NOT NULL,
+      generate_job_id TEXT NOT NULL,
+      source_id TEXT NOT NULL,
+      dataset TEXT NOT NULL,
+      run_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      as_of TEXT NOT NULL,
+      rows_persisted INTEGER NOT NULL,
+      input_artifact_id TEXT NOT NULL,
+      artifact_json TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_job_delivery_datasets_job
+      ON job_delivery_datasets (job_id, created_at DESC, id DESC)`,
+};
 export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANCE,
   MIGRATION_0002_AGENT_CHAINS_SCHEDULES,
   MIGRATION_0003_AGENT_SHARD_JOBS,
@@ -2059,6 +2093,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0054_APPROVED_FREE_QUOTA,
   MIGRATION_0055_APPROVED_FREE_QUOTA_SEED,
   MIGRATION_0056_JOB_GENERATED_DATASETS,
+  MIGRATION_0057_JOB_DELIVERY_DATASETS,
 ];
 
 function splitStatements(sqlText: string): string[] {

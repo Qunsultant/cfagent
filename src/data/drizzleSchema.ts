@@ -1523,3 +1523,34 @@ export const jobGeneratedDatasets = sqliteTable("job_generated_datasets", {
   rowsPersisted: integer("rows_persisted").notNull(),
   artifactJson: text("artifact_json").notNull(),
 });
+
+/**
+ * Pipeline J6 (#3539) — the delivery-dataset store's table:
+ * one row per deliver run, keyed by deliver job id (the
+ * delivery product's precise identity). The full artifact
+ * rides in artifact_json (the sibling families' pattern);
+ * status and the delivered-channel count are denormalized
+ * columns so latestUsable can filter without parsing every
+ * row (rows_persisted carries the count of channel pairs the
+ * run itself delivered), and the consumed generated
+ * artifact's id is denormalized (input_artifact_id) so the
+ * resume lookup — what was already delivered for this exact
+ * input — is an exact query, never a scan. The migration's
+ * DDL also carries the (job_id, created_at DESC, id DESC)
+ * history index. Timestamps are ISO text — residency parity
+ * with the sibling families. DDL authority: migration 0057.
+ */
+export const jobDeliveryDatasets = sqliteTable("job_delivery_datasets", {
+  id: text("id").primaryKey(),
+  createdAt: text("created_at").notNull(),
+  jobId: text("job_id").notNull(),
+  generateJobId: text("generate_job_id").notNull(),
+  sourceId: text("source_id").notNull(),
+  dataset: text("dataset").notNull(),
+  runId: text("run_id").notNull(),
+  status: text("status").notNull(),
+  asOf: text("as_of").notNull(),
+  rowsPersisted: integer("rows_persisted").notNull(),
+  inputArtifactId: text("input_artifact_id").notNull(),
+  artifactJson: text("artifact_json").notNull(),
+});

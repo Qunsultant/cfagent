@@ -143,6 +143,12 @@ import {
   ListGenerateJobsCommand,
   ManageGenerateJobCommand,
 } from "./generateJobCommands";
+import {
+  RunDeliverJobCommand,
+  GetDeliverJobStatusCommand,
+  ListDeliverJobsCommand,
+  ManageDeliverJobCommand,
+} from "./deliverJobCommands";
 
 import { searchPlatformKnowledge } from "../../services/platformKnowledge";
 // Issue #3342: the "search" contract's AI-search attempt reads the
@@ -1832,6 +1838,14 @@ export class McpToolFactory {
     this.registerTool(new GetGenerateJobStatusCommand());
     this.registerTool(new ListGenerateJobsCommand());
     this.registerTool(new ManageGenerateJobCommand());
+    // Issue #3539: the deliver-job doors — run / status / list /
+    // manage the job pipeline's per-source deliver jobs through
+    // the same ScheduledAgent host control plane. Same identity
+    // discipline as the generate-job doors.
+    this.registerTool(new RunDeliverJobCommand());
+    this.registerTool(new GetDeliverJobStatusCommand());
+    this.registerTool(new ListDeliverJobsCommand());
+    this.registerTool(new ManageDeliverJobCommand());
     this.registerTool(new CheckPaymentBudgetCommand());
     this.registerTool(new GetPaymentsOverviewCommand());
 
