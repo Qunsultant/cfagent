@@ -5,7 +5,9 @@
  * #3543); the OrchestratorAgent is only the invoking surface.
  * This suite pins the host-side pieces:
  * - the Think scheduled-task declaration: every ensured feed job
- *   with an enabled schedule becomes a task named
+ *   (and, since #3536, every enrich job — the declaration set is
+ *   the whole plane: 7 feed + 5 enrich) with an enabled schedule
+ *   becomes a task named
  *   `pipeline-job:<jobId>` whose firing dispatches runJob on the
  *   host's own control plane (a run record lands even when the
  *   run itself refuses — here the dataset store is unbound, so
@@ -32,6 +34,7 @@ import {
   startPipelineJobWorkflow,
   recordPipelineCompletion,
   listPipelineCompletions,
+  pipelineEnrichJobIds,
   pipelineJobIds,
   PIPELINE_TASK_ID_PREFIX,
   type ScheduledTasksPipelineContext,
@@ -125,8 +128,12 @@ describe("pipeline host wiring (#3543)", () => {
   it("declares one Think task per feed job, named pipeline-job:<jobId>", async () => {
     const { ctx } = makeHostContext();
     const tasks = await declarePipelineTasks(ctx);
-    const ids = pipelineJobIds();
-    expect(ids).toHaveLength(7);
+    // #3536 pin update (§7): the declaration set is the whole
+    // plane — pipelineJobIds() stays the 7 feed jobs, and the
+    // enrich jobs declare alongside them under the same prefix.
+    expect(pipelineJobIds()).toHaveLength(7);
+    expect(pipelineEnrichJobIds()).toHaveLength(5);
+    const ids = [...pipelineJobIds(), ...pipelineEnrichJobIds()];
     expect(Object.keys(tasks).sort()).toEqual(
       ids.map((id) => `${PIPELINE_TASK_ID_PREFIX}${id}`).sort(),
     );

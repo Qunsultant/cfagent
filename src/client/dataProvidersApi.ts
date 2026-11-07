@@ -99,6 +99,8 @@ export interface DataProviderView {
   health: DataProviderHealth;
   /** #3535: this provider's feed jobs as pipeline surface views. */
   feedJobs?: FeedJobView[];
+  /** #3536: this provider's enrich jobs as pipeline surface views. */
+  enrichJobs?: EnrichJobView[];
 }
 
 /** One feed run's record, as the status surface serves it (#3530). */
@@ -167,6 +169,68 @@ export async function postFeedJobAction(
 ): Promise<void> {
   await send<unknown>(
     `/api/data-providers/${encodeURIComponent(id)}/feed-jobs/${encodeURIComponent(jobId)}/${action}`,
+    { method: "POST" }
+  );
+}
+
+/** The enriched-dataset half of an enrich job's status (#3536). */
+export interface EnrichJobDatasetView {
+  jobId: string;
+  feedJobId: string;
+  sourceId: string;
+  dataset: string;
+  elements: string[];
+  universeLabel: string;
+  cadenceMinutes: number;
+  staleAfterMinutes: number;
+  state: "never-run" | "ready";
+  lastRun: FeedJobRunRecordView | null;
+  history: FeedJobRunRecordView[];
+  snapshot: {
+    artifactId: string;
+    asOf: string;
+    ageSeconds: number;
+    rowsPersisted: number;
+    stale: boolean;
+    /** Lineage: the feed artifact + run this copy derives from. */
+    inputArtifactId: string;
+    inputRunId: string;
+    inputAsOf: string;
+    elements: string[];
+  } | null;
+}
+
+/**
+ * One enrich job's merged surface status (#3536): the enriched
+ * copy plus the job pipeline's state for the same job — the
+ * same view the copilot tools return (one source of truth).
+ */
+export interface EnrichJobView {
+  jobId: string;
+  feedJobId: string;
+  sourceId: string;
+  dataset: string;
+  label: string;
+  enrich: EnrichJobDatasetView | null;
+  pipeline: {
+    state: string;
+    currentRunId: string | null;
+    lastRunStatus: string | null;
+    lastRunAt: string | null;
+  } | null;
+  nextScheduledRun: string | null;
+}
+
+export type EnrichJobActionName = FeedJobActionName;
+
+/** Run / manage one enrich job through the pipeline host (#3536). */
+export async function postEnrichJobAction(
+  id: string,
+  jobId: string,
+  action: EnrichJobActionName
+): Promise<void> {
+  await send<unknown>(
+    `/api/data-providers/${encodeURIComponent(id)}/enrich-jobs/${encodeURIComponent(jobId)}/${action}`,
     { method: "POST" }
   );
 }

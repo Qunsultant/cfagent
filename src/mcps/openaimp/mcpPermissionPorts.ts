@@ -204,6 +204,8 @@ export const MCP_TOOL_SCOPES: Record<string, McpScope> = {
   // merged surface views).
   get_feed_job_status: "mcp:read",
   list_feed_jobs: "mcp:read",
+  get_enrich_job_status: "mcp:read",
+  list_enrich_jobs: "mcp:read",
   // #2349 (mesh S6): the TradingAgent door's reads (accounts,
   // positions, quote) and the ReportAssetAgent door's list/get —
   // pure reads of the acting user's own data through their agents.
@@ -241,6 +243,8 @@ export const MCP_TOOL_SCOPES: Record<string, McpScope> = {
   // the job's run state (pause/resume/cancel/retry).
   run_feed_job: "mcp:write",
   manage_feed_job: "mcp:write",
+  run_enrich_job: "mcp:write",
+  manage_enrich_job: "mcp:write",
   // #2351 (mesh S7): the BrowserAgent/SlackAgent doors' deliveries —
   // each posts a snap to the configured Slack destination (an
   // outbound side effect; no caller-supplied webhook is accepted).

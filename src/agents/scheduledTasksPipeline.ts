@@ -52,6 +52,7 @@ import {
 import { createProviderCaptureAdapter } from "../data/createProviderCapturePorts";
 import type { CaptureBlobStorage } from "../data/providerCapturePorts";
 import { createFeedDatasetAdapter } from "../data/createFeedDatasetPorts";
+import { createEnrichedDatasetAdapter } from "../data/createEnrichedDatasetPorts";
 import { D1IndexListStore } from "../data/d1IndexListAdapter";
 import { createJobPipelineMessaging } from "../messaging/createJobPipelineMessaging";
 import {
@@ -63,11 +64,17 @@ import {
 } from "../services/jobPipelineEngine";
 import { buildFeedJobRegistry } from "../services/feedJobs";
 import {
-  createFeedStepRegistry,
   ensureFeedPipelineJobs,
   FEED_PIPELINE_CATALOG,
   type FeedStepDeps,
 } from "../services/feedPipelineJobs";
+import { buildEnrichJobRegistry } from "../services/enrichJobs";
+import {
+  createPipelineStepRegistry,
+  ensureEnrichPipelineJobs,
+  ENRICH_PIPELINE_CATALOG,
+  type EnrichStepDeps,
+} from "../services/enrichPipelineJobs";
 import { createCaptureWiredFeedProvider } from "../services/feedProviderWiring";
 import {
   createIndexMembershipService,
@@ -176,9 +183,37 @@ export function feedStepDepsForScheduledAgent(
 }
 
 /**
+ * The enrich-step wiring for this host residency (#3536): both
+ * of the enrich step's stores are D1-resident (the feed
+ * stage's persisted copies and this stage's enriched copies —
+ * the analyze stage's readers run in other instances), so the
+ * wiring needs no DO-storage seam and the step executes fully
+ * in every residency, unlike feed.pull's capture wiring.
+ */
+export function enrichStepDepsForScheduledAgent(
+  ctx: ScheduledTasksPipelineContext,
+): EnrichStepDeps {
+  const sql = pipelineSql(ctx);
+  return {
+    registry: buildEnrichJobRegistry(envStrings(ctx.env)),
+    datasetStore: createFeedDatasetAdapter(ctx.env),
+    enrichedStore: createEnrichedDatasetAdapter(ctx.env),
+    shardsFor: async (jobId) => {
+      const stores = createJobPipelineStoresFromSql(sql);
+      return (
+        (await stores.definitions.getDefinition(jobId))?.config.processing
+          .shards ?? []
+      );
+    },
+  };
+}
+
+/**
  * Build the pipeline control plane over this host. The acting
  * login (when a dispatch carries one) threads into the per-login
  * provider wiring; scheduled firings pass the service login.
+ * The step registry is THE composed registry (#3536): the feed
+ * steps plus enrich.apply — one registry, every residency.
  */
 export function createScheduledAgentPipelineControl(
   ctx: ScheduledTasksPipelineContext,
@@ -192,7 +227,10 @@ export function createScheduledAgentPipelineControl(
     stores,
     runRecorder: jobRunRecorderFromStore(new SqlJobRunRecordStore(sql)),
     publisher: messaging.ports?.publisher ?? null,
-    steps: createFeedStepRegistry(feedStepDepsForScheduledAgent(ctx, userLogin)),
+    steps: createPipelineStepRegistry(
+      feedStepDepsForScheduledAgent(ctx, userLogin),
+      enrichStepDepsForScheduledAgent(ctx),
+    ),
     invocation: "sync",
   });
 }
@@ -204,6 +242,29 @@ export async function ensureScheduledAgentFeedJobs(
 ): Promise<string[]> {
   const stores = createJobPipelineStoresFromSql(pipelineSql(ctx));
   return ensureFeedPipelineJobs(control, stores, envStrings(ctx.env));
+}
+
+/** Ensure the enrich job definitions exist on this host's control plane (#3536). */
+export async function ensureScheduledAgentEnrichJobs(
+  ctx: ScheduledTasksPipelineContext,
+  control: JobPipelineControl,
+): Promise<string[]> {
+  const stores = createJobPipelineStoresFromSql(pipelineSql(ctx));
+  return ensureEnrichPipelineJobs(control, stores, envStrings(ctx.env));
+}
+
+/**
+ * Ensure EVERY pipeline job definition this host manages
+ * (feed + enrich) — the ensure every host entry point runs, so
+ * a job family's definitions exist whichever door arrives first.
+ */
+export async function ensureScheduledAgentPipelineJobs(
+  ctx: ScheduledTasksPipelineContext,
+  control: JobPipelineControl,
+): Promise<string[]> {
+  const feed = await ensureScheduledAgentFeedJobs(ctx, control);
+  const enrich = await ensureScheduledAgentEnrichJobs(ctx, control);
+  return [...feed, ...enrich];
 }
 
 /**
@@ -219,7 +280,7 @@ export async function dispatchScheduledPipelineJob(
 ): Promise<JobDispatchResult | null> {
   const serviceLogin = getServiceUserLogin(ctx.env) ?? undefined;
   const control = createScheduledAgentPipelineControl(ctx, serviceLogin);
-  await ensureScheduledAgentFeedJobs(ctx, control);
+  await ensureScheduledAgentPipelineJobs(ctx, control);
   const dispatch = await control.runJob(jobId, {
     trigger: "scheduled",
     ...(scopePath ? { scopePath } : {}),
@@ -265,7 +326,7 @@ export async function startPipelineJobWorkflow(
   }
   // Mirror the definition into the workflow residency.
   const hostControl = createScheduledAgentPipelineControl(ctx);
-  await ensureScheduledAgentFeedJobs(ctx, hostControl);
+  await ensureScheduledAgentPipelineJobs(ctx, hostControl);
   const hostStores = createJobPipelineStoresFromSql(pipelineSql(ctx));
   const definition = await hostStores.definitions.getDefinition(jobId);
   if (!definition) {
@@ -286,7 +347,10 @@ export async function startPipelineJobWorkflow(
       latestRun: (jobId) => d1Runs.latestByJob(jobId),
     },
     publisher: messaging.ports?.publisher ?? null,
-    steps: createFeedStepRegistry(feedStepDepsForScheduledAgent(ctx)),
+    steps: createPipelineStepRegistry(
+      feedStepDepsForScheduledAgent(ctx),
+      enrichStepDepsForScheduledAgent(ctx),
+    ),
     invocation: "workflow-shard",
   });
   const existing = await d1Stores.definitions.getDefinition(jobId);
@@ -332,7 +396,7 @@ export async function declarePipelineTasks(
     ctx,
     getServiceUserLogin(ctx.env) ?? undefined,
   );
-  await ensureScheduledAgentFeedJobs(ctx, control);
+  await ensureScheduledAgentPipelineJobs(ctx, control);
   const specs: Array<{
     jobId: string;
     nodePath: string;
@@ -424,6 +488,56 @@ export async function listPipelineCompletions(
 /** The pipeline job ids this host manages (the catalog order). */
 export function pipelineJobIds(): string[] {
   return FEED_PIPELINE_CATALOG.map((e) => e.jobId);
+}
+
+/** The enrich job ids this host manages (the catalog order, #3536). */
+export function pipelineEnrichJobIds(): string[] {
+  return ENRICH_PIPELINE_CATALOG.map((e) => e.jobId);
+}
+
+/**
+ * The feed → enrich hand-off (#3536): the enrich stage is the
+ * CONSUMER of the feed stage — when a feed job's completion is
+ * recorded (its queue publication, routed here by the
+ * JOB_PIPELINE_EVENTS consumer), the enrich job consuming that
+ * feed job is dispatched on the same control plane, with the
+ * service identity (a scheduled firing's identity). The enrich
+ * job reads the feed run's PERSISTED dataset — the completion
+ * note is the trigger, never the data channel.
+ *
+ * Best-effort at this boundary, like a scheduled firing: the
+ * note is already recorded (the recording never depends on this
+ * dispatch), a failure is logged with its code, and the enrich
+ * run's own records are its failure surface. An enrich job's
+ * own completion maps to no consumer (no cascade); a
+ * non-completed feed state dispatches nothing.
+ */
+export async function dispatchEnrichAfterFeedCompletion(
+  ctx: ScheduledTasksPipelineContext,
+  note: PipelineCompletionNote,
+): Promise<void> {
+  if (note.state !== "completed") return;
+  const enrichDef = buildEnrichJobRegistry(envStrings(ctx.env)).forFeedJob(
+    note.jobId,
+  );
+  if (!enrichDef) return;
+  try {
+    const serviceLogin = getServiceUserLogin(ctx.env) ?? undefined;
+    const control = createScheduledAgentPipelineControl(ctx, serviceLogin);
+    await ensureScheduledAgentPipelineJobs(ctx, control);
+    const dispatch = await control.runJob(enrichDef.id, {
+      trigger: "scheduled",
+    });
+    if (dispatch.completion) {
+      void dispatch.completion.catch(() => undefined);
+    }
+  } catch (err) {
+    structuredLog.warn("enrich_dispatch_after_feed_completion_failed", {
+      message: `[job-pipeline] enrich dispatch after feed completion failed for "${enrichDef.id}" (feed job "${note.jobId}"): ${err instanceof Error ? err.message : String(err)}`,
+      feedJobId: note.jobId,
+      enrichJobId: enrichDef.id,
+    });
+  }
 }
 
 export type { JobStatusView, JobInstanceRecord };

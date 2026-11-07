@@ -143,6 +143,8 @@ describe("Data Providers consolidation & tabular presentation (#2723)", () => {
       "Lifecycle & State",
       "Health & Telemetry",
       "Feed Jobs",
+      // #3536 pin update (§7): the Enrich Jobs column joins the table.
+      "Enrich Jobs",
       "Capabilities & Routes",
       "Connectivity & Session",
       "Actions",
