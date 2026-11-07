@@ -23,8 +23,9 @@
  *   schedulable/runnable like every job on the plane.
  *
  * The composed step registry is the one registry every
- * residency builds: the feed steps plus enrich.apply
- * (createPipelineStepRegistry) — no second engine entry.
+ * residency builds: the feed steps plus enrich.apply plus
+ * analyze.apply (#3537) (createPipelineStepRegistry) — no
+ * second engine entry.
  */
 import type { DataProviderId } from "../trading";
 import type { FeedDatasetStore } from "../data/feedDatasetPorts";
@@ -46,6 +47,10 @@ import {
   FEED_PIPELINE_CATALOG,
   type FeedStepDeps,
 } from "./feedPipelineJobs";
+import {
+  registerAnalyzeStep,
+  type AnalyzeStepDeps,
+} from "./analyzePipelineJobs";
 import type { JobPipelineStores } from "../data/jobPipelinePorts";
 import type {
   JobPipelineControl,
@@ -362,17 +367,24 @@ export function registerEnrichStep(
 }
 
 /**
- * THE composed step registry — the feed steps plus enrich.apply,
- * built identically in every residency (the ScheduledAgent
- * host, the workflow start path, the workflow itself). One
- * registry, one engine, every stage family so far.
+ * THE composed step registry — the feed steps plus enrich.apply
+ * plus analyze.apply (#3537), built identically in every
+ * residency (the ScheduledAgent host, the workflow start path,
+ * the workflow itself). One registry, one engine, every stage
+ * family so far. The analyze deps are the third argument:
+ * production compositions always pass them; a stage-scoped
+ * test registry may omit them (the registry then simply has no
+ * analyze step, exactly as registerEnrichStep alone composes
+ * an enrich-only registry).
  */
 export function createPipelineStepRegistry(
   feedDeps: FeedStepDeps,
   enrichDeps: EnrichStepDeps,
+  analyzeDeps?: AnalyzeStepDeps,
 ): JobStepRegistry {
   const registry = createFeedStepRegistry(feedDeps);
   registerEnrichStep(registry, enrichDeps);
+  if (analyzeDeps) registerAnalyzeStep(registry, analyzeDeps);
   return registry;
 }
 

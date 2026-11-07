@@ -58,7 +58,7 @@ and `tests/a2a_entrypoint_auth_1763.test.ts`).
    authenticated the request is the identity, not the tool call
    itself. See gap G-AUD-3.
 
-## The 98 factory tools — verdict per tool
+## The 102 factory tools — verdict per tool
 
 Verdict key: **L** = login-attributable via door 1 (session /
 API-key); **I** = instance-attributable only via door 2 (gap
@@ -104,6 +104,8 @@ other doors. Scope column is #1843's declaration, consumed here.
 | `list_feed_jobs` | mcp:read | L via door 2 only — acting identity required (#3535); refused on doors 1/3 (no acting-identity carrier there) |
 | `get_enrich_job_status` | mcp:read | L via door 2 only — acting identity required (#3536); refused on doors 1/3 (no acting-identity carrier there) |
 | `list_enrich_jobs` | mcp:read | L via door 2 only — acting identity required (#3536); refused on doors 1/3 (no acting-identity carrier there) |
+| `get_analyze_job_status` | mcp:read | L via door 2 only — acting identity required (#3537); refused on doors 1/3 (no acting-identity carrier there) |
+| `list_analyze_jobs` | mcp:read | L via door 2 only — acting identity required (#3537); refused on doors 1/3 (no acting-identity carrier there) |
 | `ai_search_financial_docs` | mcp:read | L (I / R on other doors) |
 | `ai_search_agent_search` | mcp:read | L (I / R on other doors) |
 | `agentdb.chain.status` | mcp:read | L (I / R on other doors) |
@@ -145,6 +147,8 @@ other doors. Scope column is #1843's declaration, consumed here.
 | `manage_feed_job` | mcp:write | L via door 2 only — acting identity required (#3535); refused on doors 1/3 (no acting-identity carrier there) |
 | `run_enrich_job` | mcp:write | L via door 2 only — acting identity required (#3536); refused on doors 1/3 (no acting-identity carrier there) |
 | `manage_enrich_job` | mcp:write | L via door 2 only — acting identity required (#3536); refused on doors 1/3 (no acting-identity carrier there) |
+| `run_analyze_job` | mcp:write | L via door 2 only — acting identity required (#3537); refused on doors 1/3 (no acting-identity carrier there) |
+| `manage_analyze_job` | mcp:write | L via door 2 only — acting identity required (#3537); refused on doors 1/3 (no acting-identity carrier there) |
 
 ### mcp:execute (7)
 

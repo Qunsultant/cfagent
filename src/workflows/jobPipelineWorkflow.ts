@@ -33,8 +33,10 @@ import { createJobPipelineMessaging } from "../messaging/createJobPipelineMessag
 import { createPipelineStepRegistry } from "../services/enrichPipelineJobs";
 import { buildFeedJobRegistry } from "../services/feedJobs";
 import { buildEnrichJobRegistry } from "../services/enrichJobs";
+import { buildAnalyzeJobRegistry } from "../services/analyzeJobs";
 import { createFeedDatasetAdapter } from "../data/createFeedDatasetPorts";
 import { createEnrichedDatasetAdapter } from "../data/createEnrichedDatasetPorts";
+import { createAnalyzedDatasetPorts } from "../data/createAnalyzedDatasetPorts";
 import { D1IndexListStore } from "../data/d1IndexListAdapter";
 import {
   createIndexMembershipService,
@@ -84,10 +86,10 @@ export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
       latestRun: (jobId) => runRecords.latestByJob(jobId),
     },
     publisher: messaging.ports?.publisher ?? null,
-    // #3535/#3536: the workflow residency composes THE same step
+    // #3535/#3536/#3537: the workflow residency composes THE same step
     // registry as the ScheduledAgent host (one registry, every
     // residency — the composed registry includes the J1
-    // built-ins, the feed steps, and enrich.apply). Residency
+    // built-ins, the feed steps, enrich.apply, and analyze.apply). Residency
     // rule: the dataset and index-list stores are D1 here, and
     // the universe step runs (its service is a network fetch),
     // but capture-wired PROVIDERS need a DO host's storage (the
@@ -97,7 +99,9 @@ export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
     // fetching uncaptured. Feed pulls execute on the
     // ScheduledAgent host residency, which owns that wiring.
     // The enrich step's stores are both D1, so an enrich run
-    // dispatched here executes fully in this residency.
+    // dispatched here executes fully in this residency. The
+    // analyze step's stores are both D1 too (#3537), so an
+    // analyze run dispatched here executes fully as well.
     steps: createPipelineStepRegistry(
       {
         registry: buildFeedJobRegistry(envStrings),
@@ -125,6 +129,14 @@ export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
         registry: buildEnrichJobRegistry(envStrings),
         datasetStore: createFeedDatasetAdapter(env),
         enrichedStore: createEnrichedDatasetAdapter(env),
+        shardsFor: async (jobId) =>
+          (await stores.definitions.getDefinition(jobId))?.config.processing
+            .shards ?? [],
+      },
+      {
+        registry: buildAnalyzeJobRegistry(envStrings),
+        enrichedStore: createEnrichedDatasetAdapter(env),
+        analyzedStore: createAnalyzedDatasetPorts(env),
         shardsFor: async (jobId) =>
           (await stores.definitions.getDefinition(jobId))?.config.processing
             .shards ?? [],

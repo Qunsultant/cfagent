@@ -14,6 +14,8 @@
  *   POST /data-providers/:id/feed-jobs/:jobId/:action run|pause|resume|cancel|retry a feed job (#3535)
  *   GET  /data-providers/:id/enrich-jobs              the provider's enrich jobs as pipeline jobs (#3536)
  *   POST /data-providers/:id/enrich-jobs/:jobId/:action run|pause|resume|cancel|retry an enrich job (#3536)
+ *   GET  /data-providers/:id/analyze-jobs             the provider's analyze jobs as pipeline jobs (#3537)
+ *   POST /data-providers/:id/analyze-jobs/:jobId/:action run|pause|resume|cancel|retry an analyze job (#3537)
  *   POST /data-providers/:id/register|configure|verify|enable|disable|deprovision
  *
  * (Paths are the DO-internal spellings: src/server.ts strips the
@@ -117,6 +119,11 @@ import {
   ENRICH_PIPELINE_CATALOG,
   type EnrichJobSurfaceView,
 } from "../../services/enrichPipelineJobs";
+import { ANALYZE_JOB_CODES } from "../../services/analyzeJobs";
+import {
+  ANALYZE_PIPELINE_CATALOG,
+  type AnalyzeJobSurfaceView,
+} from "../../services/analyzePipelineJobs";
 import type { JobInstanceRecord } from "../../data/jobPipelinePorts";
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
@@ -188,6 +195,9 @@ export interface FeedPipelineDoorLike {
   // #3536: the enrich jobs' surface reads on the same host door.
   listEnrichJobSurfaceStatuses(): Promise<EnrichJobSurfaceView[]>;
   getEnrichJobSurfaceStatus(jobId: string): Promise<EnrichJobSurfaceView>;
+  // #3537: the analyze jobs' surface reads on the same host door.
+  listAnalyzeJobSurfaceStatuses(): Promise<AnalyzeJobSurfaceView[]>;
+  getAnalyzeJobSurfaceStatus(jobId: string): Promise<AnalyzeJobSurfaceView>;
   runPipelineJob(
     jobId: string,
     opts?: { userLogin?: string },
@@ -327,7 +337,8 @@ async function providerView(
   capturePort?: ProviderCaptureStore | null,
   feed?: unknown,
   feedJobs?: unknown,
-  enrichJobs?: unknown
+  enrichJobs?: unknown,
+  analyzeJobs?: unknown
 ) {
   const adapter = registry.get(record.id);
   const serving = routeViews.some(
@@ -376,6 +387,10 @@ async function providerView(
     // state + lineage + next scheduled run). Same rule as
     // feedJobs: empty when none or the host is unbound.
     enrichJobs: enrichJobs ?? [],
+    // #3537: every analyze job for this provider as a pipeline
+    // job — the merged surface views (analyzed copy + pipeline
+    // state + lineage + next scheduled run). Same rule.
+    analyzeJobs: analyzeJobs ?? [],
   };
 }
 
@@ -558,6 +573,31 @@ async function enrichJobsViewFor(
   }
 }
 
+/**
+ * Every analyze job for one provider, as merged surface views
+ * from the pipeline host (#3537). Same best-effort read rule as
+ * enrichJobsViewFor: an unreachable host yields an empty list —
+ * never a fabricated status.
+ */
+async function analyzeJobsViewFor(
+  ctx: DataProviderRoutesContext,
+  providerId: DataProviderId,
+): Promise<AnalyzeJobSurfaceView[]> {
+  const door = feedPipelineDoorFor(ctx);
+  if (!door) return [];
+  try {
+    const all = await door.listAnalyzeJobSurfaceStatuses();
+    return all.filter((v) => v.sourceId === providerId);
+  } catch (error) {
+    structuredLog.warn("data_providers.analyze_jobs_status_read_failed", {
+      message: `[data-providers] analyze-jobs status read for "${providerId}" failed: ${error instanceof Error ? error.message : String(error)}`,
+      providerId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return [];
+  }
+}
+
 export async function handleDataProviderRoutes(
   request: Request,
   url: URL,
@@ -582,7 +622,12 @@ export async function handleDataProviderRoutes(
   const enrichJobActionMatch = path.match(
     /^\/data-providers\/([^/]+)\/enrich-jobs\/([^/]+)\/([a-z]+)$/,
   );
-  if (!isList && !oneMatch && !actionMatch && !feedRunMatch && !feedJobsMatch && !feedJobActionMatch && !enrichJobsMatch && !enrichJobActionMatch) return null;
+  // #3537: the pipeline analyze-jobs surface (list + per-job actions).
+  const analyzeJobsMatch = path.match(/^\/data-providers\/([^/]+)\/analyze-jobs$/);
+  const analyzeJobActionMatch = path.match(
+    /^\/data-providers\/([^/]+)\/analyze-jobs\/([^/]+)\/([a-z]+)$/,
+  );
+  if (!isList && !oneMatch && !actionMatch && !feedRunMatch && !feedJobsMatch && !feedJobActionMatch && !enrichJobsMatch && !enrichJobActionMatch && !analyzeJobsMatch && !analyzeJobActionMatch) return null;
 
   try {
     // ---- reads ----
@@ -617,6 +662,7 @@ export async function handleDataProviderRoutes(
               await feedViewFor(ctx, c.id),
               await feedJobsViewFor(ctx, c.id),
               await enrichJobsViewFor(ctx, c.id),
+              await analyzeJobsViewFor(ctx, c.id),
             )
           )
         ),
@@ -643,6 +689,7 @@ export async function handleDataProviderRoutes(
           await feedViewFor(ctx, record.id),
           await feedJobsViewFor(ctx, record.id),
           await enrichJobsViewFor(ctx, record.id),
+          await analyzeJobsViewFor(ctx, record.id),
         ),
         routes: routeViews.filter(
           (r) => r.primaryProviderId === id || r.gapFillProviderId === id
@@ -903,6 +950,87 @@ export async function handleDataProviderRoutes(
           {
             error: error instanceof Error ? error.message : String(error),
             code: "ENRICH_JOB_ACTION_REFUSED",
+          },
+          { status: 409 },
+        );
+      }
+    }
+
+    // #3537 — the provider's analyze jobs as pipeline surface
+    // views (the same merged views the copilot tools return).
+    if (request.method === "GET" && analyzeJobsMatch) {
+      const id = decodeURIComponent(analyzeJobsMatch[1]) as DataProviderId;
+      return Response.json({ jobs: await analyzeJobsViewFor(ctx, id) });
+    }
+
+    // #3537 — run / pause / resume / cancel / retry one analyze
+    // job through the pipeline host's control plane (the same
+    // door + gates as the enrich-job actions above, transposed).
+    if (request.method === "POST" && analyzeJobActionMatch) {
+      if (!ctx.userLogin) {
+        return Response.json(
+          { error: "A verified session is required to manage an analyze job." },
+          { status: 401 },
+        );
+      }
+      const id = decodeURIComponent(analyzeJobActionMatch[1]) as DataProviderId;
+      const jobId = decodeURIComponent(analyzeJobActionMatch[2]);
+      const action = analyzeJobActionMatch[3];
+      const entry = ANALYZE_PIPELINE_CATALOG.find((e) => e.jobId === jobId);
+      if (!entry || entry.sourceId !== id) {
+        return Response.json(
+          {
+            error: `No analyze job "${jobId}" is registered for provider "${id}".`,
+            code: ANALYZE_JOB_CODES.jobNotFound,
+          },
+          { status: 404 },
+        );
+      }
+      if (!["run", "pause", "resume", "cancel", "retry"].includes(action)) {
+        return Response.json(
+          { error: `Unknown analyze-job action "${action}".` },
+          { status: 404 },
+        );
+      }
+      const door = feedPipelineDoorFor(ctx);
+      if (!door) {
+        return Response.json(
+          {
+            error:
+              "The pipeline host is not bound on this deployment; the action was refused rather than dispatched through an unwired path.",
+            code: "ANALYZE_JOB_NOT_CONFIGURED",
+          },
+          { status: 500 },
+        );
+      }
+      try {
+        const result =
+          action === "run"
+            ? await door.runPipelineJob(jobId, { userLogin: ctx.userLogin })
+            : action === "pause"
+              ? await door.pausePipelineJob(jobId)
+              : action === "resume"
+                ? await door.resumePipelineJob(jobId, { userLogin: ctx.userLogin })
+                : action === "cancel"
+                  ? await door.cancelPipelineJob(jobId)
+                  : await door.retryPipelineJob(jobId, { userLogin: ctx.userLogin });
+        ctx.recordAudit("data_provider.analyze_job_action", "orchestrator", {
+          actor: ctx.userLogin,
+          providerId: id,
+          jobId,
+          action,
+        });
+        return Response.json({
+          jobId,
+          action,
+          result,
+          status: await door.getAnalyzeJobSurfaceStatus(jobId),
+        });
+      } catch (error) {
+        return Response.json(
+          {
+            error: error instanceof Error ? error.message : String(error),
+            code: "ANALYZE_JOB_ACTION_REFUSED",
           },
           { status: 409 },
         );

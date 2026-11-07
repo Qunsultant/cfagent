@@ -145,6 +145,8 @@ describe("Data Providers consolidation & tabular presentation (#2723)", () => {
       "Feed Jobs",
       // #3536 pin update (§7): the Enrich Jobs column joins the table.
       "Enrich Jobs",
+      // #3537 pin update (§7): the Analyze Jobs column joins the table.
+      "Analyze Jobs",
       "Capabilities & Routes",
       "Connectivity & Session",
       "Actions",

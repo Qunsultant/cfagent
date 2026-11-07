@@ -66,9 +66,11 @@ import { createSocialStoresFromNamespace } from "./social/durableStores";
 import {
   createScheduledAgentPipelineControl,
   declarePipelineTasks,
+  dispatchAnalyzeAfterEnrichCompletion,
   dispatchEnrichAfterFeedCompletion,
   ensureScheduledAgentPipelineJobs,
   listPipelineCompletions,
+  pipelineAnalyzeJobIds,
   pipelineEnrichJobIds,
   pipelineJobIds,
   recordPipelineCompletion,
@@ -100,6 +102,16 @@ import {
   type EnrichJobSurfaceView,
 } from "../services/enrichPipelineJobs";
 import { createEnrichedDatasetAdapter } from "../data/createEnrichedDatasetPorts";
+// Issue #3537 (Pipeline J4): the analyze jobs' surface on this
+// host — the merged status view's composition pieces (the RPCs
+// below delegate to the same ONE control plane).
+import { buildAnalyzeJobRegistry } from "../services/analyzeJobs";
+import {
+  buildAnalyzeJobSurfaceView,
+  ANALYZE_PIPELINE_CATALOG,
+  type AnalyzeJobSurfaceView,
+} from "../services/analyzePipelineJobs";
+import { createAnalyzedDatasetPorts } from "../data/createAnalyzedDatasetPorts";
 import { createSocialBriefStoreFromNamespace } from "./social/briefStore";
 import {
   createSocialPipelineStoresFromNamespace,
@@ -584,16 +596,53 @@ export class ScheduledAgent extends PortThink {
     return views;
   }
 
+  /** One analyze job's merged surface status (dataset + pipeline, #3537). */
+  async getAnalyzeJobSurfaceStatus(jobId: string): Promise<AnalyzeJobSurfaceView> {
+    const ctx = this.pipelineContext();
+    const control = createScheduledAgentPipelineControl(ctx);
+    await ensureScheduledAgentPipelineJobs(ctx, control);
+    const entry = ANALYZE_PIPELINE_CATALOG.find((e) => e.jobId === jobId);
+    if (!entry) {
+      throw new Error(
+        `ANALYZE_JOB_NOT_FOUND: no analyze job with id "${jobId}" exists in the analyze catalog.`,
+      );
+    }
+    const envStrings: Record<string, string | undefined> = {};
+    for (const [key, value] of Object.entries(
+      this.env as unknown as Record<string, unknown>,
+    )) {
+      if (typeof value === "string") envStrings[key] = value;
+    }
+    return buildAnalyzeJobSurfaceView({
+      entry,
+      analyzedStore: createAnalyzedDatasetPorts(this.env),
+      registry: buildAnalyzeJobRegistry(envStrings),
+      pipeline: await control.getJob(jobId),
+      nowMs: Date.now(),
+    });
+  }
+
+  /** Every analyze job's merged surface status, in catalog order (#3537). */
+  async listAnalyzeJobSurfaceStatuses(): Promise<AnalyzeJobSurfaceView[]> {
+    const views: AnalyzeJobSurfaceView[] = [];
+    for (const jobId of pipelineAnalyzeJobIds()) {
+      views.push(await this.getAnalyzeJobSurfaceStatus(jobId));
+    }
+    return views;
+  }
+
   /**
    * The queue consumer's intake: record one routed completion —
-   * then the feed → enrich hand-off (#3536): a completed feed
-   * job dispatches the enrich job consuming it (best-effort;
-   * the recording never depends on the dispatch).
+   * then the stage hand-offs: a completed feed job dispatches
+   * the enrich job consuming it (#3536), and a completed enrich
+   * job dispatches the analyze job consuming it (#3537)
+   * (best-effort; the recording never depends on a dispatch).
    */
   async recordPipelineCompletion(note: PipelineCompletionNote): Promise<void> {
     const ctx = this.pipelineContext();
     await recordPipelineCompletion(ctx, note);
     await dispatchEnrichAfterFeedCompletion(ctx, note);
+    await dispatchAnalyzeAfterEnrichCompletion(ctx, note);
   }
 
   /** Recorded pipeline completions, newest first. */

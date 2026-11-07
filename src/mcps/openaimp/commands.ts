@@ -131,6 +131,12 @@ import {
   ListEnrichJobsCommand,
   ManageEnrichJobCommand,
 } from "./enrichJobCommands";
+import {
+  RunAnalyzeJobCommand,
+  GetAnalyzeJobStatusCommand,
+  ListAnalyzeJobsCommand,
+  ManageAnalyzeJobCommand,
+} from "./analyzeJobCommands";
 
 import { searchPlatformKnowledge } from "../../services/platformKnowledge";
 // Issue #3342: the "search" contract's AI-search attempt reads the
@@ -1808,6 +1814,10 @@ export class McpToolFactory {
     this.registerTool(new GetEnrichJobStatusCommand());
     this.registerTool(new ListEnrichJobsCommand());
     this.registerTool(new ManageEnrichJobCommand());
+    this.registerTool(new RunAnalyzeJobCommand());
+    this.registerTool(new GetAnalyzeJobStatusCommand());
+    this.registerTool(new ListAnalyzeJobsCommand());
+    this.registerTool(new ManageAnalyzeJobCommand());
     this.registerTool(new CheckPaymentBudgetCommand());
     this.registerTool(new GetPaymentsOverviewCommand());
 
