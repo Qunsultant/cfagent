@@ -444,6 +444,28 @@ export class AlpacaPlaceOrderCommand implements IMcpToolCommand {
       type: { type: "string", enum: ["market", "limit", "stop", "stop_limit"], description: "Order execution type" },
       limit_price: { type: "number", description: "Limit price (required if type is limit)" },
       time_in_force: { type: "string", enum: ["day", "gtc", "ioc", "fok"], description: "Time in force" },
+      extended_hours: { type: "boolean", description: "Allow execution in pre-market, after-hours, and overnight EXTO sessions" },
+      order_class: { type: "string", enum: ["simple", "bracket", "oco", "oto"], description: "Order class ('bracket' for parent orders with take-profit and stop-loss legs)" },
+      take_profit: {
+        type: "object",
+        properties: {
+          limit_price: { type: "number", description: "Limit price for take-profit leg" },
+        },
+        required: ["limit_price"],
+        description: "Take-profit bracket leg parameters",
+      },
+      take_profit_limit_price: { type: "number", description: "Convenience alias for take-profit limit price" },
+      stop_loss: {
+        type: "object",
+        properties: {
+          stop_price: { type: "number", description: "Stop trigger price for stop-loss leg" },
+          limit_price: { type: "number", description: "Optional limit price for stop-loss limit leg" },
+        },
+        required: ["stop_price"],
+        description: "Stop-loss bracket leg parameters",
+      },
+      stop_loss_stop_price: { type: "number", description: "Convenience alias for stop-loss stop price" },
+      stop_loss_limit_price: { type: "number", description: "Convenience alias for stop-loss limit price" },
       quantity: { type: "number", description: "#1727 market-data/trading-mode alias for qty (ignored in mcp mode)" },
       orderAction: { type: "string", description: "#1727 market-data-mode alias for side (ignored in mcp/trading modes)" },
       orderType: { type: "string", description: "#1727 market-data-mode alias for type (ignored in mcp/trading modes)" },
@@ -460,6 +482,13 @@ export class AlpacaPlaceOrderCommand implements IMcpToolCommand {
     type: z.enum(["market", "limit", "stop", "stop_limit"]).default("market").optional(),
     limit_price: z.number().positive().optional().describe("Limit price"),
     time_in_force: z.enum(["day", "gtc", "ioc", "fok"]).default("day").optional(),
+    extended_hours: z.boolean().optional().describe("Allow extended-hours execution"),
+    order_class: z.enum(["simple", "bracket", "oco", "oto"]).optional().describe("Order class ('bracket' for parent orders with TP/SL legs)"),
+    take_profit: z.object({ limit_price: z.number().positive() }).optional().describe("Take-profit bracket leg"),
+    take_profit_limit_price: z.number().positive().optional().describe("Take-profit limit price"),
+    stop_loss: z.object({ stop_price: z.number().positive(), limit_price: z.number().positive().optional() }).optional().describe("Stop-loss bracket leg"),
+    stop_loss_stop_price: z.number().positive().optional().describe("Stop-loss stop price"),
+    stop_loss_limit_price: z.number().positive().optional().describe("Stop-loss limit price"),
     quantity: z.number().positive().optional().describe("#1727 market-data/trading-mode alias for qty (ignored in mcp mode)"),
     orderAction: z.string().optional().describe("#1727 market-data-mode alias for side (ignored in mcp/trading modes)"),
     orderType: z.string().optional().describe("#1727 market-data-mode alias for type (ignored in mcp/trading modes)"),
@@ -475,6 +504,13 @@ export class AlpacaPlaceOrderCommand implements IMcpToolCommand {
       type?: "market" | "limit" | "stop" | "stop_limit";
       limit_price?: number;
       time_in_force?: "day" | "gtc" | "ioc" | "fok";
+      extended_hours?: boolean;
+      order_class?: "simple" | "bracket" | "oco" | "oto";
+      take_profit?: { limit_price: number };
+      take_profit_limit_price?: number;
+      stop_loss?: { stop_price: number; limit_price?: number };
+      stop_loss_stop_price?: number;
+      stop_loss_limit_price?: number;
       quantity?: number;
       orderAction?: string;
       orderType?: string;
@@ -487,6 +523,62 @@ export class AlpacaPlaceOrderCommand implements IMcpToolCommand {
     auditMarketDataConfigError(context, ALPACA_ORDER_MODE_SWITCH, resolved, "trading");
     const service = new MarketDataResearchService(context.env);
     const normalized = normalizeMarketDataOrderInput(input as any, resolved.mode);
+
+    // Validate bracket combos (#3658): fail closed before broker contact
+    if (normalized.order_class === "bracket") {
+      if (!normalized.take_profit?.limit_price || !normalized.stop_loss?.stop_price) {
+        return {
+          success: false,
+          message: "Bracket orders require both take_profit (limit_price) and stop_loss (stop_price) parameters.",
+          refusal: "invalid_bracket_parameters",
+        };
+      }
+
+      if (normalized.type === "stop_limit") {
+        return {
+          success: false,
+          message: "Bracket orders are not compatible with stop_limit parent order type.",
+          refusal: "invalid_bracket_order_type",
+        };
+      }
+
+      const tpLimit = normalized.take_profit.limit_price;
+      const slStop = normalized.stop_loss.stop_price;
+      const entryPrice = normalized.limit_price;
+
+      if (normalized.side === "buy") {
+        if (entryPrice !== undefined && (tpLimit <= entryPrice || slStop >= entryPrice)) {
+          return {
+            success: false,
+            message: `Invalid bracket prices for BUY order: take-profit ($${tpLimit}) must be greater than entry ($${entryPrice}) and stop-loss ($${slStop}) must be less than entry ($${entryPrice}).`,
+            refusal: "invalid_bracket_prices",
+          };
+        }
+        if (tpLimit <= slStop) {
+          return {
+            success: false,
+            message: `Invalid bracket prices for BUY order: take-profit ($${tpLimit}) must be greater than stop-loss ($${slStop}).`,
+            refusal: "invalid_bracket_prices",
+          };
+        }
+      } else if (normalized.side === "sell") {
+        if (entryPrice !== undefined && (tpLimit >= entryPrice || slStop <= entryPrice)) {
+          return {
+            success: false,
+            message: `Invalid bracket prices for SELL order: take-profit ($${tpLimit}) must be less than entry ($${entryPrice}) and stop-loss ($${slStop}) must be greater than entry ($${entryPrice}).`,
+            refusal: "invalid_bracket_prices",
+          };
+        }
+        if (tpLimit >= slStop) {
+          return {
+            success: false,
+            message: `Invalid bracket prices for SELL order: take-profit ($${tpLimit}) must be less than stop-loss ($${slStop}).`,
+            refusal: "invalid_bracket_prices",
+          };
+        }
+      }
+    }
+
     const result = await service.placeAlpacaOrder(normalized);
     context.audit?.(marketDataOrderAuditEvent(resolved.mode), "trading", marketDataOrderAuditPayload(resolved.mode, normalized, result));
     return result;

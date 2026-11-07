@@ -492,6 +492,13 @@ export interface MarketDataOrderRawInput {
   limit_price?: unknown;
   limitPrice?: unknown;
   time_in_force?: unknown;
+  extended_hours?: unknown;
+  order_class?: unknown;
+  take_profit?: unknown;
+  take_profit_limit_price?: unknown;
+  stop_loss?: unknown;
+  stop_loss_stop_price?: unknown;
+  stop_loss_limit_price?: unknown;
 }
 
 /** Normalized order params as passed to MarketDataResearchService.placeAlpacaOrder. */
@@ -502,6 +509,47 @@ export interface MarketDataOrderNormalized {
   type: "market" | "limit" | "stop" | "stop_limit";
   limit_price?: number;
   time_in_force: "day" | "gtc" | "ioc" | "fok";
+  extended_hours?: boolean;
+  order_class?: "simple" | "bracket" | "oco" | "oto";
+  take_profit?: { limit_price: number };
+  stop_loss?: { stop_price: number; limit_price?: number };
+}
+
+/**
+ * Normalizes bracket parameters: supports nested { take_profit, stop_loss }
+ * and convenience aliases take_profit_limit_price, stop_loss_stop_price.
+ */
+function extractBracketParams(input: MarketDataOrderRawInput): {
+  order_class?: MarketDataOrderNormalized["order_class"];
+  take_profit?: { limit_price: number };
+  stop_loss?: { stop_price: number; limit_price?: number };
+  extended_hours?: boolean;
+} {
+  let take_profit = input.take_profit as { limit_price: number } | undefined;
+  if (!take_profit && input.take_profit_limit_price !== undefined && input.take_profit_limit_price !== null) {
+    take_profit = { limit_price: Number(input.take_profit_limit_price) };
+  }
+
+  let stop_loss = input.stop_loss as { stop_price: number; limit_price?: number } | undefined;
+  if (!stop_loss && input.stop_loss_stop_price !== undefined && input.stop_loss_stop_price !== null) {
+    stop_loss = {
+      stop_price: Number(input.stop_loss_stop_price),
+      ...(input.stop_loss_limit_price !== undefined && input.stop_loss_limit_price !== null
+        ? { limit_price: Number(input.stop_loss_limit_price) }
+        : {}),
+    };
+  }
+
+  const rawClass = input.order_class as MarketDataOrderNormalized["order_class"];
+  const order_class = rawClass || (take_profit || stop_loss ? "bracket" : undefined);
+  const extended_hours = typeof input.extended_hours === "boolean" ? input.extended_hours : undefined;
+
+  return {
+    ...(order_class ? { order_class } : {}),
+    ...(take_profit ? { take_profit } : {}),
+    ...(stop_loss ? { stop_loss } : {}),
+    ...(extended_hours !== undefined ? { extended_hours } : {}),
+  };
 }
 
 /**
@@ -518,6 +566,7 @@ export interface MarketDataOrderNormalized {
  *   limit_price only when present, tif day).
  */
 export function normalizeMarketDataOrderInput(input: MarketDataOrderRawInput, mode: AlpacaOrderMode): MarketDataOrderNormalized {
+  const bracket = extractBracketParams(input);
   if (mode === "mcp") {
     // Strictly verbatim: the framework-level zod defaults (type
     // market, tif day) apply before execute in MCP transport; a
@@ -531,6 +580,7 @@ export function normalizeMarketDataOrderInput(input: MarketDataOrderRawInput, mo
       type: input.type as MarketDataOrderNormalized["type"],
       limit_price: input.limit_price as number | undefined,
       time_in_force: input.time_in_force as MarketDataOrderNormalized["time_in_force"],
+      ...bracket,
     };
   }
   if (mode === "market-data") {
@@ -546,6 +596,7 @@ export function normalizeMarketDataOrderInput(input: MarketDataOrderRawInput, mo
       type: type as MarketDataOrderNormalized["type"],
       limit_price: limitRaw ? Number(limitRaw) : undefined,
       time_in_force: ((input.time_in_force as string) || "day") as MarketDataOrderNormalized["time_in_force"],
+      ...bracket,
     };
   }
   const symbol = String(input.symbol || "").trim();
@@ -559,6 +610,7 @@ export function normalizeMarketDataOrderInput(input: MarketDataOrderRawInput, mo
     type: type as MarketDataOrderNormalized["type"],
     limit_price: input.limit_price !== undefined ? Number(input.limit_price) : undefined,
     time_in_force: ((input.time_in_force as string) || "day") as MarketDataOrderNormalized["time_in_force"],
+    ...bracket,
   };
 }
 

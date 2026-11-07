@@ -2556,7 +2556,10 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
     limit_price?: number;
     time_in_force?: "day" | "gtc" | "ioc" | "fok";
     extended_hours?: boolean;
-  }): Promise<{ success: boolean; orderId?: string; status?: string; symbol?: string; qty?: number; side?: string; message: string; httpStatus?: number }> {
+    order_class?: "simple" | "bracket" | "oco" | "oto";
+    take_profit?: { limit_price: number };
+    stop_loss?: { stop_price: number; limit_price?: number };
+  }): Promise<{ success: boolean; orderId?: string; status?: string; symbol?: string; qty?: number; side?: string; orderClass?: string; legs?: any[]; message: string; httpStatus?: number; refusal?: string }> {
     if (!this.isConfigured()) {
       return {
         success: false,
@@ -2573,6 +2576,16 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
         time_in_force: params.time_in_force || "day",
         ...(params.limit_price ? { limit_price: params.limit_price } : {}),
         ...(params.extended_hours !== undefined ? { extended_hours: params.extended_hours } : {}),
+        ...(params.order_class ? { order_class: params.order_class } : {}),
+        ...(params.take_profit ? { take_profit: { limit_price: params.take_profit.limit_price } } : {}),
+        ...(params.stop_loss
+          ? {
+              stop_loss: {
+                stop_price: params.stop_loss.stop_price,
+                ...(params.stop_loss.limit_price !== undefined ? { limit_price: params.stop_loss.limit_price } : {}),
+              },
+            }
+          : {}),
       };
 
       const res = await this.throttledFetch(`${this.getTradingUrl()}/v2/orders`, {
@@ -2594,6 +2607,8 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
           symbol: data.symbol,
           qty: Number(data.qty),
           side: data.side,
+          orderClass: data.order_class,
+          legs: data.legs,
           message: `Alpaca Order ${data.id} placed successfully. Status: ${data.status}`,
         };
       }
@@ -3353,7 +3368,10 @@ export class MarketDataResearchService {
     limit_price?: number;
     time_in_force?: "day" | "gtc" | "ioc" | "fok";
     extended_hours?: boolean;
-  }): Promise<{ success: boolean; orderId?: string; status?: string; symbol?: string; qty?: number; side?: string; message: string }> {
+    order_class?: "simple" | "bracket" | "oco" | "oto";
+    take_profit?: { limit_price: number };
+    stop_loss?: { stop_price: number; limit_price?: number };
+  }): Promise<{ success: boolean; orderId?: string; status?: string; symbol?: string; qty?: number; side?: string; orderClass?: string; legs?: any[]; message: string; httpStatus?: number; refusal?: string }> {
     return this.alpacaTrading.placeOrder(params);
   }
 
