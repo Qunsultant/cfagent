@@ -146,9 +146,9 @@ async function makeContext(withIdentity = true) {
 }
 
 describe("feed-job copilot tools (#3535)", () => {
-  it("the catalog carries the four feed-job tools (110 total since #3539)", () => {
+  it("the catalog carries the four feed-job tools (112 total since #3673)", () => {
     const names = McpToolFactory.getToolDefinitions().map((d) => d.name);
-    expect(names).toHaveLength(110);
+    expect(names).toHaveLength(112);
     for (const name of ["run_feed_job", "get_feed_job_status", "list_feed_jobs", "manage_feed_job"]) {
       expect(names).toContain(name);
     }
