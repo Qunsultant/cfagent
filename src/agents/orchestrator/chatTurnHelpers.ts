@@ -173,7 +173,7 @@ export async function deriveTurn(ctx: ChatTurnHelpersContext, turnCtx: { message
     userText,
     userLogin: metadata.userLogin || sessionId,
     sourceTab: metadata.sourceTab,
-    isAutoOptionsResearchRequest: metadata.sourceTab === "E*TRADE · Auto Options Research",
+    isAutoOptionsResearchRequest: metadata.sourceTab === "Broker · Auto Options Research",
     recentTurns,
   };
 }
