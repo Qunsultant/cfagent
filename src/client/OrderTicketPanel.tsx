@@ -24,6 +24,8 @@ import { RiskAnalysisPanel } from "./RiskAnalysisPanel";
 import { PageChromeContext } from "./components/ui/PageShell";
 import { STRATEGY_LIBRARY } from "./options/strategyLibrary";
 import { buildTradeLegs, describeTradeLeg } from "./trading/strategyAutobuild";
+import { brokerModeBadge, brokerPresentation } from "../trading/brokerPresentation";
+import { AlpacaSignInCard } from "./AlpacaSignInCard";
 
 /**
  * OrderTicketPanel — the Fast Order Ticket as its own shell-conforming
@@ -58,13 +60,22 @@ export interface OrderTicketModel {
   orderAssetClass: TradeAssetClass;
   orderLegs: NonNullable<TradeOrderContext["optionLegs"]>;
   activeDraft: ETradeOrderDraft | null;
-  oauthStatus: {
-    authenticated: boolean;
-    environment?: string;
-    storedAt?: string;
-    renewable?: boolean;
-    expired?: boolean;
-  } | null;
+  /**
+   * Issue #3669: the broker-neutral connection model. The panel used to
+   * receive only the E*TRADE OAuth object, so a tenant on any other
+   * broker was permanently told to "Connect your E*TRADE account" — the
+   * panel had no broker, no mode, and no other connect flow to show.
+   * `brokerConnected` is derived by the hub from the selected broker's
+   * own connect surface; `onConnectBroker` starts the selected broker's
+   * connect flow (E*TRADE OAuth — the only broker whose connect flow is
+   * a button; Alpaca renders its sign-in card inline instead).
+   */
+  brokerId: string;
+  tradingType: "paper" | "live";
+  brokerConnected: boolean;
+  /** The environment the Alpaca sign-in card verifies against. */
+  activeEnv?: string;
+  onConnectBroker: (override?: unknown) => Promise<void>;
   setOrderSymbol: (symbol: string) => void;
   setOrderAction: (action: "BUY" | "SELL" | "BUY_TO_COVER" | "SELL_SHORT") => void;
   setOrderType: (type: "MARKET" | "LIMIT" | "STOP" | "STOP_LIMIT") => void;
@@ -89,7 +100,6 @@ export interface OrderTicketModel {
   ) => void;
   setOptionNetOrderDirection: (credit: boolean) => void;
   handlePreviewOrder: (e: React.FormEvent) => Promise<void>;
-  handleStartOAuth: (override?: unknown) => Promise<void>;
   sendNlqToChat: (prompt?: string) => void;
   setRiskSubject: (subject: RiskSubject | null) => void;
   seedManualOptions: (symbol: string) => void;
@@ -110,7 +120,11 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
     orderAssetClass,
     orderLegs,
     activeDraft,
-    oauthStatus,
+    brokerId,
+    tradingType,
+    brokerConnected,
+    activeEnv,
+    onConnectBroker,
     setOrderSymbol,
     setOrderAction,
     setOrderType,
@@ -128,11 +142,16 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
     setOptionLegs,
     setOptionNetOrderDirection,
     handlePreviewOrder,
-    handleStartOAuth,
     sendNlqToChat,
     setRiskSubject,
     seedManualOptions,
   } = ticket;
+
+  // Issue #3669: the panel names the SELECTED broker, from the one
+  // presentation module — never a hard-coded firm. An unrecognised id
+  // is named as a selection, never silently as E*TRADE.
+  const presentation = brokerPresentation(brokerId);
+  const brokerLabel = presentation.label;
 
   const applyTab = (tab: OrderTicketTab) => {
     // The Risk tab analyzes the ticket; it never changes the ticket's
@@ -358,6 +377,16 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
                           ? "Stock strategy preview with human approval required"
                           : "Zero-commission equity trading with agentic DID stamping"}
                     </span>
+                    {/* Issue #3669: broker + mode badges, as the portfolio
+                        branch has — the ticket used to show neither, so a
+                        tenant could not tell which broker or mode an order
+                        would use. The mode comes from the TEST/PROD
+                        selection the hub passes in, not from a broker
+                        status read (see hub orderTradingType). */}
+                    <Flex gap="2" wrap>
+                      <Badge tone="accent" title={`Broker: ${brokerId}`}>{brokerLabel}</Badge>
+                      <Badge tone={tradingType === "live" ? "warning" : "success"}>{brokerModeBadge(brokerId, tradingType)}</Badge>
+                    </Flex>
                   </div>
                   {orderSymbol && (
                     <Button
@@ -378,7 +407,7 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
                   <div className="options-preview-error" role="alert">
                     <strong>Options preview failed. No order was created or submitted.</strong>
                     <span>{/unapproved options position|options approval levels/i.test(orderError)
-                      ? "E*TRADE says this strategy is not approved for the account, or conflicts with current positions or open orders. Review the account’s options approval and open orders with E*TRADE."
+                      ? `${brokerLabel} says this strategy is not approved for the account, or conflicts with current positions or open orders. Review the account’s options approval and open orders with ${brokerLabel}.`
                       : "Review the contract details and correct the issue before requesting another broker preview."}</span>
                     <details>
                       <summary>Broker response</summary>
@@ -395,7 +424,7 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
                         <div className="options-leg-editor-heading">
                           <div>
                             <strong>Build your order</strong>
-                            <span>Review and edit every contract before requesting E*TRADE’s preview.</span>
+                            <span>Review and edit every contract before requesting {brokerLabel}’s preview.</span>
                           </div>
                           <Button type="button" variant="secondary" size="sm" className="options-leg-add" onClick={addOptionLeg} disabled={orderLegs.length >= 4 || orderLegs.some((leg) => leg.securityType === "EQ")}>
                             + Add leg
@@ -448,7 +477,7 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
                             <Button type="button" variant="danger" tone="subtle" size="sm" className="options-leg-remove" onClick={() => removeOptionLeg(index)} aria-label={`Remove leg ${index + 1}`} disabled={(orderContext.optionLegs?.length ?? 0) <= 1}>Remove</Button>
                           </div>
                         ))}
-                        <p className="options-leg-editor-help">1. Edit the contracts and net limit. 2. Request E*TRADE’s preview. 3. Review and approve only if the broker accepts it. Nothing is submitted before your approval; E*TRADE still validates account approval, buying power, and existing positions.</p>
+                        <p className="options-leg-editor-help">1. Edit the contracts and net limit. 2. Request {brokerLabel}’s preview. 3. Review and approve only if the broker accepts it. Nothing is submitted before your approval; {brokerLabel} still validates account approval, buying power, and existing positions.</p>
                       </div>
                     ) : (
                       <ul>{orderContext.legs.map((leg) => <li key={leg}>{leg}</li>)}</ul>
@@ -489,18 +518,38 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
                           size="sm"
                           disabled={quoteLoading}
                           onClick={() => fetchSymbolQuote(orderSymbol)}
-                          title="Fetch live quote from E*TRADE"
+                          title={`Fetch live quote from ${brokerLabel}`}
                          loading={quoteLoading}>
                           {"🔍 Get Live Quote"}
                         </Button>
                       </div>
                     </FieldShell>
-                    {!oauthStatus?.authenticated && (
+                    {/* Issue #3669: the connect notice follows the SELECTED
+                        broker. It used to read E*TRADE's OAuth status for
+                        every tenant, so an Alpaca tenant — who can never
+                        complete E*TRADE OAuth — saw "Connect your E*TRADE
+                        account" permanently. E*TRADE keeps its OAuth
+                        button; Alpaca gets its sign-in card inline; any
+                        other broker names itself with no invented flow. */}
+                    {!brokerConnected && brokerId === "etrade" && (
                       <div className="order-auth-notice">
                         <span>🔒 Connect your E*TRADE account to fetch authenticated live market quotes.</span>
-                        <Button type="button" variant="ghost" size="sm" onClick={handleStartOAuth}>
+                        <Button type="button" variant="ghost" size="sm" onClick={onConnectBroker}>
                           Connect E*TRADE →
                         </Button>
+                      </div>
+                    )}
+                    {!brokerConnected && brokerId === "alpaca" && (
+                      <>
+                        <div className="order-auth-notice">
+                          <span>🔒 Connect your Alpaca account to fetch authenticated live market quotes.</span>
+                        </div>
+                        <AlpacaSignInCard activeEnv={activeEnv} collapsedWhenConfigured={false} />
+                      </>
+                    )}
+                    {!brokerConnected && brokerId !== "etrade" && brokerId !== "alpaca" && (
+                      <div className="order-auth-notice">
+                        <span>🔒 Connect your {brokerLabel} account to fetch authenticated live market quotes.</span>
                       </div>
                     )}
                     {orderQuote && (
@@ -815,7 +864,7 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
                   <h5>🛡️ Agentic HITL Safety Guarantee</h5>
                   <p>
                     Every trade initiated by the Multi-Agent System is saved to the institutional ledger in <code>previewed</code> status.
-                    No funds are moved, and no order is routed to E*TRADE until you review the order details and click <strong>Approve &amp; Submit</strong>.
+                    No funds are moved, and no order is routed to {brokerLabel} until you review the order details and click <strong>Approve &amp; Submit</strong>.
                   </p>
                   <div className="safety-bullets">
                     <div className="bullet-item">

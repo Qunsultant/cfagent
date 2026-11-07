@@ -204,6 +204,41 @@ describe("broker order routes (#3089)", () => {
     expect(store.trades.findMany()).toEqual([]);
   });
 
+  it("an unconfigured broker fails loud and coded on preview (#3669)", async () => {
+    TradingPlatformRegistry.register(
+      "alpaca",
+      () =>
+        ({
+          platformId: "alpaca",
+          name: "alpaca",
+          previewOrder: vi.fn(async () => {
+            throw new Error("Alpaca credentials are not configured; account data is unavailable.");
+          }),
+        }) as any,
+    );
+    const store = makeStore();
+    const res = await handleBrokerOrderRoutes(
+      req("POST", "/broker/order/preview", {
+        broker: "alpaca",
+        symbol: "ACME",
+        quantity: 1,
+        assetClass: "equity",
+      }),
+      urlOf("/broker/order/preview"),
+      "/broker/order/preview",
+      "alice",
+      baseCtx(store),
+    );
+    expect(res!.status).toBe(409);
+    const body = await res!.json();
+    expect(body.code).toBe("FAILURE_BROKER_UNAVAILABLE");
+    expect(body.broker).toBe("alpaca");
+    expect(body.message).toMatch(/Alpaca credentials are not configured/);
+    expect(body.message).toMatch(/no other broker was used/i);
+    expect(body.retryable).toBe(false);
+    expect(store.trades.findMany()).toEqual([]);
+  });
+
   it("orders listing returns stored drafts with their broker", async () => {
     const store = makeStore([
       { id: "d1", symbol: "ACME", action: "BUY", orderType: "MARKET", quantity: 1, price: 100, totalValue: 100, status: "previewed", broker: "alpaca", createdAt: "2026-11-04T00:00:00.000Z", updatedAt: "2026-11-04T00:00:00.000Z" },

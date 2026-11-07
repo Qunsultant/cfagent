@@ -36,6 +36,7 @@ import { AccountPanels } from "./AccountPanels";
 import { AlpacaBrokerPanel } from "./AlpacaBrokerPanel";
 import {
   accountsEndpoint,
+  connectStatusEndpoint,
   diagnosticsEndpoint,
   positionsEndpoint,
   quoteEndpoint,
@@ -262,6 +263,14 @@ export function ETradeTradingHub({
 
   // Broker status
   const [brokerStatus, setBrokerStatus] = useState<ETradeBrokerStatus | null>(null);
+  // Issue #3669: the Alpaca connect read (`configured`/`signedIn`, the
+  // same `GET /api/broker/connect/alpaca` the dynamic menu makes). The
+  // neutral broker status cannot answer it — it knows deployment keys
+  // only, not whether THIS login signed in with its own pair.
+  const [alpacaConnectStatus, setAlpacaConnectStatus] = useState<{
+    configured?: boolean;
+    signedIn?: boolean;
+  } | null>(null);
   const [account, setAccount] = useState<ETradeAccount | null>(null);
   const [positions, setPositions] = useState<ETradePosition[]>([]);
   const [positionsLoading, setPositionsLoading] = useState(false);
@@ -718,7 +727,9 @@ export function ETradeTradingHub({
       setLastExecutionResult(null);
       setOauthMsg(`Switched to ${adopted === "PROD" ? "Production (Live)" : "Sandbox (TEST)"} mode.`);
       await Promise.all([
-        fetchOAuthStatus(adopted),
+        // Issue #3669: E*TRADE OAuth status is E*TRADE's — refetch it
+        // only for an E*TRADE tenant.
+        ...(selectedBroker === "etrade" ? [fetchOAuthStatus(adopted)] : []),
         fetchBrokerStatus(adopted),
         fetchPositions(adopted),
       ]);
@@ -736,7 +747,11 @@ export function ETradeTradingHub({
 
   // Fetch initial broker status, OAuth status, positions, and screener
   useEffect(() => {
-    fetchOAuthStatus(activeEnv);
+    // Issue #3669: E*TRADE OAuth status is E*TRADE's — it is fetched only
+    // for an E*TRADE tenant. An Alpaca tenant never completes E*TRADE
+    // OAuth, so the call could only ever return "unauthenticated", which
+    // the order page used to render as a permanent E*TRADE prompt.
+    if (selectedBroker === "etrade") fetchOAuthStatus(activeEnv);
     fetchBrokerStatus(activeEnv);
     fetchPositions(activeEnv);
     fetchOrders();
@@ -744,7 +759,7 @@ export function ETradeTradingHub({
 
     // Check if redirected back from E*TRADE OAuth
     const params = new URLSearchParams(window.location.search);
-    if (params.get("etrade_auth") === "success") {
+    if (selectedBroker === "etrade" && params.get("etrade_auth") === "success") {
       setOauthMsg("E*TRADE OAuth 1.0a connection established! Real broker access enabled.");
       fetchOAuthStatus(activeEnv);
       fetchBrokerStatus(activeEnv);
@@ -764,6 +779,40 @@ export function ETradeTradingHub({
     }
   }, [activeEnv]);
 
+  // Issue #3669: the order page's Alpaca connection signal. Same read the
+  // dynamic menu makes, same definition of connected (`configured` OR
+  // `signedIn`): a usable pair exists for this trading type, whether it
+  // is the deployment's or the user's own. No connect read exists for
+  // any other non-E*TRADE broker yet, so the endpoint helper returns
+  // null and nothing is fetched for them.
+  useEffect(() => {
+    if (selectedBroker !== "alpaca") {
+      setAlpacaConnectStatus(null);
+      return;
+    }
+    const endpoint = connectStatusEndpoint(selectedBroker);
+    if (!endpoint) return;
+    let cancelled = false;
+    const url = `${endpoint}?environment=${encodeURIComponent(activeEnv)}`;
+    fetch(url)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!cancelled && data && typeof data === "object") {
+          const body = data as Record<string, unknown>;
+          setAlpacaConnectStatus({
+            configured: Boolean(body.configured),
+            signedIn: Boolean(body.signedIn),
+          });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setAlpacaConnectStatus(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedBroker, activeEnv]);
+
   // Listen for open-etapi-tuning and etrade-env-changed events from SettingsMenu
   useEffect(() => {
     const handleOpenTuning = () => setConfigModalOpen(true);
@@ -777,7 +826,8 @@ export function ETradeTradingHub({
         setActiveDraft(null);
         setLastExecutionResult(null);
         void Promise.all([
-          fetchOAuthStatus(target),
+          // Issue #3669: E*TRADE OAuth status is E*TRADE's (see mount effect).
+          ...(selectedBroker === "etrade" ? [fetchOAuthStatus(target)] : []),
           fetchBrokerStatus(target),
           fetchPositions(target),
         ]);
@@ -1682,6 +1732,25 @@ export function ETradeTradingHub({
   const accountValue = account?.netAccountValue;
   const isLive = activeEnv === "PROD";
 
+  // Issue #3669: what the ORDER page shows as connected, per selected
+  // broker — E*TRADE's OAuth object, Alpaca's connect read, and for any
+  // other broker the neutral status's `configured` flag (no connect
+  // surface of its own yet; never another broker's answer).
+  const orderBrokerConnected =
+    selectedBroker === "etrade"
+      ? Boolean(oauthStatus?.authenticated)
+      : selectedBroker === "alpaca"
+        ? Boolean(alpacaConnectStatus?.configured || alpacaConnectStatus?.signedIn)
+        : Boolean((brokerStatus as { configured?: boolean } | null)?.configured);
+  // Issue #3669: the displayed mode comes from the TEST/PROD selection
+  // alone. The order page keeps its own derivation so the badge never
+  // depends on the hub's shared live flag: before #3668 landed
+  // (9112193f), hub `isLive` ORed the broker status in, so once a status
+  // read reported live it stuck true even after the user clicked Paper.
+  // #3668 fixed `isLive` to the same selection, so the two now agree —
+  // the separate derivation stays as the badge's own contract.
+  const orderTradingType: "paper" | "live" = activeEnv === "PROD" ? "live" : "paper";
+
   useEffect(() => {
     onBrokerPropsChange?.({
       activeEnv,
@@ -2097,7 +2166,14 @@ export function ETradeTradingHub({
             orderAssetClass,
             orderLegs,
             activeDraft,
-            oauthStatus,
+            // Issue #3669: the order branch receives the broker-neutral
+            // connection model, not the raw E*TRADE OAuth object — the
+            // panel never sees another broker's connect flow.
+            brokerId: selectedBroker,
+            tradingType: orderTradingType,
+            brokerConnected: orderBrokerConnected,
+            activeEnv,
+            onConnectBroker: handleStartOAuth,
             setOrderSymbol,
             setOrderAction,
             setOrderType,
@@ -2115,7 +2191,6 @@ export function ETradeTradingHub({
             setOptionLegs,
             setOptionNetOrderDirection,
             handlePreviewOrder,
-            handleStartOAuth,
             sendNlqToChat,
             setRiskSubject,
             seedManualOptions,

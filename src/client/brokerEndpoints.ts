@@ -63,6 +63,22 @@ export function diagnosticsEndpoint(brokerId: string = readTenantProvidersState(
 }
 
 /**
+ * Issue #3669: where the order page asks whether the selected broker is
+ * connected. Each broker answers that question on its own connect surface:
+ * E*TRADE's OAuth status, Alpaca's neutral connect read (configured for
+ * this trading type, or signed in with the user's own pair — the same
+ * `GET /api/broker/connect/alpaca` the dynamic menu uses). A broker with
+ * no connect surface here gets null ("do not call"), never another
+ * broker's status read, which is exactly how an Alpaca tenant ended up
+ * staring at a permanent "Connect your E*TRADE account" notice.
+ */
+export function connectStatusEndpoint(brokerId: string = readTenantProvidersState().brokerId): string | null {
+  if (brokerId === "etrade") return "/api/etrade/oauth/status";
+  if (brokerId === "alpaca") return "/api/broker/connect/alpaca";
+  return null;
+}
+
+/**
  * Issue #3368: where the Sync control asks.
  *
  * E*TRADE's diagnostics answer a question only E*TRADE has (its OAuth session);
