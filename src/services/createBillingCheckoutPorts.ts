@@ -20,6 +20,13 @@ import { StripePaymentStrategy } from "../patterns/paymentStrategies";
 import { PaymentGatewayService } from "./payments";
 import type { BillingCheckoutPort } from "./billingCheckoutPorts";
 import { StripeBillingCheckoutAdapter } from "./stripeBillingCheckoutAdapter";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/createBillingCheckoutPorts",
+});
 
 export type BillingCheckoutEnv = {
   STRIPE_SECRET_KEY?: string;
@@ -40,9 +47,10 @@ export function createBillingCheckoutPorts(env: BillingCheckoutEnv): BillingChec
       retrieveCheckoutSession: (sessionId) => service.retrieveCheckoutSession(sessionId),
     });
   } catch (err) {
-    console.error(
-      `[billing-checkout-ports] Billing checkout unconfigured (bad Stripe configuration, failing closed): ${err instanceof Error ? err.message : String(err)}`,
-    );
+    structuredLog.error("billing.checkout_unconfigured", {
+      message: `[billing-checkout-ports] Billing checkout unconfigured (bad Stripe configuration, failing closed): ${err instanceof Error ? err.message : String(err)}`,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return null;
   }
 }

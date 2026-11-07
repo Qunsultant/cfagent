@@ -17,6 +17,7 @@ import { actorGateway } from "./cloudflareActorGateway";
 import { createMessagingPorts } from "../messaging/createMessagingPorts";
 import { toScreenerEnvelope } from "../messaging/screenerEventEnvelope";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
+import { createStructuredLogger } from "../observability/structuredLogger";
 import { writeEnvelopeToSink } from "../observability/observabilityPorts";
 import {
   checkScreenerDeliveryConfig,
@@ -149,6 +150,11 @@ import {
 } from "./userEmailDestination";
 import { deliverGatedSlack } from "./gatedSlackDelivery";
 import { getEventCalendarCoverage, getSymbolEventCalendar } from "./eventCalendar";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/scheduledTasks",
+});
 
 export interface AutonomousOptionsAnalysisOptions {
   symbols?: string[];
@@ -393,10 +399,10 @@ export async function writeScreenerEventTelemetry(
       toScreenerEnvelope(event, userLogin)
     );
   } catch (err) {
-    console.warn(
-      "[ScheduledTasksService] screener telemetry emit failed (run outcome unaffected):",
-      err instanceof Error ? err.message : String(err)
-    );
+    structuredLog.warn("scheduledTasks.screener_telemetry_emit_failed", {
+      message: "[ScheduledTasksService] screener telemetry emit failed (run outcome unaffected)",
+      error: err instanceof Error ? err.message : String(err),
+    });
     return false;
   }
 }
@@ -506,9 +512,10 @@ export class ScheduledTasksService {
       );
       return bindNasdaqUniverseDeps(provider, bundle.runContext);
     } catch (err) {
-      console.warn(
-        `[scheduled] universe deps unavailable, options discovery degrades to the missing-seam throw: ${err instanceof Error ? err.message : String(err)}`
-      );
+      structuredLog.warn("scheduledTasks.universe_deps_unavailable", {
+        message: `[scheduled] universe deps unavailable, options discovery degrades to the missing-seam throw: ${err instanceof Error ? err.message : String(err)}`,
+        error: err instanceof Error ? err.message : String(err),
+      });
       return undefined;
     }
   }
@@ -557,7 +564,10 @@ export class ScheduledTasksService {
         ...input,
       });
     } catch (err) {
-      console.warn("[ScheduledTasksService] discovery outcome record failed:", err instanceof Error ? err.message : String(err));
+      structuredLog.warn("scheduledTasks.discovery_outcome_record_failed", {
+        message: "[ScheduledTasksService] discovery outcome record failed",
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 
@@ -584,9 +594,12 @@ export class ScheduledTasksService {
       // never silent — the warn carries type + login on the
       // worker-log channel. The run's outcome is unchanged: the
       // audit store is the record, not the run.
-      console.warn(
-        `[ScheduledTasksService] Audit insertion failed (type=${type}, login=${this.userLogin}): ${err instanceof Error ? err.message : String(err)}`,
-      );
+      structuredLog.warn("scheduledTasks.audit_insertion_failed", {
+        message: `[ScheduledTasksService] Audit insertion failed (type=${type}, login=${this.userLogin}): ${err instanceof Error ? err.message : String(err)}`,
+        type,
+        userLogin: this.userLogin,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 
@@ -713,15 +726,15 @@ export class ScheduledTasksService {
               await writeScreenerEventTelemetry(this.env, this.userLogin, event);
               return deliveryConfig;
             }
-            console.warn(
-              "[ScheduledTasksService] queue publish reached no subscriber stream — falling back to the in-process bus."
-            );
+            structuredLog.warn("scheduledTasks.queue_publish_no_subscriber", {
+              message: "[ScheduledTasksService] queue publish reached no subscriber stream — falling back to the in-process bus.",
+            });
           }
         } catch (err) {
-          console.warn(
-            "[ScheduledTasksService] queue publish failed, falling back to the in-process bus:",
-            err instanceof Error ? err.message : String(err)
-          );
+          structuredLog.warn("scheduledTasks.queue_publish_failed", {
+            message: "[ScheduledTasksService] queue publish failed, falling back to the in-process bus",
+            error: err instanceof Error ? err.message : String(err),
+          });
         }
       }
       if (!this.screenerBus) {
@@ -743,10 +756,10 @@ export class ScheduledTasksService {
       }
       return deliveryConfig;
     } catch (err) {
-      console.warn(
-        "[ScheduledTasksService] screener event publish failed:",
-        err instanceof Error ? err.message : String(err)
-      );
+      structuredLog.warn("scheduledTasks.screener_event_publish_failed", {
+        message: "[ScheduledTasksService] screener event publish failed",
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 
@@ -957,7 +970,10 @@ export class ScheduledTasksService {
         probe: "screen-run-lock",
         error: err instanceof Error ? err.message : String(err),
       });
-      console.warn("[ScheduledTasksService] Screen-run lock probe unavailable; refusing sharded submission (fail-closed, #2860).");
+      structuredLog.warn("scheduledTasks.screen_run_lock_probe_unavailable", {
+        message: "[ScheduledTasksService] Screen-run lock probe unavailable; refusing sharded submission (fail-closed, #2860).",
+        probe: "screen-run-lock",
+      });
       return { success: true, taskType: "market_screen", skipped: true, skippedReason: "gate-unavailable", sharded: true, timestamp } as any;
     }
     if (lockHeld) {
@@ -981,7 +997,10 @@ export class ScheduledTasksService {
           probe: "active-chain",
           error: err instanceof Error ? err.message : String(err),
         });
-        console.warn("[ScheduledTasksService] Active-chain probe unavailable; refusing sharded submission (fail-closed, #2860).");
+        structuredLog.warn("scheduledTasks.active_chain_probe_unavailable", {
+          message: "[ScheduledTasksService] Active-chain probe unavailable; refusing sharded submission (fail-closed, #2860).",
+          probe: "active-chain",
+        });
         return { success: true, taskType: "market_screen", skipped: true, skippedReason: "gate-unavailable", sharded: true, timestamp } as any;
       }
       if (activeChain) {
@@ -2075,7 +2094,10 @@ export class ScheduledTasksService {
             { label: "followup-bridge" },
           );
         } catch (bridgeErr) {
-          console.warn("[ScheduledTasksService] Goal bridge failed (canonical row kept):", bridgeErr instanceof Error ? bridgeErr.message : String(bridgeErr));
+          structuredLog.warn("scheduledTasks.goal_bridge_failed", {
+            message: "[ScheduledTasksService] Goal bridge failed (canonical row kept)",
+            error: bridgeErr instanceof Error ? bridgeErr.message : String(bridgeErr),
+          });
           this.audit("followup.schedule_failed", {
             taskId: out.taskId,
             trigger,
@@ -2852,10 +2874,15 @@ export class ScheduledTasksService {
         );
       }
       if (coverageErrors > 0 || truncatedCount > 0) {
-        console.warn(
-          `[ScheduledTasks] [FAILURE_SCREEN_PARTIAL_COVERAGE] Partial options coverage: ${scannedCount} of ${symbols.length} scanned, ` +
-          `${coverageErrors} quote/chain failures, ${truncatedCount} truncated. Publishing partial report.`
-        );
+        structuredLog.warn("scheduledTasks.partial_options_coverage", {
+          message:
+            `[ScheduledTasks] [FAILURE_SCREEN_PARTIAL_COVERAGE] Partial options coverage: ${scannedCount} of ${symbols.length} scanned, ` +
+            `${coverageErrors} quote/chain failures, ${truncatedCount} truncated. Publishing partial report.`,
+          scannedCount,
+          symbolCount: symbols.length,
+          coverageErrors,
+          truncatedCount,
+        });
       }
 
       // Issue #275: tag each opportunity with its strategy's direction
@@ -2908,10 +2935,16 @@ export class ScheduledTasksService {
           // pipeline is the only PDF path (#914/#680). The run publishes
           // without a PDF: optionsPdfKey stays undefined, so no reportUrl
           // is fabricated, and the failure is visible here in the log.
-          console.warn("[ScheduledTasksService] Options PDF generation via pipeline failed:", pipelineResult.pdfError);
+          structuredLog.warn("scheduledTasks.options_pdf_pipeline_failed", {
+            message: "[ScheduledTasksService] Options PDF generation via pipeline failed",
+            error: pipelineResult.pdfError,
+          });
         }
       } catch (pdfErr) {
-        console.warn("[ScheduledTasksService] Options PDF generation/storage failed:", pdfErr instanceof Error ? pdfErr.message : String(pdfErr));
+        structuredLog.warn("scheduledTasks.options_pdf_generation_failed", {
+          message: "[ScheduledTasksService] Options PDF generation/storage failed",
+          error: pdfErr instanceof Error ? pdfErr.message : String(pdfErr),
+        });
       }
       // Issue #1195 (#1173 R3b): generate + store the options XLSX
       // (own failure domain; recorded, never fatal).
@@ -2925,7 +2958,10 @@ export class ScheduledTasksService {
         const data = await (screenerAgent as any).getOptionsXlsxByKey(stored.key);
         if (data) optionsXlsx = data.bytes;
       } catch (xlsxErr) {
-        console.warn("[ScheduledTasksService] Options XLSX generation/storage failed:", xlsxErr instanceof Error ? xlsxErr.message : String(xlsxErr));
+        structuredLog.warn("scheduledTasks.options_xlsx_generation_failed", {
+          message: "[ScheduledTasksService] Options XLSX generation/storage failed",
+          error: xlsxErr instanceof Error ? xlsxErr.message : String(xlsxErr),
+        });
       }
       // Issue #1346: generate + store the options CSV (own failure
       // domain; recorded, never fatal). Issue #1569: the scheduled
@@ -2942,7 +2978,10 @@ export class ScheduledTasksService {
         const data = await (screenerAgent as any).getOptionsCsvByKey(stored.key);
         if (data) optionsCsv = data.bytes;
       } catch (csvErr) {
-        console.warn("[ScheduledTasksService] Options CSV generation/storage failed:", csvErr instanceof Error ? csvErr.message : String(csvErr));
+        structuredLog.warn("scheduledTasks.options_csv_generation_failed", {
+          message: "[ScheduledTasksService] Options CSV generation/storage failed",
+          error: csvErr instanceof Error ? csvErr.message : String(csvErr),
+        });
       }
       // Issue #3264: stamp the generated keys onto the scan-store
       // row (the manual route already does this) so the run's scan
@@ -2955,7 +2994,10 @@ export class ScheduledTasksService {
           if (optionsXlsxKey) await this.scanRunStore.updateXlsxKey(scanData.scanRunId, optionsXlsxKey, { userLogin });
           if (optionsCsvKey) await this.scanRunStore.updateCsvKey(scanData.scanRunId, optionsCsvKey, { userLogin });
         } catch (stampErr) {
-          console.warn("[ScheduledTasksService] Options scan-row key stamp failed:", stampErr instanceof Error ? stampErr.message : String(stampErr));
+          structuredLog.warn("scheduledTasks.options_scan_row_key_stamp_failed", {
+            message: "[ScheduledTasksService] Options scan-row key stamp failed",
+            error: stampErr instanceof Error ? stampErr.message : String(stampErr),
+          });
         }
       }
       const reportUrl = optionsPdfKey
@@ -3023,9 +3065,15 @@ export class ScheduledTasksService {
           try {
             const delivery = await deliverGatedSlack(this.env, { userLogin, text: degraded, channel: options.slackChannel });
             notifications.slack = delivery.ok;
-            if (!delivery.ok) console.warn("[ScheduledTasksService] Slack degraded-coverage notice failed:", delivery.error);
+            if (!delivery.ok) structuredLog.warn("scheduledTasks.slack_degraded_coverage_notice_failed", {
+              message: "[ScheduledTasksService] Slack degraded-coverage notice failed",
+              error: delivery.error,
+            });
           } catch (noticeErr) {
-            console.warn("[ScheduledTasksService] Options Slack degraded-coverage notice failed:", noticeErr instanceof Error ? noticeErr.message : String(noticeErr));
+            structuredLog.warn("scheduledTasks.options_slack_degraded_coverage_notice_failed", {
+              message: "[ScheduledTasksService] Options Slack degraded-coverage notice failed",
+              error: noticeErr instanceof Error ? noticeErr.message : String(noticeErr),
+            });
             notifications.slack = false;
           }
         } else {
@@ -3055,12 +3103,21 @@ export class ScheduledTasksService {
             }] } : {}),
           });
           notifications.slack = delivery.ok;
-          if (!delivery.ok) console.warn("[ScheduledTasksService] Slack PDF delivery failed:", delivery.error);
+          if (!delivery.ok) structuredLog.warn("scheduledTasks.slack_pdf_delivery_failed", {
+            message: "[ScheduledTasksService] Slack PDF delivery failed",
+            error: delivery.error,
+          });
         } catch (pdfErr) {
-          console.warn("[ScheduledTasksService] Options Slack delivery failed:", pdfErr instanceof Error ? pdfErr.message : String(pdfErr));
+          structuredLog.warn("scheduledTasks.options_slack_delivery_failed", {
+            message: "[ScheduledTasksService] Options Slack delivery failed",
+            error: pdfErr instanceof Error ? pdfErr.message : String(pdfErr),
+          });
           const delivery = await deliverGatedSlack(this.env, { userLogin, text, channel: options.slackChannel });
           notifications.slack = delivery.ok;
-          if (!delivery.ok) console.warn("[ScheduledTasksService] Slack notification failed:", delivery.error);
+          if (!delivery.ok) structuredLog.warn("scheduledTasks.slack_notification_failed", {
+            message: "[ScheduledTasksService] Slack notification failed",
+            error: delivery.error,
+          });
         }
         } // end else: at-or-above-floor success delivery (#1718)
       }
@@ -3103,10 +3160,16 @@ export class ScheduledTasksService {
             }
             emailOk = r.ok;
             if (!r.ok) {
-              console.warn("[ScheduledTasksService] cfpay Email failed, falling back to local:", r.error);
+              structuredLog.warn("scheduledTasks.cfpay_email_failed", {
+                message: "[ScheduledTasksService] cfpay Email failed, falling back to local",
+                error: r.error,
+              });
             }
           } catch (err) {
-            console.warn("[ScheduledTasksService] cfpay Email error:", err);
+            structuredLog.warn("scheduledTasks.cfpay_email_error", {
+              message: "[ScheduledTasksService] cfpay Email error",
+              error: err instanceof Error ? err.message : String(err),
+            });
           }
         }
         if (!emailOk) {
@@ -3132,7 +3195,10 @@ export class ScheduledTasksService {
               })()
             );
           } catch (emailErr) {
-            console.warn("[ScheduledTasksService] Email notification error:", emailErr);
+            structuredLog.warn("scheduledTasks.email_notification_error", {
+              message: "[ScheduledTasksService] Email notification error",
+              error: emailErr instanceof Error ? emailErr.message : String(emailErr),
+            });
             notifications.email = false;
           }
         } else {
@@ -3155,10 +3221,17 @@ export class ScheduledTasksService {
           if (!whResult.success) {
             // e.g. no OUTBOUND_WEBHOOK_SECRET configured (issue #123/F20):
             // the flag above already reports false; log the reason too.
-            console.warn("[ScheduledTasksService] Webhook notification not sent:", whResult.error || `HTTP ${whResult.status}`);
+            structuredLog.warn("scheduledTasks.webhook_notification_not_sent", {
+              message: `[ScheduledTasksService] Webhook notification not sent: ${whResult.error || `HTTP ${whResult.status}`}`,
+              error: whResult.error,
+              status: whResult.status,
+            });
           }
         } catch (webhookErr) {
-          console.warn("[ScheduledTasksService] Webhook notification error:", webhookErr);
+          structuredLog.warn("scheduledTasks.webhook_notification_error", {
+            message: "[ScheduledTasksService] Webhook notification error",
+            error: webhookErr instanceof Error ? webhookErr.message : String(webhookErr),
+          });
           notifications.webhook = false;
         }
       }
@@ -3288,7 +3361,10 @@ export class ScheduledTasksService {
           channel: options.slackChannel,
           text: `⚠️ Scheduled Options Screen FAILED — ${options.universe || symbols.join(", ") || "NASDAQ100"} (${targetThesis})\nError: ${err.message || "Scheduled options analysis failed"}\n_Time: ${timestamp}_`,
         });
-        if (!failure.ok) console.warn("[ScheduledTasksService] Slack failure notification failed:", failure.error);
+        if (!failure.ok) structuredLog.warn("scheduledTasks.slack_failure_notification_failed", {
+          message: "[ScheduledTasksService] Slack failure notification failed",
+          error: failure.error,
+        });
       }
 
       // Issue #223: the failure joins the bus too, mirroring screener.failed.
@@ -3365,13 +3441,16 @@ export class ScheduledTasksService {
       const result = await deliverGatedSlack(this.env, { userLogin: this.userLogin, text });
       attempted = attempted || slackConfigured;
       if (!result.ok) {
-        console.warn("[ScheduledTasksService] Discovery failure Slack failed:", result.error);
+        structuredLog.warn("scheduledTasks.discovery_failure_slack_failed", {
+          message: "[ScheduledTasksService] Discovery failure Slack failed",
+          error: result.error,
+        });
       }
     } catch (err) {
-      console.warn(
-        "[ScheduledTasksService] Discovery failure Slack notify failed:",
-        err instanceof Error ? err.message : String(err)
-      );
+      structuredLog.warn("scheduledTasks.discovery_failure_slack_notify_failed", {
+        message: "[ScheduledTasksService] Discovery failure Slack notify failed",
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
     const webhookUrl = this.env.OUTBOUND_WEBHOOK_URL;
     if (webhookUrl) {
@@ -3389,10 +3468,10 @@ export class ScheduledTasksService {
           webhookUrl
         );
       } catch (err) {
-        console.warn(
-          "[ScheduledTasksService] Discovery failure webhook notify failed:",
-          err instanceof Error ? err.message : String(err)
-        );
+        structuredLog.warn("scheduledTasks.discovery_failure_webhook_notify_failed", {
+          message: "[ScheduledTasksService] Discovery failure webhook notify failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
     if (!attempted) {
@@ -3741,7 +3820,10 @@ export class ScheduledTasksService {
             { label: "followup-bridge" },
           );
         } catch (bridgeErr) {
-          console.warn("[ScheduledTasksService] Discovery bridge failed (canonical row kept):", bridgeErr instanceof Error ? bridgeErr.message : String(bridgeErr));
+          structuredLog.warn("scheduledTasks.discovery_bridge_failed", {
+            message: "[ScheduledTasksService] Discovery bridge failed (canonical row kept)",
+            error: bridgeErr instanceof Error ? bridgeErr.message : String(bridgeErr),
+          });
           this.audit("followup.schedule_failed", {
             bridge: "discovery",
             error: bridgeErr instanceof Error ? bridgeErr.message : String(bridgeErr),
@@ -3766,7 +3848,9 @@ export class ScheduledTasksService {
    */
   private async sendDiscoveryDirect(outcome: ScreenerRunOutcome): Promise<void> {
     if (!this.orm) {
-      console.warn("[ScheduledTasksService] Discovery direct delivery skipped: no ORM (no canonical row to link).");
+      structuredLog.warn("scheduledTasks.discovery_direct_delivery_skipped", {
+        message: "[ScheduledTasksService] Discovery direct delivery skipped: no ORM (no canonical row to link).",
+      });
       return;
     }
     try {
@@ -3783,11 +3867,18 @@ export class ScheduledTasksService {
       });
       for (const result of results) {
         if (!result.ok) {
-          console.warn(`[ScheduledTasksService] Discovery direct delivery failed (${result.channel}):`, result.error ?? "unknown error");
+          structuredLog.warn("scheduledTasks.discovery_direct_delivery_failed", {
+            message: `[ScheduledTasksService] Discovery direct delivery failed (${result.channel})`,
+            channel: result.channel,
+            error: result.error ?? "unknown error",
+          });
         }
       }
     } catch (err) {
-      console.warn("[ScheduledTasksService] Discovery direct delivery failed:", err instanceof Error ? err.message : String(err));
+      structuredLog.warn("scheduledTasks.discovery_direct_delivery_failed", {
+        message: "[ScheduledTasksService] Discovery direct delivery failed",
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 

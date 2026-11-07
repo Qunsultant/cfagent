@@ -23,6 +23,13 @@
  */
 
 import { createBlobStore } from "./blobStoreR2Adapter";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/reportBlobStore",
+});
 
 interface BlobStorage {
   get<T>(key: string): Promise<T | undefined>;
@@ -134,7 +141,11 @@ export async function getReportPdf(
           return { bytes: obj.bytes, fileName };
         }
       } catch (err) {
-        console.warn("[reportBlobStore] Direct R2 read failed:", err);
+        structuredLog.warn("report_blob.direct_r2_read_failed", {
+          message: "[reportBlobStore] Direct R2 read failed",
+          key,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
     return null;
@@ -146,7 +157,11 @@ export async function getReportPdf(
       if (!obj) return null;
       return { bytes: obj.bytes, fileName: meta.fileName };
     } catch (err) {
-      console.warn("[reportBlobStore] R2 read failed, trying legacy:", err);
+      structuredLog.warn("report_blob.r2_read_failed", {
+        message: "[reportBlobStore] R2 read failed, trying legacy",
+        key,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
   if (meta.base64) {
@@ -170,7 +185,11 @@ export async function getReportPdf(
         };
         await storage.put(key, pointer);
       } catch (err) {
-        console.warn("[reportBlobStore] Lazy R2 migration failed:", err);
+        structuredLog.warn("report_blob.lazy_r2_migration_failed", {
+          message: "[reportBlobStore] Lazy R2 migration failed",
+          key,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
     return { bytes, fileName: meta.fileName };

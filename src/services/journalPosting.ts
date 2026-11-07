@@ -13,6 +13,13 @@
  * never drizzle-orm (structural test pin).
  */
 import type { JournalEntryInput, JournalPort } from "../data/journalPorts";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/journalPosting",
+});
 
 export async function postJournalBestEffort(
   setup: () => Promise<JournalPort | null>,
@@ -21,14 +28,16 @@ export async function postJournalBestEffort(
   try {
     const port = await setup();
     if (!port) {
-      console.error("[journal] journal post skipped (AGENT_DB unbound); payment/ledger unaffected.");
+      structuredLog.error("journal.post_skipped", {
+        message: "[journal] journal post skipped (AGENT_DB unbound); payment/ledger unaffected.",
+      });
       return;
     }
     await port.postEntries(entries);
   } catch (err) {
-    console.error(
-      "[journal] journal post failed — payment/ledger unaffected:",
-      err instanceof Error ? err.message : String(err),
-    );
+    structuredLog.error("journal.post_failed", {
+      message: "[journal] journal post failed — payment/ledger unaffected",
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 }

@@ -9,7 +9,8 @@
  * These pins hold the new contract:
  *
  *  - No bare `catch {}` may exist in reflection.ts (source pin).
- *  - Every previously-swallowing site logs via console.error with
+ *  - Every previously-swallowing site logs via the structured logger
+ *    (level error, on the console-info JSON fallback) with
  *    context (repo convention) when its store operation fails.
  *  - Failed learning writes are COUNTED on the run result
  *    (`learningsFailed`, present only when > 0): the run summary never
@@ -84,13 +85,50 @@ function seedApprovedReviews(reviews: any[], n: number, label = "Momentum breako
 }
 
 let errSpy: ReturnType<typeof vi.spyOn>;
+let infoSpy: ReturnType<typeof vi.spyOn>;
 beforeEach(() => {
   errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  // #3515 S3: reflection.ts logs via the structured logger, whose
+  // fallback sink writes every event as one JSON line via console.info,
+  // regardless of level — console.error is never called.
+  infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
 });
 afterEach(() => {
   errSpy.mockRestore();
+  infoSpy.mockRestore();
 });
-const loggedText = () => errSpy.mock.calls.map((c: any[]) => c.map(String).join(" ")).join("\n");
+type StructuredEvent = { operation: string; level: string; fields: Record<string, unknown> };
+const structuredEvents = (): StructuredEvent[] => {
+  const events: StructuredEvent[] = [];
+  for (const call of infoSpy.mock.calls) {
+    try {
+      const parsed = JSON.parse(String(call[0])) as {
+        operation?: unknown;
+        level?: unknown;
+        fields?: unknown;
+      };
+      if (parsed && typeof parsed.operation === "string") {
+        events.push({
+          operation: parsed.operation,
+          level: typeof parsed.level === "string" ? parsed.level : "",
+          fields:
+            parsed.fields && typeof parsed.fields === "object"
+              ? (parsed.fields as Record<string, unknown>)
+              : {},
+        });
+      }
+    } catch {
+      // Non-JSON console.info lines are not structured events.
+    }
+  }
+  return events;
+};
+// The structured event's message field, joined across events —
+// the same text the old console.error lines carried.
+const loggedText = () =>
+  structuredEvents()
+    .map((e) => String(e.fields.message ?? ""))
+    .join("\n");
 
 describe("runReflection — persistence honesty (#784)", () => {
   it("happy path: findings persist, result shape and run-meta text unchanged, nothing logged", () => {
@@ -116,7 +154,15 @@ describe("runReflection — persistence honesty (#784)", () => {
     expect(result.learningsRecorded).toBe(0);
     expect(result.learningsFailed).toBe(2); // the finding write + the run-meta write
     expect(learnings).toHaveLength(0);
-    expect(errSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
+    const events = structuredEvents();
+    expect(events.length).toBeGreaterThanOrEqual(2);
+    const persistFailed = events.find((e) => e.operation === "reflection.persist_learning_failed");
+    expect(persistFailed).toBeDefined();
+    expect(persistFailed?.level).toBe("error");
+    expect(persistFailed?.fields.domain).toBe("strategy_ranking");
+    const metaFailed = events.find((e) => e.operation === "reflection.persist_run_meta_failed");
+    expect(metaFailed).toBeDefined();
+    expect(metaFailed?.level).toBe("error");
     expect(loggedText()).toContain("[Reflection]");
   });
 
@@ -130,6 +176,11 @@ describe("runReflection — persistence honesty (#784)", () => {
     expect(result.learningsFailed).toBe(1);
     expect(learnings).toHaveLength(1);
     expect(learnings[0].domain).toBe("strategy_ranking");
+    const metaFailed = structuredEvents().find(
+      (e) => e.operation === "reflection.persist_run_meta_failed",
+    );
+    expect(metaFailed).toBeDefined();
+    expect(metaFailed?.level).toBe("error");
     expect(loggedText()).toMatch(/run-meta|already-ran guard/);
   });
 
@@ -142,7 +193,10 @@ describe("runReflection — persistence honesty (#784)", () => {
     expect(result.skipped).toBeUndefined();
     expect(result.findings).toHaveLength(1);
     expect(result.learningsRecorded).toBe(1);
-    expect(errSpy.mock.calls.length).toBe(1);
+    const events = structuredEvents();
+    expect(events.length).toBe(1);
+    expect(events[0].operation).toBe("reflection.already_ran_guard_check_failed");
+    expect(events[0].level).toBe("error");
     expect(loggedText()).toMatch(/guard/i);
   });
 
@@ -175,6 +229,11 @@ describe("runReflection — persistence honesty (#784)", () => {
     expect(result.findings).toHaveLength(1);
     expect(result.findings[0].domain).toBe("screener_thresholds");
     expect(result.learningsRecorded).toBe(1);
+    const reviewFailed = structuredEvents().find(
+      (e) => e.operation === "reflection.strategy_review_analysis_failed",
+    );
+    expect(reviewFailed).toBeDefined();
+    expect(reviewFailed?.level).toBe("error");
     expect(loggedText()).toMatch(/Strategy-review/);
     const meta = learnings.find((l) => l.domain === "reflection_meta");
     expect(meta?.observation).toContain("analysis section");
@@ -191,6 +250,11 @@ describe("runReflection — persistence honesty (#784)", () => {
     expect(result.findings[0].domain).toBe("strategy_ranking");
     expect(result.learningsRecorded).toBe(1);
     expect(learnings.filter((l) => l.domain === "strategy_ranking")).toHaveLength(1);
+    const staleFailed = structuredEvents().find(
+      (e) => e.operation === "reflection.stale_learning_analysis_failed",
+    );
+    expect(staleFailed).toBeDefined();
+    expect(staleFailed?.level).toBe("error");
     expect(loggedText()).toMatch(/Stale-learning/);
   });
 

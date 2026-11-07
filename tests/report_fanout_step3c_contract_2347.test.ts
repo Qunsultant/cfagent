@@ -311,15 +311,45 @@ describe("3c contract: per-leg fault injection produces the declared recorded ou
   it("row INSERT throws -> null result, no row, no outcome record (REPORT_FANOUT_FAILED member)", async () => {
     const sql = new SqliteTestStorage();
     sql.failInserts = true;
-    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    // #3515 S3: the fan-out failure now travels as a structured
+    // storeReportAtGeneration.failed event (level error) on the
+    // console-info JSON fallback, not a console.error line.
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     try {
       const stored = storeReportAtGeneration(sql as unknown as SqlStorage, input());
       expect(stored).toBeNull();
       expect(rowCount(sql)).toBe(0);
-      const logged = errSpy.mock.calls.map((c) => c.map(String).join(" ")).join("\n");
-      expect(logged).toContain(DataFoundationCode.REPORT_FANOUT_FAILED);
+      const events: Array<{ operation: string; level: string; fields: Record<string, unknown> }> = [];
+      for (const call of infoSpy.mock.calls) {
+        try {
+          const parsed = JSON.parse(String(call[0])) as {
+            operation?: unknown;
+            level?: unknown;
+            fields?: unknown;
+          };
+          if (parsed && typeof parsed.operation === "string") {
+            events.push({
+              operation: parsed.operation,
+              level: typeof parsed.level === "string" ? parsed.level : "",
+              fields:
+                parsed.fields && typeof parsed.fields === "object"
+                  ? (parsed.fields as Record<string, unknown>)
+                  : {},
+            });
+          }
+        } catch {
+          // Non-JSON console.info lines are not structured events.
+        }
+      }
+      const failed = events.find((e) => e.operation === "storeReportAtGeneration.failed");
+      expect(failed).toBeDefined();
+      expect(failed?.level).toBe("error");
+      expect(failed?.fields.code).toBe(DataFoundationCode.REPORT_FANOUT_FAILED);
+      expect(String(failed?.fields.message ?? "")).toContain(
+        DataFoundationCode.REPORT_FANOUT_FAILED,
+      );
     } finally {
-      errSpy.mockRestore();
+      infoSpy.mockRestore();
     }
   });
 

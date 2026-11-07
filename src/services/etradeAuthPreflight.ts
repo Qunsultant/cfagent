@@ -41,6 +41,13 @@ import {
   formatTraceBlock,
   type ScreenerTrace,
 } from "./screenerTrace";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/etradeAuthPreflight",
+});
 
 /** Minimal key-value seam (Durable Object storage satisfies it). */
 export interface AuthEpisodeStore {
@@ -172,10 +179,11 @@ export async function fireAuthEpisodeAlertOnce(
     await fire();
     return true;
   } catch (err) {
-    console.warn(
-      `[etradeAuthPreflight] episode alert failed for ${episodeKey}:`,
-      err instanceof Error ? err.message : String(err)
-    );
+    structuredLog.warn("etrade_auth.episode_alert_failed", {
+      message: `[etradeAuthPreflight] episode alert failed for ${episodeKey}: ${err instanceof Error ? err.message : String(err)}`,
+      episodeKey,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return false;
   }
 }
@@ -287,7 +295,10 @@ export async function guardScheduledETradeAuth(
         sends.push(
           deliverGatedSlack(opts.env, { text }).then((r) => {
             if (!r.ok) {
-              console.warn("[etradeAuthPreflight] Slack reconnect alert not delivered:", r.error);
+              structuredLog.warn("etrade_auth.slack_reconnect_alert_undelivered", {
+                message: "[etradeAuthPreflight] Slack reconnect alert not delivered",
+                error: r.error,
+              });
             }
           })
         );
@@ -322,10 +333,10 @@ export async function guardScheduledETradeAuth(
     // The guard must never take a run down with it: on any internal
     // failure the run proceeds and the pipeline's own auth surfacing
     // (FAILURE_AUTH_TOKEN_EXPIRED) owns the error, exactly as before #1174.
-    console.warn(
-      "[etradeAuthPreflight] guard error (proceeding without it):",
-      err instanceof Error ? err.message : String(err)
-    );
+    structuredLog.warn("etrade_auth.guard_error", {
+      message: "[etradeAuthPreflight] guard error (proceeding without it)",
+      error: err instanceof Error ? err.message : String(err),
+    });
     return { blocked: false };
   }
 }
