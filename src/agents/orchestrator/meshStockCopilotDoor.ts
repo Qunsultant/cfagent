@@ -51,6 +51,18 @@ import {
   resolveCopilotExecutionMode,
   isCopilotExecutionMode,
 } from "../../services/stockCopilotExecutionMode";
+import {
+  COPILOT_UNIVERSE_SETTING_KEY,
+  COPILOT_STRATEGIES_SETTING_KEY,
+  resolveCopilotUniverse,
+  resolveCopilotStrategies,
+  parseUniverseInput,
+  parseStrategiesInput,
+} from "../../services/stockCopilotConfiguration";
+import {
+  evaluateStockCopilotStrategy,
+  type StockCopilotEvaluationResult,
+} from "../../services/stockCopilotEvaluation";
 import { summarizeLearnings } from "../../services/stockCopilotAgenticLoop";
 import {
   introspectStockCopilot,
@@ -64,6 +76,7 @@ export interface StockCopilotDoorContext {
   readSettingRaw: (key: string) => string | null;
   writeSetting?: (key: string, value: string) => void;
   commercial?: CommercialStore | null;
+  loadBars?: (symbol: string) => Promise<number[]>;
   audit?: (
     type: string,
     agent: "orchestrator",
@@ -108,6 +121,8 @@ export interface StockCopilotStatusResult {
     effective: string;
   };
   executionMode: CopilotExecutionMode;
+  universe: string[];
+  strategies: string[];
   status: string;
   selectionResolved: boolean;
   activeBroker: string | null;
@@ -126,6 +141,8 @@ export interface StockCopilotControlInput {
   cadence?: string;
   pauseUntil?: string;
   executionMode?: CopilotExecutionMode;
+  universe?: string | string[];
+  strategies?: string | string[];
 }
 
 export interface StockCopilotControlResult {
@@ -138,6 +155,8 @@ export interface StockCopilotControlResult {
   };
   pauseUntil?: string | null;
   executionMode: CopilotExecutionMode;
+  universe: string[];
+  strategies: string[];
   updatedAt: string;
 }
 
@@ -244,6 +263,15 @@ export async function getStockCopilotStatusViaDoor(
     env: ctx.env,
   });
 
+  const universe = resolveCopilotUniverse({
+    readSettingRaw: ctx.readSettingRaw,
+    env: ctx.env,
+  });
+  const strategies = resolveCopilotStrategies({
+    readSettingRaw: ctx.readSettingRaw,
+    env: ctx.env,
+  });
+
   return {
     flagEnabled,
     paused,
@@ -255,6 +283,8 @@ export async function getStockCopilotStatusViaDoor(
       effective: cadence.effective,
     },
     executionMode,
+    universe,
+    strategies,
     status,
     selectionResolved: selection.resolved,
     activeBroker: selection.resolved ? selection.selection.brokerId : null,
@@ -371,6 +401,36 @@ export async function controlStockCopilotViaDoor(
     });
   }
 
+  if (input.universe !== undefined) {
+    if (!ctx.writeSetting) {
+      throw new MeshDoorError(
+        "door_unavailable",
+        "Cannot update universe: writeSetting is not configured on this door context.",
+      );
+    }
+    const parsedUniverse = parseUniverseInput(input.universe);
+    ctx.writeSetting(COPILOT_UNIVERSE_SETTING_KEY, parsedUniverse.join(","));
+    ctx.audit?.("stock_copilot.control_universe_via_door", "orchestrator", {
+      userLogin: login,
+      universe: parsedUniverse,
+    });
+  }
+
+  if (input.strategies !== undefined) {
+    if (!ctx.writeSetting) {
+      throw new MeshDoorError(
+        "door_unavailable",
+        "Cannot update strategies: writeSetting is not configured on this door context.",
+      );
+    }
+    const parsedStrategies = parseStrategiesInput(input.strategies);
+    ctx.writeSetting(COPILOT_STRATEGIES_SETTING_KEY, parsedStrategies.join(","));
+    ctx.audit?.("stock_copilot.control_strategies_via_door", "orchestrator", {
+      userLogin: login,
+      strategies: parsedStrategies,
+    });
+  }
+
   const updatedControl = control.getControl(login);
   const enabledSessions = resolveCopilotSessions({
     readSettingRaw: ctx.readSettingRaw,
@@ -381,6 +441,14 @@ export async function controlStockCopilotViaDoor(
     readSettingRaw: ctx.readSettingRaw,
   });
   const executionMode = resolveCopilotExecutionMode({
+    readSettingRaw: ctx.readSettingRaw,
+    env: ctx.env,
+  });
+  const universe = resolveCopilotUniverse({
+    readSettingRaw: ctx.readSettingRaw,
+    env: ctx.env,
+  });
+  const strategies = resolveCopilotStrategies({
     readSettingRaw: ctx.readSettingRaw,
     env: ctx.env,
   });
@@ -396,6 +464,8 @@ export async function controlStockCopilotViaDoor(
     },
     pauseUntil,
     executionMode,
+    universe,
+    strategies,
     updatedAt: updatedControl?.updatedAt ?? nowIso,
   };
 }
@@ -451,4 +521,43 @@ export async function introspectStockCopilotViaDoor(
 
   return result;
 }
+
+export async function evaluateStockCopilotViaDoor(
+  ctx: StockCopilotDoorContext,
+  actingLogin?: string | null,
+  symbol?: string,
+  strategies?: string | readonly string[],
+): Promise<StockCopilotEvaluationResult> {
+  const login = requireActingLogin(actingLogin);
+  if (!symbol || symbol.trim().length === 0) {
+    throw new MeshDoorError("door_unavailable", "symbol is required for evaluation");
+  }
+
+  const loadBars =
+    ctx.loadBars ??
+    (async (sym: string) => {
+      // Return placeholder bars if no live feed provided in context
+      return [100, 102, 101, 103, 105, 104, 106];
+    });
+
+  const resolvedStrategies = strategies ?? resolveCopilotStrategies({
+    readSettingRaw: ctx.readSettingRaw,
+    env: ctx.env,
+  });
+
+  const result = await evaluateStockCopilotStrategy(
+    symbol,
+    { loadBars },
+    resolvedStrategies,
+  );
+
+  ctx.audit?.("stock_copilot.evaluate_via_door", "orchestrator", {
+    userLogin: login,
+    symbol: result.symbol,
+    barsCount: result.barsCount,
+  });
+
+  return result;
+}
+
 
