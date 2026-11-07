@@ -123,7 +123,10 @@ describe("Options chain record wiring (#2091)", () => {
   it("record helper warns and continues when the canonical write fails", async () => {
     const orm = { storeCanonicalReport: vi.fn(() => { throw new Error("boom"); }) };
     const storage = fakeStorage();
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // #3515 S3: the canonical-write failure now travels as a structured
+    // optionsServeRecord.canonical_write_failed event (level warn) on the
+    // console-info JSON fallback, not a console.warn line.
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     const written = await recordOptionsServeReport(
       { orm: orm as never, storage: storage as never },
       {
@@ -134,8 +137,34 @@ describe("Options chain record wiring (#2091)", () => {
       } as never,
     );
     expect(written).toBe(false);
-    expect(warn).toHaveBeenCalled();
-    warn.mockRestore();
+    const events: Array<{ operation: string; level: string; fields: Record<string, unknown> }> = [];
+    for (const call of infoSpy.mock.calls) {
+      try {
+        const parsed = JSON.parse(String(call[0])) as {
+          operation?: unknown;
+          level?: unknown;
+          fields?: unknown;
+        };
+        if (parsed && typeof parsed.operation === "string") {
+          events.push({
+            operation: parsed.operation,
+            level: typeof parsed.level === "string" ? parsed.level : "",
+            fields:
+              parsed.fields && typeof parsed.fields === "object"
+                ? (parsed.fields as Record<string, unknown>)
+                : {},
+          });
+        }
+      } catch {
+        // Non-JSON console.info lines are not structured events.
+      }
+    }
+    const failed = events.find((e) => e.operation === "optionsServeRecord.canonical_write_failed");
+    expect(failed).toBeDefined();
+    expect(failed?.level).toBe("warn");
+    expect(String(failed?.fields.error ?? "")).toContain("boom");
+    expect(String(failed?.fields.message ?? "")).toContain("canonical write failed");
+    infoSpy.mockRestore();
     const runs = await storage.get("options:last_runs");
     expect(Array.isArray(runs)).toBe(true);
     expect((runs as unknown[]).filter((r) => (r as { timestamp: string }).timestamp === "2026-10-28T12:00:00.000Z")).toHaveLength(1);

@@ -40,6 +40,13 @@ import {
   type NotificationPreferences,
 } from "../data/lifecyclePorts";
 import type { StoreTier } from "../data/commercialPorts";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/lifecycleEmail",
+});
 
 /** Minimal injected mail transport (cfpay A2A or env.EMAIL behind it). */
 export interface EmailSender {
@@ -114,12 +121,20 @@ export async function sendWelcomeBestEffort(input: {
     const { subject, body } = buildWelcomeEmail(input.userId, input.tier ?? "Free");
     const result = await input.sender.send({ to: input.email, subject, body });
     if (!result.ok) {
-      console.error(`[lifecycle] welcome send failed for ${input.userId}: ${result.error ?? "unknown error"}`);
+      structuredLog.error("sendWelcomeBestEffort.welcome_send_failed", {
+        message: `[lifecycle] welcome send failed for ${input.userId}: ${result.error ?? "unknown error"}`,
+        userId: input.userId,
+        error: result.error ?? "unknown error",
+      });
       return { sent: false, reason: "send-failed" };
     }
     return { sent: true };
   } catch (err: any) {
-    console.error(`[lifecycle] welcome send threw for ${input.userId}: ${err?.message ?? "unknown error"}`);
+    structuredLog.error("sendWelcomeBestEffort.welcome_send_threw", {
+      message: `[lifecycle] welcome send threw for ${input.userId}: ${err?.message ?? "unknown error"}`,
+      userId: input.userId,
+      error: err?.message ?? "unknown error",
+    });
     return { sent: false, reason: "send-failed" };
   }
 }
@@ -159,11 +174,19 @@ export async function sendDailyDigest(input: {
   try {
     result = await input.sender.send({ to: input.email, subject, body });
   } catch (err: any) {
-    console.error(`[lifecycle] digest send threw for ${input.userId}: ${err?.message ?? "unknown error"}`);
+    structuredLog.error("sendDailyDigest.digest_send_threw", {
+      message: `[lifecycle] digest send threw for ${input.userId}: ${err?.message ?? "unknown error"}`,
+      userId: input.userId,
+      error: err?.message ?? "unknown error",
+    });
     return { sent: false, reason: "send-failed" };
   }
   if (!result.ok) {
-    console.error(`[lifecycle] digest send failed for ${input.userId}: ${result.error ?? "unknown error"}`);
+    structuredLog.error("sendDailyDigest.digest_send_failed", {
+      message: `[lifecycle] digest send failed for ${input.userId}: ${result.error ?? "unknown error"}`,
+      userId: input.userId,
+      error: result.error ?? "unknown error",
+    });
     return { sent: false, reason: "send-failed" };
   }
   await input.store.markDigestSent(input.userId, day);

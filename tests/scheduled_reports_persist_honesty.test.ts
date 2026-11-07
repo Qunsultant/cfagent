@@ -236,6 +236,7 @@ function input(over: Partial<ScheduledReportInput> = {}): ScheduledReportInput {
 }
 
 let errSpy: ReturnType<typeof vi.spyOn>;
+let infoSpy: ReturnType<typeof vi.spyOn>;
 
 function loggedText(): string {
   return errSpy.mock.calls
@@ -245,12 +246,44 @@ function loggedText(): string {
     .join("\n");
 }
 
+// #3515 S3: the persist seams now log via the structured logger, whose
+// fallback sink writes every event as one JSON line via console.info.
+// Parse those lines into { operation, level, fields } events (batch-1
+// precedent, tests/feature_flags_1806.test.ts).
+function structuredEvents(): Array<{ operation: string; level: string; fields: Record<string, unknown> }> {
+  const events: Array<{ operation: string; level: string; fields: Record<string, unknown> }> = [];
+  for (const call of infoSpy.mock.calls) {
+    try {
+      const parsed = JSON.parse(String(call[0])) as {
+        operation?: unknown;
+        level?: unknown;
+        fields?: unknown;
+      };
+      if (parsed && typeof parsed.operation === "string") {
+        events.push({
+          operation: parsed.operation,
+          level: typeof parsed.level === "string" ? parsed.level : "",
+          fields:
+            parsed.fields && typeof parsed.fields === "object"
+              ? (parsed.fields as Record<string, unknown>)
+              : {},
+        });
+      }
+    } catch {
+      // Non-JSON console.info lines are not structured events.
+    }
+  }
+  return events;
+}
+
 beforeEach(() => {
   errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
 });
 
 afterEach(() => {
   errSpy.mockRestore();
+  infoSpy.mockRestore();
 });
 
 describe("issue #876 — persist seams surface the real error", () => {
@@ -298,16 +331,31 @@ describe("issue #876 — persist seams surface the real error", () => {
     const sql = new StrictMasReportsSql();
     sql.failInsertsWith = new Error("simulated store failure: SQLITE_FULL");
     expect(persistScheduledReportSql(sql, input())).toBeNull();
-    expect(loggedText()).toContain("persistScheduledReportSql");
-    expect(loggedText()).toContain("SQLITE_FULL");
+    // #3515 S3: the failure now travels as structured events on the
+    // console-info JSON fallback. The inner seam logs the underlying
+    // error; the outer seam logs that it returned null (attributable
+    // to this door, pointing at the inner line for the cause).
+    const events = structuredEvents();
+    const inner = events.find((e) => e.operation === "storeReportAtGeneration.failed");
+    expect(inner).toBeDefined();
+    expect(inner?.level).toBe("error");
+    expect(String(inner?.fields.error ?? "")).toContain("SQLITE_FULL");
+    expect(String(inner?.fields.message ?? "")).toContain("storeReportAtGeneration");
+    const outer = events.find((e) => e.operation === "persistScheduledReportSql.seam_returned_null");
+    expect(outer).toBeDefined();
+    expect(outer?.level).toBe("error");
+    expect(String(outer?.fields.message ?? "")).toContain("persistScheduledReportSql");
   });
 
   it("storeReportAtGeneration failure also logs (never a silent null)", () => {
     const sql = new StrictMasReportsSql();
     sql.failInsertsWith = new Error("simulated store failure: SQLITE_FULL");
     expect(storeReportAtGeneration(sql, input({ generationId: "gen-x" }))).toBeNull();
-    expect(loggedText()).toContain("storeReportAtGeneration");
-    expect(loggedText()).toContain("SQLITE_FULL");
+    const failed = structuredEvents().find((e) => e.operation === "storeReportAtGeneration.failed");
+    expect(failed).toBeDefined();
+    expect(failed?.level).toBe("error");
+    expect(String(failed?.fields.message ?? "")).toContain("storeReportAtGeneration");
+    expect(String(failed?.fields.error ?? "")).toContain("SQLITE_FULL");
   });
 
   it("recordUsageEvent failure is logged before returning null", () => {
@@ -326,8 +374,11 @@ describe("issue #876 — persist seams surface the real error", () => {
         category: "research_run",
       })
     ).toBeNull();
-    expect(loggedText()).toContain("recordUsageEvent");
-    expect(loggedText()).toContain("SQLITE_BUSY");
+    const failed = structuredEvents().find((e) => e.operation === "recordUsageEvent.failed");
+    expect(failed).toBeDefined();
+    expect(failed?.level).toBe("error");
+    expect(String(failed?.fields.message ?? "")).toContain("recordUsageEvent");
+    expect(String(failed?.fields.error ?? "")).toContain("SQLITE_BUSY");
   });
 
   it("healthy store: persist returns the id, row reads back, store dedupes, NO error logged (characterization)", () => {
@@ -364,14 +415,21 @@ describe("issue #876 — source pin", () => {
       "export function persistScheduledReportSql",
       "export interface ScheduledReportHit"
     );
-    expect(persistSrc).toContain("console.error");
+    // #3515 S3: the seam now logs via the structured logger — the
+    // structuredLog.error call with the same message content, not a
+    // console.error line. The pin keeps the same strength: the seam
+    // must log the failure (named operation + message) and must not
+    // swallow it in a bare catch.
+    expect(persistSrc).toContain('structuredLog.error("persistScheduledReportSql.failed"');
+    expect(persistSrc).toContain("[scheduledReports] persistScheduledReportSql failed");
     expect(persistSrc).not.toMatch(/catch\s*\{/);
 
     const storeSrc = slice(
       "export function storeReportAtGeneration",
       "/** Read back the canonical stored copy"
     );
-    expect(storeSrc).toContain("console.error");
+    expect(storeSrc).toContain('structuredLog.error("storeReportAtGeneration.failed"');
+    expect(storeSrc).toContain("[scheduledReports] storeReportAtGeneration failed");
     expect(storeSrc).not.toMatch(/catch\s*\{/);
   });
 

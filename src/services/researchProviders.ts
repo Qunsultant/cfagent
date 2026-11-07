@@ -44,6 +44,14 @@ import type {
   ProviderChainLeg,
   ProviderChainExpiry,
 } from "./researchPipeline";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/researchProviders",
+});
+
 
 function isEtfSymbol(symbol: string, companyName: string): boolean {
   const haystack = `${companyName} ${symbol}`.toUpperCase();
@@ -171,9 +179,9 @@ export class EtradeResearchDataProvider implements ResearchDataProvider {
       // Issue #1378: the lifetime cache is kept (decision D3),
       // now over the ROUTED adapter result. No freshness change.
       if (!this.universeDeps) {
-        console.warn(
-          "[research] universeDeps missing: getUniverseSymbols/etfMap degrade to empty (no dep-less listings fetch exists, #1378)"
-        );
+        structuredLog.warn("researchProviders.universe_deps_missing", {
+          message: "[research] universeDeps missing: getUniverseSymbols/etfMap degrade to empty (no dep-less listings fetch exists, #1378)",
+        });
         return [];
       }
       this.listingsCache = await this.universeDeps.fetchListings();

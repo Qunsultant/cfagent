@@ -30,6 +30,14 @@
 import { sessionStore } from "../security/session";
 import type { KvLike } from "../security/kvResilience";
 import type { Env } from "../types";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/userEmailDestination",
+});
+
 
 /** Prefix for every per-user email-destination key in the SessionStore DO. */
 export const USER_EMAIL_DESTINATION_KEY_PREFIX = "user-email-destination:";
@@ -124,10 +132,10 @@ export async function getStoredEmailDestination(
     const stored = await userEmailDestinationStore(env).get(userLogin);
     return stored ?? undefined;
   } catch (err) {
-    console.warn(
-      "[userEmailDestination] Stored destination read failed, falling back to env:",
-      err instanceof Error ? err.message : String(err)
-    );
+    structuredLog.warn("userEmailDestination.stored_destination_read_failed", {
+      message: "[userEmailDestination] Stored destination read failed, falling back to env",
+      error: err instanceof Error ? err.message : String(err),
+    });
     return undefined;
   }
 }

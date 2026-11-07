@@ -8,6 +8,13 @@
  * this helper is not called.
  */
 import type { CfpayA2AConfig } from "./cfpayA2A";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/optionsRunEmail",
+});
 
 export const OPTIONS_PDF_CONTENT_TYPE = "application/pdf";
 export const OPTIONS_XLSX_CONTENT_TYPE =
@@ -81,9 +88,15 @@ export async function sendOptionsRunEmail(
           ? await deps.sendCfpayWithAttachments(deps.cfpay, { to: args.to, subject: args.subject, body: args.textBody, attachments: cfpayAttachments })
           : await deps.sendCfpay(deps.cfpay, { to: args.to, subject: args.subject, body: args.textBody });
       if (r.ok) return { sent: true, via: "cfpay" };
-      console.warn("[optionsRunEmail] cfpay email failed, falling back to local:", r.error);
+      structuredLog.warn("options_run_email.cfpay_failed", {
+        message: "[optionsRunEmail] cfpay email failed, falling back to local",
+        error: r.error,
+      });
     } catch (err) {
-      console.warn("[optionsRunEmail] cfpay email error, falling back to local:", err instanceof Error ? err.message : String(err));
+      structuredLog.warn("options_run_email.cfpay_error", {
+        message: "[optionsRunEmail] cfpay email error, falling back to local",
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
   try {
@@ -100,7 +113,10 @@ export async function sendOptionsRunEmail(
     );
     return ok ? { sent: true, via: "local" } : { sent: false, via: "none" };
   } catch (err) {
-    console.warn("[optionsRunEmail] local email failed:", err instanceof Error ? err.message : String(err));
+    structuredLog.warn("options_run_email.local_failed", {
+      message: "[optionsRunEmail] local email failed",
+      error: err instanceof Error ? err.message : String(err),
+    });
     return { sent: false, via: "none" };
   }
 }

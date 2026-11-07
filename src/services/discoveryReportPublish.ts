@@ -19,6 +19,13 @@ import {
   type DiscoveryReportInput,
 } from "../trading";
 import { codedMessage } from "../outcomes/outcomeAspects";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/discoveryReportPublish",
+});
 
 export interface DiscoveryReportStorage {
   get<T = unknown>(key: string): Promise<T | undefined>;
@@ -69,7 +76,10 @@ export async function generateAndStoreDiscoveryReport(args: {
     outcome.pdfStatus = "generated";
   } catch (err) {
     outcome.pdfError = err instanceof Error ? err.message : String(err);
-    console.error("[DiscoveryReport] PDF generation failed:", outcome.pdfError);
+    structuredLog.error("generateAndStoreDiscoveryReport.pdf_generation_failed", {
+      message: "[DiscoveryReport] PDF generation failed",
+      error: outcome.pdfError,
+    });
   }
 
   try {
@@ -92,7 +102,10 @@ export async function generateAndStoreDiscoveryReport(args: {
     outcome.xlsxStatus = "generated";
   } catch (err) {
     outcome.xlsxError = codedMessage("FAILURE_REPORT_XLSX_GENERATION", err instanceof Error ? err.message : String(err));
-    console.error("[DiscoveryReport] XLSX generation failed:", outcome.xlsxError);
+    structuredLog.error("generateAndStoreDiscoveryReport.xlsx_generation_failed", {
+      message: "[DiscoveryReport] XLSX generation failed",
+      error: outcome.xlsxError,
+    });
   }
 
   try {
@@ -108,7 +121,10 @@ export async function generateAndStoreDiscoveryReport(args: {
     outcome.csvStatus = "generated";
   } catch (err) {
     outcome.csvError = codedMessage("FAILURE_REPORT_CSV_GENERATION", err instanceof Error ? err.message : String(err));
-    console.error("[DiscoveryReport] CSV generation failed:", outcome.csvError);
+    structuredLog.error("generateAndStoreDiscoveryReport.csv_generation_failed", {
+      message: "[DiscoveryReport] CSV generation failed",
+      error: outcome.csvError,
+    });
   }
 
   return outcome;

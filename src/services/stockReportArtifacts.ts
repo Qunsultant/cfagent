@@ -49,6 +49,13 @@ import {
 } from "../trading";
 import { runReportPipeline } from "./unifiedReportPipeline";
 import type { StockReportFormatStatus } from "./stockReportFormatStatus";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/stockReportArtifacts",
+});
 
 export type StockReportFormat = "pdf" | "xlsx" | "csv";
 
@@ -114,7 +121,10 @@ async function generatePdfLeg(
   // not to fall back to a stale PDF.
   result.pdfStatus = "failed";
   result.pdfError = pipelineResult.pdfError;
-  console.error("[stockReportArtifacts] PDF generation failed:", result.pdfError);
+  structuredLog.error("stock_report.pdf_generation_failed", {
+    message: "[stockReportArtifacts] PDF generation failed",
+    error: result.pdfError,
+  });
   return { format: "pdf", status: "failed", error: pipelineResult.pdfError };
 }
 
@@ -143,7 +153,10 @@ async function generateXlsxLeg(
       "FAILURE_REPORT_XLSX_GENERATION",
       xlsxErr instanceof Error ? xlsxErr.message : String(xlsxErr),
     );
-    console.error("[stockReportArtifacts] XLSX generation failed:", result.xlsxError);
+    structuredLog.error("stock_report.xlsx_generation_failed", {
+      message: "[stockReportArtifacts] XLSX generation failed",
+      error: result.xlsxError,
+    });
     return { format: "xlsx", status: "failed", error: result.xlsxError };
   }
 }
@@ -174,7 +187,10 @@ async function generateCsvLeg(
       "FAILURE_REPORT_CSV_GENERATION",
       csvErr instanceof Error ? csvErr.message : String(csvErr),
     );
-    console.error("[stockReportArtifacts] CSV generation failed:", result.csvError);
+    structuredLog.error("stock_report.csv_generation_failed", {
+      message: "[stockReportArtifacts] CSV generation failed",
+      error: result.csvError,
+    });
     return { format: "csv", status: "failed", error: result.csvError };
   }
 }
