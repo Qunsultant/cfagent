@@ -117,6 +117,8 @@ other doors. Scope column is #1843's declaration, consumed here.
 | `get_trade_approval_status` | mcp:read | L via door 2 only — acting identity required (#2375); refused on doors 1/3 (no acting-identity carrier there). Read-only: the TradingTradeWorkflow binding's own status surface |
 | `stock_copilot_status` | mcp:read | L via door 2 only — acting identity required (#3513); refused on doors 1/3 (no acting-identity carrier there). Reads autonomous Stock Copilot loop state, open positions, exit plans and cycle activity |
 | `stock_copilot_introspect` | mcp:read | L via door 2 only — acting identity required (#3588); refused on doors 1/3 (no acting-identity carrier there). Runtime tool introspection and dynamic 5-stage pipeline mapping |
+| `stock_copilot_learnings` | mcp:read | L via door 2 only — acting identity required (#3514); refused on doors 1/3 (no acting-identity carrier there). Reads reflection learnings and trade critiques from persistent storage |
+| `stock_copilot_evaluate` | mcp:read | L via door 2 only — acting identity required (#3514); refused on doors 1/3 (no acting-identity carrier there). On-demand evaluation of pattern strategies over symbol market bars |
 
 ### mcp:write (11)
 
