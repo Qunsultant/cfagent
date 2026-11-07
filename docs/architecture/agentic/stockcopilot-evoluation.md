@@ -348,5 +348,125 @@ flowchart LR
 4. **Distilled Learning Queries (`stock_copilot_learnings`):** Invocable across MCP and chat to review critic memory and reflections.
 5. **Unified Control (`stock_copilot_control`):** Adjust cadence, sessions, mode, universe, and strategies with fail-closed identity verification.
 
+---
+
+## 9. Deterministic vs. Non-Deterministic Equivalence Architecture
+
+In Stock Copilot (Issue [#3519](https://github.com/Qunsultant/cfagent/issues/3519)), **Deterministic Trajectory** and **Non-Deterministic Agentic Loop** are not separate copilots—they are **two execution modes of the same copilot** governed by the **Strict Equivalence Doctrine**:
+
+```mermaid
+flowchart TD
+    subgraph DUAL_MODE ["Stock Copilot Dual-Mode Engine"]
+        M{"Mode Switch<br/>(User / Config)"}
+        
+        subgraph DET ["Deterministic Trajectory"]
+            D1["Algorithmic Rules Engine<br/>(SMA / Mean Reversion / Breakout)"]
+            D2["Mathematical Sizing<br/>(Exact CVaR Allocation)"]
+            D1 --> D2
+        end
+        
+        subgraph NON_DET ["Non-Deterministic Agentic Loop"]
+            A1["1. PERCEIVE<br/>(Market Bars, Positions, Past Learnings)"]
+            A2["2. PLAN (LLM Reasoning)<br/>(Analyze Regime & Multi-Tool Context)"]
+            A3["3. INTENT (Data-Only)<br/>(Typed Candidate Proposals)"]
+            A4{"4. CRITIC (Reflection)<br/>Verify Goals & Safety Bounds"}
+            A5["5. LEARN<br/>(Distill to Persistent Memory)"]
+            
+            A1 --> A2 --> A3 --> A4
+            A4 -->|Refusal / Critique| A5
+            A4 -->|Approval| D2
+            D2 --> A5
+        end
+        
+        M -->|deterministic| D1
+        M -->|agentic| A1
+    end
+    
+    D2 --> SEAM["Common Deterministic Order Seam<br/>(Alpaca Paper / Venue Limits / Extended Hours)"]
+    SEAM --> STORAGE[("DO SQLite Ledgers<br/>(copilot_positions, stock_copilot_activity, copilot_learnings)")]
+```
+
+### 9.1 Equivalence Matrix
+
+| Capability Dimension | Deterministic Trajectory (`deterministic`) | Non-Deterministic Agentic Loop (`agentic`) | Equivalence Rule |
+|---|---|---|---|
+| **Primary Driver** | Pure mathematical & algorithmic code (`patternSignals.ts`, `cvar.ts`). | LLM cognitive reasoning + Critic reflection cycle (`stockCopilotAgenticLoop.ts`). | **Intent Equivalence**: LLM cannot trade directly; it must generate typed data intents identical to rule outputs. |
+| **Execution Path** | Evaluates static bar formulas (e.g. Fast SMA > Slow SMA). | Synthesizes indicators, market regime, news sentiment, and historical memory. | **Seam Equivalence**: Both feed into the exact same order constructor (`buildBracketOrderShape`). |
+| **Risk Enforcement** | Hard-coded portfolio bounds & mathematical CVaR sizing. | Sizing bounds proposed by LLM are strictly overridden/capped by CVaR optimizer. | **Risk Equivalence**: Risk limits are unbreakable in both modes. |
+| **Session Discipline** | Adheres to enabled sessions (Pre-market, Regular, After-hours, EXTO). | Adheres to enabled sessions (Pre-market, Regular, After-hours, EXTO). | **Venue Equivalence**: 24-hour limit order rules apply identically. |
+| **Broker Boundary** | Routes to Alpaca Paper (`TEST`). | Routes to Alpaca Paper (`TEST`). | **Broker Equivalence**: Paper mode guard (`STOCK_COPILOT_MODE=paper`) applies to both. |
+| **Telemetry & Status** | Writes to `stock_copilot_activity` and `copilot_positions`. | Writes to `stock_copilot_activity`, `copilot_positions`, and `copilot_learnings`. | **Observability Equivalence**: Both report cycle outcomes through `stock_copilot_status`. |
+| **Channel Ingress** | Invocable via Chat, Schedule, REST, Webhook, MCP. | Invocable via Chat, Schedule, REST, Webhook, MCP. | **Omnichannel Equivalence**: Identical switch via `stock_copilot_control(executionMode)`. |
+| **Reflection & Learning** | None (static execution trajectory). | Distills post-cycle critiques and learnings into DO SQLite memory for subsequent cycles. | **Memory Enhancement**: Agentic mode actively reflects and remembers. |
+
+### 9.2 The 4 Core Equivalence Guarantees
+
+1. **The Order Safety Seam (No Hallucinated Trades):**
+   Raw LLM text *never* touches the broker wire. The agentic loop outputs a data-only structured intent (`symbol`, `action`, `targetPrice`, `stopLossPrice`, `thesis`). That intent must pass the deterministic **Critic** and the **CVaR Sizing Seam** before any order reaches Alpaca.
+2. **Deterministic Parity:**
+   If the non-deterministic LLM agrees with the rule-based strategy, it produces the **exact same wire order shape** as deterministic mode.
+3. **Fail-Closed Drift Protection:**
+   If an LLM proposes a trade that violates session rules, risk limits, or buying power, the Critic rejects it and logs the refusal reason into `stock_copilot_activity` and `copilot_learnings`—guaranteeing that agentic exploration never introduces financial leakage.
+4. **Tool-Driven Dynamic Control:**
+   Users can toggle between modes on the fly via Chat (*"Switch Stock Copilot to agentic loop"* or *"Switch to deterministic mode"*) or via MCP (`stock_copilot_control(executionMode: "agentic")`), seamlessly preserving positions, brackets, and active schedules.
+
+---
+
+## 10. Convergence with the J1–J7 Job Pipeline Engine (Epic #3533)
+
+### 10.1 Architecture vs. Infrastructure Substrate
+The relationship between Stock Copilot and the J1–J7 Job Pipeline operates on two distinct layers:
+
+1. **Architectural Contract (5 Stages):**
+   Stock Copilot is conceptually designed around the 5 stages: **Feed → Enrich → Analyze → Generate → Deliver**.
+   Its runtime introspection (`stock_copilot_introspect`) dynamically categorizes available tools into these 5 stages and explains its data flow accordingly.
+2. **Execution Substrate (Migration from In-Process to Distributed J1–J7):**
+   Historically, the Stock Copilot ran within a single in-process Think scheduled task (`runStockCopilotCycle`).
+   Under Epic [#3533](https://github.com/Qunsultant/cfagent/issues/3533), every stage is being decoupled into an **independent, durable, schedulable producer/consumer job over persisted datasets with Cloudflare Queues pub/sub**.
+
+```mermaid
+flowchart TD
+    subgraph PHASE1 ["Phase 1: In-Process Loop (Initial Implementation)"]
+        P1["Think Scheduled Task (*/30)"] --> P2["runStockCopilotCycle()"]
+        P2 --> P3["In-memory handoffs between Feed, Enrich, Analyze, Generate, Deliver"]
+        P3 --> P4["Single Step Failure = Entire Cycle Retries"]
+    end
+
+    subgraph PHASE2 ["Phase 2: J1–J7 Convergence (Epic #3533 Platform Engine)"]
+        J1_FOUND["J1: Job & Checkpoint Model (Landed)"]
+        J2_FEED["J2: Standalone Feed Jobs (PR #3576)"]
+        J3_ENRICH["J3: Enrich Job (Consumer of Feed Data)"]
+        J4_ANALYZE["J4: Analyze Job (Consumer of Enriched Data)"]
+        J5_GEN["J5: Generate Job (Consumer of Analysis)"]
+        J6_DELIV["J6: Deliver Job (Consumer of Generated Artifacts)"]
+        J7_FULL["J7: Schedulable Pipeline Composition"]
+
+        J1_FOUND --> J2_FEED --> J3_ENRICH --> J4_ANALYZE --> J5_GEN --> J6_DELIV --> J7_FULL
+    end
+
+    PHASE1 -.->|"Progressively Migrating into"| PHASE2
+```
+
+### 10.2 Universal Multi-Domain Applicability
+J1–J7 is the **single converged workflow engine** across all platform activities:
+
+| Stage | Stock Screening Domain | Options Screening Domain | Stock Copilot Autonomous Loop | Multi-Format Reports |
+|---|---|---|---|---|
+| **Feed (J2)** | Ingest NASDAQ-100, S&P 100, Yahoo fundamentals, Alpaca quotes. | Ingest options chains, strike ladders, expiration dates, underlying quotes. | Fetch live market bars across configured universe (`NASDAQ100`, `SP100`, `MEGA_TECH`, `SEMIS`). | Ingest audit trail, trade executions, and performance ledgers. |
+| **Enrich (J3)** | Compute technical indicators (RSI, SMA, MACD, Bollinger Bands, ATR). | Calculate real-time Greeks (Delta, Gamma, Theta, Vega, IV percentile, OI). | Calculate pattern signal state and multi-factor indicator matrix. | Compute realized PnL, win rates, Sharpe ratio, and regime breakdowns. |
+| **Analyze (J4)** | Apply screening criteria & filter rules (e.g. Bullish Breakout, Oversold Pullback). | Score multi-leg spreads (Bull Put, Bear Call, Iron Condor, max loss/profit). | Run strategy pattern evaluators + CVaR risk sizing optimization. | Benchmark vs. buy-and-hold; analyze exit reasons (target vs. stop). |
+| **Generate (J5)** | Assemble candidate stock matches and thesis cards. | Build structured multi-leg execution orders & payoff diagrams. | Generate atomic parent limit orders with paired bracket exits (TP/SL). | Compile PDF, interactive HTML, machine-readable JSON, and Markdown summaries. |
+| **Deliver (J6)** | Deliver candidate lists to Chat UI, Slack alerts, or email digest. | Emit interactive payoff cards to Chat UI and options research desks. | Route orders to Alpaca Paper; broadcast telemetry to chat stream and activity ledger. | Dispatch reports to Chat, Slack, Webhooks, or cloud object stores. |
+
+### 10.3 Sub-Issue Roadmap Alignment (Epic #3533)
+- **J1 ([#3534](https://github.com/Qunsultant/cfagent/issues/3534)) [MERGED]:** Core job model, checkpoint cursors, execution modes, CloudEvents status stream, queue pub/sub substrate.
+- **J2 ([#3535](https://github.com/Qunsultant/cfagent/issues/3535)) [IN PROGRESS]:** Feed jobs through Stock Copilot (`yahoo-nasdaq100-quotes`, `alpaca-nasdaq100-quotes`, etc.) over persisted local datasets.
+- **J3 ([#3536](https://github.com/Qunsultant/cfagent/issues/3536)):** Standalone Enrich job consuming persisted feed output.
+- **J4 ([#3537](https://github.com/Qunsultant/cfagent/issues/3537)):** Standalone Analyze job consuming enriched vectors.
+- **J5 ([#3538](https://github.com/Qunsultant/cfagent/issues/3538)):** Standalone Generate job producing multi-format reports and order intents.
+- **J6 ([#3539](https://github.com/Qunsultant/cfagent/issues/3539)):** Standalone Deliver job routing to omnichannel endpoints.
+- **J7 ([#3540](https://github.com/Qunsultant/cfagent/issues/3540)):** Full chain composition executing the 5 stages as one unified, schedulable, checkpointed pipeline.
+
+
 
 
