@@ -84,3 +84,19 @@ export function brokerUnavailableResponse(brokerId: string): Response {
     { status: 409 },
   );
 }
+
+/** Issue #3460 slice 3: the broker gate's named refusal when the
+ * tenant broker selection cannot be read at all (no store bound, or
+ * the store read failed). The gate cannot verify the tenant's broker,
+ * so it fails closed with 503 instead of failing open to E*TRADE. */
+export function brokerStoreUnavailableResponse(): Response {
+  return Response.json(
+    {
+      code: "FAILURE_BROKER_STORE_UNAVAILABLE",
+      message:
+        "Broker selection store unavailable: the broker gate cannot verify the tenant's broker. Retry later; nothing was served from a default broker.",
+      retryable: false,
+    },
+    { status: 503 },
+  );
+}

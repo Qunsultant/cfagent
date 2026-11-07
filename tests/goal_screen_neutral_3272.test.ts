@@ -95,7 +95,7 @@ describe("the goal path is wired to the neutral engines (#3272 S3)", () => {
   const source = readFileSync(new URL("../src/agents/screener-agent.ts", import.meta.url), "utf8");
 
   it("resolves the selected broker instead of assuming E*TRADE", () => {
-    expect(source).toContain("resolveTenantBroker(this.env)");
+    expect(source).toContain("readTenantBrokerSelection(this.env)");
   });
 
   it("builds the stock leg and the chain source from that broker", () => {

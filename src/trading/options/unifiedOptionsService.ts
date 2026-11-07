@@ -22,6 +22,7 @@ import { DatabaseORM } from "../../orm";
 import type { DataProviderPorts } from "../../data/buildDataProviderPorts";
 import { TradingPlatformRegistry } from "../registry";
 import { resolveTenantBroker } from "../../services/tenantProviders";
+import { readTenantBrokerSelection } from "../../services/providerConnections";
 import { platformChainSource } from "../optionChainSource";
 import { ETradeService } from "../../services/etrade";
 import type { ETradeRestClient } from "../etrade/client";
@@ -692,7 +693,15 @@ export class UnifiedOptionsService {
    * there is NO silent fallback to the direct client.
    */
   async resolveEngineClient(): Promise<{ engineClient: ETradeRestClient | OptionChainSource; platformRunId?: string }> {
-    const broker = await resolveTenantBroker(this.env);
+    // Issue #3460 slice 3: the manual entry reads the broker through
+    // the presence-aware seam — no default. An unconfigured tenant or
+    // a store failure refuses with the named reason instead of
+    // screening E*TRADE data.
+    const brokerRead = await readTenantBrokerSelection(this.env);
+    if (brokerRead.status !== "ok") {
+      throw new Error(brokerRead.error);
+    }
+    const broker = brokerRead.brokerId;
     if (broker !== "etrade") {
       const platform = TradingPlatformRegistry.getPlatform(
         broker,
