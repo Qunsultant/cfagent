@@ -203,7 +203,7 @@ export interface FeedDatasetStatusView {
   } | null;
 }
 
-/** One direct feed run's result, as POST …/feed-run returns it (issue #3530). */
+/** One feed run's result, as POST …/feed-run returns it (issue #3530; since #3578 the run is a pipeline run and runId is the pipeline run id). */
 export interface FeedRunResultView {
   jobId: string;
   runId: string;
@@ -219,12 +219,13 @@ export interface FeedRunResultView {
 }
 
 /**
- * Run one provider's feed job now through the direct S1 route
- * (issue #3530) and return the run outcome + the fresh status
- * block. A run that fails at the provider still resolves (the
- * route answers 200 with run.status "failed" + codedError);
- * wiring/session refusals reject with the server's message and
- * its stable code preserved (see send()).
+ * Run one provider's feed job now through the S1 route
+ * (issue #3530), which dispatches the job through the pipeline
+ * host door (#3578) and returns the settled run outcome + the
+ * fresh status block. A run that fails at the provider still
+ * resolves (the route answers 200 with run.status "failed" +
+ * codedError); wiring/session refusals reject with the server's
+ * message and its stable code preserved (see send()).
  */
 export async function postFeedRun(
   id: string

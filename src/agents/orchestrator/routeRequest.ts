@@ -310,10 +310,10 @@ export async function routeRequest(deps: RouteRequestDeps, request: Request): Pr
     sql: deps.ctx.storage.sql,
     configPort: dataProviderPorts.config,
     capturePort: dataProviderPorts.captures,
-    // #3530 S1: feed runs fetch through the capture-wired Yahoo
-    // adapter — the blob store is this DO's storage, the same
-    // wiring screening's capture-wired fetches use.
-    blobStorage: deps.ctx.storage,
+    // #3530 S1 / #3578: feed surfaces read through the routes
+    // module's own env-built stores; feed RUNS dispatch through
+    // the pipeline host door (the ScheduledAgent), whose residency
+    // owns the capture-wired provider wiring — this DO wires none.
     userLogin: request.headers.get("x-user-login") || "",
     recordAudit: (type, agent, payload) => deps.recordAudit(type, agent, payload),
   });
