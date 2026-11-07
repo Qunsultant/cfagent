@@ -144,6 +144,24 @@ describe("billing servicing panel", () => {
       if (url.startsWith("/api/payments/agentic/commercial/referral/balance?")) {
         return ok(overrides.referral ?? { userId: "owner", redeemableUSD: 1.5, totalEarnedUSD: 2.0, attribution: { referrerUserId: "referrer-1" }, rules: { earnAmountUSD: 0.5, vestingDelayMs: 604800000, redemptionScope: "pay-per-run" } });
       }
+      if (url === "/api/payments/agentic/commercial/usage-billing") {
+        return ok({
+          outcome: "SUCCESS_USAGE_BILLING_READ",
+          userLogin: "owner",
+          tier: "Subscribed",
+          limit: 50,
+          identity: { creditsUSD: 0, includedRunsRemaining: 0, hasAccount: true },
+          usage: { receipts: [], counts: { meter: 0, tier: 0, transaction: 0, real: 0, simulated: 0, audit: 0 } },
+          billing: {
+            effectiveTier: "Subscribed",
+            current: null,
+            subscriptions: [],
+            renewals: [],
+            refunds: [],
+            referral: { redeemableUSD: 0, totalEarnedUSD: 0 },
+          },
+        });
+      }
       throw new Error(`unexpected fetch: ${url}`);
     };
     return impl;

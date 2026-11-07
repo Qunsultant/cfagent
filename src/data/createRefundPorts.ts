@@ -17,7 +17,7 @@ import {
   ensureRefundSchema,
   type RefundDb,
 } from "./d1RefundAdapter";
-import type { RefundPolicyStore, RefundStore } from "./refundPorts";
+import type { RefundPolicyStore, RefundRecord, RefundStore } from "./refundPorts";
 
 export interface RefundPorts {
   store: D1RefundAdapter;
@@ -32,4 +32,4 @@ export function createRefundPorts(env: { AGENT_DB?: unknown }): RefundPorts | nu
 }
 
 export { ensureRefundSchema };
-export type { RefundDb, RefundPolicyStore, RefundStore };
+export type { RefundDb, RefundPolicyStore, RefundRecord, RefundStore };
