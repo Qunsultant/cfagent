@@ -60,6 +60,7 @@ import {
 } from "./components/ui";
 import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
 import { startPolling } from "./polling";
+import { codedMessage } from "../outcomes/outcomeAspects";
 import {
   buildGoalCommand,
   buildNonGoalCommand,
@@ -292,7 +293,22 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
       polls += 1;
       try {
         const res = await getSubmissionStatus(submitResult.workflowId!);
-        if (!stopped) setRunStatus(res.status);
+        if (stopped) return;
+        // Issue #3263: a quota-exhausted completion carries the
+        // outcome + catalog code — render the catalog message,
+        // never the raw outcome string or a bare "complete". A
+        // quota-covered start carries the success code the same
+        // way (SUCCESS_APPROVED_FREE_QUOTA_COVERED) — render its
+        // catalog message too, never a bare "started".
+        if (res.outcome === "quota_exhausted") {
+          setRunStatus(
+            codedMessage(res.outcomeCode ?? "FAILURE_APPROVED_FREE_QUOTA_EXHAUSTED"),
+          );
+        } else if (res.outcomeCode === "SUCCESS_APPROVED_FREE_QUOTA_COVERED") {
+          setRunStatus(codedMessage(res.outcomeCode));
+        } else {
+          setRunStatus(res.status);
+        }
       } catch {
         // A transient status-read failure stops polling; the user can
         // still use the verify button and re-read status manually.

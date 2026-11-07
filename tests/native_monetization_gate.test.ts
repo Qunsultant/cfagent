@@ -425,14 +425,24 @@ describe("native gate: free-run counter (#3305)", () => {
     expect(await counter.getUsed({ login: "u1", family: "goal", month: "2026-11" })).toBe(10);
   });
 
-  it("an unlimited-free grant bypasses the counter (grant-covered runs consume nothing)", async () => {
+  it("an unlimited-free grant no longer bypasses the counter when the quota is unavailable (#3263 supersedes #3245 ordering)", async () => {
+    // Issue #3263 (CI fix): the grant is bounded by the quota when the
+    // quota system can enforce the bound; when it cannot, the run falls
+    // through to the Free allowance FIRST — the grant covers only if the
+    // allowance cannot. So a grant run with no quota wired spends the
+    // allowance (paidVia free_run_allowance, counter 1). The grant still
+    // consumes nothing when IT is the covering path: quota-engaged grant
+    // runs are counted against the quota, never the counter (see
+    // tests/approved_free_quota_gate_3263.test.ts). The old expectation
+    // (grant precedes the counter, counter untouched) was the #3245
+    // grant-first order, which #3263 deliberately replaces.
     const { gate, counter } = freeGate();
     const granted = freeAccount({
       unlimitedFreeGrant: { grantedBy: "op1", reason: "Owner-approved pilot account", expiresAtMs: null },
     });
     const decision = await gate.check({ id: "run-1", family: "goal", trigger: "manual", nowMs: NOV, account: granted });
-    expect(decision).toMatchObject({ allowed: true, paidVia: "unlimited_free_grant" });
-    expect(await counter.getUsed({ login: "u1", family: "goal", month: "2026-11" })).toBe(0);
+    expect(decision).toMatchObject({ allowed: true, paidVia: "free_run_allowance" });
+    expect(await counter.getUsed({ login: "u1", family: "goal", month: "2026-11" })).toBe(1);
   });
 
   it("trial/Subscribed runs use included runs, not the counter", async () => {

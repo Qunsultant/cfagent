@@ -21,6 +21,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { CheckoutPanel } from "../src/client/CheckoutPanel";
+import { resolveOutcome } from "../src/outcomes/outcomeAspects";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -37,6 +38,12 @@ const apiState = vi.hoisted(() => ({
     creditRunId?: string;
   },
   submitBody: null as null | Record<string, unknown>,
+  submissionStatus: null as null | {
+    workflowId: string;
+    status: string;
+    outcome?: string;
+    outcomeCode?: string;
+  },
 }));
 
 vi.mock("../src/client/commercialApi", () => ({
@@ -80,7 +87,8 @@ vi.mock("../src/client/commercialApi", () => ({
     browserPaymentScope: "card-only",
     failurePolicy: FAILURE_POLICY,
   }),
-  getSubmissionStatus: async (workflowId: string) => ({ workflowId, status: "running" }),
+  getSubmissionStatus: async (workflowId: string) =>
+    apiState.submissionStatus ?? { workflowId, status: "running" },
   getSubscriptionStatus: async () => ({
     userId: "u1",
     effectiveTier: "Free",
@@ -159,6 +167,7 @@ beforeEach(() => {
   apiState.flagOn = true;
   apiState.submitResult = null;
   apiState.submitBody = null;
+  apiState.submissionStatus = null;
 });
 
 afterEach(() => {
@@ -234,6 +243,45 @@ describe("checkout panel render (#2137)", () => {
     expect(el.textContent).toContain("Run request: run-1");
     expect(buttonWith("I have paid — verify")).toBeDefined();
     expect(el.textContent).toContain("Workflow status: running");
+  });
+
+  it("a quota-exhausted completion renders the catalog-coded at-limit message, never a bare status (#3263, AOP)", async () => {
+    apiState.submitResult = { runRequestId: "run-1", workflowId: "run-1", status: "payment_started" };
+    apiState.submissionStatus = {
+      workflowId: "run-1",
+      status: "complete",
+      outcome: "quota_exhausted",
+      outcomeCode: "FAILURE_APPROVED_FREE_QUOTA_EXHAUSTED",
+    };
+    const el = await renderPanel();
+    setInput(inputForLabel("Symbols"), "AAPL");
+    setInput(inputForLabel("Checkout contact email"), "u1@example.com");
+    const authorize = el.querySelector('input[type="checkbox"]') as HTMLInputElement | null;
+    act(() => authorize!.click());
+    act(() => buttonWith("Pay $0.10 and run").click());
+    await flush();
+    // AOP: the message comes FROM the catalog, never hardcoded.
+    expect(el.textContent).toContain(resolveOutcome("FAILURE_APPROVED_FREE_QUOTA_EXHAUSTED").businessMessage);
+    expect(el.textContent).not.toContain("Workflow status: running");
+  });
+
+  it("a quota-covered start renders the catalog-coded covered message (#3263, AOP)", async () => {
+    apiState.submitResult = { runRequestId: "run-1", workflowId: "run-1", status: "payment_started" };
+    apiState.submissionStatus = {
+      workflowId: "run-1",
+      status: "complete",
+      outcome: "started",
+      outcomeCode: "SUCCESS_APPROVED_FREE_QUOTA_COVERED",
+    };
+    const el = await renderPanel();
+    setInput(inputForLabel("Symbols"), "AAPL");
+    setInput(inputForLabel("Checkout contact email"), "u1@example.com");
+    const authorize = el.querySelector('input[type="checkbox"]') as HTMLInputElement | null;
+    act(() => authorize!.click());
+    act(() => buttonWith("Pay $0.10 and run").click());
+    await flush();
+    expect(el.textContent).toContain(resolveOutcome("SUCCESS_APPROVED_FREE_QUOTA_COVERED").businessMessage);
+    expect(el.textContent).not.toContain("Workflow status: running");
   });
 
   it("the subscription panel renders its no-auto-renew notice and plan state", async () => {

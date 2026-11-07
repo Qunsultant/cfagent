@@ -20,6 +20,7 @@
 export const PAYMENT_STEP_IDS = [
   "gate-check",
   "record-coverage-required",
+  "record-quota-exhausted",
   "consume-coverage",
   "record-checkout",
   "record-approval",

@@ -294,9 +294,9 @@ const PAYMENT_RUN: WorkflowDeclaration = {
   stages: [
     stage("analysis", {
       persists: "gate-decision",
-      publishes: ["gate-check", "record-coverage-required", "consume-coverage"],
+      publishes: ["gate-check", "record-coverage-required", "record-quota-exhausted", "consume-coverage"],
       consumes: null,
-      runtimeStageIds: ["gate-check", "record-coverage-required", "consume-coverage"],
+      runtimeStageIds: ["gate-check", "record-coverage-required", "record-quota-exhausted", "consume-coverage"],
     }),
     stage("store", {
       persists: "payment-record",

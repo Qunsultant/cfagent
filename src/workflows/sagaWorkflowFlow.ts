@@ -934,10 +934,14 @@ export async function runSagaWorkflowFlow(
     }
 
     // payment_required / coverage_required / approval_rejected /
-    // expired / unrecognized output: the payment did not complete.
+    // expired / quota_exhausted / unrecognized output: the payment
+    // did not complete. quota_exhausted keeps its exact reason
+    // (#3263: the approved-free quota cap is a terminal refusal,
+    // not an unrecognized output) while the status stays
+    // payment_not_completed.
     const reason =
       typeof paymentStatus === "string" &&
-      ["payment_required", "coverage_required", "approval_rejected", "expired"].includes(paymentStatus)
+      ["payment_required", "coverage_required", "approval_rejected", "expired", "quota_exhausted"].includes(paymentStatus)
         ? paymentStatus
         : "payment_output_unrecognized";
     return await endSaga(

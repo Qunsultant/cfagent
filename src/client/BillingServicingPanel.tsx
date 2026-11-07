@@ -30,6 +30,7 @@ import { fetchPlatformIdentity } from "./firstRunApi";
 import { receiptKindLabel } from "./agenticWalletApi";
 import { RefundPolicySection } from "./RefundPolicySection";
 import { RefundFlowSection } from "./RefundFlowSection";
+import { ApprovedFreeQuotaSection } from "./ApprovedFreeQuotaSection";
 import { TopUpLimitsSection } from "./TopUpLimitsSection";
 import {
   buildBillingView,
@@ -169,6 +170,7 @@ export function BillingServicingPanel() {
           </Card>
           <RefundPolicySection />
           <RefundFlowSection />
+          <ApprovedFreeQuotaSection />
           <TopUpLimitsSection />
           <Card>
             <p>Support snapshot</p>

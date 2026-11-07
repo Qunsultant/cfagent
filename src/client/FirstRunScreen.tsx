@@ -35,9 +35,9 @@
  *   + self account view + live brokerage status): account, tier,
  *   credits, included runs, trial status from the trial
  *   subscription row, brokerage status, and preferences saved
- *   state. A claim appears ONLY when the server said so — no
- *   per-service quotas are shown (#3263, not built) and nothing
- *   is invented.
+ *   state. A claim appears ONLY when the server said so — the
+ *   approved-free quota block shows per-service remaining (#3263)
+ *   and nothing is invented.
  *
  * Step progress is persisted server-side (saveOnboardingState) on
  * every advance so the gate can resume at the saved step. Finish
@@ -67,6 +67,12 @@ import { readTenantProvidersState } from "./tenantProviders";
 import { firstRunBrokerStep } from "./firstRunBrokerStep";
 import { BROKER_CATALOG, brokerCredentialGuidance, isBrokerId } from "../trading/brokerCatalog";
 import { listPlans, subscriptionTrial, type PlanView } from "./commercialApi";
+import {
+  getApprovedFreeQuota,
+  isGrantExpired,
+  type ApprovedFreeQuotaState,
+} from "./approvedFreeQuotaApi";
+import { codedMessage } from "../outcomes/outcomeAspects";
 import { NotificationPreferencesPanel } from "./NotificationPreferencesPanel";
 import { ProfileSection } from "./ProfileSection";
 import { fetchProfile, type UserProfileView } from "./profileApi";
@@ -155,6 +161,10 @@ export function FirstRunScreen({ userLogin, initialStep, onComplete, onDismiss, 
     etrade: ETradeStatusView | null;
     plans: PlanView[];
     profile: UserProfileView | null;
+    // Issue #3263: the approved-free quota for the caller's own
+    // account; null when the quota read fails (never blocks the
+    // summary — the Billing tab is the authority).
+    quota: ApprovedFreeQuotaState | null;
   } | null>(null);
   const [setupAttempt, setSetupAttempt] = useState(0);
   const [plansAttempt, setPlansAttempt] = useState(0);
@@ -267,7 +277,7 @@ export function FirstRunScreen({ userLogin, initialStep, onComplete, onDismiss, 
     setSummaryError(false);
     (async () => {
       try {
-        const [freshIdentity, accountSelf, liveEtrade, { plans: freshPlans }, liveProfile] =
+        const [freshIdentity, accountSelf, liveEtrade, { plans: freshPlans }, liveProfile, quota] =
           await Promise.all([
             fetchPlatformIdentity(),
             fetchAccountSelf(),
@@ -276,6 +286,7 @@ export function FirstRunScreen({ userLogin, initialStep, onComplete, onDismiss, 
             // Profile is ancillary to the summary: a failed read
             // shows as unset, never fails the summary itself.
             fetchProfile().catch(() => null),
+            getApprovedFreeQuota().catch(() => null),
           ]);
         if (!cancelled) {
           setSummary({
@@ -284,6 +295,7 @@ export function FirstRunScreen({ userLogin, initialStep, onComplete, onDismiss, 
             etrade: liveEtrade,
             plans: freshPlans,
             profile: liveProfile,
+            quota,
           });
         }
       } catch {
@@ -596,6 +608,32 @@ export function FirstRunScreen({ userLogin, initialStep, onComplete, onDismiss, 
                   Display name: {summary.profile?.displayName ?? summary.identity.userLogin}
                 </p>
                 <p>Phone: {summary.profile?.phone ?? "Not provided"}</p>
+                {/* Issue #3263: approved-free quota at a glance. The
+                    grant is operator-set; a missing quota read or an
+                    inactive grant reads as no grant, never as zero —
+                    except an EXPIRED grant, which renders the
+                    catalog-coded expired message. */}
+                {summary.quota === null || !summary.quota.grant.active ? (
+                  summary.quota !== null && isGrantExpired(summary.quota.grant) ? (
+                    <p>{codedMessage("FAILURE_APPROVED_FREE_QUOTA_EXPIRED")}</p>
+                  ) : (
+                    <p>Approved-free grant: No approved-free grant.</p>
+                  )
+                ) : (
+                  <p>
+                    Approved-free runs remaining:{" "}
+                    {summary.quota.families
+                      .map(
+                        (row) =>
+                          `${row.family} ${row.remaining === null ? "—" : row.remaining}`,
+                      )
+                      .join(", ")}
+                    {summary.quota.settings
+                      ? ` (${summary.quota.settings.windowKind === "week" ? "per week" : "per month"})`
+                      : ""}
+                    .
+                  </p>
+                )}
                 {(() => {
                   const trialRow = summary.accountSelf.subscriptions
                     .filter((s) => s.provider === "trial")
