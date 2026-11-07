@@ -105,6 +105,8 @@ export async function switchBrokerEnvironment(
   target: BrokerEnvironment,
 ): Promise<BrokerEnvironment> {
   const previous = current;
+  // Optimistically adopt target environment across UI subscribers
+  setCurrent(target, true);
   try {
     const resp = await apiFetch("/api/environment/switch", {
       method: "POST",

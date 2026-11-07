@@ -1677,10 +1677,8 @@ export function Chat({ user }: { user: User }) {
           <header className="app-sub-header">
             <div className="sub-header-left">
               <div className="sub-header-brand-crumbs">
-                <span className="crumb-module">
-                  {getCrumb(tab)}
-                </span>
-                <span className="crumb-divider">/</span>
+                <span className="crumb-module">{getCrumb(tab)}</span>
+                <span className="crumb-divider">{" / "}</span>
                 <span className="crumb-subtitle">
                   {accountMode === "paper" ? "Paper" : "Live Execution"}
                 </span>
@@ -1733,8 +1731,10 @@ export function Chat({ user }: { user: User }) {
                 onSelectTheme={handleSelectTheme}
                 currentLayout={navLayout}
                 onToggleLayout={handleToggleNavLayout}
+                activeEnv={brokerEnv}
                 accountMode={accountMode}
                 onToggleAccountMode={handleToggleAccountMode}
+                handleSwitchEnvironment={(target) => void switchBrokerEnvironment(target)}
                 visibleTabs={visibleTabs}
                 onToggleTabVisibility={handleToggleTabVisibility}
                 onSetVisibleTabs={handleSetVisibleTabs}
@@ -1793,8 +1793,10 @@ export function Chat({ user }: { user: User }) {
                 onSelectTheme={handleSelectTheme}
                   currentLayout={navLayout}
                   onToggleLayout={handleToggleNavLayout}
+                  activeEnv={brokerEnv}
                   accountMode={accountMode}
                   onToggleAccountMode={handleToggleAccountMode}
+                  handleSwitchEnvironment={(target) => void switchBrokerEnvironment(target)}
                   visibleTabs={visibleTabs}
                   onToggleTabVisibility={handleToggleTabVisibility}
                   onSetVisibleTabs={handleSetVisibleTabs}

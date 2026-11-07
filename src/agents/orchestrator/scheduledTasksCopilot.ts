@@ -57,7 +57,7 @@ import {
   isStockCopilotPaperEnabled,
   runStockCopilotCycle,
 } from "../../services/stockCopilot";
-import { resolveCopilotSessions } from "../../services/stockCopilotSessions";
+import { isAroundTheClock, resolveCopilotSessions } from "../../services/stockCopilotSessions";
 import {
   DEFAULT_STOCK_COPILOT_SCHEDULE,
   resolveCopilotCadence,
@@ -150,6 +150,10 @@ export async function runStockCopilotCycleForInstance(
     platform,
     selection,
     enabledSessions,
+    aroundTheClock: isAroundTheClock({
+      readSettingRaw: ctx.readSettingRaw,
+      env: ctx.env,
+    }),
     universe: resolveCopilotUniverse({
       readSettingRaw: ctx.readSettingRaw,
       env: ctx.env,

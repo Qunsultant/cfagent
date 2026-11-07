@@ -280,9 +280,6 @@ export function StockSearchBar({ onSelectTab, onAskAgent, className = "" }: Stoc
           <span className="stock-search-placeholder">Search stocks...</span>
           <kbd className="stock-search-kbd">{shortcutHint}</kbd>
         </Button>
-        <Badge tone="accent" title={`Orders will use ${brokerLabel}`}>
-          {brokerLabel}
-        </Badge>
       </div>
 
       {/* Global Command Palette / Stock Search Modal (Modal primitive, #1695) */}

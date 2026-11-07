@@ -94,6 +94,7 @@ import {
 import { runStockCopilotAgenticCycle } from "./stockCopilotAgenticLoop";
 import {
   copilotSessionAt,
+  isAroundTheClock,
   resolveCopilotSessions,
   shapeCopilotSessionOrder,
   STOCK_COPILOT_OUTSIDE_ENABLED_SESSIONS,
@@ -230,6 +231,8 @@ export interface StockCopilotDeps {
    *  cycle then resolves from the deployment env alone, which with
    *  no env value is the regular-only default. */
   enabledSessions?: readonly CopilotSessionId[];
+  /** #3728: continuous around-the-clock limit order evaluation. */
+  aroundTheClock?: boolean;
   /** #3519: execution mode: "deterministic" (default fixed pattern loop)
    *  or "agentic" (non-deterministic perceive-plan-critic-execute-learn loop). */
   executionMode?: CopilotExecutionMode;
@@ -680,9 +683,10 @@ export async function runStockCopilotCycle(
   const enabledSessions =
     deps.enabledSessions ?? resolveCopilotSessions({ env: deps.env });
   const aroundTheClock =
-    String(deps.env?.STOCK_COPILOT_AROUND_THE_CLOCK ?? "").toLowerCase() === "true" ||
-    String(deps.env?.STOCK_COPILOT_FORCE_ALL_SESSIONS ?? "").toLowerCase() === "true" ||
-    String(deps.env?.STOCK_COPILOT_IGNORE_SESSIONS ?? "").toLowerCase() === "true";
+    deps.aroundTheClock ??
+    isAroundTheClock({
+      env: deps.env,
+    });
   const session = copilotSessionAt(now, aroundTheClock);
   result.session = session;
   result.enabledSessions = [...enabledSessions];
