@@ -64,20 +64,29 @@ describe("scheduled-job outcome codes (#2037)", () => {
     expect(sanitizeScheduledJobErrorCode("x".repeat(65))).toBe("unknown");
   });
 
-  it("names exactly the three tick jobs", () => {
+  // Adapted for #3527 S5: the closed vocabulary GREW by exactly
+  // the two registered jobs (corpus-sync, reports-index-backfill).
+  // The invariant stays an exact set — extended, not loosened.
+  it("names exactly the five tick jobs", () => {
     expect(isScheduledJobId("reflection")).toBe(true);
     expect(isScheduledJobId("research")).toBe(true);
     expect(isScheduledJobId("adaptation")).toBe(true);
-    expect(isScheduledJobId("corpus-sync")).toBe(false);
+    expect(isScheduledJobId("corpus-sync")).toBe(true);
+    expect(isScheduledJobId("reports-index-backfill")).toBe(true);
     expect(isScheduledJobId("")).toBe(false);
   });
 
-  it("matches only the three scheduled-job POST dispatches", () => {
+  // Adapted for #3527 S5: the dispatch-path set grew with the
+  // vocabulary — both new POST paths are observed; the paged
+  // manual backfill route is still NOT a scheduled dispatch.
+  it("matches only the five scheduled-job POST dispatches", () => {
     expect(isScheduledJobDispatchPath("/reflection/run", "POST")).toBe(true);
     expect(isScheduledJobDispatchPath("/research/scheduled-tick", "POST")).toBe(true);
     expect(isScheduledJobDispatchPath("/adaptation/weights/run", "POST")).toBe(true);
     expect(isScheduledJobDispatchPath("/reflection/run", "GET")).toBe(false);
-    expect(isScheduledJobDispatchPath("/knowledge/corpus-sync", "POST")).toBe(false);
+    expect(isScheduledJobDispatchPath("/knowledge/corpus-sync", "POST")).toBe(true);
+    expect(isScheduledJobDispatchPath("/trading/reports/index-backfill-sweep", "POST")).toBe(true);
+    expect(isScheduledJobDispatchPath("/trading/reports/index-backfill", "POST")).toBe(false);
     expect(isScheduledJobDispatchPath("/api/audit", "GET")).toBe(false);
   });
 
