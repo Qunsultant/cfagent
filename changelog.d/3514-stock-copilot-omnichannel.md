@@ -1,3 +1,5 @@
+### Added
+
 - **Stock Copilot Omnichannel Capabilities & Platform MCP Tools (#3514)**:
   - Added dynamic universe resolution (`resolveCopilotUniverse`) supporting presets (`NASDAQ100`, `SP100`, `MEGA_TECH`, `SEMIS`) and custom comma-separated tickers externalized in `mas_settings`.
   - Added dynamic strategy selection (`resolveCopilotStrategies`) supporting `"all"` or custom strategy subsets externalized in `mas_settings`.
