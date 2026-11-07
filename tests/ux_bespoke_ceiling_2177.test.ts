@@ -109,7 +109,11 @@ describe("bespoke-styling ceiling (issue #2177)", () => {
     // feed-jobs column styles in dataProvidersPanel.css (13 braces,
     // tokens only, baseline bumped in one_off_stylesheets_1337.json).
     // Sanctioned growth named in the PR body, per this test's own rule.
-    expect(braces).toBeLessThanOrEqual(3959);
+    // Bumped 3959 -> 3966 for issue #3530: the feed status block
+    // styles in dataProvidersPanel.css (7 braces, tokens only,
+    // baseline bumped in one_off_stylesheets_1337.json). Sanctioned
+    // growth named in the PR body, per this test's own rule.
+    expect(braces).toBeLessThanOrEqual(3966);
     // Classes bumped 2619 -> 2646 for the same #2681 sheet (27 stp-
     // classes, tokens only).
     // Classes bumped 2646 -> 2648 for issue #2703 (platform-admin-menu-row, platform-admin-menu-icon).
@@ -121,7 +125,9 @@ describe("bespoke-styling ceiling (issue #2177)", () => {
     // tokens only; the sheet's other 2 scp- classes already exist in the tree).
     // Classes bumped 2714 -> 2727 for issue #3535 (13 new-to-tree dpp-feed-
     // classes, tokens only).
-    expect(classes.size).toBeLessThanOrEqual(2727); // ratcheted from 2622 by the #2177 close
+    // Classes bumped 2727 -> 2733 for issue #3530 (6 new-to-tree
+    // dpp-feed-status / dpp-feed-nojob classes, tokens only).
+    expect(classes.size).toBeLessThanOrEqual(2733); // ratcheted from 2622 by the #2177 close
   });
 
   it("inline styles and raw labels outside the primitives do not grow", () => {

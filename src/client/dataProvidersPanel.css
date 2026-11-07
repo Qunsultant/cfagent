@@ -331,3 +331,42 @@
   font-size: var(--font-size-body-sm);
   color: var(--color-text-muted);
 }
+
+/* #3530 status UX: the direct feed-status block at the top of the
+   feed-jobs cell (dataset last run + local copy + Run now) and the
+   honest no-job block. Token-only, mirroring the #3535 styles. */
+.dpp-feed-status {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.dpp-feed-status + .dpp-feed-job {
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.dpp-feed-status-chip {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-caption);
+  color: var(--color-text-muted);
+}
+
+.dpp-feed-status-chip-failed {
+  color: var(--color-danger-text, var(--color-text-primary));
+}
+
+.dpp-feed-status-chip-stale {
+  color: var(--color-warning-text, var(--color-text-primary));
+}
+
+.dpp-feed-nojob {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.dpp-feed-nojob-note {
+  font-size: var(--font-size-caption);
+  color: var(--color-text-muted);
+}
