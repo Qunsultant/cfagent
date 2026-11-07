@@ -63,6 +63,15 @@
  * discovered commands. Every other turn — and a stock turn whose
  * activation is withdrawn — stays byte-identical to the pre-#3721
  * prompt, so the fixtures stand untouched.
+ *
+ * Issue #3727: the execute_nlq steering line follows the
+ * CHAT_NLQ_MODE gate's resolved value — the caller passes the
+ * mode chatNlqTurnGate resolved for the same turn (never a
+ * second read of the switch) as `chatNlqEnabled`. Production
+ * sets CHAT_NLQ_MODE="on" in wrangler.jsonc, so production
+ * turns carry the enabled line; absent/false keeps the
+ * flagged-off line and the prompt stays byte-identical to the
+ * pre-#3727 prompt (the fixtures' contract).
  */
 import type { Env } from "../types";
 
@@ -88,6 +97,16 @@ export interface OrchestratorPromptInput {
    * prompt byte-identical (the fixtures' contract).
    */
   stockCopilotMcpActive?: boolean;
+  /**
+   * Issue #3727: the CHAT_NLQ_MODE gate's resolved value for
+   * this turn, as resolved by chatNlqTurnGate in the caller
+   * (the same resolution that decides the turn's usable tool
+   * set — never re-read here). When true the execute_nlq
+   * steering line states the enabled truth; absent/false
+   * keeps the flagged-off line and the prompt byte-identical
+   * (the fixtures' contract).
+   */
+  chatNlqEnabled?: boolean;
 }
 
 /**
@@ -147,7 +166,7 @@ Sub-agent & MCP capabilities directly available to you (the tool_openaimp_* tool
 - 'tool_openaimp_query_platform_knowledge': The authoritative source for platform documentation — all 8 platform workflows, UI navigation, 8 quantitative FAQs, and 6 decisioning engines (PickBestTrades, screeners). Answer platform questions from it (rule 1), never from prompt memory.
 - 'tool_openaimp_draft_payment': Prepare payment authorization drafts. NEVER execute unverified money movement.
 - 'tool_openaimp_confirm_payment_draft': Approve, authorize, or cancel a pending payment or task draft only upon explicit user confirmation.
-- 'tool_openaimp_execute_nlq': (Flagged OFF in chat turns by CHAT_NLQ_MODE, default off — not available in this turn; use the structured tools and door commands.)
+- 'tool_openaimp_execute_nlq': ${input.chatNlqEnabled ? "(Enabled in chat turns by CHAT_NLQ_MODE) Submit a natural-language database, market-data, or options-strategy query as an asynchronous job." : "(Flagged OFF in chat turns by CHAT_NLQ_MODE, default off — not available in this turn; use the structured tools and door commands.)"}
 - 'tool_openaimp_manage_session_memory' / 'rememberFact': Session facts; rule 5 governs when to remember.
 - 'createTaskDraft': Draft actionable tasks with priorities and deadlines.
 - 'tool_openaimp_run_stock_screen': THE universe-screen tool — run a stock screen over a named universe (NASDAQ100, SP500, SP100, RUSSELL2000, TECH, ETF, LEV_ETF, or ALL) as a durable screener workflow.
