@@ -106,6 +106,8 @@ other doors. Scope column is #1843's declaration, consumed here.
 | `list_enrich_jobs` | mcp:read | L via door 2 only — acting identity required (#3536); refused on doors 1/3 (no acting-identity carrier there) |
 | `get_analyze_job_status` | mcp:read | L via door 2 only — acting identity required (#3537); refused on doors 1/3 (no acting-identity carrier there) |
 | `list_analyze_jobs` | mcp:read | L via door 2 only — acting identity required (#3537); refused on doors 1/3 (no acting-identity carrier there) |
+| `get_generate_job_status` | mcp:read | L via door 2 only — acting identity required (#3538); refused on doors 1/3 (no acting-identity carrier there) |
+| `list_generate_jobs` | mcp:read | L via door 2 only — acting identity required (#3538); refused on doors 1/3 (no acting-identity carrier there) |
 | `ai_search_financial_docs` | mcp:read | L (I / R on other doors) |
 | `ai_search_agent_search` | mcp:read | L (I / R on other doors) |
 | `agentdb.chain.status` | mcp:read | L (I / R on other doors) |
@@ -149,6 +151,8 @@ other doors. Scope column is #1843's declaration, consumed here.
 | `manage_enrich_job` | mcp:write | L via door 2 only — acting identity required (#3536); refused on doors 1/3 (no acting-identity carrier there) |
 | `run_analyze_job` | mcp:write | L via door 2 only — acting identity required (#3537); refused on doors 1/3 (no acting-identity carrier there) |
 | `manage_analyze_job` | mcp:write | L via door 2 only — acting identity required (#3537); refused on doors 1/3 (no acting-identity carrier there) |
+| `run_generate_job` | mcp:write | L via door 2 only — acting identity required (#3538); refused on doors 1/3 (no acting-identity carrier there) |
+| `manage_generate_job` | mcp:write | L via door 2 only — acting identity required (#3538); refused on doors 1/3 (no acting-identity carrier there) |
 
 ### mcp:execute (7)
 

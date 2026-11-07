@@ -127,6 +127,10 @@ import {
   resolveAnalyzeJob,
   type AnalyzeJobSurfaceView,
 } from "../../services/analyzePipelineJobs";
+import {
+  resolveGenerateJob,
+  type GenerateJobSurfaceView,
+} from "../../services/generatePipelineJobs";
 
 // ---------------------------------------------------------------------------
 // Errors — honest, typed, coded (doors-and-layers §11.1)
@@ -143,6 +147,8 @@ export type MeshDoorErrorCode =
   | "enrich_job_not_found"
   // Issue #3537: the analyze-job door's unknown/ambiguous job name.
   | "analyze_job_not_found"
+  // Issue #3538: the generate-job door's unknown/ambiguous job name.
+  | "generate_job_not_found"
   // Issue #2488: the mesh screen door's (meshScreenDoor.ts)
   // fail-closed refusal codes — budget_denied (the S5 budget
   // door refused the paid path), price_unavailable (no stored
@@ -230,6 +236,11 @@ export interface ScheduledAgentDoorStub {
   // and manage them; these two are the analyze merged-status reads.
   getAnalyzeJobSurfaceStatus(jobId: string): Promise<AnalyzeJobSurfaceView>;
   listAnalyzeJobSurfaceStatuses(): Promise<AnalyzeJobSurfaceView[]>;
+  // Issue #3538 (Pipeline J5): the generate jobs' surface on the
+  // same host — same rule again; these two are the generate
+  // merged-status reads.
+  getGenerateJobSurfaceStatus(jobId: string): Promise<GenerateJobSurfaceView>;
+  listGenerateJobSurfaceStatuses(): Promise<GenerateJobSurfaceView[]>;
 }
 
 export interface PaymentsAgentDoorStub {
@@ -719,6 +730,130 @@ export async function manageAnalyzeJobViaDoor(
     case "retry": {
       const run = await door.retryPipelineJob(entry.jobId, { userLogin: login });
       return { ...base, run, status: await door.getAnalyzeJobSurfaceStatus(entry.jobId) };
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// ScheduledAgent door — the job pipeline's generate jobs (#3538)
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve a caller's generate-job name ("yahoo generate",
+ * "generate alpaca", "sp100 generate", an exact job id) to its
+ * catalog entry. An ambiguous or unknown name is an honest
+ * generate_job_not_found error — the door never guesses a job.
+ */
+function resolveGenerateJobOrThrow(source: string) {
+  const entry = resolveGenerateJob(source);
+  if (!entry) {
+    throw new MeshDoorError(
+      "generate_job_not_found",
+      `No generate job matches "${source}". Name a source with its universe ("yahoo nasdaq100 generate", "sp100 generate", "generate alpaca", "generate etrade", "generate public") or an exact generate job id.`,
+    );
+  }
+  return entry;
+}
+
+export interface GenerateJobRunDoorResult {
+  jobId: string;
+  label: string;
+  runId: string;
+  state: string;
+  error?: string;
+  status: GenerateJobSurfaceView;
+}
+
+/**
+ * Run one generate job now through the pipeline host's control
+ * plane (the same generic runPipelineJob RPC every job on the
+ * plane dispatches through) and report its settled outcome +
+ * the merged status view (the same view the UX renders).
+ */
+export async function runGenerateJobViaDoor(
+  env: Env,
+  actingLogin: string | undefined | null,
+  source: string,
+): Promise<GenerateJobRunDoorResult> {
+  const login = requireActingLogin(actingLogin);
+  const entry = resolveGenerateJobOrThrow(source);
+  const door = getScheduledAgentDoor(env);
+  const run = await door.runPipelineJob(entry.jobId, { userLogin: login });
+  const status = await door.getGenerateJobSurfaceStatus(entry.jobId);
+  return {
+    jobId: entry.jobId,
+    label: entry.label,
+    runId: run.runId,
+    state: run.state,
+    ...(run.error ? { error: run.error } : {}),
+    status,
+  };
+}
+
+/** One generate job's merged status (generated copy + pipeline state). */
+export async function getGenerateJobStatusViaDoor(
+  env: Env,
+  actingLogin: string | undefined | null,
+  source: string,
+): Promise<GenerateJobSurfaceView> {
+  requireActingLogin(actingLogin);
+  const entry = resolveGenerateJobOrThrow(source);
+  const door = getScheduledAgentDoor(env);
+  return door.getGenerateJobSurfaceStatus(entry.jobId);
+}
+
+/** Every generate job's merged status, in catalog order. */
+export async function listGenerateJobsViaDoor(
+  env: Env,
+  actingLogin: string | undefined | null,
+): Promise<{ jobs: GenerateJobSurfaceView[] }> {
+  requireActingLogin(actingLogin);
+  const door = getScheduledAgentDoor(env);
+  return { jobs: await door.listGenerateJobSurfaceStatuses() };
+}
+
+export type GenerateJobManagementAction = "pause" | "resume" | "cancel" | "retry";
+
+export interface GenerateJobManageDoorResult {
+  jobId: string;
+  label: string;
+  action: GenerateJobManagementAction;
+  instance?: JobInstanceRecord;
+  run?: { runId: string; state: string; error?: string };
+  status: GenerateJobSurfaceView;
+}
+
+/**
+ * Apply one management operation to a generate job through the
+ * same control plane (the analyze door's manage, transposed).
+ * The control plane's own refusals propagate unchanged.
+ */
+export async function manageGenerateJobViaDoor(
+  env: Env,
+  actingLogin: string | undefined | null,
+  source: string,
+  action: GenerateJobManagementAction,
+): Promise<GenerateJobManageDoorResult> {
+  const login = requireActingLogin(actingLogin);
+  const entry = resolveGenerateJobOrThrow(source);
+  const door = getScheduledAgentDoor(env);
+  const base = { jobId: entry.jobId, label: entry.label, action };
+  switch (action) {
+    case "pause": {
+      const instance = await door.pausePipelineJob(entry.jobId);
+      return { ...base, instance, status: await door.getGenerateJobSurfaceStatus(entry.jobId) };
+    }
+    case "cancel": {
+      const instance = await door.cancelPipelineJob(entry.jobId);
+      return { ...base, instance, status: await door.getGenerateJobSurfaceStatus(entry.jobId) };
+    }
+    case "resume": {
+      const run = await door.resumePipelineJob(entry.jobId, { userLogin: login });
+      return { ...base, run, status: await door.getGenerateJobSurfaceStatus(entry.jobId) };
+    }
+    case "retry": {
+      const run = await door.retryPipelineJob(entry.jobId, { userLogin: login });
+      return { ...base, run, status: await door.getGenerateJobSurfaceStatus(entry.jobId) };
     }
   }
 }

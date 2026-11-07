@@ -24,8 +24,8 @@
  *
  * The composed step registry is the one registry every
  * residency builds: the feed steps plus enrich.apply plus
- * analyze.apply (#3537) (createPipelineStepRegistry) — no
- * second engine entry.
+ * analyze.apply (#3537) plus generate.apply (#3538)
+ * (createPipelineStepRegistry) — no second engine entry.
  */
 import type { DataProviderId } from "../trading";
 import type { FeedDatasetStore } from "../data/feedDatasetPorts";
@@ -51,6 +51,10 @@ import {
   registerAnalyzeStep,
   type AnalyzeStepDeps,
 } from "./analyzePipelineJobs";
+import {
+  registerGenerateStep,
+  type GenerateStepDeps,
+} from "./generatePipelineJobs";
 import type { JobPipelineStores } from "../data/jobPipelinePorts";
 import type {
   JobPipelineControl,
@@ -368,23 +372,26 @@ export function registerEnrichStep(
 
 /**
  * THE composed step registry — the feed steps plus enrich.apply
- * plus analyze.apply (#3537), built identically in every
- * residency (the ScheduledAgent host, the workflow start path,
- * the workflow itself). One registry, one engine, every stage
- * family so far. The analyze deps are the third argument:
- * production compositions always pass them; a stage-scoped
- * test registry may omit them (the registry then simply has no
- * analyze step, exactly as registerEnrichStep alone composes
- * an enrich-only registry).
+ * plus analyze.apply (#3537) plus generate.apply (#3538), built
+ * identically in every residency (the ScheduledAgent host, the
+ * workflow start path, the workflow itself). One registry, one
+ * engine, every stage family so far. The analyze deps are the
+ * third argument and the generate deps the fourth: production
+ * compositions always pass them; a stage-scoped test registry
+ * may omit them (the registry then simply lacks those steps,
+ * exactly as registerEnrichStep alone composes an enrich-only
+ * registry).
  */
 export function createPipelineStepRegistry(
   feedDeps: FeedStepDeps,
   enrichDeps: EnrichStepDeps,
   analyzeDeps?: AnalyzeStepDeps,
+  generateDeps?: GenerateStepDeps,
 ): JobStepRegistry {
   const registry = createFeedStepRegistry(feedDeps);
   registerEnrichStep(registry, enrichDeps);
   if (analyzeDeps) registerAnalyzeStep(registry, analyzeDeps);
+  if (generateDeps) registerGenerateStep(registry, generateDeps);
   return registry;
 }
 

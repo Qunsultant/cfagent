@@ -1496,3 +1496,30 @@ export const jobAnalyzedDatasets = sqliteTable("job_analyzed_datasets", {
   rowsPersisted: integer("rows_persisted").notNull(),
   artifactJson: text("artifact_json").notNull(),
 });
+
+/**
+ * Pipeline J5 (#3538) — the generated-dataset store's table:
+ * one row per generate run, keyed by generate job id (the
+ * generation product's precise identity). The full artifact
+ * rides in artifact_json (the feed/enriched/analyzed families'
+ * pattern); status and the generated-format count are
+ * denormalized columns so latestUsable can filter without
+ * parsing every row (rows_persisted carries the count of
+ * format bodies the run generated). The migration's DDL also
+ * carries the (job_id, created_at DESC, id DESC) history
+ * index. Timestamps are ISO text — residency parity with the
+ * sibling families. DDL authority: migration 0056.
+ */
+export const jobGeneratedDatasets = sqliteTable("job_generated_datasets", {
+  id: text("id").primaryKey(),
+  createdAt: text("created_at").notNull(),
+  jobId: text("job_id").notNull(),
+  analyzeJobId: text("analyze_job_id").notNull(),
+  sourceId: text("source_id").notNull(),
+  dataset: text("dataset").notNull(),
+  runId: text("run_id").notNull(),
+  status: text("status").notNull(),
+  asOf: text("as_of").notNull(),
+  rowsPersisted: integer("rows_persisted").notNull(),
+  artifactJson: text("artifact_json").notNull(),
+});

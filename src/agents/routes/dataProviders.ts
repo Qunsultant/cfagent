@@ -16,6 +16,8 @@
  *   POST /data-providers/:id/enrich-jobs/:jobId/:action run|pause|resume|cancel|retry an enrich job (#3536)
  *   GET  /data-providers/:id/analyze-jobs             the provider's analyze jobs as pipeline jobs (#3537)
  *   POST /data-providers/:id/analyze-jobs/:jobId/:action run|pause|resume|cancel|retry an analyze job (#3537)
+ *   GET  /data-providers/:id/generate-jobs            the provider's generate jobs as pipeline jobs (#3538)
+ *   POST /data-providers/:id/generate-jobs/:jobId/:action run|pause|resume|cancel|retry a generate job (#3538)
  *   POST /data-providers/:id/register|configure|verify|enable|disable|deprovision
  *
  * (Paths are the DO-internal spellings: src/server.ts strips the
@@ -124,6 +126,11 @@ import {
   ANALYZE_PIPELINE_CATALOG,
   type AnalyzeJobSurfaceView,
 } from "../../services/analyzePipelineJobs";
+import { GENERATE_JOB_CODES } from "../../services/generateJobs";
+import {
+  GENERATE_PIPELINE_CATALOG,
+  type GenerateJobSurfaceView,
+} from "../../services/generatePipelineJobs";
 import type { JobInstanceRecord } from "../../data/jobPipelinePorts";
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
@@ -198,6 +205,9 @@ export interface FeedPipelineDoorLike {
   // #3537: the analyze jobs' surface reads on the same host door.
   listAnalyzeJobSurfaceStatuses(): Promise<AnalyzeJobSurfaceView[]>;
   getAnalyzeJobSurfaceStatus(jobId: string): Promise<AnalyzeJobSurfaceView>;
+  // #3538: the generate jobs' surface reads on the same host door.
+  listGenerateJobSurfaceStatuses(): Promise<GenerateJobSurfaceView[]>;
+  getGenerateJobSurfaceStatus(jobId: string): Promise<GenerateJobSurfaceView>;
   runPipelineJob(
     jobId: string,
     opts?: { userLogin?: string },
@@ -338,7 +348,8 @@ async function providerView(
   feed?: unknown,
   feedJobs?: unknown,
   enrichJobs?: unknown,
-  analyzeJobs?: unknown
+  analyzeJobs?: unknown,
+  generateJobs?: unknown
 ) {
   const adapter = registry.get(record.id);
   const serving = routeViews.some(
@@ -391,6 +402,10 @@ async function providerView(
     // job — the merged surface views (analyzed copy + pipeline
     // state + lineage + next scheduled run). Same rule.
     analyzeJobs: analyzeJobs ?? [],
+    // #3538: every generate job for this provider as a pipeline
+    // job — the merged surface views (generated copy + pipeline
+    // state + lineage + next scheduled run). Same rule.
+    generateJobs: generateJobs ?? [],
   };
 }
 
@@ -598,6 +613,31 @@ async function analyzeJobsViewFor(
   }
 }
 
+/**
+ * Every generate job for one provider, as merged surface views
+ * from the pipeline host (#3538). Same best-effort read rule as
+ * analyzeJobsViewFor: an unreachable host yields an empty list —
+ * never a fabricated status.
+ */
+async function generateJobsViewFor(
+  ctx: DataProviderRoutesContext,
+  providerId: DataProviderId,
+): Promise<GenerateJobSurfaceView[]> {
+  const door = feedPipelineDoorFor(ctx);
+  if (!door) return [];
+  try {
+    const all = await door.listGenerateJobSurfaceStatuses();
+    return all.filter((v) => v.sourceId === providerId);
+  } catch (error) {
+    structuredLog.warn("data_providers.generate_jobs_status_read_failed", {
+      message: `[data-providers] generate-jobs status read for "${providerId}" failed: ${error instanceof Error ? error.message : String(error)}`,
+      providerId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return [];
+  }
+}
+
 export async function handleDataProviderRoutes(
   request: Request,
   url: URL,
@@ -627,7 +667,12 @@ export async function handleDataProviderRoutes(
   const analyzeJobActionMatch = path.match(
     /^\/data-providers\/([^/]+)\/analyze-jobs\/([^/]+)\/([a-z]+)$/,
   );
-  if (!isList && !oneMatch && !actionMatch && !feedRunMatch && !feedJobsMatch && !feedJobActionMatch && !enrichJobsMatch && !enrichJobActionMatch && !analyzeJobsMatch && !analyzeJobActionMatch) return null;
+  // #3538: the pipeline generate-jobs surface (list + per-job actions).
+  const generateJobsMatch = path.match(/^\/data-providers\/([^/]+)\/generate-jobs$/);
+  const generateJobActionMatch = path.match(
+    /^\/data-providers\/([^/]+)\/generate-jobs\/([^/]+)\/([a-z]+)$/,
+  );
+  if (!isList && !oneMatch && !actionMatch && !feedRunMatch && !feedJobsMatch && !feedJobActionMatch && !enrichJobsMatch && !enrichJobActionMatch && !analyzeJobsMatch && !analyzeJobActionMatch && !generateJobsMatch && !generateJobActionMatch) return null;
 
   try {
     // ---- reads ----
@@ -663,6 +708,7 @@ export async function handleDataProviderRoutes(
               await feedJobsViewFor(ctx, c.id),
               await enrichJobsViewFor(ctx, c.id),
               await analyzeJobsViewFor(ctx, c.id),
+              await generateJobsViewFor(ctx, c.id),
             )
           )
         ),
@@ -690,6 +736,7 @@ export async function handleDataProviderRoutes(
           await feedJobsViewFor(ctx, record.id),
           await enrichJobsViewFor(ctx, record.id),
           await analyzeJobsViewFor(ctx, record.id),
+          await generateJobsViewFor(ctx, record.id),
         ),
         routes: routeViews.filter(
           (r) => r.primaryProviderId === id || r.gapFillProviderId === id
@@ -1031,6 +1078,87 @@ export async function handleDataProviderRoutes(
           {
             error: error instanceof Error ? error.message : String(error),
             code: "ANALYZE_JOB_ACTION_REFUSED",
+          },
+          { status: 409 },
+        );
+      }
+    }
+
+    // #3538 — the provider's generate jobs as pipeline surface
+    // views (the same merged views the copilot tools return).
+    if (request.method === "GET" && generateJobsMatch) {
+      const id = decodeURIComponent(generateJobsMatch[1]) as DataProviderId;
+      return Response.json({ jobs: await generateJobsViewFor(ctx, id) });
+    }
+
+    // #3538 — run / pause / resume / cancel / retry one generate
+    // job through the pipeline host's control plane (the same
+    // door + gates as the analyze-job actions above, transposed).
+    if (request.method === "POST" && generateJobActionMatch) {
+      if (!ctx.userLogin) {
+        return Response.json(
+          { error: "A verified session is required to manage a generate job." },
+          { status: 401 },
+        );
+      }
+      const id = decodeURIComponent(generateJobActionMatch[1]) as DataProviderId;
+      const jobId = decodeURIComponent(generateJobActionMatch[2]);
+      const action = generateJobActionMatch[3];
+      const entry = GENERATE_PIPELINE_CATALOG.find((e) => e.jobId === jobId);
+      if (!entry || entry.sourceId !== id) {
+        return Response.json(
+          {
+            error: `No generate job "${jobId}" is registered for provider "${id}".`,
+            code: GENERATE_JOB_CODES.jobNotFound,
+          },
+          { status: 404 },
+        );
+      }
+      if (!["run", "pause", "resume", "cancel", "retry"].includes(action)) {
+        return Response.json(
+          { error: `Unknown generate-job action "${action}".` },
+          { status: 404 },
+        );
+      }
+      const door = feedPipelineDoorFor(ctx);
+      if (!door) {
+        return Response.json(
+          {
+            error:
+              "The pipeline host is not bound on this deployment; the action was refused rather than dispatched through an unwired path.",
+            code: "GENERATE_JOB_NOT_CONFIGURED",
+          },
+          { status: 500 },
+        );
+      }
+      try {
+        const result =
+          action === "run"
+            ? await door.runPipelineJob(jobId, { userLogin: ctx.userLogin })
+            : action === "pause"
+              ? await door.pausePipelineJob(jobId)
+              : action === "resume"
+                ? await door.resumePipelineJob(jobId, { userLogin: ctx.userLogin })
+                : action === "cancel"
+                  ? await door.cancelPipelineJob(jobId)
+                  : await door.retryPipelineJob(jobId, { userLogin: ctx.userLogin });
+        ctx.recordAudit("data_provider.generate_job_action", "orchestrator", {
+          actor: ctx.userLogin,
+          providerId: id,
+          jobId,
+          action,
+        });
+        return Response.json({
+          jobId,
+          action,
+          result,
+          status: await door.getGenerateJobSurfaceStatus(jobId),
+        });
+      } catch (error) {
+        return Response.json(
+          {
+            error: error instanceof Error ? error.message : String(error),
+            code: "GENERATE_JOB_ACTION_REFUSED",
           },
           { status: 409 },
         );

@@ -68,10 +68,12 @@ import {
   declarePipelineTasks,
   dispatchAnalyzeAfterEnrichCompletion,
   dispatchEnrichAfterFeedCompletion,
+  dispatchGenerateAfterAnalyzeCompletion,
   ensureScheduledAgentPipelineJobs,
   listPipelineCompletions,
   pipelineAnalyzeJobIds,
   pipelineEnrichJobIds,
+  pipelineGenerateJobIds,
   pipelineJobIds,
   recordPipelineCompletion,
   startPipelineJobWorkflow,
@@ -112,6 +114,16 @@ import {
   type AnalyzeJobSurfaceView,
 } from "../services/analyzePipelineJobs";
 import { createAnalyzedDatasetPorts } from "../data/createAnalyzedDatasetPorts";
+// Issue #3538 (Pipeline J5): the generate jobs' surface on this
+// host — the merged status view's composition pieces (the RPCs
+// below delegate to the same ONE control plane).
+import { buildGenerateJobRegistry } from "../services/generateJobs";
+import {
+  buildGenerateJobSurfaceView,
+  GENERATE_PIPELINE_CATALOG,
+  type GenerateJobSurfaceView,
+} from "../services/generatePipelineJobs";
+import { createGeneratedDatasetPorts } from "../data/createGeneratedDatasetPorts";
 import { createSocialBriefStoreFromNamespace } from "./social/briefStore";
 import {
   createSocialPipelineStoresFromNamespace,
@@ -631,18 +643,56 @@ export class ScheduledAgent extends PortThink {
     return views;
   }
 
+  /** One generate job's merged surface status (dataset + pipeline, #3538). */
+  async getGenerateJobSurfaceStatus(jobId: string): Promise<GenerateJobSurfaceView> {
+    const ctx = this.pipelineContext();
+    const control = createScheduledAgentPipelineControl(ctx);
+    await ensureScheduledAgentPipelineJobs(ctx, control);
+    const entry = GENERATE_PIPELINE_CATALOG.find((e) => e.jobId === jobId);
+    if (!entry) {
+      throw new Error(
+        `GENERATE_JOB_NOT_FOUND: no generate job with id "${jobId}" exists in the generate catalog.`,
+      );
+    }
+    const envStrings: Record<string, string | undefined> = {};
+    for (const [key, value] of Object.entries(
+      this.env as unknown as Record<string, unknown>,
+    )) {
+      if (typeof value === "string") envStrings[key] = value;
+    }
+    return buildGenerateJobSurfaceView({
+      entry,
+      generatedStore: createGeneratedDatasetPorts(this.env),
+      registry: buildGenerateJobRegistry(envStrings),
+      pipeline: await control.getJob(jobId),
+      nowMs: Date.now(),
+    });
+  }
+
+  /** Every generate job's merged surface status, in catalog order (#3538). */
+  async listGenerateJobSurfaceStatuses(): Promise<GenerateJobSurfaceView[]> {
+    const views: GenerateJobSurfaceView[] = [];
+    for (const jobId of pipelineGenerateJobIds()) {
+      views.push(await this.getGenerateJobSurfaceStatus(jobId));
+    }
+    return views;
+  }
+
   /**
    * The queue consumer's intake: record one routed completion —
    * then the stage hand-offs: a completed feed job dispatches
-   * the enrich job consuming it (#3536), and a completed enrich
-   * job dispatches the analyze job consuming it (#3537)
-   * (best-effort; the recording never depends on a dispatch).
+   * the enrich job consuming it (#3536), a completed enrich
+   * job dispatches the analyze job consuming it (#3537), and a
+   * completed analyze job dispatches the generate job consuming
+   * it (#3538) (best-effort; the recording never depends on a
+   * dispatch).
    */
   async recordPipelineCompletion(note: PipelineCompletionNote): Promise<void> {
     const ctx = this.pipelineContext();
     await recordPipelineCompletion(ctx, note);
     await dispatchEnrichAfterFeedCompletion(ctx, note);
     await dispatchAnalyzeAfterEnrichCompletion(ctx, note);
+    await dispatchGenerateAfterAnalyzeCompletion(ctx, note);
   }
 
   /** Recorded pipeline completions, newest first. */

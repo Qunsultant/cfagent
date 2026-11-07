@@ -34,9 +34,11 @@ import { createPipelineStepRegistry } from "../services/enrichPipelineJobs";
 import { buildFeedJobRegistry } from "../services/feedJobs";
 import { buildEnrichJobRegistry } from "../services/enrichJobs";
 import { buildAnalyzeJobRegistry } from "../services/analyzeJobs";
+import { buildGenerateJobRegistry } from "../services/generateJobs";
 import { createFeedDatasetAdapter } from "../data/createFeedDatasetPorts";
 import { createEnrichedDatasetAdapter } from "../data/createEnrichedDatasetPorts";
 import { createAnalyzedDatasetPorts } from "../data/createAnalyzedDatasetPorts";
+import { createGeneratedDatasetPorts } from "../data/createGeneratedDatasetPorts";
 import { D1IndexListStore } from "../data/d1IndexListAdapter";
 import {
   createIndexMembershipService,
@@ -86,10 +88,11 @@ export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
       latestRun: (jobId) => runRecords.latestByJob(jobId),
     },
     publisher: messaging.ports?.publisher ?? null,
-    // #3535/#3536/#3537: the workflow residency composes THE same step
+    // #3535/#3536/#3537/#3538: the workflow residency composes THE same step
     // registry as the ScheduledAgent host (one registry, every
     // residency — the composed registry includes the J1
-    // built-ins, the feed steps, enrich.apply, and analyze.apply). Residency
+    // built-ins, the feed steps, enrich.apply, analyze.apply, and
+    // generate.apply). Residency
     // rule: the dataset and index-list stores are D1 here, and
     // the universe step runs (its service is a network fetch),
     // but capture-wired PROVIDERS need a DO host's storage (the
@@ -101,7 +104,14 @@ export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
     // The enrich step's stores are both D1, so an enrich run
     // dispatched here executes fully in this residency. The
     // analyze step's stores are both D1 too (#3537), so an
-    // analyze run dispatched here executes fully as well.
+    // analyze run dispatched here executes fully as well. The
+    // generate step's dataset stores are both D1 (#3538), so a
+    // generate run dispatched here also executes fully; its
+    // canonical report-store seam (mas_reports) is not wired in
+    // this residency — a workflow has no tenant's Orchestrator
+    // DO to write the canonical copy into — so each report's
+    // canonical leg is recorded not_wired with its coded reason
+    // on the generated artifact (generateJobs.ts carries the rule).
     steps: createPipelineStepRegistry(
       {
         registry: buildFeedJobRegistry(envStrings),
@@ -137,6 +147,15 @@ export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
         registry: buildAnalyzeJobRegistry(envStrings),
         enrichedStore: createEnrichedDatasetAdapter(env),
         analyzedStore: createAnalyzedDatasetPorts(env),
+        shardsFor: async (jobId) =>
+          (await stores.definitions.getDefinition(jobId))?.config.processing
+            .shards ?? [],
+      },
+      {
+        registry: buildGenerateJobRegistry(envStrings),
+        analyzedStore: createAnalyzedDatasetPorts(env),
+        generatedStore: createGeneratedDatasetPorts(env),
+        canonicalReportStore: null,
         shardsFor: async (jobId) =>
           (await stores.definitions.getDefinition(jobId))?.config.processing
             .shards ?? [],
