@@ -123,6 +123,13 @@ function measure(): Map<string, number> {
  * INTEGRATION; docs/plans completion records are
  * HISTORICAL; "Nasdaq-100" in a port comment is
  * NOT-PROVIDER.
+ * Baseline repair (#3761, 2026-11-08): the MCP server
+ * inventory (docs/architecture/agentic/
+ * mcp-server-inventory.md, landed in cd76eba2) names the
+ * providers its servers integrate — provenance naming of
+ * the serving integration — dispositioned INTEGRATION
+ * (3 rows / 11 lines: alpaca 4, etrade 5, yahoo 2). The
+ * seed pin totals move 1092/8522 -> 1095/8533 with it.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (186 rows / 1039 lines) ----
@@ -316,7 +323,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/platformKnowledge.ts", "yahoo", 12],
   ["src/trading/interfaces.ts", "etrade", 2],
 
-  // ---- INTEGRATION (660 rows / 6430 lines) ----
+  // ---- INTEGRATION (663 rows / 6441 lines) ----
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "etrade", 12],
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "yahoo", 1],
   ["docs/EXTERNAL_APIS_AND_ENDPOINTS_DIRECTORY.md", "alpaca", 3],
@@ -328,6 +335,9 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/architecture/agentic/job-system.md", "alpaca", 6],
   ["docs/architecture/agentic/job-system.md", "nasdaq", 2],
   ["docs/architecture/agentic/job-system.md", "yahoo", 2],
+  ["docs/architecture/agentic/mcp-server-inventory.md", "alpaca", 4],
+  ["docs/architecture/agentic/mcp-server-inventory.md", "etrade", 5],
+  ["docs/architecture/agentic/mcp-server-inventory.md", "yahoo", 2],
   ["docs/architecture/security/etrade.md", "etrade", 38],
   ["docs/architecture/security/vendor-risk-1774.md", "alpaca", 1],
   ["docs/architecture/security/vendor-risk-1774.md", "etrade", 1],
