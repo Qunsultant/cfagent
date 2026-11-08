@@ -266,7 +266,9 @@ describe("one exporter (#1065 source pins)", () => {
     // download out of AsyncJobsPanel into the shared viewer) and
     // ResearchReportActions (a server-generated workbook). Every EXPORT
     // blob URL — text or .xls — is created by runExport's download
-    // helpers only.
+    // helpers only. #3773 adds one more non-exporter: voiceBackend.ts
+    // creates a blob URL solely to PLAY the TTS endpoint's audio in an
+    // Audio element (revoked on end) — not a download or an export.
     const creators = srcFiles
       .filter((f) => readFileSync(f, "utf8").includes("URL.createObjectURL"))
       .map((f) => relative(ROOT, f).replace(/\\/g, "/"))
@@ -275,6 +277,7 @@ describe("one exporter (#1065 source pins)", () => {
       "src/client/AsyncJobResultViewer.tsx",
       "src/client/ResearchReportActions.tsx",
       "src/client/runExport.ts",
+      "src/client/voiceBackend.ts",
     ]);
   });
 });

@@ -139,6 +139,14 @@ export interface Env {
   // voice channel is on). Rollback is editing the entry and
   // redeploying — no code change.
   COPILOT_CHANNELS?: string;
+  // Issue #3773 — the copilot voice channel's BACKEND switch:
+  // entries `<registration>=webspeech|model` choosing which speech
+  // machinery serves a registration's voice turns (browser Web
+  // Speech, or the server-side Workers AI STT/TTS models). Resolved
+  // stored > env > code default (webspeech) by
+  // src/services/copilotVoiceBackend.ts; empty/absent ⇒ no env
+  // layer. Rollback is editing the entry and redeploying.
+  COPILOT_VOICE_BACKEND?: string;
   APP_NAME: string;
   GITHUB_CLIENT_ID: string;
   GITHUB_CLIENT_SECRET: string;

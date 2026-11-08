@@ -14,6 +14,13 @@ import { ReasoningView } from "./ReasoningView";
 import { ToolResultView } from "./ToolResultView";
 import { StockCopilotPanel } from "../StockCopilotPanel";
 import { setStockCopilotPaused } from "../stockCopilotApi";
+import {
+  copilotVoiceEffective,
+  fetchCopilotChannels,
+  type CopilotChannelsProjection,
+} from "../copilotChannelsApi";
+import { ChatComposerVoiceControl } from "./ChatComposerVoiceControl";
+import { createVoiceBackend } from "../voiceBackend";
 import { findCopilot, getRegisteredCopilots, hasCustomSurface, isRegisteredCopilotId } from "./copilotRegistry";
 // Fluent v9 replaces our primitives on this page only (#3146 experiment).
 // Measured gaps vs our primitives: no danger button (secondary used),
@@ -222,6 +229,45 @@ export function AgentChatTabContentInner({
     return findCopilot(activeView) || findCopilot("general");
   }, [activeView]);
 
+  // Issue #3773: the active registration's channel projection,
+  // read from the server (GET /api/copilot-channels) — the
+  // composer mic renders exactly when the projection's voice
+  // channel resolves effective. Resolution is server-side (the
+  // #3738 switch resolver + the #3720 activation); a failed or
+  // absent read renders no mic (the affordance fails absent,
+  // like the Stock Copilot panel's voice control).
+  const [channelsProjection, setChannelsProjection] =
+    useState<CopilotChannelsProjection | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setChannelsProjection(null);
+    if (!isRegisteredCopilotId(activeView)) return;
+    fetchCopilotChannels(activeView)
+      .then((projection) => {
+        if (!cancelled) setChannelsProjection(projection);
+      })
+      .catch(() => {
+        if (!cancelled) setChannelsProjection(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeView, user.login]);
+
+  // Issue #3773: the ONE voice backend adapter for the active
+  // registration — the projection carries the server-resolved
+  // backend switch (stored > env > code default "webspeech");
+  // the composer control consumes the seam, never the id.
+  const voiceBackend = useMemo(
+    () =>
+      channelsProjection
+        ? createVoiceBackend(channelsProjection.voiceBackend.backend, {
+            registration: activeView,
+          })
+        : null,
+    [channelsProjection, activeView],
+  );
+
   // Issue #2568: Agents SDK routeAgentRequest routes by BINDING name
   // kebabbed, not class name. The binding was SEARCH_AGENT (class
   // OrchestratorAgent since migration v15, #2523), so this tab passed
@@ -281,9 +327,14 @@ export function AgentChatTabContentInner({
 
   const isBusy = status === "streaming" || status === "submitted";
 
-  const handleSendChat = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim() || isBusy || isResetting) return;
+  // The ONE chat send path: typed composer submits and voice
+  // transcripts (#3773) both land as normal user turns through
+  // here — same busy/reset guards, same reconnect, same sourceTab
+  // carrier, same stock pause/resume text interception. Returns
+  // true when the turn was submitted.
+  const sendChatText = (raw: string): boolean => {
+    const text = raw.trim();
+    if (!text || isBusy || isResetting) return false;
 
     if (typeof (agent as any).reconnect === "function" && (agent as any).readyState !== 1) {
       try {
@@ -294,7 +345,7 @@ export function AgentChatTabContentInner({
     }
 
     const sourceTab = activeView === "options" ? "Broker · Auto Options Research" : (currentCopilot?.sourceTab || "Chat & Agents");
-    const lower = input.trim().toLowerCase();
+    const lower = text.toLowerCase();
     if (activeView === "stock") {
       if (lower === "pause" || lower === "pause loop" || lower === "pause stock copilot" || lower.includes("pause the loop") || lower.includes("pause stock copilot")) {
         setStockCopilotPaused(true).catch(() => {});
@@ -304,16 +355,22 @@ export function AgentChatTabContentInner({
     }
     try {
       sendMessage({
-        text: input.trim(),
-        content: input.trim(),
+        text,
+        content: text,
         role: "user",
-        parts: [{ type: "text", text: input.trim() }],
+        parts: [{ type: "text", text }],
         metadata: { sourceTab, userLogin: user.login },
       } as any);
-      setInput("");
+      return true;
     } catch (err) {
       console.error("Failed to send chat message:", err);
+      return false;
     }
+  };
+
+  const handleSendChat = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (sendChatText(input)) setInput("");
   };
 
   const handleChipClick = (prompt: string, sourceTab?: string) => {
@@ -676,6 +733,22 @@ export function AgentChatTabContentInner({
           🌊 Options Flows & Sweeps
         </Button>
       </div>
+
+      {/* Voice channel of the conversation (#3773): rendered only
+          when the active registration's voice channel resolves
+          effective; transcripts submit through sendChatText, the
+          same path as typed turns. */}
+      {copilotVoiceEffective(channelsProjection) && voiceBackend && (
+        <ChatComposerVoiceControl
+          disabled={isResetting}
+          isBusy={isBusy}
+          messages={messages}
+          backend={voiceBackend}
+          onSubmitTranscript={(text) => {
+            sendChatText(text);
+          }}
+        />
+      )}
 
       {/* Chat Input Bar */}
       <form className="chat-input-bar" onSubmit={handleSendChat}>
