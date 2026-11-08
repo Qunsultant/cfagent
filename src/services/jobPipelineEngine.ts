@@ -323,6 +323,33 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/**
+ * Schedule preservation for the family ensures (#3530
+ * scheduling-config): a job's schedule is OPERATOR configuration
+ * (set through configureJob), not a re-derivable default — when an
+ * ensure re-defines a job because some other part of its built
+ * definition drifted, the incoming raw's root schedule is replaced
+ * by the STORED definition's resolved root schedule, so the
+ * re-definition converges every other field without silently
+ * reverting a configured cadence or disable. Returns the incoming
+ * raw unchanged when there is nothing to preserve (no stored
+ * definition, no stored root schedule, or the incoming raw carries
+ * no root record). Sub-node schedules are untouched: the root is
+ * the only schedule any surface configures.
+ */
+export function withSchedulePreserved(
+  incomingRaw: unknown,
+  existing: JobDefinition | null | undefined,
+): unknown {
+  const storedSchedule = existing?.root.schedule;
+  if (!storedSchedule) return incomingRaw;
+  if (!isRecord(incomingRaw) || !isRecord(incomingRaw.root)) return incomingRaw;
+  return {
+    ...incomingRaw,
+    root: { ...incomingRaw.root, schedule: { ...storedSchedule } },
+  };
+}
+
 export class JobPipelineControl {
   private readonly now: () => Date;
   private readonly newRunId: () => string;
