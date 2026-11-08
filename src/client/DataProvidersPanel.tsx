@@ -26,6 +26,7 @@ import {
   postDeliverJobAction,
   postEnrichJobAction,
   postFeedJobAction,
+  postFeedJobSchedule,
   postFeedRun,
   postGenerateJobAction,
   postPipelineChainAction,
@@ -172,6 +173,104 @@ function FeedStatusBlock({
 }
 
 /**
+ * One feed job's stored-schedule editor (#3530 scheduling-config):
+ * renders the schedule the API serves on the job's surface view —
+ * the STORED pipeline definition's schedule, the configuration
+ * that actually schedules the job — and posts changes to the
+ * schedule route. A job whose view carries no schedule renders
+ * "Schedule: unknown" with no controls: an honest unknown, never
+ * a cadence fabricated from the registry default.
+ */
+function FeedJobScheduleEditor({
+  view,
+  job,
+  busy,
+  onSave,
+}: {
+  view: DataProviderView;
+  job: FeedJobView;
+  busy: boolean;
+  onSave: (
+    view: DataProviderView,
+    job: FeedJobView,
+    patch: { enabled?: boolean; intervalMinutes?: number }
+  ) => void;
+}) {
+  const schedule = job.schedule ?? null;
+  const minutesOf = (interval: string | null): string => {
+    const match = interval?.match(/^every (\d+) minutes$/);
+    return match ? match[1]! : "";
+  };
+  const [minutes, setMinutes] = useState<string>(() => minutesOf(schedule?.interval ?? null));
+  useEffect(() => {
+    setMinutes(minutesOf(schedule?.interval ?? null));
+  }, [schedule?.interval]);
+  if (!schedule) {
+    return (
+      <div className="dpp-feed-meta">
+        <span>Schedule: unknown</span>
+      </div>
+    );
+  }
+  const label = !schedule.enabled
+    ? "Schedule: off"
+    : schedule.cron
+      ? `Schedule: cron ${schedule.cron}`
+      : schedule.interval
+        ? `Schedule: ${schedule.interval}`
+        : "Schedule: on";
+  const parsed = Number.parseInt(minutes, 10);
+  const canSave = Number.isInteger(parsed) && parsed > 0;
+  return (
+    <div className="dpp-feed-schedule">
+      <div className="dpp-feed-meta">
+        <span>{label}</span>
+      </div>
+      <div className="dpp-feed-actions">
+        <TextInput
+          size="sm"
+          type="number"
+          min={1}
+          step={1}
+          value={minutes}
+          disabled={busy || !schedule.enabled}
+          data-feed-schedule-minutes={job.jobId}
+          aria-label={`Cadence in minutes for ${job.jobId}`}
+          onChange={(event) => setMinutes(event.target.value)}
+        />
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={busy || !canSave}
+          onClick={() => onSave(view, job, { enabled: schedule.enabled, intervalMinutes: parsed })}
+        >
+          Save schedule
+        </Button>
+        {schedule.enabled ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={busy}
+            onClick={() => onSave(view, job, { enabled: false })}
+          >
+            Disable schedule
+          </Button>
+        ) : (
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={busy}
+            onClick={() => onSave(view, job, { enabled: true })}
+          >
+            Enable schedule
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
  * The honest no-job state (#3530): the provider has no registered
  * feed job. Nasdaq's carries the recorded reason — its adapter
  * serves the US listed-securities universe, not quotes, so the
@@ -283,6 +382,29 @@ export function DataProvidersPanel() {
       await load();
     } catch (err: any) {
       setError(err?.message || `Failed to ${action} feed job "${job.jobId}".`);
+    } finally {
+      setActingId(null);
+    }
+  };
+
+  // #3530 (scheduling-config): save one feed job's schedule patch
+  // through the schedule route, then reload so the block re-renders
+  // from the server's stored definition (one source of truth). A
+  // refusal surfaces the server's own message in the error Notice,
+  // exactly like every other panel action.
+  const saveFeedSchedule = async (
+    view: DataProviderView,
+    job: FeedJobView,
+    patch: { enabled?: boolean; intervalMinutes?: number }
+  ) => {
+    setActingId(view.id);
+    setError("");
+    try {
+      await postFeedJobSchedule(view.id, job.jobId, patch);
+      toast.success(`Feed job "${job.jobId}" schedule saved.`);
+      await load();
+    } catch (err: any) {
+      setError(err?.message || `Failed to save the schedule for feed job "${job.jobId}".`);
     } finally {
       setActingId(null);
     }
@@ -715,6 +837,7 @@ export function DataProvidersPanel() {
                               </Button>
                             )}
                           </div>
+                          <FeedJobScheduleEditor view={view} job={job} busy={busy} onSave={saveFeedSchedule} />
                         </div>
                       );
                     })}
