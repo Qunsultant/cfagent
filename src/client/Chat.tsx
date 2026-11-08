@@ -1907,7 +1907,7 @@ export function Chat({ user }: { user: User }) {
           </div>
         ))}
 
-        {/* E*TRADE Agentic Trading Hub */}
+        {/* Agentic Trading Hub */}
         {/* Kept mounted (hidden) so in-flight and finished requests survive tab switches */}
         <div className="trading-view" hidden={!isTradingTab(tab)}>
           {!isBrokerId(tenantProviders.brokerId) ? (
@@ -1915,7 +1915,7 @@ export function Chat({ user }: { user: User }) {
               {brokerUnavailableNotice(tenantProviders.brokerId, selectedBrokerLabel)}
             </Notice>
           ) : (
-          <ErrorBoundary label="E*TRADE Hub">
+          <ErrorBoundary label={`${selectedBrokerLabel} Trading Hub`}>
           <ETradeTradingHub
             user={user}
             activeSubTab={mapTabToTradingSubTab(tab)}
@@ -1925,7 +1925,7 @@ export function Chat({ user }: { user: User }) {
             onBrokerPropsChange={setBrokerProps}
             onUnreadAlertsChange={setUnreadAlerts}
             onSendPrompt={(prompt, sourceTab) => {
-              setPendingPrompt({ prompt, sourceTab: sourceTab || "E*TRADE Brokerage" });
+              setPendingPrompt({ prompt, sourceTab: sourceTab || `${selectedBrokerLabel} Brokerage` });
               handleSelectTab("chat");
             }}
           />
