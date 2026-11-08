@@ -313,7 +313,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/platformKnowledge.ts", "yahoo", 12],
   ["src/trading/interfaces.ts", "etrade", 2],
 
-  // ---- INTEGRATION (641 rows / 6303 lines) ----
+  // ---- INTEGRATION (660 rows / 6430 lines) ----
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "etrade", 12],
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "yahoo", 1],
   ["docs/EXTERNAL_APIS_AND_ENDPOINTS_DIRECTORY.md", "alpaca", 3],
@@ -365,7 +365,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/agents/nlqOptionsStrategy.ts", "alpaca", 1],
   ["src/agents/nlqOptionsStrategy.ts", "etrade", 19],
   ["src/agents/orchestrator.ts", "etrade", 19],
-  ["src/agents/orchestrator/asyncJobs.ts", "etrade", 7],
+  ["src/agents/orchestrator/asyncJobs.ts", "etrade", 12],
   ["src/agents/orchestrator/autopilot.ts", "etrade", 4],
   ["src/agents/orchestrator/goalScreenDispatch.ts", "etrade", 1],
   ["src/agents/orchestrator/goalScreenDispatch.ts", "yahoo", 1],
@@ -443,7 +443,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/agents/routes/premium.ts", "yahoo", 7],
   ["src/agents/routes/reports.ts", "etrade", 1],
   ["src/agents/routes/routeIdentity.ts", "etrade", 1],
-  ["src/agents/routes/schedules.ts", "etrade", 20],
+  ["src/agents/routes/schedules.ts", "etrade", 21],
   ["src/agents/routes/screenerResearch.ts", "yahoo", 1],
   ["src/agents/routes/serviceUser.ts", "etrade", 2],
   ["src/agents/routes/tradingIntegrations.ts", "etrade", 24],
@@ -454,9 +454,9 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/agents/scheduledTasksPipeline.ts", "alpaca", 1],
   ["src/agents/scheduledTasksPipeline.ts", "etrade", 1],
   ["src/agents/scheduledTasksPipeline.ts", "yahoo", 1],
-  ["src/agents/screener-agent.ts", "alpaca", 4],
-  ["src/agents/screener-agent.ts", "etrade", 67],
-  ["src/agents/screener-agent.ts", "yahoo", 57],
+  ["src/agents/screener-agent.ts", "alpaca", 15],
+  ["src/agents/screener-agent.ts", "etrade", 69],
+  ["src/agents/screener-agent.ts", "yahoo", 58],
   ["src/agents/screenerA2aDispatch.ts", "etrade", 2],
   ["src/agents/screenerA2aDispatch.ts", "yahoo", 5],
   ["src/agents/slackA2aDispatch.ts", "etrade", 11],
@@ -487,7 +487,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/client/ETradeTradingHub.tsx", "alpaca", 23],
   ["src/client/ETradeTradingHub.tsx", "etrade", 114],
   ["src/client/ProviderConnectivityDashboard.tsx", "etrade", 20],
-  ["src/client/SchedulesPanel.tsx", "etrade", 4],
+  ["src/client/SchedulesPanel.tsx", "etrade", 7],
   ["src/client/TradingApprovalsQueue.tsx", "etrade", 7],
   ["src/client/accountApi.ts", "etrade", 30],
   ["src/client/agenticWalletApi.ts", "etrade", 1],
@@ -783,14 +783,14 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/riskPolicyEngine.ts", "etrade", 1],
   ["src/services/sandboxAgent.ts", "etrade", 1],
   ["src/services/scheduleSystems.ts", "etrade", 1],
-  ["src/services/scheduledTasks.ts", "etrade", 93],
+  ["src/services/scheduledTasks.ts", "etrade", 97],
   ["src/services/scheduledTasks.ts", "yahoo", 19],
   ["src/services/screenerFollowupDelivery.ts", "etrade", 6],
   ["src/services/screenerFollowups.ts", "etrade", 1],
   ["src/services/screeningDelivery.ts", "etrade", 6],
   ["src/services/screeningRuntime.ts", "etrade", 5],
   ["src/services/screeningRuntime.ts", "yahoo", 15],
-  ["src/services/shardExecutors.ts", "etrade", 28],
+  ["src/services/shardExecutors.ts", "etrade", 39],
   ["src/services/shardExecutors.ts", "yahoo", 9],
   ["src/services/shardJobs.ts", "etrade", 9],
   ["src/services/shardJobs.ts", "yahoo", 7],
@@ -906,8 +906,8 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/trading/screeningIndicators.ts", "etrade", 3],
   ["src/trading/screeningProvider.ts", "etrade", 10],
   ["src/trading/screeningProvider.ts", "yahoo", 9],
-  ["src/trading/screeningSchemas.ts", "etrade", 2],
-  ["src/trading/screeningSchemas.ts", "yahoo", 2],
+  ["src/trading/screeningSchemas.ts", "etrade", 4],
+  ["src/trading/screeningSchemas.ts", "yahoo", 3],
   ["src/trading/slack/agent.ts", "etrade", 81],
   ["src/trading/slack/agent.ts", "yahoo", 2],
   ["src/trading/stockQuoteSource.ts", "alpaca", 1],
@@ -955,6 +955,25 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/client/BrokerDynamicMenu.tsx", "etrade", 24],
   ["src/client/BrokerDynamicMenu.tsx", "yahoo", 6],
   ["src/trading/voice/stockCopilotVoiceActivation.ts", "etrade", 2],
+  ["docs/architecture/client-assets.md", "etrade", 1],
+  ["src/agents/orchestrator/asyncJobs.ts", "alpaca", 1],
+  ["src/client/AdminQueueWipePanel.tsx", "alpaca", 1],
+  ["src/client/ScheduleRunLedgerPanel.tsx", "alpaca", 1],
+  ["src/client/ScheduleRunLedgerPanel.tsx", "etrade", 1],
+  ["src/client/SchedulesPanel.tsx", "alpaca", 2],
+  ["src/client/scheduledOptionsManager/ScheduleCard.tsx", "alpaca", 2],
+  ["src/client/scheduledOptionsManager/ScheduleCard.tsx", "etrade", 2],
+  ["src/client/scheduledOptionsManager/ScheduleFormModal.tsx", "alpaca", 2],
+  ["src/client/scheduledOptionsManager/ScheduleFormModal.tsx", "etrade", 2],
+  ["src/client/scheduledOptionsManager/scheduleDetail.ts", "alpaca", 2],
+  ["src/client/scheduledOptionsManager/scheduleDetail.ts", "etrade", 2],
+  ["src/services/scheduledBrokerGuard.ts", "alpaca", 3],
+  ["src/services/scheduledBrokerGuard.ts", "etrade", 14],
+  ["src/services/scheduledEffectiveMode.ts", "alpaca", 7],
+  ["src/services/scheduledTasks.ts", "alpaca", 7],
+  ["src/services/shardExecutors.ts", "alpaca", 3],
+  ["src/trading/screenerPipeline.ts", "alpaca", 26],
+  ["src/trading/screeningSchemas.ts", "alpaca", 4],
 
   // ---- HISTORICAL (145 rows / 732 lines) ----
   ["docs/Assessment.md", "etrade", 6],
@@ -1162,7 +1181,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/platformKnowledge.ts", "nasdaq", 18],
   ["src/services/quoteCache.ts", "nasdaq", 3],
   ["src/services/researchProviders.ts", "nasdaq", 1],
-  ["src/services/scheduledTasks.ts", "nasdaq", 3],
+  ["src/services/scheduledTasks.ts", "nasdaq", 5],
   ["src/services/shardExecutors.ts", "nasdaq", 15],
   ["src/services/shardJobs.ts", "nasdaq", 10],
   ["src/trading/etrade/platform.ts", "nasdaq", 1],
@@ -1174,7 +1193,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/trading/screenerPipeline.ts", "nasdaq", 32],
   ["src/trading/screenerReportXlsx.ts", "nasdaq", 3],
   ["src/trading/screeningProvider.ts", "nasdaq", 1],
-  ["src/trading/screeningSchemas.ts", "nasdaq", 1],
+  ["src/trading/screeningSchemas.ts", "nasdaq", 2],
   ["src/trading/universes.ts", "nasdaq", 3],
   ["src/types.ts", "nasdaq", 1],
 
@@ -1250,8 +1269,8 @@ describe("#3525 S6 shrink-only provider-brand census pin", () => {
     expect(total).toBeLessThanOrEqual(PLATFORM_BASELINE_TOTAL);
   });
 
-  it("the baseline itself is the recorded seed (1073 rows / 8395 lines)", () => {
-    expect(BASELINE.length).toBe(1073);
-    expect(BASELINE.reduce((a, [, , c]) => a + c, 0)).toBe(8395);
+  it("the baseline itself is the recorded seed (1092 rows / 8522 lines)", () => {
+    expect(BASELINE.length).toBe(1092);
+    expect(BASELINE.reduce((a, [, , c]) => a + c, 0)).toBe(8522);
   });
 });
