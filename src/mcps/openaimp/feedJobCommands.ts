@@ -19,9 +19,11 @@
 import { z } from "zod";
 import type { IMcpToolCommand, McpToolContext } from "../../patterns/interfaces";
 import {
+  configureFeedJobScheduleViaDoor,
   getFeedJobStatusViaDoor,
   listFeedJobsViaDoor,
   manageFeedJobViaDoor,
+  requireActingLogin,
   runFeedJobViaDoor,
   type FeedJobManagementAction,
 } from "../../agents/orchestrator/meshDoors";
@@ -146,6 +148,185 @@ export class ManageFeedJobCommand
       jobId: result.jobId,
       action: result.action,
       state: result.instance?.state ?? result.run?.state ?? "unknown",
+    });
+    return result;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Schedule commands (#3530 slice B)                                   */
+/*                                                                     */
+/* The stored schedule slice A made configurable through the REST    */
+/* route, through the Copilot with the same validation and the same  */
+/* door — no second schedule shape anywhere in the chain.            */
+/* ------------------------------------------------------------------ */
+
+/** The typed refusal code for an invalid schedule patch (the schedule route's code). */
+export const FEED_JOB_SCHEDULE_INVALID = "FEED_JOB_SCHEDULE_INVALID";
+
+function schedulePatchRefusal(message: string): Error {
+  return new Error(`${FEED_JOB_SCHEDULE_INVALID}: ${message}`);
+}
+
+export interface FeedJobSchedulePatchInput {
+  source: string;
+  enabled?: boolean;
+  intervalMinutes?: number;
+  cron?: string;
+}
+
+/**
+ * Validate a schedule patch with the schedule route's rules
+ * (src/agents/routes/dataProviders.ts), in the route's terms: an
+ * empty patch, an unknown field, a non-boolean enabled, a
+ * non-positive-integer intervalMinutes, an empty cron, or
+ * intervalMinutes + cron together all refuse typed — before any
+ * door call, so an invalid patch never partially writes.
+ */
+function validateFeedJobSchedulePatch(input: FeedJobSchedulePatchInput): {
+  enabled?: boolean;
+  intervalMinutes?: number;
+  cron?: string;
+} {
+  const raw = input as unknown as Record<string, unknown>;
+  const keys = Object.keys(raw).filter(
+    (key) => key !== "source" && raw[key] !== undefined,
+  );
+  if (keys.length === 0) {
+    throw schedulePatchRefusal(
+      "The schedule patch is empty — name enabled, intervalMinutes, or cron.",
+    );
+  }
+  for (const key of keys) {
+    if (!["enabled", "intervalMinutes", "cron"].includes(key)) {
+      throw schedulePatchRefusal(`Unknown schedule field "${key}".`);
+    }
+  }
+  if (raw.enabled !== undefined && typeof raw.enabled !== "boolean") {
+    throw schedulePatchRefusal('Schedule field "enabled" must be a boolean.');
+  }
+  if (
+    raw.intervalMinutes !== undefined &&
+    (typeof raw.intervalMinutes !== "number" ||
+      !Number.isInteger(raw.intervalMinutes) ||
+      raw.intervalMinutes <= 0)
+  ) {
+    throw schedulePatchRefusal(
+      'Schedule field "intervalMinutes" must be a positive whole number of minutes.',
+    );
+  }
+  if (
+    raw.cron !== undefined &&
+    (typeof raw.cron !== "string" || !raw.cron.trim())
+  ) {
+    throw schedulePatchRefusal('Schedule field "cron" must be a non-empty string.');
+  }
+  if (raw.intervalMinutes !== undefined && raw.cron !== undefined) {
+    throw schedulePatchRefusal(
+      "Name either intervalMinutes or cron, not both — a schedule carries one cadence mechanism.",
+    );
+  }
+  return {
+    ...(typeof raw.enabled === "boolean" ? { enabled: raw.enabled } : {}),
+    ...(typeof raw.intervalMinutes === "number"
+      ? { intervalMinutes: raw.intervalMinutes }
+      : {}),
+    ...(typeof raw.cron === "string" ? { cron: raw.cron } : {}),
+  };
+}
+
+export class GetFeedJobScheduleCommand
+  implements IMcpToolCommand<{ source: string }>
+{
+  readonly name = "get_feed_job_schedule";
+  readonly description =
+    "Report one feed job's STORED schedule — whether it is enabled, its cadence (an interval like \"every 60 minutes\" or a cron expression), and the next scheduled run when known — from the same surface view the Data Providers UX renders. A job with no stored definition reports schedule as null: an honest unknown, never a cadence fabricated from the registry default. Requires the chat turn's acting identity.";
+  readonly jsonSchema = {
+    type: "object" as const,
+    properties: { source: SOURCE_PROPERTY },
+    required: ["source"],
+  };
+  readonly zodSchema = z.object({
+    source: z.string().min(1).describe("Feed job source or name"),
+  });
+
+  async execute(input: { source: string }, context: McpToolContext) {
+    const actingLogin = context.actingLogin?.();
+    const view = await getFeedJobStatusViaDoor(context.env, actingLogin, input.source);
+    context.audit("mcp.tool_called", "orchestrator", {
+      tool: this.name,
+      jobId: view.jobId,
+      enabled: view.schedule?.enabled ?? null,
+    });
+    return {
+      jobId: view.jobId,
+      label: view.label,
+      schedule: view.schedule,
+      nextScheduledRun: view.nextScheduledRun,
+    };
+  }
+}
+
+export class SetFeedJobScheduleCommand
+  implements IMcpToolCommand<FeedJobSchedulePatchInput>
+{
+  readonly name = "set_feed_job_schedule";
+  readonly description =
+    "Set one feed job's stored schedule through the pipeline host's control plane (the configure door the Data Providers schedule route uses): enable or disable the schedule, set its cadence in minutes, or set a cron expression. The patch merges over the stored schedule — disabling never loses the cadence and a cadence change never flips enablement. An invalid patch refuses with FEED_JOB_SCHEDULE_INVALID before any write. Requires the chat turn's acting identity.";
+  readonly jsonSchema = {
+    type: "object" as const,
+    properties: {
+      source: SOURCE_PROPERTY,
+      enabled: {
+        type: "boolean",
+        description: "Enable or disable the job's schedule.",
+      },
+      intervalMinutes: {
+        type: "number",
+        description: "The cadence in whole minutes (a positive integer).",
+      },
+      cron: {
+        type: "string",
+        description: "A cron expression instead of an interval cadence.",
+      },
+    },
+    required: ["source"],
+  };
+  readonly zodSchema = z.object({
+    source: z.string().min(1).describe("Feed job source or name"),
+    enabled: z.boolean().optional().describe("Enable or disable the schedule"),
+    intervalMinutes: z
+      .number()
+      .optional()
+      .describe("The cadence in whole minutes"),
+    cron: z.string().optional().describe("A cron expression"),
+  });
+
+  async execute(input: FeedJobSchedulePatchInput, context: McpToolContext) {
+    const actingLogin = context.actingLogin?.();
+    // Identity first, patch validation second — the schedule
+    // route's order (session, then body), so an identity-less call
+    // refuses as identity_required whatever the patch holds.
+    requireActingLogin(actingLogin);
+    const patch = validateFeedJobSchedulePatch(input);
+    const result = await configureFeedJobScheduleViaDoor(
+      context.env,
+      actingLogin,
+      input.source,
+      {
+        ...(patch.enabled !== undefined ? { enabled: patch.enabled } : {}),
+        ...(patch.intervalMinutes !== undefined
+          ? { interval: `every ${patch.intervalMinutes} minutes` }
+          : {}),
+        ...(patch.cron !== undefined ? { cron: patch.cron.trim() } : {}),
+      },
+    );
+    context.audit("mcp.tool_called", "orchestrator", {
+      tool: this.name,
+      jobId: result.jobId,
+      enabled: result.schedule?.enabled ?? null,
+      interval: result.schedule?.interval ?? null,
+      cron: result.schedule?.cron ?? null,
     });
     return result;
   }
