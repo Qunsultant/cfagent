@@ -50,6 +50,7 @@ import type {
   JobPipelineControl,
   JobStatusView,
 } from "./jobPipelineEngine";
+import { withSchedulePreserved } from "./jobPipelineEngine";
 import {
   createBuiltinStepRegistry,
   JobStepRegistry,
@@ -223,14 +224,17 @@ export async function ensureFeedPipelineJobs(
   for (const raw of buildAllFeedPipelineJobDefinitions(env)) {
     const jobId = (raw as { jobId: string }).jobId;
     const existing = await stores.definitions.getDefinition(jobId);
+    // #3530: the stored schedule is operator configuration — a
+    // re-definition for other drift must not revert it.
+    const effective = withSchedulePreserved(raw, existing);
     if (
       existing &&
-      JSON.stringify(existing.rawConfig) === JSON.stringify(raw)
+      JSON.stringify(existing.rawConfig) === JSON.stringify(effective)
     ) {
       ensured.push(jobId);
       continue;
     }
-    await control.defineJob(raw);
+    await control.defineJob(effective);
     ensured.push(jobId);
   }
   return ensured;
@@ -437,6 +441,18 @@ export interface FeedJobSurfaceView {
   /** ISO time of the next scheduled firing, estimated as the
    *  last dispatch + the declared interval; null when unknown. */
   nextScheduledRun: string | null;
+  /**
+   * The STORED definition's schedule — the configuration that
+   * actually schedules this job (#3530 scheduling-config) — or
+   * null when there is no stored pipeline definition to read it
+   * from (host unreachable / never defined): an honest unknown,
+   * never a cadence fabricated from the registry default.
+   */
+  schedule: {
+    enabled: boolean;
+    interval: string | null;
+    cron: string | null;
+  } | null;
 }
 
 export async function buildFeedJobSurfaceView(args: {
@@ -476,6 +492,7 @@ export async function buildFeedJobSurfaceView(args: {
       }
     }
   }
+  const storedSchedule = args.pipeline?.definition.config.schedule;
   return {
     jobId: args.entry.jobId,
     sourceId: args.entry.sourceId,
@@ -484,5 +501,12 @@ export async function buildFeedJobSurfaceView(args: {
     feed,
     pipeline,
     nextScheduledRun,
+    schedule: storedSchedule
+      ? {
+          enabled: storedSchedule.enabled,
+          interval: storedSchedule.interval ?? null,
+          cron: storedSchedule.cron ?? null,
+        }
+      : null,
   };
 }
