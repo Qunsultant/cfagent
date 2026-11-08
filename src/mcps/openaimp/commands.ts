@@ -128,6 +128,8 @@ import {
   GetFeedJobStatusCommand,
   ListFeedJobsCommand,
   ManageFeedJobCommand,
+  GetFeedJobScheduleCommand,
+  SetFeedJobScheduleCommand,
 } from "./feedJobCommands";
 import {
   RunEnrichJobCommand,
@@ -1830,6 +1832,11 @@ export class McpToolFactory {
     this.registerTool(new GetFeedJobStatusCommand());
     this.registerTool(new ListFeedJobsCommand());
     this.registerTool(new ManageFeedJobCommand());
+    // Issue #3530 slice B: the feed-job schedule doors — read the
+    // stored schedule and configure it through slice A's door,
+    // beside the feed-job doors above.
+    this.registerTool(new GetFeedJobScheduleCommand());
+    this.registerTool(new SetFeedJobScheduleCommand());
     // Issue #3536: the enrich-job doors — run / status / list /
     // manage the job pipeline's per-source enrich jobs through
     // the same ScheduledAgent host control plane. Same identity
