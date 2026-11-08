@@ -72,7 +72,7 @@ const SCOPE_FILES: string[] = [];
 function walk(dir: string): void {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const path = join(dir, entry.name);
-    if (entry.isDirectory()) walk(path);
+    if (entry.isDirectory()) walk(path); // entry: the directory entry being classified
     else SCOPE_FILES.push(path);
   }
 }
@@ -1236,7 +1236,7 @@ describe("#3525 S6 shrink-only provider-brand census pin", () => {
     const offenders: string[] = [];
     for (const [key, n] of measured) {
       const base = BASELINE_MAP.get(key);
-      if (base !== undefined && n > base) offenders.push(`${key.replace("\t", " / ")}: ${base} -> ${n}`);
+      if (base !== undefined && n > base) offenders.push(`${key.replaceAll("\t", " / ")}: ${base} -> ${n}`);
     }
     expect(
       offenders,
