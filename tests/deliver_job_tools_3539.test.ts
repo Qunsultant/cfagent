@@ -241,9 +241,9 @@ async function runChainToGenerate(stub: { runPipelineJob: (jobId: string) => Pro
 }
 
 describe("deliver-job copilot tools (#3539)", () => {
-  it("the catalog carries the four deliver-job tools (118 total since #3767)", () => {
+  it("the catalog carries the four deliver-job tools (120 total since #3530 slice B)", () => {
     const names = McpToolFactory.getToolDefinitions().map((d) => d.name);
-    expect(names).toHaveLength(118);
+    expect(names).toHaveLength(120);
     for (const name of ["run_deliver_job", "get_deliver_job_status", "list_deliver_jobs", "manage_deliver_job"]) {
       expect(names).toContain(name);
     }
