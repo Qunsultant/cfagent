@@ -187,7 +187,11 @@ import {
   type StockCopilotControlResult,
   type StockCopilotLearningsResult,
 } from "../../agents/orchestrator/meshStockCopilotDoor";
-import type { StockCopilotIntrospectionResult } from "../../services/stockCopilotIntrospection";
+import {
+  type StockCopilotIntrospectionResult,
+  remediatePlatformGaps,
+  type PlatformRemediationResult,
+} from "../../services/stockCopilotIntrospection";
 import type { StockCopilotEvaluationResult } from "../../services/stockCopilotEvaluation";
 import { COPILOT_SESSIONS } from "../../services/stockCopilotSessions";
 import { UNIVERSES, type UniverseId } from "../../trading";
@@ -351,6 +355,58 @@ export class CheckPaymentBudgetCommand implements IMcpToolCommand<{
       actingLogin: actingLogin ?? null,
       operation: input.operation,
       amountCents: input.amountCents,
+      agentId: result.agentId,
+      allowed: result.allowed,
+    });
+    return result;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* get_payment_budget                                                  */
+/* ------------------------------------------------------------------ */
+
+export class GetPaymentBudgetCommand implements IMcpToolCommand<{
+  operation?: string;
+  amountCents?: number;
+}> {
+  readonly name = "get_payment_budget";
+  readonly description =
+    "Retrieve current payment budget and remaining spend allowance for agentic tools (e.g. options screener $0.05 USDC, market research $0.10 USDC, search.query, nlq.execute). Evaluates against BudgetGuard and the user's commercial tier. Requires the chat turn's acting identity.";
+  readonly jsonSchema = {
+    type: "object" as const,
+    properties: {
+      operation: {
+        type: "string",
+        description: "The budget-guarded operation name (defaults to 'paid_options_screener').",
+      },
+      amountCents: {
+        type: "number",
+        description: "The proposed spend, in cents (defaults to 5).",
+      },
+    },
+  };
+  readonly zodSchema = z.object({
+    operation: z.string().optional(),
+    amountCents: z.number().int().positive().optional(),
+  });
+
+  async execute(
+    input: { operation?: string; amountCents?: number },
+    context: McpToolContext,
+  ): Promise<PaymentBudgetDoorResult> {
+    const actingLogin = context.actingLogin?.();
+    await recordDoorHop(context, this.name, "PaymentsAgent");
+    const op = input.operation ?? "paid_options_screener";
+    const amount = input.amountCents ?? 5;
+    const result = await checkPaymentBudgetViaDoor(context.env, actingLogin, {
+      operation: op,
+      amountCents: amount,
+    });
+    context.audit("get_payment_budget", "mcp", {
+      actingLogin: actingLogin ?? null,
+      operation: op,
+      amountCents: amount,
       agentId: result.agentId,
       allowed: result.allowed,
     });
@@ -1596,6 +1652,48 @@ export class StockCopilotIntrospectCommand implements IMcpToolCommand<Record<str
       broker: result.configuration.broker,
       mode: result.configuration.mode,
       stagesCount: result.pipeline.length,
+    });
+    return result;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* stock_copilot_remediate_gaps                                       */
+/* ------------------------------------------------------------------ */
+
+export class StockCopilotRemediateGapsCommand implements IMcpToolCommand<{ pipelineChainSource?: string }> {
+  readonly name = "stock_copilot_remediate_gaps";
+  readonly description =
+    "Autonomously remediate diagnosed platform gaps: kicks off or resumes stalled 5-stage pipeline chains (Feed -> Enrich -> Analyze -> Generate -> Deliver), clears execution bottlenecks, confirms Cloudflare Workers/DO runtime invariant (zero Kafka/RabbitMQ), and verifies payment tool allowance.";
+  readonly jsonSchema = {
+    type: "object" as const,
+    properties: {
+      pipelineChainSource: {
+        type: "string",
+        description: "The pipeline chain to run/resume (e.g. 'nasdaq100 pipeline'). Defaults to 'nasdaq100 pipeline'.",
+      },
+    },
+  };
+  readonly zodSchema = z.object({
+    pipelineChainSource: z.string().optional(),
+  });
+
+  async execute(
+    input: { pipelineChainSource?: string },
+    context: McpToolContext,
+  ): Promise<PlatformRemediationResult> {
+    const actingLogin = context.actingLogin?.();
+    await recordDoorHop(context, this.name, "OrchestratorAgent");
+    const result = await remediatePlatformGaps({
+      env: context.env,
+      userLogin: actingLogin ?? "owner",
+      readSettingRaw: (key: string) => context.orm?.readSettingRaw?.(key) ?? null,
+      pipelineChainSource: input.pipelineChainSource,
+    });
+    context.audit("stock_copilot_remediate_gaps", "mcp", {
+      actingLogin: actingLogin ?? null,
+      remediated: result.remediated,
+      actionsCount: result.actions.length,
     });
     return result;
   }

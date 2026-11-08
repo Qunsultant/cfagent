@@ -301,6 +301,8 @@ export const MCP_TOOL_SCOPES: Record<string, McpScope> = {
   run_options_strategy_screen: "mcp:write",
   // #3513: Stock Copilot loop control (pause/resume & sessions)
   stock_copilot_control: "mcp:write",
+  // #3769: Stock Copilot autonomous platform gap remediation
+  stock_copilot_remediate_gaps: "mcp:write",
   // execute (7)
   execute_nlq: "mcp:execute",
   "chain.run": "mcp:execute",
@@ -321,6 +323,7 @@ export const MCP_TOOL_SCOPES: Record<string, McpScope> = {
   // and payment-domain data (a check records nothing; the overview is
   // ledger data, so both sit in the payments scope, not read).
   check_payment_budget: "mcp:payments",
+  get_payment_budget: "mcp:payments",
   get_payments_overview: "mcp:payments",
   // trade (10)
   etrade_preview_order: "mcp:trade",

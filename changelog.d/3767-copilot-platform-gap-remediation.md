@@ -1,0 +1,7 @@
+### Added
+
+- **Stock Copilot Platform Gap Remediation & Architecture Grounding (#3767, #3768, #3769):**
+  - **Architecture Invariant Grounding (#3767):** Added explicit Cloudflare Workers, Durable Objects (DO-SQLite), D1, KV, and Cloudflare Queues runtime invariant in `src/agents/chatPrompt.ts` forbidding external message broker hallucinations (no Kafka, RabbitMQ, Celery, SQS, or Redis). Diagnostic log inquiries strictly directed to DO SQLite tables (`mas_events`, `audit_events`, `async_jobs`) and Cloudflare Logging.
+  - **Payment Budget Tool Alias (#3768):** Registered `tool_openaimp_get_payment_budget` as a first-class MCP tool alias in `src/mcps/openaimp/meshDoorCommands.ts`, `src/mcps/openaimp/mcpPermissionPorts.ts`, and `src/agents/registry.ts` under `mcp:payments` scope, enabling direct checks of remaining spend allowance without tool lookup failure.
+  - **Autonomous Platform Remediation & Auto-Healing (#3769):** Implemented `remediatePlatformGaps` in `src/services/stockCopilotIntrospection.ts` and registered `tool_openaimp_stock_copilot_remediate_gaps` in `src/mcps/openaimp/meshDoorCommands.ts`. Autonomously triggers 5-stage pipeline chain execution (Feed -> Enrich -> Analyze -> Generate -> Deliver), clears execution bottlenecks, confirms recurring schedule cadence, and validates payment tool availability.
+  - **Hero Quick-Chips & Prompt Steering:** Added *"🩺 Diagnose platform gaps"* and *"🛠️ Fix platform gaps (auto-heal)"* quick chips to `src/client/chat/copilotRegistry.ts` for 1-click execution. #clo-arsi #ceo-aimp
