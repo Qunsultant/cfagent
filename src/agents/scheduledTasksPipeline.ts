@@ -41,7 +41,10 @@ import type {
   ThinkScheduledTaskContext,
 } from "../actors/thinkAdapter";
 import type { Env } from "../types";
-import { getServiceUserLogin } from "../security/serviceIdentity";
+import {
+  getServiceUserLogin,
+  SHARED_ORCHESTRATOR_INSTANCE,
+} from "../security/serviceIdentity";
 import { createJobPipelineStoresFromSql } from "../data/createJobPipelinePorts";
 import { createJobPipelineStoresFromD1 } from "../data/createJobPipelinePorts";
 import { SqlJobRunRecordStore } from "../data/doSqliteJobRunRecordAdapter";
@@ -64,7 +67,7 @@ import {
   type JobScheduleHost,
   type JobStatusView,
 } from "../services/jobPipelineEngine";
-import { buildFeedJobRegistry } from "../services/feedJobs";
+import { buildFeedJobRegistry, buildFeedStatus } from "../services/feedJobs";
 import {
   ensureFeedPipelineJobs,
   FEED_PIPELINE_CATALOG,
@@ -96,6 +99,9 @@ import {
   type DeliverStepDeps,
 } from "../services/deliverPipelineJobs";
 import { createDeliveryDatasetPorts } from "../data/createDeliveryDatasetPorts";
+import { actorGateway } from "../services/cloudflareActorGateway";
+import { createFeedRunSettledObserver } from "../services/feedJobOutcomes";
+import type { JobOutcomeInput } from "../data/jobOutcomePorts";
 import {
   buildPipelineChainRegistry,
   chainStageNodePath,
@@ -360,6 +366,46 @@ export function deliverStepDepsForScheduledAgent(
  * analyze.apply plus generate.apply plus deliver.apply — one
  * registry, every residency.
  */
+/** The Orchestrator door the feed-outcome projection writes through (#3530 slice B). */
+interface OrchestratorOutcomeDoor {
+  recordFeedJobOutcome(input: JobOutcomeInput): Promise<void>;
+}
+
+/**
+ * The settle observer for this host's control plane (#3530 slice B):
+ * a settled feed run's outcome lands in the job-outcome sink the
+ * Autopilot Control Center reads. Residency: the sink is
+ * per-Orchestrator-instance and the reader is the owning instance's
+ * Autopilot Control, so the write doors to the shared Orchestrator
+ * instance — the same addressing the tick's corpus/reports riders
+ * write through — never into this host's own store (which no
+ * Autopilot surface reads). The settled run's counts and status
+ * come from its own feed record, read back through the same
+ * dataset adapter the surface views use and matched by run id.
+ * Best-effort-but-honest: the observer never throws (its failures
+ * are logged in services/feedJobOutcomes), so a missing binding or
+ * an unreachable instance never fails a feed run.
+ */
+function feedRunSettledObserverFor(ctx: ScheduledTasksPipelineContext) {
+  return createFeedRunSettledObserver({
+    readFeedRun: async (jobId, runId) => {
+      const datasetStore = createFeedDatasetAdapter(ctx.env);
+      if (!datasetStore) return null;
+      const def = buildFeedJobRegistry(envStrings(ctx.env)).get(jobId);
+      if (!def) return null;
+      const status = await buildFeedStatus(datasetStore, def, Date.now());
+      return status.lastRun?.runId === runId ? status.lastRun : null;
+    },
+    record: async (input) => {
+      const door = actorGateway.stub<OrchestratorOutcomeDoor>(
+        ctx.env.ORCHESTRATOR_AGENT,
+        SHARED_ORCHESTRATOR_INSTANCE,
+      );
+      await door.recordFeedJobOutcome(input);
+    },
+  });
+}
+
 export function createScheduledAgentPipelineControl(
   ctx: ScheduledTasksPipelineContext,
   userLogin?: string,
@@ -371,6 +417,7 @@ export function createScheduledAgentPipelineControl(
   return new JobPipelineControl({
     stores,
     runRecorder: jobRunRecorderFromStore(new SqlJobRunRecordStore(sql)),
+    runSettledObserver: feedRunSettledObserverFor(ctx),
     publisher: messaging.ports?.publisher ?? null,
     steps: createPipelineStepRegistry(
       feedStepDepsForScheduledAgent(ctx, userLogin),
