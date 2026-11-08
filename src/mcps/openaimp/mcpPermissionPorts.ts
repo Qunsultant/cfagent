@@ -204,6 +204,9 @@ export const MCP_TOOL_SCOPES: Record<string, McpScope> = {
   // merged surface views).
   get_feed_job_status: "mcp:read",
   list_feed_jobs: "mcp:read",
+  // #3530 slice B: the stored feed-job schedule — a pure inspect
+  // read, like the status reads above.
+  get_feed_job_schedule: "mcp:read",
   get_enrich_job_status: "mcp:read",
   list_enrich_jobs: "mcp:read",
   // #3537: the analyze-job reads — pure inspect of the host's
@@ -259,6 +262,9 @@ export const MCP_TOOL_SCOPES: Record<string, McpScope> = {
   // the job's run state (pause/resume/cancel/retry).
   run_feed_job: "mcp:write",
   manage_feed_job: "mcp:write",
+  // #3530 slice B: configuring a feed job's stored schedule is a
+  // write on the same control plane as managing its runs.
+  set_feed_job_schedule: "mcp:write",
   run_enrich_job: "mcp:write",
   manage_enrich_job: "mcp:write",
   // #3537: the analyze-job writes — running an analyze job
