@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { apiFetch as fetch } from "./apiFetch";
-import { Button, Checkbox, Select, Table, TextInput } from "./components/ui";
+import { Button, Checkbox, PageSection, PageShell, Select, Table, TextInput } from "./components/ui";
 import { getPollingConfig } from "./pollingConfig";
 import { startPolling } from "./polling";
 import { usePolling } from "./usePolling";
@@ -555,7 +555,6 @@ export function SagaStartSection({ userLogin }: { userLogin?: string }) {
 
   return (
     <div style={sagaSectionStyle}>
-      <p style={sagaHeadingStyle}>Start a paid saga journey</p>
       <p style={sagaMutedStyle}>
         Pay for a goal screen, then decide at the journey gate whether
         to enter the trading leg. Per-order approval still gates every
@@ -1173,12 +1172,11 @@ export function GoalScreenPanel({ activeEnv, userLogin }: GoalScreenPanelProps) 
         : { background: "var(--color-danger-subtle)", color: "var(--color-danger)" };
 
   return (
-    <div style={{ padding: "var(--space-4) 0" }}>
-      <p style={{ margin: "0 0 1rem", color: "var(--color-text-muted)", fontSize: "var(--font-size-body)" }}>
-        Run a goal-driven screen through the unified screening stack: the goal&rsquo;s scenario
-        drives one screen across stocks and options, executed by the shared provider registry.
-        Results are recorded in Reports and the screening activity log.
-      </p>
+    <PageShell
+      title="Goal Screen"
+      scopeNote="Run a goal-driven screen through the unified screening stack: the goal's scenario drives one screen across stocks and options, executed by the shared provider registry. Results are recorded in Reports and the screening activity log."
+    >
+      <PageSection title="Run a goal screen">
       <form onSubmit={runScreen} style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-4)", alignItems: "flex-end" }}>
         <Select label="Goal" value={goalKind} onChange={(e) => setGoalKind(e.target.value)}>
           {GOAL_KIND_OPTIONS.map((g) => (
@@ -1202,14 +1200,16 @@ export function GoalScreenPanel({ activeEnv, userLogin }: GoalScreenPanelProps) 
           {"Run goal screen"}
         </Button>
       </form>
-
-      <SagaStartSection userLogin={userLogin} />
-
       {error && <div className="options-error" role="alert">{error}</div>}
+      </PageSection>
+
+      <PageSection title="Start a paid saga journey">
+        <SagaStartSection userLogin={userLogin} />
+      </PageSection>
 
       {journeyGates.length > 0 && (
+        <PageSection title="Pending journey decisions">
         <div style={{ marginTop: "1rem" }} role="status">
-          <p style={{ margin: "0 0 0.5rem", fontWeight: 600 }}>Pending journey decisions</p>
           {journeyGateNotice && (
             <p style={{ color: "var(--color-text-muted)", fontSize: "var(--font-size-body)" }}>{journeyGateNotice}</p>
           )}
@@ -1231,13 +1231,12 @@ export function GoalScreenPanel({ activeEnv, userLogin }: GoalScreenPanelProps) 
             </div>
           ))}
         </div>
+        </PageSection>
       )}
 
       {tracking && (
+        <PageSection title="Staged run in progress">
         <div style={{ marginTop: "1rem", fontSize: "var(--font-size-body)" }} role="status">
-          <p style={{ margin: "0 0 0.5rem", fontWeight: 600 }}>
-            Staged run in progress{tracking.timedOut ? " — still processing" : ""} — live stage progress
-          </p>
           {tracking.stages.length > 0 ? (
             <ul style={{ margin: "0 0 0.5rem", color: "var(--color-text-muted)" }}>
               {tracking.stages.map((row, i) => (
@@ -1259,9 +1258,11 @@ export function GoalScreenPanel({ activeEnv, userLogin }: GoalScreenPanelProps) 
               : " — your previous result stays visible until the new one lands."}
           </p>
         </div>
+        </PageSection>
       )}
 
       {result && (
+        <PageSection title="Results">
         <div style={{ marginTop: "1rem" }}>
           {previousResult && (
             <p style={{ color: "var(--color-text-muted)", fontSize: "var(--font-size-body)" }}>
@@ -1295,7 +1296,6 @@ export function GoalScreenPanel({ activeEnv, userLogin }: GoalScreenPanelProps) 
             if (!pdfUrl && !xlsxUrl && !csvUrl) return null;
             return (
               <div
-                className="goal-screen-report-actions"
                 style={{
                   display: "flex",
                   gap: "var(--space-2)",
@@ -1306,7 +1306,7 @@ export function GoalScreenPanel({ activeEnv, userLogin }: GoalScreenPanelProps) 
               >
                 {pdfUrl && (
                   <a
-                    className="ui-btn variant-secondary tone-subtle size-sm goal-screen-download-pdf"
+                    className="ui-btn variant-secondary tone-subtle size-sm"
                     href={pdfUrl}
                     download
                     style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "var(--space-1)" }}
@@ -1316,7 +1316,7 @@ export function GoalScreenPanel({ activeEnv, userLogin }: GoalScreenPanelProps) 
                 )}
                 {xlsxUrl && (
                   <a
-                    className="ui-btn variant-secondary tone-subtle size-sm goal-screen-download-xlsx"
+                    className="ui-btn variant-secondary tone-subtle size-sm"
                     href={xlsxUrl}
                     download
                     style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "var(--space-1)" }}
@@ -1326,7 +1326,7 @@ export function GoalScreenPanel({ activeEnv, userLogin }: GoalScreenPanelProps) 
                 )}
                 {csvUrl && (
                   <a
-                    className="ui-btn variant-secondary tone-subtle size-sm goal-screen-download-csv"
+                    className="ui-btn variant-secondary tone-subtle size-sm"
                     href={csvUrl}
                     download
                     style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "var(--space-1)" }}
@@ -1390,7 +1390,8 @@ export function GoalScreenPanel({ activeEnv, userLogin }: GoalScreenPanelProps) 
             </div>
           )}
         </div>
+        </PageSection>
       )}
-    </div>
+    </PageShell>
   );
 }
