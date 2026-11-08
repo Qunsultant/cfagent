@@ -12,8 +12,9 @@
  *    disabled-by-config / unavailable / not-implemented;
  *  - TRUTHFUL states, derived from the pinned SDK surface
  *    (agents 0.32.0 / @cloudflare/think 0.23.0) and repo evidence —
- *    the pins below record reality (email/voice not-implemented
- *    fleet-wide until S2/S3; the sandbox unavailable until a
+ *    the pins below record reality (email not-implemented
+ *    fleet-wide until S2; voice not-implemented fleet-wide except
+ *    OrchestratorAgent since S3 (#3720); the sandbox unavailable until a
  *    container backend is configured; webhooks enabled at the port
  *    since #3474 but unavailable in any env without
  *    THINK_WEBHOOK_SECRET), never the docs' aspirations;
@@ -132,7 +133,7 @@ describe("capability resolution: truthful defaults (#3489)", () => {
     expect(m.channels.webhooks.prerequisite).toBe("THINK_WEBHOOK_SECRET");
     expect(m.channels.slack.state).toBe("enabled");
     expect(m.channels.email.state).toBe("not-implemented");
-    expect(m.channels.voice.state).toBe("not-implemented");
+    expect(m.channels.voice.state).toBe("enabled");
     expect(m.capabilities.mcpClient.state).toBe("enabled");
     expect(m.capabilities.scheduler.state).toBe("enabled");
     expect(m.capabilities.state.state).toBe("enabled");
@@ -166,11 +167,13 @@ describe("capability resolution: truthful defaults (#3489)", () => {
     expect(m.tools.payments.state).toBe("not-implemented");
   });
 
-  it("email and voice are not-implemented for EVERY PortThink class (S2/S3 have not landed)", () => {
+  it("email is not-implemented for EVERY PortThink class (S2 has not landed); voice is enabled only on OrchestratorAgent (S3, #3720)", () => {
     for (const className of PORT_THINK_CLASSES) {
       const m = resolveAgentCapabilityManifest(className);
       expect(m.channels.email.state, className).toBe("not-implemented");
-      expect(m.channels.voice.state, className).toBe("not-implemented");
+      expect(m.channels.voice.state, className).toBe(
+        className === "OrchestratorAgent" ? "enabled" : "not-implemented"
+      );
     }
   });
 

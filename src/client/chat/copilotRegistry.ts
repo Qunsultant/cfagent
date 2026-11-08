@@ -305,7 +305,12 @@ export const DEFAULT_COPILOTS: CopilotConfig[] = [
     // this copilot — its turns are steered to the copilot's own
     // discovered commands while the OrchestratorAgent manifest's
     // mcpClient entry resolves enabled.
-    capabilities: ["mcpClient"],
+    // S3 (#3720): the voice channel (#3418) is activated for this
+    // copilot — a voice turn carrying this registration's context
+    // is served by the existing desk under the copilot's own
+    // broker selection while the manifest's voice entry resolves
+    // enabled.
+    capabilities: ["mcpClient", "voice"],
     banner: {
       icon: "📈",
       headline: "Stock Copilot Active:",

@@ -134,6 +134,7 @@ const PINNED_STAR_REEXPORTS = [
   "./email/agent",
   "./slack/agent",
   "./voice/agent",
+  "./voice/stockCopilotVoiceActivation",
   "./channels/intake",
   "./channels/approval",
   "./channels/signedLinks",
