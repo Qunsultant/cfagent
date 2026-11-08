@@ -97,6 +97,7 @@ import {
   ListScheduledGoalsCommand,
   TriggerScheduledGoalCommand,
   CheckPaymentBudgetCommand,
+  GetPaymentBudgetCommand,
   GetPaymentsOverviewCommand,
   ProposeStockTradeCommand,
   ProposeOptionsTradeCommand,
@@ -120,6 +121,7 @@ import {
   StockCopilotIntrospectCommand,
   StockCopilotLearningsCommand,
   StockCopilotEvaluateCommand,
+  StockCopilotRemediateGapsCommand,
 } from "./meshDoorCommands";
 import {
   RunFeedJobCommand,
@@ -1867,6 +1869,7 @@ export class McpToolFactory {
     this.registerTool(new ListPipelineChainsCommand());
     this.registerTool(new ManagePipelineChainCommand());
     this.registerTool(new CheckPaymentBudgetCommand());
+    this.registerTool(new GetPaymentBudgetCommand());
     this.registerTool(new GetPaymentsOverviewCommand());
 
     // Agent Mesh G1 doors (#2349, S6 batch B): the chat turn reaches
@@ -1934,6 +1937,7 @@ export class McpToolFactory {
     this.registerTool(new StockCopilotIntrospectCommand());
     this.registerTool(new StockCopilotLearningsCommand());
     this.registerTool(new StockCopilotEvaluateCommand());
+    this.registerTool(new StockCopilotRemediateGapsCommand());
 
     // Tracker #2708 A3 (#2760): the standalone web fetch — the
     // web-fetch family's first tool (recorded absent at S14,

@@ -237,6 +237,16 @@ export const DEFAULT_COPILOTS: CopilotConfig[] = [
         category: "Tool Introspection",
       },
       {
+        label: "🩺 Diagnose platform gaps",
+        prompt: "Diagnose platform gaps and inspect pipeline and job health",
+        category: "Platform Diagnostics",
+      },
+      {
+        label: "🛠️ Fix platform gaps (auto-heal)",
+        prompt: "Fix platform gaps and auto-heal pipeline and job execution",
+        category: "Platform Diagnostics",
+      },
+      {
         label: "💡 How can you improve yourself?",
         prompt: "How can you improve yourself and what capabilities do you need?",
         category: "Self-Improvement (RSI)",

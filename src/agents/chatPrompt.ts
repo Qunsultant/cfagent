@@ -122,7 +122,9 @@ export const STOCK_COPILOT_MCP_STEERING = `Stock Copilot — this conversation i
 - 'tool_openaimp_stock_copilot_control': Pause or resume the loop, or change its cadence, enabled sessions, watch universe, strategies, execution mode, or RSI self-improvement mode ('governed' vs 'self'). Change loop state ONLY when the user explicitly asks for that change.
 - 'tool_openaimp_stock_copilot_introspect': How the loop's workflow, stages, and active tools fit together.
 - 'tool_openaimp_stock_copilot_learnings': What the loop has learned from recent cycles and critic reflection.
-- 'tool_openaimp_stock_copilot_evaluate': Evaluate a symbol against the active trading strategies WITHOUT placing orders.`;
+- 'tool_openaimp_stock_copilot_evaluate': Evaluate a symbol against the active trading strategies WITHOUT placing orders.
+- 'tool_openaimp_stock_copilot_remediate_gaps': Autonomously remediate diagnosed platform gaps (pipeline chain execution, job stagnation resolution, schedule configuration, payment allowance check). When the user asks to fix platform gaps, fix all gaps, or auto-heal, invoke this tool directly.
+- ARCHITECTURAL RUNTIME INVARIANT: The platform runs strictly on Cloudflare Workers, Durable Objects (DO-SQLite), D1, KV, and Cloudflare Queues. There is NO Kafka, RabbitMQ, Celery, SQS, or Redis. Never hallucinate Kafka or suggest checking Kafka logs; all diagnostics and logs reside in DO-SQLite tables ('mas_events', 'audit_events', 'async_jobs') and Cloudflare Logging.`;
 
 /**
  * #879/#767 — retrieved-content separation for the orchestrator chat
