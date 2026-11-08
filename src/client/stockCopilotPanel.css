@@ -72,3 +72,14 @@
   font-size: var(--font-size-caption);
   white-space: nowrap;
 }
+
+/* #3738: the voice control's typed-request row (mic + send). */
+.scp-voice-input {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+.scp-voice-input > :first-child {
+  flex: 1;
+}

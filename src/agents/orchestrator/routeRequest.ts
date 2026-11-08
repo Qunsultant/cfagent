@@ -654,6 +654,9 @@ export async function routeRequest(deps: RouteRequestDeps, request: Request): Pr
     // Issue #1262 Phase 4: channel NLQ deps need DO storage SQL
     // for the scan/profile stores and discovery runners.
     getStorageSql: () => deps.ctx.storage.sql,
+    // Issue #3738: the channel switches' stored layer reads the
+    // instance's own settings (the panel's store).
+    readSettingRaw: (key) => deps.readSettingRaw(key),
   });
   if (tradingIntegrationsResponse) return tradingIntegrationsResponse;
 

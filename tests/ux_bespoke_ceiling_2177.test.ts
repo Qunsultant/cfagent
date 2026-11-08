@@ -113,7 +113,11 @@ describe("bespoke-styling ceiling (issue #2177)", () => {
     // styles in dataProvidersPanel.css (7 braces, tokens only,
     // baseline bumped in one_off_stylesheets_1337.json). Sanctioned
     // growth named in the PR body, per this test's own rule.
-    expect(braces).toBeLessThanOrEqual(3966);
+    // Bumped 3966 -> 3968 for issue #3738: the voice-control input
+    // row in stockCopilotPanel.css (2 braces, tokens only, lines
+    // baseline bumped in one_off_stylesheets_1337.json). Sanctioned
+    // growth named in the PR body, per this test's own rule.
+    expect(braces).toBeLessThanOrEqual(3968);
     // Classes bumped 2619 -> 2646 for the same #2681 sheet (27 stp-
     // classes, tokens only).
     // Classes bumped 2646 -> 2648 for issue #2703 (platform-admin-menu-row, platform-admin-menu-icon).
@@ -127,7 +131,9 @@ describe("bespoke-styling ceiling (issue #2177)", () => {
     // classes, tokens only).
     // Classes bumped 2727 -> 2733 for issue #3530 (6 new-to-tree
     // dpp-feed-status / dpp-feed-nojob classes, tokens only).
-    expect(classes.size).toBeLessThanOrEqual(2733); // ratcheted from 2622 by the #2177 close
+    // Classes bumped 2733 -> 2734 for issue #3738 (1 new-to-tree
+    // scp-voice-input class, tokens only).
+    expect(classes.size).toBeLessThanOrEqual(2734); // ratcheted from 2622 by the #2177 close
   });
 
   it("inline styles and raw labels outside the primitives do not grow", () => {

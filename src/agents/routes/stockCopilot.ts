@@ -21,7 +21,12 @@
  *        the caller's enabled trading sessions
  *        ({ sessions: [...] }, #3398 — persisted to the caller's
  *        own settings store, the same store the cycle resolves at
- *        firing). Paused ⇒ the cycle keeps managing exits but
+ *        firing). #3738 adds the channel-switch write
+ *        ({ channels: { voice: false, ... } }) — the stored layer
+ *        of the per-copilot channel switches (src/services/
+ *        copilotChannels.ts), persisted under the stock
+ *        registration's settings key and echoed back resolved.
+ *        Paused ⇒ the cycle keeps managing exits but
  *        places no entries; the global
  *        STOCK_COPILOT_PAPER_ENABLED flag stays the master kill
  *        switch above these per-instance controls.
@@ -88,6 +93,18 @@ import {
 import { evaluateStockCopilotStrategy } from "../../services/stockCopilotEvaluation";
 import { summarizeLearnings } from "../../services/stockCopilotAgenticLoop";
 import { introspectStockCopilot } from "../../services/stockCopilotIntrospection";
+import {
+  copilotChannelsSettingKey,
+  parseStoredCopilotChannelEntries,
+  resolveCopilotChannels,
+  serializeStoredCopilotChannelEntries,
+  type CopilotChannelResolution,
+} from "../../services/copilotChannels";
+import { CAPABILITY_CHANNELS } from "../../actors/capabilityManifest";
+import {
+  resolveStockCopilotVoiceActivation,
+  STOCK_COPILOT_VOICE_SOURCE_TAB,
+} from "../../trading";
 
 /** Structural mirror of OrchestratorAgent's ScreenerExecutionContext
  *  (the schedules.ts idiom — routes do not import the orchestrator). */
@@ -126,6 +143,41 @@ export interface StockCopilotRouteContext {
 /** Recent-history bounds for the status read (the panel's lists). */
 const CLOSED_POSITION_LIMIT = 10;
 const ACTIVITY_LIMIT = 20;
+
+/**
+ * Issue #3738: the stock registration's channel-switch projection —
+ * every channel's switch resolution (stored > env > default, source
+ * named), with voice carrying the composition the panel consumes:
+ * the switch AND the #3720 class-level activation must both be on
+ * for the channel to serve (`effective`); the activation's manifest
+ * state rides along so the two config layers stay distinguishable.
+ */
+function projectStockCopilotChannels(ctx: StockCopilotRouteContext) {
+  const switches = resolveCopilotChannels({
+    registrationId: "stock",
+    readSettingRaw: ctx.readSettingRaw,
+    env: ctx.env,
+  });
+  const activation = resolveStockCopilotVoiceActivation({
+    sourceTab: STOCK_COPILOT_VOICE_SOURCE_TAB,
+    env: ctx.env as unknown as Record<string, unknown>,
+  });
+  const project = (r: CopilotChannelResolution) => ({
+    enabled: r.enabled,
+    source: r.source,
+  });
+  return {
+    chat: project(switches.chat),
+    webhooks: project(switches.webhooks),
+    email: project(switches.email),
+    slack: project(switches.slack),
+    voice: {
+      ...project(switches.voice),
+      manifestState: activation.state,
+      effective: switches.voice.enabled && activation.state === "enabled",
+    },
+  };
+}
 
 function projectOpenPosition(p: CopilotPositionRecord) {
   return {
@@ -262,6 +314,9 @@ export async function handleStockCopilotRoutes(
         selectionResolved: selection.resolved,
         activeBroker: selection.resolved ? selection.selection.brokerId : null,
         activeMode: selection.resolved ? selection.selection.mode : null,
+        // #3738: the registration's channel switches (the panel's
+        // voice affordance renders from channels.voice.effective).
+        channels: projectStockCopilotChannels(ctx),
         userLogin,
         controlUpdatedAt: controlRecord?.updatedAt ?? null,
         openPositions: positions.listOpenPositions(userLogin).map(projectOpenPosition),
@@ -363,6 +418,7 @@ export async function handleStockCopilotRoutes(
       executionMode?: unknown;
       universe?: unknown;
       strategies?: unknown;
+      channels?: unknown;
     } | null;
     const hasPaused = body !== null && "paused" in body;
     const hasSessions = body !== null && "sessions" in body;
@@ -371,6 +427,7 @@ export async function handleStockCopilotRoutes(
       body !== null && typeof body.executionMode === "string" && isCopilotExecutionMode(body.executionMode);
     const hasUniverse = body !== null && "universe" in body;
     const hasStrategies = body !== null && "strategies" in body;
+    const hasChannels = body !== null && "channels" in body;
     if (
       !body ||
       (!hasPaused &&
@@ -378,12 +435,13 @@ export async function handleStockCopilotRoutes(
         !hasCadence &&
         !hasExecutionMode &&
         !hasUniverse &&
-        !hasStrategies)
+        !hasStrategies &&
+        !hasChannels)
     ) {
       return Response.json(
         {
           error:
-            "Must supply paused, sessions, cadence, executionMode, universe, or strategies to update",
+            "Must supply paused, sessions, cadence, executionMode, universe, strategies, or channels to update",
         },
         { status: 400 },
       );
@@ -434,6 +492,50 @@ export async function handleStockCopilotRoutes(
         );
       }
     }
+    let channelUpdates: Partial<Record<string, boolean>> | null = null;
+    if (hasChannels) {
+      // #3738: the stored-layer door for the registration's channel
+      // switches — a record of channel id → on/off, validated whole
+      // before anything is written (the route family's discipline).
+      const raw = body.channels;
+      if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+        return Response.json(
+          {
+            error:
+              "channels must be an object mapping channel ids (chat, webhooks, email, slack, voice) to true or false",
+          },
+          { status: 400 },
+        );
+      }
+      const entries = Object.entries(raw as Record<string, unknown>);
+      if (
+        entries.length === 0 ||
+        entries.some(
+          ([channel, value]) =>
+            !(CAPABILITY_CHANNELS as readonly string[]).includes(channel) ||
+            typeof value !== "boolean",
+        )
+      ) {
+        return Response.json(
+          {
+            error:
+              "channels must be an object mapping channel ids (chat, webhooks, email, slack, voice) to true or false",
+          },
+          { status: 400 },
+        );
+      }
+      if (typeof ctx.writeSetting !== "function") {
+        // Fail closed: never report a switch that was not stored
+        // (the #2482 switch discipline, as for sessions above).
+        return Response.json(
+          { error: "Channel settings are unavailable on this host" },
+          { status: 500 },
+        );
+      }
+      channelUpdates = Object.fromEntries(entries) as Partial<
+        Record<string, boolean>
+      >;
+    }
     if (hasPaused) {
       control.ensureSchema();
       control.setControl({
@@ -483,6 +585,15 @@ export async function handleStockCopilotRoutes(
       updatedStrategies = parseStrategiesInput(body.strategies as string | string[]);
       ctx.writeSetting(COPILOT_STRATEGIES_SETTING_KEY, updatedStrategies.join(","));
     }
+    if (channelUpdates !== null) {
+      // Merge into the decisions already stored under the stock
+      // registration's key — a channel write never erases a
+      // decision it did not name.
+      const key = copilotChannelsSettingKey("stock");
+      const existing = parseStoredCopilotChannelEntries(ctx.readSettingRaw(key));
+      const merged = { ...existing.decisions, ...channelUpdates };
+      ctx.writeSetting!(key, serializeStoredCopilotChannelEntries(merged));
+    }
     const resolvedCadence = resolveCopilotCadence({
       env: ctx.env,
       readSettingRaw: ctx.readSettingRaw,
@@ -507,6 +618,7 @@ export async function handleStockCopilotRoutes(
       ...(hasExecutionMode ? { executionMode: body.executionMode } : {}),
       ...(hasUniverse ? { universe: updatedUniverse } : {}),
       ...(hasStrategies ? { strategies: updatedStrategies } : {}),
+      ...(channelUpdates !== null ? { channels: channelUpdates } : {}),
     });
     return Response.json({
       ok: true,
@@ -516,6 +628,9 @@ export async function handleStockCopilotRoutes(
       ...(hasExecutionMode ? { executionMode: resolvedExecutionMode } : {}),
       ...(hasUniverse ? { universe: resolvedUniverse } : {}),
       ...(hasStrategies ? { strategies: resolvedStrategies } : {}),
+      ...(channelUpdates !== null
+        ? { channels: projectStockCopilotChannels(ctx) }
+        : {}),
     });
   } catch (err) {
     return Response.json(

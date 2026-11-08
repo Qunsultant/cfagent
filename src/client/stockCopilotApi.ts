@@ -95,6 +95,36 @@ export type StockCopilotStatusKind =
   | "mode_unresolved"
   | "inactive_broker";
 
+/**
+ * #3738: one channel's switch resolution as the status read
+ * projects it (src/services/copilotChannels.ts) — the switch state
+ * and the layer that decided it.
+ */
+export interface CopilotChannelSwitchStatus {
+  enabled: boolean;
+  source: "stored" | "env" | "default";
+}
+
+/**
+ * #3738: the voice channel's projection — the switch composed
+ * with the #3720 class-level activation. `effective` is what
+ * serves: switch on AND the manifest activation enabled. The
+ * panel renders its voice control exactly when effective is true.
+ */
+export interface CopilotVoiceChannelStatus extends CopilotChannelSwitchStatus {
+  manifestState: string;
+  effective: boolean;
+}
+
+/** #3738: the stock registration's channel switches, by channel. */
+export interface StockCopilotChannelsStatus {
+  chat: CopilotChannelSwitchStatus;
+  webhooks: CopilotChannelSwitchStatus;
+  email: CopilotChannelSwitchStatus;
+  slack: CopilotChannelSwitchStatus;
+  voice: CopilotVoiceChannelStatus;
+}
+
 export interface StockCopilotStatus {
   flagEnabled: boolean;
   paused: boolean;
@@ -111,6 +141,8 @@ export interface StockCopilotStatus {
   activeMode: "paper" | "live" | null;
   userLogin: string;
   controlUpdatedAt: string | null;
+  /** #3738: the registration's channel switches (voice affordance source). */
+  channels?: StockCopilotChannelsStatus;
   openPositions: StockCopilotOpenPosition[];
   closedPositions: StockCopilotClosedPosition[];
   activity: StockCopilotActivityRecord[];
@@ -159,6 +191,26 @@ export async function setStockCopilotSessions(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sessions }),
+    },
+  );
+}
+
+/**
+ * #3738: persist the user's channel-switch decisions for the
+ * stock copilot (the control route writes them to the user's own
+ * settings store; the voice route and the status read resolve
+ * them stored > env > default). The response echoes the full
+ * resolved channel projection.
+ */
+export async function setStockCopilotChannels(
+  channels: Partial<Record<string, boolean>>,
+): Promise<{ ok: boolean; channels: StockCopilotChannelsStatus }> {
+  return send<{ ok: boolean; channels: StockCopilotChannelsStatus }>(
+    "/api/stock-copilot/control",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ channels }),
     },
   );
 }

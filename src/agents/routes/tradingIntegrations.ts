@@ -43,6 +43,10 @@ import {
   type CopilotSelectionResolution,
 } from "../copilotTradingMode";
 import {
+  COPILOT_CHANNEL_DISABLED,
+  resolveCopilotChannel,
+} from "../../services/copilotChannels";
+import {
   parseAuthenticationResults,
   resolvePrincipal,
   slackPrincipalLinkStoreFromEnv,
@@ -79,6 +83,13 @@ export interface TradingIntegrationsRouteContext {
   nlqSchedulingPort(): NLQSchedulingPort;
   /** DO storage SQL (owner: OrchestratorAgent - was `this.ctx.storage.sql`). */
   getStorageSql(): any;
+  /**
+   * The instance's settings reader (owner: OrchestratorAgent - was
+   * `this.readSettingRaw`). Optional: read-only hosts omit it, in
+   * which case the #3738 channel switches resolve without the
+   * stored layer (env > code default still applies).
+   */
+  readSettingRaw?: (key: string) => string | null;
 }
 
 /**
@@ -130,6 +141,32 @@ export function channelBrokerRefusal(broker: string): Response {
       retryable: false,
     },
     { status: 501 },
+  );
+}
+
+/**
+ * Issue #3738: the coded refusal for a voice turn carrying a
+ * copilot context whose channel switch is OFF — a configuration
+ * state above the class-level activation machinery, refused by
+ * name and audited, never silently downgraded to a plain desk
+ * turn (a switched-off channel must not serve through the desk's
+ * side door).
+ */
+export function copilotChannelDisabledRefusal(
+  registrationId: string,
+  channel: string,
+): Response {
+  return Response.json(
+    {
+      code: COPILOT_CHANNEL_DISABLED,
+      registrationId,
+      channel,
+      message:
+        `The ${channel} channel is switched off for the ${registrationId} copilot by configuration. ` +
+        `Nothing was previewed and no order was routed. Enable the channel in the copilot's channel settings to use it.`,
+      retryable: false,
+    },
+    { status: 403 },
   );
 }
 
@@ -194,6 +231,25 @@ export async function handleTradingIntegrationsRoutes(
   if (isVoiceTurn) {
     voiceBody = await request.clone().json().catch(() => ({}));
     if (voiceBody?.sourceTab === STOCK_COPILOT_VOICE_SOURCE_TAB) {
+      // Issue #3738: the per-copilot channel switch is a config
+      // state ABOVE the #3720 class-level activation — both must
+      // be on for the channel to serve. A switched-off stock voice
+      // channel refuses the turn by name (audited), before the
+      // activation resolution and before the desk gate.
+      const channelSwitch = resolveCopilotChannel({
+        registrationId: "stock",
+        channel: "voice",
+        readSettingRaw: ctx.readSettingRaw,
+        env: ctx.env as unknown as Record<string, unknown>,
+      });
+      if (!channelSwitch.enabled) {
+        ctx.audit("stock_copilot.voice_channel_disabled", "trading", {
+          registrationId: "stock",
+          channel: "voice",
+          source: channelSwitch.source,
+        });
+        return copilotChannelDisabledRefusal("stock", "voice");
+      }
       voiceActivation = resolveStockCopilotVoiceActivation({
         sourceTab: voiceBody.sourceTab,
         env: ctx.env as unknown as Record<string, unknown>,
