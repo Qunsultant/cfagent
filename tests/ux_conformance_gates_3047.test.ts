@@ -223,6 +223,7 @@ const TRADING_ROUTES = [
 const CONFORMING_SUB_TABS: Record<string, string> = {
   "track-record": "src/client/TrackRecordPanel.tsx",
   "order": "src/client/OrderTicketPanel.tsx",
+  "autopilot": "src/client/components/AutopilotControlCenter.tsx",
 };
 
 const EXPECTED_TAB_CONTENT_KEYS = [

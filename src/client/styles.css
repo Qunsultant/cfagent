@@ -11172,40 +11172,6 @@ body {
    Autopilot Control Center & Policy Limits Cards (Issue #20)
    ========================================================================== */
 
-.autopilot-control-center {
-  width: 100%;
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 1rem 0 2.5rem 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1.25rem;
-}
-
-.autopilot-header {
-  margin-bottom: 0.25rem;
-}
-
-.autopilot-title {
-  font-size: var(--font-size-display);
-  font-weight: 700;
-  color: var(--color-text-primary);
-  letter-spacing: -0.02em;
-  margin: 0 0 0.4rem 0;
-}
-
-.autopilot-subtitle {
-  font-size: var(--font-size-body);
-  color: var(--color-text-muted);
-  margin: 0;
-  line-height: 1.5;
-}
-
-.account-highlight {
-  color: var(--color-text-primary);
-  font-weight: 600;
-}
-
 /* NextGenTP Executive Performance Ribbon */
 .autopilot-executive-ribbon {
   display: grid;
@@ -11223,58 +11189,6 @@ body {
   .autopilot-executive-ribbon {
     grid-template-columns: 1fr;
   }
-}
-
-.executive-kpi-card {
-  background: var(--color-surface-glass);
-  border: 1px solid var(--color-surface-glass-border);
-  border-radius: var(--radius-lg);
-  padding: 1rem 1.25rem;
-  box-shadow: var(--shadow-e1);
-  backdrop-filter: var(--backdrop-blur-md);
-  -webkit-backdrop-filter: var(--backdrop-blur-md);
-  transition: border-color var(--transition-normal), transform var(--transition-normal);
-}
-
-.executive-kpi-card:hover {
-  border-color: var(--color-border-medium);
-  transform: translateY(-1px);
-}
-
-.executive-kpi-label {
-  font-size: var(--font-size-caption);
-  font-weight: 600;
-  color: var(--color-text-dim);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  display: block;
-  margin-bottom: 0.35rem;
-}
-
-.executive-kpi-val {
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: var(--color-text-primary);
-  font-family: var(--font-numeric);
-  letter-spacing: -0.02em;
-  line-height: 1.2;
-}
-
-.executive-kpi-sub {
-  font-size: var(--font-size-caption);
-  margin-top: 0.35rem;
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
-}
-
-.executive-kpi-sub.positive {
-  color: var(--color-gain);
-  font-weight: 600;
-}
-
-.executive-kpi-sub.neutral {
-  color: var(--color-text-muted);
 }
 
 /* NextGenTP Chart Card */
@@ -11572,13 +11486,6 @@ body {
   margin-bottom: 1.25rem;
 }
 
-.card-section-title {
-  font-size: var(--font-size-title-sm);
-  font-weight: 700;
-  color: var(--color-text-primary);
-  margin: 0;
-}
-
 .btn-edit-limits {
   background: var(--color-tag);
   border: 1px solid var(--color-border-medium);
@@ -11607,50 +11514,6 @@ body {
   .autopilot-limits-grid {
     grid-template-columns: repeat(2, 1fr);
   }
-}
-
-.policy-limit-item {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
-.policy-limit-label {
-  font-size: 0.75rem;
-  color: var(--color-text-dim);
-  font-weight: 500;
-}
-
-.policy-limit-value {
-  font-size: var(--font-size-title-sm);
-  font-weight: 700;
-  color: var(--color-text-primary);
-  font-family: var(--font-mono);
-}
-
-.policy-limit-value.universe-value {
-  font-size: var(--font-size-body);
-  color: var(--color-accent);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.policy-limit-value.risk-badge {
-  font-size: var(--font-size-body);
-  text-transform: capitalize;
-}
-
-.policy-limit-value.risk-badge.moderate {
-  color: var(--color-warning);
-}
-
-.policy-limit-value.risk-badge.conservative {
-  color: var(--color-success);
-}
-
-.policy-limit-value.risk-badge.aggressive {
-  color: var(--color-sentiment-bearish);
 }
 
 
@@ -11901,39 +11764,6 @@ body {
   .form-group-grid {
     grid-template-columns: 1fr;
   }
-}
-
-.form-field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-
-.form-field label {
-  font-size: var(--font-size-caption);
-  font-weight: 600;
-  color: var(--color-text-secondary);
-}
-
-.form-field input,
-.form-field select {
-  background: var(--color-input);
-  border: 1px solid var(--color-border-medium);
-  color: var(--color-input-foreground);
-  padding: 0.55rem 0.75rem;
-  border-radius: 6px;
-  font-size: var(--font-size-body);
-  outline: none;
-}
-
-.form-field input:focus,
-.form-field select:focus {
-  border-color: var(--color-success);
-}
-
-.field-hint {
-  font-size: var(--font-size-micro);
-  color: var(--color-text-dim);
 }
 
 .modal-actions-row {
