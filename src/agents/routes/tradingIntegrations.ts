@@ -34,7 +34,14 @@ import {
   ETradeEmailTradingService,
   ETradeSlackTradingService,
   ETradeVoiceTradingService,
+  resolveStockCopilotVoiceActivation,
+  STOCK_COPILOT_VOICE_SOURCE_TAB,
+  type StockCopilotVoiceActivation,
 } from "../../trading";
+import {
+  resolveCopilotTradingSelection,
+  type CopilotSelectionResolution,
+} from "../copilotTradingMode";
 import {
   parseAuthenticationResults,
   resolvePrincipal,
@@ -101,6 +108,9 @@ export const CHANNEL_DESK_PATHS = [
   "/trading/voice/greeting",
 ] as const;
 
+/** The voice turn path — the one desk path the #3720 activation composes with. */
+export const VOICE_TURN_PATH = "/trading/voice/turn";
+
 /** True when this path would construct an E*TRADE-shaped channel service. */
 export function isChannelDeskPath(path: string): boolean {
   return CHANNEL_DESK_PATHS.some((candidate) => path.endsWith(candidate));
@@ -161,11 +171,53 @@ export async function handleTradingIntegrationsRoutes(
   sessionId: string,
   ctx: TradingIntegrationsRouteContext
 ): Promise<Response | null> {
+  // Issue #3720 (Capability S3): a voice turn may carry the Stock
+  // Copilot's context (the registration's sourceTab). Resolve its
+  // voice activation — and, while active, the copilot's own broker
+  // selection (#3451) — BEFORE the desk gate below, whose composition
+  // with the activation is decided here:
+  // - withdrawn activation (the manifest machinery's externalized
+  //   override): audited, never silent; the turn is a plain desk turn.
+  // - active + selection resolved: the #3429 refusal is lifted for
+  //   THIS turn — the desk's data legs run the channel NLQ pipeline
+  //   (whose deps already resolve the tenant's platform), the turn
+  //   carries the resolved broker, and the desk's one E*TRADE
+  //   execution leg (voice approval) refuses by name under any other
+  //   broker, so no order can execute at the wrong venue. Executing
+  //   on the selected broker is the neutral desk's build (#3556).
+  // - active + selection UNRESOLVED: fail closed — the refusal stands.
+  const isVoiceTurn =
+    path.endsWith(VOICE_TURN_PATH) && request.method === "POST";
+  let voiceBody: any = null;
+  let voiceActivation: StockCopilotVoiceActivation | null = null;
+  let voiceSelection: CopilotSelectionResolution | null = null;
+  if (isVoiceTurn) {
+    voiceBody = await request.clone().json().catch(() => ({}));
+    if (voiceBody?.sourceTab === STOCK_COPILOT_VOICE_SOURCE_TAB) {
+      voiceActivation = resolveStockCopilotVoiceActivation({
+        sourceTab: voiceBody.sourceTab,
+        env: ctx.env as unknown as Record<string, unknown>,
+      });
+      if (!voiceActivation.active) {
+        ctx.audit("stock_copilot.voice_inactive", "trading", {
+          state: voiceActivation.state,
+        });
+      } else {
+        voiceSelection = await resolveCopilotTradingSelection({ env: ctx.env });
+      }
+    }
+  }
   // Issue #3429: refuse a non-E*TRADE tenant BEFORE any channel service is
   // constructed, so no preview, quote or order can reach another venue.
   if (isChannelDeskPath(path)) {
     const selectedBroker = await resolveTenantBroker(ctx.env);
-    if (selectedBroker !== "etrade") return channelBrokerRefusal(selectedBroker);
+    if (selectedBroker !== "etrade") {
+      const lifted =
+        isVoiceTurn &&
+        voiceActivation?.active === true &&
+        voiceSelection?.resolved === true;
+      if (!lifted) return channelBrokerRefusal(selectedBroker);
+    }
   }
   // Omnichannel Trading Channel: Inbound Email Trading Agent
   if (path.endsWith("/trading/email/inbound") && request.method === "POST") {
@@ -402,7 +454,7 @@ export async function handleTradingIntegrationsRoutes(
   // Omnichannel Trading Channel: Voice Trading Turn
   if (path.endsWith("/trading/voice/turn") && request.method === "POST") {
     try {
-      const body = (await request.json().catch(() => ({}))) as any;
+      const body = voiceBody ?? ((await request.json().catch(() => ({}))) as any);
       // Issue #1262 Phase 1: voice adopts the ChannelIntake contract
       // type only — the principal is the session login (every entry to
       // this route is session-authenticated in server.ts), tier "trade",
@@ -423,8 +475,30 @@ export async function handleTradingIntegrationsRoutes(
         ...body,
         sessionId: userLogin,
         userLogin,
+        // Issue #3720: the copilot broker carrier is route-resolved
+        // only — an inbound value is always overwritten. It is
+        // present exactly when the turn's voice activation is active
+        // and the copilot selection resolved; the desk's approval
+        // leg refuses by name under any broker other than E*TRADE.
+        copilotBrokerId:
+          voiceActivation?.active && voiceSelection?.resolved
+            ? voiceSelection.selection.brokerId
+            : undefined,
       });
-      ctx.audit("trading.voice_turn", "trading", { actionType: result.actionType, orderId: result.orderId, success: result.success });
+      ctx.audit("trading.voice_turn", "trading", {
+        actionType: result.actionType,
+        orderId: result.orderId,
+        success: result.success,
+        ...(voiceActivation
+          ? {
+              sourceTab: STOCK_COPILOT_VOICE_SOURCE_TAB,
+              voiceState: voiceActivation.state,
+              ...(voiceSelection?.resolved
+                ? { copilotBrokerId: voiceSelection.selection.brokerId }
+                : {}),
+            }
+          : {}),
+      });
       return Response.json(result);
     } catch (err) {
       return Response.json({ error: err instanceof Error ? err.message : "Failed to process voice turn" }, { status: 500 });
