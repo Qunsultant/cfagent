@@ -196,19 +196,18 @@ describe("tool family status table (#2417)", () => {
 // ---------------------------------------------------------------------------
 
 describe("degraded status evidence (#2417)", () => {
-  it("sandbox-tools: no container is bound at either construction site, no containers config exists, and the service's no-backend path returns executed:false", () => {
-    // The agent and the MCP facade both construct the service with
-    // the container argument literally undefined (the survey §8 fact,
-    // still true on current main).
+  it("sandbox-tools: container is bound at SandboxAgent construction site and declared in wrangler.jsonc (#3492)", () => {
+    // SandboxAgent constructs the service with the bound container (this.ctx.container).
     expect(read("src/agents/sandbox-agent.ts")).toContain(
-      "new ETradeSandboxService(undefined",
+      "new ETradeSandboxService(container",
     );
     expect(read("src/mcps/openaimp/cloudflareAgentCommands.ts")).toContain(
       "new ETradeSandboxService(undefined",
     );
-    // wrangler.jsonc declares no Cloudflare Containers configuration.
-    expect(wrangler["containers"]).toBeUndefined();
-    // With no container bound, the service honestly does not execute.
+    // wrangler.jsonc declares Cloudflare Containers configuration for SandboxAgent (#3492).
+    expect(wrangler["containers"]).toBeDefined();
+    expect(wrangler["containers"][0].class_name).toBe("SandboxAgent");
+    // With no container bound (outside container runtime), the service honestly does not execute.
     const service = read("src/services/sandboxAgent.ts");
     expect(service).toContain("executed: false");
     expect(service).toContain("no container sandbox backend is bound");

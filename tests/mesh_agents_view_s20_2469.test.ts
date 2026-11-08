@@ -77,8 +77,8 @@ describe("registry per-agent status records (S20 extension)", () => {
     expect(wrangler).toContain("ai_search_namespaces");
     const aiSearch = MESH_AGENTS.find((a) => a.className === "AiSearchAgent")!;
     expect(aiSearch.statusReason).toContain("wrangler.jsonc");
-    // SandboxAgent: no container backend is configured in wrangler.jsonc.
-    expect(wrangler).not.toContain('"containers"');
+    // SandboxAgent: containers configuration declared in wrangler.jsonc (#3492).
+    expect(wrangler).toContain('"containers"');
     const sandbox = MESH_AGENTS.find((a) => a.className === "SandboxAgent")!;
     expect(sandbox.statusReason).toContain("executed:false");
   });

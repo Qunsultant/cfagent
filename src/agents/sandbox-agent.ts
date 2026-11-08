@@ -88,28 +88,30 @@ export class SandboxAgent extends PortThink {
 
   private getService(): ETradeSandboxService {
     if (!this.sandboxService) {
-      // Constructed with no container backend. Every door reaches
-      // this construction through the class: the A2A dispatch and
-      // onRequest call these methods directly, and the MCP command
-      // (RunSandboxCommand in
-      // src/mcps/openaimp/cloudflareAgentCommands.ts) resolves this
-      // class on the SANDBOX_AGENT binding since #2732. Passing a
-      // real container here is the ONLY change a future enablement
-      // slice makes — see the header.
-      this.sandboxService = new ETradeSandboxService(undefined, this.env);
+      // In Cloudflare Containers environments, container is bound at this.ctx.container.
+      // When available, pass it to the sandbox service; otherwise fallback to undefined.
+      const container = (this.ctx as any)?.container;
+      this.sandboxService = new ETradeSandboxService(container, this.env);
     }
     return this.sandboxService;
   }
 
   /**
-   * Status surface: is a container backend configured? In this
-   * slice the answer is honestly no — the service is constructed
-   * without one — and the detail names the owner step that changes
-   * it. (If a future slice binds a backend, this method reports
-   * that construction instead; it must never claim a backend the
-   * service was not constructed with.)
+   * Status surface: is a container backend configured? When a
+   * container is bound at this.ctx.container, reports active and ready;
+   * otherwise honestly reports degraded (issue #121).
    */
   sandboxStatus(): SandboxAgentStatus {
+    const hasContainer = Boolean((this.ctx as any)?.container);
+    if (hasContainer) {
+      return {
+        agent: "SandboxAgent",
+        backendConfigured: true,
+        degraded: false,
+        detail:
+          "Active: Cloudflare container backend is bound (cloudflare/debian-trixie) and ready for execution.",
+      };
+    }
     return {
       agent: "SandboxAgent",
       backendConfigured: false,
