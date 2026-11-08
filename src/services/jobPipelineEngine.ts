@@ -174,6 +174,16 @@ const defaultSleep = (ms: number): Promise<void> =>
 export interface JobPipelineDeps {
   stores: JobPipelineStores;
   runRecorder: JobRunRecorder;
+  /**
+   * Optional settle observer (#3530 slice B): invoked once per
+   * terminally settled run from recordTerminal — the engine's one
+   * terminal-recording point — so every trigger class (manual,
+   * scheduled, resume, retry, cancel) is covered by construction.
+   * Best-effort by contract: the engine guards the call, so an
+   * observer failure can never fail, retry, or duplicate the
+   * run's own records; observers log their own failures.
+   */
+  runSettledObserver?: (info: JobRunSettledInfo) => Promise<void> | void;
   /** Null when the queue substrate is unconfigured: runs proceed, status publication is skipped, store state remains the truth. */
   publisher: MessagePublisher | null;
   steps: JobStepRegistry;
@@ -210,6 +220,21 @@ export interface JobRunOutcome {
   descriptor?: string;
   error?: string;
   artifactKeys: string[];
+}
+
+/**
+ * One terminally settled run, as reported to the settle observer
+ * (#3530 slice B): the run's ids, the trigger the engine recorded
+ * for it, its terminal state, and its failure message when failed.
+ * Emitted from recordTerminal only — a run that never dispatched
+ * (or is merely paused) never produces one.
+ */
+export interface JobRunSettledInfo {
+  jobId: string;
+  runId: string;
+  trigger: JobRunTrigger;
+  state: "completed" | "failed" | "cancelled";
+  error?: string;
 }
 
 /** One stage of the current/last run, as the status surface shows it (#3069 surfacing). */
@@ -1339,6 +1364,25 @@ export class JobPipelineControl {
       ...(artifactRefs !== undefined ? { artifactRefs } : {}),
     });
     await this.deps.runRecorder.recordRun(record);
+    // #3530 slice B: the settle observer fires here — downstream
+    // of the no-run guard above, so it observes exactly the runs
+    // that settled, exactly once each. Guarded: an observer
+    // failure never fails or retries the settled run.
+    const observer = this.deps.runSettledObserver;
+    if (observer) {
+      try {
+        await observer({
+          jobId: instance.jobId,
+          runId: instance.currentRunId,
+          trigger: instance.runTrigger ?? "manual",
+          state: outcome,
+          ...(error ? { error } : {}),
+        });
+      } catch {
+        // Best-effort by contract (see JobPipelineDeps): the
+        // observers log their own failures with the run's ids.
+      }
+    }
   }
 
   /** Build the run context: the ledger is read through the StageCheckpointStore (resumes), or started empty. */
