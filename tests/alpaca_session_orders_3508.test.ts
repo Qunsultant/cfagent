@@ -122,6 +122,8 @@ describe("Issue #3508 — Alpaca supportsSessionOrders & wire terms", () => {
         type: "limit",
         limit_price: 150,
         extended_hours: true,
+        // Issue #3782: the caller-supplied limit price declares user provenance for the placeOrder guard.
+        priceSource: { kind: "user" },
       });
 
       expect(res.success).toBe(true);
@@ -172,6 +174,8 @@ describe("Issue #3508 — Alpaca supportsSessionOrders & wire terms", () => {
         quantity: 10,
         orderType: "LIMIT",
         limitPrice: 125.5,
+        // Issue #3782: the caller-supplied limit price declares user provenance for the placeOrder guard.
+        priceSource: { kind: "user" },
         userLogin: "trader",
         session: "pre_market",
       });
@@ -204,6 +208,8 @@ describe("Issue #3508 — Alpaca supportsSessionOrders & wire terms", () => {
         quantity: 10,
         orderType: "LIMIT",
         limitPrice: 130.0,
+        // Issue #3782: the caller-supplied limit price declares user provenance for the placeOrder guard.
+        priceSource: { kind: "user" },
         userLogin: "trader",
         session: "after_hours",
       });
@@ -235,6 +241,8 @@ describe("Issue #3508 — Alpaca supportsSessionOrders & wire terms", () => {
         quantity: 8,
         orderType: "LIMIT",
         limitPrice: 215.0,
+        // Issue #3782: the caller-supplied limit price declares user provenance for the placeOrder guard.
+        priceSource: { kind: "user" },
         userLogin: "trader",
         session: "exto",
       });

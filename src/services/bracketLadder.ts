@@ -343,6 +343,9 @@ export async function executeBracketLadder(
 
   for (const rung of rungs) {
     totalQuantity += rung.quantity;
+    // Issue #3782: rung prices derive from the user-submitted ladder
+    // spec (entry price + tier offsets), so the placement declares
+    // user provenance for the guard in placeOrder.
     const orderResult = await service.placeAlpacaOrder({
       symbol: spec.symbol,
       qty: rung.quantity,
@@ -354,6 +357,7 @@ export async function executeBracketLadder(
       order_class: "bracket",
       take_profit: { limit_price: rung.takeProfitPrice },
       stop_loss: { stop_price: rung.stopLossPrice },
+      priceSource: { kind: "user" },
     });
 
     if (orderResult.success) {

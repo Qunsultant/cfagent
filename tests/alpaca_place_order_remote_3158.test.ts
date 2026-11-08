@@ -203,6 +203,8 @@ describe("Alpaca placeOrderRemote (#3158)", () => {
       quantity: 5,
       orderType: "LIMIT",
       limitPrice: 155.5,
+      // Issue #3782: the caller-supplied limit price declares user provenance for the placeOrder guard.
+      priceSource: { kind: "user" },
       userLogin: "boss",
     });
     await alpaca.placeOrderRemote({

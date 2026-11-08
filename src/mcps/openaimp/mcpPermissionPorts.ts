@@ -178,6 +178,9 @@ export const MCP_TOOL_SCOPES: Record<string, McpScope> = {
   alpaca_account: "mcp:read",
   alpaca_positions: "mcp:read",
   alpaca_orders: "mcp:read",
+  // Issue #3782: the Alpaca quote tool is a read, like the other
+  // Alpaca reads above.
+  alpaca_get_quote: "mcp:read",
   // #1906: deprecated aliases for the renamed market-data tools above;
   // same scopes as their canonical tools. Use canonical names instead.
   // Removal is a follow-up slice.
@@ -331,10 +334,13 @@ export const MCP_TOOL_SCOPES: Record<string, McpScope> = {
   check_payment_budget: "mcp:payments",
   get_payment_budget: "mcp:payments",
   get_payments_overview: "mcp:payments",
-  // trade (10)
+  // trade (11)
   etrade_preview_order: "mcp:trade",
   etrade_execute_order: "mcp:trade",
   alpaca_place_order: "mcp:trade",
+  // Issue #3782: the Alpaca preview tool is a trade-scope draft
+  // (a proposal, never a placed order), alongside etrade_preview_order.
+  alpaca_preview_order: "mcp:trade",
   alpaca_place_bracket_ladder: "mcp:trade",
   alpaca_cancel_bracket_ladder: "mcp:trade",
   foss_alpaca_place_order: "mcp:trade", // #1906 deprecated alias, same scope as canonical

@@ -1,0 +1,8 @@
+### Fixed
+
+- **Stock Copilot no longer invents order prices (#3782, parent incident #3781):** a LIMIT draft with no user-supplied limit and no live authoritative quote is refused in the MCP preview path — no draft record is created and the response asks the user for the limit. Applies to the E*TRADE local preview path (`ETradeService.previewOrder`) and the Alpaca preview path (`AlpacaTradingPlatform.previewOrder`), which previously priced LIMIT drafts off the ambient quote. The chat preview card no longer renders an estimated price as the order price, and Approve stays disabled until a real price is attached. Bite-proof tests in `tests/mcp_preview_price_provenance_3782.test.ts` and `tests/tool_result_view_price_provenance_3782.test.tsx`. #CISO-bhdm
+
+### Added
+
+- **Alpaca parity for the copilot (#3782):** new MCP tools `alpaca_get_quote` (live Alpaca quote with provenance) and `alpaca_preview_order` (draft with a provenanced price), registered in the MCP catalog, permission ports (`mcp:read` / `mcp:trade`), agent registry, and client endpoint catalog. The Stock Copilot steering routes quote/preview to Alpaca — not E*TRADE — when the copilot broker is Alpaca (owner rule #3451, `COPILOT_BROKER_ID = "alpaca"`), matching the broker catalog's existing at-par declaration. #CISO-bhdm
+- **Price provenance on every draft and order (#3782):** `OrderPriceSource` (user / live-quote / market-data / estimated) is carried on the draft and persisted on the trade record (`price_source` column, JSON text); `placeOrder` refuses an unprovenanced limit price before any POST to Alpaca — the last stop before the broker. Copilot entry/exit limits priced off the last bar close declare `market-data` provenance. #CISO-bhdm

@@ -428,6 +428,36 @@ export const MCP_TOOLS_CATALOG: McpToolMeta[] = [
     sampleArgs: { symbol: "NVDA", qty: 1, side: "buy", type: "limit", limit_price: 135.0 },
   },
   {
+    name: "alpaca_get_quote",
+    category: "Market Data Research & Quoting",
+    description: "Retrieve a live market quote (price, bid/ask, volume, OHLC) for an equity ticker from Alpaca Market Data v2. Live-only: the result carries provider 'alpaca', provenance 'live', and a timestamp.",
+    schema: {
+      type: "object",
+      properties: {
+        symbol: { type: "string", description: "Stock ticker symbol (e.g. AAPL, NVDA)" },
+      },
+      required: ["symbol"],
+    },
+    sampleArgs: { symbol: "AAPL" },
+  },
+  {
+    name: "alpaca_preview_order",
+    category: "Market Data Research & Quoting",
+    description: "Preview an Alpaca equity or options order draft with Agent DID attestation. Safety guarantee: NO SHARES ARE BOUGHT OR SOLD. Awaiting human confirmation — place via alpaca_place_order only on explicit approval. Every draft carries priceSource (user, or live quote with provider + timestamp).",
+    schema: {
+      type: "object",
+      properties: {
+        symbol: { type: "string", description: "Ticker symbol (e.g. NVDA, AAPL)" },
+        action: { type: "string", enum: ["BUY", "SELL", "BUY_TO_COVER", "SELL_SHORT"], description: "Order action" },
+        quantity: { type: "number", description: "Number of shares to trade" },
+        orderType: { type: "string", enum: ["MARKET", "LIMIT", "STOP", "STOP_LIMIT"], description: "Execution order type (default: MARKET)" },
+        limitPrice: { type: "number", description: "Limit price for limit orders" },
+      },
+      required: ["symbol", "action", "quantity"],
+    },
+    sampleArgs: { symbol: "AAPL", action: "BUY", quantity: 10, orderType: "LIMIT", limitPrice: 340.0 },
+  },
+  {
     name: "agentdb.chain.status",
     category: "AgentDB Reads",
     description: "Read a chain's projected status from AgentDB (latest chain + schedule rows, projection only). Read-only; tenant resolved from the caller's environment.",

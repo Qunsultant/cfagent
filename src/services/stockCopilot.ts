@@ -411,7 +411,16 @@ async function evaluateExit(
     action: "SELL",
     quantity: position.quantity,
     orderType: shape.orderType,
-    ...(shape.orderType === "LIMIT" ? { limitPrice: shape.limitPrice } : {}),
+    // Issue #3782: the exit limit is the last bar close — a price
+    // derived deterministically from the platform's own market-data
+    // pipeline, named as such so placeOrder's provenance guard lets
+    // the exit through. It is never an agent-invented price.
+    ...(shape.orderType === "LIMIT"
+      ? {
+          limitPrice: shape.limitPrice,
+          priceSource: { kind: "market-data", provider: "Stock Copilot exit bars (last close)", timestamp: nowIso } as const,
+        }
+      : {}),
     userLogin: deps.userLogin,
     session,
     extendedHours: shape.requiresSessionTerms,
@@ -528,7 +537,17 @@ async function attemptEntry(
     action: "BUY",
     quantity: qty,
     orderType: shape.orderType,
-    ...(shape.orderType === "LIMIT" ? { limitPrice: shape.limitPrice } : {}),
+    // Issue #3782: the entry limit is the decision price (last bar
+    // close) — a price derived deterministically from the platform's
+    // own market-data pipeline, named as such so placeOrder's
+    // provenance guard lets the entry through. It is never an
+    // agent-invented price.
+    ...(shape.orderType === "LIMIT"
+      ? {
+          limitPrice: shape.limitPrice,
+          priceSource: { kind: "market-data", provider: "Stock Copilot entry bars (last close)", timestamp: nowIso } as const,
+        }
+      : {}),
     userLogin: deps.userLogin,
     session: args.session,
     extendedHours: shape.requiresSessionTerms,

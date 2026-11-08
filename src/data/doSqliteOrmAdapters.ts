@@ -192,6 +192,7 @@ export const TRADE_COLUMN_MAP = {
   previewNotes: "preview_notes",
   expirationScheduleId: "expiration_schedule_id",
   broker: "broker",
+  priceSourceJson: "price_source",
   createdAt: "created_at",
   updatedAt: "updated_at",
 } as const;

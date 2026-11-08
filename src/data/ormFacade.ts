@@ -349,6 +349,7 @@ export class DatabaseORM {
         preview_notes TEXT,
         expiration_schedule_id TEXT,
         broker TEXT,
+        price_source TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       )
@@ -363,6 +364,16 @@ export class DatabaseORM {
       const cols = Array.from(this.sql.exec("PRAGMA table_info(mas_trades)")) as Array<{ name?: unknown }>;
       if (!cols.some((c) => c.name === "broker")) {
         this.sql.exec("ALTER TABLE mas_trades ADD COLUMN broker TEXT");
+      }
+    }
+
+    // Issue #3782: price provenance on stored drafts (JSON-encoded
+    // OrderPriceSource). Same guarded-ALTER precedent as broker
+    // above — pre-existing tables lack the column.
+    {
+      const cols = Array.from(this.sql.exec("PRAGMA table_info(mas_trades)")) as Array<{ name?: unknown }>;
+      if (!cols.some((c) => c.name === "price_source")) {
+        this.sql.exec("ALTER TABLE mas_trades ADD COLUMN price_source TEXT");
       }
     }
 

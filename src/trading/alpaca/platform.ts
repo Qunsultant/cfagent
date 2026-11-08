@@ -4,12 +4,13 @@
  * Implements ITradingPlatform for Alpaca Trading API v2
  */
 
-import type { Env, BrokerQuote, BrokerAccount, BrokerPosition, BrokerPositionLot, BrokerOrderDraft, BrokerOrderExecutionResult, BrokerStatus, BrokerOptionChain, BrokerOptionContract, BrokerOptionExpireDate, StockScreenerFilter, StockScreenResult, BrokerRemoteOrder, BrokerActivity, BrokerWatchlist, BrokerCancelOrderResult } from "../../types";
+import type { Env, BrokerQuote, BrokerAccount, BrokerPosition, BrokerPositionLot, BrokerOrderDraft, BrokerOrderExecutionResult, BrokerStatus, BrokerOptionChain, BrokerOptionContract, BrokerOptionExpireDate, StockScreenerFilter, StockScreenResult, BrokerRemoteOrder, BrokerActivity, BrokerWatchlist, BrokerCancelOrderResult, OrderPriceSource } from "../../types";
 import type { DatabaseORM } from "../../orm";
 import type { ITradingPlatform, OrderPreviewParams, PlaceOrderParams } from "../interfaces";
 import { BROKER_CATALOG, type TradingType } from "../brokerCatalog";
 import { deriveLotsFromFills, parseAlpacaFill, type DerivedLots } from "./fillLots";
 import { NeutralMarketScreener } from "../neutralMarketScreener";
+import { decodeOrderPriceSource } from "../quotePolicies";
 import { platformQuoteSource } from "../stockQuoteSource";
 import { formatOccSymbol, parseOccSymbol } from "./occSymbol";
 import { withAlpacaCredentials, alpacaTradingSide } from "./credentials";
@@ -875,6 +876,9 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
         term: "GOOD_FOR_DAY",
         estimatedCommission: 0,
         estimatedTotal,
+        // Issue #3782: options strategies require a user-supplied
+        // limit price (validated above), so the price is user-sourced.
+        priceSource: { kind: "user" },
         status: "previewed",
         proposerDid: didProof.proposerDid,
         authorizerDid: userDid,
@@ -891,11 +895,32 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
     if (optionLegs.length > 0) {
       throw new Error("Option contract legs cannot be previewed as an equity order.");
     }
+    // Issue #3782: getQuote is live-only — it throws
+    // marketDataResearchLiveUnavailableError when no live Alpaca quote
+    // is available, so reaching here means the quote IS live (the
+    // #913/#920 principle holds by construction on this path: no live
+    // quote → no draft). A LIMIT draft with no user limit is therefore
+    // priced off the live quote and says so; a user-supplied limit
+    // always wins over the quote (the pre-fix code priced every
+    // equity draft off the quote, ignoring the user's limit).
     const quote = await this.getQuote(params.symbol);
     const orderId = `alp_ord_${crypto.randomUUID().slice(0, 8)}`;
     const userDid = getUserDid(params.sessionId || this.userLogin);
     const action = params.action || params.orderAction || "BUY";
-    const estimatedTotal = Number((quote.lastPrice * params.quantity).toFixed(2));
+    const orderType = params.orderType || "MARKET";
+    const hasUserLimit = Number.isFinite(params.limitPrice) && Number(params.limitPrice) > 0;
+    const executionPrice =
+      (orderType === "LIMIT" || orderType === "STOP_LIMIT") && hasUserLimit
+        ? Number(params.limitPrice)
+        : quote.lastPrice;
+    const priceSource: OrderPriceSource = hasUserLimit
+      ? { kind: "user" }
+      : {
+          kind: "live-quote",
+          provider: quote.source || "Alpaca Real-Time NBBO Feed",
+          timestamp: quote.timestamp || new Date().toISOString(),
+        };
+    const estimatedTotal = Number((executionPrice * params.quantity).toFixed(2));
 
     const didProof = createDidAttestationSync({
       draftId: orderId,
@@ -914,23 +939,24 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
       symbol: params.symbol.toUpperCase(),
       action,
       orderAction: action,
-      orderType: params.orderType || "MARKET",
+      orderType,
       orderClass,
       takeProfit: params.takeProfit,
       stopLoss: params.stopLoss,
       broker: "alpaca",
       quantity: params.quantity,
-      estimatedPrice: quote.lastPrice,
+      estimatedPrice: executionPrice,
       limitPrice: params.limitPrice,
       stopPrice: params.stopPrice,
       term: "GOOD_FOR_DAY",
       estimatedCommission: 0.0,
       estimatedTotal,
+      priceSource,
       status: "previewed",
       proposerDid: didProof.proposerDid,
       authorizerDid: userDid,
       proofSignature: didProof.signature,
-      previewMessage: `Alpaca Order Preview: ${action} ${params.quantity} ${params.symbol} @ ~$${quote.lastPrice.toFixed(2)}. Estimated Total: $${estimatedTotal.toLocaleString()} USD.${orderClass === "bracket" ? " (bracket: TP / SL exits)" : ""}`,
+      previewMessage: `Alpaca Order Preview: ${action} ${params.quantity} ${params.symbol} @ ${hasUserLimit ? `$${executionPrice.toFixed(2)} (limit)` : `~$${executionPrice.toFixed(2)}`}. Estimated Total: $${estimatedTotal.toLocaleString()} USD.${orderClass === "bracket" ? " (bracket: TP / SL exits)" : ""}`,
       safetyNotice: "SAFETY GUARANTEE: NO CAPITAL HAS BEEN MOVED. HUMAN APPROVAL REQUIRED BEFORE BROKER EXECUTION.",
       placedAt: new Date().toISOString(),
     };
@@ -1107,12 +1133,18 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
 
     const { isLive } = resolveAlpacaTradingBase(this.env, this.overrideEnv);
     const mode = isLive ? "live" : "paper";
+    // Issue #3782: the trade workflow attaches provenance before the
+    // broker call — the caller's explicit source wins, otherwise the
+    // stored draft's (persisted at preview time as JSON). A limit
+    // price with neither is refused inside placeOrder, before any POST.
+    const priceSource = params.priceSource ?? decodeOrderPriceSource(draft?.priceSourceJson);
     const placed = await this.alpacaData.placeOrder({
       symbol,
       qty: params.quantity,
       side,
       type,
       ...(limitPrice !== undefined ? { limit_price: limitPrice } : {}),
+      ...(priceSource !== undefined ? { priceSource } : {}),
       time_in_force: (params.timeInForce as any) || "day",
       ...(isExtendedSession ? { extended_hours: true } : {}),
       ...(params.orderClass ? { order_class: params.orderClass } : {}),
