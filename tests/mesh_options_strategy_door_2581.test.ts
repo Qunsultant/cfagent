@@ -130,9 +130,8 @@ describe("issue #2581 — run_options_strategy_screen catalog registration", () 
     // (stock_copilot_learnings, stock_copilot_evaluate); 94 since #3535 (+4 feed-job tools);
     // 98 since #3536 (+4 enrich-job tools).
     // 106 since #3538 (+4 generate-job tools); 110 since #3539 (+4 deliver-job tools); 112 since #3673 (+2 bracket ladder tools).
-    // 116 since #3540 (+4 pipeline-chain tools).
-    // 118 since #3767 (+2 copilot gap remediation tools).
-    expect(McpToolFactory.getAllTools()).toHaveLength(118);
+    // 116 since #3540 (+4 pipeline-chain tools); 120 since #3530 slice B (+2 feed-job schedule tools).
+    expect(McpToolFactory.getAllTools()).toHaveLength(120);
   });
 
   it("the prompt steers options strategy screens at the discovered tool", () => {
