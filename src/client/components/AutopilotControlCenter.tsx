@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { AGENT_DIDS } from "../../agents/did";
-import { EmptyState, Table, Badge, Button, PillGroup, TextInput, Select, Notice, type BadgeTone, Modal, useToast } from "./ui";
+import { EmptyState, Table, Badge, Button, Card, PillGroup, TextInput, Select, Notice, PageSection, PageShell, Stack, type BadgeTone, Modal, useToast } from "./ui";
 import { BRAND } from "../branding";
 import { normalizeAutopilotLimits, type AutopilotPolicyLimits } from "../../services/riskPolicyEngine";
 import type { TradeRecord } from "../../types";
@@ -342,7 +342,6 @@ export interface AutopilotControlCenterProps {
   isLiveAccount?: boolean;
   onSendPrompt?: (prompt: string, sourceTab?: string) => void;
   onNavigateOrder?: (symbol: string) => void;
-  className?: string;
 }
 
 /** Engine defaults (autopilot Phase 1) — never re-declared here. */
@@ -353,6 +352,14 @@ const ACTION_TYPE_TONES: Record<string, BadgeTone> = {
   policy_check: "success",
   risk_guardrail: "warning",
   rebalance: "purple",
+};
+
+/** Issue #3050 PR2: the risk-profile value keeps its profile color as a
+ * token text tone (no bespoke risk-badge class). */
+const RISK_PROFILE_TONE_CLASS: Record<string, string> = {
+  conservative: "ui-success",
+  moderate: "ui-warning",
+  aggressive: "ui-danger",
 };
 
 const ACTION_STATUS_TONES: Record<string, BadgeTone> = {
@@ -412,7 +419,6 @@ export function AutopilotControlCenter({
   isLiveAccount = false,
   onSendPrompt,
   onNavigateOrder,
-  className = "",
 }: AutopilotControlCenterProps) {
   const toast = useToast();
   const [chartTimeframe, setChartTimeframe] = useState<"1d" | "1w" | "1m" | "3m" | "6m" | "ytd">("6m");
@@ -760,62 +766,55 @@ export function AutopilotControlCenter({
   const activeChartData = CHART_TF_DATA[chartTimeframe] || CHART_TF_DATA["6m"];
 
   return (
-    <div className={`autopilot-control-center ${className}`}>
-      {/* View Header */}
-      <div className="autopilot-header">
-        <h1 className="autopilot-title">Autopilot control center</h1>
-        <p className="autopilot-subtitle">
-          Autonomous execution within your written policy, on the account selected at the top:{" "}
-          <strong className="account-highlight">{accountLabel}</strong>.
-        </p>
-      </div>
-
+    <PageShell title="Autopilot control center" scopeNote={`Autonomous execution within your written policy, on the account selected at the top: ${accountLabel}.`}>
       {/* Executive Performance Ribbon */}
+      <PageSection title="Executive performance">
       <div className="autopilot-executive-ribbon">
-        <div className="executive-kpi-card">
-          <span className="executive-kpi-label">Portfolio NAV</span>
-          <div className="executive-kpi-val">{activeChartData.nav}</div>
-          <div className="executive-kpi-sub positive">
-            <span className="trend-arrow">&uarr;</span> {activeChartData.pnl}
-          </div>
-        </div>
+        <Card>
+          <Stack gap="1">
+            <span className="ui-meta-sm">Portfolio NAV</span>
+            <div><strong>{activeChartData.nav}</strong></div>
+            <span className="ui-meta-sm ui-success">&uarr; {activeChartData.pnl}</span>
+          </Stack>
+        </Card>
 
-        <div className="executive-kpi-card">
-          <span className="executive-kpi-label">Drawdown vs Alert</span>
-          <div className="executive-kpi-val">{activeChartData.dd}</div>
-          <div className="executive-kpi-sub neutral">
-            Policy Alert: {policyLimits.drawdownAlertPct.toFixed(2)}% Max
-          </div>
-        </div>
+        <Card>
+          <Stack gap="1">
+            <span className="ui-meta-sm">Drawdown vs Alert</span>
+            <div><strong>{activeChartData.dd}</strong></div>
+            <span className="ui-meta-sm">
+              Policy Alert: {policyLimits.drawdownAlertPct.toFixed(2)}% Max
+            </span>
+          </Stack>
+        </Card>
 
-        <div className="executive-kpi-card">
-          <span className="executive-kpi-label">Cash Reserve Target</span>
-          <div className="executive-kpi-val">{policyLimits.cashReservePct.toFixed(2)}%</div>
-          <div className="executive-kpi-sub positive">
-            &check; Protected Capital Floor
-          </div>
-        </div>
+        <Card>
+          <Stack gap="1">
+            <span className="ui-meta-sm">Cash Reserve Target</span>
+            <div><strong>{policyLimits.cashReservePct.toFixed(2)}%</strong></div>
+            <span className="ui-meta-sm ui-success">
+              &check; Protected Capital Floor
+            </span>
+          </Stack>
+        </Card>
 
-        <div className="executive-kpi-card">
-          <span className="executive-kpi-label">Risk Policy Engine</span>
-          <div className="executive-kpi-val">{verdictRows.length || 14} Verdicts</div>
-          <div className="executive-kpi-sub positive">
-            &check; 100% W3C DID Signed
-          </div>
-        </div>
+        <Card>
+          <Stack gap="1">
+            <span className="ui-meta-sm">Risk Policy Engine</span>
+            <div><strong>{verdictRows.length || 14} Verdicts</strong></div>
+            <span className="ui-meta-sm ui-success">
+              &check; 100% W3C DID Signed
+            </span>
+          </Stack>
+        </Card>
       </div>
+      </PageSection>
 
       {/* Interactive Strategy Performance Curve */}
+      <PageSection title="Strategy Equity vs S&P 500 Benchmark" description="Real-time mark-to-market performance with automated risk policy bounds">
       <div className="autopilot-card autopilot-chart-card">
         <div className="chart-card-header">
-          <div className="chart-title-wrap">
-            <h2 className="card-section-title">Strategy Equity vs S&amp;P 500 Benchmark</h2>
-            <span className="chart-subtitle-text">
-              Real-time mark-to-market performance with automated risk policy bounds
-            </span>
-          </div>
-
-          <div className="chart-tf-selector">
+          <div className="chart-tf-selector ui-push">
                         <PillGroup
               ariaLabel="Performance timeframe"
               options={(["1d", "1w", "1m", "3m", "6m", "ytd"] as const).map((tf) => ({ id: tf, label: tf.toUpperCase() }))}
@@ -889,9 +888,11 @@ export function AutopilotControlCenter({
           </div>
         </div>
       </div>
+      </PageSection>
 
       {/* Top 2-Card Institutional Grid */}
       <div className="autopilot-top-grid">
+        <PageSection>
         {/* Card 1: Autopilot Status Card */}
         <div className="autopilot-card autopilot-status-card">
           <div className="status-card-header">
@@ -957,14 +958,15 @@ export function AutopilotControlCenter({
             risk team, blocks all new orders.
           </p>
         </div>
+        </PageSection>
 
+        <PageSection title="Live policy limits">
         {/* Card 2: Live Policy Limits Card */}
         <div className="autopilot-card autopilot-limits-card">
           <div className="limits-card-header">
-            <h2 className="card-section-title">Live policy limits</h2>
             <Button
             variant="secondary"
-              className="btn-edit-limits"
+              className="btn-edit-limits ui-push"
               onClick={() => {
                 setEditLimitsDraft(policyLimits);
                 setLimitsError(null);
@@ -976,39 +978,35 @@ export function AutopilotControlCenter({
           </div>
 
           <div className="autopilot-limits-grid">
-            <div className="policy-limit-item">
-              <span className="policy-limit-label">Max position</span>
-              <span className="policy-limit-value">{policyLimits.maxPositionPct.toFixed(2)}%</span>
-            </div>
+            <Stack gap="1">
+              <span className="ui-meta-sm">Max position</span>
+              <span><strong>{policyLimits.maxPositionPct.toFixed(2)}%</strong></span>
+            </Stack>
 
-            <div className="policy-limit-item">
-              <span className="policy-limit-label">Cash reserve</span>
-              <span className="policy-limit-value">{policyLimits.cashReservePct.toFixed(2)}%</span>
-            </div>
+            <Stack gap="1">
+              <span className="ui-meta-sm">Cash reserve</span>
+              <span><strong>{policyLimits.cashReservePct.toFixed(2)}%</strong></span>
+            </Stack>
 
-            <div className="policy-limit-item">
-              <span className="policy-limit-label">Orders / day</span>
-              <span className="policy-limit-value">{policyLimits.ordersPerDay}</span>
-            </div>
+            <Stack gap="1">
+              <span className="ui-meta-sm">Orders / day</span>
+              <span><strong>{policyLimits.ordersPerDay}</strong></span>
+            </Stack>
 
-            <div className="policy-limit-item">
-              <span className="policy-limit-label">Drawdown alert</span>
-              <span className="policy-limit-value">{policyLimits.drawdownAlertPct.toFixed(2)}%</span>
-            </div>
+            <Stack gap="1">
+              <span className="ui-meta-sm">Drawdown alert</span>
+              <span><strong>{policyLimits.drawdownAlertPct.toFixed(2)}%</strong></span>
+            </Stack>
 
-            <div className="policy-limit-item">
-              <span className="policy-limit-label">Universe</span>
-              <span className="policy-limit-value universe-value" title={policyLimits.universe}>
-                {policyLimits.universe}
-              </span>
-            </div>
+            <Stack gap="1">
+              <span className="ui-meta-sm">Universe</span>
+              <span title={policyLimits.universe}><strong>{policyLimits.universe}</strong></span>
+            </Stack>
 
-            <div className="policy-limit-item">
-              <span className="policy-limit-label">Risk</span>
-              <span className={`policy-limit-value risk-badge ${policyLimits.riskProfile}`}>
-                {policyLimits.riskProfile}
-              </span>
-            </div>
+            <Stack gap="1">
+              <span className="ui-meta-sm">Risk</span>
+              <span className={RISK_PROFILE_TONE_CLASS[policyLimits.riskProfile] ?? "ui-warning"}><strong>{policyLimits.riskProfile.charAt(0).toUpperCase() + policyLimits.riskProfile.slice(1)}</strong></span>
+            </Stack>
           </div>
 
           <div className="ui-footer-bar">
@@ -1017,15 +1015,16 @@ export function AutopilotControlCenter({
             </span>
           </div>
         </div>
+        </PageSection>
       </div>
 
       {/* Job Outcomes (issue #1333): every job's success/failure from
           the one outcome sink, labeled by origin — not the trading
           actions feed above, but the job-truth feed. */}
+      <PageSection title="Job outcomes">
       <div className="autopilot-card autopilot-actions-card">
         <div className="actions-card-header">
           <div className="actions-header-left">
-            <h2 className="card-section-title">Job outcomes</h2>
             <span className="actions-count-badge">{jobOutcomes.length}</span>
             <span
               className="live-feed-badge cached"
@@ -1125,12 +1124,13 @@ export function AutopilotControlCenter({
           )}
         />
       </div>
+      </PageSection>
 
       {/* Bottom Card: Recent Autonomous Actions */}
+      <PageSection title="Recent autonomous actions">
       <div className="autopilot-card autopilot-actions-card">
         <div className="actions-card-header">
           <div className="actions-header-left">
-            <h2 className="card-section-title">Recent autonomous actions</h2>
             <span className="actions-count-badge">{filteredActions.length}</span>
             <span
               className={`live-feed-badge ${isLiveFeed ? "live" : "cached"}`}
@@ -1294,12 +1294,13 @@ export function AutopilotControlCenter({
           )}
         />
       </div>
+      </PageSection>
 
       {/* Policy Decisions Audit (issue #651): recorded verdicts from mas_policy_verdicts */}
+      <PageSection title="Policy decisions">
       <div className="autopilot-card autopilot-actions-card">
         <div className="actions-card-header">
           <div className="actions-header-left">
-            <h2 className="card-section-title">Policy decisions</h2>
             <span className="actions-count-badge">{verdictRows.length}</span>
             <span
               className="live-feed-badge cached"
@@ -1383,6 +1384,7 @@ export function AutopilotControlCenter({
           )}
         />
       </div>
+      </PageSection>
 
       {/* Edit Policy Limits Modal */}
       {isEditModalOpen && (
@@ -1405,8 +1407,9 @@ export function AutopilotControlCenter({
                 </Notice>
               )}
               <div className="form-group-grid">
-                <div className="form-field">
+                <div>
                   <TextInput label="Max position size (% of equity)"
+                    hint="Maximum capital committed to any single name"
                     id="maxPositionPct"
                     type="number"
                     step="0.5"
@@ -1421,11 +1424,11 @@ export function AutopilotControlCenter({
                     }
                     required
                   />
-                  <span className="field-hint">Maximum capital committed to any single name</span>
                 </div>
 
-                <div className="form-field">
+                <div>
                   <TextInput label="Minimum cash reserve (%)"
+                    hint="Safety liquidity floor preserved at all times"
                     id="cashReservePct"
                     type="number"
                     step="0.5"
@@ -1440,11 +1443,11 @@ export function AutopilotControlCenter({
                     }
                     required
                   />
-                  <span className="field-hint">Safety liquidity floor preserved at all times</span>
                 </div>
 
-                <div className="form-field">
+                <div>
                   <TextInput label="Max autonomous orders / day"
+                    hint="Rate limit on autonomous transactions per session"
                     id="ordersPerDay"
                     type="number"
                     step="1"
@@ -1459,11 +1462,11 @@ export function AutopilotControlCenter({
                     }
                     required
                   />
-                  <span className="field-hint">Rate limit on autonomous transactions per session</span>
                 </div>
 
-                <div className="form-field">
+                <div>
                   <TextInput label="Peak-to-trough drawdown alert (%)"
+                    hint="Triggers immediate agent pause & email alert"
                     id="drawdownAlertPct"
                     type="number"
                     step="1"
@@ -1478,10 +1481,9 @@ export function AutopilotControlCenter({
                     }
                     required
                   />
-                  <span className="field-hint">Triggers immediate agent pause &amp; email alert</span>
                 </div>
 
-                <div className="form-field">
+                <div>
                   <Select label="Trading Universe"
                     id="universe"
                     value={editLimitsDraft.universe}
@@ -1500,7 +1502,7 @@ export function AutopilotControlCenter({
                   </Select>
                 </div>
 
-                <div className="form-field">
+                <div>
                   <Select label="Risk Profile"
                     id="riskProfile"
                     value={editLimitsDraft.riskProfile}
@@ -1627,6 +1629,6 @@ export function AutopilotControlCenter({
             </div>
                   </Modal>
       )}
-    </div>
+    </PageShell>
   );
 }
