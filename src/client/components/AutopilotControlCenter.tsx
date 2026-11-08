@@ -31,7 +31,7 @@ export interface AutonomousActionItem {
 /** Issue #1333: one job-outcome row from GET /autopilot/jobs. */
 export interface JobOutcomeFeedItem {
   id: string;
-  kind: "stock" | "options" | "goal" | "discovery" | "corpus" | "reports";
+  kind: "stock" | "options" | "goal" | "discovery" | "corpus" | "reports" | "feed";
   trigger: "manual" | "scheduled";
   status: "completed" | "failed" | "partial";
   scanned: number | null;
@@ -54,6 +54,9 @@ export const JOB_OUTCOME_KIND_LABELS: Record<JobOutcomeFeedItem["kind"], string>
   // Issue #3527 S5 — the two registered tick jobs' run rows.
   corpus: "Corpus Sync",
   reports: "Reports Index",
+  // Issue #3530 slice B — feed runs recorded at settle on the
+  // pipeline host: a row exists only for a run that actually ran.
+  feed: "Feed Jobs",
 };
 
 export const JOB_OUTCOME_STATUS_TONES: Record<JobOutcomeFeedItem["status"], BadgeTone> = {
@@ -1028,7 +1031,7 @@ export function AutopilotControlCenter({
             <span className="actions-count-badge">{jobOutcomes.length}</span>
             <span
               className="live-feed-badge cached"
-              title="One outcome sink (mas_job_outcomes): stock, options, goal-screen, discovery, corpus-sync, and reports-index runs, manual and scheduled"
+              title="One outcome sink (mas_job_outcomes): stock, options, goal-screen, discovery, corpus-sync, reports-index, and feed runs, manual and scheduled"
             >
               {isLoadingJobs ? "🔄 Syncing…" : "Job-truth feed"}
             </span>
