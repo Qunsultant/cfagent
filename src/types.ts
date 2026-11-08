@@ -2172,6 +2172,23 @@ export interface VoiceTradingTurnRequest {
   sampleRate?: number;
   sessionId?: string;
   userLogin?: string;
+  /**
+   * Issue #3720: the copilot-context carrier — the sourceTab value
+   * of the copilot registration the voice turn belongs to (the same
+   * carrier the chat turns carry), stamped by the voice client or
+   * WebSocket frame and passed through by the #815 forwarder. It is
+   * context only: every broker fact is resolved server-side.
+   */
+  sourceTab?: string;
+  /**
+   * Issue #3720: the copilot's broker for this turn, resolved by
+   * the hosting route from the copilot's own selection resolver
+   * (#3451) — route-set only, never caller-asserted (the route
+   * overwrites any inbound value). When present and not "etrade",
+   * the desk's approval leg refuses by name: voice order execution
+   * stays on E*TRADE until the neutral desk lands (#3556).
+   */
+  copilotBrokerId?: string;
 }
 
 export interface VoiceTradingTurnResponse {
