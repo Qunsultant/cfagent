@@ -881,7 +881,12 @@ export class AlpacaPreviewOrderCommand implements IMcpToolCommand {
   });
 
   async execute(input: any, context: McpToolContext) {
-    const { TradingPlatformRegistry } = await import("../../trading/registry");
+    // Issue #3782: the registry lives behind the src/trading public
+    // seam (index.ts) — the #290 boundary test forbids importing a
+    // trading-internal path from outside src/trading/. The import
+    // stays dynamic so the trading tree (which itself reaches the
+    // MCP client modules) loads at call time, not module load.
+    const { TradingPlatformRegistry } = await import("../../trading");
     const platform = TradingPlatformRegistry.getPlatform("alpaca", context.env, context.orm, context.sessionId);
     const draft = await platform.previewOrder({
       assetClass: input.assetClass,
