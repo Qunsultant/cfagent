@@ -1,0 +1,2 @@
+### Added
+- Feed job schedules are now configurable from the Data Providers panel (#3530): a feed job's stored schedule (cadence + enabled) can be edited per job via `POST /data-providers/:id/feed-jobs/:jobId/schedule`, backed by the pipeline engine's existing `configureJob` through a new ScheduledAgent RPC and mesh door. Pipeline ensures now preserve a stored job's schedule across re-definition, so a configured cadence survives host door calls; the panel renders and edits the stored schedule (or "unknown" when no stored definition exists — never a fabricated cadence).
