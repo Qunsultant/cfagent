@@ -74,6 +74,7 @@ import { handleMarketDataQuoteResearchRoutes, handleMarketDataCompareScreenRoute
 import { handleScreenerResearchRoutes } from "../routes/screenerResearch";
 import { handleSchedulesRoutes, makeRunScheduleCallback } from "../routes/schedules";
 import { handleStockCopilotRoutes } from "../routes/stockCopilot";
+import { handleCopilotChannelsRoutes } from "../routes/copilotChannels";
 import { handleMaintenanceRoutes } from "../routes/maintenance";
 import { handleServiceUserRoutes } from "../routes/serviceUser";
 import { handleDelegationRoutes } from "../routes/delegations";
@@ -904,6 +905,20 @@ export async function routeRequest(deps: RouteRequestDeps, request: Request): Pr
     audit: (type, agent, payload) => deps.audit(type, agent, payload),
   });
   if (stockCopilotResponse) return stockCopilotResponse;
+
+  // Issue #3773: the chat surface's per-registration channel
+  // projection read (routes/copilotChannels.ts) runs after the
+  // Stock Copilot routes, before the Not-found fallthrough. It
+  // resolves the requested registration's channel switches
+  // through the same projection the stock status read serves,
+  // so the composer mic and the panel voice control can never
+  // disagree about whether voice serves.
+  const copilotChannelsResponse = await handleCopilotChannelsRoutes(request, url, path, sessionId, {
+    env: deps.env,
+    getScreenerExecutionContext: () => deps.getScreenerExecutionContext(),
+    readSettingRaw: (key) => deps.readSettingRaw(key),
+  });
+  if (copilotChannelsResponse) return copilotChannelsResponse;
 
   return new Response("Not found", { status: 404 });
 }

@@ -358,6 +358,15 @@
  * after the index-backfill page route) — bringing the pinned
  * inventory to 404 entries; the delegation sequence is unchanged
  * (same handler, same position).
+ *
+ * Issue #3773 added one — GET /copilot-channels (in the new
+ * handleCopilotChannelsRoutes, delegated last, after the Stock
+ * Copilot routes) — bringing the pinned inventory to 413 entries
+ * and the delegation sequence to 52 calls. The #3773 model-backend
+ * follow-up added two more in the same handler — POST
+ * /copilot-channels/voice/stt and /copilot-channels/voice/tts —
+ * bringing the pinned inventory to 415 entries; the delegation
+ * sequence is unchanged (same handler, same position).
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -417,7 +426,9 @@ const HANDLER_FILE: Record<string, string> = {
   "handleOrchestratorMigrationRoutes": "orchestratorMigration.ts",
   "handleSchedulesRoutes": "schedules.ts",
   // Issue #3422: Stock Copilot status + pause/resume control.
-  "handleStockCopilotRoutes": "stockCopilot.ts"
+  "handleStockCopilotRoutes": "stockCopilot.ts",
+  // Issue #3773: the chat surface's per-registration channel read.
+  "handleCopilotChannelsRoutes": "copilotChannels.ts"
 };
 
 const EXPECTED_DELEGATIONS = [
@@ -471,7 +482,8 @@ const EXPECTED_DELEGATIONS = [
   "handleDataLifecycleRoutes",
   "handleOrchestratorMigrationRoutes",
   "handleSchedulesRoutes",
-  "handleStockCopilotRoutes"
+  "handleStockCopilotRoutes",
+  "handleCopilotChannelsRoutes"
 ];
 
 const EXPECTED_INVENTORY = [
@@ -907,12 +919,19 @@ const EXPECTED_INVENTORY = [
   "handleSchedulesRoutes :: endsWith(\"/schedules/trigger-discovery\")",
   "handleSchedulesRoutes :: endsWith(\"/schedules/feed-snapshot\")",
   // Issue #3422 / #3588 / #3514: Stock Copilot status/introspect read + learnings/evaluate + pause/resume write
-  // (in handleStockCopilotRoutes, delegated last).
+  // (in handleStockCopilotRoutes).
   "handleStockCopilotRoutes :: endsWith(\"/stock-copilot/status\")",
   "handleStockCopilotRoutes :: endsWith(\"/stock-copilot/introspect\")",
   "handleStockCopilotRoutes :: endsWith(\"/stock-copilot/learnings\")",
   "handleStockCopilotRoutes :: endsWith(\"/stock-copilot/evaluate\")",
-  "handleStockCopilotRoutes :: endsWith(\"/stock-copilot/control\")"
+  "handleStockCopilotRoutes :: endsWith(\"/stock-copilot/control\")",
+  // Issue #3773: the chat surface's per-registration channel-projection read
+  // (in handleCopilotChannelsRoutes, delegated last).
+  "handleCopilotChannelsRoutes :: endsWith(\"/copilot-channels\")",
+  // Issue #3773 (model backend): the copilot voice STT/TTS endpoints
+  // (in handleCopilotChannelsRoutes, same handler, same position).
+  "handleCopilotChannelsRoutes :: endsWith(\"/copilot-channels/voice/stt\")",
+  "handleCopilotChannelsRoutes :: endsWith(\"/copilot-channels/voice/tts\")"
 ];
 
 function routeRequestBody(orchSrc: string): string {

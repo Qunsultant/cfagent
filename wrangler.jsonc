@@ -312,6 +312,15 @@
     // stock:voice is also on) or setting it to "stock:voice=off",
     // and redeploying.
     "COPILOT_CHANNELS": "stock:voice=on",
+    // Issue #3773 — the copilot voice channel's BACKEND switch
+    // (src/services/copilotVoiceBackend.ts): entries
+    // "<registration>=webspeech|model". Production value: empty —
+    // no env-layer decision, so every registration resolves to the
+    // code default (webspeech, browser Web Speech); a login's
+    // stored backend setting still wins over this layer. Set e.g.
+    // "stock=model" to serve a registration's voice turns from the
+    // Workers AI STT/TTS models instead, and redeploy.
+    "COPILOT_VOICE_BACKEND": "",
     // Issue #3452 — Stock Copilot cycle cadence (AOP). Optional;
     // absence uses "every 30 minutes". Floor is 30m (Worker cron limit).
     // "STOCK_COPILOT_CADENCE": "every 30 minutes",
