@@ -135,6 +135,7 @@ export * from "./options/strategies/ledger";
 export * from "./email/agent";
 export * from "./slack/agent";
 export * from "./voice/agent";
+export * from "./voice/stockCopilotVoiceActivation";
 export * from "./channels/intake";
 export * from "./channels/approval";
 export * from "./channels/signedLinks";

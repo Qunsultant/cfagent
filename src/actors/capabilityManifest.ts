@@ -314,6 +314,10 @@ export const PORT_THINK_CAPABILITY_BASE: Record<
       "enabled",
       "Production Slack ingress terminates on per-team instances of this class (slack_<teamId>), running the shared channel handler (src/agents/routes/tradingIntegrations.ts) — the #1262 trading/NLQ pipeline. The uniform any-copilot invocation surface is S5.",
     ),
+    voice: entry(
+      "enabled",
+      "The production voice channel terminates on per-login instances of this class: voice WebSocket ingress forwards each turn to the instance's POST /trading/voice/turn desk (src/trading/voice/agent.ts, #3418; per-turn forwarder #815), which runs the channel NLQ pipeline against the instance's real ORM with HITL order confirmation. Activated for the Stock Copilot as S3 (#3720).",
+    ),
     mcpClient: entry(
       "enabled",
       "Wired: servers are registered on the SDK client manager (this.mcp) through src/agents/orchestrator/meshMcpClient.ts (#2496), and this.mcp.getAITools() merges into every turn's tool set. Activated for the Stock Copilot as S4 (#3721): the stock registration declares mcpClient (src/client/chat/copilotRegistry.ts), and while this entry resolves enabled a stock turn is steered to the copilot's own discovered commands (tool_openaimp_stock_copilot_*); the externalized override withdraws that activation.",

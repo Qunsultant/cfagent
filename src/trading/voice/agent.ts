@@ -35,6 +35,7 @@ import {
   cancelPreviewedOrder,
 } from "../channels/approval";
 import { getVoiceConfig, getTradingConstraints } from "../../config/etapiConfig";
+import { brokerPresentation } from "../brokerPresentation";
 import { getPlatformCapabilitiesDeskSummary } from "../../services/platformKnowledge";
 import { actorGateway } from "../../services/cloudflareActorGateway";
 
@@ -201,6 +202,28 @@ export class ETradeVoiceTradingService {
     // -----------------------------------------------------------------------
     const approveMatch = cleanTranscript.match(/\b(CONFIRM|APPROVE|EXECUTE|SUBMIT)\b(?:\s+(?:THE\s+)?(?:EXECUTION\s+(?:OF\s+)?)?(?:ORDER|TRADE))?(?:\s+(ord_[a-zA-Z0-9_-]+|[a-zA-Z0-9]{6,}))?/i);
     if (approveMatch) {
+      // Issue #3720: a Stock Copilot voice turn carries the copilot's
+      // server-resolved broker. The desk's execution arm is E*TRADE
+      // (the approval executor below), so an approval under any other
+      // resolved broker refuses BY NAME before anything executes —
+      // the #3429 invariant, kept at the execution leg for a turn the
+      // activation serves. Executing on the selected broker is the
+      // neutral desk's build (#3556); the refusal names the way.
+      if (request.copilotBrokerId && request.copilotBrokerId !== "etrade") {
+        const label = brokerPresentation(request.copilotBrokerId).label;
+        const spokenText = tuneFinancialPronunciation(
+          `I can't execute that order by voice. Your selected broker is ${label}, and the voice desk executes orders on E*TRADE only — nothing was executed. Use the Trading Hub or the neutral order API for ${label}.`
+        );
+        return {
+          success: false,
+          spokenText,
+          displayMarkdown: `⚠️ **Voice Execution Refused**: your selected broker is ${label}; the voice desk executes orders on E*TRADE only. Nothing was executed. Use the Trading Hub or the neutral order API (\`/api/broker/order/execute\`) for ${label}.`,
+          actionType: "error",
+          proposerDid: AGENT_DIDS.TRADING,
+          authorizerDid,
+          timestamp,
+        };
+      }
       const rawId = approveMatch[2];
       const explicitId = rawId ? (rawId.startsWith("ord_") ? rawId : `ord_${rawId}`) : undefined;
       return this.handleVoiceApproval(explicitId, authorizerDid, tradingService, timestamp);
@@ -1075,6 +1098,11 @@ export function createOrchestratorVoiceTurnForwarder(env: Env, userLogin: string
         },
         body: JSON.stringify({
           transcript: request.transcript ?? request.rawTranscript ?? "",
+          // Issue #3720: the copilot-context carrier rides the
+          // forward, so the DO route can resolve the turn's voice
+          // activation. Broker facts are never forwarded — the
+          // route resolves them server-side.
+          ...(request.sourceTab ? { sourceTab: request.sourceTab } : {}),
         }),
       })
     );
@@ -1138,6 +1166,10 @@ export async function handleVoiceWebSocketConnection(
             transcript: userTranscript,
             sessionId,
             userLogin: sessionId,
+            // Issue #3720: a turn frame may carry the copilot
+            // context (the stock registration's sourceTab); it
+            // rides the forwarder to the DO route unchanged.
+            ...(typeof msg.sourceTab === "string" ? { sourceTab: msg.sourceTab } : {}),
           };
           const turnRes = !orm && forwardTurn
             ? await forwardTurn(turnRequest)
