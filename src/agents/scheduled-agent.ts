@@ -489,6 +489,19 @@ export class ScheduledAgent extends PortThink {
     };
   }
 
+  /**
+   * Reconfigure one pipeline job (#3530 scheduling-config): the
+   * patch merges into the stored raw config through the engine's
+   * configureJob — the schedule route's write path. Same door
+   * idiom as every RPC here: build control, ensure, dispatch.
+   */
+  async configurePipelineJob(jobId: string, patch: unknown): Promise<JobDefinition> {
+    const ctx = this.pipelineContext();
+    const control = createScheduledAgentPipelineControl(ctx);
+    await ensureScheduledAgentPipelineJobs(ctx, control);
+    return control.configureJob(jobId, patch);
+  }
+
   /** Pause a running pipeline job (honored at the next step boundary). */
   async pausePipelineJob(jobId: string): Promise<JobInstanceRecord> {
     const ctx = this.pipelineContext();
