@@ -222,6 +222,25 @@ function statusLabel(status: WorkflowRunStatus): string {
   return "Unknown";
 }
 
+/**
+ * Issue #3784: the run-level status display. "Stuck" is a display
+ * derivation on running + flagged (`run.stuck`, derived in
+ * src/services/workflowRuns.ts runFromJobs from the stuck-alert
+ * claim) — NOT a new WorkflowRunStatus and NOT a lifecycle state,
+ * so the recorded status and the STATUS_TONE map stay untouched.
+ * A stuck run renders with the warning tone: it needs operator
+ * attention, unlike a healthy running run.
+ */
+function runStatusLabel(run: WorkflowRun): string {
+  if (run.stuck === true && run.status === "running") return "Stuck";
+  return statusLabel(run.status);
+}
+
+function runStatusTone(run: WorkflowRun): "success" | "warning" | "danger" | "info" | "neutral" {
+  if (run.stuck === true && run.status === "running") return "warning";
+  return STATUS_TONE[run.status];
+}
+
 function formatDuration(ms: number | null): string {
   if (ms === null) return "—";
   if (ms < 1000) return `${ms} ms`;
@@ -610,8 +629,8 @@ export function WorkflowRunsPanel() {
       header: <SortHeader label="Status" sortKey="status" sort={sort} onSort={(key) => setSort(nextWorkflowRunSort(sort, key))} />,
       ariaSort: (sort.key === "status" ? (sort.dir === "asc" ? "ascending" : "descending") : "none") as "ascending" | "descending" | "none",
       render: (run: WorkflowRun) => (
-        <Badge tone={STATUS_TONE[run.status]} size="sm" dot>
-          {statusLabel(run.status)}
+        <Badge tone={runStatusTone(run)} size="sm" dot>
+          {runStatusLabel(run)}
         </Badge>
       ),
     },
@@ -1051,8 +1070,8 @@ function RunDetail({ run }: { run: WorkflowRun }) {
           <Badge tone={TRIGGER_TONE[run.trigger]} size="sm">
             {TRIGGER_LABEL[run.trigger]}
           </Badge>
-          <Badge tone={STATUS_TONE[run.status]} size="sm" dot>
-            {statusLabel(run.status)}
+          <Badge tone={runStatusTone(run)} size="sm" dot>
+            {runStatusLabel(run)}
           </Badge>
         </div>
       </div>

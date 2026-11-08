@@ -112,6 +112,10 @@ export function readWorkflowRunJobs(sql: WorkflowRunsSql, sessionId: string, lim
     not_before: str(row.not_before),
     stage: str(row.stage),
     chain_id: str(row.chain_id),
+    // Issue #3784: the stuck-alert claim stamp rides the row so
+    // the runs view can derive the Stuck display (the SQL
+    // projection already selects it).
+    stuck_alerted_at: str(row.stuck_alerted_at),
   }));
 }
 

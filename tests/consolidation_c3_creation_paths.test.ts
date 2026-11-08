@@ -50,8 +50,8 @@ const ARMING_PATTERN = /\.(schedule|scheduleEvery)\s*\(/;
 /** Post-C3 enumeration: file → number of arming call sites + role. */
 const ARMING_SITES: Record<string, { count: number; role: string }> = {
   "src/agents/orchestrator.ts": {
-    count: 5,
-    role: "context binding arrows for the remaining class-owned modules + the stale-task sweep arm (non-screening); the six dispatcher arrows moved to orchestrator/routeRequest.ts by #2942 (11 = 5 + 6, unchanged in total)",
+    count: 6,
+    role: "context binding arrows for the remaining class-owned modules + the stale-task sweep arm (non-screening) + the stale-async-job sweep arm (#3784, non-screening: the 15-min sweepStaleAsyncJobs interval, armed idempotently from onStart beside the #618 ledger sweep); the six dispatcher arrows moved to orchestrator/routeRequest.ts by #2942 (12 = 6 + 6: the move's 11 plus the #3784 arm)",
   },
   "src/agents/orchestrator/routeRequest.ts": {
     count: 7,

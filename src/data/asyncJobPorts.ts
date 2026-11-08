@@ -85,6 +85,20 @@ export type AsyncJobListRow = Omit<AsyncJobStoredRow, "response_status">;
 /** The workflow-runs full-row projection (payload included). */
 export type AsyncJobWorkflowRow = AsyncJobStoredRow;
 
+/** The stale-sweep scan's row: the fields the sweep needs to
+ *  decide reap-vs-alert (identity, status, age, claim stamp) —
+ *  never the payload. Issue #3784. */
+export interface AsyncJobRunningRow {
+  job_id: string;
+  session_id: string;
+  capability: string;
+  display_name: string;
+  status: string;
+  started_at: string | null;
+  stuck_alerted_at: string | null;
+  created_at: string;
+}
+
 /** One chain's rows as the shard planner reads them (raw). */
 export interface AsyncJobChainRow {
   job_id: string;
@@ -221,6 +235,11 @@ export interface AsyncJobReadPort {
   chainRows(chainId: string, sessionId: string): AsyncJobChainRow[];
   /** The workflow-runs surface's full rows, newest first. */
   workflowRunRows(sessionId: string, limit: number): AsyncJobWorkflowRow[];
+  /** Issue #3784: the stale sweep's scan — the session's `running`
+   *  rows, oldest first, capped at `limit`. The (session_id,
+   *  created_at DESC) index seeks the session; the status filter
+   *  is applied over that bounded set. */
+  listRunning(sessionId: string, limit: number): AsyncJobRunningRow[];
   /** The already-running gate's scan: payloads of queued and
    *  running jobs (the closed-domain positive IN list). */
   activeJobPayloads(): Array<{ payload_json: string }>;
@@ -256,3 +275,13 @@ export interface AsyncJobMaintenancePort {
  *  exactly this statement for activeJobPayloads(). */
 export const ACTIVE_JOB_PAYLOADS_SQL =
   "SELECT payload_json FROM mas_async_jobs WHERE status IN ('queued', 'running')";
+
+/** The stale sweep's scan statement, kept as data so its query
+ *  plan stays pinned by tests/stale_async_job_sweep_3784.test.ts
+ *  (issue #3784): the session seek on
+ *  idx_mas_async_jobs_session_created bounds the scan to this
+ *  instance's rows, oldest first so the stalest rows are swept
+ *  first when the batch cap binds. The DO adapter executes
+ *  exactly this statement for listRunning(). */
+export const LIST_RUNNING_SQL =
+  "SELECT job_id, session_id, capability, display_name, status, started_at, stuck_alerted_at, created_at FROM mas_async_jobs WHERE session_id = ? AND status = 'running' ORDER BY created_at ASC LIMIT ?";

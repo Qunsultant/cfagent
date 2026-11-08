@@ -12,8 +12,8 @@ import { recordJobOutcome } from "../src/services/jobOutcomes";
 import { recordScreeningActivity } from "../src/services/screeningActivity";
 
 const JOB_COLUMNS =
-  "job_id, session_id, capability, display_name, status, payload_json, result_json, error, created_at, updated_at, started_at, completed_at, parent_job_id, job_kind, channel, not_before, stage, chain_id";
-const JOB_PLACEHOLDERS = "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?";
+  "job_id, session_id, capability, display_name, status, payload_json, result_json, error, created_at, updated_at, started_at, completed_at, parent_job_id, job_kind, channel, not_before, stage, chain_id, stuck_alerted_at";
+const JOB_PLACEHOLDERS = "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?";
 
 function insertJob(
   sql: MockSqlStorage,
@@ -30,6 +30,7 @@ function insertJob(
     jobKind?: string | null;
     stage: string;
     chainId?: string | null;
+    stuckAlertedAt?: string | null;
   },
 ): void {
   sql.exec(
@@ -52,6 +53,7 @@ function insertJob(
     null,
     input.stage,
     input.chainId ?? null,
+    input.stuckAlertedAt ?? null,
   );
 }
 
@@ -238,5 +240,24 @@ describe("GET /workflow-runs", () => {
     const sql = new MockSqlStorage();
     const res = await handleWorkflowRunsRoutes(request("/runs"), new URL("https://agent.internal/runs"), "/runs", "session-1", ctxFor(sql));
     expect(res).toBeNull();
+  });
+
+  it("carries the stuck flag through to a running chain (#3784)", async () => {
+    const sql = new MockSqlStorage();
+    insertJob(sql, {
+      jobId: "job-stuck",
+      displayName: "MCP etrade_preview_order",
+      status: "running",
+      stage: "generate",
+      payload: { trigger: "manual" },
+      createdAt: "2026-11-08T15:29:00.000Z",
+      stuckAlertedAt: "2026-11-08T15:59:00.000Z",
+    });
+    const res = await handleWorkflowRunsRoutes(request(), new URL("https://agent.internal/workflow-runs"), "/workflow-runs", "session-1", ctxFor(sql));
+    const body = (await res!.json()) as any;
+    const run = body.runs.find((r: any) => r.id === "job-stuck");
+    expect(run).toBeDefined();
+    expect(run.status).toBe("running");
+    expect(run.stuck).toBe(true);
   });
 });

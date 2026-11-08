@@ -339,6 +339,48 @@ describe("WorkflowRunsPanel", () => {
     expect(container.textContent).not.toContain("Manual options run");
   });
 
+  it("renders a running flagged run as Stuck, not Running (#3784)", async () => {
+    payload = {
+      count: 1,
+      runs: [
+        run({
+          id: "job-stuck",
+          runId: "job-stuck",
+          status: "running",
+          stuck: true,
+          title: "MCP etrade_preview_order",
+          startedAt: "2026-11-08T15:29:00.000Z",
+          finishedAt: null,
+          durationMs: null,
+        }),
+      ],
+    };
+    await renderPanel();
+    expect(container.textContent).toContain("Stuck");
+    expect(container.textContent).not.toContain("Running");
+  });
+
+  it("renders an unflagged running run as Running (#3784)", async () => {
+    payload = {
+      count: 1,
+      runs: [
+        run({
+          id: "job-young",
+          runId: "job-young",
+          status: "running",
+          stuck: false,
+          title: "MCP market_data_get_quote",
+          startedAt: "2026-11-08T15:29:00.000Z",
+          finishedAt: null,
+          durationMs: null,
+        }),
+      ],
+    };
+    await renderPanel();
+    expect(container.textContent).toContain("Running");
+    expect(container.textContent).not.toContain("Stuck");
+  });
+
   it("keeps Refresh and Retry reachable on a failed load (#2283 stream 3)", async () => {
     status = 500;
     await renderPanel();

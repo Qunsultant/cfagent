@@ -119,6 +119,17 @@ export interface WorkflowRun {
   triggeredBy: string | null;
   status: WorkflowRunStatus;
   /**
+   * Issue #3784: display derivation — true when the run is still
+   * `running` AND at least one of its jobs carries the stuck-alert
+   * claim (`stuck_alerted_at`, #2567, applied by the sweep or the
+   * read path). NOT a stored status and NOT a lifecycle state: the
+   * recorded status stays "running" and the lifecycle stays
+   * in-progress; the panel renders "Stuck" for a stuck run.
+   * Always set by runFromJobs; outcome/report/schedule runs (no
+   * job rows) leave it unset, which renders as not stuck.
+   */
+  stuck?: boolean;
+  /**
    * Issue #3021: the run's lifecycle state — exactly one of
    * scheduled / in-progress / done / cancelled — rolled up from the
    * recorded status (and, for delayed runs, from not_before). The
@@ -218,6 +229,11 @@ export interface WorkflowRunJobRow {
   not_before?: string | null;
   stage?: string | null;
   chain_id?: string | null;
+  /** Issue #3784: the stuck-alert claim stamp (#2567) — the ISO
+   *  instant the (single) stuck alert was claimed for this row,
+   *  or NULL while unclaimed. Carried through the route mapping
+   *  so the runs view can derive the Stuck display. */
+  stuck_alerted_at?: string | null;
 }
 
 /** The mas_job_outcomes columns this model reads. */
@@ -1036,6 +1052,14 @@ export function runFromJobs(
     triggerDetail,
     triggeredBy: outcomeTrigger?.triggeredBy ?? triggerEvidenceForRun.actor ?? null,
     status: runStatus,
+    // Issue #3784: Stuck is a display derivation on running +
+    // flagged — a job whose stuck alert was claimed while the run
+    // is still running. A terminal run is never stuck, even when
+    // a claim stamp is present (the stamp predates the terminal
+    // transition); an unflagged running run is just running.
+    stuck:
+      runStatus === "running" &&
+      jobs.some((j) => typeof j.stuck_alerted_at === "string" && j.stuck_alerted_at !== ""),
     // Issue #3021: lifecycle + schedule provenance. A chain with no
     // started stage and a not-yet-due job is scheduled, not
     // in-progress — the status verb alone cannot say that, because

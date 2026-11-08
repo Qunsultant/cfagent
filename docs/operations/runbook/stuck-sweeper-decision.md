@@ -1,5 +1,15 @@
 # Stuck-job sweeper decision (Phase 5 slice 6, #2000)
 
+> **SUPERSEDED 2026-11-08 by #3784 (parent incident #3781).** The
+> G1 reopen trigger fired: six `mas_async_jobs` rows sat unread in
+> `running` for ~53 min with no alert and no reap. The scheduled
+> sweep is now built (`sweepStaleAsyncJobs`,
+> `src/agents/orchestrator/asyncJobs.ts`, 15-min tick; see
+> `docs/architecture/security/async-job-staleness-sweep-3784.md`).
+> The read-path alert + reap described below stay as-is; the "NO
+> background sweeper" decision no longer holds. The rest of this
+> document is retained as the record of the decision it replaced.
+
 **Decision: NO background sweeper.** The standing answer for stuck
 `mas_async_jobs` rows is the read-path alert (30-minute default) +
 the read-path reap (2-hour backstop) + the operator runbook, all
