@@ -27,6 +27,19 @@ describe("SandboxAgent (issue #2253)", () => {
     expect(status.degraded).toBe(true);
   });
 
+  it("status reports active when container backend is bound (issue #3492)", () => {
+    const containerCtx = {
+      id: { toString: () => "sandbox-p2253-bound" },
+      container: { running: true },
+    } as any;
+    const agent = new SandboxAgent(containerCtx, fakeEnv);
+    const status = agent.sandboxStatus();
+    expect(status.agent).toBe("SandboxAgent");
+    expect(status.backendConfigured).toBe(true);
+    expect(status.degraded).toBe(false);
+    expect(status.detail).toContain("Active");
+  });
+
   it("run door delegates to the real service: no backend → NOT executed, never emulated", async () => {
     const agent = new SandboxAgent(fakeCtx, fakeEnv);
     const result = await agent.runCommand({ command: "echo hello-from-sandbox" });

@@ -247,6 +247,16 @@ export const DEFAULT_COPILOTS: CopilotConfig[] = [
         category: "Platform Diagnostics",
       },
       {
+        label: "⚡ Generate strategy code",
+        prompt: "Generate quantitative trading strategy code for momentum breakout and save to workspace",
+        category: "Strategy Code & Sandbox",
+      },
+      {
+        label: "🧪 Run sandboxed backtest",
+        prompt: "Run the generated momentum breakout strategy in SandboxAgent and evaluate backtest performance",
+        category: "Strategy Code & Sandbox",
+      },
+      {
         label: "💡 How can you improve yourself?",
         prompt: "How can you improve yourself and what capabilities do you need?",
         category: "Self-Improvement (RSI)",

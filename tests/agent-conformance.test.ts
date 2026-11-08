@@ -163,7 +163,11 @@ describe("Agent conformance (issue #1738)", () => {
     const workflowFiles = listTsFiles(path.join(ROOT, "src")).filter((f) =>
       read(path.relative(ROOT, f)).includes('from "@cloudflare/think/workflows"')
     );
-    expect(workflowFiles.map((f) => path.relative(ROOT, f)).sort()).toEqual([
+    expect(
+      workflowFiles
+        .map((f) => path.relative(ROOT, f).replace(/\\/g, "/"))
+        .sort(),
+    ).toEqual([
       "src/agents/trading-trade-workflow.ts",
       "src/workflows/jobPipelineWorkflow.ts",
       "src/workflows/paymentWorkflow.ts",
@@ -323,11 +327,10 @@ describe("Agent conformance (issue #1738)", () => {
     // turn. Giving it a model would be new behavior, not wiring.
     expect(src).not.toMatch(/this\.portHooks\s*=/);
     expect(src).not.toMatch(/getModel\(\)|getSystemPrompt\(\)|getTools\(\)/);
-    // The agent adds NO sandbox logic of its own: it delegates to
-    // the one service, constructed exactly as the MCP facade
-    // constructs it today (RunSandboxCommand) — with no container.
+    // The agent delegates to the one service, constructed with the
+    // bound container (this.ctx.container) or undefined fallback.
     expect(src).toContain("ETradeSandboxService");
-    expect(src).toContain("new ETradeSandboxService(undefined, this.env)");
+    expect(src).toContain("new ETradeSandboxService(container, this.env)");
     // The header states the degraded posture in plain terms, so no
     // reader mistakes registration for a working sandbox.
     expect(src).toContain("no container backend is bound");

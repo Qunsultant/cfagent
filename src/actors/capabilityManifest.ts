@@ -369,7 +369,7 @@ export const PORT_THINK_CAPABILITY_BASE: Record<
   SandboxAgent: {
     sandbox: entry(
       "unavailable",
-      "The class and its A2A/MCP surfaces are live, but no container backend is configured (no containers declared in wrangler.jsonc), so run_command honestly returns executed:false. The enablement is the owner's containers configuration step; a per-agent sandbox tool lands as S8 (#3492).",
+      "Cloudflare Containers configuration declared in wrangler.jsonc for SandboxAgent (cloudflare/debian-trixie). At runtime without an active container, commands return executed:false honestly (#121); full container execution runs in Workers Paid container runtime.",
       { unavailableReason: "sandbox_container_backend_not_configured" },
     ),
   },

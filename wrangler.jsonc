@@ -123,14 +123,21 @@
       // "default", owner-provided 2026-11-05 under #1169; see
       // src/types.ts AI_SEARCH).
       { "name": "AI_SEARCH_AGENT", "class_name": "AiSearchAgent" },
-      // Issue #2253 — SandboxAgent DO (fleet registration: the agent
-      // delegates to ETradeSandboxService constructed with no
-      // container backend, so runs honestly report executed:false
-      // until the owner adds a Cloudflare Containers configuration —
-      // see src/agents/sandbox-agent.ts).
+      // Issue #2253 / #3492 — SandboxAgent DO (fleet registration:
+      // delegates to ETradeSandboxService with bound container backend).
       { "name": "SANDBOX_AGENT", "class_name": "SandboxAgent" }
     ]
   },
+  // Issue #3492 / #3779 — Cloudflare Containers configuration for SandboxAgent:
+  // attaches an isolated container to the Durable Object for executing
+  // generated quantitative strategies and shell commands.
+  "containers": [
+    {
+      "class_name": "SandboxAgent",
+      "image": "cloudflare/debian-trixie",
+      "scheduling_policy": "durable_object"
+    }
+  ],
   // Issue #1169 (owner enablement, 2026-11-05) — the AI Search
   // namespace binding the AiSearchAgent namespace path reads
   // (env.AI_SEARCH.get(AI_SEARCH_INSTANCE)); the instance
@@ -437,6 +444,10 @@
     // Issue #2742: Flagship monetization flag enabled (owner direction).
     // Native payment workflow and charging active by default.
     // Rollback is setting this var to "0" (or toggling off in Flagship dashboard).
-    "FEATURE_MONETIZATION": "1"
+    "FEATURE_MONETIZATION": "1",
+    // Issue #3491 / #3492 / #3779 — Sandbox & Workspace enablement
+    "FEATURE_SANDBOX": "1",
+    "FEATURE_WORKSPACE": "1",
+    "WORKSPACE_ROOT": "/workspace"
   }
 }

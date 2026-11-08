@@ -1,0 +1,9 @@
+### Added
+
+- **SandboxAgent Container Enablement & Workspace Execution with Stock Copilot Strategy Chips (#3779, S7 #3491, S8 #3492):**
+  - **Wrangler Containers Declaration (#3492):** Declared Cloudflare Containers configuration for `SandboxAgent` in `wrangler.jsonc` (`image: "cloudflare/debian-trixie"`, `scheduling_policy: "durable_object"`), and externalized `FEATURE_SANDBOX: "1"`, `FEATURE_WORKSPACE: "1"`, and `WORKSPACE_ROOT: "/workspace"`.
+  - **SandboxAgent Container Binding:** Upgraded `SandboxAgent` (`src/agents/sandbox-agent.ts`) to bind `(this.ctx as any)?.container` into the sandbox service, reporting active status (`backendConfigured: true`, `degraded: false`) when a container is available while preserving non-emulated honest responses (`executed: false`, `exitCode: null`) when unconfigured.
+  - **Per-Agent Workspace Filesystem (S7 #3491):** Implemented `AgentWorkspace` in `src/services/agentWorkspace.ts` providing persistent, isolated filesystem operations (`writeFile`, `readFile`, `exists`, `readdir`, `deleteFile`, `stat`, `listFiles`) with path normalization and directory traversal defense.
+  - **Stock Copilot Strategy Code Synthesis & Sandbox Runner (S8 #3492):** Implemented `generateStrategyCode` and `runStrategyInSandbox` in `src/services/stockCopilotStrategySandbox.ts` for on-the-fly synthesis and backtesting of quantitative algorithms (momentum breakout, mean reversion, RSI reversal, SMA crossover), persisting code into workspace and returning validated deterministic metrics (Sharpe ratio, max drawdown, win rate, total return).
+  - **Interactive Hero Quick-Chips:** Added *"⚡ Generate strategy code"* and *"🧪 Run sandboxed backtest"* quick-chips to `src/client/chat/copilotRegistry.ts` under Stock Copilot, and added MCP steering in `src/agents/chatPrompt.ts`. #CAIO-quns #clo-arsi #ceo-aimp
+
