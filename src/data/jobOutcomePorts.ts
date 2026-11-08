@@ -33,7 +33,10 @@ export type JobOutcomeKind =
   // Issue #3527 S5 — the corpus sync and the reports
   // canonical-index sweep record their actual runs here too.
   | "corpus"
-  | "reports";
+  | "reports"
+  // Issue #3530 slice B — feed runs settled on the pipeline host
+  // record here too, through the same one sink.
+  | "feed";
 export type JobOutcomeTrigger = "manual" | "scheduled";
 export type JobOutcomeStatus = "completed" | "failed" | "partial";
 
