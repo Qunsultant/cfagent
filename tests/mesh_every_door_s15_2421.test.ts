@@ -583,7 +583,7 @@ describe("census chat column vs the mesh-door command registry (#2421)", () => {
       "list_pipeline_chains",
       "manage_pipeline_chain",
     ],
-    PaymentsAgent: ["check_payment_budget", "get_payments_overview"],
+    PaymentsAgent: ["check_payment_budget", "get_payment_budget", "get_payments_overview"],
     TradingAgent: [
       "propose_stock_trade",
       "propose_options_trade",
@@ -631,6 +631,7 @@ describe("census chat column vs the mesh-door command registry (#2421)", () => {
       "stock_copilot_introspect",
       "stock_copilot_learnings",
       "stock_copilot_evaluate",
+      "stock_copilot_remediate_gaps",
     ].sort()).toEqual([...family.commands].sort());
     expect(new Set(union).size).toBe(union.length);
     // AiSearchAgent's chat reach is a catalog command, not a mesh-door
