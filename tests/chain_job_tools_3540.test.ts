@@ -302,9 +302,9 @@ async function makeContext(withIdentity = true) {
 }
 
 describe("pipeline-chain copilot tools (#3540)", () => {
-  it("the catalog carries the four pipeline-chain tools (118 total)", () => {
+  it("the catalog carries the four pipeline-chain tools (120 total since #3530 slice B)", () => {
     const names = McpToolFactory.getToolDefinitions().map((d) => d.name);
-    expect(names).toHaveLength(118);
+    expect(names).toHaveLength(120);
     for (const name of [
       "run_pipeline_chain",
       "get_pipeline_chain_status",
