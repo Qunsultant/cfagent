@@ -147,6 +147,9 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/architecture/UX/design-system-01.md", "etrade", 1],
   ["docs/architecture/UX/exceptions-01.md", "etrade", 3],
   ["docs/architecture/agentic/agents-sdk-conformance-matrix.md", "etrade", 5],
+  ["docs/architecture/agentic/mcp-server-inventory.md", "alpaca", 4],
+  ["docs/architecture/agentic/mcp-server-inventory.md", "etrade", 5],
+  ["docs/architecture/agentic/mcp-server-inventory.md", "yahoo", 2],
   ["docs/architecture/agentic/doors-and-layers.md", "alpaca", 1],
   ["docs/architecture/agentic/doors-and-layers.md", "etrade", 2],
   ["docs/architecture/agentic/doors-and-layers.md", "public.com", 1],
@@ -1269,8 +1272,8 @@ describe("#3525 S6 shrink-only provider-brand census pin", () => {
     expect(total).toBeLessThanOrEqual(PLATFORM_BASELINE_TOTAL);
   });
 
-  it("the baseline itself is the recorded seed (1092 rows / 8522 lines)", () => {
-    expect(BASELINE.length).toBe(1092);
-    expect(BASELINE.reduce((a, [, , c]) => a + c, 0)).toBe(8522);
+  it("the baseline itself is the recorded seed (1095 rows / 8533 lines)", () => {
+    expect(BASELINE.length).toBe(1095);
+    expect(BASELINE.reduce((a, [, , c]) => a + c, 0)).toBe(8533);
   });
 });
