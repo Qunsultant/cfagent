@@ -250,6 +250,12 @@ export interface AiConfig {
     orchestrator?: string;
     marketResearch?: string;
     searchAgent?: string;
+    // Issue #3773: the chat voice channel's model backend — the
+    // speech-to-text and text-to-speech models, resolved through
+    // resolveAiModelName(env, "voiceStt" | "voiceTts"). These are
+    // code defaults only; #3772 externalizes the values.
+    voiceStt?: string;
+    voiceTts?: string;
     [task: string]: string | undefined;
   };
   temperatureDefaults: {
@@ -490,6 +496,10 @@ const BASELINE_FALLBACK_CONFIG: EtapiConfig = {
       orchestrator: "@cf/zai-org/glm-4.7-flash",
       marketResearch: "@cf/zai-org/glm-4.7-flash",
       searchAgent: "@cf/zai-org/glm-4.7-flash",
+      // Issue #3773: Workers AI speech models for the chat voice
+      // channel's model backend (Whisper STT, MeloTTS TTS).
+      voiceStt: "@cf/openai/whisper-large-v3-turbo",
+      voiceTts: "@cf/myshell-ai/melotts",
     },
     temperatureDefaults: {
       deterministic: 0.0,

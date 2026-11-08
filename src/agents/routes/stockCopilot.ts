@@ -96,15 +96,13 @@ import { introspectStockCopilot } from "../../services/stockCopilotIntrospection
 import {
   copilotChannelsSettingKey,
   parseStoredCopilotChannelEntries,
-  resolveCopilotChannels,
   serializeStoredCopilotChannelEntries,
-  type CopilotChannelResolution,
 } from "../../services/copilotChannels";
 import { CAPABILITY_CHANNELS } from "../../actors/capabilityManifest";
 import {
-  resolveStockCopilotVoiceActivation,
-  STOCK_COPILOT_VOICE_SOURCE_TAB,
-} from "../../trading";
+  projectCopilotChannelStatuses,
+  projectCopilotVoiceBackend,
+} from "./copilotChannelProjection";
 
 /** Structural mirror of OrchestratorAgent's ScreenerExecutionContext
  *  (the schedules.ts idiom — routes do not import the orchestrator). */
@@ -151,32 +149,32 @@ const ACTIVITY_LIMIT = 20;
  * the switch AND the #3720 class-level activation must both be on
  * for the channel to serve (`effective`); the activation's manifest
  * state rides along so the two config layers stay distinguishable.
+ *
+ * Issue #3773: the composition itself lives in the shared
+ * routes-layer helper (copilotChannelProjection.ts) so the chat
+ * surface's per-registration read projects byte-identically; this
+ * wrapper keeps the stock call sites unchanged.
  */
 function projectStockCopilotChannels(ctx: StockCopilotRouteContext) {
-  const switches = resolveCopilotChannels({
+  return projectCopilotChannelStatuses({
     registrationId: "stock",
     readSettingRaw: ctx.readSettingRaw,
     env: ctx.env,
   });
-  const activation = resolveStockCopilotVoiceActivation({
-    sourceTab: STOCK_COPILOT_VOICE_SOURCE_TAB,
-    env: ctx.env as unknown as Record<string, unknown>,
+}
+
+/**
+ * Issue #3773: the stock registration's voice BACKEND projection
+ * (which speech machinery serves its voice turns), through the
+ * same shared helper the chat read uses — the two surfaces'
+ * projections stay structurally identical.
+ */
+function projectStockCopilotVoiceBackend(ctx: StockCopilotRouteContext) {
+  return projectCopilotVoiceBackend({
+    registrationId: "stock",
+    readSettingRaw: ctx.readSettingRaw,
+    env: ctx.env,
   });
-  const project = (r: CopilotChannelResolution) => ({
-    enabled: r.enabled,
-    source: r.source,
-  });
-  return {
-    chat: project(switches.chat),
-    webhooks: project(switches.webhooks),
-    email: project(switches.email),
-    slack: project(switches.slack),
-    voice: {
-      ...project(switches.voice),
-      manifestState: activation.state,
-      effective: switches.voice.enabled && activation.state === "enabled",
-    },
-  };
 }
 
 function projectOpenPosition(p: CopilotPositionRecord) {
@@ -317,6 +315,9 @@ export async function handleStockCopilotRoutes(
         // #3738: the registration's channel switches (the panel's
         // voice affordance renders from channels.voice.effective).
         channels: projectStockCopilotChannels(ctx),
+        // #3773: the voice channel's backend switch (webspeech |
+        // model) + its deciding layer, beside the channels.
+        voiceBackend: projectStockCopilotVoiceBackend(ctx),
         userLogin,
         controlUpdatedAt: controlRecord?.updatedAt ?? null,
         openPositions: positions.listOpenPositions(userLogin).map(projectOpenPosition),
