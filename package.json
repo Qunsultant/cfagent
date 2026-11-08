@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "deploy": "wrangler deploy",
     "strategy-pages": "node scripts/generate-strategy-pages.mjs",
+    "new-page": "node scripts/new-page.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:ci": "vitest run --reporter=verbose",
