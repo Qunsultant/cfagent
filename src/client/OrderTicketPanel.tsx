@@ -26,6 +26,7 @@ import { STRATEGY_LIBRARY } from "./options/strategyLibrary";
 import { buildTradeLegs, describeTradeLeg } from "./trading/strategyAutobuild";
 import { brokerModeBadge, brokerPresentation } from "../trading/brokerPresentation";
 import { AlpacaSignInCard } from "./AlpacaSignInCard";
+import { safeNumberFormat, safePriceFormat } from "./formatters";
 
 /**
  * OrderTicketPanel — the Fast Order Ticket as its own shell-conforming
@@ -562,11 +563,15 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
                             </span>
                           )}
                         </Flex>
-                        <span className="quote-price">${orderQuote.lastPrice.toFixed(2)}</span>
-                        <span className={`quote-change ${orderQuote.change >= 0 ? "positive" : "negative"}`}>
-                          {orderQuote.change >= 0 ? "+" : ""}{orderQuote.change.toFixed(2)} ({orderQuote.changePercent.toFixed(2)}%)
-                        </span>
-                        <span className="quote-bidask">Bid: ${orderQuote.bid.toFixed(2)} / Ask: ${orderQuote.ask.toFixed(2)}</span>
+                        <span className="quote-price">{safePriceFormat(orderQuote.lastPrice)}</span>
+                        {orderQuote.change !== undefined && orderQuote.change !== null ? (
+                          <span className={`quote-change ${Number(orderQuote.change) >= 0 ? "positive" : "negative"}`}>
+                            {Number(orderQuote.change) >= 0 ? "+" : ""}{safeNumberFormat(orderQuote.change)} ({safeNumberFormat(orderQuote.changePercent)}%)
+                          </span>
+                        ) : (
+                          <span className="quote-change neutral">—</span>
+                        )}
+                        <span className="quote-bidask">Bid: {safePriceFormat(orderQuote.bid)} / Ask: {safePriceFormat(orderQuote.ask)}</span>
                         {orderQuote.source && (
                           <Badge tone="accent">✓ {orderQuote.source}</Badge>
                         )}
@@ -673,7 +678,7 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
                         type="number"
                         step="0.01"
                         disabled={orderType === "MARKET"}
-                        placeholder={orderQuote?.lastPrice ? orderQuote.lastPrice.toFixed(2) : "125.50"}
+                        placeholder={orderQuote?.lastPrice != null ? safeNumberFormat(orderQuote.lastPrice, 2, "125.50") : "125.50"}
                         value={orderLimitPrice}
                         onChange={(e) => {
                           setOrderLimitPrice(e.target.value);
@@ -778,11 +783,11 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
                   <div className="order-calc-card">
                     <div className="calc-row">
                       <span>{orderContext?.optionLegs?.length ? `Net ${orderContext.strategyNetDebit !== undefined && orderContext.strategyNetDebit < 0 ? "Credit" : "Debit"} per strategy unit` : "Estimated Price per Share:"}</span>
-                      <span>${orderType === "LIMIT" ? parseFloat(orderLimitPrice || "0").toFixed(2) : (orderQuote?.lastPrice || 0).toFixed(2)}</span>
+                      <span>{orderType === "LIMIT" ? safePriceFormat(orderLimitPrice, 2, "$0.00") : safePriceFormat(orderQuote?.lastPrice, 2, "$0.00")}</span>
                     </div>
                     <div className="calc-row">
                       <span>Online Commission:</span>
-                      <span className="zero-comm">{orderContext?.optionLegs?.length ? (activeDraft ? `$${activeDraft.estimatedCommission.toFixed(2)} broker estimate` : "Broker estimate in preview") : "$0.00 USD"}</span>
+                      <span className="zero-comm">{orderContext?.optionLegs?.length ? (activeDraft ? `${safePriceFormat(activeDraft.estimatedCommission, 2, "$0.00")} broker estimate` : "Broker estimate in preview") : "$0.00 USD"}</span>
                     </div>
                     <div className="calc-row total">
                       <span>Estimated {orderContext?.optionLegs?.length && (orderContext.strategyNetDebit ?? 0) < 0 ? "Credit" : "Total Order Value"}:</span>
@@ -845,7 +850,7 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
                             expirationDate: leg.expirationDate,
                           })),
                           breakevens: [estPrice],
-                          breakevenText: `Execution/Limit: $${estPrice.toFixed(2)}`,
+                          breakevenText: `Execution/Limit: ${safePriceFormat(estPrice)}`,
                         });
                       }}
                       title="Risk Analysis — Run pre-trade institutional risk analysis"
