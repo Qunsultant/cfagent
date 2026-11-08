@@ -114,7 +114,11 @@ import {
   type ReportAssetMeta,
 } from "../report-asset-agent";
 import { getServiceUserLogin } from "../../security/serviceIdentity";
-import type { JobInstanceRecord } from "../../data/jobPipelinePorts";
+import type {
+  JobDefinition,
+  JobInstanceRecord,
+  JobScheduleConfig,
+} from "../../data/jobPipelinePorts";
 import {
   resolveFeedJob,
   type FeedJobSurfaceView,
@@ -237,6 +241,9 @@ export interface ScheduledAgentDoorStub {
     jobId: string,
     opts?: { userLogin?: string },
   ): Promise<{ jobId: string; runId: string; state: string; error?: string }>;
+  // Issue #3530 (scheduling-config): reconfigure one pipeline job
+  // through the engine — the schedule write path.
+  configurePipelineJob(jobId: string, patch: unknown): Promise<JobDefinition>;
   getFeedJobSurfaceStatus(jobId: string): Promise<FeedJobSurfaceView>;
   listFeedJobSurfaceStatuses(): Promise<FeedJobSurfaceView[]>;
   // Issue #3536 (Pipeline J3): the enrich jobs' surface on the
@@ -530,6 +537,57 @@ export async function manageFeedJobViaDoor(
       return { ...base, run, status: await door.getFeedJobSurfaceStatus(entry.jobId) };
     }
   }
+}
+
+/** A feed job's schedule patch, in the engine's native shape (#3530 scheduling-config). */
+export interface FeedJobSchedulePatch {
+  enabled?: boolean;
+  interval?: string;
+  cron?: string;
+}
+
+export interface FeedJobScheduleDoorResult {
+  jobId: string;
+  label: string;
+  /** The stored schedule after the patch, as the surface view reports it. */
+  schedule: FeedJobSurfaceView["schedule"];
+  status: FeedJobSurfaceView;
+}
+
+/**
+ * Configure one feed job's schedule through the pipeline host's
+ * control plane (#3530 scheduling-config). The patch MERGES over
+ * the stored schedule — fields the patch omits keep their stored
+ * values, so disabling a schedule never loses its cadence and a
+ * cadence change never flips its enablement — and is applied as
+ * the engine's own configure patch ({ root: { schedule } }); no
+ * parallel schedule shape exists anywhere in the chain. The
+ * stored schedule the result reports is read back from the merged
+ * status view: the same source the UX renders.
+ */
+export async function configureFeedJobScheduleViaDoor(
+  env: Env,
+  actingLogin: string | undefined | null,
+  source: string,
+  patch: FeedJobSchedulePatch,
+): Promise<FeedJobScheduleDoorResult> {
+  requireActingLogin(actingLogin);
+  const entry = resolveFeedJobOrThrow(source);
+  const door = getScheduledAgentDoor(env);
+  const before = await door.getFeedJobSurfaceStatus(entry.jobId);
+  const current = before.schedule;
+  // An interval patch supersedes a stored cron and vice versa:
+  // the engine's grammar carries one cadence mechanism per node.
+  const interval = patch.interval ?? (patch.cron ? null : current?.interval ?? null);
+  const cron = patch.cron ?? (patch.interval ? null : current?.cron ?? null);
+  const schedule: JobScheduleConfig = {
+    enabled: patch.enabled ?? current?.enabled ?? true,
+    ...(interval ? { interval } : {}),
+    ...(cron ? { cron } : {}),
+  };
+  await door.configurePipelineJob(entry.jobId, { root: { schedule } });
+  const status = await door.getFeedJobSurfaceStatus(entry.jobId);
+  return { jobId: entry.jobId, label: entry.label, schedule: status.schedule, status };
 }
 
 // ---------------------------------------------------------------------------
