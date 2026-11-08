@@ -12,6 +12,7 @@
  *   POST /data-providers/:id/feed-run                 run the provider's feed job now (#3530 S1; dispatched through the pipeline host door since #3578)
  *   GET  /data-providers/:id/feed-jobs                the provider's feed jobs as pipeline jobs (#3535)
  *   POST /data-providers/:id/feed-jobs/:jobId/:action run|pause|resume|cancel|retry a feed job (#3535)
+ *   POST /data-providers/:id/feed-jobs/:jobId/schedule configure a feed job's stored schedule (#3530)
  *   GET  /data-providers/:id/enrich-jobs              the provider's enrich jobs as pipeline jobs (#3536)
  *   POST /data-providers/:id/enrich-jobs/:jobId/:action run|pause|resume|cancel|retry an enrich job (#3536)
  *   GET  /data-providers/:id/analyze-jobs             the provider's analyze jobs as pipeline jobs (#3537)
@@ -141,7 +142,7 @@ import {
   CHAIN_PIPELINE_CATALOG,
   type PipelineChainSurfaceView,
 } from "../../services/chainPipelineJobs";
-import type { JobInstanceRecord } from "../../data/jobPipelinePorts";
+import type { JobDefinition, JobInstanceRecord } from "../../data/jobPipelinePorts";
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
 
@@ -247,6 +248,9 @@ export interface FeedPipelineDoorLike {
     jobId: string,
     opts?: { userLogin?: string },
   ): Promise<{ jobId: string; runId: string; state: string; error?: string }>;
+  // #3530 (scheduling-config): reconfigure one job through the
+  // engine (the schedule write path; returns the stored definition).
+  configurePipelineJob(jobId: string, patch: unknown): Promise<JobDefinition>;
 }
 
 const LIFECYCLE_ACTIONS: readonly ProviderLifecycleAction[] = [
@@ -788,6 +792,12 @@ export async function handleDataProviderRoutes(
   const feedJobActionMatch = path.match(
     /^\/data-providers\/([^/]+)\/feed-jobs\/([^/]+)\/([a-z]+)$/,
   );
+  // #3530 (scheduling-config): the schedule route — its own match,
+  // handled BEFORE the generic action match ("schedule" would
+  // otherwise parse as an action name).
+  const feedJobScheduleMatch = path.match(
+    /^\/data-providers\/([^/]+)\/feed-jobs\/([^/]+)\/schedule$/,
+  );
   // #3536: the pipeline enrich-jobs surface (list + per-job actions).
   const enrichJobsMatch = path.match(/^\/data-providers\/([^/]+)\/enrich-jobs$/);
   const enrichJobActionMatch = path.match(
@@ -1030,6 +1040,125 @@ export async function handleDataProviderRoutes(
     if (request.method === "GET" && feedJobsMatch) {
       const id = decodeURIComponent(feedJobsMatch[1]) as DataProviderId;
       return Response.json({ jobs: await feedJobsViewFor(ctx, id) });
+    }
+
+    // #3530 (scheduling-config) — configure one feed job's stored
+    // schedule through the pipeline host's control plane. A
+    // mutation under the SAME session discipline as the action
+    // route below (verified login or 401; catalog + provider match
+    // or 404; audited). The request body is the operator's shape —
+    // { enabled?, intervalMinutes?, cron? } — validated typed here
+    // (400 FEED_JOB_SCHEDULE_INVALID, before any door call) and
+    // mapped onto the engine's native JobScheduleConfig; the patch
+    // MERGES over the stored schedule the surface view reports, so
+    // a disable never loses the cadence and a cadence change never
+    // flips the enablement. The engine's resolution remains the
+    // second gate; its refusals map through feedRunRefusalResponse.
+    if (request.method === "POST" && feedJobScheduleMatch) {
+      if (!ctx.userLogin) {
+        return Response.json(
+          { error: "A verified session is required to manage a feed job." },
+          { status: 401 },
+        );
+      }
+      const id = decodeURIComponent(feedJobScheduleMatch[1]) as DataProviderId;
+      const jobId = decodeURIComponent(feedJobScheduleMatch[2]);
+      const entry = FEED_PIPELINE_CATALOG.find((e) => e.jobId === jobId);
+      if (!entry || entry.sourceId !== id) {
+        return Response.json(
+          {
+            error: `No feed job "${jobId}" is registered for provider "${id}".`,
+            code: FEED_JOB_CODES.jobNotFound,
+          },
+          { status: 404 },
+        );
+      }
+      const invalid = (message: string): Response =>
+        Response.json({ error: message, code: "FEED_JOB_SCHEDULE_INVALID" }, { status: 400 });
+      let body: unknown;
+      try {
+        body = await request.json();
+      } catch {
+        return invalid("The schedule patch must be a JSON object.");
+      }
+      if (body === null || typeof body !== "object" || Array.isArray(body)) {
+        return invalid("The schedule patch must be a JSON object.");
+      }
+      const patch = body as Record<string, unknown>;
+      const keys = Object.keys(patch);
+      if (keys.length === 0) {
+        return invalid("The schedule patch is empty — name enabled, intervalMinutes, or cron.");
+      }
+      for (const key of keys) {
+        if (!["enabled", "intervalMinutes", "cron"].includes(key)) {
+          return invalid(`Unknown schedule field "${key}".`);
+        }
+      }
+      if (patch.enabled !== undefined && typeof patch.enabled !== "boolean") {
+        return invalid('Schedule field "enabled" must be a boolean.');
+      }
+      if (
+        patch.intervalMinutes !== undefined &&
+        (typeof patch.intervalMinutes !== "number" ||
+          !Number.isInteger(patch.intervalMinutes) ||
+          patch.intervalMinutes <= 0)
+      ) {
+        return invalid('Schedule field "intervalMinutes" must be a positive whole number of minutes.');
+      }
+      if (patch.cron !== undefined && (typeof patch.cron !== "string" || !patch.cron.trim())) {
+        return invalid('Schedule field "cron" must be a non-empty string.');
+      }
+      if (patch.intervalMinutes !== undefined && patch.cron !== undefined) {
+        return invalid("Name either intervalMinutes or cron, not both — a schedule carries one cadence mechanism.");
+      }
+      const door = feedPipelineDoorFor(ctx);
+      if (!door) {
+        return Response.json(
+          {
+            error:
+              "The pipeline host is not bound on this deployment; the action was refused rather than dispatched through an unwired path.",
+            code: "FEED_JOB_NOT_CONFIGURED",
+          },
+          { status: 500 },
+        );
+      }
+      try {
+        const status = await door.getFeedJobSurfaceStatus(jobId);
+        const current = status.schedule;
+        const interval =
+          patch.intervalMinutes !== undefined
+            ? `every ${patch.intervalMinutes} minutes`
+            : patch.cron !== undefined
+              ? null
+              : (current?.interval ?? null);
+        const cron =
+          patch.cron !== undefined
+            ? (patch.cron as string).trim()
+            : patch.intervalMinutes !== undefined
+              ? null
+              : (current?.cron ?? null);
+        const schedule = {
+          enabled: (patch.enabled as boolean | undefined) ?? current?.enabled ?? true,
+          ...(interval ? { interval } : {}),
+          ...(cron ? { cron } : {}),
+        };
+        await door.configurePipelineJob(jobId, { root: { schedule } });
+        const next = await door.getFeedJobSurfaceStatus(jobId);
+        ctx.recordAudit("data_provider.feed_job_schedule", "orchestrator", {
+          actor: ctx.userLogin,
+          providerId: id,
+          jobId,
+          enabled: next.schedule?.enabled ?? schedule.enabled,
+          interval: next.schedule?.interval ?? null,
+          cron: next.schedule?.cron ?? null,
+        });
+        return Response.json({ jobId, schedule: next.schedule, status: next });
+      } catch (error) {
+        return feedRunRefusalResponse(
+          codedErrorOf(error),
+          error instanceof Error ? error.message : String(error),
+        );
+      }
     }
 
     // #3535 — run / pause / resume / cancel / retry one feed job
