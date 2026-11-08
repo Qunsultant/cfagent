@@ -53,6 +53,12 @@ import {
   isCopilotExecutionMode,
 } from "../../services/stockCopilotExecutionMode";
 import {
+  COPILOT_RSI_MODE_SETTING_KEY,
+  resolveStockCopilotRsiMode,
+  isStockCopilotRsiMode,
+  type StockCopilotRsiMode,
+} from "../../services/stockCopilotRsiMode";
+import {
   COPILOT_UNIVERSE_SETTING_KEY,
   COPILOT_STRATEGIES_SETTING_KEY,
   resolveCopilotUniverse,
@@ -128,6 +134,7 @@ export interface StockCopilotStatusResult {
   selectionResolved: boolean;
   activeBroker: string | null;
   activeMode: string | null;
+  rsiMode: StockCopilotRsiMode;
   userLogin: string;
   controlUpdatedAt: string | null;
   openPositions: StockCopilotOpenPositionView[];
@@ -142,6 +149,7 @@ export interface StockCopilotControlInput {
   cadence?: string;
   pauseUntil?: string;
   executionMode?: CopilotExecutionMode;
+  rsiMode?: StockCopilotRsiMode;
   universe?: string | string[];
   strategies?: string | string[];
 }
@@ -156,6 +164,7 @@ export interface StockCopilotControlResult {
   };
   pauseUntil?: string | null;
   executionMode: CopilotExecutionMode;
+  rsiMode: StockCopilotRsiMode;
   universe: string[];
   strategies: string[];
   updatedAt: string;
@@ -276,6 +285,10 @@ export async function getStockCopilotStatusViaDoor(
     readSettingRaw: ctx.readSettingRaw,
     env: ctx.env,
   });
+  const rsiMode = resolveStockCopilotRsiMode({
+    readSettingRaw: ctx.readSettingRaw,
+    env: ctx.env,
+  });
 
   return {
     flagEnabled,
@@ -288,6 +301,7 @@ export async function getStockCopilotStatusViaDoor(
       effective: cadence.effective,
     },
     executionMode,
+    rsiMode,
     universe,
     strategies,
     status,
@@ -436,6 +450,20 @@ export async function controlStockCopilotViaDoor(
     });
   }
 
+  if (typeof input.rsiMode === "string" && isStockCopilotRsiMode(input.rsiMode)) {
+    if (!ctx.writeSetting) {
+      throw new MeshDoorError(
+        "door_unavailable",
+        "Cannot update RSI mode: writeSetting is not configured on this door context.",
+      );
+    }
+    ctx.writeSetting(COPILOT_RSI_MODE_SETTING_KEY, input.rsiMode);
+    ctx.audit?.("stock_copilot.control_rsi_mode_via_door", "orchestrator", {
+      userLogin: login,
+      rsiMode: input.rsiMode,
+    });
+  }
+
   const updatedControl = control.getControl(login);
   const enabledSessions = resolveCopilotSessions({
     readSettingRaw: ctx.readSettingRaw,
@@ -446,6 +474,10 @@ export async function controlStockCopilotViaDoor(
     readSettingRaw: ctx.readSettingRaw,
   });
   const executionMode = resolveCopilotExecutionMode({
+    readSettingRaw: ctx.readSettingRaw,
+    env: ctx.env,
+  });
+  const rsiMode = resolveStockCopilotRsiMode({
     readSettingRaw: ctx.readSettingRaw,
     env: ctx.env,
   });
@@ -469,6 +501,7 @@ export async function controlStockCopilotViaDoor(
     },
     pauseUntil,
     executionMode,
+    rsiMode,
     universe,
     strategies,
     updatedAt: updatedControl?.updatedAt ?? nowIso,

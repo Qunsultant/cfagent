@@ -88,8 +88,13 @@ export const DEFAULT_COPILOTS: CopilotConfig[] = [
     mode: "chat",
     tooltip: {
       eyebrow: "AI Intelligence",
-      title: "Multi-Agent Orchestrator",
-      description: "Conversational multi-agent copilot for platform capabilities, market queries, and general workflows.",
+      title: "General Copilot Active",
+      description: "Direct conversational AI assistance for market analysis, trade queries, options strategies, risk assessments, and platform tasks.",
+    },
+    banner: {
+      icon: "⚡",
+      headline: "General Copilot Active:",
+      description: "Direct conversational AI assistance for market analysis, trade queries, options strategies, risk assessments, and platform tasks.",
     },
     hero: {
       icon: "⚡",
@@ -140,8 +145,8 @@ export const DEFAULT_COPILOTS: CopilotConfig[] = [
     mode: "chat",
     tooltip: {
       eyebrow: "Options Intelligence",
-      title: "Options Strategy & Structured Outputs",
-      description: "Specialized copilot for options screening, multi-leg spreads, Greeks analysis, and interactive payoff visualizers.",
+      title: "Options Copilot Active",
+      description: "Options Copilot Active: Queries generate structured strategy cards with multi-leg execution plans, Greeks, and interactive payoff visualizers.",
     },
     hero: {
       icon: "🎯",
@@ -186,8 +191,6 @@ export const DEFAULT_COPILOTS: CopilotConfig[] = [
       icon: "🎯",
       headline: "Options Copilot Active:",
       description: "Queries generate structured strategy cards with multi-leg execution plans, Greeks, and interactive payoff visualizers.",
-      badgeText: "Structured Outputs",
-      badgeColor: "brand",
     },
   },
   {
@@ -200,7 +203,7 @@ export const DEFAULT_COPILOTS: CopilotConfig[] = [
     tooltip: {
       eyebrow: "Autonomous Trading",
       title: "Stock Copilot & Paper-Trading Loop",
-      description: "Real-time telemetry, open positions with exit plans, cycle activity feed, and pause/resume execution controls.",
+      description: "Stock Copilot Active: Autonomous paper-trading loop on Alpaca (Paper). 24/7 continuous session execution with CVaR risk management.",
     },
     hero: {
       icon: "📈",
@@ -232,6 +235,26 @@ export const DEFAULT_COPILOTS: CopilotConfig[] = [
         label: "🧠 Explain workflow & tools",
         prompt: "Explain your autonomous trading workflow, 5-stage pipeline, and active tools",
         category: "Tool Introspection",
+      },
+      {
+        label: "💡 How can you improve yourself?",
+        prompt: "How can you improve yourself and what capabilities do you need?",
+        category: "Self-Improvement (RSI)",
+      },
+      {
+        label: "🔬 What capabilities do you need?",
+        prompt: "What capabilities do you need to improve trading performance and reduce risk?",
+        category: "Self-Improvement (RSI)",
+      },
+      {
+        label: "⚙️ Switch to Self-RSI mode",
+        prompt: "Set RSI mode to self",
+        category: "RSI Mode",
+      },
+      {
+        label: "🛡️ Switch to Governed RSI mode",
+        prompt: "Set RSI mode to governed",
+        category: "RSI Mode",
       },
       {
         label: "📊 Open Positions & Exits",
@@ -315,8 +338,6 @@ export const DEFAULT_COPILOTS: CopilotConfig[] = [
       icon: "📈",
       headline: "Stock Copilot Active:",
       description: "Autonomous paper-trading loop on Alpaca (Paper). 24/7 continuous session execution with CVaR risk management.",
-      badgeText: "Alpaca · Paper Loop",
-      badgeColor: "brand",
     },
   },
 ];

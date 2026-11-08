@@ -37,6 +37,11 @@ import {
   applyTypography,
   adjustFontScale,
 } from "./typography";
+import {
+  loadTickerEnabled,
+  saveTickerEnabled,
+  subscribeTickerEnabled,
+} from "./quotes/tickerVisibility";
 
 export interface SettingsMenuProps {
   /**
@@ -190,6 +195,16 @@ export function BrokerDynamicMenu({
   };
 
   // Ticker and Tape selection
+  const [tickerEnabled, setTickerEnabled] = useState<boolean>(() => loadTickerEnabled());
+  useEffect(() => {
+    return subscribeTickerEnabled((val) => setTickerEnabled(val));
+  }, []);
+
+  const handleToggleTicker = (enabled: boolean) => {
+    setTickerEnabled(enabled);
+    saveTickerEnabled(enabled);
+  };
+
   const [quoteSource, setQuoteSource] = useState<"auto" | "alpaca" | "yahoo">("auto");
   const [tapeSelection, setTapeSelection] = useState<TapeSetSelection>(() => loadTapeSelection() ?? { kind: "default" });
   const [tapeCustomDraft, setTapeCustomDraft] = useState<string>(() =>
@@ -1027,8 +1042,25 @@ export function BrokerDynamicMenu({
           <div className="etrade-panel-section ticker-tape-section">
             <div className="section-label-row">
               <span>Market Data &amp; Ticker Tape</span>
-              <small>Source &amp; symbol universe</small>
+              <small>Streaming benchmark ticker</small>
             </div>
+
+            <div className="settings-pref-row ticker-toggle-pref-row">
+              <span className="pref-row-lbl">Ticker Tape:</span>
+              <PillGroup
+                className="settings-pref-btn-group"
+                ariaLabel="Ticker tape display"
+                size="sm"
+                variant="default"
+                options={[
+                  { id: "off", label: "Off", icon: "⏸️", tooltip: "Hide streaming market ticker tape (default)" },
+                  { id: "on", label: "On", icon: "▶️", tooltip: "Show real-time streaming benchmark quote ticker" },
+                ]}
+                value={tickerEnabled ? "on" : "off"}
+                onChange={(val) => handleToggleTicker(val === "on")}
+              />
+            </div>
+
             <div className="ticker-controls-single-line">
               <Select
                 className="ticker-compact-select"
