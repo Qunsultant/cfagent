@@ -1,27 +1,40 @@
 /**
- * Issue #3727 — copilot capability enablement conformance pin.
+ * Issue #3727 — copilot capability enablement conformance pin,
+ * and issue #3740 — the chat/NLQ CHOICE pin.
  *
- * Owner direction (2026-11-07): every capability-gating variable
- * of the AGENT_CAPABILITIES_DISABLED kind is externalized in
- * wrangler.jsonc vars AND set so the copilots are fully
- * functional/enabled — no constraints, none at all.
+ * Two concerns, kept separate:
  *
- * The production-shaped env is wrangler.jsonc's vars block,
- * parsed here with the #2000 stripJsonc idiom. Against it:
- *  (a) the OrchestratorAgent manifest resolves with NOTHING
- *      disabled-by-config and no config issues —
- *      AGENT_CAPABILITIES_DISABLED is present and parses to
- *      zero entries; every capability the class's base record
- *      declares enabled (its mechanisms) resolves "enabled"
- *      (a prerequisite-gated entry may resolve "unavailable"
- *      only through its named prerequisite — a provider
- *      secret, never through the disabled list);
- *  (b) CHAT_NLQ_MODE resolves "on" at the env level and the
- *      Think-layer gate does not exclude the discovered NLQ
- *      tool from a chat turn's usable set;
- *  (c) SCREENER_ND_MODE resolves enabled at the mesh doors.
+ * (a) CAPABILITIES (#3727, owner direction 2026-11-07): every
+ *     capability-gating variable of the
+ *     AGENT_CAPABILITIES_DISABLED kind is externalized in
+ *     wrangler.jsonc vars AND set so the copilots are fully
+ *     functional/enabled — no constraints, none at all.
+ *     Against the production-shaped env (wrangler.jsonc's vars
+ *     block, parsed here with the #2000 stripJsonc idiom):
+ *     the OrchestratorAgent manifest resolves with NOTHING
+ *     disabled-by-config and no config issues —
+ *     AGENT_CAPABILITIES_DISABLED is present and parses to
+ *     zero entries; every capability the class's base record
+ *     declares enabled (its mechanisms) resolves "enabled"
+ *     (a prerequisite-gated entry may resolve "unavailable"
+ *     only through its named prerequisite — a provider
+ *     secret, never through the disabled list). SCREENER_ND_MODE
+ *     likewise resolves enabled at the mesh doors.
  *
- * A future silent constraint — a var removed, a value flipped,
+ * (b) CHOICE (#3740, owner correction 2026-11-08): NLQ vs
+ *     chat is a CHOICE, and chat is the DEFAULT turn mode —
+ *     "let's use chat turn." CHAT_NLQ_MODE is therefore NOT a
+ *     capability enablement: production resolves the choice
+ *     to chat (CHAT_NLQ_MODE externalized as "off", the env
+ *     level of the src/config/chatNlqModes.ts chain, whose
+ *     built-in default is likewise "off"), and the Think-layer
+ *     gate excludes the discovered NLQ tool from a chat
+ *     turn's usable set. The choice mechanism itself stays
+ *     live: a user-level "on" override over the same
+ *     production env resolves NLQ on and the gate keeps the
+ *     tool usable.
+ *
+ * A future silent change — a var removed, a value flipped,
  * a disabled entry added — fails this suite.
  */
 import { describe, it, expect } from "vitest";
@@ -80,7 +93,7 @@ function productionEnv(): Record<string, unknown> {
   return { ...(wrangler.vars ?? {}) };
 }
 
-describe("copilot capability enablement (#3727)", () => {
+describe("copilot capability enablement (#3727) and the chat/NLQ choice (#3740)", () => {
   it("AGENT_CAPABILITIES_DISABLED is externalized in wrangler vars and parses to zero entries", () => {
     const env = productionEnv();
     expect(
@@ -122,12 +135,12 @@ describe("copilot capability enablement (#3727)", () => {
     }
   });
 
-  it("CHAT_NLQ_MODE resolves on from the production env and the gate keeps the NLQ tool usable", () => {
+  it("CHOICE (#3740): the production env resolves the chat/NLQ choice to chat — CHAT_NLQ_MODE off at the env level and the gate excludes the NLQ tool from the turn", () => {
     const env = productionEnv();
     const resolved = resolveChatNlqTurnMode({ env });
     expect(resolved.invalid).toBe(false);
     expect(resolved.level).toBe("env");
-    expect(resolved.mode).toBe("on");
+    expect(resolved.mode).toBe("off");
     const audits: Array<{ type: string }> = [];
     const gate = chatNlqTurnGate({
       toolNames: [OPENAIMP_NLQ_TOOL_KEY, "tool_openaimp_run_stock_screen"],
@@ -136,11 +149,33 @@ describe("copilot capability enablement (#3727)", () => {
         audits.push({ type });
       },
     });
-    // No restriction: the NLQ tool stays in the turn's usable set,
-    // and the gate reports the same resolved value the steering
-    // follows (chatPrompt truth-sync, #3727).
-    expect(gate.activeTools).toBeUndefined();
+    // Chat is the default turn mode: the gate restricts the
+    // turn's usable set to everything EXCEPT the NLQ tool, and
+    // reports the same resolved value the steering follows
+    // (chatPrompt truth-sync).
+    expect(gate.mode).toBe("off");
+    expect(gate.activeTools).toEqual(["tool_openaimp_run_stock_screen"]);
+    expect(audits).toEqual([]);
+  });
+
+  it("CHOICE (#3740): the choice stays live — a user-level 'on' override over the production env resolves NLQ on and the gate keeps the NLQ tool usable", () => {
+    const env = productionEnv();
+    const context = { env, scopedChatNlqModes: { user: "on" } };
+    const resolved = resolveChatNlqTurnMode(context);
+    expect(resolved.invalid).toBe(false);
+    expect(resolved.level).toBe("user");
+    expect(resolved.mode).toBe("on");
+    const audits: Array<{ type: string }> = [];
+    const gate = chatNlqTurnGate({
+      toolNames: [OPENAIMP_NLQ_TOOL_KEY, "tool_openaimp_run_stock_screen"],
+      context,
+      audit: (type) => {
+        audits.push({ type });
+      },
+    });
+    // No restriction: the NLQ tool stays in the turn's usable set.
     expect(gate.mode).toBe("on");
+    expect(gate.activeTools).toBeUndefined();
     expect(audits).toEqual([]);
   });
 
@@ -150,7 +185,7 @@ describe("copilot capability enablement (#3727)", () => {
     expect(gate.enabled).toBe(true);
   });
 
-  it("the prompt steering tells the resolved truth: enabled line when the gate is on, the flagged-off line only by default", () => {
+  it("the prompt steering tells the resolved truth: enabled line when the gate is on, the flagged-off line by default and under the production choice", () => {
     const baseInput = {
       route: { agent: "orchestrator", confidence: 1, reason: "pin" },
       memoryContext: "",
@@ -171,6 +206,26 @@ describe("copilot capability enablement (#3727)", () => {
     const defaultPrompt = buildOrchestratorSystemPrompt(baseInput);
     expect(defaultPrompt).toContain(
       "'tool_openaimp_execute_nlq': (Flagged OFF in chat turns by CHAT_NLQ_MODE, default off",
+    );
+    // Production (#3740): the gate resolves the choice to chat,
+    // so a production turn's steering — fed the gate's own
+    // resolved value, never a second read — carries the
+    // flagged-off line.
+    const env = productionEnv();
+    const gate = chatNlqTurnGate({
+      toolNames: [OPENAIMP_NLQ_TOOL_KEY, "tool_openaimp_run_stock_screen"],
+      context: { env },
+      audit: () => {},
+    });
+    const productionPrompt = buildOrchestratorSystemPrompt({
+      ...baseInput,
+      chatNlqEnabled: gate.mode === "on",
+    });
+    expect(productionPrompt).toContain(
+      "'tool_openaimp_execute_nlq': (Flagged OFF in chat turns by CHAT_NLQ_MODE, default off",
+    );
+    expect(productionPrompt).not.toContain(
+      "'tool_openaimp_execute_nlq': (Enabled in chat turns by CHAT_NLQ_MODE)",
     );
   });
 });
