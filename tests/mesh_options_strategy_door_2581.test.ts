@@ -131,7 +131,8 @@ describe("issue #2581 — run_options_strategy_screen catalog registration", () 
     // 98 since #3536 (+4 enrich-job tools).
     // 106 since #3538 (+4 generate-job tools); 110 since #3539 (+4 deliver-job tools); 112 since #3673 (+2 bracket ladder tools).
     // 116 since #3540 (+4 pipeline-chain tools).
-    expect(McpToolFactory.getAllTools()).toHaveLength(116);
+    // 118 since #3767 (+2 copilot gap remediation tools).
+    expect(McpToolFactory.getAllTools()).toHaveLength(118);
   });
 
   it("the prompt steers options strategy screens at the discovered tool", () => {
