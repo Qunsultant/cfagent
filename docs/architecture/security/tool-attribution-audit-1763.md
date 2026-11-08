@@ -102,6 +102,7 @@ other doors. Scope column is #1843's declaration, consumed here.
 | `web_fetch` | mcp:read | L (I / R on other doors) — the standalone unrendered page fetch (#2760, tracker #2708 A3): acting login carried in the tool audit from context only (no identity argument); failures propagate as named `web_fetch_*` errors, never fabricated content |
 | `get_feed_job_status` | mcp:read | L via door 2 only — acting identity required (#3535); refused on doors 1/3 (no acting-identity carrier there) |
 | `list_feed_jobs` | mcp:read | L via door 2 only — acting identity required (#3535); refused on doors 1/3 (no acting-identity carrier there) |
+| `get_feed_job_schedule` | mcp:read | L via door 2 only — acting identity required (#3530); refused on doors 1/3 (no acting-identity carrier there) |
 | `get_enrich_job_status` | mcp:read | L via door 2 only — acting identity required (#3536); refused on doors 1/3 (no acting-identity carrier there) |
 | `list_enrich_jobs` | mcp:read | L via door 2 only — acting identity required (#3536); refused on doors 1/3 (no acting-identity carrier there) |
 | `get_analyze_job_status` | mcp:read | L via door 2 only — acting identity required (#3537); refused on doors 1/3 (no acting-identity carrier there) |
@@ -152,6 +153,7 @@ other doors. Scope column is #1843's declaration, consumed here.
 | `stock_copilot_remediate_gaps` | mcp:write | L via door 2 only — acting identity required (#3769); refused on doors 1/3 (no acting-identity carrier there). Autonomous platform gap diagnosis and auto-healing action |
 | `run_feed_job` | mcp:write | L via door 2 only — acting identity required (#3535); refused on doors 1/3 (no acting-identity carrier there) |
 | `manage_feed_job` | mcp:write | L via door 2 only — acting identity required (#3535); refused on doors 1/3 (no acting-identity carrier there) |
+| `set_feed_job_schedule` | mcp:write | L via door 2 only — acting identity required (#3530); refused on doors 1/3 (no acting-identity carrier there) |
 | `run_enrich_job` | mcp:write | L via door 2 only — acting identity required (#3536); refused on doors 1/3 (no acting-identity carrier there) |
 | `manage_enrich_job` | mcp:write | L via door 2 only — acting identity required (#3536); refused on doors 1/3 (no acting-identity carrier there) |
 | `run_analyze_job` | mcp:write | L via door 2 only — acting identity required (#3537); refused on doors 1/3 (no acting-identity carrier there) |
