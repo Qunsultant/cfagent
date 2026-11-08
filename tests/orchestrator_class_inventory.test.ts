@@ -365,6 +365,10 @@ const DELEGATED_METHODS = [
   "getAsyncJob",
   "listAsyncJobs",
   "executeAsyncJob",
+  // Issue #3784: the stale-async-job sweep callback — execution in
+  // orchestrator/asyncJobs.ts (sweepStaleAsyncJobs), armed from
+  // onStart beside the #618 ledger sweep.
+  "sweepStaleAsyncJobs",
   // autopilot
   "marketDateKey",
   "readAutopilotStateRaw",

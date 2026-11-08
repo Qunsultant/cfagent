@@ -85,7 +85,7 @@ import type { DoNamespaceLike } from "../data/durableKv";
 import { createKvMembershipStore } from "../security/iaaaMembershipStore";
 import { isLoginShaped } from "../security/serviceIdentity";
 import { sessionStore } from "../security/session";
-import { submitAsyncJob, recoverQueuedAsyncJobs, getAsyncJob, listAsyncJobs, executeAsyncJob, scheduleScreenerFollowups, retryAsyncJob, type AsyncJobsContext } from "./orchestrator/asyncJobs";
+import { submitAsyncJob, recoverQueuedAsyncJobs, getAsyncJob, listAsyncJobs, executeAsyncJob, sweepStaleAsyncJobs, scheduleScreenerFollowups, retryAsyncJob, type AsyncJobsContext } from "./orchestrator/asyncJobs";
 import { ensureOrchestratorTables } from "./orchestrator/tableSchema";
 import { REPORT_CONFIRMATION_TTL_MS } from "./orchestrator/reportConfirmationTtl";
 import { routeRequest, type RouteRequestDeps } from "./orchestrator/routeRequest";
@@ -205,6 +205,11 @@ const SCREENER_EXECUTION_CONTEXT_KEY = "screener:execution-context";
 const LEGACY_SCHEDULE_MIGRATION_KEY = "screener:legacy-baseline-migration:v3";
 /** Issue #618: interval between automatic stale-task sweeps (6 hours). */
 const STALE_SWEEP_INTERVAL_SECONDS = 6 * 60 * 60;
+/** Issue #3784: interval between automatic stale-async-job sweeps
+ *  (15 minutes) — short enough that a run crossing the 30-min
+ *  stuck threshold is flagged on the next tick, long enough that
+ *  the sweep stays a cheap bounded scan (100 rows/tick). */
+const STALE_ASYNC_JOB_SWEEP_INTERVAL_SECONDS = 15 * 60;
 /**
  * Issue #275: the hourly full-catalog Strategy/Symbol Scanner run.
  * Minute :35 staggers it off the equity screens (commonly armed at
@@ -1030,6 +1035,21 @@ export class OrchestratorAgent extends PortThink {
     }
 
     try {
+      // Issue #3784: run the stale-async-job sweep once and arm the
+      // recurring 15-minute interval, on the same maintenance path
+      // as the #618 ledger sweep. Session-scoped (this instance's
+      // mas_async_jobs rows), so no screener context is needed.
+      // Best-effort: a sweep problem never blocks startup.
+      await this.sweepStaleAsyncJobs();
+      await this.ensureStaleAsyncJobSweepSchedule();
+    } catch (sweepErr) {
+      structuredLog.warn("orchestrator.on_start_stale_async_job_sweep_failed", {
+        message: "[OrchestratorAgent][onStart] Stale async-job sweep setup failed:",
+        error: sweepErr instanceof Error ? sweepErr.message : String(sweepErr),
+      });
+    }
+
+    try {
       // Issue #686: residual legacy-session lift (see
       // liftLegacyChatMessages). Best-effort: never blocks startup.
       await this.liftLegacyChatMessages();
@@ -1548,6 +1568,27 @@ export class OrchestratorAgent extends PortThink {
   // Issue #992: extracted to ./orchestrator/asyncJobs.ts (executeAsyncJob);
   async executeAsyncJob({ jobId }: AsyncJobPayload): Promise<void> {
     return executeAsyncJob(this.asyncJobsContext(), { jobId });
+  }
+
+  // Issue #3784: extracted to ./orchestrator/asyncJobs.ts
+  // (sweepStaleAsyncJobs) — the scheduled callback that applies the
+  // read path's reap + stuck alert to stale `running` rows without
+  // a read. Armed from onStart beside the #618 ledger sweep.
+  async sweepStaleAsyncJobs(): Promise<{ examined: number; alerted: number; reaped: number }> {
+    return sweepStaleAsyncJobs(this.asyncJobsContext());
+  }
+
+  /** Issue #3784: arm the recurring stale-async-job sweep once per
+   *  instance (the #618 ensureStaleSweepSchedule pattern: list
+   *  schedules, skip when a sweepStaleAsyncJobs schedule exists). */
+  private async ensureStaleAsyncJobSweepSchedule(): Promise<void> {
+    const existing = await this.listSchedules().catch(() => [] as Schedule<unknown>[]);
+    const already = existing.some((s) => {
+      const item = s as any;
+      return item.callback === "sweepStaleAsyncJobs";
+    });
+    if (already) return;
+    await this.scheduleEvery(STALE_ASYNC_JOB_SWEEP_INTERVAL_SECONDS, "sweepStaleAsyncJobs", {});
   }
 
   // Consolidation C3 (#1277): extracted to ./orchestrator/asyncJobs.ts (retryAsyncJob);

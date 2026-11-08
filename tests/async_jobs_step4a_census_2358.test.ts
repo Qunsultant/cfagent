@@ -52,8 +52,9 @@ const FAMILY_FILES = [
 
 const DATA_LAYER_FILES: Array<[string, number]> = [
   // 34 at #2358; 36 after #2567 (+2: the stuck_alerted_at column
-  // migration and the guarded markStuckAlerted UPDATE).
-  ["src/data/doSqliteAsyncJobAdapter.ts", 36],
+  // migration and the guarded markStuckAlerted UPDATE); 37 after
+  // #3784 (+1: the listRunning sweep scan).
+  ["src/data/doSqliteAsyncJobAdapter.ts", 37],
   ["src/data/doSqliteJobOutcomeAdapter.ts", 13],
   ["src/data/doSqlitePausedScheduleAdapter.ts", 7],
   ["src/data/inMemoryAsyncJobAdapter.ts", 0],

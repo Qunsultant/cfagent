@@ -320,3 +320,61 @@ describe("workflow run summaries", () => {
     expect(summary.byTrigger.scheduled).toBe(1);
   });
 });
+
+describe("stuck runs (#3784)", () => {
+  it("marks a running chain stuck when a job carries the stuck-alert claim", () => {
+    const runs = buildWorkflowRuns({
+      jobs: [
+        job({
+          job_id: "job-stuck",
+          status: "running",
+          started_at: "2026-11-08T15:29:00.000Z",
+          stuck_alerted_at: "2026-11-08T15:59:00.000Z",
+          payload_json: JSON.stringify({ trigger: "manual" }),
+        }),
+      ],
+      outcomes: [],
+      transitions: [],
+    });
+    expect(runs).toHaveLength(1);
+    // "Stuck" is a display derivation on running + flagged, not a
+    // stored status: the recorded status stays "running".
+    expect(runs[0].status).toBe("running");
+    expect(runs[0].stuck).toBe(true);
+  });
+
+  it("a running chain without the claim is not stuck", () => {
+    const runs = buildWorkflowRuns({
+      jobs: [
+        job({
+          job_id: "job-young",
+          status: "running",
+          started_at: "2026-11-08T15:29:00.000Z",
+          payload_json: JSON.stringify({ trigger: "manual" }),
+        }),
+      ],
+      outcomes: [],
+      transitions: [],
+    });
+    expect(runs[0].status).toBe("running");
+    expect(runs[0].stuck).toBe(false);
+  });
+
+  it("a terminal chain is never stuck even when a claim stamp is present", () => {
+    const runs = buildWorkflowRuns({
+      jobs: [
+        job({
+          job_id: "job-done",
+          status: "completed",
+          started_at: "2026-11-08T15:29:00.000Z",
+          stuck_alerted_at: "2026-11-08T15:59:00.000Z",
+          payload_json: JSON.stringify({ trigger: "manual" }),
+        }),
+      ],
+      outcomes: [],
+      transitions: [],
+    });
+    expect(runs[0].status).toBe("completed");
+    expect(runs[0].stuck).toBe(false);
+  });
+});

@@ -531,10 +531,20 @@ export function BrokerDynamicMenu({
     };
   }, [isOpen, isPinned]);
 
+  // Issue #3784: one switch action posts /environment/switch exactly
+  // once. The `handleSwitchEnvironment` prop (Chat's plain POST
+  // wiring, or the trading hub's switch + status refetch) IS the
+  // switch when present; the direct import is only the fallback
+  // for a menu rendered without the prop. Calling both posted
+  // twice per click — the incident's duplicate /environment/switch
+  // jobs. Same target, same echo adoption either way.
   const onSwitchEnv = (target: "TEST" | "PROD") => {
     setLocalEnv(target);
-    handleSwitchEnvironment?.(target);
-    void switchBrokerEnvironment(target);
+    if (handleSwitchEnvironment) {
+      handleSwitchEnvironment(target);
+    } else {
+      void switchBrokerEnvironment(target);
+    }
   };
 
   const onRunDiagnostics = () => {
@@ -902,8 +912,12 @@ export function BrokerDynamicMenu({
                     value={isLive ? "live" : "paper"}
                     onChange={(mode) => {
                       const target = mode === "live" ? "PROD" : "TEST";
+                      // Issue #3784: onSwitchEnv already switches to
+                      // the same target — the old onToggleAccountMode
+                      // call here posted a second switch (Chat's
+                      // toggle POSTs directly), and onSwitchEnv's
+                      // direct leg made it three.
                       onSwitchEnv(target);
-                      onToggleAccountMode?.();
                     }}
                   />
                 </div>
@@ -1193,7 +1207,11 @@ export function BrokerDynamicMenu({
                     type="button"
                     className="btn-msg-fix"
                     onClick={() => {
-                      onSwitchEnv("TEST");
+                      // Issue #3784: handleSwitchAndConnect switches
+                      // (through handleSwitchEnvironment) AND starts
+                      // OAuth — the old onSwitchEnv call here posted
+                      // a second switch before it, and onSwitchEnv's
+                      // direct leg made it three.
                       handleSwitchAndConnect?.("TEST");
                     }}
                   >

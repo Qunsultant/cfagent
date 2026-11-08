@@ -73,3 +73,30 @@ describe("retention pruning rides the sweep callback (#635)", () => {
     expect(cb).toContain("pruneExpiredScreenerTasks(");
   });
 });
+
+describe("stale async-job sweep wiring (#3784)", () => {
+  it("defines the sweepStaleAsyncJobs scheduled callback delegating to asyncJobs", () => {
+    expect(orchestrator).toContain("async sweepStaleAsyncJobs(");
+    const cb = region("async sweepStaleAsyncJobs(");
+    expect(cb).toContain("sweepStaleAsyncJobs(this.asyncJobsContext())");
+  });
+
+  it("uses a 15-minute interval between automatic async-job sweeps", () => {
+    expect(orchestrator).toContain("STALE_ASYNC_JOB_SWEEP_INTERVAL_SECONDS = 15 * 60");
+  });
+
+  it("ensures the async-job sweep schedule idempotently (checks before creating)", () => {
+    const ensure = region("async ensureStaleAsyncJobSweepSchedule(");
+    expect(ensure).toContain("listSchedules");
+    expect(ensure).toContain("sweepStaleAsyncJobs");
+    expect(ensure).toContain("scheduleEvery(STALE_ASYNC_JOB_SWEEP_INTERVAL_SECONDS");
+    // The existence check must precede creation.
+    expect(ensure.indexOf("listSchedules")).toBeLessThan(ensure.indexOf("scheduleEvery("));
+  });
+
+  it("onStart runs an initial async-job sweep and ensures the schedule", () => {
+    const start = region("async onStart(");
+    expect(start).toContain("sweepStaleAsyncJobs");
+    expect(start).toContain("ensureStaleAsyncJobSweepSchedule");
+  });
+});

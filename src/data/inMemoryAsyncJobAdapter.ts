@@ -12,6 +12,7 @@ import type {
   AsyncJobMaintenancePort,
   AsyncJobQueuePort,
   AsyncJobReadPort,
+  AsyncJobRunningRow,
   AsyncJobStoredRow,
   AsyncJobWorkflowRow,
   InsertQueuedJobInput,
@@ -255,6 +256,23 @@ export class InMemoryAsyncJobStore
       .sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0))
       .slice(0, limit)
       .map((r) => clone(r));
+  }
+
+  listRunning(sessionId: string, limit: number): AsyncJobRunningRow[] {
+    return [...this.rows.values()]
+      .filter((r) => r.session_id === sessionId && r.status === "running")
+      .sort((a, b) => (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : 0))
+      .slice(0, limit)
+      .map((r) => ({
+        job_id: r.job_id,
+        session_id: r.session_id,
+        capability: r.capability,
+        display_name: r.display_name,
+        status: r.status,
+        started_at: r.started_at,
+        stuck_alerted_at: r.stuck_alerted_at,
+        created_at: r.created_at,
+      }));
   }
 
   activeJobPayloads(): Array<{ payload_json: string }> {

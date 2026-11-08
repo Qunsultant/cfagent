@@ -19,11 +19,13 @@
  */
 import {
   ACTIVE_JOB_PAYLOADS_SQL,
+  LIST_RUNNING_SQL,
   type AsyncJobChainRow,
   type AsyncJobListRow,
   type AsyncJobMaintenancePort,
   type AsyncJobQueuePort,
   type AsyncJobReadPort,
+  type AsyncJobRunningRow,
   type AsyncJobSqlExecutor,
   type AsyncJobStoredRow,
   type AsyncJobWorkflowRow,
@@ -351,6 +353,14 @@ export class DoSqliteAsyncJobStore
       sessionId,
       limit,
     )) as unknown as AsyncJobWorkflowRow[];
+  }
+
+  listRunning(sessionId: string, limit: number): AsyncJobRunningRow[] {
+    return Array.from(this.sql.exec(
+      LIST_RUNNING_SQL,
+      sessionId,
+      limit,
+    )) as unknown as AsyncJobRunningRow[];
   }
 
   activeJobPayloads(): Array<{ payload_json: string }> {

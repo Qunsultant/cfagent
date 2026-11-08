@@ -482,11 +482,11 @@ export function getAsyncJob(ctx: AsyncJobsContext, jobId: string): AsyncJobRecor
   const row = ports(ctx).read.getRow(jobId, ctx.sessionKey()) as Record<string, unknown> | undefined;
   if (!row) return undefined;
   if (row.status === "running" && typeof row.started_at === "string" &&
-    Date.now() - Date.parse(row.started_at) > 2 * 60 * 60 * 1000) {
+    Date.now() - Date.parse(row.started_at) > STALE_RUNNING_REAP_MS) {
     const completedAt = new Date().toISOString();
     ports(ctx).queue.reapStaleRunning(
       jobId,
-      "Execution stopped before a result was recorded; the outcome may be unknown. Verify external side effects before submitting again.",
+      STALE_RUNNING_REAP_MESSAGE,
       completedAt,
     );
     return getAsyncJob(ctx, jobId);
@@ -518,6 +518,87 @@ export function getAsyncJob(ctx: AsyncJobsContext, jobId: string): AsyncJobRecor
     startedAt: typeof row.started_at === "string" ? row.started_at : undefined,
     completedAt: typeof row.completed_at === "string" ? row.completed_at : undefined,
   };
+}
+
+/**
+ * Issue #3784: the stale-running reap's backstop (2h) and its fixed
+ * unknown-outcome message, shared by the read path (getAsyncJob
+ * above) and the scheduled sweep (sweepStaleAsyncJobs below) so both
+ * transitions carry the identical verdict. The message is the
+ * read path's exact string, unchanged — a reaped row reads the
+ * same whether a read or the sweep reaped it.
+ */
+const STALE_RUNNING_REAP_MS = 2 * 60 * 60 * 1000;
+const STALE_RUNNING_REAP_MESSAGE =
+  "Execution stopped before a result was recorded; the outcome may be unknown. Verify external side effects before submitting again.";
+/** Issue #3784: the sweep's batch cap — at most this many running
+ *  rows per tick; the oldest are swept first (listRunning orders
+ *  by created_at ASC), the rest wait for the next tick. */
+const STALE_SWEEP_BATCH_LIMIT = 100;
+
+export interface StaleAsyncJobSweepResult {
+  examined: number;
+  alerted: number;
+  reaped: number;
+}
+
+/**
+ * Issue #3784 (parent incident #3781): the scheduled stale-async-job
+ * sweep — the read path's reap + stuck alert (#2567) applied without
+ * a read. A claimed-but-unfinished row whose executor stalled (the
+ * six incident jobs, still `running` ~53 min after start) has no
+ * recovery path until something reads it; the sweep closes that
+ * window on a 15-minute tick (armed by OrchestratorAgent.onStart,
+ * next to the #618 ledger sweep).
+ *
+ * Per row, oldest first: past the 2h backstop the row is reaped as
+ * failed with the read path's exact message and audited as
+ * `async_job.failed` (the established `{ jobId, capability, error }`
+ * shape, docs/operations/jobs-workflows-stages-01.md §Auditing —
+ * no new event name); past the stuck threshold (default 30 min,
+ * 0 = disabled) the row is flagged + alerted through
+ * maybeAlertStuckRunning (exactly-once claim, so a second sweep
+ * never re-alerts or re-reaps). Reap check BEFORE alert, same order
+ * as getAsyncJob, so an already-reaped row is never alerted.
+ * Idempotent by the guarded transitions; per-row try/catch so one
+ * bad row never fails the sweep or its caller. The sweep never
+ * publishes to the J1 CloudEvents stream (recorded decision on
+ * #3784: mas_async_jobs rows are not J1 pipeline runs) and never
+ * deletes a row.
+ */
+export function sweepStaleAsyncJobs(ctx: AsyncJobsContext, nowMs: number = Date.now()): StaleAsyncJobSweepResult {
+  ctx.ensureTables();
+  const rows = ports(ctx).read.listRunning(ctx.sessionKey(), STALE_SWEEP_BATCH_LIMIT) as unknown as Array<Record<string, unknown>>;
+  let alerted = 0;
+  let reaped = 0;
+  for (const row of rows) {
+    const jobId = String(row.job_id);
+    try {
+      if (row.status !== "running" || typeof row.started_at !== "string") continue;
+      const ageMs = nowMs - Date.parse(row.started_at);
+      if (ageMs > STALE_RUNNING_REAP_MS) {
+        const completedAt = new Date(nowMs).toISOString();
+        const written = ports(ctx).queue.reapStaleRunning(jobId, STALE_RUNNING_REAP_MESSAGE, completedAt);
+        if (written === 1) {
+          ctx.audit("async_job.failed", "orchestrator", {
+            jobId,
+            capability: String(row.capability),
+            error: STALE_RUNNING_REAP_MESSAGE,
+          });
+          reaped++;
+        }
+        continue;
+      }
+      if (maybeAlertStuckRunning(ctx, row, nowMs)) alerted++;
+    } catch (error) {
+      structuredLog.error("asyncJobs.sweep_stale_async_job_failed", {
+        message: `[OrchestratorAgent] Stale async-job sweep failed for job ${jobId}:`,
+        jobId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return { examined: rows.length, alerted, reaped };
 }
 
 export function listAsyncJobs(ctx: AsyncJobsContext, limit = 50): AsyncJobRecord[] {
