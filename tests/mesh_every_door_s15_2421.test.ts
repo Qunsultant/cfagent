@@ -557,6 +557,9 @@ describe("census chat column vs the mesh-door command registry (#2421)", () => {
       "get_feed_job_status",
       "list_feed_jobs",
       "manage_feed_job",
+      // #3530 slice B (§7 pin update): the feed-job schedule commands join the door.
+      "get_feed_job_schedule",
+      "set_feed_job_schedule",
       // #3536 (§7 pin update): the enrich-job commands join the door.
       "run_enrich_job",
       "get_enrich_job_status",
