@@ -102,7 +102,7 @@ function insertBeforeClosing(lines, startPattern, closing, insertLines, what) {
   if (start === -1) fail(`anchor not found: ${what}`);
   let end = -1;
   for (let i = start + 1; i < lines.length; i++) {
-    if (lines[i] === closing) { end = i; break; }
+    if (lines[i].trim() === closing) { end = i; break; }
   }
   if (end === -1) fail(`closing ${closing} not found for ${what}`);
   lines.splice(end, 0, ...insertLines);
@@ -123,13 +123,15 @@ function insertSortedId(content, id) {
   if (start === -1) fail("EXPECTED_IDS anchor not found in route_table.test.ts");
   const end = content.indexOf("];", start);
   if (end === -1) fail("EXPECTED_IDS closing not found in route_table.test.ts");
+  const isCrlf = content.includes("\r\n");
+  const nl = isCrlf ? "\r\n" : "\n";
   const block = content.slice(start, end);
-  const entries = [...block.matchAll(/^  "([^"]+)",$/gm)].map((m) => m[1]);
+  const entries = [...block.matchAll(/^  "([^"]+)",/gm)].map((m) => m[1]);
   if (entries.includes(id)) fail(`route id "${id}" already in EXPECTED_IDS`);
-  const line = `  "${id}",\n`;
+  const line = `  "${id}",${nl}`;
   const after = entries.find((e) => e > id);
   if (!after) return content.slice(0, end) + line + content.slice(end);
-  const at = content.indexOf(`  "${after}",\n`, start);
+  const at = content.indexOf(`  "${after}",`, start);
   return content.slice(0, at) + line + content.slice(at);
 }
 
@@ -178,7 +180,12 @@ const nav = JSON.parse(navRaw);
 const routes = nav.routes;
 if (routes.some((r) => r.id === id)) fail(`route id "${id}" already exists in nav-config.json`);
 const chatSrc = readFileSync(chatPath, "utf8");
-if (new RegExp(`^    "?${id}"?: \\($`, "m").test(chatSrc)) fail(`TAB_CONTENT already has "${id}"`);
+const chatLinesPre = chatSrc.split("\n");
+const hasTabKey = chatLinesPre.some((l) => {
+  const t = l.trim();
+  return t === `"${id}": (` || t === `${id}: (` || t.startsWith(`"${id}": (`) || t.startsWith(`${id}: (`);
+});
+if (hasTabKey) fail(`TAB_CONTENT already has "${id}"`);
 if (!chatSrc.includes("const TAB_CONTENT")) fail("TAB_CONTENT anchor not found in Chat.tsx");
 const gateSrc = readFileSync(gatePath, "utf8");
 if (gateSrc.includes(`"${id}":`)) fail(`conformance gate already mentions "${id}"`);
@@ -198,7 +205,9 @@ if (args.nav) {
   const icons = navRoutes.map((r) => r.icon);
   if (icons.includes(icon)) fail(`icon "${icon}" is already used by a nav entry (icons must be unique)`);
   const menuSrc = readFileSync(path.join(root, "src/client/components/NavigationMenu.tsx"), "utf8");
-  if (!new RegExp(`^\\s+${icon}:`, "m").test(menuSrc)) {
+  const menuLines = menuSrc.split("\n");
+  const hasIcon = menuLines.some((l) => l.trim().startsWith(`${icon}:`));
+  if (!hasIcon) {
     fail(`icon key "${icon}" not found in NavigationMenu's NavIcons map — add the icon component there first, then re-run with --nav`);
   }
   const maxOrder = Math.max(...navRoutes.map((r) => r.navEntry.navOrder));
