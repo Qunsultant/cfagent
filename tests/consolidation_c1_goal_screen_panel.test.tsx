@@ -177,9 +177,9 @@ describe("C1 GoalScreenPanel", () => {
     });
     await submitRun();
 
-    const pdfLink = container.querySelector("a.goal-screen-download-pdf") as HTMLAnchorElement;
-    const xlsxLink = container.querySelector("a.goal-screen-download-xlsx") as HTMLAnchorElement;
-    const csvLink = container.querySelector("a.goal-screen-download-csv") as HTMLAnchorElement;
+    const pdfLink = container.querySelector('a[href*="report.pdf"]') as HTMLAnchorElement;
+    const xlsxLink = container.querySelector('a[href*="report.xlsx"]') as HTMLAnchorElement;
+    const csvLink = container.querySelector('a[href*="report.csv"]') as HTMLAnchorElement;
 
     expect(pdfLink).not.toBeNull();
     expect(pdfLink.href).toContain("/api/screening/goal-screen/report.pdf?key=goal_screen%3Apdf%3Atest1234");

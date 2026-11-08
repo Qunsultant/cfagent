@@ -224,6 +224,7 @@ const CONFORMING_SUB_TABS: Record<string, string> = {
   "track-record": "src/client/TrackRecordPanel.tsx",
   "order": "src/client/OrderTicketPanel.tsx",
   "autopilot": "src/client/components/AutopilotControlCenter.tsx",
+  "goal-screen": "src/client/GoalScreenPanel.tsx",
 };
 
 const EXPECTED_TAB_CONTENT_KEYS = [
