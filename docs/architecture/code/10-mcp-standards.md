@@ -26,7 +26,7 @@ reconciliation).
 
 **Definition.** Before adding an MCP tool, answer, in the PR: (1) transport
 or own gate — name the permission and the denial behaviour; (2) catalog
-presence — or record the gap; (3) inherited gates — E*TRADE, keys,
+presence — or record the gap; (3) inherited gates — broker, keys,
 memberships, audit; (4) attributability — calls are attributable to a
 session or a key. A tool PR that does not answer all four is incomplete.
 **Status.** DOCUMENTED — `mcp-security.md` §5. A checklist in a security
