@@ -12,6 +12,8 @@ import type { ToolSet } from "ai";
 import { getWorkersAIModel } from "./model";
 import { resolveScreenerAgentName } from "./screenerAgentName";
 import { actorGateway } from "../services/cloudflareActorGateway";
+import { recordJobOutcome } from "../services/jobOutcomes";
+import type { JobOutcomeInput } from "../data/jobOutcomePorts";
 import { buildOrchestratorSystemPrompt, resolveShadowMaxSteps } from "./chatPrompt";
 import { LLMJudge } from "./judge";
 import { VectorMemory } from "../memory/vector-memory";
@@ -1495,6 +1497,29 @@ export class OrchestratorAgent extends PortThink {
 
   private ensureTables() {
     return ensureOrchestratorTables(this.ctx.storage.sql);
+  }
+
+  /**
+   * Issue #3530 slice B: the feed-outcome door. The ScheduledAgent
+   * host's settled feed runs land in THIS instance's job-outcome
+   * sink — the store the Autopilot Control Center's job feed reads
+   * (GET /autopilot/jobs) — recorded through the one
+   * recordJobOutcome mechanism (#3527/#1976), keys + outcome codes
+   * only. Never throws: a sink failure is logged, and the feed run
+   * stands on its own records (run record + dataset artifact).
+   */
+  async recordFeedJobOutcome(input: JobOutcomeInput): Promise<void> {
+    try {
+      recordJobOutcome(this.ensureTables(), input);
+    } catch (err) {
+      structuredLog.warn("orchestrator.feed_job_outcome_record_failed", {
+        message:
+          "Feed job outcome record failed; the feed run stands on its own records.",
+        runId: input.id,
+        kind: input.kind,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
 
