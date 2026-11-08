@@ -61,6 +61,8 @@ import {
   AlpacaPlaceOrderCommand,
   AlpacaPlaceBracketLadderCommand,
   AlpacaCancelBracketLadderCommand,
+  AlpacaGetQuoteCommand,
+  AlpacaPreviewOrderCommand,
   DeprecatedToolAlias,
 } from "./marketDataCommands";
 import {
@@ -1756,6 +1758,11 @@ export class McpToolFactory {
     this.registerTool(new AlpacaPlaceOrderCommand());
     this.registerTool(new AlpacaPlaceBracketLadderCommand());
     this.registerTool(new AlpacaCancelBracketLadderCommand());
+    // Issue #3782: Alpaca quote + preview as agent tools — the
+    // copilot's broker is Alpaca, so its quote/preview legs run here
+    // instead of reaching for the E*TRADE tools.
+    this.registerTool(new AlpacaGetQuoteCommand());
+    this.registerTool(new AlpacaPreviewOrderCommand());
 
     // #1906: deprecated aliases for the renamed market-data tools above.
     // Same commands, legacy names; use canonical tool names instead.

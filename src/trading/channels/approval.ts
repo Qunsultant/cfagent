@@ -33,6 +33,8 @@
  */
 
 import { tierAtLeast, type ChannelPrincipal } from "./intake";
+import { decodeOrderPriceSource } from "../quotePolicies";
+import type { OrderPriceSource } from "../../types";
 
 export interface ApprovalTrade {
   id: string;
@@ -63,6 +65,8 @@ export interface ApprovalExecutor {
     quantity: number;
     orderType: string;
     limitPrice: number;
+    /** Issue #3782: the stored draft's provenance, forwarded so placeOrder's guard can verify the price. */
+    priceSource?: OrderPriceSource;
     userLogin: string;
   }): Promise<unknown>;
 }
@@ -187,6 +191,10 @@ export async function approvePreviewedOrder(args: {
       quantity: targetTrade.quantity,
       orderType: targetTrade.orderType,
       limitPrice: targetTrade.price,
+      // Issue #3782: forward the stored draft's provenance (persisted
+      // at preview time as JSON) so placeOrder's guard can verify the
+      // price.
+      priceSource: decodeOrderPriceSource((targetTrade as any)?.priceSourceJson),
       userLogin: args.userLogin,
     });
     if (args.trades) {

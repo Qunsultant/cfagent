@@ -30,6 +30,7 @@ import type {
   AlpacaMarketSnapshot,
   MarketDataResearchReport,
   MarketDataResearchProviderStatus,
+  OrderPriceSource,
 } from "../types";
 import type { IMarketDataProvider } from "../patterns/interfaces";
 import {
@@ -1583,6 +1584,21 @@ function marketDataResearchSyncUnavailable(symbol: string, what: string, provide
   throw marketDataResearchLiveUnavailableError(symbol, what, `${provider} sync accessor (use the async accessor)`);
 }
 
+/**
+ * Issue #3782: a limit price is provenanced only when it names a real
+ * origin — a user-supplied limit, a live broker quote, or a price
+ * derived deterministically from the platform's own market-data
+ * pipeline. "estimated" (priced from a non-live quote) and a missing
+ * source are NOT provenance: they are refused at placeOrder.
+ */
+export function isProvenancedOrderPriceSource(priceSource: OrderPriceSource | undefined): boolean {
+  return (
+    priceSource?.kind === "user" ||
+    priceSource?.kind === "live-quote" ||
+    priceSource?.kind === "market-data"
+  );
+}
+
 const MARKET_DATA_RESEARCH_PROVENANCE_RANK: Record<MarketDataResearchProvenance, number> = { live: 4, cached: 3, static: 2, generated: 1 };
 
 /** Weakest (least-live) of a set — a composite object is only as live as its weakest input (#117). */
@@ -2559,11 +2575,39 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
     order_class?: "simple" | "bracket" | "oco" | "oto";
     take_profit?: { limit_price: number };
     stop_loss?: { stop_price: number; limit_price?: number };
+    /**
+     * Issue #3782: where the limit price came from. A limit (or
+     * stop-limit) price with no provenance — or with "estimated"
+     * provenance — is refused here, the last stop before Alpaca, and
+     * nothing is POSTed. Callers attach it: the trade workflow
+     * forwards the stored draft's provenance, and direct callers
+     * (REST/MCP place, bracket ladders, copilot exits) name their own
+     * origin. Market orders carry no limit price, so the guard does
+     * not apply to them.
+     */
+    priceSource?: OrderPriceSource;
   }): Promise<{ success: boolean; orderId?: string; status?: string; symbol?: string; qty?: number; side?: string; orderClass?: string; legs?: any[]; message: string; httpStatus?: number; refusal?: string }> {
     if (!this.isConfigured()) {
       return {
         success: false,
         message: "Alpaca Trading error: ALPACA_API_KEY_ID and ALPACA_API_SECRET_KEY must be configured for order placement. Simulation is disabled.",
+      };
+    }
+
+    // Issue #3782 (incident #3781): refuse an unprovenanced limit
+    // price before any broker contact — an invented price must never
+    // sit as a real paper order at a wrong price.
+    const orderKind = (params.type || "market").toLowerCase();
+    if (
+      (orderKind === "limit" || orderKind === "stop_limit") &&
+      params.limit_price !== undefined &&
+      !isProvenancedOrderPriceSource(params.priceSource)
+    ) {
+      return {
+        success: false,
+        message:
+          `Alpaca limit order refused: the limit price $${Number(params.limit_price).toFixed(2)} for ${params.symbol.toUpperCase()} carries no provenanced price source (expected "user", "live-quote", or "market-data"; got ${params.priceSource?.kind ?? "none"}). No order was placed. Attach the price provenance before placing. (issue #3782)`,
+        refusal: "unprovenanced_limit_price",
       };
     }
 
@@ -3371,6 +3415,8 @@ export class MarketDataResearchService {
     order_class?: "simple" | "bracket" | "oco" | "oto";
     take_profit?: { limit_price: number };
     stop_loss?: { stop_price: number; limit_price?: number };
+    /** Issue #3782: forwarded to placeOrder — a limit price without it is refused there. */
+    priceSource?: OrderPriceSource;
   }): Promise<{ success: boolean; orderId?: string; status?: string; symbol?: string; qty?: number; side?: string; orderClass?: string; legs?: any[]; message: string; httpStatus?: number; refusal?: string }> {
     return this.alpacaTrading.placeOrder(params);
   }

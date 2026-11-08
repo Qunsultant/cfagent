@@ -16,8 +16,37 @@
  * fallbacks with #118 provenance) applies.
  */
 
-import type { ETradeQuote } from "../types";
+import type { ETradeQuote, OrderPriceSource } from "../types";
 import type { ITradingPlatform } from "./interfaces";
+
+/**
+ * Issue #3782 — price-provenance codec for the stored trade record.
+ * The repository binds values directly (no JSON codec), so provenance
+ * persists as JSON text in `TradeRecord.priceSourceJson` (the *Json
+ * idiom). Decode is total: anything unparseable, non-object, or
+ * carrying an unknown kind reads back as undefined (no provenance),
+ * so a corrupt or legacy value can never bless a price — placeOrder
+ * then refuses the limit price, fail-closed.
+ */
+export function encodeOrderPriceSource(source: OrderPriceSource | undefined): string | undefined {
+  if (source === undefined) return undefined;
+  return JSON.stringify(source);
+}
+
+export function decodeOrderPriceSource(value: unknown): OrderPriceSource | undefined {
+  if (typeof value !== "string" || value.trim() === "") return undefined;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (typeof parsed !== "object" || parsed === null) return undefined;
+    const kind = (parsed as Record<string, unknown>).kind;
+    if (kind === "user" || kind === "live-quote" || kind === "market-data" || kind === "estimated") {
+      return parsed as OrderPriceSource;
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * The E*TRADE stub-quote heuristic: the sandbox placeholder quote

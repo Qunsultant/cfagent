@@ -227,7 +227,35 @@ export function ToolResultView({
     const action = data?.action || data?.input?.action || "BUY";
     const quantity = data?.quantity || data?.input?.quantity || 1;
     const status = data?.status || "previewed";
+    // Issue #3782: an estimated price must never render as the order
+    // price. The quote card below keeps showing lastPrice (a quote
+    // display, not an order price); the ORDER price is only a real
+    // limit price carried on the draft. `price` stays the quote
+    // display value; `orderPrice` is the only order price.
     const price = data?.limitPrice || data?.estimatedPrice || data?.executionPrice || data?.lastPrice;
+    const orderPrice = data?.limitPrice;
+    const orderType = data?.orderType || data?.input?.orderType;
+    const priceSource = data?.priceSource;
+    // Issue #3782: Approve stays disabled until a real price is
+    // attached — a LIMIT/STOP_LIMIT draft needs a finite limit price,
+    // a STOP draft needs a finite stop price; a MARKET draft executes
+    // at the market, so it carries no price to attach.
+    const hasRealPrice =
+      orderType === "LIMIT" || orderType === "STOP_LIMIT"
+        ? Number.isFinite(data?.limitPrice)
+        : orderType === "STOP"
+          ? Number.isFinite(data?.stopPrice)
+          : true;
+    const priceSourceLabel =
+      priceSource?.kind === "user"
+        ? "Price source: user-supplied limit"
+        : priceSource?.kind === "live-quote"
+          ? `Price source: live quote — ${priceSource.provider || "broker"}${priceSource.timestamp ? `, ${priceSource.timestamp}` : ""}`
+          : priceSource?.kind === "market-data"
+            ? `Price source: market data — ${priceSource.provider || "platform"}${priceSource.timestamp ? `, ${priceSource.timestamp}` : ""}`
+            : priceSource?.kind === "estimated"
+              ? "Price source: estimated (not a real price)"
+              : undefined;
     const brokerId =
       data?.broker ||
       data?.proposal?.broker ||
@@ -306,7 +334,7 @@ export function ToolResultView({
         <div className="tool-card-header" onClick={() => setOpen(!open)}>
           <span className="tool-icon">📈</span>
           <div className="tool-summary">
-            <strong>{brokerLabel} Trade Intent:</strong> {action} {quantity} {symbol} {price ? `@ $${Number(price).toFixed(2)}` : ""}
+            <strong>{brokerLabel} Trade Intent:</strong> {action} {quantity} {symbol} {orderPrice ? `@ $${Number(orderPrice).toFixed(2)}` : ""}
           </div>
           <Badge size="xs" uppercase tone={previewPill.pillClass === "priority-urgent" ? "danger" : previewPill.pillClass}>
             {previewPill.pillLabel}
@@ -316,9 +344,19 @@ export function ToolResultView({
         <div className="payment-notice">
           🛡️ <strong>Safety Guarantee:</strong> No trade will be executed without explicit authorization.{orderId && (<> {brokerLabel} Order ID <code>{orderId}</code> reserved.</>)}
         </div>
+        {priceSourceLabel && (
+          <div className="payment-notice">
+            📌 {priceSourceLabel}
+          </div>
+        )}
+        {!hasRealPrice && orderId && status !== "executed" && status !== "rejected" && (
+          <div className="payment-notice">
+            ⚠️ No provenanced price is attached to this draft — Approve is disabled until a real price is supplied.
+          </div>
+        )}
         {orderId && status !== "executed" && status !== "rejected" && (
           <div className="hitl-actions">
-            <Button variant="primary" tone="subtle" disabled={isBusy} onClick={() => onAction?.(`Approve trade draft ${orderId}`)}>
+            <Button variant="primary" tone="subtle" disabled={isBusy || !hasRealPrice} onClick={() => onAction?.(`Approve trade draft ${orderId}`)}>
               ✅ Approve &amp; Execute Order
             </Button>
             <Button variant="danger" tone="subtle" disabled={isBusy} onClick={() => onAction?.(`Cancel trade draft ${orderId}`)}>

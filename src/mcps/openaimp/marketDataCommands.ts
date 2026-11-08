@@ -579,7 +579,12 @@ export class AlpacaPlaceOrderCommand implements IMcpToolCommand {
       }
     }
 
-    const result = await service.placeAlpacaOrder(normalized);
+    // Issue #3782: the tool's limit price is supplied by the caller
+    // (the agent acting on the user's request / approved draft), so
+    // the call declares user provenance — the price is asserted by
+    // the caller, never derived from an ambient quote. The guard in
+    // placeOrder refuses the placement if that declaration is absent.
+    const result = await service.placeAlpacaOrder({ ...normalized, priceSource: { kind: "user" } });
     context.audit?.(marketDataOrderAuditEvent(resolved.mode), "trading", marketDataOrderAuditPayload(resolved.mode, normalized, result));
     return result;
   }
@@ -768,6 +773,168 @@ export class AlpacaCancelBracketLadderCommand implements IMcpToolCommand {
     });
 
     return receipt;
+  }
+}
+
+/**
+ * 12. Alpaca Get Quote Command (#3782)
+ * Fetches a live equity quote from Alpaca Market Data v2 — the
+ * copilot's broker (COPILOT_BROKER_ID), so the copilot's quote leg
+ * runs on Alpaca instead of reaching for the E*TRADE quote tool.
+ * Live-only (#923, same as market_data_get_quote with provider
+ * "alpaca"): the result carries provider "alpaca" + provenance
+ * "live" + timestamp; when a live fetch fails the command throws an
+ * explicit unavailable error — no static or generated substitute.
+ */
+export class AlpacaGetQuoteCommand implements IMcpToolCommand {
+  readonly name = "alpaca_get_quote";
+  readonly description =
+    "Retrieve a live market quote (price, bid/ask, volume, OHLC) for an equity ticker from Alpaca Market Data v2. Live-only: the result carries provider 'alpaca', provenance 'live', and a timestamp; when Alpaca cannot serve a live quote the command throws an explicit unavailable error — no static or generated substitute is served.";
+
+  readonly jsonSchema = {
+    type: "object" as const,
+    properties: {
+      symbol: { type: "string", description: "Stock ticker symbol (e.g. AAPL, NVDA, MSFT)" },
+    },
+    required: ["symbol"],
+  };
+
+  readonly zodSchema = z.object({
+    symbol: z.string().min(1).max(20).describe("Stock ticker symbol (e.g. AAPL, NVDA, MSFT)"),
+  });
+
+  async execute(input: { symbol: string }, context: McpToolContext) {
+    const symbol = requireMcpSymbol(input);
+    const service = new MarketDataResearchService(context.env);
+    const quote = await service.getQuote(symbol, "alpaca");
+    const event = marketDataQuoteAuditEvent("mcp");
+    if (event) context.audit?.(event, "research", { symbol, provider: quote.provider, price: quote.price, provenance: quote.provenance });
+    return quote;
+  }
+}
+
+/**
+ * 13. Alpaca Preview Order Command (#3782)
+ * Drafts an equity or options order proposal on Alpaca (the
+ * copilot's broker) with Agent DID attestation — the Alpaca
+ * counterpart of etrade_preview_order, completing the catalog's
+ * declared orderPreview capability as an agent tool. Safety
+ * guarantee: NO SHARES ARE BOUGHT OR SOLD. Awaiting human
+ * confirmation (place via alpaca_place_order on explicit approval).
+ *
+ * Issue #3782 guardrail, same as the E*TRADE preview path: a
+ * LIMIT draft with no user-supplied limit prices off the LIVE
+ * Alpaca quote (getQuote throws when no live quote is available,
+ * so no draft is created); a user-supplied limit always wins over
+ * the quote; every draft carries priceSource.
+ */
+export class AlpacaPreviewOrderCommand implements IMcpToolCommand {
+  readonly name = "alpaca_preview_order";
+  readonly description =
+    "Preview an Alpaca equity or options order draft (BUY, SELL, BUY_TO_COVER, SELL_SHORT) with Agent Decentralized Identifier (DID) cryptographic attestation. Safety guarantee: NO SHARES ARE BOUGHT OR SOLD. Awaiting human confirmation — place via alpaca_place_order only on explicit approval.";
+
+  readonly jsonSchema = {
+    type: "object" as const,
+    properties: {
+      symbol: { type: "string", description: "Stock ticker symbol (e.g. NVDA, AAPL, PLTR)" },
+      action: { type: "string", enum: ["BUY", "SELL", "BUY_TO_COVER", "SELL_SHORT"], description: "Order action" },
+      quantity: { type: "number", description: "Number of shares to trade" },
+      orderType: { type: "string", enum: ["MARKET", "LIMIT", "STOP", "STOP_LIMIT"], description: "Execution order type (default: MARKET)" },
+      limitPrice: { type: "number", description: "Limit price for limit orders (user-supplied; wins over the live quote)" },
+      stopPrice: { type: "number", description: "Stop price for stop orders" },
+      orderClass: { type: "string", enum: ["simple", "bracket", "oco", "oto"], description: "Order class ('bracket' for parent orders with take-profit and stop-loss legs)" },
+      takeProfit: {
+        type: "object",
+        properties: { limitPrice: { type: "number", description: "Limit price for take-profit leg" } },
+        required: ["limitPrice"],
+        description: "Take-profit bracket leg parameters",
+      },
+      stopLoss: {
+        type: "object",
+        properties: {
+          stopPrice: { type: "number", description: "Stop trigger price for stop-loss leg" },
+          limitPrice: { type: "number", description: "Optional limit price for stop-loss limit leg" },
+        },
+        required: ["stopPrice"],
+        description: "Stop-loss bracket leg parameters",
+      },
+      assetClass: { type: "string", enum: ["equity", "options"], description: "Asset class (default: equity)" },
+      optionLegs: { type: "array", items: { type: "object" }, description: "Option legs for a multi-leg strategy order" },
+      strategyNetDebit: { type: "number", description: "Net strategy price for an options order (positive is debit, negative is credit)" },
+    },
+    required: ["symbol", "action", "quantity"],
+  };
+
+  readonly zodSchema = z.object({
+    symbol: z.string().min(1).describe("Stock ticker symbol"),
+    action: z.enum(["BUY", "SELL", "BUY_TO_COVER", "SELL_SHORT"]).describe("Order action"),
+    quantity: z.number().positive().describe("Number of shares"),
+    orderType: z.enum(["MARKET", "LIMIT", "STOP", "STOP_LIMIT"]).optional().default("MARKET").describe("Order type"),
+    limitPrice: z.number().optional().describe("Limit price"),
+    stopPrice: z.number().optional().describe("Stop price"),
+    orderClass: z.enum(["simple", "bracket", "oco", "oto"]).optional().describe("Order class"),
+    takeProfit: z.object({ limitPrice: z.number() }).optional().describe("Take-profit bracket leg"),
+    stopLoss: z.object({ stopPrice: z.number(), limitPrice: z.number().optional() }).optional().describe("Stop-loss bracket leg"),
+    assetClass: z.enum(["equity", "options"]).optional().describe("Asset class"),
+    optionLegs: z.array(z.any()).optional().describe("Option legs"),
+    strategyNetDebit: z.number().optional().describe("Net strategy price"),
+  });
+
+  async execute(input: any, context: McpToolContext) {
+    const { TradingPlatformRegistry } = await import("../../trading/registry");
+    const platform = TradingPlatformRegistry.getPlatform("alpaca", context.env, context.orm, context.sessionId);
+    const draft = await platform.previewOrder({
+      assetClass: input.assetClass,
+      symbol: input.symbol,
+      action: input.action || input.orderAction,
+      orderAction: input.orderAction || input.action,
+      quantity: input.quantity,
+      orderType: input.orderType,
+      limitPrice: input.limitPrice,
+      stopPrice: input.stopPrice,
+      orderClass: input.orderClass,
+      takeProfit: input.takeProfit,
+      stopLoss: input.stopLoss,
+      optionLegs: input.optionLegs,
+      strategyNetDebit: input.strategyNetDebit,
+      sessionId: context.sessionId,
+    });
+    context.audit?.("alpaca.order_previewed", "trading", {
+      orderId: draft.orderId,
+      symbol: draft.symbol,
+      action: draft.action,
+      quantity: draft.quantity,
+      estimatedTotal: draft.estimatedTotal,
+      proposerDid: draft.proposerDid,
+    });
+    return {
+      orderId: draft.orderId,
+      status: "previewed",
+      requiresConfirmation: true,
+      symbol: draft.symbol,
+      action: draft.action,
+      quantity: draft.quantity,
+      orderType: draft.orderType,
+      orderClass: (draft as any).orderClass,
+      takeProfit: (draft as any).takeProfit,
+      stopLoss: (draft as any).stopLoss,
+      broker: "alpaca",
+      limitPrice: draft.limitPrice,
+      stopPrice: draft.stopPrice,
+      estimatedPrice: draft.estimatedPrice,
+      estimatedTotal: draft.estimatedTotal,
+      estimatedCommission: draft.estimatedCommission,
+      // Issue #3782: price provenance rides with the draft — the
+      // preview card renders it and never treats an estimated price
+      // as the order price.
+      priceSource: draft.priceSource,
+      proposerDid: draft.proposerDid,
+      authorizerDid: draft.authorizerDid,
+      proofSignature: draft.proofSignature,
+      safetyNotice: "SAFETY GUARANTEE: NO CAPITAL HAS BEEN MOVED. HUMAN APPROVAL REQUIRED BEFORE BROKER EXECUTION.",
+      securityGuarantee: "NO MONEY HAS BEEN MOVED & NO SHARES TRADED. Stamped with Agent DID. Requires human confirmation via alpaca_place_order.",
+      previewMessage: draft.previewMessage,
+    };
   }
 }
 

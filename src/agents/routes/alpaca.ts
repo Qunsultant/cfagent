@@ -124,7 +124,10 @@ export async function handleAlpacaTradingRoutes(
       }
 
       const marketDataResearch = new MarketDataResearchService(ctx.env);
-      const orderResult = await marketDataResearch.placeAlpacaOrder(normalized);
+      // Issue #3782: the REST caller supplies the limit price in the
+      // request body, so the placement declares user provenance for
+      // the guard in placeOrder.
+      const orderResult = await marketDataResearch.placeAlpacaOrder({ ...normalized, priceSource: { kind: "user" } });
 
       ctx.audit(marketDataOrderAuditEvent(orderMode), "trading", marketDataOrderAuditPayload(orderMode, normalized, orderResult));
       return Response.json(orderResult);
@@ -311,7 +314,10 @@ export async function handleAlpacaMarketDataRoutes(
       }
 
       const marketDataResearch = new MarketDataResearchService(ctx.env);
-      const result = await marketDataResearch.placeAlpacaOrder(normalized);
+      // Issue #3782: the REST caller supplies the limit price in the
+      // request body, so the placement declares user provenance for
+      // the guard in placeOrder.
+      const result = await marketDataResearch.placeAlpacaOrder({ ...normalized, priceSource: { kind: "user" } });
 
       ctx.audit(marketDataOrderAuditEvent(orderMode), "trading", marketDataOrderAuditPayload(orderMode, normalized, result));
 

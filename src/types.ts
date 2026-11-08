@@ -1107,6 +1107,13 @@ export interface TradeRecord {
   /** Issue #3089: broker the draft was previewed on (etrade/alpaca).
    * Absent on legacy rows — those are all E*TRADE. */
   broker?: string;
+  /** Issue #3782: where this record's price came from, JSON-encoded
+   * (the *Json idiom — the repository binds values directly, so an
+   * object field would fail on real SQLite). Persisted at preview
+   * time so the execute path can forward it to placeOrder; decode
+   * with decodeOrderPriceSource. Absent on legacy rows (pre-#3782
+   * drafts carry no provenance). */
+  priceSourceJson?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -1586,6 +1593,28 @@ export interface OptionsChainCacheRecord {
   contractCount: number;
 }
 
+/**
+ * Issue #3782 (incident #3781) — price provenance carried on every
+ * order draft and persisted on the stored trade record, so no price
+ * can reach the broker without naming where it came from:
+ * - "user": a limit price the user supplied (the only provenance a
+ *   LIMIT draft may carry from a non-live quote).
+ * - "live-quote": a live broker quote (provider + timestamp); the
+ *   price a LIMIT draft may carry when the user gave no limit.
+ * - "market-data": a price derived deterministically from the
+ *   platform's own market-data pipeline (e.g. a copilot exit priced
+ *   off the last bar close) — a named origin, never an LLM guess.
+ * - "estimated": priced from a non-live/estimated quote. An estimated
+ *   price is NEVER a real order price: drafts carrying it must not
+ *   render it as the order price, Approve stays disabled, and
+ *   placeOrder refuses it.
+ */
+export type OrderPriceSource =
+  | { kind: "user" }
+  | { kind: "live-quote"; provider: string; timestamp: string; quoteStatus?: string }
+  | { kind: "market-data"; provider: string; timestamp: string }
+  | { kind: "estimated"; provider?: string; timestamp?: string; quoteStatus?: string };
+
 export interface BrokerOrderDraft {
   orderId: string;
   previewId?: string;
@@ -1613,6 +1642,8 @@ export interface BrokerOrderDraft {
   estimatedTotal: number;
   /** Issue #118: quoteStatus of the quote this preview was priced from (e.g. "REALTIME", "STATIC_FALLBACK"). */
   pricingQuoteStatus?: string;
+  /** Issue #3782: where this draft's price came from (user / live quote / market data / estimated). */
+  priceSource?: OrderPriceSource;
   status: "draft" | "previewed" | "submitted" | "executed" | "rejected" | "cancelled" | "expired";
   proposerDid: string;
   authorizerDid: string;

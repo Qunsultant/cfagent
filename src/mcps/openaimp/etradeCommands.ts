@@ -333,6 +333,12 @@ export class ETradePreviewOrderCommand implements IMcpToolCommand<{
       limitPrice: draft.limitPrice,
       estimatedTotal: draft.estimatedTotal,
       estimatedCommission: draft.estimatedCommission,
+      // Issue #3782: price provenance rides with the draft — the
+      // preview card renders it and never treats an estimated price
+      // as the order price. The refusal itself lives in
+      // ETradeService.previewOrder (a LIMIT draft with no user limit
+      // and no live quote throws there and no draft is created).
+      priceSource: draft.priceSource,
       proposerDid: draft.proposerDid,
       authorizerDid: draft.authorizerDid,
       proofSignature: draft.proofSignature,

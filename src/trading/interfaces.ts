@@ -24,6 +24,7 @@ import type {
   BrokerOptionChain,
   BrokerOptionExpireDate,
   BrokerCancelOrderResult,
+  OrderPriceSource,
 } from "../types";
 import type { BrokerId } from "./brokerCatalog";
 
@@ -81,6 +82,12 @@ export interface PlaceOrderParams {
   orderType?: string;
   limitPrice?: number;
   previewId?: string;
+  /**
+   * Issue #3782: where the limit price came from. The trade workflow
+   * attaches it (from the stored draft's provenance, or the caller's
+   * own named origin); placeOrder refuses a limit price without it.
+   */
+  priceSource?: OrderPriceSource;
   userLogin: string;
   optionLegs?: TradingOrderLeg[];
   strategyNetDebit?: number;

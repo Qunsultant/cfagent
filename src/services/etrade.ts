@@ -46,6 +46,8 @@ import {
   STATIC_CURATED_QUOTE_SOURCE,
   CACHED_UNIVERSE_QUOTE_SOURCE,
   isNonLivePricingQuoteStatus,
+  isLiveQuoteStatus,
+  encodeOrderPriceSource,
   nonLivePricingNotice,
   nasdaqUniverseSeamFromSql,
   nasdaqUniverseProviderFromRoute,
@@ -392,7 +394,42 @@ export class ETradeService {
     const userDid = `did:user:github:${sessionId}`;
     const orderType = params.orderType || "MARKET";
 
-    const executionPrice = orderType === "LIMIT" && params.limitPrice ? params.limitPrice : quote.lastPrice;
+    // Issue #3782 (incident #3781): the #913/#920 principle, in the
+    // MCP preview path — a LIMIT/STOP_LIMIT draft with no user-supplied
+    // limit and no live authoritative quote is REFUSED, never priced
+    // off the ambient quote (which may be the AUTH_REQUIRED zero
+    // object, a static fallback, or SIMULATED_LEVEL1). No draft is
+    // created and no estimated price is substituted; the error asks
+    // the user for the limit. With a live quote the draft may price
+    // off it, and the provenance says so.
+    const hasUserLimit = Number.isFinite(params.limitPrice) && Number(params.limitPrice) > 0;
+    const quoteIsLive = isLiveQuoteStatus(quote.quoteStatus);
+    if ((orderType === "LIMIT" || orderType === "STOP_LIMIT") && !hasUserLimit && !quoteIsLive) {
+      throw new Error(
+        `Cannot draft a ${orderType} order for ${symbol}: no limit price was supplied and no live quote is available (quote status: ${quote.quoteStatus || "UNKNOWN"}). Provide a limit price — no draft was created and no estimated price was substituted. (issue #3782)`
+      );
+    }
+    // Issue #3782: every draft carries price provenance.
+    const priceSource: import("../types").OrderPriceSource = hasUserLimit
+      ? { kind: "user" }
+      : quoteIsLive
+        ? {
+            kind: "live-quote",
+            provider: quote.source || "E*TRADE Market Data Feed",
+            timestamp: quote.timestamp || new Date().toISOString(),
+            quoteStatus: quote.quoteStatus,
+          }
+        : {
+            kind: "estimated",
+            provider: quote.source || "E*TRADE Market Data Feed",
+            timestamp: quote.timestamp || new Date().toISOString(),
+            quoteStatus: quote.quoteStatus,
+          };
+
+    const executionPrice =
+      (orderType === "LIMIT" || orderType === "STOP_LIMIT") && hasUserLimit
+        ? Number(params.limitPrice)
+        : quote.lastPrice;
     const estimatedTotal = Number((executionPrice * params.quantity).toFixed(2));
 
     // Issue #118: disclose when the pricing quote is a static fallback (or
@@ -414,6 +451,7 @@ export class ETradeService {
       estimatedCommission: 0.0,
       estimatedTotal,
       pricingQuoteStatus,
+      priceSource,
       status: "previewed",
       proposerDid: "did:agent:openaimp:trading",
       authorizerDid: userDid,
@@ -440,6 +478,7 @@ export class ETradeService {
           authorizerDid: userDid,
           proofSignature: draft.proofSignature,
           previewNotes: previewMessage,
+          priceSourceJson: encodeOrderPriceSource(priceSource),
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         });

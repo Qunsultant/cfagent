@@ -12,7 +12,7 @@
  * original inline block returned.
  */
 
-import { ETradeSlackTradingService } from "../../trading";
+import { ETradeSlackTradingService, decodeOrderPriceSource } from "../../trading";
 import { ETradeBrowserService } from "../../services/browserAgent";
 import { orderPayloadHash } from "./orderPayloadHash";
 import type { EtradeBrokerRouteContext } from "./etradeBroker";
@@ -237,6 +237,10 @@ export async function completeEtradeOrderExecution(args: {
       quantity,
       orderType,
       limitPrice,
+      // Issue #3782: forward the stored draft's provenance (persisted
+      // at preview time as JSON) so placeOrder's guard can verify the
+      // price.
+      priceSource: decodeOrderPriceSource((existingRecord as any)?.priceSourceJson),
       previewId: body.previewId && String(body.previewId).trim() !== ""
         ? String(body.previewId).trim()
         : existingRecord?.orderRef && String(existingRecord.orderRef).trim() !== ""
