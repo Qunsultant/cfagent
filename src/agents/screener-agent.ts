@@ -75,12 +75,15 @@ import {
   type StockScreenProvider,
   type UniverseId,
 } from "../trading";
-import { YahooFinanceProvider } from "../services/marketDataResearch";
+import { AlpacaMarketDataProvider, YahooFinanceProvider } from "../services/marketDataResearch";
 import {
+  alpacaQuoteProviderFromRoute,
+  bindAlpacaQuoteDeps,
   bindEtradeQuoteDeps,
   bindNasdaqUniverseDeps,
   bindYahooScreenerDeps,
   bootstrapDataProviders,
+  createAlpacaDataProvider,
   createETradeDataProvider,
   createNasdaqDataProvider,
   createYahooDataProvider,
@@ -95,6 +98,7 @@ import {
   resolveYahooHistoryDeps,
   transitionProvider,
   transitionProviderViaPort,
+  verifyAlpacaDataProvider,
   verifyNasdaqDataProvider,
   verifyYahooDataProvider,
   yahooQuoteProviderFromRoute,
@@ -164,6 +168,14 @@ export interface ScreenerRunRequest {
    */
   broker?: "etrade" | "alpaca";
   /**
+   * Issue #3655: live/paper mode for this run, derived from (broker,
+   * environment). Recorded on the result for provenance; never
+   * re-derived from ambient state at read time.
+   */
+  mode?: "live" | "paper";
+  /** Issue #3655 (effective mode): which resolver leg produced the mode — pin | selection | inference. */
+  modeSource?: "pin" | "selection" | "inference";
+  /**
    * Issue #2842: tenant partition for the quota charge. When
    * absent, the run owner's login is the partition (the #2426
    * rule: captures already partition by owner login, and no
@@ -230,6 +242,13 @@ export interface ScreenerRunResult {
   broker?: "etrade" | "alpaca";
   /** Issue #3331: the environment the run read quotes in (TEST = paper). */
   environment?: "TEST" | "PROD";
+  /**
+   * Issue #3655: live/paper mode for this run. Absent on runs
+   * recorded before mode provenance existed.
+   */
+  mode?: "live" | "paper";
+  /** Issue #3655 (effective mode): which resolver leg produced the mode — pin | selection | inference. */
+  modeSource?: "pin" | "selection" | "inference";
   /**
    * Issue #1527: whole-run fallback marker, carried from the request
    * when the run fell back to its provider (see the request field).
@@ -1231,6 +1250,43 @@ export class ScreenerAgent extends PortThink {
           userLogin,
         });
       }
+      // Issue #3655: Alpaca-provider runs acquire through the
+      // data-provider platform, mirroring the #1317 yahoo cutover:
+      // bootstrap this DO's platform store (seed + routes), verify
+      // + enable alpaca through the lifecycle API when it is not
+      // already enabled, resolve the quotes route's alpaca adapter,
+      // and bind the pipeline deps over it (batch via getQuotesBatch,
+      // per-symbol via getQuote — capture + outcome tracking ride
+      // along under the run id). An Alpaca-provider run never touches
+      // the broker (no ETradeService constructed) and never falls
+      // back to it. Alpaca quotes are keyed by the deployment Alpaca
+      // API keys, not an E*TRADE session.
+      let platformAlpacaDeps: ReturnType<typeof bindAlpacaQuoteDeps> | undefined;
+      if (provider === "alpaca") {
+        await this.platformBootstrap();
+        platformRunId ??= crypto.randomUUID();
+        const alpacaConfig = await this.platformConfig("alpaca");
+        if (!alpacaConfig || alpacaConfig.lifecycleState !== "enabled" || !alpacaConfig.enabled) {
+          await this.platformTransition("alpaca", "verify", userLogin, {
+            verifier: async () => verifyAlpacaDataProvider(this.env),
+          });
+          await this.platformTransition("alpaca", "enable", userLogin, {});
+        }
+        const alpacaRegistry = new DataProviderRegistry();
+        const alpacaAdapter = createAlpacaDataProvider(new AlpacaMarketDataProvider(this.env), this.env, {
+          capture: await this.platformCaptureDeps(),
+        });
+        alpacaRegistry.register(alpacaAdapter);
+        const alpacaProvider = alpacaQuoteProviderFromRoute(
+          alpacaRegistry,
+          await this.platformConfigs(),
+          await this.platformRoutes()
+        );
+        platformAlpacaDeps = bindAlpacaQuoteDeps(alpacaProvider, {
+          runId: platformRunId,
+          userLogin,
+        });
+      }
       // Issue #1331: technicals history through the platform —
       // the historicalBars route's yahoo primary, resolved with
       // capture + outcome tracking under the run id (shared with
@@ -1267,12 +1323,19 @@ export class ScreenerAgent extends PortThink {
               req.yahooDeps ??
               platformYahooDeps!,
           })
-        : await acquireUniverse({
-            mode: "etrade-only",
-            symbols: selectedSymbols,
-            maxSymbols: selectedSymbols.length,
-            quoteDeps: platformQuoteDeps!,
-          });
+        : provider === "alpaca"
+          ? await acquireUniverse({
+              mode: "alpaca",
+              symbols: selectedSymbols,
+              maxSymbols: selectedSymbols.length,
+              quoteDeps: platformAlpacaDeps!,
+            })
+          : await acquireUniverse({
+              mode: "etrade-only",
+              symbols: selectedSymbols,
+              maxSymbols: selectedSymbols.length,
+              quoteDeps: platformQuoteDeps!,
+            });
       await beat();
       // Issue #2869 slice 2 — quotes fetched for the resolved
       // universe (the fetchQuotes boundary).
@@ -1397,6 +1460,8 @@ export class ScreenerAgent extends PortThink {
         // Issue #3331: provenance from the request, never from ambient state.
         ...(req.broker ? { broker: req.broker } : {}),
         ...(req.environment ? { environment: req.environment } : {}),
+        ...(req.mode ? { mode: req.mode } : {}),
+        ...(req.modeSource ? { modeSource: req.modeSource } : {}),
         ...(providerFallback ? { providerFallback } : {}),
         universe,
         sector,
@@ -1519,6 +1584,8 @@ export class ScreenerAgent extends PortThink {
         // Issue #3331: provenance from the request, never from ambient state.
         ...(req.broker ? { broker: req.broker } : {}),
         ...(req.environment ? { environment: req.environment } : {}),
+        ...(req.mode ? { mode: req.mode } : {}),
+        ...(req.modeSource ? { modeSource: req.modeSource } : {}),
         ...(providerFallback ? { providerFallback } : {}),
         universe,
         sector,

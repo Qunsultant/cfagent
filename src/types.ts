@@ -2648,6 +2648,23 @@ export interface ShardChainContext {
   universe: string;
   userLogin: string;
   environment?: "TEST" | "PROD";
+  /**
+   * Issue #3655: the tenant selections recorded at chain submission,
+   * never re-derived per shard. The shard chain-source resolver
+   * prefers chain.brokerId over a fresh broker read, so a chain
+   * executes under the broker it was submitted with.
+   */
+  brokerId?: string;
+  /** Issue #3655: the tenant data-provider selection, for provenance. */
+  dataProviderId?: string;
+  /** Issue #3655: live/paper mode derived from (broker, environment). */
+  mode?: "live" | "paper";
+  /**
+   * Issue #3655 (effective mode): which resolver leg produced the
+   * chain's mode — pin | selection | inference. The record must never
+   * claim "paper" while the run executed live under a pin.
+   */
+  modeSource?: "pin" | "selection" | "inference";
   trigger?: "manual" | "scheduled";
   maxItems?: number;
   timestamp: string;

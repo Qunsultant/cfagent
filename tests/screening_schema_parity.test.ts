@@ -661,7 +661,12 @@ describe("#959 cross-entry schedule parity (REST route / NLQ / builder)", () => 
     const built = buildSchedulePayload(
       "autonomousOptionsAnalysis",
       { symbols: ["NVDA"], thesis: "bullish" },
-      { userLogin: authenticatedLogin, environment: "TEST", trigger: "scheduled" }
+      // Issue #3655: the REST route stamps brokerId/dataProviderId/
+      // mode server-side from the tenant selection (fixture's
+      // unbound store falls back to etrade; TEST → paper), so the
+      // builder's identity must carry the same resolved values for
+      // parity — the builder stamps identity values, never a default.
+      { userLogin: authenticatedLogin, environment: "TEST", trigger: "scheduled", brokerId: "etrade", dataProviderId: "etrade", mode: "paper" }
     );
     expect(built.ok).toBe(true);
     if (!built.ok) return;
@@ -694,7 +699,9 @@ describe("#959 cross-entry schedule parity (REST route / NLQ / builder)", () => 
     const built = buildSchedulePayload(
       "autonomousStrategyDiscovery",
       { requests: [VALID_STRATEGY_REQUEST] },
-      { userLogin: authenticatedLogin, environment: "TEST", trigger: "scheduled" }
+      // Issue #3655: same resolved-identity stamping as the options
+      // parity test above (etrade/etrade/paper for this fixture).
+      { userLogin: authenticatedLogin, environment: "TEST", trigger: "scheduled", brokerId: "etrade", dataProviderId: "etrade", mode: "paper" }
     );
     expect(built.ok).toBe(true);
     if (!built.ok) return;

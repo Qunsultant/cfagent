@@ -5,18 +5,19 @@
  * auth-dead only; per-element gap-fill stays preferred where it covers
  * the case; reconnecting E*TRADE moots it while the session lives.
  *
- * Contract pins:
- * - A guard-blocked E*TRADE scheduled stock run completes via Yahoo
- *   (monolithic Yahoo path, even when the schedule asked for sharded
- *   execution — the sharded chain's E*TRADE feed shard has no
- *   auth-dead mode) instead of failing with [FAILURE_AUTH_NO_SESSION].
- * - The fallback run carries an explicit providerFallback marker on
- *   the result, the screener.completed event, the bridge outcome, and
- *   the returned data — and the PDF provenance names it as a Yahoo
- *   fallback, not plain Yahoo and never E*TRADE live.
- * - A fallback completion emits NO failure notice (no screener.failed);
- *   the fallback labeling is the signal. The guard's deduped episode
- *   alert already fired inside the guard.
+ * Contract pins (as amended by #3655 for the scheduled stock path):
+ * - A guard-blocked E*TRADE scheduled stock run FAILS LOUD with the
+ *   guard's coded error instead of completing via Yahoo — no screen
+ *   attempt, no fallback marker, no screener.completed, and the
+ *   normal screener.failed event carries the guard error.
+ * - A guard-blocked sharded ask likewise fails loud and never
+ *   submits a shard chain.
+ * - The fallback marker / PDF provenance / bridge-outcome pins below
+ *   still hold for the goal-screen stock leg, which keeps the #1527
+ *   fallback, and for the marker wording itself.
+ * - A goal-leg fallback completion emits NO failure notice (no
+ *   screener.failed); the fallback labeling is the signal. The
+ *   guard's deduped episode alert already fired inside the guard.
  * - A fallback that itself fails goes through the normal failure path
  *   (audit + session message + screener.failed).
  * - Deliberate Yahoo runs (provider "yahoo" configured) carry NO
@@ -26,6 +27,16 @@
  * supersedes that pin for the case where the Yahoo fallback succeeds;
  * stock_preflight_failure_notify_1369.test.ts now pins the fallback-
  * failure case instead (blocked + fallback fails → failed).
+ *
+ * Supersession note 2 (#3655, 2026-11-07): the whole-run Yahoo
+ * fallback is REMOVED from the scheduled stock path
+ * (ScheduledTasksService.autonomousMarketScreen) — a guard-blocked
+ * run now fails LOUD with the guard's coded error instead of
+ * completing via Yahoo. The three fallback-behaviour pins below are
+ * re-pinned to that contract. The fallback MARKER machinery itself
+ * (PDF provenance lines, bridge outcome) is unchanged and stays
+ * pinned here: the goal-screen stock leg still carries the #1527
+ * fallback, and the marker wording is shared.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ScheduledTasksService } from "../src/services/scheduledTasks";
@@ -103,50 +114,60 @@ describe("scheduled stock Yahoo fallback (#1527)", () => {
     );
   });
 
-  it("a guard-blocked run completes via Yahoo with the fallback marker and no failure event", async () => {
+  // Issue #3655: the #1527 whole-run Yahoo fallback is gone from the
+  // scheduled stock path. A guard-blocked run FAILS LOUD with the
+  // guard's coded error — it never screens via Yahoo, never carries
+  // the fallback marker, and emits the normal failure event.
+  it("a guard-blocked run fails loud with the coded guard error and never screens via Yahoo (#3655)", async () => {
     const { service, publish, audit, runScreen } = fallbackService(async () => yahooSuccessResult());
     const result = await service.autonomousMarketScreen({});
-    expect(result.success).toBe(true);
-    expect(runScreen).toHaveBeenCalledTimes(1);
-    const req = runScreen.mock.calls[0][0];
-    expect(req.provider).toBe("yahoo");
-    expect(req.providerFallback).toEqual({ ...FALLBACK_MARKER });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("FAILURE_AUTH_NO_SESSION");
+    expect(runScreen).not.toHaveBeenCalled();
     const events = publish.mock.calls.map((c) => c[0]);
-    expect(events.find((e: any) => e.type === "screener.failed")).toBeUndefined();
-    const completed = events.find((e: any) => e.type === "screener.completed");
-    expect(completed).toBeDefined();
-    expect(completed.providerFallback).toEqual({ ...FALLBACK_MARKER });
-    expect((result as any).data.provider).toBe("yahoo");
-    expect((result as any).data.providerFallback).toEqual({ ...FALLBACK_MARKER });
+    expect(events.find((e: any) => e.type === "screener.completed")).toBeUndefined();
+    const failed = events.find((e: any) => e.type === "screener.failed");
+    expect(failed).toBeDefined();
+    expect(failed.error).toContain("FAILURE_AUTH_NO_SESSION");
+    expect((result as any).data?.providerFallback).toBeUndefined();
+    expect(failed.providerFallback).toBeUndefined();
     const fallbackAudits = audit.mock.calls.filter((c) => c[0] === "screener.run_fallback");
-    expect(fallbackAudits.length).toBeGreaterThan(0);
+    expect(fallbackAudits.length).toBe(0);
   });
 
-  it("a guard-blocked sharded run falls back monolithically and never submits a shard chain", async () => {
+  // Issue #3655: same fail-loud contract for the sharded ask — the
+  // blocked run never submits a shard chain and never falls back to
+  // a monolithic Yahoo screen.
+  it("a guard-blocked sharded run fails loud and never submits a shard chain (#3655)", async () => {
     const { service, publish, runScreen } = fallbackService(async () => yahooSuccessResult());
     const shardSubmit = vi.fn(async () => ({ jobId: "never" }));
     (service as any).shardSubmit = shardSubmit;
     const result = await service.autonomousMarketScreen({ sharded: true });
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("FAILURE_AUTH_NO_SESSION");
     expect(shardSubmit).not.toHaveBeenCalled();
-    expect((result as any).data.sharded).not.toBe(true);
+    expect(runScreen).not.toHaveBeenCalled();
     const events = publish.mock.calls.map((c) => c[0]);
-    expect(events.find((e: any) => e.type === "screener.completed")?.providerFallback).toEqual({
-      ...FALLBACK_MARKER,
-    });
-    expect(runScreen.mock.calls[0][0].provider).toBe("yahoo");
+    expect(events.find((e: any) => e.type === "screener.completed")).toBeUndefined();
+    expect(events.find((e: any) => e.type === "screener.failed")).toBeDefined();
   });
 
-  it("a fallback that itself fails goes through the normal failure path", async () => {
-    const { service, publish } = fallbackService(async () => {
+  // Issue #3655: the guard blocks BEFORE any screen attempt, so a
+  // Yahoo failure inside the screen is never reached — the failure
+  // event carries the guard's coded error, not the Yahoo error, and
+  // no completed event is emitted.
+  it("a guard-blocked run's failure carries the guard error, never a Yahoo error it never reached (#3655)", async () => {
+    const { service, publish, runScreen } = fallbackService(async () => {
       throw new Error("Yahoo quotes unavailable");
     });
     const result = await service.autonomousMarketScreen({});
     expect(result.success).toBe(false);
+    expect(runScreen).not.toHaveBeenCalled();
     const events = publish.mock.calls.map((c) => c[0]);
     const failed = events.find((e: any) => e.type === "screener.failed");
     expect(failed).toBeDefined();
-    expect(failed.error).toContain("Yahoo quotes unavailable");
+    expect(failed.error).toContain("FAILURE_AUTH_NO_SESSION");
+    expect(failed.error).not.toContain("Yahoo quotes unavailable");
     expect(events.find((e: any) => e.type === "screener.completed")).toBeUndefined();
   });
 

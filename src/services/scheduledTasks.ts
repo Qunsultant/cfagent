@@ -27,6 +27,12 @@ import {
   guardScheduledETradeAuth,
   type AuthEpisodeStore,
 } from "./etradeAuthPreflight";
+import { guardScheduledBrokerAuth } from "./scheduledBrokerGuard";
+import {
+  resolveScheduledEffectiveMode,
+  type EffectiveModeSource,
+} from "./scheduledEffectiveMode";
+import { isBrokerId, resolveTenantProviders } from "./tenantProviders";
 import type { ScreenerTrace } from "./screenerTrace";
 import { withRetry } from "./resilience";
 import { resolvePipelinePolicy } from "./pipelinePolicy";
@@ -37,6 +43,7 @@ import { TradingPlatformRegistry, platformChainSource } from "../trading";
 import {
   type ScannedStock,
   type OpportunityStock,
+  type StockScreenProvider,
 } from "../trading";
 import { ETradeService } from "./etrade";
 import { hasActiveChain } from "./asyncJobGate";
@@ -407,6 +414,54 @@ export async function writeScreenerEventTelemetry(
   }
 }
 
+/**
+ * Issue #3655: resolve a scheduled stock run's effective data
+ * provider. Precedence: an explicit payload provider wins (a schedule
+ * that names its provider keeps it); otherwise the tenant's
+ * dataProviderId at RUN time — a later change of the tenant selection
+ * applies to future runs without re-arming. A data provider with no
+ * stock-screen adapter (public, nasdaq) falls back to the legacy
+ * etrade default; that gap is named in the #3655 PR body, not hidden.
+ * Never returns an unimplemented provider.
+ */
+export function resolveScheduledStockProvider(
+  payloadProvider: StockScreenProvider | undefined,
+  tenantDataProviderId: string | null | undefined
+): StockScreenProvider {
+  if (
+    payloadProvider === "etrade" ||
+    payloadProvider === "yahoo" ||
+    payloadProvider === "alpaca"
+  ) {
+    return payloadProvider;
+  }
+  if (
+    tenantDataProviderId === "etrade" ||
+    tenantDataProviderId === "yahoo" ||
+    tenantDataProviderId === "alpaca"
+  ) {
+    return tenantDataProviderId;
+  }
+  return "etrade";
+}
+
+/**
+ * Issue #3655: effective live/paper mode for a discovery run, from
+ * (broker, environment) via the effective-mode resolver — an Alpaca
+ * deployment pin beats the schedule's environment, so the record
+ * carries the mode the run actually executed under plus its resolver
+ * source. Undefined when no mode can be resolved — mode is never
+ * guessed from a missing environment.
+ */
+async function resolveDiscoveryRunMode(
+  env: import("../types").Env,
+  environment: string | undefined
+): Promise<{ mode: "live" | "paper"; modeSource: EffectiveModeSource } | undefined> {
+  const brokerId = await resolveTenantBroker(env);
+  const effective = await resolveScheduledEffectiveMode({ env, brokerId, environment });
+  return effective ? { mode: effective.mode, modeSource: effective.modeSource } : undefined;
+}
+
 export class ScheduledTasksService {
   constructor(
     private env: Env,
@@ -611,6 +666,18 @@ export class ScheduledTasksService {
    * the alert/record path is the follow-up bridge plus a direct Slack
    * alert inside the guard. Never throws.
    *
+   * Issue #3655: the guard is broker-aware. The tenant broker is
+   * resolved FIRST (guardScheduledBrokerAuth, fail-closed): broker
+   * etrade — or an unreadable/unconfigured selection, preserving
+   * pre-#3655 behaviour — runs the E*TRADE preflight below,
+   * unchanged. Any other broker verifies that broker's credentials
+   * instead; a missing credential blocks loud with a coded,
+   * broker-named message, and the E*TRADE preflight never runs for
+   * a non-etrade broker. No episode alert fires for the broker
+   * block (the E*TRADE episode-dedup machinery is E*TRADE-specific);
+   * the coded failure is recorded on the run, and the options call
+   * site treats alerted:false as a quiet recorded failure.
+   *
    * Issue #2440: the run-as login resolves to its session identity
    * via the alias record before the guard runs, so tokens stored
    * under internal-id or alias-login keys resolve exactly as the
@@ -626,6 +693,31 @@ export class ScheduledTasksService {
     label: string,
     trace?: ScreenerTrace
   ): Promise<{ blocked: true; error: string; alerted: boolean } | { blocked: false }> {
+    const brokerGuard = await guardScheduledBrokerAuth({
+      env: this.env,
+      userLogin,
+      orm: this.orm,
+    });
+    if (brokerGuard.blocked) {
+      this.audit("broker.auth_blocked", {
+        userLogin,
+        kind,
+        brokerId: brokerGuard.brokerId,
+        code: brokerGuard.code,
+        ...(trace
+          ? {
+              runId: trace.runId,
+              scheduleId: trace.scheduleId,
+              workflow: trace.workflow,
+              stage: trace.stage,
+          }
+          : {}),
+      });
+      return { blocked: true, error: brokerGuard.error, alerted: false };
+    }
+    if (!brokerGuard.legacy) {
+      return { blocked: false };
+    }
     const blob = this.platformDeps?.blobStorage as unknown as
       | AuthEpisodeStore
       | undefined;
@@ -892,6 +984,16 @@ export class ScheduledTasksService {
       pushToSlack?: boolean;
       filters?: import("../types").StockScreenerFilter;
       stageChain?: import("../types").StageChainConfig;
+      /** Issue #3655: the run's effective provider, recorded on the chain at submission. */
+      provider?: import("../trading").StockScreenProvider;
+      /** Issue #3655: tenant broker, recorded on the chain at submission. */
+      brokerId?: string;
+      /** Issue #3655: tenant data provider, recorded on the chain at submission. */
+      dataProviderId?: string;
+      /** Issue #3655: live/paper mode, recorded on the chain at submission. */
+      mode?: "live" | "paper";
+      /** Issue #3655 (effective mode): which resolver leg produced the mode — pin/selection/inference. */
+      modeSource?: EffectiveModeSource;
     },
     userLogin: string,
     timestamp: string
@@ -909,6 +1011,7 @@ export class ScheduledTasksService {
         sector: options.sector,
         filters: options.filters,
         universe: (options.universe as any) || undefined,
+        provider: options.provider,
         trigger: options.trigger || "scheduled",
       },
       timestamp,
@@ -1032,6 +1135,12 @@ export class ScheduledTasksService {
           universe,
           userLogin,
           environment: options.environment,
+          // Issue #3655: broker + data provider + mode recorded at
+          // chain submission, for provenance on every shard.
+          ...(options.brokerId ? { brokerId: options.brokerId } : {}),
+          ...(options.dataProviderId ? { dataProviderId: options.dataProviderId } : {}),
+          ...(options.mode ? { mode: options.mode } : {}),
+          ...(options.modeSource ? { modeSource: options.modeSource } : {}),
           trigger: options.trigger || "scheduled",
           maxItems: options.maxItems,
           timestamp,
@@ -1048,6 +1157,11 @@ export class ScheduledTasksService {
         universe,
         chainId,
         jobId: submitted.jobId,
+        ...(options.brokerId ? { brokerId: options.brokerId } : {}),
+        ...(options.dataProviderId ? { dataProviderId: options.dataProviderId } : {}),
+        ...(options.mode ? { mode: options.mode } : {}),
+        ...(options.modeSource ? { modeSource: options.modeSource } : {}),
+        ...(options.provider ? { provider: options.provider } : {}),
       });
       // Issue #2860: the chain's submission IS its
       // screen.started — trace_id is the chainId, the
@@ -1076,6 +1190,14 @@ export class ScheduledTasksService {
           provider: "sharded",
           sharded: true,
           chainId,
+          // Issue #3655 (effective mode): the submission record
+          // carries the same provenance as the chain itself, so the
+          // callback run record reads the effective mode from the
+          // result, never from the stored payload alone.
+          ...(options.brokerId ? { brokerId: options.brokerId } : {}),
+          ...(options.dataProviderId ? { dataProviderId: options.dataProviderId } : {}),
+          ...(options.mode ? { mode: options.mode } : {}),
+          ...(options.modeSource ? { modeSource: options.modeSource } : {}),
           notifications: {
             slack: options.pushToSlack !== false,
             email: Boolean(options.emailTo),
@@ -1162,6 +1284,14 @@ export class ScheduledTasksService {
     universe?: string;
     /** Issue #1007: provider that produced the run. */
     provider?: string;
+    /** Issue #3655: tenant broker that produced the run. */
+    brokerId?: string;
+    /** Issue #3655: tenant data provider that produced the run. */
+    dataProviderId?: string;
+    /** Issue #3655: live/paper mode the run executed under. */
+    mode?: "live" | "paper";
+    /** Issue #3655 (effective mode): which resolver leg produced the mode — pin | selection | inference. */
+    modeSource?: EffectiveModeSource;
     expectedCount?: number;
     pdfKey?: string;
     pdfStatus?: "generated" | "failed" | "skipped";
@@ -1183,15 +1313,23 @@ export class ScheduledTasksService {
     };
   }>> {
     const timestamp = new Date().toISOString();
-    // Issue #1527: whole-run fallback marker, set when the E*TRADE
-    // guard blocks and the run falls back to Yahoo. Declared here so
-    // the catch below can name it on a fallback-run failure.
-    let providerFallback: { from: "etrade"; reason: string } | undefined;
+    // Issue #3655: the #1527 silent Yahoo fallback is REMOVED on this
+    // path — a blocked provider fails loud and coded (below), never
+    // screens another provider's data. Broker/provider/mode provenance
+    // for the run is resolved inside the try, from the tenant
+    // selections at RUN time. Declared here so the catch below can
+    // name them on a failure even when resolution itself failed
+    // (then they stay undefined — never a guessed value).
+    let tenantProviders: import("../data/commercialPorts").TenantProviders | undefined;
+    let effectiveProvider: import("../trading").StockScreenProvider | undefined;
+    let runBrokerId: string | undefined;
+    let runMode: "live" | "paper" | undefined;
+    let runModeSource: EffectiveModeSource | undefined;
 
     try {
       const userLogin = options.userLogin || this.userLogin;
       if (!userLogin) {
-        throw new Error("No authenticated E*TRADE account is associated with this scheduled screen. Open the schedules panel while signed in and run it again.");
+        throw new Error("No authenticated account is associated with this scheduled screen. Open the schedules panel while signed in and run it again.");
       }
       // Issue #2373 (slice C): monetization ON gates scheduled
       // stock screens at the tick, mirroring the goal tick's
@@ -1365,19 +1503,38 @@ export class ScheduledTasksService {
       const portfolioContext = this.platformDeps?.sql
         ? isPortfolioContextEnabled(settingReadFromSql(this.platformDeps.sql))
         : false;
-      // Issue #1174 (#1173 S1): pre-flight the broker token for
-      // E*TRADE-provider runs. An expired, unrenewable token blocks
-      // the run up front — recorded with the remedy, one alert per
-      // expiry episode — instead of failing inside quote acquisition
-      // every hour (the 2026-10-23 overnight incident). Yahoo runs
-      // never touch the broker (#1007) and skip the guard.
-      // Issue #1527: a blocked E*TRADE run no longer fails outright —
-      // it falls back to a whole-run Yahoo screen. The guard's deduped
-      // episode alert already fired inside the guard; the fallback
-      // run's marker is the per-run signal, and a fallback success
-      // emits no failure notice. A fallback that itself fails takes
-      // the normal failure path in the catch below.
-      if ((options.provider ?? "etrade") === "etrade") {
+      // Issue #3655: the effective provider resolves from the tenant's
+      // dataProviderId at RUN time (explicit payload provider wins;
+      // see resolveScheduledStockProvider), so a later change of the
+      // tenant selection applies to future runs without re-arming.
+      // The guard runs only for etrade-provider runs — Yahoo/Alpaca
+      // runs never touch the broker (#1007 pattern). A blocked run
+      // FAILS LOUD with the guard's coded error: the #1527 silent
+      // whole-run Yahoo fallback is gone on this path.
+      const tenantProvidersResolved = await resolveTenantProviders(this.env);
+      tenantProviders = tenantProvidersResolved;
+      const effectiveProviderResolved = resolveScheduledStockProvider(
+        options.provider,
+        tenantProvidersResolved.dataProviderId
+      );
+      effectiveProvider = effectiveProviderResolved;
+      const runBrokerIdResolved = isBrokerId(tenantProvidersResolved.brokerId)
+        ? tenantProvidersResolved.brokerId
+        : "etrade";
+      runBrokerId = runBrokerIdResolved;
+      const runModeResolved =
+        await resolveScheduledEffectiveMode({
+          env: this.env,
+          brokerId: runBrokerIdResolved,
+          environment: options.environment,
+        });
+      // Issue #3655: the run records the EFFECTIVE mode, not the
+      // schedule's stated environment — an Alpaca deployment pin
+      // (ALPACA_TRADING_TYPE=live) beats a TEST schedule, so the
+      // record must say live with source "pin", never "paper".
+      runMode = runModeResolved?.mode;
+      runModeSource = runModeResolved?.modeSource;
+      if (effectiveProviderResolved === "etrade") {
         const guard = await this.guardScheduledAuth(
           userLogin,
           options.environment,
@@ -1395,32 +1552,25 @@ export class ScheduledTasksService {
           }
         );
         if (guard.blocked) {
-          providerFallback = { from: "etrade", reason: "etrade-auth-dead" };
-          this.audit("screener.run_fallback", {
-            kind: "stock",
-            universe: options.universe || "TECH",
-            sector: options.sector || "ALL",
-            from: "etrade",
-            to: "yahoo",
-            reason: "etrade-auth-dead",
-            error: guard.error,
-          });
+          throw new Error(guard.error);
         }
       }
       // Issue #1355: sharded execution. The monolithic path below is
       // untouched when the flag is absent — off runs keep today's
       // behaviour exactly.
-      // Issue #1527: a fallback run bypasses sharded dispatch — the
-      // sharded chain's E*TRADE feed shard has no auth-dead mode, so
-      // the fallback runs the monolithic Yahoo path and is recorded
-      // without the sharded flag.
-      if (options.sharded && !providerFallback) {
+      // Issue #3655: the sharded chain carries the run's effective
+      // provider + broker + mode (recorded at submission, see
+      // autonomousMarketScreenSharded). The sharded STOCK feed itself
+      // (planNextFeedShard nasdaq → etrade → yahoo) cannot yet follow
+      // the provider without redesign — named limitation in the #3655
+      // PR body, never silently left as E*TRADE.
+      if (options.sharded) {
         // Issue #1412: await (do not bare-return) so a rejection from
         // the sharded path — e.g. the missing-port throw above — is
         // caught by this function's catch instead of escaping to the
         // caller. A bare `return` of a rejected promise bypasses the
         // enclosing try/catch in an async function.
-        return await this.autonomousMarketScreenSharded({ ...options, filters: screenFilters }, userLogin, timestamp);
+        return await this.autonomousMarketScreenSharded({ ...options, provider: effectiveProviderResolved, brokerId: runBrokerIdResolved, dataProviderId: tenantProvidersResolved.dataProviderId, mode: runModeResolved?.mode, modeSource: runModeResolved?.modeSource, filters: screenFilters }, userLogin, timestamp);
       }
       // Issue #2865: the monolithic scheduled run is the broker's
       // sync branch (asyncRequested false → broker null → sync) and
@@ -1434,8 +1584,7 @@ export class ScheduledTasksService {
           sector: options.sector,
           filters: screenFilters,
           universe: (options.universe as any) || undefined,
-          provider: options.provider,
-          ...(providerFallback ? { providerFallback } : {}),
+          provider: effectiveProviderResolved,
           trigger: options.trigger || "scheduled",
         },
         timestamp,
@@ -1451,9 +1600,8 @@ export class ScheduledTasksService {
         environment: options.environment,
         portfolioContext,
         provider: scheduledPlan.provider,
-        ...(scheduledPlan.providerFallback
-          ? { providerFallback: scheduledPlan.providerFallback }
-          : {}),
+        broker: runBrokerIdResolved,
+        ...(runModeResolved ? { mode: runModeResolved.mode, modeSource: runModeResolved.modeSource } : {}),
       });
 
       if (result.skippedDuplicate) {
@@ -1461,7 +1609,7 @@ export class ScheduledTasksService {
       }
 
       if (!result.success) {
-        throw new Error(result.error || "E*TRADE unavailable");
+        throw new Error(result.error || "Stock screen unavailable");
       }
 
       // Audit every run (not just ones with hits) so "Recent autonomous
@@ -1475,7 +1623,9 @@ export class ScheduledTasksService {
         sector: result.sector,
         universe: result.universe,
         provider: result.provider,
-        ...(providerFallback ? { providerFallback } : {}),
+        brokerId: runBrokerIdResolved,
+        dataProviderId: tenantProvidersResolved.dataProviderId,
+        ...(runModeResolved ? { mode: runModeResolved.mode, modeSource: runModeResolved.modeSource } : {}),
         totalScanned: result.totalScanned,
         matchedCount: result.matchedCount,
         opportunityCount: result.opportunities.length,
@@ -1501,7 +1651,6 @@ export class ScheduledTasksService {
         universe: result.universe,
         trigger: options.trigger || "scheduled",
         expectedCount: result.expectedCount,
-        ...(providerFallback ? { providerFallback } : {}),
         pdfKey: result.pdfKey,
         pdfStatus: result.pdfStatus,
         pdfError: result.pdfError,
@@ -1545,7 +1694,9 @@ export class ScheduledTasksService {
           sector: result.sector,
           universe: result.universe,
           provider: result.provider,
-          ...(providerFallback ? { providerFallback } : {}),
+          brokerId: runBrokerIdResolved,
+          dataProviderId: tenantProvidersResolved.dataProviderId,
+          ...(runModeResolved ? { mode: runModeResolved.mode, modeSource: runModeResolved.modeSource } : {}),
           expectedCount: result.expectedCount,
           pdfKey: result.pdfKey,
           pdfStatus: result.pdfStatus,
@@ -1578,7 +1729,10 @@ export class ScheduledTasksService {
         runType: options.trigger || "scheduled",
         sector: options.sector || "ALL",
         error: err.message,
-        ...(providerFallback ? { providerFallback } : {}),
+        ...(effectiveProvider ? { provider: effectiveProvider } : {}),
+        ...(runBrokerId ? { brokerId: runBrokerId } : {}),
+        ...(tenantProviders?.dataProviderId ? { dataProviderId: tenantProviders.dataProviderId } : {}),
+        ...(runMode ? { mode: runMode, ...(runModeSource ? { modeSource: runModeSource } : {}) } : {}),
       });
 
       if (this.orm?.messages) {
@@ -1587,7 +1741,7 @@ export class ScheduledTasksService {
             id: crypto.randomUUID(),
             sessionId: this.userLogin,
             role: "assistant",
-            content: `⚠️ Scheduled Market Screen failed for sector ${options.sector || "ALL"}: ${err.message || "Market screener execution error"}${providerFallback ? " (Yahoo fallback after E*TRADE auth failure)" : ""}`,
+            content: `⚠️ Scheduled Market Screen failed for sector ${options.sector || "ALL"}: ${err.message || "Market screener execution error"}`,
             agent: "orchestrator",
             createdAt: timestamp,
           });
@@ -2343,6 +2497,12 @@ export class ScheduledTasksService {
     reportUrl?: string;
     sharded?: boolean;
     chainId?: string;
+    /** Issue #3655: the tenant broker/data provider that produced the run (sharded branch) or its effective mode (all branches). */
+    brokerId?: string;
+    dataProviderId?: string;
+    /** Issue #3655 (effective mode): the mode the run actually executed under, plus which resolver leg produced it. */
+    mode?: "live" | "paper";
+    modeSource?: EffectiveModeSource;
     /** Issue #2091: the service's artifact keys + canonical row id. */
     pdfKey?: string;
     xlsxKey?: string;
@@ -2419,11 +2579,31 @@ export class ScheduledTasksService {
     let auditRunId = reportRunId;
     const shouldNotifySlack = options.pushToSlack === true ||
       (options.pushToSlack === undefined && Boolean(this.env.SLACK_BOT_TOKEN || getCfpayConfig(this.env)));
+    // Issue #3655 (effective mode): the monolithic run's effective mode,
+    // resolved once up front so the success audit, the bus event, the
+    // return data, AND the failure audit all name the same mode — the
+    // mode the run actually executed under, never the schedule's stated
+    // environment alone. Declared here so the catch below can name it
+    // even when resolution itself failed (then it stays undefined).
+    let optionsEffectiveMode: Awaited<ReturnType<typeof resolveScheduledEffectiveMode>> | undefined;
 
     try {
       const userLogin = options.userLogin || this.userLogin;
       if (!userLogin) {
         throw new Error("No authenticated E*TRADE account is associated with this options screen. Sign in and run it again.");
+      }
+      // Issue #3655 (effective mode): resolved before the guard, from
+      // the tenant selections at RUN time — an Alpaca deployment pin
+      // (ALPACA_TRADING_TYPE=live) beats a TEST schedule.
+      {
+        const optionsTenantProviders = await resolveTenantProviders(this.env);
+        optionsEffectiveMode = await resolveScheduledEffectiveMode({
+          env: this.env,
+          brokerId: isBrokerId(optionsTenantProviders.brokerId)
+            ? optionsTenantProviders.brokerId
+            : "etrade",
+          environment: options.environment,
+        });
       }
       // Issue #1174 (#1173 S1): same auth pre-flight as the stock
       // screen — options scans die on the same midnight-ET token
@@ -2586,12 +2766,33 @@ export class ScheduledTasksService {
           env: this.env as unknown as Record<string, unknown>,
         });
         const chainId = crypto.randomUUID();
+        // Issue #3655: broker + data provider + mode recorded at chain
+        // submission, so the shard chain-source resolver executes
+        // under the broker this chain was submitted with.
+        const chainTenantProviders = await resolveTenantProviders(this.env);
+        const chainBrokerId = isBrokerId(chainTenantProviders.brokerId)
+          ? chainTenantProviders.brokerId
+          : "etrade";
+        // Issue #3655 (effective mode): the chain records the mode the
+        // run actually executes under — an Alpaca deployment pin beats
+        // the schedule's environment, so the chain's mode comes from
+        // the effective-mode resolver, never tradingTypeFor alone.
+        const chainEffectiveMode = await resolveScheduledEffectiveMode({
+          env: this.env,
+          brokerId: chainBrokerId,
+          environment: options.environment,
+        });
         const chain: import("../types").ShardChainContext = {
           chainId,
           screenType: "options",
           universe: effectiveUniverse || "symbols",
           userLogin,
           environment: options.environment as "TEST" | "PROD" | undefined,
+          brokerId: chainBrokerId,
+          dataProviderId: chainTenantProviders.dataProviderId,
+          ...(chainEffectiveMode
+            ? { mode: chainEffectiveMode.mode, modeSource: chainEffectiveMode.modeSource }
+            : {}),
           trigger: options.trigger || "scheduled",
           maxItems: symbols.length,
           timestamp,
@@ -2633,7 +2834,7 @@ export class ScheduledTasksService {
         const specs = planOptionsFeedShards(chain, timestamp);
         const submitted: string[] = [];
         for (const spec of specs) submitted.push((await this.shardSubmit(spec)).jobId);
-        this.audit("options.sharded_chain_submitted", { chainId, universe: chain.universe, symbols: symbols.length, jobs: submitted.length, scope: describeReportScope(reportScope), theses: reportScope.theses, strategies: reportScope.strategyScope === "all" ? "all" : scopeStrategies, warnings: reportScope.warnings });
+        this.audit("options.sharded_chain_submitted", { chainId, universe: chain.universe, symbols: symbols.length, jobs: submitted.length, scope: describeReportScope(reportScope), theses: reportScope.theses, strategies: reportScope.strategyScope === "all" ? "all" : scopeStrategies, warnings: reportScope.warnings, brokerId: chainBrokerId, dataProviderId: chainTenantProviders.dataProviderId, ...(chain.mode ? { mode: chain.mode } : {}), ...(chain.modeSource ? { modeSource: chain.modeSource } : {}) });
         return {
           success: true,
           taskType: "options_analysis" as any,
@@ -2646,6 +2847,10 @@ export class ScheduledTasksService {
             opportunities: [],
             sharded: true,
             chainId,
+            brokerId: chainBrokerId,
+            dataProviderId: chainTenantProviders.dataProviderId,
+            ...(chain.mode ? { mode: chain.mode } : {}),
+            ...(chain.modeSource ? { modeSource: chain.modeSource } : {}),
           },
           timestamp,
         } as any;
@@ -3246,6 +3451,9 @@ export class ScheduledTasksService {
         withTrades: response.data?.withTrades ?? 0,
         notifications,
         reportId: canonical?.reportId,
+        // Issue #3655 (effective mode): the audit names the mode the
+        // run actually executed under, with its resolver source.
+        ...(optionsEffectiveMode ? { mode: optionsEffectiveMode.mode, modeSource: optionsEffectiveMode.modeSource } : {}),
       });
 
       if (this.orm?.messages) {
@@ -3293,6 +3501,10 @@ export class ScheduledTasksService {
         // Issue #1718: the qualification rides the event so the
         // lifecycle completed notice can apply the broadcast floor.
         partial: scanData?.partial,
+        // Issue #3655 (effective mode): the bus event is what the
+        // bridge records the run from — it carries the effective
+        // mode, never just the schedule's stated environment.
+        ...(optionsEffectiveMode ? { mode: optionsEffectiveMode.mode, modeSource: optionsEffectiveMode.modeSource } : {}),
         opportunities: (response.data?.opportunities || []).slice(0, 10).map((row: any) => ({
           symbol: row.symbol,
           strategy: row.pick?.best?.candidate?.type,
@@ -3318,6 +3530,8 @@ export class ScheduledTasksService {
           xlsxKey: optionsXlsxKey,
           csvKey: optionsCsvKey,
           canonicalReportId: canonical?.reportId ?? null,
+          // Issue #3655 (effective mode).
+          ...(optionsEffectiveMode ? { mode: optionsEffectiveMode.mode, modeSource: optionsEffectiveMode.modeSource } : {}),
         },
         timestamp,
       };
@@ -3329,6 +3543,9 @@ export class ScheduledTasksService {
         symbols,
         thesis: targetThesis,
         error: err.message,
+        // Issue #3655 (effective mode): the failure record names the
+        // same effective mode as the success path would have.
+        ...(optionsEffectiveMode ? { mode: optionsEffectiveMode.mode, modeSource: optionsEffectiveMode.modeSource } : {}),
       });
 
       // Failure surfacing (issue #112): mirror the success path's
@@ -3618,6 +3835,7 @@ export class ScheduledTasksService {
       const status: DiscoveryRunStatus =
         failures.length === 0 ? "completed" : failures.length === outcomes.length ? "failed" : "partial";
 
+      const discoveryMode = await resolveDiscoveryRunMode(this.env, options.environment);
       const run = await this.discoveryRunStore.save({
         createdAt: timestamp,
         trigger: options.trigger === "manual" ? "manual-trigger" : "scheduled",
@@ -3625,6 +3843,8 @@ export class ScheduledTasksService {
         userLogin,
         // Issue #3388: the run records the broker whose chains produced it.
         broker: await resolveTenantBroker(this.env),
+        // Issue #3655: live/paper mode provenance.
+        ...(discoveryMode ? { mode: discoveryMode.mode, modeSource: discoveryMode.modeSource } : {}),
         inputModel: "saved-request",
         requests,
         outcomes,
@@ -4291,6 +4511,7 @@ export class ScheduledTasksService {
       // The run is persisted BEFORE the status is judged — an
       // all-abstained/failed fire's record is exactly what makes the
       // honesty inspectable (and the run id joins the failure data).
+      const discoveryMode = await resolveDiscoveryRunMode(this.env, options.environment);
       const run = await this.discoveryRunStore.save({
         createdAt: timestamp,
         trigger: options.trigger === "manual" ? "manual-trigger" : "scheduled",
@@ -4298,6 +4519,8 @@ export class ScheduledTasksService {
         userLogin,
         // Issue #3388: the run records the broker whose chains produced it.
         broker: await resolveTenantBroker(this.env),
+        // Issue #3655: live/paper mode provenance.
+        ...(discoveryMode ? { mode: discoveryMode.mode, modeSource: discoveryMode.modeSource } : {}),
         inputModel: "profile-derived",
         profileRef,
         requests: constructed,
@@ -4600,6 +4823,7 @@ export class ScheduledTasksService {
       // The run is persisted BEFORE the status is judged — an
       // all-failed fire's record is exactly what makes the failure
       // diagnosable (and the run id joins the failure data).
+      const discoveryMode = await resolveDiscoveryRunMode(this.env, options.environment);
       const run = await this.discoveryRunStore.save({
         createdAt: timestamp,
         trigger: options.trigger === "manual" ? "manual-trigger" : "scheduled",
@@ -4607,6 +4831,8 @@ export class ScheduledTasksService {
         userLogin,
         // Issue #3388: the run records the broker whose chains produced it.
         broker: await resolveTenantBroker(this.env),
+        // Issue #3655: live/paper mode provenance.
+        ...(discoveryMode ? { mode: discoveryMode.mode, modeSource: discoveryMode.modeSource } : {}),
         inputModel: "no-view",
         requests: [],
         constraintSets: outcomes.flatMap((o) => (o.constraintSet ? [o.constraintSet] : [])),

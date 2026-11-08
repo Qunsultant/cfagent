@@ -59,6 +59,7 @@ import {
   switchBrokerEnvironment,
   useBrokerEnvironment,
 } from "./brokerEnvironment";
+import { safeNumberFormat, safePriceFormat } from "./formatters";
 import { EtapiConfigModal } from "./options/EtapiConfigModal";
 import { RiskAnalysisModal } from "./options/RiskAnalysisModal";
 import { TradeExecutionPreview } from "./TradeExecutionPreview";
@@ -1302,11 +1303,11 @@ export function ETradeTradingHub({
           if (orderType === "LIMIT") {
             // Align limit price with order direction: Buy -> Ask; Sell -> Bid
             if ((orderAction === "BUY" || orderAction === "BUY_TO_COVER") && data.ask > 0) {
-              setOrderLimitPrice(data.ask.toFixed(2));
+              setOrderLimitPrice(safeNumberFormat(data.ask));
             } else if ((orderAction === "SELL" || orderAction === "SELL_SHORT") && data.bid > 0) {
-              setOrderLimitPrice(data.bid.toFixed(2));
+              setOrderLimitPrice(safeNumberFormat(data.bid));
             } else if (data.lastPrice > 0) {
-              setOrderLimitPrice(data.lastPrice.toFixed(2));
+              setOrderLimitPrice(safeNumberFormat(data.lastPrice));
             }
           }
         }
@@ -1366,9 +1367,9 @@ export function ETradeTradingHub({
       const unitMultiplier = preparedContext.optionLegs?.some((leg) => leg.securityType === "OPTN")
         ? 100
         : preparedContext.optionLegs?.reduce((total, leg) => total + leg.quantity, 0) || 1;
-      setOrderLimitPrice((Math.abs(preparedContext.strategyNetDebit) / unitMultiplier).toFixed(2));
+      setOrderLimitPrice(safeNumberFormat(Math.abs(preparedContext.strategyNetDebit) / unitMultiplier));
     } else if (preparedContext.assetClass === "options") setOrderLimitPrice("0.01");
-    else if (preparedContext.underlyingPrice) setOrderLimitPrice(preparedContext.underlyingPrice.toFixed(2));
+    else if (preparedContext.underlyingPrice) setOrderLimitPrice(safeNumberFormat(preparedContext.underlyingPrice));
     setActiveDraft(null);
     setLastExecutionResult(null);
     setOrderError("");
@@ -1509,7 +1510,7 @@ export function ETradeTradingHub({
     } else if (defaultAction === "BUY" && quoteAsk > 0) {
       p = quoteAsk;
     }
-    setOrderLimitPrice(Number(p).toFixed(2));
+    setOrderLimitPrice(safeNumberFormat(p));
     setOrderQuote(stock as any);
     setActiveDraft(null); // Invalidate any previous approval
     setLastExecutionResult(null);
@@ -1964,11 +1965,11 @@ export function ETradeTradingHub({
               </div>
               <div className="hitl-stat">
                 <span className="stat-label">{activeDraft.optionLegs?.length ? "Net limit / unit" : "Limit / Est Price"}</span>
-                <span className="stat-value">${(activeDraft.limitPrice || activeDraft.estimatedPrice).toFixed(2)}</span>
+                <span className="stat-value">{safePriceFormat(activeDraft.limitPrice || activeDraft.estimatedPrice, 2, "Market price")}</span>
               </div>
               <div className="hitl-stat">
                 <span className="stat-label">{activeDraft.strategyNetDebit !== undefined && activeDraft.strategyNetDebit < 0 ? "Estimated Credit" : "Estimated Total"}</span>
-                <span className="stat-value total-val">${activeDraft.estimatedTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                <span className="stat-value total-val">{activeDraft.estimatedTotal != null && Number.isFinite(Number(activeDraft.estimatedTotal)) ? `$${Number(activeDraft.estimatedTotal).toLocaleString(undefined, { minimumFractionDigits: 2 })}` : "—"}</span>
               </div>
             </div>
 
@@ -2006,7 +2007,7 @@ export function ETradeTradingHub({
               </div>
               <div className="attest-item">
                 <span className="attest-label">Commission:</span>
-                <span className="zero-comm">{activeDraft.estimatedCommission > 0 ? `$${activeDraft.estimatedCommission.toFixed(2)} broker estimate` : activeDraft.optionLegs?.length ? `See ${presentation.label} account disclosure` : `$0.00 (${presentation.label} online)`}</span>
+                <span className="zero-comm">{activeDraft.estimatedCommission != null && Number(activeDraft.estimatedCommission) > 0 ? `${safePriceFormat(activeDraft.estimatedCommission)} broker estimate` : activeDraft.optionLegs?.length ? `See ${presentation.label} account disclosure` : `$0.00 (${presentation.label} online)`}</span>
               </div>
             </div>
 
@@ -2054,7 +2055,7 @@ export function ETradeTradingHub({
                     quantity: activeDraft.quantity,
                     maxLoss: activeDraft.estimatedTotal,
                     breakevens: [price],
-                    breakevenText: `Order Price: $${price.toFixed(2)}`,
+                    breakevenText: `Order Price: ${safePriceFormat(price)}`,
                   });
                 }}
                 title="Risk Analysis — Analyze pre-trade risk profile and defense playbook"
@@ -2313,14 +2314,14 @@ export function ETradeTradingHub({
           <div className="portfolio-table-wrap" id="section-positions" style={{ scrollMarginTop: 80 }}>
             <Table
                       columns={[
-                        { key: "symbol", header: "Symbol & Company", render: (pos: any) => (<><div className="ticker-company"><span className="ticker-badge">{pos.symbol}</span><span className="company-title">{pos.securityType === "OPTN" ? `${pos.optionType || "Option"} $${Number(pos.strikePrice || 0).toFixed(2)} · ${pos.expirationDate || "Expiry unavailable"}` : pos.description}</span></div>{pos.securityType === "OPTN" && <span className="position-type-badge">{pos.positionType === "SHORT" ? "Short option" : "Long option"}</span>}</>) },
+                        { key: "symbol", header: "Symbol & Company", render: (pos: any) => (<><div className="ticker-company"><span className="ticker-badge">{pos.symbol}</span><span className="company-title">{pos.securityType === "OPTN" ? `${pos.optionType || "Option"} ${safePriceFormat(pos.strikePrice, 2, "$0.00")} · ${pos.expirationDate || "Expiry unavailable"}` : pos.description}</span></div>{pos.securityType === "OPTN" && <span className="position-type-badge">{pos.positionType === "SHORT" ? "Short option" : "Long option"}</span>}</>) },
                         { key: "qty", header: "Quantity", render: (pos: any) => <span className="qty-val">{pos.quantity} {pos.securityType === "OPTN" ? "contracts" : "shares"}</span> },
-                        { key: "cost", header: "Avg Cost Basis", render: (pos: any) => <span>${Number(pos.costBasis ?? pos.pricePaid ?? 0).toFixed(2)}</span> },
-                        { key: "price", header: "Current Price", render: (pos: any) => <span className="price-tag">${Number(pos.currentPrice ?? pos.marketPrice ?? 0).toFixed(2)}</span> },
+                        { key: "cost", header: "Avg Cost Basis", render: (pos: any) => <span>{safePriceFormat(pos.costBasis ?? pos.pricePaid, 2, "$0.00")}</span> },
+                        { key: "price", header: "Current Price", render: (pos: any) => <span className="price-tag">{safePriceFormat(pos.currentPrice ?? pos.marketPrice, 2, "$0.00")}</span> },
                         { key: "mkt", header: "Total Market Value", render: (pos: any) => <span className="mkt-val">${Number(pos.marketValue ?? (Number(pos.currentPrice ?? pos.marketPrice ?? 0) * Number(pos.quantity ?? 0))).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span> },
-                        { key: "unreal", header: "Unrealized Gain / Loss", render: (pos: any) => { const g = Number(pos.unrealizedGainLoss ?? pos.totalGain ?? 0); const gp = Number(pos.unrealizedGainLossPercent ?? pos.totalGainPercent ?? 0); const isPos = g >= 0; return <span className={`change-pill ${isPos ? "positive" : "negative"}`}>{isPos ? "+" : ""}${g.toFixed(2)} ({isPos ? "+" : ""}{gp.toFixed(2)}%)</span>; } },
-                        { key: "day", header: "Day's Gain", render: (pos: any) => { const d = Number(pos.daysGain ?? 0); const dp = Number(pos.daysGainPercent ?? 0); const isPos = d >= 0; return <span className={`change-pill ${isPos ? "positive" : "negative"}`}>{isPos ? "+" : ""}${d.toFixed(2)} ({isPos ? "+" : ""}{dp.toFixed(2)}%)</span>; } },
-                        { key: "actions", header: "Actions", render: (pos: any) => { const costBasis = Number(pos.costBasis ?? pos.pricePaid ?? 0); const curPrice = Number(pos.currentPrice ?? pos.marketPrice ?? 0); const mktVal = Number(pos.marketValue ?? (curPrice * Number(pos.quantity ?? 0))); const unrealizedGain = Number(pos.unrealizedGainLoss ?? pos.totalGain ?? 0); return (<div className="table-actions-cell">{pos.securityType === "OPTN" && pos.optionType && pos.strikePrice && pos.expirationDate ? (<Button variant="danger" tone="subtle" size="sm" type="button" onClick={() => handleCloseOptionPosition(pos)} title="Build a broker-priced closing order for this option position">- Close Option</Button>) : pos.securityType === "OPTN" ? (<span className="position-action-unavailable" title="The broker did not return enough contract details to build a closing order.">Contract details unavailable</span>) : (<><Button variant="trade" tone="subtle" size="sm" type="button" onClick={() => handleQuickTrade(pos, "BUY")} title="Add more shares">+ Buy</Button><Button variant="danger" tone="subtle" size="sm" type="button" onClick={() => handleQuickTrade(pos, "SELL")} title="Sell to close position">- Close</Button></>)}<Button variant="warning" tone="subtle" size="sm" type="button" onClick={() => { setRiskSubject({ title: `${pos.quantity}x ${pos.symbol} (${pos.description || "Long Equity"})`, underlyingSymbol: pos.symbol, underlyingPrice: curPrice, strategyType: "Long Equity Position", sentiment: "bullish", quantity: pos.quantity, positionType: "EQUITY", costBasis: costBasis, unrealizedPnL: unrealizedGain, maxLoss: mktVal, maxProfit: null, breakevens: [costBasis], breakevenText: `Cost basis: $${costBasis.toFixed(2)}/share` }); }} title="Analyze position risk profile and hedging strategies">🛡️ Risk</Button></div>); } },
+                        { key: "unreal", header: "Unrealized Gain / Loss", render: (pos: any) => { const g = Number(pos.unrealizedGainLoss ?? pos.totalGain ?? 0); const gp = Number(pos.unrealizedGainLossPercent ?? pos.totalGainPercent ?? 0); const isPos = g >= 0; return <span className={`change-pill ${isPos ? "positive" : "negative"}`}>{isPos ? "+" : ""}${safeNumberFormat(g)} ({isPos ? "+" : ""}{safeNumberFormat(gp)}%)</span>; } },
+                        { key: "day", header: "Day's Gain", render: (pos: any) => { const d = Number(pos.daysGain ?? 0); const dp = Number(pos.daysGainPercent ?? 0); const isPos = d >= 0; return <span className={`change-pill ${isPos ? "positive" : "negative"}`}>{isPos ? "+" : ""}${safeNumberFormat(d)} ({isPos ? "+" : ""}{safeNumberFormat(dp)}%)</span>; } },
+                        { key: "actions", header: "Actions", render: (pos: any) => { const costBasis = Number(pos.costBasis ?? pos.pricePaid ?? 0); const curPrice = Number(pos.currentPrice ?? pos.marketPrice ?? 0); const mktVal = Number(pos.marketValue ?? (curPrice * Number(pos.quantity ?? 0))); const unrealizedGain = Number(pos.unrealizedGainLoss ?? pos.totalGain ?? 0); return (<div className="table-actions-cell">{pos.securityType === "OPTN" && pos.optionType && pos.strikePrice && pos.expirationDate ? (<Button variant="danger" tone="subtle" size="sm" type="button" onClick={() => handleCloseOptionPosition(pos)} title="Build a broker-priced closing order for this option position">- Close Option</Button>) : pos.securityType === "OPTN" ? (<span className="position-action-unavailable" title="The broker did not return enough contract details to build a closing order.">Contract details unavailable</span>) : (<><Button variant="trade" tone="subtle" size="sm" type="button" onClick={() => handleQuickTrade(pos, "BUY")} title="Add more shares">+ Buy</Button><Button variant="danger" tone="subtle" size="sm" type="button" onClick={() => handleQuickTrade(pos, "SELL")} title="Sell to close position">- Close</Button></>)}<Button variant="warning" tone="subtle" size="sm" type="button" onClick={() => { setRiskSubject({ title: `${pos.quantity}x ${pos.symbol} (${pos.description || "Long Equity"})`, underlyingSymbol: pos.symbol, underlyingPrice: curPrice, strategyType: "Long Equity Position", sentiment: "bullish", quantity: pos.quantity, positionType: "EQUITY", costBasis: costBasis, unrealizedPnL: unrealizedGain, maxLoss: mktVal, maxProfit: null, breakevens: [costBasis], breakevenText: `Cost basis: ${safePriceFormat(costBasis)}/share` }); }} title="Analyze position risk profile and hedging strategies">🛡️ Risk</Button></div>); } },
                       ]}
                       rows={positions}
                       rowKey={(pos: any) => pos.symbol}
@@ -2422,13 +2423,13 @@ export function ETradeTradingHub({
                         { key: "symbol", header: "Symbol", render: (ord: any) => <span className="ticker-badge">{ord.symbol}</span> },
                         { key: "action", header: "Action", render: (ord: any) => <span className={`action-pill ${ord.action.toLowerCase()}`}>{ord.action}</span> },
                         { key: "qty", header: "Shares", render: (ord: any) => <>{ord.quantity}</> },
-                        { key: "price", header: "Price", render: (ord: any) => <>${ord.price.toFixed(2)}</> },
-                        { key: "total", header: "Total Value", render: (ord: any) => <>${ord.totalValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</> },
+                        { key: "price", header: "Price", render: (ord: any) => <>{safePriceFormat(ord.price)}</> },
+                        { key: "total", header: "Total Value", render: (ord: any) => <>{ord.totalValue != null && Number.isFinite(Number(ord.totalValue)) ? `$${Number(ord.totalValue).toLocaleString(undefined, { minimumFractionDigits: 2 })}` : "—"}</> },
                         { key: "status", header: "Status", render: (ord: any) => <span className={`tx-status-pill ${ord.status}`}>{ord.status.toUpperCase()}</span> },
                         { key: "ref", header: "Broker Ref", render: (ord: any) => <code className="broker-ref-snippet">{ord.orderRef || "—"}</code> },
                         { key: "did", header: "Proposer DID", render: (ord: any) => <code className="did-snippet" title={ord.proposerDid}>{ord.proposerDid.replace("did:agent:openaimp:", "")}</code> },
                         { key: "date", header: "Date & Time", render: (ord: any) => <span className="time-snippet">{new Date(ord.createdAt).toLocaleString()}</span> },
-                        { key: "actions", header: "Action", render: (ord: any) => <Button variant="warning" tone="subtle" size="sm" type="button" onClick={() => { setRiskSubject({ title: `${ord.action} ${ord.quantity}x ${ord.symbol}`, underlyingSymbol: ord.symbol, underlyingPrice: ord.price, strategyType: `${ord.action} Trade`, sentiment: ord.action.toLowerCase().includes("buy") ? "bullish" : "bearish", quantity: ord.quantity, positionType: "EQUITY", maxLoss: ord.totalValue, breakevens: [ord.price], breakevenText: `Price: $${ord.price.toFixed(2)}` }); }} title="Analyze risk profile for this ledger trade">🛡️ Risk</Button> },
+                        { key: "actions", header: "Action", render: (ord: any) => <Button variant="warning" tone="subtle" size="sm" type="button" onClick={() => { setRiskSubject({ title: `${ord.action} ${ord.quantity}x ${ord.symbol}`, underlyingSymbol: ord.symbol, underlyingPrice: ord.price, strategyType: `${ord.action} Trade`, sentiment: ord.action.toLowerCase().includes("buy") ? "bullish" : "bearish", quantity: ord.quantity, positionType: "EQUITY", maxLoss: ord.totalValue, breakevens: [ord.price], breakevenText: `Price: ${safePriceFormat(ord.price)}` }); }} title="Analyze risk profile for this ledger trade">🛡️ Risk</Button> },
                       ]}
                       rows={orders}
                       rowKey={(ord: any) => ord.id}
@@ -2935,8 +2936,8 @@ export function ETradeTradingHub({
                           </div>
                           <div className="voice-order-preview-details">
                             <div><strong>Order ID:</strong> <code>{msg.orderDraft.orderId}</code></div>
-                            <div><strong>Action:</strong> {msg.orderDraft.action} {msg.orderDraft.quantity} {msg.orderDraft.quantity === 1 ? "share" : "shares"} of {msg.orderDraft.symbol} {msg.orderDraft.orderType === "LIMIT" ? `(LIMIT @ $${(msg.orderDraft.limitPrice || msg.orderDraft.estimatedPrice)?.toFixed(2)})` : "(MARKET)"}</div>
-                            <div><strong>Estimated Total:</strong> ${msg.orderDraft.estimatedTotal?.toFixed(2)} USD</div>
+                            <div><strong>Action:</strong> {msg.orderDraft.action} {msg.orderDraft.quantity} {msg.orderDraft.quantity === 1 ? "share" : "shares"} of {msg.orderDraft.symbol} {msg.orderDraft.orderType === "LIMIT" ? `(LIMIT @ ${safePriceFormat(msg.orderDraft.limitPrice || msg.orderDraft.estimatedPrice)})` : "(MARKET)"}</div>
+                            <div><strong>Estimated Total:</strong> {safePriceFormat(msg.orderDraft.estimatedTotal)} USD</div>
                           </div>
                           {/* Issue #1773 (OWASP ASI-02): the voice
                               approve path shows the same exact
@@ -2990,48 +2991,52 @@ export function ETradeTradingHub({
             ) : inspectQuote ? (<>
 
                 <div className="price-big-row">
-                  <span className="big-price">${inspectQuote.lastPrice.toFixed(2)}</span>
-                  <span className={`big-change ${inspectQuote.change >= 0 ? "positive" : "negative"}`}>
-                    {inspectQuote.change >= 0 ? "+" : ""}{inspectQuote.change.toFixed(2)} ({inspectQuote.changePercent.toFixed(2)}%)
-                  </span>
+                  <span className="big-price">{safePriceFormat(inspectQuote.lastPrice)}</span>
+                  {inspectQuote.change !== undefined && inspectQuote.change !== null ? (
+                    <span className={`big-change ${Number(inspectQuote.change) >= 0 ? "positive" : "negative"}`}>
+                      {Number(inspectQuote.change) >= 0 ? "+" : ""}{safeNumberFormat(inspectQuote.change)} ({safeNumberFormat(inspectQuote.changePercent)}%)
+                    </span>
+                  ) : (
+                    <span className="big-change neutral">—</span>
+                  )}
                 </div>
 
                 <div className="quote-grid-3">
                   <div className="grid-item">
                     <span className="label">Bid</span>
-                    <span className="val">${inspectQuote.bid.toFixed(2)}</span>
+                    <span className="val">{safePriceFormat(inspectQuote.bid)}</span>
                   </div>
                   <div className="grid-item">
                     <span className="label">Ask</span>
-                    <span className="val">${inspectQuote.ask.toFixed(2)}</span>
+                    <span className="val">{safePriceFormat(inspectQuote.ask)}</span>
                   </div>
                   <div className="grid-item">
                     <span className="label">Spread</span>
-                    <span className="val">${(inspectQuote.ask - inspectQuote.bid).toFixed(2)}</span>
+                    <span className="val">{inspectQuote.ask != null && inspectQuote.bid != null ? safePriceFormat(Number(inspectQuote.ask) - Number(inspectQuote.bid)) : "—"}</span>
                   </div>
                   <div className="grid-item">
                     <span className="label">Open</span>
-                    <span className="val">${inspectQuote.open.toFixed(2)}</span>
+                    <span className="val">{safePriceFormat(inspectQuote.open)}</span>
                   </div>
                   <div className="grid-item">
                     <span className="label">Day High</span>
-                    <span className="val">${inspectQuote.high.toFixed(2)}</span>
+                    <span className="val">{safePriceFormat(inspectQuote.high)}</span>
                   </div>
                   <div className="grid-item">
                     <span className="label">Day Low</span>
-                    <span className="val">${inspectQuote.low.toFixed(2)}</span>
+                    <span className="val">{safePriceFormat(inspectQuote.low)}</span>
                   </div>
                   <div className="grid-item">
                     <span className="label">52-Week High</span>
-                    <span className="val">{inspectQuote.week52High !== undefined ? `$${inspectQuote.week52High.toFixed(2)}` : "—"}</span>
+                    <span className="val">{inspectQuote.week52High !== undefined ? safePriceFormat(inspectQuote.week52High) : "—"}</span>
                   </div>
                   <div className="grid-item">
                     <span className="label">52-Week Low</span>
-                    <span className="val">{inspectQuote.week52Low !== undefined ? `$${inspectQuote.week52Low.toFixed(2)}` : "—"}</span>
+                    <span className="val">{inspectQuote.week52Low !== undefined ? safePriceFormat(inspectQuote.week52Low) : "—"}</span>
                   </div>
                   <div className="grid-item">
                     <span className="label">Volume</span>
-                    <span className="val">{(inspectQuote.volume / 1e6).toFixed(2)}M</span>
+                    <span className="val">{inspectQuote.volume != null ? `${safeNumberFormat(Number(inspectQuote.volume) / 1e6)}M` : "—"}</span>
                   </div>
                   <div className="grid-item">
                     <span className="label">P/E Ratio</span>
@@ -3040,13 +3045,13 @@ export function ETradeTradingHub({
                   <div className="grid-item">
                     <span className="label">Market Cap</span>
                     <span className="val">
-                      {inspectQuote.marketCap ? `$${(inspectQuote.marketCap / 1e9).toFixed(1)}B` : "N/A"}
+                      {inspectQuote.marketCap ? `$${safeNumberFormat(Number(inspectQuote.marketCap) / 1e9, 1)}B` : "N/A"}
                     </span>
                   </div>
                   <div className="grid-item">
                     <span className="label">RSI (14)</span>
                     <span className={`val ${getRsiBadgeClass(inspectQuote.rsi)}`}>
-                      {inspectQuote.rsi?.toFixed(1) || "N/A"}
+                      {safeNumberFormat(inspectQuote.rsi, 1, "N/A")}
                     </span>
                   </div>
                 </div>
@@ -3158,7 +3163,7 @@ export function ETradeTradingHub({
                       ))}
                       {diagnostics.upstreamBalance && (
                         <div className="diag-balance-row">
-                          • Live Balance Fetched: Net Value: <strong>${Number(diagnostics.upstreamBalance.netAccountValue || diagnostics.upstreamBalance.computed?.realTimeValues?.totalAccountValue || 0).toFixed(2)}</strong> | Cash: <strong>${Number(diagnostics.upstreamBalance.cashAvailableForInvestment || diagnostics.upstreamBalance.computed?.cashAvailableForInvestment || 0).toFixed(2)}</strong>
+                          • Live Balance Fetched: Net Value: <strong>{safePriceFormat(diagnostics.upstreamBalance.netAccountValue || diagnostics.upstreamBalance.computed?.realTimeValues?.totalAccountValue, 2, "$0.00")}</strong> | Cash: <strong>{safePriceFormat(diagnostics.upstreamBalance.cashAvailableForInvestment || diagnostics.upstreamBalance.computed?.cashAvailableForInvestment, 2, "$0.00")}</strong>
                         </div>
                       )}
                     </div>

@@ -156,6 +156,11 @@ export function buildJobRunRecord(input: JobRunRecordInput): JobRunRecord {
     ...(input.detail !== undefined ? { detail: input.detail } : {}),
     ...(input.descriptor !== undefined ? { descriptor: input.descriptor } : {}),
     ...(input.artifactRefs !== undefined ? { artifactRefs: input.artifactRefs } : {}),
+    // Issue #3655: broker + data-provider + mode provenance.
+    ...(input.brokerId !== undefined ? { brokerId: input.brokerId } : {}),
+    ...(input.dataProviderId !== undefined ? { dataProviderId: input.dataProviderId } : {}),
+    ...(input.mode !== undefined ? { mode: input.mode } : {}),
+    ...(input.modeSource !== undefined ? { modeSource: input.modeSource } : {}),
   };
 }
 

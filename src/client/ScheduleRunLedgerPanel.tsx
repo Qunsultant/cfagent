@@ -191,6 +191,22 @@ function ledgerColumns(
       <span title={ledgerLinkageTitle(r.workflowId)}>{ledgerLinkageCell(r.workflowId)}</span>
     ),
   },
+  {
+    // Issue #3655: broker + mode recorded on the schedule at creation.
+    // Legacy rows without them read as "—", never a guessed broker.
+    // Issue #3655 (effective mode): a pinned mode is annotated — a
+    // run that executed live under an ALPACA_TRADING_TYPE=live pin
+    // reads "Alpaca · live · pin", never just "live".
+    key: "broker",
+    header: "Broker",
+    render: (r) => (
+      <span>
+        {r.brokerId
+          ? `${r.brokerId === "etrade" ? "E*TRADE" : r.brokerId}${r.mode ? ` · ${r.mode}` : ""}${r.modeSource === "pin" ? " · pin" : ""}`
+          : "—"}
+      </span>
+    ),
+  },
   { key: "summary", header: "Summary", render: (r) => <>{runSummary(r)}</> },
   ];
 }

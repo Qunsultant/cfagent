@@ -71,6 +71,10 @@ function summarize(input: DiscoveryRunInput, id: string): DiscoveryRunSummary {
     createdAt: input.createdAt,
     // Issue #3388: provenance lives in the summary (no column migration).
     broker: normalizeDiscoveryRunBroker(input.broker),
+    // Issue #3655: mode provenance rides the same summary.
+    ...(input.mode !== undefined ? { mode: input.mode } : {}),
+    // Issue #3655 (effective mode): the resolver source rides the summary with the mode.
+    ...(input.modeSource !== undefined ? { modeSource: input.modeSource } : {}),
     ...(input.userLogin !== undefined ? { userLogin: input.userLogin } : {}),
     trigger: input.trigger,
     ...(input.scheduleId !== undefined ? { scheduleId: input.scheduleId } : {}),

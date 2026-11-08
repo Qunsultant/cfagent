@@ -202,6 +202,14 @@ export interface DiscoveryRunSummary {
    * `etrade` and are never served as another broker's evidence.
    */
   broker: DiscoveryRunBroker;
+  /**
+   * Issue #3655: live/paper mode the run executed under, from
+   * (broker, environment). Absent on runs recorded before mode
+   * provenance existed — never backfilled from the current selection.
+   */
+  mode?: "live" | "paper";
+  /** Issue #3655 (effective mode): which resolver leg produced the mode — pin | selection | inference. */
+  modeSource?: "pin" | "selection" | "inference";
   /** The login that owns the run (issue #103 scoping). Optional
    *  deliberately: an absent login is what makes a run "legacy" under
    *  the visibility rule. Scheduled runs are always saved WITH the
@@ -266,6 +274,10 @@ export interface DiscoveryRunInput {
    * as `etrade`, which is what the E*TRADE-wired engine actually used.
    */
   broker?: DiscoveryRunBroker;
+  /** Issue #3655: live/paper mode the run executed under. */
+  mode?: "live" | "paper";
+  /** Issue #3655 (effective mode): which resolver leg produced the mode — pin | selection | inference. */
+  modeSource?: "pin" | "selection" | "inference";
 }
 
 export interface DiscoveryRunStore {

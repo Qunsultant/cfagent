@@ -21,6 +21,9 @@
 import type { DatabaseORM } from "../orm";
 import type { ETradeService } from "./etrade";
 import type { ShardChainContext } from "../types";
+import type { OptionChainSource } from "../trading";
+import { isBrokerId } from "./tenantProviders";
+import { TradingPlatformRegistry, platformChainSource } from "../trading";
 import type { ShardPayload, ShardRow } from "./shardJobs";
 import {
   assessFeedGate,
@@ -70,6 +73,19 @@ export interface ShardExecutorDeps {
   /** Durable Object storage: the blob seam + capture deps. */
   storage: any;
   createETradeService: (userLogin: string, environment?: string) => ETradeService;
+  /**
+   * Issue #3655: broker-aware chain-source resolver, mirroring
+   * UnifiedOptionsService.resolveEngineClient (tenant broker →
+   * Alpaca platform chain source / etrade client / throw
+   * provider_unsupported). executeOptionsSymbol prefers this over
+   * createETradeService. When absent (legacy callers/tests), the
+   * executor falls back to the E*TRADE-only factory — the host
+   * (asyncJobs) always binds the resolver, so production never
+   * takes the fallback.
+   */
+  resolveChainSource?: (
+    chain: ShardChainContext
+  ) => Promise<OptionChainSource>;
   sessionId: string;
   /**
    * Issue #1368: test seam for the nasdaq feed shard — the listings
@@ -106,6 +122,75 @@ async function shardBootstrap(deps: ShardExecutorDeps): Promise<DataProviderPort
 
 function chainRows(deps: ShardExecutorDeps, chainId: string): ShardRow[] {
   return chainRowsFromSql(deps.sql, chainId, deps.sessionId);
+}
+
+/**
+ * Issue #3655: the broker-aware chain source for one options shard,
+ * mirroring UnifiedOptionsService.resolveEngineClient. The broker
+ * recorded on the chain at submission wins — a chain executes under
+ * the broker it was submitted with, never a fresh read that could
+ * disagree mid-chain. Without a recorded broker, the tenant broker
+ * is read fail-closed (readTenantBrokerSelection): unconfigured or
+ * unreadable refuses loudly instead of defaulting to E*TRADE.
+ * Non-etrade broker → that broker's platform chain source; no chain
+ * source → throws provider_unsupported, never a silent E*TRADE
+ * substitution. Test seam: deps.getChainSourceForBroker overrides
+ * the registry lookup (production leaves it unset).
+ */
+export async function resolveShardChainSource(
+  deps: Pick<
+    ShardExecutorDeps,
+    "env" | "orm" | "createETradeService"
+  > & {
+    getChainSourceForBroker?: (
+      broker: string,
+      args: { env: unknown; userLogin: string; environment?: string }
+    ) => OptionChainSource | null;
+  },
+  chain: ShardChainContext
+): Promise<OptionChainSource> {
+  const broker =
+    chain.brokerId ??
+    (await (async () => {
+      // Issue #3655: lazy import of providerConnections — it sits on
+      // a load cycle with the trading barrel (providerConnections →
+      // ../trading → unifiedOptionsService → providerConnections); a
+      // static import here would bind unifiedOptionsService to the
+      // real reader instead of a test's vi.mock of it.
+      const { readTenantBrokerSelection } = await import("./providerConnections");
+      const read = await readTenantBrokerSelection(
+        deps.env as unknown as import("../types").Env
+      );
+      if (read.status !== "ok") throw new Error(read.error);
+      return read.brokerId;
+    })());
+  if (broker === "etrade") {
+    return deps.createETradeService(chain.userLogin, chain.environment).client;
+  }
+  if (!isBrokerId(broker)) {
+    throw new Error(
+      `provider_unsupported: broker "${broker}" is not a registered broker; no other broker's data is used in its place.`
+    );
+  }
+  const chainSource = deps.getChainSourceForBroker
+    ? deps.getChainSourceForBroker(broker, {
+        env: deps.env,
+        userLogin: chain.userLogin,
+        environment: chain.environment,
+      })
+    : platformChainSource(
+        TradingPlatformRegistry.getPlatform(
+          broker,
+          deps.env as never,
+          deps.orm,
+          chain.userLogin,
+          chain.environment
+        )
+      );
+  if (chainSource) return chainSource;
+  throw new Error(
+    `provider_unsupported: broker "${broker}" does not provide an options chain source (no getOptionChains/getOptionExpireDates); no other broker's data is used in its place.`
+  );
 }
 
 /** Latest completed sibling result for (stage, shardKey), or null. */
@@ -367,7 +452,14 @@ async function executeOptionsSymbol(
 ): Promise<unknown> {
   const request = chain.options;
   if (!request) throw new Error("Options shard is missing its scan request.");
-  const service = deps.createETradeService(chain.userLogin, chain.environment);
+  // Issue #3655: the chain source is broker-aware — an Alpaca-broker
+  // chain fetches Alpaca chains, never E*TRADE. The resolver is the
+  // broker-aware seam; the E*TRADE-only factory below is the legacy
+  // fallback for callers that did not bind a resolver.
+  const engineClient = deps.resolveChainSource
+    ? await deps.resolveChainSource(chain)
+    : deps.createETradeService(chain.userLogin, chain.environment).client;
+  const service = { client: engineClient };
   const eventCalendar = inputs.eventCalendar ?? await (await import("./eventCalendar")).getSymbolEventCalendar(symbol);
   const policy = resolvePipelinePolicy(deps.env).retry[SHARD_RETRY_BUCKET.feed];
   return withRetry(async () => {

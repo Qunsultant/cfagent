@@ -40,6 +40,12 @@
 import type { AgentContext, Schedule, ScheduleCriteria } from "agents";
 import { resolveEnvironmentConfig } from "../../config/environment";
 import { getStoredTokens, isTokenExpiredEt, etradeIdentityFromLogin } from "../../security/etradeOAuth";
+import {
+  BROKER_DISPLAY_NAMES,
+  isBrokerId,
+  resolveTenantProviders,
+} from "../../services/tenantProviders";
+import { tradingTypeFor } from "../../trading";
 import { isLoginShaped } from "../../security/serviceIdentity";
 import { findDuplicateSchedule } from "../../services/scheduleDedupe";
 import {
@@ -641,25 +647,71 @@ export async function handleSchedulesRoutes(
             ? headerEnvironment
             : resolveEnvironmentConfig(ctx.env).name as ETradeEnvironment);
         if (ctx.accountScopedScheduleCallbacks.has(callback) && !trustedUserLogin) {
-          return Response.json({ success: false, error: "An authenticated E*TRADE account is required to create screening schedules." }, { status: 401 });
+          return Response.json({ success: false, error: "An authenticated broker account is required to create screening schedules." }, { status: 401 });
         }
+        // Issue #3655: the creation credential check follows the tenant
+        // broker, not E*TRADE unconditionally. Broker etrade — or an
+        // unreadable/unconfigured selection, preserving pre-#3655
+        // behaviour — runs the existing E*TRADE token check below,
+        // unchanged. Any other broker verifies that broker's
+        // credentials via resolveScreenSelection; a missing credential
+        // is a 409 NAMING THE BROKER, never E*TRADE. Broker + data
+        // provider + mode are resolved here and stamped onto the
+        // payload at build time (identity, never a form value).
+        let createBrokerId: string | undefined;
+        let createDataProviderId: string | undefined;
+        let createMode: "live" | "paper" | undefined;
         if (ctx.accountScopedScheduleCallbacks.has(callback)) {
-          // Issue #2442 S3: the trusted login (Worker-forwarder
-          // established, never caller-supplied) resolves to its session
-          // identity via the alias record, so a token stored under an
-          // internal-id or alias-login key passes the preflight exactly
-          // as it passes the panel check. Unresolvable yields an empty
-          // identity, keeping today's login-only lookup.
-          const identity = await etradeIdentityFromLogin(ctx.env, trustedUserLogin);
-          const storedTokens = await getStoredTokens(ctx.env, trustedUserLogin, trustedEnvironment, identity);
-          if (!storedTokens || isTokenExpiredEt(storedTokens.storedAt)) {
-            return Response.json({
-              success: false,
-              error: "Connect an E*TRADE account for this environment before creating an account-scoped schedule.",
-            }, { status: 409 });
+          const tenantProviders = await resolveTenantProviders(ctx.env);
+          createDataProviderId = tenantProviders.dataProviderId;
+          // Issue #3655: providerConnections is imported LAZILY, never
+          // statically — it sits on a load cycle with the trading
+          // barrel (providerConnections → ../trading →
+          // unifiedOptionsService → providerConnections); a static
+          // import here would bind unifiedOptionsService to the real
+          // reader instead of a test's vi.mock of it.
+          const { readTenantBrokerSelection } = await import("../../services/providerConnections");
+          const brokerRead = await readTenantBrokerSelection(ctx.env);
+          const brokerId = brokerRead.status === "ok" ? brokerRead.brokerId : "etrade";
+          createBrokerId = brokerId;
+          const createEnvironment = trustedEnvironment === "TEST" ? "TEST" : "PROD";
+          createMode = tradingTypeFor(
+            isBrokerId(brokerId) ? brokerId : "etrade",
+            createEnvironment
+          );
+          if (brokerId === "etrade") {
+            // Issue #2442 S3: the trusted login (Worker-forwarder
+            // established, never caller-supplied) resolves to its session
+            // identity via the alias record, so a token stored under an
+            // internal-id or alias-login key passes the preflight exactly
+            // as it passes the panel check. Unresolvable yields an empty
+            // identity, keeping today's login-only lookup.
+            const identity = await etradeIdentityFromLogin(ctx.env, trustedUserLogin);
+            const storedTokens = await getStoredTokens(ctx.env, trustedUserLogin, trustedEnvironment, identity);
+            if (!storedTokens || isTokenExpiredEt(storedTokens.storedAt)) {
+              return Response.json({
+                success: false,
+                error: "Connect an E*TRADE account for this environment before creating an account-scoped schedule.",
+              }, { status: 409 });
+            }
+          } else {
+            // Issue #3655: lazy import — same cycle as the broker read
+            // above; never a static import of providerConnections here.
+            const { resolveScreenSelection } = await import("../../services/providerConnections");
+            const selection = await resolveScreenSelection({
+              env: ctx.env,
+              userLogin: trustedUserLogin,
+            });
+            if (!selection.resolved) {
+              const display = BROKER_DISPLAY_NAMES[brokerId] ?? brokerId;
+              return Response.json({
+                success: false,
+                error: `Connect a ${display} account for this environment before creating an account-scoped schedule (${selection.code}: ${selection.error}).`,
+              }, { status: 409 });
+            }
           }
         }
-        const { userLogin: _untrustedUserLogin, environment: _untrustedEnvironment, ...safePayload } =
+        const { userLogin: _untrustedUserLogin, environment: _untrustedEnvironment, brokerId: _untrustedBrokerId, dataProviderId: _untrustedDataProviderId, mode: _untrustedMode, ...safePayload } =
           payload && typeof payload === "object" ? payload : {};
         // Issue #2373 (slice C): schedule-creation guard for
         // STOCK schedules, under monetization ON only. Stock
@@ -732,6 +784,11 @@ export async function handleSchedulesRoutes(
             userLogin: trustedUserLogin || undefined,
             environment: trustedEnvironment || undefined,
             trigger: "scheduled",
+            // Issue #3655: server-resolved broker + data provider +
+            // mode ride the identity stamp (never a form value).
+            ...(createBrokerId ? { brokerId: createBrokerId } : {}),
+            ...(createDataProviderId ? { dataProviderId: createDataProviderId } : {}),
+            ...(createMode ? { mode: createMode } : {}),
           });
           if (!built.ok) {
             return Response.json({ success: false, error: built.error }, { status: 400 });
@@ -866,7 +923,7 @@ export async function handleSchedulesRoutes(
       try {
         const context = await ctx.getScreenerExecutionContext();
         const userLogin = request.headers.get("x-user-login") || context?.userLogin;
-        if (!userLogin) return Response.json({ success: false, error: "An authenticated E*TRADE account is required." }, { status: 401 });
+        if (!userLogin) return Response.json({ success: false, error: "An authenticated broker account is required." }, { status: 401 });
         const rawEnvironment = (request.headers.get("x-environment") || "").toUpperCase();
         const environment = rawEnvironment === "TEST" || rawEnvironment === "PROD" ? rawEnvironment : context?.environment;
         await ctx.autoRenewETradeTokens({ userLogin, env: environment });
@@ -1187,7 +1244,7 @@ export async function handleSchedulesRoutes(
         const body = (await request.json().catch(() => ({}))) as any;
         const context = await ctx.getScreenerExecutionContext();
         const userLogin = request.headers.get("x-user-login") || context?.userLogin;
-        if (!userLogin) return Response.json({ success: false, error: "An authenticated E*TRADE account is required." }, { status: 401 });
+        if (!userLogin) return Response.json({ success: false, error: "An authenticated broker account is required." }, { status: 401 });
         const rawEnvironment = (request.headers.get("x-environment") || "").toUpperCase();
         const environment = rawEnvironment === "TEST" || rawEnvironment === "PROD" ? rawEnvironment : context?.environment;
         // Issue #2337 cutover (R-2): the on-demand trigger
@@ -1228,7 +1285,7 @@ export async function handleSchedulesRoutes(
         const body = (await request.json().catch(() => ({}))) as any;
         const context = await ctx.getScreenerExecutionContext();
         const userLogin = request.headers.get("x-user-login") || context?.userLogin;
-        if (!userLogin) return Response.json({ success: false, error: "An authenticated E*TRADE account is required." }, { status: 401 });
+        if (!userLogin) return Response.json({ success: false, error: "An authenticated broker account is required." }, { status: 401 });
         const rawEnvironment = (request.headers.get("x-environment") || "").toUpperCase();
         const environment = rawEnvironment === "TEST" || rawEnvironment === "PROD"
           ? rawEnvironment
@@ -1278,7 +1335,7 @@ export async function handleSchedulesRoutes(
         const body = (await request.json().catch(() => ({}))) as any;
         const context = await ctx.getScreenerExecutionContext();
         const userLogin = request.headers.get("x-user-login") || context?.userLogin;
-        if (!userLogin) return Response.json({ success: false, error: "An authenticated E*TRADE account is required." }, { status: 401 });
+        if (!userLogin) return Response.json({ success: false, error: "An authenticated broker account is required." }, { status: 401 });
         const rawEnvironment = (request.headers.get("x-environment") || "").toUpperCase();
         const environment = rawEnvironment === "TEST" || rawEnvironment === "PROD"
           ? rawEnvironment

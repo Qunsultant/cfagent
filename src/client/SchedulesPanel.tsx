@@ -452,10 +452,33 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
         const accountScoped = ACCOUNT_SCOPED.some((name) => s.callback.toLowerCase().includes(name));
         const owner = payload.userLogin;
         const environment = payload.environment || payload.env;
+        // Issue #3655: the account label names the schedule's broker
+        // (recorded at creation), never a hard-coded E*TRADE. Legacy
+        // payloads without a broker read as E*TRADE — the only broker
+        // wired when they were armed — rather than borrowing the
+        // currently selected broker's name.
+        const brokerLabel =
+          typeof payload.brokerId === "string" && payload.brokerId
+            ? payload.brokerId === "etrade"
+              ? "E*TRADE"
+              : payload.brokerId === "alpaca"
+                ? "Alpaca"
+                : payload.brokerId
+            : "E*TRADE";
+        const modeLabel =
+          typeof payload.mode === "string" && payload.mode
+            ? payload.mode === "live"
+              ? "live"
+              : "paper"
+            : environment === "TEST"
+              ? "paper"
+              : environment === "PROD"
+                ? "live"
+                : "";
         const account = accountScoped
           ? owner
-            ? `E*TRADE account: ${owner}${environment ? ` · ${environment}` : ""}`
-            : "E*TRADE account: missing — this schedule cannot authenticate"
+            ? `${brokerLabel} account: ${owner}${environment ? ` · ${environment}` : ""}${modeLabel ? ` · ${modeLabel}` : ""}`
+            : `${brokerLabel} account: missing — this schedule cannot authenticate`
           : "";
         return (
           <div className="schedule-row-stack">
