@@ -159,6 +159,15 @@ export interface FeedJobDatasetView {
  * plus the job pipeline's state for the same job — the same view
  * the copilot tools return (one source of truth).
  */
+/** A feed job's stored pipeline schedule, as the surface serves it
+ *  (#3530 scheduling-config): the configuration that actually
+ *  schedules the job, or null when no stored definition exists. */
+export interface FeedJobScheduleView {
+  enabled: boolean;
+  interval: string | null;
+  cron: string | null;
+}
+
 export interface FeedJobView {
   jobId: string;
   sourceId: string;
@@ -172,6 +181,17 @@ export interface FeedJobView {
     lastRunAt: string | null;
   } | null;
   nextScheduledRun: string | null;
+  /** The stored schedule (#3530 scheduling-config). Optional here
+   *  because an older API response omits it; the panel treats
+   *  absent exactly like null — unknown, never a guessed cadence. */
+  schedule?: FeedJobScheduleView | null;
+}
+
+/** The schedule route's response (#3530 scheduling-config). */
+export interface FeedJobScheduleResult {
+  jobId: string;
+  schedule: FeedJobScheduleView | null;
+  status: FeedJobView;
 }
 
 /**
@@ -247,6 +267,24 @@ export async function postFeedJobAction(
   await send<unknown>(
     `/api/data-providers/${encodeURIComponent(id)}/feed-jobs/${encodeURIComponent(jobId)}/${action}`,
     { method: "POST" }
+  );
+}
+
+/**
+ * Configure one feed job's stored schedule (#3530): the body is
+ * the operator's shape — { enabled?, intervalMinutes?, cron? } —
+ * and the result carries the stored schedule as the server read it
+ * back. Refusals reject with the server's message + code, like
+ * every call through send().
+ */
+export async function postFeedJobSchedule(
+  id: string,
+  jobId: string,
+  patch: { enabled?: boolean; intervalMinutes?: number; cron?: string }
+): Promise<FeedJobScheduleResult> {
+  return send<FeedJobScheduleResult>(
+    `/api/data-providers/${encodeURIComponent(id)}/feed-jobs/${encodeURIComponent(jobId)}/schedule`,
+    { method: "POST", body: JSON.stringify(patch) }
   );
 }
 
