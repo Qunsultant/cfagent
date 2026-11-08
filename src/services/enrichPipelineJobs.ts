@@ -64,6 +64,7 @@ import type {
   JobPipelineControl,
   JobStatusView,
 } from "./jobPipelineEngine";
+import { withSchedulePreserved } from "./jobPipelineEngine";
 import { JobStepRegistry, type JobStepContext } from "./jobPipelineSteps";
 
 /** The step name an enrich job's configuration references. */
@@ -210,14 +211,17 @@ export async function ensureEnrichPipelineJobs(
   for (const raw of buildAllEnrichPipelineJobDefinitions(env)) {
     const jobId = (raw as { jobId: string }).jobId;
     const existing = await stores.definitions.getDefinition(jobId);
+    // #3530: the stored schedule is operator configuration — a
+    // re-definition for other drift must not revert it.
+    const effective = withSchedulePreserved(raw, existing);
     if (
       existing &&
-      JSON.stringify(existing.rawConfig) === JSON.stringify(raw)
+      JSON.stringify(existing.rawConfig) === JSON.stringify(effective)
     ) {
       ensured.push(jobId);
       continue;
     }
-    await control.defineJob(raw);
+    await control.defineJob(effective);
     ensured.push(jobId);
   }
   return ensured;
