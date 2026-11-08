@@ -35,7 +35,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { readFileSync } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -414,20 +413,6 @@ describe("issue #3738 — a stock voice turn while the channel switch is OFF", (
 /* 4. The copilot routes: status projection + the stored-layer door    */
 /* ------------------------------------------------------------------ */
 
-class SqliteTestStorage {
-  readonly sqlite = new DatabaseSync(":memory:");
-  exec(query: string, ...params: unknown[]) {
-    const stmt = this.sqlite.prepare(query);
-    if (/^\s*(SELECT|PRAGMA)/i.test(query)) {
-      return stmt.all(...(params as never[])) as unknown[];
-    }
-    const info = stmt.run(...(params as never[]));
-    const out = [] as unknown[] & { rowsWritten?: number };
-    out.rowsWritten = Number(info.changes);
-    return out;
-  }
-}
-
 const STATUS_PATH = "/api/stock-copilot/status";
 const CONTROL_PATH = "/api/stock-copilot/control";
 
@@ -443,7 +428,7 @@ async function makeCopilotCtx(options: {
     dataProviderId: "etrade",
     brokerId: "alpaca",
   });
-  const sql = new SqliteTestStorage();
+  const sql = new MockSqlStorage();
   const ctx: StockCopilotRouteContext = {
     env: {
       STOCK_COPILOT_PAPER_ENABLED: "1",
