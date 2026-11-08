@@ -130,6 +130,19 @@ function measure(): Map<string, number> {
  * the serving integration — dispositioned INTEGRATION
  * (3 rows / 11 lines: alpaca 4, etrade 5, yahoo 2). The
  * seed pin totals move 1092/8522 -> 1095/8533 with it.
+ * Baseline update (#3782, 2026-11-08): the Stock Copilot fix adds
+ * two Alpaca MCP tools (alpaca_get_quote, alpaca_preview_order) and
+ * routes the copilot to Alpaca, so provider-brand mentions grow in
+ * the provider's own adapters/registries/routes and in the copilot
+ * steering — all dispositioned INTEGRATION (naming the provider is
+ * their job): 3 new rows (chatPrompt.ts/alpaca 1, marketDataCommands
+ * .ts/etrade 3, mcpPermissionPorts.ts/alpaca 3) and 10 raises
+ * (chatPrompt.ts/etrade 6->7, mcpEndpointsData.ts/alpaca 11->13,
+ * commands.ts/alpaca 1->3, commands.ts/etrade 22->23,
+ * etradeCommands.ts/etrade 118->119, marketDataCommands.ts/alpaca
+ * 29->43, mcpPermissionPorts.ts/etrade 8->9, etrade.ts/etrade
+ * 121->123, marketDataResearch.ts/alpaca 104->106, alpaca/platform
+ * .ts/alpaca 109->111). Seed pin totals move 1095/8533 -> 1098/8568.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (186 rows / 1039 lines) ----
@@ -320,7 +333,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/platformKnowledge.ts", "yahoo", 12],
   ["src/trading/interfaces.ts", "etrade", 2],
 
-  // ---- INTEGRATION (663 rows / 6441 lines) ----
+  // ---- INTEGRATION (666 rows / 6476 lines) ----
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "etrade", 12],
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "yahoo", 1],
   ["docs/EXTERNAL_APIS_AND_ENDPOINTS_DIRECTORY.md", "alpaca", 3],
@@ -353,7 +366,8 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/agentic/chainExecutor.ts", "etrade", 6],
   ["src/agentic/chainExecutor.ts", "yahoo", 2],
   ["src/agents/browserAgent.ts", "etrade", 4],
-  ["src/agents/chatPrompt.ts", "etrade", 6],
+  ["src/agents/chatPrompt.ts", "alpaca", 1],
+  ["src/agents/chatPrompt.ts", "etrade", 7],
   ["src/agents/copilotTradingMode.ts", "alpaca", 8],
   ["src/agents/copilotTradingMode.ts", "etrade", 5],
   ["src/agents/judge.ts", "alpaca", 1],
@@ -517,7 +531,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/client/firstRunApi.ts", "etrade", 11],
   ["src/client/iaaaAdminApi.ts", "etrade", 1],
   ["src/client/iaaaEndpointCatalog.ts", "etrade", 34],
-  ["src/client/mcpEndpointsData.ts", "alpaca", 11],
+  ["src/client/mcpEndpointsData.ts", "alpaca", 13],
   ["src/client/mcpEndpointsData.ts", "etrade", 53],
   ["src/client/mcpEndpointsData.ts", "yahoo", 5],
   ["src/client/orderPreviewCard.ts", "etrade", 1],
@@ -622,8 +636,8 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/mcps/openaimp/chainJobCommands.ts", "nasdaq", 2],
   ["src/mcps/openaimp/chainJobCommands.ts", "yahoo", 3],
   ["src/mcps/openaimp/cloudflareAgentCommands.ts", "etrade", 32],
-  ["src/mcps/openaimp/commands.ts", "alpaca", 1],
-  ["src/mcps/openaimp/commands.ts", "etrade", 22],
+  ["src/mcps/openaimp/commands.ts", "alpaca", 3],
+  ["src/mcps/openaimp/commands.ts", "etrade", 23],
   ["src/mcps/openaimp/deliverJobCommands.ts", "alpaca", 3],
   ["src/mcps/openaimp/deliverJobCommands.ts", "etrade", 3],
   ["src/mcps/openaimp/deliverJobCommands.ts", "nasdaq", 2],
@@ -632,7 +646,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/mcps/openaimp/enrichJobCommands.ts", "etrade", 3],
   ["src/mcps/openaimp/enrichJobCommands.ts", "nasdaq", 2],
   ["src/mcps/openaimp/enrichJobCommands.ts", "yahoo", 3],
-  ["src/mcps/openaimp/etradeCommands.ts", "etrade", 118],
+  ["src/mcps/openaimp/etradeCommands.ts", "etrade", 119],
   ["src/mcps/openaimp/feedJobCommands.ts", "alpaca", 4],
   ["src/mcps/openaimp/feedJobCommands.ts", "etrade", 4],
   ["src/mcps/openaimp/feedJobCommands.ts", "nasdaq", 3],
@@ -644,9 +658,11 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/mcps/openaimp/index.ts", "alpaca", 4],
   ["src/mcps/openaimp/index.ts", "etrade", 7],
   ["src/mcps/openaimp/index.ts", "yahoo", 5],
-  ["src/mcps/openaimp/marketDataCommands.ts", "alpaca", 29],
+  ["src/mcps/openaimp/marketDataCommands.ts", "alpaca", 43],
+  ["src/mcps/openaimp/marketDataCommands.ts", "etrade", 3],
   ["src/mcps/openaimp/marketDataCommands.ts", "yahoo", 4],
-  ["src/mcps/openaimp/mcpPermissionPorts.ts", "etrade", 8],
+  ["src/mcps/openaimp/mcpPermissionPorts.ts", "alpaca", 3],
+  ["src/mcps/openaimp/mcpPermissionPorts.ts", "etrade", 9],
   ["src/mcps/openaimp/meshDoorCommands.ts", "alpaca", 6],
   ["src/mcps/openaimp/meshDoorCommands.ts", "etrade", 15],
   ["src/mcps/public/publicMcp.ts", "public.com", 6],
@@ -718,7 +734,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/enrichPipelineJobs.ts", "alpaca", 2],
   ["src/services/enrichPipelineJobs.ts", "nasdaq", 1],
   ["src/services/enrichPipelineJobs.ts", "yahoo", 2],
-  ["src/services/etrade.ts", "etrade", 121],
+  ["src/services/etrade.ts", "etrade", 123],
   ["src/services/etrade/types.ts", "etrade", 16],
   ["src/services/etradeAuthPreflight.ts", "etrade", 37],
   ["src/services/etradeExecutionGate.ts", "etrade", 21],
@@ -752,7 +768,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/goalScreenWorkflowSubmission.ts", "etrade", 1],
   ["src/services/goalScreenWorkflowSubmission.ts", "yahoo", 2],
   ["src/services/hedgeProposals.ts", "etrade", 10],
-  ["src/services/marketDataResearch.ts", "alpaca", 104],
+  ["src/services/marketDataResearch.ts", "alpaca", 106],
   ["src/services/marketDataResearch.ts", "etrade", 2],
   ["src/services/marketDataResearch.ts", "yahoo", 31],
   ["src/services/marketDataService.ts", "alpaca", 3],
@@ -835,7 +851,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/trading/alpaca/occSymbol.ts", "alpaca", 8],
   ["src/trading/alpaca/optionsData.ts", "alpaca", 14],
   ["src/trading/alpaca/optionsData.ts", "etrade", 2],
-  ["src/trading/alpaca/platform.ts", "alpaca", 109],
+  ["src/trading/alpaca/platform.ts", "alpaca", 111],
   ["src/trading/alpaca/platform.ts", "etrade", 8],
   ["src/trading/alpaca/signIn.ts", "alpaca", 6],
   ["src/trading/brokerCatalog.ts", "alpaca", 16],
@@ -1279,8 +1295,8 @@ describe("#3525 S6 shrink-only provider-brand census pin", () => {
     expect(total).toBeLessThanOrEqual(PLATFORM_BASELINE_TOTAL);
   });
 
-  it("the baseline itself is the recorded seed (1095 rows / 8533 lines)", () => {
-    expect(BASELINE.length).toBe(1095);
-    expect(BASELINE.reduce((a, [, , c]) => a + c, 0)).toBe(8533);
+  it("the baseline itself is the recorded seed (1098 rows / 8568 lines)", () => {
+    expect(BASELINE.length).toBe(1098);
+    expect(BASELINE.reduce((a, [, , c]) => a + c, 0)).toBe(8568);
   });
 });

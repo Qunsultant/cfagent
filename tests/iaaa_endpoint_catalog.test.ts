@@ -94,7 +94,9 @@ describe("MCP catalog reuse", () => {
     // Counts verified against src/client/mcpEndpointsData.ts at v2
     // authoring time. If the catalog grows, update this pin AND the
     // MCP tab copy — do not silently let the tab go stale.
-    expect(MCP_TOOLS_CATALOG.length).toBe(34);
+    // 36 since #3782 (+2 Alpaca quote/preview tools); the MCP tab
+    // reads MCP_TOOLS_CATALOG directly, so no separate copy to update.
+    expect(MCP_TOOLS_CATALOG.length).toBe(36);
     expect(MCP_RESOURCES_CATALOG.length).toBe(8);
     expect(MCP_PROMPTS_CATALOG.length).toBe(4);
   });

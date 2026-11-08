@@ -98,6 +98,7 @@ other doors. Scope column is #1843's declaration, consumed here.
 | `foss_alpaca_positions` (deprecated #1906 alias of `alpaca_positions`, same scope) | mcp:read | L (I / R on other doors) |
 | `alpaca_orders` | mcp:read | L (I / R on other doors) |
 | `foss_alpaca_orders` (deprecated #1906 alias of `alpaca_orders`, same scope) | mcp:read | L (I / R on other doors) |
+| `alpaca_get_quote` | mcp:read | L (I / R on other doors) — live quote with provenance (#3782); the copilot's quote tool for its broker (#3451) |
 | `browser_inspect_page` | mcp:read | L (I / R on other doors) |
 | `web_fetch` | mcp:read | L (I / R on other doors) — the standalone unrendered page fetch (#2760, tracker #2708 A3): acting login carried in the tool audit from context only (no identity argument); failures propagate as named `web_fetch_*` errors, never fabricated content |
 | `get_feed_job_status` | mcp:read | L via door 2 only — acting identity required (#3535); refused on doors 1/3 (no acting-identity carrier there) |
@@ -199,6 +200,7 @@ other doors. Scope column is #1843's declaration, consumed here.
 | `etrade_preview_order` | mcp:trade | L (I / R on other doors) |
 | `etrade_execute_order` | mcp:trade | L (I / R on other doors) |
 | `alpaca_place_order` | mcp:trade | L (I / R on other doors) |
+| `alpaca_preview_order` | mcp:trade | L (I / R on other doors) — creates a draft with a provenanced price (#3782); refuses LIMIT drafts with no user limit and no live quote |
 | `alpaca_place_bracket_ladder` | mcp:trade | L (I / R on other doors) |
 | `alpaca_cancel_bracket_ladder` | mcp:trade | L (I / R on other doors) |
 | `foss_alpaca_place_order` (deprecated #1906 alias of `alpaca_place_order`, same scope) | mcp:trade | L (I / R on other doors) |

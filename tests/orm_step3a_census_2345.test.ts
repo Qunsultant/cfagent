@@ -57,7 +57,9 @@ const DATA_LAYER_FILES: Array<[string, number]> = [
   ["src/data/doSqliteMarketplaceAdapter.ts", 2],
   // 15 since #3089 (S3) added the mas_trades broker column's
   // PRAGMA-guarded ALTER (PRAGMA table_info check + ALTER).
-  ["src/data/ormFacade.ts", 15],
+  // 17 since #3782 added the mas_trades price_source column's
+  // PRAGMA-guarded ALTER (same precedent: check + ALTER).
+  ["src/data/ormFacade.ts", 17],
   ["src/data/ormSchema.ts", 4],
   ["src/data/d1MarketplaceAdapter.ts", 0],
   ["src/data/inMemoryOrmAdapters.ts", 0],
