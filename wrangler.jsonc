@@ -296,6 +296,16 @@
     "AGENT_CAPABILITIES_DISABLED": "",
     "CHAT_NLQ_MODE": "on",
     "SCREENER_ND_MODE": "on",
+    // Issue #3738 — per-copilot channel switches (owner direction
+    // 2026-11-08): channel enablement per copilot registration is
+    // externalized and resolved stored > env > code default
+    // (src/services/copilotChannels.ts). Production value: the
+    // Stock Copilot's voice channel is ON, carried explicitly by
+    // this layer (a login's stored channel setting still wins over
+    // it). Rollback is removing the entry (the code default for
+    // stock:voice is also on) or setting it to "stock:voice=off",
+    // and redeploying.
+    "COPILOT_CHANNELS": "stock:voice=on",
     // Issue #3452 — Stock Copilot cycle cadence (AOP). Optional;
     // absence uses "every 30 minutes". Floor is 30m (Worker cron limit).
     // "STOCK_COPILOT_CADENCE": "every 30 minutes",

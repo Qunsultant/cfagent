@@ -124,6 +124,21 @@ export interface Env {
   // deliberately NOT in wrangler.jsonc: the fleet ships with
   // nothing disabled.
   AGENT_CAPABILITIES_DISABLED?: string;
+  // Issue #3738 — externalized per-copilot channel switches (AOP,
+  // same idiom as AGENT_CAPABILITIES_DISABLED above).
+  // Comma-separated "<registration>:<channel>=on|off" entries
+  // (registration: general|options|stock; channel: the capability
+  // manifest's channels — chat, webhooks, email, slack, voice)
+  // setting the DEPLOYMENT layer of a copilot's channel switches.
+  // The login's stored setting (mas_settings key
+  // "copilot_channels:<registration>") wins over this var; absence
+  // of an entry falls to the code default, which records the
+  // pair's current effective behavior. Resolved by
+  // src/services/copilotChannels.ts; set in wrangler.jsonc with
+  // stock:voice=on (the production value — the Stock Copilot's
+  // voice channel is on). Rollback is editing the entry and
+  // redeploying — no code change.
+  COPILOT_CHANNELS?: string;
   APP_NAME: string;
   GITHUB_CLIENT_ID: string;
   GITHUB_CLIENT_SECRET: string;

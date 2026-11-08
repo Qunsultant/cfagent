@@ -23,6 +23,12 @@ import { PortfolioRiskPanel } from "./PortfolioRiskPanel";
 import { brokerSectionNav } from "./brokerSectionNav";
 import type { RiskBroker } from "./portfolioRiskApi";
 import { brokerSupports, isBrokerId } from "../trading";
+import {
+  isVoiceRecognitionSupported,
+  speakVoiceText,
+  startVoiceRecognition,
+  submitVoiceTurn,
+} from "./voiceDeskClient";
 import { brokerModeBadge, brokerPresentation } from "../trading/brokerPresentation";
 import {
   accountsFromPayload,
@@ -573,16 +579,14 @@ export function ETradeTradingHub({
   const [speechRecognitionActive, setSpeechRecognitionActive] = useState(false);
 
   const speakText = (text: string) => {
-    if (typeof window !== "undefined" && "speechSynthesis" in window && !voiceIsMuted) {
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 1.05;
-      utterance.pitch = 1.0;
-      utterance.onstart = () => setVoiceStatus("speaking");
-      utterance.onend = () => setVoiceStatus("idle");
-      utterance.onerror = () => setVoiceStatus("idle");
-      window.speechSynthesis.speak(utterance);
-    }
+    // #3738: the shared voice-desk client (voiceDeskClient.ts) —
+    // the same TTS helper the Stock Copilot panel's voice control
+    // speaks through.
+    speakVoiceText(text, {
+      muted: voiceIsMuted,
+      onStart: () => setVoiceStatus("speaking"),
+      onEnd: () => setVoiceStatus("idle"),
+    });
   };
 
   const handleVoiceTurn = async (textToSubmit?: string) => {
@@ -601,12 +605,10 @@ export function ETradeTradingHub({
     ]);
 
     try {
-      const resp = await fetch("/api/trading/voice/turn", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-environment": activeEnv },
-        body: JSON.stringify({ transcript: prompt }),
-      });
-      const data = (await resp.json()) as any;
+      // #3738: the shared voice-desk client (voiceDeskClient.ts)
+      // submits the turn — the same call the Stock Copilot panel's
+      // voice control makes, with its copilot context stamped.
+      const data = await submitVoiceTurn(prompt, { environment: activeEnv });
 
       const assistantMsg = {
         role: "assistant" as const,
@@ -645,9 +647,8 @@ export function ETradeTradingHub({
 
   const handleToggleVoiceRecording = () => {
     if (typeof window === "undefined") return;
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
-    if (!SpeechRecognition) {
+    if (!isVoiceRecognitionSupported()) {
       toast.warning("Web Speech API is not supported in this browser. You can type in the prompt box or use the quick chips.");
       return;
     }
@@ -658,47 +659,30 @@ export function ETradeTradingHub({
       return;
     }
 
-    try {
-      const recognition = new SpeechRecognition();
-      recognition.continuous = false;
-      recognition.interimResults = true;
-      recognition.lang = "en-US";
-
-      recognition.onstart = () => {
+    // #3738: the shared voice-desk client (voiceDeskClient.ts)
+    // runs the recognition pass; the hub wires its state to the
+    // pass's callbacks, exactly as the Stock Copilot panel's
+    // voice control does.
+    const handle = startVoiceRecognition({
+      onStart: () => {
         setSpeechRecognitionActive(true);
         setVoiceStatus("listening");
-      };
-
-      recognition.onresult = (event: any) => {
-        let interim = "";
-        let final = "";
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          if (event.results[i].isFinal) {
-            final += event.results[i][0].transcript;
-          } else {
-            interim += event.results[i][0].transcript;
-          }
-        }
-        if (interim) setVoiceInterim(interim);
-        if (final) {
-          setVoiceInterim(null);
-          setSpeechRecognitionActive(false);
-          handleVoiceTurn(final);
-        }
-      };
-
-      recognition.onerror = () => {
+      },
+      onInterim: (text) => setVoiceInterim(text),
+      onFinal: (text) => {
+        setVoiceInterim(null);
+        setSpeechRecognitionActive(false);
+        void handleVoiceTurn(text);
+      },
+      onError: () => {
         setSpeechRecognitionActive(false);
         setVoiceStatus("idle");
-      };
-
-      recognition.onend = () => {
+      },
+      onEnd: () => {
         setSpeechRecognitionActive(false);
-      };
-
-      recognition.start();
-    } catch (e) {
-      console.warn("Speech recognition error:", e);
+      },
+    });
+    if (!handle) {
       setSpeechRecognitionActive(false);
       setVoiceStatus("idle");
     }

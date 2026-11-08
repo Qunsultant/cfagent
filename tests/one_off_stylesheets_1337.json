@@ -121,7 +121,7 @@
   },
   {
     "path": "src/client/stockCopilotPanel.css",
-    "lines": 75,
-    "reason": "Stock Copilot panel (issue #3422; tokens only)"
+    "lines": 86,
+    "reason": "Stock Copilot panel (issue #3422; tokens only; #3738 voice-control row)"
   }
 ]
