@@ -32,13 +32,13 @@
 | Execution context | Tools run in the caller's own OrchestratorAgent Durable Object instance |
 | SDK | `@modelcontextprotocol/sdk` 1.32.2, `@modelcontextprotocol/server` 2.4.0 (`package.json:31-32`) |
 
-## 2. Tools — 116 in `tools/list`
+## 2. Tools — 118 in `tools/list`
 
 One factory, `McpToolFactory` (`src/mcps/openaimp/commands.ts`, static
-registration block): **116 `this.registerTool(...)` calls**, reconciled
-against **116 entries** in the scope table `MCP_TOOL_SCOPES`
+registration block): **118 `this.registerTool(...)` calls**, reconciled
+against **118 entries** in the scope table `MCP_TOOL_SCOPES`
 (`src/mcps/openaimp/mcpPermissionPorts.ts:155`, completeness-pinned by test
-against the live factory registry). Of the 116, **107 are canonical** and
+against the live factory registry). Of the 118, **109 are canonical** and
 **9 are deprecated `foss_*` aliases** (#1906; removal is a follow-up, not
 part of this inventory).
 
@@ -56,29 +56,29 @@ part of this inventory).
 | Goals & chains | 3 | `goal.compile`, `goal.schedule`, `chain.run` (dotted names) |
 | AgentDB reads | 5 | `agentdb.chain.status`, `agentdb.jobs.history`, `agentdb.audit.history`, `agentdb.reports.list`, `agentdb.trace.get` (dotted names) |
 | Web | 2 | `web_search`, `web_fetch` |
-| Job pipeline (#3533) | 24 | `run_feed_job`, `get_feed_job_status`, `list_feed_jobs`, `manage_feed_job`, `run_enrich_job`, `get_enrich_job_status`, `list_enrich_jobs`, `manage_enrich_job`, `run_analyze_job`, `get_analyze_job_status`, `list_analyze_jobs`, `manage_analyze_job`, `run_generate_job`, `get_generate_job_status`, `list_generate_jobs`, `manage_generate_job`, `run_deliver_job`, `get_deliver_job_status`, `list_deliver_jobs`, `manage_deliver_job`, `run_pipeline_chain`, `get_pipeline_chain_status`, `list_pipeline_chains`, `manage_pipeline_chain` |
+| Job pipeline (#3533) | 26 | `run_feed_job`, `get_feed_job_status`, `list_feed_jobs`, `manage_feed_job`, `get_feed_job_schedule`, `set_feed_job_schedule`, `run_enrich_job`, `get_enrich_job_status`, `list_enrich_jobs`, `manage_enrich_job`, `run_analyze_job`, `get_analyze_job_status`, `list_analyze_jobs`, `manage_analyze_job`, `run_generate_job`, `get_generate_job_status`, `list_generate_jobs`, `manage_generate_job`, `run_deliver_job`, `get_deliver_job_status`, `list_deliver_jobs`, `manage_deliver_job`, `run_pipeline_chain`, `get_pipeline_chain_status`, `list_pipeline_chains`, `manage_pipeline_chain` |
 | Mesh scheduled goals | 2 | `list_scheduled_goals`, `trigger_scheduled_goal` |
 | Trading proposals & report assets | 7 | `propose_stock_trade`, `propose_options_trade`, `get_trading_accounts`, `get_trading_positions`, `get_trading_quote`, `list_report_assets`, `get_report_asset` |
 | Trade approval (HITL) | 3 | `start_trade_approval`, `decide_trade_approval`, `get_trade_approval_status` |
 | Browser & Slack mesh | 5 | `browser_snap_transaction`, `browser_capture_page`, `browser_scrape_tables`, `slack_send_pre_trade_approval`, `slack_dispatch_transaction_snap` |
 | Screens | 2 | `run_stock_screen`, `run_options_strategy_screen` |
 | Stock Copilot | 5 | `stock_copilot_status`, `stock_copilot_control`, `stock_copilot_introspect`, `stock_copilot_learnings`, `stock_copilot_evaluate` |
-| **Total** | **116** | |
+| **Total** | **118** | |
 
 Note: `execute_nlq` is grouped above by domain (platform/knowledge) but
 carries the `mcp:execute` scope (§2.2), not `mcp:read`.
 
-### 2.2 Scopes — 6 scopes, 116 tools
+### 2.2 Scopes — 6 scopes, 118 tools
 
 Every tool declares exactly one scope in `MCP_TOOL_SCOPES`; execution
 passes through the permission gate (`executeWithPermissionGate`) before
-execution. Scope totals: 59 `mcp:read`, 25 `mcp:write`, 7 `mcp:execute`,
-12 `mcp:trade`, 9 `mcp:payments`, 4 `mcp:admin` (116 total).
+execution. Scope totals: 60 `mcp:read`, 26 `mcp:write`, 7 `mcp:execute`,
+12 `mcp:trade`, 9 `mcp:payments`, 4 `mcp:admin` (118 total).
 
 | Scope | Count | Tools |
 | --- | --- | --- |
-| `mcp:read` | 59 | All read tools, including `knowledge_search`, `web_search`, `web_fetch`, `get_async_job`, `list_async_jobs`, the E\*TRADE/market-data/Alpaca reads, the `foss_*` read aliases, the AgentDB reads, the job-pipeline `get_*`/`list_*` status tools, `get_trading_accounts`, `get_trading_positions`, `get_trading_quote`, `list_report_assets`, `get_report_asset`, `get_trade_approval_status`, `browser_scrape_tables`, `stock_copilot_status`, `stock_copilot_introspect`, `stock_copilot_learnings`, `stock_copilot_evaluate` |
-| `mcp:write` | 25 | `manage_categories`, `manage_referrals`, `manage_external_ads`, `manage_session_memory`, `goal.compile`, `goal.schedule`, `trigger_scheduled_goal`, the job-pipeline `run_*`/`manage_*` tools, `browser_snap_transaction`, `browser_capture_page`, `slack_dispatch_transaction_snap`, `run_stock_screen`, `run_options_strategy_screen`, `stock_copilot_control` |
+| `mcp:read` | 60 | All read tools, including `knowledge_search`, `web_search`, `web_fetch`, `get_async_job`, `list_async_jobs`, the E\*TRADE/market-data/Alpaca reads, the `foss_*` read aliases, the AgentDB reads, the job-pipeline `get_*`/`list_*` status tools, `get_trading_accounts`, `get_trading_positions`, `get_trading_quote`, `list_report_assets`, `get_report_asset`, `get_trade_approval_status`, `browser_scrape_tables`, `stock_copilot_status`, `stock_copilot_introspect`, `stock_copilot_learnings`, `stock_copilot_evaluate` |
+| `mcp:write` | 26 | `manage_categories`, `manage_referrals`, `manage_external_ads`, `manage_session_memory`, `goal.compile`, `goal.schedule`, `trigger_scheduled_goal`, the job-pipeline `run_*`/`manage_*` tools and `set_feed_job_schedule`, `browser_snap_transaction`, `browser_capture_page`, `slack_dispatch_transaction_snap`, `run_stock_screen`, `run_options_strategy_screen`, `stock_copilot_control` |
 | `mcp:execute` | 7 | `execute_nlq`, `chain.run`, `run_sandbox_command`, `run_quant_backtest`, `dispatch_trading_webhook`, `think_trade_validation`, `browser_screenshot` |
 | `mcp:trade` | 12 | `alpaca_cancel_bracket_ladder`, `alpaca_place_bracket_ladder`, `alpaca_place_order`, `decide_trade_approval`, `etrade_execute_order`, `etrade_preview_order`, `execute_durable_twap`, `foss_alpaca_place_order` (deprecated #1906 alias), `propose_options_trade`, `propose_stock_trade`, `slack_send_pre_trade_approval`, `start_trade_approval` |
 | `mcp:payments` | 9 | `agentic_wallet_status`, `check_payment_budget`, `confirm_payment_draft`, `draft_payment`, `get_payment_gateways`, `get_payments_overview`, `get_transactions`, `paid_market_research`, `paid_options_screener` |
@@ -199,8 +199,8 @@ as a tracked decision in #3748 — this inventory does not assert a
 
 Counts in this document were verified on a fresh `main` tarball by
 counting `this.registerTool(...)` calls in
-`src/mcps/openaimp/commands.ts` (116), entries in `MCP_TOOL_SCOPES`
-(116, per-scope totals 59/25/7/12/9/4), entries in `MCP_RESOURCES` (14)
+`src/mcps/openaimp/commands.ts` (118), entries in `MCP_TOOL_SCOPES`
+(118, per-scope totals 60/26/7/12/9/4), entries in `MCP_RESOURCES` (14)
 and `MCP_PROMPTS` (5) in `src/mcps/openaimp/index.ts`, entries in
 `SYNCHRONOUS_MCP_TOOLS` (7) in `src/config/asyncJobModes.ts`, and the
 `screen_options` / `scanner_status` / `get_scan_job` / `list_scan_jobs`
