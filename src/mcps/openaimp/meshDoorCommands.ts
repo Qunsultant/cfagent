@@ -1414,7 +1414,7 @@ export class StockCopilotStatusCommand implements IMcpToolCommand<Record<string,
 export class StockCopilotControlCommand implements IMcpToolCommand<StockCopilotControlInput> {
   readonly name = "stock_copilot_control";
   readonly description =
-    "Pause or resume the autonomous Stock Copilot trading loop, set cycle cadence/interval, update enabled trading sessions, configure watch universe, or switch execution mode (deterministic vs agentic).";
+    "Pause or resume the autonomous Stock Copilot trading loop, set cycle cadence/interval, update enabled trading sessions, configure watch universe, switch execution mode (deterministic vs agentic), or toggle RSI mode (governed vs self).";
   readonly jsonSchema = {
     type: "object" as const,
     properties: {
@@ -1449,6 +1449,11 @@ export class StockCopilotControlCommand implements IMcpToolCommand<StockCopilotC
         enum: ["deterministic", "agentic"],
         description: "Active execution mode: 'deterministic' (rule-based) or 'agentic' (perceive-plan-critic-learn).",
       },
+      rsiMode: {
+        type: "string",
+        enum: ["governed", "self"],
+        description: "RSI self-improvement mode: 'governed' (publishes GitHub issues for agentic team) or 'self' (autonomous backtesting in SandboxAgent upon approval).",
+      },
     },
   };
   readonly zodSchema = z.object({
@@ -1459,6 +1464,7 @@ export class StockCopilotControlCommand implements IMcpToolCommand<StockCopilotC
     universe: z.union([z.string(), z.array(z.string())]).optional().describe("Universe preset or ticker array"),
     strategies: z.union([z.string(), z.array(z.string())]).optional().describe("Strategy array or 'all'"),
     executionMode: z.enum(["deterministic", "agentic"]).optional().describe("Execution mode"),
+    rsiMode: z.enum(["governed", "self"]).optional().describe("RSI mode ('governed' or 'self')"),
   });
 
   async execute(

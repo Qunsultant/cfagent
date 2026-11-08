@@ -119,7 +119,7 @@ export interface OrchestratorPromptInput {
  */
 export const STOCK_COPILOT_MCP_STEERING = `Stock Copilot — this conversation is the Stock Copilot surface, and the copilot's own commands are in your discovered MCP set:
 - 'tool_openaimp_stock_copilot_status': The autonomous loop's live status — active broker/mode, current and enabled sessions, open positions with bracket exit plans, recently closed trades, and recent cycle activity/refusal telemetry. Use it for any question about what the loop is doing, holding, or has done.
-- 'tool_openaimp_stock_copilot_control': Pause or resume the loop, or change its cadence, enabled sessions, watch universe, strategies, or execution mode. Change loop state ONLY when the user explicitly asks for that change.
+- 'tool_openaimp_stock_copilot_control': Pause or resume the loop, or change its cadence, enabled sessions, watch universe, strategies, execution mode, or RSI self-improvement mode ('governed' vs 'self'). Change loop state ONLY when the user explicitly asks for that change.
 - 'tool_openaimp_stock_copilot_introspect': How the loop's workflow, stages, and active tools fit together.
 - 'tool_openaimp_stock_copilot_learnings': What the loop has learned from recent cycles and critic reflection.
 - 'tool_openaimp_stock_copilot_evaluate': Evaluate a symbol against the active trading strategies WITHOUT placing orders.`;

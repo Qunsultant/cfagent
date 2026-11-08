@@ -33,6 +33,7 @@ import { SchedulesHome } from "./SchedulesHome";
 import { getCrumb } from "./routes";
 import { StockSearchBar } from "./components/StockSearchBar";
 import { MarketTickerTape } from "./components/MarketTickerTape";
+import { useTickerEnabled } from "./quotes/tickerVisibility";
 import { AuditEventCard } from "./components/AuditEventCard";
 import { MarketStatusPill } from "./components/MarketStatusPill";
 import { AskAgentWidget } from "./components/AskAgentWidget";
@@ -209,6 +210,7 @@ export function Chat({ user }: { user: User }) {
   const selectedBrokerLabel = BROKER_OPTIONS.find((o) => o.id === tenantProviders.brokerId)?.label ?? tenantProviders.brokerId;
   const autoRefreshEnabled = autoRefreshState.enabled;
   const autoRefreshInterval = autoRefreshState.interval;
+  const tickerEnabled = useTickerEnabled();
 
   // Issue #277: server-owned setting for HITL confirmation on
   // research-report dispatch. Default ON (#1144, owner decision).
@@ -1822,16 +1824,18 @@ export function Chat({ user }: { user: User }) {
           </header>
         )}
 
-      {/* Real-Time Market Ticker Tape (Streaming Live Benchmark Quotes) */}
-      <MarketTickerTape
-        onSelectTab={(newTab) => {
-          handleSelectTab(newTab);
-          setTbdMenuOpen(false);
-        }}
-        onSelectSymbol={(sym) => {
-          handleAskAgent(`Quote and analyze ${sym}`);
-        }}
-      />
+      {/* Real-Time Market Ticker Tape (Streaming Live Benchmark Quotes, Optional - Default OFF) */}
+      {tickerEnabled && (
+        <MarketTickerTape
+          onSelectTab={(newTab) => {
+            handleSelectTab(newTab);
+            setTbdMenuOpen(false);
+          }}
+          onSelectSymbol={(sym) => {
+            handleAskAgent(`Quote and analyze ${sym}`);
+          }}
+        />
+      )}
 
       {/* External Ad Network Monetization Strip (Configurable via Settings) */}
       {effectiveAdBannerConfig.enabled && effectiveAdBannerConfig.showAdNetworkStrip && Boolean(effectiveAdBannerConfig.tabVisibility[tab]) && externalAds.length > 0 && externalAds[activeExtAdIndex] && (

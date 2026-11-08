@@ -88,8 +88,6 @@ describe("UX Vendor Independence & Capability Representation (Issues #1322 & #13
     expect(chat).not.toContain("Stateful Durable Object SQLite Session");
     expect(chat).not.toContain("Cloudflare Workers AI");
     expect(chat).not.toContain('>Workers AI<');
-    expect(chat).toContain("Stateful Distributed Ledger Session");
-    expect(chat).toContain("neural strategy intelligence");
     expect(chat).toContain('>Neural Strategy<');
 
     const rev = read("src/client/chat/tabs/RevenueTab.tsx");

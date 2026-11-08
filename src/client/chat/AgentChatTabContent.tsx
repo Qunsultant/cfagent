@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { extractText } from "./types";
 import { useUrlSyncedTabs } from "../useUrlSyncedTabs";
 import { CapabilityNavBar, type CapabilityTabItem } from "../components/CapabilityNavBar";
+import { TabHoverItem } from "../TabHoverItem";
 import type { AdItem, User } from "./types";
 import { MarkdownContent } from "./MarkdownContent";
 import { ReasoningView } from "./ReasoningView";
@@ -386,7 +387,6 @@ export function AgentChatTabContentInner({
 
       {/* Action Bar */}
       <div className="chat-action-bar">
-        <span className="chat-subtitle">Stateful Distributed Ledger Session · neural strategy intelligence</span>
         {/* Default quick chips references for #2563: Bull Put Spread, Iron Condor */}
         {messages.length > 0 && (
           <Button
@@ -718,24 +718,29 @@ export function AgentChatTabContentInner({
         activeTabId={activeView}
         onTabChange={handleViewChange}
         className="chat-capability-subnav"
+        rightContent={
+          currentCopilot ? (
+            <TabHoverItem
+              align="right"
+              eyebrow={currentCopilot.label}
+              title={currentCopilot.tooltip?.title || currentCopilot.label}
+              description={currentCopilot.banner?.description || currentCopilot.tooltip?.description || ""}
+            >
+              <Badge
+                className="copilot-hover-info-badge"
+                appearance="tint"
+                color="brand"
+                size="small"
+                tabIndex={0}
+                role="note"
+                aria-label={`${currentCopilot.label} details`}
+              >
+                ℹ️ {currentCopilot.label} Info
+              </Badge>
+            </TabHoverItem>
+          ) : undefined
+        }
       />
-      {/* Copilot Mode Banner (Options Copilot, Stock Copilot, or registered custom copilot) */}
-      {currentCopilot?.banner && (
-        <div className="options-copilot-banner">
-          <div className="options-copilot-info">
-            <span style={{ fontSize: "var(--font-size-title-sm)" }}>{currentCopilot.banner.icon}</span>
-            <div>
-              <strong style={{ color: "var(--color-text-primary)" }}>{currentCopilot.banner.headline}</strong>{" "}
-              <span>{currentCopilot.banner.description}</span>
-            </div>
-          </div>
-          {currentCopilot.banner.badgeText && (
-            <Badge size="extra-small" style={{ textTransform: "uppercase" }} color={currentCopilot.banner.badgeColor || "brand"} appearance="tint">
-              {currentCopilot.banner.badgeText}
-            </Badge>
-          )}
-        </div>
-      )}
       <Dialog
         open={clearConfirmOpen}
         onOpenChange={(_e, data) => {

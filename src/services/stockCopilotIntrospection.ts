@@ -45,6 +45,10 @@ import {
 } from "./stockCopilotSessions";
 import { resolveCopilotCadence } from "./stockCopilotCadence";
 import { resolveCopilotExecutionMode } from "./stockCopilotExecutionMode";
+import {
+  resolveStockCopilotRsiMode,
+  type StockCopilotRsiMode,
+} from "./stockCopilotRsiMode";
 
 export interface PipelineToolItem {
   name: string;
@@ -58,6 +62,28 @@ export interface PipelineStageMapping {
   title: string;
   description: string;
   tools: PipelineToolItem[];
+}
+
+export interface CapabilityImprovementProposal {
+  gapId: string;
+  title: string;
+  diagnosis: string;
+  neededCapabilities: string[];
+  leveragedTools: {
+    domain: string[];
+    platform: string[];
+  };
+  synthesisPath: string;
+  readiness: "suggestion" | "ready_to_synthesize" | "active";
+  governedPathway: {
+    targetIssueTitle: string;
+    lane: string;
+    actionablePlan: string;
+  };
+  selfRsiPathway: {
+    platformTool: string;
+    autonomousAction: string;
+  };
 }
 
 export interface StockCopilotIntrospectionResult {
@@ -76,6 +102,7 @@ export interface StockCopilotIntrospectionResult {
     enabledSessions: readonly CopilotSessionId[];
     universe: string[];
     strategies: readonly string[];
+    rsiMode: StockCopilotRsiMode;
     paused: boolean;
     pauseUntil: string | null;
   };
@@ -91,6 +118,7 @@ export interface StockCopilotIntrospectionResult {
     learnings: string[];
     criticSummary: string;
     adaptationRecommendations: string[];
+    capabilityProposals: CapabilityImprovementProposal[];
   };
   explanationMarkdown: string;
 }
@@ -209,6 +237,148 @@ export function buildPipelineStageCatalog(): PipelineStageMapping[] {
 }
 
 /**
+ * Synthesize autonomous capability improvement proposals for the Stock Copilot (RSI Loop).
+ * Diagnoses gaps from monitored universe, strategies, active sessions, and cycle refusals,
+ * and formulates concrete development pathways using domain and platform tools.
+ */
+export function synthesizeCapabilityProposals(params: {
+  universe: string[];
+  strategies: readonly string[];
+  enabledSessions: readonly CopilotSessionId[];
+  openPositionsCount: number;
+  refusalsCount: number;
+  rsiMode?: StockCopilotRsiMode;
+}): CapabilityImprovementProposal[] {
+  const proposals: CapabilityImprovementProposal[] = [];
+
+  // 1. Dynamic Universe Expansion via ScreenerAgent
+  if (params.universe.length <= 15) {
+    proposals.push({
+      gapId: "GAP_STATIC_UNIVERSE_BOTTLENECK",
+      title: "Dynamic Momentum Universe Expansion (via ScreenerAgent)",
+      diagnosis: `The current watch universe is limited to ${params.universe.length} static symbols, causing idle cycles when these specific tickers lack setup triggers.`,
+      neededCapabilities: [
+        "Dynamic high-momentum stock screening across broader indices (S&P 500 / Tech-100)",
+        "Pre-market volume surge filtering",
+      ],
+      leveragedTools: {
+        domain: ["screenerAgent", "patternSignals"],
+        platform: ["thinkWorkflow", "browserAgent"],
+      },
+      synthesisPath:
+        "Invoke ScreenerAgent at regular session open to replace or augment static universe with top-20 volume surge leaders, feeding candidate symbols into the pattern evaluation queue.",
+      readiness: "suggestion",
+      governedPathway: {
+        targetIssueTitle: "[Stock Copilot] Dynamic Universe Ingestion from ScreenerAgent",
+        lane: "lane:clo-arsi",
+        actionablePlan:
+          "Draft and publish a GitHub issue under Epic #3514 / #3752 with TDD acceptance criteria for the agentic engineering team.",
+      },
+      selfRsiPathway: {
+        platformTool: "thinkWorkflow",
+        autonomousAction:
+          "Trigger ScreenerAgent job via thinkWorkflow on session start and pipe top-momentum tickers into mas_settings:stock_copilot:universe.",
+      },
+    });
+  }
+
+  // 2. Downside risk hedging via Options Copilot
+  proposals.push({
+    gapId: "GAP_UNHEDGED_CVAR_EXPOSURE",
+    title: "Downside Tail-Risk Options Hedging (via Options Copilot)",
+    diagnosis:
+      "High-conviction equity trades in volatile tech stocks are capped or rejected by CVaR limits due to unhedged single-stock drawdown risk.",
+    neededCapabilities: [
+      "Cross-asset protective put screening",
+      "Dynamic collar structuring to bound maximum loss",
+    ],
+    leveragedTools: {
+      domain: ["cvarRiskGate", "optionsResearchPipeline"],
+      platform: ["a2aMeshDoor", "thinkWorkflow"],
+    },
+    synthesisPath:
+      "Publish an EQUITY_POSITION_OPENED event to the inter-copilot A2A bus; Options Copilot computes a delta-neutral protective put, allowing higher equity position limits under CVaR constraints.",
+    readiness: "suggestion",
+    governedPathway: {
+      targetIssueTitle: "[Stock Copilot] Cross-Asset Options Hedging Integration",
+      lane: "lane:ceo-aimp",
+      actionablePlan:
+        "Publish a GitHub issue under Sub-Issue #3755 specifying the A2A schema between Stock and Options copilots.",
+    },
+    selfRsiPathway: {
+      platformTool: "a2aMeshDoor",
+      autonomousAction:
+        "Send direct A2A event to Options Copilot over the mesh door to structure a protective collar on equity fills.",
+    },
+  });
+
+  // 3. Algorithmic Strategy Synthesis & Backtesting in SandboxAgent
+  if (params.strategies.length <= 5) {
+    proposals.push({
+      gapId: "GAP_STRATEGY_SYNTHESIS_SANDBOX",
+      title: "Autonomous Strategy Research & Sandboxed Backtesting (via SandboxAgent & BrowserAgent)",
+      diagnosis:
+        "The loop currently relies on 4 generic pattern strategies (SMA, RSI, Mean Reversion, Breakout), missing regime-specific edge in choppy or mean-reverting markets.",
+      neededCapabilities: [
+        "Web scraping of published quantitative strategies and code (SSRN, arXiv, GitHub)",
+        "Isolated TypeScript strategy compilation & historical backtesting in SandboxAgent",
+      ],
+      leveragedTools: {
+        domain: ["StockCopilotMemoryPort", "patternSignals"],
+        platform: ["browserAgent", "sandboxAgent", "thinkWorkflow"],
+      },
+      synthesisPath:
+        "Use BrowserAgent to research quantitative momentum/volatility formulas -> dispatch code to SandboxAgent (S8 #3492) -> backtest against 1-year historical market bars -> propose validated strategy with win rate & Sharpe ratio for HITL activation.",
+      readiness: "ready_to_synthesize",
+      governedPathway: {
+        targetIssueTitle: "[Stock Copilot] Algorithmic Regime Adaptive Trading Patterns",
+        lane: "lane:cpo-dhmp",
+        actionablePlan:
+          "Publish a GitHub issue documenting mathematical model specifications for the quantitative research team.",
+      },
+      selfRsiPathway: {
+        platformTool: "sandboxAgent",
+        autonomousAction:
+          "Use BrowserAgent to retrieve quant logic, compile in SandboxAgent (S8 #3492), run 1-year historical backtest, and present StrategyCard for 1-click activation.",
+      },
+    });
+  }
+
+  // 4. 24/7 Extended Liquidity Session Coverage
+  if (params.enabledSessions.length < 4) {
+    proposals.push({
+      gapId: "GAP_RESTRICTED_SESSION_COVERAGE",
+      title: "Around-the-Clock Liquidity Capture (Pre-market, After-hours, EXTO Overnight)",
+      diagnosis: `Only ${params.enabledSessions.length} session(s) are active (${params.enabledSessions.join(", ")}). The loop is idle during global overnight market-moving macro announcements.`,
+      neededCapabilities: [
+        "Overnight EXTO limit order routing",
+        "Wider spread tolerance on extended sessions",
+      ],
+      leveragedTools: {
+        domain: ["stockCopilotSessions", "alpaca_place_order"],
+        platform: ["stock_copilot_control"],
+      },
+      synthesisPath:
+        "Execute 'Enable pre-market and overnight sessions' via stock_copilot_control with limit-only bracket protection.",
+      readiness: "suggestion",
+      governedPathway: {
+        targetIssueTitle: "[Stock Copilot] 24/7 Session Liquidity Calibration",
+        lane: "lane:clo-arsi",
+        actionablePlan:
+          "File an issue to verify broker session terms and extended-hours order acceptance rules.",
+      },
+      selfRsiPathway: {
+        platformTool: "stock_copilot_control",
+        autonomousAction:
+          "Execute stock_copilot_control via chat prompt to enable all 4 sessions immediately.",
+      },
+    });
+  }
+
+  return proposals;
+}
+
+/**
  * Perform runtime introspection of the Stock Copilot:
  * inspects active settings, available tools, telemetry, and distilled learnings.
  */
@@ -238,6 +408,7 @@ export async function introspectStockCopilot(
   const enabledSessions = resolveCopilotSessions({ readSettingRaw, env });
   const universe = resolveCopilotUniverse({ readSettingRaw, env });
   const strategies = resolveCopilotStrategies({ readSettingRaw, env });
+  const rsiMode = resolveStockCopilotRsiMode({ readSettingRaw, env });
 
   const control = controlPort.getControl(userLogin);
   const paused = control?.paused === true;
@@ -291,7 +462,17 @@ export async function introspectStockCopilot(
     );
   }
 
-  // 5. Generate human-readable Markdown briefing
+  // 5. Synthesize Autonomous Capability Improvement Proposals (RSI)
+  const capabilityProposals = synthesizeCapabilityProposals({
+    universe,
+    strategies,
+    enabledSessions,
+    openPositionsCount: openPositions.length,
+    refusalsCount: refusals.length,
+    rsiMode,
+  });
+
+  // 6. Generate human-readable Markdown briefing
   const explanationMarkdown = [
     `# 🧠 Stock Copilot Self-Explanation & Capability Briefing`,
     ``,
@@ -306,6 +487,7 @@ export async function introspectStockCopilot(
     `- **Cycle Cadence:** Configured as \`${cadence.configured}\` (Effective: \`${cadence.effective}\`).`,
     `- **Monitored Universe:** ${universe.map((s) => `\`${s}\``).join(", ")}.`,
     `- **Active Strategies:** ${strategies.map((s) => `\`${s}\``).join(", ")}.`,
+    `- **RSI Self-Improvement Mode:** \`${rsiMode.toUpperCase()}\` (${rsiMode === "governed" ? "Governed Mode [DEFAULT]: Capability proposals requiring code changes are formatted and published as GitHub issues for the agentic team (#ceo-aimp)" : "Self-RSI Mode: Improvements are developed and backtested autonomously via SandboxAgent upon approval"}).`,
     `- **Execution State:** ${paused ? "⏸️ Paused (bracket exits active, new entries halted)" : "▶️ Active and running"}.`,
     ``,
     `---`,
@@ -329,6 +511,27 @@ export async function introspectStockCopilot(
     `**Key Learnings from Recent Cycles:**`,
     ...learnings.map((l) => `- ${l}`),
     adaptationRecommendations.length > 0 ? `\n**Optimization Recommendations:**\n` + adaptationRecommendations.map((r) => `- ${r}`).join("\n") : "",
+    ``,
+    `---`,
+    ``,
+    `## 4. Recursive Self-Improvement (RSI) & Capability Gap Proposals`,
+    `Stock Copilot analyzed its telemetry, risk bounds, and tool set to formulate the following self-improvement proposals (Current Mode: **${rsiMode.toUpperCase()}**):`,
+    ``,
+    ...capabilityProposals.flatMap((p) => [
+      `### 💡 ${p.title} *[${p.readiness.toUpperCase()}]*`,
+      `- **Diagnosis:** ${p.diagnosis}`,
+      `- **Needed Capabilities:** ${p.neededCapabilities.join("; ")}`,
+      `- **Leveraged Tools:** Domain: \`${p.leveragedTools.domain.join("`, `")}\` | Platform: \`${p.leveragedTools.platform.join("`, `")}\``,
+      `- **Active Execution Pathway (${rsiMode === "governed" ? "🏛️ Governed Mode [GitHub Issue]" : "🤖 Self-RSI Mode [SandboxAgent]"}):**`,
+      rsiMode === "governed"
+        ? `  - *GitHub Issue Draft:* ${p.governedPathway.actionablePlan} (Target Issue: \`${p.governedPathway.targetIssueTitle}\`, Lane: \`${p.governedPathway.lane}\`)`
+        : `  - *Autonomous Sandbox Action:* ${p.selfRsiPathway.autonomousAction} (Tool: \`${p.selfRsiPathway.platformTool}\`)`,
+      `- **Alternative Pathway (${rsiMode === "governed" ? "Self-RSI" : "Governed"}):**`,
+      rsiMode === "governed"
+        ? `  - *Self-RSI Option:* ${p.selfRsiPathway.autonomousAction}`
+        : `  - *Governed Option:* ${p.governedPathway.actionablePlan}`,
+      ``,
+    ]),
   ].filter(Boolean).join("\n");
 
   return {
@@ -347,6 +550,7 @@ export async function introspectStockCopilot(
       enabledSessions,
       universe,
       strategies,
+      rsiMode,
       paused,
       pauseUntil,
     },
@@ -362,6 +566,7 @@ export async function introspectStockCopilot(
       learnings,
       criticSummary,
       adaptationRecommendations,
+      capabilityProposals,
     },
     explanationMarkdown,
   };
