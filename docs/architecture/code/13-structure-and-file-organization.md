@@ -115,13 +115,13 @@ cleared on touch. Worst offenders: `src/mcps/openaimp/meshDoorCommands.ts`
 **Definition.** A file under active decomposition carries a byte budget that
 only shrinks, pinned by a test. Budgets are per file, set by the programme
 doing the decomposition.
-**Status.** ENFORCED where pinned. Precedents: `tests/etrade_routes_resplit_995.test.ts`
+**Status.** ENFORCED where pinned. Precedents: `tests/routes_resplit_995.test.ts`
 (every split module < 50,000 B; dispatcher allowance 52,000 B);
-`tests/etrade_broker_portfolio_risk_split_2943.test.ts` (broker file + new
-module < 50,000 B each); the #359 ratchet on `etradeOptions.ts` (50,000 B
+`tests/broker_portfolio_risk_split_2943.test.ts` (broker file + new
+module < 50,000 B each); the #359 ratchet on `brokerOptions.ts` (50,000 B
 ceiling).
 **Conformance at `9925ead8`.** The 4 pinned decomposition budgets are all
-green at base; `etradeOptions.ts` stands at 49,952 B against its 50,000 B
+green at base; `brokerOptions.ts` stands at 49,952 B against its 50,000 B
 ceiling (48 B headroom, per the #3186 review).
 
 ## P3 — The orchestrator class stays within its pinned budget and inventory
@@ -147,7 +147,7 @@ exceed 2,000, none budgeted except the P2/P3 files. Largest:
 `src/agents/routes/agenticPayments.ts` 5,615 lines,
 `src/services/scheduledTasks.ts` 5,212,
 `src/client/options/StrategyDiscoveryPanel.tsx` 3,779,
-`src/trading/etrade/client.ts` 3,587, `src/services/marketDataResearch.ts`
+`src/trading/broker/client.ts` 3,587, `src/services/marketDataResearch.ts`
 3,406, `src/server/routes/auth.ts` 3,344. (`src/server.ts`, the former
 ~188 KB monolith, is 304 lines / 18 KB at base — decomposed under #2902.)
 
@@ -158,6 +158,6 @@ into helper or route modules behind inventories — not grown by accretion.
 Adding substantial new surface to an oversized file without a decomposition
 plan (or a P4 budget) is a violation.
 **Status.** DOCUMENTED — the established pattern of #992 (orchestrator),
-#995/#2943 (E*TRADE routes), #2902 (`server.ts`), #359 (options routes),
+#995/#2943 (broker routes), #2902 (`server.ts`), #359 (options routes),
 recorded in programme records; this file states it as a standing standard.
 **Conformance at `9925ead8`.** Per the P2/P3 pins and the P4 baseline.

@@ -165,4 +165,26 @@ describe("E*TRADE & Broker Immediate Sync Routing (#1149)", () => {
     expect(forwarded[0].pathname).toBe("/tenant/settings/auto-refresh");
     expect(forwarded[0].asyncEligible).toBeNull();
   });
+
+  it("POST /api/platform/accounts/setup and /profile are forwarded with immediate sync (no x-async-eligible) (#3309)", async () => {
+    const { env, forwarded } = makeEnv();
+    const resSetup = await worker.fetch(req("/api/platform/accounts/setup", "POST"), env);
+    expect(resSetup.status).toBe(200);
+    const resProfile = await worker.fetch(req("/api/platform/accounts/profile", "POST"), env);
+    expect(resProfile.status).toBe(200);
+    expect(forwarded).toHaveLength(2);
+    expect(forwarded[0].pathname).toBe("/platform/accounts/setup");
+    expect(forwarded[0].asyncEligible).toBeNull();
+    expect(forwarded[1].pathname).toBe("/platform/accounts/profile");
+    expect(forwarded[1].asyncEligible).toBeNull();
+  });
+
+  it("POST /api/environment/switch is forwarded with immediate sync (no x-async-eligible) (#3309)", async () => {
+    const { env, forwarded } = makeEnv();
+    const res = await worker.fetch(req("/api/environment/switch", "POST"), env);
+    expect(res.status).toBe(200);
+    expect(forwarded).toHaveLength(1);
+    expect(forwarded[0].pathname).toBe("/environment/switch");
+    expect(forwarded[0].asyncEligible).toBeNull();
+  });
 });
