@@ -49,6 +49,7 @@ import type {
   JobStageView,
   JobStatusView,
 } from "./jobPipelineEngine";
+import { withSchedulePreserved } from "./jobPipelineEngine";
 import { FEED_PIPELINE_CATALOG } from "./feedPipelineJobs";
 import { buildAllFeedPipelineJobDefinitions } from "./feedPipelineJobs";
 import { buildAllEnrichPipelineJobDefinitions } from "./enrichPipelineJobs";
@@ -254,14 +255,17 @@ export async function ensureChainPipelineJobs(
   for (const raw of buildAllChainPipelineJobDefinitions(env)) {
     const jobId = (raw as { jobId: string }).jobId;
     const existing = await stores.definitions.getDefinition(jobId);
+    // #3530: the stored schedule is operator configuration — a
+    // re-definition for other drift must not revert it.
+    const effective = withSchedulePreserved(raw, existing);
     if (
       existing &&
-      JSON.stringify(existing.rawConfig) === JSON.stringify(raw)
+      JSON.stringify(existing.rawConfig) === JSON.stringify(effective)
     ) {
       ensured.push(jobId);
       continue;
     }
-    await control.defineJob(raw);
+    await control.defineJob(effective);
     ensured.push(jobId);
   }
   return ensured;
