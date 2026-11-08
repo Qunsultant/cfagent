@@ -286,15 +286,21 @@
     // here and set so the copilots are fully functional/enabled —
     // no constraints. AGENT_CAPABILITIES_DISABLED is explicitly
     // EMPTY (nothing disabled; the capability-manifest resolver's
-    // override list parses to zero entries). CHAT_NLQ_MODE "on"
-    // keeps the discovered execute_nlq tool in chat/copilot
-    // turns' usable set, and SCREENER_ND_MODE "on" admits
-    // non-deterministic screen runs at the mesh doors (each run
-    // still requires its own explicit screenMode + screenIntent).
-    // Rollback is removing these vars (or setting a mode to
-    // "off") and redeploying.
+    // override list parses to zero entries), and SCREENER_ND_MODE
+    // "on" admits non-deterministic screen runs at the mesh doors
+    // (each run still requires its own explicit screenMode +
+    // screenIntent). Rollback is removing these vars and
+    // redeploying.
+    // Issue #3740 — NLQ vs chat is a CHOICE (owner correction
+    // 2026-11-08): chat is the default turn mode, so
+    // CHAT_NLQ_MODE is "off" — the discovered execute_nlq tool
+    // stays out of chat/copilot turns' usable set by default.
+    // The var stays externalized (the env level of the
+    // src/config/chatNlqModes.ts chain keeps working) and a
+    // per-user override can still select NLQ "on". Rollback is
+    // setting CHAT_NLQ_MODE back to "on" and redeploying.
     "AGENT_CAPABILITIES_DISABLED": "",
-    "CHAT_NLQ_MODE": "on",
+    "CHAT_NLQ_MODE": "off",
     "SCREENER_ND_MODE": "on",
     // Issue #3738 — per-copilot channel switches (owner direction
     // 2026-11-08): channel enablement per copilot registration is

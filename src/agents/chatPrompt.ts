@@ -67,9 +67,14 @@
  * Issue #3727: the execute_nlq steering line follows the
  * CHAT_NLQ_MODE gate's resolved value — the caller passes the
  * mode chatNlqTurnGate resolved for the same turn (never a
- * second read of the switch) as `chatNlqEnabled`. Production
- * sets CHAT_NLQ_MODE="on" in wrangler.jsonc, so production
- * turns carry the enabled line; absent/false keeps the
+ * second read of the switch) as `chatNlqEnabled`.
+ *
+ * Issue #3740 (owner correction 2026-11-08): NLQ vs chat is a
+ * CHOICE and chat is the default turn mode — production sets
+ * CHAT_NLQ_MODE="off" in wrangler.jsonc, so production turns
+ * carry the flagged-off line; the enabled line appears only
+ * when the gate resolves "on" for a turn (e.g. a user-level
+ * override in the chatNlqModes chain). Absent/false keeps the
  * flagged-off line and the prompt stays byte-identical to the
  * pre-#3727 prompt (the fixtures' contract).
  */

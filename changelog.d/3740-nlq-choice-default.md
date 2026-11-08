@@ -1,0 +1,2 @@
+### Fixed
+- NLQ is a choice and chat is the default turn mode (#3740): production `CHAT_NLQ_MODE` is now `"off"` (was `"on"` from #3727), so the discovered `execute_nlq` tool stays out of chat/copilot turns by default while the switch stays externalized and a per-user override can still select NLQ on. The #3727 conformance pin is restructured: the capabilities pin (nothing disabled, every mechanism-backed capability enabled) stands, and a separate choices pin proves production resolves to chat while the choice chain stays live both ways. #CAIO-quns
