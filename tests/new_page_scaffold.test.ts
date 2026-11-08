@@ -100,7 +100,7 @@ describe("new-page scaffold (issue #3080)", () => {
       expect(routeTable).toContain("expect(nav).toHaveLength(31);");
       // EXPECTED_IDS gains the new id in sorted position (between
       // risk-analysis and scanner).
-      expect(routeTable).toContain('  "scaffold-probe",\n  "scanner",');
+      expect(routeTable.replace(/\r\n/g, "\n")).toContain('  "scaffold-probe",\n  "scanner",');
       const badges = read(tmp, "tests/nav_unique_icons_badges.test.ts");
       expect(badges).toContain("const NAV_COUNT = 31;");
       // Duplicate id fails instead of overwriting.
@@ -143,7 +143,7 @@ describe("new-page scaffold (issue #3080)", () => {
       const routeTable = read(tmp, "tests/route_table.test.ts");
       expect(routeTable).toContain("expect(nav).toHaveLength(32);");
       expect(routeTable).toContain("Array.from({ length: 32 }");
-      expect(routeTable).toContain('  "scaffold-nav-probe",\n  "scanner",');
+      expect(routeTable.replace(/\r\n/g, "\n")).toContain('  "scaffold-nav-probe",\n  "scanner",');
       const badges = read(tmp, "tests/nav_unique_icons_badges.test.ts");
       expect(badges).toContain("const NAV_COUNT = 32;");
     } finally {
