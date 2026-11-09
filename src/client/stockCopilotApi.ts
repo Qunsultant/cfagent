@@ -10,6 +10,7 @@
  */
 
 import { apiFetch } from "./apiFetch";
+import { currentBrokerLabel } from "./tenantProviders";
 
 /** #3398: the copilot's trading sessions, in canonical order. */
 export type StockCopilotSessionId =
@@ -228,23 +229,20 @@ export async function setStockCopilotChannels(
   );
 }
 
-const BROKER_DISPLAY_NAMES: Record<string, string> = {
-  alpaca: "Alpaca",
-  etrade: "E*TRADE",
-};
-
 /**
  * #3451: the effective selection as the panel shows it — e.g.
  * "Alpaca · Paper" / "Alpaca · Live". Null when the selection did
  * not resolve (the status kind carries that state instead).
  * Display-only: selection itself lives in the dynamic panel menu.
+ * #3751: the broker name resolves through the tenant-providers
+ * identity projection (the server's one identity map, served) —
+ * this module keeps no display-name copy of its own.
  */
 export function copilotSelectionLabel(status: StockCopilotStatus): string | null {
   if (!status.selectionResolved || !status.activeBroker || !status.activeMode) {
     return null;
   }
-  const broker =
-    BROKER_DISPLAY_NAMES[status.activeBroker] ?? status.activeBroker;
+  const broker = currentBrokerLabel(status.activeBroker);
   const mode = status.activeMode === "paper" ? "Paper" : "Live";
   return `${broker} · ${mode}`;
 }
