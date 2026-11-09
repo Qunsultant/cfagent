@@ -894,6 +894,239 @@ export class DeprecatedToolAlias implements IMcpToolCommand {
 }
 
 /**
+ * Issue #3887 — the base-breakout continuation ladder behind the same tool.
+ *
+ * One call is one observation: bars are read, the base is detected, the plan
+ * is built inside the configured caps, and ONE decision is taken (place the
+ * next rung, hold, or stop). Later rungs are placed by later calls that pass
+ * the ladder id and the observed `step_price` — never by a timer.
+ *
+ * `dry_run` runs every line except `placeRung`, so a plan the user reads is a
+ * plan the live path would produce.
+ */
+async function executeBaseBreakoutLadder(input: any, context: McpToolContext) {
+  const {
+    DEFAULT_BASE_DEFINITION,
+    BaseBreakoutLadder,
+    detectBase,
+    planBaseBreakout,
+    resolveTradingLimits,
+  } = await import("../../trading");
+  const { createSettingsPort } = await import("../../data/createSettingsPorts");
+  const { createSqlLadderStateStore, createInMemoryLadderStateStore } = await import(
+    "../../services/ladderStateStore"
+  );
+  const { MarketDataResearchService } = await import("../../services/marketDataResearch");
+
+  const symbol = String(input.symbol || "").trim().toUpperCase();
+  const side = (input.side === "sell" ? "sell" : "buy") as "buy" | "sell";
+  const baseInput = input.base ?? {};
+  const base = {
+    bars: Number(baseInput.bars ?? DEFAULT_BASE_DEFINITION.bars),
+    maxRangePercent: Number(baseInput.max_range_percent ?? baseInput.maxRangePercent ?? DEFAULT_BASE_DEFINITION.maxRangePercent),
+    minVolumeRatio: Number(baseInput.min_volume_ratio ?? baseInput.minVolumeRatio ?? DEFAULT_BASE_DEFINITION.minVolumeRatio),
+  };
+  const ladderIdInput = input.ladder_id ?? input.ladderId ?? null;
+  const dryRun = input.dry_run === true || input.dryRun === true;
+
+  const sql = context.orm?.getSql?.();
+  const store = sql ? createSqlLadderStateStore(sql) : createInMemoryLadderStateStore();
+  const existing = ladderIdInput ? store.load(String(ladderIdInput)) : null;
+
+  // The caps are configuration (#3888), read from the caller's own settings.
+  let readSetting: ((key: string) => string | null) | undefined;
+  if (sql) {
+    try {
+      const settings = createSettingsPort(sql);
+      readSetting = (key) => {
+        try {
+          return settings.get(key);
+        } catch {
+          return null;
+        }
+      };
+    } catch {
+      readSetting = undefined;
+    }
+  }
+  const limits = resolveTradingLimits({ symbol, env: context.env, readSetting });
+
+  const service = new MarketDataResearchService(context.env);
+  let bars: Array<{ timestamp: string; open: number; high: number; low: number; close: number; volume: number }> = [];
+  try {
+    const read = await service.getHistoricalBars(symbol, "1D", base.bars + 1, "alpaca");
+    bars = (read ?? []).map((bar: any) => ({
+      timestamp: String(bar.timestamp ?? ""),
+      open: Number(bar.open),
+      high: Number(bar.high),
+      low: Number(bar.low),
+      close: Number(bar.close),
+      volume: Number(bar.volume),
+    }));
+  } catch (error) {
+    return {
+      success: false,
+      entryMode: "baseBreakout",
+      symbol,
+      code: "base_not_formed",
+      message:
+        `base_not_formed: the ${base.bars + 1}-bar series for ${symbol} could not be read (` +
+        `${error instanceof Error ? error.message : String(error)}), so no base is claimed and no rung was placed.`,
+    };
+  }
+
+  const detection = detectBase(bars, base);
+  if (!detection.formed) {
+    context.audit?.("alpaca.base_breakout_refused", "trading", { symbol, code: detection.code, inputs: detection.inputs });
+    return { success: false, entryMode: "baseBreakout", symbol, code: detection.code, message: detection.message, base: detection.inputs };
+  }
+
+  // A resumed ladder reuses the plan it was started with; a fresh one anchors
+  // on the confirmation close and persists that anchor.
+  const spec = existing
+    ? JSON.parse(existing.specJson).spec
+    : {
+        symbol,
+        side,
+        base,
+        continuationIncrement: Number(input.continuation_increment ?? input.continuationIncrement ?? 1),
+        stepIncrement: Number(input.step_increment ?? input.stepIncrement ?? 1),
+        tiers: Number(input.tiers ?? 3),
+        quantityPerRung: Number(input.qty_per_tier ?? input.quantityPerTier ?? 1),
+        takeProfitDelta: Number(input.take_profit_delta ?? input.takeProfitDelta ?? 1),
+        stopLossDelta: Number(input.stop_loss_delta ?? input.stopLossDelta ?? 2),
+        budget: Number(input.budget ?? Number(input.qty_per_tier ?? 1) * (Number(input.step_increment ?? 1) * Number(input.tiers ?? 3))),
+        maxRungs: input.max_rungs ?? input.maxRungs,
+        extendedHours: input.extended_hours === true,
+        ...(ladderIdInput ? { ladderId: String(ladderIdInput) } : {}),
+      };
+  const anchorPrice = existing ? Number(JSON.parse(existing.specJson).anchorPrice) : Number(detection.inputs.confirmationClose);
+  const plan = existing ? JSON.parse(existing.planJson) : planBaseBreakout(spec, anchorPrice, limits);
+
+  if (!plan.planable) {
+    context.audit?.("alpaca.base_breakout_refused", "trading", { symbol, code: plan.code, message: plan.message });
+    return { success: false, entryMode: "baseBreakout", symbol, code: plan.code, message: plan.message, plan };
+  }
+
+  if (dryRun) {
+    return {
+      success: true,
+      entryMode: "baseBreakout",
+      symbol,
+      dryRun: true,
+      base: detection.inputs,
+      plan,
+      message:
+        `${plan.message} Dry run: ${plan.rungs.length} rung(s) planned, nothing was placed. ` +
+        `Rung 1 at ${plan.rungs[0]?.limitPrice}; the next rung waits for ${plan.rungs[0] ? plan.rungs[0].limitPrice + spec.continuationIncrement : "the continuation trigger"}.`,
+    };
+  }
+
+  const window = limits.sessionWindow;
+  const openOrdersForTicker = async (): Promise<number> => {
+    const listed = await service.getAlpacaOrders("open");
+    if (!listed.success || !Array.isArray(listed.orders)) return 0;
+    return listed.orders.filter((order: any) => String(order.symbol ?? "").toUpperCase() === symbol).length;
+  };
+  const ladder = BaseBreakoutLadder.resume(
+    { ...spec, ...(plan.rungs[0] ? { ladderId: plan.rungs[0].clientOrderId.split("-r")[0] } : {}) },
+    plan,
+    detection,
+    {
+      placeRung: async (rung) => {
+        const placed = await service.placeAlpacaOrder({
+          symbol,
+          qty: rung.quantity,
+          side: rung.side,
+          type: "limit",
+          limit_price: rung.limitPrice,
+          time_in_force: spec.timeInForce ?? "day",
+          extended_hours: spec.extendedHours,
+          order_class: "bracket",
+          take_profit: { limit_price: rung.takeProfitPrice },
+          stop_loss: { stop_price: rung.stopLossPrice },
+          priceSource: { kind: "user" },
+        });
+        return { success: placed.success, orderId: placed.orderId, message: placed.message };
+      },
+      // A cancelled ladder stops: no open order carries any of its client ids.
+      isLadderCancelled: async () => {
+        if (!existing || existing.placed.length === 0) return false;
+        const listed = await service.getAlpacaOrders("open");
+        if (!listed.success || !Array.isArray(listed.orders)) return false;
+        const ids = new Set(existing.placed.map((rung: any) => String(rung.clientOrderId)));
+        return !listed.orders.some((order: any) => ids.has(String(order.client_order_id ?? "")));
+      },
+      openOrdersForTicker,
+    },
+    (existing?.placed ?? []).map((rung: any) => ({
+      rungIndex: Number(rung.rungIndex),
+      side,
+      limitPrice: Number(rung.limitPrice),
+      quantity: Number(rung.quantity),
+      takeProfitPrice: Number(rung.limitPrice) + spec.takeProfitDelta,
+      stopLossPrice: Number(rung.limitPrice) - spec.stopLossDelta,
+      notional: Number(rung.limitPrice) * Number(rung.quantity),
+      cumulativeNotional: 0,
+      clientOrderId: String(rung.clientOrderId),
+    })),
+    window,
+    limits.limits.maxOpenOrdersPerTicker.value,
+  );
+
+  const stepPrice = Number(input.step_price ?? input.stepPrice ?? detection.inputs.confirmationClose);
+  const decision = await ladder.next({
+    at: new Date().toISOString(),
+    price: stepPrice,
+    ...(input.minute_et !== undefined ? { minuteEt: Number(input.minute_et) } : {}),
+  });
+
+  // Persist after the decision so a crash cannot record a rung the broker never took.
+  const placedRungs = ladder.placedRungs.map((rung) => ({
+    rungIndex: rung.rungIndex,
+    limitPrice: rung.limitPrice,
+    quantity: rung.quantity,
+    orderId: null,
+    clientOrderId: rung.clientOrderId,
+  }));
+  const ladderId = plan.rungs[0]?.clientOrderId.split("-r")[0] ?? `bo_${Date.now()}`;
+  store.save({
+    ladderId,
+    symbol,
+    entryMode: "baseBreakout",
+    specJson: JSON.stringify({ spec, anchorPrice }),
+    planJson: JSON.stringify(plan),
+    placed: placedRungs,
+    committedNotional: ladder.committedNotional,
+    stoppedBy: decision.action === "stop" ? decision.code ?? "stop" : null,
+    createdAt: existing?.createdAt ?? new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+
+  context.audit?.("alpaca.base_breakout_step", "trading", {
+    symbol,
+    ladderId,
+    action: decision.action,
+    code: decision.code,
+    price: stepPrice,
+    rungsPlaced: decision.rungsPlaced,
+    committedNotional: decision.committedNotional,
+    remainingBudget: decision.remainingBudget,
+  });
+
+  return {
+    success: decision.action !== "stop",
+    entryMode: "baseBreakout",
+    symbol,
+    ladderId,
+    base: detection.inputs,
+    plan,
+    decision,
+    message: decision.message,
+  };
+}
+
+/**
  * 10. Alpaca Place Bracket Ladder Command (#3673)
  * Places a TOS-style multi-tier bracket ladder (grid order) with step increments and paired TP/SL exits.
  */
@@ -930,6 +1163,28 @@ export class AlpacaPlaceBracketLadderCommand implements IMcpToolCommand {
       },
       time_in_force: { type: "string", enum: ["day", "gtc"], description: "Time in force ('day' or 'gtc')" },
       extended_hours: { type: "boolean", description: "Allow extended-hours execution" },
+      entry_mode: {
+        type: "string",
+        enum: ["fixedGrid", "baseBreakout"],
+        description:
+          "Issue #3887: 'fixedGrid' (default, all rungs at once — #3673) or 'baseBreakout' (rung 1 on base confirmation, then one rung per continuation step, inside the configured budget and caps)",
+      },
+      dry_run: { type: "boolean", description: "baseBreakout: return the rung plan and place nothing" },
+      budget: { type: "number", description: "baseBreakout: money budget for the ladder (USD notional); the configured maxNotionalPerTicker can only lower it" },
+      max_rungs: { type: "number", description: "baseBreakout: the caller's own rung ceiling; the configured maxRungsPerLadder can only lower it" },
+      continuation_increment: { type: "number", description: "baseBreakout: price advance from the last rung needed to place the next one" },
+      step_price: { type: "number", description: "baseBreakout: the price observed now (defaults to the confirmation close)" },
+      ladder_id: { type: "string", description: "baseBreakout: resume this ladder (from a previous call's ladderId)" },
+      minute_et: { type: "number", description: "baseBreakout: minutes after midnight ET, for the session window check" },
+      base: {
+        type: "object",
+        properties: {
+          bars: { type: "number", description: "Base window length in bars (default 20)" },
+          max_range_percent: { type: "number", description: "Coiling ceiling: the window range as a percent of its close (default 4)" },
+          min_volume_ratio: { type: "number", description: "Confirmation volume vs the window average (default 1)" },
+        },
+        description: "baseBreakout: how a base is defined",
+      },
     },
     required: ["symbol", "side", "tiers"],
   };
@@ -952,9 +1207,39 @@ export class AlpacaPlaceBracketLadderCommand implements IMcpToolCommand {
     direction: z.enum(["ascending", "descending"]).default("ascending").optional(),
     time_in_force: z.enum(["day", "gtc"]).default("day").optional(),
     extended_hours: z.boolean().optional(),
+    entry_mode: z.enum(["fixedGrid", "baseBreakout"]).optional(),
+    entryMode: z.enum(["fixedGrid", "baseBreakout"]).optional(),
+    dry_run: z.boolean().optional(),
+    dryRun: z.boolean().optional(),
+    budget: z.number().positive().optional(),
+    max_rungs: z.number().int().positive().optional(),
+    maxRungs: z.number().int().positive().optional(),
+    continuation_increment: z.number().positive().optional(),
+    continuationIncrement: z.number().positive().optional(),
+    step_price: z.number().positive().optional(),
+    stepPrice: z.number().positive().optional(),
+    ladder_id: z.string().min(1).optional(),
+    ladderId: z.string().min(1).optional(),
+    minute_et: z.number().int().min(0).max(1439).optional(),
+    base: z
+      .object({
+        bars: z.number().int().positive().optional(),
+        max_range_percent: z.number().positive().optional(),
+        maxRangePercent: z.number().positive().optional(),
+        min_volume_ratio: z.number().nonnegative().optional(),
+        minVolumeRatio: z.number().nonnegative().optional(),
+      })
+      .optional(),
   });
 
   async execute(input: any, context: McpToolContext) {
+    // Issue #3887: the continuation ladder is an opt-in entry mode on the
+    // same tool. `fixedGrid` (the default) keeps its #3673 behaviour exactly.
+    const entryMode = String(input.entry_mode ?? input.entryMode ?? "fixedGrid");
+    if (entryMode === "baseBreakout") {
+      return executeBaseBreakoutLadder(input, context);
+    }
+
     const { executeBracketLadder } = await import("../../services/bracketLadder");
     const basePrice = input.base_price ?? input.basePrice ?? 100.0;
     const stepIncrement = input.step_increment ?? input.stepIncrement ?? 1.0;

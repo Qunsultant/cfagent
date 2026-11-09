@@ -46,6 +46,9 @@ export * from "./limits";
 // Issue #3883/#3886: the neutral cancel vocabulary — order classes, status
 // classification and the mapping from a broker row onto a cancel target.
 export * from "./cancelFilters";
+// Issue #3887: the base-breakout continuation ladder — detection, plan and
+// the state machine that places rung N+1 only after a continuation step.
+export * from "./baseBreakout";
 // Issue #3232: the broker catalog is part of the public trading surface.
 export * from "./brokerCatalog";
 export * from "./brokerPanels";
