@@ -1442,7 +1442,7 @@ Finance & capital (CFO; parent programme #2528):
 | --- | --- | --- | --- |
 | CFO operating plan & COBIT balanced scorecard | The one-page CFO operating plan and the COBIT balanced scorecard (Financial perspective) over the platform's cost drivers | Partial — scorecard Live on main (Financial perspective only); paid-service costs GAP until billing actuals are recorded; #2474 closed but not Done | #2474; #2475 |
 | Options Screener product programme | Options Screener as a product with its own sub-menu and page, per-sub-product flags, and a human-approved product-mix review loop | Partial — product line Live (flags, nav, product-mix review); remaining slices Filed | #2528 |
-| Broker & provider neutrality | The tenant's broker and data-provider selections governing every run, job, and message — no silent E*TRADE fallback | Partial — order page and scheduled jobs merged; remaining slices Filed | #3460; #3216 |
+| Broker & provider neutrality | The tenant's broker and data-provider selections governing every run, job, and message — no silent fallback to a single broker | Partial — order page and scheduled jobs merged; remaining slices Filed | #3460; #3216 |
 | Cost attribution (FinOps) | Per-agent and per-workflow cost attribution; paid-service billing actuals | Filed — no cost-attribution mechanism defined yet; paid-service costs GAP | #2474 |
 
 Data & knowledge (CDO):
