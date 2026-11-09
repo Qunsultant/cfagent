@@ -568,17 +568,24 @@ function extractBracketParams(input: MarketDataOrderRawInput): {
 export function normalizeMarketDataOrderInput(input: MarketDataOrderRawInput, mode: AlpacaOrderMode): MarketDataOrderNormalized {
   const bracket = extractBracketParams(input);
   if (mode === "mcp") {
-    // Strictly verbatim: the framework-level zod defaults (type
-    // market, tif day) apply before execute in MCP transport; a
-    // direct execute call passes its fields through untouched.
+    // Issue #3873: verbatim EXCEPT for the aliases the tool declares. The
+    // schema offered `quantity`, `orderAction`, `orderType` and `limitPrice`
+    // and this branch dropped all four, so a caller who used a documented
+    // name lost the field — `quantity: 1` looked like an unrecognised
+    // parameter. Aliases are resolved here, once, so every caller of the MCP
+    // path behaves like the REST paths already did.
+    const qty = (input.qty as unknown) ?? (input.quantity as unknown);
+    const side = (input.side as unknown) ?? (input.orderAction as unknown);
+    const type = (input.type as unknown) ?? (input.orderType as unknown);
+    const limit = (input.limit_price as unknown) ?? (input.limitPrice as unknown);
     return {
       symbol: input.symbol as string,
-      qty: input.qty as number,
-      side: input.side as "buy" | "sell",
+      qty: qty as number,
+      side: side as "buy" | "sell",
       // Narrow cast at the single construction site (the legacy
       // routes passed type/tif through `as any` at each call site).
-      type: input.type as MarketDataOrderNormalized["type"],
-      limit_price: input.limit_price as number | undefined,
+      type: type as MarketDataOrderNormalized["type"],
+      limit_price: limit as number | undefined,
       time_in_force: input.time_in_force as MarketDataOrderNormalized["time_in_force"],
       ...bracket,
     };
