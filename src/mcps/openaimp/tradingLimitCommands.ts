@@ -16,6 +16,7 @@ import type { IMcpToolCommand, McpToolContext } from "../../patterns/interfaces"
 import {
   TRADING_LIMIT_KEYS,
   applyTradingLimitChange,
+  describeAdvancedOrderTypes,
   resolveTradingLimits,
 } from "../../trading";
 import { createSettingsPort } from "../../data/createSettingsPorts";
@@ -34,7 +35,7 @@ function settingsFor(context: McpToolContext): SettingsPort | null {
 export class TradingLimitsCommand implements IMcpToolCommand {
   readonly name = "trading_limits";
   readonly description =
-    "Report the externalized trading limits — money budget, open-order caps, ladder rung cap, daily counters, cancel-all cap and session window — with where each value came from (ticker override, setting, env, or unset). Also applies one recorded change when given `apply`. An unset limit is reported as unset, never as unlimited.";
+    "Report the externalized trading limits — money budget, open-order caps, ladder rung cap, daily counters, cancel-all cap and session window — with where each value came from (ticker override, setting, env, or unset), plus the order types each broker can actually place (and why one cannot). Also applies one recorded change when given `apply`. An unset limit is reported as unset, never as unlimited.";
 
   readonly jsonSchema = {
     type: "object" as const,
@@ -126,6 +127,16 @@ export class TradingLimitsCommand implements IMcpToolCommand {
       symbol: snapshot.symbol,
       configured: TRADING_LIMIT_KEYS.filter((key) => snapshot.limits[key].value !== null),
     });
-    return { ok: true, brokerLimits: snapshot };
+    // Issue #3892: the same introspection surface enumerates what each broker
+    // can actually place, so “can you place a trailing stop on MSFT?” is
+    // answered from the registry rather than from the prompt.
+    return {
+      ok: true,
+      brokerLimits: snapshot,
+      orderTypes: {
+        alpaca: describeAdvancedOrderTypes("alpaca"),
+        etrade: describeAdvancedOrderTypes("etrade"),
+      },
+    };
   }
 }
