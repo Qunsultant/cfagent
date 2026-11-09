@@ -55,6 +55,10 @@ import {
   CAPABILITY_CHANNELS,
   type CapabilityChannelId,
 } from "../actors/capabilityManifest";
+import {
+  registerAgentConfigEntry,
+  resolveAgentConfig,
+} from "./agentConfigResolver";
 import type { Env } from "../types";
 
 /** The copilot registrations (ids pin against the client registry). */
@@ -85,6 +89,21 @@ export const COPILOT_REGISTRATION_SOURCE_TABS: Record<
   stock: "Stock Copilot",
 };
 
+/**
+ * The inverse of COPILOT_REGISTRATION_SOURCE_TABS: the
+ * registration a turn belongs to, from the sourceTab carrier
+ * its turn carries (undefined for a non-copilot turn).
+ */
+export function copilotRegistrationForSourceTab(
+  sourceTab: string | undefined,
+): CopilotRegistrationId | undefined {
+  if (!sourceTab) return undefined;
+  for (const id of COPILOT_REGISTRATION_IDS) {
+    if (COPILOT_REGISTRATION_SOURCE_TABS[id] === sourceTab) return id;
+  }
+  return undefined;
+}
+
 /** The deployment-layer var (wrangler vars): entries `<registration>:<channel>=on|off`. */
 export const COPILOT_CHANNELS_ENV = "COPILOT_CHANNELS";
 
@@ -98,7 +117,7 @@ export function copilotChannelsSettingKey(
   return `copilot_channels:${registrationId}`;
 }
 
-export type CopilotChannelSwitchSource = "stored" | "env" | "default";
+export type CopilotChannelSwitchSource = "stored" | "env" | "default" | "pin";
 
 export interface CopilotChannelResolution {
   registrationId: CopilotRegistrationId;
@@ -214,9 +233,80 @@ export function serializeStoredCopilotChannelEntries(
 }
 
 /**
+ * Issue #3741 — the channel switches are entries of the ONE
+ * resolver (src/services/agentConfigResolver.ts): one entry per
+ * channel, keyed by registration. The layers are this module's
+ * own parsers and defaults table — the generalization changes
+ * WHO walks the chain, never what a layer decides: stored
+ * (the login's `copilot_channels:<registration>` map) > env
+ * (COPILOT_CHANNELS) > the code defaults above. A tenant write
+ * through the resolver's write door merges into the stored map
+ * — a channel write never erases a decision it did not name
+ * (the control route's merge discipline, kept).
+ */
+for (const channel of CAPABILITY_CHANNELS) {
+  registerAgentConfigEntry<boolean>({
+    id: `channel:${channel}`,
+    layers: ["stored", "env"],
+    storedKeys: (identity) =>
+      isCopilotRegistrationId(identity.registrationId)
+        ? [copilotChannelsSettingKey(identity.registrationId)]
+        : [],
+    parseStored: (raw) => {
+      const { decisions, issues } = parseStoredCopilotChannelEntries(raw);
+      const decision = decisions[channel];
+      return {
+        parse:
+          decision !== undefined
+            ? { kind: "decision", value: decision }
+            : { kind: "absent" },
+        issues,
+      };
+    },
+    envVar: COPILOT_CHANNELS_ENV,
+    parseEnv: (raw, identity) => {
+      const { decisions, issues } = parseEnvCopilotChannelEntries(
+        typeof raw === "string" ? raw : undefined,
+      );
+      const decision = decisions.get(`${identity.registrationId}:${channel}`);
+      return {
+        parse:
+          decision !== undefined
+            ? { kind: "decision", value: decision }
+            : { kind: "absent" },
+        issues,
+      };
+    },
+    codeDefault: (identity) =>
+      isCopilotRegistrationId(identity.registrationId)
+        ? COPILOT_CHANNEL_DEFAULTS[identity.registrationId][channel]
+        : false,
+    formatValue: (value) => (value ? "on" : "off"),
+    parseWriteValue: (raw) => {
+      const normalized = raw.trim().toLowerCase();
+      return normalized === "on" ? true : normalized === "off" ? false : undefined;
+    },
+    valueDomain: '"on" or "off"',
+    writeStoredKey: (identity) =>
+      isCopilotRegistrationId(identity.registrationId)
+        ? copilotChannelsSettingKey(identity.registrationId)
+        : null,
+    mergeStoredWrite: (existingRaw, value) => {
+      const { decisions } = parseStoredCopilotChannelEntries(existingRaw);
+      return serializeStoredCopilotChannelEntries({
+        ...decisions,
+        [channel]: value,
+      });
+    },
+  });
+}
+
+/**
  * Resolve one (registration × channel) switch: the login's stored
  * decision wins, then the deployment env, then the code default.
  * Never throws; malformed config is reported in `issues`.
+ * (#3741: delegated to the one resolver — the `channel:<id>`
+ * entry above; this function's result shape is unchanged.)
  */
 export function resolveCopilotChannel(deps: {
   registrationId: CopilotRegistrationId;
@@ -227,37 +317,17 @@ export function resolveCopilotChannel(deps: {
   env?: Env | Record<string, unknown> | null;
 }): CopilotChannelResolution {
   const { registrationId, channel } = deps;
-  const issues: string[] = [];
-
-  if (deps.readSettingRaw) {
-    const stored = parseStoredCopilotChannelEntries(
-      deps.readSettingRaw(copilotChannelsSettingKey(registrationId)),
-    );
-    issues.push(...stored.issues);
-    const decision = stored.decisions[channel];
-    if (decision !== undefined) {
-      return { registrationId, channel, enabled: decision, source: "stored", issues };
-    }
-  }
-
-  const envRaw = deps.env
-    ? (deps.env as Record<string, unknown>)[COPILOT_CHANNELS_ENV]
-    : undefined;
-  const envParsed = parseEnvCopilotChannelEntries(
-    typeof envRaw === "string" ? envRaw : undefined,
+  const resolved = resolveAgentConfig(
+    `channel:${channel}`,
+    { registrationId },
+    { readSettingRaw: deps.readSettingRaw, env: deps.env },
   );
-  issues.push(...envParsed.issues);
-  const envDecision = envParsed.decisions.get(`${registrationId}:${channel}`);
-  if (envDecision !== undefined) {
-    return { registrationId, channel, enabled: envDecision, source: "env", issues };
-  }
-
   return {
     registrationId,
     channel,
-    enabled: COPILOT_CHANNEL_DEFAULTS[registrationId][channel],
-    source: "default",
-    issues,
+    enabled: resolved.value as boolean,
+    source: resolved.source as CopilotChannelSwitchSource,
+    issues: resolved.issues,
   };
 }
 

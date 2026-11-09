@@ -139,6 +139,19 @@ export interface CapabilityEntry {
   unavailableReason?: string;
   /** The raw override entry that disabled this capability, when disabled. */
   disabledBy?: string;
+  /**
+   * Issue #3741 — requires-edges: the capabilities this entry
+   * cannot serve without. The one edge the fleet declares today
+   * is `state`: an entry whose implementation persists through
+   * Durable Object storage cannot serve on a fully ephemeral
+   * instance (state OFF). A resolution that disables `state`
+   * while an enabled entry requires it refuses BY NAME — the
+   * refusal codes ride the resolved manifest's `refusals` (see
+   * capabilityStateDependencyRefusals). Edges are declared only
+   * where the implementation evidence is direct; absence of an
+   * edge is the honest default, not an oversight.
+   */
+  requires?: CapabilityId[];
 }
 
 export interface AgentCapabilityManifest {
@@ -150,6 +163,17 @@ export interface AgentCapabilityManifest {
   tools: Record<CapabilityToolId, CapabilityEntry>;
   /** Malformed override entries from config — surfaced, never dropped. */
   configIssues: string[];
+  /**
+   * Issue #3741 — named requires-edge refusals: when this
+   * resolution disables `state` while an enabled entry requires
+   * it, one `capability_requires_state:<id>` code per requirer.
+   * Empty whenever state serves (or no enabled entry requires
+   * it). The configuration is not silently accepted: consumers
+   * of the manifest (the PortThink composition read) surface
+   * these names rather than discovering an ephemeral instance
+   * at use time.
+   */
+  refusals: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -254,6 +278,7 @@ const FLEET_DEFAULT_POSTURE: Record<CapabilityId, CapabilityEntry> = {
   scheduler: entry(
     "enabled",
     "Schedulable by construction: the Agents SDK scheduler is on the base (agents 0.32.0: schedule/scheduleEvery, dispatched by method name through the lifecycle job queue) and the port exposes it as ActorSchedulePort; Think classes may also declare tasks via getScheduledTasks.",
+    { requires: ["state"] },
   ),
   state: entry(
     "enabled",
@@ -270,6 +295,7 @@ const FLEET_DEFAULT_POSTURE: Record<CapabilityId, CapabilityEntry> = {
   workspace: entry(
     "enabled",
     "Provided by the base class: @cloudflare/think 0.23.0 gives every Think agent a workspace (this.workspace — a @cloudflare/computer Workspace over the Durable Object's storage) and merges the workspace tools into every turn. Not yet surfaced or configured through the port — S7 (#3491).",
+    { requires: ["state"] },
   ),
   sandbox: entry(
     "not-implemented",
@@ -294,6 +320,7 @@ const FLEET_DEFAULT_POSTURE: Record<CapabilityId, CapabilityEntry> = {
   payments: entry(
     "not-implemented",
     "This class exposes no priced capability. Payments run through the CBO price-catalogue gate on the classes that expose them; payments as a uniform port capability lands as S14 (#3498).",
+    { requires: ["state"] },
   ),
   observability: entry(
     "not-implemented",
@@ -334,6 +361,7 @@ export const PORT_THINK_CAPABILITY_BASE: Record<
     payments: entry(
       "enabled",
       "Priced capabilities on this class's surface (draft_payment / confirm_payment_draft, the agentic-payment commands) run through the CBO price-catalogue gate (src/data/priceCataloguePorts.ts, #2547-#2551): an unapproved price refuses fail-closed. Approving a price is the owner/CPO step — no agent approves prices.",
+      { requires: ["state"] },
     ),
   },
   ResearchAgent: {},
@@ -342,6 +370,7 @@ export const PORT_THINK_CAPABILITY_BASE: Record<
     payments: entry(
       "enabled",
       "DID-attested drafts and x402/MPP premium legs over the payments ledger, behind the BudgetGuard and the CBO price-catalogue gate (src/data/priceCataloguePorts.ts).",
+      { requires: ["state"] },
     ),
   },
   ScreenerAgent: {},
@@ -419,6 +448,35 @@ export interface CapabilityResolutionOptions {
   disabledRaw?: string | null;
 }
 
+/**
+ * Issue #3741 — the requires-edge refusals for one composed
+ * posture: when `state` resolves disabled-by-config (the class
+ * would run fully ephemeral) while an entry whose state is
+ * `enabled` declares `requires: ["state"]`, that entry cannot
+ * serve — one named refusal per requirer,
+ * `capability_requires_state:<id>`. A requirer that is itself
+ * disabled, unavailable, or not implemented does not refuse:
+ * nothing it would serve is being taken away.
+ */
+export function capabilityStateDependencyRefusals(
+  manifest: Pick<AgentCapabilityManifest, "channels" | "capabilities" | "tools">,
+): string[] {
+  const flat: Record<CapabilityId, CapabilityEntry> = {
+    ...manifest.channels,
+    ...manifest.capabilities,
+    ...manifest.tools,
+  } as Record<CapabilityId, CapabilityEntry>;
+  if (flat.state.state !== "disabled-by-config") return [];
+  const refusals: string[] = [];
+  for (const id of ALL_CAPABILITY_IDS) {
+    const e = flat[id];
+    if (e.state === "enabled" && e.requires?.includes("state")) {
+      refusals.push(`capability_requires_state:${id}`);
+    }
+  }
+  return refusals;
+}
+
 function clonePosture(): Record<CapabilityId, CapabilityEntry> {
   const out = {} as Record<CapabilityId, CapabilityEntry>;
   for (const id of ALL_CAPABILITY_IDS) out[id] = { ...FLEET_DEFAULT_POSTURE[id] };
@@ -486,10 +544,12 @@ export function resolveAgentCapabilityManifest(
     }
   }
 
+  const split = splitPosture(flat);
   return {
     className,
     bindings,
-    ...splitPosture(flat),
+    ...split,
     configIssues: issues,
+    refusals: capabilityStateDependencyRefusals(split),
   };
 }

@@ -306,6 +306,12 @@
     // per-user override can still select NLQ "on". Rollback is
     // setting CHAT_NLQ_MODE back to "on" and redeploying.
     "AGENT_CAPABILITIES_DISABLED": "",
+    // Issue #3741 — the one resolver's operator pins
+    // (src/services/agentConfigResolver.ts): explicitly EMPTY —
+    // nothing is pinned; a pin ("<scope>:<entryId>") would freeze
+    // that entry at the operator layer and refuse lower-layer
+    // writes by name.
+    "AGENT_CONFIG_PINS": "",
     "CHAT_NLQ_MODE": "off",
     "SCREENER_ND_MODE": "on",
     // Issue #3738 — per-copilot channel switches (owner direction
