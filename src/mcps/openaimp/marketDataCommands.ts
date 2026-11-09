@@ -28,7 +28,7 @@ import { z } from "zod";
 import { alpacaModeFromEnv, recordTradingRunOutcome } from "../../services/tradingRunOutcome";
 import { notifyOrderExecution } from "../../services/orderExecutionNotifier";
 import { COPILOT_BROKER_ID } from "../../agents/copilotTradingMode";
-import { computeBracketExits } from "../../trading";
+import { ADVANCED_ORDER_TYPES, computeBracketExits } from "../../trading";
 import { getUserDid } from "../../agents/did";
 import type { IMcpToolCommand, McpToolContext } from "../../patterns/interfaces";
 import { MarketDataResearchService, marketDataResearchBarsSourceLabel } from "../../services/marketDataResearch";
@@ -436,6 +436,22 @@ export class AlpacaOrdersCommand implements IMcpToolCommand {
  * trading modes. No HITL gate exists on this path on either surface
  * today; the switch changes normalization + audit only.
  */
+/**
+ * Issue #3892: the single-order types this tool can place, DERIVED from the
+ * one registry — the schema's enum is not a second hand-written list.
+ */
+const PLACEABLE_SINGLE_TYPES: readonly string[] = [
+  "market",
+  "limit",
+  "stop",
+  "stop_limit",
+  "trailing_stop",
+  "trailing_stop_limit",
+];
+const ALPACA_PLACEABLE_ORDER_TYPES = ADVANCED_ORDER_TYPES.filter(
+  (entry) => entry.broker.alpaca !== "none" && PLACEABLE_SINGLE_TYPES.includes(entry.id),
+).map((entry) => entry.id);
+
 export class AlpacaPlaceOrderCommand implements IMcpToolCommand {
   readonly name = "alpaca_place_order";
   readonly description = "Place a stock, ETF, or crypto order on Alpaca Securities with Agent DID attestation and audit tracing.";
@@ -448,7 +464,9 @@ export class AlpacaPlaceOrderCommand implements IMcpToolCommand {
       symbol: { type: "string", description: "Ticker symbol (e.g. NVDA, AAPL, BTC/USD)" },
       qty: { type: "number", description: "Number of shares or contract units (qty or quantity; qty wins when both are sent)" },
       side: { type: "string", enum: ["buy", "sell"], description: "Order side (buy or sell)" },
-      type: { type: "string", enum: ["market", "limit", "stop", "stop_limit", "trailing_stop", "trailing_stop_limit"], description: "Order execution type" },
+      // Issue #3892: the enum is DERIVED from the registry, so a type cannot
+      // be placeable here and unknown to the validator (or the reverse).
+      type: { type: "string", enum: [...ALPACA_PLACEABLE_ORDER_TYPES], description: "Order execution type" },
       trail_price: { type: "number", description: "Issue #3892: trailing-stop dollar distance (exactly one of trail_price / trail_percent)" },
       trail_percent: { type: "number", description: "Issue #3892: trailing-stop percent distance" },
       notional: { type: "number", description: "Issue #3892: notional sizing instead of qty (fractional trading)" },
@@ -506,7 +524,7 @@ export class AlpacaPlaceOrderCommand implements IMcpToolCommand {
     qty: z.number().positive().optional().describe("Order quantity (qty or quantity)"),
     side: z.enum(["buy", "sell"]).describe("Order side"),
     type: z
-      .enum(["market", "limit", "stop", "stop_limit", "trailing_stop", "trailing_stop_limit"])
+      .enum(ALPACA_PLACEABLE_ORDER_TYPES as unknown as [string, ...string[]])
       .default("market")
       .optional(),
     trail_price: z.number().positive().optional().describe("Issue #3892: trailing-stop dollar distance"),
