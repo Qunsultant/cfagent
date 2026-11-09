@@ -444,7 +444,7 @@ export class AlpacaPlaceOrderCommand implements IMcpToolCommand {
       orderId: { type: "string", description: "Optional previewed draft id (alp_ord_...). When present, the stored draft is executed after approval instead of creating a new order." },
       decision: { type: "string", enum: ["approved", "rejected"], description: "Approval decision for an orderId execution (default: approved)." },
       symbol: { type: "string", description: "Ticker symbol (e.g. NVDA, AAPL, BTC/USD)" },
-      qty: { type: "number", description: "Number of shares or contract units" },
+      qty: { type: "number", description: "Number of shares or contract units (qty or quantity; qty wins when both are sent)" },
       side: { type: "string", enum: ["buy", "sell"], description: "Order side (buy or sell)" },
       type: { type: "string", enum: ["market", "limit", "stop", "stop_limit"], description: "Order execution type" },
       limit_price: { type: "number", description: "Limit price (required if type is limit)" },
@@ -481,20 +481,23 @@ export class AlpacaPlaceOrderCommand implements IMcpToolCommand {
         description:
           "Issue #3812: stop-loss distance in percent from limit_price (e.g. 2 for -2%). Requires take_profit_pct; limit_price is required.",
       },
-      quantity: { type: "number", description: "#1727 market-data/trading-mode alias for qty (ignored in mcp mode)" },
+      quantity: { type: "number", description: "Alias for qty; accepted in every mode, including mcp" },
       orderAction: { type: "string", description: "#1727 market-data-mode alias for side (ignored in mcp/trading modes)" },
       orderType: { type: "string", description: "#1727 market-data-mode alias for type (ignored in mcp/trading modes)" },
       limitPrice: { type: "number", description: "#1727 market-data-mode alias for limit_price (ignored in mcp/trading modes)" },
       mode: { type: "string", description: "#1727 run-level ALPACA_ORDER_MODE override (mcp | market-data | trading)" },
     },
-    required: ["symbol", "qty", "side"],
+    // Issue #3873: `qty` is no longer forced — `quantity` is the same order
+    // size under another name, and demanding one spelling made a valid order
+    // look like an unrecognised parameter.
+    required: ["symbol", "side"],
   };
 
   readonly zodSchema = z.object({
     orderId: z.string().min(1).optional().describe("Optional previewed draft id to execute"),
     decision: z.enum(["approved", "rejected"]).optional().describe("Approval decision for an orderId execution"),
     symbol: z.string().min(1).max(20).describe("Ticker symbol"),
-    qty: z.number().positive().describe("Order quantity"),
+    qty: z.number().positive().optional().describe("Order quantity (qty or quantity)"),
     side: z.enum(["buy", "sell"]).describe("Order side"),
     type: z.enum(["market", "limit", "stop", "stop_limit"]).default("market").optional(),
     limit_price: z.number().positive().optional().describe("Limit price"),
@@ -508,10 +511,10 @@ export class AlpacaPlaceOrderCommand implements IMcpToolCommand {
     stop_loss_limit_price: z.number().positive().optional().describe("Stop-loss limit price"),
     take_profit_pct: z.number().positive().optional().describe("Issue #3812: take-profit distance in percent from limit_price (e.g. 4)"),
     stop_loss_pct: z.number().positive().optional().describe("Issue #3812: stop-loss distance in percent from limit_price (e.g. 2)"),
-    quantity: z.number().positive().optional().describe("#1727 market-data/trading-mode alias for qty (ignored in mcp mode)"),
-    orderAction: z.string().optional().describe("#1727 market-data-mode alias for side (ignored in mcp/trading modes)"),
-    orderType: z.string().optional().describe("#1727 market-data-mode alias for type (ignored in mcp/trading modes)"),
-    limitPrice: z.number().positive().optional().describe("#1727 market-data-mode alias for limit_price (ignored in mcp/trading modes)"),
+    quantity: z.number().positive().optional().describe("Alias for qty, accepted in every mode"),
+    orderAction: z.string().optional().describe("Alias for side, accepted in every mode"),
+    orderType: z.string().optional().describe("Alias for type, accepted in every mode"),
+    limitPrice: z.number().positive().optional().describe("Alias for limit_price, accepted in every mode"),
     mode: z.string().optional().describe("#1727 run-level ALPACA_ORDER_MODE override (mcp | market-data | trading)"),
   });
 
@@ -609,6 +612,25 @@ export class AlpacaPlaceOrderCommand implements IMcpToolCommand {
       (input as any).order_class = input.order_class ?? "bracket";
       (input as any).take_profit = { limit_price: exits.takeProfit.limitPrice };
       (input as any).stop_loss = { stop_price: exits.stopLoss.stopPrice };
+    }
+
+    // Issue #3873: `qty` is optional in the schema so that `quantity` can
+    // stand in for it. Validation therefore happens here, and the refusal
+    // names both accepted spellings instead of echoing whichever one the
+    // model happened to omit.
+    //
+    // Scope: the agent-facing `mcp` mode only. The REST modes keep their
+    // documented legacy default (#1727: an omitted size normalizes to 1) —
+    // changing that here would silently alter the `/trading` contract this
+    // slice is not about.
+    const requestedQty = (input as any).qty ?? (input as any).quantity;
+    if (resolved.mode === "mcp" && !(Number(requestedQty) > 0)) {
+      return {
+        success: false,
+        message:
+          "Order size is required: send qty (or its alias quantity) as a positive number, e.g. {symbol:'MSFT', qty:1, side:'buy', type:'market'}.",
+        refusal: "quantity_required",
+      };
     }
 
     const normalized = normalizeMarketDataOrderInput(input as any, resolved.mode);
