@@ -18,7 +18,7 @@
  *
  * Env overrides (comma-separated lists):
  * - TRADING_AGENT_PROVIDERS="etrade,alpaca"
- * - TRADING_AGENT_DEFAULT_PROVIDER="etrade"
+ * - TRADING_AGENT_DEFAULT_PROVIDER="alpaca"
  * - TRADING_AGENT_SERVICES="stock_screening,options_screening"
  */
 
@@ -40,7 +40,8 @@ export interface TradingAgentConfig {
 
 export const TRADING_AGENT_CONFIG_BASELINE: TradingAgentConfig = {
   enabledProviders: ["etrade", "alpaca"],
-  defaultProvider: "etrade",
+  // Issue #3812: the platform default broker is Alpaca in paper mode.
+  defaultProvider: "alpaca",
   enabledServices: [...TRADING_AGENT_SERVICE_IDS],
 };
 

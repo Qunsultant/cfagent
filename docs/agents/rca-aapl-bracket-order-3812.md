@@ -43,6 +43,19 @@ tools drifted toward the E*TRADE quote path — which returns a queued job.
 `alpaca`; paper remains the mode default (`TEST`), so the resolved state is
 “Alpaca · Paper” with no stored selection. Live remains an explicit act.
 
+**Default semantics (deliberate, two layers):**
+
+| Layer | Absent selection resolves to | Why |
+| --- | --- | --- |
+| Settings row / dynamic menu / Stock Copilot / TradingAgent baseline | Alpaca · Paper | the platform default the owner asked for |
+| Legacy E*TRADE-only surfaces (email, Slack, voice, E*TRADE options routes) | E*TRADE (legacy fallback) | those flows must not start calling Alpaca without a credential; a stored selection still wins |
+
+`resolveTenantProviders` exposes the platform default; `resolveTenantBroker`
+is the legacy concrete fallback; `resolveTenantBrokerSelection` is
+presence-aware (null when no selection is stored) and is what agent doors
+use so the downstream agent default applies. The three are one source of
+truth for the ID vocabulary, not three independent defaults.
+
 ### RC-2 — A quote was queued instead of resolved
 
 The chat tool delivery wrapped the quote as an asynchronous job. The agent
@@ -96,7 +109,7 @@ exact fix. Every preview/placement records a `trading` outcome
 
 | Prerequisite | Check | Fix URL |
 | --- | --- | --- |
-| Default broker = Alpaca, mode = paper | Settings menu shows `Settings (Alpaca · Paper)`; `resolveCopilotTradingSelection` returns `brokerId: "alpaca"`, `mode: "paper"` | `?tab=trading` |
+| Default broker = Alpaca, mode = paper | Settings menu shows `Settings (Alpaca · Paper)`; `resolveCopilotTradingSelection` returns `brokerId: "alpaca"`, `mode: "paper"`; an E*TRADE-only legacy surface keeps its legacy fallback until a selection is stored | `?tab=trading` |
 | Alpaca credentials (paper) | Deployment keys, or the user's own pair signed in | `/api/broker/connect/alpaca?environment=TEST` |
 | Alpaca market-data entitlement (live quote) | A quote returns provider `alpaca`, provenance `live`, timestamp | `?tab=trading` (Alpaca panel) |
 | Credit/run coverage (when monetization is on) | Account balance or included runs cover the run price | `?tab=checkout&checkoutTab=topup` |
@@ -188,6 +201,11 @@ field the store does not record renders “Not recorded”, never invented.
 - `alpaca_place_order` still declares `priceSource: { kind: "user" }`; a
   future percent-placement path that prices from a quote must carry the
   quote's provenance instead.
+- The two default layers are intentional but transitional. As each legacy
+  E*TRADE surface gains Alpaca parity, it should switch to
+  `resolveTenantBrokerSelection` (presence-aware) and inherit the platform
+  default; until then, a fresh tenant sees Alpaca in Settings while an
+  E*TRADE-only email/Slack flow still targets E*TRADE with no selection.
 - Alpaca requires `time_in_force: "day"` for bracket orders; a `gtc`
   bracket is refused by the broker, not by this client. The refusal is
   recorded, but a preflight could name it earlier.

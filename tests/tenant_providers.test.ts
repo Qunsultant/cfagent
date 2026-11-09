@@ -1,7 +1,7 @@
 /**
  * Provider / broker agnosticism, slice 1: tenant selections.
  *
- * Pins: defaults preserve current behaviour (etrade / etrade);
+ * Pins: defaults are the etrade data provider / Alpaca broker (#3812);
  * invalid ids are rejected, never stored; a non-etrade broker gets
  * the coded unavailable response, never an E*TRADE error; the
  * unified strategy run record stamps provider/broker into
@@ -55,11 +55,11 @@ describe("migration 0027", () => {
 });
 
 describe("in-memory tenant providers store", () => {
-  it("defaults to etrade / etrade for an absent row", async () => {
+  it("defaults to etrade data provider / alpaca broker for an absent row", async () => {
     const store = new InMemoryCommercialAdapter();
     await expect(store.getTenantProviders("tenant-1")).resolves.toEqual({
       dataProviderId: "etrade",
-      brokerId: "etrade",
+      brokerId: "alpaca",
     });
   });
 
@@ -98,13 +98,13 @@ describe("broker unavailable code", () => {
 });
 
 describe("resolveTenantBroker fail-open", () => {
-  it("defaults to etrade when the store is absent", async () => {
+  it("defaults to the legacy etrade when the store is absent", async () => {
     await expect(resolveTenantBroker({} as never)).resolves.toBe("etrade");
   });
 });
 
 describe("unified run record provenance stamping", () => {
-  it("stamps dataProviderId / brokerId into provenance, defaulting to etrade", () => {
+  it("stamps dataProviderId / brokerId into provenance, defaulting to etrade data / alpaca broker", () => {
     const bodies: Array<Record<string, unknown>> = [];
     const orm = {
       storeCanonicalReport: (input: Record<string, unknown>) => {
@@ -135,6 +135,6 @@ describe("unified run record provenance stamping", () => {
     });
     const legacy = (bodies[0].body as Record<string, unknown>).provenance as Record<string, unknown>;
     expect(legacy.dataProviderId).toBe("etrade");
-    expect(legacy.brokerId).toBe("etrade");
+    expect(legacy.brokerId).toBe("alpaca");
   });
 });

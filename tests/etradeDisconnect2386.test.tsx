@@ -20,6 +20,7 @@ import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { ETradeTradingHub } from "../src/client/ETradeTradingHub";
 import { ToastProvider } from "../src/client/components/ui/Toast";
+import { setTenantProvidersStateForTest } from "../src/client/tenantProviders";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -44,6 +45,9 @@ async function render(node: React.ReactNode) {
 
 beforeEach(() => {
   localStorage.clear();
+  // Issue #3812: the platform default broker is Alpaca; this panel test
+  // exercises the E*TRADE surface, so the selection is explicit.
+  setTenantProvidersStateForTest({ dataProviderId: "etrade", brokerId: "etrade" });
 });
 
 afterEach(() => {

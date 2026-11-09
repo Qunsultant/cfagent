@@ -130,6 +130,7 @@ vi.mock("../src/client/approvedFreeQuotaApi", async (importOriginal) => {
   };
 });
 
+import { setTenantProvidersStateForTest } from "../src/client/tenantProviders";
 import { FirstRunScreen } from "../src/client/FirstRunScreen";
 import { NotificationPreferencesPanel } from "../src/client/NotificationPreferencesPanel";
 import { FirstRunApiError, isFirstRunComplete } from "../src/client/firstRunApi";
@@ -184,6 +185,9 @@ function clickLabel(container: HTMLElement, text: string) {
 }
 
 beforeEach(() => {
+  // Issue #3812: the platform default broker is Alpaca; this suite walks
+  // the E*TRADE onboarding branch, so the selection is explicit.
+  setTenantProvidersStateForTest({ dataProviderId: "etrade", brokerId: "etrade" });
   apiState.identity = {
     userLogin: "second-user",
     tenantId: "tenant-1",

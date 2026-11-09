@@ -26,7 +26,7 @@
 
 import { z } from "zod";
 import { alpacaModeFromEnv, recordTradingRunOutcome } from "../../services/tradingRunOutcome";
-import { computeBracketExits } from "../../trading/bracketPercent";
+import { computeBracketExits } from "../../trading";
 import type { IMcpToolCommand, McpToolContext } from "../../patterns/interfaces";
 import { MarketDataResearchService, marketDataResearchBarsSourceLabel } from "../../services/marketDataResearch";
 import {

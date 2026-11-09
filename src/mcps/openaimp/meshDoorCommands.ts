@@ -162,7 +162,7 @@ import {
 import { recordTraceHopBestEffort } from "../../data/createMeshTracePorts";
 import { childContextOfTraceparent } from "../../observability/meshTrace";
 import { createSettingsPort } from "../../data/createSettingsPorts";
-import { resolveTenantBroker } from "../../services/tenantProviders";
+import { resolveTenantBrokerSelection } from "../../services/tenantProviders";
 import {
   meshScreenDoorContextFromMcp,
   runStockScreenViaDoor,
@@ -493,8 +493,8 @@ export class ProposeStockTradeCommand implements IMcpToolCommand<StockTradePropo
   ): Promise<TradeProposalDoorResult> {
     const actingLogin = context.actingLogin?.();
     await recordDoorHop(context, this.name, "TradingAgent");
-    const tenantBroker = await resolveTenantBroker(context.env);
-    const provider = input.provider || (tenantBroker === "alpaca" ? "alpaca" : undefined);
+    const tenantBroker = await resolveTenantBrokerSelection(context.env);
+    const provider = input.provider || tenantBroker || undefined;
     const proposalInput: StockTradeProposalInput = provider ? { ...input, provider } : input;
     const result = await proposeStockTradeViaDoor(context.env, actingLogin, proposalInput);
     context.audit("propose_stock_trade", "mcp", {
@@ -563,8 +563,8 @@ export class ProposeOptionsTradeCommand implements IMcpToolCommand<OptionsTradeP
   ): Promise<TradeProposalDoorResult> {
     const actingLogin = context.actingLogin?.();
     await recordDoorHop(context, this.name, "TradingAgent");
-    const tenantBroker = await resolveTenantBroker(context.env);
-    const provider = input.provider || (tenantBroker === "alpaca" ? "alpaca" : undefined);
+    const tenantBroker = await resolveTenantBrokerSelection(context.env);
+    const provider = input.provider || tenantBroker || undefined;
     const proposalInput: OptionsTradeProposalInput = provider ? { ...input, provider } : input;
     const result = await proposeOptionsTradeViaDoor(context.env, actingLogin, proposalInput);
     context.audit("propose_options_trade", "mcp", {
@@ -601,8 +601,8 @@ export class GetTradingAccountsCommand implements IMcpToolCommand<{ provider?: s
   async execute(input: { provider?: string }, context: McpToolContext): Promise<unknown> {
     const actingLogin = context.actingLogin?.();
     await recordDoorHop(context, this.name, "TradingAgent");
-    const tenantBroker = await resolveTenantBroker(context.env);
-    const provider = input.provider || (tenantBroker === "alpaca" ? "alpaca" : undefined);
+    const tenantBroker = await resolveTenantBrokerSelection(context.env);
+    const provider = input.provider || tenantBroker || undefined;
     const result = await getTradingAccountsViaDoor(context.env, actingLogin, provider);
     context.audit("get_trading_accounts", "mcp", {
       actingLogin: actingLogin ?? null,
@@ -641,8 +641,8 @@ export class GetTradingPositionsCommand implements IMcpToolCommand<{
   ): Promise<unknown> {
     const actingLogin = context.actingLogin?.();
     await recordDoorHop(context, this.name, "TradingAgent");
-    const tenantBroker = await resolveTenantBroker(context.env);
-    const provider = input.provider || (tenantBroker === "alpaca" ? "alpaca" : undefined);
+    const tenantBroker = await resolveTenantBrokerSelection(context.env);
+    const provider = input.provider || tenantBroker || undefined;
     const result = await getTradingPositionsViaDoor(context.env, actingLogin, provider ? { ...input, provider } : input);
     context.audit("get_trading_positions", "mcp", {
       actingLogin: actingLogin ?? null,
@@ -683,8 +683,8 @@ export class GetTradingQuoteCommand implements IMcpToolCommand<{
   ): Promise<unknown> {
     const actingLogin = context.actingLogin?.();
     await recordDoorHop(context, this.name, "TradingAgent");
-    const tenantBroker = await resolveTenantBroker(context.env);
-    const provider = input.provider || (tenantBroker === "alpaca" ? "alpaca" : undefined);
+    const tenantBroker = await resolveTenantBrokerSelection(context.env);
+    const provider = input.provider || tenantBroker || undefined;
     const result = await getTradingQuoteViaDoor(context.env, actingLogin, provider ? { ...input, provider } : input);
     context.audit("get_trading_quote", "mcp", {
       actingLogin: actingLogin ?? null,

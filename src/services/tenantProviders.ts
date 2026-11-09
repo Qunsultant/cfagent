@@ -71,13 +71,47 @@ export async function resolveTenantProviders(env: unknown): Promise<TenantProvid
   }
 }
 
-export async function resolveTenantBroker(env: unknown): Promise<BrokerId> {
+/**
+ * Issue #3812: the PRESENCE-AWARE selection — the stored broker, or the
+ * explicit env override, or null when the tenant has selected nothing.
+ * Callers that hand the provider to a downstream resolver (the
+ * TradingAgent) use this so the downstream default applies to an absent
+ * selection, instead of a platform default being forced into a call the
+ * caller never made. A read failure is null (not a guessed broker).
+ */
+export async function resolveTenantBrokerSelection(env: unknown): Promise<BrokerId | null> {
   const envOverride =
     (env as Record<string, unknown> | null | undefined)?.TENANT_BROKER_ID ??
     (env as Record<string, unknown> | null | undefined)?.BROKER_ID;
   if (isBrokerId(envOverride)) return envOverride;
-  const providers = await resolveTenantProviders(env);
-  return isBrokerId(providers.brokerId) ? providers.brokerId : "etrade";
+  try {
+    const { createCommercialAdapter } = await import("../data/createCommercialPorts");
+    const adapter = createCommercialAdapter(env as { AGENT_DB?: unknown });
+    if (!adapter) return null;
+    const { resolveIaaaTenant } = await import("../security/iaaaGithubEndToEnd");
+    const stored = await adapter.getTenantBrokerSelection(resolveIaaaTenant(env as never));
+    return isBrokerId(stored) ? stored : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The concrete broker for a legacy surface. Issue #3812 keeps TWO defaults,
+ * deliberately:
+ * - the PLATFORM default (settings row, dynamic menu, copilot, TradingAgent
+ *   baseline) is Alpaca in paper mode — `resolveTenantProviders` and the
+ *   copilot resolver apply it;
+ * - a LEGACY E*TRADE surface (email, Slack, voice, the E*TRADE options
+ *   routes) keeps its pre-#3812 fallback when the tenant has stored NO
+ *   selection, so those flows do not start calling Alpaca without a
+ *   credential. A stored selection always wins.
+ * A read failure is also the legacy fallback: these surfaces already
+ * fail loudly when the broker is unreachable.
+ */
+export async function resolveTenantBroker(env: unknown): Promise<BrokerId> {
+  const stored = await resolveTenantBrokerSelection(env);
+  return stored ?? "etrade";
 }
 
 /** Coded response for a broker surface the selected broker does not

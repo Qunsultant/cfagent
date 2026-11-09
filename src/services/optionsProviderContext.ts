@@ -51,9 +51,13 @@
 
 import { DATA_PROVIDER_IDS, type DataProviderCapability } from "../trading";
 import { BROKER_IDS, type BrokerId } from "./tenantProviders";
+import { DEFAULT_TENANT_PROVIDERS } from "../data/commercialPorts";
 
-export const DEFAULT_DATA_PROVIDER_ID = "etrade";
-export const DEFAULT_BROKER_ID = "etrade";
+// Issue #3812: the defaults are slice 1's values, derived — never a second
+// hardcoded copy. The broker default is Alpaca in paper mode; the data
+// provider default stays etrade.
+export const DEFAULT_DATA_PROVIDER_ID = DEFAULT_TENANT_PROVIDERS.dataProviderId;
+export const DEFAULT_BROKER_ID = DEFAULT_TENANT_PROVIDERS.brokerId;
 
 export type DataProviderId = (typeof DATA_PROVIDER_IDS)[number];
 export type { BrokerId, DataProviderCapability };

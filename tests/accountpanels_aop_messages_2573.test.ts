@@ -43,6 +43,7 @@ import { storeAccessTokens } from "../src/security/etradeOAuth";
 import type { Env } from "../src/types";
 import { fetchAlerts, fetchTransactions, fetchWatchlists, ACCOUNT_PANEL_FALLBACK_MESSAGE } from "../src/client/accountApi";
 import { AccountPanels } from "../src/client/AccountPanels";
+import { setTenantProvidersStateForTest } from "../src/client/tenantProviders";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -57,6 +58,9 @@ const AMBIENT_ET_CREDENTIAL_VARS = [
 ];
 
 beforeEach(() => {
+  // Issue #3812: the platform default broker is Alpaca; this suite
+  // exercises the E*TRADE account panels, so the selection is explicit.
+  setTenantProvidersStateForTest({ dataProviderId: "etrade", brokerId: "etrade" });
   vi.restoreAllMocks();
   for (const name of AMBIENT_ET_CREDENTIAL_VARS) vi.stubEnv(name, "");
   __resetTokenCache();

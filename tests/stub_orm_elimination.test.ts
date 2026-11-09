@@ -277,7 +277,7 @@ describe("issue #781: stub-ORM elimination", () => {
     DynamicOptionsScreener.setTestChainsFixture({ AAPL: chainFixture("AAPL", 100) });
     try {
       const store = new InMemoryIvHistoryStore();
-      const service = new ScheduledTasksService({} as Env, undefined, "trader1", undefined, store);
+      const service = new ScheduledTasksService({ TENANT_BROKER_ID: "etrade" } as Env, undefined, "trader1", undefined, store);
       const result = await service.collectDailyIvHistory({ symbols: ["AAPL"] });
       expect(result.success).toBe(true);
       expect(result.data?.recorded).toBe(1);

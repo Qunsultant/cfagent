@@ -15,7 +15,14 @@
  */
 
 import { DoSqliteJobOutcomeStore } from "../data/doSqliteJobOutcomeAdapter";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
 import type { SqlStorage } from "../orm";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/tradingRunOutcome",
+});
 
 export type TradingRunStatus = "completed" | "failed";
 
@@ -109,7 +116,7 @@ export function recordTradingRunOutcome(
       origin: input.origin,
     });
   } catch (error) {
-    console.warn("[tradingRunOutcome] could not record the order trace", {
+    structuredLog.warn("tradingRunOutcome.record_failed", {
       orderId: input.orderId,
       origin: input.origin,
       error: error instanceof Error ? error.message : String(error),

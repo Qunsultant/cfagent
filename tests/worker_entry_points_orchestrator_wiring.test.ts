@@ -294,6 +294,9 @@ describe("issue #815: worker email export routes through the orchestrator DO", (
       APP_BASE_URL: "https://agent.openaimp.com",
       AI_SEARCH_ENDPOINT: "https://ai-search.internal",
       ETRADE_ENVIRONMENT: "sandbox",
+      // Issue #3812: these paths exercise the E*TRADE services; the platform
+      // default is Alpaca, so the tenant broker is explicit.
+      TENANT_BROKER_ID: "etrade",
       EMAIL_AGENT_ADDRESS: "trade@agent.openaimp.com",
       // #1262 Phase 1: the sender is a mapped trade-tier principal.
       CHANNEL_EMAIL_PRINCIPALS: JSON.stringify({
@@ -361,6 +364,9 @@ describe("issue #815: worker email export routes through the orchestrator DO", (
       APP_BASE_URL: "https://agent.openaimp.com",
       AI_SEARCH_ENDPOINT: "https://ai-search.internal",
       ETRADE_ENVIRONMENT: "sandbox",
+      // Issue #3812: these paths exercise the E*TRADE services; the platform
+      // default is Alpaca, so the tenant broker is explicit.
+      TENANT_BROKER_ID: "etrade",
       EMAIL_AGENT_ADDRESS: "trade@agent.openaimp.com",
       // No ORCHESTRATOR_AGENT binding at all.
     } as unknown as Env;
@@ -380,6 +386,9 @@ describe("issue #815: worker email export routes through the orchestrator DO", (
       APP_BASE_URL: "https://agent.openaimp.com",
       AI_SEARCH_ENDPOINT: "https://ai-search.internal",
       ETRADE_ENVIRONMENT: "sandbox",
+      // Issue #3812: these paths exercise the E*TRADE services; the platform
+      // default is Alpaca, so the tenant broker is explicit.
+      TENANT_BROKER_ID: "etrade",
       EMAIL_AGENT_ADDRESS: "trade@agent.openaimp.com",
       SERVICE_USER_LOGIN: OWNER_INSTANCE,
       ORCHESTRATOR_AGENT: {
@@ -424,6 +433,9 @@ describe("issue #815: voice WebSocket turns route through the orchestrator DO", 
       APP_BASE_URL: "https://agent.openaimp.com",
       AI_SEARCH_ENDPOINT: "https://ai-search.internal",
       ETRADE_ENVIRONMENT: "sandbox",
+      // Issue #3812: these paths exercise the E*TRADE services; the platform
+      // default is Alpaca, so the tenant broker is explicit.
+      TENANT_BROKER_ID: "etrade",
     } as unknown as Env;
     (env as any).ORCHESTRATOR_AGENT = makeOrchestratorNamespace(orm, env, forwarded);
 
@@ -457,6 +469,9 @@ describe("issue #815: voice WebSocket turns route through the orchestrator DO", 
       APP_BASE_URL: "https://agent.openaimp.com",
       AI_SEARCH_ENDPOINT: "https://ai-search.internal",
       ETRADE_ENVIRONMENT: "sandbox",
+      // Issue #3812: these paths exercise the E*TRADE services; the platform
+      // default is Alpaca, so the tenant broker is explicit.
+      TENANT_BROKER_ID: "etrade",
     } as unknown as Env;
     (env as any).ORCHESTRATOR_AGENT = makeOrchestratorNamespace(orm, env, forwarded);
 
@@ -479,6 +494,9 @@ describe("issue #815: voice WebSocket turns route through the orchestrator DO", 
       APP_BASE_URL: "https://agent.openaimp.com",
       AI_SEARCH_ENDPOINT: "https://ai-search.internal",
       ETRADE_ENVIRONMENT: "sandbox",
+      // Issue #3812: these paths exercise the E*TRADE services; the platform
+      // default is Alpaca, so the tenant broker is explicit.
+      TENANT_BROKER_ID: "etrade",
       ORCHESTRATOR_AGENT: {} as any,
     } as unknown as Env;
 

@@ -180,6 +180,7 @@ vi.mock("../src/client/commercialApi", async (importOriginal) => {
 import { FirstRunScreen } from "../src/client/FirstRunScreen";
 import { FirstRunGate } from "../src/client/FirstRunGate";
 import { isFirstRunComplete } from "../src/client/firstRunApi";
+import { setTenantProvidersStateForTest } from "../src/client/tenantProviders";
 
 const flush = async (times = 6) => {
   for (let i = 0; i < times; i++) {
@@ -246,6 +247,9 @@ function clickLabel(container: HTMLElement, text: string) {
 }
 
 beforeEach(() => {
+  // Issue #3812: the platform default broker is Alpaca; this suite walks
+  // the E*TRADE OAuth connect step, so the selection is explicit.
+  setTenantProvidersStateForTest({ dataProviderId: "etrade", brokerId: "etrade" });
   apiState.identity = {
     userLogin: "second-user",
     tenantId: "tenant-1",

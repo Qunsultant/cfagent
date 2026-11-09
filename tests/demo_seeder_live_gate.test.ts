@@ -25,7 +25,9 @@ describe("#921 demo seeder live gate", () => {
       )
     );
     // The hub really rendered its portfolio hero in live mode…
-    expect(html).toContain("LIVE BROKERAGE");
+    // Issue #3812: the rendered live badge is broker-neutral (Alpaca renders
+    // "LIVE TRADING", E*TRADE renders "LIVE BROKERAGE").
+    expect(html).toContain("LIVE TRADING");
     // …and offers no way to seed fabricated holdings into it.
     expect(html).not.toContain("Load Demo Holdings");
     expect(html).not.toContain("Reset Demo Holdings");

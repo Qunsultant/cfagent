@@ -32,6 +32,7 @@ import type { SqlStorage } from "../orm";
 import type { ScreenerRunOutcome } from "./screenerFollowups";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
+import { DEFAULT_TENANT_PROVIDERS } from "../data/commercialPorts";
 
 /** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
 const structuredLog = createStructuredLogger(createObservabilitySink({}), {
@@ -612,7 +613,7 @@ export function recordStrategyScreenRun(
         jobType: "options-strategy-panel",
         strategyMode,
         dataProviderId: input.dataProviderId ?? "etrade",
-        brokerId: input.brokerId ?? "etrade",
+        brokerId: input.brokerId ?? DEFAULT_TENANT_PROVIDERS.brokerId,
       },
       ...(input.scheduleId ? { scheduleId: input.scheduleId } : {}),
       ...(input.goalId ? { goalId: input.goalId } : {}),
