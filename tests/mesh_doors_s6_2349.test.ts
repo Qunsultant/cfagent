@@ -48,6 +48,7 @@ import {
 } from "../src/agents/orchestrator/meshDoors";
 import {
   ProposeStockTradeCommand,
+  RunStockScreenCommand,
   ProposeOptionsTradeCommand,
   GetTradingAccountsCommand,
   GetTradingPositionsCommand,
@@ -543,15 +544,18 @@ describe("mesh door identity carriage for batch B (#2349)", () => {
       principal: { kind: "agent-turn" as const, login: null },
       submitJob,
     } as McpToolContext;
-    const tool = McpAgentToolAdapter.adapt(new ProposeStockTradeCommand(), ctx);
+    // Issue #3839: propose_stock_trade is synchronous (a money path is
+    // never queued). The adapter's queue-identity contract is covered by
+    // an async screen tool, which still travels through the job payload.
+    const tool = McpAgentToolAdapter.adapt(new RunStockScreenCommand(), ctx);
     await (tool as any).execute(
-      { symbol: "AAPL", action: "BUY", quantity: 10 },
+      { universe: "SP500" },
       { toolCallId: "t-1", messages: [] },
     );
     expect(submitJob).toHaveBeenCalledTimes(1);
     const job = submitJob.mock.calls[0][0];
     expect(job.capability).toBe("mcp.tool");
-    expect(job.payload.toolName).toBe("propose_stock_trade");
+    expect(job.payload.toolName).toBe("run_stock_screen");
     expect(job.payload.actingLogin).toBe("alice");
   });
 });

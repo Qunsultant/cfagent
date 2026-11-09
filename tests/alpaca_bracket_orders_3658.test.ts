@@ -137,7 +137,7 @@ describe("Issue #3658 — Alpaca Native Bracket Orders (alpaca_place_order)", ()
         limit_price: 220,
         take_profit_limit_price: 228.8,
         stop_loss_stop_price: 215.6,
-        time_in_force: "gtc",
+        time_in_force: "day",
       },
       ctx,
     );
@@ -148,7 +148,7 @@ describe("Issue #3658 — Alpaca Native Bracket Orders (alpaca_place_order)", ()
     expect(req.body.order_class).toBe("bracket");
     expect(req.body.take_profit).toEqual({ limit_price: 228.8 });
     expect(req.body.stop_loss).toEqual({ stop_price: 215.6 });
-    expect(req.body.time_in_force).toBe("gtc");
+    expect(req.body.time_in_force).toBe("day");
   });
 
   it("refuses bracket order missing stop_loss leg (fails closed, zero broker contact)", async () => {
