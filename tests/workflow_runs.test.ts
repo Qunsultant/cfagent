@@ -377,4 +377,31 @@ describe("stuck runs (#3784)", () => {
     expect(runs[0].status).toBe("completed");
     expect(runs[0].stuck).toBe(false);
   });
+
+  it("stamps trigger and schedule provenance for MCP tool runs (#3810)", () => {
+    const runs = buildWorkflowRuns({
+      jobs: [
+        job({
+          job_id: "job-mcp",
+          capability: "mcp.tool",
+          display_name: "MCP: get_pipeline_chain_status",
+          status: "running",
+          started_at: "2026-11-08T21:14:31.000Z",
+          payload_json: JSON.stringify({
+            toolName: "get_pipeline_chain_status",
+            actingLogin: "test-trader",
+            arguments: { source: "nasdaq100 pipeline" },
+          }),
+        }),
+      ],
+      outcomes: [],
+      transitions: [],
+    });
+    expect(runs).toHaveLength(1);
+    expect(runs[0].trigger).toBe("agent");
+    expect(runs[0].triggerDetail).toBe("Agent tool call — get_pipeline_chain_status");
+    expect(runs[0].triggeredBy).toBe("test-trader");
+    expect(runs[0].schedule?.mechanism).toBe("manual");
+    expect(runs[0].schedule?.identity).toBe("not-scheduled");
+  });
 });

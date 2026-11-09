@@ -651,6 +651,9 @@ export function WorkflowRunsPanel() {
       render: (run: WorkflowRun) => {
         const schedule = run.schedule ?? null;
         if (!schedule) return <span className="workflow-runs-muted">Not recorded</span>;
+        if (schedule.identity === "not-scheduled") {
+          return <span className="workflow-runs-muted">Not scheduled</span>;
+        }
         return (
           <div className="workflow-runs-trigger">
             <span className="workflow-runs-muted">{SCHEDULE_MECHANISM_LABEL[schedule.mechanism]}</span>

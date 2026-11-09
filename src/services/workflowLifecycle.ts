@@ -175,8 +175,14 @@ export function scheduleProvenanceForJobs(
   if (trigger === "scheduled" || trigger === "autonomous") {
     return { mechanism: "cron-trigger", identity: null, reason: null, nextFiringAt: null, delaySeconds: null };
   }
-  if (trigger === "manual") {
-    return { mechanism: "manual", identity: null, reason: null, nextFiringAt: null, delaySeconds: null };
+  if (trigger === "manual" || trigger === "agent") {
+    return {
+      mechanism: "manual",
+      identity: trigger === "agent" ? "not-scheduled" : null,
+      reason: null,
+      nextFiringAt: null,
+      delaySeconds: null,
+    };
   }
   return { mechanism: "unknown", identity: null, reason: null, nextFiringAt: null, delaySeconds: null };
 }
@@ -205,8 +211,14 @@ export function scheduleProvenanceForTrigger(trigger: string): WorkflowRunSchedu
   if (trigger === "scheduled" || trigger === "autonomous") {
     return { mechanism: "cron-trigger", identity: null, reason: null, nextFiringAt: null, delaySeconds: null };
   }
-  if (trigger === "manual") {
-    return { mechanism: "manual", identity: null, reason: null, nextFiringAt: null, delaySeconds: null };
+  if (trigger === "manual" || trigger === "agent") {
+    return {
+      mechanism: "manual",
+      identity: trigger === "agent" ? "not-scheduled" : null,
+      reason: null,
+      nextFiringAt: null,
+      delaySeconds: null,
+    };
   }
   return { mechanism: "unknown", identity: null, reason: null, nextFiringAt: null, delaySeconds: null };
 }
