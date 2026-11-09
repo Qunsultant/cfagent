@@ -27,6 +27,7 @@
 import { z } from "zod";
 import { alpacaModeFromEnv, recordTradingRunOutcome } from "../../services/tradingRunOutcome";
 import { computeBracketExits } from "../../trading";
+import { getUserDid } from "../../agents/did";
 import type { IMcpToolCommand, McpToolContext } from "../../patterns/interfaces";
 import { MarketDataResearchService, marketDataResearchBarsSourceLabel } from "../../services/marketDataResearch";
 import {
@@ -440,6 +441,8 @@ export class AlpacaPlaceOrderCommand implements IMcpToolCommand {
   readonly jsonSchema = {
     type: "object" as const,
     properties: {
+      orderId: { type: "string", description: "Optional previewed draft id (alp_ord_...). When present, the stored draft is executed after approval instead of creating a new order." },
+      decision: { type: "string", enum: ["approved", "rejected"], description: "Approval decision for an orderId execution (default: approved)." },
       symbol: { type: "string", description: "Ticker symbol (e.g. NVDA, AAPL, BTC/USD)" },
       qty: { type: "number", description: "Number of shares or contract units" },
       side: { type: "string", enum: ["buy", "sell"], description: "Order side (buy or sell)" },
@@ -488,6 +491,8 @@ export class AlpacaPlaceOrderCommand implements IMcpToolCommand {
   };
 
   readonly zodSchema = z.object({
+    orderId: z.string().min(1).optional().describe("Optional previewed draft id to execute"),
+    decision: z.enum(["approved", "rejected"]).optional().describe("Approval decision for an orderId execution"),
     symbol: z.string().min(1).max(20).describe("Ticker symbol"),
     qty: z.number().positive().describe("Order quantity"),
     side: z.enum(["buy", "sell"]).describe("Order side"),
@@ -512,6 +517,8 @@ export class AlpacaPlaceOrderCommand implements IMcpToolCommand {
 
   async execute(
     input: {
+      orderId?: string;
+      decision?: "approved" | "rejected";
       symbol: string;
       qty: number;
       side: "buy" | "sell";
@@ -535,6 +542,37 @@ export class AlpacaPlaceOrderCommand implements IMcpToolCommand {
     },
     context: McpToolContext
   ) {
+    // Issue #3846: an orderId executes the stored preview draft through the
+    // same approval/settlement path the chat's "yes" expects. This is the
+    // tool the transcript reached for as `alpaca_execute_order`.
+    if (input.orderId) {
+      const { TradingPlatformRegistry } = await import("../../trading");
+      const platform = TradingPlatformRegistry.getPlatform("alpaca", context.env, context.orm, context.sessionId);
+      const result = await platform.executeOrder(
+        input.orderId,
+        getUserDid(context.sessionId),
+        input.decision ?? "approved",
+      );
+      context.audit?.("alpaca.order_executed", "trading", {
+        orderId: input.orderId,
+        decision: input.decision ?? "approved",
+        success: result.success,
+        brokerOrderRef: result.brokerOrderRef,
+      });
+      recordTradingRunOutcome(context.orm?.getSql?.(), {
+        orderId: input.orderId,
+        status: result.success ? "completed" : "failed",
+        action: result.action,
+        symbol: result.symbol,
+        quantity: result.quantity,
+        broker: "alpaca",
+        mode: alpacaModeFromEnv(context.env),
+        ...(result.success ? {} : { codedError: "order_execution_failed" }),
+        origin: "alpaca_place_order",
+        priceSource: "draft",
+      });
+      return result;
+    }
     const resolved = resolveAlpacaOrderMode(marketDataModeLevels(context, "order", (input as any)?.mode, ALPACA_ORDER_MODE_SWITCH), "mcp");
     auditMarketDataConfigError(context, ALPACA_ORDER_MODE_SWITCH, resolved, "trading");
     const service = new MarketDataResearchService(context.env);
@@ -666,6 +704,77 @@ export class AlpacaPlaceOrderCommand implements IMcpToolCommand {
       priceSource: "user",
     });
     return result;
+  }
+}
+
+/**
+ * Issue #3846 — execute a previewed Alpaca draft by orderId.
+ *
+ * This is the explicit approval tool the chat surface expected
+ * (`alpaca_execute_order`). It settles the STORED draft through
+ * AlpacaTradingPlatform.executeOrder, which delegates to the same
+ * placement client `alpaca_place_order` uses; a missing or non-previewed
+ * draft is refused. Nothing is placed without a preview and an authorizer.
+ */
+export class AlpacaExecuteOrderCommand implements IMcpToolCommand {
+  readonly name = "alpaca_execute_order";
+  readonly description =
+    "Execute a previewed Alpaca order draft by orderId after explicit human approval. Settles the stored draft through the same placement client as alpaca_place_order; no draft, no placement.";
+
+  readonly jsonSchema = {
+    type: "object" as const,
+    properties: {
+      orderId: { type: "string", description: "The previewed draft id (alp_ord_...)" },
+      decision: { type: "string", enum: ["approved", "rejected"], description: "Human decision (default: approved)" },
+    },
+    required: ["orderId"],
+  };
+
+  readonly zodSchema = z.object({
+    orderId: z.string().min(1).describe("The previewed draft id"),
+    decision: z.enum(["approved", "rejected"]).optional().default("approved").describe("Human decision"),
+  });
+
+  async execute(
+    input: { orderId: string; decision?: "approved" | "rejected" },
+    context: McpToolContext,
+  ) {
+    const { TradingPlatformRegistry } = await import("../../trading");
+    const platform = TradingPlatformRegistry.getPlatform("alpaca", context.env, context.orm, context.sessionId);
+    const decision = input.decision ?? "approved";
+    try {
+      const result = await platform.executeOrder(input.orderId, getUserDid(context.sessionId), decision);
+      context.audit?.("alpaca.order_executed", "trading", {
+        orderId: input.orderId,
+        decision,
+        success: result.success,
+        brokerOrderRef: result.brokerOrderRef,
+      });
+      recordTradingRunOutcome(context.orm?.getSql?.(), {
+        orderId: input.orderId,
+        status: result.success ? "completed" : "failed",
+        action: result.action,
+        symbol: result.symbol,
+        quantity: result.quantity,
+        broker: "alpaca",
+        mode: alpacaModeFromEnv(context.env),
+        ...(result.success ? {} : { codedError: "order_execution_failed" }),
+        origin: "alpaca_execute_order",
+        priceSource: "draft",
+      });
+      return result;
+    } catch (error) {
+      recordTradingRunOutcome(context.orm?.getSql?.(), {
+        orderId: input.orderId,
+        status: "failed",
+        action: "UNKNOWN",
+        broker: "alpaca",
+        mode: alpacaModeFromEnv(context.env),
+        codedError: (error as { code?: string })?.code || "order_execution_failed",
+        origin: "alpaca_execute_order",
+      });
+      throw error;
+    }
   }
 }
 

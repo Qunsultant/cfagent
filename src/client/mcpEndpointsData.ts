@@ -428,6 +428,20 @@ export const MCP_TOOLS_CATALOG: McpToolMeta[] = [
     sampleArgs: { symbol: "NVDA", qty: 1, side: "buy", type: "limit", limit_price: 135.0 },
   },
   {
+    name: "alpaca_execute_order",
+    category: "Market Data Research & Quoting",
+    description: "Execute a previewed Alpaca order draft by orderId after explicit human approval. Settles the stored draft through the same placement client as alpaca_place_order; no draft, no placement.",
+    schema: {
+      type: "object",
+      properties: {
+        orderId: { type: "string", description: "The previewed draft id (alp_ord_...)" },
+        decision: { type: "string", enum: ["approved", "rejected"], description: "Human decision (default: approved)" },
+      },
+      required: ["orderId"],
+    },
+    sampleArgs: { orderId: "alp_ord_1a2b3c4d", decision: "approved" },
+  },
+  {
     name: "alpaca_get_quote",
     category: "Market Data Research & Quoting",
     description: "Retrieve a live market quote (price, bid/ask, volume, OHLC) for an equity ticker from Alpaca Market Data v2. Live-only: the result carries provider 'alpaca', provenance 'live', and a timestamp.",

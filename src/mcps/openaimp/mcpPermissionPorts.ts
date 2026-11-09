@@ -338,6 +338,7 @@ export const MCP_TOOL_SCOPES: Record<string, McpScope> = {
   etrade_preview_order: "mcp:trade",
   etrade_execute_order: "mcp:trade",
   alpaca_place_order: "mcp:trade",
+  alpaca_execute_order: "mcp:trade",
   // Issue #3782: the Alpaca preview tool is a trade-scope draft
   // (a proposal, never a placed order), alongside etrade_preview_order.
   alpaca_preview_order: "mcp:trade",

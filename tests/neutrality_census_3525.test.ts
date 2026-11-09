@@ -594,7 +594,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/client/firstRunApi.ts", "etrade", 11],
   ["src/client/iaaaAdminApi.ts", "etrade", 1],
   ["src/client/iaaaEndpointCatalog.ts", "etrade", 34],
-  ["src/client/mcpEndpointsData.ts", "alpaca", 13],
+  ["src/client/mcpEndpointsData.ts", "alpaca", 14],
   ["src/client/mcpEndpointsData.ts", "etrade", 53],
   ["src/client/mcpEndpointsData.ts", "yahoo", 5],
   ["src/client/orderPreviewCard.ts", "etrade", 1],
@@ -721,7 +721,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/mcps/openaimp/index.ts", "alpaca", 4],
   ["src/mcps/openaimp/index.ts", "etrade", 7],
   ["src/mcps/openaimp/index.ts", "yahoo", 5],
-  ["src/mcps/openaimp/marketDataCommands.ts", "alpaca", 49],
+  ["src/mcps/openaimp/marketDataCommands.ts", "alpaca", 58],
   ["src/mcps/openaimp/marketDataCommands.ts", "etrade", 3],
   ["src/mcps/openaimp/marketDataCommands.ts", "yahoo", 4],
   ["src/mcps/openaimp/mcpPermissionPorts.ts", "alpaca", 3],
@@ -914,7 +914,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/trading/alpaca/occSymbol.ts", "alpaca", 8],
   ["src/trading/alpaca/optionsData.ts", "alpaca", 14],
   ["src/trading/alpaca/optionsData.ts", "etrade", 2],
-  ["src/trading/alpaca/platform.ts", "alpaca", 111],
+  ["src/trading/alpaca/platform.ts", "alpaca", 113],
   ["src/trading/alpaca/platform.ts", "etrade", 8],
   ["src/trading/alpaca/signIn.ts", "alpaca", 6],
   ["src/trading/brokerCatalog.ts", "alpaca", 18],
@@ -1372,8 +1372,8 @@ describe("#3525 S6 shrink-only provider-brand census pin", () => {
     expect(total).toBeLessThanOrEqual(PLATFORM_BASELINE_TOTAL);
   });
 
-  it("the baseline itself is the recorded seed (1116 rows / 8702 lines)", () => {
+  it("the baseline itself is the recorded seed (1116 rows / 8714 lines)", () => {
     expect(BASELINE.length).toBe(1116);
-    expect(BASELINE.reduce((a, [, , c]) => a + c, 0)).toBe(8702);
+    expect(BASELINE.reduce((a, [, , c]) => a + c, 0)).toBe(8714);
   });
 });
