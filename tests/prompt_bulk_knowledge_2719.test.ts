@@ -40,8 +40,12 @@ const PRE_CHANGE_PROMPT_CHARS = 10_193;
  * pre-#2719 the prompt measured 10,193 chars (see
  * PRE_CHANGE_PROMPT_CHARS) — the removed workflow map, engine
  * descriptions, and catalog bullets account for the 4,313-char drop.
+ * #3812 re-pointed rule 6's order path to be broker-neutral (E*TRADE,
+ * or Alpaca on an activated Stock Copilot turn) and measured 6,164
+ * chars; the pin moves to 6,200 to keep that money-path steering while
+ * retaining the anti-bloat ceiling.
  */
-const PROMPT_SIZE_PIN_CHARS = 6_100;
+const PROMPT_SIZE_PIN_CHARS = 6_200;
 
 describe("issue #2719 — moved documentation bulk is out of the prompt", () => {
   it("drops the Platform Workflows & UI Navigation Map section", () => {

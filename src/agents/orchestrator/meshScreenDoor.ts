@@ -105,6 +105,7 @@ import type { ShardJobRow } from "../../data/shardJobPorts";
 import { meshTraceStoreForEnv } from "../../data/createMeshTracePorts";
 import type { MeshTraceStore } from "../../data/meshTracePorts";
 import { childContextOfTraceparent } from "../../observability/meshTrace";
+import { CREDITS_TOP_UP_HINT } from "../../services/providerUxLinks";
 import {
   listScheduledReports,
   resolveCanonicalReportBody,
@@ -852,9 +853,9 @@ function paymentOutcomeStatus(output: unknown): string | null {
 function paymentTerminalNote(outcome: string | null, instanceStatus: string, runRequestId: string): string {
   switch (outcome) {
     case "payment_required":
-      return `payment run ${runRequestId} is still awaiting payment (checkout outstanding) — no screen was started and no charge was confirmed`;
+      return `payment run ${runRequestId} is still awaiting payment (checkout outstanding) — no screen was started and no charge was confirmed. ${CREDITS_TOP_UP_HINT}`;
     case "coverage_required":
-      return `payment run ${runRequestId} requires subscription or credit coverage before it can start — no screen was started`;
+      return `payment run ${runRequestId} requires subscription or credit coverage before it can start — no screen was started. ${CREDITS_TOP_UP_HINT}`;
     case "approval_rejected":
       return `payment run ${runRequestId} was rejected at approval — no screen was started and no charge was made`;
     case "expired":

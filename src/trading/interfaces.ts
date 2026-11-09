@@ -58,6 +58,14 @@ export interface OrderPreviewParams {
   orderClass?: "simple" | "bracket" | "oco" | "oto";
   takeProfit?: { limitPrice?: number };
   stopLoss?: { stopPrice?: number; limitPrice?: number };
+  /**
+   * Issue #3812: percent-based bracket exits, converted to absolute leg
+   * prices by computeBracketExits against the draft's entry price. Both
+   * must be supplied together; an absolute takeProfit/stopLoss wins when
+   * also present (percent is the convenience form).
+   */
+  takeProfitPercent?: number;
+  stopLossPercent?: number;
   /** Opening legs for a native multi-leg options order. */
   optionLegs?: TradingOrderLeg[];
   /** Net strategy price: positive is debit, negative is credit. */

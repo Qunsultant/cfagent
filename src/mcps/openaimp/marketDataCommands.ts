@@ -25,6 +25,8 @@
  */
 
 import { z } from "zod";
+import { alpacaModeFromEnv, recordTradingRunOutcome } from "../../services/tradingRunOutcome";
+import { computeBracketExits } from "../../trading/bracketPercent";
 import type { IMcpToolCommand, McpToolContext } from "../../patterns/interfaces";
 import { MarketDataResearchService, marketDataResearchBarsSourceLabel } from "../../services/marketDataResearch";
 import {
@@ -466,6 +468,16 @@ export class AlpacaPlaceOrderCommand implements IMcpToolCommand {
       },
       stop_loss_stop_price: { type: "number", description: "Convenience alias for stop-loss stop price" },
       stop_loss_limit_price: { type: "number", description: "Convenience alias for stop-loss limit price" },
+      take_profit_pct: {
+        type: "number",
+        description:
+          "Issue #3812: take-profit distance in percent from limit_price (e.g. 4 for +4%). Requires stop_loss_pct; limit_price is required.",
+      },
+      stop_loss_pct: {
+        type: "number",
+        description:
+          "Issue #3812: stop-loss distance in percent from limit_price (e.g. 2 for -2%). Requires take_profit_pct; limit_price is required.",
+      },
       quantity: { type: "number", description: "#1727 market-data/trading-mode alias for qty (ignored in mcp mode)" },
       orderAction: { type: "string", description: "#1727 market-data-mode alias for side (ignored in mcp/trading modes)" },
       orderType: { type: "string", description: "#1727 market-data-mode alias for type (ignored in mcp/trading modes)" },
@@ -489,6 +501,8 @@ export class AlpacaPlaceOrderCommand implements IMcpToolCommand {
     stop_loss: z.object({ stop_price: z.number().positive(), limit_price: z.number().positive().optional() }).optional().describe("Stop-loss bracket leg"),
     stop_loss_stop_price: z.number().positive().optional().describe("Stop-loss stop price"),
     stop_loss_limit_price: z.number().positive().optional().describe("Stop-loss limit price"),
+    take_profit_pct: z.number().positive().optional().describe("Issue #3812: take-profit distance in percent from limit_price (e.g. 4)"),
+    stop_loss_pct: z.number().positive().optional().describe("Issue #3812: stop-loss distance in percent from limit_price (e.g. 2)"),
     quantity: z.number().positive().optional().describe("#1727 market-data/trading-mode alias for qty (ignored in mcp mode)"),
     orderAction: z.string().optional().describe("#1727 market-data-mode alias for side (ignored in mcp/trading modes)"),
     orderType: z.string().optional().describe("#1727 market-data-mode alias for type (ignored in mcp/trading modes)"),
@@ -511,6 +525,8 @@ export class AlpacaPlaceOrderCommand implements IMcpToolCommand {
       stop_loss?: { stop_price: number; limit_price?: number };
       stop_loss_stop_price?: number;
       stop_loss_limit_price?: number;
+      take_profit_pct?: number;
+      stop_loss_pct?: number;
       quantity?: number;
       orderAction?: string;
       orderType?: string;
@@ -522,6 +538,41 @@ export class AlpacaPlaceOrderCommand implements IMcpToolCommand {
     const resolved = resolveAlpacaOrderMode(marketDataModeLevels(context, "order", (input as any)?.mode, ALPACA_ORDER_MODE_SWITCH), "mcp");
     auditMarketDataConfigError(context, ALPACA_ORDER_MODE_SWITCH, resolved, "trading");
     const service = new MarketDataResearchService(context.env);
+
+    // Issue #3812: percent exits are resolved BEFORE normalization, from
+    // the parent's limit price. A percent bracket without a limit cannot be
+    // priced deterministically, so it refuses instead of guessing a quote.
+    if (input.take_profit_pct !== undefined || input.stop_loss_pct !== undefined) {
+      if (input.take_profit_pct === undefined || input.stop_loss_pct === undefined) {
+        return {
+          success: false,
+          message: "Percent bracket exits need both take_profit_pct and stop_loss_pct (both or neither).",
+          refusal: "invalid_bracket_percent",
+        };
+      }
+      if (!Number.isFinite(input.limit_price) || Number(input.limit_price) <= 0) {
+        return {
+          success: false,
+          message:
+            "A percent bracket needs a positive limit_price: the exits are converted from the parent limit, never from an ambient quote.",
+          refusal: "bracket_percent_needs_limit",
+        };
+      }
+      const exits = computeBracketExits({
+        side: input.side === "buy" ? "BUY" : "SELL",
+        entryPrice: Number(input.limit_price),
+        takeProfitPercent: input.take_profit_pct,
+        stopLossPercent: input.stop_loss_pct,
+      });
+      // The normalized order shape is Alpaca's snake_case body: the
+      // helper returns the platform's camelCase leg shape, so the two
+      // keys are mapped explicitly here (a silent drop would leave a
+      // bracket parent with no children — the exact refusal #3812 fixes).
+      (input as any).order_class = input.order_class ?? "bracket";
+      (input as any).take_profit = { limit_price: exits.takeProfit.limitPrice };
+      (input as any).stop_loss = { stop_price: exits.stopLoss.stopPrice };
+    }
+
     const normalized = normalizeMarketDataOrderInput(input as any, resolved.mode);
 
     // Validate bracket combos (#3658): fail closed before broker contact
@@ -586,6 +637,24 @@ export class AlpacaPlaceOrderCommand implements IMcpToolCommand {
     // placeOrder refuses the placement if that declaration is absent.
     const result = await service.placeAlpacaOrder({ ...normalized, priceSource: { kind: "user" } });
     context.audit?.(marketDataOrderAuditEvent(resolved.mode), "trading", marketDataOrderAuditPayload(resolved.mode, normalized, result));
+    // Issue #3812: the placement is the run's terminal fact. A broker
+    // refusal (success:false) is a failed run with its coded refusal.
+    recordTradingRunOutcome(context.orm?.getSql?.(), {
+      orderId: result.orderId || `place-${context.sessionId || "unassigned"}-${Date.now()}`,
+      status: result.success ? "completed" : "failed",
+      action: normalized.side.toUpperCase(),
+      symbol: normalized.symbol,
+      quantity: normalized.qty,
+      orderType: normalized.type,
+      orderClass: normalized.order_class,
+      broker: "alpaca",
+      mode: alpacaModeFromEnv(context.env),
+      ...(result.success ? {} : { codedError: result.refusal || "order_rejected" }),
+      origin: "alpaca_place_order",
+      takeProfitPrice: normalized.take_profit?.limit_price,
+      stopLossPrice: normalized.stop_loss?.stop_price,
+      priceSource: "user",
+    });
     return result;
   }
 }
@@ -858,6 +927,16 @@ export class AlpacaPreviewOrderCommand implements IMcpToolCommand {
         required: ["stopPrice"],
         description: "Stop-loss bracket leg parameters",
       },
+      takeProfitPercent: {
+        type: "number",
+        description:
+          "Issue #3812: take-profit distance in percent from the draft entry (e.g. 4 for +4%). Requires stopLossPercent; converted deterministically to an absolute leg price.",
+      },
+      stopLossPercent: {
+        type: "number",
+        description:
+          "Issue #3812: stop-loss distance in percent from the draft entry (e.g. 2 for -2%). Requires takeProfitPercent; converted deterministically to an absolute leg price.",
+      },
       assetClass: { type: "string", enum: ["equity", "options"], description: "Asset class (default: equity)" },
       optionLegs: { type: "array", items: { type: "object" }, description: "Option legs for a multi-leg strategy order" },
       strategyNetDebit: { type: "number", description: "Net strategy price for an options order (positive is debit, negative is credit)" },
@@ -875,6 +954,8 @@ export class AlpacaPreviewOrderCommand implements IMcpToolCommand {
     orderClass: z.enum(["simple", "bracket", "oco", "oto"]).optional().describe("Order class"),
     takeProfit: z.object({ limitPrice: z.number() }).optional().describe("Take-profit bracket leg"),
     stopLoss: z.object({ stopPrice: z.number(), limitPrice: z.number().optional() }).optional().describe("Stop-loss bracket leg"),
+    takeProfitPercent: z.number().positive().optional().describe("Issue #3812: take-profit distance in percent from the entry (e.g. 4)"),
+    stopLossPercent: z.number().positive().optional().describe("Issue #3812: stop-loss distance in percent from the entry (e.g. 2)"),
     assetClass: z.enum(["equity", "options"]).optional().describe("Asset class"),
     optionLegs: z.array(z.any()).optional().describe("Option legs"),
     strategyNetDebit: z.number().optional().describe("Net strategy price"),
@@ -888,22 +969,49 @@ export class AlpacaPreviewOrderCommand implements IMcpToolCommand {
     // MCP client modules) loads at call time, not module load.
     const { TradingPlatformRegistry } = await import("../../trading");
     const platform = TradingPlatformRegistry.getPlatform("alpaca", context.env, context.orm, context.sessionId);
-    const draft = await platform.previewOrder({
-      assetClass: input.assetClass,
-      symbol: input.symbol,
-      action: input.action || input.orderAction,
-      orderAction: input.orderAction || input.action,
-      quantity: input.quantity,
-      orderType: input.orderType,
-      limitPrice: input.limitPrice,
-      stopPrice: input.stopPrice,
-      orderClass: input.orderClass,
-      takeProfit: input.takeProfit,
-      stopLoss: input.stopLoss,
-      optionLegs: input.optionLegs,
-      strategyNetDebit: input.strategyNetDebit,
-      sessionId: context.sessionId,
-    });
+    let draft: Awaited<ReturnType<typeof platform.previewOrder>>;
+    try {
+      draft = await platform.previewOrder({
+        assetClass: input.assetClass,
+        symbol: input.symbol,
+        action: input.action || input.orderAction,
+        orderAction: input.orderAction || input.action,
+        quantity: input.quantity,
+        orderType: input.orderType,
+        limitPrice: input.limitPrice,
+        stopPrice: input.stopPrice,
+        orderClass: input.orderClass,
+        takeProfit: input.takeProfit,
+        stopLoss: input.stopLoss,
+        // Issue #3812: the percent form of a bracket request. The adapter
+        // converts it against the same entry it prices the draft from.
+        takeProfitPercent: input.takeProfitPercent,
+        stopLossPercent: input.stopLossPercent,
+        optionLegs: input.optionLegs,
+        strategyNetDebit: input.strategyNetDebit,
+        sessionId: context.sessionId,
+      });
+    } catch (error) {
+      // Issue #3812: a refused preview is a run too — record the coded
+      // failure before rethrowing so Workflow Runs explains the block.
+      const coded =
+        (error as { code?: string })?.code || "order_preview_failed";
+      recordTradingRunOutcome(context.orm?.getSql?.(), {
+        orderId: `preview-refused-${input.symbol}-${Date.now()}`,
+        status: "failed",
+        action: input.action || input.orderAction || "BUY",
+        symbol: input.symbol,
+        quantity: input.quantity,
+        orderType: input.orderType,
+        broker: "alpaca",
+        mode: "paper",
+        codedError: coded,
+        origin: "alpaca_preview_order",
+        takeProfitPercent: input.takeProfitPercent,
+        stopLossPercent: input.stopLossPercent,
+      });
+      throw error;
+    }
     context.audit?.("alpaca.order_previewed", "trading", {
       orderId: draft.orderId,
       symbol: draft.symbol,
@@ -911,6 +1019,25 @@ export class AlpacaPreviewOrderCommand implements IMcpToolCommand {
       quantity: draft.quantity,
       estimatedTotal: draft.estimatedTotal,
       proposerDid: draft.proposerDid,
+      takeProfitPercent: input.takeProfitPercent,
+      stopLossPercent: input.stopLossPercent,
+    });
+    recordTradingRunOutcome(context.orm?.getSql?.(), {
+      orderId: draft.orderId,
+      status: "completed",
+      action: draft.action,
+      symbol: draft.symbol,
+      quantity: draft.quantity,
+      orderType: draft.orderType,
+      orderClass: (draft as { orderClass?: string }).orderClass,
+      broker: "alpaca",
+      mode: alpacaModeFromEnv(context.env),
+      origin: "alpaca_preview_order",
+      takeProfitPercent: input.takeProfitPercent,
+      stopLossPercent: input.stopLossPercent,
+      takeProfitPrice: (draft as { takeProfit?: { limitPrice?: number } }).takeProfit?.limitPrice,
+      stopLossPrice: (draft as { stopLoss?: { stopPrice?: number } }).stopLoss?.stopPrice,
+      priceSource: draft.priceSource?.kind,
     });
     return {
       orderId: draft.orderId,
@@ -923,6 +1050,8 @@ export class AlpacaPreviewOrderCommand implements IMcpToolCommand {
       orderClass: (draft as any).orderClass,
       takeProfit: (draft as any).takeProfit,
       stopLoss: (draft as any).stopLoss,
+      takeProfitPercent: (draft as any).takeProfitPercent,
+      stopLossPercent: (draft as any).stopLossPercent,
       broker: "alpaca",
       limitPrice: draft.limitPrice,
       stopPrice: draft.stopPrice,

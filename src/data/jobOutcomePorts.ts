@@ -36,7 +36,11 @@ export type JobOutcomeKind =
   | "reports"
   // Issue #3530 slice B — feed runs settled on the pipeline host
   // record here too, through the same one sink.
-  | "feed";
+  | "feed"
+  // Issue #3812 — order previews/placements record here so the Workflow
+  // Runs ledger shows what the trading path actually did (id
+  // `order:<orderId>`), including a coded refusal.
+  | "trading";
 export type JobOutcomeTrigger = "manual" | "scheduled";
 export type JobOutcomeStatus = "completed" | "failed" | "partial";
 

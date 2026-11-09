@@ -37,6 +37,9 @@ assertBrokerCatalogComplete(TradingPlatformRegistry.getRegisteredPlatforms() as 
 // --- boundary surface (pre-existing) ---
 export * from "./interfaces";
 export * from "./registry";
+// Issue #3812: percent bracket exits — the one deterministic conversion
+// from "+4% / -2%" to absolute leg prices (public trading surface).
+export * from "./bracketPercent";
 // Issue #3232: the broker catalog is part of the public trading surface.
 export * from "./brokerCatalog";
 export * from "./brokerPanels";

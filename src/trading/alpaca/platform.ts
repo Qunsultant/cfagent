@@ -11,6 +11,7 @@ import { BROKER_CATALOG, type TradingType } from "../brokerCatalog";
 import { deriveLotsFromFills, parseAlpacaFill, type DerivedLots } from "./fillLots";
 import { NeutralMarketScreener } from "../neutralMarketScreener";
 import { decodeOrderPriceSource } from "../quotePolicies";
+import { computeBracketExits } from "../bracketPercent";
 import { platformQuoteSource } from "../stockQuoteSource";
 import { formatOccSymbol, parseOccSymbol } from "./occSymbol";
 import { withAlpacaCredentials, alpacaTradingSide } from "./credentials";
@@ -933,7 +934,31 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
       authorizerDid: userDid,
     });
 
-    const orderClass = params.orderClass || (params.takeProfit || params.stopLoss ? "bracket" : undefined);
+    // Issue #3812: percent exits are converted here, against the SAME
+    // execution price the draft is priced from (a user limit, or the live
+    // quote above). The conversion is deterministic and the receipt
+    // carries both the percent and the absolute leg prices.
+    const percentRequested =
+      params.takeProfitPercent !== undefined || params.stopLossPercent !== undefined;
+    if (
+      percentRequested &&
+      (params.takeProfitPercent === undefined || params.stopLossPercent === undefined)
+    ) {
+      throw new Error(
+        "Bracket percent exits need both takeProfitPercent and stopLossPercent (both or neither).",
+      );
+    }
+    const percentExits = percentRequested
+      ? computeBracketExits({
+          side: action,
+          entryPrice: executionPrice,
+          takeProfitPercent: params.takeProfitPercent as number,
+          stopLossPercent: params.stopLossPercent as number,
+        })
+      : null;
+    const takeProfit = params.takeProfit ?? percentExits?.takeProfit;
+    const stopLoss = params.stopLoss ?? percentExits?.stopLoss;
+    const orderClass = params.orderClass || (takeProfit || stopLoss ? "bracket" : undefined);
     return {
       orderId,
       symbol: params.symbol.toUpperCase(),
@@ -941,8 +966,14 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
       orderAction: action,
       orderType,
       orderClass,
-      takeProfit: params.takeProfit,
-      stopLoss: params.stopLoss,
+      takeProfit,
+      stopLoss,
+      ...(percentExits
+        ? {
+            takeProfitPercent: percentExits.takeProfitPercent,
+            stopLossPercent: percentExits.stopLossPercent,
+          }
+        : {}),
       broker: "alpaca",
       quantity: params.quantity,
       estimatedPrice: executionPrice,
@@ -956,7 +987,7 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
       proposerDid: didProof.proposerDid,
       authorizerDid: userDid,
       proofSignature: didProof.signature,
-      previewMessage: `Alpaca Order Preview: ${action} ${params.quantity} ${params.symbol} @ ${hasUserLimit ? `$${executionPrice.toFixed(2)} (limit)` : `~$${executionPrice.toFixed(2)}`}. Estimated Total: $${estimatedTotal.toLocaleString()} USD.${orderClass === "bracket" ? " (bracket: TP / SL exits)" : ""}`,
+      previewMessage: `Alpaca Order Preview: ${action} ${params.quantity} ${params.symbol} @ ${hasUserLimit ? `$${executionPrice.toFixed(2)} (limit)` : `~$${executionPrice.toFixed(2)}`}. Estimated Total: $${estimatedTotal.toLocaleString()} USD.${orderClass === "bracket" ? ` (bracket: take-profit $${takeProfit?.limitPrice?.toFixed(2) ?? "-"} / stop-loss $${stopLoss?.stopPrice?.toFixed(2) ?? "-"})` : ""}`,
       safetyNotice: "SAFETY GUARANTEE: NO CAPITAL HAS BEEN MOVED. HUMAN APPROVAL REQUIRED BEFORE BROKER EXECUTION.",
       placedAt: new Date().toISOString(),
     };

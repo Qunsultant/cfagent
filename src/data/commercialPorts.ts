@@ -156,11 +156,18 @@ export interface TenantProviders {
   brokerId: string;
 }
 
-/** Defaults for a tenant with no settings row: etrade / etrade,
- * preserving the pre-existing behaviour exactly. */
+/**
+ * Defaults for a tenant with no settings row. Issue #3812 (owner rule on
+ * #3451): the platform's default BROKER is Alpaca, in paper mode. The
+ * data provider stays etrade, preserving the pre-existing behaviour for
+ * every data read; the trading default is now the copilot's broker, so
+ * the settings menu, the manual routes, and the copilot resolver agree.
+ * Paper is not stored here: it is the mode default (TEST) applied by the
+ * trade-environment resolver, so live remains an explicit act.
+ */
 export const DEFAULT_TENANT_PROVIDERS: TenantProviders = {
   dataProviderId: "etrade",
-  brokerId: "etrade",
+  brokerId: "alpaca",
 };
 
 export interface CreditClaimRecord {

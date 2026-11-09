@@ -42,6 +42,7 @@ import type { BreakerRegistry } from "../breakers/breakerPorts";
 import { AGENT_DIDS, createDidAttestationSync } from "../agents/did";
 import { createOutboundRateLimiter, type OutboundRateLimiter } from "../security/outboundRateLimiter";
 import { getCachedQuoteWithAge, setCachedQuote } from "./quoteCache";
+import { ALPACA_CONNECT_HINT } from "./providerUxLinks";
 import {
   isAlpacaConfigured,
   levelsForQuoteSwitch,
@@ -1575,8 +1576,11 @@ export const MARKET_DATA_RESEARCH_UNIVERSE: Record<string, StockMarketProfile> =
  */
 export function marketDataResearchLiveUnavailableError(symbol: string, what: string, provider: string): Error {
   const sym = symbol.toUpperCase().trim();
+  // Issue #3812: an Alpaca quote failure must name the fix, not only the
+  // failure. The link is the same one the settings menu and RCA use.
+  const nextStep = provider.toLowerCase().includes("alpaca") ? ` ${ALPACA_CONNECT_HINT}` : "";
   return new Error(
-    `Market data ${what} unavailable for ${sym} from ${provider}: no live data could be fetched in this call; no static, generated, or synthetic substitute is served (#923).`,
+    `Market data ${what} unavailable for ${sym} from ${provider}: no live data could be fetched in this call; no static, generated, or synthetic substitute is served (#923).${nextStep}`,
   );
 }
 
