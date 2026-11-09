@@ -1445,6 +1445,37 @@ Finance & capital (CFO; parent programme #2528):
 | Broker & provider neutrality | The tenant's broker and data-provider selections governing every run, job, and message — no silent E*TRADE fallback | Partial — order page and scheduled jobs merged; remaining slices Filed | #3460; #3216 |
 | Cost attribution (FinOps) | Per-agent and per-workflow cost attribution; paid-service billing actuals | Filed — no cost-attribution mechanism defined yet; paid-service costs GAP | #2474 |
 
+Data & knowledge (CDO):
+
+The Data and knowledge platform provides the shared data and
+knowledge services every other platform builds on — platforms.md
+§2: DAMA-DMBOK as the foundation; data contracts; domain-oriented
+data products; provenance and semantic modelling; platforms.md §3
+names the Data Platform as the shared provision. The platform
+leads data acquisition and normalization in the trading value
+stream and is measured on freshness, completeness, reconciliation
+accuracy, provenance coverage, and retrieval correctness. The
+operational account of these products lives in
+`docs/operations/data/`; this table is the inventory entry.
+
+| Product | Purpose | Status | Tracking |
+| --- | --- | --- | --- |
+| Data-provider platform | One plugin DataProvider contract and registry: capability routing that composes providers per data element in a single run, declared gap-fill, per-element provenance, raw + normalized capture per run, and a conformance kit as the drop-in replacement gate | Live — programme complete; capture story complete on all known stock-screen legs | #1116 |
+| Feed jobs | One scheduled feed job per market-data source (Yahoo, E*TRADE, Alpaca, Nasdaq, Public.com): persisted local copies, stored operator-editable schedules, status UX in the Data Providers panel, run outcomes in the Autopilot Job outcomes feed, and Copilot schedule commands | Live — programme closed | #3530 |
+| Publish stage | Document publishing as its own reusable stage (`publishDocument`): corpus sync and report indexing ride the stage, registered as scheduled jobs with run records instead of riding an unrelated tick | Live — extraction complete | #3527 |
+| Knowledge corpus and retrieval | The curated knowledge corpus (margin, options-risk, and order-semantics references) plus AI Search over the corpus and indexed reports: R2-backed instance `screener-search` reached only through the binding, per-login filtering on report results, provenance-tagged answers | Partial — binding, report indexing, and the corpus items-API bridge Live; the closing probe waits on the seed uploads, and the public endpoint's disable is the owner's step after it | #1169; #3345; #3323 |
+| Data foundation (data access) | One data-access layer behind ports: per-aggregate ports with per-store adapters (Drizzle on the D1 plane, Durable Object SQLite behind the same interfaces), a shrink-only SQL census pin, and a per-port conformance suite | Live — programme closed; mechanism harmonization and the substrate remainder Filed as their own issues | #1976; #3260; #3251 |
+| Provider taxonomy and neutrality | The provider census and taxonomy (universe, quote, technical, sentiment, fundamental, chain providers by capability) and broker/provider neutrality: no broker-specific surface in the platform layer, provider names only behind the ports, locked by a shrink-only census pin | Partial — neutrality programme closed and pinned; taxonomy recorded with universe integration (index memberships via the existing port) and ProviderIdentity Filed, not built | #3667; #3525; #3751 |
+| Screening data products | The unified stock + options screening data path: one request schema as the single definition site, all screening executing through the provider layer with per-run provenance, results persisted and downloadable | Live — consolidation closed | #958 |
+| Data lifecycle administration | The Platform Admin data lifecycle surface: clean-state reset, platform bootstrap, and tenant bootstrap over the data foundation | Live | #3250 |
+| Evidence and audit substrate | Append-only, hash-chained audit evidence in the SessionStore Durable Object (capacity-bounded, refusal on full), the substrate the platform's provenance claims rest on | Partial — append and chaining Live; the chain-verification caller is Filed with ownership unassigned; the Q7 retention policy is half-ratified (CDO signed, CISO outstanding) | #1976; #2437 |
+
+The operator surface over these products is Data Studio,
+defined in the Platform of Platforms table above (Filed,
+#3774). The corpus's seed uploads are the user's own action;
+the #1169 sequence (uploads → probe → owner disables the public
+endpoint → close) is recorded on #1169, not restated here.
+
 All other platforms — products not yet defined (**TBD**
 placeholder rows; no filed product issues were found for these
 platforms in the 2026-11-09 survey):
@@ -1454,7 +1485,6 @@ platforms in the 2026-11-09 survey):
 | Organization & strategy (CEO) | TBD — products to be defined by the owning platform |
 | Business architecture & commercial (CBO) | TBD — products to be defined by the owning platform |
 | Operations & service delivery (COO) | TBD — products to be defined by the owning platform |
-| Data & knowledge (CDO) | TBD — products to be defined by the owning platform (shared data and knowledge services per §12.1 are the platform's provision; their product definitions are not yet filed) |
 | Legal & obligation (CLO) | TBD — products to be defined by the owning platform |
 | Investment & portfolio (CIO function) | TBD — products to be defined |
 | Research (Chief Research Officer / Chief Scientist function) | TBD — products to be defined |
@@ -1739,8 +1769,9 @@ owner's word, not on this document.
 ### 14.8 Platforms and products
 
 - **Current:** §12.2's inventory — the Technology, Agentic,
-  Security & trust, Product & experience (CPO), and Finance &
-  capital (CFO) platform products filed or partial; all other
+  Security & trust, Product & experience (CPO), Finance &
+  capital (CFO), and Data & knowledge (CDO) platform products
+  filed or partial; all other
   platforms' products undefined.
 - **Future:** every platform productized under the platform
   model, each product registered and statused like §12.2's
@@ -1752,7 +1783,9 @@ owner's word, not on this document.
   (this issue, #3851); the Product & experience (CPO)
   platform's products defined in §12.2 (this issue, #3856);
   the Finance & capital (CFO) platform's products defined in
-  §12.2 (this issue, #3862); product definition for the
+  §12.2 (this issue, #3862); the Data & knowledge (CDO)
+  platform's products defined in §12.2 (this issue, #3864);
+  product definition for the
   remaining platforms is **TBD**, owned by each platform.
 
 ### 14.9 Operator surface: dashboards and Studios
