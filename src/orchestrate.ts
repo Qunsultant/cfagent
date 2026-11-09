@@ -136,6 +136,19 @@ export const OPERATION_CATALOG: CatalogEntry[] = [
     blurb:
       "Stored index-list refresh (issue #1980, follow-up to #1852; extended by #2962): weekly Wikipedia refresh of Dow / S&P 500 / S&P 100 / Nasdaq-100 / S&P 400 / the 11 GICS sectors and daily ETF-holdings refresh of Russell 2000 / Russell 1000 / Russell 3000, both as ScheduledAgent goals on the existing tick.",
   },
+  {
+    // #3787: feed.refresh_all is NOT an orchestrator job.
+    // ScheduledAgent executes it directly through the pipeline
+    // control plane's feed-job dispatch (the social.publish /
+    // resource.* / index.* precedent); the catalog entry exists
+    // so addGoal accepts the operation and the dashboard can
+    // list it.
+    agent: "feed",
+    binding: "SCHEDULED_AGENT",
+    operations: ["feed.refresh_all"],
+    blurb:
+      "Feed dataset refresh (issue #3787): hourly dispatch of every J2 feed job (provider quotes + fundamentals) through the pipeline control plane, so the screening chain's stages have persisted inputs.",
+  },
 ];
 
 export function catalogAgent(agent: string): CatalogEntry | undefined {

@@ -608,7 +608,15 @@ export async function remediatePlatformGaps(params: {
   const pipelineSource = params.pipelineChainSource ?? "nasdaq100 pipeline";
 
   // 1. Pipeline Chain Execution & Resumption
-  let pipelineStatus = "running";
+  // Issue #3787: the no-env branch used to report "success"
+  // ("validated across all 5 stages… queued and processing")
+  // WITHOUT executing anything. A step that did not run reports
+  // "skipped" with pipelineStatus "not_run" — never success.
+  // Steps 2–4 likewise verify nothing in this function, so they
+  // report "skipped" (not-run, not verified) instead of the
+  // success they used to claim. No underlying verification is
+  // built here — just stop reporting success for work not done.
+  let pipelineStatus = "not_run";
   try {
     if (params.env && typeof (params.env as any).SCHEDULED_AGENT?.get === "function") {
       const { runPipelineChainViaDoor } = await import("../agents/orchestrator/meshDoors");
@@ -618,21 +626,38 @@ export async function remediatePlatformGaps(params: {
         pipelineSource,
       );
       pipelineStatus = chainResult.state;
-      actions.push({
-        action: "run_pipeline_chain",
-        target: pipelineSource,
-        status: "success",
-        details: `Triggered 5-stage pipeline chain (jobId: ${chainResult.jobId}, runId: ${chainResult.runId}, state: ${chainResult.state}). Stages (Feed -> Enrich -> Analyze -> Generate -> Deliver) actively processing.`,
-      });
+      if (chainResult.state === "completed") {
+        actions.push({
+          action: "run_pipeline_chain",
+          target: pipelineSource,
+          status: "success",
+          details: `Triggered 5-stage pipeline chain (jobId: ${chainResult.jobId}, runId: ${chainResult.runId}, state: ${chainResult.state}). Stages (Feed -> Enrich -> Analyze -> Generate -> Deliver) actively processing.`,
+        });
+      } else if (chainResult.state === "failed") {
+        actions.push({
+          action: "run_pipeline_chain",
+          target: pipelineSource,
+          status: "failed",
+          details: `Pipeline chain "${pipelineSource}" run ${chainResult.runId} failed (state: ${chainResult.state}${chainResult.error ? `: ${chainResult.error}` : ""}).`,
+        });
+      } else {
+        actions.push({
+          action: "run_pipeline_chain",
+          target: pipelineSource,
+          status: "success",
+          details: `Triggered 5-stage pipeline chain (jobId: ${chainResult.jobId}, runId: ${chainResult.runId}, state: ${chainResult.state}). The run was dispatched and is ${chainResult.state}; its outcome is tracked on the chain's own status surface.`,
+        });
+      }
     } else {
       actions.push({
         action: "run_pipeline_chain",
         target: pipelineSource,
-        status: "success",
-        details: `Pipeline chain "${pipelineSource}" validated across all 5 stages (Feed, Enrich, Analyze, Generate, Deliver). Stages queued and processing.`,
+        status: "skipped",
+        details: `Pipeline chain "${pipelineSource}" was not run: no ScheduledAgent binding is available in this context (SCHEDULED_AGENT.get is not a function), so no chain was started and nothing was validated.`,
       });
     }
   } catch (err) {
+    pipelineStatus = "unknown";
     actions.push({
       action: "run_pipeline_chain",
       target: pipelineSource,
@@ -641,13 +666,19 @@ export async function remediatePlatformGaps(params: {
     });
   }
 
-  // 2. Job Stagnation & Connectivity Resolution
+  // 2. Job Stagnation & Connectivity Resolution — the ledger is
+  // read only when a SQL handle is available; without one nothing
+  // is verified and the step reports skipped, never success.
+  // (Main's 5-minute auto-heal, kept; #3787's honesty rule applied
+  // to its reporting: success only when the ledger was actually read.)
   let reapedCount = 0;
+  let ledgerRead = false;
   if (params.sql && typeof params.sql.exec === "function") {
     try {
       const jobPorts = createAsyncJobPorts(params.sql as never);
       const sessionKey = params.sessionId ?? params.userLogin ?? "default";
       const runningRows = jobPorts.read.listRunning(sessionKey, 50);
+      ledgerRead = true;
       const nowMs = Date.now();
       const nowIso = new Date(nowMs).toISOString();
       for (const row of runningRows) {
@@ -665,29 +696,40 @@ export async function remediatePlatformGaps(params: {
       }
     } catch {}
   }
-  actions.push({
-    action: "resolve_job_stagnation",
-    target: "async_jobs",
-    status: "success",
-    details: reapedCount > 0
-      ? `Auto-healed ${reapedCount} stagnant async job(s) stuck in running state. Cleared DO-SQLite execution locks.`
-      : "Checked DO-SQLite async job ledger. Cleared transient execution locks; verified multi-broker execution endpoints and market data ingestion pathways.",
-  });
+  if (ledgerRead) {
+    actions.push({
+      action: "resolve_job_stagnation",
+      target: "async_jobs",
+      status: "success",
+      details: reapedCount > 0
+        ? `Auto-healed ${reapedCount} stagnant async job(s) stuck in running state. Cleared DO-SQLite execution locks.`
+        : "Checked DO-SQLite async job ledger; no job was past the 5-minute stall threshold.",
+    });
+  } else {
+    actions.push({
+      action: "resolve_job_stagnation",
+      target: "async_jobs",
+      status: "skipped",
+      details: "Not run: this remediation does not read the DO-SQLite async job ledger, clear execution locks, or verify multi-broker execution endpoints or market data ingestion pathways. Stuck runs are covered by the stale-async-job sweep (#3784) and the run bridge (#3787), not by this step.",
+    });
+  }
 
-  // 3. Payment Budget & Tool Allowance Verification
+  // 3. Payment Budget & Tool Allowance Verification — not
+  // verified by this function: no budget tool was called.
   actions.push({
     action: "verify_payment_budget",
     target: "tool_openaimp_get_payment_budget",
-    status: "success",
-    details: "Verified payment tool availability. Both tool_openaimp_get_payment_budget and tool_openaimp_check_payment_budget are online with active BudgetGuard allowance.",
+    status: "skipped",
+    details: "Not run: this remediation does not call tool_openaimp_get_payment_budget or tool_openaimp_check_payment_budget, so no BudgetGuard allowance was verified.",
   });
 
-  // 4. Scheduled Goals & Cadence Assurance
+  // 4. Scheduled Goals & Cadence Assurance — not verified by
+  // this function: no schedule was read or affirmed.
   actions.push({
     action: "configure_scheduled_goals",
     target: "scheduled_tasks",
-    status: "success",
-    details: "Autonomous cycle schedule affirmed across active trading sessions. Scheduled task frontier configured for market open cadence.",
+    status: "skipped",
+    details: "Not run: this remediation does not read scheduled goals or affirm any cadence. Feed datasets are produced by the feed-refresh goal (#3787); its firing is visible in the goal's run records.",
   });
 
   const architectureGrounding =
@@ -708,7 +750,10 @@ export async function remediatePlatformGaps(params: {
   ].join("\n");
 
   return {
-    remediated: true,
+    // Issue #3787: remediated means at least one action actually
+    // succeeded — a run where every step was skipped (or failed)
+    // remediated nothing, and must not claim otherwise.
+    remediated: actions.some((a) => a.status === "success"),
     actions,
     pipelineChainStatus: pipelineStatus,
     architectureGrounding,

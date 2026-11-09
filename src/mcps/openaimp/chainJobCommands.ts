@@ -28,7 +28,9 @@ import {
   managePipelineChainViaDoor,
   runPipelineChainViaDoor,
   type PipelineChainManagementAction,
+  type PipelineChainRunBridge,
 } from "../../agents/orchestrator/meshDoors";
+import { createRunBridgePorts } from "../../agents/orchestrator/runBridge";
 
 const SOURCE_PROPERTY = {
   type: "string",
@@ -60,7 +62,13 @@ export class RunPipelineChainCommand
 
   async execute(input: { source: string }, context: McpToolContext) {
     const actingLogin = context.actingLogin?.();
-    const result = await runPipelineChainViaDoor(context.env, actingLogin, input.source);
+    const runBridge = chainRunBridgeFromContext(context);
+    const result = await runPipelineChainViaDoor(
+      context.env,
+      actingLogin,
+      input.source,
+      runBridge ? { runBridge } : undefined,
+    );
     context.audit("mcp.tool_called", "orchestrator", {
       tool: this.name,
       jobId: result.jobId,
@@ -68,6 +76,30 @@ export class RunPipelineChainCommand
       state: result.state,
     });
     return result;
+  }
+}
+
+/**
+ * Issue #3787: the bridge handle for a chain run started from
+ * this tool — the orchestrator instance's own store (the
+ * context's SQL handle) under its session id, so the #3784
+ * sweep reads the row. Best-effort: a context without a SQL
+ * handle or session id runs unbridged (the chain still runs;
+ * only its stuck coverage is off).
+ */
+export function chainRunBridgeFromContext(
+  context: McpToolContext,
+): PipelineChainRunBridge | undefined {
+  try {
+    const sql = (context.storage as { sql?: unknown } | undefined)?.sql;
+    if (!sql) return undefined;
+    if (typeof context.sessionId !== "string" || !context.sessionId) return undefined;
+    return {
+      ports: createRunBridgePorts(sql as never),
+      sessionId: context.sessionId,
+    };
+  } catch {
+    return undefined;
   }
 }
 
