@@ -145,6 +145,13 @@ import {
 import type { McpToolContext } from "../../patterns/interfaces";
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+import {
+  bridgeRunComplete,
+  bridgeRunFail,
+  bridgeRunStart,
+  createRunBridgePorts,
+} from "./runBridge";
+import type { AsyncJobPorts } from "../../data/createAsyncJobPorts";
 
 /** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
 const structuredLog = createStructuredLogger(createObservabilitySink({}), {
@@ -269,6 +276,16 @@ export interface MeshScreenDoorContext extends MeshScreenDoorSeams {
   /** The worker env — workflow composition, tenant resolution, canonical-body R2 resolution. */
   env: Env;
   /**
+   * Issue #3787: the mas_async_jobs session this door's screen
+   * runs bridge into (the orchestrator instance id — the same
+   * session key the #3784 sweep reads, so a stalled run's
+   * bridge row is alerted/reaped by that sweep). Absent → no
+   * bridge row: the run still executes, only its stuck
+   * coverage is off. Never a login: the session key is the
+   * instance, not the user.
+   */
+  asyncJobSessionId?: string;
+  /**
    * The executing instance's SQL storage — the mas_reports
    * read-back (the canonical copies live in the orchestrator
    * instance's own store; chat jobs execute on that instance,
@@ -299,6 +316,12 @@ export function meshScreenDoorContextFromMcp(context: McpToolContext): MeshScree
     | undefined;
   return {
     env: context.env,
+    // Issue #3787: the tool context's session id IS the
+    // orchestrator instance id (the async-job executor builds
+    // it as sessionKey(), and the turn route carries the same
+    // instance id) — the bridge row's session, so the #3784
+    // sweep reads it.
+    asyncJobSessionId: context.sessionId,
     ensureTables: () => {
       const sql = storage?.sql;
       if (!sql) {
@@ -517,6 +540,91 @@ async function recordScreenStartHop(
 }
 
 /**
+ * Issue #3787: the door's bridge handle — the ports + job id of
+ * the mas_async_jobs row tracking this screen run. Null when
+ * the context carries no async-job session (no bridge row).
+ */
+interface ScreenBridge {
+  ports: AsyncJobPorts;
+  jobId: string;
+}
+
+/**
+ * Issue #3787: start the bridge row for a screen run (insert +
+ * claim to `running`) so the #3784 sweep owns stuck detection
+ * for it. Best-effort: a bridge that cannot write returns null
+ * and the run proceeds without stuck coverage — never failing
+ * the screen.
+ */
+function startScreenBridge(
+  ctx: MeshScreenDoorContext,
+  input: {
+    jobId: string;
+    displayName: string;
+    workflowId: string;
+    userLogin: string;
+    nowIso: string;
+  },
+): ScreenBridge | null {
+  const sessionId = ctx.asyncJobSessionId;
+  if (!sessionId) return null;
+  try {
+    const ports = createRunBridgePorts(ctx.ensureTables());
+    const started = bridgeRunStart(ports, {
+      jobId: input.jobId,
+      sessionId,
+      capability: "screener.run",
+      displayName: input.displayName,
+      userLogin: input.userLogin,
+      trigger: "manual",
+      workflowId: input.workflowId,
+      nowIso: input.nowIso,
+    });
+    return started ? { ports, jobId: input.jobId } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Issue #3787: settle the bridge row from the door's own
+ * verdict — completed when the assembled result succeeded,
+ * failed with the result's error otherwise. Called ONLY at
+ * return points that observed a terminal state (collation or
+ * terminal workflow status): the await-deadline return never
+ * settles, so a still-running run keeps its `running` row for
+ * the sweep. Best-effort, never throwing.
+ */
+function settleScreenBridge(
+  bridge: ScreenBridge | null,
+  result: MeshScreenRunResult,
+): void {
+  if (!bridge) return;
+  try {
+    if (result.success) {
+      bridgeRunComplete(
+        bridge.ports,
+        bridge.jobId,
+        JSON.stringify({
+          status: "completed",
+          matchedCount: result.matchedCount,
+          totalScanned: result.totalScanned,
+          ...(result.pdfKey ? { pdfKey: result.pdfKey } : {}),
+        }),
+      );
+    } else {
+      bridgeRunFail(
+        bridge.ports,
+        bridge.jobId,
+        result.error ?? `Screen workflow run ${bridge.jobId} ended without a readable result.`,
+      );
+    }
+  } catch {
+    // Best-effort by design (see startScreenBridge).
+  }
+}
+
+/**
  * The free path: start the run and await its outcome. Unlike
  * the NLQ port there is NO fallback: an unavailable port or a
  * failed start is a coded refusal (header difference 1). Once
@@ -560,12 +668,23 @@ async function runFreeScreen(
   }
 
   await recordScreenStartHop(ctx, parts, "screener.start");
+  // Issue #3787: bridge the run into mas_async_jobs BEFORE
+  // awaiting it — a run that stalls mid-await must already
+  // have its `running` row when the sweep next ticks.
+  const bridge = startScreenBridge(ctx, {
+    jobId: parts.jobId,
+    displayName: `Stock screen — ${req.universeId}`,
+    workflowId: handle.workflowId,
+    userLogin: req.userLogin,
+    nowIso: parts.startedAtIso,
+  });
   return awaitScreenOutcome(ctx, {
     shards: parts.shards,
     userLogin: req.userLogin,
     startedAtIso: parts.startedAtIso,
     jobId: parts.jobId,
     tenantId: parts.tenantId,
+    bridge,
     statusOf: async () => {
       const status = await ports.status(handle.workflowId).catch(() => null);
       return status?.status ?? null;
@@ -587,6 +706,8 @@ async function awaitScreenOutcome(
     startedAtIso: string;
     jobId: string;
     tenantId: string;
+    /** Issue #3787: settled only on terminal observation, never on deadline expiry. */
+    bridge: ScreenBridge | null;
     statusOf: () => Promise<string | null>;
   },
 ): Promise<MeshScreenRunResult> {
@@ -600,17 +721,34 @@ async function awaitScreenOutcome(
   // A terminal instance whose collation has not projected yet
   // gets a few extra polls — projection lag is not a failure.
   let terminalPolls = 0;
+  // Issue #3787: assemble + settle the bridge row from the
+  // observed terminal state (the deadline return below does
+  // NOT settle — the run may still be going, and its `running`
+  // row is what the sweep alerts on).
+  const finish = async (assembleArgs: {
+    collation: WorkflowCollation | null;
+    rows: ShardJobRow[] | null;
+    terminalNote: string;
+  }): Promise<MeshScreenRunResult> => {
+    const result = await assembleScreenResult(ctx, {
+      shards: args.shards,
+      userLogin: args.userLogin,
+      startedAtIso: args.startedAtIso,
+      collation: assembleArgs.collation,
+      rows: assembleArgs.rows,
+      jobId: args.jobId,
+      terminalNote: assembleArgs.terminalNote,
+    });
+    settleScreenBridge(args.bridge, result);
+    return result;
+  };
   for (;;) {
     const rows = await readHistory(args.tenantId, args.jobId).catch(() => null);
     const collation = collationFromRows(rows, args.jobId);
     if (collation) {
-      return assembleScreenResult(ctx, {
-        shards: args.shards,
-        userLogin: args.userLogin,
-        startedAtIso: args.startedAtIso,
+      return finish({
         collation,
         rows,
-        jobId: args.jobId,
         terminalNote: "completed",
       });
     }
@@ -621,13 +759,9 @@ async function awaitScreenOutcome(
     if (terminal) {
       terminalPolls += 1;
       if (terminalPolls >= 3) {
-        return assembleScreenResult(ctx, {
-          shards: args.shards,
-          userLogin: args.userLogin,
-          startedAtIso: args.startedAtIso,
+        return finish({
           collation: null,
           rows,
-          jobId: args.jobId,
           terminalNote: `ended with workflow status "${status}" before its outcome was projected`,
         });
       }
@@ -822,7 +956,16 @@ async function runPaidScreen(
   await recordScreenStartHop(ctx, parts, "payment.start");
 
   // 6. Await: the payment run starts the screener under the
-  // same job id once coverage/payment lands.
+  // same job id once coverage/payment lands. Issue #3787: the
+  // bridge row tracks the awaited payment run (its workflow
+  // id), so a payment run that stalls is sweep-visible too.
+  const bridge = startScreenBridge(ctx, {
+    jobId,
+    displayName: `Stock screen — ${req.universeId}`,
+    workflowId: started.workflowId,
+    userLogin: req.userLogin,
+    nowIso: startedAtIso,
+  });
   return awaitPaidScreenOutcome(ctx, {
     shards,
     userLogin: req.userLogin,
@@ -830,6 +973,7 @@ async function runPaidScreen(
     jobId,
     tenantId,
     workflowId: started.workflowId,
+    bridge,
   });
 }
 
@@ -884,6 +1028,8 @@ async function awaitPaidScreenOutcome(
     jobId: string;
     tenantId: string;
     workflowId: string;
+    /** Issue #3787: settled only on terminal observation, never on deadline expiry. */
+    bridge: ScreenBridge | null;
   },
 ): Promise<MeshScreenRunResult> {
   const readHistory =
@@ -896,17 +1042,32 @@ async function awaitPaidScreenOutcome(
   const readPaymentStatus =
     ctx.paymentWorkflowStatus ??
     ((id: string) => defaultPaymentWorkflowStatus(ctx.env, id));
+  // Issue #3787: same settle rule as the free path — the
+  // deadline return below does NOT settle the bridge row.
+  const finish = async (assembleArgs: {
+    collation: WorkflowCollation | null;
+    rows: ShardJobRow[] | null;
+    terminalNote: string;
+  }): Promise<MeshScreenRunResult> => {
+    const result = await assembleScreenResult(ctx, {
+      shards: args.shards,
+      userLogin: args.userLogin,
+      startedAtIso: args.startedAtIso,
+      collation: assembleArgs.collation,
+      rows: assembleArgs.rows,
+      jobId: args.jobId,
+      terminalNote: assembleArgs.terminalNote,
+    });
+    settleScreenBridge(args.bridge, result);
+    return result;
+  };
   for (;;) {
     const rows = await readHistory(args.tenantId, args.jobId).catch(() => null);
     const collation = collationFromRows(rows, args.jobId);
     if (collation) {
-      return assembleScreenResult(ctx, {
-        shards: args.shards,
-        userLogin: args.userLogin,
-        startedAtIso: args.startedAtIso,
+      return finish({
         collation,
         rows,
-        jobId: args.jobId,
         terminalNote: "completed",
       });
     }
@@ -917,13 +1078,9 @@ async function awaitPaidScreenOutcome(
     ) {
       const outcome = paymentOutcomeStatus(pStatus.output);
       if (outcome !== "started") {
-        return assembleScreenResult(ctx, {
-          shards: args.shards,
-          userLogin: args.userLogin,
-          startedAtIso: args.startedAtIso,
+        return finish({
           collation: null,
           rows,
-          jobId: args.jobId,
           terminalNote: paymentTerminalNote(outcome, pStatus.status, args.jobId),
         });
       }

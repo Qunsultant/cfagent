@@ -179,6 +179,19 @@ function measure(): Map<string, number> {
  * etrade 7, src/services/providerUxLinks.ts alpaca 11,
  * src/services/tradingRunOutcome.ts alpaca 2). Seed pin totals move
  * 1101/8582 -> 1105/8641.
+ * Baseline update (#3787, 2026-11-09): the screener-chain repair's
+ * durable doc names the feed jobs by their provider ids
+ * (`yahoo/alpaca/etrade/public-nasdaq100-quotes`) — naming the
+ * provider is the feed integrations' job, so the doc's 3 provider
+ * rows are dispositioned INTEGRATION and its NASDAQ-100 index row
+ * NOT-PROVIDER (the index name, per the post-census precedent).
+ * The two prose enumerations that named the same providers in code
+ * comments were neutralized instead (the `feed` catalog blurb in
+ * src/orchestrate.ts and the feed-goal comment in src/schedule.ts:
+ * "provider quotes + fundamentals"), so no code rows are added.
+ * 4 new rows (docs/architecture/security/
+ * screener-chain-stuck-repair-3787.md alpaca 1 / etrade 1 /
+ * yahoo 1 / nasdaq 1). Seed pin totals move 1105/8641 -> 1109/8645.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (186 rows / 1039 lines) ----
@@ -369,7 +382,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/platformKnowledge.ts", "yahoo", 12],
   ["src/trading/interfaces.ts", "etrade", 2],
 
-  // ---- INTEGRATION (673 rows / 6521 lines) ----
+  // ---- INTEGRATION (676 rows / 6524 lines) ----
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "etrade", 12],
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "yahoo", 1],
   ["docs/EXTERNAL_APIS_AND_ENDPOINTS_DIRECTORY.md", "alpaca", 3],
@@ -387,6 +400,9 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/architecture/code/10-mcp-standards.md", "etrade", 1],
   ["docs/architecture/code/13-structure-and-file-organization.md", "etrade", 6],
   ["docs/architecture/security/etrade.md", "etrade", 38],
+  ["docs/architecture/security/screener-chain-stuck-repair-3787.md", "alpaca", 1],
+  ["docs/architecture/security/screener-chain-stuck-repair-3787.md", "etrade", 1],
+  ["docs/architecture/security/screener-chain-stuck-repair-3787.md", "yahoo", 1],
   ["docs/architecture/security/vendor-risk-1774.md", "alpaca", 1],
   ["docs/architecture/security/vendor-risk-1774.md", "etrade", 1],
   ["docs/architecture/security/vendor-risk-1774.md", "public.com", 1],
@@ -1192,7 +1208,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/plans/pr_3719_body.md", "alpaca", 3],
   ["docs/plans/pr_3719_body.md", "etrade", 6],
 
-  // ---- NOT-PROVIDER (73 rows / 289 lines) ----
+  // ---- NOT-PROVIDER (74 rows / 290 lines) ----
   ["docs/ANALYSIS_AND_EXECUTION_WORKFLOWS.md", "nasdaq", 4],
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "nasdaq", 1],
   ["docs/EXTERNAL_APIS_AND_ENDPOINTS_DIRECTORY.md", "nasdaq", 6],
@@ -1209,6 +1225,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/architecture/enterprise/assessment/screener.md", "nasdaq", 11],
   ["docs/architecture/enterprise/iros-system-analysis.md", "nasdaq", 3],
   ["docs/architecture/infrastructure/infrastructure.md", "nasdaq", 1],
+  ["docs/architecture/security/screener-chain-stuck-repair-3787.md", "nasdaq", 1],
   ["docs/business/valueprop/goal-screener-01.md", "nasdaq", 1],
   ["docs/collaboration.md", "nasdaq", 1],
   ["docs/compliance/facts-n-findings-01.md", "nasdaq", 1],
@@ -1339,8 +1356,8 @@ describe("#3525 S6 shrink-only provider-brand census pin", () => {
     expect(total).toBeLessThanOrEqual(PLATFORM_BASELINE_TOTAL);
   });
 
-  it("the baseline itself is the recorded seed (1105 rows / 8641 lines)", () => {
-    expect(BASELINE.length).toBe(1105);
-    expect(BASELINE.reduce((a, [, , c]) => a + c, 0)).toBe(8641);
+  it("the baseline itself is the recorded seed (1109 rows / 8645 lines)", () => {
+    expect(BASELINE.length).toBe(1109);
+    expect(BASELINE.reduce((a, [, , c]) => a + c, 0)).toBe(8645);
   });
 });

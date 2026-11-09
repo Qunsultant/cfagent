@@ -85,36 +85,42 @@ describe("Issue #3767 / #3768 / #3769 — Platform Architecture Grounding & Auto
   });
 
   describe("Sub-Issue #3769: Autonomous Platform Gap Remediation (remediatePlatformGaps)", () => {
-    it("remediatePlatformGaps runs all 4 remediation phases successfully", async () => {
+    it("remediatePlatformGaps reports honestly when nothing was verified (#3787: no false success)", async () => {
       const result = await remediatePlatformGaps({
         userLogin: "trader_test",
         readSettingRaw: () => null,
       });
 
-      expect(result.remediated).toBe(true);
+      // #3787: without a ScheduledAgent binding no chain ran,
+      // and steps 2–4 verify nothing — nothing here may report
+      // "success" for work not done.
+      expect(result.remediated).toBe(false);
       expect(result.actions.length).toBe(4);
+      expect(result.pipelineChainStatus).toBe("not_run");
 
-      // 1. Pipeline chain action
+      // 1. Pipeline chain action: skipped, not run.
       const pipelineAction = result.actions.find((a) => a.action === "run_pipeline_chain");
       expect(pipelineAction).toBeDefined();
-      expect(pipelineAction?.status).toBe("success");
-      expect(pipelineAction?.details).toContain("validated across all 5 stages");
+      expect(pipelineAction?.status).toBe("skipped");
+      expect(pipelineAction?.details).toContain("not run");
+      expect(pipelineAction?.details).not.toContain("validated across all 5 stages");
 
-      // 2. Job stagnation action
+      // 2. Job stagnation action: skipped — no locks were cleared.
       const jobAction = result.actions.find((a) => a.action === "resolve_job_stagnation");
       expect(jobAction).toBeDefined();
-      expect(jobAction?.status).toBe("success");
+      expect(jobAction?.status).toBe("skipped");
 
-      // 3. Payment budget verification
+      // 3. Payment budget verification: skipped — no tool was checked.
       const paymentAction = result.actions.find((a) => a.action === "verify_payment_budget");
       expect(paymentAction).toBeDefined();
-      expect(paymentAction?.status).toBe("success");
-      expect(paymentAction?.details).toContain("tool_openaimp_get_payment_budget");
+      expect(paymentAction?.status).toBe("skipped");
 
-      // 4. Scheduled task assurance
+      // 4. Scheduled task assurance: skipped — no cadence was affirmed.
       const scheduleAction = result.actions.find((a) => a.action === "configure_scheduled_goals");
       expect(scheduleAction).toBeDefined();
-      expect(scheduleAction?.status).toBe("success");
+      expect(scheduleAction?.status).toBe("skipped");
+
+      expect(result.summary).toContain("0/4 successful");
 
       // Architecture grounding confirms zero Kafka
       expect(result.architectureGrounding).toContain("Zero external message broker dependency (no Kafka, RabbitMQ, Celery, SQS, or Redis)");
@@ -137,10 +143,12 @@ describe("Issue #3767 / #3768 / #3769 — Platform Architecture Grounding & Auto
       };
 
       const result = await cmd.execute({}, context as any);
-      expect(result.remediated).toBe(true);
+      // #3787: with no env binding nothing was remediated — the
+      // command reports that honestly instead of claiming success.
+      expect(result.remediated).toBe(false);
       expect(auditMock).toHaveBeenCalledWith("stock_copilot_remediate_gaps", "mcp", expect.objectContaining({
         actingLogin: "trader_test",
-        remediated: true,
+        remediated: false,
       }));
     });
   });

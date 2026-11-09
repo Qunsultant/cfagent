@@ -84,6 +84,8 @@ export const SCHEDULED_GOAL_IDS_INVENTORY = [
   "resource-dashboard-comparison",
   "index-refresh-wikipedia",
   "index-refresh-holdings",
+  // #3787: hourly feed-refresh goal (feed datasets on a schedule).
+  "feed-refresh",
 ] as const;
 
 /** Mirrors the crons array in wrangler.jsonc (test-pinned). */
