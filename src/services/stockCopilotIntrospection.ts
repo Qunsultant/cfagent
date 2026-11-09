@@ -23,6 +23,7 @@ import {
   COPILOT_BROKER_ID,
   resolveCopilotTradingSelection,
 } from "../agents/copilotTradingMode";
+import { createAsyncJobPorts } from "../data/createAsyncJobPorts";
 import type { CommercialStore } from "../data/commercialPorts";
 import type {
   CopilotExecutionMode,
@@ -601,6 +602,7 @@ export async function remediatePlatformGaps(params: {
   readSettingRaw?: (key: string) => string | null;
   pipelineChainSource?: string;
   sql?: { exec?: (query: string, ...args: any[]) => any };
+  sessionId?: string;
 }): Promise<PlatformRemediationResult> {
   const actions: RemediationActionReport[] = [];
   const pipelineSource = params.pipelineChainSource ?? "nasdaq100 pipeline";
@@ -643,17 +645,23 @@ export async function remediatePlatformGaps(params: {
   let reapedCount = 0;
   if (params.sql && typeof params.sql.exec === "function") {
     try {
-      const nowIso = new Date().toISOString();
-      const cutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-      const cursor = params.sql.exec(
-        `UPDATE mas_async_jobs SET status = 'failed', error = 'Auto-healed: execution stalled beyond 5-minute threshold', updated_at = ?, completed_at = ? WHERE status = 'running' AND (started_at < ? OR (started_at IS NULL AND created_at < ?))`,
-        nowIso,
-        nowIso,
-        cutoff,
-        cutoff,
-      );
-      if (cursor && typeof cursor[Symbol.iterator] === "function") {
-        reapedCount = Array.from(cursor).length;
+      const jobPorts = createAsyncJobPorts(params.sql as never);
+      const sessionKey = params.sessionId ?? params.userLogin ?? "default";
+      const runningRows = jobPorts.read.listRunning(sessionKey, 50);
+      const nowMs = Date.now();
+      const nowIso = new Date(nowMs).toISOString();
+      for (const row of runningRows) {
+        if (row.started_at) {
+          const ageMs = nowMs - Date.parse(row.started_at);
+          if (ageMs > 5 * 60 * 1000) {
+            const reaped = jobPorts.queue.reapStaleRunning(
+              row.job_id,
+              "Auto-healed: execution stalled beyond 5-minute threshold",
+              nowIso,
+            );
+            if (reaped === 1) reapedCount++;
+          }
+        }
       }
     } catch {}
   }

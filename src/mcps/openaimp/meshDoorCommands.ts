@@ -1690,6 +1690,7 @@ export class StockCopilotRemediateGapsCommand implements IMcpToolCommand<{ pipel
       env: context.env,
       userLogin: actingLogin ?? "owner",
       sql,
+      sessionId: context.sessionId,
       readSettingRaw: (key: string) => {
         try {
           return settings?.get(key) ?? null;
