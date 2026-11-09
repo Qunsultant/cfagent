@@ -12,7 +12,7 @@
  *    methods (e.g. SQUASH) to REBASE before calling enqueuePullRequest.
  * 3. auto-update-prs-app.yml actively enqueues CLEAN and MERGEABLE unqueued PRs into the Merge Queue.
  * 4. auto-merge-trusted.yml reads REST .auto_merge.merge_method, uppercase-normalizes it,
- *    and removes strategy flags from gh pr merge --auto per AGENTS.md merge queue rules.
+ *    and removes strategy flags from gh pr merge --auto per gitops §11 merge-queue rules.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
