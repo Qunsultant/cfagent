@@ -169,6 +169,7 @@ export function resolveFeedJobStaleMinutes(
 export const YAHOO_NASDAQ100_QUOTES_JOB_ID = "yahoo-nasdaq100-quotes";
 export const YAHOO_NASDAQ100_FUNDAMENTALS_JOB_ID = "yahoo-nasdaq100-fundamentals";
 export const YAHOO_SP100_QUOTES_JOB_ID = "yahoo-sp100-quotes";
+export const YAHOO_SP500_QUOTES_JOB_ID = "yahoo-sp500-quotes";
 export const ALPACA_NASDAQ100_QUOTES_JOB_ID = "alpaca-nasdaq100-quotes";
 export const ETRADE_NASDAQ100_QUOTES_JOB_ID = "etrade-nasdaq100-quotes";
 export const PUBLIC_NASDAQ100_QUOTES_JOB_ID = "public-nasdaq100-quotes";
@@ -218,7 +219,8 @@ function nasdaq100QuotesJob(
  * provider adapter declares quotes + a batch form — the dataset
  * contract this family runs against; Public's legs allow quotes +
  * optionsChains per its adapter, so its quotes job is in scope
- * per #3530/#3533).
+ * per #3530/#3533). #3876 registers the S&P 500 quotes universe
+ * on the same contract, immediately after the S&P 100 job.
  *
  * The Nasdaq provider declares screenUniverse only — it has NO
  * quotes job here (S2 finding, #3530: its dataset is the US
@@ -266,6 +268,23 @@ export function buildFeedJobRegistry(
     staleAfterMinutes: resolveFeedJobStaleMinutes(
       env,
       YAHOO_SP100_QUOTES_JOB_ID,
+      FEED_JOB_DEFAULTS.staleAfterMinutes,
+    ),
+  });
+  registry.register({
+    id: YAHOO_SP500_QUOTES_JOB_ID,
+    sourceId: "yahoo",
+    dataset: "quotes",
+    elements: ["quotes"],
+    universe: { kind: "index", index: "sp500", label: "S&P 500" },
+    cadenceMinutes: resolveFeedJobCadenceMinutes(
+      env,
+      YAHOO_SP500_QUOTES_JOB_ID,
+      FEED_JOB_DEFAULTS.cadenceMinutes,
+    ),
+    staleAfterMinutes: resolveFeedJobStaleMinutes(
+      env,
+      YAHOO_SP500_QUOTES_JOB_ID,
       FEED_JOB_DEFAULTS.staleAfterMinutes,
     ),
   });
