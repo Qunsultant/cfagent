@@ -38,6 +38,8 @@ export interface BrokerReadsRouteContext {
 }
 
 const UNSUPPORTED_CODE = "provider_unsupported";
+const ACCOUNTS_FAILED_CODE = "BROKER_ACCOUNTS_FAILED";
+const POSITIONS_FAILED_CODE = "BROKER_POSITIONS_FAILED";
 const STATUS_FAILED_CODE = "BROKER_STATUS_FAILED";
 const QUOTE_FAILED_CODE = "BROKER_QUOTE_FAILED";
 const HISTORY_FAILED_CODE = "BROKER_ORDER_HISTORY_FAILED";
@@ -54,6 +56,33 @@ function unsupportedResponse(broker: string, capability: string): Response {
       retryable: false,
     },
     { status: 501 },
+  );
+}
+
+/**
+ * Issue #3866 — a failed account or position read is a coded failure, like the
+ * three reads beside it. These two used to escape as a raw 500 carrying a
+ * Worker stack trace, so the panel could show only "the broker read did not
+ * succeed" with no code, no broker, and no reason.
+ */
+/**
+ * Issue #3866: reasons already end with a full stop when they come from the
+ * adapter, so appending another produced the `..` visible in every panel
+ * message. One helper, used by all five reads.
+ */
+function sentence(reason: string): string {
+  return reason.replace(/\.+$/, "");
+}
+
+function readFailedResponse(code: string, broker: string, what: string, reason: string): Response {
+  return Response.json(
+    {
+      code,
+      broker,
+      message: `The selected broker (${broker}) could not read ${what}: ${sentence(reason)}.`,
+      retryable: true,
+    },
+    { status: 502 },
   );
 }
 
@@ -141,16 +170,26 @@ export async function handleBrokerReadsRoutes(
     if (typeof platform.getAccounts !== "function") {
       return unsupportedResponse(broker, "Accounts");
     }
-    const result = await platform.getAccounts();
-    return Response.json({ broker, environment, result });
+    try {
+      const result = await platform.getAccounts();
+      return Response.json({ broker, environment, result });
+    } catch (error) {
+      const reason = (error as Error)?.message || "the accounts read failed";
+      return readFailedResponse(ACCOUNTS_FAILED_CODE, broker, "accounts", reason);
+    }
   }
 
   if (wantsPositions) {
     if (typeof platform.getPositions !== "function") {
       return unsupportedResponse(broker, "Positions");
     }
-    const result = await platform.getPositions();
-    return Response.json({ broker, environment, result });
+    try {
+      const result = await platform.getPositions();
+      return Response.json({ broker, environment, result });
+    } catch (error) {
+      const reason = (error as Error)?.message || "the positions read failed";
+      return readFailedResponse(POSITIONS_FAILED_CODE, broker, "positions", reason);
+    }
   }
 
   // Issue #3359: the broker's own order history. An unconfigured or failed read
@@ -171,7 +210,7 @@ export async function handleBrokerReadsRoutes(
         {
           code: HISTORY_FAILED_CODE,
           broker,
-          message: `The selected broker (${broker}) could not list its orders: ${reason}.`,
+          message: `The selected broker (${broker}) could not list its orders: ${sentence(reason)}.`,
           retryable: true,
         },
         { status: 502 },
@@ -194,7 +233,7 @@ export async function handleBrokerReadsRoutes(
         {
           code: ACTIVITY_FAILED_CODE,
           broker,
-          message: `The selected broker (${broker}) could not list account activity: ${reason}.`,
+          message: `The selected broker (${broker}) could not list account activity: ${sentence(reason)}.`,
           retryable: true,
         },
         { status: 502 },
@@ -217,7 +256,7 @@ export async function handleBrokerReadsRoutes(
         {
           code: WATCHLISTS_FAILED_CODE,
           broker,
-          message: `The selected broker (${broker}) could not list its watchlists: ${reason}.`,
+          message: `The selected broker (${broker}) could not list its watchlists: ${sentence(reason)}.`,
           retryable: true,
         },
         { status: 502 },
@@ -234,7 +273,7 @@ export async function handleBrokerReadsRoutes(
     } catch (error) {
       const reason = (error as Error)?.message || "the status read failed";
       return Response.json(
-        { code: STATUS_FAILED_CODE, broker, message: `The selected broker (${broker}) could not report its status: ${reason}.` },
+        { code: STATUS_FAILED_CODE, broker, message: `The selected broker (${broker}) could not report its status: ${sentence(reason)}.` },
         { status: 502 },
       );
     }
@@ -246,7 +285,7 @@ export async function handleBrokerReadsRoutes(
   } catch (error) {
     const reason = (error as Error)?.message || "the quote read failed";
     return Response.json(
-      { code: QUOTE_FAILED_CODE, broker, symbol: quoteSymbol, message: `The selected broker (${broker}) could not quote ${quoteSymbol}: ${reason}.` },
+      { code: QUOTE_FAILED_CODE, broker, symbol: quoteSymbol, message: `The selected broker (${broker}) could not quote ${quoteSymbol}: ${sentence(reason)}.` },
       { status: 502 },
     );
   }

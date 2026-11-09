@@ -18,6 +18,29 @@ import type { Env } from "../../types";
 
 export type AlpacaSide = "paper" | "live";
 
+/**
+ * Issue #3866 — one normalized base URL for every Alpaca client.
+ *
+ * The deploy supplies the base URL as configuration (`ALPACA_PAPER_URL` /
+ * `ALPACA_LIVE_URL`). Values copied from docs routinely carry a trailing
+ * slash or the API prefix (`https://paper-api.alpaca.markets/v2`). The
+ * clients append `/v2/account`, so an unnormalized value produced
+ * `…/v2/v2/account`, answered with a 4xx that Alpaca never explains — and
+ * because status advertised a hardcoded URL, the panel still looked healthy.
+ *
+ * Normalization: trim, drop trailing slashes, drop a trailing `/v2`, and fall
+ * back to the paper host when the value is not an https URL at all.
+ */
+export function normalizeAlpacaBaseUrl(raw: unknown, fallback = "https://paper-api.alpaca.markets"): string {
+  const value = String(raw ?? "").trim();
+  if (!value) return fallback;
+  let base = value.replace(/\/+$/, "");
+  base = base.replace(/\/v2$/i, "");
+  base = base.replace(/\/+$/, "");
+  if (!/^https:\/\/[^/]+$/i.test(base)) return fallback;
+  return base;
+}
+
 /** Which trading side this env/selection is on. */
 export function alpacaTradingSide(env: Env, overrideEnv?: string): AlpacaSide {
   const pin = String(env.ALPACA_TRADING_TYPE ?? "").trim().toLowerCase();
@@ -46,6 +69,8 @@ export function withAlpacaCredentials(env: Env, overrideEnv?: string): Env {
     ...env,
     ALPACA_API_KEY: env.ALPACA_API_KEY || key,
     ALPACA_SECRET_KEY: env.ALPACA_SECRET_KEY || secret,
-    ALPACA_BASE_URL: env.ALPACA_BASE_URL || url,
+    // Issue #3866: the mapped value is normalized here, so every consumer of
+    // ALPACA_BASE_URL inherits the same clean host.
+    ALPACA_BASE_URL: normalizeAlpacaBaseUrl(env.ALPACA_BASE_URL || url),
   } as Env;
 }
