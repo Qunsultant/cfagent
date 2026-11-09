@@ -540,7 +540,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/agents/routes/brokerOptions.ts", "etrade", 3],
   // #3883 INTEGRATION: the cancel route selects the engine by broker id, so
   // one comparison names it (the surrounding wording stays neutral).
-  ["src/agents/routes/brokerOrders.ts", "alpaca", 5],
+  ["src/agents/routes/brokerOrders.ts", "alpaca", 6],
   ["src/agents/routes/brokerOrders.ts", "etrade", 31],
   ["src/agents/routes/brokerReads.ts", "alpaca", 1],
   ["src/agents/routes/brokerReads.ts", "etrade", 1],
@@ -1393,7 +1393,10 @@ const BASELINE: Array<[string, string, number]> = [
   // keeps the brand in exactly one field (the ledger's broker stamp).
   ["src/trading/cancelFilters.ts", "alpaca", 7],
   ["src/services/orderCancellation.ts", "alpaca", 2],
-  ["src/mcps/openaimp/cancelOrderCommands.ts", "alpaca", 3],
+  ["src/mcps/openaimp/cancelOrderCommands.ts", "alpaca", 5],
+  // #3885 INTEGRATION: the Portfolio control is the provider's cancel-all
+  // surface (its test ids name the broker so a panel test can target it).
+  ["src/client/AlpacaCancelAllControl.tsx", "alpaca", 8],
   // #3866 INTEGRATION: the lifecycle table names the brokers it covers.
   ["docs/architecture/agentic/agents-workflows-schedules-queues-platforms-lifecycle.md", "etrade", 1],
   ["docs/architecture/agentic/agents-workflows-schedules-queues-platforms-lifecycle.md", "public.com", 1],
