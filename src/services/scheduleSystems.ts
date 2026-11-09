@@ -147,9 +147,9 @@ export const SCHEDULE_UNIFICATION_ANSWERS: ScheduleUnificationAnswer[] = [
   {
     question: "Which firings leave a per-run record?",
     answer:
-      "Every ScheduledAgent goal firing that reaches a terminal point (budget rejections, pipeline/social/resource/index/chain outcomes, generic job creation, and loop-catch failures); every firing of the four creatable orchestrator callbacks, SDK or manual, recorded by their method wrappers with the outcome the callback itself reports; and manual triggers of non-creatable callbacks via the generic trigger route, recorded invocation-level. Disabled or not-due goals and refused (paused) triggers leave no record — no run happened. SDK firings of internal-only callbacks are the named gap, carried below.",
+      "Every ScheduledAgent goal firing that reaches a terminal point (budget rejections, pipeline/social/resource/index/chain outcomes, generic job creation, and loop-catch failures); every firing of the four creatable orchestrator callbacks, SDK or manual, recorded by their method wrappers with the outcome the callback itself reports; every firing of the four internal-only callbacks, recorded the same way since #3788; the copilot Think task's firings, recorded since #3788; and manual triggers of other non-creatable callbacks via the generic trigger route, recorded invocation-level. Disabled or not-due goals and refused (paused) triggers leave no record — no run happened. Framework sweep callbacks are the named gap, carried below.",
     evidence:
-      "src/agents/scheduled-agent.ts onCron recordGoalRun points; src/agents/orchestrator/scheduleCallbackRunRecords.ts; src/agents/routes/schedules.ts trigger branch.",
+      "src/agents/scheduled-agent.ts onCron recordGoalRun points; src/agents/orchestrator/scheduleCallbackRunRecords.ts; src/agents/routes/schedules.ts trigger branch; src/agents/orchestrator/scheduledTasksCopilot.ts (copilot firing record, #3788); src/agents/orchestrator/scheduleWatchdog.ts (watchdog, #3788).",
   },
 ];
 
@@ -179,10 +179,10 @@ export const SCHEDULE_UNIFICATION_CARRIED: ScheduleUnificationCarried[] = [
       "Genuinely separate slice: it requires a store migration, a merged creation API, and a merged UI, and must keep both existing paths working behind a switch per NEVER-EITHER/OR. This slice documents the seam instead of merging it.",
   },
   {
-    question: "Do SDK firings of internal-only callbacks leave per-run records?",
+    question: "Do SDK firings of framework sweep callbacks leave per-run records?",
     owner: "follow-up slice",
     reason:
-      "Not in this slice: executeAsyncJob, expireStaleOrderDraft, collectIvHistory, and autoRenewETradeTokens have no outcome-reporting wrapper, and wrapping async-job plumbing would expand scope into its own outcome feed. Their outcomes stay visible via their existing feeds (job outcomes, audit rows, scan runs, token-renewal claim rows). Manual triggers of those callbacks via the generic trigger route ARE recorded, invocation-level; the unified UI says so rather than implying completeness.",
+      "Not in this slice: sweepStaleAsyncJobs, sweepStaleLedgerTasks, and watchdogMissedSchedules return sweep-result objects, not callback outcomes, so wrapping them in the outcome-reporting recorder needs outcome-mapping surgery of its own. Their firings stay observable via their effects (rows transitioned, tasks closed, watchdog heartbeat rows) and the watchdog skips them by name rather than flagging schedules it cannot observe. The four internal-only callbacks (executeAsyncJob, expireStaleOrderDraft, collectIvHistory, autoRenewETradeTokens) WERE the carried gap here and are resolved by #3788: their orchestrator methods now record their own runs (RECORDED_SCHEDULE_CALLBACKS), so the watchdog watches them.",
   },
 ];
 

@@ -83,6 +83,7 @@ import {
   SCHEDULE_UNIFICATION_CARRIED,
   UNIFIED_JOBS_UI,
 } from "../src/services/scheduleSystems";
+import { recordScheduleCallbackRun } from "../src/agents/orchestrator/scheduleCallbackRunRecords";
 
 /** node:sqlite double for the SqlStorage seam (same shape as #2337). */
 class SqliteTestStorage {
@@ -396,13 +397,16 @@ describe("unified jobs inventory (#2964)", () => {
     expect(JOB_RUN_RECORD_FIELDS).toContain("artifactRefs");
   });
 
-  it("answers name the unified surface and carried names the internal-callback gap", () => {
+  it("answers name the unified surface and carried names the framework-sweep gap (#3788)", () => {
     const questions = SCHEDULE_UNIFICATION_ANSWERS.map((a) => a.question);
     expect(questions).toContain("What does the unified Jobs UI list?");
     expect(questions).toContain("What does a per-run job record contain?");
     expect(questions).toContain("Which firings leave a per-run record?");
     const carried = SCHEDULE_UNIFICATION_CARRIED.map((c) => c.question);
-    expect(carried).toContain("Do SDK firings of internal-only callbacks leave per-run records?");
+    // Issue #3788 resolved the internal-callback gap (the four now
+    // record their own runs); the remaining named gap is the
+    // framework sweep callbacks.
+    expect(carried).toContain("Do SDK firings of framework sweep callbacks leave per-run records?");
   });
 });
 
@@ -498,7 +502,11 @@ describe("orchestrator runs routes (#2964)", () => {
     const ctx = baseCtx({
       getScheduleById: vi.fn(async () => ({
         id: "sched-9",
-        callback: "collectIvHistory",
+        // A framework sweep callback: non-creatable, no recording
+        // wrapper of its own, so the route records the invocation.
+        // (Issue #3788: collectIvHistory is now self-recording, so it
+        // no longer exercises this branch — see the next test.)
+        callback: "sweepStaleAsyncJobs",
         payload: {},
         type: "cron",
       })),
@@ -511,6 +519,39 @@ describe("orchestrator runs routes (#2964)", () => {
     const runs = store.listByJob("sched-9");
     expect(runs).toHaveLength(1);
     expect(runs[0].outcome).toBe("success");
+    expect(runs[0].triggeredBy).toBe("manual");
+  });
+
+  it("triggering a self-recording internal callback records exactly once (#3788)", async () => {
+    const ctx = baseCtx({
+      getScheduleById: vi.fn(async () => ({
+        id: "sched-9",
+        callback: "collectIvHistory",
+        payload: {},
+        type: "cron",
+      })),
+    });
+    // Simulate the real method wrapper: it records the run itself
+    // through recordScheduleCallbackRun, so the route must not add
+    // a second invocation-level record.
+    ctx.runScheduleCallback = vi.fn(async (callback: string, payload: unknown) => {
+      await recordScheduleCallbackRun(
+        (ctx.agentCtx as any).storage.sql as never,
+        callback,
+        payload,
+        { id: "sched-9" },
+        async () => ({ outcome: "success", descriptor: "collect IV history" }),
+      );
+    });
+    const res = await call(ctx, "/schedules/sched-9/trigger", "POST");
+    expect(res?.status).toBe(200);
+    const store = new SqlJobRunRecordStore(
+      (ctx.agentCtx as any).storage.sql as never,
+    );
+    const runs = store.listByJob("sched-9");
+    expect(runs).toHaveLength(1);
+    expect(runs[0].outcome).toBe("success");
+    expect(runs[0].descriptor).toBe("collect IV history");
     expect(runs[0].triggeredBy).toBe("manual");
   });
 

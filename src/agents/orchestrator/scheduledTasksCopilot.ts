@@ -67,12 +67,80 @@ import {
   resolveCopilotUniverse,
   resolveCopilotStrategies,
 } from "../../services/stockCopilotConfiguration";
+import {
+  classifyCopilotNonDeclaration,
+  copilotCycleErrorCode,
+  copilotCycleLedgerOutcome,
+  type CopilotNonDeclarationCause,
+} from "../../services/scheduleWatchdog";
+import { recordScheduleCallbackRun } from "./scheduleCallbackRunRecords";
 import { TradingPlatformRegistry } from "../../trading";
 
 /** The one code-declared task this slice arms. */
 export const STOCK_COPILOT_TASK_ID = "stock-copilot-paper-cycle";
 /** 30 minutes — the platform's fastest existing scheduling cadence (default). */
 export const STOCK_COPILOT_SCHEDULE = DEFAULT_STOCK_COPILOT_SCHEDULE;
+
+/**
+ * Issue #3788: dedup for the non-declaration audit — one audit per
+ * cause class, re-emitted only when the cause changes or 24h pass, so
+ * declaration reconciliation never spams audit. Durable in the
+ * agent's storage when available (survives isolate restarts); a
+ * module-level fallback covers contexts without storage (unit
+ * harnesses). The stored value is { cause, atMs }.
+ */
+const COPILOT_NOT_DECLARED_KEY = "stockCopilotNotDeclared";
+const COPILOT_NOT_DECLARED_DEDUP_WINDOW_MS = 24 * 60 * 60 * 1000;
+let fallbackNotDeclared: { cause: CopilotNonDeclarationCause; atMs: number } | null = null;
+
+function readNotDeclaredState(
+  value: unknown,
+): { cause: CopilotNonDeclarationCause; atMs: number } | null {
+  if (!value || typeof value !== "object") return null;
+  const v = value as Record<string, unknown>;
+  if (v.cause !== "flag_off" && v.cause !== "no_login_context" && v.cause !== "context_error") {
+    return null;
+  }
+  if (typeof v.atMs !== "number" || !Number.isFinite(v.atMs)) return null;
+  return { cause: v.cause, atMs: v.atMs };
+}
+
+async function emitCopilotNotDeclared(
+  ctx: ScheduledTasksCopilotContext,
+  cause: CopilotNonDeclarationCause,
+  nowMs: number = Date.now(),
+): Promise<void> {
+  const storage = (
+    ctx.agentCtx as unknown as
+      | { storage?: { get: (key: string) => Promise<unknown>; put: (key: string, value: unknown) => Promise<void> } }
+      | undefined
+  )?.storage;
+  let last: { cause: CopilotNonDeclarationCause; atMs: number } | null = null;
+  let useStorage = false;
+  try {
+    if (storage && typeof storage.get === "function") {
+      last = readNotDeclaredState(await storage.get(COPILOT_NOT_DECLARED_KEY));
+      useStorage = true;
+    }
+  } catch {
+    last = null;
+  }
+  if (!useStorage) last = fallbackNotDeclared;
+  if (last && last.cause === cause && nowMs - last.atMs < COPILOT_NOT_DECLARED_DEDUP_WINDOW_MS) {
+    return;
+  }
+  const next = { cause, atMs: nowMs };
+  try {
+    if (useStorage) await storage!.put(COPILOT_NOT_DECLARED_KEY, next);
+    else fallbackNotDeclared = next;
+  } catch {
+    // Dedup is best-effort; the audit below is the signal.
+  }
+  ctx.audit("stock_copilot.not_declared", "orchestrator", {
+    code: cause,
+    taskId: STOCK_COPILOT_TASK_ID,
+  });
+}
 
 /**
  * Ports the copilot declaration receives from the class. Storage, ORM
@@ -110,7 +178,17 @@ export async function runStockCopilotCycleForInstance(
   taskCtx: ThinkScheduledTaskContext,
 ): Promise<void> {
   const sql = (ctx.agentCtx?.storage as unknown as { sql?: SqlStorage } | undefined)?.sql;
-  if (!sql) return;
+  if (!sql) {
+    // Issue #3788: the silent early return is now an auditable signal
+    // with a cause code, so "copilot never ran" is distinguishable
+    // from "copilot ran and did nothing".
+    ctx.audit("stock_copilot.no_sql_storage", "orchestrator", {
+      code: "no_sql_storage",
+      taskId: taskCtx.taskId,
+      userLogin: executionContext.userLogin,
+    });
+    return;
+  }
   const userLogin = executionContext.userLogin;
   // #3451: resolve the active broker + mode for this login from the
   // panel menu's selection model. The platform is constructed under
@@ -138,57 +216,73 @@ export async function runStockCopilotCycleForInstance(
     readSettingRaw: ctx.readSettingRaw,
     env: ctx.env,
   });
-  const result = await runStockCopilotCycle({
-    env: ctx.env,
-    positions: createStockCopilotPositionPort(sql),
-    // #3422: the chat-tab surface's ports over the same storage —
-    // the pause control the cycle reads at firing, and the
-    // activity log the panel reads back.
-    control: createStockCopilotControlPort(sql),
-    activity: createStockCopilotActivityPort(sql),
-    userLogin,
-    platform,
-    selection,
-    enabledSessions,
-    aroundTheClock: isAroundTheClock({
-      readSettingRaw: ctx.readSettingRaw,
-      env: ctx.env,
-    }),
-    universe: resolveCopilotUniverse({
-      readSettingRaw: ctx.readSettingRaw,
-      env: ctx.env,
-    }),
-    strategies: resolveCopilotStrategies({
-      readSettingRaw: ctx.readSettingRaw,
-      env: ctx.env,
-    }),
-    executionMode: resolveCopilotExecutionMode({
-      readSettingRaw: ctx.readSettingRaw,
-      env: ctx.env,
-    }),
-    memory: createStockCopilotMemoryPort(sql),
-    loadBars: async (symbol: string) => {
-      // The facade's alpaca-first order with explicit-unavailable
-      // failure (#923): no synthetic bars are ever substituted, so a
-      // data outage surfaces as a cycle error entry, never a trade
-      // on invented prices.
-      const bars = await marketData.getHistoricalBars(symbol, "1D", 60, "alpaca");
-      return bars
-        .map((b) => b.close)
-        .filter((c) => Number.isFinite(c) && c > 0);
+  // Issue #3788: Think task firings are recorded in the runs ledger
+  // (recordScheduleCallbackRun, the orchestrator-schedule seam) with
+  // the cycle result's status mapped to the ledger outcome — "ok" is
+  // the only success, every refusal state is a skip. The per-firing
+  // stock_copilot.cycle audit still fires inside, unchanged. A cycle
+  // that throws records a failure and rethrows to the handler, whose
+  // catch audits it with a code.
+  await recordScheduleCallbackRun(
+    sql,
+    "stock-copilot-paper-cycle",
+    { scheduleId: STOCK_COPILOT_TASK_ID, trigger: "scheduled" },
+    { id: taskCtx.taskId },
+    async () => {
+      const result = await runStockCopilotCycle({
+        env: ctx.env,
+        positions: createStockCopilotPositionPort(sql),
+        // #3422: the chat-tab surface's ports over the same storage —
+        // the pause control the cycle reads at firing, and the
+        // activity log the panel reads back.
+        control: createStockCopilotControlPort(sql),
+        activity: createStockCopilotActivityPort(sql),
+        userLogin,
+        platform,
+        selection,
+        enabledSessions,
+        aroundTheClock: isAroundTheClock({
+          readSettingRaw: ctx.readSettingRaw,
+          env: ctx.env,
+        }),
+        universe: resolveCopilotUniverse({
+          readSettingRaw: ctx.readSettingRaw,
+          env: ctx.env,
+        }),
+        strategies: resolveCopilotStrategies({
+          readSettingRaw: ctx.readSettingRaw,
+          env: ctx.env,
+        }),
+        executionMode: resolveCopilotExecutionMode({
+          readSettingRaw: ctx.readSettingRaw,
+          env: ctx.env,
+        }),
+        memory: createStockCopilotMemoryPort(sql),
+        loadBars: async (symbol: string) => {
+          // The facade's alpaca-first order with explicit-unavailable
+          // failure (#923): no synthetic bars are ever substituted, so a
+          // data outage surfaces as a cycle error entry, never a trade
+          // on invented prices.
+          const bars = await marketData.getHistoricalBars(symbol, "1D", 60, "alpaca");
+          return bars
+            .map((b) => b.close)
+            .filter((c) => Number.isFinite(c) && c > 0);
+        },
+      });
+      ctx.audit("stock_copilot.cycle", "orchestrator", {
+        taskId: taskCtx.taskId,
+        userLogin,
+        status: result.status,
+        session: result.session,
+        enabledSessions: result.enabledSessions,
+        entriesPlaced: result.entriesPlaced,
+        exitsPlaced: result.exitsPlaced,
+        rejections: result.rejections.length,
+        errors: result.errors.length,
+      });
+      return copilotCycleLedgerOutcome(result.status, result.refusal);
     },
-  });
-  ctx.audit("stock_copilot.cycle", "orchestrator", {
-    taskId: taskCtx.taskId,
-    userLogin,
-    status: result.status,
-    session: result.session,
-    enabledSessions: result.enabledSessions,
-    entriesPlaced: result.entriesPlaced,
-    exitsPlaced: result.exitsPlaced,
-    rejections: result.rejections.length,
-    errors: result.errors.length,
-  });
+  );
 }
 
 /**
@@ -200,11 +294,38 @@ export async function runStockCopilotCycleForInstance(
 export async function declareStockCopilotTasks(
   ctx: ScheduledTasksCopilotContext,
 ): Promise<ThinkScheduledTasks> {
-  if (!isStockCopilotPaperEnabled(ctx.env)) return {};
-  const executionContext = await ctx
-    .getScreenerExecutionContext()
-    .catch(() => undefined);
-  if (!executionContext?.userLogin) return {};
+  // Issue #3788: every non-declaration path emits an auditable signal
+  // with its cause class, so "copilot never ran" is distinguishable
+  // from "copilot ran and did nothing". The signal is deduped on
+  // change of cause class (or 24h) so declaration reconciliation
+  // never spams audit.
+  if (!isStockCopilotPaperEnabled(ctx.env)) {
+    await emitCopilotNotDeclared(ctx, "flag_off");
+    return {};
+  }
+  let executionContext: ScreenerExecutionContext | undefined;
+  let contextError = false;
+  try {
+    executionContext = await ctx.getScreenerExecutionContext();
+  } catch {
+    contextError = true;
+  }
+  const cause = classifyCopilotNonDeclaration({
+    flagEnabled: true,
+    contextError,
+    hasLogin: Boolean(executionContext?.userLogin),
+  });
+  if (cause) {
+    await emitCopilotNotDeclared(ctx, cause);
+    return {};
+  }
+  if (!executionContext?.userLogin) {
+    // Unreachable in practice: the classifier returns
+    // "no_login_context" for this case and we returned above. Kept
+    // as a type-level guard so the handler below receives a defined
+    // context with a login.
+    return {};
+  }
   const cadence = resolveCopilotCadence({
     env: ctx.env,
     readSettingRaw: ctx.readSettingRaw,
@@ -214,10 +335,15 @@ export async function declareStockCopilotTasks(
       schedule: cadence.effective as any,
       handler: async (taskCtx: ThinkScheduledTaskContext): Promise<void> => {
         await runStockCopilotCycleForInstance(ctx, executionContext, taskCtx).catch(
-          () => {
-            // Best-effort: a failed cycle is visible in the audit the
-            // cycle emits per firing when it runs; a throw here would
-            // only invite a retry double-fire.
+          (err: unknown) => {
+            // Issue #3788: best-effort still — a throw here would invite
+            // a retry double-fire — but no longer silent: the failure
+            // is audited with an error CODE, never a swallowed message.
+            ctx.audit("stock_copilot.cycle_failed", "orchestrator", {
+              code: copilotCycleErrorCode(err),
+              taskId: taskCtx.taskId,
+              userLogin: executionContext!.userLogin,
+            });
           },
         );
       },

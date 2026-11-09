@@ -372,3 +372,91 @@ export function isDue(
     return false;
   }
 }
+
+/**
+ * Issue #3788 — the most recent expected cron tick before `nowMs`
+ * (start of the matching minute, epoch ms), or undefined when the
+ * cron has no tick in the scan window.
+ *
+ * This is the watchdog's half of isDue: it answers "when should this
+ * schedule last have fired?" with the SAME matching rules isDue
+ * fires by, so a schedule the firing predicate can never fire is
+ * never flagged as missed, and a schedule it should have fired is
+ * flagged exactly once per tick.
+ *
+ * - Without a timeZone the no-timeZone branch is mirrored exactly
+ *   (minute/hour only, day fields ignored; a non-numeric minute or
+ *   hour — the opportunity-hunt step-hour quirk — has no tick,
+ *   exactly as isDue never fires it).
+ * - With a timeZone the full field match runs against wall-clock
+ *   parts in that zone (lists, ranges, steps, weekdays; 7 is Sunday).
+ *   The match is EXACT at the minute (unlike isDue's within-hour
+ *   minute-tolerance window, which exists because Worker ticks land
+ *   up to 30 minutes after the scheduled minute — the expected tick
+ *   itself is the scheduled minute).
+ * - The scan walks back minute by minute, at most 8 days: a valid
+ *   cron whose only tick is older than that (e.g. monthly) has no
+ *   attributable tick yet and never alerts. An unparseable cron or
+ *   an unknown zone returns undefined (never throws). "UTC" /
+ *   "Etc/UTC" take the UTC-parts fast path instead of Intl.
+ */
+const PREVIOUS_CRON_TICK_SCAN_MINUTES = 8 * 24 * 60;
+
+export function previousCronTickMs(
+  cron: string,
+  nowMs: number,
+  timeZone?: string,
+): number | undefined {
+  const fields = cron.trim().split(/\s+/);
+  if (fields.length !== 5) return undefined;
+  const startMinute = Math.floor(nowMs / 60000) * 60000;
+  if (timeZone === undefined) {
+    const minute = Number(fields[0]);
+    const hour = Number(fields[1]);
+    if (!Number.isInteger(minute) || !Number.isInteger(hour)) return undefined;
+    if (minute < 0 || minute > 59 || hour < 0 || hour > 23) return undefined;
+    for (let step = 0; step <= PREVIOUS_CRON_TICK_SCAN_MINUTES; step++) {
+      const t = startMinute - step * 60000;
+      const d = new Date(t);
+      if (d.getUTCMinutes() === minute && d.getUTCHours() === hour) return t;
+    }
+    return undefined;
+  }
+  const minutes = expandField(fields[0], 0, 59);
+  const hours = expandField(fields[1], 0, 23);
+  const days = expandField(fields[2], 1, 31);
+  const months = expandField(fields[3], 1, 12);
+  const weekdaysRaw = expandField(fields[4], 0, 7);
+  if (!minutes || !hours || !days || !months || !weekdaysRaw) return undefined;
+  const weekdays = new Set([...weekdaysRaw].map((d) => (d === 7 ? 0 : d)));
+  const utcFastPath = timeZone === "UTC" || timeZone === "Etc/UTC";
+  for (let step = 0; step <= PREVIOUS_CRON_TICK_SCAN_MINUTES; step++) {
+    const t = startMinute - step * 60000;
+    let parts: ZonedDateParts;
+    try {
+      if (utcFastPath) {
+        const d = new Date(t);
+        parts = {
+          date: "",
+          weekday: d.getUTCDay(),
+          hour: d.getUTCHours(),
+          minute: d.getUTCMinutes(),
+          day: d.getUTCDate(),
+          month: d.getUTCMonth() + 1,
+          year: d.getUTCFullYear(),
+        };
+      } else {
+        parts = zonedDateParts(t, timeZone);
+      }
+    } catch {
+      return undefined;
+    }
+    if (!minutes.has(parts.minute)) continue;
+    if (!hours.has(parts.hour)) continue;
+    if (!days.has(parts.day)) continue;
+    if (!months.has(parts.month)) continue;
+    if (!weekdays.has(parts.weekday)) continue;
+    return t;
+  }
+  return undefined;
+}

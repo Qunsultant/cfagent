@@ -264,8 +264,15 @@ describe("OrchestratorAgent.getScheduledTasks (#2693 wiring)", () => {
       idempotencyKey: "idem-0001",
       phaseMinuteUtc: 35,
     });
-    expect(audits).toHaveLength(1);
-    expect(audits[0][0]).toBe("schedule.observe_occurrence");
-    expect(audits[0][2]).toMatchObject({ userLogin: "venus", occurrenceKey: "occ-0001" });
+    // Issue #3788: getScheduledTasks() also declares the copilot
+    // task, whose non-declaration (flag off in this harness) emits
+    // its own auditable signal during declaration — before the
+    // handler runs — so the audit trail holds two entries: the
+    // copilot signal, then the observe occurrence.
+    expect(audits).toHaveLength(2);
+    expect(audits[0][0]).toBe("stock_copilot.not_declared");
+    expect(audits[0][2]).toMatchObject({ code: "flag_off" });
+    expect(audits[1][0]).toBe("schedule.observe_occurrence");
+    expect(audits[1][2]).toMatchObject({ userLogin: "venus", occurrenceKey: "occ-0001" });
   });
 });

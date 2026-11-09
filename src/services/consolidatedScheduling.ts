@@ -434,6 +434,11 @@ export const GOAL_SCHEDULE_AUDIT_EVENTS: readonly string[] = [
   "schedule.goal.enabled",
   "schedule.goal.triggered",
   "schedule.goal.removed",
+  // Issue #3788: the schedule watchdog's missed-fire finding. A goal
+  // that misses its firing is a lifecycle event of the goal itself —
+  // the same funnel, the same sink — with the expected tick, the last
+  // run (or null), and the finding code in the payload.
+  "schedule.goal.missed_fire",
 ];
 
 export type GoalScheduleAuditEvent =
@@ -454,6 +459,12 @@ export function buildGoalScheduleAuditEvent(input: {
   operation?: string;
   enabled?: boolean;
   actor?: string | null;
+  /** Issue #3788: the missed-fire finding's expected tick (ISO). */
+  expectedTick?: string;
+  /** Issue #3788: the goal's last run (ISO), or null when it never ran. */
+  lastRun?: string | null;
+  /** Issue #3788: the finding code (missed_fire / invalid_cron). */
+  code?: string;
 }): { type: string; agent: string; payload: Record<string, unknown> } {
   return {
     type: input.event,
@@ -463,6 +474,9 @@ export function buildGoalScheduleAuditEvent(input: {
       ...(input.operation !== undefined ? { operation: input.operation } : {}),
       ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
       ...(input.actor ? { actor: input.actor } : {}),
+      ...(input.expectedTick !== undefined ? { expectedTick: input.expectedTick } : {}),
+      ...(input.lastRun !== undefined ? { lastRun: input.lastRun } : {}),
+      ...(input.code !== undefined ? { code: input.code } : {}),
     },
   };
 }

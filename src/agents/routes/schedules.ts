@@ -92,6 +92,7 @@ import type { AgentName, Env } from "../../types";
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
 import { handleCronDispatchRecordRoute } from "./cronDispatchRecord";
+import { RECORDED_SCHEDULE_CALLBACKS } from "../orchestrator/scheduleCallbacks";
 
 /** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
 const structuredLog = createStructuredLogger(createObservabilitySink({}), {
@@ -523,14 +524,15 @@ export async function handleSchedulesRoutes(
           schedule.payload && typeof schedule.payload === "object"
             ? { ...(schedule.payload as Record<string, unknown>), trigger: "manual", scheduleId }
             : schedule.payload;
-        // Issue #2964: record the manual run. Creatable callbacks
-        // record their own runs in the method wrapper (outcome-aware),
-        // so the route must not double-record them; non-creatable
-        // callbacks have no wrapper, so the route records the
+        // Issue #2964: record the manual run. Callbacks whose method
+        // wrapper records its own runs (the creatable four, plus the
+        // four internal callbacks #3788 wrapped) record outcome-aware
+        // runs themselves, so the route must not double-record them;
+        // other callbacks have no wrapper, so the route records the
         // invocation itself (invocation-level success, since the
         // callback reports no outcome). Paused schedules refused
         // above with 409 record nothing — no run happened.
-        if ((ctx.creatableScheduleCallbacks as readonly string[]).includes(schedule.callback)) {
+        if ((RECORDED_SCHEDULE_CALLBACKS as readonly string[]).includes(schedule.callback)) {
           await ctx.runScheduleCallback(schedule.callback, payload);
         } else {
           await recordScheduleCallbackRun(

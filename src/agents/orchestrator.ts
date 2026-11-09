@@ -86,6 +86,8 @@ import { createKvMembershipStore } from "../security/iaaaMembershipStore";
 import { isLoginShaped } from "../security/serviceIdentity";
 import { sessionStore } from "../security/session";
 import { submitAsyncJob, recoverQueuedAsyncJobs, getAsyncJob, listAsyncJobs, executeAsyncJob, sweepStaleAsyncJobs, scheduleScreenerFollowups, retryAsyncJob, type AsyncJobsContext } from "./orchestrator/asyncJobs";
+import { watchdogMissedSchedules, type ScheduleWatchdogContext, type ScheduleWatchdogSweepResult } from "./orchestrator/scheduleWatchdog";
+import { RECORDED_SCHEDULE_CALLBACKS } from "./orchestrator/scheduleCallbacks";
 import { ensureOrchestratorTables } from "./orchestrator/tableSchema";
 import { REPORT_CONFIRMATION_TTL_MS } from "./orchestrator/reportConfirmationTtl";
 import { routeRequest, type RouteRequestDeps } from "./orchestrator/routeRequest";
@@ -210,6 +212,10 @@ const STALE_SWEEP_INTERVAL_SECONDS = 6 * 60 * 60;
  *  stuck threshold is flagged on the next tick, long enough that
  *  the sweep stays a cheap bounded scan (100 rows/tick). */
 const STALE_ASYNC_JOB_SWEEP_INTERVAL_SECONDS = 15 * 60;
+/** Issue #3788: the missed-schedule watchdog rides the same 15-minute
+ *  sweep tick as #3784 — one implementation of the tick consumed by
+ *  both sweeps, not a second scheduler. */
+const SCHEDULE_WATCHDOG_INTERVAL_SECONDS = STALE_ASYNC_JOB_SWEEP_INTERVAL_SECONDS;
 /**
  * Issue #275: the hourly full-catalog Strategy/Symbol Scanner run.
  * Minute :35 staggers it off the equity screens (commonly armed at
@@ -705,6 +711,34 @@ export class OrchestratorAgent extends PortThink {
     };
   }
 
+  private scheduleWatchdogContext(): ScheduleWatchdogContext {
+    return {
+      env: this.env,
+      sql: this.ctx.storage.sql,
+      storage: this.ctx.storage,
+      listSchedules: () => this.listSchedules(),
+      audit: (type, agent, payload) => this.audit(type, agent, payload),
+      notifyMissedSchedule: async (info) => {
+        // Issue #3788: missed-schedule alert via postSlackText (the
+        // #2567 stuck-run seam: catalog text, webhook first, bot
+        // token second). Detection + the exactly-once claim live in
+        // scheduleWatchdog.watchdogMissedSchedules; this hook is
+        // delivery only, and audits its own outcome.
+        const text = renderChannelText("missed_schedule_alert", "slack", {
+          scheduleId: info.scheduleId, kind: "schedule", callback: info.callback,
+          expectedTick: info.expectedTick, lastRun: info.lastRun ?? "never",
+          detail: `missed-fire: expected ${info.expectedTick} (last run: ${info.lastRun ?? "never"})`,
+        }, "legacy_missed_schedule_alert");
+        const result = await postSlackText({ post: fetchSlackPost, env: this.env, text });
+        this.audit(result.ok ? "schedule.missed_fire_alert" : "schedule.missed_fire_alert_failed", "orchestrator", {
+          scheduleId: info.scheduleId,
+          callback: info.callback,
+          ...(result.ok ? { method: result.method } : { error: result.error }),
+        });
+      },
+    };
+  }
+
   private autopilotContext(): AutopilotContext {
     return {
       env: this.env,
@@ -1050,6 +1084,20 @@ export class OrchestratorAgent extends PortThink {
     }
 
     try {
+      // Issue #3788: run the missed-schedule watchdog once and arm
+      // the recurring 15-minute interval, on the same maintenance
+      // path as the #3784 sweep (one tick, two consumers).
+      // Best-effort: a watchdog problem never blocks startup.
+      await this.watchdogMissedSchedules();
+      await this.ensureScheduleWatchdogSchedule();
+    } catch (watchdogErr) {
+      structuredLog.warn("orchestrator.on_start_schedule_watchdog_failed", {
+        message: "[OrchestratorAgent][onStart] Schedule watchdog setup failed:",
+        error: watchdogErr instanceof Error ? watchdogErr.message : String(watchdogErr),
+      });
+    }
+
+    try {
       // Issue #686: residual legacy-session lift (see
       // liftLegacyChatMessages). Best-effort: never blocks startup.
       await this.liftLegacyChatMessages();
@@ -1248,8 +1296,23 @@ export class OrchestratorAgent extends PortThink {
   }
 
   // Issue #992: extracted to ./orchestrator/scheduledCallbacks.ts (autoRenewETradeTokens);
-  async autoRenewETradeTokens(payload?: { userLogin?: string; env?: string }): Promise<void> {
-    return autoRenewETradeTokens(this.scheduledCallbacksContext(), payload);
+  // Issue #3788: the method records its own run (recordScheduleCallbackRun,
+  // mirroring the four creatable callbacks) — before this slice, SDK
+  // firings of this internal-only callback left no per-run record
+  // (the #2964 carried gap), so the schedule watchdog could not
+  // observe it. The delegate reports no outcome, so a completed
+  // invocation records success; a throw records failure and rethrows.
+  async autoRenewETradeTokens(payload?: { userLogin?: string; env?: string }, schedule?: { id?: unknown }): Promise<void> {
+    return recordScheduleCallbackRun(
+      this.ctx.storage.sql,
+      "autoRenewETradeTokens",
+      payload,
+      schedule,
+      async () => {
+        await autoRenewETradeTokens(this.scheduledCallbacksContext(), payload);
+        return { outcome: "success", descriptor: "token renewal complete" };
+      },
+    );
   }
 
   // Issue #992: extracted to ./orchestrator/scheduledCallbacks.ts (autonomousMarketScreen);
@@ -1474,8 +1537,19 @@ export class OrchestratorAgent extends PortThink {
   }
 
   // Issue #992: extracted to ./orchestrator/scheduledCallbacks.ts (collectIvHistory);
-  async collectIvHistory(payload?: { symbols?: string[]; environment?: string; userLogin?: string }): Promise<void> {
-    return collectIvHistory(this.scheduledCallbacksContext(), payload);
+  // Issue #3788: records its own run — see the token-renewal wrapper above
+  // (the #2964 carried gap for internal-only callbacks).
+  async collectIvHistory(payload?: { symbols?: string[]; environment?: string; userLogin?: string }, schedule?: { id?: unknown }): Promise<void> {
+    return recordScheduleCallbackRun(
+      this.ctx.storage.sql,
+      "collectIvHistory",
+      payload,
+      schedule,
+      async () => {
+        await collectIvHistory(this.scheduledCallbacksContext(), payload);
+        return { outcome: "success", descriptor: "IV collection complete" };
+      },
+    );
   }
 
   // Issue #686: the AIChatAgent-era submitMessages wrapper — an
@@ -1489,8 +1563,19 @@ export class OrchestratorAgent extends PortThink {
   // this is now the one submission path for programmatic turns.
 
   // Issue #992: extracted to ./orchestrator/scheduledCallbacks.ts (expireStaleOrderDraft);
-  async expireStaleOrderDraft(payload: { orderId: string; userLogin?: string }): Promise<void> {
-    return expireStaleOrderDraft(this.scheduledCallbacksContext(), payload);
+  // Issue #3788: records its own run — see the token-renewal wrapper above
+  // (the #2964 carried gap for internal-only callbacks).
+  async expireStaleOrderDraft(payload: { orderId: string; userLogin?: string }, schedule?: { id?: unknown }): Promise<void> {
+    return recordScheduleCallbackRun(
+      this.ctx.storage.sql,
+      "expireStaleOrderDraft",
+      payload,
+      schedule,
+      async () => {
+        await expireStaleOrderDraft(this.scheduledCallbacksContext(), payload);
+        return { outcome: "success", descriptor: "stale order draft expired" };
+      },
+    );
   }
 
   // Issue #992: extracted to ./orchestrator/scheduledCallbacks.ts (sendScheduledReminder);
@@ -1566,8 +1651,22 @@ export class OrchestratorAgent extends PortThink {
   }
 
   // Issue #992: extracted to ./orchestrator/asyncJobs.ts (executeAsyncJob);
-  async executeAsyncJob({ jobId }: AsyncJobPayload): Promise<void> {
-    return executeAsyncJob(this.asyncJobsContext(), { jobId });
+  // Issue #3788: records its own run — see the token-renewal wrapper above
+  // (the #2964 carried gap for internal-only callbacks). Every
+  // invocation of this method is a firing (SDK schedule or manual
+  // trigger route), so recording here cannot double-record: the
+  // trigger route treats recorded callbacks as self-recording.
+  async executeAsyncJob(payload: AsyncJobPayload, schedule?: { id?: unknown }): Promise<void> {
+    return recordScheduleCallbackRun(
+      this.ctx.storage.sql,
+      "executeAsyncJob",
+      payload,
+      schedule,
+      async () => {
+        await executeAsyncJob(this.asyncJobsContext(), { jobId: payload.jobId });
+        return { outcome: "success", descriptor: "async job executed" };
+      },
+    );
   }
 
   // Issue #3784: extracted to ./orchestrator/asyncJobs.ts
@@ -1576,6 +1675,30 @@ export class OrchestratorAgent extends PortThink {
   // a read. Armed from onStart beside the #618 ledger sweep.
   async sweepStaleAsyncJobs(): Promise<{ examined: number; alerted: number; reaped: number }> {
     return sweepStaleAsyncJobs(this.asyncJobsContext());
+  }
+
+  // Issue #3788: extracted to ./orchestrator/scheduleWatchdog.ts
+  // (watchdogMissedSchedules) — the scheduled callback that flags
+  // durable schedules whose last callback run is older than their
+  // expected tick + grace. Armed from onStart on the same 15-minute
+  // tick as the #3784 sweep: one tick implementation, two consumers.
+  async watchdogMissedSchedules(): Promise<ScheduleWatchdogSweepResult> {
+    return watchdogMissedSchedules(this.scheduleWatchdogContext(), {
+      recordedCallbacks: RECORDED_SCHEDULE_CALLBACKS,
+    });
+  }
+
+  /** Issue #3788: arm the recurring missed-schedule watchdog once per
+   *  instance (the #618/#3784 ensure-schedule pattern: list
+   *  schedules, skip when a watchdogMissedSchedules schedule exists). */
+  private async ensureScheduleWatchdogSchedule(): Promise<void> {
+    const existing = await this.listSchedules().catch(() => [] as Schedule<unknown>[]);
+    const already = existing.some((s) => {
+      const item = s as any;
+      return item.callback === "watchdogMissedSchedules";
+    });
+    if (already) return;
+    await this.scheduleEvery(SCHEDULE_WATCHDOG_INTERVAL_SECONDS, "watchdogMissedSchedules", {});
   }
 
   /** Issue #3784: arm the recurring stale-async-job sweep once per

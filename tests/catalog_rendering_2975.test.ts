@@ -42,6 +42,8 @@ const CHANNEL_KEYS = [
   "legacy_resource_cap_alert",
   "resource_cap_breach_line",
   "legacy_resource_cap_breach_line",
+  "missed_schedule_alert",
+  "legacy_missed_schedule_alert",
 ];
 
 const JOURNEY_EXPECTED =
@@ -71,6 +73,10 @@ const CAP_EXPECTED =
   "Day-to-date totals: rowsRead 4,000,000, rowsWritten 80,000, DO requests (SessionStore ops, lower bound) 75,000.\n" +
   "Scope: SessionStore projection only — a breach here implies the account is at >=70%; " +
   "no breach does not prove account safety (other DO namespaces uncounted). See #1819.";
+
+const MISSED_EXPECTED =
+  "⚠️ Missed schedule firing: goal daily-qa-sweep — missed-fire: expected 2026-11-08T06:00:00.000Z (last run: never)\n" +
+  "Diagnosis: docs/architecture/security/schedule-watchdog-3788.md";
 
 describe("catalog channel templates (#2975)", () => {
   it("carries every shipped template with a non-empty slack string", () => {
@@ -201,6 +207,23 @@ describe("migrated surfaces render from the catalog, byte-identical (#2975)", ()
         "legacy_stuck_run_alert",
       ),
     ).toBe(STUCK_EXPECTED);
+  });
+
+  it("missed-schedule template renders the watchdog alert text (#3788)", () => {
+    expect(
+      renderChannelText(
+        "missed_schedule_alert",
+        "slack",
+        {
+          scheduleId: "daily-qa-sweep",
+          kind: "goal",
+          expectedTick: "2026-11-08T06:00:00.000Z",
+          lastRun: "never",
+          detail: "missed-fire: expected 2026-11-08T06:00:00.000Z (last run: never)",
+        },
+        "legacy_missed_schedule_alert",
+      ),
+    ).toBe(MISSED_EXPECTED);
   });
 
   it("cap-alert templates render the legacy cap text for the same inputs", () => {
