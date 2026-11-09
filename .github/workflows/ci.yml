@@ -171,6 +171,14 @@ jobs:
 
       - name: 📦 Install Dependencies
         run: npm ci --prefer-offline --no-audit --no-fund
+      - name: 📦 Cache vitest transform output
+        uses: actions/cache@v4
+        with:
+          path: node_modules/.vite
+          key: vite-transform-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('src/**/*.ts', 'src/**/*.tsx', 'tests/**/*.ts') }}
+          restore-keys: |
+            vite-transform-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-
+
 
       - name: 🔍 TypeScript Strict Type Check
         run: npm run typecheck
@@ -182,13 +190,17 @@ jobs:
         run: npm run build
 
       - name: 🛡️ Verify Cloudflare Worker Configuration
-        run: npx wrangler --version
+        # #3924: a version print validates nothing. A dry-run builds the Worker
+        # (config, bindings, migrations, routes) without deploying it.
+        run: npx wrangler deploy --dry-run --outdir /tmp/wrangler-dry-run
 
   # ── Job 3: test suite sharded across 4 parallel runners (Tests PR) ──
   test-shard-pr:
     name: Tests PR (shard ${{ matrix.shard }}/4)
     runs-on: ubuntu-24.04
-    needs: [load-environment]
+    # #3924: the cheap gate (typecheck, build, pin suites) runs first, so a
+    # failure there never spends four runners on the full shards.
+    needs: [load-environment, fast-gates]
     if: github.event_name != 'merge_group' && needs.load-environment.outputs.tree_already_verified != 'true'
     strategy:
       fail-fast: false
@@ -210,6 +222,14 @@ jobs:
 
       - name: 📦 Install Dependencies
         run: npm ci --prefer-offline --no-audit --no-fund
+      - name: 📦 Cache vitest transform output
+        uses: actions/cache@v4
+        with:
+          path: node_modules/.vite
+          key: vite-transform-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('src/**/*.ts', 'src/**/*.tsx', 'tests/**/*.ts') }}
+          restore-keys: |
+            vite-transform-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-
+
 
       - name: 🧪 Execute Vitest Shard ${{ matrix.shard }}/4
         run: npx vitest run --shard=${{ matrix.shard }}/4 --reporter=verbose
