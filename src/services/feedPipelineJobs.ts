@@ -102,6 +102,13 @@ export const FEED_PIPELINE_CATALOG: readonly FeedPipelineCatalogEntry[] = [
     aliases: ["sp100", "s&p 100", "yahoo sp100"],
   },
   {
+    jobId: "yahoo-sp500-quotes",
+    sourceId: "yahoo",
+    dataset: "quotes",
+    label: "Yahoo quotes — S&P 500",
+    aliases: ["sp500", "s&p 500", "yahoo sp500"],
+  },
+  {
     jobId: "alpaca-nasdaq100-quotes",
     sourceId: "alpaca",
     dataset: "quotes",
@@ -322,15 +329,6 @@ export function createFeedStepRegistry(deps: FeedStepDeps): JobStepRegistry {
     if (!deps.universeStore) throw feedNotConfigured(def.id, "the index-list (universe) store");
     const provider = deps.providerFor(def);
     if (!provider) throw feedNotConfigured(def.id, `a capture-wired provider for "${def.sourceId}"`);
-
-    const existingList = await deps.universeStore.latest(def.universe.index);
-    if ((!existingList || existingList.symbols.length === 0) && deps.indexRefresh) {
-      await executeIndexListRefreshJob({
-        store: deps.indexRefresh.store,
-        service: deps.indexRefresh.service,
-        indices: [def.universe.index],
-      }).catch(() => undefined);
-    }
 
     // Sharded shape: this unit pulls its partition of the
     // universe (the partition is computed from the stored list —
