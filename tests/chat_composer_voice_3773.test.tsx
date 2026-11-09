@@ -624,6 +624,30 @@ describe("issue #3773 — the chat tab renders the mic from the projection (data
     await act(async () => root.unmount());
   });
 
+  it("the mic + mute controls sit INLINE inside the chat box (.chat-input-bar), not on a bar above it (#3794)", async () => {
+    channelsState.byRegistration = { stock: projectionFor("stock", true) };
+    const { container, root } = await renderTab("stock");
+    const bar = container.querySelector(".chat-input-bar");
+    expect(bar).not.toBeNull();
+    const voice = container.querySelector("[data-testid='chat-composer-voice']");
+    expect(voice).not.toBeNull();
+    // The voice controls live inside the composer form itself,
+    // alongside the text input — no separate voice bar anywhere.
+    expect(bar!.contains(voice)).toBe(true);
+    const barButtons = [...bar!.querySelectorAll("button")].map(
+      (b) => b.textContent ?? "",
+    );
+    expect(barButtons.join(" ")).toContain("Speak");
+    expect(barButtons.join(" ")).toContain("Audio on");
+    expect(bar!.querySelector("input")).not.toBeNull();
+    // And no voice control exists outside the box.
+    const outside = [...container.querySelectorAll("button")].filter(
+      (b) => !bar!.contains(b) && (b.textContent ?? "").includes("Speak"),
+    );
+    expect(outside).toEqual([]);
+    await act(async () => root.unmount());
+  });
+
   it("stock view + voice NOT effective ⇒ no mic", async () => {
     channelsState.byRegistration = { stock: projectionFor("stock", false) };
     const { container, root } = await renderTab("stock");
