@@ -416,6 +416,7 @@ describe("pipeline-chain routes (#3540)", () => {
       "yahoo-nasdaq100-quotes-pipeline",
       "yahoo-sp100-quotes-pipeline",
       "yahoo-sp500-quotes-pipeline",
+      "yahoo-dow-quotes-pipeline",
     ]);
     expect(body.jobs[0].frontier).toBe("feed");
     expect(body.jobs[0].stages).toHaveLength(5);
@@ -434,6 +435,7 @@ describe("pipeline-chain routes (#3540)", () => {
       "yahoo-nasdaq100-quotes-pipeline",
       "yahoo-sp100-quotes-pipeline",
       "yahoo-sp500-quotes-pipeline",
+      "yahoo-dow-quotes-pipeline",
     ]);
   });
 
