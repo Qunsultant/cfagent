@@ -1476,6 +1476,29 @@ defined in the Platform of Platforms table above (Filed,
 the #1169 sequence (uploads → probe → owner disables the public
 endpoint → close) is recorded on #1169, not restated here.
 
+Legal & obligation (CLO):
+
+The Legal & obligation platform covers legal-operations
+coordination, legal issue identification, contract and
+obligation analysis, legal research support, and the governed
+improvement of legal-support processes — platforms.md §2: CLOC
+Core 12 for legal operations; contract lifecycle management;
+matter management; jurisdiction-specific legal playbooks;
+preservation and information-governance procedures. Standing
+rule: the RSI-CLO is not licensed counsel; it does not sign
+agreements, submit filings, settle matters, or communicate
+external legal positions — those require a human with legal
+authority. It reports to the Human General Counsel, CLO, or
+designated legal-accountable executive.
+
+| Product | Purpose | Status | Tracking |
+| --- | --- | --- | --- |
+| FINRA/SEC applicability assessment and NextGenTP legal platform | The applicability-first FINRA/SEC assessment (area-level register distinguishing law, contract, policy, interpretation, and unresolved questions) and the legal platform's registers: legal intake, matter register, contract & obligation register, verified research, approvals, preservation records, deadlines | Partial — applicability register in code (`src/workflows/legalApplicability.ts`, 4 area-level entries: 3 unresolved, 1 does-not-apply; all counselReview not-reviewed; no compliance field); platform registers are record shapes + validation only, not persisted; no intake/matter/contract surface; completion gated on a named human legal authority and qualified counsel review | #2772 |
+| Legal intake | Structured legal intake per clo.md §4.1 (requesting function, matter owner, entities/jurisdictions, facts, decision required, deadline, classification, reviewer) | TBD — no filed product issue defines it as a standalone §12.2 product; within #2772's programme scope | — |
+| Contract & obligation analysis | Contract lifecycle support and obligation extraction per clo.md §4.3 (template selection, comparison, issue identification, obligation tracking) and §15 register 4 | TBD — no filed product issue defines it as a standalone §12.2 product; within #2772's programme scope | — |
+| Legal research support | Research with recorded question, jurisdiction, provenance, conflicting authorities, and verification status per clo.md §4.2 | TBD — no filed product issue defines it as a standalone §12.2 product; within #2772's programme scope | — |
+| Governed legal-process improvement | The closed legal-process improvement cycle (L1–L3) and the improvement portfolio per clo.md §2, §12, and §15 | TBD — no filed product issue defines it as a standalone §12.2 product | — |
+
 All other platforms — products not yet defined (**TBD**
 placeholder rows; no filed product issues were found for these
 platforms in the 2026-11-09 survey):
@@ -1485,7 +1508,6 @@ platforms in the 2026-11-09 survey):
 | Organization & strategy (CEO) | TBD — products to be defined by the owning platform |
 | Business architecture & commercial (CBO) | TBD — products to be defined by the owning platform |
 | Operations & service delivery (COO) | TBD — products to be defined by the owning platform |
-| Legal & obligation (CLO) | TBD — products to be defined by the owning platform |
 | Investment & portfolio (CIO function) | TBD — products to be defined |
 | Research (Chief Research Officer / Chief Scientist function) | TBD — products to be defined |
 | Enterprise, investment & model risk (CRO function) | TBD — products to be defined |
@@ -1770,7 +1792,8 @@ owner's word, not on this document.
 
 - **Current:** §12.2's inventory — the Technology, Agentic,
   Security & trust, Product & experience (CPO), Finance &
-  capital (CFO), and Data & knowledge (CDO) platform products
+  capital (CFO), Data & knowledge (CDO), and Legal &
+  obligation (CLO) platform products
   filed or partial; all other
   platforms' products undefined.
 - **Future:** every platform productized under the platform
@@ -1785,6 +1808,8 @@ owner's word, not on this document.
   the Finance & capital (CFO) platform's products defined in
   §12.2 (this issue, #3862); the Data & knowledge (CDO)
   platform's products defined in §12.2 (this issue, #3864);
+  the Legal & obligation (CLO) platform's products defined in
+  §12.2 (this issue, #3867);
   product definition for the
   remaining platforms is **TBD**, owned by each platform.
 
