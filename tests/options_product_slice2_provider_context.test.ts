@@ -1,8 +1,9 @@
 /**
  * Options Screener product programme slice 2 (issue #2598) — provider/broker
  * integration-point plumbing, consumption side. Pins:
- * - tenant resolution fails OPEN to etrade/etrade (legacy behaviour) and
- *   flags the fallback instead of silently relabelling the tenant;
+ * - tenant resolution fails OPEN to the platform defaults (#3812:
+ *   etrade data provider / alpaca broker) and flags the fallback
+ *   instead of silently relabelling the tenant;
  * - the module reuses slice 1's canonical ids and defaults (registry
  *   vocabulary + tenantProviders broker ids + DEFAULT_TENANT_PROVIDERS),
  *   never a second source of truth;
@@ -42,7 +43,7 @@ describe("options product slice 2 provider context", () => {
     expect([...BROKER_IDS].sort()).toEqual(["alpaca", "etrade"]);
   });
 
-  it("defaults to etrade/etrade and flags the fallback on absent input", () => {
+  it("defaults to the #3812 platform defaults (etrade data / alpaca broker) and flags the fallback on absent input", () => {
     for (const input of [undefined, null, {}]) {
       const ctx = resolveTenantProviderContext(input as never);
       expect(ctx.dataProviderId).toBe(DEFAULT_DATA_PROVIDER_ID);
@@ -59,6 +60,10 @@ describe("options product slice 2 provider context", () => {
       brokerId: "alpaca",
       dataProviderFellBack: false,
       brokerFellBack: false,
+      // #3751 (adapted shape): the context also carries the resolved
+      // providers' display names from the one identity map.
+      dataProviderDisplayName: "Public.com",
+      brokerDisplayName: "Alpaca",
     });
   });
 
