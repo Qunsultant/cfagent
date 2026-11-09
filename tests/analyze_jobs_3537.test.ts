@@ -151,7 +151,7 @@ describe("the rule-set vocabulary (#3537)", () => {
   it("the built-in registry carries one analyze job per enrich job", () => {
     const registry = buildAnalyzeJobRegistry({});
     const jobs = registry.list();
-    expect(jobs).toHaveLength(5);
+    expect(jobs).toHaveLength(6);
     for (const job of jobs) {
       expect(job.id).toBe(`${job.enrichJobId}-analyze`);
       expect(job.ruleSets).toEqual(["momentum", "range", "volume", "value"]);
