@@ -606,7 +606,16 @@ describe("stock copilot routes — sessions surface", () => {
     const expectLive =
       body.currentSession !== null &&
       body.enabledSessions.includes(body.currentSession);
-    expect(body.status).toBe(expectLive ? "live" : "outside_enabled_sessions");
+    // Issue #3899: with zero cycle history the live branch reports
+    // "never_executed" — "live" now means a cycle has run, not just
+    // that the gates pass.
+    expect(body.status).toBe(
+      expectLive ? "never_executed" : "outside_enabled_sessions",
+    );
+    if (expectLive) {
+      expect(body.neverExecuted).toBe(true);
+      expect(body.lastCycle).toBeNull();
+    }
   });
 
   it("status reflects the stored per-login session setting", async () => {

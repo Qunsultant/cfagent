@@ -65,9 +65,10 @@ import {
 } from "../../services/stockCopilotCadence";
 import { resolveCopilotExecutionMode } from "../../services/stockCopilotExecutionMode";
 import {
-  resolveCopilotUniverse,
+  resolveCopilotUniverseFull,
   resolveCopilotStrategies,
 } from "../../services/stockCopilotConfiguration";
+import { SqlIndexListStore } from "../../data/doSqliteIndexListAdapter";
 import {
   classifyCopilotNonDeclaration,
   copilotCycleErrorCode,
@@ -224,6 +225,17 @@ export async function runStockCopilotCycleForInstance(
     readSettingRaw: ctx.readSettingRaw,
     env: ctx.env,
   });
+  // Issue #3899 (RC4): the cycle runs the FULL universe — when the
+  // configured preset is NASDAQ100 the member list resolves from
+  // the stored nasdaq100 membership (weekly refresh), with the
+  // 12-symbol preset as the labelled fallback only. The resolution
+  // (source, symbol count, fallback reason) rides the cycle audit
+  // below, so every firing names the universe it actually ran.
+  const universeResolution = await resolveCopilotUniverseFull({
+    readSettingRaw: ctx.readSettingRaw,
+    env: ctx.env,
+    indexListStore: new SqlIndexListStore(sql),
+  });
   // Issue #3788: Think task firings are recorded in the runs ledger
   // (recordScheduleCallbackRun, the orchestrator-schedule seam) with
   // the cycle result's status mapped to the ledger outcome — "ok" is
@@ -253,10 +265,7 @@ export async function runStockCopilotCycleForInstance(
           readSettingRaw: ctx.readSettingRaw,
           env: ctx.env,
         }),
-        universe: resolveCopilotUniverse({
-          readSettingRaw: ctx.readSettingRaw,
-          env: ctx.env,
-        }),
+        universe: universeResolution.symbols,
         strategies: resolveCopilotStrategies({
           readSettingRaw: ctx.readSettingRaw,
           env: ctx.env,
@@ -288,6 +297,12 @@ export async function runStockCopilotCycleForInstance(
         exitsPlaced: result.exitsPlaced,
         rejections: result.rejections.length,
         errors: result.errors.length,
+        // Issue #3899 (RC4): the universe this firing actually ran.
+        universeSource: universeResolution.source,
+        universeSymbols: universeResolution.symbols.length,
+        ...(universeResolution.reason
+          ? { universeFallbackReason: universeResolution.reason }
+          : {}),
       });
       return copilotCycleLedgerOutcome(result.status, result.refusal);
     },

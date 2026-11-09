@@ -65,6 +65,79 @@ function round2(v: number): number {
   return Math.round(v * 100) / 100;
 }
 
+/**
+ * Issue #3899 (RC2) — record an agentic refusal as activity,
+ * mirroring the deterministic path's `appendCycleActivity`
+ * (src/services/stockCopilot.ts): one record per refused firing,
+ * `mode: "agentic"`, the refusal code as `detail`, so `lastCycle`
+ * reflects every firing. Best-effort: a store failure is collected
+ * as a cycle error, never thrown — a record failure must not fail
+ * the cycle that was refused.
+ */
+function recordAgenticRefusal(
+  deps: StockCopilotDeps & { memory?: StockCopilotMemoryPort },
+  result: StockCopilotAgenticCycleResult,
+  cycleAt: string,
+  outcome: "refused" | "inactive" | "outside_sessions",
+  detail: string,
+  session: CopilotSessionId | null,
+): void {
+  if (!deps.activity) return;
+  try {
+    deps.activity.ensureSchema();
+    deps.activity.appendActivity({
+      id: crypto.randomUUID(),
+      userLogin: deps.userLogin,
+      cycleAt,
+      outcome,
+      entries: [],
+      exits: [],
+      detail,
+      session,
+      mode: "agentic",
+    });
+  } catch (err) {
+    result.errors.push({
+      symbol: "",
+      stage: "activity",
+      message: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+/**
+ * Issue #3899 (RC2) — the outside-enabled-sessions transition
+ * record: one record per state change, mirroring the deterministic
+ * path's `recordOutsideSessionsTransition` (#3398). A firing whose
+ * state matches the latest record's outside state writes nothing,
+ * so a persistent outside-sessions state is visible from the moment
+ * it began without a record per firing.
+ */
+function recordAgenticOutsideSessionsTransition(
+  deps: StockCopilotDeps & { memory?: StockCopilotMemoryPort },
+  result: StockCopilotAgenticCycleResult,
+  cycleAt: string,
+  session: CopilotSessionId | null,
+): void {
+  if (!deps.activity) return;
+  const detail = `${STOCK_COPILOT_OUTSIDE_ENABLED_SESSIONS}:${session ?? "none"}`;
+  try {
+    deps.activity.ensureSchema();
+    const last = deps.activity.listActivity(deps.userLogin, 1)[0];
+    if (last && last.outcome === "outside_sessions" && last.detail === detail) {
+      return;
+    }
+  } catch (err) {
+    result.errors.push({
+      symbol: "",
+      stage: "activity",
+      message: err instanceof Error ? err.message : String(err),
+    });
+    return;
+  }
+  recordAgenticRefusal(deps, result, cycleAt, "outside_sessions", detail, session);
+}
+
 export async function runStockCopilotAgenticCycle(
   deps: StockCopilotDeps & {
     memory?: StockCopilotMemoryPort;
@@ -94,14 +167,18 @@ export async function runStockCopilotAgenticCycle(
     learningsGenerated: 0,
   };
 
+  const now = (deps.now ?? (() => new Date()))();
+  const nowIso = now.toISOString();
+
   // 1. Core Gate Verification
   if (!isStockCopilotPaperEnabled(deps.env)) {
     result.status = "disabled";
+    // Issue #3899 (RC2): a refused cycle is a recorded cycle — the
+    // deterministic path records its refusals, and the agentic path
+    // must too, so lastCycle reflects every firing.
+    recordAgenticRefusal(deps, result, nowIso, "refused", "disabled", null);
     return result;
   }
-
-  const now = (deps.now ?? (() => new Date()))();
-  const nowIso = now.toISOString();
 
   // 2. Session Perception
   const enabledSessions =
@@ -120,6 +197,8 @@ export async function runStockCopilotAgenticCycle(
   if (!deps.selection.resolved) {
     result.status = "mode_unresolved";
     result.refusal = STOCK_COPILOT_MODE_UNRESOLVED;
+    // Issue #3899 (RC2): record the refusal — see the disabled gate.
+    recordAgenticRefusal(deps, result, nowIso, "refused", STOCK_COPILOT_MODE_UNRESOLVED, session);
     return result;
   }
   const selection = deps.selection.selection;
@@ -129,6 +208,9 @@ export async function runStockCopilotAgenticCycle(
       deps.env.STOCK_COPILOT_BROKER_ID === selection.brokerId;
     if (!isBrokerNeutral) {
       result.status = "inactive_broker";
+      result.refusal = STOCK_COPILOT_INACTIVE_BROKER;
+      // Issue #3899 (RC2): record the refusal — see the disabled gate.
+      recordAgenticRefusal(deps, result, nowIso, "inactive", STOCK_COPILOT_INACTIVE_BROKER, session);
       return result;
     }
   }
@@ -137,6 +219,10 @@ export async function runStockCopilotAgenticCycle(
   if (!session || !enabledSessions.includes(session)) {
     result.status = "outside_enabled_sessions";
     result.refusal = `${STOCK_COPILOT_OUTSIDE_ENABLED_SESSIONS}:${session ?? "none"}`;
+    // Issue #3899 (RC2): record the refusal — one transition record
+    // per state change, mirroring the deterministic path (#3398), so
+    // a persistent outside-sessions state does not spam the feed.
+    recordAgenticOutsideSessionsTransition(deps, result, nowIso, session);
     return result;
   }
 

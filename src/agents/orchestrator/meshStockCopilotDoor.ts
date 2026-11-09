@@ -11,11 +11,12 @@
  */
 
 import {
-  COPILOT_BROKER_ID,
   resolveCopilotTradingSelection,
 } from "../copilotTradingMode";
 import { isCopilotBroker } from "../../trading";
 import type { CommercialStore } from "../../data/commercialPorts";
+import { SqlJobRunRecordStore } from "../../data/doSqliteJobRunRecordAdapter";
+import { STOCK_COPILOT_TASK_ID } from "./scheduledTasksCopilot";
 import { createOrchestratorTablePorts } from "../../data/createOrchestratorTablePorts";
 import {
   createStockCopilotActivityPort,
@@ -172,6 +173,13 @@ export interface StockCopilotStatusResult {
   closedPositions: StockCopilotClosedPositionView[];
   activity: Array<Record<string, unknown>>;
   lastCycle: Record<string, unknown> | null;
+  /**
+   * Issue #3899 (RC3): true when no cycle has ever executed — no
+   * activity record AND no cycle row in the runs ledger. The status
+   * reports "never_executed" instead of "live" in that state, so
+   * configuration is never again presented as liveness.
+   */
+  neverExecuted: boolean;
 }
 
 export interface StockCopilotControlInput {
@@ -357,6 +365,29 @@ function projectClosedPosition(p: CopilotPositionRecord): StockCopilotClosedPosi
 }
 
 /**
+ * Issue #3899 (RC3) — whether the copilot cycle has ever fired, per
+ * the runs ledger (`SqlJobRunRecordStore`): the cycle handler records
+ * every firing under the task id `stock-copilot-paper-cycle` (and
+ * the `callback:` fallback id when no schedule id resolves). A
+ * firing that predates the RC2 activity recording still counts —
+ * the ledger is the corroborating signal when the activity log is
+ * empty. Best-effort: a ledger read failure reads as "no rows" (the
+ * activity log is the primary signal); the status read never fails
+ * on the ledger.
+ */
+export function hasCopilotCycleLedgerRows(sql: StockCopilotStoreSqlExecutor): boolean {
+  try {
+    const store = new SqlJobRunRecordStore(sql);
+    return (
+      store.latestByJob(STOCK_COPILOT_TASK_ID) !== undefined ||
+      store.latestByJob(`callback:${STOCK_COPILOT_TASK_ID}`) !== undefined
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Reads Stock Copilot status and loop telemetry for the acting user via the data layer ports.
  */
 export async function getStockCopilotStatusViaDoor(
@@ -387,18 +418,28 @@ export async function getStockCopilotStatusViaDoor(
     env: ctx.env,
   });
   const currentSession = copilotSessionAt(now, aroundTheClock);
-  const commercial =
-    ctx.commercial !== undefined
-      ? ctx.commercial
-      : ({
-          getTenantBrokerSelection: async () => COPILOT_BROKER_ID,
-        } as unknown as CommercialStore);
+  // Issue #3899 (RC3): no fake broker default — the resolver composes
+  // the real commercial store from env when no store was injected
+  // (ctx.commercial undefined), so the status reports the real stored
+  // selection; an unbound store reads as unresolved, never alpaca.
+  const commercial = ctx.commercial;
 
   const selection = await resolveCopilotTradingSelection({
     env: ctx.env,
     readSettingRaw: ctx.readSettingRaw,
     commercial,
   });
+
+  const rawActivity = activity.listActivity(login, 20);
+  const lastCycle =
+    rawActivity.length > 0
+      ? (rawActivity[0] as unknown as Record<string, unknown>)
+      : null;
+  // Issue #3899 (RC3): "live" means a cycle has run, not just that
+  // the gates pass — with no activity record and no ledger row the
+  // copilot has never executed, and the status says so.
+  const neverExecuted =
+    lastCycle === null && !hasCopilotCycleLedgerRows(ctx.sql);
 
   const status = !flagEnabled
     ? "off"
@@ -410,13 +451,9 @@ export async function getStockCopilotStatusViaDoor(
           ? "paused"
           : currentSession === null || !enabledSessions.includes(currentSession)
             ? "outside_enabled_sessions"
-            : "live";
-
-  const rawActivity = activity.listActivity(login, 20);
-  const lastCycle =
-    rawActivity.length > 0
-      ? (rawActivity[0] as unknown as Record<string, unknown>)
-      : null;
+            : neverExecuted
+              ? "never_executed"
+              : "live";
 
   const cadence = resolveCopilotCadence({
     env: ctx.env,
@@ -475,6 +512,7 @@ export async function getStockCopilotStatusViaDoor(
     closedPositions: positions.listClosedPositions(login, 10).map(projectClosedPosition),
     activity: rawActivity as unknown as Array<Record<string, unknown>>,
     lastCycle,
+    neverExecuted,
   };
 }
 

@@ -7,6 +7,8 @@
  */
 
 import type { Env } from "../types";
+import type { IndexListStore } from "../data/indexListPorts";
+import { resolveStoredIndexList } from "./indexListConsumer";
 import {
   SANDBOX_STRATEGY_IDS,
   type SandboxStrategyId,
@@ -184,6 +186,125 @@ export function resolveCopilotUniverse(opts?: {
   }
 
   return [...DEFAULT_COPILOT_UNIVERSE];
+}
+
+/**
+ * Issue #3899 (RC4) — the async full resolution of the copilot
+ * universe. The sync `resolveCopilotUniverse` stays the preset
+ * resolver (the status surface and every sync call site keep
+ * reading the preset); this step runs where the cycle actually
+ * runs, and only for the NASDAQ100 preset:
+ *
+ * - Stored list found and fresh ⇒ the full 100-member list
+ *   (`source: "stored-nasdaq100"`).
+ * - Stored list missing, stale, empty, or unreadable ⇒ the
+ *   12-symbol preset as the LABELLED fallback (`source:
+ *   "preset-fallback"`, `reason` names the cause, `stale` /
+ *   `snapshotDate` name the stored list when one was found). A
+ *   missing list is a named outcome, never a silent live fallback
+ *   and never a silent no-op — the cycle still runs, on the
+ *   labelled preset, and the caller audits the reason.
+ * - Any other preset or explicit list ⇒ the configured symbols
+ *   untouched (`source: "configured"`); the index store is never
+ *   read, so a non-NASDAQ100 universe cannot fail on it.
+ */
+export type CopilotUniverseResolutionSource =
+  | "configured"
+  | "stored-nasdaq100"
+  | "preset-fallback";
+
+export interface CopilotUniverseResolution {
+  symbols: string[];
+  source: CopilotUniverseResolutionSource;
+  /** The preset the configured universe names, when one applies. */
+  preset: string | null;
+  /** True when the stored list was found but stale (fallback path). */
+  stale: boolean;
+  /** Snapshot date of the stored list, when one was found. */
+  snapshotDate: string | null;
+  /** Why the fallback was used, or why the store could not be read. */
+  reason: string | null;
+}
+
+export async function resolveCopilotUniverseFull(opts?: {
+  readSettingRaw?: (key: string) => string | null;
+  env?: Env;
+  /** The stored-list port; absent ⇒ the labelled preset fallback. */
+  indexListStore?: IndexListStore | null;
+}): Promise<CopilotUniverseResolution> {
+  const symbols = resolveCopilotUniverse(opts);
+  const preset = resolveCopilotUniversePreset(symbols);
+  if (preset !== "NASDAQ100") {
+    return {
+      symbols,
+      source: "configured",
+      preset,
+      stale: false,
+      snapshotDate: null,
+      reason: null,
+    };
+  }
+  const fallback = (
+    reason: string,
+    stale = false,
+    snapshotDate: string | null = null,
+  ): CopilotUniverseResolution => ({
+    symbols: [...PRESET_UNIVERSES.NASDAQ100],
+    source: "preset-fallback",
+    preset,
+    stale,
+    snapshotDate,
+    reason,
+  });
+  const store = opts?.indexListStore ?? null;
+  if (!store) {
+    return fallback(
+      "no index-list store available to resolve the stored nasdaq100 membership — using the labelled 12-symbol NASDAQ100 preset",
+    );
+  }
+  let resolved: Awaited<ReturnType<typeof resolveStoredIndexList>>;
+  try {
+    resolved = await resolveStoredIndexList({ store, index: "nasdaq100" });
+  } catch (err) {
+    return fallback(
+      `stored nasdaq100 list could not be read (${err instanceof Error ? err.message : String(err)}) — using the labelled 12-symbol NASDAQ100 preset`,
+    );
+  }
+  if (resolved.status === "missing") {
+    return fallback(
+      `${resolved.reason} — using the labelled 12-symbol NASDAQ100 preset`,
+    );
+  }
+  const membership = resolved.membership;
+  if (resolved.stale) {
+    return fallback(
+      `stored nasdaq100 list is stale (snapshot ${membership.snapshotDate}) — using the labelled 12-symbol NASDAQ100 preset`,
+      true,
+      membership.snapshotDate,
+    );
+  }
+  const stored = Array.from(
+    new Set(
+      membership.symbols
+        .map((m) => m.symbol.trim().toUpperCase())
+        .filter((s) => s.length > 0),
+    ),
+  );
+  if (stored.length === 0) {
+    return fallback(
+      `stored nasdaq100 list is empty (snapshot ${membership.snapshotDate}) — using the labelled 12-symbol NASDAQ100 preset`,
+      false,
+      membership.snapshotDate,
+    );
+  }
+  return {
+    symbols: stored,
+    source: "stored-nasdaq100",
+    preset,
+    stale: false,
+    snapshotDate: membership.snapshotDate,
+    reason: null,
+  };
 }
 
 export function resolveCopilotUniversePreset(universe: readonly string[]): string | null {
