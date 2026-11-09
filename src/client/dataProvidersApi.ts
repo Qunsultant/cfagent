@@ -82,6 +82,13 @@ export interface DataProviderHealth extends DataProviderCaptureAggregates {
 /** One provider as the E3 GET surface serves it (providerView). */
 export interface DataProviderView {
   id: string;
+  /**
+   * #3751: the registry adapter's display name (providerView
+   * projects it from the registry record's adapter). Optional here
+   * because an older API response omits it; null when no adapter is
+   * registered for the record.
+   */
+  name?: string | null;
   adapterKind: string;
   lifecycleState: string;
   enabled: boolean;
@@ -767,10 +774,15 @@ export function providerActions(view: DataProviderView): DataProviderActionName[
   }
 }
 
-/** Display name: config.displayName when the record carries one, else the id. */
+/**
+ * Display name: the tenant-set config.displayName when the record
+ * carries one, else the registry adapter name (#3751 projection),
+ * else the id.
+ */
 export function providerDisplayName(view: DataProviderView): string {
-  const name = view.config?.displayName;
-  return typeof name === "string" && name !== "" ? name : view.id;
+  const configured = view.config?.displayName;
+  if (typeof configured === "string" && configured !== "") return configured;
+  return view.name ? view.name : view.id;
 }
 
 /**
