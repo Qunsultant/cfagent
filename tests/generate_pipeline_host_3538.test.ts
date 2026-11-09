@@ -88,10 +88,11 @@ async function pollRecords(
 }
 
 describe("the analyze → generate host hand-off (#3538)", () => {
-  it("the host manages the five generate jobs", () => {
+  it("the host manages the six generate jobs", () => {
     expect(pipelineGenerateJobIds()).toEqual([
       "yahoo-nasdaq100-quotes-enrich-analyze-generate",
       "yahoo-sp100-quotes-enrich-analyze-generate",
+      "yahoo-sp500-quotes-enrich-analyze-generate",
       "alpaca-nasdaq100-quotes-enrich-analyze-generate",
       "etrade-nasdaq100-quotes-enrich-analyze-generate",
       "public-nasdaq100-quotes-enrich-analyze-generate",
