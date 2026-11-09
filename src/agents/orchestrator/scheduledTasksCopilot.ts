@@ -44,7 +44,7 @@ import type {
 import type { Env } from "../../types";
 import type { ScreenerExecutionContext } from "./scheduleMaintenance";
 import { COPILOT_BROKER_ID, resolveCopilotTradingSelection } from "../copilotTradingMode";
-import { brokerCopilotCapability, type BrokerId } from "../../trading";
+import { brokerCopilotCapability, isCopilotBroker, type BrokerId } from "../../trading";
 import type { CommercialStore } from "../../data/commercialPorts";
 import {
   createStockCopilotActivityPort,
@@ -203,7 +203,10 @@ export async function runStockCopilotCycleForInstance(
   });
   // Issue #3839: the platform follows the SELECTED broker; the catalog's
   // copilot capability supplies the bars provider. No broker is hardcoded.
-  const selectedBroker = (selection.resolved ? selection.selection.brokerId : COPILOT_BROKER_ID) as BrokerId;
+  const selectedBroker: BrokerId =
+    selection.resolved && isCopilotBroker(selection.selection.brokerId)
+      ? selection.selection.brokerId
+      : COPILOT_BROKER_ID;
   const copilotCapability = brokerCopilotCapability(selectedBroker);
   const platform = TradingPlatformRegistry.getPlatform(
     selectedBroker,
