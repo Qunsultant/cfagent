@@ -21,10 +21,10 @@ this set disagree, the source governs until this set is corrected.
 > Issue bodies record proposals and point here; they are not parallel rule
 > homes.
 
-**Decision (2026-11-08).** gitops §22 will be amended to name this set as that
+**Decision (2026-11-08).** gitops §22 names this set as that
 justified place for *code* rules: gitops keeps delivery and process rules;
-this set is the operational home for the standards code must follow. Until
-the amendment lands, this decision record is the set's authority — the set
+this set is the operational home for the standards code must follow. The
+amendment landed via #3800; §22's pointer is the set's authority — the set
 claims §22's justification explicitly, and is not a parallel rule home by
 drift.
 
