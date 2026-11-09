@@ -718,6 +718,8 @@ const EXPECTED_INVENTORY = [
   "handleBrokerOrderRoutes :: endsWith(\"/broker/order/execute\")",
   // Issue #3390: the neutral cancel route, on the same delegating router.
   "handleBrokerOrderRoutes :: endsWith(\"/broker/order/cancel\")",
+  // Issue #3884: the per-ticker cancel scope.
+  "handleBrokerOrderRoutes :: endsWith(\"/broker/orders/cancel-ticker\")",
   "handleBrokerOrderRoutes :: endsWith(\"/broker/orders\")",
   "handleTradingIntegrationsRoutes :: endsWith(\"/trading/email/inbound\")",
   "handleTradingIntegrationsRoutes :: endsWith(\"/trading/email/approve-link\")",
