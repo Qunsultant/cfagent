@@ -344,6 +344,10 @@ export const MCP_TOOL_SCOPES: Record<string, McpScope> = {
   alpaca_preview_order: "mcp:trade",
   alpaca_place_bracket_ladder: "mcp:trade",
   alpaca_cancel_bracket_ladder: "mcp:trade",
+  // Issue #3888: the externalized limits. Reading them is trade-scope
+  // data (the same values every order engine enforces), and a change
+  // moves a risk ceiling, so it belongs behind the same scope.
+  trading_limits: "mcp:trade",
   foss_alpaca_place_order: "mcp:trade", // #1906 deprecated alias, same scope as canonical
   execute_durable_twap: "mcp:trade",
   // #2349 (mesh S6): the TradingAgent door's proposal commands —

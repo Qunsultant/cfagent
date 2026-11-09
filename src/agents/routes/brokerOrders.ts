@@ -24,6 +24,7 @@
  * E*TRADE-only. The legacy /api/etrade/* routes are untouched.
  */
 import { TradingPlatformRegistry, ROUTED_BROKER_IDS, brokerSupports, BROKER_CATALOG, BROKER_UNAVAILABLE_CODE } from "../../trading";
+import { handleBrokerLimitRoutes } from "./brokerLimits";
 import { resolveTenantBroker } from "../../services/tenantProviders";
 import type { EtradeBrokerRouteContext } from "./etradeBroker";
 import { unauthenticatedResponse } from "./routeIdentity";
@@ -117,6 +118,17 @@ export async function handleBrokerOrderRoutes(
 ): Promise<Response | null> {
   const requestedEnv: "TEST" | "PROD" | undefined =
     resolveTradeEnvironmentFromSettings(ctx.readSettingRaw, ctx.env);
+
+  // Issue #3888: the externalized trading limits — one read/change
+  // surface, resolved by src/trading/limits.ts so the engine, the
+  // tool and the copilot all quote the same configuration.
+  const limitResponse = await handleBrokerLimitRoutes(request, url, path, {
+    env: ctx.env,
+    readSettingRaw: (key) => ctx.readSettingRaw(key),
+    writeSetting: ctx.writeSetting ? (key, value) => ctx.writeSetting!(key, value) : undefined,
+    audit: (type, agent, payload) => ctx.audit(type, agent as never, payload),
+  });
+  if (limitResponse) return limitResponse;
 
   // Broker-routed order preview
   if (path.endsWith("/broker/order/preview") && request.method === "POST") {
