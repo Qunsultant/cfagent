@@ -1436,6 +1436,15 @@ Product & experience (CPO; parent programme #3695):
 | OWASP agentic safety | Agentic safety (prompt injection, excessive agency, tool misuse) as a product requirement | Filed | #3832 (S9) |
 | Declarative schema-driven views | Views declared as schema and rendered by the shell — one view definition, every surface | Filed | #3835 (S12) |
 
+Finance & capital (CFO; parent programme #2528):
+
+| Product | Purpose | Status | Tracking |
+| --- | --- | --- | --- |
+| CFO operating plan & COBIT balanced scorecard | The one-page CFO operating plan and the COBIT balanced scorecard (Financial perspective) over the platform's cost drivers | Partial — scorecard Live on main (Financial perspective only); paid-service costs GAP until billing actuals are recorded; #2474 closed but not Done | #2474; #2475 |
+| Options Screener product programme | Options Screener as a product with its own sub-menu and page, per-sub-product flags, and a human-approved product-mix review loop | Partial — product line Live (flags, nav, product-mix review); remaining slices Filed | #2528 |
+| Broker & provider neutrality | The tenant's broker and data-provider selections governing every run, job, and message — no silent E*TRADE fallback | Partial — order page and scheduled jobs merged; remaining slices Filed | #3460; #3216 |
+| Cost attribution (FinOps) | Per-agent and per-workflow cost attribution; paid-service billing actuals | Filed — no cost-attribution mechanism defined yet; paid-service costs GAP | #2474 |
+
 All other platforms — products not yet defined (**TBD**
 placeholder rows; no filed product issues were found for these
 platforms in the 2026-11-09 survey):
@@ -1446,7 +1455,6 @@ platforms in the 2026-11-09 survey):
 | Business architecture & commercial (CBO) | TBD — products to be defined by the owning platform |
 | Operations & service delivery (COO) | TBD — products to be defined by the owning platform |
 | Data & knowledge (CDO) | TBD — products to be defined by the owning platform (shared data and knowledge services per §12.1 are the platform's provision; their product definitions are not yet filed) |
-| Finance & capital (CFO) | TBD — products to be defined by the owning platform |
 | Legal & obligation (CLO) | TBD — products to be defined by the owning platform |
 | Investment & portfolio (CIO function) | TBD — products to be defined |
 | Research (Chief Research Officer / Chief Scientist function) | TBD — products to be defined |
@@ -1731,9 +1739,9 @@ owner's word, not on this document.
 ### 14.8 Platforms and products
 
 - **Current:** §12.2's inventory — the Technology, Agentic,
-  Security & trust, and Product & experience (CPO) platform
-  products filed or partial; all other platforms' products
-  undefined.
+  Security & trust, Product & experience (CPO), and Finance &
+  capital (CFO) platform products filed or partial; all other
+  platforms' products undefined.
 - **Future:** every platform productized under the platform
   model, each product registered and statused like §12.2's
   rows.
@@ -1743,8 +1751,9 @@ owner's word, not on this document.
   the Security & trust platform's products defined in §12.2
   (this issue, #3851); the Product & experience (CPO)
   platform's products defined in §12.2 (this issue, #3856);
-  product definition for the remaining
-  platforms is **TBD**, owned by each platform.
+  the Finance & capital (CFO) platform's products defined in
+  §12.2 (this issue, #3862); product definition for the
+  remaining platforms is **TBD**, owned by each platform.
 
 ### 14.9 Operator surface: dashboards and Studios
 
