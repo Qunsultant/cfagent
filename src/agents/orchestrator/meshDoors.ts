@@ -143,6 +143,12 @@ import {
   resolvePipelineChain,
   type PipelineChainSurfaceView,
 } from "../../services/chainPipelineJobs";
+import {
+  bridgeRunComplete,
+  bridgeRunFail,
+  bridgeRunStart,
+} from "./runBridge";
+import type { AsyncJobPorts } from "../../data/createAsyncJobPorts";
 
 // ---------------------------------------------------------------------------
 // Errors — honest, typed, coded (doors-and-layers §11.1)
@@ -1117,21 +1123,94 @@ export interface PipelineChainRunDoorResult {
 }
 
 /**
+ * Issue #3787: the bridge handle a caller supplies when it owns
+ * a mas_async_jobs store for this chain run (the MCP command's
+ * orchestrator instance store). Absent → the chain runs
+ * unbridged (its own control-plane records still exist; only
+ * its stuck coverage is off). The door never invents a store:
+ * without a handle there is nowhere honest to write the row.
+ */
+export interface PipelineChainRunBridge {
+  ports: AsyncJobPorts;
+  /** The mas_async_jobs session (the orchestrator instance id). */
+  sessionId: string;
+}
+
+/**
  * Run one composed chain end-to-end through the pipeline
  * host's control plane (the chain dispatch refreshes the
  * chain definition from the stored stage definitions first)
  * and report its settled outcome + the end-to-end status view
  * (the same view the UX renders).
+ *
+ * Issue #3787: when a bridge handle is supplied, the run is
+ * bridged into mas_async_jobs (insert + claim to `running`
+ * before dispatch, settled from the run's terminal state
+ * after) so the #3784 sweep owns stuck detection for it — a
+ * dispatch that never settles leaves its row `running` for
+ * the sweep to alert (30 min) and reap (2h). A dispatch that
+ * throws fails the bridge row with the throw's message (the
+ * run never started under this call). Non-terminal states
+ * (running/queued/paused) leave the row `running` — the sweep
+ * owns the verdict, including for a paused run (see the #3787
+ * repair doc's known limitation).
  */
 export async function runPipelineChainViaDoor(
   env: Env,
   actingLogin: string | undefined | null,
   source: string,
+  opts?: { runBridge?: PipelineChainRunBridge },
 ): Promise<PipelineChainRunDoorResult> {
   const login = requireActingLogin(actingLogin);
   const entry = resolvePipelineChainOrThrow(source);
   const door = getScheduledAgentDoor(env);
-  const run = await door.runPipelineChain(entry.jobId, { userLogin: login });
+  const bridge = opts?.runBridge;
+  const nowIso = new Date().toISOString();
+  const bridgeJobId = `chain:${entry.jobId}:${nowIso}:${crypto.randomUUID().slice(0, 8)}`;
+  let bridged = false;
+  if (bridge) {
+    bridged = bridgeRunStart(bridge.ports, {
+      jobId: bridgeJobId,
+      sessionId: bridge.sessionId,
+      capability: "pipeline.chain",
+      displayName: `Pipeline chain — ${entry.label}`,
+      userLogin: login,
+      trigger: "manual",
+      chainJobId: entry.jobId,
+      nowIso,
+    });
+  }
+  let run: Awaited<ReturnType<typeof door.runPipelineChain>>;
+  try {
+    run = await door.runPipelineChain(entry.jobId, { userLogin: login });
+  } catch (err) {
+    if (bridged && bridge) {
+      bridgeRunFail(
+        bridge.ports,
+        bridgeJobId,
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+    throw err;
+  }
+  if (bridged && bridge) {
+    if (run.state === "completed") {
+      bridgeRunComplete(
+        bridge.ports,
+        bridgeJobId,
+        JSON.stringify({ status: "completed", runId: run.runId, state: run.state }),
+      );
+    } else if (run.state === "failed" || run.state === "cancelled") {
+      bridgeRunFail(
+        bridge.ports,
+        bridgeJobId,
+        run.error ??
+          `Pipeline chain run ${run.runId} ended with state "${run.state}".`,
+      );
+    }
+    // running / queued / paused: leave the row running — the
+    // #3784 sweep owns the stuck verdict.
+  }
   const status = await door.getPipelineChainSurfaceStatus(entry.jobId);
   return {
     jobId: entry.jobId,

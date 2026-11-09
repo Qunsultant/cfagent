@@ -313,6 +313,11 @@ describe("goal compiler (#1441) — waves and planner prompt on the existing pat
     // #1980 index-list slice amends this pin: the catalog gains
     // exactly one entry, the ScheduledAgent-owned `index` marker
     // for the index-list refresh goals — same precedent.
+    // #3787 feed-refresh slice amends this pin: the catalog gains
+    // exactly one entry, the ScheduledAgent-owned `feed` marker
+    // for the feed-refresh goal (`feed.refresh_all`, dispatched by
+    // ScheduledAgent.onCron through the J2 feed jobs) — same
+    // precedent.
     expect(OPERATION_CATALOG.map((e) => e.agent)).toEqual([
       "search",
       "payments",
@@ -325,6 +330,7 @@ describe("goal compiler (#1441) — waves and planner prompt on the existing pat
       "social",
       "resource",
       "index",
+      "feed",
     ]);
   });
 });
