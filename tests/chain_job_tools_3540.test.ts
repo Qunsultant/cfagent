@@ -352,12 +352,13 @@ describe("pipeline-chain copilot tools (#3540)", () => {
     expect(view.stages.every((s: { status: string }) => s.status === "not-run")).toBe(true);
   });
 
-  it("list_pipeline_chains lists all five chains with their roll-ups", async () => {
+  it("list_pipeline_chains lists all six chains with their roll-ups", async () => {
     const { context } = await makeContext();
     const result = (await new ListPipelineChainsCommand().execute({}, context)) as any;
     expect(result.jobs.map((j: { jobId: string }) => j.jobId)).toEqual([
       "yahoo-nasdaq100-quotes-pipeline",
       "yahoo-sp100-quotes-pipeline",
+      "yahoo-sp500-quotes-pipeline",
       "alpaca-nasdaq100-quotes-pipeline",
       "etrade-nasdaq100-quotes-pipeline",
       "public-nasdaq100-quotes-pipeline",
