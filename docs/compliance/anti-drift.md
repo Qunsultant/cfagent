@@ -5,7 +5,7 @@
 **Status:** Approved Architecture & Security Anti-Drift Specification
 **Target Application:** NextGenTP / AI Search Agent (`ai-search-agent`)  
 **Scope:** Client UX, Edge Gateway, Agentic Orchestration, Data Tier, Infrastructure, and Security Architecture
-**Consolidation (#3802, 2026-11-08):** this document is the single anti-drift home. The former companion `anti-drift-controls.md` stated the same controls in prose form; it is retired under the gitops §22 rename form as `anti-drift-controls.deprecated.md` (frozen; superseded by this document), with the retirement recorded in the deprecation ledger (`docs/architecture/transition/deprecations.md`). Its one control not previously stated here — zero-FOUC pre-paint hydration — is folded into §2 below.
+**Consolidation (#3802, 2026-11-08):** this document is the single anti-drift home. The former companion `anti-drift-controls.md` stated the same controls in prose form; it is retired under the gitops §22 rename form as `anti-drift-controls.deprecated.md` (frozen; superseded by this document), with the retirement recorded in the deprecation ledger (`docs/architecture/transition/deprecations.md`). A stale un-headered original that also remained at the old path after that rename was moved to `docs/archive/anti-drift-controls.md` on 2026-11-09 (#3802), so the old compliance path no longer resolves as a live document. Its one control not previously stated here — zero-FOUC pre-paint hydration — is folded into §2 below.
 
 **Governing Architecture Standards:**
 - **Master Enterprise Architecture Standards:** `docs/architecture/standards/standards.md`
