@@ -129,6 +129,7 @@ describe("the element vocabulary (#3536)", () => {
       "alpaca-nasdaq100-quotes-enrich",
       "etrade-nasdaq100-quotes-enrich",
       "public-nasdaq100-quotes-enrich",
+      "yahoo-dow-quotes-enrich",
       "yahoo-nasdaq100-quotes-enrich",
       "yahoo-sp100-quotes-enrich",
       "yahoo-sp500-quotes-enrich",
