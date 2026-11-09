@@ -231,6 +231,7 @@ describe("analyze pipeline catalog + resolution (#3537)", () => {
     expect(ANALYZE_PIPELINE_CATALOG.map((e) => e.jobId)).toEqual([
       "yahoo-nasdaq100-quotes-enrich-analyze",
       "yahoo-sp100-quotes-enrich-analyze",
+      "yahoo-sp500-quotes-enrich-analyze",
       "alpaca-nasdaq100-quotes-enrich-analyze",
       "etrade-nasdaq100-quotes-enrich-analyze",
       "public-nasdaq100-quotes-enrich-analyze",
@@ -252,7 +253,7 @@ describe("analyze pipeline catalog + resolution (#3537)", () => {
 
   it("every catalog definition resolves as a valid J1 job definition", () => {
     const raws = buildAllAnalyzePipelineJobDefinitions({});
-    expect(raws).toHaveLength(5);
+    expect(raws).toHaveLength(6);
     for (const raw of raws) {
       const resolved = resolveJobDefinition(raw);
       expect(resolved.root.kind).toBe("analyze");
@@ -272,7 +273,7 @@ describe("analyze pipeline catalog + resolution (#3537)", () => {
         return `reg:${spec.jobId}`;
       },
     });
-    expect(registrations).toHaveLength(17);
+    expect(registrations).toHaveLength(20);
     expect(specs.map((s) => s.jobId)).toContain(ANALYZE_ID);
   });
 });
