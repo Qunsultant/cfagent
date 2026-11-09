@@ -8,6 +8,9 @@ describe("Compliance documentation layout (#1447)", () => {
   const oldComplianceDir = path.join(root, "docs", "architecture", "compliance");
 
   it("houses anti-drift framework and anti-drift controls under docs/compliance", () => {
+    // #3802: the controls document was retired under the gitops §22 rename form
+    // (anti-drift-controls.md -> anti-drift-controls.deprecated.md, superseded by
+    // anti-drift.md); the pin asserts the retired path + its original title.
     expect(fs.existsSync(newComplianceDir)).toBe(true);
 
     const antiDriftPath = path.join(newComplianceDir, "anti-drift.md");
@@ -15,7 +18,7 @@ describe("Compliance documentation layout (#1447)", () => {
     const antiDriftContent = fs.readFileSync(antiDriftPath, "utf8");
     expect(antiDriftContent).toContain("Comprehensive UX & Multi-Tier Architectural Anti-Drift Framework");
 
-    const controlsPath = path.join(newComplianceDir, "anti-drift-controls.md");
+    const controlsPath = path.join(newComplianceDir, "anti-drift-controls.deprecated.md");
     expect(fs.existsSync(controlsPath)).toBe(true);
     const controlsContent = fs.readFileSync(controlsPath, "utf8");
     expect(controlsContent).toContain("Architectural & UX Drift Analysis and Governance Framework");
