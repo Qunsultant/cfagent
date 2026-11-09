@@ -367,6 +367,12 @@
  * /copilot-channels/voice/stt and /copilot-channels/voice/tts —
  * bringing the pinned inventory to 415 entries; the delegation
  * sequence is unchanged (same handler, same position).
+ *
+ * Issue #3796 added three more in the same handler — GET
+ * /voice/backend and POST /voice/stt and /voice/tts (the
+ * surface-parameterized voice routes) — bringing the pinned
+ * inventory to 418 entries; the delegation sequence is unchanged
+ * (same handler, same position).
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -933,7 +939,12 @@ const EXPECTED_INVENTORY = [
   // Issue #3773 (model backend): the copilot voice STT/TTS endpoints
   // (in handleCopilotChannelsRoutes, same handler, same position).
   "handleCopilotChannelsRoutes :: endsWith(\"/copilot-channels/voice/stt\")",
-  "handleCopilotChannelsRoutes :: endsWith(\"/copilot-channels/voice/tts\")"
+  "handleCopilotChannelsRoutes :: endsWith(\"/copilot-channels/voice/tts\")",
+  // Issue #3796: the surface-parameterized voice routes (same
+  // handler, same position).
+  "handleCopilotChannelsRoutes :: endsWith(\"/voice/backend\")",
+  "handleCopilotChannelsRoutes :: endsWith(\"/voice/stt\")",
+  "handleCopilotChannelsRoutes :: endsWith(\"/voice/tts\")"
 ];
 
 function routeRequestBody(orchSrc: string): string {
