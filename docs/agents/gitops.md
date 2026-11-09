@@ -1547,7 +1547,12 @@ implement.
 - **Single home for rules (owner direction 2026-10-29, #2299).**
   This document is the one place for all rules unless another place is
   justified. Issue bodies record proposals and point here; they are not
-  parallel rule homes.
+  parallel rule homes. Code standards are that justified other place
+  (owner direction 2026-11-08): `docs/architecture/code/` is the
+  operational home for the standards code must follow. The set states
+  each code standard operationally and points to its canonical source;
+  it does not copy rule text wholesale, and delivery and process rules
+  remain here.
 - **Where agents meet these rules.** These rules are also stated in
   the PR template checklist (seen at PR creation) and in repo
   AGENTS.md, so an agent meets them before tripping the gate — not
