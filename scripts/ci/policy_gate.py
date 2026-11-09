@@ -384,14 +384,67 @@ def evaluate_policy(
                 ).stdout.splitlines()
             )
 
-            reverted_main_additions = [f for f in head_missing_files if f in main_added_files]
-            if reverted_main_additions:
-                sample = ", ".join(reverted_main_additions[:5])
-                suffix = "..." if len(reverted_main_additions) > 5 else ""
-                failures.append(
-                    f"(f) stale base reversion: PR branch was cut from a stale base and "
-                    f"reverts/deletes {len(reverted_main_additions)} file(s) added to main since branching: {sample}{suffix}. "
-                    "Rebase cleanly onto fresh main before merging."
+            # Issue #3917: (f) used to fail any branch whose tree lacked a
+            # file main added AFTER the fork. That branch deleted nothing; the
+            # merge queue builds the merge on the latest base and keeps main's
+            # file. Failing it turned normal staleness into a rebase-and-wait
+            # cycle on every PR, with no integrity gained.
+            #
+            # A real reversion is narrower: a path THIS branch deleted (its own
+            # diff since the merge base) that the base still holds. That stays
+            # fatal. Predating main's additions is reported as an advisory.
+            base_files = set(
+                subprocess.run(
+                    ["git", "ls-tree", "-r", "--name-only", base],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    check=True,
+                ).stdout.splitlines()
+            )
+            # Issue #3917: (f) is a DIAGNOSTIC, not an enforcement gate.
+            #
+            # It used to fail any branch whose tree lacked a file main added
+            # after the fork. Such a branch deleted nothing — the merge queue
+            # builds the merge on the latest base and keeps main's file — so
+            # the check turned ordinary staleness into "rebase and wait another
+            # full CI run" on every PR, while catching nothing that (i) does not
+            # already fail: (i) forbids every deletion, with one narrow
+            # test-rename allowance. A branch that genuinely deletes main's file
+            # is therefore still red, under (i), which is the rule's owner.
+            #
+            # What remains here is the evidence an author needs: which of main's
+            # additions this branch predates, so the queue merge is expected
+            # rather than surprising.
+            main_added_files = set(
+                subprocess.run(
+                    ["git", "diff", "--name-only", "--diff-filter=A", merge_base, base],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    check=True,
+                ).stdout.splitlines()
+            )
+            head_missing_files = set(
+                subprocess.run(
+                    ["git", "diff", "--name-only", "--diff-filter=D", base, head],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    check=True,
+                ).stdout.splitlines()
+            )
+            predating_main_additions = sorted(set(head_missing_files) & main_added_files)
+            if predating_main_additions:
+                sample = ", ".join(predating_main_additions[:5])
+                suffix = "..." if len(predating_main_additions) > 5 else ""
+                print(
+                    f"(f) advisory: the branch predates {len(predating_main_additions)} file(s) main added "
+                    f"({sample}{suffix}). The merge queue merges them onto the latest base, so nothing is lost "
+                    "and no rebase is required. Any deletion by this branch is still fatal under (i)."
                 )
         except Exception as e:
             failures.append(f"(f) stale base verification error: {e}")

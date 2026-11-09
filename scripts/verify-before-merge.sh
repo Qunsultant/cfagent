@@ -40,6 +40,7 @@ echo "--- Migration latest-pin lint (#3189) ---"
 bash scripts/check-migration-pins.sh || fail "migration latest-pin lint failed"
 
 echo "--- Full test suite ---"
+npm run test:pins || fail "pin suites failed (accounting, censuses, router inventory, policy gate)"
 npm run test:ci || fail "test suite failed"
 
 echo "--- Policy gate regression check ---"

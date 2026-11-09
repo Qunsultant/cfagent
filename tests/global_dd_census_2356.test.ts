@@ -318,7 +318,9 @@ describe("global D-D census: surface 1 — storage-shaped sites above the layer"
     // to its data-layer adapter) → 16; issue #1257 adds the
     // live-check route's 2 (DO-internal SELECT-only read, same
     // class) → 18.
-    expect(total).toBe(18);
+    // #3917: derived from the allow-list, not a hand-bumped literal — a new
+    // dispositioned slice adds sites and its allow-list row together.
+    expect(total).toBe(STORAGE_ALLOW_LIST.reduce((sum, [, sites]) => sum + sites, 0));
   });
 
   for (const file of STEP4C_SERVICE_FILES) {

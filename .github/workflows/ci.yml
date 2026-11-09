@@ -175,6 +175,9 @@ jobs:
       - name: 🔍 TypeScript Strict Type Check
         run: npm run typecheck
 
+      - name: 🧷 Pin suites (accounting, censuses, router inventory, policy gate)
+        run: npm run test:pins
+
       - name: 🏗️ Verify Frontend Production Bundle Build
         run: npm run build
 

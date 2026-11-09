@@ -1406,7 +1406,9 @@ const BASELINE_MAP = new Map(BASELINE.map(([f, t, c]) => [`${f}\t${t}`, c]));
 const PLATFORM_KEYS = new Set(
   BASELINE.slice(0, 186).map(([f, t]) => `${f}\t${t}`),
 );
-const PLATFORM_BASELINE_TOTAL = 1039;
+// #3917: derived, not a hand-maintained literal — the platform slice is the
+// first 186 rows, so its total follows from them.
+const PLATFORM_BASELINE_TOTAL = BASELINE.slice(0, 186).reduce((sum, [, , count]) => sum + count, 0);
 
 describe("#3525 S6 shrink-only provider-brand census pin", () => {
   const measured = measure();
@@ -1444,16 +1446,16 @@ describe("#3525 S6 shrink-only provider-brand census pin", () => {
     expect(total).toBeLessThanOrEqual(PLATFORM_BASELINE_TOTAL);
   });
 
-  it("the baseline itself is the recorded seed (1126 rows / 8758 lines)", () => {
-    // #3883: +3 rows — the cancellation surface names the provider it executes
-    // against (see the INTEGRATION disposition above).
-    // #3905: +6 lines on the same seed — the Dow feed job's raises above
-    // (feedJobs.ts/yahoo 12->14, feedPipelineJobs.ts/yahoo 19->23).
-    // #3796: +1 row / +1 line — the surface voice routes host the desk
-    // surface's broker gate (see the INTEGRATION disposition above).
-    // #3911: +1 row / +1 line — the stage-order rule's Yahoo row above
-    // (stockCopilotPrompt.ts/yahoo 1, the rule line alone).
-    expect(BASELINE.length).toBe(1126);
-    expect(BASELINE.reduce((a, [, , c]) => a + c, 0)).toBe(8758);
+  it("the baseline is a well-formed seed: unique rows, every count positive (#3917)", () => {
+    // #3917: the row total and the line total are NOT pinned as literals. They
+    // moved on every additive slice and each bump broke every open PR. What
+    // must hold is the shape: no duplicate file×term row, no zero/negative
+    // count, and (elsewhere) every measured row present in this table.
+    const keys = BASELINE.map(([file, term]) => `${file}\t${term}`);
+    expect(new Set(keys).size).toBe(keys.length);
+    for (const [file, term, count] of BASELINE) {
+      expect(count, `${file} / ${term}`).toBeGreaterThan(0);
+    }
+    expect(BASELINE.length).toBeGreaterThan(1000);
   });
 });

@@ -302,9 +302,11 @@ async function makeContext(withIdentity = true) {
 }
 
 describe("pipeline-chain copilot tools (#3540)", () => {
-  it("the catalog carries the four pipeline-chain tools (126 total since #3884: +1 alpaca_cancel_ticker tool)", () => {
+  it("the catalog carries the four pipeline-chain tools", () => {
     const names = McpToolFactory.getToolDefinitions().map((d) => d.name);
-    expect(names).toHaveLength(126);
+    // Issue #3917: the catalog SIZE is not pinned here — one new tool would
+    // rewrite this line in eleven suites. The tool↔scope accounting pin lives
+    // in tests/tool_attribution_audit_1763.test.ts (sets must match exactly).
     for (const name of [
       "run_pipeline_chain",
       "get_pipeline_chain_status",

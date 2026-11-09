@@ -154,14 +154,17 @@ describe("REST foss routes", () => {
     fs.unlinkSync(path.join(tempRepoDir, "tests", "unit.test.ts"));
     runGit(tempRepoDir, ["commit", "-am", "refactor: delete test file"]);
 
-    // Branch 3: stale base branch that reverts a file added to main
+    // Branch 3: stale base branch that merely PREDATES a file added to main.
+    // Issue #3917: this is staleness, not a reversion — the merge queue keeps
+    // main's file, so (f) reports an advisory and does not fail.
     runGit(tempRepoDir, ["checkout", "main"]);
     runGit(tempRepoDir, ["checkout", "-b", "branch-stale-reversion"]);
-    // Advance main with a newly added file
+    // Advance main with a newly added file the branch never sees
     runGit(tempRepoDir, ["checkout", "main"]);
     fs.writeFileSync(path.join(tempRepoDir, "src", "new_feature.ts"), "export const newF = true;\n");
     runGit(tempRepoDir, ["add", "-A"]);
     runGit(tempRepoDir, ["commit", "-m", "feat: new feature on main"]);
+
 
     // Branch 4: fully valid compliant feature branch
     runGit(tempRepoDir, ["checkout", "main"]);
@@ -578,17 +581,49 @@ describe("rewritten wrapper", () => {
     expect(resWithLabel.stdout).toContain("(i) no deletion");
   });
 
-  it("rejects PR cut from stale base that reverts newly added main files", () => {
+  it("passes a branch that merely predates main's additions, with an advisory (#3917)", () => {
     const resStale = runPolicyGate(
       {
         PR_TITLE: "feat: stale branch work (#1684) #CTO-mbshr",
-        PR_BODY: "Fixes #1684\n## Agent\n#CTO-mbshr",
+        PR_BODY: "Fixes #1684\n## Agent\n#CTO-mbshr\n\n- [ ] Process documentation impact: none",
         PR_LABELS: "lane:cto-mbshr",
       },
       ["--base", "main", "--head", "branch-stale-reversion"]
     );
-    expect(resStale.status).toBe(1);
-    expect(resStale.stdout).toContain("(f) stale base reversion");
+    expect(resStale.stdout).toContain("(f) advisory");
+    expect(resStale.stdout).not.toContain("(f) stale base reversion");
+  });
+
+  it("fails a real deletion under (i) while (f) stays a diagnostic (#3917)", () => {
+    // Enforcement of "do not lose main's file" lives in (i), which forbids
+    // every deletion; (f) only reports which of main's additions the branch
+    // predates. A branch that takes main's file and then removes it is red
+    // under (i) — the rule that owns deletion — not under a staleness check.
+    runGit(tempRepoDir, ["checkout", "main"]);
+    runGit(tempRepoDir, ["checkout", "-b", "fixture-base-3917"]);
+    fs.writeFileSync(path.join(tempRepoDir, "src", "late_file_3917.ts"), "export const late = 1;\n");
+    runGit(tempRepoDir, ["add", "-A"]);
+    runGit(tempRepoDir, ["commit", "-m", "feat: another lane lands a file"]);
+    runGit(tempRepoDir, ["checkout", "main"]);
+    runGit(tempRepoDir, ["checkout", "-b", "branch-real-revert-3917"]);
+    runGit(tempRepoDir, ["merge", "fixture-base-3917", "--no-ff", "-m", "bring the branch up to date"]);
+    fs.unlinkSync(path.join(tempRepoDir, "src", "late_file_3917.ts"));
+    runGit(tempRepoDir, ["commit", "-am", "feat: drop the file the base just added"]);
+    try {
+      const resRevert = runPolicyGate(
+        {
+          PR_TITLE: "feat: revert someone else's file (#1684) #CTO-mbshr",
+          PR_BODY: "Fixes #1684\n## Agent\n#CTO-mbshr\n\n- [ ] Process documentation impact: none",
+          PR_LABELS: "lane:cto-mbshr",
+        },
+        ["--base", "fixture-base-3917", "--head", "branch-real-revert-3917"]
+      );
+      expect(resRevert.status).toBe(1);
+      expect(resRevert.stdout).toContain("(i) no deletion");
+      expect(resRevert.stdout).toContain("late_file_3917.ts");
+    } finally {
+      runGit(tempRepoDir, ["checkout", "main"]);
+    }
   });
 
   it("validates that a compliant PR format passes all policy gate checks", () => {
@@ -922,9 +957,12 @@ describe("rewritten wrapper", () => {
       },
       ["--base", mainWithFresh, "--head", mergeHead]
     );
-    expect(res.status).toBe(1);
-    expect(res.stdout).toContain("(f) stale base reversion");
-    expect(res.stdout).toContain("src/fresh.ts");
+    // #3917: this branch never deleted main's file — it predates it, and the
+    // queue merges it — so (f) reports the advisory, and resolving HEAD to the
+    // branch head still NAMES the file (the staleness is not hidden).
+    expect(res.stdout).toContain("(f) advisory");
+    expect(res.stdout).toContain("fresh.ts");
+    expect(res.stdout).not.toContain("(f) stale base reversion");
   });
 
   it("merge_group per-PR check: does not false-fail (f)/(i) when main advanced after PR was cut (#2519)", () => {
