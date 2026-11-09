@@ -1,4 +1,4 @@
-﻿### Added
+### Added
 
 - **One declarative registry for every advanced order type (#3892):** `ADVANCED_ORDER_TYPES` declares what each type needs, which broker supports it (`native` / `emulated` / `none`), its TIF constraints and its refusal code. The validator, the tool schema and the copilot enumeration read that one table. #rsi
 - **No silent downgrade (#3892):** an unsupported request refuses with `order_type_unsupported (trailing_stop @ etrade; supported: market, limit, …)`, never a simpler order; `qty` XOR `notional` and `trail_price` XOR `trail_percent` are enforced before the broker is contacted. #rsi
