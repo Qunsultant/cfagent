@@ -150,10 +150,12 @@ const EXPECTED_STATUS: Record<string, MeshToolFamilyStatus> = {
   "agent-skills": "live",
   // Issue #3888: the externalized trading limits.
   "trading-limits-mcp-commands": "live",
+  // Issue #3883: order cancellation (one engine, every scope).
+  "order-cancel-mcp-commands": "live",
 };
 
 describe("tool family status table (#2417)", () => {
-  it("records exactly the 21 expected families, no more, no fewer", () => {
+  it("records exactly the 22 expected families, no more, no fewer", () => {
     expect(MESH_TOOL_FAMILIES.map((f) => f.id).sort()).toEqual(
       Object.keys(EXPECTED_STATUS).sort(),
     );
