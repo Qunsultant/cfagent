@@ -1,0 +1,4 @@
+### Fixed
+
+- **Alpaca portfolio reads no longer fail while account and order calls succeed (#3866):** the platform client consumed the configured base URL verbatim and appended `/v2/…`, so a value with a trailing slash or `/v2` suffix called `…/v2/v2/account`. One normalizer now decides the host for the platform, the market-data provider, and the status read; the status also reports `configuredApiUrl` and `urlMismatch` instead of advertising a hardcoded URL the client never calls. #rsi
+- **Broker read failures are classified, coded, and never a stack trace (#3866):** order history passes the real HTTP status (a 4xx no longer reads as "Could not reach Alpaca"), accounts and positions return `BROKER_ACCOUNTS_FAILED` / `BROKER_POSITIONS_FAILED` with the broker named, and no message ends with a doubled full stop. #rsi

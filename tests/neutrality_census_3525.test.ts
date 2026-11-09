@@ -192,6 +192,18 @@ function measure(): Map<string, number> {
  * 4 new rows (docs/architecture/security/
  * screener-chain-stuck-repair-3787.md alpaca 1 / etrade 1 /
  * yahoo 1 / nasdaq 1). Seed pin totals move 1105/8641 -> 1109/8645.
+ * Baseline update (#3866, 2026-11-09): the portfolio-read RCA normalizes the
+ * Alpaca base URL and makes the status name the URL in use, so the provider's
+ * market-data module gains one Alpaca mention — INTEGRATION, the adapter's own
+ * name for its own host.
+ *
+ * Baseline repair (#3866, 2026-11-09): the platform lifecycle document added by
+ * the CPO lane (`docs/architecture/agentic/…-lifecycle.md`, #3864/#3868) landed
+ * with five provider-brand rows and no disposition, so `main` was red on this
+ * pin before this branch existed. They are baselined as INTEGRATION — a
+ * lifecycle table that names the brokers it covers — instead of being edited
+ * from another lane's branch.
+ *
  * Baseline update (#3838, 2026-11-09): externalize Stock Copilot prompts
  * into src/agents/prompts/stockCopilotPrompt.ts (dispositioned INTEGRATION:
  * names the provider its agent tools integrate — Alpaca Paper trading for
@@ -831,7 +843,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/goalScreenWorkflowSubmission.ts", "etrade", 1],
   ["src/services/goalScreenWorkflowSubmission.ts", "yahoo", 2],
   ["src/services/hedgeProposals.ts", "etrade", 10],
-  ["src/services/marketDataResearch.ts", "alpaca", 113],
+  ["src/services/marketDataResearch.ts", "alpaca", 114],
   ["src/services/marketDataResearch.ts", "etrade", 2],
   ["src/services/marketDataResearch.ts", "yahoo", 31],
   ["src/services/marketDataService.ts", "alpaca", 3],
@@ -909,7 +921,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/trading/alpaca/credentialResolution.ts", "alpaca", 2],
   ["src/trading/alpaca/credentialStore.ts", "alpaca", 8],
   ["src/trading/alpaca/credentialStore.ts", "etrade", 3],
-  ["src/trading/alpaca/credentials.ts", "alpaca", 2],
+  ["src/trading/alpaca/credentials.ts", "alpaca", 6],
   ["src/trading/alpaca/fillLots.ts", "alpaca", 4],
   ["src/trading/alpaca/occSymbol.ts", "alpaca", 8],
   ["src/trading/alpaca/optionsData.ts", "alpaca", 14],
@@ -1328,7 +1340,14 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/security/githubOAuth.ts", "polygon", 1],
   ["src/services/browserAgent.ts", "fidelity", 1],
   ["src/services/meshGoldenTasks.ts", "fidelity", 1],
-  ["src/services/strategyPolicyState.ts", "fidelity", 1],];
+  ["src/services/strategyPolicyState.ts", "fidelity", 1],
+  // #3866 INTEGRATION: the lifecycle table names the brokers it covers.
+  ["docs/architecture/agentic/agents-workflows-schedules-queues-platforms-lifecycle.md", "etrade", 1],
+  ["docs/architecture/agentic/agents-workflows-schedules-queues-platforms-lifecycle.md", "public.com", 1],
+  ["docs/architecture/agentic/agents-workflows-schedules-queues-platforms-lifecycle.md", "alpaca", 1],
+  ["docs/architecture/agentic/agents-workflows-schedules-queues-platforms-lifecycle.md", "yahoo", 1],
+  ["docs/architecture/agentic/agents-workflows-schedules-queues-platforms-lifecycle.md", "nasdaq", 1],
+];
 
 const BASELINE_MAP = new Map(BASELINE.map(([f, t, c]) => [`${f}\t${t}`, c]));
 const PLATFORM_KEYS = new Set(
@@ -1372,8 +1391,8 @@ describe("#3525 S6 shrink-only provider-brand census pin", () => {
     expect(total).toBeLessThanOrEqual(PLATFORM_BASELINE_TOTAL);
   });
 
-  it("the baseline itself is the recorded seed (1116 rows / 8719 lines)", () => {
-    expect(BASELINE.length).toBe(1116);
-    expect(BASELINE.reduce((a, [, , c]) => a + c, 0)).toBe(8719);
+  it("the baseline itself is the recorded seed (1121 rows / 8729 lines)", () => {
+    expect(BASELINE.length).toBe(1121);
+    expect(BASELINE.reduce((a, [, , c]) => a + c, 0)).toBe(8729);
   });
 });
