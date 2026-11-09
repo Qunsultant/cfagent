@@ -410,7 +410,14 @@ export async function autonomousMarketScreen(ctx: ScheduledCallbacksContext, pay
       // Issue #1355: shard submission rides the agent's private
       // submitAsyncJob via the same (ctx.self as any) escape hatch
       // this file already uses for broadcast/keepAliveWhile.
-      (spec) => (ctx.self as any).submitAsyncJob(spec), undefined, ctx.env.SCREENER_EVENTS ?? null);
+      // Issue #3810: shard jobs this scheduled callback submits
+      // carry its trigger + schedule id, stamped at submission
+      // (a spec that already names its own provenance wins).
+      (spec) => (ctx.self as any).submitAsyncJob({
+        ...spec,
+        trigger: spec.trigger ?? trigger,
+        scheduleId: spec.scheduleId ?? payload?.scheduleId ?? null,
+      }), undefined, ctx.env.SCREENER_EVENTS ?? null);
     const res = await service.autonomousMarketScreen({ ...payload, userLogin: resolvedLogin, environment, trigger });
     if ((res as any).skipped) {
       return (outcome = { outcome: "skipped", detail: "service skipped" });

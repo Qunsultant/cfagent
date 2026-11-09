@@ -202,8 +202,9 @@ const STEP4A_SERVICE_FILES = [
 const STEP4A_DATA_LAYER_FILES: Array<[string, number]> = [
   // 34 at step-4a; 36 after #2567 (+2: the stuck_alerted_at column
   // migration and the guarded markStuckAlerted UPDATE); 37 after
-  // #3784 (+1: the listRunning sweep scan).
-  ["src/data/doSqliteAsyncJobAdapter.ts", 37],
+  // #3784 (+1: the listRunning sweep scan); 40 after #3810 (+3: the
+  // trigger / triggered_by / schedule_id column migrations).
+  ["src/data/doSqliteAsyncJobAdapter.ts", 40],
   ["src/data/inMemoryAsyncJobAdapter.ts", 0],
   ["src/data/asyncJobPorts.ts", 0],
   ["src/data/createAsyncJobPorts.ts", 0],

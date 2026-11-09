@@ -360,18 +360,31 @@ function documentsForRun(run: WorkflowRun): {
   };
 }
 
+/** Issue #3810: a run produced no documents at all — no canonical
+ *  row, no artifact urls. Its document cells render "None" (none
+ *  produced), not the bare "—" a missing format renders. */
+function noDocumentsProduced(run: WorkflowRun): boolean {
+  const d = documentsForRun(run);
+  return !d.pdfUrl && !d.xlsxUrl && !d.csvUrl && run.artifacts.length === 0;
+}
+
 /** Issue #2786 Part 3: one Docs artifact cell — the Docs tab's
- *  ArtifactLink semantics (link / failed badge with reason / "—"). */
+ *  ArtifactLink semantics (link / failed badge with reason / "—").
+ *  Issue #3810: when the run produced no documents at all, the
+ *  cell renders "None" instead of "—" — none-produced is a fact,
+ *  not missing data. */
 function DocumentCell({
   url,
   status,
   error,
   kind,
+  none,
 }: {
   url: string | null;
   status: string | null;
   error: string | null;
   kind: "PDF" | "XLSX" | "CSV";
+  none?: boolean;
 }) {
   if (!url && status === "failed") {
     // Issue #2088: a recorded leg failure renders as a failure
@@ -383,7 +396,13 @@ function DocumentCell({
     );
   }
   if (!url) {
-    return <span className="workflow-runs-muted">—</span>;
+    return none ? (
+      <span className="workflow-runs-muted" title="This run produced no documents">
+        None
+      </span>
+    ) : (
+      <span className="workflow-runs-muted">—</span>
+    );
   }
   return (
     <a href={url} download aria-label={`Download the ${kind}`}>
@@ -659,7 +678,21 @@ export function WorkflowRunsPanel() {
       ariaSort: (sort.key === "schedule" ? (sort.dir === "asc" ? "ascending" : "descending") : "none") as "ascending" | "descending" | "none",
       render: (run: WorkflowRun) => {
         const schedule = run.schedule ?? null;
-        if (!schedule) return <span className="workflow-runs-muted">Not recorded</span>;
+        if (!schedule) {
+          // Issue #3810: a run whose trigger is a non-scheduled
+          // origin was never scheduled — "Not scheduled", not
+          // "Not recorded". A scheduled / autonomous / unknown
+          // trigger with no schedule evidence is data that should
+          // exist but doesn't, so it keeps "Not recorded".
+          return run.trigger === "manual" || run.trigger === "agent" || run.trigger === "webhook" ? (
+            <span className="workflow-runs-muted">Not scheduled</span>
+          ) : (
+            <span className="workflow-runs-muted">Not recorded</span>
+          );
+        }
+        // #3813: a schedule object stamped "not-scheduled" renders
+        // "Not scheduled" (kept from main; composes with #3810's
+        // trigger-based rule above for runs with no schedule object).
         if (schedule.identity === "not-scheduled") {
           return <span className="workflow-runs-muted">Not scheduled</span>;
         }
@@ -696,7 +729,7 @@ export function WorkflowRunsPanel() {
       ariaSort: (sort.key === "pdf" ? (sort.dir === "asc" ? "ascending" : "descending") : "none") as "ascending" | "descending" | "none",
       render: (run: WorkflowRun) => {
         const d = documentsForRun(run);
-        return <DocumentCell url={d.pdfUrl} status={d.pdfStatus} error={d.pdfError} kind="PDF" />;
+        return <DocumentCell url={d.pdfUrl} status={d.pdfStatus} error={d.pdfError} kind="PDF" none={noDocumentsProduced(run)} />;
       },
     },
     {
@@ -705,7 +738,7 @@ export function WorkflowRunsPanel() {
       ariaSort: (sort.key === "xlsx" ? (sort.dir === "asc" ? "ascending" : "descending") : "none") as "ascending" | "descending" | "none",
       render: (run: WorkflowRun) => {
         const d = documentsForRun(run);
-        return <DocumentCell url={d.xlsxUrl} status={d.xlsxStatus} error={d.xlsxError} kind="XLSX" />;
+        return <DocumentCell url={d.xlsxUrl} status={d.xlsxStatus} error={d.xlsxError} kind="XLSX" none={noDocumentsProduced(run)} />;
       },
     },
     {
@@ -714,7 +747,7 @@ export function WorkflowRunsPanel() {
       ariaSort: (sort.key === "csv" ? (sort.dir === "asc" ? "ascending" : "descending") : "none") as "ascending" | "descending" | "none",
       render: (run: WorkflowRun) => {
         const d = documentsForRun(run);
-        return <DocumentCell url={d.csvUrl} status={d.csvStatus} error={d.csvError} kind="CSV" />;
+        return <DocumentCell url={d.csvUrl} status={d.csvStatus} error={d.csvError} kind="CSV" none={noDocumentsProduced(run)} />;
       },
     },
     {

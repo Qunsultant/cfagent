@@ -76,6 +76,14 @@ export interface AsyncJobStoredRow {
    *  while unclaimed. Probed additive column, same migration
    *  family as the graph columns above. */
   stuck_alerted_at: string | null;
+  /** Issue #3810: provenance stamped at submission — the trigger
+   *  that caused this job, its actor, and the originating schedule
+   *  id. NULL = the submission carried none (the read model renders
+   *  that as "Not recorded", never invented). Probed additive
+   *  columns, same migration family as the graph columns above. */
+  trigger: string | null;
+  triggered_by: string | null;
+  schedule_id: string | null;
 }
 
 /** The list projection: the legacy list SELECT never read
@@ -125,6 +133,10 @@ export interface InsertQueuedJobInput {
   notBefore?: string | null;
   stage?: string | null;
   chainId?: string | null;
+  /** Issue #3810: provenance stamped at submission. */
+  trigger?: string | null;
+  triggeredBy?: string | null;
+  scheduleId?: string | null;
 }
 
 export interface InsertTerminalJobInput {
@@ -140,6 +152,10 @@ export interface InsertTerminalJobInput {
   jobKind?: string | null;
   stage?: string | null;
   chainId?: string | null;
+  /** Issue #3810: provenance stamped at submission. */
+  trigger?: string | null;
+  triggeredBy?: string | null;
+  scheduleId?: string | null;
 }
 
 /**

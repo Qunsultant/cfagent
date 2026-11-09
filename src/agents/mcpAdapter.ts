@@ -98,6 +98,13 @@ export class McpAgentToolAdapter {
                 ? { traceparent }
                 : {}),
             },
+            // Issue #3810: the job was queued by an agent turn — stamp
+            // the trigger (and the acting identity when resolved) at
+            // submission so the runs view evidences it.
+            trigger: "agent",
+            ...(typeof actingLogin === "string" && actingLogin.trim()
+              ? { triggeredBy: actingLogin.trim() }
+              : {}),
           });
           const traceChild = childContextOfTraceparent(traceparent);
           if (traceChild) {
@@ -187,9 +194,16 @@ export function createAgentMcpTools(context: McpToolContext) {
           audit: context.audit,
           decisionSink: context.permissionDecisionSink,
         });
+        // Issue #3810: queued by an agent turn — stamp the trigger
+        // (and the acting identity when the turn resolved one).
+        const actingLogin = context.actingLogin?.();
         return context.submitJob({
           capability: "mcp.tool",
           payload: { toolName: "manage_session_memory", arguments: { action: "remember", key, value } },
+          trigger: "agent",
+          ...(typeof actingLogin === "string" && actingLogin.trim()
+            ? { triggeredBy: actingLogin.trim() }
+            : {}),
         });
       }
       const command = McpToolFactory.getTool("manage_session_memory");
@@ -222,9 +236,16 @@ export function createAgentMcpTools(context: McpToolContext) {
           audit: context.audit,
           decisionSink: context.permissionDecisionSink,
         });
+        // Issue #3810: queued by an agent turn — stamp the trigger
+        // (and the acting identity when the turn resolved one).
+        const actingLogin = context.actingLogin?.();
         return context.submitJob({
           capability: "mcp.tool",
           payload: { toolName: "manage_session_memory", arguments: { action: "list" } },
+          trigger: "agent",
+          ...(typeof actingLogin === "string" && actingLogin.trim()
+            ? { triggeredBy: actingLogin.trim() }
+            : {}),
         });
       }
       const command = McpToolFactory.getTool("manage_session_memory");

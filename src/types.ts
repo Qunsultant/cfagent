@@ -2764,6 +2764,14 @@ export interface ShardChainContext {
   };
 }
 
+/** Issue #3810: the run-level trigger a job submission may stamp.
+ *  One classification, shared by the submission, the row, and the
+ *  read model (WorkflowRunTrigger) — no second trigger vocabulary.
+ *  "unknown" is never stamped: an absent trigger means the
+ *  submission carried no provenance, and the read model renders
+ *  that honestly. */
+export type AsyncJobTrigger = "manual" | "scheduled" | "autonomous" | "webhook" | "agent";
+
 /** Issue #1123: optional graph fields on a job submission. */
 export interface AsyncJobGraphFields {
   parentJobId?: string;
@@ -2781,6 +2789,17 @@ export interface AsyncJobGraphFields {
   /** Consolidation C3 (#1277): the stage chain this job belongs to
    *  (links the stage rows of one run). */
   chainId?: string;
+  /** Issue #3810: provenance stamped at submission — the trigger
+   *  that caused this job. Absent = the submission carried no
+   *  provenance; the row stays NULL and the read model never
+   *  invents it. */
+  trigger?: AsyncJobTrigger;
+  /** Issue #3810: who/what caused the job (a login, a goal id, a
+   *  schedule id) — the actor the trigger evidence names. */
+  triggeredBy?: string;
+  /** Issue #3810: the originating schedule's id, when the job was
+   *  submitted from a schedule. Null/absent = not scheduled. */
+  scheduleId?: string | null;
 }
 
 export interface AsyncJobRecord {
@@ -2798,6 +2817,12 @@ export interface AsyncJobRecord {
   chainId?: string;
   /** Consolidation C3 (#1277): the job's not-before time (ISO), when deferred. */
   notBefore?: string;
+  /** Issue #3810: provenance stamped at submission (NULL = the
+   *  submission carried none; the read model renders that as
+   *  "Not recorded", never invented). */
+  trigger?: AsyncJobTrigger | null;
+  triggeredBy?: string | null;
+  scheduleId?: string | null;
   createdAt: string;
   updatedAt: string;
   startedAt?: string;

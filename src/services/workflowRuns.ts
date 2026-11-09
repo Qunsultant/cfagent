@@ -235,6 +235,13 @@ export interface WorkflowRunJobRow {
    *  or NULL while unclaimed. Carried through the route mapping
    *  so the runs view can derive the Stuck display. */
   stuck_alerted_at?: string | null;
+  /** Issue #3810: provenance stamped at submission — the trigger
+   *  that caused this job, its actor, and the originating schedule
+   *  id. NULL = the submission carried none (the read model renders
+   *  that as "Not recorded", never invented). */
+  trigger?: string | null;
+  triggered_by?: string | null;
+  schedule_id?: string | null;
 }
 
 /** The mas_job_outcomes columns this model reads. */
@@ -612,7 +619,26 @@ const FAMILY_WORKFLOW: Record<WorkflowRunFamily, string> = {
   other: "Background job",
 };
 
+/** Issue #3810: the stamped trigger domain — the run-level
+ *  triggers a submission may stamp. "unknown" is never stamped. */
+const STAMPED_TRIGGERS: readonly WorkflowRunTrigger[] = ["manual", "scheduled", "autonomous", "webhook", "agent"];
+
 function triggerEvidence(job: WorkflowRunJobRow): { trigger?: string; detail?: string; actor?: string } {
+  // Issue #3810: the stamped columns are the recorded provenance —
+  // they win over every payload heuristic below. An invalid stored
+  // value is ignored (never rendered); a missing one falls through
+  // to the payload evidence, exactly as before.
+  const stamped = STAMPED_TRIGGERS.find((t) => t === job.trigger);
+  if (stamped) {
+    const actor = typeof job.triggered_by === "string" && job.triggered_by ? job.triggered_by : undefined;
+    return {
+      trigger: stamped,
+      detail: actor
+        ? `${triggerLabel(stamped)} — recorded by ${actor}`
+        : `${triggerLabel(stamped)} — recorded on the run's job tree`,
+      actor,
+    };
+  }
   const payload = parseObject(job.payload_json);
   if (!payload) return {};
   const outcome = asObject(payload.outcome);
@@ -636,14 +662,21 @@ function triggerEvidence(job: WorkflowRunJobRow): { trigger?: string; detail?: s
   }
   if (payload.scheduled === true || payload.scheduledAt) return { trigger: "scheduled" };
   if (str(payload.webhookUrl) || payload.webhook === true) return { trigger: "webhook" };
+  // #3813 (read-time): an MCP tool run whose payload names its acting
+  // login is agent-triggered. #3810 composition: the branch fires only
+  // when an actor is present — a tool run with no actor in its payload
+  // and no stamped trigger stays "unknown" (never invent a trigger
+  // without evidence), falling through to the manual/unknown branches.
   if (job.capability === "mcp.tool") {
     const actingLogin = str(payload.actingLogin) ?? str(payload.userLogin) ?? str(payload.actor);
-    const toolName = str(payload.toolName) ?? "tool";
-    return {
-      trigger: "agent",
-      detail: `Agent tool call — ${toolName}`,
-      actor: actingLogin ?? undefined,
-    };
+    if (actingLogin) {
+      const toolName = str(payload.toolName) ?? "tool";
+      return {
+        trigger: "agent",
+        detail: `Agent tool call — ${toolName}`,
+        actor: actingLogin,
+      };
+    }
   }
   const actor = str(payload.requestedBy) ?? str(payload.userLogin) ?? str(payload.actor);
   if (actor) return { trigger: "manual", actor };
@@ -1392,6 +1425,12 @@ export interface SagaChainRunInput {
     updatedAtMs: number;
   } | null;
   triggeredBy: string | null;
+  /** Issue #3810: the trigger the saga's entry carried (manual /
+   *  scheduled), when the caller could evidence it. Absent = the
+   *  chain stays "unknown" — the trigger is never guessed. */
+  trigger?: WorkflowRunTrigger;
+  /** Issue #3810: how the trigger above was evidenced. */
+  triggerDetail?: string;
   /** The saga.ended outcomeCode, when an ended row exists. */
   endedCode?: string | null;
   /** The saga.ended row's timestamp, when one exists. */
@@ -1418,9 +1457,11 @@ function msToIso(ms: number | null | undefined): string | null {
  * Stages come from the saga's audit rows; when the audit mapping yields
  * nothing but a projection row exists, the run shows that row's
  * submitted stage instead. When neither exists, returns null so the
- * caller skips the chain rather than fabricating a run. The trigger is
- * never guessed: audit payloads and projection rows carry no trigger
- * field, so it stays "unknown" ("Not recorded by the source").
+ * caller skips the chain rather than fabricating a run. The trigger
+ * is never guessed: it comes only from the input's carried trigger
+ * (the saga entry's own trigger, issue #3810) — audit payloads and
+ * projection rows carry no trigger field of their own, so without
+ * one it stays "unknown" ("Not recorded by the source").
  */
 export function runFromSagaChain(input: SagaChainRunInput): WorkflowRun | null {
   const { sagaId } = input;
@@ -1501,6 +1542,13 @@ export function runFromSagaChain(input: SagaChainRunInput): WorkflowRun | null {
   const finishedAt = msToIso(input.endedAtMs);
   const firstError = stages.map((s) => s.error).find((e) => e !== null && e !== undefined) ?? null;
   const started = input.started;
+  // Issue #3810: the saga uses the trigger its entry carried, when
+  // the caller evidenced one — otherwise it stays "unknown", never
+  // guessed. An invalid carried value is ignored.
+  const sagaTrigger =
+    input.trigger === "manual" || input.trigger === "scheduled"
+      ? input.trigger
+      : ("unknown" as const);
   return {
     id: sagaId,
     runId: sagaId,
@@ -1508,14 +1556,17 @@ export function runFromSagaChain(input: SagaChainRunInput): WorkflowRun | null {
     family: "goal",
     title: `Saga run — ${sagaId}`,
     source: "job-chain",
-    trigger: "unknown",
-    triggerDetail: "Not recorded by the source",
+    trigger: sagaTrigger,
+    triggerDetail:
+      sagaTrigger === "unknown"
+        ? "Not recorded by the source"
+        : (input.triggerDetail ?? `${triggerLabel(sagaTrigger)} — recorded on the run's job tree`),
     triggeredBy: input.triggeredBy,
     status,
     // Issue #3021: lifecycle from the recorded verb; a saga chain
     // carries no schedule evidence, so its schedule is unknown.
     lifecycle: lifecycleStateForRun({ status, stages }),
-    schedule: scheduleProvenanceForTrigger("unknown"),
+    schedule: scheduleProvenanceForTrigger(sagaTrigger),
     startedAt,
     finishedAt,
     durationMs: durationBetween(startedAt, finishedAt),
