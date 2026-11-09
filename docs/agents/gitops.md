@@ -858,6 +858,10 @@ Do not change merge strategy unilaterally.
 
 If a merge queue is required, enqueue the PR. Ensure GitHub Actions workflows handle `merge_group` events so queue-created integration commits receive their required checks. [docs.github](https://docs.github.com/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue)
 
+**Merge-queue auto-merge enrollment (moved from repo AGENTS.md, #3816).** When a merge queue is configured, never pass strategy flags (`--rebase`, `--squash`, or `--merge`) to `gh pr merge --auto`. Use `gh pr merge --auto` directly — the merge-queue ruleset manages the merge method (REBASE). Passing strategy flags causes the CLI to exit without enqueuing.
+
+**Linear history on the PR branch (moved from repo AGENTS.md, #3816).** Maintain linear history by rebasing (`git rebase origin/main`) rather than creating merge commits on the PR branch. While the Policy Gate dynamically resolves PR branch parents on merge commits (#2546), clean rebased commits prevent accidental history distortion and speed up merge-queue evaluation.
+
 ### After merge
 
 1. Record the merged PR and resulting commit SHA.
@@ -1554,10 +1558,20 @@ implement.
   it does not copy rule text wholesale, and delivery and process rules
   remain here.
 - **Where agents meet these rules.** These rules are also stated in
-  the PR template checklist (seen at PR creation) and in repo
-  AGENTS.md, so an agent meets them before tripping the gate — not
-  only in a gate failure message. The gate remains the enforcement
+  the PR template checklist (seen at PR creation), so an agent meets
+  them before tripping the gate — not only in a gate failure message.
+  Repo AGENTS.md points here without restating the rules (#3816: this
+  document is their single home). The gate remains the enforcement
   for agents that read neither (including external agents).
+- **Zero-touch documentation merges (#2555; moved from repo
+  AGENTS.md, #3816).** A PR whose touched files are strictly confined
+  to `docs/` or markdown files — and which touches nothing under
+  `changelog.d/`, `src/`, `tests/`, `scripts/`, or `.github/` — is a
+  pure documentation PR: the gate bypasses the linked-issue, lane
+  label, agent-hashtag, §23 process-line, and CHANGELOG requirements
+  for it (the `is_pure_docs` test in `scripts/ci/policy_gate.py` is
+  the operative definition). The docs-scope rule and the no-deletion
+  rule above remain strictly enforced for pure documentation PRs.
 - **Gate evaluation (owner direction 2026-10-27, #1894).** The gate
   evaluates the PR branch head (a merge-commit HEAD resolves to its
   second parent) and reads attribution — linked issue, lane, hashtag —
@@ -1569,6 +1583,13 @@ implement.
   live `protectmain` ruleset requires zero approving reviews and does
   not require Code Owner review. Required status checks and
   review-thread resolution still apply uniformly.
+  **Required-check pre-flight (moved from repo AGENTS.md, #3816):**
+  before waiting for queue admission, confirm that the checks required
+  by ruleset 25543527 (`protectmain`) — Load Active Environment,
+  Test & Build (Node 22) [PROD], Policy Gate, Gitleaks secret scan,
+  and Analyze (javascript-typescript) — are present and running on
+  the PR branch head; a head where they never register is usually a
+  stale base or a merge conflict, not slow CI.
 - **Detection backstop.** `.github/workflows/main-audit.yml`
   ("Main Audit", daily + workflow_dispatch) checks every new main
   commit for an associated merged PR and, on a direct-push commit,
@@ -1689,8 +1710,3 @@ Multi-developer and multi-agent execution environments face a structural risk of
 
 3. **Delta Harvest Protocol**:
    - When two PRs land overlapping changes for an issue, the second PR is never simply abandoned. The second branch is rebased on `origin/main`, tested against the merged base, and evaluated for its additive delta.
-
-***
-## Instruction to add to `AGENTS.md`
-
-> Follow `docs/agents/gitops.md` for all repository work. Independent issues may proceed in parallel on separate branches; declare dependencies and use stacked PRs where useful. Every change requires an issue and PR. Synchronize with `main`, use TDD for behavioral changes, resolve required checks and CI/CD failures for each PR, and verify post-merge health before that issue is Done. Respect approval boundaries; if blocked, report the blocker instead of bypassing policy.
