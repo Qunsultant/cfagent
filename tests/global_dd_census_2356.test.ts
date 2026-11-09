@@ -116,6 +116,11 @@ const STORAGE_ALLOW_LIST: Array<[string, number, string]> = [
   // the file holds zero storage-exec sites (pinned in the
   // step-5e section below, with the adapter's count).
   ["src/actors/cfAgentsAdapter.ts", 1, "permanent — Agents-SDK shim (ADR-out)"],
+  // #3885: the cancel-all preview token owns its own one-row table in the
+  // caller's DO SQLite (single use, short TTL); the settings/outcome ports
+  // model key-value and run records, not a per-preview token with a used-at
+  // stamp, so a dedicated adapter is the honest home for these statements.
+  ["src/services/cancelPreviewStore.ts", 5, "issue #3885 cancel-all preview tokens: one-row table with a single-use stamp and TTL; no existing port models it"],
   ["src/services/receiptSurface.ts", 2, "issue #2543 receipt read-back: meter + tier reads over the sql seam (usage port drops detail_json; no port path exists)"],
   ["src/agents/routes/orchestratorMigration.ts", 3, "issue #2681 orchestrator migration: DO-internal table export/import — sqlite_master discovery, SELECT *, INSERT OR REPLACE; the migration driver must read the source instance's own storage, no port path exists for cross-instance table copy"],
   ["src/agents/routes/schedules.ts", 3, "issue #1766 nightly retention legs: DO-internal orphan-sweep read (body_r2_key), sqlite_master discovery, and per-table SELECT * for the R2 snapshot; the pass runs inside the DO and reads its own storage, no port path exists for own-instance table dump"],
