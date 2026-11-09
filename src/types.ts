@@ -1776,6 +1776,13 @@ export interface BrokerStatus {
   environment: "paper" | "sandbox" | "live";
   activeEnvironment?: "TEST" | "PROD" | string;
   apiUrl?: string;
+  /**
+   * Issue #3866: the base URL the deployment configured, beside the one the
+   * client actually calls. When they differ, `urlMismatch` is true and a panel
+   * can say so instead of advertising a healthy host no request reaches.
+   */
+  configuredApiUrl?: string;
+  urlMismatch?: boolean;
   hasApiKey?: boolean;
   /**
    * Issue #3351: which credential served this status read. `user` means the

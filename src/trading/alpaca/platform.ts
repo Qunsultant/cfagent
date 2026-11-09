@@ -14,7 +14,7 @@ import { decodeOrderPriceSource, encodeOrderPriceSource } from "../quotePolicies
 import { computeBracketExits } from "../bracketPercent";
 import { platformQuoteSource } from "../stockQuoteSource";
 import { formatOccSymbol, parseOccSymbol } from "./occSymbol";
-import { withAlpacaCredentials, alpacaTradingSide } from "./credentials";
+import { withAlpacaCredentials, alpacaTradingSide, normalizeAlpacaBaseUrl } from "./credentials";
 import { applyAlpacaPair, resolveAlpacaPair, type AlpacaCredentialSource } from "./credentialResolution";
 import {
   fetchAlpacaOptionContracts,
@@ -32,6 +32,21 @@ import { AGENT_DIDS, createDidAttestationSync, getUserDid } from "../../agents/d
  * (AlpacaMarketDataProvider.getTradingUrl) uses the same default, so
  * status and placement can never disagree about paper vs live.
  */
+const ALPACA_PAPER_HOST = "https://paper-api.alpaca.markets";
+const ALPACA_LIVE_HOST = "https://api.alpaca.markets";
+
+/**
+ * Issue #3866 — the configured URL, normalized once.
+ *
+ * `resolveAlpacaTradingBase` used to answer a hardcoded host for the `TEST`
+ * selection while the client used `env.ALPACA_BASE_URL`. Status therefore
+ * advertised a URL the client never called, which is how four portfolio reads
+ * failed against an apparently healthy connection.
+ */
+function configuredAlpacaBase(env: Env): string {
+  return normalizeAlpacaBaseUrl(env.ALPACA_BASE_URL);
+}
+
 export function resolveAlpacaTradingBase(
   env: Env,
   overrideEnv?: string,
@@ -40,13 +55,12 @@ export function resolveAlpacaTradingBase(
   // legacy rule stands (paper host = paper), so nothing silently changes for
   // an environment that only sets ALPACA_BASE_URL.
   const explicit = String(env.ALPACA_TRADING_TYPE ?? "").trim().toLowerCase();
+  const configured = configuredAlpacaBase(env);
   if (explicit === "paper") {
-    return { baseUrl: "https://paper-api.alpaca.markets", isLive: false, source: "pin" };
+    return { baseUrl: configured.includes("paper-api") ? configured : ALPACA_PAPER_HOST, isLive: false, source: "pin" };
   }
   if (explicit === "live") {
-    const configured = env.ALPACA_BASE_URL;
-    const liveUrl = configured && !configured.includes("paper-api") ? configured : "https://api.alpaca.markets";
-    return { baseUrl: liveUrl, isLive: true, source: "pin" };
+    return { baseUrl: configured.includes("paper-api") ? ALPACA_LIVE_HOST : configured, isLive: true, source: "pin" };
   }
   // Issue #3272: the persisted selection is authoritative when the deployment
   // has not pinned a trading type. TEST means paper, PROD means live - the
@@ -55,15 +69,12 @@ export function resolveAlpacaTradingBase(
   // E*TRADE-only control that Alpaca silently ignored.
   const selection = String(overrideEnv ?? "").trim().toUpperCase();
   if (selection === "TEST" || selection === "PAPER" || selection === "SANDBOX") {
-    return { baseUrl: "https://paper-api.alpaca.markets", isLive: false, source: "selection" };
+    return { baseUrl: configured.includes("paper-api") ? configured : ALPACA_PAPER_HOST, isLive: false, source: "selection" };
   }
   if (selection === "PROD" || selection === "LIVE") {
-    const configured = env.ALPACA_BASE_URL;
-    const liveUrl = configured && !configured.includes("paper-api") ? configured : "https://api.alpaca.markets";
-    return { baseUrl: liveUrl, isLive: true, source: "selection" };
+    return { baseUrl: configured.includes("paper-api") ? ALPACA_LIVE_HOST : configured, isLive: true, source: "selection" };
   }
-  const baseUrl = env.ALPACA_BASE_URL || "https://paper-api.alpaca.markets";
-  return { baseUrl, isLive: !baseUrl.includes("paper-api"), source: "inference" };
+  return { baseUrl: configured, isLive: !configured.includes("paper-api"), source: "inference" };
 }
 
 /**
@@ -74,14 +85,16 @@ export function resolveAlpacaTradingBase(
  */
 function mapAlpacaFailureToBusiness(
   httpStatus: number | undefined,
-  operation: "order" | "account" | "positions",
+  operation: "order" | "account" | "positions" | "history",
 ): string {
   const subject =
     operation === "order"
       ? "the order was not placed"
       : operation === "account"
         ? "account data is unavailable"
-        : "position data is unavailable";
+        : operation === "history"
+          ? "order history is unavailable"
+          : "position data is unavailable";
   if (httpStatus === 401 || httpStatus === 403) {
     return `Alpaca rejected the broker credentials. Check the configured Alpaca API key and secret; ${subject}.`;
   }
@@ -381,6 +394,11 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
       environment: vocabulary.environment[tradingType],
       activeEnvironment: isLive ? "PROD" : "TEST",
       apiUrl: baseUrl,
+      // Issue #3866: the configured value beside the URL in use. When they
+      // differ the panel says so instead of showing a healthy host that no
+      // request ever reaches.
+      configuredApiUrl: configuredAlpacaBase(this.env),
+      urlMismatch: configuredAlpacaBase(this.env) !== baseUrl,
       hasApiKey: configured,
       credentialSource: this.credentialSource,
       keyIdLast4: this.keyIdLast4 ?? undefined,
@@ -684,7 +702,10 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
     }
     const res = await this.alpacaData.getOrders(status);
     if (!res.success || !Array.isArray(res.orders)) {
-      throw new Error(mapAlpacaFailureToBusiness(undefined, "account"));
+      // Issue #3866: the real HTTP status decides the class of failure. Passing
+      // `undefined` here reported a 4xx as "Could not reach Alpaca" — a network
+      // claim that was simply false.
+      throw new Error(mapAlpacaFailureToBusiness(res.httpStatus, "history"));
     }
     return res.orders.map(mapAlpacaOrderHistoryRow);
   }

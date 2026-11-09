@@ -43,6 +43,7 @@ import { AGENT_DIDS, createDidAttestationSync } from "../agents/did";
 import { createOutboundRateLimiter, type OutboundRateLimiter } from "../security/outboundRateLimiter";
 import { getCachedQuoteWithAge, setCachedQuote } from "./quoteCache";
 import { ALPACA_CONNECT_HINT } from "./providerUxLinks";
+import { normalizeAlpacaBaseUrl } from "../trading/alpaca/credentials";
 import {
   isAlpacaConfigured,
   levelsForQuoteSwitch,
@@ -2298,8 +2299,14 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
     return this.env?.ALPACA_DATA_URL || "https://data.alpaca.markets";
   }
 
+  /**
+   * Issue #3866 — every trading call appends `/v2/…`, so the base is
+   * normalized once here. A configured value carrying a trailing slash or a
+   * `/v2` suffix used to produce `/v2/v2/account`, answered with a 4xx that
+   * Alpaca never explains.
+   */
   getTradingUrl(): string {
-    return this.env?.ALPACA_BASE_URL || "https://paper-api.alpaca.markets";
+    return normalizeAlpacaBaseUrl(this.env?.ALPACA_BASE_URL);
   }
 
   getHeaders(): Record<string, string> {
@@ -2973,7 +2980,9 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
   /**
    * Real Alpaca Trading v2: Get Orders
    */
-  async getOrders(status: "open" | "closed" | "all" = "open"): Promise<{ success: boolean; orders?: any[]; message?: string }> {
+  async getOrders(
+    status: "open" | "closed" | "all" = "open"
+  ): Promise<{ success: boolean; orders?: any[]; message?: string; httpStatus?: number }> {
     if (!this.isConfigured()) {
       return {
         success: false,
@@ -2989,7 +2998,13 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
       if (res.ok && Array.isArray(data)) {
         return { success: true, orders: data };
       }
-      return { success: false, message: data?.message || "Failed to fetch Alpaca orders" };
+      // Issue #3866: the status is what lets a caller say "rejected" rather
+      // than "could not reach"; dropping it made a 4xx read as a network error.
+      return {
+        success: false,
+        httpStatus: res.status,
+        message: data?.message || "Failed to fetch Alpaca orders",
+      };
     } catch (err: any) {
       return { success: false, message: err.message || "Network error" };
     }
