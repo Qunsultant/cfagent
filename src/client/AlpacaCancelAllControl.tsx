@@ -77,7 +77,7 @@ export function AlpacaCancelAllControl({ openOrders, onCancelled }: AlpacaCancel
     }
   }, []);
 
-  const confirm = useCallback(async () => {
+  const confirmCancellation = useCallback(async () => {
     if (!token) return;
     setBusy("confirm");
     try {
@@ -148,7 +148,7 @@ export function AlpacaCancelAllControl({ openOrders, onCancelled }: AlpacaCancel
               variant="danger"
               size="sm"
               loading={busy === "confirm"}
-              onClick={() => void confirm()}
+              onClick={() => void confirmCancellation()}
             >
               Cancel {preview?.count ?? 0} orders
             </Button>
