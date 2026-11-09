@@ -28,8 +28,8 @@ import type { NavTabId } from "./components/NavigationMenu";
 import { isOptionsProductEnabled } from "./featureFlags";
 import {
   useTenantProviders,
-  DATA_PROVIDER_OPTIONS,
-  BROKER_OPTIONS,
+  labelForDataProvider,
+  labelForBroker,
   brokerUnavailableNotice,
   isBrokerId,
 } from "./tenantProviders";
@@ -163,11 +163,10 @@ export function OptionsScreenerPage({ onSelectTab }: OptionsScreenerPageProps) {
   // non-chain provider, and the broker notice below mirrors slice 1's
   // AccountPanels / trading-hub notice for a non-etrade broker.
   const [tenantProviders] = useTenantProviders();
-  const dataProviderLabel =
-    DATA_PROVIDER_OPTIONS.find((o) => o.id === tenantProviders.dataProviderId)?.label ??
-    tenantProviders.dataProviderId;
-  const brokerLabel =
-    BROKER_OPTIONS.find((o) => o.id === tenantProviders.brokerId)?.label ?? tenantProviders.brokerId;
+  // #3751: labels resolve through the identity projection (served
+  // identity for the current selection, mirror lists otherwise).
+  const dataProviderLabel = labelForDataProvider(tenantProviders, tenantProviders.dataProviderId);
+  const brokerLabel = labelForBroker(tenantProviders, tenantProviders.brokerId);
   return (
     <PageShell
       title="Options Screener"
