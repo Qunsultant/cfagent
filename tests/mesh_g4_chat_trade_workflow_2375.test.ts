@@ -516,6 +516,10 @@ describe("mesh G4 enabling fix: the approval door settles from the agent's own s
     agent.env = {
       SERVICE_USER_LOGIN: "svc-background",
       ETRADE_ENVIRONMENT: "sandbox",
+      // Issue #3812: this test settles through the real E*TRADE platform;
+      // the platform default is Alpaca, so the provider is explicit.
+      TRADING_AGENT_PROVIDERS: "etrade",
+      TRADING_AGENT_DEFAULT_PROVIDER: "etrade",
     } as Env;
     agent.name = "trading:alice";
     agent.ctx = {

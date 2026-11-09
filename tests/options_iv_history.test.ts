@@ -562,7 +562,7 @@ describe("ScheduledTasksService.collectDailyIvHistory", () => {
 
     const orm = new DatabaseORM({ exec: () => [] } as any);
     const store = new InMemoryIvHistoryStore();
-    const service = new ScheduledTasksService({} as Env, orm, "trader1", undefined, store);
+    const service = new ScheduledTasksService({ TENANT_BROKER_ID: "etrade" } as Env, orm, "trader1", undefined, store);
 
     const first = await service.collectDailyIvHistory({ symbols: ["AAPL"] });
     expect(first.success).toBe(true);

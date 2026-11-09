@@ -178,7 +178,7 @@ function measure(): Map<string, number> {
  * 4 new rows (docs/agents/rca-aapl-bracket-order-3812.md alpaca 16 /
  * etrade 7, src/services/providerUxLinks.ts alpaca 11,
  * src/services/tradingRunOutcome.ts alpaca 2). Seed pin totals move
- * 1101/8582 -> 1105/8626.
+ * 1101/8582 -> 1105/8633.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (186 rows / 1039 lines) ----
@@ -617,7 +617,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/config/reportGeneratorModes.ts", "yahoo", 3],
   ["src/config/restTwinsModes.ts", "alpaca", 1],
   ["src/config/restTwinsModes.ts", "etrade", 3],
-  ["src/config/tradingAgentConfig.ts", "alpaca", 2],
+  ["src/config/tradingAgentConfig.ts", "alpaca", 5],
   ["src/config/tradingAgentConfig.ts", "etrade", 4],
   ["src/data/bucketPorts.ts", "etrade", 4],
   ["src/data/commercialPorts.ts", "alpaca", 3],
@@ -821,7 +821,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/oasfRecords.ts", "etrade", 2],
   ["src/services/optionsAuthFreshness.ts", "etrade", 21],
   ["src/services/optionsAuthFreshness.ts", "yahoo", 1],
-  ["src/services/optionsProviderContext.ts", "alpaca", 2],
+  ["src/services/optionsProviderContext.ts", "alpaca", 3],
   ["src/services/optionsProviderContext.ts", "etrade", 16],
   ["src/services/optionsProviderContext.ts", "yahoo", 3],
   ["src/services/optionsServeRecord.ts", "etrade", 5],
@@ -866,8 +866,8 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/stockCopilotIntrospection.ts", "nasdaq", 1],
   ["src/services/stockCopilotIntrospection.ts", "yahoo", 1],
   ["src/services/stockCopilotSessions.ts", "alpaca", 1],
-  ["src/services/tenantProviders.ts", "alpaca", 5],
-  ["src/services/tenantProviders.ts", "etrade", 12],
+  ["src/services/tenantProviders.ts", "alpaca", 7],
+  ["src/services/tenantProviders.ts", "etrade", 13],
   ["src/services/tenantProviders.ts", "nasdaq", 2],
   ["src/services/tenantProviders.ts", "public.com", 1],
   ["src/services/tenantProviders.ts", "yahoo", 2],
@@ -1339,8 +1339,8 @@ describe("#3525 S6 shrink-only provider-brand census pin", () => {
     expect(total).toBeLessThanOrEqual(PLATFORM_BASELINE_TOTAL);
   });
 
-  it("the baseline itself is the recorded seed (1105 rows / 8626 lines)", () => {
+  it("the baseline itself is the recorded seed (1105 rows / 8633 lines)", () => {
     expect(BASELINE.length).toBe(1105);
-    expect(BASELINE.reduce((a, [, , c]) => a + c, 0)).toBe(8626);
+    expect(BASELINE.reduce((a, [, , c]) => a + c, 0)).toBe(8633);
   });
 });
