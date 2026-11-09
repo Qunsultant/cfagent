@@ -53,6 +53,11 @@ describe("Issue #3624: Synchronous MCP tools classification", () => {
     expect(isSynchronousMcpTool("stock_copilot_remediate_gaps")).toBe(true);
     expect(isSynchronousMcpTool("get_payment_budget")).toBe(true);
     expect(isSynchronousMcpTool("check_payment_budget")).toBe(true);
+    expect(isSynchronousMcpTool("alpaca_place_order")).toBe(true);
+    expect(isSynchronousMcpTool("alpaca_preview_order")).toBe(true);
+    expect(isSynchronousMcpTool("alpaca_get_quote")).toBe(true);
+    expect(isSynchronousMcpTool("alpaca_orders")).toBe(true);
+    expect(isSynchronousMcpTool("alpaca_positions")).toBe(true);
   });
 
   it("keeps heavy/batch capabilities asynchronous", () => {
@@ -138,6 +143,18 @@ describe("Issue #3605 & #3624: renderInlineFormatted clickable links", () => {
     expect(anchor.props.href).toBe("/api/jobs/371fc175-2446-445f-8aee-31c57677d5a2");
     expect(anchor.props.children).toBe("Job Details");
     expect(anchor.props.target).toBe("_blank");
+  });
+
+  it("formats relative tab links [Label](?tab=workflow-runs) as clickable anchors without blank target", () => {
+    const rendered = renderInlineFormatted("Check [Live Workflow Runs](?tab=workflow-runs) now.");
+    expect(Array.isArray(rendered)).toBe(true);
+
+    const anchor = (rendered as any[]).find((el) => React.isValidElement(el) && el.type === "a");
+    expect(anchor).toBeDefined();
+    expect(anchor.props.href).toBe("?tab=workflow-runs");
+    expect(anchor.props.children).toBe("Live Workflow Runs");
+    expect(anchor.props.target).toBeUndefined();
+    expect(anchor.props.rel).toBeUndefined();
   });
 
   it("formats bare /api/jobs/:id paths as clickable anchors", () => {
