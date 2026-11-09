@@ -51,6 +51,13 @@ export interface TradingRunOutcomeInput {
   /** Issue #3897: Slack and Email notification delivery status on order placement. */
   slackNotification?: string;
   emailNotification?: string;
+  /**
+   * Issue #3883: a cancel records its own outcome word (the shared run
+   * status vocabulary is completed/failed/partial) and the broker's own
+   * status, so a run says both what the platform asked and what happened.
+   */
+  cancelOutcome?: "cancelled" | "cancel_failed";
+  brokerStatus?: string;
 }
 
 /**
@@ -117,6 +124,8 @@ export function recordTradingRunOutcome(
           : {}),
         ...(input.slackNotification ? { slackNotification: input.slackNotification } : {}),
         ...(input.emailNotification ? { emailNotification: input.emailNotification } : {}),
+        ...(input.cancelOutcome ? { outcome: input.cancelOutcome } : {}),
+        ...(input.brokerStatus ? { brokerStatus: input.brokerStatus } : {}),
       },
       origin: input.origin,
     });

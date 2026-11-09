@@ -344,6 +344,9 @@ export const MCP_TOOL_SCOPES: Record<string, McpScope> = {
   alpaca_preview_order: "mcp:trade",
   alpaca_place_bracket_ladder: "mcp:trade",
   alpaca_cancel_bracket_ladder: "mcp:trade",
+  // Issue #3883: cancelling one order changes broker state — same scope
+  // as placing one.
+  alpaca_cancel_order: "mcp:trade",
   // Issue #3888: the externalized limits. Reading them is trade-scope
   // data (the same values every order engine enforces), and a change
   // moves a risk ceiling, so it belongs behind the same scope.
