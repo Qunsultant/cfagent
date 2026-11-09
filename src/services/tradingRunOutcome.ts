@@ -48,6 +48,9 @@ export interface TradingRunOutcomeInput {
   stopLossPercent?: number;
   /** The live-quote or user price source, as a short string. */
   priceSource?: string;
+  /** Issue #3897: Slack and Email notification delivery status on order placement. */
+  slackNotification?: string;
+  emailNotification?: string;
 }
 
 /**
@@ -112,6 +115,8 @@ export function recordTradingRunOutcome(
         ...(input.stopLossPrice !== undefined
           ? { stopLossPrice: String(input.stopLossPrice) }
           : {}),
+        ...(input.slackNotification ? { slackNotification: input.slackNotification } : {}),
+        ...(input.emailNotification ? { emailNotification: input.emailNotification } : {}),
       },
       origin: input.origin,
     });

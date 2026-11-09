@@ -18,7 +18,15 @@ import type {
   ActorStatePort,
   ActorTurnHooks,
   ActorTurnPort,
+  ActorWorkspaceFileEntry,
+  ActorWorkspacePort,
 } from "./actorPorts";
+import {
+  THINK_WORKSPACE_ROOT,
+  resolveThinkWorkspacePath,
+  thinkWorkspaceFileName,
+  thinkWorkspaceUrls,
+} from "./thinkPortMapping";
 
 export const STUB_ASSISTANT_REPLY = "Stub assistant reply.";
 
@@ -81,6 +89,62 @@ export function createInMemoryActorSchedule(): ActorSchedulePort & { rows: Sched
 
 export function createInMemoryActorSession(): ActorSessionPort {
   return new ActorSessionStore(createMapSessionBackend());
+}
+
+/** Map-backed per-agent workspace port for tests (#3491 / #3896). */
+export function createInMemoryActorWorkspace(): ActorWorkspacePort {
+  const files = new Map<string, { path: string; content: string; size: number; updatedAt: string; scopeId: string }>();
+  return {
+    readFile: async (rawPath: string, scopeId = "default") => {
+      const resolved = resolveThinkWorkspacePath(rawPath);
+      if (!resolved.ok) return null;
+      const entry = files.get(`${scopeId}::${resolved.path}`);
+      if (!entry) return null;
+      return { content: entry.content, updatedAt: entry.updatedAt };
+    },
+    writeFile: async (rawPath: string, content: string, scopeId = "default") => {
+      const resolved = resolveThinkWorkspacePath(rawPath);
+      if (!resolved.ok) throw new Error(resolved.error);
+      const updatedAt = new Date().toISOString();
+      const size = new TextEncoder().encode(content).byteLength;
+      files.set(`${scopeId}::${resolved.path}`, {
+        path: resolved.path,
+        content,
+        size,
+        updatedAt,
+        scopeId,
+      });
+      return {
+        path: resolved.path,
+        size,
+        updatedAt,
+        ...thinkWorkspaceUrls(resolved.path),
+      };
+    },
+    deleteFile: async (rawPath: string, scopeId = "default") => {
+      const resolved = resolveThinkWorkspacePath(rawPath);
+      if (!resolved.ok) return false;
+      return files.delete(`${scopeId}::${resolved.path}`);
+    },
+    listFiles: async (dir = THINK_WORKSPACE_ROOT, scopeId = "default") => {
+      const resolved = resolveThinkWorkspacePath(dir);
+      const prefix = resolved.ok ? resolved.path : THINK_WORKSPACE_ROOT;
+      const out: ActorWorkspaceFileEntry[] = [];
+      for (const entry of files.values()) {
+        if (entry.scopeId !== scopeId) continue;
+        if (prefix !== THINK_WORKSPACE_ROOT && !entry.path.startsWith(prefix)) continue;
+        out.push({
+          name: thinkWorkspaceFileName(entry.path),
+          path: entry.path,
+          type: "file",
+          size: entry.size,
+          updatedAt: entry.updatedAt,
+          ...thinkWorkspaceUrls(entry.path),
+        });
+      }
+      return out.sort((a, b) => a.path.localeCompare(b.path));
+    },
+  };
 }
 
 /** Test turn runner: production lifecycle, stubbed provider reply. */

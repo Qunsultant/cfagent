@@ -26,6 +26,8 @@
 
 import { z } from "zod";
 import { alpacaModeFromEnv, recordTradingRunOutcome } from "../../services/tradingRunOutcome";
+import { notifyOrderExecution } from "../../services/orderExecutionNotifier";
+import { COPILOT_BROKER_ID } from "../../agents/copilotTradingMode";
 import { computeBracketExits } from "../../trading";
 import { getUserDid } from "../../agents/did";
 import type { IMcpToolCommand, McpToolContext } from "../../patterns/interfaces";
@@ -562,6 +564,20 @@ export class AlpacaPlaceOrderCommand implements IMcpToolCommand {
         success: result.success,
         brokerOrderRef: result.brokerOrderRef,
       });
+      const notifications = result.success
+        ? await notifyOrderExecution(context.env, {
+            orderId: input.orderId,
+            broker: COPILOT_BROKER_ID,
+            mode: alpacaModeFromEnv(context.env),
+            symbol: result.symbol || "UNKNOWN",
+            action: result.action || "BUY",
+            quantity: Number(result.quantity ?? 0),
+            price: result.executionPrice,
+            status: result.status || "executed",
+            origin: this.name,
+            userLogin: context.actingLogin?.() ?? context.sessionId,
+          })
+        : undefined;
       recordTradingRunOutcome(context.orm?.getSql?.(), {
         orderId: input.orderId,
         status: result.success ? "completed" : "failed",
@@ -573,8 +589,14 @@ export class AlpacaPlaceOrderCommand implements IMcpToolCommand {
         ...(result.success ? {} : { codedError: "order_execution_failed" }),
         origin: "alpaca_place_order",
         priceSource: "draft",
+        ...(notifications
+          ? {
+              slackNotification: notifications.slack.status,
+              emailNotification: notifications.email.status,
+            }
+          : {}),
       });
-      return result;
+      return notifications ? { ...result, notifications } : result;
     }
     const resolved = resolveAlpacaOrderMode(marketDataModeLevels(context, "order", (input as any)?.mode, ALPACA_ORDER_MODE_SWITCH), "mcp");
     auditMarketDataConfigError(context, ALPACA_ORDER_MODE_SWITCH, resolved, "trading");
@@ -707,10 +729,29 @@ export class AlpacaPlaceOrderCommand implements IMcpToolCommand {
     // placeOrder refuses the placement if that declaration is absent.
     const result = await service.placeAlpacaOrder({ ...normalized, priceSource: { kind: "user" } });
     context.audit?.(marketDataOrderAuditEvent(resolved.mode), "trading", marketDataOrderAuditPayload(resolved.mode, normalized, result));
+    const resolvedOrderId = result.orderId || `place-${context.sessionId || "unassigned"}-${Date.now()}`;
+    const notifications = result.success
+      ? await notifyOrderExecution(context.env, {
+          orderId: resolvedOrderId,
+          broker: COPILOT_BROKER_ID,
+          mode: alpacaModeFromEnv(context.env),
+          symbol: normalized.symbol,
+          action: normalized.side.toUpperCase(),
+          quantity: normalized.qty,
+          orderType: normalized.type,
+          orderClass: normalized.order_class,
+          price: normalized.limit_price,
+          takeProfitPrice: normalized.take_profit?.limit_price,
+          stopLossPrice: normalized.stop_loss?.stop_price,
+          status: result.status || "placed",
+          origin: this.name,
+          userLogin: context.actingLogin?.() ?? context.sessionId,
+        })
+      : undefined;
     // Issue #3812: the placement is the run's terminal fact. A broker
     // refusal (success:false) is a failed run with its coded refusal.
     recordTradingRunOutcome(context.orm?.getSql?.(), {
-      orderId: result.orderId || `place-${context.sessionId || "unassigned"}-${Date.now()}`,
+      orderId: resolvedOrderId,
       status: result.success ? "completed" : "failed",
       action: normalized.side.toUpperCase(),
       symbol: normalized.symbol,
@@ -724,8 +765,14 @@ export class AlpacaPlaceOrderCommand implements IMcpToolCommand {
       takeProfitPrice: normalized.take_profit?.limit_price,
       stopLossPrice: normalized.stop_loss?.stop_price,
       priceSource: "user",
+      ...(notifications
+        ? {
+            slackNotification: notifications.slack.status,
+            emailNotification: notifications.email.status,
+          }
+        : {}),
     });
-    return result;
+    return notifications ? { ...result, notifications } : result;
   }
 }
 
@@ -772,6 +819,20 @@ export class AlpacaExecuteOrderCommand implements IMcpToolCommand {
         success: result.success,
         brokerOrderRef: result.brokerOrderRef,
       });
+      const notifications = result.success
+        ? await notifyOrderExecution(context.env, {
+            orderId: input.orderId,
+            broker: COPILOT_BROKER_ID,
+            mode: alpacaModeFromEnv(context.env),
+            symbol: result.symbol || "UNKNOWN",
+            action: result.action || "BUY",
+            quantity: Number(result.quantity ?? 0),
+            price: result.executionPrice,
+            status: result.status || "executed",
+            origin: this.name,
+            userLogin: context.actingLogin?.() ?? context.sessionId,
+          })
+        : undefined;
       recordTradingRunOutcome(context.orm?.getSql?.(), {
         orderId: input.orderId,
         status: result.success ? "completed" : "failed",
@@ -783,8 +844,14 @@ export class AlpacaExecuteOrderCommand implements IMcpToolCommand {
         ...(result.success ? {} : { codedError: "order_execution_failed" }),
         origin: "alpaca_execute_order",
         priceSource: "draft",
+        ...(notifications
+          ? {
+              slackNotification: notifications.slack.status,
+              emailNotification: notifications.email.status,
+            }
+          : {}),
       });
-      return result;
+      return notifications ? { ...result, notifications } : result;
     } catch (error) {
       recordTradingRunOutcome(context.orm?.getSql?.(), {
         orderId: input.orderId,

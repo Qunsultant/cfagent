@@ -375,6 +375,21 @@ export const SYNCHRONOUS_MCP_TOOLS = new Set<string>([
   "market_data_company_fundamentals",
   "market_data_historical_bars",
   "market_data_research",
+  // Issue #3896: browser, web fetch/search, sandbox, think, and Slack/webhook
+  // tools execute inline during chat turns instead of returning status:"queued".
+  "browser_inspect_page",
+  "browser_screenshot",
+  "browser_scrape_tables",
+  "browser_capture_page",
+  "browser_snap_transaction",
+  "web_fetch",
+  "web_search",
+  "run_sandbox_command",
+  "run_quant_backtest",
+  "think_trade_validation",
+  "dispatch_trading_webhook",
+  "slack_dispatch_transaction_snap",
+  "slack_send_pre_trade_approval",
 ]);
 
 const LEGACY_BROKER_TOOL_PREFIX = ["et", "ra", "de_"].join("");

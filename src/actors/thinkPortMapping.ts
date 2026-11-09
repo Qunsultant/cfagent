@@ -292,3 +292,86 @@ export function thinkChatResponseToPort(
     continuation: r.continuation ?? false,
   };
 }
+
+/**
+ * Issue #3491 / #3896 — the PortThink workspace channel's pure seams.
+ *
+ * Every Think agent has a per-instance workspace rooted at `/workspace`.
+ * PortThink intercepts the reserved path tails `/workspace/files` and
+ * `/workspace/file` (under any routing prefix: `/agents/<class>/<instance>/...`,
+ * `/api/workspace/...`, `/api/stock-copilot/workspace/...`) at `fetch`, so
+ * every PortThink subclass inherits workspace listing, viewing, downloading,
+ * writing, and deletion with zero per-agent route boilerplate.
+ */
+export const THINK_WORKSPACE_ROOT = "/workspace";
+
+const THINK_WORKSPACE_PATH_TAIL = /\/(?:stock-copilot\/)?workspace\/(files|file)$/;
+
+/**
+ * Match the reserved workspace path tail (`/workspace/files` or `/workspace/file`)
+ * under any routing prefix. Returns `"files"`, `"file"`, or `null`.
+ */
+export function thinkWorkspaceEndpointFromPath(pathname: string): "files" | "file" | null {
+  const match = THINK_WORKSPACE_PATH_TAIL.exec(pathname);
+  if (!match) return null;
+  return match[1] === "files" ? "files" : "file";
+}
+
+/**
+ * Canonicalize a user- or tool-supplied workspace path into `/workspace/...`
+ * while rejecting directory traversal (`..`) and returning candidate paths
+ * for Think's `_hostReadFile` / `_hostWriteFile` / `_hostDeleteFile`.
+ */
+export function resolveThinkWorkspacePath(
+  rawPath: string
+): { ok: true; path: string; candidates: string[] } | { ok: false; error: string } {
+  if (!rawPath || typeof rawPath !== "string" || !rawPath.trim()) {
+    return { ok: false, error: "Workspace path must be a non-empty string." };
+  }
+  const normalizedSlashes = rawPath.trim().replace(/\\/g, "/");
+  const rawSegments = normalizedSlashes.split("/").filter(Boolean);
+  if (rawSegments.some((seg) => seg === "..")) {
+    return { ok: false, error: "Invalid workspace path: directory traversal ('..') is not permitted." };
+  }
+  const cleanSegments = rawSegments.filter((seg) => seg !== ".");
+  if (cleanSegments.length === 0) {
+    return { ok: true, path: THINK_WORKSPACE_ROOT, candidates: [THINK_WORKSPACE_ROOT, "/"] };
+  }
+  const startsWithWorkspace = cleanSegments[0] === "workspace";
+  const canonicalPath = startsWithWorkspace
+    ? "/" + cleanSegments.join("/")
+    : `${THINK_WORKSPACE_ROOT}/${cleanSegments.join("/")}`;
+  const relativeFromWorkspace = startsWithWorkspace
+    ? "/" + cleanSegments.slice(1).join("/")
+    : "/" + cleanSegments.join("/");
+  const candidates = Array.from(
+    new Set([canonicalPath, relativeFromWorkspace, relativeFromWorkspace.slice(1)].filter(Boolean))
+  );
+  return { ok: true, path: canonicalPath, candidates };
+}
+
+/** Safe basename for Content-Disposition and file metadata. */
+export function thinkWorkspaceFileName(path: string): string {
+  const parts = path.split("/").filter(Boolean);
+  const last = parts[parts.length - 1] || "workspace-file.txt";
+  return last.replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
+/** Content-Type header for raw/download workspace file responses. */
+export function thinkWorkspaceContentType(path: string): string {
+  const lower = path.toLowerCase();
+  if (lower.endsWith(".md") || lower.endsWith(".markdown")) return "text/markdown; charset=utf-8";
+  if (lower.endsWith(".json")) return "application/json; charset=utf-8";
+  if (lower.endsWith(".csv")) return "text/csv; charset=utf-8";
+  return "text/plain; charset=utf-8";
+}
+
+/** Standard view & download URLs for a canonical workspace path. */
+export function thinkWorkspaceUrls(canonicalPath: string): { viewUrl: string; downloadUrl: string } {
+  const encoded = encodeURIComponent(canonicalPath);
+  return {
+    viewUrl: `/api/workspace/file?path=${encoded}&raw=1`,
+    downloadUrl: `/api/workspace/file?path=${encoded}&download=1`,
+  };
+}
+

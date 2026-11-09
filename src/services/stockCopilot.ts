@@ -96,6 +96,7 @@ import {
   type CopilotPositionRecord,
 } from "./stockCopilotStore";
 import { runStockCopilotAgenticCycle } from "./stockCopilotAgenticLoop";
+import { notifyOrderExecution } from "./orderExecutionNotifier";
 import {
   copilotSessionAt,
   isAroundTheClock,
@@ -451,6 +452,22 @@ async function evaluateExit(
   });
   result.exitsPlaced += 1;
   result.exits.push({ symbol: position.symbol, reason: exitReason });
+  await notifyOrderExecution(deps.env, {
+    orderId: exitRef || `copilot-exit-${position.id}`,
+    broker: deps.selection.resolved ? deps.selection.selection.brokerId : "broker",
+    mode: deps.selection.resolved ? deps.selection.selection.mode : "paper",
+    symbol: position.symbol,
+    action: "SELL",
+    quantity: position.quantity,
+    orderType: shape.orderType,
+    price: exitPrice,
+    status: "executed",
+    origin: "stock_copilot_exit",
+    userLogin: deps.userLogin,
+    session,
+    reason: exitReason,
+    timestamp: nowIso,
+  });
 }
 
 async function attemptEntry(
@@ -581,6 +598,24 @@ async function attemptEntry(
   });
   result.entriesPlaced += 1;
   result.entries.push({ symbol, strategy });
+  await notifyOrderExecution(deps.env, {
+    orderId: entryRef || `copilot-entry-${symbol}-${nowIso}`,
+    broker: deps.selection.resolved ? deps.selection.selection.brokerId : "broker",
+    mode: deps.selection.resolved ? deps.selection.selection.mode : "paper",
+    symbol,
+    action: "BUY",
+    quantity: qty,
+    orderType: shape.orderType,
+    price: placed.executionPrice > 0 ? placed.executionPrice : entry,
+    takeProfitPrice: targetPrice,
+    stopLossPrice: stopPrice,
+    status: "executed",
+    origin: "stock_copilot_entry",
+    userLogin: deps.userLogin,
+    session: args.session,
+    strategy,
+    timestamp: nowIso,
+  });
 }
 
 /**

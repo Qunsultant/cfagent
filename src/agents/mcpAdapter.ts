@@ -68,7 +68,7 @@ export class McpAgentToolAdapter {
           // unchanged (scope check only).
           agentAccess: context.agentAccess,
         };
-        if (context.submitJob && !isSynchronousMcpTool(command.name)) {
+        if (context.submitJob && (!isSynchronousMcpTool(command.name) || command.name === "browser_scrape_tables")) {
           await authorizeMcpToolCall(port, principal, command.name, gateOpts);
           // #2341 (Agent Mesh S5): stamp the turn's acting identity
           // into the job payload, resolved HERE — server-side, from

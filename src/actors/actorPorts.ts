@@ -185,6 +185,34 @@ export interface ActorSessionPort {
   clear(): Promise<void>;
 }
 
+/** One entry in an actor's per-instance workspace filesystem (#3491 / #3896). */
+export interface ActorWorkspaceFileEntry {
+  name: string;
+  path: string;
+  type: "file" | "directory";
+  size: number;
+  updatedAt?: string;
+  viewUrl: string;
+  downloadUrl: string;
+}
+
+/**
+ * Per-agent workspace filesystem facet (#3491 / #3896).
+ * Backed by Think's workspace host (`_hostReadFile`, `_hostWriteFile`,
+ * `_hostDeleteFile`, `_hostListFiles`) + DO SQLite/KV persistence on PortThink,
+ * or Map-backed in-memory storage in tests.
+ */
+export interface ActorWorkspacePort {
+  readFile(path: string, scopeId?: string): Promise<{ content: string; updatedAt?: string } | null>;
+  writeFile(
+    path: string,
+    content: string,
+    scopeId?: string
+  ): Promise<{ path: string; size: number; updatedAt: string; viewUrl: string; downloadUrl: string }>;
+  deleteFile(path: string, scopeId?: string): Promise<boolean>;
+  listFiles(dir?: string, scopeId?: string): Promise<ActorWorkspaceFileEntry[]>;
+}
+
 /** The hooks a chat actor implements; the turn runner drives them. */
 export interface ActorTurnHooks {
   getModel(): unknown;
@@ -214,12 +242,13 @@ export interface ActorTurnPort {
   runTurn(input: TurnInput): Promise<ChatResponseResult>;
 }
 
-/** The full actor port: state + schedule + session + turn. */
+/** The full actor port: state + schedule + session + turn (+ workspace). */
 export interface ActorPort {
   state: ActorStatePort;
   schedule: ActorSchedulePort;
   session: ActorSessionPort;
   turn: ActorTurnPort;
+  workspace?: ActorWorkspacePort;
 }
 
 export type ActorErrorCode = "invalid_input" | "unavailable" | "turn_failed";
