@@ -46,3 +46,11 @@ slice.
   (`tests/compliance_docs.test.ts`) now asserts the deprecated path.
 - Deletion condition: zero consumers plus an owner decision plus a gate
   amendment; deletion is never part of a program slice.
+- Archive addendum (2026-11-09, #3802): the rename above initially left a
+  stale un-headered original at `docs/compliance/anti-drift-controls.md`
+  (the ship script created the `.deprecated.md` copy but never removed the
+  old path). On the user's direction it was moved, unchanged, to
+  `docs/archive/anti-drift-controls.md` as a true rename, so the old
+  compliance path no longer resolves as a live document. This entry's
+  retirement record is unchanged: the frozen retirement copy remains
+  `docs/compliance/anti-drift-controls.deprecated.md`.
