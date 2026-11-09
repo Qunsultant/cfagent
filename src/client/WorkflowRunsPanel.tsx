@@ -606,7 +606,24 @@ export function WorkflowRunsPanel() {
         <div className="workflow-runs-workflow">
           <span className="workflow-runs-title">{run.title}</span>
           <span className="workflow-runs-muted">
-            {run.workflow} · <span className="workflow-runs-mono">{run.runId}</span>
+            {run.workflow} ·{" "}
+            <button
+              type="button"
+              className="workflow-runs-mono ui-link-button"
+              onClick={() => setSelectedId(run.id)}
+              aria-label={`View details for ${run.runId}`}
+              style={{
+                background: "none",
+                border: "none",
+                padding: 0,
+                color: "var(--color-primary, #2563eb)",
+                textDecoration: "underline",
+                cursor: "pointer",
+                font: "inherit",
+              }}
+            >
+              {run.runId}
+            </button>
           </span>
         </div>
       ),

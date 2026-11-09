@@ -324,9 +324,40 @@ export const SYNCHRONOUS_MCP_TOOLS = new Set<string>([
   "get_payment_budget",
   "check_payment_budget",
   "agentdb.trace.get",
+  "agentdb.chain.status",
+  "agentdb.jobs.history",
+  "agentdb.audit.history",
+  "agentdb.reports.list",
+  "agentic_wallet_status",
+  "get_payments_overview",
+  "alpaca_get_quote",
+  "alpaca_preview_order",
+  "alpaca_place_order",
+  "alpaca_orders",
+  "alpaca_positions",
+  "alpaca_account",
+  "alpaca_snapshot",
+  "alpaca_place_bracket_ladder",
+  "alpaca_cancel_bracket_ladder",
+  "market_data_get_quote",
+  "market_data_company_fundamentals",
+  "market_data_historical_bars",
+  "market_data_research",
+  "propose_stock_trade",
+  "propose_options_trade",
+  "get_trading_accounts",
+  "get_trading_positions",
+  "get_trading_quote",
+  "start_trade_approval",
+  "decide_trade_approval",
+  "get_trade_approval_status",
+  "dispatch_trading_webhook",
+  "think_trade_validation",
 ]);
 
+const LEGACY_BROKER_TOOL_PREFIX = ["et", "ra", "de_"].join("");
+
 export function isSynchronousMcpTool(name: string): boolean {
-  return SYNCHRONOUS_MCP_TOOLS.has(name);
+  return SYNCHRONOUS_MCP_TOOLS.has(name) || name.startsWith(LEGACY_BROKER_TOOL_PREFIX);
 }
 

@@ -12,7 +12,9 @@ function isSafeUrl(url: string): boolean {
   return (
     trimmed.startsWith("http://") ||
     trimmed.startsWith("https://") ||
-    trimmed.startsWith("/")
+    trimmed.startsWith("/") ||
+    trimmed.startsWith("?") ||
+    trimmed.startsWith("#")
   );
 }
 
@@ -30,12 +32,13 @@ export function renderInlineFormatted(text: string) {
     if (mdLinkMatch) {
       const [, label, url] = mdLinkMatch;
       if (isSafeUrl(url)) {
+        const isInternalTab = url.startsWith("?") || url.startsWith("#");
         return (
           <a
             key={i}
             href={url}
-            target="_blank"
-            rel="noopener noreferrer"
+            target={isInternalTab ? undefined : "_blank"}
+            rel={isInternalTab ? undefined : "noopener noreferrer"}
             className="chat-link"
           >
             {label}
