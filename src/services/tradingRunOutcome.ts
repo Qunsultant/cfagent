@@ -58,6 +58,13 @@ export interface TradingRunOutcomeInput {
    */
   cancelOutcome?: "cancelled" | "cancel_failed";
   brokerStatus?: string;
+  /**
+   * Issue #3884/#3885: a batch (ticker/all) cancel is one run with real
+   * counts, not a single unit — the caller supplies how many it targeted and
+   * how many the broker actually cancelled.
+   */
+  scanned?: number;
+  matched?: number;
 }
 
 /**
@@ -97,9 +104,10 @@ export function recordTradingRunOutcome(
       trigger: "manual",
       status: input.status,
       // One order attempt is one unit: scanned=1, matched=1 only when the
-      // broker accepted the draft/order. A refusal records matched=0.
-      scanned: 1,
-      matched: input.status === "completed" ? 1 : 0,
+      // broker accepted the draft/order. A refusal records matched=0. A
+      // batch cancel supplies its own counts (#3884/#3885).
+      scanned: input.scanned ?? 1,
+      matched: input.matched ?? (input.status === "completed" ? 1 : 0),
       ...(input.codedError ? { codedError: input.codedError } : {}),
       deliveryStates: {
         broker: input.broker ?? "alpaca",
