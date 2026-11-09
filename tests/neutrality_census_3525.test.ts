@@ -221,7 +221,8 @@ function measure(): Map<string, number> {
  * (feedJobs.ts/yahoo 12->14, feedPipelineJobs.ts/yahoo 19->23).
  * Recorded-seed totals move 1121/8735 -> 1121/8741 on this slice's own
  * base; composed with #3883's cancellation-surface update (1124/8745)
- * the merged recorded seed is 1124 rows / 8751 lines.
+ * and #3884's cancel-ticker record (+5 lines, 1124/8750) the merged
+ * recorded seed is 1124 rows / 8756 lines.
  * Baseline update (#3838, 2026-11-09): externalize Stock Copilot prompts
  * into src/agents/prompts/stockCopilotPrompt.ts (dispositioned INTEGRATION:
  * names the provider its agent tools integrate — Alpaca Paper trading for
@@ -517,7 +518,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/agents/routes/brokerOptions.ts", "etrade", 3],
   // #3883 INTEGRATION: the cancel route selects the engine by broker id, so
   // one comparison names it (the surrounding wording stays neutral).
-  ["src/agents/routes/brokerOrders.ts", "alpaca", 3],
+  ["src/agents/routes/brokerOrders.ts", "alpaca", 5],
   ["src/agents/routes/brokerOrders.ts", "etrade", 31],
   ["src/agents/routes/brokerReads.ts", "alpaca", 1],
   ["src/agents/routes/brokerReads.ts", "etrade", 1],
@@ -1365,9 +1366,9 @@ const BASELINE: Array<[string, string, number]> = [
   // executes against — the tool contract itself is provider-scoped, the
   // adapter class and its status words are provider facts, and the port
   // keeps the brand in exactly one field (the ledger's broker stamp).
-  ["src/trading/cancelFilters.ts", "alpaca", 6],
-  ["src/services/orderCancellation.ts", "alpaca", 1],
-  ["src/mcps/openaimp/cancelOrderCommands.ts", "alpaca", 2],
+  ["src/trading/cancelFilters.ts", "alpaca", 7],
+  ["src/services/orderCancellation.ts", "alpaca", 2],
+  ["src/mcps/openaimp/cancelOrderCommands.ts", "alpaca", 3],
   // #3866 INTEGRATION: the lifecycle table names the brokers it covers.
   ["docs/architecture/agentic/agents-workflows-schedules-queues-platforms-lifecycle.md", "etrade", 1],
   ["docs/architecture/agentic/agents-workflows-schedules-queues-platforms-lifecycle.md", "public.com", 1],
@@ -1418,12 +1419,12 @@ describe("#3525 S6 shrink-only provider-brand census pin", () => {
     expect(total).toBeLessThanOrEqual(PLATFORM_BASELINE_TOTAL);
   });
 
-  it("the baseline itself is the recorded seed (1124 rows / 8751 lines)", () => {
-    // #3883: +3 rows / +10 lines — the cancellation surface names the provider
-    // it executes against (see the INTEGRATION disposition above).
+  it("the baseline itself is the recorded seed (1124 rows / 8756 lines)", () => {
+    // #3883 + #3884: +3 rows / +15 lines — the cancellation surface names the
+    // provider it executes against (see the INTEGRATION disposition above).
     // #3905: +6 lines on the same seed — the Dow feed job's raises above
     // (feedJobs.ts/yahoo 12->14, feedPipelineJobs.ts/yahoo 19->23).
     expect(BASELINE.length).toBe(1124);
-    expect(BASELINE.reduce((a, [, , c]) => a + c, 0)).toBe(8751);
+    expect(BASELINE.reduce((a, [, , c]) => a + c, 0)).toBe(8756);
   });
 });
