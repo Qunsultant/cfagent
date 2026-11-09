@@ -122,8 +122,8 @@ export interface OrchestratorPromptInput {
  * Appended only on activated stock turns; every other turn's
  * prompt is byte-identical without it.
  */
-export { STOCK_COPILOT_MCP_STEERING } from "./prompts/stockCopilotPrompt";
-import { buildStockCopilotSystemPrompt } from "./prompts/stockCopilotPrompt";
+import { buildStockCopilotSystemPrompt, STOCK_COPILOT_MCP_STEERING } from "./prompts/stockCopilotPrompt";
+export { STOCK_COPILOT_MCP_STEERING };
 
 /**
  * #879/#767 — retrieved-content separation for the orchestrator chat
