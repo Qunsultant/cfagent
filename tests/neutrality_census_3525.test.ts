@@ -800,7 +800,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/mcps/openaimp/index.ts", "etrade", 7],
   ["src/mcps/openaimp/index.ts", "yahoo", 5],
   // #3887 INTEGRATION: the ladder tool speaks the provider's own order vocabulary (classes, bracket legs), so its placement path names it.
-  ["src/mcps/openaimp/marketDataCommands.ts", "alpaca", 62],
+  ["src/mcps/openaimp/marketDataCommands.ts", "alpaca", 63],
   ["src/mcps/openaimp/marketDataCommands.ts", "etrade", 3],
   ["src/mcps/openaimp/marketDataCommands.ts", "yahoo", 4],
   ["src/mcps/openaimp/mcpPermissionPorts.ts", "alpaca", 3],
@@ -1422,6 +1422,19 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/architecture/agentic/agents-workflows-schedules-queues-platforms-lifecycle.md", "alpaca", 1],
   ["docs/architecture/agentic/agents-workflows-schedules-queues-platforms-lifecycle.md", "yahoo", 1],
   ["docs/architecture/agentic/agents-workflows-schedules-queues-platforms-lifecycle.md", "nasdaq", 1],
+  // #3892 INTEGRATION: the registry names the providers whose support it
+  // declares (native/emulated/none is a per-provider fact), and its
+  // trailing-stop notes quote the provider's field names.
+  ["src/trading/advancedOrders.ts", "alpaca", 28],
+  // #3892 INTEGRATION: the introspection payload is per provider, so the
+  // tool names the providers it enumerates.
+  ["src/mcps/openaimp/tradingLimitCommands.ts", "alpaca", 1],
+  // #3892 INTEGRATION: the registry declares per-broker support, so the
+  // E*TRADE rows are the `none`/`emulated` facts a caller is refused by name.
+  ["src/trading/advancedOrders.ts", "etrade", 27],
+  // #3892 INTEGRATION: the introspection payload names the provider it
+  // enumerates, alongside the other broker's.
+  ["src/mcps/openaimp/tradingLimitCommands.ts", "etrade", 1],
 ];
 
 const BASELINE_MAP = new Map(BASELINE.map(([f, t, c]) => [`${f}\t${t}`, c]));

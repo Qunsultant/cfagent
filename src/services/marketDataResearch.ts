@@ -2616,9 +2616,17 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
     symbol: string;
     qty: number;
     side: "buy" | "sell";
-    type?: "market" | "limit" | "stop" | "stop_limit";
+    /** Issue #3892: the advanced types the registry declares (trailing stops). */
+    type?: "market" | "limit" | "stop" | "stop_limit" | "trailing_stop" | "trailing_stop_limit";
     limit_price?: number;
-    time_in_force?: "day" | "gtc" | "ioc" | "fok";
+    /** Issue #3892: trailing-stop parameters, exactly one of the two. */
+    trail_price?: number;
+    trail_percent?: number;
+    /** Issue #3892: notional sizing instead of qty (fractional trading). */
+    notional?: number;
+    /** Issue #3892: GTD's expiry instant (RFC 3339). */
+    good_till_date?: string;
+    time_in_force?: "day" | "gtc" | "ioc" | "fok" | "gtd";
     extended_hours?: boolean;
     order_class?: "simple" | "bracket" | "oco" | "oto";
     take_profit?: { limit_price: number };
@@ -2667,6 +2675,12 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
         type: params.type || "market",
         time_in_force: params.time_in_force || "day",
         ...(params.limit_price ? { limit_price: params.limit_price } : {}),
+        // Issue #3892: the fields the advanced registry declares. Sent only
+        // when present, so a basic order's wire body is byte-identical.
+        ...(params.trail_price !== undefined ? { trail_price: params.trail_price } : {}),
+        ...(params.trail_percent !== undefined ? { trail_percent: params.trail_percent } : {}),
+        ...(params.notional !== undefined ? { notional: params.notional } : {}),
+        ...(params.good_till_date ? { good_till_date: params.good_till_date } : {}),
         ...(params.extended_hours !== undefined ? { extended_hours: params.extended_hours } : {}),
         ...(params.order_class ? { order_class: params.order_class } : {}),
         ...(params.take_profit ? { take_profit: { limit_price: params.take_profit.limit_price } } : {}),
@@ -3501,9 +3515,14 @@ export class MarketDataResearchService {
     symbol: string;
     qty: number;
     side: "buy" | "sell";
-    type?: "market" | "limit" | "stop" | "stop_limit";
+    /** Issue #3892: the advanced types the registry declares. */
+    type?: "market" | "limit" | "stop" | "stop_limit" | "trailing_stop" | "trailing_stop_limit";
     limit_price?: number;
-    time_in_force?: "day" | "gtc" | "ioc" | "fok";
+    trail_price?: number;
+    trail_percent?: number;
+    notional?: number;
+    good_till_date?: string;
+    time_in_force?: "day" | "gtc" | "ioc" | "fok" | "gtd";
     extended_hours?: boolean;
     order_class?: "simple" | "bracket" | "oco" | "oto";
     take_profit?: { limit_price: number };
