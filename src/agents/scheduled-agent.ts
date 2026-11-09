@@ -39,6 +39,14 @@ import {
   SCHEDULED_AGENT_JOB_RUN_CAP,
   type JobRunRecord,
 } from "../services/jobRunRecords";
+import { resolveMissedScheduleGraceMs } from "../config/missedScheduleAlert";
+import {
+  findMissedGoalFiring,
+  missedFiringDetail,
+  SCHEDULE_WATCHDOG_FIRST_SEEN_KEY,
+  SCHEDULE_WATCHDOG_HEARTBEAT_JOB_ID,
+} from "../services/scheduleWatchdog";
+import { renderChannelText } from "../outcomes/outcomeAspects";
 // Issue #3121 S3 — the tick-evaluated kind evaluates through the S1
 // shared primitives: `isDue` / `isValidCron` / `zonedDateParts` are
 // the S1 module's verbatim re-exports of src/schedule.ts (one
@@ -149,6 +157,7 @@ import {
 } from "./social/pipeline";
 import { executeSocialGoal, priorDates } from "./social/goalExecutor";
 import {
+  postSlackText,
   runResourceCapAlert,
   runResourceComparison,
   runResourceRollup,
@@ -289,6 +298,8 @@ export interface ScheduledAgentCronOpts {
   socialSlackPost?: SlackPostFn;
   /** #1819 rollup slice: injected Slack poster for cap alerts (tests). Production uses fetch. */
   resourceSlackPost?: SlackPostFn;
+  /** #3788 watchdog slice: injected Slack poster for missed-fire alerts (tests). Production uses fetch. */
+  watchdogSlackPost?: SlackPostFn;
   /** Force evaluation of a specific goal regardless of cron/enabled state (manual trigger). */
   forceGoalId?: string;
   /**
@@ -440,6 +451,175 @@ export class ScheduledAgent extends PortThink {
   async getLatestJobRun(jobId: string): Promise<JobRunRecord | undefined> {
     const runs = await this.getJobRuns();
     return runs.find((r) => r.jobId === jobId);
+  }
+
+  /**
+   * Issue #3788 — the goals watchdog, run at the end of every onCron
+   * tick (after the due-goal loop, so runs recorded on this tick are
+   * visible). For each enabled goal it asks the pure core whether the
+   * goal missed its most recent expected tick; every finding emits
+   * all three signals, claim-first in ledger order:
+   *   1. a runs-ledger record (outcome "skipped", detail
+   *      "missed-fire: ..." / "invalid-cron: ...") — the record IS
+   *      the exactly-once claim for (goal, expected tick);
+   *   2. a durable audit event (schedule.goal.missed_fire, code
+   *      missed_fire / invalid_cron) through the lifecycle sink;
+   *   3. a Slack alert through the existing postSlackText seam
+   *      (webhook first, bot token second — the #1819 seam).
+   * The watchdog NEVER stamps lastRun (the alert branch's rule: a
+   * missed fire must not suppress the next evaluation) and never
+   * fails the tick: per-goal try/catch, and a Slack failure is a
+   * tick error, not a tick failure. A grace of 0 disables it
+   * entirely (no findings, no heartbeat).
+   *
+   * The heartbeat: one ledger row per tick (job
+   * schedule-watchdog-heartbeat, outcome success, examined/missed
+   * counts). No heartbeat in 24h means the tick path itself is dead
+   * — the Worker cron triggers are deployment-only and have no
+   * per-trigger watchdog of their own. The heartbeat shares the
+   * 500-record cap with goal runs (documented trade-off: ~48
+   * heartbeat rows a day against ~7 days of retained history at
+   * current goal volume; the 50-entry tickHistory stays the
+   * short-term proof either way).
+   */
+  private async runScheduleWatchdog(
+    now: Date,
+    goals: ScheduledGoal[],
+    opts?: ScheduledAgentCronOpts,
+  ): Promise<{ examined: number; missed: number; errors: string[] }> {
+    const result = { examined: 0, missed: 0, errors: [] as string[] };
+    const graceMs = resolveMissedScheduleGraceMs(this.env as { MISSED_SCHEDULE_GRACE_MINUTES?: string });
+    if (graceMs <= 0) return result;
+    const nowMs = now.getTime();
+    const nowIso = now.toISOString();
+    const runs = await this.getJobRuns().catch(() => [] as JobRunRecord[]);
+    const runsByGoal = new Map<string, JobRunRecord[]>();
+    for (const run of runs) {
+      const list = runsByGoal.get(run.jobId) ?? [];
+      list.push(run);
+      runsByGoal.set(run.jobId, list);
+    }
+    // First-seen attribution (same rule as the durable-schedule
+    // sweep): a goal first observed after its expected tick is never
+    // flagged for that tick. Stamped once per id, pruned to live goals.
+    let firstSeen: Record<string, string> = {};
+    try {
+      const stored = await this.ctx.storage.get<Record<string, string>>(
+        SCHEDULE_WATCHDOG_FIRST_SEEN_KEY,
+      );
+      if (stored && typeof stored === "object") {
+        for (const [k, v] of Object.entries(stored)) {
+          if (typeof v === "string" && v) firstSeen[k] = v;
+        }
+      }
+      let changed = false;
+      for (const goal of goals) {
+        if (!(goal.id in firstSeen)) {
+          firstSeen[goal.id] = nowIso;
+          changed = true;
+        }
+      }
+      for (const id of Object.keys(firstSeen)) {
+        if (!goals.some((g) => g.id === id)) {
+          delete firstSeen[id];
+          changed = true;
+        }
+      }
+      if (changed) await this.ctx.storage.put(SCHEDULE_WATCHDOG_FIRST_SEEN_KEY, firstSeen);
+    } catch {
+      // A first-seen failure fails closed to "unseen": no finding can
+      // be attributed, but the sweep still runs and heartbeats.
+      firstSeen = {};
+    }
+    for (const goal of goals) {
+      if (!goal.enabled) continue;
+      result.examined++;
+      try {
+        const firstSeenAtMs = firstSeen[goal.id] ? Date.parse(firstSeen[goal.id]) : undefined;
+        const finding = findMissedGoalFiring({
+          goal,
+          runs: runsByGoal.get(goal.id) ?? [],
+          firstSeenAtMs: Number.isFinite(firstSeenAtMs) ? firstSeenAtMs : undefined,
+          nowMs,
+          graceMs,
+        });
+        if (!finding) continue;
+        const detail = missedFiringDetail(goal.id, finding, goal.cron);
+        // Claim-first: the ledger record is the exactly-once claim.
+        // A failed write alerts nothing for this goal this tick.
+        try {
+          await this.recordJobRun({
+            jobId: goal.id,
+            operation: goal.operation,
+            started: nowIso,
+            finished: nowIso,
+            outcome: "skipped",
+            triggeredBy: "scheduled",
+            trigger: "scheduled",
+            scheduleId: goal.id,
+            asyncJobId: null,
+            workflowId: null,
+            detail,
+          });
+        } catch {
+          continue;
+        }
+        result.missed++;
+        await this.auditGoalLifecycle("schedule.goal.missed_fire", goal.id, {
+          operation: goal.operation,
+          expectedTick: finding.expectedTickIso,
+          lastRun: finding.lastRunIso ?? null,
+          code: finding.code,
+        });
+        const text = renderChannelText(
+          "missed_schedule_alert",
+          "slack",
+          {
+            scheduleId: goal.id,
+            kind: "goal",
+            expectedTick: finding.expectedTickIso ?? "never (cron unparseable)",
+            lastRun: finding.lastRunIso ?? "never",
+            detail,
+          },
+          "legacy_missed_schedule_alert",
+        );
+        const delivered = await postSlackText({
+          post: opts?.watchdogSlackPost ?? fetchSlackPost,
+          env: this.env,
+          text,
+        });
+        if (!delivered.ok) {
+          result.errors.push(
+            `${goal.id}: missed-fire Slack alert undelivered: ${delivered.error ?? "unknown delivery failure"}`,
+          );
+        }
+      } catch (err) {
+        // Per-goal try/catch: one bad goal never fails the tick or
+        // the watchdog's remaining goals.
+        result.errors.push(
+          `${goal.id}: schedule watchdog failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+    // Heartbeat: the tick ran, with examined counts. Best-effort.
+    try {
+      await this.recordJobRun({
+        jobId: SCHEDULE_WATCHDOG_HEARTBEAT_JOB_ID,
+        operation: "schedule.watchdog_heartbeat",
+        started: nowIso,
+        finished: nowIso,
+        outcome: "success",
+        triggeredBy: "scheduled",
+        trigger: "scheduled",
+        scheduleId: null,
+        asyncJobId: null,
+        workflowId: null,
+        detail: `examined=${result.examined} missed=${result.missed}`,
+      });
+    } catch {
+      // Best-effort heartbeat.
+    }
+    return result;
   }
 
   /* ---------------------------------------------------------------- */
@@ -1647,6 +1827,19 @@ export class ScheduledAgent extends PortThink {
       }
     }
 
+    // Issue #3788: the goals watchdog runs at the end of every tick —
+    // a missed firing is an explicit, alerted signal, not a panel
+    // reading "never". Best-effort: a watchdog failure is a tick
+    // error, never a tick failure.
+    try {
+      const watchdog = await this.runScheduleWatchdog(now, goals, opts);
+      for (const error of watchdog.errors) tick.errors.push(error);
+    } catch (err) {
+      tick.errors.push(
+        `schedule watchdog failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
     await this.saveGoals(goals);
     await this.recordTick(tick);
     return tick;
@@ -1692,7 +1885,16 @@ export class ScheduledAgent extends PortThink {
   private async auditGoalLifecycle(
     event: GoalScheduleAuditEvent,
     goalId: string,
-    extra?: { operation?: string; enabled?: boolean },
+    extra?: {
+      operation?: string;
+      enabled?: boolean;
+      /** Issue #3788: the missed-fire finding's expected tick (ISO). */
+      expectedTick?: string;
+      /** Issue #3788: the goal's last run (ISO), or null when never. */
+      lastRun?: string | null;
+      /** Issue #3788: the finding code (missed_fire / invalid_cron). */
+      code?: string;
+    },
     actor?: string | null,
   ): Promise<void> {
     if (!goalId) return;

@@ -558,12 +558,14 @@ describe("S1-P07 O1 — hung-timeout mechanism located (#3121, #2366)", () => {
 });
 
 describe("S1-P08 O2 — goal lifecycle audit events (#3121)", () => {
-  it("enumerates exactly the four goal lifecycle events", () => {
+  it("enumerates exactly the five goal lifecycle events", () => {
     expect([...GOAL_SCHEDULE_AUDIT_EVENTS]).toEqual([
       "schedule.goal.added",
       "schedule.goal.enabled",
       "schedule.goal.triggered",
       "schedule.goal.removed",
+      // Issue #3788: the watchdog's missed-fire finding.
+      "schedule.goal.missed_fire",
     ]);
   });
 
@@ -610,7 +612,7 @@ describe("S1-P08 O2 — goal lifecycle audit events (#3121)", () => {
     expect(await postGoalScheduleAuditEvent(throwingFetch as never, event)).toBe(false);
   });
 
-  it("the DO mutation methods wire all four mutations through the poster (S3, #3312)", () => {
+  it("the DO mutation methods + watchdog wire all five events through the poster (S3, #3312; #3788)", () => {
     // Slice S3 moves the funnel into the ScheduledAgent mutation
     // methods: the route funnel S1 pinned here posted the same
     // events, but the A2A path bypassed it (filed as #3312). The

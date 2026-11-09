@@ -158,6 +158,18 @@ function measure(): Map<string, number> {
  * 2 new rows (10-mcp-standards.md/etrade 1,
  * 13-structure-and-file-organization.md/etrade 6). Seed pin
  * totals move 1098/8568 -> 1100/8575.
+ * Baseline update (#3788, 2026-11-09): the schedule watchdog wraps
+ * the four internal-only callbacks so their firings leave a per-run
+ * record, and the wrapper names the callback it records — the
+ * token-renewal callback's own name is the provider brand, so two
+ * code rows grow and cannot be neutralized without renaming the
+ * callback (out of scope, behavioral): 1 new row
+ * (scheduleCallbacks.ts/etrade 1, the RECORDED_SCHEDULE_CALLBACKS
+ * list) and 1 raise (orchestrator.ts/etrade 19->20, the new string
+ * literal passed to the recorder in the token-renewal wrapper).
+ * Three prose mentions were neutralized instead (the wrapper
+ * comments, the inventory answer, the durable doc's table). Seed
+ * pin totals move 1100/8575 -> 1101/8577.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (186 rows / 1039 lines) ----
@@ -348,7 +360,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/platformKnowledge.ts", "yahoo", 12],
   ["src/trading/interfaces.ts", "etrade", 2],
 
-  // ---- INTEGRATION (668 rows / 6483 lines) ----
+  // ---- INTEGRATION (669 rows / 6485 lines) ----
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "etrade", 12],
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "yahoo", 1],
   ["docs/EXTERNAL_APIS_AND_ENDPOINTS_DIRECTORY.md", "alpaca", 3],
@@ -405,7 +417,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/agents/nlq/types.ts", "etrade", 1],
   ["src/agents/nlqOptionsStrategy.ts", "alpaca", 1],
   ["src/agents/nlqOptionsStrategy.ts", "etrade", 19],
-  ["src/agents/orchestrator.ts", "etrade", 19],
+  ["src/agents/orchestrator.ts", "etrade", 20],
   ["src/agents/orchestrator/asyncJobs.ts", "etrade", 12],
   ["src/agents/orchestrator/autopilot.ts", "etrade", 4],
   ["src/agents/orchestrator/goalScreenDispatch.ts", "etrade", 1],
@@ -421,6 +433,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/agents/orchestrator/researchPublish.ts", "etrade", 5],
   ["src/agents/orchestrator/routeRequest.ts", "alpaca", 4],
   ["src/agents/orchestrator/routeRequest.ts", "etrade", 39],
+  ["src/agents/orchestrator/scheduleCallbacks.ts", "etrade", 1],
   ["src/agents/orchestrator/scheduleMaintenance.ts", "etrade", 2],
   ["src/agents/orchestrator/scheduledCallbacks.ts", "etrade", 16],
   ["src/agents/orchestrator/scheduledTasksCopilot.ts", "alpaca", 3],
@@ -1312,8 +1325,8 @@ describe("#3525 S6 shrink-only provider-brand census pin", () => {
     expect(total).toBeLessThanOrEqual(PLATFORM_BASELINE_TOTAL);
   });
 
-  it("the baseline itself is the recorded seed (1100 rows / 8575 lines)", () => {
-    expect(BASELINE.length).toBe(1100);
-    expect(BASELINE.reduce((a, [, , c]) => a + c, 0)).toBe(8575);
+  it("the baseline itself is the recorded seed (1101 rows / 8577 lines)", () => {
+    expect(BASELINE.length).toBe(1101);
+    expect(BASELINE.reduce((a, [, , c]) => a + c, 0)).toBe(8577);
   });
 });

@@ -33,3 +33,34 @@ export const ACCOUNT_SCOPED_SCHEDULE_CALLBACKS = new Set<string>([
 ]);
 
 export type CreatableScheduleCallback = (typeof CREATABLE_SCHEDULE_CALLBACKS)[number];
+
+/**
+ * Issue #3788 — internal-only callbacks whose orchestrator methods
+ * now record their own runs (recordScheduleCallbackRun wrappers on
+ * the class methods, mirroring the creatable four). Before this
+ * slice, SDK firings of these four left no per-run record (the
+ * #2964 carried gap): executeAsyncJob (async-job plumbing),
+ * expireStaleOrderDraft (order-draft expiry), collectIvHistory (IV
+ * collection), and the brokerage token-renewal callback.
+ * Manual triggers of these callbacks are recorded exactly once:
+ * the trigger route treats this set like the creatable set (the
+ * method wrapper records; the route must not wrap them again).
+ */
+export const INTERNAL_RECORDED_SCHEDULE_CALLBACKS = [
+  "executeAsyncJob",
+  "expireStaleOrderDraft",
+  "collectIvHistory",
+  "autoRenewETradeTokens",
+] as const;
+
+/**
+ * Issue #3788 — every callback with a per-run ledger record: the
+ * set the schedule watchdog can observe (and therefore the set it
+ * watches). Any callback outside this set is skipped by the
+ * watchdog, counted, and named — never flagged on evidence it
+ * cannot see.
+ */
+export const RECORDED_SCHEDULE_CALLBACKS: readonly string[] = [
+  ...CREATABLE_SCHEDULE_CALLBACKS,
+  ...INTERNAL_RECORDED_SCHEDULE_CALLBACKS,
+];
