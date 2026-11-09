@@ -22,6 +22,18 @@ describe("Compliance documentation layout (#1447)", () => {
     expect(fs.existsSync(controlsPath)).toBe(true);
     const controlsContent = fs.readFileSync(controlsPath, "utf8");
     expect(controlsContent).toContain("Architectural & UX Drift Analysis and Governance Framework");
+
+    // #3802 archive completion (2026-11-09): the §22 rename initially left a
+    // stale un-headered original at the old compliance path; on the user's
+    // direction it was moved to docs/archive/, so the old path must NOT
+    // resolve as a live document and the archive copy keeps the original.
+    const stalePath = path.join(newComplianceDir, "anti-drift-controls.md");
+    expect(fs.existsSync(stalePath)).toBe(false);
+    const archivePath = path.join(root, "docs", "archive", "anti-drift-controls.md");
+    expect(fs.existsSync(archivePath)).toBe(true);
+    const archiveContent = fs.readFileSync(archivePath, "utf8");
+    expect(archiveContent).toContain("Architectural & UX Drift Analysis and Governance Framework");
+    expect(archiveContent).not.toContain("Deprecated 2026-11-08 (#3802)");
   });
 
   it("removes the deprecated docs/architecture/compliance directory", () => {
