@@ -21,6 +21,7 @@ PR.
 | [0002](0002-data-foundation-layer.md) | Data foundation layer: port-first, Drizzle ORM, D1 as one adapter | Accepted |
 | [0003](0003-messaging-port.md) | Queue-backed messaging: port-first, provider adapter + in-memory adapter | Accepted |
 | [0004](0004-ux-token-architecture-no-exemptions.md) | UX token architecture compliance is mandatory — no exemptions | Accepted |
+| [0004](0004-screener-workflows.md) | Screener decoupling onto Workflows: port-first, parent/child fan-out, child-owned store/deliver | Accepted |
 | [0005](0005-actor-port.md) | Agents SDK actors: actor port and AgentActorDO pattern | Accepted |
 | [0006](0006-cloudflare-feature-flags.md) | Cloudflare feature flags: port-first architecture with Flagship adapter and fail-closed fallbacks | Accepted |
 | [0007](0007-hybrid-rag.md) | Hybrid RAG: Vectorize embeddings + D1 market adjacency graphs | Accepted |
@@ -37,9 +38,18 @@ PR.
 | [0018](0018-caio-alignment-resource-instrumentation-1819.md) | CAIO alignment for #1819 resource instrumentation: reuse #1742's port pattern, consume #1743's landed schema/transport (PR #1842) and #1741's gateway stats (PR #1838) as a resource class; one schema/stream/home; IAAA audit untouched | Accepted |
 | [0019](0019-enrichment-yahoo-alpaca.md) | Daily enrichment + minute bars (#1888): Yahoo live via existing flag port, Alpaca flag-gated with Yahoo fallback, manual killswitch, telemetry-fed quality | Accepted |
 | [0020](0020-do-d1-r2-topology.md) | DO vs D1 vs R2 — actor runtime, queryable projection, blob storage | Accepted |
+| [0021](0021-chat-deferred-from-page-shell.md) | Chat page deferred from the PageShell standard | Accepted |
+| [0022](0022-data-foundation.md) | Data foundation repo-wide — one data-access layer behind ports, AOP transactions, dialect portability, intelligence substrate | Accepted |
+| [0023](0023-cross-domain-saga.md) | Cross-domain saga — paid screener run → trade, coordinated as a linear leg sequence | Proposed |
 | [0024](0024-durable-turn-submissions.md) | Durable chat-turn submission via Think's submission queue (ADR 0005 follow-up D2) | Accepted |
 | [0025](0025-web-search-provider-seam.md) | Web search behind a named-provider seam (Brave first), fail-loud with web_search_provider_not_configured until the owner sets the provider secret (#2731) | Accepted |
+| [0026](0026-cfpay-acceptance-decision.md) | cfpay acceptance decision — contract, options, and recommendation | Proposed |
 | [0027](0027-one-stage-runner-contract.md) | One stage-runner contract for every screen invocation mode: plan + checkpoint + three drivers, `mas_async_jobs` as the single unit store, retry budgets from `pipelinePolicy`, fan-out cap named not truncated (#2601, #2621) | Proposed |
+
+**Note on ADR 0004:** the number 0004 was assigned twice — to the UX token
+architecture decision and to the screener decoupling decision. Both records
+stand (ADRs are never rewritten or renumbered); cite either as
+"ADR 0004 (<short title>)" so the reference resolves unambiguously.
 
 ## Template
 
