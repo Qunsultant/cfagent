@@ -111,8 +111,8 @@ describe("mesh registry shape (#2322)", () => {
     }
   });
 
-  it("records 20 tool families (survey §8 fifteen + web_search, web_fetch, AI Search platform + the G1 mesh-door family, #2341 + the Agent Skills family, #2417)", () => {
-    expect(MESH_TOOL_FAMILIES).toHaveLength(20);
+  it("records 21 tool families (survey §8 fifteen + web_search, web_fetch, AI Search platform + the G1 mesh-door family, #2341 + the Agent Skills family, #2417 + the trading-limits family, #3888)", () => {
+    expect(MESH_TOOL_FAMILIES).toHaveLength(21);
     const ids = MESH_TOOL_FAMILIES.map((f) => f.id);
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids).toContain("web-search");

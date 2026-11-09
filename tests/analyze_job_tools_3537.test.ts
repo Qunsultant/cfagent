@@ -192,9 +192,9 @@ async function makeContext(withIdentity = true) {
 }
 
 describe("analyze-job copilot tools (#3537)", () => {
-  it("the catalog carries the four analyze-job tools (123 total since #3846: +2 Alpaca quote/preview tools)", () => {
+  it("the catalog carries the four analyze-job tools (124 total since #3888: +1 trading_limits tool)", () => {
     const names = McpToolFactory.getToolDefinitions().map((d) => d.name);
-    expect(names).toHaveLength(123);
+    expect(names).toHaveLength(124);
     for (const name of ["run_analyze_job", "get_analyze_job_status", "list_analyze_jobs", "manage_analyze_job"]) {
       expect(names).toContain(name);
     }

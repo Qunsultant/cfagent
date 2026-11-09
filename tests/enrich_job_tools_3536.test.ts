@@ -171,9 +171,9 @@ async function makeContext(withIdentity = true) {
 }
 
 describe("enrich-job copilot tools (#3536)", () => {
-  it("the catalog carries the four enrich-job tools (123 total since #3846: +2 Alpaca quote/preview tools)", () => {
+  it("the catalog carries the four enrich-job tools (124 total since #3888: +1 trading_limits tool)", () => {
     const names = McpToolFactory.getToolDefinitions().map((d) => d.name);
-    expect(names).toHaveLength(123);
+    expect(names).toHaveLength(124);
     for (const name of ["run_enrich_job", "get_enrich_job_status", "list_enrich_jobs", "manage_enrich_job"]) {
       expect(names).toContain(name);
     }
