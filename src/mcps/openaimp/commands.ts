@@ -67,7 +67,11 @@ import {
   DeprecatedToolAlias,
 } from "./marketDataCommands";
 import { TradingLimitsCommand } from "./tradingLimitCommands";
-import { AlpacaCancelOrderCommand, AlpacaCancelTickerCommand } from "./cancelOrderCommands";
+import {
+  AlpacaCancelAllCommand,
+  AlpacaCancelOrderCommand,
+  AlpacaCancelTickerCommand,
+} from "./cancelOrderCommands";
 import {
   PaidOptionsScreenerCommand,
   PaidMarketResearchCommand,
@@ -1776,6 +1780,8 @@ export class McpToolFactory {
     // Issue #3884/#3886: every open order for one ticker, with the shared
     // class/side/ladder filter.
     this.registerTool(new AlpacaCancelTickerCommand());
+    // Issue #3885: cancel every open order — two-step, capped, token-bound.
+    this.registerTool(new AlpacaCancelAllCommand());
 
     // #1906: deprecated aliases for the renamed market-data tools above.
     // Same commands, legacy names; use canonical tool names instead.

@@ -349,6 +349,9 @@ export const MCP_TOOL_SCOPES: Record<string, McpScope> = {
   alpaca_cancel_order: "mcp:trade",
   // Issue #3884: cancelling a ticker's open orders is a broker-state change.
   alpaca_cancel_ticker: "mcp:trade",
+  // Issue #3885: “cancel everything” is a trade-scope act with its own
+  // two-step gate (preview token + configured cap).
+  alpaca_cancel_all: "mcp:trade",
   // Issue #3888: the externalized limits. Reading them is trade-scope
   // data (the same values every order engine enforces), and a change
   // moves a risk ceiling, so it belongs behind the same scope.
