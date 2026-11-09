@@ -23,15 +23,24 @@ import {
   createCfActorSession,
   createCfActorState,
   createCfActorTurn,
+  createCfActorWorkspace,
   type SchedulerLike,
+  type WorkspaceHostLike,
 } from "./cfAgentsAdapter";
 import {
   createInMemoryActorSchedule,
   createInMemoryActorSession,
   createInMemoryActorState,
   createInMemoryActorTurn,
+  createInMemoryActorWorkspace,
 } from "./inMemoryActorAdapter";
-import type { ActorPort, ActorSessionPort, ActorTurnHooks, ActorTurnPort } from "./actorPorts";
+import type {
+  ActorPort,
+  ActorSessionPort,
+  ActorTurnHooks,
+  ActorTurnPort,
+  ActorWorkspacePort,
+} from "./actorPorts";
 
 export type ActorRuntime = "cf" | "in-memory" | "think";
 
@@ -46,6 +55,10 @@ export interface CreateActorPortsDeps {
   };
   /** Live actor's scheduler surface (cf, think) — unused for in-memory. */
   scheduler?: SchedulerLike;
+  /** Optional host workspace bindings (think `_hostReadFile` etc.). */
+  hostWorkspace?: WorkspaceHostLike;
+  /** Optional pre-built workspace port override. */
+  workspace?: ActorWorkspacePort;
   /**
    * Think turn facet, injected by the caller (think only). A
    * function of the session so the factory can build the session
@@ -62,6 +75,7 @@ export function createActorPorts(runtime: ActorRuntime, deps: CreateActorPortsDe
       schedule: createInMemoryActorSchedule(),
       session,
       turn: createInMemoryActorTurn(deps.hooks, session),
+      workspace: deps.workspace ?? createInMemoryActorWorkspace(),
     };
   }
   if (runtime === "think") {
@@ -74,6 +88,7 @@ export function createActorPorts(runtime: ActorRuntime, deps: CreateActorPortsDe
       schedule: createCfActorSchedule(deps.scheduler),
       session,
       turn: deps.thinkTurn(session),
+      workspace: deps.workspace ?? createCfActorWorkspace(deps.storage, deps.hostWorkspace),
     };
   }
   if (!deps.storage || !deps.scheduler) {
@@ -85,5 +100,6 @@ export function createActorPorts(runtime: ActorRuntime, deps: CreateActorPortsDe
     schedule: createCfActorSchedule(deps.scheduler),
     session,
     turn: createCfActorTurn(deps.hooks, session),
+    workspace: deps.workspace ?? createCfActorWorkspace(deps.storage, deps.hostWorkspace),
   };
 }

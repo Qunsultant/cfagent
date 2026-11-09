@@ -142,11 +142,15 @@ export type {
 // port, and PortThink itself neither overrides nor blocks the
 // hook.)
 export type { SkillSource } from "@cloudflare/think";
-import type { UIMessage } from "ai";
+import type { ToolSet, UIMessage } from "ai";
+import { z } from "zod";
 import {
   createCfActorSchedule,
   createCfActorSession,
   createCfActorState,
+  createCfActorWorkspace,
+  type WorkspaceHostEntryLike,
+  type WorkspaceHostLike,
 } from "./cfAgentsAdapter";
 import { createActorPorts } from "./createActorPorts";
 import { toModelMessages } from "./actorTurnRunner";
@@ -156,6 +160,7 @@ import type {
   ActorTurnHooks,
   ActorTurnPort,
   ActorWebhookEvent,
+  ActorWorkspacePort,
   ChatResponseResult,
   TurnConfig,
   TurnInput,
@@ -163,15 +168,26 @@ import type {
 } from "./actorPorts";
 import {
   THINK_WEBHOOK_SIGNATURE_HEADER,
+  THINK_WORKSPACE_ROOT,
   portMessagesToThink,
   portTurnConfigToThink,
   resolveThinkWebhookSecret,
+  resolveThinkWorkspacePath,
   thinkChatResponseToPort,
   thinkTurnContextToPort,
   thinkTurnResultToPort,
   thinkWebhookSourceFromPath,
+  thinkWorkspaceContentType,
+  thinkWorkspaceEndpointFromPath,
+  thinkWorkspaceFileName,
+  thinkWorkspaceUrls,
   verifyThinkWebhookSignature,
 } from "./thinkPortMapping";
+import {
+  resolveAgentCapabilityManifest,
+  type AgentCapabilityManifest,
+  type CapabilityId,
+} from "./capabilityManifest";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
 
@@ -200,6 +216,116 @@ export class PortThink extends Think<any> {
   adapterTurnErrorReported = false;
   /** Last Think onChatResponse result, recorded during adapter turns. */
   lastThinkResponse?: ThinkChatResponseResult;
+  /** Lazy per-instance workspace port (#3491 / #3896). */
+  private _workspacePort?: ActorWorkspacePort;
+
+  /**
+   * Per-agent workspace port (#3491 / #3896), inherited by every
+   * PortThink subclass. Backed by Think's `_hostReadFile` /
+   * `_hostWriteFile` / `_hostDeleteFile` / `_hostListFiles` plus the
+   * Durable Object's SQLite/KV storage.
+   */
+  get workspacePort(): ActorWorkspacePort {
+    if (!this._workspacePort) {
+      this._workspacePort = createThinkActorWorkspace(this);
+    }
+    return this._workspacePort;
+  }
+
+  /**
+   * Resolve this agent class's capability manifest against the live
+   * instance env (`AGENT_CAPABILITIES_DISABLED` respected).
+   */
+  getPortCapabilityManifest(): AgentCapabilityManifest {
+    const rawEnv = (this as unknown as { env?: Record<string, unknown> }).env ?? null;
+    return resolveAgentCapabilityManifest(this.constructor.name, {
+      env: rawEnv,
+    });
+  }
+
+  /**
+   * Check whether a port capability (`workspace`, `browser`,
+   * `webFetch`, `webSearch`, `sandbox`, `mcpClient`, `webhooks`, etc.)
+   * is enabled for this PortThink instance.
+   */
+  isPortCapabilityEnabled(capability: CapabilityId): boolean {
+    const manifest = this.getPortCapabilityManifest();
+    const entry =
+      (manifest.channels as Record<string, { state: string }>)[capability] ??
+      (manifest.capabilities as Record<string, { state: string }>)[capability] ??
+      (manifest.tools as Record<string, { state: string }>)[capability];
+    return entry?.state !== "disabled-by-config";
+  }
+
+  /**
+   * Build AI SDK workspace tools (`workspace_list_files`,
+   * `workspace_read_file`, `workspace_write_file`,
+   * `workspace_delete_file`) backed by `this.workspacePort` for any
+   * PortThink subclass. Returns `{}` if `workspace` is disabled via
+   * `AGENT_CAPABILITIES_DISABLED`.
+   */
+  getPortWorkspaceTools(scopeId = "default"): ToolSet {
+    if (!this.isPortCapabilityEnabled("workspace")) {
+      return {};
+    }
+    const ws = this.workspacePort;
+    return {
+      workspace_list_files: {
+        description:
+          "List files in the agent's persistent /workspace filesystem, including clickable viewUrl and downloadUrl links.",
+        inputSchema: z.object({
+          dir: z.string().optional().describe("Directory path inside /workspace (defaults to /workspace)."),
+        }),
+        execute: async ({ dir }: { dir?: string }) => {
+          const files = await ws.listFiles(dir ?? THINK_WORKSPACE_ROOT, scopeId);
+          return { ok: true, dir: dir ?? THINK_WORKSPACE_ROOT, count: files.length, files };
+        },
+      } as unknown as ToolSet[string],
+      workspace_read_file: {
+        description: "Read a file from the agent's persistent /workspace filesystem.",
+        inputSchema: z.object({
+          path: z.string().describe("Workspace file path, e.g. /workspace/notes.md"),
+        }),
+        execute: async ({ path }: { path: string }) => {
+          const resolved = resolveThinkWorkspacePath(path);
+          if (!resolved.ok) return { ok: false, error: resolved.error };
+          const read = await ws.readFile(resolved.path, scopeId);
+          if (!read) return { ok: false, error: `File not found in workspace: ${resolved.path}` };
+          return {
+            ok: true,
+            path: resolved.path,
+            content: read.content,
+            updatedAt: read.updatedAt,
+            ...thinkWorkspaceUrls(resolved.path),
+          };
+        },
+      } as unknown as ToolSet[string],
+      workspace_write_file: {
+        description:
+          "Write or overwrite a file in the agent's persistent /workspace filesystem and return its viewUrl and downloadUrl.",
+        inputSchema: z.object({
+          path: z.string().describe("Workspace file path, e.g. /workspace/report.md"),
+          content: z.string().describe("UTF-8 file content to write."),
+        }),
+        execute: async ({ path, content }: { path: string; content: string }) => {
+          const written = await ws.writeFile(path, content, scopeId);
+          return { ok: true, ...written };
+        },
+      } as unknown as ToolSet[string],
+      workspace_delete_file: {
+        description: "Delete a file from the agent's persistent /workspace filesystem.",
+        inputSchema: z.object({
+          path: z.string().describe("Workspace file path to delete."),
+        }),
+        execute: async ({ path }: { path: string }) => {
+          const resolved = resolveThinkWorkspacePath(path);
+          if (!resolved.ok) return { ok: false, error: resolved.error };
+          const deleted = await ws.deleteFile(resolved.path, scopeId);
+          return { ok: true, path: resolved.path, deleted };
+        },
+      } as unknown as ToolSet[string],
+    };
+  }
 
   setPortTurnOverride(config: ThinkTurnConfig | void): void {
     this.portTurnOverride = { installed: true, config };
@@ -255,13 +381,14 @@ export class PortThink extends Think<any> {
   }
 
   /**
-   * Issue #3474: the webhook channel's single interception point.
-   * Only the reserved `/webhooks/<source>` tail is diverted (and
-   * never for a sub-agent/facet address — the SDK reserves the
-   * literal `sub` segment, and a facet's webhook tail is the
-   * facet's, forwarded by the base fetch); every other request
-   * goes to the base Agent fetch exactly as before. See the file
-   * header for why the channel is wired here and not at onRequest.
+   * Issue #3474 & #3491/#3896: single interception point for PortThink
+   * communication & workspace channels.
+   *  - `/webhooks/<source>` -> HMAC-verified webhook channel (#3474)
+   *  - `/workspace/files` & `/workspace/file` -> per-agent workspace
+   *    filesystem HTTP channel (#3491 / #3896)
+   * Both are intercepted at `fetch` so EVERY PortThink subclass in the
+   * fleet inherits them with zero per-agent route boilerplate (including
+   * classes that override `onRequest` without delegating to `super`).
    */
   override async fetch(request: Request): Promise<Response> {
     const { pathname } = new URL(request.url);
@@ -272,7 +399,53 @@ export class PortThink extends Think<any> {
     if (source !== null && !targetsSubAgent) {
       return this.handlePortWebhook(request, source);
     }
+    const workspaceEndpoint = thinkWorkspaceEndpointFromPath(pathname);
+    if (workspaceEndpoint !== null && !targetsSubAgent) {
+      return this.handlePortWorkspace(request, workspaceEndpoint);
+    }
     return super.fetch(request);
+  }
+
+  /**
+   * Issue #3491 / #3896: built-in per-agent workspace HTTP channel on PortThink.
+   * Serves `GET /workspace/files`, `GET /workspace/file`, `POST /workspace/file`,
+   * and `DELETE /workspace/file` for every PortThink subclass.
+   */
+  private async handlePortWorkspace(
+    request: Request,
+    endpoint: "files" | "file"
+  ): Promise<Response> {
+    if (!this.isPortCapabilityEnabled("workspace")) {
+      return Response.json(
+        { ok: false, error: "Workspace capability is disabled by configuration." },
+        { status: 403 }
+      );
+    }
+    await (
+      this as unknown as { lifecycle?: { start?: () => Promise<unknown> } }
+    ).lifecycle?.start?.();
+
+    const headerLogin = request.headers.get("x-user-login")?.trim();
+    const selfWithAuth = this as unknown as {
+      getScreenerExecutionContext?: () => Promise<{ userLogin?: string } | undefined>;
+      audit?: (type: string, agent: "orchestrator", payload: Record<string, unknown>) => void;
+    };
+    let resolvedLogin = headerLogin;
+    if (!resolvedLogin && typeof selfWithAuth.getScreenerExecutionContext === "function") {
+      const execCtx = await selfWithAuth.getScreenerExecutionContext().catch(() => undefined);
+      resolvedLogin = execCtx?.userLogin?.trim();
+      if (!resolvedLogin) {
+        return Response.json({ error: "Authentication required" }, { status: 401 });
+      }
+    }
+    const scopeId = resolvedLogin || "default";
+    return handlePortWorkspaceRequest(request, endpoint, this.workspacePort, {
+      scopeId,
+      audit:
+        typeof selfWithAuth.audit === "function"
+          ? (type, payload) => selfWithAuth.audit!(type, "orchestrator", payload)
+          : undefined,
+    });
   }
 
   /**
@@ -466,6 +639,191 @@ export const createThinkActorState = createCfActorState;
 export const createThinkActorSchedule = createCfActorSchedule;
 export const createThinkActorSession = createCfActorSession;
 
+/**
+ * Bind an ActorWorkspacePort to a PortThink instance: delegates to
+ * Think's built-in `_hostReadFile` / `_hostWriteFile` /
+ * `_hostDeleteFile` / `_hostListFiles` methods + DO storage SQLite/KV.
+ */
+export function createThinkActorWorkspace(think: PortThink): ActorWorkspacePort {
+  const rawThink = think as unknown as {
+    ctx?: {
+      storage?: {
+        get?(key: string): Promise<unknown>;
+        put?(key: string, value: unknown): Promise<void>;
+        delete?(key: string): Promise<unknown>;
+        sql?: { exec(sql: string, ...params: unknown[]): Iterable<unknown> };
+      };
+    };
+    _hostReadFile?: (path: string) => Promise<string | null>;
+    _hostWriteFile?: (path: string, content: string) => Promise<void>;
+    _hostDeleteFile?: (path: string) => Promise<boolean>;
+    _hostListFiles?: (dir: string) => Promise<WorkspaceHostEntryLike[]>;
+  };
+  const hostWorkspace: WorkspaceHostLike = {
+    readFile:
+      typeof rawThink._hostReadFile === "function"
+        ? (p) => rawThink._hostReadFile!(p)
+        : undefined,
+    writeFile:
+      typeof rawThink._hostWriteFile === "function"
+        ? (p, c) => rawThink._hostWriteFile!(p, c)
+        : undefined,
+    deleteFile:
+      typeof rawThink._hostDeleteFile === "function"
+        ? (p) => rawThink._hostDeleteFile!(p)
+        : undefined,
+    listFiles:
+      typeof rawThink._hostListFiles === "function"
+        ? (d) => rawThink._hostListFiles!(d)
+        : undefined,
+  };
+  return createCfActorWorkspace(rawThink.ctx?.storage, hostWorkspace);
+}
+
+/**
+ * Shared HTTP handler for `/workspace/files` and `/workspace/file`
+ * over any `ActorWorkspacePort` (#3491 / #3896).
+ */
+export async function handlePortWorkspaceRequest(
+  request: Request,
+  endpoint: "files" | "file",
+  workspace: ActorWorkspacePort,
+  options: {
+    scopeId?: string;
+    audit?: (type: string, payload: Record<string, unknown>) => void;
+  } = {}
+): Promise<Response> {
+  const url = new URL(request.url);
+  const scopeId = options.scopeId || "default";
+
+  if (endpoint === "files") {
+    if (request.method !== "GET") {
+      return Response.json({ ok: false, error: "Method not allowed" }, { status: 405 });
+    }
+    const dirParam = url.searchParams.get("dir") || THINK_WORKSPACE_ROOT;
+    const dirResolved = resolveThinkWorkspacePath(dirParam);
+    if (!dirResolved.ok) {
+      return Response.json({ ok: false, error: dirResolved.error }, { status: 400 });
+    }
+    const files = await workspace.listFiles(dirResolved.path, scopeId);
+    return Response.json({
+      ok: true,
+      dir: dirResolved.path,
+      count: files.length,
+      files,
+    });
+  }
+
+  if (request.method === "GET") {
+    const rawPath = url.searchParams.get("path") || "";
+    const resolved = resolveThinkWorkspacePath(rawPath);
+    if (!resolved.ok) {
+      return Response.json({ ok: false, error: resolved.error }, { status: 400 });
+    }
+    const found = await workspace.readFile(resolved.path, scopeId);
+    if (!found) {
+      return Response.json(
+        {
+          ok: false,
+          error: `File not found in workspace: ${resolved.path}`,
+          path: resolved.path,
+        },
+        { status: 404 }
+      );
+    }
+
+    const wantDownload =
+      url.searchParams.get("download") === "1" || url.searchParams.get("download") === "true";
+    const wantRaw =
+      url.searchParams.get("raw") === "1" || url.searchParams.get("raw") === "true";
+    const safeName = thinkWorkspaceFileName(resolved.path);
+
+    if (wantDownload) {
+      return new Response(found.content, {
+        status: 200,
+        headers: {
+          "content-type": thinkWorkspaceContentType(resolved.path),
+          "content-disposition": `attachment; filename="${safeName}"`,
+          "x-content-type-options": "nosniff",
+          "cache-control": "no-store",
+        },
+      });
+    }
+
+    if (wantRaw) {
+      return new Response(found.content, {
+        status: 200,
+        headers: {
+          "content-type": "text/plain; charset=utf-8",
+          "content-disposition": `inline; filename="${safeName}"`,
+          "x-content-type-options": "nosniff",
+          "cache-control": "no-store",
+        },
+      });
+    }
+
+    const urls = thinkWorkspaceUrls(resolved.path);
+    const size = new TextEncoder().encode(found.content).byteLength;
+    return Response.json({
+      ok: true,
+      name: safeName,
+      path: resolved.path,
+      size,
+      updatedAt: found.updatedAt,
+      content: found.content,
+      ...urls,
+    });
+  }
+
+  if (request.method === "POST" || request.method === "PUT") {
+    let body: { path?: string; content?: string } = {};
+    try {
+      body = (await request.json()) as { path?: string; content?: string };
+    } catch {
+      return Response.json({ ok: false, error: "Invalid JSON body" }, { status: 400 });
+    }
+    const rawPath = body.path || url.searchParams.get("path") || "";
+    const resolved = resolveThinkWorkspacePath(rawPath);
+    if (!resolved.ok) {
+      return Response.json({ ok: false, error: resolved.error }, { status: 400 });
+    }
+    if (typeof body.content !== "string") {
+      return Response.json({ ok: false, error: "Field 'content' must be a string." }, { status: 400 });
+    }
+    const written = await workspace.writeFile(resolved.path, body.content, scopeId);
+    options.audit?.("workspace.file_written", {
+      userLogin: scopeId,
+      path: written.path,
+      size: written.size,
+    });
+    return Response.json({
+      ok: true,
+      name: thinkWorkspaceFileName(written.path),
+      ...written,
+    });
+  }
+
+  if (request.method === "DELETE") {
+    const rawPath = url.searchParams.get("path") || "";
+    const resolved = resolveThinkWorkspacePath(rawPath);
+    if (!resolved.ok) {
+      return Response.json({ ok: false, error: resolved.error }, { status: 400 });
+    }
+    const deleted = await workspace.deleteFile(resolved.path, scopeId);
+    options.audit?.("workspace.file_deleted", {
+      userLogin: scopeId,
+      path: resolved.path,
+    });
+    return Response.json({
+      ok: true,
+      path: resolved.path,
+      deleted,
+    });
+  }
+
+  return Response.json({ ok: false, error: "Method not allowed" }, { status: 405 });
+}
+
 export function createThinkActorTurn(
   think: PortThink,
   hooks: ActorTurnHooks,
@@ -487,6 +845,7 @@ export function createThinkActorPort(deps: {
     scheduler:
       deps.scheduler ??
       (deps.think as unknown as Parameters<typeof createCfActorSchedule>[0]),
+    workspace: deps.think.workspacePort,
     thinkTurn: (session) => createThinkActorTurn(deps.think, deps.hooks, session),
   });
 }

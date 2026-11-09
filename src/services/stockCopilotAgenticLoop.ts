@@ -20,6 +20,7 @@ import {
   evaluateLatestPatternSignal,
   type SandboxStrategyId,
 } from "./patternSignals";
+import { notifyOrderExecution } from "./orderExecutionNotifier";
 import {
   copilotSessionAt,
   isAroundTheClock,
@@ -268,6 +269,25 @@ export async function runStockCopilotAgenticCycle(
           result.exitsPlaced += 1;
           result.exits.push({ symbol: intent.symbol, reason: "critic_approved_exit" });
         }
+        await notifyOrderExecution(deps.env, {
+          orderId: placed.brokerOrderRef || placed.executionId || `copilot-agentic-${intent.symbol}-${nowIso}`,
+          broker: deps.selection.resolved ? deps.selection.selection.brokerId : "broker",
+          mode: deps.selection.resolved ? deps.selection.selection.mode : "paper",
+          symbol: intent.symbol,
+          action: intent.action,
+          quantity: intent.quantity,
+          orderType: intent.orderType,
+          price: placed.executionPrice > 0 ? placed.executionPrice : intent.limitPrice,
+          takeProfitPrice: intent.targetPrice,
+          stopLossPrice: intent.stopPrice,
+          status: "executed",
+          origin: "stock_copilot_agentic",
+          userLogin: deps.userLogin,
+          session: session ?? undefined,
+          strategy: intent.strategy ?? "agentic",
+          reason: criticVerdict.reason,
+          timestamp: nowIso,
+        });
       } else {
         result.rejections.push({
           symbol: intent.symbol,

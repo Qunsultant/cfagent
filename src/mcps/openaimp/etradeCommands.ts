@@ -33,6 +33,7 @@ import {
   checkEtradeExecuteGate,
   resolveEtradeAuthorizerDid,
 } from "../../services/etradeExecutionGate";
+import { notifyOrderExecution } from "../../services/orderExecutionNotifier";
 import { orderPayloadHash, parseStrategyOrder } from "../../agents/routes/orderPayloadHash";
 import { ETradeBrowserService } from "../../services/browserAgent";
 import { createStructuredLogger } from "../../observability/structuredLogger";
@@ -456,7 +457,9 @@ export class ETradeExecuteOrderCommand implements IMcpToolCommand<{
       note,
     });
 
+    let notifications;
     if (result.status === "executed" || result.success) {
+      const envMode = (context.env.ETRADE_ENVIRONMENT || "sandbox").toLowerCase();
       try {
         const browserService = new ETradeBrowserService(context.env);
         await browserService.sendTransactionSnapToSlack({
@@ -468,7 +471,7 @@ export class ETradeExecuteOrderCommand implements IMcpToolCommand<{
           orderType: existingRecord.orderType || "MARKET",
           status: "EXECUTED",
           totalValue: existingRecord.totalValue || 0,
-          environment: (context.env.ETRADE_ENVIRONMENT || "sandbox").toLowerCase(),
+          environment: envMode,
           timestamp: new Date().toISOString(),
           humanApproved: decision === "approved",
         });
@@ -478,9 +481,22 @@ export class ETradeExecuteOrderCommand implements IMcpToolCommand<{
           error: snapErr instanceof Error ? snapErr.message : String(snapErr),
         });
       }
+      notifications = await notifyOrderExecution(context.env, {
+        orderId,
+        broker: (existingRecord as any).broker || "broker",
+        mode: envMode,
+        symbol: existingRecord.symbol,
+        action: existingRecord.action,
+        quantity: Number(existingRecord.quantity),
+        orderType: existingRecord.orderType || "MARKET",
+        price: existingRecord.price,
+        status: result.status || "executed",
+        origin: this.name,
+        userLogin: context.actingLogin?.() ?? context.sessionId,
+      });
     }
 
-    return result;
+    return notifications ? { ...result, notifications } : result;
   }
 }
 
