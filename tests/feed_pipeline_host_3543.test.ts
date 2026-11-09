@@ -133,7 +133,8 @@ describe("pipeline host wiring (#3543)", () => {
     const { ctx } = makeHostContext();
     const tasks = await declarePipelineTasks(ctx);
     // #3536 pin update (§7): the declaration set is the whole
-    // plane — pipelineJobIds() stays the 7 feed jobs, and the
+    // plane — pipelineJobIds() stays the feed jobs (7 at #3536,
+    // 8 since #3876), and the
     // enrich jobs declare alongside them under the same prefix.
     // #3537 pin update (§7): the analyze jobs join the set too.
     // #3538 pin update (§7): the generate jobs join the set too.
@@ -141,12 +142,14 @@ describe("pipeline host wiring (#3543)", () => {
     // #3540 pin update (§7): the composed pipeline chains join
     // the set too — one declaration per chain root (the chain's
     // stages carry no schedules of their own inside the chain).
-    expect(pipelineJobIds()).toHaveLength(7);
-    expect(pipelineEnrichJobIds()).toHaveLength(5);
-    expect(pipelineAnalyzeJobIds()).toHaveLength(5);
-    expect(pipelineGenerateJobIds()).toHaveLength(5);
-    expect(pipelineDeliverJobIds()).toHaveLength(5);
-    expect(pipelineChainJobIds()).toHaveLength(5);
+    // #3876 pin update (S7): the S&P 500 Yahoo quotes job joins
+    // the plane - every stage family gains its sp500 member.
+    expect(pipelineJobIds()).toHaveLength(8);
+    expect(pipelineEnrichJobIds()).toHaveLength(6);
+    expect(pipelineAnalyzeJobIds()).toHaveLength(6);
+    expect(pipelineGenerateJobIds()).toHaveLength(6);
+    expect(pipelineDeliverJobIds()).toHaveLength(6);
+    expect(pipelineChainJobIds()).toHaveLength(6);
     const ids = [
       ...pipelineJobIds(),
       ...pipelineEnrichJobIds(),
