@@ -1420,8 +1420,8 @@ describe("#3525 S6 shrink-only provider-brand census pin", () => {
   });
 
   it("the baseline itself is the recorded seed (1124 rows / 8756 lines)", () => {
-    // #3883 + #3884: +3 rows / +15 lines — the cancellation surface names the
-    // provider it executes against (see the INTEGRATION disposition above).
+    // #3883: +3 rows — the cancellation surface names the provider it executes
+    // against (see the INTEGRATION disposition above).
     // #3905: +6 lines on the same seed — the Dow feed job's raises above
     // (feedJobs.ts/yahoo 12->14, feedPipelineJobs.ts/yahoo 19->23).
     expect(BASELINE.length).toBe(1124);
