@@ -503,7 +503,7 @@ export async function handleBrokerOrderRoutes(
         readSetting: (key) => ctx.readSettingRaw(key),
       });
       const receipt = await cancelAllOrders(
-        createAlpacaCancelPort(ctx.env),
+        createCancelBrokerPort(ctx.env),
         {
           token: typeof body.confirm === "string" ? body.confirm : undefined,
           dryRun: body.dryRun === true,
