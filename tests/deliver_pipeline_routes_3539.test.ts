@@ -346,6 +346,7 @@ describe("pipeline deliver-jobs routes (#3539)", () => {
     expect(body.jobs.map((j) => j.jobId)).toEqual([
       "yahoo-nasdaq100-quotes-enrich-analyze-generate-deliver",
       "yahoo-sp100-quotes-enrich-analyze-generate-deliver",
+      "yahoo-sp500-quotes-enrich-analyze-generate-deliver",
     ]);
     const alpaca = await callRoute(ctx, "GET", "/data-providers/alpaca/deliver-jobs");
     const alpacaBody = (await alpaca.json()) as { jobs: DeliverJobSurfaceView[] };
@@ -359,7 +360,7 @@ describe("pipeline deliver-jobs routes (#3539)", () => {
     const body = (await res.json()) as any;
     const yahoo = body.providers.find((p: any) => p.id === "yahoo");
     expect(Array.isArray(yahoo.deliverJobs)).toBe(true);
-    expect(yahoo.deliverJobs).toHaveLength(2);
+    expect(yahoo.deliverJobs).toHaveLength(3);
     expect(yahoo.deliverJobs[0]).toMatchObject({ jobId: DELIVER_ID, deliver: { state: "never-run" } });
   });
 
