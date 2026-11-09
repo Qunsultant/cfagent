@@ -15,7 +15,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { apiFetch as fetch } from "./apiFetch";
-import { Button, Checkbox, Notice, SegmentedControl, TextInput } from "./components/ui";
+import { Button, Checkbox, Notice, PageSection, PageShell, SegmentedControl, TextInput } from "./components/ui";
 import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
 import { PendingReviewQueue } from "./PendingReviewQueue";
 import { RegeneratePdfButton } from "./RegeneratePdfButton";
@@ -220,7 +220,10 @@ export function ReportsPanel() {
   const filteredSources = ["all", "screener", "options_scanner", "discovery", "iv_collection", "research_report", "goal_screen"];
 
   return (
-    <div className="reports-panel">
+    <PageShell
+      title="Reports"
+      scopeNote="The single run-history UI — every screener run, options scan, and discovery run in one list, with keyword or semantic search and downloads."
+    >
       <SegmentedControl
         ariaLabel="Reports view"
         value={panelMode}
@@ -246,6 +249,7 @@ export function ReportsPanel() {
       ) : (
       <>
       {!selectedReportId && <PendingReviewQueue />}
+      <PageSection title="Search and filter">
       <div className="reports-toolbar">
         <form onSubmit={handleSearch} className="reports-search">
           <TextInput
@@ -276,7 +280,9 @@ export function ReportsPanel() {
           ))}
         </div>
       </div>
+      </PageSection>
 
+      <PageSection title="Reports">
       {!selectedReportId && loading && <div className="loading">Loading reports…</div>}
       {!selectedReportId && error && (
         <div className="error">
@@ -389,8 +395,9 @@ export function ReportsPanel() {
         ))}
       </div>
       )}
+      </PageSection>
       </>
       )}
-    </div>
+    </PageShell>
   );
 }
