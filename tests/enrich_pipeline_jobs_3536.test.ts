@@ -203,6 +203,7 @@ describe("enrich pipeline catalog + resolution (#3536)", () => {
     expect(ENRICH_PIPELINE_CATALOG.map((e) => e.jobId)).toEqual([
       "yahoo-nasdaq100-quotes-enrich",
       "yahoo-sp100-quotes-enrich",
+      "yahoo-sp500-quotes-enrich",
       "alpaca-nasdaq100-quotes-enrich",
       "etrade-nasdaq100-quotes-enrich",
       "public-nasdaq100-quotes-enrich",
@@ -222,7 +223,7 @@ describe("enrich pipeline catalog + resolution (#3536)", () => {
 
   it("every catalog definition resolves as a valid J1 job definition", () => {
     const raws = buildAllEnrichPipelineJobDefinitions({});
-    expect(raws).toHaveLength(5);
+    expect(raws).toHaveLength(6);
     for (const raw of raws) {
       const resolved = resolveJobDefinition(raw);
       expect(resolved.root.kind).toBe("enrich");
@@ -254,7 +255,7 @@ describe("enrich pipeline catalog + resolution (#3536)", () => {
         return `reg:${spec.jobId}`;
       },
     });
-    expect(registrations).toHaveLength(12);
+    expect(registrations).toHaveLength(14);
     expect(specs.map((s) => s.jobId)).toContain(ENRICH_ID);
   });
 });
