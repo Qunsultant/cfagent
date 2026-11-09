@@ -49,6 +49,8 @@ const PINNED_STAR_REEXPORTS = [
   "./limits",
   // Issue #3883: the neutral cancel vocabulary (classes, status, targets).
   "./cancelFilters",
+  // Issue #3887: the base-breakout continuation ladder (detection, plan, machine).
+  "./baseBreakout",
   // Issue #3232: the broker catalog joins the public trading surface.
   "./brokerCatalog",
   // Issue #2853: the broker panel contract joins the public trading surface.
