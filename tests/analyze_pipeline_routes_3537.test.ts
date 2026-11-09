@@ -265,6 +265,7 @@ describe("pipeline analyze-jobs routes (#3537)", () => {
       "yahoo-nasdaq100-quotes-enrich-analyze",
       "yahoo-sp100-quotes-enrich-analyze",
       "yahoo-sp500-quotes-enrich-analyze",
+      "yahoo-dow-quotes-enrich-analyze",
     ]);
     const alpaca = await callRoute(ctx, "GET", "/data-providers/alpaca/analyze-jobs");
     const alpacaBody = (await alpaca.json()) as { jobs: AnalyzeJobSurfaceView[] };
@@ -278,7 +279,7 @@ describe("pipeline analyze-jobs routes (#3537)", () => {
     const body = (await res.json()) as any;
     const yahoo = body.providers.find((p: any) => p.id === "yahoo");
     expect(Array.isArray(yahoo.analyzeJobs)).toBe(true);
-    expect(yahoo.analyzeJobs).toHaveLength(3);
+    expect(yahoo.analyzeJobs).toHaveLength(4);
     expect(yahoo.analyzeJobs[0]).toMatchObject({ jobId: ANALYZE_ID, analyze: { state: "never-run" } });
   });
 
