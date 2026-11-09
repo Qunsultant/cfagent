@@ -1,3 +1,3 @@
-﻿### Fixed
+### Fixed
 
 - **An approved Alpaca preview now places the order (#3849):** Alpaca `previewOrder` persists the draft to the trade ledger (terms, bracket legs, percent echo, price provenance), and `executeOrder` settles that stored draft through the same Alpaca placement client as `alpaca_place_order`. A new `alpaca_execute_order` tool (`{ orderId, decision? }`, `mcp:trade`) and an `orderId` path on `alpaca_place_order` make the chat "yes/approve" flow place the order instead of calling a nonexistent tool and leaving an approval job running forever. Missing or non-previewed drafts are refused. #rsi
