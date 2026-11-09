@@ -282,6 +282,7 @@ describe("feed job registry (#3530 S2)", () => {
       "alpaca-nasdaq100-quotes",
       "etrade-nasdaq100-quotes",
       "public-nasdaq100-quotes",
+      "yahoo-dow-quotes",
       "yahoo-nasdaq100-fundamentals",
       "yahoo-nasdaq100-quotes",
       "yahoo-sp100-quotes",
