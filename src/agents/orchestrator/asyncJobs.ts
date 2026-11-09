@@ -44,7 +44,7 @@ import {
   systemProvenance,
 } from "../../services/consolidatedScheduling";
 import type { NLQSchedulingPort, NLQStockScreenPort } from "../nlq";
-import { codedMessage } from "../../outcomes/outcomeAspects";
+import { BusinessError, codedMessage, resolveOutcome } from "../../outcomes/outcomeAspects";
 import { recordBlockingAudit } from "../../security/auditChain";
 import {
   enforceServiceDispatch,
@@ -433,6 +433,9 @@ export async function submitAsyncJob(ctx: AsyncJobsContext,
       jobId,
       `Could not schedule async work: ${message}`,
       new Date().toISOString(),
+      // Issue #3811: an arming failure is a job failure — it carries
+      // the generic code.
+      FAILURE_ASYNC_JOB_FAILED_CODE,
     );
     throw error;
   }
@@ -482,6 +485,12 @@ export interface StuckRunAlertInfo {
   startedAt: string;
   ageMs: number;
   thresholdMs: number;
+  /** Issue #3811: the stall evidence — the executor's last recorded
+   *  activity (heartbeat, falling back to the claim instant) and how
+   *  long ago it was. A stuck run with a fresh heartbeat is still
+   *  progressing; one whose last activity is the claim is not. */
+  lastActivityAt: string | null;
+  heartbeatAgeMs: number | null;
 }
 
 /**
@@ -515,6 +524,21 @@ export function maybeAlertStuckRunning(
   const jobId = String(row.job_id);
   const claimed = ports(ctx).queue.markStuckAlerted(jobId, new Date(nowMs).toISOString());
   if (claimed !== 1) return false;
+  // Issue #3811: the stall evidence rides the alert — the executor's
+  // last recorded activity (heartbeat, falling back to the claim
+  // instant for rows that predate heartbeats) and its age. The
+  // threshold itself stays on started_at (the #2567 contract); the
+  // last activity is evidence, never a second threshold.
+  const lastActivityAt =
+    typeof row.last_activity_at === "string" && row.last_activity_at
+      ? row.last_activity_at
+      : typeof row.started_at === "string"
+        ? row.started_at
+        : null;
+  const heartbeatAgeMs =
+    lastActivityAt && Number.isFinite(Date.parse(lastActivityAt))
+      ? nowMs - Date.parse(lastActivityAt)
+      : null;
   const info: StuckRunAlertInfo = {
     jobId,
     capability: String(row.capability),
@@ -523,6 +547,8 @@ export function maybeAlertStuckRunning(
     startedAt: row.started_at,
     ageMs,
     thresholdMs,
+    lastActivityAt,
+    heartbeatAgeMs,
   };
   ctx.audit("async_job.stuck_detected", "orchestrator", {
     jobId: info.jobId,
@@ -530,6 +556,8 @@ export function maybeAlertStuckRunning(
     ownerLogin: info.ownerLogin,
     ageMs: info.ageMs,
     thresholdMs: info.thresholdMs,
+    lastActivityAt: info.lastActivityAt,
+    heartbeatAgeMs: info.heartbeatAgeMs,
   });
   if (typeof ctx.notifyStuckRun === "function") {
     void Promise.resolve()
@@ -553,6 +581,9 @@ export function getAsyncJob(ctx: AsyncJobsContext, jobId: string): AsyncJobRecor
       jobId,
       STALE_RUNNING_REAP_MESSAGE,
       completedAt,
+      // Issue #3811: a reaped row carries the generic failure code —
+      // the execution stopped before a result was recorded.
+      FAILURE_ASYNC_JOB_FAILED_CODE,
     );
     return getAsyncJob(ctx, jobId);
   }
@@ -582,6 +613,10 @@ export function getAsyncJob(ctx: AsyncJobsContext, jobId: string): AsyncJobRecor
     updatedAt: String(row.updated_at),
     startedAt: typeof row.started_at === "string" ? row.started_at : undefined,
     completedAt: typeof row.completed_at === "string" ? row.completed_at : undefined,
+    // Issue #3811: the execution telemetry — the executor's last
+    // recorded activity and the coded failure, when one exists.
+    lastActivityAt: typeof row.last_activity_at === "string" ? row.last_activity_at : undefined,
+    errorCode: typeof row.error_code === "string" ? row.error_code : undefined,
   };
 }
 
@@ -600,6 +635,52 @@ const STALE_RUNNING_REAP_MESSAGE =
  *  rows per tick; the oldest are swept first (listRunning orders
  *  by created_at ASC), the rest wait for the next tick. */
 const STALE_SWEEP_BATCH_LIMIT = 100;
+
+/** Issue #3811: the generic failure code for an execution that
+ *  stopped before a result was recorded (reap) or threw without a
+ *  cataloged code. The single outcome catalog is the resolver;
+ *  this constant is the fallback, never an invented code. */
+const FAILURE_ASYNC_JOB_FAILED_CODE = "FAILURE_ASYNC_JOB_FAILED";
+
+/** Issue #3811: heartbeat interval while a job runs — the #624
+ *  research-task precedent (2 minutes). */
+export const ASYNC_JOB_HEARTBEAT_MS = 120_000;
+
+/** Issue #3811: derive the coded failure for a thrown error, through
+ *  the single outcome catalog — never a message where a code belongs.
+ *  A BusinessError keeps its own code; a message whose leading
+ *  "[CODE]" bracket names a cataloged code keeps that code; anything
+ *  else (uncoded, unknown bracket, non-Error) falls back to the
+ *  generic job code. The resolver never invents a code. */
+export function resolveJobFailureCode(error: unknown): string {
+  if (error instanceof BusinessError) {
+    const resolved = resolveOutcome(error.code);
+    return resolved.resolved ? resolved.code : FAILURE_ASYNC_JOB_FAILED_CODE;
+  }
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  const match = /^\[([^\]]+)\]/.exec(message);
+  if (match) {
+    const resolved = resolveOutcome(match[1]);
+    if (resolved.resolved) return resolved.code;
+  }
+  return FAILURE_ASYNC_JOB_FAILED_CODE;
+}
+
+/** Issue #3811: stamp the executor's heartbeat for a running job.
+ *  Best-effort by contract: a heartbeat failure is logged and
+ *  returns false — it must never fail the job it observes. */
+export function heartbeatAsyncJob(ctx: AsyncJobsContext, jobId: string, nowMs: number = Date.now()): boolean {
+  try {
+    return ports(ctx).queue.heartbeat(jobId, new Date(nowMs).toISOString()) === 1;
+  } catch (error) {
+    structuredLog.warn("asyncJobs.heartbeat_failed", {
+      message: `[OrchestratorAgent] Async job heartbeat failed for job ${jobId}:`,
+      jobId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
+}
 
 export interface StaleAsyncJobSweepResult {
   examined: number;
@@ -643,12 +724,29 @@ export function sweepStaleAsyncJobs(ctx: AsyncJobsContext, nowMs: number = Date.
       const ageMs = nowMs - Date.parse(row.started_at);
       if (ageMs > STALE_RUNNING_REAP_MS) {
         const completedAt = new Date(nowMs).toISOString();
-        const written = ports(ctx).queue.reapStaleRunning(jobId, STALE_RUNNING_REAP_MESSAGE, completedAt);
+        const written = ports(ctx).queue.reapStaleRunning(
+          jobId,
+          STALE_RUNNING_REAP_MESSAGE,
+          completedAt,
+          // Issue #3811: a reaped row carries the generic failure
+          // code — the execution stopped before a result was recorded.
+          FAILURE_ASYNC_JOB_FAILED_CODE,
+        );
         if (written === 1) {
           ctx.audit("async_job.failed", "orchestrator", {
             jobId,
             capability: String(row.capability),
             error: STALE_RUNNING_REAP_MESSAGE,
+            errorCode: FAILURE_ASYNC_JOB_FAILED_CODE,
+            // Issue #3811: the stall evidence — the executor's last
+            // recorded activity (heartbeat, falling back to the claim
+            // instant for rows that predate heartbeats).
+            lastActivityAt:
+              typeof row.last_activity_at === "string" && row.last_activity_at
+                ? row.last_activity_at
+                : typeof row.started_at === "string"
+                  ? row.started_at
+                  : null,
           });
           reaped++;
         }
@@ -704,6 +802,9 @@ export function listAsyncJobs(ctx: AsyncJobsContext, limit = 50): AsyncJobRecord
       updatedAt: String(row.updated_at),
       startedAt: typeof row.started_at === "string" ? row.started_at : undefined,
       completedAt: typeof row.completed_at === "string" ? row.completed_at : undefined,
+      // Issue #3811: the execution telemetry.
+      lastActivityAt: typeof row.last_activity_at === "string" ? row.last_activity_at : undefined,
+      errorCode: typeof row.error_code === "string" ? row.error_code : undefined,
     };
   });
 }
@@ -1037,6 +1138,22 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
   // (queued → started → completed/failed), not only from the 30-min
   // stuck-run threshold.
   ctx.audit("async_job.started", "orchestrator", { jobId, capability: job.capability });
+  // Issue #3811: heartbeat while the job runs — the #624
+  // research-task precedent (2-minute interval, cleared at the
+  // terminal points below). The stamp is observation, not a state
+  // change: if the executor dies, the timer dies with it and the
+  // row's last activity ages — the stall evidence. The callback
+  // never throws (heartbeatAsyncJob is best-effort).
+  let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+  const stopHeartbeat = () => {
+    if (heartbeatTimer) {
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = undefined;
+    }
+  };
+  heartbeatTimer = setInterval(() => {
+    heartbeatAsyncJob(ctx, jobId);
+  }, ASYNC_JOB_HEARTBEAT_MS);
   // Consolidation C3 (#1277): stage identity for transition recording
   // (in scope for both the completion and failure paths below).
   const jobStage = PIPELINE_STAGES.find((s) => s === job.stage);
@@ -1892,11 +2009,20 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
         });
       }
     }
+    // Issue #3811: the job's work is done — stop the heartbeat
+    // (the terminal transition below stamps the final activity).
+    stopHeartbeat();
   } catch (error) {
+    stopHeartbeat();
     const message = error instanceof Error ? error.message : String(error);
     const completedAt = new Date().toISOString();
-    family.queue.failRunning(jobId, message, completedAt);
-    ctx.audit("async_job.failed", "orchestrator", { jobId, capability: job.capability, error: message });
+    // Issue #3811: executor-side failure capture — the throw writes
+    // a terminal failed state with a CODED error (the single outcome
+    // catalog's code, via resolveJobFailureCode), never a silent
+    // stuck row.
+    const errorCode = resolveJobFailureCode(error);
+    family.queue.failRunning(jobId, message, completedAt, errorCode);
+    ctx.audit("async_job.failed", "orchestrator", { jobId, capability: job.capability, error: message, errorCode });
     // Consolidation C3 (#1277): a failed stage is the chain's stop
     // point — recorded per stage with its reason; nothing downstream
     // was scheduled (the completion hooks above never ran).

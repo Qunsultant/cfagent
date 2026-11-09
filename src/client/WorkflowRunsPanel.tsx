@@ -614,6 +614,12 @@ export function WorkflowRunsPanel() {
         <div className="workflow-runs-when">
           <span>{formatTimestamp(run.startedAt)}</span>
           <span className="workflow-runs-muted">{run.finishedAt ? `Ended ${formatTimestamp(run.finishedAt)}` : "No end recorded"}</span>
+          {run.status === "running" && run.lastActivityAt && (
+            <span className="workflow-runs-muted">
+              Last activity {formatTimestamp(run.lastActivityAt)}
+              {typeof run.heartbeatAgeMs === "number" ? ` · ${formatDuration(run.heartbeatAgeMs)} ago` : ""}
+            </span>
+          )}
         </div>
       ),
     },
@@ -796,7 +802,8 @@ export function WorkflowRunsPanel() {
                 {run.artifacts.length} artifact{run.artifacts.length === 1 ? "" : "s"}
               </span>
             )}
-            {!counts && run.artifacts.length === 0 && <span className="workflow-runs-muted">—</span>}
+            {run.error && <span className="workflow-runs-muted">{run.error}</span>}
+            {!counts && run.artifacts.length === 0 && !run.error && <span className="workflow-runs-muted">—</span>}
           </div>
         );
       },

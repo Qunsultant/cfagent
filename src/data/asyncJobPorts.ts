@@ -84,6 +84,16 @@ export interface AsyncJobStoredRow {
   trigger: string | null;
   triggered_by: string | null;
   schedule_id: string | null;
+  /** Issue #3811: the last instant the executor touched this row
+   *  (claim, heartbeat, or terminal transition), or NULL for rows
+   *  claimed before this slice existed. Probed additive column.
+   *  The heartbeat is observation, not a state change: a running
+   *  row's last_activity_at ages while its status stays 'running'. */
+  last_activity_at: string | null;
+  /** Issue #3811: the coded failure for a terminal failed row
+   *  (the single outcome catalog's code, never a message), or NULL
+   *  for rows that never failed. Probed additive column. */
+  error_code: string | null;
 }
 
 /** The list projection: the legacy list SELECT never read
@@ -95,7 +105,9 @@ export type AsyncJobWorkflowRow = AsyncJobStoredRow;
 
 /** The stale-sweep scan's row: the fields the sweep needs to
  *  decide reap-vs-alert (identity, status, age, claim stamp) —
- *  never the payload. Issue #3784. */
+ *  never the payload. Issue #3784. Issue #3811: the scan also
+ *  carries last_activity_at so the stuck alert + reap audit can
+ *  attach the stall evidence (last activity, heartbeat age). */
 export interface AsyncJobRunningRow {
   job_id: string;
   session_id: string;
@@ -104,6 +116,7 @@ export interface AsyncJobRunningRow {
   status: string;
   started_at: string | null;
   stuck_alerted_at: string | null;
+  last_activity_at: string | null;
   created_at: string;
 }
 
@@ -183,8 +196,10 @@ export interface AsyncJobQueuePort {
    *  on the job_id primary key, ADR D-E.1). */
   insertQueued(input: InsertQueuedJobInput): void;
   /** The arm-failure transition: queued -> failed, guarded on
-   *  still-queued. Returns rows written. */
-  failQueued(jobId: string, error: string, nowIso: string): number;
+   *  still-queued. Returns rows written. Issue #3811: stamps the
+   *  failure code when one is supplied (the generic job code for
+   *  an arming failure). */
+  failQueued(jobId: string, error: string, nowIso: string, errorCode?: string | null): number;
   /** Insert a row directly at a terminal status (the screener-
    *  run bridge: the run already finished elsewhere). */
   insertTerminal(input: InsertTerminalJobInput): void;
@@ -196,21 +211,31 @@ export interface AsyncJobQueuePort {
    */
   claim(jobId: string, sessionId: string, nowIso: string): boolean;
   /** The completion transition: running -> completed, guarded
-   *  on still-running. Returns rows written. */
+   *  on still-running. Returns rows written. Issue #3811: stamps
+   *  last_activity_at at the completion instant. */
   complete(jobId: string, resultJson: string, responseStatus: number | null, nowIso: string): number;
   /** The failure transition: running -> failed, guarded on
-   *  still-running. Returns rows written. */
-  failRunning(jobId: string, error: string, nowIso: string): number;
+   *  still-running. Returns rows written. Issue #3811: stamps
+   *  last_activity_at and the failure code when one is supplied. */
+  failRunning(jobId: string, error: string, nowIso: string, errorCode?: string | null): number;
   /** The stale-running reap (invoked from the read path):
    *  running -> failed with the unknown-outcome error, guarded
-   *  on still-running. Returns rows written. */
-  reapStaleRunning(jobId: string, error: string, nowIso: string): number;
+   *  on still-running. Returns rows written. Issue #3811: stamps
+   *  last_activity_at and the failure code when one is supplied. */
+  reapStaleRunning(jobId: string, error: string, nowIso: string, errorCode?: string | null): number;
   /** Issue #2567: the stuck-alert claim — stamps stuck_alerted_at,
    *  guarded on still-running AND not-yet-claimed, so exactly one
    *  caller ever wins the alert for a row. NOT a lifecycle
    *  transition (status and updated_at are untouched). Returns
    *  rows written: 1 = this caller claimed the alert. */
   markStuckAlerted(jobId: string, nowIso: string): number;
+  /** Issue #3811: the execution heartbeat — stamps
+   *  last_activity_at, guarded on still-running. NOT a lifecycle
+   *  transition (status and updated_at are untouched): the
+   *  heartbeat is observation, so a running row's last activity
+   *  ages while its status stays 'running'. Returns rows written:
+   *  1 = the row was running and the stamp landed. */
+  heartbeat(jobId: string, nowIso: string): number;
 }
 
 /**
@@ -298,6 +323,7 @@ export const ACTIVE_JOB_PAYLOADS_SQL =
  *  idx_mas_async_jobs_session_created bounds the scan to this
  *  instance's rows, oldest first so the stalest rows are swept
  *  first when the batch cap binds. The DO adapter executes
- *  exactly this statement for listRunning(). */
+ *  exactly this statement for listRunning(). Issue #3811: the
+ *  scan also selects last_activity_at (the stall evidence). */
 export const LIST_RUNNING_SQL =
-  "SELECT job_id, session_id, capability, display_name, status, started_at, stuck_alerted_at, created_at FROM mas_async_jobs WHERE session_id = ? AND status = 'running' ORDER BY created_at ASC LIMIT ?";
+  "SELECT job_id, session_id, capability, display_name, status, started_at, stuck_alerted_at, last_activity_at, created_at FROM mas_async_jobs WHERE session_id = ? AND status = 'running' ORDER BY created_at ASC LIMIT ?";

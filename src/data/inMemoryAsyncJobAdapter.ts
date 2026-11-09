@@ -90,14 +90,18 @@ export class InMemoryAsyncJobStore
       trigger: input.trigger ?? null,
       triggered_by: input.triggeredBy ?? null,
       schedule_id: input.scheduleId ?? null,
+      last_activity_at: null,
+      error_code: null,
     });
   }
 
-  failQueued(jobId: string, error: string, nowIso: string): number {
+  failQueued(jobId: string, error: string, nowIso: string, errorCode?: string | null): number {
     const row = this.rows.get(jobId);
     if (!row || row.status !== "queued") return 0;
     row.status = "failed";
     row.error = error;
+    row.error_code = errorCode ?? null;
+    row.last_activity_at = nowIso;
     row.updated_at = nowIso;
     row.completed_at = nowIso;
     return 1;
@@ -131,6 +135,8 @@ export class InMemoryAsyncJobStore
       trigger: input.trigger ?? null,
       triggered_by: input.triggeredBy ?? null,
       schedule_id: input.scheduleId ?? null,
+      last_activity_at: input.nowIso,
+      error_code: null,
     });
   }
 
@@ -139,6 +145,7 @@ export class InMemoryAsyncJobStore
     if (!row || row.session_id !== sessionId || row.status !== "queued") return false;
     row.status = "running";
     row.started_at = nowIso;
+    row.last_activity_at = nowIso;
     row.updated_at = nowIso;
     return true;
   }
@@ -149,29 +156,39 @@ export class InMemoryAsyncJobStore
     row.status = "completed";
     row.result_json = resultJson;
     row.response_status = responseStatus;
+    row.last_activity_at = nowIso;
     row.updated_at = nowIso;
     row.completed_at = nowIso;
     return 1;
   }
 
-  failRunning(jobId: string, error: string, nowIso: string): number {
+  failRunning(jobId: string, error: string, nowIso: string, errorCode?: string | null): number {
     const row = this.rows.get(jobId);
     if (!row || row.status !== "running") return 0;
     row.status = "failed";
     row.error = error;
+    row.error_code = errorCode ?? null;
+    row.last_activity_at = nowIso;
     row.updated_at = nowIso;
     row.completed_at = nowIso;
     return 1;
   }
 
-  reapStaleRunning(jobId: string, error: string, nowIso: string): number {
-    return this.failRunning(jobId, error, nowIso);
+  reapStaleRunning(jobId: string, error: string, nowIso: string, errorCode?: string | null): number {
+    return this.failRunning(jobId, error, nowIso, errorCode ?? null);
   }
 
   markStuckAlerted(jobId: string, nowIso: string): number {
     const row = this.rows.get(jobId);
     if (!row || row.status !== "running" || row.stuck_alerted_at !== null) return 0;
     row.stuck_alerted_at = nowIso;
+    return 1;
+  }
+
+  heartbeat(jobId: string, nowIso: string): number {
+    const row = this.rows.get(jobId);
+    if (!row || row.status !== "running") return 0;
+    row.last_activity_at = nowIso;
     return 1;
   }
 
@@ -277,6 +294,7 @@ export class InMemoryAsyncJobStore
         status: r.status,
         started_at: r.started_at,
         stuck_alerted_at: r.stuck_alerted_at,
+        last_activity_at: r.last_activity_at,
         created_at: r.created_at,
       }));
   }

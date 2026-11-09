@@ -698,6 +698,11 @@ export class OrchestratorAgent extends PortThink {
           jobId: info.jobId, label: info.label, ageMin: Math.round(info.ageMs / 60000),
           thresholdMin: Math.round(info.thresholdMs / 60000), capability: info.capability,
           ownerLogin: info.ownerLogin, startedAt: info.startedAt,
+          // Issue #3811: the stall evidence rides the alert text —
+          // the executor's last activity, falling back to the claim
+          // instant for rows that predate heartbeats.
+          lastActivityAt: info.lastActivityAt ?? info.startedAt,
+          lastActivityMin: Math.round((info.heartbeatAgeMs ?? info.ageMs) / 60000),
         }, "legacy_stuck_run_alert");
         const result = await postSlackText({ post: fetchSlackPost, env: this.env, text });
         this.audit(result.ok ? "async_job.stuck_alert" : "async_job.stuck_alert_failed", "orchestrator", {

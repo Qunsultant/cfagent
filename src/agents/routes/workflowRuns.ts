@@ -122,6 +122,11 @@ export function readWorkflowRunJobs(sql: WorkflowRunsSql, sessionId: string, lim
     trigger: str(row.trigger),
     triggered_by: str(row.triggered_by),
     schedule_id: str(row.schedule_id),
+    // Issue #3811: the execution telemetry rides the row so the
+    // runs view can show last activity, heartbeat age, and the
+    // coded error (the SQL projection already selects both).
+    last_activity_at: str(row.last_activity_at),
+    error_code: str(row.error_code),
   }));
 }
 
