@@ -447,9 +447,11 @@ async function makeScheduleContext(withIdentity = true) {
 }
 
 describe("feed-job schedule copilot tools (#3530 slice B)", () => {
-  it("the catalog carries both schedule tools (126 total since #3884: +1 alpaca_cancel_ticker tool) with sibling scopes", () => {
+  it("the catalog carries both schedule tools with sibling scopes", () => {
     const names = McpToolFactory.getToolDefinitions().map((d) => d.name);
-    expect(names).toHaveLength(126);
+    // Issue #3917: the catalog SIZE is not pinned here — one new tool would
+    // rewrite this line in eleven suites. The tool↔scope accounting pin lives
+    // in tests/tool_attribution_audit_1763.test.ts (sets must match exactly).
     expect(names).toContain("get_feed_job_schedule");
     expect(names).toContain("set_feed_job_schedule");
     expect(MCP_TOOL_SCOPES["get_feed_job_schedule"]).toBe("mcp:read");
