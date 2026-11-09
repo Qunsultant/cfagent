@@ -67,6 +67,7 @@ import {
   DeprecatedToolAlias,
 } from "./marketDataCommands";
 import { TradingLimitsCommand } from "./tradingLimitCommands";
+import { AlpacaCancelOrderCommand } from "./cancelOrderCommands";
 import {
   PaidOptionsScreenerCommand,
   PaidMarketResearchCommand,
@@ -1769,6 +1770,9 @@ export class McpToolFactory {
     // Issue #3888: the externalized limits, readable and changeable
     // from chat so an answer about a cap cites the configuration.
     this.registerTool(new TradingLimitsCommand());
+    // Issue #3883: cancelling one order is an agent capability, not a
+    // route only the UI could reach.
+    this.registerTool(new AlpacaCancelOrderCommand());
 
     // #1906: deprecated aliases for the renamed market-data tools above.
     // Same commands, legacy names; use canonical tool names instead.

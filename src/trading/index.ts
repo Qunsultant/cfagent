@@ -43,6 +43,9 @@ export * from "./bracketPercent";
 // Issue #3888: the externalized trading limits every engine, the limits
 // route, the trading_limits tool and the copilot's answers resolve.
 export * from "./limits";
+// Issue #3883/#3886: the neutral cancel vocabulary — order classes, status
+// classification and the mapping from a broker row onto a cancel target.
+export * from "./cancelFilters";
 // Issue #3232: the broker catalog is part of the public trading surface.
 export * from "./brokerCatalog";
 export * from "./brokerPanels";
