@@ -799,7 +799,8 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/mcps/openaimp/index.ts", "alpaca", 4],
   ["src/mcps/openaimp/index.ts", "etrade", 7],
   ["src/mcps/openaimp/index.ts", "yahoo", 5],
-  ["src/mcps/openaimp/marketDataCommands.ts", "alpaca", 58],
+  // #3887 INTEGRATION: the ladder tool speaks the provider's own order vocabulary (classes, bracket legs), so its placement path names it.
+  ["src/mcps/openaimp/marketDataCommands.ts", "alpaca", 62],
   ["src/mcps/openaimp/marketDataCommands.ts", "etrade", 3],
   ["src/mcps/openaimp/marketDataCommands.ts", "yahoo", 4],
   ["src/mcps/openaimp/mcpPermissionPorts.ts", "alpaca", 3],
