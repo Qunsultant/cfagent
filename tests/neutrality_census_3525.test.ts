@@ -143,6 +143,21 @@ function measure(): Map<string, number> {
  * 29->43, mcpPermissionPorts.ts/etrade 8->9, etrade.ts/etrade
  * 121->123, marketDataResearch.ts/alpaca 104->106, alpaca/platform
  * .ts/alpaca 109->111). Seed pin totals move 1095/8533 -> 1098/8568.
+ * Baseline repair (#3798, 2026-11-08): the code standards set
+ * (PR #3793, issue #3791) landed 16 files under
+ * docs/architecture/code/ and took main red on this pin: two of
+ * the new files carry etrade rows the census had never seen.
+ * Both are dispositioned INTEGRATION - standards documents
+ * naming the provider their subjects integrate: the MCP file
+ * quotes the mcp-security.md S5 gate question verbatim
+ * ("inherited gates - E*TRADE, keys, memberships, audit"), and
+ * the structure file cites the provider's own file-budget
+ * precedent tests/identifiers (etrade_routes_resplit_995,
+ * etrade_broker_portfolio_risk_split_2943, etradeOptions.ts).
+ * Neutralizing either would falsify a quote or a test name.
+ * 2 new rows (10-mcp-standards.md/etrade 1,
+ * 13-structure-and-file-organization.md/etrade 6). Seed pin
+ * totals move 1098/8568 -> 1100/8575.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (186 rows / 1039 lines) ----
@@ -333,7 +348,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/platformKnowledge.ts", "yahoo", 12],
   ["src/trading/interfaces.ts", "etrade", 2],
 
-  // ---- INTEGRATION (666 rows / 6476 lines) ----
+  // ---- INTEGRATION (668 rows / 6483 lines) ----
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "etrade", 12],
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "yahoo", 1],
   ["docs/EXTERNAL_APIS_AND_ENDPOINTS_DIRECTORY.md", "alpaca", 3],
@@ -348,6 +363,8 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/architecture/agentic/mcp-server-inventory.md", "alpaca", 4],
   ["docs/architecture/agentic/mcp-server-inventory.md", "etrade", 5],
   ["docs/architecture/agentic/mcp-server-inventory.md", "yahoo", 2],
+  ["docs/architecture/code/10-mcp-standards.md", "etrade", 1],
+  ["docs/architecture/code/13-structure-and-file-organization.md", "etrade", 6],
   ["docs/architecture/security/etrade.md", "etrade", 38],
   ["docs/architecture/security/vendor-risk-1774.md", "alpaca", 1],
   ["docs/architecture/security/vendor-risk-1774.md", "etrade", 1],
@@ -1295,8 +1312,8 @@ describe("#3525 S6 shrink-only provider-brand census pin", () => {
     expect(total).toBeLessThanOrEqual(PLATFORM_BASELINE_TOTAL);
   });
 
-  it("the baseline itself is the recorded seed (1098 rows / 8568 lines)", () => {
-    expect(BASELINE.length).toBe(1098);
-    expect(BASELINE.reduce((a, [, , c]) => a + c, 0)).toBe(8568);
+  it("the baseline itself is the recorded seed (1100 rows / 8575 lines)", () => {
+    expect(BASELINE.length).toBe(1100);
+    expect(BASELINE.reduce((a, [, , c]) => a + c, 0)).toBe(8575);
   });
 });
