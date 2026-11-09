@@ -30,7 +30,10 @@ export interface TenantProvidersState {
 
 export const DEFAULT_TENANT_PROVIDERS_STATE: TenantProvidersState = {
   dataProviderId: "etrade",
-  brokerId: "etrade",
+  // Issue #3812: the platform's default broker is Alpaca in paper mode
+  // (owner rule on #3451). This mirror is what a fresh browser shows
+  // before the server row loads; the server default is pinned equal.
+  brokerId: "alpaca",
 };
 
 export const DATA_PROVIDER_OPTIONS: Array<{ id: string; label: string }> = [

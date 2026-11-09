@@ -71,6 +71,7 @@ export type WorkflowRunFamily =
   | "nlq"
   | "research"
   | "ads"
+  | "trading"
   | "other";
 
 export interface WorkflowRunArtifact {
@@ -607,6 +608,7 @@ const FAMILY_WORKFLOW: Record<WorkflowRunFamily, string> = {
   nlq: "NLQ execution",
   research: "Market data research",
   ads: "Advertising",
+  trading: "Trading order workflow",
   other: "Background job",
 };
 
@@ -1144,7 +1146,9 @@ export function runFromOutcome(
           ? "goal"
           : outcome.kind === "discovery"
             ? "discovery"
-            : "other";
+            : outcome.kind === "trading"
+              ? "trading"
+              : "other";
   const unifiedStages: WorkflowRunStage[] = unified
     ? stagesFromUnifiedStages(unified.stages, outcome.createdAt)
     : [];

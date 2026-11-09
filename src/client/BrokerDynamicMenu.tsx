@@ -396,7 +396,9 @@ export function BrokerDynamicMenu({
   };
 
 
-  const selectedBrokerId = tenantProviders.brokerId ?? "etrade";
+  // Issue #3812: the platform default is Alpaca (paper), so the menu
+  // never falls back to E*TRADE when no selection is stored.
+  const selectedBrokerId = tenantProviders.brokerId ?? "alpaca";
   const selectedBrokerLabel = brokerPresentation(selectedBrokerId).label;
   const brokerIcon = selectedBrokerId === "alpaca" ? "🦙" : "⚡";
 
