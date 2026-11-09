@@ -1,0 +1,2 @@
+### Fixed
+- ADR index repaired (#3801): docs/architecture/adr/README.md now indexes all 28 ADR files — the five decisions missing from the index (0004 screener decoupling onto Workflows, 0021 chat page deferred from PageShell, 0022 data foundation repo-wide, 0023 cross-domain saga [Proposed], 0026 cfpay acceptance decision [Proposed]) are listed in number order with the statuses from their own headers, and a note disambiguates the duplicated ADR 0004 pair by title. No ADR file changed.
