@@ -207,7 +207,7 @@ describe("enrich-job copilot tools (#3536)", () => {
     expect(status.jobId).toBe(ENRICH_ID);
     expect(status.enrich.snapshot.inputRunId).toBeTruthy();
     const list = (await new ListEnrichJobsCommand().execute({}, context)) as any;
-    expect(list.jobs).toHaveLength(6);
+    expect(list.jobs).toHaveLength(7);
     expect(list.jobs.map((j: any) => j.jobId)).toContain(ENRICH_ID);
   });
 
