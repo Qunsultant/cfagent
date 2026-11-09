@@ -108,7 +108,20 @@ export async function handleDlqRoutes(
     } catch {
       return json({ error: "Dead-letter store schema could not be ensured." }, 503);
     }
-    const records = await store.listUnreplayed(100);
+    // Issue #3907: the list call is the branch's only unguarded
+    // await — a store failure here surfaced as a bare 5xx the
+    // panel could not parse (its "could not be loaded" text).
+    // Every failure returns {error} JSON, never a bare 500.
+    let records;
+    try {
+      records = await store.listUnreplayed(100);
+    } catch (error) {
+      structuredLog.error("dlq.list_records_failed", {
+        message: "[dlq] dead-letter records could not be listed:",
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return json({ error: "Dead-letter records could not be listed." }, 500);
+    }
     return json({ records }, 200);
   }
   if (path.endsWith("/api/ops/dlq/replay") && request.method === "POST") {
@@ -129,7 +142,18 @@ export async function handleDlqRoutes(
       return json({ error: "recordId is required." }, 400);
     }
     const senders = ctx.senders ?? sendersFromEnv(ctx.env);
-    const result = await replayDeadLetter({ store, senders, nowMs: Date.now() }, body.recordId);
+    // Issue #3907: same {error}-JSON guarantee as the records
+    // branch above — a replay failure never surfaces as a bare 500.
+    let result;
+    try {
+      result = await replayDeadLetter({ store, senders, nowMs: Date.now() }, body.recordId);
+    } catch (error) {
+      structuredLog.error("dlq.replay_failed", {
+        message: "[dlq] dead-letter replay failed:",
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return json({ error: "Dead-letter replay failed." }, 500);
+    }
     if (!result.ok) {
       if (result.code === "unknown_record") return json({ error: "Unknown dead-letter record.", code: result.code }, 404);
       if (result.code === "send_failed") return json({ error: "Re-drive to the source queue failed; the record is still un-replayed.", code: result.code }, 502);

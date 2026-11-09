@@ -201,6 +201,16 @@ export class PaidOptionsScreenerCommand implements IMcpToolCommand<{
       };
     }
 
+    // Issue #3907: record the payment BEFORE the long call — a
+    // job reaped/failed mid-execution otherwise leaves no payment
+    // trace (tool_executed audits only on success, below).
+    context.audit("agentic_payment.tool_paid_started", "trading", {
+      tool: "paid_options_screener",
+      price: serviceDef.priceUSD,
+      receiptId: verification.receipt.receiptId,
+      txHash: verification.receipt.txHash,
+    });
+
     // Payment verified: execute options screen. Issue #959: the
     // assembled filter validates through the ONE shared options-filter
     // schema before the engine sees it.
@@ -361,6 +371,16 @@ export class PaidMarketResearchCommand implements IMcpToolCommand<{
         challenge,
       };
     }
+
+    // Issue #3907: record the payment BEFORE the long call — a
+    // job reaped/failed mid-execution otherwise leaves no payment
+    // trace (tool_executed audits only on success, below).
+    context.audit("agentic_payment.tool_paid_started", "research", {
+      tool: "paid_market_research",
+      price: serviceDef.priceUSD,
+      receiptId: verification.receipt.receiptId,
+      txHash: verification.receipt.txHash,
+    });
 
     const marketDataResearch = new MarketDataResearchService(context.env);
     const report = await marketDataResearch.generateResearchReport(input.symbol || "NVDA");
