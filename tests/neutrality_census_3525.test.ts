@@ -192,6 +192,12 @@ function measure(): Map<string, number> {
  * 4 new rows (docs/architecture/security/
  * screener-chain-stuck-repair-3787.md alpaca 1 / etrade 1 /
  * yahoo 1 / nasdaq 1). Seed pin totals move 1105/8641 -> 1109/8645.
+ * Baseline update (#3838, 2026-11-09): externalize Stock Copilot prompts
+ * into src/agents/prompts/stockCopilotPrompt.ts (dispositioned INTEGRATION:
+ * names the provider its agent tools integrate — Alpaca Paper trading for
+ * Stock Copilot and steers away from E*TRADE tools on copilot turns).
+ * 2 new rows (stockCopilotPrompt.ts alpaca 11 / etrade 4). Seed pin
+ * totals move 1109/8645 -> 1111/8660.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (186 rows / 1039 lines) ----
@@ -465,6 +471,8 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/agents/orchestrator/settingsWebhook.ts", "alpaca", 1],
   ["src/agents/orchestrator/skillPacks.ts", "etrade", 1],
   ["src/agents/orchestrator/skills/chat-screening-doors/SKILL.md", "etrade", 1],
+  ["src/agents/prompts/stockCopilotPrompt.ts", "alpaca", 11],
+  ["src/agents/prompts/stockCopilotPrompt.ts", "etrade", 4],
   ["src/agents/registry.ts", "etrade", 27],
   ["src/agents/registry.ts", "public.com", 1],
   ["src/agents/research-agent.ts", "etrade", 6],
@@ -1356,8 +1364,8 @@ describe("#3525 S6 shrink-only provider-brand census pin", () => {
     expect(total).toBeLessThanOrEqual(PLATFORM_BASELINE_TOTAL);
   });
 
-  it("the baseline itself is the recorded seed (1109 rows / 8645 lines)", () => {
-    expect(BASELINE.length).toBe(1109);
-    expect(BASELINE.reduce((a, [, , c]) => a + c, 0)).toBe(8645);
+  it("the baseline itself is the recorded seed (1111 rows / 8660 lines)", () => {
+    expect(BASELINE.length).toBe(1111);
+    expect(BASELINE.reduce((a, [, , c]) => a + c, 0)).toBe(8660);
   });
 });

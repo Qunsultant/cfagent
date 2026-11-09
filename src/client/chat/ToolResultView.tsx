@@ -256,16 +256,20 @@ export function ToolResultView({
             : priceSource?.kind === "estimated"
               ? "Price source: estimated (not a real price)"
               : undefined;
+    const isAlpaca =
+      normalizedType.includes("alpaca") ||
+      (typeof orderId === "string" && orderId.startsWith("alp_")) ||
+      Boolean(data?.copilot) ||
+      normalizedType.includes("copilot") ||
+      data?.mode === "paper";
     const brokerId =
       data?.broker ||
       data?.proposal?.broker ||
       data?.input?.provider ||
-      (normalizedType.includes("alpaca")
+      (isAlpaca
         ? "alpaca"
         : normalizedType.includes("etrade")
         ? "etrade"
-        : typeof orderId === "string" && orderId.startsWith("alp_")
-        ? "alpaca"
         : "etrade");
     const brokerLabel = brokerPresentation(brokerId).label;
 
