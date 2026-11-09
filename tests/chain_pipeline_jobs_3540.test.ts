@@ -227,6 +227,7 @@ describe("pipeline chain registry + catalog (#3540)", () => {
     expect(registry.list().map((c) => c.id)).toEqual([
       "yahoo-nasdaq100-quotes-pipeline",
       "yahoo-sp100-quotes-pipeline",
+      "yahoo-sp500-quotes-pipeline",
       "alpaca-nasdaq100-quotes-pipeline",
       "etrade-nasdaq100-quotes-pipeline",
       "public-nasdaq100-quotes-pipeline",
@@ -261,7 +262,7 @@ describe("pipeline chain registry + catalog (#3540)", () => {
   });
 
   it("resolves names in the family idiom and refuses ambiguous/unknown names", () => {
-    expect(CHAIN_PIPELINE_CATALOG).toHaveLength(5);
+    expect(CHAIN_PIPELINE_CATALOG).toHaveLength(6);
     expect(resolvePipelineChain(CHAIN_ID)?.jobId).toBe(CHAIN_ID);
     expect(resolvePipelineChain("yahoo nasdaq100 pipeline")?.jobId).toBe(CHAIN_ID);
     expect(resolvePipelineChain("yahoo-nasdaq100-pipeline")?.jobId).toBe(CHAIN_ID);
@@ -287,7 +288,7 @@ describe("pipeline chain registry + catalog (#3540)", () => {
 describe("pipeline chain definitions (#3540)", () => {
   it("every chain definition resolves as a valid J1 job composed of the stage jobs' own nodes", () => {
     const raws = buildAllChainPipelineJobDefinitions({});
-    expect(raws).toHaveLength(5);
+    expect(raws).toHaveLength(6);
     for (const raw of raws) {
       const resolved = resolveJobDefinition(raw);
       expect(resolved.root.kind).toBe("feed");
@@ -336,7 +337,7 @@ describe("pipeline chain definitions (#3540)", () => {
     expect(params[5]).toMatchObject({ deliverJobId: DELIVER_ID });
   });
 
-  it("ensure is idempotent and registerSchedules declares the whole plane (32)", async () => {
+  it("ensure is idempotent and registerSchedules declares the whole plane (38)", async () => {
     const h = await makeHarness();
     const first = await h.stores.definitions.getDefinition(CHAIN_ID);
     await ensureChainPipelineJobs(h.control, h.stores, {});
@@ -345,9 +346,9 @@ describe("pipeline chain definitions (#3540)", () => {
     const registrations = await h.control.registerSchedules({
       schedule: async (spec) => `reg:${spec.jobId}:${spec.nodePath}`,
     });
-    expect(registrations).toHaveLength(32);
+    expect(registrations).toHaveLength(38);
     const chainRegs = registrations.filter((r) => r.jobId.endsWith("-pipeline"));
-    expect(chainRegs).toHaveLength(5);
+    expect(chainRegs).toHaveLength(6);
     expect(chainRegs.every((r) => r.nodePath === "")).toBe(true);
   });
 });
