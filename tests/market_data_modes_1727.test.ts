@@ -147,7 +147,13 @@ vi.mock("../src/services/marketDataResearch", () => {
 
 vi.mock("../src/trading", async () => {
   const schemas = await vi.importActual<any>("../src/trading/screeningSchemas");
-  return { parseStockScreenRequest: schemas.parseStockScreenRequest };
+  // Issue #3892: the placement schema derives its enum from the registry, so a
+  // module-level stub of the trading boundary must expose it as well.
+  const advanced = await vi.importActual<any>("../src/trading/advancedOrders");
+  return {
+    parseStockScreenRequest: schemas.parseStockScreenRequest,
+    ADVANCED_ORDER_TYPES: advanced.ADVANCED_ORDER_TYPES,
+  };
 });
 
 import {
