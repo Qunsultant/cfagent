@@ -134,7 +134,6 @@
   "containers": [
     {
       "class_name": "SandboxAgent",
-      "image": "cloudflare/debian-trixie",
       "scheduling_policy": "durable_object"
     }
   ],

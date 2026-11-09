@@ -203,7 +203,13 @@ describe("Wrangler Containers Configuration & SandboxAgent Readiness (#3492)", (
     expect(Array.isArray(wrangler.containers)).toBe(true);
     expect(wrangler.containers).toHaveLength(1);
     expect(wrangler.containers[0].class_name).toBe("SandboxAgent");
-    expect(wrangler.containers[0].image).toBe("cloudflare/debian-trixie");
+    // Issue #3789: wrangler 4.156.0 rejects the `image` field on a
+    // Durable Object-managed containers entry ("Unsupported fields for
+    // Durable Object-managed Containers in containers: \"image\"..."),
+    // which broke Deploy from bb24be82 on. The image is supplied at
+    // runtime by ETradeSandboxService.runCommand via
+    // container.start({ image: "cloudflare/debian-trixie", ... }).
+    expect(wrangler.containers[0]).not.toHaveProperty("image");
     expect(wrangler.containers[0].scheduling_policy).toBe("durable_object");
   });
 
