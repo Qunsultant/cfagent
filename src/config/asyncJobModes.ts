@@ -339,6 +339,16 @@ export const SYNCHRONOUS_MCP_TOOLS = new Set<string>([
   "alpaca_snapshot",
   "alpaca_place_bracket_ladder",
   "alpaca_cancel_bracket_ladder",
+  // Issue #3839: the E*TRADE and mesh-door trade tools are money paths
+  // too. Queuing them turns a one-turn draft into a polled job (the #3812
+  // RCA); they execute inline like their Alpaca counterparts.
+  "etrade_get_quote",
+  "etrade_preview_order",
+  "etrade_execute_order",
+  "propose_stock_trade",
+  "propose_options_trade",
+  "start_trade_approval",
+  "decide_trade_approval",
   "market_data_get_quote",
   "market_data_company_fundamentals",
   "market_data_historical_bars",

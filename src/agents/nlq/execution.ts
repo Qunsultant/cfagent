@@ -757,6 +757,12 @@ function executeNLQQueryCore(
         quantity: qty,
         orderType,
         limitPrice,
+        ...(plan.tradingData?.takeProfitPercent !== undefined
+          ? { takeProfitPercent: plan.tradingData.takeProfitPercent }
+          : {}),
+        ...(plan.tradingData?.stopLossPercent !== undefined
+          ? { stopLossPercent: plan.tradingData.stopLossPercent }
+          : {}),
       });
 
       const shareWord = draft.quantity === 1 ? "share" : "shares";

@@ -14,7 +14,12 @@ import { resolveScreenerAgentName } from "./screenerAgentName";
 import { actorGateway } from "../services/cloudflareActorGateway";
 import { recordJobOutcome } from "../services/jobOutcomes";
 import type { JobOutcomeInput } from "../data/jobOutcomePorts";
-import { buildOrchestratorSystemPrompt, resolveShadowMaxSteps } from "./chatPrompt";
+import {
+  buildOrchestratorSystemPrompt,
+  resolveShadowMaxSteps,
+  type StockCopilotPromptCapability,
+} from "./chatPrompt";
+import { resolveCopilotTradingSelection } from "./copilotTradingMode";
 import { LLMJudge } from "./judge";
 import { VectorMemory } from "../memory/vector-memory";
 import { planNLQ, executeNLQQuery, executeNLQQueryAsync, type NLQSchedulingPort, type NLQSocialBriefPort, type NLQStockScreenPort } from "./nlq";
@@ -56,7 +61,7 @@ import {
   type JobListScopedModes,
 } from "../config/asyncJobModes";
 import type { PaymentsFlowScopedModes } from "../config/paymentsFlowModes";
-import { diffScanRuns } from "../trading";
+import { BROKER_CATALOG, brokerCopilotCapability, diffScanRuns, isCopilotBroker } from "../trading";
 import { createOptionsDiscoveryPorts } from "../data/createOptionsDiscoveryPorts";
 
 import { createOrmPorts } from "../data/createOrmPorts";
@@ -2405,6 +2410,29 @@ export class OrchestratorAgent extends PortThink {
         state: stockMcpActivation.state,
       });
     }
+    // Issue #3839: the copilot's steering follows the ACTIVE broker/mode
+    // from the tenant selection, not a hardcoded broker. An unresolved or
+    // unsupported selection leaves the capability absent; the default
+    // Alpaca steering and the cycle's own refusal handle it.
+    let stockCopilotCapability: StockCopilotPromptCapability | undefined;
+    if (stockMcpActivation.active) {
+      const copilotSelection = await resolveCopilotTradingSelection({
+        env: this.env,
+        readSettingRaw: (key) => this.readSettingRaw(key),
+      });
+      if (copilotSelection.resolved && isCopilotBroker(copilotSelection.selection.brokerId)) {
+        const capability = brokerCopilotCapability(copilotSelection.selection.brokerId);
+        stockCopilotCapability = {
+          brokerId: copilotSelection.selection.brokerId,
+          brokerLabel: BROKER_CATALOG[copilotSelection.selection.brokerId].label,
+          mode: copilotSelection.selection.mode,
+          environment: copilotSelection.selection.environment,
+          tools: capability.tools,
+          bracketOrders: capability.bracketOrders,
+          percentBrackets: capability.percentBrackets,
+        };
+      }
+    }
     return {
       instructions: buildOrchestratorSystemPrompt({
         route,
@@ -2413,6 +2441,7 @@ export class OrchestratorAgent extends PortThink {
         optionsResearchContext,
         isAutoOptionsResearchRequest,
         stockCopilotMcpActive: stockMcpActivation.active,
+        stockCopilotCapability,
         // #3727: the steering follows the SAME value the gate
         // resolved for this turn (nlqGate.mode) — no second read
         // of CHAT_NLQ_MODE. The auto-research branch never runs
