@@ -356,6 +356,31 @@ Large work ships as phases, not as one PR. The structure is:
   §15 covering the whole outcome, as stated above in "Phased work:
   epics and sub-issues".
 
+### Planning the PR count before implementation (#3917)
+
+Decide how many PRs an epic needs **before** the first branch, and plan
+by capability, not by minimality:
+
+- one PR for the **substrate** everything else reads (a configuration
+  surface, a shared engine, a vocabulary) — it lands first and unblocks
+  the rest;
+- one PR per **capability** that is independently shippable and
+  revertible;
+- one PR for **introspection/answers** over what the first two built.
+
+Splitting further is not free: each extra PR costs a full CI cycle, and
+— because every lane shares the same pinned counters — a fresh round of
+pin edits that collides with whatever the other lanes merged meanwhile.
+Making slices smaller is not a virtue when they are entangled; the
+small-slice rule below exists to cut *merge cycles*, never to inflate
+them.
+
+Corollary for pins: a test that asserts a **size** (a catalog length, a
+family count, a census total) must read that size from the table it
+describes, or assert accounting (every member declared exactly once).
+A literal size is a change detector that every additive PR must edit, in
+every file that quotes it.
+
 ### Combining small slices into one PR (owner direction 2026-10-26)
 
 Default stays one issue → one PR. Several small sub-issues of ONE epic
@@ -861,6 +886,26 @@ If a merge queue is required, enqueue the PR. Ensure GitHub Actions workflows ha
 **Merge-queue auto-merge enrollment (moved from repo AGENTS.md, #3816).** When a merge queue is configured, never pass strategy flags (`--rebase`, `--squash`, or `--merge`) to `gh pr merge --auto`. Use `gh pr merge --auto` directly — the merge-queue ruleset manages the merge method (REBASE). Passing strategy flags causes the CLI to exit without enqueuing.
 
 **Linear history on the PR branch (moved from repo AGENTS.md, #3816).** Maintain linear history by rebasing (`git rebase origin/main`) rather than creating merge commits on the PR branch. While the Policy Gate dynamically resolves PR branch parents on merge commits (#2546), clean rebased commits prevent accidental history distortion and speed up merge-queue evaluation.
+
+### Staleness is the queue's job, not a rebase habit (#3917)
+
+With a merge queue configured, an up-to-date branch is **not** a
+precondition for merging, and not a precondition for enqueueing either:
+the queue builds each entry on the latest base and runs the
+`merge_group` checks there. Do not rebase a PR merely because `main`
+advanced. That converts every other lane's merge into a full CI cycle on
+your branch, and the check it appears to satisfy is re-run by the queue
+anyway.
+
+The Policy Gate's check (f) is therefore a **diagnostic**, not an
+enforcement gate: it names which of `main`'s additions a branch
+predates, so the queue merge is expected rather than surprising.
+Deletion enforcement belongs to check (i), which fails every deletion
+(with its narrow test-rename allowance) and so still catches a branch
+that genuinely removes a file `main` holds.
+
+Rebase when the branch is **conflicted** (`mergeable: CONFLICTING`), or
+when a failing check names a conflict — not to chase `main`.
 
 ### After merge
 
@@ -1483,13 +1528,21 @@ implement.
 
 - **Ruleset (owner-side setting, §19.4).** `main` must be protected
   by a ruleset that blocks direct pushes, force pushes, and
-  deletions, requires a pull request, requires branches to be up to
-  date, and requires four status checks: Load Active Environment,
-  Gitleaks secret scan, Test & Build (Node 22) [PROD], and Policy
-  Gate. NO merge-queue rule exists in `protectmain`: the §19.5 queue
-  steps remain owner-side steps to enable, not live enforcement, and
-  this bullet must be re-verified against the live ruleset if a queue
-  is ever enabled. The bypass list must be empty, except for
+  deletions, requires a pull request, and requires five status checks:
+  Load Active Environment, Gitleaks secret scan, Test & Build (Node 22)
+  [PROD], Policy Gate, and Analyze (javascript-typescript).
+
+  **Verified against the live ruleset 2026-11-09 (#3917).** Ruleset
+  `protectmain` (id 25543527) is active with `deletion`,
+  `non_fast_forward`, `pull_request`, `required_linear_history`,
+  `required_status_checks` and **`merge_queue`**. The queue merges by
+  `REBASE` with `ALLGREEN` grouping and up to 5 entries;
+  `strict_required_status_checks_policy` is **false**, so a branch is
+  NOT required to be up to date before merging — the queue builds each
+  entry on the latest base. Earlier text in this bullet claimed no
+  merge-queue rule existed and that branches had to be up to date;
+  both are superseded. Re-verify with
+  `gh api repos/<owner>/<repo>/rulesets` before relying on this. The bypass list must be empty, except for
   a documented owner emergency path: an owner bypass is permitted
   only when it files a restore issue in the same action (§18.1
   emergency exception), and the bypass is recorded in the ruleset

@@ -15,6 +15,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:ci": "vitest run --reporter=verbose",
+    "test:pins": "vitest run tests/tool_attribution_audit_1763.test.ts tests/mesh_registry_s1_2322.test.ts tests/mesh_tool_registry_s14_2417.test.ts tests/oasf_records_2699.test.ts tests/thin_router_inventory.test.ts tests/neutrality_census_3525.test.ts tests/global_dd_census_2356.test.ts tests/trading_extraction_ledger.test.ts tests/policy_gate_guards.test.ts",
     "test:quarantine": "node scripts/run-quarantined.mjs",
     "test:workers": "vitest run --config vitest.workers.config.mts",
     "test:watch": "vitest",

@@ -1,0 +1,6 @@
+﻿### Changed
+
+- **Staleness is the merge queue's job (#3917):** Policy Gate check (f) is now a diagnostic that names which of `main`'s additions a branch predates, instead of failing the branch and demanding a rebase. The queue builds each entry on the latest base and re-runs `merge_group` there; deletion enforcement stays with check (i), which fails every deletion. A verified ruleset audit replaces the stale “no merge queue exists” claim in gitops §22.
+- **Pins assert accounting, not sizes (#3917):** the MCP catalog length is no longer a literal in eleven suites — one pin asserts the factory tool set and the declared scope set are identical. Family counts and both census totals are derived from their tables instead of hand-bumped numbers, so an additive PR is one edit rather than fifteen.
+- **Pin suites run first (#3917):** `npm run test:pins` runs the accounting, census, router-inventory and policy-gate pins (~2 minutes), is wired into `scripts/verify-before-merge.sh`, and runs inside the CI `Fast gates` job so a pin break fails early instead of after the ten-minute shards.
+- **PR planning guidance (#3917):** gitops §5 now says to plan the PR count by substrate / capability / introspection before branching, and states the pin corollary (assert accounting, never a size).
