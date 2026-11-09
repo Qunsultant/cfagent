@@ -212,6 +212,12 @@ function measure(): Map<string, number> {
  * the only growth is the new job's own id/label lines: 2 raises
  * (feedJobs.ts/yahoo 10->12, feedPipelineJobs.ts/yahoo 15->19).
  * Recorded-seed totals move 1121/8729 -> 1121/8735.
+ * Baseline update (#3838, 2026-11-09): externalize Stock Copilot prompts
+ * into src/agents/prompts/stockCopilotPrompt.ts (dispositioned INTEGRATION:
+ * names the provider its agent tools integrate — Alpaca Paper trading for
+ * Stock Copilot and steers away from E*TRADE tools on copilot turns).
+ * 2 new rows (stockCopilotPrompt.ts alpaca 11 / etrade 4). Seed pin
+ * totals move 1109/8645 -> 1111/8660.
  * Baseline update (#3905, 2026-11-09): the Dow universe joins
  * the feed workflow as a Yahoo quotes feed job - one registry
  * definition in the feed-job registry and one entry in the feed
@@ -223,12 +229,6 @@ function measure(): Map<string, number> {
  * base; composed with #3883's cancellation-surface update (1124/8745)
  * and #3884's cancel-ticker record (+5 lines, 1124/8750) the merged
  * recorded seed is 1124 rows / 8756 lines.
- * Baseline update (#3838, 2026-11-09): externalize Stock Copilot prompts
- * into src/agents/prompts/stockCopilotPrompt.ts (dispositioned INTEGRATION:
- * names the provider its agent tools integrate — Alpaca Paper trading for
- * Stock Copilot and steers away from E*TRADE tools on copilot turns).
- * 2 new rows (stockCopilotPrompt.ts alpaca 11 / etrade 4). Seed pin
- * totals move 1109/8645 -> 1111/8660.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (186 rows / 1039 lines) ----
