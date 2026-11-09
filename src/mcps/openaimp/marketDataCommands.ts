@@ -448,7 +448,11 @@ export class AlpacaPlaceOrderCommand implements IMcpToolCommand {
       symbol: { type: "string", description: "Ticker symbol (e.g. NVDA, AAPL, BTC/USD)" },
       qty: { type: "number", description: "Number of shares or contract units (qty or quantity; qty wins when both are sent)" },
       side: { type: "string", enum: ["buy", "sell"], description: "Order side (buy or sell)" },
-      type: { type: "string", enum: ["market", "limit", "stop", "stop_limit"], description: "Order execution type" },
+      type: { type: "string", enum: ["market", "limit", "stop", "stop_limit", "trailing_stop", "trailing_stop_limit"], description: "Order execution type" },
+      trail_price: { type: "number", description: "Issue #3892: trailing-stop dollar distance (exactly one of trail_price / trail_percent)" },
+      trail_percent: { type: "number", description: "Issue #3892: trailing-stop percent distance" },
+      notional: { type: "number", description: "Issue #3892: notional sizing instead of qty (fractional trading)" },
+      good_till_date: { type: "string", description: "Issue #3892: GTD expiry instant (RFC 3339) with time_in_force 'gtd'" },
       limit_price: { type: "number", description: "Limit price (required if type is limit)" },
       time_in_force: { type: "string", enum: ["day", "gtc", "ioc", "fok"], description: "Time in force" },
       extended_hours: { type: "boolean", description: "Allow execution in pre-market, after-hours, and overnight EXTO sessions" },
@@ -501,7 +505,14 @@ export class AlpacaPlaceOrderCommand implements IMcpToolCommand {
     symbol: z.string().min(1).max(20).describe("Ticker symbol"),
     qty: z.number().positive().optional().describe("Order quantity (qty or quantity)"),
     side: z.enum(["buy", "sell"]).describe("Order side"),
-    type: z.enum(["market", "limit", "stop", "stop_limit"]).default("market").optional(),
+    type: z
+      .enum(["market", "limit", "stop", "stop_limit", "trailing_stop", "trailing_stop_limit"])
+      .default("market")
+      .optional(),
+    trail_price: z.number().positive().optional().describe("Issue #3892: trailing-stop dollar distance"),
+    trail_percent: z.number().positive().optional().describe("Issue #3892: trailing-stop percent distance"),
+    notional: z.number().positive().optional().describe("Issue #3892: notional sizing instead of qty"),
+    good_till_date: z.string().min(1).optional().describe("Issue #3892: GTD expiry instant"),
     limit_price: z.number().positive().optional().describe("Limit price"),
     time_in_force: z.enum(["day", "gtc", "ioc", "fok"]).default("day").optional(),
     extended_hours: z.boolean().optional().describe("Allow extended-hours execution"),
@@ -527,9 +538,14 @@ export class AlpacaPlaceOrderCommand implements IMcpToolCommand {
       symbol: string;
       qty: number;
       side: "buy" | "sell";
-      type?: "market" | "limit" | "stop" | "stop_limit";
+      type?: "market" | "limit" | "stop" | "stop_limit" | "trailing_stop" | "trailing_stop_limit";
       limit_price?: number;
-      time_in_force?: "day" | "gtc" | "ioc" | "fok";
+      /* Issue #3892: the advanced parameters the registry declares. */
+      trail_price?: number;
+      trail_percent?: number;
+      notional?: number;
+      good_till_date?: string;
+      time_in_force?: "day" | "gtc" | "ioc" | "fok" | "gtd";
       extended_hours?: boolean;
       order_class?: "simple" | "bracket" | "oco" | "oto";
       take_profit?: { limit_price: number };
@@ -727,7 +743,14 @@ export class AlpacaPlaceOrderCommand implements IMcpToolCommand {
     // the call declares user provenance — the price is asserted by
     // the caller, never derived from an ambient quote. The guard in
     // placeOrder refuses the placement if that declaration is absent.
-    const result = await service.placeAlpacaOrder({ ...normalized, priceSource: { kind: "user" } });
+    // Issue #3892: the advanced parameters the registry declares travel to the
+    // broker verbatim; a basic order sends none of them.
+    const advanced: Record<string, unknown> = {};
+    if (input.trail_price !== undefined) advanced.trail_price = Number(input.trail_price);
+    if (input.trail_percent !== undefined) advanced.trail_percent = Number(input.trail_percent);
+    if (input.notional !== undefined) advanced.notional = Number(input.notional);
+    if (input.good_till_date !== undefined) advanced.good_till_date = String(input.good_till_date);
+    const result = await service.placeAlpacaOrder({ ...normalized, ...advanced, priceSource: { kind: "user" } });
     context.audit?.(marketDataOrderAuditEvent(resolved.mode), "trading", marketDataOrderAuditPayload(resolved.mode, normalized, result));
     const resolvedOrderId = result.orderId || `place-${context.sessionId || "unassigned"}-${Date.now()}`;
     const notifications = result.success

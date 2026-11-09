@@ -49,6 +49,9 @@ export * from "./cancelFilters";
 // Issue #3887: the base-breakout continuation ladder — detection, plan and
 // the state machine that places rung N+1 only after a continuation step.
 export * from "./baseBreakout";
+// Issue #3892: the declarative advanced/complex order-type registry, the named
+// option-strategy builders and the collateral/protective-exit validators.
+export * from "./advancedOrders";
 // Issue #3232: the broker catalog is part of the public trading surface.
 export * from "./brokerCatalog";
 export * from "./brokerPanels";
