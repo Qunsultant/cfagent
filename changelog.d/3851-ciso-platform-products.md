@@ -1,0 +1,3 @@
+### Added
+
+- **CISO Security & trust platform products defined in the lifecycle doc (#3851, sub-issue of #3844):** §12.2's Security & trust TBD row is replaced with the platform's product table — IAAA platform, policy decision & enforcement (PDP / PEP / PIP / PAP) + obligations, service tokens, role grants, logged-in users, session caps, request quotas, audit & observability, incident substrate reliability, detection & response, agentic security management, SessionStore resource governance — each with purpose, status as of 2026-11-09, and tracking issue; §14.8 records the platform as defined. Every status was verified from current main before writing; the Emergency-Authority Register is recorded as a draft artifact (DRAFT, not adopted), not a product. #CISO-bhdm
