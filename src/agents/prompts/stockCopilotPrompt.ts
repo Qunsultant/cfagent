@@ -13,6 +13,10 @@
  *    'tool_openaimp_alpaca_place_order'. NEVER invoke 'tool_openaimp_etrade_execute_order'.
  * 6. Synchronous Tools: Trading tools are synchronous. Do NOT poll 'tool_openaimp_get_async_job'
  *    or 'tool_openaimp_list_async_jobs' for trading tools.
+ * 7. Pipeline stage order (Issue #3911): pipeline cycles run feed → enrich → analyze →
+ *    generate → deliver, never skipping a stage; the quotes job is the pipeline's feed
+ *    input, fundamentals only a join source for enrich. See
+ *    STOCK_COPILOT_PIPELINE_STAGE_ORDER_RULE.
  */
 
 import {
@@ -22,6 +26,22 @@ import {
   type OrchestratorPromptInput,
   type ResolvedPromptBrokerTools,
 } from "../chatPrompt";
+
+/**
+ * Issue #3911 — the pipeline stage-order rule, shared by the
+ * default steering (STOCK_COPILOT_MCP_STEERING) and the
+ * broker-aware steering (buildStockCopilotMcpSteering) so every
+ * copilot turn carries the identical rule. The quick-start ran
+ * the Yahoo FUNDAMENTALS feed job and skipped enrich, so
+ * analyze refused with ANALYZE_INPUT_MISSING: fundamentals is
+ * a JOIN SOURCE for enrich, not its input — enrich reads the
+ * QUOTES dataset persisted by yahoo-nasdaq100-quotes by exact
+ * lineage. The refusal was correct; the gap was orchestration:
+ * no steering named the mandatory stage order. Only real tool
+ * names appear here: there is no get_enrich_job_status tool —
+ * enrich status is read via get_async_job / list_async_jobs.
+ */
+export const STOCK_COPILOT_PIPELINE_STAGE_ORDER_RULE = `- PIPELINE STAGE ORDER (#3911): pipeline cycles run the stages in order feed → enrich → analyze → generate → deliver — never skipping a stage. Never run analyze directly after feed: before analyze, a usable enriched dataset must exist — run enrich first (or check the enrich job's status via 'tool_openaimp_get_async_job' / 'tool_openaimp_list_async_jobs'). The pipeline's feed input is the quotes job ('yahoo-nasdaq100-quotes'); the fundamentals job ('yahoo-nasdaq100-fundamentals') is a join source for enrich, never the pipeline's feed input. For an end-to-end cycle prefer 'tool_openaimp_run_pipeline_chain' for 'yahoo nasdaq100 pipeline' (chain id 'yahoo-nasdaq100-quotes-pipeline'); per-stage runs use 'tool_openaimp_run_feed_job', 'tool_openaimp_run_enrich_job', 'tool_openaimp_run_analyze_job', 'tool_openaimp_run_generate_job', 'tool_openaimp_run_deliver_job' in that order, each consuming the previous stage's persisted output.`;
 
 export const STOCK_COPILOT_SYSTEM_ROLE = `You are the master orchestrator for Multi-Agent Studio (OpenAIMP), specialized in the Stock Copilot operational domain and powered by Cloudflare Agents, Durable Objects, and SQLite.`;
 
@@ -155,6 +175,7 @@ export function buildStockCopilotMcpSteering(cap: StockCopilotPromptCapability):
 - '${tool(cap.tools.quote)}': the live quote for this broker. Never present a price without a named source + timestamp (a user limit, or this quote with provider and time); a quote failure is a failure, never an estimated price.
 - '${tool(cap.tools.preview)}' & '${tool(cap.tools.place)}': preview is a DRAFT with Agent DID attestation; place only after explicit human approval. ${orders}; ${cancel}.
 - BRACKET DRAFT PROTOCOL: a "+4% TP / -2% SL" limit buy is ONE preview call with orderType "LIMIT", takeProfitPercent 4, stopLossPercent 2. ${cap.percentBrackets ? "Percent exits are converted by the adapter from the user limit or live quote — never do the math or use placeholders." : "This broker does not accept percent exits; ask for absolute leg prices."} ${bracket}
+${STOCK_COPILOT_PIPELINE_STAGE_ORDER_RULE}
 - HONEST EXECUTION: never claim an order was placed without a broker order id; a queued job receipt is not a placement. Report the exact refusal and the fix URL.
 - FIX URLS: broker connect at ?tab=trading (Alpaca paper: /api/broker/connect/alpaca?environment=TEST; live: ?environment=PROD); credits at ?tab=checkout&checkoutTab=topup; trace at ?tab=workflow-runs; data providers at ?tab=research; workflows at ?tab=workflows.
 - 'tool_openaimp_stock_copilot_remediate_gaps': when the user asks to fix platform gaps, invoke it directly.
@@ -181,6 +202,7 @@ export const STOCK_COPILOT_MCP_STEERING = `Stock Copilot — this conversation i
      - To inspect data provider feeds: '[Open Data Providers & Feeds](?tab=research)'
      - To inspect workflows and schedules: '[Open Workflows Hub](?tab=workflows)'
   2. Pinpoint exact diagnostic facts: Always state the exact target chain (e.g. 'nasdaq100 pipeline'), the active or settled frontier stage (feed, enrich, analyze, generate, deliver), stage unit counts, and any errors or rate limits. Never return vague promises without diagnostic facts.
+${STOCK_COPILOT_PIPELINE_STAGE_ORDER_RULE}
 - ARCHITECTURAL RUNTIME INVARIANT: The platform runs strictly on Cloudflare Workers, Durable Objects (DO-SQLite), D1, KV, and Cloudflare Queues. There is NO Kafka, RabbitMQ, Celery, SQS, or Redis. Never hallucinate Kafka or suggest checking Kafka logs; all diagnostics and logs reside in DO-SQLite tables ('mas_events', 'audit_events', 'async_jobs') and Cloudflare Logging.`;
 
 export function buildStockCopilotSystemPrompt(input: OrchestratorPromptInput): string {
