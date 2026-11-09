@@ -144,12 +144,14 @@ describe("pipeline host wiring (#3543)", () => {
     // stages carry no schedules of their own inside the chain).
     // #3876 pin update (S7): the S&P 500 Yahoo quotes job joins
     // the plane - every stage family gains its sp500 member.
-    expect(pipelineJobIds()).toHaveLength(8);
-    expect(pipelineEnrichJobIds()).toHaveLength(6);
-    expect(pipelineAnalyzeJobIds()).toHaveLength(6);
-    expect(pipelineGenerateJobIds()).toHaveLength(6);
-    expect(pipelineDeliverJobIds()).toHaveLength(6);
-    expect(pipelineChainJobIds()).toHaveLength(6);
+    // #3905 pin update (§7): the Dow Yahoo quotes job joins
+    // the plane - every stage family gains its dow member.
+    expect(pipelineJobIds()).toHaveLength(9);
+    expect(pipelineEnrichJobIds()).toHaveLength(7);
+    expect(pipelineAnalyzeJobIds()).toHaveLength(7);
+    expect(pipelineGenerateJobIds()).toHaveLength(7);
+    expect(pipelineDeliverJobIds()).toHaveLength(7);
+    expect(pipelineChainJobIds()).toHaveLength(7);
     const ids = [
       ...pipelineJobIds(),
       ...pipelineEnrichJobIds(),
