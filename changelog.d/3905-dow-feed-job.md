@@ -1,0 +1,3 @@
+### Added
+
+- **Yahoo Dow quotes feed job (#3905, #3667 universe integration slice 2):** the feed-job registry gains `yahoo-dow-quotes` — Yahoo quotes over the stored Dow Jones Industrial Average index list, on the same contract as the existing S&P 500 job (cadence/staleness resolved through the same `FEED_JOB_*` config knobs). The pipeline catalog resolves "dow" / "dow jones" to the new job (bare "yahoo" still resolves to the Nasdaq-100 job), and the enrich, analyze, generate, deliver, and chain families derive their dow lineage from it automatically. A run with no stored Dow index list fails honestly with the existing universe-missing error rather than substituting another universe. #CDO-mha7
