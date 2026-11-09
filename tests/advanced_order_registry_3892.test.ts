@@ -166,6 +166,27 @@ describe("#3892 — the copilot enumerates per broker", () => {
     expect(payload.orderTypes.etrade.refused.length).toBeGreaterThan(0);
   });
 
+  it("the placeable-type enum is DERIVED from the registry, not a second list", () => {
+    const tool = McpToolFactory.getTool("alpaca_place_order")!;
+    const enumValues = (tool.jsonSchema.properties as Record<string, any>).type.enum as string[];
+    const expected = ADVANCED_ORDER_TYPES.filter(
+      (entry) =>
+        entry.broker.alpaca !== "none" &&
+        ["market", "limit", "stop", "stop_limit", "trailing_stop", "trailing_stop_limit"].includes(entry.id),
+    ).map((entry) => entry.id);
+    expect([...enumValues].sort()).toEqual([...expected].sort());
+    // Every placeable type validates; a type only the registry knows is refused.
+    const paramsFor: Record<string, Record<string, unknown>> = {
+      limit: { limit_price: 1 },
+      stop: { stop_price: 1 },
+      stop_limit: { stop_price: 1, limit_price: 1 },
+      trailing_stop_limit: { limit_price: 1 },
+    };
+    for (const type of enumValues) {
+      expect(validateAdvancedOrder({ type, broker: "alpaca", params: paramsFor[type] ?? {} }).ok).toBe(true);
+    }
+  });
+
   it("the tool schema the caller sees is declared in one place", () => {
     const source = readFileSync("src/trading/advancedOrders.ts", "utf8");
     expect(source).toContain("export const ADVANCED_ORDER_TYPES");
