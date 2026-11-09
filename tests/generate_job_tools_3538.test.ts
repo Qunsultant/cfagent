@@ -255,7 +255,7 @@ describe("generate-job copilot tools (#3538)", () => {
     expect(status.jobId).toBe(GENERATE_ID);
     expect(status.generate.snapshot.inputRunId).toBeTruthy();
     const list = (await new ListGenerateJobsCommand().execute({}, context)) as any;
-    expect(list.jobs).toHaveLength(5);
+    expect(list.jobs).toHaveLength(6);
     expect(list.jobs.map((j: any) => j.jobId)).toContain(GENERATE_ID);
   });
 
