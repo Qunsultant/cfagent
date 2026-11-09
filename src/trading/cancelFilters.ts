@@ -250,6 +250,163 @@ export function declaredLegIds(order: CancelableOrder): string[] {
 }
 
 /**
+ * Issue #3886 — the filter vocabulary every cancel path accepts.
+ *
+ * A cancel intent is rarely one id: “cancel every AAPL order”, “cancel the
+ * ladder but keep my protective stop”, “cancel the OCO legs”. All of those
+ * are one neutral filter, resolved here against the broker's own order list
+ * so no tool has to know Alpaca's field names.
+ *
+ * Class semantics are explicit and enforced, not implied:
+ *   - `simple` matches a single order (whatever its type);
+ *   - `market`/`limit`/`stop`/`stop_limit` match a single order of that
+ *     type — a bracket's entry is a limit order but the ORDER is a bracket,
+ *     so it does not match;
+ *   - `bracket`/`oco`/`oto` match the compound parent, whose cancel takes
+ *     its held legs with it;
+ *   - a leg is matched on its own merits (a simple limit/stop_limit row),
+ *     and cancelling it alone leaves its parent open — the engine says so.
+ *
+ * Folding: when a parent and one of its own legs both match, only the parent
+ * is targeted (its cancel already covers the leg). That is what keeps a
+ * one-call ticker cancel from double-cancelling a bracket.
+ */
+export interface CancelFilter {
+  symbol?: string | null;
+  orderClass?: CancelOrderClass | string | null;
+  orderSide?: "buy" | "sell" | string | null;
+  ladderId?: string | null;
+  /** Epoch ms, numeric string or ISO instant: only orders placed at/after it. */
+  placedAfter?: string | number | null;
+}
+
+export type CancelFilterRefusal = "unknown_order_class" | "invalid_order_side" | "invalid_placed_after" | "no_orders_matched";
+
+export interface CancelFilterResolution {
+  matched: boolean;
+  targets: CancelableOrder[];
+  /** Legs dropped because their parent is already targeted. */
+  foldedLegIds: string[];
+  code?: CancelFilterRefusal;
+  message?: string;
+  filter: CancelFilter;
+}
+
+function readPlacedAfter(value: string | number | null | undefined): number | null | "invalid" {
+  if (value === null || value === undefined || value === "") return null;
+  if (typeof value === "number") return Number.isFinite(value) ? value : "invalid";
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) return numeric;
+  const parsed = Date.parse(String(value));
+  return Number.isNaN(parsed) ? "invalid" : parsed;
+}
+
+/**
+ * Resolve a filter onto a broker order list. Pure: the caller supplies the
+ * list it reads, so a dry run and a real run resolve identically.
+ */
+export function resolveCancelTargets(
+  orders: readonly CancelableOrder[],
+  filter: CancelFilter,
+): CancelFilterResolution {
+  const echo = describeCancelFilter(filter);
+
+  if (filter.orderClass !== undefined && filter.orderClass !== null && filter.orderClass !== "") {
+    if (!isCancelOrderClass(filter.orderClass)) {
+      return {
+        matched: false,
+        targets: [],
+        foldedLegIds: [],
+        code: "unknown_order_class",
+        message: `Unknown order class '${String(filter.orderClass)}'. Accepted: ${CANCEL_ORDER_CLASSES.join(", ")}.`,
+        filter,
+      };
+    }
+  }
+
+  if (filter.orderSide !== undefined && filter.orderSide !== null && filter.orderSide !== "") {
+    const side = String(filter.orderSide).trim().toLowerCase();
+    if (side !== "buy" && side !== "sell") {
+      return {
+        matched: false,
+        targets: [],
+        foldedLegIds: [],
+        code: "invalid_order_side",
+        message: `Unknown order side '${String(filter.orderSide)}'. Accepted: buy, sell.`,
+        filter,
+      };
+    }
+  }
+
+  const placedAfter = readPlacedAfter(filter.placedAfter);
+  if (placedAfter === "invalid") {
+    return {
+      matched: false,
+      targets: [],
+      foldedLegIds: [],
+      code: "invalid_placed_after",
+      message: `'${String(filter.placedAfter)}' is not a usable placedAfter: use epoch milliseconds or an ISO timestamp.`,
+      filter,
+    };
+  }
+
+  const symbol = filter.symbol ? String(filter.symbol).trim().toUpperCase() : null;
+  const side = filter.orderSide ? (String(filter.orderSide).trim().toLowerCase() as "buy" | "sell") : null;
+  const orderClass = filter.orderClass ? (filter.orderClass as CancelOrderClass) : null;
+  const ladderId = filter.ladderId ? String(filter.ladderId).trim() : null;
+
+  const matching = orders.filter((order) => {
+    if (symbol && order.symbol !== symbol) return false;
+    if (side && order.side !== side) return false;
+    if (ladderId && order.ladderId !== ladderId) return false;
+    if (placedAfter !== null && placedAfter !== undefined) {
+      if (order.placedAt === null || order.placedAt < placedAfter) return false;
+    }
+    if (!orderClass) return true;
+    if (orderClass === "simple") return order.brokerOrderClass === "simple";
+    if ((SIMPLE_TYPE_CLASSES as readonly string[]).includes(orderClass)) {
+      return order.brokerOrderClass === "simple" && order.orderType === orderClass;
+    }
+    return order.brokerOrderClass === orderClass;
+  });
+
+  if (matching.length === 0) {
+    return {
+      matched: false,
+      targets: [],
+      foldedLegIds: [],
+      code: "no_orders_matched",
+      message: `no_orders_matched: no open order matches ${echo}. Nothing was cancelled.`,
+      filter,
+    };
+  }
+
+  const targetIds = new Set(matching.map((order) => order.orderId));
+  const targets: CancelableOrder[] = [];
+  const foldedLegIds: string[] = [];
+  for (const order of matching) {
+    if (order.parentId && targetIds.has(order.parentId)) {
+      foldedLegIds.push(order.orderId);
+      continue;
+    }
+    targets.push(order);
+  }
+
+  return { matched: true, targets, foldedLegIds, filter };
+}
+
+/** The filter echoed in a refusal, so “cancelled 0” is never the whole story. */
+export function describeCancelFilter(filter: CancelFilter): string {
+  const parts: string[] = [];
+  if (filter.symbol) parts.push(`symbol=${String(filter.symbol).trim().toUpperCase()}`);
+  if (filter.orderClass) parts.push(`orderClass=${String(filter.orderClass)}`);
+  if (filter.orderSide) parts.push(`orderSide=${String(filter.orderSide).toLowerCase()}`);
+  if (filter.ladderId) parts.push(`ladderId=${String(filter.ladderId)}`);
+  if (filter.placedAfter) parts.push(`placedAfter=${String(filter.placedAfter)}`);
+  return parts.length > 0 ? parts.join(", ") : "every open order";
+}
+
+/**
  * Human-facing target line, e.g. `AAPL bracket buy parent ord-1 (2 held legs)`.
  * The same words appear in the tool receipt and the UI notice, so a user can
  * match what they read to what happened.

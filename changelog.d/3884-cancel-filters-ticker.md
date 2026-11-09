@@ -1,0 +1,6 @@
+### Added
+
+- **One cancel filter for every scope (#3886):** `orderClass` (`simple`, `market`, `limit`, `stop`, `stop_limit`, `bracket`, `oco`, `oto`), `orderSide`, `ladderId` and `placedAfter`, resolved once against the broker’s own order list in `src/trading/cancelFilters.ts`. Class semantics are enforced, not implied: a bracket stays a bracket even though its entry is a limit order, and an unknown class refuses with the accepted set. #rsi
+- **`alpaca_cancel_ticker` + `POST /broker/orders/cancel-ticker` (#3884):** lists the broker’s open orders for one symbol, resolves the filter, then cancels each with a per-order receipt (id, class, status before/after). A bracket parent and its legs in one call are folded so nothing is cancelled twice. #rsi
+- **Dry run and honest refusals (#3884):** `dryRun: true` returns the target list and cancels nothing; a symbol with no matching orders refuses with `no_orders_matched` and the filter echoed — never a silent “cancelled 0”. A partial failure itemises which orders survived and why. #rsi
+- **Cap honoured, de-risking never blocked (#3884/#3888):** a configured `cancelMaxCount` refuses a larger batch and reports the real count; an unset cap does not block a ticker cancel, and the receipt says the cap was unset. #rsi
