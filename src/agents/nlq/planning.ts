@@ -702,6 +702,12 @@ export function planWithRules(question: string): NLQPlan {
         limitPrice: orderParams.limitPrice,
         relativePriceOffsetPercent: orderParams.relativePriceOffsetPercent,
         relativePriceDescription: orderParams.relativePriceDescription,
+        ...(orderParams.takeProfitPercent !== undefined
+          ? { takeProfitPercent: orderParams.takeProfitPercent }
+          : {}),
+        ...(orderParams.stopLossPercent !== undefined
+          ? { stopLossPercent: orderParams.stopLossPercent }
+          : {}),
       },
       terms: `${orderParams.orderAction} ${orderParams.quantity} ${orderParams.symbol}`,
       role: "any",

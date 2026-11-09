@@ -46,6 +46,91 @@ export const STOCK_COPILOT_TRADING_RULE = `6. Stock Copilot Trading & Execution 
 - Human Confirmation & Execution: When the user confirms or approves (e.g. 'Approve', 'Approve trade draft <orderId>', 'Approve Alpaca trade draft <orderId>', or clicks the approve button), invoke 'tool_openaimp_alpaca_place_order' to place the order. NEVER invoke 'tool_openaimp_etrade_execute_order'.
 - Synchronous Execution Invariant: Alpaca trading tools ('tool_openaimp_alpaca_preview_order', 'tool_openaimp_alpaca_place_order', 'tool_openaimp_alpaca_get_quote', 'tool_openaimp_alpaca_orders') execute synchronously. Do NOT invoke 'tool_openaimp_get_async_job' or 'tool_openaimp_list_async_jobs' for trading tools.`;
 
+/** Issue #3839: the prompt-facing capability for one broker/mode. */
+export interface StockCopilotPromptCapability {
+  brokerId: string;
+  brokerLabel: string;
+  mode: "paper" | "live";
+  environment: "TEST" | "PROD";
+  tools: {
+    quote: string;
+    preview: string;
+    place: string;
+    orders: string | null;
+    cancel: string | null;
+  };
+  bracketOrders: "native" | "preview" | "none";
+  percentBrackets: boolean;
+}
+
+/**
+ * Issue #3839: the Stock Copilot capabilities block for the ACTIVE broker.
+ * Alpaca/paper returns the original constant byte-for-byte; every other
+ * broker/mode names that broker's tools.
+ */
+export function buildStockCopilotCapabilities(cap: StockCopilotPromptCapability): string {
+  if (cap.brokerId === "alpaca" && cap.mode === "paper") return STOCK_COPILOT_CAPABILITIES;
+  const tool = (name: string) => `tool_openaimp_${name}`;
+  return `Sub-agent & MCP capabilities directly available to you (the tool_openaimp_* tools are the platform MCP server's catalog, discovered at runtime via the Agents SDK MCP client; each discovered tool carries its own description):
+- 'tool_openaimp_query_platform_knowledge': platform documentation and navigation.
+- 'tool_openaimp_stock_copilot_status' / 'control' / 'introspect' / 'learnings' / 'evaluate': the copilot's own loop state, controls, workflow, learnings, and read-only strategy evaluation.
+- '${tool(cap.tools.quote)}': the live quote for ${cap.brokerLabel}. Never present a price without a named source + timestamp.
+- '${tool(cap.tools.preview)}': draft an order with Agent DID attestation. NO SHARES ARE BOUGHT OR SOLD; human confirmation is required.
+- '${tool(cap.tools.place)}': place a confirmed draft ONLY after explicit human authorization. It executes synchronously.
+${cap.tools.orders ? `- '${tool(cap.tools.orders)}': open and historical orders.` : "- Order history is not exposed by this broker's MCP set."}
+${cap.tools.cancel ? `- '${tool(cap.tools.cancel)}': cancel open bracket orders/legs.` : "- Order cancel is not exposed by this broker's MCP set."}
+- 'tool_openaimp_get_async_job' / 'tool_openaimp_list_async_jobs': asynchronous PIPELINE jobs only; never for trading tools.`;
+}
+
+/** Issue #3839: rule 6 for the active broker. */
+export function buildStockCopilotTradingRule(cap: StockCopilotPromptCapability): string {
+  if (cap.brokerId === "alpaca" && cap.mode === "paper") return STOCK_COPILOT_TRADING_RULE;
+  const tool = (name: string) => `tool_openaimp_${name}`;
+  const bracket =
+    cap.bracketOrders === "native"
+      ? "Bracket exits are NATIVE: one preview/place call with takeProfitPercent/stopLossPercent lets the broker hold the children."
+      : cap.bracketOrders === "preview"
+        ? "Bracket exits are a DRAFT: the preview computes the legs, but this client cannot place bracket children. After approval, place the parent and then the two exits as separate approved orders; never report the parent as protected."
+        : "No bracket model: place a protective stop as a separate approved order before reporting the position protected.";
+  return `6. Stock Copilot Trading & Execution (${cap.brokerLabel} ${cap.mode}; ${cap.environment}):
+- Active Broker: ${cap.brokerLabel}. NEVER use another broker's tools ('tool_openaimp_etrade_*' / 'tool_openaimp_alpaca_*') on this turn.
+- Real-time Quotes: invoke '${tool(cap.tools.quote)}'. Never present a price without a named source + timestamp; a failed quote is a failure, never an estimated price.
+- Order Drafts: for any trade order, invoke '${tool(cap.tools.preview)}' to create an Agent DID-attested draft. NEVER execute without explicit human authorization.
+- Execution: when the user confirms, invoke '${tool(cap.tools.place)}'. ${bracket}
+- ${cap.percentBrackets ? "Percent exits (+4% / -2%) are converted by the adapter from the user limit or live quote; never do the math yourself." : "This broker does not accept percent exits; ask for absolute leg prices."}
+- Synchronous invariant: trading tools execute synchronously. Do NOT poll 'tool_openaimp_get_async_job' / 'tool_openaimp_list_async_jobs' for trading tools.`;
+}
+
+/**
+ * Issue #3839: broker-aware steering. Alpaca/paper returns the original
+ * constant byte-for-byte; every other broker/mode gets its own tool names.
+ */
+export function buildStockCopilotMcpSteering(cap: StockCopilotPromptCapability): string {
+  if (cap.brokerId === "alpaca" && cap.mode === "paper") return STOCK_COPILOT_MCP_STEERING;
+  const tool = (name: string) => `tool_openaimp_${name}`;
+  const orders = cap.tools.orders ? `history via '${tool(cap.tools.orders)}'` : "order history is not exposed";
+  const cancel = cap.tools.cancel ? `cancel via '${tool(cap.tools.cancel)}'` : "cancel is not exposed";
+  const bracket =
+    cap.bracketOrders === "native"
+      ? `Bracket exits are NATIVE on ${cap.brokerLabel}: one preview/place call with takeProfitPercent/stopLossPercent lets the broker hold the children.`
+      : cap.bracketOrders === "preview"
+        ? `Bracket exits are a DRAFT on ${cap.brokerLabel}: the preview computes the legs, but this client cannot place bracket children. After approval, place the parent and then the two exits as separate approved orders; never report the parent as protected.`
+        : `${cap.brokerLabel} has no bracket model: place a protective stop as a separate approved order before reporting the position protected.`;
+  return `Stock Copilot — this conversation is the Stock Copilot surface, and the copilot's own commands are in your discovered MCP set.
+- ACTIVE BROKER/MODE: ${cap.brokerLabel} · ${cap.mode} (${cap.environment}). Exactly one broker and one mode are in effect for this turn. Use ONLY this broker's order tools; another broker's tools are for other flows.
+- 'tool_openaimp_stock_copilot_status': active broker/mode, sessions, open positions with exit plans, closed trades, and cycle/refusal telemetry.
+- 'tool_openaimp_stock_copilot_control': pause/resume, cadence, sessions, universe, strategies, execution mode, RSI mode. Change loop state ONLY when the user explicitly asks.
+- 'tool_openaimp_stock_copilot_introspect' / 'tool_openaimp_stock_copilot_learnings' / 'tool_openaimp_stock_copilot_evaluate': workflow introspection, learned evidence, and evaluate a symbol WITHOUT placing orders.
+- '${tool(cap.tools.quote)}': the live quote for this broker. Never present a price without a named source + timestamp (a user limit, or this quote with provider and time); a quote failure is a failure, never an estimated price.
+- '${tool(cap.tools.preview)}' & '${tool(cap.tools.place)}': preview is a DRAFT with Agent DID attestation; place only after explicit human approval. ${orders}; ${cancel}.
+- BRACKET DRAFT PROTOCOL: a "+4% TP / -2% SL" limit buy is ONE preview call with orderType "LIMIT", takeProfitPercent 4, stopLossPercent 2. ${cap.percentBrackets ? "Percent exits are converted by the adapter from the user limit or live quote — never do the math or use placeholders." : "This broker does not accept percent exits; ask for absolute leg prices."} ${bracket}
+- HONEST EXECUTION: never claim an order was placed without a broker order id; a queued job receipt is not a placement. Report the exact refusal and the fix URL.
+- FIX URLS: broker connect at ?tab=trading (Alpaca paper: /api/broker/connect/alpaca?environment=TEST; live: ?environment=PROD); credits at ?tab=checkout&checkoutTab=topup; trace at ?tab=workflow-runs; data providers at ?tab=research; workflows at ?tab=workflows.
+- 'tool_openaimp_stock_copilot_remediate_gaps': when the user asks to fix platform gaps, invoke it directly.
+- CLICKABLE LINKS: whenever a pipeline, benchmark, status read, or remediation runs, include '[View Live Workflow Runs](?tab=workflow-runs)' and, when a run id exists, '[View Workflow Run <runId>](?tab=workflow-runs&run=<runId>)'; state the exact target chain, frontier stage, unit counts, and errors.
+- ARCHITECTURAL RUNTIME INVARIANT: Cloudflare Workers, Durable Objects (DO-SQLite), D1, KV, and Cloudflare Queues only. There is NO Kafka, RabbitMQ, Celery, SQS, or Redis; diagnostics live in DO-SQLite tables ('mas_events', 'audit_events', 'async_jobs') and Cloudflare Logging.`;
+}
+
 export const STOCK_COPILOT_MCP_STEERING = `Stock Copilot — this conversation is the Stock Copilot surface, and the copilot's own commands are in your discovered MCP set:
 - 'tool_openaimp_stock_copilot_status': The autonomous loop's live status — active broker/mode, current and enabled sessions, open positions with bracket exit plans, recently closed trades, and recent cycle activity/refusal telemetry. Use it for any question about what the loop is doing, holding, or has done.
 - 'tool_openaimp_stock_copilot_control': Pause or resume the loop, or change its cadence, enabled sessions, watch universe, strategies, execution mode, or RSI self-improvement mode ('governed' vs 'self'). Change loop state ONLY when the user explicitly asks for that change.
@@ -67,14 +152,14 @@ export const STOCK_COPILOT_MCP_STEERING = `Stock Copilot — this conversation i
 - ARCHITECTURAL RUNTIME INVARIANT: The platform runs strictly on Cloudflare Workers, Durable Objects (DO-SQLite), D1, KV, and Cloudflare Queues. There is NO Kafka, RabbitMQ, Celery, SQS, or Redis. Never hallucinate Kafka or suggest checking Kafka logs; all diagnostics and logs reside in DO-SQLite tables ('mas_events', 'audit_events', 'async_jobs') and Cloudflare Logging.`;
 
 export function buildStockCopilotSystemPrompt(input: OrchestratorPromptInput): string {
-  const { route, memoryContext, vectorContext, optionsResearchContext, isAutoOptionsResearchRequest } = input;
+  const { route, memoryContext, vectorContext, optionsResearchContext, isAutoOptionsResearchRequest, stockCopilotCapability } = input;
   const prompt = `${STOCK_COPILOT_SYSTEM_ROLE}
 Intent router classified request as: [${route.agent}] (confidence: ${(route.confidence * 100).toFixed(0)}%). Rationale: ${route.reason}.${delimitRetrievedContent(memoryContext)}${delimitRetrievedContent(vectorContext)}
 ${optionsResearchContext ? `\n${delimitRetrievedContent(optionsResearchContext)}\n${isAutoOptionsResearchRequest
     ? "If AUTO_OPTIONS_RESEARCH_JOB_SUBMITTED is present, tell the user it was accepted and include its job ID; do not claim analysis results yet. If AUTO_OPTIONS_RESEARCH_EXECUTION_ERROR is present, report that queueing failure clearly."
     : ""}` : ""}
 
-${STOCK_COPILOT_CAPABILITIES}
+${stockCopilotCapability ? buildStockCopilotCapabilities(stockCopilotCapability) : STOCK_COPILOT_CAPABILITIES}
 
 Platform documentation — the 8 workflows with their tabs and APIs, the UI navigation map, the quantitative FAQs, and the decisioning engines — is NOT carried in this prompt. Retrieve it at turn time with 'tool_openaimp_query_platform_knowledge'; that corpus is the single source of truth for how the platform works and how to navigate it.
 
@@ -84,11 +169,11 @@ Agentic Best Practices & Workflow Rules:
 3. RAG & Knowledge Retrieval: If 'tool_openaimp_knowledge_search' or 'tool_openaimp_query_platform_knowledge' returns matching documents, cite them accurately.
 4. Human-in-the-Loop (HITL) Execution: For financial operations or task proposals, always require human confirmation. When a user approves (or mentions a draft ID like pay_xxx or task_xxx), call 'tool_openaimp_confirm_payment_draft' with decision: 'approved'.
 5. Multi-Turn Context & Session Memory: Respect the active session memory facts shown above. When the user asks to remember a preference, call 'tool_openaimp_manage_session_memory' with action: 'remember'.
-${STOCK_COPILOT_TRADING_RULE}
+${stockCopilotCapability ? buildStockCopilotTradingRule(stockCopilotCapability) : STOCK_COPILOT_TRADING_RULE}
 7. Be structured, transparent, accurate, and professional. Avoid repeating internal tool call boilerplate.
 8. Background execution: Long-running asynchronous workflows return queued job IDs. Tell the user the job ID, and use 'tool_openaimp_get_async_job' or 'tool_openaimp_list_async_jobs' only when they ask for status or results of asynchronous background jobs. Trading tools ('tool_openaimp_alpaca_preview_order', 'tool_openaimp_alpaca_place_order') are synchronous — do NOT call 'tool_openaimp_get_async_job' or 'tool_openaimp_list_async_jobs' for trading tools. Never imply queued work is already complete.
 
-${STOCK_COPILOT_MCP_STEERING}`;
+${stockCopilotCapability ? buildStockCopilotMcpSteering(stockCopilotCapability) : STOCK_COPILOT_MCP_STEERING}`;
 
   return withRetrievedContentRule(prompt, Boolean(memoryContext || vectorContext || optionsResearchContext));
 }

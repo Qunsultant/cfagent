@@ -103,6 +103,13 @@ export interface OrchestratorPromptInput {
    */
   stockCopilotMcpActive?: boolean;
   /**
+   * Issue #3839: the resolved active broker/mode capability for the Stock
+   * Copilot turn. When present, the steering names THIS broker's tools and
+   * bracket semantics; when absent the Alpaca default steering is used
+   * (byte-identical to the pre-#3839 prompt).
+   */
+  stockCopilotCapability?: StockCopilotPromptCapability;
+  /**
    * Issue #3727: the CHAT_NLQ_MODE gate's resolved value for
    * this turn, as resolved by chatNlqTurnGate in the caller
    * (the same resolution that decides the turn's usable tool
@@ -122,8 +129,14 @@ export interface OrchestratorPromptInput {
  * Appended only on activated stock turns; every other turn's
  * prompt is byte-identical without it.
  */
-import { buildStockCopilotSystemPrompt, STOCK_COPILOT_MCP_STEERING } from "./prompts/stockCopilotPrompt";
-export { STOCK_COPILOT_MCP_STEERING };
+import {
+  buildStockCopilotMcpSteering,
+  buildStockCopilotSystemPrompt,
+  STOCK_COPILOT_MCP_STEERING,
+  type StockCopilotPromptCapability,
+} from "./prompts/stockCopilotPrompt";
+export { STOCK_COPILOT_MCP_STEERING, buildStockCopilotMcpSteering };
+export type { StockCopilotPromptCapability };
 
 /**
  * #879/#767 — retrieved-content separation for the orchestrator chat
@@ -191,7 +204,7 @@ Agentic Best Practices & Workflow Rules:
 5. Multi-Turn Context & Session Memory: Respect the active session memory facts shown above. When the user asks to remember a preference, call 'tool_openaimp_manage_session_memory' with action: 'remember'.
 6. E*TRADE Trading & Market Screening: When the user asks to run a stock screen over a universe (e.g. NASDAQ100, SP500, or ALL universes), invoke 'tool_openaimp_run_stock_screen' with that universe. When the user asks to screen options strategies over a universe (e.g. bull put credit spreads in NASDAQ100 with max loss <= $30 and max profit > $0), invoke 'tool_openaimp_run_options_strategy_screen' with the structured constraints (strategyType, maxLoss, minProfit) — never deflect that request to a UI workflow. When the user asks for a listings-style filter scan (by RSI, market cap, sector, price, gainers/losers across listings), invoke 'tool_openaimp_etrade_market_scan'. For quotes invoke 'tool_openaimp_etrade_get_quote'. For trade orders (buy/sell), ALWAYS use the active broker's preview tool ('tool_openaimp_etrade_preview_order'; 'tool_openaimp_alpaca_preview_order' on a Stock Copilot turn). Only execute via 'tool_openaimp_etrade_execute_order' when the user explicitly confirms approval. Never state an order price without its source + timestamp (user limit, or live quote + provider + time); missing \u2192 ask for the limit, never guess. A failed quote tool is a failure, never an estimated price.
 7. Be structured, transparent, accurate, and professional. Avoid repeating internal tool call boilerplate.
-8. Background execution: MCP capabilities return queued job IDs instead of final results. Tell the user the job ID, and use 'tool_openaimp_get_async_job' or 'tool_openaimp_list_async_jobs' only when they ask for status or results. Never imply queued work is already complete.${input.stockCopilotMcpActive ? `\n\n${STOCK_COPILOT_MCP_STEERING}` : ""}`;
+8. Background execution: MCP capabilities return queued job IDs instead of final results. Tell the user the job ID, and use 'tool_openaimp_get_async_job' or 'tool_openaimp_list_async_jobs' only when they ask for status or results. Never imply queued work is already complete.${input.stockCopilotMcpActive ? `\n\n${input.stockCopilotCapability ? buildStockCopilotMcpSteering(input.stockCopilotCapability) : STOCK_COPILOT_MCP_STEERING}` : ""}`;
   return withRetrievedContentRule(prompt, Boolean(memoryContext || vectorContext || optionsResearchContext));
 }
 

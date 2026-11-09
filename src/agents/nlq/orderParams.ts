@@ -10,6 +10,8 @@ export function extractOrderParameters(question: string): {
   limitPrice?: number;
   relativePriceOffsetPercent?: number;
   relativePriceDescription?: string;
+  takeProfitPercent?: number;
+  stopLossPercent?: number;
 } | null {
   const isOrderIntent = /\b(buy|purchase|sell|short|cover|order\s+to\s+buy|order\s+to\s+sell|place\s+(?:an?\s+)?order|draft\s+(?:an?\s+)?order)\b/i.test(question);
   if (!isOrderIntent || /\b(messages?|categories|tables?)\b/i.test(question)) {
@@ -124,6 +126,20 @@ export function extractOrderParameters(question: string): {
   let limitPrice: number | undefined = undefined;
   let relativePriceOffsetPercent: number | undefined = undefined;
   let relativePriceDescription: string | undefined = undefined;
+  let takeProfitPercent: number | undefined = undefined;
+  let stopLossPercent: number | undefined = undefined;
+
+  // Issue #3839: bracket exits as percentages — "+4% take-profit" and
+  // "-2% stop-loss". The adapter converts them from the same entry it
+  // prices the draft from, so no arithmetic happens in the parser.
+  const takeProfitMatch = question.match(
+    /\+?\s*(\d+(?:\.\d+)?)\s*%\s*(?:take[\s-]?profit|tp)\b/i,
+  ) || question.match(/(?:take[\s-]?profit|tp)\s*(?:at|of|:)?\s*\+?\s*(\d+(?:\.\d+)?)\s*%/i);
+  if (takeProfitMatch) takeProfitPercent = parseFloat(takeProfitMatch[1]);
+  const stopLossMatch = question.match(
+    /-\s*(\d+(?:\.\d+)?)\s*%\s*(?:stop[\s-]?loss|sl)\b/i,
+  ) || question.match(/(?:stop[\s-]?loss|sl)\s*(?:at|of|:)?\s*-?\s*(\d+(?:\.\d+)?)\s*%/i);
+  if (stopLossMatch) stopLossPercent = parseFloat(stopLossMatch[1]);
 
   // Relative Discount (below market)
   const discountMatch = question.match(
@@ -170,5 +186,7 @@ export function extractOrderParameters(question: string): {
     limitPrice,
     relativePriceOffsetPercent,
     relativePriceDescription,
+    ...(takeProfitPercent !== undefined ? { takeProfitPercent } : {}),
+    ...(stopLossPercent !== undefined ? { stopLossPercent } : {}),
   };
 }

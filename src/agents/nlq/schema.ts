@@ -96,6 +96,8 @@ export const nlqPlanSchema = z.object({
       limitPrice: z.number().optional(),
       relativePriceOffsetPercent: z.number().optional(),
       relativePriceDescription: z.string().optional(),
+      takeProfitPercent: z.number().positive().optional(),
+      stopLossPercent: z.number().positive().optional(),
       filters: z.record(z.string(), z.any()).optional(),
       strategyFilter: z.record(z.string(), z.any()).optional(),
       request: z.record(z.string(), z.any()).optional(),
