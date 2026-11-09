@@ -31,7 +31,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "./apiFetch";
-import { Button } from "./components/ui";
+import { Button, PageSection, PageShell } from "./components/ui";
 
 interface ChallengerView {
   id: string;
@@ -318,15 +318,10 @@ export function ScreeningReviewPanel({ userLogin }: { userLogin?: string }) {
   const latestEvaluation = detail?.evaluations[0];
 
   return (
-    <section aria-label="Screening proposal review" style={{ margin: "1rem 0" }}>
-      <h3 style={{ margin: "0 0 0.5rem", color: "var(--color-accent)", fontSize: "var(--font-size-title-sm)" }}>
-        🗳️ Proposal Review
-      </h3>
-      <p style={{ margin: "0 0 1rem", ...bodyText }}>
-        Everything the screening system proposes — challengers, discovered goals, and
-        strategy-bank re-selections — decided here, through the same governed endpoints that
-        produced them. Nothing activates, promotes, or trades without a recorded human decision.
-      </p>
+    <PageShell
+      title="Proposal Review"
+      scopeNote="Everything the screening system proposes — challengers, discovered goals, and strategy-bank re-selections — decided here, through the same governed endpoints that produced them. Nothing activates, promotes, or trades without a recorded human decision."
+    >
       {actionMessage && (
         <p role="status" style={{ margin: "0 0 0.75rem", color: "var(--color-success)", fontSize: "var(--font-size-body)" }}>
           {actionMessage}
@@ -339,10 +334,8 @@ export function ScreeningReviewPanel({ userLogin }: { userLogin?: string }) {
       )}
 
       {/* ---------------- Challengers ---------------- */}
+      <PageSection title="Challengers">
       <div style={boxStyle}>
-        <h4 style={{ margin: "0 0 0.5rem", color: "var(--color-text-primary)", fontSize: "1rem" }}>
-          Challengers
-        </h4>
         <p style={{ margin: "0 0 0.75rem", ...muted }}>
           Proposed changes to weights, the active set, or a ranking, each judged on a frozen
           evaluation set. The governed path: evaluate (walk-forward, holdout decides) → gate
@@ -546,12 +539,11 @@ export function ScreeningReviewPanel({ userLogin }: { userLogin?: string }) {
           </div>
         ))}
       </div>
+      </PageSection>
 
       {/* ---------------- Goal proposals ---------------- */}
+      <PageSection title="Goal proposals">
       <div style={boxStyle}>
-        <h4 style={{ margin: "0 0 0.5rem", color: "var(--color-text-primary)", fontSize: "1rem" }}>
-          Goal proposals
-        </h4>
         <p style={{ margin: "0 0 0.75rem", ...muted }}>
           Goals the discovery pass persisted as proposals. Activating one makes it a live goal for
           goal-driven screens; dismissing archives it. Only proposed goals can be decided, and the
@@ -608,12 +600,11 @@ export function ScreeningReviewPanel({ userLogin }: { userLogin?: string }) {
           </div>
         ))}
       </div>
+      </PageSection>
 
       {/* ---------------- Re-selection proposals ---------------- */}
+      <PageSection title="Strategy-bank re-selection proposals">
       <div style={boxStyle}>
-        <h4 style={{ margin: "0 0 0.5rem", color: "var(--color-text-primary)", fontSize: "1rem" }}>
-          Strategy-bank re-selection proposals
-        </h4>
         <p style={{ margin: "0 0 0.75rem", ...muted }}>
           Governance: proposal only — not promoted. The nightly re-selection records what it would
           run; promotion happens only through the champion/challenger gate above. There is
@@ -644,12 +635,11 @@ export function ScreeningReviewPanel({ userLogin }: { userLogin?: string }) {
           </div>
         ))}
       </div>
+      </PageSection>
 
       {/* ---------------- Strategy weights ---------------- */}
+      <PageSection title="Strategy weights">
       <div style={boxStyle}>
-        <h4 style={{ margin: "0 0 0.5rem", color: "var(--color-text-primary)", fontSize: "1rem" }}>
-          Strategy weights
-        </h4>
         {weightsError && (
           <>
             <p style={muted}>Strategy weights are unavailable right now (the research agent read path did not answer).</p>
@@ -677,6 +667,7 @@ export function ScreeningReviewPanel({ userLogin }: { userLogin?: string }) {
           </>
         )}
       </div>
-    </section>
+      </PageSection>
+    </PageShell>
   );
 }
