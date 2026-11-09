@@ -18,7 +18,8 @@
  *   "unresolved" — fail closed, never a guessed mode.
  * - The cycle's behavior matrix, all fail-closed and named:
  *   unresolved ⇒ stock_copilot_mode_unresolved, zero platform calls;
- *   active broker ≠ alpaca ⇒ inactive (stock_copilot_inactive_broker),
+ *   any catalog-declared copilot broker runs (etrade and alpaca);
+ *   an unsupported broker ⇒ inactive (stock_copilot_unsupported_broker),
  *   zero platform calls; guard disagreement between the selected mode
  *   and the platform resolver's base ⇒ stock_copilot_mode_mismatch,
  *   zero orders; paper ⇒ paper trades; live ⇒ live trades.
@@ -34,7 +35,7 @@
  *   defaults an absent selection to alpaca; the shared tenant-store
  *   default (etrade, via getTenantProviders) is unchanged and still
  *   governs the manual broker routes. An explicitly stored etrade
- *   selection still resolves the copilot inactive, and a FAILED
+ *   selection runs the copilot on E*TRADE (#3839), and a FAILED
  *   broker read is not an absent selection — it stays unresolved.
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
@@ -414,19 +415,16 @@ describe("stock copilot cycle — mode matrix (#3451)", () => {
     expect(records[0]).toMatchObject({ outcome: "refused", detail: STOCK_COPILOT_MODE_UNRESOLVED });
   });
 
-  it("active broker ≠ alpaca ⇒ inactive, zero platform calls, inactive record naming the state", async () => {
+  it("E*TRADE active ⇒ the cycle runs on E*TRADE, not inactive", async () => {
     const fake = createFakePlatform();
     const activity = createInMemoryStockCopilotActivityPort();
     const result = await runStockCopilotCycle(
       modeDeps({ platform: fake.platform, selection: ETRADE_SELECTION, activity }),
     );
-    expect(result.status).toBe("inactive_broker");
-    expect(fake.calls.placeOrderRemote).toBe(0);
-    expect(fake.calls.getPositions).toBe(0);
-    expect(fake.calls.getQuote).toBe(0);
-    const records = activity.listActivity("owner", 10);
-    expect(records).toHaveLength(1);
-    expect(records[0]).toMatchObject({ outcome: "inactive", detail: STOCK_COPILOT_INACTIVE_BROKER });
+    // Issue #3839: the catalog declares E*TRADE copilot-capable, so the
+    // cycle runs instead of refusing on a hardcoded Alpaca id.
+    expect(result.status).toBe("ok");
+    expect(fake.calls.placeOrderRemote).toBeGreaterThanOrEqual(1);
   });
 
   it("flag OFF still wins over every selection gate: disabled, zero calls, no record", async () => {
@@ -575,16 +573,15 @@ describe("stock copilot host — mode conformance (#3451)", () => {
     expect(fake.calls.placeOrderRemote).toBeGreaterThanOrEqual(1);
   });
 
-  it("etrade active ⇒ the audit reports inactive_broker and the platform is never called", async () => {
+  it("etrade active ⇒ the cycle runs on the selected broker", async () => {
     const fake = createFakePlatform();
     const { payload } = await runDeclaredCycle({
       storedEnvironment: "TEST",
       commercial: await commercialWithBroker("etrade"),
       fake,
     });
-    expect(payload.status).toBe("inactive_broker");
-    expect(fake.calls.placeOrderRemote).toBe(0);
-    expect(fake.calls.getPositions).toBe(0);
+    expect(payload.status).toBe("ok");
+    expect(fake.calls.placeOrderRemote).toBeGreaterThanOrEqual(1);
   });
 
   it("broker store unbound ⇒ the audit reports mode_unresolved and the platform is never called", async () => {
