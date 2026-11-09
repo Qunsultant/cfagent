@@ -539,6 +539,10 @@ export async function runSagaWorkflowFlow(
     tenantId: params.tenantId,
     userLogin: params.userLogin,
     family: params.family,
+    // Issue #3810: the saga's entry trigger rides its audit rows so
+    // the runs view can evidence the chain's trigger (the saga has
+    // no async-job row of its own to stamp).
+    trigger: params.trigger,
     ...(params.rail ? { rail: params.rail } : {}),
   };
 

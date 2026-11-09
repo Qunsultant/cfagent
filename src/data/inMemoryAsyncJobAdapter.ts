@@ -87,6 +87,9 @@ export class InMemoryAsyncJobStore
       stage: input.stage ?? null,
       chain_id: input.chainId ?? null,
       stuck_alerted_at: null,
+      trigger: input.trigger ?? null,
+      triggered_by: input.triggeredBy ?? null,
+      schedule_id: input.scheduleId ?? null,
     });
   }
 
@@ -125,6 +128,9 @@ export class InMemoryAsyncJobStore
       stage: input.stage ?? null,
       chain_id: input.chainId ?? null,
       stuck_alerted_at: null,
+      trigger: input.trigger ?? null,
+      triggered_by: input.triggeredBy ?? null,
+      schedule_id: input.scheduleId ?? null,
     });
   }
 

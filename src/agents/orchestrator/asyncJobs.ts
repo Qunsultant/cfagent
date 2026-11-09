@@ -30,6 +30,7 @@ import type {
   AsyncJobRecord,
   AsyncJobStatus,
   AsyncJobSubmission,
+  AsyncJobTrigger,
   Env,
   PipelineStage,
 } from "../../types";
@@ -231,6 +232,9 @@ function jobGraphFields(row: Record<string, unknown>): {
   stage?: PipelineStage;
   chainId?: string;
   notBefore?: string;
+  trigger?: AsyncJobTrigger | null;
+  triggeredBy?: string | null;
+  scheduleId?: string | null;
 } {
   const kind = ASYNC_JOB_KINDS.find((k) => k === row.job_kind);
   const channel = ASYNC_JOB_CHANNELS.find((c) => c === row.channel);
@@ -242,6 +246,59 @@ function jobGraphFields(row: Record<string, unknown>): {
     stage,
     chainId: typeof row.chain_id === "string" && row.chain_id ? row.chain_id : undefined,
     notBefore: typeof row.not_before === "string" && row.not_before ? row.not_before : undefined,
+    // Issue #3810: provenance stamped at submission. An invalid
+    // stored value is dropped (never rendered); NULL = the
+    // submission carried none.
+    trigger: ASYNC_JOB_TRIGGERS.find((t) => t === row.trigger) ?? null,
+    triggeredBy: typeof row.triggered_by === "string" && row.triggered_by ? row.triggered_by : null,
+    scheduleId: typeof row.schedule_id === "string" && row.schedule_id ? row.schedule_id : null,
+  };
+}
+
+/** Issue #3810: the closed run-level trigger domain for provenance. */
+const ASYNC_JOB_TRIGGERS: readonly AsyncJobTrigger[] = ["manual", "scheduled", "autonomous", "webhook", "agent"];
+
+/**
+ * Issue #3810: map a §4 ledger trigger (the five-valued
+ * JobRunLedgerTrigger the follow-up planners stamp) onto the
+ * run-level trigger — or NULL when it is not one. "worker-cron"
+ * is a scheduled trigger; "async-chain" is not a trigger at all
+ * (the chain step inherits its trigger from the chain), and
+ * "unknown" stays unknown. Never invents.
+ */
+function ledgerTriggerToJobTrigger(value: unknown): AsyncJobTrigger | null {
+  if (value === "manual" || value === "scheduled") return value;
+  if (value === "worker-cron") return "scheduled";
+  return null;
+}
+
+/**
+ * Issue #3810: resolve the provenance a submission stamps onto its
+ * row. Explicit submission fields win; otherwise the payload's
+ * §4 ledgerLinkage (stamped by the follow-up planners) is the
+ * fallback source. A trigger that is neither explicit nor
+ * mappable stays NULL — the read model renders that as
+ * "Not recorded", never invented.
+ */
+export function resolveJobProvenance(job: AsyncJobSubmission): {
+  trigger: AsyncJobTrigger | null;
+  triggeredBy: string | null;
+  scheduleId: string | null;
+} {
+  const explicit = ASYNC_JOB_TRIGGERS.find((t) => t === job.trigger);
+  const triggeredBy = typeof job.triggeredBy === "string" && job.triggeredBy ? job.triggeredBy : null;
+  const explicitScheduleId = typeof job.scheduleId === "string" && job.scheduleId ? job.scheduleId : null;
+  if (explicit) {
+    return { trigger: explicit, triggeredBy, scheduleId: explicitScheduleId };
+  }
+  const linkage = (job.payload as Record<string, unknown> | undefined)?.ledgerLinkage;
+  const link = linkage && typeof linkage === "object" ? (linkage as Record<string, unknown>) : null;
+  return {
+    trigger: link ? ledgerTriggerToJobTrigger(link.trigger) : null,
+    triggeredBy,
+    scheduleId:
+      explicitScheduleId ??
+      (link && typeof link.scheduleId === "string" && link.scheduleId ? link.scheduleId : null),
   };
 }
 
@@ -336,6 +393,11 @@ export async function submitAsyncJob(ctx: AsyncJobsContext,
                 : job.capability === "feed.snapshot"
                   ? `Feed snapshot: ${((job.payload as { symbols?: Array<{ symbol?: string }> }).symbols ?? []).map((s) => s.symbol).filter(Boolean).join(", ").slice(0, 100) || "universe"}`
                   : `Task: ${(job.payload as { title?: string }).title ?? job.capability}`);
+  // Issue #3810: provenance stamped at submission — explicit fields
+  // win, else the payload's §4 ledgerLinkage; NULL when neither
+  // names a trigger (the read model renders "Not recorded", never
+  // invented).
+  const provenance = resolveJobProvenance(job);
   queue.insertQueued({
     jobId,
     sessionId: ctx.sessionKey(),
@@ -349,6 +411,9 @@ export async function submitAsyncJob(ctx: AsyncJobsContext,
     notBefore: job.runAt ?? null,
     stage: httpChainStage ?? null,
     chainId: httpChainId ?? null,
+    trigger: provenance.trigger,
+    triggeredBy: provenance.triggeredBy,
+    scheduleId: provenance.scheduleId,
   });
 
   try {
@@ -737,6 +802,10 @@ export async function recordScreenerRunMainJob(
     jobKind: "main",
     stage: chainId ? "generate" : null,
     chainId: chainId ?? null,
+    // Issue #3810: the bridged run's own trigger + schedule ride
+    // the row (the outcome already names them — no new source).
+    trigger: outcome.trigger,
+    scheduleId: outcome.scheduleId ?? null,
   });
   ctx.audit("screener.run_bridged", "orchestrator", { jobId, kind: outcome.kind, success: outcome.success });
   // Issue #1333: every bridged run lands in the job-outcome sink
@@ -873,6 +942,11 @@ export async function retryAsyncJob(
     channel: graph.channel,
     stage: graph.stage,
     chainId: graph.chainId,
+    // Issue #3810: a retry keeps the source row's provenance — the
+    // retry is the same run, re-attempted, not a new trigger.
+    trigger: graph.trigger ?? undefined,
+    triggeredBy: graph.triggeredBy ?? undefined,
+    scheduleId: graph.scheduleId ?? undefined,
   } as unknown as AsyncJobSubmission;
   const submitted = await submitAsyncJob(ctx, submission);
   ctx.audit("async_job.retried", "orchestrator", { jobId, retryJobId: submitted.jobId, capability: String(row.capability) });

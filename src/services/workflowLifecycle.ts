@@ -117,13 +117,16 @@ function msOf(value: unknown): number | null {
  * computed trigger. Precedence is the scheduling fact, not the
  * trigger label:
  *  1. a queued job with a future not_before is delayed queue work;
- *  2. a command carrying a workflow-binding marker is binding work;
- *  3. a job carrying a schedule id / name / cron is agent-scheduler
- *     work (the SDK schedule that armed it — including Trigger-Now
- *     dispatches of that schedule, whose trigger reads manual);
- *  4. a scheduled trigger with no schedule evidence is a Worker cron
+ *  2. a job carrying a stamped schedule id (issue #3810 — the
+ *     schedule that submitted it) is agent-scheduler work;
+ *  3. a command carrying a workflow-binding marker is binding work;
+ *  4. a job carrying a schedule id / name / cron in its payload is
+ *     agent-scheduler work (the SDK schedule that armed it —
+ *     including Trigger-Now dispatches of that schedule, whose
+ *     trigger reads manual);
+ *  5. a scheduled trigger with no schedule evidence is a Worker cron
  *     trigger (the DO tick and its dispatches carry no schedule id);
- *  5. manual / autonomous-without-evidence fall through to manual /
+ *  6. manual / autonomous-without-evidence fall through to manual /
  *     cron-trigger / unknown without inventing an identity.
  */
 export function scheduleProvenanceForJobs(
@@ -156,6 +159,18 @@ export function scheduleProvenanceForJobs(
         mechanism: "workflow-binding",
         identity: str(payload.scheduleIdentity),
         reason: str(payload.scheduleReason),
+        nextFiringAt: null,
+        delaySeconds: null,
+      };
+    }
+    // Issue #3810: a stamped schedule id is the schedule that
+    // submitted the job — it wins over the payload's own hint.
+    const stampedScheduleId = str(job.schedule_id);
+    if (stampedScheduleId) {
+      return {
+        mechanism: "agent-scheduler",
+        identity: stampedScheduleId,
+        reason: null,
         nextFiringAt: null,
         delaySeconds: null,
       };
