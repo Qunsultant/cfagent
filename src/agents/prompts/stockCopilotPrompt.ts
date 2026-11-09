@@ -32,11 +32,10 @@ import {
  * default steering (STOCK_COPILOT_MCP_STEERING) and the
  * broker-aware steering (buildStockCopilotMcpSteering) so every
  * copilot turn carries the identical rule. The quick-start ran
- * the Yahoo FUNDAMENTALS feed job and skipped enrich, so
- * analyze refused with ANALYZE_INPUT_MISSING: fundamentals is
- * a JOIN SOURCE for enrich, not its input — enrich reads the
- * QUOTES dataset persisted by yahoo-nasdaq100-quotes by exact
- * lineage. The refusal was correct; the gap was orchestration:
+ * the fundamentals feed job and skipped enrich, so analyze
+ * refused with ANALYZE_INPUT_MISSING: fundamentals is a JOIN
+ * SOURCE for enrich, not its input — enrich reads the QUOTES
+ * dataset persisted by the quotes job by exact lineage. The refusal was correct; the gap was orchestration:
  * no steering named the mandatory stage order. Only real tool
  * names appear here: there is no get_enrich_job_status tool —
  * enrich status is read via get_async_job / list_async_jobs.
