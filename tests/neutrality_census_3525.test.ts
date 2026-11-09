@@ -239,6 +239,13 @@ function measure(): Map<string, number> {
  * of the desk integration's own enforcement, in its route.
  * 1 new row (copilotChannels.ts/etrade 1). Composed on the
  * 1124 rows / 8756 lines seed: totals move 1124/8756 -> 1125/8757.
+ * Baseline update (#3911, 2026-11-09): the pipeline stage-order rule names the
+ * feed/chain job ids the copilot must invoke verbatim, so the steering gains one
+ * Yahoo row in stockCopilotPrompt.ts — dispositioned INTEGRATION (data-bearing
+ * identifiers, not framing). The rule's prose comment was neutralized instead
+ * (the incident sentence names the fundamentals feed job and the quotes dataset
+ * without the provider brand), so the row is the rule line alone. Seed pin
+ * totals move 1125/8757 -> 1126/8758.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (186 rows / 1039 lines) ----
@@ -429,7 +436,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/platformKnowledge.ts", "yahoo", 12],
   ["src/trading/interfaces.ts", "etrade", 2],
 
-  // ---- INTEGRATION (677 rows / 6525 lines) ----
+  // ---- INTEGRATION (678 rows / 6526 lines) ----
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "etrade", 12],
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "yahoo", 1],
   ["docs/EXTERNAL_APIS_AND_ENDPOINTS_DIRECTORY.md", "alpaca", 3],
@@ -514,6 +521,11 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/agents/orchestrator/skills/chat-screening-doors/SKILL.md", "etrade", 1],
   ["src/agents/prompts/stockCopilotPrompt.ts", "alpaca", 17],
   ["src/agents/prompts/stockCopilotPrompt.ts", "etrade", 5],
+  // #3911 INTEGRATION: the pipeline stage-order rule names the feed/chain job ids
+  // the copilot must invoke verbatim (the quotes job, the fundamentals join, the
+  // chain id) — data-bearing identifiers, not framing. The rule's prose comment
+  // was neutralized instead (no provider name), so the row is the rule line alone.
+  ["src/agents/prompts/stockCopilotPrompt.ts", "yahoo", 1],
   ["src/agents/registry.ts", "etrade", 27],
   ["src/agents/registry.ts", "public.com", 1],
   ["src/agents/research-agent.ts", "etrade", 6],
@@ -1432,14 +1444,16 @@ describe("#3525 S6 shrink-only provider-brand census pin", () => {
     expect(total).toBeLessThanOrEqual(PLATFORM_BASELINE_TOTAL);
   });
 
-  it("the baseline itself is the recorded seed (1125 rows / 8757 lines)", () => {
+  it("the baseline itself is the recorded seed (1126 rows / 8758 lines)", () => {
     // #3883: +3 rows — the cancellation surface names the provider it executes
     // against (see the INTEGRATION disposition above).
     // #3905: +6 lines on the same seed — the Dow feed job's raises above
     // (feedJobs.ts/yahoo 12->14, feedPipelineJobs.ts/yahoo 19->23).
     // #3796: +1 row / +1 line — the surface voice routes host the desk
     // surface's broker gate (see the INTEGRATION disposition above).
-    expect(BASELINE.length).toBe(1125);
-    expect(BASELINE.reduce((a, [, , c]) => a + c, 0)).toBe(8757);
+    // #3911: +1 row / +1 line — the stage-order rule's Yahoo row above
+    // (stockCopilotPrompt.ts/yahoo 1, the rule line alone).
+    expect(BASELINE.length).toBe(1126);
+    expect(BASELINE.reduce((a, [, , c]) => a + c, 0)).toBe(8758);
   });
 });
