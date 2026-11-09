@@ -447,9 +447,9 @@ async function makeScheduleContext(withIdentity = true) {
 }
 
 describe("feed-job schedule copilot tools (#3530 slice B)", () => {
-  it("the catalog carries both schedule tools (122 total since #3782: +2 Alpaca quote/preview tools) with sibling scopes", () => {
+  it("the catalog carries both schedule tools (123 total since #3846: +2 Alpaca quote/preview tools) with sibling scopes", () => {
     const names = McpToolFactory.getToolDefinitions().map((d) => d.name);
-    expect(names).toHaveLength(122);
+    expect(names).toHaveLength(123);
     expect(names).toContain("get_feed_job_schedule");
     expect(names).toContain("set_feed_job_schedule");
     expect(MCP_TOOL_SCOPES["get_feed_job_schedule"]).toBe("mcp:read");

@@ -96,7 +96,7 @@ describe("MCP catalog reuse", () => {
     // MCP tab copy — do not silently let the tab go stale.
     // 36 since #3782 (+2 Alpaca quote/preview tools); the MCP tab
     // reads MCP_TOOLS_CATALOG directly, so no separate copy to update.
-    expect(MCP_TOOLS_CATALOG.length).toBe(36);
+    expect(MCP_TOOLS_CATALOG.length).toBe(37);
     expect(MCP_RESOURCES_CATALOG.length).toBe(8);
     expect(MCP_PROMPTS_CATALOG.length).toBe(4);
   });
