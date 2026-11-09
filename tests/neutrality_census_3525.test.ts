@@ -471,8 +471,8 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/agents/orchestrator/settingsWebhook.ts", "alpaca", 1],
   ["src/agents/orchestrator/skillPacks.ts", "etrade", 1],
   ["src/agents/orchestrator/skills/chat-screening-doors/SKILL.md", "etrade", 1],
-  ["src/agents/prompts/stockCopilotPrompt.ts", "alpaca", 11],
-  ["src/agents/prompts/stockCopilotPrompt.ts", "etrade", 4],
+  ["src/agents/prompts/stockCopilotPrompt.ts", "alpaca", 17],
+  ["src/agents/prompts/stockCopilotPrompt.ts", "etrade", 5],
   ["src/agents/registry.ts", "etrade", 27],
   ["src/agents/registry.ts", "public.com", 1],
   ["src/agents/research-agent.ts", "etrade", 6],
@@ -621,7 +621,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/client/tokens.css", "etrade", 5],
   ["src/client/tradeExecutionPreview.ts", "etrade", 5],
   ["src/config/agenticPaymentsModes.ts", "etrade", 1],
-  ["src/config/asyncJobModes.ts", "etrade", 1],
+  ["src/config/asyncJobModes.ts", "etrade", 5],
   ["src/config/cloudflareBrowserMiscModes.ts", "etrade", 15],
   ["src/config/cloudflareBrowserMiscModes.ts", "yahoo", 2],
   ["src/config/curatedStockUniverse.ts", "yahoo", 1],
@@ -721,7 +721,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/mcps/openaimp/index.ts", "alpaca", 4],
   ["src/mcps/openaimp/index.ts", "etrade", 7],
   ["src/mcps/openaimp/index.ts", "yahoo", 5],
-  ["src/mcps/openaimp/marketDataCommands.ts", "alpaca", 47],
+  ["src/mcps/openaimp/marketDataCommands.ts", "alpaca", 49],
   ["src/mcps/openaimp/marketDataCommands.ts", "etrade", 3],
   ["src/mcps/openaimp/marketDataCommands.ts", "yahoo", 4],
   ["src/mcps/openaimp/mcpPermissionPorts.ts", "alpaca", 3],
@@ -883,7 +883,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/shardExecutors.ts", "yahoo", 9],
   ["src/services/shardJobs.ts", "etrade", 9],
   ["src/services/shardJobs.ts", "yahoo", 7],
-  ["src/services/stockCopilot.ts", "alpaca", 5],
+  ["src/services/stockCopilot.ts", "alpaca", 8],
   ["src/services/stockCopilot.ts", "etrade", 1],
   ["src/services/stockCopilotIntrospection.ts", "alpaca", 1],
   ["src/services/stockCopilotIntrospection.ts", "etrade", 1],
@@ -917,8 +917,8 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/trading/alpaca/platform.ts", "alpaca", 111],
   ["src/trading/alpaca/platform.ts", "etrade", 8],
   ["src/trading/alpaca/signIn.ts", "alpaca", 6],
-  ["src/trading/brokerCatalog.ts", "alpaca", 16],
-  ["src/trading/brokerCatalog.ts", "etrade", 22],
+  ["src/trading/brokerCatalog.ts", "alpaca", 18],
+  ["src/trading/brokerCatalog.ts", "etrade", 26],
   ["src/trading/brokerPanels.ts", "alpaca", 1],
   ["src/trading/brokerPanels.ts", "etrade", 1],
   ["src/trading/brokerPresentation.ts", "alpaca", 12],
@@ -946,7 +946,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/trading/email/agent.ts", "etrade", 42],
   ["src/trading/etrade/client.ts", "etrade", 328],
   ["src/trading/etrade/optionOrders.ts", "etrade", 9],
-  ["src/trading/etrade/platform.ts", "etrade", 63],
+  ["src/trading/etrade/platform.ts", "etrade", 66],
   ["src/trading/etrade/quoteConfig.ts", "etrade", 2],
   ["src/trading/etrade/quoteTrace.ts", "etrade", 1],
   ["src/trading/factorGrades.ts", "etrade", 5],
@@ -1068,6 +1068,14 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/agents/rca-aapl-bracket-order-3812.md", "etrade", 11],
   ["src/services/providerUxLinks.ts", "alpaca", 11],
   ["src/services/tradingRunOutcome.ts", "alpaca", 2],
+
+  // Issue #3839: the copilot capability contract and its two wiring
+  // files name the providers they integrate; dispositioned INTEGRATION.
+  ["docs/agents/copilot-broker-capability.md", "alpaca", 10],
+  ["docs/agents/copilot-broker-capability.md", "etrade", 4],
+  ["docs/agents/copilot-broker-capability.md", "yahoo", 1],
+  ["src/agents/orchestrator.ts", "alpaca", 1],
+  ["src/config/asyncJobModes.ts", "alpaca", 1],
 
   // ---- HISTORICAL (145 rows / 732 lines) ----
   ["docs/Assessment.md", "etrade", 6],
@@ -1364,8 +1372,8 @@ describe("#3525 S6 shrink-only provider-brand census pin", () => {
     expect(total).toBeLessThanOrEqual(PLATFORM_BASELINE_TOTAL);
   });
 
-  it("the baseline itself is the recorded seed (1111 rows / 8660 lines)", () => {
-    expect(BASELINE.length).toBe(1111);
-    expect(BASELINE.reduce((a, [, , c]) => a + c, 0)).toBe(8660);
+  it("the baseline itself is the recorded seed (1116 rows / 8702 lines)", () => {
+    expect(BASELINE.length).toBe(1116);
+    expect(BASELINE.reduce((a, [, , c]) => a + c, 0)).toBe(8702);
   });
 });
