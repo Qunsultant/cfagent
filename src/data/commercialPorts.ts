@@ -298,7 +298,7 @@ export interface CommercialStore {
    * The tenant's STORED broker selection, or null when no broker
    * selection is stored (no settings row, or a row whose brokerId
    * is empty). Unlike getTenantProviders this applies NO default:
-   * the etrade absent-row default is a getTenantProviders behavior
+   * the absent-row default is a getTenantProviders behavior
    * for its existing consumers, and callers whose absent-selection
    * default differs (the Stock Copilot, #3451: no selection ⇒
    * alpaca) must be able to tell "no selection stored" apart from

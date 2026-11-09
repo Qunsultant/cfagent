@@ -10,12 +10,13 @@
  *     yahoo, nasdaq, alpaca)
  *   brokerId: "etrade" | "alpaca" — the only brokers with a
  *     route implementation in this build.
- * Defaults are etrade / etrade, preserving the pre-existing
- * behaviour exactly. A store failure fails open to etrade /
- * etrade for broker-handler reads (a store outage must not
- * take down the surface that worked before); the settings
- * route itself fails closed with 503 when unbound, following
- * the auto-refresh route.
+ * Defaults are etrade (data provider) / the platform default
+ * broker (DEFAULT_TENANT_PROVIDERS.brokerId, commercialPorts.ts)
+ * — issue #3812, owner rule on #3451. A store failure fails open
+ * to etrade / the platform default broker for broker-handler reads
+ * (a store outage must not take down the surface that worked
+ * before); the settings route itself fails closed with 503 when
+ * unbound, following the auto-refresh route.
  * No silent fallback: a caller that needs a capability a
  * selected provider/broker does not declare must report the
  * coded unavailable outcome, never substitute E*TRADE.
