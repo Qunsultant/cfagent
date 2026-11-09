@@ -801,7 +801,8 @@ export const MESH_TOOL_FAMILIES: MeshToolFamilyEntry[] = [
     name: "Order-cancellation MCP commands",
     source: "src/mcps/openaimp/cancelOrderCommands.ts",
     status: "live",
-    commands: ["alpaca_cancel_order"],
+    // Issue #3884: the per-ticker scope rides the same engine and family.
+    commands: ["alpaca_cancel_order", "alpaca_cancel_ticker"],
     commandSources: [{ file: "src/mcps/openaimp/cancelOrderCommands.ts", kind: "readonly-name" }],
   },
   {
