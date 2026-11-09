@@ -3,11 +3,12 @@
  *
  * Pins the posted design: the persisted per-login selection (DO
  * settings key `etrade:environment`) is the only authority, defaulting
- * to PROD; the switch persists and the GET reads it back; headers are
+ * to TEST (paper, #3857 — live is an explicit stored selection); the
+ * switch persists and the GET reads it back; headers are
  * never an input to resolution, so a stale client key cannot split
  * surfaces again. Token presence is never consulted here by design
  * (#2442 owns the token seam) — single-token and dual-token cases
- * both reduce to selection ?? PROD.
+ * both reduce to selection ?? TEST.
  */
 
 import { describe, expect, it } from "vitest";
@@ -45,13 +46,13 @@ function apiPost(path: string, body: unknown): Request {
 }
 
 describe("broker environment resolver (#2482)", () => {
-  it("defaults to PROD when unset, null, garbage, or wrong case", () => {
-    expect(resolveBrokerEnvironment(undefined)).toBe("PROD");
-    expect(resolveBrokerEnvironment(null)).toBe("PROD");
-    expect(resolveBrokerEnvironment("")).toBe("PROD");
-    expect(resolveBrokerEnvironment("BOGUS")).toBe("PROD");
-    expect(resolveBrokerEnvironment("test")).toBe("PROD");
-    expect(resolveBrokerEnvironment("prod")).toBe("PROD");
+  it("defaults to TEST (paper) when unset, null, garbage, or wrong case", () => {
+    expect(resolveBrokerEnvironment(undefined)).toBe("TEST");
+    expect(resolveBrokerEnvironment(null)).toBe("TEST");
+    expect(resolveBrokerEnvironment("")).toBe("TEST");
+    expect(resolveBrokerEnvironment("BOGUS")).toBe("TEST");
+    expect(resolveBrokerEnvironment("test")).toBe("TEST");
+    expect(resolveBrokerEnvironment("prod")).toBe("TEST");
   });
 
   it("returns the stored selection verbatim when it is TEST or PROD", () => {
@@ -65,16 +66,17 @@ describe("broker environment resolver (#2482)", () => {
     // could arrive through.
     const read = (key: string) => (key === BROKER_ENVIRONMENT_SETTING_KEY ? "TEST" : null);
     expect(resolveBrokerEnvironmentFromSettings(read, {})).toBe("TEST");
-    expect(resolveBrokerEnvironmentFromSettings(() => null, {})).toBe("PROD");
+    expect(resolveBrokerEnvironmentFromSettings(() => null, {})).toBe("TEST");
     expect(isBrokerEnvironment("TEST")).toBe(true);
     expect(isBrokerEnvironment("PROD")).toBe(true);
     expect(isBrokerEnvironment("SANDBOX")).toBe(false);
   });
 
-  it("unset selection falls back to the deployment environment, not a hardcoded value", () => {
-    // Production config defaults to PROD; a TEST deployment (APP_ENV)
-    // keeps resolving TEST, so its TEST tokens stay reachable.
-    expect(resolveBrokerEnvironmentFromSettings(() => null, {})).toBe("PROD");
+  it("unset selection falls back to the paper default (#3857), not the deployment environment", () => {
+    // The default mode is paper (TEST) on every deployment; live is
+    // an explicit stored selection. A TEST deployment resolves TEST
+    // as before; a PROD deployment no longer defaults to PROD.
+    expect(resolveBrokerEnvironmentFromSettings(() => null, {})).toBe("TEST");
     expect(resolveBrokerEnvironmentFromSettings(() => null, { APP_ENV: "TEST" })).toBe("TEST");
     expect(resolveBrokerEnvironmentFromSettings(() => null, { ETRADE_ENVIRONMENT: "sandbox" })).toBe("TEST");
     // A stored selection beats the deployment default either way.
@@ -92,12 +94,12 @@ describe("broker environment resolver (#2482)", () => {
     ).toBe("PROD");
   });
 
-  it("single-token and dual-token cases reduce to selection ?? PROD", () => {
+  it("single-token and dual-token cases reduce to selection ?? TEST", () => {
     // No token input exists on the resolver, so the number of stored
     // tokens cannot change the outcome: stored TEST wins over any
-    // token set, and unset means PROD regardless of tokens held.
+    // token set, and unset means TEST regardless of tokens held.
     expect(resolveBrokerEnvironment("TEST")).toBe("TEST");
-    expect(resolveBrokerEnvironment(undefined)).toBe("PROD");
+    expect(resolveBrokerEnvironment(undefined)).toBe("TEST");
   });
 });
 
@@ -118,11 +120,11 @@ describe("environment switch persistence (#2482)", () => {
     expect(store.size).toBe(1);
   });
 
-  it("GET with no selection returns the deployment default", () => {
+  it("GET with no selection returns the paper default", () => {
     const { ctx } = stubCtx();
     return handleBrokerEnvironmentGet(ctx)
       .json()
-      .then((body: any) => expect(body).toEqual({ environment: "PROD" }));
+      .then((body: any) => expect(body).toEqual({ environment: "TEST" }));
   });
 
   it("GET applies the deployment default in a TEST deployment", async () => {

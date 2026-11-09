@@ -4,12 +4,13 @@
  * The persisted per-login selection lives in the user's own
  * OrchestratorAgent DO instance settings (mas_settings, key
  * `etrade:environment`). When no selection is persisted, the default
- * is the deployment's chain-resolved environment (production: PROD
- * via environment.config.json; TEST deployments: TEST via APP_ENV) —
- * never a hardcoded value, so a TEST deployment keeps resolving TEST.
- * Every interactive E*TRADE data route resolves through this module,
- * never through the request header: a stale client key must not be
- * able to split surfaces again.
+ * is TEST (paper) — issue #3857, owner rule: the default broker mode
+ * is paper, never live; live is an explicit stored selection. The
+ * deployment chain no longer selects the default: a TEST deployment
+ * resolved TEST before and still does, and a PROD deployment used to
+ * default to PROD and now defaults to TEST. Every interactive E*TRADE
+ * data route resolves through this module, never through the request
+ * header: a stale client key must not be able to split surfaces again.
  *
  * Deliberately NOT consulted here: token presence. A login can hold
  * both a TEST and a PROD token, so token presence cannot disambiguate;
@@ -24,7 +25,6 @@
  * unit on its own. etradeBroker.ts delegates to it.
  */
 
-import { resolveEnvironmentConfig } from "../../config/environment";
 import type { Env } from "../../types";
 import type { SettingsChangeNotifier } from "../settingsWebhookNotify";
 
@@ -38,29 +38,29 @@ export function isBrokerEnvironment(value: unknown): value is BrokerEnvironment 
 
 /**
  * Resolve the source of truth from a stored settings value. Anything
- * other than an exact TEST/PROD falls back to PROD, matching every
- * previous default in the codebase. This function takes no header
- * input by construction: headers are not an authority for broker data.
+ * other than an exact TEST/PROD falls back to TEST (paper) — issue
+ * #3857: the default mode is paper, never live. This function takes
+ * no header input by construction: headers are not an authority for
+ * broker data.
  */
 export function resolveBrokerEnvironment(stored: string | null | undefined): BrokerEnvironment {
-  return isBrokerEnvironment(stored) ? stored : "PROD";
+  return isBrokerEnvironment(stored) ? stored : "TEST";
 }
 
 /**
- * The unset default: the deployment's chain-resolved environment, with
- * no request override. Anything the chain resolves to outside TEST /
- * PROD falls back to PROD.
+ * The unset default: TEST (paper), issue #3857. The deployment chain
+ * no longer selects it — a TEST deployment resolved TEST before and
+ * still does; a PROD deployment used to default to PROD and now
+ * defaults to TEST, because live is an explicit stored selection.
+ * The workerEnv parameter stays so callers do not change.
  */
-export function resolveBrokerEnvironmentDefault(workerEnv: Partial<Env>): BrokerEnvironment {
-  const name = resolveEnvironmentConfig(workerEnv).name;
-  return isBrokerEnvironment(name) ? name : "PROD";
+export function resolveBrokerEnvironmentDefault(_workerEnv: Partial<Env>): BrokerEnvironment {
+  return "TEST";
 }
 
 /**
- * Resolve from a settings reader plus the worker env. The worker env
- * is required: silently defaulting without it could resolve PROD in a
- * TEST deployment. Selection wins when set; otherwise the deployment
- * default applies.
+ * Resolve from a settings reader plus the worker env. Selection wins
+ * when set; otherwise the paper default applies.
  */
 export function resolveBrokerEnvironmentFromSettings(
   readSettingRaw: ((key: string) => string | null) | undefined,

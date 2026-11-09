@@ -32,17 +32,21 @@ describe("Issue #3728: Platform-wide mode sync and optimistic broadcast", () => 
       vi.fn(async () => ({
         ok: true,
         status: 200,
-        json: async () => ({ success: true, environment: "TEST" }),
+        json: async () => ({ success: true, environment: "PROD" }),
       })) as any,
     );
 
     try {
-      const switchPromise = switchBrokerEnvironment("TEST");
-      // Current should immediately be TEST even before promise resolves
-      expect(getBrokerEnvironment()).toBe("TEST");
-      expect(broadcastedEnv).toBe("TEST");
+      // Issue #3857: TEST is now the default, so switching to TEST is a
+      // no-op (no broadcast). The optimistic-update behaviour is pinned
+      // by switching to PROD instead. The switch leaves PROD behind;
+      // this file's other tests do not read the environment.
+      const switchPromise = switchBrokerEnvironment("PROD");
+      // Current should immediately be PROD even before promise resolves
+      expect(getBrokerEnvironment()).toBe("PROD");
+      expect(broadcastedEnv).toBe("PROD");
       await switchPromise;
-      expect(getBrokerEnvironment()).toBe("TEST");
+      expect(getBrokerEnvironment()).toBe("PROD");
     } finally {
       window.removeEventListener(BROKER_ENV_CHANGED_EVENT, handleEvent);
       vi.unstubAllGlobals();

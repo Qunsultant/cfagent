@@ -50,7 +50,7 @@ export function clearStaleBrokerEnvironmentKeys(): void {
 
 clearStaleBrokerEnvironmentKeys();
 
-let current: BrokerEnvironment = "PROD";
+let current: BrokerEnvironment = "TEST";
 
 const listeners = new Set<() => void>();
 
@@ -79,8 +79,8 @@ function subscribeBrokerEnvironment(listener: () => void): () => void {
 
 /**
  * Load the server-persisted selection at boot and adopt it. On any
- * failure the current value stands — the server default is PROD, so a
- * failed load never shows a stale TEST.
+ * failure the current value stands — the server default is TEST
+ * (paper, issue #3857), so a failed load never shows a stale PROD.
  */
 export async function fetchBrokerEnvironment(): Promise<BrokerEnvironment> {
   try {
