@@ -12,6 +12,7 @@ import type { ToolSet } from "ai";
 import { getWorkersAIModel } from "./model";
 import { resolveScreenerAgentName } from "./screenerAgentName";
 import { actorGateway } from "../services/cloudflareActorGateway";
+import { copilotRegistrationForSourceTab } from "../services/copilotChannels";
 import { recordJobOutcome } from "../services/jobOutcomes";
 import type { JobOutcomeInput } from "../data/jobOutcomePorts";
 import {
@@ -2435,7 +2436,18 @@ export class OrchestratorAgent extends PortThink {
       ? {}
       : chatNlqTurnGate({
           toolNames: Object.keys(ctx.tools ?? {}),
-          context: { env: this.env },
+          context: {
+            env: this.env,
+            // Issue #3741: the turn's identity + this instance's
+            // settings reader, so the chat/NLQ choice resolves
+            // per agent class and copilot registration through
+            // the one resolver (stored layer included). With
+            // nothing stored — production today — the resolution
+            // is the pre-#3741 env chain exactly.
+            className: "OrchestratorAgent",
+            registrationId: copilotRegistrationForSourceTab(sourceTab),
+            readSettingRaw: (key) => this.readSettingRaw(key),
+          },
           audit: (type, payload) => this.audit(type, "orchestrator", payload),
         });
     // Issue #3721 (Capability S4): the Stock Copilot's mcp-client

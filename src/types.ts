@@ -124,6 +124,17 @@ export interface Env {
   // deliberately NOT in wrangler.jsonc: the fleet ships with
   // nothing disabled.
   AGENT_CAPABILITIES_DISABLED?: string;
+  // Issue #3741 — the one resolver's operator pins (AOP, same
+  // idiom as AGENT_CAPABILITIES_DISABLED above). Comma-separated
+  // "<scope>:<entryId>" entries naming config entries PINNED at
+  // the operator layer; scope is an agent class name, a copilot
+  // registration, a voice surface, or "*". A pinned entry's
+  // resolution freezes the operator layer's own value and names
+  // "pin" as its effective source; stored-layer writes against
+  // it refuse by name (AGENT_CONFIG_PINNED). Resolved by
+  // src/services/agentConfigResolver.ts. Set explicitly EMPTY
+  // in wrangler.jsonc: the fleet ships with nothing pinned.
+  AGENT_CONFIG_PINS?: string;
   // Issue #3738 — externalized per-copilot channel switches (AOP,
   // same idiom as AGENT_CAPABILITIES_DISABLED above).
   // Comma-separated "<registration>:<channel>=on|off" entries

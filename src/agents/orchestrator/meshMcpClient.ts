@@ -122,6 +122,7 @@ import {
   resolveAgentCapabilityManifest,
   type CapabilityState,
 } from "../../actors/capabilityManifest";
+import type { CopilotRegistrationId } from "../../services/copilotChannels";
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
 
@@ -360,6 +361,17 @@ export function chatNlqTurnGate(deps: {
   context: {
     env?: unknown;
     scopedChatNlqModes?: ChatNlqScopedModes;
+    /**
+     * Issue #3741: the turn's agent identity and the hosting
+     * instance's settings reader, when the caller can supply
+     * them — the chat/NLQ choice then resolves per agent class
+     * and copilot registration through the one resolver, stored
+     * layer included. Without them the resolution is the
+     * pre-#3741 carrier + env chain exactly.
+     */
+    className?: string;
+    registrationId?: CopilotRegistrationId;
+    readSettingRaw?: (key: string) => string | null;
   };
   audit: (type: string, payload: Record<string, unknown>) => void;
 }): ChatNlqTurnGateResult {

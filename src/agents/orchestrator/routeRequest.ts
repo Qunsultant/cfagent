@@ -917,6 +917,11 @@ export async function routeRequest(deps: RouteRequestDeps, request: Request): Pr
     env: deps.env,
     getScreenerExecutionContext: () => deps.getScreenerExecutionContext(),
     readSettingRaw: (key) => deps.readSettingRaw(key),
+    // Issue #3741: the config write door writes through the
+    // instance's own settings machinery and audits through the
+    // instance's audit history (the stock-copilot idiom).
+    writeSetting: (key, value) => deps.writeSetting(key, value),
+    audit: (type, agent, payload) => deps.audit(type, agent, payload),
   });
   if (copilotChannelsResponse) return copilotChannelsResponse;
 
