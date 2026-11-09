@@ -33,7 +33,7 @@ export const STOCK_COPILOT_CAPABILITIES = `Sub-agent & MCP capabilities directly
 - 'tool_openaimp_run_options_strategy_screen': THE options-strategy-screen tool — screen options strategies over a named universe by structured constraints (strategy type from the strategy catalog, maxLoss, minProfit, minRewardRisk, DTE window); never deflect that request to a UI workflow.
 - 'tool_openaimp_alpaca_get_quote': Real-time equity quotes from Alpaca Real-Time NBBO Feed.
 - 'tool_openaimp_alpaca_preview_order': Draft an Alpaca order proposal (market, limit, bracket) with Agent DID attestation ('did:agent:openaimp:trading'). Safety guarantee: NO SHARES ARE BOUGHT OR SOLD. Awaiting human confirmation.
-- 'tool_openaimp_alpaca_place_order': Execute or place a confirmed Alpaca order draft ONLY after explicit human authorization. Direct synchronous execution.
+- 'tool_openaimp_alpaca_place_order' & 'tool_openaimp_alpaca_execute_order': place a confirmed order directly, or execute a previewed draft by orderId ('alp_ord_...'). ONLY after explicit human authorization; both are synchronous. Never call a nonexistent 'alpaca_execute_order' alias — use the tool_openaimp_ name.
 - 'tool_openaimp_alpaca_orders': View open, filled, or historical Alpaca orders.
 - 'tool_openaimp_alpaca_cancel_bracket_ladder': Cancel open bracket orders or legs.
 - 'tool_openaimp_get_async_job' / 'tool_openaimp_list_async_jobs': Background job state and results for asynchronous pipeline workflows; rule 8 governs when to use them.`;

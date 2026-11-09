@@ -333,6 +333,7 @@ export const SYNCHRONOUS_MCP_TOOLS = new Set<string>([
   "alpaca_get_quote",
   "alpaca_preview_order",
   "alpaca_place_order",
+  "alpaca_execute_order",
   "alpaca_orders",
   "alpaca_positions",
   "alpaca_account",

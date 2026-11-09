@@ -200,6 +200,7 @@ other doors. Scope column is #1843's declaration, consumed here.
 | `etrade_preview_order` | mcp:trade | L (I / R on other doors) |
 | `etrade_execute_order` | mcp:trade | L (I / R on other doors) |
 | `alpaca_place_order` | mcp:trade | L (I / R on other doors) |
+| `alpaca_execute_order` | mcp:trade | L (I / R on other doors) — settles a stored preview draft by orderId (#3846); refuses a missing or non-previewed draft |
 | `alpaca_preview_order` | mcp:trade | L (I / R on other doors) — creates a draft with a provenanced price (#3782); refuses LIMIT drafts with no user limit and no live quote |
 | `alpaca_place_bracket_ladder` | mcp:trade | L (I / R on other doors) |
 | `alpaca_cancel_bracket_ladder` | mcp:trade | L (I / R on other doors) |

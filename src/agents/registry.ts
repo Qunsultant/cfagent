@@ -772,6 +772,7 @@ export const MESH_TOOL_FAMILIES: MeshToolFamilyEntry[] = [
       "alpaca_positions",
       "alpaca_orders",
       "alpaca_place_order",
+      "alpaca_execute_order",
       "alpaca_place_bracket_ladder",
       "alpaca_cancel_bracket_ladder",
       "alpaca_get_quote",

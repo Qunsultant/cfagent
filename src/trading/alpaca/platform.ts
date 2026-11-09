@@ -10,7 +10,7 @@ import type { ITradingPlatform, OrderPreviewParams, PlaceOrderParams } from "../
 import { BROKER_CATALOG, type TradingType } from "../brokerCatalog";
 import { deriveLotsFromFills, parseAlpacaFill, type DerivedLots } from "./fillLots";
 import { NeutralMarketScreener } from "../neutralMarketScreener";
-import { decodeOrderPriceSource } from "../quotePolicies";
+import { decodeOrderPriceSource, encodeOrderPriceSource } from "../quotePolicies";
 import { computeBracketExits } from "../bracketPercent";
 import { platformQuoteSource } from "../stockQuoteSource";
 import { formatOccSymbol, parseOccSymbol } from "./occSymbol";
@@ -959,7 +959,7 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
     const takeProfit = params.takeProfit ?? percentExits?.takeProfit;
     const stopLoss = params.stopLoss ?? percentExits?.stopLoss;
     const orderClass = params.orderClass || (takeProfit || stopLoss ? "bracket" : undefined);
-    return {
+    const draft: BrokerOrderDraft = {
       orderId,
       symbol: params.symbol.toUpperCase(),
       action,
@@ -991,6 +991,54 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
       safetyNotice: "SAFETY GUARANTEE: NO CAPITAL HAS BEEN MOVED. HUMAN APPROVAL REQUIRED BEFORE BROKER EXECUTION.",
       placedAt: new Date().toISOString(),
     };
+
+    // Issue #3846: persist the preview so an approval by orderId can settle
+    // THIS draft (the transcript's `alp_ord_...` had no stored row, so the
+    // approval path could only start a job that waited forever). The stored
+    // notes carry the bracket legs and the price provenance the placement
+    // call must reuse.
+    const tradeSession = params.sessionId || this.userLogin;
+    const previewNotes = JSON.stringify({
+      kind: "alpaca-order-v1",
+      orderClass,
+      takeProfit,
+      stopLoss,
+      ...(percentExits
+        ? {
+            takeProfitPercent: percentExits.takeProfitPercent,
+            stopLossPercent: percentExits.stopLossPercent,
+          }
+        : {}),
+      priceSource,
+    });
+    draft.previewNotes = previewNotes;
+    if (this.orm?.trades) {
+      try {
+        this.orm.trades.create({
+          id: orderId,
+          sessionId: tradeSession,
+          symbol: draft.symbol,
+          action,
+          orderType,
+          quantity: params.quantity,
+          price: executionPrice,
+          totalValue: estimatedTotal,
+          status: "previewed",
+          orderRef: orderId,
+          proposerDid: didProof.proposerDid,
+          authorizerDid: userDid,
+          proofSignature: didProof.signature,
+          priceSourceJson: encodeOrderPriceSource(priceSource),
+          previewNotes,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+      } catch {
+        // A store failure must not fabricate an execution; the draft still
+        // returns, and executeOrder will refuse an unknown orderId.
+      }
+    }
+    return draft;
   }
 
   /**
@@ -1224,13 +1272,9 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
 
   async executeOrder(orderId: string, authorizerDid: string, decision: "approved" | "rejected"): Promise<BrokerOrderExecutionResult> {
     const now = new Date().toISOString();
-    // #2389: this adapter has no order-placement client (market data
-    // only), so it can never execute. The previous implementation
-    // returned a hardcoded "executed" NVDA result on approval —
-    // fabricated terms, fabricated references, fabricated signature.
-    // Approval now returns an honest not-executed failure; rejection
-    // still rejects the stored draft. Nothing here mints a reference
-    // or claims a fill the broker never made.
+    // Issue #3846: approval settles the STORED preview through the same
+    // placement client `alpaca_place_order` uses. A missing/expired draft
+    // or a non-previewed status is refused; nothing is fabricated.
     const record = this.orm?.trades?.findById(orderId);
     const symbol = record?.symbol ?? "";
     const action = record?.action ?? "BUY";
@@ -1267,25 +1311,105 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
       };
     }
 
-    return {
-      success: false,
+    if (!record) {
+      return {
+        success: false,
+        orderId,
+        executionId: "",
+        brokerOrderRef: "",
+        authorizerDid,
+        status: "failed",
+        symbol,
+        action,
+        quantity,
+        executionPrice: 0,
+        totalSettled: 0,
+        didAttestation: {
+          proposerDid: AGENT_DIDS.TRADING,
+          authorizerDid,
+          signature: "",
+        },
+        message: `Alpaca order draft '${orderId}' was not found. Nothing was executed; preview the order first.`,
+        timestamp: now,
+      };
+    }
+    if (record.status !== "previewed") {
+      return {
+        success: false,
+        orderId,
+        executionId: "",
+        brokerOrderRef: "",
+        authorizerDid,
+        status: "failed",
+        symbol,
+        action,
+        quantity,
+        executionPrice: 0,
+        totalSettled: 0,
+        didAttestation: {
+          proposerDid: AGENT_DIDS.TRADING,
+          authorizerDid,
+          signature: proofSignature,
+        },
+        message: `Alpaca order draft '${orderId}' is '${record.status}', not 'previewed'. Only a previewed draft may execute.`,
+        timestamp: now,
+      };
+    }
+
+    let notes: Record<string, any> = {};
+    try {
+      notes = typeof record.previewNotes === "string" ? JSON.parse(record.previewNotes) : {};
+    } catch {
+      notes = {};
+    }
+    const priceSource = decodeOrderPriceSource((record as any).priceSourceJson);
+    const execution = await this.placeOrderRemote({
       orderId,
-      executionId: "",
-      brokerOrderRef: "",
+      symbol: record.symbol,
+      action: record.action as "BUY" | "SELL" | "BUY_TO_COVER" | "SELL_SHORT",
+      quantity: record.quantity,
+      orderType: record.orderType,
+      limitPrice: record.price,
+      priceSource,
+      userLogin: this.userLogin,
+      ...(notes.orderClass === "bracket"
+        ? {
+            orderClass: "bracket" as const,
+            ...(notes.takeProfit ? { takeProfit: notes.takeProfit } : {}),
+            ...(notes.stopLoss ? { stopLoss: notes.stopLoss } : {}),
+          }
+        : {}),
+      ...(notes.takeProfitPercent !== undefined ? { timeInForce: "day" as const } : {}),
+    });
+
+    if (execution.success) {
+      if (this.orm?.trades) {
+        this.orm.trades.update(orderId, {
+          status: "submitted",
+          orderRef: execution.brokerOrderRef,
+          updatedAt: now,
+        });
+      }
+      return {
+        ...execution,
+        orderId,
+        authorizerDid,
+        didAttestation: {
+          proposerDid: AGENT_DIDS.TRADING,
+          authorizerDid,
+          signature: proofSignature,
+        },
+      };
+    }
+    return {
+      ...execution,
+      orderId,
       authorizerDid,
-      status: "failed",
-      symbol,
-      action,
-      quantity,
-      executionPrice: 0,
-      totalSettled: 0,
       didAttestation: {
         proposerDid: AGENT_DIDS.TRADING,
         authorizerDid,
         signature: proofSignature,
       },
-      message: `Alpaca execution is not wired on this adapter: no Alpaca order-placement client is connected, so order ${orderId} was NOT executed. No funds were moved.`,
-      timestamp: now,
     };
   }
 }

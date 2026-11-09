@@ -59,6 +59,7 @@ import {
   AlpacaPositionsCommand,
   AlpacaOrdersCommand,
   AlpacaPlaceOrderCommand,
+  AlpacaExecuteOrderCommand,
   AlpacaPlaceBracketLadderCommand,
   AlpacaCancelBracketLadderCommand,
   AlpacaGetQuoteCommand,
@@ -1756,6 +1757,7 @@ export class McpToolFactory {
     this.registerTool(new AlpacaPositionsCommand());
     this.registerTool(new AlpacaOrdersCommand());
     this.registerTool(new AlpacaPlaceOrderCommand());
+    this.registerTool(new AlpacaExecuteOrderCommand());
     this.registerTool(new AlpacaPlaceBracketLadderCommand());
     this.registerTool(new AlpacaCancelBracketLadderCommand());
     // Issue #3782: Alpaca quote + preview as agent tools — the
