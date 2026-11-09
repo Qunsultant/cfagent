@@ -115,6 +115,8 @@ describe("Model Context Protocol (MCP) Server", () => {
           toolName: "list_database_tables",
           arguments: {},
         },
+        // #3810: MCP submissions stamp trigger "agent" at the queue point.
+        trigger: "agent",
       });
       expect(JSON.parse(response.result?.content[0].text)).toMatchObject({
         jobId: "d9643325-6195-4c4a-bc5a-9d9348070e5d",
