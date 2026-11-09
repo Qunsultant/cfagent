@@ -505,7 +505,9 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/agents/routes/brokerEnvironment.ts", "etrade", 9],
   ["src/agents/routes/brokerGate.ts", "etrade", 11],
   ["src/agents/routes/brokerOptions.ts", "etrade", 3],
-  ["src/agents/routes/brokerOrders.ts", "alpaca", 2],
+  // #3883 INTEGRATION: the cancel route selects the engine by broker id, so
+  // one comparison names it (the surrounding wording stays neutral).
+  ["src/agents/routes/brokerOrders.ts", "alpaca", 3],
   ["src/agents/routes/brokerOrders.ts", "etrade", 31],
   ["src/agents/routes/brokerReads.ts", "alpaca", 1],
   ["src/agents/routes/brokerReads.ts", "etrade", 1],
@@ -1349,6 +1351,13 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/browserAgent.ts", "fidelity", 1],
   ["src/services/meshGoldenTasks.ts", "fidelity", 1],
   ["src/services/strategyPolicyState.ts", "fidelity", 1],
+  // #3883 INTEGRATION: the cancellation surface names the provider it
+  // executes against — the tool contract itself is provider-scoped, the
+  // adapter class and its status words are provider facts, and the port
+  // keeps the brand in exactly one field (the ledger's broker stamp).
+  ["src/trading/cancelFilters.ts", "alpaca", 6],
+  ["src/services/orderCancellation.ts", "alpaca", 1],
+  ["src/mcps/openaimp/cancelOrderCommands.ts", "alpaca", 2],
   // #3866 INTEGRATION: the lifecycle table names the brokers it covers.
   ["docs/architecture/agentic/agents-workflows-schedules-queues-platforms-lifecycle.md", "etrade", 1],
   ["docs/architecture/agentic/agents-workflows-schedules-queues-platforms-lifecycle.md", "public.com", 1],
@@ -1399,8 +1408,10 @@ describe("#3525 S6 shrink-only provider-brand census pin", () => {
     expect(total).toBeLessThanOrEqual(PLATFORM_BASELINE_TOTAL);
   });
 
-  it("the baseline itself is the recorded seed (1121 rows / 8735 lines)", () => {
-    expect(BASELINE.length).toBe(1121);
-    expect(BASELINE.reduce((a, [, , c]) => a + c, 0)).toBe(8735);
+  it("the baseline itself is the recorded seed (1124 rows / 8745 lines)", () => {
+    // #3883: +3 rows — the cancellation surface names the provider it executes
+    // against (see the INTEGRATION disposition above).
+    expect(BASELINE.length).toBe(1124);
+    expect(BASELINE.reduce((a, [, , c]) => a + c, 0)).toBe(8745);
   });
 });

@@ -25,7 +25,7 @@
  */
 import { TradingPlatformRegistry, ROUTED_BROKER_IDS, brokerSupports, BROKER_CATALOG, BROKER_UNAVAILABLE_CODE } from "../../trading";
 import { handleBrokerLimitRoutes } from "./brokerLimits";
-import { cancelSingleOrder, createAlpacaCancelPort, recordCancelOutcome } from "../../services/orderCancellation";
+import { cancelSingleOrder, createCancelBrokerPort, recordCancelOutcome } from "../../services/orderCancellation";
 import { resolveTenantBroker } from "../../services/tenantProviders";
 import type { EtradeBrokerRouteContext } from "./etradeBroker";
 import { unauthenticatedResponse } from "./routeIdentity";
@@ -380,13 +380,13 @@ export async function handleBrokerOrderRoutes(
         );
       }
 
-      // Issue #3883: on Alpaca the route runs the SAME engine the
+      // Issue #3883: on this broker the route runs the SAME engine the
       // `alpaca_cancel_order` tool runs, so the two surfaces cannot give
       // different answers about one order (bracket cascade, a filled
       // order's refusal, the leg semantics). Other brokers keep their
       // own cancel through the platform seam, untouched.
       if (broker === "alpaca") {
-        const receipt = await cancelSingleOrder(createAlpacaCancelPort(ctx.env), {
+        const receipt = await cancelSingleOrder(createCancelBrokerPort(ctx.env), {
           orderId: cancelOrderId,
           reason: typeof body.reason === "string" ? body.reason : undefined,
         });

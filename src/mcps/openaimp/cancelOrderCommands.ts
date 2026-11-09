@@ -16,7 +16,7 @@ import { z } from "zod";
 import type { IMcpToolCommand, McpToolContext } from "../../patterns/interfaces";
 import {
   cancelSingleOrder,
-  createAlpacaCancelPort,
+  createCancelBrokerPort,
   recordCancelOutcome,
 } from "../../services/orderCancellation";
 
@@ -40,7 +40,7 @@ export class AlpacaCancelOrderCommand implements IMcpToolCommand {
   });
 
   async execute(input: { orderId: string; reason?: string }, context: McpToolContext) {
-    const receipt = await cancelSingleOrder(createAlpacaCancelPort(context.env), {
+    const receipt = await cancelSingleOrder(createCancelBrokerPort(context.env), {
       orderId: input.orderId,
       reason: input.reason,
     });

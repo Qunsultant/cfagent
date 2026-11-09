@@ -284,7 +284,7 @@ describe("#3883 — the tool and the route share one implementation", () => {
 
   it("the route runs the same engine for Alpaca", () => {
     const route = readFileSync("src/agents/routes/brokerOrders.ts", "utf8");
-    expect(route).toContain("cancelSingleOrder(createAlpacaCancelPort(ctx.env)");
+    expect(route).toContain("cancelSingleOrder(createCancelBrokerPort(ctx.env)");
     expect(route).toContain('broker === "alpaca"');
     // The neutral broker path is untouched.
     expect(route).toContain("platform.cancelOrderRemote(cancelOrderId)");
