@@ -5,6 +5,8 @@
 **Status:** Approved Architecture & Security Anti-Drift Specification
 **Target Application:** NextGenTP / AI Search Agent (`ai-search-agent`)  
 **Scope:** Client UX, Edge Gateway, Agentic Orchestration, Data Tier, Infrastructure, and Security Architecture
+**Consolidation (#3802, 2026-11-08):** this document is the single anti-drift home. The former companion `anti-drift-controls.md` stated the same controls in prose form; it is retired under the gitops §22 rename form as `anti-drift-controls.deprecated.md` (frozen; superseded by this document), with the retirement recorded in the deprecation ledger (`docs/architecture/transition/deprecations.md`). Its one control not previously stated here — zero-FOUC pre-paint hydration — is folded into §2 below.
+
 **Governing Architecture Standards:**
 - **Master Enterprise Architecture Standards:** `docs/architecture/standards/standards.md`
 - **UX Architecture Specification:** `docs/agents/ux-architecture.md`
@@ -62,6 +64,7 @@ The platform currently enforces automated anti-drift gates across multiple tiers
 | **UX** | **Design Token Parity Script** | `scripts/gen-design-tokens.mjs --check` | Runs in `npm run check`; verifies `tokens.css` matches `designTokens.ts`. |
 | **UX** | **UI Primitives Inventory Pin** | `tests/ui_primitives_inventory.test.ts` | Pin test verifying `src/client/components/ui/` primitive exports. |
 | **UX** | **Theme Parity Matrix** | `tests/theme_preferences.test.ts` | Asserts theme token resolution for Light, Dark, System, and High-Contrast. |
+| **UX** | **Zero-FOUC Pre-Paint Hydration** | `index.html` (appearance-bootstrap) | Inline script applies theme tokens before initial paint, preventing flash-of-unstyled-theme. |
 | **Edge** | **Thin Router Inventory Pin** | `tests/thin_router_inventory.test.ts` | Enforces thin route handlers delegating to services/DOs. |
 | **Data** | **Single-Source Schema Pin** | `tests/schema_single_source.test.ts` | Prevents frontend/backend schema drift. |
 | **Data** | **Zero KV Security Dependency** | `src/security/sessionStore.ts` | Stores session tokens in SQLite DOs rather than unencrypted KV. |
