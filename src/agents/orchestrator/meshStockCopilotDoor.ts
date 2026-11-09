@@ -68,6 +68,7 @@ import {
   COPILOT_UNIVERSE_SETTING_KEY,
   COPILOT_STRATEGIES_SETTING_KEY,
   resolveCopilotUniverse,
+  resolveCopilotUniversePreset,
   resolveCopilotStrategies,
   parseUniverseInput,
   parseStrategiesInput,
@@ -158,6 +159,7 @@ export interface StockCopilotStatusResult {
   copilotExecutionMode: CopilotChatExecutionMode;
   autopilot: StockCopilotAutopilotSnapshot;
   universe: string[];
+  universePreset: string | null;
   strategies: string[];
   status: string;
   selectionResolved: boolean;
@@ -202,6 +204,7 @@ export interface StockCopilotControlResult {
   autopilot: StockCopilotAutopilotSnapshot;
   rsiMode: StockCopilotRsiMode;
   universe: string[];
+  universePreset: string | null;
   strategies: string[];
   updatedAt: string;
 }
@@ -460,6 +463,7 @@ export async function getStockCopilotStatusViaDoor(
     autopilot,
     rsiMode,
     universe,
+    universePreset: resolveCopilotUniversePreset(universe),
     strategies,
     status,
     selectionResolved: selection.resolved,
@@ -730,6 +734,7 @@ export async function controlStockCopilotViaDoor(
     autopilot,
     rsiMode,
     universe,
+    universePreset: resolveCopilotUniversePreset(universe),
     strategies,
     updatedAt: updatedControl?.updatedAt ?? nowIso,
   };

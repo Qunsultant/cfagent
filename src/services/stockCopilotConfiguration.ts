@@ -186,6 +186,25 @@ export function resolveCopilotUniverse(opts?: {
   return [...DEFAULT_COPILOT_UNIVERSE];
 }
 
+export function resolveCopilotUniversePreset(universe: readonly string[]): string | null {
+  const normalized = universe.map((s) => s.trim().toUpperCase());
+  for (const [presetName, presetSymbols] of Object.entries(PRESET_UNIVERSES)) {
+    if (
+      normalized.length === presetSymbols.length &&
+      normalized.every((sym, idx) => sym === presetSymbols[idx])
+    ) {
+      return presetName;
+    }
+  }
+  if (
+    normalized.length === DEFAULT_COPILOT_UNIVERSE.length &&
+    normalized.every((sym, idx) => sym === DEFAULT_COPILOT_UNIVERSE[idx])
+  ) {
+    return "DEFAULT";
+  }
+  return null;
+}
+
 export function resolveCopilotStrategies(opts?: {
   readSettingRaw?: (key: string) => string | null;
   env?: Env;

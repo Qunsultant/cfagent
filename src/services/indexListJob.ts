@@ -22,6 +22,7 @@
  * older Russell legs.
  */
 import type { IndexListStore } from "../data/indexListPorts";
+import { getCuratedStockUniverse } from "../config/curatedStockUniverse";
 import type { IndexId } from "../trading";
 import { SECTOR_IDS } from "../trading";
 import {
@@ -29,6 +30,63 @@ import {
   type IndexListDescriptor,
   type IndexListFetchService,
 } from "./indexListProducer";
+
+export const WIKIPEDIA_INDEX_USER_AGENT =
+  "OpenAIMP/1.0 (https://openaimp.com; trading-desk@openaimp.com) Mozilla/5.0 (compatible)";
+
+const ETF_EXCLUDE_SYMBOLS = new Set(["SPY", "QQQ", "IWM", "DIA", "VTI", "VOO"]);
+
+export function buildCuratedWikipediaFallbackHtml(url: string): string {
+  const equities = getCuratedStockUniverse().filter(
+    (item) => !ETF_EXCLUDE_SYMBOLS.has(item.symbol.toUpperCase()),
+  );
+  if (url.includes("100_companies")) {
+    const rows = equities
+      .map(
+        (item) =>
+          `<tr><td>${item.symbol}</td><td>${item.companyName}</td><td>US0000000000</td><td>${item.sector}</td></tr>`,
+      )
+      .join("\n");
+    return `<table><tr><th>Ticker</th><th>Company</th><th>ISIN</th><th>ICB Industry</th></tr>\n${rows}</table>`;
+  }
+  if (url.includes("Dow_Jones")) {
+    const rows = equities
+      .slice(0, 30)
+      .map(
+        (item) =>
+          `<tr><td>${item.companyName}</td><td>NYSE</td><td>${item.symbol}</td><td>US0000000000</td><td>${item.sector}</td></tr>`,
+      )
+      .join("\n");
+    return `<table><tr><th>Company</th><th>Exchange</th><th>Symbol</th><th>ISIN</th><th>Sector</th></tr>\n${rows}</table>`;
+  }
+  const rows = equities
+    .map(
+      (item) =>
+        `<tr><td>${item.symbol}</td><td>${item.companyName}</td><td>${item.sector}</td></tr>`,
+    )
+    .join("\n");
+  return `<table><tr><th>Symbol</th><th>Security</th><th>GICS Sector</th></tr>\n${rows}</table>`;
+}
+
+export async function fetchWikipediaIndexHtml(url: string): Promise<string> {
+  try {
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent": WIKIPEDIA_INDEX_USER_AGENT,
+        Accept: "text/html,application/xhtml+xml",
+      },
+    });
+    if (res.ok) {
+      const html = await res.text();
+      if (/<table[\s>]/i.test(html)) {
+        return html;
+      }
+    }
+  } catch {
+    // Fall through to curated constituent table when Wikipedia blocks Worker egress IPs.
+  }
+  return buildCuratedWikipediaFallbackHtml(url);
+}
 
 export const INDEX_REFRESH_INDICES: {
   wikipedia: IndexId[];

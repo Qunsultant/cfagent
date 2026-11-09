@@ -133,6 +133,13 @@ export interface StockCopilotStatus {
   currentSession: StockCopilotSessionId | null;
   /** #3398: the sessions the user has enabled for the copilot. */
   enabledSessions: StockCopilotSessionId[];
+  cadence?: {
+    configured: string;
+    effective: string;
+  };
+  universe?: string[];
+  universePreset?: string | null;
+  strategies?: string[];
   status: StockCopilotStatusKind;
   /** #3451: the effective trading selection the next cycle runs
    *  under (from the panel menu's selection model). */

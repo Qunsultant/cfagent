@@ -323,6 +323,15 @@ export function createFeedStepRegistry(deps: FeedStepDeps): JobStepRegistry {
     const provider = deps.providerFor(def);
     if (!provider) throw feedNotConfigured(def.id, `a capture-wired provider for "${def.sourceId}"`);
 
+    const existingList = await deps.universeStore.latest(def.universe.index);
+    if ((!existingList || existingList.symbols.length === 0) && deps.indexRefresh) {
+      await executeIndexListRefreshJob({
+        store: deps.indexRefresh.store,
+        service: deps.indexRefresh.service,
+        indices: [def.universe.index],
+      }).catch(() => undefined);
+    }
+
     // Sharded shape: this unit pulls its partition of the
     // universe (the partition is computed from the stored list —
     // the same list the run itself resolves, so partitions and

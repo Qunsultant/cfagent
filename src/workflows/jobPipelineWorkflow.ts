@@ -46,6 +46,7 @@ import {
   createIndexMembershipService,
   createWikipediaIndexMembershipAdapter,
 } from "../trading";
+import { fetchWikipediaIndexHtml } from "../services/indexListJob";
 import type { JobPipelineDeps } from "../services/jobPipelineEngine";
 import { JobPipelineError } from "../services/jobPipelineConfig";
 import {
@@ -75,13 +76,7 @@ export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
   const universeStore = new D1IndexListStore(
     db as ConstructorParameters<typeof D1IndexListStore>[0],
   );
-  const fetchHtml = async (url: string): Promise<string> => {
-    const res = await fetch(url);
-    if (!res.ok) {
-      throw new Error(`Wikipedia fetch failed for ${url}: HTTP ${res.status}`);
-    }
-    return res.text();
-  };
+  const fetchHtml = fetchWikipediaIndexHtml;
   return {
     stores,
     runRecorder: {

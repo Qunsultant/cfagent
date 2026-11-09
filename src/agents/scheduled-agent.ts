@@ -1660,16 +1660,12 @@ export class ScheduledAgent extends PortThink {
               createIndexMembershipService,
               createWikipediaIndexMembershipAdapter,
             } = await import("../trading");
-            const { createIndexListRefreshExecutor } = await import("../services/indexListJob");
-            const fetchHtml = async (url: string): Promise<string> => {
-              const res = await fetch(url);
-              if (!res.ok) {
-                throw new Error(`Wikipedia fetch failed for ${url}: HTTP ${res.status}`);
-              }
-              return res.text();
-            };
+            const {
+              createIndexListRefreshExecutor,
+              fetchWikipediaIndexHtml,
+            } = await import("../services/indexListJob");
             const service = createIndexMembershipService({
-              wikipedia: createWikipediaIndexMembershipAdapter(fetchHtml),
+              wikipedia: createWikipediaIndexMembershipAdapter(fetchWikipediaIndexHtml),
               holdings: {
                 getMembers: async () => {
                   throw new Error(

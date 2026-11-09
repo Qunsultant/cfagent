@@ -38,6 +38,7 @@ import {
 } from "./stockCopilot";
 import {
   resolveCopilotUniverse,
+  resolveCopilotUniversePreset,
   resolveCopilotStrategies,
 } from "./stockCopilotConfiguration";
 import {
@@ -102,6 +103,7 @@ export interface StockCopilotIntrospectionResult {
     };
     enabledSessions: readonly CopilotSessionId[];
     universe: string[];
+    universePreset?: string | null;
     strategies: readonly string[];
     rsiMode: StockCopilotRsiMode;
     paused: boolean;
@@ -408,6 +410,7 @@ export async function introspectStockCopilot(
   const cadence = resolveCopilotCadence({ env, readSettingRaw });
   const enabledSessions = resolveCopilotSessions({ readSettingRaw, env });
   const universe = resolveCopilotUniverse({ readSettingRaw, env });
+  const universePreset = resolveCopilotUniversePreset(universe);
   const strategies = resolveCopilotStrategies({ readSettingRaw, env });
   const rsiMode = resolveStockCopilotRsiMode({ readSettingRaw, env });
 
@@ -486,7 +489,7 @@ export async function introspectStockCopilot(
     `## 1. Runtime Configuration & Environment`,
     `- **Active Broker & Mode:** \`${activeBroker}\` in \`${activeMode}\` mode (enforces paper trading default).`,
     `- **Cycle Cadence:** Configured as \`${cadence.configured}\` (Effective: \`${cadence.effective}\`).`,
-    `- **Monitored Universe:** ${universe.map((s) => `\`${s}\``).join(", ")}.`,
+    `- **Monitored Universe:** ${universePreset ? `\`${universePreset}\` (${universe.map((s) => `\`${s}\``).join(", ")})` : universe.map((s) => `\`${s}\``).join(", ")}.`,
     `- **Active Strategies:** ${strategies.map((s) => `\`${s}\``).join(", ")}.`,
     `- **RSI Self-Improvement Mode:** \`${rsiMode.toUpperCase()}\` (${rsiMode === "governed" ? "Governed Mode [DEFAULT]: Capability proposals requiring code changes are formatted and published as GitHub issues for the agentic team (#ceo-aimp)" : "Self-RSI Mode: Improvements are developed and backtested autonomously via SandboxAgent upon approval"}).`,
     `- **Execution State:** ${paused ? "⏸️ Paused (bracket exits active, new entries halted)" : "▶️ Active and running"}.`,
@@ -550,6 +553,7 @@ export async function introspectStockCopilot(
       },
       enabledSessions,
       universe,
+      universePreset,
       strategies,
       rsiMode,
       paused,
