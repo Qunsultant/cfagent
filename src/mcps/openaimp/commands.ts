@@ -66,6 +66,7 @@ import {
   AlpacaPreviewOrderCommand,
   DeprecatedToolAlias,
 } from "./marketDataCommands";
+import { TradingLimitsCommand } from "./tradingLimitCommands";
 import {
   PaidOptionsScreenerCommand,
   PaidMarketResearchCommand,
@@ -1765,6 +1766,9 @@ export class McpToolFactory {
     // instead of reaching for the E*TRADE tools.
     this.registerTool(new AlpacaGetQuoteCommand());
     this.registerTool(new AlpacaPreviewOrderCommand());
+    // Issue #3888: the externalized limits, readable and changeable
+    // from chat so an answer about a cap cites the configuration.
+    this.registerTool(new TradingLimitsCommand());
 
     // #1906: deprecated aliases for the renamed market-data tools above.
     // Same commands, legacy names; use canonical tool names instead.

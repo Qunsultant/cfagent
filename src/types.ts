@@ -744,6 +744,23 @@ export interface Env {
    * keeps the legacy inference (paper host = paper).
    */
   ALPACA_TRADING_TYPE?: string;
+  /**
+   * Issue #3888: externalized trading limits. Every limit resolves from the
+   * per-ticker override setting, then the account setting, then the env var
+   * named here, then unset (a refusal, never "unlimited"). See
+   * src/trading/limits.ts — the names are derived there, never repeated.
+   */
+  TRADING_LIMIT_MAX_NOTIONAL_PER_TICKER?: string;
+  TRADING_LIMIT_MAX_OPEN_ORDERS_PER_TICKER?: string;
+  TRADING_LIMIT_MAX_OPEN_ORDERS_TOTAL?: string;
+  TRADING_LIMIT_MAX_RUNGS_PER_LADDER?: string;
+  TRADING_LIMIT_MAX_DAILY_ORDERS?: string;
+  TRADING_LIMIT_MAX_DAILY_NOTIONAL?: string;
+  TRADING_LIMIT_CANCEL_MAX_COUNT?: string;
+  /** Issue #3888: session window bounds the ladder engine honours (ET, "HH:MM"). */
+  TRADING_SESSION_START?: string;
+  TRADING_SESSION_END?: string;
+  TRADING_SESSION_EXTENDED_HOURS?: string;
   /** Options feed: `indicative` (default, no OPRA subscription) or `opra`. */
   ALPACA_OPTIONS_FEED?: string;
   YFINANCE_API_ENDPOINT?: string;

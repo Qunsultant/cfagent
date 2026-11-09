@@ -1,0 +1,5 @@
+### Added
+
+- **One externalized configuration surface for trading limits (#3888):** `trading:limits` (account) and `trading:limits:<SYMBOL>` (per-ticker override) settings, `TRADING_LIMIT_*` env defaults, and `src/trading/limits.ts` as the only resolver — money budget, open-order caps, ladder rung cap, daily counters, cancel-all cap and the session window. Resolution order is ticker override → setting → env → unset, and every value carries its provenance. #rsi
+- **A refusal, not "unlimited" (#3888):** an unset or unparsable limit refuses the operation with `limit_not_configured` naming the setting and env var; a breach reports the limit, its value, current usage and the requested amount, so an answer about a cap is traceable to the configuration that produced it. #rsi
+- **`GET`/`POST /api/broker/limits` and the `trading_limits` tool (#3888):** read effective values with provenance, and apply one recorded change (audited as `trading.limit_changed` with before/after and the caller). #rsi

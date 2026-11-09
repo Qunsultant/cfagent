@@ -40,6 +40,9 @@ export * from "./registry";
 // Issue #3812: percent bracket exits — the one deterministic conversion
 // from "+4% / -2%" to absolute leg prices (public trading surface).
 export * from "./bracketPercent";
+// Issue #3888: the externalized trading limits every engine, the limits
+// route, the trading_limits tool and the copilot's answers resolve.
+export * from "./limits";
 // Issue #3232: the broker catalog is part of the public trading surface.
 export * from "./brokerCatalog";
 export * from "./brokerPanels";
