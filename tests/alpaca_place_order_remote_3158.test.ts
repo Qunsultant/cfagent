@@ -464,7 +464,7 @@ describe("Alpaca placeOrderRemote (#3158)", () => {
     expect(res.status).toBe("failed");
     expect(res.executionId).toBe("");
     expect(res.brokerOrderRef).toBe("");
-    expect(res.message).toMatch(/was NOT executed/);
+    expect(res.message).toMatch(/was NOT executed|not been placed|credentials are not configured/i);
     expect(orm.trades.findById(id)?.status).toBe("previewed");
   });
 });

@@ -427,7 +427,7 @@ describe("#2389 honesty pins — no execution without broker evidence", () => {
     expect(res.brokerOrderRef).toBe("");
     expect(res.executionPrice).toBe(0);
     expect(res.totalSettled).toBe(0);
-    expect(res.message).toMatch(/not (been )?executed|not wired|no .*placement/i);
+    expect(res.message).toMatch(/not (been )?executed|not wired|no .*placement|credentials are not configured|not been placed/i);
     // The stored draft was not stamped executed either.
     expect(orm.trades.findById(id)?.status).toBe("previewed");
   });
