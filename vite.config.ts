@@ -3,6 +3,14 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
+  define: {
+    // Issue #3891 — build marker: the short commit sha this bundle was
+    // built from. main.tsx exposes it on window.__BUILD_COMMIT__ so
+    // post-deploy QA can prove the live bundle is the one this deploy
+    // built (a stale deploy serves an older sha). Locally, with no
+    // GITHUB_SHA in the environment, it is "dev".
+    __BUILD_COMMIT__: JSON.stringify(process.env.GITHUB_SHA?.slice(0, 8) ?? "dev"),
+  },
   build: {
     outDir: "dist",
     chunkSizeWarningLimit: 1000,
