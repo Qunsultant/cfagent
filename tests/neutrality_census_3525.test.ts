@@ -178,7 +178,7 @@ function measure(): Map<string, number> {
  * 4 new rows (docs/agents/rca-aapl-bracket-order-3812.md alpaca 16 /
  * etrade 7, src/services/providerUxLinks.ts alpaca 11,
  * src/services/tradingRunOutcome.ts alpaca 2). Seed pin totals move
- * 1101/8582 -> 1105/8633.
+ * 1101/8582 -> 1105/8641.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (186 rows / 1039 lines) ----
@@ -1040,8 +1040,8 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/trading/screenerPipeline.ts", "alpaca", 26],
   ["src/trading/screeningSchemas.ts", "alpaca", 4],
 
-  ["docs/agents/rca-aapl-bracket-order-3812.md", "alpaca", 16],
-  ["docs/agents/rca-aapl-bracket-order-3812.md", "etrade", 7],
+  ["docs/agents/rca-aapl-bracket-order-3812.md", "alpaca", 20],
+  ["docs/agents/rca-aapl-bracket-order-3812.md", "etrade", 11],
   ["src/services/providerUxLinks.ts", "alpaca", 11],
   ["src/services/tradingRunOutcome.ts", "alpaca", 2],
 
@@ -1339,8 +1339,8 @@ describe("#3525 S6 shrink-only provider-brand census pin", () => {
     expect(total).toBeLessThanOrEqual(PLATFORM_BASELINE_TOTAL);
   });
 
-  it("the baseline itself is the recorded seed (1105 rows / 8633 lines)", () => {
+  it("the baseline itself is the recorded seed (1105 rows / 8641 lines)", () => {
     expect(BASELINE.length).toBe(1105);
-    expect(BASELINE.reduce((a, [, , c]) => a + c, 0)).toBe(8633);
+    expect(BASELINE.reduce((a, [, , c]) => a + c, 0)).toBe(8641);
   });
 });
