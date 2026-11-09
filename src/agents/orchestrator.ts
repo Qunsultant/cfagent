@@ -2633,7 +2633,7 @@ export class OrchestratorAgent extends PortThink {
     // The Worker strips the /api prefix when forwarding and marks queue-eligible requests.
     const isMcpEndpoint = /\/mcp(?:\/|$)/i.test(path);
     const isScheduleEndpoint = /(?:^|\/)(?:api\/)?schedules(?:\/|$)/i.test(path);
-    const isImmediateEndpoint = /(?:^|\/)(?:api\/)?(?:clear|reset|memory|audit|chat|chat-activity|screener|etrade\/options\/strategy|etrade|broker|trading|options|workflow-runs|external-ads|categories|referrals|revenue|ads)(?:\/|$)/i.test(path);
+    const isImmediateEndpoint = /(?:^|\/)(?:api\/)?(?:clear|reset|memory|audit|chat|chat-activity|screener|etrade\/options\/strategy|etrade|broker|trading|options|workflow-runs|external-ads|categories|referrals|revenue|ads|platform|environment)(?:\/|$)/i.test(path);
     const isJobsEndpoint = /(?:^|\/api)\/jobs(?:\/|$)/.test(path);
     const isApiRequest = path.startsWith("/api/") || request.headers.get("x-async-eligible") === "1";
     // #1724: HTTP_DELIVERY_MODE over the queue decision (run =
