@@ -20,6 +20,60 @@ const API_KEY = process.env.DASHBOARD_API_KEY || "";
 // (the smoke still passes — only the AI-diagnosis comment is lost).
 const QA_INVESTIGATE_TOKEN = process.env.QA_INVESTIGATE_TOKEN || "";
 
+/**
+ * Issue #3891 — assert the deployed client bundle is the one this deploy
+ * built. The bundle embeds its short commit sha (window.__BUILD_COMMIT__,
+ * substituted by the `define` in vite.config.ts); the deploy job hands
+ * qa-smoke the built asset path + commit (EXPECTED_CLIENT_ASSET /
+ * EXPECTED_COMMIT). A 404 or an older marker means the published version
+ * differs from the built artifact — the exact failure the 13084a0 deploy
+ * reported as success while serving the aa751785-era bundle.
+ *
+ * Retries briefly: a fresh deploy can take a minute to propagate. After
+ * the attempts are exhausted the check FAILS (never a silent pass).
+ */
+export async function checkClientBundle({
+  fetchFn = fetch,
+  baseUrl,
+  expectedAsset,
+  expectedCommit,
+  maxAttempts = 10,
+  delayMs = 30000,
+  sleepFn = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+}) {
+  const url = `${baseUrl}${expectedAsset}`;
+  let detail = "";
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    let res;
+    try {
+      res = await fetchFn(url);
+    } catch (err) {
+      detail = `fetch failed: ${err.message}`;
+      if (attempt < maxAttempts) await sleepFn(delayMs);
+      continue;
+    }
+    if (res.status !== 200) {
+      detail = `live asset ${expectedAsset} returned ${res.status} (attempt ${attempt}/${maxAttempts})`;
+      if (attempt < maxAttempts) await sleepFn(delayMs);
+      continue;
+    }
+    const body = await res.text();
+    if (body.includes(expectedCommit)) {
+      return {
+        ok: true,
+        attempts: attempt,
+        detail: `live asset carries commit ${expectedCommit} (attempt ${attempt}/${maxAttempts})`,
+      };
+    }
+    const liveMarker = body.match(/__BUILD_COMMIT__="([^"]+)"/)?.[1];
+    detail = liveMarker
+      ? `live asset carries commit ${liveMarker}, expected ${expectedCommit} — stale deploy (attempt ${attempt}/${maxAttempts})`
+      : `live asset carries no build marker, expected commit ${expectedCommit} (attempt ${attempt}/${maxAttempts})`;
+    if (attempt < maxAttempts) await sleepFn(delayMs);
+  }
+  return { ok: false, attempts: maxAttempts, detail: `${detail} after ${maxAttempts} attempts` };
+}
+
 const results = [];
 let failed = 0;
 
@@ -59,7 +113,31 @@ async function main() {
     return;
   }
 
-  // 2. A2A agent card (public discovery)
+  // 2. Deployed client bundle matches this deploy (#3891).
+  //    The deploy job hands qa-smoke the built asset path + short commit
+  //    (EXPECTED_CLIENT_ASSET / EXPECTED_COMMIT). Without them the check
+  //    cannot run and is skipped visibly, never silently passed.
+  const expectedAsset = process.env.EXPECTED_CLIENT_ASSET || "";
+  const expectedCommit = process.env.EXPECTED_COMMIT || "";
+  if (expectedAsset && expectedCommit) {
+    try {
+      const bundle = await checkClientBundle({
+        baseUrl: BASE_URL,
+        expectedAsset,
+        expectedCommit,
+      });
+      record("deployed client bundle", bundle.ok, bundle.detail);
+    } catch (err) {
+      record("deployed client bundle", false, err.message);
+    }
+  } else {
+    skip(
+      "deployed client bundle",
+      "EXPECTED_CLIENT_ASSET/EXPECTED_COMMIT not provided by the deploy job",
+    );
+  }
+
+  // 3. A2A agent card (public discovery)
   try {
     const { res, json } = await fetchJson(`${BASE_URL}/.well-known/agent-card.json`);
     const ok = res.ok && json && Array.isArray(json.agents);
@@ -68,7 +146,7 @@ async function main() {
     record("A2A agent card", false, err.message);
   }
 
-  // 3. A2A dispatch gate is up (issue #1097).
+  // 4. A2A dispatch gate is up (issue #1097).
   //    The old check probed POST /a2a/scheduled-agent, but scheduled-agent
   //    is not an A2A agent: it has no agent card, no catalog entry, no
   //    handleA2A, and its hyphenated name cannot match the edge route
@@ -103,7 +181,7 @@ async function main() {
     record("A2A dispatch gate", false, err.message);
   }
 
-  // 4. Search agent responds (core capability)
+  // 5. Search agent responds (core capability)
   try {
     const { res, json } = await fetchJson(`${BASE_URL}/api/search`, {
       method: "POST",
@@ -250,7 +328,18 @@ async function postInvestigationComment(token, issueNumber, failure) {
   }
 }
 
-main().catch((err) => {
-  console.error("QA script crashed:", err);
-  process.exit(2);
-});
+// Exported for tests (tests/qa_smoke_client_bundle_3891.test.ts): importing
+// this module must not run the live checks — the #411 netblock would fail
+// them and process.exit would kill the test worker. Same isMain guard as
+// scripts/ci/deploy-worker.mjs.
+const isMain =
+  process.argv[1] &&
+  (process.argv[1].endsWith("qa-smoke.mjs") ||
+    process.argv[1].endsWith("qa-smoke.js"));
+
+if (isMain) {
+  main().catch((err) => {
+    console.error("QA script crashed:", err);
+    process.exit(2);
+  });
+}
