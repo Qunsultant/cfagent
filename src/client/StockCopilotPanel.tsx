@@ -152,7 +152,12 @@ export function StockCopilotPanel() {
   useEffect(() => {
     void load();
     const timer = window.setInterval(() => void load(), REFRESH_MS);
-    return () => window.clearInterval(timer);
+    const onUpdated = () => void load();
+    window.addEventListener("stock-copilot:updated", onUpdated);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("stock-copilot:updated", onUpdated);
+    };
   }, [load]);
 
   const togglePause = async () => {
@@ -215,6 +220,13 @@ export function StockCopilotPanel() {
 
   const statusView = STATUS_VIEW[status.status];
   const selectionLabel = copilotSelectionLabel(status);
+  const effectiveCadence = status.cadence?.effective ?? "every 30 minutes";
+  const universeLabel =
+    status.universePreset && status.universePreset !== "DEFAULT"
+      ? `${status.universePreset} (${(status.universe ?? []).join(", ")})`
+      : status.universe && status.universe.length > 0
+        ? status.universe.join(", ")
+        : "SPY, QQQ, AAPL, MSFT and NVDA";
 
   return (
     <Card className="scp-panel">
@@ -227,6 +239,11 @@ export function StockCopilotPanel() {
           {selectionLabel && (
             <Badge size="sm" tone="info">
               {selectionLabel}
+            </Badge>
+          )}
+          {status.universePreset && status.universePreset !== "DEFAULT" && (
+            <Badge size="sm" tone="neutral">
+              {status.universePreset}
             </Badge>
           )}
         </div>
@@ -270,8 +287,8 @@ export function StockCopilotPanel() {
 
       <p className="scp-desc">
         Pattern-driven trading on the broker and mode selected in the panel
-        menu (shown above) — a cycle runs every 30 minutes, in the trading
-        sessions you enable below, over SPY, QQQ, AAPL, MSFT and NVDA. Every
+        menu (shown above) — a cycle runs {effectiveCadence}, in the trading
+        sessions you enable below, over {universeLabel}. Every
         position opens with its exit plan (stop and target) attached.
       </p>
 

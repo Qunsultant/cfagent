@@ -86,6 +86,7 @@ import {
   COPILOT_UNIVERSE_SETTING_KEY,
   COPILOT_STRATEGIES_SETTING_KEY,
   resolveCopilotUniverse,
+  resolveCopilotUniversePreset,
   resolveCopilotStrategies,
   parseUniverseInput,
   parseStrategiesInput,
@@ -286,6 +287,10 @@ export async function handleStockCopilotRoutes(
         env: ctx.env,
         readSettingRaw: ctx.readSettingRaw,
       });
+      const universe = resolveCopilotUniverse({
+        readSettingRaw: ctx.readSettingRaw,
+        env: ctx.env,
+      });
       return Response.json({
         flagEnabled,
         paused,
@@ -300,10 +305,8 @@ export async function handleStockCopilotRoutes(
           readSettingRaw: ctx.readSettingRaw,
           env: ctx.env,
         }),
-        universe: resolveCopilotUniverse({
-          readSettingRaw: ctx.readSettingRaw,
-          env: ctx.env,
-        }),
+        universe,
+        universePreset: resolveCopilotUniversePreset(universe),
         strategies: resolveCopilotStrategies({
           readSettingRaw: ctx.readSettingRaw,
           env: ctx.env,
@@ -627,7 +630,12 @@ export async function handleStockCopilotRoutes(
       ...(sessions !== null ? { sessions } : {}),
       ...(validatedCadence !== null ? { cadence: resolvedCadence } : {}),
       ...(hasExecutionMode ? { executionMode: resolvedExecutionMode } : {}),
-      ...(hasUniverse ? { universe: resolvedUniverse } : {}),
+      ...(hasUniverse
+        ? {
+            universe: resolvedUniverse,
+            universePreset: resolveCopilotUniversePreset(resolvedUniverse),
+          }
+        : {}),
       ...(hasStrategies ? { strategies: resolvedStrategies } : {}),
       ...(channelUpdates !== null
         ? { channels: projectStockCopilotChannels(ctx) }

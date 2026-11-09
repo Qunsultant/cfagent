@@ -310,6 +310,9 @@ export function AgentChatTabContentInner({
 
   useEffect(() => {
     onStatusChange(status);
+    if (status === "ready" && typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("stock-copilot:updated"));
+    }
   }, [status, onStatusChange]);
 
   useEffect(() => {

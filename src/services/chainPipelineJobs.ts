@@ -99,6 +99,14 @@ for (const entry of QUOTES_FEED_ENTRIES) {
  */
 export const CHAIN_PIPELINE_CATALOG: readonly ChainPipelineCatalogEntry[] =
   QUOTES_FEED_ENTRIES.map((feed) => {
+    const baseAliases = Array.from(
+      new Set([
+        ...feed.aliases,
+        ...feed.aliases
+          .filter((a) => a.endsWith(" quotes"))
+          .map((a) => a.replace(/ quotes$/, "")),
+      ]),
+    );
     const registryEntry = {
       jobId: `${feed.jobId}-pipeline`,
       feedJobId: feed.jobId,
@@ -116,8 +124,8 @@ export const CHAIN_PIPELINE_CATALOG: readonly ChainPipelineCatalogEntry[] =
         `${feed.sourceId}-${feed.dataset}-pipeline`,
         `${feed.jobId.replace(/-quotes$/, "")}-pipeline`,
         `${feed.jobId}-pipeline`,
-        ...feed.aliases.map((a) => `${a} pipeline`),
-        ...feed.aliases.map((a) => `pipeline ${a}`),
+        ...baseAliases.map((a) => `${a} pipeline`),
+        ...baseAliases.map((a) => `pipeline ${a}`),
       ],
     };
     return registryEntry;

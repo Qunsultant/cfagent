@@ -117,6 +117,7 @@ import {
   type PipelineChainSurfaceView,
 } from "../services/chainPipelineJobs";
 import { createCaptureWiredFeedProvider } from "../services/feedProviderWiring";
+import { fetchWikipediaIndexHtml } from "../services/indexListJob";
 import {
   createIndexMembershipService,
   createWikipediaIndexMembershipAdapter,
@@ -178,13 +179,6 @@ export function feedStepDepsForScheduledAgent(
         ctx.env.AGENT_DB as ConstructorParameters<typeof D1IndexListStore>[0],
       )
     : null;
-  const fetchHtml = async (url: string): Promise<string> => {
-    const res = await fetch(url);
-    if (!res.ok) {
-      throw new Error(`Wikipedia fetch failed for ${url}: HTTP ${res.status}`);
-    }
-    return res.text();
-  };
   return {
     registry: buildFeedJobRegistry(envStrings(ctx.env)),
     providerFor: (def) =>
@@ -201,7 +195,7 @@ export function feedStepDepsForScheduledAgent(
       ? {
           store: universeStore,
           service: createIndexMembershipService({
-            wikipedia: createWikipediaIndexMembershipAdapter(fetchHtml),
+            wikipedia: createWikipediaIndexMembershipAdapter(fetchWikipediaIndexHtml),
             holdings: {
               getMembers: async () => {
                 throw new Error(
