@@ -1,34 +1,10 @@
 /**
- * Issue #359-09: E*TRADE broker routes extracted from OrchestratorAgent.routeRequest
- * (src/agents/orchestrator.ts). Pure move - no behavior change.
- *
- * Owns the E*TRADE broker route blocks:
- * 1. "Environment & E*TRADE Trading APIs": the environment switcher (#314,
- *    both spellings - /environment/switch and /broker/etrade/environment -
- *    delegate to the single-owner handleEnvironmentSwitch, moved here with
- *    the block), broker status, diagnostics, accounts, equity screener,
- *    quote, order preview/execute (with the autopilot policy envelope,
- *    expiration scheduling, and pre-trade Slack approval ticket), positions,
- *    portfolio-risk (aggregate / evaluate / correlation / size / bundle), think
- *    evaluation, hedge analysis, and orders listing / remote fetch / cancel.
- * 2. The broker account-activity block: transactions list + details, alerts
- *    inbox + details + delete, and product lookup. It was non-contiguous
- *    with block 1 (the omnichannel trading channels block sat between
- *    them), so this module exports TWO handlers - handleEtradeBrokerRoutes
- *    and handleEtradeBrokerActivityRoutes - each invoked from routeRequest
- *    at the EXACT position its block occupied in the sequential
- *    path.endsWith matching sequence.
- *
- * Each handler returns a Response when one of its paths matches, or null
- * when none does (the orchestrator then continues its sequential matching).
- * Every handler ends with an explicit `return null` - never undefined.
- *
- * Sibling slice (#359-11) owns the /etrade/options/* and
- * /trading/options/* blocks; those were NOT moved here.
- *
- * Handlers that used OrchestratorAgent state receive it via the explicit
- * EtradeBrokerRouteContext parameter; there are no new globals and no
- * back-references into the class.
+ * Issue #359-09: E*TRADE broker routes extracted from OrchestratorAgent.routeRequest.
+ * Pure move, no behavior change. Owns the broker environment/status/accounts/
+ * quote/order/positions/portfolio-risk/hedge/orders blocks and the account
+ * activity block, exported as handleEtradeBrokerRoutes and
+ * handleEtradeBrokerActivityRoutes. Each returns a Response on a match, else
+ * null. Route context arrives via EtradeBrokerRouteContext; no new globals.
  */
 
 import { unauthenticatedResponse } from "./routeIdentity";
